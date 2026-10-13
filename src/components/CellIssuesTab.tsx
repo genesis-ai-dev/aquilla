@@ -2,8 +2,9 @@ import { AlertCircle, AlertTriangle, ArrowRight, Check } from "lucide-react"
 import type { RuleInfraction, TranslationRule } from "@/lib/parsers/types"
 import { Button } from "@/components/ui/button"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { useFormat } from "@/lib/i18n/format"
 import { translateRuleName } from "@/lib/lqa/builtin-resolver"
-import { formatInfractionReason } from "@/lib/rules/format-infraction"
+import { formatInfractionEvidence, formatInfractionReason } from "@/lib/rules/format-infraction"
 import { distinctFindings, waiverKey } from "@/lib/rules/waivers"
 import { cn } from "@/lib/utils"
 
@@ -47,6 +48,7 @@ export function CellIssuesTab({
   onUnwaive,
 }: CellIssuesTabProps) {
   const t = useT()
+  const format = useFormat()
 
   if (activeInfractions.length === 0 && waivedInfractions.length === 0) {
     return (
@@ -93,6 +95,12 @@ export function CellIssuesTab({
                 <span className="ms-1 text-muted-foreground">
                   — {formatInfractionReason(inf, t)}
                 </span>
+                {/* AQU-1688: a Bible data finding names the dataset, record and confidence behind it. */}
+                {formatInfractionEvidence(inf, t, format).map((line) => (
+                  <span key={line} data-testid="issue-evidence" className="mt-0.5 block text-muted-foreground/80">
+                    {line}
+                  </span>
+                ))}
                 {/* Raw cell content: interpolated, never routed through t(). */}
                 {matchHash !== undefined && (
                   <span className="ms-1 font-mono text-muted-foreground/80">

@@ -340,6 +340,7 @@ import type { ContextChip } from "@/lib/agent/context-chip"
 import { CheckFindingsDrawer } from "./CheckFindingsDrawer"
 import { FileChapterToolbar } from "./FileChapterToolbar"
 import { runDeterministicCheck, type CheckRunResult } from "@/lib/check/deterministic-check"
+import { useBibleChecks } from "@/hooks/useBibleChecks"
 import { SearchDockPanel } from "./SearchDockPanel"
 import { SearchResultsView } from "./search/SearchResultsView"
 import { LeftDock } from "./LeftDock"
@@ -6622,6 +6623,18 @@ export function ProjectWorkspace() {
     return map
   }, [activeFileId, cellSummaries])
 
+  // AQU-1688: Bible data checks read each cell's compiled pack facts. They are
+  // compiled once per file (by pack version, refs and Language profile) and
+  // looked up by cell id, so typing still re-checks only the edited cell.
+  // AQU-1685: off unless the Bible data experiment is on and the open file is
+  // a Bible book.
+  const bibleChecks = useBibleChecks(project, cellSummaries, activeFile)
+  const bibleCheckContextFor = bibleChecks.contextFor
+  const healthCellCheckContext = useCallback(
+    (cell: { id: string }) => bibleCheckContextFor(cell.id),
+    [bibleCheckContextFor],
+  )
+
   // AD-14: health derives from decay (endorsement_count). The legacy
   // four-sub-score "composite-health" path is retired.
   // Per-browser off switch (lib/health/kill-switch.ts), exposed in the
@@ -6635,6 +6648,8 @@ export function ProjectWorkspace() {
       enabled: healthCalculationsEnabled,
       rulesForCell: libraryLint.rulesForCell,
       rulesForCellSig: libraryLint.signature,
+      cellCheckContext: healthCellCheckContext,
+      cellCheckContextSig: bibleChecks.signature,
     },
   )
   // AQU-599: cellOpenCommentCount from useHealth is intentionally not consumed
@@ -6969,6 +6984,8 @@ export function ProjectWorkspace() {
         // subscribed termbases come in here as well.
         concepts: laneEditorConcepts,
         termMatching: project?.termMatching,
+        // AQU-1688: the same per-cell Bible data inputs the live check uses.
+        contextFor: healthCellCheckContext,
       })
       // Bail if the active file changed mid-run — don't clobber the new file's
       // state with this (now stale) file's findings.
@@ -6977,7 +6994,7 @@ export function ProjectWorkspace() {
     } finally {
       setCheckRunning(false)
     }
-  }, [activeFileId, checkRunning, closeCommentsPanel, getActiveCells, rules, laneEditorConcepts, project?.termMatching])
+  }, [activeFileId, checkRunning, closeCommentsPanel, getActiveCells, rules, laneEditorConcepts, project?.termMatching, healthCellCheckContext])
 
   // A check run describes one file's cells; switching files invalidates it.
   useEffect(() => {

@@ -10,6 +10,7 @@ import * as doubleSpace from "./check-functions/double-space"
 import * as repeatedWord from "./check-functions/repeated-word"
 import * as unpairedSymbols from "./check-functions/unpaired-symbols"
 import * as abbreviationMismatch from "./check-functions/abbreviation-mismatch"
+import { BIBLE_BUILTIN_CHECKS } from "./bible-builtin-checks"
 import * as usfmStructure from "./check-functions/usfm-structure"
 import * as capitalization from "./check-functions/capitalization"
 import * as footnoteQuoteMismatch from "./check-functions/footnote-quote-mismatch"
@@ -156,6 +157,9 @@ export const BUILTIN_CHECKS: Record<BuiltinCheckId, BuiltinCheckDefinition> = {
     run: abbreviationMismatch.runCheck,
     message: abbreviationMismatch.MESSAGE,
   },
+  // AQU-1688: the Bible data checks. Not in BUILTIN_CHECK_IDS: they become
+  // rules only while the project's Bible data checks enrichment is on.
+  ...BIBLE_BUILTIN_CHECKS,
   "usfm-structure": {
     id: "usfm-structure",
     name: "USFM markers",
@@ -189,6 +193,7 @@ export const BUILTIN_CHECKS: Record<BuiltinCheckId, BuiltinCheckDefinition> = {
   },
 }
 
+/** The text checks every project has. Bible data checks: BIBLE_BUILTIN_CHECK_IDS. */
 export const BUILTIN_CHECK_IDS: BuiltinCheckId[] = [
   "empty-target",
   "target-equals-source",

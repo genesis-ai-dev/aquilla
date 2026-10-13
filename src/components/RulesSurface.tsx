@@ -592,6 +592,7 @@ export function RulesSurface({
           builtinRules={builtinRules}
           infractions={infractions}
           onSetOverride={setBuiltinOverride}
+          languageProfile={project.languageProfile}
         />
         </div>
       </div>

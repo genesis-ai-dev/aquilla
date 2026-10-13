@@ -51,6 +51,76 @@ beforeEach(async () => {
 })
 
 describe("edit history", () => {
+  it("presses made while a slow step runs wait their turn instead of being dropped", async () => {
+    const log: string[] = []
+    let release: () => void = () => {}
+    registerStepKinds({
+      "test.log": logKind(log),
+      "test.slow": {
+        undo: () => new Promise<StepOutcome>((resolve) => { release = () => { log.push("undo slow"); resolve({ kind: "done" }) } }),
+        redo: async () => ({ kind: "done" }),
+      } as StepHandler<never>,
+    })
+    recordStep(step("a"))
+    recordStep(step("b"))
+    recordStep({ kind: "test.slow", data: {}, labelKey: "slow" })
+    const presses = [undoLast(), undoLast(), undoLast(), undoLast()]
+    await new Promise((r) => setTimeout(r, 0))
+    release()
+    const results = await Promise.all(presses)
+    expect(log).toEqual(["undo slow", "undo b", "undo a"])
+    expect(results.map((r) => r?.step.labelKey ?? null)).toEqual(["slow", "b", "a", null])
+    // Undo then Redo pressed together: the redo waits for the undo, then runs.
+    await redoLast()
+    const [u, r] = [undoLast(), redoLast()]
+    expect((await u)?.step.labelKey).toBe("a")
+    expect((await r)?.step.labelKey).toBe("a")
+  })
+
+  it("a press does nothing if the user moved to another project before its turn", async () => {
+    const log: string[] = []
+    let release: () => void = () => {}
+    registerStepKinds({
+      "test.log": logKind(log),
+      "test.slow": {
+        undo: () => new Promise<StepOutcome>((resolve) => { release = () => resolve({ kind: "done" }) }),
+        redo: async () => ({ kind: "done" }),
+      } as StepHandler<never>,
+    })
+    recordStep(step("b"))
+    recordStep({ kind: "test.slow", data: {}, labelKey: "slow" })
+    const first = undoLast()
+    const second = undoLast()
+    await new Promise((r) => setTimeout(r, 0))
+    setHistoryScope("p2", "sam")
+    release()
+    expect((await first)?.step.labelKey).toBe("slow")
+    expect(await second).toBeNull()
+    expect(log).toEqual([])
+  })
+
+  it("a step being undone is saved as undone already, so a reload doesn't offer it again", async () => {
+    let release: () => void = () => {}
+    registerStepKinds({
+      "test.slow": {
+        undo: () => new Promise<StepOutcome>((resolve) => { release = () => resolve({ kind: "done" }) }),
+        redo: async () => ({ kind: "done" }),
+      } as StepHandler<never>,
+    })
+    recordStep({ kind: "test.slow", data: {}, labelKey: "slow" })
+    const pending = undoLast()
+    await new Promise((r) => setTimeout(r, 0))
+    await flushHistorySaveForTests()
+    // A reload now (the undo's writes are out) reads the step as undone.
+    resetHistoryForTests()
+    setHistoryScope("p1", "sam")
+    await historyReady()
+    expect(historyView().nextUndo).toBeNull()
+    expect(historyView().nextRedo?.labelKey).toBe("slow")
+    release()
+    await pending
+  })
+
   it("undoes newest first, then redoes it; a new step clears redo", async () => {
     const log: string[] = []
     registerStepKinds({ "test.log": logKind(log) })

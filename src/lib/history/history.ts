@@ -133,6 +133,10 @@ const loaded = new Map<string, Promise<void>>()
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 const dirtyScopes = new Set<string>()
 
+// Saved at the end of the current task, not after a delay: a reload a moment
+// after an action (or an undo) must find the history as it was left, or the
+// step is missing, or an undone step is offered again (slow-network pass,
+// 2026-10-13). Changes made in the same task still share one write.
 function scheduleSave(scope: string): void {
   dirtyScopes.add(scope)
   if (saveTimer) return
@@ -145,7 +149,7 @@ function scheduleSave(scope: string): void {
       void saveHistory(projectId, username, { undo: s.undo, redo: s.redo, log: s.log })
     }
     dirtyScopes.clear()
-  }, 250)
+  }, 0)
 }
 
 /** Read the saved stacks for a scope once, and put them UNDER anything already
@@ -333,8 +337,8 @@ export interface HistoryResult {
 }
 
 /**
- * Undo the newest step. Resolves null when there is nothing to undo, or while
- * another undo/redo is still writing (a held Ctrl+Z must not race itself).
+ * Undo the newest step. Resolves null when there is nothing to undo. A press
+ * made while another undo/redo is still writing waits for it, then runs.
  *
  * Done → the step moves to the redo stack. Blocked → it stays where it was.
  * Skipped or failed → it is DROPPED: its guard says the world moved on, so
@@ -349,9 +353,23 @@ export async function redoLast(): Promise<HistoryResult | null> {
   return run("redo")
 }
 
-async function run(which: "undo" | "redo"): Promise<HistoryResult | null> {
-  if (busy || !activeScope) return null
+// Presses made while a step is still running wait their turn instead of being
+// dropped: five quick Cmd+Z presses undo five steps (slow-network pass,
+// 2026-10-13, where one undo could take seconds and most presses vanished).
+let queue: Promise<unknown> = Promise.resolve()
+
+function run(which: "undo" | "redo"): Promise<HistoryResult | null> {
+  if (!activeScope) return Promise.resolve(null)
+  // A press belongs to the project it was made in; if the user has moved on
+  // by the time its turn comes, it does nothing.
   const scope = activeScope
+  const turn = queue.then(() => runNow(which, scope))
+  queue = turn.catch(() => {})
+  return turn
+}
+
+async function runNow(which: "undo" | "redo", scope: string): Promise<HistoryResult | null> {
+  if (activeScope !== scope) return null
   const s = stacksFor(scope)
   const from = which === "undo" ? s.undo : s.redo
   const record = from[from.length - 1]
@@ -360,7 +378,13 @@ async function run(which: "undo" | "redo"): Promise<HistoryResult | null> {
   if (record.fileId && openFileProbe && !openFileProbe(record.fileId)) {
     return { step: label, outcome: { kind: "blocked", reason: "elsewhere" } }
   }
+  // Saved as already moved before it runs: if the tab closes while its writes
+  // are out, a reload offers it on the other side rather than offering to do
+  // again what has (most likely) landed. Moved back if it doesn't go through.
   from.pop()
+  const to = which === "undo" ? s.redo : s.undo
+  to.push(record)
+  scheduleSave(scope)
   busy = true
   emit()
   let outcome: StepOutcome
@@ -369,9 +393,12 @@ async function run(which: "undo" | "redo"): Promise<HistoryResult | null> {
   } finally {
     busy = false
   }
+  if (outcome.kind !== "done") {
+    const at = to.lastIndexOf(record)
+    if (at >= 0) to.splice(at, 1)
+  }
   if (outcome.kind === "done") {
-    const to = which === "undo" ? s.redo : s.undo
-    to.push(record)
+    // Already where it belongs.
   } else if (outcome.kind === "blocked") {
     from.push(record)
   } else {
@@ -486,6 +513,7 @@ export function resetHistoryForTests(): void {
   activeScope = null
   activeUser = null
   busy = false
+  queue = Promise.resolve()
   openFileProbe = null
   emit()
 }

@@ -3643,6 +3643,45 @@ export function ProjectWorkspace() {
     },
     [project?.id, readTake, activeLane, currentUsername, getTokenForProjectFile],
   )
+  // Undo a cut: remove the new piece, give the first its old end (and name)
+  // back, as ONE outbox write (slow-network pass, 2026-10-13): queued one at a
+  // time, a tab closed in between kept the removal and lost the trim, leaving
+  // the take's tail missing.
+  const applyTakeUncut = useCallback(
+    async (c: CutRecord) => {
+      const cur = readTake(c.cellId, c.audioId)
+      if (!project?.id || !cur) return
+      const fileId = cur.owner.fileId
+      const slot = cur.att.slot ?? (c.audioId === cur.owner.cell.selectedAudioId ? "recording" : "generatedVoice")
+      const piece = readTake(c.cellId, c.newAudioId)
+      const trimStartMs = cur.att.trimStartMs ?? null
+      const batchP = emitCellAudioUncut({
+        projectId: project.id,
+        fileId,
+        cellId: c.cellId,
+        removeAudioId: c.newAudioId,
+        audioId: c.audioId,
+        trimStartMs,
+        trimEndMs: c.before.trimEndMs,
+        ...(c.renamed ? { rename: { label: c.before.label } } : {}),
+        ...(activeLane ? { targetLang: activeLane } : {}),
+        author: currentUsername,
+      })
+      if (piece) {
+        injectOptimisticAudioRemove(fileId, c.cellId, c.newAudioId, piece.att.slot ?? slot, batchP.then((ids) => ids[0]!))
+      }
+      injectOptimisticAudioTrim(fileId, c.cellId, {
+        ...attachmentOutFrom(c.audioId, cur.att, slot),
+        trimStartMs,
+        trimEndMs: c.before.trimEndMs,
+        ...(c.renamed ? { label: c.before.label } : {}),
+      }, batchP.then((ids) => ids[1]!))
+      await batchP
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      notifyAudioAttachmentsChanged(fileId)
+    },
+    [project?.id, readTake, activeLane, currentUsername, getTokenForProjectFile],
+  )
   const applyTakeRemove = useCallback(
     async (cellId: string, audioId: string) => {
       if (!project?.id) return
@@ -12811,14 +12850,7 @@ export function ProjectWorkspace() {
         applyTrim: (cellId, audioId, w) => applyTakeTrim(cellId, audioId, w),
         applyPlace: (cellId, audioId, offset) => applyTakePlace(cellId, audioId, offset),
         cut: (c, newAudioId) => applyTakeCut(c.cellId, c.audioId, c.atMs, newAudioId),
-        uncut: async (c) => {
-          await applyTakeRemove(c.cellId, c.newAudioId)
-          await applyTakeTrim(c.cellId, c.audioId, {
-            trimStartMs: readAtt(c.cellId, c.audioId)?.trimStartMs ?? undefined,
-            trimEndMs: c.before.trimEndMs ?? undefined,
-          })
-          if (c.renamed) await applyTakeRename(c.cellId, c.audioId, c.before.label)
-        },
+        uncut: applyTakeUncut,
         newPieceId: (c) => newPieceAudioId(c.cellId, c.audioId),
         select: applyTakeSelect,
         remove: (cellId, audioId) => applyTakeRemove(cellId, audioId),
@@ -12935,7 +12967,7 @@ export function ProjectWorkspace() {
     })
     return unregister
   }, [
-    readTake, applyTakeTrim, applyTakePlace, applyTakeCut, applyTakeRemove, applyTakeRename, applyTakeSelect,
+    readTake, applyTakeTrim, applyTakePlace, applyTakeCut, applyTakeUncut, applyTakeRemove, applyTakeRename, applyTakeSelect,
     getActiveCell, readRowTiming, cellStore, applyRetimeSubtitle, applyCellHidden, removeLineCore, applyRestoreRow, applyRepoint,
     activeLane, applyTargetText, project?.id, currentUsername, getTokenForProjectFile, revalidateAuditStats, revalidateCell,
     serverTimelineTracks, applyTrackPatches,

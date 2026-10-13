@@ -353,7 +353,7 @@ CREATE TABLE project_settings (
       GENERATED ALWAYS AS (CASE WHEN jsonb_typeof((settings::jsonb) -> 'rosterViewMinRole') = 'number' THEN (settings::jsonb) ->> 'rosterViewMinRole' END) STORED,
     member_progress_view_min_role TEXT
       GENERATED ALWAYS AS (CASE WHEN jsonb_typeof((settings::jsonb) -> 'memberProgressViewMinRole') = 'number' THEN (settings::jsonb) ->> 'memberProgressViewMinRole' END) STORED,
-    -- 0162 (AQU-1768): whether the project sets its own media settings, so
+    -- 0167 (AQU-1768): whether the project sets its own media settings, so
     -- org-default overrides can be counted and cleared without the blob. NULL
     -- = inherits the org's default. One line each (dev-stack reconciler).
     timing_locked TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'timingLocked') STORED,

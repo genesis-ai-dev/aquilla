@@ -78,6 +78,12 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     sentinels: ["e2e/specs/rules/violation.smoke.spec.ts"],
   },
   {
+    // BIA forecasting: ghost-text next words + "words that fit here". The
+    // journey crosses the projection → SPA read → forecast worker → commit.
+    source: /^src\/(?:lib\/forecast\/|lib\/richtext\/ghost-text|hooks\/useForecastCorpus|components\/WordsThatFitMenu|context\/ForecastContext|lib\/store\/ghost-text-pref)/,
+    sentinels: ["e2e/specs/editor/ghost-text.spec.ts"],
+  },
+  {
     source: /^src\/(?:components|lib)\/(?:terminology|termbase)/i,
     sentinels: ["e2e/specs/terminology/wildcard-term-chip.smoke.spec.ts"],
   },
@@ -176,6 +182,18 @@ function closestSpecs(file: string, smokeSpecs: string[]): string[] {
 export interface E2EImpact {
   specs: string[]
   reasons: string[]
+}
+
+/**
+ * The specs the affected gate may run: every smoke spec, plus every domain
+ * sentinel that exists even when it is not a smoke spec (e.g. the BIA
+ * ghost-text journey, `e2e/specs/editor/ghost-text.spec.ts`). Without the
+ * second half a non-smoke sentinel was silently filtered out of every real
+ * pre-push run, so forecast changes selected no browser journey.
+ */
+export function affectedSpecPool(smokeSpecs: string[], exists: (spec: string) => boolean): string[] {
+  const sentinels = [...CORE_SENTINELS, ...DOMAIN_RULES.flatMap(({ sentinels }) => sentinels)]
+  return [...new Set([...smokeSpecs, ...sentinels.filter((spec) => exists(spec))].map(normalize))].sort()
 }
 
 export function selectAffectedE2E(changedFiles: string[], availableSmokeSpecs: string[]): E2EImpact {

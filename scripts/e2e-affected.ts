@@ -1,9 +1,9 @@
 import { execFileSync } from "node:child_process"
 import { spawnSync } from "./lib/spawn-command"
-import { readdirSync, readFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { selectAffectedE2E } from "./lib/e2e-impact"
+import { affectedSpecPool, selectAffectedE2E } from "./lib/e2e-impact"
 import { affectedRunMode } from "./lib/e2e-run-mode"
 import { refuseBorrowedNodeModules, refuseMissingPlaywrightChromium } from "./lib/worktree-install-guard"
 
@@ -68,9 +68,10 @@ const changedFiles = process.env.E2E_CHANGED_FILES
   : pushRefs.trim()
     ? changedFilesFromPush(pushRefs)
     : changedFilesWithoutPushInput()
-const impact = selectAffectedE2E(changedFiles, smokeSpecs(path.join(REPO_ROOT, "e2e/specs")))
+const pool = affectedSpecPool(smokeSpecs(path.join(REPO_ROOT, "e2e/specs")), (spec) => existsSync(path.join(REPO_ROOT, spec)))
+const impact = selectAffectedE2E(changedFiles, pool)
 
-console.log(`[e2e-affected] ${changedFiles.length} changed file(s) → ${impact.specs.length} smoke spec(s)`)
+console.log(`[e2e-affected] ${changedFiles.length} changed file(s) → ${impact.specs.length} spec(s)`)
 for (const reason of impact.reasons) console.log(`[e2e-affected] ${reason}`)
 
 if (impact.specs.length === 0) {

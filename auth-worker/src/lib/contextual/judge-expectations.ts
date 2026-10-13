@@ -19,6 +19,10 @@
 //                    — the Greek has second-person forms of one number, the
 //                      profile says the language distinguishes number, but it
 //                      lists no forms to check.
+//   referent (P13), we_inclusive (P9), introduced (P11) — AQU-1701, the
+//                    participant questions: see ./judge-participants.ts.
+//   tq (C1)          AQU-1701, Translation Questions: asked per question and
+//                    batched per chapter, not per cell (./judge-comprehension.ts).
 //
 // ONE batched decide() per span, with keys `c{i}_{check}`. An answer whose
 // certainty |p − 0.5|·2 is below 0.4 abstains, as does every answer when Jev
@@ -37,9 +41,26 @@ import type { CellFacts, FactEntity } from "../../../../db/shared/bible-facts/ty
 import type { LanguageProfile } from "../../../../db/shared/language-profile"
 import type { DecideInput, DecideResult, JevAnswer, JevQuestion } from "../jev/decide"
 import { promptFingerprint } from "./draft"
+import { introducedCandidate, referentCandidate, weInclusiveCandidate } from "./judge-participants"
 
-export const BIBLE_QA_CHECKS = ["speaker", "question", "negation", "you_number"] as const
+export const BIBLE_QA_CHECKS = [
+  "speaker",
+  "question",
+  "negation",
+  "you_number",
+  // AQU-1701
+  "referent",
+  "we_inclusive",
+  "introduced",
+  "tq",
+] as const
 export type BibleQaCheck = (typeof BIBLE_QA_CHECKS)[number]
+
+/** The questions asked of one cell. C1 (`tq`) is asked per Translation Question instead (./judge-comprehension.ts). */
+export const BIBLE_QA_CELL_CHECKS = BIBLE_QA_CHECKS.filter(
+  (check): check is Exclude<BibleQaCheck, "tq"> => check !== "tq",
+)
+type BibleQaCellCheck = (typeof BIBLE_QA_CELL_CHECKS)[number]
 
 /** The finding code an ACTIVE question's "no" is recorded under. */
 export const BIBLE_QA_CODES: Readonly<Record<BibleQaCheck, `bkp:${string}`>> = {
@@ -47,6 +68,10 @@ export const BIBLE_QA_CODES: Readonly<Record<BibleQaCheck, `bkp:${string}`>> = {
   question: "bkp:M1",
   negation: "bkp:M3",
   you_number: "bkp:P8",
+  referent: "bkp:P13",
+  we_inclusive: "bkp:P9",
+  introduced: "bkp:P11",
+  tq: "bkp:C1",
 }
 
 export type BibleQaMode = "shadow" | "active"
@@ -62,6 +87,11 @@ export const BIBLE_QA_MODES: Readonly<Record<BibleQaCheck, BibleQaMode>> = {
   question: "shadow",
   negation: "shadow",
   you_number: "shadow",
+  // AQU-1701: new questions start in shadow, like every question before its eval.
+  referent: "shadow",
+  we_inclusive: "shadow",
+  introduced: "shadow",
+  tq: "shadow",
 }
 
 /** Below this certainty (|p − 0.5|·2) an answer abstains, as passage tags and seams do. */
@@ -89,6 +119,8 @@ export interface Judgment {
   /** p(yes), when Jev answered (now or from the cache). */
   p?: number
   certainty?: number
+  /** AQU-1701: on a failure, the repair constraint the question carries (P13, P9), built from the pack facts it asked about. */
+  repair?: string
 }
 
 export interface JudgeResult {
@@ -115,8 +147,8 @@ export interface JudgeDeps {
   /** p(yes) per (cell content hash, check, pack version), kept for the run. */
   cache: Map<string, number>
   record?: (trace: BibleQaTrace) => void
-  /** Test seam; production reads BIBLE_QA_MODES. */
-  modes?: Readonly<Record<BibleQaCheck, BibleQaMode>>
+  /** Test seam, over BIBLE_QA_MODES; production reads BIBLE_QA_MODES alone. */
+  modes?: Readonly<Partial<Record<BibleQaCheck, BibleQaMode>>>
 }
 
 // ── Code ────────────────────────────────────────────────────────────────────
@@ -137,13 +169,24 @@ function nameOf(entity: FactEntity): string {
 interface Pending {
   cell: JudgeCell
   index: number
-  check: BibleQaCheck
+  check: BibleQaCellCheck
   question: string
   /** p(yes) means the draft keeps the fact; for you_number, yes means singular. */
   passWhenYes: boolean
+  /** The constraint an active "no" repairs with, when the check builds its own (P13, P9). */
+  repair?: string
 }
 
-type Candidate = { decided: "pass" } | { ask: Omit<Pending, "cell" | "index"> } | null
+/** What a check makes of one cell: settled in code, a question for Jev, or nothing to ask. */
+export type Candidate = { decided: "pass" } | { ask: Omit<Pending, "cell" | "index"> } | null
+
+/** The questions' wording, shared with the shadow eval (scripts/jev-shadow-eval.ts, AQU-1701) so it asks what production asks. */
+export const BIBLE_QA_PROMPTS = {
+  speaker: (name: string) => `In this translation, are the quoted words spoken by ${name}?`,
+  question: "Is this sentence still a question?",
+  negation: "Is this statement negative?",
+  you_number: "Is 'you' here addressed to one person?",
+} as const
 
 function speakerCandidate(cell: JudgeCell, profile: LanguageProfile): Candidate {
   const verbs = profile.speechVerbs ?? []
@@ -152,13 +195,7 @@ function speakerCandidate(cell: JudgeCell, profile: LanguageProfile): Candidate 
   if (!speech?.speaker) return null
   const name = nameOf(speech.speaker)
   if (containsTerm(cell.text, name) && verbs.some((verb) => containsTerm(cell.text, verb))) return { decided: "pass" }
-  return {
-    ask: {
-      check: "speaker",
-      question: `In this translation, are the quoted words spoken by ${name}?`,
-      passWhenYes: true,
-    },
-  }
+  return { ask: { check: "speaker", question: BIBLE_QA_PROMPTS.speaker(name), passWhenYes: true } }
 }
 
 function questionCandidate(cell: JudgeCell, profile: LanguageProfile): Candidate {
@@ -166,13 +203,13 @@ function questionCandidate(cell: JudgeCell, profile: LanguageProfile): Candidate
   // With question markers in the profile the M1 gate decides in code.
   if (!isBibleCheckDormant("bkp:M1", profile)) return null
   if (QUESTION_MARK.test(cell.text)) return { decided: "pass" }
-  return { ask: { check: "question", question: "Is this sentence still a question?", passWhenYes: true } }
+  return { ask: { check: "question", question: BIBLE_QA_PROMPTS.question, passWhenYes: true } }
 }
 
 function negationCandidate(cell: JudgeCell, profile: LanguageProfile): Candidate {
   if (!cell.facts || cell.facts.negators === 0) return null
   if ((profile.negators ?? []).some((negator) => containsTerm(cell.text, negator))) return { decided: "pass" }
-  return { ask: { check: "negation", question: "Is this statement negative?", passWhenYes: true } }
+  return { ask: { check: "negation", question: BIBLE_QA_PROMPTS.negation, passWhenYes: true } }
 }
 
 function youNumberCandidate(cell: JudgeCell, profile: LanguageProfile): Candidate {
@@ -183,15 +220,18 @@ function youNumberCandidate(cell: JudgeCell, profile: LanguageProfile): Candidat
   // With forms listed, this is a code check for a later slice, not a question.
   if ((second.singular?.length ?? 0) > 0 || (second.plural?.length ?? 0) > 0) return null
   return {
-    ask: { check: "you_number", question: "Is 'you' here addressed to one person?", passWhenYes: number === "singular" },
+    ask: { check: "you_number", question: BIBLE_QA_PROMPTS.you_number, passWhenYes: number === "singular" },
   }
 }
 
-const CANDIDATES: Readonly<Record<BibleQaCheck, (cell: JudgeCell, profile: LanguageProfile) => Candidate>> = {
+const CANDIDATES: Readonly<Record<BibleQaCellCheck, (cell: JudgeCell, profile: LanguageProfile) => Candidate>> = {
   speaker: speakerCandidate,
   question: questionCandidate,
   negation: negationCandidate,
   you_number: youNumberCandidate,
+  referent: referentCandidate,
+  we_inclusive: weInclusiveCandidate,
+  introduced: introducedCandidate,
 }
 
 // ── Jev ─────────────────────────────────────────────────────────────────────
@@ -204,11 +244,48 @@ function cacheKey(cell: JudgeCell, check: BibleQaCheck, packVersion: string): st
   return `${promptFingerprint(`${cell.source}\u0000${cell.text}`)}|${check}|${packVersion}`
 }
 
-function outcomeOf(p: number, passWhenYes: boolean): Pick<Judgment, "outcome" | "certainty"> {
+/** An answer's outcome. Exported for C1 (./judge-comprehension.ts), which judges the same way. */
+export function outcomeOf(p: number, passWhenYes: boolean): Pick<Judgment, "outcome" | "certainty"> {
   const certainty = Math.abs(p - 0.5) * 2
   if (certainty < BIBLE_QA_ABSTAIN_BELOW) return { outcome: "abstain", certainty }
   const yes = p >= 0.5
   return { outcome: yes === passWhenYes ? "pass" : "fail", certainty }
+}
+
+/** The outcome, and on a failure the question's own repair constraint. */
+function answerOf(p: number, ask: Pick<Pending, "passWhenYes" | "repair">): Pick<Judgment, "outcome" | "certainty" | "repair"> {
+  const outcome = outcomeOf(p, ask.passWhenYes)
+  return outcome.outcome === "fail" && ask.repair ? { ...outcome, repair: ask.repair } : outcome
+}
+
+/**
+ * The batched request for questions about `cells`: each asked cell once in
+ * the state (clipped), each question naming its cell. Exported so the shadow
+ * eval (scripts/jev-shadow-eval.ts, AQU-1701) sends what production sends.
+ */
+export function bibleQaRequest(
+  cells: readonly Pick<JudgeCell, "ref" | "source" | "text" | "factsLine">[],
+  asks: readonly { key: string; index: number; question: string }[],
+): { state: { cells: Record<string, unknown>[] }; questions: Record<string, JevQuestion> } {
+  const questions: Record<string, JevQuestion> = {}
+  for (const ask of asks) {
+    questions[ask.key] = {
+      type: "noul",
+      instructions: { cell: `cell ${ask.index}`, question: ask.question },
+      criteria: { true: "Yes: the translation says so.", false: "No: the translation does not say so." },
+    }
+  }
+  const asked = [...new Set(asks.map((ask) => ask.index))]
+  const state = {
+    cells: asked.map((index) => ({
+      index,
+      ref: cells[index].ref,
+      source: clip(cells[index].source),
+      translation: clip(cells[index].text),
+      ...(cells[index].factsLine ? { facts: clip(cells[index].factsLine ?? "") } : {}),
+    })),
+  }
+  return { state, questions }
 }
 
 /**
@@ -220,11 +297,11 @@ export async function judgeExpectations(
   deps: JudgeDeps,
   spanId: string,
 ): Promise<JudgeResult> {
-  const modes = deps.modes ?? BIBLE_QA_MODES
+  const modes = { ...BIBLE_QA_MODES, ...deps.modes }
   const judgments: Judgment[] = []
   const pending: Pending[] = []
   cells.forEach((cell, index) => {
-    for (const check of BIBLE_QA_CHECKS) {
+    for (const check of BIBLE_QA_CELL_CHECKS) {
       const candidate = CANDIDATES[check](cell, deps.profile)
       if (!candidate) continue
       if ("decided" in candidate) {
@@ -236,7 +313,7 @@ export async function judgeExpectations(
         judgments.push({
           cellId: cell.cellId,
           check,
-          ...outcomeOf(cached, candidate.ask.passWhenYes),
+          ...answerOf(cached, candidate.ask),
           decidedBy: "cache",
           mode: modes[check],
           p: cached,
@@ -249,24 +326,10 @@ export async function judgeExpectations(
   if (pending.length === 0) return { judgments, jevCalls: 0 }
 
   const keyOf = (q: Pending) => `c${q.index}_${q.check}`
-  const questions: Record<string, JevQuestion> = {}
-  for (const q of pending) {
-    questions[keyOf(q)] = {
-      type: "noul",
-      instructions: { cell: `cell ${q.index}`, question: q.question },
-      criteria: { true: "Yes: the translation says so.", false: "No: the translation does not say so." },
-    }
-  }
-  const asked = [...new Set(pending.map((q) => q.index))]
-  const state = {
-    cells: asked.map((index) => ({
-      index,
-      ref: cells[index].ref,
-      source: clip(cells[index].source),
-      translation: clip(cells[index].text),
-      ...(cells[index].factsLine ? { facts: clip(cells[index].factsLine ?? "") } : {}),
-    })),
-  }
+  const { state, questions } = bibleQaRequest(
+    cells,
+    pending.map((q) => ({ key: keyOf(q), index: q.index, question: q.question })),
+  )
   // An unanswered question is p = 0.5: certainty 0, so it abstains.
   const fallback = (): Record<string, JevAnswer> =>
     Object.fromEntries(pending.map((q) => [keyOf(q), { kind: "noul", p: 0.5 } as JevAnswer]))
@@ -287,7 +350,7 @@ export async function judgeExpectations(
     return {
       cellId: q.cell.cellId,
       check: q.check,
-      ...outcomeOf(p, q.passWhenYes),
+      ...answerOf(p, q),
       decidedBy: answered ? "jev" : "fallback",
       mode: modes[q.check],
       ...(answered ? { p } : {}),
@@ -302,10 +365,21 @@ export function activeFailures(result: JudgeResult): Judgment[] {
   return result.judgments.filter((j) => j.mode === "active" && j.outcome === "fail")
 }
 
-/** The templated English constraint for an active failure, from the cell's facts. */
-export function judgmentConstraint(judgment: Pick<Judgment, "check">, facts: CellFacts | undefined): string {
+/**
+ * The templated English constraint for an active failure, from the cell's
+ * facts; null for a question whose "no" is a finding to review, never a
+ * repair (AQU-1701): an introduction (P11) is advisory, and a Translation
+ * Question (C1) never redrafts.
+ */
+export function judgmentConstraint(judgment: Pick<Judgment, "check" | "repair">, facts: CellFacts | undefined): string | null {
   const speech = facts?.speeches.find((s) => s.opens && !s.selfProjected && s.speaker)
   switch (judgment.check) {
+    case "referent":
+    case "we_inclusive":
+      return judgment.repair ?? null
+    case "introduced":
+    case "tq":
+      return null
     case "speaker":
       return speech?.speaker
         ? `Make clear that ${nameOf(speech.speaker)} speaks these words.`

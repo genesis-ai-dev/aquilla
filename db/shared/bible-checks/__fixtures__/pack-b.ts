@@ -225,3 +225,29 @@ export const JHN_B_TEXT = {
     "n43020018001": {"text":"ἔρχεται","lemma":"ἔρχομαι","class":"verb","morph":"V-PNI-3S","person":"third","number":"singular"}, "n43020018002": {"text":"Μαριὰμ","lemma":"Μαριάμ","class":"noun","type":"proper","morph":"N-PRI","number":"singular","case":"nominative"}, "n43020018003": {"text":"ἡ","lemma":"ὁ","class":"det","morph":"T-NSF","number":"singular","case":"nominative"}, "n43020018004": {"text":"Μαγδαληνὴ","lemma":"Μαγδαληνή","class":"noun","type":"proper","morph":"N-NSF","number":"singular","case":"nominative"}, "n43020018005": {"text":"ἀγγέλλουσα","lemma":"ἀγγέλλω","class":"verb","morph":"V-PAP-NSF","number":"singular","case":"nominative"}, "n43020018006": {"text":"τοῖς","lemma":"ὁ","class":"det","morph":"T-DPM","number":"plural","case":"dative"}, "n43020018007": {"text":"μαθηταῖς","lemma":"μαθητής","class":"noun","type":"common","morph":"N-DPM","number":"plural","case":"dative"}, "n43020018008": {"text":"ὅτι","lemma":"ὅτι","class":"conj","morph":"CONJ"}, "n43020018009": {"text":"Ἑώρακα","lemma":"ὁράω","class":"verb","morph":"V-RAI-1S-ATT","person":"first","number":"singular"}, "n43020018010": {"text":"τὸν","lemma":"ὁ","class":"det","morph":"T-ASM","number":"singular","case":"accusative"}, "n43020018011": {"text":"κύριον","lemma":"κύριος","class":"noun","type":"common","morph":"N-ASM","number":"singular","case":"accusative"}, "n43020018012": {"text":"καὶ","lemma":"καί","class":"conj","morph":"CONJ"}, "n43020018013": {"text":"ταῦτα","lemma":"οὗτος","class":"pron","type":"demonstrative","morph":"D-APN","number":"plural","case":"accusative"}, "n43020018014": {"text":"εἶπεν","lemma":"λέγω","class":"verb","morph":"V-2AAI-3S","person":"third","number":"singular"}, "n43020018015": {"text":"αὐτῇ","lemma":"αὐτός","class":"pron","type":"personal","morph":"P-DSF","number":"singular","case":"dative"},
   },
 }
+
+// AQU-1701: the structure layer's pericopes around these verses, and the
+// English gloss of each third-person verb whose subject the people layer
+// resolves (the referent question, P13, names it). Both from the pack
+// (1.2.0), unchanged.
+export const JHN_B_SEGMENTS = [
+  { from: "n43001035001", to: "n43001042022", title: "The First Disciples of Jesus" },
+  { from: "n43001043001", to: "n43001051024", title: "Jesus Calls Philip and Nathaniel" },
+  { from: "n43004001001", to: "n43004026009", title: "Christ and the Woman of Samaria" },
+  { from: "n43011001001", to: "n43011016015", title: "Jesus Hears of Lazarus" },
+  { from: "n43012020001", to: "n43012050020", title: "Some Greeks Seek Jesus but Many Disbelieve" },
+  { from: "n43013031001", to: "n43016033019", title: "Jesus Teaches at the Last Supper" },
+  { from: "n43019025001", to: "n43019030016", title: "Jesus Entrusts His Mother and Dies" },
+  { from: "n43020001001", to: "n43020018015", title: "Easter Morning" },
+]
+
+export const JHN_B_GLOSSES: Readonly<Record<string, string>> = {"n43001041010":"said","n43001042001":"brought","n43001043003":"decided","n43001043009":"found","n43004016001":"said","n43004017005":"said","n43004023006":"is","n43012021011":"asked","n43012022005":"told","n43012022013":"told","n43014026021":"remind","n43020001018":"saw","n43020002001":"ran","n43020002004":"came","n43020002018":"said","n43020018014":"said"}
+
+/** JHN_B_TEXT with those glosses, as the full text layer has them. */
+export const JHN_B_TEXT_GLOSSED = {
+  book: JHN_B_TEXT.book,
+  verses: JHN_B_TEXT.verses,
+  words: Object.fromEntries(
+    Object.entries(JHN_B_TEXT.words).map(([id, word]) => [id, Object.hasOwn(JHN_B_GLOSSES, id) ? { ...word, english: JHN_B_GLOSSES[id] } : word]),
+  ),
+}

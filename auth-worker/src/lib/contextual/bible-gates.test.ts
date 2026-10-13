@@ -176,6 +176,7 @@ describe("a name the source does not have (bkp:P5)", () => {
       structure: { ...JHN_B_STRUCTURE, segments: [], moves: [] } as unknown as BookPack["structure"],
       people: JHN_B_PEOPLE as unknown as BookPack["people"],
       text: JHN_B_TEXT as unknown as BookPack["text"],
+      questions: null,
     }
     const run = await prepareBibleRun({
       pairs,

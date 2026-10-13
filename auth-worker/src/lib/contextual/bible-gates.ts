@@ -50,8 +50,16 @@ export function isRepairable(finding: Pick<BibleCheckFinding, "severity">): bool
   return finding.severity === "warning"
 }
 
-/** The severity a stored `bkp:` code stands for. Jev-confirmed codes (V13, M3, P8) are only stored when they failed an ACTIVE question, so they count as warnings. */
+/**
+ * AQU-1701: the Jev-only codes whose "no" is advisory, for a person to review
+ * and never a repair: a participant's introduction (P11) and a Translation
+ * Question (C1). Both are info in the design doc's catalog (§7.2, §7.8).
+ */
+const ADVISORY_JEV_CODES: ReadonlySet<string> = new Set(["bkp:P11", "bkp:C1"])
+
+/** The severity a stored `bkp:` code stands for. Jev-confirmed codes (V13, M3, P8, P13) are only stored when they failed an ACTIVE question, so they count as warnings; the advisory ones as info. */
 export function bibleCodeSeverity(code: string): "warning" | "info" {
+  if (ADVISORY_JEV_CODES.has(code)) return "info"
   return isBibleCheckId(code) ? BIBLE_CHECK_DEFAULT_SEVERITY[code] : "warning"
 }
 

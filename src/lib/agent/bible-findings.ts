@@ -51,6 +51,10 @@ const CHECK_NAME: Readonly<Record<string, MessageKey>> = {
   V13: "agent.finding.bibleCheck.speaker",
   M3: "agent.finding.bibleCheck.negation",
   P8: "agent.finding.bibleCheck.youNumber",
+  // AQU-1701: Jev questions only. P9 is both a built-in check and a Jev question; it keeps its one name above.
+  P13: "agent.finding.bibleCheck.referent",
+  P11: "agent.finding.bibleCheck.introduced",
+  C1: "agent.finding.bibleCheck.comprehension",
 }
 
 export function bibleFindingLabel(finding: DraftFinding, t: TFunction): string {
@@ -60,11 +64,28 @@ export function bibleFindingLabel(finding: DraftFinding, t: TFunction): string {
 }
 
 /**
+ * AQU-1701, C1: the Translation Question a draft may not answer — "Comprehension:
+ * the translation may not say that “…”", the question and its verses, and how
+ * many more on the same verses got a "no". The answer and the question are
+ * pack data in the gateway language, shown as they are.
+ */
+function comprehensionEvidence(params: Readonly<Record<string, string>>, t: TFunction, format: Pick<LocaleFormatters, "list">): string[] {
+  if (!params.answer) return []
+  const refs = (params.refs ?? "").split(",").filter(Boolean)
+  const lines = [t("agent.finding.bibleCheck.comprehensionEvidence", { answer: params.answer })]
+  if (params.question) lines.push(t("agent.finding.bibleCheck.comprehensionQuestion", { refs: format.list(refs), question: params.question }))
+  const more = Number.parseInt(params.more ?? "0", 10)
+  if (more > 0) lines.push(t("agent.finding.bibleCheck.comprehensionMore", { count: more }))
+  return lines
+}
+
+/**
  * What the finding means and where its fact comes from, e.g. "The quotation
  * closes after the narration that follows it…" and "OpenText speech JHN 4:9
  * words 8–18; speaker from Clear speaker-quotations (confidence 97%)". Empty
  * when the draft stored no params (a Jev-confirmed finding) or the check is
- * unknown to this version.
+ * unknown to this version. AQU-1701: a C1 finding carries its Translation
+ * Question.
  */
 export function bibleFindingEvidence(
   finding: DraftFinding,
@@ -72,6 +93,7 @@ export function bibleFindingEvidence(
   format: Pick<LocaleFormatters, "list" | "percent">,
 ): string[] {
   if (finding.kind !== "bkp" || !finding.params) return []
+  if (finding.detail === "C1") return comprehensionEvidence(finding.params, t, format)
   const code = `bkp:${finding.detail ?? ""}`
   if (!isBibleCheckId(code)) return []
   const infraction: RuleInfraction = {

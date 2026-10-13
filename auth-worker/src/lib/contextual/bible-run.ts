@@ -25,6 +25,7 @@ import type { CellFacts } from "../../../../db/shared/bible-facts/types"
 import type { LanguageProfile } from "../../../../db/shared/language-profile"
 import type { ProjectFact } from "../../../../db/shared/project-facts"
 import type { BkpFailureReason, BkpResult, BookPack } from "../bkp/pack-loader"
+import type { BkpQuestion } from "../bkp/pack-types"
 import type { Concept } from "./project-context"
 import type { BibleJudgeDeps } from "./bible-span"
 import type { TraceInput } from "./traces"
@@ -48,6 +49,8 @@ export interface BibleRunData {
   draftLines: ReadonlyMap<string, string>
   /** One short facts line per cell id, for scene construal. */
   construeLines: ReadonlyMap<string, string>
+  /** AQU-1701: the book's Translation Questions, for C1. Empty without the checks enrichment or the notes layer. */
+  questions: readonly BkpQuestion[]
 }
 
 export type BibleRun =
@@ -55,7 +58,7 @@ export type BibleRun =
   | { state: "unavailable"; reason: BkpFailureReason }
   | { state: "ready"; data: BibleRunData }
 
-export type LoadBookPack = (book: string, opts: { text: boolean }) => Promise<BkpResult<BookPack>>
+export type LoadBookPack = (book: string, opts: { text: boolean; questions?: boolean }) => Promise<BkpResult<BookPack>>
 
 /** What the run driver injects into each tick (routes/contextual.ts builds it). */
 export interface BibleTickDeps {
@@ -84,11 +87,14 @@ export function bookOfPairs(pairs: readonly CellPair[]): string | null {
  * while the profile has not said whether "you" has number (a fact question
  * may ask) or says it does (the facts state the number); and (AQU-1697) the
  * Bible data checks that read it: numbers, negation, run-on sentences, and
- * (AQU-1699) the names, "we" and κύριος of check pack B.
+ * (AQU-1699) the names, "we" and κύριος of check pack B. AQU-1701: and the
+ * Jev questions, when they run (`questions`): a participant's introduction
+ * (P11) is a name the Greek uses, and the referent question (P13) names
+ * the verb whose subject it asks about.
  */
-export function needsTextLayer(profile: LanguageProfile, readiness?: BibleCheckReadiness): boolean {
+export function needsTextLayer(profile: LanguageProfile, readiness?: BibleCheckReadiness, questions = false): boolean {
   const second = profile.pronouns?.secondPerson
-  return second === undefined || second.numberDistinction || bibleChecksReadText(profile, readiness)
+  return questions || second === undefined || second.numberDistinction || bibleChecksReadText(profile, readiness)
 }
 
 /** AQU-1699: what decides each name: the project's decisions, terminology, source language and lanes. */
@@ -141,7 +147,11 @@ export async function prepareBibleRun(input: {
   // A file with no verse refs (a glossary, a prose doc) has no Bible data to use.
   if (!book) return { state: "off" }
   const readiness = readinessFromDecisions(input.facts ?? [], input.concepts)
-  const loaded = await input.loadPack(book, { text: needsTextLayer(input.profile, readiness) })
+  // AQU-1701: the Jev questions, C1 among them, run only with the checks enrichment.
+  const loaded = await input.loadPack(book, {
+    text: needsTextLayer(input.profile, readiness, input.flags.checks),
+    questions: input.flags.checks,
+  })
   if (!loaded.ok) return { state: "unavailable", reason: loaded.reason }
   const pack = loaded.value
 
@@ -180,6 +190,7 @@ export async function prepareBibleRun(input: {
       facts,
       draftLines,
       construeLines,
+      questions: input.flags.checks ? (pack.questions ?? []) : [],
     },
   }
 }

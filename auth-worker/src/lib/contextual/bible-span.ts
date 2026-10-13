@@ -9,12 +9,15 @@ import type { CellFacts } from "../../../../db/shared/bible-facts/types"
 import type { LanguageProfile } from "../../../../db/shared/language-profile"
 import { bibleConstraint, isRepairable, type BibleGate } from "./bible-gates"
 import type { BibleRun, BibleRunData } from "./bible-run"
+import { judgeComprehension, type ComprehensionResult } from "./judge-comprehension"
 import {
   activeFailures,
   BIBLE_QA_CODES,
   judgeExpectations,
   judgmentConstraint,
+  type BibleQaCheck,
   type BibleQaDecide,
+  type BibleQaMode,
   type BibleQaTrace,
   type JudgeResult,
 } from "./judge-expectations"
@@ -31,14 +34,24 @@ export interface SpanBible {
     profile: LanguageProfile
     /** judgeExpectations on a drafted span: code first, Jev only where code cannot decide. */
     judge: (draft: SpanDraft) => Promise<JudgeResult>
+    /**
+     * AQU-1701, C1: the Translation Questions whose verses the span's FINAL
+     * drafts complete (./judge-comprehension.ts). Findings only; never a redraft.
+     */
+    comprehension: (drafts: readonly { cellId: string; text: string }[]) => Promise<ComprehensionResult>
   }
 }
+
+/** Without a Jev side (tests, or no driver) every question abstains, and code still decides what it can. */
+const NO_JEV: BibleQaDecide = async (q) => ({ answers: q.fallback(), decidedBy: "heuristic", reason: "disabled", model: null, usage: null })
 
 /** The run driver's Jev side: purpose bible-qa, traced and metered, with a cache that lasts the run. */
 export interface BibleJudgeDeps {
   decide: BibleQaDecide
   cache: Map<string, number>
   record?: (trace: BibleQaTrace) => void
+  /** Test seam over BIBLE_QA_MODES; the run driver never sets it. */
+  modes?: Readonly<Partial<Record<BibleQaCheck, BibleQaMode>>>
 }
 
 /** The span's view of the wave's Bible data. */
@@ -50,14 +63,13 @@ export function spanBible(
   if (!data.checks) return base
   const pairById = new Map(input.pairs.map((p) => [p.cellId, p]))
   const judgeDeps = input.judge
+  const decide: BibleQaDecide = judgeDeps?.decide ?? NO_JEV
   return {
     ...base,
     checks: {
       facts: data.facts,
       profile: data.profile,
       judge: async (draft) => {
-        // Without a Jev side (tests, or no driver), code still decides what it can.
-        const decide: BibleQaDecide = judgeDeps?.decide ?? (async (q) => ({ answers: q.fallback(), decidedBy: "heuristic", reason: "disabled", model: null, usage: null }))
         return judgeExpectations(
           draft.cells.map((cell) => ({
             cellId: cell.cellId,
@@ -74,8 +86,28 @@ export function spanBible(
             decide,
             cache: judgeDeps?.cache ?? new Map(),
             ...(judgeDeps?.record ? { record: judgeDeps.record } : {}),
+            ...(judgeDeps?.modes ? { modes: judgeDeps.modes } : {}),
           },
           input.spanId,
+        )
+      },
+      comprehension: async (drafts) => {
+        // The drafts, and committed text for the verses around them: a TQ is asked once its whole range has text.
+        const drafted = new Map(drafts.map((d) => [d.cellId, d.text]))
+        const cells = input.pairs.flatMap((pair) => {
+          const refs = data.expectations.get(pair.cellId)?.refs
+          const text = drafted.get(pair.cellId) ?? pair.target
+          return refs && text.trim() ? [{ cellId: pair.cellId, refs, text }] : []
+        })
+        return judgeComprehension(
+          { questions: data.questions, cells, checked: new Set(drafted.keys()), owner: "touches", traceSpanId: input.spanId },
+          {
+            packVersion: data.packVersion,
+            decide,
+            cache: judgeDeps?.cache ?? new Map(),
+            ...(judgeDeps?.record ? { record: judgeDeps.record } : {}),
+            ...(judgeDeps?.modes?.tq ? { mode: judgeDeps.modes.tq } : {}),
+          },
         )
       },
     },
@@ -101,8 +133,12 @@ export function newBibleMetrics(): SpanBibleMetrics {
   return { findings: {}, jevCalls: 0, judgments: [], repaired: 0 }
 }
 
-/** Count one draft's bkp: flags and its judgments into the span's metrics. */
-export function recordBible(metrics: SpanBibleMetrics, flags: readonly LintFlag[], judged: JudgeResult | undefined): void {
+/** Count one draft's bkp: flags and its judgments (AQU-1701: or C1's) into the span's metrics. */
+export function recordBible(
+  metrics: SpanBibleMetrics,
+  flags: readonly LintFlag[],
+  judged: Pick<JudgeResult, "judgments" | "jevCalls"> | undefined,
+): void {
   for (const flag of flags) {
     if (flag.bible) metrics.findings[flag.ruleId] = (metrics.findings[flag.ruleId] ?? 0) + 1
   }
@@ -143,7 +179,9 @@ export async function checkSpanBible(
   out.judged = await checks.judge(draft)
   for (const judgment of activeFailures(out.judged)) {
     push(out.activeCodes, judgment.cellId, BIBLE_QA_CODES[judgment.check])
-    push(out.constraints, judgment.cellId, judgmentConstraint(judgment, checks.facts.get(judgment.cellId)))
+    // AQU-1701: an advisory question (P11) records its code and repairs nothing.
+    const constraint = judgmentConstraint(judgment, checks.facts.get(judgment.cellId))
+    if (constraint) push(out.constraints, judgment.cellId, constraint)
   }
   return out
 }

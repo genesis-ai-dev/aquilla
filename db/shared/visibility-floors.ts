@@ -72,15 +72,31 @@ export interface ProjectVisibilityOverrides {
 
 const NO_OVERRIDES: ProjectVisibilityOverrides = { rosterViewMinRole: null, memberProgressViewMinRole: null }
 
-const OVERRIDES_SELECT = `SELECT ps.project_id AS project_id,
-              CASE WHEN jsonb_typeof(x.j -> 'rosterViewMinRole') = 'number'
-                   THEN x.j ->> 'rosterViewMinRole' END AS roster,
-              CASE WHEN jsonb_typeof(x.j -> 'memberProgressViewMinRole') = 'number'
-                   THEN x.j ->> 'memberProgressViewMinRole' END AS progress
-         FROM project_settings ps
-        CROSS JOIN LATERAL (
-          SELECT CASE WHEN strpos(ps.settings, 'ViewMinRole') > 0 THEN ps.settings::jsonb END AS j
-        ) x`
+/**
+ * The own values of the project_settings rows `source` (a FROM … WHERE …
+ * clause aliasing project_settings as `ps`) yields.
+ *
+ * The blob can run to megabytes and there is no column for these keys, so it
+ * is parsed only when its text names one of them — almost every project
+ * follows its org, and for those the read is a substring scan. The MATERIALIZED
+ * CTE is a fence: without it the planner inlines `j` into each CASE below and
+ * parses the blob once per reference instead of once per row, and it evaluates
+ * the scan only for the rows `source` selects (its own WHERE/JOIN filters run
+ * first), never for every project in the table.
+ */
+function overridesSql(source: string, onlyWithOwnValues = false): string {
+  return `WITH s AS MATERIALIZED (
+           SELECT ps.project_id AS project_id,
+                  CASE WHEN strpos(ps.settings, 'ViewMinRole') > 0 THEN ps.settings::jsonb END AS j
+             ${source}
+         )
+         SELECT project_id,
+                CASE WHEN jsonb_typeof(j -> 'rosterViewMinRole') = 'number'
+                     THEN j ->> 'rosterViewMinRole' END AS roster,
+                CASE WHEN jsonb_typeof(j -> 'memberProgressViewMinRole') = 'number'
+                     THEN j ->> 'memberProgressViewMinRole' END AS progress
+           FROM s${onlyWithOwnValues ? "\n          WHERE j IS NOT NULL" : ""}`
+}
 
 interface OverrideRow { project_id: string; roster: string | null; progress: string | null }
 
@@ -93,12 +109,7 @@ function overridesFromRow(row: OverrideRow): ProjectVisibilityOverrides {
 
 /**
  * Each project's own values, for every id asked about (a project with no
- * settings row, or none of its own, maps to nulls).
- *
- * The settings blob can run to megabytes (rules, living memory) and there is no
- * generated column for these keys, so the blob is parsed only when its text
- * names one of them: almost every project follows its org, and for those the
- * read is a substring scan rather than a JSON parse.
+ * settings row, or none of its own, maps to nulls). Looked up by primary key.
  */
 export async function loadProjectVisibilityOverrides(
   db: AquillaDb,
@@ -109,8 +120,8 @@ export async function loadProjectVisibilityOverrides(
   if (ids.length === 0) return out
   const { results } = await db
     .prepare(
-      `${OVERRIDES_SELECT}
-        WHERE ps.project_id IN (${ids.map(() => "?").join(", ")})`,
+      overridesSql(`FROM project_settings ps
+            WHERE ps.project_id IN (${ids.map(() => "?").join(", ")})`),
     )
     .bind(...ids)
     .all<OverrideRow>()
@@ -123,7 +134,8 @@ export async function loadProjectVisibilityOverrides(
 /**
  * The own values of every live (unarchived) project in an org that sets any —
  * for the org's "N projects are stricter" line. Projects that follow the org
- * on both are left out.
+ * on both are left out. Starts from the org's projects (idx_projects_org), so
+ * only this org's settings rows are ever opened.
  */
 export async function loadOrgProjectVisibilityOverrides(
   db: AquillaDb,
@@ -131,9 +143,12 @@ export async function loadOrgProjectVisibilityOverrides(
 ): Promise<Map<string, ProjectVisibilityOverrides>> {
   const { results } = await db
     .prepare(
-      `${OVERRIDES_SELECT}
-         JOIN projects p ON p.id = ps.project_id
-        WHERE p.org_id = ? AND p.archived_at IS NULL AND x.j IS NOT NULL`,
+      overridesSql(
+        `FROM projects p
+             JOIN project_settings ps ON ps.project_id = p.id
+            WHERE p.org_id = ? AND p.archived_at IS NULL`,
+        true,
+      ),
     )
     .bind(orgId)
     .all<OverrideRow>()

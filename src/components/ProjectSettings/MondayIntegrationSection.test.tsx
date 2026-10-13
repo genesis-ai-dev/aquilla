@@ -188,3 +188,32 @@ describe("MondayIntegrationSection", () => {
     expect(screen.queryByLabelText(/reconfigure with ai/i)).toBeNull()
   })
 })
+
+it("uses the project's connection status when organization metadata is unavailable", async () => {
+  mocked.fetchMondayLink.mockResolvedValue({ linked: false, orgConnected: true } as api.MondayLinkStatus)
+  mocked.fetchMondayConnection.mockRejectedValue(new Error("Organization membership required"))
+  renderSection()
+  fireEvent.click(await screen.findByTestId("monday-setup-with-ai"))
+  expect(await screen.findByRole("button", { name: "Scan and propose" })).toBeTruthy()
+  expect(mocked.startMondayConnect).not.toHaveBeenCalled()
+})
+
+it("keeps a failed status check distinct from a disconnected organization", async () => {
+  mocked.fetchMondayLink.mockRejectedValue(new Error("Connection status unavailable"))
+  mocked.fetchMondayConnection.mockResolvedValue({ connected: false })
+  renderSection()
+  expect(await screen.findByRole("button", { name: /retry/i })).toBeTruthy()
+  expect(screen.queryByTestId("monday-setup-with-ai")).toBeNull()
+})
+
+it("refreshes organization authorization when returning from another tab", async () => {
+  mocked.fetchMondayLink.mockResolvedValue({ linked: false, orgConnected: false })
+  mocked.fetchMondayConnection.mockResolvedValue({ connected: false })
+  renderSection()
+  fireEvent.click(await screen.findByTestId("monday-setup-with-ai"))
+  expect(screen.getByRole("button", { name: "Connect and scan" })).toBeTruthy()
+  mocked.fetchMondayLink.mockResolvedValue({ linked: false, orgConnected: true })
+  mocked.fetchMondayConnection.mockResolvedValue({ connected: true })
+  fireEvent.focus(window)
+  expect(await screen.findByRole("button", { name: "Scan and propose" })).toBeTruthy()
+})

@@ -29,6 +29,7 @@ vi.mock("./sync-token-fetcher", () => ({
 
 import { getQueueState, MISSING_AUDIO_MESSAGE, startQueue, stopQueue } from "./play-queue"
 import { buildFrontierAudioUrl } from "./upload"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const session = { jwt: "jwt", username: "u" } as unknown as FrontierSession
 
@@ -57,7 +58,7 @@ describe("play-queue missing-clip behavior", () => {
     const cells = [missingCell("c0"), missingCell("c1")]
     startQueue({ cells, projectId: "p1", session }, 0, /* explicit */ true)
 
-    await vi.waitFor(() => expect(getQueueState().kind).toBe("error"))
+    await vi.waitFor(() => expect(getQueueState().kind).toBe("error"), { timeout: STALL_WATCHDOG_MS })
     const state = getQueueState()
     expect(state.kind === "error" && state.message).toBe(MISSING_AUDIO_MESSAGE)
     // Surfaced at the SELECTED clip (c0), not hopped forward to c1.
@@ -68,7 +69,7 @@ describe("play-queue missing-clip behavior", () => {
     const cells = [missingCell("c0"), missingCell("c1")]
     startQueue({ cells, projectId: "p1", session }, 0, /* explicit */ false)
 
-    await vi.waitFor(() => expect(getQueueState().kind).toBe("error"))
+    await vi.waitFor(() => expect(getQueueState().kind).toBe("error"), { timeout: STALL_WATCHDOG_MS })
     const state = getQueueState()
     expect(state.kind === "error" && state.message).toBe(MISSING_AUDIO_MESSAGE)
     // Skipped c0 → c1; surfaced on the LAST clip once nothing playable remained.

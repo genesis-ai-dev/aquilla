@@ -8,6 +8,9 @@ export type ErrorCode =
   | "validation_failed"
   | "exec_failed"
   | "too_large"
+  // AQU-1848: the container pool (or the caller's share of it) is saturated.
+  // 503 + Retry-After, because it is transient and the caller should come back.
+  | "pool_busy"
 
 const STATUS: Record<ErrorCode, number> = {
   unauthorized: 401,
@@ -15,6 +18,7 @@ const STATUS: Record<ErrorCode, number> = {
   validation_failed: 400,
   exec_failed: 500,
   too_large: 413,
+  pool_busy: 503,
 }
 
 export class ApiError extends Error {

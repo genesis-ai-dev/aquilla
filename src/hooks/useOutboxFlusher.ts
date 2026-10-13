@@ -1,6 +1,11 @@
 import { useEffect, useState, useRef, useCallback } from "react"
 import { flushOutboxBatch, type StaleSiblingEntry, type TokenMintResult } from "@/lib/sync/outbox-flush"
 import {
+  ONLINE_FLUSH_SPREAD_MS,
+  staggerMs,
+  withJitter,
+} from "@/lib/sync/backoff"
+import {
   outboxPendingCount,
   outboxFailedCount,
   subscribeToOutbox,
@@ -57,6 +62,9 @@ export async function drainFlushTargets(
   retryStates: Map<string, TargetRetryState>,
   flush: (target: OutboxFlushTarget) => Promise<FlushResult>,
   now: () => number = Date.now,
+  /** AQU-1838: injectable so the jitter on the per-owner retry delay is
+   *  assertable; production passes Math.random. */
+  random: () => number = Math.random,
 ): Promise<DrainCycleResult> {
   let madeProgress = false
   let postedAny = false
@@ -95,9 +103,17 @@ export async function drainFlushTargets(
       const failedHard = result.authError || (result.posted > 0 && !progressed)
       if (failedHard) {
         retry.failures = Math.min(8, retry.failures + 1)
+        // AQU-1838: ±30% so two clients that failed on the same server fault
+        // do not come back in step and re-create the burst that caused it.
+        // Clamped after jittering: the ceiling is a ceiling, so at the top of
+        // the schedule the scatter only ever pulls a retry earlier.
         retry.nextAttemptAt = now() + Math.min(
           MAX_BACKOFF_MS,
-          BASE_INTERVAL_MS * (2 ** retry.failures),
+          withJitter(
+            Math.min(MAX_BACKOFF_MS, BASE_INTERVAL_MS * (2 ** retry.failures)),
+            undefined,
+            random,
+          ),
         )
         continue
       }
@@ -422,7 +438,14 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
         async () => {
           while (!ac.signal.aborted) {
             const mult = Math.min(MAX_BACKOFF_MS / BASE_INTERVAL_MS, 2 ** backoffExp.current)
-            const delay = Math.min(MAX_BACKOFF_MS, BASE_INTERVAL_MS * Math.max(1, mult))
+            // AQU-1838: ±30% jitter, on the idle 5s cadence as much as on the
+            // backed-off one — a fleet that mounted together otherwise keeps
+            // flushing together for the whole session. Clamped after jittering
+            // so the documented 60s ceiling still holds.
+            const delay = Math.min(
+              MAX_BACKOFF_MS,
+              withJitter(Math.min(MAX_BACKOFF_MS, BASE_INTERVAL_MS * Math.max(1, mult))),
+            )
             // Interruptible sleep: flushNow() (Retry / reconnect / re-auth)
             // resolves this early so a recovered session doesn't wait out a
             // 60s backoff before draining.
@@ -455,11 +478,24 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
   useEffect(() => {
     if (!options.enabled) return
     if (typeof window === "undefined") return
+    // AQU-1838: `online` fires on every client at once when a shared outage
+    // or a deploy ends, and answering it with an immediate flush turned that
+    // into one burst of /events POSTs. Stagger the drain across a few seconds;
+    // nobody is waiting on it, and a user-visible path (Retry, re-auth) still
+    // calls flushNow() directly with no delay.
+    let staggerTimer: ReturnType<typeof setTimeout> | null = null
     const onOnline = () => {
-      void requeueTransientForEligibleOwners().then(() => flushNow())
+      if (staggerTimer !== null) return
+      staggerTimer = setTimeout(() => {
+        staggerTimer = null
+        void requeueTransientForEligibleOwners().then(() => flushNow())
+      }, staggerMs(ONLINE_FLUSH_SPREAD_MS))
     }
     window.addEventListener("online", onOnline)
-    return () => window.removeEventListener("online", onOnline)
+    return () => {
+      window.removeEventListener("online", onOnline)
+      if (staggerTimer !== null) clearTimeout(staggerTimer)
+    }
   }, [options.enabled, flushNow, requeueTransientForEligibleOwners])
 
   // Auth identity changed (sign-in / re-auth / account switch) → a previously

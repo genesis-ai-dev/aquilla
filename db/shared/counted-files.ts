@@ -127,3 +127,65 @@ export function inCountedFileSetSql(alias: string, probe = 'uncounted'): string 
        AND ${probe}.project_id = ${alias}.project_id
   )`
 }
+
+/**
+ * The AUDIO form of `inCountedFileSql`: whose RECORDINGS count. (AQU-1566)
+ *
+ * Deleted files and caption-track content are out, as above, but the
+ * `audio-cues` cue sheet stays IN. A dubbing project does not record against
+ * its subtitles: every take hangs off a CUE cell in that hidden sheet
+ * (AQU-1278; see `readPlanUnitsSql` in plan-units.ts, which measures audio
+ * against the sheet for the same reason). Applying the text rule here would
+ * read every dubbed episode as 0% recorded on OrgHome while the plan board,
+ * on the same screen, showed its real coverage.
+ *
+ * Use it for every set that describes recordings, and for the structural
+ * subtractor taken off them, so the two always name the same files. The
+ * matching denominator is the cue sheet's own cell count (the portfolio's
+ * `cue` join), never the text total.
+ *
+ * Same NOT EXISTS direction as `inCountedFileSql`: a take whose `files` row is
+ * missing stays counted.
+ */
+export function inAudioCountedFileSql(alias: string, probe = 'uncounted_audio_file'): string {
+  return `NOT EXISTS (
+    SELECT 1 FROM files ${probe}
+     WHERE ${probe}.id = ${alias}.file_id
+       AND ${probe}.project_id = ${alias}.project_id
+       AND ${uncountedAudioFileSql(probe)}
+  )`
+}
+
+/** "`<alias>` is a file whose RECORDINGS are not work": deleted, or a linked
+ *  video's caption-track content. The cue sheet is not in it. */
+function uncountedAudioFileSql(alias: string): string {
+  return `(${alias}.deleted_at IS NOT NULL
+            OR COALESCE(${alias}.role, '') = 'timeline-content')`
+}
+
+/**
+ * The SET form of `inAudioCountedFileSql`, for the same reason
+ * `inCountedFileSetSql` exists: the org dashboard's audio rollup filters every
+ * selected dub take on the page, and a per-row probe there is what took it
+ * past the SPA's 15s abort. Same two halves: the CTE in the WITH list, scoped
+ * to the projects the statement is already bounded to, and the anti-join where
+ * the probe would go.
+ */
+export const UNCOUNTED_AUDIO_FILES_CTE = 'uncounted_audio_files'
+
+export function uncountedAudioFilesCteSql(projectScopeSql: string): string {
+  return `${UNCOUNTED_AUDIO_FILES_CTE} AS MATERIALIZED (
+       SELECT uaf.project_id, uaf.id AS file_id
+         FROM files uaf
+        WHERE uaf.project_id IN (${projectScopeSql})
+          AND ${uncountedAudioFileSql('uaf')}
+     )`
+}
+
+export function inAudioCountedFileSetSql(alias: string, probe = 'uncounted_audio'): string {
+  return `NOT EXISTS (
+    SELECT 1 FROM ${UNCOUNTED_AUDIO_FILES_CTE} ${probe}
+     WHERE ${probe}.file_id = ${alias}.file_id
+       AND ${probe}.project_id = ${alias}.project_id
+  )`
+}

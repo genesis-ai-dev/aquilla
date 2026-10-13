@@ -50,7 +50,7 @@ export async function handleMigrateCellIdsRequest(
     `SELECT cell_id,
             MAX(CASE WHEN side = 'source' THEN 1 ELSE 0 END) AS has_source,
             MAX(CASE WHEN side = 'target' THEN 1 ELSE 0 END) AS has_target,
-            MAX(CASE WHEN side = 'source' AND target_lang = '' THEN anchor_cell_id END) AS source_anchor_cell_id
+            MAX(CASE WHEN side = 'source' THEN anchor_cell_id END) AS source_anchor_cell_id
      FROM cells
      WHERE project_id = ? AND file_id = ? AND cell_id > ?
      GROUP BY cell_id

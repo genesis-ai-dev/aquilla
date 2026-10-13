@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import type { ImportResult } from "@/lib/import"
+import { UsfmStructureFindings } from "@/components/import/UsfmStructureFindings"
 import { formatBytesProgress } from "@/lib/format-bytes"
 import {
   defaultEpubSkipMemberPaths,
@@ -216,6 +217,9 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
                     {t("importExport.preview.recipeNote", { name: r.importClassification.recipe.name })}
                   </p>
                 </div>
+              ) : null}
+              {r.structureFindings?.length ? (
+                <UsfmStructureFindings findings={r.structureFindings} />
               ) : null}
               {r.importNotices?.length ? (
                 <div className="mb-3 flex flex-col gap-1.5 rounded-md border bg-muted/40 px-3 py-2 text-xs" data-testid="import-preview-notices">

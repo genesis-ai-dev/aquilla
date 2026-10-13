@@ -172,6 +172,15 @@ mcpOAuthPublicRoutes.get("/.well-known/oauth-authorization-server/*", (c) => {
   return c.json(authorizationServerMetadata(issuer), 200, { "Cache-Control": "public, max-age=300" })
 })
 
+// OpenAI's plugin portal proves we own the MCP host by fetching this path and
+// expecting its one-time token as the whole plain-text body. The token comes
+// from the portal at submission time, so it is a secret, not code; unset → 404.
+mcpOAuthPublicRoutes.get("/.well-known/openai-apps-challenge", (c) => {
+  const token = c.env.OPENAI_APPS_CHALLENGE?.trim()
+  if (!token) return c.text("not found", 404)
+  return c.text(token, 200, { "Cache-Control": "no-store" })
+})
+
 // The consent UI lives in the SPA (sign-in, organization selection). Pass the request
 // through untouched; the SPA posts it back to /api/v2/mcp-oauth/* for
 // validation, so nothing here trusts the client yet.

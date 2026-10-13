@@ -46,8 +46,7 @@ async function commit(cellId: string, id: string, parentId: string | null, value
 
 async function cell(cellId: string, side: "source" | "target", value: string, opts: { validated?: number; aiDrafted?: number } = {}) {
   await env.AQUILLA_PG.prepare(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, target_lang, lane_id, validated, ai_drafted)
-     VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, lane_id, validated, ai_drafted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).bind(PROJECT_ID, FILE, cellId, side, value, `ev-${cellId}-${side}`, Date.now(), side === "source" ? "lane-src" : "lane-default", opts.validated ?? 0, opts.aiDrafted ?? 0).run()
 }
 

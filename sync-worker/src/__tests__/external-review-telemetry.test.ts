@@ -178,7 +178,7 @@ async function seedTarget(tdb: TestDb, cellId: string, eventId: string, value = 
 }
 
 function validate(cellId: string) {
-  return { kind: 'cell.validate', fileId: FILE, cellId }
+  return { kind: 'cell.validate', fileId: FILE, cellId, laneId: 'deflane1' }
 }
 
 /** No text, file name, artifact id, audio id or URL — in any property. */
@@ -204,6 +204,11 @@ beforeEach(async () => {
       value: SOURCE_TEXT, event_id: `src-evt-${i + 1}`, last_edit_at: 1,
     })),
   })
+  await tdb.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', $1, 'target', '', 1)`,
+    [PROJECT],
+  )
 })
 
 afterEach(() => {
@@ -336,7 +341,7 @@ describe('review telemetry — EmitEvents commits', () => {
         medium: 'text',
         project_id: PROJECT,
         file_id: FILE,
-        lane: '',
+        lane: 'deflane1',
         source: 'api',
         auto: false,
         surface: 'api',
@@ -359,7 +364,7 @@ describe('review telemetry — EmitEvents commits', () => {
     const { body: prep } = await prepare(env, reviewer.token, [
       {
         kind: 'EmitEvents',
-        events: [{ kind: 'cell.unvalidate', fileId: FILE, cellId: 'cell-1' }, validate(UUID_CELL)],
+        events: [{ kind: 'cell.unvalidate', fileId: FILE, cellId: 'cell-1', laneId: 'deflane1' }, validate(UUID_CELL)],
       },
     ])
     const { res } = await commit(env, reviewer.token, prep.changeset.id)

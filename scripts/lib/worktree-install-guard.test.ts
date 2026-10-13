@@ -30,7 +30,10 @@ function realNodeModules(worktree: string, relative = "node_modules"): void {
 function linkNodeModules(worktree: string, relative: string, target: string): void {
   const link = path.join(worktree, relative)
   mkdirSync(path.dirname(link), { recursive: true })
-  symlinkSync(target, link)
+  // A directory symlink needs Developer Mode or an elevated shell on Windows.
+  // A junction is a directory link that does not, and lstat still reports it
+  // as a symlink, which is what the guard checks.
+  symlinkSync(target, link, process.platform === "win32" ? "junction" : "dir")
 }
 
 describe("borrowed node_modules", () => {
@@ -77,7 +80,12 @@ describe("borrowed node_modules", () => {
 
   it("refuses a dangling symlink", () => {
     const worktree = temp("aquilla-wt-")
-    linkNodeModules(worktree, "node_modules", path.join(worktree, "missing-target"))
+    const target = path.join(worktree, "missing-target")
+    // Windows junctions can only be created against a directory that exists.
+    // Removing it afterwards leaves the same dangling link the guard rejects.
+    mkdirSync(target)
+    linkNodeModules(worktree, "node_modules", target)
+    rmSync(target, { recursive: true, force: true })
     expect(borrowedNodeModulesMessage(worktree, readNodeModulesPlacements(worktree))).toMatch(/dangling symlink/)
   })
 })

@@ -22,60 +22,81 @@
 // any Postgres user and the GUC is readable via current_setting().
 
 import { describe, it, expect, beforeAll } from "vitest"
-import { pg, env } from "./helpers/pg-test-env"
+import { pg } from "./helpers/pg-test-env"
 import { PostgresDb, type PgExecutor } from "../../../db/shim/postgres"
 import { rewriteTestLaneResolve } from "../../../db/shared/test-lane-fill"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
 
-// ─── Load the RLS migration into the test database ───────────────────────────
-// The setup-migrations.ts already loads schema.sql.  We additionally load the
-// RLS migration here so the app_user_can_access_project function is present.
+// ─── Replay the RLS migrations into the test database ────────────────────────
+// pg-test-env.ts loads schema.sql, which carries no RLS DDL at all — policies
+// live only in migrations, and scripts/rls-coverage.test.ts folds them in from
+// there. So the function and policies under test are replayed here from the
+// four migrations that installed them.
+//
+// A historical migration does not necessarily replay cleanly on today's
+// schema: 0074 also created an index on contextual_runs.target_lang, which
+// 0151 re-keyed on lane_id and 0155 dropped. Until AQU-1881 that one statement
+// aborted the whole 0074 replay inside a swallowed try/catch, so RLS never
+// came on, 0136 never ran, and five tests failed on `relrowsecurity: false`
+// instead of on the real error. The replay now strips exactly the statements a
+// later migration superseded (and fails if one is no longer there to strip),
+// and any other error is fatal and names the file.
 
-const RLS_MIGRATION = readFileSync(
-  path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "../../../db/postgres/migrations/0034_rls_backstop.sql",
-  ),
-  "utf8",
+const MIGRATIONS_DIR = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../db/postgres/migrations",
 )
-const ORG_WIDE_FLOOR_MIGRATION = readFileSync(
-  path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "../../../db/postgres/migrations/0083_org_wide_access_floor.sql",
-  ),
-  "utf8",
-)
-const CONTEXTUAL_ACTIVITY_MIGRATION = readFileSync(
-  path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "../../../db/postgres/migrations/0074_contextual_run_events.sql",
-  ),
-  "utf8",
-)
-const CONTEXTUAL_TRACES_RLS_MIGRATION = readFileSync(
-  path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "../../../db/postgres/migrations/0136_contextual_run_traces_rls.sql",
-  ),
-  "utf8",
-)
+
+/**
+ * Statements in a replayed migration that a later migration superseded, so
+ * they cannot run against schema.sql any more. None of them is what this file
+ * tests. Each pattern must still match its file: a strip for a statement that
+ * is gone would hide the next drift exactly the way the old try/catch did.
+ */
+const SUPERSEDED_STATEMENTS: Record<string, ReadonlyArray<{ reason: string; pattern: RegExp }>> = {
+  "0074_contextual_run_events.sql": [
+    {
+      reason:
+        "contextual_runs_project_lane_time was re-keyed on lane_id by 0151 and " +
+        "its target_lang column dropped by 0155",
+      pattern:
+        /CREATE INDEX IF NOT EXISTS contextual_runs_project_lane_time\s+ON contextual_runs\([^;]*\btarget_lang\b[^;]*\);\n?/,
+    },
+  ],
+}
+
+function replayableMigration(file: string): string {
+  let sql = readFileSync(path.join(MIGRATIONS_DIR, file), "utf8")
+  for (const { reason, pattern } of SUPERSEDED_STATEMENTS[file] ?? []) {
+    if (!pattern.test(sql)) {
+      throw new Error(
+        `[rls-backstop] ${file} no longer contains the statement stripped because ${reason} — drop the strip`,
+      )
+    }
+    sql = sql.replace(pattern, "")
+  }
+  return sql
+}
+
+const RLS_MIGRATIONS = [
+  "0034_rls_backstop.sql",
+  "0083_org_wide_access_floor.sql",
+  "0074_contextual_run_events.sql",
+  "0136_contextual_run_traces_rls.sql",
+] as const
 
 beforeAll(async () => {
-  // Execute the RLS migration into the shared PGlite.
-  // PGlite will parse CREATE ROLE (idempotent DO block), GRANT, CREATE POLICY,
-  // and ENABLE ROW LEVEL SECURITY.  The DDL succeeds; role-level filtering
-  // is not enforced by PGlite but the SQL function is available.
-  try {
-    await pg.exec(RLS_MIGRATION)
-    await pg.exec(ORG_WIDE_FLOOR_MIGRATION)
-    await pg.exec(CONTEXTUAL_ACTIVITY_MIGRATION)
-    await pg.exec(CONTEXTUAL_TRACES_RLS_MIGRATION)
-  } catch (e) {
-    // If PGlite rejects a specific clause (e.g. FORCE ROW LEVEL SECURITY or
-    // policy syntax), log the error and continue — we still get function tests.
-    console.warn("[rls-backstop] RLS migration partial failure (expected on some PGlite versions):", String(e))
+  // PGlite accepts the CREATE ROLE (idempotent DO block), GRANT, CREATE POLICY
+  // and ENABLE/FORCE ROW LEVEL SECURITY DDL; role-level enforcement is what
+  // the contextual tests below then exercise with SET ROLE app_runtime.
+  for (const file of RLS_MIGRATIONS) {
+    try {
+      await pg.exec(replayableMigration(file))
+    } catch (error) {
+      throw new Error(`[rls-backstop] replaying ${file} failed: ${String(error)}`, { cause: error })
+    }
   }
 })
 

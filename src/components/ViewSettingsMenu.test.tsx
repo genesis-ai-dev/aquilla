@@ -18,6 +18,11 @@ import {
   setHealthScoreColorCoding,
 } from "@/lib/store/health-score-color-coding-pref"
 import {
+  getVisibleStyleSegments,
+  resetVisibleStyleSegmentsCacheForTests,
+  setVisibleStyleSegments,
+} from "@/lib/store/visible-style-segments-pref"
+import {
   __resetLowMemoryForTests,
   getLowMemoryMode,
   isLowMemoryActive,
@@ -73,6 +78,8 @@ beforeEach(() => {
   setUnresolvedCommentHighlight(false)
   resetHealthScoreColorCodingCacheForTests()
   setHealthScoreColorCoding(false)
+  resetVisibleStyleSegmentsCacheForTests()
+  setVisibleStyleSegments(false)
   setLowMemoryMode("auto")
   __resetLowMemoryForTests()
 })
@@ -101,6 +108,22 @@ describe("ViewSettingsMenu popover", () => {
 
     fireEvent.click(screen.getByRole("switch", { name: /Show line numbers/i }))
     expect(handlers.onLineNumbersChange).toHaveBeenCalledWith(false)
+    expect(screen.getByTestId("view-settings-popover")).toBeTruthy()
+  })
+
+  it("scrolls the settings list and toggles visible style segments", () => {
+    renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const scroller = screen.getByTestId("view-settings-scroller")
+    expect(scroller.className).toContain("overflow-y-auto")
+
+    const toggle = screen.getByRole("switch", { name: "Visible style segments" })
+    expect(toggle).not.toBeChecked()
+    fireEvent.click(toggle)
+
+    expect(screen.getByRole("switch", { name: "Visible style segments" })).toBeChecked()
+    expect(getVisibleStyleSegments()).toBe(true)
     expect(screen.getByTestId("view-settings-popover")).toBeTruthy()
   })
 

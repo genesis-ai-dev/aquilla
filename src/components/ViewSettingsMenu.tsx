@@ -37,6 +37,10 @@ import {
   useHealthScoreColorCoding,
 } from "@/lib/store/health-score-color-coding-pref"
 import {
+  setVisibleStyleSegments,
+  useVisibleStyleSegments,
+} from "@/lib/store/visible-style-segments-pref"
+import {
   setLowMemoryMode,
   useLowMemoryMode,
   type LowMemoryMode,
@@ -143,6 +147,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   // ProjectWorkspace would be two more parameters carrying no extra meaning.
   const highlightUnresolvedComments = useUnresolvedCommentHighlight()
   const healthScoreColorCoding = useHealthScoreColorCoding()
+  const visibleStyleSegments = useVisibleStyleSegments()
   const lowMemoryMode = useLowMemoryMode()
   const mismatch = useMemo(
     () =>
@@ -308,13 +313,14 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
           side="bottom"
           sideOffset={4}
           data-testid="view-settings-popover"
-          className="w-72"
+          className="w-72 overflow-hidden"
         >
           <PopoverTitle className="sr-only">{t("editor.view.settings")}</PopoverTitle>
-
+          {/* The panel is taller than a laptop screen. This is a block scroller,
+              not a flex column, so the rows overflow instead of shrinking away. */}
           <div
             data-testid="view-settings-scroller"
-            className="max-h-[min(32rem,calc(100dvh-5rem))] w-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-y-contain"
+            className="max-h-[min(32rem,calc(100dvh-5rem))] w-full min-h-0 min-w-0 space-y-2.5 overflow-x-hidden overflow-y-auto overscroll-y-contain"
           >
           <FieldGroup className="gap-3">
             <SwitchRow
@@ -364,6 +370,12 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
               checked={healthScoreColorCoding}
               disabled={!fileOpen}
               onCheckedChange={setHealthScoreColorCoding}
+            />
+            <SwitchRow
+              id="view-visible-style-segments"
+              label={t("editor.view.visibleStyleSegments")}
+              checked={visibleStyleSegments}
+              onCheckedChange={setVisibleStyleSegments}
             />
           </FieldGroup>
 

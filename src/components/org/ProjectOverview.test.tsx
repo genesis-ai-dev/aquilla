@@ -41,7 +41,25 @@ vi.mock("./ProjectAutopilotPanel", () => ({
 
 const useProject = vi.fn()
 const refresh = vi.fn()
-vi.mock("@/hooks/useProject", () => ({ useProject: (...a: unknown[]) => useProject(...a) }))
+// AQU-1771: the overview waits for the project's settings before it trusts the
+// visibility floors. A test that does not hand one in gets a loaded response
+// that carries no org policy (the org-settings mock decides), read-only.
+const LOADED_PROJECT_SETTINGS = {
+  hasFetched: true,
+  canEdit: false,
+  settings: {},
+  orgPolicy: null,
+  visibilityFloors: null,
+  patch: vi.fn(async () => ({ kind: "ok" as const })),
+}
+vi.mock("@/hooks/useProject", () => ({
+  useProject: (...a: unknown[]) => {
+    const result = useProject(...a) as Record<string, unknown> | undefined
+    return result && !("projectSettings" in result)
+      ? { ...result, projectSettings: LOADED_PROJECT_SETTINGS }
+      : result
+  },
+}))
 
 // AQU-1277: the PM picker calls useProjectMembers, which fetches
 // /api/v2/projects/:id/members. Unmocked that reached production identity for
@@ -332,6 +350,7 @@ function projectSettingsMock({
     return { org, project, effective: project ?? org }
   }
   return {
+    hasFetched: true,
     canEdit,
     settings: {
       ...(rosterOwn != null ? { rosterViewMinRole: rosterOwn } : {}),
@@ -1541,6 +1560,22 @@ describe("ProjectOverview Members card (AQU-1171)", () => {
 
     choose(await screen.findByRole("option", { name: "Maintainers and owners (org default)" }))
     await waitFor(() => expect(settings.patch).toHaveBeenCalledWith({ rosterViewMinRole: undefined }))
+  })
+
+  it("shows neither card until the project's own settings arrive, so nothing flashes open", async () => {
+    // The org's floor (Maintainer) would admit this maintainer; the project's
+    // settings, still loading, may close the list to owners.
+    useProject.mockReturnValue({
+      project: projectRecord({ level: ROLE.MAINTAINER }),
+      status: "ready",
+      refresh,
+      projectSettings: { ...projectSettingsMock(), hasFetched: false, orgPolicy: null, visibilityFloors: null },
+    })
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    expect(screen.queryByTestId("overview-members-card")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("overview-team-card")).not.toBeInTheDocument()
   })
 
   it("hides the card from a maintainer once this project raised its member list to owners", async () => {

@@ -97,8 +97,17 @@ export function resolveProjectPolicy(input: {
   org: OrgSettingsFallback
   /** The caller's project-resolved role. */
   roleLevel: number | null | undefined
+  /**
+   * Whether the project's settings response has arrived. Surfaces that gate
+   * on the floors pass it for a synced project: the project's own stricter
+   * value comes only with that response, so treating the org's floor alone as
+   * known would show a Members or Team frame to a maintainer for a moment
+   * before an Owners-only project hides it. Omitted, nothing waits on it.
+   */
+  projectSettingsFetched?: boolean
 }): ResolvedProjectPolicy {
   const { orgPolicy, visibilityFloors, projectSettings, org, roleLevel } = input
+  const projectSettingsFetched = input.projectSettingsFetched ?? true
   if (orgPolicy && visibilityFloors) {
     const exportMinRole = orgPolicy.exportMinRole
     return {
@@ -115,7 +124,7 @@ export function resolveProjectPolicy(input: {
     }
   }
   return {
-    ready: org.hasFetched,
+    ready: org.hasFetched && projectSettingsFetched,
     carried: false,
     rosterViewMinRole: floorView(org.rosterViewMinRole, projectSettings?.rosterViewMinRole),
     memberProgressViewMinRole: floorView(

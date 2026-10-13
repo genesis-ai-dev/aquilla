@@ -544,6 +544,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     projectSettings: sharedSettingsBlob,
     org: orgSettingsForProject,
     roleLevel: project?.syncRole?.level ?? null,
+    // A synced project's own stricter floor arrives with its settings.
+    projectSettingsFetched: !isCloudProject || sharedSettingsFetched,
   })
   const orgAutoPropagateRepetitions = projectPolicy.autoPropagateRepetitions
   const canViewRoster =

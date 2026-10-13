@@ -117,6 +117,19 @@ describe("resolveProjectPolicy — fallback to the org read (older server)", () 
     expect(policy.memberProgressViewMinRole).toEqual({ org: 600, project: null, effective: 600 })
   })
 
+  it("is not ready, on a synced project, before the project's own settings land", () => {
+    // The org read alone says Maintainer; the project may still be stricter.
+    const policy = resolveProjectPolicy({
+      orgPolicy: null,
+      visibilityFloors: null,
+      projectSettings: null,
+      org: readOrg,
+      roleLevel: 600,
+      projectSettingsFetched: false,
+    })
+    expect(policy.ready).toBe(false)
+  })
+
   it("is not ready before the org read lands", () => {
     const policy = resolveProjectPolicy({
       orgPolicy: null,

@@ -596,6 +596,9 @@ export function ProjectOverview() {
   const carriedOrgPolicy = projectSettings?.orgPolicy
   const carriedVisibilityFloors = projectSettings?.visibilityFloors
   const projectSettingsBlob = projectSettings?.settings
+  // The floors are not known until the project's own settings arrive: a
+  // project may be stricter than its org, and only that response says so.
+  const projectSettingsFetched = projectSettings?.hasFetched ?? false
   const projectPolicy = useMemo(
     () => resolveProjectPolicy({
       orgPolicy: carriedOrgPolicy,
@@ -603,8 +606,9 @@ export function ProjectOverview() {
       projectSettings: projectSettingsBlob,
       org: orgSettings,
       roleLevel: projectRoleLevel,
+      projectSettingsFetched,
     }),
-    [carriedOrgPolicy, carriedVisibilityFloors, projectSettingsBlob, orgSettings, projectRoleLevel],
+    [carriedOrgPolicy, carriedVisibilityFloors, projectSettingsBlob, orgSettings, projectRoleLevel, projectSettingsFetched],
   )
   // Primitives, so the memos below depend on values rather than on the
   // policy object (a new one every render).

@@ -17,18 +17,25 @@ export function mapLayerToProject<T>(layer: T): T {
   return layer
 }
 
-const WORD_ID_RE = /^n(\d{2})(\d{3})(\d{3})\d{3}$/
+/**
+ * An SBLGNT word, or (pack 1.2.0, AQU-1700) a Macula Hebrew morpheme: one
+ * more digit for the morpheme, and "ה" for an implied article that Macula
+ * split off ("o080010010071ה").
+ */
+const WORD_ID_RE = /^(?:n\d{2}(\d{3})(\d{3})\d{3}|o\d{2}(\d{3})(\d{3})\d{4}\u05D4?)$/
 
 /**
  * The verse a pack word is in (AQU-1689). A word id is "n" + book(2) +
- * chapter(3) + verse(3) + word(3), so "n43004010024" is in JHN 4:10. The
- * people layer is keyed by word id alone, with no verse map to re-key, so its
- * mentions find their verse through this. The ref is ORG, which is what
- * `mapLayerToProject` gives every layer today; when that mapping lands, map
- * this ref through it as well.
+ * chapter(3) + verse(3) + word(3), so "n43004010024" is in JHN 4:10; an OT
+ * morpheme id is "o" + the same + morpheme(1), so "o080010160052" is in
+ * RUT 1:16. The people layer is keyed by word id alone, with no verse map to
+ * re-key, so its mentions find their verse through this. The ref is ORG,
+ * which is what `mapLayerToProject` gives every layer today; when that
+ * mapping lands, map this ref through it as well.
  */
 export function refOfWord(book: string, wordId: string): string | null {
   const match = WORD_ID_RE.exec(wordId)
   if (!match) return null
-  return `${book} ${Number(match[2])}:${Number(match[3])}`
+  const [chapter, verse] = match[1] !== undefined ? [match[1], match[2]] : [match[3], match[4]]
+  return `${book} ${Number(chapter)}:${Number(verse)}`
 }

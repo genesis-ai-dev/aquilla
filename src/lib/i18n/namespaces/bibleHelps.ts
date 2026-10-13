@@ -60,6 +60,7 @@ export const bibleHelps = defineNamespace({
     "bibleHelps.terms.chipAria": "Key term: {title}",
     "bibleHelps.terms.fromTw": "From unfoldingWord Translation Words",
     "bibleHelps.terms.fromAcai": "From the ACAI key terms",
+    "bibleHelps.terms.traditionalCharacters": "In Traditional characters",
 
     // ── The chain behind a pronoun, in the Context tab ──
     "bibleHelps.context.via": "via {words}",
@@ -143,6 +144,12 @@ export const bibleHelps = defineNamespace({
       },
       "bibleHelps.terms.fromAcai": {
         description: "Line in a key term's popover: the term comes from ACAI's list of key terms.",
+      },
+      "bibleHelps.terms.traditionalCharacters": {
+        description:
+          "Line in a key term's popover, for Chinese only: the data has the term's title in " +
+          "Traditional characters but not in Simplified ones, so a Simplified Chinese interface " +
+          "shows the Traditional title.",
       },
       "bibleHelps.context.via": {
         description:

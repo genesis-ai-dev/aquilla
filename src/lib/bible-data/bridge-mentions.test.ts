@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
-import { SOLID_MIN_PAIRS } from "./bridge-compose"
+import { jhn4Text } from "./__fixtures__/jhn4"
+import { ME_1_16, rutText } from "./__fixtures__/ot-pack12"
+import { alwaysDottedWords, SOLID_MIN_PAIRS } from "./bridge-compose"
 import { directTokenLinks, EXACT_PAIRS, spansFromLinks, targetSpans, wordsFromSpans } from "./bridge-mentions"
 
 // JHN 4:7, BSB: "… Jesus said to her, “Give Me a drink.”" (tokens 8–15).
@@ -68,5 +70,35 @@ describe("from token links to the words Who's Who draws", () => {
     )
     // 0.81 is confident, but Bridge 2 learned from only 30 verses.
     expect(spans).toEqual([{ wordId: JESUS, firstToken: 0, lastToken: 0, conf: 0.9 * 0.9, approximate: true }])
+  })
+})
+
+// AQU-1700: Hebrew pronouns (suffixes such as the ־ִי "me" of בִּי) are placed
+// by the aligner less reliably than AQU-1694's bar for a solid tint, so they
+// draw dotted whatever their confidence. Greek pronouns, and Hebrew names,
+// keep the confidence rule. Real pack words decide which is which.
+describe("OT pronouns always draw dotted", () => {
+  const hebrew = alwaysDottedWords(rutText())
+  const greek = alwaysDottedWords(jhn4Text())
+  const RUTH_NAME_1_16 = "o080010160021" // רוּת
+
+  it("draws RUT 1:16's suffix 'me' dotted at confidence 0.9, and John's μοι solid", () => {
+    const [me] = spansFromLinks([{ wordId: ME_1_16, token: 6, conf: 0.9 }], SOLID_MIN_PAIRS, everyone, hebrew)
+    expect(me.approximate).toBe(true)
+    const [moi] = spansFromLinks([{ wordId: MOI, token: 13, conf: 0.9 }], SOLID_MIN_PAIRS, everyone, greek)
+    expect(moi.approximate).toBe(false)
+  })
+
+  it("keeps a Hebrew name solid at confidence 0.9: the rule is for pronouns only", () => {
+    const [ruth] = spansFromLinks([{ wordId: RUTH_NAME_1_16, token: 1, conf: 0.9 }], SOLID_MIN_PAIRS, everyone, hebrew)
+    expect(ruth.approximate).toBe(false)
+  })
+
+  it("draws the suffix dotted on the target too, through both bridges", () => {
+    const bridge2 = { links: [{ src: 6, tgt: 2, conf: 0.95 }], trainedPairs: 300 }
+    const [me] = targetSpans({ links: [{ wordId: ME_1_16, token: 6, conf: 1 }], trainedPairs: EXACT_PAIRS }, bridge2, everyone, hebrew)
+    expect(me).toMatchObject({ wordId: ME_1_16, approximate: true })
+    const [moi] = targetSpans({ links: [{ wordId: MOI, token: 6, conf: 1 }], trainedPairs: EXACT_PAIRS }, bridge2, everyone, greek)
+    expect(moi).toMatchObject({ wordId: MOI, approximate: false })
   })
 })

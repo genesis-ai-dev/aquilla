@@ -6,6 +6,10 @@
 // AQU-1695: pack 1.1.0 (`notes`, `terms`, and `via`, `descriptions`, `kin`
 // and `local-thing` in `people`), plus the two optional fields pack slice 3
 // will add (a deity mention's `form`, a speech's `disputed`).
+// AQU-1700: pack 1.2.0 (slice 3) adds the 39 Old Testament books, keyed by
+// Macula Hebrew morpheme, with the Hebrew fields of `BkpWord`, and builds
+// `form` and `disputed`. Its label maps use one key scheme (see
+// voice-labels.ts): `cmn` is Traditional Chinese, `cmn-Hans` Simplified.
 //
 // The SPA checks each file's envelope only: the right kind of object, for the
 // right book, with the top-level fields its layer needs. That is enough to
@@ -17,7 +21,12 @@
 
 import type { BkpLayer } from "../../../db/shared/bible-enrichments"
 
-/** Macula SBLGNT word id: "n" + book(2) + chapter(3) + verse(3) + word(3), e.g. "n43004007012". */
+/**
+ * Macula SBLGNT word id: "n" + book(2) + chapter(3) + verse(3) + word(3), e.g.
+ * "n43004007012". In the OT (pack 1.2.0) a Macula Hebrew morpheme id: "o" +
+ * the same + morpheme(1), e.g. "o080010160052" (the suffix of בִּי, RUT 1:16);
+ * an implied article Macula split off adds "ה" ("o080010010071ה").
+ */
 export type BkpWordId = string
 /** USFM book code + chapter:verse in ORG versification, e.g. "JHN 4:7". */
 export type BkpRef = string
@@ -25,6 +34,7 @@ export type BkpRef = string
 export type BkpEntityId = string
 
 export interface BkpWord {
+  /** Empty for a Hebrew implied article, which has no letters of its own. */
   text: string
   after: string
   lemma: string
@@ -41,6 +51,11 @@ export interface BkpWord {
   tense?: string
   voice?: string
   strong?: string
+  /** Hebrew (pack 1.2.0): the noun's state ("construct") and the verb's stem ("qal"). */
+  state?: string
+  stem?: string
+  /** "A" for an Aramaic morpheme (pack 1.2.0); Hebrew ones and Greek words have none. */
+  lang?: string
 }
 
 export interface BkpTextLayer {
@@ -85,7 +100,7 @@ export interface BkpSpeech {
   type?: string
   delivery?: string
   fcbh?: string
-  /** Pack slice 3 (not built yet): scholars disagree where this speech starts or ends. */
+  /** Pack 1.2.0 (slice 3): scholars disagree where this speech starts or ends. */
   disputed?: BkpSpeechDispute
 }
 
@@ -149,7 +164,7 @@ export interface BkpMention {
   via?: BkpWordId[]
   conf: number
   /**
-   * Pack slice 3 (not built yet): how the text names a deity at this word,
+   * Pack 1.2.0 (slice 3): how the text names a deity at this word,
    * per language code, at least `eng`: θεός → "God", where the entity's own
    * label is "LORD".
    */
@@ -178,7 +193,7 @@ export interface BkpNote {
   ref: BkpRef
   /** The last verse of a note on a range of verses. */
   endRef?: BkpRef
-  /** The Greek the note discusses (UGNT spelling). */
+  /** The Greek the note discusses (UGNT spelling); in the OT the Hebrew (UHB, with its U+2060 word joiners). */
   quote?: string
   /** The unfoldingWord Translation Academy slug ("figs-rquestion"), or "other". */
   category?: string

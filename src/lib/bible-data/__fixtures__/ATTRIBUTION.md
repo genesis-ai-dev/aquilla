@@ -84,3 +84,50 @@ each verse of JHN 4:
 The golden test in `../source-alignment.test.ts` checks the aligner against
 these links; the full evaluation (all of John, other books, YLT) needs the
 complete Clear files and is in the script.
+
+# `bkp-v1.2-*.json` and `macula-hebrew-RUT-1.tsv` — attribution (AQU-1700)
+
+Source: the bibletranslation.org Bible Knowledge Pack, version 1.2.0 (built
+2026-10-06T10:18:50Z by bible-wiki `pipeline/src/bkp`, commit 1e097b0), the
+first version with the Old Testament.
+
+Licence: the `voices`, `people`, `structure`, `notes` and `terms` layers are
+**CC BY-SA 4.0** (<https://creativecommons.org/licenses/by-sa/4.0/>); the
+`text` layer is **CC BY 4.0** (<https://creativecommons.org/licenses/by/4.0/>).
+For the Old Testament they are built from:
+
+- MACULA Hebrew (Clear-Bible), the Westminster Leningrad Codex, CC BY 4.0;
+- Clear-Bible speaker-quotations (FCBH character ids, the "Clear" consensus), CC BY 4.0;
+- SIL Open Translator's Notes section headings, CC BY-SA 4.0;
+- ACAI (BibleAquifer), CC BY-SA 4.0;
+- unfoldingWord Translation Notes, Questions and Words (via BibleAquifer), CC BY-SA 4.0.
+
+Every value is copied from the published pack, unchanged. The files are
+trimmed to whole records:
+
+- `bkp-v1.2-RUT-1-2.voices.json`: the verses of RUT 1–2, the speeches they
+  use, and their parent speeches.
+- `bkp-v1.2-RUT-1-2.people.json`: every mention in RUT 1–2; the entities
+  they name, the members of those groups, the speakers and addressees of the
+  voices fixture, and the relatives (`kin`) of all of those.
+- `bkp-v1.2-RUT-1-2.structure.json`: the SIL OTN sections of RUT 1–2 and
+  the verse facts of RUT 1–2. `moves` is empty, as in every OT book.
+- `bkp-v1.2-RUT-1-2.text.json`: the morphemes of RUT 1:1, 1:8 and 1:14–17.
+- `bkp-v1.2-RUT-1-2.notes.json`: the notes and questions on those verses.
+- `bkp-v1.2-RUT-1-2.terms.json`: the tagged morphemes of those verses, and
+  the terms they use.
+- `bkp-v1.2-GEN-1-3.people.json`: every mention in GEN 1–3, with the same
+  entity rule as Ruth's.
+- `bkp-v1.2-GEN-1-3.structure.json`: the verse facts of GEN 1–3. Genesis has
+  no segments in the pack.
+- `bkp-v1.2-PSA-23.voices.json` and `bkp-v1.2-PSA-23.people.json`: PSA 23,
+  which has no speeches, and its mentions.
+
+`macula-hebrew-RUT-1.tsv`: the header and the rows of RUT 1:1 and RUT 1:16
+of MACULA Hebrew's `WLC/tsv/macula-hebrew.tsv` (Clear-Bible/macula-hebrew,
+commit 47db250b), **CC BY 4.0**: the file a project's Macula import reads.
+The SDBH columns (`lexdomain`, `contextualdomain`, `coredomain`, `sdbh`) are
+blanked; nothing reads them.
+
+To refresh: rebuild the pack (`pnpm --filter pipeline run:bkp` in bible-wiki)
+and re-run the extraction for the same chapters and verses.

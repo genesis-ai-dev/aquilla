@@ -7,7 +7,7 @@
 // cross-row overlay, which keeps the virtualized list honest.
 
 import { createContext, useContext, useMemo } from "react"
-import type { BkpEntityId, BkpRef } from "@/lib/bible-data/pack-types"
+import type { BkpEntity, BkpEntityId, BkpRef } from "@/lib/bible-data/pack-types"
 import { railSegments, type RailSegment } from "@/lib/bible-data/speech-rails"
 import {
   cellVoicesFor,
@@ -24,6 +24,8 @@ export interface BibleVoicesContextValue {
   shared: ReadonlySet<BkpRef>
   /** The name to show for an entity, through the label chain; null when the pack has none. */
   labelFor: (entityId: BkpEntityId) => VoiceLabel | null
+  /** AQU-1693: the book's people, for "Add to terminology" on a speaker or listener. */
+  entities: Readonly<Record<BkpEntityId, BkpEntity>>
   showChips: boolean
   showRails: boolean
   /** Filter the editor to the cells where `speaker` speaks. */

@@ -26,8 +26,10 @@
 //     91.7–92.0% at 120.
 //   • Links below ALIGN_LINK_MIN (word-align.ts) are not drawn at all; a
 //     composed link below it is dropped too.
+//   • AQU-1700: Old Testament pronouns fall short of the bar, so they draw
+//     dotted whatever their confidence (OT_PRONOUNS_ALWAYS_DOTTED).
 
-import type { BkpWordId } from "./pack-types"
+import type { BkpTextLayer, BkpWordId } from "./pack-types"
 import { ALIGN_LINK_MIN, type AlignLink } from "./word-align"
 
 /** At or above: a solid tint (when the training was big enough). Below: dotted, "approximate". */
@@ -81,4 +83,30 @@ export function composeBridges(
  */
 export function tintStyle(conf: number, trainedPairs: number): "solid" | "dotted" {
   return conf >= TINT_SOLID_MIN && trainedPairs >= SOLID_MIN_PAIRS ? "solid" : "dotted"
+}
+
+/**
+ * AQU-1700: an Old Testament pronoun (a Macula Hebrew word of class "pron":
+ * a pronominal suffix such as the ־ִי "me" of בִּי, or an independent pronoun)
+ * draws dotted whatever its confidence and training size. AQU-1694 draws a
+ * class solid only when its links at TINT_SOLID_MIN or above are right about
+ * 85% of the time; Hebrew pronouns are not. Measured with
+ * scripts/bridge-align-eval.ts (pack 1.2.0, Bridge 1 to the BSB, against
+ * Clear's manual WLCM→BSB alignment; personal pronouns and pronominal
+ * suffixes, links at 0.5 or above): GEN 77.6% right (1,358 links), RUT 66.7%
+ * (51 links), against 92.2% for John's Greek pronouns. Set it to false once
+ * they measure above the bar again, for example with suffix tokens that keep
+ * person and number (every suffix has the lemma הוּא) or with a Hebrew
+ * transliteration for the name constraint. NT words are never affected.
+ */
+export const OT_PRONOUNS_ALWAYS_DOTTED = true
+
+/** The words of `text` whose tints draw dotted whatever their confidence: OT pronouns, while OT_PRONOUNS_ALWAYS_DOTTED. */
+export function alwaysDottedWords(text: BkpTextLayer): (wordId: BkpWordId) => boolean {
+  return (wordId) => {
+    // A Macula Hebrew morpheme id starts with "o"; an SBLGNT word id with "n".
+    if (!OT_PRONOUNS_ALWAYS_DOTTED || !wordId.startsWith("o")) return false
+    const word = Object.hasOwn(text.words, wordId) ? text.words[wordId] : undefined
+    return word?.class === "pron"
+  }
 }

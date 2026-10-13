@@ -1955,6 +1955,17 @@ describe("ProjectOverview Team card collapse (AQU-1172)", () => {
     await waitFor(() => expect(patch).toHaveBeenCalledWith({ memberProgressViewMinRole: undefined }))
   })
 
+  it("stores a Team value that only matches the member list, rather than following the org", async () => {
+    // Org progress is Contributors, the member list Maintainers: the card shows
+    // Maintainers. Choosing Maintainers is this project's own choice for the
+    // Team card — if the member list is lowered later, the card stays put.
+    const patch = await openTeamPicker({ progressOrg: ROLE.CONTRIBUTOR, rosterOrg: ROLE.MAINTAINER, progressOwn: ROLE.OWNER })
+
+    const maintainers = await screen.findByRole("option", { name: "Maintainers and owners" })
+    choose(maintainers)
+    await waitFor(() => expect(patch).toHaveBeenCalledWith({ memberProgressViewMinRole: ROLE.MAINTAINER }))
+  })
+
   it("leaves only Owners only open under an owner-only member list", async () => {
     await openTeamPicker({ progressOrg: ROLE.MAINTAINER, rosterOrg: ROLE.OWNER })
 

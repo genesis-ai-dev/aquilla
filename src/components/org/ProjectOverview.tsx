@@ -622,9 +622,8 @@ export function ProjectOverview() {
   // must not keep that card (and its "maintainers & owners" badge) open after
   // the roster floor was raised to owner-only.
   const teamNamesFloor = Math.max(progressFloor.effective, rosterFloor.effective)
-  // What the Team card would show if this project followed its org on
-  // progress: choosing it (or anything lower, which the picker refuses)
-  // clears the project's own progress value.
+  // The lowest Team value that can show: never below the org's progress
+  // setting, and never below the member list (the card names people).
   const teamOrgShown = Math.max(progressFloor.org, rosterFloor.effective)
   // The badges write THIS project's own values, so they follow the project
   // settings write gate — Maintainer and up on the project, which every org
@@ -2523,8 +2522,13 @@ export function ProjectOverview() {
                         canEdit={canEditVisibility}
                         // AQU-1771: writes THIS project's own progress floor.
                         // The org's setting stays the org's (Settings → Security).
+                        // Only the org's own progress setting means "follow the
+                        // org"; any value above it is stored, even one that only
+                        // matches the member list today — the member list can
+                        // be lowered later, and the Team card must not follow it
+                        // down past what was chosen here.
                         onChangeMinRole={async (next) => {
-                          await patchProjectVisibility("memberProgressViewMinRole", next, teamOrgShown)
+                          await patchProjectVisibility("memberProgressViewMinRole", next, progressFloor.org)
                         }}
                         description={t("org.projectOverview.teamVisibilityDescription")}
                         // AQU-1779 / AQU-1771: the badge shows the higher of the
@@ -2533,7 +2537,9 @@ export function ProjectOverview() {
                         // looser than its org.
                         minSelectableRole={teamOrgShown}
                         storedMinRole={progressFloor.effective}
-                        orgDefaultRole={rosterFloor.project == null ? teamOrgShown : undefined}
+                        orgDefaultRole={
+                          progressFloor.org >= rosterFloor.effective ? progressFloor.org : undefined
+                        }
                         origin={
                           (progressFloor.effective >= rosterFloor.effective
                             ? progressFloor.project

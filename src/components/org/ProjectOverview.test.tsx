@@ -39,6 +39,12 @@ vi.mock("./ProjectAutopilotPanel", () => ({
   ),
 }))
 
+const toastAdd = vi.fn()
+vi.mock("@/components/ui/toast", async (importActual) => ({
+  ...await importActual<typeof import("@/components/ui/toast")>(),
+  toast: { add: (...a: unknown[]) => toastAdd(...a), close: vi.fn(), update: vi.fn(), promise: vi.fn() },
+}))
+
 const useProject = vi.fn()
 const refresh = vi.fn()
 // AQU-1771: the overview waits for the project's settings before it trusts the
@@ -1576,6 +1582,32 @@ describe("ProjectOverview Members card (AQU-1171)", () => {
     await screen.findByRole("button", { name: "Open project" })
     expect(screen.queryByTestId("overview-members-card")).not.toBeInTheDocument()
     expect(screen.queryByTestId("overview-team-card")).not.toBeInTheDocument()
+  })
+
+  it("says why when the server refuses the change, instead of letting it vanish", async () => {
+    toastAdd.mockClear()
+    const settings = projectSettingsMock({ rosterOrg: ROLE.MAINTAINER })
+    settings.patch.mockResolvedValue({
+      kind: "error",
+      message: JSON.stringify({ error: "rosterViewMinRole 400 is below the organization's setting (600)." }),
+    } as never)
+    await openMembersPicker(settings)
+
+    choose(await screen.findByRole("option", { name: /owners only/i }))
+    await waitFor(() => expect(toastAdd).toHaveBeenCalledWith({
+      type: "error",
+      title: "Couldn't change who can see this section",
+      description: "rosterViewMinRole 400 is below the organization's setting (600).",
+    }))
+  })
+
+  it("says nothing when the change saves", async () => {
+    toastAdd.mockClear()
+    const settings = projectSettingsMock({ rosterOrg: ROLE.MAINTAINER })
+    await openMembersPicker(settings)
+    choose(await screen.findByRole("option", { name: /owners only/i }))
+    await waitFor(() => expect(settings.patch).toHaveBeenCalled())
+    expect(toastAdd).not.toHaveBeenCalled()
   })
 
   it("hides the card from a maintainer once this project raised its member list to owners", async () => {

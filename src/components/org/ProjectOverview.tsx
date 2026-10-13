@@ -156,8 +156,10 @@ import { buildSourceLoader } from "@/lib/analysis/load-file-sources"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import {
   PROJECT_SETTINGS_UPDATED_EVENT,
+  type PatchOutcome,
   type ProjectSettingsUpdatedDetail,
 } from "@/hooks/useProjectSettings"
+import { toast } from "@/components/ui/toast"
 import { progressPercent, progressPercentOfFraction } from "@/lib/progress/progress-percent"
 
 
@@ -382,6 +384,33 @@ function unitAssignmentsKey(unitId: string, lane: string): string {
   return `${unitId}\u0000${lane}`
 }
 
+
+/**
+ * AQU-1771: why a project visibility change was not saved, or null when it
+ * was. A server refusal (for example a value looser than the organization's)
+ * carries its own explanation in `{ error }`.
+ */
+function visibilitySaveRefusal(outcome: PatchOutcome, t: ReturnType<typeof useT>): string | null {
+  switch (outcome.kind) {
+    case "ok":
+      return null
+    case "conflict":
+      return t("org.sync.versionConflictError")
+    case "blocked":
+      return outcome.reason === "offline"
+        ? t("org.projectOverview.visibilitySaveOffline")
+        : t("org.projectOverview.visibilitySaveForbidden")
+    case "error": {
+      try {
+        const body = JSON.parse(outcome.message) as { error?: unknown }
+        if (typeof body?.error === "string" && body.error) return body.error
+      } catch {
+        // not JSON — fall through to the raw text
+      }
+      return outcome.message || t("org.projectOverview.visibilitySaveFailed")
+    }
+  }
+}
 
 // ── Main component ────────────────────────────────────────────────────────────
 
@@ -638,7 +667,11 @@ export function ProjectOverview() {
     const own = next > followAtOrBelow ? next : undefined
     // Following the org already and choosing to follow it: nothing to write.
     if (own === undefined && projectSettings.settings[key] === undefined) return
-    await projectSettings.patch({ [key]: own })
+    const outcome = await projectSettings.patch({ [key]: own })
+    // The badge snaps back to the saved value on its own (the hook rolls the
+    // optimistic write back); say why, so the change does not just vanish.
+    const why = visibilitySaveRefusal(outcome, t)
+    if (why) toast.add({ type: "error", title: t("org.projectOverview.visibilitySaveFailed"), description: why })
   }
 
   const loadRow = useCallback(async () => {

@@ -616,6 +616,11 @@ export const org = defineNamespace({
     // options below the organization's setting are greyed out.
     "org.projectOverview.visibilityOrgFloorHint":
       "A project can only be stricter than its organization, which is set to “{floor}”. To go lower, an org owner lowers it in Settings → Security first.",
+    // AQU-1771: a toast when a project's Team / Members visibility change was not saved.
+    "org.projectOverview.visibilitySaveFailed": "Couldn't change who can see this section",
+    "org.projectOverview.visibilitySaveOffline": "You're offline. Reconnect, then change it again.",
+    "org.projectOverview.visibilitySaveForbidden":
+      "Only people who can change this project's settings can change who sees this.",
     "org.projectOverview.noOpenAssignments": "No open assignments in this project yet.",
     "org.projectOverview.openAssignmentsStat": "{count} open · {percent}",
     "org.projectOverview.viewActivityAria": "View activity for {username}",
@@ -2696,6 +2701,18 @@ export const org = defineNamespace({
         placeholders: {
           label: "The option's already-localized role label, e.g. 'Maintainers and owners'.",
         },
+      },
+      "org.projectOverview.visibilitySaveFailed": {
+        description:
+          "Title of an error toast on the project overview when changing a Team or Members card's 'who can see this section' setting was not saved. The toast body gives the reason (sometimes the server's own English text).",
+      },
+      "org.projectOverview.visibilitySaveOffline": {
+        description:
+          "Body of that error toast when the device is offline, so the visibility change could not be saved.",
+      },
+      "org.projectOverview.visibilitySaveForbidden": {
+        description:
+          "Body of that error toast when the person's role does not allow changing this project's settings.",
       },
       "org.projectOverview.visibilityOrgFloorHint": {
         description:

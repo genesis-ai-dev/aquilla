@@ -155,6 +155,31 @@ describe("GET /api/v1/projects/:projectId/members/:author/activity", () => {
     expect(await statusFor({ memberProgressViewMinRole: 700 }, 700)).toBe(200)
   })
 
+  // AQU-1771: a named person's activity is member-list information too.
+  it("refuses a caller who meets the progress floor but not the member-list floor", async () => {
+    const { db } = await makeTestDb({
+      organizations: [{ id: 1, name: "Org A" }],
+      projects: [{ id: "proj-a", org_id: 1, name: "Proj A" }],
+      org_settings: [{ org_id: 1, settings: JSON.stringify({ memberProgressViewMinRole: 400, rosterViewMinRole: 600 }) }],
+      events: [makeEvent({ id: "e1", kind: "target.cell.commit", parent_id: null, server_seq: 1, author: "alice" })],
+    })
+    const status = async (role: number) => {
+      const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x", role })
+      const req = new Request(
+        "https://w/api/v1/projects/proj-a/members/alice/activity",
+        { headers: { Authorization: `Bearer ${token}` } },
+      )
+      return (await handleMemberActivityReadRequest(req, envWith(db)))!.status
+    }
+    expect(await status(400)).toBe(403)
+    expect(await status(600)).toBe(200)
+  })
+
+  it("refuses a maintainer when the project raised its member list to owners (AQU-1771)", async () => {
+    expect(await statusFor({ rosterViewMinRole: 700 }, 600)).toBe(403)
+    expect(await statusFor({ rosterViewMinRole: 700 }, 700)).toBe(200)
+  })
+
   it("ignores a project value below the org's floor (AQU-1771)", async () => {
     expect(await statusFor({ memberProgressViewMinRole: 400 }, 400)).toBe(403)
     expect(await statusFor({ memberProgressViewMinRole: 400 }, 600)).toBe(200)

@@ -54,7 +54,8 @@ export interface OrgWideSettings {
    * imply being allowed to see WHAT each person did.
    *
    * AQU-498: consumed by ProjectOverview's Team card + the sync-worker's
-   * member-activity-read-route (server-side floor via resolveMemberProgressFloor).
+   * member-activity-read-route (server-side floor via resolveNamedProgressFloor,
+   * which also requires rosterViewMinRole — AQU-1771).
    */
   memberProgressViewMinRole?: number
   /**

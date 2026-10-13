@@ -41,6 +41,8 @@ import {
   slotKey,
   type ChainSlot,
 } from './chain-claims'
+import { buildFileProgressPushFrames } from './progress-push'
+import type { FileProgressPushFrame, RecomputedFile } from './progress-push'
 import { broadcastRealtime } from './broadcast'
 import type { BroadcastEnv } from './broadcast'
 import { deferBestEffort } from './defer-best-effort'
@@ -157,6 +159,15 @@ export interface AppliedFrame {
   via?: 'external'
   serverSeq?: number
   rows?: CellRowOut[]
+  /**
+   * AQU-1832: this request also broadcast a `file.progress.pushed` frame for
+   * this event's file, later in the same batch. Clients that understand it
+   * skip the `/progress` refetch this frame used to trigger and wait the few
+   * milliseconds for the numbers themselves. Absent from an older worker, and
+   * absent whenever no fan-out happened at all, so absent always means
+   * "refetch as before".
+   */
+  progressPushed?: boolean
 }
 
 function buildAppliedFrame(
@@ -167,6 +178,7 @@ function buildAppliedFrame(
     serverSeq: number
   },
   rowsByCell: Map<string, CellRowOut[]> | null,
+  progressPushedFiles: ReadonlySet<string>,
 ): AppliedFrame {
   const frame = entry.eventFrame
   const carriesRows =
@@ -191,6 +203,13 @@ function buildAppliedFrame(
     ...(carriesRows ? { serverSeq: entry.serverSeq } : {}),
     ...(carriesRows && rowsByCell
       ? { rows: rowsByCell.get(cellRowsKey(frame.project, frame.file!, frame.cell!)) ?? [] }
+      : {}),
+    // AQU-1832: built into the SHARED frame so the author's `applied[]` and
+    // the peers' broadcast stay byte-identical. The author is a peer of its
+    // own write — the DO echoes every winning event back to its origin — so
+    // the flag is as true on the HTTP copy as on the WS one.
+    ...(frame.file && progressPushedFiles.has(`${frame.project}|${frame.file}`)
+      ? { progressPushed: true as const }
       : {}),
   }
 }
@@ -1712,6 +1731,11 @@ export async function handleEventsWriteRequest(
     // later chunk fails still recomputes over its durable prefix — the totals
     // match the events that actually landed rather than the ones we hoped to
     // write.
+    // AQU-1832: what the pass rewrote, and when. The push read selects its own
+    // output by `updated_at >= recomputeTs`, so the timestamp has to outlive
+    // the statement builder that stamps it.
+    let recomputeTs = 0
+    const recomputedFiles: RecomputedFile[] = []
     const buildRecomputeStmts = (entries: readonly PendingEntry[]): AquillaStatement[] => {
       const counterFiles = new Map<string, {
         projectId: string
@@ -1734,9 +1758,15 @@ export async function handleEventsWriteRequest(
           }
         }
       }
-      const recomputeTs = Date.now()
+      recomputeTs = Date.now()
+      recomputedFiles.length = 0
       const stmts: AquillaStatement[] = []
       for (const f of counterFiles.values()) {
+        recomputedFiles.push({
+          projectId: f.projectId,
+          fileId: f.fileId,
+          fullSections: f.fullSections,
+        })
         stmts.push(fileCountersRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
         if (f.fullSections) {
           // A full rebuild supersedes any per-cell section recompute for the
@@ -1846,6 +1876,12 @@ export async function handleEventsWriteRequest(
         if (stmts.length === 0) return
         await runBatch(stmts)
       } catch (recomputeErr) {
+        // AQU-1832: nothing was rewritten, so there is nothing to push. A
+        // frame built here would publish the PREVIOUS pass's numbers as this
+        // commit's answer, and the client would stop asking for the right
+        // ones. Clients fall back to the read, which is where the self-heal
+        // below becomes visible.
+        recomputedFiles.length = 0
         // The events are committed; only the derived counters are behind.
         // Loud, because a silent miss here is a counter drift nobody can
         // trace back — but not fatal, and NOT reported as a rejection.
@@ -1982,9 +2018,37 @@ export async function handleEventsWriteRequest(
     // ProjectSync DO broadcast (peers) and the HTTP response `applied[]`
     // (the author's own client, which would otherwise refetch after its
     // outbox flush — see src/lib/sync/outbox-flush.ts onApplied).
+    // AQU-1832: read back the progress rows this request's recompute just
+    // wrote and broadcast them, so a peer's client applies the new numbers
+    // instead of firing the `/progress` GET its `event.applied` handler used
+    // to. One read per file here replaces one read per file PER VIEWER there.
+    //
+    // Built before the applied frames because it decides their
+    // `progressPushed` flag, and only when there is a DO to broadcast
+    // through: with no fan-out there is no push for a client to wait for, so
+    // the flag would be a promise nothing keeps.
+    const pushFramesByFile = new Map<string, FileProgressPushFrame[]>()
+    if (env.ProjectSync && env.SYNC_SECRET_KEY && recomputedFiles.length > 0) {
+      const built = await Promise.all(
+        recomputedFiles.map((file) =>
+          buildFileProgressPushFrames(db, file, recomputeTs).catch((err) => {
+            // Non-fatal by construction: without a frame the client refetches,
+            // which is exactly the behaviour this replaces.
+            console.warn('[events/route] progress push build failed:', err)
+            return [] as FileProgressPushFrame[]
+          }),
+        ),
+      )
+      for (const frames of built) {
+        if (frames.length === 0) continue
+        pushFramesByFile.set(`${frames[0].project}|${frames[0].file}`, frames)
+      }
+    }
+
     const rowsByCell = await readEventAppliedRows(db, newEntries)
+    const progressPushedFiles = new Set(pushFramesByFile.keys())
     for (const entry of newEntries) {
-      appliedFrames.push(buildAppliedFrame(entry, rowsByCell))
+      appliedFrames.push(buildAppliedFrame(entry, rowsByCell, progressPushedFiles))
     }
 
     // Fan-out event.applied frames to ProjectSync DO so UI clients receive
@@ -1992,11 +2056,23 @@ export async function handleEventsWriteRequest(
     // broadcast means the client will reconcile on its next poll/revalidate.
     if (env.ProjectSync && env.SYNC_SECRET_KEY) {
       // Group by project — one DO stub per project.
-      const byProject = new Map<string, AppliedFrame[]>()
+      const byProject = new Map<string, Array<AppliedFrame | FileProgressPushFrame>>()
       for (const frame of appliedFrames) {
         const list = byProject.get(frame.project)
         if (list) list.push(frame)
         else byProject.set(frame.project, [frame])
+      }
+      // AQU-1832: appended after the applied frames they belong to. A client
+      // reads `progressPushed` and holds its refetch, so the numbers it is
+      // holding out for must follow rather than lead. One `__broadcast` body
+      // per project, fanned out to each socket in order, is what makes that
+      // an ordering and not a hope.
+      for (const frames of pushFramesByFile.values()) {
+        for (const frame of frames) {
+          const list = byProject.get(frame.project)
+          if (list) list.push(frame)
+          else byProject.set(frame.project, [frame])
+        }
       }
       const doFanOut: Promise<void>[] = []
       for (const [project, messages] of byProject) {

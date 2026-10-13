@@ -147,6 +147,31 @@ export interface ServerFileProgressUpdated {
   fileCreated: boolean
 }
 /**
+ * AQU-1832: a file's post-commit progress, pushed instead of polled.
+ *
+ * Shaped field-for-field like the `/progress` GET body it replaces, so the
+ * client merges it into the resource that read feeds rather than keeping a
+ * second representation of the same numbers. One frame per target lane; the
+ * `event.applied` frames for the same request carry `progressPushed: true`
+ * and ride ahead of it in the same `broadcast.batch`.
+ *
+ * The DO relays it like every other frame — it holds no progress state and
+ * never synthesises one of these.
+ */
+export interface ServerFileProgressPushed {
+  t: "file.progress.pushed"
+  project: string
+  file: string
+  /** Target lane tag; '' is the default lane. */
+  lane: string
+  revision: number
+  validationCount: number
+  /** The pass rewrote every section row, so `sections` is the whole list. */
+  complete: boolean
+  counts: unknown
+  sections: unknown[]
+}
+/**
  * AQU-346: sent to a removed member's own sockets right before the DO
  * closes them (code 4403). `userId` is the presence identity (username) —
  * the same identity used in presence/lock frames — so the client can
@@ -237,6 +262,7 @@ export type ProjectDoServerMessage =
   | ServerProjectArchived
   | ServerProjectSettingsUpdated
   | ServerFileProgressUpdated
+  | ServerFileProgressPushed
   | ServerMemberRemoved
   | ServerLinkUpstreamChanged
   | ServerContextualActivity

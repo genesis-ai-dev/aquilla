@@ -79,6 +79,26 @@ export interface PresenceUser {
   ts: number
 }
 
+/**
+ * AQU-1832: the counts block of a pushed progress frame — the same object the
+ * `/progress` GET returns for a file or a section.
+ *
+ * Declared structurally here rather than imported from the progress resource
+ * so the wire parser stays the only thing in this module that knows about
+ * progress, and so a field the server adds (it already sends
+ * `audioValidationLevels`) rides through untouched instead of being dropped
+ * by a narrower re-serialisation. The parser validates the four fields every
+ * consumer reads and passes the rest along.
+ */
+export interface PushedProgressCounts {
+  totalCount: number
+  filledCount: number
+  validatedCount: number
+  validationLevels: number[]
+  audioCount?: number
+  audioValidatedCount?: number
+}
+
 export type ProjectWsServerMessage =
   | {
       t: "event.applied"
@@ -101,6 +121,13 @@ export type ProjectWsServerMessage =
        *  present with `serverSeq`, the client lands them directly
        *  (src/lib/sync/live-apply.ts) instead of refetching. */
       rows?: CellRow[]
+      /** AQU-1832: a `file.progress.pushed` frame for this event's file rides
+       *  later in the SAME broadcast batch, carrying the post-commit numbers.
+       *  Handlers skip the `/progress` refetch this frame used to trigger and
+       *  let the push land instead. Absent from an older worker, and absent
+       *  when the write produced no fan-out, so absent always means "refetch
+       *  as before". */
+      progressPushed?: boolean
     }
   | { t: "event.stale"; id: string; reason: string }
   | { t: "presence"; users: PresenceUser[] }
@@ -115,6 +142,21 @@ export type ProjectWsServerMessage =
   | { t: "project.archived"; project: string; archivedAt?: string; deletedBy?: string }
   | { t: "project.settings.updated"; project: string; version: number }
   | { t: "file.progress.updated"; project: string; file: string; fileCreated: boolean }
+  /** AQU-1832: one file+lane's post-commit progress, shaped like the
+   *  `/progress` body so it merges into the resource that read feeds. */
+  | {
+      t: "file.progress.pushed"
+      project: string
+      file: string
+      /** Target lane tag; '' is the default lane. */
+      lane: string
+      revision: number
+      validationCount: number
+      /** The server rewrote every section row — replace, don't upsert. */
+      complete: boolean
+      counts: PushedProgressCounts
+      sections: Array<{ key: string } & PushedProgressCounts>
+    }
   /** FRO-346: this user's membership was revoked; the DO closes the socket
    *  (code 4403) right after. `userId` is the presence identity (username). */
   | { t: "member.removed"; project: string; userId: string }
@@ -898,7 +940,30 @@ export function parseAppliedEventFrame(
       ? { serverSeq: m.serverSeq }
       : {}),
     ...(rows ? { rows } : {}),
+    ...(m.progressPushed === true ? { progressPushed: true as const } : {}),
   }
+}
+
+/**
+ * AQU-1832: `file.progress.pushed` counts guard. A block missing any field a
+ * consumer reads — or carrying a non-numeric level — drops the WHOLE frame,
+ * never a partial one: a progress object with a plausible shape and one
+ * absent number renders as a percentage that is simply wrong, where a dropped
+ * frame just costs the refetch this push was saving.
+ */
+function parsePushedProgressCounts(raw: unknown): PushedProgressCounts | null {
+  if (!raw || typeof raw !== "object") return null
+  const o = raw as Record<string, unknown>
+  if (
+    typeof o.totalCount !== "number" || !Number.isFinite(o.totalCount) ||
+    typeof o.filledCount !== "number" || !Number.isFinite(o.filledCount) ||
+    typeof o.validatedCount !== "number" || !Number.isFinite(o.validatedCount) ||
+    !Array.isArray(o.validationLevels) ||
+    o.validationLevels.some((n) => typeof n !== "number" || !Number.isFinite(n))
+  ) {
+    return null
+  }
+  return o as unknown as PushedProgressCounts
 }
 
 /**
@@ -977,6 +1042,38 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
       || typeof m.fileCreated !== "boolean"
     ) return null
     return { t, project: m.project, file: m.file, fileCreated: m.fileCreated }
+  }
+  if (t === "file.progress.pushed") {
+    if (
+      typeof m.project !== "string"
+      || typeof m.file !== "string"
+      || typeof m.lane !== "string"
+      || typeof m.revision !== "number" || !Number.isFinite(m.revision)
+      || typeof m.validationCount !== "number" || !Number.isFinite(m.validationCount)
+      || typeof m.complete !== "boolean"
+      || !Array.isArray(m.sections)
+    ) return null
+    const counts = parsePushedProgressCounts(m.counts)
+    if (!counts) return null
+    const sections: Array<{ key: string } & PushedProgressCounts> = []
+    for (const raw of m.sections) {
+      const key = (raw as Record<string, unknown> | null)?.key
+      if (typeof key !== "string") return null
+      const sectionCounts = parsePushedProgressCounts(raw)
+      if (!sectionCounts) return null
+      sections.push({ ...sectionCounts, key })
+    }
+    return {
+      t,
+      project: m.project,
+      file: m.file,
+      lane: m.lane,
+      revision: m.revision,
+      validationCount: m.validationCount,
+      complete: m.complete,
+      counts,
+      sections,
+    }
   }
   if (t === "member.removed") {
     // FRO-346: the DO sends this to a removed member's sockets right before

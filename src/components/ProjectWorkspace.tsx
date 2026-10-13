@@ -428,7 +428,7 @@ import { deleteFileProjection } from "@/lib/sync/file-projection"
 import { fetchCellsByIds, fetchDeletedFiles, fetchProjectFiles } from "@/lib/sync/cells-read"
 import type { FileSummary } from "@/lib/sync/cells-read-types"
 import { fileSummariesToProgress, mergeFileProgress } from "@/lib/progress/file-summary-progress"
-import { invalidateFileProgress, invalidateProjectFileProgress, setLocalFileProgress } from "@/lib/progress/file-progress-resource"
+import { applyPushedFileProgress, invalidateFileProgress, invalidateProjectFileProgress, setLocalFileProgress } from "@/lib/progress/file-progress-resource"
 import { applyStructuralPolicy } from "@/lib/cells/structural"
 import { isExcludedFromWork } from "@/lib/health/excluded-cell"
 import { Button } from "@/components/ui/button"
@@ -7550,7 +7550,12 @@ export function ProjectWorkspace() {
                 msg.kind === 'cell.validate' ||
                 msg.kind === 'cell.unvalidate'
               )) {
-                invalidateFileProgress(pid, msg.file)
+                // AQU-1832: this invalidation is what made every viewer GET
+                // /progress on every remote keystroke-debounced save. When the
+                // writing request says it is pushing the numbers, they are
+                // already on their way in this same batch — the refetch would
+                // only race them to the same answer.
+                if (!msg.progressPushed) invalidateFileProgress(pid, msg.file)
               }
               // target.cell.commit is also Autopilot's durable review
               // boundary. Reconcile proposals for the exact mounted scope
@@ -7664,6 +7669,50 @@ export function ProjectWorkspace() {
                   const next = new Set(cur)
                   next.add(msg.cell!)
                   return next
+                })
+              }
+            } else if (msg.t === "file.progress.pushed") {
+              if (msg.project !== pid) return
+              // AQU-1832: the numbers the `event.applied` frames above held
+              // their refetch for. A push the resource cannot merge safely
+              // returns false and we fall back to exactly the read that was
+              // skipped, so the worst case is the old behaviour plus a frame.
+              if (!applyPushedFileProgress(pid, {
+                fileId: msg.file,
+                lane: msg.lane,
+                revision: msg.revision,
+                validationCount: msg.validationCount,
+                complete: msg.complete,
+                counts: msg.counts,
+                sections: msg.sections,
+              })) {
+                invalidateFileProgress(pid, msg.file)
+              }
+              // The sidebar's own bars come from the project file rollup, not
+              // from this resource (file-summary-progress.ts), and that rollup
+              // was only ever refreshed on import/settings frames. The pushed
+              // file-scope counts are the same three numbers, so a peer's save
+              // now moves the bar live instead of waiting for a remount —
+              // without the GET /files that refreshing it would cost. Only the
+              // default lane: the rollup is one row per file, and a named
+              // lane's numbers are not what that row reports.
+              if (msg.lane === "") {
+                setAllFilesProgressSnapshot((current) => {
+                  const existing = current.get(msg.file)
+                  const next = {
+                    translated: msg.counts.filledCount,
+                    validated: msg.counts.validatedCount,
+                    total: msg.counts.totalCount,
+                  }
+                  if (
+                    existing
+                    && existing.translated === next.translated
+                    && existing.validated === next.validated
+                    && existing.total === next.total
+                  ) return current
+                  const merged = new Map(current)
+                  merged.set(msg.file, next)
+                  return merged
                 })
               }
             } else if (msg.t === "file.progress.updated") {

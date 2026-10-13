@@ -48,6 +48,50 @@ describe("edit history", () => {
     expect(historyView().canRedo).toBe(false)
   })
 
+  it("presses made while a slow step runs wait their turn instead of being dropped", async () => {
+    const log: string[] = []
+    let release: () => void = () => {}
+    const slow: HistoryStep = {
+      labelKey: "slow",
+      at: 3,
+      undo: () => new Promise((resolve) => { release = () => { log.push("undo slow"); resolve({ kind: "done" }) } }),
+      redo: async () => { log.push("redo slow"); return { kind: "done" } },
+    }
+    recordStep(step("a", 1, log))
+    recordStep(step("b", 2, log))
+    recordStep(slow)
+    const presses = [undoLast(), undoLast(), undoLast(), undoLast()]
+    await new Promise((r) => setTimeout(r, 0))
+    release()
+    const results = await Promise.all(presses)
+    expect(log).toEqual(["undo slow", "undo b", "undo a"])
+    expect(results.map((r) => r?.step.labelKey ?? null)).toEqual(["slow", "b", "a", null])
+    // Undo then Redo pressed together: the redo waits for the undo, then runs.
+    await redoLast()
+    const [u, r] = [undoLast(), redoLast()]
+    expect((await u)?.step.labelKey).toBe("a")
+    expect((await r)?.step.labelKey).toBe("a")
+  })
+
+  it("a press does nothing if the user moved to another project before its turn", async () => {
+    const log: string[] = []
+    let release: () => void = () => {}
+    recordStep(step("b", 1, log))
+    recordStep({
+      labelKey: "slow", at: 2,
+      undo: () => new Promise((resolve) => { release = () => resolve({ kind: "done" }) }),
+      redo: async () => ({ kind: "done" }),
+    })
+    const first = undoLast()
+    const second = undoLast()
+    await new Promise((r) => setTimeout(r, 0))
+    setHistoryScope("p2", "sam")
+    release()
+    expect((await first)?.step.labelKey).toBe("slow")
+    expect(await second).toBeNull()
+    expect(log).toEqual([])
+  })
+
   it("a skipped step leaves the stack, so the next undo reaches the one before", async () => {
     const log: string[] = []
     recordStep(step("a", 1, log))

@@ -35,7 +35,11 @@ export function useHistoryShortcuts(onResult: (which: "undo" | "redo", result: H
       const undo = key === "z" && !event.shiftKey
       if (!undo && !redo) return
       if (undo && undoShortcutOwner() !== "history") return
-      if (redo && !historyView().canRedo) return
+      // While a step runs, Redo may not be possible YET (the undo before it
+      // is still finishing), so a press then waits its turn rather than
+      // being dropped.
+      const view = historyView()
+      if (redo && !view.canRedo && !view.busy) return
       event.preventDefault()
       void (undo ? undoLast() : redoLast()).then((result) => {
         if (result) onResultRef.current(undo ? "undo" : "redo", result)

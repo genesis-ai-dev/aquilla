@@ -157,9 +157,23 @@ export async function redoLast(): Promise<HistoryResult | null> {
   return run("redo")
 }
 
+// Presses made while a step is still running wait their turn instead of being
+// dropped: five quick Cmd+Z presses undo five steps (slow-network pass,
+// 2026-10-13, where a slow write made most presses vanish without a word).
+let queue: Promise<unknown> = Promise.resolve()
+
 async function run(which: "undo" | "redo"): Promise<HistoryResult | null> {
-  if (busy || !activeScope) return null
+  if (!activeScope) return null
+  // A press belongs to the project it was made in; if the user has moved on
+  // by the time its turn comes, it does nothing.
   const scope = activeScope
+  const turn = queue.then(() => runNow(which, scope))
+  queue = turn.catch(() => {})
+  return turn
+}
+
+async function runNow(which: "undo" | "redo", scope: string): Promise<HistoryResult | null> {
+  if (activeScope !== scope) return null
   const s = stacksFor(scope)
   const from = which === "undo" ? s.undo : s.redo
   const step = from.pop()
@@ -193,5 +207,6 @@ export function resetHistoryForTests(): void {
   stacks.clear()
   activeScope = null
   busy = false
+  queue = Promise.resolve()
   emit()
 }

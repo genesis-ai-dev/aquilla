@@ -23,7 +23,7 @@ export function OrgSettingsSecurity() {
       title={ORG_SETTINGS_SECTION_TITLES.security}
       description={ORG_SETTINGS_SECTION_DESCRIPTIONS.security}
     >
-      <RosterProgressSection orgSettings={orgSettings} canEdit={canEdit} />
+      <RosterProgressSection orgSettings={orgSettings} canEdit={canEdit} orgId={activeOrgId} />
       <CommentPermissionsSection
         orgSettings={orgSettings}
         canEdit={canEditCommentFloors(activeOrg?.role?.level)}

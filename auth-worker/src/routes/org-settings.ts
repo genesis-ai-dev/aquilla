@@ -71,7 +71,11 @@ import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { notifySyncWorkerOfProjectSettingsChange } from "../services/sync-worker-notify"
 import { ROLE } from "../types"
-import { getEffectiveOrgRole, getOrgMemberRole } from "../services/org-permissions"
+import {
+  countStricterVisibilityProjects,
+  getEffectiveOrgRole,
+  getOrgMemberRole,
+} from "../services/org-permissions"
 import { hasActiveElevation } from "../middleware/platform-admin"
 import {
   MAX_VALIDATION_THRESHOLD,
@@ -349,6 +353,23 @@ orgSettings.get("/:orgId/settings", authMiddleware, async (c) => {
     })
   }
   return c.json({ ...response, ...counts })
+})
+
+/**
+ * AQU-1771: how many of the org's projects make "who sees the member list" /
+ * "who sees each member's progress" stricter than the org does. Its own route
+ * rather than part of every settings response: the settings GET is read on
+ * nearly every page, and this count has to look inside each project's
+ * settings — only the Security page, which shows the line, asks for it.
+ * Any org member may read it; it is a count, and names no project.
+ */
+orgSettings.get("/:orgId/settings/visibility-overrides", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId") ?? "", 10)
+  if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
+  const role = await getEffectiveOrgRole(c.env, orgId, user)
+  if (role == null) return c.json({ error: "no access to org" }, 403)
+  return c.json(await countStricterVisibilityProjects(c.env, orgId))
 })
 
 /**

@@ -362,3 +362,33 @@ export async function resetProjectOverrides(
     return { kind: "error", message: String(err) }
   }
 }
+
+/** AQU-1771: how many of the org's projects are stricter than each visibility floor. */
+export interface VisibilityOverrideCounts {
+  rosterViewMinRole: number
+  memberProgressViewMinRole: number
+}
+
+/**
+ * GET /api/v2/orgs/:orgId/settings/visibility-overrides. Null on any failure
+ * (an older server without the route included): the line then says nothing.
+ */
+export async function fetchVisibilityOverrideCounts(
+  jwt: string,
+  orgId: number,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<VisibilityOverrideCounts | null> {
+  try {
+    const res = await fetch(`${apiUrl}/api/v2/orgs/${orgId}/settings/visibility-overrides`, {
+      headers: authHeaders(jwt),
+    })
+    if (!res.ok) return null
+    const body = (await res.json()) as Partial<VisibilityOverrideCounts>
+    return {
+      rosterViewMinRole: Number(body.rosterViewMinRole) || 0,
+      memberProgressViewMinRole: Number(body.memberProgressViewMinRole) || 0,
+    }
+  } catch {
+    return null
+  }
+}

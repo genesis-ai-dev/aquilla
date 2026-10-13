@@ -72,6 +72,25 @@ export interface ProjectVisibilityOverrides {
 
 const NO_OVERRIDES: ProjectVisibilityOverrides = { rosterViewMinRole: null, memberProgressViewMinRole: null }
 
+const OVERRIDES_SELECT = `SELECT ps.project_id AS project_id,
+              CASE WHEN jsonb_typeof(x.j -> 'rosterViewMinRole') = 'number'
+                   THEN x.j ->> 'rosterViewMinRole' END AS roster,
+              CASE WHEN jsonb_typeof(x.j -> 'memberProgressViewMinRole') = 'number'
+                   THEN x.j ->> 'memberProgressViewMinRole' END AS progress
+         FROM project_settings ps
+        CROSS JOIN LATERAL (
+          SELECT CASE WHEN strpos(ps.settings, 'ViewMinRole') > 0 THEN ps.settings::jsonb END AS j
+        ) x`
+
+interface OverrideRow { project_id: string; roster: string | null; progress: string | null }
+
+function overridesFromRow(row: OverrideRow): ProjectVisibilityOverrides {
+  return {
+    rosterViewMinRole: parseProjectVisibilityFloor(row.roster == null ? null : Number(row.roster)),
+    memberProgressViewMinRole: parseProjectVisibilityFloor(row.progress == null ? null : Number(row.progress)),
+  }
+}
+
 /**
  * Each project's own values, for every id asked about (a project with no
  * settings row, or none of its own, maps to nulls).
@@ -90,26 +109,35 @@ export async function loadProjectVisibilityOverrides(
   if (ids.length === 0) return out
   const { results } = await db
     .prepare(
-      `SELECT ps.project_id AS project_id,
-              CASE WHEN jsonb_typeof(x.j -> 'rosterViewMinRole') = 'number'
-                   THEN x.j ->> 'rosterViewMinRole' END AS roster,
-              CASE WHEN jsonb_typeof(x.j -> 'memberProgressViewMinRole') = 'number'
-                   THEN x.j ->> 'memberProgressViewMinRole' END AS progress
-         FROM project_settings ps
-        CROSS JOIN LATERAL (
-          SELECT CASE WHEN strpos(ps.settings, 'ViewMinRole') > 0 THEN ps.settings::jsonb END AS j
-        ) x
+      `${OVERRIDES_SELECT}
         WHERE ps.project_id IN (${ids.map(() => "?").join(", ")})`,
     )
     .bind(...ids)
-    .all<{ project_id: string; roster: string | null; progress: string | null }>()
+    .all<OverrideRow>()
   for (const row of results ?? []) {
-    out.set(row.project_id, {
-      rosterViewMinRole: parseProjectVisibilityFloor(row.roster == null ? null : Number(row.roster)),
-      memberProgressViewMinRole: parseProjectVisibilityFloor(row.progress == null ? null : Number(row.progress)),
-    })
+    out.set(row.project_id, overridesFromRow(row))
   }
   return out
+}
+
+/**
+ * The own values of every live (unarchived) project in an org that sets any —
+ * for the org's "N projects are stricter" line. Projects that follow the org
+ * on both are left out.
+ */
+export async function loadOrgProjectVisibilityOverrides(
+  db: AquillaDb,
+  orgId: number,
+): Promise<Map<string, ProjectVisibilityOverrides>> {
+  const { results } = await db
+    .prepare(
+      `${OVERRIDES_SELECT}
+         JOIN projects p ON p.id = ps.project_id
+        WHERE p.org_id = ? AND p.archived_at IS NULL AND x.j IS NOT NULL`,
+    )
+    .bind(orgId)
+    .all<OverrideRow>()
+  return new Map((results ?? []).map((row) => [row.project_id, overridesFromRow(row)]))
 }
 
 /** One project's own values. */

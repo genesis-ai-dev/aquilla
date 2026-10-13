@@ -516,3 +516,40 @@ describe("saving a project's own visibility floors (AQU-1771)", () => {
     })
   })
 })
+
+describe("counting the org's stricter projects (AQU-1771)", () => {
+  async function project(id: string, settings: Record<string, unknown>, archived = false) {
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO projects (id, name, org_id, created_by, archived_at) VALUES (?, ?, 1, 1, ${archived ? "now()" : "NULL"})`,
+    )
+      .bind(id, id)
+      .run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_settings (project_id, settings, version, updated_by) VALUES (?, ?, 1, 1)",
+    )
+      .bind(id, JSON.stringify(settings))
+      .run()
+  }
+
+  const counts = async (username: string) =>
+    app.request("/api/v2/orgs/1/settings/visibility-overrides", { headers: authHeader(await jwtFor(username)) }, env)
+
+  it("counts only live projects whose own value is stricter than the org's", async () => {
+    await seedOrgAndProject()
+    await setOrgSettings({ rosterViewMinRole: 500 })
+    await project("a", { rosterViewMinRole: 600, memberProgressViewMinRole: 700 })
+    await project("b", { rosterViewMinRole: 500 }) // equal to the org's: follows it
+    await project("c", { rosterViewMinRole: 400, memberProgressViewMinRole: 600 }) // below / equal: inert
+    await project("d", { rosterViewMinRole: 700 }, true) // archived
+    await project("e", { systemPrompt: "nothing about visibility" })
+    const res = await counts("tom")
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ rosterViewMinRole: 1, memberProgressViewMinRole: 1 })
+  })
+
+  it("refuses someone outside the org", async () => {
+    await seedOrgAndProject()
+    await seedUser(9, "stranger")
+    expect((await counts("stranger")).status).toBe(403)
+  })
+})

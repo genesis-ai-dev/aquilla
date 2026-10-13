@@ -13,8 +13,12 @@ import { useI18n } from "@/lib/i18n/I18nProvider"
 interface OverrideStatusProps {
   /** How many of the org's projects set their own value for this default. */
   count: number
-  /** "number" for counts (approvals needed), "setting" for switches and choices. */
-  kind: "number" | "setting"
+  /**
+   * "number" for counts (approvals needed), "setting" for switches and
+   * choices, "stricter" for a setting a project may only make stricter
+   * (AQU-1771: who sees the member list / each member's progress).
+   */
+  kind: "number" | "setting" | "stricter"
   /** Opens the section's reset confirmation. Omitted below the edit gate. */
   onReset?: () => void
   disabled?: boolean
@@ -45,7 +49,9 @@ export function OverrideStatus({ count, kind, onReset, disabled, loading = false
     <span className="mt-1 block" data-testid="override-status">
       {kind === "number"
         ? t("settings.overrideStatus.someOwnNumber", { count })
-        : t("settings.overrideStatus.someOwnSetting", { count })}
+        : kind === "stricter"
+          ? t("settings.overrideStatus.someStricter", { count })
+          : t("settings.overrideStatus.someOwnSetting", { count })}
       {onReset ? (
         <>
           {" · "}

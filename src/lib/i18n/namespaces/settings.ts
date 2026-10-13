@@ -101,6 +101,12 @@ export const settings = defineNamespace({
       other: "{count} projects set their own setting",
     }, "count"),
     "settings.overrideStatus.reset": "Reset to default",
+    // AQU-1771: under "Who can see the member list" / "Who can see member
+    // progress" — projects may only make these stricter.
+    "settings.overrideStatus.someStricter": plural({
+      one: "{count} project is stricter than this",
+      other: "{count} projects are stricter than this",
+    }, "count"),
 
     // ── RepetitionPropagationSection (AQU-1391) ──
     "settings.autoPropagateRepetitions.label": "Auto-propagate repetitions",
@@ -468,6 +474,16 @@ export const settings = defineNamespace({
           "who may add rows…) when some projects set their own value and ignore the default. " +
           "A 'Reset to default' link follows it after a middle dot.",
         placeholders: { count: "How many projects set their own setting." },
+      },
+      "settings.overrideStatus.someStricter": {
+        description:
+          "Status line under the organization's 'who can see the member list' and 'who can see " +
+          "member progress' settings (Settings → Security). A project may only make these stricter " +
+          "(hide more), never looser; this says how many projects in the organization chose to. " +
+          "There is no reset: a stricter project is a deliberate choice.",
+        placeholders: {
+          count: "Whole number of projects, 1 or more.",
+        },
       },
       "settings.overrideStatus.reset": {
         description:

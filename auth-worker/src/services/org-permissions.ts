@@ -35,10 +35,13 @@ import {
 } from "../../../src/lib/frontier/portfolio-metrics"
 import { effectiveThresholdSql } from "../../../db/shared/validation-threshold"
 import {
+  loadOrgProjectVisibilityOverrides,
   loadProjectVisibilityOverride,
   parseProjectVisibilityFloor,
   stricterProjectFloor,
+  VISIBILITY_FLOOR_KEYS,
   type ProjectVisibilityOverrides,
+  type VisibilityFloorKey,
 } from "../../../db/shared/visibility-floors"
 
 /** Map numeric role level to a human-readable name. Used for secondarySources. */
@@ -2783,6 +2786,27 @@ export async function getProjectVisibilityFloors(
     loadProjectVisibilityOverride(env.AQUILLA_PG, projectId),
   ])
   return combineVisibilityFloors(org, own)
+}
+
+/**
+ * AQU-1771: how many of the org's live projects make each floor stricter than
+ * the org does — the "N projects are stricter" line under the org's setting.
+ */
+export async function countStricterVisibilityProjects(
+  env: Env,
+  orgId: number,
+): Promise<Record<VisibilityFloorKey, number>> {
+  const [org, rows] = await Promise.all([
+    getOrgVisibilityFloors(env, orgId),
+    loadOrgProjectVisibilityOverrides(env.AQUILLA_PG, orgId),
+  ])
+  const counts: Record<VisibilityFloorKey, number> = { rosterViewMinRole: 0, memberProgressViewMinRole: 0 }
+  for (const own of rows.values()) {
+    for (const key of VISIBILITY_FLOOR_KEYS) {
+      if (stricterProjectFloor(org[key], own[key]) != null) counts[key] += 1
+    }
+  }
+  return counts
 }
 
 /**

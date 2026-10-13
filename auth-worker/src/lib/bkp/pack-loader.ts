@@ -25,9 +25,11 @@ import { checkWordFields, checkWordIds } from "../../../../db/shared/bible-check
 import type { TextWordInput } from "../../../../db/shared/bible-checks/types"
 import { isSecondPersonWord } from "../../../../db/shared/bible-facts/facts"
 import {
+  isBkpQuestion,
   parseServerLayer,
   parseServerManifest,
   type BkpManifest,
+  type BkpQuestion,
   type BkpWord,
   type ServerBkpLayer,
   type ServerBkpLayerData,
@@ -43,8 +45,11 @@ const LAYER_MAX_BYTES = 8_000_000
 const MANIFEST_CACHE_SECONDS = 300
 /** A versioned layer URL never changes content. */
 const LAYER_CACHE_SECONDS = 7 * 24 * 3600
-/** Parsed layers kept per isolate: four layers of three books (the text layer compacted). */
-const MEMORY_ENTRIES = 12
+/**
+ * Parsed layers kept per isolate: five layers of three books (the text layer
+ * compacted; AQU-1701: of the notes layer, only its questions).
+ */
+const MEMORY_ENTRIES = 15
 const BOOK_CODE = /^[1-4]?[A-Z]{2,3}$/
 
 /**
@@ -63,7 +68,9 @@ export type BkpResult<T> = { ok: true; value: T } | { ok: false; reason: BkpFail
  * fields the facts read ("you" singular or plural), and (AQU-1697) the words
  * the Bible data checks read: number words, negators with their neighbours,
  * and each verse's last word (db/shared/bible-checks/text-compact.ts). A
- * full layer runs to ~4 MB of JSON and several times that parsed.
+ * full layer runs to ~4 MB of JSON and several times that parsed. AQU-1701:
+ * also the verbs whose subject the people layer resolves, with their gloss,
+ * for the referent question (P13: "…the one who answered?").
  */
 export interface CompactTextLayer {
   book: string
@@ -79,6 +86,8 @@ export interface BookPack {
   people: ServerBkpLayerData["people"]
   /** Present only when the caller asked for it and it loaded. */
   text: CompactTextLayer | null
+  /** AQU-1701: the book's Translation Questions (C1). Present only when the caller asked for them and they loaded. */
+  questions: readonly BkpQuestion[] | null
 }
 
 type PackEnv = Pick<Env, "BKP_BASE" | "AQUIFER_USER_AGENT">
@@ -200,16 +209,21 @@ function remember(key: string, value: unknown): void {
   }
 }
 
-/** Only the words of a text layer that autopilot reads (see CompactTextLayer). */
-export function compactTextLayer(layer: ServerBkpLayerData["text"]): CompactTextLayer {
+/**
+ * Only the words of a text layer that autopilot reads (see CompactTextLayer).
+ * `subjects`: AQU-1701, the words whose subject the people layer resolves
+ * (`impliedSubjectWords`); kept with their gloss.
+ */
+export function compactTextLayer(layer: ServerBkpLayerData["text"], subjects: ReadonlySet<string> = new Set()): CompactTextLayer {
   const verses: CompactTextLayer["verses"] = {}
   const words: CompactTextLayer["words"] = {}
   const checkIds = checkWordIds(layer)
+  const withFields = (id: string) => checkIds.has(id) || subjects.has(id)
   for (const [ref, ids] of Object.entries(layer.verses)) {
     if (!Array.isArray(ids)) continue
     const kept = ids.filter((id) => {
       const word = Object.hasOwn(layer.words, id) ? layer.words[id] : undefined
-      return word !== undefined && (isSecondPersonWord(word) || checkIds.has(id))
+      return word !== undefined && (isSecondPersonWord(word) || withFields(id))
     })
     if (kept.length === 0) continue
     verses[ref] = kept
@@ -221,11 +235,25 @@ export function compactTextLayer(layer: ServerBkpLayerData["text"]): CompactText
         morph,
         ...(person ? { person } : {}),
         ...(number ? { number } : {}),
-        ...(checkIds.has(id) ? checkWordFields(word) : {}),
+        ...(withFields(id) ? checkWordFields(word) : {}),
       }
     }
   }
   return { book: layer.book, verses, words }
+}
+
+/** AQU-1701: the words the people layer marks as a verb whose subject it resolves (P13 reads their gloss). */
+export function impliedSubjectWords(people: ServerBkpLayerData["people"]): Set<string> {
+  const out = new Set<string>()
+  for (const [wordId, mention] of Object.entries(people.mentions)) {
+    if (mention?.kind === "subject") out.add(wordId)
+  }
+  return out
+}
+
+/** AQU-1701: a notes layer's well-formed Translation Questions. The notes themselves are dropped. */
+export function questionsOf(layer: ServerBkpLayerData["notes"]): BkpQuestion[] {
+  return layer.questions.filter(isBkpQuestion).map(({ id, refs, q, a }) => ({ id, refs: [...refs], q, a }))
 }
 
 async function loadLayer<L extends ServerBkpLayer, T = ServerBkpLayerData[L]>(
@@ -261,15 +289,16 @@ async function loadLayer<L extends ServerBkpLayer, T = ServerBkpLayerData[L]>(
 
 /**
  * The voices, structure and people layers of one book (a USFM code such as
- * "JHN"), and the text layer when `text` is set. The three are required: if
- * one fails, the result is that failure. The text layer is best effort — it
- * is several MB and only feeds second-person facts — so its failure leaves
- * `text: null`.
+ * "JHN"), the text layer when `text` is set, and (AQU-1701) the notes layer's
+ * Translation Questions when `questions` is set. The three are required: if
+ * one fails, the result is that failure. The text and notes layers are best
+ * effort — several MB each, and each feeds only some facts and checks — so a
+ * failure leaves `text: null` or `questions: null`.
  */
 export async function loadBookPack(
   env: PackEnv,
   book: string,
-  opts: { text?: boolean } = {},
+  opts: { text?: boolean; questions?: boolean } = {},
 ): Promise<BkpResult<BookPack>> {
   const base = bkpBase(env)
   if (!base) return { ok: false, reason: "invalid" }
@@ -290,9 +319,12 @@ export async function loadBookPack(
   if (!voices.ok) return voices
   if (!structure.ok) return structure
   if (!people.ok) return people
-  const text = opts.text && entry.layers.includes("text")
-    ? await loadLayer(env, base, version, "text", book, compactTextLayer)
-    : null
+  const [text, questions] = await Promise.all([
+    opts.text && entry.layers.includes("text")
+      ? loadLayer(env, base, version, "text", book, (layer) => compactTextLayer(layer, impliedSubjectWords(people.value)))
+      : null,
+    opts.questions && entry.layers.includes("notes") ? loadLayer(env, base, version, "notes", book, questionsOf) : null,
+  ])
   return {
     ok: true,
     value: {
@@ -302,6 +334,7 @@ export async function loadBookPack(
       structure: structure.value,
       people: people.value,
       text: text?.ok ? text.value : null,
+      questions: questions?.ok ? questions.value : null,
     },
   }
 }

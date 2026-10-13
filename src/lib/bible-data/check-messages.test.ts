@@ -16,6 +16,8 @@ import type { RuleInfraction } from "@/lib/parsers/types"
 import { JHN4_STRUCTURE, JHN4_VOICES } from "../../../db/shared/bible-checks/__fixtures__/pack"
 import { JHN_A_STRUCTURE, JHN_A_TEXT, JHN_A_VOICES } from "../../../db/shared/bible-checks/__fixtures__/pack-a"
 import type { BibleCheckId } from "../../../db/shared/bible-checks/types"
+import { JHN_B_PEOPLE, JHN_B_STRUCTURE, JHN_B_TEXT, JHN_B_VOICES } from "../../../db/shared/bible-checks/__fixtures__/pack-b"
+import { buildNameTable } from "../../../db/shared/bible-checks/agreed-names"
 
 const format = { list: (items: readonly string[]) => formatList(items, "en"), percent: (n: number) => formatPercent(n, "en") }
 const profile = {
@@ -124,6 +126,59 @@ describe("formatting a check-pack-A finding", () => {
     )
     expect(formatInfractionEvidence(inf, t, format)).toEqual([
       "JHN 7:53–8:11: in double brackets in the critical Greek text (NA28, SBLGNT)",
+    ])
+  })
+})
+
+// AQU-1699: check pack B's findings read the same way. WHY: a name finding must
+// say whose name, what the project agreed, and where the decision comes from,
+// so the translator can fix the verse or the decision.
+describe("formatting a check-pack-B finding", () => {
+  const decide = (key: string, value: string) => ({ id: key, key, value, scope: {}, author: "dev", at: "2026-10-06T00:00:00.000Z" })
+  const names = buildNameTable({
+    people: JHN_B_PEOPLE,
+    text: JHN_B_TEXT,
+    facts: [decide("render.person.Jesus.2", "Jesus"), decide("render.person.Peter", "Peter|Simon|Cephas")],
+    sourceLanguage: "en",
+  })
+  const synthetic = {
+    pronouns: {
+      secondPerson: { numberDistinction: true, singular: ["yu"], plural: ["yupela"] },
+      firstPersonPlural: { clusivity: true, inclusive: ["yumi"], exclusive: ["mipela"] },
+    },
+  }
+  const cellsB = ["JHN 4:16", "JHN 4:22"].map((ref) => ({ id: ref, globalReferences: [ref] }))
+  const contextsB = buildCellCheckContexts(cellsB, JHN_B_VOICES, JHN_B_STRUCTURE, synthetic, JHN_B_TEXT, { people: JHN_B_PEOPLE, names })
+  const findingB = (ref: string, checkId: BibleCheckId, text: string) => {
+    const found = bibleCheckInfraction(`builtin:${checkId}`, checkId, ref, "f", text, contextsB.get(ref)?.bible)
+    if (!found) throw new Error(`${checkId} did not fire on ${ref}`)
+    return found
+  }
+
+  it("names the implied subject, the name the translation used, and the decision behind the agreed name", () => {
+    const inf = findingB("JHN 4:16", "bkp:P6", "Peter said to her, “Go, call your husband.”")
+    expect(formatInfractionReason(inf, t)).toBe(
+      "The source does not name who acts here, and the Bible data says that it is Jesus. But the translation names “Peter”.",
+    )
+    expect(formatInfractionEvidence(inf, t, format)).toEqual([
+      "Macula: in JHN 4:16, word 1 has Jesus as its implied subject",
+      "Agreed name: decision render.person.Jesus.2",
+    ])
+  })
+
+  it("says which “you” the Greek has, choosing the sentence by number", () => {
+    const inf = findingB("JHN 4:22", "bkp:P8", "Yu i lotu long samting yu i no save long en.")
+    expect(formatInfractionReason(inf, t)).toBe(
+      "Every “you” in the source of this verse speaks to several people, but the translation has a singular “you”.",
+    )
+    expect(formatInfractionEvidence(inf, t, format)).toEqual(["Macula: every “you” in JHN 4:22 is plural"])
+  })
+
+  it("names who “we” is and who is spoken to, for an exclusive “we”", () => {
+    const inf = findingB("JHN 4:22", "bkp:P9", "Yupela i lotu. Yumi i lotu long samting yumi i save long en.")
+    expect(formatInfractionReason(inf, t)).toBe("Here “we” does not include the people spoken to, but the translation has the inclusive “we”.")
+    expect(formatInfractionEvidence(inf, t, format)).toEqual([
+      "ACAI: JHN 4:22 word 6. “We”: Jews; Jesus. Spoken to: Samaritan woman; Samaritans.",
     ])
   })
 })

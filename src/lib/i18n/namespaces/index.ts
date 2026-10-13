@@ -50,6 +50,7 @@ import { projectDecisions } from "./projectDecisions"
 import { bibleAlignment } from "./bibleAlignment"
 import { bibleChecks } from "./bibleChecks"
 import { bibleHelps } from "./bibleHelps"
+import { bibleParticipants } from "./bibleParticipants"
 
 export const NAMESPACES = [
   common,
@@ -86,4 +87,5 @@ export const NAMESPACES = [
   bibleAlignment,
   bibleChecks,
   bibleHelps,
+  bibleParticipants,
 ] as const

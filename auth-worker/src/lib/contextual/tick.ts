@@ -1183,7 +1183,8 @@ async function processSpan(
           drafts: fresh.map((c) => ({
             cellId: c.cellId,
             text: c.text,
-            verdicts: withBibleVerdicts(verdictsByCell.get(c.cellId) ?? {}, rechecks.get(c.cellId) ?? null),
+            // AQU-1701: a finding's own evidence (bkp:C1) replaces its "flag".
+            verdicts: withBibleVerdicts({ ...verdictsByCell.get(c.cellId), ...c.values }, rechecks.get(c.cellId) ?? null),
             provenance: {
               spanId: draft.spanId,
               spanLabel: label,
@@ -1475,6 +1476,10 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
     pairs,
     profile: ctx.languageProfile,
     concepts: ctx.concepts,
+    // AQU-1699: the decisions and source language that give each name its agreed rendering.
+    facts: ctx.projectFacts,
+    sourceLanguage: ctx.sourceLanguage,
+    multiLane: ctx.multiLane,
   })
   // A Language-profile slot the pack needs and the project lacks: ask once per
   // run, without parking it (runId: null).

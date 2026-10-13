@@ -4,6 +4,8 @@
 // bible-wiki pipeline/src/schemas/bkp.ts. The SPA mirrors it in
 // src/lib/bible-data/pack-types.ts; a worker cannot import SPA code, so this
 // file mirrors the same four layers and the manifest. Keep the three in step.
+// AQU-1701 adds the notes layer's Translation Questions, which only the
+// worker reads.
 //
 // Like the SPA, the worker checks each file's ENVELOPE only: the right kind of
 // object, for the right book, with the top-level fields its layer needs. That
@@ -11,8 +13,11 @@
 // `invalid` before any reader sees it, without re-running the pipeline's
 // field-by-field checks on several MB per book.
 
-/** The layers autopilot reads. `notes` and `terms` have no schema yet (AQU-1685). */
-export const SERVER_BKP_LAYERS = ["text", "structure", "voices", "people"] as const
+/**
+ * The layers autopilot reads. AQU-1701: `notes` (pack 1.2), for its
+ * Translation Questions only. `terms` has no reader here yet.
+ */
+export const SERVER_BKP_LAYERS = ["text", "structure", "voices", "people", "notes"] as const
 export type ServerBkpLayer = (typeof SERVER_BKP_LAYERS)[number]
 
 export interface BkpWord {
@@ -108,11 +113,30 @@ export interface BkpPeopleLayer {
   mentions: Record<string, BkpMention>
 }
 
+/** AQU-1701: one unfoldingWord Translation Question (TQ): the verses it asks about, the question, its answer. */
+export interface BkpQuestion {
+  id: string
+  refs: string[]
+  q: string
+  a: string
+}
+
+/**
+ * AQU-1701: the notes layer. Autopilot keeps only `questions` (C1); the
+ * Translation Notes are most of the file's bytes and nothing here reads them.
+ */
+export interface BkpNotesLayer {
+  book: string
+  notes: unknown[]
+  questions: unknown[]
+}
+
 export interface ServerBkpLayerData {
   text: BkpTextLayer
   structure: BkpStructureLayer
   voices: BkpVoicesLayer
   people: BkpPeopleLayer
+  notes: BkpNotesLayer
 }
 
 export interface BkpManifest {
@@ -145,6 +169,19 @@ const LAYER_SHAPES: Readonly<Record<ServerBkpLayer, { objects: readonly string[]
   structure: { objects: ["verses"], arrays: ["segments", "moves"] },
   voices: { objects: ["narrator", "verses"], arrays: ["speeches"] },
   people: { objects: ["entities", "mentions"], arrays: [] },
+  notes: { objects: [], arrays: ["notes", "questions"] },
+}
+
+/**
+ * A Translation Question the C1 check can ask: an id, at least one verse ref,
+ * a question and an answer. The envelope check passes a layer whose entries
+ * are malformed, so each entry is checked before anything reads it.
+ */
+export function isBkpQuestion(raw: unknown): raw is BkpQuestion {
+  if (!isRecord(raw)) return false
+  const { id, refs, q, a } = raw
+  if (typeof id !== "string" || typeof q !== "string" || typeof a !== "string" || !a.trim()) return false
+  return Array.isArray(refs) && refs.length > 0 && refs.every((ref) => typeof ref === "string")
 }
 
 /** A layer file for `book`, or null when `raw` is not one. */

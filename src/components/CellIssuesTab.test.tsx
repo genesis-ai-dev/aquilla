@@ -152,6 +152,22 @@ describe("CellIssuesTab (AQU-1133)", () => {
   })
 })
 
+// Review of #1199: an infraction below its rule's severity (an info P5 on a
+// place, under P5's major rule) shows at its own severity, amber not red.
+describe("CellIssuesTab — an infraction's own lower severity (AQU-1699)", () => {
+  it("shows a minor infraction under a major rule in amber", () => {
+    renderTab({ activeInfractions: [{ ...infraction("rule-active"), severity: "minor" }], waivedInfractions: [] })
+    const icon = row("rule-active").querySelector("svg")!
+    expect(icon.getAttribute("class")).toContain("text-amber-500")
+    expect(icon.getAttribute("class")).not.toContain("text-red-500")
+  })
+
+  it("keeps a plain infraction at its major rule's red", () => {
+    renderTab({ waivedInfractions: [] })
+    expect(row("rule-active").querySelector("svg")!.getAttribute("class")).toContain("text-red-500")
+  })
+})
+
 describe("CellIssuesTab per-finding waivers (AQU-1740)", () => {
   const REPEATED = "builtin:repeated-word"
   const REPEATED_RULE_MAP = new Map<string, TranslationRule>([

@@ -10,13 +10,10 @@
 //
 // Relative imports only, no DOM: shared with the workers.
 
-import {
-  filledLanguageProfileSlots,
-  type LanguageProfile,
-  type QuestionMarkersProfile,
-  type QuoteMarksProfile,
-} from '../language-profile'
+import type { LanguageProfile, QuestionMarkersProfile, QuoteMarksProfile } from '../language-profile'
 import { isMarkedSpeech } from './compile'
+import { bibleChecksReadPeople, bibleChecksReadText, isBibleCheckDormant } from './dormancy'
+import { analyzeNames, type NamesAnalysis, type PackBCellInput } from './evaluate-names'
 import {
   checkAbsentVerse,
   checkCardinals,
@@ -26,13 +23,21 @@ import {
   checkSentenceRunsOn,
   type PackACellInput,
 } from './evaluate-pack-a'
+import {
+  checkClusivity,
+  checkClusivityDecision,
+  checkDeityPronouns,
+  checkDivineNames,
+  checkGroupNumber,
+  checkSecondPerson,
+} from './evaluate-pronouns'
+import { NO_READINESS } from './participant-types'
 import { scanQuotes, type QuoteToken } from './quote-scan'
 import { wordNumber, wordRef } from './refs'
 import { UNSPACED_SCRIPT, WORD_PART, escapeRegExp } from './text-match'
 import { maskUsfm } from './usfm-mask'
 import {
   BIBLE_CHECK_DEFAULT_SEVERITY,
-  BIBLE_CHECK_NEEDS,
   type BibleCheckEvidence,
   type BibleCheckFinding,
   type BibleCheckId,
@@ -103,21 +108,15 @@ interface Evaluation {
   levels: Map<number, LevelExpectation>
   /** AQU-1697: what the pack-A checks read; the text with its notes blanked out. */
   packA: PackACellInput
+  /** AQU-1699: what the pack-B checks read; null without the people layer. */
+  packB: PackBCellInput | null
+  /** AQU-1699: P1, P3–P6 from one pass over the text, computed on first use. */
+  names: NamesAnalysis | null
 }
 
-/** True when a check cannot run because its Language-profile slot is empty. */
-export function isBibleCheckDormant(id: BibleCheckId, profile: LanguageProfile | null | undefined): boolean {
-  const filled = filledLanguageProfileSlots(profile)
-  return BIBLE_CHECK_NEEDS[id].some((slot) => !filled.has(slot))
-}
-
-/** AQU-1697: checks that read the text layer. N1 and N2 need it; M3 and S3 are sharper with it. */
-const TEXT_LAYER_CHECKS: readonly BibleCheckId[] = ['bkp:N1', 'bkp:N2', 'bkp:M3', 'bkp:S3']
-
-/** Is the text layer worth loading for this profile? Several MB per book, so only when a check reads it. */
-export function bibleChecksReadText(profile: LanguageProfile | null | undefined): boolean {
-  return TEXT_LAYER_CHECKS.some((id) => !isBibleCheckDormant(id, profile))
-}
+// AQU-1699: dormancy, and the pack layers worth loading, live in ./dormancy.ts;
+// re-exported for the callers that import them from here.
+export { bibleChecksReadPeople, bibleChecksReadText, isBibleCheckDormant }
 
 function expectedByLevel(expectation: CellExpectation): Map<number, LevelExpectation> {
   const levels = new Map<number, LevelExpectation>()
@@ -381,7 +380,26 @@ const CHECKS: readonly (readonly [BibleCheckId, (e: Evaluation) => BibleCheckFin
   ['bkp:S3', (e) => checkSentenceRunsOn(e.packA)],
   ['bkp:S6', (e) => checkAbsentVerse(e.packA)],
   ['bkp:S7', (e) => checkDisputedPassage(e.packA)],
+  // AQU-1699: check pack B. P2 and X3 compare cells, so they are scans.
+  ['bkp:P1', (e) => namesOf(e)?.['bkp:P1'] ?? null],
+  ['bkp:P3', (e) => namesOf(e)?.['bkp:P3'] ?? null],
+  ['bkp:P4', (e) => namesOf(e)?.['bkp:P4'] ?? null],
+  ['bkp:P5', (e) => namesOf(e)?.['bkp:P5'] ?? null],
+  ['bkp:P6', (e) => namesOf(e)?.['bkp:P6'] ?? null],
+  ['bkp:P8', (e) => (e.packB ? checkSecondPerson(e.packB) : null)],
+  ['bkp:P9', (e) => (e.packB ? checkClusivity(e.packB) : null)],
+  ['bkp:P10', (e) => (e.packB ? checkGroupNumber(e.packB) : null)],
+  ['bkp:P14', (e) => (e.packB ? checkDivineNames(e.packB) : null)],
+  ['bkp:P15', (e) => (e.packB ? checkDeityPronouns(e.packB) : null)],
+  ['bkp:X4', (e) => (e.packB ? checkClusivityDecision(e.packB) : null)],
 ]
+
+/** The names analysis, run once per evaluation however many name checks ask. */
+function namesOf(e: Evaluation): NamesAnalysis | null {
+  if (!e.packB) return null
+  e.names ??= analyzeNames(e.packB)
+  return e.names
+}
 
 /**
  * In a split verse this cell holds only part of the verse, so where a mark
@@ -397,20 +415,30 @@ const VERSE_LEVEL_CHECKS: ReadonlySet<BibleCheckId> = new Set(['bkp:V3', 'bkp:V5
 const VARIANT_CHECKS: ReadonlySet<BibleCheckId> = new Set(['bkp:S6', 'bkp:S7'])
 
 /**
+ * AQU-1699: a name the verse does not have is wrong in every part of a split
+ * verse. The other pack-B checks need the whole verse's text (a name or a form
+ * may sit in the other part).
+ */
+const PART_SAFE_CHECKS: ReadonlySet<BibleCheckId> = new Set(['bkp:P5'])
+
+/**
  * Every finding for one cell. Empty when the cell has no expectation, its text
  * is empty (the empty-translation check covers that), or every check is
- * dormant because its Language-profile slot is empty.
+ * dormant: its Language-profile slot is empty or (AQU-1699) the project has not
+ * decided what it needs (./dormancy.ts).
  */
 export function evaluateCell(
   targetText: string,
   expectation: CellExpectation | null | undefined,
   languageProfile: LanguageProfile | null | undefined,
 ): BibleCheckFinding[] {
-  const filled = filledLanguageProfileSlots(languageProfile)
-  const active = CHECKS.filter(([id]) => BIBLE_CHECK_NEEDS[id].every((slot) => filled.has(slot)))
-  if (active.length === 0 || !expectation || targetText.trim() === '') return []
+  if (!expectation || targetText.trim() === '') return []
+  const readiness = expectation.participants?.names.readiness ?? NO_READINESS
+  const active = CHECKS.filter(([id]) => !isBibleCheckDormant(id, languageProfile, readiness))
+  if (active.length === 0) return []
   const marks = languageProfile?.quoteMarks ?? null
   const tokens = marks ? scanQuotes(targetText, marks, expectation.startDepth).tokens : []
+  const masked = maskUsfm(targetText)
   const e: Evaluation = {
     text: targetText,
     expectation,
@@ -420,13 +448,18 @@ export function evaluateCell(
     opens: byDepth(tokens, ['open']),
     closes: byDepth(tokens, ['close', 'stray-close']),
     levels: expectedByLevel(expectation),
-    packA: { text: maskUsfm(targetText), rawText: targetText, expectation, profile: languageProfile ?? {} },
+    packA: { text: masked, rawText: targetText, expectation, profile: languageProfile ?? {} },
+    packB: expectation.participants
+      ? { text: masked, expectation, participants: expectation.participants, profile: languageProfile ?? {} }
+      : null,
+    names: null,
   }
   const runnable = !expectation.inPack
     ? active.filter(([id]) => VARIANT_CHECKS.has(id))
     : expectation.approximate
       ? active.filter(
-          ([id]) => (VERSE_LEVEL_CHECKS.has(id) && !expectation.boundaries) || VARIANT_CHECKS.has(id),
+          ([id]) =>
+            (VERSE_LEVEL_CHECKS.has(id) && !expectation.boundaries) || VARIANT_CHECKS.has(id) || PART_SAFE_CHECKS.has(id),
         )
       : active
   const findings: BibleCheckFinding[] = []

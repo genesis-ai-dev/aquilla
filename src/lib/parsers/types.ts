@@ -107,6 +107,7 @@ export type BuiltinCheckId =
   | "repeated-word"
   | "unpaired-symbols"
   | "abbreviation-mismatch"
+  | "usfm-structure"
   | "capitalization"
   | "footnote-quote-mismatch"
 

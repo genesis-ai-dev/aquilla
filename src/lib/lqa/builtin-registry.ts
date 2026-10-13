@@ -10,6 +10,7 @@ import * as doubleSpace from "./check-functions/double-space"
 import * as repeatedWord from "./check-functions/repeated-word"
 import * as unpairedSymbols from "./check-functions/unpaired-symbols"
 import * as abbreviationMismatch from "./check-functions/abbreviation-mismatch"
+import * as usfmStructure from "./check-functions/usfm-structure"
 import * as capitalization from "./check-functions/capitalization"
 import * as footnoteQuoteMismatch from "./check-functions/footnote-quote-mismatch"
 
@@ -155,6 +156,16 @@ export const BUILTIN_CHECKS: Record<BuiltinCheckId, BuiltinCheckDefinition> = {
     run: abbreviationMismatch.runCheck,
     message: abbreviationMismatch.MESSAGE,
   },
+  "usfm-structure": {
+    id: "usfm-structure",
+    name: "USFM markers",
+    description: "Markers in the translation must be recognized and closed (\\f … \\f*).",
+    defaultSeverity: "major",
+    defaultEnabled: true,
+    runsOnEmptyTarget: false,
+    run: usfmStructure.runCheck,
+    message: usfmStructure.MESSAGE,
+  },
   "capitalization": {
     id: "capitalization",
     name: "Capitalization",
@@ -190,6 +201,7 @@ export const BUILTIN_CHECK_IDS: BuiltinCheckId[] = [
   "repeated-word",
   "unpaired-symbols",
   "abbreviation-mismatch",
+  "usfm-structure",
   "capitalization",
   "footnote-quote-mismatch",
 ]

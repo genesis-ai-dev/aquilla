@@ -15,6 +15,11 @@
 //      words that carry a term (Key terms on).
 // The notes and terms layers load when this tab first opens for a book.
 //
+// AQU-1700: in the Old Testament the words are Macula Hebrew morphemes, one
+// row each (וַ, תֹּאמֶר, …), marked `lang="hbo"` (or "arc") and `dir="rtl"`, so
+// they read right to left inside a left-to-right page. An implied article
+// has no letters of its own; its row shows its lemma in parentheses.
+//
 // Not here yet: the M1 rhetorical-question hook and the tab's attention dot
 // from Bible checks. Both need AQU-1688's check evaluator, which is on
 // another PR stack (#1189).
@@ -23,6 +28,7 @@ import { useContext } from "react"
 import { termsOfWord } from "@/lib/bible-data/helps-index"
 import { mentionsIn, type MentionAt } from "@/lib/bible-data/people-index"
 import type { BkpMention, BkpRef, BkpTextLayer, BkpWord, BkpWordId } from "@/lib/bible-data/pack-types"
+import { wordScript } from "@/lib/bible-data/original-script"
 import { cellVoicesFor } from "@/lib/bible-data/voice-index"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
@@ -100,7 +106,7 @@ function VerseWords({
   return (
     <div className="flex flex-col gap-1">
       {showRef && <h5 className="font-medium text-muted-foreground">{verseRef}</h5>}
-      {/* The pack's words are SBLGNT Greek (word ids "n…"). */}
+      {/* SBLGNT Greek words (ids "n…"), or Macula Hebrew morphemes (ids "o…"). */}
       <ol className="grid grid-cols-[auto_auto_1fr] items-baseline gap-x-3 gap-y-1">
         {ids.map((wordId) => {
           const word = Object.hasOwn(context.text.words, wordId) ? context.text.words[wordId] : undefined
@@ -114,7 +120,7 @@ function VerseWords({
               data-notes={helps.noteIds.get(wordId)?.join(" ")}
               className="col-span-3 grid grid-cols-subgrid"
             >
-              <NotedWord word={word} numbers={helps.noteNumbers.get(wordId)} />
+              <NotedWord wordId={wordId} word={word} numbers={helps.noteNumbers.get(wordId)} />
               <span className="text-muted-foreground">{word.gloss}</span>
               <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                 {at ? <Referent view={view} at={at} word={word.text} /> : null}
@@ -130,24 +136,37 @@ function VerseWords({
   )
 }
 
-/** A Greek word; with `numbers`, highlighted and marked with the notes that discuss it. */
-function NotedWord({ word, numbers }: { word: BkpWord; numbers: readonly number[] | undefined }) {
+/** A Greek word or Hebrew morpheme; with `numbers`, highlighted and marked with the notes that discuss it. */
+function NotedWord({
+  wordId,
+  word,
+  numbers,
+}: {
+  wordId: BkpWordId
+  word: BkpWord
+  numbers: readonly number[] | undefined
+}) {
   const t = useT()
   const fmt = useFormat()
   const noted = numbers !== undefined && numbers.length > 0
+  const script = wordScript(wordId, word)
+  // A Hebrew implied article: no letters in the text, only its lemma (הַ).
+  const implied = word.text === "" && word.lemma !== ""
   return (
     <span>
       <span
-        lang="grc"
-        dir="ltr"
+        lang={script.lang}
+        dir={script.dir}
         data-noted={noted ? "true" : undefined}
+        data-implied={implied ? "true" : undefined}
         className={cn(
           "text-sm",
+          implied && "text-muted-foreground",
           noted &&
             "rounded-sm bg-amber-100 px-0.5 underline decoration-amber-600 underline-offset-4 dark:bg-amber-400/20 dark:decoration-amber-300",
         )}
       >
-        {word.text}
+        {implied ? `(${word.lemma})` : word.text}
         {noted && (
           <sup aria-hidden="true" className="ms-0.5 text-[10px] font-semibold text-amber-800 dark:text-amber-300">
             {numbers.map((number) => fmt.count(number)).join(",")}

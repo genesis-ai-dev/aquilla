@@ -4,7 +4,8 @@
 // drawing, a pack word's tokens that sit next to each other become one span
 // ("to her"), and when two pack words claim the same token the more
 // confident one keeps it. Every span says whether it is approximate (dotted),
-// by bridge-compose.ts's rule. Pure.
+// by bridge-compose.ts's rule, or because its word always draws dotted (an
+// OT pronoun, AQU-1700). Pure.
 
 import { tokenSpans, type TokenSpan } from "@/lib/completion/tokenize"
 import { composeBridges, tintStyle, type WordTokenLink } from "./bridge-compose"
@@ -30,11 +31,16 @@ export interface BridgedWord extends AlignedWord {
 /** The training size under a bridge whose links are exact (a Greek source is its own alignment). */
 export const EXACT_PAIRS = Number.POSITIVE_INFINITY
 
-/** Group a word's links into runs of adjacent tokens; resolve tokens two words claim. */
+/**
+ * Group a word's links into runs of adjacent tokens; resolve tokens two words
+ * claim. A word `alwaysDotted` names is approximate whatever its confidence
+ * (see alwaysDottedWords in bridge-compose.ts).
+ */
 export function spansFromLinks(
   links: readonly WordTokenLink[],
   trainedPairs: number,
   wanted: (wordId: BkpWordId) => boolean,
+  alwaysDotted: (wordId: BkpWordId) => boolean = () => false,
 ): BridgedSpan[] {
   // Each token goes to its most confident word.
   const owner = new Map<number, WordTokenLink>()
@@ -54,7 +60,9 @@ export function spansFromLinks(
       spans.push({ wordId: link.wordId, firstToken: token, lastToken: token, conf: link.conf, approximate: false })
     }
   }
-  for (const span of spans) span.approximate = tintStyle(span.conf, trainedPairs) === "dotted"
+  for (const span of spans) {
+    span.approximate = alwaysDotted(span.wordId) || tintStyle(span.conf, trainedPairs) === "dotted"
+  }
   return spans
 }
 
@@ -87,10 +95,12 @@ export function targetSpans(
   bridge1: { links: readonly WordTokenLink[]; trainedPairs: number },
   bridge2: { links: readonly AlignLink[]; trainedPairs: number },
   wanted: (wordId: BkpWordId) => boolean,
+  alwaysDotted?: (wordId: BkpWordId) => boolean,
 ): BridgedSpan[] {
   return spansFromLinks(
     composeBridges(bridge1.links, bridge2.links),
     Math.min(bridge1.trainedPairs, bridge2.trainedPairs),
     wanted,
+    alwaysDotted,
   )
 }

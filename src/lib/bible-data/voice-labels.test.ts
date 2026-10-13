@@ -16,6 +16,7 @@ import {
   acaiLanguageFor,
   acaiLanguageForLocale,
   agreedRendering,
+  linkedConceptIndex,
   pickLabelText,
   resolveVoiceLabel,
   type ProjectNameSource,
@@ -147,6 +148,77 @@ describe("project names (terminology)", () => {
   })
 })
 
+// AQU-1693: a concept linked to the entity by `externalIds.acai`. The link is
+// exact, the headword match a guess, so the link decides; and the link is what
+// names people when there is no source-language label to match by at all.
+describe("project names from a linked concept (AQU-1693)", () => {
+  const linkedTo = (acai: string, sourceTerm: string, renderings: Concept["renderings"], status?: Concept["status"]) => ({
+    ...concept(sourceTerm, renderings, status),
+    externalIds: { acai },
+  })
+  const byLink = (concepts: Concept[]): Partial<ProjectNameSource> => {
+    const index = linkedConceptIndex(concepts)
+    return { concepts, conceptsForEntity: (id) => index.get(people.entities[id]?.acai ?? "") ?? [] }
+  }
+
+  it("names Jesus from the linked concept in a Greek-source project, which has no label to match", () => {
+    const concepts = [linkedTo(JESUS, "Ἰησοῦς", [{ rendering: "Yesus", status: "preferred" }])]
+    const greek = options({ names: { ...byLink(concepts), sourceLanguage: acaiLanguageFor("grc") } })
+    expect(resolveVoiceLabel(JESUS, jesus, greek)).toEqual({ label: "Yesus", source: "terminology" })
+  })
+
+  it("the linked concept wins over an entry that only shares the headword", () => {
+    const concepts = [
+      concept("Jesus", [{ rendering: "Isa", status: "preferred" }]),
+      linkedTo(JESUS, "Yesus Kristus", [{ rendering: "Yesus", status: "preferred" }]),
+    ]
+    expect(resolveVoiceLabel(JESUS, jesus, options({ names: byLink(concepts) }))?.label).toBe("Yesus")
+  })
+
+  it("never falls back to a headword entry for a rendering the linked concept forbids", () => {
+    const concepts = [
+      concept("Jesus", [{ rendering: "Isa", status: "preferred" }]),
+      linkedTo(JESUS, "Jesus", [{ rendering: "Isa", status: "forbidden" }]),
+    ]
+    // The link agrees no name, so the chain moves on to the interface language.
+    expect(resolveVoiceLabel(JESUS, jesus, options({ names: byLink(concepts) }))).toEqual({
+      label: "Jésus",
+      source: "acai",
+    })
+  })
+
+  it("does not name a namesake: an entry linked to one Joseph is not the other's name", () => {
+    const JOSEPH_4 = "person:Joseph.4"
+    const otherJoseph = { ...people.entities["person:Joseph.10"], acai: JOSEPH_4 }
+    const concepts = [linkedTo(JOSEPH_4, "Joseph", [{ rendering: "Yusuf", status: "preferred" }])]
+    const names = { ...byLink(concepts), conceptsForEntity: (id: string) => (id === JOSEPH_4 ? concepts : []) }
+    expect(resolveVoiceLabel(JOSEPH_4, otherJoseph, options({ names }))?.label).toBe("Yusuf")
+    expect(resolveVoiceLabel("person:Joseph.10", people.entities["person:Joseph.10"], options({ names }))?.source).not.toBe(
+      "terminology",
+    )
+  })
+
+  it("ignores a linked suggestion (draft) and uses the headword match", () => {
+    const concepts = [
+      concept("Jesus", [{ rendering: "Isa", status: "preferred" }]),
+      linkedTo(JESUS, "Jesus", [{ rendering: "Yesus", status: "preferred" }], "draft"),
+    ]
+    expect(resolveVoiceLabel(JESUS, jesus, options({ names: byLink(concepts) }))?.label).toBe("Isa")
+  })
+
+  it("keeps the lanes rule: two linked preferred renderings in a multi-lane project name no one", () => {
+    const concepts = [
+      linkedTo(JESUS, "Jesus", [
+        { rendering: "Yesus", status: "preferred" },
+        { rendering: "Isa", status: "preferred" },
+      ]),
+    ]
+    expect(resolveVoiceLabel(JESUS, jesus, options({ names: { ...byLink(concepts), multiLane: true } }))?.source).toBe(
+      "acai",
+    )
+  })
+})
+
 describe("interface language, then English", () => {
   const withRendering = { concepts: [concept("Jesus", [{ rendering: "Yesus", status: "preferred" }])] }
 
@@ -248,5 +320,54 @@ describe("pickLabelText", () => {
     expect(pickLabelText(undefined, "project", french)).toBeNull()
     expect(pickLabelText({ fra: "  ", eng: 3 }, "project", french)).toBeNull()
     expect(pickLabelText({ spa: "Samaria" }, "project", french)).toBeNull()
+  })
+})
+
+// AQU-1700: pack 1.2.0 keys every label map by one scheme, where `cmn` is
+// Traditional Chinese (ACAI's names, Translation Words' `zht` titles) and
+// `cmn-Hans` Simplified (Aquifer's `zhs`, which no source fills yet). A
+// Simplified interface must read Simplified text when the pack has it, and
+// say so when it can only offer Traditional.
+describe("Chinese scripts (pack 1.2.0 label keys)", () => {
+  const simplified = acaiLanguageForLocale("zh-Hans")
+  const traditional = acaiLanguageForLocale("zh-Hant")
+  // Real pack data has no `cmn-Hans` yet: this is what a Simplified label will look like.
+  const jesusWithSimplified = { ...jesus, labels: { ...jesus.labels, "cmn-Hans": "耶稣" } }
+  // RUT 1:16 עָזְבֵךְ "forsake" carries tw:forsaken, whose only Chinese title is Traditional.
+  const forsaken = { eng: "Forsaken", cmn: "離棄" }
+
+  it("reads a Simplified interface's names from cmn-Hans first, as its own script", () => {
+    expect(
+      resolveVoiceLabel(JESUS, jesusWithSimplified, options({ mode: "interface", interfaceLanguage: simplified })),
+    ).toEqual({ label: "耶稣", source: "acai" })
+  })
+
+  it("never gives a Traditional interface the Simplified name", () => {
+    expect(
+      resolveVoiceLabel(JESUS, jesusWithSimplified, options({ mode: "interface", interfaceLanguage: traditional })),
+    ).toEqual({ label: "耶穌", source: "acai" })
+  })
+
+  it("picks a key term's Simplified title when there is one, else the Traditional one, flagged", () => {
+    expect(pickLabelText({ ...forsaken, "cmn-Hans": "离弃" }, "interface", simplified)).toEqual({
+      text: "离弃",
+      language: "cmn-Hans",
+    })
+    // Without it the title is still Chinese, so the chip can say "In Traditional characters".
+    expect(pickLabelText(forsaken, "interface", simplified)).toEqual({
+      text: "離棄",
+      language: "cmn",
+      otherScript: true,
+    })
+    // A Traditional interface reads `cmn` as its own script.
+    expect(pickLabelText(forsaken, "interface", traditional)).toEqual({ text: "離棄", language: "cmn" })
+  })
+
+  it("keeps English the fallback, and English-only mode English", () => {
+    expect(pickLabelText({ eng: "Forsaken" }, "interface", simplified)).toEqual({ text: "Forsaken", language: "eng" })
+    expect(pickLabelText({ ...forsaken, "cmn-Hans": "离弃" }, "english", simplified)).toEqual({
+      text: "Forsaken",
+      language: "eng",
+    })
   })
 })

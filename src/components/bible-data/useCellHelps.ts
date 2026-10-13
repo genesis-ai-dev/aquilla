@@ -4,8 +4,8 @@
 // The notes layer is big (about 1.3 MB raw for John), so nothing loads it
 // until a Context tab opens for the book, and only while Translation helps is
 // on; key terms load the same way, only while Key terms is on. The pack
-// client keeps one promise per file per session, so every later tab, in any
-// cell of the book, reads it from memory. Nothing here throws: a failure is a
+// client keeps one promise per file of the open book, so every later tab, in
+// any cell of the book, reads it from memory. Nothing here throws: a failure is a
 // typed reason, and a later tab retries (the client never remembers one).
 
 import { useEffect, useState } from "react"

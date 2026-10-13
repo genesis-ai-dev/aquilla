@@ -43,8 +43,25 @@ import {
 import { eventLaneTag } from '../../../src/lib/lanes/event-lane'
 import { visibleCellIdSql, visibleSourceSql } from './hidden-cells-scope'
 import { liveCellIdSql, liveSourceSql } from './tombstoned-cells-scope'
+import { coerceExternalIds } from '../../../src/lib/terminology/external-ids'
 
 export { laneIdResolveBinds, laneIdResolveSql } from './lane-id-sql'
+
+// AQU-1693: a concept's Bible entity link. Nothing upstream validates an
+// app-pushed term.* payload, so the projector coerces it: a malformed value
+// must never become a link that names someone.
+
+/** term.create: the link as JSON, or NULL (absent, malformed or empty). */
+function createExternalIdsJson(raw: unknown): string | null {
+  const ids = raw === undefined ? undefined : coerceExternalIds(raw)
+  return ids?.acai ? JSON.stringify(ids) : null
+}
+
+/** term.update, for COALESCE: NULL leaves the column alone (absent or malformed); `{}` unlinks. */
+function updateExternalIdsJson(raw: unknown): string | null {
+  const ids = raw === undefined ? undefined : coerceExternalIds(raw)
+  return ids === undefined ? null : JSON.stringify(ids)
+}
 
 // A single event row as it lives in Postgres. JSON.parse on `payload` is the
 // caller's responsibility — `payload` here is already an object.
@@ -2406,8 +2423,8 @@ case 'cell.audio.attach': {
             // is an idempotent no-op rather than a duplicate concept.
             `INSERT INTO concepts (
               concept_id, project_id, source_term, renderings, notes,
-              status, case_sensitive, match_options, created_by, created_at, updated_at, deleted_at
-            ) VALUES (?, ?, ?, ${STAMP_RENDERINGS_SQL}, ?, ?, ?, ?::text::jsonb, ?, ?, ?, NULL)
+              status, case_sensitive, match_options, external_ids, created_by, created_at, updated_at, deleted_at
+            ) VALUES (?, ?, ?, ${STAMP_RENDERINGS_SQL}, ?, ?, ?, ?::text::jsonb, ?::text::jsonb, ?, ?, ?, NULL)
             ON CONFLICT(concept_id) DO NOTHING`,
           )
           .bind(
@@ -2420,6 +2437,7 @@ case 'cell.audio.attach': {
             p.status,
             p.caseSensitive ? 1 : 0,
             p.match === undefined ? null : JSON.stringify(p.match),
+            createExternalIdsJson(p.externalIds),
             event.author,
             event.serverTs,
             event.serverTs,
@@ -2454,6 +2472,7 @@ case 'cell.audio.attach': {
                notes          = COALESCE(?, notes),
                case_sensitive = COALESCE(?, case_sensitive),
                match_options  = COALESCE(?::text::jsonb, match_options),
+               external_ids   = COALESCE(?::text::jsonb, external_ids),
                updated_at     = ?
              WHERE concept_id = ? AND project_id = ? AND deleted_at IS NULL`,
           )
@@ -2463,6 +2482,7 @@ case 'cell.audio.attach': {
             p.notes ?? null,
             p.caseSensitive === undefined ? null : p.caseSensitive ? 1 : 0,
             p.match === undefined ? null : JSON.stringify(p.match),
+            updateExternalIdsJson(p.externalIds),
             event.serverTs,
             p.conceptId,
             event.projectId,

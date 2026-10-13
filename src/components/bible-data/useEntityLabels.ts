@@ -12,6 +12,7 @@ import type { BkpEntity, BkpEntityId } from "@/lib/bible-data/pack-types"
 import {
   acaiLanguageFor,
   acaiLanguageForLocale,
+  linkedConceptIndex,
   pickLabelText,
   resolveVoiceLabel,
   type VoiceLabel,
@@ -20,8 +21,11 @@ import {
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { useBibleDataViewPrefs } from "@/lib/store/bible-data-view-prefs"
+import type { Concept } from "@/lib/terminology/types"
 
 export type EntityLabeler = (entityId: BkpEntityId) => VoiceLabel | null
+
+const NO_CONCEPTS: readonly Concept[] = []
 
 /** The label chain over one pack's entities, cached per entity; null until the entities load. */
 export function useEntityLabels(
@@ -33,14 +37,21 @@ export function useEntityLabels(
   const multiLane = projectTargetLaneLanguages(project).length > 1
   return useMemo(() => {
     if (!entities) return null
+    const concepts = project.terminology ?? []
+    // AQU-1693: concepts linked to an entity by its ACAI id name it first.
+    const linked = linkedConceptIndex(concepts)
     const options: VoiceLabelOptions = {
       mode: labelMode,
       interfaceLanguage: acaiLanguageForLocale(locale),
       projectNames: {
-        concepts: project.terminology ?? [],
+        concepts,
         termMatching: project.termMatching,
         sourceLanguage: acaiLanguageFor(project.sourceLanguage),
         multiLane,
+        conceptsForEntity: (entityId) => {
+          const acai = Object.hasOwn(entities, entityId) ? entities[entityId].acai : undefined
+          return (acai && linked.get(acai)) || NO_CONCEPTS
+        },
       },
     }
     const cache = new Map<BkpEntityId, VoiceLabel | null>()
@@ -59,9 +70,14 @@ export function useEntityLabels(
 export interface PickedText {
   text: string
   lang: string
+  /** AQU-1700: Traditional characters in a Simplified Chinese interface. */
+  otherScript?: true
 }
 
 export type LabelTextPicker = (byLanguage: Readonly<Record<string, unknown>> | undefined) => PickedText | null
+
+/** The BCP 47 tag of a pack label key the interface's own tag does not cover: the pack's Chinese keys name their script. */
+const LANG_BY_LABEL_KEY: Readonly<Record<string, string>> = { eng: "en", cmn: "zh-Hant", "cmn-Hans": "zh-Hans" }
 
 /**
  * AQU-1695: descriptions, key-term titles and deity forms in the label
@@ -75,8 +91,10 @@ export function useLabelText(): LabelTextPicker {
     const ui = acaiLanguageForLocale(locale)
     return (byLanguage) => {
       const picked = pickLabelText(byLanguage, labelMode, ui)
-      // The only other language it can pick is the interface language.
-      return picked ? { text: picked.text, lang: picked.language === "eng" ? "en" : locale } : null
+      if (!picked) return null
+      // Otherwise it picked the interface language itself.
+      const lang = Object.hasOwn(LANG_BY_LABEL_KEY, picked.language) ? LANG_BY_LABEL_KEY[picked.language] : locale
+      return picked.otherScript ? { text: picked.text, lang, otherScript: true } : { text: picked.text, lang }
     }
   }, [labelMode, locale])
 }

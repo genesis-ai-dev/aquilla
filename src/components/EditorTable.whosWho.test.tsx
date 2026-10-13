@@ -23,7 +23,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import type { ReactNode } from "react"
+import type { ComponentProps, ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
 import { requestBibleFilter } from "./bible-data/bible-data-bus"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
@@ -182,6 +182,7 @@ function renderTable(
   source: (verse: string) => string = greekSource,
   rows: CellRow[] = makeRows(source),
   bibleOpen = true,
+  extra: Partial<ComponentProps<typeof EditorTable>> = {},
 ) {
   const store = new CellStore()
   store.setRuntime({ projectId: "proj-1", fileId: FILE_ID, username: "tester", requiredValidations: 1, auditStats: new Map() })
@@ -208,12 +209,13 @@ function renderTable(
           sourceTextDirection="ltr"
           targetTextDirection="ltr"
           bibleOpen={bibleOpen}
+          {...extra}
         />
       </EditorActionsProvider>
     </QueryClientProvider>
   )
   const view = render(ui(project))
-  return { rerender: (next: ProjectRecord) => view.rerender(ui(next)) }
+  return { rerender: (next: ProjectRecord) => view.rerender(ui(next)), unmount: () => view.unmount() }
 }
 
 function row(cellId: string): HTMLElement {
@@ -384,6 +386,30 @@ describe("word tints on a Greek source", () => {
     act(() => setBibleDataViewPrefs({ whosWhoHighlights: "off" }))
     expect(allMentions()).toEqual([])
     expect(row(cellIdFor("4:10")).textContent).toContain("αὐτὸν")
+  })
+})
+
+// AQU-1693: "Add to terminology" in the mention popover. In a Greek source the
+// pack has no label to use as the headword, so the word that names him gives
+// it; a pronoun is not his name, so it falls back to his English name.
+describe("add to terminology from the mention popover", () => {
+  async function addFrom(word: string, verse = "4:10") {
+    const add = vi.fn()
+    const view = renderTable(makeProject(), greekSource, makeRows(greekSource), true, { onAddConceptFromSelection: add })
+    await mentionsLoaded()
+    act(() => mentionWord(cellIdFor(verse), word).focus())
+    const details = await screen.findByTestId("mention-details")
+    fireEvent.click(within(details).getByRole("button", { name: /Add .*Jesus.* to terminology/ }))
+    view.unmount()
+    return add.mock.calls[0]?.[0]
+  }
+
+  it("takes the headword from the word that names him", async () => {
+    expect(await addFrom("Ἰησοῦς")).toEqual({ sourceTerm: "Ἰησοῦς", externalIds: { acai: JESUS } })
+  })
+
+  it("does not take a pronoun's lemma for his name", async () => {
+    expect(await addFrom("αὐτὸν")).toEqual({ sourceTerm: "Jesus", externalIds: { acai: JESUS } })
   })
 })
 

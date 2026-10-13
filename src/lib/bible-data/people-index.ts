@@ -51,11 +51,17 @@ export interface MentionAt {
   firstOrSecondPerson: boolean
 }
 
-/** One pericope: an OpenText segment of the book. */
+/**
+ * One passage of the book: a pericope (a segment of the pack's structure
+ * layer: an OpenText seg, or in 10 OT books an SIL OTN section), or, in a
+ * book the pack gives no segments (29 OT books, AQU-1700), a chapter.
+ */
 export interface Pericope {
   id: string
-  /** The dataset's English title. Data, not interface text. */
+  kind: "segment" | "chapter"
+  /** The dataset's English title. Data, not interface text. Empty for a chapter. */
   title: string
+  /** The first and last word; for a chapter, its first and last mention. */
   from: BkpWordId
   to: BkpWordId
   fromRef: BkpRef
@@ -71,7 +77,10 @@ export interface PeopleIndex {
   byVerse: ReadonlyMap<BkpRef, readonly MentionAt[]>
   /** Each entity's verses, in order, each once: where previous/next jumps land. */
   refsByEntity: ReadonlyMap<BkpEntityId, readonly BkpRef[]>
-  /** The book's pericopes, in order. Empty when the structure layer is missing. */
+  /**
+   * The book's pericopes, in order; its chapters when the structure layer
+   * has no segments for it. Empty when the structure layer is missing.
+   */
   pericopes: readonly Pericope[]
   /**
    * Participants a negative word introduces ("no one", οὐδείς): no later
@@ -143,9 +152,10 @@ export function buildPeopleIndex(
     const fromRef = refOfWord(people.book, segment.from)
     const toRef = refOfWord(people.book, segment.to)
     if (!fromRef || !toRef) continue
-    pericopes.push({ id: segment.id, title: segment.title, from: segment.from, to: segment.to, fromRef, toRef })
+    pericopes.push({ id: segment.id, kind: "segment", title: segment.title, from: segment.from, to: segment.to, fromRef, toRef })
   }
   pericopes.sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0))
+  if (structure && pericopes.length === 0) pericopes.push(...chapterPassages(people.book, structure, mentions))
 
   const negators = new Set<BkpWordId>()
   for (const verse of Object.values(structure?.verses ?? {})) {
@@ -159,9 +169,38 @@ export function buildPeopleIndex(
   return { book: people.book, entities: people.entities, mentions, byVerse, refsByEntity, pericopes, negativeReferents }
 }
 
+/**
+ * A book the pack gives no segments (no open OT pericope source covers 29 OT
+ * books): each chapter is a passage, from its first verse to its last, as the
+ * structure layer lists them. A chapter that mentions nobody has no cast.
+ */
+function chapterPassages(book: string, structure: BkpStructureLayer, mentions: readonly MentionAt[]): Pericope[] {
+  const chapters = new Map<number, { fromRef: BkpRef; toRef: BkpRef; from?: BkpWordId; to?: BkpWordId }>()
+  const verses = Object.keys(structure.verses ?? {})
+    .filter((ref) => !Number.isNaN(verseOrdinal(ref)))
+    .sort((a, b) => verseOrdinal(a) - verseOrdinal(b))
+  for (const ref of verses) {
+    const chapter = Math.floor(verseOrdinal(ref) / 1000)
+    const known = chapters.get(chapter)
+    if (known) known.toRef = ref
+    else chapters.set(chapter, { fromRef: ref, toRef: ref })
+  }
+  // Mentions are in word order, so the first and last of a chapter bound it.
+  for (const at of mentions) {
+    const chapter = chapters.get(Math.floor(verseOrdinal(at.ref) / 1000))
+    if (!chapter) continue
+    chapter.from ??= at.wordId
+    chapter.to = at.wordId
+  }
+  return [...chapters].flatMap(([chapter, { fromRef, toRef, from, to }]) =>
+    from && to ? [{ id: `chapter:${book} ${chapter}`, kind: "chapter" as const, title: "", from, to, fromRef, toRef }] : [],
+  )
+}
+
 // ── Memo: one index per (pack version, book) ────────────────────────────────
 
-const INDEX_CACHE_LIMIT = 8
+/** The open book's only (AQU-1700): an entry holds its layers, and an OT book's are several MB. */
+const INDEX_CACHE_LIMIT = 1
 interface IndexCacheEntry {
   people: BkpPeopleLayer
   structure: BkpStructureLayer | null

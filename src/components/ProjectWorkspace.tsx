@@ -247,7 +247,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { canHarmonize, emitCastAssign, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, enqueueEvents } from "@/lib/sync/events-emit"
+import { canHarmonize, emitCastAssign, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -489,6 +489,7 @@ import { useSubscribedConcepts } from "@/hooks/useSubscribedConcepts"
 import { resolveTermbaseEditFloor } from "@/lib/terminology/glossary-view"
 import { conceptsForLaneTag } from "@/lib/terminology/rendering-lane"
 import type { ConceptDraft } from "@/lib/terminology/types"
+import type { EntityLinkRequest } from "@/components/bible-data/entity-term-context"
 import { buildGlosser, type Glosser } from "@/lib/completion/bt-glosser"
 import { memMark } from "@/lib/perf-log"
 import { buildAlignmentModel, type AlignmentModel } from "@/lib/completion/interlinear"
@@ -6405,6 +6406,8 @@ export function ProjectWorkspace() {
         // overrides) are part of the term, not popover-local UI state — drop
         // them here and the chips the user just clicked would do nothing.
         ...(draft.match ? { match: draft.match } : {}),
+        // AQU-1693: from a Voices or Who's Who popover, the Bible entity it names.
+        ...(draft.externalIds?.acai ? { externalIds: draft.externalIds } : {}),
         author: currentUsername,
       })
       const created = { id: conceptId }
@@ -6430,6 +6433,33 @@ export function ProjectWorkspace() {
       })
     }
   }, [project, currentUsername, refreshConcepts, t, navigate])
+
+  // AQU-1693: "Link “Jesus” to Jesus" from a Voices or Who's Who popover: one
+  // term.update naming the Bible entity. Binding (the server gates every
+  // term.update at the termbase floor), so the popover offers it only to
+  // someone who can approve terms.
+  const handleLinkConceptToEntity = useCallback(async (link: EntityLinkRequest) => {
+    if (!project) return
+    try {
+      await emitTermUpdate({
+        projectId: project.id,
+        conceptId: link.conceptId,
+        externalIds: link.externalIds,
+        author: currentUsername,
+      })
+      await refreshConcepts()
+      toast.add({
+        type: "success",
+        title: t("bibleData.terms.linkedToast", { term: link.term, name: link.name }),
+        timeout: 8000,
+      })
+    } catch (err) {
+      toast.add({
+        type: "error",
+        title: err instanceof Error ? err.message : t("terminology.addConcept.saveFailed"),
+      })
+    }
+  }, [project, currentUsername, refreshConcepts, t])
 
   // AQU-1006 follow-up: terminology now has TWO authority levels, so this is
   // two questions rather than one.
@@ -14528,6 +14558,7 @@ export function ProjectWorkspace() {
             onOpenAudioSetup={openAudioSetup}
             onProjectChanged={refresh}
             onAddConceptFromSelection={handleAddConceptFromSelection}
+            onLinkConceptToEntity={handleLinkConceptToEntity}
             addConceptBlockedReason={addConceptBlockedReason}
             canApproveConcept={canApproveConcept}
             onAskAiFromSelection={handleAskAiFromSelection}

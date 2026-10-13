@@ -5,13 +5,17 @@
 // label chain and are bidi-isolated; the chip takes its direction from its
 // own text (`dir="auto"`) and the arrow mirrors in a right-to-left run.
 //
+// AQU-1692: a "?" after a speaker the data is unsure of, and a warning sign
+// when a speech in the verse has a disputed boundary.
+//
 // Hover opens the details popover, and so does keyboard focus: hover is never
 // the only way in. Focus stays on the chip, and Tab moves into the popover.
 
 import { Fragment } from "react"
+import { AlertTriangle } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import type { BkpEntityId } from "@/lib/bible-data/pack-types"
-import type { Voice } from "@/lib/bible-data/voice-index"
+import { speakerNeedsCheck, type Voice } from "@/lib/bible-data/voice-index"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
 import { cn } from "@/lib/utils"
@@ -44,11 +48,12 @@ export function VoiceChip({ view, className }: VoiceChipProps) {
     if (voice.kind === "narrator") return narrator
     const speaker = fmt.isolate(nameOf(voice.speech.speaker))
     const addressee = addresseeOf(voice)
-    return addressee === null
-      ? speaker
-      : t("bibleData.voices.speaksTo", { speaker, addressee: fmt.isolate(addressee) })
+    const spokenVoice =
+      addressee === null ? speaker : t("bibleData.voices.speaksTo", { speaker, addressee: fmt.isolate(addressee) })
+    return speakerNeedsCheck(voice.speech) ? t("bibleVoices.chip.checkAria", { voice: spokenVoice }) : spokenVoice
   })
   if (chip.more > 0) spoken.push(t("bibleData.voices.moreVoices", { count: chip.more }))
+  if (chip.disputed) spoken.push(t("bibleVoices.chip.disputedAria"))
   const ariaLabel = t(voices.approximate ? "bibleData.voices.chipAriaApproximate" : "bibleData.voices.chipAria", {
     voices: fmt.list(spoken),
   })
@@ -61,6 +66,7 @@ export function VoiceChip({ view, className }: VoiceChipProps) {
         closeDelay={150}
         data-testid="voice-chip"
         data-voice-approximate={voices.approximate ? "true" : undefined}
+        data-voice-disputed={chip.disputed ? "true" : undefined}
         aria-label={ariaLabel}
         dir="auto"
         className={cn(
@@ -75,6 +81,12 @@ export function VoiceChip({ view, className }: VoiceChipProps) {
             ≈
           </span>
         )}
+        {chip.disputed && (
+          <AlertTriangle
+            aria-hidden="true"
+            className="me-0.5 inline size-3 align-[-2px] text-amber-700 dark:text-amber-400"
+          />
+        )}
         {chip.voices.map((voice, position) => (
           <Fragment key={position}>
             {position > 0 && (
@@ -87,6 +99,11 @@ export function VoiceChip({ view, className }: VoiceChipProps) {
             ) : (
               <>
                 <bdi>{nameOf(voice.speech.speaker)}</bdi>
+                {speakerNeedsCheck(voice.speech) && (
+                  <span aria-hidden="true" data-voice-check="" className="ms-0.5 font-medium text-amber-700 dark:text-amber-400">
+                    ?
+                  </span>
+                )}
                 {addresseeOf(voice) !== null && (
                   <>
                     <span aria-hidden="true" className="mx-0.5 inline-block rtl:-scale-x-100">

@@ -24,12 +24,25 @@ export interface BibleVoicesContextValue {
   shared: ReadonlySet<BkpRef>
   /** The name to show for an entity, through the label chain; null when the pack has none. */
   labelFor: (entityId: BkpEntityId) => VoiceLabel | null
-  /** AQU-1693: the book's people, for "Add to terminology" on a speaker or listener. */
-  entities: Readonly<Record<BkpEntityId, BkpEntity>>
   showChips: boolean
   showRails: boolean
   /** Filter the editor to the cells where `speaker` speaks. */
   showLinesBy: (speaker: BkpEntityId) => void
+  /**
+   * The book's participants (the pack's `people` layer): a maintainer's picker
+   * (AQU-1692) and "Add to terminology" on a speaker or listener (AQU-1693).
+   */
+  entities: Readonly<Record<BkpEntityId, BkpEntity>>
+  /** AQU-1692: what a maintainer may do from the voice details; null for everyone else. */
+  maintainer: VoiceMaintainerActions | null
+}
+
+/** AQU-1692: a maintainer's actions on the voices. Stable callbacks, so rows stay memoized. */
+export interface VoiceMaintainerActions {
+  /** Open the correction dialog for one speech; null when there is nowhere to save it. */
+  correct: ((speechId: string) => void) | null
+  /** Open "Adopt voices as cast" for a chapter ("RUT 1"); null when the project cannot take a cast. */
+  adoptCast: ((chapter: string) => void) | null
 }
 
 export const BibleVoicesContext = createContext<BibleVoicesContextValue | null>(null)

@@ -20,6 +20,7 @@
 
 import { TEXT_DIRECTION_SETTING_VALUES } from './text-direction'
 import { BIBLE_ENRICHMENT_IDS } from './bible-enrichments'
+import { BIBLE_VOICE_OVERRIDES_TYPE_NAME, bibleVoiceOverridesProblem } from './bible-voice-overrides'
 import { LANGUAGE_PROFILE_TYPE_NAME, languageProfileProblem } from './language-profile'
 import { PROJECT_FACTS_TYPE_NAME, projectFactsProblem } from './project-facts'
 
@@ -187,6 +188,14 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
   // AQU-1686: one switch per Bible data enrichment (db/shared/bible-enrichments.ts).
   // A missing id means that enrichment's default.
   bibleEnrichments: { kind: 'object', booleanFlags: BIBLE_ENRICHMENT_IDS },
+  // AQU-1692: maintainers' corrections of who speaks a pack speech, and to whom
+  // (db/shared/bible-voice-overrides.ts). Maintainer-only like every key with
+  // no carve-out.
+  bibleVoiceOverrides: {
+    kind: 'object',
+    problem: (value) => bibleVoiceOverridesProblem(value),
+    typeName: BIBLE_VOICE_OVERRIDES_TYPE_NAME,
+  },
   knowledgeBaseEnabled: { kind: 'boolean' },
   importExcludeFrontMatter: { kind: 'boolean' },
   // AQU-1720: what one imported cell is for docx/txt/md uploads.

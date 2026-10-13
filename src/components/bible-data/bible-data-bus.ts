@@ -6,9 +6,11 @@
 // that file acts on them. A request nobody listens for is dropped, never
 // queued, so it cannot surprise a table that mounts later. The editor also
 // publishes its current filter, so the panel can show which participant is
-// filtering; the editor clears it when it unmounts.
+// filtering; the editor clears it when it unmounts. AQU-1692: it also
+// publishes how the open book's data loaded, for View settings → Bible data.
 
 import { useCallback, useSyncExternalStore } from "react"
+import type { BkpFailureReason } from "@/lib/bible-data/pack-client"
 import type { BkpEntityId, BkpRef } from "@/lib/bible-data/pack-types"
 
 export type BibleFilterKind = "speaker" | "mentions"
@@ -90,4 +92,43 @@ function subscribeActive(listener: () => void): () => void {
 export function useActiveBibleFilter(fileId: string | null): BibleFilterSpec | null {
   const snapshot = useCallback(() => (fileId ? (activeFilters.get(fileId) ?? null) : null), [fileId])
   return useSyncExternalStore(subscribeActive, snapshot, snapshot)
+}
+
+// ── How the open book's Bible data loaded, as the editor publishes it (AQU-1692) ──
+
+/**
+ * What View settings → Bible data says about the open book: why its data did
+ * not load, and this book's voice corrections whose speech the pack no longer
+ * has. The editor publishes it while Bible data shows, and clears it when it
+ * unmounts.
+ */
+export interface BiblePackStatus {
+  book: string
+  /** Why the book's Bible data did not load; null when it did. */
+  failure: BkpFailureReason | null
+  /** Speech ids of this book's corrections that a rebuilt pack no longer has. */
+  orphanedCorrections: readonly string[]
+}
+
+const packStatuses = new Map<string, BiblePackStatus>()
+const statusListeners = new Set<() => void>()
+
+export function publishBiblePackStatus(fileId: string, status: BiblePackStatus | null): void {
+  if (status) packStatuses.set(fileId, status)
+  else if (packStatuses.has(fileId)) packStatuses.delete(fileId)
+  else return
+  for (const listener of statusListeners) listener()
+}
+
+function subscribeStatus(listener: () => void): () => void {
+  statusListeners.add(listener)
+  return () => {
+    statusListeners.delete(listener)
+  }
+}
+
+/** How the Bible data of the editor showing `fileId` loaded, or null when it shows none. */
+export function useBiblePackStatus(fileId: string | null): BiblePackStatus | null {
+  const snapshot = useCallback(() => (fileId ? (packStatuses.get(fileId) ?? null) : null), [fileId])
+  return useSyncExternalStore(subscribeStatus, snapshot, snapshot)
 }

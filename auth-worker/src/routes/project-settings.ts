@@ -452,6 +452,20 @@ projectSettings.on(
       }
     }
 
+    // AQU-1692: the voice index reads these corrections, so a malformed map is
+    // refused the same way, and by the same rule as the Agent API. Null clears.
+    // An unchanged stored value rides along, as for bibleEnrichments above.
+    const rawVoiceOverrides = (body.settings as Record<string, unknown>).bibleVoiceOverrides
+    if (rawVoiceOverrides !== undefined) {
+      const problem = validateSettingsKeyValue("bibleVoiceOverrides", rawVoiceOverrides)
+      if (problem) {
+        const before = stored.settings.bibleVoiceOverrides
+        if (JSON.stringify(before) !== JSON.stringify(rawVoiceOverrides)) {
+          return c.json({ error: problem }, 400)
+        }
+      }
+    }
+
     const queryVersion = parseIntOrNull(c.req.query("ifMatchVersion"))
     const headerVersion = parseIntOrNull(c.req.header("If-Match-Version"))
     const ifMatchVersion =

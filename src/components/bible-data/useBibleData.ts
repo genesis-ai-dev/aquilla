@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import type { CellStore, CellSummary } from "@/hooks/useActiveCellStore"
 import type { BkpEntityId, BkpRef } from "@/lib/bible-data/pack-types"
+import type { VoiceCastCell } from "@/lib/bible-data/voice-cast"
 import { isBibleDataExperimentOn } from "@/lib/bible-data/experiment"
 import { mentionsEntity, type PeopleIndex } from "@/lib/bible-data/people-index"
 import {
@@ -23,14 +24,22 @@ import {
   type VoiceIndex,
 } from "@/lib/bible-data/voice-index"
 import { projectHasScriptureFiles, type ProjectRecord } from "@/lib/parsers/types"
+import { ownCastName } from "@/lib/timeline/cue-character"
+import { assignedCastVoiceId, findVoice } from "@/lib/audio/voices"
 import { useBibleDataViewPrefs } from "@/lib/store/bible-data-view-prefs"
 import { resolveBibleEnrichment } from "../../../db/shared/bible-enrichments"
-import { onBibleFilterRequest, publishBibleFilter, type BibleFilterKind, type BibleFilterSpec } from "./bible-data-bus"
+import {
+  onBibleFilterRequest,
+  publishBibleFilter,
+  publishBiblePackStatus,
+  type BibleFilterKind,
+  type BibleFilterSpec,
+} from "./bible-data-bus"
 import type { TargetCorpusCell } from "./target-bridge"
 import { useBibleVoices } from "./useBibleVoices"
 import { useWhosWho } from "./useWhosWho"
 import { useVerseCells } from "./verse-cells"
-import type { BibleVoicesContextValue } from "./voices-context"
+import type { BibleVoicesContextValue, VoiceMaintainerActions } from "./voices-context"
 import type { WhosWhoContextValue } from "./whos-who-context"
 
 export interface BibleDataOptions {
@@ -47,6 +56,10 @@ export interface BibleDataOptions {
   jumpToCell: (cellId: string) => void
   /** Sync tokens, for the stored word alignment (AQU-1694). */
   getTokenForFile?: (fileId: string) => Promise<string | null>
+  /** AQU-1692: the person may correct voices (a maintainer, with somewhere to save). */
+  canCorrectVoices?: boolean
+  /** AQU-1692: the person may adopt the voices as the cast (a maintainer, with somewhere to send it). */
+  canAdoptVoiceCast?: boolean
 }
 
 /** The filter as the bar above the list shows it. */
@@ -69,7 +82,17 @@ export interface BibleData {
   /** True when the filter is hiding this cell of the file. */
   filterHides: (cellId: string) => boolean
   clearFilter: () => void
+  /** AQU-1692: the speech a maintainer is correcting, or null. */
+  correcting: string | null
+  closeCorrection: () => void
+  /** AQU-1692: the chapter whose voices a maintainer is adopting as the cast, or null. */
+  adoptingCast: string | null
+  closeAdoptCast: () => void
+  /** AQU-1692: the file's cells as adopting reads them, with the cast names they have now. */
+  voiceCastCells: () => VoiceCastCell[]
 }
+
+const NO_CORRECTIONS: readonly string[] = []
 
 /** The cells a filter keeps, or null when it cannot apply (its data is not loaded). */
 export function filterCells(
@@ -114,6 +137,8 @@ export function useBibleData({
   fileId,
   jumpToCell,
   getTokenForFile,
+  canCorrectVoices = false,
+  canAdoptVoiceCast = false,
 }: BibleDataOptions): BibleData {
   const prefs = useBibleDataViewPrefs()
   const hasScripture = projectHasScriptureFiles(project.files)
@@ -144,7 +169,42 @@ export function useBibleData({
   const showLinesBy = useCallback((entity: BkpEntityId) => setFilter({ kind: "speaker", entity }), [setFilter])
   const showMentionsOf = useCallback((entity: BkpEntityId) => setFilter({ kind: "mentions", entity }), [setFilter])
 
-  const voices = useBibleVoices({ project, cells, shared, enabled: voicesWanted, showLinesBy })
+  // AQU-1692: a maintainer's dialogs: correcting a speech, and adopting a
+  // chapter's voices as the cast. Each belongs to one file, like the filter.
+  const [dialog, setDialog] = useState<{ fileId: string; correct?: string; adoptCast?: string } | null>(null)
+  if (dialog && dialog.fileId !== fileId) setDialog(null)
+  const open = dialog && dialog.fileId === fileId ? dialog : null
+  const closeDialog = useCallback(() => setDialog(null), [])
+  const maintainer = useMemo<VoiceMaintainerActions | null>(() => {
+    if (!fileId || (!canCorrectVoices && !canAdoptVoiceCast)) return null
+    return {
+      correct: canCorrectVoices ? (speechId: string) => setDialog({ fileId, correct: speechId }) : null,
+      adoptCast: canAdoptVoiceCast ? (chapter: string) => setDialog({ fileId, adoptCast: chapter }) : null,
+    }
+  }, [canCorrectVoices, canAdoptVoiceCast, fileId])
+  // A line whose voice was picked by hand already has a character: the row
+  // shows that voice's name in the cast slot (EditorTable's castHoldsSlot),
+  // ahead of any `cast_name`. Adopting must keep it, or the line silently
+  // loses the voice someone chose for it (castAssignments is keyed by line).
+  const ttsSettings = project.ttsSettings
+  const voiceCastCells = useCallback(
+    (): VoiceCastCell[] =>
+      cellIds.map((cellId, position) => {
+        const view = cellStore.getCellView(cellId)
+        const pickedVoice = findVoice(ttsSettings, assignedCastVoiceId(ttsSettings, cellId))?.name ?? null
+        return { ...cells[position], cellId, castName: pickedVoice ?? (view ? ownCastName(view) : null) }
+      }),
+    [cellIds, cells, cellStore, ttsSettings],
+  )
+
+  const { context: voices, failure: voicesFailure } = useBibleVoices({
+    project,
+    cells,
+    shared,
+    enabled: voicesWanted,
+    showLinesBy,
+    maintainer,
+  })
   // AQU-1694: Bridge 2 trains on the file's cells as they are when it runs.
   const targetCorpus = useCallback(() => targetCorpusOf(cellStore.getAllSummaries()), [cellStore])
   const whosWho = useWhosWho({
@@ -172,6 +232,18 @@ export function useBibleData({
   )
   const applied = filteredCellIds ? spec : null
 
+  // AQU-1692: View settings → Bible data says how the open book's data loaded,
+  // and lists this book's corrections whose speech a rebuilt pack no longer has.
+  const failure = voicesFailure ?? whosWho.failure
+  const statusBook = voices?.index.book ?? failure?.book ?? null
+  const failureReason = failure?.reason ?? null
+  const orphanedCorrections = voices?.index.orphanedOverrides ?? NO_CORRECTIONS
+  useEffect(() => {
+    if (!fileId || !statusBook) return
+    publishBiblePackStatus(fileId, { book: statusBook, failure: failureReason, orphanedCorrections })
+    return () => publishBiblePackStatus(fileId, null)
+  }, [fileId, statusBook, failureReason, orphanedCorrections])
+
   // The Who's Who panel sets the filter for this file, and shows which one applies.
   useEffect(() => {
     if (!fileId) return
@@ -198,5 +270,17 @@ export function useBibleData({
     return { kind: applied.kind, entity: applied.entity, name, count: filteredCellIds.length }
   }, [applied, filteredCellIds, voiceLabelFor, nameOf])
 
-  return { voices, whosWho: whosWho.context, filteredCellIds, filter, filterHides, clearFilter }
+  return {
+    voices,
+    whosWho: whosWho.context,
+    filteredCellIds,
+    filter,
+    filterHides,
+    clearFilter,
+    correcting: voices ? (open?.correct ?? null) : null,
+    closeCorrection: closeDialog,
+    adoptingCast: voices ? (open?.adoptCast ?? null) : null,
+    closeAdoptCast: closeDialog,
+    voiceCastCells,
+  }
 }

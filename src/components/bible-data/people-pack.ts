@@ -8,6 +8,7 @@
 // remembers a failure).
 
 import { useEffect, useState } from "react"
+import { useRetryOnReconnect } from "./use-retry-on-reconnect"
 import { loadLayer, loadManifest, type BkpFailureReason } from "@/lib/bible-data/pack-client"
 import type { BkpPeopleLayer, BkpStructureLayer, BkpTextLayer } from "@/lib/bible-data/pack-types"
 import { mapLayerToProject } from "@/lib/bible-data/versification"
@@ -56,6 +57,9 @@ export async function loadPeoplePack(book: string, wants: PeoplePackWants): Prom
 export function usePeoplePack(book: string | null, wants: PeoplePackWants): PeoplePack | null {
   const [pack, setPack] = useState<{ key: string; pack: PeoplePack } | null>(null)
   const key = book ? `${book}|${wants.structure ? "s" : ""}${wants.text ? "t" : ""}` : null
+  const current = key && pack?.key === key ? pack.pack : null
+  // AQU-1692: a book that failed offline loads again on reconnecting.
+  const attempt = useRetryOnReconnect(current?.ok === false && current.reason === "offline")
   useEffect(() => {
     if (!book || !key) return
     let live = true
@@ -65,6 +69,6 @@ export function usePeoplePack(book: string | null, wants: PeoplePackWants): Peop
     return () => {
       live = false
     }
-  }, [book, key, wants.structure, wants.text])
-  return key && pack?.key === key ? pack.pack : null
+  }, [book, key, wants.structure, wants.text, attempt])
+  return current
 }

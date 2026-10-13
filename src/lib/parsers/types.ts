@@ -793,6 +793,9 @@ export interface ProjectRecord {
    *  through `readProjectFacts` (db/shared/project-facts.ts); never write it
    *  from here (ProjectDecisionsSection writes the stored list). */
   projectFacts?: unknown[]
+  /** AQU-1692: maintainers' voice corrections, synced via ProjectWideSettings.
+   *  Read it through `readBibleVoiceOverrides` (db/shared/bible-voice-overrides.ts). */
+  bibleVoiceOverrides?: import("../../../db/shared/bible-voice-overrides").BibleVoiceOverrides
   /** AI-draft context budget. Synced via ProjectWideSettings; absent →
    *  DEFAULT_DRAFT_CONTEXT applies. See D10 in paragraph-drafting spec. */
   draftContext?: import("@/lib/completion/draft-context").DraftContextSettings

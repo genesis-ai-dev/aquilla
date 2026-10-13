@@ -6,13 +6,17 @@
 // params and pack evidence travel as `reasonParams` strings, which
 // src/lib/bible-data/check-messages.ts renders through t().
 
-import type { InfractionSpan, RuleInfraction } from "@/lib/parsers/types"
-import { evaluateCell } from "../../../db/shared/bible-checks/evaluate"
+import type { InfractionSpan, RuleInfraction, TranslationRule } from "@/lib/parsers/types"
+import { evaluateCell, isBibleCheckDormant } from "../../../db/shared/bible-checks/evaluate"
 import { bibleReasonParams } from "../../../db/shared/bible-checks/params"
-import type {
-  BibleCheckFinding,
-  BibleCheckId,
-  CellExpectation,
+import { scanHeadings, scanVersification, type ScanCellInput } from "../../../db/shared/bible-checks/scans"
+import {
+  isBibleCheckId,
+  isBibleScanCheckId,
+  type BibleCheckFinding,
+  type BibleCheckId,
+  type CellExpectation,
+  type StructureLayerInput,
 } from "../../../db/shared/bible-checks/types"
 import type { LanguageProfile } from "../../../db/shared/language-profile"
 
@@ -26,7 +30,7 @@ export interface BibleCellCheckInput {
   profile: LanguageProfile
 }
 
-// The engine runs one cell's rules back to back, so the eight Bible data rules
+// The engine runs one cell's rules back to back, so a cell's Bible data rules
 // share one evaluation of the text. Same text and same input object, same
 // findings: this is a cache, not state.
 let last: { text: string; input: BibleCellCheckInput; findings: BibleCheckFinding[] } | null = null
@@ -68,4 +72,45 @@ export function bibleCheckInfraction(
     reasonParams: bibleReasonParams(finding),
     spans,
   }
+}
+
+// ── AQU-1697: the file-level scans (S1, S8) ─────────────────────────────────
+
+/** What Check file's Bible data scans read: the book's structure layer, in the project's versification, and the profile. */
+export interface BibleFileScanInput {
+  structure: StructureLayerInput
+  profile: LanguageProfile
+}
+
+/**
+ * The scans' findings as infractions of their built-in rules, for every rule
+ * in `rules` (the enabled ones) that is a scan and not dormant. The cells are
+ * the whole file, in order.
+ */
+export function bibleScanInfractions(
+  cells: readonly (ScanCellInput & { fileId: string })[],
+  rules: readonly TranslationRule[],
+  scan: BibleFileScanInput | null | undefined,
+): RuleInfraction[] {
+  if (!scan) return []
+  const fileOf = new Map(cells.map((cell) => [cell.id, cell.fileId]))
+  const out: RuleInfraction[] = []
+  for (const rule of rules) {
+    if (rule.check.type !== "builtin" || !isBibleCheckId(rule.check.checkId)) continue
+    const checkId = rule.check.checkId
+    if (!isBibleScanCheckId(checkId) || isBibleCheckDormant(checkId, scan.profile)) continue
+    const findings =
+      checkId === "bkp:S1" ? scanHeadings(cells, scan.structure, scan.profile) : scanVersification(cells, scan.structure)
+    for (const finding of findings) {
+      out.push({
+        ruleId: rule.id,
+        cellId: finding.cellId,
+        fileId: fileOf.get(finding.cellId) ?? "",
+        reason: `builtin:${checkId}`,
+        reasonParams: bibleReasonParams(finding),
+        spans: [],
+      })
+    }
+  }
+  return out
 }

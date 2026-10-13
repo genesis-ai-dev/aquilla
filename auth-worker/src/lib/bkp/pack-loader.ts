@@ -21,6 +21,8 @@
 //     JSON the contract describes is `invalid`, like a malformed file.
 
 import type { Env } from "../../types"
+import { checkWordFields, checkWordIds } from "../../../../db/shared/bible-checks/text-compact"
+import type { TextWordInput } from "../../../../db/shared/bible-checks/types"
 import { isSecondPersonWord } from "../../../../db/shared/bible-facts/facts"
 import {
   parseServerLayer,
@@ -57,14 +59,16 @@ export type BkpFailureReason = "offline" | "not-found" | "invalid"
 export type BkpResult<T> = { ok: true; value: T } | { ok: false; reason: BkpFailureReason }
 
 /**
- * The text layer as autopilot keeps it: only the second-person words, with
- * the fields the facts read. A full layer runs to ~4 MB of JSON and several
- * times that parsed; autopilot reads it only for "you" singular or plural.
+ * The text layer as autopilot keeps it: the second-person words, with the
+ * fields the facts read ("you" singular or plural), and (AQU-1697) the words
+ * the Bible data checks read: number words, negators with their neighbours,
+ * and each verse's last word (db/shared/bible-checks/text-compact.ts). A
+ * full layer runs to ~4 MB of JSON and several times that parsed.
  */
 export interface CompactTextLayer {
   book: string
   verses: Record<string, string[]>
-  words: Record<string, Pick<BkpWord, "class" | "morph" | "person" | "number">>
+  words: Record<string, Pick<BkpWord, "class" | "morph" | "person" | "number"> & TextWordInput>
 }
 
 export interface BookPack {
@@ -196,21 +200,29 @@ function remember(key: string, value: unknown): void {
   }
 }
 
-/** Only the second-person words of a text layer (see CompactTextLayer). */
+/** Only the words of a text layer that autopilot reads (see CompactTextLayer). */
 export function compactTextLayer(layer: ServerBkpLayerData["text"]): CompactTextLayer {
   const verses: CompactTextLayer["verses"] = {}
   const words: CompactTextLayer["words"] = {}
+  const checkIds = checkWordIds(layer)
   for (const [ref, ids] of Object.entries(layer.verses)) {
     if (!Array.isArray(ids)) continue
     const kept = ids.filter((id) => {
       const word = Object.hasOwn(layer.words, id) ? layer.words[id] : undefined
-      return word !== undefined && isSecondPersonWord(word)
+      return word !== undefined && (isSecondPersonWord(word) || checkIds.has(id))
     })
     if (kept.length === 0) continue
     verses[ref] = kept
     for (const id of kept) {
-      const { class: wordClass, morph, person, number } = layer.words[id]
-      words[id] = { class: wordClass, morph, ...(person ? { person } : {}), ...(number ? { number } : {}) }
+      const word = layer.words[id]
+      const { class: wordClass, morph, person, number } = word
+      words[id] = {
+        class: wordClass,
+        morph,
+        ...(person ? { person } : {}),
+        ...(number ? { number } : {}),
+        ...(checkIds.has(id) ? checkWordFields(word) : {}),
+      }
     }
   }
   return { book: layer.book, verses, words }

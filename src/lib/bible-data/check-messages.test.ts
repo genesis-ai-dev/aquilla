@@ -14,6 +14,7 @@ import { bibleCheckInfraction } from "@/lib/rules/bible-check-rules"
 import { buildCellCheckContexts } from "./check-context"
 import type { RuleInfraction } from "@/lib/parsers/types"
 import { JHN4_STRUCTURE, JHN4_VOICES } from "../../../db/shared/bible-checks/__fixtures__/pack"
+import { JHN_A_STRUCTURE, JHN_A_TEXT, JHN_A_VOICES } from "../../../db/shared/bible-checks/__fixtures__/pack-a"
 import type { BibleCheckId } from "../../../db/shared/bible-checks/types"
 
 const format = { list: (items: readonly string[]) => formatList(items, "en"), percent: (n: number) => formatPercent(n, "en") }
@@ -82,5 +83,47 @@ describe("formatting a Bible data finding", () => {
   it("has no evidence line for any other check", () => {
     const other: RuleInfraction = { ruleId: "builtin:double-space", cellId: "c", fileId: "f", reason: "builtin:double-space", spans: [] }
     expect(formatInfractionEvidence(other, t, format)).toEqual([])
+  })
+})
+
+// AQU-1697: check pack A's findings read the same way, from codes and pack data.
+describe("formatting a check-pack-A finding", () => {
+  const packA = {
+    negators: ["not", "no"],
+    numberWords: { "3": "three", "50": "fifty", "100": "hundred" },
+    textualVariants: "bracket" as const,
+  }
+  const cellsA = ["JHN 21:11", "JHN 7:53"].map((ref) => ({ id: ref, globalReferences: [ref] }))
+  const contextsA = buildCellCheckContexts(cellsA, JHN_A_VOICES, JHN_A_STRUCTURE, packA, JHN_A_TEXT)
+  const findingA = (ref: string, checkId: BibleCheckId, text: string) => {
+    const found = bibleCheckInfraction(`builtin:${checkId}`, checkId, ref, "f", text, contextsA.get(ref)?.bible)
+    if (!found) throw new Error(`${checkId} did not fire on ${ref}`)
+    return found
+  }
+
+  it("names the missing number and where the source states it", () => {
+    const inf = findingA("JHN 21:11", "bkp:N1", "Simon Peter drew the net to land, full of great fish. The net wasn’t torn.")
+    expect(formatInfractionReason(inf, t)).toBe(
+      "The source has the number 153 in this verse, but the translation has neither its digits nor its number word.",
+    )
+    expect(formatInfractionEvidence(inf, t, format)).toEqual(["Macula: JHN 21:11 words 15–17"])
+  })
+
+  it("warns that a dropped negation can reverse the meaning", () => {
+    const inf = findingA("JHN 21:11", "bkp:M3", "Simon Peter drew the net to land, full of 153 great fish. The net was torn.")
+    expect(formatInfractionReason(inf, t)).toBe(
+      "The source makes a negative statement in this verse, but the translation has none of the negative words from the Language profile. Without one, the meaning can be the opposite.",
+    )
+    expect(formatInfractionEvidence(inf, t, format)).toEqual(["Macula: negation in JHN 21:11"])
+  })
+
+  it("names the disputed passage and why it is disputed", () => {
+    const inf = findingA("JHN 7:53", "bkp:S7", "Everyone went to his own house,")
+    expect(formatInfractionReason(inf, t)).toBe(
+      "The Language profile says to keep JHN 7:53–8:11 in brackets, but this cell does not have the brackets.",
+    )
+    expect(formatInfractionEvidence(inf, t, format)).toEqual([
+      "JHN 7:53–8:11: in double brackets in the critical Greek text (NA28, SBLGNT)",
+    ])
   })
 })

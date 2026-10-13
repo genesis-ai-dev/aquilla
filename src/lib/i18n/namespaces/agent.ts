@@ -1462,7 +1462,7 @@ export const agent = defineNamespace({
         description: "Name of an autopilot Bible data check: the draft makes clear who speaks the quoted words. Shown as {check} in 'Bible data: {check}'.",
       },
       "agent.finding.bibleCheck.negation": {
-        description: "Name of an autopilot Bible data check: the draft keeps the source's negation ('not', 'never'). Shown as {check} in 'Bible data: {check}'.",
+        description: "Name of a Bible data check: the translation keeps the source's negation ('not', 'never'). Shown in Rules → Built-in checks, and as {check} in 'Bible data: {check}' on autopilot drafts.",
       },
       "agent.finding.bibleCheck.youNumber": {
         description: "Name of an autopilot Bible data check: the draft's 'you' is singular or plural as in the source. Shown as {check} in 'Bible data: {check}'.",

@@ -11,7 +11,7 @@ import { lintSpanDraft } from "./lint-node"
 import { classifyRisk } from "./router"
 import { cellFindings } from "./findings"
 import { fallbackTriage } from "./triage"
-import { bibleConstraint, recheckForStage, withBibleVerdicts, type BibleGate } from "./bible-gates"
+import { bibleConstraint, isRepairable, recheckForStage, withBibleVerdicts, type BibleGate } from "./bible-gates"
 import { decodeBibleParams } from "../../../../db/shared/bible-checks/params"
 import { ENGLISH_QUOTES, jhn4BibleData, jhn4Pairs } from "./bible-test-helpers"
 import type { LintFlag, SpanDraft } from "./types"
@@ -114,5 +114,42 @@ describe("templated repair constraints", () => {
     expect(bibleConstraint(flag.bible, data.facts.get("c9"), data.profile)).toBe(
       "Close Samaritan woman's quotation with ” before the words that follow it in this verse; they are not part of the quotation.",
     )
+  })
+})
+
+// AQU-1697: check pack A rides the same gate. WHY: a dropped "not" reverses
+// the verse, so M3 is a warning that autopilot repairs and, if it survives,
+// sends to a person; but like a quotation slip it has a cheap fix of its own
+// and must not buy the deep panel.
+describe("a dropped negation (bkp:M3)", () => {
+  const DROPPED_4_9 = CORRECT_4_9.replace("have no dealings", "have dealings")
+
+  async function negationGate(): Promise<{ gate: BibleGate; data: Awaited<ReturnType<typeof jhn4BibleData>> }> {
+    const data = await jhn4BibleData({ profile: { ...ENGLISH_QUOTES, negators: ["not", "no", "never"] } })
+    return { gate: { expectations: data.expectations, profile: data.profile }, data }
+  }
+
+  it("flows through the gate as a repairable warning, apart from lint", async () => {
+    const { gate, data } = await negationGate()
+    const flags = lintSpanDraft([], jhn4Pairs(), draftOf([{ cellId: "c9", text: DROPPED_4_9 }]), [], gate)
+    expect(flags).toEqual([expect.objectContaining({ cellId: "c9", ruleId: "bkp:M3", message: "negation-missing" })])
+    const finding = flags[0].bible
+    if (!finding) throw new Error("no finding")
+    expect(finding.severity).toBe("warning")
+    expect(isRepairable(finding)).toBe(true)
+    expect(bibleConstraint(finding, data.facts.get("c9"), data.profile)).toBe(
+      'Keep the negation: the source says "not" here, and without it the meaning is reversed.',
+    )
+    expect(lintSpanDraft([], jhn4Pairs(), draftOf([{ cellId: "c9", text: CORRECT_4_9 }]), [], gate)).toEqual([])
+  })
+
+  it("does not force the deep panel, and a surviving one goes to a person", async () => {
+    const { gate } = await negationGate()
+    const flags = lintSpanDraft([], jhn4Pairs(), draftOf([{ cellId: "c9", text: DROPPED_4_9 }]), [], gate)
+    const risk = classifyRisk(draftOf([{ cellId: "c9", text: DROPPED_4_9 }]), flags, [], 1)
+    expect(risk.level).toBe("low")
+    expect(risk.verifiers).toEqual(["ambiguity"])
+    expect(fallbackTriage(["bkp:M3"])).toEqual({ triage: "human", severity: 3 })
+    expect(recheckForStage(gate, "c9", DROPPED_4_9, []).residual).toBe(true)
   })
 })

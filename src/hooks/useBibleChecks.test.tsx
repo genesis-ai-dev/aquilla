@@ -14,6 +14,7 @@ import { useBibleChecks } from "./useBibleChecks"
 import type { BibleChecksProject } from "@/lib/bible-data/check-context"
 import type { BkpManifest } from "@/lib/bible-data/pack-types"
 import { JHN4_STRUCTURE, JHN4_VOICES } from "../../db/shared/bible-checks/__fixtures__/pack"
+import { JHN_A_STRUCTURE, JHN_A_TEXT, JHN_A_VOICES } from "../../db/shared/bible-checks/__fixtures__/pack-a"
 
 vi.mock("@/lib/bible-data/pack-client", () => ({
   loadManifest: vi.fn(),
@@ -116,5 +117,46 @@ describe("useBibleChecks", () => {
     const { result } = renderHook(() => useBibleChecks(ON, CELLS, BOOK))
     await waitFor(() => expect(result.current.status).toBe("unavailable"))
     expect(result.current.contextFor("c9")).toBeUndefined()
+  })
+
+  // AQU-1697: the text layer is several MB per book. WHY: it must load only
+  // while a check that reads it can run, and Check file's scans must work
+  // even while every live check waits for the Language profile.
+  it("loads the text layer only for a check that reads it, and compiles its facts", async () => {
+    vi.mocked(loadLayer).mockImplementation(async (layer) => {
+      if (layer === "voices") return { ok: true, value: JHN_A_VOICES } as never
+      if (layer === "structure") return { ok: true, value: JHN_A_STRUCTURE } as never
+      return { ok: true, value: JHN_A_TEXT } as never
+    })
+    const cells = [{ id: "c11", globalReferences: ["JHN 21:11"] }]
+    const quotes = renderHook(() => useBibleChecks(ON, cells, BOOK))
+    await waitFor(() => expect(quotes.result.current.status).toBe("ready"))
+    expect(vi.mocked(loadLayer).mock.calls.some(([layer]) => layer === "text")).toBe(false)
+    expect(quotes.result.current.contextFor("c11")?.bible?.expectation.numbers).toEqual([])
+
+    const numbers = renderHook(() => useBibleChecks({ ...ON, languageProfile: { numberWords: "cldr" } }, cells, BOOK))
+    await waitFor(() => expect(numbers.result.current.contextFor("c11")?.bible?.expectation.numbers).toHaveLength(1))
+    expect(vi.mocked(loadLayer).mock.calls.some(([layer]) => layer === "text")).toBe(true)
+    expect(numbers.result.current.contextFor("c11")?.bible?.expectation.numbers[0]?.value).toBe(153)
+  })
+
+  it("loads the structure layer for Check file's scans, even while the live checks are dormant", async () => {
+    const headingsOnly = { ...ON, languageProfile: { headings: "pericope" as const } }
+    const { result } = renderHook(() => useBibleChecks(headingsOnly, CELLS, BOOK))
+    expect(result.current.status).toBe("dormant")
+    expect(loadLayer).not.toHaveBeenCalled()
+    const scan = await result.current.fileScan()
+    expect(scan?.profile).toEqual({ headings: "pericope" })
+    expect(scan?.structure).toBe(JHN4_STRUCTURE)
+    expect(vi.mocked(loadLayer).mock.calls.map(([layer]) => layer)).toEqual(["structure"])
+    const off = renderHook(() => useBibleChecks({ ...ON, bibleEnrichments: { checks: false } }, CELLS, BOOK))
+    expect(await off.result.current.fileScan()).toBeNull()
+    // AQU-1685: nor without the Bible data experiment, or on a file that is
+    // not a Bible book: Check file then runs no Bible data scan at all.
+    const noExperiment = renderHook(() => useBibleChecks({ ...headingsOnly, experimentalFlags: {} }, CELLS, BOOK))
+    expect(await noExperiment.result.current.fileScan()).toBeNull()
+    const notABible = renderHook(() => useBibleChecks(headingsOnly, CELLS, { type: "md" }))
+    expect(await notABible.result.current.fileScan()).toBeNull()
+    expect(vi.mocked(loadLayer).mock.calls.map(([layer]) => layer)).toEqual(["structure"])
   })
 })

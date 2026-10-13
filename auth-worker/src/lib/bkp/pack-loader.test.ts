@@ -4,6 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { __resetBkpServerMemory, bkpBase, compactTextLayer, loadBookPack, DEFAULT_BKP_BASE } from "./pack-loader"
+import { JHN_A_STRUCTURE, JHN_A_TEXT, JHN_A_VOICES } from "../../../../db/shared/bible-checks/__fixtures__/pack-a"
 import type { ServerBkpLayerData } from "./pack-types"
 import { compileFileExpectations } from "../../../../db/shared/bible-checks/compile"
 import { JHN4_STRUCTURE, JHN4_VOICES } from "../../../../db/shared/bible-checks/__fixtures__/pack"
@@ -161,13 +162,16 @@ describe("loadBookPack", () => {
 })
 
 // A parsed text layer is several times its ~4 MB of JSON; kept whole for a
-// few books it could exhaust an isolate. Autopilot reads it only for "you".
+// few books it could exhaust an isolate. Autopilot reads it for "you" and
+// (AQU-1697) for the words the Bible data checks read.
 describe("compactTextLayer", () => {
-  it("keeps only the second-person words, and the facts read from it are unchanged", () => {
+  it("keeps the second-person words and each verse's last word, and the facts read from it are unchanged", () => {
     const full = JHN4_TEXT as unknown as ServerBkpLayerData["text"]
     const compact = compactTextLayer(full)
-    expect(Object.keys(compact.words).length).toBeLessThan(Object.keys(full.words).length / 5)
-    expect(compact.verses["JHN 4:8"]).toBeUndefined()
+    expect(Object.keys(compact.words).length).toBeLessThan(Object.keys(full.words).length / 4)
+    // JHN 4:8 has no second-person word: only its last word stays, whose
+    // punctuation says whether the sentence goes on (S3).
+    expect(compact.verses["JHN 4:8"]).toEqual(["n43004008011"])
     const refs = ["JHN 4:7", "JHN 4:8", "JHN 4:9", "JHN 4:10"]
     const expectations = compileFileExpectations(refs.map((ref) => ({ id: ref, globalReferences: [ref] })), JHN4_VOICES, JHN4_STRUCTURE)
     for (const ref of refs) {
@@ -178,5 +182,21 @@ describe("compactTextLayer", () => {
         computeCellFacts(expectation, { ...layers, text: full }).secondPerson,
       )
     }
+  })
+})
+
+// AQU-1697: the checks must see the same facts in the compact layer as in the
+// full one, or autopilot and the editor disagree about the same verse.
+describe("compactTextLayer keeps what the Bible data checks read", () => {
+  it("gives the same numbers, negations and run-on sentences as the full layer", () => {
+    const full = JHN_A_TEXT as unknown as ServerBkpLayerData["text"]
+    const compact = compactTextLayer(full)
+    expect(Object.keys(compact.words).length).toBeLessThan(Object.keys(full.words).length / 2)
+    const cells = Object.keys(JHN_A_TEXT.verses).map((ref) => ({ id: ref, globalReferences: [ref] }))
+    const facts = (text: unknown) =>
+      [...compileFileExpectations(cells, JHN_A_VOICES, JHN_A_STRUCTURE, text as ServerBkpLayerData["text"])].map(
+        ([ref, e]) => [ref, e.numbers, e.negation, e.continuesPast],
+      )
+    expect(facts(compact)).toEqual(facts(full))
   })
 })

@@ -64,6 +64,9 @@ describe("prepareBibleRun — gating", () => {
     expect(needsTextLayer({})).toBe(true)
     expect(needsTextLayer({ pronouns: { secondPerson: { numberDistinction: true } } })).toBe(true)
     expect(needsTextLayer({ pronouns: { secondPerson: { numberDistinction: false } } })).toBe(false)
+    // AQU-1697: the number and negation checks read it too.
+    expect(needsTextLayer({ pronouns: { secondPerson: { numberDistinction: false } }, negators: ["not"] })).toBe(true)
+    expect(needsTextLayer({ pronouns: { secondPerson: { numberDistinction: false } }, numberWords: "cldr" })).toBe(true)
   })
 })
 

@@ -17,6 +17,8 @@ import { describe, it, expect } from "vitest"
 import type { TranslationRule } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import type { Concept } from "@/lib/terminology/types"
+import { resolveBuiltinRules } from "@/lib/lqa/builtin-resolver"
+import { JHN_A_STRUCTURE } from "../../../db/shared/bible-checks/__fixtures__/pack-a"
 import {
   scanTermConsistency,
   checkableRules,
@@ -299,5 +301,39 @@ describe("runDeterministicCheck", () => {
     expect(result.checkedCellCount).toBe(450)
     expect(result.termFindings[0].totalOccurrences).toBe(450)
     expect(result.termFindings[0].flaggedCells).toHaveLength(225)
+  })
+})
+
+// AQU-1697: the Bible data scans (S1 headings, S8 verse numbering) need the
+// whole file in order, so they run here and nowhere else. WHY: their findings
+// must reach the same drawer as every other rule, under their own built-in
+// rule, and only when the project has that rule switched on.
+describe("runDeterministicCheck with the Bible data scans", () => {
+  const verse = (ref: string) => cell("src", "text", { id: ref, globalReferences: [ref] })
+  const heading = cell("The Wedding", "La noce", { id: "h1", type: "heading", globalReferences: ["JHN 2:s1:1"] })
+  const cells = [heading, ...Array.from({ length: 25 }, (_, i) => verse(`JHN 2:${i + 1}`))]
+  const bibleRules = resolveBuiltinRules(undefined, { bibleChecks: true })
+  const bibleScan = { structure: JHN_A_STRUCTURE, profile: { headings: "pericope" as const } }
+
+  it("reports a passage without a heading under the S1 rule", async () => {
+    const result = await runDeterministicCheck({ fileId: "file-1", cells, rules: bibleRules, concepts: [], bibleScan })
+    const s1 = result.ruleFindings.find((group) => group.rule.id === "builtin:bkp:S1")
+    expect(s1?.infractions).toEqual([
+      expect.objectContaining({
+        cellId: "JHN 2:13",
+        fileId: "file-1",
+        reason: "builtin:bkp:S1",
+        reasonParams: expect.objectContaining({ kind: "heading-missing", evidence: "pericope", refs: "JHN 2:13" }),
+      }),
+    ])
+    expect(result.totalFindingCount).toBe(1)
+  })
+
+  it("reports nothing for a switched-off scan, a dormant one, or without the pack data", async () => {
+    const off = resolveBuiltinRules({ "bkp:S1": { enabled: false } }, { bibleChecks: true })
+    expect((await runDeterministicCheck({ fileId: "file-1", cells, rules: off, concepts: [], bibleScan })).totalFindingCount).toBe(0)
+    const dormant = { ...bibleScan, profile: {} }
+    expect((await runDeterministicCheck({ fileId: "file-1", cells, rules: bibleRules, concepts: [], bibleScan: dormant })).totalFindingCount).toBe(0)
+    expect((await runDeterministicCheck({ fileId: "file-1", cells, rules: bibleRules, concepts: [] })).totalFindingCount).toBe(0)
   })
 })

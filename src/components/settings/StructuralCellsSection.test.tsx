@@ -11,6 +11,7 @@ function orgSettings(over: Partial<UseOrgSettings> = {}): UseOrgSettings {
     patch: vi.fn().mockResolvedValue({ kind: "ok" }),
     countStructuralOverrides: 0,
     resetCountStructuralOverrides: vi.fn().mockResolvedValue({ ok: true, cleared: 1 }),
+    hasFetched: true,
     ...over,
   } as unknown as UseOrgSettings
 }

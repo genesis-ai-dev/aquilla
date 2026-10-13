@@ -86,6 +86,7 @@ export function StructuralCellsSection({ orgSettings, canEdit }: StructuralCells
             kind="setting"
             onReset={canEdit ? () => setPendingOverrides(countStructuralOverrides) : undefined}
             disabled={busy}
+            loading={!orgSettings.hasFetched}
           />
         </>
       }
@@ -95,7 +96,7 @@ export function StructuralCellsSection({ orgSettings, canEdit }: StructuralCells
             id="count-structural-cells"
             checked={countStructuralCells}
             onCheckedChange={(checked) => void handleChange(checked)}
-            disabled={!canEdit || busy}
+            disabled={!canEdit || busy || !orgSettings.hasFetched}
             aria-label={t("settings.structuralCells.label")}
           />
           {error && <FieldError className="text-xs">{error}</FieldError>}

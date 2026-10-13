@@ -18,10 +18,22 @@ interface OverrideStatusProps {
   /** Opens the section's reset confirmation. Omitted below the edit gate. */
   onReset?: () => void
   disabled?: boolean
+  /**
+   * The org's settings haven't loaded: the count is not known yet, so the line
+   * keeps its place but says nothing (rather than "All projects follow").
+   */
+  loading?: boolean
 }
 
-export function OverrideStatus({ count, kind, onReset, disabled }: OverrideStatusProps) {
+export function OverrideStatus({ count, kind, onReset, disabled, loading = false }: OverrideStatusProps) {
   const { t } = useI18n()
+  if (loading) {
+    return (
+      <span className="invisible mt-1 block" aria-hidden="true" data-testid="override-status-loading">
+        {t("settings.overrideStatus.allFollow")}
+      </span>
+    )
+  }
   if (count <= 0) {
     return (
       <span className="mt-1 block" data-testid="override-status">

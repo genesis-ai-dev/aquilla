@@ -14,6 +14,7 @@ function orgSettings(over: Partial<UseOrgSettings> = {}): UseOrgSettings {
     validationCountAudioDefault: 3,
     validationCountOverrides: 0,
     validationCountAudioOverrides: 0,
+    hasFetched: true,
     ...over,
   } as unknown as UseOrgSettings
 }
@@ -86,4 +87,12 @@ describe("ValidationDefaultsSection", () => {
     render(<ValidationDefaultsSection orgSettings={orgSettings()} canEdit={false} />)
     expect(textPicker()).toBeDisabled()
   })
+
+  it("before the org's settings load, shows no follow-status and takes no change", () => {
+    render(<ValidationDefaultsSection orgSettings={orgSettings({ hasFetched: false, validationCountOverrides: 2 })} canEdit />)
+    expect(screen.queryByTestId("override-status")).toBeNull()
+    expect(screen.getAllByTestId("override-status-loading")).toHaveLength(2)
+    expect(textPicker().hasAttribute("disabled") || textPicker().getAttribute("aria-disabled") === "true" || textPicker().hasAttribute("data-disabled")).toBe(true)
+  })
 })
+

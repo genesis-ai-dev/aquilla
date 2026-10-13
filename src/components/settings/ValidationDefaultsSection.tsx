@@ -68,6 +68,10 @@ function ThresholdDefaultRow({
 }) {
   const { t } = useI18n()
   const { patch, resetValidationCountOverrides } = orgSettings
+  // Until the org's settings load, the number and the override count are
+  // fallbacks (1 and 0): don't show them as fact, and don't let a change go
+  // through on them (it would skip the "move the projects back?" question).
+  const loaded = orgSettings.hasFetched
   const current = (settingKey === "validationCount"
     ? orgSettings.validationCountDefault
     : orgSettings.validationCountAudioDefault) ?? 1
@@ -118,6 +122,7 @@ function ThresholdDefaultRow({
               kind="number"
               onReset={canEdit ? () => setPendingOverrides(overrides) : undefined}
               disabled={busy}
+              loading={!loaded}
             />
           </>
         }
@@ -125,7 +130,7 @@ function ThresholdDefaultRow({
           <div className="flex min-w-44 flex-col items-end gap-1">
             <Select
               items={items}
-              disabled={!canEdit || busy}
+              disabled={!canEdit || busy || !loaded}
               value={String(current)}
               onValueChange={(v) => void handleChange(Number(v ?? current))}
             >

@@ -4,14 +4,21 @@ import type { Node as PMNode } from "@tiptap/pm/model"
 import { Extension } from "@tiptap/core"
 import type { RuleInfraction } from "@/lib/parsers/types"
 import { buildUsfmPlainTextMap } from "@/lib/richtext/usfm-plain-text"
+import { isSpanWaived, spanMatchHash } from "@/lib/rules/waivers"
 
 export const violationPluginKey = new PluginKey<DecorationSet>("violationDecorations")
 
+/**
+ * AQU-1740: `waivedKeys` holds one key per active waiver on the cell —
+ * `waiverKey(ruleId)` for a cell-wide waiver, `waiverKey(ruleId, matchHash)`
+ * for a single accepted finding. A blot is drawn waived only when ITS OWN span
+ * is covered, so accepting one repeated word leaves the next one red.
+ */
 export function buildViolationDecorationSet(
   doc: PMNode,
   infractions: RuleInfraction[],
   ruleSeverity: Map<string, "major" | "minor">,
-  waivedRuleIds: Set<string>,
+  waivedKeys: Set<string>,
 ): DecorationSet {
   const decorations: Decoration[] = []
   // Convert plain-text offsets into ProseMirror positions by walking the doc
@@ -28,7 +35,10 @@ export function buildViolationDecorationSet(
       const to = plainToPm[span.end]
       if (from === undefined || to === undefined) continue
       const severity = ruleSeverity.get(inf.ruleId) ?? "major"
-      const waived = waivedRuleIds.has(inf.ruleId)
+      const waived = isSpanWaived(waivedKeys, inf.ruleId, span)
+      // AQU-1740: the blot names the finding it covers, so a click can waive
+      // just this match instead of the rule across the whole cell.
+      const findingHash = spanMatchHash(span)
       const isTerminologyRule = inf.ruleId.startsWith("term:")
       const cls = [
         "violation-blot",
@@ -42,6 +52,7 @@ export function buildViolationDecorationSet(
       decorations.push(Decoration.inline(from, to, {
         class: cls,
         "data-rule-id": inf.ruleId,
+        ...(findingHash ? { "data-match-hash": findingHash } : {}),
       }))
     }
   }
@@ -51,7 +62,7 @@ export function buildViolationDecorationSet(
 export function createViolationDecorationExtension(getState: () => {
   infractions: RuleInfraction[]
   ruleSeverity: Map<string, "major" | "minor">
-  waivedRuleIds: Set<string>
+  waivedKeys: Set<string>
 }) {
   return Extension.create({
     name: "violationDecorations",
@@ -61,12 +72,12 @@ export function createViolationDecorationExtension(getState: () => {
         state: {
           init: (_, state) => {
             const s = getState()
-            return buildViolationDecorationSet(state.doc, s.infractions, s.ruleSeverity, s.waivedRuleIds)
+            return buildViolationDecorationSet(state.doc, s.infractions, s.ruleSeverity, s.waivedKeys)
           },
           apply: (tr, old, _oldState, newState) => {
             if (tr.getMeta(violationPluginKey) === "rebuild") {
               const s = getState()
-              return buildViolationDecorationSet(newState.doc, s.infractions, s.ruleSeverity, s.waivedRuleIds)
+              return buildViolationDecorationSet(newState.doc, s.infractions, s.ruleSeverity, s.waivedKeys)
             }
             if (tr.docChanged) return old.map(tr.mapping, tr.doc)
             return old

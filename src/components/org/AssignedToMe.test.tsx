@@ -35,7 +35,8 @@ vi.mock("@/lib/frontier/orgs", () => ({
   listMyOrgs: vi.fn(async () => [{ id: 1, name: "Come and See", role: { level: 400, name: "contributor" } }]),
 }))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
-vi.mock("@/lib/frontier/portfolio", () => ({
+vi.mock("@/lib/frontier/portfolio", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/frontier/portfolio")>()),
   getPortfolio: vi.fn(async () => [
     { id: "pa", name: "John", targetLanguage: "Bambara" },
     { id: "pb", name: "Mark", targetLanguage: "French" },

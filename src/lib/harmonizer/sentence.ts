@@ -31,7 +31,18 @@ import { closingSpan } from "./quotes"
 import type { HarmonizerCell, HarmonizerFinding, HarmonizerQuestion, HarmonyCheck } from "./types"
 
 export const MAX_SENTENCE_BOUNDARIES = 8
-export const SENTENCE_MIN_PROBABILITY = 0.7
+/** 0.6 from the harmonizer eval (BSB + Macula, 2026-10-05): run-on recall 88%
+ *  vs 75% at 0.7, with no clean-text false alarms at either. */
+export const SENTENCE_MIN_PROBABILITY = 0.6
+/**
+ * A sentence fragment closed by a full stop is broken whatever the source does,
+ * so the source's "does the sentence continue?" is only a weak gate — it keeps
+ * out legitimately verbless lines such as headings. In the eval, real
+ * fragments got `complete` ≈ 0.16–0.19 but `continues` only 0.52–0.68 (Greek
+ * often closes a clause where English needs the next verse), and a 0.7 gate
+ * on it rejected them.
+ */
+export const SENTENCE_CONTINUES_GATE = 0.4
 
 /** Sentence-final marks in the TARGET. Stricter than the seam heuristic's
  *  source test: a colon or semicolon followed by lowercase is fine prose. */
@@ -175,7 +186,8 @@ export const sentenceCheck: HarmonyCheck<SentencePlan> = {
     return out
   },
 
-  findings(plan, cells, answers, prefix) {
+  findings(plan, cells, answers, prefix, opts) {
+    const min = opts?.minProbability ?? SENTENCE_MIN_PROBABILITY
     const out: HarmonizerFinding[] = []
     plan.boundaries.forEach(({ b, kind }, i) => {
       const a = cells[b - 1]
@@ -200,10 +212,10 @@ export const sentenceCheck: HarmonyCheck<SentencePlan> = {
       if (kind === "brokenOff") {
         const complete = noulValue(answers[`${prefix}t${i}_complete`])
         if (complete === undefined) return
-        if (continues < SENTENCE_MIN_PROBABILITY || 1 - complete < SENTENCE_MIN_PROBABILITY) return
+        if (continues < SENTENCE_CONTINUES_GATE || 1 - complete < min) return
         out.push({
           ...base, new: old, flagOnly: true, reasonKey: "harmonizer.sentence.brokenOff",
-          confidence: Math.min(continues, 1 - complete),
+          confidence: 1 - complete,
         })
         return
       }
@@ -211,7 +223,7 @@ export const sentenceCheck: HarmonyCheck<SentencePlan> = {
       if (!plan.terminator) return
       const targetContinues = noulValue(answers[`${prefix}t${i}_targetContinues`])
       if (targetContinues === undefined) return
-      if (1 - continues < SENTENCE_MIN_PROBABILITY || 1 - targetContinues < SENTENCE_MIN_PROBABILITY) return
+      if (1 - continues < min || 1 - targetContinues < min) return
       out.push({
         ...base, new: old + plan.terminator, reasonKey: "harmonizer.sentence.runOn",
         confidence: Math.min(1 - continues, 1 - targetContinues),

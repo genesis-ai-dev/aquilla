@@ -27,6 +27,7 @@ const NAME_KEY: Record<BuiltinCheckId, MessageKey> = {
   "target-equals-source": "rules.builtin.targetEqualsSource.name",
   "placeholder-integrity": "rules.builtin.placeholderIntegrity.name",
   "number-integrity": "rules.builtin.numberIntegrity.name",
+  "number-integrity-extra": "rules.builtin.numberIntegrityExtra.name",
   "end-punctuation-mismatch": "rules.builtin.endPunctuationMismatch.name",
   "punctuation-integrity": "rules.builtin.punctuationIntegrity.name",
   "double-space": "rules.builtin.doubleSpace.name",
@@ -41,6 +42,9 @@ const NAME_KEY: Record<BuiltinCheckId, MessageKey> = {
   "bkp:V8": "bibleData.check.v8.name",
   "bkp:V9": "bibleData.check.v9.name",
   "bkp:M1": "bibleData.check.m1.name",
+  "usfm-structure": "rules.builtin.usfmStructure.name",
+  "capitalization": "rules.builtin.capitalization.name",
+  "footnote-quote-mismatch": "rules.builtin.footnoteQuoteMismatch.name",
 }
 
 const DESCRIPTION_KEY: Record<BuiltinCheckId, MessageKey> = {
@@ -48,6 +52,7 @@ const DESCRIPTION_KEY: Record<BuiltinCheckId, MessageKey> = {
   "target-equals-source": "rules.builtin.targetEqualsSource.description",
   "placeholder-integrity": "rules.builtin.placeholderIntegrity.description",
   "number-integrity": "rules.builtin.numberIntegrity.description",
+  "number-integrity-extra": "rules.builtin.numberIntegrityExtra.description",
   "end-punctuation-mismatch": "rules.builtin.endPunctuationMismatch.description",
   "punctuation-integrity": "rules.builtin.punctuationIntegrity.description",
   "double-space": "rules.builtin.doubleSpace.description",
@@ -62,10 +67,13 @@ const DESCRIPTION_KEY: Record<BuiltinCheckId, MessageKey> = {
   "bkp:V8": "bibleData.check.v8.description",
   "bkp:V9": "bibleData.check.v9.description",
   "bkp:M1": "bibleData.check.m1.description",
+  "usfm-structure": "rules.builtin.usfmStructure.description",
+  "capitalization": "rules.builtin.capitalization.description",
+  "footnote-quote-mismatch": "rules.builtin.footnoteQuoteMismatch.description",
 }
 
 /**
- * Display name for any `TranslationRule` — translated for the ten built-in
+ * Display name for any `TranslationRule` — translated for the built-in
  * checks (app-authored chrome; resolved off the `builtin:` id prefix),
  * returned verbatim for a user or org rule (their OWN name is content and
  * must never be translated).

@@ -1,17 +1,20 @@
 import { useEffect, useState } from 'react'
 import { SettingsBlock, SettingsGroup, SettingsRow } from '@/components/ui/page'
+import { useT } from '@/lib/i18n/I18nProvider'
+import type { MessageKey } from '@/lib/i18n/messages/en'
 import { getBillingWorkspace, type BillingWorkspace } from '@/lib/sync/billing-workspace'
 
-const explanations: Record<BillingWorkspace['eligibility']['reason'], string> = {
-  ready: 'Plan options match this workspace. Paid checkout is not open yet.',
-  scope_unconfirmed: 'Confirm this workspace’s type with support before choosing a paid plan. Your existing access stays unchanged.',
-  existing_billing: 'This workspace has existing billing or an agreed allowance. Contact us before changing plans.',
-  covered_access: 'This workspace has covered access. Contact us before purchasing a subscription.',
-  already_subscribed: 'This workspace already has a paid plan. Changes will be available when billing management is ready.',
-  personal_collaboration_review: 'This personal workspace has collaborators. Contact us to confirm the right plan before purchasing.',
+const explanations: Record<BillingWorkspace['eligibility']['reason'], MessageKey> = {
+  ready: 'billing.workspace.eligibility.ready',
+  scope_unconfirmed: 'billing.workspace.eligibility.scope_unconfirmed',
+  existing_billing: 'billing.review.existing_billing',
+  covered_access: 'billing.review.covered_access',
+  already_subscribed: 'billing.workspace.eligibility.already_subscribed',
+  personal_collaboration_review: 'billing.workspace.eligibility.personal_collaboration_review',
 }
 
 export function BillingWorkspaceSummary({ jwt, orgId }: { jwt: string; orgId: number }) {
+  const t = useT()
   const [result, setResult] = useState<{ jwt: string; data: BillingWorkspace } | null>(null)
   const [failed, setFailed] = useState(false)
   useEffect(() => {
@@ -25,10 +28,10 @@ export function BillingWorkspaceSummary({ jwt, orgId }: { jwt: string; orgId: nu
   }, [jwt, orgId])
   const data = result?.jwt === jwt && result.data.orgId === orgId ? result.data : null
   return data ? <BillingWorkspaceDetails data={data} /> : (
-    <SettingsGroup label="Workspace billing">
+    <SettingsGroup label={t('billing.workspace.title')}>
       <SettingsBlock>
         <p className="text-sm text-muted-foreground" role="status">
-          {failed ? 'Workspace billing details are unavailable. Your current access stays unchanged.' : 'Loading workspace billing…'}
+          {failed ? t('billing.workspace.unavailable') : t('billing.workspace.loading')}
         </p>
       </SettingsBlock>
     </SettingsGroup>
@@ -37,40 +40,38 @@ export function BillingWorkspaceSummary({ jwt, orgId }: { jwt: string; orgId: nu
 
 /** Shares the page's authoritative response instead of fetching a second snapshot. */
 export function BillingWorkspaceDetails({ data }: { data: BillingWorkspace }) {
+  const t = useT()
   return (
-    <SettingsGroup label="Workspace billing">
+    <SettingsGroup label={t('billing.workspace.title')}>
       <div data-testid="billing-workspace">
         <SettingsRow
-          label={data.name ?? 'Current workspace'}
-          description={data.scope === 'personal' ? 'Personal workspace' : data.scope === 'team' ? 'Team workspace — shared billing' : 'Workspace type needs confirmation'}
+          label={data.name ?? t('billing.review.currentWorkspace')}
+          description={data.scope === 'personal' ? t('billing.review.personal') : data.scope === 'team' ? t('billing.review.team') : t('billing.review.unconfirmed')}
         />
         <SettingsBlock className="flex flex-col gap-3">
           <p className="text-sm text-muted-foreground">{data.eligibility.reason === 'already_subscribed' && data.portalEnabled === true
-            ? 'Use Manage billing to update this workspace’s subscription in Stripe.'
-            : explanations[data.eligibility.reason]}</p>
+            ? t('billing.workspace.manageInStripe')
+            : t(explanations[data.eligibility.reason])}</p>
           {data.entitlement?.access ? (
             <p className="text-sm text-muted-foreground" data-testid="billing-access" role="status">
               {data.entitlement.access.reason === 'payment_failed'
-                ? 'Payment failed. Your AI allowance falls back to Free. This week’s usage still counts; if it exceeds Free’s allowance, AI pauses until the weekly reset or payment recovery.'
+                ? t('billing.workspace.paymentFailed')
                 : data.entitlement.access.reason === 'paid_period_ended'
-                  ? 'Your paid period has ended. Your AI allowance follows Free, with this week’s usage still counted.'
+                  ? t('billing.workspace.paidPeriodEnded')
                   : data.entitlement.access.cancelAtPeriodEnd
-                    ? `Your subscription is canceled. Paid access continues through ${new Date(data.entitlement.access.paidThrough).toLocaleString()}.`
-                    : `Paid access is confirmed through ${new Date(data.entitlement.access.paidThrough).toLocaleString()}.`}
+                    ? t('billing.workspace.canceled', { date: new Date(data.entitlement.access.paidThrough).toLocaleString() })
+                    : t('billing.workspace.paidThrough', { date: new Date(data.entitlement.access.paidThrough).toLocaleString() })}
             </p>
           ) : null}
           <p className="text-sm text-muted-foreground">
-            Work on this workspace’s projects uses this workspace’s allowance.
-            A collaborator’s personal subscription does not add capacity here.
+            {t('billing.workspace.allowanceScope')}
           </p>
           {typeof data.usagePercent === 'number' && data.usageResetsAt ? (
             <p className="text-sm text-muted-foreground" data-testid="billing-usage-percent" role="status">
-              {data.usagePercent}% of this week’s AI allowance used.
-              Resets {new Date(data.usageResetsAt).toLocaleString()}.
+              {t('billing.workspace.usagePercent', { percent: data.usagePercent, date: new Date(data.usageResetsAt).toLocaleString() })}
             </p>
           ) : data.entitlement ? <p className="text-sm text-muted-foreground">
-            Usage period ends {new Date(data.entitlement.usagePeriodEnd).toLocaleString()}.
-            Usage measurement is not available yet.
+            {t('billing.workspace.usagePeriodEnds', { date: new Date(data.entitlement.usagePeriodEnd).toLocaleString() })}
           </p> : null}
         </SettingsBlock>
       </div>

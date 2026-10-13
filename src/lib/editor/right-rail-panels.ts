@@ -1,6 +1,7 @@
-// AQU-1316: decide, for the editor's right rail, which of the two scripture
-// side surfaces render — the full panel or its collapsed edge tab — for
-// Parallel Bibles (helloao) and Verse Resources (Aquifer).
+// AQU-1316: decide, for the editor's right rail, which of the scripture side
+// surfaces render — the full panel or its collapsed edge tab — for Parallel
+// Bibles (helloao), Verse Resources (Aquifer) and, since AQU-1689, Who's Who
+// (the Bible Knowledge Pack's cast of the passage, edge tab "People").
 //
 // This lived as two inline IIFEs in ProjectWorkspace's `aside` and `asideEdge`
 // props, ~180 lines apart in a 13,000-line component. Both re-derived the same
@@ -28,10 +29,18 @@ export interface RightRailInputs {
    * is off, so an ungated Verse Resources surface would only ever show an error.
    */
   verseResourcesAvailable: boolean
+  /**
+   * AQU-1689: the project's Who's Who enrichment is on (it is off whenever
+   * Bible data is) and this device has the Bible data experiment on
+   * (AQU-1685). Off, the panel and its edge tab are both gone.
+   */
+  whosWhoAvailable: boolean
   /** Persisted per-project open flag for Parallel Bibles. */
   parallelBiblesOpen: boolean
   /** Persisted per-project open flag for Verse Resources. */
   verseResourcesOpen: boolean
+  /** AQU-1689: persisted per-project open flag for the Who's Who panel. */
+  whosWhoOpen: boolean
 }
 
 export interface RightRailSurfaces {
@@ -43,6 +52,10 @@ export interface RightRailSurfaces {
   resourcesPanel: boolean
   /** Render the collapsed Verse Resources edge tab in `asideEdge`. */
   resourcesEdge: boolean
+  /** AQU-1689: render the full Who's Who panel in `aside`. */
+  peoplePanel: boolean
+  /** AQU-1689: render the collapsed Who's Who ("People") edge tab in `asideEdge`. */
+  peopleEdge: boolean
 }
 
 /**
@@ -57,11 +70,20 @@ export interface RightRailSurfaces {
 export function computeRightRailSurfaces({
   inScriptureEditor,
   verseResourcesAvailable,
+  whosWhoAvailable,
   parallelBiblesOpen,
   verseResourcesOpen,
+  whosWhoOpen,
 }: RightRailInputs): RightRailSurfaces {
   if (!inScriptureEditor) {
-    return { biblesPanel: false, biblesEdge: false, resourcesPanel: false, resourcesEdge: false }
+    return {
+      biblesPanel: false,
+      biblesEdge: false,
+      resourcesPanel: false,
+      resourcesEdge: false,
+      peoplePanel: false,
+      peopleEdge: false,
+    }
   }
   // Verse Resources rides the scripture-editor gate PLUS the project's
   // Bible-resources setting; with the setting off it has neither surface.
@@ -71,15 +93,18 @@ export function computeRightRailSurfaces({
     biblesEdge: !parallelBiblesOpen,
     resourcesPanel: resourcesUsable && verseResourcesOpen,
     resourcesEdge: resourcesUsable && !verseResourcesOpen,
+    // AQU-1689: Who's Who rides the same gate plus its own enrichment.
+    peoplePanel: whosWhoAvailable && whosWhoOpen,
+    peopleEdge: whosWhoAvailable && !whosWhoOpen,
   }
 }
 
-/** True when `aside` has at least one of these two surfaces to render. */
+/** True when `aside` has at least one of these surfaces to render. */
 export function hasRightRailPanel(s: RightRailSurfaces): boolean {
-  return s.biblesPanel || s.resourcesPanel
+  return s.biblesPanel || s.resourcesPanel || s.peoplePanel
 }
 
 /** True when `asideEdge` has at least one collapsed tab to render. */
 export function hasRightRailEdge(s: RightRailSurfaces): boolean {
-  return s.biblesEdge || s.resourcesEdge
+  return s.biblesEdge || s.resourcesEdge || s.peopleEdge
 }

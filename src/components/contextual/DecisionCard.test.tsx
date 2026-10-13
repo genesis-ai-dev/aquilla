@@ -166,7 +166,7 @@ describe("DecisionCard — fact questions", () => {
   it("explains a refused answer by its reason code, and stays answerable", async () => {
     const transport = await import("@/lib/contextual/transport")
     vi.mocked(transport.actOnContextualDecision).mockRejectedValueOnce(
-      new transport.ContextualApiError("bad", 400, "profile-value-invalid"),
+      new transport.ContextualApiError("bad", 400, null, "profile-value-invalid"),
     )
     render(<DecisionCard decision={measures} projectId="p1" onResolved={() => {}} />)
     await userEvent.click(screen.getByRole("button", { name: "Keep the original unit" }))

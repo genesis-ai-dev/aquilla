@@ -1,22 +1,7 @@
-// AQU-1115 — Project Settings → General must show the project's SAVED source
-// and target languages in the editable Source/Target Language fields.
-//
-// Why these tests exist: this page passes `includeSettings: false` to
-// `useProject` (it owns the editable settings hook itself), so the `project`
-// record it receives is `minimalProjectRecord`, which hardcodes
-// `sourceLanguage: ""` / `targetLanguage: ""`. The languages live only in the
-// shared project-settings blob. The baseline seed runs on the first non-null
-// `project`, so it captured those empty strings and the two fields rendered
-// blank forever — while the Languages card directly below (which reads the
-// blob directly) showed the correct language. These tests pin the corrected
-// behavior:
-//   1. Languages already in the blob when the page mounts -> fields populated.
-//   2. Languages arriving in the LATER hydration phase (the real two-phase
-//      load) -> fields settle to the real values, and that settling is not a
-//      user edit (no "Save changes" button appears).
-//   3. A genuinely empty language stays empty — no invented default.
-//   4. A free-text label outside the language catalog shows verbatim.
-//   5. Hydration must never stomp a language the user has already typed.
+// AQU-1594 — source and target languages are lane rows. A settings blob that
+// still carries the old project-level keys must not fill the lane editors or
+// mark General dirty. A lane with no language stays empty, and a draft the
+// user has started typing survives a later settings GET.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
@@ -57,6 +42,28 @@ function makeProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
 let currentProject: ProjectRecord = makeProject()
 let currentSettings: ProjectWideSettings = {}
 let currentHasFetched = true
+let currentLanes = [
+  {
+    id: "source-lane",
+    role: "source" as const,
+    language: "",
+    name: null,
+    langCode: null,
+    legacyTag: "",
+    position: 0,
+    archivedAt: null,
+  },
+  {
+    id: "target-lane",
+    role: "target" as const,
+    language: "",
+    name: null,
+    langCode: null,
+    legacyTag: "French",
+    position: 1,
+    archivedAt: null,
+  },
+]
 
 vi.mock("@/hooks/useProject", () => ({
   useProject: () => ({
@@ -70,7 +77,13 @@ vi.mock("@/hooks/useProjectSettings", () => ({
   useProjectSettings: () => ({
     canEdit: true,
     reasonCannotEdit: null,
+    canEditLanguages: true,
+    reasonCannotEditLanguages: null,
     patch: vi.fn().mockResolvedValue({ kind: "ok" }),
+    lanes: currentLanes,
+    renameLane: vi.fn().mockResolvedValue("ok"),
+    createLane: vi.fn().mockResolvedValue({ kind: "ok" }),
+    setLaneArchived: vi.fn().mockResolvedValue({ kind: "ok" }),
     version: 1,
     updatedAt: null,
     updatedBy: null,
@@ -150,62 +163,64 @@ function renderSettings() {
 }
 
 const sourceField = () => screen.getByLabelText(/source language/i) as HTMLInputElement
-const targetField = () => screen.getByLabelText(/target language/i) as HTMLInputElement
+
+function sourceLane(language: string) {
+  return { ...currentLanes[0]!, language }
+}
+
+function targetLane(language: string) {
+  return { ...currentLanes[1]!, language }
+}
 
 beforeEach(() => {
   vi.clearAllMocks()
   currentProject = makeProject()
   currentSettings = {}
   currentHasFetched = true
+  currentLanes = [sourceLane(""), targetLane("")]
 })
 
-describe("ProjectSettings — saved languages reach the General fields (AQU-1115)", () => {
-  it("shows the project's saved source and target languages on first render", () => {
-    currentSettings = { sourceLanguage: "English", targetLanguage: "French" }
+describe("ProjectSettings — languages live on the lane, not Project Info (AQU-1594)", () => {
+  it("shows the lane's language, not a project-level settings key", () => {
+    currentSettings = { sourceLanguage: "Spanish", targetLanguage: "German" }
+    currentLanes = [sourceLane("English"), targetLane("French")]
     renderSettings()
     expect(sourceField().value).toBe("English")
-    expect(targetField().value).toBe("French")
-    // Hydrating the true values is not a user edit.
+    expect((screen.getByTestId("lane-language-target-lane") as HTMLInputElement).value).toBe("French")
     expect(screen.queryByRole("button", { name: /save changes/i })).toBeNull()
   })
 
-  it("settles to the real languages when they arrive in the LATER hydration phase", () => {
-    // Phase 1: the project record has resolved, but this page's settings GET
-    // hasn't landed yet, so the blob carries no languages. `minimalProjectRecord`
-    // means `project` has none either — the fields can only be blank here.
+  it("a later settings blob does not rewrite the lane fields or dirty the form", () => {
     currentSettings = {}
     currentHasFetched = false
+    currentLanes = [sourceLane("English"), targetLane("French")]
     const { rerender } = renderSettings()
-    expect(sourceField().value).toBe("")
-    expect(targetField().value).toBe("")
+    expect(sourceField().value).toBe("English")
 
-    // Phase 2: the settings GET resolves with the project's real languages.
-    currentSettings = { sourceLanguage: "English", targetLanguage: "French" }
+    currentSettings = { sourceLanguage: "Spanish", targetLanguage: "German" }
     currentHasFetched = true
     rerender(tree())
 
     expect(sourceField().value).toBe("English")
-    expect(targetField().value).toBe("French")
-    // Settling to the server value must not make the form look dirty, or an
-    // unrelated save would be offered as a language change.
+    expect((screen.getByTestId("lane-language-target-lane") as HTMLInputElement).value).toBe("French")
     expect(screen.queryByRole("button", { name: /save changes/i })).toBeNull()
   })
 
-  it("leaves a genuinely empty language empty — no invented default", () => {
-    currentSettings = { sourceLanguage: "English" }
+  it("leaves a genuinely empty lane language empty", () => {
+    currentSettings = { sourceLanguage: "English", targetLanguage: "French" }
     renderSettings()
-    expect(sourceField().value).toBe("English")
-    expect(targetField().value).toBe("")
+    expect(sourceField().value).toBe("")
+    expect((screen.getByTestId("lane-language-target-lane") as HTMLInputElement).value).toBe("")
   })
 
-  it("shows a free-text language outside the catalog verbatim", () => {
-    currentSettings = { sourceLanguage: "Grade 7 English", targetLanguage: "Kâ-nêhiyawêt" }
+  it("shows a free-text lane language outside the catalog verbatim", () => {
+    currentLanes = [sourceLane("Grade 7 English"), targetLane("Kâ-nêhiyawêt")]
     renderSettings()
     expect(sourceField().value).toBe("Grade 7 English")
-    expect(targetField().value).toBe("Kâ-nêhiyawêt")
+    expect((screen.getByTestId("lane-language-target-lane") as HTMLInputElement).value).toBe("Kâ-nêhiyawêt")
   })
 
-  it("never stomps a language the user typed before hydration landed", () => {
+  it("never stomps a language the user typed when the settings blob arrives", () => {
     currentSettings = {}
     currentHasFetched = false
     const { rerender } = renderSettings()
@@ -213,13 +228,10 @@ describe("ProjectSettings — saved languages reach the General fields (AQU-1115
     fireEvent.change(sourceField(), { target: { value: "Koine Greek" } })
     expect(sourceField().value).toBe("Koine Greek")
 
-    // The late settings GET carries a different source language. The user's
-    // in-progress edit wins; the untouched target field still hydrates.
     currentSettings = { sourceLanguage: "English", targetLanguage: "French" }
     currentHasFetched = true
     rerender(tree())
 
     expect(sourceField().value).toBe("Koine Greek")
-    expect(targetField().value).toBe("French")
   })
 })

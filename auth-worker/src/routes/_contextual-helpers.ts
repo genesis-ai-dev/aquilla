@@ -29,6 +29,8 @@ type ErrorCode =
   | "usage_accounting_unavailable"
   | "weekly_ai_allowance_exhausted"
   | "release_disabled"
+  /** AQU-1847 — per-user autopilot start throttle. */
+  | "start_throttled"
 
 export function errorJson(code: ErrorCode, message: string, status: ContentfulStatusCode, details?: unknown) {
   return {

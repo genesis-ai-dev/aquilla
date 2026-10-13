@@ -42,8 +42,8 @@
 // as cells-read; the indicator is purely a read-side derivation.
 
 import { verifyTokenForProject } from "../auth"
-import { laneRelevantHeadSeq } from "./link-sync"
-import { computeUpstreamStaleCellIds } from "./inherited-staleness"
+import { isUndefinedColumn, laneRelevantHeadSeq } from "./link-sync"
+import { computeUpstreamStaleCellIds, resolveConsumedTargetLane } from "./inherited-staleness"
 
 export interface StaleSourceEnv {
   AQUILLA_PG?: AquillaDb
@@ -223,7 +223,24 @@ export async function handleStaleSourceRequest(
   let behindSeq: BehindSeq | null = null
   if (upstreamProjectId && linkMode === "live") {
     try {
-      const head = await laneRelevantHeadSeq(env.AQUILLA_PG, upstreamProjectId, consumes)
+      // AQU-1644: a target link is behind only on the lane it follows. The
+      // column (migration 0138) is read on its own so a database without it
+      // still probes the '' lane.
+      let consumedLaneId: string | null = null
+      if (consumes === "target") {
+        try {
+          const lane = await env.AQUILLA_PG.prepare("SELECT source_link_lane_id FROM projects WHERE id = ?")
+            .bind(projectId)
+            .first<{ source_link_lane_id: string | null }>()
+          consumedLaneId = lane?.source_link_lane_id ?? null
+        } catch (err) {
+          if (!isUndefinedColumn(err)) throw err
+        }
+      }
+      const lane = consumes === "target"
+        ? await resolveConsumedTargetLane(env.AQUILLA_PG, upstreamProjectId, consumedLaneId)
+        : undefined
+      const head = await laneRelevantHeadSeq(env.AQUILLA_PG, upstreamProjectId, consumes, lane)
       if (head > linkCursor) {
         behindSeq = { upstream: head, cursor: linkCursor }
       }

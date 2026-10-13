@@ -77,6 +77,7 @@ import usersRoutes from "./routes/users"
 import meRoutes from "./routes/me"
 import accessRoutes from "./routes/access"
 import orgAccessRoutes from "./routes/org-access"
+import accessAuditRoutes from "./routes/access-audit"
 import adminRoutes from "./routes/admin"
 import testResetRoutes from "./routes/test-reset"
 import devSeedRoutes from "./routes/dev-seed"
@@ -110,6 +111,7 @@ import teamHandoffRoutes from "./routes/team-handoffs"
 import agentArtifactsRoutes from "./routes/agent-artifacts"
 import agentSessionRoutes from "./routes/agent-sessions"
 import { projectKnowledge, orgKnowledge } from "./routes/knowledge"
+import knowledgeInternalRoutes from "./routes/knowledge-internal"
 import styleRulesRoutes from "./routes/style-rules"
 import mondayRoutes from "./routes/monday"
 import contactRoutes from "./routes/contact"
@@ -282,6 +284,7 @@ app.route("/api/v2/users", usersRoutes)
 app.route("/api/v2/users", accessRoutes)
 app.route("/api/v2/me", meRoutes)
 app.route("/api/v2/orgs", orgAccessRoutes)
+app.route("/api/v2/orgs", accessAuditRoutes)
 app.route("/api/v2/orgs", orgSettingsRoutes)
 // Org termbase publish/subscribe (migration 0030). Mounted under BOTH prefixes
 // — /orgs/:orgId/published-termbases lives here, the rest under /projects/:id/
@@ -398,6 +401,11 @@ app.route("/api/v1/ai/agent", aiDraftInternalRoutes)
 // AQU-1282: server-to-server L1 brief-summary render for the external Agent
 // API's RegenerateBriefSummary / SetBrief auto-render. Shared-secret only.
 app.route("/api/v1/ai/agent", aiBriefInternalRoutes)
+// AQU-1762: server-to-server knowledge-base upload / list for the external Agent
+// API's /api/v1/external/projects/:projectId/knowledge routes. Shared-secret
+// only (sync-worker → here); runs the same uploader, extraction and indexing the
+// in-app route does (routes/knowledge-internal.ts).
+app.route("/api/v2/internal", knowledgeInternalRoutes)
 // AQU-1386: seam classification for meaning-unit drafting. Session-authed;
 // batches a window of cell boundaries into one Jev decision call and falls back
 // to punctuation whenever the model is unavailable or unconfident.

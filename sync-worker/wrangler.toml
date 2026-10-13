@@ -144,6 +144,15 @@ id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 [placement]
 mode = "smart"
 
+# AQU-1856: the nightly R2 orphan sweep (src/r2-gc-cron.ts) — the only cron on
+# this worker. 03:17 UTC, deliberately off the hour so it does not pile onto
+# auth-worker's own schedules. Wrangler does NOT inherit the top-level
+# [triggers] into env blocks, so each deployed profile repeats it below.
+# Set R2_GC_MODE = "dry-run" (or "off") in the matching [vars] to shadow or
+# stop the sweep without a code change.
+[triggers]
+crons = ["17 3 * * *"]
+
 [observability]
 enabled = true
 
@@ -168,6 +177,11 @@ command = "bash ../scripts/verify-deploy-branch.sh release"
 [env.production.placement]
 mode = "smart"
 
+# See top-level [triggers] — env blocks don't inherit crons either. AQU-1856
+# nightly R2 orphan sweep (src/r2-gc-cron.ts).
+[env.production.triggers]
+crons = ["17 3 * * *"]
+
 # Wrangler (3.x and 4.x) does inherit the top-level [observability] block into
 # named envs, and `versions deploy` syncs the resolved value. It is declared per
 # env anyway so a top-level edit can't change what production logs.
@@ -186,13 +200,11 @@ DEPLOYMENT_WORKER_NAME = "aquilla-sync-worker"
 # PostHog ingest region + *project* token (public — same one shipped in the SPA
 # bundle). Enables 4xx/5xx log shipping to PostHog Logs (src/posthog-logs.ts).
 # AQU-854: telemetry moved to PostHog EU Cloud. The host is stated explicitly
-# so a deploy never relies on the code default. POSTHOG_KEY is intentionally
-# EMPTY until the EU project exists — the retired US project token must not be
-# posted to an EU endpoint, and `shipLog` no-ops on a blank key, so worker log
-# shipping stays off (local logging is unaffected) until the EU token is filled
-# in here. See the Linear issue's "Account-side dependency".
+# so a deploy never relies on the code default. AQU-1814 connects the verified
+# Frontier R&D EU project (282623); keep this public token aligned with
+# config/posthog.json. Local and e2e profiles leave log shipping off.
 POSTHOG_HOST = "https://eu.i.posthog.com"
-POSTHOG_KEY = ""
+POSTHOG_KEY = "phc_qy5gb7wTaW5RbmMW8SEyQPSLKtYFtUobaqKZWiUs7cBt"
 # Identity worker base for the Monday-integration push nudge (monday-notify.ts).
 AUTH_WORKER_URL = "https://api.aquilla.app/identity"
 # SPA host for the ask-mode approval deep link (external/prepare.ts).
@@ -249,6 +261,11 @@ routes = ["api.dev.aquilla.app/sync/*"]
 [env.development.placement]
 mode = "smart"
 
+# See top-level [triggers] — env blocks don't inherit crons either. AQU-1856
+# nightly R2 orphan sweep (src/r2-gc-cron.ts).
+[env.development.triggers]
+crons = ["17 3 * * *"]
+
 # See [env.production.observability] — declared per env so a top-level edit
 # can't change what dev logs.
 [env.development.observability]
@@ -258,6 +275,8 @@ enabled = true
 binding = "CF_VERSION_METADATA"
 
 [env.development.vars]
+POSTHOG_HOST = "https://eu.i.posthog.com"
+POSTHOG_KEY = "phc_qy5gb7wTaW5RbmMW8SEyQPSLKtYFtUobaqKZWiUs7cBt"
 ENVIRONMENT = "development"
 # AQU-730 read wall. Deploy this only after neon-backfill-lanes --apply has
 # written project_member_lane_roles on dev. Local and e2e leave it unset.

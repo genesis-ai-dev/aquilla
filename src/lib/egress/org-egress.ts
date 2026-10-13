@@ -126,7 +126,17 @@ async function runWithPacker(
 
   // Entries accumulate uncompressed and are DEFLATEd once at the end, in the
   // worker — JSZip's .file() never compressed, so this costs no extra memory.
+  //
+  // AQU-1862: they accumulate as Blobs, never as strings or typed arrays. The
+  // org zip holds every selected project's output, and a few projects' worth
+  // of bytes on the JS heap is what used to crash the tab before the download
+  // started; as blobs the browser owns them (and spills them to disk), so the
+  // run's heap stays at about one project. It also makes the hand-off to the
+  // packaging worker a reference pass instead of a copy.
   const orgEntries: EgressZipEntry[] = []
+  const pushOrgEntry = (path: string, data: EgressZipEntry["data"]): void => {
+    orgEntries.push({ path, data: data instanceof Blob ? data : new Blob([data as BlobPart]) })
+  }
   const reports: EgressProjectReport[] = []
   // Project folder names dedupe with _2/_3 like every other egress slug.
   const usedSlugs = new Map<string, number>()
@@ -249,7 +259,7 @@ async function runWithPacker(
           // Replay the cached per-project zip into the org zip verbatim.
           const cachedEntries = await packer.unpack(await cached.zipBlob.arrayBuffer())
           for (const entry of cachedEntries) {
-            orgEntries.push({ path: `${projectSlug}/${entry.path}`, data: entry.data })
+            pushOrgEntry(`${projectSlug}/${entry.path}`, entry.data)
           }
           reports.push({ ...cached.report, fromCache: true, folder: projectSlug })
           progress({
@@ -298,7 +308,7 @@ async function runWithPacker(
         total: 1,
       })
       for (const entry of entries) {
-        orgEntries.push({ path: `${projectSlug}/${entry.path}`, data: entry.data })
+        pushOrgEntry(`${projectSlug}/${entry.path}`, entry.data)
       }
       // Cache only complete builds: transient holes (network/5xx/decode) could
       // fill on retry, so caching them would replay the gaps until the project
@@ -344,7 +354,7 @@ async function runWithPacker(
     options: args.options,
     projects: reports,
   }
-  orgEntries.push({ path: "manifest.json", data: JSON.stringify(manifest, null, 2) })
+  pushOrgEntry("manifest.json", JSON.stringify(manifest, null, 2))
 
   progress({ phase: "zipping", projectName: "", projectIndex: projectCount, done: 0, total: 0 })
   const blob = await packer.pack(orgEntries)

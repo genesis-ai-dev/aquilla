@@ -25,7 +25,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import type { CellData } from "@/hooks/useCells"
 import { seedAudibility, useQueueAudibility } from "@/lib/audio/audibility"
-import { queueClockIsFileTime, useQueueForFile } from "@/lib/audio/play-queue"
+import { queueClockIsFileTime, stopQueue, useQueueForFile } from "@/lib/audio/play-queue"
 import { effectiveSourceText } from "@/lib/cell-text"
 import type { DirectionMode, TextDirection } from "@/lib/text-direction"
 import { cellIdAtSec } from "@/lib/timeline/source-regions"
@@ -48,6 +48,15 @@ import { useMediaPictureUrl } from "@/hooks/useMediaPictureUrl"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { readFilmAudioLanguage, writeFilmAudioLanguage } from "@/lib/video/film-audio-tracks"
 import { VideoAudioPicker } from "./VideoAudioPicker"
+import { VideoSoundSourcePicker } from "./VideoSoundSourcePicker"
+import {
+  onBeforePlaybackSourceSwitch,
+  recordingDrivesPlayback,
+  switchPlaybackSource,
+  usePlaybackSource,
+  type PlaybackSource,
+} from "@/lib/audio/playback-source"
+import { pauseAllTransports } from "@/lib/audio/transport-pause"
 import { videoSyncAction } from "./video-sync"
 import { nextScrubSeek } from "./video-seek-coalesce"
 import {
@@ -140,6 +149,10 @@ export interface MediaVideoPaneProps {
   onVideoDuration?: (src: string, sec: number | null) => void
   /** Opens the link-video dialog — offered when the source will not load. */
   onChangeVideo?: () => void
+  /** A click on a YouTube picture: play or pause through Aquilla's transport,
+   *  exactly as Space and the playback bar's button do (the workspace hands
+   *  its timeline toggle). Absent means the picture takes no clicks of ours. */
+  onPictureClick?: () => void
   /** AQU-1119: collapse the video section to a rail. Absent means no button. */
   onCollapse?: () => void
   /** AQU-1119: fold the OTHER sections so the picture has the lens to itself. */
@@ -164,6 +177,7 @@ export function MediaVideoPane({
   onVideoPlaying,
   onVideoDuration,
   onChangeVideo,
+  onPictureClick,
   onCollapse,
   onToggleFullscreen,
   isFullscreen,
@@ -244,7 +258,20 @@ export function MediaVideoPane({
    * — and then every tick fails the file-time test and pauses the picture, so
    * the user gets a frozen first frame, no controls, and no way to start it.
    */
-  const slaved = useMemo(() => cells.some((c) => queueClockIsFileTime(c)), [cells])
+  const recordingCell = useMemo(() => cells.find((c) => queueClockIsFileTime(c)), [cells])
+  /**
+   * AQU-1565 follow-up: having a recording is necessary for slaving, no longer
+   * sufficient. A YouTube picture keeps its own sound and drives itself until
+   * the person picks the uploaded recording (`playback-source.ts`); a streamed
+   * film defaults to the recording, which is the arrangement it always had.
+   */
+  const playbackSource = usePlaybackSource(fileId, src)
+  const slaved = recordingDrivesPlayback(recordingCell != null, playbackSource)
+  /** The sound menu exists only where there is a choice to make: a YouTube
+   *  picture over a file that also carries an uploaded recording. */
+  const offerSoundSource = youTube && recordingCell != null
+  const recordingName = recordingCell?.original.trim() || null
+  const [soundMenuOpen, setSoundMenuOpen] = useState(false)
   /** Whether the film's soundtrack is on. Only bites in the standalone
    *  arrangement — a slaved picture is already silent. */
   const sourceAudible = useQueueAudibility().source
@@ -586,6 +613,44 @@ export function MediaVideoPane({
     }, STALL_TICK_MS)
     return () => window.clearInterval(id)
   }, [slaved])
+
+  /**
+   * Switching sound mid-play hands the transport from one player to the other
+   * (queue <-> picture). Neither stops the other on its own: picking the
+   * video's sound unmutes a picture that is still running while the queue
+   * plays on underneath it, and the playback bar then drives only the picture.
+   * So everything stops first, and the person presses play on the new source.
+   * Nothing resumes by itself, the house rule for every pause here.
+   *
+   * pauseAllTransports alone is not enough for that (walk 2026-10-02):
+   * - A SLAVED picture has no registered controller; it is normally stopped by
+   *   the sync effect following the queue. But the flip below makes the pane
+   *   standalone on the next render, so that effect never runs, and the
+   *   picture played on, now unmuted. So the element is paused here directly,
+   *   and the play intent dropped so the stall watchdog does not restart it.
+   * - A PAUSED queue is still "active" for this file, and an active queue owns
+   *   the playback bar (`selectTransportForFile`). Play then resumed the
+   *   recording under the video's own sound. Stopping it hands the bar to the
+   *   source the person just picked.
+   */
+  //
+  // The timeline's Source audio lane offers the same choice (Sam, Oct 5), so
+  // the stopping is registered for the file and runs whichever surface the
+  // person used (`switchPlaybackSource`).
+  const queueActive = queue.active
+  useEffect(
+    () =>
+      onBeforePlaybackSourceSwitch(fileId, () => {
+        pauseAllTransports()
+        wantPlayRef.current = false
+        stallRef.current = IDLE_STALL_STATE
+        cancelPendingPlay()
+        videoRef.current?.pause()
+        if (queueActive) stopQueue()
+      }),
+    [fileId, queueActive, cancelPendingPlay],
+  )
+  const chooseSoundSource = (next: PlaybackSource) => switchPlaybackSource(fileId, playbackSource, next)
 
   // Handing the transport to the queue abandons any start we were waiting for.
   //
@@ -1184,6 +1249,28 @@ export function MediaVideoPane({
           onPause={slaved ? undefined : () => { clearActiveAudioIf(filmAudio); onVideoPlaying?.(false) }}
           onEnded={slaved ? undefined : () => { clearActiveAudioIf(filmAudio); onVideoPlaying?.(false) }}
         />
+        {/* Sam, Oct 5: clicking YouTube's own play button (or anywhere on its
+             picture) started only the picture. With the uploaded recording
+             chosen, that picture is silent and follows the queue, so nothing
+             was heard and the playback bar did not know it was playing. A
+             clear layer now takes every click on a YouTube picture and hands
+             it to Aquilla's transport, the same toggle as Space and the bar's
+             button, so the chosen sound always plays. Sam accepted the cost:
+             YouTube's in-picture links (title, "Watch on YouTube") can no
+             longer be clicked. It is a pointer convenience only, so it is
+             hidden from assistive tech: the playback bar is the control.
+             Below the caption (which takes no pointer anyway), the
+             click-to-start overlay and the corner menus. A side effect worth
+             having: the picture now reports hover, so the corner controls
+             appear over it, not only over the black bars. */}
+        {youTube && onPictureClick && (
+          <div
+            aria-hidden
+            data-testid="video-pane-youtube-click-layer"
+            className="absolute inset-0 z-[5] cursor-pointer"
+            onClick={onPictureClick}
+          />
+        )}
         {/* Anchored to the PICTURE, not the black field: the exported video
              has no bars, so this is where the line really lives — and it can
              never drift into a bar as the pane is resized. */}
@@ -1223,22 +1310,41 @@ export function MediaVideoPane({
       {hasCaption && placement === "bar" && <VideoPaneCaption {...captionProps} />}
       {/* Bottom right (Sam, 2026-08-18). On the FIELD rather than the picture,
           like the two caption controls above and for the same reason: it keeps
-          its corner when the picture is letterboxed down to a small box. */}
+          its corner when the picture is letterboxed down to a small box.
+          AQU-1565 follow-up: keyboard focus reveals it too. The sound menu is
+          the only way to hear an uploaded recording on a YouTube file, and a
+          hover-only corner left a keyboard user tabbing onto an invisible
+          control.
+          And on a YouTube file with an uploaded recording it stays on screen.
+          The YouTube player is a cross-origin frame that swallows the pointer,
+          so hovering the picture itself never revealed the corner: only the
+          black bars around it did, and the sound menu is the one way to hear
+          the recording (browser pass, 2026-10-02). */}
       <div
         data-testid="video-audio-overlay"
         className={cn(
           "absolute bottom-2 right-2 z-30 transition-opacity duration-300",
-          modeRevealed || audioMenuOpen
+          modeRevealed || audioMenuOpen || soundMenuOpen || offerSoundSource
             ? "opacity-100"
-            : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100",
+            : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:opacity-100",
         )}
       >
-        <VideoAudioPicker
-          tracks={stream.audioTracks}
-          activeLang={stream.activeAudioLang}
-          onChange={chooseAudioLanguage}
-          onOpenChange={setAudioMenuOpen}
-        />
+        <div className="flex items-center gap-1.5">
+          {offerSoundSource && (
+            <VideoSoundSourcePicker
+              value={playbackSource}
+              recordingName={recordingName}
+              onChange={chooseSoundSource}
+              onOpenChange={setSoundMenuOpen}
+            />
+          )}
+          <VideoAudioPicker
+            tracks={stream.audioTracks}
+            activeLang={stream.activeAudioLang}
+            onChange={chooseAudioLanguage}
+            onOpenChange={setAudioMenuOpen}
+          />
+        </div>
       </div>
       {/* NO MUTE BUTTON ON THE PICTURE. It was here for a few hours on
           2026-08-14 and came straight back off (Sam): the playback bar already

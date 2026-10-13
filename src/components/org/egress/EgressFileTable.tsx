@@ -131,8 +131,8 @@ export function EgressFileTable({
         cell: ({ row }) => (
           <div className="flex flex-wrap gap-1">
             {row.original.lanes.map((l) => (
-              <Badge key={l.lane || "__default"} variant="secondary" className="max-w-24 truncate">
-                {laneChipLabel(l.lane, row.original.targetLanguage)}
+              <Badge key={l.laneId || l.lane || "__default"} variant="secondary" className="max-w-24 truncate">
+                {laneChipLabel(l.lane, row.original.targetLanguage, "Default", l.name)}
               </Badge>
             ))}
           </div>

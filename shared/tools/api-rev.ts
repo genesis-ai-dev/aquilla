@@ -71,7 +71,7 @@ export const API_REV_ADDITIONS: Readonly<Record<number, readonly string[]>> = {
     "ai.alignStyles: Align styles for IDML multi-run cells (scope ai:draft); signals ai phase \"aligning\"",
     "ai.healthSpans: the AI-draft provenance wash for a live draft (scope read:cells)",
     "editor-mount cell fields: canAlignStyles, healthSpans, ribbon.needsAttention; cells.signals issue ruleName is the localized check name",
-    "editor.config: readOnlyLabel, readOnlyKind (the built-in's read-only / archived-lane banner)",
+    "editor.config: readOnlyLabel, readOnlyKind (the built-in's read-only / archived-lane banner), languagesLoading (AQU-1902: read-only until the lane row is known)",
   ],
 }
 

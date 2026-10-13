@@ -75,8 +75,8 @@ describe("importDcsResource — genesis transform (spec §3, §5)", () => {
 
     // File-level ids/meta are deterministic + correct.
     expect(args.projectId).toBe("proj-1")
-    expect(args.fileId).toBe(dcsFileId(ENTRY.fullName, "57-TIT.usfm"))
-    expect(args.file.id).toBe(dcsFileId(ENTRY.fullName, "57-TIT.usfm"))
+    expect(args.fileId).toBe(dcsFileId("proj-1", ENTRY.fullName, "57-TIT.usfm"))
+    expect(args.file.id).toBe(dcsFileId("proj-1", ENTRY.fullName, "57-TIT.usfm"))
     expect(args.file.fileType).toBe("usfm")
     expect(args.file.bookCode).toBe("TIT")
 
@@ -216,6 +216,53 @@ describe("importDcsResource — genesis transform (spec §3, §5)", () => {
 
       importDcsResource({ entry: { ...ENTRY, contentFormat: "markdown", subject: "Translation Words" }, projectId: "p", client: client as any, emit, getToken: async () => "t" }),
     ).rejects.toThrow(/no.*route/i)
+  })
+})
+
+describe("importDcsResource — AQU-1891: the same resource into two projects", () => {
+  it("gives each project its OWN file id, so the second import cannot land on the first's file rows", async () => {
+    // Repro: project A imports a Door43 resource, project B imports the same
+    // resource at the same release. Before the fix both derived the identical
+    // file id, so B's file.create upserted ON CONFLICT(id) onto A's rows — B
+    // got cells but no file rows (empty file list, 404 on the source-original
+    // upload), and A's file metadata could be overwritten.
+    const emitA = vi.fn(async (_args: BulkUploadArgs) => {})
+    const emitB = vi.fn(async (_args: BulkUploadArgs) => {})
+
+    await importDcsResource({
+      entry: ENTRY,
+      projectId: "proj-A",
+       
+      client: fakeClient() as any,
+      emit: emitA,
+      getToken: async () => "tok",
+    })
+    await importDcsResource({
+      entry: ENTRY,
+      projectId: "proj-B",
+       
+      client: fakeClient() as any,
+      emit: emitB,
+      getToken: async () => "tok",
+    })
+
+    const a = emitA.mock.calls[0][0]
+    const b = emitB.mock.calls[0][0]
+
+    // Distinct file ids — and each is the id its own project derives.
+    expect(a.fileId).not.toBe(b.fileId)
+    expect(a.fileId).toBe(dcsFileId("proj-A", ENTRY.fullName, "57-TIT.usfm"))
+    expect(b.fileId).toBe(dcsFileId("proj-B", ENTRY.fullName, "57-TIT.usfm"))
+    // The file.create meta id must agree with the upload's fileId, or the
+    // source-original upload 404s on a row the project does not own.
+    expect(a.file.id).toBe(a.fileId)
+    expect(b.file.id).toBe(b.fileId)
+
+    // Cell ids stay content-addressed (cross-import lineage) — the cells PK is
+    // already project-scoped, so only file/event ids need the scope.
+    expect(b.cells.map((c) => c.cellId)).toEqual(a.cells.map((c) => c.cellId))
+    // …while the EVENT ids differ per project (the pre-existing scope).
+    expect(b.cells[0].id).not.toBe(a.cells[0].id)
   })
 })
 

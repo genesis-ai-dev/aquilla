@@ -45,7 +45,7 @@ not a micro-spec farm.
 | Editor | Workspace actions dropdown (E2E harness sentinel) | `e2e/specs/editor/workspace-actions-dropdown.smoke.spec.ts` |
 | Rules | Enable built-in rule, see violation in editor | `e2e/specs/rules/violation.smoke.spec.ts` |
 | Rules | Custom rule create / edit / toggle (surface session) | `e2e/specs/rules/rules-crud.smoke.spec.ts` |
-| Validation | Editing a cell auto-validates | `e2e/specs/validation/validate.smoke.spec.ts` |
+| Validation | Editing a cell auto-validates; an edit made as soon as the project opens waits for the languages (read-only "Loading languages…"), then lands on its lane with its validation and survives reload (AQU-1901/1902) | `e2e/specs/validation/validate.smoke.spec.ts` |
 | Validation | Validation history persists across navigation | `e2e/specs/validation/validation-persists-navigation.smoke.spec.ts` |
 | AI | Sparkle fills a cell | `e2e/specs/ai/completion.smoke.spec.ts` |
 | Collab | File propagates alice → bob | `e2e/specs/collab/file-propagation.smoke.spec.ts` |

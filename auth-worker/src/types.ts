@@ -246,6 +246,16 @@ export interface Env {
   /** Spans a project-wide autopilot start may drive at once. Lower it for a
    *  self-hosted upstream with few slots (see routes/contextual.ts). */
   CONTEXTUAL_MAX_CONCURRENCY?: string
+  /** AQU-1847 — aggregate autopilot span width one billing workspace may hold
+   *  across ALL its projects. Default 24. The per-project ceiling above
+   *  multiplies by project count without this; with it, two heavy projects in
+   *  one workspace share capacity instead of adding up. */
+  CONTEXTUAL_MAX_ORG_CONCURRENCY?: string
+  /** AQU-1847 — aggregate autopilot span width across the whole platform.
+   *  Default 96. Set BELOW the provider's real rate limit: autopilot takes a
+   *  lease and interactive chat/suggestions do not, so the gap is the headroom
+   *  that keeps user-facing calls responsive while autopilot runs hot. */
+  CONTEXTUAL_MAX_GLOBAL_CONCURRENCY?: string
   /** Hard cap on autopilot model requests in flight at once. Unset = uncapped.
    *  Set to the upstream's slot count when it has a fixed one; span concurrency
    *  bursts ~3x wider than it looks (verifier fan-out). */

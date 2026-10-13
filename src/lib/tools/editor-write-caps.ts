@@ -24,13 +24,15 @@ export interface ExtensionEditorWriteCapsInput {
   laneArchived: boolean
   /** The user's project role level (null for a local project). */
   roleLevel: number | null
+  /** AQU-1902: the active lane's row is not known yet ("Loading languages…"). */
+  lanesPending?: boolean
 }
 
 export function extensionEditorWriteCaps(input: ExtensionEditorWriteCapsInput): { canEdit: boolean; canValidate: boolean } {
-  const { projectReadOnly, laneArchived, roleLevel } = input
+  const { projectReadOnly, laneArchived, roleLevel, lanesPending = false } = input
   return {
-    canEdit: !projectReadOnly && !laneArchived && canPerform("target.cell.commit", roleLevel),
-    canValidate: !laneArchived && canPerform("cell.validate", roleLevel),
+    canEdit: !projectReadOnly && !laneArchived && !lanesPending && canPerform("target.cell.commit", roleLevel),
+    canValidate: !laneArchived && !lanesPending && canPerform("cell.validate", roleLevel),
   }
 }
 

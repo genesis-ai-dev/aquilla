@@ -68,6 +68,10 @@ export interface ToolEditorConfig {
   /** apiRev 5: why — "lane-archived" (the lane is frozen for every role) or
    *  "role" (this reader's role / project permissions). */
   readOnlyKind?: "lane-archived" | "role" | null
+  /** apiRev 5 (AQU-1902): the active lane's row is still loading — editing and
+   *  validation are off until it is known; the host shows "Loading languages…"
+   *  above the editor, so the extension adds no banner of its own. */
+  languagesLoading?: boolean
 }
 
 export type ToolPanelKind = "history" | "comments" | "attachments" | "rule" | "term" | "recorder"

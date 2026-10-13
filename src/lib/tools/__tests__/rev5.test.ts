@@ -189,6 +189,20 @@ describe("apiRev 5 in the extension editor (SDK)", () => {
     stop()
   })
 
+  it("is read-only while the project's languages load, adding no banner of its own (AQU-1902)", async () => {
+    const base = withRev5()
+    const { q, tgt, stop } = (() => {
+      const m = mount({
+        ...base,
+        editorConfig: async (fileId) => ({ ...(await base.editorConfig(fileId)), canEdit: false, canValidate: false, languagesLoading: true }),
+      })
+      return { ...m, tgt: (id: string) => m.row(id)?.querySelector("[data-target-read-view]") as HTMLElement | null }
+    })()
+    await vi.waitFor(() => expect(tgt("c1")?.getAttribute("aria-readonly")).toBe("true"))
+    expect(q(".readonly-banner")).toBeNull()
+    stop()
+  })
+
   it("shows the built-in's banner wording and testid for an archived lane (AQU-1463)", async () => {
     const base = withRev5()
     const { q, stop } = mount({

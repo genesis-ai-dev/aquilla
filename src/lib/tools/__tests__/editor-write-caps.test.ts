@@ -18,6 +18,11 @@ describe("extension editor write capabilities", () => {
       .toEqual({ canEdit: false, canValidate: true })
   })
 
+  it("stays read-only until the active lane's row is known (AQU-1902 'Loading languages…')", () => {
+    expect(extensionEditorWriteCaps({ projectReadOnly: false, laneArchived: false, roleLevel: ROLE.MAINTAINER, lanesPending: true }))
+      .toEqual({ canEdit: false, canValidate: false })
+  })
+
   it("follows the role ladder: a viewer can do neither", () => {
     expect(extensionEditorWriteCaps({ projectReadOnly: false, laneArchived: false, roleLevel: ROLE.VIEWER }))
       .toEqual({ canEdit: false, canValidate: false })

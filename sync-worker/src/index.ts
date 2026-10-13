@@ -8,6 +8,7 @@
 // cutover is complete and D1 is no longer a datastore here.
 
 import { handleAdminRequest } from "./admin"
+import { handleDbTimeoutsRequest } from "./db-timeouts-route"
 import { handleAudioRequest } from "./audio"
 import { handleCellAttachmentRequest } from "./cell-attachments"
 import { handleVoiceConvertRequest, handleVoiceReferenceRequest } from "./voice-convert"
@@ -103,6 +104,7 @@ import { shipLog, shipErrorResponse } from "./posthog-logs"
 import { redactLogPath } from "../../shared/log-path-redaction"
 import { deploymentEnvironmentError, unauthenticatedBypassError } from "./environment-guard"
 import { asReadonlyR2, type ReadonlyR2Bucket } from "./lib/readonly-r2"
+import { runR2GcSweep, R2_GC_CRON } from "./r2-gc-cron"
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace -- Cloudflare namespace augmentation requires this syntax
@@ -226,6 +228,12 @@ declare global {
       CREDIT_DAILY_CAP?: string
       CREDIT_WEEKLY_CAP?: string
       CREDIT_ENFORCE?: string
+      /**
+       * AQU-1856 R2 orphan sweep (r2-gc-cron.ts): `off` skips it, `dry-run`
+       * reports without deleting, unset/anything else sweeps. A var so the
+       * sweep can be stopped or shadowed without waiting on a release.
+       */
+      R2_GC_MODE?: string
     }
   }
 }
@@ -376,6 +384,10 @@ const worker = {
     if (rebuildResponse) return rebuildResponse
     const rebuildFtsResponse = await handleRebuildFtsRequest(request, env)
     if (rebuildFtsResponse) return rebuildFtsResponse
+    // Must precede handleAdminRequest: that handler owns the rest of /admin/*
+    // and 404s anything it does not recognise.
+    const dbTimeoutsResponse = await handleDbTimeoutsRequest(request, env)
+    if (dbTimeoutsResponse) return dbTimeoutsResponse
     const adminResponse = await handleAdminRequest(request, env)
     if (adminResponse) return adminResponse
     const audioResponse = await handleAudioRequest(request, env)
@@ -645,5 +657,26 @@ export default {
       ctx.waitUntil(shipErrorResponse(env, "aquilla-sync-worker", request, response))
     }
     return response
+  },
+
+  // AQU-1856: the only cron on this worker — the nightly R2 orphan sweep.
+  // Unlike `fetch` above it builds its own Postgres handle (r2-gc-cron.ts),
+  // since the scheduled entrypoint never passes through that wrapper.
+  async scheduled(
+    controller: ScheduledController,
+    env: Env,
+    _ctx: ExecutionContext,
+  ): Promise<void> {
+    if (controller.cron !== R2_GC_CRON) {
+      console.warn(`[cron] unrecognized schedule ${controller.cron} — ignoring`)
+      return
+    }
+    try {
+      await runR2GcSweep(env)
+    } catch (err) {
+      // A cron that throws is retried by the runtime; the sweep is bounded and
+      // resumable, so log and swallow rather than thrash on a bad night.
+      console.error("[r2-gc] sweep failed:", err)
+    }
   },
 }

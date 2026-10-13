@@ -256,11 +256,18 @@ jobs:
           cache-dependency-path: |
             pnpm-lock.yaml
             sync-worker/pnpm-lock.yaml
+            auth-worker/pnpm-lock.yaml
       - if: needs.changes.outputs.sync == 'true'
         run: pnpm install --frozen-lockfile
       - if: needs.changes.outputs.sync == 'true'
         run: pnpm install --frozen-lockfile
         working-directory: sync-worker
+      # sync-worker typecheck and tests import auth-worker source
+      # (checking/route.ts uses auth-worker/src/utils/password), which imports
+      # bcryptjs and @noble/hashes. Those packages are installed with auth-worker.
+      - if: needs.changes.outputs.sync == 'true'
+        run: pnpm install --frozen-lockfile
+        working-directory: auth-worker
       - if: needs.changes.outputs.sync == 'true'
         run: pnpm run type-check
         working-directory: sync-worker

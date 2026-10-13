@@ -98,6 +98,9 @@ const UNCOVERED: Record<string, string> = {
   knowledge_docs: "never granted to app_runtime",
   lanes: "never granted to app_runtime",
   project_access_links: "never granted to app_runtime — rows are credentials",
+  // AQU-1249: anonymous guests redeem a link by its token with no user in
+  // context, so 0034's per-user policy shape cannot apply (as mcp_oauth_codes).
+  checking_links: "never granted to app_runtime — rows are credentials, redeemed by token with no user context (0162)",
   project_brief_history: "never granted to app_runtime",
   project_brief_proposals: "never granted to app_runtime",
   project_briefs: "never granted to app_runtime",
@@ -105,6 +108,8 @@ const UNCOVERED: Record<string, string> = {
   project_member_scopes: "never granted to app_runtime",
   project_seq_counters: "never granted to app_runtime",
   seq_allocations: "never granted to app_runtime",
+  // AQU-1694 (0164): derived word links, written like cell_word_morph.
+  source_word_alignment: "never granted to app_runtime",
   style_rules: "never granted to app_runtime",
   workspace_usage_requests: "never granted to app_runtime",
   project_tools: "never granted to app_runtime (tools prototype)",

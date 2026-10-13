@@ -46,6 +46,13 @@ import { smartEdits } from "./smartEdits"
 import { harmonizer } from "./harmonizer"
 import { bibleData } from "./bibleData"
 import { extensions } from "./extensions"
+import { languageProfile } from "./languageProfile"
+import { projectDecisions } from "./projectDecisions"
+import { bibleAlignment } from "./bibleAlignment"
+import { bibleChecks } from "./bibleChecks"
+import { bibleHelps } from "./bibleHelps"
+import { bibleParticipants } from "./bibleParticipants"
+import { bibleVoices } from "./bibleVoices"
 
 export const NAMESPACES = [
   common,
@@ -78,4 +85,11 @@ export const NAMESPACES = [
   harmonizer,
   bibleData,
   extensions,
+  languageProfile,
+  projectDecisions,
+  bibleAlignment,
+  bibleChecks,
+  bibleHelps,
+  bibleParticipants,
+  bibleVoices,
 ] as const

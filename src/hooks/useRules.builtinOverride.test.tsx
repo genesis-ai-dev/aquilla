@@ -80,3 +80,31 @@ describe("useRules — setBuiltinOverride syncs to shared settings", () => {
     })
   })
 })
+
+/**
+ * AQU-1688 / AQU-1685: Rules → Built-in checks lists the Bible data checks only
+ * on a device with the Bible data experiment on. The project's own choices
+ * (Bible data on, checks enrichment on by default) are shared, so a
+ * collaborator who switched the experiment on must not make the rows, their
+ * counts or their findings appear for everyone else.
+ */
+describe("useRules — Bible data checks follow the device's Bible data experiment", () => {
+  const scriptureProject = (experimentalFlags?: Record<string, boolean>): ProjectRecord => ({
+    ...baseProject(),
+    files: [{ id: "f1", name: "JHN.usfm", type: "usfm", createdAt: "", cellCount: 1 }] as ProjectRecord["files"],
+    bibleResourcesEnabled: true,
+    experimentalFlags,
+  })
+  const bibleRuleIds = (rules: { id: string }[]) => rules.map((r) => r.id).filter((id) => id.startsWith("builtin:bkp:"))
+
+  it("has no Bible data check rules with the experiment off", () => {
+    const { result } = renderHook(() => useRules(scriptureProject(), noop))
+    expect(bibleRuleIds(result.current.builtinRules)).toEqual([])
+    expect(bibleRuleIds(result.current.rules)).toEqual([])
+  })
+
+  it("lists them with the experiment on", () => {
+    const { result } = renderHook(() => useRules(scriptureProject({ bibleData: true }), noop))
+    expect(bibleRuleIds(result.current.builtinRules)).toContain("builtin:bkp:V1")
+  })
+})

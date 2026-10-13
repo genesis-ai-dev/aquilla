@@ -56,6 +56,7 @@ import {
   sectionsProgressRecomputeStmt,
 } from './progress-projection'
 import { makeRequestCache } from './request-cache'
+import { dbFailureInfo, reportServerRejections } from './rejection-telemetry'
 
 // Max statements per batch() transaction — a conservative self-imposed cap (Postgres has no hard limit; keeps any single transaction bounded).
 const BATCH_LIMIT = 100
@@ -212,6 +213,9 @@ export interface EventsRouteEnv {
   BASE_URL?: string
   /** AQU-1415: "1" turns the lane write wall on. Unset keeps additive scopes. */
   LANE_READ_WALL?: string
+  /** PostHog Logs project token; unset (local dev, e2e) makes telemetry a no-op. */
+  POSTHOG_KEY?: string
+  POSTHOG_HOST?: string
 }
 
 interface AcceptedEntry {
@@ -1866,6 +1870,7 @@ export async function handleEventsWriteRequest(
       await recomputeCommitted()
     } catch (err) {
       console.error("[events] DB batch failed:", err)
+      const batchFailure = dbFailureInfo(err)
       // The chunks that did commit are durable, so their counters must still
       // be brought up to date (AQU-1261) before we report the partial result.
       await recomputeCommitted()
@@ -1882,6 +1887,9 @@ export async function handleEventsWriteRequest(
         }
       }
 
+      // These 5xx results ride inside a 200, which the request wrapper in
+      // index.ts never ships — report them here (grouped, throttled).
+      reportServerRejections(env, ctx, rawEvents, rejected, batchFailure)
       return Response.json(
         {
           accepted,
@@ -2099,6 +2107,8 @@ export async function handleEventsWriteRequest(
     }
   }
 
+  // A handler / auth 5xx inside this 200 (the batch itself committed).
+  reportServerRejections(env, ctx, rawEvents, rejected)
   return Response.json({
     accepted,
     rejected,

@@ -68,6 +68,7 @@ import type { MediaTextSource, MediaTextSourceOption } from "@/lib/import/media-
 import { importSdbh, type SdbhImportProgress } from "@/lib/import-sdbh"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
 import { PreviewPanel, type ImportUploadProgress, type PreviewConfirmOptions } from "@/components/import/PreviewPanel"
+import { UsfmStructureFindings } from "@/components/import/UsfmStructureFindings"
 import { formatBytesProgress } from "@/lib/format-bytes"
 import type { CellUnit, FileReference, ProjectTtsSettings } from "@/lib/parsers/types"
 import { detectFileType, isMediaFileType } from "@/lib/parsers/types"
@@ -130,11 +131,16 @@ import { partnerIntegrations } from "@/lib/partners/registry"
 import type { PartnerImportPanelProps } from "@/lib/partners/types"
 import { LinkSourceFlow } from "@/components/ProjectSettings/LinkSourceFlow"
 import { ROLE } from "@/lib/frontier/roles"
-import { FileTargetImportPanel, type FileTargetPanelBack } from "@/components/import/FileTargetImportPanel"
+import {
+  FileTargetImportPanel,
+  type FileTargetImportMode,
+  type FileTargetPanelBack,
+} from "@/components/import/FileTargetImportPanel"
 import { ImportIntentChoice, type ImportIntent } from "@/components/import/ImportIntentChoice"
 import { TranslationChooser, type TranslationOtherWay, type TranslationStartOptions } from "@/components/import/TranslationChooser"
 import type { LaneComboboxOption } from "@/components/LaneCombobox"
 import type { FileTargetCellRef } from "@/lib/import-file-target"
+import type { StageTargetProposalsResult } from "@/lib/import-file-target-proposals"
 import {
   CLOSED_IMPORT_FILE_GATE,
   nextImportFileGate,
@@ -202,6 +208,10 @@ export interface TranslationImportHost {
    *  follows it, and that lane is the one the import commits into: its review
    *  reads current translations and commit parents from the open lane's lines. */
   onLaneChange?: (lane: string) => void
+  /** AQU-1673: fired once "Stage as proposals for review" has staged its
+   *  changeset, so the host can say where the proposals went. Nothing was
+   *  written, so there is nothing to revalidate. */
+  onProposalsStaged?: (result: StageTargetProposalsResult) => void
 }
 
 /** AQU-1365: one of the project's target lanes, as the translation check sees it. */
@@ -412,6 +422,11 @@ export function ImportDialog({
   const [translationFileId, setTranslationFileId] = useState<string | null>(null)
   const [heldTranslationFile, setHeldTranslationFile] = useState<File | null>(null)
   const [translationRun, setTranslationRun] = useState<TranslationRun | null>(null)
+  // AQU-1673: where a dropped translation's reviewed matches land. "commit"
+  // writes them into the file; "proposal" stages them as one changeset behind
+  // the approval gate. Chosen on the chooser, before the drop, so the review
+  // opens already titled for it and its final button says "Propose".
+  const [translationMode, setTranslationMode] = useState<FileTargetImportMode>("commit")
   const [opening, setOpening] = useState<{ gate: ImportFileGate; state: ImportFileGateState }>(
     { gate: CLOSED_IMPORT_FILE_GATE, state: "waiting" },
   )
@@ -453,6 +468,7 @@ export function ImportDialog({
       setTranslationFileId(openFileId !== null && translationFiles.some((file) => file.id === openFileId) ? openFileId : null)
       setHeldTranslationFile(null)
       setTranslationRun(null)
+      setTranslationMode("commit")
       setOpening({ gate: CLOSED_IMPORT_FILE_GATE, state: "waiting" })
       setTranslationBack(null)
       setTranslationNotice(null)
@@ -1051,7 +1067,14 @@ export function ImportDialog({
                   />
                 )}
                 <span className="min-w-0 truncate">
-                  {t("importExport.translation.titleInto", { fileName: translationDestination?.name ?? "" })}
+                  {t(
+                    // AQU-1673: the title names the mode, so someone who ticked
+                    // "Stage as proposals" sees it before the final button.
+                    translationMode === "proposal"
+                      ? "importExport.translation.titleProposalsInto"
+                      : "importExport.translation.titleInto",
+                    { fileName: translationDestination?.name ?? "" },
+                  )}
                 </span>
               </div>
             ) : screen === "preview" ? (
@@ -1130,6 +1153,8 @@ export function ImportDialog({
               laneOptions={translation.laneOptions}
               lane={targetLang ?? ""}
               onLaneChange={translation.onLaneChange}
+              mode={translationMode}
+              onModeChange={setTranslationMode}
             />
           </div>
         )}
@@ -1677,6 +1702,24 @@ export function ImportDialog({
                 startTranslation(translationRun.file, fileId, { suggested: false }, "review-switch")
               }}
               onBackChange={setTranslationBack}
+              mode={translationMode}
+              jwt={identityToken ?? null}
+              onProposalsStaged={(result) => {
+                posthog.capture(IMPORT_SUCCEEDED, {
+                  import_type: "file-target-proposals",
+                  entry: translationRun.entry,
+                  suggested: translationRun.suggested,
+                  // Staged, NOT committed — a proposal import that reported
+                  // `cell_count` the way the direct path does would read as
+                  // written text in the same dashboards (AQU-1673).
+                  staged_count: result.stagedCount,
+                  skipped_unchanged_count: result.skippedUnchangedCount,
+                  project_id: projectId,
+                  target_lane: translationLaneProperty,
+                })
+                translation.onProposalsStaged?.(result)
+                onOpenChange(false)
+              }}
               onImported={(committedCount) => {
                 posthog.capture(IMPORT_SUCCEEDED, {
                   import_type: "file-target",
@@ -1694,7 +1737,7 @@ export function ImportDialog({
               }}
               onError={(message, phase) => {
                 posthog.capture(IMPORT_FAILED, {
-                  import_type: "file-target",
+                  import_type: translationMode === "proposal" ? "file-target-proposals" : "file-target",
                   entry: translationRun.entry,
                   phase,
                   project_id: projectId,
@@ -3111,6 +3154,11 @@ function ParatextChoice({
                       </span>
                     </button>
                   </div>
+                  {b.structureFindings.length > 0 && (
+                    <div className="px-3 pb-2 ps-9">
+                      <UsfmStructureFindings findings={b.structureFindings} />
+                    </div>
+                  )}
                   {expanded && (
                     <ul className="space-y-1 px-3 pb-2 pl-9">
                       {b.strings.slice(0, 4).map((s) => (

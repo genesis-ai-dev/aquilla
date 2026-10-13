@@ -51,6 +51,9 @@ export interface ClosureContext {
   neighborBriefs: NeighborBrief[]
   /** One layer up: file intro / project brief. */
   layerAbove: LayerAboveBlock[]
+  /** AQU-1690: per cell id, who speaks to whom and who is named, from Bible
+   *  data. Given as known facts, so the analysis need not ask about them. */
+  facts?: ReadonlyMap<string, string>
 }
 
 export interface ConstrueSceneDeps {
@@ -134,14 +137,24 @@ export function expandWindow(current: Window, _construal: Construal, context: Cl
 
 // ── Prompt + tolerant parse ─────────────────────────────────────────────────
 
-function windowBlock(window: Window, context: ClosureContext): string {
+/** Exported for tests: the construe prompt's view of the window. */
+export function windowBlock(window: Window, context: ClosureContext): string {
   const byId = new Map(context.orderedPairs.map((p) => [p.cellId, p]))
+  let factLines = 0
   const cells = window.cellIds
     .map((id) => {
       const p = byId.get(id)
-      return p ? `[${id}]${p.canonicalRef ? ` (${p.canonicalRef})` : ""} ${p.source}` : `[${id}] (missing)`
+      if (!p) return `[${id}] (missing)`
+      const facts = context.facts?.get(id)
+      if (facts) factLines += 1
+      return `[${id}]${p.canonicalRef ? ` (${p.canonicalRef})` : ""} ${p.source}${facts ? `\n  Given facts: ${facts}` : ""}`
     })
     .join("\n")
+  // AQU-1690: the speakers and participants are known, so a construal that
+  // still asks "who is speaking?" would park the run for nothing.
+  const factsNote = factLines > 0
+    ? "Given facts come from Bible data: who speaks to whom and who each cell names. Treat them as known and do not list them as open questions."
+    : ""
   const briefs = window.precedingBriefIds
     .map((id) => context.neighborBriefs.find((b) => b.id === id))
     .filter((b): b is NeighborBrief => b !== undefined)
@@ -152,7 +165,7 @@ function windowBlock(window: Window, context: ClosureContext): string {
     .filter((l): l is LayerAboveBlock => l !== undefined)
     .map((l) => `Layer above (${l.ref}): ${l.text}`)
     .join("\n")
-  return [briefs, layers, `Cells:\n${cells}`].filter(Boolean).join("\n\n")
+  return [briefs, layers, factsNote, `Cells:\n${cells}`].filter(Boolean).join("\n\n")
 }
 
 function construeSystemPrompt(steeringDirections?: string[]): string {

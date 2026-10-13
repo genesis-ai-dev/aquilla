@@ -46,6 +46,7 @@ function makePlan(): ParatextPlan {
         type: "verse",
       }],
       duplicateRefs: [],
+      structureFindings: [],
       cellCount: 1,
     }],
     sourceArtifact: {

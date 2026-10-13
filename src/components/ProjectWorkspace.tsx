@@ -111,8 +111,9 @@ import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCac
 import { completionBatchSizeFor, workspaceActions, getVisibleActions } from "@/lib/workspace-actions/registry"
 import type { WorkspaceAction } from "@/lib/workspace-actions/types"
 import type { FileReference } from "@/lib/parsers/types"
-import { fileOrderedBy, isMediaFileType, isTranslationMemoryFile, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
-import { isBibleOpen } from "@/lib/bible-data/experiment"
+import { fileOrderedBy, infractionSeverity, isMediaFileType, isTranslationMemoryFile, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
+import { resolveBibleEnrichment } from "../../db/shared/bible-enrichments"
+import { isBibleDataExperimentOn, isBibleOpen } from "@/lib/bible-data/experiment"
 import { isAudioCueFile, isHiddenTimelineFile, isSubtitleImportFile, isVideoTimedSubtitleFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
 import { isAutopilotVisible } from "@/lib/features/flags"
 import { isDiscourseFile } from "@/lib/contextual/discourse-file"
@@ -258,7 +259,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { canHarmonize, emitCastAssign, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, enqueueEvents } from "@/lib/sync/events-emit"
+import { canHarmonize, emitCastAssign, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -354,6 +355,7 @@ import type { ContextChip } from "@/lib/agent/context-chip"
 import { CheckFindingsDrawer } from "./CheckFindingsDrawer"
 import { FileChapterToolbar } from "./FileChapterToolbar"
 import { runDeterministicCheck, type CheckRunResult } from "@/lib/check/deterministic-check"
+import { useBibleChecks } from "@/hooks/useBibleChecks"
 import { SearchDockPanel } from "./SearchDockPanel"
 import { SearchResultsView } from "./search/SearchResultsView"
 import { LeftDock } from "./LeftDock"
@@ -367,6 +369,10 @@ import {
 } from "@/lib/editor/right-rail-panels"
 import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen } from "./ParallelBiblesSidebar"
 import { VerseResourcesSidebar, readVerseResourcesOpen, writeVerseResourcesOpen } from "./VerseResourcesSidebar"
+import { WhosWhoSidebar } from "./bible-data/WhosWhoSidebar"
+import { readWhosWhoOpen, writeWhosWhoOpen } from "./bible-data/whos-who-open-state"
+import { useVoiceOverrideWriter, voiceOverrideFailureKey } from "./bible-data/use-voice-override-writer"
+import { useBiblePackStatus } from "./bible-data/bible-data-bus"
 import { InactiveProjectBanner } from "./InactiveProjectBanner"
 import { OfflineBanner } from "./OfflineBanner"
 import { LinkSeedFailedBanner } from "./LinkSeedFailedNotice"
@@ -500,6 +506,7 @@ import { useSubscribedConcepts } from "@/hooks/useSubscribedConcepts"
 import { resolveTermbaseEditFloor } from "@/lib/terminology/glossary-view"
 import { conceptsForLaneTag } from "@/lib/terminology/rendering-lane"
 import type { ConceptDraft } from "@/lib/terminology/types"
+import type { EntityLinkRequest } from "@/components/bible-data/entity-term-context"
 import { buildGlosser, type Glosser } from "@/lib/completion/bt-glosser"
 import { memMark } from "@/lib/perf-log"
 import { buildAlignmentModel, type AlignmentModel } from "@/lib/completion/interlinear"
@@ -4414,6 +4421,24 @@ export function ProjectWorkspace() {
     ],
   )
 
+  // AQU-1692: "Adopt voices as cast" in the Bible voice details. The same
+  // write as a character sheet's: the names, then one voice per character so
+  // the cast gutter draws them.
+  const adoptVoicesAsCast = useCallback(
+    (assignments: readonly { cellId: string; castName: string }[]) => {
+      void handleImportCharacters({
+        assignments: assignments.map((a, i) => ({ ...a, cameraState: undefined, rowNumber: i + 1 })),
+        blankRows: 0,
+        unmatchedRows: [],
+        cellsWithoutRow: 0,
+        cameraDisagreements: 0,
+        filledByPosition: 0,
+        distinctCharacters: new Set(assignments.map((a) => a.castName)).size,
+      })
+    },
+    [handleImportCharacters],
+  )
+
   /**
    * The same import, for the sheet keyed to the HEARD lines.
    *
@@ -6428,6 +6453,8 @@ export function ProjectWorkspace() {
         // overrides) are part of the term, not popover-local UI state — drop
         // them here and the chips the user just clicked would do nothing.
         ...(draft.match ? { match: draft.match } : {}),
+        // AQU-1693: from a Voices or Who's Who popover, the Bible entity it names.
+        ...(draft.externalIds?.acai ? { externalIds: draft.externalIds } : {}),
         author: currentUsername,
       })
       const created = { id: conceptId }
@@ -6453,6 +6480,33 @@ export function ProjectWorkspace() {
       })
     }
   }, [project, currentUsername, refreshConcepts, t, navigate])
+
+  // AQU-1693: "Link “Jesus” to Jesus" from a Voices or Who's Who popover: one
+  // term.update naming the Bible entity. Binding (the server gates every
+  // term.update at the termbase floor), so the popover offers it only to
+  // someone who can approve terms.
+  const handleLinkConceptToEntity = useCallback(async (link: EntityLinkRequest) => {
+    if (!project) return
+    try {
+      await emitTermUpdate({
+        projectId: project.id,
+        conceptId: link.conceptId,
+        externalIds: link.externalIds,
+        author: currentUsername,
+      })
+      await refreshConcepts()
+      toast.add({
+        type: "success",
+        title: t("bibleData.terms.linkedToast", { term: link.term, name: link.name }),
+        timeout: 8000,
+      })
+    } catch (err) {
+      toast.add({
+        type: "error",
+        title: err instanceof Error ? err.message : t("terminology.addConcept.saveFailed"),
+      })
+    }
+  }, [project, currentUsername, refreshConcepts, t])
 
   // AQU-1006 follow-up: terminology now has TWO authority levels, so this is
   // two questions rather than one.
@@ -6646,6 +6700,20 @@ export function ProjectWorkspace() {
     return map
   }, [activeFileId, cellSummaries])
 
+  // AQU-1688: Bible data checks read each cell's compiled pack facts. They are
+  // compiled once per file (by pack version, refs and Language profile) and
+  // looked up by cell id, so typing still re-checks only the edited cell.
+  // AQU-1685: off unless the Bible data experiment is on and the open file is
+  // a Bible book.
+  // AQU-1699: the terminology gives names their agreed renderings (check pack B).
+  const bibleChecks = useBibleChecks(project, cellSummaries, activeFile, localConcepts)
+  const bibleCheckContextFor = bibleChecks.contextFor
+  const bibleFileScan = bibleChecks.fileScan
+  const healthCellCheckContext = useCallback(
+    (cell: { id: string }) => bibleCheckContextFor(cell.id),
+    [bibleCheckContextFor],
+  )
+
   // AD-14: health derives from decay (endorsement_count). The legacy
   // four-sub-score "composite-health" path is retired.
   // Per-browser off switch (lib/health/kill-switch.ts), exposed in the
@@ -6659,6 +6727,8 @@ export function ProjectWorkspace() {
       enabled: healthCalculationsEnabled,
       rulesForCell: libraryLint.rulesForCell,
       rulesForCellSig: libraryLint.signature,
+      cellCheckContext: healthCellCheckContext,
+      cellCheckContextSig: bibleChecks.signature,
     },
   )
   // AQU-599: cellOpenCommentCount from useHealth is intentionally not consumed
@@ -6993,6 +7063,10 @@ export function ProjectWorkspace() {
         // subscribed termbases come in here as well.
         concepts: laneEditorConcepts,
         termMatching: project?.termMatching,
+        // AQU-1688: the same per-cell Bible data inputs the live check uses.
+        contextFor: healthCellCheckContext,
+        // AQU-1697: the Bible data scans over the whole file (headings, verse numbering).
+        bibleScan: await bibleFileScan(),
       })
       // Bail if the active file changed mid-run — don't clobber the new file's
       // state with this (now stale) file's findings.
@@ -7001,7 +7075,7 @@ export function ProjectWorkspace() {
     } finally {
       setCheckRunning(false)
     }
-  }, [activeFileId, checkRunning, closeCommentsPanel, getActiveCells, rules, laneEditorConcepts, project?.termMatching])
+  }, [activeFileId, checkRunning, closeCommentsPanel, getActiveCells, rules, laneEditorConcepts, project?.termMatching, healthCellCheckContext, bibleFileScan])
 
   // A check run describes one file's cells; switching files invalidates it.
   useEffect(() => {
@@ -7265,7 +7339,7 @@ export function ProjectWorkspace() {
       // applies them; the click handler below asks the same question.
       const vote = textVoteGate(cell, project, { username: currentUsername, myScopes, activeLane })
       const hasMajorHealthIssue = activeInfractions.some(
-        (infraction) => ruleById.get(infraction.ruleId)?.severity === "major",
+        (infraction) => infractionSeverity(infraction, ruleById.get(infraction.ruleId)?.severity) === "major",
       )
       const needsHealthAttention = Boolean(
         cell.translated.trim()
@@ -7371,6 +7445,10 @@ export function ProjectWorkspace() {
   const [verseResourcesOpen, setVerseResourcesOpen] = useState<boolean>(() =>
     projectId ? readVerseResourcesOpen(projectId) : false,
   )
+  // AQU-1689: the Who's Who panel (Bible data), same tracked ref, its own open state.
+  const [whosWhoOpen, setWhosWhoOpen] = useState<boolean>(() =>
+    projectId ? readWhosWhoOpen(projectId) : false,
+  )
   // AQU-1016: was `useState` here — every scroll step re-rendered this whole
   // shell to feed a value only the parallel-bibles panel reads. It now lives
   // in the shared editor-viewport store (src/hooks/useEditorViewportStore.ts);
@@ -7380,6 +7458,26 @@ export function ProjectWorkspace() {
   // The AQU-461 verse-resources panel renders under a subset of that gate,
   // so the same subscription serves both.
   const parallelBiblesPanelActive = isBibleOpen(centerSurface, activeFile)
+  // AQU-1692: a maintainer's voice corrections, saved against the latest map
+  // (see use-voice-override-writer.ts). EditorTable gets the writer only while
+  // Bible data shows (AQU-1685), and offers "Correct…" only to a maintainer.
+  const saveVoiceOverride = useVoiceOverrideWriter(
+    projectSettings.refresh,
+    patchSettings,
+    project?.bibleVoiceOverrides,
+    currentUsername,
+  )
+  const bibleDataShown = !!project && parallelBiblesPanelActive && isBibleDataExperimentOn(project)
+  // AQU-1692: how the open book's Bible data loaded, for View settings → Bible data.
+  const biblePackStatus = useBiblePackStatus(bibleDataShown ? (activeFile?.id ?? null) : null)
+  const removeVoiceCorrection = useCallback(
+    (speechId: string) => {
+      void saveVoiceOverride(speechId, null).then((outcome) => {
+        if (outcome.kind !== "ok") toast.add({ type: "error", title: t(voiceOverrideFailureKey(outcome)) })
+      })
+    },
+    [saveVoiceOverride, t],
+  )
   const trackedCellRef = useEditorViewportTrackedCellRef(parallelBiblesPanelActive)
   // Drop the tracked ref when switching files so the previous file's verse
   // doesn't leak into the new file's panel (the new EditorTable re-fires).
@@ -13524,6 +13622,21 @@ export function ProjectWorkspace() {
           onFootnoteViewModeChange={setFootnoteViewMode}
           targetKeyTermHighlightMode={targetKeyTermHighlightMode}
           onTargetKeyTermHighlightModeChange={setTargetKeyTermHighlightMode}
+          bibleDataVoicesEnabled={
+            // AQU-1685: only with the Bible data experiment on and a Bible open.
+            !!project && parallelBiblesPanelActive && isBibleDataExperimentOn(project)
+            && resolveBibleEnrichment(project, "voices", projectHasScriptureFiles(project.files))
+          }
+          bibleDataWhosWhoEnabled={
+            // AQU-1685: only with the Bible data experiment on and a Bible open.
+            !!project && parallelBiblesPanelActive && isBibleDataExperimentOn(project)
+            && resolveBibleEnrichment(project, "whos-who", projectHasScriptureFiles(project.files))
+          }
+          bibleDataStatus={biblePackStatus}
+          bibleVoiceCorrections={project?.bibleVoiceOverrides}
+          onRemoveVoiceCorrection={
+            (project?.syncRole?.level ?? 0) >= ROLE.MAINTAINER ? removeVoiceCorrection : undefined
+          }
           tnSidebarEnabled={tnSidebarVisible}
           healthCalculationsEnabled={healthCalculationsEnabled}
           onHealthCalculationsChange={setHealthCalculationsEnabled}
@@ -13570,8 +13683,15 @@ export function ProjectWorkspace() {
         project.bibleResourcesEnabled,
         projectHasScriptureFiles(project.files),
       ),
+    // AQU-1689: Who's Who rides the same editor condition plus its own
+    // enrichment, which is off whenever Bible data is, and (AQU-1685) this
+    // device's Bible data experiment.
+    whosWhoAvailable:
+      !!project && isBibleDataExperimentOn(project)
+      && resolveBibleEnrichment(project, "whos-who", projectHasScriptureFiles(project.files)),
     parallelBiblesOpen,
     verseResourcesOpen,
+    whosWhoOpen,
   })
 
   return (
@@ -14704,6 +14824,9 @@ export function ProjectWorkspace() {
               <EditorTable
             ref={editorRef} project={editorProject ?? project} cellStore={cellStore}
             fileType={activeFile?.type}
+            bibleOpen={parallelBiblesPanelActive}
+            onSaveVoiceOverride={bibleDataShown ? saveVoiceOverride : undefined}
+            onAdoptVoicesAsCast={bibleDataShown ? adoptVoicesAsCast : undefined}
             showFootnotesInline={footnoteViewMode === "inline"}
             footnotePanelActive={footnoteViewMode !== "off"}
             footnoteViewMode={footnoteViewMode}
@@ -14796,6 +14919,7 @@ export function ProjectWorkspace() {
             onOpenAudioSetup={openAudioSetup}
             onProjectChanged={refresh}
             onAddConceptFromSelection={handleAddConceptFromSelection}
+            onLinkConceptToEntity={handleLinkConceptToEntity}
             addConceptBlockedReason={addConceptBlockedReason}
             canApproveConcept={canApproveConcept}
             onAskAiFromSelection={handleAskAiFromSelection}
@@ -14931,6 +15055,23 @@ export function ProjectWorkspace() {
                     const next = !verseResourcesOpen
                     setVerseResourcesOpen(next)
                     if (projectId) writeVerseResourcesOpen(projectId, next)
+                  }}
+                />
+              )}
+              {/* AQU-1689: Who's Who, the passage's cast — open panel only;
+                  its "People" edge tab rides in asideEdge. */}
+              {rightRail.peoplePanel && (
+                <WhosWhoSidebar
+                  project={project!}
+                  fileId={activeFile?.id ?? null}
+                  trackedRef={trackedCellRef}
+                  sourceLanguage={activeSourceLanguage}
+                  getTokenForFile={getTokenForFile}
+                  open
+                  onToggle={() => {
+                    const next = !whosWhoOpen
+                    setWhosWhoOpen(next)
+                    if (projectId) writeWhosWhoOpen(projectId, next)
                   }}
                 />
               )}
@@ -15103,8 +15244,8 @@ export function ProjectWorkspace() {
           )
         })()}
         asideEdge={(() => {
-          // AQU-461: two collapsed tabs can stack here — bibles and verse
-          // resources — each shown only while its own panel is closed.
+          // AQU-461: collapsed tabs stack here — bibles, verse resources and
+          // (AQU-1689) Who's Who — each shown only while its own panel is closed.
           // AQU-1316: both flags come from `rightRail`, the same value `aside`
           // reads, so a tab can never sit beside its own open panel.
           if (!hasRightRailEdge(rightRail)) return null
@@ -15133,6 +15274,20 @@ export function ProjectWorkspace() {
                     const next = !verseResourcesOpen
                     setVerseResourcesOpen(next)
                     if (projectId) writeVerseResourcesOpen(projectId, next)
+                  }}
+                />
+              )}
+              {rightRail.peopleEdge && (
+                <WhosWhoSidebar
+                  project={project!}
+                  fileId={activeFile?.id ?? null}
+                  trackedRef={trackedCellRef}
+                  sourceLanguage={activeSourceLanguage}
+                  open={false}
+                  onToggle={() => {
+                    const next = !whosWhoOpen
+                    setWhosWhoOpen(next)
+                    if (projectId) writeWhosWhoOpen(projectId, next)
                   }}
                 />
               )}
@@ -15437,6 +15592,18 @@ export function ProjectWorkspace() {
             // against those, into that lane (the dialog's targetLang follows).
             laneOptions: fileImportLaneOptions,
             onLaneChange: setActiveLane,
+            // AQU-1673: "Stage as proposals for review" writes nothing, so
+            // there is nothing to revalidate — the only job here is telling
+            // the user where the proposals went.
+            onProposalsStaged: ({ stagedCount, skippedUnchangedCount }) => {
+              toast.add({
+                title: t("importExport.proposals.staged", { count: stagedCount }),
+                description:
+                  skippedUnchangedCount > 0
+                    ? t("importExport.proposals.skippedUnchanged", { count: skippedUnchangedCount })
+                    : undefined,
+              })
+            },
           }}
           linkSource={{
             // AQU-1527: the Import dialog's "From another project" tile runs

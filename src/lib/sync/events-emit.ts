@@ -18,7 +18,7 @@ import { v7 as uuidv7 } from "uuid"
 import { enqueueOutboxEvent, enqueueOutboxEvents } from "./outbox"
 import { getCqrsOutboxBridge } from "./cqrs-bridge"
 import { canAttachSourceAudio, canPerform, requiredRoleFor, ROLE, SOURCE_AUDIO_ATTACH_FLOOR } from "./role-policy"
-import type { TermRendering, TermMatchOptions } from "@/lib/terminology/types"
+import type { ConceptExternalIds, TermRendering, TermMatchOptions } from "@/lib/terminology/types"
 import {
   OUTBOX_SCHEMA_VERSION,
   type OutboxEventKind,
@@ -548,7 +548,8 @@ export async function emitCellUnvalidate(input: CellValidateInput): Promise<stri
 
 // ── Cell waiver helpers ───────────────────────────────────────────────────
 // Non-chain-mutating (parentId omitted), like validation. A waiver dismisses
-// one QA rule's infraction on a cell; the projection keys on (cell, ruleId).
+// one QA rule finding on a cell; the projection keys on
+// (cell, ruleId, matchHash).
 
 export interface CellWaiveInput {
   projectId: string
@@ -556,6 +557,12 @@ export interface CellWaiveInput {
   cellId: string
   /** Stable id of the QA rule whose infraction is being dismissed. */
   ruleId: string
+  /**
+   * AQU-1740: hash of the matched text, narrowing the waiver to ONE finding of
+   * this rule on this cell (`spanMatchHash`, src/lib/rules/match-hash.ts).
+   * Omit to waive the rule across the whole cell.
+   */
+  matchHash?: string
   /** Optional human-entered justification. */
   reason?: string
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
@@ -577,6 +584,7 @@ export async function emitCellWaive(input: CellWaiveInput): Promise<string> {
     author: input.author,
     payload: {
       ruleId: input.ruleId,
+      ...(input.matchHash ? { matchHash: input.matchHash } : {}),
       ...(input.reason ? { reason: input.reason } : {}),
       ...targetLaneFields(input),
     },
@@ -590,6 +598,9 @@ export interface CellUnwaiveInput {
   fileId: string
   cellId: string
   ruleId: string
+  /** AQU-1740: the waived finding's hash. Must name the waiver being lifted —
+   *  omitting it lifts the rule-wide waiver, not the per-finding ones. */
+  matchHash?: string
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
   /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
@@ -607,7 +618,11 @@ export async function emitCellUnwaive(input: CellUnwaiveInput): Promise<string> 
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { ruleId: input.ruleId, ...targetLaneFields(input) },
+    payload: {
+      ruleId: input.ruleId,
+      ...(input.matchHash ? { matchHash: input.matchHash } : {}),
+      ...targetLaneFields(input),
+    },
     clientTs: input.clientTs,
   })
   return eventId
@@ -2005,6 +2020,8 @@ export interface TermCreateInput {
   notes?: string
   caseSensitive?: boolean
   match?: TermMatchOptions
+  /** AQU-1693: the Bible entity the concept names. */
+  externalIds?: ConceptExternalIds
   author: string
   clientTs?: number
 }
@@ -2024,6 +2041,7 @@ export async function emitTermCreate(input: TermCreateInput): Promise<string> {
       ...(input.notes ? { notes: input.notes } : {}),
       ...(input.caseSensitive ? { caseSensitive: true } : {}),
       ...(input.match ? { match: input.match } : {}),
+      ...(input.externalIds?.acai ? { externalIds: input.externalIds } : {}),
     },
     clientTs: input.clientTs,
   })
@@ -2039,6 +2057,8 @@ export interface TermUpdateInput {
   notes?: string
   caseSensitive?: boolean
   match?: TermMatchOptions
+  /** AQU-1693: replaces the links; `{}` unlinks (an absent key leaves them alone). */
+  externalIds?: ConceptExternalIds
   author: string
   clientTs?: number
 }
@@ -2062,6 +2082,7 @@ export async function emitTermUpdate(input: TermUpdateInput): Promise<string> {
       ...(input.notes !== undefined ? { notes: input.notes } : {}),
       ...(input.caseSensitive !== undefined ? { caseSensitive: input.caseSensitive } : {}),
       ...(input.match !== undefined ? { match: input.match } : {}),
+      ...(input.externalIds !== undefined ? { externalIds: input.externalIds } : {}),
     },
     clientTs: input.clientTs,
   })

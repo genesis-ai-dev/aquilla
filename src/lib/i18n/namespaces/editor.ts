@@ -441,6 +441,7 @@ export const editor = defineNamespace({
     "editor.view.highlightUnresolvedComments": "Highlight open comments",
     "editor.view.healthScoreColorCoding": "Health Score Color Coding",
     "editor.health.citedExample": "{source} → {target}",
+    "editor.view.visibleStyleSegments": "Visible style segments",
     "editor.view.lowMemory": "Low-memory mode",
     "editor.view.lowMemoryAuto": "Auto",
     "editor.view.lowMemoryOn": "On",
@@ -1594,6 +1595,8 @@ export const editor = defineNamespace({
       "Align styles could not place this cell. Nothing was saved.",
     "editor.idml.alignStylesUnavailable":
       "This cell has no style runs to align.",
+    "editor.idml.segmentRegular": "Regular",
+    "editor.idml.segmentBoldItalic": "Bold italic",
 
     // — Text-to-speech status badge on a row ————————————————————————
     "editor.tts.translatingBeforeVoicing": "Translating before voicing",
@@ -1801,8 +1804,10 @@ export const editor = defineNamespace({
     "editor.ai.draftParagraph": "Draft paragraph ({count} cells)",
     "editor.ai.regenerate": "Regenerate — another AI variation",
     "editor.ai.alignStyles": "Align styles",
+    "editor.ai.passToStyleSegments": "Pass to Style Segments",
     "editor.ai.aligningStyles": "Aligning styles…",
     "editor.ai.alignStylesNeedsText": "Translate this cell before aligning styles",
+    "editor.ai.alignStylesNeeded": "This cell needs Align styles",
 
     // — Remaining action-rail tooltips ————————————————————————————
     "editor.audio.play": "Play audio",
@@ -3861,6 +3866,19 @@ export const editor = defineNamespace({
           source: "The example's source-language text, already truncated.",
           target: "The example's target-language text, already truncated.",
         },
+      },
+      "editor.view.visibleStyleSegments": {
+        description:
+          "Label of the switch that draws bold and italic runs as small inline " +
+          "blocks inside the cell, once a translation has been placed into those " +
+          "runs. An empty untranslated cell stays blank. Regular text stays " +
+          "ordinary, so the translator types around those blocks and can click or " +
+          "arrow into one to type that phrase in bold or italic. An empty block " +
+          "in a placed translation shows a faint name until they type. Consecutive " +
+          "regular runs are one typing space: an empty one shows a single faint " +
+          "Regular, with no box and no gap between the runs. Applies to this " +
+          "browser only.",
+        maxLength: 32,
       },
       "editor.view.lowMemory": {
         description:
@@ -6927,6 +6945,14 @@ export const editor = defineNamespace({
           "Imperative, two words.",
         maxLength: 16,
       },
+      "editor.ai.passToStyleSegments": {
+        description:
+          "Hover tooltip and accessible name of the arrow button in the bottom " +
+          "corner of an InDesign cell. Shown while the translation is still one " +
+          "unstyled preview sentence. Clicking it places that sentence into the " +
+          "source's bold, italic, and plain runs. Imperative.",
+        maxLength: 28,
+      },
       "editor.ai.aligningStyles": {
         description:
           "Tooltip and status while Align styles is in flight. Present participle, " +
@@ -6937,6 +6963,14 @@ export const editor = defineNamespace({
         description:
           "Tooltip on Align styles when the cell has no translation yet, so there " +
           "are no words to move into style runs. Imperative — translate first.",
+      },
+      "editor.ai.alignStylesNeeded": {
+        description:
+          "Hover tooltip and accessible name of the yellow warning in the " +
+          "bottom corner of a cell. Shown after the translator typed into plain " +
+          "style runs that the editor draws as one piece of text, when those " +
+          "words are not yet sitting in each of the source's runs. Clicking it " +
+          "runs Align styles. Keep 'Align styles' identical to editor.ai.alignStyles.",
       },
       "editor.audio.play": {
         description:

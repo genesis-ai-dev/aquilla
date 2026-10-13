@@ -974,6 +974,10 @@ export const org = defineNamespace({
     "org.sectionVisibilityBadge.originProject": "Stricter for this project",
     "org.sectionVisibilityBadge.orgDefaultOption": "{label} (org default)",
     "org.sectionVisibilityBadge.followOrgOption": "Follow the org ({label})",
+    // AQU-1771: the same, said under the picker in the badge's popover.
+    "org.sectionVisibilityBadge.originOrgLine": "Follows your org's setting.",
+    "org.sectionVisibilityBadge.originProjectLine": "Stricter than your org ({label}).",
+    "org.sectionVisibilityBadge.originUndoHint": "Pick “{option}” to undo.",
 
     // -- WorkloadRollup: org Overview team-workload manager rollup --
     "org.workloadRollup.title": "Team workload",
@@ -2714,6 +2718,24 @@ export const org = defineNamespace({
       "org.projectOverview.visibilitySaveForbidden": {
         description:
           "Body of that error toast when the person's role does not allow changing this project's settings.",
+      },
+      "org.sectionVisibilityBadge.originOrgLine": {
+        description:
+          "Line under the picker in a project's 'Who can see this section' popover when the project follows its organization's setting.",
+      },
+      "org.sectionVisibilityBadge.originProjectLine": {
+        description:
+          "Line under the picker in a project's 'Who can see this section' popover when the project chose its own setting, which can only be stricter (hide more) than its organization's. The label in parentheses is the organization's setting.",
+        placeholders: {
+          label: "The organization's already-localized role label, e.g. 'Contributors and up'.",
+        },
+      },
+      "org.sectionVisibilityBadge.originUndoHint": {
+        description:
+          "Follows 'Stricter than your org (…).' in the same popover: which picker option returns the project to its organization's setting.",
+        placeholders: {
+          option: "The exact label of that option, e.g. 'Follow the org (Maintainers and owners)' or 'Contributors and up (org default)'.",
+        },
       },
       "org.sectionVisibilityBadge.followOrgOption": {
         description:

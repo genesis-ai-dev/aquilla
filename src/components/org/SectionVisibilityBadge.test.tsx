@@ -32,19 +32,39 @@ describe("isRestrictedFloor / sectionTintClass", () => {
 })
 
 describe("SectionVisibilityBadge", () => {
-  // AQU-1771: on a section a project can make stricter, the badge says where
-  // the shown setting comes from; org-only sections say nothing extra.
-  it("tags the badge with the setting's origin only when told one", () => {
-    const { rerender } = render(<SectionVisibilityBadge minRole={ROLE.MAINTAINER} />)
+  // AQU-1771: on a section a project can make stricter, the popover says where
+  // the shown setting comes from, under the picker. The badge itself only says
+  // who can see the section (Sam, 2026-10-13).
+  it("says the setting's origin under the picker, never on the badge", async () => {
+    const onChangeMinRole = vi.fn()
+    const { rerender } = render(
+      <SectionVisibilityBadge minRole={ROLE.MAINTAINER} canEdit onChangeMinRole={onChangeMinRole} origin="org" orgDefaultRole={ROLE.MAINTAINER} />,
+    )
+    expect(screen.getByTestId("section-visibility-badge")).toHaveTextContent(/^Only maintainers & owners can see this$/)
+    fireEvent.click(screen.getByTestId("section-visibility-badge"))
+    expect(await screen.findByTestId("section-visibility-origin")).toHaveTextContent("Follows your org's setting.")
+
+    rerender(
+      <SectionVisibilityBadge
+        minRole={ROLE.OWNER}
+        canEdit
+        onChangeMinRole={onChangeMinRole}
+        origin="project"
+        followOrgRole={ROLE.MAINTAINER}
+        onFollowOrg={vi.fn()}
+      />,
+    )
+    expect(screen.getByTestId("section-visibility-badge")).toHaveTextContent(/^Only owners can see this$/)
+    expect(await screen.findByTestId("section-visibility-origin")).toHaveTextContent(
+      "Stricter than your org (Maintainers and owners). Pick “Follow the org (Maintainers and owners)” to undo.",
+    )
+  })
+
+  it("says nothing about origin on org-only sections", async () => {
+    render(<SectionVisibilityBadge minRole={ROLE.MAINTAINER} canEdit onChangeMinRole={vi.fn()} />)
+    fireEvent.click(screen.getByTestId("section-visibility-badge"))
+    await screen.findByRole("combobox", { name: /who can see this section/i })
     expect(screen.queryByTestId("section-visibility-origin")).toBeNull()
-    rerender(<SectionVisibilityBadge minRole={ROLE.MAINTAINER} origin="org" />)
-    expect(screen.getByTestId("section-visibility-badge")).toHaveTextContent(
-      "Only maintainers & owners can see this · Org default",
-    )
-    rerender(<SectionVisibilityBadge minRole={ROLE.OWNER} origin="project" />)
-    expect(screen.getByTestId("section-visibility-badge")).toHaveTextContent(
-      "Only owners can see this · Stricter for this project",
-    )
   })
 
   // AQU-1771: a project's own value can always be cleared from the badge.

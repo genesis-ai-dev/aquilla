@@ -126,8 +126,9 @@ export interface SectionVisibilityBadgeProps {
   /**
    * AQU-1771: where the shown floor comes from, on a section a PROJECT can make
    * stricter than its org — "org" when the project follows its organization,
-   * "project" when the project set its own. Shown in the badge itself so it is
-   * never a guess which one a change would touch. Omit on org-only sections.
+   * "project" when the project set its own. Said in the popover, under the
+   * picker (Sam, 2026-10-13: never trailing inside the badge), so it is never a
+   * guess which one a change would touch. Omit on org-only sections.
    */
   origin?: "org" | "project"
   /** AQU-1771: the option that means "follow the organization" — labelled so. */
@@ -182,6 +183,9 @@ export function SectionVisibilityBadge({
     opt.level === orgDefaultRole
       ? t("org.sectionVisibilityBadge.orgDefaultOption", { label: t(opt.labelKey) })
       : t(opt.labelKey)
+  // The org's level, for "Stricter than your org (…)": what the section shows
+  // once the project follows the org again.
+  const orgLevel = followOrgRole ?? orgDefaultRole
   const Icon = isRestrictedFloor(minRole) ? Lock : Eye
   const interactive = canEdit && typeof onChangeMinRole === "function"
   const isSelectable = (level: number) => minSelectableRole == null || level >= minSelectableRole
@@ -190,6 +194,22 @@ export function SectionVisibilityBadge({
   const followLabel = followOrgRole != null
     ? t("org.sectionVisibilityBadge.followOrgOption", { label: t(visibilityRolePickerLabelKey(followOrgRole)) })
     : ""
+  // How to get back to the org's setting, naming the option that does it.
+  const undoOption = offersFollow
+    ? followLabel
+    : orgDefaultRole != null
+      ? t("org.sectionVisibilityBadge.orgDefaultOption", { label: t(visibilityRolePickerLabelKey(orgDefaultRole)) })
+      : null
+  const originLine = origin === "project"
+    ? [
+        orgLevel != null
+          ? t("org.sectionVisibilityBadge.originProjectLine", { label: t(visibilityRolePickerLabelKey(orgLevel)) })
+          : t("org.sectionVisibilityBadge.originProject"),
+        undoOption ? t("org.sectionVisibilityBadge.originUndoHint", { option: undoOption }) : null,
+      ].filter(Boolean).join(" ")
+    : origin === "org"
+      ? t("org.sectionVisibilityBadge.originOrgLine")
+      : null
   const selectItems = [
     ...(offersFollow ? [{ value: FOLLOW_ORG_VALUE, label: followLabel }] : []),
     ...VISIBILITY_ROLE_OPTIONS.map((opt) => ({ value: String(opt.level), label: optionLabel(opt) })),
@@ -206,14 +226,6 @@ export function SectionVisibilityBadge({
     >
       <Icon className="size-3" />
       {floorLabel}
-      {originLabel && (
-        <>
-          {" "}
-          <span className="text-muted-foreground/70" data-testid="section-visibility-origin">
-            · {originLabel}
-          </span>
-        </>
-      )}
       {interactive && <ChevronDown className="size-3" />}
     </Badge>
   )
@@ -316,6 +328,11 @@ export function SectionVisibilityBadge({
               </SelectGroup>
             </SelectContent>
           </Select>
+          {originLine && (
+            <FieldDescription className="text-xs" data-testid="section-visibility-origin">
+              {originLine}
+            </FieldDescription>
+          )}
           {/* nth-last-2:mt-0: with the hint after it, Field's own rule would
               pull this up against the picker. */}
           {description && <FieldDescription className="text-xs nth-last-2:mt-0">{description}</FieldDescription>}

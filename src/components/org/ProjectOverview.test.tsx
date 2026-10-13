@@ -1527,7 +1527,7 @@ describe("ProjectOverview Members card (AQU-1171)", () => {
     )
   })
 
-  it("says on the badge whether the project follows the org or set its own", async () => {
+  it("says in the badge's popover whether the project follows the org or set its own", async () => {
     useProject.mockReturnValue({
       project: projectRecord({ level: ROLE.OWNER }),
       status: "ready",
@@ -1536,7 +1536,9 @@ describe("ProjectOverview Members card (AQU-1171)", () => {
     })
     const view = renderOverview()
     const following = within(await screen.findByTestId("overview-members-card")).getByTestId("section-visibility-badge")
-    expect(following).toHaveTextContent("Only maintainers & owners can see this · Org default")
+    expect(following).toHaveTextContent(/^Only maintainers & owners can see this$/)
+    fireEvent.click(following)
+    expect(await screen.findByTestId("section-visibility-origin")).toHaveTextContent("Follows your org's setting.")
     view.unmount()
 
     useProject.mockReturnValue({
@@ -1547,7 +1549,11 @@ describe("ProjectOverview Members card (AQU-1171)", () => {
     })
     renderOverview()
     const own = within(await screen.findByTestId("overview-members-card")).getByTestId("section-visibility-badge")
-    expect(own).toHaveTextContent("Only owners can see this · Stricter for this project")
+    expect(own).toHaveTextContent(/^Only owners can see this$/)
+    fireEvent.click(own)
+    expect(await screen.findByTestId("section-visibility-origin")).toHaveTextContent(
+      "Stricter than your org (Maintainers and owners). Pick “Maintainers and owners (org default)” to undo.",
+    )
   })
 
   it("choosing the org's setting clears the project's own value, so the project follows the org again", async () => {

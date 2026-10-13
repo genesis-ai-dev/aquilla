@@ -43,6 +43,10 @@ export interface ChangesetWarning {
     /** ProjectSetup (AQU-1294): a plan step whose end-state already existed, so
      *  it is skipped rather than applied. A healthy outcome, not a problem. */
     | 'superseded_step'
+    /** AQU-1852: the apply stopped partway. The receipt's `eventIds` are the
+     *  events that DID land; the changeset is still `committing`, so retrying
+     *  the commit resumes from there without duplicating them. */
+    | 'apply_incomplete'
   fileId: string
   cellId: string
   message: string
@@ -257,11 +261,12 @@ export interface StructurePlan {
   /** Rows to re-point, each with its pinned head and minted reorder id. */
   reanchor: { cellId: string; parentEventId: string; eventId: string }[]
   /** Target rows to drop (Delete, and Split with `targets: 'blank'`). */
-  targetDeletes?: { lane: string; eventId: string }[]
+  targetDeletes?: { lane: string; laneId?: string; eventId: string }[]
   /** Split with `targets: 'divide'`: per lane, the pinned target head, the two
    *  halves of the translation, and the minted commit ids for each. */
   targetSplits?: {
     lane: string
+    laneId?: string
     parentEventId: string
     headValue: string
     tailValue: string
@@ -400,6 +405,8 @@ export type ProjectSetupStep =
        *  project setting (then the language) decides at read time. */
       sourceTextDirection?: TextDirection
       targetTextDirection?: TextDirection
+      /** Lane id for translations this artifact already carries. */
+      laneId?: string
       /** Cell count from the prepare-time parse. Commit re-parses the (immutable)
        *  artifact and fails the step if the count moved — the approver approved
        *  a file of this size. */

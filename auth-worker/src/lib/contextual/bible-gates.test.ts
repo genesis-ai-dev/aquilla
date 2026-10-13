@@ -37,14 +37,14 @@ async function gate(): Promise<BibleGate> {
 
 describe("lintSpanDraft with Bible data", () => {
   it("flags JHN 4:9 when the woman's quotation closes after the narrator's aside", async () => {
-    const flags = lintSpanDraft([], jhn4Pairs(), draftOf([{ cellId: "c9", text: ASIDE_INSIDE }]), [], await gate())
+    const flags = lintSpanDraft([], jhn4Pairs(), draftOf([{ cellId: "c9", text: ASIDE_INSIDE }]), [], undefined, await gate())
     expect(flags).toHaveLength(1)
     expect(flags[0]).toMatchObject({ cellId: "c9", ruleId: "bkp:V2", message: "close-after-aside" })
     expect(flags[0].bible?.evidence).toMatchObject({ kind: "speech", startRef: "JHN 4:9" })
   })
 
   it("passes a draft that keeps the pack's quotation structure", async () => {
-    expect(lintSpanDraft([], jhn4Pairs(), draftOf([{ cellId: "c9", text: CORRECT_4_9 }]), [], await gate())).toEqual([])
+    expect(lintSpanDraft([], jhn4Pairs(), draftOf([{ cellId: "c9", text: CORRECT_4_9 }]), [], undefined, await gate())).toEqual([])
   })
 
   it("runs no Bible check without a gate (checks enrichment off)", () => {
@@ -110,7 +110,7 @@ describe("stage re-check", () => {
 describe("templated repair constraints", () => {
   it("names the speaker and the marks: 'close the woman's quotation before the aside'", async () => {
     const data = await jhn4BibleData()
-    const [flag] = lintSpanDraft([], jhn4Pairs(), draftOf([{ cellId: "c9", text: ASIDE_INSIDE }]), [], {
+    const [flag] = lintSpanDraft([], jhn4Pairs(), draftOf([{ cellId: "c9", text: ASIDE_INSIDE }]), [], undefined, {
       expectations: data.expectations,
       profile: data.profile,
     })
@@ -135,7 +135,7 @@ describe("a dropped negation (bkp:M3)", () => {
 
   it("flows through the gate as a repairable warning, apart from lint", async () => {
     const { gate, data } = await negationGate()
-    const flags = lintSpanDraft([], jhn4Pairs(), draftOf([{ cellId: "c9", text: DROPPED_4_9 }]), [], gate)
+    const flags = lintSpanDraft([], jhn4Pairs(), draftOf([{ cellId: "c9", text: DROPPED_4_9 }]), [], undefined, gate)
     expect(flags).toEqual([expect.objectContaining({ cellId: "c9", ruleId: "bkp:M3", message: "negation-missing" })])
     const finding = flags[0].bible
     if (!finding) throw new Error("no finding")
@@ -144,12 +144,12 @@ describe("a dropped negation (bkp:M3)", () => {
     expect(bibleConstraint(finding, data.facts.get("c9"), data.profile)).toBe(
       'Keep the negation: the source says "not" here, and without it the meaning is reversed.',
     )
-    expect(lintSpanDraft([], jhn4Pairs(), draftOf([{ cellId: "c9", text: CORRECT_4_9 }]), [], gate)).toEqual([])
+    expect(lintSpanDraft([], jhn4Pairs(), draftOf([{ cellId: "c9", text: CORRECT_4_9 }]), [], undefined, gate)).toEqual([])
   })
 
   it("does not force the deep panel, and a surviving one goes to a person", async () => {
     const { gate } = await negationGate()
-    const flags = lintSpanDraft([], jhn4Pairs(), draftOf([{ cellId: "c9", text: DROPPED_4_9 }]), [], gate)
+    const flags = lintSpanDraft([], jhn4Pairs(), draftOf([{ cellId: "c9", text: DROPPED_4_9 }]), [], undefined, gate)
     const risk = classifyRisk(draftOf([{ cellId: "c9", text: DROPPED_4_9 }]), flags, [], 1)
     expect(risk.level).toBe("low")
     expect(risk.verifiers).toEqual(["ambiguity"])
@@ -193,7 +193,7 @@ describe("a name the source does not have (bkp:P5)", () => {
 
   it("flows through the gate as a repairable warning (major), apart from lint", async () => {
     const { gate, data } = await nameGate()
-    const flags = lintSpanDraft([], pairs, draftOf([{ cellId: "c17", text: PLANTED }]), [], gate).filter((f) => f.ruleId === "bkp:P5")
+    const flags = lintSpanDraft([], pairs, draftOf([{ cellId: "c17", text: PLANTED }]), [], undefined, gate).filter((f) => f.ruleId === "bkp:P5")
     expect(flags).toEqual([expect.objectContaining({ cellId: "c17", ruleId: "bkp:P5", message: "name-not-in-source" })])
     const finding = flags[0].bible
     if (!finding) throw new Error("no finding")
@@ -202,13 +202,13 @@ describe("a name the source does not have (bkp:P5)", () => {
     expect(bibleConstraint(finding, data.facts.get("c17"), data.profile)).toBe(
       'Do not name "Peter" here: the source of this verse does not mention Peter.',
     )
-    expect(lintSpanDraft([], pairs, draftOf([{ cellId: "c17", text: WEB_4_17 }]), [], gate).filter((f) => f.ruleId === "bkp:P5")).toEqual([])
+    expect(lintSpanDraft([], pairs, draftOf([{ cellId: "c17", text: WEB_4_17 }]), [], undefined, gate).filter((f) => f.ruleId === "bkp:P5")).toEqual([])
   })
 
   it("does not force the deep panel; a surviving one goes to a person, a repaired one does not", async () => {
     const { gate } = await nameGate()
     const draft = draftOf([{ cellId: "c17", text: PLANTED }])
-    const flags = lintSpanDraft([], pairs, draft, [], gate)
+    const flags = lintSpanDraft([], pairs, draft, [], undefined, gate)
     expect(flags.every((f) => f.ruleId.startsWith("bkp:"))).toBe(true)
     const risk = classifyRisk(draft, flags, [], 1)
     expect(risk.level).toBe("low")

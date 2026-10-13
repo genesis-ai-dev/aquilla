@@ -50,9 +50,13 @@
 //     shared along the chain but NOT unique within a project: IDML cell ids
 //     are story paths that every IDML file repeats, and a read by cell_id
 //     alone compared a line with another file's line of the same id.
+//
+// AQU-1644: a target-consumption hop reads only the lane the link follows
+// (`source_link_lane_id`). An edit on another of the ancestor's lanes is not
+// a change this downstream will receive.
 
 import { contentHash } from "./event-projection"
-import { deterministicDownstreamFileId, laneRelevantHeadSeq } from "./link-sync"
+import { deterministicDownstreamFileId, isUndefinedColumn, laneRelevantHeadSeq } from "./link-sync"
 import { parseSourceLinkAdoption } from "../../../db/shared/source-link-adopt"
 
 const MAX_HOPS = 32
@@ -70,6 +74,15 @@ interface LinkChainLink {
    *  lane. Anything but 'head' is 'validated', as link-sync reads it. */
   gate: "head" | "validated"
   cursor: number
+  /** Upstream lane this hop consumes. Null means the ancestor's `legacy_tag = ''` lane. */
+  laneId: string | null
+}
+
+/** A target lane this hop's queries are pinned to. `id` may be empty when the
+ *  '' lane has no row yet; rows that lack `lane_id` then match on `tag`. */
+export interface ConsumedTargetLane {
+  id: string
+  tag: string
 }
 
 /** Load one project's link row (id, upstream, mode, consumes, gate, cursor). */
@@ -88,6 +101,19 @@ async function loadLinkChainLink(db: AquillaDb, projectId: string): Promise<Link
       source_link_cursor: number | string
     }>()
   if (!row) return null
+  // AQU-1644: the consumed lane (migration 0138) is its own statement so a
+  // database that predates the column still walks the '' lane. Only 42703 is
+  // that case — a missing `source_link_adopt` column must not land here.
+  let laneId: string | null = null
+  try {
+    const lane = await db
+      .prepare("SELECT source_link_lane_id FROM projects WHERE id = ?")
+      .bind(projectId)
+      .first<{ source_link_lane_id: string | null }>()
+    laneId = lane?.source_link_lane_id ?? null
+  } catch (err) {
+    if (!isUndefinedColumn(err)) throw err
+  }
   return {
     projectId,
     sourceProjectId: row.source_project_id,
@@ -95,7 +121,42 @@ async function loadLinkChainLink(db: AquillaDb, projectId: string): Promise<Link
     consumes: row.source_link_consumes === "target" ? "target" : "source",
     gate: row.source_link_gate === "head" ? "head" : "validated",
     cursor: Number(row.source_link_cursor ?? 0),
+    laneId,
   }
+}
+
+/** NULL `source_link_lane_id` is the ancestor's `legacy_tag = ''` target lane.
+ *  A stored id that is not a target lane of that ancestor matches nothing. */
+export async function resolveConsumedTargetLane(
+  db: AquillaDb,
+  ancestorProjectId: string,
+  laneId: string | null,
+): Promise<ConsumedTargetLane> {
+  if (!laneId) {
+    const row = await db
+      .prepare(
+        `SELECT id FROM lanes
+          WHERE project_id = ? AND role = 'target' AND legacy_tag = ''`,
+      )
+      .bind(ancestorProjectId)
+      .first<{ id: string }>()
+    return { id: row?.id ?? "", tag: "" }
+  }
+  const row = await db
+    .prepare(
+      `SELECT id, legacy_tag FROM lanes
+        WHERE id = ? AND project_id = ? AND role = 'target'`,
+    )
+    .bind(laneId, ancestorProjectId)
+    .first<{ id: string; legacy_tag: string | null }>()
+  if (!row || row.legacy_tag === null) return { id: laneId, tag: "\u0000" }
+  return { id: row.id, tag: row.legacy_tag }
+}
+
+/** A target row belongs to the lane id the caller resolved. */
+function targetLaneSql(alias: string): string {
+  const p = alias ? `${alias}.` : ""
+  return `${p}lane_id = ?`
 }
 
 /**
@@ -113,7 +174,8 @@ async function loadUpstreamFileId(
   fileId: string,
 ): Promise<string | null> {
   if (link.consumes === "source") {
-    // Migration 0140. Unreadable = no file adopted, as link-sync reads it.
+    // Migration 0140, its own statement. Unreadable = no file adopted, as
+    // link-sync reads it — a missing lane column is not this read.
     let adopted: Record<string, string>
     try {
       const row = await db
@@ -121,7 +183,8 @@ async function loadUpstreamFileId(
         .bind(link.projectId)
         .first<{ source_link_adopt: string | null }>()
       adopted = parseSourceLinkAdoption(row?.source_link_adopt)?.files ?? {}
-    } catch {
+    } catch (err) {
+      if (!isUndefinedColumn(err)) throw err
       adopted = {}
     }
     for (const [upstreamFileId, ownFileId] of Object.entries(adopted)) {
@@ -164,23 +227,29 @@ async function loadLinkChain(db: AquillaDb, startProjectId: string): Promise<Lin
  *  `side` is the row queried: source-consumption links compare against the
  *  ancestor's SOURCE row; target-consumption links compare against the
  *  ancestor's TARGET row (the lane D actually mirrors). Scoped to the
- *  ancestor's file the hop mirrors (AQU-1683). */
+ *  ancestor's file the hop mirrors (AQU-1683) and, for a target row, to the
+ *  lane the link follows (AQU-1644). */
 async function loadAncestorLaneHead(
   db: AquillaDb,
   ancestorProjectId: string,
   ancestorFileId: string,
   side: "source" | "target",
   cellIds: readonly string[],
+  /** Target rows only. Source rows are the one source lane (`target_lang ''`). */
+  lane: ConsumedTargetLane | null,
 ): Promise<Map<string, { eventId: string; contentHash: string | null; validated: boolean }>> {
   const out = new Map<string, { eventId: string; contentHash: string | null; validated: boolean }>()
   if (cellIds.length === 0) return out
   const placeholders = cellIds.map(() => "?").join(", ")
+  const laneSql = side === "target" && lane ? ` AND ${targetLaneSql("")}` : ""
+  const binds: unknown[] = [ancestorProjectId, ancestorFileId, side, ...cellIds]
+  if (side === "target" && lane) binds.push(lane.id)
   const { results } = await db
     .prepare(
       `SELECT cell_id, event_id, content_hash, validated FROM cells
-       WHERE project_id = ? AND file_id = ? AND side = ? AND cell_id IN (${placeholders})`,
+       WHERE project_id = ? AND file_id = ? AND side = ? AND cell_id IN (${placeholders})${laneSql}`,
     )
-    .bind(ancestorProjectId, ancestorFileId, side, ...cellIds)
+    .bind(...binds)
     .all<{ cell_id: string; event_id: string; content_hash: string | null; validated: number | boolean }>()
   for (const r of results) {
     out.set(r.cell_id, { eventId: r.event_id, contentHash: r.content_hash, validated: Boolean(r.validated) })
@@ -214,9 +283,10 @@ async function loadLocalMirrorRows(
 
 /**
  * The cells whose ancestor U's own target row is stale against U's SIBLING
- * source row (same file, same cell_id) — the step-2 "side switch": only
- * relevant when D consumes U's TARGET lane, because that's the only case
- * where U's translation-vs-U's-own-source staleness transitively matters to D.
+ * source row (same file, same cell_id, the consumed lane) — the step-2 "side
+ * switch": only relevant when D consumes U's TARGET lane, because that's the
+ * only case where U's translation-vs-U's-own-source staleness transitively
+ * matters to D.
  *
  * The same comparison as the direct-stale query in stale-source-route.ts, one
  * project up, and it has to be content-aware for the same reason (AQU-1683):
@@ -226,13 +296,15 @@ async function loadLocalMirrorRows(
  * stale for good. So a moved pin is stale only when the source's effective
  * text (the transcript of a media segment, else `value`) differs from the
  * pinned event's, or the pinned event is missing. A tombstoned source row is
- * reported as deleted downstream, never as stale.
+ * reported as deleted downstream, never as stale. Scoped to the lane the link
+ * follows (AQU-1644): another lane's stale translation is not this hop's.
  */
 async function loadAncestorTargetsStaleAgainstOwnSource(
   db: AquillaDb,
   ancestorProjectId: string,
   ancestorFileId: string,
   cellIds: readonly string[],
+  lane: ConsumedTargetLane,
 ): Promise<Set<string>> {
   const out = new Set<string>()
   if (cellIds.length === 0) return out
@@ -250,6 +322,7 @@ async function loadAncestorTargetsStaleAgainstOwnSource(
          ON pinned.project_id = t.project_id
         AND pinned.id         = t.source_event_id
        WHERE t.project_id = ? AND t.file_id = ? AND t.side = 'target' AND t.cell_id IN (${placeholders})
+         AND ${targetLaneSql("t")}
          AND t.source_event_id IS NOT NULL
          AND s.event_id != t.source_event_id
          AND s.tombstoned_at IS NULL
@@ -263,7 +336,7 @@ async function loadAncestorTargetsStaleAgainstOwnSource(
                 )
          )`,
     )
-    .bind(ancestorProjectId, ancestorFileId, ...cellIds)
+    .bind(ancestorProjectId, ancestorFileId, ...cellIds, lane.id)
     .all<{ cell_id: string }>()
   for (const r of results) out.add(r.cell_id)
   return out
@@ -329,7 +402,21 @@ export async function computeUpstreamStaleCellIds(
       // Step 1: mirror check — D's local mirrored source row's
       // upstream_event_id vs U's consumed-lane row head for this cell_id.
       const localMirrors = await loadLocalMirrorRows(env.AQUILLA_PG, d.projectId, dFileId, dCellIds)
-      const ancestorLane = await loadAncestorLaneHead(env.AQUILLA_PG, u.projectId, uFileId, d.consumes, dCellIds)
+      // AQU-1644: the lane D consumes of U. NULL is U's '' lane. Without this,
+      // an edit on another of U's target lanes overwrites the map entry and
+      // flags D stale for a lane it does not follow.
+      const consumedLane =
+        d.consumes === "target"
+          ? await resolveConsumedTargetLane(env.AQUILLA_PG, u.projectId, d.laneId)
+          : null
+      const ancestorLane = await loadAncestorLaneHead(
+        env.AQUILLA_PG,
+        u.projectId,
+        uFileId,
+        d.consumes,
+        dCellIds,
+        consumedLane,
+      )
       // A link that takes only validated text mirrors nothing while U's head
       // is an unvalidated draft (link-sync.ts loadDeltaTargetConsumption), so
       // that head is not a change D will receive (AQU-1683).
@@ -355,8 +442,14 @@ export async function computeUpstreamStaleCellIds(
       // sibling source row; if so, that staleness is inherited by D
       // regardless of whether D's mirror of U has caught up yet (the dormant-
       // middle-hop case, §9.4).
-      if (d.consumes === "target") {
-        const stale = await loadAncestorTargetsStaleAgainstOwnSource(env.AQUILLA_PG, u.projectId, uFileId, dCellIds)
+      if (d.consumes === "target" && consumedLane) {
+        const stale = await loadAncestorTargetsStaleAgainstOwnSource(
+          env.AQUILLA_PG,
+          u.projectId,
+          uFileId,
+          dCellIds,
+          consumedLane,
+        )
         for (const cellId of stale) staleSet.add(cellId)
       }
     }
@@ -364,7 +457,18 @@ export async function computeUpstreamStaleCellIds(
     // Step 3: ancestor-behind fallback (link granularity, v1 approximation
     // per §6/§15 — no per-cell precision attempted here).
     if (u.mode === "live" && u.sourceProjectId) {
-      const uHead = await laneRelevantHeadSeq(env.AQUILLA_PG, u.sourceProjectId, u.consumes)
+      // U's own consumed lane. An edit on a lane U does not follow must not
+      // mark the chain behind.
+      const uLane =
+        u.consumes === "target"
+          ? await resolveConsumedTargetLane(env.AQUILLA_PG, u.sourceProjectId, u.laneId)
+          : null
+      const uHead = await laneRelevantHeadSeq(
+        env.AQUILLA_PG,
+        u.sourceProjectId,
+        u.consumes,
+        uLane ?? undefined,
+      )
       if (uHead > u.cursor) ancestorBehind = true
     }
 

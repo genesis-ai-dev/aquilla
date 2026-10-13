@@ -6,7 +6,7 @@
 // projects keep byte-identical on-wire keys and presence snapshots.
 
 import { describe, it, expect } from "vitest"
-import { focusLockKey } from "./useFocusLock"
+import { focusLockKey, lockHolderForCell } from "./useFocusLock"
 
 describe("focusLockKey (AQU-538)", () => {
   it("returns the bare cellId for the default lane ('')", () => {
@@ -27,5 +27,30 @@ describe("focusLockKey (AQU-538)", () => {
 
   it("gives the SAME key for the same cell + lane (co-editors contend)", () => {
     expect(focusLockKey("GEN 1:1", "es")).toBe(focusLockKey("GEN 1:1", "es"))
+  })
+})
+
+describe("lockHolderForCell", () => {
+  const holders = new Map([
+    ["GEN 1:1", "alice"],
+    ["GEN 1:1@lane:Swahili", "bob"],
+  ])
+
+  it("reads a default-lane lease by the bare cell id", () => {
+    expect(lockHolderForCell(holders, "GEN 1:1", "")).toBe("alice")
+    expect(lockHolderForCell(holders, "GEN 1:1", undefined)).toBe("alice")
+  })
+
+  it("reads a lane lease by the composed key", () => {
+    expect(lockHolderForCell(holders, "GEN 1:1", "Swahili")).toBe("bob")
+  })
+
+  it("does not treat the default-lane lease as a named lane's", () => {
+    expect(lockHolderForCell(new Map([["GEN 1:1", "alice"]]), "GEN 1:1", "Swahili")).toBeNull()
+    expect(lockHolderForCell(holders, "GEN 1:1", "fr")).toBeNull()
+  })
+
+  it("returns null when there is no map", () => {
+    expect(lockHolderForCell(null, "GEN 1:1", "Swahili")).toBeNull()
   })
 })

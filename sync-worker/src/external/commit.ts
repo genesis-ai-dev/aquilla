@@ -68,7 +68,7 @@ import { assertCredentialMayWrite, assertCredentialScope, mintInternalSyncToken 
 import { uuidv7 } from './uuid'
 import { audioObjectKey } from '../audio'
 import { handleEventsWriteRequest } from '../events/route'
-import { laneIdResolveSql } from '../events/lane-id-sql'
+import { artifactBindingConflictColumn, laneIdResolveSql } from '../events/lane-id-sql'
 import { ROLE } from '../events/role-policy'
 import { resolveAssignmentAuthority } from '../events/assignment-authority'
 import type { RawEvent } from '../events/types'
@@ -88,7 +88,7 @@ import {
   loadProjectSettings,
   updateProjectSettingsShared,
 } from '../../../db/shared/projects'
-import { canonicalLaneId, settingsTargetLanguage, withCanonicalLaneId } from './canonical-lane'
+import { stampStoredLaneId } from './external-lane'
 import { createOrgShared, findRecentOrgByCreator } from '../../../db/shared/orgs'
 import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
 
@@ -548,18 +548,16 @@ export async function commitChangesetCore(
   const plannedSet = new Map(
     (cs.plannedIds?.setTranslation ?? []).map((p) => [laneCellKey(p.fileId, p.cellId, p.laneId), p.eventId]),
   )
-  // AQU-1532: a changeset staged before prepare canonicalized lane ids can
-  // still name the primary language; stamp it as the default lane.
-  const targetLanguage = [...commandByCell.values()].some((c) => c.laneId)
-    ? settingsTargetLanguage((await loadProjectSettings(db, projectId)).settings)
-    : null
+  // A current plan stores lanes.id. An older staged plan may still store a
+  // tag; stampStoredLaneId writes that tag as targetLang and does not alias it.
+  const laneRows = (await loadProjectSettings(db, projectId)).lanes ?? []
   const eventsByFile = new Map<string, RawEvent<'target.cell.commit'>[]>()
   const allEventIds: string[] = []
   const clientTs = Date.now()
   for (const pre of cs.preconditions) {
-    const stored = commandByCell.get(laneCellKey(pre.fileId, pre.cellId, pre.laneId))
-    if (!stored) continue
-    const cmd = withCanonicalLaneId(stored, targetLanguage)
+    const cmd = commandByCell.get(laneCellKey(pre.fileId, pre.cellId, pre.laneId))
+    if (!cmd) continue
+    const laneStamp = stampStoredLaneId(cmd.laneId, laneRows)
     const ev: RawEvent<'target.cell.commit'> = {
       id: plannedSet.get(laneCellKey(pre.fileId, pre.cellId, pre.laneId)) ?? uuidv7(),
       schemaVersion: 1,
@@ -572,14 +570,20 @@ export async function commitChangesetCore(
       payload: {
         value: cmd.value,
         ...(cmd.valueHtml !== undefined ? { valueHtml: cmd.valueHtml } : {}),
-        // AQU-538: stamp the lane so the projection lands the commit on its
-        // own (cell, target_lang) row and chain slot.
-        ...(cmd.laneId ? { targetLang: cmd.laneId } : {}),
+        // targetLang is the frozen event key (the lane's legacy_tag). laneId
+        // is lanes.id so resolveEventLane agrees.
+        ...laneStamp,
         // AQU-1186: a DraftCells expansion carries the copilot's provenance,
         // so the projection sets ai_drafted = 1 and the cell reads back as a
         // pending AI draft — identical to an in-app draft. Only the server
         // sets this (validateCommands drops a caller-supplied aiDraft).
         ...(cmd.aiDraft ? { ai_suggestion: true as const, ai_draft: cmd.aiDraft } : {}),
+        // AQU-1673: an "import as proposals" staging carries the uploaded
+        // file's name, so the approved commit records that this text was
+        // imported rather than typed or AI-drafted. Note it does NOT set
+        // `ai_suggestion` — imported text is a human translation from
+        // elsewhere, so the cell must not land as a pending AI draft.
+        ...(cmd.importOrigin ? { imported_origin: cmd.importOrigin } : {}),
         sourceEventId: pre.sourceEventId,
       },
       clientTs,
@@ -591,30 +595,76 @@ export async function commitChangesetCore(
   }
 
   // ── Route each file's events through the /events perimeter ────────────────
+  // AQU-1852: CHUNKED, like the PlanImport and EmitEvents paths. The perimeter
+  // refuses a POST carrying more than its own MAX_EVENTS_PER_REQUEST (500) with
+  // a 413, so posting a whole file in one request made every changeset above
+  // that cap fail at apply — and because the refusal body is `{ error }` with no
+  // `accepted` key, reading it threw and left the changeset stranded in
+  // `committing`, where each retry repeated the same failure.
   const acceptedIds = new Set<string>()
   const rejected: { id: string; status: number; reason: string }[] = []
   const staleFromPerimeter: string[] = []
   const staleSource: string[] = []
 
   for (const [fileId, events] of eventsByFile) {
-    let token: string
-    try {
-      token = await mintInternalSyncToken(env, db, cred, projectId, fileId)
-    } catch (err) {
-      return toErrorResponse(err)
+    // AQU-1852: RE-MINT as the apply runs. The internal sync token lives 300s,
+    // and a whole-book apply posts tens of chunks — so one token minted up
+    // front expires mid-apply, the perimeter rejects every remaining event with
+    // "token expired", and the changeset still closed as `committed` carrying
+    // only the events that beat the clock. Silent tail loss on the largest
+    // plans, which is exactly where it is least likely to be noticed. Each
+    // mint re-checks the credential's scope and the owner's LIVE role, so
+    // refreshing tightens the gate rather than bypassing it.
+    let token = ''
+    let tokenMintedAt = 0
+    for (let i = 0; i < events.length; i += EVENTS_POST_CHUNK) {
+      if (Date.now() - tokenMintedAt >= INTERNAL_TOKEN_REFRESH_MS) {
+        try {
+          token = await mintInternalSyncToken(env, db, cred, projectId, fileId)
+          tokenMintedAt = Date.now()
+        } catch (err) {
+          // A mint that fails partway (membership revoked mid-apply) must not
+          // strand the changeset either — record what landed, then surface it.
+          const applied = allEventIds.filter((eid) => acceptedIds.has(eid))
+          await stampProvenance(db, buildProvenance(request, cs, confirmationId, channel), applied)
+          await recordPartialApply(db, id, applied, cs.summary.warnings, 'could not refresh the internal write token')
+          return toErrorResponse(err)
+        }
+      }
+      const chunk = events.slice(i, i + EVENTS_POST_CHUNK)
+      const req = new Request('https://internal/events', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ events: chunk }),
+      })
+      const res = await handleEventsWriteRequest(req, env, ctx)
+      if (!res) return errorResponse('job_failed', 'events perimeter did not respond')
+      const out = (await res.json()) as EventsWriteResponse | { error?: unknown }
+      // AQU-1852: a refusal of the WHOLE post (413, 400, …) carries no
+      // `accepted` key. Never read it as a write response — record what did
+      // apply and stop, so the partial state is visible on the changeset and a
+      // retry resumes from it (the stored planned ids keep the re-post
+      // idempotent) instead of the apply throwing with nothing written down.
+      if (!Array.isArray((out as EventsWriteResponse).accepted)) {
+        const reason =
+          typeof (out as { error?: unknown }).error === 'string'
+            ? (out as { error: string }).error
+            : `events perimeter refused the batch (HTTP ${res.status})`
+        const applied = allEventIds.filter((eid) => acceptedIds.has(eid))
+        await stampProvenance(db, buildProvenance(request, cs, confirmationId, channel), applied)
+        await recordPartialApply(db, id, applied, cs.summary.warnings, reason)
+        return errorResponse('job_failed', `apply stopped partway: ${reason}`, {
+          appliedCount: applied.length,
+          totalCount: allEventIds.length,
+          retryable: true,
+        })
+      }
+      const write = out as EventsWriteResponse
+      for (const a of write.accepted) acceptedIds.add(a.id)
+      for (const r of write.rejected) rejected.push(r)
+      for (const s of write.stale ?? []) staleFromPerimeter.push(s.id)
+      for (const s of write.staleSource ?? []) staleSource.push(s.id)
     }
-    const req = new Request('https://internal/events', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ events }),
-    })
-    const res = await handleEventsWriteRequest(req, env, ctx)
-    if (!res) return errorResponse('job_failed', 'events perimeter did not respond')
-    const out = (await res.json()) as EventsWriteResponse
-    for (const a of out.accepted) acceptedIds.add(a.id)
-    for (const r of out.rejected) rejected.push(r)
-    for (const s of out.stale ?? []) staleFromPerimeter.push(s.id)
-    for (const s of out.staleSource ?? []) staleSource.push(s.id)
   }
 
   // If nothing applied but the perimeter rejected events, surface the reason.
@@ -664,11 +714,61 @@ export async function commitChangesetCore(
 }
 
 /** Statements per POST to the /events perimeter — mirrors the perimeter's own
- *  BATCH_LIMIT (100). A PlanImport can seed thousands of source cells, so the
- *  compiled events are chunked. The new file remains soft-hidden until every
- *  chunk and artifact binding succeeds; an interrupted apply is retryable and
- *  never exposes a silently truncated file. */
-const PLAN_IMPORT_CHUNK = 100
+ *  BATCH_LIMIT (100), and so is provably under its MAX_EVENTS_PER_REQUEST (500)
+ *  refusal. EVERY apply path that can compile more than a handful of events
+ *  chunks by this: a PlanImport can seed thousands of source cells, and
+ *  AQU-1852 a SetTranslation changeset can carry thousands of target commits.
+ *  The new file remains soft-hidden until every chunk and artifact binding
+ *  succeeds; an interrupted apply is retryable and never exposes a silently
+ *  truncated file. */
+const EVENTS_POST_CHUNK = 100
+
+/** Re-mint the internal sync token once it is this old (AQU-1852). The token
+ *  itself lives 300s (mintInternalSyncToken); refreshing at 120s leaves ample
+ *  headroom for the chunk in flight, so no POST in a long apply can arrive with
+ *  an expired token and be rejected after the plan was already approved. */
+const INTERNAL_TOKEN_REFRESH_MS = 120_000
+
+/** @deprecated prefer EVENTS_POST_CHUNK — kept as the PlanImport call site's name. */
+const PLAN_IMPORT_CHUNK = EVENTS_POST_CHUNK
+
+/**
+ * AQU-1852: record a mid-apply stop so it is VISIBLE and resumable.
+ *
+ * The changeset row stays in `committing` — that is the retry-resumable state,
+ * and the planned event ids stored at prepare make a re-post idempotent — but
+ * it now carries a receipt naming exactly which events landed and why the apply
+ * stopped. Before this, a refused batch threw and left a bare `committing` row
+ * with no receipt: the approver could not see what had applied, and the next
+ * retry started blind.
+ */
+async function recordPartialApply(
+  db: AquillaDb,
+  changesetId: string,
+  appliedIds: readonly string[],
+  priorWarnings: readonly ChangesetWarning[],
+  reason: string,
+): Promise<void> {
+  const receipt: ChangesetReceipt = {
+    eventIds: [...appliedIds],
+    appliedCount: appliedIds.length,
+    staleCount: 0,
+    warnings: [
+      ...priorWarnings,
+      {
+        code: 'apply_incomplete',
+        fileId: '',
+        cellId: '',
+        message: `apply stopped partway: ${reason} — retry the commit to resume from here`,
+      },
+    ],
+    committedAt: new Date().toISOString(),
+  }
+  await db
+    .prepare(`UPDATE changesets SET receipt = ?::text::jsonb WHERE id = ? AND status = 'committing'`)
+    .bind(JSON.stringify(receipt), changesetId)
+    .run()
+}
 
 /**
  * AQU-1120: the `file_source_blobs.format` the export route switches on, derived
@@ -822,18 +922,15 @@ export async function applyPlanImport(
 
   // Explicit target variants reuse the same source unit and name their lane.
   // The source event id is both the first target-chain parent and the staleness
-  // pin, matching browser bilingual imports.
-  // AQU-1532: a variant naming the primary language writes the default lane.
-  const namesALane = compiled.units.some((unit) => (unit.cell.variants ?? []).some((v) => v.laneId))
-  const targetLanguage = namesALane
-    ? settingsTargetLanguage((await loadProjectSettings(db, projectId)).settings)
-    : null
+  // pin, matching browser bilingual imports. laneId on a current plan is
+  // lanes.id; an older staged tag is stamped as targetLang only.
+  const laneRows = (await loadProjectSettings(db, projectId)).lanes ?? []
   const targetEvents: RawEvent<'target.cell.commit'>[] = []
   compiled.units.forEach((unit, cellIndex) => {
     const sourceEvent = cellEvents[cellIndex]
     const planned = plannedImport?.cells[cellIndex]
     for (const [variantIndex, stored] of (unit.cell.variants ?? []).entries()) {
-      const variant = { ...stored, laneId: canonicalLaneId(stored.laneId, targetLanguage) }
+      const laneStamp = stampStoredLaneId(stored.laneId, laneRows)
       targetEvents.push({
         id: planned?.variantEventIds?.[variantIndex] ?? uuidv7(),
         schemaVersion: 1,
@@ -844,10 +941,10 @@ export async function applyPlanImport(
         parentId: sourceEvent.id,
         author: cred.username,
         payload: {
-          value: variant.content,
-          ...(variant.contentHtml !== undefined ? { valueHtml: variant.contentHtml } : {}),
+          value: stored.content,
+          ...(stored.contentHtml !== undefined ? { valueHtml: stored.contentHtml } : {}),
           sourceEventId: sourceEvent.id,
-          ...(variant.laneId ? { targetLang: variant.laneId } : {}),
+          ...laneStamp,
         },
         clientTs,
       })
@@ -860,16 +957,28 @@ export async function applyPlanImport(
   const allEvents: RawEvent[] = [...stagedEvents, revealEvent]
   const allEventIds = allEvents.map((e) => e.id)
 
-  let token: string
-  try {
-    token = await mintInternalSyncToken(env, db, cred, projectId, fileId)
-  } catch (err) {
-    return { ok: false, fileId, receipt: null, rejected: [], error: toErrorResponse(err) }
+  // AQU-1852: re-minted as the apply runs, for the same reason the
+  // SetTranslation path above is — a PLAN_IMPORT_MAX_CELLS import posts ~50
+  // chunks, long enough to outlive one 300s token and have the perimeter reject
+  // the tail of the file with "token expired".
+  let token = ''
+  let tokenMintedAt = 0
+  const mintIfStale = async (): Promise<Response | null> => {
+    if (Date.now() - tokenMintedAt < INTERNAL_TOKEN_REFRESH_MS) return null
+    try {
+      token = await mintInternalSyncToken(env, db, cred, projectId, fileId)
+      tokenMintedAt = Date.now()
+      return null
+    } catch (err) {
+      return toErrorResponse(err)
+    }
   }
 
   const acceptedIds = new Set<string>()
   const rejected: { id: string; status: number; reason: string }[] = []
   for (let i = 0; i < stagedEvents.length; i += PLAN_IMPORT_CHUNK) {
+    const mintError = await mintIfStale()
+    if (mintError) return { ok: false, fileId, receipt: null, rejected, error: mintError }
     const chunk = stagedEvents.slice(i, i + PLAN_IMPORT_CHUNK)
     const req = new Request('https://internal/events', {
       method: 'POST',
@@ -956,20 +1065,20 @@ export async function applyPlanImport(
         .run()
     }
 
+    const conflictColumn = await artifactBindingConflictColumn(db)
     await db
       .prepare(
         `INSERT INTO artifact_bindings (
-           id, project_id, artifact_id, file_id, binding_role, target_lang,
+           id, project_id, artifact_id, file_id, binding_role,
            member_path, profile_id, profile_version, fidelity, manifest, recipe, lane_id
-         ) VALUES (?, ?, ?::uuid, ?, 'source', '', ?, ?, ?, ?, ?::text::jsonb, ?::text::jsonb, ${laneIdResolveSql('source')})
-         ON CONFLICT (artifact_id, file_id, binding_role, target_lang, member_path)
+         ) VALUES (?, ?, ?::uuid, ?, 'source', ?, ?, ?, ?, ?::text::jsonb, ?::text::jsonb, ${laneIdResolveSql('source')})
+         ON CONFLICT (artifact_id, file_id, binding_role, ${conflictColumn}, member_path)
          DO UPDATE SET
            profile_id = excluded.profile_id,
            profile_version = excluded.profile_version,
            fidelity = excluded.fidelity,
            manifest = excluded.manifest,
            recipe = excluded.recipe,
-           lane_id = COALESCE(excluded.lane_id, artifact_bindings.lane_id),
            updated_at = now()`,
       )
       .bind(
@@ -991,6 +1100,12 @@ export async function applyPlanImport(
 
   // Reveal only after every staged event and optional binding succeeded.
   if (rejected.length === 0) {
+    // AQU-1852: this is the event that un-hides the file, and it is posted
+    // after the chunk loop AND the artifact/side-car writes — the point in the
+    // apply furthest from the original mint. A stale token here would leave a
+    // fully imported file permanently soft-hidden.
+    const mintError = await mintIfStale()
+    if (mintError) return { ok: false, fileId, receipt: null, rejected, error: mintError }
     const revealRequest = new Request('https://internal/events', {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -1151,24 +1266,22 @@ async function commitCreateProject(
   const confirmationId = gate.confirmationId
 
   // Apply — MANDATORY writeCreatorMembership: true (see JSDoc above).
-  const { inserted } = await createProjectShared(db, {
-    projectId,
-    name: cmd.name,
-    orgId,
-    createdBy: cred.userId,
-    writeCreatorMembership: true,
-    // AQU-1223: the language pair rides the create instead of being dropped.
-    // Sent only when the command carried one, so a bare name+orgId create still
-    // writes no settings row at all.
-    ...(cmd.sourceLanguage !== undefined || cmd.targetLanguage !== undefined
-      ? {
-          settingsSeed: {
-            ...(cmd.sourceLanguage !== undefined ? { sourceLanguage: cmd.sourceLanguage } : {}),
-            ...(cmd.targetLanguage !== undefined ? { targetLanguage: cmd.targetLanguage } : {}),
-          },
-        }
-      : {}),
-  })
+  let inserted: boolean
+  try {
+    const created = await createProjectShared(db, {
+      projectId,
+      name: cmd.name,
+      orgId,
+      createdBy: cred.userId,
+      writeCreatorMembership: true,
+      // Lanes become rows. The four project-level language keys are not written.
+      ...(cmd.lanes !== undefined ? { lanes: cmd.lanes } : {}),
+    })
+    inserted = created.inserted
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'could not create the project lanes'
+    return errorResponse('validation_failed', message)
+  }
 
   if (!inserted) {
     // The id already exists. Distinguish a genuine race (someone else claimed it
@@ -1567,6 +1680,9 @@ async function commitUpdateProjectSettings(
     settings: cmd.settings,
     ifMatchVersion: expectedVersion,
     updatedBy: cred.userId,
+    // The four language keys are rejected at validation. Do not let a leftover
+    // key on the stored blob mint a lane row (AQU-1615).
+    registerLanes: false,
   })
 
   if (result.status === 'conflict') {

@@ -60,9 +60,11 @@ async function postEvents(db: AquillaDb, events: unknown[]): Promise<EventsRespo
 
 async function targetHeads(t: TestDb): Promise<TargetHead[]> {
   const r = await t.pg.query<TargetHead>(
-    `SELECT target_lang, event_id, value FROM cells
-     WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = 'target'
-     ORDER BY target_lang`,
+    `SELECT COALESCE(l.legacy_tag, '') AS target_lang, c.event_id, c.value
+       FROM cells c
+       JOIN lanes l ON l.project_id = c.project_id AND l.id = c.lane_id
+      WHERE c.project_id = $1 AND c.file_id = $2 AND c.cell_id = $3 AND c.side = 'target'
+      ORDER BY target_lang`,
     [PROJECT, FILE, CELL],
   )
   return r.rows
@@ -150,8 +152,14 @@ beforeEach(async () => {
       },
     ],
     // The tagged lane has its row, as a registered lane does in production
-    // (AQU-1532: a cell write to a lane with no row is a 422).
-    lanes: [{ id: 'enlane01', project_id: PROJECT, role: 'target', name: 'English', legacy_tag: TAG }],
+    // (AQU-1532: a cell write to a lane with no row is a 422). So does the
+    // legacy default lane the unqualified commit addresses: a lane-less write
+    // on a project with only tagged lanes is a 422 (AQU-1900) — the PGlite
+    // lane-fill trigger used to mint this row, which production never does.
+    lanes: [
+      { id: 'deflane01', project_id: PROJECT, role: 'target', name: null, legacy_tag: '' },
+      { id: 'enlane01', project_id: PROJECT, role: 'target', name: 'English', legacy_tag: TAG },
+    ],
   })
 })
 

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { checkClientSessionHead } from "./head-check"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const seq = (client: number) => ({ global: 0, client, rebaseGeneration: 0 })
 
@@ -71,6 +72,6 @@ describe("checkClientSessionHead", () => {
     const slow = { _dev: { syncStates: () => new Promise<ReturnType<typeof states>>((r) => (answer = r)) } }
     expect(await checkClientSessionHead(slow, { reload, timeoutMs: 10 })).toBe("timeout")
     answer(states(2309, 2299))
-    await vi.waitFor(() => expect(reload).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(reload).toHaveBeenCalledOnce(), { timeout: STALL_WATCHDOG_MS })
   })
 })

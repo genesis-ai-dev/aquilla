@@ -8,6 +8,7 @@ import { lintDraft, type LintRule } from "../agent/lint"
 import type { CellPair } from "../agent/tools/select-cells"
 import { bibleFindings, type BibleGate } from "./bible-gates"
 import { lintTerminology, type Concept } from "./project-context"
+import type { TermMatchingSettings } from "../../../../src/lib/terminology/model"
 import type { LintFlag, SpanDraft } from "./types"
 
 /**
@@ -31,6 +32,7 @@ export function lintSpanDraft(
   pairs: CellPair[],
   draft: SpanDraft,
   concepts: Concept[] = [],
+  termMatching?: TermMatchingSettings,
   bible?: BibleGate,
 ): LintFlag[] {
   const sourceById = new Map(pairs.map((p) => [p.cellId, p.source]))
@@ -39,7 +41,7 @@ export function lintSpanDraft(
     const source = sourceById.get(cell.cellId) ?? ""
     const hits = [
       ...lintDraft(rules, source, cell.text),
-      ...lintTerminology(concepts, source, cell.text),
+      ...lintTerminology(concepts, source, cell.text, termMatching),
     ]
     for (const hit of hits) {
       flags.push({ spanId: draft.spanId, cellId: cell.cellId, ruleId: hit.ruleId, message: hit.message })

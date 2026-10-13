@@ -98,10 +98,14 @@ export interface ResourceRoute {
   id: string // "usfm" | "obs" | "tsv-notes" | "tsv-questions" | "md-dict" | "md-manual"
   matches: (entry: DcsCatalogEntry, manifest: DcsManifest) => boolean
   /** Turn raw repo files (path → text) into translatable files/cells with stable
-   *  ids. `files` keys are repo-relative paths from the git tree. */
+   *  ids. `files` keys are repo-relative paths from the git tree.
+   *  `projectId` scopes the derived FILE ids to the destination project
+   *  (AQU-1891) — cell ids stay content-addressed / project-agnostic. */
   parse: (input: {
     entry: DcsCatalogEntry
     manifest: DcsManifest
+    /** Destination project — part of every derived file id (AQU-1891). */
+    projectId: string
     files: Map<string, string>
     options?: DcsImportOptions
   }) => DcsFile[]

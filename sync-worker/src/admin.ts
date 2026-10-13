@@ -4,8 +4,10 @@
 // doesn't resolve).
 
 import { adminBearerMatches } from "./lib/admin-secret"
+import { runR2GcSweep, type R2GcCronEnv } from "./r2-gc-cron"
+import { formatR2GcReport } from "./r2-gc"
 
-export interface AdminEnv {
+export interface AdminEnv extends R2GcCronEnv {
   SNAPSHOTS: R2Bucket
   /**
    * Dedicated admin bearer. Preferred over SYNC_SECRET_KEY — see the auth note
@@ -51,12 +53,41 @@ export async function handleAdminRequest(
   // recognized resource hit with the wrong method.
   const inspectMatch = url.pathname.match(/^\/admin\/files\/([^/]+)\/([^/]+)\/inspect$/)
   const fileMatch = url.pathname.match(/^\/admin\/files\/([^/]+)\/([^/]+)$/)
-  if (!inspectMatch && !fileMatch) return new Response("not found", { status: 404 })
+  const gcMatch = url.pathname === "/admin/r2-gc"
+  if (!inspectMatch && !fileMatch && !gcMatch) return new Response("not found", { status: 404 })
 
   // Auth gate applies to every recognized admin route.
   const auth = request.headers.get("Authorization") ?? ""
   if (!adminBearerMatches(auth, env)) {
     return new Response("unauthorized", { status: 401 })
+  }
+
+  // POST /admin/r2-gc — run the AQU-1856 orphan sweep on demand and return the
+  // report. `?dryRun=1` is the reviewable mode the sweep ships with: it reads
+  // and classifies everything, reports counts/bytes/sample keys, and deletes
+  // nothing. Operator-only, and POST (not GET) because the default IS
+  // destructive. `?cursor=reset` restarts the walk from the top of the bucket
+  // instead of continuing from where the cron left off.
+  if (gcMatch) {
+    if (request.method !== "POST") return new Response("method not allowed", { status: 405 })
+    const dryRun = url.searchParams.get("dryRun") === "1"
+    const graceHours = Number(url.searchParams.get("graceHours"))
+    const maxProjects = Number(url.searchParams.get("maxProjects"))
+    const report = await runR2GcSweep(env, {
+      dryRun,
+      ...(Number.isFinite(graceHours) && graceHours >= 0
+        ? { graceMs: graceHours * 3_600_000 }
+        : {}),
+      ...(Number.isInteger(maxProjects) && maxProjects > 0 ? { maxProjects } : {}),
+      ...(url.searchParams.get("cursor") === "reset" ? { cursors: {} } : {}),
+    })
+    if (!report) {
+      return Response.json(
+        { ok: false, error: "sweep skipped — see worker logs (R2_GC_MODE=off, or refused)" },
+        { status: 503 },
+      )
+    }
+    return Response.json({ ok: true, report, summary: formatR2GcReport(report) })
   }
 
   // GET /admin/files/:projectId/:fileId/inspect — returns counts and sizes

@@ -38,6 +38,8 @@ export const autopilot = defineNamespace({
     "autopilot.feedback.resumed": "Autopilot resumed.",
     "autopilot.feedback.newRunStarted": "A new Autopilot run started for this file.",
     "autopilot.error.startFailed": "Autopilot could not start.",
+    "autopilot.error.startThrottled":
+      "Too many Autopilot runs started. Wait a few minutes and try again.",
     "autopilot.error.authRequired": "You need to be signed in to use contextual drafting.",
     "autopilot.progress.passagesComplete": plural(
       {
@@ -415,6 +417,8 @@ export const autopilot = defineNamespace({
     "autopilot.inspector.event.status.queued": "Work queued",
     "autopilot.inspector.event.runStarted": "Autopilot run started",
     "autopilot.inspector.event.workQueued": "Autopilot has work queued",
+    "autopilot.inspector.event.queuedForCapacity":
+      "Autopilot is waiting for model capacity",
     "autopilot.inspector.event.running": "Autopilot is running",
     "autopilot.inspector.event.pauseRequested": "Pause requested",
     "autopilot.inspector.event.paused": "Autopilot paused",

@@ -28,6 +28,11 @@ describe("PATCH /api/v2/projects/:projectId/pm", () => {
     expect((await set.json())).toMatchObject({ ok: true, pm: { id: 2, username: "anna" } })
     let row = await env.AQUILLA_PG.prepare("SELECT pm_user_id FROM projects WHERE id='pa'").first<{ pm_user_id: number | null }>()
     expect(Number(row?.pm_user_id)).toBe(2)
+    // AQU-984: a contributor named PM is raised to a visible Project lead.
+    const raised = await env.AQUILLA_PG.prepare(
+      "SELECT role_level FROM project_members WHERE project_id='pa' AND user_id=2",
+    ).first<{ role_level: number }>()
+    expect(Number(raised?.role_level)).toBe(500)
 
     const clear = await app.request(
       "/api/v2/projects/pa/pm",
@@ -38,6 +43,50 @@ describe("PATCH /api/v2/projects/:projectId/pm", () => {
     expect((await clear.json())).toMatchObject({ ok: true, pm: null })
     row = await env.AQUILLA_PG.prepare("SELECT pm_user_id FROM projects WHERE id='pa'").first<{ pm_user_id: number | null }>()
     expect(row?.pm_user_id).toBeNull()
+    // Clearing the PM does not remove the Project lead membership.
+    const kept = await env.AQUILLA_PG.prepare(
+      "SELECT role_level FROM project_members WHERE project_id='pa' AND user_id=2",
+    ).first<{ role_level: number }>()
+    expect(Number(kept?.role_level)).toBe(500)
+  })
+
+  it("does not lower an existing role above project lead", async () => {
+    await seed()
+    await env.AQUILLA_PG.prepare(
+      "UPDATE project_members SET role_level = 600 WHERE project_id='pa' AND user_id=2",
+    ).run()
+    const res = await app.request(
+      "/api/v2/projects/pa/pm",
+      { method: "PATCH", headers: authHeader(await jwtFor("wendi")), body: JSON.stringify({ pmUserId: 2 }) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const role = await env.AQUILLA_PG.prepare(
+      "SELECT role_level FROM project_members WHERE project_id='pa' AND user_id=2",
+    ).first<{ role_level: number }>()
+    expect(Number(role?.role_level)).toBe(600)
+  })
+
+  it("adds a visible project-lead row for an org maintainer who had none", async () => {
+    await seed()
+    await seedUser(4, "bob")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 4, 600, 1)",
+    ).run()
+    const res = await app.request(
+      "/api/v2/projects/pa/pm",
+      { method: "PATCH", headers: authHeader(await jwtFor("wendi")), body: JSON.stringify({ pmUserId: 4 }) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const direct = await env.AQUILLA_PG.prepare(
+      "SELECT role_level FROM project_members WHERE project_id='pa' AND user_id=4",
+    ).first<{ role_level: number }>()
+    expect(Number(direct?.role_level)).toBe(500)
+    const orgRole = await env.AQUILLA_PG.prepare(
+      "SELECT role_level FROM org_members WHERE org_id=1 AND user_id=4",
+    ).first<{ role_level: number }>()
+    expect(Number(orgRole?.role_level)).toBe(600)
   })
 
   it("rejects a target who is not a member of the project", async () => {

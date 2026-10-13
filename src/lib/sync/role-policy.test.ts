@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import {
   ROLE,
+  canAttachSourceAudio,
   requiredRoleFor,
   canPerform,
   canOpenAssignUi,
@@ -365,6 +366,14 @@ describe("scopedLanesFor — the lanes a lane-limited member may open", () => {
     expect(scopedLanesFor(ROLE.OWNER, [lane("es")], lanes)).toBeNull()
   })
 
+  // AQU-1795 / AQU-1808: the read wall stops at project lead, and the server
+  // shows a lead every lane even when a scope row from before a promotion, or
+  // from a membership that was removed and re-added, is still stored. The
+  // client must not narrow them by it either.
+  it("leaves a project lead to every lane (null), whatever their scopes", () => {
+    expect(scopedLanesFor(ROLE.PROJECT_LEAD, [lane("es")], lanes)).toBeNull()
+  })
+
   it("leaves a member with no lane scopes on the AQU-608 rule (null)", () => {
     expect(scopedLanesFor(ROLE.CONTRIBUTOR, [], lanes)).toBeNull()
     expect(scopedLanesFor(ROLE.CONTRIBUTOR, null, lanes)).toBeNull()
@@ -398,5 +407,25 @@ describe("scopedLanesFor — the lanes a lane-limited member may open", () => {
     expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("de")], lanes, laneRows)).toEqual(["de"])
     // A lane that is gone offers nothing to switch to.
     expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("ln-gone")], lanes, laneRows)).toEqual([])
+  })
+})
+
+// AQU-1565 follow-up. WHY: marking a clip as the file's source audio takes it
+// out of "recorded" and out of review on every row. The workspace offers the
+// recording upload only where this says yes, and the server refuses the same
+// attach below Project Lead, so the two must agree rung for rung.
+describe("canAttachSourceAudio", () => {
+  it("is Project Lead and up", () => {
+    expect(canAttachSourceAudio(ROLE.CONTRIBUTOR)).toBe(false)
+    expect(canAttachSourceAudio(ROLE.REVIEWER)).toBe(false)
+    expect(canAttachSourceAudio(ROLE.VIEWER)).toBe(false)
+    expect(canAttachSourceAudio(ROLE.PROJECT_LEAD)).toBe(true)
+    expect(canAttachSourceAudio(ROLE.MAINTAINER)).toBe(true)
+    expect(canAttachSourceAudio(ROLE.OWNER)).toBe(true)
+  })
+
+  it("fails open on an unknown role, like canPerform", () => {
+    expect(canAttachSourceAudio(null)).toBe(true)
+    expect(canAttachSourceAudio(undefined)).toBe(true)
   })
 })

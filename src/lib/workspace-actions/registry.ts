@@ -68,6 +68,7 @@ export const workspaceActions: WorkspaceAction[] = [
   },
   {
     id: "run-completions", labelKey: "nav.workspaceActions.runCompletions.label", icon: Sparkles, group: "primary",
+    opensFileModal: "draft-next",
     isAvailable: (c) => c.activeFileId != null && roleAllows(c, "target.cell.commit"),
     isDefault: (c) => {
       if (!c.activeFileId) return false
@@ -95,6 +96,7 @@ export const workspaceActions: WorkspaceAction[] = [
   },
   {
     id: "complete-all", labelKey: "nav.workspaceActions.completeAll.label", icon: Sparkles, group: "primary",
+    opensFileModal: "draft-all",
     isAvailable: (c) => {
       if (!c.activeFileId) return false
       if (!roleAllows(c, "target.cell.commit")) return false
@@ -118,6 +120,7 @@ export const workspaceActions: WorkspaceAction[] = [
   },
   {
     id: "batch-validate", labelKey: "nav.workspaceActions.batchValidate.label", icon: CheckSquare, group: "primary",
+    opensFileModal: "validate",
     isAvailable: (c) => c.activeFileId != null && roleAllows(c, "cell.validate"),
     isDefault: (c) => {
       if (!c.activeFileId) return false

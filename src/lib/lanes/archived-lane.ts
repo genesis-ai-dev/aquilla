@@ -77,6 +77,20 @@ export function writesLaneRow(kind: string): boolean {
 }
 
 /**
+ * AQU-1532 / AQU-1884: why a lane-row write cannot resolve its lane.
+ *
+ * A named tag is simply unknown, and the caller's fix is to register it. An
+ * omitted tag asked for the DEFAULT lane, which projects created today do not
+ * have — every lane carries a real tag, such as its language — so there the
+ * fix is to name the lane, not to register one.
+ */
+export function missingLaneReason(tag: string): string {
+  return tag === ""
+    ? "no lane named: this project has no default lane; name the target lane with laneId (or targetLang)"
+    : `unknown lane "${tag}"; register it in settings.targetLanes`
+}
+
+/**
  * The lane tag this event is asking to write, or null when the event is not
  * a lane write. `''` is the default lane.
  */
@@ -113,7 +127,7 @@ export const LANE_DOES_NOT_EXIST_REASON = "lane does not exist"
 
 function rowIsArchived(lane: ArchiveLaneRow, archivedTags: readonly string[]): boolean {
   if (lane.archivedAt != null && lane.archivedAt !== "") return true
-  return listed(archivedTags, lane.legacyTag ?? "") || listed(archivedTags, lane.name)
+  return listed(archivedTags, lane.legacyTag ?? "") || listed(archivedTags, lane.name ?? "")
 }
 
 /**
@@ -138,7 +152,7 @@ export function archivedLaneReason(input: {
     input.tag !== "" &&
     (listed(input.archivedTags, input.tag) ||
       matches.some(
-        (lane) => listed(input.archivedTags, lane.legacyTag ?? "") || listed(input.archivedTags, lane.name),
+        (lane) => listed(input.archivedTags, lane.legacyTag ?? "") || listed(input.archivedTags, lane.name ?? ""),
       ))
   if (!archivedMatch && !inSettings) return null
 
@@ -146,7 +160,7 @@ export function archivedLaneReason(input: {
   if (visible != null) {
     const knowable = matches.find((lane) => visible.has(lane.id) && rowIsArchived(lane, input.archivedTags))
     if (!knowable) return LANE_DOES_NOT_EXIST_REASON
-    const display = knowable.name.trim() || input.tag
+    const display = (knowable.name ?? "").trim() || input.tag
     return `lane '${display}' is archived`
   }
 

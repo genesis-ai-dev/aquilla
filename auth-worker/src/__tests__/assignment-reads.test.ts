@@ -264,9 +264,7 @@ describe("GET /api/v2/projects/:projectId/assignments/given (AQU-581)", () => {
     await seedOrgWithAssignments()
     // anna (a Contributor coordinator) handed one to bob, and took one back.
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, target_lang, cells_total, created_by, created_at, unassigned_at) VALUES
-        ('by-anna', 'pa', 3, 'chapters', 'Genesis 2', 'es', 0, 2, 1200, NULL),
-        ('by-anna-gone', 'pa', 3, 'chapters', 'Genesis 3', 'es', 0, 2, 1300, 1400)`,
+      `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, cells_total, created_by, created_at, unassigned_at, lane_id) VALUES ('by-anna', 'pa', 3, 'chapters', 'Genesis 2', 0, 2, 1200, NULL, (SELECT aquilla_test_resolve_target_lane('pa', 'es'))), ('by-anna-gone', 'pa', 3, 'chapters', 'Genesis 3', 0, 2, 1300, 1400, (SELECT aquilla_test_resolve_target_lane('pa', 'es')))`,
     ).run()
     const res = await app.request(
       "/api/v2/projects/pa/assignments/given",

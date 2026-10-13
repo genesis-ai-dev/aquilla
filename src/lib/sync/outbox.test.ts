@@ -15,6 +15,7 @@ import {
   removeOutboxEvents,
   outboxPendingCount,
   outboxFailedCount,
+  readOutboxCounts,
   peekPendingOutboxBatch,
   getOutboxRecordsForCell,
   quarantineOutboxEvents,
@@ -304,6 +305,7 @@ describe("cqrs outbox", () => {
     expect(await outboxFailedCount()).toBe(1)
     // The total count still includes the failed record.
     expect(await outboxPendingCount()).toBe(1)
+    expect(await readOutboxCounts()).toEqual({ count: 1, failed: 1 })
   })
 
   it("peekPendingOutboxBatch excludes failed records", async () => {

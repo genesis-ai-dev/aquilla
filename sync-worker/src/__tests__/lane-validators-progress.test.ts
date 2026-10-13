@@ -13,9 +13,15 @@
 //   3. The AQU-279 validationCount threshold still works, independently, per
 //      lane.
 //   4. file_section_progress materializes one row set per lane (file + section
-//      scopes), ALWAYS including '' — and the '' rows are byte-identical to the
-//      pre-lane projection for N=1 projects. The source denominator is
-//      lane-independent (shared across lanes).
+//      scopes) — and the '' rows are byte-identical to the pre-lane projection
+//      for N=1 projects. The source denominator is lane-independent (shared
+//      across lanes).
+//
+//      AQU-1599: "one row set per lane" now means per row of `lanes`, so the
+//      default lane gets its rows because the project HAS a default lane (every
+//      create / settings write runs ensureProjectLaneStmts), not because the
+//      projection manufactured a '' row whether or not one existed. The source
+//      lane gets a row set too; it carries the denominator and no translations.
 
 import { describe, it, expect, beforeEach, afterAll } from 'vitest'
 import {
@@ -25,6 +31,7 @@ import {
 import { fullProgressRecomputeStmts } from '../events/progress-projection'
 import type { EventKind } from '../events/types'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
+import { progressRowsForLane } from './helpers/progress-rows'
 
 type ProjectionOpts = { deferFileCounters?: boolean; validationCount?: number }
 
@@ -106,8 +113,14 @@ async function targets(): Promise<CellRow[]> {
     .filter((r) => r.side === 'target')
     .sort((a, b) => a.cell_id.localeCompare(b.cell_id) || a.target_lang.localeCompare(b.target_lang))
 }
+/**
+ * The TARGET lanes' progress rows. AQU-1599 gave the source lane a row of its
+ * own — the lane-independent denominator, carrying no lane's translations — so
+ * reading the whole table here would put a second '' row beside the default
+ * lane's in every expectation below. `sourceProgress` reads that one.
+ */
 async function progress(): Promise<ProgressRow[]> {
-  const rows = await t.rows<ProgressRow>('file_section_progress')
+  const rows = await progressRowsForLane<ProgressRow>(t.pg, PROJECT, 'target')
   return rows.sort(
     (a, b) =>
       a.scope.localeCompare(b.scope) ||
@@ -231,7 +244,37 @@ describe('per-lane file/section progress', () => {
     expect(rows.every((r) => r.target_lang === '')).toBe(true)
   })
 
-  it('materializes one row set per lane, always including "", sharing the source denominator', async () => {
+  it('AQU-1599: the source lane gets a row of its own, with the denominator and no translations', async () => {
+    await applyEvents(t.db, [
+      ev({ kind: 'source.cell.create', id: 'src-1', payload: { cellId: 'cell-1', value: 'a', canonicalRef: 'GEN 1:1' } }),
+      ev({ kind: 'source.cell.create', id: 'src-2', payload: { cellId: 'cell-2', value: 'b', canonicalRef: 'GEN 1:2' } }),
+      ev({ kind: 'target.cell.commit', id: 'tc-1', cellId: 'cell-1', parentId: 'src-1', payload: { value: 'Bonjour' } }),
+    ])
+    for (const s of fullProgressRecomputeStmts(t.db, PROJECT, FILE, 5000)) await s.run()
+
+    // One row per scope, keyed to the source lane: the full denominator, and
+    // filled_count 0 because no translation belongs to the source lane. This is
+    // the row the plan board, the files list and the org overview take their
+    // lane-independent numbers from, so archiving a target lane cannot move it.
+    const sourceRows = await progressRowsForLane<ProgressRow>(t.pg, PROJECT, 'source')
+    expect(sourceRows.map((r) => [r.scope, r.section_key, r.total_count, r.filled_count])).toEqual([
+      ['book', 'GEN', 2, 0],
+      ['file', '', 2, 0],
+      ['section', 'GEN 1', 2, 0],
+    ])
+    // And it is NOT one of the lanes anybody translates in.
+    expect((await progress()).every((r) => r.target_lang === '')).toBe(true)
+  })
+
+  it('materializes one row set per lane, including the untranslated default lane, sharing the source denominator', async () => {
+    // The default lane exists because the project has one — what every create
+    // and settings write makes sure of (db/shared/lanes.ts) — not because the
+    // projection invents a '' row. Nobody has translated in it.
+    await t.pg.query(
+      `INSERT INTO lanes (id, project_id, role, name, legacy_tag, position)
+       VALUES ('deflane', $1, 'target', 'Default', '', 1)`,
+      [PROJECT],
+    )
     // Two source cells; fr fills both, swh fills one, default lane fills none.
     await applyEvents(t.db, [
       ev({ kind: 'source.cell.create', id: 'src-1', payload: { cellId: 'cell-1', value: 'a', canonicalRef: 'GEN 1:1' } }),
@@ -254,6 +297,32 @@ describe('per-lane file/section progress', () => {
     const sections = rows.filter((r) => r.scope === 'section')
     expect(sections.map((r) => [r.section_key, r.target_lang, r.total_count, r.filled_count])).toEqual([
       ['GEN 1', '', 2, 0],
+      ['GEN 1', 'fr', 2, 2],
+      ['GEN 1', 'swh', 2, 1],
+    ])
+  })
+
+  it('materializes one row set per lane that exists, sharing the source denominator', async () => {
+    // Two source cells; fr fills both, swh fills one. No '' lane, so no '' row.
+    await applyEvents(t.db, [
+      ev({ kind: 'source.cell.create', id: 'src-1', payload: { cellId: 'cell-1', value: 'a', canonicalRef: 'GEN 1:1' } }),
+      ev({ kind: 'source.cell.create', id: 'src-2', payload: { cellId: 'cell-2', value: 'b', canonicalRef: 'GEN 1:2' } }),
+      ev({ kind: 'target.cell.commit', id: 'tc-fr-1', cellId: 'cell-1', parentId: 'src-1', payload: { value: 'Bonjour', targetLang: 'fr' } }),
+      ev({ kind: 'target.cell.commit', id: 'tc-fr-2', cellId: 'cell-2', parentId: 'src-2', payload: { value: 'Salut', targetLang: 'fr' } }),
+      ev({ kind: 'target.cell.commit', id: 'tc-swh-1', cellId: 'cell-1', parentId: 'src-1', payload: { value: 'Habari', targetLang: 'swh' } }),
+    ])
+    for (const s of fullProgressRecomputeStmts(t.db, PROJECT, FILE, 5000)) await s.run()
+
+    const rows = await progress()
+    // File scope: one row per lane that exists; denominator shared (=2).
+    const files = rows.filter((r) => r.scope === 'file')
+    expect(files.map((r) => [r.target_lang, r.total_count, r.filled_count])).toEqual([
+      ['fr', 2, 2],
+      ['swh', 2, 1],
+    ])
+    // Section scope mirrors it (single section GEN 1).
+    const sections = rows.filter((r) => r.scope === 'section')
+    expect(sections.map((r) => [r.section_key, r.target_lang, r.total_count, r.filled_count])).toEqual([
       ['GEN 1', 'fr', 2, 2],
       ['GEN 1', 'swh', 2, 1],
     ])

@@ -95,12 +95,7 @@ async function seedUnit(): Promise<void> {
       ('pa','f1','x2','source','s','e-pa',1,'EXO 1:2')`,
   ).run()
   await env.AQUILLA_PG.prepare(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_edit_at, endorsement_count, validated) VALUES
-      ('pa','f1','g1','target','',  'draft','e-pa',1,1,1),
-      ('pa','f1','g2','target','',  'draft','e-pa',1,0,0),
-      ('pa','f1','x1','target','',  'draft','e-pa',1,0,0),
-      ('pa','f1','g1','target','es','borrador','e-pa',1,1,1),
-      ('pa','f1','g2','target','es','borrador','e-pa',1,1,1)`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, endorsement_count, validated, lane_id) VALUES ('pa', 'f1', 'g1', 'target', 'draft', 'e-pa', 1, 1, 1, (SELECT aquilla_test_resolve_target_lane('pa', ''))), ('pa', 'f1', 'g2', 'target', 'draft', 'e-pa', 1, 0, 0, (SELECT aquilla_test_resolve_target_lane('pa', ''))), ('pa', 'f1', 'x1', 'target', 'draft', 'e-pa', 1, 0, 0, (SELECT aquilla_test_resolve_target_lane('pa', ''))), ('pa', 'f1', 'g1', 'target', 'borrador', 'e-pa', 1, 1, 1, (SELECT aquilla_test_resolve_target_lane('pa', 'es'))), ('pa', 'f1', 'g2', 'target', 'borrador', 'e-pa', 1, 1, 1, (SELECT aquilla_test_resolve_target_lane('pa', 'es')))`,
   ).run()
 
   await env.AQUILLA_PG.prepare(
@@ -112,11 +107,7 @@ async function seedUnit(): Promise<void> {
   ).run()
 
   await env.AQUILLA_PG.prepare(
-    `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, target_lang, cells_total, deadline, created_by, created_at, unassigned_at, completed_at) VALUES
-      ('as-anna',      'pa', 2, 'books', 'Genesis', '', 3, '2026-10-01', 1, 1000, NULL, NULL),
-      ('as-bob',       'pa', 3, 'books', 'Exodus',  '', 2, NULL,         1, 1100, NULL, NULL),
-      ('as-anna-old',  'pa', 2, 'books', 'Genesis', '', 1, NULL,         1,  900, 1500, NULL),
-      ('as-cara-done', 'pa', 4, 'books', 'Genesis', '', 1, NULL,         1,  950, NULL, 1600)`,
+    `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, cells_total, deadline, created_by, created_at, unassigned_at, completed_at) VALUES ('as-anna', 'pa', 2, 'books', 'Genesis', 3, '2026-10-01', 1, 1000, NULL, NULL), ('as-bob', 'pa', 3, 'books', 'Exodus', 2, NULL, 1, 1100, NULL, NULL), ('as-anna-old', 'pa', 2, 'books', 'Genesis', 1, NULL, 1, 900, 1500, NULL), ('as-cara-done', 'pa', 4, 'books', 'Genesis', 1, NULL, 1, 950, NULL, 1600)`,
   ).run()
   await env.AQUILLA_PG.prepare(
     `INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES
@@ -433,9 +424,7 @@ describe("lines added with no reference (AQU-1493)", () => {
         ('pa','f1','n1','source','s','e-pa',1,NULL,'x1')`,
     ).run()
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, target_lang, cells_total, deadline, created_by, created_at, unassigned_at, completed_at) VALUES
-        ('as-gen-only', 'pa', 2, 'cells', 'Genesis', '', 2, NULL, 1, 2000, NULL, NULL),
-        ('as-added-exo', 'pa', 3, 'cells', 'added', '', 1, NULL, 1, 2100, NULL, NULL)`,
+      `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, cells_total, deadline, created_by, created_at, unassigned_at, completed_at) VALUES ('as-gen-only', 'pa', 2, 'cells', 'Genesis', 2, NULL, 1, 2000, NULL, NULL), ('as-added-exo', 'pa', 3, 'cells', 'added', 1, NULL, 1, 2100, NULL, NULL)`,
     ).run()
     await env.AQUILLA_PG.prepare(
       `INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES

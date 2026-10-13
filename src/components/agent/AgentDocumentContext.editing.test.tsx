@@ -83,7 +83,7 @@ describe("AgentDocumentContext uses the live editor contract", () => {
     render(<AgentDocumentContext workspace={data} />)
     const surface = await activateEditor()
     act(() => { surface.editor.commands.setContent("Completed translation") })
-    await waitFor(() => expect(data.onCommitTarget).toHaveBeenCalledTimes(1), { timeout: 5_000 })
+    await waitFor(() => expect(data.onCommitTarget).toHaveBeenCalledTimes(1))
     await act(async () => { await Promise.resolve() })
     expect(data.onCellValidated).not.toHaveBeenCalled()
     act(() => { fireEvent.blur(surface) })

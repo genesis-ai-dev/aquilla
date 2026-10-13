@@ -58,9 +58,12 @@ bibleCheck.post(
       return c.json(err, status)
     }
 
+    // AQU-1610: the lane the check is about; the context's concepts are
+    // scoped to it the same way the pairs are (renderings are per lane).
+    const lane = { targetLang: body.targetLang ?? "" }
     const [ctx, pairs] = await Promise.all([
-      loadProjectContext(db, projectId),
-      selectCellPairs(db, projectId, { fileId: body.fileId, targetLang: body.targetLang ?? "" }),
+      loadProjectContext(db, projectId, lane),
+      selectCellPairs(db, projectId, { fileId: body.fileId, ...lane }),
     ])
     // The wave's own loader: a layer whose insides do not compile is `invalid`, not a 500.
     const bible = await prepareBibleWave(

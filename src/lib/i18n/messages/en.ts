@@ -50,7 +50,9 @@ import { harmonizer } from "../namespaces/harmonizer"
 import { bibleData } from "../namespaces/bibleData"
 import { languageProfile } from "../namespaces/languageProfile"
 import { projectDecisions } from "../namespaces/projectDecisions"
+import { bibleAlignment } from "../namespaces/bibleAlignment"
 import { bibleChecks } from "../namespaces/bibleChecks"
+import { bibleHelps } from "../namespaces/bibleHelps"
 import { bibleParticipants } from "../namespaces/bibleParticipants"
 import type { MessageValue } from "../plurals"
 
@@ -86,7 +88,9 @@ export const en = {
   ...bibleData.keys,
   ...languageProfile.keys,
   ...projectDecisions.keys,
+  ...bibleAlignment.keys,
   ...bibleChecks.keys,
+  ...bibleHelps.keys,
   ...bibleParticipants.keys,
 } as const
 

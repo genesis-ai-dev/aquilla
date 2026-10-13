@@ -13,6 +13,7 @@ import {
   planFileOrderReset,
   type SortIndexWrite,
 } from "@/lib/sidebar/file-sort-index"
+import { planFileRegroup, type FileRegroupPlan } from "@/lib/sidebar/file-regroup"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -24,8 +25,13 @@ import {
   FileListRow,
   FileReorderDnd,
   GroupFileRows,
+  type GroupDropState,
 } from "./file-list-dnd"
-import { readSidebarGroup, resolveSidebarFileDrop } from "./file-list-dnd-model"
+import {
+  readSidebarGroup,
+  resolveSidebarFileDrop,
+  type SidebarFileDrop,
+} from "./file-list-dnd-model"
 import { FileSectionGrid } from "./sidebar/FileSectionGrid"
 import { cn } from "@/lib/utils"
 import {
@@ -57,6 +63,56 @@ interface CorpusGroupForReset {
 
 /** Stable empty set, so an omitted `assignedFileIds` doesn't allocate per render. */
 const EMPTY_ASSIGNED: ReadonlySet<string> = new Set<string>()
+
+/**
+ * AQU-1702: what the group under the pointer is showing mid-drag.
+ *
+ * `refusal` names why the drop cannot be written, and is what decides between
+ * the drop-target ring and the refusal message:
+ *   * `derived-group` — the file would be filed under `landsIn` and not here
+ *     (a Bible book dropped on Ungrouped goes back to its testament);
+ *   * `unsupported` — this list was given no `onMoveFileToGroup`, so changing
+ *     a file's group is still "Move to corpus…" only.
+ */
+interface DropPreview {
+  group: string
+  /** Slot inside `group`, for the insertion line. Null on a refusal, and when
+   *  the pointer is on the group rather than one of its rows (lands at the end). */
+  toPosition: number | null
+  refusal: "derived-group" | "unsupported" | null
+  /** The group the file would actually land in, on a `derived-group` refusal. */
+  landsIn: string | null
+}
+
+/** The preview a resolved drop produces, or null when no group is involved. */
+function previewDrop(
+  resolution: SidebarFileDrop,
+  plan: (r: Extract<SidebarFileDrop, { kind: "regroup" }>) => FileRegroupPlan | null,
+): DropPreview | null {
+  if (resolution.kind !== "regroup") return null
+  const planned = plan(resolution)
+  if (planned === null) {
+    return { group: resolution.group, toPosition: null, refusal: "unsupported", landsIn: null }
+  }
+  if (!planned.ok) {
+    return {
+      group: resolution.group,
+      toPosition: null,
+      refusal: planned.reason,
+      landsIn: planned.landsIn,
+    }
+  }
+  return { group: resolution.group, toPosition: resolution.toPosition, refusal: null, landsIn: null }
+}
+
+/** Equality, so a pointer move inside the same slot is not a re-render. */
+function sameDropPreview(a: DropPreview | null, b: DropPreview | null): boolean {
+  if (a === null || b === null) return a === b
+  return a.group === b.group
+    && a.toPosition === b.toPosition
+    && a.refusal === b.refusal
+    && a.landsIn === b.landsIn
+}
 
 interface Props {
   projectId: string
@@ -131,6 +187,21 @@ interface Props {
    * positions computed here — the arithmetic lives in one tested module.
    */
   onReorderFiles?: (writes: SortIndexWrite[]) => void
+  /**
+   * AQU-1702: move a file into a DIFFERENT corpus group — the group change
+   * and the slot inside the new group, which are two events (`file.corpus.set`
+   * and `file.reorder`) and have to land together or the file appears to jump
+   * somewhere nobody dropped it.
+   *
+   * Omitting it leaves a cross-group drag refused, the way it was before this
+   * existed, rather than silently dropping half the move.
+   */
+  onMoveFileToGroup?: (move: {
+    fileId: string
+    /** Null clears the marker back to Ungrouped. */
+    corpusMarker: string | null
+    writes: SortIndexWrite[]
+  }) => void
 }
 
 export function ExpandableFileList({
@@ -143,6 +214,7 @@ export function ExpandableFileList({
   filterFocus,
   canReorderFiles = false,
   onReorderFiles,
+  onMoveFileToGroup,
 }: Props) {
   const t = useT()
   const { expanded, toggle } = useSidebarExpansion(projectId)
@@ -204,17 +276,41 @@ export function ExpandableFileList({
   // of the group to the end. Reordering a list you can only partly see is also
   // not a thing anyone means to do.
   const reorderEnabled = canReorderFiles && onReorderFiles !== undefined && filter.trim() === ""
+  // AQU-1702: a cross-group drag writes the group AND the slot, so it needs
+  // the handler that can do both. Without it the gesture stays refused.
+  const crossGroupEnabled = reorderEnabled && onMoveFileToGroup !== undefined
   const [drag, setDrag] = useState<{ fileId: string; group: string } | null>(null)
-  const [refusedGroup, setRefusedGroup] = useState<string | null>(null)
+  const [drop, setDrop] = useState<DropPreview | null>(null)
   const [resetGroup, setResetGroup] = useState<CorpusGroupForReset | null>(null)
 
   function endDrag() {
     setDrag(null)
-    setRefusedGroup(null)
+    setDrop(null)
   }
 
   function submit(writes: SortIndexWrite[]) {
     if (writes.length > 0) onReorderFiles?.(writes)
+  }
+
+  /**
+   * What a cross-group drop would write, or null when this list cannot do one
+   * at all (no handler, or the drag left the file list). The arithmetic and
+   * the refusal both come from `planFileRegroup`, so the preview under the
+   * pointer and the write on release are the same decision.
+   */
+  function planRegroup(
+    resolution: Extract<SidebarFileDrop, { kind: "regroup" }>,
+  ): FileRegroupPlan | null {
+    if (!crossGroupEnabled) return null
+    const file = files.find((f) => f.id === resolution.fileId)
+    const target = groups.find((group) => group.label === resolution.group)
+    if (!file || !target) return null
+    return planFileRegroup({
+      file,
+      targetGroup: target.label,
+      targetFiles: target.files.filter((f) => f.id !== file.id),
+      toPosition: resolution.toPosition,
+    })
   }
 
   function handleDragStart(event: DragStartEvent) {
@@ -225,13 +321,25 @@ export function ExpandableFileList({
 
   function handleDragOver(event: DragOverEvent) {
     const resolution = resolveSidebarFileDrop(event.active, event.over)
-    const next = resolution.kind === "refuse" ? resolution.group : null
-    setRefusedGroup((current) => current === next ? current : next)
+    const next = previewDrop(resolution, planRegroup)
+    setDrop((current) => sameDropPreview(current, next) ? current : next)
   }
 
   function handleDragEnd(event: DragEndEvent) {
     const resolution = resolveSidebarFileDrop(event.active, event.over)
     endDrag()
+    if (resolution.kind === "regroup") {
+      const plan = planRegroup(resolution)
+      // A refusal has already said why, under the pointer. Writing nothing
+      // is the whole point of it.
+      if (plan === null || !plan.ok) return
+      onMoveFileToGroup?.({
+        fileId: resolution.fileId,
+        corpusMarker: plan.corpusMarker,
+        writes: plan.writes,
+      })
+      return
+    }
     if (resolution.kind !== "move") return
     const target = groups.find((group) => group.label === resolution.group)
     if (!target) return
@@ -337,11 +445,30 @@ export function ExpandableFileList({
             const canEditCorpus =
               showHeader && group.label !== "Ungrouped" && onRenameCorpus !== undefined && !group.derived
             const isEditingCorpus = editingCorpus === group.label
-            // AQU-1569: a group of one has nothing to reorder, and "Reset
-            // order" only means something once a file in it has been placed.
+            // AQU-1569: a group of one has nothing to reorder INSIDE it, and
+            // "Reset order" only means something once a file in it has been
+            // placed. AQU-1702: its one file can still be dragged OUT, so the
+            // grip is offered whenever there is another group to drag it to.
             const canReorderGroup = reorderEnabled && group.files.length > 1
+            const canDragFromGroup =
+              canReorderGroup || (crossGroupEnabled && groups.length > 1)
             const canResetGroup = reorderEnabled && hasPlacedFiles(group.files)
-            const isRefusing = refusedGroup === group.label
+            // Every group is a slotted drop target while reordering is on —
+            // including a group of one, which a file from elsewhere can land
+            // above or below.
+            const rowsSortable = reorderEnabled
+            const preview = drop?.group === group.label ? drop : null
+            const dropState: GroupDropState =
+              preview === null ? null : preview.refusal ? "refused" : "target"
+            const dropMessage = preview === null ? null
+              : preview.refusal === "derived-group"
+                ? t("nav.fileList.regroupStaysInGroup", {
+                    name: draggedName,
+                    group: preview.landsIn ?? "",
+                  })
+                : preview.refusal === "unsupported"
+                  ? t("nav.fileList.reorderWrongGroup")
+                  : t("nav.fileList.regroupHint", { name: draggedName, group: displayLabel })
             // A project whose files are all ungrouped shows no header
             // (showHeader is false), but its one group can still be given an
             // order — so the control cannot live only inside the header, or
@@ -369,13 +496,14 @@ export function ExpandableFileList({
               </AppTooltip>
             )
             return (
-              // The group is the drop boundary. Hovering its header, or any
-              // other group, is a refusal — a file does not change corpus by
-              // being dragged. That stays "Move to corpus…", which asks first.
+              // The group is the drop boundary: dropping a file inside it
+              // reorders, dropping it on another group moves it there
+              // (AQU-1702). "Move to corpus…" is the same move without a drag.
               <CorpusGroupFrame
                 key={group.label}
                 droppable={reorderEnabled}
                 label={group.label}
+                dropState={dropState}
                 groupRef={(el) => {
                   if (el) groupEls.current.set(group.label, el)
                   else groupEls.current.delete(group.label)
@@ -438,21 +566,22 @@ export function ExpandableFileList({
                     {resetOrderButton}
                   </div>
                 )}
-                {isRefusing && (
-                  // The refusal has to be visible, not just a cursor shape:
-                  // a drop that silently does nothing is indistinguishable
-                  // from a drop that failed. Shown even on a collapsed group,
-                  // where there are no rows to carry the message otherwise.
+                {dropMessage !== null && (
+                  // What the drop will do, in words — the ring alone cannot
+                  // say "this one is refused, and here is why", and a drop
+                  // that silently does nothing is indistinguishable from a
+                  // drop that failed. Shown even on a collapsed group, where
+                  // there are no rows to carry the message otherwise.
                   <p
                     role="status"
                     className="mx-1 mb-1 rounded-md bg-muted px-2 py-1 text-[10px] leading-snug text-muted-foreground"
                   >
-                    {t("nav.fileList.reorderWrongGroup")}
+                    {dropMessage}
                   </p>
                 )}
                 {!isCollapsed && (
                   <GroupFileRows
-                    sortable={canReorderGroup}
+                    sortable={rowsSortable}
                     label={group.label}
                     fileIds={group.files.map((file) => file.id)}
                   >
@@ -463,15 +592,16 @@ export function ExpandableFileList({
                       const isEditing = editingFileId === file.id
                       // Not while renaming: the row holds a text input, and a
                       // drag ancestor takes the pointer away from selecting inside it.
-                      const isDraggable = canReorderGroup && !isEditing
+                      const isDraggable = canDragFromGroup && !isEditing
                       return (
                         <FileListRow
                           key={file.id}
-                          sortable={canReorderGroup}
+                          sortable={rowsSortable}
                           id={file.id}
                           group={group.label}
                           draggable={isDraggable}
                           handleLabel={isDraggable ? t("nav.fileList.reorderHandle", { name: file.name }) : null}
+                          insertBefore={preview !== null && preview.refusal === null && preview.toPosition === position}
                         >
                           <div
                             onPointerEnter={() => prefetchFileProgress(projectId, file.id, getTokenForFile)}

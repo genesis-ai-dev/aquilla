@@ -16,6 +16,7 @@ import {
   type BuildProjectExportDeps,
 } from "./build-project-export"
 import type { EgressFileRef, EgressOptions, EgressProjectSelection } from "./types"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const cell = (over: Partial<CellData> = {}): CellData => ({
   id: "c1", fileId: "f1", original: "Hello", translated: "Bonjour", context: "", group: "",
@@ -78,7 +79,7 @@ const makeDeps = (over: Partial<BuildProjectExportDeps> = {}): BuildProjectExpor
     rawOriginal: true,
   }),
   fetchInjectedText: async ({ fileId, targetLang }) => `\\id ${fileId} lane=${targetLang ?? "default"}`,
-  assembleAudio: async () => ({ entries: [], skipped: [] }),
+  assembleAudio: async () => ({ entries: [], skipped: [], peakPcmBytes: 0 }),
   exportDocxFn: async () => ({ blob: new Blob(["DOCX-INJECTED"]) }),
   exportPptxFn: async () => ({ blob: new Blob(["PPTX-INJECTED"]) }),
   exportIdmlFn: async () => ({ blob: new Blob(["IDML-INJECTED"]) }),
@@ -211,6 +212,7 @@ describe("buildProjectExport — source docs, audio, dedupe", () => {
       {
         entries: [{ name: "000_c1_Mary.wav", data: new Blob(["wav"]) }],
         skipped: [{ cellId: "c2", reason: "empty audio clip" }],
+        peakPcmBytes: 0,
       },
       {
         entries: [],
@@ -218,6 +220,7 @@ describe("buildProjectExport — source docs, audio, dedupe", () => {
           { cellId: "c1", reason: "no audio" },
           { cellId: "c2", reason: "no audio" },
         ],
+        peakPcmBytes: 0,
       },
     ]
     let call = 0
@@ -297,7 +300,7 @@ describe("buildProjectExport — source docs, audio, dedupe", () => {
     const assembleAudio = vi.fn(async (args: AudioAssemblyArgs): Promise<AudioAssemblyResult> => {
       // The merged listing must reach the assembler through the cells.
       expect(args.cells[0].selectedAudioId).toBe("a1")
-      return { entries: [], skipped: [] }
+      return { entries: [], skipped: [], peakPcmBytes: 0 }
     })
     await buildProjectExport(
       sel([{ id: "f1", name: "GEN.SFM", type: "usfm" }]),
@@ -328,7 +331,7 @@ describe("buildProjectExport — source docs, audio, dedupe", () => {
       makeDeps({
         audioListings: new Map([["f1", listingWith("c1", "a1")]]),
         fetchAudioAttachments,
-        assembleAudio: async () => ({ entries: [], skipped: [] }),
+        assembleAudio: async () => ({ entries: [], skipped: [], peakPcmBytes: 0 }),
       }),
     )
     expect(fetchAudioAttachments.mock.calls.map((c) => c[3])).toEqual(["fr", "de"])
@@ -346,7 +349,7 @@ describe("buildProjectExport — source docs, audio, dedupe", () => {
           if (fileId === "f1") throw new Error("audio-attachments failed: HTTP 500")
           return { cells: {} }
         },
-        assembleAudio: async () => ({ entries: [], skipped: [] }),
+        assembleAudio: async () => ({ entries: [], skipped: [], peakPcmBytes: 0 }),
       }),
     )
     expect(entries).toEqual([])
@@ -394,8 +397,8 @@ describe("buildProjectExport — transient-failure classification (cache poisoni
 
   it("per-clip 'audio failed:' skips from the assembler are transient; 'no audio' is not", async () => {
     const outcomes: AudioAssemblyResult[] = [
-      { entries: [], skipped: [{ cellId: "c1", reason: "no audio" }] },
-      { entries: [], skipped: [{ cellId: "c1", reason: "audio failed: HTTP 502" }] },
+      { entries: [], skipped: [{ cellId: "c1", reason: "no audio" }], peakPcmBytes: 0 },
+      { entries: [], skipped: [{ cellId: "c1", reason: "audio failed: HTTP 502" }], peakPcmBytes: 0 },
     ]
     for (const [i, outcome] of outcomes.entries()) {
       const { hadTransientFailures } = await buildProjectExport(
@@ -526,7 +529,7 @@ describe("buildProjectExport — file×lane fetch concurrency", () => {
 
     let finished = 0
     while (finished < totalUnits) {
-      await vi.waitFor(() => expect(pendingReleases).toHaveLength(4))
+      await vi.waitFor(() => expect(pendingReleases).toHaveLength(4), { timeout: STALL_WATCHDOG_MS })
       await new Promise((r) => setTimeout(r, 0))
       expect(pendingReleases).toHaveLength(4)
       expect(inFlight).toBe(4)
@@ -582,7 +585,7 @@ describe("buildProjectExport — file×lane fetch concurrency", () => {
       makeDeps({ loadCellFiles }),
     )
 
-    await vi.waitFor(() => expect(releases.size).toBe(4))
+    await vi.waitFor(() => expect(releases.size).toBe(4), { timeout: STALL_WATCHDOG_MS })
     for (const key of ["fr:fast", "de:fast", "fr:slow", "de:slow"]) releases.get(key)!()
 
     const { entries, report } = await pending

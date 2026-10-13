@@ -1764,3 +1764,17 @@ describe("GET/POST board-changes", () => {
     expect(res.status).toBe(403)
   })
 })
+
+describe("GET /api/v2/monday/orgs/:orgId/links", () => {
+  it("lists the org's project links for a maintainer, and refuses a contributor", async () => {
+    await seedOrgProject()
+    await seedLink({ lastPushedAt: "now" })
+    const res = await request("anna", "GET", "/api/v2/monday/orgs/1/links")
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { links: Array<{ projectId: string; boardName: string; enabled: boolean; lastPushedAt: string | null }> }
+    expect(body.links).toHaveLength(1)
+    expect(body.links[0]).toMatchObject({ projectId: "proj-1", boardName: "Ruth Board", enabled: true })
+    expect(body.links[0]!.lastPushedAt).not.toBeNull()
+    expect((await request("tom", "GET", "/api/v2/monday/orgs/1/links")).status).toBe(403)
+  })
+})

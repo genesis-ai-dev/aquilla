@@ -315,6 +315,7 @@ export const settings = defineNamespace({
     "settings.monday.reconnectButton": "Reconnect",
     "settings.monday.connectedAsRow": "Connected as {username}",
     "settings.monday.connectedOnRow": "Connected {date}",
+    "settings.monday.connectedAsOnRow": "Connected as {username} on {date}",
     "settings.monday.disconnectButton": "Disconnect",
     "settings.monday.openMondayButton": "Open Monday.com",
     "settings.monday.manageRestrictedNotice": "Only org maintainers and owners can manage this connection.",
@@ -558,6 +559,14 @@ export const settings = defineNamespace({
         description:
           "Row on the Monday.com connection card giving the date the connection was made.",
         placeholders: {
+          date: "A locale-formatted date string (already localized by the caller before interpolation).",
+        },
+      },
+      "settings.monday.connectedAsOnRow": {
+        description:
+          "Row under the Monday.com account name on the connection card: who connected it and when.",
+        placeholders: {
+          username: "The connected Monday.com account's display username. Not translated.",
           date: "A locale-formatted date string (already localized by the caller before interpolation).",
         },
       },

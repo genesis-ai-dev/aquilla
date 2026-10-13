@@ -369,6 +369,25 @@ export async function addMondayColumns(
   }
 }
 
+/** One project's link, as Org settings → Monday.com lists it. */
+export interface MondayOrgProjectLink {
+  projectId: string
+  boardId: string
+  boardName: string | null
+  boardUrl: string | null
+  enabled: boolean
+  structureStale: boolean
+  lastPushedAt: string | null
+  lastPushStatus: string | null
+}
+
+/** GET /api/v2/monday/orgs/:orgId/links (org maintainer+). */
+export async function fetchMondayOrgLinks(jwt: string, orgId: number): Promise<MondayOrgProjectLink[]> {
+  const res = await fetch(`${AUTH_BASE}/api/v2/monday/orgs/${orgId}/links`, { headers: authHeaders(jwt) })
+  if (!res.ok) await readError(res, "error.monday.loadLink")
+  return ((await res.json()) as { links: MondayOrgProjectLink[] }).links
+}
+
 /** Columns on the linked board that weren't there when the link was saved. */
 export interface MondayBoardChanges {
   /** The server's verdict, saved on the link: true while anything is new. */

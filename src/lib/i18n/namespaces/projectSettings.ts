@@ -1181,8 +1181,14 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.orgProjectsLoading": "Loading projects…",
     "projectSettings.monday.orgProjectsRetry": "Retry projects",
     "projectSettings.monday.orgNoAccessibleProjects": "No accessible projects in this organization.",
-    "projectSettings.monday.orgSetUpOrManageBoard": "Set up or manage board",
-    "projectSettings.monday.orgViewIntegration": "View Monday integration",
+    "projectSettings.monday.orgProjectLinkedTo": "Linked to {board}",
+    "projectSettings.monday.orgProjectNotLinked": "Not linked yet",
+    "projectSettings.monday.orgProjectSetUp": "Set up",
+    "projectSettings.monday.orgProjectManageInSettings": "Manage in project settings",
+    "projectSettings.monday.orgProjectViewInSettings": "View in project settings",
+    "projectSettings.monday.orgProjectSyncPaused": "Sync paused",
+    "projectSettings.monday.orgProjectBoardChanged": "Board changed",
+    "projectSettings.monday.orgProjectPushFailed": "Last push failed",
     "projectSettings.monday.boardSyncLabel": "Board sync",
     "projectSettings.monday.loadingIntegration": "Loading Monday integration…",
     "projectSettings.monday.orgNotConnected": "Your organization hasn't connected Monday.com yet.",
@@ -2259,6 +2265,31 @@ export const projectSettings = defineNamespace({
       },
       "projectSettings.monday.chooser.groupTeam": {
         description: "Group heading in the Monday.com column checklist for people and recent activity.",
+      },
+      "projectSettings.monday.orgProjectLinkedTo": {
+        description: "Under a project's name in Org settings → Monday.com: the Monday board the project pushes to.",
+        placeholders: { board: "The Monday board's name (Monday data, not translated)." },
+      },
+      "projectSettings.monday.orgProjectNotLinked": {
+        description: "Under a project's name in Org settings → Monday.com when the project has no board yet.",
+      },
+      "projectSettings.monday.orgProjectSetUp": {
+        description: "Button beside an unlinked project in Org settings → Monday.com. Opens the board setup right there, without leaving org settings.",
+      },
+      "projectSettings.monday.orgProjectManageInSettings": {
+        description: "Link beside a linked project in Org settings → Monday.com. Leaves org settings for that project's own settings page, where the mapping and Sync live.",
+      },
+      "projectSettings.monday.orgProjectViewInSettings": {
+        description: "Link beside a project the viewer can't manage, in Org settings → Monday.com. Leaves org settings for that project's settings page.",
+      },
+      "projectSettings.monday.orgProjectSyncPaused": {
+        description: "Small tag beside a linked project in Org settings → Monday.com when its Sync switch is off.",
+      },
+      "projectSettings.monday.orgProjectBoardChanged": {
+        description: "Small tag beside a linked project in Org settings → Monday.com when its board has new columns to review.",
+      },
+      "projectSettings.monday.orgProjectPushFailed": {
+        description: "Small tag beside a linked project in Org settings → Monday.com when its last push to Monday failed.",
       },
       "projectSettings.monday.boardChangesIntro": {
         description: "Amber banner on a linked Monday board listing columns someone added on Monday since the link was saved; each listed column has 'Map it' and 'Not needed' buttons.",

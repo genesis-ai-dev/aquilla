@@ -94,6 +94,11 @@ contract beyond "maintainer can, member can view":
 - `PUT /projects/:projectId/link` and `PATCH /projects/:projectId/link` return
   `{ link, warnings }`. Both settings paths (the manual one and "Set up with
   AI") show the warnings.
+- `GET /orgs/:orgId/links` (org maintainer+) lists each project's link for
+  Org settings → Monday.com: board, Sync on or off, board changed, last push.
+  That page sets up an unlinked project in place, with the same setup steps
+  as project settings; everything else about a link stays in project
+  settings, and the row's link says so ("Manage in project settings").
 - `POST /projects/:projectId/sync` pushes now. It refuses (409) while the
   link's Sync switch is off. Turning the switch back on (PATCH `{ enabled: true }`)
   pushes straight away and returns the result as `push`: edits made while it

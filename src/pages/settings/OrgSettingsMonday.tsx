@@ -9,7 +9,7 @@
 // also hears how it ended (lib/monday/oauth-return.ts).
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Link, useSearchParams } from "react-router-dom"
+import { useSearchParams } from "react-router-dom"
 import { Check, CheckCircle2, Copy, ExternalLink, XCircle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -45,6 +45,7 @@ import { isTauriRuntime } from "@/lib/offline/is-tauri"
 import { openExternal } from "@/lib/open-external"
 import { ORG_SETTINGS_SECTION_DESCRIPTIONS, ORG_SETTINGS_SECTION_TITLES } from "./constants"
 import { OrgSettingsDetailPage } from "./OrgSettingsDetailPage"
+import { OrgMondayProjectLinks } from "./OrgMondayProjectLinks"
 
 /** The connected Monday account's home (falls back to monday.com). */
 function mondayAccountUrl(slug: string | null | undefined): string {
@@ -186,6 +187,18 @@ export function OrgSettingsMonday() {
   }, [jwt, activeOrgId])
 
   const connected = connection?.connected === true
+  const connectedBy = connection?.account?.userName
+  const connectedAt = connection?.createdAt
+  const connectedDate = connectedAt ? fmtShortCalendarDate(connectedAt, undefined, locale) : ""
+  const connectedRow = connectedAt ? (
+    <DateTooltip value={connectedAt} label={t("common.date.created")}>
+      {connectedBy
+        ? t("settings.monday.connectedAsOnRow", { username: connectedBy, date: connectedDate })
+        : t("settings.monday.connectedOnRow", { date: connectedDate })}
+    </DateTooltip>
+  ) : connectedBy ? (
+    t("settings.monday.connectedAsRow", { username: connectedBy })
+  ) : null
 
   return (
     <OrgSettingsDetailPage
@@ -266,51 +279,29 @@ export function OrgSettingsMonday() {
                   )}
                 </div>
               )}
-              <div className="space-y-1 text-sm">
-                {connection?.account?.slug && (
-                  <p>
-                    {t("auth.resetPassword.accountPrefix")}{" "}
-                    <a
-                      href={mondayAccountUrl(connection.account.slug)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 font-medium underline-offset-4 hover:underline"
-                    >
-                      {connection.account.slug}
-                      <ExternalLink className="size-3.5" aria-hidden="true" />
-                    </a>
-                  </p>
-                )}
-                {connection?.account?.userName && (
-                  <p className="text-muted-foreground">
-                    {t("settings.monday.connectedAsRow", { username: connection.account.userName })}
-                  </p>
-                )}
-                {connection?.createdAt && (
-                  <p className="text-xs text-muted-foreground">
-                    <DateTooltip value={connection.createdAt} label={t("common.date.created")}>
-                      {t("settings.monday.connectedOnRow", {
-                        date: fmtShortCalendarDate(connection.createdAt, undefined, locale),
-                      })}
-                    </DateTooltip>
-                  </p>
-                )}
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <a
-                  href={mondayAccountUrl(connection?.account?.slug)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={buttonVariants({ variant: "outline" })}
-                >
-                  <ExternalLink data-icon="inline-start" />
-                  {t("settings.monday.openMondayButton")}
-                </a>
-                {canManage && (
-                  <Button variant="destructive" onClick={() => setConfirmOpen(true)} disabled={busy}>
-                    {t("settings.monday.disconnectButton")}
-                  </Button>
-                )}
+              {/* Who and when on the left, the two actions on the right; one
+                  link to Monday (the button), not a second one on the name. */}
+              <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+                <div className="min-w-0 space-y-0.5 text-sm">
+                  {connection?.account?.slug && <p className="font-medium">{connection.account.slug}</p>}
+                  {connectedRow && <p className="text-muted-foreground">{connectedRow}</p>}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <a
+                    href={mondayAccountUrl(connection?.account?.slug)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={buttonVariants({ variant: "outline" })}
+                  >
+                    <ExternalLink data-icon="inline-start" />
+                    {t("settings.monday.openMondayButton")}
+                  </a>
+                  {canManage && (
+                    <Button variant="destructive" onClick={() => setConfirmOpen(true)} disabled={busy}>
+                      {t("settings.monday.disconnectButton")}
+                    </Button>
+                  )}
+                </div>
               </div>
               {!canManage && (
                 <p className="text-xs text-muted-foreground">
@@ -360,14 +351,14 @@ export function OrgSettingsMonday() {
               </div>
             ) : accessibleProjects.filter(project => project.orgId === activeOrgId).length === 0 ? (
               <p>{t("projectSettings.monday.orgNoAccessibleProjects")}</p>
-            ) : accessibleProjects.filter(project => project.orgId === activeOrgId).map(project => (
-              <div key={project.id} className="flex items-center justify-between gap-3 rounded-lg border p-3">
-                <span className="font-medium">{project.name}</span>
-                <Link to={`/project/${project.id}/settings/integrations#section-monday`} className="text-sm underline">
-                  {project.role.level >= ROLE.MAINTAINER ? t("projectSettings.monday.orgSetUpOrManageBoard") : t("projectSettings.monday.orgViewIntegration")}
-                </Link>
-              </div>
-            ))}
+            ) : activeOrgId != null ? (
+              <OrgMondayProjectLinks
+                orgId={activeOrgId}
+                jwt={jwt}
+                canManageOrg={canManage}
+                projects={accessibleProjects.filter((project) => project.orgId === activeOrgId)}
+              />
+            ) : null}
           </CardContent>
         </Card>
       )}

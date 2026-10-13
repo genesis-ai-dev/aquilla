@@ -6,6 +6,7 @@
 //   DELETE /orgs/:orgId/connection            org maintainer+ — disconnect (cascades links)
 //   GET    /orgs/:orgId/boards                org maintainer+ — board picker proxy
 //   GET    /orgs/:orgId/boards/:boardId/structure  org maintainer+
+//   GET    /orgs/:orgId/links                 org maintainer+ — each project's link, for org settings
 //   GET    /projects/:projectId/link          any project member
 //   PUT    /projects/:projectId/link          project maintainer+ — create/replace link
 //   PATCH  /projects/:projectId/link          project maintainer+ — enabled/config
@@ -427,6 +428,35 @@ monday.get("/orgs/:orgId/boards/:boardId/structure", authMiddleware, async (c) =
     name: structure.name ?? null,
     columns: structure.columns.map(({ id, title, type }) => ({ id, title, type })),
     groups: structure.groups,
+  })
+})
+
+/**
+ * Every project in the org with a Monday link, for the org settings list
+ * ("link your projects"): which board, whether Sync is on, the last push.
+ * Org maintainers only, like the board list: board names are the org's
+ * business, not every member's.
+ */
+monday.get("/orgs/:orgId/links", authMiddleware, async (c) => {
+  const guard = await orgGuard(c, MANAGE_MIN_ROLE)
+  if (guard instanceof Response) return guard
+  const rows = await c.env.AQUILLA_PG.prepare(
+    `SELECT l.* FROM integration_links l JOIN projects p ON p.id = l.project_id
+      WHERE p.org_id = ? AND l.provider = ?`,
+  )
+    .bind(guard.orgId, PROVIDER)
+    .all<IntegrationLinkRow>()
+  return c.json({
+    links: (rows.results ?? []).map((link) => ({
+      projectId: link.project_id,
+      boardId: link.external_id,
+      boardName: link.external_name,
+      boardUrl: parseJsonColumn<MondayBoardStructure | null>(link.remote_state, null)?.url ?? null,
+      enabled: link.enabled,
+      structureStale: link.remote_state_stale,
+      lastPushedAt: link.last_pushed_at,
+      lastPushStatus: link.last_push_status,
+    })),
   })
 })
 

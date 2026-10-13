@@ -15196,6 +15196,18 @@ export function ProjectWorkspace() {
             // against those, into that lane (the dialog's targetLang follows).
             laneOptions: fileImportLaneOptions,
             onLaneChange: setActiveLane,
+            // AQU-1673: "Stage as proposals for review" writes nothing, so
+            // there is nothing to revalidate — the only job here is telling
+            // the user where the proposals went.
+            onProposalsStaged: ({ stagedCount, skippedUnchangedCount }) => {
+              toast.add({
+                title: t("importExport.proposals.staged", { count: stagedCount }),
+                description:
+                  skippedUnchangedCount > 0
+                    ? t("importExport.proposals.skippedUnchanged", { count: skippedUnchangedCount })
+                    : undefined,
+              })
+            },
           }}
           linkSource={{
             // AQU-1527: the Import dialog's "From another project" tile runs

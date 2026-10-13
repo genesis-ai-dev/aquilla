@@ -1,4 +1,4 @@
-import { defineNamespace } from "./types"
+import { defineNamespace, plural } from "./types"
 
 /**
  * `bibleData` namespace (AQU-1686): the Bible data enrichments inside the
@@ -10,6 +10,11 @@ import { defineNamespace } from "./types"
  * The hints under the switch stay in `projectSettings.bible.*` either way.
  * Enrichment ids map to these keys through the typed tables in
  * src/lib/bible-data/enrichment-labels.ts.
+ *
+ * AQU-1687 adds `bibleData.voices.*` (the voice chip, its popover, the
+ * speech rails and the "Show every line by …" filter in the editor) and
+ * `bibleData.view.*` (View settings → Bible data). Pack enums map to these
+ * keys through the typed tables in src/components/bible-data/voice-text.ts.
  */
 export const bibleData = defineNamespace({
   keys: {
@@ -75,16 +80,80 @@ export const bibleData = defineNamespace({
     "bibleData.source.acai.short": "ACAI",
     "bibleData.source.unfoldingword.name": "unfoldingWord TN/TQ/TW",
     "bibleData.source.unfoldingword.short": "unfoldingWord",
+
+    // ── Voices: the chip in each Bible cell (AQU-1687) ──
+    "bibleData.voices.narrator": "Narrator",
+    "bibleData.voices.author": "Author",
+    "bibleData.voices.unknownSpeaker": "Unknown speaker",
+    "bibleData.voices.more": "+{count}",
+    "bibleData.voices.chipAria": "Who is speaking: {voices}",
+    "bibleData.voices.chipAriaApproximate": "Who is speaking in this verse: {voices}",
+    "bibleData.voices.speaksTo": "{speaker} to {addressee}",
+    "bibleData.voices.moreVoices": plural({
+      one: "{count} more speaker",
+      other: "{count} more speakers",
+    }),
+
+    // ── Voices: the chip's popover ──
+    "bibleData.voices.popoverTitle": "Who is speaking",
+    "bibleData.voices.type.dialogue": "Conversation",
+    "bibleData.voices.type.normal": "Speech",
+    "bibleData.voices.type.quotation": "Quotation (of scripture or a source)",
+    "bibleData.voices.type.hypothetical": "Imagined speech",
+    "bibleData.voices.type.implicit": "Implied speech",
+    "bibleData.voices.delivery": "Delivery: {delivery}",
+    "bibleData.voices.level": "Quote level {level}",
+    "bibleData.voices.speakerEvidence": "Speaker: {confidence} sure, from {sources}",
+    "bibleData.voices.addresseeEvidence": "Listener: {confidence} sure, from {sources}",
+    "bibleData.voices.evidence.macula1p": "Macula (first-person pronouns)",
+    "bibleData.voices.evidence.macula2p": "Macula (second-person pronouns)",
+    "bibleData.voices.evidence.maculaA2": "Macula (the verb's listener)",
+    "bibleData.voices.namesHeading": "Where these names come from",
+    "bibleData.voices.labelSource.terminology": "From your terminology",
+    "bibleData.voices.labelSource.acai": "From ACAI",
+    "bibleData.voices.labelSource.acaiOtherScript": "From ACAI, in Traditional characters",
+    "bibleData.voices.labelSource.generated": "Generated, not yet reviewed",
+    "bibleData.voices.labelSource.english": "In English",
+    "bibleData.voices.approximate":
+      "Approximate: this cell holds only part of its verse, so it shows the whole verse's speakers.",
+    "bibleData.voices.showLinesBy": "Show every line by {speaker}",
+
+    // ── Voices: the "Show every line by …" filter ──
+    "bibleData.voices.filter.summary": plural({
+      one: "Showing {count} line by {speaker}",
+      other: "Showing {count} lines by {speaker}",
+    }),
+    "bibleData.voices.filter.clear": "Show all lines",
+
+    // ── Voices: speech rails (screen-reader text) ──
+    "bibleData.voices.rail.begins": "Speech by {speaker} begins",
+    "bibleData.voices.rail.continues": "Speech by {speaker} continues",
+    "bibleData.voices.rail.ends": "Speech by {speaker} ends",
+    "bibleData.voices.rail.beginsAndEnds": "Speech by {speaker} begins and ends",
+
+    // ── View settings → Bible data ──
+    "bibleData.view.voiceChips": "Voice chips",
+    "bibleData.view.speechRails": "Speech rails",
+    "bibleData.view.labelLanguage": "Label language",
+    "bibleData.view.labelLanguage.project": "Project names",
+    "bibleData.view.labelLanguage.interface": "Interface language",
+    "bibleData.view.labelLanguage.english": "English names",
   },
   context: {
     _context: {
       description:
-        "The 'Bible data' card in project Settings → General: a list of optional " +
-        "Bible data features ('enrichments') under the card's main switch, and a " +
-        "dialog that credits the open datasets the data comes from. Read by a " +
-        "project maintainer deciding what translators see. Dataset and organization " +
-        "names (Macula, Clear-Bible, OpenText, ACAI, BibleAquifer, unfoldingWord, " +
-        "bibletranslation.org) are proper names: keep them in Latin script, untranslated.",
+        "Bible data: open datasets about the Bible text. Two surfaces. (1) The 'Bible " +
+        "data' card in project Settings → General: a list of optional Bible data " +
+        "features ('enrichments') under the card's main switch, and a dialog that " +
+        "credits the open datasets the data comes from. (2) In the translation editor, " +
+        "'Voices': a small chip on each Bible verse naming who speaks to whom " +
+        "('Narrator · Jesus → Samaritan woman'), a popover with details, thin lines " +
+        "('speech rails') at the edge of the verse that show where a quotation opens " +
+        "and closes, and the matching personal options in the editor's View settings. " +
+        "'Speaker' and 'voice' mean people speaking in the Bible text, never " +
+        "text-to-speech voices. Dataset and organization names (Macula, Clear-Bible, " +
+        "OpenText, ACAI, BibleAquifer, unfoldingWord, bibletranslation.org) are proper " +
+        "names: keep them in Latin script, untranslated.",
     },
     keys: {
       "bibleData.experiment.label": {
@@ -284,6 +353,258 @@ export const bibleData = defineNamespace({
         description:
           "Short name of the unfoldingWord resources, used inside the source chip. " +
           "A proper name, written with a lowercase 'u'.",
+      },
+
+      // ── AQU-1687: Voices ──
+      "bibleData.voices.narrator": {
+        description:
+          "In the voice chip of a Bible verse: the narrator of a Gospel or of Acts, the " +
+          "voice that tells the story between the quotations. A role in the text, not " +
+          "an audio or text-to-speech voice.",
+        maxLength: 16,
+      },
+      "bibleData.voices.author": {
+        description:
+          "In the voice chip of a verse in a letter (Romans, Hebrews …) or in " +
+          "Revelation: the writer of the book, who 'narrates' it. Not the author of a " +
+          "comment or of a translation.",
+        maxLength: 16,
+      },
+      "bibleData.voices.unknownSpeaker": {
+        description:
+          "In the voice chip and its popover, in place of a name when the data does not " +
+          "say who speaks a quotation.",
+        maxLength: 24,
+      },
+      "bibleData.voices.more": {
+        description:
+          "Very short count at the end of a voice chip when a verse has more speakers " +
+          "than the chip shows, e.g. 'Narrator · Jesus → Samaritan woman +1'.",
+        placeholders: { count: "How many more speakers the verse has. A number." },
+        maxLength: 6,
+      },
+      "bibleData.voices.chipAria": {
+        description:
+          "Screen-reader name of the voice chip, a button that opens details about who " +
+          "speaks in the verse.",
+        placeholders: {
+          voices:
+            "The voices in reading order, already joined as a list, e.g. 'Narrator, " +
+            "Jesus to Samaritan woman'.",
+        },
+      },
+      "bibleData.voices.chipAriaApproximate": {
+        description:
+          "Screen-reader name of the voice chip when the cell holds only part of a verse, " +
+          "so the chip lists the speakers of the whole verse.",
+        placeholders: {
+          voices: "The voices in reading order, already joined as a list.",
+        },
+      },
+      "bibleData.voices.speaksTo": {
+        description:
+          "One voice in words: who speaks, and to whom. Read by screen readers in place " +
+          "of the arrow the chip shows ('Jesus → Samaritan woman').",
+        placeholders: {
+          speaker: "The name of the person speaking.",
+          addressee: "The name of the person or group spoken to.",
+        },
+      },
+      "bibleData.voices.moreVoices": {
+        description:
+          "Screen-reader text for the '+N' at the end of a voice chip: how many more " +
+          "speakers the verse has than the chip shows.",
+        placeholders: { count: "How many more speakers. A number." },
+      },
+      "bibleData.voices.popoverTitle": {
+        description:
+          "Heading of the popover that opens from a verse's voice chip and lists each " +
+          "voice in the verse with its details.",
+      },
+      "bibleData.voices.type.dialogue": {
+        description:
+          "Kind of speech, in the voice popover: people talking with each other in the " +
+          "story (dialogue). Not a chat with the app.",
+      },
+      "bibleData.voices.type.normal": {
+        description:
+          "Kind of speech, in the voice popover: a speech or saying addressed to " +
+          "someone, without a reply in the same scene.",
+      },
+      "bibleData.voices.type.quotation": {
+        description:
+          "Kind of speech, in the voice popover: words quoted from scripture or from " +
+          "another written source.",
+      },
+      "bibleData.voices.type.hypothetical": {
+        description:
+          "Kind of speech, in the voice popover: words someone might say, or is imagined " +
+          "saying ('if anyone says to you …').",
+      },
+      "bibleData.voices.type.implicit": {
+        description:
+          "Kind of speech, in the voice popover: speech the text implies without " +
+          "quoting it word for word.",
+      },
+      "bibleData.voices.delivery": {
+        description:
+          "Line in the voice popover: how the line is spoken, as a dramatized audio " +
+          "Bible would perform it.",
+        placeholders: {
+          delivery:
+            "A short English note from the dataset, e.g. 'requesting' or 'angry'. It is " +
+            "shown as it is and is not translated.",
+        },
+      },
+      "bibleData.voices.level": {
+        description:
+          "Line in the voice popover: how deeply the quotation is nested. Level 1 is a " +
+          "quotation in the story; level 2 is a quotation inside a quotation.",
+        placeholders: { level: "The nesting depth, a small number (1, 2 or 3)." },
+      },
+      "bibleData.voices.speakerEvidence": {
+        description:
+          "Line in the voice popover: how sure the data is about who speaks, and which " +
+          "datasets say so.",
+        placeholders: {
+          confidence: "A percentage, e.g. '97%'.",
+          sources: "Dataset names joined as a list, e.g. 'Clear speaker-quotations and Macula'.",
+        },
+      },
+      "bibleData.voices.addresseeEvidence": {
+        description:
+          "Line in the voice popover: how sure the data is about who is spoken to, and " +
+          "which datasets say so.",
+        placeholders: {
+          confidence: "A percentage, e.g. '80%'.",
+          sources: "Dataset names joined as a list.",
+        },
+      },
+      "bibleData.voices.evidence.macula1p": {
+        description:
+          "A data source in the voice popover: the Macula dataset, which here found the " +
+          "speaker from words such as 'I' and 'me' in the quotation. Keep 'Macula'.",
+      },
+      "bibleData.voices.evidence.macula2p": {
+        description:
+          "A data source in the voice popover: the Macula dataset, which here found who " +
+          "is spoken to from words such as 'you' in the quotation. Keep 'Macula'.",
+      },
+      "bibleData.voices.evidence.maculaA2": {
+        description:
+          "A data source in the voice popover: the Macula dataset, which here found who " +
+          "is spoken to from the speaking verb ('said to her'). Keep 'Macula'.",
+      },
+      "bibleData.voices.namesHeading": {
+        description:
+          "Small heading in the voice popover over a list of the names it shows, each " +
+          "with where that name came from.",
+      },
+      "bibleData.voices.labelSource.terminology": {
+        description:
+          "Where a name came from, in the voice popover: the project's own approved " +
+          "rendering in its terminology (glossary).",
+      },
+      "bibleData.voices.labelSource.acai": {
+        description:
+          "Where a name came from, in the voice popover: the ACAI dataset's name for the " +
+          "person in the interface language. ACAI is a proper name.",
+      },
+      "bibleData.voices.labelSource.acaiOtherScript": {
+        description:
+          "Where a name came from, in the voice popover, for Chinese only: ACAI's name, " +
+          "which is written in Traditional characters even in a Simplified Chinese " +
+          "interface. ACAI is a proper name.",
+      },
+      "bibleData.voices.labelSource.generated": {
+        description:
+          "Where a name came from, in the voice popover: made automatically from the " +
+          "data (for a person the Bible does not name, e.g. 'Samaritan woman'), and not " +
+          "checked by a person yet.",
+      },
+      "bibleData.voices.labelSource.english": {
+        description:
+          "Where a name came from, in the voice popover: the English name, used because " +
+          "no name in the chosen language is available.",
+      },
+      "bibleData.voices.approximate": {
+        description:
+          "Note in the voice popover when the project splits one Bible verse across " +
+          "several cells: the data cannot yet tell which part each person speaks, so " +
+          "every part lists all of the verse's speakers.",
+      },
+      "bibleData.voices.showLinesBy": {
+        description:
+          "Button in the voice popover. It filters the editor to the lines (verses) " +
+          "where this person speaks.",
+        placeholders: { speaker: "The name of the person, e.g. 'Jesus'." },
+      },
+      "bibleData.voices.filter.summary": {
+        description:
+          "Bar above the editor's list while it shows only one person's lines, after " +
+          "'Show every line by …'.",
+        placeholders: {
+          count: "How many lines are shown. A number.",
+          speaker: "The name of the person, e.g. 'Jesus'.",
+        },
+      },
+      "bibleData.voices.filter.clear": {
+        description:
+          "Button on the bar above the editor's list. It removes the one-person filter " +
+          "and shows every line of the file again.",
+      },
+      "bibleData.voices.rail.begins": {
+        description:
+          "Screen-reader text for the thin line at the edge of a verse: a quotation by " +
+          "this person starts in this verse and goes on into the next.",
+        placeholders: { speaker: "The name of the person speaking." },
+      },
+      "bibleData.voices.rail.continues": {
+        description:
+          "Screen-reader text for the thin line at the edge of a verse: a quotation by " +
+          "this person started in an earlier verse and goes on after this one.",
+        placeholders: { speaker: "The name of the person speaking." },
+      },
+      "bibleData.voices.rail.ends": {
+        description:
+          "Screen-reader text for the thin line at the edge of a verse: a quotation by " +
+          "this person that started earlier ends in this verse.",
+        placeholders: { speaker: "The name of the person speaking." },
+      },
+      "bibleData.voices.rail.beginsAndEnds": {
+        description:
+          "Screen-reader text for the thin line at the edge of a verse: a quotation by " +
+          "this person starts and ends within this verse.",
+        placeholders: { speaker: "The name of the person speaking." },
+      },
+      "bibleData.view.voiceChips": {
+        description:
+          "Switch in the editor's View settings, under 'Bible data': shows or hides the " +
+          "small chip on each verse that names who is speaking.",
+      },
+      "bibleData.view.speechRails": {
+        description:
+          "Switch in the editor's View settings, under 'Bible data': shows or hides the " +
+          "thin lines at the edge of verses that mark where quotations open and close.",
+      },
+      "bibleData.view.labelLanguage": {
+        description:
+          "Heading of a choice in the editor's View settings, under 'Bible data': which " +
+          "language the names of speakers are shown in.",
+      },
+      "bibleData.view.labelLanguage.project": {
+        description:
+          "Option under 'Label language': use the names the project agreed in its " +
+          "terminology (e.g. 'Yesus' in an Indonesian project), then the interface " +
+          "language, then English.",
+      },
+      "bibleData.view.labelLanguage.interface": {
+        description:
+          "Option under 'Label language': use names in the language of the app's own " +
+          "menus and buttons, then English.",
+      },
+      "bibleData.view.labelLanguage.english": {
+        description: "Option under 'Label language': always use the English names.",
       },
     },
   },

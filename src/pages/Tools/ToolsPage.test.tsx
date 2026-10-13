@@ -1,15 +1,16 @@
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { BuildFlowResult } from "@/lib/tools/build-flow"
+import { resetBuildJobs } from "@/lib/tools/build-jobs"
 import type { ToolManifest } from "../../../shared/tools/manifest"
 
 /**
- * The guided builder (AQU-1793): Describe → Review & try → Add to project.
- * A ready-made starter opens the same review (never a silent install), the
- * review quotes the user's own words above a live sandboxed preview, and only
- * "Add to project" installs — with reads granted and writes left to ask.
+ * The prompt-first builder (AQU-1793): Describe → Try it → Add it. A template
+ * opens the same review (never a silent install), the review quotes the
+ * user's own words above a live sandboxed preview, and only "Add to project"
+ * installs — with reads granted and writes left to ask.
  */
 
 const BUILT: ToolManifest = { name: "Word Count", description: "Word count per verse.", scopes: ["read:cells"], mounts: ["panel", "page"], apiRev: 5 } as ToolManifest
@@ -44,24 +45,23 @@ function renderAt(url = "/project/p1/extensions") {
 const ok = (manifest: ToolManifest): BuildFlowResult =>
   ({ ok: true, source: "<!doctype html><p>hi</p>", manifest, model: "m", attempts: 1, cost: 0.1, failures: [] }) as unknown as BuildFlowResult
 
+const box = () => screen.findByRole("textbox", { name: "Describe your extension" })
+
 describe("Smart Extensions builder", () => {
   beforeEach(() => {
     runBuildFlow.mockReset()
     installTool.mockReset()
+    resetBuildJobs()
   })
 
-  it("explains the three steps and starts on Describe", async () => {
+  it("shows the three steps as a slim stepper, starting on Describe", async () => {
     renderAt()
     const steps = await screen.findByTestId("builder-steps")
-    expect(within(steps).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
-      expect.stringContaining("Describe"),
-      expect.stringContaining("Review & try"),
-      expect.stringContaining("Add to project"),
-    ])
+    expect(within(steps).getAllByRole("listitem").map((li) => li.textContent)).toEqual(["1Describe", "2Try it", "3Add it"])
     expect(within(steps).getByText("Describe").closest("li")).toHaveAttribute("aria-current", "step")
   })
 
-  it("a ready-made starter opens Review & try instead of installing, then installs on Add", async () => {
+  it("a template opens Try it instead of installing, then installs on Add", async () => {
     installTool.mockResolvedValue({ id: "00000000-0000-0000-0000-000000000001", manifest: { mounts: ["panel", "page"] } })
     renderAt()
     await userEvent.click(await screen.findByRole("button", { name: "Try Key-Term Heat Map" }))
@@ -78,41 +78,53 @@ describe("Smart Extensions builder", () => {
     expect(body.grant.every((s) => s.startsWith("read:"))).toBe(true)
   })
 
-  it("builds from the user's words + placement, and quotes their words above the preview", async () => {
+  it("a suggestion fills the full prompt and its placement; the review quotes the user's words", async () => {
     runBuildFlow.mockResolvedValue(ok(BUILT))
     renderAt()
-    const box = await screen.findByRole("textbox", { name: "What should it do?" })
-    await userEvent.click(screen.getByRole("button", { name: "Check that my term for 'grace' is used consistently across all books" }))
-    expect(box).toHaveValue("Check that my term for 'grace' is used consistently across all books")
-    await userEvent.click(screen.getByRole("tab", { name: "Side panel" }))
+    const input = await box()
+    await userEvent.click(screen.getByRole("button", { name: "Word count panel" }))
+    expect(input).toHaveValue("A side panel with each verse's word count, updating as I type")
+    expect(screen.getByRole("radio", { name: "Side panel" })).toHaveAttribute("aria-checked", "true")
     await userEvent.click(screen.getByTestId("builder-build"))
 
     const review = await screen.findByTestId("built-candidate")
     expect(runBuildFlow.mock.calls[0][0]).toBe(
-      "Check that my term for 'grace' is used consistently across all books\n\nIt should appear in the editor's side panel (mount: panel).",
+      "A side panel with each verse's word count, updating as I type\n\nIt should appear in the editor's side panel (mount: panel).",
     )
-    expect(within(review).getByTestId("candidate-request")).toHaveTextContent(
-      "You asked for“Check that my term for 'grace' is used consistently across all books”",
-    )
-    expect(within(review).getByText("Preview with sample verses")).toBeInTheDocument()
-    expect(within(review).getByText("Opens in the editor's side panel, beside the verses.")).toBeInTheDocument()
-    expect(within(review).getByTestId("scope-summary")).toHaveTextContent("Read files and cells")
-    expect(screen.getByText("Review & try").closest("li")).toHaveAttribute("aria-current", "step")
+    expect(within(review).getByTestId("candidate-request")).toHaveTextContent("You asked for “A side panel with each verse's word count, updating as I type”")
+    expect(within(review).getByText("Live preview")).toBeInTheDocument()
+    expect(within(review).getByTestId("where-chip")).toHaveTextContent("Side panel")
+    expect(within(review).getByTestId("scope-summary")).toHaveTextContent("Reads verses")
+    expect(screen.getByText("Try it").closest("li")).toHaveAttribute("aria-current", "step")
   })
 
   it("Discard returns to Describe with the words kept", async () => {
     runBuildFlow.mockResolvedValue(ok(BUILT))
     renderAt()
-    await userEvent.type(await screen.findByRole("textbox", { name: "What should it do?" }), "count words")
+    await userEvent.type(await box(), "count words")
     await userEvent.click(screen.getByTestId("builder-build"))
     await userEvent.click(await screen.findByRole("button", { name: "Discard" }))
-    expect(screen.getByRole("textbox", { name: "What should it do?" })).toHaveValue("count words")
+    expect(await box()).toHaveValue("count words")
   })
 
-  it("a failed build says so in plain words, with the technical text on request", async () => {
+  it("building says it can take minutes and keeps going if the user leaves", async () => {
+    let finish: (r: BuildFlowResult) => void = () => {}
+    runBuildFlow.mockReturnValue(new Promise((r) => { finish = r }))
+    const view = renderAt()
+    await userEvent.type(await box(), "count words")
+    await userEvent.click(screen.getByTestId("builder-build"))
+    expect(screen.getByTestId("tool-build-progress")).toHaveTextContent("Bigger extensions can take a few minutes. You can keep working")
+    view.unmount()
+    finish(ok(BUILT))
+    await Promise.resolve()
+    renderAt()
+    expect(await screen.findByTestId("built-candidate")).toHaveTextContent("Word Count")
+  })
+
+  it("a failed build says so in one line, with the technical text on request", async () => {
     runBuildFlow.mockResolvedValue({ ok: false, failures: ["TypeError: x is undefined"] } as unknown as BuildFlowResult)
     renderAt()
-    await userEvent.type(await screen.findByRole("textbox", { name: "What should it do?" }), "cards")
+    await userEvent.type(await box(), "cards")
     await userEvent.click(screen.getByTestId("builder-build"))
     const failure = await screen.findByTestId("builder-failure")
     expect(within(failure).queryByText("TypeError: x is undefined")).toBeNull()
@@ -122,12 +134,11 @@ describe("Smart Extensions builder", () => {
 
   it("?where=editor (the editor's 'Build your own editor…') preselects the placement", async () => {
     renderAt("/project/p1/extensions?where=editor")
-    expect(await screen.findByRole("tab", { name: "As an editor" })).toHaveAttribute("aria-selected", "true")
+    expect(await screen.findByRole("radio", { name: "As an editor" })).toHaveAttribute("aria-checked", "true")
   })
 
   it("the build button waits for a description", async () => {
     renderAt()
     expect(await screen.findByTestId("builder-build")).toBeDisabled()
-    await waitFor(() => expect(screen.getByRole("textbox", { name: "What should it do?" })).toBeEnabled())
   })
 })

@@ -134,7 +134,7 @@ test("a tool bulk-harmonizes with attribution, and revert-since-T restores every
 
   await tools.open(seeded.projectId)
   const permissions = await tools.openPermissions(TOOL)
-  await expect(permissions.getByTestId("tool-grant")).toContainText(["Can read files and cells", "Can read the termbase", "Can edit translations"])
+  await expect(permissions.getByTestId("tool-grant")).toContainText(["Reads verses", "Reads key terms", "Edits translations"])
   await alice.keyboard.press("Escape")
   const activity = await tools.openActivity(TOOL)
   await expect(activity.getByTestId("tool-activity-row")).toHaveCount(3)

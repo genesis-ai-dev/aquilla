@@ -36,15 +36,13 @@ export function composeRequest(text: string, where: WhereChoice): string {
   return `${words}\n\n${sentence}`
 }
 
-/** Example prompts (i18n keys), all about Bible translation work. */
-export const EXAMPLE_PROMPT_KEYS = [
-  "extensions.examples.covenant",
-  "extensions.examples.graceAcrossBooks",
-  "extensions.examples.wordCount",
-  "extensions.examples.untranslated",
-  "extensions.examples.punctuation",
-  "extensions.examples.focusEditor",
-] as const
+/** Suggestions (i18n keys): a short title on the pill; the full prompt fills the composer. */
+export const EXAMPLE_PROMPTS = [
+  { title: "extensions.examples.graceAcrossBooksTitle", prompt: "extensions.examples.graceAcrossBooks", where: "auto" },
+  { title: "extensions.examples.wordCountTitle", prompt: "extensions.examples.wordCount", where: "panel" },
+  { title: "extensions.examples.untranslatedTitle", prompt: "extensions.examples.untranslated", where: "auto" },
+  { title: "extensions.examples.focusEditorTitle", prompt: "extensions.examples.focusEditor", where: "editor" },
+] as const satisfies readonly { title: string; prompt: string; where: WhereChoice }[]
 
 export type ProgressStepId = "write" | "check" | "try" | "fix"
 export type ProgressState = "pending" | "active" | "done"

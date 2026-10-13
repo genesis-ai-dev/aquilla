@@ -23,7 +23,7 @@ const SHOTS_DIR = process.env.SHOTS_DIR ?? path.join(__dirname, "../output")
 const PREFIX = process.env.SHOTS_PREFIX ?? "aqu-1793-builder-"
 const FRAME = { width: 1280, height: 800 }
 
-test.use({ viewport: FRAME })
+test.use({ viewport: FRAME, colorScheme: process.env.SHOTS_DARK ? "dark" : "light" })
 
 const shot = (page: Page, name: string, fullPage = false) => page.screenshot({ path: path.join(SHOTS_DIR, `${PREFIX}${name}.png`), fullPage })
 
@@ -68,7 +68,7 @@ test("Smart Extensions builder — every state", async ({ page }) => {
 
   // 1. The page as a first-time user finds it.
   await page.goto(`/project/${seeded.projectId}/extensions`)
-  const box = page.getByRole("textbox", { name: "What should it do?" })
+  const box = page.getByRole("textbox", { name: "Describe your extension" })
   await expect(box).toBeVisible({ timeout: 20_000 })
   await page.waitForTimeout(1500)
   await shot(page, "01-empty", true)
@@ -137,15 +137,15 @@ test("Smart Extensions builder — every state", async ({ page }) => {
 
   // 8b. The extension page's tabs: what it can do, changes & undo (+ versions).
   await page.goto(`/project/${seeded.projectId}/extensions/${wordCount}`)
-  await page.getByRole("tab", { name: "What it can do" }).click()
+  await page.getByRole("tab", { name: "Permissions" }).click()
   await page.waitForTimeout(500)
   await shot(page, "14-detail-permissions-tab")
-  await page.getByRole("tab", { name: "Changes & undo" }).click()
+  await page.getByRole("tab", { name: "Changes" }).click()
   await expect(page.getByTestId("tool-version").first()).toBeVisible({ timeout: 20_000 })
   await page.waitForTimeout(500)
   await shot(page, "15-detail-changes-tab")
   await page.getByRole("tab", { name: "Use" }).click()
-  await page.getByRole("button", { name: "Change it with AI" }).click()
+  await page.getByRole("button", { name: "Change with AI" }).click()
   await page.waitForTimeout(400)
   await shot(page, "16-detail-change-with-ai")
 
@@ -167,7 +167,7 @@ test("Smart Extensions builder — every state", async ({ page }) => {
   await openMenu(/permission/i)
   await shot(page, "10-permissions-dialog")
   await closeDialog()
-  await openMenu(/changes|undo/i)
+  await openMenu(/^changes$/i)
   await shot(page, "11-activity-revert")
   await closeDialog()
   await openMenu(/copy|share/i)

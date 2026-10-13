@@ -47,10 +47,8 @@ test("Smart Extensions — a first-time user builds one", async ({ page }) => {
   await page.waitForTimeout(2500)
 
   // Describe: an example fills the box; say where it goes.
-  await page.getByRole("button", { name: "A side panel with each verse's word count, updating as I type" }).click()
+  await page.getByRole("button", { name: "Word count panel" }).click()
   await page.waitForTimeout(1200)
-  await page.getByRole("tab", { name: "Side panel" }).click()
-  await page.waitForTimeout(900)
   await page.getByTestId("builder-build").click()
 
   // Building: their words, the steps, the time it usually takes.
@@ -58,7 +56,7 @@ test("Smart Extensions — a first-time user builds one", async ({ page }) => {
   await page.waitForTimeout(3500)
   release()
 
-  // Review & try: the extension running on sample verses.
+  // Try it: the extension running on sample verses.
   const review = page.getByTestId("built-candidate")
   await expect(review).toBeVisible({ timeout: 30_000 })
   await expect(review.getByTestId("extension-preview-frame").contentFrame().locator("body")).toContainText("words", { timeout: 30_000 })

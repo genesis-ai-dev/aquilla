@@ -64,16 +64,15 @@ export function VersionList({
 
   return (
     <section aria-labelledby="versions-heading" className="flex flex-col gap-2">
-      <div className="flex items-center gap-2">
+      <h3 id="versions-heading" className="flex items-center gap-2 text-sm font-medium">
         <History className="size-4 text-muted-foreground" aria-hidden />
-        <h3 id="versions-heading" className="text-sm font-medium">{t("extensions.versions.heading")}</h3>
-      </div>
-      <p className="text-xs text-muted-foreground">{t("extensions.versions.hint")}</p>
+        {t("extensions.versions.heading")}
+      </h3>
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {versions === null && !error ? (
         <Spinner />
       ) : (
-        <ol className="divide-y overflow-hidden rounded-xl border bg-card" data-testid="tool-versions">
+        <ol className="divide-y overflow-hidden rounded-xl border bg-card dark:bg-transparent" data-testid="tool-versions">
           {(versions ?? []).map((v) => {
             const current = v.version === tool.currentVersion
             const words = versionRequest(v)

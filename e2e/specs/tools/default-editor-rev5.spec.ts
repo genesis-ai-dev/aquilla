@@ -97,11 +97,11 @@ test("the Smart Extension editor is the default, the original is one click away,
   const read = frame.locator(`.cell[data-cell-id="${cellId}"] [data-target-read-view]`)
   await expect(read).toBeVisible({ timeout: 30_000 })
   await expect(read).toHaveAttribute("data-health-spans", `${nativeCount("supported")}/${nativeCount("guessed")}`)
-  const painted = await read.evaluate(() => {
+  // The highlights are registered a frame after the counts land on the row.
+  await expect.poll(() => read.evaluate(() => {
     const css = (globalThis as unknown as { CSS: { highlights?: Map<string, { size: number }> } }).CSS
     return (css.highlights?.get("aq-hs-supported")?.size ?? 0) + (css.highlights?.get("aq-hs-guessed")?.size ?? 0)
-  })
-  expect(painted).toBe(nativeKinds.length)
+  }), { timeout: 10_000 }).toBe(nativeKinds.length)
 })
 
 test("a commenter switches back to the original Aquilla editor in one click, and it survives a reload", async ({ bob }) => {

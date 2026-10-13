@@ -7,6 +7,7 @@ import { BadgeCheck, RefreshCw, RotateCcw, ShieldAlert } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { SegmentTabs } from "@/components/ui/tabs"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { useOutbox } from "@/context/OutboxContext"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { fmtShortCalendarDate } from "@/lib/format-date"
@@ -91,7 +92,7 @@ export function ToolActivityPanel({
   }
 
   return (
-    <section aria-label={t("extensions.activity.heading")} className="rounded-xl border bg-card p-3.5 text-sm">
+    <section aria-label={t("extensions.activity.heading")} className="rounded-xl border bg-card p-3.5 text-sm dark:bg-transparent">
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="me-auto font-medium">{t("extensions.activity.heading")}</h3>
         <div className="flex items-center gap-1">
@@ -161,10 +162,12 @@ export function ToolActivityPanel({
       {activity?.truncated && <p className="mt-1 text-xs text-muted-foreground">{t("extensions.activity.truncated")}</p>}
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Button size="sm" variant="outline" onClick={prepareRevert} disabled={!activity || reverting || activity.events.length === 0}>
-          <RotateCcw className="size-3.5" aria-hidden />
-          {t("extensions.revert.button")}
-        </Button>
+        <AppTooltip content={t("extensions.activity.undoHint")}>
+          <Button size="sm" variant="outline" onClick={prepareRevert} disabled={!activity || reverting || activity.events.length === 0}>
+            <RotateCcw className="size-3.5" aria-hidden />
+            {t("extensions.revert.button")}
+          </Button>
+        </AppTooltip>
         {pendingPlan && (
           <span role="group" className="flex flex-wrap items-center gap-2 rounded-lg bg-amber-500/10 px-2.5 py-1.5">
             <span className="text-xs text-amber-900 dark:text-amber-200">{t("extensions.revert.confirm", { count: pendingPlan.commits.length })}</span>

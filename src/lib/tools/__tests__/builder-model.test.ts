@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
-  EXAMPLE_PROMPT_KEYS,
+  EXAMPLE_PROMPTS,
   composeRequest,
   formatElapsed,
   groupScopes,
@@ -44,7 +44,10 @@ describe("composeRequest", () => {
 
 describe("example prompts", () => {
   it("are translation-specific catalog strings, including term consistency across books", () => {
-    for (const key of EXAMPLE_PROMPT_KEYS) expect(extensions.keys[key]).toBeTruthy()
+    for (const ex of EXAMPLE_PROMPTS) {
+      expect(extensions.keys[ex.prompt]).toBeTruthy()
+      expect(String(extensions.keys[ex.title]).length).toBeLessThan(28)
+    }
     expect(extensions.keys["extensions.examples.graceAcrossBooks"]).toBe("Check that my term for 'grace' is used consistently across all books")
   })
 })

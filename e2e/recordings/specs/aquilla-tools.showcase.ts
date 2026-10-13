@@ -105,7 +105,7 @@ test("Aquilla Tools — build, permit, harmonize, attribute, revert", async ({ p
 
   let toolName = "Key-Term Heat Map"
   if (!USE_STARTER) {
-    const box = page.getByRole("textbox", { name: "What should it do?" })
+    const box = page.getByRole("textbox", { name: "Describe your extension" })
     await box.click()
     await box.pressSequentially(BUILD_PROMPT.slice(0, 120), { delay: 8 })
     timeline.buildStart = Date.now() - t0

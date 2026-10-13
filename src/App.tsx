@@ -70,6 +70,7 @@ import { useGlobalAudioShortcuts } from "@/hooks/useGlobalAudioShortcuts"
 import { useSessionRefresh } from "@/hooks/useSessionRefresh"
 import { ProjectWorkspaceRoute } from "@/components/ProjectWorkspaceRoute"
 import { ToolsMountProvider } from "@/components/tools/ToolsMountContext"
+import { BuildJobNotifier } from "@/components/tools/builder/BuildJobNotifier"
 import { RedirectToProjectOverview } from "@/components/RedirectToProjectOverview"
 
 // Heavy workspace / admin routes — loaded only when navigated to
@@ -387,6 +388,7 @@ function AppRoutes() {
 
   return (
     <>
+      <BuildJobNotifier />
       {/* Workspace routes intentionally suspend to this outer boundary: when
           entered through useOpenWorkspace's transition, React keeps the source
           project overview mounted so its blocking "Opening project" overlay

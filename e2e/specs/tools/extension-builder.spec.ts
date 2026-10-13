@@ -1,9 +1,9 @@
 // Smart Extensions builder (AQU-1793): a first-time user goes Describe →
-// Review & try → Add to project, and the extension shows up where they work.
+// Try it → Add to project, and the extension shows up where they work.
 //
 // The model call (POST …/tools/build) is answered with a REAL builder output
 // (no builder key in e2e); everything after it is real: the client's lint +
-// sandboxed smoke render, the Review & try preview (the extension running in
+// sandboxed smoke render, the Try it preview (the extension running in
 // the sandbox on sample verses), the install (auth-worker, Postgres), and the
 // extension in the editor's palette / side panel and "Edit with".
 
@@ -45,25 +45,25 @@ test("describe → watch it build → try it on sample verses → add it → it 
 
   // 1 Describe: plain words + where it should appear.
   const words = "Show the word count of each verse's translation and the total for the file, updating live as I type"
-  await alice.getByRole("textbox", { name: "What should it do?" }).fill(words)
-  await alice.getByRole("tab", { name: "Side panel" }).click()
+  await alice.getByRole("textbox", { name: "Describe your extension" }).fill(words)
+  await alice.getByRole("radio", { name: "Side panel" }).click()
   await alice.getByTestId("builder-build").click()
 
   // Building: the user's words, the real steps, a time expectation, Cancel.
   const progress = alice.getByTestId("tool-build-progress")
   await expect(progress).toContainText(words)
-  await expect(progress).toContainText("Usually 30–60 seconds")
+  await expect(progress).toContainText("Bigger extensions can take a few minutes")
   await expect(progress.getByRole("button", { name: "Cancel" })).toBeVisible()
-  await expect(steps.locator("[aria-current=step]")).toContainText("Review & try")
+  await expect(steps.locator("[aria-current=step]")).toContainText("Try it")
   release()
 
-  // 2 Review & try: their words quoted, the extension running on sample verses.
+  // 2 Try it: their words quoted, the extension running on sample verses.
   const review = alice.getByTestId("built-candidate")
   await expect(review).toBeVisible({ timeout: 30_000 })
   expect(requests[0]).toBe(`${words}\n\nIt should appear in the editor's side panel (mount: panel).`)
   await expect(review.getByTestId("candidate-request")).toContainText(`“${words}”`)
-  await expect(review).toContainText("Opens in the editor's side panel, beside the verses.")
-  await expect(review.getByTestId("scope-summary")).toContainText("Read files and cells")
+  await expect(review.getByTestId("where-chip")).toHaveText("Side panel")
+  await expect(review.getByTestId("scope-summary")).toContainText("Reads verses")
   const preview = review.getByTestId("extension-preview-frame").contentFrame()
   await expect(preview.locator("body")).toContainText("words", { timeout: 30_000 })
 
@@ -96,14 +96,14 @@ test("\"Build your own editor…\" builds an editor that appears in \"Edit with\
   await alice.goto(`/project/${seeded.projectId}/editor/file/${seeded.fileId}`)
   await alice.getByTestId("build-own-editor").click()
   await alice.waitForURL(/\/extensions\?where=editor$/)
-  await expect(alice.getByRole("tab", { name: "As an editor" })).toHaveAttribute("aria-selected", "true")
+  await expect(alice.getByRole("radio", { name: "As an editor" })).toHaveAttribute("aria-checked", "true")
 
   const name = await tools.buildExtension("Show one verse at a time in large text, with the source above it")
   expect(name).toBe("One Verse Editor")
   expect(requests[0]).toMatch(/\(mount: editor\)\.$/)
   const review = alice.getByTestId("built-candidate")
-  await expect(review).toContainText("Replaces the editor for a file.")
-  await expect(review.getByTestId("scope-summary")).toContainText("Changes")
+  await expect(review.getByTestId("where-chip")).toHaveText("As an editor")
+  await expect(review.getByTestId("scope-summary")).toContainText("Edits translations")
 
   await tools.addCandidate()
   await alice.waitForURL(/\/editor/)

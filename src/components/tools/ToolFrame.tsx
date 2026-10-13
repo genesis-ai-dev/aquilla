@@ -136,7 +136,7 @@ export function ToolFrame({ project, tool, session, roleLevel, mount = "page", c
             <p className="font-medium text-destructive">{t("extensions.frame.problem")}</p>
             {onHeal && <p className="text-xs text-muted-foreground">{t("extensions.heal.hint")}</p>}
             <details className="group mt-1 text-xs text-muted-foreground">
-              <summary className="cursor-pointer select-none hover:text-foreground">{t("extensions.detail.problemDetails")}</summary>
+              <summary className="cursor-pointer select-none hover:text-foreground">{t("extensions.build.details")}</summary>
               <p className="mt-1 font-mono break-words whitespace-pre-wrap">{t("extensions.frame.error", { message: errors[errors.length - 1].message })}</p>
             </details>
           </div>

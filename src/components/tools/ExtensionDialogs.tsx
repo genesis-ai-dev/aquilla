@@ -18,6 +18,7 @@ import { copyTool, fetchToolSource, type ToolSummary } from "@/lib/tools/tools-a
 import type { ToolScope } from "../../../shared/tools/manifest"
 import { useScopeLabel } from "./scope-label"
 import { ToolActivityPanel } from "./ToolActivityPanel"
+import { PERM } from "./builder/ExtensionFacts"
 
 /** "Can edit translations" — a scope as a short, plain sentence. */
 export function useScopeSentence(): (scope: ToolScope) => string {
@@ -26,7 +27,7 @@ export function useScopeSentence(): (scope: ToolScope) => string {
   return (scope) => t("extensions.can", { scope: label(scope) })
 }
 
-/** The permission switches (dialog, and the page's "What it can do" tab). */
+/** The permission switches (dialog, and the page's Permissions tab). */
 export function PermissionsList({
   tool,
   roleLevel,
@@ -37,7 +38,6 @@ export function PermissionsList({
   onChange: (scopes: ToolScope[]) => Promise<void>
 }) {
   const t = useT()
-  const sentence = useScopeSentence()
   const { grantable, blocked } = grantableAtInstall(tool.manifest.scopes, roleLevel)
   const [busy, setBusy] = useState(false)
   const toggle = async (scope: ToolScope, on: boolean) => {
@@ -48,26 +48,32 @@ export function PermissionsList({
       setBusy(false)
     }
   }
-  if (grantable.length === 0 && blocked.length === 0) return <p className="text-sm text-muted-foreground">{t("extensions.scopes.none")}</p>
+  if (grantable.length === 0 && blocked.length === 0) return <p className="text-sm text-muted-foreground">{t("extensions.perm.none")}</p>
   return (
-    <ul className="divide-y overflow-hidden rounded-xl border bg-card" data-testid="tool-grants">
+    <ul className="divide-y overflow-hidden rounded-xl border bg-card dark:bg-transparent" data-testid="tool-grants">
       {grantable.map((scope) => {
         const on = tool.grantedScopes.includes(scope)
+        const p = PERM[scope]
         return (
           <li key={scope} className="flex items-center gap-3 px-3.5 py-3 text-sm">
+            <p.icon className={p.kind === "write" ? "size-4 shrink-0 text-amber-600 dark:text-amber-400" : "size-4 shrink-0 text-muted-foreground"} aria-hidden />
             <span className="min-w-0 flex-1">
-              <span className="block" data-testid={on ? "tool-grant" : "tool-ask"}>{sentence(scope)}</span>
+              <span className="block font-medium" data-testid={on ? "tool-grant" : "tool-ask"}>{t(p.label)}</span>
               <span className={on ? "block text-xs text-emerald-700 dark:text-emerald-400" : "block text-xs text-muted-foreground"}>
                 {on ? t("extensions.permissions.allowed") : t("extensions.permissions.asks")}
               </span>
             </span>
-            <Switch aria-label={sentence(scope)} checked={on} disabled={busy} onCheckedChange={(next) => void toggle(scope, next)} />
+            <Switch aria-label={t(p.label)} checked={on} disabled={busy} onCheckedChange={(next) => void toggle(scope, next)} />
           </li>
         )
       })}
       {blocked.map((scope) => (
         <li key={scope} className="flex items-center gap-3 px-3.5 py-3 text-sm text-muted-foreground">
-          <span className="min-w-0 flex-1">{sentence(scope)}</span>
+          {(() => {
+            const Icon = PERM[scope].icon
+            return <Icon className="size-4 shrink-0" aria-hidden />
+          })()}
+          <span className="min-w-0 flex-1">{t(PERM[scope].label)}</span>
           <span className="text-xs">{t("extensions.installDialog.blocked")}</span>
         </li>
       ))}
@@ -92,7 +98,6 @@ export function PermissionsDialog({
       <DialogContent className="solid-primary max-w-md">
         <DialogHeader>
           <DialogTitle>{t("extensions.permissions.title", { name: tool.name })}</DialogTitle>
-          <DialogDescription>{t("extensions.permissions.hint")}</DialogDescription>
         </DialogHeader>
         <DialogBody>
           <PermissionsList tool={tool} roleLevel={roleLevel} onChange={onChange} />
@@ -109,7 +114,6 @@ export function ActivityDialog({ projectId, tool, jwt, author, onClose }: { proj
       <DialogContent className="solid-primary sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{t("extensions.activity.title", { name: tool.name })}</DialogTitle>
-          <DialogDescription>{t("extensions.activity.undoHint")}</DialogDescription>
         </DialogHeader>
         <DialogBody>
           <ToolActivityPanel projectId={projectId} tool={tool} jwt={jwt} author={author} />

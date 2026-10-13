@@ -1,50 +1,42 @@
 import { Check } from "lucide-react"
+import { Fragment } from "react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { BuilderStep } from "@/lib/tools/builder-model"
 import { cn } from "@/lib/utils"
 
-const STEPS: readonly { id: BuilderStep; title: "extensions.steps.describe" | "extensions.steps.review" | "extensions.steps.add"; hint: "extensions.steps.describeHint" | "extensions.steps.reviewHint" | "extensions.steps.addHint" }[] = [
-  { id: "describe", title: "extensions.steps.describe", hint: "extensions.steps.describeHint" },
-  { id: "review", title: "extensions.steps.review", hint: "extensions.steps.reviewHint" },
-  { id: "add", title: "extensions.steps.add", hint: "extensions.steps.addHint" },
-]
+const STEPS = [
+  { id: "describe", title: "extensions.steps.describe" },
+  { id: "review", title: "extensions.steps.review" },
+  { id: "add", title: "extensions.steps.add" },
+] as const satisfies readonly { id: BuilderStep; title: string }[]
 
-/** Describe → Review & try → Add to project. Explains the flow before it
- *  starts, then marks where the user is. */
+/** Describe → Try it → Add it, as a slim, quiet stepper. */
 export function BuilderStepper({ current }: { current: BuilderStep }) {
   const t = useT()
   const at = STEPS.findIndex((s) => s.id === current)
   return (
     <nav aria-label={t("extensions.steps.label")}>
-      <ol className="grid grid-cols-3 gap-1.5 sm:gap-2" data-testid="builder-steps">
+      <ol className="flex items-center gap-2 text-xs" data-testid="builder-steps">
         {STEPS.map((step, i) => {
           const state = i < at ? "done" : i === at ? "current" : "next"
           return (
-            <li
-              key={step.id}
-              aria-current={state === "current" ? "step" : undefined}
-              data-state={state}
-              className={cn(
-                "flex items-start gap-2 rounded-xl border px-2.5 py-2.5 transition-colors duration-200 sm:gap-3 sm:px-3.5 sm:py-3",
-                state === "current" ? "border-primary/40 bg-primary/5" : "bg-card",
-              )}
-            >
-              <span
-                className={cn(
-                  "mt-0.5 grid size-6 shrink-0 place-items-center rounded-full text-xs font-semibold tabular-nums",
-                  state === "done" && "bg-primary text-primary-foreground",
-                  state === "current" && "bg-primary text-primary-foreground",
-                  state === "next" && "border text-muted-foreground",
-                )}
-                aria-hidden
-              >
-                {state === "done" ? <Check className="size-3.5" /> : i + 1}
-              </span>
-              <span className="min-w-0">
-                <span className={cn("block text-sm font-medium", state === "next" && "text-muted-foreground")}>{t(step.title)}</span>
-                <span className="hidden text-xs leading-snug text-muted-foreground sm:block">{t(step.hint)}</span>
-              </span>
-            </li>
+            <Fragment key={step.id}>
+              {i > 0 && <li aria-hidden className={cn("h-px w-4 transition-colors duration-200", i <= at ? "bg-primary/50" : "bg-border")} />}
+              <li aria-current={state === "current" ? "step" : undefined} data-state={state} className="flex items-center gap-1.5">
+                <span
+                  className={cn(
+                    "grid size-4.5 place-items-center rounded-full text-[10px] font-semibold tabular-nums transition-colors duration-200",
+                    state === "current" && "bg-primary text-primary-foreground",
+                    state === "done" && "bg-primary/15 text-primary",
+                    state === "next" && "border text-muted-foreground",
+                  )}
+                  aria-hidden
+                >
+                  {state === "done" ? <Check className="size-2.5" strokeWidth={3} /> : i + 1}
+                </span>
+                <span className={cn("font-medium", state === "current" ? "text-foreground" : "text-muted-foreground max-sm:sr-only")}>{t(step.title)}</span>
+              </li>
+            </Fragment>
           )
         })}
       </ol>

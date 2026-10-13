@@ -1,45 +1,34 @@
 /**
  * /project/:id/extensions/:toolId — one extension's page.
  *
- * Header: what it is, where it lives, the words it was built from, and
- * "Change it with AI". Tabs: Use (the sandboxed frame, kept mounted so its
- * state survives tab switches) · What it can do (permissions) · Changes &
- * undo (attributed writes + revert, and versions) · Share (copy to project).
+ * One compact header row: what it is, where it lives, tabs (Use · Permissions
+ * · Changes · Share) and "Change with AI". Use keeps the sandboxed frame
+ * mounted, so its state survives tab switches.
  */
 
 import { useEffect, useState } from "react"
 import { Link, useParams } from "react-router-dom"
-import { ArrowLeft, ShieldCheck, Wand2 } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { ArrowLeft, History, Play, Quote, Share2, ShieldCheck, ShieldHalf, Wand2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { toast } from "@/components/ui/toast"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { CopyList, PermissionsList } from "@/components/tools/ExtensionDialogs"
 import { ToolActivityPanel } from "@/components/tools/ToolActivityPanel"
 import { ToolFrame } from "@/components/tools/ToolFrame"
 import { useEditTool } from "@/components/tools/useEditTool"
 import { ChangeWithAi } from "@/components/tools/builder/ChangeWithAi"
-import { MountIcon, WhereLine } from "@/components/tools/builder/ExtensionFacts"
+import { MOUNT_LABEL, MountIcon } from "@/components/tools/builder/ExtensionFacts"
 import { VersionList } from "@/components/tools/builder/VersionList"
-import { versionRequest } from "@/lib/tools/builder-model"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProject } from "@/hooks/useProject"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { primaryMount, versionRequest } from "@/lib/tools/builder-model"
 import { getTool, listToolVersions, setToolGrant, type ToolDetail } from "@/lib/tools/tools-api"
 import type { ToolScope } from "../../../shared/tools/manifest"
 
 type Tab = "use" | "permissions" | "changes" | "share"
-
-function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-sm font-medium">{title}</h2>
-      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-      {children}
-    </section>
-  )
-}
 
 export function ToolRunPage() {
   const t = useT()
@@ -60,6 +49,7 @@ export function ToolRunPage() {
     if (!next) return false
     setTool(next)
     setTab("use")
+    setChangeOpen(false)
     toast.add({ title: next.name, description: t("extensions.heal.done", { version: next.currentVersion }) })
     return true
   }
@@ -80,10 +70,12 @@ export function ToolRunPage() {
   }, [jwt, projectId, toolId])
 
   // "Built from": the first description a person gave (the original build).
+  const toolKey = tool?.id
+  const firstParty = Boolean(tool?.firstParty)
   useEffect(() => {
-    if (!jwt || !tool || tool.firstParty) return
+    if (!jwt || !toolKey || firstParty) return
     let cancelled = false
-    listToolVersions(jwt, projectId, tool.id)
+    listToolVersions(jwt, projectId, toolKey)
       .then((versions) => {
         const first = [...versions].sort((a, b) => a.version - b.version).find((v) => v.origin === "builder" && versionRequest(v))
         if (!cancelled) setBuiltFrom(first ? versionRequest(first) : null)
@@ -92,7 +84,7 @@ export function ToolRunPage() {
     return () => {
       cancelled = true
     }
-  }, [jwt, projectId, tool?.id, tool?.firstParty, tool])
+  }, [jwt, projectId, toolKey, firstParty])
 
   const setGrant = async (scopes: ToolScope[]) => {
     if (!jwt || !tool) return
@@ -100,50 +92,62 @@ export function ToolRunPage() {
     setTool({ ...tool, grantedScopes: granted })
   }
 
+  const tabs = [
+    { value: "use", icon: Play, label: t("extensions.detail.tabUse") },
+    { value: "permissions", icon: ShieldHalf, label: t("extensions.menu.permissions") },
+    { value: "changes", icon: History, label: t("extensions.activity.heading") },
+    { value: "share", icon: Share2, label: t("extensions.detail.tabShare") },
+  ] as const
+
   return (
-    <div className="solid-primary flex h-dvh flex-col">
-      <header className="flex flex-col gap-2 border-b px-3 pt-2 pb-3 sm:px-4">
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" render={<Link to={`/project/${projectId}/extensions`} />}>
-            <ArrowLeft className="size-4" aria-hidden />
-            {t("extensions.backToList")}
-          </Button>
-          {tool && !changeOpen && (
-            <Button size="sm" variant="outline" className="ms-auto" onClick={() => setChangeOpen(true)} disabled={edit.busy}>
-              <Wand2 className="size-3.5" aria-hidden />
-              {t("extensions.detail.change")}
-            </Button>
-          )}
-        </div>
+    <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)} className="solid-primary flex h-dvh flex-col gap-0">
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-3 py-2.5 sm:px-4">
+        <Button variant="ghost" size="icon-sm" aria-label={t("extensions.backToList")} render={<Link to={`/project/${projectId}/extensions`} />}>
+          <ArrowLeft className="size-4" aria-hidden />
+        </Button>
         {tool && (
-          <div className="flex items-start gap-3 px-1">
-            <MountIcon mounts={tool.manifest.mounts} />
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-base font-semibold tracking-tight">{tool.name}</h1>
-                <Badge variant="outline">{t("extensions.version", { version: tool.currentVersion })}</Badge>
+          <>
+            <MountIcon mounts={tool.manifest.mounts} className="size-8 rounded-lg" />
+            <div className="min-w-0 flex-1 sm:flex-none">
+              <div className="flex items-center gap-1.5">
+                <h1 className="truncate text-sm font-semibold">{tool.name}</h1>
+                <span className="font-mono text-[11px] text-muted-foreground tabular-nums">{t("extensions.version", { version: tool.currentVersion })}</span>
                 {tool.firstParty && (
-                  <Badge variant="soft" data-testid="first-party-badge">
-                    <ShieldCheck className="size-3" aria-hidden />
-                    {t("extensions.firstParty.badge")}
-                  </Badge>
+                  <AppTooltip content={t("extensions.firstParty.badge")}>
+                    <span data-testid="first-party-badge" aria-label={t("extensions.firstParty.badge")} className="inline-flex">
+                      <ShieldCheck className="size-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden />
+                    </span>
+                  </AppTooltip>
                 )}
-              </div>
-              {tool.description && <p className="text-sm text-muted-foreground">{tool.description}</p>}
-              <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-muted-foreground [&_p]:text-xs">
-                <WhereLine mounts={tool.manifest.mounts} />
                 {builtFrom && (
-                  <p className="min-w-0 truncate text-xs" title={builtFrom} data-testid="built-from">
-                    {t("extensions.detail.builtFrom", { request: builtFrom })}
-                  </p>
+                  <AppTooltip content={t("extensions.detail.builtFrom", { request: builtFrom })}>
+                    <span tabIndex={0} aria-label={t("extensions.detail.builtFrom", { request: builtFrom })} className="inline-flex text-muted-foreground" data-testid="built-from">
+                      <Quote className="size-3.5" aria-hidden />
+                    </span>
+                  </AppTooltip>
                 )}
               </div>
+              <p className="truncate text-xs text-muted-foreground" title={tool.description}>{t(MOUNT_LABEL[primaryMount(tool.manifest.mounts)])}</p>
             </div>
-          </div>
+            <TabsList className="order-last w-full sm:order-none sm:ms-auto sm:w-fit" aria-label={tool.name}>
+              {tabs.map((x) => (
+                <TabsTrigger key={x.value} value={x.value} className="gap-1.5 px-2.5">
+                  <x.icon className="size-3.5" aria-hidden />
+                  {x.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+            {!changeOpen && (
+              <Button size="sm" variant="outline" className="rounded-full" onClick={() => setChangeOpen(true)} disabled={edit.busy}>
+                <Wand2 className="size-3.5" aria-hidden />
+                {t("extensions.detail.change")}
+              </Button>
+            )}
+          </>
         )}
       </header>
       {tool && changeOpen && (
-        <ChangeWithAi name={tool.name} busy={edit.busy} error={edit.error} onSubmit={applyEdit} onClose={() => setChangeOpen(false)} />
+        <ChangeWithAi busy={edit.busy} error={edit.error} onSubmit={applyEdit} onClose={() => setChangeOpen(false)} />
       )}
 
       {missing ? (
@@ -154,14 +158,8 @@ export function ToolRunPage() {
           {t("extensions.run.loading")}
         </div>
       ) : (
-        <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)} className="min-h-0 flex-1 gap-0">
-          <TabsList variant="line" className="w-full justify-start gap-1 border-b px-3 sm:px-4" aria-label={tool.name}>
-            <TabsTrigger value="use">{t("extensions.detail.tabUse")}</TabsTrigger>
-            <TabsTrigger value="permissions">{t("extensions.detail.tabPermissions")}</TabsTrigger>
-            <TabsTrigger value="changes">{t("extensions.detail.tabChanges")}</TabsTrigger>
-            <TabsTrigger value="share">{t("extensions.detail.tabShare")}</TabsTrigger>
-          </TabsList>
-          <TabsContent value="use" keepMounted className="flex min-h-0 flex-1 flex-col data-hidden:hidden">
+        <>
+          <TabsContent value="use" keepMounted className="flex min-h-0 flex-1 flex-col">
             <ToolFrame
               project={{ id: project.id, name: project.name }}
               tool={tool}
@@ -173,17 +171,13 @@ export function ToolRunPage() {
             />
           </TabsContent>
           <TabsContent value="permissions" className="min-h-0 overflow-y-auto">
-            <div className="mx-auto flex max-w-2xl flex-col gap-4 p-4 sm:p-6">
-              <Section title={t("extensions.permissions.title", { name: tool.name })} hint={t("extensions.permissions.hint")}>
-                <PermissionsList tool={tool} roleLevel={roleLevel ?? null} onChange={setGrant} />
-              </Section>
+            <div className="mx-auto max-w-xl px-4 py-8">
+              <PermissionsList tool={tool} roleLevel={roleLevel ?? null} onChange={setGrant} />
             </div>
           </TabsContent>
           <TabsContent value="changes" className="min-h-0 overflow-y-auto">
-            <div className="mx-auto flex max-w-3xl flex-col gap-6 p-4 sm:p-6">
-              <Section title={t("extensions.activity.title", { name: tool.name })} hint={t("extensions.activity.undoHint")}>
-                <ToolActivityPanel projectId={projectId} tool={tool} jwt={jwt} author={session.username} />
-              </Section>
+            <div className="mx-auto flex max-w-2xl flex-col gap-8 px-4 py-8">
+              <ToolActivityPanel projectId={projectId} tool={tool} jwt={jwt} author={session.username} />
               <VersionList
                 projectId={projectId}
                 jwt={jwt}
@@ -196,14 +190,13 @@ export function ToolRunPage() {
             </div>
           </TabsContent>
           <TabsContent value="share" className="min-h-0 overflow-y-auto">
-            <div className="mx-auto flex max-w-2xl flex-col gap-4 p-4 sm:p-6">
-              <Section title={t("extensions.copy.title", { name: tool.name })} hint={t("extensions.copy.hint")}>
-                <CopyList projectId={projectId} tool={tool} jwt={jwt} />
-              </Section>
+            <div className="mx-auto flex max-w-xl flex-col gap-3 px-4 py-8">
+              <p className="text-sm text-muted-foreground">{t("extensions.copy.hint")}</p>
+              <CopyList projectId={projectId} tool={tool} jwt={jwt} />
             </div>
           </TabsContent>
-        </Tabs>
+        </>
       )}
-    </div>
+    </Tabs>
   )
 }

@@ -27,7 +27,7 @@ export class ToolsPage {
     expect((await listed).ok()).toBe(true)
   }
 
-  /** Add a ready-made starter: "Try {name}" opens Review & try (a sandboxed
+  /** Add a ready-made starter: "Try {name}" opens Try it (a sandboxed
    *  preview), then "Add to project" (reads granted, writes ask on first use). */
   async installStarter(name: string, opts: { landsIn?: "page" | "editor" } = {}): Promise<void> {
     const installed = this.page.waitForResponse(
@@ -44,14 +44,14 @@ export class ToolsPage {
   /** Step 1 of the builder: describe it, "Build it", and wait for Review &
    *  try. Resolves to the built extension's name. */
   async buildExtension(description: string, opts: { timeout?: number } = {}): Promise<string> {
-    await this.page.getByRole("textbox", { name: "What should it do?" }).fill(description)
+    await this.page.getByRole("textbox", { name: "Describe your extension" }).fill(description)
     await this.page.getByTestId("builder-build").click()
     const candidate = this.page.getByTestId("built-candidate")
     await expect(candidate).toBeVisible({ timeout: opts.timeout ?? 780_000 })
     return ((await candidate.getByRole("heading", { level: 2 }).textContent()) ?? "").trim()
   }
 
-  /** Step 3: "Add to project" from Review & try. */
+  /** Step 3: "Add to project" from Try it. */
   async addCandidate(): Promise<void> {
     const installed = this.page.waitForResponse(
       (r) => r.request().method() === "POST" && /\/tools$/.test(new URL(r.url()).pathname),
@@ -131,7 +131,7 @@ export class ToolsPage {
   }
 
   async openActivity(name: string): Promise<Locator> {
-    await this.openToolMenu(name, "Changes & undo")
+    await this.openToolMenu(name, "Changes")
     return this.page.getByRole("dialog").getByRole("region", { name: "Changes" })
   }
 

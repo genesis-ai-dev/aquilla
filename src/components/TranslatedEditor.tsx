@@ -45,6 +45,10 @@ import { createKaraokeExtension, karaokePluginKey, type KaraokePluginState } fro
 import { createSmartQuotesExtension } from "@/lib/richtext/smart-quotes"
 import { createTerminologyChipExtension, terminologyChipPluginKey } from "@/lib/richtext/terminology-chip-plugin"
 import { createFootnoteDecorationExtension, footnoteDecorationPluginKey } from "@/lib/richtext/footnote-decoration-plugin"
+import { acceptGhostText, createGhostTextExtension, getGhostText, handleGhostKeyDown } from "@/lib/richtext/ghost-text-plugin"
+import type { ForecastClient } from "@/lib/forecast/forecast-client"
+import { useForecast } from "@/context/ForecastContext"
+import { WordsThatFitMenu } from "@/components/WordsThatFitMenu"
 import { UsfmFootnote } from "@/lib/richtext/footnote-node"
 import { resolveEditorClickTarget } from "@/lib/richtext/editor-click-target"
 import {
@@ -551,6 +555,15 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   healthSpans = EMPTY_HEALTH_SPANS,
 }, ref) {
   const t = useT()
+  // BIA ghost text: read through refs by the editor plugin, which is created
+  // once per cell. Null (setting off / no provider / read-only) = no ghost.
+  const forecast = useForecast()
+  const ghostClientRef = useRef<ForecastClient | null>(null)
+  useEffect(() => {
+    ghostClientRef.current = forecast?.ghostTextEnabled && editable ? forecast.client : null
+  }, [forecast, editable])
+  const ghostCellIdRef = useRef(cellId)
+  useEffect(() => { ghostCellIdRef.current = cellId }, [cellId])
   // Held in a ref so the editor's keydown handler — created once per cellId —
   // always sees the latest navigation callback without re-creating the editor.
   const onNavigateCellRef = useRef(onNavigateCell)
@@ -836,6 +849,12 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       createHealthScoreDecorationExtension(() => latestHealthSpansRef.current),
       createSmartEditDecorationExtension(() => latestSmartEditsRef.current),
       createKaraokeExtension(() => latestKaraokeStateRef.current),
+      ...(idmlContext
+        ? []
+        : [createGhostTextExtension({
+            getClient: () => ghostClientRef.current,
+            getCellId: () => ghostCellIdRef.current,
+          })]),
       ...(smartQuotes ? [createSmartQuotesExtension(lang)] : []),
       ...(terminologyConcepts !== undefined
         ? [createTerminologyChipExtension(
@@ -1203,6 +1222,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       // AQU-297: Escape commits pending work (via blur) and signals the parent
       // to return keyboard focus to the grid-row wrapper, exiting edit mode.
       handleKeyDown(view, event) {
+        // A visible ghost suggestion owns Tab / → (at the end) / Esc first:
+        // Tab accepts instead of moving cells, Esc dismisses instead of exiting.
+        if (handleGhostKeyDown(view, event)) return true
         // AQU-297: Esc — commit-and-exit back to grid focus.
         if (event.key === "Escape") {
           event.preventDefault()
@@ -1757,12 +1779,20 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     if (event.key !== "Tab") return
     const target = event.target as HTMLElement | null
     if (!target?.closest(".ProseMirror")) return
+    // A visible ghost suggestion takes Tab (accept) before cell navigation —
+    // this capture handler runs ahead of ProseMirror's own keydown props.
+    if (!event.shiftKey && editor && !editor.isDestroyed && getGhostText(editor.state)) {
+      event.preventDefault()
+      event.stopPropagation()
+      acceptGhostText(editor.view)
+      return
+    }
     const navigate = onNavigateCellRef.current
     if (!navigate) return
     event.preventDefault()
     event.stopPropagation()
     navigate(event.shiftKey ? "prev" : "next")
-  }, [])
+  }, [editor])
 
   const handleFormattingToolbarMouseDown = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault()
@@ -2027,6 +2057,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
               <Code className="h-3 w-3" />
             </Button>
           </AppTooltip>
+          {forecast && <WordsThatFitMenu editor={editor} client={forecast.client} cellId={cellId} />}
         </div>
       </BubbleMenu>}
       {idmlError && (

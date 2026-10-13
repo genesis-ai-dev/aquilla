@@ -852,10 +852,14 @@ CREATE TABLE cell_waivers (
     file_id    TEXT NOT NULL,
     cell_id    TEXT NOT NULL,
     rule_id    TEXT NOT NULL,
+    -- AQU-1740 (migration 0163): hash of the ONE finding this waiver dismisses
+    -- (src/lib/rules/match-hash.ts). '' = no finding named, i.e. the rule is
+    -- waived across the whole cell — the meaning of every row predating 0163.
+    match_hash TEXT NOT NULL DEFAULT '',
     reason     TEXT,
     waived_by  TEXT NOT NULL,
     waived_ts  BIGINT NOT NULL,
-    PRIMARY KEY (project_id, file_id, cell_id, rule_id)
+    PRIMARY KEY (project_id, file_id, cell_id, rule_id, match_hash)
 );
 
 CREATE TABLE cell_audio (

@@ -27,6 +27,7 @@ import {
   getOrgMemberRole,
   combineVisibilityFloors,
   getOrgVisibilityFloors,
+  getProjectRosterListFloors,
   getRosterViewMinRole,
   groupExistsInOrg,
   listEffectiveMembersForOrg,
@@ -560,6 +561,13 @@ orgs.get("/:orgId/assignments/mine", async (c) => {
  * the caller can access in the org, in ONE request (AQU-218). Replaces the
  * client's per-project /:projectId/members fan-out that flooded the connection
  * pool and 500'd the page. Any org member.
+ *
+ * AQU-1771: a project's roster is in the answer only when the caller could
+ * read it from GET /projects/:id/members — their role on that project meets
+ * its member-list floor (the org's, with the assigner carve-out on the org's
+ * value only, raised by the project's own stricter value). Before this the
+ * matrix handed every org member every reachable project's full roster,
+ * whatever the org or the project had hidden. An owner meets every floor.
  */
 orgs.get("/:orgId/members-matrix", async (c) => {
   const user = c.get("user")
@@ -569,7 +577,18 @@ orgs.get("/:orgId/members-matrix", async (c) => {
   const role = await getEffectiveOrgRole(c.env, orgId, user)
   if (role == null) return c.json({ error: "not an org member" }, 403)
 
-  const projects = await listEffectiveMembersForOrg(c.env, orgId, user.id)
+  let projects = await listEffectiveMembersForOrg(c.env, orgId, user.id)
+  if (role < ROLE.OWNER && projects.length > 0) {
+    const ids = projects.map((p) => p.projectId)
+    const [floors, projectRoles] = await Promise.all([
+      getProjectRosterListFloors(c.env, orgId, ids),
+      resolveProjectRoles(c.env, user, ids),
+    ])
+    projects = projects.filter((p) => {
+      const floor = floors.get(p.projectId)
+      return floor != null && canViewRoster(projectRoles.get(p.projectId)?.level ?? null, floor)
+    })
+  }
   await bumpOrgActivity(c.env, user.id, orgId)
   return c.json({
     projects: projects.map((p) => ({

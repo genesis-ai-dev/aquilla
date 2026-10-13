@@ -37,6 +37,7 @@ import { effectiveThresholdSql } from "../../../db/shared/validation-threshold"
 import {
   loadOrgProjectVisibilityOverrides,
   loadProjectVisibilityOverride,
+  loadProjectVisibilityOverrides,
   parseProjectVisibilityFloor,
   stricterProjectFloor,
   VISIBILITY_FLOOR_KEYS,
@@ -2693,16 +2694,48 @@ export async function getProjectRosterViewMinRole(
     getAssignmentMinRole(env, orgId),
     projectId != null ? loadProjectVisibilityOverride(env.AQUILLA_PG, projectId) : null,
   ])
+  return resolveProjectRosterListFloor(rosterFloor, assignmentFloor, own?.rosterViewMinRole)
+}
+
+/**
+ * The project member-list floor from its parts: the org's roster floor with
+ * the assigner carve-out above, raised by the project's own stricter value.
+ *
+ * AQU-1771: the carve-out is the ORG's (its assignment floor reading its
+ * roster), so it never lowers a project's own stricter value — that would let
+ * a project lead read a roster the project closed to them. A project value at
+ * or below the org's is inert and leaves the carve-out alone.
+ */
+function resolveProjectRosterListFloor(
+  rosterFloor: number,
+  assignmentFloor: number,
+  ownRaw: unknown,
+): number {
   const orgResolved = rosterFloor > DEFAULT_ROSTER_VIEW_MIN_ROLE
     ? rosterFloor
     : Math.min(rosterFloor, assignmentFloor)
-  // AQU-1771: a project may make its member list stricter than the org's. The
-  // carve-out above is the ORG's (its assignment floor reading its roster), so
-  // it never lowers a project's own stricter value: that would let a project
-  // lead read a roster the project closed to them. A project value at or below
-  // the org's is inert and leaves the carve-out alone.
-  const projectFloor = stricterProjectFloor(rosterFloor, own?.rosterViewMinRole)
-  return Math.max(orgResolved, projectFloor ?? 0)
+  return Math.max(orgResolved, stricterProjectFloor(rosterFloor, ownRaw) ?? 0)
+}
+
+/**
+ * AQU-1771: `getProjectRosterViewMinRole` for several projects of one org in
+ * one read each — for the org surfaces that list many projects' members at
+ * once (the members matrix).
+ */
+export async function getProjectRosterListFloors(
+  env: Env,
+  orgId: number,
+  projectIds: readonly string[],
+): Promise<Map<string, number>> {
+  const [rosterFloor, assignmentFloor, overrides] = await Promise.all([
+    getRosterViewMinRole(env, orgId),
+    getAssignmentMinRole(env, orgId),
+    loadProjectVisibilityOverrides(env.AQUILLA_PG, projectIds),
+  ])
+  return new Map(projectIds.map((id) => [
+    id,
+    resolveProjectRosterListFloor(rosterFloor, assignmentFloor, overrides.get(id)?.rosterViewMinRole),
+  ]))
 }
 
 /**

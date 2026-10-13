@@ -553,3 +553,65 @@ describe("counting the org's stricter projects (AQU-1771)", () => {
     expect((await counts("stranger")).status).toBe(403)
   })
 })
+
+// AQU-1771: the org's members matrix lists many projects' rosters at once. A
+// project's roster is in it only when the caller could read it from GET
+// /projects/:id/members — the same floor, project override included.
+describe("members matrix follows each project's member-list floor (AQU-1771)", () => {
+  const matrix = async (username: string) => {
+    const res = await app.request("/api/v2/orgs/1/members-matrix", { headers: authHeader(await jwtFor(username)) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { projects: Array<{ projectId: string; members: Array<{ username: string }> }> }
+    return new Map(body.projects.map((p) => [p.projectId, p.members.map((m) => m.username).sort()]))
+  }
+
+  async function grant(projectId: string, userId: number, level: number) {
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, ?, ?, 1)",
+    )
+      .bind(projectId, userId, level)
+      .run()
+  }
+
+  it("gives a contributor no roster for a project whose member list is closed to them", async () => {
+    await seedOrgAndProject()
+    await grant("proj1", 3, 400)
+    // Default floor (Maintainer): /projects/proj1/members refuses tom...
+    expect((await getProjectMembers("tom")).status).toBe(403)
+    // ...so the matrix must not hand him the same roster.
+    expect((await matrix("tom")).has("proj1")).toBe(false)
+  })
+
+  it("gives a viewer no roster either, and the roster once the org opens the list to viewers", async () => {
+    await seedOrgAndProject()
+    await grant("proj1", 4, 100)
+    expect((await matrix("vera")).has("proj1")).toBe(false)
+    await setOrgSettings({ rosterViewMinRole: 100 })
+    expect((await getProjectMembers("vera")).status).toBe(200)
+    expect((await matrix("vera")).get("proj1")).toContain("wendi")
+  })
+
+  it("gives an org maintainer no roster for a project whose member list is Owners only", async () => {
+    await seedOrgAndProject()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_settings (project_id, settings, version, updated_by) VALUES ('proj1', ?, 1, 1)",
+    )
+      .bind(JSON.stringify({ rosterViewMinRole: 700 }))
+      .run()
+    expect((await getProjectMembers("anna")).status).toBe(403)
+    expect((await matrix("anna")).has("proj1")).toBe(false)
+    // An owner still sees it.
+    expect((await matrix("wendi")).has("proj1")).toBe(true)
+  })
+
+  it("keeps the assigners' carve-out on the org's value: a reviewer who may assign work gets the roster", async () => {
+    await seedOrgAndProject()
+    await seedUser(5, "rita")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 5, 300, 1)",
+    ).run()
+    await grant("proj1", 5, 300)
+    await setOrgSettings({ rosterViewMinRole: 400, assignmentMinRole: 300 })
+    expect((await matrix("rita")).has("proj1")).toBe(true)
+  })
+})

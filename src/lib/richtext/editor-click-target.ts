@@ -14,7 +14,14 @@
 
 /** What a click inside the editor resolved to, in precedence order. */
 export type EditorClickTarget =
-  | { kind: "rule"; ruleId: string; element: HTMLElement }
+  | {
+      kind: "rule"
+      ruleId: string
+      /** AQU-1740: the finding this blot covers, when it has one. Absent on an
+       *  absence-rule blot, where only a cell-wide waiver is meaningful. */
+      matchHash?: string
+      element: HTMLElement
+    }
   | { kind: "smartEdit"; id: string; element: HTMLElement }
   | { kind: "term"; term: string; element: HTMLElement }
   | null
@@ -34,7 +41,13 @@ export function resolveEditorClickTarget(
   if (handlers.rule) {
     const blot = target.closest<HTMLElement>("[data-rule-id]")
     if (blot) {
-      return { kind: "rule", ruleId: blot.getAttribute("data-rule-id") ?? "", element: blot }
+      const matchHash = blot.getAttribute("data-match-hash")
+      return {
+        kind: "rule",
+        ruleId: blot.getAttribute("data-rule-id") ?? "",
+        ...(matchHash ? { matchHash } : {}),
+        element: blot,
+      }
     }
   }
 

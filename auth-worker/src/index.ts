@@ -106,6 +106,7 @@ import aiInterventionRoutes from "./routes/ai-interventions"
 import sceneBriefRoutes from "./routes/scene-briefs"
 import contextualRoutes from "./routes/contextual"
 import contextualDecisionsRoutes from "./routes/contextual-decisions"
+import contextualBibleCheckRoutes from "./routes/contextual-bible-check"
 import teamRoutes from "./routes/team"
 import teamHandoffRoutes from "./routes/team-handoffs"
 import agentArtifactsRoutes from "./routes/agent-artifacts"
@@ -122,6 +123,7 @@ import { flushDirtyLinks } from "./lib/monday/push"
 import { createRequestMemo } from "./lib/request-memo"
 import { pruneExpiredRevokedTokens } from "./utils/token-revocation"
 import { pruneExpiredTraces } from "./lib/contextual/traces"
+import { sweepContextualRunSteps } from "../../db/shared/contextual-run-steps"
 import { startReactionRun, sweepStrandedContextualRuns, wakeReactionRun } from "./routes/contextual"
 import { runReactSweep } from "./lib/react-loop"
 import {
@@ -322,6 +324,8 @@ app.route("/api/v2/projects", contextualRoutes)
 // Decision routes — the agent → user channel's HTTP surface (seam design
 // §4.3). Sibling router — same base as contextual.ts (routes/contextual-decisions.ts).
 app.route("/api/v2/projects", contextualDecisionsRoutes)
+// AQU-1690: "Check with Bible data" over translated cells (routes/contextual-bible-check.ts).
+app.route("/api/v2/projects", contextualBibleCheckRoutes)
 // Durable team channel — the shared, project-scoped message store behind the
 // one-channel agent workspace (routes/team.ts). Sibling router, same base as
 // contextual.ts; the autopilot tick writes activity into it server-side.
@@ -562,6 +566,14 @@ const scheduled = async (
     await pruneExpiredRevokedTokens(runEnv.AQUILLA_PG)
     // Autopilot prompt/reply traces expire after 30 days. Non-throwing.
     await pruneExpiredTraces(runEnv.AQUILLA_PG)
+    // AQU-1845 — abandoned wave checkpoints. The driver clears its own after
+    // every completed wave, so rows reaching this age belong to a driver that
+    // died and never came back. Must never take the cron down with it.
+    try {
+      await sweepContextualRunSteps(runEnv.AQUILLA_PG)
+    } catch (err) {
+      console.warn("[contextual cron] checkpoint sweep failed (non-fatal):", err)
+    }
     // Contextual autopilot: restart runs whose driver died and wake runs that
     // parked with spans still queued, so long files finish unattended. Failing
     // here must never take the Monday flush down with it.
@@ -595,6 +607,11 @@ const scheduled = async (
     if (shim) ctx.waitUntil(sweepDone.then(() => shim!.close()))
   }
 }
+
+// AQU-1845 — the per-run Autopilot driver. A Durable Object class must be a
+// named export of the Worker's entrypoint module for the runtime to find it;
+// the binding and migration live in wrangler.toml.
+export { ContextualRunDriver } from "./contextual-run-do"
 
 // Keep `export default app` semantics (tests call app.request) while giving
 // the Workers runtime a `scheduled` handler on the same default export.

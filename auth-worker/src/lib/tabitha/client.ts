@@ -20,10 +20,18 @@
 // Upstream carries no versioning guarantee ("built for TaBiThA's own UIs
 // first"), so parseCopilotStream validates defensively and never throws.
 
+import {
+  logVendorTimeout,
+  vendorTimeoutMessage,
+  VENDOR_TIMEOUT_MS,
+} from "../../../../shared/vendor-timeouts"
+
 const BASE_URL = "https://copilot.tabitha.bible"
 const USER_AGENT = "Aquilla/1.0 (+https://aquilla.app)"
 /** A never-requested verse took ~35s upstream when probed (2026-09-28). */
-const TIMEOUT_MS = 45_000
+/** AQU-1849: lives in `shared/vendor-timeouts.ts` with every other vendor
+ *  deadline. Much longer than a plain Aquifer read — TaBiThA builds a brief. */
+const TIMEOUT_MS = VENDOR_TIMEOUT_MS.tabitha
 const MAX_RESPONSE_BYTES = 200_000
 const CACHE_SECONDS = 86_400
 
@@ -148,7 +156,11 @@ async function fetchStream(url: string): Promise<TabithaResult<string>> {
     return { ok: true, data: text.slice(0, MAX_RESPONSE_BYTES) }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    return { ok: false, error: controller.signal.aborted ? "tabitha request timed out" : msg }
+    if (controller.signal.aborted) {
+      logVendorTimeout("tabitha", err)
+      return { ok: false, error: vendorTimeoutMessage("tabitha") }
+    }
+    return { ok: false, error: msg }
   } finally {
     clearTimeout(timer)
   }

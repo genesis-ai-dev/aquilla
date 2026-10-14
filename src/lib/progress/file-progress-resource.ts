@@ -117,6 +117,18 @@ const DB_VERSION = 1
 const STORE = 'progress'
 const REQUEST_TIMEOUT_MS = 15_000
 const PREFETCH_FRESH_MS = 30_000
+/**
+ * AQU-1832: how long a record may live on pushed frames alone before it reads
+ * the authoritative body again.
+ *
+ * The push is an accelerator, not a replacement — it can be dropped by a dead
+ * socket, superseded out of order by a concurrent writer, or built from a
+ * recompute that a later one corrected. None of those is observable from
+ * here, so the repair is on a clock rather than on a signal. Long enough that
+ * it is nothing like the per-event polling it replaces, short enough that no
+ * one stares at a wrong percentage for a session.
+ */
+const PUSH_REPAIR_MS = 5 * 60_000
 const EMPTY_STATE: FileProgressResourceState = { progress: null, loading: false, error: false, fromCache: false }
 
 interface ResourceRecord extends FileProgressResourceState {
@@ -135,6 +147,8 @@ interface ResourceRecord extends FileProgressResourceState {
   inFlight: Promise<void> | null
   refreshAfterFlight: boolean
   getToken: (() => Promise<string | null>) | null
+  /** AQU-1832: armed while this record is living off pushed frames. */
+  repairTimer: ReturnType<typeof setTimeout> | null
   listeners: Set<() => void>
 }
 
@@ -147,6 +161,11 @@ export function setFileProgressCacheOwner(ownerKey: string | null): void {
   activeOwnerKey = ownerKey
   // Resource records carry server responses and optimistic overlays in memory.
   // A new owner must build a fresh set even when project/file ids coincide.
+  // AQU-1832: and a repair timer closes over the record it was armed for, so
+  // it has to die with that record rather than wake up against the new owner.
+  for (const record of resources.values()) {
+    if (record.repairTimer !== null) clearTimeout(record.repairTimer)
+  }
   resources.clear()
   // A queued job also closes over the prior account's token fetcher. Active
   // work finishes into its captured storage key; work not started is dropped.
@@ -196,6 +215,7 @@ function resourceFor(projectId: string, fileId: string, lane = ''): ResourceReco
       inFlight: null,
       refreshAfterFlight: false,
       getToken: null,
+      repairTimer: null,
       listeners: new Set(),
     }
     resources.set(cacheKey, record)
@@ -496,6 +516,106 @@ export function setLocalFileProgress(
   }
 }
 
+/**
+ * AQU-1832: one file+lane's post-commit progress, pushed on the project
+ * socket instead of fetched. Mirrors the `/progress` body: `counts` is its
+ * `file` block, `sections` its section list (complete, or the subset the
+ * server's recompute rewrote).
+ */
+export interface PushedFileProgress {
+  fileId: string
+  lane: string
+  revision: number
+  validationCount: number
+  /** The server rewrote every section row — replace the list, don't upsert. */
+  complete: boolean
+  counts: ProgressCounts
+  sections: Array<{ key: string } & ProgressCounts>
+}
+
+function armPushRepair(record: ResourceRecord): void {
+  if (record.repairTimer !== null) return
+  record.repairTimer = setTimeout(() => {
+    record.repairTimer = null
+    // Nothing is displaying this record any more — the next mount does a real
+    // read on its own, so a timer-driven request here would be for no one.
+    if (record.listeners.size === 0 || !record.getToken) return
+    void loadResource(record.projectId, record.fileId, record.getToken, true, record.lane)
+  }, PUSH_REPAIR_MS)
+}
+
+/**
+ * Merge a pushed progress frame into the resource the `/progress` read feeds.
+ *
+ * Returns false when the push cannot be merged SAFELY, and the caller then
+ * does what it did before: invalidate and refetch. That is the whole contract
+ * — this is allowed to save a read, never to be the only way a number
+ * arrives. It refuses when:
+ *
+ *   - there is no server body to merge into (nothing has read this file+lane,
+ *     so nothing is showing it and there is no base to patch);
+ *   - the base is the pre-backfill `file-counter-fallback` body, whose empty
+ *     section list is not a section list this patch can extend;
+ *   - a partial frame names a section the base has never seen — appending it
+ *     would put a chapter out of document order, and the read route is the
+ *     only thing that knows that order;
+ *   - the frame is older than what the record already holds (two writers'
+ *     passes can finish out of order; the newer answer wins and the older one
+ *     must not resurrect the numbers it predates).
+ *
+ * The stored ETag is dropped on every merge. It describes the body the SERVER
+ * last sent, and this body is newer than that — keeping it would let the next
+ * conditional read be answered 304 against a validator that no longer matches
+ * what is cached. The cost is one unconditional read later; the alternative is
+ * a durable IndexedDB body that can never be corrected.
+ */
+export function applyPushedFileProgress(projectId: string, push: PushedFileProgress): boolean {
+  const record = resourceFor(projectId, push.fileId, push.lane)
+  const base = record.server
+  if (!base || base.source === 'file-counter-fallback') return false
+  if (push.revision < base.revision) {
+    // Already holding a newer answer. Handled — and deliberately NOT a
+    // refetch: re-reading because an out-of-order frame arrived would put
+    // back exactly the request this push exists to remove.
+    return true
+  }
+
+  let sections: FileProgressResponse['sections']
+  if (push.complete) {
+    sections = push.sections
+  } else {
+    const byKey = new Map(push.sections.map((section) => [section.key, section]))
+    sections = base.sections.map((section) => byKey.get(section.key) ?? section)
+    for (const key of byKey.keys()) {
+      if (!base.sections.some((section) => section.key === key)) return false
+    }
+  }
+
+  const next: FileProgressResponse = {
+    ...base,
+    revision: push.revision,
+    validationCount: push.validationCount,
+    file: push.counts,
+    sections,
+    source: 'projection',
+  }
+  record.server = next
+  // An optimistic overlay for this client's own un-flushed writes still wins,
+  // exactly as it does over a server read (see loadResource).
+  if (record.pendingEventIds.length === 0) {
+    record.local = null
+    record.progress = next
+  }
+  record.etag = null
+  record.fetchedAt = Date.now()
+  record.error = false
+  record.fromCache = false
+  emit(record)
+  void writeCache(record)
+  armPushRepair(record)
+  return true
+}
+
 export function invalidateFileProgress(projectId: string, fileId: string, lane = ''): void {
   const record = resourceFor(projectId, fileId, lane)
   if (record.getToken) void loadResource(projectId, fileId, record.getToken, true, lane)
@@ -607,6 +727,9 @@ export async function getPlanFirstOpenCell(
 
 export async function resetFileProgressResourceForTests(): Promise<void> {
   activeOwnerKey = undefined
+  for (const record of resources.values()) {
+    if (record.repairTimer !== null) clearTimeout(record.repairTimer)
+  }
   resources.clear()
   prefetchQueue.length = 0
   queuedOrActivePrefetches.clear()

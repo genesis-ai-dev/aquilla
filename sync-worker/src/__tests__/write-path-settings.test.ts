@@ -1,5 +1,5 @@
 // AQU-1840: POST /events answers its authority questions from the `wp_*`
-// generated columns (migration 0159), never from the multi-MB `settings` blob.
+// generated columns (migration 0171), never from the multi-MB `settings` blob.
 //
 // The regression this pins is a performance one that only shows at scale, so it
 // is pinned as a SHAPE: the statements the route sends. A reviewer who reverts
@@ -145,7 +145,7 @@ describe('writePathSettingsFromRow', () => {
   })
 })
 
-describe('a database without migration 0159', () => {
+describe('a database without migration 0171', () => {
   /** Answers the blob read and errors on the projected one. */
   function blobOnlyDb(settings: string | null, opts: { blobFails?: boolean } = {}) {
     let blobReads = 0

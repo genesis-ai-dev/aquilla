@@ -15,7 +15,11 @@
 //   npx tsx scripts/neon-migrate.ts apply      apply pending migrations in
 //       filename order and record them. Refuses to run until the DB has been
 //       baselined — re-running ALL historical files on a live DB is unsafe
-//       (0031 drops + recreates `snapshots`).
+//       (0031 drops + recreates `snapshots`). Each file commits together with
+//       its `schema_migrations` row (AQU-1877) under a `lock_timeout` of 5s
+//       (AQUILLA_MIGRATION_LOCK_TIMEOUT to override); a file needing
+//       `CREATE INDEX CONCURRENTLY` takes the documented non-transactional
+//       path in scripts/neon-migration-file.ts.
 //   npx tsx scripts/neon-migrate.ts baseline   one-time bootstrap: create the
 //       ledger and mark every existing migration file as applied WITHOUT
 //       running it. Refuses if the schema diff shows drift — fix the drift by
@@ -26,6 +30,12 @@
 // the environment — CI passes them as secrets). Targets whatever branch
 // NEON_PG_HOST points at; override it to check the staging Neon branch.
 //
+// Because this script cannot tell WHICH branch that is, `apply` against a
+// remote branch needs the snapshot decision made for it (AQU-1877): run it
+// through `pnpm neon:apply:dev` / `neon:apply:prod`, which know the target and
+// can cut the snapshot branch, or pass `--no-snapshot` here to assert that the
+// branch is already snapshotted or disposable. A local apply is never gated.
+//
 // Convention (unchanged): every migration file must be idempotent
 // (IF NOT EXISTS guards) and schema.sql must be kept up to date as the
 // rollup, since the schema diff here treats it as the source of truth.
@@ -35,7 +45,8 @@ import { fileURLToPath } from "node:url"
 import type { Client } from "pg"
 import { neonClient } from "./pg"
 import { prepareCommentsKey } from "./neon-comments-key"
-import { applyMigrationFile } from "./neon-migration-file"
+import { applyMigrationFile, lockTimeoutSetting } from "./neon-migration-file"
+import { directApplyRefusal, NO_SNAPSHOT_FLAG } from "./neon-apply-guard"
 import {
   diffSchemaContract,
   expectedSchemaContract,
@@ -170,12 +181,17 @@ async function apply(client: Client): Promise<number> {
   if (!pending.length) {
     console.log("✓ nothing to apply")
   }
+  const lockTimeout = lockTimeoutSetting()
   for (const f of pending) {
-    console.log(`applying ${f}…`)
-    await applyMigrationFile(
-      client, f, fs.readFileSync(path.join(MIGRATIONS_DIR, f), "utf8"),
+    console.log(`applying ${f}… (lock_timeout=${lockTimeout})`)
+    const plan = await applyMigrationFile(
+      client, f, fs.readFileSync(path.join(MIGRATIONS_DIR, f), "utf8"), { lockTimeout },
     )
-    console.log(`✓ applied ${f}`)
+    console.log(
+      plan.mode === "transactional"
+        ? `✓ applied ${f} (file + ledger row in one transaction)`
+        : `✓ applied ${f} (non-transactional: ${plan.reason}; ${plan.statements.length} statement(s), ledger row written last)`,
+    )
   }
   return status(client)
 }
@@ -206,12 +222,22 @@ async function baseline(client: Client): Promise<number> {
 async function main() {
   const cmd = process.argv[2] ?? "status"
   if (!["status", "apply", "baseline", "prepare-comments-key"].includes(cmd)) {
-    console.error("usage: neon-migrate.ts [status|apply|baseline|prepare-comments-key]")
+    console.error(`usage: neon-migrate.ts [status|apply|baseline|prepare-comments-key] [${NO_SNAPSHOT_FLAG}]`)
     process.exit(1)
   }
   // pg.ts reads NEON_PG_* at neonClient() call time, so loading .env here
   // (after import) is safe.
   loadDotEnv()
+  // This entry point does not know which Neon branch NEON_PG_HOST names, so the
+  // snapshot decision has to come from a flag or from neon-target.ts
+  // (AQU-1877). Refuse before opening a connection, let alone applying.
+  if (cmd === "apply") {
+    const refusal = directApplyRefusal(process.argv, process.env)
+    if (refusal) {
+      console.error(refusal)
+      process.exit(1)
+    }
+  }
   const client = neonClient()
   await client.connect()
   try {

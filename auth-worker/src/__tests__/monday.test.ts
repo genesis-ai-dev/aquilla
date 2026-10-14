@@ -392,7 +392,8 @@ describe("POST /api/v2/monday/internal/push", () => {
 
     const res = await internalPush(`Bearer ${env.SYNC_SECRET_KEY}`)
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ ok: true, pushed: false })
+    // `linked: true` is what the sync-worker DO caches (AQU-1828).
+    expect(await res.json()).toEqual({ ok: true, pushed: false, linked: true })
     expect(fetchMock).not.toHaveBeenCalled()
 
     const link = await env.AQUILLA_PG.prepare(

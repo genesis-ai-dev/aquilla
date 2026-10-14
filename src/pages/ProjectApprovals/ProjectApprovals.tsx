@@ -35,8 +35,10 @@ import { DateTooltip } from "@/components/ui/date-tooltip"
 import { ChangesetHeldNotice } from "@/components/agent/ChangesetHeldNotice"
 import {
   approveChangeset,
+  commitChangeset,
   fetchChangesetApproval,
   listProjectChangesets,
+  needsCommitOnApproval,
   rejectChangeset,
   type ChangesetListItem,
 } from "@/lib/agent/changeset-api"
@@ -117,6 +119,12 @@ export function ProjectApprovals() {
       try {
         const approval = await fetchChangesetApproval(jwt, changesetId)
         await approveChangeset(jwt, changesetId, approval.digest)
+        // AQU-1673: a session-staged plan ("Import as proposals") has no agent
+        // watching for this approval, so approving it here has to apply it
+        // too. An agent's plan is left for the agent, which is watching.
+        if (needsCommitOnApproval(approval)) {
+          await commitChangeset(jwt, approval.projectId, changesetId)
+        }
         setRowStates((prev) => ({ ...prev, [changesetId]: { phase: "approved" } }))
         return true
       } catch (err) {

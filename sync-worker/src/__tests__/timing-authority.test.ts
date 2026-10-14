@@ -10,7 +10,7 @@ import { projectSettingsRow, type SettingsDbMode } from "./helpers/project-setti
 function makeDb(options: {
   settings?: string | null
   metadata?: unknown
-  /** AQU-1840: 'blob-only' models a database without the 0159 projection. */
+  /** AQU-1840: 'blob-only' models a database without the 0171 projection. */
   mode?: SettingsDbMode
 }): AquillaDb {
   const { settings = null, metadata = null, mode = "projected" } = options

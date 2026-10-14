@@ -8,6 +8,7 @@ import {
   sandboxExec,
   sandboxFetchArtifact,
   sandboxReadFile,
+  sandboxTenant,
   type SandboxEnv,
 } from "./sandbox-client"
 import { proposeMemory, proposeBriefUpdate, type MemoryProvenance } from "./memory-writes"
@@ -71,7 +72,15 @@ export async function runCode(args: RunCodeArgs, ctx: HarnessToolCtx): Promise<s
     codePreview: code.slice(0, CODE_PREVIEW_MAX),
   })
 
-  const out = await sandboxExec(ctx.env, ctx.sandboxSessionId, { language, code, timeoutMs }, ctx.signal)
+  // AQU-1848: agent runs share the per-tenant pool cap with sandbox imports, so
+  // one user cannot drain the container pool from either direction.
+  const out = await sandboxExec(
+    ctx.env,
+    ctx.sandboxSessionId,
+    { language, code, timeoutMs },
+    ctx.signal,
+    sandboxTenant(ctx.userId),
+  )
   if (!out.available) {
     ctx.send({
       type: "tool.code.output",
@@ -148,6 +157,7 @@ export async function loadArtifact(args: LoadArtifactArgs, ctx: HarnessToolCtx):
     ctx.sandboxSessionId,
     { key: row.r2_key, path },
     ctx.signal,
+    sandboxTenant(ctx.userId),
   )
   if (!out.available) return `error: ${out.reason}`
   return `ok: loaded artifact ${artifactId} → ${path} (${out.data.bytes} bytes)`
@@ -177,7 +187,7 @@ export async function readSandboxFile(
       ? Math.min(args.maxBytes, READ_SANDBOX_MAX_BYTES)
       : READ_SANDBOX_MAX_BYTES
 
-  const out = await sandboxReadFile(ctx.env, ctx.sandboxSessionId, path, maxBytes, ctx.signal)
+  const out = await sandboxReadFile(ctx.env, ctx.sandboxSessionId, path, maxBytes, ctx.signal, sandboxTenant(ctx.userId))
   if (!out.available) return `error: ${out.reason}`
   return out.data.truncated ? `${out.data.text}\n…(truncated at ${maxBytes} bytes)` : out.data.text
 }

@@ -410,6 +410,8 @@ const bareContext = {
   briefParameters: {},
   concepts: [],
   authoredRules: [],
+  projectFacts: [],
+  languageProfile: {},
 }
 
 describe("computeContextReadiness", () => {
@@ -553,5 +555,48 @@ describe("lane-scoped authored rules (AQU-609)", () => {
     expect(rulesForLane(ctx.authoredRules, "fr").map((r) => r.id)).toEqual(["all", "fr-only"])
     expect(rulesForLane(ctx.authoredRules, "es").map((r) => r.id)).toEqual(["all"])
     expect(rulesForLane(ctx.authoredRules, "").map((r) => r.id)).toEqual(["all", "default-only"])
+  })
+})
+
+// AQU-1699: the termbase does not say which target lane a rendering is for,
+// so with several lanes a terminology entry gives a name only when it has one
+// rendering. WHY: the registry may list the primary language itself
+// (AQU-1473); that is the default lane, not a second one.
+describe("several target lanes (AQU-1699)", () => {
+  // AQU-1595: the lane rows are the list. The settings registry only answers
+  // for a project that has no rows yet.
+  async function seedTargetLane(projectId: string, id: string, tag: string, archivedAt: string | null = null) {
+    await db
+      .prepare(
+        `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position, archived_at)
+         VALUES (?, ?, 'target', ?, ?, 0, ?)`,
+      )
+      .bind(id, projectId, tag, tag, archivedAt)
+      .run()
+  }
+
+  it("counts a second active target lane row, but not an archived one", async () => {
+    await seedSettings("proj-ctx-row-one", {})
+    await seedTargetLane("proj-ctx-row-one", "ctxrow1a", "")
+    expect((await loadProjectContext(db, "proj-ctx-row-one")).multiLane).toBeUndefined()
+
+    await seedSettings("proj-ctx-row-archived", {})
+    await seedTargetLane("proj-ctx-row-archived", "ctxrow2a", "")
+    await seedTargetLane("proj-ctx-row-archived", "ctxrow2b", "fr", "2026-10-01T00:00:00Z")
+    expect((await loadProjectContext(db, "proj-ctx-row-archived")).multiLane).toBeUndefined()
+
+    await seedSettings("proj-ctx-row-two", {})
+    await seedTargetLane("proj-ctx-row-two", "ctxrow3a", "")
+    await seedTargetLane("proj-ctx-row-two", "ctxrow3b", "fr")
+    expect((await loadProjectContext(db, "proj-ctx-row-two")).multiLane).toBe(true)
+  })
+
+  it("without lane rows, counts a registered lane beside the primary, but not the primary or an archived lane", async () => {
+    await seedSettings("proj-ctx-one-lane", { targetLanguage: "en", targetLanes: ["en"] })
+    expect((await loadProjectContext(db, "proj-ctx-one-lane")).multiLane).toBeUndefined()
+    await seedSettings("proj-ctx-archived-lane", { targetLanguage: "en", targetLanes: ["en", "fr"], archivedLanes: ["fr"] })
+    expect((await loadProjectContext(db, "proj-ctx-archived-lane")).multiLane).toBeUndefined()
+    await seedSettings("proj-ctx-two-lanes", { targetLanguage: "en", targetLanes: ["en", "fr"] })
+    expect((await loadProjectContext(db, "proj-ctx-two-lanes")).multiLane).toBe(true)
   })
 })

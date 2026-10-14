@@ -79,6 +79,7 @@ import {
   normalizeProtectedCompletionWithRepair,
 } from "@/lib/idml/completion"
 import { alignIdmlStyles, cellCanAlignStyles } from "@/lib/idml/align-styles"
+import { clearStyleAlignDirty } from "@/lib/store/style-align-dirty"
 import { t } from "@/lib/i18n/standalone"
 
 // Cap per LLM call. Above this we split into independent review packages.
@@ -624,6 +625,7 @@ export function useCompletion(
         return rawOutput
       })
       if (!aligned.changed) {
+        clearStyleAlignDirty(cell.id)
         setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
         setErrors((p) => new Map(p).set(lk(cell.id), t("editor.idml.alignStylesUnchanged")))
         return false
@@ -672,6 +674,7 @@ export function useCompletion(
           exampleCellIds: [],
         }],
       })
+      clearStyleAlignDirty(cell.id)
       setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
       return true
     } catch (err) {

@@ -12,10 +12,10 @@
 // that request.
 //
 // AQU-1840: and the project_settings read is no longer the blob. It selects the
-// `wp_*` generated columns (migration 0159, write-path-settings.ts) — the
+// `wp_*` generated columns (migration 0171, write-path-settings.ts) — the
 // eleven keys this path reads — so the one remaining per-request load stopped
 // detoasting and shipping a multi-MB TEXT column to answer "is this lane
-// archived?". If those columns are missing (0159 not applied) the read falls
+// archived?". If those columns are missing (0171 not applied) the read falls
 // back to the blob and narrows it in the Worker, so the answers are identical
 // either way.
 //
@@ -55,7 +55,7 @@ export interface RequestCache {
 }
 
 /**
- * The pre-0159 read: the whole blob, narrowed to the projected keys in the
+ * The pre-0171 read: the whole blob, narrowed to the projected keys in the
  * Worker. It loads a column the table's comment calls multi-MB, so it runs only
  * after the column read has failed.
  */
@@ -112,7 +112,7 @@ export function makeRequestCache(db: AquillaDb): RequestCache {
             .first<Record<string, unknown>>()
           return row ? writePathSettingsFromRow(row) : null
         } catch {
-          // Most likely 0159 is not applied yet, so the columns do not exist.
+          // Most likely 0171 is not applied yet, so the columns do not exist.
           // Any other failure lands in the same place: the blob read either
           // answers, or rejects and the caller sees the same rejection it saw
           // before this projection existed (see CONTRACT above).

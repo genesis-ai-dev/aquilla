@@ -10,6 +10,7 @@
 // makes-narrator / deletes.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
+import { observeElementRect, useVirtualizer } from "@tanstack/react-virtual"
 import { Check, MoreHorizontal, Pencil, Plus, Search, Star, Trash2 } from "lucide-react"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
@@ -48,6 +49,16 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { ROLE } from "@/lib/frontier/roles"
 import { denialMessage } from "@/lib/permissions/denial"
 import { AppTooltip } from "@/components/ui/tooltip"
+
+/**
+ * Rendered height of one voice row including the 2px gap below it (28px avatar
+ * / two leading-tight lines + py-1.5). Only the virtualizer's first guess —
+ * `measureElement` corrects it from real layout.
+ */
+const VOICE_ROW_PX = 44
+
+/** Fallback scrollport size where layout reports none (happy-dom in tests). */
+const FALLBACK_SCROLLPORT = { width: 320, height: 480 }
 
 export interface CastMemberStats {
   /** Lines assigned to this cast member in the current file. */
@@ -183,6 +194,41 @@ export function VoiceLibraryPanel({
     return q ? voices.filter((v) => v.name.toLowerCase().includes(q)) : voices
   }, [voices, query])
 
+  // AQU-1940: a migrated project can carry tens of thousands of voices (one
+  // was minted per verse label), and a row per voice took the whole library
+  // into one synchronous render — the tab froze and Chrome killed it on
+  // out-of-memory. Mount only the rows in or near the scrollport instead; the
+  // header still counts the whole library and search still scans all of it.
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
+    count: filtered.length,
+    getScrollElement: () => scrollRef.current,
+    getItemKey: (index) => filtered[index]?.id ?? index,
+    estimateSize: () => VOICE_ROW_PX,
+    overscan: 8,
+    initialRect: FALLBACK_SCROLLPORT,
+    // happy-dom reports 0x0 for CSS-sized scrollports; coerce so rows mount.
+    observeElementRect: (instance, cb) =>
+      observeElementRect(instance, (rect) => {
+        cb({
+          width: rect.width > 0 ? rect.width : FALLBACK_SCROLLPORT.width,
+          height: rect.height > 0 ? rect.height : FALLBACK_SCROLLPORT.height,
+        })
+      }),
+    // A row is a single truncated line, so the estimate is normally exact —
+    // measure anyway so a taller row (language badge, zoomed text) cannot
+    // drift the scroll height. Keep the estimate where layout reports nothing.
+    measureElement: (element) => {
+      const height = element.getBoundingClientRect().height
+      return height > 0 ? height : VOICE_ROW_PX
+    },
+  })
+
+  const handleScrollRef = useCallback((element: HTMLDivElement | null) => {
+    scrollRef.current = element
+    if (element) rowVirtualizer.measure()
+  }, [rowVirtualizer])
+
   // A voice without its own engine follows the project's configured one — the
   // same fallback generate-voice uses at synthesis time.
   const projectProvider = resolveTtsProvider(settings)
@@ -204,36 +250,54 @@ export function VoiceLibraryPanel({
           <InputGroupInput
             type="text"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value)
+              // Filtering a huge library while scrolled deep would otherwise
+              // leave the virtual window past the end of the shorter results.
+              if (scrollRef.current) scrollRef.current.scrollTop = 0
+            }}
             placeholder={t("audio.library.searchPlaceholder")}
           />
         </InputGroup>
       </div>
 
-      {/* The selector list */}
-      <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-3 pb-3">
+      {/* The selector list — windowed, see AQU-1940 above. */}
+      <div ref={handleScrollRef} className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
         {filtered.length === 0 ? (
           <p className="px-2 py-3 text-center text-xs italic text-muted-foreground">
             {query ? t("common.noMatches") : t("audio.library.noVoicesYet")}
           </p>
         ) : (
-          filtered.map((voice) => (
-            <VoiceRow
-              key={voice.id}
-              voice={voice}
-              projectProvider={projectProvider}
-              fallbackLanguage={targetLanguage}
-              showLanguageBadge={languageBadge}
-              active={voice.id === selectedId}
-              isDefault={voice.id === defaultVoiceId}
-              stats={castStats?.get(voice.id)}
-              canEdit={canEditVoices}
-              onSelect={() => select(voice.id)}
-              onEdit={() => setEditing({ kind: "edit", voice })}
-              onMakeDefault={() => makeDefault(voice)}
-              onDelete={() => deleteVoice(voice)}
-            />
-          ))
+          <div className="relative w-full" style={{ height: rowVirtualizer.getTotalSize() }}>
+            {rowVirtualizer.getVirtualItems().map((virtualItem) => {
+              const voice = filtered[virtualItem.index]
+              if (!voice) return null
+              return (
+                <div
+                  key={virtualItem.key}
+                  ref={rowVirtualizer.measureElement}
+                  data-index={virtualItem.index}
+                  className="absolute top-0 left-0 w-full pb-0.5"
+                  style={{ transform: `translateY(${virtualItem.start}px)` }}
+                >
+                  <VoiceRow
+                    voice={voice}
+                    projectProvider={projectProvider}
+                    fallbackLanguage={targetLanguage}
+                    showLanguageBadge={languageBadge}
+                    active={voice.id === selectedId}
+                    isDefault={voice.id === defaultVoiceId}
+                    stats={castStats?.get(voice.id)}
+                    canEdit={canEditVoices}
+                    onSelect={() => select(voice.id)}
+                    onEdit={() => setEditing({ kind: "edit", voice })}
+                    onMakeDefault={() => makeDefault(voice)}
+                    onDelete={() => deleteVoice(voice)}
+                  />
+                </div>
+              )
+            })}
+          </div>
         )}
       </div>
 
@@ -421,6 +485,9 @@ function VoiceRow({
   const rowProps = {
     role: "button" as const,
     tabIndex: 0,
+    // Which voices are actually mounted is now a product fact (AQU-1940):
+    // give the row a selector that does not depend on its label.
+    "data-voice-id": voice.id,
     onClick: onSelect,
     onKeyDown: (e: KeyboardEvent) => {
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect() }

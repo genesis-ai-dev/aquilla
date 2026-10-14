@@ -3,7 +3,7 @@
 // The events route used to answer every authority question out of one
 // `SELECT settings FROM project_settings` + `JSON.parse` — a column the table's
 // own comment calls multi-MB, detoasted and shipped to the Worker on every
-// autosave flush just to ask "is this lane archived?". Migration 0159 projects
+// autosave flush just to ask "is this lane archived?". Migration 0171 projects
 // these eleven keys into STORED generated `wp_*` columns, so the write path
 // reads one narrow row instead.
 //

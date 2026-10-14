@@ -21,6 +21,7 @@
 
 import { audioObjectKey, isPathSafeId, r2KeyPrefix, safeAudioContentType } from "./audio"
 import { verifyTokenForFile, verifyTokenForProject, WRITE_ROLE_LEVEL } from "./auth"
+import { checkAiSpendCeiling } from "../../db/shared/ai-spend-ceiling"
 // Shared with the Inworld proxy: both bound their one upstream subrequest with
 // AbortSignal.timeout and need the same DOMException check to tell a blown
 // deadline apart from a dead upstream.
@@ -36,8 +37,13 @@ export interface VoiceConvertEnv {
   SEED_VC_URL?: string
   /** Shared secret matching the Modal `seed-vc-auth` secret's SEED_VC_TOKEN. */
   SEED_VC_TOKEN?: string
-  /** Postgres shim — backs the per-user conversion throttle (AQU-1854). */
+  /** Postgres shim — backs the per-user conversion throttle (AQU-1854)
+   *  and the platform spend ceiling (AQU-1869). */
   AQUILLA_PG?: AquillaDb
+  /** Platform-wide daily AI spend ceiling in USD (AQU-1869). */
+  AI_DAILY_SPEND_CEILING_USD?: string
+  /** Deployment profile; "test" bypasses the spend-ceiling read cache. */
+  ENVIRONMENT?: string
 }
 
 // AQU-1854: ceiling on every clip this route buffers. Conversion is the one
@@ -270,6 +276,14 @@ export async function handleVoiceConvertRequest(
     )
   }
   await recordRateLimitEvent(db, "voice_convert", rateLimitIdentifier)
+
+  // Platform daily spend ceiling (AQU-1869). Checked before the R2 reads and
+  // the Modal call: a conversion starts an L40S GPU container, and the point
+  // of the ceiling is that nothing paid starts once the floor is hit.
+  const spendCeiling = await checkAiSpendCeiling(db, env, "voice-convert")
+  if (!spendCeiling.ok) {
+    return Response.json(spendCeiling.body, { status: spendCeiling.status })
+  }
 
   // Resolve the source clip: inline upload, or an existing R2 recording.
   //

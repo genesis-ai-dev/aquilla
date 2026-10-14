@@ -22,7 +22,7 @@
 // shape pulsing where the take will be drawn (2026-10-01).
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { AlertCircle, CloudDownload, Download, RotateCw } from "lucide-react"
+import { AlertCircle, CloudDownload, CloudOff, Download, RotateCw } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
@@ -189,6 +189,11 @@ export function TakeWaveform({
       <Download className="h-3 w-3" />
       <span>{t("editor.waveform.load")}</span>
     </button>
+  ) : peaksState === "offline" ? (
+    <span role="status" data-testid="audio-offline-unavailable" className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
+      <CloudOff className="h-3 w-3" aria-hidden />
+      {t("audio.error.notAvailableOffline")}
+    </span>
   ) : peaksState === "missing" ? (
     <span role="status" className="text-[10px] font-medium text-muted-foreground">{MISSING_AUDIO_MESSAGE}</span>
   ) : peaksState === "error" ? (
@@ -206,7 +211,9 @@ export function TakeWaveform({
 
   const playGlyph = state === "loading"
     ? <Spinner className="size-2.5" />
-    : state === "error"
+    : state === "error" && error?.kind === "offline-unavailable"
+      ? <CloudOff className="h-2.5 w-2.5 text-muted-foreground" />
+      : state === "error"
       ? <AlertCircle className="h-2.5 w-2.5 text-destructive" />
       : state === "cloud" && !isPlaying
         ? <CloudDownload className="h-2.5 w-2.5" />

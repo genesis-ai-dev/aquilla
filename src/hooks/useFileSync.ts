@@ -19,6 +19,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { SyncStatus } from "@/components/SyncStatusIndicator"
 import type { WsReconciler } from "@/lib/sync/ws-reconciler"
+import { useConnectivity } from "@/lib/offline/connectivity"
 
 /** Awareness payload for a single connected peer in a project-sync room.
  *  Phase 2b leaves the type intact for compile-time stability; the runtime
@@ -105,7 +106,7 @@ export function useFileSync(options: UseFileSyncOptions): {
   status: SyncStatus
 } {
   const { enabled, reconciler = null, pendingCount = 0, failureStreak = 0 } = options
-  const [online, setOnline] = useState(
+  const [browserOnline, setOnline] = useState(
     typeof navigator === "undefined" ? true : navigator.onLine,
   )
   useEffect(() => {
@@ -119,6 +120,12 @@ export function useFileSync(options: UseFileSyncOptions): {
       window.removeEventListener("offline", off)
     }
   }, [])
+
+  // Tauri: the Rust probe of this build's backend. navigator.onLine stays
+  // true on a LAN with no internet, and a dead socket can take minutes to
+  // close, so without this the pill kept saying "Live" with the server gone.
+  const backendReachable = useConnectivity()
+  const online = browserOnline && backendReachable !== false
 
   const subscribeSocket = useCallback(
     (onChange: () => void) => {

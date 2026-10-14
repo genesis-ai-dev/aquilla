@@ -2019,6 +2019,13 @@ export const editor = defineNamespace({
       other: "{count} changes queued for server sync. Click to review.",
     }),
     "editor.outbox.syncedTooltip": "All changes synced. Click to review pending changes.",
+    "editor.outbox.savedLocallyLabel": plural({ other: "On device · {count}" }),
+    "editor.outbox.savedLocallyTooltip": plural({
+      one: "Saved on this device, {count} change not uploaded. It uploads when the server is reachable again.",
+      other: "Saved on this device, {count} changes not uploaded. They upload when the server is reachable again.",
+    }),
+    "editor.outbox.syncTimes": "Last upload: {upload}. Last download: {download}.",
+    "editor.outbox.never": "never",
     // Tauri desktop: the on-device store stopped saving (src/lib/offline/leader-watchdog.ts).
     "editor.outbox.notSavingLabel": "Not saving",
     "editor.outbox.notSavingTooltip": "Changes on this device aren't being saved. Restart the app to fix this.",
@@ -7754,6 +7761,29 @@ export const editor = defineNamespace({
         description:
           "Tooltip/aria-label of the outbox chip in its queued state.",
         placeholders: { count: "Number of local writes waiting to sync." },
+      },
+      "editor.outbox.savedLocallyLabel": {
+        description:
+          "Short chip text (Tauri desktop) when edits are saved in the on-device " +
+          "offline store but the server is unreachable, so they are not uploaded yet.",
+        placeholders: { count: "Number of edits saved on this device but not uploaded." },
+        maxLength: 16,
+      },
+      "editor.outbox.savedLocallyTooltip": {
+        description: "Tooltip/aria-label of the outbox chip in its saved-on-this-device (offline) state.",
+        placeholders: { count: "Number of edits saved on this device but not uploaded." },
+      },
+      "editor.outbox.syncTimes": {
+        description:
+          "Appended to the outbox chip tooltip for a project downloaded for offline use: " +
+          "when this device last uploaded and last downloaded changes.",
+        placeholders: {
+          upload: "Relative time like '5 minutes ago', or editor.outbox.never.",
+          download: "Relative time like '5 minutes ago'.",
+        },
+      },
+      "editor.outbox.never": {
+        description: "Stands in for a time in editor.outbox.syncTimes when nothing was ever uploaded.",
       },
       "editor.outbox.syncedTooltip": {
         description:

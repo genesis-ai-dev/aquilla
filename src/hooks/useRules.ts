@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { v4 as uuid } from "uuid"
 import type {
   ProjectRecord,
@@ -21,6 +21,15 @@ import type { Concept } from "@/lib/terminology/types"
  * Pass `useProjectSettings(...).patch` from the caller.
  */
 type PatchSharedFn = (partial: ProjectWideSettings) => Promise<unknown>
+
+/** The settings keys this hook writes, held locally until the server read catches up. */
+type RuleSettingsOverlay = Partial<Pick<ProjectRecord, "rules" | "algorithmicChecks" | "rulePenalties">>
+
+/** A patchShared result that says the write did not land (blocked, conflict, error). */
+function writeFailed(outcome: unknown): boolean {
+  if (!outcome || typeof outcome !== "object" || !("kind" in outcome)) return false
+  return (outcome as { kind: unknown }).kind !== "ok"
+}
 
 const EMPTY_RULES: TranslationRule[] = []
 
@@ -68,9 +77,26 @@ export function useRules(
   // AQU-1104: a fresh `[]` per render gave `rules` a new identity on every
   // workspace render for projects without rules, which re-ran every consumer
   // memo (useHealth's checkRules pass, ~700 times in one scroll session).
-  const userRules = project?.rules ?? EMPTY_RULES
-  const algorithmicChecks = project?.algorithmicChecks
-  const penalties: RulePenalties = project?.rulePenalties || { major: 15, minor: 5 }
+  // Optimistic overlay. `project` comes from useProject, which has no
+  // optimistic state, and a refresh() racing the PATCH returns the pre-save
+  // row — the toggle then didn't move, or flipped back and on again. The
+  // overlay holds what this hook wrote until the write settles AND a newer
+  // `project` arrives; a failed write drops it so the UI shows server truth.
+  const [overlay, setOverlay] = useState<RuleSettingsOverlay>({})
+  const inFlightRef = useRef(0)
+  // The `project` seen when the last write settled; the overlay clears once
+  // the prop moves past it. `undefined` = a write is still in flight.
+  const [settledAt, setSettledAt] = useState<ProjectRecord | null | undefined>(undefined)
+  if (settledAt !== undefined && project !== settledAt) {
+    setSettledAt(undefined)
+    setOverlay({})
+  }
+  const projectRef = useRef(project)
+  useEffect(() => { projectRef.current = project }, [project])
+
+  const userRules = overlay.rules ?? project?.rules ?? EMPTY_RULES
+  const algorithmicChecks = overlay.algorithmicChecks ?? project?.algorithmicChecks
+  const penalties: RulePenalties = overlay.rulePenalties ?? project?.rulePenalties ?? { major: 15, minor: 5 }
   const terminology = localConcepts
 
   // AQU-455: track the latest known-cumulative rules array ourselves rather
@@ -172,6 +198,29 @@ export function useRules(
     return lane === undefined ? merged : rulesForLane(merged, lane)
   }, [builtinRules, orgRules, userRules, terminologyRules, lane])
 
+  // Apply locally, wait for the server write, then refresh — refreshing
+  // before the PATCH lands is what read the stale row back.
+  const writeShared = useCallback(async (partial: RuleSettingsOverlay) => {
+    inFlightRef.current++
+    setSettledAt(undefined)
+    setOverlay((prev) => ({ ...prev, ...partial }))
+    let failed: boolean
+    try {
+      failed = writeFailed(await patchShared?.(partial))
+    } catch {
+      failed = true
+    } finally {
+      inFlightRef.current--
+    }
+    if (failed) {
+      if (partial.rules) latestRulesRef.current = projectRef.current?.rules ?? EMPTY_RULES
+      setOverlay({})
+    } else if (inFlightRef.current === 0) {
+      setSettledAt(projectRef.current)
+    }
+    refresh()
+  }, [patchShared, refresh])
+
   const addRule = useCallback(async (rule: Omit<TranslationRule, "id" | "createdAt">) => {
     if (!project) return
     const newRule: TranslationRule = { ...rule, id: uuid(), createdAt: new Date().toISOString() }
@@ -210,60 +259,59 @@ export function useRules(
     // the final accepted rule. Awaiting here makes each loop iteration a true
     // synchronous-from-the-caller's-perspective step: the server write for
     // rule N is durably queued and committed before rule N+1 starts.
-    await patchShared?.({ rules: cumulative })
-    refresh()
-  }, [project, refresh, patchShared])
+    await writeShared({ rules: cumulative })
+  }, [project, writeShared])
 
   const updateRule = useCallback(async (ruleId: string, updates: Partial<TranslationRule>) => {
     if (!project) return
     // Built-in rules update via setBuiltinOverride; reject here.
     if (ruleId.startsWith("builtin:")) return
-    const updated = await patchProject(project.id, (p) => ({
+    // AQU-455 again: build from latestRulesRef, not the `project.rules`
+    // closure, or two quick toggles send arrays that each drop the other.
+    const next = latestRulesRef.current.map((r) => r.id === ruleId ? { ...r, ...updates } : r)
+    latestRulesRef.current = next
+    void patchProject(project.id, (p) => ({
       ...p,
       rules: (p.rules || []).map((r) => r.id === ruleId ? { ...r, ...updates } : r),
     }))
-    void patchShared?.({ rules: updated?.rules ?? (project.rules || []).map((r) => r.id === ruleId ? { ...r, ...updates } : r) })
-    refresh()
-  }, [project, refresh, patchShared])
+    await writeShared({ rules: next })
+  }, [project, writeShared])
 
   const deleteRule = useCallback(async (ruleId: string) => {
     if (!project) return
     if (ruleId.startsWith("builtin:")) return
-    const updated = await patchProject(project.id, (p) => ({
+    const next = latestRulesRef.current.filter((r) => r.id !== ruleId)
+    latestRulesRef.current = next
+    void patchProject(project.id, (p) => ({
       ...p,
       rules: (p.rules || []).filter((r) => r.id !== ruleId),
     }))
-    void patchShared?.({ rules: updated?.rules ?? (project.rules || []).filter((r) => r.id !== ruleId) })
-    refresh()
-  }, [project, refresh, patchShared])
+    await writeShared({ rules: next })
+  }, [project, writeShared])
 
   const updatePenalties = useCallback(async (newPenalties: RulePenalties) => {
     if (!project) return
-    await patchProject(project.id, (p) => ({ ...p, rulePenalties: newPenalties }))
-    void patchShared?.({ rulePenalties: newPenalties })
-    refresh()
-  }, [project, refresh, patchShared])
+    void patchProject(project.id, (p) => ({ ...p, rulePenalties: newPenalties }))
+    await writeShared({ rulePenalties: newPenalties })
+  }, [project, writeShared])
 
   const setBuiltinOverride = useCallback(async (
     checkId: BuiltinCheckId,
     override: AlgorithmicCheckOverride,
   ) => {
     if (!project) return
-    const updated = await patchProject(project.id, (p) => ({
+    void patchProject(project.id, (p) => ({
       ...p,
       algorithmicChecks: { ...(p.algorithmicChecks ?? {}), [checkId]: override },
     }))
     // Sync to Postgres like `rules`/`rulePenalties`: under AD-3 the read path is the
     // server projection, so an IDB-only write here is invisible to useProject.
-    // Top-level settings keys replace wholesale — send the full merged map.
-    void patchShared?.({
-      algorithmicChecks: updated?.algorithmicChecks ?? {
-        ...(project.algorithmicChecks ?? {}),
-        [checkId]: override,
-      },
+    // Top-level settings keys replace wholesale — send the full merged map,
+    // overlay included so a second quick toggle keeps the first.
+    await writeShared({
+      algorithmicChecks: { ...(algorithmicChecks ?? {}), [checkId]: override },
     })
-    refresh()
-  }, [project, refresh, patchShared])
+  }, [project, algorithmicChecks, writeShared])
 
   return {
     rules,

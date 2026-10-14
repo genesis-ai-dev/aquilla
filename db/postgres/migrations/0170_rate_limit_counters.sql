@@ -1,4 +1,4 @@
--- 0169_rate_limit_counters.sql — AQU-1843
+-- 0170_rate_limit_counters.sql — AQU-1843
 --
 -- Backs the rewritten shared volumetric limiter (db/shared/rate-limit.ts),
 -- which the chat proxy, the AI/Jev routes, audio transcription, TTS and the
@@ -45,7 +45,7 @@
 --
 -- Apply by hand against Neon (same convention as prior migrations here):
 --   set -a; . ./.env; set +a
---   npx tsx scripts/pg.ts db/postgres/migrations/0169_rate_limit_counters.sql
+--   npx tsx scripts/pg.ts db/postgres/migrations/0170_rate_limit_counters.sql
 -- Verify: `rate_limit_counters` exists with the composite primary key and the
 -- `idx_rate_limit_counters_window` index.
 --

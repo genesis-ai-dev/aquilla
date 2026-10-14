@@ -58,7 +58,7 @@ export interface RateLimitDecision {
   retryAfterSeconds: number
   /** True when the limiter backend errored and `failMode` decided the answer. */
   degraded: boolean
-  /** True when the counters table is absent (migration 0169 not applied here),
+  /** True when the counters table is absent (migration 0170 not applied here),
    *  which is allowed through regardless of `failMode` — see
    *  `isLimiterUninstalled`. */
   uninstalled?: boolean
@@ -97,11 +97,11 @@ export function ipRateLimitIdentifier(ip: string): string {
 
 /**
  * Postgres `undefined_table` (SQLSTATE 42P01) — the counters table does not
- * exist, i.e. migration 0169 has not been applied to this environment yet.
+ * exist, i.e. migration 0170 has not been applied to this environment yet.
  *
  * This is a provisioning state, not a backend outage, and it is the one error
  * `failMode: "closed"` must NOT honour. The reasoning (AQU-1843, found by the
- * PR bot walk on the preview, where 0169 was unapplied): before this module was
+ * PR bot walk on the preview, where 0170 was unapplied): before this module was
  * rewritten the limiter failed open on every error, so an unapplied migration
  * was harmless. Fail-closed turns that same condition into a total outage of
  * chat, agent runs, transcription and TTS — every paid route refuses its FIRST
@@ -190,7 +190,7 @@ export async function enforceRateLimit(
     if (uninstalled) {
       console.error(
         `[rate-limit] rate_limit_counters is missing — every throttle is OFF in this environment. ` +
-          `Apply db/postgres/migrations/0169_rate_limit_counters.sql. Allowing ${req.kind} through.`,
+          `Apply db/postgres/migrations/0170_rate_limit_counters.sql. Allowing ${req.kind} through.`,
       )
     } else {
       console.warn(`[rate-limit] ${req.kind} failed, failing ${req.failMode}:`, err)

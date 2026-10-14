@@ -40,3 +40,18 @@ export function saveProjectTts(projectId: string, settings: ProjectTtsSettings):
     /* quota / access denied — ignore; in-memory state still reflects the edit */
   }
 }
+
+/**
+ * Forget this project's local copy (AQU-1943). Used when the server refuses
+ * the value outright — a durable copy of a value the server will never accept
+ * is worse than none, because it is re-sent on every later save and, being the
+ * read source of truth, survives a reload.
+ */
+export function clearProjectTts(projectId: string): void {
+  try {
+    if (typeof localStorage === "undefined") return
+    localStorage.removeItem(storageKey(projectId))
+  } catch {
+    /* access denied — nothing durable to clear */
+  }
+}

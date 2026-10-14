@@ -2207,7 +2207,18 @@ export function ProjectWorkspace() {
     project?.id ?? null,
     project?.ttsSettings,
     cellSummaries,
-    (profiles) => { void patchSettings({ ttsSettings: profiles }) },
+    // AQU-1943: the server caps the voice library and the cast-assignment map.
+    // A 422 means this value is never going to be stored, so say so where the
+    // person who just created the voice is looking, and report the refusal so
+    // the durable local copy is rolled back instead of silently diverging.
+    async (profiles) => {
+      const outcome = await patchSettings({ ttsSettings: profiles })
+      if (outcome.kind === "error" && outcome.status === 422) {
+        toast.add({ type: "error", title: outcome.message })
+        return { rejected: true }
+      }
+      return { rejected: false }
+    },
     resolveActiveTargetLanguage(
       activeLane,
       null,

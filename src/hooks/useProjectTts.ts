@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { patchProject } from "@/lib/store/project-index"
-import { loadProjectTts, saveProjectTts } from "@/lib/store/project-tts-store"
+import { clearProjectTts, loadProjectTts, saveProjectTts } from "@/lib/store/project-tts-store"
 import {
   assignedCastVoiceId, getVoiceLibrary, resolveVoice,
 } from "@/lib/audio/voices"
@@ -23,6 +23,16 @@ import posthog from "@/lib/posthog"
 import type { CastMemberStats } from "@/components/VoiceLibraryPanel"
 import type { CellSummary } from "@/hooks/useActiveCellStore"
 import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
+
+/**
+ * What the server made of a mirrored write (AQU-1943). `rejected` means it
+ * refused the VALUE — the TTS cap — so the durable local copy is rolled back
+ * instead of being kept and re-sent. A role/offline block is NOT a rejection:
+ * localStorage stays the client-owned source of truth there, by design.
+ */
+export interface TtsSyncOutcome {
+  rejected: boolean
+}
 
 export interface ProjectTtsApi {
   /** Effective settings: the localStorage overlay if present, else the server copy. */
@@ -45,7 +55,9 @@ export function useProjectTts(
   /** Persist voice profiles (minus apiKey) to the server settings blob so they
    *  sync across devices. Fire-and-forget; localStorage stays the durable
    *  client-owned source. */
-  onSyncTts?: (tts: Omit<ProjectTtsSettings, "apiKey">) => void,
+  onSyncTts?: (
+    tts: Omit<ProjectTtsSettings, "apiKey">,
+  ) => void | Promise<TtsSyncOutcome | void>,
   /** Project target-language lane — fills OmniVoice voices that stored no tag. */
   targetLanguage?: string,
 ): ProjectTtsApi {
@@ -59,6 +71,9 @@ export function useProjectTts(
   // Re-read when the project changes (lazy init only runs for the first one).
   const loadedForRef = useRef<string | null | undefined>(projectId)
   const migratedForRef = useRef<string | null>(null)
+  // AQU-1943: which save is the latest. A refusal arrives after its save, so a
+  // rollback must not undo a LATER save that already succeeded.
+  const writeSeqRef = useRef(0)
   useEffect(() => {
     if (loadedForRef.current === projectId) return
     loadedForRef.current = projectId
@@ -75,7 +90,9 @@ export function useProjectTts(
   const saveTts = useCallback(
     async (overrides: Partial<ProjectTtsSettings>) => {
       if (!projectId) return
-      const merged = { ...(localTts ?? serverSettings ?? {}), ...overrides } as ProjectTtsSettings
+      const previous = localTts ?? serverSettings
+      const seq = ++writeSeqRef.current
+      const merged = { ...(previous ?? {}), ...overrides } as ProjectTtsSettings
       const next = migrateOmnivoiceTtsSettings(merged, { targetLanguage }) ?? merged
       setLocalTts(next)
       // Source of truth: durable, client-owned, survives reload + pulls.
@@ -88,7 +105,29 @@ export function useProjectTts(
       if (onSyncTts) {
         const { apiKey, ...profiles } = next
         void apiKey
-        onSyncTts(profiles)
+        // AQU-1943: the one outcome localStorage must NOT outlive is a refused
+        // value — the server caps the voice library and the cast map, and this
+        // store is what a reload reads first, so a kept copy would resurrect
+        // the voice the server just refused and re-send it forever. Still not
+        // awaited: saveTts resolves on the local write as it always has, and
+        // the rollback lands when the answer does.
+        void Promise.resolve(onSyncTts(profiles))
+          .then((outcome) => {
+            if (!outcome?.rejected) return
+            if (writeSeqRef.current !== seq) return
+            setLocalTts(previous)
+            if (previous) saveProjectTts(projectId, previous)
+            else clearProjectTts(projectId)
+            return patchProject(projectId, (p) => {
+              const rolledBack = { ...p }
+              if (previous) rolledBack.ttsSettings = previous
+              else delete rolledBack.ttsSettings
+              return rolledBack
+            })
+          })
+          .catch((err) => {
+            console.warn("[useProjectTts] settings mirror failed", err)
+          })
       }
     },
     [projectId, localTts, serverSettings, onSyncTts, targetLanguage],

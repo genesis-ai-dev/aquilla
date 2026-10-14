@@ -29,6 +29,15 @@
 //            of the stored value is not a change and passes. (AQU-822 used to
 //            give it its own `termbaseEditMinRole` floor.)
 //
+// One key is also SIZE-capped:
+//
+//   AQU-1943 `ttsSettings`. The voice library and cast-assignment map are
+//            refused with 422 beyond the ceiling in
+//            db/shared/tts-settings-caps.ts, because every member re-reads
+//            this blob on workspace open and on focus. Judged on the change,
+//            so an already-over project can still save the rest and can still
+//            write the prune that brings it under.
+//
 // These keys are permission-scoped rather than dumb-stored:
 //
 //   AQU-1086 the project-language keys (`sourceLanguage`, `targetLanguage`,
@@ -93,6 +102,7 @@ import {
   preserveRetiredLaneSettings,
   RETIRED_LANE_SETTINGS_MESSAGE,
 } from "../../../db/shared/retired-lane-settings"
+import { ttsSettingsCapProblem } from "../../../db/shared/tts-settings-caps"
 
 const projectSettings = new Hono<AuthHonoEnv>()
 
@@ -463,6 +473,29 @@ projectSettings.on(
         if (JSON.stringify(before) !== JSON.stringify(rawVoiceOverrides)) {
           return c.json({ error: problem }, 400)
         }
+      }
+    }
+
+    // AQU-1943: the ceiling on the TTS blob. Every member re-reads these
+    // settings on workspace open and on window focus, so a runaway voice
+    // library is not this project's problem alone — one production project
+    // reached 5.45 MB (31,287 voices) and the Voices panel died on open. The
+    // refusal is 422 rather than 400: the shape is legal, the size is not.
+    //
+    // Judged on the CHANGE, like bibleEnrichments and bibleVoiceOverrides
+    // above: a project that is already over the cap must still be able to
+    // save the rest of its settings while its blob rides along unchanged, and
+    // must still be able to write the prune that brings it back under
+    // (AQU-1941). What it cannot do is grow further.
+    const rawTtsSettings = (settings as Record<string, unknown>).ttsSettings
+    if (rawTtsSettings !== undefined) {
+      const over = ttsSettingsCapProblem(rawTtsSettings)
+      if (over && JSON.stringify(stored.settings.ttsSettings) !== JSON.stringify(rawTtsSettings)) {
+        console.warn(
+          `[project-settings] ttsSettings over cap for ${projectId}: `
+          + `${over.size.voices} voices, ${over.size.assignments} assignments, ${over.size.bytes} bytes`,
+        )
+        return c.json({ error: over.message }, 422)
       }
     }
 

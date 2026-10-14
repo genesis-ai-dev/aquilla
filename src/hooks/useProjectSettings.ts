@@ -226,7 +226,14 @@ export type PatchOutcome =
   | { kind: "ok" }
   | { kind: "conflict"; latest: ProjectSettingsResponse }
   | { kind: "blocked"; reason: "offline" | "role" }
-  | { kind: "error"; message: string }
+  /**
+   * `status` is the HTTP status when the server answered (0 on a transport
+   * failure). Callers that must tell a *refused value* apart from a flaky
+   * network read it: a 422 means the server will never accept this value, so
+   * a client-durable copy of it has to be rolled back rather than retried
+   * (AQU-1943, the TTS settings cap).
+   */
+  | { kind: "error"; message: string; status?: number }
 
 /**
  * Map a non-`ok` {@link PatchOutcome} to a user-facing message, or `null` when
@@ -968,7 +975,7 @@ export function useProjectSettings(
       const snapTarget: ProjectWideSettings = serverRef.current?.settings ?? {}
       return rollbackRejectedKeys(prev, partial, snapTarget)
     })
-    return { kind: "error", message: result.message }
+    return { kind: "error", message: result.message, status: result.status }
   }, [projectId, jwt, roleLevel, termbaseEditMinRole, languageEditFloor, refresh, runSerialized, t])
 
   return {

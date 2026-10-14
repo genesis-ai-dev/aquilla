@@ -1,4 +1,4 @@
--- 0167_project_media_setting_columns.sql — AQU-1768
+-- 0172_project_media_setting_columns.sql — AQU-1768
 --
 -- Org-level defaults for the media settings (timing lock, track editing, who
 -- may add or remove lines, audio self-validation, the audio validation role

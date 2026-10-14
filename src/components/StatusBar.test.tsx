@@ -4,6 +4,7 @@ import type { CellSummary } from "@/hooks/useActiveCellStore"
 import { StatusBar as StatusBarView } from "./StatusBar"
 import { useHealth } from "@/hooks/useHealth"
 import { applyStructuralPolicy } from "@/lib/cells/structural"
+import { PROGRESS_BG } from "@/lib/progress/progress-palette"
 import { useCallback, type ComponentProps } from "react"
 
 function StatusBar({ cells, healthMap, countStructural = true, ...props }: {
@@ -91,6 +92,22 @@ it("updates footer counts across empty, drafted, validated and removed cells", (
   expect(container.textContent?.replace(/[\u2066-\u2069]/g, "")).toContain("0 cells")
   expect(container.textContent?.replace(/[\u2066-\u2069]/g, "")).toContain("0 translated")
   expect(container.textContent?.replace(/[\u2066-\u2069]/g, "")).not.toContain("unvalidated")
+})
+
+// AQU-1764: the two counts lose their amber and green. They are in the text
+// colour, each after a swatch in the tone the sidebar's file bar uses for it.
+it("marks the unvalidated and validated counts with progress-palette swatches", () => {
+  const drafted = [{ ...cells[0], status: "unvalidated" as const }, cells[1]]
+  render(<StatusBar cells={drafted} healthMap={new Map()} projectHealth={0} />)
+  for (const [id, fill] of [
+    ["status-bar-unvalidated", PROGRESS_BG.textTranslated],
+    ["status-bar-validated", PROGRESS_BG.textValidated],
+  ]) {
+    const badge = screen.getByTestId(id)
+    expect(badge.className, id).toContain("text-foreground")
+    expect(badge.className, id).not.toMatch(/amber|green/)
+    expect(badge.querySelector("[aria-hidden]")!.className, id).toContain(fill)
+  }
 })
 
 // AQU-1083. The editor footer is the ONE progress surface whose number is

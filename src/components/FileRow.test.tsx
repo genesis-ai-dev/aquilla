@@ -107,8 +107,15 @@ describe("FileRow — AQU-341 truncation consistency", () => {
 
   it("exposes both translated and validated percents on the reserved progress slot", () => {
     const { container } = renderRow({ progress: { translated: 8, validated: 5, total: 10 } })
-    const slot = container.querySelector('[data-testid="file-row-progress-slot"]')
+    const slot = container.querySelector('[data-testid="file-row-progress-slot"]')!
     expect(slot).toHaveAttribute("aria-label", "80% translated, 50% validated")
+    // AQU-1764: and draws them as ONE two-part bar across the slot (it was two
+    // bars side by side): validated, then translated but not validated.
+    const bars = slot.querySelectorAll('[data-slot="progress-split-bar"]')
+    expect(bars).toHaveLength(1)
+    expect([...bars[0].querySelectorAll<HTMLElement>("[data-progress-tone]")]
+      .map((part) => `${part.dataset.progressTone} ${part.style.width}`))
+      .toEqual(["textValidated 50%", "textTranslated 30%"])
   })
 
   it("never reads 100% while a cell is outstanding (AQU-1493)", () => {

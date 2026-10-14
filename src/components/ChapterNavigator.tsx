@@ -39,6 +39,7 @@ import { useOverflowTitle } from "@/hooks/useOverflowTitle"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { ImportMilestoneKind } from "../../shared/import-contract"
 import { progressPercent } from "@/lib/progress/progress-percent"
+import { PROGRESS_BG } from "@/lib/progress/progress-palette"
 
 export interface MilestoneNavigationItem {
   key: string
@@ -258,20 +259,23 @@ function vocabularyFor(items: readonly MilestoneNavigationItem[]): NavigationVoc
 const percent = progressPercent
 
 /**
- * One progress line: a marker icon, then the percentage right-aligned in the
- * column. `label` ("N% translated") is what the icon means — carried as hover
- * text and, because the digits themselves are `aria-hidden`, as the only thing
- * a screen reader reads out, so the announcement keeps the full wording.
+ * One progress line: a marker icon, a swatch in the figure's progress tone,
+ * then the percentage right-aligned in the column. `label` ("N% translated")
+ * is what the icon means — carried as hover text and, because the digits
+ * themselves are `aria-hidden`, as the only thing a screen reader reads out, so
+ * the announcement keeps the full wording.
  */
-function ProgressLine({ icon: Icon, iconClassName, label, value }: {
+function ProgressLine({ icon: Icon, swatchClassName, label, value }: {
   icon: LucideIcon
-  iconClassName: string
+  /** The figure's tone from the shared progress palette (AQU-1764). */
+  swatchClassName: string
   label: string
   value: string
 }) {
   return (
     <span className="flex items-center gap-1" title={label}>
-      <Icon aria-hidden="true" className={cn("size-3 shrink-0", iconClassName)} />
+      <Icon aria-hidden="true" className="size-3 shrink-0 text-muted-foreground" />
+      <span aria-hidden="true" data-progress-swatch className={cn("size-2 shrink-0 rounded-[2px]", swatchClassName)} />
       <span aria-hidden="true" className="flex-1 text-end">{value}</span>
       <span className="sr-only">{label}</span>
     </span>
@@ -283,10 +287,15 @@ function ProgressLine({ icon: Icon, iconClassName, label, value }: {
  * every row. In a fixed-width dropdown that took over 40% of the row and left
  * milestone titles about 12 characters, so a run of "1 Corinthians …"
  * milestones all read "1 Corinthian…" and the picker couldn't be used to find
- * one. The words are now the marker icons the file rows already use — amber
- * for translated, emerald for validated — which makes the column's width
+ * one. The words are now marker icons, which makes the column's width
  * independent of how long a locale's words for them are, and hands the space
  * it saves to the title.
+ *
+ * AQU-1764: the icons were amber and emerald; they are grey now, and each
+ * figure has a swatch in the shared progress palette's light blue
+ * (translated) or dark blue (validated), the colours the file rows' bars use.
+ * The swatch costs the column 8px: 64px is the narrowest that fits icon,
+ * swatch and "100 %" in Geist at this size without spilling into the row.
  */
 function ProgressSummary({ translated, validated, total }: {
   translated: number
@@ -299,16 +308,16 @@ function ProgressSummary({ translated, validated, total }: {
   // rule as the label read out beside it (Jude 1 at 219/220 showed "100%").
   const asPercent = (part: number) => f.percent(percent(part, total) / 100)
   return (
-    <span className="w-14 shrink-0 text-xs tabular-nums text-muted-foreground">
+    <span className="w-16 shrink-0 text-xs tabular-nums text-muted-foreground">
       <ProgressLine
         icon={Languages}
-        iconClassName="text-amber-500"
+        swatchClassName={PROGRESS_BG.textTranslated}
         label={t("editor.milestone.percentTranslated", { percent: percent(translated, total) })}
         value={asPercent(translated)}
       />
       <ProgressLine
         icon={CheckCheck}
-        iconClassName="text-emerald-500"
+        swatchClassName={PROGRESS_BG.textValidated}
         label={t("editor.milestone.percentValidated", { percent: percent(validated, total) })}
         value={asPercent(validated)}
       />

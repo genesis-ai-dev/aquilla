@@ -48,6 +48,38 @@ describe("BookHealthSpine", () => {
 
   })
 
+  it("paints progress squares in the shared progress palette and leaves quality squares alone (AQU-1764)", () => {
+    render(
+      <BookHealthSpine
+        chapters={[{
+          key: "chapter-4",
+          label: "Mark 4",
+          translated: 3,
+          validated: 1,
+          total: 5,
+          cells: [
+            { id: "v", stage: "validated", health: 100 },
+            { id: "t", stage: "automatic" },
+            { id: "s", stage: "automatic", health: 20, hasIssue: true },
+            { id: "u", stage: "untranslated" },
+            { id: "x", stage: "excluded" },
+          ],
+        }]}
+        onChapterClick={vi.fn()}
+      />,
+    )
+    const [validated, translated, scored, untranslated, excluded] =
+      screen.getAllByTestId("book-health-cell").map((cell) => cell.style.backgroundColor)
+    // Validated, and translated with no health score yet (amber, before).
+    expect(validated).toBe("var(--progress-text-validated)")
+    expect(translated).toBe("var(--progress-text-translated)")
+    // A scored square keeps its health tint; the untranslated slate and the
+    // hollow excluded heading are unchanged.
+    expect(scored).toMatch(/^rgb\(/)
+    expect(untranslated).toBe("rgb(148 163 184 / 0.2)")
+    expect(excluded).toBe("transparent")
+  })
+
   it("navigates by chapter label", () => {
     const onChapterClick = vi.fn()
     render(<BookHealthSpine chapters={chapters} onChapterClick={onChapterClick} />)

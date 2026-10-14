@@ -4,6 +4,7 @@ import { usePersistedToggleSet } from "@/hooks/useSidebarExpansion"
 import { groupChaptersByBook } from "@/lib/sidebar/book-sections"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { healthRibbonColor, healthRibbonOpacity } from "@/lib/health/health-ribbon"
+import { PROGRESS_COLOR, progressColorAt } from "@/lib/progress/progress-palette"
 import { cn } from "@/lib/utils"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 
@@ -57,9 +58,19 @@ function automaticScores(chapter: BookHealthChapter): number[] {
     .map((cell) => cell.health!)
 }
 
+/*
+ * AQU-1764: WHERE THE SQUARES SAY PROGRESS, THEY USE THE SHARED PROGRESS
+ * PALETTE. A validated square is the text-validated blue and a translated
+ * square with no health score the translated blue (it was amber at 0.28,
+ * which said "in review" in a colour that means Due soon elsewhere). A square
+ * WITH a score keeps the red-amber-green health tint, and the untranslated
+ * slate, the hollow excluded heading and the amber issue ring stay as they
+ * are: those are about quality, not progress.
+ */
+
 function chapterVisual(chapter: BookHealthChapter): ChapterVisual {
   if (chapter.total > 0 && chapter.validated >= chapter.total) {
-    return { color: healthRibbonColor(100, 1), score: 100, opacity: 1, measured: true }
+    return { color: PROGRESS_COLOR.textValidated, score: 100, opacity: 1, measured: true }
   }
 
   const score = median(automaticScores(chapter))
@@ -75,14 +86,17 @@ function chapterVisual(chapter: BookHealthChapter): ChapterVisual {
 
   if (chapter.translated > chapter.validated) {
     // We know work exists but do not have an automatic health measurement for
-    // this chapter. Amber says "in review" without inventing a score.
-    return { color: "rgb(245 158 11 / 0.3)", opacity: 0.3, measured: false }
+    // this chapter. The translated tone says "done, not validated yet"
+    // without inventing a score.
+    return { color: PROGRESS_COLOR.textTranslated, opacity: 1, measured: false }
   }
 
   if (chapter.validated > 0) {
+    // Partly validated and nothing else translated: the validated blue,
+    // stronger the larger the validated share.
     const ratio = chapter.total > 0 ? chapter.validated / chapter.total : 0
     const opacity = 0.28 + (0.52 * ratio)
-    return { color: healthRibbonColor(100, opacity), opacity, measured: false }
+    return { color: progressColorAt(PROGRESS_COLOR.textValidated, opacity), opacity, measured: false }
   }
 
   return { color: "rgb(148 163 184 / 0.22)", opacity: 0.22, measured: false }
@@ -114,19 +128,21 @@ function cellBucketVisual(cells: BookHealthCell[]): { color: string; issue: bool
   const validated = cells.filter((cell) => cell.stage === "validated").length
   if (validated === cells.length) {
     return {
-      color: healthRibbonColor(100, 1),
+      color: PROGRESS_COLOR.textValidated,
       issue: cells.some((cell) => cell.hasIssue),
     }
   }
   if (validated > 0) {
+    // A bucket of several cells, partly validated: the validated blue at the
+    // validated share's strength.
     return {
-      color: healthRibbonColor(100, 0.25 + (0.55 * validated / cells.length)),
+      color: progressColorAt(PROGRESS_COLOR.textValidated, 0.25 + (0.55 * validated / cells.length)),
       issue: cells.some((cell) => cell.hasIssue),
     }
   }
   if (cells.some((cell) => cell.stage === "automatic")) {
     return {
-      color: "rgb(245 158 11 / 0.28)",
+      color: PROGRESS_COLOR.textTranslated,
       issue: cells.some((cell) => cell.hasIssue),
     }
   }

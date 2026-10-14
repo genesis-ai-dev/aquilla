@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 
 import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
+import { PROGRESS_BG } from "@/lib/progress/progress-palette"
 
 /**
  * AQU-1485 — the milestone picker used to spell out "N% translated" / "N%
@@ -117,6 +118,25 @@ describe("MilestoneNavigator progress column (AQU-1485)", () => {
       "title",
       "0% validated",
     )
+  })
+
+  it("puts a progress-palette swatch before each figure and greys the icons (AQU-1764)", () => {
+    // The icons were amber and emerald; the colour now lives in a swatch in
+    // the tones the file rows' bars use.
+    render(
+      <MilestoneNavigator items={corinthians} activeKey="scripture:1CO:1" onSelect={() => {}} />,
+    )
+    openPicker()
+
+    for (const [wording, fill] of [
+      ["25% translated", PROGRESS_BG.textTranslated],
+      ["0% validated", PROGRESS_BG.textValidated],
+    ]) {
+      const line = screen.getByText(wording).closest("[title]")!
+      expect(line.querySelector("[data-progress-swatch]")!.className, wording).toContain(fill)
+      expect(line.querySelector("svg")!.getAttribute("class"), wording).toContain("text-muted-foreground")
+      expect(line.querySelector("svg")!.getAttribute("class"), wording).not.toMatch(/amber|emerald/)
+    }
   })
 })
 

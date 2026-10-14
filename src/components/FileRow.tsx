@@ -18,6 +18,8 @@ import { createMenuHandle } from "@/components/ui/menu-parts"
 import { FileActionMenu, type FileReorderActions } from "./FileActionMenu"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { progressPercent } from "@/lib/progress/progress-percent"
+import { textProgressSegments } from "@/lib/progress/progress-palette"
+import { ProgressSplitBar } from "@/components/progress/ProgressSplitBar"
 
 interface FileStats { translated: number; validated: number; total: number }
 
@@ -238,15 +240,17 @@ export function FileRow(props: FileRowProps) {
                   : undefined
               }
             >
+              {/* AQU-1764: ONE two-part bar across the slot — validated in
+                  the dark blue, then translated but not validated in the
+                  light one — where there were two side-by-side bars in amber
+                  and emerald. Drawn from the same two percentages the slot's
+                  label reads out. */}
               {progress && progress.total > 0 && (
-                <>
-                  <span className="h-2 w-6 rounded-full bg-muted overflow-hidden">
-                    <span className="block h-full bg-amber-500" style={{ width: `${translatedPct}%` }} />
-                  </span>
-                  <span className="h-2 w-6 rounded-full bg-muted overflow-hidden">
-                    <span className="block h-full bg-emerald-500" style={{ width: `${validatedPct}%` }} />
-                  </span>
-                </>
+                <ProgressSplitBar
+                  segments={textProgressSegments({ validated: validatedPct, translated: translatedPct, total: 100 })}
+                  height={8}
+                  className="w-full"
+                />
               )}
             </div>
           )}

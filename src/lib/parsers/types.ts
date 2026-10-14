@@ -980,6 +980,8 @@ export function isSubtitleImportFile(
  */
 export const AUDIO_CUES_ROLE = "audio-cues"
 export const TIMELINE_CONTENT_ROLE = "timeline-content"
+/** Smart Extensions apiRev 7: an extension's data file (shared/tools/file-extension.ts). */
+export { EXTENSION_DATA_ROLE } from "../../../shared/tools/file-extension"
 
 /**
  * True for that sibling. The canonical predicate — every surface that lists,
@@ -992,7 +994,13 @@ export function isAudioCueFile(file: Pick<FileReference, "role"> | null | undefi
 
 /** Internal cue files appear as tracks in their parent media timeline. */
 export function isHiddenTimelineFile(file: Pick<FileReference, "role"> | null | undefined): boolean {
-  return isAudioCueFile(file) || file?.role === TIMELINE_CONTENT_ROLE
+  return isAudioCueFile(file) || file?.role === TIMELINE_CONTENT_ROLE || isExtensionDataFile(file)
+}
+
+/** Smart Extensions apiRev 7: an extension's own data file — hidden like the
+ *  timeline companions unless the user turns on "Show extension data files". */
+export function isExtensionDataFile(file: Pick<FileReference, "role"> | null | undefined): boolean {
+  return file?.role === "extension-data"
 }
 
 /**

@@ -1,3 +1,4 @@
+import type { FileExtensionMeta } from "../../../shared/tools/file-extension"
 // Types for the sync-worker read API (server-side reads, AD-3 v1 thin client).
 //
 // Mirror of the server's response shapes in:
@@ -50,6 +51,9 @@ export interface FileSummary {
   deletedAt?: number | null
   /** AQU-656: original import blob exists. Absent on older sync-workers. */
   hasOriginalSource?: boolean
+  /** Smart Extensions apiRev 7: files.meta.extension (kind, tags, group,
+   *  owner, meta). Null/absent on ordinary files and older sync-workers. */
+  extension?: FileExtensionMeta | null
 }
 
 /**

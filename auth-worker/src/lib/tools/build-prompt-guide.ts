@@ -49,43 +49,69 @@ same book (e.g. a literal and a simplified text) are linked only by matching ref
 
 Available through the bridge: files, cells (source/target/html/ref/chapter, validation, history panel, comments
 counts/threads, audio), lanes, sections/chapters, the termbase and term matches, back-translations, AI drafting,
-presence/locks, per-tool storage (per user), and — with read:web — websites the manifest names (aquilla.web.fetch).
-Through aquilla.web.fetch from Door43 (see below) an extension CAN show unfoldingWord resources live: ULT/UST
-text, word-level ALIGNMENTS (read from the aligned USFM), UGNT/UHB with lemmas, Strong's and morphology, TN, TQ,
-TW articles and TWL links — matched to the project's cells by book/chapter/verse.
+presence/locks, per-tool storage (per user), websites the manifest names (read:web), and (apiRev 7):
+- creating and REFRESHING project files from anything an extension fetches and parses (files.upsert, write:files):
+  that is how outside resources become project content that is live-linked (a "Check for updates" action re-runs it),
+- shared, attributed, revertible records of your own — alignments, annotations, links — in hidden data files
+  (aquilla.data.*, write:data), anchored to cells with a drift check when the cell changes,
+- reading cells by ref across many files at once (cells.byRef) and file groups/tags (files.list, files.group),
+- headless actions (buttons, check on project open) and export formats in the export dialog.
 NOT available (state these as not possible instead of faking them):
-- SAVING alignments or any shared extension data: there is no shared storage for extension data (aquilla.storage
-  is per user and small), and Door43 is read-only from an extension. Viewing alignments is possible; editing and
-  saving them is "not_possible" with that reason.
-- Writing to Door43 or any website (read:web is GET only), or sites the manifest does not name.
-- Alignment between the PROJECT'S own translation and the original (Aquilla stores no word links for project text).
+- Writing to Door43 or any website (read:web is GET only), or sites the manifest does not name. Results go back
+  out through an export (the user uploads it).
+- Running on a server or on a schedule while nobody has the project open ("check on open" is the closest).
+- Pushing changes to a remote repository.
 Bible-translation basics: unfoldingWord resources (ULT literal text, UST simplified text, TN notes, TW key-term
 articles, TQ questions, TA academy) are all keyed by book/chapter/verse; translators work verse by verse with
 several of them side by side, and checkers validate. When a request needs data from this NOT-available list,
 build everything else well and mark that requirement not_possible with the reason — never silently drop it.
-A requirement that works only when the project has imported the data (Greek/Hebrew text, TN, TW, ULT/UST as
-files) is "partial", with a note such as "works when the notes are imported as a file" — not "covered". Prefer
-fetching unfoldingWord resources live from Door43 (read:web) over depending on imported copies.`
+Resources the team TRANSLATES or keeps beside its work belong IN the project: import them as files (files.upsert)
+rather than fetching them on every view — then they are translatable, searchable, versioned, offline-safe and
+update through the extension's refresh action.
+A requirement that works only when the project has imported the data (Greek/Hebrew text, TN, TW, ULT/UST as files)
+and THIS extension does not import it itself is "partial",
+with a note such as "works once the importer has run" — not "covered".`
 
-export const TOOLS_DOOR43_PROMPT = String.raw`## Door43 (unfoldingWord's open resources) — via aquilla.web.fetch, manifest "web": ["git.door43.org"]
-Raw files: https://git.door43.org/unfoldingWord/<repo>/raw/branch/master/<path>   (text/plain; fetch per book)
-Catalog:   https://git.door43.org/api/v1/catalog/search?owner=unfoldingWord&lang=en  (JSON; releases, subjects)
+export const TOOLS_DOOR43_PROMPT = String.raw`## Door43 (unfoldingWord's open resources) — manifest "web": ["git.door43.org"]
+Raw files: https://git.door43.org/unfoldingWord/<repo>/raw/branch/master/<path>   (text/plain; one per book)
+Zipball:   https://git.door43.org/unfoldingWord/<repo>/archive/master.zip   (aquilla.web.fetch(url, { as: "bytes" }) + aq.zip.read;
+           use it for en_tw — ~1,000 articles in one request)
+Latest commit: https://git.door43.org/api/v1/repos/unfoldingWord/<repo>/branches/master  (JSON: commit.id — the sha for "check for updates")
 Book files are numbered: OT 01-GEN … 39-MAL; NT 41-MAT 42-MRK 43-LUK 44-JHN 45-ACT 46-ROM … 67-REV (no 40).
-Map a project ref "MAT 1:1" to book code MAT, chapter 1, verse 1.
-- en_ult / en_ust: <NN>-<BOOK>.usfm (e.g. 41-MAT.usfm). Literal / simplified English, ALIGNED to the original:
-    \v 1 \zaln-s |x-strong="G09760" x-lemma="βίβλος" x-morph="Gr,N,,,,,NFS," x-occurrence="1" x-occurrences="1" x-content="Βίβλος"\*\w The|x-occurrence="1" x-occurrences="1"\w*
-    \w book|x-occurrence="1" x-occurrences="1"\w*\zaln-e\*
-  Each \zaln-s … \zaln-e\* milestone wraps the English \w words aligned to ONE original word (x-content, with
-  x-strong/x-lemma/x-morph; x-occurrence says which occurrence in the verse). Milestones can nest (many-to-many).
-  Plain text = the \w words in order; strip markers. Chapters: \c N; verses: \v N; \p, \q paragraphs.
-- el-x-koine_ugnt (Greek NT) / hbo_uhb (Hebrew OT): <NN>-<BOOK>.usfm with \w word|lemma="…" strong="G…/H…" x-morph="…"\w*.
-- en_tn  (Translation Notes): tn_<BOOK>.tsv — columns Reference, ID, Tags, SupportReference, Quote, Occurrence, Note
-    (Reference "1:1"; Quote = original-language words; Note is Markdown; SupportReference rc://*/ta/man/translate/…).
-- en_tq  (Translation Questions): tq_<BOOK>.tsv — Reference, ID, Tags, Quote, Occurrence, Question, Response.
-- en_twl (Translation Words Links): twl_<BOOK>.tsv — Reference, ID, Tags, OrigWords, Occurrence, TWLink
-    (TWLink rc://*/tw/dict/bible/kt/god → en_tw file bible/kt/god.md).
-- en_tw  (Translation Words): bible/kt/<word>.md, bible/names/<word>.md, bible/other/<word>.md (Markdown article).
-- en_ta  (Translation Academy): translate/<article>/01.md (title.md, sub-title.md beside it).
-TSVs: first line is the header; split rows on newlines and fields on tabs; a literal backslash-n inside a Note is a line break.
-Fetch each book file once, parse it into a { "chapter:verse": … } map, and look rows up by the cell's ref.
-Door43 can be slow or rate-limit heavy use: show a per-track loading state and a clear error, and never refetch per verse.`
+- en_ult / en_ust: <NN>-<BOOK>.usfm, ALIGNED to the original. aq.parse.usfm gives each verse's words with their
+    \zaln-s milestones: each milestone's attrs (x-content, x-strong, x-lemma, x-morph, x-occurrence, x-occurrences) is ONE
+    original word; the English words inside it are aligned to it; milestones nest for many-to-many.
+- el-x-koine_ugnt (Greek NT) / hbo_uhb (Hebrew OT): <NN>-<BOOK>.usfm; words carry lemma, strong, x-morph.
+- en_tn  tn_<BOOK>.tsv: Reference, ID, Tags, SupportReference, Quote, Occurrence, Note (Reference "1:1"; Quote = original-language
+    words + Occurrence; Note is Markdown with a literal \n for line breaks).
+- en_tq  tq_<BOOK>.tsv: Reference, ID, Tags, Quote, Occurrence, Question, Response.
+- en_twl twl_<BOOK>.tsv: Reference, ID, Tags, OrigWords, Occurrence, TWLink (rc://*/tw/dict/bible/kt/god → en_tw bible/kt/god.md).
+- en_tw  bible/kt|names|other/<word>.md (Markdown article: # title, ## sections).
+- en_ta  translate/<article>/01.md (title.md beside it).
+
+### "An unfoldingWord editor" = three cooperating extensions (build the one asked for; mention the others)
+1. IMPORTER (mounts ["page"], scopes read:web + write:files + write:data, actions [{ id:"import", label:"Import unfoldingWord
+   resources", where:["settings","menu"] }, { id:"refresh", label:"Check Door43 for updates", where:["bar","settings"], onOpen:true }]):
+   for the chosen books, files.upsert one file per resource and book with key "uw:<res>:<BOOK>", tags ["uw", "uw:<res>",
+   "book:<BOOK>"], group "uw:<BOOK>", meta { repo, sha }:
+   ULT/UST cells keyed by ref (value = verse text, ref "TIT 1:1"), raw = the USFM; UGNT/UHB kind "reference", cell metadata
+   { words:[{ text, lemma, strong, morph }] }; TN/TQ cells keyed by the TSV ID (value = Note / Question, ref from Reference,
+   metadata = the other columns); TWL kind "reference", value OrigWords, metadata { article:"kt/god", occurrence }; TW one file per
+   category ("uw:tw:kt"), cells keyed "<article>|<section>|<n>" with ref "tw:kt/god". The source alignment of ULT/UST goes to
+   aquilla.data.put("uw.alignment", "<BOOK> <c>:<v>|ult", { groups:[{ src:[{w,occ,occs,strong,lemma,morph}], tgt:[{w,occ}] }] },
+   { coll:"<book>", anchor:{ fileId, cellId, side:"source" } }). Refresh: compare the stored sha, re-fetch changed books,
+   re-upsert (only changed cells change). Report with aquilla.action.progress / done.
+2. EDITOR (mounts ["page","editor"], scopes read:cells + write:target + write:data): files.group(context.file) or files.list
+   ({ tags:["uw","book:TIT"] }); per verse, cells.byRef({ refs:[ref], tags:["uw","book:TIT"] }) gives ULT, UST, UGNT/UHB words,
+   TN, TQ and TWL in one call (TW article cells via cells.byRef({ refs:["tw:kt/god"], tags:["uw:tw"] })). The translator types the
+   gateway-language text into the target of each translatable cell (aquilla.cells.commit or aq.TargetEditor). Gateway-language
+   alignment: drag target words onto original words; save with aquilla.data.put("uw.alignment-gl", "<ref>|<lane>", { groups },
+   { coll, anchor:{ fileId:ultFileId, cellId, side:"target" } }); on read, drift "changed" means the translation changed: re-resolve
+   each target word by text + occurrence, keep the ones still found (mark "verify") and show missing ones as unaligned.
+   Highlight a TN Quote in UGNT by matching words + occurrence, and in the translation through the alignment.
+3. EXPORTER (exports [{ id:"aligned-usfm", label:"Aligned USFM", extension:"usfm", tags:["uw:ult"] }, { id:"uw-tsv", label:
+   "unfoldingWord TSV", extension:"tsv", tags:["uw:tn"] }]): files.source(fileId) for the original USFM, the target cells and
+   "uw.alignment-gl" records → rebuild each verse as \zaln-s |x-strong="…" x-lemma="…" x-morph="…" x-occurrence="n"
+   x-occurrences="m" x-content="…"\*\w word|x-occurrence="n" x-occurrences="m"\w*\zaln-e\*; unaligned words as bare \w…\w*;
+   TSV: the original rows with the translated Note/Question in place (re-escape newlines as \n). aquilla.export.deliver(files).
+Door43 can be slow or rate-limit heavy use: fetch per book (or the zipball) once, show progress, never per verse.`

@@ -134,9 +134,36 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
       mount: boot.mount || "page",
       cell: boot.cell || null,
       file: boot.file || null,
+      // apiRev 7: what a headless run is for ({ id } / { id, fileIds, lane }).
+      action: boot.action || null,
+      export: boot.export || null,
     }),
     files: {
-      list: function () { return call("files.list"); },
+      // apiRev 7: optional { tags, kind, group } filter.
+      list: function (filter) { return call("files.list", filter || null); },
+      upsert: function (spec) { return call("files.upsert", spec); },
+      setMeta: function (fileId, patch) { var p = Object.assign({}, patch || {}); p.fileId = fileId; return call("files.setMeta", p); },
+      source: function (fileId) { return call("files.source", { fileId: fileId }); },
+      group: function (fileId) { return call("files.group", { fileId: fileId }); },
+    },
+    // apiRev 7: records in hidden data files, anchored to cells, with a drift check.
+    data: {
+      get: function (ns, id, opts) { return call("data.get", { ns: ns, id: id, coll: opts && opts.coll ? opts.coll : null }); },
+      put: function (ns, id, doc, opts) { return call("data.put", { ns: ns, id: id, doc: doc === undefined ? null : doc, coll: opts && opts.coll ? opts.coll : null, anchor: opts && opts.anchor ? opts.anchor : null }); },
+      query: function (ns, opts) {
+        var o = opts || {};
+        return call("data.query", { ns: ns, coll: o.coll || null, anchorFileId: o.anchorFileId || null, anchorCellIds: o.anchorCellIds || null, ref: o.ref || null });
+      },
+      delete: function (ns, id, opts) { return call("data.delete", { ns: ns, id: id, coll: opts && opts.coll ? opts.coll : null }); },
+    },
+    // apiRev 7: a headless action reports back.
+    action: {
+      progress: function (message, fraction) { return call("action.progress", { message: String(message || ""), fraction: typeof fraction === "number" ? fraction : null }); },
+      done: function (message, opts) { return call("action.done", { message: message ? String(message) : null, ok: !(opts && opts.ok === false) }); },
+    },
+    // apiRev 7: a headless export hands its files back to the host.
+    export: {
+      deliver: function (files) { return call("export.deliver", { files: files }); },
     },
     cells: {
       list: function (fileId, opts) { return call("cells.list", { fileId: fileId, lane: opts && opts.lane ? opts.lane : "" }); },
@@ -154,6 +181,8 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
       signals: function (fileId) { return call("cells.signals", { fileId: fileId }); },
       pericopes: function (fileId) { return call("cells.pericopes", { fileId: fileId }); },
       settle: function (fileId, cellId) { return call("cells.settle", { fileId: fileId, cellId: cellId }); },
+      // apiRev 7: cells by canonical ref across files ({ refs | prefix, fileIds | tags, lane }).
+      byRef: function (query) { return call("cells.byRef", query || null); },
       // Removed-API marker (apiRev 1): the host answers with api_removed.
       save: function (edit) { return call("cells.save", edit === undefined ? null : edit); },
     },
@@ -257,7 +286,7 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
     },
     // apiRev 6: read a declared site through the host's proxy (scope read:web).
     web: {
-      fetch: function (url, opts) { return call("web.fetch", { url: String(url), as: opts && opts.as === "json" ? "json" : "text" }); },
+      fetch: function (url, opts) { var as = opts && (opts.as === "json" || opts.as === "bytes") ? opts.as : "text"; return call("web.fetch", { url: String(url), as: as }); },
     },
     ai: {
       generate: function (prompt, opts) {
@@ -291,6 +320,7 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
   Object.freeze(aquilla.editor); Object.freeze(aquilla.backtranslation); Object.freeze(aquilla.history); Object.freeze(aquilla.attachments);
   Object.freeze(aquilla.rules); Object.freeze(aquilla.selection); Object.freeze(aquilla.suggestions);
   Object.freeze(aquilla.agent); Object.freeze(aquilla.source); Object.freeze(aquilla.web);
+  Object.freeze(aquilla.data); Object.freeze(aquilla.action); Object.freeze(aquilla.export);
   Object.defineProperty(window, "aquilla", { value: Object.freeze(aquilla), writable: false, configurable: false });
 
   // apiRev 2: focus handoff. App-wide shortcuts (Ctrl/Cmd+K search, the

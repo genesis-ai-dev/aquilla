@@ -228,17 +228,83 @@ Revert now also **puts back validations an extension withdrew** (`revalidates` i
 `shared/tools/revert.ts`): only the reverting user's own, and only while the text they
 validated is still the live head.
 
+## apiRev 7 — primitives anything can be built on (AQU-1937)
+
+Daniel, 2026-10-13: "Smart Extensions built in such a way that ANYTHING can be built on top of them,
+including the unfoldingWord features." So core has no uW code; an unfoldingWord editor (TN/TQ/TW/TWL,
+ULT/UST alignment, UGNT/UHB, aligned export, live-linked to Door43) is three cooperating extensions
+(importer, editor, exporter) on these generic primitives. The builder's Door43 guide
+(`auth-worker/src/lib/tools/build-prompt-guide.ts`) carries the recipe.
+
+**Everything is a file.** There is no separate extension-data store: what an extension imports is an
+ordinary source file, and what it keeps for itself (alignments, annotations, links) is a hidden data file
+of the same project. Both get attribution, history, revert, permissions, sync and export from the event
+model for free, with no new table and no migration.
+
+- **Files an extension creates and refreshes** — `aquilla.files.upsert({ key, name, kind, tags, group,
+  meta, format, bookCode, cells:[{ key, value, html, type, ref, metadata }], raw })`, scope `write:files`
+  (project lead, the floor of `file.create`). Ids are uuidv5 of the project-wide file key and the cell key
+  (`src/lib/tools/live-data-files.ts`), so the first call creates the file through the bulk `/import`
+  front door and every later call is a DELTA: the change detection lifted out of the Door43 adapter
+  (`src/lib/import/change-detection.ts`, which `src/lib/dcs/delta.ts` now uses) emits only the
+  `source.cell.create/commit/delete` that differ, and translations of changed cells go stale through the
+  usual staleness machinery. `files.setMeta` replaces `files.meta.extension` through the new
+  `file.extension.set` event (project lead): `kind` (`normal` | `reference` | `data`), `tags`, `group`,
+  `owner` (the tool) and the extension's small `meta` (e.g. upstream `{ repo, sha }`).
+  `files.list({ tags, kind, group })` returns them; `files.source(fileId)` the kept original;
+  `files.group(fileId)` every file sharing its group (an editor opened on one member gets the set).
+- **Data files** — `aquilla.data.put/get/query/delete(ns, id, …, { coll, anchor })`, scope `write:data`.
+  One data file per `ns`/`coll` (`files.role = 'extension-data'`, hidden from file lists, totals and search
+  through `db/shared/counted-files.ts`, like the timeline companions; "Show extension data files" on the
+  Smart Extensions page reveals them), one cell per record, value = JSON `{ v, id, doc, anchor }`. A record
+  anchored to a cell stamps that cell's head event id (source or a lane's target); reads compare it with
+  the head now: `drift` is `current`, `changed` (edited since) or `orphaned` (gone). Core never anchors
+  below the cell: an extension re-resolves its own word-level anchors (text + occurrence) when `changed`.
+  Why a separate scope: `source.cell.commit` is a project lead's, but translators save alignments — the
+  sync-worker floors cell writes in a data file at CONTRIBUTOR, for verified extensions only.
+- **Cross-file reads** — `aquilla.cells.byRef({ refs | prefix, fileIds | tags, lane })`, backed by the
+  sync-worker's `GET /api/v1/projects/:p/cells/by-ref` (≤50 files, ≤200 refs or a prefix, ≤5,000 rows).
+  Every query is file-scoped, so it runs on `idx_cells_file_scan` (project, file, …) with `canonical_ref` as
+  a filter: no index migration.
+- **Actions** — manifest `actions: [{ id, label, where: ["bar"|"menu"|"settings"], onOpen? }]`. The host
+  runs the extension HEADLESS (`src/components/tools/HeadlessRuns.tsx`: an off-screen frame with the same
+  sandbox, CSP, bridge and permission gate; `aquilla.context.mount = "action"`), shows its
+  `aquilla.action.progress` and `done` as a toast, stops it after 15 minutes, and shows a permission prompt
+  in a floating card. `onOpen` is "check on project open": client-side only, at most daily per user, and only
+  when the user's role allows and their grant already holds every declared scope
+  (`src/lib/tools/on-open-actions.ts`). Generated code still never runs on a server.
+- **Exports** — manifest `exports: [{ id, label, extension, tags? }]` appear in the normal export dialog
+  ("From extensions", `src/components/tools/ExtensionExports.tsx`) for files carrying one of the tags; the
+  headless run gets `aquilla.context.export = { id, fileIds, lane }` and hands files back with
+  `aquilla.export.deliver([{ name, text | bytes, mime }])` (several are zipped). The export floor still
+  applies to `files.source`.
+- **Bytes** — `aquilla.web.fetch(url, { as: "bytes" })` answers an ArrayBuffer (≤20 MB; base64 across the
+  proxy). Importers (`write:files`) get 1,200 fetches per 15 minutes instead of 300: a full unfoldingWord
+  set pulled book by book is ~400 raw files plus a refresh pass, still ≤ ~1.3 requests a second against the
+  upstream; en_tw's ~1,000 articles are one zipball. SDK 1.1 adds `aq.zip.read`, `aq.parse.tsv`,
+  `aq.parse.usfm` (USFM 3 words with attributes, occurrences and nested alignment milestones) and
+  `aq.parse.mdBlocks` (`shared/tools/sdk/sdk-io.ts`).
+- **Verified identity** — `tool_origin` is no longer only caller-declared. The host mints a tool session
+  (auth-worker `POST /api/v2/projects/:p/tools/:t/session`: HS256 with the sync key, audience
+  `aquilla-tool`, bound to project, tool, current version, code hash and user) and attaches it to every
+  write. The sync-worker verifies it (`events/tool-provenance.ts`): a file write (`source.cell.*`,
+  `file.extension.set`, `/import`) that claims an extension without a valid session is refused, a data file
+  accepts only verified extensions (or the user's own revert), and provenance reads `verified` only with a
+  matching session.
+
 ## Prototype-only vs production follow-ups
 
 - **Origin.** Prototype uses srcdoc + meta CSP. Production: serve frames from a dedicated
   origin (`tools.aquilla.app`) with the CSP as a header; add it to `frame-src` in
   `public/_headers`, `worker/security-headers.ts` and the Tauri CSP; srcdoc becomes `src=`.
-- **Provenance trust.** `tool_origin` is caller-declared and verified against stored hashes;
-  production should mint a per-frame tool session token server-side so a page script cannot
-  claim a tool identity.
+- **Provenance trust.** Done in apiRev 7 (tool sessions, above). A session token rides in the stored event
+  payload; it vouches only for its own user, so it grants nothing to anyone who reads it.
 - **Builds** are synchronous (≈1–2 min) with a progress card; move to background jobs.
 - **Activity read** lives in auth-worker reading `events`; move behind a sync-worker route.
-- **Storage** (`aquilla.storage`) is per-browser localStorage; move server-side per tool/user.
+- **Storage** (`aquilla.storage`) is per-browser localStorage for per-user conveniences; shared data
+  belongs in data files (`aquilla.data.*`, apiRev 7).
+- **Revert of file and data writes.** "Revert everything since then" still compensates target commits and
+  validations only; extending it to the `source.cell.*` writes of upsert and data files is the next step.
 - **Not built:** revertible settings/comment writes with saved prior values (bridge has no
   settings/comment writes yet), handing `tell()` to the in-app agent (it is a user-facing
   message today), a Checking View starter (the Focus Editor covers verse-by-verse checking),

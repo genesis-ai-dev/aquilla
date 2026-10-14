@@ -34,6 +34,8 @@ export interface RequestCache {
   orgSettings(orgId: number): Promise<Record<string, unknown> | null>
   /** `projects.org_id` for the project, or null when the project has no org (or no row). */
   projectOrgId(projectId: string): Promise<number | null>
+  /** Smart Extensions apiRev 7: `files.role` of one file (null: no row / no role). Optional so hand-built fakes stay valid. */
+  fileRole?(projectId: string, fileId: string): Promise<string | null>
 }
 
 function parseSettings(raw: unknown): Record<string, unknown> | null {
@@ -50,6 +52,7 @@ export function makeRequestCache(db: AquillaDb): RequestCache {
   const projectSettings = new Map<string, Promise<Record<string, unknown> | null>>()
   const orgSettings = new Map<number, Promise<Record<string, unknown> | null>>()
   const projectOrgIds = new Map<string, Promise<number | null>>()
+  const fileRoles = new Map<string, Promise<string | null>>()
 
   const memo = <K, V>(store: Map<K, Promise<V>>, key: K, load: () => Promise<V>): Promise<V> => {
     let pending = store.get(key)
@@ -84,6 +87,14 @@ export function makeRequestCache(db: AquillaDb): RequestCache {
           .bind(projectId)
           .first<{ org_id: number | null }>()
         return row?.org_id ?? null
+      }),
+    fileRole: (projectId, fileId) =>
+      memo(fileRoles, `${projectId}\u0000${fileId}`, async () => {
+        const row = await db
+          .prepare(`SELECT role FROM files WHERE id = ? AND project_id = ?`)
+          .bind(fileId, projectId)
+          .first<{ role: string | null }>()
+        return row?.role ?? null
       }),
   }
 }

@@ -28,6 +28,10 @@ export function useScopeLabel(): (scope: ToolScope) => string {
           return t("extensions.scope.writeSource")
         case "read:web":
           return t("extensions.scope.readWeb")
+        case "write:files":
+          return t("extensions.scope.writeFiles")
+        case "write:data":
+          return t("extensions.scope.writeData")
       }
     },
     [t],

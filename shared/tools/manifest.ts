@@ -26,8 +26,13 @@ import { MAX_WEB_DOMAINS, validateWebDomain } from "./web-domains"
  *  integrity-check explanations and the read-only/archived-lane banner. Rev 6
  *  (additive only): `read:web` + `manifest.web` and aquilla.web.fetch — reads
  *  from declared sites through the host's proxy. See API_REV_ADDITIONS in
- *  api-rev.ts. */
-export const TOOLS_API_REV = 6
+ *  api-rev.ts. Rev 7 (additive only): extensions as importers and exporters —
+ *  `write:files` + files.upsert / files.setMeta / files.source, extension data
+ *  files (aquilla.data.*), cells.byRef across files, file groups, manifest
+ *  `actions` (headless runs from the bar/menu/settings, optional check on
+ *  project open) and manifest `exports` (formats in the export dialog), plus
+ *  web.fetch as bytes. */
+export const TOOLS_API_REV = 7
 
 /** SDK majors the host can inject (manifest.sdk; shared/tools/sdk/sdk.ts). */
 export const TOOLS_SDK_MAJORS: readonly number[] = [1]
@@ -48,6 +53,10 @@ export const TOOL_SCOPES = [
   "write:source",
   // apiRev 6: read from the sites in manifest.web, through the host's proxy.
   "read:web",
+  // apiRev 7: create and refresh project files (importers). Project lead.
+  "write:files",
+  // apiRev 7: save records in the extension's hidden data files. Contributor.
+  "write:data",
 ] as const
 
 export type ToolScope = (typeof TOOL_SCOPES)[number]
@@ -63,6 +72,8 @@ export const TOOL_SCOPE_LABELS: Record<ToolScope, string> = {
   "write:audio": "record and generate audio for cells",
   "write:source": "edit source text and add, remove or hide cells",
   "read:web": "read from the websites it names",
+  "write:files": "create and update project files",
+  "write:data": "save its own data (alignments, notes, …) in hidden data files",
 }
 
 export function isToolScope(value: unknown): value is ToolScope {
@@ -75,6 +86,31 @@ export function isToolScope(value: unknown): value is ToolScope {
  *  a file (the file arrives as `aquilla.context.file`). */
 export type ToolMount = "page" | "panel" | "inline" | "editor"
 
+/** apiRev 7: a button that runs the extension HEADLESS (no visible frame).
+ *  `where`: the extensions bar above the file view, the extensions palette
+ *  menu, or the extension's card in Smart Extensions settings. `onOpen`: also
+ *  run it (at most once a day per user) when a member who may write files opens
+ *  the project — "check for updates" for live-linked importers. */
+export interface ToolAction {
+  id: string
+  label: string
+  where: ToolActionPlace[]
+  onOpen?: boolean
+}
+export type ToolActionPlace = "bar" | "menu" | "settings"
+
+/** apiRev 7: an export format the extension contributes to the export dialog.
+ *  `tags`: offered only for files carrying one of these tags (absent = every
+ *  file). The extension runs headless and hands files back with
+ *  aquilla.export.deliver. */
+export interface ToolExport {
+  id: string
+  label: string
+  /** File extension of what it produces, e.g. "usfm", "tsv", "zip". */
+  extension: string
+  tags?: string[]
+}
+
 export interface ToolManifest {
   name: string
   description: string
@@ -85,6 +121,72 @@ export interface ToolManifest {
   sdk?: number
   /** apiRev 6: the sites `read:web` may read ("git.door43.org", "*.door43.org"). */
   web?: string[]
+  /** apiRev 7: headless actions (import, check for updates, …). */
+  actions?: ToolAction[]
+  /** apiRev 7: export formats offered in the export dialog. */
+  exports?: ToolExport[]
+}
+
+const ACTION_ID = /^[a-z][a-z0-9-]{0,39}$/
+const MAX_ACTIONS = 8
+const MAX_EXPORTS = 8
+const MAX_LABEL = 60
+const ACTION_PLACES: readonly ToolActionPlace[] = ["bar", "menu", "settings"]
+
+function readActions(input: unknown, errors: string[]): ToolAction[] {
+  if (input === undefined || input === null) return []
+  if (!Array.isArray(input)) {
+    errors.push("manifest.actions must be a list")
+    return []
+  }
+  const out: ToolAction[] = []
+  for (const [i, raw] of input.entries()) {
+    if (!isRecord(raw)) {
+      errors.push(`manifest.actions[${i}] must be an object`)
+      continue
+    }
+    const id = typeof raw.id === "string" ? raw.id : ""
+    const label = typeof raw.label === "string" ? raw.label.trim() : ""
+    if (!ACTION_ID.test(id)) errors.push(`manifest.actions[${i}].id must be lowercase letters, digits and dashes`)
+    else if (out.some((a) => a.id === id)) errors.push(`manifest.actions has two actions with id ${id}`)
+    if (!label || label.length > MAX_LABEL) errors.push(`manifest.actions[${i}].label must be 1-${MAX_LABEL} characters`)
+    const places = Array.isArray(raw.where) ? raw.where : ["bar"]
+    const where: ToolActionPlace[] = []
+    for (const p of places) {
+      const place = ACTION_PLACES.find((x) => x === p)
+      if (!place) errors.push(`manifest.actions[${i}].where: unknown place ${String(p)} (bar, menu, settings)`)
+      else if (!where.includes(place)) where.push(place)
+    }
+    out.push({ id, label, where: where.length ? where : ["bar"], ...(raw.onOpen === true ? { onOpen: true } : {}) })
+  }
+  if (out.length > MAX_ACTIONS) errors.push(`manifest.actions lists more than ${MAX_ACTIONS} actions`)
+  return out
+}
+
+function readExports(input: unknown, errors: string[]): ToolExport[] {
+  if (input === undefined || input === null) return []
+  if (!Array.isArray(input)) {
+    errors.push("manifest.exports must be a list")
+    return []
+  }
+  const out: ToolExport[] = []
+  for (const [i, raw] of input.entries()) {
+    if (!isRecord(raw)) {
+      errors.push(`manifest.exports[${i}] must be an object`)
+      continue
+    }
+    const id = typeof raw.id === "string" ? raw.id : ""
+    const label = typeof raw.label === "string" ? raw.label.trim() : ""
+    const extension = typeof raw.extension === "string" ? raw.extension.replace(/^\./, "").toLowerCase() : ""
+    if (!ACTION_ID.test(id)) errors.push(`manifest.exports[${i}].id must be lowercase letters, digits and dashes`)
+    else if (out.some((x) => x.id === id)) errors.push(`manifest.exports has two formats with id ${id}`)
+    if (!label || label.length > MAX_LABEL) errors.push(`manifest.exports[${i}].label must be 1-${MAX_LABEL} characters`)
+    if (!/^[a-z0-9]{1,10}$/.test(extension)) errors.push(`manifest.exports[${i}].extension must be a file extension such as "usfm"`)
+    const tags = Array.isArray(raw.tags) ? raw.tags.filter((t): t is string => typeof t === "string" && t.length > 0 && t.length <= 80).slice(0, 20) : []
+    out.push({ id, label, extension, ...(tags.length ? { tags } : {}) })
+  }
+  if (out.length > MAX_EXPORTS) errors.push(`manifest.exports lists more than ${MAX_EXPORTS} formats`)
+  return out
 }
 
 export interface ManifestValidation {
@@ -164,9 +266,29 @@ export function validateManifest(input: unknown): ManifestValidation {
   if (scopes.includes("read:web") && web.length === 0) errors.push('scope read:web needs manifest.web: the domains it reads, e.g. ["git.door43.org"]')
   if (web.length > 0 && !scopes.includes("read:web")) errors.push("manifest.web is only allowed with the read:web scope")
   if (scopes.includes("read:web") && apiRev < 6) errors.push("scope read:web needs apiRev 6 or later")
+  if (scopes.includes("write:files") && apiRev < 7) errors.push("scope write:files needs apiRev 7 or later")
+  if (scopes.includes("write:data") && apiRev < 7) errors.push("scope write:data needs apiRev 7 or later")
+
+  const actions = readActions(input.actions, errors)
+  const exportsList = readExports(input.exports, errors)
+  if ((actions.length > 0 || exportsList.length > 0) && apiRev < 7) errors.push("manifest.actions and manifest.exports need apiRev 7 or later")
 
   if (errors.length > 0) return { ok: false, manifest: null, errors }
-  return { ok: true, manifest: { name, description, scopes, mounts, apiRev, ...(sdk ? { sdk } : {}), ...(web.length ? { web } : {}) }, errors }
+  return {
+    ok: true,
+    manifest: {
+      name,
+      description,
+      scopes,
+      mounts,
+      apiRev,
+      ...(sdk ? { sdk } : {}),
+      ...(web.length ? { web } : {}),
+      ...(actions.length ? { actions } : {}),
+      ...(exportsList.length ? { exports: exportsList } : {}),
+    },
+    errors,
+  }
 }
 
 /** The provenance a tool write carries in its event payload (`tool_origin`).
@@ -177,6 +299,11 @@ export interface ToolOrigin {
   toolId: string
   version: number
   codeHash: string
+  /** apiRev 7: the server-minted tool session token (auth-worker
+   *  POST /tools/:id/session). The sync-worker verifies its signature and that
+   *  it names this tool, version, hash, project and author before it trusts the
+   *  claim — and REQUIRES it for writes to files and extension data files. */
+  session?: string
 }
 
 export function isToolOrigin(value: unknown): value is ToolOrigin {
@@ -206,6 +333,8 @@ export async function toolCodeHash(source: string, manifest: ToolManifest): Prom
       // Only when set, so every pre-SDK tool keeps its hash.
       ...(manifest.sdk ? { sdk: manifest.sdk } : {}),
       ...(manifest.web?.length ? { web: [...manifest.web].sort() } : {}),
+      ...(manifest.actions?.length ? { actions: manifest.actions } : {}),
+      ...(manifest.exports?.length ? { exports: manifest.exports } : {}),
     },
   })
   const bytes = new TextEncoder().encode(canonical)

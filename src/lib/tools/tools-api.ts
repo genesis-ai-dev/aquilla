@@ -200,9 +200,18 @@ export async function webFetch(
   projectId: string,
   toolId: string,
   url: string,
-  as: "text" | "json",
+  as: "text" | "json" | "bytes",
 ): Promise<{ status: number; contentType: string; body: unknown; url: string }> {
   return request(jwt, `${p(projectId)}/${encodeURIComponent(toolId)}/web-fetch`, { method: "POST", body: { url, as } })
+}
+
+/** apiRev 7: the tool session token the sync-worker requires to trust tool_origin. */
+export async function mintToolSession(
+  jwt: string,
+  projectId: string,
+  toolId: string,
+): Promise<{ token: string; version: number; codeHash: string; expiresIn: number }> {
+  return request(jwt, `${p(projectId)}/${encodeURIComponent(toolId)}/session`, { method: "POST", body: {} })
 }
 
 export async function buildToolAttempt(

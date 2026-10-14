@@ -20,6 +20,7 @@ import { BuildFailureCard } from "@/components/tools/builder/BuildFailureCard"
 import { BuildProgressCard } from "@/components/tools/builder/BuildProgressCard"
 import { DescribeStep } from "@/components/tools/builder/DescribeStep"
 import { InstalledList } from "@/components/tools/builder/InstalledList"
+import { ShowDataFilesToggle } from "@/components/tools/ShowDataFilesToggle"
 import { ReviewStep } from "@/components/tools/builder/ReviewStep"
 import { StarterGallery } from "@/components/tools/builder/StarterGallery"
 import { useToolsMount } from "@/components/tools/ToolsMountContext"
@@ -196,7 +197,8 @@ export function ToolsPage() {
         <StarterGallery disabled={running} onPick={(s) => setCandidate(projectId, { request: null, source: s.source, manifest: s.manifest, origin: "starter" })} />
       )}
 
-      <InstalledList projectId={projectId} tools={tools} menuFor={menuFor} />
+      <InstalledList projectId={projectId} tools={tools} menuFor={menuFor} onRunAction={mounts ? (toolId, actionId) => mounts.runAction(toolId, actionId) : undefined} />
+      <ShowDataFilesToggle />
 
       {sheet && sheetTool && jwt && sheet.kind === "permissions" && (
         <PermissionsDialog tool={sheetTool} roleLevel={roleLevel ?? null} onChange={(scopes) => setGrant(sheetTool, scopes)} onClose={() => setSheet(null)} />

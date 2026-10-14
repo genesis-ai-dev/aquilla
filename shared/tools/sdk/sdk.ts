@@ -23,6 +23,7 @@ import { SDK_CORE } from "./sdk-core"
 import { SDK_DATA } from "./sdk-data"
 import { SDK_EDIT } from "./sdk-edit"
 import { SDK_ICONS } from "./sdk-icons"
+import { SDK_IO } from "./sdk-io"
 import { SDK_KIT, SDK_KIT_STYLE } from "./sdk-kit"
 import { SDK_LIST } from "./sdk-list"
 import { SDK_ROW } from "./sdk-row"
@@ -30,11 +31,12 @@ import { SDK_REV4, SDK_REV4_STYLE } from "./sdk-rev4"
 import { SDK_EDITOR_STYLE } from "./sdk-style-editor"
 import { stringKeysOf } from "./string-keys"
 
-export const AQ_SDK_VERSION = "1.0"
+// 1.1 (apiRev 7): aq.zip and aq.parse (sdk-io.ts).
+export const AQ_SDK_VERSION = "1.1"
 /** SDK majors this host can inject (manifest.sdk). */
 export const AQ_SDK_MAJORS: readonly number[] = [1]
 
-const PARTS = [SDK_CORE, SDK_DATA, SDK_LIST, SDK_EDIT, SDK_ACTIONS, SDK_CELLS, SDK_ROW, SDK_REV4, SDK_KIT, SDK_API]
+const PARTS = [SDK_CORE, SDK_DATA, SDK_LIST, SDK_EDIT, SDK_ACTIONS, SDK_CELLS, SDK_ROW, SDK_REV4, SDK_KIT, SDK_IO, SDK_API]
 
 const MILESTONE_VOCABS = ["chapter", "slide", "story", "section", "timeRange", "part", "group", "milestone"]
 const MILESTONE_KEYS = MILESTONE_VOCABS.flatMap((v) =>
@@ -81,6 +83,7 @@ export const AQ_SDK_EXPORTS: readonly string[] = [
   "ui.Page", "ui.Panel", "ui.Card", "ui.Stack", "ui.Heading", "ui.Text", "ui.Button", "ui.IconButton", "ui.Badge", "ui.Stat", "ui.Progress",
   "ui.Tabs", "ui.Input", "ui.Textarea", "ui.Checkbox", "ui.Select", "ui.Spinner", "ui.Empty", "ui.Avatar", "ui.Kbd", "ui.Divider", "ui.Menu",
   "ui.popover", "ui.closePopover", "ui.tooltip", "ui.dialog", "ui.confirm", "ui.toast",
+  "zip.read", "parse.tsv", "parse.usfm", "parse.mdBlocks",
   "cell.state", "cell.refresh", "cell.ref", "cell.number", "cell.plain", "cell.words", "cell.isStructural", "cell.toggleDetails", "cell.scrollTo", "cell.focusRow",
 ]
 

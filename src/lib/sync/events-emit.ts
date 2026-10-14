@@ -1489,6 +1489,10 @@ export interface SourceCellCreateInput {
   /** Authorship — the admin/importer-bot user. */
   author: string
   clientTs?: number
+  /** Smart Extensions apiRev 7: the extension making this file write. */
+  toolOrigin?: OutboxPayloadFor<"source.cell.create">["tool_origin"]
+  /** Deterministic event id (idempotent re-runs). */
+  id?: string
 }
 
 /**
@@ -1521,7 +1525,9 @@ export async function emitSourceCellCreate(
       ...(input.sequenceIndex !== undefined ? { sequenceIndex: input.sequenceIndex } : {}),
       ...(input.transcription !== undefined ? { transcription: input.transcription } : {}),
       ...(input.cameraState !== undefined ? { cameraState: input.cameraState } : {}),
+      ...(input.toolOrigin ? { tool_origin: input.toolOrigin } : {}),
     },
+    ...(input.id !== undefined ? { id: input.id } : {}),
     clientTs: input.clientTs,
   })
   return eventId
@@ -1574,6 +1580,8 @@ export interface SourceCellDeleteInput {
   parentId?: string | null
   author: string
   clientTs?: number
+  /** Smart Extensions apiRev 7: the extension making this file write. */
+  toolOrigin?: OutboxPayloadFor<"source.cell.delete">["tool_origin"]
 }
 
 /**
@@ -1589,7 +1597,7 @@ export async function emitSourceCellDelete(input: SourceCellDeleteInput): Promis
     cellId: input.cellId,
     parentId: input.parentId ?? null,
     author: input.author,
-    payload: {},
+    payload: input.toolOrigin ? { tool_origin: input.toolOrigin } : {},
     clientTs: input.clientTs,
   })
   return eventId
@@ -1878,6 +1886,30 @@ export async function emitFileCorpusSet(input: FileCorpusSetInput): Promise<stri
     parentId: null,
     author: input.author,
     payload: { corpusMarker: trimmed || null },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface FileExtensionSetInput {
+  projectId: string
+  fileId: string
+  /** The whole files.meta.extension (shared/tools/file-extension.ts); null clears it. */
+  extension: Record<string, unknown> | null
+  author: string
+  toolOrigin?: OutboxPayloadFor<"file.extension.set">["tool_origin"]
+  clientTs?: number
+}
+
+/** Smart Extensions apiRev 7: replace a file's extension metadata (kind, tags, group, meta). */
+export async function emitFileExtensionSet(input: FileExtensionSetInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "file.extension.set",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    parentId: null,
+    author: input.author,
+    payload: { extension: input.extension, ...(input.toolOrigin ? { tool_origin: input.toolOrigin } : {}) },
     clientTs: input.clientTs,
   })
   return eventId

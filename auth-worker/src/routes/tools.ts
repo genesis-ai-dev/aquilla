@@ -11,6 +11,8 @@
 //   POST   /:projectId/tools/:toolId/copy      share as an OWNED copy into { targetProjectId }
 //   GET    /:projectId/tools/:toolId/source?version=N   one version's source (code review)
 //   POST   /:projectId/tools/build                 one builder attempt (routes/tools-build.ts)
+//   POST   /:projectId/tools/:toolId/session       apiRev 7: mint the tool session token the
+//                                                  sync-worker requires to trust tool_origin
 //   POST   /:projectId/tools/first-party           { key } ensure a first-party extension
 //                                                  (the default editor) is installed + current
 //
@@ -21,6 +23,8 @@
 // prompting and server-side on every event.
 
 import { Hono } from "hono"
+import { sign } from "hono/jwt"
+import { TOOL_SESSION_AUDIENCE, TOOL_SESSION_TTL_SECONDS, type ToolSessionClaims } from "../../../shared/tools/tool-session"
 import type { Context } from "hono"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
@@ -91,6 +95,33 @@ tools.get("/:projectId/tools", authMiddleware, async (c) => {
 
 tools.post("/:projectId/tools/build", authMiddleware, buildToolRoute)
 tools.post("/:projectId/tools/:toolId/web-fetch", authMiddleware, webFetchRoute)
+
+// apiRev 7: the tool session. Minted for a member, for the tool's CURRENT
+// version only (an old or forged version gets nothing), signed with the key the
+// sync-worker verifies sync tokens with but under its own audience. The host
+// attaches it to every write's tool_origin; the sync-worker refuses file and
+// extension-data writes whose claimed extension it does not vouch for.
+tools.post("/:projectId/tools/:toolId/session", authMiddleware, async (c) => {
+  if (!c.env.SYNC_SECRET_KEY) return err(c, 503, "not_configured", "SYNC_SECRET_KEY not configured")
+  if ((await roleFor(c)) == null) return err(c, 404, "not_found", "project not found")
+  const user = c.get("user")
+  const tool = await getTool(c.env.AQUILLA_PG, pid(c), tid(c), user.id)
+  if (!tool) return err(c, 404, "not_found", "tool not found")
+  const now = Math.floor(Date.now() / 1000)
+  const claims: ToolSessionClaims = {
+    aud: TOOL_SESSION_AUDIENCE,
+    projectId: pid(c),
+    toolId: tool.id,
+    version: tool.currentVersion,
+    codeHash: tool.codeHash,
+    userId: user.id,
+    username: user.username,
+    iat: now,
+    exp: now + TOOL_SESSION_TTL_SECONDS,
+  }
+  const token = await sign(claims as unknown as Record<string, unknown>, c.env.SYNC_SECRET_KEY, "HS256")
+  return c.json({ token, version: tool.currentVersion, codeHash: tool.codeHash, expiresIn: TOOL_SESSION_TTL_SECONDS })
+})
 
 tools.post("/:projectId/tools", authMiddleware, async (c) => {
   const level = await roleFor(c)

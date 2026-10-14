@@ -44,6 +44,7 @@ import { handleSessionChangesetsRequest } from "./external/session-routes"
 import { handleExternalArtifactsRequest } from "./external/artifacts-route"
 import { handleExternalKnowledgeRequest } from "./external/knowledge-route"
 import { handleFilesReadRequest } from "./events/files-read-route"
+import { handleCellsByRefRequest } from "./events/cells-by-ref-route"
 import { handleProgressReadRequest } from "./events/progress-read-route"
 import { handlePlanRequest } from "./events/plan-route"
 import { handleBulkImportRequest } from "./events/import-route"
@@ -420,6 +421,9 @@ const worker = {
     if (cellsAuditReadResponse) return withCors(cellsAuditReadResponse, request)
     const filesReadResponse = await handleFilesReadRequest(request, env)
     if (filesReadResponse) return withCors(filesReadResponse, request)
+    // Smart Extensions apiRev 7: cells by canonical ref across files.
+    const cellsByRefResponse = await handleCellsByRefRequest(request, env)
+    if (cellsByRefResponse) return withCors(cellsByRefResponse, request)
     const progressReadResponse = await handleProgressReadRequest(request, env)
     if (progressReadResponse) return withCors(progressReadResponse, request)
 

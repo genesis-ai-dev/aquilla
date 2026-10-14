@@ -28,7 +28,8 @@ iframe, talking to the app through \`aquilla\` / the \`aq\` SDK) before the user
 1. For each numbered requirement, decide from the CODE (not the plan) whether it is "covered", "partial" or
    "missing". Keep "not_possible" when the bridge truly cannot support it (and keep its reason); change a
    "not_possible" to "missing" if the bridge could support it after all. Something that works only when the
-   project has imported that data as a file (originals, TN, TW, ULT/UST) is "partial", and the note says so.
+   project has imported that data as a file (originals, TN, TW, ULT/UST) that THIS extension does not import
+   itself (files.upsert) is "partial", and the note says so.
    One short "note" per row.
 2. Check the code against each UI check below; ok=false with a short note when it fails.
 3. If any "must" is missing/partial (and possible) or any UI check fails, write "fix": numbered, concrete

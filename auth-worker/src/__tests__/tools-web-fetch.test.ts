@@ -5,7 +5,9 @@
 
 import { describe, expect, it } from "vitest"
 import {
+  WEB_FETCH_MAX_BINARY_BYTES,
   WEB_FETCH_MAX_BYTES,
+  toBase64,
   WebFetchError,
   checkWebUrl,
   deploymentAllowlist,
@@ -146,5 +148,27 @@ describe("the proxied GET", () => {
       throw Object.assign(new Error("timed out"), { name: "TimeoutError" })
     }) as unknown as typeof fetch
     expect(await code(proxyWebFetch({ url: "https://git.door43.org/x", as: "text", domains: DOMAINS, deploymentAllow: null }, { fetch: slow, resolve: publicDns }))).toBe("timeout")
+  })
+})
+
+describe("bytes (apiRev 7)", () => {
+  it("returns a binary body as base64 regardless of content type, and keeps the text-only rule for text", async () => {
+    const zip = new Uint8Array([0x50, 0x4b, 0x05, 0x06, 0, 0, 255])
+    const s = site(() => new Response(zip, { headers: { "Content-Type": "application/zip" } }))
+    const out = await proxyWebFetch({ url: "https://git.door43.org/a.zip", as: "bytes", domains: DOMAINS, deploymentAllow: null }, { fetch: s.fetch, resolve: publicDns })
+    expect(out.body).toBe(toBase64(zip))
+    expect(atob(out.body as string).length).toBe(zip.length)
+    const asText = site(() => new Response(zip, { headers: { "Content-Type": "application/zip" } }))
+    expect(await code(proxyWebFetch({ url: "https://git.door43.org/a.zip", as: "text", domains: DOMAINS, deploymentAllow: null }, { fetch: asText.fetch, resolve: publicDns }))).toBe("unsupported_type")
+  })
+
+  it("caps binary bodies at the binary limit", async () => {
+    const big = site(() => new Response("x", { headers: { "Content-Type": "application/zip", "Content-Length": String(WEB_FETCH_MAX_BINARY_BYTES + 1) } }))
+    expect(await code(proxyWebFetch({ url: "https://git.door43.org/a.zip", as: "bytes", domains: DOMAINS, deploymentAllow: null }, { fetch: big.fetch, resolve: publicDns }))).toBe("too_large")
+  })
+
+  it("encodes large arrays without blowing the stack", () => {
+    const bytes = new Uint8Array(300_000).map((_, i) => i % 256)
+    expect(atob(toBase64(bytes)).length).toBe(bytes.length)
   })
 })

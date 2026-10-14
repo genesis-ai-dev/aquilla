@@ -10,7 +10,7 @@
 
 import { useEffect } from "react"
 import { useNavigate } from "react-router-dom"
-import { Blocks, Pin, Plus, Sparkles } from "lucide-react"
+import { Blocks, Pin, Play, Plus, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -38,6 +38,10 @@ export function ExtensionsBar({ choice }: { choice: ExtensionEditorChoice }) {
 
   if (!ctx || ctx.tools.length === 0) return null
   const pinned = ctx.tools.filter((tool) => ctx.pinned.includes(tool.id) && tool.manifest.mounts.includes("panel"))
+  // apiRev 7: manifest actions placed on the bar run headless in one click.
+  const barActions = ctx.tools.flatMap((tool) =>
+    (tool.manifest.actions ?? []).filter((a) => a.where.includes("bar")).map((a) => ({ tool, action: a })),
+  )
   const run = (fn: () => void) => {
     ctx.setPaletteOpen(false)
     fn()
@@ -57,6 +61,20 @@ export function ExtensionsBar({ choice }: { choice: ExtensionEditorChoice }) {
         <Button key={tool.id} size="xs" variant="outline" onClick={() => ctx.openInPanel(tool.id)} data-testid="pinned-extension">
           <Pin className="size-3" aria-hidden />
           {tool.name}
+        </Button>
+      ))}
+      {barActions.map(({ tool, action }) => (
+        <Button
+          key={`${tool.id}:${action.id}`}
+          size="xs"
+          variant="outline"
+          onClick={() => ctx.runAction(tool.id, action.id)}
+          aria-label={t("extensions.action.runLabel", { action: action.label })}
+          title={tool.name}
+          data-testid="extension-action"
+        >
+          <Play className="size-3" aria-hidden />
+          {action.label}
         </Button>
       ))}
       <Button size="xs" variant="ghost" className="ms-auto" onClick={() => ctx.setPaletteOpen(true)}>
@@ -84,6 +102,14 @@ export function ExtensionsBar({ choice }: { choice: ExtensionEditorChoice }) {
                       </CommandItem>,
                     ]
                   : []),
+                ...(tool.manifest.actions ?? [])
+                  .filter((a) => a.where.includes("menu"))
+                  .map((a) => (
+                    <CommandItem key={`${tool.id}:action:${a.id}`} onSelect={() => run(() => ctx.runAction(tool.id, a.id))}>
+                      <Play className="size-3.5" aria-hidden />
+                      {`${tool.name}: ${a.label}`}
+                    </CommandItem>
+                  )),
                 <CommandItem key={`${tool.id}:page`} onSelect={() => run(() => navigate(`/project/${ctx.projectId}/extensions/${tool.id}`))}>
                   {t("extensions.palette.openPage", { name: tool.name })}
                 </CommandItem>,

@@ -18,6 +18,7 @@
 // Hash function: djb2 (32-bit), unchanged. Kept as a cheap FTS-skipping
 // fingerprint on `content_hash`.
 
+import { parseFileExtension } from '../../../shared/tools/file-extension'
 import type { AquillaDb, AquillaStatement } from '../../../db/shim/postgres'
 import type { EventKind, EventPayloads, CommentScope } from './types'
 import type { ChainSlot } from './chain-claims'
@@ -2297,6 +2298,11 @@ case 'cell.audio.attach': {
       if (p.parserVersion) langMeta.parserVersion = p.parserVersion
       const corpusMarker = usableCorpusMarker(p.corpusMarker)
       if (corpusMarker) langMeta.corpusMarker = corpusMarker
+      // Smart Extensions apiRev 7: an invalid blob is dropped, never stored.
+      if (p.extension !== undefined && p.extension !== null) {
+        const ext = parseFileExtension(p.extension)
+        if (ext.ok) langMeta.extension = ext.value
+      }
       stmts.push(
         db
           .prepare(
@@ -2947,6 +2953,15 @@ case 'cell.audio.attach': {
       return ['files']
     }
 
+    case 'file.extension.set': {
+      const p = event.payload as EventPayloads['file.extension.set']
+      if (!event.fileId) {
+        throw new Error(`file.extension.set event ${event.id} is missing fileId`)
+      }
+      stmts.push(buildFileExtensionSetStmt(db, event.projectId, event.fileId, event.id, p.extension))
+      return ['files']
+    }
+
     case 'file.reorder': {
       // AQU-1569: hand-placed sidebar position — rebuild path; the dispatch
       // path (handlers/file-reorder.ts) uses the same shared SQL builder, so
@@ -3259,6 +3274,43 @@ case 'cell.audio.attach': {
       )
     }
   }
+}
+
+/**
+ * Smart Extensions apiRev 7: replace (or clear) `files.meta.extension`. Shared
+ * by the dispatch handler and the rebuild projection. An unparseable payload
+ * leaves the row alone (the handler refuses it before it is ever logged).
+ */
+export function buildFileExtensionSetStmt(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  eventId: string,
+  extension: unknown,
+): AquillaStatement {
+  const NOW = "(extract(epoch from now()) * 1000)::bigint"
+  if (extension === null || extension === undefined) {
+    return db
+      .prepare(
+        `UPDATE files
+            SET meta = (COALESCE(NULLIF(meta, ''), '{}')::jsonb - 'extension')::text,
+                event_id = ?, updated_at = ${NOW}
+          WHERE id = ? AND project_id = ?`,
+      )
+      .bind(eventId, fileId, projectId)
+  }
+  const parsed = parseFileExtension(extension)
+  if (!parsed.ok) {
+    return db.prepare(`UPDATE files SET updated_at = updated_at WHERE id = ? AND project_id = ?`).bind(fileId, projectId)
+  }
+  return db
+    .prepare(
+      `UPDATE files
+          SET meta = (COALESCE(NULLIF(meta, ''), '{}')::jsonb || jsonb_build_object('extension', ?::text::jsonb))::text,
+              event_id = ?, updated_at = ${NOW}
+        WHERE id = ? AND project_id = ?`,
+    )
+    .bind(JSON.stringify(parsed.value), eventId, fileId, projectId)
 }
 
 /**

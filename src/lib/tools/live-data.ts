@@ -26,6 +26,9 @@ import type { ToolEditorServices } from "./editor-services"
 import { LiveEditorData } from "./live-data-editor"
 import { rev4Delegates, type ToolRev4HostData } from "./host-handlers-rev4"
 import { uiStrings, type UiStrings } from "./ui-strings"
+import { LiveFilesData, toolFileView, type HeadlessCallbacks } from "./live-data-files"
+import type { ToolDataAnchor, ToolDeliveredFile, ToolFileFilter, ToolFileUpsert } from "./host-handlers-files"
+import type { FileExtensionKind } from "../../../shared/tools/file-extension"
 import type { ToolSettingsSection, ToolTypingParams } from "./host-handlers-editor"
 import type { ToolLens } from "../../../shared/tools/editor-api"
 import type {
@@ -95,9 +98,18 @@ export interface LiveToolDataOptions {
   hostKey?: (key: HostKey) => boolean
   /** apiRev 3: the user's UI locale (for ui.strings). */
   locale?: () => string
+  /** apiRev 7: a headless run (action / export) listening for progress, done and delivered files. */
+  headless?: () => HeadlessCallbacks | undefined
 }
 
 const CHAPTER_RE = /^(.+?)\s+(\d+)[:.]/
+
+function base64ToArrayBuffer(b64: string): ArrayBuffer {
+  const bin = atob(b64)
+  const out = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
+  return out.buffer
+}
 
 export function chapterOf(ref: string | null): string | null {
   if (!ref) return null
@@ -162,6 +174,8 @@ export class LiveToolData implements ToolHostData {
 
   /** apiRev 3: editor parity surfaces over the workspace's services. */
   readonly editor: LiveEditorData
+  /** apiRev 7: files, data files, cells by ref, headless reports. */
+  readonly files: LiveFilesData
 
   constructor(opts: LiveToolDataOptions) {
     this.opts = opts
@@ -171,6 +185,22 @@ export class LiveToolData implements ToolHostData {
       origin: opts.toolOrigin,
     })
     Object.assign(this, rev4Delegates((fileId) => this.editor.rev4(fileId), opts.toolOrigin))
+    this.files = new LiveFilesData({
+      projectId: opts.projectId,
+      author: opts.author,
+      toolOrigin: () => opts.toolOrigin,
+      tokenFor: opts.tokenFor,
+      flush: () => opts.flush(),
+      resolveLaneTag: async (lane) => (await this.resolveLane(lane)).tag,
+      headless: opts.headless,
+    })
+  }
+
+  /** apiRev 7: attach the server-minted tool session to every write's
+   *  tool_origin (the same object every emitter holds, so it applies at once). */
+  setToolSession(token: string | null): void {
+    if (token) this.opts.toolOrigin.session = token
+    else delete this.opts.toolOrigin.session
   }
 
   /** Start the lane lookup and the file's sync token while the frame boots,
@@ -208,12 +238,14 @@ export class LiveToolData implements ToolHostData {
   invalidate(fileId: string): void {
     this.cache.delete(fileId)
     this.stale.delete(fileId)
+    this.files.invalidate(fileId)
   }
 
   /** apiRev 2: mark just these cells stale (a remote edit to one verse must
    *  not cost the next write a whole-book re-read). Empty = whole file. */
   invalidateCells(fileId: string, cellIds: readonly string[]): void {
     if (cellIds.length === 0) return this.invalidate(fileId)
+    this.files.invalidate(fileId)
     if (!this.cache.has(fileId)) return
     const set = this.stale.get(fileId) ?? new Set<string>()
     for (const id of cellIds) set.add(id)
@@ -222,10 +254,29 @@ export class LiveToolData implements ToolHostData {
 
   async listFiles(): Promise<ToolFileView[]> {
     const files = await fetchProjectFiles(this.opts.projectId, await this.token("any"))
+    // Data files only through files.list({ kind: "data" }): an extension that
+    // predates apiRev 7 never sees another extension's records as a document.
     return files
-      .filter((f) => f.role !== "audio-cues" && !f.deletedAt)
-      .map((f) => ({ fileId: f.fileId, name: f.name, cellCount: f.cellCount }))
+      .filter((f) => f.role !== "audio-cues" && f.role !== "timeline-content" && f.role !== "extension-data" && !f.deletedAt)
+      .map(toolFileView)
   }
+
+  // ── apiRev 7: files, data files, cells by ref (live-data-files.ts) ───────
+  listFilesFiltered = (filter: ToolFileFilter) => this.files.listFilesFiltered(filter)
+  upsertFile = (spec: ToolFileUpsert) => this.files.upsertFile(spec)
+  setFileMeta = (fileId: string, patch: { tags?: string[]; kind?: FileExtensionKind; group?: string | null; meta?: Record<string, unknown> | null; name?: string }) =>
+    this.files.setFileMeta(fileId, patch)
+  fileSource = (fileId: string) => this.files.fileSource(fileId)
+  fileGroup = (fileId: string) => this.files.fileGroup(fileId)
+  cellsByRef = (query: { refs: string[]; prefix: string | null; fileIds: string[] | null; tags: string[] | null; lane: string }) => this.files.cellsByRef(query)
+  dataGet = (ns: string, coll: string, id: string) => this.files.dataGet(ns, coll, id)
+  dataPut = (ns: string, coll: string, id: string, doc: unknown, anchor: ToolDataAnchor | null) => this.files.dataPut(ns, coll, id, doc, anchor)
+  dataQuery = (ns: string, coll: string, filter: { anchorFileId: string | null; anchorCellIds: string[] | null; ref: string | null }) =>
+    this.files.dataQuery(ns, coll, filter)
+  dataDelete = (ns: string, coll: string, id: string) => this.files.dataDelete(ns, coll, id)
+  actionProgress = (message: string, fraction: number | null) => this.files.actionProgress(message, fraction)
+  actionDone = (message: string | null, ok: boolean) => this.files.actionDone(message, ok)
+  exportDeliver = (files: ToolDeliveredFile[]) => this.files.exportDeliver(files)
 
   private async loadFile(fileId: string, lane: string): Promise<Map<string, CachedCell>> {
     const resolved = await this.resolveLane(lane)
@@ -632,8 +683,11 @@ export class LiveToolData implements ToolHostData {
   }
 
   /** aquilla.web.fetch: auth-worker fetches on the extension's behalf (the frame has no network). */
-  async webFetch(url: string, as: "text" | "json"): Promise<ToolWebResponse> {
-    return webFetchViaProxy(this.opts.sessionJwt, this.opts.projectId, this.opts.toolOrigin.toolId, url, as)
+  async webFetch(url: string, as: "text" | "json" | "bytes"): Promise<ToolWebResponse> {
+    const res = await webFetchViaProxy(this.opts.sessionJwt, this.opts.projectId, this.opts.toolOrigin.toolId, url, as)
+    // apiRev 7: bytes cross the proxy as base64 and the frame as an ArrayBuffer.
+    if (as === "bytes" && typeof res.body === "string") return { ...res, body: base64ToArrayBuffer(res.body) }
+    return res
   }
 
   grantedScopes(): ToolScope[] {

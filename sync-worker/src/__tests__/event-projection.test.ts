@@ -1046,6 +1046,7 @@ describe('isChainMutatingKind', () => {
     'file.video.set': false,
     'file.timing.set': false,
     'file.corpus.set': false,
+    'file.extension.set': false,
     // AQU-1569: a reorder writes one files.meta key; no cell chain is involved.
     'file.reorder': false,
     'file.track.set': false,

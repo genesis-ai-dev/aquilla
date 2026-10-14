@@ -16,6 +16,7 @@ import { TOOL_SANDBOX, buildToolSrcdoc } from "./srcdoc"
 import type { ToolManifest, ToolMount } from "../../../shared/tools/manifest"
 import { stubEditorData } from "./smoke-editor"
 import { stubRev4Data } from "./smoke-rev4"
+import { stubFilesData } from "./smoke-files"
 import { uiStrings } from "./ui-strings"
 
 export const SMOKE_LOAD_TIMEOUT_MS = 8000
@@ -27,8 +28,12 @@ export interface SmokeFixture {
   data: ToolHostData
   /** Push after the tool settles (e.g. a cells.changed). */
   afterSettle?: { type: string } & Record<string, unknown>
-  /** The mount to render as (default "smoke": no context). */
-  mount?: ToolMount
+  /** The mount to render as (default "smoke": no context). apiRev 7:
+   *  "action" / "export" run a manifest action or export headless. */
+  mount?: ToolMount | "action" | "export"
+  /** apiRev 7: the action / export a headless fixture runs. */
+  action?: { id: string }
+  exportId?: string
   /** Fail the run if, once settled, the tool shows nothing (render.check). */
   mustRender?: boolean
 }
@@ -82,7 +87,14 @@ function stubData(populated: boolean, scopes: ToolManifest["scopes"]): ToolHostD
   return {
     ...stubEditorData(populated),
     ...stubRev4Data(populated),
-    listFiles: async () => (populated ? [{ fileId: "f1", name: "MAT", cellCount: SAMPLE_CELLS.length }, { fileId: "f2", name: "Empty", cellCount: 0 }] : []),
+    ...stubFilesData(populated),
+    listFiles: async () =>
+      populated
+        ? [
+            { fileId: "f1", name: "MAT", cellCount: SAMPLE_CELLS.length, kind: "normal", tags: ["book:MAT"], group: "sample:MAT", owner: null, meta: null },
+            { fileId: "f2", name: "Empty", cellCount: 0, kind: "normal", tags: [], group: null, owner: null, meta: null },
+          ]
+        : [],
     listCells: async (fileId) => (populated && fileId === "f1" ? SAMPLE_CELLS.map((c) => ({ ...c })) : []),
     listTerms: async () =>
       populated
@@ -103,7 +115,12 @@ function stubData(populated: boolean, scopes: ToolManifest["scopes"]): ToolHostD
     notify: () => {},
     generate: async ({ prompt }) => ({ text: `(generated for: ${prompt.slice(0, 40)})` }),
     // A small, well-formed answer for any declared site (the smoke render has no network).
-    webFetch: async (url, as) => ({ status: 200, contentType: as === "json" ? "application/json" : "text/plain", body: as === "json" ? [] : "", url }),
+    webFetch: async (url, as) => ({
+      status: 200,
+      contentType: as === "json" ? "application/json" : as === "bytes" ? "application/octet-stream" : "text/plain",
+      body: as === "json" ? [] : as === "bytes" ? new ArrayBuffer(0) : "",
+      url,
+    }),
     tell: () => {},
     grantedScopes: () => [...scopes],
     requestScope: async () => true,
@@ -146,6 +163,10 @@ export function defaultSmokeFixtures(manifest: ToolManifest): SmokeFixture[] {
       // The live push is exercised once.
       ...(i === 0 ? { afterSettle: { type: "cells.changed", fileId: "f1", cellIds: ["c2"] } } : {}),
     })),
+    // apiRev 7: every action and export runs once, headless, against the
+    // populated stub — it must not throw (nothing has to be drawn).
+    ...(manifest.actions ?? []).map((a): SmokeFixture => ({ label: `populated (action ${a.id})`, data: stubData(true, manifest.scopes), mount: "action", action: { id: a.id } })),
+    ...(manifest.exports ?? []).map((x): SmokeFixture => ({ label: `populated (export ${x.id})`, data: stubData(true, manifest.scopes), mount: "export", exportId: x.id })),
   ]
 }
 
@@ -257,6 +278,8 @@ function runOne(
       mount: fixture.mount ?? "smoke",
       ...(fixture.mount === "editor" ? { file: { fileId: "f1", name: "MAT" } } : {}),
       ...(fixture.mount === "inline" ? { cell: { fileId: "f1", cellId: "c1" } } : {}),
+      ...(fixture.mount === "action" && fixture.action ? { action: { id: fixture.action.id, trigger: "click" as const } } : {}),
+      ...(fixture.mount === "export" && fixture.exportId ? { export: { id: fixture.exportId, fileIds: ["f1"], lane: "" } } : {}),
       theme: {},
     }, { sdk: manifest.sdk }), MOUNT_WIDTH[fixture.mount ?? "page"] ?? 1024)
   })

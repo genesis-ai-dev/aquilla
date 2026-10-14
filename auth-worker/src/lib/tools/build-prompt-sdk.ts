@@ -14,7 +14,7 @@ Start:            aq.mount(node) renders your UI (replaces the page; a layout ho
                   aq.h(tag, { class, style:{…}, text, onclick, …attrs }, [children]) makes elements. aq.icon(name, "s35")
                   draws an app icon (lucide names: sparkles, check, check-check, circle, message-circle, play, mic, history,
                   search, list, layout-grid, chart-column, settings, star, eye, clock, users, book-open, triangle-alert, …).
-                  aq.t(key) app strings; aq.strings([key…]) → Promise loads more. aq.version → "1.0". aq.Layout([children]) is a
+                  aq.t(key) app strings; aq.strings([key…]) → Promise loads more. aq.version → "1.1". aq.Layout([children]) is a
                   full-height column (toolbar on top, CellList filling the rest).
 Data (live):      const file = aq.useFile()  — file.value → { fileId, name, config, sections, loading, readOnly, cellCount };
                     file.ready → Promise of that once it is bound (the editor's/panel's file, else the first file with cells).
@@ -59,6 +59,14 @@ Actions (Promises; they confirm where the app does): aq.actions.commit(id, text,
 Cell helpers:     aq.cell.state(id) (= useCell(id).value), aq.cell.refresh(id), aq.cell.ref(id), aq.cell.number(id),
                   aq.cell.words(text) (word count, footnotes excluded), aq.cell.plain(html), aq.cell.isStructural(id),
                   aq.cell.toggleDetails(id), aq.cell.scrollTo(id, "center"), aq.cell.focusRow(id).
+Reading imports (SDK 1.1): aq.zip.read(arrayBuffer) → Promise<{ names, entries:[{name,size}], text(name), bytes(name) }> (a zipball
+                  from aquilla.web.fetch(url, { as: "bytes" }); member names keep the archive's top folder, e.g. "en_tw/bible/kt/god.md").
+                  aq.parse.tsv(text) → { header, rows:[{ Column: value }] } (no quoting; split on tabs).
+                  aq.parse.usfm(text) → { book, verses:[{ ref:"TIT 1:1", chapter, verse, text, words:[{ text, attrs:{…},
+                    occurrence, occurrences, milestones:[{…attrs}] /* enclosing \\zaln-s groups, outermost first */ }] }] } —
+                    USFM 3 words with their attributes (x-strong, x-lemma, x-morph, lemma, strong …) and alignment milestones.
+                  aq.parse.mdBlocks(markdown) → [{ kind:"heading"|"p"|"list"|"code", level, text, section }] (section = slug of the
+                    heading above: a stable cell key like \`\${path}|\${section}|\${index}\`).
 UI kit (Aquilla-styled; use these instead of your own CSS):
                   aq.ui.Page({ actions:[…], children:[…] }), aq.ui.Panel({ actions, children }) (side panel) — no title:
                   the host header already shows the extension's name (title/subtitle exist for embedded sub-pages only), aq.ui.Card({ title, subtitle, actions, children, tone, onClick }), aq.ui.Stack({ row, gap, align,

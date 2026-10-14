@@ -11,12 +11,9 @@ import type { ToolCellViewRev3 } from "../../../shared/tools/editor-api"
 import { createEditorHandlers, type ToolEditorHostData } from "./host-handlers-editor"
 import { createRev4Handlers, type ToolRev4HostData } from "./host-handlers-rev4"
 import { MAX_UI_STRING_KEYS, type UiStrings } from "./ui-strings"
+import { createFilesHandlers, parseFileFilter, type ToolFileView, type ToolFilesHostData } from "./host-handlers-files"
 
-export interface ToolFileView {
-  fileId: string
-  name: string
-  cellCount: number
-}
+export type { ToolFileView } from "./host-handlers-files"
 
 export interface ToolCellView extends ToolCellViewRev3 {
   cellId: string
@@ -87,7 +84,7 @@ export interface ToolWebResponse {
   url: string
 }
 
-export interface ToolHostData extends ToolEditorHostData, ToolRev4HostData {
+export interface ToolHostData extends ToolEditorHostData, ToolRev4HostData, ToolFilesHostData {
   listFiles: () => Promise<ToolFileView[]>
   listCells: (fileId: string, lane: string) => Promise<ToolCellView[]>
   listTerms: () => Promise<ToolTermView[]>
@@ -99,8 +96,9 @@ export interface ToolHostData extends ToolEditorHostData, ToolRev4HostData {
   notify: (message: string) => void
   /** One completion through the app's own AI proxy, as the user. */
   generate: (input: { prompt: string; system: string; maxTokens: number }) => Promise<{ text: string }>
-  /** apiRev 6: a GET through the auth-worker proxy (allowlist, SSRF and size checks there). */
-  webFetch: (url: string, as: "text" | "json") => Promise<ToolWebResponse>
+  /** apiRev 6: a GET through the auth-worker proxy (allowlist, SSRF and size checks there).
+   *  apiRev 7: `as: "bytes"` answers with an ArrayBuffer body. */
+  webFetch: (url: string, as: "text" | "json" | "bytes") => Promise<ToolWebResponse>
   /** A message for the user that stays until dismissed (unlike notify). */
   tell: (message: string) => void
   grantedScopes: () => ToolScope[]
@@ -208,7 +206,12 @@ export function createToolHandlers(data: ToolHostData): Record<string, BridgeHan
   return {
     ...createEditorHandlers(data),
     ...createRev4Handlers(data),
-    "files.list": async () => data.listFiles(),
+    ...createFilesHandlers(data),
+    // apiRev 7: optional { tags, kind, group } filter, and each file's extension metadata.
+    "files.list": async (params) => {
+      const filter = parseFileFilter(params)
+      return filter.tags || filter.kind || filter.group ? data.listFilesFiltered(filter) : data.listFiles()
+    },
     "cells.list": async (params) => {
       if (!isRecord(params)) bad("params must be an object")
       const lane = typeof params.lane === "string" ? params.lane : ""
@@ -241,7 +244,7 @@ export function createToolHandlers(data: ToolHostData): Record<string, BridgeHan
     "web.fetch": async (params) => {
       if (!isRecord(params) || typeof params.url !== "string" || !params.url.trim()) bad("url must be a non-empty string")
       if (params.url.length > 2048) bad("url exceeds 2048 characters")
-      return data.webFetch(params.url.trim(), params.as === "json" ? "json" : "text")
+      return data.webFetch(params.url.trim(), params.as === "json" ? "json" : params.as === "bytes" ? "bytes" : "text")
     },
     "ai.generate": async (params) => {
       if (!isRecord(params) || typeof params.prompt !== "string" || !params.prompt.trim()) bad("prompt must be a non-empty string")

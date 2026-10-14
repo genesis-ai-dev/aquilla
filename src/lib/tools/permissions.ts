@@ -94,6 +94,16 @@ export const METHOD_SCOPES: Readonly<Record<string, ToolScope>> = {
   "agent.ask": "read:cells",
   // apiRev 6
   "web.fetch": "read:web",
+  // apiRev 7: importers, data files, cross-file reads
+  "files.upsert": "write:files",
+  "files.setMeta": "write:files",
+  "files.source": "read:cells",
+  "files.group": "read:cells",
+  "cells.byRef": "read:cells",
+  "data.get": "read:cells",
+  "data.query": "read:cells",
+  "data.put": "write:data",
+  "data.delete": "write:data",
 }
 
 /** The event kind whose server role floor bounds each write scope. */
@@ -103,6 +113,10 @@ const SCOPE_EVENT_KIND: Partial<Record<ToolScope, string>> = {
   // An AI draft lands as a target commit; generated/recorded audio as an attach.
   "ai:draft": "target.cell.commit",
   "write:audio": "cell.audio.attach",
+  // apiRev 7: creating a file is a project lead's; a data-file record is a
+  // contributor's (the sync-worker floors data-file cells at CONTRIBUTOR).
+  "write:files": "file.create",
+  "write:data": "target.cell.commit",
 }
 
 /** Whether a user at `roleLevel` could perform this scope themselves. Reads

@@ -87,9 +87,10 @@ describe("prompt assembly (AQU-1793)", () => {
     expect(TOOLS_BUILDER_SYSTEM_PROMPT).toMatch(/never contradicts|Never write copy the UI then\s+contradicts/)
     expect(TOOLS_BUILDER_SYSTEM_PROMPT).toMatch(/skeleton in the STATIC HTML/)
     expect(TOOLS_BUILDER_SYSTEM_PROMPT).toMatch(/Never add "panel" to a wide multi-column layout/)
-    // Viewing alignments is buildable via Door43; saving them is stated as not possible, with the reason.
-    expect(TOOLS_BUILDER_SYSTEM_PROMPT).toMatch(/SAVING alignments[\s\S]*no shared storage for extension data/)
-    expect(TOOLS_BUILDER_SYSTEM_PROMPT).toMatch(/word-level ALIGNMENTS \(read from the aligned USFM\)/)
+    // apiRev 7: saving alignments and other records is possible (data files); writing to a website is not.
+    expect(TOOLS_BUILDER_SYSTEM_PROMPT).toMatch(/shared, attributed, revertible records of your own[\s\S]*aquilla\.data\.\*/)
+    expect(TOOLS_BUILDER_SYSTEM_PROMPT).toMatch(/NOT available[\s\S]*Writing to Door43 or any website/)
+    expect(TOOLS_BUILDER_SYSTEM_PROMPT).toMatch(/import them as files \(files\.upsert\)/)
     // Data a project has only if it imported it is "partial", never silently "covered".
     expect(TOOLS_BUILDER_SYSTEM_PROMPT).toMatch(/only when the project has imported the data[\s\S]*"partial"/)
     expect(TOOLS_REVIEW_SYSTEM_PROMPT).toMatch(/imported that data as a file[\s\S]*"partial"/)
@@ -102,7 +103,9 @@ describe("prompt assembly (AQU-1793)", () => {
     expect(TOOLS_BUILDER_SYSTEM_PROMPT).toContain("Reference, ID, Tags, SupportReference, Quote, Occurrence, Note")
     expect(TOOLS_BUILDER_SYSTEM_PROMPT).toContain("Reference, ID, Tags, OrigWords, Occurrence, TWLink")
     expect(TOOLS_BUILDER_SYSTEM_PROMPT).toMatch(/\\zaln-s \|x-strong=/)
-    expect(TOOLS_BUILDER_SYSTEM_PROMPT).toContain("bible/kt/<word>.md")
+    expect(TOOLS_BUILDER_SYSTEM_PROMPT).toContain("bible/kt|names|other/<word>.md")
+    // apiRev 7: the unfoldingWord editor is an importer + editor + exporter on the generic primitives.
+    expect(TOOLS_BUILDER_SYSTEM_PROMPT).toMatch(/IMPORTER[\s\S]*files\.upsert[\s\S]*EDITOR[\s\S]*cells\.byRef[\s\S]*EXPORTER[\s\S]*export\.deliver/)
   })
 
   it("no SDK example draws a title the host already shows", () => {
@@ -111,7 +114,7 @@ describe("prompt assembly (AQU-1793)", () => {
 
   it("the review prompt lists every UI check and the domain limits", () => {
     for (const c of UI_CHECKS) expect(TOOLS_REVIEW_SYSTEM_PROMPT).toContain(c)
-    expect(TOOLS_REVIEW_SYSTEM_PROMPT).toMatch(/SAVING alignments/)
+    expect(TOOLS_REVIEW_SYSTEM_PROMPT).toMatch(/Writing to Door43 or any website/)
   })
 
   it("an edit lists only the change's requirements", () => {

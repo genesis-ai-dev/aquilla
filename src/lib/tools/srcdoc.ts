@@ -54,7 +54,12 @@ export interface ToolBoot {
   tool: { id: string; name: string; version: number; scopes?: readonly string[] }
   project: { id: string; name: string }
   user: { username: string; roleLevel: number | null }
-  mount: "page" | "panel" | "inline" | "editor" | "smoke"
+  /** apiRev 7: "action" / "export" are HEADLESS runs (no visible frame). */
+  mount: "page" | "panel" | "inline" | "editor" | "smoke" | "action" | "export"
+  /** apiRev 7, action mounts: which manifest action ran, and why. */
+  action?: { id: string; trigger: "click" | "open" }
+  /** apiRev 7, export mounts: the format and the files to export. */
+  export?: { id: string; fileIds: string[]; lane: string }
   /** Editor mounts: the file being edited (`revealCellId`: a deep-linked
    *  cell to open on, apiRev 2). */
   file?: { fileId: string; name: string; revealCellId?: string | null }

@@ -31,8 +31,8 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
   },
   {
     // Aquilla Tools (prototype): sandboxed tool host, bridge, store, provenance.
-    source: /^(?:src\/(?:lib|components|pages)\/[Tt]ools\/|shared\/tools\/|auth-worker\/src\/(?:routes\/tools|lib\/tools\/)|sync-worker\/src\/events\/tool-provenance|db\/postgres\/migrations\/.*project_tools)/,
-    sentinels: ["e2e/specs/tools/tools-heatmap.spec.ts", "e2e/specs/tools/default-editor-extension.spec.ts", "e2e/specs/tools/default-editor-parity.spec.ts", "e2e/specs/tools/built-extension-renders.spec.ts", "e2e/specs/tools/sdk-extension.spec.ts", "e2e/specs/tools/default-editor-rev4.spec.ts", "e2e/specs/tools/default-editor-rev5.spec.ts", "e2e/specs/tools/extension-builder.spec.ts", "e2e/specs/tools/web-read.spec.ts"],
+    source: /^(?:src\/(?:lib|components|pages)\/[Tt]ools\/|shared\/tools\/|auth-worker\/src\/(?:routes\/tools|lib\/tools\/)|sync-worker\/src\/events\/(?:tool-provenance|cells-by-ref-route|handlers\/file-extension-set)|src\/lib\/import\/change-detection|db\/postgres\/migrations\/.*project_tools)/,
+    sentinels: ["e2e/specs/tools/tools-heatmap.spec.ts", "e2e/specs/tools/default-editor-extension.spec.ts", "e2e/specs/tools/default-editor-parity.spec.ts", "e2e/specs/tools/built-extension-renders.spec.ts", "e2e/specs/tools/sdk-extension.spec.ts", "e2e/specs/tools/default-editor-rev4.spec.ts", "e2e/specs/tools/default-editor-rev5.spec.ts", "e2e/specs/tools/extension-builder.spec.ts", "e2e/specs/tools/web-read.spec.ts", "e2e/specs/tools/extension-primitives.spec.ts"],
   },
   {
     source: /^(?:auth-worker\/|src\/(?:pages|components|lib|hooks|context)\/.*(?:auth|account|login|signup|password|session|credential|outbox))/i,

@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom"
-import { ShieldCheck } from "lucide-react"
+import { Play, ShieldCheck } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
@@ -13,10 +14,13 @@ export function InstalledList({
   projectId,
   tools,
   menuFor,
+  onRunAction,
 }: {
   projectId: string
   tools: ToolSummary[] | null
   menuFor: (tool: ToolSummary) => OverflowMenuItem[]
+  /** apiRev 7: run a manifest action placed in "settings". */
+  onRunAction?: (toolId: string, actionId: string) => void
 }) {
   const t = useT()
   const provenance = (tool: ToolSummary): string => {
@@ -67,6 +71,23 @@ export function InstalledList({
                   {t(MOUNT_LABEL[primaryMount(tool.manifest.mounts)])} · {provenance(tool)}
                 </p>
               </div>
+              {onRunAction &&
+                (tool.manifest.actions ?? [])
+                  .filter((a) => a.where.includes("settings"))
+                  .map((a) => (
+                    <Button
+                      key={a.id}
+                      size="xs"
+                      variant="outline"
+                      className="relative z-10"
+                      onClick={() => onRunAction(tool.id, a.id)}
+                      aria-label={t("extensions.action.runLabel", { action: a.label })}
+                      data-testid="extension-settings-action"
+                    >
+                      <Play className="size-3" aria-hidden />
+                      {a.label}
+                    </Button>
+                  ))}
               <span className="relative z-10">
                 <OverflowMenu items={menuFor(tool)} ariaLabel={t("extensions.menu.label", { name: tool.name })} triggerSize="icon-sm" testId="tool-menu" />
               </span>

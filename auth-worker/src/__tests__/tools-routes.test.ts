@@ -10,6 +10,8 @@ import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import { ROLE } from "../types"
 import { TOOLS_API_REV } from "../../../shared/tools/manifest"
+import { verify } from "hono/jwt"
+import { TOOL_SESSION_AUDIENCE } from "../../../shared/tools/tool-session"
 import { DEFAULT_EDITOR_MANIFEST, DEFAULT_EDITOR_SOURCE, firstPartyToolId } from "../../../shared/tools/first-party/default-editor"
 
 const PROJECT = "proj-tools"
@@ -70,6 +72,24 @@ describe("tools API", () => {
 
     const list = (await (await call("/tools", jwt)).json()) as { tools: { id: string }[] }
     expect(list.tools.map((t) => t.id)).toEqual([tool.id])
+  })
+
+  it("mints a tool session for a member, for the tool's current version only (apiRev 7)", async () => {
+    await seedProject()
+    const jwt = await jwtFor("owner")
+    await call("/tools", jwt, { method: "POST", body: { source: GOOD_SOURCE, manifest: MANIFEST, origin: "starter", grant: ["read:cells"] } })
+    const list = (await (await call("/tools", jwt)).json()) as { tools: { id: string; currentVersion: number; codeHash: string }[] }
+    const tool = list.tools[0]
+    const res = await call(`/tools/${tool.id}/session`, jwt, { method: "POST", body: {} })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { token: string; version: number; codeHash: string }
+    expect(body.version).toBe(tool.currentVersion)
+    expect(body.codeHash).toBe(tool.codeHash)
+    const claims = (await verify(body.token, env.SYNC_SECRET_KEY as string, "HS256")) as Record<string, unknown>
+    expect(claims).toMatchObject({ aud: TOOL_SESSION_AUDIENCE, projectId: PROJECT, toolId: tool.id, version: tool.currentVersion, codeHash: tool.codeHash, username: "owner" })
+    // A sync token never doubles as a tool session (different audience).
+    expect(claims.aud).not.toBe("sync")
+    expect((await call(`/tools/does-not-exist/session`, jwt, { method: "POST", body: {} })).status).toBe(404)
   })
 
   it("repeats the lint gate server-side", async () => {

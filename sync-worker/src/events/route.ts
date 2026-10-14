@@ -1924,6 +1924,7 @@ export async function handleEventsWriteRequest(
           const raw = rawById.get(entry.id)
           return raw ? [{ id: entry.id, projectId: raw.projectId, author: entry.author, payload: raw.payload }] : []
         }),
+        env.SYNC_SECRET_KEY,
       )
     } catch (err) {
       console.warn('[events/route] tool provenance stamp failed:', err)

@@ -19,7 +19,8 @@ import { dispatchHostKey } from "@/lib/tools/host-keys"
 import { METHOD_SCOPES, applyPromptAnswer, decideScope, type PromptAnswer } from "@/lib/tools/permissions"
 import { readThemeVars } from "@/lib/tools/srcdoc"
 import { loadFrameFonts } from "@/lib/tools/frame-fonts"
-import { setToolGrant, type ToolDetail } from "@/lib/tools/tools-api"
+import { mintToolSession, setToolGrant, type ToolDetail } from "@/lib/tools/tools-api"
+import type { HeadlessCallbacks } from "@/lib/tools/live-data-files"
 import type { ToolScope } from "../../../shared/tools/manifest"
 import type { PendingPrompt } from "./PermissionPrompt"
 
@@ -38,6 +39,8 @@ export interface UseToolHostArgs {
   controlRef?: MutableRefObject<ToolFrameControl | null>
   /** apiRev 3: size of the host chrome drawn over the frame's top-right. */
   chrome?: { trailingWidth: number; trailingHeight: number } | null
+  /** apiRev 7: a headless run (action / export) listening for reports. */
+  headless?: HeadlessCallbacks
 }
 
 export interface ToolHostState {
@@ -61,7 +64,11 @@ export interface ToolFrameControl {
   push: (event: { type: string } & Record<string, unknown>) => void
 }
 
-export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onGrantChange, services, revealCellId, chrome, controlRef }: UseToolHostArgs): ToolHostState {
+export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onGrantChange, services, revealCellId, chrome, controlRef, headless }: UseToolHostArgs): ToolHostState {
+  const headlessRef = useRef(headless)
+  useEffect(() => {
+    headlessRef.current = headless
+  }, [headless])
   const { flushNow } = useOutbox()
   const [prompt, setPrompt] = useState<PendingPrompt | null>(null)
   const [errors, setErrors] = useState<ToolErrorReport[]>([])
@@ -163,7 +170,18 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
       services: () => servicesRef.current ?? {},
       hostKey: (key) => dispatchHostKey(key),
       locale: () => localeRef.current,
+      headless: () => headlessRef.current,
     })
+    // apiRev 7: the server-minted tool session. Until it arrives, writes carry
+    // an unverified claim (fine for translations; file and data-file writes
+    // are refused by the sync-worker without it), so file writes wait for it.
+    let sessionAlive = true
+    const sessionReady = mintToolSession(session.jwt, projectId, toolId)
+      .then((s) => {
+        if (sessionAlive && s.version === toolVersion && s.codeHash === codeHash) data.setToolSession(s.token)
+      })
+      .catch((err) => console.warn("[tools] tool session mint failed:", err))
+    data.files.whenReady(sessionReady)
     const warmFile = servicesRef.current?.fileId
     // Editor mounts read the workspace's store: nothing to warm.
     if (warmFile && !servicesRef.current?.editor) data.warm(warmFile)
@@ -216,6 +234,7 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
     const unsubscribeRemote = subscribeProjectApplied((frame) => onFrames([frame]))
 
     return () => {
+      sessionAlive = false
       stop()
       unsubscribeOwn()
       unsubscribeRemote()

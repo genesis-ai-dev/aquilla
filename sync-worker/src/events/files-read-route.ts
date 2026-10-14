@@ -16,6 +16,7 @@
 // claim must match the path's :projectId. Token role is implicitly the
 // project-membership check (identity mints tokens only for members).
 
+import { readFileExtension, type FileExtensionMeta } from '../../../shared/tools/file-extension'
 import { verifyTokenForProject, type SyncTokenClaims } from "../auth"
 import { resolveCorpusMarker } from "./corpus-marker"
 import { usableSortIndex } from "./sort-index"
@@ -119,6 +120,9 @@ interface FileSummary {
   deletedAt: number | null
   /** AQU-656: original import blob exists (R2 or legacy raw_source). */
   hasOriginalSource: boolean
+  /** Smart Extensions apiRev 7: files.meta.extension (kind, tags, group,
+   *  owner, meta). Null on ordinary files. */
+  extension: FileExtensionMeta | null
 }
 
 /** Shape-check the recorded correction. `scale` is the only field that must be
@@ -182,6 +186,7 @@ function mapRow(row: FileRowRaw): FileSummary {
     lastEditAt: row.last_edit_at,
     deletedAt: row.deleted_at ?? null,
     hasOriginalSource: Boolean(row.has_original_source),
+    extension: readFileExtension(meta),
   }
 }
 
@@ -369,7 +374,12 @@ export async function handleFilesReadRequest(
   // work. The single-file fetch above deliberately keeps no such filter: the
   // audio workflow follows `anchor_file_id` straight to its cue sheet, and a
   // hidden file is ordinary readable content once you know its id.
-  const where: string[] = [`f.project_id = ?`, `f.${tombstoneFilter}`, notHiddenFileSql("f")]
+  // Smart Extensions apiRev 7: `?extensionData=1` also lists the extension
+  // data files (hidden everywhere else), for the extension host that owns them.
+  const hiddenFilter = url.searchParams.get("extensionData") === "1"
+    ? `(${notHiddenFileSql("f")} OR f.role = 'extension-data')`
+    : notHiddenFileSql("f")
+  const where: string[] = [`f.project_id = ?`, `f.${tombstoneFilter}`, hiddenFilter]
   // Unrestricted: [threshold project, page project]. Restricted: the lane
   // tags bind inside the clock subquery, which sits between those two.
   const tagList = grantedTags === null ? [] : [...grantedTags]

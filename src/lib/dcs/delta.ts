@@ -19,6 +19,7 @@ import { parseManifest } from "./manifest"
 import { routeFor } from "./resource-map"
 import { dcsEventId, dcsFileId, dcsLegacyFileId } from "./cell-id"
 import { contentHash } from "./content-hash"
+import { detectChanges } from "@/lib/import/change-detection"
 
 /** The adapter project's current view of one source cell (from the projection). */
 export interface CurrentCell {
@@ -153,38 +154,10 @@ function classifyAgainstCurrent(
     }
   }
 
-  // The set of (relevant) files the parse (re)produced — deletes are scoped to
-  // these so a cell that vanished from a re-parsed file is a real removal, not
-  // just an untouched file elsewhere.
-  const parsedFileIds = new Set(relevantFiles.map((f) => f.fileId))
-  const parsedCellIds = new Set<string>()
-
-  const creates: Array<{ cell: DcsCell; fileId: string }> = []
-  const commits: Array<{ cell: DcsCell; parentEventId: string }> = []
-
-  for (const file of relevantFiles) {
-    for (const cell of file.cells) {
-      parsedCellIds.add(cell.cellId)
-      const current = currentCells.get(cell.cellId)
-      if (!current) {
-        creates.push({ cell, fileId: file.fileId })
-      } else if (current.contentHash !== cell.contentHash) {
-        commits.push({ cell, parentEventId: current.eventId })
-      }
-      // hash-equal → nothing.
-    }
-  }
-
-  // Deletes: cells the adapter currently holds for a re-parsed file that the
-  // new parse no longer produced (tombstone). Scoped by fileId so untouched
-  // files' cells are never deleted.
-  const deletes: string[] = []
-  for (const [cellId, current] of currentCells) {
-    if (parsedFileIds.has(current.fileId) && !parsedCellIds.has(cellId)) {
-      deletes.push(cellId)
-    }
-  }
-
+  // The generic classifier (src/lib/import/change-detection.ts) scopes deletes
+  // to the (relevant) files this parse re-produced, so an untouched file's
+  // cells are never deleted.
+  const { creates, commits, deletes } = detectChanges(relevantFiles, currentCells)
   return { creates, commits, deletes }
 }
 

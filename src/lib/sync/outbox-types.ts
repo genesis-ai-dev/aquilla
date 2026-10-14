@@ -69,6 +69,8 @@ export type OutboxEventKind =
   // File label rename (contributor-level; non-chain-mutating).
   | "file.rename"
   | "file.corpus.set"
+  // Smart Extensions apiRev 7: replace files.meta.extension (project_lead+).
+  | "file.extension.set"
   // AQU-1569: the file's hand-placed position in its sidebar group
   // (project_lead+; non-chain-mutating). Null clears it back to the automatic
   // name-derived order.
@@ -176,12 +178,14 @@ export interface OutboxEventPayloads {
     sequenceIndex?: number
     transcription?: string
     cameraState?: string
+    /** Smart Extensions apiRev 7: an extension's file write (verified server-side). */
+    tool_origin?: { origin: "tool"; toolId: string; version: number; codeHash: string; session?: string }
   }
   "source.cell.commit": {
     value?: string
     valueHtml?: string
     /** Aquilla Tools: an extension's source edit (verified server-side). */
-    tool_origin?: { origin: "tool"; toolId: string; version: number; codeHash: string }
+    tool_origin?: { origin: "tool"; toolId: string; version: number; codeHash: string; session?: string }
     /** AQU-847 / AQU-646: corrected source text for a MEDIA section. An
      *  imported media cell's `value` is the import filename, so the user's
      *  edit lands here — the field `effectiveSourceText` (and therefore export
@@ -189,7 +193,10 @@ export interface OutboxEventPayloads {
      *  still advances, so targets go stale. */
     transcription?: string
   }
-  "source.cell.delete": Record<string, never>
+  "source.cell.delete": {
+    /** Smart Extensions apiRev 7: an extension's file write (verified server-side). */
+    tool_origin?: { origin: "tool"; toolId: string; version: number; codeHash: string; session?: string }
+  }
   "source.cell.reorder": {
     anchorCellId: string | null
   }
@@ -283,7 +290,7 @@ export interface OutboxEventPayloads {
      * the sync-worker verifies it against project_tool_versions and stamps the
      * trusted envelope into events.provenance (events/tool-provenance.ts).
      */
-    tool_origin?: { origin: "tool"; toolId: string; version: number; codeHash: string }
+    tool_origin?: { origin: "tool"; toolId: string; version: number; codeHash: string; session?: string }
     /** Aquilla Tools: set on the compensating events "revert since T" emits. */
     revert_of_tool?: { toolId: string; sinceMs: number }
     harmonize_origin?: {
@@ -317,7 +324,7 @@ export interface OutboxEventPayloads {
      * the sync-worker verifies it against project_tool_versions and stamps the
      * trusted envelope into events.provenance (events/tool-provenance.ts).
      */
-    tool_origin?: { origin: "tool"; toolId: string; version: number; codeHash: string }
+    tool_origin?: { origin: "tool"; toolId: string; version: number; codeHash: string; session?: string }
     /**
      * AQU-538: lane of the target row being validated. Omitted on the wire for
      * the default lane (`''`). Validation is projected per lane so a cell can
@@ -330,7 +337,7 @@ export interface OutboxEventPayloads {
   "cell.unvalidate": {
     editEventId: string
     /** Aquilla Tools: the tool that withdrew this validation (provenance, apiRev 2). */
-    tool_origin?: { origin: "tool"; toolId: string; version: number; codeHash: string }
+    tool_origin?: { origin: "tool"; toolId: string; version: number; codeHash: string; session?: string }
     /** AQU-538: lane of the target row being unvalidated. Omitted for `''`. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
@@ -572,6 +579,11 @@ export interface OutboxEventPayloads {
   // Set/clear the file's sidebar corpus group. Null clears it (Ungrouped).
   "file.corpus.set": {
     corpusMarker: string | null
+  }
+  // Smart Extensions apiRev 7: kind/tags/group/owner/meta (file-extension.ts).
+  "file.extension.set": {
+    extension: Record<string, unknown> | null
+    tool_origin?: { origin: "tool"; toolId: string; version: number; codeHash: string; session?: string }
   }
   // AQU-1569: the file's hand-placed position within its corpus group, stored
   // in files.meta.sortIndex. Fractional (a midpoint between two neighbours);

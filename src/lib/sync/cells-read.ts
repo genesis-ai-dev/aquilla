@@ -134,6 +134,8 @@ export const FILES_PAGE_SIZE = 100
 export async function fetchProjectFiles(
   projectId: string,
   jwt: string,
+  /** Smart Extensions apiRev 7: also list the (hidden) extension data files. */
+  opts: { extensionData?: boolean } = {},
 ): Promise<FileSummary[]> {
   const base = `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/files`
   const files: FileSummary[] = []
@@ -142,6 +144,7 @@ export async function fetchProjectFiles(
   do {
     const params = new URLSearchParams({ limit: String(FILES_PAGE_SIZE) })
     if (cursor) params.set("cursor", cursor)
+    if (opts.extensionData) params.set("extensionData", "1")
     const res = await observedSyncFetch(`${base}?${params.toString()}`, fetchInit(jwt))
     const body: { files: FileSummary[]; nextCursor?: string | null } = await readJson(res)
     for (const f of body.files) {
@@ -154,6 +157,27 @@ export async function fetchProjectFiles(
     cursor = body.nextCursor ?? null
   } while (cursor)
   return files
+}
+
+/** Smart Extensions apiRev 7: one row of GET /cells/by-ref (a cell row plus its file). */
+export type CellRowWithFile = CellRow & { fileId: string }
+
+/**
+ * GET /api/v1/projects/:projectId/cells/by-ref — cells whose canonical ref is
+ * one of `refs` (or starts with `prefix`) across up to 50 files, source rows
+ * plus the lane's target rows (sync-worker cells-by-ref-route.ts).
+ */
+export async function fetchCellsByRef(
+  projectId: string,
+  jwt: string,
+  query: { fileIds: string[]; refs?: string[]; prefix?: string; lane?: string },
+): Promise<{ cells: CellRowWithFile[]; truncated: boolean }> {
+  const params = new URLSearchParams({ files: query.fileIds.join(",") })
+  if (query.refs && query.refs.length > 0) params.set("refs", query.refs.join("|"))
+  if (query.prefix) params.set("prefix", query.prefix)
+  if (query.lane) params.set("lane", query.lane)
+  const url = `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/cells/by-ref?${params.toString()}`
+  return readJson(await observedSyncFetch(url, fetchInit(jwt)))
 }
 
 /**

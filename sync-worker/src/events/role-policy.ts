@@ -133,6 +133,9 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'file.rename': ROLE.CONTRIBUTOR,
   // Sidebar folder label — same class as file.rename (grouping, not inventory).
   'file.corpus.set': ROLE.CONTRIBUTOR,
+  // Smart Extensions apiRev 7: an extension's tags/kind/meta on a file. Same
+  // floor as creating the file (the extension's write:files scope).
+  'file.extension.set': ROLE.PROJECT_LEAD,
   // AQU-1569: NOT the contributor floor its file.corpus.set neighbour sits at.
   // A corpus marker moves one file into a folder; a reorder rewrites the
   // sidebar every member of the project reads, which is the same "project

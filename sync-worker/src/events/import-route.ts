@@ -28,6 +28,8 @@
 import { verifyDocScope, verifySyncToken } from '../auth'
 import { youTubeVideoId } from '../../../src/lib/video/youtube'
 import { ROLE } from './role-policy'
+import { stampToolProvenance, toolClaimVerified } from './tool-provenance'
+import { EXTENSION_DATA_ROLE } from '../../../shared/tools/file-extension'
 import { withCors } from '../cors'
 import {
   buildEventProjectionStmts,
@@ -183,6 +185,8 @@ interface ImportFileMeta {
   importManifest?: Record<string, unknown>
   /** Sidebar folder — "OT"/"NT" or a named collection such as a Biblica title. */
   corpusMarker?: string
+  /** Smart Extensions apiRev 7: files.meta.extension (shared/tools/file-extension.ts). */
+  extension?: unknown
 }
 
 interface ImportCell {
@@ -244,6 +248,10 @@ interface ImportBody {
   targets?: ImportTarget[]
   /** Hide the file in the same transaction that creates it. */
   stageEventId?: string
+  /** Smart Extensions apiRev 7: the extension running this import, with its
+   *  tool session token. Verified before anything is written; stamped into
+   *  events.provenance for the file.create and every cell. */
+  toolOrigin?: unknown
   clientTs?: number
   /** Raw bytes of the source file for formats that need round-trip fidelity
    *  (USFM today). Sent once with the first chunk alongside `file`. Stored in
@@ -318,7 +326,13 @@ export async function handleBulkImportRequest(
   if (!auth.ok) {
     return withCors(new Response(auth.reason, { status: auth.status }), request)
   }
-  if (auth.claims.role < ROLE.PROJECT_LEAD) {
+  // Smart Extensions apiRev 7: a CONTRIBUTOR may import into an extension
+  // DATA file through a verified extension. The caller says so up front
+  // (X-Aquilla-Extension-Data: 1) so every other below-lead request is still
+  // refused before its body is read (AQU-1858); the claim itself is verified
+  // once the body is parsed.
+  const extensionDataClaim = request.headers.get('X-Aquilla-Extension-Data') === '1'
+  if (auth.claims.role < (extensionDataClaim ? ROLE.CONTRIBUTOR : ROLE.PROJECT_LEAD)) {
     return withCors(new Response('role too low for source import', { status: 403 }), request)
   }
 
@@ -354,6 +368,28 @@ export async function handleBulkImportRequest(
   const scope = verifyDocScope(auth.claims, { projectId: body.projectId, fileId: body.fileId })
   if (!scope.ok) {
     return withCors(new Response(scope.reason, { status: scope.status }), request)
+  }
+  const importAuthor = typeof auth.claims.username === 'string' && auth.claims.username.trim() !== ''
+    ? auth.claims.username
+    : `user:${auth.claims.userId}`
+  const toolClaim = body.toolOrigin !== undefined
+    ? await toolClaimVerified({ tool_origin: body.toolOrigin }, { projectId: body.projectId, author: importAuthor }, env.SYNC_SECRET_KEY)
+    : null
+  if (body.toolOrigin !== undefined && !toolClaim?.ok) {
+    return withCors(new Response('the extension identity on this import could not be verified (missing or invalid tool session)', { status: 403 }), request)
+  }
+  if (auth.claims.role < ROLE.PROJECT_LEAD) {
+    let dataFile = body.file?.role === EXTENSION_DATA_ROLE
+    if (!body.file) {
+      const row = await db
+        .prepare(`SELECT role FROM files WHERE id = ? AND project_id = ?`)
+        .bind(body.fileId, body.projectId)
+        .first<{ role: string | null }>()
+      dataFile = row?.role === EXTENSION_DATA_ROLE
+    }
+    if (!dataFile || !toolClaim?.ok) {
+      return withCors(new Response('role too low for source import', { status: 403 }), request)
+    }
   }
   if (body.video !== undefined) {
     const video = body.video
@@ -754,6 +790,7 @@ export async function handleBulkImportRequest(
         ...(f.orderedBy !== undefined ? { orderedBy: f.orderedBy } : {}),
         ...(f.importManifest !== undefined ? { importManifest: f.importManifest } : {}),
         ...(f.corpusMarker !== undefined ? { corpusMarker: f.corpusMarker } : {}),
+        ...(f.extension !== undefined ? { extension: f.extension } : {}),
       },
       clientTs,
       serverTs: serverTs++,
@@ -967,6 +1004,18 @@ export async function handleBulkImportRequest(
       Response.json({ error: "DB batch failed" }, { status: 500 }),
       request,
     )
+  }
+
+  // Smart Extensions apiRev 7: attribute the file and its cells to the
+  // (verified) extension, exactly as an ordinary tool write is attributed.
+  if (toolClaim?.ok) {
+    const tagged = { tool_origin: body.toolOrigin }
+    const ids = [...(fileEvent ? [fileEvent.id] : []), ...cellEvents.map((e) => e.id)]
+    try {
+      await stampToolProvenance(db, ids.map((id) => ({ id, projectId: body.projectId, author: importAuthor, payload: tagged })), env.SYNC_SECRET_KEY)
+    } catch (err) {
+      console.warn('[import] tool provenance stamp failed:', err)
+    }
   }
 
   // The first chunk is the only one that creates a file. Notify once here;

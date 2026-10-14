@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react"
-import { AppWindow, AudioLines, BookOpen, CheckCheck, Eye, Globe, MessageSquare, PanelRight, PenLine, Rows3, Sparkles, SquarePen, Type } from "lucide-react"
+import { AppWindow, AudioLines, BookOpen, CheckCheck, Database, Eye, FilePlus, Globe, MessageSquare, PanelRight, PenLine, Rows3, Sparkles, SquarePen, Type } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { primaryMount } from "@/lib/tools/builder-model"
@@ -25,6 +25,8 @@ export const PERM = {
   "ai:generate": { icon: Sparkles, label: "extensions.perm.aiGenerate", kind: "ai" },
   "ai:draft": { icon: Sparkles, label: "extensions.perm.aiDraft", kind: "ai" },
   "read:web": { icon: Globe, label: "extensions.perm.readWeb", kind: "web" },
+  "write:files": { icon: FilePlus, label: "extensions.perm.writeFiles", kind: "write" },
+  "write:data": { icon: Database, label: "extensions.perm.writeData", kind: "write" },
 } as const satisfies Record<ToolScope, { icon: LucideIcon; label: string; kind: "read" | "write" | "ai" | "web" }>
 const HINT = { read: "extensions.perm.readHint", write: "extensions.perm.writeHint", ai: "extensions.perm.aiHint", web: "extensions.perm.webHint" } as const
 

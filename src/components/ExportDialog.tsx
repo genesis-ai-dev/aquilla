@@ -20,6 +20,7 @@
 // a "Voice" filter appears letting users export only one voice's cells across
 // all camera angles.
 
+import { ExtensionExports } from "@/components/tools/ExtensionExports"
 import { useState, useEffect, useMemo, useRef, useCallback, type ComponentType } from "react"
 import { Download, AlertTriangle, CheckCircle2, ChevronRight } from "lucide-react"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
@@ -2870,6 +2871,7 @@ export function ExportDialog({
             </ul>
           </div>
         )}
+        <ExtensionExports projectId={projectId} fileId={activeFileId} lane={targetLang ?? ""} getToken={getToken} />
         </>
         )}
         </DialogBody>

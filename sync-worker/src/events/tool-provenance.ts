@@ -12,7 +12,33 @@
 // version, a forged hash). Stamping is best-effort: a failure here never fails
 // the write, it only leaves provenance NULL, same as any in-app edit.
 
+import { verify } from 'hono/jwt'
 import { isToolOrigin, type ToolOrigin } from '../../../shared/tools/manifest'
+import { isToolSessionClaims, toolSessionMatches, TOOL_SESSION_AUDIENCE, type ToolSessionClaims } from '../../../shared/tools/tool-session'
+
+/** apiRev 7: verify a tool session token (signature, audience, expiry). */
+export async function verifyToolSession(token: unknown, secret: string | undefined): Promise<ToolSessionClaims | null> {
+  if (typeof token !== 'string' || token.length === 0 || token.length > 4096 || !secret) return null
+  try {
+    const claims: unknown = await verify(token, secret, 'HS256')
+    if (!isToolSessionClaims(claims) || claims.aud !== TOOL_SESSION_AUDIENCE) return null
+    return claims
+  } catch {
+    return null
+  }
+}
+
+/** apiRev 7: is this event's tool claim vouched for by a valid session token? */
+export async function toolClaimVerified(
+  payload: unknown,
+  event: { projectId: string; author: string },
+  secret: string | undefined,
+): Promise<{ origin: ToolOrigin; ok: boolean } | null> {
+  const origin = toolOriginOf(payload)
+  if (!origin) return null
+  const claims = await verifyToolSession(origin.session, secret)
+  return { origin, ok: claims !== null && toolSessionMatches(claims, { ...event, origin }) }
+}
 
 export interface ToolProvenanceCandidate {
   id: string
@@ -28,6 +54,8 @@ export interface ToolProvenanceEnvelope {
   version: number
   codeHash: string
   verified: boolean
+  /** apiRev 7: whether a server-minted tool session token vouched for the claim. */
+  session?: 'verified' | 'missing' | 'invalid'
   human_authority: { user_id: string }
   channel: 'in-app'
 }
@@ -41,6 +69,9 @@ export function toolOriginOf(payload: unknown): ToolOrigin | null {
 export async function stampToolProvenance(
   db: AquillaDb,
   candidates: readonly ToolProvenanceCandidate[],
+  /** apiRev 7: SYNC_SECRET_KEY. When given, `verified` ALSO requires a valid
+   *  tool session token naming this tool, version, hash, project and author. */
+  secret?: string,
 ): Promise<number> {
   const tagged = candidates
     .map((c) => ({ c, origin: toolOriginOf(c.payload) }))
@@ -61,12 +92,22 @@ export async function stampToolProvenance(
   const known = new Set(results.map((r) => `${r.project_id}|${r.tool_id}|${Number(r.version)}|${r.code_hash}`))
 
   for (const { c, origin } of tagged) {
+    const hashKnown = known.has(`${c.projectId}|${origin.toolId}|${origin.version}|${origin.codeHash}`)
+    let session: ToolProvenanceEnvelope['session']
+    if (secret !== undefined) {
+      if (!origin.session) session = 'missing'
+      else {
+        const claims = await verifyToolSession(origin.session, secret)
+        session = claims && toolSessionMatches(claims, { projectId: c.projectId, author: c.author, origin }) ? 'verified' : 'invalid'
+      }
+    }
     const envelope: ToolProvenanceEnvelope = {
       origin: 'tool',
       toolId: origin.toolId,
       version: origin.version,
       codeHash: origin.codeHash,
-      verified: known.has(`${c.projectId}|${origin.toolId}|${origin.version}|${origin.codeHash}`),
+      verified: hashKnown && (session === undefined || session === 'verified'),
+      ...(session ? { session } : {}),
       human_authority: { user_id: c.author },
       channel: 'in-app',
     }

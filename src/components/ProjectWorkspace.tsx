@@ -1,4 +1,5 @@
 import { useValidatedEvidenceVersion } from "@/hooks/useValidatedEvidenceVersion"
+import { useShowExtensionDataFiles } from "@/lib/tools/show-data-files"
 import { recordModelCall, type RecordModelCall } from "@/lib/ai-interventions/client"
 import { useCharacterSheetCells } from "@/hooks/useCharacterSheetCells"
 import { confirmedTargetHeadKeys } from "@/lib/sync/confirmed-target-heads"
@@ -114,7 +115,7 @@ import type { FileReference } from "@/lib/parsers/types"
 import { fileOrderedBy, infractionSeverity, isMediaFileType, isTranslationMemoryFile, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import { resolveBibleEnrichment } from "../../db/shared/bible-enrichments"
 import { isBibleDataExperimentOn, isBibleOpen } from "@/lib/bible-data/experiment"
-import { isAudioCueFile, isHiddenTimelineFile, isSubtitleImportFile, isVideoTimedSubtitleFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
+import { isAudioCueFile, isExtensionDataFile, isHiddenTimelineFile, isSubtitleImportFile, isVideoTimedSubtitleFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
 import { isAutopilotVisible } from "@/lib/features/flags"
 import { isDiscourseFile } from "@/lib/contextual/discourse-file"
 import {
@@ -808,6 +809,7 @@ export function ProjectWorkspace() {
     setClientProject(null)
   }, [projectId])
 
+  const showDataFiles = useShowExtensionDataFiles()
   const projectFiles = useMemo(() => {
     // AQU-646 stage 2 — THE CENTRAL SEAM for hiding the audio-cue siblings.
     //
@@ -830,9 +832,10 @@ export function ProjectWorkspace() {
     // hydratedProject.files`, which is what lets the `project` memo hand the
     // hydrated record straight back instead of respreading it.
     const rawFiles = hydratedProject?.files ?? []
-    const serverFiles = rawFiles.some((f) => isHiddenTimelineFile(f))
-      ? rawFiles.filter((f) => !isHiddenTimelineFile(f))
-      : rawFiles
+    // apiRev 7: extension data files are hidden companions too, unless the
+    // user chose "Show extension data files" (Smart Extensions settings).
+    const hidden = (f: (typeof rawFiles)[number]) => isHiddenTimelineFile(f) && !(showDataFiles && isExtensionDataFile(f))
+    const serverFiles = rawFiles.some(hidden) ? rawFiles.filter((f) => !hidden(f)) : rawFiles
     // Overlay optimistic renames so the new label shows instantly and
     // detectSuggestions drops the applied file from the banner. Reconciled away
     // by the effect below once the server read reflects the new name.
@@ -858,7 +861,7 @@ export function ProjectWorkspace() {
       (file) => !seen.has(file.id) && !optimisticDeletes.has(file.id),
     )
     return pending.length > 0 ? [...base, ...pending] : base
-  }, [hydratedProject?.files, optimisticFiles, optimisticRenames, optimisticSortIndexes, optimisticDeletes])
+  }, [hydratedProject?.files, optimisticFiles, optimisticRenames, optimisticSortIndexes, optimisticDeletes, showDataFiles])
 
   // AQU-1393: the Examples panel names where each match came from. Resolved
   // here because the file inventory lives at this level and the editor table

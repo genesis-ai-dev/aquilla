@@ -40,7 +40,8 @@ through the global \`aquilla\` object the host injects before your code runs.
   Mounts (manifest "mounts"): page = its own page; panel = the editor's side panel (narrow, ~300px);
   inline = under one cell (aquilla.context.cell); editor = REPLACES the standard editor for a file
   (aquilla.context.file) — a full editing surface: list that file's cells, write targets, validate.
-- aquilla.files.list() → [{ fileId, name, cellCount }]                      scope read:cells
+- aquilla.files.list({ tags?, kind?, group? }?) → [{ fileId, name, cellCount, kind, tags, group, owner, meta }]   scope read:cells
+    kind "normal" | "reference" | "data"; data files appear only with { kind: "data" }.
 - aquilla.cells.list(fileId, { lane? }) → [{                                scope read:cells
     cellId, ref /* e.g. "MAT 1:1" or null */, source /* plain text */, target /* plain text */,
     validated /* boolean */, chapter /* string|null, parsed from ref */,
@@ -157,6 +158,47 @@ through the global \`aquilla\` object the host injects before your code runs.
     ("host_not_allowed", "permission_denied", "too_large", "timeout", "rate_limited", …). Cache what you fetch in
     memory (and small things in aquilla.storage); fetch per chapter or book, never per verse in a loop.
 
+### apiRev 7 — importers, data, cross-file reads, actions and exports (any mount)
+Anything can be built from these: an importer that pulls a resource from a site and keeps it live-linked, an
+editor that opens a set of files together by verse, a store for its own records (alignments, annotations…),
+and an exporter that writes them back out. Everything lands as ordinary, attributed, revertible project data.
+- aquilla.web.fetch(url, { as: "bytes" }) → body is an ArrayBuffer (zip archives etc., ≤20 MB): one zipball beats
+    a thousand file fetches. Read it with aq.zip.read(buffer) (SDK). Importers (write:files) may make ~1,200 fetches per 15 min.
+- aquilla.files.upsert({ key, name, kind?: "normal"|"reference", tags?:[…], group?, meta?:{…}, format?: "usfm"|"tsv"|"md"|"txt"|"json"|"custom",
+    bookCode?, cells:[{ key, value, html?, type?, ref?, metadata? }], raw?: { text, format } })
+    → { fileId, created, creates, commits, deletes, unchanged, cellIds:{ [cellKey]: cellId } }   scope write:files (project lead)
+    Creates the source file the first time; every later call with the same key REFRESHES it: only cells whose value changed are
+    committed, new keys are created, missing keys deleted — so translations of unchanged cells stay put and changed ones show as
+    stale. key: project-wide and stable — prefix it ("uw:tn:TIT"); cell keys stable per file (a row ID, "TIT 1:1", "kt/god|definition|0").
+    ref: the canonical reference ("TIT 1:1", or your own like "tw:kt/god") that cells.byRef finds. metadata: small per-cell JSON
+    (untranslated columns, word data). kind "reference": read-only material (original-language text, link tables) — no translation.
+    tags + group: how editors find the files later. meta: e.g. { repo, ref, sha } for "check for updates". raw: the original text
+    (for an exporter's files.source). Large files: keep each call ≤50,000 cells.
+- aquilla.files.setMeta(fileId, { tags?, kind?, group?, meta?, name? }) → file   scope write:files
+- aquilla.files.source(fileId) → { text } | null — the original kept by upsert's raw (or the imported original).   scope read:cells
+- aquilla.files.group(fileId) → { key, files:[…] } | null — every file sharing that file's group.   scope read:cells
+- aquilla.cells.byRef({ refs:["TIT 1:1",…] | prefix:"TIT 1:", fileIds:[…] | tags:[…], lane? })
+    → { [ref]: [{ fileId, cellId, ref, source, target, sourceHtml, targetHtml, type, metadata, validated }] }   scope read:cells
+    One round trip for a verse (or chapter) across up to 50 files — use it instead of reading whole books per pane.
+- aquilla.data.put(ns, id, doc, { coll?, anchor?: { fileId, cellId, side?: "target"|"source", lane? } }) → { id, version }   scope write:data
+  aquilla.data.get(ns, id, { coll? }) → { id, doc, anchor, drift, ref, updatedBy, updatedAt } | null   scope read:cells
+  aquilla.data.query(ns, { coll?, anchorFileId?, anchorCellIds?, ref? }) → [doc…]   scope read:cells
+  aquilla.data.delete(ns, id, { coll? }) → boolean   scope write:data
+    Your extension's own records (any JSON ≤200 KB), saved as cells of a hidden data file per ns/coll ("myext.alignment" / "TIT")
+    — shared with every member, attributed, revertible, and readable by other extensions that use the same ns. Anchor a record to
+    the cell it is about: drift is then "current" (that cell unchanged since you wrote it), "changed" (edited since: re-check it —
+    never assume character offsets still hold; anchor sub-cell things by word + occurrence and re-resolve) or "orphaned" (cell gone).
+    Writing a record re-stamps it as "current". Contributors can write data; files.upsert needs a project lead.
+- Manifest "actions": [{ "id": "refresh", "label": "Check for updates", "where": ["bar","menu","settings"], "onOpen"?: true }]
+    A button that runs your extension HEADLESS: aquilla.context.mount is "action" and aquilla.context.action = { id, trigger }.
+    Do the work, report with aquilla.action.progress(message, fraction 0..1) and finish with aquilla.action.done(message, { ok? }).
+    onOpen: also run it (at most daily) when a member who may run it opens the project — use it for "check for updates".
+    In an action mount draw nothing; branch on aquilla.context.mount first thing.
+- Manifest "exports": [{ "id": "aligned-usfm", "label": "Aligned USFM", "extension": "usfm", "tags"?: ["uw:ult"] }]
+    Offered in the export dialog (for files with one of those tags). Runs HEADLESS with aquilla.context.export =
+    { id, fileIds, lane }: read cells / data / files.source, then aquilla.export.deliver([{ name, text | bytes, mime }])
+    (several files are zipped for the user).
+
 Every bridge error is an Error with a .code. Wrap awaits in try/catch and show errors in the UI.
 Start your script with: \`(async () => { … })()\` and render a loading state first.
 
@@ -177,7 +219,7 @@ saying why when the bridge cannot support it (see "What Aquilla has"). Then buil
 [{ "id": 1, "text": "…", "priority": "must", "status": "planned" }, { "id": 2, "text": "…", "priority": "must", "status": "not_possible", "note": "…" }]
 \`\`\`
 \`\`\`json
-{ "name": "…", "description": "one short sentence", "web": ["only with read:web"], "scopes": [${TOOL_SCOPES.map((s) => `"${s}"`).join(", ")} — only those you use], "mounts": ["page", …any of "panel", "inline", "editor" that fit], "sdk": 1 }
+{ "name": "…", "description": "one short sentence", "web": ["only with read:web"], "scopes": [${TOOL_SCOPES.map((s) => `"${s}"`).join(", ")} — only those you use], "mounts": ["page", …any of "panel", "inline", "editor" that fit], "sdk": 1, "apiRev": ${TOOLS_API_REV}, "actions": [only if you need headless buttons], "exports": [only if you add export formats] }
 \`\`\`
 \`\`\`html
 <!doctype html>

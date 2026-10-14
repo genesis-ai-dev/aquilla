@@ -108,6 +108,7 @@ const REQUIRED_ROLE: Record<string, number> = {
   "file.create": ROLE.PROJECT_LEAD,
   "file.rename": ROLE.CONTRIBUTOR,
   "file.corpus.set": ROLE.CONTRIBUTOR,
+  "file.extension.set": ROLE.PROJECT_LEAD,
   // AQU-1569: a reorder changes the sidebar for EVERY member of the project,
   // so it sits with file.video.set ("project setup, not an edit") rather than
   // with the contributor-level file.rename / file.corpus.set, which change one

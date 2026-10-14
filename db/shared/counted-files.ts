@@ -7,6 +7,9 @@
 //   * `audio-cues`      — the cue sheet an audio/dub workflow records against
 //                         (see migrations/0073_cell_links.sql).
 //   * `timeline-content` — a linked video's caption-track content.
+//   * `extension-data`   — a Smart Extension's own data file (apiRev 7: one
+//                         record per cell, value = JSON; see
+//                         shared/tools/file-extension.ts).
 //
 // Both can be large. A 500-cue caption track added 500 untranslated cells to
 // the org dashboard, so a team that linked one video watched its completion
@@ -30,7 +33,7 @@
 // `TIMELINE_CONTENT_ROLE` in src/lib/parsers/types.ts.
 
 /** The `files.role` values that mark a hidden companion file. */
-export const HIDDEN_FILE_ROLES = ['audio-cues', 'timeline-content'] as const
+export const HIDDEN_FILE_ROLES = ['audio-cues', 'timeline-content', 'extension-data'] as const
 
 const HIDDEN_ROLE_LIST = HIDDEN_FILE_ROLES.map((role) => `'${role}'`).join(', ')
 

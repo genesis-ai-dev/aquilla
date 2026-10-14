@@ -76,6 +76,16 @@ export const API_REV_ADDITIONS: Readonly<Record<number, readonly string[]>> = {
   6: [
     "web.fetch(url, { as }): read from a site in manifest.web through the host's proxy (scope read:web, approved per user; https GET only, 12 MB, text/JSON)",
   ],
+  7: [
+    "files.upsert / files.setMeta (scope write:files): create and refresh project files from an extension's own parse (delta-applied, stable ids, kinds normal/reference, tags, group, meta, raw original)",
+    "files.list({ tags, kind, group }) and each file's kind/tags/group/owner/meta; files.source; files.group",
+    "cells.byRef({ refs | prefix, fileIds | tags, lane }): cells by canonical ref across files in one call",
+    "data.get / data.put / data.query / data.delete (scope write:data): records in hidden extension data files, anchored to cells with drift current/changed/orphaned",
+    "manifest.actions (headless runs from the bar/menu/settings, onOpen) with action.progress / action.done; manifest.exports with export.deliver",
+    "web.fetch(url, { as: 'bytes' }) answers an ArrayBuffer (≤20 MB); importers (write:files) get a 1,200-per-15-min window",
+    "tool sessions: the sync-worker verifies every claimed extension identity and requires it for file and data writes",
+    "SDK 1.1: aq.zip.read, aq.parse.tsv / usfm / mdBlocks",
+  ],
 }
 
 export function removedApi(method: string): RemovedApi | null {

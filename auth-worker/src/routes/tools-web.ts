@@ -1,6 +1,6 @@
 // POST /api/v2/projects/:projectId/tools/:toolId/web-fetch — aquilla.web.fetch.
 //
-// Body: { url: string, as?: "text" | "json" }
+// Body: { url: string, as?: "text" | "json" | "bytes" }   (bytes → base64 body, apiRev 7)
 // → 200 { status, contentType, body, url }   (status = the SITE's status; 4xx/5xx bodies included)
 //
 // Who may: a project member whose standing grant for THIS tool includes
@@ -12,7 +12,7 @@ import type { Context } from "hono"
 import type { AuthHonoEnv } from "../middleware/auth"
 import { resolveProjectRole } from "../services/project-permissions"
 import { getTool } from "../lib/tools/store"
-import { WebFetchError, WEB_FETCH_MAX_PER_WINDOW, deploymentAllowlist, dohResolver, proxyWebFetch } from "../lib/tools/web-fetch"
+import { WebFetchError, WEB_FETCH_IMPORTER_MAX_PER_WINDOW, WEB_FETCH_MAX_PER_WINDOW, deploymentAllowlist, dohResolver, proxyWebFetch } from "../lib/tools/web-fetch"
 import { countRecentEvents, recordAuthEvent, userIdentifier } from "../utils/rate-limit"
 
 type Ctx = Context<AuthHonoEnv>
@@ -35,10 +35,12 @@ export async function webFetchRoute(c: Ctx) {
 
   const body = (await c.req.json().catch(() => null)) as { url?: unknown; as?: unknown } | null
   if (!body || typeof body.url !== "string" || !body.url.trim() || body.url.length > 2048) return fail(c, 400, "validation_failed", "url is required (at most 2048 characters)")
-  const as = body.as === "json" ? "json" : "text"
+  const as = body.as === "json" ? "json" : body.as === "bytes" ? "bytes" : "text"
 
   const ident = userIdentifier(user.id)
-  if ((await countRecentEvents(c.env.AQUILLA_PG, "tool_web_fetch", ident, { onlyFailures: false })) >= WEB_FETCH_MAX_PER_WINDOW) {
+  // apiRev 7: importers (write:files) get the larger window — see web-fetch.ts.
+  const windowMax = tool.manifest.scopes.includes("write:files") ? WEB_FETCH_IMPORTER_MAX_PER_WINDOW : WEB_FETCH_MAX_PER_WINDOW
+  if ((await countRecentEvents(c.env.AQUILLA_PG, "tool_web_fetch", ident, { onlyFailures: false })) >= windowMax) {
     return fail(c, 429, "rate_limited", "too many website reads; try again in a few minutes")
   }
   await recordAuthEvent(c.env.AQUILLA_PG, "tool_web_fetch", ident, true)

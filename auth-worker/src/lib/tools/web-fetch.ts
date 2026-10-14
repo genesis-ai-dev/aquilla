@@ -23,6 +23,21 @@ export const WEB_FETCH_MAX_BYTES = 12 * 1024 * 1024
 export const WEB_FETCH_MAX_REDIRECTS = 3
 /** Per user, per 15-minute window (auth_rate_limit_events). */
 export const WEB_FETCH_MAX_PER_WINDOW = 300
+/**
+ * apiRev 7: the window for an IMPORTER (an extension that declares
+ * write:files). An unfoldingWord resource set pulled book by book is about
+ * 66 books × 6 per-book repos (ULT, UST, UGNT/UHB, TN, TQ, TWL) ≈ 400 raw files,
+ * plus a manifest/catalog read per repo; a "check for updates" pass afterwards
+ * re-reads the changed books. 1,200 lets one full import AND a refresh pass fit
+ * in a window with room for a retry, while still capping one user at ~1.3
+ * requests a second against the upstream (Door43 rate-limits heavy use). The
+ * resources that would need thousands of files (en_tw's ~1,000 articles) are
+ * one request as a zipball through `as: "bytes"`.
+ */
+export const WEB_FETCH_IMPORTER_MAX_PER_WINDOW = 1200
+/** apiRev 7: binary bodies (`as: "bytes"`, zipballs). en_tw's zipball is ~9 MB;
+ *  20 MB leaves room while keeping the worker far inside its memory budget. */
+export const WEB_FETCH_MAX_BINARY_BYTES = 20 * 1024 * 1024
 
 export class WebFetchError extends Error {
   code: string
@@ -143,10 +158,10 @@ async function assertPublic(host: string, resolve: Resolver): Promise<void> {
   if (bad) throw new WebFetchError("host_blocked", `${host} resolves to a private or reserved address`, 403)
 }
 
-async function readCapped(res: Response, cap: number): Promise<{ text: string; bytes: number }> {
+async function readCapped(res: Response, cap: number): Promise<{ text: string; bytes: number; raw: Uint8Array }> {
   const declared = Number(res.headers.get("content-length") ?? "")
   if (Number.isFinite(declared) && declared > cap) throw new WebFetchError("too_large", `the response is larger than ${cap / 1024 / 1024} MB`, 413)
-  if (!res.body) return { text: "", bytes: 0 }
+  if (!res.body) return { text: "", bytes: 0, raw: new Uint8Array(0) }
   const reader = res.body.getReader()
   const chunks: Uint8Array[] = []
   let bytes = 0
@@ -166,12 +181,21 @@ async function readCapped(res: Response, cap: number): Promise<{ text: string; b
     all.set(c, at)
     at += c.byteLength
   }
-  return { text: new TextDecoder().decode(all), bytes }
+  return { text: new TextDecoder().decode(all), bytes, raw: all }
+}
+
+/** Base64 without a stack-busting String.fromCharCode(...bigArray). */
+export function toBase64(bytes: Uint8Array): string {
+  let out = ""
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    out += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  }
+  return btoa(out)
 }
 
 /** GET `raw` for an extension whose approved sites are `domains`. */
 export async function proxyWebFetch(
-  input: { url: string; as: "text" | "json"; domains: readonly string[]; deploymentAllow: readonly string[] | null },
+  input: { url: string; as: "text" | "json" | "bytes"; domains: readonly string[]; deploymentAllow: readonly string[] | null },
   deps: WebFetchDeps,
 ): Promise<WebFetchResult> {
   let url = checkWebUrl(input.url, input.domains, input.deploymentAllow)
@@ -186,7 +210,7 @@ export async function proxyWebFetch(
         redirect: "manual",
         signal,
         // A fixed header set: nothing of the user's (cookies, Authorization) ever leaves.
-        headers: { Accept: "text/plain, text/*, application/json;q=0.9, */*;q=0.1", "User-Agent": "Aquilla-Extensions/1 (+https://aquilla.app)" },
+        headers: { Accept: input.as === "bytes" ? "*/*" : "text/plain, text/*, application/json;q=0.9, */*;q=0.1", "User-Agent": "Aquilla-Extensions/1 (+https://aquilla.app)" },
       })
     } catch (err) {
       if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) throw new WebFetchError("timeout", "the site took too long to answer", 504)
@@ -199,11 +223,13 @@ export async function proxyWebFetch(
       continue
     }
     const contentType = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase()
-    if (res.ok && !TEXT_TYPES.test(contentType)) {
+    if (res.ok && input.as !== "bytes" && !TEXT_TYPES.test(contentType)) {
       await res.body?.cancel().catch(() => {})
       throw new WebFetchError("unsupported_type", `only text and JSON can be fetched (got ${contentType || "no content type"})`, 415)
     }
-    const { text, bytes } = await readCapped(res, WEB_FETCH_MAX_BYTES)
+    const { text, bytes, raw } = await readCapped(res, input.as === "bytes" ? WEB_FETCH_MAX_BINARY_BYTES : WEB_FETCH_MAX_BYTES)
+    // apiRev 7: bytes travel as base64; the host turns them back into an ArrayBuffer.
+    if (input.as === "bytes") return { status: res.status, contentType, body: toBase64(raw), url: url.toString(), bytes }
     let body: unknown = text
     if (input.as === "json" && res.ok) {
       try {

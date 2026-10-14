@@ -91,6 +91,9 @@ export const SDK_API = String.raw`
     AudioValidateButton: AudioValidateButton, ExamplePanel: ExamplePanel, ContextualDraftCard: ContextualDraftCard, SourceMenuButton: SourceMenuButton,
     ChapterPicker: ChapterPicker, Toolbar: Toolbar, ColumnHeader: ColumnHeader, ReadOnlyBanner: ReadOnlyBanner,
     ui: ui,
+    // SDK 1.1 (apiRev 7): reading what an importer fetches (sdk-io.ts).
+    zip: io.zip,
+    parse: io.parse,
     cell: {
       state: function (id) { return S.byId[id] ? cellState(id) : null; },
       refresh: function (id) { notify(id ? [id] : null); },

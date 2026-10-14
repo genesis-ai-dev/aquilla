@@ -305,6 +305,31 @@ describe("parseProjectWsMessage", () => {
     }))).toBeNull()
   })
 
+  it("parses presence.tier1, a batch of coarse rows (AQU-1825)", () => {
+    expect(parseProjectWsMessage(JSON.stringify({
+      t: "presence.tier1",
+      users: [
+        { connId: "tab-a", userId: "alice", currentFileId: "file-1", focusedCell: "c1", ts: 10 },
+        { userId: "bob", ts: 11 },
+      ],
+    }))).toEqual({
+      t: "presence.tier1",
+      users: [
+        { connId: "tab-a", userId: "alice", currentFileId: "file-1", focusedCell: "c1", ts: 10 },
+        // No connId on the wire → keyed by userId, as the roster frame does.
+        { connId: "bob", userId: "bob", ts: 11 },
+      ],
+    })
+    // Strict field validation — one bad row marks the whole frame malformed.
+    expect(parseProjectWsMessage(JSON.stringify({ t: "presence.tier1", users: {} }))).toBeNull()
+    expect(parseProjectWsMessage(JSON.stringify({
+      t: "presence.tier1", users: [{ userId: "alice" }],
+    }))).toBeNull()
+    expect(parseProjectWsMessage(JSON.stringify({
+      t: "presence.tier1", users: [{ userId: "alice", ts: 1 }, { ts: 2 }],
+    }))).toBeNull()
+  })
+
   it("parses presence.diff / presence.left / presence.draft", () => {
     expect(parseProjectWsMessage(JSON.stringify({
       t: "presence.diff",
@@ -1499,5 +1524,81 @@ describe("createReconnectResyncHandler (AQU-845 missed-broadcast recovery)", () 
     h.handleOpen()
 
     expect(onResync).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("file.progress.pushed (AQU-1832 live progress push)", () => {
+  const counts = {
+    totalCount: 4,
+    filledCount: 2,
+    validatedCount: 1,
+    validationLevels: [1],
+    audioCount: 0,
+    audioValidatedCount: 0,
+  }
+  const frame = (over: Record<string, unknown> = {}) => JSON.stringify({
+    t: "file.progress.pushed",
+    project: "p1",
+    file: "f1",
+    lane: "",
+    revision: 7,
+    validationCount: 1,
+    complete: false,
+    counts,
+    sections: [{ key: "GEN 1", ...counts }],
+    ...over,
+  })
+
+  it("parses a well-formed frame and keeps fields this client does not model", () => {
+    const parsed = parseProjectWsMessage(frame({
+      counts: { ...counts, audioValidationLevels: [0] },
+    }))
+    expect(parsed).toMatchObject({
+      t: "file.progress.pushed",
+      project: "p1",
+      file: "f1",
+      lane: "",
+      revision: 7,
+      complete: false,
+    })
+    // The server already sends more than the client type names; re-serialising
+    // a narrower shape here would silently drop it on the way to the resource.
+    expect(
+      (parsed as unknown as { counts: Record<string, unknown> }).counts.audioValidationLevels,
+    ).toEqual([0])
+  })
+
+  it("keeps a named lane distinct from the default one", () => {
+    expect(parseProjectWsMessage(frame({ lane: "fr" }))).toMatchObject({ lane: "fr" })
+  })
+
+  it("drops the whole frame when a counts block is incomplete", () => {
+    // A progress object with a plausible shape and one absent number renders
+    // as a percentage that is simply wrong; a dropped frame only costs the
+    // refetch the push was saving.
+    expect(parseProjectWsMessage(frame({ counts: { ...counts, filledCount: undefined } }))).toBeNull()
+    expect(parseProjectWsMessage(frame({ counts: { ...counts, validationLevels: ["1"] } }))).toBeNull()
+    expect(parseProjectWsMessage(frame({ sections: [{ ...counts }] }))).toBeNull()
+    expect(parseProjectWsMessage(frame({ sections: [{ key: "GEN 1", totalCount: 2 }] }))).toBeNull()
+  })
+
+  it("drops a frame missing the fields that scope it", () => {
+    expect(parseProjectWsMessage(frame({ lane: undefined }))).toBeNull()
+    expect(parseProjectWsMessage(frame({ revision: "7" }))).toBeNull()
+    expect(parseProjectWsMessage(frame({ complete: undefined }))).toBeNull()
+    expect(parseProjectWsMessage(frame({ sections: undefined }))).toBeNull()
+  })
+
+  it("carries progressPushed through an event.applied frame, and only when true", () => {
+    const applied = (over: Record<string, unknown>) => parseProjectWsMessage(JSON.stringify({
+      t: "event.applied", id: "e1", kind: "target.cell.commit", project: "p1", file: "f1", cell: "c1",
+      ...over,
+    }))
+    expect(applied({ progressPushed: true })).toMatchObject({ progressPushed: true })
+    // Anything but an explicit true means "refetch as before" — an older
+    // worker omits the field, and a truthy non-boolean is not a promise.
+    expect(applied({})).not.toHaveProperty("progressPushed")
+    expect(applied({ progressPushed: false })).not.toHaveProperty("progressPushed")
+    expect(applied({ progressPushed: "yes" })).not.toHaveProperty("progressPushed")
   })
 })

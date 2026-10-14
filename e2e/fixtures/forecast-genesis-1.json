@@ -1,0 +1,162 @@
+{
+ "_comment": "Genesis 1: World English Bible (source) and Reina-Valera 1909 (target), both public domain. Seeds a translated project for the BIA ghost-text spec and showcase.",
+ "sourceLanguage": "en",
+ "targetLanguage": "es",
+ "verses": [
+  {
+   "ref": "GEN 1:1",
+   "source": "In the beginning, God created the heavens and the earth.",
+   "target": "EN el principio crió Dios los cielos y la tierra."
+  },
+  {
+   "ref": "GEN 1:2",
+   "source": "The earth was formless and empty. Darkness was on the surface of the deep and God’s Spirit was hovering over the surface of the waters.",
+   "target": "Y la tierra estaba desordenada y vacía, y las tinieblas estaban sobre la haz del abismo, y el Espíritu de Dios se movía sobre la haz de las aguas."
+  },
+  {
+   "ref": "GEN 1:3",
+   "source": "God said, “Let there be light,” and there was light.",
+   "target": "Y dijo Dios: Sea la luz: y fué la luz."
+  },
+  {
+   "ref": "GEN 1:4",
+   "source": "God saw the light, and saw that it was good. God divided the light from the darkness.",
+   "target": "Y vió Dios que la luz era buena: y apartó Dios la luz de las tinieblas."
+  },
+  {
+   "ref": "GEN 1:5",
+   "source": "God called the light “day”, and the darkness he called “night”. There was evening and there was morning, the first day.",
+   "target": "Y llamó Dios á la luz Día, y á las tinieblas llamó Noche: y fué la tarde y la mañana un día."
+  },
+  {
+   "ref": "GEN 1:6",
+   "source": "God said, “Let there be an expanse in the middle of the waters, and let it divide the waters from the waters.”",
+   "target": "Y dijo Dios: Haya expansión en medio de las aguas, y separe las aguas de las aguas."
+  },
+  {
+   "ref": "GEN 1:7",
+   "source": "God made the expanse, and divided the waters which were under the expanse from the waters which were above the expanse; and it was so.",
+   "target": "E hizo Dios la expansión, y apartó las aguas que estaban debajo de la expansión, de las aguas que estaban sobre la expansión: y fué así."
+  },
+  {
+   "ref": "GEN 1:8",
+   "source": "God called the expanse “sky”. There was evening and there was morning, a second day.",
+   "target": "Y llamó Dios á la expansión Cielos: y fué la tarde y la mañana el día segundo."
+  },
+  {
+   "ref": "GEN 1:9",
+   "source": "God said, “Let the waters under the sky be gathered together to one place, and let the dry land appear;” and it was so.",
+   "target": "Y dijo Dios: Júntense las aguas que están debajo de los cielos en un lugar, y descúbrase la seca: y fué así."
+  },
+  {
+   "ref": "GEN 1:10",
+   "source": "God called the dry land “earth”, and the gathering together of the waters he called “seas”. God saw that it was good.",
+   "target": "Y llamó Dios á la seca Tierra, y á la reunión de las aguas llamó Mares: y vió Dios que era bueno."
+  },
+  {
+   "ref": "GEN 1:11",
+   "source": "God said, “Let the earth yield grass, herbs yielding seeds, and fruit trees bearing fruit after their kind, with their seeds in it, on the earth;” and it was so.",
+   "target": "Y dijo Dios: Produzca la tierra hierba verde, hierba que dé simiente; árbol de fruto que dé fruto según su género, que su simiente esté en él, sobre la tierra: y fué así."
+  },
+  {
+   "ref": "GEN 1:12",
+   "source": "The earth yielded grass, herbs yielding seed after their kind, and trees bearing fruit, with their seeds in it, after their kind; and God saw that it was good.",
+   "target": "Y produjo la tierra hierba verde, hierba que da simiente según su naturaleza, y árbol que da fruto, cuya simiente está en él, según su género: y vió Dios que era bueno."
+  },
+  {
+   "ref": "GEN 1:13",
+   "source": "There was evening and there was morning, a third day.",
+   "target": "Y fué la tarde y la mañana el día tercero."
+  },
+  {
+   "ref": "GEN 1:14",
+   "source": "God said, “Let there be lights in the expanse of the sky to divide the day from the night; and let them be for signs to mark seasons, days, and years;",
+   "target": "Y dijo Dios: Sean lumbreras en la expansión de los cielos para apartar el día y la noche: y sean por señales, y para las estaciones, y para días y años;"
+  },
+  {
+   "ref": "GEN 1:15",
+   "source": "and let them be for lights in the expanse of the sky to give light on the earth;” and it was so.",
+   "target": "Y sean por lumbreras en la expansión de los cielos para alumbrar sobre la tierra: y fué así."
+  },
+  {
+   "ref": "GEN 1:16",
+   "source": "God made the two great lights: the greater light to rule the day, and the lesser light to rule the night. He also made the stars.",
+   "target": "E hizo Dios las dos grandes lumbreras; la lumbrera mayor para que señorease en el día, y la lumbrera menor para que señorease en la noche: hizo también las estrellas."
+  },
+  {
+   "ref": "GEN 1:17",
+   "source": "God set them in the expanse of the sky to give light to the earth,",
+   "target": "Y púsolas Dios en la expansión de los cielos, para alumbrar sobre la tierra,"
+  },
+  {
+   "ref": "GEN 1:18",
+   "source": "and to rule over the day and over the night, and to divide the light from the darkness. God saw that it was good.",
+   "target": "Y para señorear en el día y en la noche, y para apartar la luz y las tinieblas: y vió Dios que era bueno."
+  },
+  {
+   "ref": "GEN 1:19",
+   "source": "There was evening and there was morning, a fourth day.",
+   "target": "Y fué la tarde y la mañana el día cuarto."
+  },
+  {
+   "ref": "GEN 1:20",
+   "source": "God said, “Let the waters abound with living creatures, and let birds fly above the earth in the open expanse of the sky.”",
+   "target": "Y dijo Dios: Produzcan las aguas reptil de ánima viviente, y aves que vuelen sobre la tierra, en la abierta expansión de los cielos."
+  },
+  {
+   "ref": "GEN 1:21",
+   "source": "God created the large sea creatures and every living creature that moves, with which the waters swarmed, after their kind, and every winged bird after its kind. God saw that it was good.",
+   "target": "Y crió Dios las grandes ballenas, y toda cosa viva que anda arrastrando, que las aguas produjeron según su género, y toda ave alada según su especie: y vió Dios que era bueno."
+  },
+  {
+   "ref": "GEN 1:22",
+   "source": "God blessed them, saying, “Be fruitful, and multiply, and fill the waters in the seas, and let birds multiply on the earth.”",
+   "target": "Y Dios los bendijo diciendo: Fructificad y multiplicad, y henchid las aguas en los mares, y las aves se multipliquen en la tierra."
+  },
+  {
+   "ref": "GEN 1:23",
+   "source": "There was evening and there was morning, a fifth day.",
+   "target": "Y fué la tarde y la mañana el día quinto."
+  },
+  {
+   "ref": "GEN 1:24",
+   "source": "God said, “Let the earth produce living creatures after their kind, livestock, creeping things, and animals of the earth after their kind;” and it was so.",
+   "target": "Y dijo Dios: Produzca la tierra seres vivientes según su género, bestias y serpientes y animales de la tierra según su especie: y fué así."
+  },
+  {
+   "ref": "GEN 1:25",
+   "source": "God made the animals of the earth after their kind, and the livestock after their kind, and everything that creeps on the ground after its kind. God saw that it was good.",
+   "target": "E hizo Dios animales de la tierra según su género, y ganado según su género, y todo animal que anda arrastrando sobre la tierra según su especie: y vió Dios que era bueno."
+  },
+  {
+   "ref": "GEN 1:26",
+   "source": "God said, “Let’s make man in our image, after our likeness. Let them have dominion over the fish of the sea, and over the birds of the sky, and over the livestock, and over all the earth, and over every creeping thing that creeps on the earth.”",
+   "target": "Y dijo Dios: Hagamos al hombre á nuestra imagen, conforme á nuestra semejanza; y señoree en los peces de la mar, y en las aves de los cielos, y en las bestias, y en toda la tierra, y en todo animal que anda arrastrando sobre la tierra."
+  },
+  {
+   "ref": "GEN 1:27",
+   "source": "God created man in his own image. In God’s image he created him; male and female he created them.",
+   "target": "Y crió Dios al hombre á su imagen, á imagen de Dios lo crió; varón y hembra los crió."
+  },
+  {
+   "ref": "GEN 1:28",
+   "source": "God blessed them. God said to them, “Be fruitful, multiply, fill the earth, and subdue it. Have dominion over the fish of the sea, over the birds of the sky, and over every living thing that moves on the earth.”",
+   "target": "Y los bendijo Dios; y díjoles Dios: Fructificad y multiplicad, y henchid la tierra, y sojuzgadla, y señoread en los peces de la mar, y en las aves de los cielos, y en todas las bestias que se mueven sobre la tierra."
+  },
+  {
+   "ref": "GEN 1:29",
+   "source": "God said, “Behold, I have given you every herb yielding seed, which is on the surface of all the earth, and every tree, which bears fruit yielding seed. It will be your food.",
+   "target": "Y dijo Dios: He aquí que os he dado toda hierba que da simiente, que está sobre la haz de toda la tierra; y todo árbol en que hay fruto de árbol que da simiente, seros ha para comer."
+  },
+  {
+   "ref": "GEN 1:30",
+   "source": "To every animal of the earth, and to every bird of the sky, and to everything that creeps on the earth, in which there is life, I have given every green herb for food;” and it was so.",
+   "target": "Y á toda bestia de la tierra, y á todas las aves de los cielos, y á todo lo que se mueve sobre la tierra, en que hay vida, toda hierba verde les será para comer: y fué así."
+  },
+  {
+   "ref": "GEN 1:31",
+   "source": "God saw everything that he had made, and, behold, it was very good. There was evening and there was morning, a sixth day.",
+   "target": "Y vió Dios todo lo que había hecho, y he aquí que era bueno en gran manera. Y fué la tarde y la mañana el día sexto."
+  }
+ ]
+}

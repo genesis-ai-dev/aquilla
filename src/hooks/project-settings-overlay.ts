@@ -86,6 +86,14 @@ export function overlaySettings(
     "bibleEnrichments",
     settings.bibleEnrichments == null ? settings.bibleEnrichments : readBibleEnrichments(settings.bibleEnrichments),
   )
+  // AQU-1688: quotation marks enable Bible data checks in the workspace.
+  assign("languageProfile", settings.languageProfile)
+  // AQU-1699: must reach the workspace, or the name and clusivity checks never
+  // see the project's render.* and clusivity.* decisions.
+  assign("projectFacts", settings.projectFacts)
+  // AQU-1692: must reach the workspace, or a saved voice correction never
+  // shows in the editor.
+  assign("bibleVoiceOverrides", settings.bibleVoiceOverrides)
   assign("draftContext", settings.draftContext)
   // AQU-646 SUB-53: the Media lens reads this to decide whether to draw the
   // timeline against the imported file's clock or lay the verses out end to end.

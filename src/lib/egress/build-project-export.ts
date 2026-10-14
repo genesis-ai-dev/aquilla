@@ -29,6 +29,7 @@ import {
   type AudioAssemblyMode,
 } from "@/lib/export/audio-assembly"
 import { audioCacheGet, audioCachePut } from "@/lib/audio/bytes-cache"
+import { memMark } from "@/lib/perf-log"
 import { fetchCellAudio } from "@/lib/audio/upload"
 import type {
   EgressFileRef,
@@ -450,6 +451,12 @@ export async function buildProjectExport(
           decode: decodeAudio,
           signal: deps.signal,
         })
+        // AQU-1862: one heap sample per file×lane while the mem sampler runs
+        // (window.startMemSampler()), carrying what the assembler retained —
+        // the number the "peak memory stays bounded" check records.
+        memMark(
+          `egress audio ${fileBase}/${laneSlug} peak pcm ${(result.peakPcmBytes / 1048576).toFixed(1)}MB`,
+        )
         for (const e of result.entries) {
           outcome.audioEntries.push({ path: `audio/${laneSlug}/${fileBase}/${e.name}`, data: e.data })
         }

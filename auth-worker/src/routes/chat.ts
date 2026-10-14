@@ -22,7 +22,8 @@ import type { Env, Variables, AuthUser } from "../types"
 import { authMiddleware } from "../middleware/auth"
 import { resolveProjectRole } from "../services/project-permissions"
 import { runAiGuard } from "../lib/ai-budget"
-import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../../db/shared/rate-limit"
+import { checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
+import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 import { getPlatformSettingsCached, type PlatformSettings } from "../lib/platform-settings"
 import { creditGuard, recordCredit } from "../lib/credits"
 import { countWords } from "../lib/billing/plans"
@@ -37,6 +38,11 @@ import {
   recordAbOutcome,
   setAbHeaders,
 } from "../lib/model-ab"
+import {
+  logVendorTimeout,
+  vendorDeadline,
+  vendorTimeoutMessage,
+} from "../../../shared/vendor-timeouts"
 
 const chat = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -296,27 +302,37 @@ chat.post(
     // AQU-617: the org lookup is read-only and never throws, so it runs
     // alongside the rate-limit and guard round trips instead of after them.
     const orgIdLookup = resolveChatOrgId(c.env, user, request.projectId)
-    const rateLimitIdentifier = `user:${user.id}`
-    const recentChatCalls = await countRecentRateLimitEvents(
-      c.env.AQUILLA_PG,
-      "chat_completions",
-      rateLimitIdentifier,
-    )
-    if (recentChatCalls >= CHAT_MAX_PER_USER_PER_WINDOW) {
-      return c.json({ error: "rate_limited", message: "Too many chat requests, slow down." }, 429)
+    // AQU-1843: one atomic check-and-consume, and FAIL CLOSED — this proxy
+    // spends the shared OPENROUTER_API_KEY, so a limiter outage must not become
+    // an unmetered free pass.
+    const chatLimit = await enforceRateLimit(c.env.AQUILLA_PG, {
+      kind: "chat_completions",
+      identifier: userRateLimitIdentifier(user.id),
+      limit: CHAT_MAX_PER_USER_PER_WINDOW,
+      failMode: "closed",
+    })
+    if (!chatLimit.allowed) {
+      return c.json(
+        { error: "rate_limited", message: "Too many chat requests, slow down." },
+        429,
+        { "Retry-After": String(chatLimit.retryAfterSeconds) },
+      )
     }
 
     // AI guard: model allowlist + per-user/global daily budget (AQU-265).
-    // The rate-limit row was always written before the guard ran, pass or
-    // fail, so the two can share a round trip.
-    const [, guard] = await Promise.all([
-      recordRateLimitEvent(c.env.AQUILLA_PG, "chat_completions", rateLimitIdentifier),
-      // Log-only budget counting is a single upsert issued now; the request
-      // shim drains in-flight queries before it closes, so it can ride along.
-      runAiGuard(model, user.id, c.env.AQUILLA_PG, c.env, (work) => detach(c, work(c.env.AQUILLA_PG))),
-    ])
+    // Log-only budget counting is a single upsert issued now; the request
+    // shim drains in-flight queries before it closes, so it can ride along.
+    const guard = await runAiGuard(model, user.id, c.env.AQUILLA_PG, c.env, (work) => detach(c, work(c.env.AQUILLA_PG)))
     if (!guard.ok) {
       return c.json(guard.body, guard.status)
+    }
+
+    // Platform daily spend ceiling (AQU-1869) — checked on BOTH the legacy and
+    // the metered path, before the org guards below, because it protects the
+    // shared OpenRouter key rather than any one org's allowance.
+    const spendCeiling = await checkAiSpendCeiling(c.env.AQUILLA_PG, c.env, "chat")
+    if (!spendCeiling.ok) {
+      return c.json(spendCeiling.body, spendCeiling.status)
     }
 
     // Credit guard + attribution (AQU-414 follow-up): chat invoked from a
@@ -373,6 +389,23 @@ chat.post(
         return c.json({ error: 'usage_accounting_unavailable' }, 503)
       }
     }
+    // AQU-1849: the proxy's one upstream call, bounded two different ways.
+    //
+    //   * `stream: false` — nothing arrives until the whole completion is
+    //     done, so the deadline is TOTAL: it stays armed across the `.json()`
+    //     read and is disarmed by the `finally` when the handler returns.
+    //   * `stream: true` — a long generation is not a hang, so the deadline is
+    //     FIRST BYTE only: `await fetch` resolves when the headers arrive and
+    //     the handler returns right after wiring the stream up, which disarms
+    //     it. The body streams on unbounded afterwards.
+    //
+    // The deadline is linked to the client's signal (metered requests already
+    // forwarded it) so a user who navigates away still cancels upstream — and
+    // `timedOut()` keeps that case out of the vendor-timeout logs.
+    const deadline = vendorDeadline(
+      request.stream ? "openRouterStreamFirstByte" : "openRouterNonStreaming",
+      usage ? c.req.raw.signal : null,
+    )
     try {
       const startedAt = Date.now()
       const upstream = await fetch(resolveOpenRouterUrl(c.env), {
@@ -382,7 +415,7 @@ chat.post(
           "Content-Type": "application/json",
         },
         body: buildOpenRouterBody(request, model, c.env),
-        ...(usage ? { signal: c.req.raw.signal } : {}),
+        signal: deadline.signal,
       })
       const latencyMs = Date.now() - startedAt
 
@@ -485,8 +518,18 @@ chat.post(
       }
       return c.json(data)
     } catch (error) {
+      // AQU-1849: a blown deadline is the upstream's fault, not ours — 504 so
+      // the client can say "the model did not respond" and offer a retry,
+      // instead of the blanket 500 that used to swallow it.
+      if (deadline.timedOut()) {
+        const vendor = request.stream ? "openRouterStreamFirstByte" : "openRouterNonStreaming"
+        logVendorTimeout(vendor, error)
+        return c.json({ error: "openrouter_timeout", message: vendorTimeoutMessage(vendor) }, 504)
+      }
       console.error("Error in chat completion:", error)
       return c.json({ error: "internal_error", message: "Chat completion failed" }, 500)
+    } finally {
+      deadline.clear()
     }
   },
 )

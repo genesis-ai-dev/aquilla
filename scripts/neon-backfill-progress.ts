@@ -1,5 +1,5 @@
 #!/usr/bin/env tsx
-import { makePostgres } from '../db/shim/postgres'
+import { makeMaintenancePostgres } from '../db/shim/postgres'
 import {
   fullProgressRecomputeStmts,
   UNREFERENCED_LINES_STALE_FILES_SQL,
@@ -23,7 +23,7 @@ function connectionString(): string {
 }
 
 async function main(): Promise<void> {
-  const db = makePostgres(connectionString(), 1)
+  const db = makeMaintenancePostgres(connectionString(), 1)
   try {
     const missingOnly = process.argv.includes('--missing-only')
     // AQU-1093/1098: `--missing-books` re-runs only files whose projection

@@ -14,6 +14,13 @@
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import { enqueueOutboxEvents } from "./outbox"
 import { assertSourceUploadSize, uploadSourceOriginal } from "./source-upload"
+import {
+  completeImportSession,
+  recordLandedChunk,
+  recordOriginalUploaded,
+  releaseImportSession,
+  type ImportSessionRecord,
+} from "./import-session"
 import { v7 as uuidv7 } from "uuid"
 import type { CaptionRowsPromotion, ImportedTrackPublication } from "../../../shared/timeline-import"
 import {
@@ -25,6 +32,9 @@ import {
  *  Postgres inserts, keeping request bodies manageable while still amortizing
  *  Hyperdrive/network latency. */
 const CHUNK = 1500
+/** The chunking a resumable session's recorded offsets are relative to
+ *  (`src/lib/sync/import-session.ts`). */
+export const BULK_IMPORT_CHUNK = CHUNK
 const IMPORT_ATTEMPTS = 3
 const IMPORT_RETRY_DELAYS_MS = [200, 800] as const
 
@@ -137,6 +147,14 @@ export interface BulkUploadArgs {
    * Call `publishStagedImport` after any required secondary data (media,
    * morphology, shared package artifacts) has been persisted. */
   deferPublication?: boolean
+  /** AQU-1859: the resumable session this run belongs to. When present, its
+   * ids (which `projectId`/`fileId`/`file.id` must already agree with) are
+   * reused instead of freshly minted, chunks it records as landed are not
+   * re-sent, and it is forgotten once the upload completes — so a retry after
+   * a mid-import failure finishes the SAME file instead of creating a second
+   * one. Absent ⇒ a one-shot, non-resumable import (the pre-AQU-1859 path).
+   * Resolve one with `resolveImportSession`. */
+  session?: ImportSessionRecord
   /** Mints a sync-token scoped to (projectId, fileId). */
   getToken: (fileId: string) => Promise<string | null>
   /** Fired after each chunk lands — drives the progress UI. */
@@ -407,6 +425,16 @@ export async function publishStagedImport(args: PublishStagedImportArgs): Promis
  * so the dialog can surface it instead of silently parking work.
  */
 export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
+  try {
+    await uploadSourceChunks(args)
+  } finally {
+    // However this run ended, it no longer owns the key. A failure leaves the
+    // stored record behind on purpose — that is the retry's resume point.
+    if (args.session) releaseImportSession(args.session.key)
+  }
+}
+
+async function uploadSourceChunks(args: BulkUploadArgs): Promise<void> {
   const fetchFn = args.fetchImpl ?? fetch
   const { bytes: sourceBytes, format: sourceFormat } = sourceArtifactInput(args)
   // Fail before file.create/staging so an unsupported artifact cannot leave a
@@ -421,15 +449,29 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
   const url = `${syncWorkerHttpOrigin()}/import`
   const total = args.cells.length
   let uploaded = 0
-  const stageEventId = uuidv7()
-  const publishEventId = uuidv7()
-  const artifactId = uuidv7()
+  const session = args.session
+  const stageEventId = session?.stageEventId ?? uuidv7()
+  const publishEventId = session?.publishEventId ?? uuidv7()
+  const artifactId = session?.artifactId ?? uuidv7()
+  // Chunks a previous attempt already got an ok for. Re-sending one is safe
+  // (the route is idempotent) but on a Bible-sized retry it is the whole cost
+  // of the import, so skip them.
+  const landed = new Set<number>(session?.landedOffsets ?? [])
 
   // Chunk offsets. `do…while` semantics: at least one request (carrying
   // file.create) even for a zero-cell file.
   const offsets: number[] = []
   for (let offset = 0; offset === 0 || offset < args.cells.length; offset += CHUNK) {
     offsets.push(offset)
+  }
+
+  const chunkLengthAt = (offset: number): number =>
+    Math.max(0, Math.min(offset + CHUNK, args.cells.length) - offset)
+
+  /** Count an already-landed chunk towards progress without re-sending it. */
+  const skipChunk = (offset: number): void => {
+    uploaded += chunkLengthAt(offset)
+    args.onProgress?.(uploaded, total)
   }
 
   const sendChunk = async (offset: number, isFirst: boolean): Promise<void> => {
@@ -475,6 +517,9 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
         if (response.ok) {
           uploaded += chunk.length
           args.onProgress?.(uploaded, total)
+          // Noted before the next chunk goes out, so a tab closed mid-import
+          // leaves an accurate resume point.
+          if (session) await recordLandedChunk(session.key, offset)
           return
         }
 
@@ -557,7 +602,8 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
 
   // The first chunk carries file.create (+ side-car raw source) and must land
   // before the rest so the file row exists. Send it alone.
-  await sendChunk(offsets[0], true)
+  if (landed.has(offsets[0])) skipChunk(offsets[0])
+  else await sendChunk(offsets[0], true)
 
   // After the first chunk lands (file.create projected), preserve immutable
   // original bytes in R2. This is not limited to Office packages: text-based
@@ -565,7 +611,7 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
   // serializers. Runs before subsequent chunks so provenance is available as
   // soon as any cell is written.
   let uploadFailure: unknown | null = null
-  if (sourceBytes && sourceFormat) {
+  if (sourceBytes && sourceFormat && !session?.originalUploaded) {
     try {
       await uploadSourceOriginal({
         projectId: args.projectId,
@@ -584,6 +630,7 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
         fetchFn,
         signal: args.signal,
       })
+      if (session) await recordOriginalUploaded(session.key)
     } catch (error) {
       uploadFailure = error
     }
@@ -603,6 +650,10 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
   const worker = async (): Promise<void> => {
     while (uploadFailure === null && cursor < rest.length) {
       const i = cursor++
+      if (landed.has(rest[i])) {
+        skipChunk(rest[i])
+        continue
+      }
       try {
         await sendChunk(rest[i], false)
       } catch (err) {
@@ -635,7 +686,10 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
     throw finalizeError
   }
 
+  // Only a clean run retires the session. A failure keeps it, and with it the
+  // ids and the landed-chunk list the next attempt resumes from.
   if (uploadFailure !== null) throw uploadFailure
+  if (session) await completeImportSession(session.key)
 }
 
 // ---------------------------------------------------------------------------

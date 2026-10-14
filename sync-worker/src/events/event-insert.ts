@@ -100,9 +100,13 @@ export function buildEventInsertStmt(db: AquillaDb, e: EventInsertRow): AquillaS
 // INVARIANT: the reader fence is correct only while every write batch completes
 // in under this TTL. A batch that outlives it has its ledger row purged out from
 // under it, and readers may already have advertised cursors above its seqs.
-// Server-side statement timeouts (audit fix #2, not yet landed) are what will
-// make that a provable bound — until then the settle-returned-zero warning
-// (see buildSettleSeqRangeStmt's RETURNING first_seq) is the tripwire.
+// AQU-1876 makes that a server-side bound rather than an assumption: every
+// worker connection carries DEFAULT_STATEMENT_TIMEOUT_MS (15s) and
+// DEFAULT_IDLE_IN_TRANSACTION_TIMEOUT_MS (30s), and the longest registered
+// opt-out that writes events — `import-finalize`, 120s — is still well inside
+// this TTL, so Postgres aborts a stuck batch long before its ledger row can
+// expire. The settle-returned-zero warning (see buildSettleSeqRangeStmt's
+// RETURNING first_seq) stays as the tripwire if that ever stops holding.
 export const PENDING_ALLOC_TTL_MS = 5 * 60_000
 
 // Allocation = counter bump + ledger announce + expired-row purge, ONE

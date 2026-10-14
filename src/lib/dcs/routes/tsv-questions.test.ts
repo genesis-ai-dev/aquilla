@@ -4,6 +4,8 @@ import { dcsCellId, dcsFileId } from "../cell-id"
 import { contentHash } from "../content-hash"
 import type { DcsCatalogEntry, DcsManifest } from "../types"
 
+const PROJECT_ID = "proj-1"
+
 const TQ_ENTRY: DcsCatalogEntry = {
   name: "en_tq",
   owner: "unfoldingWord",
@@ -59,13 +61,14 @@ describe("tsvQuestionsRoute parse()", () => {
     tsvQuestionsRoute.parse({
       entry: TQ_ENTRY,
       manifest: TQ_MANIFEST,
+      projectId: PROJECT_ID,
       files: new Map([["tq_TIT.tsv", TQ_TSV]]),
     })
 
   it("uses the TSV `ID` column for a stable cell id seeded `repo|book|rowID`", () => {
     const out = parse()
     expect(out).toHaveLength(1)
-    expect(out[0].fileId).toBe(dcsFileId("unfoldingWord/en_tq", "tq_TIT.tsv"))
+    expect(out[0].fileId).toBe(dcsFileId(PROJECT_ID, "unfoldingWord/en_tq", "tq_TIT.tsv"))
     expect(out[0].bookCode).toBe("TIT")
     expect(out[0].cells[0].cellId).toBe(dcsCellId("unfoldingWord/en_tq|TIT|q001"))
     expect(out[0].cells[1].cellId).toBe(dcsCellId("unfoldingWord/en_tq|TIT|q002"))
@@ -108,6 +111,7 @@ describe("tsvQuestionsRoute parse()", () => {
     const cells = tsvQuestionsRoute.parse({
       entry: TQ_ENTRY,
       manifest: TQ_MANIFEST,
+      projectId: PROJECT_ID,
       files: new Map([["tq_TIT.tsv", tsv]]),
     })[0].cells
     expect(cells[0].value).toBe("Question: Why?\nReally why?\nResponse: Because **so**.")

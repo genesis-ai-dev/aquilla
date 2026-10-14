@@ -4,6 +4,8 @@ import { dcsCellId } from "./cell-id"
 import { contentHash } from "./content-hash"
 import type { DcsCatalogEntry, DcsManifest } from "./types"
 
+const PROJECT_ID = "proj-1"
+
 const ULT_ENTRY: DcsCatalogEntry = {
   name: "en_ult",
   owner: "unfoldingWord",
@@ -112,6 +114,7 @@ describe("USFM route parse()", () => {
     const files = route.parse({
       entry: ULT_ENTRY,
       manifest: ULT_MANIFEST,
+      projectId: PROJECT_ID,
       files: new Map([["57-TIT.usfm", TIT_USFM]]),
     })
     expect(files).toHaveLength(1)
@@ -136,6 +139,7 @@ describe("USFM route parse()", () => {
       route.parse({
         entry: ULT_ENTRY,
         manifest: ULT_MANIFEST,
+        projectId: PROJECT_ID,
         files: new Map([["57-TIT.usfm", TIT_USFM]]),
       })
     const a = parseOnce()
@@ -148,6 +152,7 @@ describe("USFM route parse()", () => {
     const files = route.parse({
       entry: ULT_ENTRY,
       manifest: ULT_MANIFEST,
+      projectId: PROJECT_ID,
       files: new Map([
         ["57-TIT.usfm", TIT_USFM],
         ["manifest.yaml", "dublin_core: {}"],

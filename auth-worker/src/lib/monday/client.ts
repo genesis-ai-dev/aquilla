@@ -4,6 +4,12 @@
 // mutations (daily-call budgets on Free/Basic Monday plans are tiny).
 
 import type { MondayBoardColumn, MondayBoardGroup } from "./types"
+import {
+  isAbortTimeout,
+  logVendorTimeout,
+  vendorTimeoutMessage,
+  VENDOR_TIMEOUT_MS,
+} from "../../../../shared/vendor-timeouts"
 
 export const MONDAY_API_URL = "https://api.monday.com/v2"
 export const MONDAY_API_VERSION = "2026-07"
@@ -57,15 +63,29 @@ export async function mondayGraphQL<T>(
   variables?: Record<string, unknown>,
   attempt = 0,
 ): Promise<T> {
-  const res = await fetch(MONDAY_API_URL, {
-    method: "POST",
-    headers: {
-      Authorization: accessToken,
-      "Content-Type": "application/json",
-      "API-Version": MONDAY_API_VERSION,
-    },
-    body: JSON.stringify(variables ? { query, variables } : { query }),
-  })
+  let res: Response
+  try {
+    res = await fetch(MONDAY_API_URL, {
+      method: "POST",
+      headers: {
+        Authorization: accessToken,
+        "Content-Type": "application/json",
+        "API-Version": MONDAY_API_VERSION,
+      },
+      body: JSON.stringify(variables ? { query, variables } : { query }),
+      // AQU-1849: per ATTEMPT, not per call — the 429 retry below sleeps
+      // between attempts and each one gets its own deadline. A hung Monday
+      // used to hold the push engine (and the cron flush behind it) open with
+      // nothing in the logs; now it surfaces as a 504 MondayApiError.
+      signal: AbortSignal.timeout(VENDOR_TIMEOUT_MS.mondayGraphQL),
+    })
+  } catch (err) {
+    if (isAbortTimeout(err)) {
+      logVendorTimeout("mondayGraphQL", err)
+      throw new MondayApiError(vendorTimeoutMessage("mondayGraphQL"), 504)
+    }
+    throw err
+  }
 
   let body: GraphQLEnvelope<T> | null = null
   try {

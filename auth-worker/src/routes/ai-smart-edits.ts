@@ -32,7 +32,7 @@ import type { Env, Variables } from "../types"
 import { ROLE } from "../types"
 import { authMiddleware } from "../middleware/auth"
 import { resolveProjectRole } from "../services/project-permissions"
-import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../../db/shared/rate-limit"
+import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 import { callJev } from "../lib/jev/client"
 import { JEV_MODEL } from "../../../src/lib/completion/seam-request"
 import {
@@ -53,6 +53,7 @@ import { loadObservations, loadScoreInputs, passagePhraseKeys } from "../lib/sma
 import { buildLlmMessages, LLM_MAX_TOKENS, parseLlmEdits } from "../../../src/lib/smart-edits/llm"
 import { tokenize } from "../../../src/lib/smart-edits/tokens"
 import { runAiGuard } from "../lib/ai-budget"
+import { checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
 import { creditGuard, recordCredit } from "../lib/credits"
 import { countWords } from "../lib/billing/plans"
 import { recordWords, wordCapBody, wordGuard } from "../lib/billing/words"
@@ -62,6 +63,11 @@ import { getPlatformSettingsCached } from "../lib/platform-settings"
 import { openRouterExtras } from "../lib/llm-vendor"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
 import type { Observation } from "../../../src/lib/smart-edits/suggest"
+import {
+  logVendorTimeout,
+  vendorDeadline,
+  vendorTimeoutMessage,
+} from "../../../shared/vendor-timeouts"
 
 type AppEnv = { Bindings: Env; Variables: Variables }
 const aiSmartEdits = new Hono<AppEnv>()
@@ -144,10 +150,15 @@ aiSmartEdits.post("/suggest", authMiddleware, zValidator("json", suggestSchema),
   }
 
   const db = c.env.AQUILLA_PG
-  const identifier = `user:${user.id}`
-  const recent = await countRecentRateLimitEvents(db, "ai_smart_edits", identifier)
-  if (recent >= SUGGEST_MAX_PER_USER_PER_WINDOW) return c.json({ suggestions: [], rateLimited: true })
-  await recordRateLimitEvent(db, "ai_smart_edits", identifier)
+  // AQU-1843: atomic, and FAIL CLOSED — the window bounds Jev spend here and
+  // tier-0-only suggestions are the documented degradation (see the header).
+  const suggestLimit = await enforceRateLimit(db, {
+    kind: "ai_smart_edits",
+    identifier: userRateLimitIdentifier(user.id),
+    limit: SUGGEST_MAX_PER_USER_PER_WINDOW,
+    failMode: "closed",
+  })
+  if (!suggestLimit.allowed) return c.json({ suggestions: [], rateLimited: true })
 
   // Fold in edits made since the last request (bounded), then keep going in
   // the background if a backlog remains. A failed pass never blocks reading.
@@ -303,6 +314,11 @@ aiSmartEdits.post("/llm", authMiddleware, zValidator("json", llmSchema), async (
   const aiGuard = await runAiGuard(model, user.id, db, c.env)
   if (!aiGuard.ok) return c.json(aiGuard.body, aiGuard.status)
 
+  // Platform daily spend ceiling (AQU-1869) — outside the weekly/legacy split
+  // below, so a metered request is bounded by it too.
+  const spendCeiling = await checkAiSpendCeiling(db, c.env, "smart-edits")
+  if (!spendCeiling.ok) return c.json(spendCeiling.body, spendCeiling.status)
+
   const project = await db.prepare("SELECT org_id FROM projects WHERE id = ?").bind(input.projectId).first<{ org_id: number | null }>()
   const orgId = project?.org_id ?? 0
 
@@ -359,6 +375,9 @@ aiSmartEdits.post("/llm", authMiddleware, zValidator("json", llmSchema), async (
     }
   }
 
+  // AQU-1849: total deadline (`stream: false`), linked to the client's signal
+  // so a user who navigates away still cancels upstream.
+  const deadline = vendorDeadline("openRouterNonStreaming", c.req.raw.signal)
   try {
     const upstream = await fetch(resolveOpenRouterUrl(c.env), {
       method: "POST",
@@ -372,7 +391,7 @@ aiSmartEdits.post("/llm", authMiddleware, zValidator("json", llmSchema), async (
         ...openRouterExtras(c.env.OPENROUTER_BASE_URL),
         response_format: { type: "json_object" },
       }),
-      signal: c.req.raw.signal,
+      signal: deadline.signal,
     })
     if (!upstream.ok) {
       const detail = await upstream.text().catch(() => "")
@@ -408,8 +427,14 @@ aiSmartEdits.post("/llm", authMiddleware, zValidator("json", llmSchema), async (
     }))
     return c.json({ suggestions })
   } catch (error) {
+    if (deadline.timedOut()) {
+      logVendorTimeout("openRouterNonStreaming", error)
+      return c.json({ error: "llm_timeout", message: vendorTimeoutMessage("openRouterNonStreaming") }, 504)
+    }
     console.error("[smart-edits] llm failed:", error)
     return c.json({ error: "llm_unavailable", message: "Smart edits are temporarily unavailable" }, 502)
+  } finally {
+    deadline.clear()
   }
 })
 

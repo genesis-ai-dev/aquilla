@@ -1,5 +1,10 @@
 import type { Env } from '../../types'
 import { providerCostToMicroCents } from '../../../../db/shared/billing-cost'
+import {
+  isAbortTimeout,
+  logVendorTimeout,
+  VENDOR_TIMEOUT_MS,
+} from "../../../../shared/vendor-timeouts"
 
 /** Live OpenRouter model prices (USD per token) are the only rate card
  * (decision 2026-09-16). A model absent from the card is refused, never
@@ -14,9 +19,19 @@ export async function readRateCard(env: Env, now = Date.now()): Promise<RateCard
   if (!base) throw new Error('Rate card unavailable')
   const cached = cache.get(base)
   if (cached && now - cached.fetchedAt < CARD_TTL_MS) return cached
-  const response = await fetch(`${base}/models`, {
-    headers: env.OPENROUTER_API_KEY ? { Authorization: `Bearer ${env.OPENROUTER_API_KEY}` } : {},
-  })
+  // AQU-1849: small JSON, and it gates every metered call — an unbounded read
+  // here stalled admission itself. A blown deadline is one more
+  // 'Rate card unavailable', which callers already handle.
+  let response: Response
+  try {
+    response = await fetch(`${base}/models`, {
+      headers: env.OPENROUTER_API_KEY ? { Authorization: `Bearer ${env.OPENROUTER_API_KEY}` } : {},
+      signal: AbortSignal.timeout(VENDOR_TIMEOUT_MS.openRouterMetadata),
+    })
+  } catch (err) {
+    if (isAbortTimeout(err)) logVendorTimeout('openRouterMetadata', err)
+    throw new Error('Rate card unavailable', { cause: err })
+  }
   if (!response.ok) throw new Error('Rate card unavailable')
   const body = await response.json() as { data?: Array<{ id?: unknown; pricing?: { prompt?: unknown; completion?: unknown } }> } | null
   if (!Array.isArray(body?.data)) throw new Error('Rate card unavailable')

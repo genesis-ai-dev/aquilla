@@ -270,6 +270,7 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
       // 3. Compute + apply the delta through the typed source emitters.
       const delta = await computeDelta({
         client: dcs,
+        projectId,
         cursor,
         oldEntry,
         newEntry,
@@ -320,7 +321,13 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
     try {
       const entry = await dcs.getCatalogEntry(cursor.owner, cursor.repo, cursor.ref)
       const currentCells = await buildCurrentCells(projectId, getToken, t)
-      const delta = await computeRepairDelta({ client: dcs, entry, currentCells, excludeFrontMatter })
+      const delta = await computeRepairDelta({
+        client: dcs,
+        projectId,
+        entry,
+        currentCells,
+        excludeFrontMatter,
+      })
       const total = delta.creates.length + delta.commits.length + delta.deletes.length
       if (total === 0) {
         // Nothing diverges from the pinned source — report and stop; no

@@ -68,6 +68,7 @@ import type { MediaTextSource, MediaTextSourceOption } from "@/lib/import/media-
 import { importSdbh, type SdbhImportProgress } from "@/lib/import-sdbh"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
 import { PreviewPanel, type ImportUploadProgress, type PreviewConfirmOptions } from "@/components/import/PreviewPanel"
+import { UsfmStructureFindings } from "@/components/import/UsfmStructureFindings"
 import { formatBytesProgress } from "@/lib/format-bytes"
 import type { CellUnit, FileReference, ProjectTtsSettings } from "@/lib/parsers/types"
 import { detectFileType, isMediaFileType } from "@/lib/parsers/types"
@@ -120,6 +121,7 @@ import {
 } from "@/lib/event-names"
 import { YouTubeImportPanel } from "@/components/import/YouTubeImportPanel"
 import { SpreadsheetImportPanel } from "@/components/import/SpreadsheetImportPanel"
+import { JsonImportPanel } from "@/components/import/JsonImportPanel"
 import { PairedImportPanel } from "@/components/import/PairedImportPanel"
 import { DcsCatalogBrowser } from "@/components/dcs/DcsCatalogBrowser"
 import { importDcsResource } from "@/lib/dcs/import-dcs"
@@ -129,11 +131,16 @@ import { partnerIntegrations } from "@/lib/partners/registry"
 import type { PartnerImportPanelProps } from "@/lib/partners/types"
 import { LinkSourceFlow } from "@/components/ProjectSettings/LinkSourceFlow"
 import { ROLE } from "@/lib/frontier/roles"
-import { FileTargetImportPanel, type FileTargetPanelBack } from "@/components/import/FileTargetImportPanel"
+import {
+  FileTargetImportPanel,
+  type FileTargetImportMode,
+  type FileTargetPanelBack,
+} from "@/components/import/FileTargetImportPanel"
 import { ImportIntentChoice, type ImportIntent } from "@/components/import/ImportIntentChoice"
 import { TranslationChooser, type TranslationOtherWay, type TranslationStartOptions } from "@/components/import/TranslationChooser"
 import type { LaneComboboxOption } from "@/components/LaneCombobox"
 import type { FileTargetCellRef } from "@/lib/import-file-target"
+import type { StageTargetProposalsResult } from "@/lib/import-file-target-proposals"
 import {
   CLOSED_IMPORT_FILE_GATE,
   nextImportFileGate,
@@ -156,7 +163,7 @@ import { LANGUAGES, type LanguageEntry } from "@/lib/languages/catalog"
 import { resolveImportDirection, type ImportDirectionLane } from "@/components/import/import-direction"
 import { loadFullLanguageCatalog, peekFullLanguageCatalog } from "@/lib/languages/full-catalog"
 
-type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "partner" | "direction" | "result" | "collision" | "spreadsheet" | "paired" | "sdbh" | "dcs" | "gdrive" | "youtube" | "linkProject"
+type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "partner" | "direction" | "result" | "collision" | "spreadsheet" | "jsonKeys" | "paired" | "sdbh" | "dcs" | "gdrive" | "youtube" | "linkProject"
   // AQU-1365: a translation's destination file is opening in the editor, then
   // its review (FileTargetImportPanel) runs, or one of the other ways into it
   // (eBible in target mode, a paired spreadsheet).
@@ -201,6 +208,10 @@ export interface TranslationImportHost {
    *  follows it, and that lane is the one the import commits into: its review
    *  reads current translations and commit parents from the open lane's lines. */
   onLaneChange?: (lane: string) => void
+  /** AQU-1673: fired once "Stage as proposals for review" has staged its
+   *  changeset, so the host can say where the proposals went. Nothing was
+   *  written, so there is nothing to revalidate. */
+  onProposalsStaged?: (result: StageTargetProposalsResult) => void
 }
 
 /** AQU-1365: one of the project's target lanes, as the translation check sees it. */
@@ -411,6 +422,11 @@ export function ImportDialog({
   const [translationFileId, setTranslationFileId] = useState<string | null>(null)
   const [heldTranslationFile, setHeldTranslationFile] = useState<File | null>(null)
   const [translationRun, setTranslationRun] = useState<TranslationRun | null>(null)
+  // AQU-1673: where a dropped translation's reviewed matches land. "commit"
+  // writes them into the file; "proposal" stages them as one changeset behind
+  // the approval gate. Chosen on the chooser, before the drop, so the review
+  // opens already titled for it and its final button says "Propose".
+  const [translationMode, setTranslationMode] = useState<FileTargetImportMode>("commit")
   const [opening, setOpening] = useState<{ gate: ImportFileGate; state: ImportFileGateState }>(
     { gate: CLOSED_IMPORT_FILE_GATE, state: "waiting" },
   )
@@ -452,6 +468,7 @@ export function ImportDialog({
       setTranslationFileId(openFileId !== null && translationFiles.some((file) => file.id === openFileId) ? openFileId : null)
       setHeldTranslationFile(null)
       setTranslationRun(null)
+      setTranslationMode("commit")
       setOpening({ gate: CLOSED_IMPORT_FILE_GATE, state: "waiting" })
       setTranslationBack(null)
       setTranslationNotice(null)
@@ -491,10 +508,13 @@ export function ImportDialog({
     /** Commits the parsed results to the server once user confirms. */
     commit: (options?: PreviewConfirmOptions) => void | Promise<void>
     /** Surface to restore if the user cancels the preview. */
-    returnScreen: "upload" | "spreadsheet" | "gdrive"
+    returnScreen: "upload" | "spreadsheet" | "jsonKeys" | "gdrive"
   } | null>(null)
   const [spreadsheetSeedFile, setSpreadsheetSeedFile] = useState<File | null>(null)
   const [spreadsheetReturnScreen, setSpreadsheetReturnScreen] = useState<"landing" | "upload" | "gdrive">("landing")
+  // AQU-525: a single JSON file goes through the key picker before import.
+  const [jsonSeedFile, setJsonSeedFile] = useState<File | null>(null)
+  const [jsonReturnScreen, setJsonReturnScreen] = useState<"landing" | "upload" | "gdrive">("landing")
   // AQU-430: upload progress surfaced from UploadPanel's doCommit while the
   // preview screen is active (UploadPanel is unmounted; these live here so
   // PreviewPanel can render an in-flight indicator).
@@ -1047,7 +1067,14 @@ export function ImportDialog({
                   />
                 )}
                 <span className="min-w-0 truncate">
-                  {t("importExport.translation.titleInto", { fileName: translationDestination?.name ?? "" })}
+                  {t(
+                    // AQU-1673: the title names the mode, so someone who ticked
+                    // "Stage as proposals" sees it before the final button.
+                    translationMode === "proposal"
+                      ? "importExport.translation.titleProposalsInto"
+                      : "importExport.translation.titleInto",
+                    { fileName: translationDestination?.name ?? "" },
+                  )}
                 </span>
               </div>
             ) : screen === "preview" ? (
@@ -1079,6 +1106,7 @@ export function ImportDialog({
                   : screen === "tn" ? t("importExport.dialog.titleTn")
                   : screen === "partner" ? t(activePartner?.importScreen?.titleKey ?? "importExport.landing.upload.title")
                   : screen === "spreadsheet" ? t("importExport.dialog.titleSpreadsheet")
+                  : screen === "jsonKeys" ? t("importExport.dialog.titleJsonKeys")
                   : screen === "paired" ? t("importExport.dialog.titlePaired")
                   : screen === "sdbh" ? t("importExport.landing.sdbh.title")
                   : screen === "linkProject" ? t("importExport.landing.linkProject.title")
@@ -1125,6 +1153,8 @@ export function ImportDialog({
               laneOptions={translation.laneOptions}
               lane={targetLang ?? ""}
               onLaneChange={translation.onLaneChange}
+              mode={translationMode}
+              onModeChange={setTranslationMode}
             />
           </div>
         )}
@@ -1251,6 +1281,11 @@ export function ImportDialog({
               setSpreadsheetReturnScreen("upload")
               setScreen("spreadsheet")
             }}
+            onJsonFile={(file) => {
+              setJsonSeedFile(file)
+              setJsonReturnScreen("upload")
+              setScreen("jsonKeys")
+            }}
             onCommitPhase={setPreviewUploadPhase}
             onCommitProgress={setPreviewUploadProgress}
             onCommitError={setPreviewCommitError}
@@ -1293,6 +1328,11 @@ export function ImportDialog({
               setSpreadsheetSeedFile(file)
               setSpreadsheetReturnScreen("gdrive")
               setScreen("spreadsheet")
+            }}
+            onJsonFile={(file) => {
+              setJsonSeedFile(file)
+              setJsonReturnScreen("gdrive")
+              setScreen("jsonKeys")
             }}
             onCommitPhase={setPreviewUploadPhase}
             onCommitProgress={setPreviewUploadProgress}
@@ -1438,6 +1478,34 @@ export function ImportDialog({
             onCancel={() => {
               setSpreadsheetSeedFile(null)
               setScreen(spreadsheetReturnScreen)
+            }}
+          />
+        )}
+
+        {/* AQU-525: JSON source import — pick the translatable keys first. */}
+        {screen === "jsonKeys" && (
+          <JsonImportPanel
+            projectId={projectId}
+            username={username}
+            sourceLanguage={sourceLanguage}
+            targetLanguage={targetLanguage}
+            targetLang={targetLang}
+            getToken={getToken}
+            onPreview={(results, commit) => {
+              setPreviewUploadPhase("")
+              setPreviewUploadProgress(null)
+              setPreviewCommitError(null)
+              setPreviewState({ results, commit, returnScreen: "jsonKeys" })
+              setScreen("preview")
+            }}
+            onCommitError={setPreviewCommitError}
+            onImported={async (refs) => {
+              await handleChildImported(refs)
+            }}
+            initialFile={jsonSeedFile}
+            onCancel={() => {
+              setJsonSeedFile(null)
+              setScreen(jsonReturnScreen)
             }}
           />
         )}
@@ -1634,6 +1702,24 @@ export function ImportDialog({
                 startTranslation(translationRun.file, fileId, { suggested: false }, "review-switch")
               }}
               onBackChange={setTranslationBack}
+              mode={translationMode}
+              jwt={identityToken ?? null}
+              onProposalsStaged={(result) => {
+                posthog.capture(IMPORT_SUCCEEDED, {
+                  import_type: "file-target-proposals",
+                  entry: translationRun.entry,
+                  suggested: translationRun.suggested,
+                  // Staged, NOT committed — a proposal import that reported
+                  // `cell_count` the way the direct path does would read as
+                  // written text in the same dashboards (AQU-1673).
+                  staged_count: result.stagedCount,
+                  skipped_unchanged_count: result.skippedUnchangedCount,
+                  project_id: projectId,
+                  target_lane: translationLaneProperty,
+                })
+                translation.onProposalsStaged?.(result)
+                onOpenChange(false)
+              }}
               onImported={(committedCount) => {
                 posthog.capture(IMPORT_SUCCEEDED, {
                   import_type: "file-target",
@@ -1651,7 +1737,7 @@ export function ImportDialog({
               }}
               onError={(message, phase) => {
                 posthog.capture(IMPORT_FAILED, {
-                  import_type: "file-target",
+                  import_type: translationMode === "proposal" ? "file-target-proposals" : "file-target",
                   entry: translationRun.entry,
                   phase,
                   project_id: projectId,
@@ -1985,6 +2071,9 @@ interface UploadPanelProps {
    * Keep this handoff inside the unified Upload files entry point so users do
    * not have to know which specialized importer to choose. */
   onSpreadsheetFile: (file: File) => void
+  /** AQU-525: a lone JSON file goes through the key picker, so the user says
+   * which keys hold translatable text before any cell is created. */
+  onJsonFile: (file: File) => void
   /** AQU-634: per-project USFM front-matter opt-out (forwarded to parseFile /
    *  the Paratext preview). */
   excludeFrontMatter?: boolean
@@ -2079,6 +2168,21 @@ function fileExts(list: File[]): string {
 // Outside React render (called from a progress callback passed into a plain
 // lib helper), so this uses the standalone t() rather than useT() — see
 // src/lib/i18n/standalone.ts.
+/**
+ * AQU-525: is this file small enough to read whole on the main thread? The
+ * JSON key picker parses the document before anything is imported, so an
+ * oversized file must not be read here at all — the ordinary import pipeline
+ * rejects it against the same ceiling, with the usual message.
+ */
+function withinUploadCeiling(file: File): boolean {
+  try {
+    assertSourceUploadByteLength(file.size)
+    return true
+  } catch {
+    return false
+  }
+}
+
 function idmlParsePhase(
   fileName: string,
   progress: { phase: string; completed: number; total: number },
@@ -2101,7 +2205,7 @@ function idmlParsePhase(
   })
 }
 
-function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, excludeFrontMatter, cellUnit, variant = "upload", onTranslationCheck }: UploadPanelProps) {
+function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, onJsonFile, excludeFrontMatter, cellUnit, variant = "upload", onTranslationCheck }: UploadPanelProps) {
   const t = useT()
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
@@ -2193,6 +2297,28 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
         }
         onSpreadsheetFile(spreadsheets[0])
         return
+      }
+
+      // AQU-525: a lone JSON file goes to the key picker, which asks which keys
+      // hold translatable text and keeps the original document as the source
+      // side-car for a keyed export. A multi-file drop keeps the previous
+      // behavior (every string leaf of every file) so bulk imports still work,
+      // and an unparseable .json still falls through to the normal pipeline,
+      // which reports the parse error (or classifies the file).
+      if (list.length === 1 && detectFileType(list[0].name) === "json" && withinUploadCeiling(list[0])) {
+        const candidate = list[0]
+        const parseable = await candidate.arrayBuffer().then((bytes) => {
+          try {
+            JSON.parse(decodeImportText(bytes, candidate.name))
+            return true
+          } catch {
+            return false
+          }
+        })
+        if (parseable) {
+          onJsonFile(candidate)
+          return
+        }
       }
 
       setImporting(true)
@@ -3028,6 +3154,11 @@ function ParatextChoice({
                       </span>
                     </button>
                   </div>
+                  {b.structureFindings.length > 0 && (
+                    <div className="px-3 pb-2 ps-9">
+                      <UsfmStructureFindings findings={b.structureFindings} />
+                    </div>
+                  )}
                   {expanded && (
                     <ul className="space-y-1 px-3 pb-2 pl-9">
                       {b.strings.slice(0, 4).map((s) => (

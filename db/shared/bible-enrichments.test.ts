@@ -96,7 +96,7 @@ describe('the registry', () => {
     )
     expect(layers).toEqual({
       voices: ['voices', 'people'],
-      'whos-who': ['people', 'text'],
+      'whos-who': ['people', 'text', 'structure'],
       structure: ['structure'],
       'original-context': ['text', 'people'],
       helps: ['notes'],

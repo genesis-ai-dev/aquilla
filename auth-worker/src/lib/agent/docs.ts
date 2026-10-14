@@ -74,8 +74,10 @@ FROM cells WHERE project_id = :project AND side = 'target'
 LIMIT 30
 
 5. Check waived rules before re-flagging something:
-SELECT cell_id, rule_id, reason FROM cell_waivers
+SELECT cell_id, rule_id, match_hash, reason FROM cell_waivers
 WHERE project_id = :project AND file_id = :file
+-- match_hash '' = the whole rule is waived on that cell; otherwise it names
+-- the one finding (a hash of the matched text) that was accepted.
 
 6. Report findings as comments (COMMENTER+):
 emit: [{kind:'comment.create', fileId:':file', cellId:'#c3',

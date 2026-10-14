@@ -14,6 +14,7 @@ import { admitChatUsage, providerRejectedPreModel, releaseChatUsage, settleChatU
 import { weeklyUsageActive } from "../lib/billing/usage-mode"
 import { authMiddleware } from "../middleware/auth"
 import { runAiGuard } from "../lib/ai-budget"
+import { checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
 import { creditGuard, recordCredit } from "../lib/credits"
 import { countWords } from "../lib/billing/plans"
 import { recordWords, wordCapBody, wordGuard } from "../lib/billing/words"
@@ -21,6 +22,11 @@ import { getPlatformSettingsCached } from "../lib/platform-settings"
 import { openRouterExtras } from "../lib/llm-vendor"
 import { resolveProjectRole } from "../services/project-permissions"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
+import {
+  logVendorTimeout,
+  vendorDeadline,
+  vendorTimeoutMessage,
+} from "../../../shared/vendor-timeouts"
 
 const imports = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -135,6 +141,11 @@ imports.post(
     const aiGuard = await runAiGuard(model, user.id, c.env.AQUILLA_PG, c.env)
     if (!aiGuard.ok) return c.json(aiGuard.body, aiGuard.status)
 
+    // Platform daily spend ceiling (AQU-1869) — outside the weekly/legacy
+    // split below, so a metered request is bounded by it too.
+    const spendCeiling = await checkAiSpendCeiling(c.env.AQUILLA_PG, c.env, "import-classify")
+    if (!spendCeiling.ok) return c.json(spendCeiling.body, spendCeiling.status)
+
     const project = await c.env.AQUILLA_PG.prepare(
       "SELECT org_id FROM projects WHERE id = ?",
     ).bind(input.projectId).first<{ org_id: number | null }>()
@@ -181,6 +192,10 @@ imports.post(
         return c.json({ error: "usage_accounting_unavailable" }, 503)
       }
     }
+    // AQU-1849: total deadline (`stream: false` — nothing arrives until the
+    // completion is whole), linked to the client's signal so a user who
+    // navigates away still cancels upstream.
+    const deadline = vendorDeadline("openRouterNonStreaming", c.req.raw.signal)
     try {
       const upstream = await fetch(resolveOpenRouterUrl(c.env), {
         method: "POST",
@@ -197,7 +212,7 @@ imports.post(
           ...openRouterExtras(c.env.OPENROUTER_BASE_URL),
           response_format: { type: "json_object" },
         }),
-        signal: c.req.raw.signal,
+        signal: deadline.signal,
       })
       if (!upstream.ok) {
         const detail = await upstream.text().catch(() => "")
@@ -248,11 +263,20 @@ imports.post(
       }
       return c.json({ classification: classification.data })
     } catch (error) {
+      if (deadline.timedOut()) {
+        logVendorTimeout("openRouterNonStreaming", error)
+        return c.json({
+          error: "import_classifier_timeout",
+          message: vendorTimeoutMessage("openRouterNonStreaming"),
+        }, 504)
+      }
       console.error("Import classification failed:", error)
       return c.json({
         error: "import_classifier_unavailable",
         message: "Import classification is temporarily unavailable",
       }, 502)
+    } finally {
+      deadline.clear()
     }
   },
 )

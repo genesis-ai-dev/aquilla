@@ -11,12 +11,12 @@
 import { ExtensionMarker } from "./ExtensionMarker"
 import { useEffect } from "react"
 import { useNavigate } from "react-router-dom"
-import { Blocks, Pin, Play, Plus, Sparkles } from "lucide-react"
+import { Blocks, Pin, Play, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { ExtensionEditorChoice } from "./ExtensionEditor"
-import { ExtensionEditorFallbackNotice, ExtensionEditorSwitcher, FirstPartyBadge } from "./ExtensionEditor"
+import { ExtensionEditorFallbackNotice, ExtensionEditorSwitcher } from "./ExtensionEditor"
 import { useToolsMount } from "./ToolsMountContext"
 
 export function ExtensionsBar({ choice }: { choice: ExtensionEditorChoice }) {
@@ -53,11 +53,6 @@ export function ExtensionsBar({ choice }: { choice: ExtensionEditorChoice }) {
     <ExtensionEditorFallbackNotice choice={choice} />
     <div className="flex flex-wrap items-center gap-2 border-b bg-muted/30 px-3 py-1 text-xs" data-testid="extensions-bar">
       <ExtensionEditorSwitcher choice={choice} />
-      <FirstPartyBadge toolId={choice.selected} />
-      <Button size="xs" variant="ghost" className="text-muted-foreground" onClick={() => navigate(`/project/${ctx.projectId}/extensions?where=editor`)} data-testid="build-own-editor">
-        <Plus className="size-3" aria-hidden />
-        {t("extensions.editor.buildOwn")}
-      </Button>
       {pinned.map((tool) => (
         <Button key={tool.id} size="xs" variant="outline" onClick={() => ctx.openInPanel(tool.id)} data-testid="pinned-extension">
           <Pin className="size-3" aria-hidden />

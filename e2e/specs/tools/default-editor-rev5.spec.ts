@@ -35,7 +35,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURE = path.join(__dirname, "../../fixtures/tools/key-terms.usfm")
 const SYNC_BASE = process.env.E2E_SYNC_BASE ?? `http://${process.env.VITE_SYNC_WORKER_HOST ?? "127.0.0.1:8788"}`
 const WASH_PREF = "aq.health-score-color-coding.v1"
-const ORIGINAL = "Use the original Aquilla editor"
 
 interface Row { cellId: string; side: "source" | "target"; value: string; aiDrafted?: boolean; canonicalRef: string | null }
 
@@ -67,15 +66,20 @@ test("the Smart Extension editor is the default, the original is one click away,
 
   // A user who never chose an editor gets the Smart Extension editor.
   const frame = await tools.openFileInDefaultEditor(seeded.projectId, seeded.fileId, "MAT 1:1")
-  const picker = alice.getByRole("combobox", { name: "Edit with" })
-  await expect(picker.locator("option:checked")).toHaveText(`${DEFAULT_EDITOR} (default)`)
-  await expect(picker.locator("option[value=standard]")).toHaveText("Aquilla editor")
+  const picker = tools.editWithTrigger()
+  await expect(picker).toHaveAccessibleName(`Edit with: ${DEFAULT_EDITOR}`)
+  // One menu: the native editor first, the extension checked and marked as the default.
+  await picker.click()
+  await expect(alice.getByRole("menuitemradio").first()).toContainText("Aquilla editor")
+  await expect(tools.editWithItem(DEFAULT_EDITOR)).toHaveAttribute("aria-checked", "true")
+  await expect(tools.editWithItem(DEFAULT_EDITOR)).toContainText("Your default")
+  await alice.keyboard.press("Escape")
 
-  // One click back to the original editor.
-  await alice.getByRole("button", { name: ORIGINAL }).click()
+  // Back to the original editor: just pick it in the menu.
+  await tools.switchEditor("Aquilla editor")
   await expect(alice.getByTestId("extension-editor-surface")).toHaveCount(0)
   await workspace.waitForEditor()
-  await expect(picker).toHaveValue("standard")
+  await expect(picker).toHaveAttribute("data-editor", "standard")
 
   // AI-draft the first row (the book heading) there: a new project shows the
   // host's "Set up AI" chooser first, then the sparkle drafts (mock LLM).
@@ -104,7 +108,7 @@ test("the Smart Extension editor is the default, the original is one click away,
   }), { timeout: 10_000 }).toBe(nativeKinds.length)
 })
 
-test("a commenter switches back to the original Aquilla editor in one click, and it survives a reload", async ({ bob }) => {
+test("a commenter switches back to the original Aquilla editor from the menu, makes it the project default, and it survives a reload", async ({ bob }) => {
   test.setTimeout(120_000)
   const jwt = await jwtFor("alice")
   const seeded = await seedProjectWithFile(jwt, { smartExtensions: true, name: `Rev5 commenter ${Date.now()}`, fixturePath: FIXTURE })
@@ -114,15 +118,19 @@ test("a commenter switches back to the original Aquilla editor in one click, and
   await productDefault(bob)
 
   await tools.openFileInDefaultEditor(seeded.projectId, seeded.fileId, "MAT 1:1")
-  await bob.getByRole("button", { name: ORIGINAL }).click()
+  await tools.switchEditor("Aquilla editor")
   await workspace.waitForEditor()
   await expect(bob.getByTestId("extension-editor-surface")).toHaveCount(0)
+  // Every file of the project: the explicit menu action (no role gates it).
+  await tools.setEditorAsProjectDefault()
 
   await bob.reload()
   await workspace.waitForEditor()
-  await expect(bob.getByRole("combobox", { name: "Edit with" })).toHaveValue("standard")
+  await expect(tools.editWithTrigger()).toHaveAttribute("data-editor", "standard")
   await expect(bob.getByTestId("extension-editor-surface")).toHaveCount(0)
-  await expect(bob.getByRole("button", { name: ORIGINAL })).toHaveCount(0)
+  await tools.editWithTrigger().click()
+  await expect(tools.editWithItem("Aquilla editor")).toContainText("Your default")
+  await bob.keyboard.press("Escape")
 })
 
 test("when the Smart Extension editor cannot load, the original Aquilla editor opens instead", async ({ alice }) => {

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url"
 import { ensureAuthState, injectSession } from "../../helpers/auth"
 import { resetBackend } from "../../helpers/seed"
 import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
+import { ToolsPage } from "../../helpers/page-objects/ToolsPage"
 
 /**
  * Builder benchmark screenshots (AQU-1793): real builder outputs, saved by a
@@ -80,7 +81,7 @@ test("builder benchmark — before/after screenshots", async ({ page }) => {
     await shot(page, `after-${name}-page`)
     if (built.manifest.mounts.includes("editor")) {
       await page.goto(`/project/${seeded.projectId}/editor/file/${seeded.fileId}`)
-      await page.getByRole("combobox", { name: "Edit with" }).first().selectOption({ label: built.manifest.name })
+      await new ToolsPage(page).switchEditor(built.manifest.name)
       await page.waitForTimeout(6000)
       await shot(page, `after-${name}-editor`)
     }

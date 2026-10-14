@@ -99,9 +99,10 @@ test("\"Build your own editor…\" builds an editor that appears in \"Edit with\
   })
   const tools = new ToolsPage(alice)
   // The product default (the first-party editor extension), so the file view
-  // shows "Edit with" and its "Build your own editor…" link.
+  // shows "Edit with"; "Build a new editor…" is the menu's footer item.
   await tools.optIntoDefaultEditorExtension()
   await alice.goto(`/project/${seeded.projectId}/editor/file/${seeded.fileId}`)
+  await tools.editWithTrigger().click()
   await alice.getByTestId("build-own-editor").click()
   await alice.waitForURL(/\/extensions\?where=editor$/)
   await expect(alice.getByRole("radio", { name: "As an editor" })).toHaveAttribute("aria-checked", "true")

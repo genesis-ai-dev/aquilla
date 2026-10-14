@@ -176,7 +176,7 @@ test("Smart Extensions builder — every state", async ({ page }) => {
 
   // 10. Where it shows up in the editor ("Edit with" and the palette).
   await page.goto(`/project/${seeded.projectId}/editor/file/${seeded.fileId}`)
-  await expect(page.getByRole("combobox", { name: "Edit with" })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByTestId("edit-with-trigger")).toBeVisible({ timeout: 30_000 })
   await page.waitForTimeout(1500)
   await shot(page, "13-editor-entry")
   await page.keyboard.press("ControlOrMeta+Shift+E")

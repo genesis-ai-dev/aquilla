@@ -56,7 +56,7 @@ test("the default editor is a first-party extension that edits, validates, shows
   // Opening the file IS opening the extension editor: no install, no prompt.
   const frame = await tools.openFileInDefaultEditor(seeded.projectId, seeded.fileId, "MAT 1:1")
   await expect(alice.getByTestId("first-party-notice")).toContainText("ships with Aquilla. It was given these permissions automatically")
-  await expect(alice.getByRole("combobox", { name: "Edit with" })).toHaveValue(/[0-9a-f-]{36}/)
+  await expect(tools.editWithTrigger()).toHaveAttribute("data-editor", /[0-9a-f-]{36}/)
   await expect(tools.editorRow(frame, "MAT 1:1")).toContainText("The book of the genealogy of Jesus Christ")
 
   // Edit MAT 1:1 (plain), Tab commits and moves on; MAT 1:2 with bold.

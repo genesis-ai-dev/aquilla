@@ -7,12 +7,12 @@
  * (or project-wide), see src/lib/tools/editor-choice.ts.
  */
 
-import { ExtensionMarker } from "./ExtensionMarker"
+import { EditWithMenu } from "./EditWithMenu"
 import { useCallback, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type Ref } from "react"
 import type { EditorTableHandle } from "@/components/EditorTable"
 import type { ToolFrameControl } from "./useToolHost"
-import { Link, useInRouterContext } from "react-router-dom"
-import { ShieldCheck, Undo2, X } from "lucide-react"
+import { Link } from "react-router-dom"
+import { ShieldCheck, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { ToolHostServices } from "@/lib/tools/live-data"
 import { useScopeLabel } from "./scope-label"
@@ -20,7 +20,6 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import {
   STANDARD_EDITOR,
   chooseEditor,
-  chooseOriginalEditor,
   readEditorChoice,
   resolveEditor,
   writeEditorChoice,
@@ -37,9 +36,10 @@ export interface ExtensionEditorChoice {
   /** The default may be an extension but the project's extensions have not
    *  loaded yet: show a placeholder, not a flash of the built-in editor. */
   pending: boolean
-  /** "Use the original Aquilla editor": native for every file of this
-   *  project, for this user. Local; no role or permission gates it. */
-  useOriginal: () => void
+  /** The editor every file of this project opens with for this user (their
+   *  "Set as default for this project", else the default editor extension,
+   *  else the native one). Marked "Default" in the Edit with menu. */
+  projectDefault: string
   /** The extension editor failed to load (load error, blank render, or an
    *  error before it drew anything): the native editor stands in for it this
    *  session. Reported by the surface; `retry` clears it. */
@@ -71,11 +71,7 @@ export function useExtensionEditorChoice(username: string, projectId: string, fi
     setFailures((prev) => (prev.has(toolId) ? prev : new Map(prev).set(toolId, reason)))
   }, [])
   const retry = useCallback(() => setFailures(new Map()), [])
-  const useOriginal = useCallback(() => {
-    const next = chooseOriginalEditor()
-    writeEditorChoice(username, projectId, next)
-    setState(next)
-  }, [username, projectId])
+  const projectDefault = resolveEditor({ project: state.project, files: {} }, "", editors.map((e) => e.id), ctx?.defaultEditorId ?? null, failedIds)
   const choose = useCallback(
     (editorId: string, wholeProject: boolean) => {
       if (!fileId) return
@@ -89,73 +85,12 @@ export function useExtensionEditorChoice(username: string, projectId: string, fi
   )
   const explicitStandard = fileId ? (state.files[fileId] ?? state.project) === STANDARD_EDITOR : false
   const pending = Boolean(fileId && ctx?.defaultEditorEnabled && ctx.session && !ctx.toolsReady && !explicitStandard)
-  return { editors, selected, choose, pending, useOriginal, failure, reportFailure, retry }
+  return { editors, selected, choose, pending, projectDefault, failure, reportFailure, retry }
 }
 
+/** The "Edit with" menu above the editor (EditWithMenu.tsx). */
 export function ExtensionEditorSwitcher({ choice }: { choice: ExtensionEditorChoice }) {
-  const t = useT()
-  const mount = useToolsMount()
-  const defaultEditorId = mount?.defaultEditorId ?? null
-  // Linked only inside a router (the switcher also renders in bare tests).
-  const projectId = useInRouterContext() ? (mount?.projectId ?? null) : null
-  const editorName = choice.editors.find((ed) => ed.id === choice.selected)?.name ?? ""
-  const nativeIsDefault = defaultEditorId === null || !choice.editors.some((ed) => ed.id === defaultEditorId)
-  const [wholeProject, setWholeProject] = useState(false)
-  if (choice.editors.length === 0) return null
-  return (
-    <div className="flex flex-wrap items-center gap-2" data-testid="extension-editor-switcher">
-      <label className="flex items-center gap-2">
-        <span className="text-muted-foreground">{t("extensions.editor.label")}</span>
-        <select
-          aria-label={t("extensions.editor.label")}
-          className="rounded border bg-background px-1.5 py-0.5"
-          value={choice.selected}
-          onChange={(e) => choice.choose(e.target.value, wholeProject)}
-        >
-          {/* One name per editor, the same as on the Smart Extensions page;
-              "(default)" marks whichever editor is the effective default —
-              the native one unless the user opted into an extension. */}
-          <option value={STANDARD_EDITOR}>
-            {nativeIsDefault
-              ? t("extensions.editor.defaultOption", { name: t("extensions.editor.standard") })
-              : t("extensions.editor.standard")}
-          </option>
-          <optgroup label={t("extensions.identity.groupLabel")}>
-            {choice.editors.map((ed) => (
-              <option key={ed.id} value={ed.id}>
-                {ed.id === defaultEditorId ? t("extensions.editor.defaultOption", { name: ed.name }) : ed.name}
-              </option>
-            ))}
-          </optgroup>
-        </select>
-      </label>
-      {choice.selected !== STANDARD_EDITOR &&
-        (projectId ? (
-          // The editor's host-drawn identity (its frame is a quiet hairline): links to its page.
-          <Link
-            to={`/project/${projectId}/extensions/${choice.selected}`}
-            className="inline-flex rounded-sm hover:opacity-80"
-            title={t("extensions.identity.open", { name: editorName })}
-            data-testid="extension-editor-marker"
-          >
-            <ExtensionMarker iconOnly />
-          </Link>
-        ) : (
-          <ExtensionMarker iconOnly />
-        ))}
-      <label className="flex items-center gap-1 text-muted-foreground">
-        <input type="checkbox" checked={wholeProject} onChange={(e) => setWholeProject(e.target.checked)} />
-        {t("extensions.editor.wholeProject")}
-      </label>
-      {/* The safety valve for the extension default: one click, any user. */}
-      {choice.selected !== STANDARD_EDITOR && (
-        <Button size="xs" variant="outline" onClick={choice.useOriginal} data-testid="use-original-editor">
-          <Undo2 className="size-3.5" aria-hidden />
-          {t("extensions.editor.useOriginal")}
-        </Button>
-      )}
-    </div>
-  )
+  return <EditWithMenu choice={choice} />
 }
 
 /** The extension editor failed to load, so the original editor is open. */
@@ -272,29 +207,5 @@ function FirstPartyNotice({ toolId }: { toolId: string }) {
         <X className="size-3" aria-hidden />
       </button>
     </div>
-  )
-}
-
-/** Compact form of the first-party disclosure, inside the extensions bar. */
-export function FirstPartyBadge({ toolId }: { toolId: string }) {
-  const t = useT()
-  const scopeLabel = useScopeLabel()
-  const ctx = useToolsMount()
-  const tool = ctx?.tools.find((x) => x.id === toolId)
-  if (!ctx || !tool?.firstParty) return null
-  const sentence = t("extensions.firstParty.granted", {
-    name: tool.name,
-    scopes: tool.grantedScopes.map(scopeLabel).join(", ") || t("extensions.firstParty.none"),
-  })
-  return (
-    <Link
-      to={`/project/${ctx.projectId}/extensions`}
-      className="hidden items-center gap-1 rounded px-1 text-muted-foreground hover:text-foreground md:inline-flex"
-      title={sentence}
-      data-testid="first-party-badge-bar"
-    >
-      <ShieldCheck className="size-3.5 text-emerald-600" aria-hidden />
-      <span className="sr-only">{sentence}</span>
-    </Link>
   )
 }

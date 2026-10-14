@@ -3,8 +3,9 @@ import { expect, type FrameLocator, type Locator, type Page } from "@playwright/
 /** The first-party editor extension's name (manifest name, also its "Edit with" label). */
 export const DEFAULT_EDITOR = "Aquilla editor (Smart Extension)"
 
-/** The native (built-in) editor's "Edit with" label; "(default)" is appended
- *  to whichever editor is the effective default. */
+/** The native (built-in) editor's "Edit with" label. The effective default is
+ *  marked with a "Your default" badge in the menu; "(default)" in a label
+ *  passed to switchEditor is ignored (back-compat). */
 export const NATIVE_EDITOR = "Aquilla editor"
 export const NATIVE_EDITOR_DEFAULT = "Aquilla editor (default)"
 
@@ -60,9 +61,31 @@ export class ToolsPage {
     expect((await installed).status()).toBe(201)
   }
 
-  /** Pick an editor in the file view's editor switcher (the native "Aquilla editor" or an extension). */
+  /** The "Edit with" menu button above the editor; `data-editor` holds the
+   *  current editor ("standard" or an extension id). */
+  editWithTrigger(): Locator {
+    return this.page.getByTestId("edit-with-trigger").first()
+  }
+
+  /** The editor item in the open "Edit with" menu whose name is exactly `label`. */
+  editWithItem(label: string): Locator {
+    const name = label.replace(/ \(default\)$/, "")
+    const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    // The item's text is name + badge + hint; "Aquilla editor" must not match
+    // "Aquilla editor (Smart Extension)".
+    return this.page.getByRole("menuitemradio", { name: new RegExp(`^${esc}(?!\\s*\\()`) })
+  }
+
+  /** Pick an editor in the file view's "Edit with" menu (the native "Aquilla editor" or an extension). */
   async switchEditor(label: string): Promise<void> {
-    await this.page.getByRole("combobox", { name: "Edit with" }).first().selectOption({ label })
+    await this.editWithTrigger().click()
+    await this.editWithItem(label).click()
+  }
+
+  /** "Set as default for this project" for the current editor, from the "Edit with" menu. */
+  async setEditorAsProjectDefault(): Promise<void> {
+    await this.editWithTrigger().click()
+    await this.page.getByTestId("edit-with-set-default").click()
   }
 
   /** Restore the product default for this browser context — the first-party

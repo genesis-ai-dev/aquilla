@@ -11,7 +11,7 @@ import { ExtensionMarker } from "./ExtensionMarker"
 import { useCallback, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type Ref } from "react"
 import type { EditorTableHandle } from "@/components/EditorTable"
 import type { ToolFrameControl } from "./useToolHost"
-import { Link } from "react-router-dom"
+import { Link, useInRouterContext } from "react-router-dom"
 import { ShieldCheck, Undo2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { ToolHostServices } from "@/lib/tools/live-data"
@@ -94,7 +94,11 @@ export function useExtensionEditorChoice(username: string, projectId: string, fi
 
 export function ExtensionEditorSwitcher({ choice }: { choice: ExtensionEditorChoice }) {
   const t = useT()
-  const defaultEditorId = useToolsMount()?.defaultEditorId ?? null
+  const mount = useToolsMount()
+  const defaultEditorId = mount?.defaultEditorId ?? null
+  // Linked only inside a router (the switcher also renders in bare tests).
+  const projectId = useInRouterContext() ? (mount?.projectId ?? null) : null
+  const editorName = choice.editors.find((ed) => ed.id === choice.selected)?.name ?? ""
   const nativeIsDefault = defaultEditorId === null || !choice.editors.some((ed) => ed.id === defaultEditorId)
   const [wholeProject, setWholeProject] = useState(false)
   if (choice.editors.length === 0) return null
@@ -125,7 +129,20 @@ export function ExtensionEditorSwitcher({ choice }: { choice: ExtensionEditorCho
           </optgroup>
         </select>
       </label>
-      {choice.selected !== STANDARD_EDITOR && <ExtensionMarker iconOnly />}
+      {choice.selected !== STANDARD_EDITOR &&
+        (projectId ? (
+          // The editor's host-drawn identity (its frame is a quiet hairline): links to its page.
+          <Link
+            to={`/project/${projectId}/extensions/${choice.selected}`}
+            className="inline-flex rounded-sm hover:opacity-80"
+            title={t("extensions.identity.open", { name: editorName })}
+            data-testid="extension-editor-marker"
+          >
+            <ExtensionMarker iconOnly />
+          </Link>
+        ) : (
+          <ExtensionMarker iconOnly />
+        ))}
       <label className="flex items-center gap-1 text-muted-foreground">
         <input type="checkbox" checked={wholeProject} onChange={(e) => setWholeProject(e.target.checked)} />
         {t("extensions.editor.wholeProject")}

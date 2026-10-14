@@ -16,7 +16,7 @@ through the global \`aquilla\` object the host injects before your code runs.
 
 ## Hard rules (a lint enforces them; violations fail the build)
 - No fetch (only aquilla.web.fetch, for declared sites), XMLHttpRequest, WebSocket, EventSource, eval, new Function, importScripts.
-- No localStorage/sessionStorage/indexedDB/cookies — use aquilla.storage.
+- No localStorage/sessionStorage/indexedDB/caches/cookies: they THROW in the sandbox (opaque origin) and the save gate rejects them. Small per-user values → aquilla.storage; records → aquilla.data; repeat web reads are cached by the platform (and keep what you fetched in memory for the run).
 - No external <script src>, <link href>, @import, <iframe>, <base>, <meta http-equiv>.
 - Never touch window.parent / window.top — only the aquilla API.
 - Plain modern JavaScript (ES2020) in a classic <script>; no modules, no JSX, no build step.
@@ -198,7 +198,10 @@ and an exporter that writes them back out. Everything lands as ordinary, attribu
     "dynamic": true asks YOU for the choices, re-asked when a "dependsOn" field changes), runs your extension HEADLESS with
     aquilla.context.mount = "import" and aquilla.context.import = { importerId, phase, options, fileIds, field }, shows progress and
     Cancel, and records { extension, importer, options, upstream } on every file you upsert. phase "choices": compute the choices
-    for options[field] and answer aquilla.import.choices([{ value, label }…]) — nothing else. phase "run": import what the options
+    for options[field] and answer aquilla.import.choices([{ value, label, group? }…]) — nothing else (optional group: a heading
+    the dialog groups choices under, e.g. official first; aquilla.import.progress(message) shows while you load; if loading
+    fails, aquilla.import.done(reason, { ok: false }) so the user sees why — never answer an empty list for an error; ask the
+    upstream for the LIGHTEST listing that names the choices). phase "run": import what the options
     say. phase "refresh": the user chose "Refresh from source" on a file (fileIds): re-import just those, with the stored options.
     Report with aquilla.import.progress(message, fraction 0..1) and finish with aquilla.import.done(summary, { ok? }).
     Importer rules: work BOOK BY BOOK (one fetch and one files.upsert per book/file), report progress after each, keep every

@@ -44,8 +44,10 @@ export interface RenderReport {
 export interface BridgeHostOptions {
   getFrameWindow: () => Window | null
   handlers: Readonly<Record<string, BridgeHandler>>
-  /** Resolve to allow, throw BridgeError("permission_denied") to refuse. */
-  authorize: (method: string) => Promise<void>
+  /** Resolve to allow, throw BridgeError("permission_denied") to refuse.
+   *  Call `hold()` before waiting on the user (a permission prompt): the
+   *  frame's call timeout pauses until the answer, then restarts in full. */
+  authorize: (method: string, hold: () => void) => Promise<void>
   onReady?: () => void
   onToolError?: (err: ToolErrorReport) => void
   /** A tool called a removed bridge API (see shared/tools/api-rev.ts). */
@@ -131,7 +133,13 @@ export function createBridgeHost(opts: BridgeHostOptions): BridgeHost {
     }
     inFlight++
     try {
-      await opts.authorize(call.method)
+      let held = false
+      await opts.authorize(call.method, () => {
+        if (held) return
+        held = true
+        post({ type: "hold", requestId: call.requestId })
+      })
+      if (held) post({ type: "resume", requestId: call.requestId })
       const value = await handler(call.params)
       reply(call.requestId, { ok: true, value: value === undefined ? null : value })
       opts.onCall?.(call.method, true)

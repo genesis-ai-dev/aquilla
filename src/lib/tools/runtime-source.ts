@@ -21,6 +21,7 @@
  */
 
 import { TOOLS_API_REV } from "../../../shared/tools/manifest"
+import { BRIDGE_CALL_TIMEOUT_MS, BRIDGE_WEB_FETCH_TIMEOUT_MS } from "../../../shared/tools/timeouts"
 export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
   "use strict";
   var host = window.parent;
@@ -28,7 +29,10 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
   var pending = Object.create(null);
   var listeners = Object.create(null);
   var seq = 0;
-  var CALL_TIMEOUT_MS = 30000;
+  var CALL_TIMEOUT_MS = ${BRIDGE_CALL_TIMEOUT_MS};
+  // A proxied fetch may legitimately take the proxy's whole budget (timeouts.ts).
+  var SLOW_CALLS = { "web.fetch": ${BRIDGE_WEB_FETCH_TIMEOUT_MS} };
+  function deadline(method) { return SLOW_CALLS[method] || CALL_TIMEOUT_MS; }
 
   function post(msg) {
     msg.channel = "aquilla-tool";
@@ -40,9 +44,9 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
       var requestId = "r" + (++seq) + "-" + Date.now().toString(36);
       var timer = setTimeout(function () {
         delete pending[requestId];
-        reject(new Error("aquilla." + method + " timed out"));
-      }, CALL_TIMEOUT_MS);
-      pending[requestId] = { resolve: resolve, reject: reject, timer: timer };
+        reject(new Error("aquilla." + method + " timed out after " + Math.round(deadline(method) / 1000) + " s"));
+      }, deadline(method));
+      pending[requestId] = { resolve: resolve, reject: reject, timer: timer, method: method };
       post({ type: "call", requestId: requestId, method: method, params: params === undefined ? null : params });
     });
   }
@@ -65,7 +69,17 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
     if (e.source !== host) return;
     var msg = e.data;
     if (!msg || typeof msg !== "object" || msg.channel !== "aquilla-host") return;
-    if (msg.type === "result") {
+    if (msg.type === "hold" || msg.type === "resume") {
+      // The host is waiting on the USER (a permission prompt): no deadline while
+      // they decide; the full call timeout restarts once they have answered.
+      var h = pending[msg.requestId];
+      if (!h) return;
+      clearTimeout(h.timer);
+      h.timer = msg.type === "hold" ? 0 : setTimeout(function () {
+        delete pending[msg.requestId];
+        h.reject(new Error("aquilla." + h.method + " timed out after " + Math.round(deadline(h.method) / 1000) + " s"));
+      }, deadline(h.method));
+    } else if (msg.type === "result") {
       var p = pending[msg.requestId];
       if (!p) return;
       delete pending[msg.requestId];
@@ -84,11 +98,25 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
     }
   });
 
+  // Only the extension's OWN errors count. Browser extensions (password
+  // managers, devtools hooks) and test harnesses inject scripts into every
+  // frame; in this opaque-origin frame theirs throw (e.g. reading
+  // localStorage) and must not fail the extension's run (AQU-1937).
+  function ours(file, stack) {
+    var here = String(location.href);
+    if (file) return file === here || file === "about:srcdoc";
+    return !stack || stack.indexOf("about:srcdoc") !== -1 || stack.indexOf(here) !== -1;
+  }
   window.addEventListener("error", function (e) {
+    var stack = e.error && e.error.stack ? String(e.error.stack) : "";
+    if (!ours(e.filename || "", stack)) return;
     reportError(e.error || { message: e.message || "script error" });
   });
   window.addEventListener("unhandledrejection", function (e) {
-    reportError(e.reason || { message: "unhandled rejection" });
+    var r = e.reason;
+    var stack = r && r.stack ? String(r.stack) : "";
+    if (!ours("", stack)) return;
+    reportError(r || { message: "unhandled rejection" });
   });
 
   function applyTheme(vars) {

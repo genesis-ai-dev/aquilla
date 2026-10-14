@@ -5,7 +5,7 @@
  * prop threading. Tool sources are fetched lazily, per mount.
  */
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useParams } from "react-router-dom"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -16,7 +16,7 @@ import { FIRST_PARTY_DOOR43_IMPORTER } from "../../../shared/tools/first-party/d
 import type { ToolScope } from "../../../shared/tools/manifest"
 import { useProject } from "@/hooks/useProject"
 import { useSmartExtensionsEnabled } from "@/lib/tools/smart-extensions-enabled"
-import { HeadlessRuns, type HeadlessJob, type HeadlessOutcome } from "./HeadlessRuns"
+import { HeadlessRuns, type HeadlessJob, type HeadlessJobHooks, type HeadlessOutcome } from "./HeadlessRuns"
 import { makeAudioSyncTokenFetcher } from "@/lib/audio/sync-token-fetcher"
 import { fetchProjectFiles } from "@/lib/sync/cells-read"
 import type { FileImportProvenance } from "../../../shared/tools/file-extension"
@@ -59,10 +59,18 @@ export interface ToolsMountValue {
     toolId: string,
     importerId: string,
     options: Record<string, unknown>,
-    opts?: { phase?: "run" | "refresh"; fileIds?: string[]; onProgress?: (message: string, fraction: number | null) => void },
+    opts?: { phase?: "run" | "refresh"; fileIds?: string[] } & HeadlessJobHooks,
   ) => { key: string; done: Promise<HeadlessOutcome> }
-  /** AQU-1937: ask an importer for a dynamic field's choices. */
-  importChoices: (toolId: string, importerId: string, field: string, options: Record<string, unknown>) => Promise<HeadlessOutcome>
+  /** AQU-1937: ask an importer for a dynamic field's choices. Answers are
+   *  cached for the session (per tool version, field and options); `fresh`
+   *  skips the cache (Retry). */
+  importChoices: (
+    toolId: string,
+    importerId: string,
+    field: string,
+    options: Record<string, unknown>,
+    opts?: { fresh?: boolean } & HeadlessJobHooks,
+  ) => Promise<HeadlessOutcome>
   /** Stop a running headless job (import cancel). */
   cancelJob: (key: string) => void
   /** AQU-1937: files an import contribution wrote (fileId → provenance). */
@@ -282,6 +290,7 @@ export function ToolsMountProvider({ children }: { children: ReactNode }) {
             key, toolId, kind: "import", label: importer.label, importerId, phase: opts.phase ?? "run", options,
             ...(opts.fileIds ? { fileIds: opts.fileIds } : {}),
             ...(opts.onProgress ? { onProgress: opts.onProgress } : {}),
+            ...(opts.onPrompt ? { onPrompt: opts.onPrompt } : {}),
             settle: (outcome) => {
               resolve(outcome)
               setImportsVersion((n) => n + 1)
@@ -293,8 +302,11 @@ export function ToolsMountProvider({ children }: { children: ReactNode }) {
     },
     [tools],
   )
+  // Session cache of choices answers: reopening Import (or going back to a
+  // language already asked for) is instant instead of another catalog read.
+  const choicesCache = useRef(new Map<string, { value: string; label: string; group?: string }[]>())
   const importChoices = useCallback<ToolsMountValue["importChoices"]>(
-    (toolId, importerId, field, options) =>
+    (toolId, importerId, field, options, opts = {}) =>
       new Promise<HeadlessOutcome>((resolve) => {
         const tool = tools.find((x) => x.id === toolId)
         const importer = tool?.manifest.importers?.find((x) => x.id === importerId)
@@ -302,7 +314,26 @@ export function ToolsMountProvider({ children }: { children: ReactNode }) {
           resolve({ ok: false, error: "unknown importer" })
           return
         }
-        setJobs((prev) => [...prev, { key: `${toolId}:choices:${field}:${Date.now()}`, toolId, kind: "import", label: importer.label, importerId, phase: "choices", options, field, settle: resolve }])
+        const cacheKey = JSON.stringify([toolId, tool.currentVersion, importerId, field, options])
+        const cached = opts.fresh ? undefined : choicesCache.current.get(cacheKey)
+        if (cached) {
+          resolve({ ok: true, choices: cached })
+          return
+        }
+        const key = `${toolId}:choices:${field}:${Date.now()}`
+        opts.onStart?.(key)
+        setJobs((prev) => [
+          ...prev,
+          {
+            key, toolId, kind: "import", label: importer.label, importerId, phase: "choices", options, field,
+            ...(opts.onProgress ? { onProgress: opts.onProgress } : {}),
+            ...(opts.onPrompt ? { onPrompt: opts.onPrompt } : {}),
+            settle: (outcome) => {
+              if (outcome.ok && outcome.choices && outcome.choices.length > 0) choicesCache.current.set(cacheKey, outcome.choices)
+              resolve(outcome)
+            },
+          },
+        ])
       }),
     [tools],
   )

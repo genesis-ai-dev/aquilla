@@ -64,6 +64,58 @@ describe("tool bridge", () => {
     expect(commit).not.toHaveBeenCalled()
   })
 
+  it("does not time a call out while the user decides a permission prompt (hold), then restarts the deadline", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true })
+    try {
+      let answer: () => void = () => {}
+      const held = vi.fn()
+      const pair = createFakeFramePair()
+      const host = createBridgeHost({
+        getFrameWindow: () => pair.frame as unknown as Window,
+        handlers: { "files.list": async () => ["ok"] },
+        authorize: (_m, hold) => {
+          hold()
+          held()
+          return new Promise<void>((resolve) => (answer = resolve))
+        },
+      })
+      host.listen(pair.host as unknown as Window)
+      const aquilla = boot(pair)
+      const out = aquilla.files.list()
+      for (let i = 0; i < 50 && held.mock.calls.length === 0; i++) await vi.advanceTimersByTimeAsync(1)
+      expect(held).toHaveBeenCalled()
+      // The user takes longer than the 30 s call timeout to answer…
+      await vi.advanceTimersByTimeAsync(45_000)
+      answer()
+      await vi.advanceTimersByTimeAsync(10)
+      // …and the call still succeeds.
+      await expect(out).resolves.toEqual(["ok"])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("ignores errors from scripts the browser or a browser extension injected into the frame (only the tool's own count)", async () => {
+    const { pair, onToolError } = setup({})
+    boot(pair)
+    // What a password manager / devtools hook injected into every frame throws
+    // in this opaque-origin frame: no filename, an anonymous stack.
+    const injected = new Error("Failed to read the 'localStorage' property from 'Window': The document is sandboxed")
+    injected.stack = `SecurityError: ${injected.message}\n    at <anonymous>:8:7\n    at <anonymous>:9:7`
+    const ev = new Event("error")
+    Object.defineProperties(ev, { error: { value: injected }, message: { value: injected.message }, filename: { value: "" } })
+    pair.frame.dispatchEvent(ev)
+    const ext = new Event("error")
+    Object.defineProperties(ext, { error: { value: new Error("x") }, message: { value: "x" }, filename: { value: "chrome-extension://abc/inject.js" } })
+    pair.frame.dispatchEvent(ext)
+    // The tool's own uncaught error still counts.
+    const own = new Event("error")
+    Object.defineProperties(own, { error: { value: new Error("tool bug") }, message: { value: "tool bug" }, filename: { value: "about:srcdoc" } })
+    pair.frame.dispatchEvent(own)
+    await vi.waitFor(() => expect(onToolError).toHaveBeenCalled())
+    expect(onToolError.mock.calls.map((c) => (c[0] as { message: string }).message)).toEqual(["tool bug"])
+  })
+
   it("rejects unknown methods", async () => {
     const { pair } = setup({})
     const aquilla = boot(pair)

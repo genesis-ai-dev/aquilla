@@ -12,7 +12,7 @@
  * floating card (headless runs have no frame to draw it in).
  */
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import JSZip from "jszip"
 import { toast } from "@/components/ui/toast"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -26,13 +26,26 @@ import { ExtensionMarker } from "./ExtensionMarker"
 import { PermissionPrompt } from "./PermissionPrompt"
 import { useCancelOnUnmount } from "./useCancelOnUnmount"
 import { useToolHost } from "./useToolHost"
+import { CHOICES_TIME_LIMIT_MS } from "../../../shared/tools/timeouts"
 
 /** Every toast a headless run raises carries the Smart Extensions marker (AQU-1937 identity). */
 const EXTENSION_TOAST = { icon: <ExtensionMarker iconOnly /> }
 
 export type HeadlessOutcome =
-  | { ok: true; files?: number; message?: string | null; choices?: { value: string; label: string }[] }
+  | { ok: true; files?: number; message?: string | null; choices?: { value: string; label: string; group?: string }[] }
   | { ok: false; error: string }
+
+/** What the screen that started a job wants to hear while it runs. */
+export interface HeadlessJobHooks {
+  /** Live progress (import runs, and "Loading Door43 catalog…" for choices). */
+  onProgress?: (message: string, fraction: number | null) => void
+  /** A permission prompt the extension is waiting on, drawn by the caller
+   *  INSIDE its own dialog (null = answered). Without it the prompt floats,
+   *  and a modal dialog would hide it while the call waits. */
+  onPrompt?: (prompt: ReactNode | null) => void
+  /** The job's key as soon as it is queued (for Cancel). */
+  onStart?: (key: string) => void
+}
 
 export interface HeadlessJob {
   key: string
@@ -45,7 +58,8 @@ export interface HeadlessJob {
   options?: Record<string, unknown>
   field?: string
   /** Live progress for the Import dialog. */
-  onProgress?: (message: string, fraction: number | null) => void
+  onProgress?: HeadlessJobHooks["onProgress"]
+  onPrompt?: HeadlessJobHooks["onPrompt"]
   actionId?: string
   trigger?: "click" | "open"
   exportId?: string
@@ -61,7 +75,6 @@ export const ACTION_TIME_LIMIT_MS = 15 * 60 * 1000
 export const EXPORT_TIME_LIMIT_MS = 5 * 60 * 1000
 /** An import of a whole Bible's resources book by book can take a while. */
 export const IMPORT_TIME_LIMIT_MS = 30 * 60 * 1000
-const CHOICES_TIME_LIMIT_MS = 60 * 1000
 
 /** Turn delivered files into one download: a single file as itself, several as a zip. */
 export async function deliverDownload(files: ToolDeliveredFile[], zipName: string): Promise<void> {
@@ -163,11 +176,17 @@ function HeadlessRun({
     if (errors.length > 0) finish.current(false, errors[errors.length - 1].message)
   }, [errors])
 
+  // The deadline pauses while the user decides a permission prompt, and
+  // restarts in full once they have answered (like the bridge's call hold).
+  const waitingOnUser = prompt != null
   useEffect(() => {
-    const limit = job.kind === "action" ? ACTION_TIME_LIMIT_MS : job.kind === "import" ? (job.phase === "choices" ? CHOICES_TIME_LIMIT_MS : IMPORT_TIME_LIMIT_MS) : EXPORT_TIME_LIMIT_MS
-    const timer = setTimeout(() => finish.current(false, t("extensions.action.timedOut", { ...vars, minutes: Math.round(limit / 60000) })), limit)
+    if (waitingOnUser) return
+    const choices = job.kind === "import" && job.phase === "choices"
+    const limit = job.kind === "action" ? ACTION_TIME_LIMIT_MS : job.kind === "import" ? (choices ? CHOICES_TIME_LIMIT_MS : IMPORT_TIME_LIMIT_MS) : EXPORT_TIME_LIMIT_MS
+    const message = choices ? t("extensions.import.choicesTimedOut", vars) : t("extensions.action.timedOut", { ...vars, minutes: Math.round(limit / 60000) })
+    const timer = setTimeout(() => finish.current(false, message), limit)
     return () => clearTimeout(timer)
-  }, [job.kind, t, vars])
+  }, [job.kind, job.phase, t, vars, waitingOnUser])
 
   useEffect(() => {
     if (job.kind !== "action" || toastShown.current) return
@@ -193,9 +212,19 @@ function HeadlessRun({
     [job.key, tool.id, tool.currentVersion],
   )
 
+  // A caller that draws the prompt itself (the Import dialog) gets it handed over.
+  const promptEl = prompt ? <PermissionPrompt toolName={tool.name} prompt={prompt} web={tool.manifest.web} /> : null
+  const onPrompt = job.onPrompt
+  useEffect(() => {
+    if (!onPrompt) return
+    onPrompt(promptEl)
+    return () => onPrompt(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-sent when the prompt changes
+  }, [prompt, onPrompt])
+
   return (
     <>
-      {prompt && (
+      {prompt && !onPrompt && (
         <div className="fixed bottom-4 end-4 z-50 w-96 max-w-[calc(100vw-2rem)] rounded-lg border bg-background shadow-lg" data-testid="headless-permission">
           <PermissionPrompt toolName={tool.name} prompt={prompt} web={tool.manifest.web} />
         </div>

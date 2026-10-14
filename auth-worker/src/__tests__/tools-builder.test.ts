@@ -222,6 +222,20 @@ describe("static UI findings", () => {
     expect(found).toMatch(/sdk-components/)
   })
 
+  it("flags a choices path that downloads a full catalog / archive / tree to fill a dropdown (fetch-small-first)", () => {
+    const heavy = `<body><div class="skel"></div><script>
+      if (job.phase === "choices") { const r = await aquilla.web.fetch("https://git.door43.org/api/v1/catalog/search?lang=" + lang); await aquilla.import.choices(list(r)) }
+      const z = await aquilla.web.fetch(base + "/archive/v1.zip", { as: "bytes" })
+    </script></body>`
+    const found = staticUiFindings(heavy, { name: "X" }).join("\n")
+    expect(found).toMatch(/fetch-small-first: .*catalog search/)
+    expect(found).toMatch(/fetch-small-first: .*archive/)
+    // The slim listing passes; so does a big download outside any choices path.
+    const slim = heavy.replace("lang=\" + lang", "lang=\" + lang + \"&showIngredients=false").replace(/const z = .*\n/, "")
+    expect(staticUiFindings(slim, { name: "X" }).join("\n")).not.toMatch(/fetch-small-first/)
+    expect(staticUiFindings(`<body><div class="skel"></div><script>await aquilla.web.fetch(u + "/archive/v1.zip")</script></body>`, { name: "X" }).join("\n")).not.toMatch(/fetch-small-first/)
+  })
+
   it("passes an SDK build with a skeleton", () => {
     expect(staticUiFindings(`<body><div class="skel"></div><script>aq.mount(aq.CellList({}))</script></body>`, { name: "Grid" })).toEqual([])
   })

@@ -142,7 +142,7 @@ describe("running the shipped bundle", () => {
 
   it("answers the resource and book choices from the catalog", async () => {
     const resources = await runBundle({ importerId: "door43", phase: "choices", field: "resource", options: { lang: "en" } }, {})
-    expect(resources.choices[0]).toEqual([{ value: "unfoldingWord/en_tn", label: "TSV Translation Notes — unfoldingWord/en_tn" }])
+    expect(resources.choices[0]).toEqual([{ value: "unfoldingWord/en_tn", label: "TSV Translation Notes (unfoldingWord)", group: "unfoldingWord" }])
     const books = await runBundle({ importerId: "door43", phase: "choices", field: "books", options: { lang: "en", resource: "unfoldingWord/en_tn" } }, {})
     expect(books.choices[0]).toEqual([{ value: "TIT", label: "TIT" }, { value: "PHM", label: "PHM" }])
   })
@@ -158,14 +158,49 @@ describe("running the shipped bundle", () => {
     )
     expect(done).toEqual([])
     expect(new URL(asked[0]).searchParams.get("lang")).toBe("en")
+    // The lightest listing: no per-entry ingredients.
+    expect(new URL(asked[0]).searchParams.get("showIngredients")).toBe("false")
+    const g = "unfoldingWord"
     expect(choices[0]).toEqual([
-      { value: "unfoldingWord/en_ust", label: "Aligned Bible — unfoldingWord/en_ust" },
-      { value: "unfoldingWord/en_obs", label: "Open Bible Stories — unfoldingWord/en_obs" },
-      { value: "unfoldingWord/en_ta", label: "Translation Academy — unfoldingWord/en_ta" },
-      { value: "unfoldingWord/en_tw", label: "Translation Words — unfoldingWord/en_tw" },
-      { value: "unfoldingWord/en_tn", label: "TSV Translation Notes — unfoldingWord/en_tn" },
-      { value: "unfoldingWord/en_twl", label: "TSV Translation Words Links — unfoldingWord/en_twl" },
+      { value: "unfoldingWord/en_ust", label: "UST — unfoldingWord® Simplified Text (unfoldingWord)", group: g },
+      { value: "unfoldingWord/en_tn", label: "TN — unfoldingWord® Translation Notes (unfoldingWord)", group: g },
+      { value: "unfoldingWord/en_twl", label: "TWL — unfoldingWord® Translation Words Links (unfoldingWord)", group: g },
+      { value: "unfoldingWord/en_tw", label: "TW — unfoldingWord® Translation Words (unfoldingWord)", group: g },
+      { value: "unfoldingWord/en_ta", label: "TA — unfoldingWord® Translation Academy (unfoldingWord)", group: g },
+      { value: "unfoldingWord/en_obs", label: "OBS — unfoldingWord® Open Bible Stories (unfoldingWord)", group: g },
     ])
+  })
+
+  it("runs in an opaque-origin frame: never touches browser storage (any access throws there)", async () => {
+    const names = ["localStorage", "sessionStorage", "indexedDB", "caches"] as const
+    const touched: string[] = []
+    const saved = names.map((n) => [n, Object.getOwnPropertyDescriptor(globalThis, n)] as const)
+    for (const n of names) {
+      Object.defineProperty(globalThis, n, {
+        configurable: true,
+        get() {
+          touched.push(n)
+          throw new DOMException(`Failed to read the '${n}' property from 'Window': The document is sandboxed`, "SecurityError")
+        },
+      })
+    }
+    try {
+      const resources = await runBundle({ importerId: "door43", phase: "choices", field: "resource", options: { lang: "en" } }, {})
+      expect(resources.done).toEqual([])
+      expect(resources.choices[0]).toHaveLength(1)
+      const upserts: ToolFileUpsert[] = []
+      const run = await runBundle(
+        { importerId: "door43", phase: "run", options: { lang: "en", resource: "unfoldingWord/en_tn", books: ["TIT"], alignment: true } },
+        { upsertFile: async (spec) => (upserts.push(spec), { fileId: spec.fileId ?? "", created: true, creates: spec.cells.length, commits: 0, deletes: 0, unchanged: 0, cellIds: {} }) },
+      )
+      expect(run.done).toEqual([expect.objectContaining({ ok: true })])
+    } finally {
+      for (const [n, d] of saved) {
+        if (d) Object.defineProperty(globalThis, n, d)
+        else delete (globalThis as Record<string, unknown>)[n]
+      }
+    }
+    expect(touched).toEqual([])
   })
 
   it("reports a choices failure instead of answering an empty list", async () => {

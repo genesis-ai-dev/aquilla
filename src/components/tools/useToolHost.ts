@@ -113,7 +113,7 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
   }, [tool.grantedScopes])
 
   const ask = useCallback(
-    (scope: ToolScope): Promise<boolean> => {
+    (scope: ToolScope, onPrompt?: () => void): Promise<boolean> => {
       const run = async (): Promise<boolean> => {
         const decision = decideScope(scope, {
           standing: standingRef.current,
@@ -122,6 +122,7 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
         })
         if (decision.kind === "allow") return true
         if (decision.kind === "deny") return false
+        onPrompt?.()
         const answer = await new Promise<PromptAnswer>((resolve) => {
           setPrompt({ scope, declared: declaredRef.current.includes(scope), answer: resolve })
         })
@@ -188,10 +189,10 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
     const host = createBridgeHost({
       getFrameWindow: () => frameRef.current?.contentWindow ?? null,
       handlers: createToolHandlers(data),
-      authorize: async (method) => {
+      authorize: async (method, hold) => {
         const scope = METHOD_SCOPES[method]
         if (!scope) return
-        if (!(await ask(scope))) throw new BridgeError("permission_denied", `${scope} was not allowed`)
+        if (!(await ask(scope, hold))) throw new BridgeError("permission_denied", `${scope} was not allowed`)
       },
       onReady: () => setReady(true),
       onApiRemoved: (_method, message) => setRemovedApi(message),

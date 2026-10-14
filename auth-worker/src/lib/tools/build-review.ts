@@ -65,10 +65,29 @@ export function staticUiFindings(source: string, manifest: { name?: string; desc
   if (!/skel|loading|spinner/i.test(body) && !/aq\.ui\.spinner/i.test(lower)) {
     out.push("loading-skeleton: no loading placeholder in the static HTML")
   }
+  for (const finding of largeFetchFindings(source)) out.push(finding)
   if (/aquilla\.cells\.(list|page|commit)/.test(source) && !/aq\.(celllist|cellrow|targeteditor)/i.test(lower)) {
     out.push("sdk-components: cells are read/edited with hand-rolled UI instead of aq.CellList / aq.CellRow / aq.TargetEditor")
   }
   return out
+}
+
+/** Endpoints known to answer big (whole catalogs with contents, archives,
+ *  recursive trees): fine for an import RUN, wrong for filling a dropdown. */
+const KNOWN_LARGE_FETCHES: { re: RegExp; unless?: RegExp; what: string; instead: string }[] = [
+  { re: /catalog\/search/i, unless: /showIngredients(=|\s*:\s*)false/i, what: "a Door43 catalog search with every entry's ingredients", instead: "add showIngredients=false and read one resource's manifest after the user picks it" },
+  { re: /\/archive\/[^"'`\s]*\.(zip|tar\.gz)|zipball/i, what: "a whole repository archive", instead: "list first; download the archive only in the import run" },
+  { re: /git\/trees\/[^"'`\s]*recursive/i, what: "a recursive repository tree", instead: "read the manifest (one small file) for the list" },
+]
+
+/** fetch-small-first: a choices/loading path that reads a known-large endpoint. */
+export function largeFetchFindings(source: string): string[] {
+  if (!/aquilla\.web\.fetch|web\.fetch\(/.test(source)) return []
+  const choicesPath = /import\.choices|phase\s*===?\s*["']choices["']/.test(source)
+  if (!choicesPath) return []
+  return KNOWN_LARGE_FETCHES.filter((k) => k.re.test(source) && !k.unless?.test(source)).map(
+    (k) => `fetch-small-first: the choices path may fetch ${k.what} to fill a dropdown; ${k.instead}`,
+  )
 }
 
 export function buildReviewMessage(input: {

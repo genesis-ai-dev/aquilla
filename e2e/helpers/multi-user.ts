@@ -51,7 +51,13 @@ export async function openAuthedPage(
       // via localStorage must not retain a stale id from a prior document in
       // this context (or "all"), or RootRedirect / Dashboard.goto land on
       // OrgRouteGate's not-found shell (no "+ New Project", no account menu).
-      localStorage.setItem("org:active", String(orgId))
+      // Init scripts run in every frame, including sandboxed (opaque-origin)
+      // extension frames where storage throws: skip those.
+      try {
+        localStorage.setItem("org:active", String(orgId))
+      } catch {
+        /* sandboxed frame */
+      }
     }, opts.pinOrgId)
   }
   // AppEntry redirects a fresh unsigned context away from "/" before session

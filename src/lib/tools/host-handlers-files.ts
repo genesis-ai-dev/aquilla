@@ -138,7 +138,7 @@ export interface ToolFilesHostData {
   actionDone: (message: string | null, ok: boolean) => Promise<boolean>
   exportDeliver: (files: ToolDeliveredFile[]) => Promise<boolean>
   /** AQU-1937: an import run reports back (progress/done reuse the headless callbacks). */
-  importChoices: (choices: { value: string; label: string }[]) => Promise<boolean>
+  importChoices: (choices: { value: string; label: string; group?: string }[]) => Promise<boolean>
 }
 
 export const MAX_UPSERT_CELLS = 50_000
@@ -383,7 +383,10 @@ export function createFilesHandlers(data: ToolFilesHostData): Record<string, Bri
       if (p.choices.length > 2000) bad("at most 2000 choices")
       return data.importChoices(p.choices.map((c, i) => {
         if (!isRecord(c) || typeof c.value !== "string") bad(`choices[${i}] needs a string value`)
-        return { value: c.value.slice(0, 300), label: typeof c.label === "string" ? c.label.slice(0, 300) : c.value.slice(0, 300) }
+        const label = typeof c.label === "string" ? c.label.slice(0, 300) : c.value.slice(0, 300)
+        // Optional heading the dialog groups choices under (in first-seen order).
+        const group = typeof c.group === "string" && c.group.trim() ? c.group.trim().slice(0, 100) : undefined
+        return { value: c.value.slice(0, 300), label, ...(group ? { group } : {}) }
       }))
     },
   }

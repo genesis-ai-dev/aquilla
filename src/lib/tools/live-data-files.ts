@@ -80,7 +80,7 @@ export interface HeadlessCallbacks {
   done?: (message: string | null, ok: boolean) => void
   deliver?: (files: ToolDeliveredFile[]) => void
   /** AQU-1937: an importer's dynamic option choices. */
-  choices?: (choices: { value: string; label: string }[]) => void
+  choices?: (choices: { value: string; label: string; group?: string }[]) => void
   /** AQU-1937: the import run this frame is doing — recorded on every file it upserts. */
   importContext?: { toolId: string; importerId: string; options: Record<string, unknown> }
 }
@@ -619,7 +619,7 @@ export class LiveFilesData implements ToolFilesHostData {
     return true
   }
 
-  async importChoices(choices: { value: string; label: string }[]): Promise<boolean> {
+  async importChoices(choices: { value: string; label: string; group?: string }[]): Promise<boolean> {
     const cb = this.opts.headless?.()?.choices
     if (!cb) return false
     cb(choices)

@@ -7,12 +7,25 @@
 // read:web, for a URL on the tool's current manifest.web (and the optional
 // TOOLS_WEB_ALLOWED_DOMAINS). Every other check lives in lib/tools/web-fetch.ts.
 // Each call is rate-limited per user and written to the audit log line below.
+// AQU-1937: answers are cached per tool + URL (web-fetch-cache.ts); a fresh
+// cached copy answers without touching the site or the rate limit. Importers
+// (write:files) get the longer upstream budget (shared/tools/timeouts.ts).
 
 import type { Context } from "hono"
 import type { AuthHonoEnv } from "../middleware/auth"
 import { resolveProjectRole } from "../services/project-permissions"
 import { getTool } from "../lib/tools/store"
-import { WebFetchError, WEB_FETCH_IMPORTER_MAX_PER_WINDOW, WEB_FETCH_MAX_PER_WINDOW, deploymentAllowlist, dohResolver, proxyWebFetch } from "../lib/tools/web-fetch"
+import {
+  WebFetchError,
+  WEB_FETCH_IMPORTER_MAX_PER_WINDOW,
+  WEB_FETCH_IMPORTER_TIMEOUT_MS,
+  WEB_FETCH_MAX_PER_WINDOW,
+  WEB_FETCH_TIMEOUT_MS,
+  checkWebUrl,
+  deploymentAllowlist,
+  dohResolver,
+} from "../lib/tools/web-fetch"
+import { type WebCacheStore, cachedWebFetch, freshCached, webCacheKey, workersCacheStore } from "../lib/tools/web-fetch-cache"
 import { countRecentEvents, recordAuthEvent, userIdentifier } from "../utils/rate-limit"
 
 type Ctx = Context<AuthHonoEnv>
@@ -39,7 +52,22 @@ export async function webFetchRoute(c: Ctx) {
 
   const ident = userIdentifier(user.id)
   // apiRev 7: importers (write:files) get the larger window — see web-fetch.ts.
-  const windowMax = tool.manifest.scopes.includes("write:files") ? WEB_FETCH_IMPORTER_MAX_PER_WINDOW : WEB_FETCH_MAX_PER_WINDOW
+  const importer = tool.manifest.scopes.includes("write:files")
+  const windowMax = importer ? WEB_FETCH_IMPORTER_MAX_PER_WINDOW : WEB_FETCH_MAX_PER_WINDOW
+  const store = webCacheStore()
+  const url = body.url.trim()
+  // The domain checks still apply to a cached answer: the tool's sites may have changed since.
+  const hit = as === "bytes" ? null : await freshCached(store, webCacheKey(toolId, as, url))
+  if (hit) {
+    try {
+      checkWebUrl(url, domains, deploymentAllowlist(c.env.TOOLS_WEB_ALLOWED_DOMAINS))
+    } catch (err) {
+      if (err instanceof WebFetchError) return fail(c, err.status, err.code, err.message)
+      throw err
+    }
+    console.log(JSON.stringify({ audit: "tools.web_fetch", projectId, toolId, userId: user.id, host: new URL(hit.url).hostname, status: hit.status, bytes: hit.bytes, cache: "hit" }))
+    return c.json({ status: hit.status, contentType: hit.contentType, body: hit.body, url: hit.url, cache: "hit" })
+  }
   if ((await countRecentEvents(c.env.AQUILLA_PG, "tool_web_fetch", ident, { onlyFailures: false })) >= windowMax) {
     return fail(c, 429, "rate_limited", "too many website reads; try again in a few minutes")
   }
@@ -52,13 +80,22 @@ export async function webFetchRoute(c: Ctx) {
     /* reported by proxyWebFetch */
   }
   try {
-    const out = await proxyWebFetch(
-      { url: body.url.trim(), as, domains, deploymentAllow: deploymentAllowlist(c.env.TOOLS_WEB_ALLOWED_DOMAINS) },
+    const started = Date.now()
+    const out = await cachedWebFetch(
+      {
+        toolId,
+        url,
+        as,
+        domains,
+        deploymentAllow: deploymentAllowlist(c.env.TOOLS_WEB_ALLOWED_DOMAINS),
+        timeoutMs: importer ? WEB_FETCH_IMPORTER_TIMEOUT_MS : WEB_FETCH_TIMEOUT_MS,
+      },
       // Bound wrappers: workerd's global fetch throws "Illegal invocation" when called as a method of another object.
-      { fetch: (input, init) => fetch(input, init), resolve: dohResolver((input, init) => fetch(input, init)) },
+      { fetch: (input, init) => fetch(input, init), resolve: dohResolver((input, init) => fetch(input, init)), store },
     )
-    console.log(JSON.stringify({ audit: "tools.web_fetch", projectId, toolId, userId: user.id, host: new URL(out.url).hostname, status: out.status, bytes: out.bytes }))
-    return c.json({ status: out.status, contentType: out.contentType, body: out.body, url: out.url })
+    const ms = Date.now() - started
+    console.log(JSON.stringify({ audit: "tools.web_fetch", projectId, toolId, userId: user.id, host: new URL(out.url).hostname, status: out.status, bytes: out.bytes, cache: out.cache, ms }))
+    return c.json({ status: out.status, contentType: out.contentType, body: out.body, url: out.url, cache: out.cache, ms })
   } catch (err) {
     if (err instanceof WebFetchError) {
       console.log(JSON.stringify({ audit: "tools.web_fetch", projectId, toolId, userId: user.id, host, refused: err.code }))
@@ -67,4 +104,10 @@ export async function webFetchRoute(c: Ctx) {
     console.error("[tools/web-fetch] failed:", err)
     return fail(c, 502, "fetch_failed", "the site could not be reached")
   }
+}
+
+/** The Workers Cache API when the runtime has one (not in every test pool). */
+function webCacheStore(): WebCacheStore | null {
+  const g = globalThis as { caches?: { default?: Cache } }
+  return g.caches?.default ? workersCacheStore(g.caches.default) : null
 }

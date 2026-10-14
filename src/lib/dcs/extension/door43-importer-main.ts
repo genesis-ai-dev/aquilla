@@ -13,6 +13,7 @@ import { DcsClient } from "../catalog"
 import { parseManifest } from "../manifest"
 import { MANIFEST_PATH, dcsBookOfPath, fetchDcsSources, planDcsFiles } from "../import-plan"
 import type { DcsCatalogEntry } from "../types"
+import { resourceChoices } from "./door43-choices"
 import { alignmentsFromWords, specForPlanned, specForTwCategory, specForTwl, type Door43UpsertSpec, type MdBlock } from "./door43-plan"
 
 interface WebResponse { status: number; contentType: string; body: unknown; url: string }
@@ -32,7 +33,7 @@ interface Bridge {
   import: {
     progress: (message: string, fraction: number | null) => Promise<unknown>
     done: (message: string, opts?: { ok?: boolean }) => Promise<unknown>
-    choices: (list: { value: string; label: string }[]) => Promise<unknown>
+    choices: (list: { value: string; label: string; group?: string }[]) => Promise<unknown>
   }
 }
 interface Sdk {
@@ -87,22 +88,18 @@ async function latestEntry(owner: string, repo: string): Promise<DcsCatalogEntry
 async function choices(field: string, options: Record<string, unknown>): Promise<void> {
   if (field === "resource") {
     const lang = str(options.lang, "en") || "en"
-    const entries = await client.searchCatalog({ lang, stage: "prod", limit: 200 })
-    const seen = new Set<string>()
-    const out: { value: string; label: string }[] = []
-    for (const e of entries) {
-      if (seen.has(e.fullName)) continue
-      seen.add(e.fullName)
-      out.push({ value: e.fullName, label: `${e.subject} — ${e.fullName}` })
-    }
-    out.sort((a, b) => a.label.localeCompare(b.label))
-    await w.aquilla.import.choices(out)
+    await w.aquilla.import.progress("Loading the Door43 catalog…", null)
+    // The lightest listing that names the resources: no per-book ingredients
+    // (the chosen resource's books come later, from its own manifest).
+    const entries = await client.searchCatalog({ lang, stage: "prod", limit: 200, showIngredients: false })
+    await w.aquilla.import.choices(resourceChoices(entries))
     return
   }
   if (field === "books") {
     const value = str(options.resource)
     if (!value) return void (await w.aquilla.import.choices([]))
     const { owner, repo } = splitRepo(value)
+    await w.aquilla.import.progress(`Reading ${value}…`, null)
     const entry = await latestEntry(owner, repo)
     const manifest = parseManifest(await client.fetchRaw(owner, repo, entry.ref, MANIFEST_PATH, entry.refType === "branch" ? "branch" : "tag"))
     const books = manifest.projects

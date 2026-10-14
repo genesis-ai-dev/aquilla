@@ -26,8 +26,12 @@ const BANNED: BannedPattern[] = [
   { re: /\bimportScripts\b/, message: "importScripts is not available" },
   { re: /(^|[^.\w$])eval\s*\(/, message: "eval() is banned" },
   { re: /\bnew\s+Function\b|(^|[^.\w$])Function\s*\(/, message: "the Function constructor is banned" },
-  { re: /\bdocument\.cookie\b/, message: "cookies are not available" },
-  { re: /\blocalStorage\b|\bsessionStorage\b|\bindexedDB\b/, message: "browser storage is not available; use aquilla.storage" },
+  { re: /\bdocument\.cookie\b/, message: "cookies are not available in the extension's sandbox; use aquilla.storage" },
+  {
+    re: /\blocalStorage\b|\bsessionStorage\b|\bindexedDB\b|\bcaches\.open\b/,
+    message:
+      "browser storage throws in the extension's sandbox (opaque origin); keep small per-user values with aquilla.storage, records with aquilla.data, and let the platform cache repeat aquilla.web.fetch reads",
+  },
   { re: /\bwindow\.open\s*\(/, message: "window.open is not available" },
   { re: /\bwindow\.(parent|top|opener)\b|(^|[^.\w$])(parent|top)\.postMessage\b/, message: "talk to the host only through the aquilla bridge" },
   { re: /<script[^>]*\ssrc\s*=/i, message: "external scripts are not allowed; inline everything" },

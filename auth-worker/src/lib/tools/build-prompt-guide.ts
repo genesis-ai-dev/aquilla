@@ -12,6 +12,7 @@ export const UI_CHECKS = [
   "accessible: every control has a visible label or aria-label; icon-only buttons have aria-label",
   "empty-and-error states: no files, no cells, empty translations and bridge errors each render something sensible",
   "mount-fit: the declared mounts match what the request implies",
+  "fetch-small-first: web reads fetch the smallest thing first (a list, then details only for what the user picks), reuse what was already read, never download a full catalog, archive or tree to fill a dropdown, and show progress while loading",
 ] as const
 
 export const TOOLS_DESIGN_PROMPT = `## Design rules (every build is reviewed against these)
@@ -28,6 +29,12 @@ export const TOOLS_DESIGN_PROMPT = `## Design rules (every build is reviewed aga
   buttons, tabs, inputs, badges, empty states. Hand-roll UI (with the host CSS variables) only when no
   component fits. Never restyle the SDK components.
 - Every control has a label or aria-label. Empty and error states render inside the UI, never throw.
+- Web reads (aquilla.web.fetch): fetch the smallest thing first — a list that names the choices, then the
+  details only for what the user picked (one resource's manifest, one book), never a whole catalog with every
+  entry's contents, a zip archive or a recursive tree just to fill a dropdown. Ask the site for less (filters,
+  paging, its "no details" switches). Remember what you read in this run instead of fetching it twice (the
+  platform also caches repeat reads). Report progress (aquilla.import.progress / a spinner) while loading,
+  and on failure say why (aquilla.import.done(reason, { ok: false }) in import choices).
 - Calm, dense, modern: one font size for body text, muted secondary text, 4/8px spacing, no decorative colour.
 
 ## Choosing mounts (pick from the request's intent; list the primary one first)

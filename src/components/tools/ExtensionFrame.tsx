@@ -8,8 +8,8 @@
  * app-proper UI from extension content. A 1px low-opacity hairline with a
  * faint outer glow, plus a soft label tab (tinted background, quiet text, the
  * extension icon, its name and "Smart Extension") linking to its page
- * (permissions, versions). The default editor uses the QUIET variant: a
- * hairline and the compact label.
+ * (permissions, versions). The editor uses the QUIET variant: a hairline only;
+ * its marker (linking to the extension's page) sits in the "Edit with" row.
  *
  * Every visible tool iframe goes through here (extension-identity.test.ts
  * fails otherwise). One of the two files allowed to use the reserved token
@@ -42,10 +42,7 @@ export function ExtensionFrame({ name, href, variant = "full", className, childr
       <span className="shrink-0 text-[var(--extension-accent)]">{t("extensions.identity.label")}</span>
     </>
   )
-  const tabClass =
-    variant === "full"
-      ? "inline-flex max-w-full items-center gap-1 rounded-t-md border border-b-0 border-[var(--extension-accent-line)] bg-[var(--extension-accent-subtle)] px-2 py-px text-[11px] font-medium leading-4 transition-colors hover:border-[var(--extension-accent)]"
-      : "inline-flex max-w-full items-center gap-1 rounded-full border border-[var(--extension-accent-line)] bg-[var(--extension-accent-subtle)] px-1.5 text-[10px] font-medium leading-4 transition-colors hover:border-[var(--extension-accent)]"
+  const tabClass = "inline-flex max-w-full items-center gap-1 rounded-t-md border border-b-0 border-[var(--extension-accent-line)] bg-[var(--extension-accent-subtle)] px-2 py-px text-[11px] font-medium leading-4 transition-colors hover:border-[var(--extension-accent)]"
   const tab = href ? (
     <Link to={href} className={tabClass} data-testid="extension-frame-tab" title={t("extensions.identity.open", { name })}>
       {label}
@@ -65,9 +62,14 @@ export function ExtensionFrame({ name, href, variant = "full", className, childr
       {variant === "full" ? (
         <div className="flex shrink-0 items-end px-2">{tab}</div>
       ) : (
-        // Quiet: a hairline with the compact label sitting ON it — no extra height.
+        // Quiet (the editor): just the hairline, no visible tab: nothing can clip
+        // or overlap the toolbar above. The host-drawn marker lives in the
+        // "Edit with" row (ExtensionEditorSwitcher), which already names the
+        // editor; the label stays here for assistive tech.
         <div className="relative h-0 shrink-0 border-t border-[var(--extension-accent-line)]">
-          <div className="absolute start-2 top-0 z-10 -translate-y-1/2">{tab}</div>
+          <span className="sr-only" data-testid="extension-frame-tab">
+            {name} · {t("extensions.identity.label")}
+          </span>
         </div>
       )}
       <div

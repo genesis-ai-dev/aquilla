@@ -11,13 +11,18 @@
 //   - SSRF: IP literals, local/internal names and any name that RESOLVES to a
 //     private, loopback, link-local, CGNAT, multicast or reserved address are
 //     refused (DNS over HTTPS, before each hop).
-//   - 15 s timeout, 12 MB body cap (streamed, aborted past the cap), text/JSON
-//     content types only.
+//   - 15 s timeout (40 s for importers; shared/tools/timeouts.ts), 12 MB body
+//     cap (streamed, aborted past the cap), text/JSON content types only. A
+//     slow or oversized answer fails with how long / how much, and what to ask
+//     for instead.
+//   - Conditional requests (If-None-Match / If-Modified-Since) for the
+//     response cache (web-fetch-cache.ts); a 304 comes back as such.
 // Pure apart from the injected fetch/resolve, so every rule is unit-tested.
 
 import { blockedHostReason, hostAllowed, isIpLiteral } from "../../../../shared/tools/web-domains"
+import { WEB_FETCH_DNS_TIMEOUT_MS, WEB_FETCH_TIMEOUT_MS } from "../../../../shared/tools/timeouts"
 
-export const WEB_FETCH_TIMEOUT_MS = 15_000
+export { WEB_FETCH_IMPORTER_TIMEOUT_MS, WEB_FETCH_TIMEOUT_MS } from "../../../../shared/tools/timeouts"
 // Aligned ULT books reach ~5.2 MB (JER); 12 MB covers every book with room to spare.
 export const WEB_FETCH_MAX_BYTES = 12 * 1024 * 1024
 export const WEB_FETCH_MAX_REDIRECTS = 3
@@ -64,7 +69,14 @@ export interface WebFetchResult {
   /** The final URL after redirects. */
   url: string
   bytes: number
+  /** Upstream caching headers (for web-fetch-cache.ts). */
+  etag?: string | null
+  lastModified?: string | null
+  cacheControl?: string | null
 }
+
+const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`
+const NARROWER = "ask for a narrower listing (filters, paging, fewer fields) or fetch details only when they are needed"
 
 const TEXT_TYPES = /^(text\/[a-z0-9.+-]+|application\/(json|[a-z0-9.-]+\+json|xml|[a-z0-9.-]+\+xml|x-ndjson|tab-separated-values))$/i
 
@@ -118,7 +130,7 @@ export function dohResolver(fetchImpl: typeof fetch): Resolver {
     const ask = async (type: "A" | "AAAA") => {
       const res = await fetchImpl(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(host)}&type=${type}`, {
         headers: { Accept: "application/dns-json" },
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(WEB_FETCH_DNS_TIMEOUT_MS),
       })
       if (!res.ok) throw new WebFetchError("dns_failed", `could not resolve ${host}`, 502)
       const body = (await res.json()) as { Answer?: { type: number; data: string }[] }
@@ -158,22 +170,42 @@ async function assertPublic(host: string, resolve: Resolver): Promise<void> {
   if (bad) throw new WebFetchError("host_blocked", `${host} resolves to a private or reserved address`, 403)
 }
 
-async function readCapped(res: Response, cap: number): Promise<{ text: string; bytes: number; raw: Uint8Array }> {
+async function readCapped(
+  res: Response,
+  cap: number,
+  progress: { bytes: number } = { bytes: 0 },
+  signal?: AbortSignal,
+): Promise<{ text: string; bytes: number; raw: Uint8Array }> {
+  const tooLarge = () => new WebFetchError("too_large", `the response is larger than ${cap / 1024 / 1024} MB; ${NARROWER}`, 413)
   const declared = Number(res.headers.get("content-length") ?? "")
-  if (Number.isFinite(declared) && declared > cap) throw new WebFetchError("too_large", `the response is larger than ${cap / 1024 / 1024} MB`, 413)
+  if (Number.isFinite(declared) && declared > cap) throw tooLarge()
   if (!res.body) return { text: "", bytes: 0, raw: new Uint8Array(0) }
   const reader = res.body.getReader()
+  // The deadline covers the BODY too, whatever the runtime does with fetch's
+  // own signal: cancelling the reader ends a pending read.
+  const onAbort = () => void reader.cancel().catch(() => {})
+  signal?.addEventListener("abort", onAbort)
   const chunks: Uint8Array[] = []
   let bytes = 0
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    bytes += value.byteLength
-    if (bytes > cap) {
-      await reader.cancel().catch(() => {})
-      throw new WebFetchError("too_large", `the response is larger than ${cap / 1024 / 1024} MB`, 413)
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (signal?.aborted) {
+        const err = new Error("aborted")
+        err.name = "TimeoutError"
+        throw err
+      }
+      if (done) break
+      bytes += value.byteLength
+      progress.bytes = bytes
+      if (bytes > cap) {
+        await reader.cancel().catch(() => {})
+        throw tooLarge()
+      }
+      chunks.push(value)
     }
-    chunks.push(value)
+  } finally {
+    signal?.removeEventListener("abort", onAbort)
   }
   const all = new Uint8Array(bytes)
   let at = 0
@@ -195,11 +227,32 @@ export function toBase64(bytes: Uint8Array): string {
 
 /** GET `raw` for an extension whose approved sites are `domains`. */
 export async function proxyWebFetch(
-  input: { url: string; as: "text" | "json" | "bytes"; domains: readonly string[]; deploymentAllow: readonly string[] | null },
+  input: {
+    url: string
+    as: "text" | "json" | "bytes"
+    domains: readonly string[]
+    deploymentAllow: readonly string[] | null
+    /** Upstream budget (default WEB_FETCH_TIMEOUT_MS; importers get longer). */
+    timeoutMs?: number
+    /** Revalidate a cached copy: a 304 answers { status: 304 }. */
+    conditional?: { etag?: string | null; lastModified?: string | null }
+  },
   deps: WebFetchDeps,
 ): Promise<WebFetchResult> {
   let url = checkWebUrl(input.url, input.domains, input.deploymentAllow)
-  const signal = AbortSignal.timeout(WEB_FETCH_TIMEOUT_MS)
+  const timeoutMs = input.timeoutMs ?? WEB_FETCH_TIMEOUT_MS
+  const signal = AbortSignal.timeout(timeoutMs)
+  const progress = { bytes: 0 }
+  const timedOut = () =>
+    new WebFetchError(
+      "timeout",
+      `the site took longer than ${Math.round(timeoutMs / 1000)} s to answer${progress.bytes > 0 ? ` (${mb(progress.bytes)} received so far)` : ""}; ${NARROWER}`,
+      504,
+    )
+  const isAbort = (err: unknown) => err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")
+  const conditionalHeaders: Record<string, string> = {}
+  if (input.conditional?.etag) conditionalHeaders["If-None-Match"] = input.conditional.etag
+  if (input.conditional?.lastModified) conditionalHeaders["If-Modified-Since"] = input.conditional.lastModified
   for (let hop = 0; ; hop++) {
     await assertPublic(url.hostname, deps.resolve)
     let res: Response
@@ -210,12 +263,21 @@ export async function proxyWebFetch(
         redirect: "manual",
         signal,
         // A fixed header set: nothing of the user's (cookies, Authorization) ever leaves.
-        headers: { Accept: input.as === "bytes" ? "*/*" : "text/plain, text/*, application/json;q=0.9, */*;q=0.1", "User-Agent": "Aquilla-Extensions/1 (+https://aquilla.app)" },
+        headers: {
+          Accept: input.as === "bytes" ? "*/*" : "text/plain, text/*, application/json;q=0.9, */*;q=0.1",
+          "User-Agent": "Aquilla-Extensions/1 (+https://aquilla.app)",
+          ...conditionalHeaders,
+        },
       })
     } catch (err) {
-      if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) throw new WebFetchError("timeout", "the site took too long to answer", 504)
+      if (isAbort(err)) throw timedOut()
       console.warn("[tools/web-fetch] upstream error:", err instanceof Error ? `${err.name}: ${err.message}` : String(err))
       throw new WebFetchError("fetch_failed", "the site could not be reached", 502)
+    }
+    const cacheHeaders = { etag: res.headers.get("etag"), lastModified: res.headers.get("last-modified"), cacheControl: res.headers.get("cache-control") }
+    if (res.status === 304) {
+      await res.body?.cancel().catch(() => {})
+      return { status: 304, contentType: "", body: null, url: url.toString(), bytes: 0, ...cacheHeaders }
     }
     if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
       if (hop >= WEB_FETCH_MAX_REDIRECTS) throw new WebFetchError("too_many_redirects", "the site redirected too many times", 502)
@@ -227,9 +289,16 @@ export async function proxyWebFetch(
       await res.body?.cancel().catch(() => {})
       throw new WebFetchError("unsupported_type", `only text and JSON can be fetched (got ${contentType || "no content type"})`, 415)
     }
-    const { text, bytes, raw } = await readCapped(res, input.as === "bytes" ? WEB_FETCH_MAX_BINARY_BYTES : WEB_FETCH_MAX_BYTES)
+    let read: { text: string; bytes: number; raw: Uint8Array }
+    try {
+      read = await readCapped(res, input.as === "bytes" ? WEB_FETCH_MAX_BINARY_BYTES : WEB_FETCH_MAX_BYTES, progress, signal)
+    } catch (err) {
+      if (isAbort(err)) throw timedOut()
+      throw err
+    }
+    const { text, bytes, raw } = read
     // apiRev 7: bytes travel as base64; the host turns them back into an ArrayBuffer.
-    if (input.as === "bytes") return { status: res.status, contentType, body: toBase64(raw), url: url.toString(), bytes }
+    if (input.as === "bytes") return { status: res.status, contentType, body: toBase64(raw), url: url.toString(), bytes, ...cacheHeaders }
     let body: unknown = text
     if (input.as === "json" && res.ok) {
       try {
@@ -238,7 +307,7 @@ export async function proxyWebFetch(
         throw new WebFetchError("invalid_json", "the response is not valid JSON", 502)
       }
     }
-    return { status: res.status, contentType, body, url: url.toString(), bytes }
+    return { status: res.status, contentType, body, url: url.toString(), bytes, ...cacheHeaders }
   }
 }
 

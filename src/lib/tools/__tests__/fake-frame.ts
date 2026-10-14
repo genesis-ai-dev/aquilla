@@ -78,7 +78,8 @@ export function createFakeFramePair(): FakeFramePair {
         new Function("window", "document", "aquilla", "aq", code)(frame, doc, aquilla, aq)
       } catch (error) {
         const ev = new Event("error")
-        Object.defineProperties(ev, { error: { value: error }, message: { value: String(error) } })
+        // As a browser reports an error thrown by the srcdoc's own inline script.
+        Object.defineProperties(ev, { error: { value: error }, message: { value: String(error) }, filename: { value: "about:srcdoc" } })
         frame.dispatchEvent(ev)
       }
     }

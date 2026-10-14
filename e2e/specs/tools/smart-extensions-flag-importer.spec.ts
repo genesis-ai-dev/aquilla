@@ -20,6 +20,7 @@ import { Workspace } from "../../helpers/page-objects/Workspace"
 import { updateProjectSettings } from "../../helpers/frontier-api"
 import { jwtFor, mintSyncToken, seedProjectWithFile } from "../../helpers/seed-project"
 import { readFileSync } from "node:fs"
+import { firstPartyToolId } from "../../../shared/tools/first-party/default-editor"
 
 const AUTH = process.env.VITE_AUTH_BASE ?? "http://127.0.0.1:8787"
 const SYNC_BASE = process.env.E2E_SYNC_BASE ?? `http://${process.env.VITE_SYNC_WORKER_HOST ?? "127.0.0.1:8788"}`
@@ -122,11 +123,17 @@ test("Smart Extensions are off by default; switched on, an extension importer ru
   const importers = alice.getByTestId("extension-importer")
   await expect(importers.filter({ hasText: "Door43 resources" })).toBeVisible({ timeout: 30_000 })
 
-  // The Door43 importer's Resource select is filled from the catalog (dynamic choices).
+  // The Door43 importer's Resource select is filled from the catalog (dynamic
+  // choices) while the platform's loading row says what is happening.
   await importers.filter({ hasText: "Door43 resources" }).click()
+  await expect(alice.getByTestId("extension-import-choices-loading-resource")).toContainText("Loading the Door43 catalog")
   const resource = alice.getByTestId("extension-import-option-resource").locator("select")
-  await expect(resource.locator("option", { hasText: "TSV Translation Notes — unfoldingWord/en_tn" })).toHaveCount(1, { timeout: 30_000 })
+  await expect(resource.locator("option", { hasText: "TN — unfoldingWord® Translation Notes (unfoldingWord)" })).toHaveCount(1, { timeout: 30_000 })
+  await expect(alice.getByTestId("extension-import-choices-loading-resource")).toBeHidden()
   await expect(resource.locator("option")).toHaveCount(7) // "—" + six resources
+  // Official unfoldingWord resources, Bibles first, under their own heading.
+  await expect(resource.locator("optgroup").first()).toHaveAttribute("label", "unfoldingWord")
+  await expect(resource.locator("optgroup option").first()).toHaveText("UST — unfoldingWord® Simplified Text (unfoldingWord)")
   await resource.selectOption("unfoldingWord/en_ust")
   await expect(resource).toHaveValue("unfoldingWord/en_ust")
   await alice.keyboard.press("Escape")
@@ -158,4 +165,43 @@ test("Smart Extensions are off by default; switched on, an extension importer ru
   await expect.poll(() => readValues(jwt, seeded.projectId, file!.fileId), { timeout: 30_000 }).toEqual(["TIT servant", "TIT hope v2"])
   await expect.poll(async () => (await readFiles(jwt, seeded.projectId, seeded.fileId)).find((f) => f.fileId === file!.fileId)?.extension?.import?.upstream ?? null, { timeout: 30_000 })
     .toMatchObject({ version: "v2" })
+})
+
+test("a first-time read:web prompt for an importer's choices shows inside the Import dialog and does not time out the call", async ({ alice }) => {
+  test.setTimeout(180_000)
+  const jwt = await jwtFor("alice")
+  const seeded = await seedProjectWithFile(jwt, { name: `Prompt ${Date.now()}`, smartExtensions: true })
+  const workspace = new Workspace(alice)
+  await alice.route(/\/tools\/[^/]+\/web-fetch$/, async (route) => {
+    const url = (route.request().postDataJSON() as { url: string }).url
+    await route.fulfill({ json: { status: 200, contentType: "application/json", url, body: CATALOG } })
+  })
+  await alice.goto(`/project/${seeded.projectId}/editor/file/${seeded.fileId}`)
+  await workspace.waitForFileInSidebar(seeded.fileName)
+  // This user revoked "read websites" for the Door43 importer (or never kept it).
+  const toolId = await firstPartyToolId(seeded.projectId, "door43-importer")
+  await expect.poll(async () => (await fetch(`${AUTH}/api/v2/projects/${seeded.projectId}/tools/${toolId}`, { headers: { Authorization: `Bearer ${jwt}` } })).status, { timeout: 30_000 }).toBe(200)
+  const revoked = await fetch(`${AUTH}/api/v2/projects/${seeded.projectId}/tools/${toolId}/grant`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
+    body: JSON.stringify({ scopes: ["write:files", "write:data", "read:cells"] }),
+  })
+  expect(revoked.status).toBe(200)
+  await alice.reload()
+  await workspace.waitForFileInSidebar(seeded.fileName)
+  await workspace.openImportDialog()
+  await alice.getByTestId("extension-importer").filter({ hasText: "Door43 resources" }).click()
+
+  // The prompt is drawn INSIDE the dialog (not behind its backdrop)…
+  const prompt = alice.getByRole("dialog").getByTestId("extension-import-permission")
+  await expect(prompt).toBeVisible({ timeout: 30_000 })
+  await expect(alice.getByTestId("headless-permission")).toHaveCount(0)
+  // …and the user can take longer than the bridge's 30 s call timeout to answer.
+  await expect(alice.getByTestId("extension-import-choices-loading-resource-elapsed")).toHaveText(/^(3[2-9]|[4-9]\d) s$/, { timeout: 45_000 })
+  await expect(alice.getByTestId("extension-import-choices-loading-resource")).toContainText("Waiting for your permission")
+  await prompt.getByRole("button", { name: "Always allow", exact: true }).click()
+  await expect(prompt).toBeHidden()
+  const resource = alice.getByTestId("extension-import-option-resource").locator("select")
+  await expect(resource.locator("option")).toHaveCount(7, { timeout: 30_000 })
+  await expect(alice.getByTestId("extension-import-choices-error-resource")).toHaveCount(0)
 })

@@ -259,7 +259,8 @@ export class ProjectSync extends DurableObject<DOEnv> {
   /**
    * AQU-346: numeric userIds whose membership was revoked, mapped to the
    * deny-until timestamp. Blocks reconnects with still-valid (≤15 min)
-   * tokens after an eject. In-memory by design (no durable DO state).
+   * tokens after an eject. Durable (DENIED_USERS_STORAGE_KEY) since AQU-1836
+   * — see MEMBER_REMOVED_DENY_MS.
    */
   private removedUsers = new Map<number, number>()
   /**

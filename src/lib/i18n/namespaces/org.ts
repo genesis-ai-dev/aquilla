@@ -594,10 +594,12 @@ export const org = defineNamespace({
     "org.projectOverview.assignProjectManagerDialogTitle": "Assign project manager",
     "org.projectOverview.pmDialogDescription":
       "The project manager is responsible for this project. They must be a member of the project.",
-    // Shown when a person is the PM (overview) or is selected in the dialog.
-    // Hidden while the field is Unassigned — clearing does not add a role.
+    // Shown when a person is the PM (overview, behind the circled-i beside the
+    // heading) or is selected in the dialog. Hidden while the field is
+    // Unassigned — clearing does not add a role.
     "org.projectOverview.pmGrantsProjectLead":
       "Naming them project manager also adds them as a Project lead on this project. An existing higher role is kept. Clearing the project manager does not remove that membership.",
+    "org.projectOverview.pmGrantsProjectLeadAriaLabel": "What naming a project manager does",
     "org.projectOverview.selectMemberPlaceholder": "Select a member",
     "org.projectOverview.teamVisibilityDescription":
       "Who can see each teammate's assignment progress on this project.",
@@ -2157,6 +2159,10 @@ export const org = defineNamespace({
       },
       "org.projectOverview.sortFilesByAria": {
         description: "Accessible name for the dropdown that chooses the sort order of the per-file breakdown list.",
+      },
+      "org.projectOverview.pmGrantsProjectLeadAriaLabel": {
+        description:
+          "Accessible name for the small circled-i button beside the 'Project manager' heading on the project overview. It appears while a project manager is set, and clicking it expands a sentence explaining that naming a project manager also makes them a Project lead.",
       },
       "org.projectOverview.fileListActionsAria": {
         description:

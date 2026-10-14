@@ -181,6 +181,31 @@ describe("summary", () => {
     renderBoard([unit({ filledCount: 40 })])
     expect(screen.queryByTestId("plan-summary-nearly-complete")).toBeNull()
   })
+
+  // AQU-1950: the overview passes its buttons as one fragment. Placed straight
+  // into the justify-between header, each button became its own item and the
+  // first one sat stranded in the middle of the row.
+  it("keeps every action together in one group at the end of the header", () => {
+    render(
+      <PlanBoard
+        units={[unit({ filledCount: 40 })]}
+        now={NOW}
+        projectId="p1"
+        selectedId={null}
+        onSelect={vi.fn()}
+        actions={
+          <>
+            <button type="button">Analyze word counts</button>
+            <button type="button">Copy CSV</button>
+          </>
+        }
+      />,
+    )
+    const group = screen.getByTestId("plan-board-actions")
+    expect(within(group).getByRole("button", { name: "Analyze word counts" })).toBeInTheDocument()
+    expect(within(group).getByRole("button", { name: "Copy CSV" })).toBeInTheDocument()
+    expect(group).toHaveClass("ms-auto")
+  })
 })
 
 describe("the date column", () => {

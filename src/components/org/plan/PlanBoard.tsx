@@ -594,7 +594,13 @@ export function PlanBoard({
             />
           )}
         </div>
-        {actions}
+        {/* One group at the end of the row. Passed straight in, a fragment's
+            buttons became separate items of the justify-between row and the
+            first one (Analyze word counts) was stranded mid-row (AQU-1950).
+            ms-auto keeps the group at the end when the row wraps. */}
+        <div className="ms-auto flex flex-wrap items-center gap-2" data-testid="plan-board-actions">
+          {actions}
+        </div>
       </div>
 
       {/* Controls. Hidden when there is nothing to arrange — a filter box over

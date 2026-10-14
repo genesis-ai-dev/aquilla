@@ -1,7 +1,7 @@
 import { ProjectMondayCard } from "./ProjectMondayCard"
-import { useState, useEffect, useCallback, useMemo, useRef } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef, useId } from "react"
 import { useParams, useNavigate, useLocation, Link } from "react-router-dom"
-import { MoreHorizontal, Download, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil, CloudDownload, CloudOff, HardDriveDownload, ChevronDown, ChevronRight } from "lucide-react"
+import { MoreHorizontal, Download, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil, CloudDownload, CloudOff, HardDriveDownload, ChevronDown, ChevronRight, Info } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { DateTooltip } from "@/components/ui/date-tooltip"
@@ -527,6 +527,10 @@ export function ProjectOverview() {
   // stringified userId, or "" for unassigned) while the dialog is open.
   const [pmDialogOpen, setPmDialogOpen] = useState(false)
   const [pmSelection, setPmSelection] = useState<string>("")
+  // AQU-1950: the "naming them PM also adds them as Project lead" note, shut
+  // until its circled-i is clicked.
+  const [pmNoteOpen, setPmNoteOpen] = useState(false)
+  const pmNoteId = useId()
   const [workload, setWorkload] = useState<AssigneeWorkload[]>([])
 
   // AQU-538 §3.3: the lane filter tab selection. `null` = "All" — today's
@@ -1790,9 +1794,29 @@ export function ProjectOverview() {
 
                 <div className="mt-4 flex flex-wrap items-start gap-4" data-testid="overview-project-meta">
                   <Field className="w-auto min-w-48">
-                    <FieldLabel className="text-xs font-semibold text-muted-foreground">
-                      {t("org.projectOverview.projectManagerHeading")}
-                    </FieldLabel>
+                    <div className="flex items-center gap-1">
+                      <FieldLabel className="text-xs font-semibold text-muted-foreground">
+                        {t("org.projectOverview.projectManagerHeading")}
+                      </FieldLabel>
+                      {/* A click, not a hover, like the Team picker's circled-i
+                          (AQU-1779): a tooltip would not reach touch screens.
+                          -my-0.5 keeps the row at the label's own height, so
+                          this column still lines up with Deadline beside it. */}
+                      {pm ? (
+                        <button
+                          type="button"
+                          data-testid="overview-pm-lead-info"
+                          className="-my-0.5 inline-flex size-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground data-[state=open]:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                          aria-label={t("org.projectOverview.pmGrantsProjectLeadAriaLabel")}
+                          aria-expanded={pmNoteOpen}
+                          aria-controls={pmNoteId}
+                          data-state={pmNoteOpen ? "open" : "closed"}
+                          onClick={() => setPmNoteOpen((v) => !v)}
+                        >
+                          <Info className="size-3.5" aria-hidden />
+                        </button>
+                      ) : null}
+                    </div>
                     <div className="flex flex-wrap items-center gap-2 text-sm">
                       {pm ? (
                         <UsernameWithAvatar userId={pm.id} username={pm.username} nameTestId="overview-pm-name" />
@@ -1817,10 +1841,25 @@ export function ProjectOverview() {
                         />
                       )}
                     </div>
+                    {/* Stays mounted so it animates both ways: the 0fr→1fr grid
+                        row grows to the text's own height without measuring it,
+                        and the negative margin cancels the Field's gap while it
+                        is shut. */}
                     {pm ? (
-                      <p className="mt-1 max-w-sm text-xs text-muted-foreground" data-testid="overview-pm-lead-note">
-                        {t("org.projectOverview.pmGrantsProjectLead")}
-                      </p>
+                      <div
+                        className={cn(
+                          "grid transition-[grid-template-rows,opacity,margin] duration-200 ease-out motion-reduce:transition-none",
+                          pmNoteOpen ? "grid-rows-[1fr] opacity-100" : "-mt-1.5 grid-rows-[0fr] opacity-0",
+                        )}
+                        data-state={pmNoteOpen ? "open" : "closed"}
+                        data-testid="overview-pm-lead-note"
+                        aria-hidden={!pmNoteOpen}
+                        inert={!pmNoteOpen}
+                      >
+                        <p id={pmNoteId} className="min-h-0 max-w-sm overflow-hidden text-xs text-muted-foreground">
+                          {t("org.projectOverview.pmGrantsProjectLead")}
+                        </p>
+                      </div>
                     ) : null}
                   </Field>
                   <Field className="w-auto min-w-56">

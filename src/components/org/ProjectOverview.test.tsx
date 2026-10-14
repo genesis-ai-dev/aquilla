@@ -951,6 +951,15 @@ describe("ProjectOverview PM assignment", () => {
     expect(within(meta).queryByRole("button", { name: "Change" })).not.toBeInTheDocument()
     expect(within(meta).queryByRole("button", { name: "Clear" })).not.toBeInTheDocument()
 
+    // AQU-1950: the note sits behind a circled-i beside the heading, shut
+    // until it is clicked.
+    const pmInfo = screen.getByRole("button", { name: "What naming a project manager does" })
+    expect(pmInfo).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getByTestId("overview-pm-lead-note")).toHaveAttribute("data-state", "closed")
+    expect(screen.getByTestId("overview-pm-lead-note")).toHaveAttribute("aria-hidden", "true")
+    fireEvent.click(pmInfo)
+    expect(pmInfo).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByTestId("overview-pm-lead-note")).toHaveAttribute("data-state", "open")
     expect(screen.getByTestId("overview-pm-lead-note")).toHaveTextContent(
       /adds them as a Project lead/,
     )

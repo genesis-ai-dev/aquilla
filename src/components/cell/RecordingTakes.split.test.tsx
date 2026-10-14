@@ -72,10 +72,15 @@ describe("RecordingTakes — a split take (AQU-1767)", () => {
     expect(screen.queryByTestId("cell-take-rename-button")).toBeNull()
   })
 
-  it("approves the whole take from the top, every piece", () => {
+  it("approves the whole take from the top, every piece", async () => {
+    const { emitCellAudioValidate } = await import("@/lib/sync/events-emit")
+    vi.mocked(emitCellAudioValidate).mockClear()
     draw(splitTake)
     const top = within(screen.getByTestId("cell-take-validation"))
-    expect(top.getByTestId("audio-validation-button").getAttribute("aria-label")).toMatch(/click to validate/i)
+    fireEvent.click(top.getByTestId("audio-validation-button"))
+    await vi.waitFor(() =>
+      expect(vi.mocked(emitCellAudioValidate).mock.calls.map(([i]) => (i as { audioId: string }).audioId).sort()).toEqual([T1, P2].sort()),
+    )
   })
 
   it("deletes the whole take from the top, and one piece from its row", async () => {

@@ -31,6 +31,7 @@ import { Button } from "@/components/ui/button"
 import { Badge, badgeVariants } from "@/components/ui/badge"
 import { LaneCombobox } from "@/components/LaneCombobox"
 import { laneOptionLabels, toLaneComboboxOptions } from "@/components/lane-options"
+import { laneLanguageCodeForTag } from "@/lib/lanes/lane-language"
 import { withLaneLabelSuffix } from "@/lib/lanes/lane-label-suffix"
 import { EmptyState } from "@/components/ui/page"
 import type { CellData } from "@/hooks/useCells"
@@ -5871,6 +5872,19 @@ function EditorRow({
     ),
     [targetDirectionMode, targetTextDirection, showCompletionOverlay, completionPreview, visibleTranslatedHtml, visibleTranslated],
   )
+  // AQU-1908: the `lang` the target editor advertises — what the browser's
+  // spell-checker reads to pick a dictionary, and what smart quotes read for
+  // their style. It is the ACTIVE LANE's language code, so a Spanish lane and a
+  // French lane in one project are each checked against their own dictionary.
+  // The project's `targetLanguage` is the freeform label the user typed
+  // ("Spanish", "Grade 7 English") — a name, not a language tag, so the
+  // spell-checker could not resolve it to a dictionary at all. A lane whose
+  // label matches no catalog entry resolves to nothing and the attribute is
+  // omitted, leaving the browser its own default.
+  const targetLanguageCode = useMemo(
+    () => laneLanguageCodeForTag(activeLane, project.lanes, project) ?? undefined,
+    [activeLane, project],
+  )
   const hasTargetFootnoteMarker = (visibleTranslated ?? "").includes("\\f")
   const mayHaveFootnotes = hasSourceFootnoteMarker || hasTargetFootnoteMarker
   const showFootnotesInExpansion = footnoteViewMode === "off" && mayHaveFootnotes
@@ -8388,7 +8402,7 @@ function EditorRow({
                     onSelectionChange={handleTargetPresenceSelection}
                     textDirection={targetCellDirection}
                     directionMode={targetDirectionMode}
-                    lang={project.targetLanguage || undefined}
+                    lang={targetLanguageCode}
                     smartQuotes={project.smartQuotes}
                     className={cn(
                       "w-full",
@@ -8433,7 +8447,7 @@ function EditorRow({
                     data-target-read-view
                     data-target-locked-by={lockHolderLabel ?? undefined}
                     dir={targetCellDirection}
-                    lang={project.targetLanguage || undefined}
+                    lang={targetLanguageCode}
                     // AQU-1163: a lease-locked cell is a READ-ONLY textbox, not a
                     // disabled control, so it keeps its place in the tab order.
                     // Dropping tabIndex while a peer held the lease removed the

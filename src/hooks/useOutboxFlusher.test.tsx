@@ -33,6 +33,7 @@ import {
 // ---------------------------------------------------------------------------
 vi.mock("@/lib/sync/outbox-flush", () => ({
   flushOutboxBatch: vi.fn(),
+  releaseElevationHolds: vi.fn(),
 }))
 
 // SUB-48: the wake-on-enqueue path is driven through the outbox subscription,
@@ -53,9 +54,11 @@ vi.mock("@/lib/sync/outbox", async (importOriginal) => {
   }
 })
 
-import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
+import { flushOutboxBatch, releaseElevationHolds } from "@/lib/sync/outbox-flush"
 import { outboxPendingCount, requeueTransientlyFailedOutboxEvents } from "@/lib/sync/outbox"
+import { notifyElevationGranted } from "@/lib/errors/elevation-required-signal"
 const mockFlush = flushOutboxBatch as ReturnType<typeof vi.fn>
+const mockReleaseHolds = releaseElevationHolds as ReturnType<typeof vi.fn>
 const mockPendingCount = outboxPendingCount as ReturnType<typeof vi.fn>
 const mockRequeue = requeueTransientlyFailedOutboxEvents as ReturnType<typeof vi.fn>
 
@@ -85,6 +88,7 @@ beforeEach(() => {
   mockPendingCount.mockResolvedValue(0)
   mockRequeue.mockReset()
   mockRequeue.mockResolvedValue(undefined)
+  mockReleaseHolds.mockReset()
 
   // Snapshot the original descriptors so we can restore them
   originalOnLine =
@@ -919,5 +923,39 @@ describe("useOutboxFlusher — wake on enqueue (SUB-48)", () => {
     expect(mockFlush.mock.calls.length).toBe(afterWake)
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000) })
     expect(mockFlush.mock.calls.length).toBe(afterWake + 1)
+  })
+})
+
+describe("useOutboxFlusher — admin step-up (OPS-44)", () => {
+  it("releases elevation holds and flushes at once when the step-up verifies", async () => {
+    Object.defineProperty(navigator, "locks", { value: undefined, configurable: true })
+    mockFlush.mockResolvedValue(NOTHING)
+
+    renderHook(() => useOutboxFlusher({ enabled: true, getTokenForFile: TOKEN_FN }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) }) // mount tick
+    mockFlush.mockClear()
+    mockReleaseHolds.mockClear()
+
+    await act(async () => {
+      notifyElevationGranted()
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    // Held projects are released BEFORE the wake, or the flush would skip them.
+    expect(mockReleaseHolds).toHaveBeenCalledTimes(1)
+    expect(mockFlush).toHaveBeenCalled()
+  })
+
+  it("does not listen for step-ups while disabled", async () => {
+    Object.defineProperty(navigator, "locks", { value: undefined, configurable: true })
+
+    renderHook(() => useOutboxFlusher({ enabled: false, getTokenForFile: TOKEN_FN }))
+    await act(async () => {
+      notifyElevationGranted()
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    expect(mockReleaseHolds).not.toHaveBeenCalled()
+    expect(mockFlush).not.toHaveBeenCalled()
   })
 })

@@ -118,11 +118,12 @@ worker binds D1; workers fail fast if `HYPERDRIVE` is unbound and query through
   (translation agent, SSE), `aquifer` (Bible Aquifer proxy), `usage`.
 - **`sync-worker/`** — Worker `aquilla-sync-worker`, R2 `aquilla-snapshots`. Owns the
   append-only event log and its projection to `cells`/`files`, the per-project `ProjectSync`
-  Durable Object (presence, focus-lock leases, `event.applied`/`event.stale` broadcast — no
-  durable DO state), comments (+ email notifications via CF Email Service), `/audio/*`,
-  diarization, voice-convert, the nightly R2 orphan sweep (AQU-1856 — this worker's only
-  cron, `src/r2-gc-cron.ts`; `POST /admin/r2-gc?dryRun=1` for an on-demand report), and the
-  external **Agent API** under `/api/v1/external/*`
+  Durable Object (presence, focus-lock leases, `event.applied`/`event.stale` broadcast —
+  hibernatable sockets; its only durable state is two DO-storage keys for leases and the
+  member-removed denylist, no Postgres/R2 writes), comments (+ email notifications via CF
+  Email Service), `/audio/*`, diarization, voice-convert, the nightly R2 orphan sweep
+  (AQU-1856 — this worker's only cron, `src/r2-gc-cron.ts`; `POST /admin/r2-gc?dryRun=1` for
+  an on-demand report), and the external **Agent API** under `/api/v1/external/*`
   (changeset engine + apply gate, artifacts, tools-only MCP server, self-describing
   discovery — see `docs/AGENT-API.md`). Every PR DOES get its own per-branch sync-worker and
   auth-worker preview (`aquilla-sync-preview` / `aquilla-auth-preview`, deployed by

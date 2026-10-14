@@ -239,8 +239,58 @@ describe("PR publication", () => {
   for (const config of [{ currentSha: "b".repeat(40) }, { secondSha: "b".repeat(40) }, { state: "closed" }]) {
     it(`does not overwrite a newer or closed PR: ${JSON.stringify(config)}`, async () => {
       const h = harness(config)
-      expect(await publishReport(h.options)).toBe("superseded")
-      expect(h.writes).toEqual([])
+    expect(await publishReport(h.options)).toBe("superseded")
+    expect(h.writes).toEqual([])
     })
   }
+})
+
+const releaseRef = "release/2026/10/07-01"
+describe("release HEAD publication", () => {
+  it("states the deploy rule for each result", () => {
+    const pass = renderReport({ sha, phase: "finished", suite: qualified(), releaseRef })
+    expect(pass).toContain("**PASS — a person may deploy this release HEAD.**")
+    expect(pass).toContain("Only a result for this branch's current HEAD counts.")
+    expect(pass).not.toContain("Advisory coverage, not a release guarantee")
+
+    const failed = qualified()
+    failed.tests[1].evidence["smart-testing-evidence"].outcome.verdict = "product_failure"
+    const fail = renderReport({ sha, phase: "finished", suite: failed, releaseRef })
+    expect(fail).toContain("**FAIL — this release HEAD does not deploy.**")
+
+    const unknown = qualified()
+    unknown.tests[1].status = "timedOut"
+    unknown.tests[1].evidence = { "dom-audit": { reports: [] } }
+    unknown.tests[1].title = "DOM audit: kept beside the self-test"
+    unknown.planned = [selfTest, unknown.tests[1].title]
+    const inconclusive = renderReport({ sha, phase: "finished", suite: unknown, releaseRef })
+    expect(inconclusive).toContain("**INCONCLUSIVE — this does not hold the deploy.**")
+    expect(inconclusive).not.toContain("**FAIL — this release HEAD does not deploy.**")
+
+    const unavailable = renderReport({ sha, phase: "finished", releaseRef })
+    expect(unavailable).toContain("**HARNESS UNAVAILABLE does not hold this deploy.**")
+    expect(unavailable).not.toContain("**FAIL — this release HEAD does not deploy.**")
+  })
+
+  it("posts a commit comment and drops a moved branch", async () => {
+    const writes = []
+    const fetchImpl = async (url, options) => {
+      if (options.method !== "GET") {
+        writes.push({ url, method: options.method })
+        return { ok: true, json: async () => ({ id: 4 }) }
+      }
+      if (url.includes("/comments")) return { ok: true, json: async () => [] }
+      return { ok: true, json: async () => ({ sha }) }
+    }
+    const body = renderReport({ sha, phase: "running", releaseRef })
+    expect(await publishReport({ ref: releaseRef, sha, body, token: "fake", author: "qa", fetchImpl })).toBe("created")
+    expect(writes[0].url).toContain(`/commits/${sha}/comments`)
+    expect(writes[0].method).toBe("POST")
+
+    const moved = async (url, options) => {
+      if (options.method !== "GET") throw new Error("should not write")
+      return { ok: true, json: async () => ({ sha: "b".repeat(40) }) }
+    }
+    expect(await publishReport({ ref: releaseRef, sha, body, token: "fake", author: "qa", fetchImpl: moved })).toBe("superseded")
+  })
 })

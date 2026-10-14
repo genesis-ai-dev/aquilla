@@ -42,6 +42,7 @@ import {
 } from "./psalmVersification";
 import { readChapterTransitionFromParagraph } from "./chapterBlocks";
 import { canonicalizeParagraphStyle } from "./paragraphStyleRoles";
+import { isDivineNameCharacterStyle } from "./divineNameStyles";
 import {
     digitsOnly,
     parseVerseMarkerNumber,
@@ -383,6 +384,7 @@ function cloneOpenVerse(closed: OpenVerse): OpenVerse {
         verseNumbers: [...closed.verseNumbers],
         parts: [...closed.parts],
         contentPositions: closed.contentPositions.map((p) => ({ ...p })),
+        divinePositions: closed.divinePositions.map((p) => ({ ...p })),
         paragraphStart: closed.paragraphStart,
         paragraphEnd: closed.paragraphEnd,
         paragraphChunks: closed.paragraphChunks.map((c) => ({
@@ -471,6 +473,7 @@ export function scanStudyStoryForSwap(
                 studyIndex.set(key, {
                     text: cleanWhitespace(proseParts.join(" ")),
                     segments: [...proseParts],
+                    divineSegments: closed.divinePositions.map((p) => p.originalText),
                     paragraphSig: buildParagraphSig(closed.paragraphChunks),
                     paragraphChunks: closed.paragraphChunks.map((c) => ({
                         paragraphStyle: c.paragraphStyle,
@@ -557,6 +560,30 @@ function isProseSegment(text: string): boolean {
     return true;
 }
 
+/**
+ * Collect the `<Content>` nodes of a divine-name (`nd`) CSR (AQU-1959).
+ * The runs stay out of `parts`/`proseParts`: prose slots are mapped
+ * positionally, and a small-caps run is not interchangeable with a prose one.
+ */
+function collectDivineRunPositions(
+    storyXml: string,
+    absBodyStart: number,
+    absBodyEnd: number,
+    into: ContentPosition[]
+): void {
+    for (const content of iterateContentAbs(storyXml, absBodyStart, absBodyEnd)) {
+        const originalText = storyXml.slice(content.absInnerStart, content.absInnerEnd);
+        if (!isProseSegment(originalText)) continue;
+        into.push({
+            absStart: content.absStart,
+            absEnd: content.absEnd,
+            absInnerStart: content.absInnerStart,
+            absInnerEnd: content.absInnerEnd,
+            originalText,
+        });
+    }
+}
+
 function normalizeParagraphStyle(style: string): string {
     return style
         .replace(/^ParagraphStyle\//, "")
@@ -618,6 +645,8 @@ interface OpenVerse {
     verseNumbers: string[];
     parts: string[];
     contentPositions: ContentPosition[];
+    /** `<Content>` nodes inside this verse's divine-name (`nd`) CSRs. */
+    divinePositions: ContentPosition[];
     paragraphStart: number;
     paragraphEnd: number;
     paragraphChunks: ParagraphChunkState[];
@@ -651,6 +680,7 @@ function buildAcrosticVerseFromParagraph(
     let verseNums: number[] = [];
     const parts: string[] = [];
     const contentPositions: ContentPosition[] = [];
+    const divinePositions: ContentPosition[] = [];
     const paragraphChunks: ParagraphChunkState[] = [];
     const chunk: ParagraphChunkState = {
         paragraphStyle: para.appliedParagraphStyle,
@@ -666,6 +696,15 @@ function buildAcrosticVerseFromParagraph(
                 collectContentText(storyXml, csr.absBodyStart, csr.absBodyEnd)
             );
             if (covered.length > 0 && verseNums.length === 0) verseNums = covered;
+            continue;
+        }
+        if (isDivineNameCharacterStyle(csr.appliedCharacterStyle)) {
+            collectDivineRunPositions(
+                storyXml,
+                csr.absBodyStart,
+                csr.absBodyEnd,
+                divinePositions
+            );
             continue;
         }
         if (!isNoStyleContentStyle(csr.appliedCharacterStyle)) continue;
@@ -702,6 +741,7 @@ function buildAcrosticVerseFromParagraph(
         verseNumbers: verseNums.map(String),
         parts,
         contentPositions,
+        divinePositions,
         paragraphStart: para.fullStart,
         paragraphEnd: para.fullEnd,
         paragraphChunks,
@@ -905,6 +945,7 @@ function walkStory(
                     verseNumbers: covered.map(String),
                     parts: [],
                     contentPositions: [],
+                    divinePositions: [],
                     paragraphStart: findPoetryLeadInStart(
                         storyXml,
                         para.fullStart
@@ -959,6 +1000,7 @@ function walkStory(
                         verseNumbers: covered.map(String),
                         parts: [],
                         contentPositions: [],
+                        divinePositions: [],
                         paragraphStart: findPoetryLeadInStart(storyXml, para.fullStart),
                         paragraphEnd: para.fullEnd,
                         paragraphChunks: [],
@@ -998,6 +1040,17 @@ function walkStory(
                         lastVerseParagraphStyle = para.appliedParagraphStyle;
                     }
                 }
+                continue;
+            }
+            if (openVerse && isDivineNameCharacterStyle(csr.appliedCharacterStyle)) {
+                // Divine name (`\nd`): small-caps text that belongs to the
+                // verse but must not be mapped as prose (AQU-1959).
+                collectDivineRunPositions(
+                    storyXml,
+                    csr.absBodyStart,
+                    csr.absBodyEnd,
+                    openVerse.divinePositions
+                );
                 continue;
             }
             // Other styled CSRs (cv:v, cv:dc, etc.) are ignored.
@@ -1059,6 +1112,55 @@ function preserveLeadingWhitespace(original: string, replacement: string): strin
     if (!lead) return replacement;
     const body = replacement.replace(/^[\t\u2009\u00A0]*/, "");
     return lead + body;
+}
+
+/**
+ * Carry the Bible's divine-name (`nd`) runs onto the study's own `nd` runs
+ * (AQU-1959).
+ *
+ * Content-only replacement never touches styled CSRs, so before this the
+ * study kept its English "Lᴏʀᴅ" in small caps while the translated divine
+ * name — indexed out of the Bible's own `nd` run — was dropped on the floor.
+ * Writing the Bible's run text into the study's run keeps the study's
+ * small-caps character style and swaps only the words inside it.
+ *
+ * Runs pair up positionally, and ONLY when both sides agree on how many the
+ * verse has. A disagreement means the translation marks the divine name
+ * somewhere the study does not (or not at all); guessing would move words
+ * between a plain and a small-caps run, so the runs are left untouched and
+ * the verse is reported in `stats.divineNamesUnmatched` instead.
+ */
+function applyDivineNameRuns(
+    closed: OpenVerse,
+    entry: VerseEntry,
+    stats: SwapStats,
+    upsertSplice: (splice: { absStart: number; absEnd: number; replacement: string }) => void
+): void {
+    const studyRuns = closed.divinePositions;
+    const bibleRuns = entry.divineSegments;
+    if (studyRuns.length === 0 && bibleRuns.length === 0) return;
+
+    if (studyRuns.length !== bibleRuns.length) {
+        stats.divineNamesUnmatched = stats.divineNamesUnmatched ?? [];
+        stats.divineNamesUnmatched.push({
+            book: closed.book,
+            chapter: closed.chapter,
+            verse: closed.verse,
+            studyRuns: studyRuns.length,
+            bibleRuns: bibleRuns.length,
+        });
+        return;
+    }
+
+    for (let i = 0; i < studyRuns.length; i++) {
+        const cp = studyRuns[i];
+        upsertSplice({
+            absStart: cp.absInnerStart,
+            absEnd: cp.absInnerEnd,
+            replacement: escapeXml(preserveLeadingWhitespace(cp.originalText, bibleRuns[i])),
+        });
+    }
+    stats.divineNamesReplaced = (stats.divineNamesReplaced ?? 0) + studyRuns.length;
 }
 
 /**
@@ -1179,6 +1281,7 @@ export function buildBibleVerseIndex(bibleStoryXml: string): BibleVerseIndex {
             index.set(key, {
                 text: cleanWhitespace(proseParts.join(" ")),
                 segments: [...proseParts],
+                divineSegments: closed.divinePositions.map((p) => p.originalText),
                 paragraphSig: buildParagraphSig(closed.paragraphChunks),
                 paragraphChunks: closed.paragraphChunks.map((c) => ({
                     paragraphStyle: c.paragraphStyle,
@@ -1280,7 +1383,13 @@ export function applySurgicalSwapToStudyXml(
                     usedByChapter.set(chapterKey, used);
                 }
                 used.add(closed.verse);
-                for (const cp of getProsePositions(closed.contentPositions)) {
+                // A removed verse is emptied whole: its divine-name runs go
+                // too, or the study's untranslated "Lᴏʀᴅ" is left behind in a
+                // verse that no longer exists (AQU-1959).
+                for (const cp of [
+                    ...getProsePositions(closed.contentPositions),
+                    ...closed.divinePositions,
+                ]) {
                     upsertSplice({
                         absStart: cp.absInnerStart,
                         absEnd: cp.absInnerEnd,
@@ -1364,11 +1473,20 @@ export function applySurgicalSwapToStudyXml(
                     entry.paragraphChunks
                 )
             ) {
+                // The Bible's whole paragraph span is spliced in, so its own
+                // divine-name CSRs (and their small caps) come with it — as
+                // long as the style exists in the Study package, which
+                // `mergeBibleSmallCapsCharacterStylesIntoStudyStylesXml`
+                // guarantees (AQU-1959).
                 spanSplices.push({
                     absStart: closed.paragraphStart,
                     absEnd: closed.paragraphEnd,
                     replacement: entry.verseSpanXml,
                 });
+                if (entry.divineSegments.length > 0) {
+                    stats.divineNamesReplaced =
+                        (stats.divineNamesReplaced ?? 0) + entry.divineSegments.length;
+                }
                 stats.replacedCount++;
                 continue;
             }
@@ -1410,6 +1528,7 @@ export function applySurgicalSwapToStudyXml(
                     replacement: escapeXml(text),
                 });
             }
+            applyDivineNameRuns(closed, entry, stats, upsertSplice);
             stats.replacedCount++;
     }
 

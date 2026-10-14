@@ -5,6 +5,7 @@ import { act, cleanup, render, screen } from "@testing-library/react"
 import { useState, type ReactNode } from "react"
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom"
 import { ProjectWorkspaceRoute } from "./ProjectWorkspaceRoute"
+import { notifyElevationGranted, notifyElevationRequired } from "@/lib/errors/elevation-required-signal"
 
 afterEach(() => {
   cleanup()
@@ -112,6 +113,14 @@ describe("ProjectWorkspaceRoute — workspace instance survives a surface hop", 
 
   it("remounts when only the agent surface is wrapped (the AQU-1496 regression)", async () => {
     expect(await hopToAgent(false)).toBe("2")
+  })
+  // OPS-44: the one deliberate remount. After an admin step-up unblocks this
+  // project's sync-token mint, every read in the workspace starts over.
+  it("remounts once when an admin step-up unblocks this project, and keeps that instance across hops", async () => {
+    expect(await hopToAgent(true)).toBe("1")
+    notifyElevationRequired({ kind: "sync-token", projectId: "p1" })
+    act(() => notifyElevationGranted())
+    expect(screen.getByTestId("mount-id").textContent).toBe("2")
   })
 })
 

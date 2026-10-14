@@ -764,3 +764,22 @@ textarea,
   outline-offset: 2px;
   border-radius: 6px;
 }
+
+/* AQU-1937: Smart Extensions' reserved identity. A magenta-violet outside
+   every brand's palette, used ONLY by the host-drawn ExtensionFrame and
+   ExtensionMarker (src/components/tools/) so people can always tell app-proper
+   UI from extension-drawn content. Reserved: an ESLint rule forbids the token
+   anywhere else, no brand or theme defines it, and it is NOT one of the CSS
+   variables forwarded into extension frames (srcdoc.ts THEME_VARS). Light:
+   ~5.6:1 on the page background; dark: ~6:1 on the dark surface. */
+:root {
+  --extension-accent: oklch(0.5 0.2 322);
+  --extension-accent-subtle: oklch(0.955 0.03 322);
+  --extension-accent-foreground: oklch(0.99 0 0);
+}
+:root.dark,
+.dark {
+  --extension-accent: oklch(0.78 0.14 322);
+  --extension-accent-subtle: oklch(0.37 0.07 322);
+  --extension-accent-foreground: oklch(0.2 0.03 322);
+}

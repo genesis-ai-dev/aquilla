@@ -17,6 +17,7 @@ import { TOOL_SANDBOX, buildToolSrcdoc, readThemeVars } from "@/lib/tools/srcdoc
 import type { ToolDetail } from "@/lib/tools/tools-api"
 import type { ToolScope } from "../../../shared/tools/manifest"
 import { PermissionPrompt } from "./PermissionPrompt"
+import { ExtensionFrame } from "./ExtensionFrame"
 import type { ToolHostServices } from "@/lib/tools/live-data"
 import { HOST_SHORTCUTS } from "@/lib/tools/host-keys"
 import { useToolHost, type ToolFrameControl } from "./useToolHost"
@@ -49,9 +50,11 @@ export interface ToolFrameProps {
   /** The tool failed to load: it drew nothing (render check), or threw before
    *  drawing anything. Editor mounts fall back to the original editor. */
   onFailure?: (reason: string) => void
+  /** AQU-1937: the host-drawn identity frame — "quiet" for the default editor. */
+  frameVariant?: "full" | "quiet"
 }
 
-export function ToolFrame({ project, tool, session, roleLevel, mount = "page", cell, file, onGrantChange, onHeal, healing = false, className, services, revealCellId = null, frameOverlay, controlRef, onFailure }: ToolFrameProps) {
+export function ToolFrame({ project, tool, session, roleLevel, mount = "page", cell, file, onGrantChange, onHeal, healing = false, className, services, revealCellId = null, frameOverlay, controlRef, onFailure, frameVariant = "full" }: ToolFrameProps) {
   const t = useT()
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const overlayRef = useRef<HTMLDivElement | null>(null)
@@ -94,7 +97,8 @@ export function ToolFrame({ project, tool, session, roleLevel, mount = "page", c
   )
 
   return (
-    <div className={className ?? "flex h-full min-h-0 flex-col"} data-testid="tool-frame" data-tool-id={tool.id}>
+    <ExtensionFrame name={tool.name} href={`/project/${project.id}/extensions/${tool.id}`} variant={frameVariant} className={className ?? "h-full"}>
+    <div className="flex min-h-0 flex-1 flex-col" data-testid="tool-frame" data-tool-id={tool.id}>
       {prompt && <PermissionPrompt toolName={tool.name} prompt={prompt} web={tool.manifest.web} />}
       {(isToolStale(tool.apiRev) || removedApi) && (
         <div role="alert" className="flex flex-wrap items-center gap-2 border-b bg-amber-50 px-4 py-2 text-sm dark:bg-amber-950/40" data-testid="extension-stale">
@@ -171,5 +175,6 @@ export function ToolFrame({ project, tool, session, roleLevel, mount = "page", c
         )}
       </div>
     </div>
+    </ExtensionFrame>
   )
 }

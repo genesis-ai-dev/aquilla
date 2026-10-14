@@ -1,4 +1,5 @@
 import { Globe, ShieldQuestion } from "lucide-react"
+import { ExtensionMarker } from "@/components/tools/ExtensionMarker"
 import { Button } from "@/components/ui/button"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { PromptAnswer } from "@/lib/tools/permissions"
@@ -31,6 +32,7 @@ export function PermissionPrompt({ toolName, prompt, web }: { toolName: string; 
         {isWeb ? <Globe className="size-4" aria-hidden /> : <ShieldQuestion className="size-4" aria-hidden />}
       </span>
       <span className="min-w-0 flex-1">
+        <ExtensionMarker className="mb-0.5" />
         <span className="block font-medium">{message}</span>
         <span className="block text-xs text-muted-foreground">
           {isWeb ? t("extensions.perm.webNote") : t("extensions.prompt.note")}

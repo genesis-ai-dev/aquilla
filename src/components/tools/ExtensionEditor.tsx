@@ -7,6 +7,7 @@
  * (or project-wide), see src/lib/tools/editor-choice.ts.
  */
 
+import { ExtensionMarker } from "./ExtensionMarker"
 import { useCallback, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type Ref } from "react"
 import type { EditorTableHandle } from "@/components/EditorTable"
 import type { ToolFrameControl } from "./useToolHost"
@@ -115,13 +116,16 @@ export function ExtensionEditorSwitcher({ choice }: { choice: ExtensionEditorCho
               ? t("extensions.editor.defaultOption", { name: t("extensions.editor.standard") })
               : t("extensions.editor.standard")}
           </option>
-          {choice.editors.map((ed) => (
-            <option key={ed.id} value={ed.id}>
-              {ed.id === defaultEditorId ? t("extensions.editor.defaultOption", { name: ed.name }) : ed.name}
-            </option>
-          ))}
+          <optgroup label={t("extensions.identity.groupLabel")}>
+            {choice.editors.map((ed) => (
+              <option key={ed.id} value={ed.id}>
+                {ed.id === defaultEditorId ? t("extensions.editor.defaultOption", { name: ed.name }) : ed.name}
+              </option>
+            ))}
+          </optgroup>
         </select>
       </label>
+      {choice.selected !== STANDARD_EDITOR && <ExtensionMarker iconOnly />}
       <label className="flex items-center gap-1 text-muted-foreground">
         <input type="checkbox" checked={wholeProject} onChange={(e) => setWholeProject(e.target.checked)} />
         {t("extensions.editor.wholeProject")}

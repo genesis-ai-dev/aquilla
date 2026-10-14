@@ -8,6 +8,7 @@
  * review. Installed extensions sit below.
  */
 
+import { ExtensionMarker } from "@/components/tools/ExtensionMarker"
 import { useCallback, useEffect, useState } from "react"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { ArrowLeft, X } from "lucide-react"
@@ -142,6 +143,7 @@ export function ToolsPage() {
           <ArrowLeft className="size-4" aria-hidden />
         </Button>
         <h1 className="flex min-w-0 items-baseline gap-2 text-sm font-semibold">
+          <ExtensionMarker iconOnly className="self-center" />
           {t("extensions.title")}
           {project && <span className="truncate font-normal text-muted-foreground">{project.name}</span>}
         </h1>

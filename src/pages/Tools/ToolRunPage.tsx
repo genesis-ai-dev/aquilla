@@ -6,6 +6,7 @@
  * mounted, so its state survives tab switches.
  */
 
+import { ExtensionMarker } from "@/components/tools/ExtensionMarker"
 import { useEffect, useState } from "react"
 import { Link, useParams } from "react-router-dom"
 import { ArrowLeft, History, Play, Quote, Share2, ShieldCheck, ShieldHalf, Wand2 } from "lucide-react"
@@ -111,6 +112,7 @@ export function ToolRunPage() {
             <div className="min-w-0 flex-1 sm:flex-none">
               <div className="flex items-center gap-1.5">
                 <h1 className="truncate text-sm font-semibold">{tool.name}</h1>
+                <ExtensionMarker />
                 <span className="font-mono text-[11px] text-muted-foreground tabular-nums">{t("extensions.version", { version: tool.currentVersion })}</span>
                 {tool.firstParty && (
                   <AppTooltip content={t("extensions.firstParty.badge")}>

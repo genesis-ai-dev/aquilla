@@ -7,6 +7,7 @@
  *   cell, which the tool receives as `aquilla.context.cell`.
  */
 
+import { FIRST_PARTY_DEFAULT_EDITOR } from "../../../shared/tools/first-party/default-editor"
 import { useEffect, useState, type MutableRefObject, type ReactNode } from "react"
 import type { ToolFrameControl } from "./useToolHost"
 import { Link } from "react-router-dom"
@@ -68,6 +69,8 @@ export function MountedTool({
       session={ctx.session}
       roleLevel={roleLevel ?? null}
       mount={mount}
+      // AQU-1937: the default (first-party) editor gets the quiet identity frame.
+      frameVariant={mount === "editor" && tool.firstParty === FIRST_PARTY_DEFAULT_EDITOR ? "quiet" : "full"}
       {...(cell ? { cell } : {})}
       {...(file ? { file } : {})}
       onGrantChange={() => ctx.refresh()}

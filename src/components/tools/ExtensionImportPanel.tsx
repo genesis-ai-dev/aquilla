@@ -7,6 +7,7 @@
  * so whatever already landed is a no-op).
  */
 
+import { ExtensionFrame } from "./ExtensionFrame"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -41,10 +42,13 @@ function missingRequired(importer: ToolImporter, values: Record<string, Value>):
 
 export function ExtensionImportPanel({
   toolId,
+  toolName,
   importer,
   onDone,
 }: {
   toolId: string
+  /** AQU-1937: shown on the host-drawn identity frame around the import. */
+  toolName: string
   importer: ToolImporter
   onDone: () => void
 }) {
@@ -148,7 +152,8 @@ export function ExtensionImportPanel({
   }
 
   return (
-    <div className="flex flex-col gap-3" data-testid="extension-import-panel">
+    <ExtensionFrame name={toolName} href={ctx.projectId ? `/project/${ctx.projectId}/extensions/${toolId}` : undefined}>
+    <div className="flex flex-col gap-3 p-3" data-testid="extension-import-panel">
       {importer.description && <p className="text-sm text-muted-foreground">{importer.description}</p>}
       {importer.options.map(field)}
       {run && (
@@ -176,5 +181,6 @@ export function ExtensionImportPanel({
         )}
       </div>
     </div>
+    </ExtensionFrame>
   )
 }

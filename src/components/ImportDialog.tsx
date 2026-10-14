@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { ExtensionMarker, ExtensionStripe } from "@/components/tools/ExtensionMarker"
 import { ExtensionImportPanel } from "@/components/tools/ExtensionImportPanel"
 import { useToolsMount } from "@/components/tools/ToolsMountContext"
 import type { ToolImporter } from "../../shared/tools/manifest"
@@ -1405,6 +1406,7 @@ export function ImportDialog({
         {screen === "extension" && extensionImporter && (
           <ExtensionImportPanel
             toolId={extensionImporter.toolId}
+            toolName={extensionImporter.toolName}
             importer={extensionImporter.importer}
             onDone={() => onOpenChange(false)}
           />
@@ -2028,6 +2030,7 @@ function ImportLanding({ onSelect, allowDcs, linkProject, translationOnlyElsewhe
       </ImportSection>
       {extensionImporters.length > 0 && onPickExtensionImporter && (
         <ImportSection label={t("extensions.import.section")}>
+          <ExtensionStripe className="space-y-2">
           {extensionImporters.map(({ tool, importer }) => (
             <button
               key={`${tool.id}:${importer.id}`}
@@ -2036,10 +2039,11 @@ function ImportLanding({ onSelect, allowDcs, linkProject, translationOnlyElsewhe
               onClick={() => onPickExtensionImporter({ toolId: tool.id, importer, toolName: tool.name })}
               data-testid="extension-importer"
             >
-              <span className="text-sm font-medium">{importer.label}</span>
+              <span className="flex items-center gap-1.5 text-sm font-medium">{importer.label}<ExtensionMarker /></span>
               <span className="text-xs text-muted-foreground">{importer.description ?? tool.name}</span>
             </button>
           ))}
+          </ExtensionStripe>
         </ImportSection>
       )}
       <div className="space-y-2">

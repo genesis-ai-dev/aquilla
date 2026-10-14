@@ -8,6 +8,7 @@
  * Shown only once the project has at least one extension installed.
  */
 
+import { ExtensionMarker } from "./ExtensionMarker"
 import { useEffect } from "react"
 import { useNavigate } from "react-router-dom"
 import { Blocks, Pin, Play, Plus, Sparkles } from "lucide-react"
@@ -73,6 +74,7 @@ export function ExtensionsBar({ choice }: { choice: ExtensionEditorChoice }) {
           title={tool.name}
           data-testid="extension-action"
         >
+          <ExtensionMarker iconOnly />
           <Play className="size-3" aria-hidden />
           {action.label}
         </Button>
@@ -106,6 +108,7 @@ export function ExtensionsBar({ choice }: { choice: ExtensionEditorChoice }) {
                   .filter((a) => a.where.includes("menu"))
                   .map((a) => (
                     <CommandItem key={`${tool.id}:action:${a.id}`} onSelect={() => run(() => ctx.runAction(tool.id, a.id))}>
+                      <ExtensionMarker iconOnly />
                       <Play className="size-3.5" aria-hidden />
                       {`${tool.name}: ${a.label}`}
                     </CommandItem>

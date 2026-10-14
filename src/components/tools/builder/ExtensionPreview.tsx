@@ -9,6 +9,7 @@ import { createToolHandlers } from "@/lib/tools/host-handlers"
 import { defaultSmokeFixtures } from "@/lib/tools/smoke"
 import { TOOL_SANDBOX, buildToolSrcdoc, readThemeVars } from "@/lib/tools/srcdoc"
 import { cn } from "@/lib/utils"
+import { ExtensionFrame } from "../ExtensionFrame"
 import type { ToolManifest } from "../../../../shared/tools/manifest"
 
 /** The frame takes the shape of where it will live: a side panel is narrow
@@ -59,22 +60,24 @@ export function ExtensionPreview({ source, manifest }: { source: string; manifes
   }, [srcdoc, manifest, mount])
 
   const frame = (
-    <div className={cn("relative", FRAME[mount])}>
+    <ExtensionFrame name={manifest.name} className={FRAME[mount]}>
+    <div className="relative min-h-0 flex-1">
       <iframe
         ref={frameRef}
         title={t("extensions.frame.title", { name: manifest.name })}
         sandbox={TOOL_SANDBOX}
         srcDoc={srcdoc}
-        className="size-full rounded-xl border bg-background shadow-[0_1px_2px_rgb(0_0_0/0.06),0_16px_40px_-20px_rgb(0_0_0/0.3)]"
+        className="size-full bg-background"
         data-testid="extension-preview-frame"
       />
       {readyFor !== srcdoc && (
-        <div className="absolute inset-0 flex items-center justify-center gap-2 rounded-xl bg-background text-sm text-muted-foreground" aria-live="polite">
+        <div className="absolute inset-0 flex items-center justify-center gap-2 bg-background text-sm text-muted-foreground" aria-live="polite">
           <Spinner className="size-4" />
           {t("extensions.candidate.previewLoading")}
         </div>
       )}
     </div>
+    </ExtensionFrame>
   )
 
   return (

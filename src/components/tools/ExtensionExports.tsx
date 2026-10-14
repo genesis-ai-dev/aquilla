@@ -6,6 +6,7 @@
  * back with aquilla.export.deliver and the download starts.
  */
 
+import { ExtensionMarker } from "./ExtensionMarker"
 import { useEffect, useState } from "react"
 import { Blocks } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -53,7 +54,7 @@ export function ExtensionExports({
 
   return (
     <section className="flex flex-col gap-2" data-testid="extension-exports" aria-label={t("extensions.export.groupLabel")}>
-      <h3 className="text-xs font-medium text-muted-foreground">{t("extensions.export.groupLabel")}</h3>
+      <h3 className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">{t("extensions.export.groupLabel")}<ExtensionMarker /></h3>
       <div className="flex flex-wrap gap-2">
         {offered.map(({ tool, format }) => {
           const key = `${tool.id}:${format.id}`

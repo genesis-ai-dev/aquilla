@@ -677,14 +677,6 @@ export const projectSettings = defineNamespace({
     "projectSettings.structuralCells.exclude": "Leave them out",
     "projectSettings.structuralCells.saveFailed": "Could not save that change",
 
-    // AQU-1954 — RecordsAudioProjectSection, first row of the audio card.
-    "projectSettings.recordsAudio.label": "This project records audio",
-    "projectSettings.recordsAudio.description":
-      "On: every book needs audio, so the plan and the progress numbers count " +
-      "audio for every file. Off: only files that already have a recording " +
-      "count audio.",
-    "projectSettings.recordsAudio.saveFailed": "Could not save that change",
-
     // AQU-1391 — repetition auto-propagation, same tri-state shape as above.
     "projectSettings.autoPropagateRepetitions.label": "Auto-propagate repetitions",
     "projectSettings.autoPropagateRepetitions.description":
@@ -1104,6 +1096,12 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.archivingButton": "Archiving…",
     "projectSettings.languages.confirmArchiveButton": "Confirm archive",
     "projectSettings.languages.archiveLaneAriaLabel": "Archive lane {lane}",
+    // AQU-1954 — each language row's "Records audio" switch.
+    "projectSettings.languages.recordsAudioLabel": "Records audio",
+    "projectSettings.languages.recordsAudioAriaLabel": "{lane} records audio",
+    "projectSettings.languages.recordsAudioHint":
+      "Records audio: when on, every book needs audio in that language. When " +
+      "off, a book counts audio only once it has a recording in that language.",
     "projectSettings.languages.archivedLanesLabel": "Archived lanes",
     "projectSettings.languages.archivedLanesDescription":
       "Hidden from the lane switcher by default. Their translations are kept; " +
@@ -1940,6 +1938,12 @@ export const projectSettings = defineNamespace({
           "wordings consistent — only the trailing \"by <name>\" is dropped.",
         placeholders: {
           date: "The already-formatted, locale-aware date of the edit (data) — insert exactly as given, do not reformat or reorder its parts.",
+        },
+      },
+      "projectSettings.languages.recordsAudioAriaLabel": {
+        description: "Accessible name of the switch on one target language row that says every file needs audio in that language.",
+        placeholders: {
+          lane: "The language's display name (data, not translated).",
         },
       },
       "projectSettings.languages.archiveLaneAriaLabel": {

@@ -215,9 +215,9 @@ export function PlanBoard({
   units: PlanUnit[]
   now: number
   /**
-   * AQU-1954: the project's "This project records audio" switch. On, every
-   * file is expected to carry audio, so every row has an audio bar and is
-   * judged on its takes. Off, only files with a take or a cue sheet are.
+   * AQU-1954: the "Records audio" switch of the language the board is reading.
+   * On, every file is expected to carry audio, so every row has an audio bar
+   * and is judged on its takes. Off, only files with a take or a cue sheet are.
    */
   recordsAudio?: boolean
   /** Scopes the per-project group folds. Null while the route id is unresolved. */

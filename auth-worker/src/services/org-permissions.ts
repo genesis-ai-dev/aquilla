@@ -1272,6 +1272,16 @@ export interface PortfolioLane {
    */
   audioCells: number
   validatedAudioCells: number
+  /**
+   * AQU-1954: what this language's recordings are measured against. Every
+   * file (its cue sheet where it has one) when the language's "Records audio"
+   * switch is on; otherwise only the files with a recording in this language,
+   * plus any file with a cue sheet. A language nobody records in therefore owes
+   * nothing, and does not pull the project's "All" audio down.
+   */
+  audioTotalCells: number
+  /** AQU-1954: the language row's "Records audio" switch. */
+  recordsAudio: boolean
 }
 
 export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioTotalCells: number; recordsAudio: boolean; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number; lanes: PortfolioLane[]; unitsTotal: number; unitsDone: number; unitsOverdue: number }
@@ -1300,7 +1310,7 @@ interface PortfolioDbRow {
   last_edit_at: number | null
   /** AQU-1566: what audio coverage divides by (a dubbing file's cue sheet, else the file). */
   audio_total_cells: number
-  /** AQU-1954: the project's "This project records audio" switch (migration 0169). */
+  /** AQU-1954: whether any of the project's languages has "Records audio" on (lane rows, migration 0169). */
   records_audio: boolean | null
   audio_cells: number
   validated_audio_cells: number
@@ -1347,6 +1357,27 @@ function textAcrossLanes(lanes: readonly PortfolioLane[]) {
   return portfolioTextFromVisibleLanes(targets, new Set(targets.map((lane) => lane.lane)))
 }
 
+/**
+ * AQU-1954 (Sam, 2026-10-14): the "All" audio of a project with two or more
+ * languages is every language's recordings over every language's audio work,
+ * the same rule as `textAcrossLanes`. German at 76% beside a Tok Pisin that
+ * owes the same files and has recorded none reads 38%, not 76%. A language
+ * whose switch is off and that has recorded nothing owes nothing, so it leaves
+ * the average alone. Every target lane counts, archived ones included, as for
+ * text; the read wall does not apply (a recording is not a lane's text). Null
+ * keeps the project-wide counts.
+ */
+function audioAcrossLanes(lanes: readonly PortfolioLane[]) {
+  const targets = lanes.filter((lane) => lane.role !== "source")
+  if (targets.length < 2) return null
+  return {
+    audioTotalCells: targets.reduce((sum, lane) => sum + (lane.audioTotalCells ?? 0), 0),
+    audioCells: targets.reduce((sum, lane) => sum + lane.audioCells, 0),
+    validatedAudioCells: targets.reduce((sum, lane) => sum + lane.validatedAudioCells, 0),
+    recordsAudio: targets.some((lane) => lane.recordsAudio === true),
+  }
+}
+
 function mapPortfolioRow(
   r: PortfolioDbRow,
   lanesByProject: Map<string, PortfolioLane[]>,
@@ -1354,6 +1385,7 @@ function mapPortfolioRow(
   sourceActivityAt: number | null = null,
 ): PortfolioRow {
   const acrossLanes = visibleText ? null : textAcrossLanes(lanesByProject.get(r.id) ?? [])
+  const audioLanes = audioAcrossLanes(lanesByProject.get(r.id) ?? [])
   return {
     id: r.id,
     name: r.name,
@@ -1363,10 +1395,10 @@ function mapPortfolioRow(
     aiDraftedCells: visibleText ? visibleText.aiDraftedCells : r.ai_drafted_cells,
     lastEditAt: laterEdit(visibleText ? visibleText.lastEditAt : r.last_edit_at, sourceActivityAt),
     // Lane-independent like the audio counts, so the read wall leaves it alone.
-    audioTotalCells: Number(r.audio_total_cells) || 0,
-    recordsAudio: r.records_audio === true,
-    audioCells: r.audio_cells,
-    validatedAudioCells: r.validated_audio_cells,
+    audioTotalCells: audioLanes?.audioTotalCells ?? (Number(r.audio_total_cells) || 0),
+    recordsAudio: audioLanes?.recordsAudio ?? r.records_audio === true,
+    audioCells: audioLanes?.audioCells ?? r.audio_cells,
+    validatedAudioCells: audioLanes?.validatedAudioCells ?? r.validated_audio_cells,
     recordedMs: r.recorded_ms,
     deadlineAt: r.deadline_at,
     lanes: visibleText ? visibleText.lanes : (lanesByProject.get(r.id) ?? []),
@@ -1408,6 +1440,10 @@ interface LaneDbRow {
    * the text sums must skip the rows this is false for.
    */
   text_counted: number | string
+  /** AQU-1954: the row's file, and for a cue sheet the file it is anchored to. */
+  file_id: string
+  file_role: string | null
+  anchor_file_id: string | null
 }
 
 interface PortfolioSettingsDbRow {
@@ -1492,10 +1528,12 @@ async function fetchPortfolioLanes(
               fsp.audio_validator_histogram AS audio_validator_histogram,
               fsp.structural_audio_count AS structural_audio_count,
               fsp.structural_audio_validator_histogram AS structural_audio_validator_histogram,
-              CASE WHEN ${inCountedFileSql('fsp')} THEN 1 ELSE 0 END AS text_counted
+              CASE WHEN ${inCountedFileSql('fsp')} THEN 1 ELSE 0 END AS text_counted,
+              fsp.file_id AS file_id, fr.role AS file_role, fr.anchor_file_id AS anchor_file_id
          FROM file_section_progress fsp
          JOIN projects p ON p.id = fsp.project_id
          JOIN lanes l ON l.project_id = fsp.project_id AND l.id = fsp.lane_id
+         LEFT JOIN files fr ON fr.project_id = fsp.project_id AND fr.id = fsp.file_id
         WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL AND fsp.scope = 'file'
           -- AQU-1626: one progress row per file per lane, so a hidden or
           -- deleted file contributes one here too — and a lane chip that
@@ -1524,7 +1562,7 @@ async function fetchPortfolioLanes(
     env.AQUILLA_PG.prepare(
       `SELECT l.project_id AS project_id, l.id AS id, ${laneDisplayNameSql("l")} AS name,
               l.role AS role, l.legacy_tag AS legacy_tag, l.position AS position,
-              l.archived_at AS archived_at
+              l.archived_at AS archived_at, l.records_audio AS records_audio
          FROM lanes l
          JOIN projects p ON p.id = l.project_id
         WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL${projectFilter}`,
@@ -1536,6 +1574,7 @@ async function fetchPortfolioLanes(
       position: number
       archived_at: string | null
       role: string
+      records_audio: boolean | null
     }>(),
   ])
   const thresholds = readValidationCounts(settingsRows.results ?? [])
@@ -1556,6 +1595,15 @@ async function fetchPortfolioLanes(
   // rows of its own borrows, and the number that used to be read off the ''
   // lane's chip.
   const sourceTotals = new Map<string, number>()
+  // AQU-1954: what each language's recordings are measured against, built from
+  // the same rows. Per project: each file's cell count (any lane's row says it;
+  // structural cells off when the project leaves them out), each file's cue
+  // sheet, and per language the files it has recorded in. A recording on a cue
+  // sheet belongs to the file the sheet is anchored to.
+  const fileCells = new Map<string, Map<string, number>>()
+  const cueSheetOf = new Map<string, Map<string, string>>()
+  const audioFiles = new Map<string, Set<string>>()
+  const recordedIn = new Map<string, Map<string, Set<string>>>()
   /**
    * AQU-1599: the lane-independent denominator a lane with no progress rows of
    * its own borrows — the project's source-cell count, from the SOURCE lane's
@@ -1583,6 +1631,26 @@ async function fetchPortfolioLanes(
     const drop = excluding.has(row.project_id)
     const structuralTotal = drop ? Number(row.structural_count) || 0 : 0
     const textCounted = Number(row.text_counted) === 1
+    // AQU-1954: the file's cell count, its cue sheet, and (target rows only,
+    // below) whether this language has recorded in it.
+    const isCueSheet = row.file_role === "audio-cues" && row.anchor_file_id != null
+    const audioHome = isCueSheet ? row.anchor_file_id! : row.file_id
+    {
+      let cells = fileCells.get(row.project_id)
+      if (!cells) { cells = new Map(); fileCells.set(row.project_id, cells) }
+      const total = Math.max(0, (Number(row.total_count) || 0) - structuralTotal)
+      cells.set(row.file_id, Math.max(cells.get(row.file_id) ?? 0, total))
+      if (isCueSheet) {
+        let cues = cueSheetOf.get(row.project_id)
+        if (!cues) { cues = new Map(); cueSheetOf.set(row.project_id, cues) }
+        cues.set(audioHome, row.file_id)
+      } else if (row.file_role !== "audio-cues") {
+        // Every file that can hold recordings is a candidate, recorded or not.
+        let files = audioFiles.get(row.project_id)
+        if (!files) { files = new Set(); audioFiles.set(row.project_id, files) }
+        files.add(audioHome)
+      }
+    }
     if (row.lane_role === "source") {
       // A cue sheet's source rows are not the project's text: the denominator
       // and the activity clock read text files only, as they always have.
@@ -1617,6 +1685,13 @@ async function fetchPortfolioLanes(
       ? validatedFromHistogram(row.structural_audio_validator_histogram, audioThreshold)
       : 0
     audioEntry.audioCells += Math.max(0, (Number(row.audio_count) || 0) - structuralAudio)
+    if ((Number(row.audio_count) || 0) > 0) {
+      let homes = recordedIn.get(row.project_id)
+      if (!homes) { homes = new Map(); recordedIn.set(row.project_id, homes) }
+      let recorded = homes.get(lane)
+      if (!recorded) { recorded = new Set(); homes.set(lane, recorded) }
+      recorded.add(audioHome)
+    }
     audioEntry.validatedAudioCells += Math.max(
       0,
       validatedFromHistogram(row.audio_validator_histogram, audioThreshold) - structuralAudioValidated,
@@ -1629,7 +1704,7 @@ async function fetchPortfolioLanes(
     if (!entry) {
       entry = {
         lane, totalCells: 0, filledCells: 0, validatedCells: 0, lastEditAt: null,
-        audioCells: 0, validatedAudioCells: 0,
+        audioCells: 0, validatedAudioCells: 0, audioTotalCells: 0, recordsAudio: false,
       }
       lanes.set(lane, entry)
     }
@@ -1654,6 +1729,26 @@ async function fetchPortfolioLanes(
   // targetLanes / archivedLanes / targetLanguage are not read (AQU-1595). A
   // target lane with no progress rows of its own borrows the lane-independent
   // denominator (AQU-1599): the source lane's cell count, never the '' lane's.
+  /**
+   * AQU-1954: one language's audio denominator. A file counts when the
+   * language's switch is on, when the file has a cue sheet (the dubbing is
+   * planned), or when the language has recorded in it; it counts its cue
+   * sheet's cells where it has one, else its own.
+   */
+  const laneAudioTotal = (projectId: string, tag: string, recordsAudio: boolean): number => {
+    const files = audioFiles.get(projectId)
+    if (!files) return 0
+    const recorded = recordedIn.get(projectId)?.get(tag)
+    const cues = cueSheetOf.get(projectId)
+    const cells = fileCells.get(projectId)
+    let total = 0
+    for (const file of files) {
+      const cue = cues?.get(file)
+      if (!recordsAudio && cue == null && !recorded?.has(file)) continue
+      total += cells?.get(cue ?? file) ?? 0
+    }
+    return total
+  }
   const listed = new Map<string, PortfolioLane[]>()
   for (const row of nameRows.results ?? []) {
     const role = row.role === "source" ? "source" : "target"
@@ -1672,6 +1767,8 @@ async function fetchPortfolioLanes(
       lastEditAt: progress?.lastEditAt ?? null,
       audioCells: role === "target" ? audioAcc.get(row.project_id)?.get(tag)?.audioCells ?? 0 : 0,
       validatedAudioCells: role === "target" ? audioAcc.get(row.project_id)?.get(tag)?.validatedAudioCells ?? 0 : 0,
+      audioTotalCells: role === "target" ? laneAudioTotal(row.project_id, tag, row.records_audio === true) : 0,
+      recordsAudio: role === "target" && row.records_audio === true,
       ...(row.archived_at != null && row.archived_at !== "" ? { archived: true } : {}),
     }
     let lanes = listed.get(row.project_id)
@@ -1744,8 +1841,8 @@ const lessStructural = (total: string, structural: string) =>
 /**
  * AQU-1954: does this file's audio count toward the project's audio numbers?
  *
- * Every file does when the project says it records audio (`records_audio`,
- * the generated column of migration 0169). Otherwise only a file somebody has
+ * Every file does when the project's language records audio (`ra`, from the
+ * lane rows' switch, migration 0169). Otherwise only a file somebody has
  * recorded in, or one with a cue sheet, which declares the dubbing before the
  * first take: the plan board's own rule (`audioFileIds`). Without this a
  * project with one recorded book among sixty-five text books divided its
@@ -1753,7 +1850,7 @@ const lessStructural = (total: string, structural: string) =>
  * the recorded book.
  */
 const PORTFOLIO_FILE_EXPECTS_AUDIO =
-  "(ps.records_audio IS TRUE OR cue.anchor_file_id IS NOT NULL OR af.file_id IS NOT NULL)"
+  "(ra.records_audio IS TRUE OR cue.anchor_file_id IS NOT NULL OR af.file_id IS NOT NULL)"
 
 /**
  * The per-project cell rollups.
@@ -1768,7 +1865,7 @@ const PORTFOLIO_CELL_COLUMNS = `
             ${lessStructural('COALESCE(SUM(f.filled_count), 0)', 'COALESCE(SUM(f.structural_filled_count), 0)')} AS filled_cells,
             ${lessStructural('COALESCE(SUM(f.ai_drafted_count), 0)', 'COALESCE(SUM(f.structural_ai_drafted_count), 0)')} AS ai_drafted_cells,
             ${lessStructural(`COALESCE(SUM(CASE WHEN ${PORTFOLIO_FILE_EXPECTS_AUDIO} THEN COALESCE(cue.cell_count, f.cell_count) END), 0)`, `COALESCE(SUM(CASE WHEN ${PORTFOLIO_FILE_EXPECTS_AUDIO} THEN COALESCE(cue.structural_cell_count, f.structural_cell_count) END), 0)`)} AS audio_total_cells,
-            COALESCE(BOOL_OR(ps.records_audio), false) AS records_audio,`
+            COALESCE(BOOL_OR(ra.records_audio), false) AS records_audio,`
 
 /**
  * Shared join tail — the org default now has to reach the rollups too.
@@ -1789,6 +1886,7 @@ const PORTFOLIO_JOINS = `
        LEFT JOIN org_settings os ON os.org_id = p.org_id
        LEFT JOIN au ON au.project_id = p.id
        LEFT JOIN af ON af.project_id = f.project_id AND af.file_id = f.id
+       LEFT JOIN ra ON ra.project_id = p.id
        LEFT JOIN pu ON pu.project_id = p.id`
 
 /** AQU-1097: planning-unit counts, read from the `pu` CTE above. */
@@ -1945,6 +2043,15 @@ const portfolioCtes = (orgPredicate: string) => `
        -- here exactly when it counts in the numerator. A dubbing file's takes
        -- sit on its cue sheet, which the cue join below already speaks for.
        SELECT DISTINCT c.project_id, c.file_id FROM au_cells c
+     ), ra AS MATERIALIZED (
+       -- AQU-1954: whether the project's language records audio, from the
+       -- lane rows' switch. Only a one-language project's row reads it: with
+       -- two or more, mapPortfolioRow sums the languages' own audio instead.
+       SELECT l.project_id, BOOL_OR(l.records_audio) AS records_audio
+         FROM lanes l
+         JOIN policy pol ON pol.project_id = l.project_id
+        WHERE l.role = 'target'
+        GROUP BY l.project_id
      ), cue AS MATERIALIZED (
        -- AQU-1566: each counted file's cue sheet, for the AUDIO denominator.
        -- A dubbing project records against its hidden audio-cues sibling, not

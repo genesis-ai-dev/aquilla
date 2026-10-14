@@ -103,6 +103,7 @@ import {
   createProjectLane,
   renameProjectLane,
   setProjectLaneArchived,
+  setProjectLaneRecordsAudio,
   fetchLaneLastChange,
   settingsEditorName,
   type LaneLastChangeResult,
@@ -111,7 +112,6 @@ import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import { RepetitionPropagationProjectSection } from "./ProjectSettings/RepetitionPropagationProjectSection"
 import { StructuralCellsProjectSection } from "./ProjectSettings/StructuralCellsProjectSection"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
-import { RecordsAudioProjectSection } from "./ProjectSettings/RecordsAudioProjectSection"
 import { TermMatchingSection } from "./ProjectSettings/TermMatchingSection"
 import type { TermMatchingSettings } from "@/lib/terminology/types"
 import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
@@ -582,6 +582,16 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     if (result.kind === "duplicate") return "duplicate" as const
     if (result.kind === "malformed_code") return "malformed_code" as const
     return "invalid" as const
+  }, [session?.jwt, id, refreshSharedSettingsAfterWrite])
+
+  // AQU-1954: the "Records audio" switch on one language row.
+  const setLaneRecordsAudio = useCallback(async (laneId: string, recordsAudio: boolean) => {
+    const jwt = session?.jwt
+    if (!jwt || !id) return false
+    const result = await setProjectLaneRecordsAudio(jwt, id, laneId, recordsAudio)
+    if (result.kind !== "ok") return false
+    await refreshSharedSettingsAfterWrite()
+    return true
   }, [session?.jwt, id, refreshSharedSettingsAfterWrite])
 
   const setLaneArchived = useCallback(async (laneId: string, archived: boolean) => {
@@ -2106,6 +2116,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             onRenameLane={isCloudProject ? renameLane : undefined}
             onCreateLane={isCloudProject ? createLane : undefined}
             onSetLaneArchived={isCloudProject ? setLaneArchived : undefined}
+            onSetLaneRecordsAudio={isCloudProject ? setLaneRecordsAudio : undefined}
             onLoadLaneLastChange={isCloudProject ? loadLaneLastChange : undefined}
           />
         )}
@@ -2854,14 +2865,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 <RepetitionPropagationProjectSection
                   value={sharedSettingsBlob?.autoPropagateRepetitions}
                   orgDefault={orgAutoPropagateRepetitions}
-                  disabled={!canEditShared}
-                  disabledTooltip={sharedDisabledTooltip ?? undefined}
-                  onPatch={patchShared}
-                />
-              }
-              recordsAudioRow={
-                <RecordsAudioProjectSection
-                  value={sharedSettingsBlob?.recordsAudio}
                   disabled={!canEditShared}
                   disabledTooltip={sharedDisabledTooltip ?? undefined}
                   onPatch={patchShared}

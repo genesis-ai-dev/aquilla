@@ -2147,6 +2147,49 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     expect(within(card).getByTestId("stat-bar-audioValidated")).toHaveTextContent("4/200")
   })
 
+  it("AQU-1954: a language tab measures audio against that language's own audio total", async () => {
+    // The server sends each language what it owes: every file when its
+    // "Records audio" switch is on, else the files it has recorded in.
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject({
+      audioCells: 60, validatedAudioCells: 16, audioTotalCells: 300,
+      lanes: [
+        { ...TWO_LANES[0], audioCells: 50, validatedAudioCells: 12, audioTotalCells: 100 },
+        { ...TWO_LANES[1], audioCells: 10, validatedAudioCells: 4, audioTotalCells: 200, recordsAudio: true },
+      ],
+    })])
+    renderOverview()
+    await screen.findByTestId("lane-filter-tabs")
+    const card = screen.getByTestId("progress-card")
+    // All: both languages' 60 over both languages' 300.
+    expect(statTile("Has audio")).toHaveTextContent("20%")
+    fireEvent.click(screen.getByRole("tab", { name: "es" }))
+    await waitFor(() => expect(statTile("Has audio")).toHaveTextContent("5%"))
+    expect(within(card).getByTestId("stat-bar-audioRecorded")).toHaveTextContent("10/200")
+    expect(within(card).getByTestId("stat-bar-audioValidated")).toHaveTextContent("4/200")
+  })
+
+  it("AQU-1954: a language that is off and has recorded nothing greys its audio and says how to turn it on", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject({
+      audioCells: 50, validatedAudioCells: 12, audioTotalCells: 100,
+      lanes: [
+        { ...TWO_LANES[0], audioCells: 50, validatedAudioCells: 12, audioTotalCells: 100 },
+        { ...TWO_LANES[1], audioCells: 0, validatedAudioCells: 0, audioTotalCells: 0 },
+      ],
+    })])
+    renderOverview()
+    await screen.findByTestId("lane-filter-tabs")
+    const card = screen.getByTestId("progress-card")
+    const bars = () => within(card).getAllByTestId(/^stat-bar-/).map((b) => b.getAttribute("data-testid"))
+    fireEvent.click(screen.getByRole("tab", { name: "es" }))
+    await waitFor(() => expect(bars()).not.toContain("stat-bar-audioRecorded"))
+    expect(bars()).not.toContain("stat-bar-audioValidated")
+    for (const label of ["Has audio", "Audio Validated"]) {
+      expect(statTile(label).firstElementChild!.className, label).toContain("text-muted-foreground/60")
+    }
+  })
+
   it("greys the cross-language tiles and drops their bars on a language tab when the server sends no lane audio (AQU-1764)", async () => {
     // AI drafts have no per-language breakdown, and an older server sends no
     // lane audio, so with a language tab chosen those tiles grey out (swatch

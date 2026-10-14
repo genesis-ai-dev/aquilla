@@ -536,6 +536,9 @@ export const org = defineNamespace({
     "org.projectOverview.audioValidatedOfRecorded":
       "Of the audio recorded, {percent}% is validated.",
     "org.projectOverview.crossLaneTooltip": "Cross-language stat — not broken down per language.",
+    // AQU-1954: a language tab whose language is off and has no recordings.
+    "org.projectOverview.laneNoAudioTooltip":
+      "This language doesn't record audio. Turn on Records audio for it in Project settings → Languages.",
     "org.projectOverview.cellsSuffix": "cells",
     "org.projectOverview.laneDefaultFallback": "Default",
     "org.projectOverview.legendTranslated": "translated",

@@ -72,7 +72,7 @@ export function planRowsToCsv(units: readonly PlanUnit[], now: number, recordsAu
   // exported as Nearly complete, while the board — counting the recordings it
   // is missing — still calls it In progress. The two surfaces have to say the
   // same word about the same row, or the export is the one that gets believed.
-  // AQU-1954: and the project's "This project records audio" switch with it.
+  // AQU-1954: and the language's "Records audio" switch with it.
   const audioFiles = audioFileIds(units, recordsAudio)
   // AQU-955: and the text set, for the same reason. Without it every book of
   // an audio-only project exports as Not started however much of it is

@@ -792,10 +792,12 @@ export function ProjectOverview() {
     [planUnits, selectedPlanUnitId],
   )
   /**
-   * AQU-1954: the project's "This project records audio" switch, carried on its
-   * portfolio row so it is read again with the row whenever settings change.
+   * AQU-1954: the "Records audio" switch of the language the plan is reading,
+   * from that language's row (Project settings → Languages). Carried on the
+   * portfolio row, so it is read again with the row whenever settings change.
    */
-  const recordsAudio = audio?.recordsAudio === true
+  const recordsAudio =
+    (audio?.lanes ?? []).find((l) => l.role !== "source" && l.lane === planLane)?.recordsAudio === true
   const planShowAudio = useMemo(() => planHasAudio(planUnits, recordsAudio), [planUnits, recordsAudio])
   /**
    * Which FILES carry recordings. Audio expectation is judged per file, never
@@ -1361,7 +1363,7 @@ export function ProjectOverview() {
   const hasText = audio != null && audio.totalCells > 0
   // AQU-1954: a project that says it records audio shows its audio from the
   // first day, at 0%, rather than hiding it until the first take.
-  const hasAudio = audio != null && (audio.audioCells > 0 || (recordsAudio && audioDenominator(audio) > 0))
+  const hasAudio = audio != null && (audio.audioCells > 0 || (audio.recordsAudio === true && audioDenominator(audio) > 0))
   const showText = hasText
   const showAudio = hasAudio
 
@@ -1428,11 +1430,25 @@ export function ProjectOverview() {
   // not change with the language. Only a server too old to send lane audio
   // leaves a language tab with nothing to show, and there the audio tiles
   // grey out as they used to.
+  //
+  // AQU-1954: over the LANGUAGE's own audio total too: every file when its
+  // "Records audio" switch is on, else the files it has recorded in. A
+  // language that is off and has recorded nothing owes no audio; its tiles grey
+  // out and say how to turn it on, rather than reading "0/0 cells".
   const laneAudioMissing = activeLane != null && activeLane.audioCells == null
+  const laneOwesNoAudio =
+    activeLane != null && !laneAudioMissing && activeLane.audioTotalCells === 0
   const audioOnTab = (p: PortfolioProject): PortfolioProject =>
     activeLane != null && activeLane.audioCells != null
-      ? { ...p, audioCells: activeLane.audioCells, validatedAudioCells: activeLane.validatedAudioCells ?? 0 }
+      ? {
+          ...p,
+          audioCells: activeLane.audioCells,
+          validatedAudioCells: activeLane.validatedAudioCells ?? 0,
+          ...(activeLane.audioTotalCells != null ? { audioTotalCells: activeLane.audioTotalCells } : {}),
+        }
       : p
+  const audioTileTooltip = (fallback: string): string =>
+    laneAudioMissing ? CROSS_LANE_TOOLTIP : laneOwesNoAudio ? t("org.projectOverview.laneNoAudioTooltip") : fallback
 
   // AQU-593: which stat widgets are applicable to this project (drives the
   // Customize menu). Audio tiles only apply to audio projects; the AI-Drafted
@@ -2152,8 +2168,8 @@ export function ProjectOverview() {
                             label={t("org.orgHome.table.audioHeaderLabel")}
                             pct={audioPct(audioOnTab(audio))}
                             tone="audioRecorded"
-                            muted={laneAudioMissing}
-                            tooltip={laneAudioMissing ? CROSS_LANE_TOOLTIP : t("org.projectOverview.hasAudioTooltip")}
+                            muted={laneAudioMissing || laneOwesNoAudio}
+                            tooltip={audioTileTooltip(t("org.projectOverview.hasAudioTooltip"))}
                           />
                         )}
                         {/*
@@ -2178,8 +2194,8 @@ export function ProjectOverview() {
                             label={t("org.projectOverview.audioValidated")}
                             pct={audioValidatedPct(audioOnTab(audio))}
                             tone="audioValidated"
-                            muted={laneAudioMissing}
-                            tooltip={laneAudioMissing ? CROSS_LANE_TOOLTIP : [
+                            muted={laneAudioMissing || laneOwesNoAudio}
+                            tooltip={laneAudioMissing || laneOwesNoAudio ? audioTileTooltip("") : [
                               t("org.projectOverview.audioValidatedTooltip"),
                               t("org.projectOverview.audioValidatedOfRecorded", {
                                 percent: progressPercentOfFraction(audioValidatedOfRecordedPct(audioOnTab(audio))),
@@ -2229,12 +2245,12 @@ export function ProjectOverview() {
                         )}
                       </>
                     )}
-                    {showAudio && !laneAudioMissing && statVisible("has-audio") && (
+                    {showAudio && !laneAudioMissing && !laneOwesNoAudio && statVisible("has-audio") && (
                       <>
                         <StatBar
                           label={t("org.orgHome.table.audioHeaderLabel")}
                           value={audioOnTab(audio).audioCells}
-                          total={audioDenominator(audio)}
+                          total={audioDenominator(audioOnTab(audio))}
                           tone="audioRecorded"
                           suffix={t("org.projectOverview.cellsSuffix")}
                         />
@@ -2244,11 +2260,11 @@ export function ProjectOverview() {
                     {/* Over the same cells as Has audio and as its tile
                         (`audioValidatedPct`), so the bar, the tile and the
                         plan board's audio bars agree. */}
-                    {showAudio && !laneAudioMissing && statVisible("audio-validated") && (
+                    {showAudio && !laneAudioMissing && !laneOwesNoAudio && statVisible("audio-validated") && (
                       <StatBar
                         label={t("org.projectOverview.audioValidated")}
                         value={audioOnTab(audio).validatedAudioCells}
-                        total={audioDenominator(audio)}
+                        total={audioDenominator(audioOnTab(audio))}
                         tone="audioValidated"
                         suffix={t("org.projectOverview.cellsSuffix")}
                       />

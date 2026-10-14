@@ -88,14 +88,6 @@ export interface ProjectWideSettings {
    */
   countStructuralCells?: boolean
   /**
-   * AQU-1954: "This project records audio". On, every file is expected to carry
-   * audio: the plan board judges every book on its takes and the project's
-   * audio numbers divide by every file. Off or absent, only files with a
-   * recording or a cue sheet count audio, which is how the board has always
-   * decided it. Read in SQL through the generated column (migration 0169).
-   */
-  recordsAudio?: boolean
-  /**
    * AQU-1391: does validating a cell copy its translation into the other cells
    * in the same file whose source text is identical?
    *
@@ -510,6 +502,12 @@ export interface ProjectLaneView {
   legacyTag: string | null
   position: number
   archivedAt: string | null
+  /**
+   * AQU-1954: does every file owe audio in this language? Off, a file counts
+   * this language's audio only once it has a recording in it. Absent from a
+   * server that predates migration 0169, which reads as off.
+   */
+  recordsAudio?: boolean
 }
 
 export type PatchResult =
@@ -629,6 +627,31 @@ export async function createProjectLane(
   if (!res.ok) return { kind: "error", message: `create failed (${res.status})` }
   const body = (await res.json()) as { lane: ProjectLaneView }
   return { kind: "ok", lane: body.lane }
+}
+
+/** AQU-1954: POST /api/v2/projects/:id/lanes/:laneId/records-audio. */
+export async function setProjectLaneRecordsAudio(
+  jwt: string,
+  projectId: string,
+  laneId: string,
+  recordsAudio: boolean,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<{ kind: "ok" } | { kind: "error"; message: string }> {
+  let res: Response
+  try {
+    res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/lanes/${encodeURIComponent(laneId)}/records-audio`,
+      {
+        method: "POST",
+        headers: authHeaders(jwt),
+        body: JSON.stringify({ recordsAudio }),
+      },
+    )
+  } catch (e) {
+    return { kind: "error", message: e instanceof Error ? e.message : String(e) }
+  }
+  if (!res.ok) return { kind: "error", message: `save failed (${res.status})` }
+  return { kind: "ok" }
 }
 
 /** POST /api/v2/projects/:id/lanes/:laneId/archive. */

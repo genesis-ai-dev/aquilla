@@ -51,12 +51,20 @@ export interface PortfolioLane {
   role?: "source" | "target"
   /**
    * AQU-1951: this language's recordings — cells with a selected dub take in
-   * this lane, and those whose takes meet the audio threshold. Measured over
-   * the project's own audio denominator (`audioDenominator`): which cells
-   * exist does not change with the language. Absent on older servers.
+   * this lane, and those whose takes meet the audio threshold. Absent on older
+   * servers.
    */
   audioCells?: number
   validatedAudioCells?: number
+  /**
+   * AQU-1954: what this language's recordings are measured against: every
+   * file when its "Records audio" switch is on, else the files it has recorded
+   * in (and any file with a cue sheet). 0 means the language owes no audio.
+   * Absent on older servers, which measured against the project's total.
+   */
+  audioTotalCells?: number
+  /** AQU-1954: the language row's "Records audio" switch. */
+  recordsAudio?: boolean
 }
 
 export interface PortfolioProject {
@@ -89,10 +97,9 @@ export interface PortfolioProject {
    */
   audioTotalCells?: number
   /**
-   * AQU-1954: the project's "This project records audio" switch. On, every
-   * file counts toward `audioTotalCells` and the plan board expects audio of
-   * every book; off, only files with a recording or a cue sheet do. Optional
-   * because an older server sends none, which reads as off.
+   * AQU-1954: whether any of the project's languages has its "Records audio"
+   * switch on, so the Progress card shows audio before the first take.
+   * Optional because an older server sends none, which reads as off.
    */
   recordsAudio?: boolean
   audioCells: number

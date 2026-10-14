@@ -73,6 +73,11 @@ export interface WaveformRectProps {
   trackVars?: Record<string, string>
   /** The part that plays, as fractions of the whole clip. Outside it is faded. */
   keep?: { start: number; end: number } | null
+  /**
+   * AQU-1767: stretches INSIDE `keep` that do not play either, as fractions —
+   * the space between a split take's pieces. Faded like the outside.
+   */
+  gaps?: readonly { start: number; end: number }[]
   /** Playback position as a fraction of the whole clip; drawn only while `playing`. */
   progress?: number | null
   playing?: boolean
@@ -126,6 +131,7 @@ export function WaveformRect({
   kind = "take",
   trackVars = NEUTRAL_TRACK_VARS,
   keep = null,
+  gaps,
   progress = null,
   playing = false,
   onTogglePlay,
@@ -282,6 +288,17 @@ export function WaveformRect({
           className="pointer-events-none absolute inset-y-0 right-0 bg-background/60"
           style={{ width: pct(1 - keep.end) }}
         />
+      )}
+      {gaps?.map((gap, i) =>
+        gap.end > gap.start ? (
+          <div
+            key={i}
+            aria-hidden
+            data-testid={testId ? `${testId}-fade-gap` : undefined}
+            className="pointer-events-none absolute inset-y-0 bg-background/60"
+            style={{ left: pct(gap.start), width: pct(gap.end - gap.start) }}
+          />
+        ) : null,
       )}
 
       {onSeek && (

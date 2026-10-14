@@ -2014,6 +2014,16 @@ export const editor = defineNamespace({
       one: "{count} other take",
       other: "{count} other takes",
     }),
+    // AQU-1767 (Sam, 2026-10-14): a split take is one take made of pieces.
+    "editor.recordingTab.splitInto": plural({
+      one: "split in {count}",
+      other: "split in {count}",
+    }),
+    "editor.recordingTab.cutAt": "Cut",
+    "editor.recordingTab.pieces": plural({
+      one: "{count} piece",
+      other: "{count} pieces",
+    }),
     "editor.recordingTab.matches": "Matches the text",
     "editor.recordingTab.differs": plural({
       one: "{count} word differs",
@@ -7791,6 +7801,27 @@ export const editor = defineNamespace({
           "Heading over the list of a line's takes other than the one that plays, in " +
           "the Recording tab. Count-governed.",
         placeholders: { count: "How many other takes the line has. Always 1 or more here." },
+        maxLength: 24,
+      },
+      "editor.recordingTab.splitInto": {
+        description:
+          "After a take's name when it has been split into pieces on the timeline, e.g. " +
+          "'Take 1 · split in 2'. The take is still one recording; the pieces are parts of it. " +
+          "Count-governed.",
+        placeholders: { count: "How many pieces the take is in. Always 2 or more." },
+        maxLength: 24,
+      },
+      "editor.recordingTab.cutAt": {
+        description:
+          "Screen-reader name of a line on a take's waveform marking where it was split into " +
+          "two pieces (a noun: the cut).",
+        maxLength: 20,
+      },
+      "editor.recordingTab.pieces": {
+        description:
+          "Heading over the list of a split take's pieces in the Recording tab. A piece is " +
+          "one part of a take that was split on the timeline. Count-governed.",
+        placeholders: { count: "How many pieces the take is in. Always 2 or more." },
         maxLength: 24,
       },
       "editor.recordingTab.matches": {

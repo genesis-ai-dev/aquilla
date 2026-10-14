@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { isSourceClipFor, keptWindowSec } from "./kept-window"
+import { isSourceClipFor, keptWindowSec, piecesWindowSec } from "./kept-window"
 
 // Ids follow buildAudioId's seeding: a take carries its CELL id, the imported
 // source clip carries its FILE id.
@@ -48,5 +48,16 @@ describe("isSourceClipFor", () => {
     expect(isSourceClipFor(cell, take)).toBe(false)
     expect(isSourceClipFor({ ...cell, medium: "text" }, source)).toBe(false)
     expect(isSourceClipFor({ ...cell, selectedAudioId: take }, source)).toBe(false)
+  })
+})
+
+// AQU-1767 (Sam, 2026-10-14): a split take's pieces, for its waveform.
+describe("piecesWindowSec", () => {
+  it("runs first start to last end, marks cuts where pieces meet, and keeps the space between apart", () => {
+    expect(piecesWindowSec([
+      { trimStartMs: 1500, trimEndMs: 2500 },
+      { trimStartMs: 200, trimEndMs: 1500 },
+      { trimStartMs: 3000, trimEndMs: null },
+    ])).toEqual({ start: 0.2, end: null, cuts: [1.5], gaps: [{ start: 2.5, end: 3 }] })
   })
 })

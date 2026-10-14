@@ -16,7 +16,8 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { isDenoisedAudioId } from "@/lib/audio/upload"
 import { isDenoiseSupported } from "@/lib/audio/denoise"
-import { denoiseTake } from "@/lib/audio/denoise-take"
+import { denoiseSplitTake, denoiseTake } from "@/lib/audio/denoise-take"
+import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 import { emitCellAudioSelect } from "@/lib/sync/events-emit"
 import {
   injectOptimisticAudioAttachment,
@@ -44,6 +45,12 @@ interface Props {
   editable: boolean
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
+  /**
+   * AQU-1767 (Sam, 2026-10-14): the take is SPLIT — its live pieces, in clip
+   * order. Cleaning keeps the cuts (`denoiseSplitTake`), and Revert chooses
+   * the original take again, every piece of it.
+   */
+  pieces?: readonly AudioAttachmentOut[]
 }
 
 export function DenoiseButton(props: Props) {
@@ -51,8 +58,9 @@ export function DenoiseButton(props: Props) {
   const {
     projectId, fileId, cellId, selectedAudioId, selectedUrl,
     referenceAudioId, originalUrl, originalDurationMs, author, session, editable,
-    targetLang,
+    targetLang, pieces,
   } = props
+  const split = pieces && pieces.length > 1 ? pieces : null
 
   const [processing, setProcessing] = useState(false)
   const [reverting, setReverting] = useState(false)
@@ -67,14 +75,18 @@ export function DenoiseButton(props: Props) {
     setError(null)
     setProcessing(true)
     try {
-      await denoiseTake({
-        projectId, fileId, cellId,
-        sourceAudioId: selectedAudioId,
-        sourceUrl: selectedUrl,
-        author,
-        session,
-        ...(targetLang ? { targetLang } : {}),
-      })
+      if (split) {
+        await denoiseSplitTake({ projectId, fileId, cellId, pieces: split, author, session, ...(targetLang ? { targetLang } : {}) })
+      } else {
+        await denoiseTake({
+          projectId, fileId, cellId,
+          sourceAudioId: selectedAudioId,
+          sourceUrl: selectedUrl,
+          author,
+          session,
+          ...(targetLang ? { targetLang } : {}),
+        })
+      }
       // Success: the cleaned take is optimistically selected, so this component
       // re-renders into the "Noise removed" state on the next pass.
     } catch (e) {
@@ -84,7 +96,7 @@ export function DenoiseButton(props: Props) {
     } finally {
       setProcessing(false)
     }
-  }, [canRun, processing, projectId, fileId, cellId, selectedAudioId, selectedUrl, author, session, targetLang])
+  }, [canRun, processing, projectId, fileId, cellId, selectedAudioId, selectedUrl, author, session, targetLang, split])
 
   const handleRevert = useCallback(async () => {
     if (!referenceAudioId || reverting) return
@@ -97,11 +109,14 @@ export function DenoiseButton(props: Props) {
       const revertP = emitCellAudioSelect({
         projectId, fileId, cellId,
         audioId: referenceAudioId,
-        slot: "recording",
+        // A split take may sit on an added track: choose on its own slot.
+        slot: split?.[0]?.slot ?? "recording",
         ...(targetLang ? { targetLang } : {}),
         author,
       })
-      if (originalUrl) {
+      // Not for a split take: painting the original's first piece alone, with
+      // no window, would show the whole recording as one take until the read.
+      if (originalUrl && !split) {
         injectOptimisticAudioAttachment(fileId, cellId, {
           audioId: referenceAudioId,
           url: originalUrl,
@@ -123,7 +138,7 @@ export function DenoiseButton(props: Props) {
     } finally {
       setReverting(false)
     }
-  }, [referenceAudioId, reverting, originalUrl, originalDurationMs, projectId, fileId, cellId, author, targetLang])
+  }, [referenceAudioId, reverting, originalUrl, originalDurationMs, projectId, fileId, cellId, author, targetLang, split])
 
   if (isDenoised) {
     return (

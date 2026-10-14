@@ -25,7 +25,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { useRecordingTextDrift } from "@/hooks/useRecordingTextDrift"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { audioIdSeededWith } from "@/lib/audio/upload"
-import { groupSelection, groupTakesByTrack, playingTakeId, type TakeGroup } from "@/lib/audio/take-groups"
+import { groupSelection, groupTakesByTrack, piecesOf, playingTakeId, type TakeGroup } from "@/lib/audio/take-groups"
 import { DEFAULT_TARGET_TRACK_ID, GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
 import { takeTrackVars, tracksForTakesIn } from "@/lib/timeline/take-colors"
 import { useEditorActions } from "@/context/EditorActionsContext"
@@ -212,6 +212,14 @@ function OwnerTakes({
       )}
       {groups.map((group) => {
         const playing = playingTakeId(group, entry)
+        // AQU-1767 (Sam, 2026-10-14): a split take plays as one take — all its
+        // pieces sit on top together, and none of them is an "other take".
+        const playingPieces = piecesOf(group.takes, playing)
+        const split = playingPieces.length > 1 ? playingPieces : undefined
+        // Its transcript is of the whole take, on whichever piece holds it.
+        const playingTimings = split
+          ? split.map((piece) => owner.audioTimings?.[piece.audioId]).find((tm) => tm && tm.length > 0)
+          : playing ? owner.audioTimings?.[playing] : undefined
         const isDefault = group.trackId === DEFAULT_TARGET_TRACK_ID
         const playingAtt = playing ? group.takes.find((a) => a.audioId === playing) : undefined
         const generated = Boolean(playingAtt && (playingAtt.voiceId || playingAtt.slot === GENERATED_VOICE_SLOT))
@@ -240,9 +248,11 @@ function OwnerTakes({
                 {...shared}
                 owner={owner}
                 audioId={playing}
-                timings={owner.audioTimings?.[playing]}
+                timings={playingTimings}
                 readOnlyTranscript={generated}
-                provenance={history.get(playing) ?? null}
+                provenance={(split ? history.get(split[0].pieceOf ?? split[0].audioId) : undefined) ?? history.get(playing) ?? null}
+                pieces={split}
+                takesHistory={history}
                 onLastTakeRemoved={shared.onLastTakeRemoved}
                 trackName={showTracks ? group.name || t("editor.recordingTab.addedTrack") : null}
                 trackFileId={trackFileId}
@@ -256,7 +266,7 @@ function OwnerTakes({
               trackFileId={trackFileId}
               cellId={owner.id}
               takes={group.takes}
-              hide={playing ? [playing] : undefined}
+              hide={split ? split.map((piece) => piece.audioId) : playing ? [playing] : undefined}
               selectedAudioId={groupSelection(entry, group.trackId)}
               // The displace-to-source dance belongs to the default row alone.
               selectedGeneratedAudioId={isDefault ? entry.selectedGeneratedVoiceAudioId : null}

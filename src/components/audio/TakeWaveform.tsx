@@ -36,7 +36,7 @@ import {
   TRIM_NUDGE_SEC,
   type TrimValue,
 } from "@/lib/audio/trim-edit"
-import type { KeptWindow } from "@/lib/audio/kept-window"
+import type { KeptWindow, PiecesWindow } from "@/lib/audio/kept-window"
 import type { UseCellAudioResult } from "@/hooks/useCellAudio"
 import type { AudioMediaStrategy } from "@/lib/parsers/types"
 import { WaveformRect, type WaveformEdge } from "./WaveformRect"
@@ -47,6 +47,12 @@ export interface TakeWaveformProps {
   /** Identifies the take, so a drag in progress never leaks onto the next one. */
   audioId: string | null | undefined
   kept: KeptWindow
+  /**
+   * AQU-1767: a split take — its pieces lit, the cuts marked, the space
+   * between them faded and skipped in playback. `kept` then runs from the
+   * first piece's start to the last's end. No trim edges: trim each piece.
+   */
+  pieces?: PiecesWindow
   height: number
   kind?: "take" | "generated"
   /** The take's track colour (take-colors.ts); grey when absent. */
@@ -70,6 +76,7 @@ export function TakeWaveform({
   controller,
   audioId,
   kept,
+  pieces,
   height,
   kind = "take",
   trackVars,
@@ -137,8 +144,16 @@ export function TakeWaveform({
     ? { start: toFrac(trim.start ?? 0), end: toFrac(trim.end ?? dur) }
     : null
 
+  // AQU-1767: a split take plays its pieces and skips what lies between.
+  useEffect(() => {
+    if (!pieces || !isPlaying) return
+    const gap = pieces.gaps.find((g) => currentTime >= g.start && currentTime < g.end - 0.01)
+    if (gap) seek(gap.end)
+  }, [pieces, isPlaying, currentTime, seek])
+  const gaps = pieces && dur > 0 ? pieces.gaps.map((g) => ({ start: toFrac(g.start), end: toFrac(g.end) })) : undefined
+
   // ── Edges ─────────────────────────────────────────────────────────────
-  const canEdit = trimEditable && !isSection && dur > 0 && Boolean(onCommitTrim)
+  const canEdit = !pieces && trimEditable && !isSection && dur > 0 && Boolean(onCommitTrim)
   const showReadOnly = !canEdit && !isSection && dur > 0 && kept.kind === "trim"
   // The save paints the new window at once (an optimistic overlay, in the same
   // event), so the drag's own value can retire as it is handed over.
@@ -147,7 +162,7 @@ export function TakeWaveform({
     if (!sameTrim(v, stored)) onCommitTrim?.(v.start, v.end)
     setDraft(null)
   }
-  const edges: WaveformEdge[] = canEdit || showReadOnly
+  const trimEdges: WaveformEdge[] = canEdit || showReadOnly
     ? [
         {
           key: "start",
@@ -177,6 +192,11 @@ export function TakeWaveform({
         },
       ]
     : []
+  // AQU-1767: a split take's cuts, as read-only lines.
+  const cutEdges: WaveformEdge[] = pieces && dur > 0
+    ? pieces.cuts.map((at) => ({ key: `cut-${at}`, at: toFrac(at), label: t("editor.recordingTab.cutAt"), valueText: formatTrimTime(at), editable: false }))
+    : []
+  const edges = cutEdges.length > 0 ? [...trimEdges, ...cutEdges] : trimEdges
 
   // ── Status overlays (CellWaveform's, unchanged) ───────────────────────
   const needsClick = !shouldLoad && peaksState === "idle"
@@ -226,6 +246,7 @@ export function TakeWaveform({
       kind={kind}
       trackVars={trackVars}
       keep={keep}
+      gaps={gaps}
       playing={isPlaying}
       progress={viewLen > 0 ? toFrac(currentTime) : null}
       onTogglePlay={() => { if (isPlaying) pause(); else void play() }}

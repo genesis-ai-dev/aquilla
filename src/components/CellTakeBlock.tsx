@@ -36,7 +36,7 @@ import { CellTranscriptPreview } from "./CellTranscriptPreview"
 import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { DenoiseButton } from "./audio/DenoiseButton"
 import { useCellAudio, type UseCellAudioResult } from "@/hooks/useCellAudio"
-import { keptWindowSec } from "@/lib/audio/kept-window"
+import { keptWindowSec, piecesWindowSec, type KeptWindow } from "@/lib/audio/kept-window"
 import { takeTrackVars } from "@/lib/timeline/take-colors"
 import { persistTakeTrim, trimMs } from "@/lib/audio/persist-trim"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
@@ -56,7 +56,10 @@ import type { CodexCell } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { AudioValidationControl } from "./cell/AudioValidationControl"
 import { useAudioValidation } from "@/hooks/useAudioValidation"
-import { hasOwnRecordingLeft, removeTake, renameTake } from "@/lib/audio/take-actions"
+import { hasOwnRecordingLeft, removeTake, removeWholeTake, renameTake } from "@/lib/audio/take-actions"
+import { takeBaseLabel } from "@/lib/audio/take-groups"
+import { pieceGroupOf, type AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
+import { TakesStrip } from "@/components/AudioRecorder/TakesStrip"
 import { GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
 import { effectiveAttachmentDurationMs } from "@/lib/timeline/lane-timing"
 
@@ -124,6 +127,17 @@ export interface CellTakeBlockProps {
    * take is a "Take 1" (Sam, 2026-09-30).
    */
   trackName?: string | null
+  /**
+   * AQU-1767 (Sam, 2026-10-14): the take that plays was SPLIT — its live
+   * pieces, in clip order. It shows as one take ("Take 1 · split in 2"): one
+   * waveform with the pieces lit and the cuts marked, Transcribe and Remove
+   * noise on the whole take, delete removing every piece, the approval
+   * covering every piece, and a row per piece under it (play, approve, rename,
+   * delete). Absent, or one piece: a take as before.
+   */
+  pieces?: readonly AudioAttachmentOut[]
+  /** The line's take history, already read by the tab — for the piece rows. */
+  takesHistory?: ReadonlyMap<string, RecordingTextDrift>
 }
 
 export function CellTakeBlock(props: CellTakeBlockProps) {
@@ -164,6 +178,8 @@ function CellTakeBlockView({
   onLastTakeRemoved,
   trackName = null,
   trackFileId,
+  pieces,
+  takesHistory,
 }: CellTakeBlockProps & { controller: UseCellAudioResult }) {
   const t = useT()
   const transcriptPreviewRef = useRef<HTMLDivElement | null>(null)
@@ -183,13 +199,20 @@ function CellTakeBlockView({
     ...(targetLang ? { targetLang } : {}),
     surface: "recording-tab",
   })
-  const validationTakes = audioValidation.takeFor(owner, selectedAudioId)
+  const split = pieces && pieces.length > 1 ? pieces : null
+  // A split take is approved as a whole from here: one press, every piece.
+  const validationTakes = split
+    ? split.flatMap((piece) => audioValidation.takeFor(owner, piece.audioId))
+    : audioValidation.takeFor(owner, selectedAudioId)
 
   // AQU-1217: the part of the clip that plays for this line — the take's
   // stored trim, or, for an imported source-audio section, the section itself.
   // TakeWaveform applies it to the player; this block used to play the whole
   // file (an untrimmed take, and on a source section the entire reading).
-  const kept = keptWindowSec(owner, selectedAudioId, attachment)
+  const piecesWindow = useMemo(() => (split ? piecesWindowSec(split) : null), [split])
+  const kept: KeptWindow = piecesWindow
+    ? { start: piecesWindow.start, end: piecesWindow.end, kind: "trim" }
+    : keptWindowSec(owner, selectedAudioId, attachment)
   const isGenerated = Boolean(selectedAudioId && selectedAudioId === owner.selectedGeneratedVoiceAudioId)
   // Trimmed where it is shown (Sam, 2026-09-25): the edit lands on the cell
   // that HOLDS the take — a linked heard-line take writes to its cue.
@@ -234,6 +257,8 @@ function CellTakeBlockView({
       projectId: project.id,
       language,
       askAgain: true,
+      // A split take is transcribed whole (Sam, 2026-10-14).
+      ...(split ? { pieces: split } : {}),
     })
     // The transcript rides a queued cell.audio.attach — flush it, then poke the
     // OWNER's file so its attachment read picks the timings up. For a linked
@@ -241,7 +266,7 @@ function CellTakeBlockView({
     // takes are drawn from.
     await onCommitted?.(owner.id)
     notifyAudioAttachmentsChanged(owner.fileId)
-  }, [owner, selectedAudioId, attachment?.slot, session, project, targetLang, onCommitted])
+  }, [owner, selectedAudioId, attachment?.slot, session, project, targetLang, onCommitted, split])
 
   // Deletable even when it is the line's only take (Sam, 2026-09-29) — the
   // same removal as the takes lists. Nothing is chosen in its place: the line
@@ -256,6 +281,11 @@ function CellTakeBlockView({
     const slot = attachment.slot ?? (selectedAudioId === owner.selectedGeneratedVoiceAudioId ? GENERATED_VOICE_SLOT : RECORDING_SLOT)
     const lane = targetLang ? { targetLang } : {}
     const removal = { projectId: project.id, fileId: owner.fileId, cellId: owner.id, audioId: selectedAudioId, slot, ...lane, author: username, history: { wasSelected: true } }
+    // A split take goes whole, every piece in one step (Sam, 2026-10-14).
+    const removing = split ? split.map((piece) => ({ audioId: piece.audioId, slot: piece.slot ?? slot })) : null
+    const remove = removing
+      ? () => removeWholeTake({ ...removal, pieces: removing })
+      : () => removeTake(removal)
     if (takePlaying) pauseTake()
     // THE TRY HOLDS THE AWAIT AND NOTHING ELSE, deliberately: the React
     // Compiler cannot compile a try/finally, or a conditional inside a try,
@@ -265,18 +295,19 @@ function CellTakeBlockView({
     // whatever happens, as a finally would.
     let removed = false
     try {
-      await removeTake(removal)
+      await remove()
       removed = true
     } catch {
       // The remove overlay drops itself and refetches; the take comes back.
     }
     setDeleting(false)
     if (!removed) return
+    const gone = new Set(removing?.map((r) => r.audioId) ?? [selectedAudioId])
     const takes = Object.entries(owner.attachments ?? {}).map(([audioId, a]) => ({
-      audioId, voiceId: a.voiceId ?? null, isDeleted: a.isDeleted,
+      audioId, voiceId: a.voiceId ?? null, isDeleted: a.isDeleted || (gone.has(audioId) && audioId !== selectedAudioId),
     }))
     if (!hasOwnRecordingLeft(takes, selectedAudioId, owner.id)) onLastTakeRemoved?.(owner.id)
-  }, [selectedAudioId, attachment, takePlaying, pauseTake, project.id, owner, username, onLastTakeRemoved, targetLang])
+  }, [selectedAudioId, attachment, takePlaying, pauseTake, project.id, owner, username, onLastTakeRemoved, targetLang, split])
 
   // Renameable in place, as every take in the lists is (Sam, 2026-09-29).
   // The new name shows at once, for as long as the take still carries the
@@ -359,11 +390,13 @@ function CellTakeBlockView({
   const showTranscript = Boolean(timings && timings.length > 0) && (isSection || verdict.kind !== "match")
   const label = isSection
     ? t("editor.recordingTab.sourceSection")
-    : shownLabel ?? t("audio.takesStrip.takeFallback")
+    : (split ? takeBaseLabel(shownLabel) : shownLabel) ?? t("audio.takesStrip.takeFallback")
   // The length that PLAYS (AQU-1217: a trimmed take shows its trimmed
   // length) — the head said the whole file's while the timer under it said
   // the kept part's.
-  const keptMs = effectiveAttachmentDurationMs(attachment)
+  const keptMs = split
+    ? split.reduce((sum, piece) => sum + (effectiveAttachmentDurationMs(piece as never) ?? 0), 0)
+    : effectiveAttachmentDurationMs(attachment)
   const trackVars = takeTrackVars({
     files: project.files,
     fileId: trackFileId ?? owner.fileId,
@@ -404,6 +437,11 @@ function CellTakeBlockView({
         ) : (
           <span data-testid="cell-take-label" className="font-medium">{label}</span>
         )}
+        {split && (
+          <span data-testid="cell-take-split" className="text-muted-foreground">
+            · {t("editor.recordingTab.splitInto", { count: split.length })}
+          </span>
+        )}
         {!isSection && keptMs != null && (
           <span data-testid="cell-take-length" className="tabular-nums text-muted-foreground">{(keptMs / 1000).toFixed(1)}s</span>
         )}
@@ -441,7 +479,8 @@ function CellTakeBlockView({
             testId="cell-take-verdict"
           />
         )}
-        {!isSection && selectedAudioId && !renaming && (
+        {/* A split take's name is its pieces': each is renamed on its row. */}
+        {!isSection && !split && selectedAudioId && !renaming && (
           <AppTooltip content={t("audio.takesStrip.renameTooltip")}>
             <Button
               type="button"
@@ -491,7 +530,10 @@ function CellTakeBlockView({
               projectId={project.id}
               fileId={owner.fileId}
               cellId={owner.id}
-              selectedAudioId={selectedAudioId}
+              // A split take reads as cleaned by its group: the first piece of
+              // a cleaned take may have been deleted since.
+              selectedAudioId={split ? pieceGroupOf(split[0], split[0].audioId) : selectedAudioId}
+              pieces={split ?? undefined}
               selectedUrl={attachment.url}
               referenceAudioId={attachment.referenceAudioId ?? null}
               originalUrl={
@@ -556,7 +598,8 @@ function CellTakeBlockView({
         kind={isGenerated || isSection ? "generated" : "take"}
         trackVars={trackVars}
         strategy={project.audioMediaStrategy ?? "lazy"}
-        trimEditable={editable}
+        {...(piecesWindow ? { pieces: piecesWindow } : {})}
+        trimEditable={editable && !split}
         onCommitTrim={commitTrim}
         testId="cell-take-waveform"
       >
@@ -570,6 +613,26 @@ function CellTakeBlockView({
           />
         </span>
       </TakeWaveform>
+      {split && (
+        // A row per piece (Sam, 2026-10-14): play it, approve it, rename it,
+        // delete it.
+        <TakesStrip
+          variant="pieces"
+          projectId={project.id}
+          project={project}
+          fileId={owner.fileId}
+          trackFileId={trackFileId ?? owner.fileId}
+          cellId={owner.id}
+          takes={[...split]}
+          selectedAudioId={selectedAudioId ?? null}
+          author={username}
+          session={session}
+          targetLang={targetLang}
+          history={takesHistory}
+          onLastTakeRemoved={onLastTakeRemoved}
+          readOnly={!editable}
+        />
+      )}
       {showTranscript && timings && (
         <CellTranscriptPreview
           ref={readOnlyTranscript ? undefined : transcriptPreviewRef}

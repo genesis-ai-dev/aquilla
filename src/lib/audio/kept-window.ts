@@ -78,3 +78,38 @@ export function keptWindowSec(
   if (startMs == null && endMs == null) return NONE
   return { start: startMs == null ? null : startMs / 1000, end: endMs == null ? null : endMs / 1000, kind: "trim" }
 }
+
+/** AQU-1767: a split take's pieces on the recording's clock, in seconds. */
+export interface PiecesWindow {
+  /** The first piece's start and the last piece's end (null = the clip's end). */
+  start: number
+  end: number | null
+  /** Stretches between pieces that do not play. */
+  gaps: { start: number; end: number }[]
+  /** Where one piece ends exactly where the next begins: the cuts. */
+  cuts: number[]
+}
+
+/**
+ * AQU-1767 (Sam, 2026-10-14): where a split take's pieces sit in the recording
+ * they share, so its waveform can show them lit, the cuts marked and the
+ * space between them faded — and its player can skip that space.
+ */
+export function piecesWindowSec(
+  pieces: ReadonlyArray<{ trimStartMs?: number | null; trimEndMs?: number | null }>,
+): PiecesWindow {
+  const spans = pieces
+    .map((p) => ({ start: (p.trimStartMs ?? 0) / 1000, end: p.trimEndMs == null ? Infinity : p.trimEndMs / 1000 }))
+    .sort((a, b) => a.start - b.start)
+  const cuts: number[] = []
+  const merged: { start: number; end: number }[] = []
+  for (const span of spans) {
+    const last = merged[merged.length - 1]
+    if (last && Math.abs(span.start - last.end) < 0.001) cuts.push(span.start)
+    if (last && span.start <= last.end + 0.001) last.end = Math.max(last.end, span.end)
+    else merged.push({ ...span })
+  }
+  const gaps = merged.slice(1).map((m, i) => ({ start: merged[i].end, end: m.start }))
+  const end = merged.length > 0 ? merged[merged.length - 1].end : Infinity
+  return { start: merged[0]?.start ?? 0, end: Number.isFinite(end) ? end : null, gaps, cuts }
+}

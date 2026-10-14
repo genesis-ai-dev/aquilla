@@ -913,7 +913,7 @@ export const editor = defineNamespace({
     // AQU-1767 phase 1: cutting takes into independent pieces.
     "editor.timeline.bladeToggleAria": "Blade: cut a take where you click",
     "editor.timeline.bladeOnTooltip": "Blade on: click a take to cut it there (B)",
-    "editor.timeline.bladeOffTooltip": "Blade (B): click to cut · S splits under the pointer",
+    "editor.timeline.bladeOffTooltip": "Blade (B): click to cut · S splits at the playhead",
     "editor.timeline.bladeFreeTiming": "Cutting takes isn't available in Free timing yet",
     // AQU-1767 (Sam, 2026-10-14): a take's right-click menu.
     "editor.timeline.takeMenuSplit": "Split here",
@@ -5915,7 +5915,7 @@ export const editor = defineNamespace({
       "editor.timeline.bladeOffTooltip": {
         description:
           "Tooltip of the blade toggle while it is off. (B) is the toggle's keyboard shortcut " +
-          "and S splits the take under the mouse pointer without the blade — keep both as the " +
+          "and S splits the selected take at the playhead without the blade — keep both as the " +
           "Latin letters B and S.",
         maxLength: 60,
       },

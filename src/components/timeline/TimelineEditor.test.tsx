@@ -670,7 +670,9 @@ describe("TimelineEditor", () => {
     expect(screen.getByTestId("tl-target-m3")).toHaveAttribute("data-kind", "generated")
   })
 
-  it("clicking a Target-track chip selects the section and seeks playback to it", () => {
+  // AQU-1767 (Sam, 2026-10-14): a click selects the take and leaves the
+  // playhead alone; a double-click jumps to the line.
+  it("clicking a Target-track chip selects the section; double-clicking seeks playback to it", () => {
     const onSeekToTime = vi.fn()
     render(
       <TimelineEditor
@@ -679,8 +681,10 @@ describe("TimelineEditor", () => {
       />,
     )
     fireEvent.click(screen.getByTestId("tl-target-m2"))
-    expect(onSeekToTime).toHaveBeenCalledWith(10)
+    expect(onSeekToTime).not.toHaveBeenCalled()
     expect(screen.getByTestId("tl-detail")).toHaveAttribute("data-cell-id", "m2")
+    fireEvent.doubleClick(screen.getByTestId("tl-target-m2"))
+    expect(onSeekToTime).toHaveBeenCalledWith(10)
   })
 
   it("speaker buttons start audible, push audibility into the queue, toggle, and persist per file", () => {
@@ -4932,8 +4936,8 @@ describe("TimelineEditor — an empty linked video (Sam's D3)", () => {
   })
 })
 
-// AQU-1767 (Sam, 2026-10-14): the blade stays on B, S splits under the pointer,
-// and the "cut at the playhead" button is gone.
+// AQU-1767 (Sam, 2026-10-14): the blade stays on B, S splits the selected take
+// at the playhead, and the "cut at the playhead" button is gone.
 describe("TimelineEditor — splitting takes (AQU-1767)", () => {
   beforeEach(() => { topOwner.value = 1 })
   const TAKE_ID = "audio-m2-1700000000-take.wav"
@@ -4952,30 +4956,66 @@ describe("TimelineEditor — splitting takes (AQU-1767)", () => {
     expect(screen.queryByTestId("tl-cut-at-playhead")).toBeNull()
   })
 
-  it("S splits the take under the pointer, at the pointer, without the blade", () => {
-    const onCutTargets = vi.fn()
+  // Sam (2026-10-14): "S should only split AT PLAYHEAD and only ON A SELECTED
+  // TAKE." 38 px/s at the default zoom; the take sits at 10-14 s.
+  const renderSplit = (onCutTargets = vi.fn(), onSeekToTime = vi.fn()) => {
     render(
-      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={[takeCell()]} onRetimeSubtitle={() => {}} onCutTargets={onCutTargets} />,
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={[takeCell()]}
+        onRetimeSubtitle={() => {}} onCutTargets={onCutTargets} onSeekToTime={onSeekToTime}
+      />,
     )
-    const chip = screen.getByTestId("tl-target-m2")
-    expect(chip.hasAttribute("data-blade")).toBe(false)
-    fireEvent.pointerMove(chip, { clientX: 60 })
+    const playheadTo = (sec: number) => fireEvent.click(screen.getByTestId("tl-ruler"), { clientX: sec * 38 })
+    return { onCutTargets, onSeekToTime, playheadTo, chip: () => screen.getByTestId("tl-target-m2") }
+  }
+
+  it("S splits the selected take at the playhead", () => {
+    const { onCutTargets, playheadTo, chip } = renderSplit()
+    playheadTo(12)
+    fireEvent.click(chip())
+    expect(chip().className).toContain("ring-2 ring-sky-500")
     fireEvent.keyDown(window, { key: "s" })
     expect(onCutTargets).toHaveBeenCalledTimes(1)
     const [cuts] = onCutTargets.mock.calls[0]
     expect(cuts).toHaveLength(1)
     expect(cuts[0]).toMatchObject({ cellId: "m2", audioId: TAKE_ID })
-    expect(cuts[0].atMs).toBeGreaterThan(0)
+    expect(cuts[0].atMs).toBeGreaterThan(1900)
+    expect(cuts[0].atMs).toBeLessThan(2100)
   })
 
-  it("S does nothing once the pointer has left the take", () => {
-    const onCutTargets = vi.fn()
-    render(
-      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={[takeCell()]} onRetimeSubtitle={() => {}} onCutTargets={onCutTargets} />,
-    )
-    const chip = screen.getByTestId("tl-target-m2")
-    fireEvent.pointerMove(chip, { clientX: 60 })
-    fireEvent.pointerLeave(chip)
+  it("clicking a take leaves the playhead where it is; double-clicking jumps to the line", () => {
+    const { onSeekToTime, playheadTo, chip } = renderSplit()
+    playheadTo(12)
+    expect(onSeekToTime).toHaveBeenCalledTimes(1)
+    fireEvent.click(chip())
+    expect(onSeekToTime).toHaveBeenCalledTimes(1)
+    fireEvent.doubleClick(chip())
+    expect(onSeekToTime).toHaveBeenCalledTimes(2)
+    expect(onSeekToTime.mock.calls[1][0]).toBeCloseTo(10)
+  })
+
+  it("S never splits at the mouse: with no take selected it does nothing", () => {
+    const { onCutTargets, playheadTo, chip } = renderSplit()
+    playheadTo(12)
+    fireEvent.pointerMove(chip(), { clientX: 12 * 38 })
+    fireEvent.keyDown(window, { key: "s" })
+    expect(onCutTargets).not.toHaveBeenCalled()
+  })
+
+  it("S does nothing while the playhead is off the selected take", () => {
+    const { onCutTargets, playheadTo, chip } = renderSplit()
+    playheadTo(2)
+    fireEvent.click(chip())
+    fireEvent.keyDown(window, { key: "s" })
+    expect(onCutTargets).not.toHaveBeenCalled()
+  })
+
+  it("a click on the line's card drops the selected take", () => {
+    const { onCutTargets, playheadTo, chip } = renderSplit()
+    fireEvent.click(chip())
+    fireEvent.click(screen.getByTestId("tl-card-m2"))
+    playheadTo(12)
+    expect(chip().className).not.toContain("ring-2")
     fireEvent.keyDown(window, { key: "s" })
     expect(onCutTargets).not.toHaveBeenCalled()
   })

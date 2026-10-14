@@ -85,6 +85,13 @@ export interface TargetAudioLaneProps {
   viewStartSec: number
   viewEndSec: number
   selectedId: string | null
+  /**
+   * AQU-1767 (Sam, 2026-10-14): the line whose take ON THIS LANE is the
+   * selected take — the one S splits at the playhead. A selected line alone
+   * (from its card or its row) lights its takes more quietly, because S does
+   * not act on them.
+   */
+  selectedTakeCellId?: string | null
   /** The verse the transport is WAITING ON (queue state "loading") — its chip
    *  shows a small spinner while the readiness gate parks. */
   loadingCellId?: string | null
@@ -112,7 +119,11 @@ export interface TargetAudioLaneProps {
   masterHonorsTrims?: boolean
   snapEnabled?: boolean
   onSelect(id: string): void
-  /** Clean chip click navigates playback to the section (same as a card). */
+  /** AQU-1767 (Sam, 2026-10-14): a clean click on a take selects THAT take,
+   *  after `onSelect` has selected its line. */
+  onSelectTake?(cellId: string): void
+  /** A double-click on a take jumps playback to its line (a single click
+   *  selects it and leaves the playhead where it is — Sam, 2026-10-14). */
   onSeek?(id: string): void
   /** Round 6/7: move a chip — the dub's new CLIP-ZERO ANCHOR (file seconds).
    *
@@ -129,8 +140,6 @@ export interface TargetAudioLaneProps {
   onCutTarget?(cellId: string, audioId: string, atMs: number): void
   /** AQU-1767: what a right-click on a take offers. Absent, it offers nothing. */
   takeMenu?: TakeMenuActions
-  /** AQU-1767: the take and cut point under the pointer, for the S key. */
-  onHoverCut?(target: HoverCut | null): void
   /** Round 8b: corner mic button — opens the recording modal on this cell. */
   onOpenRecording?(cellId: string): void
   /** SUB-51: timed media sections with NO dub yet. Their empty space in this
@@ -199,13 +208,6 @@ interface ChipGeometry {
   ratio: number | null
 }
 
-/** AQU-1767: the take under the pointer and where in its audio a cut would land. */
-export interface HoverCut {
-  cellId: string
-  audioId: string
-  atMs: number
-}
-
 /**
  * AQU-1767 (Sam, 2026-10-14): the actions a take's right-click menu offers.
  * Each is optional; a missing one is simply not in the menu.
@@ -240,13 +242,13 @@ function TargetAudioChip({
   editable,
   snap,
   onSelect,
+  onSelectTake,
   onSeek,
   onRetimeTarget,
   onTrimTarget,
   bladeActive = false,
   onCutTarget,
   takeMenu,
-  onHoverCut,
   onOpenRecording,
   validationRequirementAudio = 1,
   currentUsername = "",
@@ -282,7 +284,9 @@ function TargetAudioChip({
    *  "runs long". */
   audioFirst: boolean
   pxPerSec: number
-  selected: boolean
+  /** "take": this is the selected take (S splits it). "line": its line is
+   *  selected, but not this take. */
+  selected: "take" | "line" | false
   /** The transport is parked waiting on this verse's audio (slow load). */
   loading: boolean
   /** This chip's dub audio definitively 404'd. */
@@ -290,6 +294,7 @@ function TargetAudioChip({
   editable: boolean
   snap: { enabled: boolean; candidates: number[] }
   onSelect(id: string): void
+  onSelectTake?(cellId: string): void
   onSeek?(id: string): void
   /** AQU-646 stage 3: the TAKE being moved, not just its line. Placement is
    *  stored per take now — two tracks share a line, and a per-cell anchor
@@ -299,7 +304,6 @@ function TargetAudioChip({
   bladeActive?: boolean
   onCutTarget?(cellId: string, audioId: string, atMs: number): void
   takeMenu?: TakeMenuActions
-  onHoverCut?(target: HoverCut | null): void
   onOpenRecording?(cellId: string): void
   /** AQU-490: how many validators the project asks for on a recording. */
   validationRequirementAudio?: number
@@ -891,25 +895,27 @@ function TargetAudioChip({
           cutRef.current = false
           return
         }
+        // AQU-1767 (Sam, 2026-10-14): a click selects the take and leaves the
+        // playhead where it is, so S can split it there. Jumping to the line
+        // is a double-click.
         onSelect(cell.id)
-        if (!movedRef.current) onSeek?.(cell.id)
+        if (!movedRef.current) onSelectTake?.(cell.id)
         movedRef.current = false
+      }}
+      onDoubleClick={(e) => {
+        // Not from the play or record button in a corner, and not a blade cut.
+        if (blade || (e.target as Element).closest?.('[role="button"]')) return
+        onSeek?.(cell.id)
       }}
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => {
         setHovered(false)
         setBladeX(null)
-        onHoverCut?.(null)
       }}
       onPointerMove={(e) => {
-        // AQU-1767: S cuts under the pointer without the blade in hand, so the
-        // lane always knows which take, and where, the pointer is over.
-        if (!blade && !onHoverCut) return
+        if (!blade) return
         const at = bladeAt(e.clientX)
-        if (onHoverCut && editable && onCutTarget) {
-          onHoverCut(at?.ok ? { cellId: cell.id, audioId: chip.item.audioId, atMs: at.atMs } : null)
-        }
-        if (blade) setBladeX(at?.ok ? at.x : null)
+        setBladeX(at?.ok ? at.x : null)
       }}
       {...(blade ? { "data-blade": "" } : {})}
       data-audio-id={chip.item.audioId}
@@ -992,7 +998,8 @@ function TargetAudioChip({
           "border-red-500 ring-1 ring-red-500/70 bg-red-100/80 text-red-800 dark:bg-red-950/70 dark:text-red-300",
         blade ? "cursor-crosshair" : canMove && "cursor-grab active:cursor-grabbing",
         "hover:brightness-105",
-        selected && "ring-2 ring-sky-500",
+        selected === "take" && "ring-2 ring-sky-500",
+        selected === "line" && "ring-1 ring-sky-500/50",
       )}
     >
       {drag && (
@@ -1141,8 +1148,10 @@ function TargetAudioChip({
 
           BOTH `stopPropagation` CALLS ARE LOAD-BEARING. Without the pointerdown
           one, pressing play begins a chip MOVE drag; without the click one, the
-          chip's own onClick fires `onSeek` — which moves the playhead, the
-          exact thing this button was ruled not to do. */}
+          chip's own onClick selects the take as well. (The chip's double-click
+          jump skips its corner buttons itself, so a quick second press on play
+          does not move the playhead — the thing this button was ruled not to
+          do.) */}
       {showPlayButton && preview && (
         <span
           role="button"
@@ -1359,19 +1368,20 @@ export function TargetAudioLane({
   viewStartSec,
   viewEndSec,
   selectedId,
+  selectedTakeCellId = null,
   loadingCellId,
   missingCellIds,
   editable,
   masterHonorsTrims,
   snapEnabled,
   onSelect,
+  onSelectTake,
   onSeek,
   onRetimeTarget,
   onTrimTarget,
   bladeActive = false,
   onCutTarget,
   takeMenu,
-  onHoverCut,
   onOpenRecording,
   validationRequirementAudio,
   emptyCells,
@@ -1664,19 +1674,21 @@ export function TargetAudioLane({
             paintOrder={chips.length - i}
             audioFirst={Boolean(audioFirst)}
             pxPerSec={pxPerSec}
-            selected={selectedId === chip.item.cell.id}
+            selected={
+              selectedTakeCellId === chip.item.cell.id ? "take" : selectedId === chip.item.cell.id ? "line" : false
+            }
             loading={loadingCellId === chip.item.cell.id}
             missing={missingCellIds?.has(chip.item.cell.id) ?? false}
             editable={editable}
             snap={{ enabled: Boolean(snapEnabled), candidates: candidatesFor(chip.item.audioId, chip.section) }}
             onSelect={onSelect}
+            onSelectTake={onSelectTake}
             onSeek={onSeek}
             onRetimeTarget={onRetimeTarget}
             onTrimTarget={onTrimTarget}
             bladeActive={bladeActive}
             onCutTarget={onCutTarget}
             takeMenu={takeMenu}
-            onHoverCut={onHoverCut}
             onOpenRecording={onOpenRecording}
             validationRequirementAudio={validationRequirementAudio}
             currentUsername={session?.username ?? ""}

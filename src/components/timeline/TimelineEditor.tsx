@@ -51,6 +51,7 @@ import {
 import { cn } from "@/lib/utils"
 import { useHistoryView } from "@/lib/history/useHistory"
 import { redoLast, undoLast, type HistoryResult } from "@/lib/history/history"
+import { canCutAt } from "@/lib/audio/cut-take"
 import { isTextEntryTarget } from "@/lib/history/arbiter"
 import { deriveLanes } from "@/lib/timeline/lanes"
 import { deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
@@ -144,7 +145,7 @@ import { useBatchProgress, canTranscribeCell } from "@/lib/audio/batch-audio"
 import { useOnline } from "@/hooks/useOnline"
 import { TimelineRuler } from "./TimelineRuler"
 import { TimelineLane } from "./TimelineLane"
-import { TargetAudioLane, type HoverCut, type TakeMenuActions, type TargetAudioItem } from "./TargetAudioLane"
+import { TargetAudioLane, type TakeMenuActions, type TargetAudioItem } from "./TargetAudioLane"
 import { TimelinePlayhead } from "./TimelinePlayhead"
 import { MediaTextHeader, TimelineTimingRow } from "./TimelineChipStrip"
 import {
@@ -1272,6 +1273,10 @@ export function TimelineEditor({
   // AQU-1767: the blade. Personal and per-session — a tool in your hand, not a
   // setting — and off whenever cutting is not possible here.
   const [bladeOn, setBladeOn] = useState(false)
+  // AQU-1767 (Sam, 2026-10-14): the take a click selected — a line on one
+  // track. S splits it at the playhead. It lapses the moment the selected line
+  // is a different one, and a click on a card or row drops it.
+  const [selectedTake, setSelectedTake] = useState<{ cellId: string; slot: string } | null>(null)
   const history = useHistoryView()
   // AQU-646 stage 2: which folders this person has closed, on THIS file.
   // Personal state — folder membership syncs, but whether a folder is open is
@@ -2470,13 +2475,34 @@ export function TimelineEditor({
   // piece has nowhere of its own to be; cutting waits for phase 4 there.
   const canCut = Boolean(onCutTargets) && editable && !audioFirst
   const bladeActive = bladeOn && canCut
-  // AQU-1767 (Sam, 2026-10-14): S splits the take under the pointer, at the
-  // pointer, without the blade (REAPER's habit, but at the mouse rather than
-  // the playhead). The lanes report what is under the pointer as it moves.
-  const hoverCutRef = useRef<HoverCut | null>(null)
-  const reportHoverCut = useCallback((target: HoverCut | null) => {
-    hoverCutRef.current = target
-  }, [])
+  // AQU-1767 (Sam, 2026-10-14): S splits the SELECTED take at the PLAYHEAD,
+  // and nothing else — "splitting should never take place where the mouse is
+  // hovering. We have the B mode for that." No take selected, or the playhead
+  // not over it: S does nothing.
+  const takeSel = selectedTake && selectedTake.cellId === selectedId ? selectedTake : null
+  const takeSelCellFor = (slot: string) => (takeSel?.slot === slot ? takeSel.cellId : null)
+  function selectedTakeCutAtPlayhead(): { cellId: string; audioId: string; atMs: number } | null {
+    if (!takeSel) return null
+    const sec = displayCurrentSec
+    const items =
+      takeSel.slot === RECORDING_SLOT
+        ? targetItems
+        : tracks
+            .filter((tr) => tr.kind === "audio" && slotForTrack(tr.id) === takeSel.slot)
+            .flatMap((tr) => targetItemsForTrack(tr).items)
+    // A cut take is several chips on its line; the one the playhead is over.
+    for (const item of items) {
+      if (item.cell.id !== takeSel.cellId) continue
+      const att = item.cell.attachments?.[item.audioId]
+      const geom = layout.targetGeom(item.cell, att)
+      if (!geom || geom.usingFallback || sec <= geom.start || sec >= geom.end) continue
+      const atMs = (sec - geom.anchor) * 1000
+      return canCutAt(att, atMs) ? { cellId: item.cell.id, audioId: item.audioId, atMs } : null
+    }
+    return null
+  }
+  const splitAtPlayheadRef = useRef(selectedTakeCutAtPlayhead)
+  splitAtPlayheadRef.current = selectedTakeCutAtPlayhead
   useEffect(() => {
     if (!canCut) return
     function onKeyDown(event: KeyboardEvent) {
@@ -2486,10 +2512,10 @@ export function TimelineEditor({
         event.preventDefault()
         setBladeOn((on) => !on)
       } else if (event.key === "s" || event.key === "S") {
-        const target = hoverCutRef.current
-        if (!target || !onCutTargets) return
+        const cut = splitAtPlayheadRef.current()
+        if (!cut || !onCutTargets) return
         event.preventDefault()
-        onCutTargets([target])
+        onCutTargets([cut])
       } else if (event.key === "Escape") {
         setBladeOn(false)
       }
@@ -3448,6 +3474,7 @@ export function TimelineEditor({
   // id, and a cue has no row there to scroll to. The table is reached through
   // the cue's LINKS instead, which is the workspace's job.
   const selectCueFromChip = (cueCellId: string) => {
+    setSelectedTake(null)
     setSelectedId(cueCellId)
     onCueActivated?.(cueCellId)
   }
@@ -3460,6 +3487,12 @@ export function TimelineEditor({
     // a batch scope, and scroll-yanking the text table on each ⌘-click would
     // make picking a handful of sections unusable.
     if (!mods) onChipActivated?.(cellId)
+  }
+  /** A card, row or list click selects the LINE, and drops any selected take
+   *  (AQU-1767) — a take is selected only by clicking the take itself. */
+  const selectLine = (cellId: string, mods?: SelectMods) => {
+    setSelectedTake(null)
+    selectFromChip(cellId, mods)
   }
 
   // AQU-928: the batch scope the transcribe row acts on. `selectedIdsInOrder`
@@ -3563,7 +3596,7 @@ export function TimelineEditor({
     selectedId,
     multiSelectedIds,
     editable,
-    onSelect: selectFromChip,
+    onSelect: selectLine,
     onRetime: onRetimeSubtitle,
     // Clean card click → navigate playback to the clip's start (both lanes;
     // untimed chips have no timecode to seek to). SUB-53: "the clip's start"
@@ -3847,12 +3880,14 @@ export function TimelineEditor({
             viewStartSec={viewStartSec}
             viewEndSec={viewEndSec}
             selectedId={selectedId}
+            selectedTakeCellId={takeSelCellFor(RECORDING_SLOT)}
             loadingCellId={loadingCellId}
             missingCellIds={missingCellIds}
             editable={editable}
             masterHonorsTrims={masterHonorsTrims}
             snapEnabled={snapOn && !audioFirst}
             onSelect={selectFromChip}
+            onSelectTake={(cellId) => setSelectedTake({ cellId, slot: RECORDING_SLOT })}
             onSeek={laneProps.onSeek}
             // SUB-53: a chip's position is computed in audio-first, so there
             // is nothing to drag it to. Trimming stays — and re-flows.
@@ -3861,7 +3896,6 @@ export function TimelineEditor({
             bladeActive={bladeActive}
             onCutTarget={cutOne}
             takeMenu={takeMenuFor(RECORDING_SLOT)}
-            onHoverCut={canCut ? reportHoverCut : undefined}
             onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, RECORDING_SLOT) : undefined}
             emptyCells={emptyTargets}
             // AQU-646: the mic over a stretch with no cell at all creates the
@@ -3921,19 +3955,20 @@ export function TimelineEditor({
             viewStartSec={viewStartSec}
             viewEndSec={viewEndSec}
             selectedId={selectedId}
+            selectedTakeCellId={takeSelCellFor(slotForTrack(track.id))}
             loadingCellId={loadingCellId}
             missingCellIds={missingCellIds}
             editable={editable}
             masterHonorsTrims={masterHonorsTrims}
             snapEnabled={snapOn && !audioFirst}
             onSelect={selectFromChip}
+            onSelectTake={(cellId) => setSelectedTake({ cellId, slot: slotForTrack(track.id) })}
             onSeek={laneProps.onSeek}
             onRetimeTarget={audioFirst ? undefined : onRetimeTarget}
             onTrimTarget={onTrimTarget}
             bladeActive={bladeActive}
             onCutTarget={cutOne}
             takeMenu={takeMenuFor(slotForTrack(track.id))}
-            onHoverCut={canCut ? reportHoverCut : undefined}
             emptyCells={own.empty}
             onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, slotForTrack(track.id)) : undefined}
             projectId={project?.id ?? null}
@@ -4122,9 +4157,9 @@ export function TimelineEditor({
               </AppTooltip>
             </>
           )}
-          {/* AQU-1767: the blade. (Sam, 2026-10-14: no "cut at the playhead" —
-              the playhead is the transport's, so a cut there landed wherever
-              playback happened to be, on every voice track at once.) */}
+          {/* AQU-1767: the blade. (Sam, 2026-10-14: no "cut at the playhead"
+              button — it cut every voice track at once. S splits the one
+              selected take at the playhead instead.) */}
           {onCutTargets && editable && (
             <>
               <AppTooltip
@@ -4938,7 +4973,7 @@ export function TimelineEditor({
                       key={c.id}
                       type="button"
                       data-testid={`tl-untimed-${c.id}`}
-                      onClick={() => selectFromChip(c.id)}
+                      onClick={() => selectLine(c.id)}
                       className={cn(
                         "shrink-0 rounded-md border border-dashed border-zinc-400 bg-background px-2 py-1 text-[10px] text-foreground/80 hover:bg-muted dark:border-zinc-600",
                         selectedId === c.id && "ring-2 ring-sky-500",

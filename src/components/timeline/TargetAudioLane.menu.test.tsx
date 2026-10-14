@@ -1,5 +1,4 @@
-// AQU-1767 (Sam, 2026-10-14): a take's right-click menu, and the pointer
-// reporting that lets S split under the mouse.
+// AQU-1767 (Sam, 2026-10-14): a take's right-click menu.
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 vi.mock("@/lib/audio/transport-pause", () => ({ pauseAllTransports: vi.fn() }))
@@ -195,30 +194,5 @@ describe("TargetAudioLane — a take's right-click menu (AQU-1767)", () => {
     )
     rightClick("tl-target-c1", 80)
     expect(screen.queryByTestId("tl-take-menu-split")).toBeNull()
-  })
-})
-
-describe("TargetAudioLane — the take under the pointer, for S (AQU-1767)", () => {
-  it("reports the take and the cut point as the pointer moves, without the blade, and clears on leave", () => {
-    const onHoverCut = vi.fn()
-    render(
-      <TargetAudioLane
-        {...base}
-        items={[{ cell: oneTake(), kind: "take", audioId: TAKE }]}
-        onCutTarget={vi.fn()}
-        onHoverCut={onHoverCut}
-      />,
-    )
-    const chip = screen.getByTestId("tl-target-c1")
-    fireEvent.pointerMove(chip, { clientX: 80 })
-    const last = onHoverCut.mock.calls.at(-1)?.[0]
-    expect(last).toMatchObject({ cellId: "c1", audioId: TAKE })
-    expect(last.atMs).toBeCloseTo(2000)
-    // Too near the edge to cut: nothing to split there.
-    fireEvent.pointerMove(chip, { clientX: 2 })
-    expect(onHoverCut.mock.calls.at(-1)?.[0]).toBeNull()
-    fireEvent.pointerMove(chip, { clientX: 80 })
-    fireEvent.pointerLeave(chip)
-    expect(onHoverCut.mock.calls.at(-1)?.[0]).toBeNull()
   })
 })

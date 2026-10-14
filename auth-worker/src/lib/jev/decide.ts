@@ -15,7 +15,7 @@
  */
 
 import type { Env } from "../../types"
-import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../../../db/shared/rate-limit"
+import { enforceRateLimit, projectRateLimitIdentifier } from "../../../../db/shared/rate-limit"
 import { JEV_MODEL, type JevQuestion } from "../../../../src/lib/completion/seam-request"
 import { callJev } from "./client"
 
@@ -109,11 +109,18 @@ export async function decide(env: Env, input: DecideInput): Promise<DecideResult
   const timeoutMs = input.deadline === undefined ? DEFAULT_TIMEOUT_MS : Math.min(DEFAULT_TIMEOUT_MS, input.deadline - Date.now())
   if (timeoutMs <= 0) return heuristic("timeout")
 
-  const identifier = `project:${input.projectId}`
+  // AQU-1843: atomic, and FAIL CLOSED — this window is the ONLY thing bounding
+  // Jev spend (decide() sits outside the credit guard by design), so a limiter
+  // outage must hand back the fixed-rule fallback, not an uncapped model call.
+  // AQU-1690: each purpose has its own bucket and cap (PURPOSE_LIMITS).
   const limit = PURPOSE_LIMITS[input.purpose]
-  const recent = await countRecentRateLimitEvents(env.AQUILLA_PG, limit.kind, identifier)
-  if (recent >= limit.cap) return heuristic("capped")
-  await recordRateLimitEvent(env.AQUILLA_PG, limit.kind, identifier)
+  const capped = await enforceRateLimit(env.AQUILLA_PG, {
+    kind: limit.kind,
+    identifier: projectRateLimitIdentifier(input.projectId),
+    limit: limit.cap,
+    failMode: "closed",
+  })
+  if (!capped.allowed) return heuristic("capped")
 
   const called = await callJev(env, { model: JEV_MODEL, state: input.state, questions: input.questions }, timeoutMs)
   if (!called.ok) return heuristic(called.reason)

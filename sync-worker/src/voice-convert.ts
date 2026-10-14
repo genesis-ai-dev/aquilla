@@ -27,7 +27,7 @@ import { checkAiSpendCeiling } from "../../db/shared/ai-spend-ceiling"
 // deadline apart from a dead upstream.
 import { isAbortTimeout } from "./inworld-tts"
 import { logVendorTimeout, VENDOR_TIMEOUT_MS } from "../../shared/vendor-timeouts"
-import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../db/shared/rate-limit"
+import { enforceRateLimit, userRateLimitIdentifier } from "../../db/shared/rate-limit"
 
 export interface VoiceConvertEnv {
   SNAPSHOTS: R2Bucket
@@ -265,17 +265,22 @@ export async function handleVoiceConvertRequest(
   // control of any kind, so one contributor looping requests could hold open
   // as many L40S containers as Modal would start. Fails CLOSED when the
   // database is unbound: unmetered GPU spend is the worse failure mode.
+  // AQU-1843: one atomic check-and-consume, and fail CLOSED on a limiter
+  // outage for the same reason — this starts a paid GPU container.
   const db = env.AQUILLA_PG
   if (!db) return new Response("database not configured", { status: 500 })
-  const rateLimitIdentifier = `user:${verified.claims.userId}`
-  const recentConversions = await countRecentRateLimitEvents(db, "voice_convert", rateLimitIdentifier)
-  if (recentConversions >= VOICE_CONVERT_MAX_PER_USER_PER_WINDOW) {
+  const conversionLimit = await enforceRateLimit(db, {
+    kind: "voice_convert",
+    identifier: userRateLimitIdentifier(verified.claims.userId),
+    limit: VOICE_CONVERT_MAX_PER_USER_PER_WINDOW,
+    failMode: "closed",
+  })
+  if (!conversionLimit.allowed) {
     return Response.json(
       { error: "rate_limited", message: "Too many requests, slow down." },
-      { status: 429 },
+      { status: 429, headers: { "Retry-After": String(conversionLimit.retryAfterSeconds) } },
     )
   }
-  await recordRateLimitEvent(db, "voice_convert", rateLimitIdentifier)
 
   // Platform daily spend ceiling (AQU-1869). Checked before the R2 reads and
   // the Modal call: a conversion starts an L40S GPU container, and the point

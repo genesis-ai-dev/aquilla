@@ -1,4 +1,4 @@
-"""Trusted serial controller. PR code executes only in disposable containers."""
+"""Trusted serial controller. Release-branch code executes only in disposable containers."""
 import json
 import os
 import re
@@ -12,7 +12,7 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from webhook import REPO, REPO_ID, STATE, database
+from webhook import REPO, RELEASE_REF, STATE, database
 
 CODE = Path("/opt/aquilla-qa")
 JOBS = Path("/var/lib/aquilla-qa-jobs")
@@ -85,16 +85,16 @@ def github(config, path):
         return json.load(response)
 
 
-def current(config, pr, sha):
-    pull = github(config, f"/pulls/{pr}")
-    return (pull["state"] == "open" and not pull.get("draft")
-            and pull["head"]["sha"] == sha
-            and pull["head"].get("repo", {}).get("id") == REPO_ID)
+def current(config, ref, sha):
+    if not RELEASE_REF.fullmatch(ref or ""):
+        return False
+    commit = github(config, "/commits/" + ref)
+    return commit.get("sha") == sha
 
 
-def report(config, pr, sha, phase, suite=None, url=None, status=None):
+def report(config, ref, sha, phase, suite=None, url=None, status=None):
     # Credentials travel over stdin, never command arguments or job logs.
-    payload = dict(pr=pr, sha=sha, phase=phase, suite=suite, runUrl=url,
+    payload = dict(ref=ref, sha=sha, phase=phase, suite=suite, runUrl=url,
                    jobStatus=status, token=config["github_token"], author=config["author"])
     command(["node", str(CODE / "report.mjs")], timeout=150,
             input=json.dumps(payload).encode())
@@ -152,10 +152,13 @@ def cleanup_containers(prefix):
 
 
 def execute(config, job):
-    job_id, pr, sha = job
-    if type(pr) is not int or pr <= 0 or not SHA.fullmatch(sha):
+    job_id, _pr, sha, ref = job
+    if not SHA.fullmatch(sha or ""):
         raise ValueError("Invalid persisted job")
-    if not current(config, pr, sha):
+    # Queued pull-request jobs have no release ref. Do not run them.
+    if not RELEASE_REF.fullmatch(ref or ""):
+        return "superseded"
+    if not current(config, ref, sha):
         return "superseded"
     provider_env = model_environment(config)
     harness_sha = config["harness_sha"]
@@ -169,9 +172,9 @@ def execute(config, job):
     suite, status, artifact_url = None, "failure", None
     started = time.monotonic()
     try:
-        report(config, pr, sha, "running")
+        report(config, ref, sha, "running")
         download(config, sha, source)
-        if not current(config, pr, sha):
+        if not current(config, ref, sha):
             return "superseded"
         command(["docker", "run", "-d", "--name", prefix + "db", *COMMON,
                  "--network=" + NETWORK, "--user=postgres", "--read-only",
@@ -211,7 +214,7 @@ def execute(config, job):
             time.sleep(1)
         else:
             raise RuntimeError("Application readiness timeout")
-        if not current(config, pr, sha):
+        if not current(config, ref, sha):
             return "superseded"
         # Fixed trusted test image, separate mount/PID namespace, no host mounts.
         # Only the network namespace is shared to preserve localhost safeguards.
@@ -254,7 +257,7 @@ def execute(config, job):
         outbox = dict(suite=suite, url=artifact_url, status=status)
         (directory / "report.json").write_text(json.dumps(outbox))
         try:
-            report(config, pr, sha, "finished", **outbox)
+            report(config, ref, sha, "finished", **outbox)
         except Exception as error:
             raise ReportPending() from error
 
@@ -266,12 +269,12 @@ def drain_interrupted(config, job):
     Once the grace window closes it becomes terminal, so one undeliverable
     report cannot stop every later PR from being tested.
     """
-    job_id, pr, sha, interrupted_at = job
+    job_id, _pr, sha, ref, interrupted_at = job
     cleanup_containers(f"aquilla-qa-{job_id}-")
     try:
         outbox_path = JOBS / str(job_id) / "report.json"
         outbox = json.loads(outbox_path.read_text()) if outbox_path.exists() else {}
-        report(config, pr, sha, "finished", **outbox)
+        report(config, ref, sha, "finished", **outbox)
         status = "completed" if outbox.get("status") == "success" else "failed"
     except Exception as error:
         print("Interrupted report:", type(error).__name__, flush=True)
@@ -297,8 +300,9 @@ def main():
         config = json.loads(CONFIG.read_text())
         with database() as db:
             interrupted = db.execute(
-                "SELECT id,pr,sha,updated FROM jobs WHERE status='interrupted' LIMIT 1").fetchone()
-            job = db.execute("SELECT id,pr,sha FROM jobs WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
+                "SELECT id,pr,sha,ref,updated FROM jobs WHERE status='interrupted' LIMIT 1").fetchone()
+            job = db.execute(
+                "SELECT id,pr,sha,ref FROM jobs WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
             if job and not interrupted:
                 db.execute("UPDATE jobs SET status='running',updated=? WHERE id=?", (time.time(), job[0]))
         if interrupted:

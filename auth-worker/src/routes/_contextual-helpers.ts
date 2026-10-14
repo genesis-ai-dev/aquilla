@@ -31,6 +31,10 @@ type ErrorCode =
   | "release_disabled"
   /** AQU-1847 — per-user autopilot start throttle. */
   | "start_throttled"
+  // AQU-1690: "Check with Bible data" (routes/contextual-bible-check.ts).
+  | "bible_data_off"
+  | "no_bible_refs"
+  | "bible_data_unavailable"
 
 export function errorJson(code: ErrorCode, message: string, status: ContentfulStatusCode, details?: unknown) {
   return {

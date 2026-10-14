@@ -13,12 +13,18 @@ import { runThreadId } from "@/lib/agent/team-channel"
 import type { ContextualDraftRecord, ContextualRunRecord } from "@/lib/contextual/transport"
 import type { RunReview } from "@/hooks/useRunReview"
 import { DraftFindingChips } from "./DraftFindingChips"
+import { useBibleDataExperiment } from "@/hooks/useBibleDataExperiment"
 
 export function draftReviewHref(projectId: string, runId: string, cellId: string): string {
   return `${agentConversationHref(projectId, runThreadId(runId), "review")}&cell=${encodeURIComponent(cellId)}`
 }
 
-function CheckRow({ draft, projectId, runId }: { draft: ContextualDraftRecord; projectId: string; runId: string }) {
+function CheckRow({ draft, projectId, runId, bibleData }: {
+  draft: ContextualDraftRecord
+  projectId: string
+  runId: string
+  bibleData: boolean
+}) {
   const t = useT()
   const where = draft.spanLabel ? `${draft.spanLabel} · ${draft.cellId}` : draft.cellId
   return (
@@ -31,13 +37,15 @@ function CheckRow({ draft, projectId, runId }: { draft: ContextualDraftRecord; p
         {where}
       </Link>
       <p className="line-clamp-2 text-xs text-muted-foreground" dir="auto">{draft.text}</p>
-      <DraftFindingChips review={draft.review} />
+      <DraftFindingChips review={draft.review} evidence bibleData={bibleData} />
     </li>
   )
 }
 
 export function RunChecks({ projectId, run, review }: { projectId: string; run: ContextualRunRecord; review: RunReview }) {
   const t = useT()
+  // AQU-1685: Bible data findings are named only with the experiment on here.
+  const bibleData = useBibleDataExperiment(projectId)
   const flagged = review.drafts
     .filter((d) => (d.review?.findings.length ?? 0) > 0)
     .sort((a, b) => (b.review?.severity ?? 0) - (a.review?.severity ?? 0))
@@ -49,7 +57,7 @@ export function RunChecks({ projectId, run, review }: { projectId: string; run: 
       <section className="flex flex-col gap-2" data-testid={testId}>
         <h3 className="text-sm font-semibold">{title} · {drafts.length}</h3>
         <ul className="flex flex-col gap-2">
-          {drafts.map((d) => <CheckRow key={d.draftId} draft={d} projectId={projectId} runId={run.runId} />)}
+          {drafts.map((d) => <CheckRow key={d.draftId} draft={d} projectId={projectId} runId={run.runId} bibleData={bibleData} />)}
         </ul>
       </section>
     )

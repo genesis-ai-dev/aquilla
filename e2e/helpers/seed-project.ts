@@ -368,6 +368,10 @@ export interface ProjectedCellRow {
   aiDrafted: boolean
   /** Chain head for this side/lane — the event id the projection last applied. */
   eventId: string
+  /** Target rows: the lane's frozen tag (`''` = a legacy default lane). */
+  targetLang?: string
+  /** Target rows: the lane row's id. */
+  laneId?: string | null
 }
 
 /** Read a seeded file's cell rows straight from the sync-worker projection —

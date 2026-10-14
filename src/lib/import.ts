@@ -23,7 +23,7 @@ import { proxyOrigin } from "./net/resource-proxy"
 import { t } from "./i18n/standalone"
 import type { CellUnit, FileType, FileReference, TranslatableString, OrderedBy } from "./parsers/types"
 import { detectFileType, isMediaFileType, TRANSLATION_MEMORY_FILE_KIND } from "./parsers/types"
-import { buildAudioId, MAX_AUDIO_UPLOAD_BYTES, uploadCellAudio } from "./audio/upload"
+import { buildAudioId, MAX_AUDIO_OBJECT_BYTES, uploadCellAudio } from "./audio/upload"
 import { analyseSpeechInFile } from "./audio/speech-analysis"
 import { tileSegments } from "./timeline/tile-segments"
 import { recordMediaImportSeed, buildMediaSeedCells } from "./audio/auto-transcribe"
@@ -31,6 +31,7 @@ import { createMediaCueSpecs } from "./import/media-cues"
 import { youTubeVideoId } from "./video/youtube"
 import { parseTextFormatOffMainThread } from "./parsers/parse-worker-client"
 import { usfmSectionToStrings } from "./parsers/parse-text-formats"
+import type { UsfmStructureFinding } from "./parsers/usfm-structure-check"
 import {
   assembleParatextProject,
   type ParatextBook,
@@ -496,6 +497,9 @@ export interface ImportResult {
   importRecipe?: DeclarativeImportRecipe
   importClassification?: Omit<AiImportClassification, "recipe"> & { recipe: DeclarativeImportRecipe }
   importNotices?: ImportPreviewNotice[]
+  /** Paratext-parity chapter/verse + marker findings (AQU-1731), USFM only.
+   *  Carried as codes + refs and translated in the preview. */
+  structureFindings?: UsfmStructureFinding[]
   roundTripFidelity?: RoundTripFidelity
   /** Exact container for a multi-book import. Stored once and bound to every
    * emitted book instead of becoming every book's export skeleton. */
@@ -1874,7 +1878,9 @@ export function createMediaFileCommit(
   const prepare = async () => {
     if (ctx.mediaPictureUrl && !videoId) throw new Error("Enter a YouTube video link.")
     if (file.size === 0) throw new Error(t("importExport.errors.emptyFile", { fileName: file.name }))
-    if (file.size > MAX_AUDIO_UPLOAD_BYTES) {
+    // AQU-1853: large media rides the multipart upload path, so the gate is
+    // the whole-object ceiling, not the single-request one.
+    if (file.size > MAX_AUDIO_OBJECT_BYTES) {
       throw new Error(t("importExport.errors.mediaFileTooLarge", { fileName: file.name }))
     }
     ctx.signal?.throwIfAborted()
@@ -2111,6 +2117,9 @@ export interface ParatextBookPlan {
   strings: TranslatableString[]
   /** Verse refs that appear more than once in the book (surfaced in preview). */
   duplicateRefs: string[]
+  /** Paratext-parity chapter/verse + marker findings for this book (AQU-1731),
+   *  surfaced in preview next to the duplicate-ref count. */
+  structureFindings: UsfmStructureFinding[]
   cellCount: number
 }
 
@@ -2143,10 +2152,10 @@ export async function prepareParatextProject(
     throw new Error(t("importExport.errors.notAParatextProject"))
   }
   const books: ParatextBookPlan[] = project.books.map((book) => {
-    const { strings, duplicateRefs } = usfmSectionToStrings(book.rawSource, {
+    const { strings, duplicateRefs, structureFindings } = usfmSectionToStrings(book.rawSource, {
       excludeFrontMatter: opts?.excludeFrontMatter,
     })
-    return { book, strings, duplicateRefs, cellCount: strings.length }
+    return { book, strings, duplicateRefs, structureFindings, cellCount: strings.length }
   })
   // Materialize and validate the complete package during preview. Commit then
   // uploads these exact immutable bytes; a large folder-derived ZIP cannot

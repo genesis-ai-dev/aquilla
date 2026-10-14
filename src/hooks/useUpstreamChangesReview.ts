@@ -58,6 +58,11 @@ export interface ReviewItem {
     eventId: string
     sourceEventId: string | null
     value: string
+    /** AQU-1902: the lane of this target row — a repin addresses that row's
+     *  lane. `''` = a legacy default lane. */
+    targetLang: string
+    /** AQU-1902: the row's `lanes.id`, when the server sent it. */
+    laneId: string | null
   } | null
 }
 
@@ -285,7 +290,13 @@ export function useUpstreamChangesReview(
           batchId: batch?.batchId ?? "unknown",
           batchServerTs: batch?.serverTs ?? 0,
           target: target
-            ? { eventId: target.eventId, sourceEventId: target.sourceEventId, value: target.value }
+            ? {
+              eventId: target.eventId,
+              sourceEventId: target.sourceEventId,
+              value: target.value,
+              targetLang: target.targetLang ?? "",
+              laneId: target.laneId ?? null,
+            }
             : null,
         }
 

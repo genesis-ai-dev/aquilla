@@ -798,6 +798,7 @@ monday.post("/internal/push", zValidator("json", internalPushSchema), async (c) 
  * control characters (tab/CR/LF are stripped by URL parsers: `/\t/evil.com`).
  */
 export function isSafeAppPath(p: string): boolean {
+  // eslint-disable-next-line no-control-regex -- the control-character range is the point of this check
   return p.startsWith("/") && !p.startsWith("//") && !/[\\\u0000-\u001f]/.test(p)
 }
 

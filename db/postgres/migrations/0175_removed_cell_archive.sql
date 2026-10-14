@@ -1,4 +1,4 @@
--- 0171_removed_cell_archive.sql — AQU-1767 phase 2: removing a row can be undone.
+-- 0175_removed_cell_archive.sql — AQU-1767 phase 2: removing a row can be undone.
 --
 -- `source.cell.delete` hard-deletes the cell's rows and takes everything hanging
 -- off it (AQU-1068): every lane's translation, validators, waivers,

@@ -621,7 +621,7 @@ CREATE TABLE IF NOT EXISTS chain_claims (
     PRIMARY KEY (project_id, file_id, cell_id, parent_key)
 );
 
--- AQU-1767 phase 2 (migration 0171): what a `source.cell.delete` took, so
+-- AQU-1767 phase 2 (migration 0175): what a `source.cell.delete` took, so
 -- `source.cell.restore` can put it back. Written once by the delete's
 -- projection (same batch, same gate), keyed by the delete event; `restored_by`
 -- makes each archive single-use. See the migration for the full rules.
@@ -1018,7 +1018,7 @@ CREATE TABLE cell_audio (
     -- permanent home for every take that predates this column (rebuild replays
     -- historical cell.lane.retime events into it forever).
     target_offset_ms   BIGINT,
-    -- AQU-1767 (0170): the take this row was CUT from, when it is a piece of
+    -- AQU-1767 (0174): the take this row was CUT from, when it is a piece of
     -- one. NULL for every whole take and for a cut's first piece (the root).
     -- Group key = COALESCE(piece_of, audio_id); selection is per group — every
     -- live piece of a selected group is selected, so a row needs every piece

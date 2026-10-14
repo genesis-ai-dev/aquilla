@@ -281,7 +281,7 @@ export function counts(
  * known book: "Go to first untranslated" walked past an untranslated title to
  * land on 1:1, or found nothing at all.
  */
-function compareSections(a: string, b: string): number {
+export function compareSections(a: string, b: string): number {
   const parse = (value: string) => {
     const trimmed = value.trim()
     const match = /^(\S+)\s+(\d+)/.exec(trimmed)

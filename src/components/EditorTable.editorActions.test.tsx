@@ -21,6 +21,11 @@ import { MemoryRouter } from "react-router-dom"
 import { CellStore } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CellRow } from "@/lib/sync/cells-read-types"
+import { markStyleAlignDirty, resetStyleAlignDirtyForTests } from "@/lib/store/style-align-dirty"
+import {
+  resetVisibleStyleSegmentsCacheForTests,
+  setVisibleStyleSegments,
+} from "@/lib/store/visible-style-segments-pref"
 
 vi.mock("@/hooks/useMicPermission", () => ({
   useMicPermission: () => ({ micDenied: true }),
@@ -686,7 +691,140 @@ describe("EditorTable — EditorActionsContext wiring", () => {
     const plainPopup = document.querySelector('[data-slot="popover-content"]') as HTMLElement
     expect(within(plainPopup).queryByRole("button", { name: "Align styles" })).toBeNull()
   })
+
+  it("warns in the corner when a merged plain run was typed into one slot, and the warning runs Align styles", async () => {
+    const source = idmlParagraph(idmlSlot(0, "Plain", "Hello ") + idmlSlot(1, "Plain", "world"))
+    const target = idmlParagraph(idmlSlot(0, "Plain", "Bonjour monde") + idmlSlot(1, "Plain", ""))
+    setVisibleStyleSegments(true)
+    markStyleAlignDirty("cell-1", target)
+    const onAlignStyles = vi.fn().mockResolvedValue(true)
+    try {
+      const { unmount } = renderTable(
+        { onOpenComments: vi.fn() },
+        new Map(),
+        {
+          cellStore: makePlainRunStore("cell-1", source, target),
+          onAlignStyles,
+          isCompletionConfigured: true,
+          isCompletionAvailable: true,
+        },
+      )
+      const warning = await screen.findByRole("button", { name: "This cell needs Align styles" })
+      fireEvent.click(warning)
+      expect(onAlignStyles).toHaveBeenCalledTimes(1)
+      unmount()
+
+      setVisibleStyleSegments(false)
+      renderTable(
+        { onOpenComments: vi.fn() },
+        new Map(),
+        {
+          cellStore: makePlainRunStore("cell-1", source, target),
+          onAlignStyles,
+          isCompletionConfigured: true,
+          isCompletionAvailable: true,
+        },
+      )
+      expect(screen.queryByRole("button", { name: "This cell needs Align styles" })).toBeNull()
+    } finally {
+      setVisibleStyleSegments(false)
+      resetVisibleStyleSegmentsCacheForTests()
+      resetStyleAlignDirtyForTests()
+      localStorage.clear()
+    }
+  })
+
+  it("keeps an untranslated IDML cell blank and offers Pass to Style Segments once there is a preview", async () => {
+    const source = idmlParagraph(idmlSlot(0, "Plain", "Hello ") + idmlSlot(1, "Bold", "world"))
+    const emptyTarget = idmlParagraph(idmlSlot(0, "Plain", "") + idmlSlot(1, "Bold", ""))
+    const anchorSequenceHash = createHash("sha256").update([
+      "slot:0:editable:CharacterStyle/Plain",
+      "slot:1:editable:CharacterStyle/Bold",
+    ].join("\u0000")).digest("hex")
+    setVisibleStyleSegments(true)
+    const onAlignStyles = vi.fn().mockResolvedValue(true)
+    try {
+      const { unmount } = renderTable(
+        { onOpenComments: vi.fn() },
+        new Map(),
+        { cellStore: makePlainRunStore("cell-1", source, emptyTarget, "", anchorSequenceHash) },
+      )
+      const blank = await screen.findByText("Hello", { exact: false })
+      const row = blank.closest("[data-grid-row]")!
+      expect(row.querySelector("[data-editor-cell-surface=\"target\"] [data-idml-slot]")).toBeNull()
+      expect(screen.queryByRole("button", { name: "Pass to Style Segments" })).toBeNull()
+      unmount()
+
+      renderTable(
+        { onOpenComments: vi.fn() },
+        new Map(),
+        {
+          cellStore: makePlainRunStore("cell-1", source, emptyTarget, "Bonjour", anchorSequenceHash),
+          onAlignStyles,
+          isCompletionConfigured: true,
+          isCompletionAvailable: true,
+        },
+      )
+      const target = (await screen.findByText("Bonjour")).closest("[data-editor-cell-surface=\"target\"]")!
+      expect(target.querySelector("[data-idml-slot]")).toBeNull()
+      fireEvent.click(screen.getByRole("button", { name: "Pass to Style Segments" }))
+      expect(onAlignStyles).toHaveBeenCalledWith(expect.objectContaining({ translated: "Bonjour" }))
+
+      setVisibleStyleSegments(false)
+      expect(screen.getByRole("button", { name: "Pass to Style Segments" })).toBeInTheDocument()
+    } finally {
+      setVisibleStyleSegments(false)
+      resetVisibleStyleSegmentsCacheForTests()
+    }
+  })
 })
+
+function makePlainRunStore(
+  cellId: string,
+  sourceHtml: string,
+  targetHtml: string,
+  targetPlain = "Bonjour monde",
+  anchorSequenceHash = "not-validated-here",
+): CellStore {
+  const store = new CellStore()
+  store.setRuntime({
+    projectId: project.id,
+    fileId: "file-1",
+    username: "tester",
+    requiredValidations: 1,
+    auditStats: new Map(),
+  })
+  const metadata = {
+    idml: {
+      version: 2,
+      slotCount: 2,
+      editableSlotIndexes: [0, 1],
+      protectedTokenCount: 0,
+      anchorSequenceHash,
+    },
+  }
+  const rows = makeRows(cellId)
+  for (const row of rows) {
+    row.metadata = metadata
+    if (row.side === "source") {
+      row.value = "Hello world"
+      row.valueHtml = sourceHtml
+    } else {
+      row.value = targetPlain
+      row.valueHtml = targetHtml
+    }
+  }
+  store.replaceRows(rows, { full: true, maxServerSeq: 1 })
+  return store
+}
+
+function idmlParagraph(inner: string): string {
+  return `<p data-idml-version="2">${inner}</p>`
+}
+
+function idmlSlot(index: number, face: string, text: string): string {
+  return `<span data-idml-slot="${index}" data-idml-character-style="CharacterStyle/${face}" data-idml-protected="slot">${text}</span>`
+}
 
 // ── AQU-646 stage 4c ─────────────────────────────────────────────────────────
 //

@@ -1200,6 +1200,26 @@ export const importExport = defineNamespace({
     "importExport.fileTarget.noCuesInVtt": "No cues found in this VTT file.",
     "importExport.fileTarget.noVersesInUsfm": "No verses found in this USFM file.",
     "importExport.fileTarget.title": "Import target translations into \"{fileName}\"",
+    // AQU-1673 — "Import as proposals": the same mapping/review flow, but the
+    // values land as staged proposals behind the approval gate.
+    "importExport.proposals.explainer": "These translations will be staged as proposals for review — " +
+      "nothing is written to the file until someone approves them.",
+    "importExport.proposals.directExplainer": "These translations are written straight into the file as " +
+      "committed text.",
+    "importExport.proposals.notStaged": "The proposals could not be staged for review (the plan came back " +
+      "\"{status}\"). Nothing was written.",
+    "importExport.proposals.tooMany": "This would propose {count} cells, more than the {max} a single review can " +
+      "show. Narrow the selection (or import in smaller files) so the reviewer can see every proposal.",
+    "importExport.proposals.nothingToStage": "Every selected row already matches the current translation, so " +
+      "there is nothing to propose.",
+    "importExport.proposals.staged": plural({
+      one: "{count} proposal staged for review.",
+      other: "{count} proposals staged for review.",
+    }),
+    "importExport.proposals.skippedUnchanged": plural({
+      one: "{count} row skipped — already matches the current translation.",
+      other: "{count} rows skipped — already match the current translation.",
+    }),
     "importExport.fileTarget.unsupportedFileType": "Unsupported file type. Use USFM (.usfm/.sfm), a spreadsheet " +
       "(.csv/.tsv/.xlsx), or a subtitle file (.vtt/.srt/.sbv).",
     "importExport.paired.applyingTargets": "Applying target translations to cells.",
@@ -1224,6 +1244,36 @@ export const importExport = defineNamespace({
       "yet verified.",
     "importExport.preview.reviewBeforeImporting": "Review before importing",
     "importExport.preview.structuralContentAriaLabel": "Structural content",
+    "importExport.review.stageProposalCount": plural({
+      one: "Propose {count} cell",
+      other: "Propose {count} cells",
+    }),
+    // ── USFM structure findings (AQU-1731) ──────────────────────────────
+    // Paratext parity for its "Chapter/Verse Numbers" and "Markers" checks.
+    // `{detail}` is raw file content — a marker token (`\\f`) or a number —
+    // interpolated as data and never translated. The ref the problem came from
+    // is rendered beside the message as monospace chrome, not inside it, so
+    // these sentences stay ref-free and reusable.
+    "importExport.usfmStructure.heading": "Structure problems found in this file",
+    "importExport.usfmStructure.more": plural({
+      one: "… {count} more problem",
+      other: "… {count} more problems",
+    }),
+    "importExport.usfmStructure.chapterDuplicate": "This chapter number appears more than once",
+    "importExport.usfmStructure.chapterMissing": "No chapter with this number in the file",
+    "importExport.usfmStructure.chapterOutOfOrder": "Chapter out of order ({detail})",
+    "importExport.usfmStructure.chapterInvalid": "Chapter marker has no usable number ({detail})",
+    "importExport.usfmStructure.verseDuplicate": "This verse number appears more than once ({detail})",
+    "importExport.usfmStructure.verseMissing": "No verse with this number in the chapter",
+    "importExport.usfmStructure.verseOutOfOrder": "Verse out of order ({detail})",
+    "importExport.usfmStructure.verseInvalid": "Verse marker has no usable number ({detail})",
+    "importExport.usfmStructure.verseOutsideChapter": "Verse marker before the first chapter ({detail})",
+    "importExport.usfmStructure.markerUnknown": "Unrecognized marker {detail}",
+    "importExport.usfmStructure.markerUnclosed": "Marker {detail} is never closed",
+    "importExport.usfmStructure.markerUnopened": "End marker {detail} has no opening marker",
+    "importExport.usfmStructure.markerLevelMixed": "Mixed marker levels in one file ({detail})",
+    "importExport.usfmStructure.markerAfterChapter":
+      "Marker {detail} belongs in the file header, before the first chapter",
     "importExport.review.alreadyThereCount": plural({
       one: "{count} already there",
       other: "{count} already there",
@@ -1401,6 +1451,13 @@ export const importExport = defineNamespace({
     "importExport.translation.otherWays": "Other ways to bring in a translation",
     "importExport.translation.chooseFileFirst": "Choose the file first.",
     "importExport.translation.fileHasNoLines": "{fileName} has no lines yet, so there is nothing for a translation to fill.",
+    // AQU-1673: "Stage as proposals for review" on the translation screen.
+    "importExport.translation.titleProposalsInto": "Import a translation into {fileName} as proposals",
+    "importExport.translation.proposeForReview": "Stage as proposals for review",
+    "importExport.translation.proposeForReviewHint":
+      "Each match becomes a proposal waiting for approval. Nothing is written to the file until someone approves it.",
+    "importExport.translation.otherWaysWriteDirectly":
+      "These write straight into the file. Untick \"Stage as proposals for review\" to use them.",
     "importExport.translationCheck.sameBookTitle": "{book} is already in this project",
     "importExport.translationCheck.languageToo": "It also says it's in {language}, the language you translate into.",
     "importExport.translationCheck.severalSameBook": "{fileName} is for {book}, and this project already has more than one {book}. If it's a translation, choose which file it translates.",
@@ -3437,12 +3494,160 @@ export const importExport = defineNamespace({
           "Short imperative instruction telling the user to read the list before " +
           "committing.",
       },
+      // ── USFM structure findings (AQU-1731) ────────────────────────────
+      // One bullet per finding in the import preview, each preceded by the
+      // Scripture reference it came from (rendered as separate monospace
+      // chrome, so the sentence itself must not repeat the ref).
+      "importExport.usfmStructure.more": {
+        description:
+          "Last bullet of the import-preview structure list when more problems were found than the list shows, counting the ones left out.",
+        placeholders: { count: "How many findings are not listed." },
+      },
+      "importExport.usfmStructure.chapterDuplicate": {
+        description:
+          "Import-preview bullet: the file declares the same chapter number twice.",
+      },
+      "importExport.usfmStructure.chapterMissing": {
+        description:
+          "Import-preview bullet: the chapter numbering skips this chapter.",
+      },
+      "importExport.usfmStructure.chapterOutOfOrder": {
+        description:
+          "Import-preview bullet: a chapter marker goes backwards relative to the chapter before it.",
+        placeholders: { detail: "The offending marker token or number copied from the file (for example \\f, or 3 follows 5). Raw file content — interpolate it, never translate it." },
+      },
+      "importExport.usfmStructure.chapterInvalid": {
+        description:
+          "Import-preview bullet: a chapter marker is followed by something that is not a number.",
+        placeholders: { detail: "The offending marker token or number copied from the file (for example \\f, or 3 follows 5). Raw file content — interpolate it, never translate it." },
+      },
+      "importExport.usfmStructure.verseDuplicate": {
+        description:
+          "Import-preview bullet: the chapter declares the same verse number twice.",
+        placeholders: { detail: "The offending marker token or number copied from the file (for example \\f, or 3 follows 5). Raw file content — interpolate it, never translate it." },
+      },
+      "importExport.usfmStructure.verseMissing": {
+        description:
+          "Import-preview bullet: the verse numbering inside this chapter skips this verse.",
+      },
+      "importExport.usfmStructure.verseOutOfOrder": {
+        description:
+          "Import-preview bullet: a verse marker goes backwards relative to the verse before it.",
+        placeholders: { detail: "The offending marker token or number copied from the file (for example \\f, or 3 follows 5). Raw file content — interpolate it, never translate it." },
+      },
+      "importExport.usfmStructure.verseInvalid": {
+        description:
+          "Import-preview bullet: a verse marker is followed by something that is not a number.",
+        placeholders: { detail: "The offending marker token or number copied from the file (for example \\f, or 3 follows 5). Raw file content — interpolate it, never translate it." },
+      },
+      "importExport.usfmStructure.verseOutsideChapter": {
+        description:
+          "Import-preview bullet: a verse marker appears before any chapter marker, so it has no chapter.",
+        placeholders: { detail: "The offending marker token or number copied from the file (for example \\f, or 3 follows 5). Raw file content — interpolate it, never translate it." },
+      },
+      "importExport.usfmStructure.markerUnknown": {
+        description:
+          "Import-preview bullet: a backslash marker the USFM taxonomy does not model (custom z-namespace markers and milestones are tolerated and never reported here).",
+        placeholders: { detail: "The offending marker token or number copied from the file (for example \\f, or 3 follows 5). Raw file content — interpolate it, never translate it." },
+      },
+      "importExport.usfmStructure.markerUnclosed": {
+        description:
+          "Import-preview bullet: a paired marker such as a footnote was opened and the block ended before its closing marker.",
+        placeholders: { detail: "The offending marker token or number copied from the file (for example \\f, or 3 follows 5). Raw file content — interpolate it, never translate it." },
+      },
+      "importExport.usfmStructure.markerUnopened": {
+        description:
+          "Import-preview bullet: a closing marker appears with no matching opening marker.",
+        placeholders: { detail: "The offending marker token or number copied from the file (for example \\f, or 3 follows 5). Raw file content — interpolate it, never translate it." },
+      },
+      "importExport.usfmStructure.markerLevelMixed": {
+        description:
+          "Import-preview bullet: the file uses both the plain and the numbered form of one marker family, which Paratext flags as inconsistent.",
+        placeholders: { detail: "The offending marker token or number copied from the file (for example \\f, or 3 follows 5). Raw file content — interpolate it, never translate it." },
+      },
+      "importExport.usfmStructure.markerAfterChapter": {
+        description:
+          "Import-preview bullet: an identification or introduction marker appears after the first chapter, where it is out of position.",
+        placeholders: { detail: "The offending marker token or number copied from the file (for example \\f, or 3 follows 5). Raw file content — interpolate it, never translate it." },
+      },
       "importExport.preview.structuralContentAriaLabel": {
         description:
           "Screen-reader name for the placeholder dash shown instead of a reference " +
           "on preview rows that hold structure rather than translatable prose, such " +
           "as a heading or a layout marker. Short noun phrase; sighted users see " +
           "only the dash.",
+      },
+      "importExport.proposals.explainer": {
+        description:
+          "AQU-1673: one-line statement under the import review list in PROPOSAL " +
+          "mode, saying the rows will be staged for approval and that nothing is " +
+          "written until someone approves. This is the only thing distinguishing " +
+          "the two modes at the point of no return, so it must stay explicit that " +
+          "the file does not change yet.",
+      },
+      "importExport.proposals.directExplainer": {
+        description:
+          "AQU-1673: the same line in the ordinary COMMITTING mode, saying the " +
+          "translations go straight into the file as committed text. Paired with " +
+          "importExport.proposals.explainer — keep the contrast between them clear.",
+      },
+      "importExport.proposals.notStaged": {
+        description:
+          "AQU-1673: error shown when the server answered the staging request but " +
+          "not with a reviewable plan, so the proposals are not in anyone's queue. " +
+          "Must state that nothing was written, because the user has just been " +
+          "through a full review screen and would otherwise assume it landed.",
+        placeholders: {
+          status: "Raw server status word for the plan (e.g. 'stale', 'expired') — not translated, shown verbatim.",
+        },
+      },
+      "importExport.proposals.tooMany": {
+        description:
+          "AQU-1673: refusal shown when an import would stage more proposals than " +
+          "the approval page can render, so the reviewer would be approving rows " +
+          "they were never shown. Must read as a limit on what is REVIEWABLE, not " +
+          "as a file-size or performance error, and should point at narrowing the " +
+          "selection.",
+        placeholders: {
+          count: "How many proposals the import would have staged.",
+          max: "The most proposals one review can show.",
+        },
+      },
+      "importExport.proposals.nothingToStage": {
+        description:
+          "AQU-1673: shown in place of a success when every row the user ticked " +
+          "already matches the cell's current translation, so there was nothing to " +
+          "propose and no changeset was created.",
+      },
+      "importExport.proposals.staged": {
+        description:
+          "AQU-1673: success notification after an import was staged as proposals. " +
+          "Says how many proposals are now waiting for review — deliberately NOT " +
+          "phrased as cells imported or written, because nothing has been applied " +
+          "to the file yet.",
+        placeholders: {
+          count: "Number of proposals staged for review; also selects the plural form.",
+        },
+      },
+      "importExport.proposals.skippedUnchanged": {
+        description:
+          "AQU-1673: supporting line under the staged-proposals notification, " +
+          "reporting how many rows were dropped because their text already matched " +
+          "the cell's current translation. Omitted entirely when none were.",
+        placeholders: {
+          count: "Number of rows skipped as no-ops; also selects the plural form.",
+        },
+      },
+      "importExport.review.stageProposalCount": {
+        description:
+          "AQU-1673: the confirm button on the import review screen in PROPOSAL " +
+          "mode, naming how many ticked cells will be staged for review. Sibling " +
+          "of importExport.review.importCellCount (the committing mode's button) — " +
+          "use a verb meaning 'propose' or 'suggest', never one meaning 'import' " +
+          "or 'save', since this button writes nothing.",
+        placeholders: {
+          count: "Number of ticked cells that will be staged as proposals; also selects the plural form.",
+        },
       },
       "importExport.review.alreadyThereCount": {
         description:
@@ -4242,6 +4447,37 @@ export const importExport = defineNamespace({
         placeholders: {
           fileName: "Display name of the chosen project file, e.g. 'Jonah'. Do not translate the substituted value.",
         },
+      },
+      "importExport.translation.titleProposalsInto": {
+        description:
+          "AQU-1673: title of the Import dialog while a translation is opened and reviewed " +
+          "with 'Stage as proposals for review' ticked — the matches will be staged for " +
+          "approval rather than written. Sibling of importExport.translation.titleInto; " +
+          "the wording must make the difference obvious, since the review looks the same.",
+        placeholders: {
+          fileName: "Display name of the project file the proposals are for, e.g. 'Jonah'. Do not translate the substituted value.",
+        },
+      },
+      "importExport.translation.proposeForReview": {
+        description:
+          "AQU-1673: label of a checkbox on the Import dialog's translation screen, above " +
+          "the drop zone. Ticked, the reviewed matches are staged as proposals behind the " +
+          "approval gate instead of written into the file. Short noun phrase; the same " +
+          "words are quoted in importExport.translation.otherWaysWriteDirectly, so keep " +
+          "them identical.",
+      },
+      "importExport.translation.proposeForReviewHint": {
+        description:
+          "AQU-1673: one-line explanation under the 'Stage as proposals for review' " +
+          "checkbox. Must say that nothing is written to the file until a proposal is " +
+          "approved. Two short sentences.",
+      },
+      "importExport.translation.otherWaysWriteDirectly": {
+        description:
+          "AQU-1673: hint under 'Other ways to bring in a translation' while 'Stage as " +
+          "proposals for review' is ticked; both options are disabled then, because eBible " +
+          "and a paired spreadsheet only ever write into the file. Quotes the checkbox " +
+          "label (importExport.translation.proposeForReview) verbatim.",
       },
       // AQU-1365: "Is this a translation?", asked on the New source text path
       // before any cell is created, when an upload's book is already in the

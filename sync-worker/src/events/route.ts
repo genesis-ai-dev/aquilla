@@ -49,7 +49,9 @@ import { deferBestEffort } from './defer-best-effort'
 import { checkProjectMembershipDetailed, type MembershipDetail } from './membership'
 import { ROLE, isForeignCommentKind, requiredRoleForForeignComment, roleLabel } from './role-policy'
 import { createCommentFloorsCache } from './comment-floors'
-import { sendCommentNotifications, type EmailService } from '../notification-email'
+import { type EmailService } from '../notification-email'
+import { dispatchCommentNotification } from '../side-effects/queue'
+import type { SideEffectMessage } from '../side-effects/types'
 import { collectLaneTouches, notifyLiveDownstreamsOfUpstreamChanges } from './link-notify'
 import {
   fileProgressRecomputeStmt,
@@ -57,6 +59,7 @@ import {
   sectionsProgressRecomputeStmt,
 } from './progress-projection'
 import { makeRequestCache } from './request-cache'
+import { dbFailureInfo, reportServerRejections } from './rejection-telemetry'
 
 // Max statements per batch() transaction — a conservative self-imposed cap (Postgres has no hard limit; keeps any single transaction bounded).
 const BATCH_LIMIT = 100
@@ -226,10 +229,17 @@ export interface EventsRouteEnv {
    * sent on comment.create via the Cloudflare Email Service `send_email` binding. */
   EMAIL?: EmailService
   EMAIL_FROM?: string
+  /** AQU-1824 — when present (deployed envs), comment notifications are handed
+   * to the side-effect queue instead of being sent inside this invocation.
+   * Absent locally/e2e, where `dispatchCommentNotification` sends inline. */
+  SIDE_EFFECTS?: Queue<SideEffectMessage>
   /** Base URL for deep links in notification emails (e.g. https://aquilla.app). */
   BASE_URL?: string
   /** AQU-1415: "1" turns the lane write wall on. Unset keeps additive scopes. */
   LANE_READ_WALL?: string
+  /** PostHog Logs project token; unset (local dev, e2e) makes telemetry a no-op. */
+  POSTHOG_KEY?: string
+  POSTHOG_HOST?: string
 }
 
 interface AcceptedEntry {
@@ -1901,6 +1911,7 @@ export async function handleEventsWriteRequest(
       await recomputeCommitted()
     } catch (err) {
       console.error("[events] DB batch failed:", err)
+      const batchFailure = dbFailureInfo(err)
       // The chunks that did commit are durable, so their counters must still
       // be brought up to date (AQU-1261) before we report the partial result.
       await recomputeCommitted()
@@ -1917,6 +1928,9 @@ export async function handleEventsWriteRequest(
         }
       }
 
+      // These 5xx results ride inside a 200, which the request wrapper in
+      // index.ts never ships — report them here (grouped, throttled).
+      reportServerRejections(env, ctx, rawEvents, rejected, batchFailure)
       return Response.json(
         {
           accepted,
@@ -1940,8 +1954,13 @@ export async function handleEventsWriteRequest(
       (entry) => !replayedCellEventIds.has(entry.id),
     )
 
-    // Comment notifications — fire-and-forget via ctx.waitUntil so they
-    // never delay the response. Only fires for comment.create events.
+    // Comment notifications — handed to the side-effect queue (AQU-1824) via
+    // ctx.waitUntil so they never delay the response. The waitUntil now covers
+    // a single `queue.send()`; recipient resolution and the sends themselves
+    // happen in the queue consumer, where they are retryable and
+    // dead-letterable. Without a queue binding (local dev, e2e)
+    // `dispatchCommentNotification` falls back to the old inline send. Only
+    // fires for comment.create events.
     if (ctx && env.AQUILLA_PG) {
       const baseUrl = env.BASE_URL ?? 'https://aquilla.app'
       for (const entry of newEntries) {
@@ -1957,9 +1976,7 @@ export async function handleEventsWriteRequest(
             const body = p.body ?? ''
             const parentCommentId = p.parentCommentId ?? null
             ctx.waitUntil(
-              sendCommentNotifications({
-                env,
-                db: env.AQUILLA_PG!,
+              dispatchCommentNotification(env, {
                 baseUrl,
                 projectId: rawEvent.projectId,
                 author: entry.author,
@@ -2158,6 +2175,8 @@ export async function handleEventsWriteRequest(
     }
   }
 
+  // A handler / auth 5xx inside this 200 (the batch itself committed).
+  reportServerRejections(env, ctx, rawEvents, rejected)
   return Response.json({
     accepted,
     rejected,

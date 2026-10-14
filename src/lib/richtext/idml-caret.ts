@@ -41,6 +41,8 @@ export function idmlPointerSelectionFromPoint(
   const root = target ?? readRoot
   if (!root) return null
 
+  const slot = target ? Number(target.getAttribute("data-idml-slot")) : Number.NaN
+  const slotKnown = Number.isSafeInteger(slot)
   const doc = root.ownerDocument as CaretPointDocument
   const caret = doc.caretPositionFromPoint?.(event.clientX, event.clientY)
   const range = caret
@@ -51,16 +53,21 @@ export function idmlPointerSelectionFromPoint(
         return next
       })()
     : doc.caretRangeFromPoint?.(event.clientX, event.clientY) ?? null
-  if (!range || !root.contains(range.startContainer)) return null
+  // An empty run — a faint Regular label, or an empty bold box — has no text
+  // node for the browser caret to land in, so the measured range is missing
+  // or sits on the paragraph. The click still names the slot; dropping it
+  // activates the cell with the caret at the end, which reads as selecting
+  // the whole cell.
+  if (!range || !root.contains(range.startContainer)) {
+    return slotKnown ? { kind: "slot", slot, offset: 0 } : null
+  }
 
   const prefix = doc.createRange()
   prefix.selectNodeContents(root)
   prefix.setEnd(range.startContainer, range.startOffset)
   const offset = idmlRenderedOffset(prefix.cloneContents())
   if (!target) return { kind: "plain", offset }
-
-  const slot = Number(target.getAttribute("data-idml-slot"))
-  return Number.isSafeInteger(slot) ? { kind: "slot", slot, offset } : null
+  return slotKnown ? { kind: "slot", slot, offset } : null
 }
 
 /**

@@ -178,6 +178,10 @@ export interface Env {
   /** Kill switch for Jev react decisions (lib/jev/decide.ts): "off" makes the
    *  react loop use its fixed rules without calling Jev. Unset = on. */
   JEV_REACT?: string
+  /** AQU-1690 kill switch for autopilot's Bible-data Jev questions
+   *  (lib/contextual/judge-expectations.ts): "off" leaves every question the
+   *  code cannot settle unanswered. Unset = on. */
+  JEV_BIBLE_QA?: string
   /** Kill switch for smart edits (routes/ai-smart-edits.ts): "off" answers
    *  every suggest request with no suggestions. Unset = on. */
   SMART_EDITS?: string
@@ -283,6 +287,12 @@ export interface Env {
   //   Default (unset / "false"): LOG-ONLY mode — over-budget requests are logged
   //   but allowed through. Flip to "true" after sizing thresholds.
   AI_BUDGET_ENFORCE?: string
+  // AI_DAILY_SPEND_CEILING_USD: platform-wide daily spend ceiling in US dollars,
+  //   checked before every paid AI call (db/shared/ai-spend-ceiling.ts, AQU-1869).
+  //   Unlike the controls above this is NOT behind an enforce flag — it is the
+  //   floor that keeps the shared vendor keys solvent. Unset → $500/day. "0"
+  //   blocks all paid AI; "off"/"none"/"unlimited" switches the ceiling off.
+  AI_DAILY_SPEND_CEILING_USD?: string
 
   // ── Bible Aquifer reference data (bibletranslation.org) ──────────────────
   // Server-side proxy + agent integration of our scholarly reference API,
@@ -294,6 +304,9 @@ export interface Env {
   /** User-Agent sent to the Aquifer API — the live site 403s generic UAs.
    *  Default: "Aquilla/1.0 (+https://aquilla.app)". */
   AQUIFER_USER_AGENT?: string
+  /** AQU-1690: base URL of the Bible Knowledge Pack that autopilot reads
+   *  (lib/bkp/pack-loader.ts). Default https://bibletranslation.org/bkp/v1. */
+  BKP_BASE?: string
 
   // ── Org credit accounting (WS-AUTH-CREDITS) ──────────────────────────────
   // Platform-level defaults; per-org overrides live in org_settings.credits.

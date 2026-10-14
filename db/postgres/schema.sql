@@ -852,10 +852,14 @@ CREATE TABLE cell_waivers (
     file_id    TEXT NOT NULL,
     cell_id    TEXT NOT NULL,
     rule_id    TEXT NOT NULL,
+    -- AQU-1740 (migration 0163): hash of the ONE finding this waiver dismisses
+    -- (src/lib/rules/match-hash.ts). '' = no finding named, i.e. the rule is
+    -- waived across the whole cell — the meaning of every row predating 0163.
+    match_hash TEXT NOT NULL DEFAULT '',
     reason     TEXT,
     waived_by  TEXT NOT NULL,
     waived_ts  BIGINT NOT NULL,
-    PRIMARY KEY (project_id, file_id, cell_id, rule_id)
+    PRIMARY KEY (project_id, file_id, cell_id, rule_id, match_hash)
 );
 
 CREATE TABLE cell_audio (
@@ -1053,6 +1057,8 @@ CREATE TABLE concepts (
     status         TEXT NOT NULL DEFAULT 'draft',
     case_sensitive INTEGER NOT NULL DEFAULT 0,
     match_options  JSONB,
+    -- AQU-1693 (0166): {"acai": "<ACAI entity id>"}; NULL or {} = not linked.
+    external_ids   JSONB,
     created_by     TEXT,
     created_at     BIGINT NOT NULL,
     updated_at     BIGINT NOT NULL,
@@ -1154,6 +1160,27 @@ CREATE TABLE cell_word_morph (
     strongs_h   TEXT,               -- Strong's Hebrew number (e.g. H1234), NULL for Greek
     strongs_g   TEXT,               -- Strong's Greek number (e.g. G1234), NULL for Hebrew
     PRIMARY KEY (project_id, file_id, cell_id, word_seq)
+);
+
+-- Migration 0164: Bridge 1 of the Bible data layer (AQU-1694). One row per
+-- link between a Bible Knowledge Pack word (Macula id) and a token of a
+-- gateway-language source cell, computed in the browser and uploaded through
+-- the sync-worker's source-word-alignment route. Derived data: rows are valid
+-- only while source_hash equals the source row's cells.content_hash, and the
+-- read route returns nothing else. Keep each column on one line (the dev-stack
+-- schema reconciler drops lines nested in a column's parentheses).
+CREATE TABLE source_word_alignment (
+    project_id    TEXT NOT NULL,
+    file_id       TEXT NOT NULL,
+    cell_id       TEXT NOT NULL,
+    src_word_id   TEXT NOT NULL,      -- pack word id, e.g. n43004007009
+    tgt_token_idx INTEGER NOT NULL CHECK (tgt_token_idx >= 0),   -- token of the source cell's text (tokenize order)
+    conf          REAL NOT NULL CHECK (conf >= 0 AND conf <= 1),
+    method        TEXT NOT NULL,      -- recipe, e.g. ibm1-gdfa-names/1
+    source_hash   TEXT NOT NULL,      -- cells.content_hash of the text that was aligned
+    trained_pairs INTEGER NOT NULL CHECK (trained_pairs >= 0),   -- verse cells the run trained on
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (project_id, file_id, cell_id, src_word_id, tgt_token_idx)
 );
 
 -- ────────────────────────────── indexes ─────────────────────────────────
@@ -1286,6 +1313,9 @@ CREATE TABLE IF NOT EXISTS org_credit_usage_daily (
   PRIMARY KEY (org_id, user_id, date_utc, rail)
 );
 CREATE INDEX IF NOT EXISTS idx_org_credit_org_date ON org_credit_usage_daily (org_id, date_utc);
+-- Platform-wide daily spend ceiling sums one UTC day across every org, so it
+-- has no org predicate to use the composite index above (0167, AQU-1869).
+CREATE INDEX IF NOT EXISTS idx_org_credit_date ON org_credit_usage_daily (date_utc);
 
 -- Translation agent run ledger (0040_agent_runs.sql). One row per
 -- POST /api/v1/ai/agent/run; staged commits carry payload.agent_run_id →
@@ -2079,16 +2109,17 @@ CREATE TABLE IF NOT EXISTS contextual_decisions (
   id text PRIMARY KEY,                  -- uuidv7
   project_id text NOT NULL,
   run_id text,                          -- NULL once the owning run ends
-  file_id text NOT NULL,
+  file_id text,                         -- NULL for a project-wide question (0165)
   span_id text,
   cell_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
   -- WHY the agent cannot proceed, in the user's words. Never "review this".
   reason text NOT NULL,
   -- Which readiness item this gap belongs to; NULL for free-text ambiguities,
-  -- which the deterministic sweep can never close.
+  -- which the deterministic sweep can never close. 'bible-fact' (0165) asks
+  -- for a durable project fact.
   readiness_item text
     CHECK (readiness_item IS NULL OR
-           readiness_item IN ('terminology','brief','examples','rules','languages')),
+           readiness_item IN ('terminology','brief','examples','rules','languages','bible-fact')),
   -- Set only for terminology decisions: the concept whose rendering is missing.
   concept_id text,
   -- How many later passages the answer affects. Drives surfacing rank (§4.6)
@@ -2102,6 +2133,13 @@ CREATE TABLE IF NOT EXISTS contextual_decisions (
   assigned_user_id integer,
   assigned_invite_id text,
   resolution jsonb,                     -- {kind:'answered'|'researched', …}
+  -- 0165 (AQU-1691): a fact question stores its answer as a project fact
+  -- under fact_key (db/shared/project-facts.ts), offers one-click options,
+  -- and says where the fact applies. Keep each on one line: the dev-stack
+  -- schema reconciler (scripts/dev-stack-schema-parser.ts) ALTERs them in.
+  fact_key text,
+  options jsonb,                        -- [{value, label?}]
+  fact_scope jsonb,                     -- {book?, passage?: {from, to}, entity?}
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   resolved_at timestamptz
@@ -2661,3 +2699,46 @@ CREATE OR REPLACE VIEW assignment_member_cells WITH (security_invoker = true) AS
 -- AQU-1491: runtime grants, distinct from legacy word/credit allowances.
 ALTER TABLE org_billing ADD COLUMN weekly_allowance BIGINT
   CHECK (weekly_allowance >= 0 AND weekly_allowance <= 10000000);
+
+-- AQU-1249: feature-flagged WIP. Capabilities confer no project membership.
+CREATE TABLE IF NOT EXISTS checking_links (
+  token TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  created_by BIGINT NOT NULL REFERENCES users(id),
+  title TEXT NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('viewer', 'commenter', 'reviewer')),
+  units JSONB NOT NULL,
+  pin_hash TEXT,
+  failed_attempts INTEGER NOT NULL DEFAULT 0,
+  locked_until BIGINT,
+  join_count INTEGER NOT NULL DEFAULT 0,
+  join_window BIGINT NOT NULL DEFAULT 0,
+  feedback_count INTEGER NOT NULL DEFAULT 0,
+  feedback_window BIGINT NOT NULL DEFAULT 0,
+  expires_at BIGINT NOT NULL,
+  revoked_at BIGINT,
+  created_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS checking_links_project ON checking_links(project_id);
+
+-- ──────────────────────── side-effect queue ledger ────────────────────────
+
+-- AQU-1824: idempotency ledger for the side-effect queue (sync-worker
+-- src/side-effects/). One row per delivery — for comment mail the unit is
+-- (comment, recipient user) — so a queue retry or a duplicate delivery never
+-- performs the same side effect twice. See
+-- db/postgres/migrations/0168_side_effect_deliveries.sql for the status
+-- semantics and why a `pending` row is retried rather than skipped.
+CREATE TABLE side_effect_deliveries (
+    idempotency_key TEXT PRIMARY KEY,
+    kind            TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'pending'
+                      CHECK (status IN ('pending', 'sent', 'failed')),
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    last_error      TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_side_effect_deliveries_created_at
+    ON side_effect_deliveries (created_at);

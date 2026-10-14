@@ -29,6 +29,7 @@ import { ROLE, type Env } from "../types"
 import { errorJson, requireAutopilotReleased, requireRole } from "./_contextual-helpers"
 import { isAutopilotReleased } from "../lib/contextual/release-gate"
 import { runAiGuard } from "../lib/ai-budget"
+import { AI_SPEND_CEILING_ERROR, checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
 import { getPlatformSettingsCached } from "../lib/platform-settings"
 import { creditGuard } from "../lib/credits"
 import { wordCapBody, wordGuard } from "../lib/billing/words"
@@ -120,6 +121,7 @@ import {
   invalidateContextualReads,
 } from "../lib/contextual/read-cache"
 import { decide } from "../lib/jev/decide"
+import { makeBibleTickDeps } from "../lib/contextual/bible-deps"
 import { reactCheckProject, type StartReactionRun, type WakeReactionRun } from "../lib/react-loop"
 import type { LlmCall } from "../lib/contextual/types"
 
@@ -448,6 +450,8 @@ async function selfTickLoop(
   const meter = makeCostMeter(env, db)
   // Prompt/reply per call for the Team step inspector; flushed with the meter.
   const traces = makeTraceRecorder(env, db, { runId, projectId })
+  // AQU-1690: Bible data for the run; its caches last across waves.
+  const bible = makeBibleTickDeps(env, db, { projectId, runId }, { traces, meter })
   try {
     const settings = await getPlatformSettingsCached(env)
     // AQU-837 weekly allowance: every graph call reserves before the provider
@@ -491,6 +495,20 @@ async function selfTickLoop(
       global: resolveMaxGlobalConcurrency(env.CONTEXTUAL_MAX_GLOBAL_CONCURRENCY),
     }
     for (let wave = 0; wave < MAX_WAVES_PER_LOOP; wave++) {
+      // Platform daily spend ceiling (AQU-1869), re-checked at every wave
+      // edge. Checking only at start would let a run already in flight keep
+      // spending for the rest of the day after the floor trips, and one wave
+      // is several model calls. Park rather than fail: the work is still
+      // queued, and Continue (or the sweeper) resumes it once the ceiling
+      // resets at the next UTC day or an operator raises it.
+      const spendCeiling = await checkAiSpendCeiling(db, env, "autopilot-tick")
+      if (!spendCeiling.ok) {
+        const paused = await parkRun(db, runId, "awaiting_input")
+        if (paused.status === "ok") {
+          await publishRunStateOutsideTick(env, db, projectId, paused.run)
+        }
+        return
+      }
       const weight = Math.max(1, Math.min(
         capacityLimits.project,
         concurrency ?? MAX_WAVE_CONCURRENCY,
@@ -516,6 +534,7 @@ async function selfTickLoop(
             notify,
             ...(concurrency ? { concurrency } : {}),
             triage: (input) => decide(env, { purpose: "triage", projectId, ...input }),
+            bible,
           })
         } finally {
           await guarded.stop()
@@ -743,6 +762,10 @@ export const startReactionRun: StartReactionRun = async (env, input) => {
   if (!credit.ok) return { status: "skipped", reason: `credit_cap_exceeded (${credit.reason})` }
   const words = await wordGuard(env.AQUILLA_PG, orgId)
   if (!words.ok) return { status: "skipped", reason: `word_cap_exceeded (${words.reason})` }
+  // Platform daily spend ceiling (AQU-1869). An autonomous reaction has no
+  // user to tell, so it simply declines to start and says why.
+  const spendCeiling = await checkAiSpendCeiling(env.AQUILLA_PG, env, "autopilot-reaction")
+  if (!spendCeiling.ok) return { status: "skipped", reason: AI_SPEND_CEILING_ERROR }
 
   const created = await createRun(env.AQUILLA_PG, {
     projectId: input.projectId,
@@ -804,6 +827,10 @@ export const wakeReactionRun: WakeReactionRun = async (env, input) => {
   if (!credit.ok) return { status: "skipped", reason: `credit_cap_exceeded (${credit.reason})` }
   const words = await wordGuard(env.AQUILLA_PG, orgId)
   if (!words.ok) return { status: "skipped", reason: `word_cap_exceeded (${words.reason})` }
+  // Platform daily spend ceiling (AQU-1869) — waking a parked run resumes
+  // paid work, so it is gated exactly like starting one.
+  const spendCeiling = await checkAiSpendCeiling(env.AQUILLA_PG, env, "autopilot-wake")
+  if (!spendCeiling.ok) return { status: "skipped", reason: AI_SPEND_CEILING_ERROR }
 
   // An EXHAUSTED parked run (every span settled) has nothing left to drive —
   // waking it would consume the steering and re-park untouched. Retire it and
@@ -983,6 +1010,11 @@ contextual.post(
     const models = resolveContextualModels(c.env, settings)
     const guard = await runAiGuard(models.mid, user.id, c.env.AQUILLA_PG, c.env)
     if (!guard.ok) return c.json(guard.body, guard.status)
+
+    // Platform daily spend ceiling (AQU-1869). Autopilot is the heaviest paid
+    // surface per start, so it is refused before a run row exists.
+    const spendCeiling = await checkAiSpendCeiling(c.env.AQUILLA_PG, c.env, "autopilot-start")
+    if (!spendCeiling.ok) return c.json(spendCeiling.body, spendCeiling.status)
 
     let orgId = 0
     try {
@@ -1457,6 +1489,12 @@ contextual.get("/:projectId/contextual/runs/:runId/traces", authMiddleware, asyn
     return c.json(body, status)
   }
   const spanId = c.req.query("spanId") || undefined
+  // AQU-1690: ?label=bible-facts lists one kind of row (the inspector's facts).
+  const label = c.req.query("label") || undefined
+  if (label !== undefined && !/^[a-z0-9:_-]{1,64}$/.test(label)) {
+    const { body, status } = errorJson("validation_failed", "label must be 1 to 64 of a-z 0-9 : _ -", 400)
+    return c.json(body, status)
+  }
   const limitRaw = c.req.query("limit")
   const limit = limitRaw === undefined ? TRACE_LIST_LIMIT : Number(limitRaw)
   if (!Number.isInteger(limit) || limit < 1 || limit > TRACE_LIST_LIMIT) {
@@ -1467,7 +1505,15 @@ contextual.get("/:projectId/contextual/runs/:runId/traces", authMiddleware, asyn
     )
     return c.json(body, status)
   }
-  const result = await listRunTraces(c.env.AQUILLA_PG, { projectId, runId, limit, ...(spanId ? { spanId } : {}) })
+  const result = await listRunTraces(c.env.AQUILLA_PG, {
+    projectId,
+    runId,
+    limit,
+    ...(spanId ? { spanId } : {}),
+    ...(label ? { label } : {}),
+    // AQU-1690: shadow-mode Jev answers (Jev and metrics rows) are for maintainers only.
+    maintainer: gate.level >= ROLE.MAINTAINER,
+  })
   return c.json(result)
 })
 
@@ -2144,6 +2190,10 @@ contextual.post(
     // will actually call, not the one the drafting pipeline uses.
     const guard = await runAiGuard(models.fast, user.id, db, c.env)
     if (!guard.ok) return c.json(guard.body, guard.status)
+
+    // Platform daily spend ceiling (AQU-1869).
+    const spendCeiling = await checkAiSpendCeiling(db, c.env, "autopilot-note")
+    if (!spendCeiling.ok) return c.json(spendCeiling.body, spendCeiling.status)
 
     let orgId = 0
     try {

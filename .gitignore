@@ -119,3 +119,7 @@ client_secret*.json
 # AQU-1868 — Big Bible perf harness: local fixture handle + run reports
 .perf/
 perf-report/
+
+# AQU-1941 — pre-write copies of project TTS settings taken by
+# `pnpm neon:prune-phantom-voices … --apply`. Customer data; never commit.
+.phantom-voice-backups/

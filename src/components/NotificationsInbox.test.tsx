@@ -167,6 +167,28 @@ describe("NotificationsInbox", () => {
     expect(screen.queryByText(/Berean|Cell /)).not.toBeInTheDocument()
   })
 
+  // Seen on dev after PR #1319: a cell whose canonical ref is its own id
+  // titled the row "b7f7b6f9-c87b-4100-96cc-f3f2dfee7ade in Lesson 1.docx".
+  it("titles a mention on a cell whose ref is only its id with the file name", async () => {
+    const user = userEvent.setup()
+    const opaque = "b7f7b6f9-c87b-4100-96cc-f3f2dfee7ade"
+    renderInbox(
+      [comment({ cellId: opaque, cellRef: opaque, body: "@[alice] see this" })],
+      { files: [{ id: "file-1", name: "Lesson 1.docx" }] },
+    )
+    await user.click(screen.getByTestId("notifications-inbox-trigger"))
+    const row = screen.getByRole("button", { name: /@alice see this/ })
+    const text = row.textContent ?? ""
+    expect(text.indexOf("Lesson 1.docx")).toBeLessThan(text.indexOf("Bob commented: @alice see this"))
+    expect(text).not.toContain(opaque)
+    expect(screen.getByText("Lesson 1.docx")).toBeInTheDocument()
+    expect(screen.queryByText(/ in Lesson 1\.docx/)).not.toBeInTheDocument()
+    await user.click(row)
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      `/project/proj-1/editor/file/file-1?cellId=${opaque}&comments=1&commentId=c1`,
+    )
+  })
+
   it("marks every mention read without leaving the page", async () => {
     const user = userEvent.setup()
     renderInbox([

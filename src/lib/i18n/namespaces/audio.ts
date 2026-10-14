@@ -641,6 +641,9 @@ export const audio = defineNamespace({
     // actually reads to decide what to do was the untranslated half.
     "audio.aiError.dailyLimitBody":
       "Daily AI limit reached — resets at midnight UTC. Try again tomorrow, or switch this project to a custom AI provider.",
+    // AQU-1869: the platform-wide spend ceiling, not the user's own quota.
+    "audio.aiError.spendCeilingBody":
+      "Hosted AI is paused for the rest of the day — the platform reached its daily AI spend ceiling. It resets at midnight UTC. Nothing is wrong with your project; your own work is unaffected. To keep going now, switch this project to a custom AI provider in Project Settings.",
     "audio.aiError.tooLargeBody":
       "This request was larger than the selected model can handle. Draft fewer cells at once, lower the number of examples in AI settings, or pick a model with a larger context window.",
     "audio.aiError.geminiKeyRequiredBody":
@@ -3034,6 +3037,18 @@ export const audio = defineNamespace({
           "reset, or move the project to its own AI provider so the platform " +
           "budget stops applying. 'UTC' is a technical term the sentence needs — " +
           "keep it recognizable rather than translating it to a local zone.",
+      },
+      "audio.aiError.spendCeilingBody": {
+        description:
+          "Body shown under providerUnavailableTitle when the PLATFORM has hit its " +
+          "daily dollar ceiling for hosted AI (AQU-1869) and every paid AI call is " +
+          "refused until the next UTC day. This is a platform-wide pause, not the " +
+          "user's own allowance — unlike dailyLimitBody it must not read as a " +
+          "personal quota or tell them to wait out their own limit. Names the one " +
+          "thing they can do now: switch the project to its own AI provider in " +
+          "Project Settings. 'UTC' and 'Project Settings' are a technical term " +
+          "and a UI location — keep the first recognizable and match the second " +
+          "to that settings page's translated name.",
       },
       "audio.aiError.tooLargeBody": {
         description:

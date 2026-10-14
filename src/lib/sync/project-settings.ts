@@ -505,7 +505,7 @@ export interface ProjectLaneView {
   /**
    * AQU-1954: does every file owe audio in this language? Off, a file counts
    * this language's audio only once it has a recording in it. Absent from a
-   * server that predates migration 0169, which reads as off.
+   * server that predates migration 0173, which reads as off.
    */
   recordsAudio?: boolean
 }

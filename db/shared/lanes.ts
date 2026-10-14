@@ -562,7 +562,7 @@ export interface ProjectLaneRecord {
   /**
    * AQU-1954: does every file owe audio in this language? Off (the default),
    * a file counts this language's audio only once it has a recording in it.
-   * Optional so a record built before migration 0169 still type-checks.
+   * Optional so a record built before migration 0173 still type-checks.
    */
   recordsAudio?: boolean
 }

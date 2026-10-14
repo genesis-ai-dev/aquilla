@@ -1310,7 +1310,7 @@ interface PortfolioDbRow {
   last_edit_at: number | null
   /** AQU-1566: what audio coverage divides by (a dubbing file's cue sheet, else the file). */
   audio_total_cells: number
-  /** AQU-1954: whether any of the project's languages has "Records audio" on (lane rows, migration 0169). */
+  /** AQU-1954: whether any of the project's languages has "Records audio" on (lane rows, migration 0173). */
   records_audio: boolean | null
   audio_cells: number
   validated_audio_cells: number
@@ -1842,7 +1842,7 @@ const lessStructural = (total: string, structural: string) =>
  * AQU-1954: does this file's audio count toward the project's audio numbers?
  *
  * Every file does when the project's language records audio (`ra`, from the
- * lane rows' switch, migration 0169). Otherwise only a file somebody has
+ * lane rows' switch, migration 0173). Otherwise only a file somebody has
  * recorded in, or one with a cue sheet, which declares the dubbing before the
  * first take: the plan board's own rule (`audioFileIds`). Without this a
  * project with one recorded book among sixty-five text books divided its

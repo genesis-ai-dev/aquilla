@@ -14805,7 +14805,7 @@ export function ProjectWorkspace() {
                   rides in asideEdge so it isn't stretched by Resizable. */}
               {rightRail.biblesPanel && (
                 <ParallelBiblesSidebar
-                  key={activeFile!.id}
+                  key={`${activeFile!.id}-bibles`}
                   trackedRef={trackedCellRef}
                   open
                   onToggle={() => {
@@ -14819,7 +14819,7 @@ export function ProjectWorkspace() {
                   collapsed edge tab rides in asideEdge alongside the bibles'. */}
               {rightRail.resourcesPanel && (
                 <VerseResourcesSidebar
-                  key={activeFile!.id}
+                  key={`${activeFile!.id}-resources`}
                   projectId={project!.id}
                   trackedRef={trackedCellRef}
                   getJwt={() => jwtRef.current}

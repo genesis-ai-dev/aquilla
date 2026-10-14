@@ -285,6 +285,9 @@ export const audio = defineNamespace({
     "audio.tts.serverOnlyNeedsGenerate":
       "Generate audio on this line first to hear {engine} TTS.",
     "audio.tts.playbackFailed": "That voice clip couldn't be played.",
+    "audio.tts.offlineBlocked": "Offline: {engine} needs a connection to generate audio.",
+    "audio.tts.offlineSuggestLocal": "Offline: {engine} needs a connection. Switch this voice to the on-device MMS voice to preview it offline.",
+    "audio.tts.offlinePreviewOnly": "Offline: preview with the on-device voice. The clip won't be saved.",
     "audio.tts.failedTooltip": "Couldn't generate a voice — {reason}",
     "audio.recordingModal.cueReferenceLabel": "This cue:",
     "audio.recordingModal.ttsSharedNotice": plural({
@@ -506,6 +509,7 @@ export const audio = defineNamespace({
       "count",
     ),
     "audio.batchVoice.failedTitle": "Couldn't generate voice for these lines",
+    "audio.batchVoice.offline": "You're offline. Generating voice for these lines needs a connection.",
     "audio.batchVoice.moreFailures": plural(
       { one: "{count} more failure", other: "{count} more failures" },
       "count",
@@ -1898,6 +1902,17 @@ export const audio = defineNamespace({
           "wordings distinct — merging them would re-point a string translators " +
           "were given a specific surface for.",
       },
+      "audio.tts.offlineBlocked": {
+        description: "Tooltip on the disabled generate-voice button while offline when the voice uses a hosted engine.",
+        placeholders: { engine: "Short engine name, e.g. 'Inworld' or 'Gemini'." },
+      },
+      "audio.tts.offlineSuggestLocal": {
+        description: "Tooltip on the disabled generate-voice button while offline when the on-device MMS voice model is downloaded and could be used instead.",
+        placeholders: { engine: "Short engine name, e.g. 'Inworld' or 'Gemini'." },
+      },
+      "audio.tts.offlinePreviewOnly": {
+        description: "Tooltip on the generate-voice button while offline when the voice is the on-device MMS model: it plays but is not saved.",
+      },
       "audio.tts.failedTooltip": {
         description:
           "AQU-510: tooltip and accessible name of the line's voice button once " +
@@ -2637,6 +2652,9 @@ export const audio = defineNamespace({
           "and also hit failures. States the success count; the body names the " +
           "lines that failed and why.",
         placeholders: { count: "Number of lines that got a take." },
+      },
+      "audio.batchVoice.offline": {
+        description: "Note beside the disabled Generate button in the batch voice dialog while the device is offline.",
       },
       "audio.batchVoice.failedTitle": {
         description:

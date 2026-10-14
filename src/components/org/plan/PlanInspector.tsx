@@ -27,7 +27,7 @@ import { fmtDeadlineDate } from "@/lib/format-date"
 import { formatRelativeTime } from "@/lib/i18n/format"
 import { isKnownBookCode } from "@/lib/file-labeling/bible-book-names"
 import {
-  planAudioTotal, planOpenKind, planPct, planShortfallParts, planUnitExpectsAudio,
+  planAudioTotal, planOpenKind, planPct, planUnitExpectsAudio,
   planUnitIsNearlyComplete, planUnitLabel, planUnitNote,
   planUnitExpectsText, planUnitShortfall, planUnitStatus, type PlanOpenKind, type PlanUnit,
 } from "@/lib/plan/plan-status"
@@ -755,42 +755,27 @@ function PlanChapterCard({
 }) {
   const t = useT()
   const readoutTips = usePlanReadoutTips()
-  const rowRef = useRef<HTMLDivElement>(null)
 
   const shortfall = planSectionShortfall(section, hasAudio, hasText)
-  // Which queue this chapter is in, and therefore which verses the chips list.
-  // `planShortfallParts` has already ordered the terms worst-first with
-  // translation ahead of validation, so its first term IS the lead.
-  const lead = planShortfallParts(shortfall)[0]
-  const outstandingLabel = lead
-    ? t(
-        (lead.kind === "translate"
-          ? "org.projectOverview.plan.chapterCellsUntranslated"
-          : lead.kind === "validate"
-            ? "org.projectOverview.plan.chapterCellsUnvalidated"
-            : lead.kind === "record"
-              ? "org.projectOverview.plan.chapterTakesUnrecorded"
-              // audio_validate: these takes ARE recorded — what they lack is
-              // validation, and the old fall-through said "not yet recorded",
-              // sending the reader to record work that already existed. The
-              // branch is DORMANT today: AUDIO_JUDGED_ON_RECORDED zeroes the
-              // audio_validate part everywhere, so no test can reach it
-              // through the panel until AQU-490 flips that flag. It is here
-              // so flip day changes the measurement, not the words.
-              : "org.projectOverview.plan.chapterTakesUnvalidated") as never,
-        { count: lead.count },
-      )
-    : null
+  // The header says what is left in the panel's own words — "1 to translate ·
+  // 1 to validate" — as the book line above and each assignee below do. It
+  // used to name only the first queue ("1 cell not yet translated"), which
+  // read as the whole story beside a badge that counted more (meeting,
+  // 2026-10-14).
+  const outstandingLabel = usePlanShortfallText(shortfall)
 
-  // The chips list the chapter's own lead queue — the same rule as the link,
-  // so a chapter that reads "5 takes to record" lists the five verses with no
-  // take. A worker from before verses carried take state sends no flags, and
-  // an audio lead then draws no chips rather than every verse.
-  const chipLead = planOpenKind(shortfall)
-  const short = verses?.status === "ready" && chipLead
-    ? shortVerses(verses.verses, chipLead)
+  // AQU-1973: ONE ROW PER QUEUE (Sam, 2026-10-14). Each line appears once, under the
+  // first job it still needs: a line nobody has translated needs translating
+  // and then validating; a translated one only validating. So the counts add
+  // up to the chapter's badge, and a reader visits every line exactly once.
+  // It used to list the first queue only, so a chapter with one untranslated
+  // and one unvalidated line showed a single chip under a "2".
+  const queues = verses?.status === "ready"
+    ? CHAPTER_QUEUES
+        .filter((q) => shortfall[q.field] > 0)
+        .map((q) => ({ ...q, verses: shortVerses(verses.verses, q.kind) }))
+        .filter((q) => q.verses.length > 0)
     : []
-  const fade = useScrollFade(rowRef, short.length)
   const firstCellId = verses?.status === "ready" ? verses.verses[0]?.cellId ?? null : null
   // Lines added in the editor only. A heading is never one of them; the
   // `structural` check also covers a worker mid-deploy that still flags it.
@@ -906,50 +891,43 @@ function PlanChapterCard({
           tips={readoutTips("audio", section.audioCount, section.audioValidatedCount, section.totalCount)}
         />
       )}
-      {/* ONE ROW, NEVER TWO — and it SCROLLS. Sam, 2026-09-16: every verse
-          reachable, the card's height never depending on how badly a chapter
-          is doing, and no "+N" chip, because the header above already says
-          how many are left and a count that cannot be clicked was the least
-          useful thing the row could end on. Fixed-width chips, so the strip
-          reads as a set rather than a sentence.
-          The scrollbar is hidden (the app's global rule would otherwise pin a
-          12px track under the chips); the cut-off chip at the edge plus the
-          fade are the affordance. `overscroll-x-contain` keeps a trackpad
-          swipe past the last chip from turning into the browser's back
-          gesture. */}
-      {short.length > 0 && (
-        <div
-          ref={rowRef}
-          className="flex gap-1 overflow-x-auto overscroll-x-contain whitespace-nowrap py-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          style={{ maskImage: fadeMask(fade), WebkitMaskImage: fadeMask(fade) }}
-          data-testid="plan-chapter-verses"
-        >
-          {short.map((v) => {
-            const name = wordChipName(v)
-            return (
-              <AppTooltip key={v.cellId} content={name}>
-                <button
-                  type="button"
-                  aria-label={name}
-                  data-testid={`plan-verse-chip-${v.cellId}`}
-                  // Text in the text colour (AQU-1764): it was Nearly complete's
-                  // blue, which the progress bars took over, and `text-primary`
-                  // is the pale accent tuned for button fills, which washed out
-                  // on a chip this small. The bordered pill is what says it is
-                  // a button.
-                  // AQU-1493: a line with no reference has no number to print, so
-                  // its chip says what it is in words and grows to fit them. So
-                  // does a heading, whose ref (if any) is a USFM id like "1:s1:1".
-                  className={`h-6 shrink-0 rounded-full border border-primary/35 bg-primary/10 text-[11.5px] font-medium tabular-nums text-foreground transition-colors hover:bg-primary/20 ${v.structural || v.unnumbered ? "px-2" : "w-[46px]"}`}
-                  onClick={() => onOpenCell?.(v.cellId)}
-                >
-                  {chipText(v)}
-                </button>
-              </AppTooltip>
-            )
-          })}
+      {queues.map((q, i) => (
+        <div key={q.kind} className="flex flex-col gap-0.5" data-testid={`plan-chapter-queue-${q.kind}`}>
+          <span className="text-[11px] text-muted-foreground">
+            {t(q.labelKey, { count: q.verses.length })}
+          </span>
+          <VerseChipRow
+            // The first queue's row keeps the id it has always had.
+            testId={i === 0 ? "plan-chapter-verses" : `plan-chapter-verses-${q.kind}`}
+            count={q.verses.length}
+          >
+            {q.verses.map((v) => {
+              const name = wordChipName(v)
+              return (
+                <AppTooltip key={v.cellId} content={name}>
+                  <button
+                    type="button"
+                    aria-label={name}
+                    data-testid={`plan-verse-chip-${v.cellId}`}
+                    // Text in the text colour (AQU-1764): it was Nearly complete's
+                    // blue, which the progress bars took over, and `text-primary`
+                    // is the pale accent tuned for button fills, which washed out
+                    // on a chip this small. The bordered pill is what says it is
+                    // a button.
+                    // AQU-1493: a line with no reference has no number to print, so
+                    // its chip says what it is in words and grows to fit them. So
+                    // does a heading, whose ref (if any) is a USFM id like "1:s1:1".
+                    className={`h-6 shrink-0 rounded-full border border-primary/35 bg-primary/10 text-[11.5px] font-medium tabular-nums text-foreground transition-colors hover:bg-primary/20 ${v.structural || v.unnumbered ? "px-2" : "w-[46px]"}`}
+                    onClick={() => onOpenCell?.(v.cellId)}
+                  >
+                    {chipText(v)}
+                  </button>
+                </AppTooltip>
+              )
+            })}
+          </VerseChipRow>
         </div>
-      )}
+      ))}
       {/* AQU-1493: only on the chapter that holds them (Sam, 2026-10-01). A
           line added with no verse reference counts with the chapter of the
           line above it; this says so here, where the number it changes is,
@@ -966,6 +944,45 @@ function PlanChapterCard({
           )}
         </p>
       )}
+    </div>
+  )
+}
+
+/**
+ * AQU-1973 (meeting, 2026-10-14): the chapter card's queues, in the order the work
+ * is done. `field` is the shortfall count that says the queue is non-empty;
+ * `kind` picks its lines (see `shortVerses`).
+ */
+const CHAPTER_QUEUES = [
+  { field: "toTranslate", kind: "untranslated", labelKey: "org.projectOverview.plan.queueTranslateValidate" },
+  { field: "toValidate", kind: "unvalidated", labelKey: "org.projectOverview.plan.queueValidate" },
+  { field: "toRecord", kind: "unrecorded", labelKey: "org.projectOverview.plan.queueRecordValidate" },
+  { field: "toAudioValidate", kind: "unsigned", labelKey: "org.projectOverview.plan.queueValidateRecording" },
+] as const
+
+/**
+ * ONE ROW, NEVER TWO — and it SCROLLS. Sam, 2026-09-16: every verse reachable,
+ * the card's height never depending on how badly a chapter is doing, and no
+ * "+N" chip, because the label above already says how many are left and a
+ * count that cannot be clicked was the least useful thing the row could end
+ * on. Fixed-width chips, so the strip reads as a set rather than a sentence.
+ * The scrollbar is hidden (the app's global rule would otherwise pin a 12px
+ * track under the chips); the cut-off chip at the edge plus the fade are the
+ * affordance. `overscroll-x-contain` keeps a trackpad swipe past the last chip
+ * from turning into the browser's back gesture. One per queue since
+ * 2026-10-14, each with its own fade.
+ */
+function VerseChipRow({ testId, count, children }: { testId: string; count: number; children: ReactNode }) {
+  const rowRef = useRef<HTMLDivElement>(null)
+  const fade = useScrollFade(rowRef, count)
+  return (
+    <div
+      ref={rowRef}
+      className="flex gap-1 overflow-x-auto overscroll-x-contain whitespace-nowrap py-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      style={{ maskImage: fadeMask(fade), WebkitMaskImage: fadeMask(fade) }}
+      data-testid={testId}
+    >
+      {children}
     </div>
   )
 }

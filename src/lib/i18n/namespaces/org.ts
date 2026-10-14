@@ -1599,10 +1599,12 @@ export const org = defineNamespace({
     // The title names the chapter the way the reader just clicked it; the line
     // beside it says what is outstanding in the medium that leads.
     "org.projectOverview.plan.chapterTitle": "Chapter {chapter}",
-    "org.projectOverview.plan.chapterCellsUntranslated": plural({ one: "{count} cell not yet translated", other: "{count} cells not yet translated" }),
-    "org.projectOverview.plan.chapterCellsUnvalidated": plural({ one: "{count} cell not yet validated", other: "{count} cells not yet validated" }),
-    "org.projectOverview.plan.chapterTakesUnrecorded": plural({ one: "{count} take not yet recorded", other: "{count} takes not yet recorded" }),
-    "org.projectOverview.plan.chapterTakesUnvalidated": plural({ one: "{count} take not yet validated", other: "{count} takes not yet validated" }),
+    // Sam, 2026-10-14 (meeting): the chapter card lists each queue under its
+    // own label, every line once, under the first job it still needs.
+    "org.projectOverview.plan.queueTranslateValidate": "Requires translation and validation ({count})",
+    "org.projectOverview.plan.queueValidate": "Requires validation ({count})",
+    "org.projectOverview.plan.queueRecordValidate": "Requires a recording and its validation ({count})",
+    "org.projectOverview.plan.queueValidateRecording": "Recording requires validation ({count})",
     // The overflow chip at the end of the verse row, when the outstanding
     // verses outnumber the chips one row can hold.
     // …and its sibling for a document, which has no sections at all.
@@ -3591,27 +3593,26 @@ export const org = defineNamespace({
         placeholders: { chapter: "The chapter number — a number, not translated." },
         maxLength: 18,
       },
-      "org.projectOverview.plan.chapterCellsUntranslated": {
+      "org.projectOverview.plan.queueTranslateValidate": {
         description:
-          "Beside the chapter card's heading: how many cells in this chapter still have no target text. Shown when translation is the outstanding work; its two siblings cover validation and recording. Reads as a fact about the chapter, not as an instruction.",
-        placeholders: { count: "Cells with no target text — a number; it also selects the plural form." },
+          "Label above a row of verse buttons on the plan board's chapter card: the lines nobody has " +
+          "translated yet, which then also need validating. {count} is how many lines are in the row.",
+        placeholders: { count: "How many lines (a number)." },
       },
-      "org.projectOverview.plan.chapterTakesUnvalidated": {
+      "org.projectOverview.plan.queueValidate": {
         description:
-          "Beside the chapter card's heading (see chapterCellsUntranslated): how many recorded takes nobody has validated yet. Distinct from chapterTakesUnrecorded — these ARE recorded.",
-        placeholders: {
-          count: "How many takes await validation — a number; the plural form is selected by it.",
-        },
+          "Label above the chapter card's row of lines that are translated but not validated yet.",
+        placeholders: { count: "How many lines (a number)." },
       },
-      "org.projectOverview.plan.chapterCellsUnvalidated": {
+      "org.projectOverview.plan.queueRecordValidate": {
         description:
-          "Beside the chapter card's heading (see chapterCellsUntranslated): how many translated cells nobody has validated yet.",
-        placeholders: { count: "Translated cells awaiting validation — a number; it also selects the plural form." },
+          "Label above the chapter card's row of lines with no recording yet (which then also need " +
+          "the recording validated).",
+        placeholders: { count: "How many lines (a number)." },
       },
-      "org.projectOverview.plan.chapterTakesUnrecorded": {
-        description:
-          "Beside the chapter card's heading (see chapterCellsUntranslated), for a file that carries recordings: how many cells have no take against them. A 'take' is one recorded clip for one cell.",
-        placeholders: { count: "Cells with no recording — a number; it also selects the plural form." },
+      "org.projectOverview.plan.queueValidateRecording": {
+        description: "Label above the chapter card's row of lines whose recording nobody has validated yet.",
+        placeholders: { count: "How many lines (a number)." },
       },
       "org.projectOverview.plan.frontMatter": {
         description:

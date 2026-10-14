@@ -28,7 +28,9 @@ const MASKED_SURFACES = [
   "src/components/TranslatedEditor.tsx",
   "src/components/EditorTable.tsx",
   "src/components/CommentThread.tsx",
-  "src/components/CommentsPage.tsx",
+  // AQU-1958: the comment-list body is rendered by the thread card, shared by
+  // the project Comments page and the org-wide comments view.
+  "src/components/comments-thread-card.tsx",
 ]
 
 describe("OPS-3 session-replay masking", () => {

@@ -621,7 +621,7 @@ CREATE TABLE IF NOT EXISTS chain_claims (
     PRIMARY KEY (project_id, file_id, cell_id, parent_key)
 );
 
--- AQU-1767 phase 2 (migration 0164): what a `source.cell.delete` took, so
+-- AQU-1767 phase 2 (migration 0171): what a `source.cell.delete` took, so
 -- `source.cell.restore` can put it back. Written once by the delete's
 -- projection (same batch, same gate), keyed by the delete event; `restored_by`
 -- makes each archive single-use. See the migration for the full rules.

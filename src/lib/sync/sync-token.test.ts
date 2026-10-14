@@ -8,7 +8,10 @@ import {
 } from "./sync-token"
 import {
   clearElevationRequired,
+  getElevationWaitingOn,
   isElevationRequired,
+  notifyElevationGranted,
+  onElevationGranted,
 } from "@/lib/errors/elevation-required-signal"
 import type { FrontierSession } from "@/lib/frontier/types"
 
@@ -149,6 +152,19 @@ describe("fetchSyncToken — OPS-44 elevation required", () => {
     expect(isElevationRequired()).toBe(true)
   })
 
+  it("tells the prompt it was a sync-token mint, and names the project in the next grant", async () => {
+    notifyElevationGranted() // start from an empty refused set
+    const granted = vi.fn()
+    const unsubscribe = onElevationGranted(granted)
+    global.fetch = mockFetch({ status: 403, body: ELEVATION_BODY }) as unknown as typeof fetch
+    await fetchSyncToken("jwt-admin", "burmese-ot", "f", {}, API).catch(() => undefined)
+    expect(getElevationWaitingOn()).toBe("sync-token")
+
+    notifyElevationGranted()
+    expect([...granted.mock.calls[0][0]]).toEqual(["burmese-ot"])
+    unsubscribe()
+  })
+
   it("leaves a generic 403 alone: no prompt, not elevation-required", async () => {
     global.fetch = mockFetch({ status: 403, body: NO_ACCESS_BODY }) as unknown as typeof fetch
     const err = await fetchSyncToken("jwt-admin", "p", "f", {}, API).catch((e: unknown) => e)
@@ -157,11 +173,18 @@ describe("fetchSyncToken — OPS-44 elevation required", () => {
   })
 
   it("does not prompt for a JWT that is not the active session's (background account drain)", async () => {
+    notifyElevationGranted() // start from an empty refused set
+    const granted = vi.fn()
+    const unsubscribe = onElevationGranted(granted)
     global.fetch = mockFetch({ status: 403, body: ELEVATION_BODY }) as unknown as typeof fetch
     const err = await fetchSyncToken("jwt-other-account", "p", "f", {}, API).catch((e: unknown) => e)
     // Still classified, so the outbox holds rather than quarantines it.
     expect(err).toMatchObject({ status: 403, elevationRequired: true })
     expect(isElevationRequired()).toBe(false)
+    // Nor does the active account's step-up reload that account's project.
+    notifyElevationGranted()
+    expect([...granted.mock.calls[0][0]]).toEqual([])
+    unsubscribe()
   })
 })
 

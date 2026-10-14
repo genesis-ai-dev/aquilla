@@ -1,4 +1,4 @@
-import { notifyElevationRequired } from "@/lib/errors/elevation-required-signal"
+import { notifyElevationRequired, type ElevationReason } from "@/lib/errors/elevation-required-signal"
 import { isElevationRequiredBody, UserError } from "@/lib/errors/user-error"
 import { loadActiveSession } from "./session-store"
 import type { FrontierSession } from "./types"
@@ -38,6 +38,7 @@ export function isElevationRequiredError(err: unknown): err is UserError {
  */
 export async function notifyElevationRequiredIfCurrent(
   jwt: string,
+  reason: ElevationReason,
   readActive: () => Promise<FrontierSession | null> = loadActiveSession,
 ): Promise<void> {
   try {
@@ -46,5 +47,5 @@ export async function notifyElevationRequiredIfCurrent(
   } catch {
     // Fall through: staleness can't be proven.
   }
-  notifyElevationRequired()
+  notifyElevationRequired(reason)
 }

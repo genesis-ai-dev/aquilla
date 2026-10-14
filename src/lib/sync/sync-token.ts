@@ -89,7 +89,7 @@ export async function fetchSyncToken(
     // caller shares, rather than in each of them. Before this, an un-elevated
     // admin opening a project they reach only through platform power saw
     // nothing but console warnings.
-    if (err.elevationRequired) await notifyElevationRequiredIfCurrent(jwt)
+    if (err.elevationRequired) await notifyElevationRequiredIfCurrent(jwt, { kind: "sync-token", projectId })
     throw err
   }
   return (await res.json()) as SyncTokenResponse

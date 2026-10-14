@@ -287,7 +287,7 @@ describe('POST /events — counter recompute runs after the write transaction', 
     let laterWritesDone: () => void = () => {}
     const sawLaterWrites = new Promise<void>((r) => { laterWritesDone = r })
 
-    const run = async (stmts: AquillaStatement[]) => {
+    const run = async <T = Record<string, unknown>>(stmts: AquillaStatement[]) => {
       const sql = stmts.map(sqlOf)
       if (sql.some(isCountersRecompute)) {
         recomputePasses += 1
@@ -296,7 +296,7 @@ describe('POST /events — counter recompute runs after the write transaction', 
           await firstPassHeld
         }
       }
-      const res = await td.db.batchPipelined!(stmts)
+      const res = await td.db.batchPipelined!<T>(stmts)
       if (isWriteTxn(sql)) {
         writeTxnsDone += 1
         if (writeTxnsDone === LATER + 1) laterWritesDone()

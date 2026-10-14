@@ -285,6 +285,42 @@ describe("the audio gate is per FILE, not per project", () => {
   })
 })
 
+describe("AQU-1954: a project that says it records audio", () => {
+  // Sam's report (2026-10-14): Numbers at 100% text and 0% audio sat under
+  // Nearly complete with "Nothing left", because nobody had recorded anything
+  // in its file yet, so the file was judged a text file.
+  const recorded = counts(220, 220, 220, 196, 196, { fileId: "audio", fileName: "Audio.usfm", sectionKey: "EXO" })
+  const numbers = counts(396, 396, 396, 0, 0, { fileId: "text", fileName: "Text.usfm", sectionKey: "NUM" })
+  const rows = [recorded, numbers]
+
+  it("off: the unrecorded file is a text file, so the finished text reads Nearly complete", () => {
+    expect([...audioFileIds(rows)]).toEqual(["audio"])
+    expect(planUnitStatus(numbers, NOW, audioFileIds(rows), textFileIds(rows))).toBe("nearly_complete")
+  })
+
+  it("on: every file owes its audio, so the same book is In progress", () => {
+    const audioFiles = audioFileIds(rows, true)
+    expect([...audioFiles].sort()).toEqual(["audio", "text"])
+    expect(planUnitStatus(numbers, NOW, audioFiles, textFileIds(rows))).toBe("in_progress")
+    expect(planUnitShortfall(numbers, true, true).toRecord).toBe(396)
+  })
+
+  it("on: draws the audio bars before the first take exists", () => {
+    const untouched = [unit({ fileId: "a" }), unit({ fileId: "b", filledCount: 9 })]
+    expect(planHasAudio(untouched)).toBe(false)
+    expect(planHasAudio(untouched, true)).toBe(true)
+    expect(planHasAudio([], true)).toBe(false)
+  })
+
+  it("never makes a file audio-only: text expectation still asks the evidence", () => {
+    // A file nobody has written or recorded in yet is still a text file. Were
+    // the switch passed into textFileIds, every untouched book of a project
+    // that records audio would lose its text bar.
+    const untouched = unit({ fileId: "new" })
+    expect(textFileIds([recorded, untouched]).has("new")).toBe(true)
+  })
+})
+
 describe("a dubbing project's audio is counted against its CUE SHEET", () => {
   // The real shape, from The Chosen: 646 subtitle cells, a hidden cue sheet of
   // 548 cues, and every take hanging off a cue. The two counts are not meant

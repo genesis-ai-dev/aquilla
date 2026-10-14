@@ -210,9 +210,16 @@ export function PlanBoard({
   units, now, projectId, selectedId, onSelect, actions, emptyAction,
   status = "ready", onRetry, orderRef,
   shortChaptersByUnit, frontMatterShortUnits, assigneesByUnit, onOpenShortfall, laneLabel, lanes, lane, onLaneChange,
+  recordsAudio = false,
 }: {
   units: PlanUnit[]
   now: number
+  /**
+   * AQU-1954: the project's "This project records audio" switch. On, every
+   * file is expected to carry audio, so every row has an audio bar and is
+   * judged on its takes. Off, only files with a take or a cue sheet are.
+   */
+  recordsAudio?: boolean
   /** Scopes the per-project group folds. Null while the route id is unresolved. */
   projectId: string | null
   selectedId: string | null
@@ -350,7 +357,7 @@ export function PlanBoard({
     () => filterPlanUnits(units, { query, needsDateOnly }),
     [units, query, needsDateOnly],
   )
-  const audioFiles = useMemo(() => audioFileIds(units), [units])
+  const audioFiles = useMemo(() => audioFileIds(units, recordsAudio), [units, recordsAudio])
   // AQU-955: the mirror set — which files carry TEXT work. Same rule as
   // `audioFiles`: derived from the UNFILTERED units, because whether a file is
   // audio-only is a fact about the file and must not change when the search
@@ -432,7 +439,7 @@ export function PlanBoard({
   // Audio bars vanish entirely on a text-only project rather than showing a
   // column of zeroes, matching what the Progress card already does. Judged on
   // the whole project so a filter cannot make a column appear and disappear.
-  const showAudio = useMemo(() => planHasAudio(units), [units])
+  const showAudio = useMemo(() => planHasAudio(units, recordsAudio), [units, recordsAudio])
   /**
    * AQU-1278: which FILES carry recordings. Computed ONCE over the whole board
    * and handed down, for two reasons that are both bugs if you skip it.

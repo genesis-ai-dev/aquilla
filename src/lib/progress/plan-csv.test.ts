@@ -32,6 +32,18 @@ describe("planRowsToCsv", () => {
     expect(row).not.toContain("288")
   })
 
+  it("leaves the audio columns blank for a file nobody records (AQU-1954)", () => {
+    const rows = [
+      unit({ fileId: "audio", fileName: "Exodus" }),
+      unit({ fileId: "text", fileName: "Numbers", audioCount: 0, audioValidatedCount: 0 }),
+    ]
+    const [, , numbers] = planRowsToCsv(rows, NOW).split("\r\n")
+    expect(numbers).toContain("72,31,,,")
+    // Unless the project records audio, when every book owes its takes.
+    const [, , owed] = planRowsToCsv(rows, NOW, true).split("\r\n")
+    expect(owed).toContain("72,31,0,0,")
+  })
+
   it("names a book unit by its book name", () => {
     const [, row] = planRowsToCsv([unit({ sectionKey: "GEN", fileName: "Whole Bible" })], NOW).split("\r\n")
     expect(row.startsWith("Genesis,")).toBe(true)

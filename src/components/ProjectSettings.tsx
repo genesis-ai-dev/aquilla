@@ -111,6 +111,7 @@ import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import { RepetitionPropagationProjectSection } from "./ProjectSettings/RepetitionPropagationProjectSection"
 import { StructuralCellsProjectSection } from "./ProjectSettings/StructuralCellsProjectSection"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
+import { RecordsAudioProjectSection } from "./ProjectSettings/RecordsAudioProjectSection"
 import { TermMatchingSection } from "./ProjectSettings/TermMatchingSection"
 import type { TermMatchingSettings } from "@/lib/terminology/types"
 import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
@@ -2853,6 +2854,14 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 <RepetitionPropagationProjectSection
                   value={sharedSettingsBlob?.autoPropagateRepetitions}
                   orgDefault={orgAutoPropagateRepetitions}
+                  disabled={!canEditShared}
+                  disabledTooltip={sharedDisabledTooltip ?? undefined}
+                  onPatch={patchShared}
+                />
+              }
+              recordsAudioRow={
+                <RecordsAudioProjectSection
+                  value={sharedSettingsBlob?.recordsAudio}
                   disabled={!canEditShared}
                   disabledTooltip={sharedDisabledTooltip ?? undefined}
                   onPatch={patchShared}

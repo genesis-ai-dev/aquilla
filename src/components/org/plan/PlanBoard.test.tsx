@@ -278,6 +278,34 @@ describe("audio columns", () => {
     expect(screen.getByText("AUD")).toBeInTheDocument()
     expect(screen.getByText("TXT")).toBeInTheDocument()
   })
+
+  // AQU-1954 (Sam, 2026-10-14): a book in a file nobody records showed a 0%
+  // audio bar its status ignored.
+  const recorded = unit({ fileId: "audio", fileName: "Exodus", filledCount: 50, audioCount: 20 })
+  const textOnly = unit({ fileId: "text", fileName: "Numbers", filledCount: 50 })
+
+  it("draws the audio bar only on rows whose file carries audio", () => {
+    renderBoard([recorded, textOnly])
+    expect(screen.getAllByText("AUD")).toHaveLength(1)
+    const exodus = screen.getByText("Exodus").closest("li")!
+    const numbers = screen.getByText("Numbers").closest("li")!
+    expect(within(exodus).getByText("AUD")).toBeInTheDocument()
+    expect(within(numbers).queryByText("AUD")).toBeNull()
+  })
+
+  it("draws it on every row when the project records audio, before any take", () => {
+    render(
+      <PlanBoard
+        units={[textOnly, unit({ fileId: "text2", fileName: "Titus", filledCount: 5 })]}
+        now={NOW}
+        projectId="p1"
+        selectedId={null}
+        onSelect={vi.fn()}
+        recordsAudio
+      />,
+    )
+    expect(screen.getAllByText("AUD")).toHaveLength(2)
+  })
 })
 
 describe("selection and keyboard", () => {

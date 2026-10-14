@@ -540,7 +540,10 @@ export const PlanRow = memo(function PlanRow({
               tips={readoutTips("text", unit.filledCount, unit.validatedCount, unit.totalCount)}
             />
           )}
-          {showAudio && (
+          {/* AQU-1954 (Sam, 2026-10-14): only on a row whose file carries
+              audio. A 0% bar under a book of a file nobody records said the
+              book was behind on audio while its status, rightly, ignored it. */}
+          {showAudio && hasAudio && (
             <PlanBar
               label={t("org.projectOverview.plan.audioBarLabel")}
               outer={recorded}

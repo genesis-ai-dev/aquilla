@@ -1274,7 +1274,7 @@ export interface PortfolioLane {
   validatedAudioCells: number
 }
 
-export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioTotalCells: number; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number; lanes: PortfolioLane[]; unitsTotal: number; unitsDone: number; unitsOverdue: number }
+export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioTotalCells: number; recordsAudio: boolean; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number; lanes: PortfolioLane[]; unitsTotal: number; unitsDone: number; unitsOverdue: number }
 export interface OrgPortfolioRow extends PortfolioRow { orgId: number }
 
 /** Soft-deleted file in an org the caller can see (Archived → Recently deleted). */
@@ -1300,6 +1300,8 @@ interface PortfolioDbRow {
   last_edit_at: number | null
   /** AQU-1566: what audio coverage divides by (a dubbing file's cue sheet, else the file). */
   audio_total_cells: number
+  /** AQU-1954: the project's "This project records audio" switch (migration 0169). */
+  records_audio: boolean | null
   audio_cells: number
   validated_audio_cells: number
   recorded_ms: number
@@ -1362,6 +1364,7 @@ function mapPortfolioRow(
     lastEditAt: laterEdit(visibleText ? visibleText.lastEditAt : r.last_edit_at, sourceActivityAt),
     // Lane-independent like the audio counts, so the read wall leaves it alone.
     audioTotalCells: Number(r.audio_total_cells) || 0,
+    recordsAudio: r.records_audio === true,
     audioCells: r.audio_cells,
     validatedAudioCells: r.validated_audio_cells,
     recordedMs: r.recorded_ms,
@@ -1739,6 +1742,20 @@ const lessStructural = (total: string, structural: string) =>
   `GREATEST(0, ${total} - CASE WHEN ${PORTFOLIO_EXCLUDE_STRUCTURAL} THEN ${structural} ELSE 0 END)`
 
 /**
+ * AQU-1954: does this file's audio count toward the project's audio numbers?
+ *
+ * Every file does when the project says it records audio (`records_audio`,
+ * the generated column of migration 0169). Otherwise only a file somebody has
+ * recorded in, or one with a cue sheet, which declares the dubbing before the
+ * first take: the plan board's own rule (`audioFileIds`). Without this a
+ * project with one recorded book among sixty-five text books divided its
+ * takes by the whole Bible, while its board, on the same page, measured only
+ * the recorded book.
+ */
+const PORTFOLIO_FILE_EXPECTS_AUDIO =
+  "(ps.records_audio IS TRUE OR cue.anchor_file_id IS NOT NULL OR af.file_id IS NOT NULL)"
+
+/**
  * The per-project cell rollups.
  *
  * ai_drafted follows the policy for the same reason audio does: the client
@@ -1750,7 +1767,8 @@ const PORTFOLIO_CELL_COLUMNS = `
             ${lessStructural('COALESCE(SUM(f.approved_count), 0)', 'COALESCE(SUM(f.structural_approved_count), 0)')} AS validated_cells,
             ${lessStructural('COALESCE(SUM(f.filled_count), 0)', 'COALESCE(SUM(f.structural_filled_count), 0)')} AS filled_cells,
             ${lessStructural('COALESCE(SUM(f.ai_drafted_count), 0)', 'COALESCE(SUM(f.structural_ai_drafted_count), 0)')} AS ai_drafted_cells,
-            ${lessStructural('COALESCE(SUM(COALESCE(cue.cell_count, f.cell_count)), 0)', 'COALESCE(SUM(COALESCE(cue.structural_cell_count, f.structural_cell_count)), 0)')} AS audio_total_cells,`
+            ${lessStructural(`COALESCE(SUM(CASE WHEN ${PORTFOLIO_FILE_EXPECTS_AUDIO} THEN COALESCE(cue.cell_count, f.cell_count) END), 0)`, `COALESCE(SUM(CASE WHEN ${PORTFOLIO_FILE_EXPECTS_AUDIO} THEN COALESCE(cue.structural_cell_count, f.structural_cell_count) END), 0)`)} AS audio_total_cells,
+            COALESCE(BOOL_OR(ps.records_audio), false) AS records_audio,`
 
 /**
  * Shared join tail — the org default now has to reach the rollups too.
@@ -1770,6 +1788,7 @@ const PORTFOLIO_JOINS = `
        LEFT JOIN project_settings ps ON ps.project_id = p.id
        LEFT JOIN org_settings os ON os.org_id = p.org_id
        LEFT JOIN au ON au.project_id = p.id
+       LEFT JOIN af ON af.project_id = f.project_id AND af.file_id = f.id
        LEFT JOIN pu ON pu.project_id = p.id`
 
 /** AQU-1097: planning-unit counts, read from the `pu` CTE above. */
@@ -1919,6 +1938,13 @@ const portfolioCtes = (orgPredicate: string) => `
          FROM au_cells c
          JOIN policy pol ON pol.project_id = c.project_id
         GROUP BY c.project_id
+     ), af AS MATERIALIZED (
+       -- AQU-1954: the files that carry a recording, one row each, so the
+       -- audio denominator can leave out the files nobody records (see
+       -- PORTFOLIO_FILE_EXPECTS_AUDIO). Read off au_cells, so a take counts
+       -- here exactly when it counts in the numerator. A dubbing file's takes
+       -- sit on its cue sheet, which the cue join below already speaks for.
+       SELECT DISTINCT c.project_id, c.file_id FROM au_cells c
      ), cue AS MATERIALIZED (
        -- AQU-1566: each counted file's cue sheet, for the AUDIO denominator.
        -- A dubbing project records against its hidden audio-cues sibling, not

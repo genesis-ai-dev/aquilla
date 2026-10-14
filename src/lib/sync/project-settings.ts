@@ -88,6 +88,14 @@ export interface ProjectWideSettings {
    */
   countStructuralCells?: boolean
   /**
+   * AQU-1954: "This project records audio". On, every file is expected to carry
+   * audio: the plan board judges every book on its takes and the project's
+   * audio numbers divide by every file. Off or absent, only files with a
+   * recording or a cue sheet count audio, which is how the board has always
+   * decided it. Read in SQL through the generated column (migration 0169).
+   */
+  recordsAudio?: boolean
+  /**
    * AQU-1391: does validating a cell copy its translation into the other cells
    * in the same file whose source text is identical?
    *

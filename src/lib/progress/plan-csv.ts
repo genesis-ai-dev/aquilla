@@ -63,7 +63,7 @@ function isoDate(ms: number | null): string {
 }
 
 /** RFC 4180: CRLF line endings, quotes doubled inside quoted fields. */
-export function planRowsToCsv(units: readonly PlanUnit[], now: number): string {
+export function planRowsToCsv(units: readonly PlanUnit[], now: number, recordsAudio = false): string {
   // AQU-1278: whether audio is EXPECTED is decided per file across the whole
   // export, the same way the board decides it. Omitting this set makes
   // `planUnitStatus` fall back to the row's own `audioCount`, which is right
@@ -72,7 +72,8 @@ export function planRowsToCsv(units: readonly PlanUnit[], now: number): string {
   // exported as Nearly complete, while the board — counting the recordings it
   // is missing — still calls it In progress. The two surfaces have to say the
   // same word about the same row, or the export is the one that gets believed.
-  const audioFiles = audioFileIds(units)
+  // AQU-1954: and the project's "This project records audio" switch with it.
+  const audioFiles = audioFileIds(units, recordsAudio)
   // AQU-955: and the text set, for the same reason. Without it every book of
   // an audio-only project exports as Not started however much of it is
   // recorded — the export is what a PM forwards, so it has to say what the
@@ -88,8 +89,10 @@ export function planRowsToCsv(units: readonly PlanUnit[], now: number): string {
     pct(u.validatedCount, u.totalCount),
     // AQU-1278: against the cue sheet where the takes actually live, so the
     // export and the board agree on a dubbing project's percentage too.
-    pct(u.audioCount, planAudioTotal(u)),
-    pct(u.audioValidatedCount, planAudioTotal(u)),
+    // AQU-1954: blank where the board draws no audio bar — a file nobody
+    // records is not 0% recorded, it is not recorded work at all.
+    audioFiles.has(u.fileId) ? pct(u.audioCount, planAudioTotal(u)) : "",
+    audioFiles.has(u.fileId) ? pct(u.audioValidatedCount, planAudioTotal(u)) : "",
     isoDate(u.lastEditAt),
   ])
   return [HEADER, ...rows].map((row) => row.map((c) => escapeCell(String(c))).join(",")).join("\r\n")

@@ -677,6 +677,14 @@ export const projectSettings = defineNamespace({
     "projectSettings.structuralCells.exclude": "Leave them out",
     "projectSettings.structuralCells.saveFailed": "Could not save that change",
 
+    // AQU-1954 — RecordsAudioProjectSection, first row of the audio card.
+    "projectSettings.recordsAudio.label": "This project records audio",
+    "projectSettings.recordsAudio.description":
+      "On: every book needs audio, so the plan and the progress numbers count " +
+      "audio for every file. Off: only files that already have a recording " +
+      "count audio.",
+    "projectSettings.recordsAudio.saveFailed": "Could not save that change",
+
     // AQU-1391 — repetition auto-propagation, same tri-state shape as above.
     "projectSettings.autoPropagateRepetitions.label": "Auto-propagate repetitions",
     "projectSettings.autoPropagateRepetitions.description":

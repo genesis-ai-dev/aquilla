@@ -1612,17 +1612,56 @@ describe("AQU-1566 portfolio counts only the files that count", () => {
     )
     const owner = await rowFor(1)
     // The text is the two lanes' 6 each (AQU-1952); the new document has no
-    // progress rows yet, so it is in no language's numbers. Audio is
-    // lane-independent and still takes the document's 10 against the sheet's 40.
-    expect(owner).toMatchObject({ totalCells: 12, audioTotalCells: 50, audioCells: 2 })
+    // progress rows yet, so it is in no language's numbers. AQU-1954: it has
+    // no recording and no cue sheet either, so it is not audio work: the
+    // audio total is the sheet's 40, not 50.
+    expect(owner).toMatchObject({ totalCells: 12, audioTotalCells: 40, audioCells: 2, recordsAudio: false })
     // Behind the read wall the text total shrinks to the granted lanes; the
     // audio total does not (a take is shared by every language).
     env.LANE_READ_WALL = "1"
     try {
-      expect(await rowFor(2)).toMatchObject({ audioTotalCells: 50 })
+      expect(await rowFor(2)).toMatchObject({ audioTotalCells: 40 })
     } finally {
       env.LANE_READ_WALL = undefined
     }
+  })
+
+  describe("AQU-1954: which files count toward the audio total", () => {
+    async function seedNotesFile() {
+      await seedEpisodeWithHiddenFiles()
+      await sql("INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e5', 1, 'pa', 'file.create', 'owner', '{}', 5, 5, 5)")
+      await sql(
+        `INSERT INTO files (id, project_id, name, role, kind, anchor_file_id, event_id, cell_count, deleted_at) VALUES
+          ('f-doc', 'pa', 'Notes', NULL, 'codex', NULL, 'e5', 10, NULL)`,
+      )
+    }
+
+    it("counts a file nobody records once the project says it records audio", async () => {
+      await seedNotesFile()
+      await sql(
+        `INSERT INTO project_settings (project_id, settings) VALUES ('pa', '{"recordsAudio":true}')
+         ON CONFLICT (project_id) DO UPDATE SET settings = EXCLUDED.settings`,
+      )
+      expect(await rowFor(1)).toMatchObject({ audioTotalCells: 50, audioCells: 2, recordsAudio: true })
+    })
+
+    it("counts a file once somebody records in it, with the switch off", async () => {
+      await seedNotesFile()
+      await sql(
+        `INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, duration_ms, selected, deleted, event_id, created_ts) VALUES
+          ('pa', 'f-doc', 'd1', 'a5', 'recording', 'frontier-audio://a5.wav', 1000, 1, 0, 'e5', 1)`,
+      )
+      expect(await rowFor(1)).toMatchObject({ audioTotalCells: 50, audioCells: 3, recordsAudio: false })
+    })
+
+    it("reads anything but true as off", async () => {
+      await seedNotesFile()
+      await sql(
+        `INSERT INTO project_settings (project_id, settings) VALUES ('pa', '{"recordsAudio":"yes"}')
+         ON CONFLICT (project_id) DO UPDATE SET settings = EXCLUDED.settings`,
+      )
+      expect(await rowFor(1)).toMatchObject({ audioTotalCells: 40, recordsAudio: false })
+    })
   })
 
   it("counts machine drafts per lane on the same files behind the read wall", async () => {

@@ -424,7 +424,8 @@ export function PlanInspector({
                 tips={readoutTips("text", unit.filledCount, unit.validatedCount, unit.totalCount)}
               />
             )}
-            {showAudio && (
+            {/* AQU-1954: per FILE, like the board's rows and the tiles below. */}
+            {showAudio && hasAudio && (
               <PlanBar
                 label={t("org.projectOverview.plan.audioBarLabel")}
                 outer={planPct(unit.audioCount, audioTotal)}

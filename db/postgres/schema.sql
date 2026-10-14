@@ -318,7 +318,13 @@ CREATE TABLE project_settings (
       GENERATED ALWAYS AS (CASE (settings::jsonb) ->> 'bibleResourcesEnabled' WHEN 'true' THEN TRUE WHEN 'false' THEN FALSE END) STORED,
     -- One boolean per Bible data enrichment; readers validate it
     -- (db/shared/bible-enrichments.ts readBibleEnrichments).
-    bible_enrichments JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'bibleEnrichments') STORED
+    bible_enrichments JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'bibleEnrichments') STORED,
+    -- 0169 (AQU-1954): "This project records audio". On, every file counts
+    -- toward the project's audio numbers; off (absent, false or garbage), only
+    -- files with a recording or a cue sheet do. Read by the org portfolio for
+    -- every project on the page, so it must never parse the blob.
+    records_audio BOOLEAN
+      GENERATED ALWAYS AS (((settings::jsonb) ->> 'recordsAudio') = 'true') STORED
 );
 CREATE INDEX project_settings_agent_react ON project_settings(project_id) WHERE agent_react;
 

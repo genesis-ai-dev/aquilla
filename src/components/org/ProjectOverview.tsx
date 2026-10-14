@@ -791,7 +791,12 @@ export function ProjectOverview() {
     () => planUnits.find((u) => planUnitId(u) === selectedPlanUnitId) ?? null,
     [planUnits, selectedPlanUnitId],
   )
-  const planShowAudio = useMemo(() => planHasAudio(planUnits), [planUnits])
+  /**
+   * AQU-1954: the project's "This project records audio" switch, carried on its
+   * portfolio row so it is read again with the row whenever settings change.
+   */
+  const recordsAudio = audio?.recordsAudio === true
+  const planShowAudio = useMemo(() => planHasAudio(planUnits, recordsAudio), [planUnits, recordsAudio])
   /**
    * Which FILES carry recordings. Audio expectation is judged per file, never
    * per project (`planShowAudio` above answers the different question "does
@@ -799,7 +804,7 @@ export function ProjectOverview() {
    * beside sixty-five text books would otherwise owe a recording for every
    * verse in the Bible. See `audioFileIds`.
    */
-  const planAudioFiles = useMemo(() => audioFileIds(planUnits), [planUnits])
+  const planAudioFiles = useMemo(() => audioFileIds(planUnits, recordsAudio), [planUnits, recordsAudio])
   /**
    * AQU-955: the mirror set — which FILES carry text work. An audio-only file
    * (recordings present, no target text anywhere in this lane) is charged no
@@ -1212,7 +1217,10 @@ export function ProjectOverview() {
     }
   }, [planUnits, selectedPlanUnitId])
 
-  const planCsv = useCallback(() => planRowsToCsv(planUnits, tableNow), [planUnits, tableNow])
+  const planCsv = useCallback(
+    () => planRowsToCsv(planUnits, tableNow, recordsAudio),
+    [planUnits, tableNow, recordsAudio],
+  )
   const handleCopyPlanCsv = useCallback(() => {
     void navigator.clipboard.writeText(planCsv()).then(() => {
       setPlanCsvCopied(true)
@@ -1351,7 +1359,9 @@ export function ProjectOverview() {
 
   // Conditionality flags
   const hasText = audio != null && audio.totalCells > 0
-  const hasAudio = audio != null && audio.audioCells > 0
+  // AQU-1954: a project that says it records audio shows its audio from the
+  // first day, at 0%, rather than hiding it until the first take.
+  const hasAudio = audio != null && (audio.audioCells > 0 || (recordsAudio && audioDenominator(audio) > 0))
   const showText = hasText
   const showAudio = hasAudio
 
@@ -2319,6 +2329,7 @@ export function ProjectOverview() {
               <PlanBoard
                 units={planUnits}
                 now={tableNow}
+                recordsAudio={recordsAudio}
                 projectId={id ?? null}
                 status={planStatus}
                 onRetry={refreshPlan}

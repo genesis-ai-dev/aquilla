@@ -632,6 +632,27 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     expect(screen.queryByText("Audio Validated")).not.toBeInTheDocument()
   })
 
+  it("AQU-1954: a project that records audio shows its audio at 0% before the first take", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "John", totalCells: 100, filledCells: 80, validatedCells: 50,
+      aiDraftedCells: 0,
+      audioTotalCells: 100, recordsAudio: true,
+      audioCells: 0,
+      validatedAudioCells: 0,
+      recordedMs: 0, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null,
+    }])
+    renderOverview()
+
+    await waitFor(() => expect(screen.getAllByText("Has audio").length).toBeGreaterThan(0))
+  })
+
   it("audio-only project: shows Has Audio + a real Audio Validated percentage", async () => {
     fetchSyncToken.mockResolvedValue({ token: "tok" })
     fetchProjectFiles.mockResolvedValue([])

@@ -88,6 +88,13 @@ export interface PortfolioProject {
    * total, as it always did.
    */
   audioTotalCells?: number
+  /**
+   * AQU-1954: the project's "This project records audio" switch. On, every
+   * file counts toward `audioTotalCells` and the plan board expects audio of
+   * every book; off, only files with a recording or a cue sheet do. Optional
+   * because an older server sends none, which reads as off.
+   */
+  recordsAudio?: boolean
   audioCells: number
   /**
    * AQU-508: cells whose selected audio take has been validated by a reviewer —

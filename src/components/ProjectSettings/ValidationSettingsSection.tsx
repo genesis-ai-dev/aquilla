@@ -74,6 +74,12 @@ interface Props {
    * triggers it.
    */
   repetitionPropagationRow?: ReactNode
+  /**
+   * AQU-1954: "This project records audio". Same slot treatment as the two
+   * above, for the same reason; the first row of the audio card, because it
+   * decides which recordings the rest of that card is about.
+   */
+  recordsAudioRow?: ReactNode
   /** Tooltip shown on hover when disabled is true. */
   disabledTooltip?: ReactNode
   /**
@@ -125,6 +131,7 @@ export function ValidationSettingsSection({
   notice,
   structuralCellsRow,
   repetitionPropagationRow,
+  recordsAudioRow,
   onChange,
 }: Props) {
   const t = useT()
@@ -254,6 +261,7 @@ export function ValidationSettingsSection({
           has its own card: one card mixing the two read as one muddled rule
           (Sam, PR 1 test pass). */}
       <SettingsGroup label={t("projectSettings.validation.audioGroup")}>
+        {recordsAudioRow}
         <SettingsRow
           label={<label htmlFor="validation-count-audio">{t("projectSettings.validation.requiredAudioLabel")}</label>}
           description={t("projectSettings.validation.requiredAudioAppliesNote")}

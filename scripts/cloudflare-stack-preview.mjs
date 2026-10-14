@@ -61,6 +61,18 @@ export function previewConfig(surface, { cwd, urls = {} }) {
       ADMIN_REQUIRE_ELEVATION: "true",
       DEFAULT_LLM_MODEL: "openai/gpt-5.6-luna",
     })
+    // AQU-1845 — auth previews deliberately get NO ContextualRunDriver binding,
+    // even though auth-worker/wrangler.toml declares one for every real
+    // environment. Cloudflare does not generate preview URLs for a Worker that
+    // implements a Durable Object (see "Preview limitations" in
+    // docs/DEPLOYMENT-ENVIRONMENTS.md), and `previewOrigin` treats a missing
+    // URL as a hard failure — declaring the class here would risk taking the
+    // whole PR preview stack down, since the web preview is built from the auth
+    // preview's origin.
+    //
+    // The cost is that routes/contextual.ts falls back to the in-request loop
+    // on a preview, so a preview CANNOT be used to verify that a run outlives
+    // the request that started it. Walk that on development or production.
   } else {
     // KNOWN BROKEN AT RUNTIME, and not for want of a correct value here: sync's
     // subrequest to this origin 404s (Cloudflare's HTML edge page) even though the

@@ -18,6 +18,7 @@ import {
   memoryKindForPath,
 } from "../../../db/shared/agent-memory"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
+import { bumpRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 
 const SECRET = "test-secret"
 const CRED_1 = "00000000-0000-0000-0000-000000000001"
@@ -726,11 +727,8 @@ describe("external Living Memory reads", () => {
 
     it("throttles a credential over the shared read budget", async () => {
       const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
-      await testDb.pg.query(
-        `INSERT INTO auth_rate_limit_events (kind, identifier, success)
-         SELECT 'external_read', $1, 1 FROM generate_series(1, 300)`,
-        [`credential:${CRED_1}`],
-      )
+      // AQU-1843: the read budget belongs to the credential's OWNER now.
+      await bumpRateLimit(testDb.db, "external_read", userRateLimitIdentifier(2), 300)
       const res = await handleExternalMemoryReadRequest(
         req("/api/v1/external/projects/proj-a/memory", token),
         env(testDb),

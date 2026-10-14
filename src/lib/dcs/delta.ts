@@ -13,8 +13,9 @@
 //        - present in a changed file, gone from parse → delete (tombstone)
 //        - present, hash equal                      → nothing
 
+import { mapWithConcurrency } from "@/lib/concurrency"
 import type { DcsCatalogEntry, DcsCell, DcsCursor, DcsFile } from "./types"
-import type { DcsClient, RefKind } from "./catalog"
+import { isDcsRawNotFound, type DcsClient, type RefKind } from "./catalog"
 import { parseManifest } from "./manifest"
 import { routeFor } from "./resource-map"
 import { dcsEventId, dcsFileId, dcsLegacyFileId } from "./cell-id"
@@ -60,6 +61,61 @@ export interface DeltaResult {
 
 const MANIFEST_PATH = "manifest.yaml"
 
+/** Raw member fetches in flight at once (AQU-1860). A release that touches
+ *  several thousand verses spans dozens of books, and these used to be fetched
+ *  one after another — latency, not work, dominated. Checks are user-triggered
+ *  and a handful of concurrent reads is well within what Gitea serves, so the
+ *  cap is the same small pool the rest of the app uses for fan-out reads. */
+const RAW_FETCH_CONCURRENCY = 4
+
+/**
+ * Fetch every `path` at one ref into a path→text map. Results are folded in
+ * INPUT order, so the map (and therefore the parse, and therefore the
+ * classification) does not depend on which fetch finished first.
+ *
+ * A member that is ABSENT at this ref is skipped, not fatal. `compareRefs`
+ * returns the union of the filenames touched by every commit in the range, so a
+ * file renamed or deleted part-way through legitimately appears in the changed
+ * list while not existing at the new ref: on WycliffeAssociates/en_udb
+ * v19-01...v19-10, 11 of 84 changed paths are absent. Letting one of those
+ * abort the batch meant a single stale front-matter path lost the whole
+ * release — every USFM book included — which is what it did before this guard
+ * (the pre-existing serial loop propagated the 404 the same way).
+ *
+ * Skipping is the conservative half of the repair: the member is simply not in
+ * `parsedFiles`, and `classifyAgainstCurrent` scopes deletes to the files the
+ * parse produced, so no cell is tombstoned on account of a path we could not
+ * read. A file genuinely deleted upstream therefore keeps its cells rather than
+ * losing them to a guess — the same position the "a brand-new upstream file is
+ * NOT auto-added here" note above takes on the other side.
+ *
+ * Every other failure (403, 5xx, a size or encoding refusal) still aborts, so a
+ * throttled or broken upstream never looks like an empty delta.
+ */
+async function fetchRawFiles(
+  client: DcsClient,
+  at: { owner: string; repoName: string; ref: string; refKind: RefKind },
+  paths: readonly string[],
+  cancelMessage: string,
+  signal?: AbortSignal,
+): Promise<Map<string, string>> {
+  const texts = await mapWithConcurrency(paths, RAW_FETCH_CONCURRENCY, async (path) => {
+    if (signal?.aborted) throw new Error(cancelMessage)
+    try {
+      return await client.fetchRaw(at.owner, at.repoName, at.ref, path, at.refKind, signal)
+    } catch (error) {
+      if (isDcsRawNotFound(error)) return null
+      throw error
+    }
+  })
+  const fileTexts = new Map<string, string>()
+  paths.forEach((path, index) => {
+    const text = texts[index]
+    if (text !== null) fileTexts.set(path, text)
+  })
+  return fileTexts
+}
+
 /**
  * Compute the source-cell delta between the pinned cursor and a newer release.
  * Fetches nothing when compare reports no changed files.
@@ -91,11 +147,13 @@ export async function computeDelta(args: ComputeDeltaArgs): Promise<DeltaResult>
 
   // 2. Re-fetch + re-parse only the changed files the route can parse.
   const changed = compare.changedFiles.filter((p) => p !== MANIFEST_PATH)
-  const fileTexts = new Map<string, string>()
-  for (const path of changed) {
-    if (args.signal?.aborted) throw new Error("Delta cancelled")
-    fileTexts.set(path, await client.fetchRaw(owner, repoName, newEntry.ref, path, refKind))
-  }
+  const fileTexts = await fetchRawFiles(
+    client,
+    { owner, repoName, ref: newEntry.ref, refKind },
+    changed,
+    "Delta cancelled",
+    args.signal,
+  )
   const parsedFiles = route.parse({
     entry: newEntry,
     manifest,
@@ -235,13 +293,18 @@ export async function computeRepairDelta(args: ComputeRepairDeltaArgs): Promise<
   for (const c of currentCells.values()) adapterFileIds.add(c.fileId)
 
   const tree = await client.getTree(owner, repoName, entry.ref)
-  const fileTexts = new Map<string, string>()
-  for (const path of tree) {
-    if (path === MANIFEST_PATH) continue
-    if (resolveHeldFileId(adapterFileIds, args.projectId, repo, path) === undefined) continue
-    if (args.signal?.aborted) throw new Error("Repair cancelled")
-    fileTexts.set(path, await client.fetchRaw(owner, repoName, entry.ref, path, refKind))
-  }
+  const held = tree.filter(
+    (path) =>
+      path !== MANIFEST_PATH &&
+      resolveHeldFileId(adapterFileIds, args.projectId, repo, path) !== undefined,
+  )
+  const fileTexts = await fetchRawFiles(
+    client,
+    { owner, repoName, ref: entry.ref, refKind },
+    held,
+    "Repair cancelled",
+    args.signal,
+  )
 
   const parsedFiles = route.parse({
     entry,

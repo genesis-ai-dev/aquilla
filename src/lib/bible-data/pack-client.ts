@@ -84,6 +84,23 @@ async function fetchJson(url: string, init?: RequestInit): Promise<Fetched> {
   }
 }
 
+// ── Reads in flight ─────────────────────────────────────────────────────────
+
+/**
+ * Every manifest and layer read still running, its IndexedDB write included.
+ * A read outlives the component that asked for it (the pack is shared, and a
+ * later mount wants the result), so a test that unmounts mid-load waits for
+ * these (`__bkpSettled`) before it resets its fetch mock or the store.
+ */
+const inFlight = new Set<Promise<unknown>>()
+
+function track<T>(read: Promise<T>): Promise<T> {
+  inFlight.add(read)
+  const done = () => inFlight.delete(read)
+  void read.then(done, done)
+  return read
+}
+
 // ── Manifest ────────────────────────────────────────────────────────────────
 
 /** Remembered for the session only after a successful network read. */
@@ -113,14 +130,16 @@ async function readManifest(): Promise<{ result: BkpResult<BkpManifest>; fromNet
 export function loadManifest(): Promise<BkpResult<BkpManifest>> {
   if (manifestFromNetwork) return Promise.resolve(manifestFromNetwork)
   if (!manifestInFlight) {
-    manifestInFlight = readManifest()
-      // Nothing above should throw; if it does, it is still not the UI's problem.
-      .catch(() => ({ result: { ok: false, reason: "offline" } as const, fromNetwork: false }))
-      .then(({ result, fromNetwork }) => {
-        manifestInFlight = null
-        if (fromNetwork && result.ok) manifestFromNetwork = result
-        return result
-      })
+    manifestInFlight = track(
+      readManifest()
+        // Nothing above should throw; if it does, it is still not the UI's problem.
+        .catch(() => ({ result: { ok: false, reason: "offline" } as const, fromNetwork: false }))
+        .then(({ result, fromNetwork }) => {
+          manifestInFlight = null
+          if (fromNetwork && result.ok) manifestFromNetwork = result
+          return result
+        }),
+    )
   }
   return manifestInFlight
 }
@@ -170,8 +189,8 @@ export async function loadLayer<L extends BkpLayer>(layer: L, book: string): Pro
   let pending = layerPromises.get(key) as Promise<BkpResult<BkpLayerData[L]>> | undefined
   if (!pending) {
     // e.g. encodeURIComponent on a malformed version string: still a typed result.
-    const started = readLayer(layer, book, version).catch(
-      (): BkpResult<BkpLayerData[L]> => ({ ok: false, reason: "invalid" }),
+    const started = track(
+      readLayer(layer, book, version).catch((): BkpResult<BkpLayerData[L]> => ({ ok: false, reason: "invalid" })),
     )
     pending = started
     layerPromises.set(key, started)
@@ -218,6 +237,17 @@ export function __resetBkpMemoryCache(): void {
   manifestInFlight = null
   layerPromises.clear()
   memoryBook = null
+}
+
+/**
+ * Test seam: resolves once every manifest and layer read in flight has
+ * finished, IndexedDB writes included. A test that asserts on what was fetched
+ * waits here first, or a read that an earlier test (or an earlier render)
+ * started lands in its mock.
+ */
+export async function __bkpSettled(): Promise<void> {
+  // A layer read starts only after the manifest it waited for: look again after each round.
+  while (inFlight.size > 0) await Promise.allSettled([...inFlight])
 }
 
 /** Test seam: the books whose layer files the session holds in memory. */

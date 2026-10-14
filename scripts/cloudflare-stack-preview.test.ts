@@ -95,6 +95,18 @@ describe("full-stack Cloudflare previews", () => {
     expect(previewConfig(surface, { cwd: "/repo" }).previews.vars?.LANE_READ_WALL).toBe(wall)
   })
 
+  it("keeps auth previews free of a Durable Object, so they still get a preview URL", () => {
+    // AQU-1845: auth-worker declares the ContextualRunDriver DO in every real
+    // environment, but Cloudflare generates no preview URL for a Worker that
+    // implements one — and previewOrigin treats a missing URL as fatal, so
+    // adding it here would risk the whole PR preview stack. The cost, noted in
+    // docs/DEPLOYMENT-ENVIRONMENTS.md, is that a preview runs the in-request
+    // fallback driver and cannot be used to walk "the run outlives the tab".
+    const config = previewConfig("auth", { cwd: "/repo" })
+    expect(config.previews).not.toHaveProperty("durable_objects")
+    expect(config).not.toHaveProperty("migrations")
+  })
+
   it("preserves the sync Durable Object migration history", () => {
     const config = previewConfig("sync", { cwd: "/repo" })
     expect(config.previews.durable_objects?.bindings).toEqual([{ name: "ProjectSync", class_name: "ProjectSync" }])

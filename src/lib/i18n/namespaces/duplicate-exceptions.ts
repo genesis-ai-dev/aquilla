@@ -955,4 +955,13 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "autopilot.inspector.context.title is the material an AI agent was given. " +
     "Textual context and an AI's input are different words in several target " +
     "languages.",
+  "editor.batchFile.confirmDraft":
+    "AQU-1822: the confirm BUTTON of the batch draft modal (BatchFileModal) — the " +
+    "imperative command that starts drafting the chosen cells, in the same slot " +
+    "where the modal's validate mode shows 'Validate'. autopilot.graph.node.draft " +
+    "is the caption of the DRAFTING STAGE in the Autopilot pipeline graph (and the " +
+    "review inspector's card title), which every locale already renders as the " +
+    "noun 'a draft' (fr 'Brouillon', ru 'Черновик'). An imperative verb on a " +
+    "button and a nominalized stage caption take different words in most target " +
+    "languages, so the two cannot share a translation.",
 }

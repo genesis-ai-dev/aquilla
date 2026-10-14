@@ -1327,18 +1327,37 @@ function laterEdit(a: number | null, b: number | null): number | null {
   return Math.max(a, b)
 }
 
+/**
+ * AQU-1952: a project's text totals across two or more target languages. The
+ * file counters cannot give them: `files.filled_count` and `approved_count`
+ * count one row per LANE while `files.cell_count` counts each cell once, so a
+ * two-language project read e.g. 3540/3042 and its "All" percentages pinned
+ * at 100% (German 94% and Tok Pisin 22% were simply added). Summing the lanes,
+ * totals included, gives all the languages' work done over all the languages'
+ * work — 94% and 22% read 58% — the same answer the read wall's per-caller
+ * totals below and the Monday push (AQU-1620) already give. With one language
+ * the file counters ARE that language's work, so they stand and a one-language
+ * project reads exactly as before. Null keeps the counters.
+ */
+function textAcrossLanes(lanes: readonly PortfolioLane[]) {
+  const targets = lanes.filter((lane) => lane.role !== "source")
+  if (targets.length < 2) return null
+  return portfolioTextFromVisibleLanes(targets, new Set(targets.map((lane) => lane.lane)))
+}
+
 function mapPortfolioRow(
   r: PortfolioDbRow,
   lanesByProject: Map<string, PortfolioLane[]>,
   visibleText?: VisiblePortfolioText,
   sourceActivityAt: number | null = null,
 ): PortfolioRow {
+  const acrossLanes = visibleText ? null : textAcrossLanes(lanesByProject.get(r.id) ?? [])
   return {
     id: r.id,
     name: r.name,
-    totalCells: visibleText ? visibleText.totalCells : r.total_cells,
-    validatedCells: visibleText ? visibleText.validatedCells : r.validated_cells,
-    filledCells: visibleText ? visibleText.filledCells : r.filled_cells,
+    totalCells: visibleText ? visibleText.totalCells : acrossLanes?.totalCells ?? r.total_cells,
+    validatedCells: visibleText ? visibleText.validatedCells : acrossLanes?.validatedCells ?? r.validated_cells,
+    filledCells: visibleText ? visibleText.filledCells : acrossLanes?.filledCells ?? r.filled_cells,
     aiDraftedCells: visibleText ? visibleText.aiDraftedCells : r.ai_drafted_cells,
     lastEditAt: laterEdit(visibleText ? visibleText.lastEditAt : r.last_edit_at, sourceActivityAt),
     // Lane-independent like the audio counts, so the read wall leaves it alone.

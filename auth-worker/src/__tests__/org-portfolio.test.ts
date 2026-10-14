@@ -145,9 +145,12 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     const byLane = Object.fromEntries(pa.lanes.map((l) => [l.lane, l]))
     expect(byLane[""]).toMatchObject({ totalCells: 45, filledCells: 15, validatedCells: 5, lastEditAt: 1500 })
     expect(byLane.es).toMatchObject({ totalCells: 45, filledCells: 2, validatedCells: 2, lastEditAt: 2600 })
-    // Scalar fields remain cross-lane (from files), untouched by the lane rollup.
-    const paScalar = body.projects.find((p) => p.id === "pa") as unknown as { totalCells: number; validatedCells: number }
-    expect(paScalar).toMatchObject({ totalCells: 45, validatedCells: 5 })
+    // AQU-1952: with two languages the project's own numbers are the lanes'
+    // summed, totals included — all the languages' work done over all their
+    // work. They used to be the file counters, whose fill counts one row per
+    // lane over a once-per-cell total, so "All" added the languages together.
+    const paScalar = body.projects.find((p) => p.id === "pa") as unknown as { totalCells: number; filledCells: number; validatedCells: number }
+    expect(paScalar).toMatchObject({ totalCells: 90, filledCells: 17, validatedCells: 7 })
   })
 
   // AQU-1951: audio has been per language since AQU-1591, and the Progress
@@ -347,6 +350,8 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     expect(pa.lanes).toHaveLength(1)
     // Default validationCount = 1 (no settings row) → validated = buckets >= 1 = 4.
     expect(pa.lanes[0]).toMatchObject({ lane: "", totalCells: 10, filledCells: 4, validatedCells: 4 })
+    // AQU-1952: one language keeps the file counters as the project's numbers.
+    expect(pa).toMatchObject({ totalCells: 10, validatedCells: 3 })
   })
 
   it("AQU-1458: an archived lane row is flagged, and a settings-only archive is too", async () => {
@@ -1535,7 +1540,7 @@ describe("AQU-1566 portfolio counts only the files that count", () => {
     )
     await sql(
       `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, lane_id, total_count, filled_count, validator_histogram, updated_at) VALUES
-        ('pa', 'f-ep',    'file', '', 'deflane1', 6,   3,  '{}', 8000),
+        ('pa', 'f-ep',    'file', '', 'deflane1', 6,   3,  '{"1":2}', 8000),
         ('pa', 'f-ep',    'file', '', 'eslane01', 6,   1,  '{}', 1000),
         ('pa', 'f-del',   'file', '', 'deflane1', 50,  50, '{}', 1),
         ('pa', 'f-del',   'file', '', 'eslane01', 50,  50, '{}', 1),
@@ -1572,9 +1577,11 @@ describe("AQU-1566 portfolio counts only the files that count", () => {
   it("leaves deleted files, cue sheets and caption tracks out of the text totals and lanes", async () => {
     await seedEpisodeWithHiddenFiles()
     const owner = await rowFor(1)
+    // Two languages, so the project's text is its lanes' summed (AQU-1952):
+    // the episode's 6 cells in each, none of the hidden files' hundreds.
     expect(owner).toMatchObject({
-      totalCells: 6,
-      filledCells: 3,
+      totalCells: 12,
+      filledCells: 4,
       validatedCells: 2,
       aiDraftedCells: 2,
       lastEditAt: 9000,
@@ -1604,7 +1611,10 @@ describe("AQU-1566 portfolio counts only the files that count", () => {
         ('f-cue-old', 'pa', 'Old cue sheet',    'audio-cues', 'vtt',   'f-ep', 'e6', 999, 1700000000000)`,
     )
     const owner = await rowFor(1)
-    expect(owner).toMatchObject({ totalCells: 16, audioTotalCells: 50, audioCells: 2 })
+    // The text is the two lanes' 6 each (AQU-1952); the new document has no
+    // progress rows yet, so it is in no language's numbers. Audio is
+    // lane-independent and still takes the document's 10 against the sheet's 40.
+    expect(owner).toMatchObject({ totalCells: 12, audioTotalCells: 50, audioCells: 2 })
     // Behind the read wall the text total shrinks to the granted lanes; the
     // audio total does not (a take is shared by every language).
     env.LANE_READ_WALL = "1"
@@ -1632,6 +1642,6 @@ describe("AQU-1566 portfolio counts only the files that count", () => {
     const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("owner")) }, env)
     expect(res.status).toBe(200)
     const body = (await res.json()) as { projects: Array<{ id: string; totalCells: number; audioCells: number }> }
-    expect(body.projects.find((p) => p.id === "pa")).toMatchObject({ totalCells: 6, audioCells: 2 })
+    expect(body.projects.find((p) => p.id === "pa")).toMatchObject({ totalCells: 12, audioCells: 2 })
   })
 })

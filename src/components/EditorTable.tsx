@@ -3082,7 +3082,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             data-chapter-nav-slot=""
             className="me-auto flex min-w-24 max-w-full flex-1 items-center lg:me-0 lg:flex-none lg:shrink"
           >
-            <div className="min-w-0 max-w-full w-full lg:w-auto">
+            <div className="min-w-0 max-w-full flex-1 lg:flex-none">
               <MilestoneNavigator
                 items={milestoneNavigationItems}
                 activeKey={activeChapterLabel!}

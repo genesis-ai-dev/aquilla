@@ -260,19 +260,38 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
     ) as readonly EventQueueRow[]
     if (pending.length === 0) return "idle"
 
-    const ids = pending.map((r) => r.id)
-    for (const id of ids) store.commit(events.eventQueueStatusSet({ id, status: "flushing" }))
+    for (const r of pending) store.commit(events.eventQueueStatusSet({ id: r.id, status: "flushing" }))
 
+    const file = store.query(tables.files.select().where({ projectId }).first())
+    if (!file) {
+      for (const r of pending) store.commit(events.eventQueueStatusSet({ id: r.id, status: "pending" }))
+      return "retry"
+    }
+
+    // A sync token is scoped to one file; the server refuses events for any
+    // other file with 403 "token scoped to different file". So each file's
+    // rows go up in their own POST under their own token.
+    const byFile = new Map<string, EventQueueRow[]>()
+    for (const r of pending) {
+      const fileId = r.fileId ?? file.id
+      const group = byFile.get(fileId)
+      if (group) group.push(r)
+      else byFile.set(fileId, [r])
+    }
+    let outcome: FlushOutcome = "ok"
+    for (const [fileId, rows] of byFile) {
+      if ((await flushFileRows(fileId, rows)) === "retry") outcome = "retry"
+    }
+    return outcome
+  }
+
+  async function flushFileRows(fileId: string, pending: readonly EventQueueRow[]): Promise<FlushOutcome> {
+    const ids = pending.map((r) => r.id)
     const revertToPending = (): void => {
       for (const id of ids) store.commit(events.eventQueueStatusSet({ id, status: "pending" }))
     }
 
-    const file = store.query(tables.files.select().where({ projectId }).first())
-    if (!file) {
-      revertToPending()
-      return "retry"
-    }
-    const mint = await mintToken(projectId, file.id)
+    const mint = await mintToken(projectId, fileId)
     if (!mint.token) {
       revertToPending()
       return "retry"

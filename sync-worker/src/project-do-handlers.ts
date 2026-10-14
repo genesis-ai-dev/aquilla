@@ -208,8 +208,24 @@ export interface ServerPong {
   /** Echo of the ping's `ts`, when it sent one. */
   ts?: number
 }
+/**
+ * AQU-1839: the expiry of the verified token this connection is currently
+ * authorized by, in epoch ms (null in ALLOW_UNAUTHENTICATED dev, where there
+ * is no token to expire). Sent to the socket at handshake and again after
+ * every accepted `token.refresh`.
+ *
+ * Its arrival is also how the client learns this worker supports in-band
+ * refresh at all: a worker that predates it sends nothing, and the client
+ * keeps the old behaviour of being closed at expiry and reconnecting.
+ */
+export interface ServerTokenExpiry {
+  t: "token.expiry"
+  expiresAt: number | null
+}
+
 export type ProjectDoServerMessage =
   | ServerPong
+  | ServerTokenExpiry
   | ServerEventApplied
   | ServerEventStale
   | ServerPresence
@@ -287,8 +303,19 @@ export interface ClientPing {
   t: "ping"
   ts?: number
 }
+/**
+ * AQU-1839: a freshly minted sync token for THIS connection, sent before the
+ * current one expires. Accepting it in-band re-resolves the connection's role
+ * and pushes its expiry out, so a tab left open all day keeps one socket
+ * instead of being closed and reconnecting every token TTL (15 min).
+ */
+export interface ClientTokenRefresh {
+  t: "token.refresh"
+  token: string
+}
 export type ProjectDoClientMessage =
   | ClientPing
+  | ClientTokenRefresh
   | ClientOutboxEvent
   | ClientFocusClaim
   | ClientFocusRenew
@@ -311,6 +338,10 @@ export function parseProjectDoClientMessage(raw: string): ProjectDoClientMessage
   const t = m.t
   if (t === "ping") {
     return typeof m.ts === "number" && Number.isFinite(m.ts) ? { t: "ping", ts: m.ts } : { t: "ping" }
+  }
+  if (t === "token.refresh") {
+    if (typeof m.token !== "string" || m.token.length === 0) return null
+    return { t: "token.refresh", token: m.token }
   }
   if (t === "focus.claim") {
     if (typeof m.cellId !== "string") return null
@@ -824,6 +855,72 @@ export function applyDisconnect(
   }
   if (hadPresence) emit.push({ t: "presence.left", userId, connId })
   return { locks: nextLocks, presence: nextPresence, emit, emitTo: [] }
+}
+
+/**
+ * AQU-1839: decide whether an in-band `token.refresh` may re-authorize an open
+ * connection. Pure so the policy is testable without a DO host; the caller
+ * (ProjectSync) does the signature verification and applies the outcome.
+ *
+ * Two refusals matter:
+ *
+ *  - **identity mismatch.** A connection is authorized as one user for its
+ *    whole life — presence, lock ownership and event authorship all key off
+ *    that identity. Accepting a token minted for somebody else would let one
+ *    socket change who it is mid-session, so the refresh is refused and the
+ *    connection keeps the authorization it already had.
+ *  - **already expired.** A token that is past its own `exp` buys nothing: it
+ *    would leave the connection due for the very sweep it was meant to avoid,
+ *    and treating it as a refresh would hide a broken client clock.
+ *
+ * A refresh that does not extend the expiry (a replayed token, or one minted
+ * from the same cache) is still accepted: it re-resolves the role, which is
+ * the other half of what the expiry close bought (see TOKEN_EXPIRED_CLOSE_CODE).
+ */
+export type TokenRefreshOutcome =
+  | { ok: true; role: number | null; tokenExpiresAt: number }
+  | { ok: false; reason: "identity-mismatch" | "expired" }
+
+export function resolveTokenRefresh(
+  conn: { numericUserId: number | null },
+  claims: { userId: number; role: number | null; exp: number },
+  now: number,
+): TokenRefreshOutcome {
+  if (conn.numericUserId !== null && claims.userId !== conn.numericUserId) {
+    return { ok: false, reason: "identity-mismatch" }
+  }
+  const tokenExpiresAt = claims.exp * 1000
+  if (tokenExpiresAt <= now) return { ok: false, reason: "expired" }
+  return { ok: true, role: claims.role, tokenExpiresAt }
+}
+
+/**
+ * AQU-1839: drop every focus lock held by one user and emit the releases.
+ *
+ * Needed when a `token.refresh` downgrades a connection to a read-only role.
+ * Before in-band refresh existed, the role change took effect by closing the
+ * socket, and the disconnect path released the locks on the way out; keeping
+ * the socket open has to release them explicitly, or a demoted user holds
+ * every cell they had open until the lease lapses — the exact lock-out the
+ * role gate on `focus.claim` exists to prevent.
+ *
+ * Locks are per user rather than per socket (see applyDisconnect), so this is
+ * keyed by userId too: a role is a property of the account, so a downgrade
+ * seen on one of the user's sockets applies to all of them.
+ */
+export function releaseUserLocks(
+  locks: ReadonlyMap<string, LockState>,
+  userId: string,
+  now: number,
+): { locks: Map<string, LockState>; emit: ProjectDoServerMessage[] } {
+  const nextLocks = clone(locks)
+  const emit: ProjectDoServerMessage[] = []
+  for (const [cellId, lock] of nextLocks) {
+    if (lock.userId !== userId) continue
+    nextLocks.delete(cellId)
+    emit.push({ t: "lock.released", cellId, by: { userId, ts: now } })
+  }
+  return { locks: nextLocks, emit }
 }
 
 /**

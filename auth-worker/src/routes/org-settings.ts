@@ -71,7 +71,8 @@ import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { notifySyncWorkerOfProjectSettingsChange } from "../services/sync-worker-notify"
 import { ROLE } from "../types"
-import { getEffectiveOrgRole } from "../services/org-permissions"
+import { getEffectiveOrgRole, getOrgMemberRole } from "../services/org-permissions"
+import { hasActiveElevation } from "../middleware/platform-admin"
 
 const orgSettings = new Hono<AuthHonoEnv>()
 
@@ -292,7 +293,23 @@ orgSettings.get("/:orgId/settings", authMiddleware, async (c) => {
   // deliberately deaf to this switch, and saying nothing about that is how the
   // switch becomes a no-op nobody can see.
   const overrides = await countStructuralOverrides(c.env, orgId)
-  if (role < SETTINGS_WRITE_MIN_ROLE) {
+  // OPS-44: the unredacted branch hands back the org's LIVE vendor API keys
+  // (D7 — someone else's credential we chose to hold). getEffectiveOrgRole
+  // returns 700 for any platform operator on any org, so without this an
+  // un-elevated admin session — the stolen-but-not-elevated admin JWT that
+  // /elevation/verify's own threat note describes — reads every tenant's
+  // Gemini/TTS keys in plaintext. Elevation is required when the write-level
+  // role rests ONLY on admin power; a genuine Maintainer+ is unaffected.
+  // Resolved lazily: only a caller already past the write floor can receive
+  // secrets, so only they are worth a second membership read (getEffectiveOrgRole
+  // made the first one). Every ordinary viewer keeps its single query.
+  let secretsVisible = role >= SETTINGS_WRITE_MIN_ROLE
+  if (secretsVisible) {
+    const genuineRole = await getOrgMemberRole(c.env, orgId, user.id)
+    const adminOnlyWrite = (genuineRole ?? 0) < SETTINGS_WRITE_MIN_ROLE
+    if (adminOnlyWrite && !(await hasActiveElevation(c))) secretsVisible = false
+  }
+  if (!secretsVisible) {
     return c.json({
       ...response,
       settings: redactSecrets(response.settings),

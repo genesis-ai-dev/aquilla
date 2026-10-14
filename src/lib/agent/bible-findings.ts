@@ -1,0 +1,108 @@
+/**
+ * bible-findings — a draft's `bkp:` findings as words (AQU-1690).
+ *
+ * Autopilot stores a Bible data finding as `bkp:<check>` with its reason and
+ * pack evidence as params (src/lib/agent/draft-findings.ts). The label names
+ * the check the way Rules → Built-in checks does; the explanation and the
+ * evidence line reuse the editor's own Bible data check messages
+ * (src/lib/bible-data/check-messages.ts), so one finding reads the same in
+ * the editor and in autopilot's review.
+ */
+
+import { formatBibleCheckEvidence, formatBibleCheckReason } from "@/lib/bible-data/check-messages"
+import type { TFunction } from "@/lib/i18n/I18nProvider"
+import type { LocaleFormatters } from "@/lib/i18n/format"
+import type { MessageKey } from "@/lib/i18n/messages/en"
+import type { RuleInfraction } from "@/lib/parsers/types"
+import { isBibleCheckId } from "../../../db/shared/bible-checks/types"
+import type { DraftFinding } from "./draft-findings"
+
+/** Check names: the editor's built-in check names, and the one that only autopilot's Jev questions ask (V13). */
+const CHECK_NAME: Readonly<Record<string, MessageKey>> = {
+  V1: "bibleData.check.v1.name",
+  V2: "bibleData.check.v2.name",
+  V3: "bibleData.check.v3.name",
+  V5: "bibleData.check.v5.name",
+  V7: "bibleData.check.v7.name",
+  V8: "bibleData.check.v8.name",
+  V9: "bibleData.check.v9.name",
+  M1: "bibleData.check.m1.name",
+  // AQU-1697: check pack A. M3 is both a built-in check and a Jev question; one name.
+  N1: "bibleChecks.n1.name",
+  N2: "bibleChecks.n2.name",
+  S1: "bibleChecks.s1.name",
+  S3: "bibleChecks.s3.name",
+  S6: "bibleChecks.s6.name",
+  S7: "bibleChecks.s7.name",
+  S8: "bibleChecks.s8.name",
+  // AQU-1699: check pack B. P8 is both a built-in check and a Jev question; one name.
+  P1: "bibleParticipants.p1.name",
+  P2: "bibleParticipants.p2.name",
+  P3: "bibleParticipants.p3.name",
+  P4: "bibleParticipants.p4.name",
+  P5: "bibleParticipants.p5.name",
+  P6: "bibleParticipants.p6.name",
+  P9: "bibleParticipants.p9.name",
+  P10: "bibleParticipants.p10.name",
+  P14: "bibleParticipants.p14.name",
+  P15: "bibleParticipants.p15.name",
+  X3: "bibleParticipants.x3.name",
+  X4: "bibleParticipants.x4.name",
+  V13: "agent.finding.bibleCheck.speaker",
+  M3: "agent.finding.bibleCheck.negation",
+  P8: "agent.finding.bibleCheck.youNumber",
+  // AQU-1701: Jev questions only. P9 is both a built-in check and a Jev question; it keeps its one name above.
+  P13: "agent.finding.bibleCheck.referent",
+  P11: "agent.finding.bibleCheck.introduced",
+  C1: "agent.finding.bibleCheck.comprehension",
+}
+
+export function bibleFindingLabel(finding: DraftFinding, t: TFunction): string {
+  const detail = finding.detail ?? ""
+  const key = Object.hasOwn(CHECK_NAME, detail) ? CHECK_NAME[detail] : undefined
+  return key ? t("agent.finding.bible", { check: t(key) }) : t("agent.finding.bibleUnknown", { code: detail })
+}
+
+/**
+ * AQU-1701, C1: the Translation Question a draft may not answer — "Comprehension:
+ * the translation may not say that “…”", the question and its verses, and how
+ * many more on the same verses got a "no". The answer and the question are
+ * pack data in the gateway language, shown as they are.
+ */
+function comprehensionEvidence(params: Readonly<Record<string, string>>, t: TFunction, format: Pick<LocaleFormatters, "list">): string[] {
+  if (!params.answer) return []
+  const refs = (params.refs ?? "").split(",").filter(Boolean)
+  const lines = [t("agent.finding.bibleCheck.comprehensionEvidence", { answer: params.answer })]
+  if (params.question) lines.push(t("agent.finding.bibleCheck.comprehensionQuestion", { refs: format.list(refs), question: params.question }))
+  const more = Number.parseInt(params.more ?? "0", 10)
+  if (more > 0) lines.push(t("agent.finding.bibleCheck.comprehensionMore", { count: more }))
+  return lines
+}
+
+/**
+ * What the finding means and where its fact comes from, e.g. "The quotation
+ * closes after the narration that follows it…" and "OpenText speech JHN 4:9
+ * words 8–18; speaker from Clear speaker-quotations (confidence 97%)". Empty
+ * when the draft stored no params (a Jev-confirmed finding) or the check is
+ * unknown to this version. AQU-1701: a C1 finding carries its Translation
+ * Question.
+ */
+export function bibleFindingEvidence(
+  finding: DraftFinding,
+  t: TFunction,
+  format: Pick<LocaleFormatters, "list" | "percent">,
+): string[] {
+  if (finding.kind !== "bkp" || !finding.params) return []
+  if (finding.detail === "C1") return comprehensionEvidence(finding.params, t, format)
+  const code = `bkp:${finding.detail ?? ""}`
+  if (!isBibleCheckId(code)) return []
+  const infraction: RuleInfraction = {
+    ruleId: code,
+    cellId: "",
+    fileId: "",
+    reason: `builtin:${code}`,
+    reasonParams: finding.params,
+    spans: [],
+  }
+  return [formatBibleCheckReason(infraction, t), ...formatBibleCheckEvidence(infraction, t, format)]
+}

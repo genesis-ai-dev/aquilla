@@ -115,3 +115,11 @@ i18n-todo/
 # Google OAuth credential downloads — never commit
 client_secret*.json
 .harmonizer-eval-cache/
+
+# AQU-1868 — Big Bible perf harness: local fixture handle + run reports
+.perf/
+perf-report/
+
+# AQU-1941 — pre-write copies of project TTS settings taken by
+# `pnpm neon:prune-phantom-voices … --apply`. Customer data; never commit.
+.phantom-voice-backups/

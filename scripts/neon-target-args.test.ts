@@ -18,6 +18,10 @@ describe("neon-target hands the backfill its flags", () => {
       .toEqual(["scripts/neon-verify-lanes.ts", "--require-complete"])
     expect(childArgs("repair-lane-grants", ["--out", "report.json", "--project", "p1"]))
       .toEqual(["scripts/neon-repair-lane-grants.ts", "--out", "report.json", "--project", "p1"])
+    // AQU-1941: --production is the prune's write gate — dropping it would turn
+    // a refused production apply into a silent dry run.
+    expect(childArgs("prune-phantom-voices", ["--apply", "--production", "--only", "p1"]))
+      .toEqual(["scripts/neon-prune-phantom-voices.ts", "--apply", "--production", "--only", "p1"])
   })
 
   it("still runs an unscoped backfill when nothing follows the command", () => {

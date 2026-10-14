@@ -40,9 +40,20 @@ enabled = true
 [vars]
 POSTHOG_HOST = "https://eu.i.posthog.com"
 POSTHOG_KEY = ""
+# AQU-1848: pool admission caps. SANDBOX_MAX_TOTAL must track `max_instances`
+# below — the Worker cannot read the container config at runtime, so the two
+# move together. SANDBOX_MAX_PER_TENANT keeps one org from draining the pool;
+# SANDBOX_POOL_WAIT_MS is how long a request waits for a slot before it returns
+# `pool_busy`. Local dev keeps the pool tiny so the queueing path is easy to
+# exercise by hand (see the ticket's test checklist).
+SANDBOX_MAX_TOTAL = "2"
+SANDBOX_MAX_PER_TENANT = "1"
+SANDBOX_POOL_WAIT_MS = "20000"
 
 # The container-backed Durable Object. `image = "./Dockerfile"` builds the
 # sandbox image; `instance_type` sizes each container (contract §6).
+# NOTE: `sleepAfter` is NOT a wrangler key — it is a property on the `Sandbox`
+# class (inherited from `Container`), so it is set in src/index.ts (AQU-1848).
 [[containers]]
 class_name = "Sandbox"
 image = "./Dockerfile"
@@ -53,9 +64,19 @@ max_instances = 20
 name = "Sandbox"
 class_name = "Sandbox"
 
+# AQU-1848: the admission ledger. One singleton instance counts every in-flight
+# container so the caps are enforced before a container start can fail.
+[[durable_objects.bindings]]
+name = "SANDBOX_POOL"
+class_name = "SandboxPool"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Sandbox"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["SandboxPool"]
 
 # Agent artifacts / media blobs (same bucket the sync-worker binds). The
 # fetch-artifact route reads objects from here and writes them into /workspace.
@@ -78,6 +99,12 @@ enabled = true
 [env.development.vars]
 POSTHOG_HOST = "https://eu.i.posthog.com"
 POSTHOG_KEY = "phc_qy5gb7wTaW5RbmMW8SEyQPSLKtYFtUobaqKZWiUs7cBt"
+# AQU-1848: dev mirrors `max_instances = 5` below. The ticket's first
+# acceptance criterion is checked here by dropping both numbers to 2 and
+# starting a third run.
+SANDBOX_MAX_TOTAL = "5"
+SANDBOX_MAX_PER_TENANT = "2"
+SANDBOX_POOL_WAIT_MS = "20000"
 
 [[env.development.containers]]
 class_name = "Sandbox"
@@ -89,9 +116,17 @@ max_instances = 5
 name = "Sandbox"
 class_name = "Sandbox"
 
+[[env.development.durable_objects.bindings]]
+name = "SANDBOX_POOL"
+class_name = "SandboxPool"
+
 [[env.development.migrations]]
 tag = "v1"
 new_sqlite_classes = ["Sandbox"]
+
+[[env.development.migrations]]
+tag = "v2"
+new_sqlite_classes = ["SandboxPool"]
 
 [[env.development.r2_buckets]]
 binding = "SNAPSHOTS"
@@ -109,6 +144,13 @@ enabled = true
 [env.production.vars]
 POSTHOG_HOST = "https://eu.i.posthog.com"
 POSTHOG_KEY = "phc_qy5gb7wTaW5RbmMW8SEyQPSLKtYFtUobaqKZWiUs7cBt"
+# AQU-1848: SANDBOX_MAX_TOTAL tracks `max_instances = 20` below. A per-tenant
+# cap of 3 is more than any single UI flow needs (one agent run plus a couple of
+# imports) and still leaves 17 slots for the rest of the platform when one
+# tenant is at its cap.
+SANDBOX_MAX_TOTAL = "20"
+SANDBOX_MAX_PER_TENANT = "3"
+SANDBOX_POOL_WAIT_MS = "20000"
 
 [[env.production.containers]]
 class_name = "Sandbox"
@@ -120,9 +162,17 @@ max_instances = 20
 name = "Sandbox"
 class_name = "Sandbox"
 
+[[env.production.durable_objects.bindings]]
+name = "SANDBOX_POOL"
+class_name = "SandboxPool"
+
 [[env.production.migrations]]
 tag = "v1"
 new_sqlite_classes = ["Sandbox"]
+
+[[env.production.migrations]]
+tag = "v2"
+new_sqlite_classes = ["SandboxPool"]
 
 [[env.production.r2_buckets]]
 binding = "SNAPSHOTS"

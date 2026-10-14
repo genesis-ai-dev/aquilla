@@ -7,6 +7,10 @@ const CORE_SENTINELS = [
 
 const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
   {
+    source: /^(?:src\/(?:components|lib)\/checking\/|sync-worker\/src\/checking\/|db\/postgres\/migrations\/0162_community_checking)/,
+    sentinels: ["e2e/specs/collab/cross-user-comment.smoke.spec.ts"],
+  },
+  {
     // AQU-1479: captions, media bytes, and staged attachments publish together.
     source: /^(?:src\/lib\/import(?:\.ts|\/)|src\/lib\/parsers\/embedded-subtitles|src\/lib\/audio\/(?:align-source-script|script-alignment|source-alignment)|src\/components\/(?:ImportDialog|import\/|timeline\/TimelineEditor)|src\/hooks\/useTimelineTextCells|src\/lib\/sync\/bulk-import|sync-worker\/src\/audio\.ts|sync-worker\/src\/events\/import-(?:route|track-publication|caption-promotion)|shared\/timeline-import)/i,
     sentinels: ["e2e/specs/editor/import-media-captions.smoke.spec.ts"],
@@ -72,6 +76,12 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     // Its auth-worker route and client consumers are covered here instead.
     source: /^(?:auth-worker\/src\/routes\/style-rules|src\/lib\/scripture\/|src\/hooks\/useStyleRules)/i,
     sentinels: ["e2e/specs/rules/violation.smoke.spec.ts"],
+  },
+  {
+    // BIA forecasting: ghost-text next words + "words that fit here". The
+    // journey crosses the projection → SPA read → forecast worker → commit.
+    source: /^src\/(?:lib\/forecast\/|lib\/richtext\/ghost-text|hooks\/useForecastCorpus|components\/WordsThatFitMenu|context\/ForecastContext|lib\/store\/ghost-text-pref)/,
+    sentinels: ["e2e/specs/editor/ghost-text.spec.ts"],
   },
   {
     source: /^src\/(?:components|lib)\/(?:terminology|termbase)/i,
@@ -172,6 +182,18 @@ function closestSpecs(file: string, smokeSpecs: string[]): string[] {
 export interface E2EImpact {
   specs: string[]
   reasons: string[]
+}
+
+/**
+ * The specs the affected gate may run: every smoke spec, plus every domain
+ * sentinel that exists even when it is not a smoke spec (e.g. the BIA
+ * ghost-text journey, `e2e/specs/editor/ghost-text.spec.ts`). Without the
+ * second half a non-smoke sentinel was silently filtered out of every real
+ * pre-push run, so forecast changes selected no browser journey.
+ */
+export function affectedSpecPool(smokeSpecs: string[], exists: (spec: string) => boolean): string[] {
+  const sentinels = [...CORE_SENTINELS, ...DOMAIN_RULES.flatMap(({ sentinels }) => sentinels)]
+  return [...new Set([...smokeSpecs, ...sentinels.filter((spec) => exists(spec))].map(normalize))].sort()
 }
 
 export function selectAffectedE2E(changedFiles: string[], availableSmokeSpecs: string[]): E2EImpact {

@@ -6,6 +6,7 @@
 
 import { describe, it, expect } from "vitest"
 import { categorizeAiError } from "./ai-error"
+import { errorFromHostedTts, errorFromVoiceConvert, HOSTED_TTS_CREDIT_CAP_BODY } from "./tts-engine-error"
 
 const OPENROUTER_413 =
   'Completion failed: 413 {"error":{"message":"request too large for model `meta-llama/llama-3.3-70b-instruct`, max 131072 tokens","code":413},"user_id":"user_2abc"}'
@@ -69,6 +70,32 @@ describe("categorizeAiError — AI request failures (AQU-891)", () => {
   it("still reports the platform daily-quota case ahead of the generic 429 branch", () => {
     const result = categorizeAiError("Daily AI limit reached — resets at midnight UTC")
     expect(result.category).toBe("daily-quota-exceeded")
+  })
+
+  // AQU-1869: the platform spend ceiling. Its server message also says "resets
+  // at midnight UTC", so without its own earlier branch it would wear the
+  // personal-quota copy and tell the user they had used up their own limit.
+  it("separates the platform spend ceiling from the user's own daily quota", () => {
+    // The real producer's output, not a hand-written string: the ceiling's 503
+    // body reaches the user only through these formatters, and a fixture that
+    // skipped them would not prove the composition.
+    const ceilingBody = JSON.stringify({
+      error: "ai_spend_ceiling_reached",
+      message:
+        "AI is temporarily unavailable: the platform's daily AI spend ceiling has been reached. It resets at midnight UTC.",
+    })
+    for (const err of [errorFromHostedTts(503, ceilingBody), errorFromVoiceConvert(503, ceilingBody)]) {
+      const result = categorizeAiError(err.message)
+      expect(result.category).toBe("ai-spend-ceiling")
+      expect(result.title).toMatch(/unavailable/i)
+      // It must not read as the user's own allowance, it must not be mistaken
+      // for an unconfigured voice engine, and it must not dump the machine
+      // payload the way `unknown` would.
+      expect(result.body).not.toMatch(/daily AI limit reached/i)
+      expect(result.body).not.toMatch(/isn't configured|not set up/i)
+      expect(result.body).not.toContain("{")
+      expect(result.body).toMatch(/midnight UTC/)
+    }
   })
 })
 
@@ -137,6 +164,41 @@ describe("categorizeAiError — names the TTS engine that failed", () => {
     const result = categorizeAiError(raw)
     expect(result.category).toBe("hosted-tts-not-configured")
     expect(result.title).toBe("Inworld TTS isn't configured")
+  })
+
+  // AQU-1872: an org out of credit is refused before the vendor is ever
+  // called. Titling that "Inworld TTS failed" sends the user to debug an
+  // engine that is working, and never names the org admin who can clear it.
+  it("calls an exhausted credit allowance what it is, not an engine failure", () => {
+    const result = categorizeAiError(
+      'Inworld TTS failed (429): {"error":"credit_cap_exceeded","reason":"daily"}',
+    )
+    expect(result.category).toBe("hosted-tts-credit-cap")
+    expect(result.category).not.toBe("hosted-tts-failed")
+    expect(result.title).toBe("AI credit allowance used up")
+    expect(result.body).toMatch(/no audio was generated/i)
+    expect(result.body).toMatch(/org admin/i)
+    // Never a machine dump, never advice to retry an engine that is fine, and
+    // no Gemini red herring — the cause is named outright here.
+    expect(result.body).not.toContain("credit_cap_exceeded")
+    expect(result.body).not.toMatch(/try again in a moment/i)
+    expect(result.body).not.toMatch(/gemini/i)
+  })
+
+  it("recognizes the authored credit-allowance body", () => {
+    // WHY: errorFromHostedTts replaces the JSON with this prose, so the
+    // categorizer must still place it after the message has been rewritten.
+    const result = categorizeAiError(HOSTED_TTS_CREDIT_CAP_BODY)
+    expect(result.category).toBe("hosted-tts-credit-cap")
+    expect(result.title).toBe("AI credit allowance used up")
+  })
+
+  it("keeps the per-user TTS budget 429 on its own daily-quota branch", () => {
+    // WHY: two different 429s. The credit branch must not annex the seconds cap.
+    const result = categorizeAiError(
+      'voice/tts failed (429): {"error":"tts_daily_limit_exceeded"}',
+    )
+    expect(result.category).toBe("daily-quota-exceeded")
   })
 
   it("names Inworld on a later upstream failure", () => {

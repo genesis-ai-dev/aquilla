@@ -15,6 +15,7 @@ import { z } from "zod"
 import type { AuthUser, Env, Variables } from "../types"
 import { authMiddleware } from "../middleware/auth"
 import { runAiGuard } from "../lib/ai-budget"
+import { checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
 import { getPlatformSettingsCached, type PlatformSettings } from "../lib/platform-settings"
 import { creditGuard, creditsFor, recordCredit, resolveCreditConfig } from "../lib/credits"
 import { countWords } from "../lib/billing/plans"
@@ -76,6 +77,10 @@ import {
   type ProposeCommandArgs,
   type DescribeCommandArgs,
 } from "../lib/agent/command-tools"
+import {
+  logVendorTimeout,
+  vendorDeadline,
+} from "../../../shared/vendor-timeouts"
 
 const agent = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -589,6 +594,13 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
     return c.json(guard.body, guard.status)
   }
 
+  // Platform daily spend ceiling (AQU-1869). Before the SSE stream opens, for
+  // the same reason the agent credit guard is: this is the dangerous rail.
+  const spendCeiling = await checkAiSpendCeiling(c.env.AQUILLA_PG, c.env, "agent")
+  if (!spendCeiling.ok) {
+    return c.json(spendCeiling.body, spendCeiling.status)
+  }
+
   // Credit guard: resolve org from project, pre-check agent sub-cap.
   // This is the DANGEROUS rail — block early (before the SSE stream starts).
   let orgId = 0
@@ -1018,6 +1030,12 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       }
       const turnStartedAt = Date.now()
       const promptChars = JSON.stringify(convo).length
+      // AQU-1849: FIRST-BYTE deadline, not a total one — an agent turn
+      // legitimately streams for minutes, but a provider that never sends the
+      // first frame is a hang. Disarmed the moment the headers land, so the
+      // stream below runs unbounded. Linked to the run's own signal so a
+      // cancelled run still aborts upstream.
+      const firstByte = vendorDeadline("openRouterStreamFirstByte", signal)
       let upstream: Response
       try {
         upstream = await fetch(resolveOpenRouterUrl(env), {
@@ -1035,12 +1053,15 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
             ...streamUsageOptions(env.OPENROUTER_BASE_URL),
             ...(usage ? { max_tokens: usage.maxOutputTokens } : {}),
           }),
-          signal,
+          signal: firstByte.signal,
         })
       } catch (error) {
         // Uncertain charge: the reservation stays held for reconciliation.
         if (usage && stepRequestId) await usage.holdStep(stepRequestId, undefined)
+        if (firstByte.timedOut()) logVendorTimeout("openRouterStreamFirstByte", error)
         throw error
+      } finally {
+        firstByte.clear()
       }
 
       if (!upstream.ok) {

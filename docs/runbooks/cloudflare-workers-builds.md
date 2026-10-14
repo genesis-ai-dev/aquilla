@@ -86,9 +86,10 @@ separately in Cloudflare. Any retained Neon branch or R2 data is not deployable
 application infrastructure and requires its own backup/retention decision before
 deletion.
 
-`.github/workflows/ci.yml` and `.github/workflows/deploy-workers.yml` are retained
-as explicit `workflow_dispatch` fallbacks. Neither has a `pull_request` or `push`
-trigger. Scheduled Neon/content workflows and tag-triggered Tauri releases are
+`.github/workflows/ci.yml` runs its test gate on pull requests into `dev` and
+keeps `workflow_dispatch` for typecheck, the production build, Tauri, and IDML.
+`.github/workflows/deploy-workers.yml` stays `workflow_dispatch` only. Neither
+workflow has a `push` trigger. Scheduled Neon/content workflows and tag-triggered Tauri releases are
 separate operational workloads and are not silently reassigned to Workers Builds.
 Playwright smoke on a dedicated Hetzner box is also separate — see
 [hetzner-ci.md](hetzner-ci.md). It is `workflow_dispatch`-only until a

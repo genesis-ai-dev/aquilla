@@ -322,6 +322,24 @@ CREATE TABLE project_settings (
 );
 CREATE INDEX project_settings_agent_react ON project_settings(project_id) WHERE agent_react;
 
+-- 0158 (AQU-1846): the react watcher's per-project bookmark and its
+-- round-robin stamp. Deliberately NOT in the settings blob: persisting the
+-- cursor there meant a read-modify-write of a multi-MB TEXT column every five
+-- minutes per swept project, racing any human settings edit. `cursor_ms` is
+-- epoch millis matching events.server_ts (NULL = never swept);
+-- `last_reaction_at` is fileId -> ISO timestamp, the per-file cooldown input;
+-- `last_swept_at` is when the cron last VISITED the project (NULL = never),
+-- which is the sweep's ordering key so no project starves behind the LIMIT.
+CREATE TABLE agent_react_state (
+    project_id       TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+    cursor_ms        BIGINT,
+    last_reaction_at JSONB NOT NULL DEFAULT '{}'::jsonb,
+    last_swept_at    TIMESTAMPTZ,
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX agent_react_state_last_swept
+  ON agent_react_state(last_swept_at ASC NULLS FIRST, project_id ASC);
+
 CREATE TABLE org_settings (
     org_id     BIGINT PRIMARY KEY REFERENCES organizations(id) ON DELETE CASCADE,
     settings   TEXT NOT NULL DEFAULT '{}',
@@ -834,10 +852,14 @@ CREATE TABLE cell_waivers (
     file_id    TEXT NOT NULL,
     cell_id    TEXT NOT NULL,
     rule_id    TEXT NOT NULL,
+    -- AQU-1740 (migration 0163): hash of the ONE finding this waiver dismisses
+    -- (src/lib/rules/match-hash.ts). '' = no finding named, i.e. the rule is
+    -- waived across the whole cell — the meaning of every row predating 0163.
+    match_hash TEXT NOT NULL DEFAULT '',
     reason     TEXT,
     waived_by  TEXT NOT NULL,
     waived_ts  BIGINT NOT NULL,
-    PRIMARY KEY (project_id, file_id, cell_id, rule_id)
+    PRIMARY KEY (project_id, file_id, cell_id, rule_id, match_hash)
 );
 
 CREATE TABLE cell_audio (
@@ -1035,6 +1057,8 @@ CREATE TABLE concepts (
     status         TEXT NOT NULL DEFAULT 'draft',
     case_sensitive INTEGER NOT NULL DEFAULT 0,
     match_options  JSONB,
+    -- AQU-1693 (0166): {"acai": "<ACAI entity id>"}; NULL or {} = not linked.
+    external_ids   JSONB,
     created_by     TEXT,
     created_at     BIGINT NOT NULL,
     updated_at     BIGINT NOT NULL,
@@ -1097,6 +1121,9 @@ CREATE TABLE diarization_jobs (
     num_speakers INTEGER,
     turns_json   TEXT,
     error        TEXT,
+    -- AQU-1855: which user started the job, so a per-user concurrency cap has
+    -- something to count. NULL on rows that predate the column.
+    created_by   BIGINT,
     created_at   BIGINT NOT NULL,
     updated_at   BIGINT NOT NULL
 );
@@ -1133,6 +1160,27 @@ CREATE TABLE cell_word_morph (
     strongs_h   TEXT,               -- Strong's Hebrew number (e.g. H1234), NULL for Greek
     strongs_g   TEXT,               -- Strong's Greek number (e.g. G1234), NULL for Hebrew
     PRIMARY KEY (project_id, file_id, cell_id, word_seq)
+);
+
+-- Migration 0164: Bridge 1 of the Bible data layer (AQU-1694). One row per
+-- link between a Bible Knowledge Pack word (Macula id) and a token of a
+-- gateway-language source cell, computed in the browser and uploaded through
+-- the sync-worker's source-word-alignment route. Derived data: rows are valid
+-- only while source_hash equals the source row's cells.content_hash, and the
+-- read route returns nothing else. Keep each column on one line (the dev-stack
+-- schema reconciler drops lines nested in a column's parentheses).
+CREATE TABLE source_word_alignment (
+    project_id    TEXT NOT NULL,
+    file_id       TEXT NOT NULL,
+    cell_id       TEXT NOT NULL,
+    src_word_id   TEXT NOT NULL,      -- pack word id, e.g. n43004007009
+    tgt_token_idx INTEGER NOT NULL CHECK (tgt_token_idx >= 0),   -- token of the source cell's text (tokenize order)
+    conf          REAL NOT NULL CHECK (conf >= 0 AND conf <= 1),
+    method        TEXT NOT NULL,      -- recipe, e.g. ibm1-gdfa-names/1
+    source_hash   TEXT NOT NULL,      -- cells.content_hash of the text that was aligned
+    trained_pairs INTEGER NOT NULL CHECK (trained_pairs >= 0),   -- verse cells the run trained on
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (project_id, file_id, cell_id, src_word_id, tgt_token_idx)
 );
 
 -- ────────────────────────────── indexes ─────────────────────────────────
@@ -1188,6 +1236,8 @@ CREATE INDEX idx_checkpoints_project ON checkpoints(project_id, created_at);
 CREATE INDEX comments_project_scope ON comments(project_id, scope_kind, file_id, cell_id);
 CREATE INDEX comments_thread ON comments(project_id, parent_comment_id);
 CREATE INDEX idx_diarization_jobs_file ON diarization_jobs(project_id, file_id);
+-- AQU-1855: the stale-job sweep and the concurrency cap both read live jobs by age.
+CREATE INDEX idx_diarization_jobs_live ON diarization_jobs(status, updated_at);
 -- idx_events_author and idx_events_cell were dropped in migration 0081
 -- (AQU-1005): zero/near-zero reads on production, and every event INSERT paid
 -- their maintenance inside the seq-counter lock window.
@@ -1263,6 +1313,9 @@ CREATE TABLE IF NOT EXISTS org_credit_usage_daily (
   PRIMARY KEY (org_id, user_id, date_utc, rail)
 );
 CREATE INDEX IF NOT EXISTS idx_org_credit_org_date ON org_credit_usage_daily (org_id, date_utc);
+-- Platform-wide daily spend ceiling sums one UTC day across every org, so it
+-- has no org predicate to use the composite index above (0167, AQU-1869).
+CREATE INDEX IF NOT EXISTS idx_org_credit_date ON org_credit_usage_daily (date_utc);
 
 -- Translation agent run ledger (0040_agent_runs.sql). One row per
 -- POST /api/v1/ai/agent/run; staged commits carry payload.agent_run_id →
@@ -1711,6 +1764,8 @@ CREATE TABLE IF NOT EXISTS integration_links (
   last_pushed_at TIMESTAMPTZ,
   last_push_status TEXT,              -- 'ok' | 'error'
   last_push_error TEXT,
+  push_attempts INTEGER NOT NULL DEFAULT 0,  -- consecutive failed pushes (0159; AQU-1828)
+  next_retry_at TIMESTAMPTZ,          -- earliest the cron flush may retry; NULL = no backoff
   created_by TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -1985,6 +2040,10 @@ CREATE INDEX IF NOT EXISTS contextual_run_traces_created
 CREATE TABLE IF NOT EXISTS contextual_project_leases (
   id text PRIMARY KEY,
   project_id text NOT NULL,
+  -- Billing workspace of project_id, denormalized so the org ceiling
+  -- (0158_contextual_lease_org_scope.sql; AQU-1847) can be summed without
+  -- joining projects inside the acquire statement. 0 = project with no org.
+  org_id bigint NOT NULL DEFAULT 0,
   run_id text NOT NULL UNIQUE,
   weight integer NOT NULL CHECK (weight BETWEEN 1 AND 1000),
   expires_at timestamptz NOT NULL,
@@ -1995,6 +2054,12 @@ CREATE TABLE IF NOT EXISTS contextual_project_leases (
 );
 CREATE INDEX IF NOT EXISTS contextual_project_leases_project_expiry
   ON contextual_project_leases(project_id, expires_at);
+CREATE INDEX IF NOT EXISTS contextual_project_leases_org_expiry
+  ON contextual_project_leases(org_id, expires_at);
+-- The platform-wide sum and the platform-wide expiry GC both scan on expiry
+-- alone, with no project or org to narrow them.
+CREATE INDEX IF NOT EXISTS contextual_project_leases_expiry
+  ON contextual_project_leases(expires_at);
 
 -- Stripe Field Plan billing + word-metered AI credits (0077_org_billing.sql).
 -- Additive: unpaid orgs have no row and are treated as plan=none.
@@ -2044,16 +2109,17 @@ CREATE TABLE IF NOT EXISTS contextual_decisions (
   id text PRIMARY KEY,                  -- uuidv7
   project_id text NOT NULL,
   run_id text,                          -- NULL once the owning run ends
-  file_id text NOT NULL,
+  file_id text,                         -- NULL for a project-wide question (0165)
   span_id text,
   cell_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
   -- WHY the agent cannot proceed, in the user's words. Never "review this".
   reason text NOT NULL,
   -- Which readiness item this gap belongs to; NULL for free-text ambiguities,
-  -- which the deterministic sweep can never close.
+  -- which the deterministic sweep can never close. 'bible-fact' (0165) asks
+  -- for a durable project fact.
   readiness_item text
     CHECK (readiness_item IS NULL OR
-           readiness_item IN ('terminology','brief','examples','rules','languages')),
+           readiness_item IN ('terminology','brief','examples','rules','languages','bible-fact')),
   -- Set only for terminology decisions: the concept whose rendering is missing.
   concept_id text,
   -- How many later passages the answer affects. Drives surfacing rank (§4.6)
@@ -2067,6 +2133,13 @@ CREATE TABLE IF NOT EXISTS contextual_decisions (
   assigned_user_id integer,
   assigned_invite_id text,
   resolution jsonb,                     -- {kind:'answered'|'researched', …}
+  -- 0165 (AQU-1691): a fact question stores its answer as a project fact
+  -- under fact_key (db/shared/project-facts.ts), offers one-click options,
+  -- and says where the fact applies. Keep each on one line: the dev-stack
+  -- schema reconciler (scripts/dev-stack-schema-parser.ts) ALTERs them in.
+  fact_key text,
+  options jsonb,                        -- [{value, label?}]
+  fact_scope jsonb,                     -- {book?, passage?: {from, to}, entity?}
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   resolved_at timestamptz
@@ -2626,3 +2699,24 @@ CREATE OR REPLACE VIEW assignment_member_cells WITH (security_invoker = true) AS
 -- AQU-1491: runtime grants, distinct from legacy word/credit allowances.
 ALTER TABLE org_billing ADD COLUMN weekly_allowance BIGINT
   CHECK (weekly_allowance >= 0 AND weekly_allowance <= 10000000);
+
+-- AQU-1249: feature-flagged WIP. Capabilities confer no project membership.
+CREATE TABLE IF NOT EXISTS checking_links (
+  token TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  created_by BIGINT NOT NULL REFERENCES users(id),
+  title TEXT NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('viewer', 'commenter', 'reviewer')),
+  units JSONB NOT NULL,
+  pin_hash TEXT,
+  failed_attempts INTEGER NOT NULL DEFAULT 0,
+  locked_until BIGINT,
+  join_count INTEGER NOT NULL DEFAULT 0,
+  join_window BIGINT NOT NULL DEFAULT 0,
+  feedback_count INTEGER NOT NULL DEFAULT 0,
+  feedback_window BIGINT NOT NULL DEFAULT 0,
+  expires_at BIGINT NOT NULL,
+  revoked_at BIGINT,
+  created_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS checking_links_project ON checking_links(project_id);

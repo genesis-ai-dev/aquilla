@@ -7,6 +7,7 @@
 // Codes and categories only — never model prose.
 
 import type { DecideInput, DecideResult, JevAnswer, JevQuestion } from "../jev/decide"
+import { bibleCodeSeverity, isBibleCode } from "./bible-gates"
 
 export interface TriageCell {
   cellId: string
@@ -25,7 +26,10 @@ const TEXT_MAX = 400
 
 export function fallbackTriage(findings: string[]): { triage: "human" | "advisory"; severity: number } {
   if (findings.some((f) => f === "unsupported" || f.startsWith("dissent:"))) return { triage: "human", severity: 3 }
-  if (findings.some((f) => f.startsWith("lint:"))) return { triage: "advisory", severity: 2 }
+  // AQU-1690: a Bible data warning that survived its repair is a fact the
+  // draft contradicts (a quotation left open, a question made a statement).
+  if (findings.some((f) => isBibleCode(f) && bibleCodeSeverity(f) === "warning")) return { triage: "human", severity: 3 }
+  if (findings.some((f) => f.startsWith("lint:") || isBibleCode(f))) return { triage: "advisory", severity: 2 }
   return { triage: "advisory", severity: findings.length > 0 ? 1 : 0 }
 }
 

@@ -82,9 +82,28 @@ like an ordinary slice. The bot's job ends at the same place either way.
      and reachable from it, so QA and whoever deploys both find it from
      `git log` or the GitHub commit view without hunting for a separate
      artifact.
-5. Done. Do not poll for the deploy, do not wait for a tag, do not follow up
-   on this release again — the next thing that happens to it happens
-   without this bot, per [QA-BOT-REGIMEN.md](QA-BOT-REGIMEN.md) §3.
+5. Done. Do not poll for the deploy, do not wait for Jev, do not wait for a
+   tag, do not follow up on this release again — the next thing that happens
+   to it happens without this bot, per [QA-BOT-REGIMEN.md](QA-BOT-REGIMEN.md) §3.
+
+## After the cut: smart Jev, then a person
+
+This bot does not start Jev and does not read its result. The push that
+creates `plan.branch`, and every later push onto that branch, is what starts
+the one Hetzner run. The webhook accepts `push` events for
+`refs/heads/release/YYYY/MM/DD-NN` and ignores pull requests. See
+[smart-testing-webhook.md](../../docs/runbooks/smart-testing-webhook.md).
+
+The HEAD Jev tests is not always `plan.sha`. When `hold` is true, a person
+checks that pull request and ready pull requests are added onto the branch.
+Jev runs after that pile-on. Only a result for the branch's current HEAD counts. A comment on an older commit does not decide the deploy.
+
+- **FAIL** (a journey verdict of `FAIL (model-free check)` or `PRODUCT FAILURE`)
+  means that HEAD does not deploy. A new commit on the branch starts Jev again.
+- **PASS**. `INCONCLUSIVE` and `HARNESS UNAVAILABLE` do not hold. A person deploys, then tags production.
+
+Adversarial Jev is not part of this cut. It attacks deployed `dev` at 09:00 UTC
+and files Linear tickets. It does not affect the cut or the deploy.
 
 ## Release notes template
 

@@ -4997,7 +4997,8 @@ describe("TimelineEditor — splitting takes (AQU-1767)", () => {
   it("S never splits at the mouse: with no take selected it does nothing", () => {
     const { onCutTargets, playheadTo, chip } = renderSplit()
     playheadTo(12)
-    fireEvent.pointerMove(chip(), { clientX: 12 * 38 })
+    // 2 s into the take (the test DOM lays the chip at x = 0).
+    fireEvent.pointerMove(chip(), { clientX: 2 * 38 })
     fireEvent.keyDown(window, { key: "s" })
     expect(onCutTargets).not.toHaveBeenCalled()
   })

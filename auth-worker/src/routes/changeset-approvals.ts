@@ -164,6 +164,12 @@ changesetApprovals.get("/:id/approval", authMiddleware, async (c) => {
     projectName: cs.project_name,
     status: cs.status,
     autonomyMode: cs.autonomy_mode,
+    // AQU-1673: WHO staged this plan. An agent-staged changeset is committed by
+    // the agent once a human approves; a session-staged one (credential_id
+    // 'session' — the in-app "Import as proposals" path) has no agent coming
+    // back for it, so the approving surface has to commit it itself or the
+    // approved text never lands. The approval surfaces branch on this.
+    credentialId: cs.credential_id,
     summary: parseJson<unknown>(cs.summary),
     ...details,
     // Routing only — an assignee never changes the status (P1 §2.2).

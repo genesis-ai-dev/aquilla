@@ -44,7 +44,7 @@
 //        --statement-timeout <pg interval>  --lock-timeout <pg interval>
 import { retryingLaneIdCollision } from '../db/shared/lanes'
 import { resolveProjectRoleIncludingArchivedShared } from '../db/shared/project-roles'
-import { makePostgres, type AquillaDb } from '../db/shim/postgres'
+import { makeMaintenancePostgres, type AquillaDb } from '../db/shim/postgres'
 import { planLanesForProject, type LaneRolePlan } from '../src/lib/lanes/backfill-plan'
 import { planLaneGrants } from '../src/lib/lanes/grant-backfill'
 import { newLaneId } from '../src/lib/lanes/lane-id'
@@ -357,7 +357,7 @@ async function main(): Promise<void> {
   const statementTimeout = flagValue('--statement-timeout') ?? '300s'
   const lockTimeout = flagValue('--lock-timeout') ?? '3s'
 
-  const db = makePostgres(connectionString(), 1)
+  const db = makeMaintenancePostgres(connectionString(), 1)
   try {
     // Prod-safety: bound each statement and never wait long on a lock.
     await db.exec(`SET statement_timeout = '${statementTimeout}'`)

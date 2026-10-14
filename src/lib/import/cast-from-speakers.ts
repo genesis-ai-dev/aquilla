@@ -13,13 +13,31 @@ export interface CastAdditions {
   castAssignments: Record<string, string>
 }
 
+/**
+ * A verse reference, which Codex stores in the very same `cellLabel` field a
+ * subtitle notebook uses for a character (AQU-1942): optional leading digit for
+ * the numbered books, a 2–3 letter book code, `chapter:verse`, optionally a
+ * verse letter and a range — `GEN 1:1`, `1JN 2:3`, `MAT 5:1-10`, `PSA 23:1a`.
+ *
+ * This one is NOT a judgement about repetition, so it holds for a batch of any
+ * size: a Bible notebook labels every cell with its own reference, and a short
+ * file or a delta run over one changed file hands `castLikeSpeakers` too few
+ * labels for guard 2 to fire. Without this pattern a three-verse file minted
+ * three voices named after verses; `iloko_ilo_the_chosen` reached 31,170 of
+ * them that way. A reference cannot be a person's name, so it is rejected
+ * structurally rather than statistically.
+ */
+const SCRIPTURE_REFERENCE_LABEL = /^[1-3]?\s*[A-Z]{2,3}\s+\d+:\d+[a-z]?(?:\s*[-–]\s*\d+[a-z]?)?$/i
+
 /** Labels that are structurally identifiers, never a person's name: bare
  *  numbers and timecodes ("12", "00:01:23,456"), positional labels
- *  ("clip 3", "segment_12"), and media/subtitle filenames. */
+ *  ("clip 3", "segment_12"), media/subtitle filenames, and scripture
+ *  references ("GEN 1:1", "1JN 2:3-5" — see `SCRIPTURE_REFERENCE_LABEL`). */
 const NON_SPEAKER_LABEL: readonly RegExp[] = [
   /^\d+([.,:]\d+)*$/,
   /^(clip|cue|segment|section|cell|line|track|part|chunk|take|item|row)[\s_-]*\d+$/i,
   /\.(wav|mp3|m4a|aac|ogg|opus|flac|webm|mp4|mov|mkv|vtt|srt|txt|json)$/i,
+  SCRIPTURE_REFERENCE_LABEL,
 ]
 
 /** A label set this large is a big enough sample to judge whether it repeats. */

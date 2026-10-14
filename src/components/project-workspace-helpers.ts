@@ -7,6 +7,7 @@ import type { ContextualDraftsScope } from "@/lib/contextual/drafts-store"
 import { btSeedsFromAlignmentSeeds, type BtSeed } from "@/lib/completion/bt-glosser"
 import type { BacktranslationRecord } from "@/lib/completion/bt-record"
 import type { CellSummary } from "@/hooks/useActiveCellStore"
+import type { FileSummary } from "@/lib/sync/cells-read-types"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { Concept } from "@/lib/terminology/types"
 import type { LaneLanguageRow } from "@/lib/lanes/lane-language"
@@ -471,4 +472,40 @@ export function ruleFixPreflight(
   if (!isIdmlCell) return "plain"
   if (preview.find === undefined || preview.replace === undefined) return "refuse"
   return "protected"
+}
+
+/**
+ * The sentinel fileId a project-level sync-token mint rides.
+ * Must match PROJECT_SENTINEL_FILE_ID in sync-worker/src/events/authorize.ts.
+ */
+const PROJECT_SENTINEL_FILE_ID = "__project__"
+
+/**
+ * AQU-1894: reads the "Recently deleted" (trash) listing with a project SYNC
+ * token. The trash list used to hand sync-worker the identity SESSION jwt,
+ * which `verifyTokenForProject` rejects (it only accepts an `aud: "sync"`
+ * token), so `files?trash=1` answered 401 every single time and deleted files
+ * could never be listed or restored from the UI.
+ *
+ * The mint rides the `__project__` sentinel rather than the first live file's
+ * id — the established sentinel for project-level, non-file-scoped calls (see
+ * useComments / archive.ts / outbox-flush). `verifyTokenForProject` checks
+ * only the projectId claim, and the trash list is precisely the surface that
+ * can be non-empty while the project has NO live files left: deleting a
+ * project's only file is the shortest path to this screen, and keying the mint
+ * on `files[0]` would mint nothing in exactly that case.
+ *
+ * Returns `null` when no token could be minted (signed out, mid-session
+ * expiry), which the caller must treat as "leave the current list alone" —
+ * distinct from `[]`, which is a real empty trash and clears optimistic rows.
+ */
+export async function fetchDeletedFilesWithProjectToken(args: {
+  projectId: string
+  getTokenForFile: (fileId: string) => Promise<string | null>
+  fetchFiles: (projectId: string, token: string) => Promise<FileSummary[]>
+}): Promise<FileSummary[] | null> {
+  const { projectId, getTokenForFile, fetchFiles } = args
+  const token = await getTokenForFile(PROJECT_SENTINEL_FILE_ID)
+  if (!token) return null
+  return fetchFiles(projectId, token)
 }

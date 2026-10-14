@@ -20,6 +20,7 @@ import { handleEventsWriteRequest } from '../events/route'
 import { mintApiToken } from '../../../db/shared/api-credentials'
 import { ensureProjectLanes } from '../../../db/shared/lanes'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
+import { bumpRateLimit, userRateLimitIdentifier } from '../../../db/shared/rate-limit'
 import { makeTestToken } from './helpers/auth'
 import type { RawEvent } from '../events/types'
 
@@ -560,11 +561,8 @@ describe('changesets — GET/discard rate limiting', () => {
       { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hi' },
     ])
 
-    await tdb.pg.query(
-      `INSERT INTO auth_rate_limit_events (kind, identifier, success)
-       SELECT 'external_changeset_lifecycle', $1, 1 FROM generate_series(1, 300)`,
-      [`credential:${CRED_1}`],
-    )
+    // AQU-1843: the lifecycle budget belongs to the credential's OWNER now.
+    await bumpRateLimit(tdb.db, 'external_changeset_lifecycle', userRateLimitIdentifier(1), 300)
     const res = (await handleExternalChangesetsRequest(
       new Request(`https://w/api/v1/external/projects/${PROJECT}/changesets/${prep.changeset.id}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -582,11 +580,7 @@ describe('changesets — GET/discard rate limiting', () => {
       { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hi' },
     ])
 
-    await tdb.pg.query(
-      `INSERT INTO auth_rate_limit_events (kind, identifier, success)
-       SELECT 'external_changeset_lifecycle', $1, 1 FROM generate_series(1, 300)`,
-      [`credential:${CRED_1}`],
-    )
+    await bumpRateLimit(tdb.db, 'external_changeset_lifecycle', userRateLimitIdentifier(1), 300)
     const res = (await handleExternalChangesetsRequest(
       new Request(`https://w/api/v1/external/projects/${PROJECT}/changesets/${prep.changeset.id}/discard`, {
         method: 'POST',

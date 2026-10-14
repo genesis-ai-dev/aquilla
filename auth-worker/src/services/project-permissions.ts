@@ -221,11 +221,50 @@ async function resolveProjectRoleInternal(
   )
 }
 
+/**
+ * OPS-44: the project role this user would hold with NO platform-admin
+ * contribution — their genuine grant via override / group / org / creator, or
+ * null if they have none.
+ *
+ * Why this exists: resolveProjectRole gives a platform operator level 700 on
+ * every project, and 700 outranks any genuine grant below owner, so the
+ * resolved `source` reads "platform" even for an admin who is a real
+ * Maintainer of the project's own org. A gate that keyed on
+ * `source === "platform"` alone would therefore lock operators out of their
+ * OWN projects, not just out of other tenants'. Callers use this to tell the
+ * two apart: strip the admin power, keep the genuine role.
+ *
+ * Deliberately resolves through the per-table grant paths rather than
+ * {@link resolveWithGrantsMode}: this is a narrowing safety check, and under
+ * ACCESS_GRANTS_RESOLVER=shadow (the deployed setting) the per-table resolver
+ * is the authoritative one anyway. Memoised in its own slot so it cannot
+ * collide with the platform-inclusive answer for the same (project, user).
+ */
+export async function resolveGenuineProjectRole(
+  env: Env,
+  user: AuthUser,
+  projectId: string,
+): Promise<ResolvedRole | null> {
+  const project = await loadProjectRow(env, projectId)
+  if (!project) return null
+  if (project.archived_at) return null
+  return memoize(env.requestMemo, `role-genuine:${projectId}:${user.id}`, () =>
+    resolveGrantPaths(env, user, projectId, project, false),
+  )
+}
+
 async function resolveGrantPaths(
   env: Env,
   user: AuthUser,
   projectId: string,
   project: ProjectRow,
+  /**
+   * OPS-44: force the platform-admin contribution on or off instead of looking
+   * it up. `false` yields the role the user would hold if they were not a
+   * platform operator — the "genuine" role, used to strip cross-tenant admin
+   * power from an un-elevated session. Undefined keeps the normal lookup.
+   */
+  forcePlatformAdmin?: boolean,
 ): Promise<ResolvedRole | null> {
   // All four path queries run in parallel — they're independent reads.
   // Each path is wrapped so a single missing/pending-migration table
@@ -262,7 +301,7 @@ async function resolveGrantPaths(
       : Promise.resolve<PathResult<{ role_level: number }>>({ row: null, failed: false }),
   ])
   return roleFromGrantPaths(
-    await isPlatformAdminEmail(env, user.email),
+    forcePlatformAdmin ?? (await isPlatformAdminEmail(env, user.email)),
     user,
     project,
     { override, group, org },

@@ -1,4 +1,5 @@
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
+import { looksLikeUuid } from "@/lib/uuid"
 import { extractMentions, mentionDisplayText } from "./comment-helpers"
 
 /**
@@ -17,7 +18,11 @@ export interface MentionNotice {
   scopeKind: CommentRecord["scopeKind"]
   fileId: string | null
   cellId: string | null
-  /** Canonical verse or chapter address, when the cell has one. */
+  /**
+   * Canonical verse or chapter address, when the cell has one. Some
+   * importers store the cell's own id as its canonical ref; that is not an
+   * address and is dropped here, so the row falls back to the file name.
+   */
   cellRef: string | null
   /**
    * Plain cell text saved on the thread when it was opened. Used when the
@@ -39,6 +44,13 @@ export function cellTextSnippet(value: string | null | undefined): string | null
   if (!flat) return null
   if (flat.length <= CELL_TEXT_LENGTH) return flat
   return `${flat.slice(0, CELL_TEXT_LENGTH - 1)}…`
+}
+
+/** The address a person would say; an id stored in its place counts as none. */
+function humanCellRef(value: string | null | undefined): string | null {
+  const ref = value?.trim()
+  if (!ref || looksLikeUuid(ref)) return null
+  return ref
 }
 
 function cellTextOf(comment: CommentRecord, byId: ReadonlyMap<string, CommentRecord>): string | null {
@@ -92,7 +104,7 @@ export function mentionNoticesFor(
       scopeKind: comment.scopeKind,
       fileId: comment.fileId,
       cellId: comment.cellId,
-      cellRef: comment.cellRef?.trim() || null,
+      cellRef: humanCellRef(comment.cellRef),
       cellText: cellTextOf(comment, byId),
     })
   }

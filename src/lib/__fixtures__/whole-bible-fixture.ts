@@ -29,8 +29,13 @@ import type { CellRow } from "@/lib/sync/cells-read-types"
  * same order and codes as `src/lib/file-labeling/bible-book-names.ts`. Summing
  * to 1,189 matters: the navigation index builds one milestone per chapter, so
  * a fixture with the wrong chapter count exercises the wrong rollup width.
+ *
+ * Exported because the AQU-1868 "Big Bible" perf harness
+ * (`scripts/perf/lib/big-bible-plan.ts`) seeds the SERVER-side shape of the
+ * same canon — 66 files instead of one — and two copies of this table would
+ * drift into two different "whole Bibles".
  */
-const CHAPTERS_BY_BOOK: ReadonlyArray<readonly [code: string, chapters: number]> = [
+export const CHAPTERS_BY_BOOK: ReadonlyArray<readonly [code: string, chapters: number]> = [
   ["GEN", 50], ["EXO", 40], ["LEV", 27], ["NUM", 36], ["DEU", 34],
   ["JOS", 24], ["JDG", 21], ["RUT", 4],
   ["1SA", 31], ["2SA", 24], ["1KI", 22], ["2KI", 25],

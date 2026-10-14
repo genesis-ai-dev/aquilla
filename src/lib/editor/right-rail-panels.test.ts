@@ -9,25 +9,40 @@ import {
 const BASE: RightRailInputs = {
   inScriptureEditor: true,
   verseResourcesAvailable: true,
+  whosWhoAvailable: true,
   parallelBiblesOpen: false,
   verseResourcesOpen: false,
+  whosWhoOpen: false,
 }
 
-/** Every combination of the four booleans the rail decides from. */
+/** Every combination of the six booleans the rail decides from. */
 function allInputs(): RightRailInputs[] {
   const bools = [false, true]
   const out: RightRailInputs[] = []
   for (const inScriptureEditor of bools)
     for (const verseResourcesAvailable of bools)
-      for (const parallelBiblesOpen of bools)
-        for (const verseResourcesOpen of bools)
-          out.push({
-            inScriptureEditor,
-            verseResourcesAvailable,
-            parallelBiblesOpen,
-            verseResourcesOpen,
-          })
+      for (const whosWhoAvailable of bools)
+        for (const parallelBiblesOpen of bools)
+          for (const verseResourcesOpen of bools)
+            for (const whosWhoOpen of bools)
+              out.push({
+                inScriptureEditor,
+                verseResourcesAvailable,
+                whosWhoAvailable,
+                parallelBiblesOpen,
+                verseResourcesOpen,
+                whosWhoOpen,
+              })
   return out
+}
+
+const NOTHING = {
+  biblesPanel: false,
+  biblesEdge: false,
+  resourcesPanel: false,
+  resourcesEdge: false,
+  peoplePanel: false,
+  peopleEdge: false,
 }
 
 describe("computeRightRailSurfaces", () => {
@@ -39,6 +54,7 @@ describe("computeRightRailSurfaces", () => {
       const s = computeRightRailSurfaces(input)
       expect(s.biblesPanel && s.biblesEdge, `bibles: ${JSON.stringify(input)}`).toBe(false)
       expect(s.resourcesPanel && s.resourcesEdge, `resources: ${JSON.stringify(input)}`).toBe(false)
+      expect(s.peoplePanel && s.peopleEdge, `people: ${JSON.stringify(input)}`).toBe(false)
     }
   })
 
@@ -62,14 +78,18 @@ describe("computeRightRailSurfaces", () => {
     }
   })
 
+  // AQU-1689: the same reachability for Who's Who, whose "People" edge tab is
+  // the way back after the panel's X.
+  it("always offers exactly one Who's Who surface when the enrichment is on", () => {
+    for (const input of allInputs().filter((i) => i.inScriptureEditor && i.whosWhoAvailable)) {
+      const s = computeRightRailSurfaces(input)
+      expect(s.peoplePanel !== s.peopleEdge, JSON.stringify(input)).toBe(true)
+    }
+  })
+
   it("renders nothing outside the scripture editor", () => {
     for (const input of allInputs().filter((i) => !i.inScriptureEditor)) {
-      expect(computeRightRailSurfaces(input)).toEqual({
-        biblesPanel: false,
-        biblesEdge: false,
-        resourcesPanel: false,
-        resourcesEdge: false,
-      })
+      expect(computeRightRailSurfaces(input)).toEqual(NOTHING)
     }
   })
 
@@ -83,12 +103,23 @@ describe("computeRightRailSurfaces", () => {
     }
   })
 
-  it("shows both edge tabs when both panels are closed", () => {
+  // AQU-1689: Who's Who off (or Bible data off) means no panel and no tab.
+  it("renders neither Who's Who surface when the enrichment is off", () => {
+    for (const input of allInputs().filter((i) => !i.whosWhoAvailable)) {
+      const s = computeRightRailSurfaces(input)
+      expect(s.peoplePanel, JSON.stringify(input)).toBe(false)
+      expect(s.peopleEdge, JSON.stringify(input)).toBe(false)
+    }
+  })
+
+  it("shows every edge tab when every panel is closed", () => {
     expect(computeRightRailSurfaces(BASE)).toEqual({
       biblesPanel: false,
       biblesEdge: true,
       resourcesPanel: false,
       resourcesEdge: true,
+      peoplePanel: false,
+      peopleEdge: true,
     })
   })
 
@@ -102,6 +133,8 @@ describe("computeRightRailSurfaces", () => {
       biblesEdge: true,
       resourcesPanel: true,
       resourcesEdge: false,
+      peoplePanel: false,
+      peopleEdge: true,
     })
 
     const bothOpen = computeRightRailSurfaces({
@@ -114,10 +147,18 @@ describe("computeRightRailSurfaces", () => {
       biblesEdge: false,
       resourcesPanel: true,
       resourcesEdge: false,
+      peoplePanel: false,
+      peopleEdge: true,
     })
 
     // The X on Parallel Bibles flips only its own flag.
     expect(computeRightRailSurfaces({ ...BASE, verseResourcesOpen: true })).toEqual(helpsOpen)
+    // Opening Who's Who leaves the other two as they were.
+    expect(computeRightRailSurfaces({ ...BASE, verseResourcesOpen: true, whosWhoOpen: true })).toEqual({
+      ...helpsOpen,
+      peoplePanel: true,
+      peopleEdge: false,
+    })
   })
 })
 
@@ -125,18 +166,24 @@ describe("hasRightRailPanel / hasRightRailEdge", () => {
   it("agree with the surfaces they summarize", () => {
     for (const input of allInputs()) {
       const s = computeRightRailSurfaces(input)
-      expect(hasRightRailPanel(s)).toBe(s.biblesPanel || s.resourcesPanel)
-      expect(hasRightRailEdge(s)).toBe(s.biblesEdge || s.resourcesEdge)
+      expect(hasRightRailPanel(s)).toBe(s.biblesPanel || s.resourcesPanel || s.peoplePanel)
+      expect(hasRightRailEdge(s)).toBe(s.biblesEdge || s.resourcesEdge || s.peopleEdge)
     }
   })
 
-  it("reports no edge tabs once both panels are open", () => {
+  it("reports no edge tabs once every panel is open", () => {
     const s = computeRightRailSurfaces({
       ...BASE,
       parallelBiblesOpen: true,
       verseResourcesOpen: true,
+      whosWhoOpen: true,
     })
     expect(hasRightRailEdge(s)).toBe(false)
+    expect(hasRightRailPanel(s)).toBe(true)
+  })
+
+  it("still has a panel to render when only Who's Who is open", () => {
+    const s = computeRightRailSurfaces({ ...BASE, whosWhoOpen: true })
     expect(hasRightRailPanel(s)).toBe(true)
   })
 })

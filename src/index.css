@@ -439,6 +439,93 @@ textarea,
   display: inline;
 }
 
+/* AQU-1689: Who's Who mention words in a Greek or Hebrew source. At rest a
+   dotted underline, so a mention can be found without hovering. Lit (its
+   participant is hovered or focused anywhere in view): the term marker's 12%
+   wash plus a solid underline. "Always" mode keeps every mention washed in
+   its participant's thread color. The underline style changes too, so the
+   state never rests on color alone. */
+.mention-mark {
+  --mention-color: var(--primary);
+  margin-inline: -0.08em;
+  padding-inline: 0.08em;
+  border-radius: 0.22em;
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in oklch, var(--mention-color) 55%, transparent);
+  text-underline-offset: 3px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.mention-mark[data-mention-tinted="true"],
+.mention-mark[data-mention-lit="true"] {
+  background-image: linear-gradient(
+    100deg,
+    transparent 0%,
+    color-mix(in oklch, var(--mention-color) 12%, transparent) 8%,
+    color-mix(in oklch, var(--mention-color) 12%, transparent) 92%,
+    transparent 100%
+  );
+}
+.mention-mark[data-mention-lit="true"] {
+  text-decoration-style: solid;
+  text-decoration-thickness: 2px;
+  text-decoration-color: var(--mention-color);
+}
+.mention-mark[data-thread-slot="1"] { --mention-color: var(--color-sky-600, oklch(0.588 0.158 241.966)); }
+.mention-mark[data-thread-slot="2"] { --mention-color: var(--color-rose-600, oklch(0.586 0.253 17.585)); }
+.mention-mark[data-thread-slot="3"] { --mention-color: var(--color-emerald-600, oklch(0.596 0.145 163.225)); }
+.mention-mark[data-thread-slot="4"] { --mention-color: var(--color-amber-600, oklch(0.666 0.179 58.318)); }
+.mention-mark[data-thread-slot="5"] { --mention-color: var(--color-violet-600, oklch(0.541 0.281 293.009)); }
+.mention-mark[data-thread-slot="6"] { --mention-color: var(--color-teal-600, oklch(0.6 0.118 184.704)); }
+
+/* AQU-1694: a mention placed by word alignment with low confidence is
+   "approximate". Lit or tinted, it keeps a dotted underline and a fainter
+   wash, so it never looks as sure as the rest. */
+.mention-mark[data-mention-approximate="true"][data-mention-tinted="true"],
+.mention-mark[data-mention-approximate="true"][data-mention-lit="true"] {
+  background-image: linear-gradient(
+    100deg,
+    transparent 0%,
+    color-mix(in oklch, var(--mention-color) 6%, transparent) 8%,
+    color-mix(in oklch, var(--mention-color) 6%, transparent) 92%,
+    transparent 100%
+  );
+}
+.mention-mark[data-mention-approximate="true"][data-mention-lit="true"] {
+  text-decoration-style: dotted;
+}
+
+/* AQU-1694: Who's Who tints on the target column, painted with the CSS
+   Custom Highlight API (src/components/bible-data/target-tint-layer.ts), so
+   the editor's rendering is untouched. Same language as the source: a wash
+   and a solid underline when lit, dotted when approximate. */
+::highlight(aq-mention-lit) {
+  background-color: color-mix(in oklch, var(--primary) 12%, transparent);
+  text-decoration: underline solid 2px var(--primary);
+}
+::highlight(aq-mention-lit-approx) {
+  background-color: color-mix(in oklch, var(--primary) 6%, transparent);
+  text-decoration: underline dotted 2px var(--primary);
+}
+::highlight(aq-mention-slot-0) { background-color: color-mix(in oklch, var(--primary) 12%, transparent); }
+::highlight(aq-mention-slot-1) { background-color: color-mix(in oklch, var(--color-sky-600, oklch(0.588 0.158 241.966)) 12%, transparent); }
+::highlight(aq-mention-slot-2) { background-color: color-mix(in oklch, var(--color-rose-600, oklch(0.586 0.253 17.585)) 12%, transparent); }
+::highlight(aq-mention-slot-3) { background-color: color-mix(in oklch, var(--color-emerald-600, oklch(0.596 0.145 163.225)) 12%, transparent); }
+::highlight(aq-mention-slot-4) { background-color: color-mix(in oklch, var(--color-amber-600, oklch(0.666 0.179 58.318)) 12%, transparent); }
+::highlight(aq-mention-slot-5) { background-color: color-mix(in oklch, var(--color-violet-600, oklch(0.541 0.281 293.009)) 12%, transparent); }
+::highlight(aq-mention-slot-6) { background-color: color-mix(in oklch, var(--color-teal-600, oklch(0.6 0.118 184.704)) 12%, transparent); }
+::highlight(aq-mention-slot-0-approx),
+::highlight(aq-mention-slot-1-approx),
+::highlight(aq-mention-slot-2-approx),
+::highlight(aq-mention-slot-3-approx),
+::highlight(aq-mention-slot-4-approx),
+::highlight(aq-mention-slot-5-approx),
+::highlight(aq-mention-slot-6-approx) {
+  text-decoration: underline dotted 1px currentColor;
+}
+
 .usfm-footnote-marker {
   position: relative;
   display: inline-flex;
@@ -581,6 +668,68 @@ textarea,
    — never persisted, never editable. Bold and italic only. */
 .idml-style-bold { font-weight: 700; }
 .idml-style-italic { font-style: italic; }
+
+/* Visible style segments: only bold and italic runs are blocks. Consecutive
+   plain runs are one typing space. An empty plain run shows a single faint
+   "Regular" on its first slot, with no box; the plain slots after it add
+   neither another word nor a gap. An empty bold or italic run shows its own
+   faint label until the translator types. Labels are not document text. */
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold,
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic {
+  border-radius: 0.2em;
+  padding-inline: 0.18em;
+  margin-inline: 1px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  background-color: color-mix(in oklch, var(--color-foreground) 7%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-foreground) 16%, transparent);
+}
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold {
+  background-color: color-mix(in oklch, var(--color-foreground) 14%, transparent);
+}
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold[data-style-segment-empty],
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic[data-style-segment-empty] {
+  display: inline-block;
+  min-height: 1.15em;
+  vertical-align: baseline;
+}
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic:not(.idml-style-bold)[data-style-segment-empty]::before,
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold:not(.idml-style-italic)[data-style-segment-empty]::before,
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold.idml-style-italic[data-style-segment-empty]::before {
+  color: color-mix(in oklch, var(--color-foreground) 40%, transparent);
+  pointer-events: none;
+  user-select: none;
+}
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic:not(.idml-style-bold)[data-style-segment-empty]::before {
+  content: var(--aq-style-label-italic, "Italic");
+}
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold:not(.idml-style-italic)[data-style-segment-empty]::before {
+  content: var(--aq-style-label-bold, "Bold");
+}
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold.idml-style-italic[data-style-segment-empty]::before {
+  content: var(--aq-style-label-bold-italic, "Bold italic");
+}
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold.idml-segment-caret,
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic.idml-segment-caret {
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-foreground) 48%, transparent);
+}
+[data-visible-style-segments] [data-idml-protected="slot"][data-style-plain-group="label"] {
+  display: inline-block;
+  min-height: 1.15em;
+  vertical-align: baseline;
+}
+[data-visible-style-segments] [data-idml-protected="slot"][data-style-plain-group="label"]::before {
+  content: var(--aq-style-label-regular, "Regular");
+  color: color-mix(in oklch, var(--color-foreground) 32%, transparent);
+  pointer-events: none;
+  user-select: none;
+}
+[data-visible-style-segments] [data-idml-protected="slot"][data-style-plain-group="join"] {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  min-height: 0;
+}
 
 /* Audio view (Sam, 2026-09-28): a line's waveform and its audio check point at
    each other, since a validated line shows the same green check for text and

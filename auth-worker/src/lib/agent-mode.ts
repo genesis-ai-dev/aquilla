@@ -1,10 +1,14 @@
 /**
- * agent-mode.ts — the per-project autonomy dial and the react watcher's
- * bookmark, both read out of the project-settings JSON blob.
+ * agent-mode.ts — the per-project autonomy dial, read out of the
+ * project-settings JSON blob.
  * (docs/superpowers/specs/2026-08-28-agent-social-workspace-design.md §v3.)
  *
  *   agentMode: { initiative, react, scope }
- *   agentReactState: { cursor, lastReactionAt }
+ *
+ * The react watcher's bookmark used to live under `agentReactState` in the
+ * same blob; AQU-1846 moved it to its own table
+ * (db/shared/agent-react-state.ts) so the five-minute cron stops
+ * read-modify-writing a multi-MB column to advance a cursor.
  *
  * Settings are an unvalidated `Record<string, unknown>` — the PATCH/PUT route
  * takes `z.record(z.string(), z.unknown())` and passes unknown keys straight
@@ -45,7 +49,6 @@ export const AGENT_MODE_DEFAULT: AgentMode = {
 const AGENT_SCOPES: readonly AgentScope[] = ["full", "qa", "draft"]
 
 export const AGENT_MODE_KEY = "agentMode"
-export const AGENT_REACT_STATE_KEY = "agentReactState"
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value != null && typeof value === "object" && !Array.isArray(value)
@@ -77,51 +80,5 @@ export function readAgentMode(settings: Record<string, unknown> | null | undefin
     initiative: asBool(raw.initiative),
     react: asBool(raw.react),
     scope: asScope(raw.scope),
-  }
-}
-
-/**
- * The react watcher's durable bookmark, kept in the same settings blob.
- *
- *   cursor         — epoch millis. Every `events.server_ts <= cursor` has been
- *                    CONSIDERED (acted on, or deliberately skipped). Absent
- *                    means "never swept"; the watcher seeds it from a bounded
- *                    lookback rather than the beginning of the project.
- *   lastReactionAt — fileId → ISO timestamp of the last reaction started on
- *                    that file, the input to the per-file cooldown.
- */
-export interface AgentReactState {
-  cursor: number | null
-  lastReactionAt: Record<string, string>
-}
-
-export const AGENT_REACT_STATE_EMPTY: AgentReactState = {
-  cursor: null,
-  lastReactionAt: {},
-}
-
-export function readAgentReactState(
-  settings: Record<string, unknown> | null | undefined,
-): AgentReactState {
-  const raw = asRecord(settings?.[AGENT_REACT_STATE_KEY])
-  if (!raw) return { cursor: null, lastReactionAt: {} }
-  const cursorValue = Number(raw.cursor)
-  const cursor = Number.isFinite(cursorValue) && cursorValue > 0 ? Math.floor(cursorValue) : null
-  const reactions = asRecord(raw.lastReactionAt)
-  const lastReactionAt: Record<string, string> = {}
-  if (reactions) {
-    for (const [fileId, at] of Object.entries(reactions)) {
-      if (typeof at === "string" && at.length > 0) lastReactionAt[fileId] = at
-    }
-  }
-  return { cursor, lastReactionAt }
-}
-
-/** Serialize back into the settings blob's shape. Kept next to the reader so
- *  the two cannot drift. */
-export function agentReactStateValue(state: AgentReactState): Record<string, unknown> {
-  return {
-    cursor: state.cursor,
-    lastReactionAt: state.lastReactionAt,
   }
 }

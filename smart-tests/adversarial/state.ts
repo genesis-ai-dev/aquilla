@@ -8,6 +8,7 @@ import {
   mintSyncToken, readCellHistory, readProjectedCells, seedProjectWithFile, type SeededProject,
 } from "../../e2e/helpers/seed-project"
 import { OUTBOX_SCHEMA_VERSION } from "../../src/lib/sync/outbox-types"
+import { readTargetLane } from "../target-lane"
 import type { AdversarialUser, TargetKind } from "./target"
 import type { Snapshot } from "./invariants"
 
@@ -67,6 +68,8 @@ export async function seedFixture(
   for (const member of opts.members) await addProjectMember(owner.jwt, seeded.projectId, member.username, member.role)
   const sources = await readProjectedCells(owner.jwt, seeded, "source")
   const token = await mintSyncToken(owner.jwt, seeded.projectId, seeded.fileId)
+  // Name the target lane: a lane-less target write is refused (AQU-1899).
+  const lane = await readTargetLane(owner.jwt, seeded.projectId)
   const events = seeded.cellIds.map((cellId, index) => ({
     id: uuidv7(),
     schemaVersion: OUTBOX_SCHEMA_VERSION,
@@ -76,7 +79,7 @@ export async function seedFixture(
     cellId,
     parentId: sources.find((row) => row.cellId === cellId)?.eventId ?? null,
     author: owner.username,
-    payload: { value: `Tafsiri ya mstari wa ${index + 1}.` },
+    payload: { value: `Tafsiri ya mstari wa ${index + 1}.`, ...lane },
     clientTs: Date.now(),
   }))
   const result = await json<{ rejected: unknown[] }>(await fetch(`${sync()}/events`, {
@@ -84,7 +87,14 @@ export async function seedFixture(
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify({ events }),
   }), "seed translations")
-  if (result.rejected.length > 0) throw new Error("Seeded translations were rejected")
+  if (result.rejected.length > 0) {
+    throw new Error(`Seeded translations were rejected: ${JSON.stringify(result.rejected)}`)
+  }
+  // An accepted commit can still be logged as a stale sibling and never project.
+  const targets = (await readProjectedCells(owner.jwt, seeded, "target")).filter((row) => row.value)
+  if (targets.length !== seeded.cellIds.length) {
+    throw new Error(`Seeded translations did not project: ${targets.length} of ${seeded.cellIds.length} target rows`)
+  }
   const rows = seeded.cellIds.map((cellId) => sources.find((row) => row.cellId === cellId)?.value ?? "")
   return { seeded, rows }
 }

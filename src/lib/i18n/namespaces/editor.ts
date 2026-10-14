@@ -439,8 +439,13 @@ export const editor = defineNamespace({
     "editor.view.showTranslationNotes": "Show translation notes",
     "editor.view.showHealthIndicators": "Show health indicators",
     "editor.view.highlightUnresolvedComments": "Highlight open comments",
+    "editor.view.ghostText": "Suggest next words",
+    "editor.wordsThatFit.button": "Words that fit here",
+    "editor.wordsThatFit.empty": "No suggestions yet",
+    "editor.wordsThatFit.replace": "Replace with {word}",
     "editor.view.healthScoreColorCoding": "Health Score Color Coding",
     "editor.health.citedExample": "{source} → {target}",
+    "editor.view.visibleStyleSegments": "Visible style segments",
     "editor.view.lowMemory": "Low-memory mode",
     "editor.view.lowMemoryAuto": "Auto",
     "editor.view.lowMemoryOn": "On",
@@ -1594,6 +1599,8 @@ export const editor = defineNamespace({
       "Align styles could not place this cell. Nothing was saved.",
     "editor.idml.alignStylesUnavailable":
       "This cell has no style runs to align.",
+    "editor.idml.segmentRegular": "Regular",
+    "editor.idml.segmentBoldItalic": "Bold italic",
 
     // — Text-to-speech status badge on a row ————————————————————————
     "editor.tts.translatingBeforeVoicing": "Translating before voicing",
@@ -1625,6 +1632,14 @@ export const editor = defineNamespace({
     "editor.validation.validatedBy": "Text validated by",
     "editor.readOnly.reviewerNoTextValidation":
       "Viewing as reviewer. You can comment, but this project does not let you validate text.",
+
+    // — Archived lane (AQU-1463): the lane you are in has been frozen ———————
+    "editor.laneArchived.title": "{lane} has been archived",
+    "editor.laneArchived.body":
+      "A project manager archived {lane}, so it is now read-only. You can still " +
+      "read, search, export and comment on it, and your other languages are " +
+      "unaffected.",
+    "editor.laneArchived.acknowledge": "Got it",
     "editor.validation.noActiveValidators": "No active validators",
     "editor.validation.removeYours": "Remove your validation",
     "editor.validation.history": "History",
@@ -1793,8 +1808,10 @@ export const editor = defineNamespace({
     "editor.ai.draftParagraph": "Draft paragraph ({count} cells)",
     "editor.ai.regenerate": "Regenerate — another AI variation",
     "editor.ai.alignStyles": "Align styles",
+    "editor.ai.passToStyleSegments": "Pass to Style Segments",
     "editor.ai.aligningStyles": "Aligning styles…",
     "editor.ai.alignStylesNeedsText": "Translate this cell before aligning styles",
+    "editor.ai.alignStylesNeeded": "This cell needs Align styles",
 
     // — Remaining action-rail tooltips ————————————————————————————
     "editor.audio.play": "Play audio",
@@ -3837,6 +3854,37 @@ export const editor = defineNamespace({
           "this browser only.",
         maxLength: 32,
       },
+      "editor.view.ghostText": {
+        description:
+          "Label of the switch that shows a faint suggested next word (learned " +
+          "from this project's own translated lines) after the caret while " +
+          "typing a translation. Tab accepts it; Esc hides it. Applies to this " +
+          "browser only.",
+        maxLength: 32,
+      },
+      "editor.wordsThatFit.button": {
+        description:
+          "Tooltip and screen-reader name of the toolbar button, shown above a " +
+          "selected word in the translation, that lists other words this " +
+          "project's translation uses in the same kinds of places (a project " +
+          "thesaurus), so the translator can swap the selected word.",
+        maxLength: 40,
+      },
+      "editor.wordsThatFit.empty": {
+        description:
+          "Shown in the alternative-words list when the project has not " +
+          "translated enough text yet to suggest any.",
+        maxLength: 40,
+      },
+      "editor.wordsThatFit.replace": {
+        description:
+          "Screen-reader name of one alternative-word button. {word} is the " +
+          "alternative that will replace the selected word in the translation.",
+        placeholders: {
+          word: "The alternative word, in the translation's own language and script.",
+        },
+        maxLength: 60,
+      },
       "editor.view.healthScoreColorCoding": {
         description:
           "Label of the switch that colours words in an AI draft: green when the " +
@@ -3853,6 +3901,19 @@ export const editor = defineNamespace({
           source: "The example's source-language text, already truncated.",
           target: "The example's target-language text, already truncated.",
         },
+      },
+      "editor.view.visibleStyleSegments": {
+        description:
+          "Label of the switch that draws bold and italic runs as small inline " +
+          "blocks inside the cell, once a translation has been placed into those " +
+          "runs. An empty untranslated cell stays blank. Regular text stays " +
+          "ordinary, so the translator types around those blocks and can click or " +
+          "arrow into one to type that phrase in bold or italic. An empty block " +
+          "in a placed translation shows a faint name until they type. Consecutive " +
+          "regular runs are one typing space: an empty one shows a single faint " +
+          "Regular, with no box and no gap between the runs. Applies to this " +
+          "browser only.",
+        maxLength: 32,
       },
       "editor.view.lowMemory": {
         description:
@@ -5185,7 +5246,11 @@ export const editor = defineNamespace({
         description: "Shown when the current ticks would draft nothing.",
       },
       "editor.batchFile.confirmDraft": {
-        description: "Confirm button of the draft modal. Imperative.",
+        description:
+          "Confirm button of the batch draft modal: the imperative command that "
+          + "starts drafting the chosen cells, in the slot where validate mode shows "
+          + "'Validate'. A verb, not the autopilot pipeline's 'Draft' stage caption "
+          + "(autopilot.graph.node.draft), which is a noun.",
         maxLength: 16,
       },
       "editor.batchValidate.skip.alreadyMine": {
@@ -6076,6 +6141,32 @@ export const editor = defineNamespace({
           "leaves them out, so they cannot validate text here either. Replaces " +
           "the usual 'Viewing as reviewer, you can validate and comment' banner.",
       },
+      "editor.laneArchived.title": {
+        description:
+          "Title of the modal that interrupts a member the moment the language " +
+          "they are translating in is archived by a project manager. Names the " +
+          "language, because the member may have several open in other tabs.",
+        placeholders: {
+          lane: "The archived language's own label, e.g. 'Spanish'. Content — do not translate.",
+        },
+      },
+      "editor.laneArchived.body": {
+        description:
+          "Body of that same modal. It has to carry three facts: a person did " +
+          "this deliberately, the language is now read-only rather than gone, " +
+          "and the member's other languages still work. Keep all three — the " +
+          "member's first fear is that they have lost their work.",
+        placeholders: {
+          lane: "The archived language's own label, e.g. 'Spanish'. Content — do not translate.",
+        },
+      },
+      "editor.laneArchived.acknowledge": {
+        description:
+          "The only button on that modal, and the only way to close it: Esc and " +
+          "a click outside deliberately do nothing. An acknowledgement, not an " +
+          "action — nothing is undone or confirmed by pressing it.",
+        maxLength: 20,
+      },
       "editor.validation.ariaValidatedByOthers": {
         description:
           "Screen-reader name when other reviewers have signed off but this user " +
@@ -6893,6 +6984,14 @@ export const editor = defineNamespace({
           "Imperative, two words.",
         maxLength: 16,
       },
+      "editor.ai.passToStyleSegments": {
+        description:
+          "Hover tooltip and accessible name of the arrow button in the bottom " +
+          "corner of an InDesign cell. Shown while the translation is still one " +
+          "unstyled preview sentence. Clicking it places that sentence into the " +
+          "source's bold, italic, and plain runs. Imperative.",
+        maxLength: 28,
+      },
       "editor.ai.aligningStyles": {
         description:
           "Tooltip and status while Align styles is in flight. Present participle, " +
@@ -6903,6 +7002,14 @@ export const editor = defineNamespace({
         description:
           "Tooltip on Align styles when the cell has no translation yet, so there " +
           "are no words to move into style runs. Imperative — translate first.",
+      },
+      "editor.ai.alignStylesNeeded": {
+        description:
+          "Hover tooltip and accessible name of the yellow warning in the " +
+          "bottom corner of a cell. Shown after the translator typed into plain " +
+          "style runs that the editor draws as one piece of text, when those " +
+          "words are not yet sitting in each of the source's runs. Clicking it " +
+          "runs Align styles. Keep 'Align styles' identical to editor.ai.alignStyles.",
       },
       "editor.audio.play": {
         description:

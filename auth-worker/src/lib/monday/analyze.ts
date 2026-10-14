@@ -18,6 +18,11 @@ import {
 } from "./types"
 import type { MondayItemSample, MondayBoardSummary } from "./client"
 import type { ProjectMetricsSummary } from "./metrics"
+import {
+  isAbortTimeout,
+  logVendorTimeout,
+  VENDOR_TIMEOUT_MS,
+} from "../../../../shared/vendor-timeouts"
 
 export interface AnalyzeArgs {
   structure: { columns: MondayBoardColumn[]; groups: MondayBoardGroup[] }
@@ -142,21 +147,35 @@ async function callLlm(env: Env, model: string, prompt: string): Promise<string>
   const base = env.OPENROUTER_BASE_URL
     ? env.OPENROUTER_BASE_URL.replace(/\/$/, "")
     : "https://openrouter.ai/api/v1"
-  const upstream = await fetch(`${base}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.2,
-      stream: false,
-      response_format: { type: "json_object" },
-      ...openRouterUsage(env.OPENROUTER_BASE_URL),
-    }),
-  })
+  let upstream: Response
+  try {
+    upstream = await fetch(`${base}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.2,
+        stream: false,
+        response_format: { type: "json_object" },
+        ...openRouterUsage(env.OPENROUTER_BASE_URL),
+      }),
+      // AQU-1849: `stream: false`, so nothing arrives until the completion is
+      // whole — this one deadline therefore bounds the entire answer. A blown
+      // one becomes the same AnalyzeUpstreamError the wizard already renders,
+      // carrying a 504 status.
+      signal: AbortSignal.timeout(VENDOR_TIMEOUT_MS.openRouterNonStreaming),
+    })
+  } catch (err) {
+    if (isAbortTimeout(err)) {
+      logVendorTimeout("openRouterNonStreaming", err)
+      throw new AnalyzeUpstreamError(504)
+    }
+    throw err
+  }
   if (!upstream.ok) {
     // Log the body snippet server-side only — never surfaced to the client.
     const text = await upstream.text().catch(() => "")

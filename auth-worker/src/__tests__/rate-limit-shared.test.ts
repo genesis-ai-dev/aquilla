@@ -123,7 +123,7 @@ describe("enforceRateLimit", () => {
   })
 
   // AQU-1843 follow-up (found by the PR bot walk on a preview where migration
-  // 0158 was unapplied): with the table absent, EVERY fail-closed route refused
+  // 0169 was unapplied): with the table absent, EVERY fail-closed route refused
   // its first call — chat, agent runs, transcription and TTS all down for
   // everyone until a person ran the migration. Before this module was rewritten
   // the same condition was harmless, because the old limiter always failed open.

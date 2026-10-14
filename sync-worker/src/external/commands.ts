@@ -15,7 +15,8 @@ import {
   RETIRED_LANE_SETTINGS_KEYS,
   RETIRED_LANE_SETTINGS_MESSAGE,
 } from './external-lane'
-import type { AiDraftProvenance } from '../events/types'
+import type { AiDraftProvenance, ImportedOriginProvenance } from '../events/types'
+import { IMPORTED_ORIGIN_FILENAME_MAX } from '../events/types'
 import { normalizeTextDirection, type TextDirection } from '../../../db/shared/text-direction'
 import {
   validatePlanImportManifest,
@@ -24,7 +25,6 @@ import {
   type PlanImportVariant,
 } from './import-manifest'
 import {
-  staticPatchSettingsFloor,
   validatePatchSettingsCommand,
   type PatchSettingsCommand,
 } from './commands-patch-settings'
@@ -184,6 +184,14 @@ export interface SetTranslationCommand {
    *  rebuilds every command from known keys only, so a caller CANNOT set this
    *  on a hand-written SetTranslation — provenance is never self-asserted. */
   aiDraft?: AiDraftProvenance
+  /** AQU-1673: CALLER-SUPPLIED import provenance — the name of the file this
+   *  value was read out of, stamped onto the compiled commit as
+   *  `imported_origin`. Unlike `aiDraft` this is accepted from the caller,
+   *  because it asserts no authorship and gates nothing: it is a descriptive
+   *  label that lets a reviewer tell imported text from AI-drafted text. It
+   *  never sets `ai_suggestion`, so an imported cell does not read back as an
+   *  AI draft. */
+  importOrigin?: ImportedOriginProvenance
 }
 
 /** Create a file and its source cells via the changeset pipeline (AQU-533 §5).
@@ -316,6 +324,15 @@ export type Command =
  *  imports is a Wave-3 TRACE (see docs/swarm/AGENT-API-TRACES.md). */
 export const PLAN_IMPORT_MAX_CELLS = 5000
 
+/** Hard cap on SetTranslation commands per changeset (AQU-1852). Above this the
+ *  plan is rejected at PREPARE with validation_failed naming the cap, rather
+ *  than staged and then failing at apply — an approver must never be shown a
+ *  plan the engine cannot land. Matched to PLAN_IMPORT_MAX_CELLS: a whole book
+ *  of target commits is the largest batch the apply path pages through, and the
+ *  prepare-time precondition lookup is paged to match
+ *  (PRECONDITION_LOOKUP_CHUNK). Larger batches split into several changesets. */
+export const SET_TRANSLATION_MAX_COMMANDS = 5000
+
 /** Longest org name CreateOrg will stage (AQU-1221). The column is TEXT; this
  *  is a sanity bound so an agent cannot park a document in the org switcher. */
 export const CREATE_ORG_MAX_NAME_LENGTH = 120
@@ -352,6 +369,19 @@ export interface CommandValidationIssue {
 export type ValidateCommandsResult =
   | { ok: true; commands: Command[] }
   | { ok: false; issues: CommandValidationIssue[] }
+
+/** AQU-1673: validate caller-supplied import provenance and rebuild it from
+ *  known keys only. Returns null when the shape is wrong so the caller can
+ *  report a named validation issue rather than stage unlabelled proposals. */
+export function parseImportOrigin(raw: unknown): ImportedOriginProvenance | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const o = raw as Record<string, unknown>
+  if (typeof o.fileName !== 'string') return null
+  const fileName = o.fileName.trim()
+  if (fileName.length === 0 || fileName.length > IMPORTED_ORIGIN_FILENAME_MAX) return null
+  if (typeof o.importedAt !== 'number' || !Number.isFinite(o.importedAt)) return null
+  return { fileName, importedAt: o.importedAt }
+}
 
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.length > 0
@@ -446,6 +476,24 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
         issues.push({ index, message: 'SetTranslation.laneId lane does not exist' })
         return
       }
+      // AQU-1673: parsed, never passed through. A caller may label a value as
+      // imported, but only in this exact shape — the rebuilt command carries
+      // the two known keys and nothing else, so provenance cannot smuggle
+      // extra fields into the compiled event payload.
+      let importOrigin: ImportedOriginProvenance | undefined
+      if (c.importOrigin !== undefined) {
+        const parsed = parseImportOrigin(c.importOrigin)
+        if (!parsed) {
+          issues.push({
+            index,
+            message:
+              'SetTranslation.importOrigin must be { fileName: non-empty string (max ' +
+              `${IMPORTED_ORIGIN_FILENAME_MAX} chars), importedAt: finite epoch-ms number } when present`,
+          })
+          return
+        }
+        importOrigin = parsed
+      }
       commands.push({
         kind: 'SetTranslation',
         fileId: c.fileId,
@@ -453,6 +501,7 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
         value: c.value,
         ...(c.valueHtml !== undefined ? { valueHtml: c.valueHtml } : {}),
         laneId: c.laneId,
+        ...(importOrigin ? { importOrigin } : {}),
       })
       return
     }
@@ -948,11 +997,12 @@ export function requiredRoleForCommand(
   ) {
     return ROLE.MAINTAINER
   }
-  // PatchSettings also takes its own path (dynamic per-key floors, incl. the
-  // org termbase floor for `terminology`); this static value is the honest
-  // index-filtering floor per the command catalog.
+  // PatchSettings also takes its own path (dynamic per-key floors). Every key's
+  // DEFAULT floor is MAINTAINER now that `terminology` is retired (AQU-1724):
+  // an org that lowers `languageEditMinRole` admits its leads at prepare and
+  // commit, and this static value stays the conservative default.
   if (c.kind === 'PatchSettings') {
-    return staticPatchSettingsFloor(c)
+    return ROLE.MAINTAINER
   }
   // SetBrief also takes its own receipt-only path; MAINTAINER is the honest
   // floor (the same one PatchSettings applies to the translationBrief key).

@@ -32,6 +32,18 @@ export const MAX_BUFFERED_SOURCE_ARTIFACT_BYTES = 50 * 1024 * 1024
  */
 export const MAX_CELL_TEXT_BYTES = 256 * 1024
 
+/**
+ * Largest request body the bulk `/import` route will read (AQU-1858).
+ *
+ * It has to clear a legacy inline `rawSource` at
+ * `MAX_BUFFERED_SOURCE_ARTIFACT_BYTES`, the JSON escaping of those bytes, and
+ * the cells travelling beside them — while staying far enough under a Worker
+ * isolate's ~128 MB that one request cannot evict the others sharing it. A
+ * body declaring more than this is refused from `Content-Length` alone,
+ * before the route reads a byte of it.
+ */
+export const MAX_IMPORT_REQUEST_BODY_BYTES = 64 * 1024 * 1024
+
 /** UTF-8 byte length — the unit both import size ceilings are measured in. */
 export function utf8ByteLength(text: string): number {
   return new TextEncoder().encode(text).length

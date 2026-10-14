@@ -73,8 +73,13 @@ describe("OverrideStatus project list (AQU-1938)", () => {
   it("keeps the Reset link beside the count, and it still only opens the confirmation", async () => {
     const onReset = vi.fn()
     renderStatus({ projects: list(2, ["Genesis", "Exodus"]), onReset })
-    const line = screen.getByTestId("override-status")
-    expect(line.textContent).toBe("2 projects set their own number · Reset to default")
+    // Sam (2026-10-14): spaced apart on one line, no dot between them.
+    const line = screen.getByTestId("override-status-line")
+    expect(line.textContent).toBe("2 projects set their own numberReset to default")
+    expect(within(line).getAllByRole("button").map((b) => b.textContent)).toEqual([
+      "2 projects set their own number",
+      "Reset to default",
+    ])
     await userEvent.click(screen.getByRole("button", { name: "2 projects set their own number" }))
     expect(onReset).not.toHaveBeenCalled()
     await userEvent.click(screen.getByRole("button", { name: "Reset to default" }))

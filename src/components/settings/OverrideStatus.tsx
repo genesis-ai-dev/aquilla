@@ -21,7 +21,7 @@
 
 import { useId, useState } from "react"
 import { Link } from "react-router-dom"
-import { ChevronDown } from "lucide-react"
+import { ChevronDown, ChevronRight } from "lucide-react"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import type { OverrideProjectList } from "@/lib/sync/override-projects"
 import { cn } from "@/lib/utils"
@@ -84,23 +84,34 @@ export function OverrideStatus({
   // The count is the headline the person reads, so "and N more" is measured
   // against it: every project it covers is either named or in that number.
   const more = Math.max(0, count - named.length)
+  const listed = named.length > 0 && projectHref != null
   return (
     <span className="mt-1 block" data-testid="override-status">
-      {named.length > 0 ? (
-        <button
-          type="button"
-          className={cn("inline-flex items-center gap-0.5", LINK_CLASS)}
-          aria-expanded={open}
-          aria-controls={open ? listId : undefined}
-          onClick={() => setOpen((was) => !was)}
-        >
-          {summary}
-          <ChevronDown className={cn("size-3 transition-transform", open && "rotate-180")} aria-hidden />
-        </button>
-      ) : summary}
-      {onReset ? (
-        <>
-          {" · "}
+      {/* Sam (2026-10-14): a stack of underlined names under an underlined
+          count, a lone chevron and a dotted-on Reset "looked funny". The count
+          is now a plain disclosure, Reset sits apart as the one link, and the
+          projects open in a small bordered list, a row each, the way the org's
+          Monday project rows read. */}
+      <span className="flex flex-wrap items-center gap-x-3 gap-y-1" data-testid="override-status-line">
+        {listed ? (
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 font-medium text-foreground hover:text-primary"
+            aria-expanded={open}
+            aria-controls={listId}
+            onClick={() => setOpen((was) => !was)}
+          >
+            {summary}
+            <ChevronDown
+              className={cn(
+                "size-3.5 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none",
+                open && "rotate-180",
+              )}
+              aria-hidden
+            />
+          </button>
+        ) : <span>{summary}</span>}
+        {onReset ? (
           <button
             type="button"
             className={cn(LINK_CLASS, "disabled:no-underline disabled:opacity-60")}
@@ -109,22 +120,45 @@ export function OverrideStatus({
           >
             {t("settings.overrideStatus.reset")}
           </button>
-        </>
-      ) : null}
-      {open && named.length > 0 && projectHref ? (
-        <span id={listId} role="list" className="mt-1 block space-y-0.5 pl-3" data-testid="override-status-projects">
-          {named.map((project) => (
-            <span key={project.id} role="listitem" className="block">
-              <Link to={projectHref(project.id)} className={LINK_CLASS}>
-                {project.name}
-              </Link>
+        ) : null}
+      </span>
+      {listed ? (
+        // Always drawn, so it can open and close smoothly (the same grid-rows
+        // move as the Team card's "Visibility adjusted" note); hidden from
+        // reading and from Tab while it is shut.
+        <span
+          className={cn(
+            "grid transition-[grid-template-rows,opacity,margin] duration-200 ease-out motion-reduce:transition-none",
+            open ? "mt-2 grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+          )}
+          aria-hidden={!open}
+          inert={!open || undefined}
+        >
+          <span className="min-h-0 overflow-hidden">
+            <span
+              id={listId}
+              role="list"
+              className="block max-w-sm divide-y divide-border overflow-hidden rounded-md border bg-background"
+              data-testid="override-status-projects"
+            >
+              {named.map((project) => (
+                <span key={project.id} role="listitem" className="block">
+                  <Link
+                    to={projectHref(project.id)}
+                    className="flex items-center justify-between gap-3 px-3 py-1.5 text-foreground hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:outline-none"
+                  >
+                    <span className="min-w-0 truncate">{project.name}</span>
+                    <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                  </Link>
+                </span>
+              ))}
+              {more > 0 ? (
+                <span role="listitem" className="block px-3 py-1.5 text-muted-foreground">
+                  {t("settings.overrideStatus.andMore", { count: more })}
+                </span>
+              ) : null}
             </span>
-          ))}
-          {more > 0 ? (
-            <span role="listitem" className="block">
-              {t("settings.overrideStatus.andMore", { count: more })}
-            </span>
-          ) : null}
+          </span>
         </span>
       ) : null}
     </span>

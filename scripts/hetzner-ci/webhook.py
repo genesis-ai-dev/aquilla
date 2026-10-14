@@ -12,6 +12,9 @@ from pathlib import Path
 REPO = "genesis-ai-dev/aquilla"
 REPO_ID = 1210631685
 STATE = Path(os.environ.get("QA_STATE", "/var/lib/aquilla-qa"))
+# release/YYYY/MM/DD-NN — the branch the deploy bot pushes, and the branch a
+# person piles ready pull requests onto. Nothing else starts a run.
+RELEASE_REF = re.compile(r"release/\d{4}/\d{2}/\d{2}-\d{2}\Z")
 
 
 def valid_signature(body, signature, secret):
@@ -20,24 +23,26 @@ def valid_signature(body, signature, secret):
 
 
 def parse_event(event, payload):
-    if event != "pull_request":
+    # Pull requests do not run. Smart Jev runs the release HEAD people are
+    # about to deploy, after any pile-on onto that branch.
+    if event != "push":
         return None
     if payload.get("repository", {}).get("id") != REPO_ID:
         raise ValueError("Unexpected repository")
-    if payload.get("action") not in {
-        "opened", "reopened", "synchronize", "ready_for_review"
-    }:
+    ref = payload.get("ref") or ""
+    if not ref.startswith("refs/heads/"):
         return None
-    pull = payload.get("pull_request", {})
-    head = pull.get("head", {})
-    if head.get("repo", {}).get("id") != REPO_ID:
+    branch = ref.removeprefix("refs/heads/")
+    if not RELEASE_REF.fullmatch(branch):
         return None
-    if pull.get("draft") or pull.get("state") != "open":
+    if payload.get("deleted"):
         return None
-    pr, sha = payload.get("number"), head.get("sha")
-    if type(pr) is not int or pr <= 0 or not re.fullmatch(r"[a-f0-9]{40}", sha or ""):
-        raise ValueError("Invalid PR identity")
-    return pr, sha
+    sha = payload.get("after")
+    if sha == "0" * 40:
+        return None
+    if not re.fullmatch(r"[a-f0-9]{40}", sha or ""):
+        raise ValueError("Invalid release identity")
+    return branch, sha
 
 
 def database():
@@ -47,18 +52,28 @@ def database():
         id INTEGER PRIMARY KEY, pr INTEGER NOT NULL, sha TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'queued', created REAL NOT NULL,
         updated REAL NOT NULL, UNIQUE(pr, sha))""")
+    columns = {row[1] for row in db.execute("PRAGMA table_info(jobs)")}
+    if "ref" not in columns:
+        db.execute("ALTER TABLE jobs ADD COLUMN ref TEXT NOT NULL DEFAULT ''")
+    db.commit()
     return db
 
 
-def enqueue(pr, sha):
+def enqueue(ref, sha):
+    if not RELEASE_REF.fullmatch(ref or ""):
+        raise ValueError("Invalid release ref")
     with database() as db:
-        exists = db.execute("SELECT id FROM jobs WHERE pr=? AND sha=?", (pr, sha)).fetchone()
+        # pr stays 0. The unique key is still (pr, sha): one run per commit.
+        exists = db.execute("SELECT id FROM jobs WHERE pr=? AND sha=?", (0, sha)).fetchone()
         if exists:
             return "duplicate"
         if db.execute("SELECT COUNT(*) FROM jobs WHERE status='queued'").fetchone()[0] >= 100:
             raise OverflowError("Queue is full")
         now = time.time()
-        db.execute("INSERT INTO jobs(pr,sha,created,updated) VALUES(?,?,?,?)", (pr, sha, now, now))
+        db.execute(
+            "INSERT INTO jobs(pr,sha,ref,created,updated) VALUES(?,?,?,?,?)",
+            (0, sha, ref, now, now),
+        )
     return "queued"
 
 

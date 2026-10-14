@@ -231,7 +231,9 @@ async function main() {
     console.log(`Skipping ${target} migrations because SKIP_${defaults.envPrefix}_MIGRATIONS=1 or SKIP_MIGRATIONS=1`)
   } else {
     console.log(`Applying pending migrations to '${branch}'`)
-    await run("pnpm", ["neon:apply"], { env: migrationEnv })
+    // This branch was just recreated from upstream, so there is nothing a
+    // pre-migration snapshot would protect (AQU-1877's gate).
+    await run("pnpm", ["neon:apply", "--no-snapshot"], { env: migrationEnv })
   }
 
   await checkHttp(healthUrl, `${target} API health check`)

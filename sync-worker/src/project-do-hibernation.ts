@@ -50,6 +50,12 @@ export const CONNECTION_ATTACHMENT_VERSION = 1
  */
 export interface ConnectionAttachment {
   v: number
+  /**
+   * AQU-1839: the project this socket was authorized for — a `token.refresh`
+   * after a wake has to re-check the token's project scope, and the id only
+   * ever arrived on the connect URL.
+   */
+  projectId: string
   connId: string
   userId: string
   numericUserId: number | null
@@ -65,6 +71,7 @@ export interface ConnectionAttachment {
 
 /** The runtime fields an attachment is built from. */
 export interface ConnectionIdentity {
+  projectId: string
   connId: string
   userId: string
   numericUserId: number | null
@@ -81,6 +88,7 @@ export function toConnectionAttachment(
   const row: PresenceState = presence ?? { connId: conn.connId, userId: conn.userId, ts: conn.lastSeenAt }
   return {
     v: CONNECTION_ATTACHMENT_VERSION,
+    projectId: conn.projectId,
     connId: conn.connId,
     userId: conn.userId,
     numericUserId: conn.numericUserId,
@@ -102,6 +110,7 @@ export function parseConnectionAttachment(raw: unknown): ConnectionAttachment | 
   if (typeof raw !== "object" || raw === null) return null
   const a = raw as Partial<ConnectionAttachment>
   if (a.v !== CONNECTION_ATTACHMENT_VERSION) return null
+  if (typeof a.projectId !== "string" || a.projectId.length === 0) return null
   if (typeof a.connId !== "string" || typeof a.userId !== "string") return null
   if (typeof a.lastSeenAt !== "number" || typeof a.heartbeatSeen !== "boolean") return null
   const numericUserId = typeof a.numericUserId === "number" ? a.numericUserId : null
@@ -117,6 +126,7 @@ export function parseConnectionAttachment(raw: unknown): ConnectionAttachment | 
     : { connId: a.connId, userId: a.userId, ts: a.lastSeenAt }
   return {
     v: CONNECTION_ATTACHMENT_VERSION,
+    projectId: a.projectId,
     connId: a.connId,
     userId: a.userId,
     numericUserId,

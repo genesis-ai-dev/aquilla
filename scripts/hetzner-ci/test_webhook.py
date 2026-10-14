@@ -1,4 +1,3 @@
-import copy
 import hashlib
 import hmac
 import json
@@ -7,6 +6,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 import webhook
+
+
+REF = "release/2026/10/07-01"
+
+
+def push(ref="refs/heads/" + REF, sha="a" * 40):
+    return {"repository": {"id": webhook.REPO_ID}, "ref": ref, "after": sha, "deleted": False}
 
 
 def pull():
@@ -25,47 +31,45 @@ class WebhookTests(unittest.TestCase):
         self.assertFalse(webhook.valid_signature(body, None, secret))
         self.assertFalse(webhook.valid_signature(body, "sha256=bad", secret))
 
-    def test_valid_pull(self):
-        self.assertEqual(webhook.parse_event("pull_request", pull()), (716, "a" * 40))
+    def test_release_push_starts_a_run(self):
+        self.assertEqual(webhook.parse_event("push", push()), (REF, "a" * 40))
+
+    def test_pull_requests_do_not_run(self):
+        self.assertIsNone(webhook.parse_event("pull_request", pull()))
+        self.assertIsNone(webhook.parse_event("ping", {}))
 
     def test_rejected_identity(self):
-        for key, value in [("number", True), ("number", "716"), ("number", -1)]:
-            data = pull()
-            data[key] = value
-            with self.assertRaises(ValueError):
-                webhook.parse_event("pull_request", data)
-        data = pull()
+        data = push()
         data["repository"]["id"] = 1
         with self.assertRaises(ValueError):
-            webhook.parse_event("pull_request", data)
+            webhook.parse_event("push", data)
         for sha in ["main", "a" * 39, "a" * 40 + ";bad", None]:
-            data = pull()
-            data["pull_request"]["head"]["sha"] = sha
+            data = push(sha=sha)
             with self.assertRaises(ValueError):
-                webhook.parse_event("pull_request", data)
+                webhook.parse_event("push", data)
 
     def test_ignored(self):
-        data = pull()
-        variants = [copy.deepcopy(data) for _ in range(4)]
-        variants[0]["pull_request"]["head"]["repo"]["id"] = 1
-        variants[1]["pull_request"]["draft"] = True
-        variants[2]["pull_request"]["state"] = "closed"
-        variants[3]["action"] = "edited"
-        for variant in variants:
-            self.assertIsNone(webhook.parse_event("pull_request", variant))
-        self.assertIsNone(webhook.parse_event("ping", {}))
+        self.assertIsNone(webhook.parse_event("push", push(ref="refs/heads/dev")))
+        self.assertIsNone(webhook.parse_event("push", push(ref="refs/heads/release/not-a-cut")))
+        self.assertIsNone(webhook.parse_event("push", push(ref="refs/tags/2026.10.07.01")))
+        deleted = push()
+        deleted["deleted"] = True
+        deleted["after"] = "0" * 40
+        self.assertIsNone(webhook.parse_event("push", deleted))
 
     def test_durable_deduplication_and_bound(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(webhook, "STATE", Path(directory)):
-            self.assertEqual(webhook.enqueue(716, "a" * 40), "queued")
-            self.assertEqual(webhook.enqueue(716, "a" * 40), "duplicate")
+            self.assertEqual(webhook.enqueue(REF, "a" * 40), "queued")
+            self.assertEqual(webhook.enqueue(REF, "a" * 40), "duplicate")
             for number in range(1, 100):
-                webhook.enqueue(number, "b" * 40)
+                day = f"{(number % 28) + 1:02d}"
+                month = f"{(number // 28) + 1:02d}"
+                webhook.enqueue(f"release/2026/{month}/{day}-{number % 100:02d}", f"{number:040x}")
             with self.assertRaises(OverflowError):
-                webhook.enqueue(1000, "c" * 40)
+                webhook.enqueue("release/2026/12/31-01", "c" * 40)
             with webhook.database() as db:
-                db.execute("UPDATE jobs SET status='completed' WHERE pr=716")
-            self.assertEqual(webhook.enqueue(716, "a" * 40), "duplicate")
+                db.execute("UPDATE jobs SET status='completed' WHERE sha=?", ("a" * 40,))
+            self.assertEqual(webhook.enqueue(REF, "a" * 40), "duplicate")
 
 
 if __name__ == "__main__":

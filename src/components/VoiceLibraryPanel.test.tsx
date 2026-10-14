@@ -385,3 +385,57 @@ describe("VoiceLibraryPanel — settings sync (AQU-1001)", () => {
     expect(screen.getByText("Keean")).toBeTruthy()
   })
 })
+
+// AQU-1940: `iloko_ilo_the_chosen` came out of the Codex migration with 31,287
+// voices (one minted per verse label). The panel mapped every one of them to a
+// full row in a single synchronous render: the main thread blocked ~3s on
+// "Open project", the heap passed 2.4GB and Chrome killed the tab, so anyone
+// whose dock remembered the Voices tab could not open the project at all. The
+// list is windowed now — the library's size must not decide how many rows the
+// panel mounts.
+describe("VoiceLibraryPanel — large library (AQU-1940)", () => {
+  function library(size: number): Voice[] {
+    return Array.from({ length: size }, (_, i) =>
+      makeVoice({ id: `v-${i}`, name: `Voice ${i}` }),
+    )
+  }
+
+  function renderLibrary(voices: Voice[]) {
+    render(
+      <VoiceLibraryPanel
+        projectId="dev-project"
+        settings={{ provider: "gemini", voices, defaultVoiceId: voices[0]?.id }}
+        onSettingsChange={vi.fn()}
+      />,
+    )
+  }
+
+  it("mounts a window of rows, not one per voice, and still counts the whole library", () => {
+    renderLibrary(library(30_000))
+
+    // The header reports the whole library…
+    expect(screen.getByText("30000")).toBeTruthy()
+    // …while only the rows in or near the scrollport are in the DOM.
+    const mounted = document.querySelectorAll("[data-voice-id]")
+    expect(mounted.length).toBeGreaterThan(0)
+    expect(mounted.length).toBeLessThan(100)
+  })
+
+  it("search still reaches a voice at the far end of a huge library", () => {
+    renderLibrary(library(30_000))
+    expect(screen.queryByText("Voice 29999")).toBeNull()
+
+    fireEvent.change(screen.getByPlaceholderText("Search voices…"), {
+      target: { value: "voice 29999" },
+    })
+
+    expect(screen.getByText("Voice 29999")).toBeTruthy()
+    expect(document.querySelectorAll("[data-voice-id]").length).toBe(1)
+  })
+
+  it("renders a small library in full, exactly as before", () => {
+    renderLibrary(library(12))
+    expect(document.querySelectorAll("[data-voice-id]").length).toBe(12)
+    expect(screen.getByText("Voice 11")).toBeTruthy()
+  })
+})

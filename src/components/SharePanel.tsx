@@ -34,7 +34,7 @@ import { isElevationRequiredError } from "@/lib/frontier/elevation"
 import { INVITE_SENT } from "@/lib/event-names"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
-import { useCurrentTargetLanes } from "@/hooks/useCurrentTargetLanes"
+import { useCurrentTargetLanes, type TargetLaneOption } from "@/hooks/useCurrentTargetLanes"
 import { LaneAccessFields } from "@/components/LaneAccessFields"
 import {
   chosenLaneLabels,
@@ -50,7 +50,12 @@ import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { toUserFacingError } from "@/lib/errors/user-error"
 import { GrantScopeNotice } from "@/components/GrantScopeNotice"
 import { toast } from "@/components/ui/toast"
-import { describeGrant, grantButtonLabel, grantProjectName } from "@/lib/access/grant-scope-sentence"
+import {
+  describeGrant,
+  grantButtonLabel,
+  grantProjectName,
+  laneScopeEcho,
+} from "@/lib/access/grant-scope-sentence"
 import {
   MembersPanel,
   type MembersPanelMember,
@@ -706,6 +711,7 @@ function InviteLinkTab({ projectId, projectName, onSharesChanged }: InviteLinkTa
           projectId={projectId}
           jwt={session.jwt}
           version={inviteListVersion}
+          targetLanes={targetLanes}
           onRevoked={() => setInviteListVersion((v) => v + 1)}
         />
       )}
@@ -720,10 +726,18 @@ interface ActiveInvitesListProps {
   jwt: string
   /** Incrementing this value triggers a re-fetch. */
   version: number
+  /** AQU-528: current target lanes, to name a link's lane scope by language. */
+  targetLanes: readonly TargetLaneOption[]
   onRevoked: () => void
 }
 
-function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvitesListProps) {
+function ActiveInvitesList({
+  projectId,
+  jwt,
+  version,
+  targetLanes,
+  onRevoked,
+}: ActiveInvitesListProps) {
   const { locale } = useI18n()
   const t = useT()
   const [invites, setInvites] = useState<ActiveProjectInvite[] | null>(null)
@@ -766,6 +780,29 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
     }
   }
 
+  /**
+   * AQU-528: the languages a lane-scoped link auto-grants on join, as the same
+   * phrase the mint button echoes. A language-scoped link has to be
+   * distinguishable here from an unscoped one AND from a link scoped to a
+   * different language — otherwise the only way to tell which of two links to
+   * revoke is to redeem one.
+   *
+   * A stored value that is not a current lane (a stale lane id, or the legacy
+   * `''` default lane) still renders, as the raw value or "Default language".
+   * Rendering nothing is the one wrong answer: it reads as an unscoped link,
+   * which grants every lane.
+   */
+  function laneScopeFor(invite: ActiveProjectInvite): string | null {
+    const values = invite.scopeLanes ?? []
+    if (values.length === 0) return null
+    const labels = values.map((value) => {
+      const lane = targetLanes.find((candidate) => candidate.id === value)
+      if (lane) return lane.label
+      return value.trim() || t("dialog.assign.defaultLaneFallback")
+    })
+    return laneScopeEcho(t, labels, locale)
+  }
+
   function formatExpiry(expiresAt: string | null) {
     if (!expiresAt) return t("common.noExpiry")
     return (
@@ -799,6 +836,15 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
                 {inv.email ? ` · ${inv.email}` : ` · ${t("projectSettings.share.openLinkConnector")}`}
                 {" · "}
                 {formatExpiry(inv.expiresAt)}
+                {(() => {
+                  const laneScope = laneScopeFor(inv)
+                  return laneScope ? (
+                    <>
+                      {" · "}
+                      <span className="font-medium text-foreground">{laneScope}</span>
+                    </>
+                  ) : null
+                })()}
               </p>
             </div>
             {revokeTarget === inv.token ? (

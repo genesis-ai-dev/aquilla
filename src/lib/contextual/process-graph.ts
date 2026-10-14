@@ -15,6 +15,8 @@ import { humanPassageLabel } from "../../../shared/span-label"
 export const PROCESS_NODE_IDS = [
   "scope",
   "segment",
+  // AQU-1690: per-cell facts from Bible data, given to construe and draft.
+  "bible_facts",
   "construe",
   "expand_window",
   "register",
@@ -22,6 +24,8 @@ export const PROCESS_NODE_IDS = [
   "persist",
   "draft",
   "lint_rules",
+  // AQU-1690: the bkp: gates and the Jev questions; their cheap repair loops back to draft.
+  "bible_checks",
   "route_risk",
   "verify_force",
   "verify_ambiguity",
@@ -58,28 +62,31 @@ const YV = 8
 export const PROCESS_NODE_LAYOUT: readonly ProcessNodeLayout[] = [
   { id: "scope", x: X0, y: Y },
   { id: "segment", x: X0 + STEP, y: Y },
-  { id: "construe", x: X0 + STEP * 2, y: Y },
-  { id: "expand_window", x: X0 + STEP * 3, y: Y },
-  { id: "register", x: X0 + STEP * 4, y: Y },
-  { id: "summarize", x: X0 + STEP * 5, y: Y },
-  { id: "persist", x: X0 + STEP * 6, y: Y },
-  { id: "draft", x: X0 + STEP * 7, y: Y },
-  { id: "lint_rules", x: X0 + STEP * 8, y: Y },
-  { id: "route_risk", x: X0 + STEP * 9, y: Y },
-  { id: "verify_force", x: X0 + STEP * 9 + 10, y: YV },
-  { id: "verify_ambiguity", x: X0 + STEP * 9 + 23, y: YV },
-  { id: "verify_naturalness", x: X0 + STEP * 9 + 36, y: YV },
-  { id: "quorum", x: X0 + STEP * 11 + 20, y: Y },
-  { id: "stage", x: X0 + STEP * 12 + 20, y: Y },
-  { id: "report", x: X0 + STEP * 13 + 20, y: Y },
+  { id: "bible_facts", x: X0 + STEP * 2, y: Y },
+  { id: "construe", x: X0 + STEP * 3, y: Y },
+  { id: "expand_window", x: X0 + STEP * 4, y: Y },
+  { id: "register", x: X0 + STEP * 5, y: Y },
+  { id: "summarize", x: X0 + STEP * 6, y: Y },
+  { id: "persist", x: X0 + STEP * 7, y: Y },
+  { id: "draft", x: X0 + STEP * 8, y: Y },
+  { id: "lint_rules", x: X0 + STEP * 9, y: Y },
+  { id: "bible_checks", x: X0 + STEP * 10, y: Y },
+  { id: "route_risk", x: X0 + STEP * 11, y: Y },
+  { id: "verify_force", x: X0 + STEP * 11 + 10, y: YV },
+  { id: "verify_ambiguity", x: X0 + STEP * 11 + 23, y: YV },
+  { id: "verify_naturalness", x: X0 + STEP * 11 + 36, y: YV },
+  { id: "quorum", x: X0 + STEP * 13 + 20, y: Y },
+  { id: "stage", x: X0 + STEP * 14 + 20, y: Y },
+  { id: "report", x: X0 + STEP * 15 + 20, y: Y },
 ]
 
-export const PROCESS_VIEWBOX = { width: 268, height: 42 }
+export const PROCESS_VIEWBOX = { width: 302, height: 42 }
 export const PROCESS_NODE_SIZE = 7
 
 export const PROCESS_EDGES: readonly ProcessEdge[] = [
   { id: "scope-segment", from: "scope", to: "segment", kind: "flow" },
-  { id: "segment-construe", from: "segment", to: "construe", kind: "flow" },
+  { id: "segment-facts", from: "segment", to: "bible_facts", kind: "flow" },
+  { id: "facts-construe", from: "bible_facts", to: "construe", kind: "flow" },
   { id: "construe-expand", from: "construe", to: "expand_window", kind: "flow" },
   { id: "expand-construe", from: "expand_window", to: "construe", kind: "loop" },
   { id: "expand-register", from: "expand_window", to: "register", kind: "flow" },
@@ -87,7 +94,8 @@ export const PROCESS_EDGES: readonly ProcessEdge[] = [
   { id: "summarize-persist", from: "summarize", to: "persist", kind: "flow" },
   { id: "persist-draft", from: "persist", to: "draft", kind: "flow" },
   { id: "draft-lint", from: "draft", to: "lint_rules", kind: "flow" },
-  { id: "lint-route", from: "lint_rules", to: "route_risk", kind: "flow" },
+  { id: "lint-bible", from: "lint_rules", to: "bible_checks", kind: "flow" },
+  { id: "bible-route", from: "bible_checks", to: "route_risk", kind: "flow" },
   { id: "route-force", from: "route_risk", to: "verify_force", kind: "flow" },
   { id: "route-ambiguity", from: "route_risk", to: "verify_ambiguity", kind: "flow" },
   { id: "route-naturalness", from: "route_risk", to: "verify_naturalness", kind: "flow" },
@@ -97,12 +105,60 @@ export const PROCESS_EDGES: readonly ProcessEdge[] = [
   { id: "quorum-stage", from: "quorum", to: "stage", kind: "flow" },
   { id: "stage-report", from: "stage", to: "report", kind: "flow" },
   { id: "quorum-draft", from: "quorum", to: "draft", kind: "redraft" },
+  { id: "bible-draft", from: "bible_checks", to: "draft", kind: "redraft" },
 ]
 
-const READING: readonly ProcessNodeId[] = [
-  "scope", "segment", "construe", "expand_window", "register", "summarize", "persist",
+/**
+ * AQU-1685: the graph as drawn. The Bible data steps appear only on a device
+ * with the Bible data experiment on. Without it the graph is the one from
+ * before them: segment flows straight into construe and lint into routing,
+ * and every later node moves one STEP left per step left out.
+ */
+export interface ProcessGraphTopology {
+  nodes: readonly ProcessNodeLayout[]
+  edges: readonly ProcessEdge[]
+  viewBox: { width: number; height: number }
+}
+
+const BIBLE_DATA_NODE_IDS: ReadonlySet<ProcessNodeId> = new Set<ProcessNodeId>(["bible_facts", "bible_checks"])
+
+/** The flows past the Bible data steps, drawn only without them. */
+const BIBLE_DATA_BYPASS_EDGES: readonly ProcessEdge[] = [
+  { id: "segment-construe", from: "segment", to: "construe", kind: "flow" },
+  { id: "lint-route", from: "lint_rules", to: "route_risk", kind: "flow" },
 ]
-const DRAFTING: readonly ProcessNodeId[] = ["draft", "lint_rules"]
+
+/** Every edge a model carries a state for, whichever graph is drawn. */
+const MODEL_EDGES: readonly ProcessEdge[] = [...PROCESS_EDGES, ...BIBLE_DATA_BYPASS_EDGES]
+
+const BIBLE_DATA_NODES = PROCESS_NODE_LAYOUT.filter((node) => BIBLE_DATA_NODE_IDS.has(node.id))
+
+const WITH_BIBLE_DATA: ProcessGraphTopology = {
+  nodes: PROCESS_NODE_LAYOUT,
+  edges: PROCESS_EDGES,
+  viewBox: PROCESS_VIEWBOX,
+}
+
+const WITHOUT_BIBLE_DATA: ProcessGraphTopology = {
+  nodes: PROCESS_NODE_LAYOUT.filter((node) => !BIBLE_DATA_NODE_IDS.has(node.id)).map((node) => ({
+    ...node,
+    x: node.x - STEP * BIBLE_DATA_NODES.filter((bible) => bible.x < node.x).length,
+  })),
+  edges: [
+    ...PROCESS_EDGES.filter((edge) => !BIBLE_DATA_NODE_IDS.has(edge.from) && !BIBLE_DATA_NODE_IDS.has(edge.to)),
+    ...BIBLE_DATA_BYPASS_EDGES,
+  ],
+  viewBox: { ...PROCESS_VIEWBOX, width: PROCESS_VIEWBOX.width - STEP * BIBLE_DATA_NODES.length },
+}
+
+export function processGraphTopology(bibleData: boolean): ProcessGraphTopology {
+  return bibleData ? WITH_BIBLE_DATA : WITHOUT_BIBLE_DATA
+}
+
+const READING: readonly ProcessNodeId[] = [
+  "scope", "segment", "bible_facts", "construe", "expand_window", "register", "summarize", "persist",
+]
+const DRAFTING: readonly ProcessNodeId[] = ["draft", "lint_rules", "bible_checks"]
 const CHECKING: readonly ProcessNodeId[] = [
   "route_risk", "verify_force", "verify_ambiguity", "verify_naturalness", "quorum",
 ]
@@ -378,7 +434,7 @@ function emptyInspect(decision: ProcessDecision | null): Record<ProcessNodeId, P
 export function emptyProcessGraph(live = false): ProcessGraphModel {
   return {
     nodeStates: { ...EMPTY_STATES },
-    edgeStates: Object.fromEntries(PROCESS_EDGES.map((edge) => [edge.id, "pending"])),
+    edgeStates: Object.fromEntries(MODEL_EDGES.map((edge) => [edge.id, "pending"])),
     liveSpanLabels: [],
     lastDecision: null,
     inspect: emptyInspect(null),
@@ -430,7 +486,7 @@ export function deriveProcessGraph(
     inspectForNode(id, nodeStates[id], cursors, activity ?? null, lastDecision),
   ])) as Record<ProcessNodeId, ProcessNodeInspect>
   const edgeStates = Object.fromEntries(
-    PROCESS_EDGES.map((edge) => [edge.id, edgeState(edge, nodeStates)]),
+    MODEL_EDGES.map((edge) => [edge.id, edgeState(edge, nodeStates)]),
   )
 
   return {
@@ -451,7 +507,7 @@ export function deriveProcessGraphFromOverview(overview: ContextualOverview | nu
   const model = emptyProcessGraph(working)
   if (working) {
     for (const id of PROCESS_NODE_IDS) model.nodeStates[id] = "pending"
-    for (const edge of PROCESS_EDGES) {
+    for (const edge of MODEL_EDGES) {
       if (edge.kind === "flow") model.edgeStates[edge.id] = "active"
     }
     model.live = true
@@ -464,13 +520,15 @@ export function deriveProcessGraphFromOverview(overview: ContextualOverview | nu
   }
   if (done) {
     for (const id of PROCESS_NODE_IDS) model.nodeStates[id] = "done"
-    for (const edge of PROCESS_EDGES) model.edgeStates[edge.id] = "done"
+    for (const edge of MODEL_EDGES) model.edgeStates[edge.id] = "done"
   }
   return model
 }
 
-export function layoutById(): Record<ProcessNodeId, ProcessNodeLayout> {
-  return Object.fromEntries(PROCESS_NODE_LAYOUT.map((node) => [node.id, node])) as Record<
+export function layoutById(
+  nodes: readonly ProcessNodeLayout[] = PROCESS_NODE_LAYOUT,
+): Record<ProcessNodeId, ProcessNodeLayout> {
+  return Object.fromEntries(nodes.map((node) => [node.id, node])) as Record<
     ProcessNodeId,
     ProcessNodeLayout
   >

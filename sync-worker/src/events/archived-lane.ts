@@ -57,12 +57,24 @@ export function targetLaneRowsFor(
 
 /**
  * AQU-1532: true when the project has a target lane row whose legacy tag is
- * exactly `tag` — the same match the projection's lane_id lookup uses.
- * `''` is not refused as missing. A bare project has no target lane yet, and
- * the cell-write batch creates that bridge before resolving lane_id
- * (AQU-1594). A project that already has a target lane does not: the write
- * reaches the cells insert and fails there (AQU-1615), rather than as a 422.
- * A named tag still has to exist or the write is a 422.
+ * exactly `tag` — the same match the projection's lane_id lookup uses, so a
+ * false here is exactly the write that would resolve a NULL `lane_id`.
+ * A named tag has to exist or the write is a 422.
+ *
+ * `''` — the omitted tag, the former default lane — resolves when the project
+ * HAS the `''` row (a legacy/migrated project), and on a project with NO target
+ * lane at all. That second case is the only one where the `''` bridge can
+ * still be minted: a lane-less `target.cell.*` write splices
+ * `ensureBlankTargetBridgeStmt` into its own batch, and a validation may ride
+ * the same outbox flush as that commit (a brand-new project), which this
+ * pre-flight read cannot see.
+ *
+ * AQU-1884 closed the `''` waiver for validations, AQU-1900 for
+ * `target.cell.*`. Since AQU-1615 the bridge INSERT adds a row only when the
+ * project has no target lane, so on a project whose target lanes all carry a
+ * real tag either write projected a NULL `lane_id` and failed the whole batch
+ * as a per-event 500 ("DB batch failed") instead of saying so.
+ *
  * Shares the per-request lane list with the archived-lane check.
  */
 export async function targetLaneRowExists(
@@ -71,9 +83,9 @@ export async function targetLaneRowExists(
   tag: string,
   cache: RequestCache,
 ): Promise<boolean> {
-  if (tag === '') return true
   const lanes = await rowsFor(db, projectId, cache)
-  return lanes.some((lane) => lane.legacyTag === tag)
+  if (lanes.some((lane) => lane.legacyTag === tag)) return true
+  return tag === '' && lanes.length === 0
 }
 
 /**

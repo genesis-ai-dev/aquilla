@@ -40,7 +40,24 @@ const retryMock = vi.fn<(_projectId: string, _fileId: string) => Promise<{ runId
   async () => ({ runId: "new-run" }),
 )
 
+/** The panel branches on `instanceof ContextualApiError`, so the mocked module
+ *  has to export a real class — a plain object would make the test agree with
+ *  itself and nothing else (AQU-1847). `vi.hoisted` because `vi.mock`'s
+ *  factory is lifted above every top-level binding in this file. */
+const { MockContextualApiError } = vi.hoisted(() => ({
+  MockContextualApiError: class MockContextualApiError extends Error {
+    status: number
+    code: string | null
+    constructor(message: string, status: number, code: string | null = null) {
+      super(message)
+      this.status = status
+      this.code = code
+    }
+  },
+}))
+
 vi.mock("@/lib/contextual/transport", () => ({
+  ContextualApiError: MockContextualApiError,
   fetchContextualOverview: (projectId: string) => fetchMock(projectId),
   startProjectContextualRun: (projectId: string, targetLang?: string) => startMock(projectId, targetLang),
   fetchContextualRuns: (projectId: string, options?: ContextualRunListOptions) => runsMock(projectId, options),
@@ -665,6 +682,32 @@ describe("ProjectAutopilotPanel", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(screen.getByText("Working")).toBeInTheDocument()
     expect(screen.getByText(/Working across 1 file.*4 of 10 passages complete/)).toBeInTheDocument()
+  })
+
+  // AQU-1847. The per-user start throttle refuses with its own code, and the
+  // difference matters to the person reading the card: "could not start" sends
+  // them to check their AI setup, when all they have to do is wait. Both
+  // branches are asserted because the generic one is the fallback the panel
+  // keeps for every other failure.
+  it("distinguishes a throttled start from Autopilot failing to start", async () => {
+    fetchMock.mockResolvedValue(overview({ files: [] }))
+    startMock.mockRejectedValueOnce(
+      new MockContextualApiError("start project autopilot failed: HTTP 429", 429, "start_throttled"),
+    )
+    renderPanel()
+    await act(async () => { await Promise.resolve() })
+
+    fireEvent.click(await screen.findByRole("button", { name: "Run Autopilot" }))
+    expect(await screen.findByText("Too many Autopilot runs started. Wait a few minutes and try again."))
+      .toBeInTheDocument()
+    expect(screen.queryByText("Autopilot could not start.")).not.toBeInTheDocument()
+
+    // Any other failure keeps the generic wording — and a later throttle
+    // message must not persist over it.
+    startMock.mockRejectedValueOnce(new Error("offline"))
+    fireEvent.click(screen.getByRole("button", { name: "Run Autopilot" }))
+    expect(await screen.findByText("Autopilot could not start.")).toBeInTheDocument()
+    expect(screen.queryByText(/Too many Autopilot runs started/)).not.toBeInTheDocument()
   })
 
   it("retains the last good snapshot and marks it stale when refresh fails", async () => {

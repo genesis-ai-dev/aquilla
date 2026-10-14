@@ -14,6 +14,12 @@
 import type { Env } from "../../types"
 import type { IntegrationConnectionRow } from "./types"
 import { decryptMondayToken, encryptMondayToken } from "./crypto"
+import {
+  isAbortTimeout,
+  logVendorTimeout,
+  vendorTimeoutMessage,
+  VENDOR_TIMEOUT_MS,
+} from "../../../../shared/vendor-timeouts"
 
 export const MONDAY_TOKEN_URL = "https://auth.monday.com/oauth_ms/oauth/token"
 
@@ -60,11 +66,24 @@ interface TokenEndpointResponse {
 async function callTokenEndpoint(
   params: Record<string, string>,
 ): Promise<MondayTokenSet> {
-  const res = await fetch(MONDAY_TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams(params),
-  })
+  let res: Response
+  try {
+    res = await fetch(MONDAY_TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(params),
+      // AQU-1849: a token exchange/refresh is never slow when healthy, and it
+      // sits in front of every Monday push — an unbounded one stalled the
+      // whole integration, not just one request.
+      signal: AbortSignal.timeout(VENDOR_TIMEOUT_MS.mondayTokenEndpoint),
+    })
+  } catch (err) {
+    if (isAbortTimeout(err)) {
+      logVendorTimeout("mondayTokenEndpoint", err)
+      throw new MondayAuthError(vendorTimeoutMessage("mondayTokenEndpoint"))
+    }
+    throw err
+  }
   if (!res.ok) {
     throw new MondayAuthError(`monday token endpoint HTTP ${res.status}`)
   }

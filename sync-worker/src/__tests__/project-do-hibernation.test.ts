@@ -17,6 +17,7 @@ const NOW = 1_800_000_000_000
 
 function conn(over: Partial<Parameters<typeof toConnectionAttachment>[0]> = {}) {
   return {
+    projectId: "proj-1",
     connId: "conn-aaaaaaaa",
     userId: "ryder",
     numericUserId: 7,
@@ -46,6 +47,7 @@ describe("connection attachment", () => {
     const restored = parseConnectionAttachment(toConnectionAttachment(conn(), presence))
     expect(restored).toEqual({
       v: CONNECTION_ATTACHMENT_VERSION,
+      projectId: "proj-1",
       connId: "conn-aaaaaaaa",
       userId: "ryder",
       numericUserId: 7,
@@ -82,6 +84,10 @@ describe("connection attachment", () => {
     expect(parseConnectionAttachment({ connId: "c", userId: "u", lastSeenAt: NOW })).toBeNull()
     expect(parseConnectionAttachment({ ...toConnectionAttachment(conn(), undefined), v: 99 })).toBeNull()
     expect(parseConnectionAttachment({ ...toConnectionAttachment(conn(), undefined), userId: 7 })).toBeNull()
+    // AQU-1839: without the project a token.refresh after a wake could not be
+    // re-verified against anything — retire the socket rather than guess.
+    const { projectId: _noProject, ...withoutProject } = toConnectionAttachment(conn(), undefined)
+    expect(parseConnectionAttachment(withoutProject)).toBeNull()
   })
 
   it("re-stamps the presence row's identity from the attachment's", () => {

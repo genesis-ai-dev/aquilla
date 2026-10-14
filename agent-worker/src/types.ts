@@ -1,5 +1,6 @@
 import type { DurableObjectNamespace, R2Bucket } from "@cloudflare/workers-types"
 import type { Sandbox } from "@cloudflare/sandbox"
+import type { SandboxPool } from "./pool-do"
 
 /**
  * Worker bindings. `Sandbox` is the container-backed Durable Object namespace
@@ -20,4 +21,24 @@ export interface Env {
   POSTHOG_KEY?: string
   /** PostHog ingest host; defaults to https://eu.i.posthog.com (AQU-854). */
   POSTHOG_HOST?: string
+  /** AQU-1848: admission ledger for the account-wide container pool. */
+  SANDBOX_POOL: DurableObjectNamespace<SandboxPool>
+  /** AQU-1848: global cap on in-flight containers. Default `DEFAULT_LIMITS`. */
+  SANDBOX_MAX_TOTAL?: string
+  /** AQU-1848: per-tenant cap, so one org cannot drain the pool. */
+  SANDBOX_MAX_PER_TENANT?: string
+  /** AQU-1848: how long a lease survives without renewal, in ms. */
+  SANDBOX_LEASE_TTL_MS?: string
+  /** AQU-1848: how long a caller waits on a FULL pool before giving up, in ms. */
+  SANDBOX_POOL_WAIT_MS?: string
 }
+
+/**
+ * The slice of `Env` the pool plumbing needs. Declared separately so
+ * `pool-do.ts` and `pool-gate.ts` do not depend on the R2/sandbox bindings they
+ * never touch.
+ */
+export type PoolEnv = Pick<
+  Env,
+  "SANDBOX_POOL" | "SANDBOX_MAX_TOTAL" | "SANDBOX_MAX_PER_TENANT" | "SANDBOX_LEASE_TTL_MS"
+>

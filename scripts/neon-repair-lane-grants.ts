@@ -18,7 +18,7 @@
 // Flags: --apply  --project <id>  --limit <n>  --out <file>
 import { writeFileSync } from "node:fs"
 import { resolveProjectRoleIncludingArchivedShared } from "../db/shared/project-roles"
-import { makePostgres, type AquillaDb } from "../db/shim/postgres"
+import { makeMaintenancePostgres, type AquillaDb } from "../db/shim/postgres"
 import { planGrantRepair, type GrantRepairInsert, type GrantRepairLane, type GrantRepairMember } from "../src/lib/lanes/grant-repair"
 
 interface ReportInsert extends GrantRepairInsert {
@@ -183,7 +183,7 @@ async function main(): Promise<void> {
     throw new Error("--limit must be a positive integer")
   }
 
-  const db = makePostgres(connectionString(), 1)
+  const db = makeMaintenancePostgres(connectionString(), 1)
   try {
     await db.exec(`SET statement_timeout = '120s'`)
     await db.exec(`SET lock_timeout = '3s'`)

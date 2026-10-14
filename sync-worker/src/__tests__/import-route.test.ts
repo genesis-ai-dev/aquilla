@@ -19,8 +19,10 @@
 import { describe, it, expect } from 'vitest'
 
 import { handleBulkImportRequest } from '../events/import-route'
-import { makeTestDb } from './helpers/pg-test-db'
+import { makeTestDb, DRIVER_MAX_BIND_PARAMS } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
+import { MAX_IMPORT_REQUEST_BODY_BYTES } from '../../../shared/import-contract'
+import { EVENT_INSERT_BULK_ROWS } from '../events/event-insert'
 
 const SECRET = 'test-secret'
 const PROJECT_ID = 'proj-race'
@@ -884,6 +886,102 @@ describe('POST /import — cells land in Postgres projection (AQU-135)', () => {
     expect(cellRows).toHaveLength(CELL_COUNT)
   })
 
+  it('a silence-split media import past 10,000 segments finalizes, bounded (AQU-1861)', async () => {
+    // Two separate ceilings used to fail this import at its very last step,
+    // after every byte was uploaded and every cell written:
+    //   1. a flat `> 10_000 attachments` rejection (400), and
+    //   2. the finalize's SINGLE events INSERT — 12 bound values per row, so
+    //      past ~5,461 attachments postgres.js refused to send the statement
+    //      at all (MAX_PARAMETERS_EXCEEDED), which the old cap sat above.
+    // A long recording split by silence detection routinely produces more
+    // segments than this, so the whole import died at finalize.
+    const SEGMENTS = 12_000
+    const token = await leadToken()
+    let widestEventsInsert = 0
+    let widestBind = 0
+    const { db, rows } = await makeTestDb({}, {
+      onStatement: (sql, params) => {
+        widestBind = Math.max(widestBind, params.length)
+        if (/INSERT INTO events\b/.test(sql)) {
+          widestEventsInsert = Math.max(widestEventsInsert, params.length)
+        }
+      },
+    })
+
+    // The segment cells, staged (invisible) until the finalize reveals them.
+    for (let offset = 0; offset < SEGMENTS; offset += 4_000) {
+      const chunk = Array.from({ length: Math.min(4_000, SEGMENTS - offset) }, (_, i) => ({
+        id: `seg-evt-${offset + i}`,
+        cellId: `seg-cell-${offset + i}`,
+        value: `segment ${offset + i}`,
+        medium: 'media',
+      }))
+      const body: Record<string, unknown> = { projectId: PROJECT_ID, fileId: FILE_ID, cells: chunk }
+      if (offset === 0) {
+        body.file = { id: 'seg-file-evt', name: 'long-recording.wav', fileType: 'audio' }
+        body.stageEventId = 'seg-file-stage'
+      }
+      expect((await handleBulkImportRequest(new Request('https://worker/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      }), makeEnv(db)))?.status).toBe(200)
+    }
+    expect((await rows<any>('files'))[0].deleted_at).not.toBeNull()
+
+    // The one uploaded clip every segment's window points into.
+    await db.prepare(
+      `INSERT INTO artifacts (
+         id, project_id, uploaded_by_user_id, credential_id, name, content_type,
+         size_bytes, sha256, r2_key, file_id, kind, audio_id, metadata
+       ) VALUES (?::uuid, ?, '1', NULL, 'long-recording.wav', 'audio/wav', 3, ?, ?, ?, 'audio', 'long.wav', '{}'::jsonb)`,
+    ).bind(
+      '01900000-0000-7000-8000-000000000861',
+      PROJECT_ID,
+      'b'.repeat(64),
+      'projects/proj-race/files/file-race/audio/long.wav',
+      FILE_ID,
+    ).run()
+
+    widestEventsInsert = 0
+    widestBind = 0
+    const publish = await handleBulkImportRequest(new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        cells: [],
+        complete: true,
+        publishEventId: 'seg-file-publish',
+        attachments: Array.from({ length: SEGMENTS }, (_, i) => ({
+          id: `seg-attach-${i}`,
+          cellId: `seg-cell-${i}`,
+          audioId: 'long.wav',
+          url: 'frontier-audio://long.wav',
+          slot: 'recording',
+          role: 'source',
+          mimeType: 'audio/wav',
+          trimStartMs: i * 1_000,
+          trimEndMs: (i + 1) * 1_000,
+        })),
+      }),
+    }), makeEnv(db))
+
+    expect(publish?.status).toBe(200)
+    // The file is live and EVERY segment carries its clip window — the import
+    // finalized whole, not partially.
+    expect((await rows<any>('files'))[0].deleted_at).toBeNull()
+    expect(await rows('cell_audio')).toHaveLength(SEGMENTS)
+    expect((await rows<any>('events')).filter((event) => event.kind === 'cell.audio.attach'))
+      .toHaveLength(SEGMENTS)
+
+    // And it got there in statements whose bind count does not grow with the
+    // segment count — the fix is more statements, not wider ones.
+    expect(widestEventsInsert).toBe(EVENT_INSERT_BULK_ROWS * 12)
+    expect(widestBind).toBeLessThanOrEqual(DRIVER_MAX_BIND_PARAMS)
+  }, 240_000)
+
   it('rawSource side-car lands in file_source_blobs on Postgres', async () => {
     const token = await leadToken()
     const { db, rows } = await makeTestDb()
@@ -1117,5 +1215,119 @@ describe('POST /import — ProjectSync inventory notifications (AQU-744)', () =>
 
     await settled()
     expect(frames.map((frame) => frame.fileCreated)).toEqual([true, false])
+  })
+})
+
+// AQU-1858: the route used to call request.json() before it looked at the
+// Authorization header or any size limit, so an unauthenticated caller could
+// make a Worker isolate materialize ~90 MB of JSON — evicting every other
+// request sharing that isolate — for a request that was always going to be
+// refused. Auth, the role floor and the body ceiling now all run first.
+//
+// The streaming cap itself (a chunked body with no declared length) is
+// covered at its own boundary in shared/http-body-limit.test.ts; these tests
+// prove the route routes through that gate, and that it does so before
+// reading.
+describe('POST /import — gated before the body is read (AQU-1858)', () => {
+  /** A body stream that records whether anything was ever pulled from it. */
+  function unreadableBody(): { body: ReadableStream<Uint8Array>; pulled: () => boolean } {
+    let pulled = false
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled = true
+        controller.enqueue(new TextEncoder().encode('{}'))
+        controller.close()
+      },
+    }, new CountQueuingStrategy({ highWaterMark: 0 }))
+    return { body, pulled: () => pulled }
+  }
+
+  function streamingRequest(
+    body: ReadableStream<Uint8Array>,
+    headers: Record<string, string>,
+  ): Request {
+    return new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body,
+      // Node/workerd both require this for a streamed request body.
+      duplex: 'half',
+    } as RequestInit)
+  }
+
+  it('rejects a missing token with 401 without touching the body', async () => {
+    const { db } = await makeTestDb()
+    const { body, pulled } = unreadableBody()
+
+    const res = await handleBulkImportRequest(streamingRequest(body, {}), makeEnv(db))
+
+    expect(res?.status).toBe(401)
+    expect(pulled()).toBe(false)
+  })
+
+  it('rejects a too-low role with 403 without touching the body', async () => {
+    const { db } = await makeTestDb()
+    const contributor = await makeTestToken(SECRET, {
+      projectId: PROJECT_ID,
+      fileId: FILE_ID,
+      role: 400, // contributor — below PROJECT_LEAD
+    })
+    const { body, pulled } = unreadableBody()
+
+    const res = await handleBulkImportRequest(
+      streamingRequest(body, { Authorization: `Bearer ${contributor}` }),
+      makeEnv(db),
+    )
+
+    expect(res?.status).toBe(403)
+    expect(pulled()).toBe(false)
+  })
+
+  it('rejects an oversize Content-Length with 413 without touching the body', async () => {
+    const { db } = await makeTestDb()
+    const token = await leadToken()
+    const { body, pulled } = unreadableBody()
+
+    const res = await handleBulkImportRequest(
+      streamingRequest(body, {
+        Authorization: `Bearer ${token}`,
+        'content-length': String(MAX_IMPORT_REQUEST_BODY_BYTES + 1),
+      }),
+      makeEnv(db),
+    )
+
+    expect(res?.status).toBe(413)
+    expect(await res?.json()).toMatchObject({ maxBytes: MAX_IMPORT_REQUEST_BODY_BYTES })
+    expect(pulled()).toBe(false)
+  })
+
+  it('still accepts a normal bulk import at a legitimate size', async () => {
+    const { db } = await makeTestDb()
+    const token = await leadToken()
+
+    const res = await handleBulkImportRequest(
+      await makeImportRequest(token, { idPrefix: 'gated', cellCount: 3, includeFile: true }),
+      makeEnv(db),
+    )
+
+    expect(res?.status).toBe(200)
+    expect(await res?.json()).toEqual({ accepted: 3, fileId: FILE_ID })
+  })
+
+  it('rejects a token scoped to another file with 403', async () => {
+    const { db } = await makeTestDb()
+    const otherFile = await makeTestToken(SECRET, {
+      projectId: PROJECT_ID,
+      fileId: 'some-other-file',
+      role: 500,
+    })
+
+    const res = await handleBulkImportRequest(
+      await makeImportRequest(otherFile, { idPrefix: 'scoped', cellCount: 1 }),
+      makeEnv(db),
+    )
+
+    expect(res?.status).toBe(403)
+    expect(await res?.text()).toBe('token scoped to different file')
   })
 })

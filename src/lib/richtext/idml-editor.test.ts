@@ -525,8 +525,8 @@ describe("sanitizeIdmlSlotInsertion (AQU-758)", () => {
     expect(sanitizeIdmlSlotInsertion("keep nbsp", "x", "y", "paste")).toBe("keep nbsp")
   })
 
-  it("blocks a leading space typed into an empty slot", () => {
-    expect(sanitizeIdmlSlotInsertion(" ", "", "", "type")).toBe("")
+  it("keeps a space typed as the first character of a slot", () => {
+    expect(sanitizeIdmlSlotInsertion(" ", "", "", "type")).toBe(" ")
   })
 
   it("blocks a second consecutive space typed after an existing space", () => {

@@ -34,6 +34,7 @@
 
 import { t } from "@/lib/i18n/standalone"
 import {
+  HOSTED_TTS_CREDIT_CAP_BODY,
   HOSTED_TTS_FAILED_BODY,
   HOSTED_TTS_NOT_CONFIGURED_BODY,
   SEED_VC_FAILED_BODY,
@@ -56,6 +57,7 @@ export type ErrorCategory =
   | "gemini-failed"
   | "hosted-tts-not-configured"
   | "hosted-tts-failed"
+  | "hosted-tts-credit-cap"
   | "seed-vc-not-configured"
   | "seed-vc-failed"
   | "consent-denied"
@@ -69,6 +71,7 @@ export type ErrorCategory =
   | "model-load-failed"
   | "audio-format-unsupported"
   | "daily-quota-exceeded"
+  | "ai-spend-ceiling"
   | "model-not-allowed"
   | "request-too-large"
   | "rate-limited"
@@ -110,6 +113,21 @@ export function categorizeAiError(rawMessage: string): ActionableError {
   const raw = rawMessage.trim()
   const m = raw.toLowerCase()
   const status = extractStatus(m)
+
+  // Platform daily SPEND ceiling (AQU-1869): a 503 from any paid AI path once
+  // the platform's dollar floor for the day is reached. It must be matched
+  // BEFORE the daily-quota branch below, whose "resets at midnight" substring
+  // also appears here — and it must not wear that branch's copy, because this
+  // is not the user's own limit and "switch to a custom AI provider" is the
+  // only thing they could actually do about it.
+  if (m.includes("ai_spend_ceiling_reached") || m.includes("daily ai spend ceiling")) {
+    return {
+      category: "ai-spend-ceiling",
+      title: t("audio.aiError.providerUnavailableTitle"),
+      body: t("audio.aiError.spendCeilingBody"),
+      raw,
+    }
+  }
 
   // Platform daily quota (AQU-265): 429 responses from the Frontier/Aquilla proxy.
   if (
@@ -176,6 +194,23 @@ export function categorizeAiError(rawMessage: string): ActionableError {
       category: "missing-openrouter-key",
       title: t("audio.aiError.openRouterKeyRequiredTitle"),
       body: OPENROUTER_KEY_REQUIRED_BODY,
+      raw,
+    }
+  }
+
+  // AQU-1872: an org out of AI credit is refused BEFORE the vendor is called,
+  // so it is not a vendor failure. This must precede the hosted-tts branches:
+  // the raw 429 body also carries "voice/tts", which would otherwise title it
+  // "Inworld TTS failed" and tell the user the engine broke when nothing was
+  // ever sent to it.
+  if (
+    m.includes("credit_cap_exceeded") ||
+    m.includes("ai credit allowance")
+  ) {
+    return {
+      category: "hosted-tts-credit-cap",
+      title: t("audio.aiError.creditCapTitle"),
+      body: HOSTED_TTS_CREDIT_CAP_BODY,
       raw,
     }
   }

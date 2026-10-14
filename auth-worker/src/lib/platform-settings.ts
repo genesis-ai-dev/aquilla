@@ -58,6 +58,12 @@ export interface PlatformSettings {
   aiGlobalDailyLimit?: number
   /** When true, the AI budget is enforced with 429s instead of log-only. */
   aiBudgetEnforce?: boolean
+  /** Platform-wide daily AI spend ceiling in US dollars (AQU-1869). Read by
+   *  db/shared/ai-spend-ceiling.ts, which parses this one key out of the blob
+   *  itself so sync-worker's paid paths (TTS, voice-convert, diarization) obey
+   *  the same admin-set number. A negative value switches the ceiling off;
+   *  unset falls back to the AI_DAILY_SPEND_CEILING_USD env var. */
+  aiDailySpendCeilingUsd?: number
   /** Champion/challenger A/B experiment on the default chat model. */
   abTest?: AbTestConfig
   /** Field Plan catalog overrides (amounts + Stripe price ids). */
@@ -109,6 +115,9 @@ function parseSettings(raw: string): PlatformSettings {
   if (typeof obj.aiUserDailyLimit === "number") out.aiUserDailyLimit = obj.aiUserDailyLimit
   if (typeof obj.aiGlobalDailyLimit === "number") out.aiGlobalDailyLimit = obj.aiGlobalDailyLimit
   if (typeof obj.aiBudgetEnforce === "boolean") out.aiBudgetEnforce = obj.aiBudgetEnforce
+  if (typeof obj.aiDailySpendCeilingUsd === "number") {
+    out.aiDailySpendCeilingUsd = obj.aiDailySpendCeilingUsd
+  }
   const ab = obj.abTest
   if (ab && typeof ab === "object" && !Array.isArray(ab)) {
     const a = ab as Record<string, unknown>

@@ -11,7 +11,12 @@
 
 import { sign } from "hono/jwt"
 import type { AuthUser, Env, RoleResolution, SyncTokenClaims } from "../types"
-import { loadProjectRow, resolveProjectRole, RoleLookupError } from "./project-permissions"
+import {
+  loadProjectRow,
+  resolveGenuineProjectRole,
+  resolveProjectRole,
+  RoleLookupError,
+} from "./project-permissions"
 
 /** 15-minute lifetime — matches docs/SYNC.md. */
 export const SYNC_TOKEN_TTL_SECONDS = 15 * 60
@@ -70,10 +75,30 @@ export type SyncTokenMintFailure =
   | "role_lookup_failed"
   /** projectId/fileId contains R2-key-unsafe characters (see isPathSafeId). */
   | "unsafe_id"
+  /** OPS-44: the ONLY grant path was platform-admin power (`source:
+   *  "platform"`) and the caller supplied no active step-up elevation. A
+   *  platform-source token is the one sync token the sync-worker exempts from
+   *  its live membership re-check and lane read wall, so AQU-1322's
+   *  "admin power applies only while elevated" rule has to hold HERE, not
+   *  only on the grant-management writes it originally covered. Callers
+   *  answer 403; a genuine grant (override/group/org/creator) never reaches
+   *  this arm. */
+  | "elevation_required"
 
 export type SyncTokenMintResult =
   | { ok: true; token: string; expiresIn: number; role: RoleResolution }
   | { ok: false; reason: SyncTokenMintFailure }
+
+export interface MintSyncTokenOptions {
+  /**
+   * OPS-44: true when the request carries an active step-up elevation (see
+   * `hasActiveElevation`). Required to mint a token whose only grant path is
+   * platform-admin power. Omitted/false fails that path closed, which is the
+   * right default for every caller that cannot observe elevation — a
+   * server-side harness has no session to elevate.
+   */
+  platformElevated?: boolean
+}
 
 /**
  * Sign a sync token for an ALREADY-RESOLVED role — the signing half of
@@ -141,6 +166,7 @@ export async function mintSyncTokenForUser(
   user: AuthUser,
   projectId: string,
   fileId: string,
+  opts?: MintSyncTokenOptions,
 ): Promise<SyncTokenMintResult> {
   if (!env.SYNC_SECRET_KEY) return { ok: false, reason: "not_configured" }
   if (!isPathSafeId(projectId) || !isPathSafeId(fileId)) {
@@ -165,6 +191,31 @@ export async function mintSyncTokenForUser(
     throw err
   }
   if (!resolved) return { ok: false, reason: "no_access" }
+
+  // OPS-44: strip cross-tenant admin power from an un-elevated session BEFORE
+  // signing. A platform-source token is the one sync token the sync-worker
+  // exempts from its live membership re-check and from the lane read wall, so
+  // AQU-1322's "admin power applies only while elevated" rule has to hold here.
+  //
+  // Not a flat denial: platform contributes 700, which outranks any genuine
+  // grant below owner, so `source === "platform"` also describes an operator
+  // who is a real Maintainer of this project's own org. Demote such a caller
+  // to their genuine role instead of locking them out of their own work —
+  // the admin superpower is what needs elevation, not the whole request.
+  // Only a caller whose ONLY path was platform gets refused.
+  if (resolved.source === "platform" && opts?.platformElevated !== true) {
+    let genuine: RoleResolution | null = null
+    try {
+      genuine = await resolveGenuineProjectRole(env, user, projectId)
+    } catch (err) {
+      // An unreliable genuine answer must not hand back admin power. Fail the
+      // platform path closed; elevating still works, and a genuine member is
+      // unaffected because their resolution never reaches this arm.
+      if (!(err instanceof RoleLookupError)) throw err
+    }
+    if (!genuine) return { ok: false, reason: "elevation_required" }
+    resolved = genuine
+  }
 
   const signed = await signSyncTokenWithRole(env, user, projectId, fileId, resolved)
   return { ok: true, token: signed.token, expiresIn: signed.expiresIn, role: resolved }

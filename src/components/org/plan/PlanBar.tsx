@@ -6,8 +6,8 @@
 // validated, done but not yet validated, nothing yet.
 //
 // THE SHARED PROGRESS PALETTE (AQU-1764, Sam 2026-10-13): text is blue and
-// audio teal, the dark step validated and the light step done, drawn by the
-// same `ProgressSplitBar` as every other busy progress surface. Until then
+// audio magenta, the dark step validated and the light step done, drawn by
+// the same `ProgressSplitBar` as every other busy progress surface. Until then
 // this bar borrowed the timeline's Azure and Cyan at two alphas, because the
 // Progress card's amber and emerald read here as Due soon and Done; the card
 // now uses this palette too, and In progress no longer wears a blue of its

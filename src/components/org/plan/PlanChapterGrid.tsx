@@ -29,8 +29,8 @@ import { useFrontMatterLabel } from "./use-plan-note"
  * Each medium's colour from the shared progress palette (AQU-1764, Sam
  * 2026-10-13), the same table `PlanBar` draws from, so the bars and the tiles
  * cannot drift apart: text in the text-validated blue, audio in the
- * audio-validated teal. Two surfaces that mean the same thing must never be
- * tinted from two tables.
+ * audio-validated magenta. Two surfaces that mean the same thing must never
+ * be tinted from two tables.
  */
 const HUE = {
   text: PROGRESS_COLOR.textValidated,

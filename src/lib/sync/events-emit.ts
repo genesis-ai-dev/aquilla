@@ -653,6 +653,9 @@ export interface CellAudioAttachInput {
   targetLang?: string
   /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
   laneId?: string
+  /** AQU-1767: born a PIECE of this take (the group's root). Fill-only on the
+   *  server — a re-attach can never move a take into or out of a group. */
+  pieceOf?: string
   /**
    * AQU-1572: which gesture produced this clip — telemetry only, never on the
    * wire. ONLY the originating gesture passes one (an upload or LinkMedia
@@ -722,6 +725,7 @@ export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<
       ...(input.timings !== undefined ? { timings: input.timings } : {}),
       ...(input.transcription !== undefined ? { transcription: input.transcription } : {}),
       ...(input.role !== undefined ? { role: input.role } : {}),
+      ...(input.pieceOf !== undefined ? { pieceOf: input.pieceOf } : {}),
       ...targetLaneFields(input),
     },
     clientTs: input.clientTs,

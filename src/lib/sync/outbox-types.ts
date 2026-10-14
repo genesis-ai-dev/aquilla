@@ -380,6 +380,8 @@ export interface OutboxEventPayloads {
     laneId?: string
     /** AQU-1565 follow-up: "source" marks the shared programme audio; absent is a dub. */
     role?: "dub" | "source"
+    /** AQU-1767: born a piece of this take (a split take's cleaned copy). Fill-only. */
+    pieceOf?: string
   }
   "cell.audio.select": {
     /** null: leave the slot with nothing selected (2026-09-28) — how a line

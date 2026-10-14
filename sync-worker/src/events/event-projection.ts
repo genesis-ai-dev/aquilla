@@ -227,6 +227,17 @@ function pieceGroupOfSql(): string {
                      WHERE g.project_id = ? AND g.file_id = ? AND g.cell_id = ? AND g.audio_id = ?), ?)`
 }
 
+/**
+ * AQU-1767: the group an ATTACH lands in, as a scalar subquery. An existing
+ * take's own (its root, or itself); otherwise the last bind — the payload's
+ * `pieceOf` for a piece being born, else the attached id. Binds: the first four
+ * of {@link pieceGroupOfBinds}, then that fallback.
+ */
+function attachGroupOfSql(): string {
+  return `COALESCE((SELECT COALESCE(g.piece_of, g.audio_id) FROM cell_audio g
+                     WHERE g.project_id = ? AND g.file_id = ? AND g.cell_id = ? AND g.audio_id = ?), ?)`
+}
+
 /** Binds for {@link pieceGroupOfSql}. */
 function pieceGroupOfBinds(projectId: string, fileId: string, cellId: string, audioId: string): unknown[] {
   return [projectId, fileId, cellId, audioId, audioId]
@@ -1822,13 +1833,20 @@ case 'cell.audio.attach': {
       //
       // AQU-1767: and never the attached take's own PIECES. A take cut in two is
       // one group (`piece_of`), and a group is selected or not as a whole; a
-      // routine re-attach of either piece must not deselect the other.
+      // routine re-attach of either piece must not deselect the other. A piece
+      // being BORN (`pieceOf` in the payload) names its group itself, since
+      // there is no row yet to read it from.
+      // An existing take keeps the group it has: the payload's only counts for
+      // a take with no row yet (see the fill-only `piece_of` below).
+      const attachPieceOf = typeof p.pieceOf === 'string' && p.pieceOf !== '' && p.pieceOf !== p.audioId
+        ? p.pieceOf
+        : null
       stmts.push(
         db
           .prepare(
             `UPDATE cell_audio SET selected = 0
               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND slot = ? AND audio_id != ?
-                AND ${PIECE_GROUP_SQL} <> ${pieceGroupOfSql()}${attachDeselectLaneSql}`,
+                AND ${PIECE_GROUP_SQL} <> ${attachGroupOfSql()}${attachDeselectLaneSql}`,
           )
           .bind(
             event.projectId,
@@ -1836,7 +1854,8 @@ case 'cell.audio.attach': {
             event.cellId,
             p.slot,
             p.audioId,
-            ...pieceGroupOfBinds(event.projectId, event.fileId, event.cellId, p.audioId),
+            ...pieceGroupOfBinds(event.projectId, event.fileId, event.cellId, p.audioId).slice(0, 4),
+            attachPieceOf ?? p.audioId,
             ...attachDeselectLaneBinds,
           ),
       )
@@ -1887,8 +1906,8 @@ case 'cell.audio.attach': {
             `INSERT INTO cell_audio (
               project_id, file_id, cell_id, audio_id, slot, url, mime_type,
               voice_id, reference_audio_id, duration_ms, label, trim_start_ms, trim_end_ms,
-              timings_json, selected, deleted, event_id, created_ts, role, created_by, lane_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ${audioLaneResolveSql()})
+              timings_json, selected, deleted, event_id, created_ts, role, created_by, lane_id, piece_of
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ${audioLaneResolveSql()}, ?)
             ON CONFLICT(project_id, file_id, cell_id, audio_id) DO UPDATE SET
               slot               = excluded.slot,
               url                = excluded.url,
@@ -1931,7 +1950,10 @@ case 'cell.audio.attach': {
               -- an absent targetLang resolves to the '' lane, so assigning it
               -- here would quietly drag a take recorded in another language
               -- into the default one. A take's lane is decided when it is born.
-              lane_id            = COALESCE(cell_audio.lane_id, excluded.lane_id)`,
+              lane_id            = COALESCE(cell_audio.lane_id, excluded.lane_id)
+              -- AQU-1767: piece_of is deliberately NOT updated. A take joins a
+              -- group when its row is born; no re-attach moves it into or out
+              -- of one.`,
           )
           .bind(
             event.projectId,
@@ -1959,6 +1981,7 @@ case 'cell.audio.attach': {
             event.author,
             // AQU-1591: the lane_id subquery's binds, at the column's position.
             ...audioLaneResolveBinds(event.projectId, audioRole, audioLane),
+            attachPieceOf,
           ),
       )
       // AQU-646: an attach may carry the ASR transcript of a media segment.

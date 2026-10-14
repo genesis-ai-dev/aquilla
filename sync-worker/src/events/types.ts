@@ -590,6 +590,16 @@ export interface EventPayloads {
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
     laneId?: string
+    /**
+     * AQU-1767 (Sam, 2026-10-14): this clip is born a PIECE of the take
+     * `pieceOf` (the group's root) — how "Remove noise" on a split take keeps
+     * its cuts: the cleaned root is attached first, then each other piece
+     * naming it. Fill-only, like `created_by`: a routine re-attach never names
+     * a group, and cannot move a take into or out of one. The attach's
+     * deselect spares this group, so attaching a piece never unselects its
+     * siblings.
+     */
+    pieceOf?: string
   }
   'cell.audio.select': {
     /** The take to select — or null to leave the slot with NOTHING selected

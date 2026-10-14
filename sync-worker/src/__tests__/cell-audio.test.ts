@@ -120,7 +120,9 @@ describe("cell-audio projection", () => {
     expect(a[15]).toBe(100) // created_ts = serverTs
     expect(a[16]).toBe("dub") // role — nothing said 'source'
     // AQU-1591: lane_id's resolve subquery binds (project, role, role, tag).
-    expect(a.slice(18)).toEqual(["p1", "dub", "dub", ""])
+    expect(a.slice(18, 22)).toEqual(["p1", "dub", "dub", ""])
+    // AQU-1767: piece_of, last — null unless the attach is a piece being born.
+    expect(a.slice(22)).toEqual([null])
   })
 
   it("attach: binds NULL for optional fields the payload omits", () => {

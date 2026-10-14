@@ -234,3 +234,39 @@ describe('cell.audio.cut', () => {
     expect(cell.selectedBySlot.recording).toBe('take-a')
   })
 })
+
+// AQU-1767 (Sam, 2026-10-14): "Remove noise" on a split take keeps its cuts —
+// the cleaned root is attached, then each other piece naming it.
+describe('cell.audio.attach — a piece born into a group', () => {
+  const cleaned = (audioId: string, extra: Record<string, unknown> = {}) =>
+    project('cell.audio.attach', {
+      audioId, url: 'https://r2.invalid/dn-clean', slot: 'recording', durationMs: 4_000, ...extra,
+    })
+
+  it('joins the group, and attaching it keeps its siblings selected while the old take is set aside', async () => {
+    await attach('take-a')
+    await project('cell.audio.cut', { audioId: 'take-a', atMs: 1_500, newAudioId: 'take-b' })
+    await cleaned('dn-a', { trimEndMs: 1_500 })
+    await cleaned('dn-b', { trimStartMs: 1_500, pieceOf: 'dn-a' })
+
+    const by = Object.fromEntries((await rows()).map((r) => [r.audio_id, r]))
+    expect(by['dn-b'].piece_of).toBe('dn-a')
+    expect(by['dn-a'].piece_of).toBeNull()
+    expect([by['dn-a'].selected, by['dn-b'].selected]).toEqual([1, 1])
+    expect([by['take-a'].selected, by['take-b'].selected]).toEqual([0, 0])
+    expect([n(by['dn-b'].trim_start_ms), n(by['dn-b'].trim_end_ms)]).toEqual([1_500, null])
+  })
+
+  it('never moves an existing take into or out of a group on a re-attach', async () => {
+    await attach('take-a')
+    await attach('take-z')
+    await project('cell.audio.attach', { audioId: 'take-z', url: 'https://r2.invalid/take-z', slot: 'recording', pieceOf: 'take-a' })
+    const z = (await rows()).find((r) => r.audio_id === 'take-z')!
+    expect(z.piece_of).toBeNull()
+
+    await project('cell.audio.cut', { audioId: 'take-a', atMs: 1_500, newAudioId: 'take-b' })
+    await project('cell.audio.attach', { audioId: 'take-b', url: 'https://r2.invalid/take-a', slot: 'recording' })
+    const b = (await rows()).find((r) => r.audio_id === 'take-b')!
+    expect(b.piece_of).toBe('take-a')
+  })
+})

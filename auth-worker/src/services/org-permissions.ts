@@ -6,6 +6,7 @@ import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { planUnitCountsSql, aoeTodayIso } from "../../../db/shared/plan-units"
 import {
   inAudioCountedFileSetSql,
+  inAudioCountedFileSql,
   inCountedFileSql,
   inCountedFileSetSql,
   uncountedAudioFilesCteSql,
@@ -1261,6 +1262,16 @@ export interface PortfolioLane {
   archived?: boolean
   /** Source lanes ride along so the language pair is read from the row. Chips skip them. */
   role?: "source" | "target"
+  /**
+   * AQU-1951: this language's recordings. Cells with a selected dub take in
+   * this lane, and those whose takes meet the project's audio threshold. Read
+   * from the same file-scope progress rows as the text numbers above (and as
+   * the plan board's AUD bars), over the AUDIO form of the counted-file rule,
+   * so a dubbing project's cue sheet counts. Measured against the project's
+   * `audioTotalCells`: which cells exist does not change with the language.
+   */
+  audioCells: number
+  validatedAudioCells: number
 }
 
 export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioTotalCells: number; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number; lanes: PortfolioLane[]; unitsTotal: number; unitsDone: number; unitsOverdue: number }
@@ -1364,20 +1375,36 @@ interface LaneDbRow {
   structural_count: number | string | null
   structural_filled_count: number | string | null
   structural_validator_histogram: Record<string, number> | string | null
+  // AQU-1951: the lane's audio pair, and its structural subset.
+  audio_count: number | string | null
+  audio_validator_histogram: Record<string, number> | string | null
+  structural_audio_count: number | string | null
+  structural_audio_validator_histogram: Record<string, number> | string | null
+  /**
+   * AQU-1951: 1 when the row's file counts as TEXT work, else 0. The query admits
+   * every file whose RECORDINGS count, a superset that adds the cue sheet, so
+   * the text sums must skip the rows this is false for.
+   */
+  text_counted: number | string
 }
 
 interface PortfolioSettingsDbRow {
   project_id: string
   validation_count: number | string | null
+  /** AQU-1951: the audio threshold, read the way the portfolio's policy CTE reads it. */
+  validation_count_audio?: number | string | null
   /** AQU-1083 effective policy, already COALESCEd project → org → 'true'. */
   count_structural?: string | null
 }
 
 /** Endorsement threshold at which a cell counts as validated, per the project's settings (default 1, cap 15). */
-function readValidationCounts(settingsRows: PortfolioSettingsDbRow[]): Map<string, number> {
+function readValidationCounts(
+  settingsRows: PortfolioSettingsDbRow[],
+  column: "validation_count" | "validation_count_audio" = "validation_count",
+): Map<string, number> {
   const out = new Map<string, number>()
   for (const row of settingsRows) {
-    const value = Math.floor(Number(row.validation_count))
+    const value = Math.floor(Number(row[column]))
     const threshold = Number.isFinite(value) ? Math.min(MAX_VALIDATION_LEVEL, Math.max(1, value)) : 1
     out.set(row.project_id, threshold)
   }
@@ -1438,7 +1465,12 @@ async function fetchPortfolioLanes(
               fsp.validator_histogram AS validator_histogram, fsp.updated_at AS updated_at,
               fsp.structural_count AS structural_count,
               fsp.structural_filled_count AS structural_filled_count,
-              fsp.structural_validator_histogram AS structural_validator_histogram
+              fsp.structural_validator_histogram AS structural_validator_histogram,
+              fsp.audio_count AS audio_count,
+              fsp.audio_validator_histogram AS audio_validator_histogram,
+              fsp.structural_audio_count AS structural_audio_count,
+              fsp.structural_audio_validator_histogram AS structural_audio_validator_histogram,
+              CASE WHEN ${inCountedFileSql('fsp')} THEN 1 ELSE 0 END AS text_counted
          FROM file_section_progress fsp
          JOIN projects p ON p.id = fsp.project_id
          JOIN lanes l ON l.project_id = fsp.project_id AND l.id = fsp.lane_id
@@ -1447,7 +1479,10 @@ async function fetchPortfolioLanes(
           -- deleted file contributes one here too — and a lane chip that
           -- disagreed with the project total beside it is how the caption-track
           -- inflation first showed up.
-          AND ${inCountedFileSql('fsp')}${projectFilter}`,
+          -- AQU-1951: the AUDIO form of the rule, which also admits the cue
+          -- sheet a dubbing project records against; \`text_counted\` above
+          -- keeps those rows out of the text sums, as the text rule did here.
+          AND ${inAudioCountedFileSql('fsp')}${projectFilter}`,
     ).bind(...orgBinds, ...projectBinds).all<LaneDbRow>(),
     env.AQUILLA_PG.prepare(
       // Driven FROM projects, not from project_settings: a project that has
@@ -1457,6 +1492,7 @@ async function fetchPortfolioLanes(
       // before anyway (default threshold, no registered lanes).
       `SELECT p.id AS project_id,
               ps.validation_count AS validation_count,
+              ps.validation_count_audio AS validation_count_audio,
               COALESCE(ps.count_structural, os.count_structural, 'true') AS count_structural
          FROM projects p
          LEFT JOIN project_settings ps ON ps.project_id = p.id
@@ -1481,6 +1517,7 @@ async function fetchPortfolioLanes(
     }>(),
   ])
   const thresholds = readValidationCounts(settingsRows.results ?? [])
+  const audioThresholds = readValidationCounts(settingsRows.results ?? [], "validation_count_audio")
   // AQU-1083: which projects leave structural cells out. Absent = count them,
   // so a project with no settings row at all keeps today's numbers.
   const excluding = new Set(
@@ -1490,6 +1527,8 @@ async function fetchPortfolioLanes(
   )
   // Accumulate one lane entry per (project, lane tag).
   const acc = new Map<string, Map<string, PortfolioLane>>()
+  // AQU-1951: each lane's recordings, per (project, lane tag).
+  const audioAcc = new Map<string, Map<string, { audioCells: number; validatedAudioCells: number }>>()
   // AQU-1599: the project's source-cell count, summed over the SOURCE lane's
   // file rows. The lane-independent denominator every lane without progress
   // rows of its own borrows, and the number that used to be read off the ''
@@ -1521,7 +1560,11 @@ async function fetchPortfolioLanes(
     // project must never contribute a negative number to the lane's sum.
     const drop = excluding.has(row.project_id)
     const structuralTotal = drop ? Number(row.structural_count) || 0 : 0
+    const textCounted = Number(row.text_counted) === 1
     if (row.lane_role === "source") {
+      // A cue sheet's source rows are not the project's text: the denominator
+      // and the activity clock read text files only, as they always have.
+      if (!textCounted) continue
       sourceTotals.set(
         row.project_id,
         (sourceTotals.get(row.project_id) ?? 0)
@@ -1536,11 +1579,38 @@ async function fetchPortfolioLanes(
       }
       continue
     }
+    const lane = row.target_lang ?? ""
+    // AQU-1951: the lane's recordings, from every file whose recordings count
+    // (the cue sheet included), less the structural share exactly as the text
+    // numbers below are. A tally of their own, so a cue sheet's row never
+    // creates a text entry: a lane without text rows must still borrow the
+    // lane-independent denominator below.
+    let audioLanes = audioAcc.get(row.project_id)
+    if (!audioLanes) { audioLanes = new Map(); audioAcc.set(row.project_id, audioLanes) }
+    let audioEntry = audioLanes.get(lane)
+    if (!audioEntry) { audioEntry = { audioCells: 0, validatedAudioCells: 0 }; audioLanes.set(lane, audioEntry) }
+    const audioThreshold = audioThresholds.get(row.project_id) ?? 1
+    const structuralAudio = drop ? Number(row.structural_audio_count) || 0 : 0
+    const structuralAudioValidated = drop
+      ? validatedFromHistogram(row.structural_audio_validator_histogram, audioThreshold)
+      : 0
+    audioEntry.audioCells += Math.max(0, (Number(row.audio_count) || 0) - structuralAudio)
+    audioEntry.validatedAudioCells += Math.max(
+      0,
+      validatedFromHistogram(row.audio_validator_histogram, audioThreshold) - structuralAudioValidated,
+    )
+    // A cue sheet's row carries recordings, not text work.
+    if (!textCounted) continue
     let lanes = acc.get(row.project_id)
     if (!lanes) { lanes = new Map(); acc.set(row.project_id, lanes) }
-    const lane = row.target_lang ?? ""
     let entry = lanes.get(lane)
-    if (!entry) { entry = { lane, totalCells: 0, filledCells: 0, validatedCells: 0, lastEditAt: null }; lanes.set(lane, entry) }
+    if (!entry) {
+      entry = {
+        lane, totalCells: 0, filledCells: 0, validatedCells: 0, lastEditAt: null,
+        audioCells: 0, validatedAudioCells: 0,
+      }
+      lanes.set(lane, entry)
+    }
     const structuralFilled = drop ? Number(row.structural_filled_count) || 0 : 0
     const structuralValidated = drop
       ? validatedFromHistogram(row.structural_validator_histogram, threshold)
@@ -1578,6 +1648,8 @@ async function fetchPortfolioLanes(
       filledCells: progress?.filledCells ?? 0,
       validatedCells: progress?.validatedCells ?? 0,
       lastEditAt: progress?.lastEditAt ?? null,
+      audioCells: role === "target" ? audioAcc.get(row.project_id)?.get(tag)?.audioCells ?? 0 : 0,
+      validatedAudioCells: role === "target" ? audioAcc.get(row.project_id)?.get(tag)?.validatedAudioCells ?? 0 : 0,
       ...(row.archived_at != null && row.archived_at !== "" ? { archived: true } : {}),
     }
     let lanes = listed.get(row.project_id)

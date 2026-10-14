@@ -150,6 +150,53 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     expect(paScalar).toMatchObject({ totalCells: 45, validatedCells: 5 })
   })
 
+  // AQU-1951: audio has been per language since AQU-1591, and the Progress
+  // card's language tabs need each lane's own recordings rather than greying
+  // the audio tiles as "cross-language".
+  it("AQU-1951: each lane carries its own recordings, the cue sheet's included, against the project's audio threshold", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e1', 1, 'pa', 'file.create', 'wendi', '{}', 1000, 1000, 1), ('e2', 1, 'pa', 'file.create', 'wendi', '{}', 1000, 1000, 2)",
+    ).run()
+    // A subtitle file and the hidden cue sheet a dubbing workflow records against.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO files (id, project_id, name, role, kind, anchor_file_id, event_id, cell_count) VALUES
+        ('f1',   'pa', 'Episode 1',  NULL,         'vtt', NULL, 'e1', 45),
+        ('cue1', 'pa', 'Cue sheet',  'audio-cues', 'vtt', 'f1', 'e2', 40)`,
+    ).run()
+    // Two validators per take, so the histograms' 1-buckets do not count.
+    await env.AQUILLA_PG.prepare("INSERT INTO project_settings (project_id, settings) VALUES ('pa', ?)")
+      .bind(JSON.stringify({ validationCountAudio: 2 })).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, legacy_tag, position) VALUES
+        ('deflane1', 'pa', 'target', 'Default', '', 0),
+        ('eslane01', 'pa', 'target', 'es', 'es', 1)`,
+    ).run()
+    // '' lane: 10 recorded on the subtitles, 3 of them at two validators.
+    // es lane: nothing on the subtitles; 6 on the cue sheet, 5 at two.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, lane_id, total_count, filled_count, validator_histogram, audio_count, audio_validator_histogram, revision, updated_at) VALUES
+        ('pa','f1',  'file','', 'deflane1', 45, 15, '{}', 10, ?, 1, 1500),
+        ('pa','f1',  'file','', 'eslane01', 45, 2,  '{}', 0,  '{}', 1, 2600),
+        ('pa','cue1','file','', 'deflane1', 40, 0,  '{}', 0,  '{}', 1, 9000),
+        ('pa','cue1','file','', 'eslane01', 40, 0,  '{}', 6,  ?, 1, 9000)`,
+    ).bind(JSON.stringify({ "0": 4, "1": 3, "2": 3 }), JSON.stringify({ "1": 1, "2": 5 })).run()
+
+    const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { projects: Array<{ id: string; lanes: Array<{ lane: string; totalCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; validatedAudioCells: number }> }> }
+    const byLane = Object.fromEntries(body.projects.find((p) => p.id === "pa")!.lanes.map((l) => [l.lane, l]))
+    expect(byLane[""]).toMatchObject({ audioCells: 10, validatedAudioCells: 3 })
+    expect(byLane.es).toMatchObject({ audioCells: 6, validatedAudioCells: 5 })
+    // The cue sheet's rows carry recordings only: its 40 cells and its later
+    // updated_at stay out of the text numbers, as before.
+    expect(byLane[""]).toMatchObject({ totalCells: 45, filledCells: 15, lastEditAt: 1500 })
+    expect(byLane.es).toMatchObject({ totalCells: 45, filledCells: 2, lastEditAt: 2600 })
+  })
+
   it("AQU-538: a REGISTERED lane with no progress rows yet appears as a 0% row (PM sees the chip immediately)", async () => {
     await seedUser(1, "wendi")
     await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()

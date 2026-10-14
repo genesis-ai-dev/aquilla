@@ -69,3 +69,38 @@ function safeCount(value: unknown): number {
     ? value
     : 0
 }
+
+export interface IdmlDraftRejectionInput {
+  cells: readonly IdmlTelemetryCell[]
+  diagnostics?: readonly IdmlDiagnostic[]
+  /** Which drafting path refused: "single" | "batch" | "paragraph" | … */
+  mode: string
+  /** True when the slot-stitch repair pass ran and still could not recover. */
+  repairAttempted: boolean
+}
+
+export interface IdmlDraftRejectionProperties extends IdmlTelemetryProperties {
+  draft_mode: string
+  repair_attempted: boolean
+}
+
+/**
+ * AQU-1964: a draft refused for changing a protected IDML anchor was invisible
+ * — correct behaviour that nobody could count. Same boundary rules as
+ * `idmlTelemetryProperties`: codes and counts only, never the draft text, the
+ * source/target HTML, or the cell id (an IDML cell id IS its anchor locator,
+ * `Stories/Story_u363.xml#/idPkg:Story[1]/…`, so it is a member path).
+ */
+export function idmlDraftRejectionProperties(
+  input: IdmlDraftRejectionInput,
+): IdmlDraftRejectionProperties {
+  return {
+    ...idmlTelemetryProperties({
+      cells: input.cells,
+      ...(input.diagnostics ? { diagnostics: input.diagnostics } : {}),
+      durationMs: 0,
+    }),
+    draft_mode: input.mode,
+    repair_attempted: input.repairAttempted,
+  }
+}

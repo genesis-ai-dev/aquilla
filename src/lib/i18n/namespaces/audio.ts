@@ -614,6 +614,7 @@ export const audio = defineNamespace({
     "audio.aiError.dailyLimitTitle": "Daily AI limit reached",
     "audio.aiError.modelNotAvailableTitle": "Model not available",
     "audio.aiError.tooLargeTitle": "Too much text for this model",
+    "audio.aiError.protectedFormatTitle": "Protected formatting stopped this draft",
     "audio.aiError.geminiKeyRequiredTitle": "Gemini API key required",
     "audio.aiError.openRouterKeyRequiredTitle": "OpenRouter API key required",
     "audio.aiError.geminiFailedTitle": "Gemini TTS failed",
@@ -646,6 +647,10 @@ export const audio = defineNamespace({
       "Hosted AI is paused for the rest of the day — the platform reached its daily AI spend ceiling. It resets at midnight UTC. Nothing is wrong with your project; your own work is unaffected. To keep going now, switch this project to a custom AI provider in Project Settings.",
     "audio.aiError.tooLargeBody":
       "This request was larger than the selected model can handle. Draft fewer cells at once, lower the number of examples in AI settings, or pick a model with a larger context window.",
+    // AQU-1964: a draft refused for changing a protected IDML anchor. The
+    // refusal is correct; the silence was the bug.
+    "audio.aiError.protectedFormatBody":
+      "The AI draft changed formatting this document protects, so it was discarded and nothing was saved. Draft the cell again, or type the translation yourself around the protected part. The technical detail below names the protected part of the file.",
     "audio.aiError.geminiKeyRequiredBody":
       "Add a Gemini API key to use this Gemini voice, or switch the line to Inworld TTS (hosted, no key) or a local MMS engine.",
     "audio.aiError.geminiFailedBody":
@@ -2898,6 +2903,13 @@ export const audio = defineNamespace({
           "Popover heading when a completion/TTS request exceeded the selected " +
           "model's context window (a 413 or an explicit 'too large' provider error).",
       },
+      "audio.aiError.protectedFormatTitle": {
+        description:
+          "Popover heading (AQU-1964) when an AI draft was discarded because it "
+          + "changed formatting the imported document protects — an IDML anchor. "
+          + "The draft was refused on purpose and nothing was saved, so the "
+          + "heading must read as a deliberate refusal, not a crash or an outage.",
+      },
       "audio.aiError.geminiKeyRequiredTitle": {
         description:
           "Popover heading when a Gemini-voice TTS request fails because no Gemini " +
@@ -3057,6 +3069,14 @@ export const audio = defineNamespace({
           "can act on them: draft fewer cells, lower the example count in AI " +
           "settings, or choose a bigger model. 'AI settings' is a UI location — " +
           "match the translation used for that settings section.",
+      },
+      "audio.aiError.protectedFormatBody": {
+        description:
+          "Body for protectedFormatTitle (AQU-1964). Says three things in order: "
+          + "the draft was discarded, nothing was saved, and the two ways "
+          + "forward — draft again, or translate by hand around the protected "
+          + "part. 'Technical detail' names the disclosure control beneath it: "
+          + "use the same wording as that control's label.",
       },
       "audio.aiError.geminiKeyRequiredBody": {
         description:

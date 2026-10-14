@@ -1,19 +1,19 @@
 import { describe, expect, it, vi } from "vitest"
 import { cacheProjectMediaOffline, collectFrontierMedia, type CacheProjectMediaDeps } from "./media-cache"
 import type { FrontierSession } from "@/lib/frontier/types"
-import type { CellRow } from "@/lib/sync/cells-read-types"
 
 const session = { jwt: "jwt", username: "u" } as FrontierSession
 
 describe("collectFrontierMedia", () => {
   // Takes, dubs and source clips each hang their pointers off different
   // metadata shapes; any new shape must be found without editing this module.
-  it("finds R2 pointers at any depth, de-duplicated, and skips external URLs", () => {
+  it("finds R2 pointers at any depth, de-duplicated, and skips external URLs and deleted takes", () => {
     const row = {
       metadata: {
         takes: [{ url: "frontier-audio://a1.webm" }, { url: "frontier-audio://a2.wav" }],
         dub: { nested: { src: "frontier-audio://a1.webm" } },
         video: "https://youtube.com/watch?v=x",
+        old: { url: "frontier-audio://deleted.webm", isDeleted: true },
       },
     }
     const found = [...collectFrontierMedia("f1", row).values()]
@@ -26,17 +26,17 @@ describe("collectFrontierMedia", () => {
 
 function fakeDeps(cached: Set<string>, usage = 0, budget = 1_000): CacheProjectMediaDeps & { fetched: string[] } {
   const fetched: string[] = []
-  const rows = [
-    { cellId: "c1", metadata: { takes: [{ url: "frontier-audio://a1.webm" }] } },
-    { cellId: "c2", metadata: { takes: [{ url: "frontier-audio://a2.webm" }, { url: "frontier-audio://gone.webm" }] } },
-  ] as unknown as CellRow[]
+  const response = {
+    cells: {
+      c1: { attachments: { a1: { url: "frontier-audio://a1.webm" } } },
+      c2: { attachments: { a2: { url: "frontier-audio://a2.webm" }, gone: { url: "frontier-audio://gone.webm" } } },
+    },
+  }
   return {
     fetched,
     fetchSyncToken: vi.fn(async () => ({ token: "t" })) as unknown as CacheProjectMediaDeps["fetchSyncToken"],
     fetchProjectFiles: vi.fn(async () => [{ fileId: "f1" }]) as unknown as CacheProjectMediaDeps["fetchProjectFiles"],
-    streamFileCells: vi.fn(async (_p, _f, _t, onPage) => {
-      await onPage(rows, true)
-    }) as CacheProjectMediaDeps["streamFileCells"],
+    fetchFileAudioAttachments: vi.fn(async () => response) as unknown as CacheProjectMediaDeps["fetchFileAudioAttachments"],
     fetchCellAudio: vi.fn(async ({ audioId }) => {
       if (audioId === "gone") throw Object.assign(new Error("404"), { status: 404 })
       fetched.push(audioId)

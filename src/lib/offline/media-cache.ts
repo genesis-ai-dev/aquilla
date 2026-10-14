@@ -4,12 +4,13 @@
 // offline copy holds cell text only, so without this a downloaded project's
 // players showed nothing playable once the network went away.
 //
-// Pointers are found by scanning each server cell row for `frontier-audio://`
-// strings rather than by knowing every metadata shape (takes, dubs, source
-// clips, generated voice): a new shape is picked up without touching this
-// file. External http(s) media is skipped — we don't own it and can't cache
+// Pointers come from each file's audio-attachments read (takes, dubs, source
+// clips, generated voice — every lane), found by scanning for
+// `frontier-audio://` strings rather than knowing every shape, so a new slot
+// is picked up without touching this file. Deleted takes are skipped. External http(s) media is skipped — we don't own it and can't cache
 // it reliably. Like the Media-lens warmer it never evicts to make room.
-import { fetchProjectFiles as fetchProjectFilesDefault, streamFileCells as streamFileCellsDefault } from "@/lib/sync/cells-read"
+import { fetchProjectFiles as fetchProjectFilesDefault } from "@/lib/sync/cells-read"
+import { fetchFileAudioAttachments as fetchFileAudioAttachmentsDefault } from "@/lib/sync/cell-audio-read"
 import { fetchSyncToken as fetchSyncTokenDefault } from "@/lib/sync/sync-token"
 import { fetchCellAudio as fetchCellAudioDefault, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
@@ -37,6 +38,7 @@ export function collectFrontierMedia(fileId: string, value: unknown, into = new 
   } else if (Array.isArray(value)) {
     for (const item of value) collectFrontierMedia(fileId, item, into)
   } else if (value && typeof value === "object") {
+    if ((value as { isDeleted?: unknown }).isDeleted === true) return into
     for (const item of Object.values(value)) collectFrontierMedia(fileId, item, into)
   }
   return into
@@ -53,7 +55,7 @@ export interface CacheProjectMediaResult {
 export interface CacheProjectMediaDeps {
   fetchSyncToken: typeof fetchSyncTokenDefault
   fetchProjectFiles: typeof fetchProjectFilesDefault
-  streamFileCells: typeof streamFileCellsDefault
+  fetchFileAudioAttachments: typeof fetchFileAudioAttachmentsDefault
   fetchCellAudio: typeof fetchCellAudioDefault
   cache: {
     available: typeof audioCacheAvailable
@@ -67,7 +69,7 @@ export interface CacheProjectMediaDeps {
 const defaultDeps: CacheProjectMediaDeps = {
   fetchSyncToken: fetchSyncTokenDefault,
   fetchProjectFiles: fetchProjectFilesDefault,
-  streamFileCells: streamFileCellsDefault,
+  fetchFileAudioAttachments: fetchFileAudioAttachmentsDefault,
   fetchCellAudio: fetchCellAudioDefault,
   cache: {
     available: audioCacheAvailable,
@@ -91,9 +93,7 @@ export async function cacheProjectMediaOffline(
   const { token } = await deps.fetchSyncToken(session.jwt, projectId, OFFLINE_DOWNLOAD_TOKEN_FILE_ID)
   const targets = new Map<string, MediaTarget>()
   for (const file of await deps.fetchProjectFiles(projectId, token)) {
-    await deps.streamFileCells(projectId, file.fileId, token, (rows) => {
-      for (const row of rows) collectFrontierMedia(file.fileId, row, targets)
-    })
+    collectFrontierMedia(file.fileId, await deps.fetchFileAudioAttachments(projectId, file.fileId, token), targets)
   }
   result.total = targets.size
 

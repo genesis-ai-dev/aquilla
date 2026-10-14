@@ -2333,6 +2333,42 @@ describe("plan board on the overview", () => {
     expect(screen.queryByTestId("file-breakdown-header")).toBeNull()
   })
 
+  it("reads the plan in the language the editor opens when the project has no unnamed one", async () => {
+    // AQU-1594: a new project's first language is tagged with its own name and
+    // there is no '' lane. Reading '' found no lane at all, so a file with four
+    // takes in Spanish showed 0% and no audio bar. An archived lane in first
+    // position is passed over, as the editor passes over it.
+    const lane = (over: Record<string, unknown>) => ({
+      language: null, name: null, langCode: null, archivedAt: null, ...over,
+    })
+    useProject.mockReturnValue({
+      project: projectRecord({
+        level: 600,
+        lanes: [
+          lane({ id: "aaaa0001", role: "source", legacyTag: null, position: 0 }),
+          lane({ id: "aaaa0002", role: "target", language: "French", legacyTag: "French", position: 0, archivedAt: "2026-10-01" }),
+          lane({ id: "aaaa0003", role: "target", language: "Spanish", legacyTag: "Spanish", position: 1 }),
+        ],
+      } as Partial<ProjectRecord> & { level: number }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "John", totalCells: 5, filledCells: 0, validatedCells: 0,
+      aiDraftedCells: 0, audioCells: 4, validatedAudioCells: 0, recordedMs: 16000,
+      lastEditAt: null, deadlineAt: null, sourceLanguage: null, targetLanguage: null,
+    }])
+    fetchProjectPlan.mockImplementation((_id: string, _tok: string, laneTag: string) => Promise.resolve({
+      projectId: "p1", lane: laneTag, validationCount: 1, revision: 1,
+      units: [planUnit({ fileName: "Market scene.vtt", totalCount: 5, filledCount: 0, audioCount: laneTag === "Spanish" ? 4 : 0 })],
+    }))
+    renderOverview()
+
+    const row = await screen.findByTestId("plan-row-f1-")
+    await waitFor(() => expect(within(row).getByText("AUD")).toBeInTheDocument())
+    expect(fetchProjectPlan.mock.calls.map((c) => c[2])).not.toContain("")
+    expect(fetchProjectPlan.mock.calls.map((c) => c[2])).toContain("Spanish")
+  })
+
   it("summarises how many units are done without naming the unit", async () => {
     useProject.mockReturnValue({ project: projectRecord({ level: 600 }), status: "ready", refresh })
     getPortfolio.mockResolvedValue([{

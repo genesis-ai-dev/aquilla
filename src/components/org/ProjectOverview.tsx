@@ -48,6 +48,7 @@ import { OverviewLaneTable } from "./OverviewLaneTable"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { isLaneArchived } from "@/components/project-lane-archive"
 import { laneLabelForTag, laneLabelsByTag } from "@/lib/lanes/lane-language"
+import { firstPositionLaneId, laneTagForId } from "@/lib/lanes/active-lane-choice"
 import { laneChipLabel } from "./project-lanes"
 import { isHiddenTimelineFile } from "@/lib/parsers/types"
 import { downloadBlob } from "@/lib/export/export-service"
@@ -712,11 +713,20 @@ export function ProjectOverview() {
   const [selectedPlanUnitId, setSelectedPlanUnitId] = useState<string | null>(null)
   const [planCsvCopied, setPlanCsvCopied] = useState(false)
   /**
-   * The lane every plan read is measured in. "All" (null) and the default-lane
-   * tab both mean the default lane server-side, exactly as the progress reads
-   * resolve them — see the lane-tab note above.
+   * The lane every plan read is measured in: the tab picked, or with none
+   * picked ("All"), the lane the editor opens — the first live lane in
+   * position order.
+   *
+   * Not simply '': since AQU-1594 a new project's first language is tagged
+   * with its own name and the project has no '' lane, so asking for '' read no
+   * lane at all — every row 0% text and no audio bar, however much had been
+   * recorded. A project whose '' lane is still first reads what it always did.
    */
-  const planLane = selectedLaneTag ?? ""
+  const defaultPlanLane = useMemo(
+    () => laneTagForId(firstPositionLaneId(targetLaneRows), targetLaneRows),
+    [targetLaneRows],
+  )
+  const planLane = selectedLaneTag ?? defaultPlanLane
   /**
    * ONE token for the whole plan, not one per read.
    *
@@ -777,7 +787,13 @@ export function ProjectOverview() {
     patchUnit: patchPlanUnit,
     status: planStatus,
     refresh: refreshPlan,
-  } = useProjectPlan({ projectId: id ?? null, lane: planLane, getToken: getPlanToken })
+  } = useProjectPlan({
+    // Wait for the project: its lane rows decide `planLane`, and a read made
+    // before they arrive asks for '' and flashes 0% on a project with no '' lane.
+    projectId: project ? id ?? null : null,
+    lane: planLane,
+    getToken: getPlanToken,
+  })
   /**
    * The rows the board is actually drawing, in drawn order. The board owns the
    * filter, the arrangement and the folds that decide this, so the inspector's

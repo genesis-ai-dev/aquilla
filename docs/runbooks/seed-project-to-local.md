@@ -140,6 +140,10 @@ docker rm -f aquilla-dev-pg
   hand-offs cannot be loaded side by side without swapping the meta.
 - No R2 content, so nothing audio-related is exercisable locally from a seed.
 - Remote targets: `pnpm seed:load --target "<url>" --confirm-remote-target <host>`
-  loads into another Postgres, for example the Neon `dev` branch. A host
-  declared production (`NEON_PG_HOST`, `AQUILLA_PROD_PG_HOST`) is refused
-  outright; the loader deletes before it inserts (AQU-750).
+  loads into another Postgres. A host declared production (`NEON_PG_HOST`,
+  `AQUILLA_PROD_PG_HOST`) is refused outright; the loader deletes before it
+  inserts (AQU-750). **Do not point it at the shared Neon `dev` branch for an
+  org that has real accounts:** the load deletes and re-inserts every user in
+  the seeded projects' org and group closure as scrubbed `user_<id>` rows with
+  no password, which signs those people out of dev.aquilla.app for good. The
+  seed is for throwaway databases.

@@ -5,7 +5,7 @@
 // parent rule for each (project, file, cell, parent_id) slot.
 
 import { describe, it, expect } from 'vitest'
-import { handleRebuildProjectionRequest } from '../events/rebuild'
+import { EVENT_PAGE_LIMIT, handleRebuildProjectionRequest } from '../events/rebuild'
 import { type EventRow } from './helpers/in-memory-db'
 import { makeTestDb } from './helpers/pg-test-db'
 
@@ -319,5 +319,90 @@ describe('handleRebuildProjectionRequest — successful replay', () => {
     ) as Response
     expect(res.status).toBe(500)
     expect(await res.text()).toContain('unknown event kind')
+  })
+})
+
+describe('handleRebuildProjectionRequest — bounded memory + atomic swap (AQU-1827)', () => {
+  it('a failure mid-replay leaves the PREVIOUS projection intact, and the project rebuildable', async () => {
+    // The whole rebuild is one transaction, so the wipe at step 1 rolls back
+    // with the replay that failed. Before AQU-1827 the wipe had already
+    // committed and the project was stranded empty — the exact state this
+    // endpoint exists to repair.
+    const { db, snapshot } = await makeTestDb({
+      cells: [{
+        project_id: 'proj-1', file_id: 'file-a', cell_id: 'cell-1',
+        side: 'target', value: 'previous', event_id: 'evt-old', last_editor: 'x',
+        last_edit_at: 1, validated: 0, word_count: 1,
+      }],
+      cell_validators: [{
+        project_id: 'proj-1', file_id: 'file-a', cell_id: 'cell-1',
+        user_id: 7, username: 'bob', validated_at: 1,
+      }],
+      events: [
+        evt({
+          id: 'evt-good',
+          kind: 'target.cell.create',
+          parent_id: null,
+          payload: JSON.stringify({ cellId: 'cell-2', value: 'rebuilt' }),
+          server_seq: 1,
+        }),
+        evt({
+          id: 'evt-bad',
+          kind: 'cell.future.unknown',
+          parent_id: null,
+          payload: '{}',
+          server_seq: 2,
+        }),
+      ],
+    })
+
+    const res = await handleRebuildProjectionRequest(
+      makeRequest('/admin/projects/proj-1/rebuild-projection'),
+      makeEnv(db),
+    ) as Response
+    expect(res.status).toBe(500)
+    expect(await res.text()).toContain('unknown event kind')
+
+    const tables = await snapshot()
+    expect(tables.cells).toHaveLength(1)
+    expect(tables.cells[0].value).toBe('previous')
+    expect(tables.cells[0].event_id).toBe('evt-old')
+    expect(tables.cell_validators).toHaveLength(1)
+    // Nothing from the aborted replay leaked through either.
+    expect(tables.cells.some((c) => c.cell_id === 'cell-2')).toBe(false)
+  })
+
+  it('replays a log that spans the keyset pages, in order, with no row left behind', async () => {
+    // Exactly EVENT_PAGE_LIMIT events: the first page comes back full (so the
+    // cursor advances and a second page is fetched) and the second comes back
+    // empty. The pre-paging single SELECT could not exercise either boundary.
+    const total = EVENT_PAGE_LIMIT
+    const { db, snapshot } = await makeTestDb({
+      events: Array.from({ length: total }, (_, i) => evt({
+        id: `evt-${i}`,
+        kind: 'source.cell.create',
+        cell_id: `cell-${i}`,
+        parent_id: null,
+        payload: JSON.stringify({ cellId: `cell-${i}`, value: `v${i}` }),
+        server_seq: i + 1,
+      })),
+    })
+
+    const res = await handleRebuildProjectionRequest(
+      makeRequest('/admin/projects/proj-1/rebuild-projection'),
+      makeEnv(db),
+    ) as Response
+    expect(res.status).toBe(200)
+    const body = await res.json() as any
+    expect(body.eventsRead).toBe(total)
+    expect(body.eventsProjected).toBe(total)
+    expect(body.cellsAfter).toBe(total)
+
+    const cells = (await snapshot()).cells
+    expect(cells).toHaveLength(total)
+    // The rows either side of the page boundary, and the last row of all.
+    const byCell = new Map(cells.map((c) => [c.cell_id, c.value]))
+    expect(byCell.get('cell-0')).toBe('v0')
+    expect(byCell.get(`cell-${EVENT_PAGE_LIMIT - 1}`)).toBe(`v${EVENT_PAGE_LIMIT - 1}`)
   })
 })

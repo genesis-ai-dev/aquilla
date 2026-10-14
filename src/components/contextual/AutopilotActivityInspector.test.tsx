@@ -238,6 +238,30 @@ describe("AutopilotActivityInspector", () => {
     expect(announcement).toHaveTextContent("Finished checking the next passage.")
   })
 
+  // AQU-1847. A run can be held behind another file, another project in the
+  // same workspace, or another tenant, under the org and platform-wide
+  // capacity ceilings. The queued status used to fall through to the generic
+  // "Autopilot status changed", which reads as a stall — the opposite of the
+  // honest answer, which is that the run is in line and will start.
+  it("names a run queued for model capacity instead of calling it a bare status change", async () => {
+    const queuedEvent = {
+      ...activity.events[0],
+      id: "event-queued",
+      kind: "run_state",
+      status: "queued",
+      spanId: undefined,
+      spanLabel: undefined,
+      summary: "Autopilot is waiting for model capacity",
+      details: { done: 3, total: 10, failed: 0 },
+      createdAt: "2026-08-11T10:03:00.000Z",
+    }
+    activityMock.mockResolvedValue({ ...activity, events: [queuedEvent] })
+    renderInspector()
+
+    expect(await screen.findByText("Autopilot is waiting for model capacity")).toBeInTheDocument()
+    expect(screen.queryByText("Autopilot status changed")).not.toBeInTheDocument()
+  })
+
   it("opens failed details and offers a truthful new-run retry", async () => {
     const failed = { ...run, status: "failed", lastError: "Agent credit cap reached." }
     runsMock.mockResolvedValueOnce(runPage([failed]))

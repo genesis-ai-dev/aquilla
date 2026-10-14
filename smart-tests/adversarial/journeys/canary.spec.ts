@@ -6,6 +6,7 @@ import { mintSyncToken } from "../../../e2e/helpers/seed-project"
 import { OUTBOX_SCHEMA_VERSION } from "../../../src/lib/sync/outbox-types"
 import { verifyInvariants, type Contract } from "../invariants"
 import { readRunContext, readSnapshot, seedFixture } from "../state"
+import { readTargetLane } from "../../target-lane"
 
 /*
  * The health gate. No model runs here. Attacks depend on this project, so
@@ -76,10 +77,14 @@ test("canary: a planted wrong-row write is rejected", async () => {
     body: JSON.stringify({ events: [{
       id: uuidv7(), schemaVersion: OUTBOX_SCHEMA_VERSION, kind: "target.cell.commit",
       projectId: seeded.projectId, fileId: seeded.fileId, cellId: wrongCell, parentId: head,
-      author: owner.username, payload: { value: expected }, clientTs: Date.now(),
+      author: owner.username, payload: { value: expected, ...await readTargetLane(owner.jwt, seeded.projectId) },
+      clientTs: Date.now(),
     }] }),
   })
   expect(response.ok).toBe(true)
+  // The server must accept the planted write, or the oracle has nothing to catch.
+  const { rejected } = await response.json() as { rejected: unknown[] }
+  expect(rejected, `planted write was rejected: ${JSON.stringify(rejected)}`).toEqual([])
   const outcome = verifyInvariants(before, await readSnapshot(readers), contract, seen)
   await attachEvidence(testInfo, { check: "planted-wrong-row", outcome, projects: [{ projectId: seeded.projectId, owner: owner.username }] })
   expect(outcome.verdict).toBe("product_failure")

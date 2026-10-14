@@ -1,4 +1,4 @@
-import { admitChatUsage, METERED_MAX_OUTPUT_TOKENS, meterChatStream, providerRejectedPreModel, releaseChatUsage, settleChatUsage, type ChatUsage } from '../lib/billing/chat-usage'
+import { admitChatUsage, METERED_MAX_OUTPUT_TOKENS, meterChatStream, observeChatStreamCost, providerRejectedPreModel, releaseChatUsage, settleChatUsage, type ChatUsage } from '../lib/billing/chat-usage'
 import { weeklyUsageActive } from '../lib/billing/usage-mode'
 // POST /api/v1/chat/completions — OpenAI-compatible authenticated proxy to
 // OpenRouter. Streams via SSE when `stream: true`; otherwise returns the
@@ -22,12 +22,13 @@ import type { Env, Variables, AuthUser } from "../types"
 import { authMiddleware } from "../middleware/auth"
 import { resolveProjectRole } from "../services/project-permissions"
 import { runAiGuard } from "../lib/ai-budget"
+import { checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
 import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../../db/shared/rate-limit"
 import { getPlatformSettingsCached, type PlatformSettings } from "../lib/platform-settings"
 import { creditGuard, recordCredit } from "../lib/credits"
 import { countWords } from "../lib/billing/plans"
 import { recordWords, wordCapBody, wordGuard } from "../lib/billing/words"
-import { openRouterExtras } from "../lib/llm-vendor"
+import { openRouterExtras, streamUsageOptions } from "../lib/llm-vendor"
 import { makePostgres, type AquillaDb } from "../../../db/shim/postgres"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
 import {
@@ -37,6 +38,11 @@ import {
   recordAbOutcome,
   setAbHeaders,
 } from "../lib/model-ab"
+import {
+  logVendorTimeout,
+  vendorDeadline,
+  vendorTimeoutMessage,
+} from "../../../shared/vendor-timeouts"
 
 const chat = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -177,14 +183,24 @@ async function resolveChatOrgId(
  * user's. The request-scoped shim closes as soon as the Response returns, so
  * this opens its own connection (same as contextual's selfTickLoop). Ledger
  * writes were already best-effort; a failure here is logged, never surfaced.
+ *
+ * `waitFor` defers the work until something the write depends on has happened —
+ * for a streamed reply, the stream ending so its real cost is known (AQU-1871).
+ * The connection is opened only once that resolves, so a long reply does not
+ * hold Postgres open for its whole duration. A rejected `waitFor` still runs
+ * the work: bookkeeping degrades to what it knows rather than vanishing.
  */
 function afterResponse(
   c: Context<{ Bindings: Env; Variables: Variables }>,
   work: (db: AquillaDb) => Promise<void>,
+  waitFor?: Promise<unknown>,
 ): void {
-  const shim = c.env.PG_CONNECTION_STRING ? makePostgres(c.env.PG_CONNECTION_STRING) : null
-  const db = (shim as unknown as AquillaDb | null) ?? c.env.AQUILLA_PG
-  detach(c, work(db).finally(() => shim?.close()))
+  detach(c, (async () => {
+    if (waitFor) await waitFor.catch(() => undefined)
+    const shim = c.env.PG_CONNECTION_STRING ? makePostgres(c.env.PG_CONNECTION_STRING) : null
+    const db = (shim as unknown as AquillaDb | null) ?? c.env.AQUILLA_PG
+    try { await work(db) } finally { shim?.close() }
+  })())
 }
 
 /** Keep a best-effort task alive past the response; failures are logged only. */
@@ -210,6 +226,11 @@ function buildOpenRouterBody(request: ChatRequest, model: string, env: Env): str
     stream: request.stream,
     max_tokens: request.max_tokens,
     ...openRouterExtras(env.OPENROUTER_BASE_URL),
+    // AQU-1871: a streamed reply's cost is only in the stream if we asked for
+    // it. OpenRouter answers `usage.include` above; every other
+    // OpenAI-compatible upstream needs stream_options.include_usage, or the
+    // ledger would see no cost at all for a streamed call.
+    ...(request.stream ? streamUsageOptions(env.OPENROUTER_BASE_URL) : {}),
     ...(request.response_format && { response_format: request.response_format }),
   })
 }
@@ -304,6 +325,14 @@ chat.post(
       return c.json(guard.body, guard.status)
     }
 
+    // Platform daily spend ceiling (AQU-1869) — checked on BOTH the legacy and
+    // the metered path, before the org guards below, because it protects the
+    // shared OpenRouter key rather than any one org's allowance.
+    const spendCeiling = await checkAiSpendCeiling(c.env.AQUILLA_PG, c.env, "chat")
+    if (!spendCeiling.ok) {
+      return c.json(spendCeiling.body, spendCeiling.status)
+    }
+
     // Credit guard + attribution (AQU-414 follow-up): chat invoked from a
     // project context bills that project's org; project-less chat falls back
     // to org 0 as before. The guard uses the same org so chat respects the
@@ -323,8 +352,12 @@ chat.post(
     }
     // Legacy credit/word guards are retired once the weekly ledger meters this call.
     if (!usage) {
+      // AQU-1871: org 0 is the no-org fallback every project-less chat lands
+      // in, so guarding it as one org let any user's spend consume the cap
+      // that was supposed to bound each of them. With no real org to bill, the
+      // cap is the caller's own.
       const [chatCreditCheck, chatWordCheck] = await Promise.all([
-        creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm"),
+        creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm", orgId === 0 ? user.id : undefined),
         wordGuard(c.env.AQUILLA_PG, orgId),
       ])
       if (!chatCreditCheck.ok) {
@@ -354,6 +387,23 @@ chat.post(
         return c.json({ error: 'usage_accounting_unavailable' }, 503)
       }
     }
+    // AQU-1849: the proxy's one upstream call, bounded two different ways.
+    //
+    //   * `stream: false` — nothing arrives until the whole completion is
+    //     done, so the deadline is TOTAL: it stays armed across the `.json()`
+    //     read and is disarmed by the `finally` when the handler returns.
+    //   * `stream: true` — a long generation is not a hang, so the deadline is
+    //     FIRST BYTE only: `await fetch` resolves when the headers arrive and
+    //     the handler returns right after wiring the stream up, which disarms
+    //     it. The body streams on unbounded afterwards.
+    //
+    // The deadline is linked to the client's signal (metered requests already
+    // forwarded it) so a user who navigates away still cancels upstream — and
+    // `timedOut()` keeps that case out of the vendor-timeout logs.
+    const deadline = vendorDeadline(
+      request.stream ? "openRouterStreamFirstByte" : "openRouterNonStreaming",
+      usage ? c.req.raw.signal : null,
+    )
     try {
       const startedAt = Date.now()
       const upstream = await fetch(resolveOpenRouterUrl(c.env), {
@@ -363,7 +413,7 @@ chat.post(
           "Content-Type": "application/json",
         },
         body: buildOpenRouterBody(request, model, c.env),
-        ...(usage ? { signal: c.req.raw.signal } : {}),
+        signal: deadline.signal,
       })
       const latencyMs = Date.now() - startedAt
 
@@ -405,25 +455,37 @@ chat.post(
       }
 
       if (request.stream) {
-        // Streaming: pass body through unchanged. We can't inspect the usage
-        // object from a streaming response without buffering it (defeats the
-        // point). Record a flat 1¢ fallback estimate so the ledger always has
-        // a row — this is the cheap/low-priority rail. Written after the
-        // Response so the first token isn't held behind them (AQU-617).
+        // Streaming: the bytes pass through unchanged, but the frames are
+        // scanned on the way past so the ledger gets the provider's real cost
+        // instead of the flat 1¢ it used to record — a 16k-output reply on a
+        // frontier model is ~25¢, so org caps and the usage dashboard
+        // under-reported by 10–25× and would not have tripped once
+        // enforcement was turned on (AQU-1871). Written after the Response,
+        // and only once the stream has ended, so neither the first token nor
+        // the last is held behind a ledger write (AQU-617).
+        const observed = !usage && upstream.body ? observeChatStreamCost(upstream.body) : undefined
         afterResponse(c, async (db) => {
           await logAb(db)
           if (!usage) {
-            await recordCredit(db, orgId, user.id, "llm", 1, 1)
+            // An unresolved cost is recorded as zero cost and one unit: the
+            // request still shows up, and no invented charge enters the
+            // ledger (db/shared/billing-cost.ts's rule).
+            if (observed?.costCents === undefined) {
+              console.warn("[chat] streamed reply reported no usable cost", { orgId, userId: user.id, model })
+            }
+            await recordCredit(db, orgId, user.id, "llm", observed?.costCents ?? 0, 1)
             await recordWords(db, orgId, user.id, "llm", chatWords)
           }
-        })
+        }, observed?.ended)
         const streamHeaders = new Headers({
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",
           Connection: "keep-alive",
         })
         if (ab) setAbHeaders(streamHeaders, ab)
-        const body = usage && upstream.body ? meterChatStream(upstream.body, c.env, usage) : upstream.body
+        const body = usage && upstream.body
+          ? meterChatStream(upstream.body, c.env, usage)
+          : (observed?.body ?? upstream.body)
         return new Response(body, { status: 200, headers: streamHeaders })
       }
 
@@ -454,8 +516,18 @@ chat.post(
       }
       return c.json(data)
     } catch (error) {
+      // AQU-1849: a blown deadline is the upstream's fault, not ours — 504 so
+      // the client can say "the model did not respond" and offer a retry,
+      // instead of the blanket 500 that used to swallow it.
+      if (deadline.timedOut()) {
+        const vendor = request.stream ? "openRouterStreamFirstByte" : "openRouterNonStreaming"
+        logVendorTimeout(vendor, error)
+        return c.json({ error: "openrouter_timeout", message: vendorTimeoutMessage(vendor) }, 504)
+      }
       console.error("Error in chat completion:", error)
       return c.json({ error: "internal_error", message: "Chat completion failed" }, 500)
+    } finally {
+      deadline.clear()
     }
   },
 )

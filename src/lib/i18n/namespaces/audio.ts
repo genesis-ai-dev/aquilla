@@ -619,6 +619,7 @@ export const audio = defineNamespace({
     "audio.aiError.geminiFailedTitle": "Gemini TTS failed",
     "audio.aiError.inworldNotConfiguredTitle": "Inworld TTS isn't configured",
     "audio.aiError.inworldFailedTitle": "Inworld TTS failed",
+    "audio.aiError.creditCapTitle": "AI credit allowance used up",
     "audio.aiError.seedVcNotConfiguredTitle": "Voice cloning isn't configured",
     "audio.aiError.seedVcFailedTitle": "Voice cloning failed",
     "audio.aiError.signInRequiredTitle": "Sign in required",
@@ -640,6 +641,9 @@ export const audio = defineNamespace({
     // actually reads to decide what to do was the untranslated half.
     "audio.aiError.dailyLimitBody":
       "Daily AI limit reached — resets at midnight UTC. Try again tomorrow, or switch this project to a custom AI provider.",
+    // AQU-1869: the platform-wide spend ceiling, not the user's own quota.
+    "audio.aiError.spendCeilingBody":
+      "Hosted AI is paused for the rest of the day — the platform reached its daily AI spend ceiling. It resets at midnight UTC. Nothing is wrong with your project; your own work is unaffected. To keep going now, switch this project to a custom AI provider in Project Settings.",
     "audio.aiError.tooLargeBody":
       "This request was larger than the selected model can handle. Draft fewer cells at once, lower the number of examples in AI settings, or pick a model with a larger context window.",
     "audio.aiError.geminiKeyRequiredBody":
@@ -2924,6 +2928,14 @@ export const audio = defineNamespace({
           "Popover heading when Inworld TTS was configured but the synthesize " +
           "call itself failed (upstream vendor error).",
       },
+      "audio.aiError.creditCapTitle": {
+        description:
+          "Popover heading when the sync-worker refused synthesis with 429 " +
+          "credit_cap_exceeded because the org has spent its credit allowance " +
+          "(AQU-1872). Distinct from inworldFailedTitle — the vendor was never " +
+          "called, so this must not be worded as an engine or Gemini-key fault; " +
+          "the body names the org admin who can raise the cap.",
+      },
       "audio.aiError.seedVcNotConfiguredTitle": {
         description:
           "Popover heading when a non-Inworld clone voice needs Seed-VC conversion " +
@@ -3025,6 +3037,18 @@ export const audio = defineNamespace({
           "reset, or move the project to its own AI provider so the platform " +
           "budget stops applying. 'UTC' is a technical term the sentence needs — " +
           "keep it recognizable rather than translating it to a local zone.",
+      },
+      "audio.aiError.spendCeilingBody": {
+        description:
+          "Body shown under providerUnavailableTitle when the PLATFORM has hit its " +
+          "daily dollar ceiling for hosted AI (AQU-1869) and every paid AI call is " +
+          "refused until the next UTC day. This is a platform-wide pause, not the " +
+          "user's own allowance — unlike dailyLimitBody it must not read as a " +
+          "personal quota or tell them to wait out their own limit. Names the one " +
+          "thing they can do now: switch the project to its own AI provider in " +
+          "Project Settings. 'UTC' and 'Project Settings' are a technical term " +
+          "and a UI location — keep the first recognizable and match the second " +
+          "to that settings page's translated name.",
       },
       "audio.aiError.tooLargeBody": {
         description:

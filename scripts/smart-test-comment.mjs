@@ -43,9 +43,12 @@ export function evidenceDefect(suite, sha) {
   return null
 }
 
-export function renderReport({ sha, phase, suite, runUrl, jobStatus }) {
+export function renderReport({ sha, phase, suite, runUrl, jobStatus, releaseRef }) {
   if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error("Expected an exact commit SHA")
   if (!["running", "finished"].includes(phase)) throw new Error("Invalid report phase")
+  if (releaseRef !== undefined && !/^release\/\d{4}\/\d{2}\/\d{2}-\d{2}$/.test(releaseRef)) {
+    throw new Error("Invalid release ref")
+  }
   const hostedEvidence = /^https:\/\/aquilla-qa\.5-161-201-46\.sslip\.io\/aquilla-qa\/artifacts\/[a-f0-9]{64}\/suite\.json$/.test(runUrl ?? "")
   if (runUrl && !hostedEvidence && !/^https:\/\/github\.com\/genesis-ai-dev\/aquilla\/actions\/runs\/\d+$/.test(runUrl)) {
     throw new Error("Invalid workflow URL")
@@ -53,11 +56,15 @@ export function renderReport({ sha, phase, suite, runUrl, jobStatus }) {
   const lines = [MARKER, "## Jev smart testing", "",
     `Commit: [\`${sha.slice(0, 8)}\`](https://github.com/${REPO}/commit/${sha}).`, "",
     "Jev walks user journeys on a reset, isolated local stack built from this commit. Independent checks verify server state and fresh browser sessions.", ""]
+  let productFail = false
+  /** @type {null | "pass" | "fail" | "inconclusive" | "unavailable"} */
+  let deployDecision = null
   if (phase === "running") {
     lines.push("**Starting.** The runner has started setup. No outcome has passed yet.")
   } else {
     const defect = evidenceDefect(suite, sha)
     if (defect) {
+      deployDecision = "unavailable"
       lines.push(UNAVAILABLE, "", NOT_A_FINDING, "",
         `No complete, clean-checkout evidence matches this commit. ${defect}`)
     } else {
@@ -97,6 +104,7 @@ export function renderReport({ sha, phase, suite, runUrl, jobStatus }) {
         }
         if (!["VERIFIED PASS", "PASS (model-free check)"].includes(verdict)) verified = false
         else passedTitles.add(test.title)
+        if (verdict === "FAIL (model-free check)" || verdict === "PRODUCT FAILURE") productFail = true
         if (CONCLUSIVE.includes(verdict)) conclusive++
         const calls = evidence?.agent?.modelCalls ?? []
         for (const call of calls) {
@@ -117,11 +125,13 @@ export function renderReport({ sha, phase, suite, runUrl, jobStatus }) {
       const selfTests = suite.planned.filter(isSelfTest)
       const unqualified = selfTests.filter((title) => !passedTitles.has(title))
       if (unqualified.length > 0 || conclusive === 0) {
+        deployDecision = "unavailable"
         lines.push(UNAVAILABLE, "", NOT_A_FINDING, "", unqualified.length > 0
           ? `The oracle self-test did not pass (${unqualified.length} of ${selfTests.length}: ${unqualified.map(escape).join("; ")}), so every journey verdict in this run is unqualified.`
           : `No journey reached a verdict (0 of ${suite.planned.length} planned).`,
           "", "Per-journey rows are withheld deliberately: an unqualified run's rows read like product findings. Start with the runner and the stack it builds, not with this pull request's diff.")
       } else {
+        deployDecision = productFail ? "fail" : verified ? "pass" : "inconclusive"
         lines.push(verified ? "**PASS — all listed outcomes verified.**" : "**NOT A PASS — review failures and incomplete checks.**",
           "", "| Journey | Result | Duration |", "| --- | --- | --- |", ...rows,
           "", `Provider-reported model cost: $${cost.toFixed(6)} (${costReported}/${modelCalls} calls report cost; excludes runner compute).`)
@@ -139,16 +149,63 @@ export function renderReport({ sha, phase, suite, runUrl, jobStatus }) {
   if (runUrl) lines.push("", hostedEvidence
     ? `[Download outcome evidence](${runUrl}) (private bearer link; expires after seven days).`
     : `[Run logs and downloadable evidence](${runUrl}).`)
-  lines.push("", "**Re-runs on this commit are not available.** The QA host queues one job per PR and commit, "
-    + "so a repeat event for this commit is discarded as a duplicate; reopening the PR does not requeue it. "
-    + "Push a new commit to dispatch a fresh run, or ask the QA host operator — the account that posted this "
-    + "comment — to requeue the job. A transient failure cannot be retried away, so read this report as it stands.")
-  lines.push("", "Advisory coverage, not a release guarantee. No retries convert a failed journey into a pass. Preview deployment and workflows outside these journeys are not verified by this run.")
+  if (releaseRef) {
+    const decision = {
+      fail: "**FAIL — this release HEAD does not deploy.**",
+      unavailable: "**HARNESS UNAVAILABLE does not hold this deploy.**",
+      inconclusive: "**INCONCLUSIVE — this does not hold the deploy.**",
+      pass: "**PASS — a person may deploy this release HEAD.**",
+    }[deployDecision ?? ""]
+    lines.push("", `Release branch \`${releaseRef}\`. Only a result for this branch's current HEAD counts.`)
+    if (decision) lines.push("", decision)
+    lines.push("", "A repeat delivery of this same commit is discarded. A new commit on this release branch starts another run. A result for an older commit does not decide the deploy.")
+    lines.push("", "A journey FAIL holds this HEAD. An inconclusive journey and a harness that produced no evidence do not. No retries convert a failed journey into a pass.")
+  } else {
+    lines.push("", "**Re-runs on this commit are not available.** The QA host queues one job per PR and commit, "
+      + "so a repeat event for this commit is discarded as a duplicate; reopening the PR does not requeue it. "
+      + "Push a new commit to dispatch a fresh run, or ask the QA host operator — the account that posted this "
+      + "comment — to requeue the job. A transient failure cannot be retried away, so read this report as it stands.")
+    lines.push("", "Advisory coverage, not a release guarantee. No retries convert a failed journey into a pass. Preview deployment and workflows outside these journeys are not verified by this run.")
+  }
   return lines.join("\n")
 }
 
-/** Trusted reporting process: never imports or executes code from the PR. */
-export async function publishReport({ pr, sha, body, token, author, fetchImpl = fetch }) {
+async function publishRelease({ ref, sha, body, token, author, fetchImpl }) {
+  if (!/^release\/\d{4}\/\d{2}\/\d{2}-\d{2}$/.test(ref) || !/^[a-f0-9]{40}$/.test(sha)) {
+    throw new Error("Invalid release identity")
+  }
+  const api = async (route, method = "GET", payload) => {
+    const response = await fetchImpl(`https://api.github.com/repos/${REPO}${route}`, {
+      method, redirect: "error", signal: AbortSignal.timeout(30_000),
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "Content-Type": "application/json" },
+      ...(payload ? { body: JSON.stringify(payload) } : {}),
+    })
+    if (!response.ok) throw new Error(`GitHub report request failed: HTTP ${response.status}`)
+    return response.json()
+  }
+  const current = async () => (await api(`/commits/${ref}`)).sha === sha
+  if (!await current()) return "superseded"
+  let existing
+  for (let page = 1; page <= 20; page++) {
+    const comments = await api(`/commits/${sha}/comments?per_page=100&page=${page}`)
+    existing ??= comments.find((comment) => comment.user?.login === author && comment.body?.startsWith(MARKER))
+    if (comments.length < 100) break
+    if (page === 20) throw new Error("Comment pagination limit reached")
+  }
+  if (!await current()) return "superseded"
+  if (existing?.body === body) return "unchanged"
+  if (existing && !Number.isSafeInteger(existing.id)) throw new Error("Invalid comment ID")
+  await api(
+    existing ? `/commits/comments/${existing.id}` : `/commits/${sha}/comments`,
+    existing ? "PATCH" : "POST",
+    { body },
+  )
+  return existing ? "updated" : "created"
+}
+
+/** Trusted reporting process: never imports or executes code from the release. */
+export async function publishReport({ pr, ref, sha, body, token, author, fetchImpl = fetch }) {
+  if (ref) return publishRelease({ ref, sha, body, token, author, fetchImpl })
   if (!Number.isSafeInteger(pr) || pr <= 0 || !/^[a-f0-9]{40}$/.test(sha)) throw new Error("Invalid PR identity")
   const api = async (route, method = "GET", payload) => {
     const response = await fetchImpl(`https://api.github.com/repos/${REPO}${route}`, {

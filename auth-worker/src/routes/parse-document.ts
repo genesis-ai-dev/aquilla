@@ -19,8 +19,15 @@
 import { Hono } from "hono"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { unzipSync, unzlibSync, inflateSync } from "fflate"
+import { readBytesWithLimit } from "../../../shared/http-body-limit"
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024 // 2 MB
+// Ceiling on the whole multipart envelope (AQU-1858). The form used to be
+// parsed before MAX_FILE_BYTES was applied, so a caller could make the route
+// materialize an arbitrarily large upload it was always going to refuse. The
+// slack over MAX_FILE_BYTES covers the boundary markers and part headers
+// wrapping a file that is itself exactly at the limit.
+const MAX_UPLOAD_BYTES = MAX_FILE_BYTES + 16 * 1024
 // word/document.xml inflated size cap (AQU pen-test finding, 2026-07-29): a
 // small deflate-based zip can decompress to gigabytes before this route ever
 // looks at its content — unlike the client-side import path (zip-safety.ts),
@@ -417,9 +424,23 @@ function decodePdfString(s: string): string {
 // ── Route ─────────────────────────────────────────────────────────────────────
 
 parseDocument.post("/", authMiddleware, async (c) => {
+  // Size-gate the upload before the form is parsed (AQU-1858): an oversize
+  // Content-Length is refused from the headers alone, and a chunked body with
+  // no declared length is read through the same byte cap. Only the capped
+  // bytes reach the multipart parser.
+  const upload = await readBytesWithLimit(c.req.raw.headers, c.req.raw.body, MAX_UPLOAD_BYTES)
+  if (!upload.ok) {
+    return c.json(
+      { error: `File too large. Maximum is ${megabytes(MAX_FILE_BYTES)} MB.` },
+      413,
+    )
+  }
+
   let formData: FormData
   try {
-    formData = await c.req.formData()
+    formData = await new Response(upload.bytes, {
+      headers: { "content-type": c.req.header("content-type") ?? "" },
+    }).formData()
   } catch {
     return c.json({ error: "Expected multipart/form-data with a `file` field." }, 400)
   }

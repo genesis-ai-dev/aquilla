@@ -43,17 +43,25 @@ import {
 } from './chain-claims'
 import { broadcastRealtime } from './broadcast'
 import type { BroadcastEnv } from './broadcast'
+import { deferBestEffort } from './defer-best-effort'
 import { checkProjectMembershipDetailed, type MembershipDetail } from './membership'
 import { ROLE, isForeignCommentKind, requiredRoleForForeignComment, roleLabel } from './role-policy'
 import { createCommentFloorsCache } from './comment-floors'
-import { sendCommentNotifications, type EmailService } from '../notification-email'
+import { type EmailService } from '../notification-email'
+import { dispatchCommentNotification } from '../side-effects/queue'
+import type { SideEffectMessage } from '../side-effects/types'
 import { collectLaneTouches, notifyLiveDownstreamsOfUpstreamChanges } from './link-notify'
+import {
+  coalesceFileCounterRecompute,
+  type CounterImpact,
+} from './counter-recompute-coalescer'
 import {
   fileProgressRecomputeStmt,
   fullProgressRecomputeStmts,
   sectionsProgressRecomputeStmt,
 } from './progress-projection'
 import { makeRequestCache } from './request-cache'
+import { dbFailureInfo, reportServerRejections } from './rejection-telemetry'
 
 // Max statements per batch() transaction — a conservative self-imposed cap (Postgres has no hard limit; keeps any single transaction bounded).
 const BATCH_LIMIT = 100
@@ -206,10 +214,17 @@ export interface EventsRouteEnv {
    * sent on comment.create via the Cloudflare Email Service `send_email` binding. */
   EMAIL?: EmailService
   EMAIL_FROM?: string
+  /** AQU-1824 — when present (deployed envs), comment notifications are handed
+   * to the side-effect queue instead of being sent inside this invocation.
+   * Absent locally/e2e, where `dispatchCommentNotification` sends inline. */
+  SIDE_EFFECTS?: Queue<SideEffectMessage>
   /** Base URL for deep links in notification emails (e.g. https://aquilla.app). */
   BASE_URL?: string
   /** AQU-1415: "1" turns the lane write wall on. Unset keeps additive scopes. */
   LANE_READ_WALL?: string
+  /** PostHog Logs project token; unset (local dev, e2e) makes telemetry a no-op. */
+  POSTHOG_KEY?: string
+  POSTHOG_HOST?: string
 }
 
 interface AcceptedEntry {
@@ -1711,13 +1726,13 @@ export async function handleEventsWriteRequest(
     // later chunk fails still recomputes over its durable prefix — the totals
     // match the events that actually landed rather than the ones we hoped to
     // write.
-    const buildRecomputeStmts = (entries: readonly PendingEntry[]): AquillaStatement[] => {
-      const counterFiles = new Map<string, {
-        projectId: string
-        fileId: string
-        fullSections: boolean
-        cellIds: Set<string>
-      }>()
+    //
+    // AQU-1826: and once per FILE across concurrent requests, not just within
+    // one request — see counter-recompute-coalescer.ts. The impact is collected
+    // per file here and the pass itself is coalesced, so ten editors saving one
+    // cell each in the same file no longer scan it ten times.
+    const collectCounterImpacts = (entries: readonly PendingEntry[]): CounterImpact[] => {
+      const counterFiles = new Map<string, CounterImpact>()
       for (const entry of entries) {
         if (entry.counterFile) {
           const key = `${entry.counterFile.projectId}|${entry.counterFile.fileId}`
@@ -1733,21 +1748,23 @@ export async function handleEventsWriteRequest(
           }
         }
       }
+      return [...counterFiles.values()]
+    }
+
+    const buildRecomputeStmts = (f: CounterImpact): AquillaStatement[] => {
       const recomputeTs = Date.now()
       const stmts: AquillaStatement[] = []
-      for (const f of counterFiles.values()) {
-        stmts.push(fileCountersRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
-        if (f.fullSections) {
-          // A full rebuild supersedes any per-cell section recompute for the
-          // same file, so the touched cell ids are deliberately dropped here.
-          stmts.push(...fullProgressRecomputeStmts(db, f.projectId, f.fileId, recomputeTs))
-        } else {
-          stmts.push(fileProgressRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
-          if (f.cellIds.size > 0) {
-            stmts.push(
-              sectionsProgressRecomputeStmt(db, f.projectId, f.fileId, recomputeTs, [...f.cellIds]),
-            )
-          }
+      stmts.push(fileCountersRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
+      if (f.fullSections) {
+        // A full rebuild supersedes any per-cell section recompute for the
+        // same file, so the touched cell ids are deliberately dropped here.
+        stmts.push(...fullProgressRecomputeStmts(db, f.projectId, f.fileId, recomputeTs))
+      } else {
+        stmts.push(fileProgressRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
+        if (f.cellIds.size > 0) {
+          stmts.push(
+            sectionsProgressRecomputeStmt(db, f.projectId, f.fileId, recomputeTs, [...f.cellIds]),
+          )
         }
       }
       return stmts
@@ -1840,18 +1857,27 @@ export async function handleEventsWriteRequest(
      * the last chunk, and on the failure path over the durable prefix.
      */
     const recomputeCommitted = async (): Promise<void> => {
-      try {
-        const stmts = buildRecomputeStmts(committedEntries)
-        if (stmts.length === 0) return
-        await runBatch(stmts)
-      } catch (recomputeErr) {
-        // The events are committed; only the derived counters are behind.
-        // Loud, because a silent miss here is a counter drift nobody can
-        // trace back — but not fatal, and NOT reported as a rejection.
-        console.error(
-          `[events] file counter recompute failed after commit (${committedEntries.length} events accepted; counters self-heal on the next commit):`,
-          recomputeErr,
-        )
+      // Sequential, as the single all-files batch it replaced was: a wide
+      // request must not open one transaction per file at once.
+      for (const impact of collectCounterImpacts(committedEntries)) {
+        try {
+          // AQU-1826: coalesced per file across requests. The pass that answers
+          // us always starts after this impact was merged, so the counters are
+          // still correct by the time the request responds.
+          await coalesceFileCounterRecompute(impact, async (drained) => {
+            const stmts = buildRecomputeStmts(drained)
+            if (stmts.length === 0) return
+            await runBatch(stmts)
+          })
+        } catch (recomputeErr) {
+          // The events are committed; only the derived counters are behind.
+          // Loud, because a silent miss here is a counter drift nobody can
+          // trace back — but not fatal, and NOT reported as a rejection.
+          console.error(
+            `[events] file counter recompute failed after commit (${committedEntries.length} events accepted; counters self-heal on the next commit):`,
+            recomputeErr,
+          )
+        }
       }
     }
 
@@ -1864,6 +1890,7 @@ export async function handleEventsWriteRequest(
       await recomputeCommitted()
     } catch (err) {
       console.error("[events] DB batch failed:", err)
+      const batchFailure = dbFailureInfo(err)
       // The chunks that did commit are durable, so their counters must still
       // be brought up to date (AQU-1261) before we report the partial result.
       await recomputeCommitted()
@@ -1880,6 +1907,9 @@ export async function handleEventsWriteRequest(
         }
       }
 
+      // These 5xx results ride inside a 200, which the request wrapper in
+      // index.ts never ships — report them here (grouped, throttled).
+      reportServerRejections(env, ctx, rawEvents, rejected, batchFailure)
       return Response.json(
         {
           accepted,
@@ -1903,8 +1933,13 @@ export async function handleEventsWriteRequest(
       (entry) => !replayedCellEventIds.has(entry.id),
     )
 
-    // Comment notifications — fire-and-forget via ctx.waitUntil so they
-    // never delay the response. Only fires for comment.create events.
+    // Comment notifications — handed to the side-effect queue (AQU-1824) via
+    // ctx.waitUntil so they never delay the response. The waitUntil now covers
+    // a single `queue.send()`; recipient resolution and the sends themselves
+    // happen in the queue consumer, where they are retryable and
+    // dead-letterable. Without a queue binding (local dev, e2e)
+    // `dispatchCommentNotification` falls back to the old inline send. Only
+    // fires for comment.create events.
     if (ctx && env.AQUILLA_PG) {
       const baseUrl = env.BASE_URL ?? 'https://aquilla.app'
       for (const entry of newEntries) {
@@ -1920,9 +1955,7 @@ export async function handleEventsWriteRequest(
             const body = p.body ?? ''
             const parentCommentId = p.parentCommentId ?? null
             ctx.waitUntil(
-              sendCommentNotifications({
-                env,
-                db: env.AQUILLA_PG!,
+              dispatchCommentNotification(env, {
                 baseUrl,
                 projectId: rawEvent.projectId,
                 author: entry.author,
@@ -2025,7 +2058,14 @@ export async function handleEventsWriteRequest(
           }),
         )
       }
-      await Promise.all(doFanOut)
+      // AQU-1837: the subrequests above are ALREADY in flight (stub.fetch is
+      // eager) — awaiting them is what used to cost the author. A busy project
+      // DO queues this __broadcast behind its own work, and every save in the
+      // project inherited that delay. The author's own result is complete at
+      // this point (`applied[]` rides the HTTP response below) and a missed
+      // peer broadcast is non-fatal by design, so let the fan-out settle after
+      // the response instead of in front of it.
+      await deferBestEffort(Promise.all(doFanOut), ctx, 'events/route ProjectSync fan-out')
     }
 
     // FRO-479 push accelerator — see link-notify.ts for the full contract.
@@ -2074,6 +2114,8 @@ export async function handleEventsWriteRequest(
     }
   }
 
+  // A handler / auth 5xx inside this 200 (the batch itself committed).
+  reportServerRejections(env, ctx, rawEvents, rejected)
   return Response.json({
     accepted,
     rejected,

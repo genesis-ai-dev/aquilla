@@ -23,10 +23,28 @@ export type { JevQuestion }
 
 /** 120 an hour, expressed in the shared limiter's fixed 15-minute window. */
 export const JEV_PROJECT_CAP_PER_WINDOW = 30
-const RATE_LIMIT_KIND = "jev_decisions"
+/**
+ * AQU-1690: autopilot's Bible data questions — one batched call per span, plus
+ * one per expectation repair. Its own bucket, so a long run can never use up
+ * the cap react and triage share.
+ */
+export const JEV_BIBLE_QA_CAP_PER_WINDOW = 120
 const DEFAULT_TIMEOUT_MS = 10_000
 
-export type JevPurpose = "react" | "triage"
+export type JevPurpose = "react" | "triage" | "bible-qa"
+
+/** The rate-limit bucket and cap for each purpose. React and triage share one, as they always have. */
+const PURPOSE_LIMITS: Readonly<Record<JevPurpose, { kind: string; cap: number }>> = {
+  react: { kind: "jev_decisions", cap: JEV_PROJECT_CAP_PER_WINDOW },
+  triage: { kind: "jev_decisions", cap: JEV_PROJECT_CAP_PER_WINDOW },
+  "bible-qa": { kind: "jev_bible_qa", cap: JEV_BIBLE_QA_CAP_PER_WINDOW },
+}
+
+/** Each purpose's kill switch: the env var that, set to "off", keeps that purpose on its fixed rules. */
+function switchedOff(env: Env, purpose: JevPurpose): boolean {
+  const flag = purpose === "react" ? env.JEV_REACT : purpose === "bible-qa" ? env.JEV_BIBLE_QA : undefined
+  return flag?.trim().toLowerCase() === "off"
+}
 
 export type JevAnswer =
   | { kind: "noul"; p: number }
@@ -86,35 +104,49 @@ export async function decide(env: Env, input: DecideInput): Promise<DecideResult
     usage: null,
   })
 
-  if (input.purpose === "react" && env.JEV_REACT?.trim().toLowerCase() === "off") return heuristic("disabled")
+  if (switchedOff(env, input.purpose)) return heuristic("disabled")
   if (!env.OPENROUTER_API_KEY) return heuristic("no_key")
   const timeoutMs = input.deadline === undefined ? DEFAULT_TIMEOUT_MS : Math.min(DEFAULT_TIMEOUT_MS, input.deadline - Date.now())
   if (timeoutMs <= 0) return heuristic("timeout")
 
   const identifier = `project:${input.projectId}`
-  const recent = await countRecentRateLimitEvents(env.AQUILLA_PG, RATE_LIMIT_KIND, identifier)
-  if (recent >= JEV_PROJECT_CAP_PER_WINDOW) return heuristic("capped")
-  await recordRateLimitEvent(env.AQUILLA_PG, RATE_LIMIT_KIND, identifier)
+  const limit = PURPOSE_LIMITS[input.purpose]
+  const recent = await countRecentRateLimitEvents(env.AQUILLA_PG, limit.kind, identifier)
+  if (recent >= limit.cap) return heuristic("capped")
+  await recordRateLimitEvent(env.AQUILLA_PG, limit.kind, identifier)
 
   const called = await callJev(env, { model: JEV_MODEL, state: input.state, questions: input.questions }, timeoutMs)
   if (!called.ok) return heuristic(called.reason)
+  return decideResultFromBody(called.body, input.questions, input.fallback)
+}
 
-  const raw = (called.body as { answers?: Record<string, unknown> } | null)?.answers ?? {}
-  const fallback = input.fallback()
+/**
+ * A decisions response as a DecideResult: each question's answer, or its
+ * fallback when the model left it out; all fallbacks when it answered none.
+ * Exported so the shadow eval (scripts/jev-shadow-eval.ts, AQU-1701) reads
+ * answers exactly as production does.
+ */
+export function decideResultFromBody(
+  body: unknown,
+  questions: Record<string, JevQuestion>,
+  fallbackOf: () => Record<string, JevAnswer>,
+): DecideResult {
+  const raw = (body as { answers?: Record<string, unknown> } | null)?.answers ?? {}
+  const fallback = fallbackOf()
   const answers: Record<string, JevAnswer> = {}
   let fromModel = 0
-  for (const [key, question] of Object.entries(input.questions)) {
+  for (const [key, question] of Object.entries(questions)) {
     const parsed = parseAnswer(raw[key], question)
     if (parsed) fromModel += 1
     answers[key] = parsed ?? fallback[key]
   }
-  const total = Object.keys(input.questions).length
-  if (fromModel === 0) return heuristic("upstream")
+  const total = Object.keys(questions).length
+  if (fromModel === 0) return { answers: fallback, decidedBy: "heuristic", reason: "upstream", model: null, usage: null }
   return {
     answers,
     decidedBy: fromModel === total ? "model" : "mixed",
     ...(fromModel === total ? {} : { reason: "partial" as const }),
     model: JEV_MODEL,
-    usage: usageOf(called.body),
+    usage: usageOf(body),
   }
 }

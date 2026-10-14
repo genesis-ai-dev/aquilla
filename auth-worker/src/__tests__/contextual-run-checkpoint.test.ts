@@ -199,11 +199,11 @@ describe("contextual run checkpoints (AQU-1845)", () => {
 // because without the GRANT the runtime role silently cannot use the table and
 // the decorator above degrades to calling the provider every time — a feature
 // that quietly does nothing rather than a visible failure.
-describe("contextual_run_steps migration 0158", () => {
+describe("contextual_run_steps migration 0169", () => {
   const sql = readFileSync(
     path.resolve(
       path.dirname(fileURLToPath(import.meta.url)),
-      "../../../db/postgres/migrations/0158_contextual_run_steps.sql",
+      "../../../db/postgres/migrations/0169_contextual_run_steps.sql",
     ),
     "utf8",
   )

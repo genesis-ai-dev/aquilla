@@ -73,6 +73,46 @@ describe("IDML read-surface pointer selection", () => {
     })).toEqual({ kind: "slot", slot: 3, offset: 7 })
   })
 
+  it("keeps the clicked empty slot when the browser has no caret there", () => {
+    document.body.innerHTML =
+      `<p data-idml-version="2">`
+      + `<span data-idml-slot="0" data-idml-protected="slot" class="idml-style-bold"></span>`
+      + `<span data-idml-slot="1" data-idml-protected="slot" data-style-segment-empty></span>`
+      + `<span data-idml-slot="2" data-idml-protected="slot" class="idml-style-bold"></span>`
+      + `</p>`
+    const gap = document.querySelector<HTMLElement>("[data-idml-slot='1']")!
+    ;(
+      document as Document & { caretRangeFromPoint?: (x: number, y: number) => Range | null }
+    ).caretRangeFromPoint = () => null
+
+    expect(idmlPointerSelectionFromPoint({
+      clientX: 8,
+      clientY: 8,
+      target: gap,
+    })).toEqual({ kind: "slot", slot: 1, offset: 0 })
+  })
+
+  it("keeps the clicked slot when the caret lands on the paragraph instead", () => {
+    document.body.innerHTML =
+      `<p id="cell" data-idml-version="2">`
+      + `<span data-idml-slot="4" data-idml-protected="slot" class="idml-style-bold"></span>`
+      + `</p>`
+    const cell = document.querySelector<HTMLElement>("#cell")!
+    const slot = cell.querySelector<HTMLElement>("[data-idml-slot]")!
+    const caret = document.createRange()
+    caret.setStart(cell, 0)
+    caret.collapse(true)
+    ;(
+      document as Document & { caretRangeFromPoint?: (x: number, y: number) => Range | null }
+    ).caretRangeFromPoint = () => caret
+
+    expect(idmlPointerSelectionFromPoint({
+      clientX: 4,
+      clientY: 4,
+      target: slot,
+    })).toEqual({ kind: "slot", slot: 4, offset: 0 })
+  })
+
   it("does not create a pointer selection for a protected slot", () => {
     document.body.innerHTML =
       `<span data-idml-slot="2" data-idml-protected="slot" contenteditable="false">LOCK</span>`

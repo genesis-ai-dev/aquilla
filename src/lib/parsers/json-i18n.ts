@@ -219,3 +219,70 @@ export function exportJson(
   const json = JSON.stringify(replaced, null, detectIndent(originalContent)) + "\n"
   return new Blob([json], { type: "application/json;charset=utf-8" })
 }
+
+/** A leaf's owning container path and its own last segment, for display. */
+export interface JsonPathParts {
+  /** The leaf's container path (`app` for `app.title`); `""` at the document root. */
+  parent: string
+  /** The leaf's own segment (`title`, `[2]`, `["weird key"]`). */
+  label: string
+}
+
+/**
+ * Split a path produced by {@link joinPath} into its container path and its
+ * own last segment. Bracketed keys are quoted JSON strings, so a `.` or `]`
+ * inside one (`cfg["a.b"]`) is part of the key, not a separator — the scan
+ * tracks quoting and bracket depth rather than splitting on punctuation.
+ */
+export function splitJsonPath(path: string): JsonPathParts {
+  let depth = 0
+  let inQuote = false
+  // Where the LAST top-level segment starts, and where its parent path ends.
+  let labelAt = 0
+  let parentEnd = 0
+  for (let i = 0; i < path.length; i++) {
+    const ch = path[i]
+    if (inQuote) {
+      if (ch === "\\") i += 1
+      else if (ch === '"') inQuote = false
+      continue
+    }
+    if (ch === '"') inQuote = true
+    else if (ch === "[") {
+      if (depth === 0) {
+        labelAt = i
+        parentEnd = i
+      }
+      depth += 1
+    } else if (ch === "]") {
+      depth -= 1
+    } else if (ch === "." && depth === 0) {
+      labelAt = i + 1
+      parentEnd = i
+    }
+  }
+  return { parent: path.slice(0, parentEnd), label: path.slice(labelAt) }
+}
+
+/** String leaves of one container, in walk order. */
+export interface JsonLeafGroup {
+  /** Shared container path (`""` for root-level leaves). */
+  parent: string
+  leaves: JsonStringLeaf[]
+}
+
+/**
+ * Group string leaves by their container path, preserving first-appearance
+ * order of both the groups and the leaves inside them. This is what the
+ * key-picker UI lists: one toggle per key, its leaves underneath (AQU-525).
+ */
+export function groupJsonLeaves(leaves: readonly JsonStringLeaf[]): JsonLeafGroup[] {
+  const groups = new Map<string, JsonLeafGroup>()
+  for (const leaf of leaves) {
+    const { parent } = splitJsonPath(leaf.path)
+    const group = groups.get(parent)
+    if (group) group.leaves.push(leaf)
+    else groups.set(parent, { parent, leaves: [leaf] })
+  }
+  return [...groups.values()]
+}

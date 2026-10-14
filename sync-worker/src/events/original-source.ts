@@ -6,6 +6,19 @@ import { sourceArtifactDescriptor } from "../../../shared/import-contract"
 
 const BASE64_INLINE_FORMATS = new Set(["docx", "pptx", "idml"])
 
+/**
+ * Whether a legacy inline `raw_source` for this format is base64 rather than
+ * UTF-8 text — i.e. whether it can be *corrupt* rather than merely absent.
+ */
+export function isBase64InlineFormat(format: string): boolean {
+  return BASE64_INLINE_FORMATS.has(format)
+}
+
+/** Decode a legacy base64 side-car, or `null` when the bytes are corrupt. */
+export function decodeInlineOriginal(raw: string): Uint8Array | null {
+  return decodeBase64(raw)
+}
+
 export interface SourceBlobRow {
   format: string
   raw_source: string | null
@@ -61,4 +74,29 @@ export async function readOriginalSourceBytes(
     format: blob.format,
     contentType,
   }
+}
+
+/**
+ * AQU-1863: streaming counterpart of `readOriginalSourceBytes`. Returns the
+ * R2 object's body as a stream — never buffered — so a bundle writer can pipe
+ * a 50 MB original through without holding it. Legacy inline blobs are small
+ * by construction and come back as bytes.
+ *
+ * Returns `null` when the blob has no bytes (missing R2 object, no recorded
+ * source, corrupted side-car); callers that already reported a 404 for the
+ * empty case skip the entry instead.
+ */
+export async function openOriginalSourceStream(
+  blob: SourceBlobRow,
+  snapshots: R2Bucket,
+): Promise<ReadableStream<Uint8Array> | Uint8Array | null> {
+  if (blob.r2_key) {
+    const object = await snapshots.get(blob.r2_key)
+    return object?.body ?? null
+  }
+  if (blob.raw_source == null || blob.raw_source === "") return null
+  if (BASE64_INLINE_FORMATS.has(blob.format)) {
+    return decodeBase64(blob.raw_source)
+  }
+  return new TextEncoder().encode(blob.raw_source)
 }

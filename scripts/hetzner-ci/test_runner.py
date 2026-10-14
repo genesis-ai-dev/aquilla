@@ -24,25 +24,25 @@ class RunnerTests(unittest.TestCase):
             runner.command([sys.executable, "-c", "import time; time.sleep(10)"], io.BytesIO(), timeout=0.1)
 
     def test_persisted_jobs_are_validated_before_use(self):
+        ref = "release/2026/10/07-01"
         with patch.object(runner, "current") as current:
-            for job in [(1, True, "a" * 40), (1, -1, "a" * 40), (1, 716, "main;whoami")]:
-                with self.assertRaises(ValueError):
-                    runner.execute({}, job)
+            with self.assertRaises(ValueError):
+                runner.execute({}, (1, 0, "main;whoami", ref))
+            self.assertEqual(runner.execute({}, (1, 716, "a" * 40, "")), "superseded")
             current.assert_not_called()
 
     def test_stale_jobs_do_not_download_or_start_containers(self):
         with patch.object(runner, "current", return_value=False), patch.object(runner, "command") as command:
-            self.assertEqual(runner.execute({}, (1, 716, "a" * 40)), "superseded")
+            self.assertEqual(
+                runner.execute({}, (1, 0, "a" * 40, "release/2026/10/07-01")), "superseded")
             command.assert_not_called()
 
-    def test_github_revalidation_rejects_forks_and_new_heads(self):
-        pull = {"state": "open", "draft": False,
-                "head": {"sha": "a" * 40, "repo": {"id": runner.REPO_ID}}}
-        with patch.object(runner, "github", return_value=pull):
-            self.assertTrue(runner.current({}, 716, "a" * 40))
-            self.assertFalse(runner.current({}, 716, "b" * 40))
-            pull["head"]["repo"]["id"] = 1
-            self.assertFalse(runner.current({}, 716, "a" * 40))
+    def test_github_revalidation_rejects_moved_heads(self):
+        ref = "release/2026/10/07-01"
+        with patch.object(runner, "github", return_value={"sha": "a" * 40}):
+            self.assertTrue(runner.current({}, ref, "a" * 40))
+            self.assertFalse(runner.current({}, ref, "b" * 40))
+            self.assertFalse(runner.current({}, "dev", "a" * 40))
 
     def test_provider_settings_never_fall_back_to_another_endpoint(self):
         settings = {"TYPESAFE_API_KEY": "test-decision", "TEXT_MODEL_API_KEY": "test-text",
@@ -63,7 +63,8 @@ class RunnerTests(unittest.TestCase):
     def test_reporting_credentials_never_enter_command_arguments(self):
         token = "synthetic-test-token"
         with patch.object(runner, "command") as command:
-            runner.report({"github_token": token, "author": "test-owner"}, 716, "a" * 40, "running")
+            runner.report({"github_token": token, "author": "test-owner"},
+                           "release/2026/10/07-01", "a" * 40, "running")
             args, kwargs = command.call_args
             self.assertNotIn(token, repr(args))
             self.assertEqual(json.loads(kwargs["input"])["token"], token)
@@ -97,7 +98,7 @@ class InterruptedDrainTests(unittest.TestCase):
             now = time.time()
             db.execute("INSERT INTO jobs(pr,sha,status,created,updated) VALUES(?,?,?,?,?)",
                        (716, "a" * 40, "interrupted", now - age, now - age))
-            return db.execute("SELECT id,pr,sha,updated FROM jobs").fetchone()
+            return db.execute("SELECT id,pr,sha,ref,updated FROM jobs").fetchone()
 
     def status(self, job_id):
         with runner.database() as db:

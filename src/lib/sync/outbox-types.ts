@@ -16,7 +16,7 @@
  */
 
 import type { CameraState } from "@/lib/sync/cells-read-types"
-import type { TermRendering, TermMatchOptions } from "@/lib/terminology/types"
+import type { ConceptExternalIds, TermRendering, TermMatchOptions } from "@/lib/terminology/types"
 
 // ── Kind union (must mirror sync-worker/src/events/types.ts) ──────────────
 
@@ -319,9 +319,15 @@ export interface OutboxEventPayloads {
     laneId?: string
   }
 
-  // QA rule waivers. One row per (cell, rule); DELETE-on-unwaive.
+  // QA rule waivers. One row per (cell, rule, matchHash); DELETE-on-unwaive.
   "cell.waive": {
     ruleId: string
+    /**
+     * AQU-1740: finding hash — dismisses just the match whose text hashes to
+     * this value. Omitted waives the rule across the whole cell (the only
+     * shape that existed before AQU-1740; still emitted and still honoured).
+     */
+    matchHash?: string
     reason?: string
     /** AQU-1462: lane the member was working in. Omitted for the default lane. */
     targetLang?: string
@@ -330,6 +336,9 @@ export interface OutboxEventPayloads {
   }
   "cell.unwaive": {
     ruleId: string
+    /** AQU-1740: see `cell.waive`. Must match the waiver being lifted —
+     *  omitting it lifts the rule-wide waiver, not the per-finding ones. */
+    matchHash?: string
     /** AQU-1462: see `cell.waive`. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
@@ -593,6 +602,8 @@ export interface OutboxEventPayloads {
     notes?: string
     caseSensitive?: boolean
     match?: TermMatchOptions
+    /** AQU-1693: the Bible entity the concept names. */
+    externalIds?: ConceptExternalIds
   }
   // Partial patch: only the keys present are written, so two people editing
   // different fields of one concept both survive. `renderings` is replaced
@@ -604,6 +615,8 @@ export interface OutboxEventPayloads {
     notes?: string
     caseSensitive?: boolean
     match?: TermMatchOptions
+    /** AQU-1693: replaces the links wholesale; `{}` unlinks. */
+    externalIds?: ConceptExternalIds
   }
   "term.delete": {
     conceptId: string // soft-delete: stamps deleted_at
@@ -730,6 +743,10 @@ export interface OutboxEventPayloads {
     /** The target row's event_id as observed when the reviewer opened the
      *  review panel — the server no-ops if the head has since moved. */
     expectedTargetEventId: string
+    /** AQU-1902: the lane of the repinned target row. Absent/'' = default lane. */
+    targetLang?: string
+    /** AQU-1902: the lane row's id. Must match `targetLang`. */
+    laneId?: string
   }
 }
 

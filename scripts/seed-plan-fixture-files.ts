@@ -12,7 +12,7 @@
  * own recompute and are read back and checked against the fixture.
  */
 import { createHash } from "node:crypto"
-import { makePostgres, type AquillaDb } from "../db/shim/postgres"
+import { makeMaintenancePostgres, type AquillaDb } from "../db/shim/postgres"
 import { fullProgressRecomputeStmts } from "../sync-worker/src/events/progress-projection"
 import { readPlanUnitsSql, type PlanUnitRow } from "../db/shared/plan-units"
 import {
@@ -334,7 +334,7 @@ async function verify(db: AquillaDb, p: Project): Promise<boolean> {
 
 async function main(): Promise<void> {
   const url = process.env.AQUILLA_DATABASE_URL?.trim() || "postgresql://aquilla@localhost/aquilla_dev"
-  const db = makePostgres(url, 1)
+  const db = makeMaintenancePostgres(url, 1)
   const projects: Project[] = [
     { id: VTT_PROJECT_ID, name: VTT_PROJECT_NAME, targetLanguage: "German",
       files: VTT_FILES, assignments: VTT_ASSIGNMENTS, secondLane: ["s1e1", "s1e2", "s2e1"] },

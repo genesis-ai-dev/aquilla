@@ -6,6 +6,9 @@ import { describe, it, expect, afterEach } from "vitest"
 import { sign } from "hono/jwt"
 import { audioObjectKey } from "../audio"
 import {
+  MAX_VOICE_CLIP_BYTES,
+  SEED_VC_REQUEST_TIMEOUT_MS,
+  VOICE_CONVERT_MAX_PER_USER_PER_WINDOW,
   handleVoiceConvertRequest,
   handleVoiceReferenceRequest,
   voiceRefObjectKey,
@@ -28,7 +31,15 @@ function makeStubBucket() {
     async get(key: string) {
       const obj = store.get(key)
       if (!obj) return null
-      return { arrayBuffer: async () => obj.body, httpMetadata: obj.httpMetadata }
+      // R2Object exposes `size` without reading the body, and R2ObjectBody
+      // exposes blob() — voice-convert uses both (AQU-1854) so the stub must too.
+      return {
+        size: obj.body.byteLength,
+        arrayBuffer: async () => obj.body,
+        blob: async () =>
+          new Blob([obj.body], { type: obj.httpMetadata?.contentType ?? "audio/wav" }),
+        httpMetadata: obj.httpMetadata,
+      }
     },
     async put(
       key: string,
@@ -60,12 +71,42 @@ function makeStubBucket() {
   }
 }
 
+/**
+ * Minimal `AquillaDb` stand-in for the per-user conversion throttle (AQU-1854).
+ * It understands exactly the two statements db/shared/rate-limit.ts issues: the
+ * COUNT over the trailing window, and the INSERT that records a call. `recorded`
+ * starts at `seedRecorded` so a test can place a user already at the cap without
+ * firing N requests.
+ */
+function makeRateLimitDb(seedRecorded = 0) {
+  const state = { recorded: seedRecorded, inserts: [] as string[] }
+  const db = {
+    prepare(sql: string) {
+      return {
+        bind(...args: unknown[]) {
+          return {
+            async first<T>() {
+              return { n: state.recorded } as unknown as T
+            },
+            async run() {
+              state.recorded += 1
+              state.inserts.push(String(args[0]))
+            },
+          }
+        },
+      }
+    },
+  }
+  return { db, state }
+}
+
 type StubEnv = {
   SNAPSHOTS: ReturnType<typeof makeStubBucket>
   SYNC_SECRET_KEY?: string
   R2_KEY_PREFIX?: string
   SEED_VC_URL?: string
   SEED_VC_TOKEN?: string
+  AQUILLA_PG?: unknown
 }
 
 function makeEnv(overrides: Partial<StubEnv> = {}): StubEnv {
@@ -74,6 +115,7 @@ function makeEnv(overrides: Partial<StubEnv> = {}): StubEnv {
     SYNC_SECRET_KEY: SECRET,
     SEED_VC_URL: MODAL_URL,
     SEED_VC_TOKEN: MODAL_TOKEN,
+    AQUILLA_PG: makeRateLimitDb().db,
     ...overrides,
   }
 }
@@ -314,6 +356,163 @@ describe("POST /api/v1/voice/convert", () => {
     expect(res.status).toBe(502)
   })
 
+  // --- AQU-1854: bounded inputs, bounded rate, bounded upstream wait ----------
+  //
+  // Conversion is the one audio path that holds several clips at once (source +
+  // reference up to Modal, converted wav back), so an unbounded input here is a
+  // Worker-memory failure rather than a slow request, and an unbounded call rate
+  // is unmetered L40S GPU spend. Each test below pins one of those bounds.
+
+  function sizedBlob(bytes: number): Blob {
+    return new Blob([new Uint8Array(bytes)], { type: "audio/wav" })
+  }
+
+  function baseForm(): FormData {
+    const form = new FormData()
+    form.append("projectId", "p1")
+    form.append("fileId", "f1")
+    form.append("referenceAudioId", "ref1.wav")
+    return form
+  }
+
+  it("413 for an inline source clip over MAX_VOICE_CLIP_BYTES, before calling Modal", async () => {
+    const env = makeEnv()
+    env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9]), "audio/wav")
+    const modalCalls = stubModal(() => new Response(new Uint8Array([1]).buffer, { status: 200 }))
+
+    const form = baseForm()
+    form.append("source", sizedBlob(MAX_VOICE_CLIP_BYTES + 1), "source")
+    const res = (await call(env, convertReq(form, await makeToken())))!
+    expect(res.status).toBe(413)
+    const body = (await res.json()) as { error: string; input: string; maxBytes: number; message: string }
+    expect(body.error).toBe("audio too large")
+    expect(body.maxBytes).toBe(MAX_VOICE_CLIP_BYTES)
+    expect(body.message).toMatch(/too large for voice conversion/i)
+    // The whole point: no GPU was started for a clip we were always going to reject.
+    expect(modalCalls).toHaveLength(0)
+  })
+
+  it("413 for a stored sourceAudioId recording over the cap, without buffering it", async () => {
+    const env = makeEnv()
+    env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9]), "audio/wav")
+    env.SNAPSHOTS._seed(
+      audioObjectKey(env, "p1", "f1", "rec.webm"),
+      new Uint8Array(MAX_VOICE_CLIP_BYTES + 1),
+      "audio/webm",
+    )
+    const modalCalls = stubModal(() => new Response(new Uint8Array([1]).buffer, { status: 200 }))
+
+    const form = baseForm()
+    form.append("sourceAudioId", "rec.webm")
+    const res = (await call(env, convertReq(form, await makeToken())))!
+    expect(res.status).toBe(413)
+    expect(((await res.json()) as { input: string }).input).toBe("stored source recording")
+    expect(modalCalls).toHaveLength(0)
+  })
+
+  it("413 when the project's stored reference clip is over the cap", async () => {
+    const env = makeEnv()
+    env.SNAPSHOTS._seed(
+      voiceRefObjectKey(env, "p1", "ref1.wav"),
+      new Uint8Array(MAX_VOICE_CLIP_BYTES + 1),
+      "audio/wav",
+    )
+    const modalCalls = stubModal(() => new Response(new Uint8Array([1]).buffer, { status: 200 }))
+
+    const form = baseForm()
+    form.append("source", sizedBlob(16), "source")
+    const res = (await call(env, convertReq(form, await makeToken())))!
+    expect(res.status).toBe(413)
+    expect(((await res.json()) as { input: string }).input).toBe("reference clip")
+    expect(modalCalls).toHaveLength(0)
+  })
+
+  it("413 on the declared Content-Length before the multipart body is parsed", async () => {
+    const env = makeEnv()
+    const modalCalls = stubModal(() => new Response(new Uint8Array([1]).buffer, { status: 200 }))
+    // No Authorization header and no reference clip seeded: a 413 here proves
+    // the size check ran before parsing, auth, or any R2 read.
+    const req = new Request("https://w/api/v1/voice/convert", {
+      method: "POST",
+      body: "x",
+      headers: { "Content-Length": String(MAX_VOICE_CLIP_BYTES * 4) },
+    })
+    const res = (await call(env, req))!
+    expect(res.status).toBe(413)
+    expect(modalCalls).toHaveLength(0)
+  })
+
+  it("429 once the user is at the per-window conversion cap, and spends no GPU", async () => {
+    const { db, state } = makeRateLimitDb(VOICE_CONVERT_MAX_PER_USER_PER_WINDOW)
+    const env = makeEnv({ AQUILLA_PG: db })
+    env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9]), "audio/wav")
+    const modalCalls = stubModal(() => new Response(new Uint8Array([1]).buffer, { status: 200 }))
+
+    const form = baseForm()
+    form.append("source", sizedBlob(16), "source")
+    const res = (await call(env, convertReq(form, await makeToken())))!
+    expect(res.status).toBe(429)
+    expect((await res.json()) as { error: string }).toEqual({
+      error: "rate_limited",
+      message: "Too many requests, slow down.",
+    })
+    expect(modalCalls).toHaveLength(0)
+    // A throttled call must not also count against the window.
+    expect(state.recorded).toBe(VOICE_CONVERT_MAX_PER_USER_PER_WINDOW)
+  })
+
+  it("records one throttle event per accepted conversion, keyed by user", async () => {
+    const { db, state } = makeRateLimitDb()
+    const env = makeEnv({ AQUILLA_PG: db })
+    env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9]), "audio/wav")
+    stubModal(() => new Response(new Uint8Array([1]).buffer, { status: 200 }))
+
+    const form = baseForm()
+    form.append("source", sizedBlob(16), "source")
+    const res = (await call(env, convertReq(form, await makeToken({ userId: 42 }))))!
+    expect(res.status).toBe(200)
+    expect(state.recorded).toBe(1)
+    expect(state.inserts).toEqual(["voice_convert"])
+  })
+
+  it("500 rather than unmetered GPU spend when the throttle's database is unbound", async () => {
+    const env = makeEnv({ AQUILLA_PG: undefined })
+    env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9]), "audio/wav")
+    const modalCalls = stubModal(() => new Response(new Uint8Array([1]).buffer, { status: 200 }))
+
+    const form = baseForm()
+    form.append("source", sizedBlob(16), "source")
+    const res = (await call(env, convertReq(form, await makeToken())))!
+    expect(res.status).toBe(500)
+    expect(modalCalls).toHaveLength(0)
+  })
+
+  it("504 when the Seed-VC call blows its deadline, and passes a timeout signal", async () => {
+    const env = makeEnv()
+    env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9]), "audio/wav")
+    const calls = stubModal(() => {
+      // What AbortSignal.timeout rejects a fetch with once the deadline passes.
+      const err = new Error("The operation was aborted due to timeout")
+      err.name = "TimeoutError"
+      throw err
+    })
+
+    const form = baseForm()
+    form.append("source", sizedBlob(16), "source")
+    const res = (await call(env, convertReq(form, await makeToken())))!
+    // 504, not the 502 a genuinely unreachable upstream gets — the user is told
+    // the request was cancelled and is retryable, not that the box is down.
+    expect(res.status).toBe(504)
+    expect(await res.text()).toMatch(/did not respond within 120s/)
+    expect(calls).toHaveLength(1)
+    expect((calls[0].init as { signal?: AbortSignal }).signal).toBeInstanceOf(AbortSignal)
+  })
+
+  it("keeps the Seed-VC deadline under the client's own 90s..300s retry window", () => {
+    expect(SEED_VC_REQUEST_TIMEOUT_MS).toBeGreaterThan(60_000)
+    expect(SEED_VC_REQUEST_TIMEOUT_MS).toBeLessThan(300_000)
+  })
+
   it("honors R2_KEY_PREFIX for both reference read and output write", async () => {
     const env = makeEnv({ R2_KEY_PREFIX: "pr-7" })
     env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9]), "audio/wav")
@@ -386,6 +585,39 @@ describe("GET/PUT /api/v1/voice/reference/:projectId/:referenceAudioId", () => {
     const token = await makeToken({ projectId: "other" })
     const res = (await callRef(env, refReq("GET", "ref1.webm", token)))!
     expect(res.status).toBe(403)
+  })
+
+  // AQU-1854: this PUT buffered the whole body with no size check — the last
+  // unbounded audio write in the worker, and the one that feeds conversion.
+  it("413 for a reference clip over MAX_VOICE_CLIP_BYTES", async () => {
+    const env = makeEnv()
+    const token = await makeToken()
+    const res = (await callRef(
+      env,
+      refReq("PUT", "ref-big.webm", token, new Uint8Array(MAX_VOICE_CLIP_BYTES + 1)),
+    ))!
+    expect(res.status).toBe(413)
+    expect(((await res.json()) as { input: string }).input).toBe("reference clip")
+    // Nothing was written, so the project's existing clip can't be clobbered by an
+    // oversize upload that was going to be rejected anyway.
+    expect(env.SNAPSHOTS._allKeys()).toEqual([])
+  })
+
+  it("413 on a declared Content-Length over the cap, before buffering the body", async () => {
+    const env = makeEnv()
+    const token = await makeToken()
+    const req = new Request("https://w/api/v1/voice/reference/p1/ref-big.webm", {
+      method: "PUT",
+      body: new Uint8Array([1, 2, 3]),
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "audio/webm",
+        "Content-Length": String(MAX_VOICE_CLIP_BYTES * 4),
+      },
+    })
+    const res = (await callRef(env, req))!
+    expect(res.status).toBe(413)
+    expect(env.SNAPSHOTS._allKeys()).toEqual([])
   })
 
   it("coerces a declared text/html Content-Type to a safe type", async () => {

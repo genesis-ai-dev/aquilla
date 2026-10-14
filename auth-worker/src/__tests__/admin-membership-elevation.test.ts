@@ -360,6 +360,72 @@ describe("invite token reads", () => {
   })
 })
 
+describe("sync-token mint (OPS-44)", () => {
+  // proj-a is in org 1, a tenant root does not belong to, so root's ONLY grant
+  // path is platform-admin power (source: "platform"). proj-b is in org 2,
+  // where root is a genuine Maintainer, so its mint resolves source "org" and
+  // must stay open — the gate keys on the GRANT PATH, not on being an admin.
+  const mint = (as: string, projectId: string, jwt?: string) =>
+    call(as, "POST", "/api/v2/sync-token", { projectId, fileId: "f1" }, jwt)
+
+  it("un-elevated admin is denied on a project they reach only as platform admin", async () => {
+    const res = await mint("root", "proj-a")
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({
+      error: "elevation required to mint a project sync token with platform-admin access",
+    })
+  })
+
+  it("elevated admin mints, and the token carries the platform source", async () => {
+    const jwt = await jwtFor("root")
+    await elevate(jwt)
+    const res = await mint("root", "proj-a", jwt)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { token: string; role: { source: string; level: number } }
+    expect(body.role).toMatchObject({ source: "platform", level: 700 })
+    expect(typeof body.token).toBe("string")
+  })
+
+  it("admin with a GENUINE org role is unaffected while un-elevated", async () => {
+    const res = await mint("root", "proj-b")
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { role: { source: string } }
+    expect(body.role.source).not.toBe("platform")
+  })
+
+  it("an ordinary project member is unaffected", async () => {
+    const res = await mint("dana", "proj-a")
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { role: { source: string } }
+    expect(body.role.source).not.toBe("platform")
+  })
+
+  it("un-elevated admin keeps a project they CREATED in a foreign org", async () => {
+    // proj-c is in org 1 (root is not a member) but root created it, so the
+    // creator path grants 700 genuinely. Stripping admin power must leave it.
+    const res = await mint("root", "proj-c")
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { role: { source: string; level: number } }
+    expect(body.role).toMatchObject({ source: "creator", level: 700 })
+  })
+
+  it("a project outsider still gets the original 403, not an elevation hint", async () => {
+    const res = await mint("outsider", "proj-a")
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({ error: "No access to project" })
+  })
+
+  it("the denial does not depend on the project being readable another way", async () => {
+    // Same request with elevation turned off entirely (local/e2e shape):
+    // adminElevationRequired() is false, so every admin counts as elevated and
+    // the pre-OPS-44 behaviour is preserved for the local dev stack.
+    env.ADMIN_REQUIRE_ELEVATION = undefined
+    const res = await mint("root", "proj-a")
+    expect(res.status).toBe(200)
+    env.ADMIN_REQUIRE_ELEVATION = "true"
+  })
+})
+
 describe("multi-project invites and access links for non-admins", () => {
   it("a project Lead mints a multi-project invite and an access link; no audit rows", async () => {
     const multi = await call("dana", "POST", "/api/v2/invites/multi", { projectIds: ["proj-a"], roleLevel: 300 })

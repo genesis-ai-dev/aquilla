@@ -19,8 +19,7 @@ import app from "../index"
 import { _test } from "../routes/contextual"
 import { authHeader, jwtFor, seedUser } from "./helpers/db"
 import { createRun, getRun } from "../../../db/shared/contextual-runs"
-import { loadProjectSettings } from "../../../db/shared/projects"
-import { readAgentReactState } from "../lib/agent-mode"
+import { readAgentReactState } from "../../../db/shared/agent-react-state"
 import {
   REACT_DEBOUNCE_MS,
   runReactSweep,
@@ -155,6 +154,42 @@ async function seedHumanCommit(
   return ts
 }
 
+/** A second live project with react on (and Autopilot released), for the
+ *  rotation tests. No files or events: being VISITED is what they assert. */
+async function seedReactProject(projectId: string): Promise<void> {
+  await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, created_by) VALUES (?, ?, 1)")
+    .bind(projectId, projectId)
+    .run()
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO project_settings (project_id, settings, version, updated_by)
+     VALUES (?, ?, 1, 1)`,
+  )
+    .bind(projectId, JSON.stringify({ autopilotEnabled: true, agentMode: { react: true, scope: "full" } }))
+    .run()
+}
+
+/** Which projects the cron has VISITED, newest visit last. `last_swept_at` is
+ *  stamped per visit, so this is the observable for rotation fairness. */
+async function sweptProjects(): Promise<string[]> {
+  const { results } = await env.AQUILLA_PG
+    .prepare(
+      `SELECT project_id FROM agent_react_state
+        WHERE last_swept_at IS NOT NULL
+        ORDER BY last_swept_at ASC, project_id ASC`,
+    )
+    .all<{ project_id: string }>()
+  return results.map((row) => row.project_id)
+}
+
+/** Deps that record nothing: the rotation tests care about which projects were
+ *  reached, not about runs. */
+function stubDeps() {
+  return {
+    startRun: async () => ({ status: "ok" as const, runId: "stub-run", done: Promise.resolve() }),
+    wakeRun: async () => ({ status: "skipped" as const, reason: "unexpected wake in this test" }),
+  }
+}
+
 interface ReactCheckBody {
   reactions: { fileId: string; runId: string }[]
   questions: { fileId: string; decisionId: string }[]
@@ -174,9 +209,26 @@ async function reactCheck(jwt = contrib): Promise<{ status: number; body: ReactC
   return { status: res.status, body }
 }
 
-async function reactState() {
-  const stored = await loadProjectSettings(env.AQUILLA_PG, PROJECT)
-  return readAgentReactState(stored.settings)
+async function reactState(projectId = PROJECT) {
+  return readAgentReactState(env.AQUILLA_PG, projectId)
+}
+
+/** Seed the watcher's bookmark. AQU-1846: it lives in its own table, not in
+ *  the settings blob the mode comes from. */
+async function setReactState(
+  projectId: string,
+  state: { cursor?: number | null; lastReactionAt?: Record<string, string>; lastSweptAt?: string },
+): Promise<void> {
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO agent_react_state (project_id, cursor_ms, last_reaction_at, last_swept_at)
+     VALUES (?, ?, ?::jsonb, ?)
+     ON CONFLICT (project_id) DO UPDATE
+        SET cursor_ms = EXCLUDED.cursor_ms,
+            last_reaction_at = EXCLUDED.last_reaction_at,
+            last_swept_at = EXCLUDED.last_swept_at`,
+  )
+    .bind(projectId, state.cursor ?? null, state.lastReactionAt ?? {}, state.lastSweptAt ?? null)
+    .run()
 }
 
 async function storedDirections(runId: string): Promise<string[]> {
@@ -299,6 +351,96 @@ describe("runReactSweep", () => {
       { projectId: PROJECT, fileId: FILE, runId: "stub-run" },
     ])
   })
+
+  // AQU-1846. The candidate query used to be `ORDER BY project_id ASC LIMIT
+  // 10`, which is not a queue — it is the same ten projects forever. Project
+  // eleven by id never reacted at all, which is indistinguishable from the
+  // feature being off for whoever owns it. The guard is round-robin FAIRNESS,
+  // not the limit: with N enabled projects and a limit of L, every project
+  // must be visited within ceil(N / L) cycles.
+  it("rotates through every react-enabled project instead of the first N by id", async () => {
+    await setSettings({ agentMode: { react: true, scope: "full" } })
+    // Ids chosen to sort AFTER `proj-react`, so under the old ordering these
+    // are exactly the projects that never got a turn.
+    const extra = Array.from({ length: 11 }, (_, i) => `zz-react-${String(i + 1).padStart(2, "0")}`)
+    for (const id of extra) await seedReactProject(id)
+    const all = [PROJECT, ...extra]
+
+    const seen = new Set<string>()
+    // ceil(12 / 5) = 3 cycles is the bound the rotation promises.
+    for (let cycle = 0; cycle < 3; cycle++) {
+      const sweep = await runReactSweep(env, stubDeps(), 5)
+      await sweep.done
+      for (const id of await sweptProjects()) seen.add(id)
+    }
+
+    expect([...seen].sort()).toEqual([...all].sort())
+  })
+
+  it("sweeps a project switched on today even though it has the highest id", async () => {
+    // The ticket's repro, minimised: ten older projects hold the front of the
+    // old ordering, and the new one sorts last.
+    await setSettings({ agentMode: { react: true, scope: "full" } })
+    for (let i = 0; i < 10; i++) {
+      const id = `zz-older-${String(i).padStart(2, "0")}`
+      await seedReactProject(id)
+      // Already swept once, so the newcomer (no row at all) sorts ahead.
+      await setReactState(id, { lastSweptAt: new Date(Date.now() - MINUTE).toISOString() })
+    }
+    const newcomer = "zzz-newest-project"
+    await seedReactProject(newcomer)
+
+    const sweep = await runReactSweep(env, stubDeps(), 10)
+    await sweep.done
+
+    expect(await sweptProjects()).toContain(newcomer)
+  })
+
+  it("advances the cursor without rewriting the project settings blob", async () => {
+    // The second half of AQU-1846: the bookmark used to be read-modify-written
+    // into `settings`, a multi-MB TEXT column, every five minutes per swept
+    // project — and its version guard could lose the race to a human edit.
+    await setSettings({ agentMode: { react: true, scope: "full" } })
+    await seedHumanCommit(5 * MINUTE)
+    const before = await env.AQUILLA_PG
+      .prepare("SELECT settings, version FROM project_settings WHERE project_id = ?")
+      .bind(PROJECT)
+      .first<{ settings: string; version: number }>()
+
+    const sweep = await runReactSweep(env, stubDeps(), 10)
+    await sweep.done
+
+    const after = await env.AQUILLA_PG
+      .prepare("SELECT settings, version FROM project_settings WHERE project_id = ?")
+      .bind(PROJECT)
+      .first<{ settings: string; version: number }>()
+    expect(after).toEqual(before)
+    // The cursor still advanced — in its own row.
+    expect((await reactState()).cursor).toBeGreaterThan(0)
+  })
+
+  it("stamps the visit even when the project short-circuits, so it cannot starve the queue", async () => {
+    // A project whose sweep bails before it writes any cursor (Autopilot off)
+    // must still move to the back of the rotation; otherwise it keeps the
+    // front of the queue every cycle and starves the rest.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO projects (id, name, created_by) VALUES ('zz-optout', 'Opt out', 1)`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings, version, updated_by)
+       VALUES ('zz-optout', ?, 1, 1)`,
+    )
+      .bind(JSON.stringify({ agentMode: { react: true, scope: "full" } }))
+      .run()
+
+    const sweep = await runReactSweep(env, stubDeps(), 10)
+    await sweep.done
+
+    expect(sweep.projects).toBe(1)
+    expect(await sweptProjects()).toEqual(["zz-optout"])
+    // Nothing was reacted to, and no cursor was invented for it.
+    expect((await reactState("zz-optout")).cursor).toBeNull()
+  })
 })
 
 // ── The gates ───────────────────────────────────────────────────────────────
@@ -408,12 +550,10 @@ describe("react-check gates", () => {
   })
 
   it("honours the per-file cooldown", async () => {
-    await setSettings({
-      agentMode: { react: true, scope: "full" },
-      agentReactState: {
-        cursor: Date.now() - 30 * MINUTE,
-        lastReactionAt: { [FILE]: new Date(Date.now() - MINUTE).toISOString() },
-      },
+    await setSettings({ agentMode: { react: true, scope: "full" } })
+    await setReactState(PROJECT, {
+      cursor: Date.now() - 30 * MINUTE,
+      lastReactionAt: { [FILE]: new Date(Date.now() - MINUTE).toISOString() },
     })
     await seedHumanCommit(5 * MINUTE)
 

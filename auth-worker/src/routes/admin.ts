@@ -969,6 +969,9 @@ const platformSettingsPatchSchema = z.object({
   aiUserDailyLimit:   z.number().int().nonnegative().optional(),
   aiGlobalDailyLimit: z.number().int().nonnegative().optional(),
   aiBudgetEnforce:    z.boolean().optional(),
+  // AQU-1869. Negative switches the platform spend ceiling off, so the bound is
+  // -1, not nonnegative — and 0 is a legitimate "no paid AI" panic position.
+  aiDailySpendCeilingUsd: z.number().min(-1).optional(),
   abTest: z
     .object({
       enabled: z.boolean(),

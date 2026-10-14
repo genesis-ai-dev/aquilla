@@ -204,6 +204,13 @@ function currentTarget(
   if (cell.originalHtml && cell.translatedHtml) {
     const validation = validateIdmlTranslation(cell.originalHtml, cell.translatedHtml, metadata)
     if (validation.valid) {
+      // An unstyled preview keeps the sentence in `translated` and leaves every
+      // editable run empty. Place that sentence; don't treat the empty runs as
+      // the translation.
+      const plain = cell.translated ?? ""
+      if (editableSlotsAreEmpty(metadata, validation.slots) && plain.replace(/\u00a0/g, " ").trim()) {
+        return { kind: "plain", text: plain }
+      }
       const texts = new Map<number, string>()
       for (const index of metadata.editableSlotIndexes) {
         texts.set(index, validation.slots[index] ?? "")
@@ -248,6 +255,16 @@ function emphasisLabel(
 function isDefaultCharacterStyle(styleId: string): boolean {
   if (!styleId) return true
   return styleId.includes("[No character style]")
+}
+
+function editableSlotsAreEmpty(
+  metadata: IdmlFormatMetadataV2,
+  slots: readonly string[],
+): boolean {
+  return metadata.editableSlotIndexes.every((index) => {
+    const text = slots[index] ?? ""
+    return !text.includes("\n") && text.replace(/\u200b/g, "").replace(/\u00a0/g, " ").trim().length === 0
+  })
 }
 
 function joined(indexes: readonly number[], texts: ReadonlyMap<number, string>): string {

@@ -26,6 +26,7 @@ import { z } from "zod"
 import type { Env, Variables } from "../types"
 import { secureCompare } from "../utils/secure-compare"
 import { runAiGuard } from "../lib/ai-budget"
+import { checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
 import { getPlatformSettingsCached } from "../lib/platform-settings"
 import { creditGuard, recordCredit } from "../lib/credits"
 import { AliasMap } from "../lib/agent/compress"
@@ -94,6 +95,10 @@ aiDraftInternal.post("/internal/draft-cells", zValidator("json", bodySchema), as
 
   const guard = await runAiGuard(model, Number(body.userId), db, c.env)
   if (!guard.ok) return c.json(guard.body, guard.status)
+
+  // Platform daily spend ceiling (AQU-1869).
+  const spendCeiling = await checkAiSpendCeiling(db, c.env, "draft-cells")
+  if (!spendCeiling.ok) return c.json(spendCeiling.body, spendCeiling.status)
 
   // Org for the credit rails: the project's org (0 = personal/org-less).
   let orgId = 0

@@ -97,7 +97,7 @@ export async function readContextualRunStep(
 /** Checkpoint one reply. Idempotent: a racing writer for the same key wins and
  *  this is a no-op, because either reply is equally valid.
  *
- *  `projectId` is written for the table's RLS policy (0158), which scopes it
+ *  `projectId` is written for the table's RLS policy (0169), which scopes it
  *  exactly as its sibling contextual tables are scoped; nothing reads it. */
 export async function writeContextualRunStep(
   db: AquillaDb,

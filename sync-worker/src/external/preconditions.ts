@@ -56,6 +56,24 @@ export interface CellState {
   sourceHidden: boolean | null
 }
 
+/** Cells per precondition-lookup statement. Each cell binds 2 parameters, and
+ *  Postgres refuses a statement with more than 65,535 of them (AQU-1852), so
+ *  the lookup is paged well under that ceiling rather than sized by the caller's
+ *  batch. 2,000 cells = 4,001 parameters per statement. */
+const PRECONDITION_LOOKUP_CHUNK = 2000
+
+interface CellRow {
+  file_id: string
+  cell_id: string
+  side: string
+  target_lang: string | null
+  lane_id: string | null
+  event_id: string
+  ai_drafted: number | null
+  value: string | null
+  hidden_at?: number | null
+}
+
 /** Resolve current source + lane-qualified target head event ids for the given
  *  cells. The returned map is keyed by laneCellKey(fileId, cellId, laneId). */
 export async function resolveCellStates(
@@ -80,29 +98,29 @@ export async function resolveCellStates(
   }
   const list = [...lanesByCell.values()]
 
-  const placeholders = list.map(() => '(?, ?)').join(', ')
-  const binds: unknown[] = []
-  for (const c of list) binds.push(c.fileId, c.cellId)
+  // AQU-1852: the lookup binds 2 parameters per cell, so one statement over
+  // ~32.7k cells exceeds Postgres's 65,535-parameter ceiling and the whole
+  // prepare fails. A whole-book changeset is exactly that size, so page the
+  // lookup — one statement per PRECONDITION_LOOKUP_CHUNK cells, union'd in
+  // memory. The reads are independent, so paging cannot change the result.
+  const results: CellRow[] = []
+  for (let i = 0; i < list.length; i += PRECONDITION_LOOKUP_CHUNK) {
+    const page = list.slice(i, i + PRECONDITION_LOOKUP_CHUNK)
+    const placeholders = page.map(() => '(?, ?)').join(', ')
+    const binds: unknown[] = []
+    for (const c of page) binds.push(c.fileId, c.cellId)
 
-  const { results } = await db
-    .prepare(
-      `SELECT file_id, cell_id, side, ${wireLegacyTagSql("cells")} AS target_lang, lane_id, event_id, ai_drafted, value, hidden_at FROM cells
-       WHERE project_id = ?
-         AND side IN ('source', 'target')
-         AND (file_id, cell_id) IN (${placeholders})`,
-    )
-    .bind(projectId, ...binds)
-    .all<{
-      file_id: string
-      cell_id: string
-      side: string
-      target_lang: string | null
-      lane_id: string | null
-      event_id: string
-      ai_drafted: number | null
-      value: string | null
-      hidden_at?: number | null
-    }>()
+    const res = await db
+      .prepare(
+        `SELECT file_id, cell_id, side, ${wireLegacyTagSql("cells")} AS target_lang, lane_id, event_id, ai_drafted, value, hidden_at FROM cells
+         WHERE project_id = ?
+           AND side IN ('source', 'target')
+           AND (file_id, cell_id) IN (${placeholders})`,
+      )
+      .bind(projectId, ...binds)
+      .all<CellRow>()
+    results.push(...res.results)
+  }
 
   for (const c of list) {
     for (const lane of c.lanes) {

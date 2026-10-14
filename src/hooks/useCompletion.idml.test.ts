@@ -12,6 +12,11 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import { useCompletion } from "./useCompletion"
+import {
+  markStyleAlignDirty,
+  resetStyleAlignDirtyForTests,
+  styleAlignDirtyMatches,
+} from "@/lib/store/style-align-dirty"
 
 vi.mock("@/lib/posthog", () => ({
   default: { capture: vi.fn(), captureException: vi.fn() },
@@ -62,6 +67,8 @@ const searchPassages = vi.fn().mockResolvedValue([])
 describe("useCompletion IDML protected-output boundary", () => {
   beforeEach(() => {
     vi.unstubAllGlobals()
+    localStorage.clear()
+    resetStyleAlignDirtyForTests()
   })
 
   it("prompts with canonical anchors and commits only an exact protected response", async () => {
@@ -268,12 +275,14 @@ describe("useCompletion IDML protected-output boundary", () => {
     const { result } = renderCompletion(cell, commit, record)
     search.mockClear()
 
+    markStyleAlignDirty(cell.id, cell.translatedHtml)
     let saved = false
     await act(async () => {
       saved = await result.current.alignCellStyles(cell as never)
     })
 
     expect(saved).toBe(true)
+    expect(styleAlignDirtyMatches(cell.id, cell.translatedHtml)).toBe(false)
     expect(search).not.toHaveBeenCalled()
     expect(commit).toHaveBeenCalledWith(
       cell,
@@ -329,6 +338,7 @@ describe("useCompletion IDML protected-output boundary", () => {
     const record = vi.fn()
     const { result } = renderCompletion(cell, commit, record)
 
+    markStyleAlignDirty(cell.id, cell.translatedHtml)
     let saved = true
     await act(async () => {
       saved = await result.current.alignCellStyles(cell as never)
@@ -337,7 +347,36 @@ describe("useCompletion IDML protected-output boundary", () => {
     expect(saved).toBe(false)
     expect(commit).not.toHaveBeenCalled()
     expect(record).not.toHaveBeenCalled()
+    expect(styleAlignDirtyMatches(cell.id, cell.translatedHtml)).toBe(true)
     expect(result.current.errors.get(cell.id)).toMatch(/changed the wording/)
+  })
+
+  it("clears the align warning when the model leaves the runs unchanged", async () => {
+    const unit = await parsedUnit()
+    const cell = completionCell(unit)
+    cell.translated = "Bonjour MONDE"
+    cell.translatedHtml = renderIdmlUnitHtml({
+      ...unit,
+      slots: unit.slots.map((slot, index) => ({
+        ...slot,
+        text: index === 0 ? "Bonjour MONDE" : "",
+      })),
+    })
+    mockCompletion(JSON.stringify({
+      slots: [{ i: 0, t: "Bonjour MONDE" }, { i: 1, t: "" }],
+    }), [])
+    const commit = vi.fn().mockResolvedValue(undefined)
+    const { result } = renderCompletion(cell, commit)
+    markStyleAlignDirty(cell.id, cell.translatedHtml)
+
+    let saved = true
+    await act(async () => {
+      saved = await result.current.alignCellStyles(cell as never)
+    })
+
+    expect(saved).toBe(false)
+    expect(commit).not.toHaveBeenCalled()
+    expect(styleAlignDirtyMatches(cell.id, cell.translatedHtml)).toBe(false)
   })
 })
 

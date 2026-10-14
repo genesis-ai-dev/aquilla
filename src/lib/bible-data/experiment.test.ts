@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from "vitest"
 import { FLAGS } from "@/lib/features/flags"
-import { BIBLE_DATA_FLAG, isBibleDataExperimentOn, isBibleOpen } from "./experiment"
+import { BIBLE_DATA_FLAG, isBibleDataExperimentOn, isBibleEntityLinkAvailable, isBibleOpen } from "./experiment"
 
 describe("isBibleDataExperimentOn", () => {
   it("is off for a device that never chose, because the experiment ships off", () => {
@@ -37,5 +37,25 @@ describe("isBibleOpen (the Parallel Bibles panel's condition)", () => {
     expect(isBibleOpen("agent", { type: "usfm" })).toBe(false)
     expect(isBibleOpen("editor", { type: "docx" })).toBe(false)
     expect(isBibleOpen("editor", null)).toBe(false)
+  })
+})
+
+// AQU-1693: Terminology's "Link to a Bible person, place or group" is not a
+// Bible-open surface, but its picker reads the pack directly, so it needs both
+// this device's experiment and the project's Bible data switch.
+describe("isBibleEntityLinkAvailable", () => {
+  const scripture = [{ type: "usfm" as const }]
+  const on = { experimentalFlags: { bibleData: true } }
+
+  it("needs the experiment on this device", () => {
+    expect(isBibleEntityLinkAvailable(null)).toBe(false)
+    expect(isBibleEntityLinkAvailable({ files: scripture })).toBe(false)
+    expect(isBibleEntityLinkAvailable({ ...on, files: scripture })).toBe(true)
+  })
+
+  it("follows the project's Bible data switch, which defaults on for a scripture project", () => {
+    expect(isBibleEntityLinkAvailable({ ...on, files: scripture, bibleResourcesEnabled: false })).toBe(false)
+    expect(isBibleEntityLinkAvailable({ ...on, files: [{ type: "docx" as const }] })).toBe(false)
+    expect(isBibleEntityLinkAvailable({ ...on, files: [{ type: "docx" as const }], bibleResourcesEnabled: true })).toBe(true)
   })
 })

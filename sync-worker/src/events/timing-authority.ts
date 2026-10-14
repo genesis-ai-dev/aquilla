@@ -53,7 +53,7 @@ export async function resolveTimingLocked(
   // the role mirror exists to prevent. An unreachable settings row must read as
   // LOCKED (nothing moves) rather than as an outage.
   try {
-    const parsed = await cache.projectSettings(projectId)
+    const parsed = await cache.writePathSettings(projectId)
     if (!parsed) return true
     return parsed.timingLocked !== false
   } catch {

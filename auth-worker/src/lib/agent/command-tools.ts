@@ -195,6 +195,12 @@ function mintFailureText(reason: SyncTokenMintFailure): string {
       return "the user's project access could not be verified right now (temporary server issue) — retry shortly"
     case "unsafe_id":
       return "the project id contains characters that cannot be minted into a sync token"
+    // OPS-44: the run's user reaches this project only through platform-admin
+    // power. A server-side harness has no session to elevate, so the
+    // cross-tenant path is simply closed here — the admin can stage from the
+    // app once elevated, like every other admin write (AQU-1322).
+    case "elevation_required":
+      return "the user reaches this project only through platform-admin access, which requires an elevated admin session"
   }
 }
 

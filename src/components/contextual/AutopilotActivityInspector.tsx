@@ -34,6 +34,8 @@ import {
 } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
+import { BibleFactsEvidence } from "./BibleFactsEvidence"
+import { useBibleDataExperiment } from "@/hooks/useBibleDataExperiment"
 import { LivingMemoryButton } from "@/components/LivingMemoryButton"
 import { useI18n, useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { DateTooltip } from "@/components/ui/date-tooltip"
@@ -553,6 +555,11 @@ function eventSummary(event: ContextualActivityEvent, t: TFunction): string {
       return t("autopilot.inspector.event.idle")
     }
     if (event.status === "running") return t("autopilot.inspector.event.running")
+    // AQU-1847: the run holds its place in line for model capacity — behind
+    // another file, another project in this workspace, or another tenant. It
+    // is neither working nor stalled, and the generic "status changed" this
+    // used to fall through to read as the latter.
+    if (event.status === "queued") return t("autopilot.inspector.event.queuedForCapacity")
     if (event.status === "pausing") return t("autopilot.inspector.event.pauseRequested")
     if (event.status === "paused") return t("autopilot.inspector.event.paused")
     if (event.status === "done") return t("autopilot.inspector.event.completed")
@@ -838,6 +845,9 @@ export function AutopilotActivityInspector({
   onRunChanged,
 }: AutopilotActivityInspectorProps) {
   const { locale, t } = useI18n()
+  // AQU-1685: Bible data (the graph's Bible steps, each span's Bible facts)
+  // shows only on a device with the Bible data experiment on.
+  const bibleData = useBibleDataExperiment(projectId)
   const fallbackRuns = useMemo(() => mergeRuns(
     fallbackRun ? [fallbackRun] : [],
     (overview?.files ?? []).map(runFromOverview),
@@ -1460,7 +1470,7 @@ export function AutopilotActivityInspector({
             {selectedRun && (
               <>
                 <Separator />
-                <AutopilotProcessGraph run={selectedRun} activity={activity} />
+                <AutopilotProcessGraph run={selectedRun} activity={activity} bibleData={bibleData} />
                 <Card size="sm">
                   <CardHeader>
                     <CardTitle>{fileNames?.get(selectedRun.fileId) ?? selectedRun.fileId}</CardTitle>
@@ -1777,6 +1787,9 @@ export function AutopilotActivityInspector({
                     </div>
                   )}
                   {sceneBriefs.map((brief, index) => <SceneBriefEvidence key={brief.id ?? index} brief={brief} />)}
+                  {bibleData && (
+                    <BibleFactsEvidence key={selectedRun.runId} projectId={projectId} runId={selectedRun.runId} />
+                  )}
                   {!readiness && sceneBriefs.length === 0 && (
                     <p className="text-sm text-muted-foreground">
                       {t("autopilot.inspector.context.noEvidence")}

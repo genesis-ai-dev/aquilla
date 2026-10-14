@@ -70,6 +70,10 @@ describe("overlaySettings", () => {
       cellEditingFloor: "contributor",
       bibleResourcesEnabled: false,
       bibleEnrichments: { voices: false, autopilot: true },
+      languageProfile: {
+        quoteMarks: { levels: [{ open: "«", close: "»" }], continuation: "continuation-mark" },
+      },
+      bibleVoiceOverrides: { "sp:a-b": { speaker: "person:Jesus", note: "FCBH", by: "mara", at: "2026-10-06T00:00:00Z" } },
       importExcludeFrontMatter: true,
       draftContext: { precedingTargetCells: 4 },
       termMatching: { prefixes: ["re"], suffixes: [] },
@@ -84,6 +88,12 @@ describe("overlaySettings", () => {
     // AQU-1686: a dropped key would load layers for enrichments the project
     // switched off.
     expect(out.bibleEnrichments).toEqual({ voices: false, autopilot: true })
+    // AQU-1688: a dropped profile would leave Bible data checks dormant for a
+    // project that has set its quotation marks.
+    expect(out.languageProfile?.quoteMarks?.levels).toEqual([{ open: "«", close: "»" }])
+    // AQU-1692: a dropped key would save a maintainer's voice correction and
+    // never show it.
+    expect(out.bibleVoiceOverrides?.["sp:a-b"]?.speaker).toBe("person:Jesus")
     expect(out.importExcludeFrontMatter).toBe(true)
     expect(out.draftContext).toEqual({ precedingTargetCells: 4 })
     expect(out.termMatching).toEqual({ prefixes: ["re"], suffixes: [] })

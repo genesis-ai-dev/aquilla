@@ -188,7 +188,7 @@ async function handleQuality(
   if (!authed.ok) return authed.response
   const ctx = authed.ctx
   const db = env.AQUILLA_PG as AquillaDb
-  const limited = await checkReadRateLimit(db, ctx.credential.credentialId)
+  const limited = await checkReadRateLimit(db, ctx.credential)
   if (limited) return limited
 
   const url = new URL(request.url)
@@ -436,7 +436,7 @@ async function handleTermConsistency(
   if (!authed.ok) return authed.response
   const ctx = authed.ctx
   const db = env.AQUILLA_PG as AquillaDb
-  const limited = await checkReadRateLimit(db, ctx.credential.credentialId)
+  const limited = await checkReadRateLimit(db, ctx.credential)
   if (limited) return limited
 
   const url = new URL(request.url)
@@ -555,7 +555,7 @@ async function handleTermsList(
   if (!authed.ok) return authed.response
   const ctx = authed.ctx
   const db = env.AQUILLA_PG as AquillaDb
-  const limited = await checkReadRateLimit(db, ctx.credential.credentialId)
+  const limited = await checkReadRateLimit(db, ctx.credential)
   if (limited) return limited
 
   const url = new URL(request.url)

@@ -27,6 +27,7 @@ import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware } from "../middleware/auth"
+import { hasActiveElevation } from "../middleware/platform-admin"
 import type { AuthHonoEnv } from "../middleware/auth"
 import type { SyncTokenResponse } from "../types"
 import { isPathSafeId, mintSyncTokenForUser } from "../services/sync-token-mint"
@@ -66,7 +67,15 @@ syncToken.post(
     const user = c.get("user")
     const { projectId, fileId } = c.req.valid("json")
 
-    const minted = await mintSyncTokenForUser(c.env, user, projectId, fileId)
+    // OPS-44: a mint whose only grant path is platform-admin power needs the
+    // same step-up elevation AQU-1322 demands for grant-management writes.
+    // The resulting token carries `src: "platform"`, which the sync-worker
+    // exempts from its live membership re-check (events/route.ts) and from
+    // the lane read wall (events/lane-read-wall.ts) — so this one mint reaches
+    // further than anything the admin console's own gate protects.
+    const minted = await mintSyncTokenForUser(c.env, user, projectId, fileId, {
+      platformElevated: await hasActiveElevation(c),
+    })
     if (minted.ok) {
       const response: SyncTokenResponse = {
         token: minted.token,
@@ -105,6 +114,15 @@ syncToken.post(
       // but the mint core's union requires the case.
       case "unsafe_id":
         return c.json({ error: "projectId or fileId contains unsafe characters" }, 400)
+      // OPS-44: platform-admin power was the only grant path and this session
+      // is not elevated. 403 rather than 503: this is a genuine permission
+      // answer (elevate, then retry), not the transient DB blip AQU-996
+      // reserves 503 for.
+      case "elevation_required":
+        return c.json(
+          { error: "elevation required to mint a project sync token with platform-admin access" },
+          403,
+        )
     }
   },
 )

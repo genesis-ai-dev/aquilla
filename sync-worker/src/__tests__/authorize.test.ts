@@ -4,6 +4,7 @@ import { authorize, AuthorizedEvent, isAuthorizedEvent, PROJECT_SENTINEL_FILE_ID
 import { makeTestToken } from "./helpers/auth"
 import type { RawEvent } from "../events/types"
 import type { SyncTokenClaims } from "../auth"
+import { projectSettingsRow } from "./helpers/project-settings-db"
 
 /**
  * AQU-496: minimal AquillaDb stub for the self-assign carve-out — mirrors
@@ -53,7 +54,7 @@ function makeDb(options: {
               }
               if (sql.includes("FROM assignments")) return assignmentRow
               if (sql.includes("FROM project_settings")) {
-                return projectSettings == null ? null : { settings: JSON.stringify(projectSettings) }
+                return projectSettingsRow(sql, projectSettings == null ? null : JSON.stringify(projectSettings))
               }
               if (sql.includes("FROM projects")) return { org_id: orgId, created_by: 999, archived_at: null }
               if (sql.includes("FROM org_settings")) {
@@ -959,11 +960,27 @@ describe("authorize() archived lanes (AQU-1462)", () => {
     expect(source.ok).toBe(true)
   })
 
-  it("does not refuse the former default lane when no lane row records it archived", async () => {
+  // AQU-1900: with no '' lane row there is nothing archived to refuse — but on
+  // a project whose target lanes are all tagged the omitted lane does not
+  // exist either (since AQU-1615 the bridge is only minted on a project with no
+  // target lane), so the write is a 422 naming the missing lane, not a 403 and
+  // not the per-event 500 it used to project as.
+  it("refuses a lane-less target commit as a missing lane, not archived, when only tagged lanes exist", async () => {
     const db = makeDb({
       lanes: [{ id: "frlane01", name: "French", legacy_tag: "fr", archived_at: null }],
       projectSettings: { archivedLanes: [], targetLanes: ["fr"] },
     })
+    const result = await authorize(await makeToken({ role: 400 }), makeTargetCommit(), SECRET, db)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.status).toBe(422)
+      expect(result.reason).toContain("no default lane")
+      expect(result.reason).not.toContain("archived")
+    }
+  })
+
+  it("still admits a lane-less target commit on a project with no target lane (it mints the bridge)", async () => {
+    const db = makeDb({ lanes: [], projectSettings: { archivedLanes: [] } })
     const result = await authorize(await makeToken({ role: 400 }), makeTargetCommit(), SECRET, db)
     expect(result.ok).toBe(true)
   })
@@ -974,6 +991,7 @@ describe("authorize() archived lanes (AQU-1462)", () => {
       lanes: [
         ...archivedSpanish.lanes,
         { id: "frlane01", name: "French", legacy_tag: "fr", archived_at: null },
+        { id: "default1", name: "English", legacy_tag: "", archived_at: null },
       ],
       projectSettings: archivedSpanish.projectSettings,
     })

@@ -10,8 +10,16 @@ import {
   mergePresenceUpdate,
   PresenceFloodGuard,
   PresenceTier2Batcher,
+  releaseUserLocks,
+  resolveTokenRefresh,
   presenceFrameOwnerConnId,
-  presenceSnapshot,
+  presenceFrameAudience,
+  presenceSnapshotFor,
+  presenceTier1Row,
+  PresenceTier1Batcher,
+  PRESENCE_TIER1_TICK_MS,
+  sameTier1Row,
+  stripPresenceDetail,
   PRESENCE_FLOOD_BURST,
   PRESENCE_FLOOD_REFILL_PER_SEC,
   PRESENCE_HEARTBEAT_TTL_MS,
@@ -80,6 +88,15 @@ describe("parseProjectDoClientMessage", () => {
       t: "presence.update",
       selection: { side: "target", anchor: 0, head: 0, draftText: "x".repeat(16_385) },
     }))).toBeNull()
+  })
+  it("parses token.refresh and rejects one with no token (AQU-1839)", () => {
+    expect(parseProjectDoClientMessage(JSON.stringify({ t: "token.refresh", token: "jwt" }))).toEqual({
+      t: "token.refresh",
+      token: "jwt",
+    })
+    expect(parseProjectDoClientMessage(JSON.stringify({ t: "token.refresh", token: "" }))).toBeNull()
+    expect(parseProjectDoClientMessage(JSON.stringify({ t: "token.refresh" }))).toBeNull()
+    expect(parseProjectDoClientMessage(JSON.stringify({ t: "token.refresh", token: 1 }))).toBeNull()
   })
   it("parses outbox.event", () => {
     const ev: OutboxRawEvent = {
@@ -406,7 +423,7 @@ describe("applyPresenceUpdate", () => {
   })
 })
 
-describe("presenceSnapshot", () => {
+describe("presenceSnapshotFor", () => {
   it("returns the full roster with every draftText stripped (connect snapshot)", () => {
     const presence = new Map<string, PresenceState>([
       ["alice", {
@@ -418,7 +435,9 @@ describe("presenceSnapshot", () => {
       }],
       ["bob", { connId: "bob", userId: "bob", currentFileId: "file-1", ts: 2 }],
     ])
-    expect(presenceSnapshot(presence)).toEqual({
+    // alice has no file, and so does the connecting socket: same bucket, so
+    // her row keeps its tier-2 detail.
+    expect(presenceSnapshotFor(presence, undefined)).toEqual({
       t: "presence",
       users: [
         {
@@ -918,7 +937,7 @@ describe("per-connection presence for one user", () => {
     const r1 = applyPresenceUpdate(emptyPresence(), tabA, { t: "presence.update", viewingCell: "cell-1" }, 1)
     const r2 = applyPresenceUpdate(r1.presence, tabB, { t: "presence.update", viewingCell: "cell-2" }, 2)
     expect(r1.presence.get("tab-a")?.viewingCell).toBe("cell-1")
-    expect(presenceSnapshot(r2.presence).users).toEqual([
+    expect(presenceSnapshotFor(r2.presence, undefined).users).toEqual([
       { connId: "tab-a", userId: "alice", viewingCell: "cell-1", ts: 1 },
       { connId: "tab-b", userId: "alice", viewingCell: "cell-2", ts: 2 },
     ])
@@ -1250,5 +1269,321 @@ describe("selectStaleConnections (AQU-1791)", () => {
       now,
     )
     expect(stale.map((c) => c.connId)).toEqual(["tab-a"])
+  })
+})
+
+// ── AQU-1825: tier-1 (coarse, project-wide) vs tier-2 (same-file) presence ──
+
+describe("stripPresenceDetail / presenceTier1Row (AQU-1825)", () => {
+  const typing: PresenceState = {
+    connId: "alice",
+    userId: "alice",
+    currentFileId: "file-1",
+    focusedCell: "cell-1",
+    viewingCell: "cell-1",
+    selection: { side: "target", anchor: 3, head: 7, draftText: "hello" },
+    ts: 5,
+  }
+
+  it("drops the cursor selection and the viewed row, keeping who + where", () => {
+    expect(stripPresenceDetail(typing)).toEqual({
+      connId: "alice",
+      userId: "alice",
+      currentFileId: "file-1",
+      focusedCell: "cell-1",
+      ts: 5,
+    })
+  })
+
+  it("returns the same object when there is no detail to strip", () => {
+    const coarse: PresenceState = { connId: "bob", userId: "bob", currentFileId: "file-2", ts: 1 }
+    expect(stripPresenceDetail(coarse)).toBe(coarse)
+  })
+
+  it("projects a row to its tier-1 fields, omitting absent ones", () => {
+    expect(presenceTier1Row(typing)).toEqual({
+      connId: "alice",
+      userId: "alice",
+      currentFileId: "file-1",
+      focusedCell: "cell-1",
+      ts: 5,
+    })
+    expect(presenceTier1Row({ connId: "bob", userId: "bob", ts: 2 })).toEqual({
+      connId: "bob",
+      userId: "bob",
+      ts: 2,
+    })
+  })
+
+  it("compares tier-1 rows by content, ignoring the restamped ts", () => {
+    const a = presenceTier1Row(typing)
+    const b = presenceTier1Row({ ...typing, ts: 9_999, selection: { side: "target", anchor: 0, head: 0 } })
+    expect(sameTier1Row(a, b)).toBe(true)
+    expect(sameTier1Row(a, { ...a, currentFileId: "file-2" })).toBe(false)
+    expect(sameTier1Row(a, { ...a, focusedCell: undefined })).toBe(false)
+    expect(sameTier1Row(a, undefined)).toBe(false)
+    expect(sameTier1Row(undefined, undefined)).toBe(true)
+  })
+})
+
+describe("presenceSnapshotFor (AQU-1825 — the connect snapshot is tiered)", () => {
+  const presence = new Map<string, PresenceState>([
+    ["alice", {
+      connId: "alice",
+      userId: "alice",
+      currentFileId: "file-1",
+      focusedCell: "cell-1",
+      viewingCell: "cell-1",
+      selection: { side: "target", anchor: 0, head: 2, draftText: "draft" },
+      ts: 1,
+    }],
+    ["bob", {
+      connId: "bob",
+      userId: "bob",
+      currentFileId: "file-2",
+      viewingCell: "cell-9",
+      selection: { side: "target", anchor: 1, head: 1 },
+      ts: 2,
+    }],
+  ])
+
+  it("gives detail for the viewer's own file and tier-1 rows for the others", () => {
+    expect(presenceSnapshotFor(presence, "file-1").users).toEqual([
+      {
+        connId: "alice",
+        userId: "alice",
+        currentFileId: "file-1",
+        focusedCell: "cell-1",
+        viewingCell: "cell-1",
+        selection: { side: "target", anchor: 0, head: 2 },
+        ts: 1,
+      },
+      { connId: "bob", userId: "bob", currentFileId: "file-2", ts: 2 },
+    ])
+  })
+
+  it("gives tier-1 rows for everyone to a socket that has opened no file yet", () => {
+    expect(presenceSnapshotFor(presence, undefined).users).toEqual([
+      { connId: "alice", userId: "alice", currentFileId: "file-1", focusedCell: "cell-1", ts: 1 },
+      { connId: "bob", userId: "bob", currentFileId: "file-2", ts: 2 },
+    ])
+  })
+})
+
+describe("presenceFrameAudience (AQU-1825)", () => {
+  const presence = new Map<string, PresenceState>([
+    ["alice", { connId: "alice", userId: "alice", currentFileId: "file-1", ts: 1 }],
+    ["bob", { connId: "bob", userId: "bob", ts: 2 }],
+  ])
+
+  it("scopes a presence.diff to the sockets in the subject's file", () => {
+    expect(
+      presenceFrameAudience(
+        { t: "presence.diff", user: { connId: "alice", userId: "alice", currentFileId: "file-1", ts: 1 } },
+        presence,
+      ),
+    ).toEqual({ scope: "file", fileId: "file-1" })
+  })
+
+  it("scopes a presence.draft to the file its author has open", () => {
+    const draft: ServerPresenceDraft = {
+      t: "presence.draft",
+      userId: "alice",
+      connId: "alice",
+      cellId: "cell-1",
+      draftText: "hi",
+      ts: 3,
+    }
+    expect(presenceFrameAudience(draft, presence)).toEqual({ scope: "file", fileId: "file-1" })
+    // A frame about a socket with no file open reaches the no-file bucket,
+    // which is also where pre-currentFileId clients sit.
+    expect(presenceFrameAudience({ ...draft, connId: "bob", userId: "bob" }, presence)).toEqual({
+      scope: "file",
+      fileId: undefined,
+    })
+  })
+
+  it("leaves locks, leaves and content frames project-wide", () => {
+    expect(
+      presenceFrameAudience({ t: "lock.claimed", cellId: "c", by: { userId: "alice", ts: 1 } }, presence),
+    ).toEqual({ scope: "all" })
+    expect(presenceFrameAudience({ t: "presence.left", userId: "alice", connId: "alice" }, presence)).toEqual({
+      scope: "all",
+    })
+    expect(
+      presenceFrameAudience({ t: "presence.tier1", users: [] }, presence),
+    ).toEqual({ scope: "all" })
+  })
+})
+
+describe("PresenceTier1Batcher (AQU-1825)", () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  const row = (connId: string, fileId?: string, focusedCell?: string, ts = 1) => ({
+    connId,
+    userId: connId,
+    ...(fileId !== undefined ? { currentFileId: fileId } : {}),
+    ...(focusedCell !== undefined ? { focusedCell } : {}),
+    ts,
+  })
+
+  it("coalesces a tick's changes into ONE frame", () => {
+    const sent: ProjectDoServerMessage[] = []
+    const batcher = new PresenceTier1Batcher((f) => sent.push(f))
+    batcher.push(row("alice", "file-1"))
+    batcher.push(row("bob", "file-2"))
+    expect(sent).toEqual([])
+    vi.advanceTimersByTime(PRESENCE_TIER1_TICK_MS)
+    expect(sent).toEqual([
+      { t: "presence.tier1", users: [row("alice", "file-1"), row("bob", "file-2")] },
+    ])
+  })
+
+  it("keeps only the latest row per connection", () => {
+    const sent: ProjectDoServerMessage[] = []
+    const batcher = new PresenceTier1Batcher((f) => sent.push(f))
+    batcher.push(row("alice", "file-1"))
+    batcher.push(row("alice", "file-2", undefined, 2))
+    vi.advanceTimersByTime(PRESENCE_TIER1_TICK_MS)
+    expect(sent).toEqual([{ t: "presence.tier1", users: [row("alice", "file-2", undefined, 2)] }])
+  })
+
+  it("sends nothing when only the ts moved — a cursor move costs the project no frame", () => {
+    const sent: ProjectDoServerMessage[] = []
+    const batcher = new PresenceTier1Batcher((f) => sent.push(f))
+    batcher.push(row("alice", "file-1"))
+    vi.advanceTimersByTime(PRESENCE_TIER1_TICK_MS)
+    expect(sent).toHaveLength(1)
+    // 20 cursor moves inside file-1, each restamping the presence row.
+    for (let i = 0; i < 20; i++) batcher.push(row("alice", "file-1", undefined, 100 + i))
+    vi.advanceTimersByTime(PRESENCE_TIER1_TICK_MS * 4)
+    expect(sent).toHaveLength(1)
+    // A real change still goes out on the next tick.
+    batcher.push(row("alice", "file-2", undefined, 200))
+    vi.advanceTimersByTime(PRESENCE_TIER1_TICK_MS)
+    expect(sent).toHaveLength(2)
+  })
+
+  it("re-sends a row that changed and changed back within one window", () => {
+    const sent: ProjectDoServerMessage[] = []
+    const batcher = new PresenceTier1Batcher((f) => sent.push(f))
+    batcher.push(row("alice", "file-1"))
+    vi.advanceTimersByTime(PRESENCE_TIER1_TICK_MS)
+    batcher.push(row("alice", "file-2", undefined, 2))
+    batcher.push(row("alice", "file-1", undefined, 3))
+    vi.advanceTimersByTime(PRESENCE_TIER1_TICK_MS)
+    // The queued row differs from what alice last had sent only in ts, but it
+    // was queued against the pending file-2 row, so the revert is delivered.
+    expect(sent).toEqual([
+      { t: "presence.tier1", users: [row("alice", "file-1")] },
+      { t: "presence.tier1", users: [row("alice", "file-1", undefined, 3)] },
+    ])
+  })
+
+  it("drops a disconnected connection's queued row and sent-state", () => {
+    const sent: ProjectDoServerMessage[] = []
+    const batcher = new PresenceTier1Batcher((f) => sent.push(f))
+    batcher.push(row("alice", "file-1"))
+    batcher.clear("alice")
+    vi.advanceTimersByTime(PRESENCE_TIER1_TICK_MS * 2)
+    expect(sent).toEqual([])
+    // The connId reconnecting into the same file is a change again, not a dedup hit.
+    batcher.push(row("alice", "file-1", undefined, 9))
+    vi.advanceTimersByTime(PRESENCE_TIER1_TICK_MS)
+    expect(sent).toEqual([{ t: "presence.tier1", users: [row("alice", "file-1", undefined, 9)] }])
+  })
+
+  it("flush sends immediately and dispose leaves no timer behind", () => {
+    const sent: ProjectDoServerMessage[] = []
+    const batcher = new PresenceTier1Batcher((f) => sent.push(f))
+    batcher.push(row("alice", "file-1"))
+    batcher.flush()
+    expect(sent).toHaveLength(1)
+    vi.advanceTimersByTime(PRESENCE_TIER1_TICK_MS * 2)
+    expect(sent).toHaveLength(1)
+    batcher.push(row("bob", "file-2"))
+    batcher.dispose()
+    vi.advanceTimersByTime(PRESENCE_TIER1_TICK_MS * 2)
+    expect(sent).toHaveLength(1)
+  })
+})
+
+/**
+ * AQU-1839: the DO accepts a freshly minted token on an open socket instead of
+ * closing it at expiry. These cover the policy half — who may re-authorize a
+ * live connection, and what a role downgrade has to release now that the
+ * disconnect path no longer runs.
+ */
+describe("resolveTokenRefresh", () => {
+  const conn = (numericUserId: number | null) => ({ numericUserId })
+  const claims = (userId: number, role: number | null, expSeconds: number) => ({
+    userId,
+    role,
+    exp: expSeconds,
+  })
+
+  it("accepts a token for the same user and reports the new role and expiry", () => {
+    const outcome = resolveTokenRefresh(conn(7), claims(7, 200, 2_000), 1_000_000)
+    expect(outcome).toEqual({ ok: true, role: 200, tokenExpiresAt: 2_000_000 })
+  })
+
+  it("refuses a token minted for a different user", () => {
+    // A socket is authorized as one identity for its whole life: presence, lock
+    // ownership and event authorship all key off it.
+    expect(resolveTokenRefresh(conn(7), claims(8, 300, 2_000), 1_000_000)).toEqual({
+      ok: false,
+      reason: "identity-mismatch",
+    })
+  })
+
+  it("refuses an already-expired token", () => {
+    expect(resolveTokenRefresh(conn(7), claims(7, 300, 1_000), 1_000_000)).toEqual({
+      ok: false,
+      reason: "expired",
+    })
+    // Exactly at the boundary is no better: it buys zero extra seconds.
+    expect(resolveTokenRefresh(conn(7), claims(7, 300, 1_000), 1_000_000).ok).toBe(false)
+  })
+
+  it("accepts a refresh on a connection with no numeric identity (dev bypass)", () => {
+    const outcome = resolveTokenRefresh(conn(null), claims(7, 100, 2_000), 1_000_000)
+    expect(outcome).toEqual({ ok: true, role: 100, tokenExpiresAt: 2_000_000 })
+  })
+
+  it("accepts a token that does not extend the expiry, so the role is still re-resolved", () => {
+    const outcome = resolveTokenRefresh(conn(7), claims(7, 100, 1_001), 1_000_000)
+    expect(outcome).toEqual({ ok: true, role: 100, tokenExpiresAt: 1_001_000 })
+  })
+})
+
+describe("releaseUserLocks", () => {
+  const lock = (cellId: string, userId: string): LockState => ({
+    cellId,
+    userId,
+    expiresAt: 9_999,
+  })
+
+  it("drops every lock the user holds and leaves everyone else's alone", () => {
+    const locks = new Map<string, LockState>([
+      ["c1", lock("c1", "demoted")],
+      ["c2", lock("c2", "other")],
+      ["c3", lock("c3", "demoted")],
+    ])
+    const result = releaseUserLocks(locks, "demoted", 5_000)
+    expect([...result.locks.keys()]).toEqual(["c2"])
+    expect(result.emit).toEqual([
+      { t: "lock.released", cellId: "c1", by: { userId: "demoted", ts: 5_000 } },
+      { t: "lock.released", cellId: "c3", by: { userId: "demoted", ts: 5_000 } },
+    ])
+    // The caller's map is untouched until it adopts the result.
+    expect(locks.size).toBe(3)
+  })
+
+  it("emits nothing when the user holds no locks", () => {
+    const locks = new Map<string, LockState>([["c1", lock("c1", "other")]])
+    const result = releaseUserLocks(locks, "demoted", 5_000)
+    expect(result.emit).toEqual([])
+    expect([...result.locks.keys()]).toEqual(["c1"])
   })
 })

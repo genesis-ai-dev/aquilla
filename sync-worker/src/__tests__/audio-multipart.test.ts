@@ -446,12 +446,13 @@ describe("multipart validation", () => {
   it("rejects a missing or malformed uploadId", async () => {
     const env = makeEnv()
     const token = await makeToken()
-    for (const params of [
+    const malformed: Record<string, string>[] = [
       { multipart: "part", partNumber: "1" },
       { multipart: "part", uploadId: "has space", partNumber: "1" },
       { multipart: "part", uploadId: "has\tcontrol", partNumber: "1" },
       { multipart: "part", uploadId: "x".repeat(1025), partNumber: "1" },
-    ]) {
+    ]
+    for (const params of malformed) {
       const res = (await call(
         new Request(phaseUrl(params), {
           method: "PUT",

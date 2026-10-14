@@ -21,7 +21,11 @@ The browser enqueues edits in an IndexedDB outbox and flushes them asynchronousl
 to the sync Worker with a per-file JWT. The sync Worker appends accepted events to
 Postgres and projects them into the read tables in the same datastore. A
 per-project `ProjectSync` Durable Object relays accepted events and holds transient
-presence and focus-lock leases; it is not a durable event or blob store.
+presence and focus-lock leases; it is not a durable event or blob store. Its sockets use
+the WebSocket Hibernation API, so an open-but-idle project is evicted from memory between
+frames: per-connection state lives in the socket attachment, client heartbeats are answered
+by the runtime, and the periodic lease/presence sweep is a single alarm armed for the next
+real deadline (AQU-1836).
 
 ## Service ownership
 
@@ -31,7 +35,7 @@ presence and focus-lock leases; it is not a durable event or blob store.
 | Identity Worker (`auth-worker/`) | Users, organizations, projects, membership, permissions, access tokens, sync-token minting, chat |
 | Sync Worker (`sync-worker/`) | Event validation, append-only event log, cell/file projections, project reads, realtime relay, blob endpoints |
 | Neon Postgres via Hyperdrive | Durable identity, event, projection, and metadata state |
-| ProjectSync Durable Object | Transient presence, focus-lock leases, and broadcast relay only |
+| ProjectSync Durable Object | Transient presence, focus-lock leases, and broadcast relay only (hibernatable; leases and the member-removed denylist in DO storage) |
 | R2 | Media, import-source blobs, and agent artifacts only |
 | Side-effect queue (`SIDE_EFFECTS` + DLQ) | Fan-out work a user action triggers but does not wait on — comment/@mention mail today |
 

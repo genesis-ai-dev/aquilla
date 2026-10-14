@@ -306,6 +306,15 @@ describe("audio columns", () => {
     )
     expect(screen.getAllByText("AUD")).toHaveLength(2)
   })
+
+  it("keeps the summary strip in step with the groups when the project records audio", () => {
+    const finished = unit({ fileId: "text", fileName: "Numbers", filledCount: 100, validatedCount: 100 })
+    render(
+      <PlanBoard units={[finished]} now={NOW} projectId="p1" selectedId={null} onSelect={vi.fn()} recordsAudio />,
+    )
+    expect(screen.queryByTestId("plan-summary-nearly-complete")).toBeNull()
+    expect(screen.getByTestId("plan-summary-in-progress")).toBeInTheDocument()
+  })
 })
 
 describe("selection and keyboard", () => {

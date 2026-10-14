@@ -305,6 +305,11 @@ describe("AQU-1954: a project that says it records audio", () => {
     expect(planUnitShortfall(numbers, true, true).toRecord).toBe(396)
   })
 
+  it("on: the summary strip counts the same groups the board draws", () => {
+    expect(planSummary(rows, NOW)).toMatchObject({ nearlyComplete: 1, inFlight: 1 })
+    expect(planSummary(rows, NOW, true)).toMatchObject({ nearlyComplete: 0, inFlight: 2 })
+  })
+
   it("on: draws the audio bars before the first take exists", () => {
     const untouched = [unit({ fileId: "a" }), unit({ fileId: "b", filledCount: 9 })]
     expect(planHasAudio(untouched)).toBe(false)

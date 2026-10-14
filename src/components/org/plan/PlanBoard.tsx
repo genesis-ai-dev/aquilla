@@ -435,7 +435,7 @@ export function PlanBoard({
   // The summary counts the WHOLE project, never the filtered view. "1 of 3
   // done" under a filter that hid the other sixty-three would be a lie, and
   // the strip is the one thing on this card a reader trusts without checking.
-  const summary = useMemo(() => planSummary(units, now), [units, now])
+  const summary = useMemo(() => planSummary(units, now, recordsAudio), [units, now, recordsAudio])
   // Audio bars vanish entirely on a text-only project rather than showing a
   // column of zeroes, matching what the Progress card already does. Judged on
   // the whole project so a filter cannot make a column appear and disappear.

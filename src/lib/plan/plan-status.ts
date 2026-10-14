@@ -665,8 +665,10 @@ export interface PlanSummary {
  * numbers above the board quietly shrink. `plan-status.test.ts` asserts the
  * buckets sum to the unit count; keep that test.
  */
-export function planSummary(units: readonly PlanUnit[], now: number): PlanSummary {
-  const audioFiles = audioFileIds(units)
+export function planSummary(units: readonly PlanUnit[], now: number, recordsAudio = false): PlanSummary {
+  // AQU-1954: the strip counts the groups the board draws, so it follows the
+  // project's "This project records audio" switch exactly as they do.
+  const audioFiles = audioFileIds(units, recordsAudio)
   const textFiles = textFileIds(units)
   let done = 0
   let overdue = 0

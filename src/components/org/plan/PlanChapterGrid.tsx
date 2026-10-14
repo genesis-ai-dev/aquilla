@@ -22,27 +22,29 @@ import {
 } from "@/lib/plan/plan-section"
 import { planUnitShortfall, type PlanShortfall } from "@/lib/plan/plan-status"
 import type { PlanSection } from "@/hooks/usePlanUnitSections"
-import { hexToRgba, parseTrackHue } from "@/lib/timeline/track-colors"
-import { PLAN_TONE } from "./plan-tone"
+import { PROGRESS_COLOR } from "@/lib/progress/progress-palette"
 import { useFrontMatterLabel } from "./use-plan-note"
 
 /**
- * The timeline's own hues, looked up by preset id exactly as `PlanBar` does, so
- * a retune in `track-colors.ts` lands on the bars and the tiles together. Two
- * surfaces that mean the same thing must never be tinted from two tables.
+ * Each medium's colour from the shared progress palette (AQU-1764, Sam
+ * 2026-10-13), the same table `PlanBar` draws from, so the bars and the tiles
+ * cannot drift apart: text in the text-validated blue, audio in the
+ * audio-validated teal. Two surfaces that mean the same thing must never be
+ * tinted from two tables.
  */
 const HUE = {
-  text: parseTrackHue("azure"),
-  audio: parseTrackHue("cyan"),
+  text: PROGRESS_COLOR.textValidated,
+  audio: PROGRESS_COLOR.audioValidated,
 } as const
 
 /**
- * THE UNDERLINE'S LADDER IS NOT THE BARS' LADDER, and that is deliberate rather
- * than an oversight. `PlanBar` fills a whole 8px track, where 0.33 is plainly
- * visible; this is a three-pixel line under a tile the size of a fingernail, and
- * at a third alpha it disappears into the tile's own surface. So it starts at
- * half and climbs from there: a chapter missing everything draws at full
- * strength, one missing a couple of cells still draws hard enough to find.
+ * How strongly an underline half is drawn, which says how short the chapter is.
+ * It starts at half and climbs from there: this is a three-pixel line under a
+ * tile the size of a fingernail, and much fainter than half disappears into the
+ * tile's own surface. A chapter missing everything draws at full strength, one
+ * missing a couple of cells still draws hard enough to find. Applied as the
+ * half's opacity, which on a plain fill is the same as mixing its colour with
+ * transparent.
  */
 function underlineAlpha(short: number, total: number): number {
   if (short <= 0 || total <= 0) return 0
@@ -285,8 +287,9 @@ export function PlanGridLegend({
         <span className="flex items-center gap-1">
           <span
             aria-hidden
+            data-plan-legend="text"
             className="h-2.5 w-2.5 rounded-[2px]"
-            style={{ backgroundColor: hexToRgba(HUE.text, LEGEND_ALPHA) }}
+            style={{ backgroundColor: HUE.text, opacity: LEGEND_ALPHA }}
           />
           {t("org.projectOverview.plan.gridLegendTextShort")}
         </span>
@@ -298,8 +301,9 @@ export function PlanGridLegend({
         <span className="flex items-center gap-1">
           <span
             aria-hidden
+            data-plan-legend="audio"
             className="h-2.5 w-2.5 rounded-[2px]"
-            style={{ backgroundColor: hexToRgba(HUE.audio, LEGEND_ALPHA) }}
+            style={{ backgroundColor: HUE.audio, opacity: LEGEND_ALPHA }}
           />
           {t("org.projectOverview.plan.gridLegendAudioShort")}
         </span>
@@ -375,10 +379,10 @@ function PlanTile({
           data-testid={`plan-tile-badge-${section.key}`}
           // HANGS OFF THE CORNER, most of it outside the tile, so the number
           // underneath stays clear — sat mostly inside, it crowded a two-digit
-          // chapter. And it is the STATUS azure, the same rung the group
-          // header and the pill use, not the bar-fill blue: the bar's hue is
-          // tuned to be read as a fill at two alphas, and at full strength on
-          // a fifteen-pixel dot it is the loudest thing on the panel.
+          // chapter. And it is NEUTRAL, the text colour filled with the page
+          // colour for its digits: it was Nearly complete's blue, and since
+          // that status gave its blue up to the progress bars (AQU-1764), a
+          // blue bubble here would read as a bar's colour, not as a count.
           //
           // `z-10` IS THE OVERHANG'S OTHER HALF. Every tile is positioned, and
           // positioned boxes at z-index auto paint in tree order — so the tile
@@ -386,7 +390,7 @@ function PlanTile({
           // that reaches into the gap, and every badge but the last column's
           // came out shaved flat on one side. Lifting the badge out of that
           // order is what lets it actually sit on top of its neighbours.
-          className={`absolute -top-[5px] -end-[5px] z-10 flex h-[13px] min-w-[13px] items-center justify-center rounded-full px-[2.5px] text-[8.5px] leading-none font-bold text-white dark:text-[oklch(0.2_0.04_245)] ${PLAN_TONE.nearly_complete.dot}`}
+          className="absolute -top-[5px] -end-[5px] z-10 flex h-[13px] min-w-[13px] items-center justify-center rounded-full bg-foreground px-[2.5px] text-[8.5px] leading-none font-bold text-background"
         >
           {worst}
         </span>
@@ -406,20 +410,16 @@ function PlanTile({
           <span
             data-plan-underline="text"
             className="flex-1 rounded-[2px]"
-            style={{
-              backgroundColor: textShort > 0
-                ? hexToRgba(HUE.text, underlineAlpha(textShort, section.totalCount))
-                : "transparent",
-            }}
+            style={textShort > 0
+              ? { backgroundColor: HUE.text, opacity: underlineAlpha(textShort, section.totalCount) }
+              : { backgroundColor: "transparent" }}
           />
           <span
             data-plan-underline="audio"
             className="flex-1 rounded-[2px]"
-            style={{
-              backgroundColor: audioShort > 0
-                ? hexToRgba(HUE.audio, underlineAlpha(audioShort, section.totalCount))
-                : "transparent",
-            }}
+            style={audioShort > 0
+              ? { backgroundColor: HUE.audio, opacity: underlineAlpha(audioShort, section.totalCount) }
+              : { backgroundColor: "transparent" }}
           />
         </span>
       )}

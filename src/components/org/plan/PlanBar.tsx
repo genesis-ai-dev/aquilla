@@ -1,43 +1,26 @@
-// AQU-1092…1098: one lane of progress as a SEGMENTED bar in one hue.
+// AQU-1092…1098: one lane of progress as a SEGMENTED bar.
 //
 // Two figures share a single track: the outer measure (translated, recorded)
 // and the inner one it contains (validated). Validated is a subset of
 // translated, so the track reads left to right as three exclusive states —
-// validated, done but not yet validated, nothing yet — in one hue at two
-// strengths. That is the timeline's own palette rule (Sam, 2026-08-27): one
-// solid hue per thing, drawn at alphas over whatever is behind it, SAME ALPHAS
-// IN BOTH THEMES, so every shade follows the theme instead of being redefined
-// for it. See `track-colors.ts`, whose hues and rungs this reuses.
+// validated, done but not yet validated, nothing yet.
 //
-// The hues are the timeline's Azure and Cyan rather than the Progress card's
-// amber and emerald, on purpose. Amber is Due soon and emerald is Done on this
-// board, and a bar in either would read as a status it does not have. Blue is
-// In progress, which is the one status a progress bar can agree with. Sam is
-// raising the card's palette separately.
+// THE SHARED PROGRESS PALETTE (AQU-1764, Sam 2026-10-13): text is blue and
+// audio teal, the dark step validated and the light step done, drawn by the
+// same `ProgressSplitBar` as every other busy progress surface. Until then
+// this bar borrowed the timeline's Azure and Cyan at two alphas, because the
+// Progress card's amber and emerald read here as Due soon and Done; the card
+// now uses this palette too, and In progress no longer wears a blue of its
+// own, so the bars and the statuses cannot be mistaken for each other.
 //
-// The two fills never overlap. Drawn as two adjacent segments so each rung is
-// exactly its alpha; stacked, the inner would composite to a third value that
-// belongs to no ladder.
+// Plan units carry no AI-draft count, so the text bar has no striped part.
 
 import type { ReactNode } from "react"
 import { AppTooltip } from "@/components/ui/tooltip"
-import { hexToRgba, parseTrackHue } from "@/lib/timeline/track-colors"
+import { ProgressSplitBar } from "@/components/progress/ProgressSplitBar"
+import { audioProgressSegments, textProgressSegments } from "@/lib/progress/progress-palette"
 
 export type PlanBarTone = "text" | "audio"
-
-/** The timeline's own hues, looked up by preset id so a retune there lands here. */
-const HUE: Record<PlanBarTone, string> = {
-  text: parseTrackHue("azure"),
-  audio: parseTrackHue("cyan"),
-}
-
-/**
- * The chip ladder's two fill rungs, with the bar's own meanings: a third says
- * done, two thirds says verified. Named here rather than imported from the
- * chips, because "generated" and "translated" are different claims that
- * happen to share a strength.
- */
-const ALPHA = { done: 0.33, validated: 0.67 } as const
 
 export function PlanBar({ label, outer, inner, tone, aria, tips }: {
   /** Omitted where the caller supplies its own leading gutter (a chapter number). */
@@ -58,9 +41,11 @@ export function PlanBar({ label, outer, inner, tone, aria, tips }: {
    */
   tips?: { outer: string; inner: string }
 }) {
-  const hue = HUE[tone]
-  const validated = Math.max(0, Math.min(inner, outer))
-  const done = Math.max(0, outer - validated)
+  // The two percentages the readout prints, so the bar and the numbers beside
+  // it can never disagree.
+  const segments = tone === "text"
+    ? textProgressSegments({ validated: inner, translated: outer, total: 100 })
+    : audioProgressSegments({ validated: inner, recorded: outer, total: 100 })
   return (
     // No `title`: the bar used to repeat its two percentages in a sentence on
     // hover, and the numbers now say more than that sentence did.
@@ -71,26 +56,7 @@ export function PlanBar({ label, outer, inner, tone, aria, tips }: {
         </span>
       )}
       {/* Same track as the Progress card's bars: 8px, fully rounded, muted. */}
-      <span className="relative h-2 min-w-[52px] flex-1 overflow-hidden rounded-full bg-muted">
-        {validated > 0 && (
-          <span
-            data-plan-fill="validated"
-            className={`absolute inset-y-0 start-0 ${done === 0 ? "rounded-e-full" : ""}`}
-            style={{ width: `${validated}%`, backgroundColor: hexToRgba(hue, ALPHA.validated) }}
-          />
-        )}
-        {done > 0 && (
-          <span
-            data-plan-fill="done"
-            className="absolute inset-y-0 rounded-e-full"
-            style={{
-              insetInlineStart: `${validated}%`,
-              width: `${done}%`,
-              backgroundColor: hexToRgba(hue, ALPHA.done),
-            }}
-          />
-        )}
-      </span>
+      <ProgressSplitBar segments={segments} height={8} className="min-w-[52px] flex-1" />
       {/* 72px, not 60: "100% | 100%" is the widest this reads and it has to
           fit without wrapping, or the row grows a line on the very unit that
           is finished. A flex box rather than right-aligned text so the

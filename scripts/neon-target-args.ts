@@ -22,6 +22,7 @@ export type NeonTargetCommand =
   | "repair-lane-grants"
   | "prune-phantom-voices"
   | "verify-lanes"
+  | "seed-extract"
 
 export function scriptFor(command: NeonTargetCommand): string {
   if (command === "backfill-progress") return "scripts/neon-backfill-progress.ts"
@@ -31,6 +32,9 @@ export function scriptFor(command: NeonTargetCommand): string {
   if (command === "repair-lane-grants") return "scripts/neon-repair-lane-grants.ts"
   if (command === "prune-phantom-voices") return "scripts/neon-prune-phantom-voices.ts"
   if (command === "verify-lanes") return "scripts/neon-verify-lanes.ts"
+  // AQU-1953: the dev-DB seed extract runs under neon-target so the source
+  // branch is explicit and recorded (AQUILLA_NEON_TARGET) in seed.meta.json.
+  if (command === "seed-extract") return "scripts/seed-extract.ts"
   return "scripts/neon-migrate.ts"
 }
 
@@ -46,6 +50,7 @@ export function childArgs(command: NeonTargetCommand, passthrough: readonly stri
     command.startsWith("backfill-") ||
     command === "verify-lanes" ||
     command === "repair-lane-grants" ||
-    command === "prune-phantom-voices"
+    command === "prune-phantom-voices" ||
+    command === "seed-extract"
   return forwardsFlags ? [script, ...passthrough] : [script, command]
 }

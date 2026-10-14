@@ -25,6 +25,7 @@ import { isAnalyticsEnabled } from "@/lib/analytics-consent"
 import { AUTH_BASE } from "@/lib/frontier/auth"
 import { fetchWithTimeout } from "@/lib/frontier/orgs"
 import { fetchSyncToken, SyncTokenError } from "@/lib/sync/sync-token"
+import { t } from "@/lib/i18n/standalone"
 import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
 import type {
   ChangesetChanges,
@@ -304,6 +305,11 @@ async function mintProjectSyncToken(jwt: string, projectId: string): Promise<str
     const { token } = await fetchSyncToken(jwt, projectId, PROJECT_SENTINEL_FILE_ID)
     return token
   } catch (err) {
+    // OPS-44: a refresh cannot clear this one; the step-up prompt fetchSyncToken
+    // raised can. Say so instead of sending the admin round a reload.
+    if (err instanceof SyncTokenError && err.elevationRequired) {
+      throw new ChangesetApiError(t("error.network.elevationRequired"), 403, "elevation_required")
+    }
     if (err instanceof SyncTokenError) {
       throw new ChangesetApiError(
         "Couldn't authorize with the sync service. Refresh and try again.",

@@ -648,10 +648,14 @@ export async function getOutboxRecordsForCell(
   }
 }
 
-/** Oldest-first rows with status `pending` only, at most `limit`. Used by the flusher. */
+/** Oldest-first rows with status `pending` only, at most `limit`. Used by the flusher.
+ *  `skip` drops rows the caller is deliberately holding back (OPS-44) before
+ *  they count toward `limit`, so a large held backlog cannot fill the window
+ *  and hide the rows behind it. */
 export async function peekPendingOutboxBatch(
   limit: number,
   scope?: OutboxOwnerScope,
+  skip?: (record: OutboxRecord) => boolean,
 ): Promise<OutboxRecord[]> {
   const ownerKey = ownerForScope(scope)
   try {
@@ -668,7 +672,11 @@ export async function peekPendingOutboxBatch(
           return
         }
         const record = cursor.value as OutboxRecord
-        if (belongsToOwner(record, ownerKey) && (record.status ?? "pending") === "pending") {
+        if (
+          belongsToOwner(record, ownerKey) &&
+          (record.status ?? "pending") === "pending" &&
+          !skip?.(record)
+        ) {
           pending.push(record)
         }
         cursor.continue()

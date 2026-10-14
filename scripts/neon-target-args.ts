@@ -20,6 +20,7 @@ export type NeonTargetCommand =
   | "backfill-lanes"
   | "backfill-lane-batch"
   | "repair-lane-grants"
+  | "prune-phantom-voices"
   | "verify-lanes"
 
 export function scriptFor(command: NeonTargetCommand): string {
@@ -28,6 +29,7 @@ export function scriptFor(command: NeonTargetCommand): string {
   if (command === "backfill-lanes") return "scripts/neon-backfill-lanes.ts"
   if (command === "backfill-lane-batch") return "scripts/neon-backfill-lane-batch.ts"
   if (command === "repair-lane-grants") return "scripts/neon-repair-lane-grants.ts"
+  if (command === "prune-phantom-voices") return "scripts/neon-prune-phantom-voices.ts"
   if (command === "verify-lanes") return "scripts/neon-verify-lanes.ts"
   return "scripts/neon-migrate.ts"
 }
@@ -41,6 +43,9 @@ export function scriptFor(command: NeonTargetCommand): string {
 export function childArgs(command: NeonTargetCommand, passthrough: readonly string[]): string[] {
   const script = scriptFor(command)
   const forwardsFlags =
-    command.startsWith("backfill-") || command === "verify-lanes" || command === "repair-lane-grants"
+    command.startsWith("backfill-") ||
+    command === "verify-lanes" ||
+    command === "repair-lane-grants" ||
+    command === "prune-phantom-voices"
   return forwardsFlags ? [script, ...passthrough] : [script, command]
 }

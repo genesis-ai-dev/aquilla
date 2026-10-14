@@ -6,7 +6,7 @@
 // because a peer that skips the read and never receives the push is left
 // showing a percentage that silently stopped moving.
 
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 // route.ts imports broadcast.ts → partyserver (cloudflare:* imports).
 vi.mock('partyserver', () => ({
@@ -18,6 +18,7 @@ vi.mock('partyserver', () => ({
 import { handleEventsWriteRequest } from '../events/route'
 import { makeTestToken } from './helpers/auth'
 import { makeTestDb } from './helpers/pg-test-db'
+import { resetFileCounterRecomputeCoalescerForTests } from '../events/counter-recompute-coalescer'
 
 const SECRET = 'progress-push-fanout-secret'
 const PROJECT = 'proj-a'
@@ -37,6 +38,55 @@ async function seeded() {
     files: [{ id: FILE, project_id: PROJECT, name: 'Genesis', event_id: 'file-event' }],
     cells: [sourceCell('cell-1', 'GEN 1:1', 1), sourceCell('cell-2', 'GEN 1:2', 2)],
   })
+}
+
+afterEach(() => {
+  // AQU-1826: the recompute coalescer keeps isolate-scoped per-file state.
+  resetFileCounterRecomputeCoalescerForTests()
+})
+
+/**
+ * AQU-1826 × AQU-1832: wrap the shim so the FIRST counter-recompute pass is
+ * held until released, and the Nth write transaction can be awaited. Requests
+ * that commit while the first pass is held are answered by the pass queued
+ * behind it — started by whichever of them reaches the coalescer first, so the
+ * others never run their own callback. Same scaffolding as
+ * events-write-path-perf.test.ts, which proves the coalescing itself.
+ */
+function heldFirstPassDb(db: AquillaDb, writesToAwait: number) {
+  const sqlOf = (s: AquillaStatement): string => (s as unknown as { _sql(): string })._sql()
+  let passes = 0
+  let writes = 0
+  let releaseFirstPass: () => void = () => {}
+  const firstPassHeld = new Promise<void>((r) => { releaseFirstPass = r })
+  let firstPassStarted: () => void = () => {}
+  const sawFirstPass = new Promise<void>((r) => { firstPassStarted = r })
+  let writesDone: () => void = () => {}
+  const sawWrites = new Promise<void>((r) => { writesDone = r })
+  const run = async <T = Record<string, unknown>>(stmts: AquillaStatement[]) => {
+    const sql = stmts.map(sqlOf)
+    if (sql.some((s) => s.includes('UPDATE files SET cell_count'))) {
+      passes += 1
+      if (passes === 1) {
+        firstPassStarted()
+        await firstPassHeld
+      }
+    }
+    const res = await db.batchPipelined!<T>(stmts)
+    if (sql.some((s) => s.includes('INSERT INTO events'))) {
+      writes += 1
+      if (writes === writesToAwait) writesDone()
+    }
+    return res
+  }
+  const wrapped: AquillaDb = {
+    prepare: (q) => db.prepare(q),
+    exec: (q) => db.exec(q),
+    close: () => db.close(),
+    batch: run,
+    batchPipelined: run,
+  }
+  return { db: wrapped, sawFirstPass, sawWrites, release: () => releaseFirstPass(), passes: () => passes }
 }
 
 function envWithProjectSync(db: AquillaDb) {
@@ -134,5 +184,46 @@ describe('AQU-1832 — POST /events fans out the progress push', () => {
     const res = await commitCell({ AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }, 'cell-1', 'uno')
     const body = (await res.json()) as { applied: Array<Record<string, unknown>> }
     expect(body.applied[0].progressPushed).toBeUndefined()
+  })
+
+  it('AQU-1826: a request answered by a pass another request started still pushes its frames', async () => {
+    // Under the per-file coalescer the pass that answers a request may have
+    // been started by a different request's callback. What that pass wrote,
+    // and the timestamp it stamped the rows with, must still reach THIS
+    // request — otherwise it broadcasts no push, its applied frames carry no
+    // `progressPushed`, and every peer refetches exactly as before, under the
+    // one load pattern (several writers on one file) both tickets exist for.
+    const { db: raw } = await makeTestDb({
+      files: [{ id: FILE, project_id: PROJECT, name: 'Genesis', event_id: 'file-event' }],
+      cells: [sourceCell('cell-1', 'GEN 1:1', 1), sourceCell('cell-2', 'GEN 1:2', 2), sourceCell('cell-3', 'GEN 1:3', 3)],
+    })
+    const held = heldFirstPassDb(raw, 3)
+    const { env, bodies } = envWithProjectSync(held.db)
+
+    const first = commitCell(env, 'cell-1', 'uno')
+    await held.sawFirstPass
+    // Both arrive while the first pass is held: one of them starts the queued
+    // pass, the other only joins it — and must not be able to tell.
+    const second = commitCell(env, 'cell-2', 'dos')
+    const third = commitCell(env, 'cell-3', 'tres')
+    await held.sawWrites
+    await new Promise<void>((r) => { setTimeout(r, 0) })
+    held.release()
+
+    const responses = await Promise.all([first, second, third])
+    // The held pass plus the one queued behind it — not one per request.
+    expect(held.passes()).toBe(2)
+
+    for (const res of responses) {
+      const body = (await res.json()) as { applied: Array<Record<string, unknown>> }
+      expect(body.applied[0].progressPushed).toBe(true)
+    }
+    expect(bodies).toHaveLength(3)
+    for (const b of bodies) {
+      const push = messagesOf([b]).find((m) => m.t === 'file.progress.pushed')
+      expect(push).toBeDefined()
+      expect(push!.file).toBe(FILE)
+      expect(push!.complete).toBe(false)
+    }
   })
 })

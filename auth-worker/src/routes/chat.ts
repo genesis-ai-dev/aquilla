@@ -1,4 +1,4 @@
-import { admitChatUsage, METERED_MAX_OUTPUT_TOKENS, meterChatStream, providerRejectedPreModel, releaseChatUsage, settleChatUsage, type ChatUsage } from '../lib/billing/chat-usage'
+import { admitChatUsage, METERED_MAX_OUTPUT_TOKENS, meterChatStream, observeChatStreamCost, providerRejectedPreModel, releaseChatUsage, settleChatUsage, type ChatUsage } from '../lib/billing/chat-usage'
 import { weeklyUsageActive } from '../lib/billing/usage-mode'
 // POST /api/v1/chat/completions — OpenAI-compatible authenticated proxy to
 // OpenRouter. Streams via SSE when `stream: true`; otherwise returns the
@@ -28,7 +28,7 @@ import { getPlatformSettingsCached, type PlatformSettings } from "../lib/platfor
 import { creditGuard, recordCredit } from "../lib/credits"
 import { countWords } from "../lib/billing/plans"
 import { recordWords, wordCapBody, wordGuard } from "../lib/billing/words"
-import { openRouterExtras } from "../lib/llm-vendor"
+import { openRouterExtras, streamUsageOptions } from "../lib/llm-vendor"
 import { makePostgres, type AquillaDb } from "../../../db/shim/postgres"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
 import {
@@ -38,6 +38,11 @@ import {
   recordAbOutcome,
   setAbHeaders,
 } from "../lib/model-ab"
+import {
+  logVendorTimeout,
+  vendorDeadline,
+  vendorTimeoutMessage,
+} from "../../../shared/vendor-timeouts"
 
 const chat = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -58,6 +63,39 @@ const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 // per-credential throttles (db/shared/rate-limit.ts).
 const CHAT_MAX_PER_USER_PER_WINDOW = 300
 
+// AQU-1870: the volumetric cap above bounds how *often* a user can call this
+// proxy; it says nothing about how expensive one call is. The request schema
+// accepted message content of any length and an optional client-chosen
+// `max_tokens` (the SPA's own default is DEFAULT_COMPLETION_MAX_TOKENS =
+// 16,384, and a project admin can type any number into the advanced-LLM
+// field), and only the metered path clamped output. So one signed-in user
+// could aim a 200k-token prompt at an allowlisted frontier model on the
+// shared OPENROUTER_API_KEY. These are the two missing ceilings, applied on
+// every path before any provider call:
+//
+//   - CHAT_MAX_PROMPT_CHARS bounds the summed message content. 200k chars is
+//     ~100k tokens at the rate card's 2-chars-per-token estimate
+//     (lib/billing/rate-card.ts) and ~35k words — orders of magnitude above
+//     any real suggest or batch-translate prompt, which is system + user
+//     built from one cell plus its few-shot examples.
+//   - CHAT_MAX_OUTPUT_TOKENS is the legacy path's output ceiling, set to the
+//     SPA's shipped default so no normal suggestion is clipped. The metered
+//     path stays tighter at METERED_MAX_OUTPUT_TOKENS.
+const CHAT_MAX_PROMPT_CHARS = 200_000
+const CHAT_MAX_OUTPUT_TOKENS = 16_384
+// The prompt ceiling is counted after zod has already parsed the body, so it
+// cannot stop a body far larger than any valid request from being parsed in
+// the first place. This is the declared-length pre-check that can — same
+// shape as import-sandbox.ts. Deliberately loose: 200k chars of 4-byte UTF-8
+// plus JSON escaping still fits well inside it, so nothing the prompt ceiling
+// would have admitted is refused here.
+const CHAT_MAX_BODY_BYTES = 2 * 1024 * 1024
+
+/** Summed message content for a chat request — what the prompt ceiling bounds. */
+function promptChars(messages: { content: string }[]): number {
+  return messages.reduce((n, m) => n + m.content.length, 0)
+}
+
 /** Mirrors the agent route so local/dev/test can use the same scripted or
  * self-hosted OpenAI-compatible upstream as every other AI surface. The dev
  * stack points this override at scripts/mock-openrouter.ts; production keeps
@@ -69,16 +107,21 @@ function resolveOpenRouterUrl(env: Env): string {
 }
 
 const messageSchema = z.object({
-  role: z.string(),
+  // AQU-1870: role is forwarded verbatim and is not part of the prompt-chars
+  // sum, so it carries its own ceiling. Every real role is one short word.
+  role: z.string().min(1).max(32),
   content: z.string(),
 })
 
 const chatCompletionRequestSchema = z.object({
   model: z.string(),
-  messages: z.array(messageSchema),
+  // Every caller in this repo sends system + user; 64 is a sanity ceiling
+  // (AQU-1870) so a client cannot flood the proxy with array elements.
+  messages: z.array(messageSchema).min(1).max(64),
   temperature: z.number().optional().default(0.7),
   stream: z.boolean().optional().default(false),
-  max_tokens: z.number().optional(),
+  // A positive integer or absent (AQU-1870); clamped server-side below.
+  max_tokens: z.number().int().positive().optional(),
   response_format: z.record(z.string(), z.unknown()).optional(),
   // AQU-414 follow-up: chat invoked from a project-editing context carries the
   // project id so its credit spend counts against that project's org (same
@@ -140,14 +183,24 @@ async function resolveChatOrgId(
  * user's. The request-scoped shim closes as soon as the Response returns, so
  * this opens its own connection (same as contextual's selfTickLoop). Ledger
  * writes were already best-effort; a failure here is logged, never surfaced.
+ *
+ * `waitFor` defers the work until something the write depends on has happened —
+ * for a streamed reply, the stream ending so its real cost is known (AQU-1871).
+ * The connection is opened only once that resolves, so a long reply does not
+ * hold Postgres open for its whole duration. A rejected `waitFor` still runs
+ * the work: bookkeeping degrades to what it knows rather than vanishing.
  */
 function afterResponse(
   c: Context<{ Bindings: Env; Variables: Variables }>,
   work: (db: AquillaDb) => Promise<void>,
+  waitFor?: Promise<unknown>,
 ): void {
-  const shim = c.env.PG_CONNECTION_STRING ? makePostgres(c.env.PG_CONNECTION_STRING) : null
-  const db = (shim as unknown as AquillaDb | null) ?? c.env.AQUILLA_PG
-  detach(c, work(db).finally(() => shim?.close()))
+  detach(c, (async () => {
+    if (waitFor) await waitFor.catch(() => undefined)
+    const shim = c.env.PG_CONNECTION_STRING ? makePostgres(c.env.PG_CONNECTION_STRING) : null
+    const db = (shim as unknown as AquillaDb | null) ?? c.env.AQUILLA_PG
+    try { await work(db) } finally { shim?.close() }
+  })())
 }
 
 /** Keep a best-effort task alive past the response; failures are logged only. */
@@ -173,13 +226,40 @@ function buildOpenRouterBody(request: ChatRequest, model: string, env: Env): str
     stream: request.stream,
     max_tokens: request.max_tokens,
     ...openRouterExtras(env.OPENROUTER_BASE_URL),
+    // AQU-1871: a streamed reply's cost is only in the stream if we asked for
+    // it. OpenRouter answers `usage.include` above; every other
+    // OpenAI-compatible upstream needs stream_options.include_usage, or the
+    // ledger would see no cost at all for a streamed call.
+    ...(request.stream ? streamUsageOptions(env.OPENROUTER_BASE_URL) : {}),
     ...(request.response_format && { response_format: request.response_format }),
   })
+}
+
+/** AQU-1870: refuse an over-sized body on its declared length, before the
+ *  JSON is parsed. Runs after authMiddleware so an anonymous caller is still
+ *  turned away by 401 first. A body with no Content-Length is left to the
+ *  prompt-chars ceiling below. */
+async function rejectOversizedBody(
+  c: Context<{ Bindings: Env; Variables: Variables }>,
+  next: () => Promise<void>,
+): Promise<Response | void> {
+  const declared = Number(c.req.header("Content-Length"))
+  if (Number.isFinite(declared) && declared > CHAT_MAX_BODY_BYTES) {
+    return c.json(
+      {
+        error: "prompt_too_large",
+        message: `Chat request body is ${declared} bytes; the limit is ${CHAT_MAX_BODY_BYTES}.`,
+      },
+      413,
+    )
+  }
+  await next()
 }
 
 chat.post(
   "/completions",
   authMiddleware,
+  rejectOversizedBody,
   zValidator("json", chatCompletionRequestSchema),
   async (c) => {
     if (!c.env.OPENROUTER_API_KEY) {
@@ -187,6 +267,25 @@ chat.post(
     }
 
     const request = c.req.valid("json")
+
+    // AQU-1870: bound the request before it costs anything — no DB round trip,
+    // no provider call. Rejected outright when the prompt is over the ceiling;
+    // a client-supplied output budget is clamped rather than rejected so a
+    // too-generous project setting degrades instead of failing.
+    const requestPromptChars = promptChars(request.messages)
+    if (requestPromptChars > CHAT_MAX_PROMPT_CHARS) {
+      return c.json(
+        {
+          error: "prompt_too_large",
+          message: `Chat prompt is ${requestPromptChars} characters; the limit is ${CHAT_MAX_PROMPT_CHARS}. Shorten the text or reduce the context size.`,
+        },
+        413,
+      )
+    }
+    if (request.max_tokens !== undefined) {
+      request.max_tokens = Math.min(request.max_tokens, CHAT_MAX_OUTPUT_TOKENS)
+    }
+
     const settings = await getPlatformSettingsCached(c.env)
     let model = resolveModel(c.env, request.model, settings)
 
@@ -253,8 +352,12 @@ chat.post(
     }
     // Legacy credit/word guards are retired once the weekly ledger meters this call.
     if (!usage) {
+      // AQU-1871: org 0 is the no-org fallback every project-less chat lands
+      // in, so guarding it as one org let any user's spend consume the cap
+      // that was supposed to bound each of them. With no real org to bill, the
+      // cap is the caller's own.
       const [chatCreditCheck, chatWordCheck] = await Promise.all([
-        creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm"),
+        creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm", orgId === 0 ? user.id : undefined),
         wordGuard(c.env.AQUILLA_PG, orgId),
       ])
       if (!chatCreditCheck.ok) {
@@ -274,7 +377,7 @@ chat.post(
       request.max_tokens = Math.min(request.max_tokens ?? METERED_MAX_OUTPUT_TOKENS, METERED_MAX_OUTPUT_TOKENS)
       try {
         const created = await admitChatUsage(c.env, { ...usage, userId: user.id, projectId: request.projectId!,
-          model, promptChars: request.messages.reduce((n, m) => n + m.content.length, 0), maxOutputTokens: request.max_tokens })
+          model, promptChars: requestPromptChars, maxOutputTokens: request.max_tokens })
         if (!created) return c.json({ error: 'usage_request_already_admitted' }, 409)
       } catch (error) {
         if (error instanceof Error && error.message === 'Weekly AI allowance exhausted') {
@@ -284,6 +387,23 @@ chat.post(
         return c.json({ error: 'usage_accounting_unavailable' }, 503)
       }
     }
+    // AQU-1849: the proxy's one upstream call, bounded two different ways.
+    //
+    //   * `stream: false` — nothing arrives until the whole completion is
+    //     done, so the deadline is TOTAL: it stays armed across the `.json()`
+    //     read and is disarmed by the `finally` when the handler returns.
+    //   * `stream: true` — a long generation is not a hang, so the deadline is
+    //     FIRST BYTE only: `await fetch` resolves when the headers arrive and
+    //     the handler returns right after wiring the stream up, which disarms
+    //     it. The body streams on unbounded afterwards.
+    //
+    // The deadline is linked to the client's signal (metered requests already
+    // forwarded it) so a user who navigates away still cancels upstream — and
+    // `timedOut()` keeps that case out of the vendor-timeout logs.
+    const deadline = vendorDeadline(
+      request.stream ? "openRouterStreamFirstByte" : "openRouterNonStreaming",
+      usage ? c.req.raw.signal : null,
+    )
     try {
       const startedAt = Date.now()
       const upstream = await fetch(resolveOpenRouterUrl(c.env), {
@@ -293,7 +413,7 @@ chat.post(
           "Content-Type": "application/json",
         },
         body: buildOpenRouterBody(request, model, c.env),
-        ...(usage ? { signal: c.req.raw.signal } : {}),
+        signal: deadline.signal,
       })
       const latencyMs = Date.now() - startedAt
 
@@ -335,25 +455,37 @@ chat.post(
       }
 
       if (request.stream) {
-        // Streaming: pass body through unchanged. We can't inspect the usage
-        // object from a streaming response without buffering it (defeats the
-        // point). Record a flat 1¢ fallback estimate so the ledger always has
-        // a row — this is the cheap/low-priority rail. Written after the
-        // Response so the first token isn't held behind them (AQU-617).
+        // Streaming: the bytes pass through unchanged, but the frames are
+        // scanned on the way past so the ledger gets the provider's real cost
+        // instead of the flat 1¢ it used to record — a 16k-output reply on a
+        // frontier model is ~25¢, so org caps and the usage dashboard
+        // under-reported by 10–25× and would not have tripped once
+        // enforcement was turned on (AQU-1871). Written after the Response,
+        // and only once the stream has ended, so neither the first token nor
+        // the last is held behind a ledger write (AQU-617).
+        const observed = !usage && upstream.body ? observeChatStreamCost(upstream.body) : undefined
         afterResponse(c, async (db) => {
           await logAb(db)
           if (!usage) {
-            await recordCredit(db, orgId, user.id, "llm", 1, 1)
+            // An unresolved cost is recorded as zero cost and one unit: the
+            // request still shows up, and no invented charge enters the
+            // ledger (db/shared/billing-cost.ts's rule).
+            if (observed?.costCents === undefined) {
+              console.warn("[chat] streamed reply reported no usable cost", { orgId, userId: user.id, model })
+            }
+            await recordCredit(db, orgId, user.id, "llm", observed?.costCents ?? 0, 1)
             await recordWords(db, orgId, user.id, "llm", chatWords)
           }
-        })
+        }, observed?.ended)
         const streamHeaders = new Headers({
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",
           Connection: "keep-alive",
         })
         if (ab) setAbHeaders(streamHeaders, ab)
-        const body = usage && upstream.body ? meterChatStream(upstream.body, c.env, usage) : upstream.body
+        const body = usage && upstream.body
+          ? meterChatStream(upstream.body, c.env, usage)
+          : (observed?.body ?? upstream.body)
         return new Response(body, { status: 200, headers: streamHeaders })
       }
 
@@ -384,8 +516,18 @@ chat.post(
       }
       return c.json(data)
     } catch (error) {
+      // AQU-1849: a blown deadline is the upstream's fault, not ours — 504 so
+      // the client can say "the model did not respond" and offer a retry,
+      // instead of the blanket 500 that used to swallow it.
+      if (deadline.timedOut()) {
+        const vendor = request.stream ? "openRouterStreamFirstByte" : "openRouterNonStreaming"
+        logVendorTimeout(vendor, error)
+        return c.json({ error: "openrouter_timeout", message: vendorTimeoutMessage(vendor) }, 504)
+      }
       console.error("Error in chat completion:", error)
       return c.json({ error: "internal_error", message: "Chat completion failed" }, 500)
+    } finally {
+      deadline.clear()
     }
   },
 )

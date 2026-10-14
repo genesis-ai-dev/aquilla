@@ -248,6 +248,29 @@ export interface ProjectWideSettings {
    */
   bibleEnrichments?: import("../../../db/shared/bible-enrichments").BibleEnrichmentSettings
   /**
+   * AQU-1688: facts about the target language that Bible data checks need,
+   * one optional slot each (db/shared/language-profile.ts). A check whose slot
+   * is empty is dormant. Maintainer floor, like the rest of the blob. Written
+   * whole, so a writer merges over the stored value to keep other slots.
+   */
+  languageProfile?: import("../../../db/shared/language-profile").LanguageProfile
+  /**
+   * AQU-1691: the decision log — the team's answers to Autopilot's questions
+   * (db/shared/project-facts.ts). Typed `unknown[]` on purpose: read it
+   * through `readProjectFacts`, and write it with `upsertProjectFact` /
+   * `removeProjectFact`, which keep an entry this version cannot read.
+   * Maintainer floor, like the rest of the blob; an answer on a question card
+   * writes it server-side (db/shared/project-facts-write.ts).
+   */
+  projectFacts?: unknown[]
+  /**
+   * AQU-1692: maintainers' corrections of who speaks a Bible Knowledge Pack
+   * speech, and to whom, keyed by speech id (db/shared/bible-voice-overrides.ts).
+   * Maintainer floor, like the rest of the blob; the settings route refuses a
+   * malformed map.
+   */
+  bibleVoiceOverrides?: import("../../../db/shared/bible-voice-overrides").BibleVoiceOverrides
+  /**
    * Knowledge base drafting toggle (spec docs/superpowers/specs/2026-08-07-knowledge-base-design.md).
    * When true, translation generation + predictions inject KB string-search
    * snippets into draft prompts. Agent access to the KB is NOT gated by this.

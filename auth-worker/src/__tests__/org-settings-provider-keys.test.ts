@@ -9,7 +9,7 @@
 //      does NOT interfere with the export floor.
 
 import { env } from "cloudflare:test"
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, beforeEach, afterEach} from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
@@ -149,5 +149,64 @@ describe("org-settings orgProviderKeys (AQU-433)", () => {
     const body2 = (await mergeRes.json()) as { settings: Record<string, unknown> }
     expect(body2.settings.exportMinRole).toBe(400)
     expect((body2.settings.orgProviderKeys as Record<string, unknown>)["gemini-tts"]).toBe("another-key")
+  })
+})
+
+describe("org-settings orgProviderKeys: platform admin needs elevation (OPS-44)", () => {
+  // The unredacted branch hands back the org's LIVE vendor keys (D7).
+  // getEffectiveOrgRole gives any platform operator 700 on EVERY org, so
+  // without an elevation check an un-elevated admin session reads every
+  // tenant's Gemini/TTS key in plaintext. "root" is the test ADMIN_EMAILS
+  // allowlist entry (pg-test-env); it has no org_members row on org 1.
+  const KEY = "AIza-secret-key"
+  const REDACTED = "••••••••"
+
+  const keysFrom = async (res: Response): Promise<Record<string, unknown>> => {
+    const body = (await res.json()) as { settings: Record<string, unknown> }
+    return body.settings.orgProviderKeys as Record<string, unknown>
+  }
+
+  const elevate = async (jwt: string) => {
+    const req = await app.request("/api/v2/admin/elevation/request", { method: "POST", headers: authHeader(jwt) }, env)
+    const { devCode } = (await req.json()) as { devCode?: string }
+    const res = await app.request(
+      "/api/v2/admin/elevation/verify",
+      { method: "POST", headers: authHeader(jwt), body: JSON.stringify({ code: devCode }) },
+      env,
+    )
+    expect(res.status).toBe(200)
+  }
+
+  beforeEach(async () => {
+    await seedOrg()
+    await seedUser(7, "root")
+    expect((await patch("anna", { orgProviderKeys: { "gemini-tts": KEY } })).status).toBe(200)
+    env.ADMIN_REQUIRE_ELEVATION = "true"
+  })
+
+  afterEach(() => {
+    env.ADMIN_REQUIRE_ELEVATION = undefined
+  })
+
+  it("un-elevated platform admin gets the keys REDACTED", async () => {
+    const res = await get("root")
+    expect(res.status).toBe(200)
+    expect(await keysFrom(res)).toEqual({ "gemini-tts": REDACTED })
+  })
+
+  it("elevated platform admin sees the real keys", async () => {
+    const jwt = await jwtFor("root")
+    await elevate(jwt)
+    const res = await app.request("/api/v2/orgs/1/settings", { headers: authHeader(jwt) }, env)
+    expect(res.status).toBe(200)
+    expect(await keysFrom(res)).toEqual({ "gemini-tts": KEY })
+  })
+
+  it("a genuine maintainer is unaffected while un-elevated", async () => {
+    expect(await keysFrom(await get("anna"))).toEqual({ "gemini-tts": KEY })
+  })
+
+  it("a contributor is still redacted, as before", async () => {
+    expect(await keysFrom(await get("tom"))).toEqual({ "gemini-tts": REDACTED })
   })
 })

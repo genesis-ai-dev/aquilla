@@ -90,8 +90,12 @@ vi.mock("@/lib/sync/invites", () => ({
 }))
 
 const mockFetchProjectSettings = vi.fn()
+// AQU-528: useCurrentTargetLanes reads the *Result* variant; the Invite-link
+// tab needs it to name a link's lane scope by language.
+const mockFetchProjectSettingsResult = vi.fn()
 vi.mock("@/lib/sync/project-settings", () => ({
   fetchProjectSettings: (...args: unknown[]) => mockFetchProjectSettings(...args),
+  fetchProjectSettingsResult: (...args: unknown[]) => mockFetchProjectSettingsResult(...args),
 }))
 
 const mockResolveCloudProjectResult = vi.fn()
@@ -358,5 +362,96 @@ describe("SharePanel — invite create needs the admin code", () => {
 
     expect(await screen.findByText("Verify with your admin code, then try again.")).toBeInTheDocument()
     expect(screen.queryByText(/couldn't create invite/i)).not.toBeInTheDocument()
+  })
+})
+
+// AQU-528: a language-scoped invite link auto-grants its lane(s) on join, so
+// the Link tab's active-links list has to say WHICH language each link grants.
+// Without it two links differing only by language render identically, and the
+// only way to tell which one to revoke is to redeem it.
+describe("SharePanel — active invite links name their language scope (AQU-528)", () => {
+  const laneRows = [
+    {
+      id: "ln-fr", role: "target", name: "French", language: "French",
+      langCode: "fr", legacyTag: "fr", position: 0, archivedAt: null,
+    },
+    {
+      id: "ln-es", role: "target", name: "Spanish", language: "Spanish",
+      langCode: "es", legacyTag: "es", position: 1, archivedAt: null,
+    },
+  ]
+
+  function invite(tokenTail: string, scopeLanes?: string[]) {
+    return {
+      token: `tok-${tokenTail}`,
+      role: { level: 400, name: "contributor" },
+      createdAt: "2026-10-01T00:00:00Z",
+      expiresAt: null,
+      email: null,
+      ...(scopeLanes ? { scopeLanes } : {}),
+    }
+  }
+
+  async function renderLinkTab(invites: unknown[]) {
+    const { listProjectInvites } = await import("@/lib/sync/invites")
+    vi.mocked(listProjectInvites).mockResolvedValue(invites as never)
+    renderPanel()
+    fireEvent.click(screen.getByRole("button", { name: "Invite link" }))
+  }
+
+  function rowFor(tokenTail: string): HTMLElement {
+    const token = `tok-${tokenTail}`
+    return screen.getByText(`…${token.slice(-8)}`).closest("li") as HTMLElement
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockMembers = leadMembers
+    mockFetchProjectSettings.mockResolvedValue(null)
+    mockFetchProjectSettingsResult.mockResolvedValue({ ok: true, value: { lanes: laneRows } })
+  })
+
+  it("names each link's lane by language, so two single-lane links differ", async () => {
+    await renderLinkTab([invite("frfrfr01", ["ln-fr"]), invite("eseses02", ["ln-es"])])
+
+    await waitFor(() => {
+      expect(rowFor("frfrfr01")).toHaveTextContent("French lane only")
+    })
+    expect(rowFor("eseses02")).toHaveTextContent("Spanish lane only")
+    expect(rowFor("frfrfr01")).not.toHaveTextContent("Spanish")
+  })
+
+  it("lists every lane of a multi-lane link", async () => {
+    await renderLinkTab([invite("multi003", ["ln-fr", "ln-es"])])
+
+    await waitFor(() => {
+      expect(rowFor("multi003")).toHaveTextContent("French and Spanish lanes only")
+    })
+  })
+
+  it("says nothing about lanes on an unscoped link (it grants every lane)", async () => {
+    await renderLinkTab([invite("openlink", undefined), invite("frfrfr01", ["ln-fr"])])
+
+    await waitFor(() => {
+      expect(rowFor("frfrfr01")).toHaveTextContent("French lane only")
+    })
+    expect(rowFor("openlink")).not.toHaveTextContent(/lane[s]? only/)
+  })
+
+  it("still marks a link scoped to a lane that no longer exists as scoped", async () => {
+    // Rendering nothing here would read as an unscoped link — i.e. every lane.
+    await renderLinkTab([invite("stale005", ["ln-deleted"])])
+
+    await waitFor(() => {
+      expect(rowFor("stale005")).toHaveTextContent("ln-deleted lane only")
+    })
+  })
+
+  it("names the legacy default lane rather than dropping it", async () => {
+    await renderLinkTab([invite("legacy06", [""])])
+
+    await waitFor(() => {
+      expect(rowFor("legacy06")).toHaveTextContent("Default language lane only")
+    })
   })
 })

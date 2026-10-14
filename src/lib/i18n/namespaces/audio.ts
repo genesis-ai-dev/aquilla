@@ -282,6 +282,10 @@ export const audio = defineNamespace({
     }),
     "audio.tts.siblingFailedDetail":
       "The clip you played was saved. Delete it and press the button again to retry the rest.",
+    "audio.tts.serverOnlyNeedsGenerate":
+      "Generate audio on this line first to hear {engine} TTS.",
+    "audio.tts.playbackFailed": "That voice clip couldn't be played.",
+    "audio.tts.failedTooltip": "Couldn't generate a voice — {reason}",
     "audio.recordingModal.cueReferenceLabel": "This cue:",
     "audio.recordingModal.ttsSharedNotice": plural({
       one: "{count} heard line performs this subtitle. A generated voice speaks the whole subtitle onto this one, and leaves the others silent.",
@@ -615,6 +619,7 @@ export const audio = defineNamespace({
     "audio.aiError.geminiFailedTitle": "Gemini TTS failed",
     "audio.aiError.inworldNotConfiguredTitle": "Inworld TTS isn't configured",
     "audio.aiError.inworldFailedTitle": "Inworld TTS failed",
+    "audio.aiError.creditCapTitle": "AI credit allowance used up",
     "audio.aiError.seedVcNotConfiguredTitle": "Voice cloning isn't configured",
     "audio.aiError.seedVcFailedTitle": "Voice cloning failed",
     "audio.aiError.signInRequiredTitle": "Sign in required",
@@ -631,6 +636,37 @@ export const audio = defineNamespace({
     "audio.aiError.providerUnavailableTitle": "The AI service is unavailable",
     "audio.aiError.providerRejectedTitle": "The AI provider rejected this request",
     "audio.aiError.unknownTitle": "Something went wrong",
+    // AQU-510: the BODY of each AI failure. The titles above were localized by
+    // AQU-891; the bodies stayed English literals, so the sentence a translator
+    // actually reads to decide what to do was the untranslated half.
+    "audio.aiError.dailyLimitBody":
+      "Daily AI limit reached — resets at midnight UTC. Try again tomorrow, or switch this project to a custom AI provider.",
+    // AQU-1869: the platform-wide spend ceiling, not the user's own quota.
+    "audio.aiError.spendCeilingBody":
+      "Hosted AI is paused for the rest of the day — the platform reached its daily AI spend ceiling. It resets at midnight UTC. Nothing is wrong with your project; your own work is unaffected. To keep going now, switch this project to a custom AI provider in Project Settings.",
+    "audio.aiError.tooLargeBody":
+      "This request was larger than the selected model can handle. Draft fewer cells at once, lower the number of examples in AI settings, or pick a model with a larger context window.",
+    "audio.aiError.geminiKeyRequiredBody":
+      "Add a Gemini API key to use this Gemini voice, or switch the line to Inworld TTS (hosted, no key) or a local MMS engine.",
+    "audio.aiError.geminiFailedBody":
+      "Gemini couldn't generate this line. Check the API key, or switch this voice to Inworld TTS.",
+    "audio.aiError.translationNotConfiguredBody":
+      "Set up a completion provider for this project before generating voice on untranslated cells.",
+    "audio.aiError.ttsNotConfiguredBody":
+      "Switch this project to a local MMS voice, which runs in the browser, or ask an administrator to configure the server voice service.",
+    "audio.aiError.networkBody":
+      "Check your connection and try again. Local voices keep working offline once their model is downloaded.",
+    "audio.aiError.audioFormatUnsupportedBody": "Try uploading a .wav, .mp3, or .ogg file.",
+    "audio.aiError.timedOutBody":
+      "The AI provider took too long to respond. Try again — if it keeps happening, send a smaller request or switch models.",
+    "audio.aiError.rateLimitedBody":
+      "The AI provider is rate-limiting requests. Wait a moment and try again.",
+    "audio.aiError.providerUnavailableBody":
+      "The AI provider returned a server error. This is usually temporary — try again in a moment.",
+    "audio.aiError.providerRejectedBody":
+      "The request didn't reach a model. Open the technical detail below and copy it to support if this keeps happening.",
+    "audio.aiError.unknownBody":
+      "The AI request didn't finish. Open the technical detail below and copy it to support if this keeps happening.",
   },
   context: {
     _context: {
@@ -1837,6 +1873,40 @@ export const audio = defineNamespace({
           "safe, and names the only recovery path — the button becomes a replay " +
           "button once the first clip lands, so retrying means removing it.",
       },
+      "audio.tts.serverOnlyNeedsGenerate": {
+        description:
+          "AQU-510: shown on the line's voice button when the project's voice " +
+          "engine runs only on the server, so there is nothing to synthesize in " +
+          "the browser for a preview. Guides the user to generate the audio " +
+          "first rather than reporting the internal server-only guard. States " +
+          "what to do, not what went wrong.",
+        placeholders: {
+          engine: "Short name of the configured voice engine, e.g. 'Inworld'. A product name — leave it untranslated.",
+        },
+      },
+      "audio.tts.playbackFailed": {
+        description:
+          "AQU-510: shown on the line's voice button when a clip that was " +
+          "generated successfully then fails to load in the browser's audio " +
+          "player (a dead blob URL or an unsupported codec). About playback, " +
+          "not about generation — the clip itself may be fine. Deliberately " +
+          "separate from audio.error.queueLoadFailed, which is the same class " +
+          "of failure on a different surface: that one is the multi-cell " +
+          "playback queue, rendered in the VoicePlaybackBar in place of the " +
+          "voice name, where this one is one line's own button. Keep the two " +
+          "wordings distinct — merging them would re-point a string translators " +
+          "were given a specific surface for.",
+      },
+      "audio.tts.failedTooltip": {
+        description:
+          "AQU-510: tooltip and accessible name of the line's voice button once " +
+          "generation has failed, so a translator who cannot read English still " +
+          "learns what the red button means. The reason is already a localized " +
+          "sentence; this key only frames it. Keep it short — it is a tooltip.",
+        placeholders: {
+          reason: "An already-localized one-sentence reason, produced by the app's error categoriser. Insert exactly as given; do not add punctuation before it.",
+        },
+      },
       "audio.recordingModal.ttsSharedNotice": {
         description:
           "Notice in the recorder, shown AFTER a voice has been generated, and " +
@@ -2858,6 +2928,14 @@ export const audio = defineNamespace({
           "Popover heading when Inworld TTS was configured but the synthesize " +
           "call itself failed (upstream vendor error).",
       },
+      "audio.aiError.creditCapTitle": {
+        description:
+          "Popover heading when the sync-worker refused synthesis with 429 " +
+          "credit_cap_exceeded because the org has spent its credit allowance " +
+          "(AQU-1872). Distinct from inworldFailedTitle — the vendor was never " +
+          "called, so this must not be worded as an engine or Gemini-key fault; " +
+          "the body names the org admin who can raise the cap.",
+      },
       "audio.aiError.seedVcNotConfiguredTitle": {
         description:
           "Popover heading when a non-Inworld clone voice needs Seed-VC conversion " +
@@ -2943,6 +3021,118 @@ export const audio = defineNamespace({
           "full failure-screen title): this is an inline popover heading inside an " +
           "AI-feature affordance, the same register split already documented for " +
           "audio.recordingModal.genericError just above.",
+      },
+
+      // AQU-510 — the bodies. Each pairs with the *Title key of the same name
+      // and is the sentence that tells the user what to DO. They are rendered
+      // together as one block (InlineAiError, CellAiStatusPopover), so a body
+      // should follow its title rather than restate it, and must read as an
+      // instruction, not a diagnosis: the verbatim provider text is always
+      // available separately under "Technical detail", and these strings
+      // deliberately REPLACE it as the primary message.
+      "audio.aiError.dailyLimitBody": {
+        description:
+          "Body for the platform's own daily AI budget being spent (not a " +
+          "provider rate limit). Names both ways out: wait for the midnight-UTC " +
+          "reset, or move the project to its own AI provider so the platform " +
+          "budget stops applying. 'UTC' is a technical term the sentence needs — " +
+          "keep it recognizable rather than translating it to a local zone.",
+      },
+      "audio.aiError.spendCeilingBody": {
+        description:
+          "Body shown under providerUnavailableTitle when the PLATFORM has hit its " +
+          "daily dollar ceiling for hosted AI (AQU-1869) and every paid AI call is " +
+          "refused until the next UTC day. This is a platform-wide pause, not the " +
+          "user's own allowance — unlike dailyLimitBody it must not read as a " +
+          "personal quota or tell them to wait out their own limit. Names the one " +
+          "thing they can do now: switch the project to its own AI provider in " +
+          "Project Settings. 'UTC' and 'Project Settings' are a technical term " +
+          "and a UI location — keep the first recognizable and match the second " +
+          "to that settings page's translated name.",
+      },
+      "audio.aiError.tooLargeBody": {
+        description:
+          "Body for a prompt that exceeded the model's context window (HTTP 413 " +
+          "or a context-length error). Lists the three levers in the order a user " +
+          "can act on them: draft fewer cells, lower the example count in AI " +
+          "settings, or choose a bigger model. 'AI settings' is a UI location — " +
+          "match the translation used for that settings section.",
+      },
+      "audio.aiError.geminiKeyRequiredBody": {
+        description:
+          "Body shown when a Gemini voice is selected but no Gemini API key is " +
+          "configured. Offers the alternative engines by name so the user is not " +
+          "stuck behind an API key they may not be able to obtain. 'Gemini', " +
+          "'Inworld TTS' and 'MMS' are product names — leave them untranslated.",
+      },
+      "audio.aiError.geminiFailedBody": {
+        description:
+          "Body for a Gemini voice request that reached Gemini and failed there " +
+          "(as opposed to a missing key). Both remedies are the user's: check the " +
+          "key, or switch engine. 'Gemini' and 'Inworld TTS' are product names.",
+      },
+      "audio.aiError.translationNotConfiguredBody": {
+        description:
+          "Body shown when voice generation is attempted on an UNTRANSLATED cell " +
+          "and the project has no completion provider — the voice engine is fine; " +
+          "there is no text to speak and nothing configured to produce it. Points " +
+          "at the completion provider, not at the voice settings.",
+      },
+      "audio.aiError.ttsNotConfiguredBody": {
+        description:
+          "Body shown when the server's voice service is not wired up at all. " +
+          "Deliberately worded to continue its title rather than repeat it (the " +
+          "recorder renders title and body as one sentence). This is NOT a " +
+          "temporary outage, so the copy must not suggest retrying: it offers the " +
+          "local in-browser engine, or asking an administrator. 'MMS' is a " +
+          "product name.",
+      },
+      "audio.aiError.networkBody": {
+        description:
+          "Body for a request that never reached the provider (offline, DNS, " +
+          "failed fetch). The second sentence is the actionable part for a field " +
+          "team on poor connectivity: local voices keep working once downloaded. " +
+          "Worth keeping — it is often the only thing the user can still do.",
+      },
+      "audio.aiError.audioFormatUnsupportedBody": {
+        description:
+          "Body shown when an uploaded or recorded clip could not be decoded. " +
+          "Just the three formats known to work; the file extensions are literal " +
+          "and must not be translated or localized in punctuation.",
+      },
+      "audio.aiError.timedOutBody": {
+        description:
+          "Body for a provider that did not answer inside the request deadline. " +
+          "Retry first, because a timeout often is transient; the two fallbacks " +
+          "are a smaller request or a different model.",
+      },
+      "audio.aiError.rateLimitedBody": {
+        description:
+          "Body for the AI PROVIDER rate-limiting us (HTTP 429), as distinct from " +
+          "the platform's own daily budget above. Waiting is the whole remedy, so " +
+          "the sentence stays short and says only that.",
+      },
+      "audio.aiError.providerUnavailableBody": {
+        description:
+          "Body for a 5xx from the AI provider. Says the failure is on their side " +
+          "and usually temporary, so the user retries instead of hunting through " +
+          "their own settings for a cause that is not there.",
+      },
+      "audio.aiError.providerRejectedBody": {
+        description:
+          "Body for a 4xx from the AI provider with no more specific category — " +
+          "the request was refused before a model saw it. There is no user-side " +
+          "remedy to offer honestly, so it directs them to the technical detail " +
+          "and to support. 'Technical detail' names the disclosure control " +
+          "beneath it: use the same wording as that control's label.",
+      },
+      "audio.aiError.unknownBody": {
+        description:
+          "Body for the classifier's final fallback — a failure matching no " +
+          "category, whose raw text is a machine dump (JSON, a stack, a wall of " +
+          "text) and so is not shown as the primary message. Like " +
+          "providerRejectedBody it can only point at the technical detail and " +
+          "support. 'Technical detail' names the disclosure control beneath it.",
       },
     },
   },

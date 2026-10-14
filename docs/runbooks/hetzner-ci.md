@@ -76,7 +76,8 @@ pnpm test:e2e:smoke
 
 ## Later (not this runbook)
 
-Re-enable `pull_request` on `.github/workflows/ci.yml` with
-`runs-on: [self-hosted, hetzner]`, register more runner processes, and
-disconnect Workers Builds from the test gate. Preview upload can stay a
-final Actions step with a preview-scoped `CLOUDFLARE_API_TOKEN`.
+`ci.yml` already runs on pull requests into `dev`, on GitHub-hosted runners.
+That is the test gate. Moving those jobs onto this box, or adding a
+`pull_request` trigger to `e2e-hetzner.yml`, is a separate decision and still
+waits on an Idle runner. Do not point that trigger at this file until a
+dispatch of it is green.

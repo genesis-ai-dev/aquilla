@@ -12,6 +12,7 @@
  * blank, and an 8-hex lane id is never either answer.
  */
 
+import { codeForLanguageLabel } from "./backfill-plan"
 import {
   hasLaneCodeOverride,
   laneDisplayName,
@@ -128,6 +129,34 @@ export function laneLanguageForTag(
     { settings, role: "target", legacyTag: tag },
   )
   return resolved || null
+}
+
+/**
+ * The BCP 47 code of the lane carrying `tag`, or `null` when nothing names one.
+ *
+ * This is the lane's language rendered as a tag a *machine* can act on — the
+ * browser's spell-checker picking a dictionary, a `lang` attribute (AQU-1908).
+ * {@link laneLanguageForTag} answers the other question, "what language is this
+ * lane for", in the freeform words the user typed ("Spanish", "Grade 7
+ * English"); that string is what the model is told and what every "same
+ * language?" comparison reads, and it is NOT a valid language tag.
+ *
+ * The row's code override wins (AQU-1784), else the code is derived from the
+ * row's language at read time — never stored, so nothing drifts when the label
+ * is edited (AQU-1585). A freeform label no catalog entry matches derives
+ * nothing and answers `null`, which is honest: no dictionary exists for it.
+ */
+export function laneLanguageCodeForTag(
+  tag: string,
+  lanes: readonly LaneLanguageRow[] | null | undefined,
+  settings?: LaneLanguageSettings | null,
+): string | null {
+  const row = rowForTag(tag, lanes)
+  if (row) {
+    return laneLanguageCode(row, { settings, role: row.role, legacyTag: row.legacyTag })
+  }
+  // No row: the tag is all a caller has, by the same rule as the language.
+  return codeForLanguageLabel(laneLanguageForTag(tag, lanes, settings))
 }
 
 /**

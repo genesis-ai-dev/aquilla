@@ -18,11 +18,20 @@ import {
   setHealthScoreColorCoding,
 } from "@/lib/store/health-score-color-coding-pref"
 import {
+  getVisibleStyleSegments,
+  resetVisibleStyleSegmentsCacheForTests,
+  setVisibleStyleSegments,
+} from "@/lib/store/visible-style-segments-pref"
+import {
   __resetLowMemoryForTests,
   getLowMemoryMode,
   isLowMemoryActive,
   setLowMemoryMode,
 } from "@/lib/perf/low-memory"
+import {
+  getBibleDataViewPrefs,
+  resetBibleDataViewPrefsCacheForTests,
+} from "@/lib/store/bible-data-view-prefs"
 import { DIRECTION_MISMATCH_TOAST_ID, ViewSettingsMenu } from "./ViewSettingsMenu"
 
 function renderViewSettings(overrides: Partial<ComponentProps<typeof ViewSettingsMenu>> = {}) {
@@ -73,6 +82,8 @@ beforeEach(() => {
   setUnresolvedCommentHighlight(false)
   resetHealthScoreColorCodingCacheForTests()
   setHealthScoreColorCoding(false)
+  resetVisibleStyleSegmentsCacheForTests()
+  setVisibleStyleSegments(false)
   setLowMemoryMode("auto")
   __resetLowMemoryForTests()
 })
@@ -101,6 +112,22 @@ describe("ViewSettingsMenu popover", () => {
 
     fireEvent.click(screen.getByRole("switch", { name: /Show line numbers/i }))
     expect(handlers.onLineNumbersChange).toHaveBeenCalledWith(false)
+    expect(screen.getByTestId("view-settings-popover")).toBeTruthy()
+  })
+
+  it("scrolls the settings list and toggles visible style segments", () => {
+    renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const scroller = screen.getByTestId("view-settings-scroller")
+    expect(scroller.className).toContain("overflow-y-auto")
+
+    const toggle = screen.getByRole("switch", { name: "Visible style segments" })
+    expect(toggle).not.toBeChecked()
+    fireEvent.click(toggle)
+
+    expect(screen.getByRole("switch", { name: "Visible style segments" })).toBeChecked()
+    expect(getVisibleStyleSegments()).toBe(true)
     expect(screen.getByTestId("view-settings-popover")).toBeTruthy()
   })
 
@@ -389,6 +416,120 @@ describe("ViewSettingsMenu — highlight open comments", () => {
     fireEvent.click(toggle)
 
     expect(getUnresolvedCommentHighlight()).toBe(false)
+  })
+})
+
+// AQU-1687: each person's options for the Voices enrichment. They exist only
+// where the project has Voices on, and they are device preferences, like the
+// milestone split: what one person likes to see while reading.
+describe("ViewSettingsMenu — Bible data", () => {
+  beforeEach(() => {
+    resetBibleDataViewPrefsCacheForTests()
+  })
+
+  it("has no Bible data section when the project does not show Voices", () => {
+    renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+
+    expect(screen.queryByTestId("bible-data-view-settings")).toBeNull()
+    expect(screen.queryByRole("switch", { name: "Voice chips" })).toBeNull()
+  })
+
+  it("switches voice chips and speech rails, and picks the label language, for this device", () => {
+    renderViewSettings({ bibleDataVoicesEnabled: true })
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const section = screen.getByTestId("bible-data-view-settings")
+    expect(within(section).getByText("Bible data")).toBeTruthy()
+
+    // Both on by default, and the label chain starts at the project's names.
+    const chips = within(section).getByRole("switch", { name: "Voice chips" })
+    const rails = within(section).getByRole("switch", { name: "Speech rails" })
+    expect(chips.getAttribute("aria-checked")).toBe("true")
+    expect(rails.getAttribute("aria-checked")).toBe("true")
+    expect(within(section).getByRole("radio", { name: "Project names" }).getAttribute("aria-checked")).toBe("true")
+
+    fireEvent.click(chips)
+    fireEvent.click(within(section).getByRole("radio", { name: "English names" }))
+
+    // AQU-1689: the Who's Who options stay at their defaults.
+    const expected = {
+      voiceChips: false,
+      speechRails: true,
+      labelMode: "english",
+      whosWhoHighlights: "hover",
+      impliedSubjectHints: "names",
+    }
+    expect(getBibleDataViewPrefs()).toEqual(expected)
+    // Survives a reload: stored on this device.
+    resetBibleDataViewPrefsCacheForTests()
+    expect(getBibleDataViewPrefs()).toEqual(expected)
+    expect(screen.getByTestId("view-settings-popover")).toBeTruthy()
+  })
+
+  // AQU-1689: Who's Who's options appear where the project has Who's Who on,
+  // and only its own: a project with Voices off shows no voice switches.
+  it("offers Who's Who highlights and implied-subject hints where the project has Who's Who on", () => {
+    renderViewSettings({ bibleDataWhosWhoEnabled: true })
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const section = screen.getByTestId("bible-data-view-settings")
+    expect(within(section).queryByRole("switch", { name: "Voice chips" })).toBeNull()
+
+    const highlights = within(section).getByRole("radiogroup", { name: "Who's Who highlights" })
+    const hints = within(section).getByRole("radiogroup", { name: "Implied-subject hints" })
+    expect(within(highlights).getByRole("radio", { name: "On hover or focus" }).getAttribute("aria-checked")).toBe("true")
+    expect(within(hints).getByRole("radio", { name: "Names only" }).getAttribute("aria-checked")).toBe("true")
+    // Names follow the same label chain as Voices.
+    expect(within(section).getByRole("radiogroup", { name: "Label language" })).toBeTruthy()
+
+    fireEvent.click(within(highlights).getByRole("radio", { name: "Always on" }))
+    fireEvent.click(within(hints).getByRole("radio", { name: "Off" }))
+
+    expect(getBibleDataViewPrefs()).toMatchObject({ whosWhoHighlights: "always", impliedSubjectHints: "off" })
+    resetBibleDataViewPrefsCacheForTests()
+    expect(getBibleDataViewPrefs()).toMatchObject({ whosWhoHighlights: "always", impliedSubjectHints: "off" })
+  })
+
+  // AQU-1692: offline with nothing cached, the editor shows no chips; this says why.
+  it("says when the open book's Bible data is not downloaded yet", () => {
+    renderViewSettings({
+      bibleDataVoicesEnabled: true,
+      bibleDataStatus: { book: "RUT", failure: "offline", orphanedCorrections: [] },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    expect(screen.getByTestId("bible-data-pack-status").textContent).toBe(
+      "The Bible data for this book isn't downloaded yet. It loads when you're back online.",
+    )
+  })
+
+  // AQU-1692: after a pack rebuild moves a speech, its correction applies to
+  // nothing. It is listed rather than lost, and a maintainer can remove it.
+  it("lists voice corrections the Bible data no longer matches, with Remove for a maintainer", () => {
+    const remove = vi.fn()
+    const moved = "sp:o080010100041-o080010100070"
+    renderViewSettings({
+      bibleDataVoicesEnabled: true,
+      bibleDataStatus: { book: "RUT", failure: null, orphanedCorrections: [moved] },
+      bibleVoiceCorrections: {
+        [moved]: { speaker: "person:Ruth", note: "We follow Ruth.", by: "mara", at: "2026-10-06T12:00:00Z" },
+      },
+      onRemoveVoiceCorrection: remove,
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const list = screen.getByTestId("bible-data-orphaned-corrections")
+    expect(list.textContent).toContain("1 voice correction no longer matches the Bible data:")
+    expect(list.textContent).toContain("RUT 1:10 · mara: We follow Ruth.")
+    expect(screen.queryByTestId("bible-data-pack-status")).toBeNull()
+    fireEvent.click(within(list).getByRole("button", { name: "Remove" }))
+    expect(remove).toHaveBeenCalledWith(moved)
+  })
+
+  it("has no Bible data section when the project shows neither Voices nor Who's Who", () => {
+    renderViewSettings({ bibleDataVoicesEnabled: false, bibleDataWhosWhoEnabled: false })
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    expect(screen.queryByTestId("bible-data-view-settings")).toBeNull()
   })
 })
 

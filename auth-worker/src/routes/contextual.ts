@@ -84,6 +84,9 @@ import {
   tryAcquireContextualProjectLease,
   renewContextualProjectLease,
   releaseContextualProjectLease,
+  countRecentContextualStarts,
+  CONTEXTUAL_MAX_STARTS_PER_USER,
+  CONTEXTUAL_START_THROTTLE_WINDOW_SECONDS,
   CONTEXTUAL_PROJECT_LEASE_SECONDS,
   getProjectAutopilotSummary,
   type ContextualRun,
@@ -118,6 +121,7 @@ import {
   invalidateContextualReads,
 } from "../lib/contextual/read-cache"
 import { decide } from "../lib/jev/decide"
+import { makeBibleTickDeps } from "../lib/contextual/bible-deps"
 import { reactCheckProject, type StartReactionRun, type WakeReactionRun } from "../lib/react-loop"
 import type { LlmCall } from "../lib/contextual/types"
 
@@ -143,6 +147,47 @@ const DEFAULT_MAX_PROJECT_CONCURRENCY = 12
 function resolveMaxProjectConcurrency(raw: string | undefined): number {
   const n = Number(raw)
   return Number.isFinite(n) && n >= 1 ? Math.floor(n) : DEFAULT_MAX_PROJECT_CONCURRENCY
+}
+
+/** AQU-1847 — the two ceilings ABOVE the per-project one.
+ *
+ *  The per-project ceiling alone multiplies: one user with ten self-created
+ *  projects had ten times DEFAULT_MAX_PROJECT_CONCURRENCY in flight (~360
+ *  requests with the verifier fan-out) and could exhaust the shared provider
+ *  key's rate limit for every other tenant.
+ *
+ *  `org` is the fairness ceiling: two heavy projects in one workspace share it
+ *  instead of adding up. `global` is the platform ceiling, and is deliberately
+ *  set BELOW what the provider will actually serve — autopilot is background
+ *  work and takes a lease, while interactive suggestions and chat take none, so
+ *  the gap between this ceiling and the provider's real limit is the headroom
+ *  that keeps a user-facing request responsive while autopilot runs hot. */
+const DEFAULT_MAX_ORG_CONCURRENCY = 24
+const DEFAULT_MAX_GLOBAL_CONCURRENCY = 96
+function resolveMaxOrgConcurrency(raw: string | undefined): number {
+  const n = Number(raw)
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : DEFAULT_MAX_ORG_CONCURRENCY
+}
+function resolveMaxGlobalConcurrency(raw: string | undefined): number {
+  const n = Number(raw)
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : DEFAULT_MAX_GLOBAL_CONCURRENCY
+}
+
+/** The project's billing workspace, or 0 when it has none. Every unowned
+ *  project shares the org-0 bucket on purpose: having no workspace must not be
+ *  a way out of the org ceiling. */
+async function resolveProjectOrgId(db: AquillaDb, projectId: string): Promise<number> {
+  try {
+    const row = await db
+      .prepare("SELECT org_id FROM projects WHERE id = ?")
+      .bind(projectId)
+      .first<{ org_id: number | null }>()
+    return Number(row?.org_id ?? 0)
+  } catch {
+    // Capacity must fail SAFE, not open: an unreadable org lands this project
+    // in the shared org-0 bucket, which is more restrictive, never less.
+    return 0
+  }
 }
 /** Files a single project-wide start will fan out to. Additional eligible
  * files are reported as deferred and become reachable on the next start. */
@@ -223,24 +268,51 @@ function yieldLeaseTurn(): Promise<void> {
 
 /** Wait on the durable cross-isolate capacity authority. A pause/terminate
  * must not sit behind model work: return without a lease so runOneTick can
- * observe and settle that control state immediately. */
+ * observe and settle that control state immediately.
+ *
+ * AQU-1847: unattended work QUEUES for a slot rather than failing, and says so
+ * once. Without that activity line a run waiting behind another project — or
+ * another tenant — in the org or platform ceiling was indistinguishable from
+ * one that had quietly stalled. The event is written at most once per wave, on
+ * the first refusal; acquiring is reported by the ordinary span activity that
+ * follows it. */
 async function waitForProjectLease(
   db: AquillaDb,
   projectId: string,
   runId: string,
   weight: number,
-  limit: number,
+  limits: { project: number; org: number; global: number },
+  orgId: number,
 ): Promise<ContextualProjectLease | null> {
+  let announcedQueued = false
   for (;;) {
     const lease = await tryAcquireContextualProjectLease(db, {
       projectId,
       runId,
+      orgId,
       weight,
-      limit,
+      limit: limits.project,
+      orgLimit: limits.org,
+      globalLimit: limits.global,
     })
     if (lease) return lease
     const current = await getRun(db, runId)
     if (!current || current.status !== "running") return null
+    if (!announcedQueued) {
+      announcedQueued = true
+      await appendActivitySafely(db, {
+        runId,
+        projectId,
+        fileId: current.fileId,
+        kind: "run_state",
+        status: "queued",
+        details: {
+          done: current.doneSpans,
+          total: current.totalSpans,
+          failed: current.failedSpans,
+        },
+      })
+    }
     await waitForLeaseRetry()
   }
 }
@@ -378,6 +450,8 @@ async function selfTickLoop(
   const meter = makeCostMeter(env, db)
   // Prompt/reply per call for the Team step inspector; flushed with the meter.
   const traces = makeTraceRecorder(env, db, { runId, projectId })
+  // AQU-1690: Bible data for the run; its caches last across waves.
+  const bible = makeBibleTickDeps(env, db, { projectId, runId }, { traces, meter })
   try {
     const settings = await getPlatformSettingsCached(env)
     // AQU-837 weekly allowance: every graph call reserves before the provider
@@ -411,6 +485,15 @@ async function selfTickLoop(
         }),
       onTrace: (t) => traces.add(t),
     })
+    // AQU-1847: resolved once per loop, not per wave — the project's billing
+    // workspace cannot change under a run, and the org ceiling is checked on
+    // every acquire anyway.
+    const orgId = await resolveProjectOrgId(db, projectId)
+    const capacityLimits = {
+      project: resolveMaxProjectConcurrency(env.CONTEXTUAL_MAX_CONCURRENCY),
+      org: resolveMaxOrgConcurrency(env.CONTEXTUAL_MAX_ORG_CONCURRENCY),
+      global: resolveMaxGlobalConcurrency(env.CONTEXTUAL_MAX_GLOBAL_CONCURRENCY),
+    }
     for (let wave = 0; wave < MAX_WAVES_PER_LOOP; wave++) {
       // Platform daily spend ceiling (AQU-1869), re-checked at every wave
       // edge. Checking only at start would let a run already in flight keep
@@ -427,7 +510,7 @@ async function selfTickLoop(
         return
       }
       const weight = Math.max(1, Math.min(
-        resolveMaxProjectConcurrency(env.CONTEXTUAL_MAX_CONCURRENCY),
+        capacityLimits.project,
         concurrency ?? MAX_WAVE_CONCURRENCY,
       ))
       const tick = async () => {
@@ -436,7 +519,8 @@ async function selfTickLoop(
           projectId,
           runId,
           weight,
-          resolveMaxProjectConcurrency(env.CONTEXTUAL_MAX_CONCURRENCY),
+          capacityLimits,
+          orgId,
         )
         if (!lease) {
           return settleRunWithoutProjectLease(db, runId, notify)
@@ -450,6 +534,7 @@ async function selfTickLoop(
             notify,
             ...(concurrency ? { concurrency } : {}),
             triage: (input) => decide(env, { purpose: "triage", projectId, ...input }),
+            bible,
           })
         } finally {
           await guarded.stop()
@@ -865,6 +950,24 @@ contextual.post(
     }
 
     const user = c.get("user")
+
+    // AQU-1847 — per-user start throttle, checked before the lane, context and
+    // budget lookups below: the point of a throttle is to refuse without doing
+    // the work. It bounds what the capacity ceilings cannot. A start is cheap
+    // in slots but creates up to MAX_PROJECT_FILES runs, and a loop of starts
+    // leaves the lease table full of queued waves no human is waiting on.
+    const recentStarts = await countRecentContextualStarts(c.env.AQUILLA_PG, user.id)
+    if (recentStarts >= CONTEXTUAL_MAX_STARTS_PER_USER) {
+      const { body: err, status } = errorJson(
+        "start_throttled",
+        `Too many Autopilot runs started. You can start ${CONTEXTUAL_MAX_STARTS_PER_USER} runs every `
+          + `${Math.round(CONTEXTUAL_START_THROTTLE_WINDOW_SECONDS / 60)} minutes — wait a moment and try again.`,
+        429,
+        { retryAfterSeconds: CONTEXTUAL_START_THROTTLE_WINDOW_SECONDS },
+      )
+      return c.json(err, status)
+    }
+
     const body = c.req.valid("json")
     // AQU-1610: a lane id names exactly one lane and is checked against its
     // own row; a tag is still accepted and checked the old way.
@@ -1386,6 +1489,12 @@ contextual.get("/:projectId/contextual/runs/:runId/traces", authMiddleware, asyn
     return c.json(body, status)
   }
   const spanId = c.req.query("spanId") || undefined
+  // AQU-1690: ?label=bible-facts lists one kind of row (the inspector's facts).
+  const label = c.req.query("label") || undefined
+  if (label !== undefined && !/^[a-z0-9:_-]{1,64}$/.test(label)) {
+    const { body, status } = errorJson("validation_failed", "label must be 1 to 64 of a-z 0-9 : _ -", 400)
+    return c.json(body, status)
+  }
   const limitRaw = c.req.query("limit")
   const limit = limitRaw === undefined ? TRACE_LIST_LIMIT : Number(limitRaw)
   if (!Number.isInteger(limit) || limit < 1 || limit > TRACE_LIST_LIMIT) {
@@ -1396,7 +1505,15 @@ contextual.get("/:projectId/contextual/runs/:runId/traces", authMiddleware, asyn
     )
     return c.json(body, status)
   }
-  const result = await listRunTraces(c.env.AQUILLA_PG, { projectId, runId, limit, ...(spanId ? { spanId } : {}) })
+  const result = await listRunTraces(c.env.AQUILLA_PG, {
+    projectId,
+    runId,
+    limit,
+    ...(spanId ? { spanId } : {}),
+    ...(label ? { label } : {}),
+    // AQU-1690: shadow-mode Jev answers (Jev and metrics rows) are for maintainers only.
+    maintainer: gate.level >= ROLE.MAINTAINER,
+  })
   return c.json(result)
 })
 

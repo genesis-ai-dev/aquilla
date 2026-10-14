@@ -200,16 +200,36 @@ describe("read filter:'flagged' — rule violations for the QA sweep", () => {
     expect(flagged.text).toContain("rule-ensenaba")
     expect(flagged.text).not.toContain("rule-fr-only")
 
-    // A waiver is how the sweep clears a false positive, so it must drop the cell.
+    // AQU-1740: a waiver that accepted ONE occurrence must not silence the rule
+    // for the agent's whole-cell lint — `lintDraft` tests patterns and never
+    // collects the matched text, so it has no finding to compare against and
+    // the conservative read is to keep flagging.
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO cell_waivers (project_id, file_id, cell_id, rule_id, reason, waived_by, waived_ts)
-       VALUES (?, ?, ?, 'rule-ensenaba', 'correct in this context', 'alice', 0)`,
+      `INSERT INTO cell_waivers (project_id, file_id, cell_id, rule_id, match_hash, reason, waived_by, waived_ts)
+       VALUES (?, ?, ?, 'rule-ensenaba', 'abc123', 'this one occurrence is fine', 'alice', 0)`,
+    )
+      .bind(PROJECT, FILE, cellId("c2"))
+      .run()
+    const afterPerFinding = await executeRead(env.AQUILLA_PG, { ref: "MRK 4", filter: "flagged" }, toolCtx())
+    expect(afterPerFinding.data?.cells?.map((c) => c.ref)).toEqual(["MRK 4:2"])
+    await env.AQUILLA_PG.prepare(
+      `DELETE FROM cell_waivers WHERE project_id = ? AND match_hash = 'abc123'`,
+    )
+      .bind(PROJECT)
+      .run()
+
+    // A cell-wide waiver (match_hash '') is how the sweep clears a false
+    // positive, so it must drop the cell.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cell_waivers (project_id, file_id, cell_id, rule_id, match_hash, reason, waived_by, waived_ts)
+       VALUES (?, ?, ?, 'rule-ensenaba', '', 'correct in this context', 'alice', 0)`,
     )
       .bind(PROJECT, FILE, cellId("c2"))
       .run()
     const afterWaive = await executeRead(env.AQUILLA_PG, { ref: "MRK 4", filter: "flagged" }, toolCtx())
     expect(afterWaive.data?.cells).toEqual([])
   })
+
 
   // AQU-609: a lane-pinned rule applies only in its own lane. The test above
   // runs in the default lane, so it still passes if read.ts hands rulesForLane

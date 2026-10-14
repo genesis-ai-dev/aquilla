@@ -17,8 +17,8 @@
 import { audioObjectKey, isPathSafeId, r2KeyPrefix } from "./audio"
 import { listInworldSupportedLanguages } from "./inworld-supported-languages"
 import { verifyTokenForFile, verifyTokenForProject, WRITE_ROLE_LEVEL } from "./auth"
-import { runTtsGuard, recordTtsUsage } from "./tts-budget"
-import { recordCredit } from "./credits"
+import { runTtsGuard, recordTtsUsage, estimateTtsSecondsFromText } from "./tts-budget"
+import { recordCredit, runOrgCreditGuard } from "./credits"
 import {
   INWORLD_DESIGN_PROMPT_MAX,
   INWORLD_DESIGN_PROMPT_MIN,
@@ -104,6 +104,16 @@ export interface TtsEnv {
    * Default: 0 (per-call estimate is the primary signal until we have GPU billing).
    */
   TTS_COST_PER_AUDIO_SEC_CENTS?: string
+  /**
+   * Org credit caps, shared with auth-worker's llm/agent rails. The pre-check
+   * below is log-only unless CREDIT_ENFORCE === "true" (or the org sets
+   * `credits.enforce`). See credits.ts § Org credit pre-check (AQU-1872).
+   */
+  CREDIT_MARKUP?: string
+  CREDIT_AGENT_MARKUP?: string
+  CREDIT_DAILY_CAP?: string
+  CREDIT_WEEKLY_CAP?: string
+  CREDIT_ENFORCE?: string
 }
 
 const TTS_PATH = "/api/v1/voice/tts"
@@ -249,9 +259,21 @@ export async function handleTtsRequest(
   // Platform daily spend ceiling (AQU-1869) — unlike runTtsGuard above this
   // is never log-only, and it counts dollars across every paid surface rather
   // than this user's audio seconds, so it holds even for a first-time caller.
+  // Checked before the org credit guard below, as in auth-worker's chat
+  // route: it protects the shared Inworld key, not one org's allowance.
   const spendCeiling = await checkAiSpendCeiling(db, env, "tts")
   if (!spendCeiling.ok) {
     return Response.json(spendCeiling.body, { status: spendCeiling.status })
+  }
+
+  // Pre-check the ORG's remaining credit (AQU-1872). The per-user window above
+  // is volumetric, not monetary: several users batch-narrating a Bible in one
+  // org each stay under it while the org's spend runs away. This must come
+  // before every paid Inworld call below — the voice clone as well as the
+  // synthesis — so an exhausted org costs nothing.
+  const creditGuard = await runOrgCreditGuard(db, env, orgId, "tts")
+  if (!creditGuard.ok) {
+    return Response.json(creditGuard.body, { status: creditGuard.status })
   }
 
   let inworldVoiceId = voiceId?.trim() || undefined
@@ -310,11 +332,15 @@ export async function handleTtsRequest(
     console.error("[tts] upstream voice request failed", err)
     return new Response("voice provider request failed", { status: 502 })
   }
+  // A clip we cannot measure is charged an estimate from its text, never 0
+  // (AQU-1872) — recording 0s made such a clip count toward no daily budget
+  // and no credit ledger, so the whole path was silently free.
   if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+    durationSeconds = estimateTtsSecondsFromText(text)
     console.warn(
-      `[tts] Inworld clip had no parseable duration — recording 0s for user ${userId} org ${orgId}`,
+      `[tts] Inworld clip had no parseable duration — charging text-length estimate ` +
+        `${durationSeconds.toFixed(2)}s for user ${userId} org ${orgId}`,
     )
-    durationSeconds = 0
   }
 
   // Write WAV to R2 as a cell-audio object (same layout as voice-convert).

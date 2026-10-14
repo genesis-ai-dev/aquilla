@@ -30,6 +30,11 @@ import { creditGuard, recordCredit } from "../lib/credits"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
 import { resolveProjectRoleShared } from "../../../db/shared/project-roles"
 import { BRIEF_L1_MAX_CHARS, BRIEF_L1_SYSTEM_PROMPT } from "../../../db/shared/brief"
+import {
+  logVendorTimeout,
+  vendorDeadline,
+  vendorTimeoutMessage,
+} from "../../../shared/vendor-timeouts"
 
 const aiBriefInternal = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -106,6 +111,11 @@ aiBriefInternal.post("/internal/brief-summary", zValidator("json", bodySchema), 
     )
   }
 
+  // AQU-1849: deadline on the provider's answer (`stream: false`, so the
+  // headers wait for the whole completion), linked to the caller's signal.
+  // This runs behind sync-worker's brief-summary bridge, so an unbounded call
+  // held BOTH workers' invocations open on one hung provider.
+  const deadline = vendorDeadline("openRouterNonStreaming", c.req.raw.signal)
   let res: Response
   try {
     res = await fetch(resolveOpenRouterUrl(c.env), {
@@ -125,10 +135,16 @@ aiBriefInternal.post("/internal/brief-summary", zValidator("json", bodySchema), 
         temperature: 0.2,
         max_tokens: 1024,
       }),
-      signal: c.req.raw.signal,
+      signal: deadline.signal,
     })
-  } catch {
+  } catch (err) {
+    if (deadline.timedOut()) {
+      logVendorTimeout("openRouterNonStreaming", err)
+      return c.json({ error: "job_failed", message: vendorTimeoutMessage("openRouterNonStreaming") }, 504)
+    }
     return c.json({ error: "job_failed", message: "brief summary model unreachable" }, 502)
+  } finally {
+    deadline.clear()
   }
 
   if (!res.ok) {

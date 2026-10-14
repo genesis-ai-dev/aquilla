@@ -40,6 +40,9 @@ vi.mock("@/lib/import", () => ({
   prepareImportFile: vi.fn(),
 }))
 vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+vi.mock("@/lib/import-file-target-proposals", () => ({
+  stageTargetImportAsProposals: vi.fn(),
+}))
 vi.mock("@/lib/parsers/ebible", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/parsers/ebible")>()),
   fetchTranslationsList: vi.fn(async () => [{
@@ -55,6 +58,7 @@ vi.mock("@/components/ui/scroll-area", () => ({
 
 import { ImportDialog, type TranslationImportHost } from "./ImportDialog"
 import { applyEBibleTargetImport, prepareEBibleTargetImport } from "@/lib/import"
+import { stageTargetImportAsProposals } from "@/lib/import-file-target-proposals"
 import posthog from "@/lib/posthog"
 import { IMPORT_STARTED, IMPORT_SUCCEEDED } from "@/lib/event-names"
 import type { FileTargetCellRef } from "@/lib/import-file-target"
@@ -631,5 +635,104 @@ describe("AQU-1365: the translation-only importers live under A translation", ()
     expect(await screen.findByText("Jonah has no lines yet, so there is nothing for a translation to fill.")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Back" }))
     expect(await screen.findByTestId("translation-chooser")).toBeInTheDocument()
+  })
+})
+
+describe("AQU-1673: a translation staged as proposals for review", () => {
+  // WHY: partners already hold candidate translations and want them REVIEWED,
+  // not written. The choice lives on the translation screen beside the
+  // language picker (the three-dot entry it was designed for is gone, AQU-1365),
+  // and everything after it — title, final button, where the rows go — has to
+  // say so, because the review list looks identical either way.
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(applyEBibleTargetImport).mockResolvedValue({ committedCount: 2, skippedCount: 0 })
+    vi.mocked(stageTargetImportAsProposals).mockResolvedValue({
+      stagedCount: 2, skippedUnchangedCount: 0, changesetId: "cs-1",
+    })
+  })
+
+  // The wrapping label names the box (base-ui points aria-labelledby at it), so
+  // its accessible name runs on into the hint: match the start, as the radios do.
+  const proposalsBox = () => screen.getByRole("checkbox", { name: /^Stage as proposals for review/ })
+  function otherWay(name: RegExp) {
+    return within(screen.getByTestId("translation-other-ways")).getByRole("button", { name })
+  }
+
+  it("stages the reviewed matches as proposals instead of writing them, and tells the host", async () => {
+    const onOpenChange = vi.fn()
+    const onProposalsStaged = vi.fn()
+    const { translation } = renderDialog({
+      onOpenChange, targetLang: "tt", identityToken: "jwt-1", translation: host({ onProposalsStaged }),
+    })
+    await chooseTranslation()
+    expect(proposalsBox()).toHaveAttribute("aria-checked", "false")
+    await userEvent.click(proposalsBox())
+    await dropFiles([usfm(JON_USFM, "JON-tatar.usfm")])
+    expect(await screen.findByRole("heading", { name: "Import a translation into Jonah as proposals" })).toBeInTheDocument()
+    expect(screen.getByText(/staged as proposals for review/i)).toBeInTheDocument()
+    const propose = await screen.findByRole("button", { name: /propose 2 cells/i })
+    await act(async () => {
+      fireEvent.click(propose)
+    })
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+    const [matched, selected, ctx] = vi.mocked(stageTargetImportAsProposals).mock.calls[0]
+    expect(matched.map((cell) => cell.cellId)).toEqual(["jonah-1", "jonah-2"])
+    expect(selected).toEqual(new Set(["jonah-1", "jonah-2"]))
+    // Into the editor's lane, under this session, naming the upload as provenance.
+    expect(ctx).toEqual({ jwt: "jwt-1", projectId: "proj-1365", targetLang: "tt", sourceFileName: "JON-tatar.usfm" })
+    // Nothing written, nothing painted: the editor keeps showing what the cells hold.
+    expect(applyEBibleTargetImport).not.toHaveBeenCalled()
+    expect(translation.applyOptimisticTargetEdits).not.toHaveBeenCalled()
+    expect(onProposalsStaged).toHaveBeenCalledWith({ stagedCount: 2, skippedUnchangedCount: 0, changesetId: "cs-1" })
+    expect(posthog.capture).toHaveBeenCalledWith(IMPORT_SUCCEEDED, expect.objectContaining({
+      import_type: "file-target-proposals", entry: "translation", staged_count: 2, skipped_unchanged_count: 0,
+    }))
+  })
+
+  it("writes into the file, as before, when the box is left unticked", async () => {
+    const onOpenChange = vi.fn()
+    renderDialog({ onOpenChange, identityToken: "jwt-1" })
+    await chooseTranslation()
+    await dropFiles([usfm(JON_USFM, "JON-tatar.usfm")])
+    expect(await screen.findByRole("heading", { name: "Import a translation into Jonah" })).toBeInTheDocument()
+    expect(screen.getByText(/written straight into the file/i)).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: /import 2 cells/i }))
+    })
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+    expect(applyEBibleTargetImport).toHaveBeenCalledTimes(1)
+    expect(stageTargetImportAsProposals).not.toHaveBeenCalled()
+  })
+
+  it("keeps the choice through Back, and holds the other ways while it is ticked", async () => {
+    renderDialog()
+    const chooser = await chooseTranslation()
+    expect(otherWay(/^eBible Corpus/)).toBeEnabled()
+    await userEvent.click(proposalsBox())
+    // eBible and a paired spreadsheet only ever write, so they wait.
+    expect(otherWay(/^eBible Corpus/)).toBeDisabled()
+    expect(otherWay(/^Paired translation/)).toBeDisabled()
+    expect(chooser).toHaveTextContent("These write straight into the file.")
+    await dropFiles([usfm(JON_USFM, "JON-tatar.usfm")])
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Back to file selection" }))
+    await screen.findByTestId("translation-chooser")
+    expect(proposalsBox()).toHaveAttribute("aria-checked", "true")
+    await userEvent.click(proposalsBox())
+    expect(otherWay(/^eBible Corpus/)).toBeEnabled()
+  })
+
+  it("starts over as a direct import each time the dialog opens", async () => {
+    const translation = host()
+    const all = { ...baseProps, translation }
+    const view = render(<ImportDialog {...all} />)
+    await chooseTranslation()
+    await userEvent.click(proposalsBox())
+    expect(proposalsBox()).toHaveAttribute("aria-checked", "true")
+    view.rerender(<ImportDialog {...all} open={false} />)
+    view.rerender(<ImportDialog {...all} open={true} />)
+    await chooseTranslation()
+    expect(proposalsBox()).toHaveAttribute("aria-checked", "false")
   })
 })

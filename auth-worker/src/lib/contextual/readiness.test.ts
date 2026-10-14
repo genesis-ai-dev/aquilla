@@ -13,7 +13,13 @@ import { describe, it, expect } from "vitest"
 import { computeContextReadiness, computeStartBlockers } from "./readiness"
 import type { ProjectContext } from "./project-context"
 
-const bare: ProjectContext = { briefParameters: {}, concepts: [], authoredRules: [] }
+const bare: ProjectContext = {
+  briefParameters: {},
+  concepts: [],
+  authoredRules: [],
+  projectFacts: [],
+  languageProfile: {},
+}
 
 const ready: ProjectContext = {
   ...bare,

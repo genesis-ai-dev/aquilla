@@ -231,8 +231,8 @@ async function main(): Promise<void> {
     const message = job.phase === "refresh" ? await refresh(job.options, job.fileIds ?? []) : await importResource(job.options, null)
     await w.aquilla.import.done(message)
   } catch (err) {
-    if (job.phase === "choices") await w.aquilla.import.choices([])
-    else await w.aquilla.import.done(err instanceof Error ? err.message : String(err), { ok: false })
+    // Choices too: a failure is reported (the dialog shows it), never an empty list.
+    await w.aquilla.import.done(err instanceof Error ? err.message : String(err), { ok: false })
   }
 }
 

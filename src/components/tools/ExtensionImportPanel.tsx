@@ -57,6 +57,7 @@ export function ExtensionImportPanel({
   const [values, setValues] = useState<Record<string, Value>>(() => defaultImportOptions(importer))
   const [choices, setChoices] = useState<Record<string, { value: string; label: string }[]>>({})
   const [loadingChoices, setLoadingChoices] = useState<Record<string, boolean>>({})
+  const [choicesError, setChoicesError] = useState<Record<string, string | null>>({})
   const [run, setRun] = useState<{ key: string; message: string; fraction: number | null } | null>(null)
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
   const askedFor = useRef(new Map<string, string>())
@@ -73,8 +74,12 @@ export function ExtensionImportPanel({
       askedFor.current.set(key, deps)
       setLoadingChoices((prev) => ({ ...prev, [key]: true }))
       void ctx.importChoices(toolId, importer.id, key, values).then((outcome) => {
+        // A newer ask for this field (its dependencies changed) owns the field now.
+        if (askedFor.current.get(key) !== deps) return
         setLoadingChoices((prev) => ({ ...prev, [key]: false }))
         if (outcome.ok) setChoices((prev) => ({ ...prev, [key]: outcome.choices ?? [] }))
+        // Never a silent "—": say why the list is empty.
+        setChoicesError((prev) => ({ ...prev, [key]: outcome.ok ? null : outcome.error }))
       })
     }
   }, [ctx, dynamicKeys, toolId, importer.id, values])
@@ -146,6 +151,11 @@ export function ExtensionImportPanel({
           {o.required ? " *" : ""}
         </label>
         {control}
+        {choicesError[o.key] && (
+          <p role="alert" className="text-xs text-destructive" data-testid={`extension-import-choices-error-${o.key}`}>
+            {t("extensions.import.choicesFailed", { error: choicesError[o.key] ?? "" })}
+          </p>
+        )}
         {o.help && <p className="text-xs text-muted-foreground">{o.help}</p>}
       </div>
     )

@@ -19,10 +19,14 @@ import { test, expect } from "../../helpers/multi-user"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import { updateProjectSettings } from "../../helpers/frontier-api"
 import { jwtFor, mintSyncToken, seedProjectWithFile } from "../../helpers/seed-project"
+import { readFileSync } from "node:fs"
 
 const AUTH = process.env.VITE_AUTH_BASE ?? "http://127.0.0.1:8787"
 const SYNC_BASE = process.env.E2E_SYNC_BASE ?? `http://${process.env.VITE_SYNC_WORKER_HOST ?? "127.0.0.1:8788"}`
 const SITE = "glossary.example.org"
+// A real Door43 catalog answer (lang=en, stage=prod), trimmed to six entries but
+// with their full per-entry ingredients: what the Resource choices map from.
+const CATALOG = readFileSync(new URL("../../fixtures/door43/catalog-search-en.json", import.meta.url), "utf8")
 
 const SOURCE = `<!doctype html><html><body><p>Glossary importer</p><script>
 (async () => {
@@ -103,6 +107,12 @@ test("Smart Extensions are off by default; switched on, an extension importer ru
   let version = "v1"
   await alice.route(/\/tools\/[^/]+\/web-fetch$/, async (route) => {
     const url = (route.request().postDataJSON() as { url: string }).url
+    if (url.includes("/api/v1/catalog/search")) {
+      // As slow as the real catalog through the proxy: the other dynamic field
+      // (books, nothing to ask yet) answers first, while this one is in flight.
+      await new Promise((r) => setTimeout(r, 2500))
+      return route.fulfill({ json: { status: 200, contentType: "application/json", url, body: CATALOG } })
+    }
     const book = /\/([A-Z]{3})\.txt$/.exec(url)?.[1] ?? "?"
     await route.fulfill({ json: { status: 200, contentType: "text/plain", url, body: `${version}\n${book} servant\n${book} hope ${version}\n` } })
   })
@@ -111,6 +121,16 @@ test("Smart Extensions are off by default; switched on, an extension importer ru
   await workspace.openImportDialog()
   const importers = alice.getByTestId("extension-importer")
   await expect(importers.filter({ hasText: "Door43 resources" })).toBeVisible({ timeout: 30_000 })
+
+  // The Door43 importer's Resource select is filled from the catalog (dynamic choices).
+  await importers.filter({ hasText: "Door43 resources" }).click()
+  const resource = alice.getByTestId("extension-import-option-resource").locator("select")
+  await expect(resource.locator("option", { hasText: "TSV Translation Notes — unfoldingWord/en_tn" })).toHaveCount(1, { timeout: 30_000 })
+  await expect(resource.locator("option")).toHaveCount(7) // "—" + six resources
+  await resource.selectOption("unfoldingWord/en_ust")
+  await expect(resource).toHaveValue("unfoldingWord/en_ust")
+  await alice.keyboard.press("Escape")
+  await workspace.openImportDialog()
   await importers.filter({ hasText: "Book glossary" }).click()
 
   // 3. Options rendered from the schema; run with one book chosen.

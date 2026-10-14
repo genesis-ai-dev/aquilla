@@ -147,6 +147,36 @@ describe("running the shipped bundle", () => {
     expect(books.choices[0]).toEqual([{ value: "TIT", label: "TIT" }, { value: "PHM", label: "PHM" }])
   })
 
+  it("maps a real Door43 catalog answer to Resource choices", async () => {
+    // A real /catalog/search answer ({ ok, data, last_updated }), six entries with
+    // their full per-entry ingredients/books/relations, delivered as the proxy does.
+    const catalog = readFileSync(path.join(ROOT, "e2e/fixtures/door43/catalog-search-en.json"), "utf8")
+    const asked: string[] = []
+    const { choices, done } = await runBundle(
+      { importerId: "door43", phase: "choices", field: "resource", options: { lang: "en" } },
+      { webFetch: async (url) => (asked.push(url), { status: 200, contentType: "application/json", body: catalog, url }) },
+    )
+    expect(done).toEqual([])
+    expect(new URL(asked[0]).searchParams.get("lang")).toBe("en")
+    expect(choices[0]).toEqual([
+      { value: "unfoldingWord/en_ust", label: "Aligned Bible — unfoldingWord/en_ust" },
+      { value: "unfoldingWord/en_obs", label: "Open Bible Stories — unfoldingWord/en_obs" },
+      { value: "unfoldingWord/en_ta", label: "Translation Academy — unfoldingWord/en_ta" },
+      { value: "unfoldingWord/en_tw", label: "Translation Words — unfoldingWord/en_tw" },
+      { value: "unfoldingWord/en_tn", label: "TSV Translation Notes — unfoldingWord/en_tn" },
+      { value: "unfoldingWord/en_twl", label: "TSV Translation Words Links — unfoldingWord/en_twl" },
+    ])
+  })
+
+  it("reports a choices failure instead of answering an empty list", async () => {
+    const { choices, done } = await runBundle(
+      { importerId: "door43", phase: "choices", field: "resource", options: { lang: "en" } },
+      { webFetch: async (url) => ({ status: 503, contentType: "text/plain", body: "down", url }) },
+    )
+    expect(choices).toEqual([])
+    expect(done).toEqual([{ ok: false, message: expect.stringMatching(/503/) }])
+  })
+
   it("refresh writes nothing when the upstream sha is unchanged", async () => {
     const upsert = vi.fn()
     const { done } = await runBundle(

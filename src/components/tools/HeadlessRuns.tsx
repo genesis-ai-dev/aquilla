@@ -22,8 +22,13 @@ import { TOOL_SANDBOX, buildToolSrcdoc, readThemeVars } from "@/lib/tools/srcdoc
 import type { ToolDetail } from "@/lib/tools/tools-api"
 import type { ToolDeliveredFile } from "@/lib/tools/host-handlers-files"
 import type { HeadlessCallbacks } from "@/lib/tools/live-data-files"
+import { ExtensionMarker } from "./ExtensionMarker"
 import { PermissionPrompt } from "./PermissionPrompt"
+import { useCancelOnUnmount } from "./useCancelOnUnmount"
 import { useToolHost } from "./useToolHost"
+
+/** Every toast a headless run raises carries the Smart Extensions marker (AQU-1937 identity). */
+const EXTENSION_TOAST = { icon: <ExtensionMarker iconOnly /> }
 
 export type HeadlessOutcome =
   | { ok: true; files?: number; message?: string | null; choices?: { value: string; label: string }[] }
@@ -102,6 +107,7 @@ function HeadlessRun({
       toast.add({
         title: t(ok ? "extensions.action.done" : "extensions.action.failed", vars),
         ...(message ? { description: message } : {}),
+        data: EXTENSION_TOAST,
       })
     }
     if (!ok) job.settle?.({ ok: false, error: message ?? t("extensions.export.empty", vars) })
@@ -124,7 +130,7 @@ function HeadlessRun({
         const description = fraction != null ? `${message} (${Math.round(fraction * 100)}%)` : message
         if (toastShown.current) toast.update(toastId, { title, description })
         else {
-          toast.add({ id: toastId, title, description, timeout: 0 })
+          toast.add({ id: toastId, title, description, timeout: 0, data: EXTENSION_TOAST })
           toastShown.current = true
         }
       },
@@ -144,12 +150,13 @@ function HeadlessRun({
   const { prompt, errors } = useToolHost({ frameRef, projectId: project.id, tool, session, roleLevel, headless })
 
   // Cancelled (the job was removed before it reported): say so to the waiter.
-  useEffect(() => () => {
-    if (!finished.current) {
-      finished.current = true
-      job.settle?.({ ok: false, error: "cancelled" })
-    }
-  }, [job])
+  // StrictMode-safe: dev's simulated unmount must not cancel a run that is still mounted.
+  useCancelOnUnmount(() => {
+    if (finished.current) return
+    finished.current = true
+    if (toastShown.current) toast.close(toastId)
+    job.settle?.({ ok: false, error: "cancelled" })
+  })
 
   // An uncaught error before the extension reported = the run failed.
   useEffect(() => {
@@ -164,7 +171,7 @@ function HeadlessRun({
 
   useEffect(() => {
     if (job.kind !== "action" || toastShown.current) return
-    toast.add({ id: toastId, title: t("extensions.action.running", vars), timeout: 0 })
+    toast.add({ id: toastId, title: t("extensions.action.running", vars), timeout: 0, data: EXTENSION_TOAST })
     toastShown.current = true
   }, [job.kind, t, vars, toastId])
 

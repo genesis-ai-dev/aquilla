@@ -3,10 +3,11 @@
  * (side panel, page, editor, cell tab, Review & try preview, import progress).
  *
  * It is drawn by the HOST, outside the sandboxed iframe, in the reserved
- * --extension-accent color that is never forwarded into frames — so an
+ * --extension-accent family that is never forwarded into frames — so an
  * extension cannot draw, hide or restyle it, and users can always tell
- * app-proper UI from extension content. A thin border plus an edge tab with
- * the extension icon, its name and "Smart Extension", linking to its page
+ * app-proper UI from extension content. A 1px low-opacity hairline with a
+ * faint outer glow, plus a soft label tab (tinted background, quiet text, the
+ * extension icon, its name and "Smart Extension") linking to its page
  * (permissions, versions). The default editor uses the QUIET variant: a
  * hairline and the compact label.
  *
@@ -35,16 +36,16 @@ export function ExtensionFrame({ name, href, variant = "full", className, childr
   const t = useT()
   const label = (
     <>
-      <Blocks className="size-3 shrink-0" aria-hidden />
-      <span className="truncate">{name}</span>
-      <span aria-hidden>·</span>
-      <span className="shrink-0">{t("extensions.identity.label")}</span>
+      <Blocks className="size-3 shrink-0 text-[var(--extension-accent)]" aria-hidden />
+      <span className="truncate text-foreground/80">{name}</span>
+      <span aria-hidden className="text-[var(--extension-accent-line)]">·</span>
+      <span className="shrink-0 text-[var(--extension-accent)]">{t("extensions.identity.label")}</span>
     </>
   )
   const tabClass =
     variant === "full"
-      ? "inline-flex max-w-full items-center gap-1 rounded-t-md bg-[var(--extension-accent)] px-2 py-0.5 text-[11px] font-medium leading-4 text-[var(--extension-accent-foreground)] hover:opacity-90"
-      : "inline-flex max-w-full items-center gap-1 rounded-full bg-background px-1.5 text-[10px] font-medium leading-4 text-[var(--extension-accent)] hover:underline"
+      ? "inline-flex max-w-full items-center gap-1 rounded-t-md border border-b-0 border-[var(--extension-accent-line)] bg-[var(--extension-accent-subtle)] px-2 py-px text-[11px] font-medium leading-4 transition-colors hover:border-[var(--extension-accent)]"
+      : "inline-flex max-w-full items-center gap-1 rounded-full border border-[var(--extension-accent-line)] bg-[var(--extension-accent-subtle)] px-1.5 text-[10px] font-medium leading-4 transition-colors hover:border-[var(--extension-accent)]"
   const tab = href ? (
     <Link to={href} className={tabClass} data-testid="extension-frame-tab" title={t("extensions.identity.open", { name })}>
       {label}
@@ -65,14 +66,15 @@ export function ExtensionFrame({ name, href, variant = "full", className, childr
         <div className="flex shrink-0 items-end px-2">{tab}</div>
       ) : (
         // Quiet: a hairline with the compact label sitting ON it — no extra height.
-        <div className="relative h-0 shrink-0 border-t border-[var(--extension-accent)]">
+        <div className="relative h-0 shrink-0 border-t border-[var(--extension-accent-line)]">
           <div className="absolute start-2 top-0 z-10 -translate-y-1/2">{tab}</div>
         </div>
       )}
       <div
         className={cn(
           "flex min-h-0 flex-1 flex-col overflow-hidden",
-          variant === "full" ? "rounded-md border-2 border-[var(--extension-accent)]" : "",
+          // A hairline plus a faint glow at the edge: present, never loud.
+          variant === "full" ? "rounded-md border border-[var(--extension-accent-line)] shadow-[0_0_0_3px_var(--extension-accent-glow)]" : "",
         )}
       >
         {children}

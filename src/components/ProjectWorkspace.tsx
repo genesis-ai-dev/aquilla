@@ -5222,6 +5222,10 @@ export function ProjectWorkspace() {
     deleteComment,
     resolveThread: resolveCommentThread,
     refresh: refreshComments,
+    // AQU-1957: comment.* events the outbox gave up on. The hook has already
+    // pulled their optimistic comments back out, so the drawer needs these to
+    // explain the text that disappeared instead of posting.
+    refusals: commentSubmitRefusals,
   } = useComments({
     projectId: project?.id ?? null,
     getToken: getTokenForFile,
@@ -14971,6 +14975,7 @@ export function ProjectWorkspace() {
                 isError={commentsIsError}
                 isLoadingRest={commentsIsLoadingRest}
                 onRetry={() => { void refreshComments() }}
+                submitRefusals={commentSubmitRefusals}
               />
             )}
             {attachmentsDrawerOpen && project && activeFileId && (

@@ -36,6 +36,7 @@
  * working over the same open socket, which is why it looked like "Tauri pulls
  * changes down but never pushes them up".
  */
+import { recordOfflineUpload } from "./sync-times"
 import type { Store } from "@livestore/livestore"
 import {
   createWsReconciler,
@@ -179,7 +180,9 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
    *  or permanently rejected) — a no-op if `id` isn't in the queue. */
   function dequeueIfQueued(id: string): void {
     const queued = store.query(tables.eventQueue.select().where({ id }).first())
-    if (queued) store.commit(events.eventDequeued({ id }))
+    if (!queued) return
+    store.commit(events.eventDequeued({ id }))
+    recordOfflineUpload(projectId)
   }
 
   function handleMessage(msg: ProjectWsServerMessage): void {
@@ -331,6 +334,7 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
       }
       if (acceptedIds.has(id)) {
         store.commit(events.eventDequeued({ id }))
+        recordOfflineUpload(projectId)
         continue
       }
       const refusal = refused.get(id)

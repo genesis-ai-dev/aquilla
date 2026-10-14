@@ -60,7 +60,14 @@ import { auditMembershipChange, isAdminActor, priorMembershipRole } from "../ser
 import { getOrgAssignmentWorkload, getMyAssignmentsAcrossOrg } from "../services/assignments"
 import { sendOrgInviteEmail } from "../services/email"
 import { getTeamMemberRole, setTeamMemberRole, TEAM_SCOPE_ROLES } from "../services/team-roles"
-import { applyTeamMemberLaneGrants, applyTeamProjectLaneGrants } from "../services/lane-grants"
+import {
+  applyTeamMemberLaneGrants,
+  applyTeamProjectLaneGrants,
+  applyTeamRosterLaneChecks,
+  reconcileMemberProjectLanes,
+  resolveTeamLaneSelection,
+  saveTeamLaneSelection,
+} from "../services/lane-grants"
 
 const orgs = new Hono<AuthHonoEnv>()
 
@@ -1443,8 +1450,15 @@ orgs.get("/:orgId/project-invites", async (c) => {
   })
 })
 
-const attachBody = z.object({ projectId: z.string().min(1), roleLevel: z.number().int() })
-const roleBody = z.object({ roleLevel: z.number().int() })
+const attachBody = z.object({
+  projectId: z.string().min(1),
+  roleLevel: z.number().int(),
+  laneIds: z.array(z.string()).optional(),
+})
+const roleBody = z.object({
+  roleLevel: z.number().int().optional(),
+  laneIds: z.array(z.string()).optional(),
+})
 
 orgs.post("/:orgId/groups/:groupId/projects", zValidator("json", attachBody), async (c) => {
   const user = c.get("user")
@@ -1454,15 +1468,17 @@ orgs.post("/:orgId/groups/:groupId/projects", zValidator("json", attachBody), as
   const callerRole = await resolveTeamWriteRole(c, orgId)
   if (typeof callerRole !== "number") return callerRole
   if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
-  const { projectId, roleLevel } = c.req.valid("json")
+  const { projectId, roleLevel, laneIds } = c.req.valid("json")
   if (!isCanonicalRoleLevel(roleLevel) || roleLevel > callerRole) return c.json({ error: "invalid or too-high role level" }, 403)
+  const selection = await resolveTeamLaneSelection(c.env.AQUILLA_PG, projectId, laneIds)
+  if (!selection.ok) return c.json({ error: selection.error }, 400)
   const result = await attachGroupProject(c.env, orgId, groupId, projectId, roleLevel, user.id)
   if (result === "no-project") return c.json({ error: "project not found" }, 404)
   if (result === "cross-org") return c.json({ error: "project is not in this org" }, 409)
-  // AQU-1801: every member of the team reaches this project now, so each one
-  // below Maintainer needs grants on its target lanes (same reason as the
-  // team-member add above).
-  await applyTeamProjectLaneGrants(c.env.AQUILLA_PG, groupId, projectId, user.id)
+  // AQU-1813: a named lane list freezes the attachment to those lanes. Omitting
+  // it keeps the living "every lane" attachment the Codex sync still sends.
+  await saveTeamLaneSelection(c.env.AQUILLA_PG, groupId, projectId, selection.selection)
+  await applyTeamRosterLaneChecks(c.env.AQUILLA_PG, groupId, projectId, user.id)
   await auditMembershipChange(c.env, user, {
     action: "team.project.attach",
     where: { scope: "team", orgId, groupId },
@@ -1482,23 +1498,44 @@ orgs.patch("/:orgId/groups/:groupId/projects/:projectId", zValidator("json", rol
   const callerRole = await resolveTeamWriteRole(c, orgId)
   if (typeof callerRole !== "number") return callerRole
   if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
-  const { roleLevel } = c.req.valid("json")
-  if (!isCanonicalRoleLevel(roleLevel) || roleLevel > callerRole) return c.json({ error: "invalid or too-high role level" }, 403)
-  const ok = await updateGroupProjectRole(c.env, groupId, projectId, roleLevel)
-  if (!ok) return c.json({ error: "attachment not found" }, 404)
-  // AQU-1801: the attachment's new role has to reach the grant rows too, or a
-  // demotion leaves the team still editing and a promotion still read-only.
-  // Only the level moves — the lanes a member already reads are unchanged.
-  await applyTeamProjectLaneGrants(c.env.AQUILLA_PG, groupId, projectId, user.id)
-  await auditMembershipChange(c.env, user, {
-    action: "team.project.role",
-    where: { scope: "team", orgId, groupId },
-    projectId,
-    roleBefore: null,
-    roleAfter: roleLevel,
-  })
-  return c.json({ projectId, roleLevel })
+  const { roleLevel, laneIds } = c.req.valid("json")
+  if (roleLevel == null && laneIds == null) return c.json({ error: "roleLevel or laneIds required" }, 400)
+  if (roleLevel != null && (!isCanonicalRoleLevel(roleLevel) || roleLevel > callerRole)) {
+    return c.json({ error: "invalid or too-high role level" }, 403)
+  }
+  if (roleLevel != null) {
+    const ok = await updateGroupProjectRole(c.env, groupId, projectId, roleLevel)
+    if (!ok) return c.json({ error: "attachment not found" }, 404)
+    // The role change re-levels the grants the members already hold. It does
+    // not change which lanes are checked.
+    await applyTeamProjectLaneGrants(c.env.AQUILLA_PG, groupId, projectId, user.id)
+    await auditMembershipChange(c.env, user, {
+      action: "team.project.role",
+      where: { scope: "team", orgId, groupId },
+      projectId,
+      roleBefore: null,
+      roleAfter: roleLevel,
+    })
+  } else if (!(await groupProjectAttached(c.env, groupId, projectId))) {
+    return c.json({ error: "attachment not found" }, 404)
+  }
+  if (laneIds != null) {
+    const selection = await resolveTeamLaneSelection(c.env.AQUILLA_PG, projectId, laneIds)
+    if (!selection.ok) return c.json({ error: selection.error }, 400)
+    await saveTeamLaneSelection(c.env.AQUILLA_PG, groupId, projectId, selection.selection)
+    await applyTeamRosterLaneChecks(c.env.AQUILLA_PG, groupId, projectId, user.id)
+  }
+  return c.json({ projectId, ...(roleLevel != null ? { roleLevel } : {}), ...(laneIds != null ? { laneIds } : {}) })
 })
+
+async function groupProjectAttached(env: Env, groupId: number, projectId: string): Promise<boolean> {
+  const row = await env.AQUILLA_PG.prepare(
+    "SELECT 1 AS ok FROM group_project_grants WHERE group_id = ? AND project_id = ?",
+  )
+    .bind(groupId, projectId)
+    .first<{ ok: number }>()
+  return row != null
+}
 
 orgs.delete("/:orgId/groups/:groupId/projects/:projectId", async (c) => {
   const user = c.get("user")
@@ -1509,7 +1546,15 @@ orgs.delete("/:orgId/groups/:groupId/projects/:projectId", async (c) => {
   const callerRole = await resolveTeamWriteRole(c, orgId)
   if (typeof callerRole !== "number") return callerRole
   if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
+  const members = await c.env.AQUILLA_PG.prepare(
+    "SELECT user_id FROM group_members WHERE group_id = ?",
+  )
+    .bind(groupId)
+    .all<{ user_id: number }>()
   await detachGroupProject(c.env, groupId, projectId)
+  for (const row of members.results ?? []) {
+    await reconcileMemberProjectLanes(c.env.AQUILLA_PG, projectId, Number(row.user_id), user.id)
+  }
   await auditMembershipChange(c.env, user, {
     action: "team.project.detach",
     where: { scope: "team", orgId, groupId },

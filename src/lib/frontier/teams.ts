@@ -16,7 +16,14 @@ export interface TeamDetail {
     teamRoleLevel?: number | null
     addedAt?: string | null
   }>
-  projects: Array<{ id: string; name: string; grantedRoleLevel: number; grantedAt?: string | null }>
+  projects: Array<{
+    id: string
+    name: string
+    grantedRoleLevel: number
+    grantedAt?: string | null
+    lanesExplicit?: boolean
+    laneIds?: string[]
+  }>
 }
 function authHeaders(jwt: string): HeadersInit { return { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` } }
 
@@ -110,11 +117,35 @@ export async function removeTeamMember(jwt: string, orgId: number, groupId: numb
   if (!res.ok) throw new UserError(res.status, "", "team")
 }
 
-export async function attachProject(jwt: string, orgId: number, groupId: number, projectId: string, roleLevel: number): Promise<{ projectId: string; roleLevel: number }> {
-  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/groups/${groupId}/projects`, { method: "POST", headers: authHeaders(jwt), body: JSON.stringify({ projectId, roleLevel }) })
+export async function attachProject(
+  jwt: string,
+  orgId: number,
+  groupId: number,
+  projectId: string,
+  roleLevel: number,
+  laneIds?: string[],
+): Promise<{ projectId: string; roleLevel: number }> {
+  const body = laneIds != null ? { projectId, roleLevel, laneIds } : { projectId, roleLevel }
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/groups/${groupId}/projects`, { method: "POST", headers: authHeaders(jwt), body: JSON.stringify(body) })
   await throwIfElevationRequired(res, "project")
   if (!res.ok) throw new UserError(res.status, "", "project")
   return (await res.json()) as { projectId: string; roleLevel: number }
+}
+
+/** Replace the lanes checked on a team attachment. Does not change its role. */
+export async function setTeamProjectLanes(
+  jwt: string,
+  orgId: number,
+  groupId: number,
+  projectId: string,
+  laneIds: string[],
+): Promise<void> {
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/orgs/${orgId}/groups/${groupId}/projects/${encodeURIComponent(projectId)}`,
+    { method: "PATCH", headers: authHeaders(jwt), body: JSON.stringify({ laneIds }) },
+  )
+  await throwIfElevationRequired(res, "project")
+  if (!res.ok) throw new UserError(res.status, "", "project")
 }
 
 export async function changeProjectRole(jwt: string, orgId: number, groupId: number, projectId: string, roleLevel: number): Promise<{ projectId: string; roleLevel: number }> {

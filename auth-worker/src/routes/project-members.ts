@@ -26,6 +26,7 @@ import { resolveProjectRole } from "../services/project-permissions"
 import { listEffectiveProjectMembers } from "../services/org-permissions"
 import { notifySyncWorkerOfMemberRemoval } from "../services/sync-worker-notify"
 import { auditMembershipChange } from "../services/admin-audit"
+import { reconcileMemberProjectLanes } from "../services/lane-grants"
 import { projectElevationDenial } from "../services/elevation-gate"
 
 const projectMembers = new Hono<AuthHonoEnv>()
@@ -175,6 +176,10 @@ projectMembers.post(
         roleBefore: Number(existingRow.role_level),
         roleAfter: null,
       })
+      // AQU-1818: drop lane rows when nothing else admits the person. A team
+      // that still reaches them is rewritten to that team's lanes, not the
+      // direct membership's old limit.
+      await reconcileMemberProjectLanes(c.env.AQUILLA_PG, projectId, targetUserId, user.id)
     }
 
     // AQU-346: when the direct row was removed AND no other grant path

@@ -5,7 +5,9 @@ import { AlertTriangle, FolderGit2, Settings, ShieldUser, Unlink, UserMinus, Use
 import { AppShell } from "@/components/AppShell"
 import { MemberMultiSelect } from "@/components/MemberMultiSelect"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { TeamLaneChecks } from "./TeamLaneChecks"
 import { TeamRoleSelect } from "./TeamRoleSelect"
+import { useCurrentTargetLanes } from "@/hooks/useCurrentTargetLanes"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
@@ -44,6 +46,7 @@ import {
   changeProjectRole,
   detachProject,
   setTeamMemberRole,
+  setTeamProjectLanes,
   type TeamDetail as TeamDetailType,
 } from "@/lib/frontier/teams"
 import { listOrgMembers, addOrgMember, type OrgMember } from "@/lib/frontier/orgs"
@@ -159,6 +162,11 @@ export function TeamDetail() {
   const [attachingProject, setAttachingProject] = useState(false)
   const [selectedProjectId, setSelectedProjectId] = useState("")
   const [selectedRole, setSelectedRole] = useState<number>(ROLE.VIEWER)
+  const [attachLaneIds, setAttachLaneIds] = useState<string[]>([])
+  const [attachLaneProject, setAttachLaneProject] = useState("")
+  const { lanes: attachLanes, ready: attachLanesReady } = useCurrentTargetLanes(
+    attachingProject && selectedProjectId ? selectedProjectId : null,
+  )
 
   // Add member UI state — multi-select (AQU-735): stage several org members via
   // MemberMultiSelect (same checkbox combobox as named validators) and grant
@@ -177,6 +185,31 @@ export function TeamDetail() {
   const [projectRoleTarget, setProjectRoleTarget] = useState<TeamProject | null>(null)
   const [projectRoleLevel, setProjectRoleLevel] = useState("")
   const [projectRoleBusy, setProjectRoleBusy] = useState(false)
+
+  const [laneEditTarget, setLaneEditTarget] = useState<TeamProject | null>(null)
+  const [laneEditIds, setLaneEditIds] = useState<string[]>([])
+  const [laneEditReadyFor, setLaneEditReadyFor] = useState<string | null>(null)
+  const [laneEditBusy, setLaneEditBusy] = useState(false)
+  const { lanes: editLanes, ready: editLanesReady } = useCurrentTargetLanes(laneEditTarget?.id ?? null)
+
+  useEffect(() => {
+    if (!attachingProject || !attachLanesReady || !selectedProjectId) return
+    if (attachLaneProject === selectedProjectId) return
+    setAttachLaneProject(selectedProjectId)
+    setAttachLaneIds(attachLanes.map((lane) => lane.id))
+  }, [attachingProject, attachLanesReady, selectedProjectId, attachLanes, attachLaneProject])
+
+  useEffect(() => {
+    if (!laneEditTarget || !editLanesReady) return
+    if (laneEditReadyFor === laneEditTarget.id) return
+    setLaneEditReadyFor(laneEditTarget.id)
+    if (laneEditTarget.lanesExplicit) {
+      const allowed = new Set(editLanes.map((lane) => lane.id))
+      setLaneEditIds((laneEditTarget.laneIds ?? []).filter((id) => allowed.has(id)))
+    } else {
+      setLaneEditIds(editLanes.map((lane) => lane.id))
+    }
+  }, [laneEditTarget, editLanesReady, editLanes, laneEditReadyFor])
 
   const refetch = useCallback(async () => {
     const request = ++teamRequestRef.current
@@ -303,6 +336,8 @@ export function TeamDetail() {
     setAttachingProject(false)
     setSelectedProjectId("")
     setSelectedRole(ROLE.VIEWER)
+    setAttachLaneIds([])
+    setAttachLaneProject("")
   }
 
   function openAttachProject() {
@@ -313,7 +348,9 @@ export function TeamDetail() {
 
   async function handleAttachProject() {
     if (!jwt || activeOrgId == null || groupIdNum == null || !selectedProjectId) return
-    await attachProject(jwt, activeOrgId, groupIdNum, selectedProjectId, selectedRole)
+    if (attachLanes.length > 0 && attachLaneIds.length === 0) return
+    const laneIds = attachLanes.length > 0 ? attachLaneIds : undefined
+    await attachProject(jwt, activeOrgId, groupIdNum, selectedProjectId, selectedRole, laneIds)
     closeAttachProject()
     await refetch()
   }
@@ -371,6 +408,32 @@ export function TeamDetail() {
       closeProjectRoleChange()
     } finally {
       setProjectRoleBusy(false)
+    }
+  }
+
+  function openLaneEdit(project: TeamProject) {
+    setLaneEditTarget(project)
+    setLaneEditReadyFor(null)
+    setLaneEditIds([])
+  }
+
+  function closeLaneEdit() {
+    setLaneEditTarget(null)
+    setLaneEditIds([])
+    setLaneEditReadyFor(null)
+    setLaneEditBusy(false)
+  }
+
+  async function confirmLaneEdit() {
+    if (!jwt || activeOrgId == null || groupIdNum == null || !laneEditTarget) return
+    if (editLanes.length > 0 && laneEditIds.length === 0) return
+    setLaneEditBusy(true)
+    try {
+      await setTeamProjectLanes(jwt, activeOrgId, groupIdNum, laneEditTarget.id, laneEditIds)
+      closeLaneEdit()
+      await refetch()
+    } finally {
+      setLaneEditBusy(false)
     }
   }
 
@@ -728,6 +791,49 @@ export function TeamDetail() {
                 </Dialog>
               )}
 
+              {isAdmin && (
+                <Dialog
+                  open={laneEditTarget !== null}
+                  onOpenChange={(open) => { if (!open) closeLaneEdit() }}
+                >
+                  <DialogContent className="max-w-md">
+                    <DialogHeader>
+                      <DialogTitle>{t("projectSettings.share.laneChoiceLegend")}</DialogTitle>
+                      <DialogDescription>
+                        {laneEditTarget?.name}
+                      </DialogDescription>
+                    </DialogHeader>
+                    {editLanesReady && editLanes.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">{t("projectSettings.languages.noAdditionalLanes")}</p>
+                    ) : (
+                      <TeamLaneChecks
+                        lanes={editLanes}
+                        selected={laneEditIds}
+                        onChange={setLaneEditIds}
+                        disabled={laneEditBusy}
+                      />
+                    )}
+                    <DialogFooter>
+                      <Button type="button" variant="outline" onClick={closeLaneEdit} disabled={laneEditBusy}>
+                        {t("common.cancel")}
+                      </Button>
+                      <Button
+                        type="button"
+                        onClick={() => void confirmLaneEdit()}
+                        disabled={
+                          laneEditBusy ||
+                          !editLanesReady ||
+                          (editLanes.length > 0 && laneEditIds.length === 0)
+                        }
+                      >
+                        {laneEditBusy && <Spinner data-icon="inline-start" />}
+                        {laneEditBusy ? "Saving…" : "Save"}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              )}
+
               <div className="space-y-3">
               <div
                 className={cn(
@@ -834,6 +940,11 @@ export function TeamDetail() {
                             aria-label={t("org.teamDetail.grantedRoleAriaLabel")}
                             className="w-full"
                           />
+                          <TeamLaneChecks
+                            lanes={attachLanes}
+                            selected={attachLaneIds}
+                            onChange={setAttachLaneIds}
+                          />
                           {attachableProjects.length === 0 && (
                             <p className="text-xs text-muted-foreground">
                               {t("org.teamDetail.allProjectsAttachedNotice")}
@@ -847,7 +958,11 @@ export function TeamDetail() {
                           <Button
                             type="button"
                             onClick={handleAttachProject}
-                            disabled={!selectedProjectId}
+                            disabled={
+                              !selectedProjectId ||
+                              !attachLanesReady ||
+                              (attachLanes.length > 0 && attachLaneIds.length === 0)
+                            }
                           >
                             {t("editor.media.attach")}
                           </Button>
@@ -887,6 +1002,9 @@ export function TeamDetail() {
                             <MenuItem onClick={() => openProjectRoleChange(p)}>
                               <ShieldUser className="size-4" />
                               {t("org.membersPage.changeRoleAria")}
+                            </MenuItem>
+                            <MenuItem onClick={() => openLaneEdit(p)}>
+                              {t("projectSettings.share.laneChoiceLegend")}
                             </MenuItem>
                             <MenuSeparator />
                             <MenuItem

@@ -78,6 +78,7 @@ import {
 import { lanesForScopeVisibility } from "../../../src/lib/lanes/scope-ids"
 import { loadTargetLaneIdentities, visibleTagsForMember } from "../../../db/shared/lane-visibility"
 import { grantNewLane } from "../../../db/shared/lane-grants"
+import { grantCreatedLaneToActor } from "../services/lane-grants"
 import type { AquillaDb } from "../../../db/shim/postgres"
 import { laneLanguage } from "../../../src/lib/lanes/lane-display"
 import { validateSettingsKeyValue } from "../../../db/shared/project-settings-keys"
@@ -230,10 +231,9 @@ projectSettings.get("/:projectId/settings", authMiddleware, async (c) => {
   // unchanged. Does not read lanes.language, so a row the backfill has not
   // filled yet filters the same way.
   //
-  // AQU-1795: this runs whenever the wall left the caller unrestricted, wall
-  // on or off, so it stops at the wall's own floor. A project lead who still
-  // carries a scope row from before a promotion sees every lane, the same as
-  // the sync worker's scopeReadClause and the portfolio give them.
+  // This runs whenever the wall left the caller unrestricted, wall on or
+  // off, so it stops at the wall's own floor. A project lead is below that
+  // floor: a leftover lane scope still limits them.
   if (visible === null && role.level < READ_WALL_MAINTAINER) {
     const scoped = await laneScopeValuesFor(c.env.AQUILLA_PG, projectId, user.id)
     if (scoped.length > 0) {
@@ -681,6 +681,7 @@ projectSettings.post(
     // "Unscoped — full access". Grant it in the same request that creates it.
     try {
       await grantNewLane(c.env.AQUILLA_PG, projectId, { laneId: created.laneId }, user.id)
+      await grantCreatedLaneToActor(c.env.AQUILLA_PG, projectId, created.laneId, user.id)
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
       return c.json({ error: `write failed: ${message}` }, 500)

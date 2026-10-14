@@ -323,7 +323,7 @@ export function AssignModal({
   // AQU-676: the assignee picker must list only the project's own members,
   // never everyone with org-baseline access. Org members inherit access to
   // every project via AD-12 max-wins, so without this filter a per-team mentor
-  // doing assignments sees (and could assign to) other language teams' people.
+  // doing assignments sees (and could assign to) people staffed on other lanes.
   // partitionMembers (AQU-454) keeps only members with a project-specific path
   // (override / group / creator); org-baseline-only members drop out.
   //

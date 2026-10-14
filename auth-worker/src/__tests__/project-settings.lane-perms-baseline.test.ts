@@ -3,12 +3,9 @@
 // is not handed `fr` or `de`. An unscoped member still receives the full
 // registry — that case is the wall-off default, not this file.
 //
-// AQU-1795: the scope fallback stops at the read wall's floor. A project lead
-// (500) sees every lane whether or not a scope row from before a promotion is
-// still stored, wall on or off, with or without lane rows. Before this pin the
-// fallback kept its own Maintainer (600) floor, so a promoted lead passed the
-// wall and was then narrowed to the leftover scope: the overview listed every
-// lane and Settings → Target lanes showed one.
+// A project lead is below the read wall. A leftover lane scope limits them
+// the same way it limits a contributor, wall on or off. A lead with no grant
+// and no scope sees every lane only while the wall is off.
 
 import { env } from "cloudflare:test"
 import { describe, it, expect, afterEach } from "vitest"
@@ -62,11 +59,13 @@ describe("AQU-1039 — GET project settings hides lanes outside a member's scope
     expect(await targetLanes("carla")).toEqual(["es"])
   })
 
-  it("returns the full registry to a project lead with a leftover scope, wall off and on (AQU-1795)", async () => {
+  it("limits a project lead with a leftover scope to that lane when the wall is off", async () => {
     await seedScopedMembers()
-    expect(await targetLanes("lena")).toEqual(FULL_REGISTRY)
+    expect(await targetLanes("lena")).toEqual(["es"])
     env.LANE_READ_WALL = "1"
-    expect(await targetLanes("lena")).toEqual(FULL_REGISTRY)
+    // No grant rows: the wall hides every target lane. The leftover scope does
+    // not open one.
+    expect(await targetLanes("lena")).toEqual([])
   })
 })
 
@@ -75,7 +74,7 @@ describe("AQU-1039 — GET project settings hides lanes outside a member's scope
  * backfill has not converted yet. French is the default lane. dan (500) and
  * carla (400) hold a grant on Spanish only and carry a leftover scope on it;
  * erin (500) holds neither. The wall hides French and German from carla and
- * must hide them from neither lead.
+ * hides them from both leads: dan is granted Spanish, erin holds no grant.
  */
 const STORED = {
   sourceLanguage: "English",
@@ -156,23 +155,24 @@ const EVERY_LANE = {
   laneIds: ["ln-de", "ln-es", "ln-main"],
 }
 const SPANISH_ONLY = { targetLanguage: "", targetLanes: ["es"], laneIds: ["ln-es"] }
+const NO_TARGET = { targetLanguage: "", targetLanes: [], laneIds: [] }
 
 describe.each([
   ["a lane id", "ln-es"],
   ["an unconverted tag", "es"],
-])("AQU-1795 — a project lead whose leftover scope is %s", (_label, scopeValue) => {
-  it("sees every lane with the wall on; a contributor still sees only the grant", async () => {
+])("a project lead whose leftover scope is %s", (_label, scopeValue) => {
+  it("sees only a grant with the wall on", async () => {
     await seedLaneRows(scopeValue)
     env.LANE_READ_WALL = "1"
-    expect(await laneView("erin")).toEqual(EVERY_LANE)
+    expect(await laneView("erin")).toEqual(NO_TARGET)
     expect(await laneView("carla")).toEqual(SPANISH_ONLY)
-    expect(await laneView("dan")).toEqual(EVERY_LANE)
+    expect(await laneView("dan")).toEqual(SPANISH_ONLY)
   })
 
-  it("sees every lane with the wall off; a contributor still sees only the scope", async () => {
+  it("sees only the scope with the wall off", async () => {
     await seedLaneRows(scopeValue)
     expect(await laneView("erin")).toEqual(EVERY_LANE)
     expect(await laneView("carla")).toEqual(SPANISH_ONLY)
-    expect(await laneView("dan")).toEqual(EVERY_LANE)
+    expect(await laneView("dan")).toEqual(SPANISH_ONLY)
   })
 })

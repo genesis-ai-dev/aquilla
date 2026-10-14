@@ -470,7 +470,7 @@ export function canSwitchLanes(roleLevel: number | null | undefined): boolean {
 }
 
 /**
- * The lanes a member below project lead may open and switch between: their own
+ * The lanes a member below maintainer may open and switch between: their own
  * lane scopes (AQU-553), in the project's lane order. AQU-608 kept the lane
  * switcher from everyone below MAINTAINER so a translator stays on the lane
  * their assignment opens — but a member the org has LIMITED to certain lanes
@@ -479,12 +479,9 @@ export function canSwitchLanes(roleLevel: number | null | undefined): boolean {
  * Spanish chapters yet not open the Spanish lane to look at them.
  *
  * `null` when the AQU-608 rule stands unchanged: a MAINTAINER+ (every lane,
- * via `canSwitchLanes`), a project lead (every lane — the read wall stops at
- * project lead, AQU-1795, and the server shows a lead every lane even when a
- * scope row from before their promotion, or from a membership that was removed
- * and re-added, is still stored), or a member with no lane scopes (their
- * assigned lane). A scope naming no lane the project has yields `[]`: nothing
- * to move to.
+ * via `canSwitchLanes`), or a member with no lane scopes (their assigned
+ * lane). A project lead with lane scopes is limited to those lanes. A scope
+ * naming no lane the project has yields `[]`: nothing to move to.
  */
 export function scopedLanesFor(
   roleLevel: number | null | undefined,

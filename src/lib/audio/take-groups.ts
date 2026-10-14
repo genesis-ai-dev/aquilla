@@ -7,7 +7,7 @@
 // one of them can play, and each added track on its own.
 
 import { audioIdSeededWith } from "@/lib/audio/upload"
-import { slotSelections, type AudioAttachmentOut, type CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
+import { pieceGroupOf, slotSelections, type AudioAttachmentOut, type CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import { DEFAULT_TARGET_TRACK_ID, slotForTrack, trackIdForSlot } from "@/lib/timeline/track-slots"
 
 export interface TakeGroup {
@@ -80,4 +80,47 @@ export function playingTakeId(group: TakeGroup, entry: Selections | null | undef
     return entry!.selectedGeneratedVoiceAudioId!
   }
   return null
+}
+
+/**
+ * AQU-1767 (Sam, 2026-10-14): a take as the lists show it. A take that was split
+ * is ONE take made of pieces, never a row per piece; one never split is a take
+ * of one piece.
+ */
+export interface TakeRow {
+  /** The group's id: the take the pieces were cut from. */
+  group: string
+  /** Its live pieces in CLIP order (where each starts in the recording). */
+  pieces: AudioAttachmentOut[]
+}
+
+const clipOrder = (a: AudioAttachmentOut, b: AudioAttachmentOut) =>
+  (a.trimStartMs ?? 0) - (b.trimStartMs ?? 0) || a.audioId.localeCompare(b.audioId)
+
+/** `takes` as takes: each split take once, in the order its first piece came. */
+export function takeRows(takes: readonly AudioAttachmentOut[]): TakeRow[] {
+  const byGroup = new Map<string, AudioAttachmentOut[]>()
+  for (const att of takes) {
+    if ((att as { isDeleted?: boolean }).isDeleted) continue
+    const group = pieceGroupOf(att, att.audioId)
+    const list = byGroup.get(group)
+    if (list) list.push(att)
+    else byGroup.set(group, [att])
+  }
+  return [...byGroup.entries()].map(([group, pieces]) => ({ group, pieces: pieces.sort(clipOrder) }))
+}
+
+/** The live pieces of the take `audioId` belongs to, in clip order (just it, if never split). */
+export function piecesOf(takes: readonly AudioAttachmentOut[], audioId: string | null | undefined): AudioAttachmentOut[] {
+  if (!audioId) return []
+  const att = takes.find((a) => a.audioId === audioId)
+  if (!att) return []
+  const group = pieceGroupOf(att, audioId)
+  return takeRows(takes).find((row) => row.group === group)?.pieces ?? [att]
+}
+
+/** "Take 3 · 2" → "Take 3": the name a split take goes by. Null when unnamed. */
+export function takeBaseLabel(label: string | null | undefined): string | null {
+  if (!label) return null
+  return label.replace(/\s·\s\d+$/, "")
 }

@@ -35,7 +35,15 @@ export interface TakeCutData { cuts: CutRecord[] }
 /** Choosing which take plays in a slot. `before` null = the slot was empty. */
 export interface TakeSelectData { cellId: string; slot: string; before: string | null; after: string }
 /** Deleting a take. Undo un-deletes it, and puts the slot's choice back. */
-export interface TakeRemoveData { cellId: string; audioId: string; slot: string; wasSelected: boolean; selectedBefore: string | null }
+export interface TakeRemoveData {
+  cellId: string
+  audioId: string
+  slot: string
+  wasSelected: boolean
+  selectedBefore: string | null
+  /** AQU-1767: the take's other pieces, deleted with it in the same step. */
+  pieces?: string[]
+}
 export interface TakeRenameData { cellId: string; audioId: string; before: string | null; after: string | null }
 
 export interface TakeStepContext {
@@ -144,18 +152,21 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
       async undo(d: TakeRemoveData) {
         // Deleted takes are not sent to the browser, so "still deleted" is
         // "not live". Somebody who brought it back already wins.
-        if (ctx.readTake(d.cellId, d.audioId)) return CHANGED
+        const ids = [d.audioId, ...(d.pieces ?? [])]
+        if (ids.some((id) => ctx.readTake(d.cellId, id))) return CHANGED
         // Choosing a deleted take is how it comes back (the projection
-        // un-deletes on select). If it was not the one playing, give the slot
-        // its previous choice back straight after.
+        // un-deletes on select) — and only the piece named, so a split take's
+        // pieces are chosen one by one. If it was not the one playing, give the
+        // slot its previous choice back straight after.
         const playingNow = ctx.selectedIn(d.cellId, d.slot)
-        await ctx.select(d.cellId, d.slot, d.audioId)
+        for (const id of ids) await ctx.select(d.cellId, d.slot, id)
         if (!d.wasSelected) await ctx.select(d.cellId, d.slot, playingNow)
         return DONE
       },
       async redo(d: TakeRemoveData) {
-        if (!ctx.readTake(d.cellId, d.audioId)) return GONE
-        await ctx.remove(d.cellId, d.audioId)
+        const live = [d.audioId, ...(d.pieces ?? [])].filter((id) => ctx.readTake(d.cellId, id))
+        if (live.length === 0) return GONE
+        for (const id of live) await ctx.remove(d.cellId, id)
         return DONE
       },
     } as StepHandler<never>,

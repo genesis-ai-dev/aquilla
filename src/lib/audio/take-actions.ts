@@ -45,6 +45,54 @@ export async function removeTake(args: {
   }
 }
 
+/**
+ * AQU-1767 (Sam, 2026-10-14): delete a split take — every piece — as one step
+ * (one Undo brings them all back). The pieces go in one outbox transaction,
+ * each with the overlay `removeTake` gives one. A take of one piece is just
+ * `removeTake`.
+ */
+export async function removeWholeTake(args: {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** Every live piece, first one first. */
+  pieces: readonly { audioId: string; slot: string }[]
+  targetLang?: string
+  author: string
+  /** Whether it was the take that played, so Undo can choose it again. */
+  history: { wasSelected: boolean }
+}): Promise<void> {
+  const { projectId, fileId, cellId, pieces, author, targetLang } = args
+  const [first, ...rest] = pieces
+  if (!first) return
+  if (rest.length === 0) {
+    await removeTake({ projectId, fileId, cellId, audioId: first.audioId, slot: first.slot, author, ...(targetLang ? { targetLang } : {}), history: args.history })
+    return
+  }
+  const queued = await enqueueEvents(
+    pieces.map((piece) => ({
+      kind: "cell.audio.remove" as const,
+      projectId,
+      fileId,
+      cellId,
+      parentId: null,
+      author,
+      payload: { audioId: piece.audioId, ...(targetLang ? { targetLang } : {}) },
+    })),
+  )
+  pieces.forEach((piece, i) => injectOptimisticAudioRemove(fileId, cellId, piece.audioId, piece.slot, queued[i]?.eventId))
+  notifyAudioAttachmentsChanged(fileId)
+  recordStep({
+    kind: "take.remove",
+    data: {
+      cellId, audioId: first.audioId, slot: first.slot, wasSelected: args.history.wasSelected, selectedBefore: null,
+      pieces: rest.map((piece) => piece.audioId),
+    },
+    labelKey: "editor.history.stepDeleteTake",
+    fileId,
+  })
+}
+
 export interface TakeRemoval {
   projectId: string
   /** The file the CELL lives in — a heard line's take is the cue sibling's. */

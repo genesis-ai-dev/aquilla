@@ -373,3 +373,38 @@ describe("transcribeCell — the slot is stated, not guessed", () => {
     expect(input.slot).toBe("recording")
   })
 })
+
+// ── AQU-1767 (Sam, 2026-10-14): a split take is transcribed whole ──
+
+describe("transcribeCell — a split take, whole (AQU-1767)", () => {
+  it("hears every piece and nothing between them, and lands the words on the recording's clock", async () => {
+    await audioCachePut(AUDIO_ID, EXT, new Uint8Array([1, 2, 3]))
+    // Stands in for transcribeAudio, whose word times are on the window's clock.
+    const impl = fakeTranscribe(["hola", "mundo"])
+    __setTranscribeAudioForTests(impl)
+
+    // Piece 1 keeps 1.0-2.0s of the recording, piece 2 keeps 3.0-4.0s.
+    await transcribeCell({
+      cell: makeCell(), session, projectId: "proj-1", language: "spa",
+      pieces: [{ trimStartMs: 1000, trimEndMs: 2000 }, { trimStartMs: 3000, trimEndMs: 4000 }],
+    })
+
+    const opts = (impl.mock.calls[0] as unknown[])[1] as import("./transcribe").TranscriptionOptions
+    expect(opts.trim).toEqual({ trimStartMs: 1000, trimEndMs: 4000 })
+    expect(opts.keep).toEqual([{ startSec: 0, endSec: 1 }, { startSec: 2, endSec: 3 }])
+    const input = emitCellAudioAttach.mock.calls[0][0] as { audioId: string; timings: Array<{ word: string; t0: number }> }
+    expect(input.audioId).toBe(FULL_ID)
+    // + the window's 1s head = the recording's clock.
+    expect(input.timings.map((w) => [w.word, w.t0])).toEqual([["hola", 1], ["mundo", 2]])
+  })
+
+  it("a take of one piece is transcribed as before", async () => {
+    await audioCachePut(AUDIO_ID, EXT, new Uint8Array([1, 2, 3]))
+    const impl = fakeTranscribe(["hola"])
+    __setTranscribeAudioForTests(impl)
+    await transcribeCell({ cell: makeCell(), session, projectId: "proj-1", language: "spa", pieces: [{ trimStartMs: 500, trimEndMs: 900 }] })
+    const opts = (impl.mock.calls[0] as unknown[])[1] as import("./transcribe").TranscriptionOptions
+    expect(opts.keep).toBeUndefined()
+    expect(opts.trim).toBeUndefined()
+  })
+})

@@ -98,6 +98,27 @@ describe("take.select / take.remove / take.rename", () => {
     ])
   })
 
+  it("a split take deleted whole comes back piece by piece in one undo, and goes again in one redo", async () => {
+    const takes: Takes = { a: { isDeleted: true }, b: { isDeleted: true } }
+    const { ctx, handlers } = ctxFor(takes)
+    const data = { cellId: "c", audioId: "a", slot: "recording", wasSelected: true, selectedBefore: null, pieces: ["b"] }
+    expect(await handlers["take.remove"].undo(data)).toEqual({ kind: "done" })
+    expect((ctx.select as ReturnType<typeof vi.fn>).mock.calls).toEqual([
+      ["c", "recording", "a"],
+      ["c", "recording", "b"],
+    ])
+    takes.a = {}
+    takes.b = {}
+    expect(await handlers["take.remove"].redo(data)).toEqual({ kind: "done" })
+    expect((ctx.remove as ReturnType<typeof vi.fn>).mock.calls).toEqual([["c", "a"], ["c", "b"]])
+  })
+
+  it("undoing a whole-take delete is skipped once any piece is back", async () => {
+    const { handlers } = ctxFor({ a: { isDeleted: true }, b: {} })
+    const data = { cellId: "c", audioId: "a", slot: "recording", wasSelected: true, selectedBefore: null, pieces: ["b"] }
+    expect(await handlers["take.remove"].undo(data)).toEqual({ kind: "skipped", reason: "changed" })
+  })
+
   it("undoing a delete is skipped when the take is already back", async () => {
     const { handlers } = ctxFor({ a: {} })
     const data = { cellId: "c", audioId: "a", slot: "recording", wasSelected: true, selectedBefore: null }

@@ -16,7 +16,7 @@ import { audioCacheGet, audioCachePut } from "./bytes-cache"
 import { applyCorrections } from "./transcript-corrections"
 import { loadTranscriptCorrections } from "@/lib/store/transcript-corrections-store"
 import { makeAudioSyncTokenFetcher } from "./sync-token-fetcher"
-import { resolvePcmWindow, type PcmTrimWindow } from "./pcm-window"
+import { keepSpans, resolvePcmWindow, type KeepSpan, type PcmTrimWindow } from "./pcm-window"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { t } from "@/lib/i18n/standalone"
 import { transcribeHostedPcm } from "./transcribe-hosted"
@@ -51,6 +51,13 @@ export interface TranscriptionOptions {
   /** AQU-646: transcribe only this window of the clip (shared imported clip →
    *  per-cell segment). Absent = whole clip (recorded takes). */
   trim?: PcmTrimWindow
+  /**
+   * AQU-1767: only these parts of the trim window are heard (a split take's
+   * pieces, seconds from the window's start). The gaps are dropped before ASR,
+   * and the word times come back on the window's clock as `trim` alone gives
+   * them. Absent = the whole window.
+   */
+  keep?: readonly KeepSpan[]
   /** The Transcribe button. A stored Cancel stays quiet on save, and this
    *  press brings the download prompt back. */
   askAgain?: boolean
@@ -190,13 +197,18 @@ export async function transcribeAudio(
   opts: TranscriptionOptions = {},
 ): Promise<TranscriptionResult> {
   if (usesHostedTranscription(opts.session, opts.projectId)) {
-    const pcm = await audioBytesToWhisperPcm(bytes, opts.trim)
-    return transcribeHostedPcm(pcm, opts.session!.jwt, opts.projectId!, opts.language)
+    const kept = keepSpans(await audioBytesToWhisperPcm(bytes, opts.trim), opts.keep, WHISPER_SAMPLE_RATE)
+    return onWindowClock(await transcribeHostedPcm(kept.pcm, opts.session!.jwt, opts.projectId!, opts.language), kept.toWindowSec)
   }
   const consented = await requestAiModelConsent(WHISPER_MODEL, { askAgain: opts.askAgain })
   if (!consented) throw new AiModelConsentDeniedError(WHISPER_MODEL.id)
-  const pcm = await audioBytesToWhisperPcm(bytes, opts.trim)
-  return runWhisperOnPcm(pcm, opts)
+  const kept = keepSpans(await audioBytesToWhisperPcm(bytes, opts.trim), opts.keep, WHISPER_SAMPLE_RATE)
+  return onWindowClock(await runWhisperOnPcm(kept.pcm, opts), kept.toWindowSec)
+}
+
+/** AQU-1767: word times from a joined buffer, put back on the window's clock. */
+function onWindowClock(result: TranscriptionResult, toWindowSec: (sec: number) => number): TranscriptionResult {
+  return { ...result, chunks: result.chunks.map((c) => ({ ...c, start: toWindowSec(c.start), end: toWindowSec(c.end) })) }
 }
 
 /**
@@ -290,6 +302,32 @@ export interface TranscribeCellArgs {
   slot?: string
   /** Set by the Transcribe button so a prior Cancel shows the prompt again. */
   askAgain?: boolean
+  /**
+   * AQU-1767 (Sam, 2026-10-14): the live pieces of a SPLIT take, in clip order.
+   * The take is transcribed whole — every piece, together, and nothing a
+   * piece leaves out — and the timings land on `cell.selectedAudioId`.
+   */
+  pieces?: ReadonlyArray<{ trimStartMs?: number | null; trimEndMs?: number | null }>
+}
+
+/**
+ * AQU-1767: a split take's pieces as one trim window (first start to last end)
+ * and the spans within it that are heard, in seconds from its start. A piece
+ * with no end runs to the clip's end.
+ */
+export function splitTakeWindow(
+  pieces: ReadonlyArray<{ trimStartMs?: number | null; trimEndMs?: number | null }>,
+): { trim: PcmTrimWindow; keep: KeepSpan[] } {
+  const startMs = Math.min(...pieces.map((p) => p.trimStartMs ?? 0))
+  const ends = pieces.map((p) => p.trimEndMs ?? null)
+  const endMs = ends.some((e) => e == null) ? null : Math.max(...(ends as number[]))
+  return {
+    trim: { trimStartMs: startMs > 0 ? startMs : null, trimEndMs: endMs },
+    keep: pieces.map((p) => ({
+      startSec: ((p.trimStartMs ?? 0) - startMs) / 1000,
+      endSec: p.trimEndMs == null ? Infinity : (p.trimEndMs - startMs) / 1000,
+    })),
+  }
 }
 
 // Test seam: transcribeCell calls transcribeAudio through this binding so
@@ -381,10 +419,15 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
     // Unlike a source section, a take's word times stay on the CLIP's clock
     // (WordTiming.t0 is "seconds from the start of the audio clip"), so they
     // are shifted back by the head trim below.
-    const takeTrim = !isSourceSegment && attachment &&
-      ((attachment.trimStartMs ?? 0) > 0 || attachment.trimEndMs != null)
-      ? { trimStartMs: attachment.trimStartMs ?? null, trimEndMs: attachment.trimEndMs ?? null }
-      : undefined
+    // AQU-1767: a split take's window runs from its first piece's start to its
+    // last piece's end, and only the pieces themselves are kept within it.
+    const split = !isSourceSegment && args.pieces && args.pieces.length > 1 ? splitTakeWindow(args.pieces) : null
+    const takeTrim = split
+      ? split.trim
+      : !isSourceSegment && attachment &&
+        ((attachment.trimStartMs ?? 0) > 0 || attachment.trimEndMs != null)
+        ? { trimStartMs: attachment.trimStartMs ?? null, trimEndMs: attachment.trimEndMs ?? null }
+        : undefined
     const trim = isSourceSegment
       ? { trimStartMs: attachment?.trimStartMs ?? null, trimEndMs: attachment?.trimEndMs ?? null }
       : takeTrim
@@ -396,6 +439,7 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
       language: whisperLanguageFromTag(language) ?? undefined,
       askAgain,
       trim,
+      ...(split ? { keep: split.keep } : {}),
       onProgress: (p) => {
         setTranscribeStatus(audioId, {
           kind: "loading",

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
-import { groupSelection, groupTakesByTrack, playingTakeId } from "./take-groups"
+import { groupSelection, groupTakesByTrack, piecesOf, playingTakeId, takeBaseLabel, takeRows } from "./take-groups"
 
 const att = (audioId: string, slot: string, over: Partial<AudioAttachmentOut> = {}): AudioAttachmentOut => ({
   audioId, url: `frontier-audio://${audioId}`, slot, mimeType: null, voiceId: null, referenceAudioId: null,
@@ -57,5 +57,35 @@ describe("which take plays", () => {
     expect(groupSelection(entry, "trk-2")).toBe("audio-c1-t2.wav")
     const g2 = { trackId: "trk-2", name: "Track 2", takes: [att("audio-c1-t2.wav", "trk-2")] }
     expect(playingTakeId(g2, entry)).toBe("audio-c1-t2.wav")
+  })
+})
+
+// AQU-1767 (Sam, 2026-10-14): a split take is one take made of pieces.
+describe("takeRows / piecesOf", () => {
+  const takes = [
+    att("t2", "recording", { label: "Take 2" }),
+    att("p1b", "recording", { pieceOf: "t1", trimStartMs: 1500, label: "Take 1 · 2" }),
+    att("t1", "recording", { trimEndMs: 1500, label: "Take 1 · 1" }),
+    { ...att("p1c", "recording", { pieceOf: "t1", trimStartMs: 3000 }), isDeleted: true } as AudioAttachmentOut,
+  ]
+
+  it("lists each split take once, its live pieces in clip order", () => {
+    expect(takeRows(takes).map((r) => [r.group, r.pieces.map((p) => p.audioId)])).toEqual([
+      ["t2", ["t2"]],
+      ["t1", ["t1", "p1b"]],
+    ])
+  })
+
+  it("answers any piece with its whole take, and a take never split with itself", () => {
+    expect(piecesOf(takes, "p1b").map((p) => p.audioId)).toEqual(["t1", "p1b"])
+    expect(piecesOf(takes, "t1").map((p) => p.audioId)).toEqual(["t1", "p1b"])
+    expect(piecesOf(takes, "t2").map((p) => p.audioId)).toEqual(["t2"])
+    expect(piecesOf(takes, "nope")).toEqual([])
+  })
+
+  it("names a split take by its pieces' shared name", () => {
+    expect(takeBaseLabel("Take 1 · 2")).toBe("Take 1")
+    expect(takeBaseLabel("Hero line")).toBe("Hero line")
+    expect(takeBaseLabel(null)).toBeNull()
   })
 })

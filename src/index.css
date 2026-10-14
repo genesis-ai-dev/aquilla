@@ -24,6 +24,12 @@
     --color-chart-3: var(--chart-3);
     --color-chart-2: var(--chart-2);
     --color-chart-1: var(--chart-1);
+    /* AQU-1764: the progress palette, defined in the theme blocks below. */
+    --color-progress-text-validated: var(--progress-text-validated);
+    --color-progress-text-translated: var(--progress-text-translated);
+    --color-progress-ai-stripe: var(--progress-ai-stripe);
+    --color-progress-audio-validated: var(--progress-audio-validated);
+    --color-progress-audio-recorded: var(--progress-audio-recorded);
     --color-ring: var(--ring);
     --color-input: var(--input);
     --color-border: var(--border);
@@ -88,6 +94,18 @@
   }
 }
 
+/* AQU-1764: an AI draft nobody has validated yet, on any progress surface —
+   diagonal stripes of the translated colour and the stripe colour. One
+   utility so the Progress card, the bars and the swatches all draw the same
+   stripes; the colours are the palette tokens in the theme blocks below. */
+@utility bg-progress-ai {
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--progress-text-translated) 0 3px,
+    var(--progress-ai-stripe) 3px 6px
+  );
+}
+
 @layer base {
   :where(:root) {
     color-scheme: light;
@@ -136,6 +154,22 @@
     --chart-3: oklch(0.76 0.07 150);
     --chart-4: oklch(0.74 0.10 70);
     --chart-5: oklch(0.66 0.12 25);
+    /* AQU-1764: THE PROGRESS PALETTE. Sam picked it on 2026-10-13 ("Layout A,
+       softest"), and every progress bar, swatch and chapter square draws from
+       it (src/lib/progress/progress-palette.ts names the classes). Text is
+       blue, audio is teal. Dark = validated, light = done but not validated
+       yet (translated, or recorded); the dark theme flips the lightness so
+       validated still stands out most. Stripes = AI drafts nobody has
+       validated: the translated colour striped with --progress-ai-stripe,
+       drawn by the `bg-progress-ai` utility below.
+       Audio magenta instead of teal? Change only the audio pair: light
+       validated oklch(0.64 0.14 355), recorded oklch(0.84 0.06 355); dark
+       validated oklch(0.80 0.12 355), recorded oklch(0.52 0.12 355). */
+    --progress-text-validated: oklch(0.62 0.15 252);
+    --progress-text-translated: oklch(0.81 0.07 245);
+    --progress-ai-stripe: oklch(0.93 0.025 245);
+    --progress-audio-validated: oklch(0.64 0.09 203);
+    --progress-audio-recorded: oklch(0.83 0.065 200);
     --sidebar: oklch(0.965 0.002 264);
     --sidebar-foreground: oklch(0.32 0.008 264);
     --sidebar-primary: oklch(0.78 0.07 245);
@@ -180,6 +214,12 @@
     --chart-3: oklch(0.78 0.07 150);
     --chart-4: oklch(0.76 0.10 70);
     --chart-5: oklch(0.68 0.12 25);
+    /* AQU-1764: the progress palette's dark pair; see the light block. */
+    --progress-text-validated: oklch(0.80 0.12 245);
+    --progress-text-translated: oklch(0.52 0.10 248);
+    --progress-ai-stripe: oklch(0.36 0.05 248);
+    --progress-audio-validated: oklch(0.82 0.09 200);
+    --progress-audio-recorded: oklch(0.52 0.08 202);
     --sidebar: var(--surface);
     --sidebar-foreground: oklch(0.92 0.008 250);
     --sidebar-primary: oklch(0.78 0.09 245);

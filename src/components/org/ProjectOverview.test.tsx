@@ -1991,6 +1991,13 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     expect(defaultRow).toHaveTextContent("50%")
     expect(esRow).toHaveTextContent("20%")
     expect(esRow).toHaveTextContent("8%")
+    // AQU-1764: ONE two-part bar per lane (it was an amber bar and an emerald
+    // one): validated, then translated but not validated.
+    const parts = (row: HTMLElement) => [...row.querySelectorAll<HTMLElement>("[data-progress-tone]")]
+      .map((part) => `${part.dataset.progressTone} ${part.style.width}`)
+    expect(defaultRow.querySelectorAll('[data-slot="progress-split-bar"]')).toHaveLength(1)
+    expect(parts(defaultRow)).toEqual(["textValidated 50%", "textTranslated 30%"])
+    expect(parts(esRow)).toEqual(["textValidated 8%", "textTranslated 12%"])
   })
 
   it("AQU-1458: tucks archived lanes into a collapsed group and keeps a one-active-lane project visible", async () => {
@@ -2020,6 +2027,12 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     expect(sw).toHaveTextContent("Swahili")
     expect(sw).toHaveTextContent("Archived")
     expect(sw).toHaveTextContent("20%")
+    // AQU-1764: one dimmed two-part bar, and the validated figure names itself
+    // since an archived row has no column headings.
+    expect(sw).toHaveTextContent("8% validated")
+    const archivedBars = sw.querySelectorAll('[data-slot="progress-split-bar"]')
+    expect(archivedBars).toHaveLength(1)
+    expect(archivedBars[0].className).toContain("opacity-70")
     expect(sw.compareDocumentPosition(fr) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(within(sw).queryByTestId("overview-lane-actions-sw")).not.toBeInTheDocument()
 

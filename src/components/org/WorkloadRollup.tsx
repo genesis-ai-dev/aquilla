@@ -9,6 +9,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { UserChip } from "@/components/UserChip"
 import { progressPercent } from "@/lib/progress/progress-percent"
+import { PROGRESS_BG } from "@/lib/progress/progress-palette"
 
 /**
  * Team-workload rollup for the org Overview (manager oversight). One row per
@@ -108,8 +109,10 @@ export function WorkloadRollup({
                   )}
                 </div>
                 <p className="truncate text-xs text-muted-foreground">{a.scopeLabel}</p>
+                {/* AQU-1764: done cells are VALIDATED cells — the shared
+                    palette's text-validated blue. */}
                 <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                  <div className="h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
+                  <div className={`h-full rounded-full ${PROGRESS_BG.textValidated}`} style={{ width: `${pct}%` }} />
                 </div>
               </div>
               <div className="shrink-0 text-end">

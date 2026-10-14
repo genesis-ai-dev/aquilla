@@ -9,7 +9,7 @@ import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { validatedPct } from "@/lib/frontier/portfolio"
+import { translatedPct, validatedPct } from "@/lib/frontier/portfolio"
 import { listMyPendingInvites, type MyPendingInvite } from "@/lib/sync/invites"
 import { WorkloadRollup } from "./WorkloadRollup"
 import { UsageRollup } from "./UsageRollup"
@@ -181,7 +181,14 @@ export function OrgOverview() {
         id: "validated",
         enableSorting: false,
         header: t("org.orgHome.table.validatedHeaderLabel"),
-        cell: ({ row }) => <ValidatedBar fraction={validatedPct(row.original.project)} />,
+        // AQU-1764: validated, then translated but not validated, as one
+        // two-part bar in the shared progress palette.
+        cell: ({ row }) => (
+          <ValidatedBar
+            fraction={validatedPct(row.original.project)}
+            translatedFraction={translatedPct(row.original.project)}
+          />
+        ),
       },
       {
         id: "status",

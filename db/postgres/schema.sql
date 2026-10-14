@@ -2720,3 +2720,25 @@ CREATE TABLE IF NOT EXISTS checking_links (
   created_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS checking_links_project ON checking_links(project_id);
+
+-- ──────────────────────── side-effect queue ledger ────────────────────────
+
+-- AQU-1824: idempotency ledger for the side-effect queue (sync-worker
+-- src/side-effects/). One row per delivery — for comment mail the unit is
+-- (comment, recipient user) — so a queue retry or a duplicate delivery never
+-- performs the same side effect twice. See
+-- db/postgres/migrations/0168_side_effect_deliveries.sql for the status
+-- semantics and why a `pending` row is retried rather than skipped.
+CREATE TABLE side_effect_deliveries (
+    idempotency_key TEXT PRIMARY KEY,
+    kind            TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'pending'
+                      CHECK (status IN ('pending', 'sent', 'failed')),
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    last_error      TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_side_effect_deliveries_created_at
+    ON side_effect_deliveries (created_at);

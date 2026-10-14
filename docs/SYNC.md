@@ -33,6 +33,7 @@ presence and focus-lock leases; it is not a durable event or blob store.
 | Neon Postgres via Hyperdrive | Durable identity, event, projection, and metadata state |
 | ProjectSync Durable Object | Transient presence, focus-lock leases, and broadcast relay only |
 | R2 | Media, import-source blobs, and agent artifacts only |
+| Side-effect queue (`SIDE_EFFECTS` + DLQ) | Fan-out work a user action triggers but does not wait on — comment/@mention mail today |
 
 `frontier-server` is not part of the running system. D1 migration files are
 historical inputs to the Postgres schema, not a live datastore.
@@ -86,6 +87,30 @@ the route's response ETag (`fileId:epoch:rebuiltSeq:maxSeq`) plus
 `projectId`/`side`/`lane`, so any write, rebuild, or re-incarnation
 invalidates it automatically — see
 [`docs/runbooks/fix-cell-page-read-scaling.md`](runbooks/fix-cell-page-read-scaling.md).
+
+## Side effects (AQU-1824)
+
+Work a user action triggers but must not wait on — notification mail, partner
+nudges, cross-project fan-out — runs on one Cloudflare Queue with a dead-letter
+queue, not on `ctx.waitUntil` + `fetch`. Code: `sync-worker/src/side-effects/`.
+Comment / @mention mail is the first side effect on it.
+
+Shape: the request enqueues ONE message naming the thing that happened (not its
+contents — a comment body can run to 50,000 characters). The consumer resolves
+recipients and enqueues one leaf message per recipient, so each delivery is its
+own retryable unit. Every leaf claims an `(entity, recipient)` idempotency key in
+`side_effect_deliveries` before acting, which is what makes a queue retry or a
+duplicate delivery send no second message.
+
+Failure handling is the point of the queue: a transient provider error is retried
+(`max_retries` in `sync-worker/wrangler.toml`), and a message that keeps failing
+lands in the DLQ, where it is visible and replayable, instead of disappearing into
+a `console.warn`. The DLQ has no consumer on purpose — a human looks at it.
+
+The queue binding is **optional**. Local `wrangler dev`, e2e and the unit suite
+have none, so the producer runs the side effect inline (best-effort, as it did
+before the queue). Provision per environment before deploying a build that
+declares the binding — see the block in `sync-worker/wrangler.toml`.
 
 ## Authentication and revocation
 

@@ -45,7 +45,7 @@ export type MediaDefaults = {
 }
 
 /**
- * The project_settings generated column for each key (migration 0172), used to
+ * The project_settings generated column for each key (migration 0176), used to
  * count and clear project overrides without parsing every settings blob.
  */
 export const MEDIA_DEFAULT_COLUMNS: Record<MediaDefaultKey, string> = {

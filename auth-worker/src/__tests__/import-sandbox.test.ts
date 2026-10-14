@@ -243,4 +243,153 @@ describe("POST /api/v1/import/parse/:projectId", () => {
     expect(await response.json()).toMatchObject({ error: "project_lead_required" })
     expect(upstream).not.toHaveBeenCalled()
   })
+
+  // ── AQU-1848: pool saturation ────────────────────────────────────────────
+  //
+  // The sandbox pool is account-wide and small. When it is full the sandbox
+  // answers `pool_busy`, and the import route must say "try again in a moment"
+  // (503 + Retry-After) rather than the generic 502 "this file cannot be
+  // imported" — and must not burn LLM credits retrying against a full pool.
+
+  it("sends the per-user pool tenant on every sandbox call", async () => {
+    const jwt = await seedOwner()
+    const bucket = new FakeBucket()
+    // Only calls that may START a container need the tenant; the teardown
+    // DELETE releases by session id and never admits, so it carries none.
+    const tenants: Array<string | undefined> = []
+    let destroyTenant: string | undefined | null = null
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input)
+      if (url.includes("sandbox.test")) {
+        const headers = new Headers(init?.headers as HeadersInit)
+        const tenant = headers.get("X-Sandbox-Tenant") ?? undefined
+        if (init?.method === "DELETE") destroyTenant = tenant
+        else tenants.push(tenant)
+      }
+      if (url.includes("/fetch-artifact")) {
+        return new Response(JSON.stringify({ ok: true, bytes: 4 }), { status: 200 })
+      }
+      if (url.endsWith("/exec")) {
+        return new Response(JSON.stringify({
+          ok: true,
+          stdout: JSON.stringify({ isZip: false }),
+          stderr: "",
+          durationMs: 1,
+        }), { status: 200 })
+      }
+      if (url.includes("model.test")) {
+        return new Response(JSON.stringify({
+          choices: [{ message: { content: JSON.stringify(proposal()) } }],
+          usage: { cost: 0.001 },
+        }), { status: 200 })
+      }
+      if (url.includes("/files?")) {
+        return new Response(JSON.stringify({ units: [{ sourceText: "x", type: "verse" }] }), { status: 200 })
+      }
+      if (init?.method === "DELETE") return new Response(JSON.stringify({ ok: true }), { status: 200 })
+      throw new Error(`Unexpected fetch ${url}`)
+    })
+
+    await app.request(`/api/v1/import/parse/${PROJECT_ID}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+        "Content-Type": "application/octet-stream",
+        "X-Artifact-Name": "legacy.bin",
+      },
+      body: new Uint8Array([0, 1, 2, 3]),
+    }, testEnv(bucket))
+
+    // Seeded user id 1 — the cap is counted per user, so one project lead
+    // cannot hold every container with back-to-back imports.
+    // fetch-artifact, the inspect exec, the parser exec, the size exec and the
+    // result read all go out under the same tenant.
+    expect(tenants.length).toBeGreaterThanOrEqual(4)
+    expect(new Set(tenants)).toEqual(new Set(["user:1"]))
+    expect(destroyTenant).toBeUndefined()
+  })
+
+  it("answers 503 sandbox_busy with Retry-After when the pool is saturated", async () => {
+    const jwt = await seedOwner()
+    const bucket = new FakeBucket()
+    let modelCalls = 0
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.includes("model.test")) {
+        modelCalls++
+        throw new Error("the model must not be called when no sandbox is free")
+      }
+      if (url.includes("/fetch-artifact")) {
+        // What agent-worker returns once the pool (or this tenant's share of
+        // it) is full — see agent-worker/src/app.ts `poolBusy`.
+        return new Response(JSON.stringify({
+          error: { code: "pool_busy", message: "Waiting for a sandbox — every sandbox is busy right now. Please try again in a moment." },
+        }), { status: 503, headers: { "Retry-After": "3" } })
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 })
+    })
+
+    const response = await app.request(`/api/v1/import/parse/${PROJECT_ID}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+        "Content-Type": "application/octet-stream",
+        "X-Artifact-Name": "legacy.bin",
+      },
+      body: new Uint8Array([0, 1, 2, 3]),
+    }, testEnv(bucket))
+
+    expect(response.status).toBe(503)
+    expect(Number(response.headers.get("Retry-After"))).toBeGreaterThanOrEqual(1)
+    const body = await response.json() as { error: string; message: string }
+    expect(body.error).toBe("sandbox_busy")
+    // The message must read as a wait, not as a broken file.
+    expect(body.message).toMatch(/waiting for a sandbox/i)
+    expect(modelCalls).toBe(0)
+    // The staged upload is still cleaned up on the way out.
+    expect(bucket.store.size).toBe(0)
+  })
+
+  it("surfaces the tenant's own cap as a clear message instead of retrying the model", async () => {
+    const jwt = await seedOwner()
+    const bucket = new FakeBucket()
+    let modelCalls = 0
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.includes("model.test")) {
+        modelCalls++
+        return new Response(JSON.stringify({
+          choices: [{ message: { content: JSON.stringify(proposal()) } }],
+          usage: { cost: 0.001 },
+        }), { status: 200 })
+      }
+      if (url.includes("/fetch-artifact")) {
+        return new Response(JSON.stringify({ ok: true, bytes: 4 }), { status: 200 })
+      }
+      if (url.endsWith("/exec")) {
+        return new Response(JSON.stringify({
+          error: { code: "pool_busy", message: "You already have 3 sandbox runs in flight. Wait for one to finish and try again." },
+        }), { status: 503 })
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 })
+    })
+
+    const response = await app.request(`/api/v1/import/parse/${PROJECT_ID}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+        "Content-Type": "application/octet-stream",
+        "X-Artifact-Name": "legacy.bin",
+      },
+      body: new Uint8Array([0, 1, 2, 3]),
+    }, testEnv(bucket))
+
+    expect(response.status).toBe(503)
+    const body = await response.json() as { error: string; message: string }
+    expect(body.error).toBe("sandbox_busy")
+    expect(body.message).toMatch(/already have 3 sandbox runs/i)
+    // The inspect exec is refused before any model call, so a user at their cap
+    // never pays for an LLM round trip.
+    expect(modelCalls).toBe(0)
+  })
 })

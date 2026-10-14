@@ -61,6 +61,7 @@ import { loadTargetLanes } from './lane-read-wall'
 import type { EventKind } from './types'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { isAuthorizedAdminBearer } from '../lib/admin-auth'
+import { withLongOperationTimeout } from '../../../db/shim/postgres'
 
 const BATCH_LIMIT = 100
 
@@ -133,7 +134,16 @@ export async function handleRebuildProjectionRequest(
     return new Response('AQUILLA_PG binding not configured', { status: 500 })
   }
 
-  const db = env.AQUILLA_PG
+  // AQU-1876: every worker connection carries a 15s statement_timeout. A
+  // rebuild is minutes of work by design — the paged replay is many short
+  // statements, but the project-wide wipe, the set-based counter recompute
+  // and the per-file progress recompute are each one statement over a whole
+  // project — so it runs under the registered `project-rebuild` ceiling
+  // instead. The registry (db/shim/postgres.ts LONG_OPERATION_TIMEOUTS) is
+  // the one list of operations allowed to outrun the default. The ceiling is
+  // a SET LOCAL inside the transaction opened below, so every statement of
+  // the replay inherits it.
+  const db = withLongOperationTimeout(env.AQUILLA_PG, 'project-rebuild')
   // The transaction IS the atomic swap, so a handle without one cannot run
   // this endpoint at all — a half-replayed projection is the bug being fixed,
   // not an acceptable degraded mode. Production PostgresDb always has it.

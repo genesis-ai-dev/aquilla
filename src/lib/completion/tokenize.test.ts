@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { tokenize } from "./tokenize"
+import { tokenize, tokenSpans } from "./tokenize"
 import { tokenize as interlinearTokenize } from "./interlinear"
 
 describe("tokenize — combining marks stay inside the word (AQU-462, AQU-1190)", () => {
@@ -45,5 +45,18 @@ describe("one tokenizer, not two (AQU-1190)", () => {
     // widened interlinear's class and bt-glosser kept the narrow one for four
     // months. Identity here is what stops that happening a second time.
     expect(interlinearTokenize).toBe(tokenize)
+  })
+})
+
+describe("tokenSpans — where each token sits (AQU-1694)", () => {
+  it("yields the tokenize tokens, in order, at their offsets", () => {
+    // Word alignment stores a token INDEX; Who's Who draws it at an OFFSET.
+    // If the two came from different splits, a tint would land on the wrong
+    // word, so the spans must be tokenize() plus positions, nothing else.
+    const text = "Jesus said to her, “Give Me a drink.”"
+    const spans = tokenSpans(text)
+    expect(spans.map((span) => span.token)).toEqual(tokenize(text))
+    expect(spans.map((span) => text.slice(span.start, span.end))).toEqual(spans.map((span) => span.raw))
+    expect(spans[5]).toEqual({ token: "me", raw: "Me", start: 25, end: 27 })
   })
 })

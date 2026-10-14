@@ -925,6 +925,11 @@ auth.post(
       const token = crypto.randomUUID()
       const tokenHash = await sha256Hex(token)
       const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
+      // [Pen test] Auth & session mgmt (2026-10-12): a fresh request supersedes
+      // earlier links, so a stale/leaked older email can't be redeemed.
+      await c.env.AQUILLA_PG.prepare(`DELETE FROM password_reset_tokens WHERE user_id = ?`)
+        .bind(user.id)
+        .run()
       await c.env.AQUILLA_PG.prepare(
         `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
          VALUES (?, ?, ?)

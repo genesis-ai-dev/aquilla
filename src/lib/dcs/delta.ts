@@ -17,7 +17,7 @@ import type { DcsCatalogEntry, DcsCell, DcsCursor, DcsFile } from "./types"
 import type { DcsClient, RefKind } from "./catalog"
 import { parseManifest } from "./manifest"
 import { routeFor } from "./resource-map"
-import { dcsEventId, dcsFileId } from "./cell-id"
+import { dcsEventId, dcsFileId, dcsLegacyFileId } from "./cell-id"
 import { contentHash } from "./content-hash"
 
 /** The adapter project's current view of one source cell (from the projection). */
@@ -32,6 +32,8 @@ export interface CurrentCell {
 
 export interface ComputeDeltaArgs {
   client: DcsClient
+  /** The adapter project the delta lands in — scopes derived file ids (AQU-1891). */
+  projectId: string
   /** The pinned cursor (owner/repo/ref of the LAST import). */
   cursor: DcsCursor
   /** The entry the cursor points at (old ref). Its refType picks the raw kind. */
@@ -96,11 +98,12 @@ export async function computeDelta(args: ComputeDeltaArgs): Promise<DeltaResult>
   const parsedFiles = route.parse({
     entry: newEntry,
     manifest,
+    projectId: args.projectId,
     files: fileTexts,
     options: { excludeFrontMatter: args.excludeFrontMatter },
   })
 
-  return classifyAgainstCurrent(parsedFiles, currentCells)
+  return classifyAgainstCurrent(parsedFiles, currentCells, newEntry.fullName)
 }
 
 /**
@@ -129,10 +132,26 @@ export async function computeDelta(args: ComputeDeltaArgs): Promise<DeltaResult>
 function classifyAgainstCurrent(
   parsedFiles: DcsFile[],
   currentCells: Map<string, CurrentCell>,
+  repo: string,
 ): DeltaResult {
   const adapterFileIds = new Set<string>()
   for (const c of currentCells.values()) adapterFileIds.add(c.fileId)
-  const relevantFiles = parsedFiles.filter((f) => adapterFileIds.has(f.fileId))
+  // AQU-1891: a parsed file is "held" under the project-scoped id for anything
+  // imported after the scope landed, and under the legacy project-agnostic id
+  // for anything imported before it. Match either, and carry the id the
+  // PROJECTION actually uses so creates land in the existing file row and
+  // deletes stay scoped to the right file.
+  const relevantFiles: DcsFile[] = []
+  for (const f of parsedFiles) {
+    if (adapterFileIds.has(f.fileId)) {
+      relevantFiles.push(f)
+      continue
+    }
+    const legacy = f.sourcePath === undefined ? undefined : dcsLegacyFileId(repo, f.sourcePath)
+    if (legacy !== undefined && adapterFileIds.has(legacy)) {
+      relevantFiles.push({ ...f, fileId: legacy })
+    }
+  }
 
   // The set of (relevant) files the parse (re)produced — deletes are scoped to
   // these so a cell that vanished from a re-parsed file is a real removal, not
@@ -179,8 +198,29 @@ function classifyAgainstCurrent(
 // projection with the identical create/commit/delete logic. Correctly-imported
 // cells hash-match and produce no ops.
 
+/**
+ * AQU-1891: which id the PROJECTION holds a DCS file under, or undefined when
+ * this project does not hold it. New imports derive `dcsFileId(project, repo,
+ * path)`; imports from before the project scope was added hold the legacy
+ * `dcsLegacyFileId(repo, path)`. Both must resolve, or "check for updates" and
+ * repair would silently stop matching any file of a pre-fix project.
+ */
+function resolveHeldFileId(
+  heldFileIds: Set<string>,
+  projectId: string,
+  repo: string,
+  path: string,
+): string | undefined {
+  const scoped = dcsFileId(projectId, repo, path)
+  if (heldFileIds.has(scoped)) return scoped
+  const legacy = dcsLegacyFileId(repo, path)
+  return heldFileIds.has(legacy) ? legacy : undefined
+}
+
 export interface ComputeRepairDeltaArgs {
   client: DcsClient
+  /** The adapter project being repaired — scopes derived file ids (AQU-1891). */
+  projectId: string
   /** The catalog entry the cursor is PINNED at — repair re-reads this exact ref. */
   entry: DcsCatalogEntry
   /** The adapter project's current source cells, keyed by cellId. */
@@ -194,9 +234,11 @@ export interface ComputeRepairDeltaArgs {
 /**
  * Re-parse ALL adapter-held files at the pinned ref and diff against the
  * projection. Fetches only files the adapter holds: every route derives its
- * fileId as `dcsFileId(repo, path)`, so tree paths are pre-filtered against the
- * adapter's fileIds BEFORE any raw fetch (a one-book adapter of a 66-book repo
- * fetches exactly one book).
+ * fileId as `dcsFileId(projectId, repo, path)`, so tree paths are pre-filtered
+ * against the adapter's fileIds BEFORE any raw fetch (a one-book adapter of a
+ * 66-book repo fetches exactly one book). The pre-filter also accepts the
+ * pre-AQU-1891 project-agnostic id so repair still reaches a pre-fix project's
+ * files.
  */
 export async function computeRepairDelta(args: ComputeRepairDeltaArgs): Promise<DeltaResult> {
   const { client, entry, currentCells } = args
@@ -223,7 +265,7 @@ export async function computeRepairDelta(args: ComputeRepairDeltaArgs): Promise<
   const fileTexts = new Map<string, string>()
   for (const path of tree) {
     if (path === MANIFEST_PATH) continue
-    if (!adapterFileIds.has(dcsFileId(repo, path))) continue
+    if (resolveHeldFileId(adapterFileIds, args.projectId, repo, path) === undefined) continue
     if (args.signal?.aborted) throw new Error("Repair cancelled")
     fileTexts.set(path, await client.fetchRaw(owner, repoName, entry.ref, path, refKind))
   }
@@ -231,10 +273,11 @@ export async function computeRepairDelta(args: ComputeRepairDeltaArgs): Promise<
   const parsedFiles = route.parse({
     entry,
     manifest,
+    projectId: args.projectId,
     files: fileTexts,
     options: { excludeFrontMatter: args.excludeFrontMatter },
   })
-  return classifyAgainstCurrent(parsedFiles, currentCells)
+  return classifyAgainstCurrent(parsedFiles, currentCells, repo)
 }
 
 /**

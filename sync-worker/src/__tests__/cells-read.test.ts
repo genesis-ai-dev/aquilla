@@ -1335,7 +1335,7 @@ describe("AQU-1160: chain-order cache", () => {
     expect(pagedOrder).toEqual(oracleOrder)
   })
 
-  it("invalidates on a new event (ETag change) instead of serving a stale ordering", async () => {
+  it("invalidates on a new event (ETag change) instead of serving a stale ordering for a cursor that pinned nothing", async () => {
     const { db } = await makeTestDb({
       cells: [
         makeCell({ cell_id: "c1", anchor_cell_id: null, event_id: "e1" }),
@@ -1369,13 +1369,15 @@ describe("AQU-1160: chain-order cache", () => {
       .bind("proj-a", "file-x", "c0", "v0", "e0", "alice", 1700000000001)
       .run()
 
-    // Reusing the OLD cursor against the NEW ETag must not serve a page built
-    // from the stale (pre-c0) ordering — the offset now means something
-    // different in the new chain, exactly like the pre-cache full-recompute
-    // behavior (this route has never validated a cursor's offset against the
-    // version it was minted under; the cache must not make that worse).
+    // A cursor that pinned NO ordering — a pre-AQU-1841 client, or one whose
+    // pin was retired — must not be served a page built from the stale
+    // (pre-c0) ordering: its offset means something different in the new
+    // chain, exactly like the pre-cache full-recompute behavior (this route
+    // has never validated a bare offset against the version it was minted
+    // under; the cache must not make that worse).
+    const unpinned = btoa(JSON.stringify({ offset: JSON.parse(atob(cursor)).offset }))
     const secondReq = new Request(
-      `https://w/api/v1/projects/proj-a/files/file-x/cells?side=target&limit=1&cursor=${encodeURIComponent(cursor)}`,
+      `https://w/api/v1/projects/proj-a/files/file-x/cells?side=target&limit=1&cursor=${encodeURIComponent(unpinned)}`,
       { headers: { Authorization: `Bearer ${token}` } },
     )
     const secondRes = (await handleCellsReadRequest(secondReq, envWith(db)))!
@@ -1384,6 +1386,30 @@ describe("AQU-1160: chain-order cache", () => {
     // same as before c0 landed, proving the cache recomputed rather than
     // reusing a stale id list (a stale reuse would return c2 here).
     expect(secondBody.cells.map((c) => c.cellId)).toEqual(["c1"])
+
+    // AQU-1841: the SAME cursor, still carrying its pin, deliberately keeps
+    // serving the snapshot its stream started on — c1 → c2, each cell once —
+    // rather than re-walking into an ordering where its offset means
+    // something else. That recompute is what delivered c1 twice and c2 never;
+    // the pinned read is the fix, and c0 (seq 2 > the advertised seq 1)
+    // reaches the client through its next delta.
+    const pinnedRes = (await handleCellsReadRequest(
+      new Request(
+        `https://w/api/v1/projects/proj-a/files/file-x/cells?side=target&limit=1&cursor=${encodeURIComponent(cursor)}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      ),
+      envWith(db),
+    ))!
+    const pinnedBody = (await pinnedRes.json()) as { cells: Array<{ cellId: string }>; maxServerSeq: number }
+    expect(pinnedBody.cells.map((c) => c.cellId)).toEqual(["c2"])
+    expect(pinnedBody.maxServerSeq).toBe(1)
+    const delta = (await (await handleCellsReadRequest(
+      new Request("https://w/api/v1/projects/proj-a/files/file-x/cells?since=1&epoch=0", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      envWith(db),
+    ))!.json()) as { changedCellIds: string[] }
+    expect(delta.changedCellIds).toContain("c0")
   })
 
   it("does not apply to the cellIds= fast path (unpaginated, caller-order, unaffected by the cache)", async () => {
@@ -1532,4 +1558,185 @@ it("reads narrow ordering on a cold page and keeps intervening edits visible to 
   const delta = await (await handleCellsReadRequest(request("since=1&epoch=0"), envWith(db)))!.json() as { changedCellIds: string[]; cells: { value: string }[] }
   expect(delta.changedCellIds).toContain("lc00000")
   expect(delta.cells[0].value).toBe("edited during read")
+})
+
+// ── AQU-1841: the cursor pins the stream's ordering ─────────────────────────
+//
+// AQU-1160's cache is keyed on the LIVE response ETag, so one peer commit
+// mid-stream moved the key and every remaining page re-walked the whole file
+// — the ~60 full-file scans behind opening a 30k-cell file while someone else
+// edits it. These tests pin the three obligations: a continuation page still
+// hits the cache after a peer commit (AC3), it serves the ordering the stream
+// started on with no duplicates or gaps and re-advertises that watermark so
+// the client can resume its delta from it (AC1/AC2), and a pin that can no
+// longer describe a resumable snapshot is retired back to today's behavior.
+
+/** The `{ offset, pin }` a response's opaque `nextCursor` carries. */
+function readCursor(cursor: string): { offset: number; pin?: { maxSeq: number; rebuiltSeq: number; epoch: number; seq: number } } {
+  return JSON.parse(atob(cursor))
+}
+
+async function commitPeerEvent(db: AquillaDb, id: string, seq: number, cellId: string): Promise<void> {
+  await db
+    .prepare(
+      "INSERT INTO events (id, schema_version, project_id, file_id, cell_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(id, 1, "proj-a", "file-x", cellId, "target.cell.commit", "bob", "{}", 1700000000001, 1700000000001, seq)
+    .run()
+}
+
+describe("AQU-1841: cursor-pinned page ordering", () => {
+  it("AC3: a peer commit mid-stream no longer makes every later page re-walk the file", async () => {
+    const N = 400
+    const limit = 25
+    const { db } = await makeTestDb({
+      cells: makeLinearChain(N),
+      events: [makeEvent({ id: "seed", server_seq: 10, cell_id: "lc00000" })],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const request = (query: string) =>
+      new Request(`https://w/api/v1/projects/proj-a/files/file-x/cells?${query}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+
+    // Page 1 pays the one unavoidable full-file walk and pins its watermark.
+    const firstRes = (await handleCellsReadRequest(request(`side=target&limit=${limit}`), envWith(db)))!
+    const first = (await firstRes.json()) as { cells: Array<{ cellId: string }>; nextCursor: string; maxServerSeq: number }
+    expect(first.maxServerSeq).toBe(10)
+    expect(readCursor(first.nextCursor).pin).toEqual({ maxSeq: 10, rebuiltSeq: 0, epoch: 0, seq: 10 })
+
+    // A peer commits. The live ETag moves; the pinned one does not.
+    await commitPeerEvent(db, "peer", 11, "lc00000")
+
+    const { env: countedEnv, counts } = countingEnv(db)
+    const seen: string[] = first.cells.map((c) => c.cellId)
+    let cursor: string | null = first.nextCursor
+    const advertised = new Set<number>([first.maxServerSeq])
+    let pages = 1
+    while (cursor) {
+      const res = (await handleCellsReadRequest(
+        request(`side=target&limit=${limit}&cursor=${encodeURIComponent(cursor)}`),
+        countedEnv,
+      ))!
+      const body = (await res.json()) as { cells: Array<{ cellId: string }>; nextCursor: string | null; maxServerSeq: number }
+      seen.push(...body.cells.map((c) => c.cellId))
+      advertised.add(body.maxServerSeq)
+      cursor = body.nextCursor
+      pages++
+    }
+
+    // Every page after the first came out of the pinned ordering: not one of
+    // them re-read anything approaching the whole file.
+    expect(pages).toBe(N / limit)
+    expect(Math.max(...counts)).toBeLessThanOrEqual(limit)
+    // AC1: the full stream is the chain, in order, once each.
+    expect(seen).toEqual(makeLinearChain(N).map((c) => c.cell_id))
+    // AC2: one watermark for the whole stream — the pinned one — so the
+    // client keeps it as its `?since=` cursor and the peer's commit arrives
+    // through the delta instead of forcing a full refetch.
+    expect([...advertised]).toEqual([10])
+    console.log(
+      `[AQU-1841 test evidence] file size=${N}; a peer commit landed after page 1; the remaining ${pages - 1} pages read at most ${Math.max(...counts)} rows per query (counts: ${JSON.stringify(counts)})`,
+    )
+  })
+
+  it("re-pins at the live watermark when the pinned ordering is gone, and says so by advertising it", async () => {
+    const { db } = await makeTestDb({
+      cells: makeLinearChain(60),
+      events: [makeEvent({ id: "seed", server_seq: 4, cell_id: "lc00000" })],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const request = (query: string) =>
+      new Request(`https://w/api/v1/projects/proj-a/files/file-x/cells?${query}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+
+    const first = (await (await handleCellsReadRequest(request("side=target&limit=20"), envWith(db)))!.json()) as {
+      nextCursor: string
+    }
+    await commitPeerEvent(db, "peer", 9, "lc00000")
+    // Another isolate / an evicted entry: the pinned ordering is not in memory.
+    resetChainCacheForTests()
+
+    const res = (await handleCellsReadRequest(
+      request(`side=target&limit=20&cursor=${encodeURIComponent(first.nextCursor)}`),
+      envWith(db),
+    ))!
+    const body = (await res.json()) as { cells: Array<{ cellId: string }>; nextCursor: string; maxServerSeq: number }
+
+    // Exactly the pre-AQU-1841 behavior: the page is served from the live
+    // ordering and advertises the live watermark, which is how the client
+    // learns the stream may be torn (audit B2).
+    expect(body.maxServerSeq).toBe(9)
+    expect(body.cells[0].cellId).toBe("lc00020")
+    // ...and the stream is re-pinned, so the pages after this one hit again.
+    expect(readCursor(body.nextCursor).pin).toEqual({ maxSeq: 9, rebuiltSeq: 0, epoch: 0, seq: 9 })
+  })
+
+  it("retires a pin from before a projection rebuild instead of serving its ordering", async () => {
+    const { db } = await makeTestDb({
+      cells: makeLinearChain(60),
+      events: [makeEvent({ id: "seed", server_seq: 4, cell_id: "lc00000" })],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const request = (query: string) =>
+      new Request(`https://w/api/v1/projects/proj-a/files/file-x/cells?${query}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+
+    const first = (await (await handleCellsReadRequest(request("side=target&limit=20"), envWith(db)))!.json()) as {
+      nextCursor: string
+    }
+    // A rebuild changes cells without minting events, so a delta from the
+    // pinned seq could never see it — the pin must not survive it.
+    await db
+      .prepare("INSERT INTO project_seq_counters (project_id, last_seq, rebuilt_seq, project_epoch) VALUES (?, ?, ?, ?)")
+      .bind("proj-a", 4, 4, 0)
+      .run()
+
+    const body = (await (await handleCellsReadRequest(
+      request(`side=target&limit=20&cursor=${encodeURIComponent(first.nextCursor)}`),
+      envWith(db),
+    ))!.json()) as { cells: Array<{ cellId: string }>; nextCursor: string; maxServerSeq: number }
+
+    expect(readCursor(first.nextCursor).pin!.rebuiltSeq).toBe(0)
+    expect(body.maxServerSeq).toBe(4)
+    expect(readCursor(body.nextCursor).pin).toEqual({ maxSeq: 4, rebuiltSeq: 4, epoch: 0, seq: 4 })
+    expect(body.cells[0].cellId).toBe("lc00020")
+  })
+
+  it("pages a pre-AQU-1841 cursor (bare offset, no pin) exactly as before", async () => {
+    const { db } = await makeTestDb({ cells: makeLinearChain(60) })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const legacyCursor = btoa(JSON.stringify({ offset: 20 }))
+
+    const body = (await (await handleCellsReadRequest(
+      new Request(
+        `https://w/api/v1/projects/proj-a/files/file-x/cells?side=target&limit=20&cursor=${encodeURIComponent(legacyCursor)}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      ),
+      envWith(db),
+    ))!.json()) as { cells: Array<{ cellId: string }>; total: number; maxServerSeq: number }
+
+    expect(body.cells[0].cellId).toBe("lc00020")
+    expect(body.cells).toHaveLength(20)
+    expect(body.total).toBe(60)
+    expect(body.maxServerSeq).toBe(0)
+  })
+
+  it("ignores a malformed pin rather than restarting the stream at offset 0", async () => {
+    const { db } = await makeTestDb({ cells: makeLinearChain(60) })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const bad = btoa(JSON.stringify({ offset: 20, pin: { maxSeq: "7", rebuiltSeq: 0, epoch: 0, seq: 1.5 } }))
+
+    const body = (await (await handleCellsReadRequest(
+      new Request(
+        `https://w/api/v1/projects/proj-a/files/file-x/cells?side=target&limit=20&cursor=${encodeURIComponent(bad)}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      ),
+      envWith(db),
+    ))!.json()) as { cells: Array<{ cellId: string }> }
+
+    expect(body.cells[0].cellId).toBe("lc00020")
+  })
 })

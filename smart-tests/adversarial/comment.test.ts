@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { MARKER, renderComment } from "./comment"
+import { MARKER, renderComment, runStatus } from "./comment"
 
 const evidence = (verdict: string, extra: Record<string, unknown> = {}) => ({ "smart-testing-evidence": {
   outcome: { verdict, reason: `${verdict} reason`, checks: {}, diffs: [] }, projects: [],
@@ -51,8 +51,45 @@ describe("PR comment", () => {
     expect(renderComment({ ...base, tests })).toContain("Agent: Text helper returned no valid field value")
   })
 
+  it("says the check may fail on a dead harness, not on findings", () => {
+    expect(renderComment({ ...base, tests: [...canary, attack("a", "passed")] }))
+      .toContain("the check fails only when the harness could not test this commit")
+  })
+
   it("escapes table-breaking characters in reasons", () => {
     const tests = [...canary, { ...attack("x", "product_failure"), evidence: evidence("product_failure", { attackId: "x", outcome: { verdict: "product_failure", reason: "a | b\nc", checks: {}, diffs: [] } }) }]
     expect(renderComment({ ...base, tests })).toContain("a \\| b c")
+  })
+})
+
+// AQU-1899: the PR job is green only for "healthy". The canary failed on every
+// run for days while the check stayed green, because nothing read this.
+describe("PR check status", () => {
+  it("is healthy when the canary passed and attacks reached verdicts, even with product failures", () => {
+    expect(runStatus({ ...base, tests: [...canary, attack("a", "passed")] }).status).toBe("healthy")
+    expect(runStatus({ ...base, tests: [...canary, attack("a", "passed"), attack("b", "product_failure")] }).status)
+      .toBe("healthy")
+  })
+
+  it("fails when the canary failed, as on every run before AQU-1899", () => {
+    const failed = canary.map((test) => ({ ...test, status: "failed" }))
+    expect(runStatus({ ...base, tests: failed })).toEqual({
+      status: "harness_unavailable", reason: "The canary health check failed (2 of 2).",
+    })
+  })
+
+  it("fails when the canary never ran or every attack was inconclusive", () => {
+    expect(runStatus({ ...base, tests: [attack("a", "passed")] }).status).toBe("harness_unavailable")
+    expect(runStatus({ ...base, tests: [...canary, attack("a", "inconclusive")] }).status).toBe("harness_unavailable")
+  })
+
+  it("fails when the suite never ran", () => {
+    expect(runStatus({ ...base, notRun: "The preview build failed." })).toEqual({
+      status: "not_run", reason: "The preview build failed.",
+    })
+  })
+
+  it("fails when the preview served another commit", () => {
+    expect(runStatus({ ...base, sha: "fff0000", tests: [...canary, attack("a", "passed")] }).status).toBe("not_verified")
   })
 })

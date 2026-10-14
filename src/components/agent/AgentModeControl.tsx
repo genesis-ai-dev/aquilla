@@ -45,6 +45,7 @@ import {
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { requestReactCheck } from "@/lib/contextual/transport"
 import { AutopilotProcessGraph } from "@/components/contextual/AutopilotProcessGraph"
+import { useBibleDataExperiment } from "@/hooks/useBibleDataExperiment"
 
 const SCOPE_LABEL_KEYS = {
   full: "agent.mode.scope.full",
@@ -70,6 +71,8 @@ type CheckState =
 
 export function AgentModeControl({ projectId, jwt, roleLevel }: AgentModeControlProps) {
   const { t } = useI18n()
+  // AQU-1685: the graph's Bible data steps, only with the experiment on here.
+  const bibleData = useBibleDataExperiment(projectId)
   const [mode, setMode] = useState<AgentMode | null>(null)
   const [version, setVersion] = useState<number | null>(null)
   const [loadFailed, setLoadFailed] = useState(false)
@@ -288,7 +291,7 @@ export function AgentModeControl({ projectId, jwt, roleLevel }: AgentModeControl
               <p className="text-[11px] font-medium text-foreground">
                 {t("agent.mode.graphTitle")}
               </p>
-              <AutopilotProcessGraph compact />
+              <AutopilotProcessGraph compact bibleData={bibleData} />
             </section>
 
             {canCheck && (

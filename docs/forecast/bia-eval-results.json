@@ -1,0 +1,584 @@
+[
+  {
+    "corpus": "eng-engwebp",
+    "slice": "full",
+    "report": {
+      "trainCells": 27864,
+      "testCells": 3095,
+      "next": {
+        "unigram": {
+          "top1": 0.07066666666666667,
+          "top3": 0.15933333333333333,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.00039930600000009995
+        },
+        "bigram-markov": {
+          "top1": 0.18866666666666668,
+          "top3": 0.314,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.07183761133333337
+        },
+        "bia faithful (python: markov filter)": {
+          "top1": 0.07933333333333334,
+          "top3": 0.17466666666666666,
+          "coverage": 0.9986666666666667,
+          "n": 1500,
+          "ms": 0.16798997200000002
+        },
+        "bia votes only (no markov)": {
+          "top1": 0.07933333333333334,
+          "top3": 0.176,
+          "coverage": 0.9986666666666667,
+          "n": 1500,
+          "ms": 0.16123113866666683
+        },
+        "bia + markov weight": {
+          "top1": 0.20933333333333334,
+          "top3": 0.338,
+          "coverage": 0.9986666666666667,
+          "n": 1500,
+          "ms": 1.165787
+        },
+        "bia shipped (decay + markov weight + fallback)": {
+          "top1": 0.208,
+          "top3": 0.332,
+          "coverage": 0.9986666666666667,
+          "n": 1500,
+          "ms": 7.141924472666667
+        }
+      },
+      "infill": {
+        "unigram": {
+          "top1": 0.082,
+          "top3": 0.16733333333333333,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.000381749999999253
+        },
+        "bigram-markov": {
+          "top1": 0.2926666666666667,
+          "top3": 0.46066666666666667,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.2336706386666677
+        },
+        "bia faithful (python: markov filter)": {
+          "top1": 0.16666666666666666,
+          "top3": 0.284,
+          "coverage": 0.934,
+          "n": 1500,
+          "ms": 5.020065111333333
+        },
+        "bia votes only (no markov)": {
+          "top1": 0.11533333333333333,
+          "top3": 0.22266666666666668,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 5.197735222
+        },
+        "bia + markov weight": {
+          "top1": 0.286,
+          "top3": 0.44666666666666666,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 6.483106000000002
+        },
+        "bia shipped (decay + markov weight + fallback)": {
+          "top1": 0.30266666666666664,
+          "top3": 0.4713333333333333,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 7.7407789440000005
+        }
+      },
+      "msPerQuery": 4.173416666666666
+    }
+  },
+  {
+    "corpus": "eng-engwebp",
+    "slice": "first 2000",
+    "report": {
+      "trainCells": 2000,
+      "testCells": 223,
+      "next": {
+        "unigram": {
+          "top1": 0.072,
+          "top3": 0.158,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.00016211133333369313
+        },
+        "bigram-markov": {
+          "top1": 0.202,
+          "top3": 0.31733333333333336,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.01090402733333758
+        },
+        "bia faithful (python: markov filter)": {
+          "top1": 0.108,
+          "top3": 0.226,
+          "coverage": 0.9986666666666667,
+          "n": 1500,
+          "ms": 0.036332555333331885
+        },
+        "bia votes only (no markov)": {
+          "top1": 0.108,
+          "top3": 0.22866666666666666,
+          "coverage": 0.9986666666666667,
+          "n": 1500,
+          "ms": 0.03590397200000007
+        },
+        "bia + markov weight": {
+          "top1": 0.23733333333333334,
+          "top3": 0.382,
+          "coverage": 0.9986666666666667,
+          "n": 1500,
+          "ms": 0.18076586066666642
+        },
+        "bia shipped (decay + markov weight + fallback)": {
+          "top1": 0.21866666666666668,
+          "top3": 0.362,
+          "coverage": 0.9993333333333333,
+          "n": 1500,
+          "ms": 0.4894871113333356
+        }
+      },
+      "infill": {
+        "unigram": {
+          "top1": 0.076,
+          "top3": 0.168,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.00015722199999921335
+        },
+        "bigram-markov": {
+          "top1": 0.31066666666666665,
+          "top3": 0.474,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.027188444000004287
+        },
+        "bia faithful (python: markov filter)": {
+          "top1": 0.22133333333333333,
+          "top3": 0.3413333333333333,
+          "coverage": 0.8,
+          "n": 1500,
+          "ms": 0.3698604720000003
+        },
+        "bia votes only (no markov)": {
+          "top1": 0.13066666666666665,
+          "top3": 0.24266666666666667,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.3646081386666677
+        },
+        "bia + markov weight": {
+          "top1": 0.29,
+          "top3": 0.48,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.4874808053333351
+        },
+        "bia shipped (decay + markov weight + fallback)": {
+          "top1": 0.326,
+          "top3": 0.512,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.5378655279999996
+        }
+      },
+      "msPerQuery": 0.31766666666666665
+    }
+  },
+  {
+    "corpus": "tpi-tpi",
+    "slice": "full",
+    "report": {
+      "trainCells": 31965,
+      "testCells": 3474,
+      "next": {
+        "unigram": {
+          "top1": 0.11266666666666666,
+          "top3": 0.22333333333333333,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.001693055999998857
+        },
+        "bigram-markov": {
+          "top1": 0.24733333333333332,
+          "top3": 0.4206666666666667,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.05308777799999613
+        },
+        "bia faithful (python: markov filter)": {
+          "top1": 0.094,
+          "top3": 0.23533333333333334,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.12263441666666768
+        },
+        "bia votes only (no markov)": {
+          "top1": 0.094,
+          "top3": 0.23533333333333334,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.11996727799999644
+        },
+        "bia + markov weight": {
+          "top1": 0.25733333333333336,
+          "top3": 0.436,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.7019355553333299
+        },
+        "bia shipped (decay + markov weight + fallback)": {
+          "top1": 0.252,
+          "top3": 0.426,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 14.975556556000006
+        }
+      },
+      "infill": {
+        "unigram": {
+          "top1": 0.11266666666666666,
+          "top3": 0.22733333333333333,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.0172209440000006
+        },
+        "bigram-markov": {
+          "top1": 0.37266666666666665,
+          "top3": 0.576,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.15103925000000162
+        },
+        "bia faithful (python: markov filter)": {
+          "top1": 0.15933333333333333,
+          "top3": 0.31,
+          "coverage": 0.9953333333333333,
+          "n": 1500,
+          "ms": 8.138719472000007
+        },
+        "bia votes only (no markov)": {
+          "top1": 0.12866666666666668,
+          "top3": 0.26666666666666666,
+          "coverage": 0.9993333333333333,
+          "n": 1500,
+          "ms": 8.161390555999999
+        },
+        "bia + markov weight": {
+          "top1": 0.3546666666666667,
+          "top3": 0.5546666666666666,
+          "coverage": 0.9993333333333333,
+          "n": 1500,
+          "ms": 8.698426444666664
+        },
+        "bia shipped (decay + markov weight + fallback)": {
+          "top1": 0.366,
+          "top3": 0.584,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 12.139533722000003
+        }
+      },
+      "msPerQuery": 6.660666666666667
+    }
+  },
+  {
+    "corpus": "tpi-tpi",
+    "slice": "first 2000",
+    "report": {
+      "trainCells": 2000,
+      "testCells": 219,
+      "next": {
+        "unigram": {
+          "top1": 0.12733333333333333,
+          "top3": 0.236,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.00006655533334317927
+        },
+        "bigram-markov": {
+          "top1": 0.24933333333333332,
+          "top3": 0.45,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.01291608333333473
+        },
+        "bia faithful (python: markov filter)": {
+          "top1": 0.114,
+          "top3": 0.25133333333333335,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.042539471999994326
+        },
+        "bia votes only (no markov)": {
+          "top1": 0.114,
+          "top3": 0.252,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.043023666666665426
+        },
+        "bia + markov weight": {
+          "top1": 0.264,
+          "top3": 0.4573333333333333,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.18668350000000403
+        },
+        "bia shipped (decay + markov weight + fallback)": {
+          "top1": 0.25933333333333336,
+          "top3": 0.458,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.6244318886666637
+        }
+      },
+      "infill": {
+        "unigram": {
+          "top1": 0.116,
+          "top3": 0.22733333333333333,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.00009405599998232598
+        },
+        "bigram-markov": {
+          "top1": 0.37866666666666665,
+          "top3": 0.552,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.03195074999999876
+        },
+        "bia faithful (python: markov filter)": {
+          "top1": 0.19466666666666665,
+          "top3": 0.36466666666666664,
+          "coverage": 0.9593333333333334,
+          "n": 1500,
+          "ms": 0.42075116666666385
+        },
+        "bia votes only (no markov)": {
+          "top1": 0.12933333333333333,
+          "top3": 0.258,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.4103519446666663
+        },
+        "bia + markov weight": {
+          "top1": 0.3453333333333333,
+          "top3": 0.52,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.4991322780000046
+        },
+        "bia shipped (decay + markov weight + fallback)": {
+          "top1": 0.37866666666666665,
+          "top3": 0.5553333333333333,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.5957091113333396
+        }
+      },
+      "msPerQuery": 0.3585
+    }
+  },
+  {
+    "corpus": "npi-npiulb",
+    "slice": "full",
+    "report": {
+      "trainCells": 27872,
+      "testCells": 3096,
+      "next": {
+        "unigram": {
+          "top1": 0.04933333333333333,
+          "top3": 0.06733333333333333,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.00016444399999454616
+        },
+        "bigram-markov": {
+          "top1": 0.126,
+          "top3": 0.21066666666666667,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.04169913866667775
+        },
+        "bia faithful (python: markov filter)": {
+          "top1": 0.05333333333333334,
+          "top3": 0.10866666666666666,
+          "coverage": 0.9973333333333333,
+          "n": 1500,
+          "ms": 0.13727511133333126
+        },
+        "bia votes only (no markov)": {
+          "top1": 0.05333333333333334,
+          "top3": 0.10933333333333334,
+          "coverage": 0.9973333333333333,
+          "n": 1500,
+          "ms": 0.1387426946666674
+        },
+        "bia + markov weight": {
+          "top1": 0.128,
+          "top3": 0.21466666666666667,
+          "coverage": 0.9973333333333333,
+          "n": 1500,
+          "ms": 1.010627833333332
+        },
+        "bia shipped (decay + markov weight + fallback)": {
+          "top1": 0.132,
+          "top3": 0.21933333333333332,
+          "coverage": 0.998,
+          "n": 1500,
+          "ms": 4.279640777333329
+        }
+      },
+      "infill": {
+        "unigram": {
+          "top1": 0.042666666666666665,
+          "top3": 0.06133333333333333,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.0001711666666669771
+        },
+        "bigram-markov": {
+          "top1": 0.17066666666666666,
+          "top3": 0.2833333333333333,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.13631949999998325
+        },
+        "bia faithful (python: markov filter)": {
+          "top1": 0.08266666666666667,
+          "top3": 0.144,
+          "coverage": 0.7013333333333334,
+          "n": 1500,
+          "ms": 3.4671890273333412
+        },
+        "bia votes only (no markov)": {
+          "top1": 0.06466666666666666,
+          "top3": 0.12066666666666667,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 3.477491916666661
+        },
+        "bia + markov weight": {
+          "top1": 0.14933333333333335,
+          "top3": 0.264,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 4.836557972666652
+        },
+        "bia shipped (decay + markov weight + fallback)": {
+          "top1": 0.18733333333333332,
+          "top3": 0.31066666666666665,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 5.506255416666662
+        }
+      },
+      "msPerQuery": 2.879166666666667
+    }
+  },
+  {
+    "corpus": "npi-npiulb",
+    "slice": "first 2000",
+    "report": {
+      "trainCells": 2000,
+      "testCells": 223,
+      "next": {
+        "unigram": {
+          "top1": 0.036,
+          "top3": 0.06866666666666667,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.00010763933334965259
+        },
+        "bigram-markov": {
+          "top1": 0.10333333333333333,
+          "top3": 0.17133333333333334,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.004890388666671546
+        },
+        "bia faithful (python: markov filter)": {
+          "top1": 0.05266666666666667,
+          "top3": 0.106,
+          "coverage": 0.9906666666666667,
+          "n": 1500,
+          "ms": 0.02352263866667636
+        },
+        "bia votes only (no markov)": {
+          "top1": 0.05266666666666667,
+          "top3": 0.10733333333333334,
+          "coverage": 0.9906666666666667,
+          "n": 1500,
+          "ms": 0.02281552800000645
+        },
+        "bia + markov weight": {
+          "top1": 0.13133333333333333,
+          "top3": 0.202,
+          "coverage": 0.9906666666666667,
+          "n": 1500,
+          "ms": 0.10110866666664757
+        },
+        "bia shipped (decay + markov weight + fallback)": {
+          "top1": 0.132,
+          "top3": 0.20666666666666667,
+          "coverage": 0.9946666666666667,
+          "n": 1500,
+          "ms": 0.2735411106666822
+        }
+      },
+      "infill": {
+        "unigram": {
+          "top1": 0.037333333333333336,
+          "top3": 0.06533333333333333,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.000074694666681656
+        },
+        "bigram-markov": {
+          "top1": 0.16733333333333333,
+          "top3": 0.23466666666666666,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.010361527333327103
+        },
+        "bia faithful (python: markov filter)": {
+          "top1": 0.126,
+          "top3": 0.15933333333333333,
+          "coverage": 0.5293333333333333,
+          "n": 1500,
+          "ms": 0.2971203053333447
+        },
+        "bia votes only (no markov)": {
+          "top1": 0.08933333333333333,
+          "top3": 0.17066666666666666,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.29844563866666673
+        },
+        "bia + markov weight": {
+          "top1": 0.16466666666666666,
+          "top3": 0.27,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.419237166666678
+        },
+        "bia shipped (decay + markov weight + fallback)": {
+          "top1": 0.19333333333333333,
+          "top3": 0.292,
+          "coverage": 1,
+          "n": 1500,
+          "ms": 0.39246583333334034
+        }
+      },
+      "msPerQuery": 0.23041666666666666
+    }
+  }
+]

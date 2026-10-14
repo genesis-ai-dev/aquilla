@@ -69,7 +69,7 @@ describe("TargetAudioLane — a take's right-click menu (AQU-1767)", () => {
     for (const id of ["split", "rerecord", "regenerate", "vote", "rename", "delete"]) {
       expect(await screen.findByTestId(`tl-take-menu-${id}`), id).toBeInTheDocument()
     }
-    expect(screen.getByTestId("tl-take-menu-split").textContent).toContain("Split here")
+    expect(screen.getByTestId("tl-take-menu-split").textContent).toBe("Split here")
     expect(screen.getByTestId("tl-take-menu-vote").textContent).toContain("Approve this take")
     expect(screen.getByTestId("tl-take-menu-delete").textContent).toContain("Delete take")
   })

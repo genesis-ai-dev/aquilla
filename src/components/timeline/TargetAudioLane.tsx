@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import { Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Mic, Pencil, Play, Scissors, Sparkles, Square, Trash2, VolumeX, X } from "lucide-react"
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuShortcut, ContextMenuTrigger } from "@/components/ui/context-menu"
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { toast } from "@/components/ui/toast"
@@ -1308,8 +1308,9 @@ function TargetAudioChip({
             onClick={() => { if (menuSplitAtMs != null) onCutTarget?.(cell.id, audioId, menuSplitAtMs) }}
           >
             <Scissors className="h-3.5 w-3.5" />
+            {/* No "S" hint: S splits the selected take at the PLAYHEAD; this
+                splits where you right-clicked (Sam, 2026-10-14). */}
             {t("editor.timeline.takeMenuSplit")}
-            <ContextMenuShortcut>S</ContextMenuShortcut>
           </ContextMenuItem>
         )}
         {takeMenu?.reRecord && (

@@ -94,6 +94,7 @@ function setupParatextMocks(skipped: { book: string; reason: string }[]) {
           { id: "s2", original: "And the earth", translated: "", context: "GEN 1:2", group: "GEN 1:2" },
         ],
         duplicateRefs: [],
+        structureFindings: [],
         cellCount: 2,
       },
     ],

@@ -74,6 +74,21 @@ describe("align IDML styles", () => {
     expect(aligned.changed).toBe(false)
   })
 
+  it("treats an unstyled preview as one sentence to place, not as empty runs", async () => {
+    const unit = await parsedUnit()
+    const cell: AlignStylesCell = {
+      ...misalignedCell(unit),
+      translated: "Bonjour MONDE",
+      translatedHtml: renderIdmlUnitHtml({
+        ...unit,
+        slots: unit.slots.map((slot) => ({ ...slot, text: slot.editable ? "" : slot.text })),
+      }),
+    }
+    const messages = buildIdmlAlignStylesMessages(cell)
+    expect(messages[1]?.content).toContain("not split across runs yet")
+    expect(messages[1]?.content).toContain("Bonjour MONDE")
+  })
+
   it("does not call the model when the cell has no translation", async () => {
     const unit = await parsedUnit()
     const ask = vi.fn()

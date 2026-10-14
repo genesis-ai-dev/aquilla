@@ -8,7 +8,7 @@ Shim changes: `db/shim/postgres.ts` — `withUser()` / `asAdmin()`
 
 ## What is protected
 
-**29 of the schema's 64 project-scoped tables have RLS enabled.** The list below is
+**29 of the schema's 65 project-scoped tables have RLS enabled.** The list below is
 generated from the migrations; `scripts/rls-coverage.test.ts` fails if this table and
 the migrations disagree, and if any project-scoped table is neither covered nor
 explicitly recorded as uncovered. Before that guard existed this section said "nine

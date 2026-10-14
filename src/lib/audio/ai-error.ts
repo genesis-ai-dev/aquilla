@@ -71,6 +71,7 @@ export type ErrorCategory =
   | "model-load-failed"
   | "audio-format-unsupported"
   | "daily-quota-exceeded"
+  | "ai-spend-ceiling"
   | "model-not-allowed"
   | "request-too-large"
   | "rate-limited"
@@ -112,6 +113,21 @@ export function categorizeAiError(rawMessage: string): ActionableError {
   const raw = rawMessage.trim()
   const m = raw.toLowerCase()
   const status = extractStatus(m)
+
+  // Platform daily SPEND ceiling (AQU-1869): a 503 from any paid AI path once
+  // the platform's dollar floor for the day is reached. It must be matched
+  // BEFORE the daily-quota branch below, whose "resets at midnight" substring
+  // also appears here — and it must not wear that branch's copy, because this
+  // is not the user's own limit and "switch to a custom AI provider" is the
+  // only thing they could actually do about it.
+  if (m.includes("ai_spend_ceiling_reached") || m.includes("daily ai spend ceiling")) {
+    return {
+      category: "ai-spend-ceiling",
+      title: t("audio.aiError.providerUnavailableTitle"),
+      body: t("audio.aiError.spendCeilingBody"),
+      raw,
+    }
+  }
 
   // Platform daily quota (AQU-265): 429 responses from the Frontier/Aquilla proxy.
   if (

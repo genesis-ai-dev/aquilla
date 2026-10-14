@@ -26,7 +26,7 @@
  * where the fixture meets that library and its claimed groups are checked.
  */
 import { createHash } from "node:crypto"
-import { makePostgres, type AquillaDb } from "../db/shim/postgres"
+import { makeMaintenancePostgres, type AquillaDb } from "../db/shim/postgres"
 import { fullProgressRecomputeStmts } from "../sync-worker/src/events/progress-projection"
 import {
   ALL_BOOKS, ASSIGNMENTS, AUDIO_BOOKS, AUDIO_FILE, EMPTY_FILE, LANE2, MEDIA_FILE,
@@ -354,7 +354,7 @@ async function verify(db: AquillaDb): Promise<boolean> {
 async function main(): Promise<void> {
   const url = process.env.AQUILLA_DATABASE_URL?.trim()
     || "postgresql://aquilla@localhost/aquilla_dev"
-  const db = makePostgres(url, 1)
+  const db = makeMaintenancePostgres(url, 1)
   try {
     console.log(`\nSeeding "${PROJECT_NAME}" (${PROJECT_ID}) into org ${ORG}…\n`)
     await seed(db)

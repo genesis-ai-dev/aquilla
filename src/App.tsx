@@ -1,3 +1,4 @@
+import { CheckingPage } from "@/components/checking/CheckingPage"
 import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Navigate, Routes, Route, useParams, useLocation, type Location } from "react-router-dom"
 import { OrgHome } from "@/components/org/OrgHome"
@@ -46,6 +47,7 @@ import { AiModelConsentDialog } from "@/components/AiModelConsentDialog"
 import { AiModelDownloadChip } from "@/components/AiModelDownloadChip"
 import { AudioBulkProgressBanner } from "@/components/AudioBulkProgressBanner"
 import { PrivateModeBanner } from "@/components/PrivateModeBanner"
+import { StorageFullBanner } from "@/components/StorageFullBanner"
 import { SessionExpiredBanner } from "@/components/SessionExpiredBanner"
 import { AdminElevationPrompt } from "@/components/admin/AdminElevationPrompt"
 import { ExpiredSessionGate } from "@/components/ExpiredSessionGate"
@@ -314,6 +316,9 @@ export default function App() {
       <TooltipProvider delay={600}>
         <SyncingProvider>
           <PrivateModeBanner />
+          {/* AQU-1865: nearly-full origin storage — the caches shed themselves,
+              but only the user can free the disk. */}
+          <StorageFullBanner />
           <ConflictToast />
           <OfflineLeaderWatchdog />
           <DesktopUpdatePrompt />
@@ -377,6 +382,7 @@ function AppRoutes() {
         <Route path="/join/:token" element={<JoinPage />} />
         {/* AQU-626: per-user deep link + PIN — public, eager (fresh-browser
             diode-zone flow lands here with no session and no onboarding). */}
+        <Route path="/check/:token" element={<CheckingPage />} />
         <Route path="/link/:token" element={<AccessLinkPage />} />
         {/* Agent API (AQU-533 §3) — one-time human approval for ask-mode changesets. */}
         <Route path="/approve/:changesetId" element={<LazyRoute><ApproveChangeset /></LazyRoute>} />

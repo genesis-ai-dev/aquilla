@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest"
-import { encodeWavPcm16, encodeWavPcm16Chunks, quantisePcm16 } from "./wav-encode"
+import {
+  encodeWavPcm16,
+  encodeWavPcm16Blobs,
+  encodeWavPcm16Chunks,
+  quantisePcm16,
+  toPcm16,
+} from "./wav-encode"
 
 async function bytes(blob: Blob): Promise<DataView> {
   return new DataView(await blob.arrayBuffer())
@@ -55,5 +61,34 @@ describe("encodeWavPcm16Chunks", () => {
     expect(dv.getUint32(4, true)).toBe(36 + samples.length * 2) // RIFF size
     expect(dv.getUint32(24, true)).toBe(44100)                  // the REAL context rate
     expect(dv.getUint32(40, true)).toBe(samples.length * 2)     // data chunk size
+  })
+})
+
+// The egress audio modes stitch whole files, so their parts are PCM16 already
+// in blob storage rather than arrays on the heap (AQU-1862). Same bytes out.
+describe("toPcm16 + encodeWavPcm16Blobs", () => {
+  const samples = new Float32Array([0, 0.5, -0.5, 1, -1, 0.123, -0.987, 2, -2, NaN, 0.001])
+
+  it("quantises exactly as the DataView path does", () => {
+    expect(Array.from(toPcm16(samples))).toEqual(Array.from(samples, quantisePcm16))
+  })
+
+  it("is byte-identical to encodeWavPcm16 for equivalent input, split across parts", async () => {
+    const whole = new Uint8Array(await encodeWavPcm16(samples, 48000).arrayBuffer())
+    const parts = [
+      new Blob([toPcm16(samples.slice(0, 3))]),
+      new Blob([toPcm16(samples.slice(3, 4))]),
+      new Blob([toPcm16(samples.slice(4))]),
+    ]
+    const assembled = new Uint8Array(await encodeWavPcm16Blobs(parts, 48000).arrayBuffer())
+    expect(assembled).toEqual(whole)
+  })
+
+  it("sizes the header from the total of every part, and is a bare header when empty", async () => {
+    const dv = await bytes(encodeWavPcm16Blobs([new Blob([toPcm16(samples)])], 44100))
+    expect(dv.getUint32(4, true)).toBe(36 + samples.length * 2)
+    expect(dv.getUint32(24, true)).toBe(44100)
+    expect(dv.getUint32(40, true)).toBe(samples.length * 2)
+    expect(encodeWavPcm16Blobs([], 48000).size).toBe(44)
   })
 })

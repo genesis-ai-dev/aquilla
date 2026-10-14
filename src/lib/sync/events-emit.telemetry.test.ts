@@ -60,7 +60,7 @@ function captured(name: string): Record<string, unknown>[] {
 
 // An opaque UUID: only such a cell id is ever sent (see review-events.ts).
 const CELL_ID = "01a0f305-61ea-7cfd-8a03-dab4dfb4010a"
-const CELL = { projectId: "p1", fileId: "f1", cellId: CELL_ID, author: "tester" }
+const CELL = { projectId: "p1", fileId: "f1", cellId: CELL_ID, author: "tester", targetLang: "" }
 
 beforeEach(() => {
   mockCapture.mockClear()

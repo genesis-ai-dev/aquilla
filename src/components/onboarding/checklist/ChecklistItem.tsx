@@ -24,6 +24,16 @@ interface ChecklistItemProps {
  *
  * Visual language matches SettingsRow / SettingsGroup: a divide-y list row,
  * not a standalone tinted card. Completion is a status icon, not a wash.
+ *
+ * AQU-1197: an OPEN row is the exception. Collapsed, every row is the same
+ * `bg-card` surface as the settings rows beside it; expanded, the row's body
+ * used to continue that same surface, so the only thing between an open
+ * step's content and the next collapsed step was the list's own hairline
+ * divider — the eye could not tell where the expanded section ended. Opening
+ * now contains the row: a tinted surface bounded by a divider under its own
+ * header, so the open step reads as a panel and the next setting is visibly
+ * outside it. Tint plus outline rather than elevation, because this UI uses
+ * almost no shadows.
  */
 export function ChecklistItem({
   title,
@@ -43,12 +53,19 @@ export function ChecklistItem({
   }, [complete])
 
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
+      className={cn(open && "bg-muted/30")}
+    >
       <CollapsibleTrigger asChild>
         <button
           type="button"
           aria-expanded={open}
-          className="flex w-full items-start gap-3 px-4 py-3 text-start hover:bg-muted/40"
+          className={cn(
+            "flex w-full items-start gap-3 px-4 py-3 text-start hover:bg-muted/40",
+            open && "border-b",
+          )}
         >
           <CompletionIcon complete={complete} />
           <div className="min-w-0 flex-1 space-y-1">
@@ -74,7 +91,7 @@ export function ChecklistItem({
           />
         </button>
       </CollapsibleTrigger>
-      <CollapsibleContent className="px-4 pb-4">
+      <CollapsibleContent className="px-4 pb-4 pt-3">
         {children}
       </CollapsibleContent>
     </Collapsible>

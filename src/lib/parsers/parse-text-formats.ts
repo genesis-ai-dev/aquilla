@@ -22,6 +22,7 @@ import { extractPoStrings } from "./po"
 import { extractPropertiesStrings } from "./properties"
 import { extractSbvStrings } from "./sbv"
 import type { CellUnit, ParsedTextFileResult, TranslatableString } from "./core-types"
+import { checkUsfmStructure, type UsfmStructureFinding } from "./usfm-structure-check"
 
 /** DOM-free file types handled by this module (and therefore the parse worker). */
 export type TextParseFileType = "txt" | "md" | "json" | "po" | "properties" | "obs" | "vtt" | "srt" | "sbv" | "csv" | "tsv" | "usfm"
@@ -70,6 +71,10 @@ export function usfmSectionToStrings(
   bookId: string
   strings: TranslatableString[]
   duplicateRefs: string[]
+  /** Paratext-parity structure findings for this section (AQU-1731). Computed
+   *  here so BOTH USFM import paths — plain single-file and per-book Paratext
+   *  project — report the same findings from one place. */
+  structureFindings: UsfmStructureFinding[]
 } {
   const doc = parseUsfmLossless(section, { excludeFrontMatter: opts?.excludeFrontMatter })
   const bookId = doc.bookId || "unknown"
@@ -112,7 +117,7 @@ export function usfmSectionToStrings(
     type: s.type,
     ...(s.paragraphStart ? { paragraphStart: true } : {}),
   }))
-  return { bookId, strings, duplicateRefs }
+  return { bookId, strings, duplicateRefs, structureFindings: checkUsfmStructure(section) }
 }
 
 /**
@@ -153,20 +158,19 @@ export function parseTextFormat(req: TextParseRequest): ParsedTextFileResult[] {
         ? text.split(/(?=\\id\s)/).filter((s) => s.trim().length > 0)
         : [text]
       return sections.map((section) => {
-        const { bookId, strings, duplicateRefs } = usfmSectionToStrings(section, {
+        const { bookId, strings, structureFindings } = usfmSectionToStrings(section, {
           excludeFrontMatter,
         })
-        if (duplicateRefs.length > 0) {
-          console.warn(
-            `[usfm import] ${name}: ${duplicateRefs.length} duplicate verse ref(s) — ` +
-              `${duplicateRefs.slice(0, 5).join(", ")}${duplicateRefs.length > 5 ? `, +${duplicateRefs.length - 5} more` : ""}`,
-          )
-        }
+        // AQU-1731: duplicate refs used to reach a `console.warn` here and
+        // nowhere else. They are now `verse-duplicate` findings alongside the
+        // rest of the chapter/verse and marker checks, carried to the import
+        // preview so a broken file is reported before anyone translates it.
         return {
           name: name === bookId ? bookId : sections.length > 1 ? bookId : name,
           strings,
           rawSource: section,
           rawSourceFormat: "usfm",
+          ...(structureFindings.length > 0 ? { structureFindings } : {}),
         }
       })
     }

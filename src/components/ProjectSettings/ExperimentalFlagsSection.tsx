@@ -26,6 +26,7 @@ import { Switch } from "@/components/ui/switch"
 import { SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { DisabledFieldTooltip } from "./DisabledFieldTooltip"
 import { FLAGS } from "@/lib/features/flags"
+import { CheckingLinkCreator } from "@/components/checking/CheckingLinkCreator"
 import { AUTOPILOT_EDIT_ROLE_FLOOR } from "@/hooks/useProjectSettings"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { getProject, patchProject, updateProject } from "@/lib/store/project-index"
@@ -131,6 +132,7 @@ export function ExperimentalFlagsSection({
           />
         ))}
       </SettingsGroup>
+      {flags?.communityChecking === true && <CheckingLinkCreator key={projectId} projectId={projectId} />}
       <p className="mt-2 px-4 text-xs text-muted-foreground">
         {t("autopilot.settings.experimentalDescription")}
       </p>

@@ -65,6 +65,11 @@ export interface EditorCapabilities {
 export const DCS_SOURCE_LOCK_REASON =
   "Source is synced from Door43 — a maintainer can detach it in Project Settings."
 
+/** Banner copy for a member whose lane has been archived (AQU-1463). */
+export function archivedLaneReadOnlyLabel(laneLabel: string): string {
+  return `${laneLabel} is archived — read-only. You can still read, search, export and comment.`
+}
+
 export interface EditorCapabilityOpts {
   /**
    * True while the project's settings carry a `dcsUpstream` cursor (Door43-
@@ -77,6 +82,18 @@ export interface EditorCapabilityOpts {
    * delays the affordance for cloud project_lead+ users by one settings GET.
    */
   hasDcsUpstream?: boolean
+  /**
+   * AQU-1463: the label of the archived lane the editor is pointed at, or null
+   * when the active lane is open for business.
+   *
+   * An archived lane is frozen for EVERY role — AQU-1462 has the sync-worker
+   * refuse a write that names one, Maintainer included — so this overrides the
+   * role ladder below rather than being folded into it: a project lead sitting
+   * in an archived lane is as read-only as a viewer. It covers the target side
+   * only. Source editing, comments, reading, search and export are not lane
+   * writes and stay exactly as the caller's role leaves them.
+   */
+  archivedLaneLabel?: string | null
 }
 
 export function resolveEditorCapabilities(
@@ -85,6 +102,7 @@ export function resolveEditorCapabilities(
 ): EditorCapabilities {
   const level = project?.syncRole?.level ?? null
   const hasDcsUpstream = opts?.hasDcsUpstream === true
+  const archivedLaneLabel = opts?.archivedLaneLabel ?? null
   // Source editing: cloud project_lead+ (500), never on a live-linked
   // downstream, never while pinned to a DCS upstream (see EditorCapabilityOpts).
   const canEditSource =
@@ -93,6 +111,20 @@ export function resolveEditorCapabilities(
     project?.sourceLinkMode !== "live" &&
     !hasDcsUpstream
   const sourceReadOnlyReason = hasDcsUpstream ? DCS_SOURCE_LOCK_REASON : null
+
+  // AQU-1463: an archived lane is frozen for every role, so the target-side
+  // answer is no before the role ladder is consulted. `canEditSource` and the
+  // source reason are computed above and ride through untouched — archiving a
+  // target lane says nothing about the source lane.
+  if (archivedLaneLabel !== null) {
+    return {
+      canEdit: false,
+      canValidate: false,
+      canEditSource,
+      sourceReadOnlyReason,
+      readOnlyLabel: archivedLaneReadOnlyLabel(archivedLaneLabel),
+    }
+  }
 
   // Local project (no syncRole): full edit, no badge.
   // Also covers git-imported projects that carry a ProjectPermissions object.
@@ -155,8 +187,9 @@ export function useEditorCapabilities(
   opts?: EditorCapabilityOpts,
 ): EditorCapabilities {
   const hasDcsUpstream = opts?.hasDcsUpstream
+  const archivedLaneLabel = opts?.archivedLaneLabel ?? null
   return useMemo(
-    () => resolveEditorCapabilities(project, { hasDcsUpstream }),
-    [project, hasDcsUpstream],
+    () => resolveEditorCapabilities(project, { hasDcsUpstream, archivedLaneLabel }),
+    [project, hasDcsUpstream, archivedLaneLabel],
   );
 }

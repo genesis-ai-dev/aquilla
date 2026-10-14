@@ -21,10 +21,12 @@
 
 import { audioObjectKey, isPathSafeId, r2KeyPrefix, safeAudioContentType } from "./audio"
 import { verifyTokenForFile, verifyTokenForProject, WRITE_ROLE_LEVEL } from "./auth"
+import { checkAiSpendCeiling } from "../../db/shared/ai-spend-ceiling"
 // Shared with the Inworld proxy: both bound their one upstream subrequest with
 // AbortSignal.timeout and need the same DOMException check to tell a blown
 // deadline apart from a dead upstream.
 import { isAbortTimeout } from "./inworld-tts"
+import { logVendorTimeout, VENDOR_TIMEOUT_MS } from "../../shared/vendor-timeouts"
 import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../db/shared/rate-limit"
 
 export interface VoiceConvertEnv {
@@ -35,8 +37,13 @@ export interface VoiceConvertEnv {
   SEED_VC_URL?: string
   /** Shared secret matching the Modal `seed-vc-auth` secret's SEED_VC_TOKEN. */
   SEED_VC_TOKEN?: string
-  /** Postgres shim — backs the per-user conversion throttle (AQU-1854). */
+  /** Postgres shim — backs the per-user conversion throttle (AQU-1854)
+   *  and the platform spend ceiling (AQU-1869). */
   AQUILLA_PG?: AquillaDb
+  /** Platform-wide daily AI spend ceiling in USD (AQU-1869). */
+  AI_DAILY_SPEND_CEILING_USD?: string
+  /** Deployment profile; "test" bypasses the spend-ceiling read cache. */
+  ENVIRONMENT?: string
 }
 
 // AQU-1854: ceiling on every clip this route buffers. Conversion is the one
@@ -58,8 +65,11 @@ export const MAX_VOICE_CONVERT_REQUEST_BYTES = MAX_VOICE_CLIP_BYTES + 1024 * 102
  * diffusion steps, far below Modal's own 600 s function timeout — so a hung
  * GPU returns this 504 instead of pinning a Worker invocation until the
  * platform kills it with no diagnosis.
+ *
+ * AQU-1849: the number moved to `shared/vendor-timeouts.ts` alongside every
+ * other vendor deadline; the name stays for the callers and tests using it.
  */
-export const SEED_VC_REQUEST_TIMEOUT_MS = 120_000
+export const SEED_VC_REQUEST_TIMEOUT_MS = VENDOR_TIMEOUT_MS.modalVoiceConvert
 
 /**
  * AQU-1854: per-user sliding window (15 min, shared primitive with the TTS and
@@ -267,6 +277,14 @@ export async function handleVoiceConvertRequest(
   }
   await recordRateLimitEvent(db, "voice_convert", rateLimitIdentifier)
 
+  // Platform daily spend ceiling (AQU-1869). Checked before the R2 reads and
+  // the Modal call: a conversion starts an L40S GPU container, and the point
+  // of the ceiling is that nothing paid starts once the floor is hit.
+  const spendCeiling = await checkAiSpendCeiling(db, env, "voice-convert")
+  if (!spendCeiling.ok) {
+    return Response.json(spendCeiling.body, { status: spendCeiling.status })
+  }
+
   // Resolve the source clip: inline upload, or an existing R2 recording.
   //
   // AQU-1854: both branches hand Modal the Blob they already hold rather than
@@ -324,7 +342,7 @@ export async function handleVoiceConvertRequest(
     })
   } catch (err) {
     if (isAbortTimeout(err)) {
-      console.error("[voice-convert] upstream timed out:", err)
+      logVendorTimeout("modalVoiceConvert", err)
       return new Response(
         `voice conversion upstream did not respond within ${Math.round(SEED_VC_REQUEST_TIMEOUT_MS / 1000)}s`,
         { status: 504 },

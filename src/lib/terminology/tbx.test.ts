@@ -77,3 +77,55 @@ describe("TBX import robustness", () => {
     expect(concepts[0].match?.forms).toEqual(["אֶרֶץ"])
   })
 })
+
+describe("TBX Bible entity link (AQU-1693)", () => {
+  // WHY: the link is what makes Voices and Who's Who name Jesus "Yesus" when
+  // the source has no label to match by. A termbase exported, shared and
+  // re-imported must keep it, or every link silently has to be made again.
+  const jesus: Concept = {
+    id: "c-jesus",
+    sourceTerm: "Ἰησοῦς",
+    renderings: [{ rendering: "Yesus", status: "preferred" }],
+    status: "active",
+    createdAt: "2026-10-06T00:00:00.000Z",
+    externalIds: { acai: "person:Jesus.2" },
+  }
+
+  it("round-trips the link as a concept-level externalCrossReference", () => {
+    const xml = exportConceptsTbx([jesus])
+    expect(xml).toContain('<xref type="externalCrossReference" target="acai:person:Jesus.2">')
+    const [back] = importConceptsTbx(xml)
+    expect(back.externalIds).toEqual({ acai: "person:Jesus.2" })
+  })
+
+  it("an unlinked concept exports no xref and imports without a link", () => {
+    const xml = exportConceptsTbx([{ ...jesus, externalIds: undefined }])
+    expect(xml).not.toContain("<xref")
+    expect(importConceptsTbx(xml)[0]).not.toHaveProperty("externalIds")
+  })
+
+  // WHY: other TBX tools write their own cross-references (web links, and
+  // xrefs on single terms). Only an `acai:` target on the concept is a link.
+  it("reads the acai target in any attribute order and ignores other xrefs", () => {
+    const xml = `<martif><text><body>
+      <termEntry id="c-1">
+        <xref target="https://example.org/jesus" type="externalCrossReference">web</xref>
+        <xref target="acai:place:Jerusalem" type="externalCrossReference">ACAI</xref>
+        <langSet xml:lang="source"><tig><term>Jerusalem</term></tig></langSet>
+      </termEntry>
+      <termEntry id="c-2">
+        <langSet xml:lang="source"><tig><term>Samaria</term>
+          <xref type="externalCrossReference" target="acai:place:Samaria">term-level</xref>
+        </tig></langSet>
+      </termEntry>
+      <termEntry id="c-3">
+        <xref type="externalCrossReference" target="acai:not an id">bad</xref>
+        <langSet xml:lang="source"><tig><term>Sychar</term></tig></langSet>
+      </termEntry>
+    </body></text></martif>`
+    const [jerusalem, samaria, sychar] = importConceptsTbx(xml)
+    expect(jerusalem.externalIds).toEqual({ acai: "place:Jerusalem" })
+    expect(samaria).not.toHaveProperty("externalIds")
+    expect(sychar).not.toHaveProperty("externalIds")
+  })
+})

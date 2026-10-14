@@ -667,6 +667,11 @@ export function planLaneBatch(
   const projects = focus ? snapshot.projects.filter((project) => project.id === focus) : snapshot.projects
 
   for (const project of projects) {
+    // Every row this project reports is filed under the same identity, so the
+    // call sites below name only what differs: the rule, the key and the reason.
+    const unresolved = (rule: UnresolvableRow["rule"], key: string, reason: string): void => {
+      unresolvable.push({ rule, projectId: project.id, projectName: project.name, key, reason })
+    }
     const names = new Map<string, { display: string; laneIds: string[] }>()
     for (const lane of project.lanes) {
       counts.lanes.examined += 1
@@ -758,16 +763,13 @@ export function planLaneBatch(
             counts.scopes.two += 1
             scopeTwo.push(row)
           }
-          unresolvable.push({
-            rule: "scopes",
-            projectId: project.id,
-            projectName: project.name,
-            key: `user:${userId} value:${scope.value}`,
-            reason:
-              match.matches === 0
-                ? "scope tag matches zero lanes"
-                : `scope tag matches ${match.matches} lanes`,
-          })
+          unresolved(
+            "scopes",
+            `user:${userId} value:${scope.value}`,
+            match.matches === 0
+              ? "scope tag matches zero lanes"
+              : `scope tag matches ${match.matches} lanes`,
+          )
           continue
         }
         if (scope.value === match.laneId) {
@@ -804,13 +806,7 @@ export function planLaneBatch(
     for (const invite of project.invites) {
       counts.invites.examined += 1
       if (invite.scopeLanesInvalid) {
-        unresolvable.push({
-          rule: "invites",
-          projectId: project.id,
-          projectName: project.name,
-          key: "invite",
-          reason: "scope_lanes is not a JSON array of strings",
-        })
+        unresolved("invites", "invite", "scope_lanes is not a JSON array of strings")
         continue
       }
       if (invite.scopeLanes === null) {
@@ -837,16 +833,13 @@ export function planLaneBatch(
             counts.invites.two += 1
             scopeTwo.push(row)
           }
-          unresolvable.push({
-            rule: "invites",
-            projectId: project.id,
-            projectName: project.name,
-            key: `invite value:${value}`,
-            reason:
-              match.matches === 0
-                ? "scope tag matches zero lanes"
-                : `scope tag matches ${match.matches} lanes`,
-          })
+          unresolved(
+            "invites",
+            `invite value:${value}`,
+            match.matches === 0
+              ? "scope tag matches zero lanes"
+              : `scope tag matches ${match.matches} lanes`,
+          )
           if (!seen.has(value)) {
             seen.add(value)
             next.push(value)
@@ -891,24 +884,16 @@ export function planLaneBatch(
       }
       if (!resolved) {
         counts.links.unresolved += 1
-        unresolvable.push({
-          rule: "links",
-          projectId: project.id,
-          projectName: project.name,
-          key: `upstream:${project.sourceProjectId ?? ""}`,
-          reason: problem ?? "link lane unresolved",
-        })
+        unresolved("links", `upstream:${project.sourceProjectId ?? ""}`, problem ?? "link lane unresolved")
       } else if (project.sourceLinkLaneId === resolved) {
         counts.links.already += 1
       } else if (project.sourceLinkLaneId) {
         counts.links.conflict += 1
-        unresolvable.push({
-          rule: "links",
-          projectId: project.id,
-          projectName: project.name,
-          key: `upstream:${project.sourceProjectId}`,
-          reason: `source_link_lane_id is already ${project.sourceLinkLaneId}, which is not the backfill lane ${resolved}`,
-        })
+        unresolved(
+          "links",
+          `upstream:${project.sourceProjectId}`,
+          `source_link_lane_id is already ${project.sourceLinkLaneId}, which is not the backfill lane ${resolved}`,
+        )
       } else {
         counts.links.filled += 1
         writes.push({ table: "projects", projectId: project.id, sourceLinkLaneId: resolved })
@@ -923,13 +908,7 @@ export function planLaneBatch(
       if (!assigned.ok) {
         counts.audio.unresolved += 1
         takeLane.set(key, null)
-        unresolvable.push({
-          rule: "audio",
-          projectId: project.id,
-          projectName: project.name,
-          key: `${take.fileId}/${take.cellId}/${take.audioId}`,
-          reason: assigned.reason,
-        })
+        unresolved("audio", `${take.fileId}/${take.cellId}/${take.audioId}`, assigned.reason)
         continue
       }
       const stored = noteStoredLane(take.laneId, assigned.laneId)
@@ -937,13 +916,11 @@ export function planLaneBatch(
       takeLane.set(key, kept)
       if (stored === "conflict") {
         counts.audio.conflict += 1
-        unresolvable.push({
-          rule: "audio",
-          projectId: project.id,
-          projectName: project.name,
-          key: `${take.fileId}/${take.cellId}/${take.audioId}`,
-          reason: `lane_id is already ${take.laneId}, which is not ${assigned.laneId}`,
-        })
+        unresolved(
+          "audio",
+          `${take.fileId}/${take.cellId}/${take.audioId}`,
+          `lane_id is already ${take.laneId}, which is not ${assigned.laneId}`,
+        )
         continue
       }
       if (assigned.rule === "sourceRole") counts.audio.byRule.sourceRole += 1
@@ -971,13 +948,11 @@ export function planLaneBatch(
       const laneId = takeLane.get(key)
       if (!laneId) {
         counts.audioValidators.unresolved += 1
-        unresolvable.push({
-          rule: "audioValidators",
-          projectId: project.id,
-          projectName: project.name,
-          key: `${vote.fileId}/${vote.cellId}/${vote.audioId}/${vote.username}`,
-          reason: laneId === null ? "the take's lane is unresolved" : "no audio take for this vote",
-        })
+        unresolved(
+          "audioValidators",
+          `${vote.fileId}/${vote.cellId}/${vote.audioId}/${vote.username}`,
+          laneId === null ? "the take's lane is unresolved" : "no audio take for this vote",
+        )
         continue
       }
       const stored = noteStoredLane(vote.laneId, laneId)
@@ -987,13 +962,11 @@ export function planLaneBatch(
       }
       if (stored === "conflict") {
         counts.audioValidators.unresolved += 1
-        unresolvable.push({
-          rule: "audioValidators",
-          projectId: project.id,
-          projectName: project.name,
-          key: `${vote.fileId}/${vote.cellId}/${vote.audioId}/${vote.username}`,
-          reason: `lane_id is already ${vote.laneId}, which is not the take's lane ${laneId}`,
-        })
+        unresolved(
+          "audioValidators",
+          `${vote.fileId}/${vote.cellId}/${vote.audioId}/${vote.username}`,
+          `lane_id is already ${vote.laneId}, which is not the take's lane ${laneId}`,
+        )
         continue
       }
       counts.audioValidators.filled += 1
@@ -1014,25 +987,13 @@ export function planLaneBatch(
       const key = `${row.fileId}/${row.cellId}/${row.targetEventId}`
       if (!assigned.ok) {
         counts.backtranslations.unresolved += 1
-        unresolvable.push({
-          rule: "backtranslations",
-          projectId: project.id,
-          projectName: project.name,
-          key,
-          reason: assigned.reason,
-        })
+        unresolved("backtranslations", key, assigned.reason)
         continue
       }
       const stored = noteStoredLane(row.laneId, assigned.laneId)
       if (stored === "conflict") {
         counts.backtranslations.conflict += 1
-        unresolvable.push({
-          rule: "backtranslations",
-          projectId: project.id,
-          projectName: project.name,
-          key,
-          reason: `lane_id is already ${row.laneId}, which is not ${assigned.laneId}`,
-        })
+        unresolved("backtranslations", key, `lane_id is already ${row.laneId}, which is not ${assigned.laneId}`)
         continue
       }
       if (assigned.rule === "eventLaneId") counts.backtranslations.byRule.eventLaneId += 1
@@ -1062,13 +1023,7 @@ export function planLaneBatch(
       const list = renderingList(concept.renderings)
       if (!list) {
         counts.concepts.unresolved += 1
-        unresolvable.push({
-          rule: "concepts",
-          projectId: project.id,
-          projectName: project.name,
-          key: concept.conceptId,
-          reason: "renderings are not a list of objects",
-        })
+        unresolved("concepts", concept.conceptId, "renderings are not a list of objects")
         continue
       }
       const missing = list.some((item) => {
@@ -1077,13 +1032,11 @@ export function planLaneBatch(
       })
       if (!bridge && missing) {
         counts.concepts.unresolved += 1
-        unresolvable.push({
-          rule: "concepts",
-          projectId: project.id,
-          projectName: project.name,
-          key: concept.conceptId,
-          reason: "rendering has no laneId and the project has no target lane with legacy_tag ''",
-        })
+        unresolved(
+          "concepts",
+          concept.conceptId,
+          "rendering has no laneId and the project has no target lane with legacy_tag ''",
+        )
         continue
       }
       const stamped = stampRenderingLanes(list, bridge)
@@ -1103,13 +1056,7 @@ export function planLaneBatch(
     const source = sourceLane(project)
     const laneIds = new Set(project.lanes.map((lane) => lane.id))
     if (!source && project.files.length > 0) {
-      unresolvable.push({
-        rule: "progress",
-        projectId: project.id,
-        projectName: project.name,
-        key: "source-lane",
-        reason: "project has no source lane for source totals",
-      })
+      unresolved("progress", "source-lane", "project has no source lane for source totals")
     }
     const sourceFiles = new Set(
       project.progress
@@ -1124,13 +1071,11 @@ export function planLaneBatch(
     for (const row of project.progress) {
       if (laneIds.has(row.laneId)) continue
       counts.progress.orphanRows += 1
-      unresolvable.push({
-        rule: "progress",
-        projectId: project.id,
-        projectName: project.name,
-        key: `${row.fileId}/${row.scope}/${row.sectionKey}/${row.laneId}`,
-        reason: "progress row's lane_id is not a lane of this project",
-      })
+      unresolved(
+        "progress",
+        `${row.fileId}/${row.scope}/${row.sectionKey}/${row.laneId}`,
+        "progress row's lane_id is not a lane of this project",
+      )
     }
   }
 

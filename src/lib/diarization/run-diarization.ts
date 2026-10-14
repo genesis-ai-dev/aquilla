@@ -91,7 +91,19 @@ async function startJob(args: RunDiarizationArgs, audioObject: string): Promise<
     signal: args.signal,
   })
   if (!res.ok) {
-    throw new Error(`diarization start failed (${res.status}): ${(await res.text().catch(() => "")).slice(0, 200)}`)
+    const raw = await res.text().catch(() => "")
+    // AQU-1855: /start refuses with 429 + `{error}` when the user or the project
+    // is already holding the cap of live diarization jobs. Surface that sentence
+    // — it tells the user what to do ("wait for one to finish") — rather than the
+    // raw JSON blob the message used to carry.
+    let detail = raw.slice(0, 200)
+    try {
+      const parsed = JSON.parse(raw) as { error?: unknown }
+      if (typeof parsed.error === "string" && parsed.error.length > 0) detail = parsed.error
+    } catch {
+      // Not JSON (a plain-text 401/403 from the token check) — keep the body.
+    }
+    throw new Error(`diarization start failed (${res.status}): ${detail}`)
   }
   const body = (await res.json()) as { jobId?: string }
   if (!body.jobId) throw new Error("diarization start returned no jobId")

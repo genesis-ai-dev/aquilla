@@ -13,6 +13,7 @@ import {
   normalizeAquiferPath,
 } from "../lib/aquifer/client"
 import type { Env } from "../types"
+import { VENDOR_TIMEOUT_MS } from "../../../shared/vendor-timeouts"
 
 const ENV = { AQUIFER_BASE_URL: "https://bibletranslation.org" } as Env
 
@@ -131,4 +132,48 @@ describe("aquiferPublishAnswer", () => {
     const init = spy.mock.calls[0][1] as RequestInit
     expect(init.method).toBe("POST")
   })
+})
+
+// ── AQU-1849: the deadline, end to end against a hanging stub ───────────────
+//
+// The Aquifer client already bounded its own fetch; what this ticket changed
+// is that the value now comes from the shared registry and a blown deadline is
+// logged with the vendor's name and surfaced in the error text. Run against
+// the REAL `aquifer` deadline (the shortest in the registry) with real timers,
+// so this is the ticket's "point the vendor at a hanging stub, time the error"
+// check rather than a simulation of it.
+describe("aquifer deadline (AQU-1849)", () => {
+  it(
+    "gives up within its own deadline and names the vendor, instead of hanging",
+    async () => {
+      const log = vi.spyOn(console, "error").mockImplementation(() => {})
+      // Accepts the request, answers only when the client's own signal aborts.
+      vi.spyOn(globalThis, "fetch").mockImplementation(
+        ((_url: string, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            const signal = init?.signal
+            if (!signal) return // no deadline would mean a real hang
+            signal.addEventListener("abort", () =>
+              reject(new DOMException("aborted", "AbortError")),
+            )
+          })) as unknown as typeof globalThis.fetch,
+      )
+
+      const startedAt = Date.now()
+      const res = await aquiferSearch(ENV, "chesed")
+      const elapsed = Date.now() - startedAt
+
+      expect(res.ok).toBe(false)
+      if (!res.ok) {
+        expect(res.error).toContain("aquifer")
+        expect(res.error).toContain(`${VENDOR_TIMEOUT_MS.aquifer / 1000}s`)
+      }
+      // Bounded by the deadline, not by the caller giving up.
+      expect(elapsed).toBeLessThan(VENDOR_TIMEOUT_MS.aquifer * 3)
+      expect(
+        log.mock.calls.some((c) => String(c[0]).includes("[vendor-timeout] aquifer")),
+      ).toBe(true)
+    },
+    VENDOR_TIMEOUT_MS.aquifer + 20_000,
+  )
 })

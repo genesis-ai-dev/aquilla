@@ -1313,6 +1313,9 @@ CREATE TABLE IF NOT EXISTS org_credit_usage_daily (
   PRIMARY KEY (org_id, user_id, date_utc, rail)
 );
 CREATE INDEX IF NOT EXISTS idx_org_credit_org_date ON org_credit_usage_daily (org_id, date_utc);
+-- Platform-wide daily spend ceiling sums one UTC day across every org, so it
+-- has no org predicate to use the composite index above (0167, AQU-1869).
+CREATE INDEX IF NOT EXISTS idx_org_credit_date ON org_credit_usage_daily (date_utc);
 
 -- Translation agent run ledger (0040_agent_runs.sql). One row per
 -- POST /api/v1/ai/agent/run; staged commits carry payload.agent_run_id →
@@ -2717,3 +2720,25 @@ CREATE TABLE IF NOT EXISTS checking_links (
   created_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS checking_links_project ON checking_links(project_id);
+
+-- ──────────────────────── side-effect queue ledger ────────────────────────
+
+-- AQU-1824: idempotency ledger for the side-effect queue (sync-worker
+-- src/side-effects/). One row per delivery — for comment mail the unit is
+-- (comment, recipient user) — so a queue retry or a duplicate delivery never
+-- performs the same side effect twice. See
+-- db/postgres/migrations/0168_side_effect_deliveries.sql for the status
+-- semantics and why a `pending` row is retried rather than skipped.
+CREATE TABLE side_effect_deliveries (
+    idempotency_key TEXT PRIMARY KEY,
+    kind            TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'pending'
+                      CHECK (status IN ('pending', 'sent', 'failed')),
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    last_error      TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_side_effect_deliveries_created_at
+    ON side_effect_deliveries (created_at);

@@ -201,7 +201,9 @@ export type ProjectWsClientMessage =
   | { t: "focus.claim"; cellId: string; leaseMs?: number }
   | { t: "focus.renew"; cellId: string }
   | { t: "focus.release"; cellId: string }
-  /** Heartbeat; the DO answers `pong`. Sent by the reconciler itself. */
+  /** Heartbeat; the DO answers `pong`. Sent by the reconciler itself.
+   *  `ts` is accepted by the worker for older clients but no longer sent —
+   *  see PING_FRAME. */
   | { t: "ping"; ts?: number }
   /**
    * AQU-1839: a freshly minted sync token for this open socket, sent by the
@@ -304,6 +306,19 @@ let serverPongSeen = false
 export function __resetHeartbeatForTests(): void {
   serverPongSeen = false
 }
+
+/**
+ * AQU-1836: the heartbeat frame is a byte-stable constant so the project DO
+ * can register it with `setWebSocketAutoResponse` and the Cloudflare runtime
+ * can answer it without waking a hibernating Durable Object — an exact string
+ * match, so a per-ping `ts` (what this used to send) can never match. Nothing
+ * read that echo anyway: a pong only proves the server answers pings
+ * (`serverPongSeen`), and liveness is tracked from any received frame.
+ *
+ * Keep in sync with AUTO_RESPONSE_PING_FRAME in
+ * `sync-worker/src/project-do-hibernation.ts`.
+ */
+const PING_FRAME = JSON.stringify({ t: "ping" } satisfies ProjectWsClientMessage)
 
 /** Cheap pre-check before a JSON.parse: `pong` frames are tiny. */
 function isPongFrame(raw: string): boolean {
@@ -645,7 +660,7 @@ export function createWsReconciler(
       }
       const sentAt = Date.now()
       try {
-        ws.send(JSON.stringify({ t: "ping", ts: sentAt } satisfies ProjectWsClientMessage))
+        ws.send(PING_FRAME)
       } catch {
         /* a failing send surfaces through onerror/onclose */
       }

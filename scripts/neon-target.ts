@@ -41,7 +41,7 @@ const DEFAULTS: Partial<Record<PgKey, string>> = {
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
 function usage(): never {
-  console.error("usage: tsx scripts/neon-target.ts <production|dev|local> <status|apply|baseline|prepare-comments-key|backfill-progress|backfill-activity|backfill-lanes|backfill-lane-batch|verify-lanes>")
+  console.error("usage: tsx scripts/neon-target.ts <production|dev|local> <status|apply|baseline|prepare-comments-key|backfill-progress|backfill-activity|backfill-lanes|backfill-lane-batch|prune-phantom-voices|verify-lanes>")
   console.error(`       production apply requires ${SNAPSHOT_FLAG} (take a Neon snapshot branch first) or ${NO_SNAPSHOT_FLAG}`)
   process.exit(1)
 }
@@ -54,7 +54,7 @@ function parseTarget(value: string | undefined): Target {
 }
 
 function parseCommand(value: string | undefined): Command {
-  if (value === "prepare-comments-key" || value === "status" || value === "apply" || value === "baseline" || value === "backfill-progress" || value === "backfill-activity" || value === "backfill-lanes" || value === "backfill-lane-batch" || value === "verify-lanes") return value
+  if (value === "prepare-comments-key" || value === "status" || value === "apply" || value === "baseline" || value === "backfill-progress" || value === "backfill-activity" || value === "backfill-lanes" || value === "backfill-lane-batch" || value === "prune-phantom-voices" || value === "verify-lanes") return value
   usage()
 }
 
@@ -280,6 +280,11 @@ async function main() {
   const env = await resolvePgEnv(target)
   // The decision above is this run's; neon-migrate.ts must not ask again.
   env.AQUILLA_MIGRATION_SNAPSHOT_DECISION = `${target}:${command}`
+  // AQU-1941: which database the child is actually pointed at. A script holding
+  // raw NEON_PG_* credentials cannot tell, so a child that gates its own writes
+  // on "is this production?" reads this instead of guessing
+  // (scripts/phantom-voice-prune-gate.ts).
+  env.AQUILLA_NEON_TARGET = target
   const args = childArgs(command, passthrough)
   console.log(`neon-target ${target} ${command}${passthrough.length ? " " + passthrough.join(" ") : ""} -> ${target === "local" ? "local Postgres" : env.NEON_PG_HOST}`)
   process.exit(await run("tsx", args, env))

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { throwIfElevationRequired } from "./elevation"
+import { notifyElevationRequiredIfCurrent, throwIfElevationRequired } from "./elevation"
+import type { FrontierSession } from "./types"
 import { addTeamMember } from "./teams"
 import { addProjectMember } from "./members"
 import { UserError } from "@/lib/errors/user-error"
@@ -51,6 +52,32 @@ describe("throwIfElevationRequired", () => {
   it("does nothing on a 200", async () => {
     await expect(throwIfElevationRequired(json("{}", 200))).resolves.toBeUndefined()
     expect(isElevationRequired()).toBe(false)
+  })
+})
+
+describe("notifyElevationRequiredIfCurrent (OPS-44)", () => {
+  const active = (jwt: string) => async () => ({ jwt }) as FrontierSession
+
+  it("raises the signal when the refused JWT is the active session's", async () => {
+    await notifyElevationRequiredIfCurrent("jwt-admin", active("jwt-admin"))
+    expect(isElevationRequired()).toBe(true)
+  })
+
+  it("stays quiet for another stored account: verifying would elevate the wrong session", async () => {
+    await notifyElevationRequiredIfCurrent("jwt-background", active("jwt-admin"))
+    expect(isElevationRequired()).toBe(false)
+  })
+
+  it("stays quiet when nobody is signed in", async () => {
+    await notifyElevationRequiredIfCurrent("jwt-admin", async () => null)
+    expect(isElevationRequired()).toBe(false)
+  })
+
+  it("raises the signal when the session store cannot be read", async () => {
+    await notifyElevationRequiredIfCurrent("jwt-admin", async () => {
+      throw new Error("idb closed")
+    })
+    expect(isElevationRequired()).toBe(true)
   })
 })
 

@@ -43,3 +43,21 @@ export function onElevationRequired(handler: (required: boolean) => void): () =>
   bus.addEventListener(ELEVATION_REQUIRED_EVENT, listener)
   return () => bus.removeEventListener(ELEVATION_REQUIRED_EVENT, listener)
 }
+
+const ELEVATION_GRANTED_EVENT = "elevation-granted"
+
+/**
+ * OPS-44: call once the emailed code verifies. Unlike the required signal this
+ * is a plain event, not a latch: work that was waiting on elevation (the outbox
+ * holds a project whose sync-token mint answered "elevation required") retries
+ * when it hears it, and a listener that mounts later has nothing to catch up on.
+ */
+export function notifyElevationGranted(): void {
+  bus.dispatchEvent(new Event(ELEVATION_GRANTED_EVENT))
+}
+
+/** Subscribe to successful step-ups. Returns an unsubscribe. */
+export function onElevationGranted(handler: () => void): () => void {
+  bus.addEventListener(ELEVATION_GRANTED_EVENT, handler)
+  return () => bus.removeEventListener(ELEVATION_GRANTED_EVENT, handler)
+}

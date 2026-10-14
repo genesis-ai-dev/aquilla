@@ -159,7 +159,7 @@ async function importResource(options: Record<string, unknown>, onlyBooks: strin
       const spec = specForTwl(entry, projectId, path, text, dcsBookOfPath(path) ?? "")
       if (spec) specs.push(spec)
     }
-    const r = await upsertAll(specs, (s) => s.name)
+    const r = await upsertAll(specs, (s) => s.label ?? s.name)
     return `${r.files} word-link file(s) from ${entry.fullName} ${entry.ref}; ${r.changed} changed.`
   }
 
@@ -179,7 +179,7 @@ async function importResource(options: Record<string, unknown>, onlyBooks: strin
       const s = specForTwCategory(entry, projectId, cat, articles)
       return s ? [s] : []
     })
-    const r = await upsertAll(specs, (s) => s.name)
+    const r = await upsertAll(specs, (s) => s.label ?? s.name)
     return `${r.files} Translation Words file(s) from ${entry.fullName} ${entry.ref}; ${r.changed} changed.`
   }
 
@@ -192,7 +192,8 @@ async function importResource(options: Record<string, unknown>, onlyBooks: strin
   let changed = 0
   let aligned = 0
   for (const [i, p] of planned.entries()) {
-    const spec = specForPlanned(entry, p)
+    const bookTitle = fetched.manifest.projects.find((m) => m.identifier.toUpperCase() === p.file.bookCode)?.title
+    const spec = specForPlanned(entry, p, bookTitle)
     await w.aquilla.import.progress(`Importing ${spec.name}`, 0.5 + (i / Math.max(1, planned.length)) * 0.5)
     const out = await w.aquilla.files.upsert({ ...spec, meta: metaOf(spec) })
     if (out.created || out.creates + out.commits + out.deletes > 0) changed++

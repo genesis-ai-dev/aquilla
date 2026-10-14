@@ -26,6 +26,7 @@
 // in sync-worker/src/events/authorize.ts; the client gate is a UX affordance,
 // not the security boundary.
 
+import { fileDisplayName } from "@/lib/file-display-name"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { UserCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -476,7 +477,8 @@ export function AssignModal({
     if (scopeKind === "books") {
       if (selectedFileIds.size === 0) { setError(t("dialog.assign.error.selectFile")); return }
       const entries = Array.from(selectedFileIds).map((fid) => {
-        const name = projectFiles.find((f) => f.id === fid)?.name ?? fid
+        const file = projectFiles.find((f) => f.id === fid)
+        const name = file ? fileDisplayName(file) : fid
         const groupLabel = groupLabelByFileId.get(fid)
         return { fileId: fid, scopeLabel: groupLabel ? `${groupLabel} · ${name}` : name }
       })
@@ -757,7 +759,7 @@ export function AssignModal({
                             onCheckedChange={() => toggleFile(f.id)}
                             className="size-3"
                           />
-                          {f.name}
+                          {fileDisplayName(f)}
                         </label>
                       ))}
                     </div>

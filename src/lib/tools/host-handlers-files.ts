@@ -17,7 +17,7 @@
  */
 
 import { BridgeError, type BridgeHandler } from "./host-bridge"
-import { parseFileExtension, type FileExtensionKind } from "../../../shared/tools/file-extension"
+import { MAX_FILE_LABEL_CHARS, parseFileExtension, parseFileLabel, type FileExtensionKind } from "../../../shared/tools/file-extension"
 
 export interface ToolFileView {
   fileId: string
@@ -29,6 +29,8 @@ export interface ToolFileView {
   group?: string | null
   owner?: string | null
   meta?: Record<string, unknown> | null
+  /** AQU-1937: the display label, when the extension set one. */
+  label?: string | null
 }
 
 export interface ToolFileFilter {
@@ -58,6 +60,8 @@ export interface ToolFileUpsert {
   tags: string[]
   group?: string
   meta?: Record<string, unknown>
+  /** AQU-1937: display label (files.meta.extension.label); the stored name is unchanged. */
+  label?: string
   /** The app's file type for the editor ("usfm", "tsv", "md", … default "custom"). */
   format?: string
   bookCode?: string
@@ -126,7 +130,10 @@ export interface ToolDeliveredFile {
 export interface ToolFilesHostData {
   listFilesFiltered: (filter: ToolFileFilter) => Promise<ToolFileView[]>
   upsertFile: (spec: ToolFileUpsert) => Promise<ToolUpsertResult>
-  setFileMeta: (fileId: string, patch: { tags?: string[]; kind?: FileExtensionKind; group?: string | null; meta?: Record<string, unknown> | null; name?: string }) => Promise<ToolFileView>
+  setFileMeta: (
+    fileId: string,
+    patch: { tags?: string[]; kind?: FileExtensionKind; group?: string | null; meta?: Record<string, unknown> | null; name?: string; label?: string | null },
+  ) => Promise<ToolFileView>
   fileSource: (fileId: string) => Promise<{ text: string } | null>
   fileGroup: (fileId: string) => Promise<{ key: string; files: ToolFileView[] } | null>
   cellsByRef: (query: { refs: string[]; prefix: string | null; fileIds: string[] | null; tags: string[] | null; lane: string }) => Promise<Record<string, ToolRefCell[]>>
@@ -191,7 +198,7 @@ function ns(params: Record<string, unknown>): { ns: string; coll: string } {
 
 function parseUpsert(params: unknown): ToolFileUpsert {
   const p = obj(params)
-  const ext = parseFileExtension({ kind: p.kind ?? "normal", tags: p.tags ?? [], group: p.group, meta: p.meta })
+  const ext = parseFileExtension({ kind: p.kind ?? "normal", tags: p.tags ?? [], group: p.group, meta: p.meta, label: p.label })
   if (!ext.ok) bad(ext.error)
   if (ext.value.kind === "data") bad('kind "data" is for aquilla.data.* — use "normal" or "reference" here')
   if (!Array.isArray(p.cells)) bad("cells must be a list")
@@ -237,6 +244,7 @@ function parseUpsert(params: unknown): ToolFileUpsert {
     cells,
     ...(ext.value.group ? { group: ext.value.group } : {}),
     ...(ext.value.meta ? { meta: ext.value.meta } : {}),
+    ...(ext.value.label ? { label: ext.value.label } : {}),
   }
   const bookCode = optStr(p.bookCode, "bookCode", 8)
   if (bookCode) out.bookCode = bookCode
@@ -314,6 +322,14 @@ export function createFilesHandlers(data: ToolFilesHostData): Record<string, Bri
         patch.meta = p.meta as Record<string, unknown> | null
       }
       if (p.name !== undefined) patch.name = str(p.name, "name", 200)
+      if (p.label !== undefined) {
+        if (p.label === null) patch.label = null
+        else {
+          const label = parseFileLabel(p.label)
+          if (label === null) bad(`label must be a string of 1-${MAX_FILE_LABEL_CHARS} printable characters, or null`)
+          patch.label = label
+        }
+      }
       return data.setFileMeta(fileId, patch)
     },
     "files.source": async (params) => data.fileSource(str(obj(params).fileId, "fileId")),

@@ -8,6 +8,7 @@
 // (TW) and Translation Words Links (TWL), which the built-in cannot import,
 // and word alignment kept as data, are BEYOND the built-in and live here.
 
+import { getBookName } from "../../file-labeling/bible-book-names"
 import type { DcsCatalogEntry } from "../types"
 import type { PlannedDcsFile } from "../import-plan"
 import { dcsCellId, dcsFileId } from "../cell-id"
@@ -18,6 +19,8 @@ export interface Door43UpsertSpec {
   fileId: string
   key: string
   name: string
+  /** AQU-1937: display label ("Titus · ULT"); `name` stays the built-in's. */
+  label?: string
   kind: "normal" | "reference"
   tags: string[]
   group?: string
@@ -54,13 +57,38 @@ function tagsFor(entry: DcsCatalogEntry, bookCode: string | undefined): string[]
   return ["door43", `door43:${entry.name}`, ...(bookCode ? [`book:${bookCode}`] : [])]
 }
 
-/** A built-in-parity file → its upsert spec (ids and cells unchanged). */
-export function specForPlanned(entry: DcsCatalogEntry, p: PlannedDcsFile): Door43UpsertSpec {
+/** What a Door43 resource is called in a file label. */
+export function resourceShortName(entry: DcsCatalogEntry): string {
+  const abbr = (entry.abbreviation ?? entry.name.split("_").pop() ?? entry.name).toUpperCase()
+  const subject = entry.subject.toLowerCase()
+  if (/translation words links/.test(subject)) return "Word links"
+  if (/translation notes/.test(subject)) return "Notes"
+  if (/translation questions/.test(subject)) return "Questions"
+  if (/greek new testament/.test(subject) || abbr === "UGNT") return `Greek (${abbr})`
+  if (/hebrew old testament/.test(subject) || abbr === "UHB") return `Hebrew (${abbr})`
+  return abbr
+}
+
+/** "Titus · ULT": the book's name (from the resource manifest, else the
+ *  canonical English name) and the resource. Null for book-less files. */
+export function door43FileLabel(entry: DcsCatalogEntry, bookCode: string | undefined, bookTitle?: string): string | undefined {
+  if (!bookCode) return undefined
+  const book = bookTitle?.trim() || getBookName(bookCode) || bookCode
+  return `${book} · ${resourceShortName(entry)}`
+}
+
+const TW_CATEGORY_LABEL: Record<string, string> = { kt: "Key terms", names: "Names", other: "Other" }
+
+/** A built-in-parity file → its upsert spec (ids, cells and name unchanged;
+ *  only the display label is added). */
+export function specForPlanned(entry: DcsCatalogEntry, p: PlannedDcsFile, bookTitle?: string): Door43UpsertSpec {
   const { file } = p
+  const label = door43FileLabel(entry, file.bookCode, bookTitle)
   return {
     fileId: file.fileId,
     key: `door43:${entry.fullName}:${p.sourcePath}`,
     name: file.name,
+    ...(label ? { label } : {}),
     kind: "normal",
     tags: tagsFor(entry, file.bookCode),
     ...(file.bookCode ? { group: `door43:${file.bookCode}` } : {}),
@@ -112,6 +140,7 @@ export function specForTwl(entry: DcsCatalogEntry, projectId: string, path: stri
     fileId: dcsFileId(projectId, entry.fullName, path),
     key: `door43:${entry.fullName}:${path}`,
     name: `${book} word links`,
+    ...(door43FileLabel(entry, book) ? { label: door43FileLabel(entry, book) } : {}),
     kind: "reference",
     tags: tagsFor(entry, book),
     group: `door43:${book}`,
@@ -164,6 +193,7 @@ export function specForTwCategory(
     fileId: dcsFileId(projectId, entry.fullName, `bible/${category}`),
     key: `door43:${entry.fullName}:bible/${category}`,
     name: `Translation Words: ${category}`,
+    label: `Translation Words · ${TW_CATEGORY_LABEL[category] ?? category}`,
     kind: "normal",
     tags: ["door43", `door43:${entry.name}`, `tw:${category}`],
     format: "md",

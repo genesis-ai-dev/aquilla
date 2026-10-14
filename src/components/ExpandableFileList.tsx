@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
+import { fileDisplayName } from "@/lib/file-display-name"
 import type { DragEndEvent, DragOverEvent, DragStartEvent } from "@dnd-kit/core"
 import { Search as SearchIcon, X, ChevronDown, Pencil, RotateCcw } from "lucide-react"
 import type { FileReference } from "@/lib/parsers/types"
@@ -254,7 +255,10 @@ export function ExpandableFileList({
 
   const groups = useMemo(() => {
     const needle = filter.trim().toLowerCase()
-    const filtered = needle ? files.filter((f) => f.name.toLowerCase().includes(needle)) : files
+    // AQU-1937: the filter finds a file by what the row shows AND its stored name.
+    const filtered = needle
+      ? files.filter((f) => f.name.toLowerCase().includes(needle) || fileDisplayName(f).toLowerCase().includes(needle))
+      : files
     return groupByCorpus(filtered)
   }, [files, filter])
 

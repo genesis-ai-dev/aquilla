@@ -18,6 +18,9 @@
  *         whole group as aquilla.context.group
  *   owner the tool that created the file
  *   meta  the extension's own small JSON (upstream repo/ref/sha, …)
+ *   label AQU-1937: a DISPLAY name ("Titus · ULT") shown wherever the file's
+ *         name is shown (sidebar, tabs, pickers, search); the stored file name
+ *         and every id stay as imported (fileDisplayName falls back to them)
  */
 
 /** `files.role` of an extension data file (hidden; see counted-files.ts). */
@@ -43,9 +46,11 @@ export interface FileExtensionMeta {
   owner?: string
   meta?: Record<string, unknown>
   import?: FileImportProvenance
+  label?: string
 }
 
 export const MAX_FILE_TAGS = 20
+export const MAX_FILE_LABEL_CHARS = 120
 export const MAX_TAG_CHARS = 80
 export const MAX_FILE_EXTENSION_META_BYTES = 16 * 1024
 
@@ -101,6 +106,11 @@ export function parseFileExtension(input: unknown): ParsedFileExtension {
     if (!isRecord(input.meta)) return { ok: false, error: "meta must be an object" }
     out.meta = input.meta
   }
+  if (input.label !== undefined && input.label !== null) {
+    const label = parseFileLabel(input.label)
+    if (label === null) return { ok: false, error: `label must be a string of 1-${MAX_FILE_LABEL_CHARS} printable characters` }
+    out.label = label
+  }
   if (input.import !== undefined && input.import !== null) {
     const imp = input.import
     if (!isRecord(imp) || typeof imp.tool !== "string" || typeof imp.importer !== "string" || !isRecord(imp.options) || typeof imp.at !== "number") {
@@ -118,6 +128,19 @@ export function parseFileExtension(input: unknown): ParsedFileExtension {
     return { ok: false, error: `extension metadata exceeds ${MAX_FILE_EXTENSION_META_BYTES / 1024} KB` }
   }
   return { ok: true, value: out }
+}
+
+/** A display label: trimmed, 1-MAX_FILE_LABEL_CHARS, no control characters; null when invalid. */
+export function parseFileLabel(value: unknown): string | null {
+  if (typeof value !== "string") return null
+  const v = value.trim()
+  if (!v || v.length > MAX_FILE_LABEL_CHARS || hasControlChar(v)) return null
+  return v
+}
+
+/** The name to SHOW for a file: its extension label when it has one, else its stored name. */
+export function fileDisplayName(file: { name: string; displayLabel?: string | null; extension?: { label?: string } | null }): string {
+  return file.displayLabel || file.extension?.label || file.name
 }
 
 /** Read `files.meta.extension` leniently (a malformed blob reads as absent). */

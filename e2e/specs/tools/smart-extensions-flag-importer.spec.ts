@@ -42,7 +42,7 @@ const SOURCE = `<!doctype html><html><body><p>Glossary importer</p><script>
       const lines = String(r.body).split("\\n").filter(Boolean)
       await aquilla.import.progress(book, n / books.length)
       await aquilla.files.upsert({
-        key: "e2e:glossary:" + book, name: book + " glossary", kind: "normal", tags: ["glossary", "book:" + book],
+        key: "e2e:glossary:" + book, name: book + " glossary", label: (book === "TIT" ? "Titus" : "Philemon") + " · Glossary", kind: "normal", tags: ["glossary", "book:" + book],
         upstream: { version: lines[0] }, cells: lines.slice(1).map((l, i) => ({ key: "g" + i, value: l, ref: book + " 1:" + (i + 1) })),
       })
       n++
@@ -158,7 +158,9 @@ test("Smart Extensions are off by default; switched on, an extension importer ru
   // Refresh from source (file menu): same options, only the changed cell changes.
   version = "v2"
   await alice.reload()
-  await workspace.openFileBySubstring("TIT glossary")
+  // The extension's display label is what the sidebar shows; the stored name is unchanged.
+  await workspace.waitForFileInSidebar("Titus · Glossary")
+  await workspace.openFileBySubstring("Titus · Glossary")
   await workspace.openFileOverflowMenu()
   await alice.getByRole("menuitem", { name: "Refresh from source" }).click()
   await expect(alice.getByText("Refreshed from source")).toBeVisible({ timeout: 30_000 })

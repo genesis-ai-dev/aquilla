@@ -849,6 +849,9 @@ export interface FileReference {
    * numeric sort on an `undefined` cannot express.
    */
   sortIndex?: number
+  /** AQU-1937: what to SHOW for this file when an extension labelled it
+   *  ("Titus · ULT"); `name` stays the stored name. Read through fileDisplayName. */
+  displayLabel?: string
   originalName?: string  // Set the first time `name` is auto-rewritten by a suggestion or user rename. Enables hover-to-see-original. Never overwritten after set.
   /** Stable USFM/Scripture book identity used for re-import collision matching. */
   bookCode?: string

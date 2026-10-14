@@ -107,6 +107,7 @@ export function toolFileView(f: FileSummary): ToolFileView {
     group: ext?.group ?? null,
     owner: ext?.owner ?? null,
     meta: ext?.meta ?? null,
+    label: ext?.label ?? null,
   }
 }
 
@@ -190,6 +191,7 @@ export class LiveFilesData implements ToolFilesHostData {
       owner: origin.toolId,
       ...(spec.group ? { group: spec.group } : {}),
       ...(spec.meta ? { meta: spec.meta } : {}),
+      ...(spec.label ? { label: spec.label } : {}),
       // AQU-1937: provenance the platform records for "Refresh from source".
       ...(run ? { import: { tool: run.toolId, importer: run.importerId, options: run.options, ...(spec.upstream ? { upstream: spec.upstream } : {}), at: Date.now() } } : {}),
     }
@@ -306,7 +308,7 @@ export class LiveFilesData implements ToolFilesHostData {
 
   async setFileMeta(
     fileId: string,
-    patch: { tags?: string[]; kind?: FileExtensionKind; group?: string | null; meta?: Record<string, unknown> | null; name?: string },
+    patch: { tags?: string[]; kind?: FileExtensionKind; group?: string | null; meta?: Record<string, unknown> | null; name?: string; label?: string | null },
   ): Promise<ToolFileView> {
     await this.ready
     const file = (await this.files(true)).find((f) => f.fileId === fileId && !f.deletedAt)
@@ -326,6 +328,10 @@ export class LiveFilesData implements ToolFilesHostData {
     if (patch.meta !== undefined) {
       if (patch.meta === null) delete next.meta
       else next.meta = patch.meta
+    }
+    if (patch.label !== undefined) {
+      if (patch.label === null) delete next.label
+      else next.label = patch.label
     }
     await emitFileExtensionSet({ projectId: this.opts.projectId, fileId, extension: next as unknown as Record<string, unknown>, author: this.opts.author, toolOrigin: origin })
     if (patch.name !== undefined && patch.name !== file.name) {

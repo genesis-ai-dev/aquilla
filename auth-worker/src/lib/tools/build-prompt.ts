@@ -164,7 +164,7 @@ editor that opens a set of files together by verse, a store for its own records 
 and an exporter that writes them back out. Everything lands as ordinary, attributed, revertible project data.
 - aquilla.web.fetch(url, { as: "bytes" }) → body is an ArrayBuffer (zip archives etc., ≤20 MB): one zipball beats
     a thousand file fetches. Read it with aq.zip.read(buffer) (SDK). Importers (write:files) may make ~1,200 fetches per 15 min.
-- aquilla.files.upsert({ key, name, kind?: "normal"|"reference", tags?:[…], group?, meta?:{…}, format?: "usfm"|"tsv"|"md"|"txt"|"json"|"custom",
+- aquilla.files.upsert({ key, name, label?, kind?: "normal"|"reference", tags?:[…], group?, meta?:{…}, format?: "usfm"|"tsv"|"md"|"txt"|"json"|"custom",
     bookCode?, cells:[{ key, value, html?, type?, ref?, metadata? }], raw?: { text, format } })
     → { fileId, created, creates, commits, deletes, unchanged, cellIds:{ [cellKey]: cellId } }   scope write:files (project lead)
     Creates the source file the first time; every later call with the same key REFRESHES it: only cells whose value changed are
@@ -174,7 +174,7 @@ and an exporter that writes them back out. Everything lands as ordinary, attribu
     (untranslated columns, word data). kind "reference": read-only material (original-language text, link tables) — no translation.
     tags + group: how editors find the files later. meta: e.g. { repo, ref, sha } for "check for updates". raw: the original text
     (for an exporter's files.source). Large files: keep each call ≤50,000 cells.
-- aquilla.files.setMeta(fileId, { tags?, kind?, group?, meta?, name? }) → file   scope write:files
+- aquilla.files.setMeta(fileId, { tags?, kind?, group?, meta?, name?, label? }) → file   scope write:files. label = the name the app SHOWS for the file ("Titus · ULT", ≤120 chars; null clears) — sidebar, tabs, pickers, search; name stays the stored name
 - aquilla.files.source(fileId) → { text } | null — the original kept by upsert's raw (or the imported original).   scope read:cells
 - aquilla.files.group(fileId) → { key, files:[…] } | null — every file sharing that file's group.   scope read:cells
 - aquilla.cells.byRef({ refs:["TIT 1:1",…] | prefix:"TIT 1:", fileIds:[…] | tags:[…], lane? })

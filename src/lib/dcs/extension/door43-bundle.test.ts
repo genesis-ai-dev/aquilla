@@ -138,6 +138,9 @@ describe("running the shipped bundle", () => {
     expect(upserts[0].fileId).toBe(titBuiltIn.fileId)
     expect(upserts[0].cells.map((c) => [c.cellId, c.value, c.html, c.ref])).toEqual(titBuiltIn.cells.map((c) => [c.cellId, c.value, c.valueHtml, c.canonicalRef]))
     expect(upserts[0].upstream).toMatchObject({ repo: "en_tn", sha: "sha80", path: "tn_TIT.tsv" })
+    // A display label rides along; the stored name stays the built-in's.
+    expect(upserts[0].label).toBe("Titus · Notes")
+    expect(upserts[0].name).toBe(titBuiltIn.file.name)
   })
 
   it("answers the resource and book choices from the catalog", async () => {

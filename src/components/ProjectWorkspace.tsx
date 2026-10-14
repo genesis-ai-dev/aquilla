@@ -1,4 +1,5 @@
 import { useValidatedEvidenceVersion } from "@/hooks/useValidatedEvidenceVersion"
+import { fileDisplayName } from "@/lib/file-display-name"
 import { useShowExtensionDataFiles } from "@/lib/tools/show-data-files"
 import { recordModelCall, type RecordModelCall } from "@/lib/ai-interventions/client"
 import { useCharacterSheetCells } from "@/hooks/useCharacterSheetCells"
@@ -13850,7 +13851,7 @@ export function ProjectWorkspace() {
               // the per-line voice controls show alongside the panel.
               if (t === "voices" && lens !== "audio") switchLens("audio")
             }}
-            toolsPanel={extensionsOn ? <ToolsDockPanel file={activeFile ? { fileId: activeFile.id, name: activeFile.name } : undefined} /> : undefined}
+            toolsPanel={extensionsOn ? <ToolsDockPanel file={activeFile ? { fileId: activeFile.id, name: fileDisplayName(activeFile) } : undefined} /> : undefined}
             voicesPanel={
               project ? (
                 <div className="flex h-full min-h-0 flex-col overflow-hidden p-2">
@@ -14000,7 +14001,7 @@ export function ProjectWorkspace() {
             searchPanel={
               <SearchDockPanel
                 activeFileId={activeFileId}
-                activeFileName={activeFileId ? project.files.find((f) => f.id === activeFileId)?.name ?? null : null}
+                activeFileName={activeFileId ? (() => { const f = project.files.find((x) => x.id === activeFileId); return f ? fileDisplayName(f) : null })() : null}
                 loading={searchLoading}
                 ready={searchReady}
                 results={searchResults}
@@ -15119,7 +15120,7 @@ export function ProjectWorkspace() {
           <CellAreaPlaceholder
             state={cellAreaState}
             progress={cellLoadProgress}
-            fileName={activeFile?.name}
+            fileName={activeFile ? fileDisplayName(activeFile) : undefined}
             hasFiles={projectFiles.length > 0}
             filesLoaded={status === "ready"}
             /* AQU-481: no empty-state "Import" CTA below the file.create floor —

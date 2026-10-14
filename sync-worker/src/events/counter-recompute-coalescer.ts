@@ -46,9 +46,9 @@ interface FileSlot {
   /** Impact merged by callers since the last drain. Drained by `nextRun`. */
   pending: CounterImpact | null
   /** The pass that will drain `pending`; null once it has drained. */
-  nextRun: Promise<void> | null
+  nextRun: Promise<unknown> | null
   /** The pass currently executing; null when idle. */
-  current: Promise<void> | null
+  current: Promise<unknown> | null
 }
 
 /**
@@ -89,16 +89,24 @@ function copyImpact(impact: CounterImpact): CounterImpact {
  * response — see index.ts) safe to use: it cannot be closed while a pass built
  * on it is still running.
  *
+ * For the same reason, what a pass LEARNS must travel as its return value:
+ * `recompute`'s result is handed to every caller the pass answers, including
+ * the ones whose own `recompute` never ran. (Callers sharing a file must
+ * therefore agree on `R`; there is one callback shape, in route.ts.) AQU-1832
+ * needs the timestamp a pass stamped its rows with in order to read back what
+ * it wrote, and a request answered by someone else's pass has no other way to
+ * learn it.
+ *
  * The cost of sharing is that one request's connection failing now leaves its
  * co-committers' counters behind too, for the one request. That is the existing
  * post-commit contract either way — the events are durable, the failure is
  * logged loudly and never reported as a rejected write, and the next commit on
  * the file restores the counts.
  */
-export function coalesceFileCounterRecompute(
+export function coalesceFileCounterRecompute<R>(
   impact: CounterImpact,
-  recompute: (drained: CounterImpact) => Promise<void>,
-): Promise<void> {
+  recompute: (drained: CounterImpact) => Promise<R>,
+): Promise<R> {
   const key = `${impact.projectId}|${impact.fileId}`
   let slot = slots.get(key)
   if (!slot) {
@@ -111,7 +119,7 @@ export function coalesceFileCounterRecompute(
   else s.pending = copyImpact(impact)
 
   // A pass that has not drained yet will carry what we just merged.
-  if (s.nextRun) return s.nextRun
+  if (s.nextRun) return s.nextRun as Promise<R>
 
   // `Promise.resolve(...).then(...)` always defers to a microtask, so the
   // assignment to `s.nextRun` below lands BEFORE the drain. Starting the drain

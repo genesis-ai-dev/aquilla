@@ -187,4 +187,26 @@ describe('coalesceFileCounterRecompute', () => {
     g.gates[1].resolve()
     await b
   })
+
+  it("hands a pass's result to every caller it answers, including ones whose own recompute never ran", async () => {
+    // AQU-1832 reads back the rows a pass wrote by the timestamp the pass
+    // stamped them with. A caller answered by a pass another caller started
+    // has no closure of its own to find that in — the pass's return value is
+    // the only channel, so it has to reach the joiners too.
+    let releaseFirst: () => void = () => {}
+    const firstPassHeld = new Promise<void>((r) => { releaseFirst = r })
+    const ranBy = (who: string) => async (): Promise<{ ranBy: string }> => {
+      if (who === 'a') await firstPassHeld
+      return { ranBy: who }
+    }
+    const a = coalesceFileCounterRecompute(impact('f1', ['c1']), ranBy('a'))
+    await flush()
+    // Both arrive mid-pass: b starts the queued pass, c only joins it.
+    const b = coalesceFileCounterRecompute(impact('f1', ['c2']), ranBy('b'))
+    const c = coalesceFileCounterRecompute(impact('f1', ['c3']), ranBy('c'))
+    releaseFirst()
+    expect(await a).toEqual({ ranBy: 'a' })
+    expect(await b).toEqual({ ranBy: 'b' })
+    expect(await c).toEqual({ ranBy: 'b' })
+  })
 })

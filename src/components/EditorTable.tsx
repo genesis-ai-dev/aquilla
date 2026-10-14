@@ -27,6 +27,7 @@ import {
 } from "lucide-react"
 import { FillsTwiceIndicator } from "@/components/ui/fills-twice-indicator"
 import { Spinner } from "@/components/ui/spinner"
+import type { RepetitionGesture } from "@/lib/workflow/repetition-validation"
 import { Button } from "@/components/ui/button"
 import { Badge, badgeVariants } from "@/components/ui/badge"
 import { LaneCombobox } from "@/components/LaneCombobox"
@@ -898,8 +899,10 @@ interface EditorTableProps {
    *  Fired by the explicit validate gesture and (AQU-1484) by the commit
    *  path's auto-validate-on-edit once that edit is SETTLED — the editor has
    *  been left. Never on unvalidate, never from an idle save mid-typing — see
-   *  `handleCellValidated` in ProjectWorkspace for why. */
-  onValidated?: (cellId: string) => void | Promise<void>
+   *  `handleCellValidated` in ProjectWorkspace for why. AQU-1486: `gesture`
+   *  says which: a "click" may ask whether to validate the repetitions too;
+   *  a "typed" edit never opens a dialog. */
+  onValidated?: (cellId: string, gesture: RepetitionGesture) => void | Promise<void>
   /** AQU-1391: cellId → how many cells in this file share its normalized
    *  source. Only repeated cells (count ≥ 2) appear; absent = no badge. */
   repetitionCounts?: ReadonlyMap<string, number>
@@ -4005,7 +4008,7 @@ interface MemoizedRowProps {
   /** AQU-1391: fires after a validation lands — the explicit gesture, or
    *  (AQU-1484) a settled auto-validated edit; the workspace auto-propagates
    *  the confirmed text to repeated source segments. */
-  onValidated?: (cellId: string) => void | Promise<void>
+  onValidated?: (cellId: string, gesture: RepetitionGesture) => void | Promise<void>
   /** AQU-1391: cellId -> count of cells in this file sharing its normalized
    *  source. Only repeated cells appear. */
   repetitionCounts?: ReadonlyMap<string, number>
@@ -4454,7 +4457,7 @@ interface EditorRowProps {
   /** AQU-1391: fires after a validation lands — the explicit gesture, or
    *  (AQU-1484) a settled auto-validated edit; the workspace auto-propagates
    *  the confirmed text to repeated source segments. */
-  onValidated?: (cellId: string) => void | Promise<void>
+  onValidated?: (cellId: string, gesture: RepetitionGesture) => void | Promise<void>
   /** AQU-1391: how many cells in this file share THIS cell's normalized
    *  source. Undefined (or < 2) when it isn't a repetition — no badge. */
   repetitionCount?: number
@@ -6154,7 +6157,7 @@ function EditorRow({
   const settleOwedRepetitions = useCallback(() => {
     if (!repetitionOwedRef.current || editorFocusedRef.current) return
     repetitionOwedRef.current = false
-    void Promise.resolve(onValidatedRef.current?.(cell.id)).catch((err) => {
+    void Promise.resolve(onValidatedRef.current?.(cell.id, "typed")).catch((err) => {
       console.warn("[repetition-propagation] failed:", err)
     })
   }, [cell.id])
@@ -6730,7 +6733,7 @@ function EditorRow({
       // AQU-1391: only on the way IN. Un-validating a cell must not push its
       // text anywhere, and the propagation runs after the commit has flushed
       // so it reads this cell's settled head.
-      if (validated) await onValidated?.(cell.id)
+      if (validated) await onValidated?.(cell.id, "click")
       return true
     } catch (err) {
       console.warn(`[${validated ? "validate" : "unvalidate"}] emit failed:`, err)

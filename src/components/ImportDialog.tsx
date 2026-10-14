@@ -1,4 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { ExtensionImportPanel } from "@/components/tools/ExtensionImportPanel"
+import { useToolsMount } from "@/components/tools/ToolsMountContext"
+import type { ToolImporter } from "../../shared/tools/manifest"
 import {
   Upload, Library, Globe, Table2, Languages, ArrowLeft, ArrowLeftRight, StickyNote, Database,
   BookImage, BookA, Search, Cloud, CloudDownload, Video, Link2,
@@ -164,6 +167,8 @@ import { resolveImportDirection, type ImportDirectionLane } from "@/components/i
 import { loadFullLanguageCatalog, peekFullLanguageCatalog } from "@/lib/languages/full-catalog"
 
 type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "partner" | "direction" | "result" | "collision" | "spreadsheet" | "jsonKeys" | "paired" | "sdbh" | "dcs" | "gdrive" | "youtube" | "linkProject"
+  // AQU-1937: an extension's import contribution (Smart Extensions on).
+  | "extension"
   // AQU-1365: a translation's destination file is opening in the editor, then
   // its review (FileTargetImportPanel) runs, or one of the other ways into it
   // (eBible in target mode, a paired spreadsheet).
@@ -415,6 +420,7 @@ export function ImportDialog({
 }: ImportDialogProps) {
   const t = useT()
   const [screen, setScreen] = useState<Screen>("landing")
+  const [extensionImporter, setExtensionImporter] = useState<{ toolId: string; importer: ToolImporter; toolName: string } | null>(null)
   // AQU-1365: "What are you importing?" and the translation path's choices.
   // They live here, not in the chooser, so Back from the review finds the
   // same file chosen and the same upload held.
@@ -1110,6 +1116,7 @@ export function ImportDialog({
                   : screen === "paired" ? t("importExport.dialog.titlePaired")
                   : screen === "sdbh" ? t("importExport.landing.sdbh.title")
                   : screen === "linkProject" ? t("importExport.landing.linkProject.title")
+                  : screen === "extension" ? (extensionImporter?.importer.label ?? "")
                   : t("importExport.landing.ebible.title")}
               </div>
             )}
@@ -1197,6 +1204,10 @@ export function ImportDialog({
                   }
                 : null
             }
+            onPickExtensionImporter={(pick) => {
+              setExtensionImporter(pick)
+              setScreen("extension")
+            }}
             onSelect={(s, selectedPartnerId) => {
               posthog.capture(IMPORT_STARTED, {
                 import_type: selectedPartnerId ?? s,
@@ -1388,6 +1399,14 @@ export function ImportDialog({
             onImported={async (ref, inferredLanguages) => {
               await handleChildImported([ref], inferredLanguages)
             }}
+          />
+        )}
+
+        {screen === "extension" && extensionImporter && (
+          <ExtensionImportPanel
+            toolId={extensionImporter.toolId}
+            importer={extensionImporter.importer}
+            onDone={() => onOpenChange(false)}
           />
         )}
 
@@ -1969,10 +1988,16 @@ interface ImportLandingProps {
    * offered there instead of among the source importers.
    */
   translationOnlyElsewhere?: boolean
+  /** AQU-1937: open an extension's import contribution. */
+  onPickExtensionImporter?: (pick: { toolId: string; importer: ToolImporter; toolName: string }) => void
 }
 
-function ImportLanding({ onSelect, allowDcs, linkProject, translationOnlyElsewhere = false }: ImportLandingProps) {
+function ImportLanding({ onSelect, allowDcs, linkProject, translationOnlyElsewhere = false, onPickExtensionImporter }: ImportLandingProps) {
   const t = useT()
+  // AQU-1937: import contributions from Smart Extensions (only when the
+  // project has them switched on: the provider lists no tools otherwise).
+  const toolsCtx = useToolsMount()
+  const extensionImporters = (toolsCtx?.tools ?? []).flatMap((tool) => (tool.manifest.importers ?? []).map((importer) => ({ tool, importer })))
   // The specialized tier is a growing catalogue of domain-specific importers —
   // filterable so it stays scannable as entries accumulate.
   const [filter, setFilter] = useState("")
@@ -2001,6 +2026,22 @@ function ImportLanding({ onSelect, allowDcs, linkProject, translationOnlyElsewhe
           <OptionCard key={o.titleKey} option={o} onSelect={onSelect} />
         ))}
       </ImportSection>
+      {extensionImporters.length > 0 && onPickExtensionImporter && (
+        <ImportSection label={t("extensions.import.section")}>
+          {extensionImporters.map(({ tool, importer }) => (
+            <button
+              key={`${tool.id}:${importer.id}`}
+              type="button"
+              className="flex w-full flex-col items-start gap-0.5 rounded-xl border px-3 py-2.5 text-start hover:bg-muted/40"
+              onClick={() => onPickExtensionImporter({ toolId: tool.id, importer, toolName: tool.name })}
+              data-testid="extension-importer"
+            >
+              <span className="text-sm font-medium">{importer.label}</span>
+              <span className="text-xs text-muted-foreground">{importer.description ?? tool.name}</span>
+            </button>
+          ))}
+        </ImportSection>
+      )}
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-3">
           <h3 className="px-0.5 text-xs font-medium text-muted-foreground/70">{t("importExport.landing.specializedSection")}</h3>

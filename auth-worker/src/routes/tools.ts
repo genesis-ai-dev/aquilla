@@ -24,6 +24,7 @@
 
 import { Hono } from "hono"
 import { sign } from "hono/jwt"
+import { smartExtensionsEnabledInRaw } from "../../../shared/tools/smart-extensions-flag"
 import { TOOL_SESSION_AUDIENCE, TOOL_SESSION_TTL_SECONDS, type ToolSessionClaims } from "../../../shared/tools/tool-session"
 import type { Context } from "hono"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
@@ -86,6 +87,23 @@ async function readSaveInput(c: Ctx): Promise<(SaveVersionInput & { grant: unkno
     grant: body.grant,
   }
 }
+
+// AQU-1937: the per-project "Smart Extensions" switch (project settings,
+// `smartExtensionsEnabled`, Maintainer+). Off — the default — refuses every
+// extension route, so a project that never turned it on is exactly today's
+// Aquilla whatever a client asks for: no install, no first-party install, no
+// tool session (so no verified extension write), no web reads, no builds.
+const requireSmartExtensions = async (c: Ctx, next: () => Promise<void>) => {
+  const row = await c.env.AQUILLA_PG.prepare(`SELECT settings FROM project_settings WHERE project_id = ?`)
+    .bind(pid(c))
+    .first<{ settings: unknown }>()
+  if (!smartExtensionsEnabledInRaw(row?.settings)) {
+    return err(c, 403, "smart_extensions_off", "Smart Extensions are turned off for this project (Project settings → Experimental)")
+  }
+  await next()
+}
+tools.use("/:projectId/tools", requireSmartExtensions)
+tools.use("/:projectId/tools/*", requireSmartExtensions)
 
 tools.get("/:projectId/tools", authMiddleware, async (c) => {
   if ((await roleFor(c)) == null) return err(c, 404, "not_found", "project not found")
@@ -285,6 +303,12 @@ tools.post("/:projectId/tools/:toolId/copy", authMiddleware, async (c) => {
   const body = (await c.req.json().catch(() => null)) as { targetProjectId?: unknown } | null
   const targetProjectId = typeof body?.targetProjectId === "string" ? body.targetProjectId : ""
   if (!targetProjectId || targetProjectId === pid(c)) return err(c, 400, "validation_failed", "targetProjectId must be another project")
+  const target = await c.env.AQUILLA_PG.prepare(`SELECT settings FROM project_settings WHERE project_id = ?`)
+    .bind(targetProjectId)
+    .first<{ settings: unknown }>()
+  if (!smartExtensionsEnabledInRaw(target?.settings)) {
+    return err(c, 403, "smart_extensions_off", "Smart Extensions are turned off for the target project")
+  }
   const targetRole = await resolveProjectRole(c.env, user, targetProjectId)
   if (!targetRole || targetRole.level < ROLE.CONTRIBUTOR) {
     return err(c, 403, "permission_denied", "copying an extension needs contributor access on the target project")

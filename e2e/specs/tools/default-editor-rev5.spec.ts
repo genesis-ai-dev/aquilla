@@ -55,7 +55,7 @@ async function productDefault(page: Page): Promise<void> {
 test("the Smart Extension editor is the default, the original is one click away, and both paint the same provenance wash", async ({ alice }) => {
   test.setTimeout(150_000)
   const jwt = await jwtFor("alice")
-  const seeded = await seedProjectWithFile(jwt, { name: `Rev5 ${Date.now()}`, fixturePath: FIXTURE })
+  const seeded = await seedProjectWithFile(jwt, { smartExtensions: true, name: `Rev5 ${Date.now()}`, fixturePath: FIXTURE })
   const tools = new ToolsPage(alice)
   const workspace = new Workspace(alice, "builtin")
   const llmBase = process.env.VITE_LLM_BASE_URL ?? ""
@@ -107,7 +107,7 @@ test("the Smart Extension editor is the default, the original is one click away,
 test("a commenter switches back to the original Aquilla editor in one click, and it survives a reload", async ({ bob }) => {
   test.setTimeout(120_000)
   const jwt = await jwtFor("alice")
-  const seeded = await seedProjectWithFile(jwt, { name: `Rev5 commenter ${Date.now()}`, fixturePath: FIXTURE })
+  const seeded = await seedProjectWithFile(jwt, { smartExtensions: true, name: `Rev5 commenter ${Date.now()}`, fixturePath: FIXTURE })
   await addProjectMember(jwt, seeded.projectId, "bob", ROLE.COMMENTER)
   const tools = new ToolsPage(bob)
   const workspace = new Workspace(bob, "builtin")
@@ -128,7 +128,7 @@ test("a commenter switches back to the original Aquilla editor in one click, and
 test("when the Smart Extension editor cannot load, the original Aquilla editor opens instead", async ({ alice }) => {
   test.setTimeout(120_000)
   const jwt = await jwtFor("alice")
-  const seeded = await seedProjectWithFile(jwt, { name: `Rev5 fallback ${Date.now()}`, fixturePath: FIXTURE })
+  const seeded = await seedProjectWithFile(jwt, { smartExtensions: true, name: `Rev5 fallback ${Date.now()}`, fixturePath: FIXTURE })
   const tools = new ToolsPage(alice)
   const workspace = new Workspace(alice, "builtin")
   await productDefault(alice)

@@ -12,9 +12,14 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { ensureFirstPartyTool, getTool, listTools, type FirstPartyEnsureResult, type ToolDetail, type ToolSummary } from "@/lib/tools/tools-api"
 import { defaultEditorExtensionEnabled } from "@/lib/tools/default-editor-flag"
 import { FIRST_PARTY_DEFAULT_EDITOR } from "../../../shared/tools/first-party/default-editor"
+import { FIRST_PARTY_DOOR43_IMPORTER } from "../../../shared/tools/first-party/door43-importer"
 import type { ToolScope } from "../../../shared/tools/manifest"
 import { useProject } from "@/hooks/useProject"
-import { HeadlessRuns, type HeadlessJob } from "./HeadlessRuns"
+import { useSmartExtensionsEnabled } from "@/lib/tools/smart-extensions-enabled"
+import { HeadlessRuns, type HeadlessJob, type HeadlessOutcome } from "./HeadlessRuns"
+import { makeAudioSyncTokenFetcher } from "@/lib/audio/sync-token-fetcher"
+import { fetchProjectFiles } from "@/lib/sync/cells-read"
+import type { FileImportProvenance } from "../../../shared/tools/file-extension"
 import { dueOnOpenActions, markOnOpenRun } from "@/lib/tools/on-open-actions"
 
 export interface ToolsMountValue {
@@ -48,9 +53,26 @@ export interface ToolsMountValue {
   /** apiRev 7: run a manifest action headless. */
   runAction: (toolId: string, actionId: string, trigger?: "click" | "open") => void
   /** apiRev 7: run a manifest export headless; settles once files were delivered. */
-  runExport: (toolId: string, exportId: string, fileIds: string[], lane: string) => Promise<{ ok: true; files: number } | { ok: false; error: string }>
+  runExport: (toolId: string, exportId: string, fileIds: string[], lane: string) => Promise<HeadlessOutcome>
+  /** AQU-1937: run an import contribution headless (run, or refresh files). */
+  runImport: (
+    toolId: string,
+    importerId: string,
+    options: Record<string, unknown>,
+    opts?: { phase?: "run" | "refresh"; fileIds?: string[]; onProgress?: (message: string, fraction: number | null) => void },
+  ) => { key: string; done: Promise<HeadlessOutcome> }
+  /** AQU-1937: ask an importer for a dynamic field's choices. */
+  importChoices: (toolId: string, importerId: string, field: string, options: Record<string, unknown>) => Promise<HeadlessOutcome>
+  /** Stop a running headless job (import cancel). */
+  cancelJob: (key: string) => void
+  /** AQU-1937: files an import contribution wrote (fileId → provenance). */
+  fileImports: ReadonlyMap<string, FileImportProvenance>
+  /** Re-run the importer that wrote this file, with its stored options. */
+  refreshFile: (fileId: string) => Promise<HeadlessOutcome>
   /** apiRev 7: headless jobs running now. */
   runningJobs: number
+  /** AQU-1937: the project's Smart Extensions switch (null while unknown). */
+  extensionsEnabled: boolean | null
 }
 
 interface ExtensionPrefs {
@@ -131,8 +153,16 @@ export function ToolsMountProvider({ children }: { children: ReactNode }) {
   const [autoGranted, setAutoGranted] = useState<ToolScope[]>([])
   const [defaultEditorOn] = useState(() => defaultEditorExtensionEnabled())
   const [loadedFor, setLoadedFor] = useState<string | null>(null)
+  // AQU-1937: nothing about extensions loads (not even the first-party
+  // install) unless the project has Smart Extensions switched on.
+  const extensionsEnabled = useSmartExtensionsEnabled(jwt, projectId)
   useEffect(() => {
-    if (!jwt || !projectId) return
+    if (!jwt || !projectId || extensionsEnabled === null) return
+    if (!extensionsEnabled) {
+      setTools([])
+      setLoadedFor(projectId)
+      return
+    }
     let cancelled = false
     // First-party editor extension: the server installs (or upgrades) it from
     // the repo's reviewed source, so it is always there to OPT INTO from the
@@ -147,7 +177,17 @@ export function ToolsMountProvider({ children }: { children: ReactNode }) {
           return null
         })
       : Promise.resolve(null)
-    const listed = listTools(jwt, projectId).catch(() => null)
+    // AQU-1937: the first-party Door43 importer (Import → "Door43 resources"),
+    // installed the same way. Its auto-grant (read:web for git.door43.org,
+    // write:files, write:data) is the user's own; the role ceiling still applies.
+    const ensuredDoor43: Promise<FirstPartyEnsureResult | null> = version === 0
+      ? ensureFirstPartyTool(jwt, projectId, FIRST_PARTY_DOOR43_IMPORTER).catch((err: unknown) => {
+          console.warn("[extensions] first-party Door43 importer install failed:", err)
+          return null
+        })
+      : Promise.resolve(null)
+    // Listed AFTER that install, so a fresh install is in the first list.
+    const listed = ensuredDoor43.then(() => listTools(jwt, projectId).catch(() => null))
     void Promise.all([ensured, listed]).then(([res, list]) => {
       if (cancelled) return
       let next = list ?? []
@@ -166,7 +206,7 @@ export function ToolsMountProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [jwt, projectId, version, details])
+  }, [jwt, projectId, version, details, extensionsEnabled])
   const toolsReady = loadedFor === projectId
 
   const refresh = useCallback(() => {
@@ -209,7 +249,7 @@ export function ToolsMountProvider({ children }: { children: ReactNode }) {
   )
   const runExport = useCallback(
     (toolId: string, exportId: string, fileIds: string[], lane: string) =>
-      new Promise<{ ok: true; files: number } | { ok: false; error: string }>((resolve) => {
+      new Promise<HeadlessOutcome>((resolve) => {
         const tool = tools.find((x) => x.id === toolId)
         const format = tool?.manifest.exports?.find((x) => x.id === exportId)
         if (!tool || !format) {
@@ -222,6 +262,76 @@ export function ToolsMountProvider({ children }: { children: ReactNode }) {
         ])
       }),
     [tools],
+  )
+  // AQU-1937: import contributions — the same headless runner as exports.
+  const [fileImports, setFileImports] = useState<ReadonlyMap<string, FileImportProvenance>>(new Map())
+  const [importsVersion, setImportsVersion] = useState(0)
+  const runImport = useCallback<ToolsMountValue["runImport"]>(
+    (toolId, importerId, options, opts = {}) => {
+      const tool = tools.find((x) => x.id === toolId)
+      const importer = tool?.manifest.importers?.find((x) => x.id === importerId)
+      const key = `${toolId}:import:${importerId}:${Date.now()}`
+      const done = new Promise<HeadlessOutcome>((resolve) => {
+        if (!tool || !importer) {
+          resolve({ ok: false, error: "unknown importer" })
+          return
+        }
+        setJobs((prev) => [
+          ...prev,
+          {
+            key, toolId, kind: "import", label: importer.label, importerId, phase: opts.phase ?? "run", options,
+            ...(opts.fileIds ? { fileIds: opts.fileIds } : {}),
+            ...(opts.onProgress ? { onProgress: opts.onProgress } : {}),
+            settle: (outcome) => {
+              resolve(outcome)
+              setImportsVersion((n) => n + 1)
+            },
+          },
+        ])
+      })
+      return { key, done }
+    },
+    [tools],
+  )
+  const importChoices = useCallback<ToolsMountValue["importChoices"]>(
+    (toolId, importerId, field, options) =>
+      new Promise<HeadlessOutcome>((resolve) => {
+        const tool = tools.find((x) => x.id === toolId)
+        const importer = tool?.manifest.importers?.find((x) => x.id === importerId)
+        if (!tool || !importer) {
+          resolve({ ok: false, error: "unknown importer" })
+          return
+        }
+        setJobs((prev) => [...prev, { key: `${toolId}:choices:${field}:${Date.now()}`, toolId, kind: "import", label: importer.label, importerId, phase: "choices", options, field, settle: resolve }])
+      }),
+    [tools],
+  )
+  const cancelJob = useCallback((key: string) => setJobs((prev) => prev.filter((j) => j.key !== key)), [])
+  // Which files an import contribution wrote (for "Refresh from source").
+  useEffect(() => {
+    if (!session || !projectId || extensionsEnabled !== true) return
+    let alive = true
+    const tokenFor = makeAudioSyncTokenFetcher(() => session)
+    void tokenFor(projectId, "any")
+      .then((token) => (token ? fetchProjectFiles(projectId, token) : []))
+      .then((files) => {
+        if (!alive) return
+        const next = new Map<string, FileImportProvenance>()
+        for (const f of files) if (f.extension?.import && !f.deletedAt) next.set(f.fileId, f.extension.import)
+        setFileImports(next)
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [session, projectId, extensionsEnabled, importsVersion])
+  const refreshFile = useCallback(
+    async (fileId: string): Promise<HeadlessOutcome> => {
+      const prov = fileImports.get(fileId)
+      if (!prov) return { ok: false, error: "this file was not written by an extension importer" }
+      return runImport(prov.tool, prov.importer, prov.options, { phase: "refresh", fileIds: [fileId] }).done
+    },
+    [fileImports, runImport],
   )
   // "Check on project open": once the list has loaded, at most once a day per
   // user, and only for actions whose extension already holds every scope it
@@ -262,8 +372,14 @@ export function ToolsMountProvider({ children }: { children: ReactNode }) {
       runAction,
       runExport,
       runningJobs: jobs.length,
+      extensionsEnabled,
+      runImport,
+      importChoices,
+      cancelJob,
+      fileImports,
+      refreshFile,
     }),
-    [projectId, session, tools, refresh, loadTool, prefs, togglePin, setDockSelection, panelRequestSeq, openInPanel, paletteOpen, defaultEditorId, autoGranted, defaultEditorOn, toolsReady, runAction, runExport, jobs.length],
+    [projectId, session, tools, refresh, loadTool, prefs, togglePin, setDockSelection, panelRequestSeq, openInPanel, paletteOpen, defaultEditorId, autoGranted, defaultEditorOn, toolsReady, runAction, runExport, jobs.length, extensionsEnabled, runImport, importChoices, cancelJob, fileImports, refreshFile],
   )
   return (
     <ToolsMountContext.Provider value={value}>

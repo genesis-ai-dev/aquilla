@@ -17,6 +17,7 @@
 import type { ToolManifest } from "../manifest"
 import { stringKeysOf } from "../sdk/string-keys"
 import { DEFAULT_EDITOR_APP } from "./default-editor-app"
+import { DOOR43_IMPORTER_MANIFEST, DOOR43_IMPORTER_SOURCE, FIRST_PARTY_DOOR43_IMPORTER } from "./door43-importer"
 
 export const FIRST_PARTY_DEFAULT_EDITOR = "default-editor"
 
@@ -54,6 +55,12 @@ export const FIRST_PARTY_TOOLS: Readonly<Record<string, FirstPartyTool>> = {
     key: FIRST_PARTY_DEFAULT_EDITOR,
     manifest: DEFAULT_EDITOR_MANIFEST,
     source: DEFAULT_EDITOR_SOURCE,
+  },
+  // AQU-1937: the Door43 importer, on the public importer API.
+  [FIRST_PARTY_DOOR43_IMPORTER]: {
+    key: FIRST_PARTY_DOOR43_IMPORTER,
+    manifest: DOOR43_IMPORTER_MANIFEST,
+    source: DOOR43_IMPORTER_SOURCE,
   },
 }
 

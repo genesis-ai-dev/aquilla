@@ -55,7 +55,9 @@ export interface ToolBoot {
   project: { id: string; name: string }
   user: { username: string; roleLevel: number | null }
   /** apiRev 7: "action" / "export" are HEADLESS runs (no visible frame). */
-  mount: "page" | "panel" | "inline" | "editor" | "smoke" | "action" | "export"
+  mount: "page" | "panel" | "inline" | "editor" | "smoke" | "action" | "export" | "import"
+  /** AQU-1937, import mounts: the importer, the phase and the options. */
+  import?: { importerId: string; phase: "run" | "refresh" | "choices"; options: Record<string, unknown>; fileIds?: string[]; field?: string }
   /** apiRev 7, action mounts: which manifest action ran, and why. */
   action?: { id: string; trigger: "click" | "open" }
   /** apiRev 7, export mounts: the format and the files to export. */

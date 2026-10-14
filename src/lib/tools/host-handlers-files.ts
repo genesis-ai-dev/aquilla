@@ -38,11 +38,15 @@ export interface ToolFileFilter {
 }
 
 export interface ToolUpsertCell {
+  /** AQU-1937: an explicit cell id (UUID) — see ToolFileUpsert.fileId. */
+  cellId?: string
   key: string
   value: string
   html?: string
   type?: string
   ref?: string
+  /** Intrinsic order key (fractional ranks allowed), as importers set it. */
+  sequenceIndex?: number
   metadata?: Record<string, unknown>
 }
 
@@ -60,6 +64,13 @@ export interface ToolFileUpsert {
   cells: ToolUpsertCell[]
   /** The original text, kept for exporters (files.source). */
   raw?: { text: string; format: string }
+  /** AQU-1937: the upstream version this content came from ({ repo, ref, sha, url, … }),
+   *  recorded in the file's import provenance during an import run. */
+  upstream?: Record<string, unknown>
+  /** AQU-1937: an explicit file id (UUID) — lets an importer keep the ids an
+   *  earlier import of the same content used (e.g. the built-in Door43 import),
+   *  so a refresh lands on those files instead of creating copies. */
+  fileId?: string
 }
 
 export interface ToolUpsertResult {
@@ -126,6 +137,8 @@ export interface ToolFilesHostData {
   actionProgress: (message: string, fraction: number | null) => Promise<boolean>
   actionDone: (message: string | null, ok: boolean) => Promise<boolean>
   exportDeliver: (files: ToolDeliveredFile[]) => Promise<boolean>
+  /** AQU-1937: an import run reports back (progress/done reuse the headless callbacks). */
+  importChoices: (choices: { value: string; label: string }[]) => Promise<boolean>
 }
 
 export const MAX_UPSERT_CELLS = 50_000
@@ -135,6 +148,7 @@ export const MAX_DATA_DOC_CHARS = 200_000
 export const MAX_DELIVER_FILES = 200
 export const MAX_DELIVER_BYTES = 100 * 1024 * 1024
 const NS_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const FORMATS = new Set(["md", "txt", "html", "json", "usfm", "tsv", "csv", "obs", "custom", "codex"])
 
 /** True when the string holds an ASCII control character (U+0000-U+001F). */
@@ -191,12 +205,20 @@ function parseUpsert(params: unknown): ToolFileUpsert {
     if (typeof raw.value !== "string") bad(`cells[${i}].value must be a string`)
     if (raw.value.length > MAX_UPSERT_VALUE_CHARS) bad(`cells[${i}].value exceeds ${MAX_UPSERT_VALUE_CHARS} characters`)
     const cell: ToolUpsertCell = { key, value: raw.value }
+    if (raw.cellId !== undefined) {
+      if (typeof raw.cellId !== "string" || !UUID_RE.test(raw.cellId)) bad(`cells[${i}].cellId must be a UUID`)
+      cell.cellId = raw.cellId
+    }
     const html = optStr(raw.html, `cells[${i}].html`, MAX_UPSERT_VALUE_CHARS * 2)
     if (html !== undefined) cell.html = html
     const type = optStr(raw.type, `cells[${i}].type`, 40)
     if (type !== undefined) cell.type = type
     const ref = optStr(raw.ref, `cells[${i}].ref`, 300)
     if (ref !== undefined) cell.ref = ref
+    if (raw.sequenceIndex !== undefined && raw.sequenceIndex !== null) {
+      if (typeof raw.sequenceIndex !== "number" || !Number.isFinite(raw.sequenceIndex)) bad(`cells[${i}].sequenceIndex must be a number`)
+      cell.sequenceIndex = raw.sequenceIndex
+    }
     if (raw.metadata !== undefined && raw.metadata !== null) {
       if (!isRecord(raw.metadata)) bad(`cells[${i}].metadata must be an object`)
       if (JSON.stringify(raw.metadata).length > 32_000) bad(`cells[${i}].metadata exceeds 32000 characters`)
@@ -218,6 +240,14 @@ function parseUpsert(params: unknown): ToolFileUpsert {
   }
   const bookCode = optStr(p.bookCode, "bookCode", 8)
   if (bookCode) out.bookCode = bookCode
+  if (p.fileId !== undefined && p.fileId !== null) {
+    if (typeof p.fileId !== "string" || !UUID_RE.test(p.fileId)) bad("fileId must be a UUID")
+    out.fileId = p.fileId
+  }
+  if (p.upstream !== undefined && p.upstream !== null) {
+    if (!isRecord(p.upstream) || JSON.stringify(p.upstream).length > 4000) bad("upstream must be a small object")
+    out.upstream = p.upstream
+  }
   if (p.raw !== undefined && p.raw !== null) {
     const raw = obj(p.raw)
     if (typeof raw.text !== "string" || raw.text.length > MAX_RAW_CHARS) bad(`raw.text must be a string of at most ${MAX_RAW_CHARS} characters`)
@@ -337,6 +367,25 @@ export function createFilesHandlers(data: ToolFilesHostData): Record<string, Bri
       return data.actionDone(typeof p.message === "string" ? p.message.slice(0, 500) : null, p.ok !== false)
     },
     "export.deliver": async (params) => data.exportDeliver(parseDelivered(obj(params).files)),
+    // AQU-1937: an import contribution reports back to the Import dialog.
+    "import.progress": async (params) => {
+      const p = obj(params)
+      const fraction = typeof p.fraction === "number" && Number.isFinite(p.fraction) ? Math.max(0, Math.min(1, p.fraction)) : null
+      return data.actionProgress(typeof p.message === "string" ? p.message.slice(0, 300) : "", fraction)
+    },
+    "import.done": async (params) => {
+      const p = isRecord(params) ? params : {}
+      return data.actionDone(typeof p.message === "string" ? p.message.slice(0, 500) : null, p.ok !== false)
+    },
+    "import.choices": async (params) => {
+      const p = obj(params)
+      if (!Array.isArray(p.choices)) bad("choices must be a list")
+      if (p.choices.length > 2000) bad("at most 2000 choices")
+      return data.importChoices(p.choices.map((c, i) => {
+        if (!isRecord(c) || typeof c.value !== "string") bad(`choices[${i}] needs a string value`)
+        return { value: c.value.slice(0, 300), label: typeof c.label === "string" ? c.label.slice(0, 300) : c.value.slice(0, 300) }
+      }))
+    },
   }
 }
 

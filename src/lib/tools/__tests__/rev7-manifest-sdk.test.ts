@@ -10,6 +10,7 @@ import JSZip from "jszip"
 import { toolCodeHash, validateManifest, type ToolManifest } from "../../../../shared/tools/manifest"
 import { SDK_IO } from "../../../../shared/tools/sdk/sdk-io"
 import { dueOnOpenActions, markOnOpenRun, ON_OPEN_INTERVAL_MS } from "../on-open-actions"
+import { smartExtensionsEnabledIn } from "../../../../shared/tools/smart-extensions-flag"
 
 describe("manifest actions and exports", () => {
   const base = { name: "Importer", description: "", scopes: ["read:web", "write:files"], web: ["example.org"], apiRev: 7 }
@@ -42,6 +43,27 @@ describe("manifest actions and exports", () => {
     const withAction = validateManifest({ ...base, actions: [{ id: "a", label: "A" }] }).manifest as ToolManifest
     expect(await toolCodeHash("x", m)).not.toBe(await toolCodeHash("x", withAction))
     expect(await toolCodeHash("x", m)).toBe(await toolCodeHash("x", { ...m }))
+  })
+})
+
+describe("import contributions (AQU-1937)", () => {
+  const base = { name: "Importer", description: "", scopes: ["read:web", "write:files"], web: ["example.org"], apiRev: 7 }
+  it("validates an options schema and needs write:files", () => {
+    const ok = validateManifest({ ...base, importers: [{ id: "g", label: "Glossary", options: [
+      { key: "books", label: "Books", type: "multiselect", dynamic: true, dependsOn: ["lang"] },
+      { key: "lang", label: "Language", type: "select", choices: [{ value: "en", label: "English" }], default: "en" },
+    ] }] })
+    expect(ok.errors).toEqual([])
+    expect(ok.manifest?.importers?.[0].options[0]).toMatchObject({ key: "books", dynamic: true, dependsOn: ["lang"] })
+    expect(validateManifest({ ...base, scopes: ["read:web"], importers: [{ id: "g", label: "G", options: [] }] }).errors.join()).toMatch(/needs the write:files scope/)
+    expect(validateManifest({ ...base, importers: [{ id: "g", label: "G", options: [{ key: "x", label: "X", type: "select" }] }] }).errors.join()).toMatch(/needs choices/)
+    expect(validateManifest({ ...base, importers: [{ id: "g", label: "G", options: [{ key: "1bad", label: "X", type: "text" }] }] }).errors.join()).toMatch(/short identifier/)
+  })
+  it("the Smart Extensions switch is on only when explicitly true", () => {
+    expect(smartExtensionsEnabledIn({ smartExtensionsEnabled: true })).toBe(true)
+    expect(smartExtensionsEnabledIn({ smartExtensionsEnabled: "true" })).toBe(false)
+    expect(smartExtensionsEnabledIn({})).toBe(false)
+    expect(smartExtensionsEnabledIn(null)).toBe(false)
   })
 })
 

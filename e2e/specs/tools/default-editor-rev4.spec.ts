@@ -34,7 +34,7 @@ async function rows(jwt: string, seeded: SeededProject): Promise<Row[]> {
 test("the extension editor carries the source toolbar, the source menu, the footnote tray, the audio column and the Audio lens", async ({ alice }) => {
   test.setTimeout(150_000)
   const jwt = await jwtFor("alice")
-  const seeded = await seedProjectWithFile(jwt, { name: `Rev4 ${Date.now()}`, fixturePath: FIXTURE })
+  const seeded = await seedProjectWithFile(jwt, { smartExtensions: true, name: `Rev4 ${Date.now()}`, fixturePath: FIXTURE })
   const tools = new ToolsPage(alice)
   await tools.optIntoDefaultEditorExtension()
   await alice.goto("/")

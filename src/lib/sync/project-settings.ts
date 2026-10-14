@@ -198,6 +198,15 @@ export interface ProjectWideSettings {
    */
   autopilotEnabled?: boolean
   /**
+   * AQU-1937: the per-project "Smart Extensions" switch. Absent / false = the
+   * project is exactly today's Aquilla: the native editor, the built-in
+   * importers, and no extensions UI or routes (auth-worker refuses the tools
+   * API). True = the extensions UI, the Smart Extension editor as the default
+   * (switch-back stays) and extension importers (the first-party Door43 one)
+   * in Import. Maintainer (600)+, the ordinary settings floor.
+   */
+  smartExtensionsEnabled?: boolean
+  /**
    * AQU-186: minimum role level required to trigger a harmonization sweep on
    * this project. Default (absent) = project_lead (500). Configurable up to
    * maintainer (600); lowering below project_lead is not allowed (hard floor).

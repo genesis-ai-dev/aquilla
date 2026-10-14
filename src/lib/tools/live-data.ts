@@ -277,6 +277,7 @@ export class LiveToolData implements ToolHostData {
   actionProgress = (message: string, fraction: number | null) => this.files.actionProgress(message, fraction)
   actionDone = (message: string | null, ok: boolean) => this.files.actionDone(message, ok)
   exportDeliver = (files: ToolDeliveredFile[]) => this.files.exportDeliver(files)
+  importChoices = (choices: { value: string; label: string }[]) => this.files.importChoices(choices)
 
   private async loadFile(fileId: string, lane: string): Promise<Map<string, CachedCell>> {
     const resolved = await this.resolveLane(lane)

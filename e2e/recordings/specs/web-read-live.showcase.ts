@@ -28,7 +28,7 @@ test("read:web live: Door43 translation notes through the proxy", async ({ page 
   await page.goto("/")
   await injectSession(page, session)
   const jwt = await jwtFor("alice")
-  const seeded = await seedProjectWithFile(jwt, { name: "Matthew (Spanish)", fixturePath: FIXTURE })
+  const seeded = await seedProjectWithFile(jwt, { smartExtensions: true, name: "Matthew (Spanish)", fixturePath: FIXTURE })
   const built = JSON.parse(readFileSync(path.join(DIR, `aqu-1793-builder-eval-after-${CASE}.json`), "utf8"))
   const res = await fetch(`${AUTH_BASE}/api/v2/projects/${seeded.projectId}/tools`, {
     method: "POST",

@@ -38,7 +38,7 @@ test("Smart Extensions — the builder makes a custom editor", async ({ page }, 
   await page.goto("/")
   await injectSession(page, session)
   const jwt = await jwtFor("alice")
-  const seeded = await seedProjectWithFile(jwt, { name: "Matthew (Spanish)", fixturePath: FIXTURE })
+  const seeded = await seedProjectWithFile(jwt, { smartExtensions: true, name: "Matthew (Spanish)", fixturePath: FIXTURE })
 
   const tools = new ToolsPage(page)
   await tools.open(seeded.projectId)

@@ -89,18 +89,19 @@ Book files are numbered: OT 01-GEN … 39-MAL; NT 41-MAT 42-MRK 43-LUK 44-JHN 45
 - en_tw  bible/kt|names|other/<word>.md (Markdown article: # title, ## sections).
 - en_ta  translate/<article>/01.md (title.md beside it).
 
-### "An unfoldingWord editor" = three cooperating extensions (build the one asked for; mention the others)
-1. IMPORTER (mounts ["page"], scopes read:web + write:files + write:data, actions [{ id:"import", label:"Import unfoldingWord
-   resources", where:["settings","menu"] }, { id:"refresh", label:"Check Door43 for updates", where:["bar","settings"], onOpen:true }]):
-   for the chosen books, files.upsert one file per resource and book with key "uw:<res>:<BOOK>", tags ["uw", "uw:<res>",
-   "book:<BOOK>"], group "uw:<BOOK>", meta { repo, sha }:
-   ULT/UST cells keyed by ref (value = verse text, ref "TIT 1:1"), raw = the USFM; UGNT/UHB kind "reference", cell metadata
-   { words:[{ text, lemma, strong, morph }] }; TN/TQ cells keyed by the TSV ID (value = Note / Question, ref from Reference,
-   metadata = the other columns); TWL kind "reference", value OrigWords, metadata { article:"kt/god", occurrence }; TW one file per
-   category ("uw:tw:kt"), cells keyed "<article>|<section>|<n>" with ref "tw:kt/god". The source alignment of ULT/UST goes to
-   aquilla.data.put("uw.alignment", "<BOOK> <c>:<v>|ult", { groups:[{ src:[{w,occ,occs,strong,lemma,morph}], tgt:[{w,occ}] }] },
-   { coll:"<book>", anchor:{ fileId, cellId, side:"source" } }). Refresh: compare the stored sha, re-fetch changed books,
-   re-upsert (only changed cells change). Report with aquilla.action.progress / done.
+### "An unfoldingWord editor" = importer contribution + editor + export contribution
+Aquilla ships a first-party Door43 importer ("Door43 resources", in Import when Smart Extensions are on) that brings Bibles,
+OBS, TN, TQ, TW and TWL in book by book, live-linked, with alignment kept as data. Prefer it: build only what it lacks.
+1. IMPORTER (manifest "importers", scopes read:web + write:files + write:data): options e.g. language (select), resources
+   (multiselect: ult, ust, ugnt/uhb, tn, tq, tw, twl), books (multiselect, dynamic from the catalog), ref (text, default "master").
+   Per resource and book: files.upsert with key "uw:<res>:<BOOK>", tags ["uw", "uw:<res>", "book:<BOOK>"], group "uw:<BOOK>",
+   upstream { repo, ref, sha }. ULT/UST cells keyed by ref (value = verse text, ref "TIT 1:1"), raw = the USFM; UGNT/UHB kind
+   "reference" with cell metadata { words:[{ text, lemma, strong, morph }] }; TN/TQ keyed by the TSV ID (value = Note / Question,
+   ref from Reference, metadata = the other columns); TWL kind "reference", value OrigWords, metadata { article, occurrence };
+   TW one file per category ("uw:tw:kt"), cells keyed "<article>|<section>|<n>", ref "tw:kt/god". ULT/UST source alignment:
+   aquilla.data.put("uw.alignment", "<ref>|ult", { groups:[{ src:[{w,occ,occs,strong,lemma,morph}], tgt:[{w,occ}] }] },
+   { coll:"<book>", anchor:{ fileId, cellId, side:"source" } }). phase "refresh": the stored sha vs the branch's latest commit;
+   re-fetch and re-upsert only what changed.
 2. EDITOR (mounts ["page","editor"], scopes read:cells + write:target + write:data): files.group(context.file) or files.list
    ({ tags:["uw","book:TIT"] }); per verse, cells.byRef({ refs:[ref], tags:["uw","book:TIT"] }) gives ULT, UST, UGNT/UHB words,
    TN, TQ and TWL in one call (TW article cells via cells.byRef({ refs:["tw:kt/god"], tags:["uw:tw"] })). The translator types the
@@ -109,8 +110,8 @@ Book files are numbered: OT 01-GEN … 39-MAL; NT 41-MAT 42-MRK 43-LUK 44-JHN 45
    { coll, anchor:{ fileId:ultFileId, cellId, side:"target" } }); on read, drift "changed" means the translation changed: re-resolve
    each target word by text + occurrence, keep the ones still found (mark "verify") and show missing ones as unaligned.
    Highlight a TN Quote in UGNT by matching words + occurrence, and in the translation through the alignment.
-3. EXPORTER (exports [{ id:"aligned-usfm", label:"Aligned USFM", extension:"usfm", tags:["uw:ult"] }, { id:"uw-tsv", label:
-   "unfoldingWord TSV", extension:"tsv", tags:["uw:tn"] }]): files.source(fileId) for the original USFM, the target cells and
+3. EXPORT (manifest "exports": [{ id:"aligned-usfm", label:"Aligned USFM", extension:"usfm", tags:["uw:ult"] }, { id:"uw-tsv",
+   label:"unfoldingWord TSV", extension:"tsv", tags:["uw:tn"] }]): files.source(fileId) for the original USFM, the target cells and
    "uw.alignment-gl" records → rebuild each verse as \zaln-s |x-strong="…" x-lemma="…" x-morph="…" x-occurrence="n"
    x-occurrences="m" x-content="…"\*\w word|x-occurrence="n" x-occurrences="m"\w*\zaln-e\*; unaligned words as bare \w…\w*;
    TSV: the original rows with the translated Note/Question in place (re-escape newlines as \n). aquilla.export.deliver(files).

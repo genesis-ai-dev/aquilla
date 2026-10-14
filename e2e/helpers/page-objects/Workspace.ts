@@ -459,7 +459,7 @@ export class Workspace {
     return this.page.getByRole("button", { name: /^Upload files/i }).first()
   }
 
-  private async openImportDialog(): Promise<void> {
+  async openImportDialog(): Promise<void> {
     const uploadCard = this.uploadFilesCard()
     const importButton = this.page
       .getByRole("button", { name: /^Import(?: a file)?$/i })

@@ -25,12 +25,24 @@ export const EXTENSION_DATA_ROLE = "extension-data"
 
 export type FileExtensionKind = "normal" | "reference" | "data"
 
+/** AQU-1937: which import contribution wrote the file, with the options it
+ *  ran with and the upstream version it read — what "Refresh from source"
+ *  re-runs. Recorded by the PLATFORM, never chosen by the extension. */
+export interface FileImportProvenance {
+  tool: string
+  importer: string
+  options: Record<string, unknown>
+  upstream?: Record<string, unknown>
+  at: number
+}
+
 export interface FileExtensionMeta {
   kind: FileExtensionKind
   tags: string[]
   group?: string
   owner?: string
   meta?: Record<string, unknown>
+  import?: FileImportProvenance
 }
 
 export const MAX_FILE_TAGS = 20
@@ -88,6 +100,19 @@ export function parseFileExtension(input: unknown): ParsedFileExtension {
   if (input.meta !== undefined && input.meta !== null) {
     if (!isRecord(input.meta)) return { ok: false, error: "meta must be an object" }
     out.meta = input.meta
+  }
+  if (input.import !== undefined && input.import !== null) {
+    const imp = input.import
+    if (!isRecord(imp) || typeof imp.tool !== "string" || typeof imp.importer !== "string" || !isRecord(imp.options) || typeof imp.at !== "number") {
+      return { ok: false, error: "import must be { tool, importer, options, upstream?, at }" }
+    }
+    out.import = {
+      tool: imp.tool,
+      importer: imp.importer,
+      options: imp.options,
+      ...(isRecord(imp.upstream) ? { upstream: imp.upstream } : {}),
+      at: imp.at,
+    }
   }
   if (new TextEncoder().encode(JSON.stringify(out)).length > MAX_FILE_EXTENSION_META_BYTES) {
     return { ok: false, error: `extension metadata exceeds ${MAX_FILE_EXTENSION_META_BYTES / 1024} KB` }

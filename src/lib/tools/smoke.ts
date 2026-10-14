@@ -30,10 +30,12 @@ export interface SmokeFixture {
   afterSettle?: { type: string } & Record<string, unknown>
   /** The mount to render as (default "smoke": no context). apiRev 7:
    *  "action" / "export" run a manifest action or export headless. */
-  mount?: ToolMount | "action" | "export"
+  mount?: ToolMount | "action" | "export" | "import"
   /** apiRev 7: the action / export a headless fixture runs. */
   action?: { id: string }
   exportId?: string
+  /** AQU-1937: the import run a headless fixture does. */
+  importRun?: { importerId: string; phase: "run" | "choices"; options: Record<string, unknown>; field?: string }
   /** Fail the run if, once settled, the tool shows nothing (render.check). */
   mustRender?: boolean
 }
@@ -167,6 +169,18 @@ export function defaultSmokeFixtures(manifest: ToolManifest): SmokeFixture[] {
     // populated stub — it must not throw (nothing has to be drawn).
     ...(manifest.actions ?? []).map((a): SmokeFixture => ({ label: `populated (action ${a.id})`, data: stubData(true, manifest.scopes), mount: "action", action: { id: a.id } })),
     ...(manifest.exports ?? []).map((x): SmokeFixture => ({ label: `populated (export ${x.id})`, data: stubData(true, manifest.scopes), mount: "export", exportId: x.id })),
+    // AQU-1937: every importer runs once with its default options, and each
+    // dynamic field is asked for its choices.
+    ...(manifest.importers ?? []).flatMap((imp): SmokeFixture[] => {
+      const options: Record<string, unknown> = {}
+      for (const o of imp.options) options[o.key] = o.default ?? (o.type === "multiselect" ? [] : o.type === "boolean" ? false : "")
+      return [
+        { label: `populated (import ${imp.id})`, data: stubData(true, manifest.scopes), mount: "import", importRun: { importerId: imp.id, phase: "run", options } },
+        ...imp.options.filter((o) => o.dynamic).map((o): SmokeFixture => ({
+          label: `populated (import ${imp.id} choices ${o.key})`, data: stubData(true, manifest.scopes), mount: "import", importRun: { importerId: imp.id, phase: "choices", options, field: o.key },
+        })),
+      ]
+    }),
   ]
 }
 
@@ -280,6 +294,7 @@ function runOne(
       ...(fixture.mount === "inline" ? { cell: { fileId: "f1", cellId: "c1" } } : {}),
       ...(fixture.mount === "action" && fixture.action ? { action: { id: fixture.action.id, trigger: "click" as const } } : {}),
       ...(fixture.mount === "export" && fixture.exportId ? { export: { id: fixture.exportId, fileIds: ["f1"], lane: "" } } : {}),
+      ...(fixture.mount === "import" && fixture.importRun ? { import: fixture.importRun } : {}),
       theme: {},
     }, { sdk: manifest.sdk }), MOUNT_WIDTH[fixture.mount ?? "page"] ?? 1024)
   })

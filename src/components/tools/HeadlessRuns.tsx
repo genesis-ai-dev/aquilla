@@ -25,11 +25,22 @@ import type { HeadlessCallbacks } from "@/lib/tools/live-data-files"
 import { PermissionPrompt } from "./PermissionPrompt"
 import { useToolHost } from "./useToolHost"
 
+export type HeadlessOutcome =
+  | { ok: true; files?: number; message?: string | null; choices?: { value: string; label: string }[] }
+  | { ok: false; error: string }
+
 export interface HeadlessJob {
   key: string
   toolId: string
-  kind: "action" | "export"
+  kind: "action" | "export" | "import"
   label: string
+  /** AQU-1937, import jobs. */
+  importerId?: string
+  phase?: "run" | "refresh" | "choices"
+  options?: Record<string, unknown>
+  field?: string
+  /** Live progress for the Import dialog. */
+  onProgress?: (message: string, fraction: number | null) => void
   actionId?: string
   trigger?: "click" | "open"
   exportId?: string
@@ -37,12 +48,15 @@ export interface HeadlessJob {
   lane?: string
   /** Export: the file extension the format produces (for a single file without one). */
   extension?: string
-  /** Export: settles when the extension delivered (or failed). */
-  settle?: (outcome: { ok: true; files: number } | { ok: false; error: string }) => void
+  /** Export: settles when the extension delivered (or failed); import: done / choices. */
+  settle?: (outcome: HeadlessOutcome) => void
 }
 
 export const ACTION_TIME_LIMIT_MS = 15 * 60 * 1000
 export const EXPORT_TIME_LIMIT_MS = 5 * 60 * 1000
+/** An import of a whole Bible's resources book by book can take a while. */
+export const IMPORT_TIME_LIMIT_MS = 30 * 60 * 1000
+const CHOICES_TIME_LIMIT_MS = 60 * 1000
 
 /** Turn delivered files into one download: a single file as itself, several as a zip. */
 export async function deliverDownload(files: ToolDeliveredFile[], zipName: string): Promise<void> {
@@ -83,6 +97,7 @@ function HeadlessRun({
     if (finished.current) return
     finished.current = true
     if (toastShown.current) toast.close(toastId)
+    if (ok && job.kind === "import") job.settle?.({ ok: true, message })
     if (job.kind === "action") {
       toast.add({
         title: t(ok ? "extensions.action.done" : "extensions.action.failed", vars),
@@ -95,7 +110,16 @@ function HeadlessRun({
 
   const headless: HeadlessCallbacks = useMemo(
     () => ({
+      ...(job.kind === "import" && job.phase !== "choices" && job.importerId
+        ? { importContext: { toolId: tool.id, importerId: job.importerId, options: job.options ?? {} } }
+        : {}),
+      choices: (choices) => {
+        job.settle?.({ ok: true, choices })
+        finish.current(true, null)
+      },
       progress: (message, fraction) => {
+        job.onProgress?.(message, fraction)
+        if (job.kind === "import") return
         const title = t(job.kind === "action" ? "extensions.action.running" : "extensions.export.running", vars)
         const description = fraction != null ? `${message} (${Math.round(fraction * 100)}%)` : message
         if (toastShown.current) toast.update(toastId, { title, description })
@@ -119,13 +143,21 @@ function HeadlessRun({
 
   const { prompt, errors } = useToolHost({ frameRef, projectId: project.id, tool, session, roleLevel, headless })
 
+  // Cancelled (the job was removed before it reported): say so to the waiter.
+  useEffect(() => () => {
+    if (!finished.current) {
+      finished.current = true
+      job.settle?.({ ok: false, error: "cancelled" })
+    }
+  }, [job])
+
   // An uncaught error before the extension reported = the run failed.
   useEffect(() => {
     if (errors.length > 0) finish.current(false, errors[errors.length - 1].message)
   }, [errors])
 
   useEffect(() => {
-    const limit = job.kind === "action" ? ACTION_TIME_LIMIT_MS : EXPORT_TIME_LIMIT_MS
+    const limit = job.kind === "action" ? ACTION_TIME_LIMIT_MS : job.kind === "import" ? (job.phase === "choices" ? CHOICES_TIME_LIMIT_MS : IMPORT_TIME_LIMIT_MS) : EXPORT_TIME_LIMIT_MS
     const timer = setTimeout(() => finish.current(false, t("extensions.action.timedOut", { ...vars, minutes: Math.round(limit / 60000) })), limit)
     return () => clearTimeout(timer)
   }, [job.kind, t, vars])
@@ -145,6 +177,9 @@ function HeadlessRun({
         mount: job.kind,
         ...(job.kind === "action" ? { action: { id: job.actionId ?? "", trigger: job.trigger ?? "click" } } : {}),
         ...(job.kind === "export" ? { export: { id: job.exportId ?? "", fileIds: job.fileIds ?? [], lane: job.lane ?? "" } } : {}),
+        ...(job.kind === "import"
+          ? { import: { importerId: job.importerId ?? "", phase: job.phase ?? "run", options: job.options ?? {}, ...(job.fileIds ? { fileIds: job.fileIds } : {}), ...(job.field ? { field: job.field } : {}) } }
+          : {}),
         theme: readThemeVars(),
       }, { sdk: tool.manifest.sdk }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one frame per job

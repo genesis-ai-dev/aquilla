@@ -76,7 +76,7 @@ const targetsByRef = (rows: Row[]) => {
 test("a tool bulk-harmonizes with attribution, and revert-since-T restores everything but a later human edit", async ({ alice }) => {
   test.setTimeout(120_000)
   const jwt = await jwtFor("alice")
-  const seeded = await seedProjectWithFile(jwt, { name: `Tools ${Date.now()}`, fixturePath: FIXTURE })
+  const seeded = await seedProjectWithFile(jwt, { smartExtensions: true, name: `Tools ${Date.now()}`, fixturePath: FIXTURE })
 
   // Inconsistent renderings of "Jesus" across two chapters.
   const sources = (await readRows(jwt, seeded)).filter((r) => r.side === "source")

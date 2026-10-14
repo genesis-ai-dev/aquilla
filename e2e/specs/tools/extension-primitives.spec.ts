@@ -118,7 +118,7 @@ async function readFiles(jwt: string, projectId: string, anyFileId: string, exte
 test("an importer extension creates and refreshes a tagged file, an editor reads it by verse with a drift-checked data record, and its export downloads", async ({ alice }) => {
   test.setTimeout(180_000)
   const jwt = await jwtFor("alice")
-  const seeded = await seedProjectWithFile(jwt, { name: `Primitives ${Date.now()}` })
+  const seeded = await seedProjectWithFile(jwt, { smartExtensions: true, name: `Primitives ${Date.now()}` })
   const importerId = await install(jwt, seeded.projectId, IMPORTER_SOURCE, IMPORTER_MANIFEST)
   await install(jwt, seeded.projectId, EDITOR_SOURCE, EDITOR_MANIFEST)
 

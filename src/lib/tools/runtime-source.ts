@@ -137,6 +137,8 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
       // apiRev 7: what a headless run is for ({ id } / { id, fileIds, lane }).
       action: boot.action || null,
       export: boot.export || null,
+      // AQU-1937: an import run ({ importerId, phase: "run"|"refresh"|"choices", options, fileIds, field }).
+      import: boot.import || null,
     }),
     files: {
       // apiRev 7: optional { tags, kind, group } filter.
@@ -160,6 +162,12 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
     action: {
       progress: function (message, fraction) { return call("action.progress", { message: String(message || ""), fraction: typeof fraction === "number" ? fraction : null }); },
       done: function (message, opts) { return call("action.done", { message: message ? String(message) : null, ok: !(opts && opts.ok === false) }); },
+    },
+    // AQU-1937: an import contribution reports back to the Import dialog.
+    import: {
+      progress: function (message, fraction) { return call("import.progress", { message: String(message || ""), fraction: typeof fraction === "number" ? fraction : null }); },
+      done: function (message, opts) { return call("import.done", { message: message ? String(message) : null, ok: !(opts && opts.ok === false) }); },
+      choices: function (list) { return call("import.choices", { choices: list || [] }); },
     },
     // apiRev 7: a headless export hands its files back to the host.
     export: {
@@ -320,7 +328,7 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
   Object.freeze(aquilla.editor); Object.freeze(aquilla.backtranslation); Object.freeze(aquilla.history); Object.freeze(aquilla.attachments);
   Object.freeze(aquilla.rules); Object.freeze(aquilla.selection); Object.freeze(aquilla.suggestions);
   Object.freeze(aquilla.agent); Object.freeze(aquilla.source); Object.freeze(aquilla.web);
-  Object.freeze(aquilla.data); Object.freeze(aquilla.action); Object.freeze(aquilla.export);
+  Object.freeze(aquilla.data); Object.freeze(aquilla.action); Object.freeze(aquilla.export); Object.freeze(aquilla.import);
   Object.defineProperty(window, "aquilla", { value: Object.freeze(aquilla), writable: false, configurable: false });
 
   // apiRev 2: focus handoff. App-wide shortcuts (Ctrl/Cmd+K search, the

@@ -67,7 +67,7 @@ test("Smart Extensions rev 5 parity — hover explanations and the provenance wa
   await signIn(page)
   await applyUserProviderOverride(page, "alice", `${process.env.VITE_LLM_BASE_URL ?? ""}/v1`)
   const jwt = await jwtFor("alice")
-  const seeded = await seedProjectWithFile(jwt, { name: "Matthew (Spanish)", fixturePath: FIXTURE })
+  const seeded = await seedProjectWithFile(jwt, { smartExtensions: true, name: "Matthew (Spanish)", fixturePath: FIXTURE })
   const ws = new Workspace(page, "builtin")
   const tools = new ToolsPage(page)
   await tools.openFileInDefaultEditor(seeded.projectId, seeded.fileId, "MAT 1:1")

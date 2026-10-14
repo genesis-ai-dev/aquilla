@@ -22,6 +22,7 @@
     "dev:context": "BRAND=context vite",
     "predev:example-context": "node scripts/ensure-port-free.mjs 5173",
     "dev:example-context": "BRAND=example-context vite",
+    "build:door43-extension": "tsx scripts/build-door43-extension.ts",
     "build": "pnpm idml:gate && tsc -b && vite build && tsx scripts/check-app-build.ts && tsx scripts/check-brand-build.ts aquilla",
     "build:hosted": "node scripts/hosted-posthog.mjs",
     "build:compile": "tsc -b && vite build",

@@ -38,7 +38,7 @@ async function webFetch(jwt: string, projectId: string, toolId: string, url: str
 test("an extension asks before reading git.door43.org; denied it gets nothing, allowed it reads through the proxy", async ({ alice }) => {
   test.setTimeout(120_000)
   const jwt = await jwtFor("alice")
-  const seeded = await seedProjectWithFile(jwt, { name: `Web ${Date.now()}` })
+  const seeded = await seedProjectWithFile(jwt, { smartExtensions: true, name: `Web ${Date.now()}` })
   const res = await fetch(`${AUTH}/api/v2/projects/${seeded.projectId}/tools`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },

@@ -345,7 +345,7 @@ import { useComments } from "@/hooks/useComments"
 import { useFileAttachments } from "@/hooks/useFileAttachments"
 import { removeAttachmentFromCell } from "@/lib/attachments/attach-file"
 import type { CellAttachmentRecord } from "@/lib/sync/cell-attachments-read-types"
-import { MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical, BarChart3, Blocks, Loader2 } from "lucide-react"
+import { MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical, BarChart3, Blocks, Loader2, RefreshCw } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { setMicHeld } from "@/lib/audio/mic-hold"
 import { startOutputDeviceWatch } from "@/lib/audio/output-device-watch"
@@ -1505,7 +1505,10 @@ export function ProjectWorkspace() {
   // Smart Extensions: an installed `editor` extension may replace the
   // standard editor for this file (choice remembered per user/project/file).
   const extensionEditorChoice = useExtensionEditorChoice(currentUsername, projectId ?? "", activeFileId ?? null)
-  const extensionPanelRequestSeq = useToolsMount()?.panelRequestSeq ?? 0
+  const toolsMountCtx = useToolsMount()
+  const extensionPanelRequestSeq = toolsMountCtx?.panelRequestSeq ?? 0
+  // AQU-1937: no extensions UI at all unless the project switched them on.
+  const extensionsOn = toolsMountCtx?.extensionsEnabled === true
   // A pinned extension or palette entry asked for the side panel: show it.
   // An explicit request: open the dock even when it is collapsed (and, below
   // lg, open the dock's sheet — see AppShell dockOpenRequest).
@@ -9773,8 +9776,11 @@ export function ProjectWorkspace() {
       { id: "memory", labelKey: "terminology.livingMemory.title" as const, icon: LIVING_MEMORY_ICON, pinned: true,
         onClick: () => openOverlay("memory") },
       // Smart Extensions (prototype): sandboxed, agent-built project extensions.
-      { id: "tools", labelKey: "extensions.title" as const, icon: Blocks, pinned: true,
-        onClick: () => { if (projectId) navigate(`/project/${projectId}/extensions`) } },
+      // AQU-1937: only when the project has them switched on.
+      ...(extensionsOn
+        ? [{ id: "tools", labelKey: "extensions.title" as const, icon: Blocks, pinned: true,
+            onClick: () => { if (projectId) navigate(`/project/${projectId}/extensions`) } }]
+        : []),
       // Project settings is a header cog beside Import. Audio/Media lens lives
       // in the header EditorModeToggle. Sharing lives in Settings → Members.
       // FRO-272: trash opens a dialog (project_lead+). Pinned in the same
@@ -9786,7 +9792,7 @@ export function ProjectWorkspace() {
         : []),
     ]
     return items
-  }, [commentCounts, openCommentCount, currentRoleLevel, openOverlay, projectId, navigate])
+  }, [commentCounts, openCommentCount, currentRoleLevel, openOverlay, projectId, navigate, extensionsOn])
 
   // AQU-646 P0: cells from the store never carry audio attachments — only
   // mergeCellsWithAudio adds them (EditorTable and VoicePlaybackBar each merge
@@ -13188,6 +13194,24 @@ export function ProjectWorkspace() {
       icon: Download,
       onClick: openExportFlow,
     })
+    // AQU-1937: a file an extension importer wrote refreshes from its source
+    // (re-runs that importer with the options it ran with; only changes land).
+    if (activeFileId && extensionsOn && toolsMountCtx?.fileImports.has(activeFileId)) {
+      const refreshId = activeFileId
+      items.push({
+        id: "file-refresh-from-source",
+        label: t("extensions.import.refresh"),
+        icon: RefreshCw,
+        onClick: () => {
+          void toolsMountCtx.refreshFile(refreshId).then((outcome) => {
+            toast.add({
+              title: t(outcome.ok ? "extensions.import.refreshDone" : "extensions.import.refreshFailed"),
+              ...(outcome.ok ? (outcome.message ? { description: outcome.message } : {}) : { description: outcome.error }),
+            })
+          })
+        },
+      })
+    }
     if (activeFile && projectId && canExportByOrgPolicy && originalSourceIds.has(activeFile.id)) {
       items.push({
         id: "file-download-original",
@@ -13242,6 +13266,8 @@ export function ProjectWorkspace() {
     suggestions.length,
     suggestionsDismissed,
     t,
+    extensionsOn,
+    toolsMountCtx,
   ])
 
   const handleHeaderImport = useCallback(() => {
@@ -13739,7 +13765,7 @@ export function ProjectWorkspace() {
               // the per-line voice controls show alongside the panel.
               if (t === "voices" && lens !== "audio") switchLens("audio")
             }}
-            toolsPanel={<ToolsDockPanel file={activeFile ? { fileId: activeFile.id, name: activeFile.name } : undefined} />}
+            toolsPanel={extensionsOn ? <ToolsDockPanel file={activeFile ? { fileId: activeFile.id, name: activeFile.name } : undefined} /> : undefined}
             voicesPanel={
               project ? (
                 <div className="flex h-full min-h-0 flex-col overflow-hidden p-2">

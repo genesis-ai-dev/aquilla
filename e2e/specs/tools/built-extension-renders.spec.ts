@@ -26,7 +26,7 @@ const NAME = "Word Count"
 test("a freshly built extension renders in its full page and in the side panel, and updates live", async ({ alice }) => {
   test.setTimeout(120_000)
   const jwt = await jwtFor("alice")
-  const seeded = await seedProjectWithFile(jwt, { name: `Built ${Date.now()}`, fixturePath: FIXTURE })
+  const seeded = await seedProjectWithFile(jwt, { smartExtensions: true, name: `Built ${Date.now()}`, fixturePath: FIXTURE })
   const source = await readFile(SOURCE, "utf8")
   const manifest = { name: NAME, description: "Word count per verse and for the file, live.", scopes: ["read:cells"], mounts: ["panel", "page"], apiRev: 3 }
   const res = await fetch(`${AUTH}/api/v2/projects/${seeded.projectId}/tools`, {

@@ -32,7 +32,7 @@ test("Smart Extensions — a first-time user builds one", async ({ page }) => {
   await page.goto("/")
   await injectSession(page, session)
   const jwt = await jwtFor("alice")
-  const seeded = await seedProjectWithFile(jwt, { name: "Matthew (Spanish)", fixturePath: FIXTURE })
+  const seeded = await seedProjectWithFile(jwt, { smartExtensions: true, name: "Matthew (Spanish)", fixturePath: FIXTURE })
   const source = await readFile(BUILT, "utf8")
   let release: () => void = () => {}
   const held = new Promise<void>((r) => { release = r })

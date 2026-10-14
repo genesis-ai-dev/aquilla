@@ -36,7 +36,7 @@ test("Smart Extensions — a custom editor", async ({ page }, testInfo) => {
   await injectSession(page, session)
 
   const jwt = await jwtFor("alice")
-  const seeded = await seedProjectWithFile(jwt, { name: "Matthew (Spanish)", fixturePath: FIXTURE })
+  const seeded = await seedProjectWithFile(jwt, { smartExtensions: true, name: "Matthew (Spanish)", fixturePath: FIXTURE })
   // One verse already translated by someone, so the standard editor isn't empty.
   const token = await mintSyncToken(jwt, seeded.projectId, seeded.fileId)
   const read = await fetch(`${SYNC_BASE}/api/v1/projects/${seeded.projectId}/files/${seeded.fileId}/cells`, { headers: { Authorization: `Bearer ${token}` } })

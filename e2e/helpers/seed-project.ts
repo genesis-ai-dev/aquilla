@@ -38,7 +38,7 @@ import {
 } from "../../src/lib/parsers/helloao"
 import { aquillaImportMetadata, normalizeTranslatableStrings } from "../../src/lib/import/normalized-manifest"
 import { readPersistedSession } from "./auth-state"
-import { createProjectServerSide, setProjectLanguagePair } from "./frontier-api"
+import { createProjectServerSide, setProjectLanguagePair, updateProjectSettings } from "./frontier-api"
 import { postIdempotentJson } from "./idempotent-request"
 import { Workspace } from "./page-objects/Workspace"
 
@@ -255,13 +255,25 @@ export async function importHelloaoStringsIntoProject(
  * written by ensureAuthState; pass `session.jwt` or re-read the sidecar). */
 export async function seedProjectWithFile(
   jwt: string,
-  opts: { name?: string; fixturePath?: string; steeringContext?: boolean; orgId?: number } = {},
+  opts: {
+    name?: string
+    fixturePath?: string
+    steeringContext?: boolean
+    orgId?: number
+    /** AQU-1937: switch the project's Smart Extensions on (off by default
+     *  for every project). Defaults on for E2E_EDITOR=extension runs, whose
+     *  journeys drive the first-party extension editor. */
+    smartExtensions?: boolean
+  } = {},
 ): Promise<SeededProject> {
   const projectId = randomUUID()
   const projectName = opts.name ?? `Seeded ${projectId.slice(0, 8)}`
   await createProjectServerSide(jwt, {
     id: projectId, name: projectName, ...(opts.orgId === undefined ? {} : { orgId: opts.orgId }),
   })
+  if (opts.smartExtensions ?? process.env.E2E_EDITOR === "extension") {
+    await updateProjectSettings(jwt, projectId, { smartExtensionsEnabled: true })
+  }
   // A seeded project stands in for one a team has actually set up: autopilot
   // refuses to start without both languages and an answered brief question
   // (AQU-827). Languages are lane rows (AQU-1594 / AQU-1595): English on the

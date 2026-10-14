@@ -292,6 +292,37 @@ model for free, with no new table and no migration.
   accepts only verified extensions (or the user's own revert), and provenance reads `verified` only with a
   matching session.
 
+## The "Smart Extensions" switch, import contributions and the Door43 importer (AQU-1937)
+
+- **Per-project switch, off by default.** `smartExtensionsEnabled` in the project settings blob (no
+  migration), Maintainer (600)+ like every other project setting, in Project settings → Experimental.
+  Off: the native editor, the built-in importers and no extensions anywhere (nav entry, dock, bar,
+  palette, "Edit with" entries, export and import contributions, the first-party installs), the
+  extensions pages show an "off" notice, and auth-worker refuses every `/tools*` route
+  (`smart_extensions_off`) — so no tool session, no verified extension write, no web reads, no builds.
+  Merging Smart Extensions changes no project until someone turns it on.
+- **Import contributions.** Manifest `importers: [{ id, label, description, options }]` with a typed
+  options schema (text, number, boolean, select, multiselect; `dynamic` choices asked of the extension,
+  re-asked on `dependsOn`). They appear in the platform's Import dialog ("From extensions"); the
+  platform renders the form (`src/components/tools/ExtensionImportPanel.tsx`), runs the extension
+  headless (`aquilla.context.mount = "import"`, phases `choices` / `run` / `refresh`) with progress and
+  Cancel through the same runner as exports, and records `files.meta.extension.import = { tool, importer,
+  options, upstream, at }` on every file the run upserts. "Refresh from source" in the file menu re-runs
+  that importer with the stored options for that file. Re-running resumes: `files.upsert` is a delta.
+  `files.upsert` accepts explicit `fileId` / `cellIds` (UUIDs) so an importer can keep the ids an earlier
+  import used. Permissions are the extension's granted scopes bounded by the user's role
+  (`write:files` = project lead). Importers are never action buttons.
+- **First-party Door43 importer.** `shared/tools/first-party/door43-importer.ts`, installed by the server
+  like the first-party editor. Its script is generated (`pnpm build:door43-extension` →
+  `door43-importer.bundle.ts`) from `src/lib/dcs/extension/door43-importer-main.ts` and the SAME Door43
+  modules the built-in import runs: the built-in import was split into `src/lib/dcs/import-plan.ts`
+  (fetch → route → parse → deterministic ids) which both importers call, so parity is by construction
+  and pinned by `door43-parity.test.ts` (ULT / TN / TQ / OBS, byte-identical files and cells through the
+  public `files.upsert`). Beyond the built-in: Translation Words (one file per category, section-anchored
+  ids), Translation Words Links (reference files) and word alignment kept as data (`door43.alignment`).
+  The built-in Door43 import stays in Import, one click away. `door43-bundle.test.ts` fails when the
+  bundle is stale.
+
 ## Prototype-only vs production follow-ups
 
 - **Origin.** Prototype uses srcdoc + meta CSP. Production: serve frames from a dedicated

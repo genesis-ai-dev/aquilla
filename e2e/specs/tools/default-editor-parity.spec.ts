@@ -36,7 +36,7 @@ async function target(jwt: string, seeded: SeededProject, ref: string): Promise<
 test("the extension editor drafts with AI, opens history and comments, writes a footnote, jumps to the next unfinished cell and drives the selection bar", async ({ alice }) => {
   test.setTimeout(150_000)
   const jwt = await jwtFor("alice")
-  const seeded = await seedProjectWithFile(jwt, { name: `Parity ${Date.now()}`, fixturePath: FIXTURE })
+  const seeded = await seedProjectWithFile(jwt, { smartExtensions: true, name: `Parity ${Date.now()}`, fixturePath: FIXTURE })
   const tools = new ToolsPage(alice)
   await tools.optIntoDefaultEditorExtension()
   const llmBase = process.env.VITE_LLM_BASE_URL ?? ""

@@ -54,7 +54,7 @@ async function targetLaneTag(jwt: string, projectId: string): Promise<string> {
 test("a custom editor extension replaces the editor, writes with attribution, and updates live", async ({ alice }) => {
   test.setTimeout(120_000)
   const jwt = await jwtFor("alice")
-  const seeded = await seedProjectWithFile(jwt, { name: `Custom editor ${Date.now()}`, fixturePath: FIXTURE })
+  const seeded = await seedProjectWithFile(jwt, { smartExtensions: true, name: `Custom editor ${Date.now()}`, fixturePath: FIXTURE })
 
   const tools = new ToolsPage(alice)
   await tools.open(seeded.projectId)

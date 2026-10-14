@@ -27,10 +27,18 @@ const MANIFEST = {
   mounts: ["page"],
 }
 
+async function enableSmartExtensions(projectId: string, on = true): Promise<void> {
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO project_settings (project_id, settings, version) VALUES (?, ?, 1)
+     ON CONFLICT (project_id) DO UPDATE SET settings = excluded.settings`,
+  ).bind(projectId, JSON.stringify({ smartExtensionsEnabled: on })).run()
+}
+
 async function seedProject(): Promise<void> {
   await seedUser(1, "owner")
   await seedUser(2, "viewer")
   await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, created_by) VALUES (?, ?, ?)").bind(PROJECT, "Tools", 1).run()
+  await enableSmartExtensions(PROJECT)
   for (const [uid, role] of [[1, ROLE.OWNER], [2, ROLE.VIEWER]] as const) {
     await env.AQUILLA_PG.prepare(
       "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, ?, ?, ?)",
@@ -53,6 +61,21 @@ async function call(path: string, jwt: string, init: { method?: string; body?: u
 interface ToolBody {
   tool: { id: string; currentVersion: number; codeHash: string; grantedScopes: string[]; source: string; apiRev: number }
 }
+
+describe("the per-project Smart Extensions switch (AQU-1937)", () => {
+  it("refuses every extension route while the project has it off, and serves them once on", async () => {
+    await seedProject()
+    await enableSmartExtensions(PROJECT, false)
+    const jwt = await jwtFor("owner")
+    for (const [path, method] of [["/tools", "GET"], ["/tools", "POST"], ["/tools/first-party", "POST"], ["/tools/x/session", "POST"], ["/tools/x/web-fetch", "POST"], ["/tools/build", "POST"]] as const) {
+      const res = await call(path, jwt, { method, ...(method === "POST" ? { body: {} } : {}) })
+      expect(res.status, `${method} ${path}`).toBe(403)
+      expect(((await res.json()) as { error: { code: string } }).error.code).toBe("smart_extensions_off")
+    }
+    await enableSmartExtensions(PROJECT, true)
+    expect((await call("/tools", jwt)).status).toBe(200)
+  })
+})
 
 describe("tools API", () => {
   it("installs a tool with a standing grant limited to declared scopes", async () => {
@@ -146,6 +169,7 @@ describe("tools API", () => {
   it("shares as an owned copy with upstream link, same hash and no grants", async () => {
     await seedProject()
     await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, created_by) VALUES ('proj-other', 'Other', 1)").run()
+    await enableSmartExtensions("proj-other")
     await env.AQUILLA_PG.prepare(
       "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj-other', 1, ?, 1)",
     ).bind(ROLE.OWNER).run()

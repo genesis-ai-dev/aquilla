@@ -53,6 +53,15 @@ export const extensionDataFileId = (projectId: string, ns: string, coll: string)
   uuidv5(`${projectId}|ext-data|${ns}|${coll}`, EXTENSION_NS)
 export const extensionCellId = (fileId: string, key: string): string => uuidv5(`${fileId}|cell|${key}`, EXTENSION_NS)
 
+/** Source rich text an extension writes (files.upsert, write:files = project
+ *  lead) is stored as given, exactly like a built-in importer's parser HTML:
+ *  every display path sanitizes on read to its own allowlist (pairRows,
+ *  cells.byRef, the editor). AQU-1937 parity: the Door43 importer's markdown
+ *  HTML must land byte-identical to the built-in import's. */
+export function storedSourceHtml(html: string): string {
+  return html
+}
+
 /** What a refresh compares: value and rich text (metadata rides separately). */
 export function upsertHash(value: string, html: string | null | undefined): string {
   return `${contentHash(value)}:${contentHash(html ?? "")}`
@@ -70,6 +79,10 @@ export interface HeadlessCallbacks {
   progress?: (message: string, fraction: number | null) => void
   done?: (message: string | null, ok: boolean) => void
   deliver?: (files: ToolDeliveredFile[]) => void
+  /** AQU-1937: an importer's dynamic option choices. */
+  choices?: (choices: { value: string; label: string }[]) => void
+  /** AQU-1937: the import run this frame is doing — recorded on every file it upserts. */
+  importContext?: { toolId: string; importerId: string; options: Record<string, unknown> }
 }
 
 export interface LiveFilesOptions {
@@ -166,16 +179,19 @@ export class LiveFilesData implements ToolFilesHostData {
   async upsertFile(spec: ToolFileUpsert): Promise<ToolUpsertResult> {
     await this.ready
     const { projectId } = this.opts
-    const fileId = extensionFileId(projectId, spec.key)
+    const fileId = spec.fileId ?? extensionFileId(projectId, spec.key)
     const origin = this.opts.toolOrigin()
     const cellIds: Record<string, string> = {}
-    for (const c of spec.cells) cellIds[c.key] = extensionCellId(fileId, c.key)
+    for (const c of spec.cells) cellIds[c.key] = c.cellId ?? extensionCellId(fileId, c.key)
+    const run = this.opts.headless?.()?.importContext
     const extension: FileExtensionMeta = {
       kind: spec.kind,
       tags: spec.tags,
       owner: origin.toolId,
       ...(spec.group ? { group: spec.group } : {}),
       ...(spec.meta ? { meta: spec.meta } : {}),
+      // AQU-1937: provenance the platform records for "Refresh from source".
+      ...(run ? { import: { tool: run.toolId, importer: run.importerId, options: run.options, ...(spec.upstream ? { upstream: spec.upstream } : {}), at: Date.now() } } : {}),
     }
     const existing = (await this.files(true)).find((f) => f.fileId === fileId)
     if (existing?.deletedAt) throw new Error(`the file "${existing.name}" was deleted; restore it from Trash before refreshing it`)
@@ -186,9 +202,10 @@ export class LiveFilesData implements ToolFilesHostData {
         cellId: cellIds[c.key],
         anchorCellId: i === 0 ? null : cellIds[spec.cells[i - 1].key],
         value: c.value,
-        ...(c.html !== undefined ? { valueHtml: sanitizeSourceDisplayHtml(c.html) } : {}),
+        ...(c.html !== undefined ? { valueHtml: storedSourceHtml(c.html) } : {}),
         ...(c.type !== undefined ? { type: c.type } : {}),
         ...(c.ref !== undefined ? { canonicalRef: c.ref } : {}),
+        ...(c.sequenceIndex !== undefined ? { sequenceIndex: c.sequenceIndex } : {}),
         ...(c.metadata !== undefined ? { metadata: c.metadata } : {}),
       }))
       await bulkUploadSource({
@@ -221,7 +238,7 @@ export class LiveFilesData implements ToolFilesHostData {
       rowById.set(r.cellId, r)
     }
     const desired = spec.cells.map((c, i) => {
-      const html = c.html !== undefined ? sanitizeSourceDisplayHtml(c.html) : undefined
+      const html = c.html !== undefined ? storedSourceHtml(c.html) : undefined
       return { ...c, html, cellId: cellIds[c.key], index: i, contentHash: upsertHash(c.value, html ?? rowById.get(cellIds[c.key])?.valueHtml ?? null) }
     })
     const changes = detectChanges([{ fileId, cells: desired }], held)
@@ -235,6 +252,7 @@ export class LiveFilesData implements ToolFilesHostData {
         ...(cell.html !== undefined ? { valueHtml: cell.html } : {}),
         ...(cell.type !== undefined ? { type: cell.type } : {}),
         ...(cell.ref !== undefined ? { canonicalRef: cell.ref } : {}),
+        ...(cell.sequenceIndex !== undefined ? { sequenceIndex: cell.sequenceIndex } : {}),
         ...(cell.metadata !== undefined ? { metadata: cell.metadata } : {}),
         author: this.opts.author,
         toolOrigin: origin,
@@ -256,7 +274,8 @@ export class LiveFilesData implements ToolFilesHostData {
       await emitSourceCellDelete({ projectId, fileId, cellId, parentId: held.get(cellId)?.eventId ?? null, author: this.opts.author, toolOrigin: origin })
     }
     const before = existing.extension ?? null
-    if (JSON.stringify(before) !== JSON.stringify(extension)) {
+    const comparable = (e: FileExtensionMeta | null) => (e?.import ? { ...e, import: { ...e.import, at: 0 } } : e)
+    if (JSON.stringify(comparable(before)) !== JSON.stringify(comparable(extension))) {
       await emitFileExtensionSet({ projectId, fileId, extension: extension as unknown as Record<string, unknown>, author: this.opts.author, toolOrigin: origin })
     }
     if (existing.name !== spec.name) await emitFileRename({ projectId, fileId, name: spec.name, author: this.opts.author })
@@ -597,6 +616,13 @@ export class LiveFilesData implements ToolFilesHostData {
     const cb = this.opts.headless?.()?.done
     if (!cb) return false
     cb(message, ok)
+    return true
+  }
+
+  async importChoices(choices: { value: string; label: string }[]): Promise<boolean> {
+    const cb = this.opts.headless?.()?.choices
+    if (!cb) return false
+    cb(choices)
     return true
   }
 

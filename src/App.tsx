@@ -70,6 +70,7 @@ import { useGlobalAudioShortcuts } from "@/hooks/useGlobalAudioShortcuts"
 import { useSessionRefresh } from "@/hooks/useSessionRefresh"
 import { ProjectWorkspaceRoute } from "@/components/ProjectWorkspaceRoute"
 import { ToolsMountProvider } from "@/components/tools/ToolsMountContext"
+import { SmartExtensionsGate } from "@/components/tools/SmartExtensionsGate"
 import { BuildJobNotifier } from "@/components/tools/builder/BuildJobNotifier"
 import { RedirectToProjectOverview } from "@/components/RedirectToProjectOverview"
 
@@ -482,8 +483,8 @@ function AppRoutes() {
         <Route path="/project/:id/rules" element={<RedirectToProjectMemory section="quality" />} />
         {/* AQU-841 — in-app approvals queue for agent-staged changesets. */}
         <Route path="/project/:id/approvals" element={<LazyRoute><ProjectApprovals /></LazyRoute>} />
-        <Route path="/project/:id/extensions" element={<LazyRoute><ToolsMountProvider><ToolsPage /></ToolsMountProvider></LazyRoute>} />
-        <Route path="/project/:id/extensions/:toolId" element={<LazyRoute><ToolRunPage /></LazyRoute>} />
+        <Route path="/project/:id/extensions" element={<LazyRoute><SmartExtensionsGate><ToolsMountProvider><ToolsPage /></ToolsMountProvider></SmartExtensionsGate></LazyRoute>} />
+        <Route path="/project/:id/extensions/:toolId" element={<LazyRoute><SmartExtensionsGate><ToolRunPage /></SmartExtensionsGate></LazyRoute>} />
         <Route path="/project/:id/tools" element={<RedirectToExtensions />} />
         <Route path="/project/:id/tools/:toolId" element={<RedirectToExtensions />} />
         <Route path="/project/:id/agent" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />

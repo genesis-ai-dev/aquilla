@@ -37,7 +37,7 @@ test("Smart Extensions — the default editor is an extension", async ({ page, b
   await injectSession(page, session)
 
   const jwt = await jwtFor("alice")
-  const seeded = await seedProjectWithFile(jwt, { name: "Matthew (Spanish)", fixturePath: FIXTURE })
+  const seeded = await seedProjectWithFile(jwt, { smartExtensions: true, name: "Matthew (Spanish)", fixturePath: FIXTURE })
   await addProjectMember(jwt, seeded.projectId, "bob", ROLE.CONTRIBUTOR)
 
   // Bob: his own browser, not recorded.

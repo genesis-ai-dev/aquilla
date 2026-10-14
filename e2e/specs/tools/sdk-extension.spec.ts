@@ -35,7 +35,7 @@ async function install(jwt: string, projectId: string, file: string, manifest: R
 test("SDK extensions: verse cards edit and validate; a word-count panel follows the open file live", async ({ alice }) => {
   test.setTimeout(120_000)
   const jwt = await jwtFor("alice")
-  const seeded = await seedProjectWithFile(jwt, { name: `SDK ${Date.now()}`, fixturePath: USFM })
+  const seeded = await seedProjectWithFile(jwt, { smartExtensions: true, name: `SDK ${Date.now()}`, fixturePath: USFM })
   const write = ["read:cells", "write:target", "write:validation"]
   const cardsId = await install(jwt, seeded.projectId, "sdk-verse-cards.html", { name: "Verse Cards", description: "One card per verse.", scopes: write, mounts: ["page"] }, write)
   await install(jwt, seeded.projectId, "sdk-word-count.html", { name: "Words", description: "Word count, live.", scopes: ["read:cells"], mounts: ["page", "panel"] }, ["read:cells"])

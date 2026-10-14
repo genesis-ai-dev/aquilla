@@ -84,5 +84,6 @@ export function stubFilesData(populated: boolean): ToolFilesHostData {
     actionProgress: async () => true,
     actionDone: async () => true,
     exportDeliver: async () => true,
+    importChoices: async () => true,
   }
 }

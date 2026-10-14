@@ -189,15 +189,40 @@ and an exporter that writes them back out. Everything lands as ordinary, attribu
     the cell it is about: drift is then "current" (that cell unchanged since you wrote it), "changed" (edited since: re-check it —
     never assume character offsets still hold; anchor sub-cell things by word + occurrence and re-resolve) or "orphaned" (cell gone).
     Writing a record re-stamps it as "current". Contributors can write data; files.upsert needs a project lead.
-- Manifest "actions": [{ "id": "refresh", "label": "Check for updates", "where": ["bar","menu","settings"], "onOpen"?: true }]
+- Manifest "importers" (AQU-1937) — THE way to bring outside content into the project. Never put an importer in an action button.
+    "importers": [{ "id": "door43", "label": "unfoldingWord resources (Door43)", "description": "…",
+      "options": [{ "key": "books", "label": "Books", "type": "multiselect", "dynamic": true, "required": true },
+                  { "key": "lang", "label": "Language", "type": "select", "choices": [{ "value": "en", "label": "English" }], "default": "en" },
+                  { "key": "ref", "label": "Branch or release", "type": "text", "default": "master" }] }]   (needs write:files)
+    The PLATFORM shows it in the Import dialog, renders this options form (types: text, number, boolean, select, multiselect;
+    "dynamic": true asks YOU for the choices, re-asked when a "dependsOn" field changes), runs your extension HEADLESS with
+    aquilla.context.mount = "import" and aquilla.context.import = { importerId, phase, options, fileIds, field }, shows progress and
+    Cancel, and records { extension, importer, options, upstream } on every file you upsert. phase "choices": compute the choices
+    for options[field] and answer aquilla.import.choices([{ value, label }…]) — nothing else. phase "run": import what the options
+    say. phase "refresh": the user chose "Refresh from source" on a file (fileIds): re-import just those, with the stored options.
+    Report with aquilla.import.progress(message, fraction 0..1) and finish with aquilla.import.done(summary, { ok? }).
+    Importer rules: work BOOK BY BOOK (one fetch and one files.upsert per book/file), report progress after each, keep every
+    upsert idempotent (stable keys) so re-running RESUMES where it stopped, compare the upstream version you stored (upstream
+    in files.upsert) and skip what did not change, and never fetch per verse.
+- Manifest "actions": [{ "id": "check", "label": "Check consistency", "where": ["bar","menu","settings"], "onOpen"?: true }]
     A button that runs your extension HEADLESS: aquilla.context.mount is "action" and aquilla.context.action = { id, trigger }.
     Do the work, report with aquilla.action.progress(message, fraction 0..1) and finish with aquilla.action.done(message, { ok? }).
-    onOpen: also run it (at most daily) when a member who may run it opens the project — use it for "check for updates".
+    onOpen: also run it (at most daily) when a member who may run it opens the project. Actions are for jobs (checks, reports,
+    batch fixes) — importing is an importer, refreshing is the file's "Refresh from source".
     In an action mount draw nothing; branch on aquilla.context.mount first thing.
 - Manifest "exports": [{ "id": "aligned-usfm", "label": "Aligned USFM", "extension": "usfm", "tags"?: ["uw:ult"] }]
     Offered in the export dialog (for files with one of those tags). Runs HEADLESS with aquilla.context.export =
     { id, fileIds, lane }: read cells / data / files.source, then aquilla.export.deliver([{ name, text | bytes, mime }])
     (several files are zipped for the user).
+
+### The shape of anything that works with outside resources (AQU-1937)
+Build it as up to THREE parts, each its own extension or one extension with all three:
+1. an IMPORTER contribution (manifest "importers") that brings the resource in as tagged, grouped project files;
+2. an EDITOR (mounts "editor"/"page") that opens files by tag/group (files.list, files.group, cells.byRef) and never imports;
+3. an EXPORT contribution (manifest "exports") that writes the work back out.
+Options, not hard-coding: books, languages, repositories, branches, file names or any other specific a request mentions become
+importer OPTIONS (with that value as the default) or settings — never literals in the code — so the same extension serves the
+next project. "Import Titus from en_tn" → options books (default ["TIT"]) and resource (default "en_tn").
 
 Every bridge error is an Error with a .code. Wrap awaits in try/catch and show errors in the UI.
 Start your script with: \`(async () => { … })()\` and render a loading state first.
@@ -219,7 +244,7 @@ saying why when the bridge cannot support it (see "What Aquilla has"). Then buil
 [{ "id": 1, "text": "…", "priority": "must", "status": "planned" }, { "id": 2, "text": "…", "priority": "must", "status": "not_possible", "note": "…" }]
 \`\`\`
 \`\`\`json
-{ "name": "…", "description": "one short sentence", "web": ["only with read:web"], "scopes": [${TOOL_SCOPES.map((s) => `"${s}"`).join(", ")} — only those you use], "mounts": ["page", …any of "panel", "inline", "editor" that fit], "sdk": 1, "apiRev": ${TOOLS_API_REV}, "actions": [only if you need headless buttons], "exports": [only if you add export formats] }
+{ "name": "…", "description": "one short sentence", "web": ["only with read:web"], "scopes": [${TOOL_SCOPES.map((s) => `"${s}"`).join(", ")} — only those you use], "mounts": ["page", …any of "panel", "inline", "editor" that fit], "sdk": 1, "apiRev": ${TOOLS_API_REV}, "importers": [only to bring content in], "actions": [only for headless jobs], "exports": [only if you add export formats] }
 \`\`\`
 \`\`\`html
 <!doctype html>

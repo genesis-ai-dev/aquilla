@@ -63,7 +63,7 @@ test("Smart Extensions builder — every state", async ({ page }) => {
   await page.goto("/")
   await injectSession(page, session)
   const jwt = await jwtFor("alice")
-  const seeded = await seedProjectWithFile(jwt, { name: "Matthew (Spanish)", fixturePath: FIXTURE })
+  const seeded = await seedProjectWithFile(jwt, { smartExtensions: true, name: "Matthew (Spanish)", fixturePath: FIXTURE })
   const built = await readFile(BUILT, "utf8")
 
   // 1. The page as a first-time user finds it.

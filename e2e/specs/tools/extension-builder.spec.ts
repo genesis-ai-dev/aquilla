@@ -30,7 +30,7 @@ const REQUIREMENTS = [
 test("describe → watch it build → try it on sample verses → add it → it opens in the side panel", async ({ alice }) => {
   test.setTimeout(120_000)
   const jwt = await jwtFor("alice")
-  const seeded = await seedProjectWithFile(jwt, { name: `Builder ${Date.now()}`, fixturePath: FIXTURE })
+  const seeded = await seedProjectWithFile(jwt, { smartExtensions: true, name: `Builder ${Date.now()}`, fixturePath: FIXTURE })
   const source = await readFile(WORD_COUNT, "utf8")
   const manifest = { name: "Word Count", description: "Word count per verse and for the file, live.", scopes: ["read:cells"], mounts: ["panel", "page"], apiRev: 5 }
   const requests: string[] = []
@@ -90,7 +90,7 @@ test("describe → watch it build → try it on sample verses → add it → it 
 test("\"Build your own editor…\" builds an editor that appears in \"Edit with\"", async ({ alice }) => {
   test.setTimeout(120_000)
   const jwt = await jwtFor("alice")
-  const seeded = await seedProjectWithFile(jwt, { name: `Builder editor ${Date.now()}`, fixturePath: FIXTURE })
+  const seeded = await seedProjectWithFile(jwt, { smartExtensions: true, name: `Builder editor ${Date.now()}`, fixturePath: FIXTURE })
   const manifest = { name: "One Verse Editor", description: "One verse at a time, source on top.", scopes: ["read:cells", "write:target", "write:validation"], mounts: ["editor", "page"], apiRev: 1 }
   const requests: string[] = []
   await alice.route(BUILD, async (route: Route) => {

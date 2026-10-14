@@ -37,7 +37,7 @@ test("builder benchmark — before/after screenshots", async ({ page }) => {
   const jwt = await jwtFor("alice")
 
   for (const name of CASES) {
-    const seeded = await seedProjectWithFile(jwt, { name: `Bench ${name}`, fixturePath: FIXTURE })
+    const seeded = await seedProjectWithFile(jwt, { smartExtensions: true, name: `Bench ${name}`, fixturePath: FIXTURE })
 
     // BEFORE: the source the old prompt produced, installed as-is.
     const beforeSrc = path.join(DIR, `aqu-1793-builder-eval-before-${name}.html`)

@@ -125,6 +125,103 @@ export interface ToolManifest {
   actions?: ToolAction[]
   /** apiRev 7: export formats offered in the export dialog. */
   exports?: ToolExport[]
+  /** apiRev 7 (AQU-1937): import contributions offered in the Import dialog. */
+  importers?: ToolImporter[]
+}
+
+/** One field of an importer's options form. The PLATFORM renders the form
+ *  from this schema (the extension never draws it); `dynamic` choices are
+ *  asked of the extension headlessly (context.import.phase "choices"). */
+export interface ToolImporterOption {
+  key: string
+  label: string
+  type: "text" | "number" | "boolean" | "select" | "multiselect"
+  required?: boolean
+  default?: string | number | boolean | string[]
+  help?: string
+  choices?: { value: string; label: string }[]
+  /** Choices come from the extension at run time (e.g. a catalog), and are
+   *  re-asked when one of `dependsOn` changes. */
+  dynamic?: boolean
+  dependsOn?: string[]
+}
+
+/** apiRev 7 (AQU-1937): an import contribution. Runs headless
+ *  (aquilla.context.mount "import"), writes through files.upsert, and the
+ *  platform records { tool, importer, options, upstream } on every file it
+ *  writes — so "Refresh from source" on a file re-runs it with those options. */
+export interface ToolImporter {
+  id: string
+  label: string
+  description?: string
+  options: ToolImporterOption[]
+}
+
+const OPTION_TYPES = ["text", "number", "boolean", "select", "multiselect"] as const
+const MAX_IMPORTERS = 4
+const MAX_OPTIONS = 16
+
+function readImporters(input: unknown, errors: string[]): ToolImporter[] {
+  if (input === undefined || input === null) return []
+  if (!Array.isArray(input)) {
+    errors.push("manifest.importers must be a list")
+    return []
+  }
+  const out: ToolImporter[] = []
+  for (const [i, raw] of input.entries()) {
+    if (!isRecord(raw)) {
+      errors.push(`manifest.importers[${i}] must be an object`)
+      continue
+    }
+    const id = typeof raw.id === "string" ? raw.id : ""
+    const label = typeof raw.label === "string" ? raw.label.trim() : ""
+    if (!ACTION_ID.test(id)) errors.push(`manifest.importers[${i}].id must be lowercase letters, digits and dashes`)
+    else if (out.some((x) => x.id === id)) errors.push(`manifest.importers has two importers with id ${id}`)
+    if (!label || label.length > MAX_LABEL) errors.push(`manifest.importers[${i}].label must be 1-${MAX_LABEL} characters`)
+    const description = typeof raw.description === "string" ? raw.description.trim().slice(0, MAX_DESCRIPTION) : ""
+    const rawOptions = Array.isArray(raw.options) ? raw.options : []
+    if (rawOptions.length > MAX_OPTIONS) errors.push(`manifest.importers[${i}] has more than ${MAX_OPTIONS} options`)
+    const options: ToolImporterOption[] = []
+    for (const [j, o] of rawOptions.entries()) {
+      const where = `manifest.importers[${i}].options[${j}]`
+      if (!isRecord(o)) {
+        errors.push(`${where} must be an object`)
+        continue
+      }
+      const key = typeof o.key === "string" ? o.key : ""
+      const olabel = typeof o.label === "string" ? o.label.trim() : ""
+      const type = OPTION_TYPES.find((t) => t === o.type)
+      if (!/^[a-zA-Z][a-zA-Z0-9_]{0,39}$/.test(key)) errors.push(`${where}.key must be a short identifier`)
+      else if (options.some((x) => x.key === key)) errors.push(`${where}.key ${key} is used twice`)
+      if (!olabel || olabel.length > MAX_LABEL) errors.push(`${where}.label must be 1-${MAX_LABEL} characters`)
+      if (!type) errors.push(`${where}.type must be one of ${OPTION_TYPES.join(", ")}`)
+      const choices = Array.isArray(o.choices)
+        ? o.choices.flatMap((c) => (isRecord(c) && typeof c.value === "string" ? [{ value: c.value, label: typeof c.label === "string" ? c.label : c.value }] : [])).slice(0, 500)
+        : undefined
+      const dynamic = o.dynamic === true
+      if ((type === "select" || type === "multiselect") && !dynamic && (!choices || choices.length === 0)) {
+        errors.push(`${where} needs choices (or dynamic: true)`)
+      }
+      const def = o.default
+      const okDefault = def === undefined || typeof def === "string" || typeof def === "number" || typeof def === "boolean" || (Array.isArray(def) && def.every((d) => typeof d === "string"))
+      if (!okDefault) errors.push(`${where}.default must be a string, number, boolean or list of strings`)
+      const dependsOn = Array.isArray(o.dependsOn) ? o.dependsOn.filter((d): d is string => typeof d === "string").slice(0, 8) : undefined
+      options.push({
+        key,
+        label: olabel,
+        type: type ?? "text",
+        ...(o.required === true ? { required: true } : {}),
+        ...(def !== undefined && okDefault ? { default: def as ToolImporterOption["default"] } : {}),
+        ...(typeof o.help === "string" ? { help: o.help.slice(0, 300) } : {}),
+        ...(choices && choices.length ? { choices } : {}),
+        ...(dynamic ? { dynamic: true } : {}),
+        ...(dependsOn && dependsOn.length ? { dependsOn } : {}),
+      })
+    }
+    out.push({ id, label, ...(description ? { description } : {}), options })
+  }
+  if (out.length > MAX_IMPORTERS) errors.push(`manifest.importers lists more than ${MAX_IMPORTERS} importers`)
+  return out
 }
 
 const ACTION_ID = /^[a-z][a-z0-9-]{0,39}$/
@@ -271,7 +368,9 @@ export function validateManifest(input: unknown): ManifestValidation {
 
   const actions = readActions(input.actions, errors)
   const exportsList = readExports(input.exports, errors)
-  if ((actions.length > 0 || exportsList.length > 0) && apiRev < 7) errors.push("manifest.actions and manifest.exports need apiRev 7 or later")
+  const importers = readImporters(input.importers, errors)
+  if ((actions.length > 0 || exportsList.length > 0 || importers.length > 0) && apiRev < 7) errors.push("manifest.actions, manifest.exports and manifest.importers need apiRev 7 or later")
+  if (importers.length > 0 && !scopes.includes("write:files")) errors.push("manifest.importers needs the write:files scope")
 
   if (errors.length > 0) return { ok: false, manifest: null, errors }
   return {
@@ -286,6 +385,7 @@ export function validateManifest(input: unknown): ManifestValidation {
       ...(web.length ? { web } : {}),
       ...(actions.length ? { actions } : {}),
       ...(exportsList.length ? { exports: exportsList } : {}),
+      ...(importers.length ? { importers } : {}),
     },
     errors,
   }
@@ -335,6 +435,7 @@ export async function toolCodeHash(source: string, manifest: ToolManifest): Prom
       ...(manifest.web?.length ? { web: [...manifest.web].sort() } : {}),
       ...(manifest.actions?.length ? { actions: manifest.actions } : {}),
       ...(manifest.exports?.length ? { exports: manifest.exports } : {}),
+      ...(manifest.importers?.length ? { importers: manifest.importers } : {}),
     },
   })
   const bytes = new TextEncoder().encode(canonical)

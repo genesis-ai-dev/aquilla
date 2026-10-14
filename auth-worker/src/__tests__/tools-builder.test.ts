@@ -105,7 +105,12 @@ describe("prompt assembly (AQU-1793)", () => {
     expect(TOOLS_BUILDER_SYSTEM_PROMPT).toMatch(/\\zaln-s \|x-strong=/)
     expect(TOOLS_BUILDER_SYSTEM_PROMPT).toContain("bible/kt|names|other/<word>.md")
     // apiRev 7: the unfoldingWord editor is an importer + editor + exporter on the generic primitives.
-    expect(TOOLS_BUILDER_SYSTEM_PROMPT).toMatch(/IMPORTER[\s\S]*files\.upsert[\s\S]*EDITOR[\s\S]*cells\.byRef[\s\S]*EXPORTER[\s\S]*export\.deliver/)
+    expect(TOOLS_BUILDER_SYSTEM_PROMPT).toMatch(/IMPORTER[\s\S]*files\.upsert[\s\S]*EDITOR[\s\S]*cells\.byRef[\s\S]*EXPORT[\s\S]*export\.deliver/)
+    // AQU-1937: importers are contributions (Import dialog), never action buttons; options, not literals.
+    expect(TOOLS_BUILDER_SYSTEM_PROMPT).toMatch(/Manifest "importers"[\s\S]*Never put an importer in an action button/)
+    expect(TOOLS_BUILDER_SYSTEM_PROMPT).toMatch(/BOOK BY BOOK[\s\S]*RESUMES/)
+    expect(TOOLS_BUILDER_SYSTEM_PROMPT).toMatch(/Options, not hard-coding/)
+    expect(TOOLS_BUILDER_SYSTEM_PROMPT).not.toMatch(/"label": "Check for updates"/)
   })
 
   it("no SDK example draws a title the host already shows", () => {

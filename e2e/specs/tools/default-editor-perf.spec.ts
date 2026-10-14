@@ -142,7 +142,7 @@ test("default editor extension vs built-in editor on a full gospel", async ({ al
   const dir = await mkdtemp(path.join(os.tmpdir(), "aquilla-perf-"))
   const fixture = path.join(dir, "MAT.usfm")
   await writeFile(fixture, await gospelUsfm("MAT"))
-  const seeded = await seedProjectWithFile(jwt, { name: `Perf Matthew ${Date.now()}`, fixturePath: fixture })
+  const seeded = await seedProjectWithFile(jwt, { smartExtensions: true, name: `Perf Matthew ${Date.now()}`, fixturePath: fixture })
   const lane = (await readProjectLanes(jwt, seeded.projectId)).find((l) => l.role === "target")?.legacyTag ?? ""
   const verses = await translateAll(jwt, seeded, lane)
   expect(verses).toBeGreaterThan(1000)

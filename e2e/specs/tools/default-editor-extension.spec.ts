@@ -45,7 +45,7 @@ async function target(jwt: string, seeded: SeededProject, ref: string): Promise<
 test("the default editor is a first-party extension that edits, validates, shows live edits and reverts", async ({ alice, bob }) => {
   test.setTimeout(150_000)
   const jwt = await jwtFor("alice")
-  const seeded = await seedProjectWithFile(jwt, { name: `Default editor ${Date.now()}`, fixturePath: FIXTURE })
+  const seeded = await seedProjectWithFile(jwt, { smartExtensions: true, name: `Default editor ${Date.now()}`, fixturePath: FIXTURE })
   await addProjectMember(jwt, seeded.projectId, "bob", ROLE.CONTRIBUTOR)
 
   const tools = new ToolsPage(alice)

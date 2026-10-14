@@ -823,7 +823,13 @@ export function PlanBoard({
                       {folded
                         ? <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
                         : <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />}
-                      <span className={`h-[7px] w-[7px] shrink-0 rounded-full ${tone.dot}`} aria-hidden />
+                      {/* A dot, or for In progress / Nearly complete a ring the
+                          same size (AQU-1764) — `tone.dot` carries the border. */}
+                      <span
+                        data-plan-mark={group.status}
+                        className={`h-[7px] w-[7px] shrink-0 rounded-full ${tone.dot}`}
+                        aria-hidden
+                      />
                       {t(PLAN_STATUS_LABEL_KEY[group.status] as never)}
                       <span className="rounded-full border bg-card px-[7px] text-[11px] font-bold tabular-nums text-muted-foreground">
                         {group.units.length}

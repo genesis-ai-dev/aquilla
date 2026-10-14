@@ -43,7 +43,6 @@ import type { FileReference, FileType } from "@/lib/parsers/types"
 import { SectionVisibilityGate } from "../SectionVisibilityBadge"
 import { laneChipLabel } from "../project-lanes"
 import { PlanBar } from "./PlanBar"
-import { PLAN_TONE } from "./plan-tone"
 import { usePlanShortfallRenderer, usePlanReadoutTips } from "./use-plan-note"
 
 /** AssignModal takes the editor's cell selection; a PM surface has none. */
@@ -377,13 +376,16 @@ function PlanAssignmentRow({
             </span>
           )}
         </span>
-        {/* WHAT THIS PERSON STILL OWES, on the name's own line and in the
-            board's azure — it is the one fact on the row that asks for an
-            action, and under the bars it read as a footnote to them. "Nothing
-            left" stays grey: it asks for nothing. */}
+        {/* WHAT THIS PERSON STILL OWES, on the name's own line and set in
+            the text colour at medium weight against the grey around it — it
+            is the one fact on the row that asks for an action, and under the
+            bars it read as a footnote to them. It was the board's azure until
+            that blue went to the progress bars (AQU-1764). Not underlined:
+            it is not a link, and an underline would promise a click that
+            goes nowhere. "Nothing left" stays grey: it asks for nothing. */}
         <span
           className={`shrink-0 text-[11px] tabular-nums ${
-            outstanding ? PLAN_TONE.nearly_complete.text : "text-muted-foreground"
+            outstanding ? "font-medium text-foreground" : "text-muted-foreground"
           }`}
           data-testid={`plan-assignment-left-${a.assignmentId}`}
         >

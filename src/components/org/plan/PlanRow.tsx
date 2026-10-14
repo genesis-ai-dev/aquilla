@@ -367,10 +367,10 @@ export const PlanRow = memo(function PlanRow({
   const openLabel = pair(leftToDo, openDestination)
 
   /**
-   * The shortfall as the row draws it: azure, and clickable when there is a
-   * cell to land on. One function because it renders on line 1 or line 2
-   * depending on whether the unit has a date, and the two must be the same
-   * thing — the same colour, the same testid, the same click.
+   * The shortfall as the row draws it: a link when there is a cell to land on.
+   * One function because it renders on line 1 or line 2 depending on whether
+   * the unit has a date, and the two must be the same thing — the same look,
+   * the same testid, the same click.
    *
    * NOT A <button>. The row is itself a button, and a button inside a button
    * is invalid HTML that React warns about and that some browsers un-nest
@@ -383,12 +383,14 @@ export const PlanRow = memo(function PlanRow({
   const shortfallNode = (text: string) => {
     const node = (
     <span
-      // Azure, the same rung the "Go to first…" link in the inspector uses:
-      // the mockup draws the shortfall as a link, and in the foreground colour
-      // it only admitted to being clickable on hover.
-      className={`font-medium ${PLAN_TONE.in_progress.text}${
+      // The mockup draws the shortfall as a link. It was azure, until that
+      // blue went to the progress bars (AQU-1764); in the text colour it now
+      // carries a standing underline, the same look as the inspector's "Go to
+      // first…" link, because without one it only admitted to being clickable
+      // on hover.
+      className={`font-medium text-foreground${
         openable
-          ? " cursor-pointer rounded-sm underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          ? " cursor-pointer rounded-sm underline decoration-foreground/40 underline-offset-2 hover:decoration-foreground focus-visible:decoration-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           : ""
       }`}
       role={openable ? "button" : undefined}

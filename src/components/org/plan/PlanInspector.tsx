@@ -37,7 +37,6 @@ import { usePlanUnitSections, type PlanSection } from "@/hooks/usePlanUnitSectio
 import { PlanStatusPill } from "./PlanStatusPill"
 import { PlanBar } from "./PlanBar"
 import { PlanChapterGrid, PlanGridLegend, planSectionShortfall } from "./PlanChapterGrid"
-import { PLAN_TONE } from "./plan-tone"
 import { GO_TO_FIRST_KEY, useFrontMatterLabel, usePlanReadoutTips, usePlanShortfallText, usePlanStatusNote } from "./use-plan-note"
 import { useSectionVerses, type SectionVersesState } from "./use-section-verses"
 import { shortVerses, verseChipLabel, wordChipPlaces, type ShortVerse } from "./verse-chips"
@@ -474,7 +473,7 @@ export function PlanInspector({
                 className="flex flex-wrap items-center justify-between gap-x-2.5 gap-y-1 text-[11.5px]"
                 data-testid="plan-unit-shortfall"
               >
-                <span className={shortfallText ? `font-medium ${PLAN_TONE.nearly_complete.text}` : "text-muted-foreground"}>
+                <span className={shortfallText ? "font-medium text-foreground" : "text-muted-foreground"}>
                   {shortfallText ?? t("org.projectOverview.plan.nothingLeft")}
                 </span>
                 {/* NEARLY COMPLETE ONLY, and so are the grid's count badges. A
@@ -490,12 +489,13 @@ export function PlanInspector({
                   <Button
                     variant="link"
                     size="sm"
-                    // The link variant paints itself `text-primary`, which is a
-                    // lighter blue than the shortfall sharing this line — two
-                    // blues an inch apart, reading as two different kinds of
-                    // thing when they are one sentence. Both take the plan's
-                    // own nearly-complete rung instead.
-                    className={`h-auto gap-1 p-0 text-[12px] ${PLAN_TONE.nearly_complete.text}`}
+                    // The link variant paints itself `text-primary`, a pale
+                    // blue, and the blues belong to the progress bars now
+                    // (AQU-1764). So this is the shortfall's own text colour
+                    // with a STANDING underline, the same look as the row's
+                    // shortfall link on the board: text-coloured, it would
+                    // otherwise read as plain words until hovered.
+                    className="h-auto gap-1 p-0 text-[12px] text-foreground underline decoration-foreground/40 hover:decoration-foreground"
                     data-testid="plan-go-to-first-open"
                     onClick={() => onGoToFirstOpen(openKind)}
                   >
@@ -931,12 +931,15 @@ function PlanChapterCard({
                   type="button"
                   aria-label={name}
                   data-testid={`plan-verse-chip-${v.cellId}`}
-                  // Text in the STATUS azure: `text-primary` is the pale accent
-                  // tuned for button fills, and on a chip this small it washed out.
+                  // Text in the text colour (AQU-1764): it was Nearly complete's
+                  // blue, which the progress bars took over, and `text-primary`
+                  // is the pale accent tuned for button fills, which washed out
+                  // on a chip this small. The bordered pill is what says it is
+                  // a button.
                   // AQU-1493: a line with no reference has no number to print, so
                   // its chip says what it is in words and grows to fit them. So
                   // does a heading, whose ref (if any) is a USFM id like "1:s1:1".
-                  className={`h-6 shrink-0 rounded-full border border-primary/35 bg-primary/10 text-[11.5px] font-medium tabular-nums transition-colors hover:bg-primary/20 ${v.structural || v.unnumbered ? "px-2" : "w-[46px]"} ${PLAN_TONE.nearly_complete.text}`}
+                  className={`h-6 shrink-0 rounded-full border border-primary/35 bg-primary/10 text-[11.5px] font-medium tabular-nums text-foreground transition-colors hover:bg-primary/20 ${v.structural || v.unnumbered ? "px-2" : "w-[46px]"}`}
                   onClick={() => onOpenCell?.(v.cellId)}
                 >
                   {chipText(v)}

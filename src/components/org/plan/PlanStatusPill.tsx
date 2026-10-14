@@ -32,7 +32,11 @@ export function PlanStatusPill({ status, unit, now, compact = false, plain = fal
         plain ? "" : `rounded-full px-2 py-0.5 ${tone.bg} ${compact ? "text-[11px]" : "text-xs"}`
       }`}
     >
-      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone.dot}`} aria-hidden />
+      {/* A dot, or a ring of the same size for In progress and Nearly complete
+          (AQU-1764) — `tone.dot` carries the border. 7px, the group header's
+          size: at 6px the half-filled ring's open half was a pixel and a half
+          wide and read as a solid dot. */}
+      <span data-plan-mark={resolved} className={`h-[7px] w-[7px] shrink-0 rounded-full ${tone.dot}`} aria-hidden />
       {t(PLAN_STATUS_LABEL_KEY[resolved] as never)}
     </span>
   )

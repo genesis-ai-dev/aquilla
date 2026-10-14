@@ -102,6 +102,45 @@ describe("grouping", () => {
   })
 })
 
+// AQU-1764 (Sam, 2026-10-13): In progress and Nearly complete gave their blue
+// to the progress bars. They are told apart by the mark instead, in the text
+// colour: a hollow ring, and the same ring half filled. Done, Overdue, Due soon
+// and Not started keep their coloured dots.
+describe("status marks (AQU-1764)", () => {
+  const RING = "border-[1.5px] border-foreground"
+  const HALF = "bg-[linear-gradient(90deg,var(--foreground)_50%,transparent_50%)]"
+  /** Each status's mark, by status. */
+  const marks = () => Object.fromEntries(
+    [...document.querySelectorAll<HTMLElement>("[data-plan-mark]")]
+      .map((mark) => [mark.dataset.planMark, mark.className]),
+  )
+  const expectMarks = () => {
+    const mark = marks()
+    expect(mark.in_progress).toContain(RING)
+    expect(mark.in_progress).not.toContain(HALF)
+    expect(mark.nearly_complete).toContain(RING)
+    expect(mark.nearly_complete).toContain(HALF)
+    expect(mark.done).toContain("bg-emerald-500")
+    expect(mark.done).not.toContain("border-")
+  }
+
+  it("rings In progress and half-fills Nearly complete, in the group headers and on the rows' status", () => {
+    renderBoard([
+      nearlyDone({ fileId: "near" }),
+      unit({ fileId: "mid", filledCount: 40 }),
+      unit({ fileId: "fin", doneAt: NOW, doneBy: "r" }),
+    ])
+    expectMarks()
+    // And the header words are in the text colour rather than a blue.
+    expect(screen.getByTestId("plan-fold-in_progress").className).toContain("text-foreground")
+    expect(screen.getByTestId("plan-fold-nearly_complete").className).toContain("text-foreground")
+    // The in-order arrangement moves the status onto each row, same marks.
+    fireEvent.click(screen.getByTestId("plan-view-order"))
+    expect(screen.queryByTestId("plan-fold-in_progress")).toBeNull()
+    expectMarks()
+  })
+})
+
 describe("summary", () => {
   it("reports done out of total and flags overdue", () => {
     renderBoard([
@@ -722,6 +761,9 @@ describe("a target date does not cost the row its link", () => {
     const onSelect = vi.fn()
     const onOpenShortfall = vi.fn()
     withRow([dated()], { onSelect, onOpenShortfall })
+    // AQU-1764: in the text colour now, so the underline is always there, not
+    // only on hover — without it the link reads as plain words.
+    expect(shortfall().className).toMatch(/(^|\s)underline(\s|$)/)
     fireEvent.click(shortfall())
     expect(onOpenShortfall).toHaveBeenCalledTimes(1)
     expect(onSelect).not.toHaveBeenCalled()

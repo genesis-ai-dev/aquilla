@@ -553,6 +553,9 @@ describe("the link into the editor (AQU-1278)", () => {
     await waitFor(() => expect(screen.getByTestId("plan-chapter-grid")).toBeInTheDocument())
 
     expect(goLinks()).toHaveLength(1)
+    // AQU-1764: text-coloured now, so it is underlined at rest, not on hover
+    // only, or it would read as a plain phrase beside the shortfall.
+    expect(screen.getByTestId("plan-go-to-first-open").className).toMatch(/(^|\s)underline(\s|$)/)
     fireEvent.click(screen.getByTestId("plan-go-to-first-open"))
     expect(onGoToFirstOpen).toHaveBeenCalledWith("unvalidated")
   })

@@ -24,6 +24,7 @@ import {
   Eye,
   EyeOff,
   BookOpenText,
+  CloudOff,
 } from "lucide-react"
 import { FillsTwiceIndicator } from "@/components/ui/fills-twice-indicator"
 import { Spinner } from "@/components/ui/spinner"
@@ -252,6 +253,8 @@ import { TermLookupPopover } from "./TermLookupPopover"
 import type { Concept, ConceptDraft, TermMatchingSettings } from "@/lib/terminology/types"
 import { conceptsForLaneTag } from "@/lib/terminology/rendering-lane"
 import { findConceptMatches } from "@/lib/terminology/match"
+import { useOnline } from "@/hooks/useOnline"
+import { useConnectivity } from "@/lib/offline/connectivity"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { bidiIsolate } from "@/lib/i18n/format"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
@@ -5338,11 +5341,7 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
       {renderable.map((att, i) =>
         att.type === "video" ? (
           <AppTooltip key={i} content={att.title ?? undefined} disabled={!att.title}>
-            <video
-              src={att.url}
-              controls
-              className="max-h-32 rounded border object-contain"
-            />
+            <AttachmentVideo src={att.url!} />
           </AppTooltip>
         ) : (
           <AppTooltip key={i} content={att.title ?? undefined} disabled={!att.title}>
@@ -5356,6 +5355,36 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
         ),
       )}
     </div>
+  )
+}
+
+/** A source-reference video. Offline, an unreachable URL shows a plain
+ *  "Not available offline" box instead of a broken player. */
+function AttachmentVideo({ src }: { src: string }) {
+  const t = useT()
+  const online = useOnline()
+  const backendReachable = useConnectivity()
+  const [failedSrc, setFailedSrc] = useState<string | null>(null)
+  const offline = !online || backendReachable === false
+  if (failedSrc === src && offline) {
+    return (
+      <div
+        role="status"
+        data-testid="video-offline-unavailable"
+        className="flex h-20 w-36 items-center justify-center gap-1.5 rounded border bg-muted/40 text-xs text-muted-foreground"
+      >
+        <CloudOff className="size-3.5" aria-hidden />
+        {t("audio.error.notAvailableOffline")}
+      </div>
+    )
+  }
+  return (
+    <video
+      src={src}
+      controls
+      onError={() => setFailedSrc(src)}
+      className="max-h-32 rounded border object-contain"
+    />
   )
 }
 

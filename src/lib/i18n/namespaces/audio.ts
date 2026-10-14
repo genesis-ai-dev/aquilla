@@ -580,6 +580,7 @@ export const audio = defineNamespace({
     "audio.error.noAttachment": "No audio attachment on this cell",
     "audio.error.legacyLfsUnsupported": "Unsupported audio URL (legacy LFS): {url}",
     "audio.error.notSignedIn": "Not signed in",
+    "audio.error.notAvailableOffline": "Not available offline",
     "audio.error.recordingDeleted": "This audio recording has been deleted and cannot be played.",
     "audio.error.streamingFailed": "Playback failed — the media source could not be streamed.",
 
@@ -2793,6 +2794,12 @@ export const audio = defineNamespace({
         placeholders: {
           url: "The unsupported attachment URL. Technical value — do not translate.",
         },
+      },
+      "audio.error.notAvailableOffline": {
+        description:
+          "Shown on an audio or video player when the media is not saved on this device " +
+          "and the server can't be reached. Short.",
+        maxLength: 32,
       },
       "audio.error.notSignedIn": {
         description:

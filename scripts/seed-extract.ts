@@ -6,7 +6,7 @@
 //
 //   pnpm seed:extract:dev              # dev branch → bundle → R2 → meta (via neon-target)
 //   pnpm seed:extract:prod             # production branch, same
-//   pnpm seed:extract:dev -- --no-upload   # write the bundle locally, skip the R2 put
+//   pnpm seed:extract:dev --no-upload   # write the bundle locally, skip the R2 put
 //   set -a; . ./.env; set +a; npx tsx scripts/seed-extract.ts   # raw NEON_PG_* (source unrecorded)
 //
 // Reads db/seed/manifest.json, resolves the identity closure for the listed

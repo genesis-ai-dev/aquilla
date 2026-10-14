@@ -47,10 +47,10 @@ failing that, from a logged-in Neon CLI (`npx neon@2.30.0 auth`, the version the
 3. Extract without uploading:
 
 ```bash
-pnpm seed:extract:dev -- --no-upload
+pnpm seed:extract:dev --no-upload
 ```
 
-   (`pnpm seed:extract:prod -- --no-upload` reads the production branch.) This
+   (`pnpm seed:extract:prod --no-upload` reads the production branch.) This
    writes `db/seed/.cache/dev-seed-<sha>.jsonl.zst` and rewrites
    `db/seed/seed.meta.json` with the bundle's sha256, the schema hash, and
    `source: "neon dev"`.

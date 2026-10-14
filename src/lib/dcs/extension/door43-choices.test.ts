@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { DcsCatalogEntry } from "../types"
-import { OFFICIAL_GROUP, OTHER_GROUP, resourceChoices, resourceLabel } from "./door43-choices"
+import { OFFICIAL_GROUP, OTHER_GROUP, resourceChoices, resourceLabel, wantBookPath } from "./door43-choices"
 
 const entry = (owner: string, name: string, subject: string, abbreviation: string, title: string): DcsCatalogEntry => ({
   name, owner, fullName: `${owner}/${name}`, subject, abbreviation, title,
@@ -36,5 +36,17 @@ describe("Door43 Resource choices", () => {
   it("labels by abbreviation, title and owner, so a fork never reads like the original", () => {
     expect(resourceLabel(CATALOG[4])).toBe("ULT — unfoldingWord® Literal Text (unfoldingWord)")
     expect(resourceLabel(CATALOG[0])).toBe("ULT — unfoldingWord® Literal Text (ru_gt)")
+  })
+})
+
+describe("book selection", () => {
+  it("reads only the chosen books' files: no front matter or book-less files (live en_ult TIT pulled A0-FRT.usfm)", () => {
+    const tit = new Set(["TIT"])
+    expect(wantBookPath("57-TIT.usfm", tit)).toBe(true)
+    expect(wantBookPath("tn_TIT.tsv", tit)).toBe(true)
+    expect(wantBookPath("A0-FRT.usfm", tit)).toBe(false)
+    expect(wantBookPath("41-MAT.usfm", tit)).toBe(false)
+    // No book chosen: everything the route owns.
+    expect(wantBookPath("A0-FRT.usfm", new Set())).toBe(true)
   })
 })

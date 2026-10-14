@@ -5,6 +5,7 @@
 // (unfoldingWord)" so a fork never reads like the original.
 
 import type { DcsCatalogEntry } from "../types"
+import { dcsBookOfPath } from "../import-plan"
 
 export interface ResourceChoice {
   value: string
@@ -56,4 +57,11 @@ export function resourceChoices(entries: readonly DcsCatalogEntry[]): ResourceCh
       resourceLabel(a.e).localeCompare(resourceLabel(b.e)),
   )
   return rows.map(({ e, official }) => ({ value: e.fullName, label: resourceLabel(e), group: official ? OFFICIAL_GROUP : OTHER_GROUP }))
+}
+
+/** Which repository paths an import of `books` reads (empty = every path). */
+export function wantBookPath(path: string, books: ReadonlySet<string>): boolean {
+  if (books.size === 0) return true
+  const book = dcsBookOfPath(path)
+  return book !== null && books.has(book)
 }

@@ -45,6 +45,21 @@ describe("Translation Words (beyond the built-in)", () => {
     const ids = (s: typeof spec) => new Set(s.cells.map((c) => c.cellId))
     for (const id of ids(spec)) expect(ids(edited).has(id)).toBe(true)
   })
+
+  it("keeps cell keys unique when several sections each open with a heading (live en_tw: kt/abomination)", () => {
+    const blocks = [
+      { kind: "heading", level: 1, text: "abomination", section: "abomination" },
+      { kind: "heading", level: 2, text: "Definition:", section: "definition" },
+      { kind: "p", level: 0, text: "Something hated.", section: "definition" },
+      { kind: "heading", level: 2, text: "Translation Suggestions:", section: "translation-suggestions" },
+      { kind: "list", level: 0, text: "* detestable", section: "translation-suggestions" },
+      { kind: "heading", level: 2, text: "Bible References:", section: "bible-references" },
+    ]
+    const spec = specForTwCategory(entry("en_tw", "Translation Words"), "p1", "kt", [{ word: "abomination", blocks }])!
+    const keys = spec.cells.map((c) => c.key)
+    expect(new Set(keys).size).toBe(keys.length)
+    expect(new Set(spec.cells.map((c) => c.cellId)).size).toBe(keys.length)
+  })
 })
 
 describe("alignment as data (beyond the built-in)", () => {

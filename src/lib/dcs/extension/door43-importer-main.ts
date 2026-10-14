@@ -13,7 +13,7 @@ import { DcsClient } from "../catalog"
 import { parseManifest } from "../manifest"
 import { MANIFEST_PATH, dcsBookOfPath, fetchDcsSources, planDcsFiles } from "../import-plan"
 import type { DcsCatalogEntry } from "../types"
-import { resourceChoices } from "./door43-choices"
+import { resourceChoices, wantBookPath } from "./door43-choices"
 import { alignmentsFromWords, specForPlanned, specForTwCategory, specForTwl, type Door43UpsertSpec, type MdBlock } from "./door43-plan"
 
 interface WebResponse { status: number; contentType: string; body: unknown; url: string }
@@ -147,11 +147,9 @@ async function importResource(options: Record<string, unknown>, onlyBooks: strin
   const entry = await latestEntry(owner, repo)
   const projectId = w.aquilla.context.project?.id ?? ""
   const books = new Set((onlyBooks ?? list(options.books)).map((b) => b.toUpperCase()))
-  const wantPath = (path: string) => {
-    if (books.size === 0) return true
-    const b = dcsBookOfPath(path)
-    return b === null || books.has(b)
-  }
+  // Chosen books only: front matter (A0-FRT.usfm) and other book-less files
+  // come along only when no book was chosen (live en_ult: TIT also pulled FRT).
+  const wantPath = (path: string) => wantBookPath(path, books)
 
   if (isTwl(entry)) {
     const tree = await client.getTree(owner, repo, entry.ref)

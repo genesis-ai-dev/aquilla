@@ -146,7 +146,9 @@ export function specForTwCategory(
     for (const b of blocks) {
       const n = counts.get(b.section) ?? 0
       counts.set(b.section, n + 1)
-      const key = `${category}/${word}|${b.kind === "heading" ? "heading" : b.section}|${n}`
+      // Unique per article like the cell id (several sections each open with a
+      // heading; "heading|0" collided for every article with 2+ sections).
+      const key = `${category}/${word}|${b.section}|${n}`
       cells.push({
         key,
         cellId: dcsCellId(`${entry.fullName}|bible/${category}/${word}.md|${b.section}|${n}`),

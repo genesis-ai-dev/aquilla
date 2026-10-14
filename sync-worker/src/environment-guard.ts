@@ -115,3 +115,32 @@ export function deploymentEnvironmentError(
 
   return null
 }
+
+/**
+ * The `scheduled` entrypoint's version of the guard above.
+ *
+ * `deploymentEnvironmentError` keys off the request hostname, which a cron has
+ * none of — so a worker whose profile and bindings disagree would sail straight
+ * past it. That matters for the AQU-1856 R2 sweep in particular: it DELETES
+ * user media unattended, so a development-profile deploy pointed at the
+ * production bucket must not run it.
+ *
+ * Returns an operator-facing message when the combination is unsafe, else null.
+ * A non-deployed worker (`pnpm dev`, `[env.e2e]`) returns null — local stacks
+ * own their own bucket and are allowed to sweep it.
+ */
+export function scheduledDeploymentEnvironmentError(
+  bindings: AuthBypassBindings & { DEPLOYMENT_WORKER_NAME?: string },
+): string | null {
+  if (!isDeployedEnvironment(bindings)) return null
+  const expected = Object.values(EXPECTED_DEPLOYMENTS).find(
+    (d) => d.environment === bindings.ENVIRONMENT,
+  )
+  if (!expected) {
+    return `ENVIRONMENT=${bindings.ENVIRONMENT} has no expected deployment profile`
+  }
+  if (bindings.DEPLOYMENT_WORKER_NAME !== expected.worker) {
+    return `ENVIRONMENT=${expected.environment} expected DEPLOYMENT_WORKER_NAME=${expected.worker}, received ${bindings.DEPLOYMENT_WORKER_NAME ?? "unset"}`
+  }
+  return null
+}

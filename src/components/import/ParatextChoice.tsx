@@ -15,6 +15,7 @@ import { fetchTranslationsList, fetchTranslationText, parseEBibleCorpus, type EB
 import { detectCollisions, type CollisionResult } from "@/lib/import-collision"
 import posthog from "@/lib/posthog"
 import { IMPORT_FAILED } from "@/lib/event-names"
+import { UsfmStructureFindings } from "./UsfmStructureFindings"
 import type { CollisionResolution } from "./import-dialog-types"
 
 interface ParatextChoiceProps {
@@ -347,6 +348,11 @@ export function ParatextChoice({
                       </span>
                     </button>
                   </div>
+                  {b.structureFindings.length > 0 && (
+                    <div className="px-3 pb-2 ps-9">
+                      <UsfmStructureFindings findings={b.structureFindings} />
+                    </div>
+                  )}
                   {expanded && (
                     <ul className="space-y-1 px-3 pb-2 ps-9">
                       {b.strings.slice(0, 4).map((s) => (

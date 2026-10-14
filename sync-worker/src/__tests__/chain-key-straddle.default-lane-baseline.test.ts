@@ -152,8 +152,14 @@ beforeEach(async () => {
       },
     ],
     // The tagged lane has its row, as a registered lane does in production
-    // (AQU-1532: a cell write to a lane with no row is a 422).
-    lanes: [{ id: 'enlane01', project_id: PROJECT, role: 'target', name: 'English', legacy_tag: TAG }],
+    // (AQU-1532: a cell write to a lane with no row is a 422). So does the
+    // legacy default lane the unqualified commit addresses: a lane-less write
+    // on a project with only tagged lanes is a 422 (AQU-1900) — the PGlite
+    // lane-fill trigger used to mint this row, which production never does.
+    lanes: [
+      { id: 'deflane01', project_id: PROJECT, role: 'target', name: null, legacy_tag: '' },
+      { id: 'enlane01', project_id: PROJECT, role: 'target', name: 'English', legacy_tag: TAG },
+    ],
   })
 })
 

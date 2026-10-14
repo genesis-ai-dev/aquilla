@@ -8,7 +8,7 @@
 //     host, donor archived + pointed at the host.
 
 import { env } from "cloudflare:test"
-import { describe, it, expect, vi, afterEach } from "vitest"
+import { describe, it, expect, vi, afterEach, beforeEach} from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import { laneDisplayName, laneLanguageCode } from "../../../src/lib/lanes/lane-display"
@@ -423,6 +423,99 @@ describe("POST /:projectId/merge-sibling — the fold token names the caller (AQ
     expect(res.status).toBe(200)
 
     expect(foldTokenClaims(fetchSpy)).toMatchObject({ userId: 14, src: "platform" })
+  })
+})
+
+describe("POST /:projectId/merge-sibling — admin power needs elevation (OPS-44)", () => {
+  // Folding is irreversible and cross-tenant: resolveProjectRole gives a
+  // platform operator 500+ on BOTH sides of any merge. AQU-1322 already makes
+  // adding one member to one project require the emailed step-up code.
+  beforeEach(() => {
+    env.ADMIN_REQUIRE_ELEVATION = "true"
+  })
+  afterEach(() => {
+    env.ADMIN_REQUIRE_ELEVATION = undefined
+  })
+
+  const elevate = async (jwt: string) => {
+    const req = await app.request("/api/v2/admin/elevation/request", { method: "POST", headers: authHeader(jwt) }, env)
+    const { devCode } = (await req.json()) as { devCode?: string }
+    const res = await app.request(
+      "/api/v2/admin/elevation/verify",
+      { method: "POST", headers: authHeader(jwt), body: JSON.stringify({ code: devCode }) },
+      env,
+    )
+    expect(res.status).toBe(200)
+  }
+
+  it("un-elevated operator with no genuine grant on either side is refused", async () => {
+    await seedUser(40, "root")
+    await seedProject("host-e1", "Host", 99)
+    await seedProject("donor-e1", "Donor", 99)
+
+    const fetchSpy = mockFold({ merged: 1, skipped: [], lane: "fr" })
+    const res = await post("host-e1", await jwtFor("root"), { donorProjectId: "donor-e1", lane: "fr" })
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({
+      error: "elevation required to fold a sibling project with platform-admin access",
+    })
+    // The fold never reached the sync-worker.
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("the same operator folds once elevated", async () => {
+    await seedUser(41, "root")
+    await seedProject("host-e2", "Host", 99)
+    await seedProject("donor-e2", "Donor", 99)
+
+    const jwt = await jwtFor("root")
+    await elevate(jwt)
+    const fetchSpy = mockFold({ merged: 1, skipped: [], lane: "fr" })
+    const res = await post("host-e2", jwt, { donorProjectId: "donor-e2", lane: "fr" })
+    expect(res.status).toBe(200)
+    expect(fetchSpy).toHaveBeenCalled()
+  })
+
+  it("an operator who GENUINELY leads both projects is unaffected while un-elevated", async () => {
+    // The regression this guards: platform contributes 700, which outranks a
+    // genuine 500, so the resolved source reads "platform" for an operator who
+    // really does lead the project. Refusing them would lock operators out of
+    // their own work, so admin power is stripped and the floor re-applied to
+    // the genuine grant that remains.
+    await seedUser(42, "root")
+    await seedProject("host-e3", "Host", 99)
+    await seedProject("donor-e3", "Donor", 99)
+    await grant("host-e3", 42, 500)
+    await grant("donor-e3", 42, 500)
+
+    const fetchSpy = mockFold({ merged: 1, skipped: [], lane: "fr" })
+    const res = await post("host-e3", await jwtFor("root"), { donorProjectId: "donor-e3", lane: "fr" })
+    expect(res.status).toBe(200)
+    expect(fetchSpy).toHaveBeenCalled()
+  })
+
+  it("a genuine grant on only ONE side still needs elevation", async () => {
+    await seedUser(43, "root")
+    await seedProject("host-e4", "Host", 99)
+    await seedProject("donor-e4", "Donor", 99)
+    await grant("host-e4", 43, 500) // host genuine, donor by admin power only
+
+    const fetchSpy = mockFold({ merged: 1, skipped: [], lane: "fr" })
+    const res = await post("host-e4", await jwtFor("root"), { donorProjectId: "donor-e4", lane: "fr" })
+    expect(res.status).toBe(403)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("a non-admin lead is unaffected", async () => {
+    await seedUser(44, "u44")
+    await seedProject("host-e5", "Host", 99)
+    await seedProject("donor-e5", "Donor", 99)
+    await grant("host-e5", 44, 500)
+    await grant("donor-e5", 44, 500)
+
+    mockFold({ merged: 1, skipped: [], lane: "fr" })
+    const res = await post("host-e5", await jwtFor("u44"), { donorProjectId: "donor-e5", lane: "fr" })
+    expect(res.status).toBe(200)
   })
 })
 

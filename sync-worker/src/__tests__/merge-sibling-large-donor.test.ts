@@ -41,6 +41,20 @@ const LANE = "fr"
 /** Bound values per row of the canonical events INSERT. */
 const EVENT_COLUMNS = 12
 
+/**
+ * AQU-1905: budget for the 6,000-cell case below, which folds the donor twice
+ * (the fold, then the idempotent rerun) — two passes of one projection
+ * statement per cell through PGlite. About 48 s on a developer machine, but
+ * GitHub's hosted `ubuntu-latest` runner, where this suite's three vitest
+ * forks share the box, runs this file about 3x slower: the 3,600-cell case
+ * below takes 20 s locally and 58 s there, and this case was killed at the
+ * default 120 s (actions run 38423170471, job sync-worker-tests). Expect
+ * 140–170 s on the runner; 300 s leaves room for a busy one without letting a
+ * genuine hang eat the job. Do not shrink the donor instead: 6,000 keeps a real
+ * margin past the 5,461-cell ceiling the test exists to cross.
+ */
+const LARGE_DONOR_TIMEOUT_MS = 300_000
+
 async function seedProjects(t: TestDb): Promise<void> {
   await t.pg.query(`INSERT INTO projects (id, name, created_by) VALUES ($1, 'Host', 1), ($2, 'Donor', 1)`, [HOST, DONOR])
   for (const [projectId, fileId] of [
@@ -224,7 +238,7 @@ describe("mergeSibling — a donor past what one statement can carry", () => {
     } finally {
       await t.close()
     }
-  }, 120_000)
+  }, LARGE_DONOR_TIMEOUT_MS)
 })
 
 describe("mergeSibling — statement size does not grow with the donor", () => {

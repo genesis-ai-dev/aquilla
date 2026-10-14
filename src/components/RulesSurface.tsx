@@ -75,6 +75,8 @@ interface Props {
    *  with `onActiveLaneChange`, switching lanes here switches the editor too. */
   activeLane?: string
   onActiveLaneChange?: (lane: string) => void
+  /** AQU-1699: what the project's decisions and terminology switch on for the Bible data checks. */
+  bibleReadiness?: import("../../db/shared/bible-checks/participant-types").BibleCheckReadiness
 }
 
 export function RulesSurface({
@@ -102,6 +104,7 @@ export function RulesSurface({
   embedded = false,
   activeLane,
   onActiveLaneChange,
+  bibleReadiness,
 }: Props) {
   const t = useT()
   const navigate = useNavigate()
@@ -592,6 +595,8 @@ export function RulesSurface({
           builtinRules={builtinRules}
           infractions={infractions}
           onSetOverride={setBuiltinOverride}
+          languageProfile={project.languageProfile}
+          bibleReadiness={bibleReadiness}
         />
         </div>
       </div>

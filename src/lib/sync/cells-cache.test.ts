@@ -22,6 +22,7 @@ import {
   flushCellsCacheWrites,
   scheduleCellsCacheWrite,
 } from "./cells-cache"
+import { CELLS_CACHE_STORE } from "./cells-cache-writer"
 
 function row(
   cellId: string,
@@ -352,6 +353,19 @@ describe("cells cache grant version", () => {
 })
 
 describe("queued cells cache writes", () => {
+  /**
+   * AQU-1865: a snapshot write commits two rows in one transaction — the
+   * snapshot and the `cells-meta` row carrying its size and last access. These
+   * tests are about how many *snapshot writes* the debounce let through, so they
+   * count puts against the snapshot store rather than every put in the
+   * transaction.
+   */
+  function snapshotPuts(put: { mock: { contexts: unknown[] } }): number {
+    return put.mock.contexts.filter(
+      (context) => (context as IDBObjectStore | undefined)?.name === CELLS_CACHE_STORE,
+    ).length
+  }
+
   beforeEach(async () => {
     vi.useRealTimers()
     await resetCellsCacheConnectionForTests()
@@ -382,12 +396,12 @@ describe("queued cells cache writes", () => {
     expect(put).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
     await vi.runAllTimersAsync()
-    expect(put).toHaveBeenCalledTimes(1)
+    expect(snapshotPuts(put)).toBe(1)
     // fake-indexeddb completes transactions through timers of its own.
     vi.useRealTimers()
     await flushCellsCacheWrites("queued-project", "queued-file")
 
-    expect(put).toHaveBeenCalledTimes(1)
+    expect(snapshotPuts(put)).toBe(1)
     const entry = await readCellsCache("queued-project", "queued-file")
     expect(entry?.rows[0].cellId).toBe("row-10")
     expect(entry?.maxServerSeq).toBeUndefined()
@@ -414,11 +428,11 @@ describe("queued cells cache writes", () => {
     expect(put).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
     await vi.runAllTimersAsync()
-    expect(put).toHaveBeenCalledTimes(1)
+    expect(snapshotPuts(put)).toBe(1)
     vi.useRealTimers()
     await flushCellsCacheWrites("trailing-project", "trailing-file")
 
-    expect(put).toHaveBeenCalledTimes(1)
+    expect(snapshotPuts(put)).toBe(1)
     const entry = await readCellsCache("trailing-project", "trailing-file")
     expect(entry?.rows[0].cellId).toBe("second")
     expect(entry?.maxServerSeq).toBe(2)

@@ -80,6 +80,16 @@ export function buildUndoEvents(
         ...(typeof ev.payload.sourceEventId === "string"
           ? { sourceEventId: ev.payload.sourceEventId }
           : {}),
+        // AQU-1902: restore the SAME lane the accepted commit wrote. The
+        // server stages both forms (emit-stage.ts); dropping them addressed
+        // the default lane, which projects created today do not have, so the
+        // undo was refused and silently lost.
+        ...(typeof ev.payload.targetLang === "string" && ev.payload.targetLang !== ""
+          ? { targetLang: ev.payload.targetLang }
+          : {}),
+        ...(typeof ev.payload.laneId === "string" && ev.payload.laneId !== ""
+          ? { laneId: ev.payload.laneId }
+          : {}),
         // Undo provenance — NOT agent_run_id (would inflate the run's applied
         // count) and no ai_suggestion (the restored text is human-authored).
         undo_of_agent_run_id: proposal.runId,

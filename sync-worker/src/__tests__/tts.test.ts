@@ -9,12 +9,13 @@
 //   - An Inworld failure must NOT record any seconds; recording on failure
 //     would wrongly drain the user's budget for audio they never received.
 
-import { describe, it, expect, afterEach } from "vitest"
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { sign } from "hono/jwt"
 import { audioObjectKey } from "../audio"
 import { handleTtsRequest } from "../tts"
 import { __setInworldBackoffSleepForTests, bytesToBase64, INWORLD_DESIGN_DEFAULT_PREVIEW_TEXT } from "../inworld-tts"
 import type { SyncTokenClaims } from "../auth"
+import { __resetAiSpendCeilingStateForTests } from "../../../db/shared/ai-spend-ceiling"
 
 const SECRET = "tts-tests-secret"
 const INWORLD_API_KEY = "dGVzdDprZXk=" // base64("test:key")
@@ -133,17 +134,24 @@ interface CreditRow {
 
 function makeStubDb(
   projectOrgId: number | null = 5,
-  opts: { creditRows?: CreditRow[]; orgSettings?: string | null } = {},
+  opts: {
+    creditRows?: CreditRow[]
+    orgSettings?: string | null
+    /** AQU-1869: today's platform-wide raw spend the ceiling reads. */
+    platformSpendCents?: number
+  } = {},
 ) {
   const usageRows: UsageRow[] = []
   // AQU-1872: backs the org credit pre-check in tts.ts — resolveCreditConfig
   // reads org_settings, readOrgSpend sums org_credit_usage_daily.
   const creditRows: CreditRow[] = [...(opts.creditRows ?? [])]
-  // [Pen test] API security & data exposure (2026-09-03): backs the new
-  // per-user throttle in tts.ts — countRecentRateLimitEvents/recordRateLimitEvent
-  // (db/shared/rate-limit.ts) against the same auth_rate_limit_events table
-  // the external Agent API and auth-worker already use.
-  const rateLimitEvents: { kind: string; identifier: string }[] = []
+  // [Pen test] API security & data exposure (2026-09-03): backs the per-user
+  // throttle in tts.ts. AQU-1843: that throttle is now one atomic
+  // `enforceRateLimit` upsert into rate_limit_counters (db/shared/rate-limit.ts)
+  // rather than a COUNT over auth_rate_limit_events plus an INSERT, so the stub
+  // keeps a counter per (kind, identifier) and returns the post-increment value
+  // the way `RETURNING hits` does.
+  const rateLimitHits = new Map<string, number>()
 
   return {
     db: {
@@ -158,6 +166,10 @@ function makeStubDb(
             if (sql.includes("FROM projects")) {
               return (projectOrgId != null ? { org_id: projectOrgId } : null) as unknown as T
             }
+            // AQU-1869: the platform spend ceiling's single combined read.
+            if (sql.includes("org_credit_usage_daily")) {
+              return { spend_cents: opts.platformSpendCents ?? 0, platform_settings: null } as unknown as T
+            }
             if (sql.includes("SUM(audio_seconds)")) {
               const [userId, dateUtc] = boundArgs as [number, string]
               const total = usageRows
@@ -168,19 +180,22 @@ function makeStubDb(
             if (sql.includes("FROM org_settings")) {
               return (opts.orgSettings ? { settings: opts.orgSettings } : null) as unknown as T
             }
-            if (sql.includes("FROM auth_rate_limit_events")) {
+            if (sql.includes("INTO rate_limit_counters")) {
               const [kind, identifier] = boundArgs as [string, string]
-              const n = rateLimitEvents.filter(
-                (e) => e.kind === kind && e.identifier === identifier,
-              ).length
-              return { n } as unknown as T
+              const cost = Number(boundArgs[4] ?? 1)
+              const key = `${kind}\u0000${identifier}`
+              const hits = (rateLimitHits.get(key) ?? 0) + cost
+              rateLimitHits.set(key, hits)
+              return { hits } as unknown as T
             }
             return null
           },
           async run() {
-            if (sql.includes("INSERT INTO auth_rate_limit_events")) {
+            if (sql.includes("INTO rate_limit_counters")) {
               const [kind, identifier] = boundArgs as [string, string]
-              rateLimitEvents.push({ kind, identifier })
+              const cost = Number(boundArgs[4] ?? 1)
+              const key = `${kind}\u0000${identifier}`
+              rateLimitHits.set(key, (rateLimitHits.get(key) ?? 0) + cost)
             }
             if (sql.includes("INSERT INTO org_credit_usage_daily")) {
               const [orgId, userId, dateUtc, rail, rawCostCents, units] = boundArgs as [
@@ -267,7 +282,10 @@ function makeStubDb(
       async close() {},
     } as unknown as AquillaDb,
     usageRows,
-    rateLimitEvents,
+    /** Pre-spend a (kind, identifier) bucket, the way a flooding caller would. */
+    spendRateLimit(kind: string, identifier: string, hits: number) {
+      rateLimitHits.set(`${kind}\u0000${identifier}`, hits)
+    },
     creditRows,
   }
 }
@@ -285,6 +303,8 @@ type StubEnv = {
   TTS_USER_DAILY_SECONDS_LIMIT?: string
   TTS_BUDGET_ENFORCE?: string
   AQUILLA_PG?: AquillaDb
+  AI_DAILY_SPEND_CEILING_USD?: string
+  ENVIRONMENT?: string
   CREDIT_DAILY_CAP?: string
   CREDIT_WEEKLY_CAP?: string
   CREDIT_ENFORCE?: string
@@ -302,6 +322,9 @@ function makeEnv(
     INWORLD_API_KEY,
     INWORLD_API_BASE,
     AQUILLA_PG: dbStub,
+    // The spend ceiling caches its read for 15 s in-isolate; "test" bypasses
+    // that so one test's verdict cannot decide the next one's.
+    ENVIRONMENT: "test",
     ...overrides,
   }
 }
@@ -327,6 +350,10 @@ async function makeToken(
 const originalFetch = globalThis.fetch
 afterEach(() => {
   globalThis.fetch = originalFetch
+})
+
+beforeEach(() => {
+  __resetAiSpendCeilingStateForTests()
 })
 
 interface InworldCallRecord {
@@ -401,6 +428,33 @@ function ttsReq(
 function call(env: StubEnv, req: Request) {
   return handleTtsRequest(req, env as unknown as Parameters<typeof handleTtsRequest>[1])
 }
+
+// AQU-1869. TTS is the sync-worker side of the platform spend ceiling, and the
+// one whose own budget guard (seconds, log-only) can never stop a first-time
+// caller — so without this gate a fresh account could narrate all day on the
+// shared Inworld key after the platform had already blown its dollar floor.
+describe("POST /api/v1/voice/tts — platform spend ceiling", () => {
+  it("503s and never calls Inworld once the platform ceiling is reached", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    const { db } = makeStubDb(5, { platformSpendCents: 1500 }) // $15 spent today
+    const env = makeEnv(db, { AI_DAILY_SPEND_CEILING_USD: "10" })
+    const calls = stubInworld({ wav: makeWav(1) })
+    const res = (await call(env, ttsReq({ projectId: "p1", fileId: "f1", text: "hi" }, await makeToken())))!
+    expect(res.status).toBe(503)
+    expect(await res.json()).toMatchObject({ error: "ai_spend_ceiling_reached" })
+    expect(calls).toHaveLength(0)
+    vi.restoreAllMocks()
+  })
+
+  it("synthesizes as usual while platform spend is below the ceiling", async () => {
+    const { db } = makeStubDb(5, { platformSpendCents: 200 }) // $2 spent today
+    const env = makeEnv(db, { AI_DAILY_SPEND_CEILING_USD: "10" })
+    const calls = stubInworld({ wav: makeWav(1) })
+    const res = (await call(env, ttsReq({ projectId: "p1", fileId: "f1", text: "hi" }, await makeToken())))!
+    expect(res.status).toBe(200)
+    expect(calls).toHaveLength(1)
+  })
+})
 
 describe("POST /api/v1/voice/tts", () => {
   it("returns null for unrelated paths", async () => {
@@ -543,10 +597,8 @@ describe("POST /api/v1/voice/tts", () => {
   // only thing actually blocking a flood against the hosted Inworld endpoint.
   describe("rate limiting", () => {
     it("429s a user that has flooded the window, without calling Inworld", async () => {
-      const { db, rateLimitEvents } = makeStubDb()
-      for (let i = 0; i < 200; i++) {
-        rateLimitEvents.push({ kind: "tts_synthesize", identifier: "user:1" })
-      }
+      const { db, spendRateLimit } = makeStubDb()
+      spendRateLimit("tts_synthesize", "user:1", 200)
       const calls = stubInworld({ wav: makeWav(1) })
       const token = await makeToken({ userId: 1 })
 
@@ -559,10 +611,8 @@ describe("POST /api/v1/voice/tts", () => {
     })
 
     it("does not throttle a fresh user, even when another user has flooded the window", async () => {
-      const { db, rateLimitEvents } = makeStubDb()
-      for (let i = 0; i < 200; i++) {
-        rateLimitEvents.push({ kind: "tts_synthesize", identifier: "user:999" })
-      }
+      const { db, spendRateLimit } = makeStubDb()
+      spendRateLimit("tts_synthesize", "user:999", 200)
       stubInworld({ wav: makeWav(1) })
       const token = await makeToken({ userId: 1 })
 

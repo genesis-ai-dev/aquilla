@@ -922,7 +922,16 @@ export class ProjectSync extends DurableObject<DOEnv> {
       // tick. Between them one connection costs the DO at most one presence
       // apply + fan-out per PRESENCE_TIER2_TICK_MS however fast it publishes.
       if (!this.presenceFloodGuard.allow(conn.connId, now)) {
-        conn.ws.close(PRESENCE_FLOOD_CLOSE_CODE, "presence rate limit exceeded")
+        try {
+          conn.ws.close(PRESENCE_FLOOD_CLOSE_CODE, "presence rate limit exceeded")
+        } catch {
+          /* swallow */
+        }
+        // Server-initiated close doesn't reliably fire our own close path —
+        // drop the row, the locks and this connection's pending patch
+        // explicitly, as every other server-side close here does
+        // (idempotent; see the connections.has guard in handleConnectionClose).
+        this.handleConnectionClose(conn)
         return
       }
       this.presenceBatcher.push(conn.connId, msg)

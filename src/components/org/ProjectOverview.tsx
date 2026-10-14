@@ -1354,8 +1354,8 @@ export function ProjectOverview() {
   // AQU-538 §3.3: lane tabs + tile recompute. Tabs only surface once a project
   // has more than one lane (N=1 stays byte-identical). `activeLane` is the
   // PortfolioLane the tabs are filtered to (null = "All"); when set, the
-  // Translated/Validated tiles + bars read that lane, and the cross-language
-  // tiles (AI Drafted, audio) grey out — they have no per-lane breakdown.
+  // Translated/Validated tiles + bars read that lane, and so do the audio ones
+  // (AQU-1951). AI Drafted greys out — it has no per-lane breakdown.
   // AQU-1796: a source lane rides along in the portfolio with lane "" so the
   // source-language label can find it. It is not a target lane. Listing it
   // here put the source language in the Languages table and, because the
@@ -1408,6 +1408,17 @@ export function ProjectOverview() {
   const tileTranslatedPct = activeLane ? laneTranslatedPct(activeLane) : audio ? translatedPct(audio) : 0
   const tileValidatedPct = activeLane ? laneValidatedPct(activeLane) : audio ? validatedPct(audio) : 0
   const CROSS_LANE_TOOLTIP = t("org.projectOverview.crossLaneTooltip")
+  // AQU-1951: audio follows the language tab as text does. Each take belongs
+  // to a language (AQU-1591), so the lane's own recordings replace the
+  // project's, over the project's audio denominator: which cells exist does
+  // not change with the language. Only a server too old to send lane audio
+  // leaves a language tab with nothing to show, and there the audio tiles
+  // grey out as they used to.
+  const laneAudioMissing = activeLane != null && activeLane.audioCells == null
+  const audioOnTab = (p: PortfolioProject): PortfolioProject =>
+    activeLane != null && activeLane.audioCells != null
+      ? { ...p, audioCells: activeLane.audioCells, validatedAudioCells: activeLane.validatedAudioCells ?? 0 }
+      : p
 
   // AQU-593: which stat widgets are applicable to this project (drives the
   // Customize menu). Audio tiles only apply to audio projects; the AI-Drafted
@@ -2090,10 +2101,10 @@ export function ProjectOverview() {
                         {statVisible("has-audio") && (
                           <StatTile
                             label={t("org.orgHome.table.audioHeaderLabel")}
-                            pct={audioPct(audio)}
+                            pct={audioPct(audioOnTab(audio))}
                             tone="audioRecorded"
-                            muted={!!activeLane}
-                            tooltip={activeLane ? CROSS_LANE_TOOLTIP : t("org.projectOverview.hasAudioTooltip")}
+                            muted={laneAudioMissing}
+                            tooltip={laneAudioMissing ? CROSS_LANE_TOOLTIP : t("org.projectOverview.hasAudioTooltip")}
                           />
                         )}
                         {/*
@@ -2110,20 +2121,19 @@ export function ProjectOverview() {
                          * the more natural reviewer's question, so it survives in the
                          * tooltip rather than being dropped.
                          *
-                         * Greyed with the cross-lane tooltip like "Has Audio": takes hang
-                         * off the cell, not a language lane, so there is nothing per-lane
-                         * to show.
+                         * AQU-1951: on a language tab it reads that language's takes,
+                         * like "Has audio" beside it.
                          */}
                         {statVisible("audio-validated") && (
                           <StatTile
                             label={t("org.projectOverview.audioValidated")}
-                            pct={audioValidatedPct(audio)}
+                            pct={audioValidatedPct(audioOnTab(audio))}
                             tone="audioValidated"
-                            muted={!!activeLane}
-                            tooltip={activeLane ? CROSS_LANE_TOOLTIP : [
+                            muted={laneAudioMissing}
+                            tooltip={laneAudioMissing ? CROSS_LANE_TOOLTIP : [
                               t("org.projectOverview.audioValidatedTooltip"),
                               t("org.projectOverview.audioValidatedOfRecorded", {
-                                percent: progressPercentOfFraction(audioValidatedOfRecordedPct(audio)),
+                                percent: progressPercentOfFraction(audioValidatedOfRecordedPct(audioOnTab(audio))),
                               }),
                             ].join(" ")}
                           />
@@ -2133,8 +2143,9 @@ export function ProjectOverview() {
                   </div>
 
                   {/* Detail bars below tiles. AQU-538: Translated/Validated
-                      follow the active lane; the cross-language AI/audio bars
-                      only render in the "All" view (no per-lane breakdown).
+                      follow the active lane, and AQU-1951 the audio bars too;
+                      the cross-language AI bar only renders in the "All" view
+                      (no per-lane breakdown).
                       AQU-1764: one single-colour bar per measure, each in its
                       tile's tone, and Audio validated gets the bar it never had. */}
                   <div className="space-y-2.5">
@@ -2169,11 +2180,11 @@ export function ProjectOverview() {
                         )}
                       </>
                     )}
-                    {showAudio && !activeLane && statVisible("has-audio") && (
+                    {showAudio && !laneAudioMissing && statVisible("has-audio") && (
                       <>
                         <StatBar
                           label={t("org.orgHome.table.audioHeaderLabel")}
-                          value={audio.audioCells}
+                          value={audioOnTab(audio).audioCells}
                           total={audioDenominator(audio)}
                           tone="audioRecorded"
                           suffix={t("org.projectOverview.cellsSuffix")}
@@ -2184,10 +2195,10 @@ export function ProjectOverview() {
                     {/* Over the same cells as Has audio and as its tile
                         (`audioValidatedPct`), so the bar, the tile and the
                         plan board's audio bars agree. */}
-                    {showAudio && !activeLane && statVisible("audio-validated") && (
+                    {showAudio && !laneAudioMissing && statVisible("audio-validated") && (
                       <StatBar
                         label={t("org.projectOverview.audioValidated")}
-                        value={audio.validatedAudioCells}
+                        value={audioOnTab(audio).validatedAudioCells}
                         total={audioDenominator(audio)}
                         tone="audioValidated"
                         suffix={t("org.projectOverview.cellsSuffix")}

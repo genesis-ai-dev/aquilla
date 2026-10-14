@@ -2082,10 +2082,45 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     await waitFor(() => expect(statTile("Translated")).toHaveTextContent("50%"))
   })
 
-  it("greys the cross-language tiles and drops their bars while one language is selected (AQU-1764)", async () => {
-    // AI drafts and audio have no per-language breakdown, so with a language
-    // tab chosen their tiles grey out (swatch faded with the number) and their
-    // bars, the new Audio validated one included, are not drawn at all.
+  it("AQU-1951: a language tab shows that language's recordings, over the project's audio cells", async () => {
+    // Each take belongs to a language (AQU-1591), so audio follows the tab the
+    // way text does. AI drafts still have no per-language count and grey out.
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject({
+      aiDraftedCells: 20, audioCells: 60, validatedAudioCells: 16,
+      lanes: [
+        { ...TWO_LANES[0], audioCells: 50, validatedAudioCells: 12 },
+        { ...TWO_LANES[1], audioCells: 10, validatedAudioCells: 4 },
+      ],
+    })])
+    renderOverview()
+    await screen.findByTestId("lane-filter-tabs")
+    const card = screen.getByTestId("progress-card")
+    const bars = () => within(card).getAllByTestId(/^stat-bar-/).map((b) => b.getAttribute("data-testid"))
+
+    // All: the project's 60 and 16 of 200 cells.
+    expect(statTile("Has audio")).toHaveTextContent("30%")
+    expect(statTile("Audio Validated")).toHaveTextContent("8%")
+
+    // es: its own 10 and 4, still of the project's 200 cells.
+    fireEvent.click(screen.getByRole("tab", { name: "es" }))
+    await waitFor(() => expect(statTile("Has audio")).toHaveTextContent("5%"))
+    expect(statTile("Audio Validated")).toHaveTextContent("2%")
+    for (const label of ["Has audio", "Audio Validated"]) {
+      expect(statTile(label).firstElementChild!.className, label).not.toContain("text-muted-foreground/60")
+    }
+    expect(statTile("AI Drafted").firstElementChild!.className).toContain("text-muted-foreground/60")
+    expect(bars()).toEqual([
+      "stat-bar-textTranslated", "stat-bar-textValidated", "stat-bar-audioRecorded", "stat-bar-audioValidated",
+    ])
+    expect(within(card).getByTestId("stat-bar-audioRecorded")).toHaveTextContent("10/200")
+    expect(within(card).getByTestId("stat-bar-audioValidated")).toHaveTextContent("4/200")
+  })
+
+  it("greys the cross-language tiles and drops their bars on a language tab when the server sends no lane audio (AQU-1764)", async () => {
+    // AI drafts have no per-language breakdown, and an older server sends no
+    // lane audio, so with a language tab chosen those tiles grey out (swatch
+    // faded with the number) and their bars are not drawn at all.
     useLaneProject()
     getPortfolio.mockResolvedValue([laneProject({ aiDraftedCells: 20, audioCells: 60, validatedAudioCells: 15 })])
     renderOverview()

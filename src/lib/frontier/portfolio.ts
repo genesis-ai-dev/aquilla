@@ -49,6 +49,14 @@ export interface PortfolioLane {
   archived?: boolean
   /** Source rows are for the language pair. Chips list target lanes only. */
   role?: "source" | "target"
+  /**
+   * AQU-1951: this language's recordings — cells with a selected dub take in
+   * this lane, and those whose takes meet the audio threshold. Measured over
+   * the project's own audio denominator (`audioDenominator`): which cells
+   * exist does not change with the language. Absent on older servers.
+   */
+  audioCells?: number
+  validatedAudioCells?: number
 }
 
 export interface PortfolioProject {

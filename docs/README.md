@@ -17,6 +17,9 @@ design and audit material.
   build integrations, explicit deployment ownership, previews, and verification.
 - [Hetzner self-hosted e2e](runbooks/hetzner-ci.md) — dedicated-box Playwright
   smoke; GitHub remains the webhook and queue.
+- [Seed a project into a local database](runbooks/seed-project-to-local.md) — hand
+  a developer a PII-scrubbed copy of one project without Neon or R2 access
+  (`seed:extract:dev` → bundle → `seed:load --local`).
 - [E2E](../e2e/README.md) — local integration and smoke-test environment.
 - [RLS rollout](RLS-ROLLOUT.md) — Postgres row-level-security operations.
 - [Operational security](OPSEC.md) — sensitive data inventory, threat model,

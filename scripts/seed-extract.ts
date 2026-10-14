@@ -1,10 +1,13 @@
 #!/usr/bin/env tsx
-// Extract a curated, PII-scrubbed slice of PROD into a zstd bundle in R2.
-// Maintainer-only — needs prod Neon creds and wrangler R2 access.
+// Extract a curated, PII-scrubbed slice of a Neon branch into a zstd bundle.
+// Maintainer-only — needs Postgres credentials for the source branch, and
+// wrangler R2 access unless --no-upload. Hand-off procedure for giving a
+// developer one project without any of those: docs/runbooks/seed-project-to-local.md.
 //
-//   set -a; . ./.env; set +a
-//   npx tsx scripts/seed-extract.ts            # extract → bundle → R2 → meta
-//   npx tsx scripts/seed-extract.ts --no-upload # write local bundle, skip R2 put
+//   pnpm seed:extract:dev              # dev branch → bundle → R2 → meta (via neon-target)
+//   pnpm seed:extract:prod             # production branch, same
+//   pnpm seed:extract:dev -- --no-upload   # write the bundle locally, skip the R2 put
+//   set -a; . ./.env; set +a; npx tsx scripts/seed-extract.ts   # raw NEON_PG_* (source unrecorded)
 //
 // Reads db/seed/manifest.json, resolves the identity closure for the listed
 // projects, applies a deterministic identity remap (see spec), writes per-table
@@ -109,6 +112,8 @@ async function main() {
     if (orgIds.size) for (const col of ["user_id", "granted_by"]) for (const v of await distinct(c, `SELECT ${col} FROM org_members WHERE org_id = ANY($1) AND ${col} IS NOT NULL`, [[...orgIds]])) userIds.add(v)
     if (groupIds.size) for (const col of ["user_id", "added_by"]) for (const v of await distinct(c, `SELECT ${col} FROM group_members WHERE group_id = ANY($1) AND ${col} IS NOT NULL`, [[...groupIds]])) userIds.add(v)
     for (const col of ["user_id", "granted_by"]) for (const v of await distinct(c, `SELECT ${col} FROM project_members WHERE project_id = ANY($1) AND ${col} IS NOT NULL`, [projectIds])) userIds.add(v)
+    // AQU-1953: lane grants (the read/write wall) reference users by id too.
+    for (const col of ["user_id", "granted_by"]) for (const v of await distinct(c, `SELECT ${col} FROM project_member_lane_roles WHERE project_id = ANY($1) AND ${col} IS NOT NULL`, [projectIds])) userIds.add(v)
     // assignments → ids + assignee/creator
     const asg = (await c.query(`SELECT assignment_id, assignee_user_id, created_by FROM assignments WHERE project_id = ANY($1)`, [projectIds])).rows
     for (const a of asg) { assignmentIds.add(String(a.assignment_id)); for (const u of [a.assignee_user_id, a.created_by]) if (u != null) userIds.add(String(u)) }
@@ -118,6 +123,7 @@ async function main() {
     for (const v of await distinct(c, `SELECT DISTINCT author FROM events WHERE project_id = ANY($1)`, [projectIds])) usernames.add(v)
     for (const v of await distinct(c, `SELECT DISTINCT last_editor FROM cells WHERE project_id = ANY($1) AND last_editor IS NOT NULL`, [projectIds])) usernames.add(v)
     for (const v of await distinct(c, `SELECT DISTINCT username FROM cell_validators WHERE project_id = ANY($1)`, [projectIds])) usernames.add(v)
+    for (const v of await distinct(c, `SELECT DISTINCT username FROM cell_audio_validators WHERE project_id = ANY($1)`, [projectIds])) usernames.add(v)
     for (const v of await distinct(c, `SELECT DISTINCT author FROM cell_backtranslations WHERE project_id = ANY($1)`, [projectIds])) usernames.add(v)
     for (const v of await distinct(c, `SELECT DISTINCT author_id FROM comments WHERE project_id = ANY($1)`, [projectIds])) usernames.add(v)
 
@@ -222,7 +228,10 @@ async function main() {
     // ── 6. write committed meta ────────────────────────────────────────────
     const meta = {
       generatedAt: new Date().toISOString(),
-      source: "prod neon sweet-paper-88472094",
+      // AQU-1953: which Neon branch this came from. scripts/neon-target.ts sets
+      // it (`pnpm seed:extract:dev` / `:prod`); a bare `seed:extract` reads raw
+      // NEON_PG_* and cannot tell, so it says so rather than guess.
+      source: process.env.AQUILLA_NEON_TARGET ? `neon ${process.env.AQUILLA_NEON_TARGET}` : "unspecified (raw NEON_PG_* credentials)",
       r2: { accountId: manifest.r2.accountId, bucket: manifest.r2.bucket, key: r2Key },
       bundleBytes: compressed.length,
       sha256,

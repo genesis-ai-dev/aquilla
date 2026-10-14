@@ -127,6 +127,8 @@
     "tags:eval": "tsx scripts/passage-tags-eval.ts",
     "offline:fixture": "VITE_UPDATE_OFFLINE_EVENTLOG_FIXTURE=1 vitest run src/lib/offline/eventlog-compat.test.ts",
     "seed:extract": "tsx scripts/seed-extract.ts",
+    "seed:extract:dev": "tsx scripts/neon-target.ts dev seed-extract",
+    "seed:extract:prod": "tsx scripts/neon-target.ts production seed-extract",
     "seed:fetch": "tsx scripts/seed-fetch.ts",
     "seed:load": "tsx scripts/seed-load.ts",
     "seed:dev": "tsx scripts/seed-load.ts --local",

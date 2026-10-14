@@ -19,7 +19,7 @@ import { zstdDecompressSync } from "node:zlib"
 import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { SEED_TABLES, TABLE_HEADER_KEY, type IdSet } from "./lib/seed-tables"
+import { DEPENDENT_TABLES, SEED_TABLES, TABLE_HEADER_KEY, type IdSet } from "./lib/seed-tables"
 import { assertSeedTargetAllowed } from "./lib/seed-target-guard"
 import { ensureBundle, readMeta } from "./seed-fetch"
 
@@ -141,7 +141,16 @@ async function main() {
     console.log(`Loading ${meta.projectIds.length} projects into ${host} …`)
     await assertTargetSchema(c, sections)
     await c.query("BEGIN")
-    // delete existing (reverse order; harmless without FKs but tidy)
+    // AQU-1953: rows the seed never carries but that point at seeded rows
+    // without ON DELETE CASCADE (agent artifact bindings, contextual runs,
+    // usage requests). Clear them first, or the lanes / files / projects
+    // deletes below fail on a re-load over a project someone used locally.
+    for (const d of DEPENDENT_TABLES) {
+      const set = idSets[d.by.set]
+      if (set.length) await c.query(`DELETE FROM ${d.name} WHERE ${d.by.col} = ANY($1)`, [set])
+    }
+    // delete existing in reverse load order — the lane foreign keys make the
+    // order load-bearing (cells before lanes, lanes before projects)
     for (const t of [...SEED_TABLES].reverse()) {
       const set = idSets[t.by.set]
       if (set.length) await c.query(`DELETE FROM ${t.name} WHERE ${t.by.col} = ANY($1)`, [set])

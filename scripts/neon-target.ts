@@ -41,7 +41,7 @@ const DEFAULTS: Partial<Record<PgKey, string>> = {
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
 function usage(): never {
-  console.error("usage: tsx scripts/neon-target.ts <production|dev|local> <status|apply|baseline|prepare-comments-key|backfill-progress|backfill-activity|backfill-lanes|backfill-lane-batch|prune-phantom-voices|verify-lanes>")
+  console.error("usage: tsx scripts/neon-target.ts <production|dev|local> <status|apply|baseline|prepare-comments-key|backfill-progress|backfill-activity|backfill-lanes|backfill-lane-batch|prune-phantom-voices|verify-lanes|seed-extract>")
   console.error(`       production apply requires ${SNAPSHOT_FLAG} (take a Neon snapshot branch first) or ${NO_SNAPSHOT_FLAG}`)
   process.exit(1)
 }
@@ -54,7 +54,7 @@ function parseTarget(value: string | undefined): Target {
 }
 
 function parseCommand(value: string | undefined): Command {
-  if (value === "prepare-comments-key" || value === "status" || value === "apply" || value === "baseline" || value === "backfill-progress" || value === "backfill-activity" || value === "backfill-lanes" || value === "backfill-lane-batch" || value === "prune-phantom-voices" || value === "verify-lanes") return value
+  if (value === "prepare-comments-key" || value === "status" || value === "apply" || value === "baseline" || value === "backfill-progress" || value === "backfill-activity" || value === "backfill-lanes" || value === "backfill-lane-batch" || value === "prune-phantom-voices" || value === "verify-lanes" || value === "seed-extract") return value
   usage()
 }
 

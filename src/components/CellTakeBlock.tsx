@@ -60,6 +60,7 @@ import { hasOwnRecordingLeft, removeTake, removeWholeTake, renameTake } from "@/
 import { takeBaseLabel } from "@/lib/audio/take-groups"
 import { pieceGroupOf, type AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 import { TakesStrip } from "@/components/AudioRecorder/TakesStrip"
+import { attachmentOutFrom } from "@/lib/audio/cut-take"
 import { GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
 import { effectiveAttachmentDurationMs } from "@/lib/timeline/lane-timing"
 
@@ -210,6 +211,12 @@ function CellTakeBlockView({
   // TakeWaveform applies it to the player; this block used to play the whole
   // file (an untrimmed take, and on a source section the entire reading).
   const piecesWindow = useMemo(() => (split ? piecesWindowSec(split) : null), [split])
+  // A cleaned split take's original, for Revert to paint at once.
+  const originalId = split?.[0]?.referenceAudioId ?? null
+  const originalAtt = originalId ? owner.attachments?.[originalId] : undefined
+  const originalTake = originalId && originalAtt && split
+    ? attachmentOutFrom(originalId, originalAtt, originalAtt.slot ?? split[0].slot)
+    : null
   const kept: KeptWindow = piecesWindow
     ? { start: piecesWindow.start, end: piecesWindow.end, kind: "trim" }
     : keptWindowSec(owner, selectedAudioId, attachment)
@@ -534,6 +541,7 @@ function CellTakeBlockView({
               // a cleaned take may have been deleted since.
               selectedAudioId={split ? pieceGroupOf(split[0], split[0].audioId) : selectedAudioId}
               pieces={split ?? undefined}
+              originalTake={originalTake}
               selectedUrl={attachment.url}
               referenceAudioId={attachment.referenceAudioId ?? null}
               originalUrl={

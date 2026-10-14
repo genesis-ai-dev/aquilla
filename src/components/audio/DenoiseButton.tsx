@@ -51,6 +51,9 @@ interface Props {
    * the original take again, every piece of it.
    */
   pieces?: readonly AudioAttachmentOut[]
+  /** For a split take's Revert: the original take's first piece as it reads,
+   *  painted chosen at once (its whole group follows it). */
+  originalTake?: AudioAttachmentOut | null
 }
 
 export function DenoiseButton(props: Props) {
@@ -58,7 +61,7 @@ export function DenoiseButton(props: Props) {
   const {
     projectId, fileId, cellId, selectedAudioId, selectedUrl,
     referenceAudioId, originalUrl, originalDurationMs, author, session, editable,
-    targetLang, pieces,
+    targetLang, pieces, originalTake,
   } = props
   const split = pieces && pieces.length > 1 ? pieces : null
 
@@ -114,9 +117,12 @@ export function DenoiseButton(props: Props) {
         ...(targetLang ? { targetLang } : {}),
         author,
       })
-      // Not for a split take: painting the original's first piece alone, with
-      // no window, would show the whole recording as one take until the read.
-      if (originalUrl && !split) {
+      // A split take's original is painted as it really reads (its window and
+      // group), never as the bare clip below — which would show the whole
+      // recording as one take until the read caught up.
+      if (split) {
+        if (originalTake) injectOptimisticAudioAttachment(fileId, cellId, originalTake, revertP)
+      } else if (originalUrl) {
         injectOptimisticAudioAttachment(fileId, cellId, {
           audioId: referenceAudioId,
           url: originalUrl,
@@ -138,7 +144,7 @@ export function DenoiseButton(props: Props) {
     } finally {
       setReverting(false)
     }
-  }, [referenceAudioId, reverting, originalUrl, originalDurationMs, projectId, fileId, cellId, author, targetLang, split])
+  }, [referenceAudioId, reverting, originalUrl, originalDurationMs, projectId, fileId, cellId, author, targetLang, split, originalTake])
 
   if (isDenoised) {
     return (

@@ -31,6 +31,7 @@ vi.mock("@/lib/sync/events-emit", () => ({
 vi.mock("@/lib/history/history", () => ({ recordStep: vi.fn() }))
 
 import { RecordingTakes } from "./RecordingTakes"
+import { getOptimisticShadows } from "@/lib/audio/audio-attachments-bus"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -110,6 +111,21 @@ describe("RecordingTakes — a split take (AQU-1767)", () => {
     expect(within(row).getByTestId(`take-length-${T2}`)).toHaveTextContent("3.5s")
     fireEvent.click(within(row).getByRole("button", { name: /delete/i }))
     await vi.waitFor(() => expect(queued.removes).toEqual([T2, Q2]))
+  })
+
+  it("Revert on a cleaned split take paints the original take chosen at once, window and all", async () => {
+    const DN = "dn-audio-c1-9.webm", DQ = "audio-c1-10.webm"
+    draw({
+      ...splitTake,
+      [DN]: audio({ url: "frontier-audio://dn-audio-c1-9.webm", label: "Take 1 · 1", trimEndMs: 1500, referenceAudioId: T1 }),
+      [DQ]: audio({ url: "frontier-audio://dn-audio-c1-9.webm", label: "Take 1 · 2", trimStartMs: 1500, pieceOf: DN, referenceAudioId: P2 }),
+    }, DN)
+    fireEvent.click(within(screen.getByTestId("cell-take-block")).getByRole("button", { name: /Revert/ }))
+    await vi.waitFor(() => {
+      const shadows = getOptimisticShadows("f1").get("c1") ?? []
+      const painted = shadows.map((sh) => (sh as { att?: { audioId: string; trimEndMs: number | null } }).att).find((a) => a?.audioId === T1)
+      expect(painted?.trimEndMs).toBe(1500)
+    })
   })
 
   it("draws a take never split as before", () => {

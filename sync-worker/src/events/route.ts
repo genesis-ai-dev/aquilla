@@ -63,6 +63,7 @@ import {
   sectionsProgressRecomputeStmt,
 } from './progress-projection'
 import { makeRequestCache } from './request-cache'
+import type { WritePathSettings } from './write-path-settings'
 import { dbFailureInfo, reportServerRejections } from './rejection-telemetry'
 
 // Max statements per batch() transaction — a conservative self-imposed cap (Postgres has no hard limit; keeps any single transaction bounded).
@@ -944,9 +945,9 @@ export async function handleEventsWriteRequest(
   const requestCache = makeRequestCache(db)
   const readProjectSettings = async (
     projectId: string,
-  ): Promise<Record<string, unknown> | null> => {
+  ): Promise<WritePathSettings | null> => {
     try {
-      return await requestCache.projectSettings(projectId)
+      return await requestCache.writePathSettings(projectId)
     } catch {
       // Settings load failure is non-fatal — callers fall back to their
       // defaults rather than blocking the batch.

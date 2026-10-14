@@ -913,10 +913,27 @@ export const editor = defineNamespace({
     // AQU-1767 phase 1: cutting takes into independent pieces.
     "editor.timeline.bladeToggleAria": "Blade: cut a take where you click",
     "editor.timeline.bladeOnTooltip": "Blade on: click a take to cut it there (B)",
-    "editor.timeline.bladeOffTooltip": "Blade (B): cut a take where you click",
+    "editor.timeline.bladeOffTooltip": "Blade (B): click to cut · S splits under the pointer",
     "editor.timeline.bladeFreeTiming": "Cutting takes isn't available in Free timing yet",
-    "editor.timeline.cutAtPlayheadAria": "Cut takes at the playhead",
-    "editor.timeline.cutAtPlayheadTooltip": "Cut the takes under the playhead into two pieces",
+    // AQU-1767 (Sam, 2026-10-14): a take's right-click menu.
+    "editor.timeline.takeMenuSplit": "Split here",
+    "editor.timeline.takeMenuReRecord": "Re-record this line",
+    "editor.timeline.takeMenuRegenerate": "Regenerate voice",
+    "editor.timeline.takeMenuApprove": "Approve this take",
+    "editor.timeline.takeMenuApprovePiece": "Approve this piece",
+    "editor.timeline.takeMenuUnapprove": "Remove my approval",
+    "editor.timeline.takeMenuRename": "Rename…",
+    "editor.timeline.takeMenuDeleteTake": "Delete take",
+    "editor.timeline.takeMenuDeletePiece": "Delete this piece",
+    "editor.timeline.renameTakeTitle": "Rename take",
+    "editor.timeline.renameTakeLabel": "Name",
+    "editor.timeline.renameTakeFailed": "Couldn't rename that take",
+    "editor.timeline.deleteTakeFailed": "Couldn't delete that take",
+    "editor.timeline.voteTakeFailed": "Couldn't save your approval",
+    "editor.timeline.regenerateStarted": "Generating a new voice for this line…",
+    "editor.timeline.regenerateDone": "New voice ready",
+    "editor.timeline.regenerateFailed": "Couldn't generate a voice for this line",
+    "editor.timeline.regenerateNoText": "This line has no translation to speak yet",
     // AQU-1767: the edit history (Undo / Redo), the first slice of app-wide undo.
     "editor.history.undoAria": "Undo",
     "editor.history.redoAria": "Redo",
@@ -5897,24 +5914,35 @@ export const editor = defineNamespace({
       },
       "editor.timeline.bladeOffTooltip": {
         description:
-          "Tooltip of the blade toggle while it is off. (B) is the keyboard shortcut — keep it " +
-          "as the Latin letter B.",
+          "Tooltip of the blade toggle while it is off. (B) is the toggle's keyboard shortcut " +
+          "and S splits the take under the mouse pointer without the blade — keep both as the " +
+          "Latin letters B and S.",
         maxLength: 60,
       },
       "editor.timeline.bladeFreeTiming": {
         description:
-          "Tooltip of the disabled blade and cut buttons when the file is in 'Free timing' " +
+          "Tooltip of the disabled blade button when the file is in 'Free timing' " +
           "(the mode where lines are laid out end to end). Use the same name for Free timing " +
           "as the timing-mode picker does.",
       },
-      "editor.timeline.cutAtPlayheadAria": {
+      "editor.timeline.takeMenuSplit": {
         description:
-          "Screen-reader name of the timeline toolbar button that cuts every take under the " +
-          "playhead (the vertical line showing the current time) into two pieces.",
+          "Item in the menu that opens when you right-click a take on the timeline: cuts the " +
+          "take in two at the point you right-clicked. A 'take' is one recording or generated " +
+          "voice on a line.",
+        maxLength: 30,
       },
-      "editor.timeline.cutAtPlayheadTooltip": {
-        description: "Tooltip of the same button. A 'take' is one recording or generated voice on a line.",
-        maxLength: 60,
+      "editor.timeline.takeMenuRegenerate": {
+        description:
+          "Item in a take's right-click menu: generates a new AI voice for the line at once, " +
+          "with the line's cast voice, and makes it the one that plays.",
+        maxLength: 30,
+      },
+      "editor.timeline.takeMenuDeletePiece": {
+        description:
+          "Item in a take's right-click menu when the take has been cut: deletes only this " +
+          "piece, not the other pieces of the same take.",
+        maxLength: 30,
       },
       "editor.history.undoAria": {
         description: "Screen-reader name of the timeline toolbar's Undo button (icon only).",

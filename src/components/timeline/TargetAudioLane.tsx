@@ -13,7 +13,8 @@
 
 import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
-import { Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Mic, Play, Sparkles, Square, VolumeX } from "lucide-react"
+import { Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Mic, Pencil, Play, Scissors, Sparkles, Square, Trash2, VolumeX, X } from "lucide-react"
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuShortcut, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { toast } from "@/components/ui/toast"
@@ -126,6 +127,10 @@ export interface TargetAudioLaneProps {
   bladeActive?: boolean
   /** AQU-1767: cut one take at `atMs`, a position in its own audio. */
   onCutTarget?(cellId: string, audioId: string, atMs: number): void
+  /** AQU-1767: what a right-click on a take offers. Absent, it offers nothing. */
+  takeMenu?: TakeMenuActions
+  /** AQU-1767: the take and cut point under the pointer, for the S key. */
+  onHoverCut?(target: HoverCut | null): void
   /** Round 8b: corner mic button — opens the recording modal on this cell. */
   onOpenRecording?(cellId: string): void
   /** SUB-51: timed media sections with NO dub yet. Their empty space in this
@@ -194,6 +199,32 @@ interface ChipGeometry {
   ratio: number | null
 }
 
+/** AQU-1767: the take under the pointer and where in its audio a cut would land. */
+export interface HoverCut {
+  cellId: string
+  audioId: string
+  atMs: number
+}
+
+/**
+ * AQU-1767 (Sam, 2026-10-14): the actions a take's right-click menu offers.
+ * Each is optional; a missing one is simply not in the menu.
+ */
+export interface TakeMenuActions {
+  /** Open the recorder on this line, on this take's track. */
+  reRecord?(cellId: string): void
+  /** Generate a new voice for this line straight away, on this take's track. */
+  regenerate?(cellId: string): void
+  /** Ask for a new name; `current` is the take's own name, if it has one. */
+  rename?(cellId: string, audioId: string, current: string | null): void
+  /** Delete this take, or this piece of a cut take. */
+  remove?(cellId: string, audioId: string): void
+  /** Add or withdraw your own approval of this take. */
+  vote?(cellId: string, audioId: string, validated: boolean): void
+  /** Whether you may vote on this take, and whether you already have. */
+  voteState?(cellId: string, audioId: string): { canVote: boolean; voted: boolean }
+}
+
 function TargetAudioChip({
   chip,
   prevChip,
@@ -214,6 +245,8 @@ function TargetAudioChip({
   onTrimTarget,
   bladeActive = false,
   onCutTarget,
+  takeMenu,
+  onHoverCut,
   onOpenRecording,
   validationRequirementAudio = 1,
   currentUsername = "",
@@ -265,6 +298,8 @@ function TargetAudioChip({
   onTrimTarget?(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): void
   bladeActive?: boolean
   onCutTarget?(cellId: string, audioId: string, atMs: number): void
+  takeMenu?: TakeMenuActions
+  onHoverCut?(target: HoverCut | null): void
   onOpenRecording?(cellId: string): void
   /** AQU-490: how many validators the project asks for on a recording. */
   validationRequirementAudio?: number
@@ -281,6 +316,11 @@ function TargetAudioChip({
   const testKey = chip.item.pieceIndex ? `${cell.id}-p${chip.item.pieceIndex + 1}` : cell.id
   // AQU-1767: where the blade would cut, while it hovers over this chip.
   const [bladeX, setBladeX] = useState<number | null>(null)
+  // AQU-1767: where the take was right-clicked, so "Split here" cuts there.
+  // Taken on pointerdown (which precedes the context menu) and read into state
+  // when the menu opens, so the menu draws with the point it will use.
+  const contextXRef = useRef<number | null>(null)
+  const [menuSplitAtMs, setMenuSplitAtMs] = useState<number | null>(null)
   const [drag, setDrag] = useState<{ mode: ChipDragMode; dx: number } | null>(null)
   /**
    * AQU-646 stage 5: is THIS chip's own preview sounding?
@@ -515,6 +555,8 @@ function TargetAudioChip({
   // AQU-1767: with the blade in hand the chip is a cutting surface — no trim
   // handles to catch the pointer, and no move.
   const blade = bladeActive && editable && Boolean(onCutTarget)
+  // AQU-1767: a take only has a menu where there is something in it to do.
+  const hasMenu = editable && (Boolean(onCutTarget) || Boolean(takeMenu && Object.keys(takeMenu).length > 0))
   /** The take-relative ms under a pointer x, and whether a cut there is legal. */
   const bladeAt = (clientX: number): { atMs: number; ok: boolean; x: number } | null => {
     const el = chipRef.current
@@ -815,8 +857,7 @@ function TargetAudioChip({
   }
   const tooltipContent = <div className="flex flex-col gap-0.5">{tipLines}</div>
 
-  return (
-    <AppTooltip content={tooltipContent} disabled={drag != null}>
+  const chipButton = (
     <button
       type="button"
       ref={chipRef}
@@ -858,11 +899,17 @@ function TargetAudioChip({
       onPointerLeave={() => {
         setHovered(false)
         setBladeX(null)
+        onHoverCut?.(null)
       }}
       onPointerMove={(e) => {
-        if (!blade) return
+        // AQU-1767: S cuts under the pointer without the blade in hand, so the
+        // lane always knows which take, and where, the pointer is over.
+        if (!blade && !onHoverCut) return
         const at = bladeAt(e.clientX)
-        setBladeX(at?.ok ? at.x : null)
+        if (onHoverCut && editable && onCutTarget) {
+          onHoverCut(at?.ok ? { cellId: cell.id, audioId: chip.item.audioId, atMs: at.atMs } : null)
+        }
+        if (blade) setBladeX(at?.ok ? at.x : null)
       }}
       {...(blade ? { "data-blade": "" } : {})}
       data-audio-id={chip.item.audioId}
@@ -881,11 +928,21 @@ function TargetAudioChip({
       // this stops the custom one. That is the intended outcome, not an
       // oversight — noted here because "nothing happened" is otherwise a
       // reasonable thing to file a bug about.
-      onContextMenu={(e) => {
-        e.preventDefault()
-        e.stopPropagation()
+      //
+      // AQU-1767 (Sam, 2026-10-14): unless the take has a menu of its own. The
+      // menu's trigger owns `onContextMenu` then (one supplied alongside it
+      // replaces it) and stops the event itself, so the track's menu still
+      // never opens over a take.
+      {...(hasMenu ? {} : {
+        onContextMenu: (e: React.MouseEvent) => {
+          e.preventDefault()
+          e.stopPropagation()
+        },
+      })}
+      onPointerDown={(e) => {
+        if (e.button === 2 || e.ctrlKey) contextXRef.current = e.clientX
+        beginDrag("move", e)
       }}
-      onPointerDown={(e) => beginDrag("move", e)}
       style={{
         // AQU-646 stage 7: NO COLOUR HERE ANY MORE, and that is the headline.
         // The hue arrives as inherited CUSTOM PROPERTIES set once on the lane,
@@ -1206,7 +1263,92 @@ function TargetAudioChip({
         </span>
       )}
     </button>
-    </AppTooltip>
+  )
+  if (!hasMenu) {
+    return (
+      <AppTooltip content={tooltipContent} disabled={drag != null}>
+        {chipButton}
+      </AppTooltip>
+    )
+  }
+  // AQU-1767 (Sam, 2026-10-14): a right-click on a take offers what can be
+  // done with it. The menu's root sits outside the tooltip and its trigger
+  // renders the chip itself, so the tooltip and the menu share one element.
+  const audioId = chip.item.audioId
+  const vote = takeMenu?.vote && takeMenu.voteState ? takeMenu.voteState(cell.id, audioId) : null
+  const isPiece = (chip.item.pieceCount ?? 1) > 1
+  const canSplit = Boolean(onCutTarget) && editable
+  return (
+    <ContextMenu
+      onOpenChange={(open) => {
+        if (!open) return
+        const x = contextXRef.current
+        contextXRef.current = null
+        const at = x == null ? null : bladeAt(x)
+        setMenuSplitAtMs(at?.ok ? at.atMs : null)
+      }}
+    >
+      <AppTooltip content={tooltipContent} disabled={drag != null}>
+        <ContextMenuTrigger render={chipButton} />
+      </AppTooltip>
+      <ContextMenuContent className="w-56" data-testid={`tl-take-menu-${testKey}`}>
+        {canSplit && (
+          <ContextMenuItem
+            data-testid="tl-take-menu-split"
+            disabled={menuSplitAtMs == null}
+            onClick={() => { if (menuSplitAtMs != null) onCutTarget?.(cell.id, audioId, menuSplitAtMs) }}
+          >
+            <Scissors className="h-3.5 w-3.5" />
+            {t("editor.timeline.takeMenuSplit")}
+            <ContextMenuShortcut>S</ContextMenuShortcut>
+          </ContextMenuItem>
+        )}
+        {takeMenu?.reRecord && (
+          <ContextMenuItem data-testid="tl-take-menu-rerecord" onClick={() => takeMenu.reRecord?.(cell.id)}>
+            <Mic className="h-3.5 w-3.5" />
+            {t("editor.timeline.takeMenuReRecord")}
+          </ContextMenuItem>
+        )}
+        {takeMenu?.regenerate && (
+          <ContextMenuItem data-testid="tl-take-menu-regenerate" onClick={() => takeMenu.regenerate?.(cell.id)}>
+            <Sparkles className="h-3.5 w-3.5" />
+            {t("editor.timeline.takeMenuRegenerate")}
+          </ContextMenuItem>
+        )}
+        {vote?.canVote && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              data-testid="tl-take-menu-vote"
+              onClick={() => takeMenu?.vote?.(cell.id, audioId, !vote.voted)}
+            >
+              {vote.voted ? <X className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
+              {t(vote.voted ? "editor.timeline.takeMenuUnapprove" : isPiece ? "editor.timeline.takeMenuApprovePiece" : "editor.timeline.takeMenuApprove")}
+            </ContextMenuItem>
+          </>
+        )}
+        {(takeMenu?.rename || takeMenu?.remove) && <ContextMenuSeparator />}
+        {takeMenu?.rename && (
+          <ContextMenuItem
+            data-testid="tl-take-menu-rename"
+            onClick={() => takeMenu.rename?.(cell.id, audioId, chipTake?.label ?? null)}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            {t("editor.timeline.takeMenuRename")}
+          </ContextMenuItem>
+        )}
+        {takeMenu?.remove && (
+          <ContextMenuItem
+            variant="destructive"
+            data-testid="tl-take-menu-delete"
+            onClick={() => takeMenu.remove?.(cell.id, audioId)}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            {t(isPiece ? "editor.timeline.takeMenuDeletePiece" : "editor.timeline.takeMenuDeleteTake")}
+          </ContextMenuItem>
+        )}
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }
 
@@ -1228,6 +1370,8 @@ export function TargetAudioLane({
   onTrimTarget,
   bladeActive = false,
   onCutTarget,
+  takeMenu,
+  onHoverCut,
   onOpenRecording,
   validationRequirementAudio,
   emptyCells,
@@ -1531,6 +1675,8 @@ export function TargetAudioLane({
             onTrimTarget={onTrimTarget}
             bladeActive={bladeActive}
             onCutTarget={onCutTarget}
+            takeMenu={takeMenu}
+            onHoverCut={onHoverCut}
             onOpenRecording={onOpenRecording}
             validationRequirementAudio={validationRequirementAudio}
             currentUsername={session?.username ?? ""}

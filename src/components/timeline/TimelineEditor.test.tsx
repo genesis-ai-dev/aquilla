@@ -4931,3 +4931,52 @@ describe("TimelineEditor — an empty linked video (Sam's D3)", () => {
     expect(screen.queryByTestId("tl-source-gap-label")).toBeNull()
   })
 })
+
+// AQU-1767 (Sam, 2026-10-14): the blade stays on B, S splits under the pointer,
+// and the "cut at the playhead" button is gone.
+describe("TimelineEditor — splitting takes (AQU-1767)", () => {
+  beforeEach(() => { topOwner.value = 1 })
+  const TAKE_ID = "audio-m2-1700000000-take.wav"
+  const takeCell = () =>
+    cell({
+      id: "m2", original: "Two", medium: "media", startTime: 10, endTime: 20,
+      selectedAudioId: TAKE_ID,
+      attachments: { [TAKE_ID]: { type: "audio", url: "frontier-audio://take", slot: "recording", durationMs: 4000 } },
+    })
+
+  it("keeps the blade toggle and has no cut-at-the-playhead button", () => {
+    render(
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={[takeCell()]} onRetimeSubtitle={() => {}} onCutTargets={vi.fn()} />,
+    )
+    expect(screen.getByTestId("tl-blade-toggle")).toBeInTheDocument()
+    expect(screen.queryByTestId("tl-cut-at-playhead")).toBeNull()
+  })
+
+  it("S splits the take under the pointer, at the pointer, without the blade", () => {
+    const onCutTargets = vi.fn()
+    render(
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={[takeCell()]} onRetimeSubtitle={() => {}} onCutTargets={onCutTargets} />,
+    )
+    const chip = screen.getByTestId("tl-target-m2")
+    expect(chip.hasAttribute("data-blade")).toBe(false)
+    fireEvent.pointerMove(chip, { clientX: 60 })
+    fireEvent.keyDown(window, { key: "s" })
+    expect(onCutTargets).toHaveBeenCalledTimes(1)
+    const [cuts] = onCutTargets.mock.calls[0]
+    expect(cuts).toHaveLength(1)
+    expect(cuts[0]).toMatchObject({ cellId: "m2", audioId: TAKE_ID })
+    expect(cuts[0].atMs).toBeGreaterThan(0)
+  })
+
+  it("S does nothing once the pointer has left the take", () => {
+    const onCutTargets = vi.fn()
+    render(
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={[takeCell()]} onRetimeSubtitle={() => {}} onCutTargets={onCutTargets} />,
+    )
+    const chip = screen.getByTestId("tl-target-m2")
+    fireEvent.pointerMove(chip, { clientX: 60 })
+    fireEvent.pointerLeave(chip)
+    fireEvent.keyDown(window, { key: "s" })
+    expect(onCutTargets).not.toHaveBeenCalled()
+  })
+})

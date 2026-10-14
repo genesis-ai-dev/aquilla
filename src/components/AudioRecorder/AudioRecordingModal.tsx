@@ -52,7 +52,7 @@ import { readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { TakeWaveform } from "@/components/audio/TakeWaveform"
 import type { CodexCell, CodexCellAttachment } from "@/lib/codex-editor/types"
 import { probeDurationMsSafe } from "@/lib/import"
-import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
+import { regenerateVoiceTake } from "./regenerate-voice"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { COUNTDOWN_FROM, useCountdown } from "./useCountdown"
@@ -79,10 +79,10 @@ import { ACCEPT, OFFLINE_MESSAGE, attachAudioFileToCell, validateAudioFile } fro
 import { recordingLimitsFor } from "@/lib/audio/recording-limits"
 import { MAX_AUDIO_UPLOAD_BYTES, audioIdSeededWith, buildAudioId, uploadCellAudio, deleteCellAudio, fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
-import { emitCellAudioAttach, emitCellAudioDeselect, emitCellAudioSelect, emitCellAudioValidate, emitCellLaneRetime } from "@/lib/sync/events-emit"
+import { emitCellAudioAttach, emitCellAudioValidate, emitCellLaneRetime } from "@/lib/sync/events-emit"
 import { audioValidationScope } from "@/lib/audio/audio-validation-permissions"
 import { shouldAutoValidateFreshRecording } from "@/lib/review/auto-validation"
-import { notifyAudioAttachmentsChanged, injectOptimisticAudioAttachment, injectOptimisticAudioDeselect } from "@/lib/audio/audio-attachments-bus"
+import { notifyAudioAttachmentsChanged, injectOptimisticAudioAttachment } from "@/lib/audio/audio-attachments-bus"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
 import { setTranscribeStatus } from "@/lib/audio/transcribe-status"
@@ -1197,59 +1197,21 @@ export function AudioRecordingModal({
     setTtsBusy(true)
     setTtsDone(false)
     try {
-      // Round 8c: the TTS take is born with its permanent name like any take.
-      const ok = await generateCellVoice({
-        project, cell: activeCell, session, username,
+      // AQU-1767: shared with the timeline take's "Regenerate voice", so both
+      // name the new take and make it the one that sounds the same way.
+      const ok = await regenerateVoiceTake({
+        project, cell: activeCell, entry: audioEntry, session, username,
         surface: "recorder",
-        label: nextTakeLabel(recordingTakes),
-        // The WORDS come from the subtitle this line performs, and the VOICE
-        // from that subtitle's cast assignment — neither of which the cue
-        // carries itself. Both undefined off a cue file, which is the cell's
-        // own text and its own assignment, exactly as before.
+        targetSlot,
+        laneTag,
         text: ttsText,
         voiceCellId: readAloud?.voiceCellId ?? undefined,
-        // The voice lands on the track the recorder is pointed at, not always
-        // on the default row's generated-voice slot.
-        slot: isDefaultTrackSlot(targetSlot) ? undefined : targetSlot,
-        ...(laneTag ? { targetLang: laneTag } : {}),
       })
-      if (ok) {
-        setTtsDone(true)
-        // You asked for this voice — make it the one that sounds. A recorded
-        // take holding the recording slot would shadow it, so hand the slot
-        // back to the source clip (the "no take" state).
-        //
-        // THE DEFAULT TRACK ONLY, and this is why added tracks were given ONE
-        // slot rather than a pair. The juggle exists because the default row's
-        // resolution prefers whatever holds `"recording"`, and it works only
-        // because there is a shared source clip to park that slot on. An added
-        // track has no such clip — and needs no juggle, because its recorded
-        // and generated takes are siblings in one slot, so picking either
-        // deselects the other through the per-(cell, slot) rule the server
-        // already enforces.
-        //
-        // With no source clip (every text file) there is nothing to park the
-        // slot on, and this used to do nothing — the new voice was saved and
-        // never played. The slot is emptied instead (2026-09-28).
-        const recSel = isDefaultTrackSlot(targetSlot) ? audioEntry?.selectedAudioId : null
-        if (recSel && audioIdSeededWith(recSel, activeCell.id)) {
-          const where = {
-            projectId: project.id, fileId: activeCell.fileId, cellId: activeCell.id, slot: "recording", author: username,
-            ...(laneTag ? { targetLang: laneTag } : {}),
-          }
-          const displaceP = sourceClip
-            ? emitCellAudioSelect({ ...where, audioId: sourceClip.audioId })
-            : emitCellAudioDeselect(where)
-          if (sourceClip) injectOptimisticAudioAttachment(activeCell.fileId, activeCell.id, sourceClip, displaceP)
-          else injectOptimisticAudioDeselect(activeCell.fileId, activeCell.id, "recording", displaceP)
-          await displaceP
-          notifyAudioAttachmentsChanged(activeCell.fileId)
-        }
-      }
+      if (ok) setTtsDone(true)
     } finally {
       setTtsBusy(false)
     }
-  }, [online, activeCell, session, ttsBusy, project, username, recordingTakes, audioEntry?.selectedAudioId, sourceClip, targetSlot, laneTag])
+  }, [online, activeCell, session, ttsBusy, project, username, audioEntry, targetSlot, laneTag, ttsText, readAloud?.voiceCellId])
 
   // Settle on the next line after a brief success indication. The RECORDED path
   // only: this used to be shared with the uploaded one so that keeping a take

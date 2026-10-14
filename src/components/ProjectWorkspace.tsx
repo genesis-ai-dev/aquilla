@@ -249,7 +249,8 @@ import { trackStepHandlers, trackFieldsOf, type TrackFields, type TrackTake } fr
 import { readProjectSettingsFor, writeProjectSettingsFor } from "@/lib/history/settings-access"
 import { useHistoryShortcuts } from "@/lib/history/useHistory"
 import { takeStepHandlers, type CutRecord } from "@/lib/history/take-steps"
-import { enqueueTakeRemovals } from "@/lib/audio/take-actions"
+import { enqueueTakeRemovals, hasOwnRecordingLeft, removeTake, renameTake } from "@/lib/audio/take-actions"
+import { regenerateVoiceTake } from "./AudioRecorder/regenerate-voice"
 import { commitAudioValidation } from "@/lib/audio/audio-validation-commit"
 import { useOutbox } from "@/context/OutboxContext"
 import { useReconcileOnDrain } from "@/hooks/useReconcileOnDrain"
@@ -11180,6 +11181,148 @@ export function ProjectWorkspace() {
     },
     [audioCueCells, cueLinks, cellSummaries, castByCellId],
   )
+
+  // ── AQU-1767 (Sam, 2026-10-14): a timeline take's right-click menu ──────
+  // The same writes as the takes lists and the line's audio check, each
+  // recording the same history step, so Undo treats them alike.
+  const handleRemoveTimelineTake = useCallback(
+    async (cellId: string, audioId: string) => {
+      if (!project?.id) return
+      const cur = readTake(cellId, audioId)
+      if (!cur) return
+      const slot = cur.att.slot ?? (audioId === cur.owner.cell.selectedAudioId ? "recording" : "generatedVoice")
+      const removal = {
+        projectId: project.id, fileId: cur.owner.fileId, cellId, audioId, slot,
+        ...(activeLane ? { targetLang: activeLane } : {}),
+        author: currentUsername,
+        // A take on the timeline is one that plays: Undo chooses it again.
+        history: { wasSelected: true },
+      }
+      let removed = false
+      try {
+        await removeTake(removal)
+        removed = true
+      } catch {
+        toast.add({ type: "error", title: t("editor.timeline.deleteTakeFailed") })
+      }
+      if (!removed) return
+      const takes = Object.entries(cur.owner.cell.attachments ?? {}).map(([id, a]) => ({
+        audioId: id, voiceId: a.voiceId ?? null, isDeleted: a.isDeleted,
+      }))
+      if (!hasOwnRecordingLeft(takes, audioId, cellId)) handleLastTakeRemoved(cellId)
+    },
+    [project?.id, readTake, activeLane, currentUsername, t, handleLastTakeRemoved],
+  )
+  const handleRenameTimelineTake = useCallback(
+    async (cellId: string, audioId: string, label: string) => {
+      if (!project?.id) return
+      const cur = readTake(cellId, audioId)
+      const next = label.trim()
+      if (!cur || !next || next === (cur.att.label ?? "")) return
+      try {
+        await renameTake({
+          projectId: project.id, fileId: cur.owner.fileId, cellId, audioId, label: next,
+          ...(activeLane ? { targetLang: activeLane } : {}),
+          author: currentUsername,
+          labelBefore: cur.att.label ?? null,
+        })
+      } catch {
+        toast.add({ type: "error", title: t("editor.timeline.renameTakeFailed") })
+      }
+    },
+    [project?.id, readTake, activeLane, currentUsername, t],
+  )
+  /** Whether you may vote on this take (the line's audio check's own rule), and whether you have. */
+  const timelineVoteState = useCallback(
+    (cellId: string, audioId: string) => {
+      const owner = resolveTakeCellRef.current(cellId)
+      if (!owner || !project) return { canVote: false, voted: false }
+      const take = audioValidationTakes(
+        audioEntryFromCell(owner.cell),
+        project,
+        { roleLevel: project.syncRole?.level ?? null, username: currentUsername },
+        () => "",
+      ).find((x) => x.audioId === audioId)
+      return { canVote: Boolean(take?.canValidate), voted: Boolean(take?.validators.includes(currentUsername)) }
+    },
+    [project, currentUsername],
+  )
+  const handleVoteTimelineTake = useCallback(
+    async (cellId: string, audioId: string, validated: boolean) => {
+      if (!project?.id) return
+      const kind = validated ? "cell.audio.validate" : "cell.audio.unvalidate"
+      if (!canPerform(kind, project.syncRole?.level ?? null)) return
+      // The scope is the OPEN file's, as the line's own check asks it: an
+      // assignment is to the subtitle file, never to its hidden cue sibling.
+      if (activeFileId && !isInMemberScope(myScopes, activeFileId, activeLane)) return
+      const cur = readTake(cellId, audioId)
+      if (!cur) return
+      // Recorded as the vote starts, so an Undo pressed while it saves undoes
+      // this vote; dropped if the vote fails.
+      let settle: (ok: boolean) => void = () => {}
+      recordStep(
+        {
+          kind: "vote.audio",
+          data: { cellId, audioId, voted: validated },
+          labelKey: validated ? "editor.history.stepValidateAudio" : "editor.history.stepUnvalidateAudio",
+          fileId: activeFileId,
+          fileName: activeFileNameRef.current,
+        },
+        undefined,
+        { pending: new Promise<boolean>((resolve) => { settle = resolve }) },
+      )
+      try {
+        const emit = validated ? emitCellAudioValidate : emitCellAudioUnvalidate
+        await emit({
+          projectId: project.id,
+          fileId: cur.owner.fileId,
+          cellId,
+          audioId,
+          ...(activeLane ? { targetLang: activeLane } : {}),
+          author: currentUsername,
+          surface: "timeline", // AQU-1572
+        })
+        await commitAudioValidation([cur.owner.fileId], { getTokenForFile: getTokenForProjectFile })
+        settle(true)
+      } catch {
+        settle(false)
+        toast.add({ type: "error", title: t("editor.timeline.voteTakeFailed") })
+      }
+    },
+    [project?.id, project?.syncRole?.level, activeFileId, myScopes, activeLane, readTake, currentUsername, getTokenForProjectFile, t],
+  )
+  const handleRegenerateTimelineVoice = useCallback(
+    async (cellId: string, slot: string) => {
+      if (!project || !frontierSession) return
+      const owner = resolveTakeCellRef.current(cellId)
+      if (!owner) return
+      // The words a cue performs, and whose voice says them, live on the
+      // subtitle it is linked to; off a cue file, the line's own.
+      const readAloud = audioCueCells ? resolveCueReadAloud(cellId) : null
+      const text = (readAloud?.text ?? owner.cell.translated ?? "").trim()
+      if (!text) {
+        toast.add({ type: "info", title: t("editor.timeline.regenerateNoText") })
+        return
+      }
+      toast.add({ type: "info", title: t("editor.timeline.regenerateStarted") })
+      const ok = await regenerateVoiceTake({
+        project,
+        cell: owner.cell,
+        entry: timelineAudioByCellId.get(cellId),
+        session: frontierSession,
+        username: currentUsername,
+        surface: "timeline",
+        targetSlot: slot,
+        laneTag: activeLane || null,
+        text,
+        voiceCellId: readAloud?.voiceCellId ?? undefined,
+      }).catch(() => false)
+      toast.add(ok
+        ? { type: "success", title: t("editor.timeline.regenerateDone") }
+        : { type: "error", title: t("editor.timeline.regenerateFailed") })
+    },
+    [project, frontierSession, audioCueCells, resolveCueReadAloud, timelineAudioByCellId, currentUsername, activeLane, t],
+  )
   // Publish the resolver declared near the top of the component. Assigned on
   // every render, deliberately: it closes over this render's cue cells, and a
   // memoised version would hand the handlers a stale set after every import.
@@ -15028,6 +15171,11 @@ export function ProjectWorkspace() {
                     onRetimeCue={handleRetimeAudioCue}
                     onTrimTarget={handleTrimTarget}
                     onCutTargets={handleCutTargets}
+                    onRegenerateVoice={handleRegenerateTimelineVoice}
+                    onRenameTake={handleRenameTimelineTake}
+                    onRemoveTake={handleRemoveTimelineTake}
+                    onVoteTake={handleVoteTimelineTake}
+                    voteStateFor={timelineVoteState}
                     onHistoryResult={reportHistory}
                     onTogglePlay={handleTimelineTogglePlay}
                     onRequestLinkVideo={() => setLinkVideoOpen(true)}

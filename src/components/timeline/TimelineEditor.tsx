@@ -39,7 +39,6 @@ import {
   Minus,
   Redo2,
   Scissors,
-  SquareSplitHorizontal,
   Undo2,
   MoreHorizontal,
   Plus,
@@ -52,7 +51,6 @@ import {
 import { cn } from "@/lib/utils"
 import { useHistoryView } from "@/lib/history/useHistory"
 import { redoLast, undoLast, type HistoryResult } from "@/lib/history/history"
-import { canCutAt } from "@/lib/audio/cut-take"
 import { isTextEntryTarget } from "@/lib/history/arbiter"
 import { deriveLanes } from "@/lib/timeline/lanes"
 import { deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
@@ -66,6 +64,7 @@ import type { PlaybackSource } from "@/lib/audio/playback-source"
 import type { LaneLinkOverlay } from "./CueLinkOverlay"
 import { CueLinkConfirmDialog } from "./CueLinkConfirmDialog"
 import { AddTrackDialog } from "./AddTrackDialog"
+import { RenameTakeDialog } from "./RenameTakeDialog"
 import { DeleteTrackDialog } from "./DeleteTrackDialog"
 import { trackMenuItems, trackMenuIsEmpty, trackMenuScopes } from "./TrackMenuItems"
 import {
@@ -145,7 +144,7 @@ import { useBatchProgress, canTranscribeCell } from "@/lib/audio/batch-audio"
 import { useOnline } from "@/hooks/useOnline"
 import { TimelineRuler } from "./TimelineRuler"
 import { TimelineLane } from "./TimelineLane"
-import { TargetAudioLane, type TargetAudioItem } from "./TargetAudioLane"
+import { TargetAudioLane, type HoverCut, type TakeMenuActions, type TargetAudioItem } from "./TargetAudioLane"
 import { TimelinePlayhead } from "./TimelinePlayhead"
 import { MediaTextHeader, TimelineTimingRow } from "./TimelineChipStrip"
 import {
@@ -224,6 +223,15 @@ export interface TimelineEditorProps {
    *  position in each take's OWN audio. One call is one user action (one
    *  history step), however many cuts it carries. Absent = no blade. */
   onCutTargets?(cuts: { cellId: string; audioId: string; atMs: number }[]): void
+  /**
+   * AQU-1767 (Sam, 2026-10-14): a take's right-click menu. Each absent action
+   * is left out of the menu. `slot` is the take's track's storage slot.
+   */
+  onRegenerateVoice?(cellId: string, slot: string): void
+  onRenameTake?(cellId: string, audioId: string, label: string): void
+  onRemoveTake?(cellId: string, audioId: string): void
+  onVoteTake?(cellId: string, audioId: string, validated: boolean): void
+  voteStateFor?(cellId: string, audioId: string): { canVote: boolean; voted: boolean }
   /** AQU-1767: what Undo/Redo from the toolbar did, so the workspace can say
    *  so (the same report the keyboard shortcut gives). Absent = no buttons. */
   onHistoryResult?(which: "undo" | "redo", result: HistoryResult): void
@@ -1151,6 +1159,11 @@ export function TimelineEditor({
   timingLocked = false,
   onTrimTarget,
   onCutTargets,
+  onRegenerateVoice,
+  onRenameTake,
+  onRemoveTake,
+  onVoteTake,
+  voteStateFor,
   onHistoryResult,
   onTogglePlay,
   onRequestLinkVideo,
@@ -2457,6 +2470,13 @@ export function TimelineEditor({
   // piece has nowhere of its own to be; cutting waits for phase 4 there.
   const canCut = Boolean(onCutTargets) && editable && !audioFirst
   const bladeActive = bladeOn && canCut
+  // AQU-1767 (Sam, 2026-10-14): S splits the take under the pointer, at the
+  // pointer, without the blade (REAPER's habit, but at the mouse rather than
+  // the playhead). The lanes report what is under the pointer as it moves.
+  const hoverCutRef = useRef<HoverCut | null>(null)
+  const reportHoverCut = useCallback((target: HoverCut | null) => {
+    hoverCutRef.current = target
+  }, [])
   useEffect(() => {
     if (!canCut) return
     function onKeyDown(event: KeyboardEvent) {
@@ -2465,31 +2485,32 @@ export function TimelineEditor({
       if (event.key === "b" || event.key === "B") {
         event.preventDefault()
         setBladeOn((on) => !on)
+      } else if (event.key === "s" || event.key === "S") {
+        const target = hoverCutRef.current
+        if (!target || !onCutTargets) return
+        event.preventDefault()
+        onCutTargets([target])
       } else if (event.key === "Escape") {
         setBladeOn(false)
       }
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [canCut])
-  /** Every dub chip under the playhead, on every target track, cut there. */
-  function cutAtPlayhead() {
-    if (!onCutTargets) return
-    const sec = displayCurrentSec
-    const all = [
-      ...targetItems,
-      ...tracks.filter((tr) => tr.kind === "audio").flatMap((tr) => targetItemsForTrack(tr).items),
-    ]
-    const cuts: { cellId: string; audioId: string; atMs: number }[] = []
-    for (const item of all) {
-      const att = item.cell.attachments?.[item.audioId]
-      const geom = layout.targetGeom(item.cell, att)
-      if (!geom || geom.usingFallback || sec <= geom.start || sec >= geom.end) continue
-      const atMs = (sec - geom.anchor) * 1000
-      if (canCutAt(att, atMs)) cuts.push({ cellId: item.cell.id, audioId: item.audioId, atMs })
-    }
-    onCutTargets(cuts)
-  }
+  }, [canCut, onCutTargets])
+  // AQU-1767 (Sam, 2026-10-14): a take's right-click menu, per track slot.
+  const [renamingTake, setRenamingTake] = useState<{ cellId: string; audioId: string; label: string } | null>(null)
+  const takeMenuFor = (slot: string): TakeMenuActions | undefined =>
+    editable
+      ? {
+          ...(onOpenRecording ? { reRecord: (cellId: string) => onOpenRecording(cellId, slot) } : {}),
+          ...(onRegenerateVoice ? { regenerate: (cellId: string) => onRegenerateVoice(cellId, slot) } : {}),
+          ...(onRenameTake
+            ? { rename: (cellId: string, audioId: string, current: string | null) => setRenamingTake({ cellId, audioId, label: current ?? "" }) }
+            : {}),
+          ...(onRemoveTake ? { remove: onRemoveTake } : {}),
+          ...(onVoteTake && voteStateFor ? { vote: onVoteTake, voteState: voteStateFor } : {}),
+        }
+      : undefined
   const cutOne = canCut && onCutTargets
     ? (cellId: string, audioId: string, atMs: number) => onCutTargets([{ cellId, audioId, atMs }])
     : undefined
@@ -3839,6 +3860,8 @@ export function TimelineEditor({
             onTrimTarget={onTrimTarget}
             bladeActive={bladeActive}
             onCutTarget={cutOne}
+            takeMenu={takeMenuFor(RECORDING_SLOT)}
+            onHoverCut={canCut ? reportHoverCut : undefined}
             onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, RECORDING_SLOT) : undefined}
             emptyCells={emptyTargets}
             // AQU-646: the mic over a stretch with no cell at all creates the
@@ -3909,6 +3932,8 @@ export function TimelineEditor({
             onTrimTarget={onTrimTarget}
             bladeActive={bladeActive}
             onCutTarget={cutOne}
+            takeMenu={takeMenuFor(slotForTrack(track.id))}
+            onHoverCut={canCut ? reportHoverCut : undefined}
             emptyCells={own.empty}
             onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, slotForTrack(track.id)) : undefined}
             projectId={project?.id ?? null}
@@ -4097,7 +4122,9 @@ export function TimelineEditor({
               </AppTooltip>
             </>
           )}
-          {/* AQU-1767: the blade, and "cut at the playhead". */}
+          {/* AQU-1767: the blade. (Sam, 2026-10-14: no "cut at the playhead" —
+              the playhead is the transport's, so a cut there landed wherever
+              playback happened to be, on every voice track at once.) */}
           {onCutTargets && editable && (
             <>
               <AppTooltip
@@ -4124,20 +4151,6 @@ export function TimelineEditor({
                   )}
                 >
                   <Scissors className="h-3.5 w-3.5" />
-                </button>
-              </AppTooltip>
-              <AppTooltip
-                content={audioFirst ? t("editor.timeline.bladeFreeTiming") : t("editor.timeline.cutAtPlayheadTooltip")}
-              >
-                <button
-                  type="button"
-                  aria-label={t("editor.timeline.cutAtPlayheadAria")}
-                  data-testid="tl-cut-at-playhead"
-                  disabled={!canCut}
-                  onClick={cutAtPlayhead}
-                  className="inline-flex items-center rounded-md border border-border bg-background px-1.5 py-1 text-foreground/70 hover:bg-muted disabled:opacity-40"
-                >
-                  <SquareSplitHorizontal className="h-3.5 w-3.5" />
                 </button>
               </AppTooltip>
             </>
@@ -5007,6 +5020,17 @@ export function TimelineEditor({
         }
         onConfirm={commitPendingLink}
         onCancel={() => setPendingLink(null)}
+      />
+      {/* AQU-1767 (Sam, 2026-10-14): "Rename…" from a take's right-click menu. */}
+      <RenameTakeDialog
+        open={renamingTake != null}
+        current={renamingTake?.label ?? ""}
+        onCancel={() => setRenamingTake(null)}
+        onConfirm={(label) => {
+          const r = renamingTake
+          setRenamingTake(null)
+          if (r) onRenameTake?.(r.cellId, r.audioId, label)
+        }}
       />
       {/* AQU-646 stage 2. Both are mounted only while track editing is on —
           not merely closed, absent — so a project that never turns the setting

@@ -537,13 +537,13 @@ import {
   useTrackedCellRef as useEditorViewportTrackedCellRef,
 } from "@/hooks/useEditorViewportStore"
 
-// Import runs inline in the workspace (upload + eBible corpus tabs). The
-// AD-11 plan carves import into a standalone apps/import Worker, but that
-// app is still a placeholder shell — routing users there is a dead end.
-// The import pipeline (parsers + outbox + events-emit) is workspace-
-// internal and not yet extracted into a shared package the standalone app
-// could consume, so the working ImportDialog stays hosted here. Lazy-loaded
-// because the eBible parser bundles a ~2MB vref table.
+// Import runs inline in the workspace (upload + eBible corpus tabs). An
+// earlier AD-11 plan carved import out into a standalone import Worker; that
+// monorepo layout was abandoned (see CLAUDE.md), so there is nowhere to route
+// users to. The import pipeline (parsers + outbox + events-emit) is
+// workspace-internal and was never extracted into a shared package, so the
+// ImportDialog stays hosted here. Lazy-loaded because the eBible parser
+// bundles a ~2MB vref table.
 const ImportDialog = lazy(() =>
   import("./ImportDialog").then((mod) => ({ default: mod.ImportDialog })),
 )

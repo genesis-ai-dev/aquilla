@@ -144,6 +144,15 @@ id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 [placement]
 mode = "smart"
 
+# AQU-1856: the nightly R2 orphan sweep (src/r2-gc-cron.ts) — the only cron on
+# this worker. 03:17 UTC, deliberately off the hour so it does not pile onto
+# auth-worker's own schedules. Wrangler does NOT inherit the top-level
+# [triggers] into env blocks, so each deployed profile repeats it below.
+# Set R2_GC_MODE = "dry-run" (or "off") in the matching [vars] to shadow or
+# stop the sweep without a code change.
+[triggers]
+crons = ["17 3 * * *"]
+
 [observability]
 enabled = true
 
@@ -167,6 +176,11 @@ command = "bash ../scripts/verify-deploy-branch.sh release"
 # See top-level [placement] — keep env blocks in sync (they don't inherit it).
 [env.production.placement]
 mode = "smart"
+
+# See top-level [triggers] — env blocks don't inherit crons either. AQU-1856
+# nightly R2 orphan sweep (src/r2-gc-cron.ts).
+[env.production.triggers]
+crons = ["17 3 * * *"]
 
 # Wrangler (3.x and 4.x) does inherit the top-level [observability] block into
 # named envs, and `versions deploy` syncs the resolved value. It is declared per
@@ -246,7 +260,7 @@ name = "EMAIL"
 #
 # The DLQ has no consumer on purpose — it is a holding pen a human looks at.
 # Deliveries are made exactly-once by the side_effect_deliveries ledger
-# (db/postgres/migrations/0158_…sql), not by queue semantics, so a replay
+# (db/postgres/migrations/0168_…sql), not by queue semantics, so a replay
 # cannot re-send mail that already went out.
 # ---------------------------------------------------------------------------
 
@@ -281,6 +295,11 @@ routes = ["api.dev.aquilla.app/sync/*"]
 # See top-level [placement] — keep env blocks in sync (they don't inherit it).
 [env.development.placement]
 mode = "smart"
+
+# See top-level [triggers] — env blocks don't inherit crons either. AQU-1856
+# nightly R2 orphan sweep (src/r2-gc-cron.ts).
+[env.development.triggers]
+crons = ["17 3 * * *"]
 
 # See [env.production.observability] — declared per env so a top-level edit
 # can't change what dev logs.
@@ -362,7 +381,7 @@ name = "EMAIL"
 #
 # The DLQ has no consumer on purpose — it is a holding pen a human looks at.
 # Deliveries are made exactly-once by the side_effect_deliveries ledger
-# (db/postgres/migrations/0158_…sql), not by queue semantics, so a replay
+# (db/postgres/migrations/0168_…sql), not by queue semantics, so a replay
 # cannot re-send mail that already went out.
 # ---------------------------------------------------------------------------
 

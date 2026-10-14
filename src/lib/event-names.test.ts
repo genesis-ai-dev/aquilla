@@ -137,6 +137,7 @@ describe("emitTargetCellCommit — FIRST_CELL_COMMIT instrumentation", () => {
       parentId: null,
       value: "hello",
       author: "tester",
+      targetLang: "",
     })
     // The session flag ensures the event fires at most once per module load.
     // We just verify that IF it fires, it uses the right constant and props.
@@ -165,6 +166,7 @@ describe("emitTargetCellCommit — FIRST_CELL_COMMIT instrumentation", () => {
       parentId: null,
       value: "hello",
       author: "tester",
+      targetLang: "",
     })
     mockCapture.mockClear()
     await emitTargetCellCommit({
@@ -174,6 +176,7 @@ describe("emitTargetCellCommit — FIRST_CELL_COMMIT instrumentation", () => {
       parentId: null,
       value: "world",
       author: "tester",
+      targetLang: "",
     })
     // Second call must NOT fire FIRST_CELL_COMMIT again
     const firstCommitCalls = mockCapture.mock.calls.filter(
@@ -192,6 +195,7 @@ describe("emitCellValidate — FIRST_CELL_VALIDATE instrumentation", () => {
       cellId: "c2",
       editEventId: "ev1",
       author: "tester",
+      targetLang: "",
     })
     const validateCalls = mockCapture.mock.calls.filter(
       (args) => args[0] === FIRST_CELL_VALIDATE,
@@ -212,6 +216,7 @@ describe("emitCellValidate — FIRST_CELL_VALIDATE instrumentation", () => {
       cellId: "c2",
       editEventId: "ev1",
       author: "tester",
+      targetLang: "",
     })
     mockCapture.mockClear()
     await emitCellValidate({
@@ -220,6 +225,7 @@ describe("emitCellValidate — FIRST_CELL_VALIDATE instrumentation", () => {
       cellId: "c3",
       editEventId: "ev2",
       author: "tester",
+      targetLang: "",
     })
     const validateCalls = mockCapture.mock.calls.filter(
       (args) => args[0] === FIRST_CELL_VALIDATE,

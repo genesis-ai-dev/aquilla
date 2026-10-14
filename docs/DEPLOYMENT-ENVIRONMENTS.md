@@ -51,6 +51,19 @@ then does any deploy command get past its guard. Migrations are never applied
 automatically by a deploy path or by an agent — that is a deliberate human step
 (`npm run neon:status:dev` / `:prod` is the read-only check the guard runs).
 
+Each file commits together with its `schema_migrations` row, so a migration is
+either applied and recorded or neither; a file needing `CREATE INDEX
+CONCURRENTLY` takes an explicit non-transactional path and must stay idempotent
+(AQU-1877, `scripts/neon-migration-file.ts`). Both paths run under
+`lock_timeout` — 5 s by default, `AQUILLA_MIGRATION_LOCK_TIMEOUT` to widen it
+for a window where blocking every write to `events`/`cells` is acceptable — so a
+migration queued behind a long transaction fails fast instead of holding the
+write queue open. **`neon:apply:prod` refuses without a snapshot decision:**
+pass `--snapshot` to have it cut a `premigrate-<timestamp>` Neon branch off
+production first (instant and copy-on-write, and what you restore from if the
+apply goes wrong), or `--no-snapshot` if one already exists. `dev` and `local`
+are ungated — they are refreshable by design (`pnpm neon:refresh:dev`).
+
 All unnamed Wrangler profiles are local-only, including the SPA, identity, sync,
 agent sandbox, and resource proxy Workers. A bare
 `wrangler deploy` therefore cannot target a production Worker. Production named
@@ -216,8 +229,10 @@ route. Its build deploys matching auth/sync previews and never promotes a live v
 production/development traffic. `versification-tool` remains disconnected
 because it has no deployable Wrangler application.
 
-The consolidated `.github/workflows/ci.yml` is `workflow_dispatch`-only. Normal
-pull-request and push activity consumes no GitHub-hosted runner minutes. Cloudflare
+The consolidated `.github/workflows/ci.yml` runs on pull requests into `dev`
+(lint, `i18n:check`, the secret scan, unit tests, worker tests, and
+`pnpm neon:check`) and on `workflow_dispatch` (that set, plus typecheck, the
+Vite build, Tauri, and the IDML browser suite). It does not deploy. Cloudflare
 receives GitHub repository events, runs the repository-owned build commands, and
 reports compilation results and preview links back to GitHub. The local pre-push
 hook runs a secret scan and the existing commit-based affected E2E selection,

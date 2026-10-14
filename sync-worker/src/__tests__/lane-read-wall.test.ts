@@ -183,3 +183,60 @@ describe("AQU-730 read wall", () => {
     expect(ownBody.file.filledCount).toBe(1)
   })
 })
+
+describe("AQU-1841: a cursor pin cannot reach another reader's ordering", () => {
+  it("serves a lane-scoped reader their own lanes even when their pin names the unscoped watermark", async () => {
+    // The AQU-1841 pin carries only numbers. If it carried the chain-cache key
+    // itself, a scoped reader could name the UNSCOPED key — every component of
+    // which is advertised to them except its (empty) visibility token — and be
+    // served an ordering over lanes the wall hides. The key is therefore
+    // rebuilt from the pin under the caller's own visibility.
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: ES, project_id: PROJECT, role: "target", name: "Spanish", lang_code: "es", legacy_tag: "es" },
+        { id: FR, project_id: PROJECT, role: "target", name: "French", lang_code: "fr", legacy_tag: "fr" },
+      ],
+      cells: [
+        { project_id: PROJECT, file_id: FILE, cell_id: "s1", side: "source", event_id: "e-s", value: "source-text", target_lang: "" },
+        { project_id: PROJECT, file_id: FILE, cell_id: "t1", side: "target", event_id: "e-es", value: "hola", target_lang: "es", lane_id: ES },
+        { project_id: PROJECT, file_id: FILE, cell_id: "t2", side: "target", anchor_cell_id: "t1", event_id: "e-fr", value: "bonjour", target_lang: "fr", lane_id: FR },
+      ],
+      events: [
+        {
+          id: "e-s", schema_version: 1, project_id: PROJECT, file_id: FILE, cell_id: "s1",
+          kind: "source.cell.create", author: "alice", payload: "{}", client_ts: 1, server_ts: 1, server_seq: 3,
+        },
+      ],
+    })
+
+    // An unscoped maintainer pages the file first, warming the cache with an
+    // ordering that includes the French lane.
+    const maintainer = await makeTestToken(SECRET, { projectId: PROJECT, fileId: FILE, role: 600 })
+    const warm = (await handleCellsReadRequest(
+      new Request(`https://w/api/v1/projects/${PROJECT}/files/${FILE}/cells?limit=1`, {
+        headers: { Authorization: `Bearer ${maintainer}` },
+      }),
+      envWith(db, true),
+    ))!
+    const warmBody = (await warm.json()) as { nextCursor: string; maxServerSeq: number }
+    expect(warmBody.maxServerSeq).toBe(3)
+
+    // The scoped contributor replays the maintainer's cursor verbatim — pin
+    // and all. They must still only ever see their own lane's rows.
+    const contributor = await makeTestToken(SECRET, {
+      projectId: PROJECT,
+      fileId: FILE,
+      role: 400,
+      laneGrants: [{ lane: ES, level: 400 }],
+    })
+    const stolen = (await handleCellsReadRequest(
+      new Request(
+        `https://w/api/v1/projects/${PROJECT}/files/${FILE}/cells?limit=10&cursor=${encodeURIComponent(warmBody.nextCursor)}`,
+        { headers: { Authorization: `Bearer ${contributor}` } },
+      ),
+      envWith(db, true),
+    ))!
+    const stolenBody = (await stolen.json()) as { cells: Array<{ value: string }> }
+    expect(stolenBody.cells.map((c) => c.value)).not.toContain("bonjour")
+  })
+})

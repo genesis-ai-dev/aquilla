@@ -34,6 +34,7 @@
 
 import { t } from "@/lib/i18n/standalone"
 import {
+  HOSTED_TTS_CREDIT_CAP_BODY,
   HOSTED_TTS_FAILED_BODY,
   HOSTED_TTS_NOT_CONFIGURED_BODY,
   SEED_VC_FAILED_BODY,
@@ -56,6 +57,7 @@ export type ErrorCategory =
   | "gemini-failed"
   | "hosted-tts-not-configured"
   | "hosted-tts-failed"
+  | "hosted-tts-credit-cap"
   | "seed-vc-not-configured"
   | "seed-vc-failed"
   | "consent-denied"
@@ -176,6 +178,23 @@ export function categorizeAiError(rawMessage: string): ActionableError {
       category: "missing-openrouter-key",
       title: t("audio.aiError.openRouterKeyRequiredTitle"),
       body: OPENROUTER_KEY_REQUIRED_BODY,
+      raw,
+    }
+  }
+
+  // AQU-1872: an org out of AI credit is refused BEFORE the vendor is called,
+  // so it is not a vendor failure. This must precede the hosted-tts branches:
+  // the raw 429 body also carries "voice/tts", which would otherwise title it
+  // "Inworld TTS failed" and tell the user the engine broke when nothing was
+  // ever sent to it.
+  if (
+    m.includes("credit_cap_exceeded") ||
+    m.includes("ai credit allowance")
+  ) {
+    return {
+      category: "hosted-tts-credit-cap",
+      title: t("audio.aiError.creditCapTitle"),
+      body: HOSTED_TTS_CREDIT_CAP_BODY,
       raw,
     }
   }

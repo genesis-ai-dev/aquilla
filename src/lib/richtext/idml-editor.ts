@@ -14,7 +14,7 @@ import {
   idmlStyleCatalogFromMetadata,
 } from "@/lib/idml/style-catalog"
 import { sanitizeIdmlEditorHtml } from "@/lib/richtext/editor-content"
-import { decorateIdmlStyleElement } from "@/lib/richtext/idml-style-display"
+import { decorateIdmlStyleElement, syncIdmlStyleSegmentEmpty } from "@/lib/richtext/idml-style-display"
 import { t } from "@/lib/i18n/standalone"
 
 export const IDML_PARAGRAPH_NODE_NAME = "idmlParagraph"
@@ -726,6 +726,13 @@ const IdmlSlot = TiptapNode.create({
           editor.storage.idmlTransactionGuard?.styleCatalog,
           editor.storage.idmlTransactionGuard?.paragraphStyleId,
         )
+        let text = ""
+        let hasBreak = false
+        currentNode.forEach((child) => {
+          if (child.type.name === "hardBreak") hasBreak = true
+          else if (child.isText) text += child.text ?? ""
+        })
+        syncIdmlStyleSegmentEmpty(dom, text, hasBreak)
       }
       render(node)
       return {
@@ -1039,16 +1046,16 @@ export function idmlDiagnosticMessage(diagnostic: IdmlDiagnostic | undefined): s
  * accepting-then-flagging.
  *
  * `\n` is preserved (it becomes an InDesign `<Br/>`); a run of spaces/tabs is
- * collapsed to a single space, and any space that would abut a line break, a
- * slot boundary, or an existing space is dropped. Only literal ASCII spaces and
- * tabs are touched, so meaningful non-breaking spaces and other Unicode
- * whitespace pass through unchanged.
+ * collapsed to a single space. A space that would abut a line break or an
+ * existing space is dropped. A paste also drops a space at either edge of the
+ * slot. While typing, a space at the slot start is kept: it is the first
+ * character of that Bold or Regular run, and the word can follow it. A lone
+ * trailing space typed at the end of a word is kept too, so the next word can
+ * follow. Only literal ASCII spaces and tabs are touched, so meaningful
+ * non-breaking spaces and other Unicode whitespace pass through unchanged.
  *
  * `before`/`after` are the slot characters flanking the insertion point (empty
- * at a slot edge or against a protected token / line break). `mode` separates a
- * paste — where a space landing at the slot end is trailing whitespace and is
- * removed — from live typing, where a lone trailing space begins the next word
- * and must survive so the user can keep typing.
+ * at a slot edge or against a protected token / line break).
  */
 export function sanitizeIdmlSlotInsertion(
   text: string,
@@ -1061,9 +1068,9 @@ export function sanitizeIdmlSlotInsertion(
   return lines
     .map((line, index) => {
       let next = line.replace(/[ \t]+/g, " ")
-      // Trim a leading space when it would abut the slot start, a preceding
-      // line break (any line after the first), or an existing space.
-      if (index > 0 || before === "" || before.endsWith(" ")) {
+      // Trim a leading space after a line break, against an existing space, or
+      // — on paste — at the slot start. Typing may begin the run with a space.
+      if (index > 0 || before.endsWith(" ") || (mode === "paste" && before === "")) {
         next = next.replace(/^ +/, "")
       }
       // Trim a trailing space when it would abut a following line break (any

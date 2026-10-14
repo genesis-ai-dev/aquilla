@@ -68,7 +68,11 @@ import {
   isChainArbitrated,
   type PersistedEvent,
 } from './event-projection'
-import { ChainHeadReplay } from './chain-head-replay'
+import {
+  buildClaimWinners,
+  ChainHeadReplay,
+  type ChainClaimRow,
+} from './chain-head-replay'
 import { buildBulkEventInsertStmt, buildBulkEventInsertStmts, allocateSeqRange, buildSettleSeqRangeStmt, fetchPendingFloor, type SeqEventInsertRow } from './event-insert'
 import type { EventPayloads } from './types'
 import { fullProgressRecomputeStmts } from './progress-projection'
@@ -509,6 +513,15 @@ interface ReplayedChainEvent {
  * lane and a mirror's seq and tombstone flag, never the text. Rows arrive per
  * chunk of cells, each chunk in seq order; the replay keys every head by cell,
  * so a cell's events only need to be in order among themselves.
+ *
+ * AQU-1844: the upstream's `chain_claims` for these cells go in with the rows.
+ * Seq order is not commit order, so without them a sibling race folds to the
+ * edit the upstream REJECTED — the one thing this replay exists to prevent.
+ * A claim whose winner sits above `untilSeq` is dropped (buildClaimWinners sees
+ * only this window's ids), so a window that ends BETWEEN two racing siblings
+ * folds exactly as it did before — and the next window, which replays the cell
+ * from its beginning with both siblings in range, corrects it. The read fence
+ * (fetchPendingFloor) is what keeps a cursor from settling in that gap.
  */
 async function replayUpstreamChains(
   db: AquillaDb,
@@ -547,7 +560,19 @@ async function replayUpstreamChains(
           AND (file_id, cell_id) IN (${placeholders})
         ORDER BY server_seq ASC`,
   )
-  const replay = new ChainHeadReplay()
+  const claimRows = await selectByCellKeys<ChainClaimRow>(
+    db,
+    cellKeys,
+    [upstreamProjectId],
+    (placeholders) =>
+      `SELECT file_id, cell_id, parent_key, event_id
+         FROM chain_claims
+        WHERE project_id = ? AND (file_id, cell_id) IN (${placeholders})`,
+  )
+  const replay = new ChainHeadReplay(
+    null,
+    buildClaimWinners(claimRows, new Set(rows.map((r) => r.id))),
+  )
   return rows.map((r) => ({
     id: r.id,
     fileId: r.file_id,

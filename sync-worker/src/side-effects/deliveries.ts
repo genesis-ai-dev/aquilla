@@ -5,7 +5,7 @@
 // visible to a user — an email — "twice" is a defect, so every leaf message
 // claims its delivery here before performing the work.
 //
-// Table: side_effect_deliveries (db/postgres/migrations/0158_…sql), keyed by
+// Table: side_effect_deliveries (db/postgres/migrations/0168_…sql), keyed by
 // the producer-built key from `sideEffectIdempotencyKey`.
 
 /** How much of a provider error is kept on the row for operators. */

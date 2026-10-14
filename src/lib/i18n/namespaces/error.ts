@@ -16,6 +16,9 @@ export const error = defineNamespace({
     "error.privateMode.message":
       "Private browsing is restricting local storage. Audio will stream and play, but " +
       "waveforms and downloads can't be cached — you'll see slower loads on each visit.",
+    "error.storageNearlyFull.message":
+      "This device is almost out of storage. Your work still saves and syncs, but " +
+      "files will reload more slowly until you free up space.",
     "error.notFound.title": "Page not found",
     "error.notFound.description": "The link you followed doesn't exist or may have moved.",
     "error.notFound.goHome": "Go home",

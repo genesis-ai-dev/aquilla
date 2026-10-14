@@ -31,7 +31,9 @@ import {
   presenceFrameOwnerConnId,
   presenceSnapshot,
   PROJECT_DO_DEFAULT_LEASE_MS,
+  releaseUserLocks,
   resolveConnId,
+  resolveTokenRefresh,
   selectStaleConnections,
   stripPresenceDraft,
   sweepExpiredLeases,
@@ -72,6 +74,13 @@ export const MEMBER_REMOVED_CLOSE_CODE = 4403
  * Forcing a close at the token's own expiry (≤ SYNC_TOKEN_TTL_SECONDS) bounds
  * that staleness window and makes the reconnect fetch a fresh token/role via
  * ws-reconciler's connect(), which already re-authenticates from scratch.
+ *
+ * AQU-1839: a client can now avoid that close by re-authorizing in band — it
+ * sends `token.refresh` with a freshly minted token before the current one
+ * lapses, which re-resolves the role and pushes `tokenExpiresAt` out. This
+ * close is what happens when no valid refresh arrives, so the staleness bound
+ * is unchanged: the role is still re-resolved at least once per token TTL,
+ * either by a refresh or by the reconnect this close forces.
  */
 export const TOKEN_EXPIRED_CLOSE_CODE = 4401
 
@@ -96,8 +105,25 @@ export const PRESENCE_STALE_CLOSE_CODE = 4408
  */
 export const CONNECTION_SUPERSEDED_CLOSE_CODE = 4409
 
+/**
+ * AQU-1839: minimum gap between `token.refresh` frames honoured on one
+ * connection. Each one costs an HMAC verification, and the frame is
+ * client-driven — this keeps a buggy or hostile client from turning its own
+ * socket into a signature-checking treadmill. Far below the lead time a real
+ * client refreshes at (tens of seconds before a 15-minute expiry), so it never
+ * delays a legitimate refresh or its retries.
+ */
+const TOKEN_REFRESH_MIN_INTERVAL_MS = 500
+
 interface ConnectionState {
   ws: WebSocket
+  /**
+   * AQU-1839: the project this socket was authorized for. A `token.refresh`
+   * has to re-check the token's project scope, and the DO instance is only
+   * conventionally per project — the id arrives on the connect URL, so the
+   * connection is the thing that knows it.
+   */
+  projectId: string
   /**
    * Per-socket presence key. Sent by the client as `?connId=` (generated per
    * socket session in ws-reconciler.ts); older clients omit it and get a
@@ -132,6 +158,11 @@ interface ConnectionState {
    * selectStaleConnections.
    */
   heartbeatSeen: boolean
+  /**
+   * AQU-1839: epoch ms of the last `token.refresh` frame this socket was
+   * charged for — see TOKEN_REFRESH_MIN_INTERVAL_MS.
+   */
+  lastTokenRefreshAt: number
 }
 
 interface DOEnv {
@@ -168,6 +199,15 @@ interface DOEnv {
  *  dirty-flags on its side too; this only caps subrequest chatter. */
 const MONDAY_NOTIFY_THROTTLE_MS = 60_000
 
+/**
+ * AQU-1828: how long a "this project has no Monday link" answer from identity
+ * is trusted. Linking/unlinking invalidates it immediately through
+ * /__monday-link-changed, so this is only a backstop for a missed notify —
+ * long enough that an unlinked project costs ~one request per DO lifetime
+ * instead of one per 60s (at 1k active projects that was ~17 req/s of no-ops).
+ */
+const MONDAY_UNLINKED_TTL_MS = 30 * 60_000
+
 export class ProjectSync extends DurableObject<DOEnv> {
   private connections = new Map<WebSocket, ConnectionState>()
   private presence = new Map<string, PresenceState>()
@@ -198,6 +238,8 @@ export class ProjectSync extends DurableObject<DOEnv> {
   /** Monday push nudge throttle (in-memory; eviction resets it, which is fine —
    *  identity's cron reconciliation covers gaps). */
   private lastMondayNotifyAt = 0
+  /** Epoch ms until which identity said this project has no Monday link. */
+  private mondayUnlinkedUntil = 0
 
   private async runLinkSync(projectId: string): Promise<MirrorSyncResult> {
     // Test seam takes priority; otherwise build a short-lived PG connection
@@ -280,11 +322,19 @@ export class ProjectSync extends DurableObject<DOEnv> {
       // Monday integration nudge: content frames imply progress may have
       // changed. Throttled + best-effort; never blocks the broadcast reply.
       const mondayProject = mondayNotifyProject(frames)
-      if (mondayProject && Date.now() - this.lastMondayNotifyAt > MONDAY_NOTIFY_THROTTLE_MS) {
-        this.lastMondayNotifyAt = Date.now()
-        this.ctx.waitUntil(notifyMondayProgress(this.env, mondayProject))
-      }
+      if (mondayProject) this.maybeNotifyMonday(mondayProject)
       return Response.json({ ok: true, recipients: this.connections.size })
+    }
+
+    // AQU-1828: identity tells us the project's Monday link changed, so the
+    // cached "no link here" answer must go — the next edit nudges again.
+    if (request.method === "POST" && url.pathname === "/__monday-link-changed") {
+      if (!serviceBearerMatches(request.headers.get("Authorization"), this.env)) {
+        return new Response("unauthorized", { status: 401 })
+      }
+      this.mondayUnlinkedUntil = 0
+      this.lastMondayNotifyAt = 0
+      return Response.json({ ok: true })
     }
 
     // AQU-346: membership-revocation hook. identity's member-removal routes
@@ -430,6 +480,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
 
     const conn: ConnectionState = {
       ws: server,
+      projectId,
       connId,
       userId,
       numericUserId,
@@ -437,6 +488,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
       tokenExpiresAt,
       lastSeenAt: Date.now(),
       heartbeatSeen: false,
+      lastTokenRefreshAt: 0,
     }
     this.connections.set(server, conn)
     const joined: PresenceState = { connId, userId, ts: Date.now() }
@@ -445,6 +497,10 @@ export class ProjectSync extends DurableObject<DOEnv> {
     // Snapshot of current roster (drafts stripped) so the new client sees
     // existing peers; everyone else learns about the newcomer via a diff.
     this.sendTo(server, presenceSnapshot(this.presence))
+    // AQU-1839: tell the client when this connection's authorization lapses so
+    // it can refresh in band instead of waiting to be closed. Sending the
+    // frame at all is what signals support — see ServerTokenExpiry.
+    this.sendTo(server, { t: "token.expiry", expiresAt: tokenExpiresAt })
     this.broadcast({ t: "presence.diff", user: stripPresenceDraft(joined) })
 
     server.addEventListener("message", (ev) => {
@@ -465,6 +521,25 @@ export class ProjectSync extends DurableObject<DOEnv> {
     } catch {
       /* swallow */
     }
+  }
+
+  /**
+   * AQU-1828: nudge identity's Monday push only when this project can plausibly
+   * have something to push. identity answers `linked: false` for a project with
+   * no enabled link; we cache that and go quiet until the link changes (or the
+   * backstop TTL lapses), instead of paying a round trip every 60s forever.
+   */
+  private maybeNotifyMonday(projectId: string): void {
+    const now = Date.now()
+    if (now < this.mondayUnlinkedUntil) return
+    if (now - this.lastMondayNotifyAt <= MONDAY_NOTIFY_THROTTLE_MS) return
+    this.lastMondayNotifyAt = now
+    this.ctx.waitUntil(
+      notifyMondayProgress(this.env, projectId).then((linked) => {
+        if (linked === false) this.mondayUnlinkedUntil = Date.now() + MONDAY_UNLINKED_TTL_MS
+        else if (linked === true) this.mondayUnlinkedUntil = 0
+      }),
+    )
   }
 
   private broadcastToAll(msg: ProjectDoServerMessage, exceptConnId?: string): void {
@@ -504,6 +579,10 @@ export class ProjectSync extends DurableObject<DOEnv> {
     if (msg.t === "ping") {
       conn.heartbeatSeen = true
       this.sendTo(conn.ws, msg.ts === undefined ? { t: "pong" } : { t: "pong", ts: msg.ts })
+      return
+    }
+    if (msg.t === "token.refresh") {
+      void this.handleTokenRefresh(conn, msg.token)
       return
     }
     const now = Date.now()
@@ -547,6 +626,70 @@ export class ProjectSync extends DurableObject<DOEnv> {
       void this.forwardOutboxEvent(msg.event)
       return
     }
+  }
+
+  /**
+   * AQU-1839: re-authorize an open socket from a freshly minted token.
+   *
+   * The DO used to close every connection at its token's expiry, so each tab
+   * re-minted and reconnected every 15 minutes — a constant floor of roughly
+   * N/900 reconnects per second across the fleet (10k tabs ≈ 11/s), each one
+   * costing a socket, a token mint and the AQU-845 resync fan-out, and all of
+   * them synchronised because tabs opened together expire together.
+   *
+   * Accepting the new token in band keeps the socket and still re-resolves the
+   * role, which is what the forced close was protecting (see
+   * TOKEN_EXPIRED_CLOSE_CODE). A refusal is deliberately quiet: the connection
+   * keeps the expiry it already had, so the sweep closes it on schedule and the
+   * client reconnects exactly as it does today.
+   */
+  private async handleTokenRefresh(conn: ConnectionState, token: string): Promise<void> {
+    // A connection with no expiry was never token-authorized (the
+    // ALLOW_UNAUTHENTICATED dev bypass) — there is nothing to refresh, and
+    // honouring a token here would hand it a role it never passed a gate for.
+    if (conn.tokenExpiresAt === null) return
+    const arrivedAt = Date.now()
+    if (arrivedAt - conn.lastTokenRefreshAt < TOKEN_REFRESH_MIN_INTERVAL_MS) return
+    conn.lastTokenRefreshAt = arrivedAt
+    const auth = await verifyTokenForProject(token, conn.projectId, this.env.SYNC_SECRET_KEY)
+    if (!auth.ok) {
+      console.warn(`[ProjectSync] token.refresh rejected: ${auth.reason}`)
+      return
+    }
+    // Still in the connection map? A socket closed while we were verifying
+    // must not be written back into.
+    if (!this.connections.has(conn.ws)) return
+    // AQU-346: the same eject gate the connect path applies. A token minted
+    // before the removal is still signature-valid, so without this a removed
+    // member could hold their socket open past the eject by refreshing it.
+    const deniedUntil = this.removedUsers.get(auth.claims.userId)
+    if (deniedUntil != null && deniedUntil > Date.now()) {
+      try {
+        conn.ws.close(MEMBER_REMOVED_CLOSE_CODE, "membership revoked")
+      } catch {
+        /* swallow */
+      }
+      this.handleConnectionClose(conn)
+      return
+    }
+    const now = Date.now()
+    const outcome = resolveTokenRefresh(conn, auth.claims, now)
+    if (!outcome.ok) {
+      console.warn(`[ProjectSync] token.refresh rejected: ${outcome.reason}`)
+      return
+    }
+    const wasWriteCapable = !shouldBeReadOnly(conn.role)
+    conn.role = outcome.role
+    conn.tokenExpiresAt = outcome.tokenExpiresAt
+    // A downgrade now has to release the locks the close used to release on
+    // this socket's way out — otherwise a demoted user keeps every cell they
+    // hold until the lease lapses.
+    if (wasWriteCapable && shouldBeReadOnly(outcome.role)) {
+      const released = releaseUserLocks(this.locks, conn.userId, now)
+      this.locks = released.locks
+      for (const m of released.emit) this.broadcast(m)
+    }
+    this.sendTo(conn.ws, { t: "token.expiry", expiresAt: outcome.tokenExpiresAt })
   }
 
   private async forwardOutboxEvent(event: OutboxRawEvent): Promise<void> {

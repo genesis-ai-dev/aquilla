@@ -12,6 +12,7 @@ import {
 } from "lucide-react"
 import { AutopilotActivityInspector, type AutopilotInspectorSection } from "@/components/contextual/AutopilotActivityInspector"
 import { AutopilotProcessGraph } from "@/components/contextual/AutopilotProcessGraph"
+import { useBibleDataExperiment } from "@/hooks/useBibleDataExperiment"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -33,6 +34,7 @@ import {
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
+  ContextualApiError,
   fetchContextualOverview,
   startProjectContextualRun,
   type ContextualOverview,
@@ -436,10 +438,18 @@ export function ProjectAutopilotPanel({
   laneLabels,
 }: ProjectAutopilotPanelProps) {
   const { locale, t } = useI18n()
+  // AQU-1685: the graph's Bible data steps, only with the experiment on here.
+  const bibleData = useBibleDataExperiment(projectId)
   const [overview, setOverview] = useState<ContextualOverview | null>(null)
   const [loading, setLoading] = useState(true)
   const [starting, setStarting] = useState(false)
   const [startFailed, setStartFailed] = useState(false)
+  /** AQU-1847: WHY the start failed, when the server named a reason worth
+   *  saying. A throttled start is not a broken Autopilot — telling the user
+   *  "could not start" there sends them looking for a fault that isn't one. */
+  const [startErrorKey, setStartErrorKey] = useState<
+    "autopilot.error.startFailed" | "autopilot.error.startThrottled"
+  >("autopilot.error.startFailed")
   const [startResult, setStartResult] = useState<ProjectRunStartResult | null>(null)
   const [refreshWarning, setRefreshWarning] = useState(false)
   const [lastGoodAt, setLastGoodAt] = useState<Date | null>(null)
@@ -519,12 +529,16 @@ export function ProjectAutopilotPanel({
     if (starting) return
     setStarting(true)
     setStartFailed(false)
+    setStartErrorKey("autopilot.error.startFailed")
     setStartResult(null)
     try {
       const result = await startProjectContextualRun(projectId, lane)
       setStartResult(result)
       await load()
-    } catch {
+    } catch (err) {
+      if (err instanceof ContextualApiError && err.code === "start_throttled") {
+        setStartErrorKey("autopilot.error.startThrottled")
+      }
       setStartFailed(true)
     } finally {
       setStarting(false)
@@ -613,7 +627,7 @@ export function ProjectAutopilotPanel({
           {showStart && startBlocked && (
             <StartGateNotice projectId={projectId} blockers={startBlockers} t={t} />
           )}
-          {state !== "not-started" && <AutopilotProcessGraph overview={overview} compact />}
+          {state !== "not-started" && <AutopilotProcessGraph overview={overview} compact bibleData={bibleData} />}
           {state === "working" && !starting && workingTotalsKnown && workingTotal > 0 && (
             <Progress
               value={(workingDone / workingTotal) * 100}
@@ -648,7 +662,7 @@ export function ProjectAutopilotPanel({
               {startResultSummary(startResult, locale, t)}
             </p>
           )}
-          {startFailed && <p role="alert" className="flex items-start gap-2 text-sm text-destructive"><AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />{t("autopilot.error.startFailed")}</p>}
+          {startFailed && <p role="alert" className="flex items-start gap-2 text-sm text-destructive"><AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />{t(startErrorKey)}</p>}
           {refreshWarning && (
             <div className="flex flex-wrap items-center gap-2 text-xs text-destructive" role="status">
               <AlertTriangle className="size-4 shrink-0" aria-hidden />

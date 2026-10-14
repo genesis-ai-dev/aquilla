@@ -6,6 +6,7 @@ import { ProjectOverview, deriveProjectStatus } from "./ProjectOverview"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { ROLE } from "@/lib/frontier/roles"
 import { fmtDeadlineDate } from "@/lib/format-date"
+import { PROGRESS_BG } from "@/lib/progress/progress-palette"
 
 // Keep the overview suite's project-member reads local.
 vi.mock("@/lib/frontier/members", async (importActual) => ({
@@ -666,8 +667,10 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     // portfolio), so the tile shows a real number.
     // AQU-1093: that number is 15 of 100 CELLS = 15%, not 15 of 60 takes = 25%
     // — the tile and the plan board's audio bar must report the same share.
-    expect(screen.getByText("Audio Validated")).toBeInTheDocument()
-    expect(screen.getByText("15%")).toBeInTheDocument()
+    // AQU-1764 gave the measure a bar of its own, so the tile and its bar
+    // both say it.
+    expect(screen.getAllByText("Audio Validated")).toHaveLength(2)
+    expect(screen.getAllByText("15%")).toHaveLength(2)
     expect(screen.queryByText("N/A")).not.toBeInTheDocument()
   })
 
@@ -1257,6 +1260,58 @@ describe("ProjectOverview AI-drafted segment (AQU-292)", () => {
     await waitFor(() => expect(screen.getAllByText("Translated").length).toBeGreaterThan(0))
     // "AI Drafted" must NOT appear when count is 0 (forward-only honest rendering)
     expect(screen.queryByText("AI Drafted")).not.toBeInTheDocument()
+  })
+})
+
+// ── AQU-1764: the shared progress palette on the Progress card ─────────────
+
+describe("ProjectOverview Progress card colours (AQU-1764)", () => {
+  // Sam, 2026-10-13 ("Layout A, softest"): one single-colour bar per measure,
+  // each in its measure's tone from the shared palette, and Audio validated
+  // gets the bar it never had. The tiles' numbers lose their four colours;
+  // the colour moves to a swatch before each label.
+  it("draws one bar per measure in its own tone, Audio validated included, and a matching swatch on each tile", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "John", totalCells: 100, filledCells: 80, validatedCells: 50,
+      aiDraftedCells: 10, audioCells: 60, validatedAudioCells: 15,
+      recordedMs: 90000, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null,
+    }])
+    renderOverview()
+
+    const card = await screen.findByTestId("progress-card")
+    await waitFor(() => expect(within(card).getAllByTestId(/^stat-bar-/)).toHaveLength(5))
+    const bars = within(card).getAllByTestId(/^stat-bar-/).map((row) => {
+      const fill = row.querySelector<HTMLElement>("[style]")!
+      return [row.getAttribute("data-testid"), fill.style.width, fill.className.includes(
+        PROGRESS_BG[row.getAttribute("data-testid")!.slice("stat-bar-".length) as keyof typeof PROGRESS_BG],
+      )]
+    })
+    expect(bars).toEqual([
+      ["stat-bar-textTranslated", "80%", true],
+      ["stat-bar-textAi", "10%", true],
+      ["stat-bar-textValidated", "50%", true],
+      ["stat-bar-audioRecorded", "60%", true],
+      ["stat-bar-audioValidated", "15%", true],
+    ])
+    expect(within(card).getByTestId("stat-bar-audioValidated")).toHaveTextContent("Audio Validated15%15/100 cells")
+
+    const swatches = [...card.querySelectorAll<HTMLElement>("[data-progress-swatch]")]
+    expect(swatches.map((s) => s.dataset.progressSwatch)).toEqual([
+      "textTranslated", "textAi", "textValidated", "audioRecorded", "audioValidated",
+    ])
+    // Each tile's number is in the text colour, not a colour of its own.
+    for (const swatch of swatches) {
+      const number = swatch.closest("p")!.previousElementSibling!
+      expect(number.className).toContain("text-foreground")
+      expect(number.className).not.toMatch(/amber|violet|emerald|sky/)
+    }
   })
 })
 
@@ -2012,6 +2067,28 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     // Back to All restores the cross-lane figures.
     fireEvent.click(screen.getByRole("tab", { name: "All" }))
     await waitFor(() => expect(statTile("Translated")).toHaveTextContent("50%"))
+  })
+
+  it("greys the cross-language tiles and drops their bars while one language is selected (AQU-1764)", async () => {
+    // AI drafts and audio have no per-language breakdown, so with a language
+    // tab chosen their tiles grey out (swatch faded with the number) and their
+    // bars, the new Audio validated one included, are not drawn at all.
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject({ aiDraftedCells: 20, audioCells: 60, validatedAudioCells: 15 })])
+    renderOverview()
+    await screen.findByTestId("lane-filter-tabs")
+    const card = screen.getByTestId("progress-card")
+    const bars = () => within(card).getAllByTestId(/^stat-bar-/).map((b) => b.getAttribute("data-testid"))
+    expect(bars()).toHaveLength(5)
+
+    fireEvent.click(screen.getByRole("tab", { name: "es" }))
+    await waitFor(() => expect(bars()).toEqual(["stat-bar-textTranslated", "stat-bar-textValidated"]))
+    for (const label of ["AI Drafted", "Has audio", "Audio Validated"]) {
+      const tile = statTile(label)
+      expect(tile.firstElementChild!.className, label).toContain("text-muted-foreground/60")
+      expect(tile.querySelector("[data-progress-swatch]")!.className, label).toContain("opacity-40")
+    }
+    expect(statTile("Translated").firstElementChild!.className).toContain("text-foreground")
   })
 
   it("AQU-1566: hidden timeline files are neither counted nor offered for assignment", async () => {

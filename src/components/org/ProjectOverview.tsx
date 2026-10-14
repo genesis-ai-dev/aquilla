@@ -157,6 +157,7 @@ import {
   type ProjectSettingsUpdatedDetail,
 } from "@/hooks/useProjectSettings"
 import { progressPercent, progressPercentOfFraction } from "@/lib/progress/progress-percent"
+import { PROGRESS_BG, type ProgressTone } from "@/lib/progress/progress-palette"
 
 
 function ProjectOverviewSkeleton() {
@@ -280,16 +281,34 @@ function MetaFieldEditButton({
 
 // ── Stat tiles (big %) ────────────────────────────────────────────────────────
 
-function StatTile({ label, pct, colorClass, tooltip }: {
+/**
+ * AQU-1764 (Sam, 2026-10-13, "Layout A, softest"): the number is in the text
+ * colour, and the colour lives in a small swatch before the label — the same
+ * tone that measure's bar below is drawn in (AI drafted: the stripes). The
+ * numbers used to be amber, violet, emerald and sky, four colours that meant
+ * nothing anywhere else.
+ */
+function StatTile({ label, pct, tone, muted = false, tooltip }: {
   label: string
   pct: number
-  colorClass: string
+  tone: ProgressTone
+  /** A cross-language figure while one language is selected: greyed, swatch faded. */
+  muted?: boolean
   tooltip?: string
 }) {
   const tile = (
     <div className="flex flex-col items-center rounded-lg bg-muted/40 px-5 py-3 text-center">
-      <p className={`text-2xl font-bold tabular-nums ${colorClass}`}>{`${progressPercentOfFraction(pct)}%`}</p>
-      <p className="mt-0.5 text-[11px] text-muted-foreground">{label}</p>
+      <p className={`text-2xl font-bold tabular-nums ${muted ? "text-muted-foreground/60" : "text-foreground"}`}>
+        {`${progressPercentOfFraction(pct)}%`}
+      </p>
+      <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <span
+          aria-hidden
+          data-progress-swatch={tone}
+          className={cn("h-1.5 w-3.5 shrink-0 rounded-full", PROGRESS_BG[tone], muted && "opacity-40")}
+        />
+        {label}
+      </p>
     </div>
   )
   return tooltip ? <AppTooltip content={tooltip}>{tile}</AppTooltip> : tile
@@ -321,20 +340,30 @@ function tabToLaneTag(tab: string): string | null {
 
 // ── Stat bar ──────────────────────────────────────────────────────────────────
 
-function StatBar({ label, value, total, fillClass, suffix }: {
+/**
+ * One measure, one bar, one colour, starting at zero (AQU-1764, "Layout A"):
+ * the card keeps a separate bar per measure, so each reads by its length alone,
+ * in that measure's tone from the shared progress palette.
+ */
+function StatBar({ label, value, total, tone, suffix }: {
   label: string
   value: number
   total: number
-  fillClass: string
+  tone: ProgressTone
   suffix?: string
 }) {
   const pct = progressPercent(value, total)
   return (
-    <div className="flex items-center gap-3">
-      <span className="w-20 shrink-0 text-xs font-medium text-muted-foreground">{label}</span>
+    <div className="flex items-center gap-3" data-testid={`stat-bar-${tone}`}>
+      {/* w-28, not w-20: "Audio Validated" (AQU-1764 added its bar) is the
+          longest label and wrapped onto two lines at 80px. */}
+      <span className="w-28 shrink-0 text-xs font-medium text-muted-foreground">{label}</span>
       <div className="flex flex-1 items-center gap-2">
         <span className="h-2 flex-1 rounded-full bg-muted overflow-hidden">
-          <span className={`block h-full rounded-full transition-all ${fillClass}`} style={{ width: `${pct}%` }} />
+          <span
+            className={`block h-full rounded-full transition-all ${PROGRESS_BG[tone]}`}
+            style={{ width: `${pct}%` }}
+          />
         </span>
         <span className="w-20 shrink-0 text-end text-xs tabular-nums text-muted-foreground">
           {pct}%
@@ -2040,18 +2069,19 @@ export function ProjectOverview() {
                     {showText && (
                       <>
                         {statVisible("translated") && (
-                          <StatTile label={t("org.orgHome.table.translatedHeaderLabel")} pct={tileTranslatedPct} colorClass="text-amber-600" />
+                          <StatTile label={t("org.orgHome.table.translatedHeaderLabel")} pct={tileTranslatedPct} tone="textTranslated" />
                         )}
                         {audio.aiDraftedCells > 0 && statVisible("ai-drafted") && (
                           <StatTile
                             label={t("org.projectOverview.aiDrafted")}
                             pct={aiDraftedPct(audio)}
-                            colorClass={activeLane ? "text-muted-foreground/60" : "text-violet-600"}
+                            tone="textAi"
+                            muted={!!activeLane}
                             tooltip={activeLane ? CROSS_LANE_TOOLTIP : t("org.projectOverview.aiDraftedTooltip")}
                           />
                         )}
                         {statVisible("validated") && (
-                          <StatTile label={t("org.orgHome.table.validatedHeaderLabel")} pct={tileValidatedPct} colorClass="text-emerald-600" />
+                          <StatTile label={t("org.orgHome.table.validatedHeaderLabel")} pct={tileValidatedPct} tone="textValidated" />
                         )}
                       </>
                     )}
@@ -2061,7 +2091,8 @@ export function ProjectOverview() {
                           <StatTile
                             label={t("org.orgHome.table.audioHeaderLabel")}
                             pct={audioPct(audio)}
-                            colorClass={activeLane ? "text-muted-foreground/60" : "text-sky-600"}
+                            tone="audioRecorded"
+                            muted={!!activeLane}
                             tooltip={activeLane ? CROSS_LANE_TOOLTIP : t("org.projectOverview.hasAudioTooltip")}
                           />
                         )}
@@ -2087,7 +2118,8 @@ export function ProjectOverview() {
                           <StatTile
                             label={t("org.projectOverview.audioValidated")}
                             pct={audioValidatedPct(audio)}
-                            colorClass={activeLane ? "text-muted-foreground/60" : "text-sky-700"}
+                            tone="audioValidated"
+                            muted={!!activeLane}
                             tooltip={activeLane ? CROSS_LANE_TOOLTIP : [
                               t("org.projectOverview.audioValidatedTooltip"),
                               t("org.projectOverview.audioValidatedOfRecorded", {
@@ -2102,7 +2134,9 @@ export function ProjectOverview() {
 
                   {/* Detail bars below tiles. AQU-538: Translated/Validated
                       follow the active lane; the cross-language AI/audio bars
-                      only render in the "All" view (no per-lane breakdown). */}
+                      only render in the "All" view (no per-lane breakdown).
+                      AQU-1764: one single-colour bar per measure, each in its
+                      tile's tone, and Audio validated gets the bar it never had. */}
                   <div className="space-y-2.5">
                     {showText && (
                       <>
@@ -2111,7 +2145,7 @@ export function ProjectOverview() {
                             label={t("org.orgHome.table.translatedHeaderLabel")}
                             value={activeLane ? activeLane.filledCells : audio.filledCells}
                             total={activeLane ? activeLane.totalCells : audio.totalCells}
-                            fillClass="bg-amber-500"
+                            tone="textTranslated"
                             suffix={t("org.projectOverview.cellsSuffix")}
                           />
                         )}
@@ -2120,7 +2154,7 @@ export function ProjectOverview() {
                             label={t("org.projectOverview.aiDrafted")}
                             value={audio.aiDraftedCells}
                             total={audio.totalCells}
-                            fillClass="bg-violet-500"
+                            tone="textAi"
                             suffix={t("org.projectOverview.cellsSuffix")}
                           />
                         )}
@@ -2129,7 +2163,7 @@ export function ProjectOverview() {
                             label={t("org.orgHome.table.validatedHeaderLabel")}
                             value={activeLane ? activeLane.validatedCells : audio.validatedCells}
                             total={activeLane ? activeLane.totalCells : audio.totalCells}
-                            fillClass="bg-emerald-500"
+                            tone="textValidated"
                             suffix={t("org.projectOverview.cellsSuffix")}
                           />
                         )}
@@ -2141,11 +2175,23 @@ export function ProjectOverview() {
                           label={t("org.orgHome.table.audioHeaderLabel")}
                           value={audio.audioCells}
                           total={audioDenominator(audio)}
-                          fillClass="bg-sky-500"
+                          tone="audioRecorded"
                           suffix={t("org.projectOverview.cellsSuffix")}
                         />
                         {/* TODO: confirm whether legacy GitLab project import populated audio (cell_audio) — see AQU-160 data gap */}
                       </>
+                    )}
+                    {/* Over the same cells as Has audio and as its tile
+                        (`audioValidatedPct`), so the bar, the tile and the
+                        plan board's audio bars agree. */}
+                    {showAudio && !activeLane && statVisible("audio-validated") && (
+                      <StatBar
+                        label={t("org.projectOverview.audioValidated")}
+                        value={audio.validatedAudioCells}
+                        total={audioDenominator(audio)}
+                        tone="audioValidated"
+                        suffix={t("org.projectOverview.cellsSuffix")}
+                      />
                     )}
                   </div>
                   {!activeLane && audio.recordedMs > 0 && statVisible("has-audio") && (
@@ -2495,8 +2541,13 @@ export function ProjectOverview() {
                                   size="sm"
                                   className="w-40 shrink-0"
                                 />
+                                {/* AQU-1764: an assignment's done cells are its
+                                    VALIDATED cells, so the text-validated tone. */}
                                 <span className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                                  <span className="block h-full rounded-full bg-primary transition-all" style={{ width: `${donePct}%` }} />
+                                  <span
+                                    className={`block h-full rounded-full transition-all ${PROGRESS_BG.textValidated}`}
+                                    style={{ width: `${donePct}%` }}
+                                  />
                                 </span>
                                 <span className="w-20 shrink-0 text-end text-xs tabular-nums text-muted-foreground">
                                   {t("org.projectOverview.openAssignmentsStat", {

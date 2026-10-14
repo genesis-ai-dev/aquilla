@@ -25,7 +25,7 @@ import { EditorTable } from "./EditorTable"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { CellStore } from "@/hooks/useActiveCellStore"
 import { JHN4_PEOPLE_JSON, JHN4_VOICES_JSON } from "@/lib/bible-data/__fixtures__/jhn4"
-import { __resetBkpMemoryCache } from "@/lib/bible-data/pack-client"
+import { __bkpSettled, __resetBkpMemoryCache } from "@/lib/bible-data/pack-client"
 import { __clearPackStore } from "@/lib/bible-data/pack-store"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import {
@@ -243,7 +243,11 @@ beforeEach(async () => {
   await __clearPackStore()
 })
 
-afterEach(() => {
+afterEach(async () => {
+  // A load the test did not wait for outlives its table: let it finish here,
+  // so its fetches and IndexedDB writes never land in the next test's cleared
+  // mock and store. In act, because a pack arriving late is a React update.
+  await act(() => __bkpSettled())
   vi.unstubAllGlobals()
 })
 
@@ -529,10 +533,9 @@ describe("add to terminology from the voice popover", () => {
 describe("off means off", () => {
   it("shows no chips or rails and fetches no voices when the Voices enrichment is off", async () => {
     renderTable(makeProject({ bibleEnrichments: { voices: false } }))
-    // Give a load the chance to happen, then check it did not.
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 20))
-    })
+    // Who's Who and the Context tab still load their layers: wait for those
+    // reads to finish, so the list of fetches below is complete.
+    await act(() => __bkpSettled())
     expect(document.querySelector('[data-testid="voice-chip"]')).toBeNull()
     expect(document.querySelector('[data-testid="speech-rails"]')).toBeNull()
     // AQU-1689: Who's Who and the Context tab are still on, and read their
@@ -544,9 +547,9 @@ describe("off means off", () => {
     renderTable(
       makeProject({ bibleEnrichments: { voices: false, "whos-who": false, "original-context": false } }),
     )
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 20))
-    })
+    // A load the table did start would be in flight now: wait for it, so the
+    // check below sees every fetch it makes.
+    await act(() => __bkpSettled())
     expect(layerFetches()).toEqual([])
   })
 
@@ -555,9 +558,7 @@ describe("off means off", () => {
   // pack's servers see no request from them.
   it("shows nothing and fetches nothing, not even the manifest, with the Bible data experiment off", async () => {
     renderTable(makeProject({ experimentalFlags: {} }))
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 20))
-    })
+    await act(() => __bkpSettled())
     expect(document.querySelector('[data-testid="voice-chip"]')).toBeNull()
     expect(document.querySelector('[data-testid="speech-rails"]')).toBeNull()
     expect(fetchMock).not.toHaveBeenCalled()
@@ -566,9 +567,7 @@ describe("off means off", () => {
   // Any other EditorTable mount (no Bible open) passes no `bibleOpen`.
   it("shows nothing and fetches nothing when no Bible is open", async () => {
     renderTable(makeProject(), DEFAULT_CELLS, false)
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 20))
-    })
+    await act(() => __bkpSettled())
     expect(document.querySelector('[data-testid="voice-chip"]')).toBeNull()
     expect(document.querySelector('[data-testid="speech-rails"]')).toBeNull()
     expect(fetchMock).not.toHaveBeenCalled()
@@ -576,9 +575,7 @@ describe("off means off", () => {
 
   it("shows nothing when Bible data itself is off", async () => {
     renderTable(makeProject({ bibleResourcesEnabled: false }))
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 20))
-    })
+    await act(() => __bkpSettled())
     expect(document.querySelector('[data-testid="voice-chip"]')).toBeNull()
     expect(layerFetches()).toEqual([])
   })
@@ -608,9 +605,8 @@ describe("off means off", () => {
     offline = true
     renderTable(makeProject())
     await waitFor(() => expect(fetchMock).toHaveBeenCalled())
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 20))
-    })
+    // The failed reads settle (the manifest's IndexedDB fallback included) before the check.
+    await act(() => __bkpSettled())
     expect(document.querySelector('[data-testid="voice-chip"]')).toBeNull()
     expect(row(cellIdFor("4:7"))).toBeTruthy()
   })

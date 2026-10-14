@@ -38,7 +38,14 @@ export {
 export { buildChapterBlockIndex } from "./chapterBlocks";
 
 export { normalizeBibleStoryXmlGlyphs } from "./bibleTextNormalization";
-export { mergeBibleHeadingStylesIntoStudyStylesXml } from "./headingStyleMerge";
+export {
+    mergeBibleHeadingStylesIntoStudyStylesXml,
+    mergeBibleSmallCapsCharacterStylesIntoStudyStylesXml,
+} from "./headingStyleMerge";
+export {
+    characterStyleBlockIsSmallCaps,
+    isDivineNameCharacterStyle,
+} from "./divineNameStyles";
 export { canonicalizeParagraphStyle, isHeadingRoleTitleStyle } from "./paragraphStyleRoles";
 
 export {

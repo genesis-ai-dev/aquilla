@@ -20,7 +20,7 @@ vi.mock('partyserver', () => ({
 }))
 
 import { handleExternalChangesetsRequest } from '../external/changesets-route'
-import { CREATE_ORG_MAX_PER_CREDENTIAL } from '../external/prepare'
+import { CREATE_ORG_MAX_PER_USER } from '../external/prepare'
 import { mintApiToken } from '../../../db/shared/api-credentials'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 
@@ -347,11 +347,11 @@ describe('CreateOrg — happy path', () => {
 // ── rate limiting ────────────────────────────────────────────────────────────
 
 describe('CreateOrg — rate limiting', () => {
-  it(`rejects staging past ${CREATE_ORG_MAX_PER_CREDENTIAL} creations per credential with rate_limited`, async () => {
+  it(`rejects staging past ${CREATE_ORG_MAX_PER_USER} creations per user with rate_limited`, async () => {
     const env = makeEnv(tdb.db)
     const token = await unscopedToken(tdb)
 
-    for (let i = 0; i < CREATE_ORG_MAX_PER_CREDENTIAL; i += 1) {
+    for (let i = 0; i < CREATE_ORG_MAX_PER_USER; i += 1) {
       const { res } = await prepare(env, `${FILING_PROJECT}-${i}`, token, [
         { kind: 'CreateOrg', name: `Partner ${i}` },
       ])
@@ -364,6 +364,6 @@ describe('CreateOrg — rate limiting', () => {
     expect(res.status).toBe(429)
     expect(body.error.code).toBe('rate_limited')
     // The documented limit is stated in the message so the agent can back off.
-    expect(body.error.message).toContain(String(CREATE_ORG_MAX_PER_CREDENTIAL))
+    expect(body.error.message).toContain(String(CREATE_ORG_MAX_PER_USER))
   })
 })

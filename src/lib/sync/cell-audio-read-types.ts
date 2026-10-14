@@ -1,5 +1,5 @@
 // Client mirror of the sync-worker's GET /api/v1/projects/:p/files/:f/audio-attachments
-// response (apps/sync/src/events/cell-audio-read-route.ts).
+// response (sync-worker/src/events/cell-audio-read-route.ts).
 
 import { GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
 

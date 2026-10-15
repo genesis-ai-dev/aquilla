@@ -2392,7 +2392,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // timestamps or ordinary text edits. One version scan serves both caches;
   // unchanged inputs retain their maps instead of rebuilding the whole file.
   const structureCache = useMemo(() => createEditorStructureCache(), [cellStore])
-  const { sequentialNumberByCellId, paragraphGroupInfoByCellId } = useMemo(() =>
+  const { sequentialNumberByCellId, paragraphGroupInfoByCellId, versePartByCellId } = useMemo(() =>
     readAtVersion(cellStoreVersion, () => structureCache.read(fileCellIds, cellStore)),
   [cellStore, cellStoreVersion, fileCellIds, structureCache])
 
@@ -2907,6 +2907,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onPauseCue={onPauseCue}
           rowIndex={index}
           contentNumber={sequentialNumberByCellId.get(cell.id) ?? index + 1}
+          versePart={versePartByCellId.get(cell.id)}
           lineNumbersEnabled={lineNumbersEnabled}
           scriptureNumbering={scriptureNumbering}
           cellLabelsEnabled={cellLabelsEnabled}
@@ -3035,6 +3036,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     milestoneNavigationItems,
     scriptureNumbering,
     sequentialNumberByCellId,
+    versePartByCellId,
     lineNumbersEnabled,
     micDenied,
     onAckRemoteChange,
@@ -4128,6 +4130,8 @@ interface MemoizedRowProps {
   rowIndex: number
   /** AQU-610: 1-based ordinal among numbered (non-paratext) cells for sequential numbering. */
   contentNumber: number
+  /** AQU-1759: "5a"/"5b" when this row is part of a verse split at its quotes. */
+  versePart?: string
   lineNumbersEnabled: boolean
   cellLabelsEnabled: boolean
   sourceDirectionMode: DirectionMode
@@ -4196,7 +4200,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
     cell, linkedTakes, audioColumn, cellExamples, exampleOriginFor, completingState, cellError, previewText, healthRibbonPoint, infractions,
     backtranslating, backtranslationErrors, cellOpenCommentCount,
-    rowIndex, contentNumber, gridCols, castGutter, ttsSettings,
+    rowIndex, contentNumber, versePart, gridCols, castGutter, ttsSettings,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
     onSelectionPointerDown: onSelectionPointerDownParent,
     onNavigateCell: onNavigateCellParent,
@@ -4379,6 +4383,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onPauseCue={onPauseCue}
         rowIndex={rowIndex}
         contentNumber={contentNumber}
+        versePart={versePart}
         lineNumbersEnabled={lineNumbersEnabled}
         scriptureNumbering={scriptureNumbering}
         cellLabelsEnabled={cellLabelsEnabled}
@@ -4576,6 +4581,8 @@ interface EditorRowProps {
   rowIndex: number
   /** AQU-610: 1-based ordinal among numbered (non-paratext) cells for sequential numbering. */
   contentNumber: number
+  /** AQU-1759: "5a"/"5b" when this row is part of a verse split at its quotes. */
+  versePart?: string
   lineNumbersEnabled: boolean
   /** Scripture files number verse rows by canonical ref and leave headings unnumbered. */
   scriptureNumbering: boolean
@@ -5501,7 +5508,7 @@ function EditorRow({
   onPauseCue,
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
   onEscapeToGrid, onGridRowKeyNav,
-  rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
+  rowIndex, contentNumber, versePart, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
   isAnonymous, micDenied,
   audioLens, onOpenAudioSetup, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
   onCellCommitted, onValidated, repetitionCount, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
@@ -7274,6 +7281,7 @@ function EditorRow({
     rowIndex,
     contentNumber,
     displayLabel: importDisplayLabel(cell.metadata),
+    versePart,
   })
   // ── Character gutter (2026-08-07, stacked media lens only) ──────────────
   // A media-gutter row "speaks" unless it's STRUCTURE (paratext/heading) —

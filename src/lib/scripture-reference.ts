@@ -105,6 +105,9 @@ export interface CellNumberLabelInput {
   /** Normalized-import display label. `null` is an explicit structural row
    *  marker; `undefined` means legacy content with no normalized metadata. */
   displayLabel?: string | null
+  /** AQU-1759: "5a"/"5b" — this row is one part of a verse split at its
+   *  quotation marks (see `versePartsFor` in editor-structure-cache). */
+  versePart?: string
 }
 
 /** Read the normalized import display label without trusting arbitrary cell
@@ -134,6 +137,7 @@ export function cellNumberLabel({
   rowIndex,
   contentNumber,
   displayLabel,
+  versePart,
 }: CellNumberLabelInput): string | null {
   if (!lineNumbersEnabled) return null
 
@@ -143,6 +147,10 @@ export function cellNumberLabel({
   if (displayLabel === null || cellType === "heading" || cellType === "paratext") {
     return null
   }
+
+  // A verse split at its quotes: every part says which verse, and which part.
+  // Ahead of the canonical ref, which only the first part carries.
+  if (versePart) return versePart
 
   const canonicalVerse = verseLabelFromCanonical(canonicalRef)
     ?? verseLabelFromCanonical(sourceCanonicalRef)

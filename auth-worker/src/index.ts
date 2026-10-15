@@ -116,6 +116,7 @@ import { projectKnowledge, orgKnowledge } from "./routes/knowledge"
 import knowledgeInternalRoutes from "./routes/knowledge-internal"
 import styleRulesRoutes from "./routes/style-rules"
 import mondayRoutes from "./routes/monday"
+import airtableRoutes from "./routes/airtable"
 import contactRoutes from "./routes/contact"
 import feedbackRoutes from "./routes/feedback"
 import billingWorkspaceRoutes from "./routes/billing-workspace"
@@ -389,6 +390,10 @@ app.route("/api/v2/access-links", accessLinksRoutes)
 // push engine (routes/monday.ts). OAuth callback + inbound webhook routes are
 // deliberately unauthenticated (browser redirect / Monday-signed JWT).
 app.route("/api/v2/monday", mondayRoutes)
+// Airtable integration (AQU-804): the same shape as Monday's, connected with a
+// personal access token instead of OAuth. Its pushes ride Monday's triggers
+// (lib/integrations/push.ts), including the sync-worker nudge above.
+app.route("/api/v2/airtable", airtableRoutes)
 // External API credentials (PATs) for the Agent API (AQU-533 §2). Mint/list/
 // revoke; live role is re-resolved on every downstream API call.
 app.route("/api/v2/credentials", credentialsRoutes)
@@ -534,7 +539,7 @@ app.fetch = (async (request: Request, env: Env, ctx: ExecutionContext): Promise<
 
 // Cron (wrangler.toml [triggers], every 5 minutes). Three independent pieces
 // of work, each isolated so one failing cannot take the others down:
-//   1. flush Monday board links whose push was debounced (dirty_at set),
+//   1. flush Monday and Airtable links whose push was debounced (dirty_at set),
 //      oldest first, capped at 20 per run;
 //   2. sweep stranded contextual runs (dead driver / parked with spans left);
 //   3. the v3 react watcher — projects with agentMode.react on react to human

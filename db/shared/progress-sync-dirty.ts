@@ -23,7 +23,7 @@ import type { AquillaDb } from "../shim/postgres"
  * one of them reads the same metrics (auth-worker lib/monday/metrics.ts), so a
  * change that moves those numbers concerns all of them.
  */
-export const PROGRESS_SYNC_PROVIDERS = ["monday"] as const
+export const PROGRESS_SYNC_PROVIDERS = ["monday", "airtable"] as const
 export type ProgressSyncProvider = (typeof PROGRESS_SYNC_PROVIDERS)[number]
 
 /** `<column> IN (?, ?)` over PROGRESS_SYNC_PROVIDERS; bind `PROGRESS_SYNC_PROVIDERS` after it. */

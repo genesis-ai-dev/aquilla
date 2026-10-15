@@ -149,8 +149,8 @@ binding = "CF_VERSION_METADATA"
 [placement]
 mode = "smart"
 
-# Monday.com integration: cron flush of debounced board-link pushes
-# (src/index.ts scheduled() → lib/monday/push.ts flushDirtyLinks, cap 20).
+# Monday.com and Airtable integrations: cron flush of debounced link pushes
+# (src/index.ts scheduled() → lib/integrations/push.ts flushDirtyLinks, cap 20).
 # NOTE: like placement/observability, [triggers] is NOT inherited by env
 # blocks — keep the env-block copies below in sync.
 [triggers]

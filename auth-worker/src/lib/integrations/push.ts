@@ -20,10 +20,12 @@ import {
 } from "../../../../db/shared/progress-sync-dirty"
 import type { IntegrationLinkRow } from "../monday/types"
 import { pushBoardLink } from "../monday/push"
+import { pushAirtableLink } from "../airtable/push"
 import { markDirty, PUSH_DEBOUNCE_SECONDS, type PushResult } from "./push-state"
 
 const PUSHERS: Record<ProgressSyncProvider, (env: Env, link: IntegrationLinkRow) => Promise<PushResult>> = {
   monday: pushBoardLink,
+  airtable: pushAirtableLink,
 }
 
 /** Push one link now, with its provider's engine. */

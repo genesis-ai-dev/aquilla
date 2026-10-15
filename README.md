@@ -25,7 +25,7 @@ It is deliberately standalone: no Aquilla app, database or Worker dependency
 ```bash
 pnpm i
 pnpm demo          # narrated walkthrough in ./demo-workspace
-pnpm test          # 118 tests, incl. property-based convergence tests
+pnpm test          # 121 tests, incl. property-based convergence tests
 pnpm gate          # measures the spec's Gate A and writes docs/GATE-A.md
 ```
 
@@ -117,7 +117,7 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 | WebDAV drive (`/dav/`) | Mount in Finder/Explorer; `/dav/<any-lang>/file` is translated when opened |
 | MCP (`ambient mcp`) | Lets Claude (Desktop/Code) inspect and steer the folder in conversation; `ambient_view` generates a focused review page on demand |
 
-Add to Claude Code: `claude mcp add ambient -- pnpm --dir /path/to/aquilla-ambient ambient mcp /path/to/folder`.
+Add to Claude Code: `claude mcp add ambient -- pnpm --silent --dir /path/to/aquilla-ambient ambient mcp /path/to/folder`.
 
 ## Repository map
 

@@ -347,6 +347,8 @@ interface OverlayEntry {
   url: string | null
   /** Trim end on the CLIP's clock; null = play to natural end. */
   stopAtClipSec: number | null
+  /** AQU-1767: dubbing's timer aimed at `stopAtClipSec`, between timeupdate ticks. */
+  endStopTimer?: ReturnType<typeof setTimeout> | null
 }
 
 const overlayPool: OverlayEntry[] = []
@@ -459,11 +461,16 @@ const coordinatorController: ActiveAudioController = {
 function removeOverlayEntry(entry: OverlayEntry): void {
   const i = overlayPool.indexOf(entry)
   if (i >= 0) overlayPool.splice(i, 1)
+  if (entry.endStopTimer != null) {
+    clearTimeout(entry.endStopTimer)
+    entry.endStopTimer = null
+  }
   const el = entry.element
   if (el) {
     el.onended = null
     el.onerror = null
     el.ontimeupdate = null
+    el.onplaying = null
     el.onloadedmetadata = null
     el.pause()
     el.src = ""
@@ -2168,13 +2175,12 @@ function wireOverlayElement(
         progCheckBoundary()
         return
       }
-      // Dubbing: pool entries own their frozen trim end-stop (~250ms
-      // timeupdate slop; pause immediately at the threshold to bound it).
-      if (entry.stopAtClipSec != null && audio.currentTime >= entry.stopAtClipSec) {
-        removeOverlayEntry(entry)
-        progOnTargetFinished(entry, "ended")
-      }
+      // Dubbing: pool entries own their frozen trim end-stop. A tick lands
+      // only every ~250ms, so each one re-aims the timer that stops it on time.
+      armDubEndStop(entry, audio)
     }
+    // A resume after a pause re-aims it too (a paused dub's timer lapses).
+    if (timingMode !== "audioFirst") audio.onplaying = () => armDubEndStop(entry, audio)
   }
   if (opts.autostart) {
     // SUB-53: in audio-first a verse can be dub-only, so the source element
@@ -2195,6 +2201,39 @@ function wireOverlayElement(
       }
     }
   }
+}
+
+/** Less than this left and the dub is stopped now rather than timed again. */
+const DUB_ENDSTOP_EPS_SEC = 0.004
+
+/**
+ * Stop a dubbing dub AT its trim end, not on the next timeupdate. (AQU-1767)
+ *
+ * Ticks land ~every 250ms, so a dub used to run up to a quarter-second past
+ * its end. A trimmed tail is usually silence and nobody heard it — but a CUT
+ * falls mid-speech: Sam's walk (2026-10-15) heard the next piece's first word
+ * spoken in the gap, then again when that piece began. A timer is aimed a
+ * little short of the end and re-aimed from the live clock until under
+ * DUB_ENDSTOP_EPS_SEC remains, so a late timer never carries the dub past it.
+ * Audio-first has its own 60ms authority (progCheckBoundary) and is left to it.
+ */
+function armDubEndStop(entry: OverlayEntry, audio: HTMLAudioElement): void {
+  if (entry.endStopTimer != null) {
+    clearTimeout(entry.endStopTimer)
+    entry.endStopTimer = null
+  }
+  const stop = entry.stopAtClipSec
+  if (stop == null || timingMode === "audioFirst" || audio.paused || !overlayPool.includes(entry)) return
+  const leftSec = (stop - audio.currentTime) / (audio.playbackRate || 1)
+  if (leftSec <= DUB_ENDSTOP_EPS_SEC) {
+    removeOverlayEntry(entry)
+    progOnTargetFinished(entry, "ended")
+    return
+  }
+  entry.endStopTimer = setTimeout(() => {
+    entry.endStopTimer = null
+    if (entry.element === audio) armDubEndStop(entry, audio)
+  }, Math.max(1, leftSec * 900))
 }
 
 // ── Next-verse prefetch (smooth-playback round) ─────────────────────────────

@@ -337,3 +337,36 @@ describe("dubs driven by a linked picture", () => {
     expect(poolIds()).toEqual([])
   })
 })
+
+// AQU-1767 (Sam's walk, 2026-10-15): a cut falls mid-speech, and a dub left
+// running until the next ~250ms timeupdate spoke the next piece's first word in
+// the gap before that piece said it again. The dub stops AT its trim end.
+describe("a trimmed dub's end", () => {
+  afterEach(() => { vi.useRealTimers() })
+
+  it("stops at the trim end itself, not on the next timeupdate", async () => {
+    const take = "audio-a-1700000000-take.webm"
+    const cell = {
+      ...line("a", 10, 20, 4000),
+      attachments: { [take]: { type: "audio", url: "http://audio.test/a.webm", durationMs: 4000, trimEndMs: 1500 } },
+    } as unknown as CellData
+    startExternalDubs(ctxFor([cell]))
+    setExternalDubsPlaying(true)
+    tickExternalDubs(10.1)
+    await settle()
+    const el = dubEl("a")!
+    expect(el.paused).toBe(false)
+
+    // The element's clock runs on its own from here: 1.0s into the clip.
+    vi.useFakeTimers()
+    const t0 = Date.now()
+    Object.defineProperty(el, "currentTime", { configurable: true, get: () => 1 + (Date.now() - t0) / 1000, set: () => {} })
+    // The last tick before the end, half a second out; no other tick comes.
+    el.ontimeupdate?.()
+    vi.advanceTimersByTime(495)
+    expect(poolIds()).toEqual(["a"])
+    vi.advanceTimersByTime(15)
+    expect(poolIds()).toEqual([])
+    expect(el.paused).toBe(true)
+  })
+})

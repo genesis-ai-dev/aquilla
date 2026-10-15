@@ -76,6 +76,10 @@ AGENT_SANDBOX_KEY=""
 MONDAY_CLIENT_ID=""
 MONDAY_CLIENT_SECRET=""
 MONDAY_SIGNING_SECRET=""
+# Leave unset locally: the Monday token key then derives from SECRET_KEY. The
+# deployed dev worker sets it so copied production tokens are unreadable there
+# (AQU-1775). Setting it invalidates every Monday connection made before it.
+# MONDAY_TOKEN_KEY=""
 MONDAY_APP_ID=""
 MONDAY_APP_SLUG=""
 # Must EXACTLY match the redirect URL registered in the Monday Developer

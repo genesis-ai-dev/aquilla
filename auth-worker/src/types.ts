@@ -205,6 +205,15 @@ export interface Env {
   MONDAY_CLIENT_SECRET?: string
   /** Monday app Signing Secret — verifies webhook JWTs (secret). */
   MONDAY_SIGNING_SECRET?: string
+  /**
+   * AQU-1775: optional secret the Monday token encryption key is derived from
+   * instead of SECRET_KEY (lib/monday/crypto.ts mondayTokenKeyMaterial). Set
+   * on the dev worker only, so a production token copied to dev is unreadable
+   * there whatever the environment gate decides; unset keeps the SECRET_KEY
+   * derivation (production, local, e2e). Setting or rotating it makes every
+   * token encrypted before it unreadable — the org reconnects.
+   */
+  MONDAY_TOKEN_KEY?: string
   /** Monday app id (plain var; informational/config). */
   MONDAY_APP_ID?: string
   /** Monday app slug (plain var; informational/config). */

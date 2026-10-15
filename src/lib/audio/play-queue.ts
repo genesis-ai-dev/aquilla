@@ -486,6 +486,7 @@ function removeOverlayEntry(entry: OverlayEntry): void {
 
 function disposeAllOverlays(): void {
   while (overlayPool.length > 0) removeOverlayEntry(overlayPool[overlayPool.length - 1])
+  disposeDubStash()
 }
 
 function disposeCurrent(): void {
@@ -1826,6 +1827,10 @@ export type TargetOverlayPlan =
       /** Seek semantics: clear the pool first (an earlier section's
        *  overhanging tail does NOT resurrect on seek — documented rule). */
       exclusive: boolean
+      /** AQU-1767: the piece after this one, so its player is made and loaded
+       *  while this one plays — a player made at its due time starts late
+       *  (Safari takes ~200ms to sound a fresh element). */
+      nextPiece?: { audioId: string; url: string; startAtClipSec: number; stopAtClipSec: number | null }
       /** AQU-1767: when this line's take was CUT, the start (file seconds) of
        *  the piece after this one — armed as soon as this one fires, so the
        *  next piece sounds even under a master that only re-plans on arms. */
@@ -1933,6 +1938,16 @@ export function planTargetOverlay(
     stopAtClipSec: geom?.trimEndSec ?? null,
     exclusive: reason === "seek",
     ...(nextDueSec != null ? { nextDueSec } : {}),
+    ...(cut && pieces[currentIdx + 1]
+      ? {
+          nextPiece: {
+            audioId: pieces[currentIdx + 1].ref.audioId,
+            url: pieces[currentIdx + 1].ref.url,
+            startAtClipSec: pieces[currentIdx + 1].geom?.trimStartSec ?? 0,
+            stopAtClipSec: pieces[currentIdx + 1].geom?.trimEndSec ?? null,
+          },
+        }
+      : {}),
   }
 }
 
@@ -2128,6 +2143,15 @@ function executeFire(
   overlayPool.push(entry)
   let startAtClipSec = plan.startAtClipSec
   const firedAtMs = performance.now()
+  // AQU-1767: the piece after this one, made and loaded while this one plays.
+  stockNextPiece(plan, cell, ctx)
+  // This piece's own player, made while the one before it played: adopted
+  // ready, so it sounds on time.
+  const stashed = takeStashedDub(plan)
+  if (stashed) {
+    wireOverlayElement(entry, stashed, startAtClipSec, { autostart: true })
+    return
+  }
   void (async () => {
     let resolved: ResolvedAudioSrc
     try {
@@ -2152,35 +2176,15 @@ function executeFire(
     // webm) gets a WAV of it first, or it could not be seeked and would play
     // from the recording's head (Sam's walk: a split take's later pieces).
     if (timingMode !== "audioFirst" && resolved.frontier) {
-      const { audioId, ext } = resolved.frontier
+      const ext = resolved.frontier.ext
       const mustSeek = startAtClipSec > 0.05 && ext.toLowerCase() !== "wav"
-      let bytes = resolved.bytes
-      if (!bytes && mustSeek) {
-        try {
-          bytes = await fetchCellAudio({
-            projectId: ctx.projectId, fileId: cell.fileId, audioId, ext,
-            getSyncToken: audioSyncTokenFetcherForSession(ctx.session),
-          })
-        } catch { /* play it as resolved; the head is the worst of it */ }
-      }
       // The take's other pieces will want the same, moments from now: start
       // on them while this one plays, so they are ready when they are due.
-      if (ext.toLowerCase() !== "wav") warmSplitPieces(cell, plan.audioId, audioId, ext, bytes, ctx)
-      const cut = !bytes
-        ? null
-        : mustSeek
-          ? await seekableClip(audioId, ext, bytes, plan.stopAtClipSec)
-          : plan.stopAtClipSec != null
-            ? tailCutNow(audioId, ext, bytes, plan.stopAtClipSec)
-            : null
+      if (ext.toLowerCase() !== "wav") warmSplitPieces(cell, plan.audioId, resolved.frontier.audioId, ext, resolved.bytes, ctx)
+      resolved = await prepareDubClip(resolved, startAtClipSec, plan.stopAtClipSec, cell, ctx)
       if (!overlayPool.includes(entry)) {
         if (resolved.objectUrl) URL.revokeObjectURL(resolved.objectUrl)
         return
-      }
-      if (cut) {
-        if (resolved.objectUrl) URL.revokeObjectURL(resolved.objectUrl)
-        const url = URL.createObjectURL(cut)
-        resolved = { ...resolved, src: url, objectUrl: url, streaming: false }
       }
       // The time that took, made up: the clock ran on while the clip was got
       // ready, so the dub joins where the line is now, not where it was.
@@ -2191,6 +2195,126 @@ function executeFire(
     }
     wireOverlayElement(entry, { resolved }, startAtClipSec, { autostart: true })
   })()
+}
+
+/**
+ * AQU-1767: the clip a dubbing dub plays. A trimmed dub plays bytes that END at
+ * its trim end, so it stops there by itself, however busy the page is (the
+ * timer stays as the fallback for a clip that could not be cut — streamed, or
+ * not yet decoded). A dub that must start partway into a clip that states no
+ * length (a webm) gets a WAV of it first, or it could not be seeked and would
+ * play from the recording's head (Sam's walk: a split take's later pieces).
+ */
+async function prepareDubClip(
+  resolved: ResolvedAudioSrc,
+  startAtClipSec: number,
+  stopAtClipSec: number | null,
+  cell: CellData,
+  ctx: PlayContext,
+): Promise<ResolvedAudioSrc> {
+  if (!resolved.frontier) return resolved
+  const { audioId, ext } = resolved.frontier
+  const mustSeek = startAtClipSec > 0.05 && ext.toLowerCase() !== "wav"
+  let bytes = resolved.bytes
+  if (!bytes && mustSeek) {
+    try {
+      bytes = await fetchCellAudio({
+        projectId: ctx.projectId, fileId: cell.fileId, audioId, ext,
+        getSyncToken: audioSyncTokenFetcherForSession(ctx.session),
+      })
+    } catch { /* play it as resolved; the head is the worst of it */ }
+  }
+  const cut = !bytes
+    ? null
+    : mustSeek
+      ? await seekableClip(audioId, ext, bytes, stopAtClipSec)
+      : stopAtClipSec != null
+        ? tailCutNow(audioId, ext, bytes, stopAtClipSec)
+        : null
+  if (!cut) return resolved
+  if (resolved.objectUrl) URL.revokeObjectURL(resolved.objectUrl)
+  const url = URL.createObjectURL(cut)
+  return { ...resolved, src: url, objectUrl: url, streaming: false }
+}
+
+// ── AQU-1767: the next piece, made ready while this one plays ───────────────
+// A dub's player is made when the dub is due, and a fresh element takes time to
+// sound — about a fifth of a second in Safari — so the piece after a cut began
+// audibly after its waveform did (Sam's walk, 2026-10-15). While a piece plays,
+// the one after it is resolved, made, loaded and parked at its start; when it
+// is due it is adopted and only has to play.
+
+interface StashedDub {
+  element: HTMLAudioElement | null
+  objectUrl: string | null
+  stopAtClipSec: number | null
+}
+const dubStash = new Map<string, StashedDub>()
+const stashKey = (cellId: string, slot: string, audioId: string) => `${cellId}|${slot}|${audioId}`
+
+function stockNextPiece(plan: Extract<TargetOverlayPlan, { kind: "fire" }>, cell: CellData, ctx: PlayContext): void {
+  const next = plan.nextPiece
+  if (!next || timingMode === "audioFirst") return
+  const key = stashKey(plan.cellId, plan.slot, next.audioId)
+  const had = dubStash.get(key)
+  if (had && had.stopAtClipSec === next.stopAtClipSec) return
+  if (had) disposeStashed(key)
+  const stash: StashedDub = { element: null, objectUrl: null, stopAtClipSec: next.stopAtClipSec }
+  dubStash.set(key, stash)
+  void (async () => {
+    let resolved: ResolvedAudioSrc
+    try {
+      resolved = await resolveAudioSrc(next.url, ctx.projectId, cell.fileId, ctx.session, cell)
+      resolved = await prepareDubClip(resolved, next.startAtClipSec, next.stopAtClipSec, cell, ctx)
+    } catch {
+      if (dubStash.get(key) === stash) dubStash.delete(key)
+      return
+    }
+    if (dubStash.get(key) !== stash) {
+      if (resolved.objectUrl) URL.revokeObjectURL(resolved.objectUrl)
+      return
+    }
+    const el = new Audio(resolved.src)
+    el.preload = "auto"
+    stash.element = el
+    stash.objectUrl = resolved.objectUrl
+    el.onerror = () => { if (dubStash.get(key) === stash) disposeStashed(key) }
+    // Parked at its start; never seek a clip whose length is unknown.
+    el.onloadedmetadata = () => {
+      if (next.startAtClipSec > 0 && Number.isFinite(el.duration)) {
+        el.currentTime = Math.min(next.startAtClipSec, el.duration)
+      }
+    }
+  })()
+}
+
+/** This fire's own player, if one was made and loaded for it — taken out of the stash. */
+function takeStashedDub(plan: Extract<TargetOverlayPlan, { kind: "fire" }>): { element: HTMLAudioElement; objectUrl: string | null } | null {
+  const key = stashKey(plan.cellId, plan.slot, plan.audioId)
+  const stash = dubStash.get(key)
+  if (!stash?.element || stash.element.error != null || stash.element.readyState < 1 || stash.stopAtClipSec !== plan.stopAtClipSec) return null
+  dubStash.delete(key)
+  const { element } = stash
+  element.onerror = null
+  element.onloadedmetadata = null
+  return { element, objectUrl: stash.objectUrl }
+}
+
+function disposeStashed(key: string): void {
+  const stash = dubStash.get(key)
+  dubStash.delete(key)
+  if (!stash) return
+  if (stash.element) {
+    stash.element.onerror = null
+    stash.element.onloadedmetadata = null
+    stash.element.pause()
+    stash.element.src = ""
+  }
+  if (stash.objectUrl) URL.revokeObjectURL(stash.objectUrl)
+}
+
+function disposeDubStash(): void {
+  for (const key of [...dubStash.keys()]) disposeStashed(key)
 }
 
 /**

@@ -175,3 +175,37 @@ describe("a dub that starts partway into a webm", () => {
   })
 })
 
+// AQU-1767 (Sam's walk, 2026-10-15): the piece after a cut sounded after its
+// waveform began — its player was made when it was due, and a fresh player
+// takes time to sound. It is now made and loaded while the piece before plays.
+describe("the next piece of a split take", () => {
+  it("is made and parked at its start while the piece before it plays, then adopted when due", async () => {
+    const A = `${TAKE}.wav`, B = "audio-a-1700000500-piece.wav"
+    const split = {
+      ...line("wav"),
+      selectedAudioId: A,
+      attachments: {
+        [A]: { type: "audio", url: `frontier-audio://${TAKE}.wav`, slot: "recording", durationMs: 4000, trimEndMs: 1500 },
+        [B]: { type: "audio", url: `frontier-audio://${TAKE}.wav`, slot: "recording", pieceOf: A, durationMs: 4000, trimStartMs: 2000, trimEndMs: 3500 },
+      },
+    } as unknown as CellData
+    startExternalDubs(ctxFor([split]))
+    setExternalDubsPlaying(true)
+    tickExternalDubs(10.2)
+    await settle()
+    // A plays; B's player is already made.
+    expect(FakeAudio.instances).toHaveLength(2)
+    const sizeOf = (el: FakeAudio) => blobs[Number(el.src.split("/").pop()) - 1].size
+    // B's clip ends at its trim end, 3.5s in.
+    const stocked = FakeAudio.instances.find((el) => sizeOf(el) === 44 + 3.5 * 48000 * 2)!
+    expect(stocked).toBeTruthy()
+    expect(stocked.paused).toBe(true)
+    // Ordinary playback, a tick at a time, up to B's start.
+    for (const t of [10.45, 10.7, 10.95, 11.2, 11.45, 11.7, 11.95, 12.1]) tickExternalDubs(t)
+    await settle()
+    // B is due: that player sounds, and no new one is made for it.
+    expect(FakeAudio.instances).toHaveLength(2)
+    expect(stocked.paused).toBe(false)
+  })
+})
+

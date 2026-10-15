@@ -86,6 +86,7 @@ import {
 import { lanesForScopeVisibility } from "../../../src/lib/lanes/scope-ids"
 import { loadTargetLaneIdentities, visibleTagsForMember } from "../../../db/shared/lane-visibility"
 import { grantNewLane } from "../../../db/shared/lane-grants"
+import { markProjectMondayLinksDirty } from "../../../db/shared/monday-dirty"
 import type { AquillaDb } from "../../../db/shim/postgres"
 import { laneLanguage } from "../../../src/lib/lanes/lane-display"
 import { validateSettingsKeyValue } from "../../../db/shared/project-settings-keys"
@@ -654,6 +655,19 @@ function notifySettingsChangedBestEffort(
   }
 }
 
+// AQU-1770: a language added, renamed or archived changes what a linked Monday
+// board shows — its Languages column, and which languages its percentages
+// cover — with no project edit to trigger a push. Mark the project's boards
+// dirty and push after the response, as a counting-settings change does; the
+// cron flush picks up anything this misses.
+async function pushMondayAfterLaneChange(
+  c: { env: AuthHonoEnv["Bindings"]; executionCtx: { waitUntil(promise: Promise<unknown>): void } },
+  projectId: string,
+): Promise<void> {
+  await markProjectMondayLinksDirty(c.env.AQUILLA_PG, [projectId])
+  pushDirtyLinksAfterResponse(c, { projectIds: [projectId] })
+}
+
 // AQU-1418: lane rows are what the screen edits. The settings string registry
 // stays in step so events, the external API, and older clients still resolve
 // a lane by its legacy tag. The id is never shown. A duplicate display name
@@ -723,6 +737,7 @@ projectSettings.post(
     const fresh = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
     notifySettingsChangedBestEffort(c, projectId, fresh.version)
     const lane = fresh.lanes?.find((row) => row.id === created.laneId) ?? null
+    await pushMondayAfterLaneChange(c, projectId)
     return c.json({ lane }, 201)
   },
 )
@@ -757,6 +772,7 @@ projectSettings.patch(
     if (result.status !== "ok") return c.json({ error: result.status }, 400)
     const fresh = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
     notifySettingsChangedBestEffort(c, projectId, fresh.version)
+    await pushMondayAfterLaneChange(c, projectId)
     return c.json({ lane: fresh.lanes?.find((row) => row.id === laneId) ?? result.lane })
   },
 )
@@ -832,6 +848,7 @@ projectSettings.post(
     } catch {
       void notifyPromise
     }
+    await pushMondayAfterLaneChange(c, projectId)
     return c.json({ lane: fresh.lanes?.find((row) => row.id === laneId) ?? result.lane })
   },
 )

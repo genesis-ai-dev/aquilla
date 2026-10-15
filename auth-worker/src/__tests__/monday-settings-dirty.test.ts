@@ -120,3 +120,36 @@ describe("Monday boards follow settings changes (AQU-1771)", () => {
     expect(await dirtyLinks()).toEqual(["l-over"])
   })
 })
+
+// AQU-1770: a language added, renamed or archived changes the board's Languages
+// column and which languages its percentages cover, with no project edit to
+// push it.
+describe("Monday boards follow language changes (AQU-1770)", () => {
+  const laneRequest = async (path: string, method: string, body: Record<string, unknown>) =>
+    app.request(
+      `/api/v2/projects/p-inherit${path}`,
+      { method, headers: authHeader(await jwtFor("olive")), body: JSON.stringify(body) },
+      env,
+    )
+
+  it("adding a language marks only that project's board", async () => {
+    await seed()
+    const res = await laneRequest("/lanes", "POST", { name: "Spanish", language: "Spanish", code: "es" })
+    expect(res.status).toBe(201)
+    expect(await dirtyLinks()).toEqual(["l-inherit"])
+  })
+
+  it("renaming and archiving a language mark it too", async () => {
+    await seed()
+    const created = (await (await laneRequest("/lanes", "POST", { name: "Spanish", language: "Spanish", code: "es" })).json()) as { lane: { id: string } }
+    await laneRequest("/lanes", "POST", { name: "French", language: "French", code: "fr" })
+    await env.AQUILLA_PG.prepare("UPDATE integration_links SET dirty_at = NULL").run()
+
+    expect((await laneRequest(`/lanes/${created.lane.id}`, "PATCH", { name: "Español" })).status).toBe(200)
+    expect(await dirtyLinks()).toEqual(["l-inherit"])
+
+    await env.AQUILLA_PG.prepare("UPDATE integration_links SET dirty_at = NULL").run()
+    expect((await laneRequest(`/lanes/${created.lane.id}/archive`, "POST", { archived: true })).status).toBe(200)
+    expect(await dirtyLinks()).toEqual(["l-inherit"])
+  })
+})

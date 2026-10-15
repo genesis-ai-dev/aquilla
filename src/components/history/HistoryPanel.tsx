@@ -6,7 +6,7 @@
  * It reads the same store as Cmd/Ctrl+Z and the timeline's buttons, so the
  * three always agree. "Undo to here" walks back one step at a time — each
  * step's own guard still decides — and stops at a step that has to wait for
- * its file to be opened.
+ * its file to be opened, or its language to be switched to (AQU-1419).
  */
 import { useState } from "react"
 import { History, Redo2, Undo2 } from "lucide-react"

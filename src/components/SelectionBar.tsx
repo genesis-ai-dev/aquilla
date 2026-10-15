@@ -471,6 +471,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           data: { cellId: target.cellId, audioId: target.audioId, voted: true },
           labelKey: "editor.history.stepValidateAudio",
           fileId: selectedCells[0]?.fileId ?? null,
+          lane: activeLane, // AQU-1419: the takes are this lane's.
         })),
       )
       toast.add({
@@ -515,6 +516,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           data: { cellId: target.cellId, audioId: target.audioId, voted: false },
           labelKey: "editor.history.stepUnvalidateAudio",
           fileId: selectedCells[0]?.fileId ?? null,
+          lane: activeLane, // AQU-1419: the takes are this lane's.
         })),
       )
       toast.add({
@@ -637,6 +639,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           data: { cellId: cell.id, lane: activeLane, voted: true, editEventId: cell.targetEventId! },
           labelKey: "editor.history.stepValidate",
           fileId: cell.fileId,
+          lane: activeLane, // AQU-1419: undone only while this lane is open.
         })),
       )
       posthog.capture(BATCH_VALIDATE_ATTEMPTED, batchValidateTelemetry(summary, "selection"))
@@ -678,6 +681,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           data: { cellId: cell.id, lane: activeLane, voted: false, editEventId: cell.targetEventId },
           labelKey: "editor.history.stepUnvalidate",
           fileId: cell.fileId,
+          lane: activeLane, // AQU-1419: undone only while this lane is open.
         })
       }
       recordGroup({ labelKey: "editor.history.stepUnvalidateMany", labelParams: { count: removed }, fileId: parts[0]?.fileId ?? null }, parts)

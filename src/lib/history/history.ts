@@ -21,7 +21,11 @@
  *
  * WHEN IT CANNOT BE DONE FROM HERE. A step made in another file is BLOCKED
  * while that file is not open: it stays on the stack and says which file to
- * open. Nothing is lost by switching files.
+ * open. Nothing is lost by switching files. The same goes for a step made in
+ * another language (AQU-1419): takes, translations and votes belong to a lane,
+ * and the workspace reads and writes only the open one — from another lane the
+ * step's take or text looks gone, so it would be thrown away, or (a deleted
+ * take's undo) written into the wrong language. It waits for its lane instead.
  *
  * GROUPS. One action that writes many things (bulk validation, applying a
  * voice to many lines) is ONE step: `withGroup` collects the steps recorded
@@ -59,6 +63,12 @@ export interface StepRecord<D = unknown> {
   fileId?: string | null
   /** That file's name when the step was made, for "open … to undo this". */
   fileName?: string | null
+  /** AQU-1419: the language lane (its tag — `''` is a lane like any other)
+   *  the step changed, when what it changed belongs to one: takes, text,
+   *  votes. It can only be undone while that lane is open (see
+   *  `setOpenLaneProbe`). Rows, tracks and settings are shared and carry none,
+   *  except a track delete that took recordings with it. */
+  lane?: string | null
 }
 
 /** What `recordStep` takes; `id` and `at` are filled in. */
@@ -98,6 +108,7 @@ let activeScope: string | null = null
 let activeUser: string | null = null
 let busy = false
 let openFileProbe: ((fileId: string) => boolean) | null = null
+let openLaneProbe: ((lane: string) => boolean) | null = null
 let idCounter = 0
 
 /** Steps recorded while a `withGroup` runs, innermost last. */
@@ -181,7 +192,7 @@ export function historyReady(): Promise<void> {
   return activeScope ? loadScope(activeScope) : Promise.resolve()
 }
 
-// ── Scope, handlers, open-file probe ─────────────────────────────────────────
+// ── Scope, handlers, open-file and open-lane probes ──────────────────────────
 
 /**
  * Which project and person the shortcut and the buttons act for. The workspace
@@ -212,6 +223,11 @@ export function registerStepKinds(map: Record<string, StepHandler<never>>): () =
 /** Whether a file is open (so a step that changed it can be undone now). */
 export function setOpenFileProbe(probe: ((fileId: string) => boolean) | null): void {
   openFileProbe = probe
+}
+
+/** Whether a language lane is the open one (so a step made in it can be undone now). */
+export function setOpenLaneProbe(probe: ((lane: string) => boolean) | null): void {
+  openLaneProbe = probe
 }
 
 // ── Recording ───────────────────────────────────────────────────────────────
@@ -289,7 +305,7 @@ function pushRecord(record: StepRecord, key: string): void {
  * inner group joins the outer one.
  */
 export async function withGroup<T>(
-  label: { labelKey: string; labelParams?: Record<string, string | number>; fileId?: string | null; fileName?: string | null },
+  label: { labelKey: string; labelParams?: Record<string, string | number>; fileId?: string | null; fileName?: string | null; lane?: string | null },
   fn: () => Promise<T>,
   opts?: { alwaysGroup?: boolean },
 ): Promise<T> {
@@ -311,6 +327,7 @@ export async function withGroup<T>(
       labelParams: label.labelParams,
       fileId: label.fileId ?? buffer[0].fileId ?? null,
       fileName: label.fileName ?? buffer[0].fileName ?? null,
+      lane: label.lane ?? buffer[0].lane ?? null,
       at: buffer[buffer.length - 1].at,
     })
   }
@@ -322,7 +339,7 @@ export async function withGroup<T>(
  * has them all (a synchronous loop). Async work uses {@link withGroup}.
  */
 export function recordGroup(
-  label: { labelKey: string; labelParams?: Record<string, string | number>; fileId?: string | null; fileName?: string | null },
+  label: { labelKey: string; labelParams?: Record<string, string | number>; fileId?: string | null; fileName?: string | null; lane?: string | null },
   parts: ReadonlyArray<StepInput>,
 ): void {
   if (parts.length === 0) return
@@ -335,6 +352,7 @@ export function recordGroup(
     labelParams: label.labelParams,
     fileId: label.fileId ?? steps[0].fileId ?? null,
     fileName: label.fileName ?? steps[0].fileName ?? null,
+    lane: label.lane ?? steps[0].lane ?? null,
   })
 }
 
@@ -375,7 +393,7 @@ async function runGroup(record: StepRecord<{ steps: StepRecord[] }>, which: "und
 }
 
 export interface HistoryResult {
-  step: Pick<StepRecord, "labelKey" | "labelParams" | "fileName">
+  step: Pick<StepRecord, "labelKey" | "labelParams" | "fileName" | "lane">
   outcome: StepOutcome
 }
 
@@ -417,8 +435,13 @@ async function runNow(which: "undo" | "redo", scope: string): Promise<HistoryRes
   const from = which === "undo" ? s.undo : s.redo
   const record = from[from.length - 1]
   if (!record) return null
-  const label = { labelKey: record.labelKey, labelParams: record.labelParams, fileName: record.fileName ?? null }
+  const label = { labelKey: record.labelKey, labelParams: record.labelParams, fileName: record.fileName ?? null, lane: record.lane ?? null }
   if (record.fileId && openFileProbe && !openFileProbe(record.fileId)) {
+    return { step: label, outcome: { kind: "blocked", reason: "elsewhere" } }
+  }
+  // AQU-1419: `!= null`, not truthiness — `''` is a lane, and a step made in
+  // it must wait for it like any other.
+  if (record.lane != null && openLaneProbe && !openLaneProbe(record.lane)) {
     return { step: label, outcome: { kind: "blocked", reason: "elsewhere" } }
   }
   // Saved as already moved before it runs: if the tab closes while its writes
@@ -564,6 +587,7 @@ export function resetHistoryForTests(): void {
   queue = Promise.resolve()
   pendingWrites.clear()
   openFileProbe = null
+  openLaneProbe = null
   emit()
 }
 

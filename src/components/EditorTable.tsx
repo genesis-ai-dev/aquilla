@@ -6201,6 +6201,7 @@ function EditorRow({
       data: { cellId: cell.id, lane: activeLane, side: "target", before: step.before, after: step.after },
       labelKey: "editor.history.stepEditText",
       fileId: cell.fileId,
+      lane: activeLane, // AQU-1419: undone only while this lane is open.
     })
   }, [cell.id, cell.fileId, activeLane])
   const settleOwedRepetitions = useCallback(() => {
@@ -6792,6 +6793,7 @@ function EditorRow({
         data: { cellId: cell.id, lane: activeLane, voted: validated, editEventId },
         labelKey: validated ? "editor.history.stepValidate" : "editor.history.stepUnvalidate",
         fileId: cell.fileId,
+        lane: activeLane, // AQU-1419: undone only while this lane is open.
       })
       await onCellCommitted?.(cell.id)
       // AQU-1391: only on the way IN. Un-validating a cell must not push its
@@ -7643,6 +7645,8 @@ function EditorRow({
         data: { cellId: owner.cellId, audioId, voted: validated },
         labelKey: validated ? "editor.history.stepValidateAudio" : "editor.history.stepUnvalidateAudio",
         fileId: cell.fileId,
+        // AQU-1419: the take is this lane's; from another it reads as gone.
+        lane: activeLane,
       },
       undefined,
       { pending: new Promise<boolean>((resolve) => { settle = resolve }) },

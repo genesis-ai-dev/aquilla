@@ -369,6 +369,9 @@ export function TakesStrip({
           data: { cellId, slot, before: groupOf(effectiveSelected), after: groupOf(audioId)! },
           labelKey: "editor.history.stepChooseTake",
           fileId,
+          // AQU-1419: the choice is this lane's. `targetLang` is omitted for
+          // the '' lane (see the emit above), so absent reads back as ''.
+          lane: targetLang ?? "",
         })
       }
       if (displaceRecording) {

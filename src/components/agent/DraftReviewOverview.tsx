@@ -18,11 +18,13 @@ export interface OverviewRow {
   review: DraftFindings | undefined
 }
 
-export function DraftReviewOverview({ rows, selectedCellId, disabled, onSelect }: {
+export function DraftReviewOverview({ rows, selectedCellId, disabled, onSelect, bibleData = false }: {
   rows: OverviewRow[]
   selectedCellId: string | null
   disabled: boolean
   onSelect: (cellId: string) => void
+  /** AQU-1685: name Bible data findings (the Bible data experiment is on here). */
+  bibleData?: boolean
 }) {
   const t = useT()
   return (
@@ -45,7 +47,7 @@ export function DraftReviewOverview({ rows, selectedCellId, disabled, onSelect }
               >
                 <span className="text-xs font-medium">{row.label}</span>
                 {row.review && row.review.findings.length > 0
-                  ? <DraftFindingChips review={row.review} />
+                  ? <DraftFindingChips review={row.review} bibleData={bibleData} />
                   : <span className="text-[11px] text-muted-foreground">{t("agentDraftReview.noFindings")}</span>}
               </button>
             </li>

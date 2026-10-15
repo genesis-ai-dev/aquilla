@@ -18,6 +18,9 @@ export interface RangeHighlight {
   end: number
   kind: "violation-major" | "violation-minor" | "violation-waived"
   ruleId: string
+  /** AQU-1740: the finding this underline covers, when it has one — lets a
+   *  click on it waive that match rather than the whole rule. */
+  matchHash?: string
 }
 
 /** The more severe finding sits innermost, closest to the text. */

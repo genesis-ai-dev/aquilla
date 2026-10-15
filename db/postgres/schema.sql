@@ -318,7 +318,31 @@ CREATE TABLE project_settings (
       GENERATED ALWAYS AS (CASE (settings::jsonb) ->> 'bibleResourcesEnabled' WHEN 'true' THEN TRUE WHEN 'false' THEN FALSE END) STORED,
     -- One boolean per Bible data enrichment; readers validate it
     -- (db/shared/bible-enrichments.ts readBibleEnrichments).
-    bible_enrichments JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'bibleEnrichments') STORED
+    bible_enrichments JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'bibleEnrichments') STORED,
+    -- 0171 (AQU-1840): the `wp_` block is the EVENTS WRITE PATH's projection of
+    -- this blob. Every lane write used to authorize through a
+    -- `SELECT settings` + JSON.parse of the whole multi-MB column, once per
+    -- request; a validate, a retime, a track patch and a harmonize each read
+    -- their own key out of the same load. These columns carry exactly the keys
+    -- POST /events reads, so no write-path statement names `settings` at all.
+    -- JSONB, not `->>` TEXT like the columns above, because the write path's
+    -- guards are typed (`typeof === 'number'`, `=== true`, `!== false`,
+    -- `Array.isArray`) and `->>` cannot tell a JSON number from the string
+    -- "3", or JSON false from the string "false" — reading them as TEXT would
+    -- quietly unlock a locked timeline. `->` keeps the value's JSON type, so
+    -- the driver hands back the same JS value `JSON.parse(settings)` did.
+    -- Reader: sync-worker/src/events/request-cache.ts (one statement, one row).
+    wp_archived_lanes JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'archivedLanes') STORED,
+    wp_timing_locked JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'timingLocked') STORED,
+    wp_allow_track_editing JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'allowTrackEditing') STORED,
+    wp_validation_count JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'validationCount') STORED,
+    wp_validation_role_floor JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'validationRoleFloor') STORED,
+    wp_validation_named_users JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'validationNamedUsers') STORED,
+    wp_allow_self_validation JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'allowSelfValidation') STORED,
+    wp_validation_role_floor_audio JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'validationRoleFloorAudio') STORED,
+    wp_validation_named_users_audio JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'validationNamedUsersAudio') STORED,
+    wp_allow_self_validation_audio JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'allowSelfValidationAudio') STORED,
+    wp_harmonize_min_role JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'harmonize_min_role') STORED
 );
 CREATE INDEX project_settings_agent_react ON project_settings(project_id) WHERE agent_react;
 
@@ -408,6 +432,38 @@ CREATE TABLE auth_rate_limit_events (
     created_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX idx_auth_rate_limit_lookup ON auth_rate_limit_events(kind, identifier, created_at);
+
+-- AQU-1843: the shared volumetric limiter (db/shared/rate-limit.ts) used by the
+-- chat proxy, the AI/Jev routes, TTS and the external Agent API. One row per
+-- (kind, identifier, window) rather than one row per request: the check is a
+-- single `ON CONFLICT DO UPDATE ... RETURNING hits` upsert, which takes a row
+-- lock and so hands each concurrent caller a distinct ordinal — the
+-- count-then-insert it replaced let a parallel burst all read the same
+-- pre-burst count and pass. `window_start` is the epoch-aligned start of a
+-- fixed window (15 minutes for every current caller), computed by Postgres so
+-- auth-worker and sync-worker bucket on one clock. Finished windows are
+-- deleted by the auth-worker 5-minute cron (pruneRateLimitCounters), not
+-- opportunistically off a request.
+--
+-- If this table is absent, every throttle is off in that environment: the
+-- limiter treats SQLSTATE 42P01 as "not installed" and allows the call through
+-- even on the fail-closed paid routes, because refusing them would be a total
+-- outage rather than a safeguard. Apply migration 0170 before deploying the
+-- code that reads it.
+--
+-- No app_runtime grant and no RLS policy, matching auth_rate_limit_events
+-- above: this is a non-project-scoped infrastructure table with no tenant
+-- column for a policy to key on.
+CREATE TABLE rate_limit_counters (
+    kind         TEXT NOT NULL,
+    identifier   TEXT NOT NULL,
+    window_start TIMESTAMPTZ NOT NULL,
+    hits         INTEGER NOT NULL DEFAULT 0,
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (kind, identifier, window_start)
+);
+-- Supports the prune sweep only; the hot path is a primary-key lookup.
+CREATE INDEX idx_rate_limit_counters_window ON rate_limit_counters(window_start);
 
 -- [Pen test] Auth & session mgmt (2026-08-03): denylist backing server-side
 -- logout (POST /api/v2/auth/logout, utils/token-revocation.ts). Keyed by the
@@ -852,10 +908,14 @@ CREATE TABLE cell_waivers (
     file_id    TEXT NOT NULL,
     cell_id    TEXT NOT NULL,
     rule_id    TEXT NOT NULL,
+    -- AQU-1740 (migration 0163): hash of the ONE finding this waiver dismisses
+    -- (src/lib/rules/match-hash.ts). '' = no finding named, i.e. the rule is
+    -- waived across the whole cell — the meaning of every row predating 0163.
+    match_hash TEXT NOT NULL DEFAULT '',
     reason     TEXT,
     waived_by  TEXT NOT NULL,
     waived_ts  BIGINT NOT NULL,
-    PRIMARY KEY (project_id, file_id, cell_id, rule_id)
+    PRIMARY KEY (project_id, file_id, cell_id, rule_id, match_hash)
 );
 
 CREATE TABLE cell_audio (
@@ -1053,6 +1113,8 @@ CREATE TABLE concepts (
     status         TEXT NOT NULL DEFAULT 'draft',
     case_sensitive INTEGER NOT NULL DEFAULT 0,
     match_options  JSONB,
+    -- AQU-1693 (0166): {"acai": "<ACAI entity id>"}; NULL or {} = not linked.
+    external_ids   JSONB,
     created_by     TEXT,
     created_at     BIGINT NOT NULL,
     updated_at     BIGINT NOT NULL,
@@ -1154,6 +1216,27 @@ CREATE TABLE cell_word_morph (
     strongs_h   TEXT,               -- Strong's Hebrew number (e.g. H1234), NULL for Greek
     strongs_g   TEXT,               -- Strong's Greek number (e.g. G1234), NULL for Hebrew
     PRIMARY KEY (project_id, file_id, cell_id, word_seq)
+);
+
+-- Migration 0164: Bridge 1 of the Bible data layer (AQU-1694). One row per
+-- link between a Bible Knowledge Pack word (Macula id) and a token of a
+-- gateway-language source cell, computed in the browser and uploaded through
+-- the sync-worker's source-word-alignment route. Derived data: rows are valid
+-- only while source_hash equals the source row's cells.content_hash, and the
+-- read route returns nothing else. Keep each column on one line (the dev-stack
+-- schema reconciler drops lines nested in a column's parentheses).
+CREATE TABLE source_word_alignment (
+    project_id    TEXT NOT NULL,
+    file_id       TEXT NOT NULL,
+    cell_id       TEXT NOT NULL,
+    src_word_id   TEXT NOT NULL,      -- pack word id, e.g. n43004007009
+    tgt_token_idx INTEGER NOT NULL CHECK (tgt_token_idx >= 0),   -- token of the source cell's text (tokenize order)
+    conf          REAL NOT NULL CHECK (conf >= 0 AND conf <= 1),
+    method        TEXT NOT NULL,      -- recipe, e.g. ibm1-gdfa-names/1
+    source_hash   TEXT NOT NULL,      -- cells.content_hash of the text that was aligned
+    trained_pairs INTEGER NOT NULL CHECK (trained_pairs >= 0),   -- verse cells the run trained on
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (project_id, file_id, cell_id, src_word_id, tgt_token_idx)
 );
 
 -- ────────────────────────────── indexes ─────────────────────────────────
@@ -1286,6 +1369,9 @@ CREATE TABLE IF NOT EXISTS org_credit_usage_daily (
   PRIMARY KEY (org_id, user_id, date_utc, rail)
 );
 CREATE INDEX IF NOT EXISTS idx_org_credit_org_date ON org_credit_usage_daily (org_id, date_utc);
+-- Platform-wide daily spend ceiling sums one UTC day across every org, so it
+-- has no org predicate to use the composite index above (0167, AQU-1869).
+CREATE INDEX IF NOT EXISTS idx_org_credit_date ON org_credit_usage_daily (date_utc);
 
 -- Translation agent run ledger (0040_agent_runs.sql). One row per
 -- POST /api/v1/ai/agent/run; staged commits carry payload.agent_run_id →
@@ -2010,6 +2096,10 @@ CREATE INDEX IF NOT EXISTS contextual_run_traces_created
 CREATE TABLE IF NOT EXISTS contextual_project_leases (
   id text PRIMARY KEY,
   project_id text NOT NULL,
+  -- Billing workspace of project_id, denormalized so the org ceiling
+  -- (0158_contextual_lease_org_scope.sql; AQU-1847) can be summed without
+  -- joining projects inside the acquire statement. 0 = project with no org.
+  org_id bigint NOT NULL DEFAULT 0,
   run_id text NOT NULL UNIQUE,
   weight integer NOT NULL CHECK (weight BETWEEN 1 AND 1000),
   expires_at timestamptz NOT NULL,
@@ -2020,6 +2110,39 @@ CREATE TABLE IF NOT EXISTS contextual_project_leases (
 );
 CREATE INDEX IF NOT EXISTS contextual_project_leases_project_expiry
   ON contextual_project_leases(project_id, expires_at);
+CREATE INDEX IF NOT EXISTS contextual_project_leases_org_expiry
+  ON contextual_project_leases(org_id, expires_at);
+-- The platform-wide sum and the platform-wide expiry GC both scan on expiry
+-- alone, with no project or org to narrow them.
+CREATE INDEX IF NOT EXISTS contextual_project_leases_expiry
+  ON contextual_project_leases(expires_at);
+
+-- AQU-1845 — per-LLM-call checkpoint for Autopilot waves (0169). The run
+-- cursor only advances past a COMPLETED wave, so a driver that dies mid-wave
+-- makes the replay re-issue every model call the dead attempt had already
+-- finished — calls whose output was discarded but already paid for. One row
+-- per call, written the moment it returns, read by the replay before it dials
+-- the provider.
+--
+-- Ephemeral coordination state, like contextual_project_leases above: the
+-- driver clears a run's rows after each completed wave (the cursor has moved,
+-- so nothing will replay those spans) and on settlement. `created_at` carries
+-- the retention sweep for rows whose driver never came back. `project_id` is
+-- there for the 0169 RLS policy, not for any read path — it keeps this table
+-- under the same app_contextual_project_scope() helper as its siblings.
+CREATE TABLE IF NOT EXISTS contextual_run_steps (
+  run_id     text NOT NULL,
+  project_id text NOT NULL,
+  step_key   text NOT NULL,
+  output     text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (run_id, step_key),
+  CHECK (octet_length(run_id) <= 512),
+  CHECK (octet_length(project_id) <= 512),
+  CHECK (octet_length(step_key) <= 512)
+);
+CREATE INDEX IF NOT EXISTS contextual_run_steps_created
+  ON contextual_run_steps(created_at);
 
 -- Stripe Field Plan billing + word-metered AI credits (0077_org_billing.sql).
 -- Additive: unpaid orgs have no row and are treated as plan=none.
@@ -2069,16 +2192,17 @@ CREATE TABLE IF NOT EXISTS contextual_decisions (
   id text PRIMARY KEY,                  -- uuidv7
   project_id text NOT NULL,
   run_id text,                          -- NULL once the owning run ends
-  file_id text NOT NULL,
+  file_id text,                         -- NULL for a project-wide question (0165)
   span_id text,
   cell_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
   -- WHY the agent cannot proceed, in the user's words. Never "review this".
   reason text NOT NULL,
   -- Which readiness item this gap belongs to; NULL for free-text ambiguities,
-  -- which the deterministic sweep can never close.
+  -- which the deterministic sweep can never close. 'bible-fact' (0165) asks
+  -- for a durable project fact.
   readiness_item text
     CHECK (readiness_item IS NULL OR
-           readiness_item IN ('terminology','brief','examples','rules','languages')),
+           readiness_item IN ('terminology','brief','examples','rules','languages','bible-fact')),
   -- Set only for terminology decisions: the concept whose rendering is missing.
   concept_id text,
   -- How many later passages the answer affects. Drives surfacing rank (§4.6)
@@ -2092,6 +2216,13 @@ CREATE TABLE IF NOT EXISTS contextual_decisions (
   assigned_user_id integer,
   assigned_invite_id text,
   resolution jsonb,                     -- {kind:'answered'|'researched', …}
+  -- 0165 (AQU-1691): a fact question stores its answer as a project fact
+  -- under fact_key (db/shared/project-facts.ts), offers one-click options,
+  -- and says where the fact applies. Keep each on one line: the dev-stack
+  -- schema reconciler (scripts/dev-stack-schema-parser.ts) ALTERs them in.
+  fact_key text,
+  options jsonb,                        -- [{value, label?}]
+  fact_scope jsonb,                     -- {book?, passage?: {from, to}, entity?}
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   resolved_at timestamptz
@@ -2651,3 +2782,46 @@ CREATE OR REPLACE VIEW assignment_member_cells WITH (security_invoker = true) AS
 -- AQU-1491: runtime grants, distinct from legacy word/credit allowances.
 ALTER TABLE org_billing ADD COLUMN weekly_allowance BIGINT
   CHECK (weekly_allowance >= 0 AND weekly_allowance <= 10000000);
+
+-- AQU-1249: feature-flagged WIP. Capabilities confer no project membership.
+CREATE TABLE IF NOT EXISTS checking_links (
+  token TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  created_by BIGINT NOT NULL REFERENCES users(id),
+  title TEXT NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('viewer', 'commenter', 'reviewer')),
+  units JSONB NOT NULL,
+  pin_hash TEXT,
+  failed_attempts INTEGER NOT NULL DEFAULT 0,
+  locked_until BIGINT,
+  join_count INTEGER NOT NULL DEFAULT 0,
+  join_window BIGINT NOT NULL DEFAULT 0,
+  feedback_count INTEGER NOT NULL DEFAULT 0,
+  feedback_window BIGINT NOT NULL DEFAULT 0,
+  expires_at BIGINT NOT NULL,
+  revoked_at BIGINT,
+  created_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS checking_links_project ON checking_links(project_id);
+
+-- ──────────────────────── side-effect queue ledger ────────────────────────
+
+-- AQU-1824: idempotency ledger for the side-effect queue (sync-worker
+-- src/side-effects/). One row per delivery — for comment mail the unit is
+-- (comment, recipient user) — so a queue retry or a duplicate delivery never
+-- performs the same side effect twice. See
+-- db/postgres/migrations/0168_side_effect_deliveries.sql for the status
+-- semantics and why a `pending` row is retried rather than skipped.
+CREATE TABLE side_effect_deliveries (
+    idempotency_key TEXT PRIMARY KEY,
+    kind            TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'pending'
+                      CHECK (status IN ('pending', 'sent', 'failed')),
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    last_error      TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_side_effect_deliveries_created_at
+    ON side_effect_deliveries (created_at);

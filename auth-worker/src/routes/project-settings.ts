@@ -20,14 +20,17 @@
 // `targetLanguage` left unset identifying a source-only project (AD-9) is
 // purely a downstream interpretation.
 //
-// THREE keys are permission-scoped rather than dumb-stored:
+// One key is REFUSED rather than stored:
 //
-//   AQU-822  `terminology` (the project's termbase concepts). A write whose
-//            only *changed* key is `terminology` is gated by the org's
-//            configurable `termbaseEditMinRole` floor (default project_lead
-//            500) instead of the maintainer floor below, so an org can let its
-//            translators own terminology without also handing them AI config,
-//            health thresholds, or languages.
+//   AQU-1724 `terminology`, retired. Key terms live in the `concepts` table,
+//            written with term.* events; the editor never reads this key on a
+//            migrated project. A write that CHANGES it — sets, edits or drops
+//            it — is a 400 pointing to term.* events, for every role. An echo
+//            of the stored value is not a change and passes. (AQU-822 used to
+//            give it its own `termbaseEditMinRole` floor.)
+//
+// These keys are permission-scoped rather than dumb-stored:
+//
 //   AQU-1086 the project-language keys (`sourceLanguage`, `targetLanguage`,
 //            `targetLanes`, `archivedLanes`). A write whose only *changed*
 //            keys are language keys is gated by the org's configurable
@@ -40,13 +43,14 @@
 //            project_lead 500 — whether your own project tries an experiment
 //            is a lead's call.
 //
-// Everything else keeps the maintainer gate, unchanged. All three carve-outs
-// are scoped to a write that changes NOTHING ELSE, so none widens access to
-// any other key.
+// Everything else keeps the maintainer gate, unchanged. Each carve-out is
+// scoped to a write that changes NOTHING ELSE, so none widens access to any
+// other key.
 
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
+import { pushDirtyLinksAfterResponse } from "../lib/monday/push"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE, type AuthUser } from "../types"
 import { ROLE_NAMES, resolveProjectRole } from "../services/project-permissions"
@@ -65,6 +69,10 @@ import {
   type ProjectSettingsResponse,
 } from "../../../db/shared/projects"
 import {
+  RETIRED_TERMINOLOGY_KEY,
+  RETIRED_TERMINOLOGY_MESSAGE,
+} from "../../../db/shared/project-settings-keys"
+import {
   createTargetLane,
   readLaneLastChange,
   updateTargetLane,
@@ -78,6 +86,7 @@ import {
 import { lanesForScopeVisibility } from "../../../src/lib/lanes/scope-ids"
 import { loadTargetLaneIdentities, visibleTagsForMember } from "../../../db/shared/lane-visibility"
 import { grantNewLane } from "../../../db/shared/lane-grants"
+import { markProjectMondayLinksDirty } from "../../../db/shared/monday-dirty"
 import type { AquillaDb } from "../../../db/shim/postgres"
 import { laneLanguage } from "../../../src/lib/lanes/lane-display"
 import { validateSettingsKeyValue } from "../../../db/shared/project-settings-keys"
@@ -93,9 +102,6 @@ const projectSettings = new Hono<AuthHonoEnv>()
 // (project-configuration stories: name-and-configure-project,
 // customize-ai-settings, monitor-project-health, validate-translation).
 const SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER
-
-/** The termbase key — its own (org-configurable) write floor. */
-const TERMINOLOGY_KEY = "terminology"
 
 /**
  * AQU-1083: this project's override for whether headings count toward
@@ -166,8 +172,9 @@ const ALIGNMENT_SEEDS_WRITE_MIN_ROLE = ROLE.CONTRIBUTOR
  * Top-level settings keys whose value differs between the stored blob and an
  * incoming write. Compared on the CHANGE, not on presence: the client patch
  * is a whole-object read-modify-write, so every write echoes back every key
- * it didn't touch — treating presence as a change would make the
- * terminology carve-out below unreachable in practice.
+ * it didn't touch — treating presence as a change would make every carve-out
+ * below unreachable in practice, and would refuse every save on a project
+ * that still carries the retired `terminology` blob (AQU-1724).
  *
  * Values are compared by JSON serialization. Echoed keys round-trip through
  * `JSON.parse` of the stored blob, so nested key order is preserved and this
@@ -314,16 +321,6 @@ projectSettings.on(
     const stored = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
     let settings = preserveRetiredLaneSettings(stored.settings, body.settings)
     if (role.level < SETTINGS_WRITE_MIN_ROLE) {
-      // AQU-822 / AQU-1086: below the maintainer floor, the ONLY writes
-      // allowed are a terminology-only one (gated by the org's configured
-      // termbaseEditMinRole) or a language-only one (gated by the org's
-      // configured languageEditMinRole). Any other changed key falls through
-      // to the maintainer 403 — lowering either floor must never widen write
-      // access to AI config, health, validation, or anything else.
-      //
-      // The scopes are tested in this order because a no-op write (nothing
-      // changed) satisfies both vacuously; keeping terminology first preserves
-      // the pre-AQU-1086 behaviour for that case exactly.
       // AQU-1750: behind the read wall this caller's body is an echo of a
       // filtered GET. Put back the lanes and primary language it could not
       // see before diffing, so the echo neither deletes them nor turns a
@@ -335,18 +332,30 @@ projectSettings.on(
       const restored = restoreHiddenLaneSettings(stored.settings, settings, visible, lanes)
       if (!restored.ok) return c.json({ error: restored.error }, 403)
       settings = restored.settings
-      const changed = changedSettingsKeys(stored.settings, settings)
+    }
+
+    // The diff against the stored blob, for EVERY role, taken after the
+    // read-wall echo is put back so a hidden-lane echo cannot fake a change.
+    // The retired `terminology` key is refused whoever writes it (AQU-1724),
+    // and the sub-maintainer carve-outs below are judged on the same diff.
+    const changed = changedSettingsKeys(stored.settings, settings)
+    if (changed.includes(RETIRED_TERMINOLOGY_KEY)) {
+      return c.json({ error: RETIRED_TERMINOLOGY_MESSAGE }, 400)
+    }
+
+    if (role.level < SETTINGS_WRITE_MIN_ROLE) {
+      // AQU-1086 and the single-key scopes below: below the maintainer floor,
+      // the ONLY writes allowed are a no-op one or one whose changed keys all
+      // sit in one scope, gated by that scope's floor. Any other changed key
+      // falls through to the maintainer 403 — lowering a floor must never
+      // widen write access to AI config, health, validation, or anything else.
       // Each carve-out is key-exact and carries its own floor. A write that
       // touches anything else — even alongside a permitted key — falls through
       // to the maintainer 403, so widening one of these can never widen access
       // to AI config, health, languages, or the rest.
-      // terminologyOnly/languageOnly are deliberately NOT guarded by
-      // `changed.length > 0` — a no-op write (nothing changed) satisfies both
-      // vacuously, and checking terminology first below preserves the
-      // pre-AQU-1086 behaviour for that case exactly (a read-modify-write
-      // client always echoes every key it didn't touch).
-      const terminologyOnly = changed.every((key) => key === TERMINOLOGY_KEY)
-      const languageOnly = changed.every((key) => LANGUAGE_KEYS.has(key))
+      const noop = changed.length === 0
+      const languageOnly = changed.length > 0
+        && changed.every((key) => LANGUAGE_KEYS.has(key))
       const autopilotOnly = changed.length > 0
         && changed.every((key) => key === AUTOPILOT_KEY)
       const countStructuralOnly = changed.length > 0
@@ -354,7 +363,7 @@ projectSettings.on(
       const alignmentSeedsOnly = changed.length > 0
         && changed.every((key) => key === ALIGNMENT_SEEDS_KEY)
       if (
-        !terminologyOnly && !languageOnly && !autopilotOnly
+        !noop && !languageOnly && !autopilotOnly
         && !countStructuralOnly && !alignmentSeedsOnly
       ) {
         return c.json(
@@ -362,13 +371,19 @@ projectSettings.on(
           403,
         )
       }
-      if (terminologyOnly) {
-        const termbaseFloor = await getTermbaseEditMinRoleForProject(c.env, projectId)
-        if (role.level < termbaseFloor) {
+      if (noop) {
+        // A write that changes nothing — a read-modify-write client echoes
+        // every key it didn't touch. Before AQU-1724 it reached the
+        // terminology-only branch (vacuously true for an empty diff) and was
+        // admitted at the org's termbaseEditMinRole floor. It keeps exactly
+        // that floor, so retiring the key changes no one's no-op save; routed
+        // to the language scope instead it would need languageEditMinRole
+        // (project lead by default since AQU-984, but an org may store
+        // maintainer), and a lead's save would then 403.
+        const noopFloor = await getTermbaseEditMinRoleForProject(c.env, projectId)
+        if (role.level < noopFloor) {
           return c.json(
-            {
-              error: `role >= ${termbaseFloor} required to manage this project's termbase (org termbaseEditMinRole)`,
-            },
+            { error: `role >= ${noopFloor} required to save project settings (org termbaseEditMinRole)` },
             403,
           )
         }
@@ -439,6 +454,20 @@ projectSettings.on(
       }
     }
 
+    // AQU-1692: the voice index reads these corrections, so a malformed map is
+    // refused the same way, and by the same rule as the Agent API. Null clears.
+    // An unchanged stored value rides along, as for bibleEnrichments above.
+    const rawVoiceOverrides = (body.settings as Record<string, unknown>).bibleVoiceOverrides
+    if (rawVoiceOverrides !== undefined) {
+      const problem = validateSettingsKeyValue("bibleVoiceOverrides", rawVoiceOverrides)
+      if (problem) {
+        const before = stored.settings.bibleVoiceOverrides
+        if (JSON.stringify(before) !== JSON.stringify(rawVoiceOverrides)) {
+          return c.json({ error: problem }, 400)
+        }
+      }
+    }
+
     const queryVersion = parseIntOrNull(c.req.query("ifMatchVersion"))
     const headerVersion = parseIntOrNull(c.req.header("If-Match-Version"))
     const ifMatchVersion =
@@ -504,6 +533,11 @@ projectSettings.on(
       // remains best-effort there just as it is in a deployed Worker.
       void notifyPromise
     }
+    // AQU-1771: a change to what a linked Monday board shows marked its link
+    // dirty in the write above; push it now rather than at the next cron.
+    pushDirtyLinksAfterResponse(c, {
+      projectIds: [projectId, ...(result.propagated ?? []).map((copy) => copy.projectId)],
+    })
     // `lanes` predates the write. A lane the write minted carries no grant,
     // so the newer list would hide exactly the same labels.
     return c.json(
@@ -621,6 +655,19 @@ function notifySettingsChangedBestEffort(
   }
 }
 
+// AQU-1770: a language added, renamed or archived changes what a linked Monday
+// board shows — its Languages column, and which languages its percentages
+// cover — with no project edit to trigger a push. Mark the project's boards
+// dirty and push after the response, as a counting-settings change does; the
+// cron flush picks up anything this misses.
+async function pushMondayAfterLaneChange(
+  c: { env: AuthHonoEnv["Bindings"]; executionCtx: { waitUntil(promise: Promise<unknown>): void } },
+  projectId: string,
+): Promise<void> {
+  await markProjectMondayLinksDirty(c.env.AQUILLA_PG, [projectId])
+  pushDirtyLinksAfterResponse(c, { projectIds: [projectId] })
+}
+
 // AQU-1418: lane rows are what the screen edits. The settings string registry
 // stays in step so events, the external API, and older clients still resolve
 // a lane by its legacy tag. The id is never shown. A duplicate display name
@@ -690,6 +737,7 @@ projectSettings.post(
     const fresh = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
     notifySettingsChangedBestEffort(c, projectId, fresh.version)
     const lane = fresh.lanes?.find((row) => row.id === created.laneId) ?? null
+    await pushMondayAfterLaneChange(c, projectId)
     return c.json({ lane }, 201)
   },
 )
@@ -724,6 +772,7 @@ projectSettings.patch(
     if (result.status !== "ok") return c.json({ error: result.status }, 400)
     const fresh = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
     notifySettingsChangedBestEffort(c, projectId, fresh.version)
+    await pushMondayAfterLaneChange(c, projectId)
     return c.json({ lane: fresh.lanes?.find((row) => row.id === laneId) ?? result.lane })
   },
 )
@@ -799,6 +848,7 @@ projectSettings.post(
     } catch {
       void notifyPromise
     }
+    await pushMondayAfterLaneChange(c, projectId)
     return c.json({ lane: fresh.lanes?.find((row) => row.id === laneId) ?? result.lane })
   },
 )

@@ -19,7 +19,24 @@ describe("fetchProjectSearch", () => {
     expect(url).toContain("q=hello")
     expect(url).toContain("side=target")
     expect(url).toContain("limit=25")
+    expect(url).not.toContain("case=")
     expect(url.startsWith("https://sync.example.com/api/v1/projects/proj-a/search?")).toBe(true)
+  })
+
+  it("sends match case, whole word, and regexp only when they are on", async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ results: [] }), { status: 200 }),
+    ) as unknown as typeof fetch
+    await fetchProjectSearch(
+      "proj-a",
+      "God",
+      { matchCase: true, wholeWord: true, useRegexp: true },
+      "jwt",
+    )
+    const url = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
+    expect(url).toContain("case=1")
+    expect(url).toContain("word=1")
+    expect(url).toContain("regexp=1")
   })
 
   it("returns the results array on a 200 response", async () => {

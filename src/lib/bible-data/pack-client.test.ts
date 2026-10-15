@@ -13,6 +13,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   DEFAULT_BKP_BASE,
+  __bkpMemoryBooks,
+  __bkpSettled,
   __resetBkpMemoryCache,
   loadEnabledLayers,
   loadLayer,
@@ -48,8 +50,8 @@ function layerFile(layer: string, book: string, tag: string): Record<string, unk
     structure: { segments: [], moves: [], verses: {} },
     voices: { narrator: { kind: "narrator" }, speeches: [], verses: {} },
     people: { entities: {}, mentions: {} },
-    notes: {},
-    terms: {},
+    notes: { notes: [], questions: [] },
+    terms: { words: {}, terms: {} },
   }
   return { book, tag, ...shapes[layer] }
 }
@@ -135,6 +137,26 @@ describe("version-keyed caching", () => {
   })
 })
 
+// AQU-1700: an OT book's layers are up to about 12 MB raw, several times that
+// once parsed. A session that reads book after book must hold only the open
+// one; IndexedDB answers when an earlier book is opened again.
+describe("memory", () => {
+  it("holds only the open book's layers, and reopens an earlier book from IndexedDB", async () => {
+    server.manifest = manifest("1.0.0", { JHN: ALL_BOOK_LAYERS, RUT: ALL_BOOK_LAYERS })
+    await loadLayer("text", "JHN")
+    await loadLayer("people", "JHN")
+    expect(__bkpMemoryBooks()).toEqual(["JHN"])
+
+    await loadLayer("text", "RUT")
+    expect(__bkpMemoryBooks()).toEqual(["RUT"])
+
+    fetchMock.mockClear()
+    expect((await loadLayer("text", "JHN")).ok).toBe(true)
+    expect(layerFetches()).toEqual([])
+    expect(__bkpMemoryBooks()).toEqual(["JHN"])
+  })
+})
+
 describe("loadEnabledLayers", () => {
   it("loads only the layers of the enabled enrichments", async () => {
     const onlyVoices = Object.fromEntries(
@@ -173,6 +195,20 @@ describe("loadEnabledLayers", () => {
       await loadEnabledLayers({ experimentalFlags: { bibleData: false }, files: SCRIPTURE, bibleResourcesEnabled: true }, "JHN"),
     ).toEqual({})
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+// AQU-1955: a read outlives the component that asked for it, so a test that
+// resets the fetch mock or the store between tests waits for the reads in
+// flight first, or an earlier test's fetches and writes land in the next one.
+describe("reads in flight", () => {
+  it("__bkpSettled resolves once a read nobody awaited has finished, its IndexedDB write included", async () => {
+    // Only the manifest read exists when the wait starts; the layer read
+    // begins after it, and the wait covers that too.
+    void loadLayer("voices", "JHN")
+    await __bkpSettled()
+    expect(layerFetches()).toEqual(["/bkp/v1/voices/JHN.json"])
+    expect(await __packRecordKeys()).toContain("1.0.0/voices/JHN")
   })
 })
 

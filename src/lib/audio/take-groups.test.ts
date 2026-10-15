@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
-import { groupSelection, groupTakesByTrack, piecesOf, playingTakeId, takeBaseLabel, takeRows } from "./take-groups"
+import { groupSelection, groupTakesByTrack, originalRecordingId, pieceNames, piecesOf, playingTakeId, takeBaseLabel, takeRows } from "./take-groups"
 
 const att = (audioId: string, slot: string, over: Partial<AudioAttachmentOut> = {}): AudioAttachmentOut => ({
   audioId, url: `frontier-audio://${audioId}`, slot, mimeType: null, voiceId: null, referenceAudioId: null,
@@ -87,5 +87,47 @@ describe("takeRows / piecesOf", () => {
     expect(takeBaseLabel("Take 1 · 2")).toBe("Take 1")
     expect(takeBaseLabel("Hero line")).toBe("Hero line")
     expect(takeBaseLabel(null)).toBeNull()
+  })
+})
+
+// AQU-1767 (Sam, 2026-10-15): piece numbers are worked out, not stored.
+describe("pieceNames", () => {
+  const att = (audioId: string, over: Record<string, unknown>) => ({ audioId, url: "", slot: "recording", ...over }) as unknown as AudioAttachmentOut
+  it("numbers a split take's pieces by where they sit, whatever each stored", () => {
+    const names = pieceNames([
+      att("a", { label: "Take 2 · 9" }),
+      att("c", { label: "Take 2 · 2", pieceOf: "a", trimStartMs: 3000 }),
+      att("b", { label: "Take 2 · 3", pieceOf: "a", trimStartMs: 2000 }),
+      att("x", { label: "Take 1" }),
+    ])
+    expect(names.get("a")).toBe("Take 2 · 1")
+    expect(names.get("b")).toBe("Take 2 · 2")
+    expect(names.get("c")).toBe("Take 2 · 3")
+    expect(names.get("x")).toBe("Take 1")
+  })
+  it("renumbers at once when a piece goes", () => {
+    const names = pieceNames([
+      att("a", { label: "Take 2 · 1" }),
+      att("b", { label: "Take 2 · 2", pieceOf: "a", trimStartMs: 2000, isDeleted: true }),
+      att("c", { label: "Take 2 · 3", pieceOf: "a", trimStartMs: 3000 }),
+    ])
+    expect(names.get("c")).toBe("Take 2 · 2")
+  })
+})
+
+describe("originalRecordingId", () => {
+  it("traces a piece to the take it was cut from, and a cleaned copy to what it was cleaned from", () => {
+    const takes = {
+      "audio-c1-1.wav": {},
+      "audio-c1-2.wav": { pieceOf: "audio-c1-1.wav" },
+      "dn-audio-c1-1.wav": { referenceAudioId: "audio-c1-1.wav" },
+      "dn-audio-c1-9.wav": { pieceOf: "dn-audio-c1-1.wav", referenceAudioId: "audio-c1-2.wav" },
+    }
+    expect(originalRecordingId(takes, "audio-c1-2.wav")).toBe("audio-c1-1.wav")
+    expect(originalRecordingId(takes, "dn-audio-c1-9.wav")).toBe("audio-c1-1.wav")
+    expect(originalRecordingId(takes, "dn-audio-c1-1.wav")).toBe("audio-c1-1.wav")
+  })
+  it("stops at a cleaned copy whose original is gone", () => {
+    expect(originalRecordingId({ "dn-audio-c1-1.wav": { referenceAudioId: "audio-c1-1.wav" } }, "dn-audio-c1-1.wav")).toBe("dn-audio-c1-1.wav")
   })
 })

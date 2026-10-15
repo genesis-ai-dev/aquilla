@@ -28,7 +28,7 @@ import {
   retryFailedAudioSync,
 } from "@/lib/audio/audio-attachments-bus"
 import { hasOwnRecordingLeft, removeTake, removeWholeTake, renameTake } from "@/lib/audio/take-actions"
-import { takeBaseLabel, takeRows } from "@/lib/audio/take-groups"
+import { originalRecordingId, pieceNames, takeBaseLabel, takeRows } from "@/lib/audio/take-groups"
 import { pieceGroupOf } from "@/lib/sync/cell-audio-read-types"
 import { useRecordingTextDrift } from "@/hooks/useRecordingTextDrift"
 import type { RecordingTextDrift } from "@/lib/audio/text-drift"
@@ -579,6 +579,11 @@ export function TakesStrip({
     return [...rows.filter((r) => r.isCleaned).sort(byId), ...rows.filter((r) => !r.isCleaned).sort(byId)]
   }, [takes, hide, piecesList])
 
+  // AQU-1767 (Sam, 2026-10-15): pieces numbered by where they sit, worked
+  // out here; and every take dated by the recording its words came from.
+  const names = useMemo(() => pieceNames(takes), [takes])
+  const takesById = useMemo(() => Object.fromEntries(takes.map((t) => [t.audioId, t])), [takes])
+
   if (ordered.length === 0) return null
 
   const haveTake = new Set(takes.map((t) => t.audioId))
@@ -631,7 +636,24 @@ export function TakesStrip({
           // AQU-1372: when this take was made and who made it. Absent — never
           // guessed — while the history read is still in flight, or when the
           // 200-event window does not reach back to this take's attach.
-          const provenance = (isSplit ? takeHistory.get(pieceGroupOf(att, att.audioId)) : undefined) ?? takeHistory.get(att.audioId) ?? null
+          // AQU-1767 (Sam, 2026-10-15): dated by the recording its words came
+          // from — not by when a piece was cut or a copy cleaned — so a take
+          // and all its pieces agree. A piece's own row says neither: the
+          // take above it does, once.
+          const provenance = piecesList
+            ? null
+            : takeHistory.get(originalRecordingId(takesById, att.audioId)) ??
+              takeHistory.get(pieceGroupOf(att, att.audioId)) ??
+              takeHistory.get(att.audioId) ??
+              null
+          // A recording's words checked against the line's text, in the tab.
+          // A split take is checked whole: whichever piece holds its transcript.
+          const verdict = tab && !isGenerated
+            ? transcriptVerdict({
+                timings: pieces.map((p) => timingsFor?.(p.audioId)).find((tm) => tm && tm.length > 0) ?? timingsFor?.(att.audioId),
+                cellText,
+              })
+            : null
           const isPlaying = att.audioId === playingId
           const isLoading = att.audioId === loadingId
           const isBusy = att.audioId === busyId
@@ -709,7 +731,7 @@ export function TakesStrip({
                 ) : (
                   <>
                     <span data-testid={`take-label-${att.audioId}`} className="truncate font-medium">
-                      {isSplit ? takeBaseLabel(displayLabel(att)) : displayLabel(att)}
+                      {isSplit ? takeBaseLabel(displayLabel(att)) : piecesList ? (names.get(att.audioId) ?? displayLabel(att)) : displayLabel(att)}
                     </span>
                     {isSplit && (
                       <span data-testid={`take-split-${att.audioId}`} className="shrink-0 text-muted-foreground/70">
@@ -802,7 +824,11 @@ export function TakesStrip({
                         current text, so it can never lag it — without this
                         guard, widening that list to every take would have
                         started badging TTS takes as stale. */}
-                    {!isGenerated && provenance?.drifted && (
+                    {/* Not when its transcript matches the line as it reads now:
+                        that recording says the current text, however the text
+                        got there (Sam, 2026-10-15 — using a transcript AS the
+                        text was flagging its own take). */}
+                    {!isGenerated && provenance?.drifted && verdict?.kind !== "match" && (
                       <span
                         title={t("audio.takesStrip.textDriftTooltip", {
                           date: new Date(provenance.recordedAt).toLocaleDateString(),
@@ -817,13 +843,9 @@ export function TakesStrip({
                     {/* The tab's question about every take: does it say the
                         text? A generated take is read FROM the text, so only
                         a recording is asked. */}
-                    {tab && !isGenerated && (
+                    {verdict && (
                       <TakeTextVerdict
-                        // A split take is checked whole: whichever piece holds its transcript.
-                        verdict={transcriptVerdict({
-                          timings: pieces.map((p) => timingsFor?.(p.audioId)).find((tm) => tm && tm.length > 0) ?? timingsFor?.(att.audioId),
-                          cellText,
-                        })}
+                        verdict={verdict}
                         testId={`take-verdict-${att.audioId}`}
                       />
                     )}

@@ -16,6 +16,7 @@ import {
 } from "@/lib/sync/cell-audio-read-types"
 // AQU-1571: one floor table for text and audio, as the server keeps one.
 import { VALIDATION_ROLE_FLOOR } from "@/lib/review/text-validation-policy"
+import { pieceNames } from "@/lib/audio/take-groups"
 
 /**
  * The shape every surface actually holds: a row of the editor's `CellData`,
@@ -165,11 +166,13 @@ export function audioValidationTakes(
 ): AudioValidationTake[] {
   if (!entry) return []
   const scope = audioValidationScope(project, policy)
+  // AQU-1767: a piece goes by its take's name, numbered by where it sits.
+  const names = pieceNames(Object.values(entry.attachments))
   return selectedDubTakes(entry).map((take) => {
     const verdict = canValidateTake(take, project, scope, policy.username)
     return {
       audioId: take.audioId,
-      label: take.label ?? null,
+      label: names.get(take.audioId) ?? take.label ?? null,
       slot: take.slot,
       validatorCount: take.validatorCount ?? 0,
       validators: take.validators ?? [],

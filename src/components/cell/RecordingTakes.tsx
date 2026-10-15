@@ -25,7 +25,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { useRecordingTextDrift } from "@/hooks/useRecordingTextDrift"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { audioIdSeededWith } from "@/lib/audio/upload"
-import { groupSelection, groupTakesByTrack, piecesOf, playingTakeId, type TakeGroup } from "@/lib/audio/take-groups"
+import { groupSelection, groupTakesByTrack, originalRecordingId, piecesOf, playingTakeId, type TakeGroup } from "@/lib/audio/take-groups"
 import { DEFAULT_TARGET_TRACK_ID, GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
 import { takeTrackVars, tracksForTakesIn } from "@/lib/timeline/take-colors"
 import { useEditorActions } from "@/context/EditorActionsContext"
@@ -250,7 +250,8 @@ function OwnerTakes({
                 audioId={playing}
                 timings={playingTimings}
                 readOnlyTranscript={generated}
-                provenance={(split ? history.get(split[0].pieceOf ?? split[0].audioId) : undefined) ?? history.get(playing) ?? null}
+                // AQU-1767: dated by the recording its words came from.
+                provenance={history.get(originalRecordingId(takes, playing)) ?? (split ? history.get(split[0].pieceOf ?? split[0].audioId) : undefined) ?? history.get(playing) ?? null}
                 pieces={split}
                 takesHistory={history}
                 onLastTakeRemoved={shared.onLastTakeRemoved}

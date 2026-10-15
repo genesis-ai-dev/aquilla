@@ -56,7 +56,7 @@ import type { CodexCell } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { AudioValidationControl } from "./cell/AudioValidationControl"
 import { useAudioValidation } from "@/hooks/useAudioValidation"
-import { hasOwnRecordingLeft, removeTake, removeWholeTake, renameTake } from "@/lib/audio/take-actions"
+import { hasOwnRecordingLeft, removeTake, removeWholeTake, renameTake, renameWholeTake } from "@/lib/audio/take-actions"
 import { takeBaseLabel } from "@/lib/audio/take-groups"
 import { pieceGroupOf, type AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 import { TakesStrip } from "@/components/AudioRecorder/TakesStrip"
@@ -333,19 +333,24 @@ function CellTakeBlockView({
     if (renameCancelledRef.current) { renameCancelledRef.current = false; return }
     const label = renameDraft.trim()
     // Against the name as SHOWN: an unnamed take shows "Take", and saving
-    // that unchanged would turn the placeholder into a real name.
-    if (!selectedAudioId || !label || label === (shownLabel ?? t("audio.takesStrip.takeFallback"))) return
+    // that unchanged would turn the placeholder into a real name. A split
+    // take is shown, and renamed, by its own name (AQU-1767, Sam 2026-10-15).
+    const shownName = (split ? takeBaseLabel(shownLabel) : shownLabel) ?? t("audio.takesStrip.takeFallback")
+    if (!selectedAudioId || !label || label === shownName) return
     setRenamed({ audioId: selectedAudioId, from: storedLabel, to: label })
     // Worked out before the try: a conditional inside one makes the React
     // Compiler skip the whole component (see handleDelete).
     const lane = targetLang ? { targetLang } : {}
-    const rename = { projectId: project.id, fileId: owner.fileId, cellId: owner.id, audioId: selectedAudioId, label, author: username, ...lane, labelBefore: storedLabel }
+    const where = { projectId: project.id, fileId: owner.fileId, cellId: owner.id, author: username, ...lane }
+    const save = split
+      ? () => renameWholeTake({ ...where, pieces: split, name: label })
+      : () => renameTake({ ...where, audioId: selectedAudioId, label, labelBefore: storedLabel })
     try {
-      await renameTake(rename)
+      await save()
     } catch {
       setRenamed(null)
     }
-  }, [renameDraft, selectedAudioId, shownLabel, storedLabel, project.id, owner.fileId, owner.id, username, t, targetLang])
+  }, [renameDraft, selectedAudioId, shownLabel, storedLabel, split, project.id, owner.fileId, owner.id, username, t, targetLang])
 
   const handleCorrectTranscript = useCallback(
     (corrected: string) => {
@@ -467,7 +472,11 @@ function CellTakeBlockView({
             })}
           </span>
         )}
-        {!isGenerated && provenance?.drifted && (
+        {/* Not when its transcript matches the line as it reads now: the
+            recording says the current text, however the text got there
+            (Sam, 2026-10-15 — using a transcript AS the text flagged its own
+            take). */}
+        {!isGenerated && provenance?.drifted && !(showVerdict && verdict.kind === "match") && (
           <span
             title={t("audio.takesStrip.textDriftTooltip", {
               date: new Date(provenance.recordedAt).toLocaleDateString(),
@@ -486,8 +495,8 @@ function CellTakeBlockView({
             testId="cell-take-verdict"
           />
         )}
-        {/* A split take's name is its pieces': each is renamed on its row. */}
-        {!isSection && !split && selectedAudioId && !renaming && (
+        {/* A split take is renamed whole, here; its pieces follow, numbered. */}
+        {!isSection && selectedAudioId && !renaming && (
           <AppTooltip content={t("audio.takesStrip.renameTooltip")}>
             <Button
               type="button"

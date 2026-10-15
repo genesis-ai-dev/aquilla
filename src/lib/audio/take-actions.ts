@@ -6,7 +6,7 @@
 import { emitCellAudioRemove, emitCellAudioRename, enqueueEvents } from "@/lib/sync/events-emit"
 import { injectOptimisticAudioRemove, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { audioIdSeededWith } from "@/lib/audio/upload"
-import { recordStep } from "@/lib/history/history"
+import { recordStep, withGroup } from "@/lib/history/history"
 
 /**
  * Remove one take. SUB-48: the remove gets its own overlay, so the take leaves
@@ -154,6 +154,30 @@ export async function renameTake(args: {
       fileId: args.fileId,
     })
   }
+}
+
+/**
+ * AQU-1767 (Sam, 2026-10-15): rename a split take — every piece, as ONE Undo
+ * step. Each is stored as the new name numbered by where it sits in the
+ * recording, the way the pieces are shown anyway (pieceNames works the
+ * numbers out every time, whatever a piece has stored).
+ */
+export async function renameWholeTake(args: {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** The take's pieces in the order they sit in the recording. */
+  pieces: readonly { audioId: string; label?: string | null }[]
+  name: string
+  targetLang?: string
+  author: string
+}): Promise<void> {
+  const { pieces, name, ...where } = args
+  await withGroup({ labelKey: "editor.history.stepRenameTake", fileId: args.fileId }, async () => {
+    for (const [i, piece] of pieces.entries()) {
+      await renameTake({ ...where, audioId: piece.audioId, label: `${name} · ${i + 1}`, labelBefore: piece.label ?? null })
+    }
+  }, { alwaysGroup: true })
 }
 
 /**

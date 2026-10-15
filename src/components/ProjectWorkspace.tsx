@@ -249,7 +249,7 @@ import { trackStepHandlers, trackFieldsOf, type TrackFields, type TrackTake } fr
 import { readProjectSettingsFor, writeProjectSettingsFor } from "@/lib/history/settings-access"
 import { useHistoryShortcuts } from "@/lib/history/useHistory"
 import { takeStepHandlers, type CutRecord } from "@/lib/history/take-steps"
-import { enqueueTakeRemovals, hasOwnRecordingLeft, removeTake, renameTake } from "@/lib/audio/take-actions"
+import { enqueueTakeRemovals, hasOwnRecordingLeft, removeTake, renameTake, renameWholeTake } from "@/lib/audio/take-actions"
 import { regenerateVoiceTake } from "./AudioRecorder/regenerate-voice"
 import { commitAudioValidation } from "@/lib/audio/audio-validation-commit"
 import { useOutbox } from "@/context/OutboxContext"
@@ -520,7 +520,7 @@ import { assignedFileIds } from "@/lib/assignments/assigned-files"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useMentionCandidates } from "@/hooks/useMentionCandidates"
 import { useMyScopeGrant } from "@/hooks/useMyScopes"
-import { slotSelections } from "@/lib/sync/cell-audio-read-types"
+import { selectedPieceIds, slotSelections } from "@/lib/sync/cell-audio-read-types"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { buildRepetitionCounts } from "@/lib/workflow/repetition-propagation"
 import { showBulkValidateToast, useRepetitionValidation, type BulkRepetitionOutcome, type UseRepetitionValidation } from "@/hooks/useRepetitionValidation"
@@ -11220,32 +11220,47 @@ export function ProjectWorkspace() {
       if (!project?.id) return
       const cur = readTake(cellId, audioId)
       const next = label.trim()
-      if (!cur || !next || next === (cur.att.label ?? "")) return
+      if (!cur || !next) return
+      // AQU-1767 (Sam, 2026-10-15): a piece renames its whole take — every
+      // piece, numbered by where it sits, as one Undo step.
+      const attachments = cur.owner.cell.attachments
+      const pieceIds = selectedPieceIds(attachments, audioId)
+      const where = {
+        projectId: project.id, fileId: cur.owner.fileId, cellId,
+        ...(activeLane ? { targetLang: activeLane } : {}),
+        author: currentUsername,
+      }
+      const split = pieceIds.length > 1
+      if (!split && next === (cur.att.label ?? "")) return
+      const save = split
+        ? () => renameWholeTake({ ...where, pieces: pieceIds.map((id) => ({ audioId: id, label: attachments?.[id]?.label ?? null })), name: next })
+        : () => renameTake({ ...where, audioId, label: next, labelBefore: cur.att.label ?? null })
       try {
-        await renameTake({
-          projectId: project.id, fileId: cur.owner.fileId, cellId, audioId, label: next,
-          ...(activeLane ? { targetLang: activeLane } : {}),
-          author: currentUsername,
-          labelBefore: cur.att.label ?? null,
-        })
+        await save()
       } catch {
         toast.add({ type: "error", title: t("editor.timeline.renameTakeFailed") })
       }
     },
     [project?.id, readTake, activeLane, currentUsername, t],
   )
-  /** Whether you may vote on this take (the line's audio check's own rule), and whether you have. */
+  /**
+   * Whether you may vote on this take (the line's audio check's own rule), and
+   * whether you have. A piece answers for its whole take (Sam, 2026-10-15):
+   * approved once you have approved every piece you may.
+   */
   const timelineVoteState = useCallback(
     (cellId: string, audioId: string) => {
       const owner = resolveTakeCellRef.current(cellId)
       if (!owner || !project) return { canVote: false, voted: false }
-      const take = audioValidationTakes(
+      const ids = new Set(selectedPieceIds(owner.cell.attachments, audioId))
+      if (ids.size === 0) ids.add(audioId)
+      const mine = audioValidationTakes(
         audioEntryFromCell(owner.cell),
         project,
         { roleLevel: project.syncRole?.level ?? null, username: currentUsername },
         () => "",
-      ).find((x) => x.audioId === audioId)
-      return { canVote: Boolean(take?.canValidate), voted: Boolean(take?.validators.includes(currentUsername)) }
+      ).filter((x) => ids.has(x.audioId) && x.canValidate)
+      return { canVote: mine.length > 0, voted: mine.length > 0 && mine.every((x) => x.validators.includes(currentUsername)) }
     },
     [project, currentUsername],
   )
@@ -11259,39 +11274,66 @@ export function ProjectWorkspace() {
       if (activeFileId && !isInMemberScope(myScopes, activeFileId, activeLane)) return
       const cur = readTake(cellId, audioId)
       if (!cur) return
-      // Recorded as the vote starts, so an Undo pressed while it saves undoes
-      // this vote; dropped if the vote fails.
-      let settle: (ok: boolean) => void = () => {}
-      recordStep(
+      // AQU-1767 (Sam, 2026-10-15): a piece is approved with its whole take —
+      // every piece whose vote this changes, as one Undo step.
+      const ids = new Set(selectedPieceIds(cur.owner.cell.attachments, audioId))
+      if (ids.size === 0) ids.add(audioId)
+      const changing = audioValidationTakes(
+        audioEntryFromCell(cur.owner.cell),
+        project,
+        { roleLevel: project.syncRole?.level ?? null, username: currentUsername },
+        () => "",
+      )
+        .filter((x) => ids.has(x.audioId) && (validated ? x.canValidate && !x.validators.includes(currentUsername) : x.validators.includes(currentUsername)))
+        .map((x) => x.audioId)
+      const targets = changing.length > 0 ? changing : [audioId]
+      const voteOne = async (id: string) => {
+        // Recorded as the vote starts, so an Undo pressed while it saves undoes
+        // this vote; dropped if the vote fails.
+        let settle: (ok: boolean) => void = () => {}
+        recordStep(
+          {
+            kind: "vote.audio",
+            data: { cellId, audioId: id, voted: validated },
+            labelKey: validated ? "editor.history.stepValidateAudio" : "editor.history.stepUnvalidateAudio",
+            fileId: activeFileId,
+            fileName: activeFileNameRef.current,
+          },
+          undefined,
+          { pending: new Promise<boolean>((resolve) => { settle = resolve }) },
+        )
+        try {
+          const emit = validated ? emitCellAudioValidate : emitCellAudioUnvalidate
+          await emit({
+            projectId: project.id,
+            fileId: cur.owner.fileId,
+            cellId,
+            audioId: id,
+            ...(activeLane ? { targetLang: activeLane } : {}),
+            author: currentUsername,
+            surface: "timeline", // AQU-1572
+          })
+          settle(true)
+        } catch {
+          settle(false)
+          toast.add({ type: "error", title: t("editor.timeline.voteTakeFailed") })
+        }
+      }
+      await withGroup(
         {
-          kind: "vote.audio",
-          data: { cellId, audioId, voted: validated },
           labelKey: validated ? "editor.history.stepValidateAudio" : "editor.history.stepUnvalidateAudio",
           fileId: activeFileId,
           fileName: activeFileNameRef.current,
         },
-        undefined,
-        { pending: new Promise<boolean>((resolve) => { settle = resolve }) },
+        async () => { for (const id of targets) await voteOne(id) },
       )
       try {
-        const emit = validated ? emitCellAudioValidate : emitCellAudioUnvalidate
-        await emit({
-          projectId: project.id,
-          fileId: cur.owner.fileId,
-          cellId,
-          audioId,
-          ...(activeLane ? { targetLang: activeLane } : {}),
-          author: currentUsername,
-          surface: "timeline", // AQU-1572
-        })
         await commitAudioValidation([cur.owner.fileId], { getTokenForFile: getTokenForProjectFile })
-        settle(true)
       } catch {
-        settle(false)
-        toast.add({ type: "error", title: t("editor.timeline.voteTakeFailed") })
+        // The votes are saved; the refreshed counts arrive with the next read.
       }
     },
-    [project?.id, project?.syncRole?.level, activeFileId, myScopes, activeLane, readTake, currentUsername, getTokenForProjectFile, t],
+    [project, activeFileId, myScopes, activeLane, readTake, currentUsername, getTokenForProjectFile, t],
   )
   const handleRegenerateTimelineVoice = useCallback(
     async (cellId: string, slot: string) => {

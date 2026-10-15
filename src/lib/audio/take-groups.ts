@@ -6,7 +6,7 @@
 // two slots (recordings and generated voices) together as ONE list, since only
 // one of them can play, and each added track on its own.
 
-import { audioIdSeededWith } from "@/lib/audio/upload"
+import { audioIdSeededWith, isDenoisedAudioId } from "@/lib/audio/upload"
 import { pieceGroupOf, slotSelections, type AudioAttachmentOut, type CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import { DEFAULT_TARGET_TRACK_ID, slotForTrack, trackIdForSlot } from "@/lib/timeline/track-slots"
 
@@ -123,4 +123,48 @@ export function piecesOf(takes: readonly AudioAttachmentOut[], audioId: string |
 export function takeBaseLabel(label: string | null | undefined): string | null {
   if (!label) return null
   return label.replace(/\s·\s\d+$/, "")
+}
+
+/**
+ * AQU-1767 (Sam, 2026-10-15): the name each take goes by, keyed by audioId. A
+ * split take's pieces are its name numbered by where each sits in the
+ * recording, 1, 2, 3…, worked out here every time and never read from the
+ * number stored on a piece, so a split, a deleted piece or an undo renumbers
+ * them at once. A take never split (or split down to one piece) keeps its own
+ * name. Null where a piece's take has no name.
+ */
+export function pieceNames(
+  takes: readonly Pick<AudioAttachmentOut, "audioId" | "label" | "pieceOf" | "trimStartMs">[],
+): Map<string, string | null> {
+  const names = new Map<string, string | null>()
+  for (const row of takeRows(takes as AudioAttachmentOut[])) {
+    if (row.pieces.length === 1) {
+      names.set(row.pieces[0].audioId, row.pieces[0].label ?? null)
+      continue
+    }
+    const base = takeBaseLabel(row.pieces[0].label)
+    row.pieces.forEach((p, i) => names.set(p.audioId, base ? `${base} · ${i + 1}` : null))
+  }
+  return names
+}
+
+/**
+ * AQU-1767 (Sam, 2026-10-15): the recording a take's words were spoken in —
+ * the take a piece was cut from, and behind a cleaned copy (Remove noise) the
+ * take it was cleaned from. A piece is created when it is cut and a cleaned
+ * copy when the noise is removed, but the words are as old as the recording,
+ * so "when was it recorded" and "has the text changed since" ask this one.
+ */
+export function originalRecordingId(
+  takes: Readonly<Record<string, { pieceOf?: string | null; referenceAudioId?: string | null } | undefined>>,
+  audioId: string,
+): string {
+  let id = audioId
+  for (let hops = 0; hops < 8; hops++) {
+    const root = takes[id]?.pieceOf ?? id
+    const from = isDenoisedAudioId(root) ? takes[root]?.referenceAudioId : null
+    if (!from || !takes[from] || from === root) return root
+    id = from
+  }
+  return id
 }

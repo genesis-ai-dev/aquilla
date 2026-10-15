@@ -163,9 +163,10 @@ describe("TargetAudioLane — a take's right-click menu (AQU-1767)", () => {
 
   it("names a cut take's part a piece", async () => {
     const c = cell({
-      [TAKE]: { type: "audio", url: "frontier-audio://take", slot: "recording", durationMs: 4000, trimEndMs: 2000 },
-      [PIECE]: { type: "audio", url: "frontier-audio://take", slot: "recording", durationMs: 4000, trimStartMs: 2000, pieceOf: TAKE },
+      [TAKE]: { type: "audio", url: "frontier-audio://take", slot: "recording", durationMs: 4000, trimEndMs: 2000, label: "Take 1 · 1" },
+      [PIECE]: { type: "audio", url: "frontier-audio://take", slot: "recording", durationMs: 4000, trimStartMs: 2000, pieceOf: TAKE, label: "Take 1 · 4" },
     })
+    const actions = menuActions()
     render(
       <TargetAudioLane
         {...base}
@@ -174,12 +175,15 @@ describe("TargetAudioLane — a take's right-click menu (AQU-1767)", () => {
           { cell: c, kind: "take", audioId: PIECE, pieceIndex: 1, pieceCount: 2 },
         ]}
         onCutTarget={vi.fn()}
-        takeMenu={menuActions()}
+        takeMenu={actions}
       />,
     )
     rightClick("tl-target-c1-p2", 20)
     expect((await screen.findByTestId("tl-take-menu-delete")).textContent).toContain("Delete this piece")
-    expect(screen.getByTestId("tl-take-menu-vote").textContent).toContain("Approve this piece")
+    // Sam, 2026-10-15: a piece is approved and renamed with its whole take.
+    expect(screen.getByTestId("tl-take-menu-vote").textContent).toContain("Approve this take")
+    fireEvent.click(screen.getByTestId("tl-take-menu-rename"))
+    expect(actions.rename).toHaveBeenCalledWith("c1", PIECE, "Take 1")
   })
 
   it("opens nothing on a timeline you cannot edit", () => {

@@ -1004,6 +1004,13 @@ export interface EventPayloads {
     deadline?: string | null
     /** Optional instruction note. */
     note?: string | null
+    /**
+     * AQU-1969: what the assignment hands out. Absent = 'translate', the only
+     * kind before this field existed, so every older event replays unchanged.
+     * 'validate' gives the assignee only the approving; its progress counts
+     * their own approvals in the scope.
+     */
+    kind?: 'translate' | 'validate'
   }
   'assignment.reassign': {
     assignmentId: string

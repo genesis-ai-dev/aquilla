@@ -38,6 +38,7 @@ import { FLOOR_LABEL } from "@/pages/settings/constants"
 import type { UseOrgSettings } from "@/hooks/useOrgSettings"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { fetchVisibilityOverrideCounts, type VisibilityOverrideCounts } from "@/lib/sync/org-settings"
+import { projectOverviewPath } from "@/lib/navigation/org-paths"
 import { OverrideStatus } from "./OverrideStatus"
 
 interface RosterProgressSectionProps {
@@ -89,7 +90,9 @@ export function RosterProgressSection({ orgSettings, canEdit, orgId }: RosterPro
   // AQU-1771: a project may make either floor stricter, never looser. Each
   // row says how many did, like the other org defaults. No reset link: a
   // project that hides more than the org asked for chose to, and putting it
-  // back is that project's call.
+  // back is that project's call. AQU-1938: so the count opens a list of those
+  // projects, each linking to its overview, where its Team and Members badges
+  // set these two.
   const stricter = useStricterProjectCounts(orgId, rosterViewMinRole, memberProgressViewMinRole)
 
   const [rosterBusy, setRosterBusy] = useState(false)
@@ -136,6 +139,8 @@ export function RosterProgressSection({ orgSettings, canEdit, orgId }: RosterPro
                 count={stricter?.rosterViewMinRole ?? 0}
                 kind="stricter"
                 loading={stricter == null}
+                projects={stricter?.overrideProjects?.rosterViewMinRole ?? null}
+                projectHref={projectOverviewPath}
               />
             )}
           </>
@@ -161,6 +166,8 @@ export function RosterProgressSection({ orgSettings, canEdit, orgId }: RosterPro
                 count={stricter?.memberProgressViewMinRole ?? 0}
                 kind="stricter"
                 loading={stricter == null}
+                projects={stricter?.overrideProjects?.memberProgressViewMinRole ?? null}
+                projectHref={projectOverviewPath}
               />
             )}
           </>

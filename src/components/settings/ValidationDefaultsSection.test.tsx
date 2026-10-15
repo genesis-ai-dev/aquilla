@@ -1,8 +1,9 @@
 // AQU-1771: the org's default number of required validators, text and audio,
 // on the Project defaults page.
 import { describe, it, expect, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { MemoryRouter } from "react-router-dom"
 import { ValidationDefaultsSection } from "./ValidationDefaultsSection"
 import type { UseOrgSettings } from "@/hooks/useOrgSettings"
 
@@ -94,5 +95,27 @@ describe("ValidationDefaultsSection", () => {
     expect(screen.getAllByTestId("override-status-loading")).toHaveLength(2)
     expect(textPicker().hasAttribute("disabled") || textPicker().getAttribute("aria-disabled") === "true" || textPicker().hasAttribute("data-disabled")).toBe(true)
   })
-})
 
+  it("each count opens its own projects, each linking to its Validation settings (AQU-1938)", async () => {
+    const settings = orgSettings({
+      validationCountOverrides: 2,
+      validationCountAudioOverrides: 1,
+      overrideProjects: {
+        validationCount: { total: 2, projects: [{ id: "p-gen", name: "Genesis" }, { id: "p-exo", name: "Exodus" }] },
+        validationCountAudio: { total: 1, projects: [{ id: "p-lev", name: "Leviticus" }] },
+        countStructuralCells: null,
+      },
+    })
+    render(<MemoryRouter><ValidationDefaultsSection orgSettings={settings} canEdit /></MemoryRouter>)
+    const [text, audio] = screen.getAllByTestId("override-status")
+    await userEvent.click(within(text).getByRole("button", { name: "2 projects set their own number" }))
+    expect(within(text).getByRole("link", { name: "Genesis" })).toHaveAttribute("href", "/project/p-gen/settings/validation")
+    expect(within(text).getByRole("link", { name: "Exodus" })).toHaveAttribute("href", "/project/p-exo/settings/validation")
+    // The audio line's list is its own, and stays shut.
+    expect(within(audio).queryByRole("link")).toBeNull()
+    await userEvent.click(within(audio).getByRole("button", { name: "1 project sets its own number" }))
+    expect(within(audio).getByRole("link", { name: "Leviticus" })).toHaveAttribute("href", "/project/p-lev/settings/validation")
+    // The reset still sits beside each count.
+    expect(within(text).getByRole("button", { name: "Reset to default" })).toBeInTheDocument()
+  })
+})

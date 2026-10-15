@@ -31,6 +31,7 @@ export function FindOptionToggles({
         label={t("search.find.matchCase")}
         onPressedChange={onMatchCaseChange}
       >
+        {/* i18n-exempt match-case glyph; the name is search.find.matchCase */}
         Aa
       </FindToggle>
       <FindToggle
@@ -38,6 +39,7 @@ export function FindOptionToggles({
         label={t("search.find.wholeWord")}
         onPressedChange={onWholeWordChange}
       >
+        {/* i18n-exempt whole-word glyph; the name is search.find.wholeWord */}
         <span className="underline decoration-1 underline-offset-[3px]">ab</span>
       </FindToggle>
       <FindToggle

@@ -827,8 +827,9 @@ export function TakesStrip({
                         testId={`take-verdict-${att.audioId}`}
                       />
                     )}
-                    {/* A split take's name is its pieces': rename them where they are listed. */}
-                    {!isSplit && <AppTooltip content={t("audio.takesStrip.renameTooltip")}>
+                    {/* A split take's pieces are not renamed one by one (Sam,
+                        2026-10-15): on its pieces' rows a piece is only deleted. */}
+                    {!isSplit && !piecesList && <AppTooltip content={t("audio.takesStrip.renameTooltip")}>
                       <Button
                         type="button"
                         variant="ghost"
@@ -892,10 +893,12 @@ export function TakesStrip({
                   validation read-only. In the Recording tab's lists nothing
                   is circled — the take that plays sits above them, with its
                   own vote. */}
-              {/* AQU-1767: a split take's row stands for every piece; a piece
-                  of the playing take is approved on its own row. */}
+              {/* AQU-1767: a split take's row stands for every piece. Its pieces'
+                  rows show their approval but take no vote: the take is approved
+                  whole, from the top (Sam, 2026-10-15: a piece is not edited on
+                  its own here, only deleted). */}
               <AudioValidationControl
-                  readOnly={readOnly || (!piecesList && (tab || !isCircled))}
+                  readOnly={readOnly || piecesList || tab || !isCircled}
                   cellRef={cellId}
                   takes={pieces.flatMap((p) => audioValidation.takeFor(
                     { attachments: { [p.audioId]: p }, selectedBySlot: { [p.slot]: p.audioId } },

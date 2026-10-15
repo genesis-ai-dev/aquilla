@@ -68,8 +68,13 @@ describe("RecordingTakes — a split take (AQU-1767)", () => {
     expect(within(pieces).getByTestId(`take-label-${P2}`)).toHaveTextContent("Take 1 · 2")
     // Pieces play together: nothing on a piece's row chooses it on its own.
     expect(within(pieces).queryByRole("button", { name: "Use this take" })).toBeNull()
-    // Each piece is approved on its own row; the take's name is its pieces'.
-    expect(within(pieces).getAllByTestId("audio-validation-button")).toHaveLength(2)
+    // Sam, 2026-10-15: a piece is not edited on its own here, only deleted —
+    // its approval shows but takes no vote, and it has no rename.
+    const votes = within(pieces).getAllByTestId("audio-validation-button")
+    expect(votes).toHaveLength(2)
+    for (const v of votes) expect(v.hasAttribute("aria-pressed")).toBe(false)
+    expect(within(pieces).queryByRole("button", { name: "Rename take" })).toBeNull()
+    expect(within(pieces).getAllByRole("button", { name: "Delete take" })).toHaveLength(2)
     expect(screen.queryByTestId("cell-take-rename-button")).toBeNull()
   })
 

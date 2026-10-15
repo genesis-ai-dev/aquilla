@@ -10394,6 +10394,8 @@ export function ProjectWorkspace() {
           // speech, recorded takes voice the target text (per-cell in the batch).
           sourceLanguage: activeSourceLanguage,
           targetLanguage: activeLaneTargetLanguage,
+          // AQU-1978: each take's timings are written in this lane.
+          ...(activeLane ? { targetLang: activeLane } : {}),
           onProgress: (done, total) => {
             lastDone = done
             lastTotal = total
@@ -10880,6 +10882,8 @@ export function ProjectWorkspace() {
           session: frontierSession ?? null,
           sourceLanguage: activeSourceLanguage,
           targetLanguage: activeLaneTargetLanguage,
+          // AQU-1978: each take's timings are written in this lane.
+          ...(activeLane ? { targetLang: activeLane } : {}),
           force: true,
         })
         // AQU-783: the batch enqueues one cell.audio.attach per cell but never
@@ -10893,7 +10897,7 @@ export function ProjectWorkspace() {
     [
       activeFileId, project, takeCellsFor, frontierSession,
       getTokenForProjectFile, refreshOutboxPending, revalidateCells,
-      activeSourceLanguage, activeLaneTargetLanguage,
+      activeSourceLanguage, activeLaneTargetLanguage, activeLane,
     ],
   )
 

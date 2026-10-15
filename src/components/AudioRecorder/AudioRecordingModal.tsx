@@ -1539,6 +1539,9 @@ export function AudioRecordingModal({
         // sibling-deselect would drop that track's real take. This is the
         // caller that knows, so it says.
         slot: targetSlot,
+        // AQU-1978: …and the lane, for the same reason: the timings re-attach
+        // deselects within the lane it names, and naming none meant `''`.
+        ...(laneTag ? { targetLang: laneTag } : {}),
       })
       scheduleAutoAdvance()
     } catch (e) {

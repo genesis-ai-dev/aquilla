@@ -242,19 +242,38 @@ export function ToolsMountProvider({ children }: { children: ReactNode }) {
   const { project: projectRecord, roleLevel } = useProject(projectId)
   const [jobs, setJobs] = useState<HeadlessJob[]>([])
   const finishJob = useCallback((key: string) => setJobs((prev) => prev.filter((j) => j.key !== key)), [])
+  // A click can arrive before this provider's own tool list has the tool
+  // (the extensions page lists tools with its own, faster read; a just-installed
+  // tool): the run waits for the list instead of being silently dropped.
+  const pendingActions = useRef<Array<{ toolId: string; actionId: string; trigger: "click" | "open" }>>([])
   const runAction = useCallback(
     (toolId: string, actionId: string, trigger: "click" | "open" = "click") => {
       const tool = tools.find((x) => x.id === toolId)
       const action = tool?.manifest.actions?.find((a) => a.id === actionId)
-      if (!tool || !action) return
+      if (!tool || !action) {
+        const first = pendingActions.current.length === 0
+        pendingActions.current.push({ toolId, actionId, trigger })
+        // Loaded but missing: it was installed after the last list — read it again (once).
+        if (first && toolsReady) refresh()
+        return
+      }
       setJobs((prev) =>
         prev.some((j) => j.toolId === toolId && j.actionId === actionId)
           ? prev
           : [...prev, { key: `${toolId}:${actionId}:${Date.now()}`, toolId, kind: "action", label: action.label, actionId, trigger }],
       )
     },
-    [tools],
+    [tools, toolsReady, refresh],
   )
+  useEffect(() => {
+    if (pendingActions.current.length === 0 || !toolsReady) return
+    const waiting = pendingActions.current
+    pendingActions.current = []
+    for (const p of waiting) {
+      const known = tools.some((t) => t.id === p.toolId && t.manifest.actions?.some((x) => x.id === p.actionId))
+      if (known) runAction(p.toolId, p.actionId, p.trigger)
+    }
+  }, [tools, toolsReady, runAction])
   const runExport = useCallback(
     (toolId: string, exportId: string, fileIds: string[], lane: string) =>
       new Promise<HeadlessOutcome>((resolve) => {

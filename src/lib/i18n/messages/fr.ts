@@ -3337,7 +3337,6 @@ export const fr: Catalog = {
   "org.projectOverview.plan.frontMatter": "préliminaires",
   "org.projectOverview.plan.tileAria": {"forms":{"one":"Chapitre {chapter} : {count} cellule manquante","many":"Chapitre {chapter} : {count} cellules manquantes","other":"Chapitre {chapter} : {count} cellules manquantes"},"countVar":"count"},
   "org.projectOverview.plan.tileAriaSection": {"forms":{"one":"{section} : {count} cellule manquante","many":"{section} : {count} cellules manquantes","other":"{section} : {count} cellules manquantes"},"countVar":"count"},
-  "org.projectOverview.plan.audioSharedAcrossLanes": "l'audio est partagé entre toutes les langues",
   "org.projectOverview.plan.assignedTo": "Assigné à",
   "org.projectOverview.plan.assign": "Assigner",
   "org.projectOverview.plan.assignmentScope": {"forms":{"one":"{scope} · {count} cellule","many":"{scope} · {count} cellules","other":"{scope} · {count} cellules"},"countVar":"count"},

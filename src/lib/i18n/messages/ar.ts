@@ -3352,7 +3352,6 @@ export const ar: Catalog = {
   "org.projectOverview.plan.frontMatter": "المقدمة",
   "org.projectOverview.plan.tileAria": {"forms":{"zero":"الفصل {chapter}: ينقص {count} خلية","one":"الفصل {chapter}: ينقص {count} خلية","two":"الفصل {chapter}: ينقص {count} خليتان","few":"الفصل {chapter}: ينقص {count} خلايا","many":"الفصل {chapter}: ينقص {count} خلية","other":"الفصل {chapter}: ينقص {count} خلية"},"countVar":"count"},
   "org.projectOverview.plan.tileAriaSection": {"forms":{"zero":"{section}: ينقص {count} خلية","one":"{section}: ينقص {count} خلية","two":"{section}: ينقص {count} خليتان","few":"{section}: ينقص {count} خلايا","many":"{section}: ينقص {count} خلية","other":"{section}: ينقص {count} خلية"},"countVar":"count"},
-  "org.projectOverview.plan.audioSharedAcrossLanes": "الصوت مشترك بين جميع اللغات",
   "org.projectOverview.plan.assignedTo": "مُسنَد إلى",
   "org.projectOverview.plan.assign": "إسناد",
   "org.projectOverview.plan.assignmentScope": {"forms":{"zero":"{scope} · {count} خلية","one":"{scope} · {count} خلية","two":"{scope} · {count} خليتان","few":"{scope} · {count} خلايا","many":"{scope} · {count} خلية","other":"{scope} · {count} خلية"},"countVar":"count"},

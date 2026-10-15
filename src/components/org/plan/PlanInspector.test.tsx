@@ -59,7 +59,6 @@ type InspectorExtras = {
   onGoToFirstOpen?: (kind: PlanOpenKind) => void
   onOpenCell?: (cellId: string) => void
   onOpenUnit?: () => void
-  laneCount?: number
   assignments?: ReactNode
 }
 
@@ -261,25 +260,13 @@ describe("progress and navigation", () => {
     expect(screen.getByTestId("plan-last-activity")).toHaveTextContent("No activity yet")
   })
 
-  it("warns a multi-language project that its audio bar is the same on every tab", () => {
-    // AQU-1278: recordings hang off the file, so a manager comparing two lanes
-    // is seeing the truth rather than a stuck filter.
-    renderInspector(unit({ audioCount: 40 }), true, true, null, { laneCount: 3 })
-    expect(screen.getByTestId("plan-audio-shared-note"))
-      .toHaveTextContent("audio is shared by every language")
-  })
-
-  it("says nothing of the kind on a single-language project", () => {
-    renderInspector(unit({ audioCount: 40 }), true, true, null, { laneCount: 1 })
+  it("never says audio is shared by every language", () => {
+    // AQU-1977: it was true when a recording hung off the file (AQU-1278). A
+    // take belongs to one language since AQU-1591, so each tab's audio bar is
+    // that language's own and the note would contradict the bar beside it.
+    renderInspector(unit({ audioCount: 40 }), true, true, null)
     expect(screen.queryByTestId("plan-audio-shared-note")).toBeNull()
-  })
-
-  it("keeps the note off a text-only book, whatever the rest of the project records", () => {
-    // Per FILE, like the tiles. The project has audio elsewhere (showAudio),
-    // so the bar still draws — but under a bar reading 0/0% the note was
-    // explaining numbers that were not there.
-    renderInspector(unit({ audioCount: 0 }), true, true, null, { laneCount: 3 })
-    expect(screen.queryByTestId("plan-audio-shared-note")).toBeNull()
+    expect(screen.queryByText(/shared by every language/)).toBeNull()
   })
 
   it("renders whatever the assignment block is given as", () => {

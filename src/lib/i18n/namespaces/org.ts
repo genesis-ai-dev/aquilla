@@ -1622,7 +1622,6 @@ export const org = defineNamespace({
     // Audio hangs off the file, not off a target language, so every lane reads
     // the same recordings — a manager comparing two lanes' audio bars and
     // finding them identical is seeing the truth, not a stuck filter.
-    "org.projectOverview.plan.audioSharedAcrossLanes": "audio is shared by every language",
     // ── AQU-1278: per-assignment progress ──────────────────────────────
     // Who owns which slice of a unit, and how far along their slice is.
     "org.projectOverview.plan.assignedTo": "Assigned to",
@@ -3629,10 +3628,6 @@ export const org = defineNamespace({
           section: "The section's own key, e.g. a book code or a scene name. Not translated.",
           count: "Outstanding cells in that section — a number, and the one the plural agrees with.",
         },
-      },
-      "org.projectOverview.plan.audioSharedAcrossLanes": {
-        description:
-          "Note beside the inspector's audio bars: recordings hang off the file rather than off one target language, so every lane reads the same audio figures. Lower case because it is read as a parenthetical beside the bars, not as a sentence of its own.",
       },
       "org.projectOverview.plan.assignedTo": {
         description:

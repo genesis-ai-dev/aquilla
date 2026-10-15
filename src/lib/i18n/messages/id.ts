@@ -3364,7 +3364,6 @@ export const id: Catalog = {
   "org.projectOverview.plan.frontMatter": "bagian awal",
   "org.projectOverview.plan.tileAria": {"forms":{"other":"Pasal {chapter}: kurang {count} sel"},"countVar":"count"},
   "org.projectOverview.plan.tileAriaSection": {"forms":{"other":"{section}: kurang {count} sel"},"countVar":"count"},
-  "org.projectOverview.plan.audioSharedAcrossLanes": "audio dipakai bersama oleh semua bahasa",
   "org.projectOverview.plan.assignedTo": "Ditugaskan kepada",
   "org.projectOverview.plan.assign": "Tugaskan",
   "org.projectOverview.plan.assignmentScope": {"forms":{"other":"{scope} · {count} sel"},"countVar":"count"},

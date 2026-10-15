@@ -174,13 +174,32 @@ export function portfolioTargetLabel(p: {
   return fromLane || p.targetLanguage?.trim() || null
 }
 
+/**
+ * AQU-1977: the project's MAIN target language — its former default ('')
+ * lane while it has one, which keeps an old project's label, otherwise its
+ * first live target lane in position order, the lane the editor opens. A
+ * project made since AQU-1594 has no '' lane, so the '' lookup alone named
+ * nothing and its pair read "English" with no target.
+ */
+export function portfolioMainTargetLabel(p: {
+  lanes?: PortfolioLane[]
+  targetLanguage?: string | null
+}): string | null {
+  const fromDefault = portfolioTargetLabel(p)
+  if (fromDefault) return fromDefault
+  const first = (p.lanes ?? [])
+    .filter((lane) => lane.role !== "source" && lane.archived !== true)
+    .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))[0]
+  return laneLabelText(first) ?? null
+}
+
 export function languagePairLabel(p: {
   lanes?: PortfolioLane[]
   sourceLanguage?: string | null
   targetLanguage?: string | null
 }): string | null {
   const source = portfolioSourceLabel(p)
-  const target = portfolioTargetLabel(p)
+  const target = portfolioMainTargetLabel(p)
   if (source && target) return `${source} → ${target}`
   return target ?? source ?? null
 }

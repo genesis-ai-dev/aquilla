@@ -49,6 +49,7 @@ import { ROLE } from "@/lib/frontier/roles"
 import { laneTranslatedPct, laneValidatedPct, type PortfolioLane } from "@/lib/frontier/portfolio"
 import type { FileReference } from "@/lib/parsers/types"
 import type { ProjectMember } from "@/lib/frontier/members"
+import type { AssignLaneOption } from "@/lib/sync/assignment-lane"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { progressPercentOfFraction } from "@/lib/progress/progress-percent"
 import { textProgressSegments } from "@/lib/progress/progress-palette"
@@ -69,6 +70,8 @@ export interface OverviewLaneTableProps {
   defaultLanguageLabel: string
   /** Non-default lane registry (project.targetLanes) — AssignModal's lane select. */
   extraLanes: string[]
+  /** AQU-1977: the project's own languages, in order — what Assign offers. See AssignModal's `lanes`. */
+  assignLanes?: readonly AssignLaneOption[]
   /** All project files — AssignModal's book/file scope picker. */
   files: FileReference[]
   /** Caller's project role level — gates + passed to AssignModal. */
@@ -155,6 +158,7 @@ export function OverviewLaneTable({
   archivedLanes = [],
   defaultLanguageLabel,
   extraLanes,
+  assignLanes,
   files,
   roleLevel,
   author,
@@ -453,6 +457,7 @@ export function OverviewLaneTable({
         activeFileId={null}
         projectFiles={files}
         targetLanes={extraLanes}
+        lanes={assignLanes}
         defaultLane={assignLane ?? ""}
         members={members}
         roleLevel={roleLevel}

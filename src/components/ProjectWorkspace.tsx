@@ -33,6 +33,7 @@ import { ROLE } from "@/lib/frontier/roles"
 import { languagesEqual } from "@/lib/language-normalize"
 import { importLanguageDecision } from "@/lib/import-language"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
+import { assignLaneOptions } from "@/lib/sync/assignment-lane"
 import { laneCodesByTag, laneLabelsByTag, laneRowLanguage, type LaneLanguageRow } from "@/lib/lanes/lane-language"
 import { switcherLaneTags } from "@/lib/lanes/switcher-lanes"
 import {
@@ -2218,6 +2219,13 @@ export function ProjectWorkspace() {
   const audioProject = useMemo(
     () => (project ? { ...project, ttsSettings: tts.settings } : null),
     [project, tts.settings],
+  )
+  // AQU-1977: what the Assign dialog offers — the project's own languages, in
+  // order, by name, with no invented "Default language" (a project made since
+  // AQU-1594 has no '' lane, and work assigned into one belongs to no lane).
+  const assignLanes = useMemo(
+    () => assignLaneOptions(project?.lanes, t("dialog.assign.defaultLaneFallback")),
+    [project?.lanes, t],
   )
   // 2026-08-07: on a TIME-ORDERED file the Media lens stacks the timeline over
   // the plain text table — audioLens (the per-row voice-panel mode) applies
@@ -15137,6 +15145,7 @@ export function ProjectWorkspace() {
           activeFileId={assignTargetFileId ?? activeFileId}
           projectFiles={projectFiles}
           targetLanes={extraRegistryLanes(project.targetLanes, activeTargetLanguage)}
+          lanes={assignLanes}
           laneLabels={laneLabels}
           defaultLane={activeLane}
           defaultLaneLabel={activeTargetLanguage ?? ""}

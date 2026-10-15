@@ -3349,7 +3349,6 @@ export const th: Catalog = {
   "org.projectOverview.plan.frontMatter": "ส่วนนำ",
   "org.projectOverview.plan.tileAria": {"forms":{"other":"บทที่ {chapter}: ขาดอีก {count} เซลล์"},"countVar":"count"},
   "org.projectOverview.plan.tileAriaSection": {"forms":{"other":"{section}: ขาดอีก {count} เซลล์"},"countVar":"count"},
-  "org.projectOverview.plan.audioSharedAcrossLanes": "เสียงใช้ร่วมกันทุกภาษา",
   "org.projectOverview.plan.assignedTo": "มอบหมายให้",
   "org.projectOverview.plan.assign": "มอบหมาย",
   "org.projectOverview.plan.assignmentScope": {"forms":{"other":"{scope} · {count} เซลล์"},"countVar":"count"},

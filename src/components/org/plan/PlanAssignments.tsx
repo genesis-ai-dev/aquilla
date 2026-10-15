@@ -39,6 +39,7 @@ import { formatList } from "@/lib/i18n/format"
 import { classifyPlanSection, isTimeBucketKey, numberedBookCodes, planSectionLabel } from "@/lib/plan/plan-section"
 import { planPct, planUnitShortfall, type PlanShortfall } from "@/lib/plan/plan-status"
 import type { UnitAssignment, UnitAssignmentChapter } from "@/lib/sync/assignments"
+import type { AssignLaneOption } from "@/lib/sync/assignment-lane"
 import type { FileReference, FileType } from "@/lib/parsers/types"
 import { SectionVisibilityGate } from "../SectionVisibilityBadge"
 import { laneChipLabel } from "../project-lanes"
@@ -127,6 +128,8 @@ export interface PlanAssignTarget {
   files: { id: string; name: string }[]
   /** Extra (non-default) lane tags, so the modal can offer its lane select. */
   targetLanes: string[]
+  /** AQU-1977: the project's own target lanes, in order. See AssignModal's `lanes`. */
+  lanes?: readonly AssignLaneOption[]
   jwt: string
   author: string
   roleLevel: number
@@ -473,6 +476,7 @@ function PlanAssignHost({
       activeFileId={target.activeFileId}
       projectFiles={projectFiles}
       targetLanes={target.targetLanes}
+      lanes={target.lanes}
       // The lane the inspector is showing, so work assigned from here lands in
       // the language whose numbers the manager was just reading.
       defaultLane={lane}

@@ -38,13 +38,20 @@ import { fmtDeadlineDate } from "@/lib/format-date"
 import { formatList } from "@/lib/i18n/format"
 import { classifyPlanSection, isTimeBucketKey, numberedBookCodes, planSectionLabel } from "@/lib/plan/plan-section"
 import { planPct, planUnitShortfall, type PlanShortfall } from "@/lib/plan/plan-status"
-import type { UnitAssignment, UnitAssignmentChapter } from "@/lib/sync/assignments"
+import type { UnitAssignment, UnitAssignmentChapter, ValidationProgress } from "@/lib/sync/assignments"
+import {
+  compareValidationBehind,
+  isValidationRow,
+  validationLeft,
+  validationLeftOverall,
+} from "@/lib/assignments/validation-progress"
 import type { AssignLaneOption, TeamLaneAttachment } from "@/lib/sync/assignment-lane"
 import type { FileReference, FileType } from "@/lib/parsers/types"
 import { SectionVisibilityGate } from "../SectionVisibilityBadge"
 import { laneChipLabel } from "../project-lanes"
 import { PlanBar } from "./PlanBar"
 import { usePlanShortfallRenderer, usePlanReadoutTips } from "./use-plan-note"
+import { useValidationProgressLines } from "../use-validation-progress"
 
 /** AssignModal takes the editor's cell selection; a PM surface has none. */
 const EMPTY_SELECTION: ReadonlySet<string> = new Set()
@@ -218,6 +225,10 @@ export function PlanAssignments({
 }: PlanAssignmentsProps) {
   const t = useT()
   const [assignOpen, setAssignOpen] = useState(false)
+  // AQU-1969: translators first, in the order this panel has always listed
+  // them; then each validator, furthest behind first.
+  const translateRows = assignments.filter((a) => !isValidationRow(a))
+  const validateRows = assignments.filter(isValidationRow).sort(compareValidationBehind)
 
   // Nothing to say and no way to act: render no heading rather than an empty
   // box under a label, which reads as a section that failed to load.
@@ -244,7 +255,7 @@ export function PlanAssignments({
 
         {assignments.length > 0 && (
           <ul className="flex flex-col gap-2">
-            {assignments.map((a) => (
+            {translateRows.map((a) => (
               <PlanAssignmentRow
                 key={a.assignmentId}
                 assignment={a}
@@ -253,6 +264,17 @@ export function PlanAssignments({
                 defaultLaneLabel={defaultLaneLabel}
                 showAudio={showAudio}
                 unitSectionKeys={unitSectionKeys}
+              />
+            ))}
+            {validateRows.map((a) => (
+              <PlanValidationRow
+                key={a.assignmentId}
+                assignment={a}
+                validation={a.validation}
+                now={now}
+                lane={lane}
+                defaultLaneLabel={defaultLaneLabel}
+                showAudio={showAudio}
               />
             ))}
           </ul>
@@ -435,6 +457,118 @@ function PlanAssignmentRow({
               validated: planPct(a.audioValidated, a.cellsTotal),
             })}
             tips={readoutTips("audio", a.recorded, a.audioValidated, a.cellsTotal)}
+          />
+        )}
+      </div>
+    </li>
+  )
+}
+
+/**
+ * AQU-1969: one person's VALIDATING of the unit — their own approvals, not the
+ * unit's. Laid out like a translator's row (name and what is left on top, then
+ * the slice, then the bars) so the two read as one list, with a chip saying
+ * which kind of work this is.
+ *
+ * Measured in the assignment's own language whatever tab is showing: an
+ * approval belongs to one language. A row in another language carries the
+ * lane chip, exactly as a translator's does.
+ *
+ * The bars keep their meaning from the row above them, narrowed to this
+ * person: the outer bar is what is ready for them (translated, or recorded),
+ * the inner one what they have approved.
+ */
+function PlanValidationRow({
+  assignment: a,
+  validation: v,
+  now,
+  lane,
+  defaultLaneLabel,
+  showAudio,
+}: {
+  assignment: UnitAssignment
+  validation: ValidationProgress
+  now: number
+  lane: string
+  defaultLaneLabel: string
+  showAudio: boolean
+}) {
+  const t = useT()
+  const { locale } = useI18n()
+  const readoutTips = usePlanReadoutTips()
+  const progressLines = useValidationProgressLines()
+  const otherLane = a.targetLang !== lane
+  const left = showAudio ? validationLeftOverall(v) : validationLeft(v.text)
+  const lines = progressLines(v, showAudio)
+  const ready = (c: ValidationProgress["text"]) => Math.max(0, c.total - c.waiting)
+
+  const meta = [
+    a.scopeLabel,
+    a.deadline
+      ? t("org.projectOverview.plan.assignmentDue", { date: fmtDeadlineDate(a.deadline, now, locale) })
+      : t("org.projectOverview.plan.assignmentNoDeadline"),
+  ].join(" · ")
+
+  return (
+    <li className="flex flex-col gap-1" data-testid={`plan-assignment-${a.assignmentId}`} data-kind="validate">
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <span className="flex min-w-0 items-center gap-2">
+          <UserChip userId={a.assigneeUserId} username={a.username} size="xs" nameClassName="text-[13px]" />
+          {/* Same chip as the language one beside it: a quiet label, not a control. */}
+          <span
+            data-testid="plan-assignment-kind"
+            className="shrink-0 rounded border bg-card px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground"
+          >
+            {t("org.validationProgress.kindChip")}
+          </span>
+          {otherLane && (
+            <span
+              data-testid="plan-assignment-lane"
+              className="shrink-0 rounded border bg-card px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground"
+            >
+              {laneChipLabel(a.targetLang, defaultLaneLabel, t("org.projectOverview.laneDefaultFallback"), a.laneName)}
+            </span>
+          )}
+        </span>
+        <span
+          className={`shrink-0 text-[11px] tabular-nums ${
+            left > 0 ? "font-medium text-foreground" : "text-muted-foreground"
+          }`}
+          data-testid={`plan-assignment-left-${a.assignmentId}`}
+        >
+          {left > 0
+            ? t("org.validationProgress.left", { count: left })
+            : t("org.projectOverview.plan.nothingLeft")}
+        </span>
+      </div>
+
+      <p className="text-[11.5px] text-muted-foreground">{meta}</p>
+      <p className="text-[11.5px] tabular-nums text-muted-foreground" data-testid={`plan-validation-text-${a.assignmentId}`}>
+        {lines.text}
+      </p>
+      {lines.audio && (
+        <p className="text-[11.5px] tabular-nums text-muted-foreground" data-testid={`plan-validation-audio-${a.assignmentId}`}>
+          {lines.audio}
+        </p>
+      )}
+
+      <div className="flex flex-col gap-[3px] ps-7">
+        <PlanBar
+          label={t("org.projectOverview.plan.textBarLabel")}
+          outer={planPct(ready(v.text), v.text.total)}
+          inner={planPct(v.text.validated, v.text.total)}
+          tone="text"
+          aria={lines.text}
+          tips={readoutTips("text", ready(v.text), v.text.validated, v.text.total)}
+        />
+        {showAudio && (
+          <PlanBar
+            label={t("org.projectOverview.plan.audioBarLabel")}
+            outer={planPct(ready(v.audio), v.audio.total)}
+            inner={planPct(v.audio.validated, v.audio.total)}
+            tone="audio"
+            aria={lines.audio ?? ""}
+            tips={readoutTips("audio", ready(v.audio), v.audio.validated, v.audio.total)}
           />
         )}
       </div>

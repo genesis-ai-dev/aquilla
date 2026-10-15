@@ -328,3 +328,75 @@ describe("where a person's outstanding work is", () => {
     expect(left).not.toHaveTextContent("ch. 1")
   })
 })
+
+// AQU-1969: a validator's row counts their OWN approvals, under the four rules.
+describe("validate assignments", () => {
+  const counts = (total: number, validated: number, waiting: number, changed: number) => ({ total, validated, waiting, changed })
+
+  it("words a validator's own progress and lists validators after translators, furthest behind first", () => {
+    renderSection({
+      assignments: [
+        // Newest first from the server: the two validators before the translator.
+        assignment({
+          assignmentId: "v-near",
+          username: "bo",
+          kind: "validate",
+          scopeLabel: "Deuteronomy 11",
+          validation: { text: counts(10, 9, 0, 0), audio: counts(10, 0, 10, 0) },
+        }),
+        assignment({
+          assignmentId: "v-far",
+          username: "ana",
+          kind: "validate",
+          scopeLabel: "Deuteronomy 1–10",
+          // 34 of 40, 6 left (2 of them changed since), 0 waiting.
+          validation: { text: counts(40, 34, 0, 2), audio: counts(40, 0, 40, 0) },
+        }),
+        assignment({ assignmentId: "t1", username: "tom", kind: "translate" }),
+      ],
+    })
+    const rows = screen.getAllByRole("listitem").map((li) => li.getAttribute("data-testid"))
+    expect(rows).toEqual(["plan-assignment-t1", "plan-assignment-v-far", "plan-assignment-v-near"])
+
+    expect(screen.getByTestId("plan-validation-text-v-far").textContent).toBe(
+      "Validated 34 of 40 · 6 left · 2 changed since",
+    )
+    expect(screen.getByTestId("plan-assignment-left-v-far").textContent).toBe("6 left")
+    // A validator is labelled as one; a translator is not.
+    expect(screen.getByTestId("plan-assignment-v-far").querySelector("[data-testid=plan-assignment-kind]")?.textContent).toBe("Validating")
+    expect(screen.getByTestId("plan-assignment-t1").querySelector("[data-testid=plan-assignment-kind]")).toBeNull()
+    // No recordings on the file: no audio line.
+    expect(screen.queryByTestId("plan-validation-audio-v-far")).toBeNull()
+  })
+
+  it("says what is waiting on someone else, and reports recordings when the file has them", () => {
+    renderSection({
+      showAudio: true,
+      assignments: [
+        assignment({
+          assignmentId: "v1",
+          kind: "validate",
+          validation: { text: counts(40, 35, 5, 0), audio: counts(40, 3, 36, 1) },
+        }),
+      ],
+    })
+    // Five untranslated lines are waiting, not behind: nothing is left in text.
+    expect(screen.getByTestId("plan-validation-text-v1").textContent).toBe(
+      "Text validated 35 of 40 · waiting on translation (5)",
+    )
+    expect(screen.getByTestId("plan-validation-audio-v1").textContent).toBe(
+      "Audio validated 3 of 40 · 1 left · 1 changed since · waiting on a recording (36)",
+    )
+    expect(screen.getByTestId("plan-assignment-left-v1").textContent).toBe("1 left")
+  })
+
+  it("reads 'Nothing left' once every line ready for them is approved", () => {
+    renderSection({
+      assignments: [
+        assignment({ assignmentId: "v1", kind: "validate", validation: { text: counts(4, 4, 0, 0), audio: counts(4, 0, 4, 0) } }),
+      ],
+    })
+    expect(screen.getByTestId("plan-assignment-left-v1").textContent).toBe("Nothing left")
+    expect(screen.getByTestId("plan-validation-text-v1").textContent).toBe("Validated 4 of 4")
+  })
+})

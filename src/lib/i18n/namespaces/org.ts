@@ -1720,6 +1720,25 @@ export const org = defineNamespace({
     "org.projectOverview.plan.everyChapterAssigned": "Every chapter is assigned.",
     "org.projectOverview.plan.moreAssignees": "{count} more",
 
+    // -- AQU-1969: a Validate assignment's own-approval progress, in words. One
+    // renderer (use-validation-progress.ts) for the plan inspector, the Team
+    // card and the org's Team workload. --
+    "org.validationProgress.validated": "Validated {validated} of {total}",
+    "org.validationProgress.textValidated": "Text validated {validated} of {total}",
+    "org.validationProgress.audioValidated": "Audio validated {validated} of {total}",
+    "org.validationProgress.left": plural({ one: "{count} left", other: "{count} left" }),
+    "org.validationProgress.changedSince": plural({ one: "{count} changed since", other: "{count} changed since" }),
+    "org.validationProgress.waitingOnTranslation": plural({
+      one: "waiting on translation ({count})",
+      other: "waiting on translation ({count})",
+    }),
+    "org.validationProgress.waitingOnRecording": plural({
+      one: "waiting on a recording ({count})",
+      other: "waiting on a recording ({count})",
+    }),
+    "org.validationProgress.kindChip": "Validating",
+    "org.validationProgress.heading": "Validation assignments",
+
     // -- TeamDetail: single team's page. Most call-site strings here reuse
     // existing org.teamDetail.* / org.teamForm.* / common.* keys already
     // defined above (they were pre-seeded for this exact file); only
@@ -3927,6 +3946,59 @@ export const org = defineNamespace({
         description:
           "Overflow chip closing a truncated row of assignee avatars: how many people the row could not fit.",
         placeholders: { count: "Assignees not shown — a number." },
+      },
+      "org.validationProgress.validated": {
+        description:
+          "Head of a validator's progress line (AQU-1969): how many of the lines this person was asked to validate carry THEIR OWN approval of the current wording — not whether someone else approved them. 'Ana · Deuteronomy 1–10 · Validated 34 of 40 · 6 left'. Shown when there are no recordings to judge.",
+        placeholders: {
+          validated: "Lines this person has approved as they read now — a number, already formatted.",
+          total: "Lines theirs to approve — a number, already formatted.",
+        },
+      },
+      "org.validationProgress.textValidated": {
+        description:
+          "The same head as org.validationProgress.validated, used when the line beneath it reports recordings too, so the written text names itself.",
+        placeholders: {
+          validated: "Lines whose text this person has approved as it reads now — a number, already formatted.",
+          total: "Lines theirs to approve — a number, already formatted.",
+        },
+      },
+      "org.validationProgress.audioValidated": {
+        description:
+          "Head of a validator's recordings line: how many lines' recordings carry this person's own approval.",
+        placeholders: {
+          validated: "Lines whose recording this person has approved — a number, already formatted.",
+          total: "Lines theirs to approve — a number, already formatted.",
+        },
+      },
+      "org.validationProgress.left": {
+        description:
+          "Middle term of a validator's progress line: lines ready for them to approve that they have not approved yet. Follows the head after a middle dot.",
+        placeholders: { count: "Lines still to approve — a number; it also selects the plural form." },
+      },
+      "org.validationProgress.changedSince": {
+        description:
+          "Term of a validator's progress line: lines this person HAD approved whose wording (or recording) changed afterwards, so their approval no longer counts. Short for 'changed since they approved'; part of the 'left' count before it.",
+        placeholders: { count: "Lines changed since this person approved them — a number; it also selects the plural form." },
+      },
+      "org.validationProgress.waitingOnTranslation": {
+        description:
+          "Last term of a validator's text line: lines with no translation yet, so nothing to approve — the translator's backlog, not the validator's. Lower case: it follows the other terms on the same line.",
+        placeholders: { count: "Lines not translated yet — a number; it also selects the plural form." },
+      },
+      "org.validationProgress.waitingOnRecording": {
+        description:
+          "Last term of a validator's recordings line: lines nobody has recorded yet, so there is nothing to approve. Lower case: it follows the other terms on the same line.",
+        placeholders: { count: "Lines not recorded yet — a number; it also selects the plural form." },
+      },
+      "org.validationProgress.kindChip": {
+        description:
+          "Small chip beside a person's name in the plan inspector's 'Assigned to' list: this person was given only the validating of these lines, not the translating.",
+        maxLength: 16,
+      },
+      "org.validationProgress.heading": {
+        description:
+          "Small heading over the list of validate-only assignments on the project Team card and the org's Team workload, each line showing how much of their own approving a person has done.",
       },
       "org.memberActivityPanel.fileRollupSummary": {
         description:

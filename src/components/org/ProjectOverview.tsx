@@ -30,6 +30,7 @@ import { LinkSeedFailedBanner } from "@/components/LinkSeedFailedNotice"
 import { downloadProjectBundle } from "@/lib/sync/export-bundle"
 import { downloadImportedOriginal, downloadImportedOriginalsZip } from "@/lib/file-original-download"
 import { AssignWork } from "./AssignWork"
+import { TeamValidationList } from "./TeamValidationList"
 import { MembersSection } from "@/components/ProjectSettings/MembersSection"
 import { MemberActivityPanel } from "./MemberActivityPanel"
 import { ProjectAutopilotPanel } from "./ProjectAutopilotPanel"
@@ -93,12 +94,13 @@ import { planRowsToCsv, planCsvFilename } from "@/lib/progress/plan-csv"
 import { fetchProjectFiles, type FileSummary } from "@/lib/sync/cells-read"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
 import {
-  getProjectAssignments,
+  getProjectTeamProgress,
   getProjectUnitAssignees,
   getUnitAssignments,
   type UnitAssignee,
   type AssigneeWorkload,
   type UnitAssignment,
+  type ValidationAssignment,
 } from "@/lib/sync/assignments"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { UserError } from "@/lib/errors/user-error"
@@ -581,6 +583,8 @@ export function ProjectOverview() {
   const [pmNoteOpen, setPmNoteOpen] = useState(false)
   const pmNoteId = useId()
   const [workload, setWorkload] = useState<AssigneeWorkload[]>([])
+  // AQU-1969: each open validate assignment, with its assignee's own approvals.
+  const [validations, setValidations] = useState<ValidationAssignment[]>([])
   const [workloadRefused, setWorkloadRefused] = useState(false)
 
   // AQU-538 §3.3: the lane filter tab selection. `null` = "All" — today's
@@ -788,10 +792,13 @@ export function ProjectOverview() {
   const loadWorkload = useCallback(async () => {
     if (!jwt || !id) return
     try {
-      setWorkload(await getProjectAssignments(jwt, id))
+      const team = await getProjectTeamProgress(jwt, id)
+      setWorkload(team.roster)
+      setValidations(team.validations)
       setWorkloadRefused(false)
     } catch (err) {
       setWorkload([])
+      setValidations([])
       setWorkloadRefused(err instanceof UserError && err.status === 403)
     }
   }, [jwt, id])
@@ -2879,9 +2886,9 @@ export function ProjectOverview() {
                     )}
                     {teamOpen && (
                       <div id="overview-team-panel">
-                        {workload.length === 0 ? (
+                        {workload.length === 0 && validations.length === 0 ? (
                           <p className="text-sm text-muted-foreground">{t("org.projectOverview.noOpenAssignments")}</p>
-                        ) : (
+                        ) : workload.length === 0 ? null : (
                           <ul className="space-y-2">
                             {workload.map((w) => {
                               const donePct = progressPercent(w.cellsDone, w.cellsTotal)
@@ -2930,6 +2937,10 @@ export function ProjectOverview() {
                             })}
                           </ul>
                         )}
+
+                        {/* AQU-1969: validators, furthest behind first, apart
+                            from the translate rows above. */}
+                        <TeamValidationList validations={validations} showLane={showLaneTabs} />
 
                         {selectedMemberUsername && (
                           <MemberActivityPanel

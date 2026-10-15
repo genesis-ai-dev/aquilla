@@ -124,6 +124,13 @@ export function ProjectAssignedToMe({
                           fallbackLabel={t("org.projectOverview.laneDefaultFallback")}
                           className="h-4 px-1 text-[9px] leading-none"
                         />
+                        {/* AQU-1969: a validate assignment's done count is
+                            this person's own approvals; say which kind it is. */}
+                        {a.kind === "validate" && (
+                          <Badge variant="outline" className="h-4 shrink-0 px-1 text-[9px] leading-none">
+                            {t("org.validationProgress.kindChip")}
+                          </Badge>
+                        )}
                       </span>
                       <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">{pct}%</span>
                     </div>

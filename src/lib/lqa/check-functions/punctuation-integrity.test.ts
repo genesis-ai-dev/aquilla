@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest"
 import { runCheck } from "./punctuation-integrity"
+import { resolvePunctuation } from "../../../../db/shared/punctuation-conventions"
+
+/** The context the editor passes for a lane in `language` (AQU-1906). */
+const lane = (language: string) => ({ punctuation: resolvePunctuation({ language }).conventions })
 
 describe("punctuation-integrity", () => {
   it("returns null when the colon is preserved", () => {
@@ -50,5 +54,40 @@ describe("punctuation-integrity", () => {
     expect(spans).toEqual([
       { side: "source", start: 5, end: 6, matchedText: "：" },
     ])
+  })
+
+  // AQU-1906 — the target lane's own clause marks answer the source's.
+  describe("target-language conventions", () => {
+    it("treats the Arabic semicolon as the source semicolon preserved", () => {
+      expect(runCheck("Wait; then go.", "انتظر؛ ثم اذهب.", lane("ar"))).toBeNull()
+    })
+
+    it("treats the Greek ano teleia as the source semicolon preserved", () => {
+      expect(runCheck("Wait; then go.", "Περίμενε· μετά πήγαινε.", lane("el"))).toBeNull()
+    })
+
+    it("treats the Ethiopic colon and semicolon as preserved", () => {
+      expect(runCheck("He said: run", "አለ፦ ሩጥ", lane("am"))).toBeNull()
+      expect(runCheck("Wait; then go", "ቆይ፤ ከዚያ ሂድ", lane("am"))).toBeNull()
+    })
+
+    it("still flags a dropped mark in a lane whose conventions add nothing for it", () => {
+      expect(runCheck("He said: run.", "قال. اركض.", lane("ar"))).toEqual([
+        { side: "source", start: 7, end: 8, matchedText: ":" },
+      ])
+    })
+
+    it("behaves exactly as with no lane when the lane records no language", () => {
+      expect(runCheck("He said: run.", "Il a dit. cours.", lane(""))).toEqual(
+        runCheck("He said: run.", "Il a dit. cours."),
+      )
+    })
+
+    it("does not let a target convention excuse the OTHER clause mark", () => {
+      // "؛" answers a ";", never a ":".
+      expect(runCheck("He said: run", "قال؛ اركض", lane("ar"))).toEqual([
+        { side: "source", start: 7, end: 8, matchedText: ":" },
+      ])
+    })
   })
 })

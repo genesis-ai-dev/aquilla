@@ -510,6 +510,10 @@ const POLICY_DIRECTION_CASES: {
   { key: 'allowSelfValidationAudio', tighten: { from: undefined, to: false }, loosen: { from: false, to: true } },
   { key: 'validationRoleFloorAudio', tighten: { from: 'reviewer', to: 'project_lead' }, loosen: { from: 'maintainer', to: null } },
   { key: 'validationNamedUsersAudio', tighten: { from: undefined, to: ['a'] }, loosen: { from: ['a'], to: [] } },
+  // AQU-1771: the project's own visibility floors. The org sets none here, so
+  // its floor is Maintainer; clearing a stricter value goes back to it.
+  { key: 'rosterViewMinRole', tighten: { from: undefined, to: 700 }, loosen: { from: 700, to: null } },
+  { key: 'memberProgressViewMinRole', tighten: { from: 600, to: 700 }, loosen: { from: 700, to: 600 } },
 ]
 
 describe('PatchSettings — policy keys, restrictive direction only (AQU-1282 §1)', () => {
@@ -543,6 +547,42 @@ describe('PatchSettings — policy keys, restrictive direction only (AQU-1282 §
     expect(body.error.details.loosening[0].reason).toBeTruthy()
     expect(await tdb.rows('changesets')).toHaveLength(0)
     expect(JSON.parse((await tdb.rows<{ settings: string }>('project_settings'))[0].settings)[key]).toEqual(loosen.from)
+  })
+
+  // AQU-1771: a project following the org's default of 3 approvals has
+  // nothing stored; lowering it to 2 is a loosening all the same.
+  it('judges an unset key against the org default it follows, not the built-in one', async () => {
+    const env = makeEnv(tdb.db)
+    await seedPolicy({})
+    await tdb.pg.query(
+      `INSERT INTO org_settings (org_id, settings, version) VALUES ($1, $2, 1)`,
+      [ORG_ID, JSON.stringify({ validationCount: 3 })],
+    )
+    const owner = await memberToken(tdb, 700)
+    const { res, body } = await prepare(env, owner.token, patchCmd([{ key: 'validationCount', value: 2 }]))
+    expect(res.status).toBe(403)
+    expect(body.error.details.loosening[0].key).toBe('validationCount')
+    const { res: upRes, body: up } = await prepare(env, owner.token, patchCmd([{ key: 'validationCount', value: 4 }]))
+    expect(upRes.status, JSON.stringify(up)).toBe(200)
+  })
+
+  // AQU-1771: a project's visibility floors follow the org's floor when unset,
+  // and can never sit below it.
+  it("judges a visibility floor against the org's floor: unset reads as it, and nothing goes below it", async () => {
+    const env = makeEnv(tdb.db)
+    await seedPolicy({})
+    await tdb.pg.query(
+      `INSERT INTO org_settings (org_id, settings, version) VALUES ($1, $2, 1)`,
+      [ORG_ID, JSON.stringify({ rosterViewMinRole: 400 })],
+    )
+    const owner = await memberToken(tdb, 700)
+    const up = await prepare(env, owner.token, patchCmd([{ key: 'rosterViewMinRole', value: 500 }]))
+    expect(up.res.status, JSON.stringify(up.body)).toBe(200)
+    const below = await prepare(env, owner.token, patchCmd([{ key: 'rosterViewMinRole', value: 300 }]))
+    expect(below.res.status).toBe(403)
+    expect(below.body.error.details.loosening[0].key).toBe('rosterViewMinRole')
+    const garbage = await prepare(env, owner.token, patchCmd([{ key: 'rosterViewMinRole', value: 450 }]))
+    expect(garbage.res.status).toBe(400)
   })
 
   it('a fresh project (no settings row, version 0) accepts contributeToGlobalTm:false + agentAuthorship:"none" in one changeset', async () => {
@@ -690,6 +730,33 @@ describe('UpdateProjectSettings — retired terminology key (AQU-1724)', () => {
     const stored = JSON.parse((await tdb.rows<{ settings: string }>('project_settings'))[0].settings)
     expect(stored.validationCount).toBe(3)
     expect(stored.terminology).toEqual({ concepts: [] })
+  })
+})
+
+// AQU-1771: a project's own stricter visibility floor can be lowered or
+// removed only by a person at or above it — and never by an agent, whose
+// writes to policy keys only ever tighten.
+describe('agent writes cannot remove a stored visibility floor (AQU-1771)', () => {
+  it('PatchSettings: clearing it (null) is a loosening, refused even for an owner', async () => {
+    const env = makeEnv(tdb.db)
+    await seedPolicy({ rosterViewMinRole: 700 })
+    const owner = await memberToken(tdb, 700)
+    const { res, body } = await prepare(env, owner.token, patchCmd([{ key: 'rosterViewMinRole', value: null }]))
+    expect(res.status).toBe(403)
+    expect(body.error.details.loosening[0].key).toBe('rosterViewMinRole')
+  })
+
+  it('UpdateProjectSettings: a whole blob that leaves it out is refused', async () => {
+    const env = makeEnv(tdb.db)
+    await seedPolicy({ memberProgressViewMinRole: 700 })
+    const owner = await memberToken(tdb, 700)
+    const { res, body } = await prepare(env, owner.token, [
+      { kind: 'UpdateProjectSettings', projectId: PROJECT, settings: { terminology: { concepts: [] } }, ifMatchVersion: 1 },
+    ])
+    expect(res.status).toBe(403)
+    expect(body.error.code).toBe('permission_denied')
+    expect(body.error.details.policyKeys).toContain('memberProgressViewMinRole')
+    expect(await tdb.rows('changesets')).toHaveLength(0)
   })
 })
 

@@ -56,11 +56,24 @@ export interface CellState {
   sourceHidden: boolean | null
 }
 
-/** Cells per precondition-lookup statement. Each cell binds 2 parameters, and
- *  Postgres refuses a statement with more than 65,535 of them (AQU-1852), so
- *  the lookup is paged well under that ceiling rather than sized by the caller's
- *  batch. 2,000 cells = 4,001 parameters per statement. */
-const PRECONDITION_LOOKUP_CHUNK = 2000
+/** Cells per precondition-lookup statement. Two ceilings size it:
+ *
+ *  1. Binds — each cell binds 2 parameters, and postgres.js refuses a statement
+ *     with more than 65,534 of them (AQU-1852), so the lookup is paged well under
+ *     that rather than sized by the caller's batch.
+ *  2. Depth — Postgres rewrites a row-constructor `(a, b) IN ((…), (…), …)` list
+ *     into a left-deep nested OR tree, one level per row, so every recursive
+ *     pass over the expression (analysis, rewrite, planning) recurses once per
+ *     row. Native Postgres absorbs thousands of levels (2 MB max_stack_depth),
+ *     but PGlite — the test database, Postgres in WASM on Node's ~1 MB native
+ *     stack — overflows between 1,700 and 1,800 rows, swallows the overflow, and
+ *     the next protocol message fails with "unnamed prepared statement does not
+ *     exist" (AQU-1982). A page past that cannot be tested at all.
+ *
+ *  1,000 cells = 2,001 parameters per statement, and the same page size as the
+ *  sibling `(file_id, cell_id) IN (…)` lookups in link-sync
+ *  (CELL_KEY_LOOKUP_ROWS). */
+const PRECONDITION_LOOKUP_CHUNK = 1000
 
 interface CellRow {
   file_id: string

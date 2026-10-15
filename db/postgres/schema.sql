@@ -342,7 +342,17 @@ CREATE TABLE project_settings (
     wp_validation_role_floor_audio JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'validationRoleFloorAudio') STORED,
     wp_validation_named_users_audio JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'validationNamedUsersAudio') STORED,
     wp_allow_self_validation_audio JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'allowSelfValidationAudio') STORED,
-    wp_harmonize_min_role JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'harmonize_min_role') STORED
+    wp_harmonize_min_role JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'harmonize_min_role') STORED,
+    -- AQU-1771 (0174): this project's own, stricter-only floors for who sees
+    -- its member list and each member's progress — read on every roster and
+    -- named-progress check (members, mentions, assignments, activity), so they
+    -- must never open the blob. NULL unless the key holds a JSON number; the
+    -- readers keep only role-ladder values (db/shared/visibility-floors.ts).
+    -- One line each, for the dev-stack reconciler (see bible_resources_enabled).
+    roster_view_min_role TEXT
+      GENERATED ALWAYS AS (CASE WHEN jsonb_typeof((settings::jsonb) -> 'rosterViewMinRole') = 'number' THEN (settings::jsonb) ->> 'rosterViewMinRole' END) STORED,
+    member_progress_view_min_role TEXT
+      GENERATED ALWAYS AS (CASE WHEN jsonb_typeof((settings::jsonb) -> 'memberProgressViewMinRole') = 'number' THEN (settings::jsonb) ->> 'memberProgressViewMinRole' END) STORED
 );
 CREATE INDEX project_settings_agent_react ON project_settings(project_id) WHERE agent_react;
 
@@ -373,7 +383,12 @@ CREATE TABLE org_settings (
     -- AQU-1083: the org-wide default for whether structural cells count toward
     -- progress. Generated so the org dashboard can resolve the policy in SQL
     -- without parsing the settings blob per project (0090).
-    count_structural TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'countStructuralCells') STORED
+    count_structural TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'countStructuralCells') STORED,
+    -- AQU-1771: the org-wide defaults for how many validations a cell / a take
+    -- needs. NULL = unset; a project's own value wins, and absent on both reads
+    -- as 1 (0174).
+    validation_count TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationCount') STORED,
+    validation_count_audio TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationCountAudio') STORED
 );
 
 -- Global, runtime-editable platform config (migration 0047). Single row

@@ -12,6 +12,7 @@
 
 import { RepetitionPropagationSection } from "@/components/settings/RepetitionPropagationSection"
 import { StructuralCellsSection } from "@/components/settings/StructuralCellsSection"
+import { ValidationDefaultsSection } from "@/components/settings/ValidationDefaultsSection"
 import { SettingsGroup } from "@/components/ui/page"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
@@ -38,6 +39,10 @@ export function OrgSettingsProjectDefaults() {
         {/* AQU-1391 — same card, same MAINTAINER gate, same reason: it shapes
             what a project's editor does, not who may reach it. */}
         <RepetitionPropagationSection orgSettings={orgSettings} canEdit={orgSettings.canEdit} />
+        {/* AQU-1771 — how many validators a translation and a recording
+            need. Same card and MAINTAINER gate: it decides how progress is
+            counted, not who may validate. Projects may override. */}
+        <ValidationDefaultsSection orgSettings={orgSettings} canEdit={orgSettings.canEdit} />
         {/* Sam, 2026-10-01 — same card and gate: it changes what a bulk
             validate covers in every project, not who may validate. Unlike the
             two above it has no project override. */}

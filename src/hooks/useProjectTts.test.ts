@@ -74,3 +74,73 @@ describe("useProjectTts OmniVoice persist (AQU-1189)", () => {
     expect(mockCapture).not.toHaveBeenCalled()
   })
 })
+
+// AQU-1943: the server caps the voice library, and this store is what a reload
+// reads FIRST — so a refused value kept here would resurrect the voice the
+// server just refused and re-send it on every later save.
+describe("useProjectTts refused-write rollback (AQU-1943)", () => {
+  beforeEach(() => {
+    localStorage.clear()
+    vi.mocked(patchProject).mockClear()
+    mockCapture.mockClear()
+  })
+
+  it("rolls the durable copy back to the pre-write settings when the server refuses the value", async () => {
+    const PROJECT = "proj-tts-cap"
+    const server: ProjectTtsSettings = {
+      provider: "inworld",
+      voices: [{ id: "v1", name: "Narrator", provider: "inworld", voiceName: "Dennis", language: "en-US" }],
+    }
+    const onSyncTts = vi.fn(async () => ({ rejected: true }))
+    const { result } = renderHook(() => useProjectTts(PROJECT, server, [], onSyncTts, "en"))
+
+    await act(async () => {
+      await result.current.saveTts({
+        voices: [...(server.voices ?? []), { id: "v2", name: "Over the cap", provider: "inworld" }],
+      })
+    })
+
+    await waitFor(() => expect(loadProjectTts(PROJECT)?.voices).toHaveLength(1))
+    expect(loadProjectTts(PROJECT)?.voices?.[0].id).toBe("v1")
+    expect(result.current.voices.map((v) => v.id)).toEqual(["v1"])
+  })
+
+  it("does not undo a later save that succeeded", async () => {
+    const PROJECT = "proj-tts-race"
+    let settle: ((outcome: { rejected: boolean }) => void) | null = null
+    const onSyncTts = vi
+      .fn()
+      // The refused write answers LAST, after the accepted one has landed.
+      .mockImplementationOnce(() => new Promise<{ rejected: boolean }>((r) => { settle = r }))
+      .mockImplementation(async () => ({ rejected: false }))
+    const { result } = renderHook(() => useProjectTts(PROJECT, undefined, [], onSyncTts, "en"))
+
+    await act(async () => {
+      await result.current.saveTts({ voices: [{ id: "big", name: "Over the cap", provider: "inworld" }] })
+    })
+    await act(async () => {
+      await result.current.saveTts({ voices: [{ id: "small", name: "Pruned", provider: "inworld" }] })
+    })
+    await act(async () => {
+      settle?.({ rejected: true })
+    })
+
+    await waitFor(() => expect(onSyncTts).toHaveBeenCalledTimes(2))
+    expect(loadProjectTts(PROJECT)?.voices?.[0].id).toBe("small")
+  })
+
+  it("keeps the durable copy when the write is merely blocked (role / offline)", async () => {
+    const PROJECT = "proj-tts-blocked"
+    const onSyncTts = vi.fn(async () => ({ rejected: false }))
+    const { result } = renderHook(() => useProjectTts(PROJECT, undefined, [], onSyncTts, "en"))
+
+    await act(async () => {
+      await result.current.saveTts({
+        voices: [{ id: "v9", name: "Local only", provider: "inworld" }],
+      })
+    })
+
+    await waitFor(() => expect(onSyncTts).toHaveBeenCalled())
+    expect(loadProjectTts(PROJECT)?.voices?.[0].id).toBe("v9")
+  })
+})

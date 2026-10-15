@@ -16,6 +16,7 @@ import {
   type ProjectSettingsEditor,
   settingsEditorName,
 } from "@/lib/sync/project-settings"
+import type { ProjectOrgPolicy, ProjectVisibilityFloors } from "@/lib/sync/project-org-policy"
 import posthog from "@/lib/posthog"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
 import { claimHydrationReport, retainProjectOpen } from "./project-settings-open"
@@ -226,7 +227,14 @@ export type PatchOutcome =
   | { kind: "ok" }
   | { kind: "conflict"; latest: ProjectSettingsResponse }
   | { kind: "blocked"; reason: "offline" | "role" }
-  | { kind: "error"; message: string }
+  /**
+   * `status` is the HTTP status when the server answered (0 on a transport
+   * failure). Callers that must tell a *refused value* apart from a flaky
+   * network read it: a 422 means the server will never accept this value, so
+   * a client-durable copy of it has to be rolled back rather than retried
+   * (AQU-1943, the TTS settings cap).
+   */
+  | { kind: "error"; message: string; status?: number }
 
 /**
  * Map a non-`ok` {@link PatchOutcome} to a user-facing message, or `null` when
@@ -268,10 +276,25 @@ export interface UseProjectSettings {
    * `settings.countStructuralCells ?? orgCountStructuralCells ?? true`.
    */
   orgCountStructuralCells: boolean | null
+  /**
+   * AQU-1771: the org's validation defaults this project inherits when it has
+   * no `validationCount` / `validationCountAudio` of its own. Null when the
+   * org set none, or before the first response that carries them.
+   */
+  orgValidationCount: number | null
+  orgValidationCountAudio: number | null
   /** The org's "Allow bulk validation of AI drafts", carried on the project's
    *  own settings response so a member outside the org sees it too. Null when
    *  the project has no org, or before the first response that carries it. */
   orgAllowBulkValidateAiDrafts: boolean | null
+  /**
+   * AQU-1771: the org policy this project's surfaces apply, and the
+   * visibility floors it enforces, from the same response. Null before the
+   * first response that carries them, and on a server that predates them —
+   * read both through `resolveProjectPolicy` (src/lib/sync/project-org-policy.ts).
+   */
+  orgPolicy: ProjectOrgPolicy | null
+  visibilityFloors: ProjectVisibilityFloors | null
   /** AQU-1418: the project's lane rows from the last settings response.
    *  Null before the first response that carries them, and on a server
    *  that predates lane rows. */
@@ -399,6 +422,8 @@ function localSettingsFrom(
   if (record.rules != null) out.rules = record.rules
   if (record.rulePenalties != null) out.rulePenalties = record.rulePenalties
   if (record.algorithmicChecks != null) out.algorithmicChecks = record.algorithmicChecks
+  if (record.algorithmicChecksByLane != null)
+    out.algorithmicChecksByLane = record.algorithmicChecksByLane
   if (record.validationCount != null) out.validationCount = record.validationCount
   if (record.validationCountAudio != null)
     out.validationCountAudio = record.validationCountAudio
@@ -492,6 +517,10 @@ export function useProjectSettings(
   // project control's meaning while a save was in flight.
   const [orgCountStructuralCells, setOrgCountStructuralCells] = useState<boolean | null>(null)
   const [orgAllowBulkValidateAiDrafts, setOrgAllowBulkValidateAiDrafts] = useState<boolean | null>(null)
+  const [orgValidationCount, setOrgValidationCount] = useState<number | null>(null)
+  const [orgValidationCountAudio, setOrgValidationCountAudio] = useState<number | null>(null)
+  const [orgPolicy, setOrgPolicy] = useState<ProjectOrgPolicy | null>(null)
+  const [visibilityFloors, setVisibilityFloors] = useState<ProjectVisibilityFloors | null>(null)
   const [lanes, setLanes] = useState<ProjectLaneView[] | null>(null)
   const writeServer = useCallback((next: ProjectSettingsResponse | null) => {
     serverRef.current = next
@@ -502,6 +531,10 @@ export function useProjectSettings(
     if (next?.orgAllowBulkValidateAiDrafts !== undefined) {
       setOrgAllowBulkValidateAiDrafts(next.orgAllowBulkValidateAiDrafts)
     }
+    if (next?.orgValidationCount !== undefined) setOrgValidationCount(next.orgValidationCount)
+    if (next?.orgValidationCountAudio !== undefined) setOrgValidationCountAudio(next.orgValidationCountAudio)
+    if (next?.orgPolicy !== undefined) setOrgPolicy(next.orgPolicy)
+    if (next?.visibilityFloors !== undefined) setVisibilityFloors(next.visibilityFloors)
     if (next?.lanes !== undefined) setLanes(next.lanes)
   }, [])
 
@@ -587,6 +620,9 @@ export function useProjectSettings(
               : {}),
             ...(got.settings.algorithmicChecks != null
               ? { algorithmicChecks: got.settings.algorithmicChecks }
+              : {}),
+            ...(got.settings.algorithmicChecksByLane != null
+              ? { algorithmicChecksByLane: got.settings.algorithmicChecksByLane }
               : {}),
             ...(got.settings.validationCount != null
               ? { validationCount: got.settings.validationCount }
@@ -968,7 +1004,7 @@ export function useProjectSettings(
       const snapTarget: ProjectWideSettings = serverRef.current?.settings ?? {}
       return rollbackRejectedKeys(prev, partial, snapTarget)
     })
-    return { kind: "error", message: result.message }
+    return { kind: "error", message: result.message, status: result.status }
   }, [projectId, jwt, roleLevel, termbaseEditMinRole, languageEditFloor, refresh, runSerialized, t])
 
   return {
@@ -979,6 +1015,10 @@ export function useProjectSettings(
     hasFetched,
     orgCountStructuralCells,
     orgAllowBulkValidateAiDrafts,
+    orgValidationCount,
+    orgValidationCountAudio,
+    orgPolicy,
+    visibilityFloors,
     lanes,
     isOnline,
     canEdit,

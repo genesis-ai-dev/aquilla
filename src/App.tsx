@@ -37,6 +37,7 @@ import { LocalLlmConfigMount } from "@/components/LocalLlmConfigMount"
 import { ConflictToast } from "@/components/ConflictToast"
 import { OfflineLeaderWatchdog } from "@/components/OfflineLeaderWatchdog"
 import { DesktopUpdatePrompt } from "@/components/DesktopUpdatePrompt"
+import { NewerOfflineDataNotice } from "@/components/NewerOfflineDataNotice"
 import { OfflineProjectAccessWatch } from "@/components/OfflineProjectAccessWatch"
 import { OfflineRefusedWritesNotice } from "@/components/OfflineRefusedWritesNotice"
 import { NavHistoryProvider } from "@/context/NavHistoryContext"
@@ -323,6 +324,7 @@ export default function App() {
           <ConflictToast />
           <OfflineLeaderWatchdog />
           <DesktopUpdatePrompt />
+          <NewerOfflineDataNotice />
           <OfflineProjectAccessWatch />
           <OfflineRefusedWritesNotice />
           {/* AQU-293: session-expiry banner — must be inside Router (uses useLocation) */}

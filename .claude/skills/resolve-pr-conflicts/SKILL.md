@@ -182,9 +182,10 @@ shapes saves time:
 "$SKILL/scripts/link-deps.sh"
 ```
 
-Run this once the conflicts are resolved so it sees the merged lockfiles. It symlinks the main checkout's
-dependencies where the installed versions match, does a real install where they do not, and arms
-the pre-push hook.
+Run this once the conflicts are resolved so it sees the merged lockfiles. It links the root's
+`node_modules` entry by entry to the main checkout's where the installed versions match (a real
+install where they do not), installs each worker's dependencies for real - the pre-push hook refuses
+a worker `node_modules` that is a symlink out of the worktree - and arms the pre-push hook.
 
 Scale the checks to the PR's effective diff (`git diff --name-only origin/<base> HEAD`):
 
@@ -243,8 +244,10 @@ the output teed to a log - the gate takes several minutes:
 git push origin HEAD:refs/heads/<head> 2>&1 | tee "<scratchpad>/pr-<number>-push.log"
 ```
 
-The hook runs the secret scan, then the browser specs affected by everything being pushed. A
-base merge pushes hundreds of files, so expect most of the smoke suite on two isolated stacks.
+The hook first refuses a `node_modules` borrowed from another checkout (`link-deps.sh` never
+leaves one; see `references/traps.md`), then runs the secret scan, then the browser specs affected
+by everything being pushed. A base merge pushes hundreds of files, so expect most of the smoke
+suite on two isolated stacks.
 That is the intended cost; it runs beside a live `pnpm dev` without port clashes.
 
 If `link-deps.sh` reported the hook as not armed, run the same gate by hand first:
@@ -274,7 +277,8 @@ slice - correct those statements in the PR body with `gh pr edit`. Change only w
 made false.
 
 Finally remove the worktrees: `git worktree remove --force "<scratchpad>/pr-<number>"` (and the
-baseline one). This deletes only the symlinks, not what they point at.
+baseline one). This deletes the worktree's own installs and links, never the main checkout's
+dependencies.
 
 ## 6. Report
 

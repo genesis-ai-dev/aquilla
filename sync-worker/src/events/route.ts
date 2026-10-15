@@ -66,6 +66,7 @@ import { makeRequestCache } from './request-cache'
 import type { WritePathSettings } from './write-path-settings'
 import { dbFailureInfo, reportServerRejections } from './rejection-telemetry'
 import { reportStaleSiblings } from './stale-sibling-telemetry'
+import { loadOrgValidationDefaults, type OrgValidationDefaults } from '../../../db/shared/validation-threshold'
 
 // Max statements per batch() transaction — a conservative self-imposed cap (Postgres has no hard limit; keeps any single transaction bounded).
 const BATCH_LIMIT = 100
@@ -956,6 +957,21 @@ export async function handleEventsWriteRequest(
     }
   }
 
+  // AQU-1771: the org's approvals defaults, read at most once per (request,
+  // project) like project_settings above. Read per event, a batch's query
+  // count grew with its size, which is what the PERF-2 guard exists to stop.
+  // A failed read stays failed for the batch; the caller logs it and keeps
+  // the projection's default of 1, as it does for a failed settings read.
+  const orgValidationDefaultsCache = new Map<string, Promise<OrgValidationDefaults>>()
+  const readOrgValidationDefaults = (projectId: string): Promise<OrgValidationDefaults> => {
+    let pending = orgValidationDefaultsCache.get(projectId)
+    if (!pending) {
+      pending = loadOrgValidationDefaults(db, projectId)
+      orgValidationDefaultsCache.set(projectId, pending)
+    }
+    return pending
+  }
+
   // FRO-346: live membership re-check, once per (project, user) per request.
   // authorize() proves the token was valid at MINT time; this proves the
   // author still has a grant path NOW, so removing a member terminates their
@@ -1358,6 +1374,16 @@ export async function handleEventsWriteRequest(
       const parsed = await readProjectSettings(rawEvent.projectId)
       if (parsed && typeof parsed.validationCount === 'number' && parsed.validationCount >= 1) {
         validationCountForDispatch = parsed.validationCount as number
+      } else {
+        // AQU-1771: no value of the project's own means the org's default.
+        // Non-fatal like the settings read above: on failure the projection
+        // keeps its old default of 1.
+        try {
+          const orgDefaults = await readOrgValidationDefaults(rawEvent.projectId)
+          if (orgDefaults.validationCount != null) validationCountForDispatch = orgDefaults.validationCount
+        } catch (err) {
+          console.error('[route] org validation default read failed:', err)
+        }
       }
       // FRO-189 checks are only for cell.validate.
       if (rawEvent.kind === 'cell.validate') {

@@ -4,7 +4,7 @@
 //
 // Routes (mounted at /api/v1/usage in index.ts):
 //   GET /me              — caller's own rollup: today + 7-day history. JWT-authed.
-//   GET /org/:orgId      — per-member rollup for the org. Maintainer-gated (≥ 600).
+//   GET /org/:orgId      — per-member rollup for the org. Gated on the org's progress + roster floors.
 //   GET /org/:orgId/credits — org credit spend + caps. Platform-admin OR (org-maintainer + showToOrg).
 //
 // Defensive: if tts_usage_daily / org_credit_usage_daily don't exist yet
@@ -12,7 +12,11 @@
 
 import { Hono } from "hono"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
-import { getEffectiveOrgRole } from "../services/org-permissions"
+import {
+  canViewNamedProgress,
+  getEffectiveOrgRole,
+  getOrgVisibilityFloors,
+} from "../services/org-permissions"
 import { isPlatformAdmin } from "../middleware/platform-admin"
 import { ROLE } from "../types"
 import { resolveCreditConfig, readSpend } from "../lib/credits"
@@ -215,8 +219,15 @@ interface OrgUsageResponse {
  * GET /api/v1/usage/org/:orgId
  *
  * Per-member usage rollup for the org, aggregated for the last 7 days.
- * MAINTAINER-GATED: caller must have org role >= 600 (maintainer/owner).
- * Non-managers get 403 — the UI swallows it and hides the section.
+ *
+ * AQU-1771: gated on the org's member-progress AND roster floors (a named
+ * person's usage is both), not on a hard Maintainer floor — the org overview
+ * shows the Team usage card from those floors. Below either, 403 and the card
+ * stays hidden.
+ *
+ * ORG FLOORS ONLY, never a project's stricter ones: this is one org-wide total
+ * per person (TTS rows carry only the org, AI requests only the person), so no
+ * row belongs to a single project whose floor could apply to it.
  *
  * Response shape (per spec §4):
  *   {
@@ -231,10 +242,10 @@ usage.get("/org/:orgId", async (c) => {
   const orgId = parseInt(c.req.param("orgId"), 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
 
-  // Maintainer gate — mirrors orgs.ts GET /:orgId/assignments/workload.
   const role = await getEffectiveOrgRole(c.env, orgId, user)
-  if (role == null || role < ROLE.MAINTAINER) {
-    return c.json({ error: "org role >= maintainer required" }, 403)
+  if (role == null) return c.json({ error: "not an org member" }, 403)
+  if (!canViewNamedProgress(role, await getOrgVisibilityFloors(c.env, orgId))) {
+    return c.json({ error: "member progress hidden by org policy" }, 403)
   }
 
   const since = nDaysAgoUtc(6) // today + 6 prior = 7 days
@@ -301,7 +312,22 @@ usage.get("/org/:orgId", async (c) => {
   }
 
   // ── Merge LLM + TTS, keyed by userId ────────────────────────────────────────
-  const allUserIds = new Set([...llmByUser.keys(), ...ttsByUser.keys()])
+  let allUserIds = new Set([...llmByUser.keys(), ...ttsByUser.keys()])
+  // AQU-1771: below Maintainer, only the org's own members. The rows above
+  // also count people who reach one of the org's projects through a direct
+  // project grant without belonging to the org; when this read was
+  // Maintainer-only that was a manager's view, but an org that opens the floors
+  // to contributors must not show them outsiders' names and usage. The total
+  // is summed over the rows shown, so it cannot be used to work them out.
+  if (role < ROLE.MAINTAINER && allUserIds.size > 0) {
+    const { results } = await c.env.AQUILLA_PG.prepare(
+      "SELECT user_id FROM org_members WHERE org_id = ?",
+    )
+      .bind(orgId)
+      .all<{ user_id: number | string }>()
+    const orgMemberIds = new Set((results ?? []).map((r) => Number(r.user_id)))
+    allUserIds = new Set([...allUserIds].filter((uid) => orgMemberIds.has(Number(uid))))
+  }
   const members: MemberUsage[] = []
 
   for (const uid of allUserIds) {

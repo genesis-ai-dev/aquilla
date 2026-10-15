@@ -125,7 +125,38 @@ export async function finalizeArtifactBindingSchema(
   )
   if (fileConstraint) patched.push(fileConstraint)
 
+  // Migration 0134. The generic reconciler copies columns out of schema.sql
+  // but not constraints that live inside CREATE TABLE, so a long-lived local
+  // database keeps the older target_lang unique and never gains
+  // artifact_bindings_lane_member_key. Source uploads then fail with
+  // "there is no unique or exclusion constraint matching the ON CONFLICT
+  // specification", the import stays unpublished, and the new file looks
+  // missing. Both uniques can coexist; 0155 drops the tag one later.
+  const laneMemberKey = await ensureArtifactBindingLaneMemberKey(client, run)
+  if (laneMemberKey) patched.push(laneMemberKey)
+
   return patched
+}
+
+async function ensureArtifactBindingLaneMemberKey(
+  client: PgSchemaClient,
+  run: RunSchemaSql,
+): Promise<string | null> {
+  const { rows } = await client.query(
+    `SELECT column_name
+       FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'artifact_bindings'
+        AND column_name IN ('artifact_id', 'file_id', 'binding_role', 'lane_id', 'member_path')`,
+  )
+  if (rows.length < 5) return null
+  return ensureConstraint(
+    client,
+    run,
+    "artifact_bindings",
+    "artifact_bindings_lane_member_key",
+    "UNIQUE (artifact_id, file_id, binding_role, lane_id, member_path)",
+  )
 }
 
 /** Mirror migration 0046 for long-lived local databases. The generic dev

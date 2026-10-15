@@ -25,13 +25,13 @@
 // NOT a numeric user id.
 //
 // Auth: sync-token JWT scoped to `projectId`. Additionally gated by the
-// org's memberProgressViewMinRole floor (AQU-485) — see
-// member-progress-floor.ts. A caller below the floor gets 403, mirroring the
-// client-side SectionVisibilityGate so the API can't be used to bypass the
-// dashboard's hard gate.
+// project's memberProgressViewMinRole AND rosterViewMinRole floors (AQU-485,
+// AQU-1771: the higher of the two) — see member-progress-floor.ts. A caller
+// below the floor gets 403, mirroring the client-side SectionVisibilityGate so
+// the API can't be used to bypass the dashboard's hard gate.
 
 import { verifyTokenForProject } from "../auth"
-import { resolveMemberProgressFloor } from "./member-progress-floor"
+import { resolveNamedProgressFloor } from "./member-progress-floor"
 import { countedFileSql } from "../../../db/shared/counted-files"
 
 export interface MemberActivityReadEnv {
@@ -92,7 +92,10 @@ export async function handleMemberActivityReadRequest(
     return new Response(auth.reason, { status: auth.status })
   }
 
-  const floor = await resolveMemberProgressFloor(env.AQUILLA_PG, projectId)
+  // AQU-1771: this is one named person's activity, so it needs the member-list
+  // floor as well as the member-progress one (the higher of the two), like
+  // every other read of named progress.
+  const floor = await resolveNamedProgressFloor(env.AQUILLA_PG, projectId)
   if (auth.claims.role < floor) {
     return new Response("insufficient role for member-progress view", { status: 403 })
   }

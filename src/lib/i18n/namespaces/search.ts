@@ -18,8 +18,7 @@ import { defineNamespace, plural } from "./types"
  * is one key holding a `plural({ … })` record of CLDR category → string, and the
  * component passes the count instead of choosing a branch — `translate()`
  * selects the category through `Intl.PluralRules` for the active locale. Strings
- * where the noun doesn't inflect ("Replace {count}", "{count} more — …") stay a
- * plain single key.
+ * where the noun doesn't inflect stay a plain single key.
  */
 export const search = defineNamespace({
   keys: {
@@ -70,11 +69,20 @@ export const search = defineNamespace({
 
     // Replace (shared by the dock's "open full panel" hint and the dialog's
     // Replace mode — the actual replace UI only exists in the dialog)
-    "search.replace.includeCellAriaLabel": "Include cell {cellId} in replace",
-    "search.replace.cellLocation": "{fileId} · cell {cellId}",
+    "search.replace.includeCellAriaLabel": "Include {location} in replace",
+    "search.replace.cellLocation": "{location}",
+    "search.replace.samePlace": "{location} ({index} of {total})",
+    "search.replace.filePosition": "{fileName} · {position}",
+    "search.replace.linePosition": "Line {position}",
+    "search.replace.unnamedPlace": "Cell",
     "search.replace.matchCount": "{count} replacements in this cell",
     "search.replace.placeholder": "Replacement text…",
     "search.replace.ariaLabel": "Replacement text",
+    "search.find.matchCase": "Match case",
+    "search.find.wholeWord": "Match whole word",
+    "search.find.useRegexp": "Use regular expression",
+    "search.find.invalidRegexp": "Invalid regular expression",
+    "search.replace.preserveCase": "Preserve case",
     "search.replace.clearsValidation":
       "Replacing text clears validation — it must be re-reviewed.",
     "search.replace.skippedNotice": plural({
@@ -98,8 +106,15 @@ export const search = defineNamespace({
     "search.replace.readOnlyTooltip": "Replace requires contributor access on these files",
     "search.replace.notWiredTooltip": "Replace is not yet wired",
     "search.replace.applying": "Applying…",
-    "search.replace.applyButtonCount": "Replace {count}",
+    "search.replace.applyButtonCount": plural({
+      one: "Replace {count} cell",
+      other: "Replace {count} cells",
+    }),
     "search.replace.applyButtonAll": "Replace All",
+    "search.replace.noSource": "No source text for this cell",
+    "search.replace.targetOnlyReason":
+      "Replace changes target text only. Each match shows its source so you can check the wording.",
+    "search.replace.sourceMatchNotReplaced": "Source match — not replaced",
 
     // Result row column badge (aria-hidden decorative label on a search hit)
 
@@ -330,18 +345,51 @@ export const search = defineNamespace({
       "search.replace.includeCellAriaLabel": {
         description:
           "Accessible name (aria-label) of the checkbox beside a replace-diff preview " +
-          "row, letting a screen-reader user identify which cell it toggles.",
-        placeholders: { cellId: "Internal id of the cell row. Not translated." },
+          "row, letting a screen-reader user identify which place it toggles. The " +
+          "place is a verse reference or other readable location, never an id.",
+        placeholders: {
+          location: "Readable place of the match, e.g. 'Genesis 1:1' or 'Notes · 4'. Not translated.",
+        },
       },
       "search.replace.cellLocation": {
         description:
-          "Small location label above a replace-diff preview row, identifying which " +
-          "file and cell the before/after text belongs to. 'cell' is the only " +
-          "translatable word — it names the row/unit being edited.",
+          "Location label above a Find & Replace match. The whole label is the " +
+          "readable place (a verse reference, a section, or a file and position). " +
+          "There is no other wording to translate.",
         placeholders: {
-          fileId: "Internal id of the file the cell belongs to. Not translated.",
-          cellId: "Internal id of the cell. Not translated.",
+          location: "Readable place of the match, e.g. 'Genesis 1:1'. Not translated.",
         },
+      },
+      "search.replace.samePlace": {
+        description:
+          "Location label above a Find & Replace match when another match has the " +
+          "same place, so a verse split across rows can be told apart. 'of' is the " +
+          "only word to translate. Example: 'Genesis 1:1 (2 of 2)'.",
+        placeholders: {
+          location: "Readable place shared by these matches, e.g. 'Genesis 1:1'. Not translated.",
+          index: "Which of the matches this is, in file order, starting at 1.",
+          total: "How many matches share this place.",
+        },
+      },
+      "search.replace.filePosition": {
+        description:
+          "Location of a match that is not a verse and has no section label: the " +
+          "file's name and the cell's position in that file. Example: 'Notes · 4'.",
+        placeholders: {
+          fileName: "The file's display name. Not translated.",
+          position: "1-based position of the cell in the file.",
+        },
+      },
+      "search.replace.linePosition": {
+        description:
+          "Location of a match that has no verse, section, or file name: its " +
+          "position in the file. Example: 'Line 4'.",
+        placeholders: { position: "1-based position of the cell in the file." },
+      },
+      "search.replace.unnamedPlace": {
+        description:
+          "Location of a match when nothing readable is known about where it sits. " +
+          "One short word. An id is never shown in its place.",
       },
       "search.replace.matchCount": {
         description:
@@ -363,6 +411,36 @@ export const search = defineNamespace({
           "not be read aloud as part of the field's name, and a translator must be able " +
           "to word the accessible name differently from the placeholder " +
           "(AQU-511 wave-3 finding 6).",
+      },
+      "search.find.matchCase": {
+        description:
+          "Tooltip and accessible name of the Aa toggle inside the find field. Pressed, " +
+          "the search distinguishes capitals from lowercase. Keep it to a few words.",
+        maxLength: 24,
+      },
+      "search.find.wholeWord": {
+        description:
+          "Tooltip and accessible name of the underlined ab toggle inside the find field. " +
+          "Pressed, a hit must be a whole word, not part of a longer one.",
+        maxLength: 24,
+      },
+      "search.find.useRegexp": {
+        description:
+          "Tooltip and accessible name of the * toggle inside the find field. Pressed, " +
+          "the find text is read as a regular expression.",
+        maxLength: 32,
+      },
+      "search.find.invalidRegexp": {
+        description:
+          "Error shown under the find field when Use regular expression is on and the " +
+          "pattern cannot be compiled. One short sentence.",
+      },
+      "search.replace.preserveCase": {
+        description:
+          "Tooltip and accessible name of the AB toggle inside the replacement field. " +
+          "Pressed, each replacement takes the capitalization of the text it replaces " +
+          "(hello → world, Hello → World, HELLO → WORLD).",
+        maxLength: 24,
       },
       "search.replace.clearsValidation": {
         description:
@@ -429,8 +507,8 @@ export const search = defineNamespace({
       },
       "search.replace.applyButtonCount": {
         description:
-          "Replace button label once at least one diff row is selected. 'Replace' does " +
-          "not change grammatical number with the count, so this is a single key.",
+          "Replace button label once at least one cell is selected. The noun agrees " +
+          "with the count: 'Replace 1 cell' or 'Replace N cells'.",
         placeholders: { count: "How many cells are selected to be replaced." },
       },
       "search.replace.applyButtonAll": {
@@ -438,10 +516,24 @@ export const search = defineNamespace({
           "Replace button label before any row is individually selected/deselected — " +
           "implies 'replace everything currently matched'.",
       },
-      "search.dialog.titlePassages": {
+      "search.replace.noSource": {
         description:
-          "Full dialog's title AND footer label when in parallel-passages mode " +
-          "(cross-project verse matching).",
+          "Shown in a replace-diff row when the matched target cell has no source text " +
+          "to compare against, so the absence is visible instead of a blank gap.",
+      },
+      "search.replace.targetOnlyReason": {
+        description:
+          "Note in Replace mode explaining why only target text is changed, and that " +
+          "each match shows its source for review. Both and Source are unavailable in " +
+          "this mode, so the search is target text only.",
+      },
+      "search.replace.sourceMatchNotReplaced": {
+        description:
+          "Label on a source-side hit inside Replace mode, explaining that the row stays " +
+          "visible for review and is not part of the replacement.",
+      },
+      "search.dialog.titlePassages": {
+        description: "Full dialog's title when in parallel-passages mode (cross-project verse matching).",
       },
       "search.dialog.titleReplace": {
         description: "Full dialog's title when in Replace mode.",
@@ -536,7 +628,8 @@ export const search = defineNamespace({
       "search.dialog.contentSideLabel": {
         description:
           "Accessible name (aria-label) of the Both/Source/Target toggle in the full " +
-          "dialog, hidden while in Replace mode (which is always target-only).",
+          "dialog. Stays visible in Replace mode so a reviewer can see why a source " +
+          "match is listed and switch sides without the control disappearing.",
       },
       "search.side.both": {
         description: "Tab option: search both source and target text.",

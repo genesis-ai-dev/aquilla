@@ -75,6 +75,12 @@ export interface ProjectWideSettings {
    *  full merged object. Project-wide so LQA severity is consistent across
    *  devices/members (same rationale as `rulePenalties`). */
   algorithmicChecks?: Partial<Record<BuiltinCheckId, AlgorithmicCheckOverride>>
+  /** AQU-1906: per-target-lane built-in check overrides, keyed by the lane's
+   *  legacy tag (`''` = the default lane). Replaces wholesale like
+   *  `algorithmicChecks`, so a writer sends the full merged map. Absent means
+   *  every lane shares the project-wide overrides, which is what every project
+   *  had before this key existed. */
+  algorithmicChecksByLane?: Record<string, Partial<Record<BuiltinCheckId, AlgorithmicCheckOverride>>>
   validationCount?: number
   validationCountAudio?: number
   /**
@@ -538,6 +544,17 @@ export type PatchResult =
   | { kind: "forbidden"; required: number; role: number }
   | { kind: "error"; status: number; message: string }
 
+/** The `{error}` an API refusal carries, or the raw body when it is not that. */
+function errorMessageFrom(body: string): string {
+  try {
+    const parsed = JSON.parse(body) as { error?: unknown }
+    if (typeof parsed?.error === "string" && parsed.error.trim()) return parsed.error
+  } catch {
+    /* not JSON — the body is the best message there is */
+  }
+  return body
+}
+
 function authHeaders(jwt: string): HeadersInit {
   return {
     "Content-Type": "application/json",
@@ -846,6 +863,9 @@ export async function patchProjectSettings(
     const body = (await res.json().catch(() => ({}))) as { required?: number; role?: number }
     return { kind: "forbidden", required: body.required ?? 500, role: body.role ?? 0 }
   }
+  // AQU-1943: the server's refusals carry `{error}`, and a settings refusal is
+  // now something a user has to read (the TTS cap names the limit and their
+  // actual count). Handing the raw JSON to a toast showed them the braces.
   const text = await res.text().catch(() => "")
-  return { kind: "error", status: res.status, message: text }
+  return { kind: "error", status: res.status, message: errorMessageFrom(text) }
 }

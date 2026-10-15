@@ -1642,7 +1642,8 @@ describe("ProjectOverview Members card (AQU-1171)", () => {
     const settings = projectSettingsMock({ rosterOrg: ROLE.MAINTAINER })
     settings.patch.mockResolvedValue({
       kind: "error",
-      message: JSON.stringify({ error: "rosterViewMinRole 400 is below the organization's setting (600)." }),
+      // patchProjectSettings hands over the body's `error`, not the raw JSON.
+      message: "rosterViewMinRole 400 is below the organization's setting (600).",
     } as never)
     await openMembersPicker(settings)
 

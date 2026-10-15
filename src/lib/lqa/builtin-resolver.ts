@@ -5,6 +5,7 @@ import type {
 } from "@/lib/parsers/types"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { TFunction } from "@/lib/i18n/I18nProvider"
+import type { PunctuationConventions } from "../../../db/shared/punctuation-conventions"
 import { BUILTIN_CHECKS, BUILTIN_CHECK_IDS } from "./builtin-registry"
 import { BIBLE_BUILTIN_CHECK_IDS } from "./bible-builtin-checks"
 
@@ -136,6 +137,12 @@ export function translateRuleDescription(
   return checkId ? t(DESCRIPTION_KEY[checkId]) : rule.description
 }
 
+/** AQU-1906: the two checks that judge the target by its own language's marks. */
+export const PUNCTUATION_CHECK_IDS: readonly BuiltinCheckId[] = [
+  "end-punctuation-mismatch",
+  "punctuation-integrity",
+]
+
 export interface ResolveBuiltinRulesOptions {
   /**
    * AQU-1688: the project's Bible data checks enrichment is on
@@ -144,6 +151,51 @@ export interface ResolveBuiltinRulesOptions {
    * counts or evaluates them.
    */
   bibleChecks?: boolean
+  /**
+   * AQU-1906: the active target lane's punctuation conventions, from
+   * `resolvePunctuation` (db/shared/punctuation-conventions.ts). Stamped onto
+   * the two punctuation checks' `check` descriptors so every evaluation
+   * consumer of this rule set — editor underline, Issues tab, health ribbon,
+   * Check file — judges the target by the same marks.
+   *
+   * Omitted or null keeps the pre-AQU-1906 source-relative behaviour, which is
+   * what a lane with no recorded language and no Language profile slot gets.
+   */
+  punctuation?: PunctuationConventions | null
+}
+
+/**
+ * Re-resolve the built-in rules of an already-built list against a different
+ * override map — AQU-1906's Rules page, which lists the lane it is VIEWING
+ * while `useRules` resolved the editor's ACTIVE lane. Non-built-in rules are
+ * returned untouched.
+ *
+ * It re-reads the registry defaults rather than the rule's current values, so
+ * dropping a lane's override restores the default instead of freezing whatever
+ * the project-wide pass had resolved.
+ */
+export function withBuiltinOverrides(
+  rules: readonly TranslationRule[],
+  overrides: Partial<Record<BuiltinCheckId, AlgorithmicCheckOverride>> | undefined,
+  punctuation?: PunctuationConventions | null,
+): TranslationRule[] {
+  return rules.map((rule) => {
+    if (rule.check.type !== "builtin") return rule
+    const checkId = rule.check.checkId
+    const def = BUILTIN_CHECKS[checkId]
+    if (!def) return rule
+    const ov = overrides?.[checkId]
+    return {
+      ...rule,
+      severity: ov?.severity ?? def.defaultSeverity,
+      enabled: ov?.enabled ?? def.defaultEnabled,
+      check: {
+        type: "builtin",
+        checkId,
+        ...(punctuation && PUNCTUATION_CHECK_IDS.includes(checkId) ? { punctuation } : {}),
+      },
+    }
+  })
 }
 
 export function resolveBuiltinRules(
@@ -165,7 +217,13 @@ export function resolveBuiltinRules(
       scope: "project",
       enabled: ov?.enabled ?? def.defaultEnabled,
       createdAt: FROZEN_CREATED_AT,
-      check: { type: "builtin", checkId: id },
+      check: {
+        type: "builtin",
+        checkId: id,
+        ...(options.punctuation && PUNCTUATION_CHECK_IDS.includes(id)
+          ? { punctuation: options.punctuation }
+          : {}),
+      },
     }
   })
 }

@@ -389,7 +389,8 @@ function unitAssignmentsKey(unitId: string, lane: string): string {
 /**
  * AQU-1771: why a project visibility change was not saved, or null when it
  * was. A server refusal (for example a value looser than the organization's)
- * carries its own explanation in `{ error }`.
+ * carries its own explanation, which `patchProjectSettings` has already lifted
+ * out of the `{ error }` body (AQU-1943).
  */
 function visibilitySaveRefusal(outcome: PatchOutcome, t: ReturnType<typeof useT>): string | null {
   switch (outcome.kind) {
@@ -401,15 +402,8 @@ function visibilitySaveRefusal(outcome: PatchOutcome, t: ReturnType<typeof useT>
       return outcome.reason === "offline"
         ? t("org.projectOverview.visibilitySaveOffline")
         : t("org.projectOverview.visibilitySaveForbidden")
-    case "error": {
-      try {
-        const body = JSON.parse(outcome.message) as { error?: unknown }
-        if (typeof body?.error === "string" && body.error) return body.error
-      } catch {
-        // not JSON — fall through to the raw text
-      }
+    case "error":
       return outcome.message || t("org.projectOverview.visibilitySaveFailed")
-    }
   }
 }
 

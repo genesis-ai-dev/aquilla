@@ -178,3 +178,50 @@ describe("BuiltinChecksList — Bible data checks", () => {
     expect(spy).toHaveBeenCalledWith("bkp:V2", expect.objectContaining({ enabled: false }))
   })
 })
+
+// AQU-1906: the two punctuation rows say which conventions are in effect, and
+// a multi-lane project is told these switches belong to the lane it is viewing.
+describe("BuiltinChecksList — punctuation conventions and lane scope", () => {
+  const builtinRules = resolveBuiltinRules(undefined)
+
+  const conventionsOf = (name: string) => {
+    const row = screen.getByText(name).closest("[data-testid='builtin-row']") as HTMLElement
+    return within(row).queryAllByTestId("builtin-row-conventions").map((line) => line.textContent)
+  }
+
+  it("shows the note on both punctuation rows and nowhere else", () => {
+    render(
+      <BuiltinChecksList
+        builtinRules={builtinRules}
+        infractions={new Map()}
+        onSetOverride={() => {}}
+        punctuationNote="Using Thai punctuation conventions."
+      />,
+    )
+    expect(conventionsOf("End punctuation")).toEqual(["Using Thai punctuation conventions."])
+    expect(conventionsOf("Punctuation integrity")).toEqual(["Using Thai punctuation conventions."])
+    expect(conventionsOf("Extra whitespace")).toEqual([])
+  })
+
+  it("says nothing about conventions when the caller passes no note", () => {
+    render(<BuiltinChecksList builtinRules={builtinRules} infractions={new Map()} onSetOverride={() => {}} />)
+    expect(screen.queryByTestId("builtin-row-conventions")).toBeNull()
+  })
+
+  it("warns that the switches are lane-scoped only when the caller says so", () => {
+    const { unmount } = render(
+      <BuiltinChecksList builtinRules={builtinRules} infractions={new Map()} onSetOverride={() => {}} />,
+    )
+    expect(screen.queryByTestId("builtin-checks-lane-note")).toBeNull()
+    unmount()
+    render(
+      <BuiltinChecksList
+        builtinRules={builtinRules}
+        infractions={new Map()}
+        onSetOverride={() => {}}
+        laneNote="These switches apply to the Thai lane only. Other lanes keep their own."
+      />,
+    )
+    expect(screen.getByTestId("builtin-checks-lane-note").textContent).toMatch(/Thai lane only/)
+  })
+})

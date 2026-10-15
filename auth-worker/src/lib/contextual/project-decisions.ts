@@ -25,6 +25,7 @@ const PROFILE_LINE_MAX_CHARS = 300
 /** English, for the model: the prompt is not UI. */
 const SLOT_LABELS: Readonly<Record<LanguageProfileSlot, string>> = {
   quoteMarks: "Quotation marks by level",
+  punctuation: "Terminal and clause punctuation",
   questionMarkers: "Question markers besides a question mark",
   pronouns: "Pronoun distinctions",
   negators: "Negators",

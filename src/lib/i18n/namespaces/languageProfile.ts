@@ -54,6 +54,19 @@ export const languageProfile = defineNamespace({
     "languageProfile.pronouns.honorifics": "Levels of respect",
     "languageProfile.pronouns.honorificsHint": "One level on each line, as name: forms. For example, Polite: vous",
 
+    // ── Punctuation (AQU-1906) ──
+    "languageProfile.punctuation.title": "Punctuation",
+    "languageProfile.punctuation.description":
+      "The marks your language uses where the source uses ? ! . : and ; — the punctuation checks judge the translation by these. Pre-filled from the target language; edit it and your answer wins.",
+    "languageProfile.punctuation.example": "Arabic: ؟ for a question, ؛ for a semicolon. Thai: no mark at the end.",
+    "languageProfile.punctuation.question": "Question marks",
+    "languageProfile.punctuation.exclamation": "Exclamation marks",
+    "languageProfile.punctuation.statement": "End-of-sentence marks",
+    "languageProfile.punctuation.colon": "Colons",
+    "languageProfile.punctuation.semicolon": "Semicolons",
+    "languageProfile.punctuation.marksHint": "Type the marks themselves; spaces between them are ignored.",
+    "languageProfile.punctuation.noTerminalMark": "Sentences normally end with no mark",
+
     // ── Lists ──
     "languageProfile.negators.title": "Negative words",
     "languageProfile.negators.description": "Words that make a sentence negative.",
@@ -198,6 +211,22 @@ export const languageProfile = defineNamespace({
       },
       "languageProfile.pronouns.honorificsHint": {
         description: "Hint: write one level per line as 'name: forms'. Keep 'vous' as it is.",
+      },
+      "languageProfile.punctuation.title": { description: "Row title: the language's own punctuation marks." },
+      "languageProfile.punctuation.description": {
+        description: "Explains the row. Keep the marks ? ! . : ; exactly as they are.",
+      },
+      "languageProfile.punctuation.example": {
+        description: "Examples from Arabic and Thai. Keep the marks ؟ and ؛ exactly as they are.",
+      },
+      "languageProfile.punctuation.question": { description: "Field label: the marks that end a question." },
+      "languageProfile.punctuation.exclamation": { description: "Field label: the marks that end an exclamation." },
+      "languageProfile.punctuation.statement": { description: "Field label: the marks that end a plain statement." },
+      "languageProfile.punctuation.colon": { description: "Field label: the marks used where the source uses a colon." },
+      "languageProfile.punctuation.semicolon": { description: "Field label: the marks used where the source uses a semicolon." },
+      "languageProfile.punctuation.marksHint": { description: "Hint under each marks field." },
+      "languageProfile.punctuation.noTerminalMark": {
+        description: "Yes/no question: does the language normally end a sentence without any mark (Thai, Lao, Khmer)?",
       },
       "languageProfile.negators.title": { description: "Row title, and the label of its field: words that negate a sentence." },
       "languageProfile.negators.description": { description: "Explains the row." },

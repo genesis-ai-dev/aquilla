@@ -9,6 +9,11 @@ import type {
 } from "@/lib/parsers/types"
 import { patchProject } from "@/lib/store/project-index"
 import { resolveBuiltinRules } from "@/lib/lqa/builtin-resolver"
+import {
+  laneCheckOverrides,
+  lanePunctuation,
+  withLaneOverride,
+} from "@/lib/lqa/lane-builtin-checks"
 import { bibleChecksEnabled } from "@/lib/bible-data/check-context"
 import { rulesForLane } from "@/lib/rules/rule-engine"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
@@ -23,7 +28,7 @@ import type { Concept } from "@/lib/terminology/types"
 type PatchSharedFn = (partial: ProjectWideSettings) => Promise<unknown>
 
 /** The settings keys this hook writes, held locally until the server read catches up. */
-type RuleSettingsOverlay = Partial<Pick<ProjectRecord, "rules" | "algorithmicChecks" | "rulePenalties">>
+type RuleSettingsOverlay = Partial<Pick<ProjectRecord, "rules" | "algorithmicChecks" | "algorithmicChecksByLane" | "rulePenalties">>
 
 /** A patchShared result that says the write did not land (blocked, conflict, error). */
 function writeFailed(outcome: unknown): boolean {
@@ -94,15 +99,34 @@ export function useRules(
     setSettledAt(undefined)
     setOverlay({})
   }
-  // Checks map as last written, for clicks that land before a re-render;
-  // null once no write is in flight (the rendered map is current again).
+  // Checks maps as last written, for clicks that land before a re-render;
+  // null once no write is in flight (the rendered maps are current again).
   const pendingChecksRef = useRef<ProjectRecord["algorithmicChecks"] | null>(null)
+  const pendingLaneChecksRef = useRef<ProjectRecord["algorithmicChecksByLane"] | null>(null)
   const projectRef = useRef(project)
   useEffect(() => { projectRef.current = project }, [project])
 
   const userRules = overlay.rules ?? project?.rules ?? EMPTY_RULES
-  const algorithmicChecks = overlay.algorithmicChecks ?? project?.algorithmicChecks
+  // AQU-1906: the lane's own overrides lie over the project-wide ones. With no
+  // lane (a management surface) this IS the project-wide map, by identity —
+  // memoized for the same reason `userRules` is above: a fresh object per
+  // render re-runs every consumer memo. Writes build from the two STORED maps
+  // (`projectChecks`, `laneChecks`), never from this resolved one.
+  const projectChecks = overlay.algorithmicChecks ?? project?.algorithmicChecks
+  const laneChecks = overlay.algorithmicChecksByLane ?? project?.algorithmicChecksByLane
+  const algorithmicChecks = useMemo(
+    () => laneCheckOverrides({ algorithmicChecks: projectChecks, algorithmicChecksByLane: laneChecks }, lane),
+    [projectChecks, laneChecks, lane],
+  )
   const penalties: RulePenalties = overlay.rulePenalties ?? project?.rulePenalties ?? { major: 15, minor: 5 }
+  // The two stored maps, overlay included, for a surface that resolves a lane
+  // of its own: the Rules page views one lane while its useRules has none.
+  // Resolving from `project` instead would show a toggle only once the refresh
+  // lands — the flip-back PR #1438 removed.
+  const checkOverrides = useMemo(
+    () => ({ algorithmicChecks: projectChecks, algorithmicChecksByLane: laneChecks }),
+    [projectChecks, laneChecks],
+  )
   const terminology = localConcepts
 
   // AQU-455: track the latest known-cumulative rules array ourselves rather
@@ -158,9 +182,32 @@ export function useRules(
   // AQU-1688: the Bible data checks are rules only while the project's Bible
   // data checks enrichment is on (which also needs Bible data itself on).
   const bibleChecks = bibleChecksEnabled(project)
+  // AQU-1906: the punctuation checks judge the target by the ACTIVE lane's own
+  // marks. Resolved here, once per lane, and stamped onto the two checks'
+  // descriptors, so every consumer of this rule set — editor underline, Issues
+  // tab, health ribbon, Check file — agrees. A management surface (no lane)
+  // keeps the source-relative sets; the Rules page resolves the lane it is
+  // viewing itself, through `withBuiltinOverrides`.
+  const projectLanes = project?.lanes
+  const projectTargetLanguage = project?.targetLanguage
+  const projectLanguageProfile = project?.languageProfile
+  const punctuation = useMemo(
+    () =>
+      lane === undefined
+        ? null
+        : lanePunctuation(
+            {
+              lanes: projectLanes,
+              targetLanguage: projectTargetLanguage ?? "",
+              languageProfile: projectLanguageProfile,
+            },
+            lane,
+          ).conventions,
+    [projectLanes, projectTargetLanguage, projectLanguageProfile, lane],
+  )
   const builtinRules = useMemo(
-    () => resolveBuiltinRules(algorithmicChecks, { bibleChecks }),
-    [algorithmicChecks, bibleChecks],
+    () => resolveBuiltinRules(algorithmicChecks, { bibleChecks, punctuation }),
+    [algorithmicChecks, bibleChecks, punctuation],
   )
 
   // Subscribed (org-managed) concepts union local terminology, subscribed
@@ -220,7 +267,10 @@ export function useRules(
       failed = true
     } finally {
       inFlightRef.current -= calls
-      if (inFlightRef.current === 0) pendingChecksRef.current = null
+      if (inFlightRef.current === 0) {
+        pendingChecksRef.current = null
+        pendingLaneChecksRef.current = null
+      }
     }
     if (failed) {
       if (partial.rules) latestRulesRef.current = projectRef.current?.rules ?? EMPTY_RULES
@@ -335,11 +385,31 @@ export function useRules(
     await writeShared({ rulePenalties: newPenalties })
   }, [project, writeShared])
 
+  /**
+   * AQU-1906: `overrideLane` switches ONE lane's copy of the check instead of
+   * the project-wide one (`''` is the default lane). Omit it and this writes
+   * `algorithmicChecks`, exactly as before — which is what a single-lane
+   * project keeps doing.
+   */
   const setBuiltinOverride = useCallback(async (
     checkId: BuiltinCheckId,
     override: AlgorithmicCheckOverride,
+    overrideLane?: string,
   ) => {
     if (!project) return
+    if (overrideLane !== undefined) {
+      void patchProject(project.id, (p) => ({
+        ...p,
+        algorithmicChecksByLane: withLaneOverride(p.algorithmicChecksByLane, overrideLane, checkId, override),
+      }))
+      // Same rule as the project-wide path below: the key replaces wholesale,
+      // so send the full per-lane map, built from the last-written one so two
+      // quick toggles in a lane both survive.
+      const next = withLaneOverride(pendingLaneChecksRef.current ?? laneChecks, overrideLane, checkId, override)
+      pendingLaneChecksRef.current = next
+      await writeShared({ algorithmicChecksByLane: next })
+      return
+    }
     void patchProject(project.id, (p) => ({
       ...p,
       algorithmicChecks: { ...(p.algorithmicChecks ?? {}), [checkId]: override },
@@ -348,16 +418,19 @@ export function useRules(
     // server projection, so an IDB-only write here is invisible to useProject.
     // Top-level settings keys replace wholesale — send the full merged map,
     // built from the last-written map so a second click before a re-render
-    // keeps the first (QA on PR #1438 lost one of two quick toggles).
-    const next = { ...(pendingChecksRef.current ?? algorithmicChecks ?? {}), [checkId]: override }
+    // keeps the first (QA on PR #1438 lost one of two quick toggles). The
+    // STORED project-wide map, not the lane-resolved `algorithmicChecks`: a
+    // lane's overrides must never be baked into the key every lane shares.
+    const next = { ...(pendingChecksRef.current ?? projectChecks ?? {}), [checkId]: override }
     pendingChecksRef.current = next
     await writeShared({ algorithmicChecks: next })
-  }, [project, algorithmicChecks, writeShared])
+  }, [project, projectChecks, laneChecks, writeShared])
 
   return {
     rules,
     userRules,
     builtinRules,
+    checkOverrides,
     penalties,
     addRule,
     updateRule,

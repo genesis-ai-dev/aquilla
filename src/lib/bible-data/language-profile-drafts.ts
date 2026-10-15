@@ -13,6 +13,7 @@ import type {
   KinTermsProfile,
   NumberWordsProfile,
   PronounsProfile,
+  PunctuationProfile,
   QuestionMarkersProfile,
 } from "../../../db/shared/language-profile"
 
@@ -252,4 +253,57 @@ export function divineNamesValue(draft: DivineNamesDraft): DivineNamesProfile {
   const capitalization = triValue(draft.capitalization)
   if (capitalization !== undefined) out.deityPronounCapitalization = capitalization
   return out
+}
+
+// ── Punctuation (AQU-1906) ──────────────────────────────────────────────────
+
+/** The mark classes the row edits, in the order it shows them. */
+export const PUNCTUATION_MARK_CLASSES = [
+  "question",
+  "exclamation",
+  "statement",
+  "colon",
+  "semicolon",
+] as const
+
+export type PunctuationMarkClass = (typeof PUNCTUATION_MARK_CLASSES)[number]
+
+export type PunctuationDraft = Record<PunctuationMarkClass, string> & { noTerminalMark: TriState }
+
+/**
+ * Marks are single characters, so every non-whitespace character typed is one
+ * mark. `splitList`'s separators (",", "؛", ";", "、") are themselves marks
+ * here, which is exactly why this row cannot use it.
+ */
+function marksDraft(value: unknown): string {
+  return (strings(value) ?? []).join(" ")
+}
+
+function marksValue(draft: string): string[] {
+  return [...new Set(Array.from(draft).filter((char) => !/\s/u.test(char)))]
+}
+
+/**
+ * The stored slot, or — while the slot is empty — the table's answer for the
+ * project's target language, so the row opens PRE-FILLED rather than blank
+ * (AQU-1906). Saving a pre-filled row stores what is shown, which resolves to
+ * the same conventions the table was already applying.
+ */
+export function punctuationDraft(stored: unknown, prefill?: PunctuationProfile | null): PunctuationDraft {
+  const value = isRecord(stored) ? stored : ((prefill ?? {}) as Record<string, unknown>)
+  const out = { noTerminalMark: tri(value.noTerminalMark) } as PunctuationDraft
+  for (const key of PUNCTUATION_MARK_CLASSES) out[key] = marksDraft(value[key])
+  return out
+}
+
+/** Null while the row holds no answer at all — the slot needs at least one field. */
+export function punctuationValue(draft: PunctuationDraft): PunctuationProfile | null {
+  const out: PunctuationProfile = {}
+  for (const key of PUNCTUATION_MARK_CLASSES) {
+    const marks = marksValue(draft[key])
+    if (marks.length > 0) out[key] = marks
+  }
+  const noTerminalMark = triValue(draft.noTerminalMark)
+  if (noTerminalMark !== undefined) out.noTerminalMark = noTerminalMark
+  return Object.keys(out).length > 0 ? out : null
 }

@@ -87,6 +87,7 @@ import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
 import { setTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeCell } from "@/lib/audio/transcribe"
+import { laneLanguageForTag } from "@/lib/lanes/lane-language"
 import { probeMicPermission } from "./probeMicPermission"
 
 interface Props {
@@ -1530,7 +1531,10 @@ export function AudioRecordingModal({
         },
         session,
         projectId: project.id,
-        language: project.targetLanguage,
+        // AQU-1978: Whisper hears the LANE's language. The project-level one is
+        // retired and empty on a new project, so every fresh take was
+        // transcribed with no language at all (auto-detect).
+        language: laneLanguageForTag(laneTag ?? "", project.lanes) ?? undefined,
         // AQU-646: state the slot rather than letting transcription infer it
         // from the stub above. The stub carries `selectedAudioId` and no slot,
         // so the inference would read every take as "recording" — which was
@@ -1539,6 +1543,9 @@ export function AudioRecordingModal({
         // sibling-deselect would drop that track's real take. This is the
         // caller that knows, so it says.
         slot: targetSlot,
+        // AQU-1978: …and the lane, for the same reason: the timings re-attach
+        // deselects within the lane it names, and naming none meant `''`.
+        ...(laneTag ? { targetLang: laneTag } : {}),
       })
       scheduleAutoAdvance()
     } catch (e) {
@@ -1553,7 +1560,7 @@ export function AudioRecordingModal({
       // that struck mid-upload retries with the SAME take after reconnect.
       setPhase(recorder.state.kind === "stopped" ? "preview" : "error")
     }
-  }, [recorder.state, online, session, activeCell, project.id, username, recordingTakes, scheduleAutoAdvance, returnToReady, laneTag, previewTrim])
+  }, [recorder.state, online, session, activeCell, project.id, project.lanes, username, recordingTakes, scheduleAutoAdvance, returnToReady, laneTag, previewTrim])
 
   // Attach an existing FILE as a take, through this dialog's phase machine.
   //

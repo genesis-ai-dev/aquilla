@@ -363,6 +363,30 @@ describe("useOrgSettings — rollback on rejected writes (AQU-255 follow-up)", (
     })
     expect(result.current.validationCountOverrides).toBe(0)
   })
+
+  it("names the projects behind each count, and a save whose reply lacks them keeps them (AQU-1938)", async () => {
+    const genesis = { total: 1, projects: [{ id: "p1", name: "Genesis" }] }
+    mockFetchResponse = {
+      ...serverTruth(),
+      validationCountOverrides: 1,
+      overrideProjects: { validationCount: genesis },
+    }
+    vi.mocked(restClient.patchOrgSettings).mockResolvedValueOnce({
+      kind: "ok",
+      value: { orgId: 1, settings: { validationCount: 2 }, version: 4, updatedAt: null, updatedBy: 9 },
+    })
+
+    const { result } = renderHook(() => useOrgSettings(1, 600))
+    await waitFor(() => expect(result.current.overrideProjects.validationCount).toEqual(genesis))
+    // Not sent: the line keeps its bare count.
+    expect(result.current.overrideProjects.validationCountAudio).toBeNull()
+
+    await act(async () => {
+      await result.current.patch({ validationCount: 2 })
+    })
+    expect(result.current.version).toBe(4)
+    expect(result.current.overrideProjects.validationCount).toEqual(genesis)
+  })
 })
 
 // ───────────────────────────────────────────────────────────────────────────

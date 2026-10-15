@@ -9029,6 +9029,9 @@ function EditorRow({
                 attachments={audioHome?.attachments ?? cell.attachments}
                 projectId={project.id}
                 fileId={audioHome?.fileId ?? cell.fileId}
+                // AQU-1978: the voice is a take in the lane on screen, like the
+                // mic and the upload beside it.
+                targetLang={activeLane || undefined}
                 // Sam, 2026-08-25: a subtitle performed by two heard lines
                 // voices BOTH, so neither is left silent. Only the first is
                 // played back; the rest are generated alongside it.

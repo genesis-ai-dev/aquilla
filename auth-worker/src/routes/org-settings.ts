@@ -72,11 +72,15 @@ import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { notifySyncWorkerOfProjectSettingsChange } from "../services/sync-worker-notify"
 import { ROLE } from "../types"
 import {
-  countStricterVisibilityProjects,
   getEffectiveOrgRole,
   getOrgMemberRole,
+  listStricterVisibilityProjects,
+  OVERRIDE_PROJECT_LIST_CAP,
+  projectNameVisibleSql,
+  type OverrideProjectList,
+  type ProjectNameViewer,
 } from "../services/org-permissions"
-import { hasActiveElevation } from "../middleware/platform-admin"
+import { hasActiveElevation, isPlatformAdminEmail } from "../middleware/platform-admin"
 import {
   MAX_VALIDATION_THRESHOLD,
   VALIDATION_THRESHOLD_COLUMNS,
@@ -329,8 +333,8 @@ orgSettings.get("/:orgId/settings", authMiddleware, async (c) => {
 
   const response = await loadSettings(c.env, orgId)
   // AQU-1083 / AQU-1771: how many projects have their own answer for each
-  // inherited default (see loadOverrideCounts).
-  const counts = await loadOverrideCounts(c.env, orgId)
+  // inherited default (see loadOverrideCounts). AQU-1938: and which ones.
+  const counts = await loadOverrideCounts(c.env, orgId, await nameViewer(c.env, user))
   // OPS-44: the unredacted branch hands back the org's LIVE vendor API keys
   // (D7 — someone else's credential we chose to hold). getEffectiveOrgRole
   // returns 700 for any platform operator on any org, so without this an
@@ -363,7 +367,13 @@ orgSettings.get("/:orgId/settings", authMiddleware, async (c) => {
  * rather than part of every settings response: the settings GET is read on
  * nearly every page and only the Security page shows this line, so only it
  * pays for the per-project read (the 0174 generated columns, org-scoped).
- * Any org member may read it; it is a count, and names no project.
+ * Any org member may read it.
+ *
+ * AQU-1938: a bare count left nobody able to act on it, so `overrideProjects`
+ * also names those projects — but only the ones the caller may already see
+ * (projectNameVisibleSql), so a member below Maintainer learns no project
+ * name the org dashboard would not show them. The counts are unchanged and
+ * stay at the top level for older clients.
  */
 orgSettings.get("/:orgId/settings/visibility-overrides", authMiddleware, async (c) => {
   const user = c.get("user")
@@ -371,8 +381,22 @@ orgSettings.get("/:orgId/settings/visibility-overrides", authMiddleware, async (
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
   const role = await getEffectiveOrgRole(c.env, orgId, user)
   if (role == null) return c.json({ error: "no access to org" }, 403)
-  return c.json(await countStricterVisibilityProjects(c.env, orgId))
+  const lists = await listStricterVisibilityProjects(c.env, orgId, await nameViewer(c.env, user))
+  return c.json({
+    rosterViewMinRole: lists.rosterViewMinRole.total,
+    memberProgressViewMinRole: lists.memberProgressViewMinRole.total,
+    overrideProjects: lists,
+  })
 })
+
+/** AQU-1938: the caller, as the project-name rule needs them. */
+async function nameViewer(
+  env: AuthHonoEnv["Bindings"],
+  user: { id: number; email: string },
+): Promise<ProjectNameViewer> {
+  // Memoised per request: getEffectiveOrgRole has already asked.
+  return { userId: user.id, isAdmin: await isPlatformAdminEmail(env, user.email) }
+}
 
 /**
  * AQU-1083: how many projects have opted out of each org default the Project
@@ -386,46 +410,84 @@ orgSettings.get("/:orgId/settings/visibility-overrides", authMiddleware, async (
  * its 409s): the client replaces its whole copy with each response, so a
  * response without them read as "no overrides" and the reset prompt never
  * came back after the first save.
+ *
+ * AQU-1938: each count now comes with the projects behind it (by name, only
+ * those the caller may see, capped), so the page can say which ones they are.
  */
-async function loadOverrideCounts(env: AuthHonoEnv["Bindings"], orgId: number) {
-  const [countStructuralOverrides, validationCountOverrides, validationCountAudioOverrides] =
-    await Promise.all([
-      countOverrides(env, orgId, "count_structural"),
-      countOverrides(env, orgId, VALIDATION_THRESHOLD_COLUMNS.validationCount),
-      countOverrides(env, orgId, VALIDATION_THRESHOLD_COLUMNS.validationCountAudio),
-    ])
-  return { countStructuralOverrides, validationCountOverrides, validationCountAudioOverrides }
+async function loadOverrideCounts(
+  env: AuthHonoEnv["Bindings"],
+  orgId: number,
+  viewer: ProjectNameViewer,
+) {
+  const [countStructuralCells, validationCount, validationCountAudio] = await Promise.all([
+    listOverrideProjects(env, orgId, INHERITED_KEY_COLUMNS[COUNT_STRUCTURAL_KEY], viewer),
+    listOverrideProjects(env, orgId, VALIDATION_THRESHOLD_COLUMNS.validationCount, viewer),
+    listOverrideProjects(env, orgId, VALIDATION_THRESHOLD_COLUMNS.validationCountAudio, viewer),
+  ])
+  return {
+    countStructuralOverrides: countStructuralCells.total,
+    validationCountOverrides: validationCount.total,
+    validationCountAudioOverrides: validationCountAudio.total,
+    // AQU-1938: which projects those are, keyed by the setting they override.
+    overrideProjects: { countStructuralCells, validationCount, validationCountAudio },
+  }
 }
 
 /** The settings plus the override counts: the shape every settings response carries. */
-async function loadSettingsWithCounts(env: AuthHonoEnv["Bindings"], orgId: number) {
-  const [settings, counts] = await Promise.all([loadSettings(env, orgId), loadOverrideCounts(env, orgId)])
+async function loadSettingsWithCounts(
+  env: AuthHonoEnv["Bindings"],
+  orgId: number,
+  viewer: ProjectNameViewer,
+) {
+  const [settings, counts] = await Promise.all([
+    loadSettings(env, orgId),
+    loadOverrideCounts(env, orgId, viewer),
+  ])
   return { ...settings, ...counts }
 }
 
 /**
  * Projects in this org whose settings carry their own value for an inherited
  * key. `column` is one of INHERITED_KEY_COLUMNS' values, never caller input.
+ *
+ * AQU-1938: returns the count AND, by name, the first of those projects the
+ * caller may see. One query: the window total counts every overriding project
+ * (the number the page always showed), and ordering the visible ones first
+ * means the cap only ever cuts names the caller could have read.
  */
-async function countOverrides(
+async function listOverrideProjects(
   env: AuthHonoEnv["Bindings"],
   orgId: number,
   column: string,
-): Promise<number> {
+  viewer: ProjectNameViewer,
+): Promise<OverrideProjectList> {
+  const visible = projectNameVisibleSql(viewer)
   try {
     // The STORED generated column, never the multi-MB settings blob.
-    const row = await env.AQUILLA_PG.prepare(
-      `SELECT COUNT(*)::int AS n
+    const { results } = await env.AQUILLA_PG.prepare(
+      `SELECT p.id AS id, p.name AS name,
+              CASE WHEN ${visible.sql} THEN 1 ELSE 0 END AS name_visible,
+              COUNT(*) OVER ()::int AS total
          FROM project_settings ps
          JOIN projects p ON p.id = ps.project_id
         WHERE p.org_id = ? AND p.archived_at IS NULL
-          AND ps.${column} IS NOT NULL`,
-    ).bind(orgId).first<{ n: number }>()
-    return Number(row?.n) || 0
+          AND ps.${column} IS NOT NULL
+        ORDER BY name_visible DESC, LOWER(p.name), p.id
+        LIMIT ?`,
+    )
+      .bind(...visible.binds, orgId, OVERRIDE_PROJECT_LIST_CAP)
+      .all<{ id: string; name: string; name_visible: number | string; total: number | string }>()
+    const rows = results ?? []
+    return {
+      total: Number(rows[0]?.total) || 0,
+      projects: rows
+        .filter((row) => Number(row.name_visible) === 1)
+        .map((row) => ({ id: row.id, name: row.name })),
+    }
   } catch {
     // A count is an affordance, not authority. Failing it must not take the
     // whole settings page down; the prompt simply does not appear.
-    return 0
+    return { total: 0, projects: [] }
   }
 }
 
@@ -577,10 +639,12 @@ orgSettings.on(
       )
     }
 
+    // AQU-1938: every response below carries the override lists, named for this caller.
+    const viewer = await nameViewer(c.env, user)
     const current = await loadSettings(c.env, orgId)
 
     if (ifMatchVersion !== current.version) {
-      return c.json({ error: "version mismatch", current: { ...current, ...(await loadOverrideCounts(c.env, orgId)) } }, 409)
+      return c.json({ error: "version mismatch", current: { ...current, ...(await loadOverrideCounts(c.env, orgId, viewer)) } }, 409)
     }
 
     const newSettingsJson = JSON.stringify(body.settings)
@@ -595,7 +659,7 @@ orgSettings.on(
           .bind(orgId, newSettingsJson, newVersion, user.id)
           .run()
       } catch (err) {
-        const fresh = await loadSettingsWithCounts(c.env, orgId)
+        const fresh = await loadSettingsWithCounts(c.env, orgId, viewer)
         if (fresh.version !== newVersion) {
           return c.json({ error: "version mismatch", current: fresh }, 409)
         }
@@ -616,7 +680,7 @@ orgSettings.on(
 
       const changes = result.meta?.changes
       if (typeof changes === "number" && changes === 0) {
-        const fresh = await loadSettingsWithCounts(c.env, orgId)
+        const fresh = await loadSettingsWithCounts(c.env, orgId, viewer)
         return c.json({ error: "version mismatch", current: fresh }, 409)
       }
     }
@@ -679,7 +743,7 @@ orgSettings.on(
       [...toNotify].map(([projectId, version]) => ({ projectId, version })),
     )
 
-    const saved = { ...fresh, ...(await loadOverrideCounts(c.env, orgId)) }
+    const saved = { ...fresh, ...(await loadOverrideCounts(c.env, orgId, viewer)) }
     return c.json(reprojectionFailed ? { ...saved, warning: "reprojection_failed" } : saved)
   },
 )

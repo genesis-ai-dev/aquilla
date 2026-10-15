@@ -107,6 +107,11 @@ export const settings = defineNamespace({
       one: "{count} project is stricter than this",
       other: "{count} projects are stricter than this",
     }, "count"),
+    // AQU-1938: the last line of the project list those counts open.
+    "settings.overrideStatus.andMore": plural({
+      one: "and {count} more",
+      other: "and {count} more",
+    }, "count"),
 
     // ── RepetitionPropagationSection (AQU-1391) ──
     "settings.autoPropagateRepetitions.label": "Auto-propagate repetitions",
@@ -498,6 +503,17 @@ export const settings = defineNamespace({
         description:
           "Link after that status line. It opens a confirmation asking whether those " +
           "projects should go back to following the organization's default.",
+      },
+      "settings.overrideStatus.andMore": {
+        description:
+          "Last line of the list that opens when someone clicks one of the status lines above " +
+          "(e.g. '2 projects set their own number'). The list names those projects, one per " +
+          "line, each a link to that project; this line counts the ones not named — because " +
+          "the list stops at 50, or because the person may not see some of those projects. " +
+          "Lower-case 'and': it continues the list of names above it.",
+        placeholders: {
+          count: "Whole number of projects not named in the list, 1 or more.",
+        },
       },
       "settings.personalProvider.trailingPathHint": {
         description:

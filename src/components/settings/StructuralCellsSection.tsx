@@ -21,7 +21,14 @@ import { SettingsRow } from "@/components/ui/page"
 import { OverrideStatus } from "./OverrideStatus"
 import { Switch } from "@/components/ui/switch"
 import { useI18n } from "@/lib/i18n/I18nProvider"
+import { projectSettingsPath } from "@/lib/navigation/org-paths"
 import type { UseOrgSettings } from "@/hooks/useOrgSettings"
+
+/**
+ * AQU-1938: a listed project's own answer is set on its Validation settings
+ * pane, where "Count headings" sits at the bottom of the validation card.
+ */
+const validationSettingsHref = (projectId: string) => projectSettingsPath(projectId, "validation")
 
 interface StructuralCellsSectionProps {
   orgSettings: UseOrgSettings
@@ -87,6 +94,8 @@ export function StructuralCellsSection({ orgSettings, canEdit }: StructuralCells
             onReset={canEdit ? () => setPendingOverrides(countStructuralOverrides) : undefined}
             disabled={busy}
             loading={!orgSettings.hasFetched}
+            projects={orgSettings.overrideProjects?.countStructuralCells ?? null}
+            projectHref={validationSettingsHref}
           />
         </>
       }

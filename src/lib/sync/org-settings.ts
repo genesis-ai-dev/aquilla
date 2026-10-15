@@ -1,4 +1,9 @@
 import { FRONTIER_API_URL } from "./sync-token"
+import {
+  parseOverrideProjectList,
+  type InheritedOverrideKey,
+  type OverrideProjectList,
+} from "./override-projects"
 import type { TranslationRule, PromotionRequest } from "@/lib/parsers/types"
 import { t } from "@/lib/i18n/standalone"
 
@@ -211,7 +216,14 @@ export interface OrgSettingsResponse {
   /** AQU-1771: the same count for the two validation defaults. */
   validationCountOverrides?: number
   validationCountAudioOverrides?: number
+  /**
+   * AQU-1938: which projects those counts are, keyed by the setting they set
+   * their own value for. Absent from an older server: the line then shows the
+   * bare count, as it did before.
+   */
+  overrideProjects?: Partial<Record<InheritedOverrideKey, OverrideProjectList>>
 }
+
 
 export type OrgPatchResult =
   | { kind: "ok"; value: OrgSettingsResponse }
@@ -368,6 +380,8 @@ export async function resetProjectOverrides(
 export interface VisibilityOverrideCounts {
   rosterViewMinRole: number
   memberProgressViewMinRole: number
+  /** AQU-1938: which projects those are. Null from an older server. */
+  overrideProjects: Record<"rosterViewMinRole" | "memberProgressViewMinRole", OverrideProjectList | null>
 }
 
 /**
@@ -384,10 +398,18 @@ export async function fetchVisibilityOverrideCounts(
       headers: authHeaders(jwt),
     })
     if (!res.ok) return null
-    const body = (await res.json()) as Partial<VisibilityOverrideCounts>
+    const body = (await res.json()) as {
+      rosterViewMinRole?: unknown
+      memberProgressViewMinRole?: unknown
+      overrideProjects?: { rosterViewMinRole?: unknown; memberProgressViewMinRole?: unknown }
+    }
     return {
       rosterViewMinRole: Number(body.rosterViewMinRole) || 0,
       memberProgressViewMinRole: Number(body.memberProgressViewMinRole) || 0,
+      overrideProjects: {
+        rosterViewMinRole: parseOverrideProjectList(body.overrideProjects?.rosterViewMinRole),
+        memberProgressViewMinRole: parseOverrideProjectList(body.overrideProjects?.memberProgressViewMinRole),
+      },
     }
   } catch {
     return null

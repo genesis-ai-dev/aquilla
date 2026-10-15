@@ -2,6 +2,8 @@
 // floors. A project may only make them stricter, so there is no reset link.
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { MemoryRouter } from "react-router-dom"
 import { RosterProgressSection } from "./RosterProgressSection"
 import type { UseOrgSettings } from "@/hooks/useOrgSettings"
 
@@ -60,5 +62,24 @@ describe("RosterProgressSection stricter-project line (AQU-1771)", () => {
     render(<RosterProgressSection orgSettings={orgSettings()} canEdit orgId={7} />)
     expect(screen.queryByTestId("override-status")).toBeNull()
     expect(screen.getAllByTestId("override-status-loading")).toHaveLength(2)
+  })
+
+  it("the count opens the stricter projects, each linking to its overview, where its badges set this (AQU-1938)", async () => {
+    fetchCounts.mockResolvedValue({
+      rosterViewMinRole: 3,
+      memberProgressViewMinRole: 0,
+      overrideProjects: {
+        rosterViewMinRole: { total: 3, projects: [{ id: "p-gen", name: "Genesis" }, { id: "p-exo", name: "Exodus" }] },
+        memberProgressViewMinRole: { total: 0, projects: [] },
+      },
+    })
+    render(<MemoryRouter><RosterProgressSection orgSettings={orgSettings()} canEdit orgId={7} /></MemoryRouter>)
+    const toggle = await screen.findByRole("button", { name: "3 projects are stricter than this" })
+    await userEvent.click(toggle)
+    const roster = screen.getAllByTestId("override-status")[0]
+    expect(within(roster).getByRole("link", { name: "Genesis" })).toHaveAttribute("href", "/projects/p-gen")
+    expect(within(roster).getByRole("link", { name: "Exodus" })).toHaveAttribute("href", "/projects/p-exo")
+    // One of the three is not this person's to see: counted, not named.
+    expect(within(roster).getAllByRole("listitem").at(-1)?.textContent).toBe("and 1 more")
   })
 })

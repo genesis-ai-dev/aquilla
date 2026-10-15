@@ -3046,24 +3046,78 @@ export async function getProjectVisibilityFloors(
 }
 
 /**
+ * AQU-1938: at most this many project names ride along with one of the org
+ * settings pages' "N projects …" counts. The count itself stays exact; the
+ * page ends a capped list with "and N more".
+ */
+export const OVERRIDE_PROJECT_LIST_CAP = 50
+
+/**
+ * AQU-1938: the projects behind one "N projects set their own …" / "N projects
+ * are stricter" count on the org settings pages.
+ */
+export interface OverrideProjectList {
+  /** Every live project in the org that counts — the same number as the bare count. */
+  total: number
+  /**
+   * The ones the caller may see (the AQU-745 rule), by name, at most
+   * OVERRIDE_PROJECT_LIST_CAP. Shorter than `total` when the list was capped
+   * or when some of those projects are not the caller's to see.
+   */
+  projects: Array<{ id: string; name: string }>
+}
+
+/** Who is asking, for projectNameVisibleSql. */
+export interface ProjectNameViewer {
+  userId: number
+  isAdmin: boolean
+}
+
+/**
+ * AQU-1938: the AQU-745 rule the org dashboard uses (PORTFOLIO_VISIBILITY_PREDICATE)
+ * as a condition over `projects p`, with its binds in order. The org settings
+ * counts are open to every org member, but a project's NAME is not: below
+ * Maintainer a member sees only the projects they created or were given. So
+ * the names that ride along with a count go through the same rule, and the
+ * rest are left to "and N more".
+ */
+export function projectNameVisibleSql(viewer: ProjectNameViewer): { sql: string; binds: unknown[] } {
+  return {
+    sql: PORTFOLIO_VISIBILITY_PREDICATE,
+    binds: [viewer.isAdmin ? 1 : 0, viewer.userId, viewer.userId, viewer.userId, viewer.userId],
+  }
+}
+
+/**
  * AQU-1771: how many of the org's live projects make each floor stricter than
  * the org does — the "N projects are stricter" line under the org's setting.
+ * AQU-1938: and which ones, so the line can name them.
  */
-export async function countStricterVisibilityProjects(
+export async function listStricterVisibilityProjects(
   env: Env,
   orgId: number,
-): Promise<Record<VisibilityFloorKey, number>> {
+  viewer: ProjectNameViewer,
+): Promise<Record<VisibilityFloorKey, OverrideProjectList>> {
   const [org, rows] = await Promise.all([
     getOrgVisibilityFloors(env, orgId),
-    loadOrgProjectVisibilityOverrides(env.AQUILLA_PG, orgId),
+    loadOrgProjectVisibilityOverrides(env.AQUILLA_PG, orgId, projectNameVisibleSql(viewer)),
   ])
-  const counts: Record<VisibilityFloorKey, number> = { rosterViewMinRole: 0, memberProgressViewMinRole: 0 }
-  for (const own of rows.values()) {
+  const lists: Record<VisibilityFloorKey, OverrideProjectList> = {
+    rosterViewMinRole: { total: 0, projects: [] },
+    memberProgressViewMinRole: { total: 0, projects: [] },
+  }
+  // Rows arrive in name order, so each list is too.
+  for (const row of rows) {
     for (const key of VISIBILITY_FLOOR_KEYS) {
-      if (stricterProjectFloor(org[key], own[key]) != null) counts[key] += 1
+      if (stricterProjectFloor(org[key], row[key]) == null) continue
+      const list = lists[key]
+      list.total += 1
+      if (row.nameVisible && list.projects.length < OVERRIDE_PROJECT_LIST_CAP) {
+        list.projects.push({ id: row.projectId, name: row.name })
+      }
     }
   }
-  return counts
+  return lists
 }
 
 /**

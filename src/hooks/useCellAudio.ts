@@ -15,6 +15,7 @@ import { decodePeaks } from "@/lib/audio/peaks"
 import { audioMimeForExt } from "@/lib/audio/mime"
 import { peaksCacheGet, peaksCachePut } from "@/lib/audio/peaks-cache"
 import { audioCacheGet, audioCachePut, audioCacheEvict } from "@/lib/audio/bytes-cache"
+import { joinedClip } from "@/lib/audio/tail-cut"
 import {
   type ActiveAudioController,
   claimActiveAudio,
@@ -47,6 +48,67 @@ export interface AudioError {
  *  uncaught error in the middle of playback. */
 function setPlayhead(a: HTMLMediaElement, t: number): void {
   try { a.currentTime = t } catch { /* not seekable yet */ }
+}
+
+/**
+ * AQU-1767 (Sam's walk, 2026-10-15): a split take plays as ONE clip — its
+ * pieces' audio joined — so nothing seeks between pieces. Every seek on a
+ * playing element stalls Safari about a third of a second, sounding the old
+ * position meanwhile: a click played the take's head and then jumped, and
+ * every cut stuttered. The element then runs on the joined clip's clock;
+ * these map it to and from the recording's, which every caller speaks.
+ */
+export interface JoinedClock {
+  key: string
+  spans: { start: number; end: number }[]
+  offsets: number[]
+  total: number
+}
+
+/** The parts of [start, end] that play, given the gaps that do not. */
+export function playingSpans(
+  start: number,
+  end: number,
+  gaps: readonly { start: number; end: number }[],
+): { start: number; end: number }[] {
+  const spans: { start: number; end: number }[] = []
+  let at = start
+  for (const g of [...gaps].sort((a, b) => a.start - b.start)) {
+    if (g.start > at) spans.push({ start: at, end: Math.min(g.start, end) })
+    at = Math.max(at, g.end)
+  }
+  if (end > at) spans.push({ start: at, end })
+  return spans.filter((s) => s.end > s.start)
+}
+
+/** Which window and gaps a joined clip was built for. */
+export function gapsKeyOf(tr: { start: number | null; end: number | null; gaps?: readonly { start: number; end: number }[] }): string {
+  return `${tr.start ?? ""}-${tr.end ?? ""}~${(tr.gaps ?? []).map((g) => `${g.start}-${g.end}`).join(",")}`
+}
+
+export function joinedClockFor(key: string, spans: { start: number; end: number }[]): JoinedClock {
+  const offsets: number[] = []
+  let total = 0
+  for (const s of spans) { offsets.push(total); total += s.end - s.start }
+  return { key, spans, offsets, total }
+}
+
+/** Recording seconds → the joined clip's (a gap lands on the next piece). */
+export function toJoinedSec(j: JoinedClock, t: number): number {
+  for (let i = 0; i < j.spans.length; i++) {
+    if (t < j.spans[i].start) return j.offsets[i]
+    if (t < j.spans[i].end) return j.offsets[i] + (t - j.spans[i].start)
+  }
+  return j.total
+}
+
+/** The joined clip's seconds → the recording's. */
+export function toRecordingSec(j: JoinedClock, x: number): number {
+  for (let i = 0; i < j.spans.length; i++) {
+    const len = j.spans[i].end - j.spans[i].start
+    if (x < j.offsets[i] + len) return j.spans[i].start + Math.max(0, x - j.offsets[i])
+  }
+  return j.spans.length > 0 ? j.spans[j.spans.length - 1].end : 0
 }
 
 /** AQU-1767: where playback resumes when `t` lies in a gap that does not play, or null. */
@@ -164,6 +226,19 @@ export function useCellAudio(
   const peaksReadyRef = useRef(false)
   const volumeRef = useRef(1)
   const trimRef = useRef<{ start: number | null; end: number | null; gaps?: readonly { start: number; end: number }[] }>({ start: null, end: null })
+  // AQU-1767: the joined clip's clock while the element plays one (see JoinedClock).
+  const joinedRef = useRef<JoinedClock | null>(null)
+  // AQU-1767: where a click asked a not-yet-loaded take to start, so it starts
+  // THERE rather than at its head and then jumps.
+  const pendingStartRef = useRef<number | null>(null)
+  // AQU-1767: the element being made, so a second click waits for it.
+  const creatingRef = useRef<Promise<void> | null>(null)
+  // The recording's own length, for a window whose end is the clip's end.
+  const recordingSecRef = useRef(0)
+  /** The element's position on the recording's clock. */
+  const elTime = (a: HTMLMediaElement): number => (joinedRef.current ? toRecordingSec(joinedRef.current, a.currentTime) : a.currentTime)
+  /** Move the element to a position on the recording's clock. */
+  const setElTime = (a: HTMLMediaElement, t: number): void => setPlayhead(a, joinedRef.current ? toJoinedSec(joinedRef.current, t) : t)
 
   // Keep the latest session reachable from the token fetcher without
   // recreating it on every session field update. The underlying token cache
@@ -193,6 +268,8 @@ export function useCellAudio(
   // take whole and raw, the Recording tab its pieces — and a click on the tab's
   // waveform was handed to the row's player, which played the gaps and ran
   // past the last piece. The window is part of which take this is.
+  const elTimeRef = useRef<(a: HTMLMediaElement) => number>((a) => a.currentTime)
+  elTimeRef.current = elTime
   const copyKeyRef = useRef<() => string | null>(() => null)
   copyKeyRef.current = () => {
     const key = clipKeyRef.current
@@ -207,7 +284,7 @@ export function useCellAudio(
       play: () => playRef.current(),
       pause: () => pauseRef.current(),
       clipKey: () => copyKeyRef.current(),
-      currentTime: () => audioRef.current?.currentTime ?? 0,
+      currentTime: () => (audioRef.current ? elTimeRef.current(audioRef.current) : 0),
       seek: (t: number) => seekRef.current(t),
     }
   }
@@ -243,6 +320,8 @@ export function useCellAudio(
       // new take through the old one's window (AQU-1217); callers re-apply
       // theirs when the take they show changes.
       trimRef.current = { start: null, end: null }
+      joinedRef.current = null
+      pendingStartRef.current = null
       if (coordinatorControllerRef.current) clearActiveAudioIf(coordinatorControllerRef.current)
       setState("idle")
       setIsPlaying(false)
@@ -386,16 +465,18 @@ export function useCellAudio(
     const a = audioRef.current
     if (!a) return
     const { start, end } = trimRef.current
-    if (end != null && a.currentTime >= end) {
+    const now = elTime(a)
+    if (end != null && now >= end) {
       a.pause()
-      setPlayhead(a, start ?? 0)
+      setElTime(a, start ?? 0)
       setCurrentTime(start ?? 0)
       return // onpause → stopTicking
     }
-    // AQU-1767: across the space between a split take's pieces.
-    const pastGap = gapEndAt(trimRef.current.gaps, a.currentTime)
+    // AQU-1767: across the space between a split take's pieces (a joined
+    // clip has none to cross).
+    const pastGap = joinedRef.current ? null : gapEndAt(trimRef.current.gaps, now)
     if (pastGap != null) setPlayhead(a, pastGap)
-    publishTime(a.currentTime)
+    publishTime(elTime(a))
     rafRef.current = requestAnimationFrame(() => tickPlayheadRef.current())
   }, [publishTime, setCurrentTime])
   tickPlayheadRef.current = tickPlayhead
@@ -429,16 +510,32 @@ export function useCellAudio(
       // trimEnd). `ended` covers a take trimmed only at its head that played to
       // the file's natural end: a replay would otherwise restart at 0 and play
       // the trimmed-off head (AQU-1217).
-      if (start != null && (a.ended || a.currentTime < start || (end != null && a.currentTime >= end - 0.01))) {
-        setPlayhead(a, start)
+      const now = elTime(a)
+      if (start != null && (a.ended || now < start || (end != null && now >= end - 0.01))) {
+        setElTime(a, start)
+      } else if (a.ended) {
+        setElTime(a, 0)
       }
-      const pastGap = gapEndAt(trimRef.current.gaps, a.currentTime)
+      const pastGap = joinedRef.current ? null : gapEndAt(trimRef.current.gaps, elTime(a))
       if (pastGap != null) setPlayhead(a, pastGap)
       try { await a.play() } catch (e) {
         console.error("[useCellAudio] play() rejected", e)
       }
       return
     }
+    if (creatingRef.current) {
+      // A second click while the first is still loading the take: one
+      // element, not two playing on top of each other.
+      await creatingRef.current
+      const made = audioRef.current as HTMLAudioElement | null
+      if (made && pendingStartRef.current != null && made.readyState >= 1) {
+        setElTime(made, pendingStartRef.current)
+        pendingStartRef.current = null
+      }
+      return
+    }
+    let created: () => void = () => {}
+    creatingRef.current = new Promise<void>((resolve) => { created = resolve })
     setState("loading")
     setError(null)
     // One-shot guard: if the streamed src errors (expired token, transient
@@ -492,28 +589,33 @@ export function useCellAudio(
       audio.onpause = () => { setIsPlaying(false); stopTicking(); notifyActiveAudioChanged() }
       audio.onended = () => { setIsPlaying(false); stopTicking(); notifyActiveAudioChanged() }
       audio.onloadedmetadata = () => {
-        if (Number.isFinite(audio.duration)) setDuration(audio.duration)
+        // A joined clip is shorter than the recording the waveform draws.
+        if (Number.isFinite(audio.duration) && !joinedRef.current) setDuration(audio.duration)
         const { start } = trimRef.current
+        // Where a click asked it to start, or the window's start.
+        const at = pendingStartRef.current ?? start
+        pendingStartRef.current = null
         // Never seek a clip whose length is still unknown: a MediaRecorder
         // webm reports Infinity until indexed, and seeking one makes Chrome
         // fire \`ended\` at once, so the take is never heard (play-queue's
         // wireOverlayElement refuses the same seek).
-        if (start != null && start > 0 && Number.isFinite(audio.duration)) {
-          setPlayhead(audio, start)
-          setCurrentTime(start)
+        if (at != null && Number.isFinite(audio.duration) && (at > 0 || joinedRef.current)) {
+          setElTime(audio, at)
+          setCurrentTime(at)
         }
       }
       audio.ontimeupdate = () => {
         const { start, end } = trimRef.current
-        if (end != null && audio.currentTime >= end) {
+        const now = elTime(audio)
+        if (end != null && now >= end) {
           audio.pause()
-          setPlayhead(audio, start ?? 0)
+          setElTime(audio, start ?? 0)
           setCurrentTime(start ?? 0)
           return
         }
-        const pastGap = gapEndAt(trimRef.current.gaps, audio.currentTime)
+        const pastGap = joinedRef.current ? null : gapEndAt(trimRef.current.gaps, now)
         if (pastGap != null) setPlayhead(audio, pastGap)
-        publishTime(audio.currentTime)
+        publishTime(elTime(audio))
       }
       audioRef.current = audio
       return audio
@@ -522,7 +624,24 @@ export function useCellAudio(
       let src: string
       let streamingSrc = false
       const frontier = attachmentUrl ? parseFrontierAudioUrl(attachmentUrl) : null
-      if (attachmentUrl && isRemoteMediaUrl(attachmentUrl)) {
+      // AQU-1767: a split take plays as one joined clip of its pieces.
+      joinedRef.current = null
+      const tr = trimRef.current
+      const recEnd = tr.end ?? (recordingSecRef.current > 0 ? recordingSecRef.current : null)
+      const joined = frontier && tr.gaps && tr.gaps.length > 0 && recEnd != null
+        ? await (async () => {
+            const bytes = bytesRef.current ?? (await audioCacheGet(frontier.audioId, frontier.ext)) ?? (await ensureBytes())
+            bytesRef.current = bytes
+            const spans = playingSpans(tr.start ?? 0, recEnd, tr.gaps ?? [])
+            const blob = spans.length > 0 ? await joinedClip(bytes, frontier.ext, spans) : null
+            return blob ? { blob, clock: joinedClockFor(gapsKeyOf(tr), spans) } : null
+          })()
+        : null
+      if (joined) {
+        src = URL.createObjectURL(joined.blob)
+        urlRef.current = src
+        joinedRef.current = joined.clock
+      } else if (attachmentUrl && isRemoteMediaUrl(attachmentUrl)) {
         if (await mediaUnreachable()) {
           throw { kind: "offline-unavailable", message: t("audio.error.notAvailableOffline") } as AudioError
         }
@@ -575,6 +694,13 @@ export function useCellAudio(
       }
       const audio = makeElement(src, streamingSrc)
       setState("ready")
+      // A click asked for a place: be there before the first sound, not after.
+      if (pendingStartRef.current != null && audio.readyState < 1) {
+        await new Promise<void>((resolve) => {
+          audio.addEventListener("loadedmetadata", () => resolve(), { once: true })
+          audio.addEventListener("error", () => resolve(), { once: true })
+        })
+      }
       try {
         await audio.play()
       } catch (e) {
@@ -590,8 +716,11 @@ export function useCellAudio(
       })
       setError(err)
       setState("error")
+    } finally {
+      creatingRef.current = null
+      created()
     }
-  }, [attachmentUrl, project.id, fileId, getSyncToken, ensureBytes, startTicking, stopTicking, t, publishTime, setCurrentTime])
+  }, [attachmentUrl, project.id, fileId, getSyncToken, ensureBytes, startTicking, stopTicking, t, publishTime, setCurrentTime]) // eslint-disable-line react-hooks/exhaustive-deps -- elTime/setElTime read refs only
 
   const pause = useCallback(() => {
     const own = audioRef.current
@@ -608,16 +737,34 @@ export function useCellAudio(
   }, [])
 
   const setTrim = useCallback((start: number | null, end: number | null, gaps?: readonly { start: number; end: number }[]) => {
-    trimRef.current = gaps && gaps.length > 0 ? { start, end, gaps } : { start, end }
+    const next = gaps && gaps.length > 0 ? { start, end, gaps } : { start, end }
+    // AQU-1767: an element playing a joined clip of OTHER pieces (or one that
+    // should now be joined, or no longer) is let go; the next play builds the
+    // right one.
+    const built = joinedRef.current?.key ?? null
+    const wanted = next.gaps ? gapsKeyOf(next) : null
+    trimRef.current = next
     const a = audioRef.current
+    if (a && built !== wanted) {
+      a.onplay = a.onpause = a.onended = a.onerror = a.onloadedmetadata = a.ontimeupdate = null
+      a.pause()
+      audioRef.current = null
+      joinedRef.current = null
+      if (urlRef.current) { URL.revokeObjectURL(urlRef.current); urlRef.current = null }
+      stopTicking()
+      setIsPlaying(false)
+      if (coordinatorControllerRef.current) clearActiveAudioIf(coordinatorControllerRef.current)
+      return
+    }
     if (a && start != null && Number.isFinite(a.duration)) {
       // Snap the playhead into the new window if it fell outside.
-      if (a.currentTime < start || (end != null && a.currentTime > end)) {
-        setPlayhead(a, start)
+      const now = elTime(a)
+      if (now < start || (end != null && now > end)) {
+        setElTime(a, start)
         setCurrentTime(start)
       }
     }
-  }, [setCurrentTime])
+  }, [setCurrentTime, stopTicking]) // eslint-disable-line react-hooks/exhaustive-deps -- elTime/setElTime read refs only
 
   // A seek lands a hair INSIDE the window's end. Landing exactly on it is
   // "reached the end" to the tick, which pauses and rewinds — so a drag into
@@ -646,10 +793,13 @@ export function useCellAudio(
     const other = self ? otherCopyOf(self, copyKeyRef.current()) : null
     if (other?.seek) { other.seek(t); return }
     const a = audioRef.current
+    // The recording's length (a joined clip's element is shorter).
+    const recDur = (el: HTMLMediaElement, fallback: number) =>
+      joinedRef.current ? (recordingSecRef.current || fallback) : Number.isFinite(el.duration) ? el.duration : fallback
     if (a) {
       pendingSeekRef.current = t
       // The readout follows the pointer at once; the element, next frame.
-      setCurrentTime(clampToTrim(t, Number.isFinite(a.duration) ? a.duration : t))
+      setCurrentTime(clampToTrim(t, recDur(a, t)))
       if (seekFrameRef.current != null) return
       seekFrameRef.current = requestAnimationFrame(() => {
         seekFrameRef.current = null
@@ -657,8 +807,8 @@ export function useCellAudio(
         pendingSeekRef.current = null
         const el = audioRef.current
         if (!el || target == null) return
-        const clamped = clampToTrim(target, Number.isFinite(el.duration) ? el.duration : target)
-        try { el.currentTime = clamped } catch { /* not seekable yet — the next move tries again */ }
+        const clamped = clampToTrim(target, recDur(el, target))
+        setElTime(el, clamped)
         setCurrentTime(clamped)
         // Clicking the waveform implies "play from here" — resume if paused
         // (covers the post-end and post-pause cases where audioRef is set but
@@ -667,18 +817,15 @@ export function useCellAudio(
       })
       return
     }
-    // No audio loaded yet — kick off play and let the user-initiated promise
-    // resolve, then seek. We deliberately don't await here so the click feels
-    // immediate; ontimeupdate will eventually catch the playhead up.
-    void (async () => {
-      await play()
-      const a2 = audioRef.current
-      if (!a2) return
-      const clamped = clampToTrim(t, Number.isFinite(a2.duration) ? a2.duration : t)
-      try { a2.currentTime = clamped } catch { /* not seekable yet */ }
-      setCurrentTime(clamped)
-    })()
-  }, [play, setCurrentTime])
+    // No audio loaded yet: start playing it AT the click (AQU-1767 — it used
+    // to start at the take's head and then jump there, and in Safari the jump
+    // took a third of a second, sounding the head meanwhile). Not awaited, so
+    // the click feels immediate.
+    const at = clampToTrim(t, recordingSecRef.current || t)
+    pendingStartRef.current = at
+    setCurrentTime(at)
+    void play()
+  }, [play, setCurrentTime]) // eslint-disable-line react-hooks/exhaustive-deps -- setElTime reads refs only
 
   const requestPeaks = useCallback(async (bins: number, opts?: { force?: boolean }) => {
     if (!attachmentUrl || !selectedAudioId) return
@@ -774,6 +921,7 @@ export function useCellAudio(
   const attachmentDurationSec = typeof attachment?.durationMs === "number" && attachment.durationMs > 0
     ? attachment.durationMs / 1000
     : 0
+  recordingSecRef.current = duration > 0 ? duration : attachmentDurationSec
 
   return {
     state,

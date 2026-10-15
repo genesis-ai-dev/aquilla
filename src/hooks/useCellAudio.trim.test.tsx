@@ -164,10 +164,12 @@ describe("useCellAudio — a split take's gaps, and copies that play alike", () 
     act(() => tab.result.current.setTrim(0, 2.5, gaps))
     await act(async () => { await row.result.current.play() })
     act(() => row.result.current.pause())
-    // The tab's click plays the tab's own player, through its own window.
+    // The tab's click plays the tab's own player, through its own window,
+    // starting where it was clicked once the clip has loaded.
     await seekTo(tab.result, 1.2)
     expect(instances).toHaveLength(2)
     expect(instances[0].paused).toBe(true)
+    act(() => instances[1].onloadedmetadata?.())
     expect(instances[1].currentTime).toBeCloseTo(1.5)
   })
 

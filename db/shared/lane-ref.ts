@@ -71,6 +71,45 @@ export async function resolveLane(
 }
 
 /**
+ * AQU-1977: the lane a READ means when the request names none.
+ *
+ * Progress and plan reads still name their lane by legacy tag, and an empty
+ * tag used to be "the default lane". Since AQU-1594 a new project has no `''`
+ * lane — its first language is tagged with its own name — so an empty lane
+ * resolved to no lane at all and every read came back empty: 0% text, no
+ * audio, no chapters.
+ *
+ * The rule, which never makes `''` primary on a project that lacks it:
+ * - a named tag is returned unchanged;
+ * - an empty one reads the project's `''` lane while it still has one,
+ *   archived or not, so an old project reads exactly what it always did;
+ * - otherwise the first live target lane in position order — the lane the
+ *   editor opens (src/lib/lanes/active-lane-choice.ts) — or, with every lane
+ *   archived, the first of those;
+ * - a project with no target lane keeps `''`.
+ *
+ * A tagless lane (`legacy_tag` NULL) cannot be named by tag, so it is passed
+ * over rather than returned as `''`.
+ */
+export async function readLaneTag(
+  db: AquillaDb,
+  projectId: string,
+  requested: string | null | undefined,
+): Promise<string> {
+  if ((requested ?? "").trim()) return requested!.trim()
+  const row = await db
+    .prepare(
+      `SELECT legacy_tag FROM lanes
+        WHERE project_id = ? AND role = 'target' AND legacy_tag IS NOT NULL
+        ORDER BY (legacy_tag = '') DESC, (archived_at IS NULL) DESC, position, id
+        LIMIT 1`,
+    )
+    .bind(projectId)
+    .first<{ legacy_tag: string }>()
+  return row?.legacy_tag ?? ""
+}
+
+/**
  * Normalize a positional lane argument. A bare string is the LEGACY TAG — the
  * spelling every pre-AQU-1610 caller passes — so existing call sites keep
  * their meaning while new ones pass `{ laneId }`.

@@ -3349,7 +3349,6 @@ export const my: Catalog = {
   "org.projectOverview.plan.frontMatter": "ရှေ့ဖြည့်စာ",
   "org.projectOverview.plan.tileAria": {"forms":{"other":"အခန်း {chapter}: ဆဲလ် {count} ခု လိုအပ်နေသည်"},"countVar":"count"},
   "org.projectOverview.plan.tileAriaSection": {"forms":{"other":"{section}: ဆဲလ် {count} ခု လိုအပ်နေသည်"},"countVar":"count"},
-  "org.projectOverview.plan.audioSharedAcrossLanes": "အသံကို ဘာသာစကားအားလုံး မျှဝေသုံးသည်",
   "org.projectOverview.plan.assignedTo": "တာဝန်ပေးထားသူ",
   "org.projectOverview.plan.assign": "တာဝန်ပေးရန်",
   "org.projectOverview.plan.assignmentScope": {"forms":{"other":"{scope} · ဆဲလ် {count} ခု"},"countVar":"count"},

@@ -48,7 +48,7 @@ import { shortVerses, verseChipLabel, wordChipPlaces, type ShortVerse } from "./
  * it beats an effect that writes state during render.
  */
 export function PlanInspector({
-  unit, now, canPlan, showAudio, projectId, getToken, lane, dataVersion = 0, languageLabel, laneCount,
+  unit, now, canPlan, showAudio, projectId, getToken, lane, dataVersion = 0, languageLabel,
   assignments, audioFiles, textFiles, onPatch, onClose, onStep, onGoToFirstOpen, onOpenCell, onOpenUnit,
 }: {
   unit: PlanUnit
@@ -84,12 +84,6 @@ export function PlanInspector({
   dataVersion?: number
   /** The language the numbers on screen belong to. */
   languageLabel: string | null
-  /**
-   * AQU-1278: how many target languages this project carries. Above one, the
-   * audio bar gets a note saying it is the same on every tab — see the note's
-   * own comment for why that is worth a line.
-   */
-  laneCount?: number
   /**
    * AQU-1278: the per-assignment block, rendered between Progress and Chapters.
    *
@@ -437,21 +431,6 @@ export function PlanInspector({
                 })}
                 tips={readoutTips("audio", unit.audioCount, unit.audioValidatedCount, audioTotal)}
               />
-            )}
-            {/* AQU-1278. A recording hangs off the FILE, not off a target
-                language, so the audio bar reads identically on every lane tab
-                while the text bar moves. A manager flipping between two
-                languages and seeing one bar frozen assumes a stuck filter; this
-                says it is the truth instead of leaving them to wonder. Set under
-                the bar rather than beside it: the panel is barely three hundred
-                pixels wide and an inline note would squeeze the track past the
-                52px `PlanBar` refuses to go below. */}
-            {/* Per FILE, like the tiles: under an empty bar on a text-only book
-                the note explained numbers that were not there. */}
-            {hasAudio && (laneCount ?? 1) > 1 && (
-              <p className="ps-8 text-[11px] text-muted-foreground" data-testid="plan-audio-shared-note">
-                {t("org.projectOverview.plan.audioSharedAcrossLanes")}
-              </p>
             )}
             {/* WHAT IS LEFT, AND THE WAY TO IT — under the bars, for every kind
                 of unit. AQU-1278 first put this on the chapter grid's summary

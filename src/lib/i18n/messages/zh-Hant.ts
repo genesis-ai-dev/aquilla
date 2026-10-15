@@ -3350,7 +3350,6 @@ export const zh_Hant: Catalog = {
   "org.projectOverview.plan.frontMatter": "前置內容",
   "org.projectOverview.plan.tileAria": {"forms":{"other":"第 {chapter} 章：缺少 {count} 個儲存格"},"countVar":"count"},
   "org.projectOverview.plan.tileAriaSection": {"forms":{"other":"{section}：缺少 {count} 個儲存格"},"countVar":"count"},
-  "org.projectOverview.plan.audioSharedAcrossLanes": "音訊由所有語言共用",
   "org.projectOverview.plan.assignedTo": "指派給",
   "org.projectOverview.plan.assign": "指派",
   "org.projectOverview.plan.assignmentScope": {"forms":{"other":"{scope} · {count} 個儲存格"},"countVar":"count"},

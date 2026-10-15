@@ -42,7 +42,7 @@ import { OrgWithAvatar } from "@/components/OrgWithAvatar"
 import { LaneChips } from "./LaneChips"
 import { ProjectLaneSubRows } from "./ProjectLaneSubRows"
 import { OrgLaneAssignModal } from "./OrgLaneAssignModal"
-import { displayLanes, resolveDefaultLaneLabel } from "./project-lanes"
+import { assignLaneOptionsForPortfolio, displayLanes, resolveDefaultLaneLabel } from "./project-lanes"
 import { isManagedBy } from "./project-pm-filter"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { cn } from "@/lib/utils"
@@ -733,7 +733,9 @@ export function OrgProjectsDataTable({
                 <>
                   {canAssignProject(p.id) && (
                     <MenuItem
-                      onClick={() => setAssignTarget({ projectId: p.id, lane: "" })}
+                      // AQU-1977: open on the project's first live language, not
+                      // a '' lane a project made since AQU-1594 does not have.
+                      onClick={() => setAssignTarget({ projectId: p.id, lane: displayLanes(p)[0]?.lane ?? "" })}
                     >
                       <UserPlus className="size-4" />
                       {t("dialog.assign.title")}
@@ -799,6 +801,7 @@ export function OrgProjectsDataTable({
           targetLanes={displayLanes(assignProject)
             .map((l) => l.lane)
             .filter((l) => l !== "")}
+          lanes={assignLaneOptionsForPortfolio(assignProject, t("org.projectOverview.laneDefaultFallback"))}
           defaultLaneLabel={resolveDefaultLaneLabel(assignProject)}
           files={filesByProjectId?.get(assignTarget.projectId) ?? []}
           roleLevel={roleByProjectId?.get(assignTarget.projectId)?.level ?? 0}

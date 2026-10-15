@@ -48,7 +48,8 @@ import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioDenominat
 import { OverviewLaneTable } from "./OverviewLaneTable"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { isLaneArchived } from "@/components/project-lane-archive"
-import { laneLabelForTag, laneLabelsByTag } from "@/lib/lanes/lane-language"
+import { laneLabelForTag, laneLabelsByTag, laneRowLabel } from "@/lib/lanes/lane-language"
+import { assignLaneOptions } from "@/lib/sync/assignment-lane"
 import { firstPositionLaneId, laneTagForId } from "@/lib/lanes/active-lane-choice"
 import { laneChipLabel } from "./project-lanes"
 import { isHiddenTimelineFile } from "@/lib/parsers/types"
@@ -456,6 +457,14 @@ export function ProjectOverview() {
   const targetLaneRows = useMemo(
     () => (project?.lanes ?? []).filter((lane) => lane.role === "target"),
     [project?.lanes],
+  )
+  // AQU-1977: what every Assign surface on this page offers — the project's own
+  // languages, in order, by name. Never an invented "Default language": a
+  // project made since AQU-1594 has no '' lane, and an assignment saved into
+  // one belongs to no lane and reads 0% for ever.
+  const assignLanes = useMemo(
+    () => assignLaneOptions(targetLaneRows, t("dialog.assign.defaultLaneFallback")),
+    [targetLaneRows, t],
   )
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -1318,24 +1327,16 @@ export function ProjectOverview() {
   )
   // The lane whose numbers the inspector is showing, named the way the lane
   // tabs name it — so nobody reads a French percentage as a Spanish one.
-  // Labeled exactly as the lane tabs label it: the project's target language
-  // for the default lane, the lane row's own name for any other (AQU-1586 —
-  // never the tag, which can be the lane id). Derived here rather than read
-  // off `selectedLane`, which is declared further down.
-  const planLanguageLabel = selectedLaneTag
-    ? laneLabelForTag(selectedLaneTag, targetLaneRows)
-    : project?.targetLanguage || null
-  /**
-   * How many target languages this project carries: its declared extra lanes
-   * plus the default one, which is a real language and always exists (AQU-728).
-   * Counted from the project record rather than from the portfolio's `lanes`,
-   * which only lists lanes that already have progress in them — a lane added
-   * this morning has none, and the inspector's "audio is shared by every
-   * language" note is exactly as true on the day a second lane is created.
-   * The primary language is the default lane even when it also sits in
-   * targetLanes (AQU-1473).
-   */
-  const planLaneCount = extraRegistryLanes(project?.targetLanes, project?.targetLanguage).length + 1
+  // Labeled exactly as the lane tabs label it: the lane row's own name
+  // (AQU-1586 — never the tag, which can be the lane id). Derived here rather
+  // than read off `selectedLane`, which is declared further down. AQU-1977:
+  // `planLane` always names a lane now, so with no tab picked this is the
+  // language the plan opens on — not the retired project-level target
+  // language, which is empty on a project made since AQU-1594.
+  const planLanguageLabel =
+    (targetLaneRows.length > 0 ? laneLabelForTag(planLane, targetLaneRows) : null) ||
+    project?.targetLanguage ||
+    null
   // Selecting a unit that a refetch removed (a file deleted elsewhere) would
   // leave the inspector pointing at nothing.
   useEffect(() => {
@@ -1383,6 +1384,7 @@ export function ProjectOverview() {
       activeFileId: selectedUnitFileId,
       files: documentFiles.map((f) => ({ id: f.id, name: f.name })),
       targetLanes: extraRegistryLanes(project?.targetLanes, project?.targetLanguage),
+      lanes: assignLanes,
       jwt,
       author: session?.username ?? "",
       roleLevel: project?.syncRole?.level ?? 0,
@@ -1399,7 +1401,7 @@ export function ProjectOverview() {
     }
   }, [
     canAssign, isArchived, jwt, id, selectedUnitFileId, documentFiles, project?.targetLanes,
-    project?.targetLanguage, project?.syncRole?.level, session?.username, policyAllowSelfAssignment,
+    project?.targetLanguage, assignLanes, project?.syncRole?.level, session?.username, policyAllowSelfAssignment,
     policyAssignmentMinRole, handleAssigned,
   ])
 
@@ -1415,7 +1417,6 @@ export function ProjectOverview() {
       lane={planLane}
       dataVersion={planDataVersion}
       languageLabel={planLanguageLabel}
-      laneCount={planLaneCount}
       // The SAME set the board judges by. Audio expectation is a fact about a
       // file, so a text-only book inside a dubbed file must read the same way
       // in this panel as it does in the row that opened it — without this the
@@ -1730,13 +1731,24 @@ export function ProjectOverview() {
 
   // Language pair label, e.g. "Greek → Bambara". Arrow is wrapped so it
   // visually mirrors under RTL instead of pointing away from the target.
+  // AQU-1977: both sides come off the lane rows (AQU-1593). The project-level
+  // keys are retired — empty on a project made since AQU-1594, a stale
+  // snapshot on an older one — so the pair read nothing or an old language.
+  // The target is the language the plan opens on.
+  const sourceLaneRow = (project?.lanes ?? []).find((lane) => lane.role === "source")
+  const sourceLanguageLabel =
+    (sourceLaneRow ? laneRowLabel(sourceLaneRow) : null) || project?.sourceLanguage || null
+  const targetLanguageLabel =
+    (targetLaneRows.length > 0 ? laneLabelForTag(defaultPlanLane, targetLaneRows) : null) ||
+    project?.targetLanguage ||
+    null
   const languagePair =
-    project?.sourceLanguage && project?.targetLanguage ? (
+    sourceLanguageLabel && targetLanguageLabel ? (
       <>
-        {project.sourceLanguage} <span className="inline-block rtl:-scale-x-100">→</span> {project.targetLanguage}
+        {sourceLanguageLabel} <span className="inline-block rtl:-scale-x-100">→</span> {targetLanguageLabel}
       </>
     ) : (
-      project?.targetLanguage ?? project?.sourceLanguage ?? null
+      targetLanguageLabel ?? sourceLanguageLabel ?? null
     )
 
   if (status === "no-session") {
@@ -2465,6 +2477,7 @@ export function ProjectOverview() {
                   archivedLanes={archivedProjectLanes}
                   defaultLanguageLabel={project?.targetLanguage || t("org.projectOverview.laneDefaultFallback")}
                   extraLanes={extraRegistryLanes(project?.targetLanes, project?.targetLanguage)}
+                  assignLanes={assignLanes}
                   files={documentFiles}
                   roleLevel={project?.syncRole?.level ?? 0}
                   author={session?.username ?? ""}
@@ -2921,6 +2934,7 @@ export function ProjectOverview() {
                               }
                               laneLabels={autopilotLaneLabels}
                               defaultLaneLabel={project?.targetLanguage ?? ""}
+                              lanes={assignLanes}
                               laneRows={targetLaneRows}
                               roleLevel={project?.syncRole?.level ?? 0}
                               allowSelfAssignment={policyAllowSelfAssignment}

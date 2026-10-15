@@ -5,7 +5,7 @@
 
 import { describe, it, expect } from "vitest"
 import type { PortfolioProject } from "@/lib/frontier/portfolio"
-import { displayLanes, laneChipLabel, resolveDefaultLaneLabel, withOptimisticLane } from "./project-lanes"
+import { assignLaneOptionsForPortfolio, displayLanes, laneChipLabel, resolveDefaultLaneLabel, withOptimisticLane } from "./project-lanes"
 
 function baseProject(overrides: Partial<PortfolioProject> = {}): PortfolioProject {
   return {
@@ -131,5 +131,40 @@ describe("withOptimisticLane (AQU-605)", () => {
     const next = withOptimisticLane(p, "fr")
     expect(p.lanes).toBeUndefined()
     expect(next).not.toBe(p)
+  })
+})
+
+// AQU-1977: what the org table shows and offers on projects made since the
+// language lanes work, and on older ones.
+describe("the org table's languages (AQU-1977)", () => {
+  const lane = (l: string, name: string, over: Record<string, unknown> = {}) => ({
+    lane: l, name, totalCells: 10, filledCells: 0, validatedCells: 0, lastEditAt: null, role: "target" as const, ...over,
+  })
+
+  it("leaves archived languages out of the chips", () => {
+    const p = baseProject({ lanes: [lane("Spanish", "Spanish", { position: 1 }), lane("German", "German", { position: 2, archived: true })] })
+    expect(displayLanes(p).map((l) => l.lane)).toEqual(["Spanish"])
+  })
+
+  it("labels an old project's '' lane by its own row name, the portfolio no longer sending targetLanguage", () => {
+    const p = baseProject({ lanes: [lane("", "Bambara", { position: 0 }), lane("es", "Spanish", { position: 1 })] })
+    expect(resolveDefaultLaneLabel(p)).toBe("Bambara")
+  })
+
+  it("offers Assign the project's own live languages, with no invented default", () => {
+    const fresh = baseProject({ lanes: [
+      lane("Spanish", "Spanish", { position: 1 }),
+      lane("French", "French", { position: 2 }),
+      lane("German", "German", { position: 3, archived: true }),
+    ] })
+    expect(assignLaneOptionsForPortfolio(fresh, "Default language")).toEqual([
+      { legacyTag: "Spanish", label: "Spanish" },
+      { legacyTag: "French", label: "French" },
+    ])
+    const old = baseProject({ lanes: [lane("", "Bambara", { position: 0 }), lane("es", "Spanish", { position: 1 })] })
+    expect(assignLaneOptionsForPortfolio(old, "Default language")).toEqual([
+      { legacyTag: "", label: "Bambara" },
+      { legacyTag: "es", label: "Spanish" },
+    ])
   })
 })

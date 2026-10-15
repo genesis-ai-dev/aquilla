@@ -3395,7 +3395,6 @@ export const ru: Catalog = {
   "org.projectOverview.plan.frontMatter": "вводная часть",
   "org.projectOverview.plan.tileAria": {"forms":{"one":"Глава {chapter}: не хватает {count} ячейки","few":"Глава {chapter}: не хватает {count} ячеек","many":"Глава {chapter}: не хватает {count} ячеек","other":"Глава {chapter}: не хватает {count} ячеек"},"countVar":"count"},
   "org.projectOverview.plan.tileAriaSection": {"forms":{"one":"{section}: не хватает {count} ячейки","few":"{section}: не хватает {count} ячеек","many":"{section}: не хватает {count} ячеек","other":"{section}: не хватает {count} ячеек"},"countVar":"count"},
-  "org.projectOverview.plan.audioSharedAcrossLanes": "аудио общее для всех языков",
   "org.projectOverview.plan.assignedTo": "Назначено",
   "org.projectOverview.plan.assign": "Назначить",
   "org.projectOverview.plan.assignmentScope": {"forms":{"one":"{scope} · {count} ячейка","few":"{scope} · {count} ячейки","many":"{scope} · {count} ячеек","other":"{scope} · {count} ячейки"},"countVar":"count"},

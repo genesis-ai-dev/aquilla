@@ -2692,6 +2692,32 @@ describe("plan board on the overview", () => {
     expect(fetchProjectPlan.mock.calls.map((c) => c[2])).toContain("Spanish")
   })
 
+  it("names the language pair from the lane rows, the project-level languages being retired", async () => {
+    // AQU-1977: a project made since AQU-1594 carries no sourceLanguage or
+    // targetLanguage, so the header line read nothing at all.
+    const lane = (over: Record<string, unknown>) => ({
+      language: null, name: null, langCode: null, archivedAt: null, ...over,
+    })
+    useProject.mockReturnValue({
+      project: projectRecord({
+        level: 600,
+        lanes: [
+          lane({ id: "aaaa0001", role: "source", language: "English", legacyTag: null, position: 0 }),
+          lane({ id: "aaaa0003", role: "target", language: "Spanish", legacyTag: "Spanish", position: 1 }),
+          lane({ id: "aaaa0004", role: "target", language: "French", legacyTag: "French", position: 2 }),
+        ],
+      } as Partial<ProjectRecord> & { level: number }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([])
+    fetchProjectPlan.mockResolvedValue({ projectId: "p1", lane: "Spanish", validationCount: 1, revision: 1, units: [] })
+    renderOverview()
+    // The arrow is its own span (it mirrors under RTL), so match the whole line.
+    expect(await screen.findByText((_, el) =>
+      el?.tagName === "P" && /^English\s*→\s*Spanish$/.test(el.textContent?.trim() ?? ""),
+    )).toBeInTheDocument()
+  })
+
   it("summarises how many units are done without naming the unit", async () => {
     useProject.mockReturnValue({ project: projectRecord({ level: 600 }), status: "ready", refresh })
     getPortfolio.mockResolvedValue([{

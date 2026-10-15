@@ -3350,7 +3350,6 @@ export const zh_Hans: Catalog = {
   "org.projectOverview.plan.frontMatter": "前置内容",
   "org.projectOverview.plan.tileAria": {"forms":{"other":"第 {chapter} 章：缺少 {count} 个单元格"},"countVar":"count"},
   "org.projectOverview.plan.tileAriaSection": {"forms":{"other":"{section}：缺少 {count} 个单元格"},"countVar":"count"},
-  "org.projectOverview.plan.audioSharedAcrossLanes": "音频由所有语言共用",
   "org.projectOverview.plan.assignedTo": "分配给",
   "org.projectOverview.plan.assign": "分配",
   "org.projectOverview.plan.assignmentScope": {"forms":{"other":"{scope} · {count} 个单元格"},"countVar":"count"},

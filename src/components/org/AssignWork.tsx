@@ -7,6 +7,7 @@ import {
   initialAssignmentLane,
   laneIdForTag,
   laneTagForAssignment,
+  type AssignLaneOption,
 } from "@/lib/sync/assignment-lane"
 import { canSubmitAssignment } from "@/lib/sync/role-policy"
 import { Button } from "@/components/ui/button"
@@ -83,6 +84,11 @@ export interface AssignWorkProps {
   arrivedLane?: string | null
   /** Tags the field offers. `''` is the default lane. Omitted → that lane only. */
   laneTags?: readonly string[]
+  /**
+   * AQU-1977: the project's own target lanes, in order (`assignLaneOptions`).
+   * When given they replace `laneTags` and no "Default language" is invented.
+   */
+  lanes?: readonly AssignLaneOption[]
   laneLabels?: Readonly<Record<string, string>>
   defaultLaneLabel?: string
   /**
@@ -107,6 +113,7 @@ export function AssignWork({
   onAssigned,
   arrivedLane = null,
   laneTags,
+  lanes,
   laneLabels,
   defaultLaneLabel,
   laneRows,
@@ -127,12 +134,13 @@ export function AssignWork({
   const laneItems = useMemo(
     () =>
       buildLaneItems({
+        lanes,
         targetLanes: laneTags,
         laneLabels,
         defaultLaneLabel,
         defaultLaneFallback: t("dialog.assign.defaultLaneFallback"),
       }),
-    [laneTags, laneLabels, defaultLaneLabel, t],
+    [lanes, laneTags, laneLabels, defaultLaneLabel, t],
   )
   // undefined = the arrival rule; a string or null is the manager's own pick.
   // Reset when the panel opens or the lane they arrived from changes, so a

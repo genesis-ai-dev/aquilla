@@ -78,6 +78,15 @@ interface Props {
   projectId?: string
   /** Required for the sync-worker R2 audio key. */
   fileId?: string
+  /**
+   * AQU-1462: lane the member is working in. Omitted for the default lane.
+   *
+   * AQU-1978: the voice is a take IN THIS LANE. Without the tag the server
+   * reads the take as the `''` lane's, which a project made since AQU-1594
+   * does not have — the clip was stored with no lane, showed in none, and
+   * every press paid for another one.
+   */
+  targetLang?: string
   disabled?: boolean
   /** Play-only surfaces (e.g. the translate page) preview audio transiently
    *  and never durably attach — voice *production* lives in the Voice Studio.
@@ -86,16 +95,20 @@ interface Props {
 }
 
 const MAX_CACHE_ENTRIES = 64
-const cache = new Map<string, string>() // key = cellId+text+voice+attachId -> blob URL
+const cache = new Map<string, string>() // key = cellId+lane+text+voice+attachId -> blob URL
 
 function cacheKey(
   cellId: string,
+  lane: string,
   text: string,
   voiceSignature: string,
   provider: string,
   generatedAttachId: string | undefined,
 ): string {
-  return `${cellId}::${provider}::${voiceSignature}::${generatedAttachId ?? ""}::${text}`
+  // AQU-1978: the lane too. Two lanes may hold the same words (two lanes of
+  // one language), and a clip generated in one must not be replayed in the
+  // other in place of generating that lane's own take.
+  return `${cellId}::${lane}::${provider}::${voiceSignature}::${generatedAttachId ?? ""}::${text}`
 }
 
 function voiceSignature(voice: ReturnType<typeof resolveVoice>): string {
@@ -139,6 +152,7 @@ export function CellTtsButton({
   alsoAttachTo,
   projectId,
   fileId,
+  targetLang,
   disabled,
   playOnly,
 }: Props) {
@@ -210,7 +224,7 @@ export function CellTtsButton({
       }
       return
     }
-    const key = cacheKey(cellId, trimmed, voiceSignature(voice), provider, playableAttachId)
+    const key = cacheKey(cellId, targetLang ?? "", trimmed, voiceSignature(voice), provider, playableAttachId)
     let url = cache.get(key)
     if (!url) {
       try {
@@ -252,6 +266,7 @@ export function CellTtsButton({
               session,
               username: session.username,
               onProgress,
+              ...(targetLang ? { targetLang } : {}),
               surface: "cell", // AQU-1572
             })
             blob = gen.blob
@@ -275,6 +290,9 @@ export function CellTtsButton({
                   geminiContext,
                   session,
                   username: session.username,
+                  // The same lane as the clip above: every heard line voices
+                  // the one translation, in the one language.
+                  ...(targetLang ? { targetLang } : {}),
                   surface: "cell", // AQU-1572: one event per line it voiced
                 })
                 alsoWritten += 1
@@ -381,6 +399,7 @@ export function CellTtsButton({
     generatedAttachmentUrl,
     projectId,
     fileId,
+    targetLang,
     session,
     projectTtsSettings,
     cellTtsSettings?.voiceId,

@@ -1,0 +1,35 @@
+name: Notify help bot
+
+# Wakes the aquilla-help Grok bot after each production release so it can
+# bring help.aquilla.app up to date. scripts/tag-release.sh pushes the calver
+# tag only after aquilla.app/version.json serves the release HEAD, so a tag
+# push means the release is live. A redeploy that reuses an existing tag
+# pushes nothing, so the bot is not pinged twice.
+#
+# GitHub reads this file from the tagged commit, so it fires only for
+# releases cut from a dev that already carries it.
+
+on:
+  push:
+    tags: ['20*']
+
+# Sends one request to the bot; needs no access to the repo.
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the aquilla-help bot
+        env:
+          WEBHOOK_URL: ${{ secrets.GROK_HELP_WEBHOOK_URL }}
+          TAG: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          if [ -z "$WEBHOOK_URL" ]; then
+            echo "::error::GROK_HELP_WEBHOOK_URL is not set."
+            exit 1
+          fi
+          curl -fsS --max-time 30 -X POST "$WEBHOOK_URL" \
+            -H 'Content-Type: application/json' \
+            -d "{\"tag\":\"$TAG\",\"sha\":\"$SHA\"}"

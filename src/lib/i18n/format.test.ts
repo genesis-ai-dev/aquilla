@@ -3,6 +3,7 @@ import {
   BIDI_FSI,
   BIDI_PDI,
   bidiIsolate,
+  formatByteLimit,
   formatBytesProgress,
   formatCount,
   formatDate,
@@ -92,6 +93,31 @@ describe("formatMB / formatBytesProgress", () => {
     const MB = 1024 * 1024
     expect(formatBytesProgress(12.4 * MB, 40 * MB, "en")).toBe("12.4 / 40.0 MB (31%)")
     expect(formatBytesProgress(12.4 * MB, undefined, "en")).toBe("12.4 MB")
+  })
+})
+
+describe("formatByteLimit", () => {
+  const MB = 1024 * 1024
+  const GB = 1024 * MB
+
+  it("states a gigabyte ceiling in GB, not four digits of MB (AQU-1975)", () => {
+    // The media import cap is 2 GB; `formatMB` would call it "2,048.0 MB".
+    expect(formatByteLimit(2 * GB, "en")).toBe("2 GB")
+    expect(formatByteLimit(1 * GB, "en")).toBe("1 GB")
+  })
+
+  it("keeps a sub-gigabyte ceiling in one-decimal MB", () => {
+    expect(formatByteLimit(95 * MB, "en")).toBe("95.0 MB")
+    expect(formatByteLimit(0, "en")).toBe("0.0 MB")
+  })
+
+  it("shows one decimal for a fractional gigabyte ceiling", () => {
+    expect(formatByteLimit(1.5 * GB, "en")).toBe("1.5 GB")
+  })
+
+  it("localizes the number but not the unit symbol", () => {
+    // Same rule `formatMB` documents: GB is a unit symbol, not a word.
+    expect(formatByteLimit(1.5 * GB, "fr")).toBe("1,5 GB")
   })
 })
 

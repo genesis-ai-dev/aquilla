@@ -10,6 +10,7 @@ import {
   type ProjectPresenceStore,
 } from "@/lib/sync/presence-store"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { useConnectivity } from "@/lib/offline/connectivity"
 
 interface PeerPresenceProps {
   /** Pre-resolved roster. Prefer `store` so only this component re-renders on roster changes. */
@@ -26,8 +27,12 @@ export function PeerPresence({ peers: peersProp, store, onJumpToPeer, resolveCel
   const [showPopover, setShowPopover] = useState(false)
   const storePeers = usePresencePeers(store ?? null)
   const peers = peersProp ?? storePeers
+  // Tauri: with the backend unreachable the roster is a stale snapshot (the
+  // socket may not have noticed yet), so showing it would claim people are
+  // here when we cannot know.
+  const backendReachable = useConnectivity()
 
-  if (peers.length === 0) return null
+  if (peers.length === 0 || backendReachable === false) return null
 
   const visible = peers.slice(0, 5)
   const overflow = peers.length - 5

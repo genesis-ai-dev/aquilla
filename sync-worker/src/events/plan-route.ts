@@ -13,6 +13,7 @@
 // and this board can never disagree about the total.
 
 import type { AquillaDb } from '../../../db/shim/postgres'
+import { markProjectMondayLinksDirty } from '../../../db/shared/monday-dirty'
 import { verifyTokenForProject } from '../auth'
 import { ROLE } from './role-policy'
 import { checkProjectMembershipDetailed } from './membership'
@@ -342,6 +343,11 @@ export async function handlePlanRequest(
     author,
     now: Date.now(),
   }).run()
+  // AQU-1770: a linked Monday board can show plan figures (books done, next
+  // target date, schedule). Mark its link dirty; the identity worker's
+  // 5-minute flush pushes it. Pushing from here would need the identity
+  // worker's Monday token, so this path waits for the cron.
+  await markProjectMondayLinksDirty(db, [projectId])
 
   const { results } = await db
     .prepare(readPlanUnitsSql('AND u.file_id = ? AND u.section_key = ?'))

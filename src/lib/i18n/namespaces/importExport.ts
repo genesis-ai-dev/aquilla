@@ -993,7 +993,7 @@ export const importExport = defineNamespace({
       "{fileName} parsed successfully but contained no study notes. Biblica notes live in `intro:*` " +
       "paragraph styles — check that this is the notes document.",
     "importExport.errors.invalidIdmlPackage": "{fileName} is not a valid IDML package. IDML files are ZIP archives and start with \"PK\".",
-    "importExport.errors.mediaFileTooLarge": "{fileName} exceeds the 95 MB media import limit.",
+    "importExport.errors.mediaFileTooLarge": "{fileName} exceeds the {limit} media import limit.",
     "importExport.errors.couldNotDecodeAudio":
       "Couldn't decode {fileName} — the file may be corrupt or in an unsupported codec. Try " +
       "re-exporting it as mp3 or wav.",
@@ -2468,8 +2468,14 @@ export const importExport = defineNamespace({
         placeholders: { fileName: "Name of the file — not translated." },
       },
       "importExport.errors.mediaFileTooLarge": {
-        description: "Thrown when an audio/video file exceeds the media import size ceiling.",
-        placeholders: { fileName: "Name of the file — not translated." },
+        description:
+          "Thrown when an audio/video file exceeds the media import size ceiling. The ceiling " +
+          "is interpolated from MAX_AUDIO_OBJECT_BYTES so the number cannot drift out of the " +
+          "copy again when the cap moves (AQU-1975).",
+        placeholders: {
+          fileName: "Name of the file — not translated.",
+          limit: "The media import ceiling, already formatted (e.g. '2 GB') — not translated.",
+        },
       },
       "importExport.errors.couldNotDecodeAudio": {
         description: "Thrown when the browser's Web Audio API fails to decode an uploaded audio/video file.",

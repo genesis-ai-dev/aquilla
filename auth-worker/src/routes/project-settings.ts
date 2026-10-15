@@ -29,6 +29,15 @@
 //            of the stored value is not a change and passes. (AQU-822 used to
 //            give it its own `termbaseEditMinRole` floor.)
 //
+// One key is also SIZE-capped:
+//
+//   AQU-1943 `ttsSettings`. The voice library and cast-assignment map are
+//            refused with 422 beyond the ceiling in
+//            db/shared/tts-settings-caps.ts, because every member re-reads
+//            this blob on workspace open and on focus. Judged on the change,
+//            so an already-over project can still save the rest and can still
+//            write the prune that brings it under.
+//
 // These keys are permission-scoped rather than dumb-stored:
 //
 //   AQU-1086 the project-language keys (`sourceLanguage`, `targetLanguage`,
@@ -50,6 +59,7 @@
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
+import { pushDirtyLinksAfterResponse } from "../lib/monday/push"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE, type AuthUser } from "../types"
 import { ROLE_NAMES, resolveProjectRole } from "../services/project-permissions"
@@ -85,6 +95,7 @@ import {
 import { lanesForScopeVisibility } from "../../../src/lib/lanes/scope-ids"
 import { loadTargetLaneIdentities, visibleTagsForMember } from "../../../db/shared/lane-visibility"
 import { grantNewLane } from "../../../db/shared/lane-grants"
+import { markProjectMondayLinksDirty } from "../../../db/shared/monday-dirty"
 import type { AquillaDb } from "../../../db/shim/postgres"
 import { laneLanguage } from "../../../src/lib/lanes/lane-display"
 import { validateSettingsKeyValue } from "../../../db/shared/project-settings-keys"
@@ -93,6 +104,7 @@ import {
   preserveRetiredLaneSettings,
   RETIRED_LANE_SETTINGS_MESSAGE,
 } from "../../../db/shared/retired-lane-settings"
+import { ttsSettingsCapProblem } from "../../../db/shared/tts-settings-caps"
 
 const projectSettings = new Hono<AuthHonoEnv>()
 
@@ -466,6 +478,29 @@ projectSettings.on(
       }
     }
 
+    // AQU-1943: the ceiling on the TTS blob. Every member re-reads these
+    // settings on workspace open and on window focus, so a runaway voice
+    // library is not this project's problem alone — one production project
+    // reached 5.45 MB (31,287 voices) and the Voices panel died on open. The
+    // refusal is 422 rather than 400: the shape is legal, the size is not.
+    //
+    // Judged on the CHANGE, like bibleEnrichments and bibleVoiceOverrides
+    // above: a project that is already over the cap must still be able to
+    // save the rest of its settings while its blob rides along unchanged, and
+    // must still be able to write the prune that brings it back under
+    // (AQU-1941). What it cannot do is grow further.
+    const rawTtsSettings = (settings as Record<string, unknown>).ttsSettings
+    if (rawTtsSettings !== undefined) {
+      const over = ttsSettingsCapProblem(rawTtsSettings)
+      if (over && JSON.stringify(stored.settings.ttsSettings) !== JSON.stringify(rawTtsSettings)) {
+        console.warn(
+          `[project-settings] ttsSettings over cap for ${projectId}: `
+          + `${over.size.voices} voices, ${over.size.assignments} assignments, ${over.size.bytes} bytes`,
+        )
+        return c.json({ error: over.message }, 422)
+      }
+    }
+
     const queryVersion = parseIntOrNull(c.req.query("ifMatchVersion"))
     const headerVersion = parseIntOrNull(c.req.header("If-Match-Version"))
     const ifMatchVersion =
@@ -531,6 +566,11 @@ projectSettings.on(
       // remains best-effort there just as it is in a deployed Worker.
       void notifyPromise
     }
+    // AQU-1771: a change to what a linked Monday board shows marked its link
+    // dirty in the write above; push it now rather than at the next cron.
+    pushDirtyLinksAfterResponse(c, {
+      projectIds: [projectId, ...(result.propagated ?? []).map((copy) => copy.projectId)],
+    })
     // `lanes` predates the write. A lane the write minted carries no grant,
     // so the newer list would hide exactly the same labels.
     return c.json(
@@ -648,6 +688,19 @@ function notifySettingsChangedBestEffort(
   }
 }
 
+// AQU-1770: a language added, renamed or archived changes what a linked Monday
+// board shows — its Languages column, and which languages its percentages
+// cover — with no project edit to trigger a push. Mark the project's boards
+// dirty and push after the response, as a counting-settings change does; the
+// cron flush picks up anything this misses.
+async function pushMondayAfterLaneChange(
+  c: { env: AuthHonoEnv["Bindings"]; executionCtx: { waitUntil(promise: Promise<unknown>): void } },
+  projectId: string,
+): Promise<void> {
+  await markProjectMondayLinksDirty(c.env.AQUILLA_PG, [projectId])
+  pushDirtyLinksAfterResponse(c, { projectIds: [projectId] })
+}
+
 // AQU-1418: lane rows are what the screen edits. The settings string registry
 // stays in step so events, the external API, and older clients still resolve
 // a lane by its legacy tag. The id is never shown. A duplicate display name
@@ -717,6 +770,7 @@ projectSettings.post(
     const fresh = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
     notifySettingsChangedBestEffort(c, projectId, fresh.version)
     const lane = fresh.lanes?.find((row) => row.id === created.laneId) ?? null
+    await pushMondayAfterLaneChange(c, projectId)
     return c.json({ lane }, 201)
   },
 )
@@ -751,6 +805,7 @@ projectSettings.patch(
     if (result.status !== "ok") return c.json({ error: result.status }, 400)
     const fresh = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
     notifySettingsChangedBestEffort(c, projectId, fresh.version)
+    await pushMondayAfterLaneChange(c, projectId)
     return c.json({ lane: fresh.lanes?.find((row) => row.id === laneId) ?? result.lane })
   },
 )
@@ -826,6 +881,7 @@ projectSettings.post(
     } catch {
       void notifyPromise
     }
+    await pushMondayAfterLaneChange(c, projectId)
     return c.json({ lane: fresh.lanes?.find((row) => row.id === laneId) ?? result.lane })
   },
 )

@@ -194,7 +194,7 @@ export function TakeWaveform({
     : []
   // AQU-1767: a split take's cuts, as read-only lines.
   const cutEdges: WaveformEdge[] = pieces && dur > 0
-    ? pieces.cuts.map((at) => ({ key: `cut-${at}`, at: toFrac(at), label: t("editor.recordingTab.cutAt"), valueText: formatTrimTime(at), editable: false }))
+    ? pieces.cuts.map((at) => ({ key: `cut-${at}`, at: toFrac(at), label: t("editor.recordingTab.cutAt"), valueText: formatTrimTime(at), editable: false, dashed: true }))
     : []
   const edges = cutEdges.length > 0 ? [...trimEdges, ...cutEdges] : trimEdges
 

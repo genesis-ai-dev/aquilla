@@ -53,6 +53,8 @@ export interface WaveformEdge {
   valueText?: string
   /** Draggable? A read-only edge is drawn grey and takes no input. */
   editable: boolean
+  /** AQU-1767: drawn dashed — a split take's cut, which is not an edge of what plays. */
+  dashed?: boolean
   /** Pointer drag: the fraction under the pointer. */
   onDrag?: (fraction: number) => void
   /** Arrow keys: -1 / +1, `coarse` with Shift. */
@@ -471,8 +473,12 @@ function EdgeLine({
       )}
       style={{ left: pct(edge.at) }}
     >
-      {/* The line itself: 2px, fully opaque. */}
-      <div className={cn("mx-auto h-full w-0.5 rounded-[1px]", editable ? "bg-foreground" : "bg-muted-foreground/80")} />
+      {/* The line itself: 2px, fully opaque; a cut is dashed (Sam, 2026-10-15). */}
+      {edge.dashed ? (
+        <div data-dashed="true" className="mx-auto h-full w-0 border-l-2 border-dashed border-muted-foreground/80" />
+      ) : (
+        <div className={cn("mx-auto h-full w-0.5 rounded-[1px]", editable ? "bg-foreground" : "bg-muted-foreground/80")} />
+      )}
       {/* Its time, at the top, on whichever side keeps it inside the box. */}
       {showTime && edge.valueText && (
         <span

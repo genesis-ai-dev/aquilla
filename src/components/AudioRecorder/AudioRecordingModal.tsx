@@ -29,7 +29,7 @@ import {
 import type { TimelineTrack } from "@/lib/timeline/tracks"
 import { DEFAULT_TARGET_TRACK_ID } from "@/lib/timeline/track-slots"
 import { slotSelections, type AudioAttachmentOut, type CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
-import { groupSelection, groupTakesByTrack } from "@/lib/audio/take-groups"
+import { groupSelection, groupTakesByTrack, piecesOf, takeBaseLabel } from "@/lib/audio/take-groups"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { composeTakeWindow, defaultTakeWindow } from "@/lib/audio/take-margins"
 import { keptLengthSec } from "@/lib/audio/trim-edit"
@@ -46,7 +46,7 @@ import { useMediaPictureUrl } from "@/hooks/useMediaPictureUrl"
 import { useOnline } from "@/hooks/useOnline"
 import { getActiveAudio, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { useCellAudio } from "@/hooks/useCellAudio"
-import { keptWindowSec, type KeptWindow } from "@/lib/audio/kept-window"
+import { keptWindowSec, piecesWindowSec, type KeptWindow } from "@/lib/audio/kept-window"
 import { takeBadgeState } from "@/components/cell/audio-validation-state"
 import { readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { TakeWaveform } from "@/components/audio/TakeWaveform"
@@ -705,12 +705,23 @@ export function AudioRecordingModal({
     return take(slotSelections(audioEntry)[targetSlot])
   }, [audioEntry, activeCell, targetSlot])
   const readyAtt = readyTakeId ? audioEntry?.attachments[readyTakeId] : undefined
+  // AQU-1767 (Sam, 2026-10-15): a split take is shown WHOLE, as the Recording
+  // tab shows it — every piece lit, each cut a dashed line, its name and its
+  // full length — never as its selected piece with the rest faded out, which
+  // read as the other pieces being dropped.
+  const readySplit = useMemo(() => {
+    const pieces = piecesOf(recordingTakes, readyTakeId)
+    return pieces.length > 1 ? pieces : null
+  }, [recordingTakes, readyTakeId])
+  const readyPieces = useMemo(() => (readySplit ? piecesWindowSec(readySplit) : null), [readySplit])
   const readyCell = useMemo(() => ({
     metadata: { attachments: audioEntry?.attachments ?? {}, selectedAudioId: readyTakeId ?? undefined },
   }) as unknown as CodexCell, [audioEntry?.attachments, readyTakeId])
   const readyAudio = useCellAudio(project, readyCell, activeCell?.fileId ?? "")
-  const readyKept = activeCell && readyTakeId
-    ? keptWindowSec(
+  const readyKept: KeptWindow | null = activeCell && readyTakeId
+    ? readyPieces
+      ? { start: readyPieces.start, end: readyPieces.end, kind: "trim" }
+      : keptWindowSec(
         { id: activeCell.id, medium: activeCell.medium, selectedAudioId: audioEntry?.selectedAudioId ?? undefined, startTime: activeCell.startTime, endTime: activeCell.endTime },
         readyTakeId,
         readyAtt as unknown as Pick<CodexCellAttachment, "trimStartMs" | "trimEndMs">,
@@ -719,7 +730,9 @@ export function AudioRecordingModal({
   // What the target bar is fed at rest: the part of the selected take that
   // plays, so an over-long take reads as over before anyone records (trim-aware:
   // a take trimmed on the timeline shows its trimmed length).
-  const readyKeptMs = readyAtt
+  const readyKeptMs = readySplit
+    ? readySplit.reduce((sum, piece) => sum + (effectiveAttachmentDurationMs(piece as never) ?? 0), 0)
+    : readyAtt
     ? effectiveAttachmentDurationMs(readyAtt as unknown as Pick<CodexCellAttachment, "durationMs" | "trimStartMs" | "trimEndMs">)
     : null
   const readyBadge = readyAtt
@@ -1774,8 +1787,10 @@ export function AudioRecordingModal({
       ? activeCell.startTime + laneOffsetMs / 1000
       : targetChipGeom(activeCell, undefined)?.anchor ?? activeCell.startTime
   })()
-  const readyAnchorSec = readyAtt
-    ? targetChipGeom(activeCell, readyAtt as unknown as ChipAtt)?.anchor ?? null
+  // A split take plays from its first piece, so the film follows that piece.
+  const readyAnchorAtt = readySplit?.[0] ?? readyAtt
+  const readyAnchorSec = readyAnchorAtt
+    ? targetChipGeom(activeCell, readyAnchorAtt as unknown as ChipAtt)?.anchor ?? null
     : null
   const filmFollowTarget =
     displayPhase === "preview" && previewAnchorSec != null
@@ -2363,7 +2378,7 @@ export function AudioRecordingModal({
                   <div data-testid="rec-ready-take" className="space-y-1">
                     <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                       {t("audio.recordingModal.readyTakeCaption", {
-                        label: readyAtt.label ?? t("audio.takesStrip.takeFallback"),
+                        label: (readySplit ? takeBaseLabel(readyAtt.label) : readyAtt.label) ?? t("audio.takesStrip.takeFallback"),
                         // Tenths rounded DOWN, as the target bar below
                         // prints them — the two must never disagree.
                         seconds: (Math.floor((readyKeptMs ?? 0) / 100) / 10).toFixed(1),
@@ -2388,6 +2403,7 @@ export function AudioRecordingModal({
                       controller={readyController}
                       audioId={readyTakeId}
                       kept={readyKept}
+                      {...(readyPieces ? { pieces: readyPieces } : {})}
                       // Compact in both layouts: beside the film so Record
                       // keeps its place, and without it so a long line still
                       // leaves the takes drawer its room (Sam, 2026-09-28).

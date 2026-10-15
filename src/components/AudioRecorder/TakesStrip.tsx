@@ -41,9 +41,12 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import { AudioValidationControl } from "@/components/cell/AudioValidationControl"
 import { useAudioValidation } from "@/hooks/useAudioValidation"
 
-/** "Take 7" → 7; anything else → null. */
+/**
+ * "Take 7" → 7; anything else → null. A split take's pieces ("Take 7 · 2",
+ * AQU-1767) hold their take's number too, or the next recording would reuse it.
+ */
 function parseTakeNumber(label: string | null | undefined): number | null {
-  const m = label?.match(/^Take (\d+)$/)
+  const m = label?.match(/^Take (\d+)(?: · \d+)?$/)
   return m ? Number(m[1]) : null
 }
 

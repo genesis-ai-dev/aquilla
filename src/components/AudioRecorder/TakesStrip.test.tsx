@@ -41,7 +41,7 @@ vi.mock("@/hooks/useRecordingTextDrift", () => ({
   useRecordingTextDrift: () => driftResult,
 }))
 
-import { TakesStrip } from "./TakesStrip"
+import { TakesStrip, nextTakeLabel } from "./TakesStrip"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
 const session = { jwt: "jwt", username: "dir" } as never
@@ -684,5 +684,14 @@ describe("TakesStrip — length", () => {
   it("gives a trimmed take the length that plays", () => {
     render(<TakesStrip {...common} takes={[{ ...take("audio-c1-a.webm", 2560), trimStartMs: 256, trimEndMs: 2320 }]} selectedAudioId={null} />)
     expect(screen.getByTestId("take-length-audio-c1-a.webm")).toHaveTextContent("2.1s")
+  })
+})
+
+// AQU-1767 (Sam's walk, 2026-10-15): splitting "Take 1" renames it "Take 1 · 1"
+// and "Take 1 · 2", and the next recording was named "Take 1" again.
+describe("nextTakeLabel", () => {
+  it("counts a split take's pieces as their take's number", () => {
+    expect(nextTakeLabel([{ label: "Take 1 · 1" }, { label: "Take 1 · 2" }])).toBe("Take 2")
+    expect(nextTakeLabel([{ label: "Take 1" }, { label: "Take 3 · 2" }])).toBe("Take 4")
   })
 })

@@ -30,9 +30,7 @@ import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import type { Context } from "hono"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
-import { ROLE, type Env } from "../types"
-import { getEffectiveOrgRole } from "../services/org-permissions"
-import { resolveProjectRole } from "../services/project-permissions"
+import type { Env } from "../types"
 import {
   encryptMondayToken,
   decryptMondayToken,
@@ -84,12 +82,16 @@ import {
   isCreatableMetric,
   PROJECTS_GROUP_TITLE,
 } from "../lib/monday/columns"
-import { notifySyncWorkerOfMondayLinkChange } from "../services/sync-worker-notify"
 import { secureCompare } from "../utils/secure-compare"
+import {
+  getProjectOrgId,
+  MANAGE_MIN_ROLE,
+  notifyLinkChangedBestEffort,
+  orgGuard,
+  projectGuard,
+} from "./_integration-helpers"
 
 const monday = new Hono<AuthHonoEnv>()
-
-const MANAGE_MIN_ROLE = ROLE.MAINTAINER
 
 /**
  * Public base of THIS worker, for the webhook URL Monday calls back. It must
@@ -156,49 +158,12 @@ async function orgTokenOr409(
   }
 }
 
-async function getProjectOrgId(env: Env, projectId: string): Promise<number | null> {
-  const row = await env.AQUILLA_PG.prepare("SELECT org_id FROM projects WHERE id = ?")
-    .bind(projectId)
-    .first<{ org_id: number | null }>()
-  return row?.org_id ?? null
-}
-
 async function getLink(env: Env, projectId: string): Promise<IntegrationLinkRow | null> {
   return env.AQUILLA_PG.prepare(
     "SELECT * FROM integration_links WHERE project_id = ? AND provider = ?",
   )
     .bind(projectId, PROVIDER)
     .first<IntegrationLinkRow>()
-}
-
-/** Guard: caller must have >= minRole on the org. Returns role or an error Response. */
-async function orgGuard(
-  c: Context<AuthHonoEnv>,
-  minRole: number | null,
-): Promise<{ orgId: number } | Response> {
-  const orgId = parseInt(c.req.param("orgId") ?? "", 10)
-  if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
-  const role = await getEffectiveOrgRole(c.env, orgId, c.get("user"))
-  if (role == null) return c.json({ error: "no access to org" }, 403)
-  if (minRole != null && role < minRole) {
-    return c.json({ error: `org role >= maintainer (${minRole}) required` }, 403)
-  }
-  return { orgId }
-}
-
-/** Guard: caller must have >= minRole on the project. */
-async function projectGuard(
-  c: Context<AuthHonoEnv>,
-  minRole: number | null,
-): Promise<{ projectId: string } | Response> {
-  const projectId = c.req.param("projectId") ?? ""
-  if (!projectId) return c.json({ error: "invalid projectId" }, 400)
-  const role = await resolveProjectRole(c.env, c.get("user"), projectId)
-  if (!role) return c.json({ error: "no access to project" }, 403)
-  if (minRole != null && role.level < minRole) {
-    return c.json({ error: `project role >= maintainer (${minRole}) required` }, 403)
-  }
-  return { projectId }
 }
 
 function linkResponse(link: IntegrationLinkRow, orgConnected: boolean) {
@@ -526,28 +491,6 @@ const putLinkSchema = z.object({
   config: z.record(z.string(), z.unknown()),
   enabled: z.boolean().optional(),
 })
-
-/**
- * AQU-1828: the project's DO caches "this project has no Monday link" so it
- * stops nudging identity on every edit. Any change to the link row has to drop
- * that cache, or a freshly linked project would not start pushing until the
- * DO's backstop TTL lapsed. Best-effort: `executionCtx` is absent in some test
- * harnesses, and the link row itself is already durable.
- */
-function notifyLinkChangedBestEffort(
-  c: {
-    env: Parameters<typeof notifySyncWorkerOfMondayLinkChange>[0]
-    executionCtx: { waitUntil(promise: Promise<unknown>): void }
-  },
-  projectId: string,
-): void {
-  const notifyPromise = notifySyncWorkerOfMondayLinkChange(c.env, projectId)
-  try {
-    c.executionCtx.waitUntil(notifyPromise)
-  } catch {
-    void notifyPromise
-  }
-}
 
 monday.put(
   "/projects/:projectId/link",

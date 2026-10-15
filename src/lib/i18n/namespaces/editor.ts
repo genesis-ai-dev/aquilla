@@ -2041,6 +2041,62 @@ export const editor = defineNamespace({
     }, "count"),
     "editor.repetition.undo": "Undo",
     "editor.repetition.undoFailed": "Couldn't undo the propagation.",
+    // AQU-1486 — "Validate all repeated rows, or just this one?"
+    "editor.repetition.choiceTitle": "Validate the repeated rows too?",
+    "editor.repetition.choiceSingleBody": plural({
+      one: "This text appears in {count} other row of this file. It gets this translation either way. Validate it now, or leave it to be validated later?",
+      other: "This text appears in {count} other rows of this file. They get this translation either way. Validate them now, or leave them to be validated later?",
+    }, "count"),
+    "editor.repetition.choiceBulkBody": plural({
+      one: "The rows you are validating repeat in {count} other row of this file. It gets the same translation either way. Validate it now, or leave it to be validated later?",
+      other: "The rows you are validating repeat in {count} other rows of this file. They get the same translation either way. Validate them now, or leave them to be validated later?",
+    }, "count"),
+    "editor.repetition.choiceCapNote": plural({
+      one: "The project's batch validation size leaves room to validate {count} of them. The rest are filled but not validated.",
+      other: "The project's batch validation size leaves room to validate {count} of them. The rest are filled but not validated.",
+    }, "count"),
+    "editor.repetition.validateMore": plural({
+      one: "Validate {count} more row",
+      other: "Validate {count} more rows",
+    }, "count"),
+    "editor.repetition.justThisRow": "Just this row",
+    "editor.repetition.justTheseRows": "Just these rows",
+    "editor.repetition.dontAskAgain": "Don't ask again",
+    "editor.repetition.dontAskAgainHelp": "To be asked again, use “Ask me each time” on the message that follows a validation.",
+    "editor.repetition.validated": plural({
+      one: "Validated {count} repeated row",
+      other: "Validated {count} repeated rows",
+    }, "count"),
+    "editor.repetition.unvalidatedRepeats": plural({
+      one: "{count} repeated row has this text but isn't validated",
+      other: "{count} repeated rows have this text but aren't validated",
+    }, "count"),
+    "editor.repetition.validateAll": "Validate all",
+    "editor.repetition.askEachTime": "Ask me each time",
+    "editor.repetition.validateFailed": "Couldn't validate the repeated rows.",
+    "editor.repetition.bulkValidatedNote": plural({
+      one: "Also validated {count} repeated row.",
+      other: "Also validated {count} repeated rows.",
+    }, "count"),
+    "editor.repetition.bulkFilledNote": plural({
+      one: "Filled {count} repeated row, which still needs validating.",
+      other: "Filled {count} repeated rows, which still need validating.",
+    }, "count"),
+    "editor.repetition.bulkSkippedNote": plural({
+      one: "Left {count} repeated row as it was, because the translations disagreed.",
+      other: "Left {count} repeated rows as they were, because the translations disagreed.",
+    }, "count"),
+    "editor.repetition.conflictTitle": "These repeated rows disagree",
+    "editor.repetition.conflictBody": plural({
+      one: "Rows you are validating translate this source text in different ways. Which translation should the {count} other row get?",
+      other: "Rows you are validating translate this source text in different ways. Which translation should the {count} other rows get?",
+    }, "count"),
+    "editor.repetition.conflictFrom": "From {rows}",
+    "editor.repetition.conflictRowName": "row {number}",
+    "editor.repetition.conflictSkip": "Skip: leave those rows as they are",
+    "editor.repetition.conflictApplyToRest": "Do the same for the rest of this run",
+    "editor.repetition.conflictApplyToRestHelp": "Uses the first or last row's translation, or skips, for every other disagreement in this run.",
+    "editor.repetition.conflictConfirm": "Use this choice",
   },
   context: {
     _context: {
@@ -2087,6 +2143,117 @@ export const editor = defineNamespace({
           "as a report of something already done, not a question.",
         placeholders: {
           count: "How many other cells received the translation. Always 1 or more.",
+        },
+      },
+      // AQU-1486 — the "validate the repeated rows too?" dialog, its toasts,
+      // and the bulk-run conflict picker. Each carries a placeholder.
+      "editor.repetition.choiceSingleBody": {
+        description:
+          "Body of a dialog shown right after the user validated one row whose " +
+          "source text repeats elsewhere in the file. The other rows receive the " +
+          "same translation whatever the user picks; the question is only whether " +
+          "they are also marked validated now or left for someone to validate later.",
+        placeholders: {
+          count: "How many other rows share this source text and would be validated. Always 1 or more.",
+        },
+      },
+      "editor.repetition.choiceBulkBody": {
+        description:
+          "Body of the same dialog when the user validated many rows at once " +
+          "(a selection, or a whole-file batch). Some of those rows repeat in " +
+          "rows outside the run; those rows receive the matching translation " +
+          "either way, and the question is whether to validate them too.",
+        placeholders: {
+          count: "How many rows outside the run would receive a translation and be validated. Always 1 or more.",
+        },
+      },
+      "editor.repetition.choiceCapNote": {
+        description:
+          "Extra line in the bulk dialog when the project limits how many rows " +
+          "one batch validation may validate. Only part of the repeated rows fit " +
+          "under that limit; the others still receive the translation but stay " +
+          "unvalidated.",
+        placeholders: {
+          count: "How many of the repeated rows can still be validated under the limit. Always 1 or more.",
+        },
+      },
+      "editor.repetition.validateMore": {
+        description:
+          "Primary button of the dialog: validate the repeated rows as well as " +
+          "the row(s) the user already validated. A button label — keep it short.",
+        placeholders: {
+          count: "How many additional rows the button validates. Always 1 or more.",
+        },
+      },
+      "editor.repetition.validated": {
+        description:
+          "Toast confirming that the repeated rows were filled in and marked " +
+          "validated. Paired with an Undo action.",
+        placeholders: {
+          count: "How many repeated rows were validated. Always 1 or more.",
+        },
+      },
+      "editor.repetition.unvalidatedRepeats": {
+        description:
+          "Toast after a typed translation, when the repeated rows already hold " +
+          "the same text but nobody has validated them. Paired with a " +
+          "'Validate all' button.",
+        placeholders: {
+          count: "How many repeated rows are waiting for validation. Always 1 or more.",
+        },
+      },
+      "editor.repetition.bulkValidatedNote": {
+        description:
+          "Sentence appended to the summary toast of a bulk validation, saying " +
+          "rows outside the selection were validated as well because they repeat " +
+          "a validated row's source text.",
+        placeholders: {
+          count: "How many repeated rows were also validated. Always 1 or more.",
+        },
+      },
+      "editor.repetition.bulkFilledNote": {
+        description:
+          "Sentence appended to the summary toast of a bulk validation, saying " +
+          "rows outside the selection received a translation but were not " +
+          "validated and still need someone to validate them.",
+        placeholders: {
+          count: "How many repeated rows were filled but not validated. Always 1 or more.",
+        },
+      },
+      "editor.repetition.bulkSkippedNote": {
+        description:
+          "Sentence appended to the summary toast of a bulk validation, saying " +
+          "some repeated rows were left untouched because the validated rows " +
+          "disagreed about their translation and the user chose to skip them.",
+        placeholders: {
+          count: "How many repeated rows were left unchanged. Always 1 or more.",
+        },
+      },
+      "editor.repetition.conflictBody": {
+        description:
+          "Body of a dialog in a bulk validation: two or more of the rows being " +
+          "validated share a source text but hold different translations, so " +
+          "the user picks which translation the remaining rows with that source " +
+          "receive. The options follow as a list.",
+        placeholders: {
+          count: "How many rows would receive the chosen translation. Always 1 or more.",
+        },
+      },
+      "editor.repetition.conflictFrom": {
+        description:
+          "Small caption under one translation option in the conflict dialog, " +
+          "naming which validated rows hold that translation.",
+        placeholders: {
+          rows: "A list of row names, already joined, e.g. 'row 3 and row 7' or 'GEN 1:1 and GEN 2:4'.",
+        },
+      },
+      "editor.repetition.conflictRowName": {
+        description:
+          "How one row is named inside the conflict dialog's caption when it has " +
+          "no reference of its own. Lower-case because it is joined into a list " +
+          "inside a sentence.",
+        placeholders: {
+          number: "The row's number in the editor table's # column.",
         },
       },
       "editor.row.draftSearching": {

@@ -49,6 +49,7 @@ import {
 import { namedCellRef } from "@/lib/cell-named-ref"
 import { createEditorStructureCache } from "@/lib/editor-structure-cache"
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
+import { showBulkValidateToast, type BulkRepetitionOutcome, type UseRepetitionValidation } from "@/hooks/useRepetitionValidation"
 import posthog from "@/lib/posthog"
 
 /** "Voice together" failures whose usual body speaks of ONE line, in the
@@ -128,6 +129,14 @@ interface Props {
    * commit; this closes that gap.
    */
   onValidationCommitted?: () => void
+  /**
+   * AQU-1486: asks what the selection's repetitions get (fill only, or fill
+   * and validate) before "Validate text" writes, and plans the fills. Absent
+   * = repetitions are left alone, as before.
+   */
+  prepareBulkRepetitions?: UseRepetitionValidation["prepareBulkRepetitions"]
+  /** AQU-1486: the note and Undo a run's repetitions add to its one toast. */
+  bulkRepetitionToastExtras?: UseRepetitionValidation["bulkToastExtras"]
 }
 
 type Running =
@@ -137,7 +146,7 @@ type Running =
   | { kind: "voice" }
   | { kind: "validate-audio" }
 
-export function SelectionBar({ project, cellStore, session, username, activeLane, myScopes, audioByCellId, linkedTakesByCell, completeBatch, audioMode, orderedBy, mediaLayer = false, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted }: Props) {
+export function SelectionBar({ project, cellStore, session, username, activeLane, myScopes, audioByCellId, linkedTakesByCell, completeBatch, audioMode, orderedBy, mediaLayer = false, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted, prepareBulkRepetitions, bulkRepetitionToastExtras }: Props) {
   const t = useT()
   // AQU-1503: skip clauses join the way a list is written in the reader's
   // language rather than with a hardcoded separator.
@@ -552,7 +561,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     }
   }, [selectedCells, onVoiceTogether, isBusy, t, project.id])
 
-  const onValidate = useCallback(() => {
+  const onValidate = useCallback(async () => {
     if (isBusy) return
     setRunning({ kind: "validate" })
     try {
@@ -571,34 +580,46 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
         noPermissionReason,
         allowSelfValidation,
       })
+      // AQU-1486: what the selection's repetitions get is asked BEFORE any
+      // write, so the dialog's counts are a promise rather than a report.
+      // Null at once when nothing repeats, so that run emits synchronously, as before.
+      const asking = summary.validatable.length > 0
+        ? prepareBulkRepetitions?.(summary.validatable.map((cell) => cell.id)) ?? null
+        : null
+      const repetitionRun = asking ? await asking : null
       // AQU-1572: each emit reports its own line's `cell validated` once the
       // write is in the outbox, so this loop adds no telemetry of its own. A
       // write that fails is logged rather than left as an unhandled rejection.
-      for (const cell of summary.validatable) {
-        void emitCellValidate({
-          projectId: project.id,
-          fileId: cell.fileId,
+      const emits = summary.validatable.map((cell) => emitCellValidate({
+        projectId: project.id,
+        fileId: cell.fileId,
+        cellId: cell.id,
+        author: username,
+        editEventId: cell.targetEventId!,
+        targetLang: activeLane, // AQU-633: '' omitted on the wire by the emit
+        surface: "selection", // AQU-1572
+      }).catch((err) => console.warn("[validate] enqueue failed:", err)))
+      let repetitions: BulkRepetitionOutcome | null = null
+      if (repetitionRun) {
+        // The run's own votes go in first so its Undo can take them back.
+        await Promise.all(emits)
+        repetitions = await repetitionRun.apply(summary.validatable.map((cell) => ({
           cellId: cell.id,
-          author: username,
+          fileId: cell.fileId,
           editEventId: cell.targetEventId!,
-          targetLang: activeLane, // AQU-633: '' omitted on the wire by the emit
-          surface: "selection", // AQU-1572
-        }).catch((err) => console.warn("[validate] enqueue failed:", err))
+        })))
       }
       posthog.capture(BATCH_VALIDATE_ATTEMPTED, batchValidateTelemetry(summary, "selection"))
       const message = batchValidateToast(summary, t, formatLocaleList)
-      toast.add({
-        type: message.type,
-        title: message.title,
-        ...(message.description ? { description: message.description } : {}),
-      })
+      // One message for the whole gesture: the repetitions' note and Undo ride on it.
+      showBulkValidateToast(message, bulkRepetitionToastExtras?.(repetitions) ?? { note: null })
       // AQU-616: flush the just-enqueued validates now instead of waiting for
       // the ~5s periodic flusher, so the confirmed/synced state lands promptly.
       if (summary.validatable.length > 0) onValidationCommitted?.()
     } finally {
       setRunning({ kind: "idle" })
     }
-  }, [selectedCells, username, activeLane, myScopes, isBusy, project.id, onValidationCommitted, t, formatLocaleList, allowSelfValidation, textScopeCanValidate, noPermissionReason])
+  }, [selectedCells, username, activeLane, myScopes, isBusy, project.id, onValidationCommitted, t, formatLocaleList, allowSelfValidation, textScopeCanValidate, noPermissionReason, prepareBulkRepetitions, bulkRepetitionToastExtras])
 
   const onUnvalidate = useCallback(() => {
     if (isBusy) return
@@ -758,7 +779,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           type="button"
           size="sm"
           variant="outline"
-          onClick={onValidate}
+          onClick={() => { void onValidate() }}
           disabled={isBusy || validatableCount === 0}
         >
           {running.kind === "validate" ? (

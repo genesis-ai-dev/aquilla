@@ -317,6 +317,72 @@ describe("flushNow", () => {
     adapter.close()
   })
 
+  // A sync token is scoped to one file and the server 403s events for any
+  // other file, so a single first-file token stranded offline edits to every
+  // other file as "failed" (reproduced in the Tauri app, 2026-10-14).
+  it("flushes each file's queued writes under a token minted for that file", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    store.commit(events.fileSynced({ id: "file2", projectId: "proj1", name: "Exodus", type: "usfm", sequenceIndex: 1 }))
+    for (const [id, fileId] of [["q1", "file1"], ["q2", "file2"]] as const) {
+      store.commit(
+        events.eventQueued({
+          id,
+          projectId: "proj1",
+          fileId,
+          cellId: "1:1",
+          kind: "target.cell.commit",
+          payload: { value: "hola" },
+          parentId: "head-1",
+          author: "dev@local.test",
+          schemaVersion: 1,
+          clientTs: new Date(),
+          createdAt: new Date(),
+        }),
+      )
+    }
+    const mintToken = vi.fn<MintToken>(async (_projectId, fileId) => ({ token: `tok-${fileId}`, status: null }))
+    // Behaves like the server: refuses any event whose file the token isn't scoped to.
+    const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+      const token = (init.headers as Record<string, string>).Authorization.replace("Bearer tok-", "")
+      const evs = (JSON.parse(init.body as string) as { events: Array<{ id: string; fileId: string }> }).events
+      return new Response(
+        JSON.stringify({
+          accepted: evs.filter((e) => e.fileId === token).map((e) => ({ id: e.id })),
+          rejected: evs
+            .filter((e) => e.fileId !== token)
+            .map((e) => ({ id: e.id, status: 403, reason: "token scoped to different file" })),
+          stale: [],
+        }),
+        { status: 200 },
+      )
+    })
+
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    })
+    await drainMicrotasks()
+    await adapter.flushNow()
+
+    const posted = fetchImpl.mock.calls.map(([, init]) => ({
+      auth: (init.headers as Record<string, string>).Authorization,
+      ids: (JSON.parse(init.body as string) as { events: Array<{ id: string }> }).events.map((e) => e.id),
+    }))
+    expect(posted).toEqual(
+      expect.arrayContaining([
+        { auth: "Bearer tok-file1", ids: ["q1"] },
+        { auth: "Bearer tok-file2", ids: ["q2"] },
+      ]),
+    )
+    expect(store.query(tables.eventQueue.select().where({ projectId: "proj1" }))).toHaveLength(0)
+
+    adapter.close()
+  })
+
   it("leaves the queue pending when no local file exists yet to scope a token", async () => {
     store.commit(
       events.eventQueued({

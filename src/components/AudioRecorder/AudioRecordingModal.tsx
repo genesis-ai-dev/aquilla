@@ -17,7 +17,8 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { Switch } from "@/components/ui/switch"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
-import { MIN_USEFUL_REGION_SEC, effectiveAttachmentDurationMs, targetChipGeom, type ChipAtt } from "@/lib/timeline/lane-timing"
+import { MIN_USEFUL_REGION_SEC, targetChipGeom, type ChipAtt } from "@/lib/timeline/lane-timing"
+import { formatTakeSeconds, takePlayedMs } from "@/lib/audio/take-length"
 import { setRecordingTakesDrawerOpen, useRecordingTakesDrawerOpen } from "@/lib/store/recording-takes-drawer-pref"
 import { takeTrackVars } from "@/lib/timeline/take-colors"
 import {
@@ -731,11 +732,7 @@ export function AudioRecordingModal({
   // What the target bar is fed at rest: the part of the selected take that
   // plays, so an over-long take reads as over before anyone records (trim-aware:
   // a take trimmed on the timeline shows its trimmed length).
-  const readyKeptMs = readySplit
-    ? readySplit.reduce((sum, piece) => sum + (effectiveAttachmentDurationMs(piece as never) ?? 0), 0)
-    : readyAtt
-    ? effectiveAttachmentDurationMs(readyAtt as unknown as Pick<CodexCellAttachment, "durationMs" | "trimStartMs" | "trimEndMs">)
-    : null
+  const readyKeptMs = takePlayedMs(readySplit ?? (readyAtt ? [readyAtt] : []))
   const readyBadge = readyAtt
     ? takeBadgeState(readyAtt, username, readValidationCountAudio(project))
     : null
@@ -2387,8 +2384,9 @@ export function AudioRecordingModal({
                       {t("audio.recordingModal.readyTakeCaption", {
                         label: (readySplit ? takeBaseLabel(readyAtt.label) : readyAtt.label) ?? t("audio.takesStrip.takeFallback"),
                         // Tenths rounded DOWN, as the target bar below
-                        // prints them — the two must never disagree.
-                        seconds: (Math.floor((readyKeptMs ?? 0) / 100) / 10).toFixed(1),
+                        // prints them — the two must never disagree, nor
+                        // with the Recording tab (take-length.ts).
+                        seconds: formatTakeSeconds(readyKeptMs ?? 0),
                       })}
                       {/* No window to judge against: said on hover, beside the
                           take, rather than as a line of its own (Sam,

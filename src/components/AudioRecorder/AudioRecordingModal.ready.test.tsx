@@ -255,6 +255,21 @@ describe("the selected take, before recording", () => {
     expect(cut.querySelector("[data-dashed='true']")).not.toBeNull()
   })
 
+  // AQU-1767 (Sam's walk, 2026-10-15): the Recording tab said 2.4s for this
+  // take; both now say it the one way (take-length.ts).
+  it("says a split take's length as the Recording tab does", () => {
+    attachmentsState.byCellId = entry({
+      selectedAudioId: "audio-c1-1.wav",
+      attachments: {
+        "audio-c1-1.wav": take("audio-c1-1.wav", { label: "Take 1 · 1", durationMs: 4000, trimEndMs: 1200 }),
+        "audio-c1-2.wav": take("audio-c1-2.wav", { label: "Take 1 · 2", durationMs: 4000, trimStartMs: 2000, trimEndMs: 3150, pieceOf: "audio-c1-1.wav" }),
+      },
+    })
+    render(modalEl())
+    expect(screen.getByTestId("rec-ready-take")).toHaveTextContent("Take 1 · 2.3s")
+    expect(screen.getByText("0:02.3")).toBeInTheDocument()
+  })
+
   it("names and measures a split take the same whichever piece is selected", () => {
     attachmentsState.byCellId = entry({
       selectedAudioId: "audio-c1-2.wav",

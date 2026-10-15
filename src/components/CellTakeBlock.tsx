@@ -64,7 +64,7 @@ import { pieceGroupOf, type AudioAttachmentOut } from "@/lib/sync/cell-audio-rea
 import { TakesStrip } from "@/components/AudioRecorder/TakesStrip"
 import { attachmentOutFrom } from "@/lib/audio/cut-take"
 import { GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
-import { effectiveAttachmentDurationMs } from "@/lib/timeline/lane-timing"
+import { formatTakeSeconds, takePlayedMs } from "@/lib/audio/take-length"
 
 export interface CellTakeBlockProps {
   project: ProjectRecord
@@ -410,9 +410,7 @@ function CellTakeBlockView({
   // The length that PLAYS (AQU-1217: a trimmed take shows its trimmed
   // length) — the head said the whole file's while the timer under it said
   // the kept part's.
-  const keptMs = split
-    ? split.reduce((sum, piece) => sum + (effectiveAttachmentDurationMs(piece as never) ?? 0), 0)
-    : effectiveAttachmentDurationMs(attachment)
+  const keptMs = takePlayedMs(split ?? (attachment ? [attachment] : []))
   const trackVars = takeTrackVars({
     files: project.files,
     fileId: trackFileId ?? owner.fileId,
@@ -459,7 +457,7 @@ function CellTakeBlockView({
           </span>
         )}
         {!isSection && keptMs != null && (
-          <span data-testid="cell-take-length" className="tabular-nums text-muted-foreground">{(keptMs / 1000).toFixed(1)}s</span>
+          <span data-testid="cell-take-length" className="tabular-nums text-muted-foreground">{formatTakeSeconds(keptMs)}s</span>
         )}
         {provenance && (
           <span

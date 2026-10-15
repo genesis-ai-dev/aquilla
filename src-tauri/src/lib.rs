@@ -1,3 +1,7 @@
+#[cfg(desktop)]
+mod app_update;
+#[cfg(mobile)]
+#[path = "app_update_mobile.rs"]
 mod app_update;
 mod auth;
 mod connectivity;
@@ -12,12 +16,18 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg_attr(mobile, allow(unused_mut))]
     let mut builder = tauri::Builder::default()
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init());
 
-    #[cfg(debug_assertions)]
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+
+    // mcp-bridge calls window minimize/maximize, which don't exist on mobile.
+    #[cfg(all(debug_assertions, desktop))]
     {
         builder = builder.plugin(
             tauri_plugin_mcp_bridge::Builder::new()

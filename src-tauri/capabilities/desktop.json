@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop",
+  "description": "desktop-only permissions (plugins not built for iOS/Android)",
+  "windows": [
+    "main"
+  ],
+  "platforms": [
+    "macOS",
+    "windows",
+    "linux"
+  ],
+  "permissions": [
+    "mcp-bridge:default"
+  ]
+}

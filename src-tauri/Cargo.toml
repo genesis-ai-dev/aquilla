@@ -24,7 +24,6 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.10.3", features = [] }
 tauri-plugin-log = "2"
-tauri-plugin-updater = "2"
 tauri-plugin-deep-link = "2"
 tauri-plugin-opener = "2"
 url = "2"
@@ -32,6 +31,11 @@ tokio = { version = "1", features = ["full"] }
 axum = { version = "0.8", features = ["json", "macros"] }
 tower-http = { version = "0.7", features = ["cors"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+
+# Desktop-only: mobile updates ship through the app stores, and mcp-bridge / wdio-webdriver
+# use window APIs (minimize/maximize) that don't exist on iOS/Android.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-updater = "2"
 tauri-plugin-mcp-bridge = "0.13"
 tauri-plugin-wdio-webdriver = { version = "1.4", optional = true }
 

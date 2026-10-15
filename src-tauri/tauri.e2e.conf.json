@@ -3,6 +3,7 @@
     "security": {
       "capabilities": [
         "default",
+        "desktop",
         {
           "identifier": "e2e-webdriver",
           "windows": ["main"],

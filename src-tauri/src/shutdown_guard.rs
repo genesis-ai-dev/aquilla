@@ -107,7 +107,14 @@ where
 
 /// Register via `Builder::on_window_event` (applies to all windows). Covers
 /// the window's close button / Cmd+W.
+///
+/// Desktop only: on iOS/Android the OS owns the lifecycle (Back destroys the
+/// activity, the process can be killed without notice), so holding the close
+/// and then calling `exit()` just aborts the process mid-teardown.
 pub fn handle_window_event(window: &Window, event: &WindowEvent) {
+    if cfg!(mobile) {
+        return;
+    }
     if let WindowEvent::CloseRequested { api, .. } = event {
         let app = window.app_handle();
         let state = app.state::<ShutdownGuardState>();
@@ -121,8 +128,17 @@ pub fn handle_window_event(window: &Window, event: &WindowEvent) {
 
 /// Register as `App::run`'s callback. Covers Cmd+Q / app-level quit, which
 /// doesn't always route through a window's `CloseRequested` first.
+///
+/// On mobile, Back destroys the last window and Tauri would exit the process,
+/// which aborts (`FORTIFY: pthread_mutex_lock called on a destroyed mutex`)
+/// while tokio/axum threads are still live. Mobile apps don't exit themselves:
+/// keep the process cached and let the OS reclaim it.
 pub fn handle_run_event(app: &AppHandle, event: RunEvent) {
     if let RunEvent::ExitRequested { api, .. } = event {
+        if cfg!(mobile) {
+            api.prevent_exit();
+            return;
+        }
         let state = app.state::<ShutdownGuardState>();
         if !claim_shutdown(&state.exiting) {
             return;

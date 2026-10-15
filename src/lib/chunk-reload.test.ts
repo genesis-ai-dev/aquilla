@@ -7,12 +7,18 @@
  * recovery must reload exactly once per failing chunk — never twice for the
  * same URL (that is the reload loop), and never *only* once per session (a
  * second deploy in the same session must still recover).
+ *
+ * AQU-1966 adds the reporting contract: every chunk failure is counted exactly
+ * once per page load, including the ones the reload could not repair, because
+ * the un-recovered failure is the one the user is actually looking at.
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import {
+  CHUNK_FAILURE_EVENT,
   CHUNK_NOTICE_ID,
   CHUNK_RELOAD_KEY,
+  __resetChunkFailureReportsForTests,
   chunkLoadKey,
   isChunkLoadError,
   markChunkAttempted,
@@ -27,15 +33,26 @@ const SAFARI = "Importing a module script failed."
 
 function harness(overrides: { storage?: Storage } = {}) {
   const reload = vi.fn()
+  // `capture` is injected rather than left to the default so no test reaches
+  // the real PostHog client.
+  const capture = vi.fn()
   return {
     reload,
-    deps: { storage: overrides.storage ?? sessionStorage, doc: document, reload, message: "Updating Aquilla…" },
+    capture,
+    deps: {
+      storage: overrides.storage ?? sessionStorage,
+      doc: document,
+      reload,
+      message: "Updating Aquilla…",
+      capture,
+    },
   }
 }
 
 beforeEach(() => {
   sessionStorage.clear()
   document.getElementById(CHUNK_NOTICE_ID)?.remove()
+  __resetChunkFailureReportsForTests()
 })
 
 describe("isChunkLoadError", () => {
@@ -122,6 +139,92 @@ describe("recoverFromChunkError", () => {
     expect(reload).not.toHaveBeenCalled()
     expect(sessionStorage.getItem(CHUNK_RELOAD_KEY)).toBeNull()
     expect(document.getElementById(CHUNK_NOTICE_ID)).toBeNull()
+  })
+})
+
+describe("failure reporting (AQU-1966)", () => {
+  it("reports a recovered failure once, tagged with the chunk that failed", () => {
+    const { capture, deps } = harness()
+    expect(recoverFromChunkError(new Error(CHROME), deps)).toBe(true)
+    expect(capture).toHaveBeenCalledOnce()
+    expect(capture).toHaveBeenCalledWith({
+      chunk: "https://aquilla.app/assets/app-chunk-BfoUWN3w.js",
+      recovered: true,
+    })
+  })
+
+  it("reports the failure it could NOT repair — the one the user is staring at", () => {
+    const { capture, deps } = harness()
+    recoverFromChunkError(new Error(CHROME), deps) // spends the one reload
+    __resetChunkFailureReportsForTests()
+    capture.mockClear()
+    expect(recoverFromChunkError(new Error(CHROME), deps)).toBe(false)
+    expect(capture).toHaveBeenCalledWith({
+      chunk: "https://aquilla.app/assets/app-chunk-BfoUWN3w.js",
+      recovered: false,
+    })
+  })
+
+  it("counts one incident once, however many paths report it", () => {
+    // vite:preloadError fires, then the caller's own rejection arrives: one
+    // failure, and the dashboard must not read it as two.
+    const { capture, deps } = harness()
+    recoverFromChunkError(new Error(CHROME), deps)
+    recoverFromChunkError(new Error(CHROME), deps)
+    expect(capture).toHaveBeenCalledOnce()
+  })
+
+  it("reports when storage is unavailable, where no reload can be risked", () => {
+    const broken = {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error("QuotaExceededError")
+      },
+    } as unknown as Storage
+    const { capture, reload, deps } = harness({ storage: broken })
+    expect(recoverFromChunkError(new Error(CHROME), deps)).toBe(false)
+    expect(reload).not.toHaveBeenCalled()
+    expect(capture).toHaveBeenCalledWith({
+      chunk: "https://aquilla.app/assets/app-chunk-BfoUWN3w.js",
+      recovered: false,
+    })
+  })
+
+  it("stays silent on errors that are not chunk failures", () => {
+    const { capture, deps } = harness()
+    recoverFromChunkError(new Error("Cannot read properties of undefined"), deps)
+    expect(capture).not.toHaveBeenCalled()
+  })
+
+  it("treats an offline failure as neither a recovery nor a deploy statistic", () => {
+    // The exporters load on demand behind a button, so a dropped connection
+    // produces the same message a deploy does. Reloading cannot fetch the
+    // asset and "Updating …" would misdescribe it.
+    const { capture, reload, deps } = harness()
+    const onLine = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false)
+    try {
+      expect(recoverFromChunkError(new Error(CHROME), deps)).toBe(false)
+      expect(reload).not.toHaveBeenCalled()
+      expect(capture).not.toHaveBeenCalled()
+      expect(sessionStorage.getItem(CHUNK_RELOAD_KEY)).toBeNull()
+    } finally {
+      onLine.mockRestore()
+    }
+  })
+
+  it("still recovers when the browser merely cannot prove it is online", () => {
+    const { reload, deps } = harness()
+    const onLine = vi.spyOn(navigator, "onLine", "get").mockReturnValue(true)
+    try {
+      expect(recoverFromChunkError(new Error(CHROME), deps)).toBe(true)
+      expect(reload).toHaveBeenCalledOnce()
+    } finally {
+      onLine.mockRestore()
+    }
+  })
+
+  it("names the event so the dashboard query cannot drift from the code", () => {
+    expect(CHUNK_FAILURE_EVENT).toBe("chunk load failed")
   })
 })
 

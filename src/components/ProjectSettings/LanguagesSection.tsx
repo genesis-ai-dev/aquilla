@@ -18,6 +18,7 @@
 import { useEffect, useState, type ReactNode } from "react"
 import { Archive, ArchiveRestore, Plus, Globe } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Switch } from "@/components/ui/switch"
 import { LanguageComboboxInput } from "@/components/LanguageComboboxInput"
 import { Badge } from "@/components/ui/badge"
 import { FieldLabel } from "@/components/ui/field"
@@ -87,6 +88,11 @@ export interface LanguagesSectionProps {
     allowDuplicateName?: boolean
   }) => Promise<"ok" | "duplicate" | "invalid" | "malformed_code">
   onSetLaneArchived?: (laneId: string, archived: boolean) => Promise<boolean>
+  /**
+   * AQU-1954: the "Records audio" switch on each language row. Omitted (a
+   * local project, or an older caller), the rows show no switch.
+   */
+  onSetLaneRecordsAudio?: (laneId: string, recordsAudio: boolean) => Promise<boolean>
   /** AQU-1464: reads the lane's newest target edit for the archive confirmation.
    *  Optional — omitted for a local project, where there is no server to ask;
    *  the dialog then simply carries no activity line. */
@@ -141,6 +147,7 @@ export function LanguagesSection({
   onRenameLane,
   onCreateLane,
   onSetLaneArchived,
+  onSetLaneRecordsAudio,
   onLoadLaneLastChange,
 }: LanguagesSectionProps) {
   const t = useT()
@@ -155,6 +162,8 @@ export function LanguagesSection({
   const [pendingArchive, setPendingArchive] = useState<string | null>(null)
   const [laneActionError, setLaneActionError] = useState<string | null>(null)
   const [busyLane, setBusyLane] = useState<string | null>(null)
+  // AQU-1954: the row whose "Records audio" switch is saving.
+  const [audioBusyLane, setAudioBusyLane] = useState<string | null>(null)
   const derivedNewLaneCode = useDerivedLanguageCode(newLane)
 
   const laneRows = laneRecords ?? []
@@ -308,6 +317,18 @@ export function LanguagesSection({
     }
   }
 
+  async function handleRecordsAudio(laneId: string, recordsAudio: boolean) {
+    if (!onSetLaneRecordsAudio) return
+    setLaneActionError(null)
+    setAudioBusyLane(laneId)
+    try {
+      const ok = await onSetLaneRecordsAudio(laneId, recordsAudio)
+      if (!ok) setLaneActionError(t("projectSettings.languages.savingFailedGeneric"))
+    } finally {
+      setAudioBusyLane(null)
+    }
+  }
+
   async function handleConfirmArchive(lane: string) {
     if (!canEdit) return
     setLaneActionError(null)
@@ -385,6 +406,9 @@ export function LanguagesSection({
           <FieldLabel>{t("projectSettings.languages.additionalLanesLabel")}</FieldLabel>
           <p className="mb-2 text-xs text-muted-foreground">
             {t("projectSettings.languages.additionalLanesDescription")}
+            {rowMode && onSetLaneRecordsAudio && (
+              <span className="mt-1 block">{t("projectSettings.languages.recordsAudioHint")}</span>
+            )}
           </p>
           {rowMode ? (
             activeRows.length === 0 ? (
@@ -414,6 +438,28 @@ export function LanguagesSection({
                       >
                         {t("projectSettings.languages.laneShownAs", { label: laneLabel(lane) })}
                       </span>
+                    )}
+                    {/* AQU-1954 (Sam, 2026-10-14): whether every file owes
+                        audio in this language. Off, a file counts this
+                        language's audio only once it has a recording in it;
+                        on, the plan board and the Progress card expect it of
+                        every book. Saved straight away, like Archive. */}
+                    {onSetLaneRecordsAudio && pendingArchive !== lane.id && (
+                      <DisabledFieldTooltip disabled={!canEdit} tooltip={disabledTooltip}>
+                        <span className="ms-auto flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+                          {/* The switch names its own language; this is the
+                              visible caption, so it is not read twice. */}
+                          <span aria-hidden="true">{t("projectSettings.languages.recordsAudioLabel")}</span>
+                          <Switch
+                            size="sm"
+                            data-testid={`records-audio-${lane.id}`}
+                            checked={lane.recordsAudio === true}
+                            disabled={!canEdit || audioBusyLane === lane.id}
+                            onCheckedChange={(checked) => void handleRecordsAudio(lane.id, checked)}
+                            aria-label={t("projectSettings.languages.recordsAudioAriaLabel", { lane: laneLabel(lane) })}
+                          />
+                        </span>
+                      </DisabledFieldTooltip>
                     )}
                     {pendingArchive === lane.id ? (
                       <div className="flex flex-wrap items-center gap-2">

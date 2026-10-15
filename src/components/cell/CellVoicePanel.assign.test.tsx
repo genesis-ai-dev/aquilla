@@ -23,6 +23,9 @@ vi.mock("@/lib/audio/voice-generate-helpers", () => ({
   generateCellVoice: (...a: unknown[]) => generateCellVoice(...a),
 }))
 
+let backendReachable: boolean | null = null
+vi.mock("@/lib/offline/connectivity", () => ({ useConnectivity: () => backendReachable }))
+
 import { CellVoicePanel } from "./CellVoicePanel"
 import { CastGutterVoice } from "@/components/voice/CastGutterVoice"
 import { assignedCastVoiceId, findVoice, resolveCastVoice } from "@/lib/audio/voices"
@@ -104,5 +107,21 @@ describe("CellVoicePanel follows the line's voice (AQU-768)", () => {
     // …and the AQU-768 regression (reverting to the previous voice after the
     // refresh) stays fixed.
     await waitFor(() => expect(screen.getByTestId("voice-card-generate")).toHaveTextContent("Generate · John"))
+  })
+
+  // Every clip this card makes is saved to the server. Offline, it must be
+  // refused before it starts instead of spinning and then failing.
+  it("disables Generate offline and never starts a synth", async () => {
+    backendReachable = false
+    try {
+      render(<Harness />)
+      const button = screen.getByTestId("voice-card-generate")
+      expect(button).toBeDisabled()
+      expect(screen.getByTestId("voice-card-offline")).toBeInTheDocument()
+      await act(async () => { fireEvent.click(button) })
+      expect(generateCellVoice).not.toHaveBeenCalled()
+    } finally {
+      backendReachable = null
+    }
   })
 })

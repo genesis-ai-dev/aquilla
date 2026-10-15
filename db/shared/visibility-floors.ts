@@ -73,7 +73,7 @@ export interface ProjectVisibilityOverrides {
 const NO_OVERRIDES: ProjectVisibilityOverrides = { rosterViewMinRole: null, memberProgressViewMinRole: null }
 
 /**
- * The own values come from the STORED generated columns migration 0161 added
+ * The own values come from the STORED generated columns migration 0174 added
  * (`roster_view_min_role`, `member_progress_view_min_role`), never from the
  * settings blob: that can run to megabytes, and these are read on every
  * roster and named-progress check.

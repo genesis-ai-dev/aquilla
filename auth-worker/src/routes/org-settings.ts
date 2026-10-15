@@ -88,6 +88,8 @@ import {
   reprojectValidatedStmts,
   type ValidationThresholdKey,
 } from "../../../db/shared/validation-threshold"
+import { markOrgMondayLinksDirty, markProjectMondayLinksDirty } from "../../../db/shared/monday-dirty"
+import { pushDirtyLinksAfterResponse } from "../lib/monday/push"
 
 const orgSettings = new Hono<AuthHonoEnv>()
 
@@ -364,7 +366,7 @@ orgSettings.get("/:orgId/settings", authMiddleware, async (c) => {
  * "who sees each member's progress" stricter than the org does. Its own route
  * rather than part of every settings response: the settings GET is read on
  * nearly every page and only the Security page shows this line, so only it
- * pays for the per-project read (the 0161 generated columns, org-scoped).
+ * pays for the per-project read (the 0174 generated columns, org-scoped).
  * Any org member may read it.
  *
  * AQU-1938: a bare count left nobody able to act on it, so `overrideProjects`
@@ -696,7 +698,8 @@ orgSettings.on(
     // notifying on presence would wake every project room in the org whenever
     // anyone touched an unrelated setting.
     const toNotify = new Map<string, number>()
-    if (current.settings[COUNT_STRUCTURAL_KEY] !== body.settings[COUNT_STRUCTURAL_KEY]) {
+    const headingsRuleChanged = current.settings[COUNT_STRUCTURAL_KEY] !== body.settings[COUNT_STRUCTURAL_KEY]
+    if (headingsRuleChanged) {
       const { results: inheriting } = await c.env.AQUILLA_PG.prepare(
         `SELECT p.id AS project_id, COALESCE(ps.version, 0) AS version
            FROM projects p
@@ -714,8 +717,10 @@ orgSettings.on(
     // either way; only the per-cell validated flag lags until the project's
     // next threshold change.
     let reprojectionFailed = false
+    let thresholdChanged = false
     for (const key of VALIDATION_THRESHOLD_KEYS) {
       if (current.settings[key] === body.settings[key]) continue
+      thresholdChanged = true
       try {
         for (const row of await applyOrgThresholdChange(c.env, orgId, key)) {
           toNotify.set(row.projectId, row.version)
@@ -724,6 +729,14 @@ orgSettings.on(
         reprojectionFailed = true
         console.error(`[org-settings] ${key} re-projection failed for org ${orgId}:`, err)
       }
+    }
+    // AQU-1771: what the inheriting projects push to Monday moved too — for the
+    // headings rule and for an approvals default alike (db/shared/monday-dirty.ts
+    // lists the keys computeProjectMetrics reads). Marked once per save, however
+    // many of those keys it changed; the push itself runs after the response.
+    if (headingsRuleChanged || thresholdChanged) {
+      await markOrgMondayLinksDirty(c.env.AQUILLA_PG, orgId)
+      pushDirtyLinksAfterResponse(c, { orgId })
     }
     notifyProjectRoomsBestEffort(
       c,
@@ -942,6 +955,12 @@ orgSettings.post(
       }
     }
 
+    // AQU-1771: they now resolve to the org's value, so their boards are stale.
+    await markProjectMondayLinksDirty(
+      c.env.AQUILLA_PG,
+      affected.map((row) => row.project_id),
+    )
+    pushDirtyLinksAfterResponse(c, { projectIds: affected.map((row) => row.project_id) })
     // The UPDATE above bumped each of these rows by one.
     notifyProjectRoomsBestEffort(
       c,

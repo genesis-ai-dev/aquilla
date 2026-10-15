@@ -18,6 +18,14 @@
  *   { t: "presence", users: [{ connId, userId, focusedCell?, currentFileId?, selection?, ts }] }
  *       Roster snapshot, one row per CONNECTION (a user with two tabs is two
  *       rows). Sent on connect; later changes arrive as presence.diff/left.
+ *       AQU-1825: rows for peers in a file other than the receiver's carry
+ *       tier-1 fields only (no selection, no viewingCell).
+ *   { t: "presence.tier1", users: [{ connId, userId, currentFileId?, focusedCell?, ts }] }
+ *       AQU-1825: batched coarse roster delta, project-wide, one frame per
+ *       server tick (~250 ms) and only for connections whose coarse state
+ *       changed. Tier-2 detail (cursor selection, viewingCell, live draft)
+ *       travels in presence.diff / presence.draft, which the server sends
+ *       only to the sockets that have the same file open.
  *   { t: "lock.claimed", cellId, by: { userId, ts } }
  *   { t: "lock.released", cellId, by: { userId, ts } }
  *       Focus-lock transitions by another user.
@@ -79,6 +87,39 @@ export interface PresenceUser {
   ts: number
 }
 
+/**
+ * AQU-1825 tier 1: the coarse half of a presence row — who, and which file
+ * they have open. Carries no cursor selection and no `viewingCell`; those are
+ * tier 2 and only reach the sockets in that same file.
+ */
+export interface PresenceTier1Row {
+  connId: string
+  userId: string
+  currentFileId?: string
+  focusedCell?: string
+  ts: number
+}
+
+/**
+ * AQU-1832: the counts block of a pushed progress frame — the same object the
+ * `/progress` GET returns for a file or a section.
+ *
+ * Declared structurally here rather than imported from the progress resource
+ * so the wire parser stays the only thing in this module that knows about
+ * progress, and so a field the server adds (it already sends
+ * `audioValidationLevels`) rides through untouched instead of being dropped
+ * by a narrower re-serialisation. The parser validates the four fields every
+ * consumer reads and passes the rest along.
+ */
+export interface PushedProgressCounts {
+  totalCount: number
+  filledCount: number
+  validatedCount: number
+  validationLevels: number[]
+  audioCount?: number
+  audioValidatedCount?: number
+}
+
 export type ProjectWsServerMessage =
   | {
       t: "event.applied"
@@ -101,6 +142,13 @@ export type ProjectWsServerMessage =
        *  present with `serverSeq`, the client lands them directly
        *  (src/lib/sync/live-apply.ts) instead of refetching. */
       rows?: CellRow[]
+      /** AQU-1832: a `file.progress.pushed` frame for this event's file rides
+       *  later in the SAME broadcast batch, carrying the post-commit numbers.
+       *  Handlers skip the `/progress` refetch this frame used to trigger and
+       *  let the push land instead. Absent from an older worker, and absent
+       *  when the write produced no fan-out, so absent always means "refetch
+       *  as before". */
+      progressPushed?: boolean
     }
   | { t: "event.stale"; id: string; reason: string }
   | { t: "presence"; users: PresenceUser[] }
@@ -110,11 +158,29 @@ export type ProjectWsServerMessage =
   | { t: "presence.left"; userId: string; connId: string }
   /** Live draft text for one cell; server coalesces to ≤1 per connection per 150 ms. */
   | { t: "presence.draft"; userId: string; connId: string; cellId: string; draftText: string; ts: number }
+  /** AQU-1825: batched coarse roster delta — one frame per server tick (~250 ms),
+   *  carrying only the connections whose file or lease-held cell changed. */
+  | { t: "presence.tier1"; users: PresenceTier1Row[] }
   | { t: "lock.claimed"; cellId: string; by: { userId: string; ts: number } }
   | { t: "lock.released"; cellId: string; by: { userId: string; ts: number } }
   | { t: "project.archived"; project: string; archivedAt?: string; deletedBy?: string }
   | { t: "project.settings.updated"; project: string; version: number }
   | { t: "file.progress.updated"; project: string; file: string; fileCreated: boolean }
+  /** AQU-1832: one file+lane's post-commit progress, shaped like the
+   *  `/progress` body so it merges into the resource that read feeds. */
+  | {
+      t: "file.progress.pushed"
+      project: string
+      file: string
+      /** Target lane tag; '' is the default lane. */
+      lane: string
+      revision: number
+      validationCount: number
+      /** The server rewrote every section row — replace, don't upsert. */
+      complete: boolean
+      counts: PushedProgressCounts
+      sections: Array<{ key: string } & PushedProgressCounts>
+    }
   /** FRO-346: this user's membership was revoked; the DO closes the socket
    *  (code 4403) right after. `userId` is the presence identity (username). */
   | { t: "member.removed"; project: string; userId: string }
@@ -201,7 +267,9 @@ export type ProjectWsClientMessage =
   | { t: "focus.claim"; cellId: string; leaseMs?: number }
   | { t: "focus.renew"; cellId: string }
   | { t: "focus.release"; cellId: string }
-  /** Heartbeat; the DO answers `pong`. Sent by the reconciler itself. */
+  /** Heartbeat; the DO answers `pong`. Sent by the reconciler itself.
+   *  `ts` is accepted by the worker for older clients but no longer sent —
+   *  see PING_FRAME. */
   | { t: "ping"; ts?: number }
   /**
    * AQU-1839: a freshly minted sync token for this open socket, sent by the
@@ -304,6 +372,19 @@ let serverPongSeen = false
 export function __resetHeartbeatForTests(): void {
   serverPongSeen = false
 }
+
+/**
+ * AQU-1836: the heartbeat frame is a byte-stable constant so the project DO
+ * can register it with `setWebSocketAutoResponse` and the Cloudflare runtime
+ * can answer it without waking a hibernating Durable Object — an exact string
+ * match, so a per-ping `ts` (what this used to send) can never match. Nothing
+ * read that echo anyway: a pong only proves the server answers pings
+ * (`serverPongSeen`), and liveness is tracked from any received frame.
+ *
+ * Keep in sync with AUTO_RESPONSE_PING_FRAME in
+ * `sync-worker/src/project-do-hibernation.ts`.
+ */
+const PING_FRAME = JSON.stringify({ t: "ping" } satisfies ProjectWsClientMessage)
 
 /** Cheap pre-check before a JSON.parse: `pong` frames are tiny. */
 function isPongFrame(raw: string): boolean {
@@ -433,6 +514,16 @@ export function newConnId(): string {
  * which settles the pair after one round.
  */
 export const CONNECTION_SUPERSEDED_CLOSE_CODE = 4409
+
+/**
+ * AQU-1831: the DO's close code for "this project is already holding its
+ * maximum number of sockets" (sync-worker `project-do.ts`
+ * PROJECT_DO_MAX_CONNECTIONS). The socket opens and closes immediately, which
+ * would otherwise reset the backoff window on every attempt and turn a full
+ * room into a reconnect loop — so this code sends the window straight to its
+ * ceiling instead.
+ */
+export const CONNECTION_LIMIT_CLOSE_CODE = 4429
 
 /** Forget a tab's stored presence key so the next connect mints a fresh one. */
 function rotateTabConnId(key: string): void {
@@ -645,7 +736,7 @@ export function createWsReconciler(
       }
       const sentAt = Date.now()
       try {
-        ws.send(JSON.stringify({ t: "ping", ts: sentAt } satisfies ProjectWsClientMessage))
+        ws.send(PING_FRAME)
       } catch {
         /* a failing send surfaces through onerror/onclose */
       }
@@ -781,6 +872,11 @@ export function createWsReconciler(
       if (closeEvent.code === CONNECTION_SUPERSEDED_CLOSE_CODE && options.connIdStorageKey) {
         rotateTabConnId(options.connIdStorageKey)
       }
+      // AQU-1831: a full room is not a transient failure of this socket — the
+      // DO accepted and immediately closed it, which already reset the window
+      // in onopen. Wait out the longest window rather than retrying in a
+      // second, which is all a turned-away client can usefully do.
+      if (closeEvent.code === CONNECTION_LIMIT_CLOSE_CODE) reconnectWindow = maxBackoff
       safeEmit(() => handlers.onClose?.(closeEvent))
       socket = null
       scheduleReconnect()
@@ -898,7 +994,30 @@ export function parseAppliedEventFrame(
       ? { serverSeq: m.serverSeq }
       : {}),
     ...(rows ? { rows } : {}),
+    ...(m.progressPushed === true ? { progressPushed: true as const } : {}),
   }
+}
+
+/**
+ * AQU-1832: `file.progress.pushed` counts guard. A block missing any field a
+ * consumer reads — or carrying a non-numeric level — drops the WHOLE frame,
+ * never a partial one: a progress object with a plausible shape and one
+ * absent number renders as a percentage that is simply wrong, where a dropped
+ * frame just costs the refetch this push was saving.
+ */
+function parsePushedProgressCounts(raw: unknown): PushedProgressCounts | null {
+  if (!raw || typeof raw !== "object") return null
+  const o = raw as Record<string, unknown>
+  if (
+    typeof o.totalCount !== "number" || !Number.isFinite(o.totalCount) ||
+    typeof o.filledCount !== "number" || !Number.isFinite(o.filledCount) ||
+    typeof o.validatedCount !== "number" || !Number.isFinite(o.validatedCount) ||
+    !Array.isArray(o.validationLevels) ||
+    o.validationLevels.some((n) => typeof n !== "number" || !Number.isFinite(n))
+  ) {
+    return null
+  }
+  return o as unknown as PushedProgressCounts
 }
 
 /**
@@ -934,6 +1053,16 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
     const user = parsePresenceUser(m.user)
     if (!user) return null
     return { t: "presence.diff", user }
+  }
+  if (t === "presence.tier1") {
+    if (!Array.isArray(m.users)) return null
+    const users: PresenceTier1Row[] = []
+    for (const u of m.users) {
+      const row = parsePresenceTier1Row(u)
+      if (!row) return null
+      users.push(row)
+    }
+    return { t: "presence.tier1", users }
   }
   if (t === "presence.left") {
     if (typeof m.userId !== "string") return null
@@ -977,6 +1106,38 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
       || typeof m.fileCreated !== "boolean"
     ) return null
     return { t, project: m.project, file: m.file, fileCreated: m.fileCreated }
+  }
+  if (t === "file.progress.pushed") {
+    if (
+      typeof m.project !== "string"
+      || typeof m.file !== "string"
+      || typeof m.lane !== "string"
+      || typeof m.revision !== "number" || !Number.isFinite(m.revision)
+      || typeof m.validationCount !== "number" || !Number.isFinite(m.validationCount)
+      || typeof m.complete !== "boolean"
+      || !Array.isArray(m.sections)
+    ) return null
+    const counts = parsePushedProgressCounts(m.counts)
+    if (!counts) return null
+    const sections: Array<{ key: string } & PushedProgressCounts> = []
+    for (const raw of m.sections) {
+      const key = (raw as Record<string, unknown> | null)?.key
+      if (typeof key !== "string") return null
+      const sectionCounts = parsePushedProgressCounts(raw)
+      if (!sectionCounts) return null
+      sections.push({ ...sectionCounts, key })
+    }
+    return {
+      t,
+      project: m.project,
+      file: m.file,
+      lane: m.lane,
+      revision: m.revision,
+      validationCount: m.validationCount,
+      complete: m.complete,
+      counts,
+      sections,
+    }
   }
   if (t === "member.removed") {
     // FRO-346: the DO sends this to a removed member's sockets right before
@@ -1183,6 +1344,19 @@ function parsePresenceUser(u: unknown): PresenceUser | null {
     ...(typeof r.viewingCell === "string" ? { viewingCell: r.viewingCell } : {}),
     ...(typeof r.currentFileId === "string" ? { currentFileId: r.currentFileId } : {}),
     ...(r.selection !== undefined ? { selection: r.selection } : {}),
+  }
+}
+
+function parsePresenceTier1Row(u: unknown): PresenceTier1Row | null {
+  if (!u || typeof u !== "object") return null
+  const r = u as Record<string, unknown>
+  if (typeof r.userId !== "string" || typeof r.ts !== "number" || !Number.isFinite(r.ts)) return null
+  return {
+    connId: typeof r.connId === "string" ? r.connId : r.userId,
+    userId: r.userId,
+    ts: r.ts,
+    ...(typeof r.currentFileId === "string" ? { currentFileId: r.currentFileId } : {}),
+    ...(typeof r.focusedCell === "string" ? { focusedCell: r.focusedCell } : {}),
   }
 }
 

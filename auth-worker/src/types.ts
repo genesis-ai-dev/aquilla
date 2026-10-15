@@ -240,6 +240,13 @@ export interface Env {
   /** Per-run OpenRouter cost cap in whole cents. Default 500 (frames.ts). The
    *  run halts gracefully with a budget.exhausted frame at this ceiling. */
   AGENT_RUN_COST_CAP_CENTS?: string
+  /** Per-run Autopilot driver (src/contextual-run-do.ts) — AQU-1845. One
+   *  object per run; its alarm drives the run's waves and re-arms itself, so a
+   *  run outlives the request that started it instead of dying with that
+   *  request's `waitUntil` budget and waiting for the 5-minute cron. Optional:
+   *  where it is unbound (vitest route suites, an environment deployed before
+   *  the DO migration) routes/contextual.ts falls back to the in-request loop. */
+  CONTEXTUAL_RUN_DRIVER?: DurableObjectNamespace
   /** Spans a project-wide autopilot start may drive at once. Lower it for a
    *  self-hosted upstream with few slots (see routes/contextual.ts). */
   CONTEXTUAL_MAX_CONCURRENCY?: string
@@ -287,6 +294,12 @@ export interface Env {
   //   Default (unset / "false"): LOG-ONLY mode — over-budget requests are logged
   //   but allowed through. Flip to "true" after sizing thresholds.
   AI_BUDGET_ENFORCE?: string
+  // AI_DAILY_SPEND_CEILING_USD: platform-wide daily spend ceiling in US dollars,
+  //   checked before every paid AI call (db/shared/ai-spend-ceiling.ts, AQU-1869).
+  //   Unlike the controls above this is NOT behind an enforce flag — it is the
+  //   floor that keeps the shared vendor keys solvent. Unset → $500/day. "0"
+  //   blocks all paid AI; "off"/"none"/"unlimited" switches the ceiling off.
+  AI_DAILY_SPEND_CEILING_USD?: string
 
   // ── Bible Aquifer reference data (bibletranslation.org) ──────────────────
   // Server-side proxy + agent integration of our scholarly reference API,

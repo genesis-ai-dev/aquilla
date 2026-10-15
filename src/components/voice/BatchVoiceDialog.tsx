@@ -35,6 +35,8 @@ import { formatCredits } from "@/lib/credits"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { CellData } from "@/hooks/useCells"
+import { useOnline } from "@/hooks/useOnline"
+import { useConnectivity } from "@/lib/offline/connectivity"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 
@@ -126,6 +128,11 @@ export function BatchVoiceDialog({
     [cells, existing, remainingWords, wordsPerCredit],
   )
 
+  // Every batch clip is saved to the server, so nothing here can run offline.
+  const browserOnline = useOnline()
+  const backendReachable = useConnectivity()
+  const offline = !browserOnline || backendReachable === false
+
   const nameOf = (cellId: string): string => {
     const cell = cells.find((c) => c.id === cellId)
     return cell ? nameCell(cell) : ""
@@ -137,7 +144,7 @@ export function BatchVoiceDialog({
   })).filter((g) => g.ids.length > 0)
 
   const onGenerate = async () => {
-    if (plan.targets.length === 0 || starting) return
+    if (plan.targets.length === 0 || starting || offline) return
     setStarting(true)
     // Close first: the shared banner owns progress from here, and leaving a
     // modal over the editor would hide the very lines filling in behind it.
@@ -257,10 +264,15 @@ export function BatchVoiceDialog({
           </section>
         </DialogBody>
         <DialogFooter>
+          {offline && (
+            <p role="status" data-testid="batch-voice-offline" className="me-auto text-xs text-muted-foreground">
+              {t("audio.batchVoice.offline")}
+            </p>
+          )}
           <Button type="button" variant="ghost" onClick={onClose} disabled={starting}>
             {t("common.cancel")}
           </Button>
-          <Button type="button" onClick={onGenerate} disabled={starting || plan.targets.length === 0}>
+          <Button type="button" onClick={onGenerate} disabled={starting || offline || plan.targets.length === 0}>
             {starting ? <Spinner className="me-1 size-3.5" /> : <Sparkles className="me-1 h-3.5 w-3.5" />}
             {t("audio.batchVoice.generate", { count: plan.targets.length, voice: voiceName })}
           </Button>

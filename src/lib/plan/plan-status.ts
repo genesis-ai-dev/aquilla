@@ -184,10 +184,17 @@ export function planUnitExpectsAudio(
  * dubbing is planned before the first take exists; a whole-Bible audio import
  * has no such declaration, so it still announces itself by being recorded.
  * Inventing an expectation from `fileKind` would guess.
+ *
+ * AQU-1954 closes the rest of that gap with a declaration: `recordsAudio`, the
+ * "Records audio" switch on the plan's language (Project settings →
+ * Languages, off unless someone turns it on). On, every file is expected to
+ * carry audio in that language from day one, so a book whose file nobody has
+ * recorded yet is short by its takes instead of reading Nearly complete on its
+ * text alone. Off, the evidence above decides.
  */
-export function audioFileIds(units: readonly PlanUnit[]): ReadonlySet<string> {
+export function audioFileIds(units: readonly PlanUnit[], recordsAudio = false): ReadonlySet<string> {
   const ids = new Set<string>()
-  for (const u of units) if (planUnitExpectsAudio(u)) ids.add(u.fileId)
+  for (const u of units) if (recordsAudio || planUnitExpectsAudio(u)) ids.add(u.fileId)
   return ids
 }
 
@@ -234,6 +241,10 @@ export function planUnitExpectsText(
  *
  * The first target cell anyone writes puts the file back in the set and its
  * text shortfall reappears, which is correct: the work became text work.
+ *
+ * Asks the EVIDENCE, never the language's `recordsAudio` switch (AQU-1954): the
+ * switch says audio is expected, not that text is not, and passing it here
+ * would call every untouched file of a language that records audio audio-only.
  */
 export function textFileIds(units: readonly PlanUnit[]): ReadonlySet<string> {
   const audioFiles = audioFileIds(units)
@@ -655,8 +666,10 @@ export interface PlanSummary {
  * numbers above the board quietly shrink. `plan-status.test.ts` asserts the
  * buckets sum to the unit count; keep that test.
  */
-export function planSummary(units: readonly PlanUnit[], now: number): PlanSummary {
-  const audioFiles = audioFileIds(units)
+export function planSummary(units: readonly PlanUnit[], now: number, recordsAudio = false): PlanSummary {
+  // AQU-1954: the strip counts the groups the board draws, so it follows the
+  // language's "Records audio" switch exactly as they do.
+  const audioFiles = audioFileIds(units, recordsAudio)
   const textFiles = textFileIds(units)
   let done = 0
   let overdue = 0
@@ -740,9 +753,13 @@ export function filterPlanUnits(units: readonly PlanUnit[], filter: PlanFilter):
  * disagreed, a project whose cue sheets were imported before anyone started
  * recording would have every row short by its whole cue count with no audio
  * bar anywhere to say why.
+ *
+ * AQU-1954: same agreement with the language's `recordsAudio` switch — on, every
+ * file is an audio file, so the bars are drawn before the first take exists.
+ * Rows still draw their bar only when their own file is in `audioFileIds`.
  */
-export function planHasAudio(units: readonly PlanUnit[]): boolean {
-  return units.some(planUnitExpectsAudio)
+export function planHasAudio(units: readonly PlanUnit[], recordsAudio = false): boolean {
+  return recordsAudio ? units.length > 0 : units.some(planUnitExpectsAudio)
 }
 
 /**

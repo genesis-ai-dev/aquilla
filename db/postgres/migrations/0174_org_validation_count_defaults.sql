@@ -1,4 +1,4 @@
--- 0161_org_validation_count_defaults.sql — AQU-1771 settings projections
+-- 0174_org_validation_count_defaults.sql — AQU-1771 settings projections
 --
 -- Two sets of STORED generated columns for AQU-1771, both so the settings
 -- blob (several MB on some projects) is never parsed on a read path. Same

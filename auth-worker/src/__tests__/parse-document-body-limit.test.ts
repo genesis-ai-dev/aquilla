@@ -15,12 +15,26 @@ import { describe, it, expect, vi } from "vitest"
 import { zipSync, strToU8 } from "fflate"
 
 vi.mock("../middleware/auth", () => ({
-  authMiddleware: async (_c: unknown, next: () => Promise<void>) => {
+  authMiddleware: async (
+    c: { set: (k: string, v: unknown) => void },
+    next: () => Promise<void>,
+  ) => {
+    c.set("user", { id: 1 })
     await next()
   },
 }))
 
-const parseDocument = (await import("../routes/parse-document")).default
+vi.mock("../../../db/shared/rate-limit", () => ({
+  enforceRateLimit: async () => ({ allowed: true, hits: 1, limit: 1, retryAfterSeconds: 0, degraded: false }),
+  userRateLimitIdentifier: (id: number) => `user:${id}`,
+}))
+
+const parseDocumentApp = (await import("../routes/parse-document")).default
+// The route reads c.env.AQUILLA_PG for the (mocked) rate limiter.
+const parseDocument = {
+  request: (path: string, init?: RequestInit) =>
+    parseDocumentApp.request(path, init, { AQUILLA_PG: {} }),
+}
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024
 const MAX_UPLOAD_BYTES = MAX_FILE_BYTES + 16 * 1024

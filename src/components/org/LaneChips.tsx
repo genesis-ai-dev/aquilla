@@ -1,14 +1,17 @@
 // AQU-538 §3.2 — compact per-lane chips for an OrgHome project row.
 //
 // Each chip = lane tag (the '' lane shows the project's default target
-// language, rendered first) + a mini translated-progress bar + the translated
-// percentage. Visible chips are capped (default 3); the rest collapse into a
-// "+N" affordance that expands the row's per-lane detail (when interactive).
+// language, rendered first) + a mini two-part progress bar (validated, then
+// translated; AQU-1764) + the translated percentage. Visible chips are capped
+// (default 3); the rest collapse into a "+N" affordance that expands the row's
+// per-lane detail (when interactive).
 //
 // A single-lane project renders exactly one chip — visual parity with the
 // old source→target column (no regression).
 
-import { laneTranslatedPct, type PortfolioLane } from "@/lib/frontier/portfolio"
+import { laneTranslatedPct, laneValidatedPct, type PortfolioLane } from "@/lib/frontier/portfolio"
+import { textProgressSegments } from "@/lib/progress/progress-palette"
+import { ProgressSplitBar } from "@/components/progress/ProgressSplitBar"
 import { cn } from "@/lib/utils"
 import { laneChipLabel, safePct } from "./project-lanes"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -56,9 +59,19 @@ function LaneChip({
         aria-label={t("org.laneChips.ariaLabel", { label, pct: pctPlain })}
       >
         <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
-        <span className="h-1.5 w-8 shrink-0 overflow-hidden rounded-full bg-muted" aria-hidden>
-          <span className="block h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
-        </span>
+        {/* AQU-1764: the shared two-part bar, validated then translated but
+            not validated, where this was one primary-blue fill for
+            translated. It ends where the printed percentage says. A lane
+            carries no AI-draft count, so there is no striped part. */}
+        <ProgressSplitBar
+          segments={textProgressSegments({
+            validated: safePct(laneValidatedPct(lane)),
+            translated: pct,
+            total: 100,
+          })}
+          height={6}
+          className="w-8 shrink-0"
+        />
         <span className="shrink-0 tabular-nums text-muted-foreground">{pctDisplay}</span>
       </span>
     </AppTooltip>

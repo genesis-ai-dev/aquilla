@@ -10,6 +10,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, renderHook } from "@testing-library/react"
 import { deriveSyncStatus, useFileSync, type SyncSignals } from "./useFileSync"
 
+let backendReachable: boolean | null = null
+vi.mock("@/lib/offline/connectivity", () => ({ useConnectivity: () => backendReachable }))
+
 const healthy: SyncSignals = {
   enabled: true,
   online: true,
@@ -103,6 +106,23 @@ describe("useFileSync", () => {
       vi.advanceTimersByTime(1000)
     })
     expect(result.current.status).toBe("reconnecting")
+  })
+
+  // Desktop with Wi-Fi off: navigator.onLine can stay true and the socket
+  // may not have closed yet, but the Rust probe knows the backend is gone.
+  // The pill must not keep saying "Live".
+  it("is offline when the desktop probe says the backend is unreachable, even with an open socket", () => {
+    backendReachable = false
+    try {
+      const { result } = renderHook(() => useFileSync({ ...base, reconciler: { isConnected: () => true } }))
+      act(() => {
+        vi.advanceTimersByTime(1000)
+      })
+      expect(result.current.status).toBe("offline")
+      expect(result.current.connected).toBe(false)
+    } finally {
+      backendReachable = null
+    }
   })
 
   it("treats a missing reconciler as a closed socket", () => {

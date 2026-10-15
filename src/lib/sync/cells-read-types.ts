@@ -4,10 +4,10 @@
 //   sync-worker/src/events/files-read-route.ts
 //   sync-worker/src/events/cells-read-route.ts
 //
-// These will move into `packages/data-model` in Phase 3 (one canonical
-// definition shared by every Worker + the web client). Until then we keep
-// them local — Phase 2's hook migration only depends on the surface
-// described here, not on its physical location.
+// Kept hand-authored here rather than shared: the `packages/` shared-libs
+// layout Phase 3 would have moved them into was abandoned, and the SPA's
+// tsconfig covers `src` only, so it cannot import the worker's own types.
+// Update both sides when the response shape changes.
 
 import type { AiDraftProvenance } from "./outbox-types"
 

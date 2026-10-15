@@ -6,6 +6,7 @@ import { ProjectOverview, deriveProjectStatus } from "./ProjectOverview"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { ROLE } from "@/lib/frontier/roles"
 import { fmtDeadlineDate } from "@/lib/format-date"
+import { PROGRESS_BG } from "@/lib/progress/progress-palette"
 
 // Keep the overview suite's project-member reads local.
 vi.mock("@/lib/frontier/members", async (importActual) => ({
@@ -711,6 +712,27 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     expect(screen.queryByText("Audio Validated")).not.toBeInTheDocument()
   })
 
+  it("AQU-1954: a project that records audio shows its audio at 0% before the first take", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "John", totalCells: 100, filledCells: 80, validatedCells: 50,
+      aiDraftedCells: 0,
+      audioTotalCells: 100, recordsAudio: true,
+      audioCells: 0,
+      validatedAudioCells: 0,
+      recordedMs: 0, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null,
+    }])
+    renderOverview()
+
+    await waitFor(() => expect(screen.getAllByText("Has audio").length).toBeGreaterThan(0))
+  })
+
   it("audio-only project: shows Has Audio + a real Audio Validated percentage", async () => {
     fetchSyncToken.mockResolvedValue({ token: "tok" })
     fetchProjectFiles.mockResolvedValue([])
@@ -746,8 +768,10 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     // portfolio), so the tile shows a real number.
     // AQU-1093: that number is 15 of 100 CELLS = 15%, not 15 of 60 takes = 25%
     // — the tile and the plan board's audio bar must report the same share.
-    expect(screen.getByText("Audio Validated")).toBeInTheDocument()
-    expect(screen.getByText("15%")).toBeInTheDocument()
+    // AQU-1764 gave the measure a bar of its own, so the tile and its bar
+    // both say it.
+    expect(screen.getAllByText("Audio Validated")).toHaveLength(2)
+    expect(screen.getAllByText("15%")).toHaveLength(2)
     expect(screen.queryByText("N/A")).not.toBeInTheDocument()
   })
 
@@ -1028,6 +1052,15 @@ describe("ProjectOverview PM assignment", () => {
     expect(within(meta).queryByRole("button", { name: "Change" })).not.toBeInTheDocument()
     expect(within(meta).queryByRole("button", { name: "Clear" })).not.toBeInTheDocument()
 
+    // AQU-1950: the note sits behind a circled-i beside the heading, shut
+    // until it is clicked.
+    const pmInfo = screen.getByRole("button", { name: "What naming a project manager does" })
+    expect(pmInfo).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getByTestId("overview-pm-lead-note")).toHaveAttribute("data-state", "closed")
+    expect(screen.getByTestId("overview-pm-lead-note")).toHaveAttribute("aria-hidden", "true")
+    fireEvent.click(pmInfo)
+    expect(pmInfo).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByTestId("overview-pm-lead-note")).toHaveAttribute("data-state", "open")
     expect(screen.getByTestId("overview-pm-lead-note")).toHaveTextContent(
       /adds them as a Project lead/,
     )
@@ -1365,6 +1398,58 @@ describe("ProjectOverview AI-drafted segment (AQU-292)", () => {
   })
 })
 
+// ── AQU-1764: the shared progress palette on the Progress card ─────────────
+
+describe("ProjectOverview Progress card colours (AQU-1764)", () => {
+  // Sam, 2026-10-13 ("Layout A, softest"): one single-colour bar per measure,
+  // each in its measure's tone from the shared palette, and Audio validated
+  // gets the bar it never had. The tiles' numbers lose their four colours;
+  // the colour moves to a swatch before each label.
+  it("draws one bar per measure in its own tone, Audio validated included, and a matching swatch on each tile", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "John", totalCells: 100, filledCells: 80, validatedCells: 50,
+      aiDraftedCells: 10, audioCells: 60, validatedAudioCells: 15,
+      recordedMs: 90000, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null,
+    }])
+    renderOverview()
+
+    const card = await screen.findByTestId("progress-card")
+    await waitFor(() => expect(within(card).getAllByTestId(/^stat-bar-/)).toHaveLength(5))
+    const bars = within(card).getAllByTestId(/^stat-bar-/).map((row) => {
+      const fill = row.querySelector<HTMLElement>("[style]")!
+      return [row.getAttribute("data-testid"), fill.style.width, fill.className.includes(
+        PROGRESS_BG[row.getAttribute("data-testid")!.slice("stat-bar-".length) as keyof typeof PROGRESS_BG],
+      )]
+    })
+    expect(bars).toEqual([
+      ["stat-bar-textTranslated", "80%", true],
+      ["stat-bar-textAi", "10%", true],
+      ["stat-bar-textValidated", "50%", true],
+      ["stat-bar-audioRecorded", "60%", true],
+      ["stat-bar-audioValidated", "15%", true],
+    ])
+    expect(within(card).getByTestId("stat-bar-audioValidated")).toHaveTextContent("Audio Validated15%15/100 cells")
+
+    const swatches = [...card.querySelectorAll<HTMLElement>("[data-progress-swatch]")]
+    expect(swatches.map((s) => s.dataset.progressSwatch)).toEqual([
+      "textTranslated", "textAi", "textValidated", "audioRecorded", "audioValidated",
+    ])
+    // Each tile's number is in the text colour, not a colour of its own.
+    for (const swatch of swatches) {
+      const number = swatch.closest("p")!.previousElementSibling!
+      expect(number.className).toContain("text-foreground")
+      expect(number.className).not.toMatch(/amber|violet|emerald|sky/)
+    }
+  })
+})
+
 // ── AQU-486: per-section visibility chrome ──────────────────────────────────
 
 describe("ProjectOverview Members card (AQU-1171)", () => {
@@ -1643,7 +1728,8 @@ describe("ProjectOverview Members card (AQU-1171)", () => {
     const settings = projectSettingsMock({ rosterOrg: ROLE.MAINTAINER })
     settings.patch.mockResolvedValue({
       kind: "error",
-      message: JSON.stringify({ error: "rosterViewMinRole 400 is below the organization's setting (600)." }),
+      // patchProjectSettings hands over the body's `error`, not the raw JSON.
+      message: "rosterViewMinRole 400 is below the organization's setting (600).",
     } as never)
     await openMembersPicker(settings)
 
@@ -2258,6 +2344,13 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     expect(defaultRow).toHaveTextContent("50%")
     expect(esRow).toHaveTextContent("20%")
     expect(esRow).toHaveTextContent("8%")
+    // AQU-1764: ONE two-part bar per lane (it was an amber bar and an emerald
+    // one): validated, then translated but not validated.
+    const parts = (row: HTMLElement) => [...row.querySelectorAll<HTMLElement>("[data-progress-tone]")]
+      .map((part) => `${part.dataset.progressTone} ${part.style.width}`)
+    expect(defaultRow.querySelectorAll('[data-slot="progress-split-bar"]')).toHaveLength(1)
+    expect(parts(defaultRow)).toEqual(["textValidated 50%", "textTranslated 30%"])
+    expect(parts(esRow)).toEqual(["textValidated 8%", "textTranslated 12%"])
   })
 
   it("AQU-1458: tucks archived lanes into a collapsed group and keeps a one-active-lane project visible", async () => {
@@ -2287,6 +2380,12 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     expect(sw).toHaveTextContent("Swahili")
     expect(sw).toHaveTextContent("Archived")
     expect(sw).toHaveTextContent("20%")
+    // AQU-1764: one dimmed two-part bar, and the validated figure names itself
+    // since an archived row has no column headings.
+    expect(sw).toHaveTextContent("8% validated")
+    const archivedBars = sw.querySelectorAll('[data-slot="progress-split-bar"]')
+    expect(archivedBars).toHaveLength(1)
+    expect(archivedBars[0].className).toContain("opacity-70")
     expect(sw.compareDocumentPosition(fr) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(within(sw).queryByTestId("overview-lane-actions-sw")).not.toBeInTheDocument()
 
@@ -2334,6 +2433,106 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     // Back to All restores the cross-lane figures.
     fireEvent.click(screen.getByRole("tab", { name: "All" }))
     await waitFor(() => expect(statTile("Translated")).toHaveTextContent("50%"))
+  })
+
+  it("AQU-1951: a language tab shows that language's recordings, over the project's audio cells", async () => {
+    // Each take belongs to a language (AQU-1591), so audio follows the tab the
+    // way text does. AI drafts still have no per-language count and grey out.
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject({
+      aiDraftedCells: 20, audioCells: 60, validatedAudioCells: 16,
+      lanes: [
+        { ...TWO_LANES[0], audioCells: 50, validatedAudioCells: 12 },
+        { ...TWO_LANES[1], audioCells: 10, validatedAudioCells: 4 },
+      ],
+    })])
+    renderOverview()
+    await screen.findByTestId("lane-filter-tabs")
+    const card = screen.getByTestId("progress-card")
+    const bars = () => within(card).getAllByTestId(/^stat-bar-/).map((b) => b.getAttribute("data-testid"))
+
+    // All: the project's 60 and 16 of 200 cells.
+    expect(statTile("Has audio")).toHaveTextContent("30%")
+    expect(statTile("Audio Validated")).toHaveTextContent("8%")
+
+    // es: its own 10 and 4, still of the project's 200 cells.
+    fireEvent.click(screen.getByRole("tab", { name: "es" }))
+    await waitFor(() => expect(statTile("Has audio")).toHaveTextContent("5%"))
+    expect(statTile("Audio Validated")).toHaveTextContent("2%")
+    for (const label of ["Has audio", "Audio Validated"]) {
+      expect(statTile(label).firstElementChild!.className, label).not.toContain("text-muted-foreground/60")
+    }
+    expect(statTile("AI Drafted").firstElementChild!.className).toContain("text-muted-foreground/60")
+    expect(bars()).toEqual([
+      "stat-bar-textTranslated", "stat-bar-textValidated", "stat-bar-audioRecorded", "stat-bar-audioValidated",
+    ])
+    expect(within(card).getByTestId("stat-bar-audioRecorded")).toHaveTextContent("10/200")
+    expect(within(card).getByTestId("stat-bar-audioValidated")).toHaveTextContent("4/200")
+  })
+
+  it("AQU-1954: a language tab measures audio against that language's own audio total", async () => {
+    // The server sends each language what it owes: every file when its
+    // "Records audio" switch is on, else the files it has recorded in.
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject({
+      audioCells: 60, validatedAudioCells: 16, audioTotalCells: 300,
+      lanes: [
+        { ...TWO_LANES[0], audioCells: 50, validatedAudioCells: 12, audioTotalCells: 100 },
+        { ...TWO_LANES[1], audioCells: 10, validatedAudioCells: 4, audioTotalCells: 200, recordsAudio: true },
+      ],
+    })])
+    renderOverview()
+    await screen.findByTestId("lane-filter-tabs")
+    const card = screen.getByTestId("progress-card")
+    // All: both languages' 60 over both languages' 300.
+    expect(statTile("Has audio")).toHaveTextContent("20%")
+    fireEvent.click(screen.getByRole("tab", { name: "es" }))
+    await waitFor(() => expect(statTile("Has audio")).toHaveTextContent("5%"))
+    expect(within(card).getByTestId("stat-bar-audioRecorded")).toHaveTextContent("10/200")
+    expect(within(card).getByTestId("stat-bar-audioValidated")).toHaveTextContent("4/200")
+  })
+
+  it("AQU-1954: a language that is off and has recorded nothing greys its audio and says how to turn it on", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject({
+      audioCells: 50, validatedAudioCells: 12, audioTotalCells: 100,
+      lanes: [
+        { ...TWO_LANES[0], audioCells: 50, validatedAudioCells: 12, audioTotalCells: 100 },
+        { ...TWO_LANES[1], audioCells: 0, validatedAudioCells: 0, audioTotalCells: 0 },
+      ],
+    })])
+    renderOverview()
+    await screen.findByTestId("lane-filter-tabs")
+    const card = screen.getByTestId("progress-card")
+    const bars = () => within(card).getAllByTestId(/^stat-bar-/).map((b) => b.getAttribute("data-testid"))
+    fireEvent.click(screen.getByRole("tab", { name: "es" }))
+    await waitFor(() => expect(bars()).not.toContain("stat-bar-audioRecorded"))
+    expect(bars()).not.toContain("stat-bar-audioValidated")
+    for (const label of ["Has audio", "Audio Validated"]) {
+      expect(statTile(label).firstElementChild!.className, label).toContain("text-muted-foreground/60")
+    }
+  })
+
+  it("greys the cross-language tiles and drops their bars on a language tab when the server sends no lane audio (AQU-1764)", async () => {
+    // AI drafts have no per-language breakdown, and an older server sends no
+    // lane audio, so with a language tab chosen those tiles grey out (swatch
+    // faded with the number) and their bars are not drawn at all.
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject({ aiDraftedCells: 20, audioCells: 60, validatedAudioCells: 15 })])
+    renderOverview()
+    await screen.findByTestId("lane-filter-tabs")
+    const card = screen.getByTestId("progress-card")
+    const bars = () => within(card).getAllByTestId(/^stat-bar-/).map((b) => b.getAttribute("data-testid"))
+    expect(bars()).toHaveLength(5)
+
+    fireEvent.click(screen.getByRole("tab", { name: "es" }))
+    await waitFor(() => expect(bars()).toEqual(["stat-bar-textTranslated", "stat-bar-textValidated"]))
+    for (const label of ["AI Drafted", "Has audio", "Audio Validated"]) {
+      const tile = statTile(label)
+      expect(tile.firstElementChild!.className, label).toContain("text-muted-foreground/60")
+      expect(tile.querySelector("[data-progress-swatch]")!.className, label).toContain("opacity-40")
+    }
+    expect(statTile("Translated").firstElementChild!.className).toContain("text-foreground")
   })
 
   it("AQU-1566: hidden timeline files are neither counted nor offered for assignment", async () => {
@@ -2455,6 +2654,42 @@ describe("plan board on the overview", () => {
     // The card it replaced is gone for good.
     expect(screen.queryByTestId("file-row")).toBeNull()
     expect(screen.queryByTestId("file-breakdown-header")).toBeNull()
+  })
+
+  it("reads the plan in the language the editor opens when the project has no unnamed one", async () => {
+    // AQU-1594: a new project's first language is tagged with its own name and
+    // there is no '' lane. Reading '' found no lane at all, so a file with four
+    // takes in Spanish showed 0% and no audio bar. An archived lane in first
+    // position is passed over, as the editor passes over it.
+    const lane = (over: Record<string, unknown>) => ({
+      language: null, name: null, langCode: null, archivedAt: null, ...over,
+    })
+    useProject.mockReturnValue({
+      project: projectRecord({
+        level: 600,
+        lanes: [
+          lane({ id: "aaaa0001", role: "source", legacyTag: null, position: 0 }),
+          lane({ id: "aaaa0002", role: "target", language: "French", legacyTag: "French", position: 0, archivedAt: "2026-10-01" }),
+          lane({ id: "aaaa0003", role: "target", language: "Spanish", legacyTag: "Spanish", position: 1 }),
+        ],
+      } as Partial<ProjectRecord> & { level: number }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "John", totalCells: 5, filledCells: 0, validatedCells: 0,
+      aiDraftedCells: 0, audioCells: 4, validatedAudioCells: 0, recordedMs: 16000,
+      lastEditAt: null, deadlineAt: null, sourceLanguage: null, targetLanguage: null,
+    }])
+    fetchProjectPlan.mockImplementation((_id: string, _tok: string, laneTag: string) => Promise.resolve({
+      projectId: "p1", lane: laneTag, validationCount: 1, revision: 1,
+      units: [planUnit({ fileName: "Market scene.vtt", totalCount: 5, filledCount: 0, audioCount: laneTag === "Spanish" ? 4 : 0 })],
+    }))
+    renderOverview()
+
+    const row = await screen.findByTestId("plan-row-f1-")
+    await waitFor(() => expect(within(row).getByText("AUD")).toBeInTheDocument())
+    expect(fetchProjectPlan.mock.calls.map((c) => c[2])).not.toContain("")
+    expect(fetchProjectPlan.mock.calls.map((c) => c[2])).toContain("Spanish")
   })
 
   it("summarises how many units are done without naming the unit", async () => {

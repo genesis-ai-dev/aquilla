@@ -32,6 +32,7 @@
 // isChainArbitrated is shared by every arbitration site.
 
 import { isChainArbitrated, isChainMutatingKind, laneOfEvent } from './event-projection'
+import type { SnapshotCellRow } from './projection-snapshot'
 import { eventQualifiedParentKey } from './chain-claims'
 import { resolveEventLane } from '../../../src/lib/lanes/event-lane'
 import type { LaneIdentity } from '../../../src/lib/lanes/read-wall'
@@ -80,14 +81,22 @@ export interface ChainClaimRow {
  * seq-order fallback. Nothing prunes `chain_claims` today, so this only guards
  * a log that arrived without its claims (an event-level migration, a project
  * copy) — exactly the case that must keep the old behaviour.
+ *
+ * AQU-1827: pass `null` when the caller has ALREADY established that every
+ * row's winner is in the log. The full-project rebuild does, with an EXISTS
+ * against `events` in the same SELECT, because materialising a Set of every
+ * event id defeats the point of streaming the log in pages (a million-event
+ * project's ids alone are tens of megabytes in the isolate). Callers replaying
+ * a bounded slice of a log — the mirror fold, which cuts at `untilSeq` — still
+ * pass the slice's ids, and a claim above the cut is dropped as before.
  */
 export function buildClaimWinners(
   rows: readonly ChainClaimRow[],
-  presentEventIds: ReadonlySet<string>,
+  presentEventIds: ReadonlySet<string> | null,
 ): Map<string, string> {
   const winners = new Map<string, string>()
   for (const r of rows) {
-    if (!presentEventIds.has(r.event_id)) continue
+    if (presentEventIds !== null && !presentEventIds.has(r.event_id)) continue
     winners.set(`${r.file_id}\0${r.cell_id}\0${r.parent_key}`, r.event_id)
   }
   return winners
@@ -118,6 +127,51 @@ export class ChainHeadReplay {
   ) {
     this.lanes = lanes
     this.claimWinners = claimWinners
+  }
+
+  /**
+   * AQU-1833: seed the head state from a projection snapshot's `cells` rows, so
+   * a rebuild can skip the events the snapshot already reflects and still
+   * compare-and-swap the tail against the right heads.
+   *
+   * `cells.event_id` IS the chain head for that row's (file, cell, side, lane)
+   * — the projection advances it exactly when `apply` below moves `headAt`,
+   * and the non-chain-mutating kinds (`source.cell.reanchor`,
+   * `source.cell.visibility.set`) move neither. A deleted cell has no row, and
+   * `apply` clears the head on a delete, so absence agrees too. `upstream_seq`
+   * is the mirror apply-guard the same row carries.
+   *
+   * Returns false when a target row's lane cannot be resolved to the tag the
+   * head key is built from — which means the snapshot and the project's lane
+   * rows disagree and the caller must replay in full rather than guess.
+   */
+  seedFromCellRows(rows: Iterable<SnapshotCellRow>): boolean {
+    // Resolved in full BEFORE anything is written, so a snapshot this replay
+    // refuses leaves the head state exactly as it found it and the caller can
+    // fall back to a full replay without having to undo a partial seed.
+    const heads: Array<[string, string]> = []
+    const mirrorSeqs: Array<[string, number]> = []
+    for (const row of rows) {
+      const side = row.side === 'source' ? 'source' : 'target'
+      let lane = ''
+      if (side === 'target') {
+        // Without the project's lane rows there is no way to turn the row's
+        // `lane_id` into the tag the head key uses, and a guess would key the
+        // tail's commits to the wrong lane. Refuse instead.
+        const resolved = this.lanes?.find((candidate) => candidate.id === row.lane_id)
+        if (!resolved) return false
+        lane = resolved.legacyTag ?? ''
+      }
+      const key = `${row.file_id}\0${row.cell_id}\0${side}\0${lane}`
+      heads.push([key, row.event_id])
+      if (row.upstream_seq !== null && row.upstream_seq !== undefined) {
+        const seq = Number(row.upstream_seq)
+        if (Number.isFinite(seq)) mirrorSeqs.push([key, seq])
+      }
+    }
+    for (const [key, eventId] of heads) this.headAt.set(key, eventId)
+    for (const [key, seq] of mirrorSeqs) this.mirrorSeqAt.set(key, seq)
+    return true
   }
 
   /**

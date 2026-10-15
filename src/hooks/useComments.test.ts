@@ -12,8 +12,17 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { renderHook, act, waitFor } from "@testing-library/react"
+import "fake-indexeddb/auto"
 import { useComments } from "./useComments"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
+import {
+  enqueueOutboxEvent,
+  quarantineOutboxEvents,
+  resetOutboxConnectionForTests,
+  stampOutboxError,
+} from "@/lib/sync/outbox"
+import type { CqrsRawEvent } from "@/lib/sync/outbox-types"
+import { CQRS_SCHEMA_VERSION } from "@/lib/sync/outbox-types"
 
 // ── Module mocks ──────────────────────────────────────────────────────────────
 
@@ -340,5 +349,111 @@ describe("useComments — open file first, then the rest of the project", () => 
     expect(result.current.comments).toHaveLength(1)
     expect(result.current.isError).toBe(false)
     expect(result.current.counts).toBeNull()
+  })
+})
+
+// ── AQU-1957: a refused comment comes back out of the thread ─────────────────
+
+describe("useComments — a permanently refused comment is rolled back (AQU-1957)", () => {
+  beforeEach(async () => {
+    await resetOutboxConnectionForTests()
+    await new Promise<void>((resolve) => {
+      const d = indexedDB.deleteDatabase("aquilla-cqrs-outbox")
+      d.onsuccess = () => resolve()
+      d.onerror = () => resolve()
+      d.onblocked = () => resolve()
+    })
+  })
+
+  /** The outbox record the real `enqueueEvent` would have written (it's mocked here). */
+  const makeQueuedCreate = (recordId: string, commentId: string): CqrsRawEvent<"comment.create"> => ({
+    id: recordId,
+    schemaVersion: CQRS_SCHEMA_VERSION,
+    kind: "comment.create",
+    projectId: "proj-1",
+    fileId: "__project__",
+    cellId: undefined,
+    author: "kume",
+    payload: {
+      commentId,
+      scope: { kind: "project" },
+      body: "Needs a footnote here",
+      parentCommentId: null,
+      createdForTranslated: null,
+    },
+    clientTs: Date.now(),
+  })
+
+  it("drops the optimistic comment and reports the reason once the outbox gives up", async () => {
+    // The server never returns this comment — it was refused, so it never landed.
+    mockFetchComments.mockResolvedValue([makeServerComment()])
+
+    const { result } = renderHook(() =>
+      useComments({ projectId: "proj-1", getToken: GET_TOKEN, author: "kume" }),
+    )
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+    let commentId = ""
+    await act(async () => {
+      commentId = await result.current.addComment({
+        scope: { kind: "project" },
+        body: "Needs a footnote here",
+      })
+    })
+    // Pre-refusal: the composer's text is in the thread, optimistically.
+    expect(result.current.comments.map((c) => c.commentId)).toContain(commentId)
+
+    // The flusher posts it and the server refuses on the comment-create floor.
+    await act(async () => {
+      await enqueueOutboxEvent(makeQueuedCreate("rec-1", commentId))
+      await quarantineOutboxEvents(["rec-1"], {
+        status: 403,
+        reason: "role too low for comment.create",
+      })
+    })
+
+    // The thread must stop claiming the comment was posted…
+    await waitFor(() =>
+      expect(result.current.comments.map((c) => c.commentId)).not.toContain(commentId),
+    )
+    // …and the refusal must be reported so the drawer can say why.
+    expect(result.current.refusals).toEqual([
+      {
+        id: "rec-1",
+        commentId,
+        kind: "comment.create",
+        status: 403,
+        reason: "role too low for comment.create",
+      },
+    ])
+    // The server's own comment is untouched.
+    expect(result.current.comments.map((c) => c.commentId)).toEqual(["cmt-server-1"])
+  })
+
+  it("keeps the optimistic comment while the record is only pending", async () => {
+    mockFetchComments.mockResolvedValue([])
+
+    const { result } = renderHook(() =>
+      useComments({ projectId: "proj-1", getToken: GET_TOKEN, author: "kume" }),
+    )
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+    let commentId = ""
+    await act(async () => {
+      commentId = await result.current.addComment({
+        scope: { kind: "project" },
+        body: "Needs a footnote here",
+      })
+    })
+
+    await act(async () => {
+      await enqueueOutboxEvent(makeQueuedCreate("rec-1", commentId))
+      // A network drop, not a refusal: the flusher will try again.
+      await stampOutboxError(["rec-1"], { status: 0, reason: "offline" })
+    })
+
+    await act(async () => { await result.current.refresh() })
+    expect(result.current.refusals).toEqual([])
+    expect(result.current.comments.map((c) => c.commentId)).toEqual([commentId])
   })
 })

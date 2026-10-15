@@ -660,6 +660,11 @@ export const projectSettings = defineNamespace({
     "projectSettings.validation.requiredTextDescription": "Cells need this many distinct validators to count as validated.",
     "projectSettings.validation.requiredAudioLabel": "Required validators (audio)",
     "projectSettings.validation.requiredAudioAppliesNote": "Applies to audio translations, once recordings exist.",
+    // AQU-1771: the count can follow the organization's default or be set here.
+    "projectSettings.validation.orgDefaultOption": "Organization default ({number})",
+    "projectSettings.validation.customOption": "Set for this project",
+    "projectSettings.validation.requiredTextSourceAria": "Text validators: use the organization default or set a number for this project",
+    "projectSettings.validation.requiredAudioSourceAria": "Audio validators: use the organization default or set a number for this project",
     "projectSettings.validation.minRoleLabel": "Minimum validator role",
     "projectSettings.validation.minRoleDescription": "Only users with at least this role can cast a validation vote. Defaults to reviewer.",
     // ── StructuralCellsProjectSection ── AQU-1083
@@ -1360,7 +1365,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.inherit.field.knowledgeDocs": "Knowledge-base documents",
     "projectSettings.inherit.field.workflowPolicy": "Workflow policy",
     "projectSettings.inherit.field.workflowPolicyDetail":
-      "Validation count and role floors, self-validation, autopilot and agent mode, structural-cell counting, and check penalties.",
+      "Who may validate, self-validation, autopilot and agent mode, and check penalties.",
     "projectSettings.inherit.field.livingMemory": "Living-memory notes",
     "projectSettings.inherit.field.smartQuotes": "Smart quotes",
     "projectSettings.inherit.field.systemPrompt": "AI instructions",
@@ -2834,7 +2839,7 @@ export const projectSettings = defineNamespace({
       },
       "projectSettings.inherit.field.workflowPolicy": {
         description:
-          "Checkbox label. Validation counts, role floors, self-validation, autopilot, agent mode, structural-cell counting, and check penalties are copied when this is on.",
+          "Checkbox label. Validation role floors, self-validation, autopilot, agent mode, and check penalties are copied when this is on.",
       },
       "projectSettings.inherit.field.workflowPolicyDetail": {
         description: "Secondary line under the workflow-policy checkbox, listing what that one choice covers.",
@@ -2855,6 +2860,25 @@ export const projectSettings = defineNamespace({
         placeholders: {
           upstream: "The upstream project's name, as its maintainers named it — never translated.",
         },
+      },
+      "projectSettings.validation.orgDefaultOption": {
+        description:
+          "Option in a dropdown beside 'Required validators'. Choosing it means this project uses the number its organization set, shown in brackets.",
+        placeholders: {
+          number: "How many validators the organization's default requires, a number from 1 to 15.",
+        },
+      },
+      "projectSettings.validation.customOption": {
+        description:
+          "Option in the same dropdown. Choosing it lets this project set its own number of required validators, in a box that appears next to it.",
+      },
+      "projectSettings.validation.requiredTextSourceAria": {
+        description:
+          "Screen-reader label for that dropdown on the text-validation row. Not shown on screen.",
+      },
+      "projectSettings.validation.requiredAudioSourceAria": {
+        description:
+          "Screen-reader label for that dropdown on the audio-validation row. Not shown on screen.",
       },
       "projectSettings.inherit.detach": {
         description:

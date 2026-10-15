@@ -29,6 +29,7 @@ import {
   portfolioAttentionReasons,
 } from "../../../../src/lib/frontier/portfolio-metrics"
 import { laneDisplayName } from "../../../../src/lib/lanes/lane-display"
+import { loadEffectiveThreshold } from "../../../../db/shared/validation-threshold"
 
 export interface MondayEntityMetrics {
   completion_pct: number
@@ -233,14 +234,6 @@ function toDeadline(raw: unknown): string | null {
   return match ? match[1]! : null
 }
 
-/** Same clamp as every other reader of these counts (progress read, portfolio): 1–15. */
-const MAX_VALIDATION_LEVELS = 15
-
-function toThreshold(raw: unknown): number {
-  const n = Number(raw)
-  return Number.isFinite(n) && n >= 1 ? Math.min(MAX_VALIDATION_LEVELS, Math.floor(n)) : 1
-}
-
 /** Bucket-wise subtraction, because validatedAtThreshold reads cumulatively. */
 function subtractHistogram(from: Map<number, number>, raw: unknown): void {
   for (const [bucket, amount] of parseHistogram(raw)) {
@@ -273,19 +266,12 @@ export async function computeProjectMetrics(
   // the multi-MB settings blob inline for it); validationCountAudio has no
   // generated column yet — a single-project jsonb extract is acceptable here
   // (the org-portfolio timeout was a fan-out over every project).
-  const settings = await db
-    .prepare(
-      `SELECT validation_count,
-              (settings::jsonb)->>'validationCountAudio' AS validation_count_audio
-         FROM project_settings WHERE project_id = ?`,
-    )
-    .bind(projectId)
-    .first<{ validation_count: string | null; validation_count_audio: string | null }>()
-  const threshold = toThreshold(settings?.validation_count)
-  // AQU-1771: an unset audio count means one vote, as on the dashboards. It
-  // used to fall back to the TEXT count, so a project needing two text votes
-  // reported its audio against two as well.
-  const audioThreshold = toThreshold(settings?.validation_count_audio)
+  // AQU-1771: project → org → 1 for both, the same resolution every other
+  // progress reader uses.
+  const [threshold, audioThreshold] = await Promise.all([
+    loadEffectiveThreshold(db, projectId, "validationCount"),
+    loadEffectiveThreshold(db, projectId, "validationCountAudio"),
+  ])
 
   // AQU-1083: do headings count? The project's answer, else its org's, else
   // yes. Generated columns on both, for the reason stated above about blobs.

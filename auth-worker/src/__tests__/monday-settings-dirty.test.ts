@@ -103,6 +103,18 @@ describe("Monday boards follow settings changes (AQU-1771)", () => {
     expect(await dirtyLinks()).toEqual(["l-inherit", "l-over"])
   })
 
+  it("the org's approvals default marks every board in that org and none in another", async () => {
+    await seed()
+    expect((await patchOrg({ validationCount: 2 })).status).toBe(200)
+    expect(await dirtyLinks()).toEqual(["l-inherit", "l-over"])
+  })
+
+  it("the org's audio approvals default marks them too", async () => {
+    await seed()
+    expect((await patchOrg({ validationCountAudio: 3 })).status).toBe(200)
+    expect(await dirtyLinks()).toEqual(["l-inherit", "l-over"])
+  })
+
   it("an org save that leaves the headings rule alone marks nothing", async () => {
     await seed()
     expect((await patchOrg({ orgTimezone: "UTC" })).status).toBe(200)

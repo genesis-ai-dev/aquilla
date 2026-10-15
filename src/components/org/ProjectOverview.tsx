@@ -1,7 +1,7 @@
 import { ProjectMondayCard } from "./ProjectMondayCard"
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useParams, useNavigate, useLocation, Link } from "react-router-dom"
-import { MoreHorizontal, Download, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil, CloudDownload, CloudOff, HardDriveDownload, Headphones, ChevronDown, ChevronRight } from "lucide-react"
+import { MoreHorizontal, Download, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil, CloudDownload, CloudOff, HardDriveDownload, Headphones, ChevronDown, ChevronRight, Info } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { DateTooltip } from "@/components/ui/date-tooltip"
@@ -97,7 +97,9 @@ import {
   type AssigneeWorkload,
   type UnitAssignment,
 } from "@/lib/sync/assignments"
-import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
+import { useOrgSettings } from "@/hooks/useOrgSettings"
+import { UserError } from "@/lib/errors/user-error"
+import { resolveProjectPolicy } from "@/lib/sync/project-org-policy"
 import { ROLE } from "@/lib/frontier/roles"
 import { canOpenAssignUi } from "@/lib/sync/role-policy"
 import {
@@ -155,8 +157,10 @@ import { buildSourceLoader } from "@/lib/analysis/load-file-sources"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import {
   PROJECT_SETTINGS_UPDATED_EVENT,
+  type PatchOutcome,
   type ProjectSettingsUpdatedDetail,
 } from "@/hooks/useProjectSettings"
+import { toast } from "@/components/ui/toast"
 import { progressPercent, progressPercentOfFraction } from "@/lib/progress/progress-percent"
 
 
@@ -382,6 +386,27 @@ function unitAssignmentsKey(unitId: string, lane: string): string {
 }
 
 
+/**
+ * AQU-1771: why a project visibility change was not saved, or null when it
+ * was. A server refusal (for example a value looser than the organization's)
+ * carries its own explanation, which `patchProjectSettings` has already lifted
+ * out of the `{ error }` body (AQU-1943).
+ */
+function visibilitySaveRefusal(outcome: PatchOutcome, t: ReturnType<typeof useT>): string | null {
+  switch (outcome.kind) {
+    case "ok":
+      return null
+    case "conflict":
+      return t("org.sync.versionConflictError")
+    case "blocked":
+      return outcome.reason === "offline"
+        ? t("org.projectOverview.visibilitySaveOffline")
+        : t("org.projectOverview.visibilitySaveForbidden")
+    case "error":
+      return outcome.message || t("org.projectOverview.visibilitySaveFailed")
+  }
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function ProjectOverview() {
@@ -393,7 +418,7 @@ export function ProjectOverview() {
   // button so it spins + disables instead of sitting idle and re-clickable.
   // `openingOverlay` blocks the rest of the page while the open is in flight.
   const { open: openWorkspace, isPending: openPending, overlay: openingOverlay } = useOpenWorkspace()
-  const { project, status, refresh, pm, roleLevel } = useProject(id)
+  const { project, status, refresh, pm, roleLevel, projectSettings } = useProject(id)
   useNavHistoryTitle(project?.name)
   // AQU-1586: the target lane ROWS — the only place a lane's language is
   // recorded. A lane's `legacy_tag` is its event key and can be the opaque
@@ -500,6 +525,7 @@ export function ProjectOverview() {
   const [pmDialogOpen, setPmDialogOpen] = useState(false)
   const [pmSelection, setPmSelection] = useState<string>("")
   const [workload, setWorkload] = useState<AssigneeWorkload[]>([])
+  const [workloadRefused, setWorkloadRefused] = useState(false)
 
   // AQU-538 §3.3: the lane filter tab selection. `null` = "All" — today's
   // cross-lane behavior, byte-identical (StatTiles read the PortfolioProject
@@ -557,11 +583,16 @@ export function ProjectOverview() {
 
   // AQU-474: project-only invitees (direct project_members grant, no org
   // membership) have `activeOrgId == null` or an org that doesn't include this
-  // project's org. The portfolio endpoint is org-scoped, so fall back to the
-  // project's own (server-verified) orgId when it differs from the active
-  // org — `useProject` already gatekept access, so any orgId it returns is
-  // one this user can legitimately query the portfolio for.
-  const portfolioOrgId = activeOrgId ?? project?.orgId ?? null
+  // project's org. The portfolio endpoint is org-scoped, so use the project's
+  // own (server-verified) orgId — `useProject` already gatekept access, so any
+  // orgId it returns is one this user can legitimately query the portfolio for.
+  //
+  // AQU-1771: the PROJECT's org first, always. The active org came first, so a
+  // viewer whose switcher sat on org A, looking at a project in org B, read
+  // org A's portfolio and org A's visibility floors — and an owner of A saw a
+  // badge that would have written A's. Nothing is read until the project has
+  // resolved, so the wrong org never flashes in first.
+  const portfolioOrgId = project ? (project.orgId ?? activeOrgId ?? null) : null
 
   // AQU-486: per-section visibility chrome. The roster + team-progress floors
   // come from AQU-485's org settings; `projectRoleLevel` (not orgRoleLevel)
@@ -583,14 +614,85 @@ export function ProjectOverview() {
     ?? (activeOrg?.id === portfolioOrgId ? activeOrg.role.level : null)
     ?? null
   const orgSettings = useOrgSettings(portfolioOrgId, orgRoleLevel, projectRoleLevel)
-  const canEditVisibility = canEditRosterProgressFloor(orgRoleLevel)
+  // AQU-1771: the org policy THIS project applies, carried on its own settings
+  // response so a member outside the org gets the org's real values (the org
+  // read above is refused for them). See src/lib/sync/project-org-policy.ts.
+  const carriedOrgPolicy = projectSettings?.orgPolicy
+  const carriedVisibilityFloors = projectSettings?.visibilityFloors
+  const projectSettingsBlob = projectSettings?.settings
+  // The floors are not known until the project's own settings arrive: a
+  // project may be stricter than its org, and only that response says so.
+  const projectSettingsFetched = projectSettings?.hasFetched ?? false
+  const projectPolicy = useMemo(
+    () => resolveProjectPolicy({
+      orgPolicy: carriedOrgPolicy,
+      visibilityFloors: carriedVisibilityFloors,
+      projectSettings: projectSettingsBlob,
+      org: orgSettings,
+      roleLevel: projectRoleLevel,
+      projectSettingsFetched,
+    }),
+    [carriedOrgPolicy, carriedVisibilityFloors, projectSettingsBlob, orgSettings, projectRoleLevel, projectSettingsFetched],
+  )
+  // Primitives, so the memos below depend on values rather than on the
+  // policy object (a new one every render).
+  const policyAllowSelfAssignment = projectPolicy.allowSelfAssignment
+  const policyAssignmentMinRole = projectPolicy.assignmentMinRole
+  // AQU-1771: the floors THIS project enforces — its organization's, or its
+  // own where stricter (a project can hide more than its org, never less).
+  const rosterFloor = projectPolicy.rosterViewMinRole
+  const progressFloor = projectPolicy.memberProgressViewMinRole
   // Names on the Team card are the roster. A progress floor of maintainer
   // must not keep that card (and its "maintainers & owners" badge) open after
   // the roster floor was raised to owner-only.
-  const teamNamesFloor = Math.max(
-    orgSettings.memberProgressViewMinRole,
-    orgSettings.rosterViewMinRole,
-  )
+  const teamNamesFloor = Math.max(progressFloor.effective, rosterFloor.effective)
+  // The lowest Team value that can show: never below the org's progress
+  // setting, and never below the member list (the card names people).
+  const teamOrgShown = Math.max(progressFloor.org, rosterFloor.effective)
+  // Sam, 2026-10-13: when a Members change moves the Team card's level, say so
+  // in amber under the Team badge. Holds the level it moved to; cleared when
+  // the Team level next moves on its own (its badge, or the org's progress
+  // setting). Any Members change counts, this tab's or a teammate's.
+  const [teamMovedByMembers, setTeamMovedByMembers] = useState<number | null>(null)
+  // The note is two words; its (i) opens the why (Sam, 2026-10-13).
+  const [teamMovedWhyOpen, setTeamMovedWhyOpen] = useState(false)
+  const lastVisibilityRef = useRef<{ roster: number; team: number } | null>(null)
+  useEffect(() => {
+    if (!projectPolicy.ready) return
+    const last = lastVisibilityRef.current
+    lastVisibilityRef.current = { roster: rosterFloor.effective, team: teamNamesFloor }
+    if (!last || last.team === teamNamesFloor) return
+    setTeamMovedByMembers(last.roster !== rosterFloor.effective ? teamNamesFloor : null)
+    setTeamMovedWhyOpen(false)
+  }, [projectPolicy.ready, rosterFloor.effective, teamNamesFloor])
+  // The badges write THIS project's own values, so they follow the project
+  // settings write gate — Maintainer and up on the project, which every org
+  // owner is — not the org-owner gate that guards the org's own setting.
+  const canEditVisibility = Boolean(projectSettings?.canEdit) && projectPolicy.ready
+  /** Store `own` as this project's value for `key`, or remove it (undefined: follow the org). */
+  const writeProjectVisibility = async (
+    key: "rosterViewMinRole" | "memberProgressViewMinRole",
+    own: number | undefined,
+  ) => {
+    if (!projectSettings) return
+    // Following the org already and choosing to follow it: nothing to write.
+    if (own === undefined && projectSettings.settings[key] === undefined) return
+    const outcome = await projectSettings.patch({ [key]: own })
+    // The badge snaps back to the saved value on its own (the hook rolls the
+    // optimistic write back); say why, so the change does not just vanish.
+    const why = visibilitySaveRefusal(outcome, t)
+    if (why) toast.add({ type: "error", title: t("org.projectOverview.visibilitySaveFailed"), description: why })
+  }
+  const patchProjectVisibility = (
+    key: "rosterViewMinRole" | "memberProgressViewMinRole",
+    next: number,
+    followAtOrBelow: number,
+  ) => writeProjectVisibility(key, next > followAtOrBelow ? next : undefined)
+  // Sam, 2026-10-13: a stricter value this project set may be loosened only by
+  // someone at or above it ("Owners only" binds maintainers); the server
+  // refuses anyone else. The badges need no lock of their own for it: each
+  // sits inside a gate at the floor it shows, which is at least the project's
+  // own value, so everyone who can open one already meets that value.
 
   const loadRow = useCallback(async () => {
     if (!jwt || portfolioOrgId == null) return
@@ -623,12 +725,18 @@ export function ProjectOverview() {
   // AQU-495: extracted into a callback so a fresh assignment (onAssigned) can
   // revalidate the workload list live, not only on mount — the walkthrough bug
   // was "No open assignments in this project yet." lingering until manual reload.
+  //
+  // AQU-1771: a refusal (403) hides the Team card outright. Read as an empty
+  // list it showed "No open assignments in this project yet." to someone the
+  // server would not tell, which is a claim, not an absence.
   const loadWorkload = useCallback(async () => {
     if (!jwt || !id) return
     try {
       setWorkload(await getProjectAssignments(jwt, id))
-    } catch {
+      setWorkloadRefused(false)
+    } catch (err) {
       setWorkload([])
+      setWorkloadRefused(err instanceof UserError && err.status === 403)
     }
   }, [jwt, id])
 
@@ -1197,8 +1305,8 @@ export function ProjectOverview() {
   const canManage = (project?.syncRole?.level ?? 0) >= 600
   const canAssign = canOpenAssignUi(
     project?.syncRole?.level ?? null,
-    orgSettings.allowSelfAssignment,
-    orgSettings.assignmentMinRole,
+    policyAllowSelfAssignment,
+    policyAssignmentMinRole,
   )
   const canToggleLifecycle = (project?.syncRole?.level ?? 0) >= 500
   const isArchived = Boolean(project?.deletedAt)
@@ -1219,8 +1327,8 @@ export function ProjectOverview() {
       jwt,
       author: session?.username ?? "",
       roleLevel: project?.syncRole?.level ?? 0,
-      allowSelfAssignment: orgSettings.allowSelfAssignment,
-      assignmentMinRole: orgSettings.assignmentMinRole,
+      allowSelfAssignment: policyAllowSelfAssignment,
+      assignmentMinRole: policyAssignmentMinRole,
       // AssignModal resolves the caller from `author` against the roster it
       // fetches, which is the only identity this page actually has — the
       // overview never reads the caller's numeric user id.
@@ -1232,8 +1340,8 @@ export function ProjectOverview() {
     }
   }, [
     canAssign, isArchived, jwt, id, selectedUnitFileId, documentFiles, project?.targetLanes,
-    project?.targetLanguage, project?.syncRole?.level, session?.username, orgSettings.allowSelfAssignment,
-    orgSettings.assignmentMinRole, handleAssigned,
+    project?.targetLanguage, project?.syncRole?.level, session?.username, policyAllowSelfAssignment,
+    policyAssignmentMinRole, handleAssigned,
   ])
 
   const planInspector = selectedPlanUnit ? (
@@ -1276,9 +1384,11 @@ export function ProjectOverview() {
           // Sam ruled this a real gap and a later ticket — **TODO: assignment-
           // level audio on dubbing projects** — and text-only until then.
           showAudio={assignmentsShowAudio(selectedPlanUnit, planAudioFiles)}
-          minRole={orgSettings.memberProgressViewMinRole}
+          // AQU-1771: names AND progress, so the higher of the two floors
+          // this project enforces — the same gate as the Team card.
+          minRole={teamNamesFloor}
           viewerRoleLevel={projectRoleLevel}
-          ready={orgSettings.hasFetched}
+          ready={projectPolicy.ready}
           assign={planAssignTarget}
         />
       }
@@ -2470,143 +2580,216 @@ export function ProjectOverview() {
                   this card exist at all, not an empty/placeholder version.
                   Names on the rows are also the roster, so an owner-only
                   roster floor raises this gate with them (AQU-1172). */}
-              <SectionVisibilityGate
-                minRole={teamNamesFloor}
-                viewerRoleLevel={projectRoleLevel}
-                ready={orgSettings.hasFetched}
-              >
-                <div
-                  className={cn(
-                    "relative rounded-lg border bg-card px-5",
-                    teamOpen ? "py-5" : "py-3",
-                    sectionTintClass(teamNamesFloor),
-                  )}
-                  data-testid="overview-team-card"
-                  data-expanded={teamOpen ? "true" : "false"}
+              {!workloadRefused && (
+                <SectionVisibilityGate
+                  minRole={teamNamesFloor}
+                  viewerRoleLevel={projectRoleLevel}
+                  ready={projectPolicy.ready}
                 >
-                  <div className={cn("flex items-center justify-between gap-2", teamOpen && "mb-3")}>
-                    {/* Heading wraps the button: a button may only contain
-                        phrasing content, and an h2 inside it is invalid.
-                        Same header treatment as the Members card (AQU-1171). */}
-                    <h2 className="contents">
-                      <button
-                        type="button"
-                        className="flex min-w-0 flex-1 items-center gap-1.5 rounded-sm text-start text-xs font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-                        aria-expanded={teamOpen}
-                        aria-controls="overview-team-panel"
-                        data-testid="overview-team-toggle"
-                        onClick={() => setTeamOpen((open) => !open)}
-                      >
-                        {teamOpen
-                          ? <ChevronDown className="size-3.5 shrink-0" aria-hidden />
-                          : <ChevronRight className="size-3.5 shrink-0" aria-hidden />}
-                        {t("editor.navTitle.team")}
-                      </button>
-                    </h2>
-                    <SectionVisibilityBadge
-                      minRole={teamNamesFloor}
-                      canEdit={canEditVisibility}
-                      onChangeMinRole={async (next) => { await orgSettings.patch({ memberProgressViewMinRole: next }) }}
-                      description={t("org.projectOverview.teamVisibilityDescription")}
-                      // AQU-1779: the badge shows the higher of the two floors
-                      // but writes only the progress floor, so a value below
-                      // the roster floor would save, snap back, and loosen
-                      // per-member progress org-wide unseen. Offer only what
-                      // can show; the roster is lowered on the Members card.
-                      minSelectableRole={orgSettings.rosterViewMinRole}
-                      // Re-picking the shown floor still writes when progress
-                      // sits below it, so an owner can undo the old loosening.
-                      storedMinRole={orgSettings.memberProgressViewMinRole}
-                      belowMinSelectableHint={t("org.projectOverview.teamVisibilityRosterFloorHint", {
-                        floor: t(visibilityRolePickerLabelKey(orgSettings.rosterViewMinRole)),
-                      })}
-                    />
-                  </div>
-                  {teamOpen && (
-                    <div id="overview-team-panel">
-                      {workload.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">{t("org.projectOverview.noOpenAssignments")}</p>
-                      ) : (
-                        <ul className="space-y-2">
-                          {workload.map((w) => {
-                            const donePct = progressPercent(w.cellsDone, w.cellsTotal)
-                            const isSelected = w.username != null && w.username === selectedMemberUsername
-                            return (
-                              <li key={w.userId} className="flex items-center gap-3 text-sm">
-                                {/* AQU-491: click-to-reveal affordance, see file-name cell above. */}
-                                <UserChip
-                                  userId={w.userId}
-                                  username={w.username}
-                                  size="sm"
-                                  className="w-40 shrink-0"
-                                />
-                                <span className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                                  <span className="block h-full rounded-full bg-primary transition-all" style={{ width: `${donePct}%` }} />
-                                </span>
-                                <span className="w-20 shrink-0 text-end text-xs tabular-nums text-muted-foreground">
-                                  {t("org.projectOverview.openAssignmentsStat", {
-                                    count: w.openAssignments,
-                                    percent: bidiIsolate(`${donePct}%`),
-                                  })}
-                                </span>
-                                {/* AQU-498: select a teammate to see their recent actions +
-                                    files-worked-on rollup. Sits inside this SAME
-                                    memberProgressViewMinRole gate, so no separate
-                                    permission plumbing is needed here. */}
-                                {w.username != null && (
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    className="h-6 shrink-0 px-2 text-xs text-muted-foreground"
-                                    aria-label={t("org.projectOverview.viewActivityAria", { username: w.username })}
-                                    aria-pressed={isSelected}
-                                    onClick={() => setSelectedMemberUsername(isSelected ? null : (w.username as string))}
-                                  >
-                                    {isSelected ? t("org.projectOverview.hide") : t("autopilot.inspector.activity.title")}
-                                  </Button>
-                                )}
-                              </li>
-                            )
-                          })}
-                        </ul>
-                      )}
-
-                      {selectedMemberUsername && (
-                        <MemberActivityPanel
-                          projectId={id}
-                          username={selectedMemberUsername}
-                          getToken={getMemberActivityToken}
-                          onClose={() => setSelectedMemberUsername(null)}
-                        />
-                      )}
-
-                      {canAssign && !isArchived && activeOrgId != null && documentFiles.length > 0 && (
-                        <div className="mt-3 pt-3 border-t">
-                          <AssignWork
-                            projectId={id}
-                            files={documentFiles}
-                            jwt={jwt ?? ""}
-                            author={session?.username ?? ""}
-                            arrivedLane={showLaneTabs ? selectedLaneTag : null}
-                            laneTags={
-                              targetLaneRows.length > 0
-                                ? [...new Set(targetLaneRows.map((lane) => lane.legacyTag ?? ""))]
-                                : ["", ...(project?.targetLanes ?? [])]
-                            }
-                            laneLabels={autopilotLaneLabels}
-                            defaultLaneLabel={project?.targetLanguage ?? ""}
-                            laneRows={targetLaneRows}
-                            roleLevel={project?.syncRole?.level ?? 0}
-                            allowSelfAssignment={orgSettings.allowSelfAssignment}
-                            assignmentMinRole={orgSettings.assignmentMinRole}
-                            onAssigned={handleAssigned}
-                          />
-                        </div>
-                      )}
+                  <div
+                    className={cn(
+                      "relative rounded-lg border bg-card px-5",
+                      teamOpen ? "py-5" : "py-3",
+                      sectionTintClass(teamNamesFloor),
+                    )}
+                    data-testid="overview-team-card"
+                    data-expanded={teamOpen ? "true" : "false"}
+                  >
+                    <div className={cn("flex items-center justify-between gap-2", teamOpen && teamMovedByMembers == null && "mb-3")}>
+                      {/* Heading wraps the button: a button may only contain
+                          phrasing content, and an h2 inside it is invalid.
+                          Same header treatment as the Members card (AQU-1171). */}
+                      <h2 className="contents">
+                        <button
+                          type="button"
+                          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-sm text-start text-xs font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                          aria-expanded={teamOpen}
+                          aria-controls="overview-team-panel"
+                          data-testid="overview-team-toggle"
+                          onClick={() => setTeamOpen((open) => !open)}
+                        >
+                          {teamOpen
+                            ? <ChevronDown className="size-3.5 shrink-0" aria-hidden />
+                            : <ChevronRight className="size-3.5 shrink-0" aria-hidden />}
+                          {t("editor.navTitle.team")}
+                        </button>
+                      </h2>
+                      <SectionVisibilityBadge
+                        minRole={teamNamesFloor}
+                        canEdit={canEditVisibility}
+                        // AQU-1771: writes THIS project's own progress floor.
+                        // The org's setting stays the org's (Settings → Security).
+                        // Only the org's own progress setting means "follow the
+                        // org"; any value above it is stored, even one that only
+                        // matches the member list today — the member list can
+                        // be lowered later, and the Team card must not follow it
+                        // down past what was chosen here.
+                        onChangeMinRole={async (next) => {
+                          await patchProjectVisibility("memberProgressViewMinRole", next, progressFloor.org)
+                        }}
+                        description={t("org.projectOverview.teamVisibilityDescription")}
+                        // AQU-1779 / AQU-1771: the badge shows the higher of the
+                        // two floors but writes only progress, so nothing below
+                        // the member list can show; and a project is never
+                        // looser than its org.
+                        minSelectableRole={teamOrgShown}
+                        storedMinRole={progressFloor.effective}
+                        orgDefaultRole={
+                          progressFloor.project == null && progressFloor.org >= rosterFloor.effective
+                            ? progressFloor.org
+                            : undefined
+                        }
+                        // While the project has its own progress value, a plain
+                        // way back to the org's, whatever the member list says.
+                        followOrgRole={progressFloor.project != null ? teamOrgShown : undefined}
+                        onFollowOrg={() => writeProjectVisibility("memberProgressViewMinRole", undefined)}
+                        origin={
+                          (progressFloor.effective >= rosterFloor.effective
+                            ? progressFloor.project
+                            : rosterFloor.project) != null
+                            ? "project"
+                            : "org"
+                        }
+                        belowMinSelectableHint={
+                          rosterFloor.effective > progressFloor.org
+                            ? t("org.projectOverview.teamVisibilityRosterFloorHint", {
+                                floor: t(visibilityRolePickerLabelKey(rosterFloor.effective)),
+                              })
+                            : t("org.projectOverview.visibilityOrgFloorHint", {
+                                floor: t(visibilityRolePickerLabelKey(progressFloor.org)),
+                              })
+                        }
+                      />
                     </div>
-                  )}
-                </div>
-              </SectionVisibilityGate>
+                    {teamMovedByMembers != null && (
+                      <div
+                        role="status"
+                        data-testid="overview-team-visibility-moved"
+                        className={cn("mt-1 flex flex-col items-end gap-0.5", teamOpen && "mb-3")}
+                      >
+                        <span className="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
+                          {t("org.projectOverview.teamVisibilityAdjusted")}
+                          {/* A click, not a hover, like the badge's own (i): a
+                              tooltip would not reach touch screens. */}
+                          <button
+                            type="button"
+                            data-testid="overview-team-visibility-moved-info"
+                            className="inline-flex size-4 items-center justify-center rounded-full transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                            aria-label={t("org.projectOverview.teamVisibilityAdjustedWhyAriaLabel")}
+                            aria-expanded={teamMovedWhyOpen}
+                            onClick={() => setTeamMovedWhyOpen((v) => !v)}
+                          >
+                            <Info className="size-3.5" aria-hidden />
+                          </button>
+                        </span>
+                        {/* Same open/close as the badge's own (i) hint: stays
+                            mounted, the 0fr→1fr grid row grows to the text's
+                            height without measuring it, and the negative
+                            margin cancels the gap while it is shut. */}
+                        <div
+                          className={cn(
+                            "grid justify-items-end transition-[grid-template-rows,opacity,margin] duration-200 ease-out motion-reduce:transition-none",
+                            teamMovedWhyOpen ? "grid-rows-[1fr] opacity-100" : "-mt-0.5 grid-rows-[0fr] opacity-0",
+                          )}
+                          data-testid="overview-team-visibility-moved-why"
+                          data-state={teamMovedWhyOpen ? "open" : "closed"}
+                          aria-hidden={!teamMovedWhyOpen}
+                          inert={!teamMovedWhyOpen}
+                        >
+                          <p className="min-h-0 max-w-sm overflow-hidden text-end text-xs text-muted-foreground">
+                            {t("org.projectOverview.teamVisibilityMovedByMembers", {
+                              level: t(visibilityRolePickerLabelKey(teamMovedByMembers)),
+                            })}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                    {teamOpen && (
+                      <div id="overview-team-panel">
+                        {workload.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">{t("org.projectOverview.noOpenAssignments")}</p>
+                        ) : (
+                          <ul className="space-y-2">
+                            {workload.map((w) => {
+                              const donePct = progressPercent(w.cellsDone, w.cellsTotal)
+                              const isSelected = w.username != null && w.username === selectedMemberUsername
+                              return (
+                                <li key={w.userId} className="flex items-center gap-3 text-sm">
+                                  {/* AQU-491: click-to-reveal affordance, see file-name cell above. */}
+                                  <UserChip
+                                    userId={w.userId}
+                                    username={w.username}
+                                    size="sm"
+                                    className="w-40 shrink-0"
+                                  />
+                                  <span className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                                    <span className="block h-full rounded-full bg-primary transition-all" style={{ width: `${donePct}%` }} />
+                                  </span>
+                                  <span className="w-20 shrink-0 text-end text-xs tabular-nums text-muted-foreground">
+                                    {t("org.projectOverview.openAssignmentsStat", {
+                                      count: w.openAssignments,
+                                      percent: bidiIsolate(`${donePct}%`),
+                                    })}
+                                  </span>
+                                  {/* AQU-498: select a teammate to see their recent actions +
+                                      files-worked-on rollup. Sits inside this SAME
+                                      memberProgressViewMinRole gate, so no separate
+                                      permission plumbing is needed here. */}
+                                  {w.username != null && (
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      className="h-6 shrink-0 px-2 text-xs text-muted-foreground"
+                                      aria-label={t("org.projectOverview.viewActivityAria", { username: w.username })}
+                                      aria-pressed={isSelected}
+                                      onClick={() => setSelectedMemberUsername(isSelected ? null : (w.username as string))}
+                                    >
+                                      {isSelected ? t("org.projectOverview.hide") : t("autopilot.inspector.activity.title")}
+                                    </Button>
+                                  )}
+                                </li>
+                              )
+                            })}
+                          </ul>
+                        )}
+
+                        {selectedMemberUsername && (
+                          <MemberActivityPanel
+                            projectId={id}
+                            username={selectedMemberUsername}
+                            getToken={getMemberActivityToken}
+                            onClose={() => setSelectedMemberUsername(null)}
+                          />
+                        )}
+
+                        {canAssign && !isArchived && activeOrgId != null && documentFiles.length > 0 && (
+                          <div className="mt-3 pt-3 border-t">
+                            <AssignWork
+                              projectId={id}
+                              files={documentFiles}
+                              jwt={jwt ?? ""}
+                              author={session?.username ?? ""}
+                              arrivedLane={showLaneTabs ? selectedLaneTag : null}
+                              laneTags={
+                                targetLaneRows.length > 0
+                                  ? [...new Set(targetLaneRows.map((lane) => lane.legacyTag ?? ""))]
+                                  : ["", ...(project?.targetLanes ?? [])]
+                              }
+                              laneLabels={autopilotLaneLabels}
+                              defaultLaneLabel={project?.targetLanguage ?? ""}
+                              laneRows={targetLaneRows}
+                              roleLevel={project?.syncRole?.level ?? 0}
+                              allowSelfAssignment={policyAllowSelfAssignment}
+                              assignmentMinRole={policyAssignmentMinRole}
+                              onAssigned={handleAssigned}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </SectionVisibilityGate>
+              )}
 
               {/* ── Members card (AQU-1171) — same add / change-role / revoke
                   surface as Project Settings → Team members. Collapsed on
@@ -2616,15 +2799,15 @@ export function ProjectOverview() {
                   archived project. */}
               {canManage && !isArchived && (
                 <SectionVisibilityGate
-                  minRole={orgSettings.rosterViewMinRole}
+                  minRole={rosterFloor.effective}
                   viewerRoleLevel={projectRoleLevel}
-                  ready={orgSettings.hasFetched}
+                  ready={projectPolicy.ready}
                 >
                   <div
                     className={cn(
                       "relative rounded-lg border bg-card px-5",
                       membersOpen ? "py-5" : "py-3",
-                      sectionTintClass(orgSettings.rosterViewMinRole),
+                      sectionTintClass(rosterFloor.effective),
                     )}
                     data-testid="overview-members-card"
                     data-expanded={membersOpen ? "true" : "false"}
@@ -2648,10 +2831,20 @@ export function ProjectOverview() {
                         </button>
                       </h2>
                       <SectionVisibilityBadge
-                        minRole={orgSettings.rosterViewMinRole}
+                        minRole={rosterFloor.effective}
                         canEdit={canEditVisibility}
-                        onChangeMinRole={async (next) => { await orgSettings.patch({ rosterViewMinRole: next }) }}
+                        // AQU-1771: writes THIS project's own member-list floor;
+                        // choosing the org's setting follows the org again.
+                        onChangeMinRole={async (next) => {
+                          await patchProjectVisibility("rosterViewMinRole", next, rosterFloor.org)
+                        }}
                         description={t("org.projectOverview.membersVisibilityDescription")}
+                        minSelectableRole={rosterFloor.org}
+                        orgDefaultRole={rosterFloor.org}
+                        origin={rosterFloor.project != null ? "project" : "org"}
+                        belowMinSelectableHint={t("org.projectOverview.visibilityOrgFloorHint", {
+                          floor: t(visibilityRolePickerLabelKey(rosterFloor.org)),
+                        })}
                       />
                     </div>
                     {membersOpen && (

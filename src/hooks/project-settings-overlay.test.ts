@@ -20,6 +20,28 @@ function makeRecord(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
 }
 
 describe("overlaySettings", () => {
+  // AQU-1771: the workspace passes the org's validation defaults so every
+  // reader of the record sees the threshold actually in force.
+  it("takes the org's validation defaults when the project has none", () => {
+    const out = overlaySettings(makeRecord(), {}, null, { validationCount: 3, validationCountAudio: 2 })
+    expect(out.validationCount).toBe(3)
+    expect(out.validationCountAudio).toBe(2)
+  })
+
+  it("keeps the project's own numbers over the org's", () => {
+    const out = overlaySettings(
+      makeRecord(), { validationCount: 1, validationCountAudio: 4 }, null,
+      { validationCount: 3, validationCountAudio: 2 },
+    )
+    expect(out.validationCount).toBe(1)
+    expect(out.validationCountAudio).toBe(4)
+  })
+
+  it("leaves the count unset without org defaults (the Project settings form's view)", () => {
+    const out = overlaySettings(makeRecord(), {})
+    expect(out.validationCount).toBeUndefined()
+  })
+
   it("carries the text validation trio and count", () => {
     const out = overlaySettings(makeRecord(), {
       validationCount: 2,

@@ -13,7 +13,12 @@
 //
 // At boot the snapshot *is* the leader's state file, and nothing has been
 // committed yet (the store isn't handed out until this passes), so with one
-// window and no LiveStore sync backend the two heads must be identical.
+// window the two heads must be identical. (local-sync-backend.ts sits above
+// the leader, not between it and the session, so it doesn't change that.)
+//
+// The leader's syncState carries its whole `pending` list. That's small now
+// local checkpoints confirm it, but the first boot after upgrading from a
+// build without them can take seconds here — within the timeout below.
 //
 // Reloads at most once per session: if the heads still disagree after that
 // (e.g. the patch didn't apply), looping would only hide the problem — the

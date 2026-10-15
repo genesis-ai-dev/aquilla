@@ -1337,6 +1337,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.chooser.groupTeam": "Team and activity",
     "projectSettings.monday.chooser.newColumn": "New column",
     "projectSettings.monday.chooser.alwaysIncluded": "Always included, so Aquilla can find this project's row again.",
+    "projectSettings.monday.chooser.namesVisible": "Everyone who can see {board} on Monday will see these names.",
     "projectSettings.monday.chooser.summaryAdds": plural({
       one: "Adds {count} new column to {board} and uses {uses} already there.",
       other: "Adds {count} new columns to {board} and uses {uses} already there.",
@@ -2289,6 +2290,13 @@ export const projectSettings = defineNamespace({
       },
       "projectSettings.monday.chooser.alwaysIncluded": {
         description: "Note under the locked 'Aquilla ID' column in the checklist, saying why it can't be unticked.",
+      },
+      "projectSettings.monday.chooser.namesVisible": {
+        description:
+          "Calm, factual note under the 'Project manager' and 'Translators' columns in the checklist, shown while " +
+          "either is ticked: those columns put people's names on the Monday board, and anyone with access to the " +
+          "board can read them. Informational, not a warning.",
+        placeholders: { board: "The Monday board's name (Monday data, not translated)." },
       },
       "projectSettings.monday.chooser.summaryAdds": {
         description: "Live summary under the column checklist when some ticked columns will be created.",

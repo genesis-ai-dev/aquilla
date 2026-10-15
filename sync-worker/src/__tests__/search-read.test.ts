@@ -69,7 +69,7 @@ describe("GET /api/v1/projects/:projectId/search", () => {
     const res = (await handleSearchReadRequest(req, envWith(db)))!
     expect(res.status).toBe(200)
     const body = (await res.json()) as {
-      results: Array<{ cellId: string; side: string; value: string; snippet: string }>
+      results: Array<{ cellId: string; side: string; value: string; snippet: string; pairedValue: string | null }>
     }
     expect(body.results).toHaveLength(1)
     expect(body.results[0].cellId).toBe("c1")

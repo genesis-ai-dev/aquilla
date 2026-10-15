@@ -10,7 +10,7 @@
 //     only timing/metadata is captured, nothing is copied into project storage.
 
 import { v7 as uuidv7 } from "uuid"
-import { computeMediaSegmentSpecs } from "@/lib/import"
+import { computeMediaSegmentSpecs, mediaSegmentSpecsFromSpeech } from "@/lib/import"
 import { recordMediaImportSeed, buildMediaSeedCells } from "@/lib/audio/auto-transcribe"
 import { buildAudioId, deleteCellAudio, uploadCellAudio } from "@/lib/audio/upload"
 import { emitCellAudioAttach, emitSourceCellCreate, InsufficientRoleError } from "@/lib/sync/events-emit"
@@ -26,6 +26,17 @@ export interface AttachMediaContext {
   getToken: (fileId: string) => Promise<string | null>
 }
 
+export interface AttachMediaFileOptions {
+  /** AQU-1681: speech already found in this clip (a linked video's sound is
+   *  analysed while it is fetched). Given, the clip is not decoded again. */
+  analysis?: { segments: readonly { startMs: number; endMs: number }[]; durationMs: number }
+  /** Cancels the upload. Once the bytes are stored the rows go in regardless:
+   *  a half-made set of rows is worse than a finished one. */
+  signal?: AbortSignal
+  /** Called as the stored copy is uploaded, then as the rows are made. */
+  onPhase?: (phase: "save" | "rows") => void
+}
+
 /**
  * Upload a local clip's bytes and append its media segments to the file.
  * Caller flushes the outbox and revalidates cells afterwards (diarize pattern).
@@ -33,12 +44,19 @@ export interface AttachMediaContext {
 export async function attachMediaFileToTimeline(
   file: File,
   ctx: AttachMediaContext,
+  opts: AttachMediaFileOptions = {},
 ): Promise<{ segments: number }> {
   assertMayAttachSourceAudio()
-  const { durationMs, specs } = await computeMediaSegmentSpecs(file)
+  const { durationMs, specs } = opts.analysis
+    ? {
+        durationMs: opts.analysis.durationMs,
+        specs: mediaSegmentSpecsFromSpeech(opts.analysis.segments, opts.analysis.durationMs),
+      }
+    : await computeMediaSegmentSpecs(file)
 
   const ext = (file.name.split(".").pop() || "bin").toLowerCase()
   const audioId = buildAudioId(ctx.fileId)
+  opts.onPhase?.("save")
   const upload = await uploadCellAudio({
     projectId: ctx.projectId,
     fileId: ctx.fileId,
@@ -46,7 +64,9 @@ export async function attachMediaFileToTimeline(
     ext,
     blob: file,
     getSyncToken: (_p, f) => ctx.getToken(f),
+    ...(opts.signal ? { signal: opts.signal } : {}),
   })
+  opts.onPhase?.("rows")
 
   try {
     let prevCellId: string | null = null

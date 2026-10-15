@@ -361,6 +361,13 @@ import { generateAndAttachCellVoice } from "@/lib/audio/generate-voice"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { TimeOrderedEmptyState } from "./TimeOrderedEmptyState"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
+import {
+  describeVideoSound,
+  extractVideoSound,
+  type LinkedVideoSoundActions,
+  type VideoSoundSource,
+} from "@/lib/timeline/video-sound"
+import { laneLanguageCode } from "@/lib/lanes/lane-display"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
 import { useFileAttachments } from "@/hooks/useFileAttachments"
@@ -3161,19 +3168,16 @@ export function ProjectWorkspace() {
   // Media-lens empty state: attach a clip to the ACTIVE file by upload or
   // direct URL. The Import dialog can't do this — it always creates a new
   // time-ordered file. Errors propagate to TimelineAddMedia, which renders them.
-  const handleAttachMediaFile = useCallback(async (file: File) => {
-    if (!project?.id || !activeFileId) return
-    await attachMediaFileToTimeline(file, {
-      projectId: project.id,
-      fileId: activeFileId,
-      author: currentUsername,
-      getToken: getTokenForFile,
-    })
+  /** After a recording lands on a file as its rows: send the rows, show
+   *  them, and transcribe them. Shared by the upload and, AQU-1681, the
+   *  linked video's own sound. */
+  const finishSourceMediaAttach = useCallback(async (fileId: string) => {
+    if (!project?.id) return
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     revalidateCells()
     // AQU-646: the attach flow seeds auto-transcribe too — same "file gained
     // media sections" moment as an import (see handleImported).
-    const seed = consumeMediaImportSeed(activeFileId)
+    const seed = consumeMediaImportSeed(fileId)
     if (seed) {
       void autoTranscribeImportedMedia({
         seed,
@@ -3187,7 +3191,18 @@ export function ProjectWorkspace() {
         },
       })
     }
-  }, [project?.id, activeSourceLanguage, activeLaneTargetLanguage, activeFileId, currentUsername, frontierSession, getTokenForFile, getTokenForProjectFile, revalidateCells])
+  }, [project?.id, activeSourceLanguage, activeLaneTargetLanguage, frontierSession, getTokenForProjectFile, revalidateCells])
+
+  const handleAttachMediaFile = useCallback(async (file: File) => {
+    if (!project?.id || !activeFileId) return
+    await attachMediaFileToTimeline(file, {
+      projectId: project.id,
+      fileId: activeFileId,
+      author: currentUsername,
+      getToken: getTokenForFile,
+    })
+    await finishSourceMediaAttach(activeFileId)
+  }, [project?.id, activeFileId, currentUsername, getTokenForFile, finishSourceMediaAttach])
 
   const handleAttachMediaUrl = useCallback(async (url: string) => {
     if (!project?.id || !activeFileId) return
@@ -12125,9 +12140,69 @@ export function ProjectWorkspace() {
    * govern. It needs Project Lead on EVERY empty media file, not only a
    * linked video's, because the clip is stored as the file's source audio.
    */
-  const { offerCaptionRows, canImportCaptions, canUploadSourceMedia } = mediaEmptyGates({
+  const { offerCaptionRows, canImportCaptions, canUploadSourceMedia, offerVideoSoundRows } = mediaEmptyGates({
     roleLevel: project?.syncRole?.level, captionRowsMode, canEditTracks,
+    linkedVideoUrl: activeFile?.coreMediaUrl,
   })
+  /**
+   * AQU-1681: make an empty linked video's rows from its own sound. The sound
+   * is fetched (a streamed film's audio track, or a direct file), stored as
+   * this file's recording exactly like an upload, split at its pauses and
+   * transcribed — `finishSourceMediaAttach`, the upload's own tail.
+   *
+   * The film's track list is read once per file and kept for the run, so
+   * choosing a track and starting does not fetch the master twice. The
+   * default track is the project's source language (Sam, 2026-10-15).
+   */
+  const sourceLanguageCode = useMemo(
+    () => sourceLane
+      ? laneLanguageCode(sourceLane, { settings: project, role: "source", legacyTag: sourceLane.legacyTag ?? null })
+      : null,
+    [sourceLane, project],
+  )
+  const linkedVideoUrl = activeFile?.coreMediaUrl ?? null
+  const linkedVideoBaseName = (activeFile?.name ?? "").replace(/\.[a-z0-9]{2,5}$/i, "") || "video"
+  const linkedVideoSound = useMemo<LinkedVideoSoundActions | undefined>(() => {
+    if (!offerVideoSoundRows || !project?.id || !activeFileId || !linkedVideoUrl) return undefined
+    const projectId = project.id
+    const fileId = activeFileId
+    let described: Promise<VideoSoundSource> | null = null
+    const describeOnce = () => {
+      described ??= describeVideoSound(linkedVideoUrl, sourceLanguageCode).catch((err: unknown) => {
+        described = null
+        throw err
+      })
+      return described
+    }
+    return {
+      describe: async () => {
+        const source = await describeOnce()
+        return source.kind === "stream"
+          ? { tracks: source.tracks.map(({ id, name, lang }) => ({ id, name, lang })), defaultTrackId: source.defaultTrackId }
+          : { tracks: [], defaultTrackId: null }
+      },
+      run: async (trackId, { signal, onProgress }) => {
+        const sound = await extractVideoSound({
+          source: await describeOnce(),
+          trackId,
+          baseName: linkedVideoBaseName,
+          signal,
+          onProgress,
+        })
+        await attachMediaFileToTimeline(sound.file, {
+          projectId,
+          fileId,
+          author: currentUsername,
+          getToken: getTokenForFile,
+        }, {
+          ...(sound.analysis ? { analysis: sound.analysis } : {}),
+          signal,
+          onPhase: (phase) => onProgress({ phase }),
+        })
+        await finishSourceMediaAttach(fileId)
+      },
+    }
+  }, [offerVideoSoundRows, project?.id, activeFileId, linkedVideoUrl, linkedVideoBaseName, sourceLanguageCode, currentUsername, getTokenForFile, finishSourceMediaAttach])
   const alignmentClipUrl = useMemo(() => {
     const urls = new Set(audioMergedCells.flatMap(cell => {
       const clip = sourceClipAudioForCell(cell)
@@ -16134,6 +16209,7 @@ export function ProjectWorkspace() {
             // file's rows, for maintainers on an empty linked video only.
             onAttachCaptions={offerCaptionRows ? handleAttachCaptionsAsRows : undefined}
             onUseCaptionTrackAsRows={offerCaptionRows ? requestUseTrackAsRows : undefined}
+            linkedVideoSound={linkedVideoSound}
             onCellCommitted={handleCellCommitted}
             onValidated={handleCellValidated}
             repetitionCounts={repetitionCounts}

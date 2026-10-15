@@ -7,7 +7,7 @@ bot already proved. Humans spend their attention on taste and on what the bots
 could not prove.
 
 Related: [PR-BOT.md](PR-BOT.md) (how a PR is walked),
-[DEPLOY-BOT.md](DEPLOY-BOT.md) (how a release branch is cut),
+[RELEASE-CUT.md](RELEASE-CUT.md) (how a release branch is cut),
 [DEPLOYMENT-ENVIRONMENTS.md](../../docs/DEPLOYMENT-ENVIRONMENTS.md) (branches,
 deploy commands, calver tags).
 
@@ -23,7 +23,7 @@ is not a stage on this line.
 | Stage | Who acts | Gate |
 | --- | --- | --- |
 | PR → `dev` | The agent who opened it | Walk **PASS** at the head sha, no proven unresolved finding, required checks green. |
-| `dev` → release branch | A person presses **Release cut** in GitHub Actions | `node scripts/release-plan.mjs` says `cut: true`. |
+| `dev` → release branch | **Release cut** workflow, after each deploy's tag push or a button press | `node scripts/release-plan.mjs` says `cut: true`. |
 | Release HEAD → deploy | A person, after smart Jev | A smart-Jev `FAIL` holds that HEAD. `PASS`, inconclusive, and harness unavailable do not. |
 | Release → prod | Kieran or Matthew | Always a person. The tag is `YYYY.MM.DD.NN`. See "Deployment ownership" in [DEPLOYMENT-ENVIRONMENTS.md](../../docs/DEPLOYMENT-ENVIRONMENTS.md). |
 
@@ -62,17 +62,16 @@ trial only works if that account does not merge around a red check.
 
 ## 2. Cutting a release: one in flight, no ceiling
 
-The Deploy bot's only job is cutting the branch — it never deploys, and it
-never touches production. The **Release cut** workflow now runs these steps when a
-person presses its button; there is no polling bot. Full step-by-step mechanics, hard stops, and the
-comment template are in [DEPLOY-BOT.md](DEPLOY-BOT.md); the summary:
+The **Release cut** workflow cuts the branch. It runs after every production
+deploy (the calver tag push starts it) and when a person presses its button;
+it never deploys and never touches production. Full mechanics, hard stops,
+and the comment template are in [RELEASE-CUT.md](RELEASE-CUT.md); the summary:
 
 1. `git fetch origin --tags` and fetch `release/*`.
 2. Run `node scripts/release-plan.mjs`. It returns JSON: `cut`, `hold`,
    `reason`, `branch`, `sha`, `areas`, and the PRs in the slice. Do not
    second-guess it; the rules are in code on purpose.
-3. If `cut` is false, stop. Post nothing, except a once-only warning for a
-   held branch with no tag after 4 hours.
+3. If `cut` is false, stop. The run summary gives the reason.
 4. If `cut` is true, create the named `branch` at the named `sha` — not the
    tip of `dev` — push it, and post the release notes below as a comment
    on that commit, where QA and the deployer both find it.
@@ -134,10 +133,10 @@ The plan's rules:
 | --- | --- | --- | --- |
 | #771 | Remove Inworld companion preset | PASS | — |
 | #772 | Comment thread polish | PASS | sync |
-| #773 | Export raw mode fix | FLAKY | — |
+| #773 | Export raw mode fix | fail | — |
 | #774 | Retention tab copy | none (docs only) | — |
 
-Needs a human: #773 (walk not conclusive).
+Needs a human: #773 (walk fail).
 ```
 
 "Walk @ head sha" is the PR bot's status for the PR's own final head sha, not

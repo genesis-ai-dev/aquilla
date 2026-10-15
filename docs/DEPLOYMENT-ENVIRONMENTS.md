@@ -199,8 +199,9 @@ branches cut from `dev`; `main` is retired.
    which `dev` PRs shipped). A release branch may carry the plain cut date,
    `release/YYYY/MM/DD`, or a same-day `-NN` suffix for the Nth slice cut that
    date; both are production branches (see `e2e/journeys/QA-BOT-REGIMEN.md`
-   for how a slice is built and when it deploys itself versus waiting for a
-   person).
+   for how a slice is built). The **Release cut** workflow runs the plan and
+   pushes the branch after every production deploy's tag push, or when a
+   person presses its button (`e2e/journeys/RELEASE-CUT.md`).
 2. QA tests the branch's preview.
 3. From a clean checkout of that branch, checked out by name (not a detached
    HEAD — the branch guard and the tag script both need it), run

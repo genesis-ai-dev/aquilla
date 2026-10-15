@@ -8,6 +8,6 @@ export type ReleaseNotesPlan = Pick<ReleasePlan, "hold" | "reason" | "branch" | 
   prs: Pick<UnreleasedPr, "number" | "walk" | "areas">[]
 }
 
-// DEPLOY-BOT.md "Release notes template". titles maps PR number to title; a
+// RELEASE-CUT.md "Release notes template". titles maps PR number to title; a
 // missing title prints as "(title unavailable)" rather than failing the cut.
 export function releaseNotes(plan: ReleaseNotesPlan, titles?: Partial<Record<number, string>>): string

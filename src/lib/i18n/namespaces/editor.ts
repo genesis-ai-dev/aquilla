@@ -1367,6 +1367,41 @@ export const editor = defineNamespace({
     "editor.row.addLine": "Add a line",
     "editor.row.insertAbove": "Insert above",
     "editor.row.insertBelow": "Insert below",
+    // AQU-1759: split a passage at its quotation marks, so narration and each
+    // quotation become lines of their own and can be given different voices.
+    "editor.row.splitAtQuotes": "Split at quotes",
+    "editor.row.splitNoQuoteReason": "No quotation to split at \u2014 one speaker throughout.",
+    "editor.row.splitFormattedReason": "This line has formatting that can\u2019t be split automatically.",
+    "editor.row.splitMarkupReason": "Markup crosses a quotation mark here, so it can\u2019t be split automatically.",
+    "editor.row.splitSourceLockedReason": "Splitting changes the source text, which only a project lead can edit.",
+    "editor.splitQuotes.title": "Split this line at its quotation marks?",
+    "editor.splitQuotes.description": plural({
+      one: "It becomes {count} line, so each speaker can have their own voice. Every language shares the new lines.",
+      other: "It becomes {count} lines, so each speaker can have their own voice. Every language shares the new lines.",
+    }),
+    "editor.splitQuotes.narration": "Narration",
+    "editor.splitQuotes.quotation": "Quotation",
+    "editor.splitQuotes.translationsNote":
+      "A translation that splits the same way is divided between the new lines. Any other translation stays whole on the first line and is marked for review.",
+    "editor.splitQuotes.recordingsNote": "Recordings stay on the first line.",
+    "editor.splitQuotes.confirm": plural({
+      one: "Split into {count} line",
+      other: "Split into {count} lines",
+    }),
+    "editor.splitQuotes.doneToast": plural({
+      one: "Split into {count} line.",
+      other: "Split into {count} lines.",
+    }),
+    "editor.splitQuotes.keptToast": plural({
+      one: "{count} translation stayed on the first line \u2014 move its quoted part by hand.",
+      other: "{count} translations stayed on the first line \u2014 move their quoted parts by hand.",
+    }),
+    // Not plural()-wrapped: a sweep only reports here when it split two or
+    // more lines, so both numbers are always plural.
+    "editor.splitQuotes.doneManyToast": "Split {rows} lines into {count}.",
+    "editor.splitQuotes.unchangedToast": "That couldn\u2019t be split. Nothing was changed.",
+    "editor.splitQuotes.failedToast": "That line couldn\u2019t be split, so it has been put back.",
+    "editor.splitQuotes.forbiddenToast": "You don\u2019t have permission to split lines here, so it has been put back.",
     // AQU-1422: the reversible sibling of "Remove this line". The wording says
     // "cell" rather than "line" on purpose — one hide parks the row in EVERY
     // language lane at once, so calling it a line invites the reading that it
@@ -8099,6 +8134,105 @@ export const editor = defineNamespace({
         placeholders: {
           key: "The metadata field name exactly as imported, e.g. \"Field\". Not translated.",
         },
+      },
+      // AQU-1759 — split a line at its quotation marks.
+      "editor.row.splitAtQuotes": {
+        description:
+          "Menu entry on a source line (the three-dot menu at its top-right). It cuts the " +
+          "line at its quotation marks into separate lines — narration, then each quoted " +
+          "speech — so each speaker can be given their own voice. Imperative. \"Quotes\" " +
+          "means quotation marks, not citations.",
+        maxLength: 24,
+      },
+      "editor.row.splitNoQuoteReason": {
+        description:
+          "Second line under that menu entry when it is disabled because the line has no " +
+          "quotation, or is one speaker throughout. Full sentence.",
+      },
+      "editor.row.splitFormattedReason": {
+        description:
+          "Second line under that menu entry when it is disabled because the source line " +
+          "carries rich formatting (styles, links) that splitting would lose. Full sentence.",
+      },
+      "editor.row.splitMarkupReason": {
+        description:
+          "Second line under that menu entry when it is disabled because scripture markup " +
+          "(e.g. a marker around Jesus' words) starts on one side of a quotation mark and " +
+          "ends on the other. Full sentence.",
+      },
+      "editor.row.splitSourceLockedReason": {
+        description:
+          "Second line under that menu entry when the person may add lines but may not " +
+          "edit source text, which splitting does. Full sentence.",
+      },
+      "editor.splitQuotes.title": {
+        description: "Heading of the dialog that previews a split before it happens. A question.",
+      },
+      "editor.splitQuotes.description": {
+        description:
+          "Body of that dialog, above the list of new lines. Explains the purpose (one voice " +
+          "per speaker) and that the new lines appear in every target language at once.",
+        placeholders: { count: "How many lines the one line becomes. Always two or more." },
+      },
+      "editor.splitQuotes.narration": {
+        description:
+          "Small tag beside a new line in the preview list, marking it as the narrator's " +
+          "words (outside quotation marks). A noun.",
+        maxLength: 16,
+      },
+      "editor.splitQuotes.quotation": {
+        description:
+          "Small tag beside a new line in the preview list, marking it as quoted speech " +
+          "(inside quotation marks). A noun.",
+        maxLength: 16,
+      },
+      "editor.splitQuotes.translationsNote": {
+        description:
+          "Note in the dialog about existing translations of the line: divided when they have " +
+          "matching quotation marks, otherwise kept on the first line and flagged for review.",
+      },
+      "editor.splitQuotes.recordingsNote": {
+        description:
+          "Note in the dialog, shown when the line already has recordings: they are not moved " +
+          "or deleted.",
+      },
+      "editor.splitQuotes.confirm": {
+        description: "The dialog's confirm button. Imperative.",
+        placeholders: { count: "How many lines the one line becomes. Always two or more." },
+        maxLength: 28,
+      },
+      "editor.splitQuotes.doneToast": {
+        description: "Toast after a split succeeds.",
+        placeholders: { count: "How many lines the one line became." },
+      },
+      "editor.splitQuotes.keptToast": {
+        description:
+          "Second toast line after a split, when some languages' translations could not be " +
+          "divided automatically and stayed whole on the first line.",
+        placeholders: { count: "How many languages' translations stayed whole." },
+      },
+      "editor.splitQuotes.doneManyToast": {
+        description:
+          "Toast after splitting several lines of a file at once (every line that holds more " +
+          "than one speaker). Both numbers are always two or more.",
+        placeholders: {
+          rows: "How many lines were split.",
+          count: "How many lines they became in total.",
+        },
+      },
+      "editor.splitQuotes.unchangedToast": {
+        description:
+          "Toast when a split could not even be attempted (the line changed meanwhile, or the " +
+          "connection failed). Nothing was written.",
+      },
+      "editor.splitQuotes.failedToast": {
+        description:
+          "Toast when the server refused a split; the line has been restored as it was.",
+      },
+      "editor.splitQuotes.forbiddenToast": {
+        description:
+          "Toast when the server refused a split for lack of permission; the line has been " +
+          "restored as it was.",
       },
       // AQU-1422 — hide / show one cell.
       "editor.row.hideCell": {

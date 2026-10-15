@@ -301,6 +301,9 @@ import { v7 as uuidv7 } from "uuid"
 import { sequenceBetween } from "@/lib/timeline/derive"
 import { isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
 import { buildCellRemovalInventory, type CellRemovalInventory } from "@/lib/cell-removal-inventory"
+import { planQuoteSplits, quoteSplitForRow, voiceAssignmentsForSplits } from "@/lib/cells/quote-split-plan"
+import type { QuoteSplitPiece } from "@/lib/cells/quote-split"
+import { SplitAtQuotesDialog } from "@/components/SplitAtQuotesDialog"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
   canEditCells,
@@ -473,7 +476,7 @@ import { applySuggestions, buildUndo, hasEffectiveChange } from "@/lib/file-labe
 import { renameFile, moveFileToCorpus, renameCorpus, deleteFile, applyFileSortIndexes, overlayPendingSortIndexes, settlePendingSortIndexes } from "@/lib/store/file-operations"
 import { deleteFileProjection } from "@/lib/sync/file-projection"
 import { fetchCellsByIds, fetchDeletedFiles, fetchProjectFiles } from "@/lib/sync/cells-read"
-import type { FileSummary } from "@/lib/sync/cells-read-types"
+import type { CellRow, FileSummary } from "@/lib/sync/cells-read-types"
 import { fileSummariesToProgress, mergeFileProgress } from "@/lib/progress/file-summary-progress"
 import { applyPushedFileProgress, invalidateFileProgress, invalidateProjectFileProgress, setLocalFileProgress } from "@/lib/progress/file-progress-resource"
 import { applyStructuralPolicy } from "@/lib/cells/structural"
@@ -2899,10 +2902,15 @@ export function ProjectWorkspace() {
       emitted: Awaited<ReturnType<typeof enqueueEvents>>,
     ): Promise<boolean> => {
       if (!project?.id || !activeFileId) return false
+      // AQU-1759: a split's own source commit too — losing it would leave the
+      // split row holding its whole text with its pieces inserted after it,
+      // so the passage would read twice.
       const losers = emitted.filter(
         (e) =>
           staleIds.has(e.eventId) &&
-          (e.event.kind === "source.cell.reorder" || e.event.kind === "source.cell.delete"),
+          (e.event.kind === "source.cell.reorder"
+            || e.event.kind === "source.cell.delete"
+            || e.event.kind === "source.cell.commit"),
       )
       if (losers.length === 0) return true
 
@@ -2935,6 +2943,15 @@ export function ProjectWorkspace() {
             author: string
             payload: Record<string, never>
           }
+        | {
+            kind: "source.cell.commit"
+            projectId: string
+            fileId: string
+            cellId: string
+            parentId: string
+            author: string
+            payload: { value?: string; valueHtml?: string }
+          }
       > = []
       for (const loser of losers) {
         const cellId = loser.event.cellId
@@ -2954,6 +2971,13 @@ export function ProjectWorkspace() {
             ...base,
             kind: "source.cell.reorder" as const,
             payload: loser.event.payload as { anchorCellId: string | null },
+          })
+        } else if (loser.event.kind === "source.cell.commit") {
+          // Same: the text the row should now hold has not changed.
+          retries.push({
+            ...base,
+            kind: "source.cell.commit" as const,
+            payload: loser.event.payload as { value?: string; valueHtml?: string },
           })
         } else {
           retries.push({ ...base, kind: "source.cell.delete" as const, payload: {} })
@@ -8921,6 +8945,142 @@ export function ProjectWorkspace() {
   )
 
   /**
+   * AQU-1759: split rows at their quotation marks, so narration and each
+   * quotation become rows of their own and can be cast in different voices.
+   *
+   * Built from a FRESH read of the rows rather than the store: the plan chains
+   * on every language's translation head and on the follower's head, and a
+   * stale head is a stale sibling the server drops. It is one targeted read of
+   * the rows and their followers, not a refetch of the file.
+   *
+   * Then the same three moves every structural edit in this file makes — show
+   * it now, send it as one batch, put it back if the server refuses — with one
+   * difference in what counts as a refusal: only the SOURCE events decide
+   * whether the split happened. A translation that could not be divided costs
+   * that language its division, never the split.
+   */
+  const handleSplitAtQuotes = useCallback(
+    async (cellIds: readonly string[]): Promise<void> => {
+      if (!project?.id || !activeFileId || cellIds.length === 0) return
+      const projectId = project.id
+      const fileId = activeFileId
+      const followerOf = new Map<string, { cellId: string | null; sequenceAfter: number | undefined }>()
+      for (const cellId of cellIds) {
+        const insert = cellStore.getInsertPlan(cellId, "below")
+        followerOf.set(cellId, { cellId: insert?.reanchor?.cellId ?? null, sequenceAfter: insert?.sequenceAfter })
+      }
+      let rows: CellRow[]
+      try {
+        const mint = await getTokenForProjectFile(projectId, fileId)
+        if (!mint.token) throw new Error("no sync token")
+        const ids = new Set(cellIds)
+        for (const follower of followerOf.values()) if (follower.cellId) ids.add(follower.cellId)
+        rows = await fetchCellsByIds(projectId, fileId, [...ids], mint.token)
+      } catch (err) {
+        console.error("[splitAtQuotes] read failed:", err)
+        toast.add({ type: "error", title: t("editor.splitQuotes.unchangedToast") })
+        return
+      }
+      const sourceOf = new Map<string, CellRow>()
+      const targetsOf = new Map<string, CellRow[]>()
+      for (const row of rows) {
+        if (row.side === "source") sourceOf.set(row.cellId, row)
+        else targetsOf.set(row.cellId, [...(targetsOf.get(row.cellId) ?? []), row])
+      }
+      const plan = planQuoteSplits({
+        projectId,
+        fileId,
+        author: currentUsername,
+        mintId: uuidv7,
+        rows: cellIds.flatMap((cellId) => {
+          const source = sourceOf.get(cellId)
+          if (!source) return []
+          const follower = followerOf.get(cellId)
+          const next = follower?.cellId ? sourceOf.get(follower.cellId) : undefined
+          return [{
+            source,
+            targets: targetsOf.get(cellId) ?? [],
+            // Only a follower the server agrees is anchored here.
+            successor: next && next.anchorCellId === cellId ? { cellId: next.cellId, eventId: next.eventId } : null,
+            nextSequenceIndex: follower?.sequenceAfter,
+          }]
+        }),
+      })
+      if (plan.splits.length === 0) {
+        toast.add({ type: "error", title: t("editor.splitQuotes.unchangedToast") })
+        return
+      }
+
+      const undo = cellStore.applyOptimisticQuoteSplit(plan.splits.map((split) => ({
+        cellId: split.cellId,
+        firstText: split.pieces[0].text,
+        pieces: split.newCellIds.map((cellId, i) => ({
+          cellId,
+          value: split.pieces[i + 1].text,
+          sequenceIndex: split.sequenceIndexes[i],
+        })),
+        successorCellId: split.successorCellId,
+      })))
+      let emitted: Awaited<ReturnType<typeof enqueueEvents>>
+      try {
+        emitted = await enqueueEvents(plan.events)
+      } catch (err) {
+        // Nothing was queued: `enqueueEvents` refuses the whole batch on the
+        // first input it will not take.
+        console.error("[splitAtQuotes] refused before enqueue:", err)
+        cellStore.rollbackOptimisticQuoteSplit(undo)
+        toast.add({ type: "error", title: t("editor.splitQuotes.failedToast") })
+        return
+      }
+      const mine = new Set(emitted.map((e) => e.eventId))
+      const sourceSide = new Set(emitted.filter((e) => e.event.kind.startsWith("source.")).map((e) => e.eventId))
+      let refusal: MessageKey | null = null
+      const staleIds = new Set<string>()
+      await flushOutboxUntilSettled([...mine], {
+        getTokenForFile: getTokenForProjectFile,
+        onRejected: (entries) => {
+          if (entries.some((e) => sourceSide.has(e.id))) refusal ??= "editor.splitQuotes.failedToast"
+        },
+        onForbidden: (entries) => {
+          if (entries.some((e) => sourceSide.has(e.id))) refusal = "editor.splitQuotes.forbiddenToast"
+        },
+        onStaleSiblings: (entries) => {
+          for (const entry of entries) if (mine.has(entry.id)) staleIds.add(entry.id)
+        },
+      }, { maxRounds: Math.ceil(emitted.length / 100) + 2 })
+      // A dead-lettered re-anchor or source commit is repaired the way every
+      // structural edit here repairs one: re-read the head, re-send the intent.
+      const sourceStale = [...staleIds].some((id) => sourceSide.has(id))
+      if (!refusal && sourceStale && !(await rebaseStaleCellStructureEvents(staleIds, emitted))) {
+        refusal = "editor.splitQuotes.failedToast"
+      }
+      if (refusal) {
+        cellStore.rollbackOptimisticQuoteSplit(undo)
+        toast.add({ type: "error", title: t(refusal) })
+      } else {
+        // Narration after narration keeps the row's voice; quotations are left
+        // for casting — which is the whole point of splitting.
+        const voices = voiceAssignmentsForSplits(plan.splits, tts.settings?.castAssignments)
+        if (voices) void tts.saveTts({ castAssignments: { ...(tts.settings?.castAssignments ?? {}), ...voices } })
+        const lines = plan.splits.reduce((n, split) => n + split.pieces.length, 0)
+        const kept = plan.splits.reduce((n, split) => n + split.lanes.filter((l) => l.outcome === "kept").length, 0)
+        toast.add({
+          type: "success",
+          title: plan.splits.length === 1
+            ? t("editor.splitQuotes.doneToast", { count: lines })
+            : t("editor.splitQuotes.doneManyToast", { rows: plan.splits.length, count: lines }),
+          ...(kept > 0 ? { description: t("editor.splitQuotes.keptToast", { count: kept }) } : {}),
+        })
+        // A translation kept whole now sits on changed source text: ask again
+        // which rows are stale, so its review marker shows without a reload.
+        if (kept > 0) staleSourceRefetchRef.current()
+      }
+      revalidateCells()
+    },
+    [project?.id, activeFileId, currentUsername, cellStore, getTokenForProjectFile, revalidateCells, rebaseStaleCellStructureEvents, tts, toast, t],
+  )
+
+  /**
    * Land on a line the moment it exists. Keyed on the store's version so it
    * re-checks on every projection change and fires exactly once, on the first
    * tick where the row is really there. Gives up after a few seconds rather
@@ -8994,6 +9154,12 @@ export function ProjectWorkspace() {
   const handleRemoveCell = useCallback((cellId: string) => {
     requestRemoveCellRef.current(cellId)
   }, [])
+  // AQU-1759: same indirection, same reason — the preview it opens is declared
+  // beside the removal confirmation, further down.
+  const requestSplitAtQuotesRef = useRef<(cellId: string) => void>(() => {})
+  const handleRequestSplitAtQuotes = useCallback((cellId: string) => {
+    requestSplitAtQuotesRef.current(cellId)
+  }, [])
 
   // AQU-1422: identity-stable wrapper, for the reason the whole
   // EditorActionsContext exists — `handleSetCellHidden` is rebuilt whenever the
@@ -9057,6 +9223,7 @@ export function ProjectWorkspace() {
     onAddLineAt: handleAddLineAt,
     onInsertCellBeside: handleInsertCellBeside,
     onRemoveCell: handleRemoveCell,
+    onSplitAtQuotes: handleRequestSplitAtQuotes, // AQU-1759
     // AQU-1422: passed unconditionally — the ROLE gate is applied in the row,
     // with `canPerform` against the same table the emitter enforces, because
     // that is where the DCS/live-linked reasons already live.
@@ -9065,7 +9232,7 @@ export function ProjectWorkspace() {
     timingLocked,
     canUnlockTiming,
     onOpenTimingSettings: handleOpenTimingSettings,
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleSetCellHiddenStable, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings])
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRequestSplitAtQuotes, handleSetCellHiddenStable, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings])
 
 
   // Drives the editor-area rendering: loading skeleton vs. empty state vs.
@@ -11733,6 +11900,23 @@ export function ProjectWorkspace() {
   // Publish it to the stable wrapper the editor context hands the rows. See
   // `handleRemoveCell` above for why the indirection exists.
   requestRemoveCellRef.current = requestRemoveCell
+
+  /**
+   * AQU-1759: the split's preview. Read from the store, so it opens at once;
+   * the split itself re-reads the row before it writes anything.
+   */
+  const [pendingQuoteSplit, setPendingQuoteSplit] = useState<
+    { cellId: string; pieces: QuoteSplitPiece[]; hasRecordings: boolean } | null
+  >(null)
+  requestSplitAtQuotesRef.current = (cellId: string) => {
+    const cell = getActiveCell(cellId)
+    if (!cell) return
+    const { pieces, refusal } = quoteSplitForRow({ value: cell.original ?? "", valueHtml: cell.originalHtml })
+    if (refusal) return
+    const merged = mergeCellsWithAudio([cell], workspaceAudioByCellIdRef.current)[0] ?? cell
+    const hasRecordings = buildCellRemovalInventory({ cell: merged, targetLangs: [], commentCount: 0 }).takeCount > 0
+    setPendingQuoteSplit({ cellId, pieces, hasRecordings })
+  }
   // AQU-1422: same publication, same reason.
   setCellHiddenRef.current = (cellId, hidden) => { void handleSetCellHidden(cellId, hidden) }
 
@@ -17140,6 +17324,16 @@ export function ProjectWorkspace() {
         onConfirm={() => {
           if (pendingCellRemoval) void handleRemoveLine(pendingCellRemoval.cellId)
           setPendingCellRemoval(null)
+        }}
+      />
+      {/* AQU-1759: what a split will make, before it makes it. */}
+      <SplitAtQuotesDialog
+        pieces={pendingQuoteSplit?.pieces ?? null}
+        hasRecordings={pendingQuoteSplit?.hasRecordings ?? false}
+        onCancel={() => setPendingQuoteSplit(null)}
+        onConfirm={() => {
+          if (pendingQuoteSplit) void handleSplitAtQuotes([pendingQuoteSplit.cellId])
+          setPendingQuoteSplit(null)
         }}
       />
       {/* A remote timing-mode change, acknowledged (2026-08-06). */}

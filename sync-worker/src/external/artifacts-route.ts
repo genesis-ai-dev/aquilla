@@ -29,7 +29,6 @@ import { ROLE } from '../events/role-policy'
 import type { ExternalEnv } from './types'
 import { validateApiCredentialRequest, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
-import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
 import { attachmentDisposition } from '../events/content-disposition'
 import { enforceRateLimit, userRateLimitIdentifier } from '../../../db/shared/rate-limit'
 

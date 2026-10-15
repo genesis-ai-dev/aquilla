@@ -41,8 +41,11 @@ import {
 } from "../lib/monday/crypto"
 import {
   exchangeAuthorizationCode,
+  foreignConnectionError,
   getConnectionAccessToken,
   MondayAuthError,
+  MondayForeignConnectionError,
+  runningEnvironment,
 } from "../lib/monday/tokens"
 import {
   createBoardWebhooks,
@@ -128,6 +131,19 @@ async function orgTokenOr409(
   try {
     return await getConnectionAccessToken(c.env, conn)
   } catch (err) {
+    // AQU-1775: the row was made by another deployment (a production row on
+    // dev after the Neon copy). Not a re-auth problem — reconnecting HERE is
+    // the only fix, and the UI must not send anyone to re-authorise.
+    if (err instanceof MondayForeignConnectionError) {
+      return c.json(
+        {
+          error: err.message,
+          foreignConnection: true,
+          connectionEnvironment: err.connectionEnvironment,
+        },
+        409,
+      )
+    }
     if (err instanceof MondayAuthError) {
       return c.json(
         { error: "Monday connection needs re-authorization", needsReauth: true },
@@ -222,6 +238,10 @@ monday.get("/orgs/:orgId/connection", authMiddleware, async (c) => {
     scopes: conn.scopes,
     createdAt: conn.created_at,
     needsReauth: conn.needs_reauth,
+    // AQU-1775: where the row was made, and whether THIS deployment may use
+    // it. False means the row was copied from another environment.
+    environment: conn.environment,
+    usable: foreignConnectionError(c.env, conn) === null,
   })
 })
 
@@ -344,8 +364,9 @@ monday.get("/oauth/callback", async (c) => {
     await c.env.AQUILLA_PG.prepare(
       `INSERT INTO integration_connections
          (id, org_id, provider, account,
-          access_token_enc, refresh_token_enc, access_token_expires_at, needs_reauth, scopes, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, FALSE, ?, ?)
+          access_token_enc, refresh_token_enc, access_token_expires_at, needs_reauth, scopes, created_by,
+          environment)
+       VALUES (?, ?, ?, ?, ?, ?, ?, FALSE, ?, ?, ?)
        ON CONFLICT (org_id, provider) DO UPDATE SET
          account = EXCLUDED.account,
          access_token_enc = EXCLUDED.access_token_enc,
@@ -353,6 +374,7 @@ monday.get("/oauth/callback", async (c) => {
          access_token_expires_at = EXCLUDED.access_token_expires_at,
          needs_reauth = FALSE,
          scopes = EXCLUDED.scopes,
+         environment = EXCLUDED.environment,
          updated_at = now()`,
     )
       .bind(
@@ -365,6 +387,8 @@ monday.get("/oauth/callback", async (c) => {
         tokens.expiresAt,
         tokens.scope,
         state.userId ?? "unknown",
+        // AQU-1775: a reconnect here re-stamps the row as this deployment's.
+        runningEnvironment(c.env),
       )
       .run()
 

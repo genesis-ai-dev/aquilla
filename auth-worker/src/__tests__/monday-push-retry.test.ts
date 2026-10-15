@@ -45,8 +45,8 @@ async function seedLinkedProject(
   ).run()
   const accessEnc = await encryptMondayToken(env.SECRET_KEY, "monday-plain-token")
   await env.AQUILLA_PG.prepare(
-    `INSERT INTO integration_connections (id, org_id, provider, account, access_token_enc, created_by)
-     VALUES ('conn-1', '1', 'monday', '{"accountSlug":"acme"}', ?, 'wendi')`,
+    `INSERT INTO integration_connections (id, org_id, provider, account, access_token_enc, created_by, environment)
+     VALUES ('conn-1', '1', 'monday', '{"accountSlug":"acme"}', ?, 'wendi', 'test')`,
   )
     .bind(accessEnc)
     .run()

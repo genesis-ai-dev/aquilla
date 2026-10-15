@@ -16,6 +16,7 @@ import { flushDirtyLinks } from "../lib/integrations/push"
 import { markProjectSyncLinksDirty } from "../../../db/shared/progress-sync-dirty"
 import type { IntegrationLinkRow } from "../lib/monday/types"
 import type { Env } from "../types"
+import { scriptMockResponse } from "../../../scripts/mock-openrouter"
 
 const aenv = { ...env, OPENROUTER_API_KEY: "test-openrouter-key" } as unknown as Env
 
@@ -635,6 +636,26 @@ describe("Set up with AI", () => {
     const mappingPrompt = prompts.find((p) => p.includes("Airtable field mapping"))!
     expect(mappingPrompt).toContain('"name":"Progress"')
     expect(mappingPrompt).toContain("Episode 2")
+  })
+
+  it("works end to end against the dev stack's OpenRouter mock", async () => {
+    await seedOrgProject()
+    const fake = makeFakeAirtable({ bases: [trackerBase()] })
+    await seedConnection(fake)
+    install(fake, (prompt) => JSON.parse(scriptMockResponse([{ role: "user", content: prompt }]).choices[0].message.content ?? "{}"))
+
+    const res = await request("anna", "POST", "/api/v2/airtable/projects/proj-1/analyze", {})
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { proposal: { tableId: string; itemGranularity: string; columns: unknown[] } }
+    expect(body.proposal).toMatchObject({
+      tableId: "tblTRACKER000001",
+      itemGranularity: "project_and_files",
+      columns: [
+        { columnId: "fldProgress", columnType: "percent", metric: "completion_pct" },
+        { columnId: "fldStatus", columnType: "singleSelect", metric: "status_auto" },
+        { columnId: "fldName", columnType: "singleLineText", metric: "project_name" },
+      ],
+    })
   })
 
   it("a token that sees no tables gets a 409 that says so", async () => {

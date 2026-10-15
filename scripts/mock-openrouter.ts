@@ -260,6 +260,44 @@ export function scriptMockResponse(messages: ChatMessage[]) {
     }))
   }
 
+  // Airtable table SELECTION (auth-worker lib/airtable/analyze.ts
+  // selectTableForProject, AQU-804): echo back the first real table id.
+  if (userText.includes("Tables available:")) {
+    const tablesMatch = userText.match(/Tables available:\n(\[.*?\])\n/s)
+    let tableId = ""
+    try {
+      const tables = JSON.parse(tablesMatch?.[1] ?? "[]") as { tableId: string }[]
+      tableId = tables[0]?.tableId ?? ""
+    } catch { /* the server falls back to a name match */ }
+    return respond(JSON.stringify({ tableId, reason: "[mock] First table the token can see." }))
+  }
+
+  // Airtable field mapping (lib/airtable/analyze.ts): map completion onto the
+  // first percent or number field and the status onto the first single
+  // select, one record for the project and one per file. The server clamps it.
+  if (userText.includes("Airtable field mapping")) {
+    const fieldsMatch = userText.match(/Table fields: (\[.*?\])\n/s)
+    const tableMatch = userText.match(/\nTable: .* \((tbl[^)]*)\)\n/)
+    const columns: { columnId: string; columnType: string; metric: string }[] = []
+    try {
+      const fields = JSON.parse(fieldsMatch?.[1] ?? "[]") as { id: string; type: string }[]
+      const pct = fields.find((f) => f.type === "percent" || f.type === "number")
+      if (pct) columns.push({ columnId: pct.id, columnType: pct.type, metric: "completion_pct" })
+      const select = fields.find((f) => f.type === "singleSelect")
+      if (select) columns.push({ columnId: select.id, columnType: select.type, metric: "status_auto" })
+    } catch { /* an empty mapping is still a valid proposal */ }
+    return respond(JSON.stringify({
+      mapping: {
+        version: 1,
+        tableId: tableMatch?.[1] ?? "",
+        itemGranularity: "project_and_files",
+        columns,
+        notes: "[mock] Completion and status, one record for the project and one per file.",
+      },
+      summary: "[mock] Keeps a record for the project and one per episode up to date.",
+    }))
+  }
+
   // Monday.com board analyze (auth-worker lib/monday/analyze.ts): the prompt
   // asks for a "column mapping" proposal in strict JSON. Return a minimal valid
   // MondayMapping so the AI-configure flow works end-to-end against the mock.

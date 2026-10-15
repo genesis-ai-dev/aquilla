@@ -17,6 +17,7 @@ import { applyCorrections } from "./transcript-corrections"
 import { loadTranscriptCorrections } from "@/lib/store/transcript-corrections-store"
 import { makeAudioSyncTokenFetcher } from "./sync-token-fetcher"
 import { keepSpans, resolvePcmWindow, type KeepSpan, type PcmTrimWindow } from "./pcm-window"
+import { hasSharedClipPcm, sharedClipWindow } from "./shared-clip-pcm"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { t } from "@/lib/i18n/standalone"
 import { transcribeHosted, type ZeroShotCellContext } from "./transcribe-hosted"
@@ -72,6 +73,13 @@ export interface TranscriptionOptions {
   /** The Transcribe button. A stored Cancel stays quiet on save, and this
    *  press brings the download prompt back. */
   askAgain?: boolean
+  /** AQU-1681: `trim` is one row of a recording shared by many rows, known
+   *  by this key. The whole clip is then decoded once for all of them
+   *  (shared-clip-pcm.ts) instead of once per row. */
+  sharedClipKey?: string
+  /** AQU-1681: with `sharedClipKey`, the caller may pass no bytes when the
+   *  clip is already decoded; this reads them if it is not after all. */
+  loadClipBytes?: () => Promise<Uint8Array>
 }
 
 const WHISPER_SAMPLE_RATE = 16000
@@ -207,8 +215,16 @@ export async function transcribeAudio(
   bytes: Uint8Array,
   opts: TranscriptionOptions = {},
 ): Promise<TranscriptionResult> {
+  const toPcm = () => opts.sharedClipKey && opts.trim
+    ? sharedClipWindow(
+        opts.sharedClipKey,
+        opts.trim,
+        () => (bytes.byteLength > 0 || !opts.loadClipBytes ? bytes : opts.loadClipBytes()),
+        (whole) => audioBytesToWhisperPcm(whole),
+      )
+    : audioBytesToWhisperPcm(bytes, opts.trim)
   if (usesHostedTranscription(opts.session, opts.projectId)) {
-    const kept = keepSpans(await audioBytesToWhisperPcm(bytes, opts.trim), opts.keep, WHISPER_SAMPLE_RATE)
+    const kept = keepSpans(await toPcm(), opts.keep, WHISPER_SAMPLE_RATE)
     return onWindowClock(await transcribeHosted(kept.pcm, {
       jwt: opts.session!.jwt,
       projectId: opts.projectId!,
@@ -220,7 +236,7 @@ export async function transcribeAudio(
   }
   const consented = await requestAiModelConsent(WHISPER_MODEL, { askAgain: opts.askAgain })
   if (!consented) throw new AiModelConsentDeniedError(WHISPER_MODEL.id)
-  const kept = keepSpans(await audioBytesToWhisperPcm(bytes, opts.trim), opts.keep, WHISPER_SAMPLE_RATE)
+  const kept = keepSpans(await toPcm(), opts.keep, WHISPER_SAMPLE_RATE)
   return onWindowClock(await runWhisperOnPcm(kept.pcm, opts), kept.toWindowSec)
 }
 
@@ -404,34 +420,48 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
     return 0
   }
 
+  // AQU-646 / SUB-29: is this the SOURCE CLIP shared by the file's rows, or
+  // somebody's take? (See the trim below.) Decided before the bytes are read
+  // because, AQU-1681, a source clip already decoded for an earlier row of
+  // the batch need not be read at all — for a feature-length recording that
+  // read is tens of megabytes per row.
+  const isMediaCell = cell.medium === "media"
+  const isSourceSegment = isMediaCell && !audioIdSeededWith(audioId, cell.id)
+  const sharedClipKey = isSourceSegment ? `${frontier.audioId}.${frontier.ext}` : undefined
+  const clipHeld = sharedClipKey !== undefined && hasSharedClipPcm(sharedClipKey)
+
   // Local-first (FRO-355): a just-recorded take's bytes live in the OPFS cache
   // even before — or without — a successful R2 upload, so transcription can run
   // offline and while signed out. Only the network fallback needs a JWT, so the
   // sign-in guard moves below the cache probe.
-  const cached = await audioCacheGet(frontier.audioId, frontier.ext)
-  if (!cached && !session?.jwt) {
+  const cached = clipHeld ? null : await audioCacheGet(frontier.audioId, frontier.ext)
+  if (!clipHeld && !cached && !session?.jwt) {
     setTranscribeStatus(audioId, { kind: "error", message: t("audio.error.signInToTranscribe") })
     return 0
   }
 
   setTranscribeStatus(audioId, { kind: "loading", loaded: 0, total: 0, file: "" })
 
+  const readBytes = async (): Promise<Uint8Array> => {
+    const local = cached ?? (clipHeld ? await audioCacheGet(frontier.audioId, frontier.ext) : null)
+    if (local) return local
+    const getSyncToken = makeAudioSyncTokenFetcher(() => session)
+    const fetched = await fetchCellAudio({
+      projectId,
+      fileId: cell.fileId,
+      audioId: frontier.audioId,
+      ext: frontier.ext,
+      getSyncToken,
+    })
+    // Write through so a later transcribe/play hits the cache (mirrors
+    // useCellAudio.ensureBytes). Non-fatal if OPFS is unavailable.
+    void audioCachePut(frontier.audioId, frontier.ext, fetched)
+    return fetched
+  }
+
   const t0 = Date.now()
   try {
-    let bytes = cached
-    if (!bytes) {
-      const getSyncToken = makeAudioSyncTokenFetcher(() => session)
-      bytes = await fetchCellAudio({
-        projectId,
-        fileId: cell.fileId,
-        audioId: frontier.audioId,
-        ext: frontier.ext,
-        getSyncToken,
-      })
-      // Write through so a later transcribe/play hits the cache (mirrors
-      // useCellAudio.ensureBytes). Non-fatal if OPFS is unavailable.
-      void audioCachePut(frontier.audioId, frontier.ext, bytes)
-    }
+    const bytes = clipHeld ? new Uint8Array(0) : await readBytes()
 
     setTranscribeStatus(audioId, { kind: "transcribing" })
 
@@ -445,8 +475,6 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
     // speech: whole-clip transcription, timings against the translation, and
     // it must NEVER write the section's source transcription. Provenance
     // comes from the audioId seed (source clip = fileId, takes = cellId).
-    const isMediaCell = cell.medium === "media"
-    const isSourceSegment = isMediaCell && !audioIdSeededWith(audioId, cell.id)
     // AQU-1210: a TAKE is transcribed through its trim too, so the transcript
     // is of the part that plays — the operator trimmed that silence (or a
     // false start) off for a reason. An untrimmed take is still the whole clip.
@@ -490,6 +518,8 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
       askAgain,
       trim,
       ...(split ? { keep: split.keep } : {}),
+      // Read only if the held clip went away in the meantime.
+      ...(sharedClipKey && trim ? { sharedClipKey, loadClipBytes: readBytes } : {}),
       onProgress: (p) => {
         setTranscribeStatus(audioId, {
           kind: "loading",

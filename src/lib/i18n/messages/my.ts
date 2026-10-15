@@ -4202,7 +4202,7 @@ export const my: Catalog = {
   "importExport.errors.biblicaExpectsIdml": "Biblica လေ့လာမှုမှတ်စု တင်သွင်းခြင်းအတွက် InDesign .idml package လိုအပ်သည်။",
   "importExport.errors.biblicaNoStudyNotes": "{fileName} ကို အောင်မြင်စွာ ဖတ်ခွဲပြီးသော်လည်း လေ့လာမှုမှတ်စု မပါဝင်ပါ။ Biblica မှတ်စုများသည် `intro:*` စာပိုဒ်စတိုင်များတွင် ရှိသည် — ဤဖိုင်သည် မှတ်စုစာတမ်း ဟုတ်မဟုတ် စစ်ဆေးပါ။",
   "importExport.errors.invalidIdmlPackage": "{fileName} သည် မှန်ကန်သော IDML package မဟုတ်ပါ။ IDML ဖိုင်များသည် ZIP သိမ်းဆည်းမှုများဖြစ်ပြီး \"PK\" ဖြင့် စတင်ပါသည်။",
-  "importExport.errors.mediaFileTooLarge": "{fileName} သည် 95 MB မီဒီယာတင်သွင်းမှု ကန့်သတ်ချက်ကို ကျော်လွန်နေသည်။",
+  "importExport.errors.mediaFileTooLarge": "{fileName} သည် {limit} မီဒီယာတင်သွင်းမှု ကန့်သတ်ချက်ကို ကျော်လွန်နေသည်။",
   "importExport.errors.couldNotDecodeAudio": "{fileName} ကို decode လုပ်၍ မရပါ — ဖိုင်ပျက်စီးနေခြင်း သို့မဟုတ် အထောက်အပံ့မပေးသော codec ဖြစ်နေနိုင်သည်။ mp3 သို့မဟုတ် wav အဖြစ် ပြန်ထုတ်ယူကြည့်ပါ။",
   "importExport.errors.notAParatextProject": "၎င်းသည် Paratext ပရောဂျက် မဟုတ်ပုံရသည် — USFM ကျမ်းများပါသော Settings.xml (သို့မဟုတ် .ssf) မတွေ့ပါ။",
   "importExport.notices.basicParserFallback": "Aquilla သည်ဤတည်ဆောက်သည့်အသုံးအနှုန်းကို AI အကျည်းစီစဉ်မည်မဟုတ်။အခြေခံအလုံးအစုသုံးစွဲခဲ့သည်။တင်သွင်းမီအစဉ်အလာအစီအမံကြည့်ပါ။",

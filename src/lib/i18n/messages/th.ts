@@ -4203,7 +4203,7 @@ export const th: Catalog = {
   "importExport.errors.biblicaExpectsIdml": "การนำเข้าหมายเหตุการศึกษาของ Biblica ต้องใช้แพ็กเกจ InDesign .idml",
   "importExport.errors.biblicaNoStudyNotes": "{fileName} แยกวิเคราะห์สำเร็จแต่ไม่มีหมายเหตุการศึกษา หมายเหตุของ Biblica อยู่ในสไตล์ย่อหน้า `intro:*` — ตรวจสอบว่านี่คือเอกสารหมายเหตุจริงหรือไม่",
   "importExport.errors.invalidIdmlPackage": "{fileName} ไม่ใช่แพ็กเกจ IDML ที่ถูกต้อง ไฟล์ IDML เป็นไฟล์บีบอัด ZIP และขึ้นต้นด้วย \"PK\"",
-  "importExport.errors.mediaFileTooLarge": "{fileName} มีขนาดเกินขีดจำกัดการนำเข้าสื่อที่ 95 MB",
+  "importExport.errors.mediaFileTooLarge": "{fileName} มีขนาดเกินขีดจำกัดการนำเข้าสื่อที่ {limit}",
   "importExport.errors.couldNotDecodeAudio": "ถอดรหัส {fileName} ไม่สำเร็จ — ไฟล์อาจเสียหายหรือใช้ตัวแปลงสัญญาณที่ไม่รองรับ ลองส่งออกใหม่เป็น mp3 หรือ wav",
   "importExport.errors.notAParatextProject": "นี่ดูเหมือนจะไม่ใช่โปรเจกต์ Paratext — ไม่พบ Settings.xml (หรือ .ssf) ที่มีพระธรรม USFM",
   "importExport.notices.basicParserFallback": "Aquilla ไม่สามารถตรวจสอบเลย์เอาต์ที่มีโครงสร้างนี้ด้วย AI ดังนั้นจึงใช้เครื่องแยกวิเคราะห์พื้นฐาน ตรวจสอบการแสดงตัวอย่างอย่างระมัดระวังก่อนนำเข้า",

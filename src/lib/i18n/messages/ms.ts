@@ -4185,7 +4185,7 @@ export const ms: Catalog = {
   "importExport.errors.biblicaExpectsIdml": "Import nota kajian Biblica memerlukan pakej InDesign .idml.",
   "importExport.errors.biblicaNoStudyNotes": "{fileName} berjaya dihurai tetapi tidak mengandungi nota kajian. Nota Biblica berada dalam gaya perenggan `intro:*` — semak bahawa ini ialah dokumen nota.",
   "importExport.errors.invalidIdmlPackage": "{fileName} bukan pakej IDML yang sah. Fail IDML ialah arkib ZIP dan bermula dengan \"PK\".",
-  "importExport.errors.mediaFileTooLarge": "{fileName} melebihi had import media 95 MB.",
+  "importExport.errors.mediaFileTooLarge": "{fileName} melebihi had import media {limit}.",
   "importExport.errors.couldNotDecodeAudio": "Tidak dapat menyahkod {fileName} — fail mungkin rosak atau dalam kodek yang tidak disokong. Cuba eksport semula sebagai mp3 atau wav.",
   "importExport.errors.notAParatextProject": "Itu tidak kelihatan seperti projek Paratext — tiada Settings.xml (atau .ssf) dengan kitab USFM ditemui.",
   "importExport.notices.basicParserFallback": "Aquilla tidak dapat mengesahkan tata letak berstruktur ini dengan AI, jadi ia menggunakan penganalisis asas. Semak pratonton dengan teliti sebelum mengimport.",

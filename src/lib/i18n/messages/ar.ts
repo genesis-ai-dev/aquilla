@@ -4212,7 +4212,7 @@ export const ar: Catalog = {
   "importExport.errors.biblicaExpectsIdml": "يتوقّع استيراد ملاحظات دراسة Biblica حزمة InDesign بامتداد .idml.",
   "importExport.errors.biblicaNoStudyNotes": "تم تحليل {fileName} بنجاح لكنه لم يحتوِ على أي ملاحظات دراسة. تكون ملاحظات Biblica ضمن أنماط الفقرات `intro:*` — تحقّق من أن هذا هو مستند الملاحظات.",
   "importExport.errors.invalidIdmlPackage": "{fileName} ليس حزمة IDML صالحة. ملفات IDML هي أرشيفات ZIP وتبدأ بـ\"PK\".",
-  "importExport.errors.mediaFileTooLarge": "يتجاوز {fileName} حد استيراد الوسائط البالغ 95 ميغابايت.",
+  "importExport.errors.mediaFileTooLarge": "يتجاوز {fileName} حد استيراد الوسائط البالغ {limit}.",
   "importExport.errors.couldNotDecodeAudio": "تعذّر فك ترميز {fileName} — قد يكون الملف تالفًا أو بترميز غير مدعوم. حاول إعادة تصديره بصيغة mp3 أو wav.",
   "importExport.errors.notAParatextProject": "لا يبدو هذا مشروع Paratext — لم يُعثر على Settings.xml (أو .ssf) يحتوي على أسفار USFM.",
   "importExport.notices.basicParserFallback": "لم تتمكن Aquilla من التحقق من هذا التخطيط المنظم باستخدام الذكاء الاصطناعي، لذا استخدمت المُحلل الأساسي. تحقق من المعاينة بعناية قبل الاستيراد.",

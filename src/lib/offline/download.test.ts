@@ -308,4 +308,21 @@ describe("recoverInterruptedDownloads", () => {
     seedProject("fine", "ready")
     expect(recoverInterruptedDownloads(store)).toEqual([])
   })
+
+  // Recovery waits for the store to be verified, so a download the user
+  // started this session can already be under way when it runs.
+  it("leaves a download that's in progress this session alone", () => {
+    const never = () => new Promise<never>(() => {})
+    const stalled: DownloadProjectDeps = {
+      resolveCloudProjectResult: never,
+      fetchSyncToken: never,
+      fetchProjectFiles: never,
+      streamFileCells: never,
+    }
+    void downloadProjectOffline(store, "live", "jwt", stalled)
+    expect(getDownloadProgress("live")).not.toBeNull()
+
+    expect(recoverInterruptedDownloads(store)).toEqual([])
+    expect(store.query(tables.offlineProjects.select().where({ projectId: "live" }))).toHaveLength(1)
+  })
 })

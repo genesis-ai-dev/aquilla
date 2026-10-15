@@ -217,6 +217,9 @@ export function recoverInterruptedDownloads(store: Store<typeof schema>): string
   const stuck = store
     .query(tables.offlineProjects.select())
     .filter((row) => row.status === "downloading" || row.status === "removing")
+    // Runs once the store is verified, which can be after the user has
+    // started a download this session: that one is live, not interrupted.
+    .filter((row) => getDownloadProgress(row.projectId) === null)
     .map((row) => row.projectId)
   for (const projectId of stuck) deleteProjectRows(store, projectId)
   return stuck

@@ -15,6 +15,7 @@ import { buildProgramme, slotAtProgrammeSec, type Programme, type ProgrammeSlot 
 import type { AudioTimingMode } from "@/lib/parsers/types"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
+import { tailCutNow } from "./tail-cut"
 import { preferredPlaybackExt } from "./lossless-sibling"
 import { getAudioQualityPref, type AudioQuality } from "@/lib/store/audio-quality-pref"
 import { audioMimeForExt } from "./mime"
@@ -595,6 +596,8 @@ interface ResolvedAudioSrc {
   src: string
   /** Object URL to revoke on dispose (blob playback only). */
   objectUrl: string | null
+  /** AQU-1767: the bytes behind a cached blob, so a trimmed dub can be cut to end at its trim. */
+  bytes?: Uint8Array
   /** True when src is an authenticated streaming URL — on media error the
    *  queue retries once via the full-bytes blob path. */
   streaming: boolean
@@ -677,7 +680,7 @@ async function resolveAudioSrc(
     const url = URL.createObjectURL(
       new Blob([cached as BlobPart], { type: audioMimeForExt(frontier.ext) }),
     )
-    return { src: url, objectUrl: url, streaming: false, frontier, swapped }
+    return { src: url, objectUrl: url, streaming: false, frontier, swapped, bytes: cached }
   }
   const streamUrl = await getCellAudioStreamUrl({
     projectId,
@@ -2066,6 +2069,17 @@ function executeFire(
       // Evicted/replaced/cleared while resolving.
       if (resolved.objectUrl) URL.revokeObjectURL(resolved.objectUrl)
       return
+    }
+    // AQU-1767: a trimmed dub plays bytes that END at its trim end, so it stops
+    // there by itself, however busy the page is; the timer stays as the
+    // fallback for a clip that could not be cut (streamed, or not yet decoded).
+    if (timingMode !== "audioFirst" && plan.stopAtClipSec != null && resolved.bytes && resolved.frontier) {
+      const cut = tailCutNow(resolved.frontier.audioId, resolved.frontier.ext, resolved.bytes, plan.stopAtClipSec)
+      if (cut) {
+        if (resolved.objectUrl) URL.revokeObjectURL(resolved.objectUrl)
+        const url = URL.createObjectURL(cut)
+        resolved = { ...resolved, src: url, objectUrl: url }
+      }
     }
     wireOverlayElement(entry, { resolved }, startAtClipSec, { autostart: true })
   })()

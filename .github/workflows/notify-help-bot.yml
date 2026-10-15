@@ -24,9 +24,8 @@ jobs:
     steps:
       - name: Ping the aquilla-help bot
         env:
-          # Both come from the bot's trigger panel. The panel's header name
-          # carries key material, so the whole header line, "Name: key",
-          # is a secret.
+          # Both come from the bot's trigger panel. The auth header secret is
+          # the whole line, "Authorization: Bearer <key>".
           WEBHOOK_URL: ${{ secrets.GROK_HELP_WEBHOOK_URL }}
           WEBHOOK_AUTH_HEADER: ${{ secrets.GROK_HELP_WEBHOOK_AUTH_HEADER }}
           TAG: ${{ github.ref_name }}

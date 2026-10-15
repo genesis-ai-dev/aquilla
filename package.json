@@ -1,0 +1,36 @@
+{
+  "name": "aquilla-ambient",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ambient localization research prototype: translate once, stay translated. Live IDML round-tripping plus a second (Markdown) and third (JSON) adapter on one format-agnostic core.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "bin": {
+    "ambient": "./bin/ambient.mjs"
+  },
+  "scripts": {
+    "ambient": "tsx src/ambient/cli.ts",
+    "demo": "tsx scripts/demo.ts",
+    "gate": "tsx scripts/gate-a.ts",
+    "fixtures": "tsx scripts/make-fixtures.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "check": "pnpm typecheck && pnpm test"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.134.0",
+    "fflate": "0.8.3",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "fast-check": "4.10.2",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "vitest": "5.0.4"
+  }
+}

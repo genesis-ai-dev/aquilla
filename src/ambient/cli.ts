@@ -85,7 +85,14 @@ export const printSummary = (s: SyncSummary, log: (m: string) => void = console.
         l.diagnostics.filter((x) => x.severity === "error").length ? `${l.diagnostics.filter((x) => x.severity === "error").length} error(s)` : "",
       ].filter(Boolean)
       log(`  → ${l.locale}: ${flags.join(" · ")}${l.besideTarget ? " · written beside existing file" : ""}`)
-      for (const sug of l.suggestions) log(`    💡 "${sug.from}" → "${sug.to}" seen in a human edit. Accept everywhere: ambient correction accept ${sug.id}`)
+    }
+  }
+  const seen = new Set<string>()
+  for (const l of s.docs.flatMap((d) => d.locales)) {
+    for (const sug of l.suggestions) {
+      if (seen.has(sug.id)) continue
+      seen.add(sug.id)
+      log(`💡 [${l.locale}] "${sug.from}" → "${sug.to}" came from a human edit. Apply it everywhere: ambient correction accept ${sug.id}`)
     }
   }
   if (s.written.length) log(`wrote ${s.written.length} file(s): ${s.written.join(", ")}`)

@@ -4218,7 +4218,7 @@ export const zh_Hans: Catalog = {
   "importExport.errors.biblicaExpectsIdml": "Biblica 研读注释导入需要 InDesign 的 .idml 封装。",
   "importExport.errors.biblicaNoStudyNotes": "{fileName} 已成功解析，但其中没有任何研读注释。Biblica 的注释位于 `intro:*` 段落样式中 — 请确认这是注释文档。",
   "importExport.errors.invalidIdmlPackage": "{fileName} 不是有效的 IDML 封装。IDML 文件是 ZIP 压缩档，开头为「PK」。",
-  "importExport.errors.mediaFileTooLarge": "{fileName} 超过 95 MB 的媒体导入上限。",
+  "importExport.errors.mediaFileTooLarge": "{fileName} 超过 {limit} 的媒体导入上限。",
   "importExport.errors.couldNotDecodeAudio": "无法解码 {fileName} — 该文件可能已损毁，或使用不支持的编码。请试着改用 mp3 或 wav 重新导出。",
   "importExport.errors.notAParatextProject": "这看起来不像 Paratext 项目 — 找不到含有 USFM 书卷的 Settings.xml（或 .ssf）。",
   "importExport.notices.basicParserFallback": "Aquilla 无法以 AI 验证这个结构化版面，因此改用了基本解析器。导入前请仔细检查预览内容。",

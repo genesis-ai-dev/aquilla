@@ -302,17 +302,18 @@ function withOutboxQuotaRecovery(write: () => Promise<void>): Promise<void> {
   return withStorageQuotaRecovery(write, purgeCellsCacheForQuota)
 }
 
-export async function enqueueOutboxEvent(event: CqrsRawEvent): Promise<void> {
+export async function enqueueOutboxEvent(event: CqrsRawEvent, scope?: OutboxOwnerScope): Promise<void> {
   // Tauri desktop offline routing (Phase 4): eligible kinds on a
   // ready-for-offline project bypass IndexedDB entirely — LiveStore's
   // event_queue (+ its own sync adapter) fully replaces the IDB outbox for
   // these. `isTauriRuntime()` is a zero-cost check on the web, so this branch
   // adds no overhead to the browser SPA's write path.
-  if (isTauriRuntime() && (await routeToOfflineQueueIfEligible(event))) return
+  // A scoped (guest) write never takes the signed-in desktop's offline queue.
+  if (!scope && isTauriRuntime() && (await routeToOfflineQueueIfEligible(event))) return
 
   // Capture before IndexedDB opens. A transition that lands during that await
   // must not reclassify an edit initiated by the previous account.
-  const ownerKey = activeOwnerKey
+  const ownerKey = ownerForScope(scope)
   const rec: OutboxRecord = {
     id: event.id,
     enqueuedAt: Date.now(),
@@ -647,10 +648,14 @@ export async function getOutboxRecordsForCell(
   }
 }
 
-/** Oldest-first rows with status `pending` only, at most `limit`. Used by the flusher. */
+/** Oldest-first rows with status `pending` only, at most `limit`. Used by the flusher.
+ *  `skip` drops rows the caller is deliberately holding back (OPS-44) before
+ *  they count toward `limit`, so a large held backlog cannot fill the window
+ *  and hide the rows behind it. */
 export async function peekPendingOutboxBatch(
   limit: number,
   scope?: OutboxOwnerScope,
+  skip?: (record: OutboxRecord) => boolean,
 ): Promise<OutboxRecord[]> {
   const ownerKey = ownerForScope(scope)
   try {
@@ -667,7 +672,11 @@ export async function peekPendingOutboxBatch(
           return
         }
         const record = cursor.value as OutboxRecord
-        if (belongsToOwner(record, ownerKey) && (record.status ?? "pending") === "pending") {
+        if (
+          belongsToOwner(record, ownerKey) &&
+          (record.status ?? "pending") === "pending" &&
+          !skip?.(record)
+        ) {
           pending.push(record)
         }
         cursor.continue()

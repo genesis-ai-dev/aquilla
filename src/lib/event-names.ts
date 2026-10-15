@@ -98,6 +98,19 @@ export const INVITE_REDEEMED = "invite redeemed"
  */
 export const OUTBOX_QUARANTINED = "outbox record quarantined"
 
+// ── Comment submission (AQU-1957) ─────────────────────────────────────────
+
+/**
+ * A `comment.*` event the outbox gave up on — quarantined on a 403 (role
+ * floor, the org's `commentCreateMinRole`, membership revoked mid-session) or
+ * retry-exhausted on a deterministic 4xx. OUTBOX_QUARANTINED already counts
+ * the record but names no kind, so a comment that never posted was
+ * indistinguishable from any other refused write: the only report of
+ * AQU-1957 reached us through meeting notes. Fired once per outbox record,
+ * and never with the comment body.
+ */
+export const COMMENT_SUBMIT_REFUSED = "comment submit refused"
+
 // ── TTS provider cutover (AQU-1189) ───────────────────────────────────────
 
 /**

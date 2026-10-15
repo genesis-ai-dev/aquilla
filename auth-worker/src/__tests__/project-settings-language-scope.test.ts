@@ -208,4 +208,17 @@ describe("lane writes carry the language-edit floor (AQU-1086 / AQU-984)", () =>
     expect(res.status).toBe(200)
     expect(await storedLaneLanguage()).toBe("German")
   })
+
+  it("does not reopen terminology (the key is retired for every role, AQU-1724)", async () => {
+    // languageEditMinRole 500 must not let anyone write terminology — it is
+    // refused outright, pointing to term.* events. The body carries no
+    // language keys (AQU-1595 would 400 those for a different reason).
+    await seed('{"languageEditMinRole":500}')
+    const res = await patchProjectSettings("dan", {
+      terminology: [{ id: "c1", sourceTerm: "grace", renderings: [], status: "active" }],
+    })
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { error?: string }).error).toContain("term.create")
+    expect((await storedSettings()).terminology).toBeUndefined()
+  })
 })

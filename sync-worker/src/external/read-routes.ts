@@ -104,7 +104,7 @@ async function handleExternalMe(request: Request, env: ExternalReadsEnv): Promis
   if (!env.AQUILLA_PG) return externalError("job_failed", "AQUILLA_PG not configured", 500)
   const authed = await authenticateCredential(request, env)
   if (!authed.ok) return authed.response
-  const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.credential.credentialId)
+  const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.credential)
   if (limited) return limited
   const cred = authed.credential
   return Response.json({
@@ -151,7 +151,7 @@ async function handleExternalProjects(request: Request, env: ExternalReadsEnv): 
   if (!env.AQUILLA_PG) return externalError("job_failed", "AQUILLA_PG not configured", 500)
   const authed = await authenticateCredential(request, env)
   if (!authed.ok) return authed.response
-  const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.credential.credentialId)
+  const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.credential)
   if (limited) return limited
 
   const orgId = new URL(request.url).searchParams.get("orgId")
@@ -191,7 +191,7 @@ async function handleExternalProjectDetail(
   const authed = await authenticateAndScope(request, env, projectId)
   if (!authed.ok) return authed.response
   if (env.AQUILLA_PG) {
-    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential.credentialId)
+    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential)
     if (limited) return limited
   }
 
@@ -217,7 +217,7 @@ async function handleExternalFiles(
   const authed = await authenticateAndScope(request, env, projectId)
   if (!authed.ok) return authed.response
   if (env.AQUILLA_PG) {
-    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential.credentialId)
+    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential)
     if (limited) return limited
   }
 
@@ -296,7 +296,7 @@ async function handleExternalFileCells(
   const authed = await authenticateAndScope(request, env, projectId)
   if (!authed.ok) return authed.response
   if (env.AQUILLA_PG) {
-    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential.credentialId)
+    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential)
     if (limited) return limited
   }
 
@@ -424,7 +424,7 @@ async function handleExternalCellHistory(
   const authed = await authenticateAndScope(request, env, projectId)
   if (!authed.ok) return authed.response
   if (env.AQUILLA_PG) {
-    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential.credentialId)
+    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential)
     if (limited) return limited
   }
 
@@ -481,7 +481,7 @@ async function handleExternalProjectSettings(
   const authed = await authenticateAndScope(request, env, projectId)
   if (!authed.ok) return authed.response
   if (env.AQUILLA_PG) {
-    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential.credentialId)
+    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential)
     if (limited) return limited
   }
 
@@ -524,7 +524,7 @@ async function handleExternalPromptPreview(
   const authed = await authenticateAndScope(request, env, projectId)
   if (!authed.ok) return authed.response
   if (env.AQUILLA_PG) {
-    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential.credentialId)
+    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential)
     if (limited) return limited
   }
   if (!env.AQUILLA_PG) return externalError("job_failed", "AQUILLA_PG not configured", 500)

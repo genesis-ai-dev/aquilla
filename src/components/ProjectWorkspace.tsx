@@ -57,6 +57,7 @@ import {
   writePersistedActiveLane,
 } from "@/lib/lanes/active-lane-choice"
 import { readAtVersion, useActiveCellStore, useCellStoreVersion, type CellSummary } from "@/hooks/useActiveCellStore"
+import { useActiveTargetLane } from "@/hooks/useActiveTargetLane"
 import { useImportCellRefs } from "@/hooks/useImportCellRefs"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
 import { triggerLinkSync } from "@/lib/sync/archive"
@@ -110,8 +111,9 @@ import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCac
 import { completionBatchSizeFor, workspaceActions, getVisibleActions } from "@/lib/workspace-actions/registry"
 import type { WorkspaceAction } from "@/lib/workspace-actions/types"
 import type { FileReference } from "@/lib/parsers/types"
-import { fileOrderedBy, isMediaFileType, isTranslationMemoryFile, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
-import { isBibleOpen } from "@/lib/bible-data/experiment"
+import { fileOrderedBy, infractionSeverity, isMediaFileType, isTranslationMemoryFile, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
+import { resolveBibleEnrichment } from "../../db/shared/bible-enrichments"
+import { isBibleDataExperimentOn, isBibleOpen } from "@/lib/bible-data/experiment"
 import { isAudioCueFile, isHiddenTimelineFile, isSubtitleImportFile, isVideoTimedSubtitleFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
 import { isAutopilotVisible } from "@/lib/features/flags"
 import { isDiscourseFile } from "@/lib/contextual/discourse-file"
@@ -246,7 +248,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { canHarmonize, emitCastAssign, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, enqueueEvents } from "@/lib/sync/events-emit"
+import { canHarmonize, emitCastAssign, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -328,7 +330,7 @@ import { useComments } from "@/hooks/useComments"
 import { useFileAttachments } from "@/hooks/useFileAttachments"
 import { removeAttachmentFromCell } from "@/lib/attachments/attach-file"
 import type { CellAttachmentRecord } from "@/lib/sync/cell-attachments-read-types"
-import { MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical, BarChart3 } from "lucide-react"
+import { MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical, BarChart3, Loader2 } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { setMicHeld } from "@/lib/audio/mic-hold"
 import { startOutputDeviceWatch } from "@/lib/audio/output-device-watch"
@@ -339,6 +341,7 @@ import type { ContextChip } from "@/lib/agent/context-chip"
 import { CheckFindingsDrawer } from "./CheckFindingsDrawer"
 import { FileChapterToolbar } from "./FileChapterToolbar"
 import { runDeterministicCheck, type CheckRunResult } from "@/lib/check/deterministic-check"
+import { useBibleChecks } from "@/hooks/useBibleChecks"
 import { SearchDockPanel } from "./SearchDockPanel"
 import { SearchResultsView } from "./search/SearchResultsView"
 import { LeftDock } from "./LeftDock"
@@ -352,6 +355,10 @@ import {
 } from "@/lib/editor/right-rail-panels"
 import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen } from "./ParallelBiblesSidebar"
 import { VerseResourcesSidebar, readVerseResourcesOpen, writeVerseResourcesOpen } from "./VerseResourcesSidebar"
+import { WhosWhoSidebar } from "./bible-data/WhosWhoSidebar"
+import { readWhosWhoOpen, writeWhosWhoOpen } from "./bible-data/whos-who-open-state"
+import { useVoiceOverrideWriter, voiceOverrideFailureKey } from "./bible-data/use-voice-override-writer"
+import { useBiblePackStatus } from "./bible-data/bible-data-bus"
 import { InactiveProjectBanner } from "./InactiveProjectBanner"
 import { OfflineBanner } from "./OfflineBanner"
 import { LinkSeedFailedBanner } from "./LinkSeedFailedNotice"
@@ -420,6 +427,9 @@ import { useShowHiddenCells, setShowHiddenCells } from "@/lib/store/show-hidden-
 import { EditorScrollProvider } from "@/context/EditorScrollContext"
 import { ScrollToGroupHandler } from "@/components/ScrollToGroupHandler"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
+import { ForecastProvider } from "@/context/ForecastContext"
+import { useForecastCorpus } from "@/hooks/useForecastCorpus"
+import { useGhostTextEnabled } from "@/lib/store/ghost-text-pref"
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
 import { downloadImportedOriginal } from "@/lib/file-original-download"
 import { useOriginalSourceFlags } from "@/hooks/useOriginalSourceFlags"
@@ -429,7 +439,7 @@ import { deleteFileProjection } from "@/lib/sync/file-projection"
 import { fetchCellsByIds, fetchDeletedFiles, fetchProjectFiles } from "@/lib/sync/cells-read"
 import type { FileSummary } from "@/lib/sync/cells-read-types"
 import { fileSummariesToProgress, mergeFileProgress } from "@/lib/progress/file-summary-progress"
-import { invalidateFileProgress, invalidateProjectFileProgress, setLocalFileProgress } from "@/lib/progress/file-progress-resource"
+import { applyPushedFileProgress, invalidateFileProgress, invalidateProjectFileProgress, setLocalFileProgress } from "@/lib/progress/file-progress-resource"
 import { applyStructuralPolicy } from "@/lib/cells/structural"
 import { isExcludedFromWork } from "@/lib/health/excluded-cell"
 import { Button } from "@/components/ui/button"
@@ -485,6 +495,7 @@ import { useSubscribedConcepts } from "@/hooks/useSubscribedConcepts"
 import { resolveTermbaseEditFloor } from "@/lib/terminology/glossary-view"
 import { conceptsForLaneTag } from "@/lib/terminology/rendering-lane"
 import type { ConceptDraft } from "@/lib/terminology/types"
+import type { EntityLinkRequest } from "@/components/bible-data/entity-term-context"
 import { buildGlosser, type Glosser } from "@/lib/completion/bt-glosser"
 import { memMark } from "@/lib/perf-log"
 import { buildAlignmentModel, type AlignmentModel } from "@/lib/completion/interlinear"
@@ -527,13 +538,13 @@ import {
   useTrackedCellRef as useEditorViewportTrackedCellRef,
 } from "@/hooks/useEditorViewportStore"
 
-// Import runs inline in the workspace (upload + eBible corpus tabs). The
-// AD-11 plan carves import into a standalone apps/import Worker, but that
-// app is still a placeholder shell — routing users there is a dead end.
-// The import pipeline (parsers + outbox + events-emit) is workspace-
-// internal and not yet extracted into a shared package the standalone app
-// could consume, so the working ImportDialog stays hosted here. Lazy-loaded
-// because the eBible parser bundles a ~2MB vref table.
+// Import runs inline in the workspace (upload + eBible corpus tabs). An
+// earlier AD-11 plan carved import out into a standalone import Worker; that
+// monorepo layout was abandoned (see CLAUDE.md), so there is nowhere to route
+// users to. The import pipeline (parsers + outbox + events-emit) is
+// workspace-internal and was never extracted into a shared package, so the
+// ImportDialog stays hosted here. Lazy-loaded because the eBible parser
+// bundles a ~2MB vref table.
 const ImportDialog = lazy(() =>
   import("./ImportDialog").then((mod) => ({ default: mod.ImportDialog })),
 )
@@ -2444,6 +2455,17 @@ export function ProjectWorkspace() {
     const hadStoredChoice = stored.laneId !== null || stored.legacyTag !== null
     if (hadStoredChoice && laneId) writePersistedActiveLane(projectId, laneId, lane)
   }, [projectId, project?.lanes, laneRows, fallbackLaneId])
+  // AQU-1902: the lane row target writes go to. Null while it cannot be named
+  // (lane rows still loading and no remembered lane id for this tag): the
+  // editor is then read-only, so no edit is queued onto a lane the server will
+  // refuse — or onto a lane the reader is not looking at.
+  const activeTargetLane = useActiveTargetLane(
+    projectId,
+    project?.lanes != null ? laneRows : null,
+    settingsFetched,
+    activeLane,
+  )
+  const lanesPending = activeTargetLane === null
   // A member the org limited to certain lanes opens in one of them, never on
   // the default lane when that lies outside their limit, and may switch among
   // them (`scopedLanesFor`). Null keeps the AQU-608 rule for everyone else.
@@ -4378,6 +4400,24 @@ export function ProjectWorkspace() {
     ],
   )
 
+  // AQU-1692: "Adopt voices as cast" in the Bible voice details. The same
+  // write as a character sheet's: the names, then one voice per character so
+  // the cast gutter draws them.
+  const adoptVoicesAsCast = useCallback(
+    (assignments: readonly { cellId: string; castName: string }[]) => {
+      void handleImportCharacters({
+        assignments: assignments.map((a, i) => ({ ...a, cameraState: undefined, rowNumber: i + 1 })),
+        blankRows: 0,
+        unmatchedRows: [],
+        cellsWithoutRow: 0,
+        cameraDisagreements: 0,
+        filledByPosition: 0,
+        distinctCharacters: new Set(assignments.map((a) => a.castName)).size,
+      })
+    },
+    [handleImportCharacters],
+  )
+
   /**
    * The same import, for the sheet keyed to the HEARD lines.
    *
@@ -5185,6 +5225,10 @@ export function ProjectWorkspace() {
     deleteComment,
     resolveThread: resolveCommentThread,
     refresh: refreshComments,
+    // AQU-1957: comment.* events the outbox gave up on. The hook has already
+    // pulled their optimistic comments back out, so the drawer needs these to
+    // explain the text that disappeared instead of posting.
+    refusals: commentSubmitRefusals,
   } = useComments({
     projectId: project?.id ?? null,
     getToken: getTokenForFile,
@@ -5311,6 +5355,23 @@ export function ProjectWorkspace() {
   // the edit/commit path keep live selectors.
   const corpusCells = useDebouncedValue(cellSummaries, 600)
 
+  // BIA forecasting — ghost-text next words and "words that fit here" — from
+  // the project's own target text, in a Web Worker (see useForecastCorpus).
+  const ghostTextEnabled = useGhostTextEnabled()
+  const forecastClient = useForecastCorpus({
+    enabled: true,
+    projectId: project?.id,
+    files: projectFiles,
+    activeFileId,
+    activeCells: corpusCells,
+    getToken: getTokenForFile,
+    lane: activeLane,
+  })
+  const forecastValue = useMemo(
+    () => (forecastClient ? { client: forecastClient, ghostTextEnabled } : null),
+    [forecastClient, ghostTextEnabled],
+  )
+
   const { importSourceCells, fileTargetCells } = useImportCellRefs(cellSummaries, importOpen)
 
   // AD-13 branching-search adapters — single-cell completion's few-shot
@@ -5409,6 +5470,8 @@ export function ProjectWorkspace() {
     // declared further down and a deps array is evaluated at render — the same
     // temporal-dead-zone trap the note over handleToggleCueLink describes.
     if (activeLaneLock !== null) return
+    // AQU-1902: nor before the active lane's row is known.
+    if (lanesPending) return
     // TOCTOU guard: `cell` is the row snapshot captured when the sparkle was
     // clicked. A rapid second draft can arrive after the FIRST draft's
     // projection confirmed (which clears its pending-head entry) but before
@@ -5588,7 +5651,7 @@ export function ProjectWorkspace() {
     // only that row's stats and cell data back (its authoritative event_id
     // becomes the next commit's parent) instead of re-fetching the file.
     confirmCommitted(cell.id, eventId)
-  }, [project?.id, project?.syncRole?.level, applyOptimisticTargetEdit, activeLane, laneCellKey, getActiveCell, cellStore, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell, confirmCommitted])
+  }, [project?.id, project?.syncRole?.level, applyOptimisticTargetEdit, activeLane, laneCellKey, getActiveCell, cellStore, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell, confirmCommitted, lanesPending])
 
   const commitCompletedCells = useCallback(async (
     drafts: CompletedCellDraft[],
@@ -6390,6 +6453,8 @@ export function ProjectWorkspace() {
         // overrides) are part of the term, not popover-local UI state — drop
         // them here and the chips the user just clicked would do nothing.
         ...(draft.match ? { match: draft.match } : {}),
+        // AQU-1693: from a Voices or Who's Who popover, the Bible entity it names.
+        ...(draft.externalIds?.acai ? { externalIds: draft.externalIds } : {}),
         author: currentUsername,
       })
       const created = { id: conceptId }
@@ -6415,6 +6480,33 @@ export function ProjectWorkspace() {
       })
     }
   }, [project, currentUsername, refreshConcepts, t, navigate])
+
+  // AQU-1693: "Link “Jesus” to Jesus" from a Voices or Who's Who popover: one
+  // term.update naming the Bible entity. Binding (the server gates every
+  // term.update at the termbase floor), so the popover offers it only to
+  // someone who can approve terms.
+  const handleLinkConceptToEntity = useCallback(async (link: EntityLinkRequest) => {
+    if (!project) return
+    try {
+      await emitTermUpdate({
+        projectId: project.id,
+        conceptId: link.conceptId,
+        externalIds: link.externalIds,
+        author: currentUsername,
+      })
+      await refreshConcepts()
+      toast.add({
+        type: "success",
+        title: t("bibleData.terms.linkedToast", { term: link.term, name: link.name }),
+        timeout: 8000,
+      })
+    } catch (err) {
+      toast.add({
+        type: "error",
+        title: err instanceof Error ? err.message : t("terminology.addConcept.saveFailed"),
+      })
+    }
+  }, [project, currentUsername, refreshConcepts, t])
 
   // AQU-1006 follow-up: terminology now has TWO authority levels, so this is
   // two questions rather than one.
@@ -6608,6 +6700,20 @@ export function ProjectWorkspace() {
     return map
   }, [activeFileId, cellSummaries])
 
+  // AQU-1688: Bible data checks read each cell's compiled pack facts. They are
+  // compiled once per file (by pack version, refs and Language profile) and
+  // looked up by cell id, so typing still re-checks only the edited cell.
+  // AQU-1685: off unless the Bible data experiment is on and the open file is
+  // a Bible book.
+  // AQU-1699: the terminology gives names their agreed renderings (check pack B).
+  const bibleChecks = useBibleChecks(project, cellSummaries, activeFile, localConcepts)
+  const bibleCheckContextFor = bibleChecks.contextFor
+  const bibleFileScan = bibleChecks.fileScan
+  const healthCellCheckContext = useCallback(
+    (cell: { id: string }) => bibleCheckContextFor(cell.id),
+    [bibleCheckContextFor],
+  )
+
   // AD-14: health derives from decay (endorsement_count). The legacy
   // four-sub-score "composite-health" path is retired.
   // Per-browser off switch (lib/health/kill-switch.ts), exposed in the
@@ -6621,6 +6727,8 @@ export function ProjectWorkspace() {
       enabled: healthCalculationsEnabled,
       rulesForCell: libraryLint.rulesForCell,
       rulesForCellSig: libraryLint.signature,
+      cellCheckContext: healthCellCheckContext,
+      cellCheckContextSig: bibleChecks.signature,
     },
   )
   // AQU-599: cellOpenCommentCount from useHealth is intentionally not consumed
@@ -6955,6 +7063,10 @@ export function ProjectWorkspace() {
         // subscribed termbases come in here as well.
         concepts: laneEditorConcepts,
         termMatching: project?.termMatching,
+        // AQU-1688: the same per-cell Bible data inputs the live check uses.
+        contextFor: healthCellCheckContext,
+        // AQU-1697: the Bible data scans over the whole file (headings, verse numbering).
+        bibleScan: await bibleFileScan(),
       })
       // Bail if the active file changed mid-run — don't clobber the new file's
       // state with this (now stale) file's findings.
@@ -6963,7 +7075,7 @@ export function ProjectWorkspace() {
     } finally {
       setCheckRunning(false)
     }
-  }, [activeFileId, checkRunning, closeCommentsPanel, getActiveCells, rules, laneEditorConcepts, project?.termMatching])
+  }, [activeFileId, checkRunning, closeCommentsPanel, getActiveCells, rules, laneEditorConcepts, project?.termMatching, healthCellCheckContext, bibleFileScan])
 
   // A check run describes one file's cells; switching files invalidates it.
   useEffect(() => {
@@ -7231,7 +7343,7 @@ export function ProjectWorkspace() {
       // applies them; the click handler below asks the same question.
       const vote = textVoteGate(cell, project, { username: currentUsername, myScopes, activeLane })
       const hasMajorHealthIssue = activeInfractions.some(
-        (infraction) => ruleById.get(infraction.ruleId)?.severity === "major",
+        (infraction) => infractionSeverity(infraction, ruleById.get(infraction.ruleId)?.severity) === "major",
       )
       const needsHealthAttention = Boolean(
         cell.translated.trim()
@@ -7337,6 +7449,10 @@ export function ProjectWorkspace() {
   const [verseResourcesOpen, setVerseResourcesOpen] = useState<boolean>(() =>
     projectId ? readVerseResourcesOpen(projectId) : false,
   )
+  // AQU-1689: the Who's Who panel (Bible data), same tracked ref, its own open state.
+  const [whosWhoOpen, setWhosWhoOpen] = useState<boolean>(() =>
+    projectId ? readWhosWhoOpen(projectId) : false,
+  )
   // AQU-1016: was `useState` here — every scroll step re-rendered this whole
   // shell to feed a value only the parallel-bibles panel reads. It now lives
   // in the shared editor-viewport store (src/hooks/useEditorViewportStore.ts);
@@ -7346,6 +7462,26 @@ export function ProjectWorkspace() {
   // The AQU-461 verse-resources panel renders under a subset of that gate,
   // so the same subscription serves both.
   const parallelBiblesPanelActive = isBibleOpen(centerSurface, activeFile)
+  // AQU-1692: a maintainer's voice corrections, saved against the latest map
+  // (see use-voice-override-writer.ts). EditorTable gets the writer only while
+  // Bible data shows (AQU-1685), and offers "Correct…" only to a maintainer.
+  const saveVoiceOverride = useVoiceOverrideWriter(
+    projectSettings.refresh,
+    patchSettings,
+    project?.bibleVoiceOverrides,
+    currentUsername,
+  )
+  const bibleDataShown = !!project && parallelBiblesPanelActive && isBibleDataExperimentOn(project)
+  // AQU-1692: how the open book's Bible data loaded, for View settings → Bible data.
+  const biblePackStatus = useBiblePackStatus(bibleDataShown ? (activeFile?.id ?? null) : null)
+  const removeVoiceCorrection = useCallback(
+    (speechId: string) => {
+      void saveVoiceOverride(speechId, null).then((outcome) => {
+        if (outcome.kind !== "ok") toast.add({ type: "error", title: t(voiceOverrideFailureKey(outcome)) })
+      })
+    },
+    [saveVoiceOverride, t],
+  )
   const trackedCellRef = useEditorViewportTrackedCellRef(parallelBiblesPanelActive)
   // Drop the tracked ref when switching files so the previous file's verse
   // doesn't leak into the new file's panel (the new EditorTable re-fires).
@@ -7557,7 +7693,12 @@ export function ProjectWorkspace() {
                 msg.kind === 'cell.validate' ||
                 msg.kind === 'cell.unvalidate'
               )) {
-                invalidateFileProgress(pid, msg.file)
+                // AQU-1832: this invalidation is what made every viewer GET
+                // /progress on every remote keystroke-debounced save. When the
+                // writing request says it is pushing the numbers, they are
+                // already on their way in this same batch — the refetch would
+                // only race them to the same answer.
+                if (!msg.progressPushed) invalidateFileProgress(pid, msg.file)
               }
               // target.cell.commit is also Autopilot's durable review
               // boundary. Reconcile proposals for the exact mounted scope
@@ -7673,6 +7814,58 @@ export function ProjectWorkspace() {
                   return next
                 })
               }
+            } else if (msg.t === "file.progress.pushed") {
+              if (msg.project !== pid) return
+              // AQU-1832: the numbers the `event.applied` frames above held
+              // their refetch for. A push the resource cannot merge safely
+              // returns false and we fall back to exactly the read that was
+              // skipped, so the worst case is the old behaviour plus a frame.
+              if (!applyPushedFileProgress(pid, {
+                fileId: msg.file,
+                lane: msg.lane,
+                revision: msg.revision,
+                validationCount: msg.validationCount,
+                complete: msg.complete,
+                counts: msg.counts,
+                sections: msg.sections,
+              })) {
+                invalidateFileProgress(pid, msg.file)
+              }
+              // The sidebar's own bars come from the project file rollup, not
+              // from this resource (file-summary-progress.ts), and that rollup
+              // was only ever refreshed on import/settings frames. The pushed
+              // file-scope counts are the same three numbers, so a peer's save
+              // now moves the bar live instead of waiting for a remount —
+              // without the GET /files that refreshing it would cost.
+              //
+              // Only the default lane, because that is the lane the rollup
+              // itself is pinned to: files-read-route takes its filled and
+              // approved counts from the '' bridge lane, falling back to the
+              // single target lane when a project has no bridge (AQU-1594).
+              // On such a project no frame ever matches and the bar keeps its
+              // old refresh — the one thing that must not happen is a named
+              // lane's numbers landing in a row reporting the bridge's. The
+              // denominator is safe either way: it is a fact about the source
+              // text, so every lane's row carries the same one (AQU-1599).
+              if (msg.lane === "") {
+                setAllFilesProgressSnapshot((current) => {
+                  const existing = current.get(msg.file)
+                  const next = {
+                    translated: msg.counts.filledCount,
+                    validated: msg.counts.validatedCount,
+                    total: msg.counts.totalCount,
+                  }
+                  if (
+                    existing
+                    && existing.translated === next.translated
+                    && existing.validated === next.validated
+                    && existing.total === next.total
+                  ) return current
+                  const merged = new Map(current)
+                  merged.set(msg.file, next)
+                  return merged
+                })
+              }
             } else if (msg.t === "file.progress.updated") {
               if (msg.project !== pid) return
               invalidateFileProgress(pid, msg.file)
@@ -7757,12 +7950,20 @@ export function ProjectWorkspace() {
               if (sameStringMap(cellLockHoldersRef.current, next)) return
               cellLockHoldersRef.current = next
               setCellLockHolders(next)
-            } else if (msg.t === "presence.diff" || msg.t === "presence.left") {
+            } else if (
+              msg.t === "presence.diff" ||
+              msg.t === "presence.left" ||
+              msg.t === "presence.tier1"
+            ) {
               // Diff presence (SYNC-LIVE): the DO no longer rebroadcasts the
               // roster per update. Apply the diff to the store, then derive
               // the lock-holder map and the focus-lock feed from the store's
               // snapshots, which still have the full-roster shape.
+              // AQU-1825: `presence.tier1` is the batched coarse delta for the
+              // whole project; it merges into the same store, so the lock-holder
+              // map stays correct for peers in files we are not looking at.
               if (msg.t === "presence.diff") presenceStore.applyPresenceDiff(msg.user)
+              else if (msg.t === "presence.tier1") presenceStore.applyPresenceTier1(msg.users)
               else presenceStore.applyPresenceLeft(msg.connId)
               const users = presenceStore.getUserSnapshots()
               focusLockFeedFrameRef.current?.({ t: "presence", users })
@@ -8505,7 +8706,8 @@ export function ProjectWorkspace() {
    * that keeps asking `isReadOnly` on its own is the "imported from git"
    * banner, which would otherwise blame git for a lane a PM archived.
    */
-  const laneWriteFrozen = isReadOnly || activeLaneLock !== null
+  // AQU-1902: …and, briefly, while the active lane's row is not yet known.
+  const laneWriteFrozen = isReadOnly || activeLaneLock !== null || lanesPending
 
   /**
    * AQU-646: give a cell a TARGET ROW when it gains a recording, so that a line
@@ -13245,6 +13447,21 @@ export function ProjectWorkspace() {
           onFootnoteViewModeChange={setFootnoteViewMode}
           targetKeyTermHighlightMode={targetKeyTermHighlightMode}
           onTargetKeyTermHighlightModeChange={setTargetKeyTermHighlightMode}
+          bibleDataVoicesEnabled={
+            // AQU-1685: only with the Bible data experiment on and a Bible open.
+            !!project && parallelBiblesPanelActive && isBibleDataExperimentOn(project)
+            && resolveBibleEnrichment(project, "voices", projectHasScriptureFiles(project.files))
+          }
+          bibleDataWhosWhoEnabled={
+            // AQU-1685: only with the Bible data experiment on and a Bible open.
+            !!project && parallelBiblesPanelActive && isBibleDataExperimentOn(project)
+            && resolveBibleEnrichment(project, "whos-who", projectHasScriptureFiles(project.files))
+          }
+          bibleDataStatus={biblePackStatus}
+          bibleVoiceCorrections={project?.bibleVoiceOverrides}
+          onRemoveVoiceCorrection={
+            (project?.syncRole?.level ?? 0) >= ROLE.MAINTAINER ? removeVoiceCorrection : undefined
+          }
           tnSidebarEnabled={tnSidebarVisible}
           healthCalculationsEnabled={healthCalculationsEnabled}
           onHealthCalculationsChange={setHealthCalculationsEnabled}
@@ -13291,8 +13508,15 @@ export function ProjectWorkspace() {
         project.bibleResourcesEnabled,
         projectHasScriptureFiles(project.files),
       ),
+    // AQU-1689: Who's Who rides the same editor condition plus its own
+    // enrichment, which is off whenever Bible data is, and (AQU-1685) this
+    // device's Bible data experiment.
+    whosWhoAvailable:
+      !!project && isBibleDataExperimentOn(project)
+      && resolveBibleEnrichment(project, "whos-who", projectHasScriptureFiles(project.files)),
     parallelBiblesOpen,
     verseResourcesOpen,
+    whosWhoOpen,
   })
 
   return (
@@ -13615,6 +13839,16 @@ export function ProjectWorkspace() {
               <div className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900">
                 <Lock className="h-3.5 w-3.5" />
                 {t("workspace.readOnlyGitBanner")}
+              </div>
+            )}
+            {!isReadOnly && lanesPending && (
+              <div
+                role="status"
+                data-testid="lanes-loading-banner"
+                className="flex items-center gap-2 border-b bg-muted px-4 py-2 text-xs text-muted-foreground"
+              >
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                {t("workspace.loadingLanguagesBanner")}
               </div>
             )}
             {project && (
@@ -13947,6 +14181,7 @@ export function ProjectWorkspace() {
                   stacks the timeline above it. The provider wraps both so the
                   table's row actions work identically in either position. */}
               <EditorActionsProvider value={editorActionsValue}>
+              <ForecastProvider value={forecastValue}>
               {/* AQU-646 stage 3: the timeline/table split is a DRAGGABLE
                   divider now — the rows have multiplied (four tracks, more
                   later) and a timeline sized to its own content was squeezing
@@ -14375,6 +14610,9 @@ export function ProjectWorkspace() {
               <EditorTable
             ref={editorRef} project={editorProject ?? project} cellStore={cellStore}
             fileType={activeFile?.type}
+            bibleOpen={parallelBiblesPanelActive}
+            onSaveVoiceOverride={bibleDataShown ? saveVoiceOverride : undefined}
+            onAdoptVoicesAsCast={bibleDataShown ? adoptVoicesAsCast : undefined}
             showFootnotesInline={footnoteViewMode === "inline"}
             footnotePanelActive={footnoteViewMode !== "off"}
             footnoteViewMode={footnoteViewMode}
@@ -14388,6 +14626,7 @@ export function ProjectWorkspace() {
             // AQU-1463: non-null turns the table read-only and banners which
             // lane was archived, whatever the reader's role.
             archivedLaneLabel={activeLaneLock?.label ?? null}
+            languagesLoading={lanesPending}
             onLaneChange={setActiveLane}
             defaultLaneLabel={laneLabels[""] || activeTargetLanguage || "Target"}
             laneLabels={laneLabels}
@@ -14466,6 +14705,7 @@ export function ProjectWorkspace() {
             onOpenAudioSetup={openAudioSetup}
             onProjectChanged={refresh}
             onAddConceptFromSelection={handleAddConceptFromSelection}
+            onLinkConceptToEntity={handleLinkConceptToEntity}
             addConceptBlockedReason={addConceptBlockedReason}
             canApproveConcept={canApproveConcept}
             onAskAiFromSelection={handleAskAiFromSelection}
@@ -14531,6 +14771,7 @@ export function ProjectWorkspace() {
               </ResizablePanelGroup>
               </ResizablePanel>
               </ResizablePanelGroup>
+              </ForecastProvider>
               </EditorActionsProvider>
             </div>
             {/* i18n-exempt "tray" is a footnote view-mode token, not copy */}
@@ -14577,7 +14818,7 @@ export function ProjectWorkspace() {
                   rides in asideEdge so it isn't stretched by Resizable. */}
               {rightRail.biblesPanel && (
                 <ParallelBiblesSidebar
-                  key={activeFile!.id}
+                  key={`${activeFile!.id}-bibles`}
                   trackedRef={trackedCellRef}
                   open
                   onToggle={() => {
@@ -14591,7 +14832,7 @@ export function ProjectWorkspace() {
                   collapsed edge tab rides in asideEdge alongside the bibles'. */}
               {rightRail.resourcesPanel && (
                 <VerseResourcesSidebar
-                  key={activeFile!.id}
+                  key={`${activeFile!.id}-resources`}
                   projectId={project!.id}
                   trackedRef={trackedCellRef}
                   getJwt={() => jwtRef.current}
@@ -14600,6 +14841,23 @@ export function ProjectWorkspace() {
                     const next = !verseResourcesOpen
                     setVerseResourcesOpen(next)
                     if (projectId) writeVerseResourcesOpen(projectId, next)
+                  }}
+                />
+              )}
+              {/* AQU-1689: Who's Who, the passage's cast — open panel only;
+                  its "People" edge tab rides in asideEdge. */}
+              {rightRail.peoplePanel && (
+                <WhosWhoSidebar
+                  project={project!}
+                  fileId={activeFile?.id ?? null}
+                  trackedRef={trackedCellRef}
+                  sourceLanguage={activeSourceLanguage}
+                  getTokenForFile={getTokenForFile}
+                  open
+                  onToggle={() => {
+                    const next = !whosWhoOpen
+                    setWhosWhoOpen(next)
+                    if (projectId) writeWhosWhoOpen(projectId, next)
                   }}
                 />
               )}
@@ -14734,6 +14992,7 @@ export function ProjectWorkspace() {
                 isError={commentsIsError}
                 isLoadingRest={commentsIsLoadingRest}
                 onRetry={() => { void refreshComments() }}
+                submitRefusals={commentSubmitRefusals}
               />
             )}
             {attachmentsDrawerOpen && project && activeFileId && (
@@ -14772,8 +15031,8 @@ export function ProjectWorkspace() {
           )
         })()}
         asideEdge={(() => {
-          // AQU-461: two collapsed tabs can stack here — bibles and verse
-          // resources — each shown only while its own panel is closed.
+          // AQU-461: collapsed tabs stack here — bibles, verse resources and
+          // (AQU-1689) Who's Who — each shown only while its own panel is closed.
           // AQU-1316: both flags come from `rightRail`, the same value `aside`
           // reads, so a tab can never sit beside its own open panel.
           if (!hasRightRailEdge(rightRail)) return null
@@ -14802,6 +15061,20 @@ export function ProjectWorkspace() {
                     const next = !verseResourcesOpen
                     setVerseResourcesOpen(next)
                     if (projectId) writeVerseResourcesOpen(projectId, next)
+                  }}
+                />
+              )}
+              {rightRail.peopleEdge && (
+                <WhosWhoSidebar
+                  project={project!}
+                  fileId={activeFile?.id ?? null}
+                  trackedRef={trackedCellRef}
+                  sourceLanguage={activeSourceLanguage}
+                  open={false}
+                  onToggle={() => {
+                    const next = !whosWhoOpen
+                    setWhosWhoOpen(next)
+                    if (projectId) writeWhosWhoOpen(projectId, next)
                   }}
                 />
               )}
@@ -15106,6 +15379,18 @@ export function ProjectWorkspace() {
             // against those, into that lane (the dialog's targetLang follows).
             laneOptions: fileImportLaneOptions,
             onLaneChange: setActiveLane,
+            // AQU-1673: "Stage as proposals for review" writes nothing, so
+            // there is nothing to revalidate — the only job here is telling
+            // the user where the proposals went.
+            onProposalsStaged: ({ stagedCount, skippedUnchangedCount }) => {
+              toast.add({
+                title: t("importExport.proposals.staged", { count: stagedCount }),
+                description:
+                  skippedUnchangedCount > 0
+                    ? t("importExport.proposals.skippedUnchanged", { count: skippedUnchangedCount })
+                    : undefined,
+              })
+            },
           }}
           linkSource={{
             // AQU-1527: the Import dialog's "From another project" tile runs

@@ -9,8 +9,14 @@
 //      queue of unanswered questions can never report as handled work.
 //   2. `superseded` and `expired` are distinct terminal states. Supersession is
 //      the system working; expiry is the system stalling.
+//
+// AQU-1691: a `bible-fact` decision asks for a durable project fact. It names
+// the `factKey` its answer is stored under (./project-facts.ts), may offer
+// one-click `options`, and may say where the fact applies (`factScope`). It is
+// raised with no run and often no file, so `fileId` is nullable.
 
 import type { AquillaDb } from "../shim/postgres"
+import type { FactScope } from "./project-facts"
 
 export type DecisionStatus =
   | "open"
@@ -26,6 +32,18 @@ export type DecisionReadinessItem =
   | "examples"
   | "rules"
   | "languages"
+  | "bible-fact"
+
+/** One answer a fact question offers, so answering is one click. */
+export interface DecisionOption {
+  /** Stored as the fact's value when chosen. */
+  value: string
+  /** What the card shows. Data from the raiser, like `reason`; absent means show `value`. */
+  label?: string
+}
+
+/** Most options one question offers. */
+export const MAX_DECISION_OPTIONS = 8
 
 export type DecisionResolution =
   | { kind: "answered"; answer: string; byUserId: number }
@@ -35,7 +53,8 @@ export interface ContextualDecision {
   id: string
   projectId: string
   runId: string | null
-  fileId: string
+  /** Null for a project-wide question, such as most fact questions. */
+  fileId: string | null
   spanId: string | null
   cellIds: string[]
   reason: string
@@ -46,6 +65,10 @@ export interface ContextualDecision {
   assignedUserId: number | null
   assignedInviteId: string | null
   resolution: DecisionResolution | null
+  /** AQU-1691: the project fact an answer is stored under, or null for a one-off question. */
+  factKey: string | null
+  options: DecisionOption[] | null
+  factScope: FactScope | null
   createdAt: string
   updatedAt: string
   resolvedAt: string | null
@@ -54,13 +77,16 @@ export interface ContextualDecision {
 export interface RaiseDecisionInput {
   projectId: string
   runId: string | null
-  fileId: string
+  fileId: string | null
   spanId?: string | null
   cellIds?: string[]
   reason: string
   readinessItem?: DecisionReadinessItem | null
   conceptId?: string | null
   blastRadius?: number
+  factKey?: string | null
+  options?: DecisionOption[] | null
+  factScope?: FactScope | null
 }
 
 /** How many open decisions a project surfaces at once (§4.6). Deliberately
@@ -82,7 +108,8 @@ export const DECISION_ANSWER_MAX_BYTES = 2000
 
 const DECISION_COLS = `id, project_id, run_id, file_id, span_id, cell_ids, reason,
   readiness_item, concept_id, blast_radius, status, assigned_user_id,
-  assigned_invite_id, resolution, created_at, updated_at, resolved_at`
+  assigned_invite_id, resolution, fact_key, options, fact_scope,
+  created_at, updated_at, resolved_at`
 
 /** uuidv7 — time-ordered, so lexicographic id order is creation order.
  *  Deliberately duplicated from contextual-runs.ts rather than cross-imported;
@@ -104,7 +131,7 @@ interface DecisionRow {
   id: string
   project_id: string
   run_id: string | null
-  file_id: string
+  file_id: string | null
   span_id: string | null
   cell_ids: unknown
   reason: string
@@ -115,6 +142,9 @@ interface DecisionRow {
   assigned_user_id: number | null
   assigned_invite_id: string | null
   resolution: unknown
+  fact_key: string | null
+  options: unknown
+  fact_scope: unknown
   created_at: string | Date
   updated_at: string | Date
   resolved_at: string | Date | null
@@ -158,10 +188,35 @@ function mapRow(row: DecisionRow): ContextualDecision {
     assignedUserId: row.assigned_user_id,
     assignedInviteId: row.assigned_invite_id,
     resolution: parseJson<DecisionResolution | null>(row.resolution, null),
+    factKey: row.fact_key ?? null,
+    options: parseJson<DecisionOption[] | null>(row.options, null),
+    factScope: parseJson<FactScope | null>(row.fact_scope, null),
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
     resolvedAt: row.resolved_at == null ? null : toIso(row.resolved_at),
   }
+}
+
+/** Null when `options` can be offered, else what is wrong with them. */
+export function decisionOptionsProblem(options: unknown): string | null {
+  if (!Array.isArray(options) || options.length < 1 || options.length > MAX_DECISION_OPTIONS) {
+    return `decision options must list 1 to ${MAX_DECISION_OPTIONS} choices`
+  }
+  for (const option of options) {
+    if (typeof option !== "object" || option === null || Array.isArray(option)) return "each option must be an object"
+    const { value, label } = option as Record<string, unknown>
+    if (typeof value !== "string" || !value.trim()) return "each option needs a value"
+    if (new TextEncoder().encode(value).length > DECISION_ANSWER_MAX_BYTES) {
+      return `an option value exceeds ${DECISION_ANSWER_MAX_BYTES} bytes`
+    }
+    if (label !== undefined && (typeof label !== "string" || !label.trim() || label.length > 200)) {
+      return "an option label must be text of 1 to 200 characters"
+    }
+  }
+  if (new Set(options.map((option) => (option as DecisionOption).value)).size !== options.length) {
+    return "two options have the same value"
+  }
+  return null
 }
 
 export async function raiseDecision(
@@ -173,12 +228,16 @@ export async function raiseDecision(
   if (new TextEncoder().encode(reason).length > DECISION_REASON_MAX_BYTES) {
     throw new Error(`decision reason exceeds ${DECISION_REASON_MAX_BYTES} bytes`)
   }
+  if (input.options) {
+    const problem = decisionOptionsProblem(input.options)
+    if (problem) throw new Error(problem)
+  }
   const row = await db
     .prepare(
       `INSERT INTO contextual_decisions
           (id, project_id, run_id, file_id, span_id, cell_ids, reason,
-           readiness_item, concept_id, blast_radius)
-       VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?)
+           readiness_item, concept_id, blast_radius, fact_key, options, fact_scope)
+       VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb)
        RETURNING ${DECISION_COLS}`,
     )
     .bind(
@@ -198,6 +257,10 @@ export async function raiseDecision(
       input.readinessItem ?? null,
       input.conceptId ?? null,
       input.blastRadius ?? 0,
+      input.factKey ?? null,
+      // Objects, not JSON strings: the same postgres.js jsonb rule as cell_ids above.
+      input.options ?? null,
+      input.factScope ?? null,
     )
     .first<DecisionRow>()
   if (!row) throw new Error("failed to raise decision")
@@ -276,6 +339,22 @@ export async function findOpenDecisionForRun(
     .bind(input.projectId, input.runId)
     .first<DecisionRow>()
   return row ? mapRow(row) : null
+}
+
+/** AQU-1691: the open questions for one project fact, oldest first. */
+export async function listOpenFactQuestions(
+  db: AquillaDb,
+  input: { projectId: string; factKey: string },
+): Promise<ContextualDecision[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT ${DECISION_COLS} FROM contextual_decisions
+        WHERE project_id = ? AND fact_key = ? AND status IN ('open','researching')
+        ORDER BY created_at ASC, id ASC`,
+    )
+    .bind(input.projectId, input.factKey)
+    .all<DecisionRow>()
+  return (results ?? []).map(mapRow)
 }
 
 export async function countOpenDecisions(

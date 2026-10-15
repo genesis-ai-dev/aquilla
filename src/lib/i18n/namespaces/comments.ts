@@ -94,6 +94,10 @@ export const comments = defineNamespace({
     "comments.drawer.newThreadHeading": "New thread",
     "comments.drawer.newThreadPlaceholder": "Leave a comment...",
     "comments.drawer.post": "Post",
+    "comments.drawer.submitRefused": plural({
+      one: "{count} comment you wrote wasn't posted — {reason}.",
+      other: "{count} comments you wrote weren't posted — {reason}.",
+    }),
 
     // In-app mention inbox (workspace header bell)
     "comments.inbox.title": "Notifications",
@@ -508,6 +512,21 @@ export const comments = defineNamespace({
           "Accessible name of the arrow button at the bottom right of the new-thread " +
           "field. It stays an outline icon button until the field has text, then " +
           "fills in. Enter posts the comment. Imperative verb.",
+        screenshot: "cell-editor",
+      },
+      "comments.drawer.submitRefused": {
+        description:
+          "Inline warning above the new-thread field in the per-cell drawer, shown " +
+          "when the server permanently refused a comment this person wrote, so it " +
+          "has been taken back out of the thread. Past tense: it reports what " +
+          "happened to that comment, not current project policy. {count} is how many " +
+          "of their comments were refused; {reason} is a lower-case clause naming the " +
+          "refusal (e.g. \"your role wasn't allowed to comment on this project\") and " +
+          "completes the sentence after the dash.",
+        placeholders: {
+          reason: "Lower-case clause naming why the server refused the comment.",
+          count: "How many of this person's comments were refused.",
+        },
         screenshot: "cell-editor",
       },
       "comments.inbox.title": {

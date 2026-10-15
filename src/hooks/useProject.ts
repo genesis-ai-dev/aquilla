@@ -22,6 +22,7 @@ import { overlaySettings } from "@/hooks/project-settings-overlay"
 import { getProject, subscribeProjectRecords } from "@/lib/store/project-index"
 import { readResolvedProjectSeed, rememberResolvedProject } from "@/lib/sync/project-record-seed"
 import { subscribeProjectRecordChanged } from "@/lib/sync/project-record-changed"
+import { clearProjectTargetLanes, setProjectTargetLanes } from "@/lib/sync/project-target-lanes"
 
 /**
  * Overlay the DEVICE-LOCAL fields (the ones that live only on the IDB record,
@@ -252,6 +253,24 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
     },
   )
   const { settings: syncedSettings, patch: patchSettings, hasFetched: settingsFetched } = projectSettings
+  // AQU-1902: publish this project's target lane rows to the emit layer, which
+  // stamps every lane-addressed write with its lane row before queuing it.
+  // `null` while the settings GET is outstanding: a write naming no lane id is
+  // then refused at the source instead of being queued, refused by the server
+  // and dropped. A server response without lane rows (pre-AQU-1418) leaves the
+  // project unregistered, so writes pass through as before.
+  const settingsLanes = projectSettings.lanes
+  const settingsEnabled = enabled && options?.includeSettings !== false
+  useEffect(() => {
+    if (!settingsEnabled || !projectId) return
+    if (settingsLanes) {
+      setProjectTargetLanes(projectId, settingsLanes.filter((lane) => lane.role === "target"))
+    } else if (!settingsFetched) {
+      setProjectTargetLanes(projectId, null)
+    } else {
+      clearProjectTargetLanes(projectId)
+    }
+  }, [settingsEnabled, projectId, settingsLanes, settingsFetched])
   const overlaid = useMemo(
     () => project ? overlaySettings(project, syncedSettings, projectSettings.lanes) : null,
     [project, syncedSettings, projectSettings.lanes],

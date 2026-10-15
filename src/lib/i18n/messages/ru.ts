@@ -4252,7 +4252,7 @@ export const ru: Catalog = {
   "importExport.errors.biblicaExpectsIdml": "Для импорта учебных примечаний Biblica нужен пакет InDesign .idml.",
   "importExport.errors.biblicaNoStudyNotes": "Файл {fileName} разобран успешно, но не содержит учебных примечаний. Примечания Biblica размещаются в стилях абзацев `intro:*` — проверьте, что это документ с примечаниями.",
   "importExport.errors.invalidIdmlPackage": "{fileName} не является корректным пакетом IDML. Файлы IDML — это ZIP-архивы, которые начинаются с «PK».",
-  "importExport.errors.mediaFileTooLarge": "{fileName} превышает лимит импорта медиа в 95 МБ.",
+  "importExport.errors.mediaFileTooLarge": "{fileName} превышает лимит импорта медиа в {limit}.",
   "importExport.errors.couldNotDecodeAudio": "Не удалось декодировать {fileName} — возможно, файл повреждён или использует неподдерживаемый кодек. Попробуйте экспортировать его заново в mp3 или wav.",
   "importExport.errors.notAParatextProject": "Это не похоже на проект Paratext — не найден Settings.xml (или .ssf) с книгами USFM.",
   "importExport.notices.basicParserFallback": "Aquilla не смогла проверить эту структурированную разметку с помощью ИИ, поэтому использовала базовый разборщик. Внимательно проверьте предпросмотр перед импортом.",

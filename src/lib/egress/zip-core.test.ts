@@ -34,14 +34,28 @@ describe("packZip", () => {
   })
 
   it("survives output larger than one flush window", async () => {
-    // Compressible, but comfortably past the flush threshold once stored, so
-    // the streamed path actually hands several parts to blob storage.
+    // The flush threshold counts compressed bytes, so the input must not
+    // compress: a repeating pattern deflates to a few KB and never flushes
+    // mid-stream. xorshift noise keeps the output past ZIP_FLUSH_BYTES, so the
+    // streamed path hands at least two parts to blob storage.
     const bytes = new Uint8Array(ZIP_FLUSH_BYTES + 1024)
-    for (let i = 0; i < bytes.length; i++) bytes[i] = i % 251
+    let seed = 0x9e3779b9
+    for (let i = 0; i < bytes.length; i++) {
+      seed ^= seed << 13
+      seed ^= seed >>> 17
+      seed ^= seed << 5
+      bytes[i] = seed & 0xff
+    }
     const blob = await packZip([{ path: "big.bin", data: new Blob([bytes]) }])
+    expect(blob.size).toBeGreaterThan(ZIP_FLUSH_BYTES)
+
     const [entry] = await unpackZip(await blob.arrayBuffer())
     expect(entry.path).toBe("big.bin")
-    expect(new Uint8Array(await (entry.data as Blob).arrayBuffer())).toEqual(bytes)
+    // toEqual walks 8 MB one element at a time and took 40-60 s on CI against
+    // the 60 s test timeout (AQU-1970). Compare the bytes directly instead.
+    const out = new Uint8Array(await (entry.data as Blob).arrayBuffer())
+    expect(out.byteLength).toBe(bytes.byteLength)
+    expect(Buffer.compare(out, bytes)).toBe(0)
   })
 })
 

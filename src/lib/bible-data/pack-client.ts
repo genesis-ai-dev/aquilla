@@ -8,8 +8,10 @@
 //   • fetches through the same-origin resource proxy
 //     (src/lib/net/resource-proxy.ts), which is a no-op unless
 //     VITE_RESOURCES_BASE is set, as for Parallel Bibles;
-//   • caches every file in memory (one promise per file per session) and in
-//     IndexedDB (./pack-store.ts), keyed `${version}/${layer}/${book}`. The
+//   • caches the open book's files in memory (one promise per file; opening
+//     another book lets them go, AQU-1700) and every file in IndexedDB
+//     (./pack-store.ts, the most recently used books), keyed
+//     `${version}/${layer}/${book}`. The
 //     version comes from the manifest, which is revalidated once per session,
 //     so a new pack version misses both caches. Layer URLs carry `?v=` so an
 //     HTTP cache cannot answer for a new version with an old file either;
@@ -82,6 +84,23 @@ async function fetchJson(url: string, init?: RequestInit): Promise<Fetched> {
   }
 }
 
+// ── Reads in flight ─────────────────────────────────────────────────────────
+
+/**
+ * Every manifest and layer read still running, its IndexedDB write included.
+ * A read outlives the component that asked for it (the pack is shared, and a
+ * later mount wants the result), so a test that unmounts mid-load waits for
+ * these (`__bkpSettled`) before it resets its fetch mock or the store.
+ */
+const inFlight = new Set<Promise<unknown>>()
+
+function track<T>(read: Promise<T>): Promise<T> {
+  inFlight.add(read)
+  const done = () => inFlight.delete(read)
+  void read.then(done, done)
+  return read
+}
+
 // ── Manifest ────────────────────────────────────────────────────────────────
 
 /** Remembered for the session only after a successful network read. */
@@ -111,21 +130,30 @@ async function readManifest(): Promise<{ result: BkpResult<BkpManifest>; fromNet
 export function loadManifest(): Promise<BkpResult<BkpManifest>> {
   if (manifestFromNetwork) return Promise.resolve(manifestFromNetwork)
   if (!manifestInFlight) {
-    manifestInFlight = readManifest()
-      // Nothing above should throw; if it does, it is still not the UI's problem.
-      .catch(() => ({ result: { ok: false, reason: "offline" } as const, fromNetwork: false }))
-      .then(({ result, fromNetwork }) => {
-        manifestInFlight = null
-        if (fromNetwork && result.ok) manifestFromNetwork = result
-        return result
-      })
+    manifestInFlight = track(
+      readManifest()
+        // Nothing above should throw; if it does, it is still not the UI's problem.
+        .catch(() => ({ result: { ok: false, reason: "offline" } as const, fromNetwork: false }))
+        .then(({ result, fromNetwork }) => {
+          manifestInFlight = null
+          if (fromNetwork && result.ok) manifestFromNetwork = result
+          return result
+        }),
+    )
   }
   return manifestInFlight
 }
 
 // ── Layers ──────────────────────────────────────────────────────────────────
 
+/**
+ * The open book's layer files. Only one book's (AQU-1700): an OT book's
+ * layers are up to about 12 MB raw (JER), several times that once parsed, so
+ * a session that reads many books must not keep them all. IndexedDB keeps
+ * the files of recent books for when one is opened again.
+ */
 const layerPromises = new Map<string, Promise<BkpResult<BkpLayerData[BkpLayer]>>>()
+let memoryBook: string | null = null
 
 async function readLayer<L extends BkpLayer>(
   layer: L,
@@ -153,12 +181,16 @@ export async function loadLayer<L extends BkpLayer>(layer: L, book: string): Pro
   const entry = Object.hasOwn(books, book) ? books[book] : undefined
   if (!entry?.layers.includes(layer)) return { ok: false, reason: "not-found" }
 
+  if (memoryBook !== book) {
+    layerPromises.clear()
+    memoryBook = book
+  }
   const key = packFileKey(version, layer, book)
   let pending = layerPromises.get(key) as Promise<BkpResult<BkpLayerData[L]>> | undefined
   if (!pending) {
     // e.g. encodeURIComponent on a malformed version string: still a typed result.
-    const started = readLayer(layer, book, version).catch(
-      (): BkpResult<BkpLayerData[L]> => ({ ok: false, reason: "invalid" }),
+    const started = track(
+      readLayer(layer, book, version).catch((): BkpResult<BkpLayerData[L]> => ({ ok: false, reason: "invalid" })),
     )
     pending = started
     layerPromises.set(key, started)
@@ -204,4 +236,21 @@ export function __resetBkpMemoryCache(): void {
   manifestFromNetwork = null
   manifestInFlight = null
   layerPromises.clear()
+  memoryBook = null
+}
+
+/**
+ * Test seam: resolves once every manifest and layer read in flight has
+ * finished, IndexedDB writes included. A test that asserts on what was fetched
+ * waits here first, or a read that an earlier test (or an earlier render)
+ * started lands in its mock.
+ */
+export async function __bkpSettled(): Promise<void> {
+  // A layer read starts only after the manifest it waited for: look again after each round.
+  while (inFlight.size > 0) await Promise.allSettled([...inFlight])
+}
+
+/** Test seam: the books whose layer files the session holds in memory. */
+export function __bkpMemoryBooks(): string[] {
+  return [...new Set([...layerPromises.keys()].map((key) => key.slice(key.lastIndexOf("/") + 1)))]
 }

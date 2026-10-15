@@ -277,6 +277,18 @@ describe("LanguagesSection — lane last-change in the archive confirmation (AQU
     expect(note.textContent).toContain("\u2068carol\u2069")
   })
 
+  it("puts the archive confirmation on its own line, under the lane's fields", async () => {
+    // AQU-1977 (Sam, 2026-10-14): kept in the one-line row, the sentence
+    // squeezed the language and name boxes to empty slivers and slid
+    // "Advanced" under Confirm archive. The row wraps; the confirmation takes
+    // a full line of its own.
+    renderRows(vi.fn(async (): Promise<LaneLastChangeResult> => ({ kind: "ok", lastChange: null })))
+    fireEvent.click(screen.getByTestId("archive-lane-lane-es"))
+    const confirm = await screen.findByTestId("archive-confirm-lane-es")
+    expect(confirm.className).toContain("basis-full")
+    expect(confirm.closest("li")!.className).toContain("flex-wrap")
+  })
+
   it("asks only about the lane being archived, so another lane's edits can't leak in", async () => {
     const load = vi.fn(async (laneId: string): Promise<LaneLastChangeResult> => ({
       kind: "ok",

@@ -418,7 +418,7 @@ export function LanguagesSection({
                 {activeRows.map((lane) => (
                   <li
                     key={lane.id}
-                    className="flex items-center gap-2 rounded border bg-background px-2 py-1.5 text-sm"
+                    className="flex flex-wrap items-center gap-2 rounded border bg-background px-2 py-1.5 text-sm"
                   >
                     <LaneIdentityFields lane={lane} canEdit={canEdit} onEdit={onRenameLane!} />
                     {/* AQU-1592: the code the lane actually resolves to —
@@ -462,8 +462,12 @@ export function LanguagesSection({
                       </DisabledFieldTooltip>
                     )}
                     {pendingArchive === lane.id ? (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <div className="flex min-w-0 flex-col gap-0.5">
+                      // AQU-1977: its own line under the lane's fields. Kept in
+                      // the row, the sentence squeezed the language and name
+                      // boxes to empty slivers and slid "Advanced" under
+                      // Confirm archive.
+                      <div className="flex basis-full flex-wrap items-center gap-2" data-testid={`archive-confirm-${lane.id}`}>
+                        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                           <span className="text-xs text-muted-foreground">
                             {t("projectSettings.languages.archiveConfirm", { lane: laneLabel(lane) })}
                           </span>
@@ -516,15 +520,15 @@ export function LanguagesSection({
               {blobActive.map((lane) => (
                 <li
                   key={lane}
-                  className="flex items-center gap-2 rounded border bg-background px-2 py-1.5 text-sm"
+                  className="flex flex-wrap items-center gap-2 rounded border bg-background px-2 py-1.5 text-sm"
                 >
                   <Badge variant="outline" className="shrink-0">
                     {lane}
                   </Badge>
                   <span className="flex-1" />
                   {active.includes(lane) && (pendingArchive === lane ? (
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground">
+                    <div className="flex basis-full flex-wrap items-center gap-2">
+                      <span className="min-w-0 flex-1 text-xs text-muted-foreground">
                         {t("projectSettings.languages.archiveConfirm", { lane })}
                       </span>
                       <Button

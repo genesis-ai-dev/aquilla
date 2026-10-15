@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest"
 import { makeInMemoryAdapter } from "@livestore/adapter-web"
 import { createStorePromise, type Store } from "@livestore/livestore"
 import { schema, tables, events, cellRowId, DEFAULT_LANE_KEY, localLaneKey } from "./schema"
-import { createOfflineSyncAdapter, type MintToken } from "./sync-adapter"
+import { createOfflineSyncAdapter, MAX_FLUSH_BATCH, type MintToken } from "./sync-adapter"
 import { __resetConflictsForTests, getConflicts } from "./conflicts"
 import { catchUpProject } from "./catch-up"
 import { isProjectUnavailable, resetProjectAccessForTests } from "./project-access"
@@ -886,5 +886,149 @@ describe("project no longer available on the server", () => {
 
     adapter.close()
     expect(isProjectUnavailable("proj1")).toBe(false)
+  })
+})
+
+describe("long offline stretches", () => {
+  function fakeConnectivity(initial: boolean | null) {
+    let online = initial
+    const listeners = new Set<(online: boolean | null) => void>()
+    return {
+      current: () => online,
+      subscribe(listener: (online: boolean | null) => void) {
+        listeners.add(listener)
+        return () => {
+          listeners.delete(listener)
+        }
+      },
+      set(next: boolean) {
+        online = next
+        for (const listener of listeners) listener(next)
+      },
+    }
+  }
+
+  /** `count` writes, oldest first, inserted in reverse to prove the flush sorts. */
+  function queueMany(count: number): string[] {
+    const base = Date.parse("2026-10-01T00:00:00Z")
+    const ids = Array.from({ length: count }, (_, i) => `q${String(i).padStart(4, "0")}`)
+    for (const [i, id] of [...ids.entries()].reverse()) {
+      store.commit(
+        events.eventQueued({
+          id,
+          projectId: "proj1",
+          fileId: "file1",
+          cellId: `GEN 1:${i + 1}`,
+          kind: "target.cell.commit",
+          payload: { value: `v${i}` },
+          parentId: `head-${i}`,
+          author: "dev@local.test",
+          schemaVersion: 1,
+          clientTs: new Date(base + i * 1_000),
+          createdAt: new Date(base + i * 1_000),
+        }),
+      )
+    }
+    return ids
+  }
+
+  const acceptAll = async (_url: string, init?: RequestInit) => {
+    const body = JSON.parse(init?.body as string) as { events: Array<{ id: string }> }
+    return new Response(JSON.stringify({ accepted: body.events.map((e) => ({ id: e.id })) }), { status: 200 })
+  }
+
+  const postedIds = (fetchImpl: ReturnType<typeof vi.fn>) =>
+    fetchImpl.mock.calls.map(([, init]) => (JSON.parse((init as RequestInit).body as string) as { events: Array<{ id: string }> }).events.map((e) => e.id))
+
+  const statusWrites = (commit: { mock: { calls: unknown[][] } }) =>
+    commit.mock.calls.filter(([e]) => (e as { name: string }).name === "v1.EventQueueStatusSet").length
+
+  it("attempts nothing and writes nothing while offline, then sends it all on reconnect", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    const connectivity = fakeConnectivity(false)
+    const fetchImpl = vi.fn(acceptAll)
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 1,
+      minFlushRetryMs: 5,
+      connectivity,
+    })
+    const commit = vi.spyOn(store, "commit")
+    const ids = queueMany(3)
+
+    await new Promise((r) => setTimeout(r, 80))
+    expect(fetchImpl).not.toHaveBeenCalled()
+    expect(statusWrites(commit)).toBe(0)
+
+    connectivity.set(true)
+    await waitFor(() => store.query(tables.eventQueue.select()).length === 0)
+    expect(postedIds(fetchImpl)).toEqual([ids])
+    expect(statusWrites(commit)).toBe(0)
+
+    adapter.close()
+  })
+
+  it(`sends a big backlog oldest first, at most ${MAX_FLUSH_BATCH} per POST`, async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    const connectivity = fakeConnectivity(false)
+    const fetchImpl = vi.fn(acceptAll)
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 1,
+      connectivity,
+    })
+    const ids = queueMany(450)
+
+    connectivity.set(true)
+    await waitFor(() => store.query(tables.eventQueue.select()).length === 0, 5_000)
+    const batches = postedIds(fetchImpl)
+    expect(batches.map((b) => b.length)).toEqual([200, 200, 50])
+    expect(batches.flat()).toEqual(ids)
+
+    adapter.close()
+  })
+
+  it("stops at the first failed batch, keeping order, without touching row status", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    const connectivity = fakeConnectivity(false)
+    let call = 0
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      call += 1
+      return call === 2 ? new Response("unavailable", { status: 503 }) : acceptAll(url, init)
+    })
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 1,
+      minFlushRetryMs: 60_000,
+      connectivity,
+    })
+    const commit = vi.spyOn(store, "commit")
+    const ids = queueMany(450)
+
+    connectivity.set(true)
+    await waitFor(() => fetchImpl.mock.calls.length === 2)
+    await new Promise((r) => setTimeout(r, 50))
+    expect(fetchImpl).toHaveBeenCalledTimes(2) // the third batch waits behind the second
+    const left = store.query(tables.eventQueue.select()).map((r) => r.id).sort()
+    expect(left).toEqual(ids.slice(200))
+    expect(store.query(tables.eventQueue.select()).every((r) => r.status === "pending")).toBe(true)
+    expect(statusWrites(commit)).toBe(0)
+
+    adapter.close()
   })
 })

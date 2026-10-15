@@ -105,6 +105,8 @@ import { UserError } from "@/lib/errors/user-error"
 import { resolveProjectPolicy } from "@/lib/sync/project-org-policy"
 import { ROLE } from "@/lib/frontier/roles"
 import { canOpenAssignUi } from "@/lib/sync/role-policy"
+import { useMyScopeGrant } from "@/hooks/useMyScopes"
+import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import {
   SectionVisibilityBadge,
   SectionVisibilityGate,
@@ -694,6 +696,20 @@ export function ProjectOverview() {
   // policy object (a new one every render).
   const policyAllowSelfAssignment = projectPolicy.allowSelfAssignment
   const policyAssignmentMinRole = projectPolicy.assignmentMinRole
+  const policyAllowScopedLaneAssignment = projectPolicy.allowScopedLaneAssignment
+  // AQU-1914: the caller's own lane-delegate grant (AQU-581), built the way
+  // the editor builds it — the server's answer to "may lane-limited members
+  // assign" wins when it has one (a guest cannot read the org's settings), and
+  // a lane scope is a lane id, read back as the tag the assign dialog compares.
+  const myScopeGrant = useMyScopeGrant(id ?? null)
+  const planLaneDelegate = useMemo(
+    () => ({
+      allowScopedLaneAssignment:
+        myScopeGrant.allowScopedLaneAssignment ?? policyAllowScopedLaneAssignment,
+      scopes: laneScopesAsTags(myScopeGrant.scopes, targetLaneRows),
+    }),
+    [myScopeGrant, policyAllowScopedLaneAssignment, targetLaneRows],
+  )
   // AQU-1771: the floors THIS project enforces — its organization's, or its
   // own where stricter (a project can hide more than its org, never less).
   const rosterFloor = projectPolicy.rosterViewMinRole
@@ -1384,17 +1400,27 @@ export function ProjectOverview() {
     policyAllowSelfAssignment,
     policyAssignmentMinRole,
   )
+  // AQU-1914: the plan inspector's Assign also admits a lane delegate the org
+  // allowed to assign (AQU-581) — the editor offers them Assign and the
+  // server's authorize.ts accepts their assignment in their own lanes.
+  const canAssignInPlan = canOpenAssignUi(
+    project?.syncRole?.level ?? null,
+    policyAllowSelfAssignment,
+    policyAssignmentMinRole,
+    planLaneDelegate,
+  )
   const canToggleLifecycle = (project?.syncRole?.level ?? 0) >= 500
   const isArchived = Boolean(project?.deletedAt)
 
   /**
-   * AQU-1278: the inspector's Assign affordance. Same authority the Team card's
-   * Assign panel asks for (`canOpenAssignUi` over the org's assignmentMinRole,
-   * with AQU-496's self-assign carve-out), and never on an archived project —
-   * nothing about an archive should invite new work into it.
+   * AQU-1278: the inspector's Assign affordance. Same authority the editor's
+   * Assign asks for (`canOpenAssignUi` over the org's assignmentMinRole, with
+   * AQU-496's self-assign and AQU-581's lane-delegate carve-outs — AQU-1914),
+   * and never on an archived project — nothing about an archive should invite
+   * new work into it.
    */
   const planAssignTarget: PlanAssignTarget | undefined = useMemo(() => {
-    if (!canAssign || isArchived || !jwt || !id || selectedUnitFileId == null) return undefined
+    if (!canAssignInPlan || isArchived || !jwt || !id || selectedUnitFileId == null) return undefined
     return {
       projectId: id,
       activeFileId: selectedUnitFileId,
@@ -1408,6 +1434,7 @@ export function ProjectOverview() {
       roleLevel: project?.syncRole?.level ?? 0,
       allowSelfAssignment: policyAllowSelfAssignment,
       assignmentMinRole: policyAssignmentMinRole,
+      laneDelegate: planLaneDelegate,
       // AssignModal resolves the caller from `author` against the roster it
       // fetches, which is the only identity this page actually has — the
       // overview never reads the caller's numeric user id.
@@ -1418,9 +1445,9 @@ export function ProjectOverview() {
       },
     }
   }, [
-    canAssign, isArchived, jwt, id, selectedUnitFileId, documentFiles, project?.targetLanes,
+    canAssignInPlan, isArchived, jwt, id, selectedUnitFileId, documentFiles, project?.targetLanes,
     project?.targetLanguage, assignLanes, staffedLaneIds, teamLanes, project?.syncRole?.level, session?.username,
-    policyAllowSelfAssignment, policyAssignmentMinRole, handleAssigned,
+    policyAllowSelfAssignment, policyAssignmentMinRole, planLaneDelegate, handleAssigned,
   ])
 
   const planInspector = selectedPlanUnit ? (

@@ -122,6 +122,10 @@ export const org = defineNamespace({
     "org.egress.options.audio.voice.description": "Each voice’s recordings joined together, no gaps.",
     "org.egress.options.audio.timeline.label": "Voice timeline stems (silence while others speak)",
     "org.egress.options.audio.timeline.description": "One aligned track per voice; all tracks share the file’s timeline.",
+    // AQU-1575: the broadcast deliverable LOTE's vendor asked for, by name.
+    "org.egress.options.audioWav": "Convert every clip to WAV (16-bit, 48 kHz, mono)",
+    "org.egress.options.audioWavDescription":
+      "For broadcast delivery. Off copies each clip as it was saved, which may be compressed or at a lower sample rate.",
     "org.egress.options.useCache": "Reuse cached exports for unchanged projects",
     "org.egress.options.empty": "These options would export nothing — pick a lane, an audio mode, or source documents.",
     "org.egress.options.estimate": "{fileCount} · {cellCount}",
@@ -1869,6 +1873,19 @@ export const org = defineNamespace({
       "org.egress.options.estimateAudio": {
         description: "Optional audio-duration suffix appended to the Data egress estimate.",
         placeholders: { minutes: "Rounded number of recorded-audio minutes." },
+      },
+      "org.egress.options.audioWav": {
+        description:
+          "Checkbox under the Data egress audio modes, shown only when 'Every clip separately' is " +
+          "chosen. On re-encodes every clip as an uncompressed WAV file; off copies each clip in the " +
+          "format it was saved in. '16-bit, 48 kHz, mono' is the technical audio format a broadcast " +
+          "studio asks for — keep the numbers and units as they are.",
+      },
+      "org.egress.options.audioWavDescription": {
+        description:
+          "Help text under the convert-to-WAV checkbox in Data egress: the WAV files are for broadcast " +
+          "delivery, and leaving the box unchecked keeps each clip as it was saved, which can mean a " +
+          "compressed file or a lower sample rate.",
       },
       "org.egress.results.projectStatus": {
         description: "Live export progress line for one project in a multi-project organization export.",

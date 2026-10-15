@@ -269,4 +269,21 @@ describe('cell.audio.attach — a piece born into a group', () => {
     const b = (await rows()).find((r) => r.audio_id === 'take-b')!
     expect(b.piece_of).toBe('take-a')
   })
+
+  // A split take is one take, so its pieces are in one language — whatever
+  // lane a piece's own event names, as a cut copies its parent's lane.
+  it("lands in the lane of the take it is a piece of, not the lane its event names", async () => {
+    const SPANISH = 'ee44ff55'
+    await h.pg.exec(`INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag)
+      VALUES ('${SPANISH}', '${P}', 'target', 'Spanish', 'es', 'es')`)
+    await cleaned('dn-a', { trimEndMs: 1_500, targetLang: 'es' })
+    await cleaned('dn-b', { trimStartMs: 1_500, pieceOf: 'dn-a' }) // names the '' lane
+    // Until the take it names has a row, the event's lane is all there is.
+    await cleaned('dn-y', { pieceOf: 'dn-x', targetLang: 'es' })
+
+    const by = Object.fromEntries((await rows()).map((r) => [r.audio_id, r]))
+    expect(by['dn-a'].lane_id).toBe(SPANISH)
+    expect(by['dn-b'].lane_id).toBe(SPANISH)
+    expect(by['dn-y'].lane_id).toBe(SPANISH)
+  })
 })

@@ -243,6 +243,32 @@ function pieceGroupOfBinds(projectId: string, fileId: string, cellId: string, au
   return [projectId, fileId, cellId, audioId, audioId]
 }
 
+/**
+ * AQU-1767: the lane a piece BORN through an attach (`pieceOf`) lands in — the
+ * lane of the take it is a piece of, when that take has a row, copied as
+ * `cell.audio.cut` copies its parent's `lane_id` (NULL included). A split take
+ * is one take, so its pieces never span two languages, whatever lane the event
+ * names; the payload's `targetLang` decides only while the root has no row.
+ * Binds: {@link attachPieceLaneBinds}.
+ */
+function attachPieceLaneSql(): string {
+  const root = `FROM cell_audio r WHERE r.project_id = ? AND r.file_id = ? AND r.cell_id = ? AND r.audio_id = ?`
+  return `CASE WHEN EXISTS (SELECT 1 ${root}) THEN (SELECT r.lane_id ${root}) ELSE ${audioLaneResolveSql()} END`
+}
+
+/** Binds for {@link attachPieceLaneSql}: the root's key twice, then {@link audioLaneResolveBinds}. */
+function attachPieceLaneBinds(
+  projectId: string,
+  fileId: string,
+  cellId: string,
+  pieceOf: string,
+  role: string,
+  targetLang: string,
+): unknown[] {
+  const root = [projectId, fileId, cellId, pieceOf]
+  return [...root, ...root, ...audioLaneResolveBinds(projectId, role, targetLang)]
+}
+
 export function laneOfAudioEvent(payload: unknown): string {
   const lang = (payload as { targetLang?: unknown } | null | undefined)?.targetLang
   return typeof lang === 'string' ? lang : ''
@@ -1907,7 +1933,8 @@ case 'cell.audio.attach': {
               project_id, file_id, cell_id, audio_id, slot, url, mime_type,
               voice_id, reference_audio_id, duration_ms, label, trim_start_ms, trim_end_ms,
               timings_json, selected, deleted, event_id, created_ts, role, created_by, lane_id, piece_of
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ${audioLaneResolveSql()}, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?,
+                      ${attachPieceOf ? attachPieceLaneSql() : audioLaneResolveSql()}, ?)
             ON CONFLICT(project_id, file_id, cell_id, audio_id) DO UPDATE SET
               slot               = excluded.slot,
               url                = excluded.url,
@@ -1980,7 +2007,10 @@ case 'cell.audio.attach': {
             audioRole,
             event.author,
             // AQU-1591: the lane_id subquery's binds, at the column's position.
-            ...audioLaneResolveBinds(event.projectId, audioRole, audioLane),
+            // AQU-1767: a piece being born takes its root's lane when it can.
+            ...(attachPieceOf
+              ? attachPieceLaneBinds(event.projectId, event.fileId, event.cellId, attachPieceOf, audioRole, audioLane)
+              : audioLaneResolveBinds(event.projectId, audioRole, audioLane)),
             attachPieceOf,
           ),
       )

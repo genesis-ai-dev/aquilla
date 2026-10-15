@@ -34,6 +34,7 @@ import { encodeWavPcm16Chunks, quantisePcm16, type Pcm16Chunk } from "@/lib/audi
 import { parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { TARGET_RATE } from "@/lib/audio/decode-mono"
 import { isInternalIdName, stripInternalIds } from "./internal-id-names"
+import { isSilencedForExport } from "./audio-validation-scope"
 
 export interface CharacterClip {
   cellId: string
@@ -178,6 +179,15 @@ export function groupAudioByCharacter(
     if (!audioId) continue
     const attachment = cell.attachments?.[audioId]
     if (!attachment?.url) continue
+    // AQU-965: validated-only withdrew this take. Leaving it out IS silence in
+    // place here — every clip is laid on a silent track at its own timeline
+    // second (`placeClips`), so the line falls quiet and every other take in
+    // the character's track keeps the position it had — which is what makes
+    // the stems drop into a DAW still aligned. A withdrawn take at the very
+    // END of a character's part shortens the trailing silence (its cue window
+    // leaves `trackDurationSec` with it); every stem still starts at 0:00, so
+    // nothing earlier moves.
+    if (isSilencedForExport(attachment)) continue
     // The NAME is the identity when we have one: two cells sharing a character
     // belong together even if they resolved to different voices. A line nobody
     // cast is its own group — see `characterIdentity`.

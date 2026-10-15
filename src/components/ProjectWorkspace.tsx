@@ -452,7 +452,7 @@ import {
   Select, SelectContent, SelectGroup, SelectItem, SelectSeparator, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import type { ProjectRecord } from "@/lib/parsers/types"
-import { readValidationCount } from "@/lib/progress/read-validation-count"
+import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import {
   detectStrongTextDirection,
   projectSettingTextDirection,
@@ -15463,6 +15463,20 @@ export function ProjectWorkspace() {
           targetLang={activeLane}
           ttsSettings={tts.settings}
           getToken={getTokenForFile}
+          // AQU-965: the number the line's own audio check compares against,
+          // so the dialog's count of unvalidated lines agrees with the ticks
+          // in the gutter rather than counting "at least one vote".
+          audioValidationRequirement={project ? readValidationCountAudio(project) : 1}
+          // Take the viewer to a line with no validated take. On a dubbing
+          // file that line is a CUE in the audio-cue sibling, where the takes
+          // are, so both surfaces are aimed at it: the timeline seats the cue,
+          // and `scrollToCellId` no-ops for an id the open table does not hold
+          // (an audio-first file carries its takes on its own rows, and there
+          // it is the table that lands it).
+          onJumpToAudioLine={(cellId: string) => {
+            setTimelineActivateRequest({ cellId, nonce: Date.now() })
+            editorRef.current?.scrollToCellId(cellId, { flash: true })
+          }}
           orgId={projectOrg?.id.toString()}
           /* AQU-481: "Import again" is an import affordance too — omitted below
              the file.create floor, which leaves the dialog's own button

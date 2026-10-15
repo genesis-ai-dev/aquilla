@@ -20,6 +20,7 @@
 
 import { cellKey, laneCellKey } from './commands'
 import { wireLegacyTagSql } from '../../../db/shared/lane-sql'
+import { selectByCellKeys } from '../lib/cell-key-lookup'
 
 export interface CellPrecondition {
   fileId: string
@@ -55,25 +56,6 @@ export interface CellState {
    *  exists (there is no cell to have a visibility). */
   sourceHidden: boolean | null
 }
-
-/** Cells per precondition-lookup statement. Two ceilings size it:
- *
- *  1. Binds — each cell binds 2 parameters, and postgres.js refuses a statement
- *     with more than 65,534 of them (AQU-1852), so the lookup is paged well under
- *     that rather than sized by the caller's batch.
- *  2. Depth — Postgres rewrites a row-constructor `(a, b) IN ((…), (…), …)` list
- *     into a left-deep nested OR tree, one level per row, so every recursive
- *     pass over the expression (analysis, rewrite, planning) recurses once per
- *     row. Native Postgres absorbs thousands of levels (2 MB max_stack_depth),
- *     but PGlite — the test database, Postgres in WASM on Node's ~1 MB native
- *     stack — overflows between 1,700 and 1,800 rows, swallows the overflow, and
- *     the next protocol message fails with "unnamed prepared statement does not
- *     exist" (AQU-1982). A page past that cannot be tested at all.
- *
- *  1,000 cells = 2,001 parameters per statement, and the same page size as the
- *  sibling `(file_id, cell_id) IN (…)` lookups in link-sync
- *  (CELL_KEY_LOOKUP_ROWS). */
-const PRECONDITION_LOOKUP_CHUNK = 1000
 
 interface CellRow {
   file_id: string
@@ -111,29 +93,19 @@ export async function resolveCellStates(
   }
   const list = [...lanesByCell.values()]
 
-  // AQU-1852: the lookup binds 2 parameters per cell, so one statement over
-  // ~32.7k cells exceeds Postgres's 65,535-parameter ceiling and the whole
-  // prepare fails. A whole-book changeset is exactly that size, so page the
-  // lookup — one statement per PRECONDITION_LOOKUP_CHUNK cells, union'd in
-  // memory. The reads are independent, so paging cannot change the result.
-  const results: CellRow[] = []
-  for (let i = 0; i < list.length; i += PRECONDITION_LOOKUP_CHUNK) {
-    const page = list.slice(i, i + PRECONDITION_LOOKUP_CHUNK)
-    const placeholders = page.map(() => '(?, ?)').join(', ')
-    const binds: unknown[] = []
-    for (const c of page) binds.push(c.fileId, c.cellId)
-
-    const res = await db
-      .prepare(
-        `SELECT file_id, cell_id, side, ${wireLegacyTagSql("cells")} AS target_lang, lane_id, event_id, ai_drafted, value, hidden_at FROM cells
-         WHERE project_id = ?
-           AND side IN ('source', 'target')
-           AND (file_id, cell_id) IN (${placeholders})`,
-      )
-      .bind(projectId, ...binds)
-      .all<CellRow>()
-    results.push(...res.results)
-  }
+  // AQU-1852 / AQU-1982: a whole-book changeset is thousands of cells, so the
+  // lookup is paged (lib/cell-key-lookup.ts) rather than sized by the caller's
+  // batch. The reads are independent, so paging cannot change the result.
+  const results = await selectByCellKeys<CellRow>(
+    db,
+    list,
+    [projectId],
+    (placeholders) =>
+      `SELECT file_id, cell_id, side, ${wireLegacyTagSql("cells")} AS target_lang, lane_id, event_id, ai_drafted, value, hidden_at FROM cells
+       WHERE project_id = ?
+         AND side IN ('source', 'target')
+         AND (file_id, cell_id) IN (${placeholders})`,
+  )
 
   for (const c of list) {
     for (const lane of c.lanes) {

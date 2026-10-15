@@ -60,7 +60,7 @@ export interface TestDbOptions {
  * a row-constructor `(a, b) IN ((…), …)` list, which Postgres rewrites into a
  * left-deep OR tree, fails between 1,700 and 1,800 rows. Native Postgres has no
  * such ceiling, so this is a harness limit, not a production bug — the fix is
- * to page the statement smaller (see PRECONDITION_LOOKUP_CHUNK).
+ * to page the statement smaller (see CELL_KEY_LOOKUP_ROWS in lib/cell-key-lookup.ts).
  */
 function explainLostParse(e: unknown, sql: string, params: readonly unknown[]): unknown {
   const message = (e as { message?: unknown } | null)?.message

@@ -44,7 +44,7 @@ const withTake = (id: string, startTime: number, ext = "wav") =>
   })
 
 /** A minimal but real RIFF/WAVE: header, `fmt `, `data`. */
-function makeWav(dataBytes = 8): Uint8Array {
+function makeWav(dataBytes = 8, sampleRate = 48000): Uint8Array {
   const bytes = new Uint8Array(12 + 8 + 16 + 8 + dataBytes)
   const view = new DataView(bytes.buffer)
   const tag = (at: number, s: string) => { for (let i = 0; i < 4; i += 1) view.setUint8(at + i, s.charCodeAt(i)) }
@@ -56,8 +56,8 @@ function makeWav(dataBytes = 8): Uint8Array {
   // see a blockAlign of 0 the moment something did (2026-08-27).
   view.setUint16(20, 1, true)      // audioFormat: PCM
   view.setUint16(22, 1, true)      // channels: mono
-  view.setUint32(24, 48000, true)  // sampleRate
-  view.setUint32(28, 96000, true)  // byteRate = rate * blockAlign
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * 2, true)  // byteRate = rate * blockAlign
   view.setUint16(32, 2, true)      // blockAlign: 1 channel * 16 bits
   view.setUint16(34, 16, true)     // bitsPerSample
   tag(36, "data"); view.setUint32(40, dataBytes, true)
@@ -799,6 +799,27 @@ describe("where a take is placed in the export", () => {
     })
     expect(result.untrimmed).toBe(1)
     expect(result.files).toBe(1)
+  })
+
+  // AQU-1575: the timestamp is a count of the FILE'S samples. Inworld takes
+  // are stored at 24 kHz and Seed-VC takes at 22.05 kHz; stamped as if every
+  // WAV were 48 kHz, a DAW placed them at about twice their real time.
+  it("stamps a 24 kHz and a 22.05 kHz take at their own sample rates", async () => {
+    const rates: Record<string, number> = { "a-inworld": 24_000, "a-seedvc": 22_050 }
+    const result = await exportAudioPerLine({
+      cells: [withTake("inworld", 10), withTake("seedvc", 20)],
+      settings: SETTINGS, projectId: "p1", langCode: "es",
+      fetchBytes: async ({ audioId }) => makeWav(8, rates[audioId]),
+    })
+    const zip = await JSZip.loadAsync(await result.blob.arrayBuffer())
+    const timeReference = async (entry: string) => {
+      const bytes = await zip.file(entry)!.async("uint8array")
+      const at = new TextDecoder("latin1").decode(bytes).indexOf("bext")
+      return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(at + 8 + 338, true)
+    }
+    // 10 s at 24,000 a second, and 20 s at 22,050 a second.
+    expect(await timeReference("es_L0001_NO_CHARACTER.wav")).toBe(240_000)
+    expect(await timeReference("es_L0002_NO_CHARACTER.wav")).toBe(441_000)
   })
 
   it("falls back to the line's start for a take nobody has placed", async () => {

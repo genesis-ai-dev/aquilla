@@ -35,7 +35,7 @@ import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import { parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { isDefaultTrackSlot, slotForTrack } from "@/lib/timeline/track-slots"
 import type { TimelineTrack } from "@/lib/timeline/tracks"
-import { trimWav, withBwfTimestamp } from "./audio-bwf"
+import { readWavFormat, trimWav, withBwfTimestamp } from "./audio-bwf"
 import { targetChipGeom } from "@/lib/timeline/lane-timing"
 import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 import { stripInternalIds } from "./internal-id-names"
@@ -47,8 +47,8 @@ import {
   type ResolveCharacterName,
 } from "./audio-by-character"
 
-/** Sample rate the BWF timestamp is expressed in. The stored WAVs are written
- *  at this rate by the recorder and the offline encoder alike. */
+/** The rate a BWF timestamp falls back to when a WAV's own `fmt ` cannot be
+ *  read. Only a fallback: see where the timestamp is written. */
 const BWF_RATE = 48000
 
 export interface PerLineClip {
@@ -438,6 +438,12 @@ export async function exportAudioPerLine(
         // `take-margins.ts` gives every recorded take a head trim at birth.
         const geom = targetChipGeom(cell, attachment)
         const placeSec = geom?.start ?? clip.startSec
+        // AQU-1575: a BWF TimeReference is a count of THIS FILE'S samples, so
+        // it is written at the file's own rate. Not every stored WAV is 48 kHz:
+        // Inworld takes are 24 kHz and Seed-VC takes 22.05 kHz, and stamping
+        // those at 48,000 a second put them into a DAW at about twice their
+        // real time.
+        const rate = readWavFormat(bytes)?.sampleRate ?? BWF_RATE
         bytes = withBwfTimestamp(bytes, {
           // A hyphen, not an em dash: the bext fields are Latin-1 and the
           // writer turns anything above 0xFF into "?", so the pretty dash came
@@ -445,7 +451,7 @@ export async function exportAudioPerLine(
           description: `${clip.character} - line ${clip.lineNumber}`,
           originator: "Aquilla",
           originatorRef: clip.cellId,
-          timeReferenceSamples: placeSec * BWF_RATE,
+          timeReferenceSamples: placeSec * rate,
         })
       }
 

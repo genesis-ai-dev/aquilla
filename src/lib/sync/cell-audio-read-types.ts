@@ -122,6 +122,44 @@ export function selectedPieceIds(
   return ids.sort((x, y) => (attachments[x]?.trimStartMs ?? 0) - (attachments[y]?.trimStartMs ?? 0))
 }
 
+/**
+ * AQU-1767 (Sam, 2026-10-15): how far a piece of a split take may be trimmed
+ * back OUT, in ms on the recording's clock. A cut edge reaches as far as the
+ * neighbouring piece's edge as it stands now and never over it, so two pieces
+ * never play the same audio. The limit follows the neighbour as it is
+ * trimmed, and goes with it when it is deleted. An outer edge (the first
+ * piece's start, the last piece's end) answers null: the recording's own end.
+ * Moving a piece is not limited by any of this.
+ */
+export function pieceTrimLimitsMs(
+  attachments:
+    | Record<
+        string,
+        {
+          pieceOf?: string | null
+          slot?: string
+          trimStartMs?: number | null
+          trimEndMs?: number | null
+          isDeleted?: boolean
+        }
+      >
+    | undefined,
+  audioId: string,
+): { minStartMs: number | null; maxEndMs: number | null } {
+  const ids = selectedPieceIds(attachments, audioId)
+  const i = ids.indexOf(audioId)
+  const self = attachments?.[audioId]
+  if (!attachments || !self || i < 0) return { minStartMs: null, maxEndMs: null }
+  const prev = i > 0 ? attachments[ids[i - 1]] : undefined
+  const next = i < ids.length - 1 ? attachments[ids[i + 1]] : undefined
+  return {
+    // A previous piece that runs to the recording's end already overlaps this
+    // one: leave no room rather than hand it more.
+    minStartMs: prev ? (prev.trimEndMs ?? self.trimStartMs ?? 0) : null,
+    maxEndMs: next ? (next.trimStartMs ?? 0) : null,
+  }
+}
+
 /** A take counts toward validation only if somebody dubbed it. */
 export function isDubTake(att: Pick<AudioAttachmentOut, "role">): boolean {
   return (att.role ?? "dub") === "dub"

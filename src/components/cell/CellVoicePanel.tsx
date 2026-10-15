@@ -51,6 +51,7 @@ import { useCellAudio, type UseCellAudioResult } from "@/hooks/useCellAudio"
 import { setCellPref, useCellPref } from "@/lib/store/audio-cell-prefs"
 import { persistTakeTrim, trimMs } from "@/lib/audio/persist-trim"
 import { keptWindowSec } from "@/lib/audio/kept-window"
+import { pieceTrimLimitsMs } from "@/lib/sync/cell-audio-read-types"
 import { TRACK_DASH_CLASS } from "@/lib/timeline/track-colors"
 import { takeTrackColor, takeTrackVars } from "@/lib/timeline/take-colors"
 import { cn } from "@/lib/utils"
@@ -231,6 +232,14 @@ export function CellVoicePanel({
   const playableAtt = playableId ? cell.attachments?.[playableId] : undefined
   const kept = keptWindowSec(cell, playableId, playableAtt)
   const isSourceClip = kept.kind === "section"
+  // AQU-1767: a piece of a split take trims back out only as far as its
+  // neighbouring piece (Sam, 2026-10-15).
+  const pieceLimits = useMemo(() => {
+    if (!playableId) return null
+    const ms = pieceTrimLimitsMs(cell.attachments as Parameters<typeof pieceTrimLimitsMs>[0], playableId)
+    if (ms.minStartMs == null && ms.maxEndMs == null) return null
+    return { minStart: ms.minStartMs != null ? ms.minStartMs / 1000 : null, maxEnd: ms.maxEndMs != null ? ms.maxEndMs / 1000 : null }
+  }, [cell.attachments, playableId])
   const isGenerated = Boolean(playableId && playableId === cell.selectedGeneratedVoiceAudioId && !isSourceClip)
 
   // Trimmed right on the card (Sam, 2026-09-25; the Crop popover is retired).
@@ -339,6 +348,7 @@ export function CellVoicePanel({
           trackVars={trackVars}
           strategy={project.audioMediaStrategy ?? "lazy"}
           trimEditable={!isSourceClip && canEdit}
+          {...(pieceLimits ? { trimLimits: pieceLimits } : {})}
           onCommitTrim={commitTrim}
           className="voice-card-wave"
           testId="voice-card-waveform"

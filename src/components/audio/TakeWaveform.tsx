@@ -61,6 +61,11 @@ export interface TakeWaveformProps {
   strategy?: AudioMediaStrategy
   /** Offer draggable trim edges. Ignored for a source-audio section. */
   trimEditable?: boolean
+  /**
+   * AQU-1767: how far each edge may be trimmed back OUT, in seconds — a piece
+   * of a split take stops at its neighbouring piece. Null = the clip's end.
+   */
+  trimLimits?: { minStart: number | null; maxEnd: number | null }
   /** Persist a finished drag or nudge. Null = back to the clip's edge. */
   onCommitTrim?: (start: number | null, end: number | null) => void
   onRecord?: () => void
@@ -82,6 +87,7 @@ export function TakeWaveform({
   trackVars,
   strategy = "lazy",
   trimEditable = false,
+  trimLimits,
   onCommitTrim,
   onRecord,
   recordLabel,
@@ -162,6 +168,8 @@ export function TakeWaveform({
     if (!sameTrim(v, stored)) onCommitTrim?.(v.start, v.end)
     setDraft(null)
   }
+  const atLeastMinStart = (sec: number) => (trimLimits?.minStart != null ? Math.max(sec, trimLimits.minStart) : sec)
+  const atMostMaxEnd = (sec: number) => (trimLimits?.maxEnd != null ? Math.min(sec, trimLimits.maxEnd) : sec)
   const trimEdges: WaveformEdge[] = canEdit || showReadOnly
     ? [
         {
@@ -170,9 +178,9 @@ export function TakeWaveform({
           label: t("editor.waveform.trimStart"),
           valueText: formatTrimTime(trim.start ?? 0),
           editable: canEdit,
-          onDrag: (f) => setDraft({ audioId, ...moveTrimStart(trim, f * dur, dur) }),
+          onDrag: (f) => setDraft({ audioId, ...moveTrimStart(trim, atLeastMinStart(f * dur), dur) }),
           onNudge: (dir, coarse) => {
-            const next = moveTrimStart(trim, (trim.start ?? 0) + dir * (coarse ? TRIM_NUDGE_COARSE_SEC : TRIM_NUDGE_SEC), dur, { snap: false })
+            const next = moveTrimStart(trim, atLeastMinStart((trim.start ?? 0) + dir * (coarse ? TRIM_NUDGE_COARSE_SEC : TRIM_NUDGE_SEC)), dur, { snap: false })
             setDraft({ audioId, ...next })
           },
           onCommit: () => { if (draftRef.current) commit(draftRef.current) },
@@ -183,9 +191,9 @@ export function TakeWaveform({
           label: t("editor.waveform.trimEnd"),
           valueText: formatTrimTime(trim.end ?? dur),
           editable: canEdit,
-          onDrag: (f) => setDraft({ audioId, ...moveTrimEnd(trim, f * dur, dur) }),
+          onDrag: (f) => setDraft({ audioId, ...moveTrimEnd(trim, atMostMaxEnd(f * dur), dur) }),
           onNudge: (dir, coarse) => {
-            const next = moveTrimEnd(trim, (trim.end ?? dur) + dir * (coarse ? TRIM_NUDGE_COARSE_SEC : TRIM_NUDGE_SEC), dur, { snap: false })
+            const next = moveTrimEnd(trim, atMostMaxEnd((trim.end ?? dur) + dir * (coarse ? TRIM_NUDGE_COARSE_SEC : TRIM_NUDGE_SEC)), dur, { snap: false })
             setDraft({ audioId, ...next })
           },
           onCommit: () => { if (draftRef.current) commit(draftRef.current) },

@@ -1,7 +1,7 @@
 // AQU-1767: the client's mirror of the server's cut rule, and piece names.
 import { describe, it, expect } from "vitest"
 import { CUT_MIN_PIECE_MS, canCutAt, newPieceAudioId, pieceLabels } from "./cut-take"
-import { selectedDubTakes, selectedPieceIds, type CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
+import { pieceTrimLimitsMs, selectedDubTakes, selectedPieceIds, type CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 
 describe("canCutAt", () => {
   const take = { durationMs: 4000, role: "dub" as const }
@@ -71,5 +71,31 @@ describe("the gutter's take list sees every piece", () => {
       selectedAudioId: "a",
     })!
     expect(selectedDubTakes(entry).map((t) => [t.audioId, t.validatorCount])).toEqual([["a", 1], ["b", 0]])
+  })
+})
+
+// AQU-1767 (Sam, 2026-10-15): a cut edge trims back out as far as the
+// neighbouring piece's edge as it stands now; deleting a piece frees it.
+describe("pieceTrimLimitsMs", () => {
+  // A 4s take cut at 2.1s and 3.0s, then trimmed: A ends at 1.6s, B runs 2.8–3.0s, C starts at 3.0s.
+  const pieces = () => ({
+    A: { slot: "recording", trimEndMs: 1600 },
+    B: { slot: "recording", pieceOf: "A", trimStartMs: 2800, trimEndMs: 3000 },
+    C: { slot: "recording", pieceOf: "A", trimStartMs: 3000 },
+    other: { slot: "recording", trimStartMs: 500 },
+  } as Record<string, { slot: string; pieceOf?: string; trimStartMs?: number; trimEndMs?: number; isDeleted?: boolean }>)
+  it("limits each cut edge by its neighbour's current edge, and leaves the outer edges free", () => {
+    expect(pieceTrimLimitsMs(pieces(), "A")).toEqual({ minStartMs: null, maxEndMs: 2800 })
+    expect(pieceTrimLimitsMs(pieces(), "B")).toEqual({ minStartMs: 1600, maxEndMs: 3000 })
+    expect(pieceTrimLimitsMs(pieces(), "C")).toEqual({ minStartMs: 3000, maxEndMs: null })
+  })
+  it("releases the limit when the neighbouring piece is deleted", () => {
+    const att = pieces()
+    att.B.isDeleted = true
+    expect(pieceTrimLimitsMs(att, "A")).toEqual({ minStartMs: null, maxEndMs: 3000 })
+    expect(pieceTrimLimitsMs(att, "C")).toEqual({ minStartMs: 1600, maxEndMs: null })
+  })
+  it("limits nothing on a take never cut", () => {
+    expect(pieceTrimLimitsMs(pieces(), "other")).toEqual({ minStartMs: null, maxEndMs: null })
   })
 })

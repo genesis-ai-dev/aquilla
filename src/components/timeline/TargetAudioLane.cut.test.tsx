@@ -96,3 +96,57 @@ describe("TargetAudioLane — cutting (AQU-1767)", () => {
     expect(Number(second.getAttribute("data-span-end"))).toBeCloseTo(14)
   })
 })
+
+// AQU-1767 (Sam, 2026-10-15): a 4s take cut at 2.1s, then A trimmed to end at
+// 1.6s and B to start at 2.8s. Each cut edge may come back out as far as the
+// other piece's edge, never over it; moving a piece changes nothing.
+describe("TargetAudioLane — a piece's cut edge (AQU-1767)", () => {
+  const split = (bOffsetMs?: number) => {
+    const c = cell({
+      [TAKE]: { type: "audio", url: "frontier-audio://take", slot: "recording", durationMs: 4000, trimEndMs: 1600, label: "Take 1 · 1" },
+      [PIECE]: {
+        type: "audio", url: "frontier-audio://take", slot: "recording", durationMs: 4000, trimStartMs: 2800, pieceOf: TAKE, label: "Take 1 · 2",
+        ...(bOffsetMs != null ? { targetOffsetMs: bOffsetMs } : {}),
+      },
+    })
+    return [
+      { cell: c, kind: "take" as const, audioId: TAKE, pieceIndex: 0, pieceCount: 2 },
+      { cell: c, kind: "take" as const, audioId: PIECE, pieceIndex: 1, pieceCount: 2 },
+    ]
+  }
+  const drag = (testId: string, from: number, to: number) => {
+    const handle = screen.getByTestId(testId)
+    fireEvent.pointerDown(handle, { clientX: from, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: to })
+    fireEvent.pointerUp(window, { clientX: to })
+  }
+
+  it("lets A's end come back out freely up to where B starts, and no further", () => {
+    const onTrimTarget = vi.fn()
+    render(<TargetAudioLane {...base} items={split()} onTrimTarget={onTrimTarget} />)
+    // A ends at 11.6s = 464px. +20px = 0.5s: free, inside the room.
+    drag("tl-target-c1-handle-r", 464, 484)
+    expect(onTrimTarget.mock.calls[0][2].trimEndMs).toBe(2100)
+    // +80px = 2s would reach 3.6s of the recording: stops at B's start, 2.8s.
+    drag("tl-target-c1-handle-r", 464, 544)
+    expect(onTrimTarget.mock.calls[1][2].trimEndMs).toBe(2800)
+  })
+
+  it("lets B's start come back out up to where A ends, and no further", () => {
+    const onTrimTarget = vi.fn()
+    render(<TargetAudioLane {...base} items={split()} onTrimTarget={onTrimTarget} />)
+    // B starts at 12.8s = 512px. −80px = 2s would reach 0.8s: stops at A's end, 1.6s.
+    drag("tl-target-c1-p2-handle-l", 512, 432)
+    const [cellId, audioId, trims] = onTrimTarget.mock.calls[0]
+    expect([cellId, audioId]).toEqual(["c1", PIECE])
+    expect(trims.trimStartMs).toBe(1600)
+  })
+
+  it("keeps the limit in the recording when B has been moved along the timeline", () => {
+    const onTrimTarget = vi.fn()
+    // B moved 3s later: it now sits well clear of A on the timeline.
+    render(<TargetAudioLane {...base} items={split(3000)} onTrimTarget={onTrimTarget} />)
+    drag("tl-target-c1-handle-r", 464, 600)
+    expect(onTrimTarget.mock.calls[0][2].trimEndMs).toBe(2800)
+  })
+})

@@ -45,6 +45,7 @@ import {
 } from "@/lib/timeline/lane-timing"
 import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { canCutAt } from "@/lib/audio/cut-take"
+import { pieceTrimLimitsMs } from "@/lib/sync/cell-audio-read-types"
 import { snapSpan, SNAP_THRESHOLD_PX } from "@/lib/timeline/snap"
 import { trackChipClass, trackChipPlayingClass, trackHueVars } from "@/lib/timeline/track-colors"
 import { DragTimeChip } from "./DragTimeChip"
@@ -382,6 +383,13 @@ function TargetAudioChip({
     ? takeBadgeState(chipTake, currentUsername, validationRequirementAudio)
     : null
 
+  // AQU-1767 (Sam, 2026-10-15): a piece's cut edge trims back out only as far
+  // as its neighbouring piece's edge — in the RECORDING, not on the timeline,
+  // so moving pieces about changes nothing here.
+  const pieceLimits = (chip.item.pieceCount ?? 1) > 1
+    ? pieceTrimLimitsMs(cell.attachments as Parameters<typeof pieceTrimLimitsMs>[0], chip.item.audioId)
+    : null
+
   // The one span transform shared by preview and commit.
   function proposeSpan(mode: ChipDragMode, dxSec: number): { start: number; end: number } {
     const thresholdSec = SNAP_THRESHOLD_PX / pxPerSec
@@ -435,7 +443,11 @@ function TargetAudioChip({
       // arm has always had: drag a chip to the move clamp's limit and then pull
       // this handle past it, and the audible span ended up entirely after its
       // own line, with no contact at all.
-      const lo = Math.max(geom.anchor, prevChip?.start ?? -Infinity)
+      const lo = Math.max(
+        geom.anchor,
+        prevChip?.start ?? -Infinity,
+        pieceLimits?.minStartMs != null ? geom.anchor + pieceLimits.minStartMs / 1000 : -Infinity,
+      )
       // Floored at `lo` so the clamp cannot invert on a chip whose end already
       // sits before its section — that chip is already outside the invariant,
       // and pinning its handle is better than sending it further out.
@@ -450,7 +462,10 @@ function TargetAudioChip({
     // trimEnd ≤ duration, len ≥ min — and the mirror of the ceiling above: the
     // audible END may not be pulled back before the section, or the take stops
     // touching the line it performs.
-    const hi = geom.durationSec != null ? geom.anchor + geom.durationSec : end
+    const hi = Math.min(
+      geom.durationSec != null ? geom.anchor + geom.durationSec : end,
+      pieceLimits?.maxEndMs != null ? geom.anchor + pieceLimits.maxEndMs / 1000 : Infinity,
+    )
     // Capped by `hi`, because the floor must never demand a LONGER clip than
     // was actually recorded: a short take on a late-starting section cannot
     // reach it, and asking would pin the handle at audio that does not exist.

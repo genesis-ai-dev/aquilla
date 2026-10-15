@@ -110,10 +110,6 @@ const UNCOVERED: Record<string, string> = {
   seq_allocations: "never granted to app_runtime",
   // AQU-1694 (0164): derived word links, written like cell_word_morph.
   source_word_alignment: "never granted to app_runtime",
-  // AQU-1767 (0171): what a row removal took, kept so the removal can be
-  // undone. Written and read only by the sync-worker's projection of
-  // source.cell.delete / source.cell.restore; no app read path touches it.
-  removed_cell_archive: "never granted to app_runtime",
   style_rules: "never granted to app_runtime",
   workspace_usage_requests: "never granted to app_runtime",
 }

@@ -72,10 +72,6 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // because re-import, DCS repair and diarization all emit them through a
   // user's own outbox, and nothing emits this but a person choosing it.
   'source.cell.visibility.set': ROLE.PROJECT_LEAD,
-  // AQU-1767 phase 2: undoing a removal. The floor matches the delete it
-  // reverses; authorize.ts adds the real rule — only the person who removed the
-  // cell, or a maintainer, may put it back, and never through the external API.
-  'source.cell.restore': ROLE.COMMENTER,
 
   // Target-side: translator commits.
   'target.cell.create': ROLE.CONTRIBUTOR,

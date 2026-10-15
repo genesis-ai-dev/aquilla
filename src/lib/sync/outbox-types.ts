@@ -31,8 +31,6 @@ export type OutboxEventKind =
   // and no lane's translation goes stale. Hiding is per CELL, not per lane,
   // which is why one source-side kind covers every language.
   | "source.cell.visibility.set"
-  // AQU-1767 phase 2: undo a removal — restore the cell as the removal found it.
-  | "source.cell.restore"
   // Target-side cell events (translator).
   | "target.cell.create"
   | "target.cell.commit"
@@ -198,10 +196,6 @@ export interface OutboxEventPayloads {
   "source.cell.visibility.set": {
     /** true parks the cell (stamps hidden_at), false brings it back (NULL). */
     hidden: boolean
-  }
-  "source.cell.restore": {
-    /** The removal to undo; absent = the cell's newest unrestored removal. */
-    deleteEventId?: string
   }
 
   "target.cell.create": {

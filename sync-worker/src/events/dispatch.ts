@@ -79,7 +79,6 @@ export function dispatchEvent(
     case 'source.cell.metadata.patch':
     case 'source.cell.reanchor':
     case 'source.cell.visibility.set':
-    case 'source.cell.restore':
     case 'target.cell.create':
     case 'target.cell.commit':
     case 'target.cell.delete':

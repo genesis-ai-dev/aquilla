@@ -25,7 +25,6 @@ import { loadLaneGrants } from '../../../db/shared/lane-visibility'
 import { refusalForArchivedLane, targetLaneRowExists, targetLaneRowsFor } from './archived-lane'
 import { eventLaneIdOf, resolveEventLane } from '../../../src/lib/lanes/event-lane'
 import { isEligibleLaneAssignee, isOwnLaneAssignment } from './lane-delegate-authority'
-import { findRestorableRemoval } from './removed-cell-archive'
 
 /** Sentinel fileId used by project-scoped comment.* events in the outbox. */
 export const PROJECT_SENTINEL_FILE_ID = '__project__'
@@ -718,42 +717,6 @@ export async function authorize<K extends EventKind>(
         ok: false,
         status: 403,
         reason: 'removing an imported cell requires maintainer',
-      }
-    }
-  }
-
-  // AQU-1767 phase 2: UNDOING A REMOVAL is the remover's own act. Only the
-  // person who removed the cell may put it back — or a maintainer, who could
-  // have removed it themselves. Never through the external API: the agent
-  // surface has its own undo (compensating commits) and no archive to read.
-  // A restore with nothing to restore (no archive, or the cell is live again)
-  // is refused here rather than accepted as a silent no-op, so the undo that
-  // sent it can say so.
-  if (raw.kind === 'source.cell.restore') {
-    if (tokenClaims.src === 'external') {
-      return { ok: false, status: 403, reason: 'restoring a removed cell is not available through the API' }
-    }
-    if (db != null) {
-      if (raw.cellId == null || raw.fileId == null) {
-        return { ok: false, status: 400, reason: 'source.cell.restore needs a fileId and a cellId' }
-      }
-      const named = (raw.payload as { deleteEventId?: unknown } | null)?.deleteEventId
-      const removal = await findRestorableRemoval(
-        db,
-        raw.projectId,
-        raw.fileId,
-        raw.cellId,
-        typeof named === 'string' && named !== '' ? named : null,
-      )
-      if (!removal) {
-        return { ok: false, status: 422, reason: 'there is no removal of this cell to undo' }
-      }
-      if (removal.deletedBy !== tokenUsername && tokenClaims.role < ROLE.MAINTAINER) {
-        return {
-          ok: false,
-          status: 403,
-          reason: 'only the person who removed this cell, or a maintainer, can put it back',
-        }
       }
     }
   }

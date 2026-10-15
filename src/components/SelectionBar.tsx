@@ -11,7 +11,6 @@
 // disabled until the audio-attachment + validate-via-events grammars land.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { recordGroup, type StepInput } from "@/lib/history/history"
 import { AudioLines, Languages, Sparkles, Wand2, X } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { Spinner } from "@/components/ui/spinner"
@@ -463,16 +462,6 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           surface: "selection", // AQU-1572
         })
       }
-      // AQU-1767 phase 2: the whole selection is ONE history step.
-      recordGroup(
-        { labelKey: "editor.history.stepValidateAudioMany", labelParams: { count: audioTakeTargets.length }, fileId: selectedCells[0]?.fileId ?? null },
-        audioTakeTargets.map((target) => ({
-          kind: "vote.audio",
-          data: { cellId: target.cellId, audioId: target.audioId, voted: true },
-          labelKey: "editor.history.stepValidateAudio",
-          fileId: selectedCells[0]?.fileId ?? null,
-        })),
-      )
       toast.add({
         type: "success",
         title: t("editor.selection.validatedAudioToast", { count: audioTakeTargets.length }),
@@ -508,15 +497,6 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           surface: "selection", // AQU-1572
         })
       }
-      recordGroup(
-        { labelKey: "editor.history.stepUnvalidateAudioMany", labelParams: { count: audioRemoveTargets.length }, fileId: selectedCells[0]?.fileId ?? null },
-        audioRemoveTargets.map((target) => ({
-          kind: "vote.audio",
-          data: { cellId: target.cellId, audioId: target.audioId, voted: false },
-          labelKey: "editor.history.stepUnvalidateAudio",
-          fileId: selectedCells[0]?.fileId ?? null,
-        })),
-      )
       toast.add({
         type: "success",
         title: t("editor.selection.unvalidatedAudioToast", { count: audioRemoveTargets.length }),
@@ -629,16 +609,6 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           editEventId: cell.targetEventId!,
         })))
       }
-      // AQU-1767 phase 2: the whole selection is ONE history step.
-      recordGroup(
-        { labelKey: "editor.history.stepValidateMany", labelParams: { count: summary.validatable.length }, fileId: summary.validatable[0]?.fileId ?? null },
-        summary.validatable.map((cell) => ({
-          kind: "vote.text",
-          data: { cellId: cell.id, lane: activeLane, voted: true, editEventId: cell.targetEventId! },
-          labelKey: "editor.history.stepValidate",
-          fileId: cell.fileId,
-        })),
-      )
       posthog.capture(BATCH_VALIDATE_ATTEMPTED, batchValidateTelemetry(summary, "selection"))
       const message = batchValidateToast(summary, t, formatLocaleList)
       // One message for the whole gesture: the repetitions' note and Undo ride on it.
@@ -657,7 +627,6 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     setRunning({ kind: "validate" })
     try {
       let removed = 0
-      const parts: StepInput[] = []
       for (const cell of selectedCells) {
         if (!cell.translated.trim()) continue
         if (!cell.activeValidators.includes(username)) continue
@@ -673,14 +642,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           surface: "selection", // AQU-1572
         }).catch((err) => console.warn("[unvalidate] enqueue failed:", err))
         removed++
-        parts.push({
-          kind: "vote.text",
-          data: { cellId: cell.id, lane: activeLane, voted: false, editEventId: cell.targetEventId },
-          labelKey: "editor.history.stepUnvalidate",
-          fileId: cell.fileId,
-        })
       }
-      recordGroup({ labelKey: "editor.history.stepUnvalidateMany", labelParams: { count: removed }, fileId: parts[0]?.fileId ?? null }, parts)
       toast.add({
         type: "success",
         title: t("editor.selection.unvalidatedToast", { count: removed }),

@@ -934,95 +934,8 @@ export const editor = defineNamespace({
     "editor.timeline.regenerateDone": "New voice ready",
     "editor.timeline.regenerateFailed": "Couldn't generate a voice for this line",
     "editor.timeline.regenerateNoText": "This line has no translation to speak yet",
-    // AQU-1767: the edit history (Undo / Redo), the first slice of app-wide undo.
-    "editor.history.undoAria": "Undo",
-    "editor.history.redoAria": "Redo",
-    "editor.history.undoTooltip": "Undo: {step}",
-    "editor.history.redoTooltip": "Redo: {step}",
-    "editor.history.nothingToUndo": "Nothing to undo",
-    "editor.history.nothingToRedo": "Nothing to redo",
-    "editor.history.stepCut": "Cut take",
-    "editor.history.stepCutMany": "Cut takes",
-    "editor.history.stepTrim": "Trim take",
-    "editor.history.stepMove": "Move take",
-    "editor.history.undone": "Undid: {step}",
-    "editor.history.redone": "Redid: {step}",
-    "editor.history.skippedChanged": "Skipped “{step}”: it was changed since",
-    "editor.history.skippedGone": "Skipped “{step}”: what it changed no longer exists",
-    "editor.history.failed": "Couldn't save “{step}”. Try again.",
+    // AQU-1767: what S says when there is no take under the playhead.
     "editor.history.nothingToCut": "No take to cut there",
-    // AQU-1767 phase 2: the app-wide history — more kinds of step, the panel.
-    "editor.history.stepRemoveRow": "Remove row",
-    "editor.history.stepAddRow": "Add row",
-    "editor.history.stepRetimeRow": "Change row timing",
-    "editor.history.stepHideRow": "Hide row",
-    "editor.history.stepShowRow": "Show row",
-    "editor.history.stepEditText": "Edit translation",
-    "editor.history.stepValidate": "Validate line",
-    "editor.history.stepUnvalidate": "Remove your validation",
-    "editor.history.stepValidateMany": plural({
-      one: "Validate {count} line",
-      other: "Validate {count} lines",
-    }),
-    "editor.history.stepUnvalidateMany": plural({
-      one: "Remove your validation from {count} line",
-      other: "Remove your validation from {count} lines",
-    }),
-    "editor.history.stepValidateAudio": "Validate recording",
-    "editor.history.stepUnvalidateAudio": "Remove your recording validation",
-    "editor.history.stepValidateAudioMany": plural({
-      one: "Validate {count} recording",
-      other: "Validate {count} recordings",
-    }),
-    "editor.history.stepUnvalidateAudioMany": plural({
-      one: "Remove your validation from {count} recording",
-      other: "Remove your validation from {count} recordings",
-    }),
-    "editor.history.stepChooseTake": "Choose take",
-    "editor.history.stepDeleteTake": "Delete take",
-    "editor.history.stepRenameTake": "Rename take",
-    "editor.history.stepAddTrack": "Add track",
-    "editor.history.stepAddFolder": "Make folder",
-    "editor.history.stepRenameTrack": "Rename track",
-    "editor.history.stepTrackColour": plural({
-      one: "Change {count} track colour",
-      other: "Change {count} track colours",
-    }),
-    "editor.history.stepMoveTrack": plural({
-      one: "Move {count} track",
-      other: "Move {count} tracks",
-    }),
-    "editor.history.stepDeleteTrack": "Delete track",
-    "editor.history.stepSettings": plural({
-      one: "Change {count} project setting",
-      other: "Change {count} project settings",
-    }),
-    "editor.history.skippedUnavailable": "Skipped “{step}”: it can't be undone any more",
-    "editor.history.blockedElsewhere": "Open “{file}” to undo “{step}”",
-    "editor.history.blockedElsewhereNoName": "Open the file it was made in to undo “{step}”",
-    "editor.history.undonePartly": plural({
-      one: "Undid “{step}” — {count} part was changed since and was left alone",
-      other: "Undid “{step}” — {count} parts were changed since and were left alone",
-    }),
-    "editor.history.redonePartly": plural({
-      one: "Redid “{step}” — {count} part was changed since and was left alone",
-      other: "Redid “{step}” — {count} parts were changed since and were left alone",
-    }),
-    "editor.history.panelTitle": "History",
-    "editor.history.panelAria": "Edit history",
-    "editor.history.panelTooltip": "History: undo any of your recent steps",
-    "editor.history.undoSection": "Can undo",
-    "editor.history.redoSection": "Can redo",
-    "editor.history.skippedSection": "Not undone or redone",
-    "editor.history.empty": "Nothing to undo yet. Your edits will appear here.",
-    "editor.history.emptyAllUndone": "Everything here is undone. Redo puts steps back.",
-    "editor.history.notRedone": "Redo of “{step}”",
-    "editor.history.undoThis": "Undo",
-    "editor.history.undoToHere": "Undo to here",
-    "editor.history.reasonChanged": "Someone changed it afterwards, so it was left as they made it.",
-    "editor.history.reasonGone": "What it changed no longer exists.",
-    "editor.history.reasonUnavailable": "This step can't be undone any more.",
-    "editor.history.reasonFailed": "It couldn't be saved. Try again.",
     "editor.timeline.videoHiddenNote":
       "The linked video is hidden here — it plays on the original recording's timing, which this view no longer follows.",
     "editor.timeline.bluetoothPill": "Bluetooth",
@@ -1325,8 +1238,6 @@ export const editor = defineNamespace({
     "editor.removeCell.milestoneWarning":
       "This cell carries the \u201c{label}\u201d heading, which will disappear from chapter navigation.",
     "editor.removeCell.permanent": "This cannot be undone.",
-    // AQU-1767 phase 2: removing a row can be undone now (source.cell.restore).
-    "editor.removeCell.undoable": "You can undo this with Undo or from History.",
     // AQU-1068: an insert/removal applies instantly and is corrected if the
     // server refuses it — the row comes back (or goes away again) on its own,
     // so the copy explains the reversal rather than asking for an action.
@@ -2759,12 +2670,6 @@ export const editor = defineNamespace({
         placeholders: {
           count: "The number of validations; it also selects which plural form is used.",
         },
-      },
-      "editor.removeCell.undoable": {
-        description:
-          "Last sentence of the 'Remove this cell?' confirmation. Removing a cell can now be " +
-          "undone (Cmd/Ctrl+Z, the timeline's Undo button, or the History panel), which brings " +
-          "back its translations, recordings, comments and validations.",
       },
       "editor.removeCell.milestoneWarning": {
         description:
@@ -5956,129 +5861,11 @@ export const editor = defineNamespace({
           "piece, not the other pieces of the same take.",
         maxLength: 30,
       },
-      "editor.history.undoAria": {
-        description: "Screen-reader name of the timeline toolbar's Undo button (icon only).",
-        maxLength: 20,
-      },
-      "editor.history.redoAria": {
-        description: "Screen-reader name of the timeline toolbar's Redo button (icon only).",
-        maxLength: 20,
-      },
-      "editor.history.undoTooltip": {
-        description: "Tooltip of the Undo button, naming the step it would take back.",
-        placeholders: { step: "The step's name, e.g. 'Cut take' or 'Move take'." },
-        maxLength: 50,
-      },
-      "editor.history.redoTooltip": {
-        description: "Tooltip of the Redo button, naming the step it would do again.",
-        placeholders: { step: "The step's name, e.g. 'Cut take' or 'Move take'." },
-        maxLength: 50,
-      },
-      "editor.history.nothingToUndo": {
-        description: "Tooltip of the Undo button when there is nothing to undo.",
-        maxLength: 30,
-      },
-      "editor.history.nothingToRedo": {
-        description: "Tooltip of the Redo button when there is nothing to redo.",
-        maxLength: 30,
-      },
-      "editor.history.stepCut": {
-        description:
-          "Name of one step in the edit history: a take (a recording or generated voice on a " +
-          "line) was cut into two pieces. Shown in the Undo/Redo tooltips and toasts. A short " +
-          "verb phrase.",
-        maxLength: 30,
-      },
-      "editor.history.stepCutMany": {
-        description:
-          "Name of one step in the edit history where several takes were cut at once, at the " +
-          "playhead. Short verb phrase, plural.",
-        maxLength: 30,
-      },
-      "editor.history.stepTrim": {
-        description:
-          "Name of one step in the edit history: the start or end of a take was shortened or " +
-          "lengthened by dragging its edge. Short verb phrase.",
-        maxLength: 30,
-      },
-      "editor.history.stepMove": {
-        description:
-          "Name of one step in the edit history: a take was dragged to a new time. Short verb phrase.",
-        maxLength: 30,
-      },
-      "editor.history.undone": {
-        description: "Toast after Undo succeeded.",
-        placeholders: { step: "The step's name, e.g. 'Cut take'." },
-      },
-      "editor.history.redone": {
-        description: "Toast after Redo succeeded.",
-        placeholders: { step: "The step's name, e.g. 'Cut take'." },
-      },
-      "editor.history.skippedChanged": {
-        description:
-          "Toast when Undo or Redo was not applied because someone (a collaborator, or the user " +
-          "another way) changed the same take after the step was made. Nothing was changed.",
-        placeholders: { step: "The step's name, e.g. 'Cut take'." },
-      },
-      "editor.history.skippedGone": {
-        description:
-          "Toast when Undo or Redo was not applied because what it would change (a take, a line, " +
-          "a track) has been deleted since. Nothing was changed.",
-        placeholders: { step: "The step's name, e.g. 'Cut take'." },
-      },
-      "editor.history.failed": {
-        description: "Toast when Undo or Redo could not be saved (for example, a network error).",
-        placeholders: { step: "The step's name, e.g. 'Cut take'." },
-      },
       "editor.history.nothingToCut": {
         description:
           "Toast after 'Cut takes at the playhead' when no recorded or generated take lies under " +
           "the playhead, or it is too close to a take's edge to cut.",
       },
-      "editor.history.stepRemoveRow": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a line (row) was removed from the file. Undo puts it back with its translations, recordings and comments. A short verb phrase.", maxLength: 40 },
-      "editor.history.stepAddRow": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a new empty line (row) was added to the file. A short verb phrase.", maxLength: 40 },
-      "editor.history.stepRetimeRow": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a line's start or end time was changed on the timeline. A short verb phrase.", maxLength: 40 },
-      "editor.history.stepHideRow": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a line was hidden (parked) with 'Hide cell'. A short verb phrase.", maxLength: 40 },
-      "editor.history.stepShowRow": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a hidden line was shown again. A short verb phrase.", maxLength: 40 },
-      "editor.history.stepEditText": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): the user edited the translation of a line (one editing session). A short verb phrase.", maxLength: 40 },
-      "editor.history.stepValidate": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): the user validated (approved) one line's translation. A short verb phrase.", maxLength: 40 },
-      "editor.history.stepUnvalidate": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): the user took back their own validation of one line's translation. A short verb phrase.", maxLength: 40 },
-      "editor.history.stepValidateAudio": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): the user validated (approved) one recording. A short verb phrase.", maxLength: 40 },
-      "editor.history.stepUnvalidateAudio": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): the user took back their own validation of one recording. A short verb phrase.", maxLength: 40 },
-      "editor.history.stepChooseTake": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): the user chose which take (recording) plays for a line. A short verb phrase.", maxLength: 40 },
-      "editor.history.stepDeleteTake": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a take (recording or generated voice) was deleted. A short verb phrase.", maxLength: 40 },
-      "editor.history.stepRenameTake": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a take (recording) was renamed. A short verb phrase.", maxLength: 40 },
-      "editor.history.stepAddTrack": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): an audio track was added to the timeline. A short verb phrase.", maxLength: 40 },
-      "editor.history.stepAddFolder": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a folder of timeline tracks was made. A short verb phrase.", maxLength: 40 },
-      "editor.history.stepRenameTrack": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a timeline track was renamed. A short verb phrase.", maxLength: 40 },
-      "editor.history.stepDeleteTrack": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a timeline track (and its recordings) was deleted. A short verb phrase.", maxLength: 40 },
-      "editor.history.stepValidateMany": { description: "Name of one history step: the user validated many lines at once (bulk). {count} is the number of lines.", placeholders: { count: "A number." } },
-      "editor.history.stepUnvalidateMany": { description: "Name of one history step: the user took back their own validation from many lines at once. {count} is the number of lines.", placeholders: { count: "A number." } },
-      "editor.history.stepValidateAudioMany": { description: "Name of one history step: the user validated many recordings at once. {count} is the number of recordings.", placeholders: { count: "A number." } },
-      "editor.history.stepUnvalidateAudioMany": { description: "Name of one history step: the user took back their own validation from many recordings at once. {count} is the number of recordings.", placeholders: { count: "A number." } },
-      "editor.history.stepTrackColour": { description: "Name of one history step: the colour of one or more timeline tracks was changed. {count} is how many tracks.", placeholders: { count: "A number." } },
-      "editor.history.stepMoveTrack": { description: "Name of one history step: one or more timeline tracks were moved (reordered, or into/out of a folder). {count} is how many tracks.", placeholders: { count: "A number." } },
-      "editor.history.stepSettings": { description: "Name of one history step: the user saved project settings. {count} is how many settings changed.", placeholders: { count: "A number." } },
-      "editor.history.skippedUnavailable": { description: "Toast when Undo/Redo could not run because this kind of step can no longer be undone (for example, it was made by an older version of the app). Nothing was changed.", placeholders: { step: "The step's name." } },
-      "editor.history.blockedElsewhere": { description: "Toast when Undo is waiting because the step was made in another file. The step is kept; it can be undone after opening that file.", placeholders: { file: "The file's name, as the user named it.", step: "The step's name." } },
-      "editor.history.blockedElsewhereNoName": { description: "Same as blockedElsewhere, when the file's name is not known.", placeholders: { step: "The step's name." } },
-      "editor.history.undonePartly": { description: "Toast after Undo of a step made of several parts (e.g. validating many lines) where some parts were changed by someone since and were left alone.", placeholders: { step: "The step's name.", count: "How many parts were left alone." } },
-      "editor.history.redonePartly": { description: "Toast after Redo of a step made of several parts where some parts were changed since and were left alone.", placeholders: { step: "The step's name.", count: "How many parts were left alone." } },
-      "editor.history.panelTitle": { description: "Title of the History panel, which lists the user's recent steps they can undo." },
-      "editor.history.panelAria": { description: "Accessible name of the button that opens the History panel." },
-      "editor.history.panelTooltip": { description: "Tooltip of the button that opens the History panel." },
-      "editor.history.undoSection": { description: "Heading over the list of steps that can be undone (newest first)." },
-      "editor.history.redoSection": { description: "Heading over the list of steps that were undone and can be redone." },
-      "editor.history.skippedSection": { description: "Heading over recent undos/redos that did not happen, each with the reason." },
-      "editor.history.empty": { description: "Shown in the History panel when there is nothing to undo yet." },
-      "editor.history.emptyAllUndone": { description: "Shown in the History panel's undo list when every step has been undone and some can still be redone (they are listed above it)." },
-      "editor.history.notRedone": { description: "In the History panel's \"Not undone\" list, names a REDO that did not happen (an undo shows just the step's name).", placeholders: { step: "The step's name, e.g. 'Hide row'." } },
-      "editor.history.undoThis": { description: "Button on the newest step in the History panel: undo just this step." },
-      "editor.history.undoToHere": { description: "Button on an older step in the History panel: undo every step down to and including this one, newest first." },
-      "editor.history.reasonChanged": { description: "Why an undo did not happen: a collaborator (or the user, another way) changed the same thing after the step." },
-      "editor.history.reasonGone": { description: "Why an undo did not happen: the line, take or track it changed has been deleted since." },
-      "editor.history.reasonUnavailable": { description: "Why an undo did not happen: this kind of step can no longer be undone." },
-      "editor.history.reasonFailed": { description: "Why an undo did not happen: it could not be saved (for example, a network error)." },
       "editor.timeline.videoHiddenNote": {
         description:
           "Note replacing the linked video player when the file is in free-timing " +

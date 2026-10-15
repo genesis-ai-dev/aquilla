@@ -3,17 +3,16 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 // Keep the user provably-authorized (fail-open role gate) and capture the
 // enqueued envelope without touching IDB.
 vi.mock("./cqrs-bridge", () => ({ getCqrsOutboxBridge: () => null }))
-vi.mock("./outbox", () => ({ enqueueOutboxEvent: vi.fn(async () => {}), enqueueOutboxEvents: vi.fn(async () => {}) }))
+vi.mock("./outbox", () => ({ enqueueOutboxEvent: vi.fn(async () => {}) }))
 
 import {
   emitCellAudioTrim,
-  emitCellAudioUncut,
   emitCellLinkSet,
   emitCellRetime,
   emitFileTrackSet,
   emitFileVideoSet,
 } from "./events-emit"
-import { enqueueOutboxEvent, enqueueOutboxEvents } from "./outbox"
+import { enqueueOutboxEvent } from "./outbox"
 
 const mockEnqueue = enqueueOutboxEvent as unknown as ReturnType<typeof vi.fn>
 beforeEach(() => mockEnqueue.mockClear())
@@ -192,34 +191,5 @@ describe("emitFileTrackSet", () => {
     const ev = mockEnqueue.mock.calls.at(-1)![0] as any
     expect(ev.kind).toBe("file.track.set")
     expect(ev.payload).toEqual({ trackId: "trk-fr", patch: null })
-  })
-})
-
-describe("emitCellAudioUncut (AQU-1767)", () => {
-  it("queues remove, trim-back and rename as ONE outbox write, in that order", async () => {
-    const batch = enqueueOutboxEvents as unknown as ReturnType<typeof vi.fn>
-    batch.mockClear()
-    const ids = await emitCellAudioUncut({
-      projectId: "p1", fileId: "f1", cellId: "c1",
-      removeAudioId: "piece.wav", audioId: "a1.wav", trimStartMs: null, trimEndMs: null,
-      rename: { label: "Take 1" }, author: "u",
-    })
-    expect(batch).toHaveBeenCalledTimes(1)
-    const events = batch.mock.calls[0]![0] as any[]
-    expect(events.map((e) => e.kind)).toEqual(["cell.audio.remove", "cell.audio.trim", "cell.audio.rename"])
-    expect(events[0].payload).toEqual({ audioId: "piece.wav" })
-    expect(events[1].payload).toEqual({ audioId: "a1.wav", trimStartMs: null, trimEndMs: null })
-    expect(events[2].payload).toEqual({ audioId: "a1.wav", label: "Take 1" })
-    expect(ids).toEqual(events.map((e) => e.id))
-  })
-
-  it("leaves the rename out when the cut didn't rename", async () => {
-    const batch = enqueueOutboxEvents as unknown as ReturnType<typeof vi.fn>
-    batch.mockClear()
-    await emitCellAudioUncut({
-      projectId: "p1", fileId: "f1", cellId: "c1",
-      removeAudioId: "piece.wav", audioId: "a1.wav", trimStartMs: 200, trimEndMs: 3000, author: "u",
-    })
-    expect((batch.mock.calls[0]![0] as any[]).map((e) => e.kind)).toEqual(["cell.audio.remove", "cell.audio.trim"])
   })
 })

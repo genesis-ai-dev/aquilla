@@ -38,9 +38,7 @@ import {
   LocateFixed,
   Magnet,
   Minus,
-  Redo2,
   Scissors,
-  Undo2,
   MoreHorizontal,
   Plus,
   Users,
@@ -50,10 +48,7 @@ import {
   X,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { useHistoryView } from "@/lib/history/useHistory"
-import { redoLast, undoLast, type HistoryResult } from "@/lib/history/history"
 import { canCutAt } from "@/lib/audio/cut-take"
-import { isTextEntryTarget } from "@/lib/history/arbiter"
 import { deriveLanes } from "@/lib/timeline/lanes"
 import { deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
 import { isUserAddedLine } from "@/lib/timeline/user-lines"
@@ -235,9 +230,6 @@ export interface TimelineEditorProps {
   onRemoveTake?(cellId: string, audioId: string): void
   onVoteTake?(cellId: string, audioId: string, validated: boolean): void
   voteStateFor?(cellId: string, audioId: string): { canVote: boolean; voted: boolean }
-  /** AQU-1767: what Undo/Redo from the toolbar did, so the workspace can say
-   *  so (the same report the keyboard shortcut gives). Absent = no buttons. */
-  onHistoryResult?(which: "undo" | "redo", result: HistoryResult): void
   /** Round 7 (SUB-44): Space — toggle queue playback (playing→pause,
    *  paused→resume, idle→start). The editor claims the app-wide audio
    *  shortcut while mounted so a last-played single cell can't steal Space. */
@@ -657,6 +649,14 @@ const SPEAKER_TOGGLE_KEYS: Record<
 }
 
 const zoomKey = (fileId: string) => `aquilla:timelineZoom:${fileId}`
+
+/** A key typed into a text field is the field's, not the timeline's (S, B). */
+function isTextEntryTarget(target: EventTarget | null): boolean {
+  if (typeof HTMLElement === "undefined" || !(target instanceof HTMLElement)) return false
+  if (target.isContentEditable) return true
+  const tag = target.tagName
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT"
+}
 
 /**
  * AQU-1767: one lane item per PIECE of a line's take. A take never cut is one
@@ -1167,7 +1167,6 @@ export function TimelineEditor({
   onRemoveTake,
   onVoteTake,
   voteStateFor,
-  onHistoryResult,
   onTogglePlay,
   onRequestLinkVideo,
   onAddLine,
@@ -1279,7 +1278,6 @@ export function TimelineEditor({
   // track. S splits it at the playhead. It lapses the moment the selected line
   // is a different one, and a click on a card or row drops it.
   const [selectedTake, setSelectedTake] = useState<{ cellId: string; slot: string } | null>(null)
-  const history = useHistoryView()
   // AQU-646 stage 2: which folders this person has closed, on THIS file.
   // Personal state — folder membership syncs, but whether a folder is open is
   // where somebody is looking, and syncing that would fold a collaborator's
@@ -2542,11 +2540,6 @@ export function TimelineEditor({
   const cutOne = canCut && onCutTargets
     ? (cellId: string, audioId: string, atMs: number) => onCutTargets([{ cellId, audioId, atMs }])
     : undefined
-  const runHistory = (which: "undo" | "redo") => {
-    void (which === "undo" ? undoLast() : redoLast()).then((result) => {
-      if (result) onHistoryResult?.(which, result)
-    })
-  }
 
   /**
    * Does this lane have anything its mute button would silence? (AQU-1682)
@@ -4154,47 +4147,6 @@ export function TimelineEditor({
               <AudioLines className="h-3.5 w-3.5" />
             </button>
           </AppTooltip>
-          {/* AQU-1767: Undo / Redo — the edit history, app-wide. */}
-          {onHistoryResult && (
-            <>
-              <AppTooltip
-                content={
-                  history.nextUndo
-                    ? t("editor.history.undoTooltip", { step: t(history.nextUndo.labelKey as never, history.nextUndo.labelParams as never) })
-                    : t("editor.history.nothingToUndo")
-                }
-              >
-                <button
-                  type="button"
-                  aria-label={t("editor.history.undoAria")}
-                  data-testid="tl-undo"
-                  disabled={!history.canUndo}
-                  onClick={() => runHistory("undo")}
-                  className="inline-flex items-center rounded-md border border-border bg-background px-1.5 py-1 text-foreground/70 hover:bg-muted disabled:opacity-40"
-                >
-                  <Undo2 className="h-3.5 w-3.5" />
-                </button>
-              </AppTooltip>
-              <AppTooltip
-                content={
-                  history.nextRedo
-                    ? t("editor.history.redoTooltip", { step: t(history.nextRedo.labelKey as never, history.nextRedo.labelParams as never) })
-                    : t("editor.history.nothingToRedo")
-                }
-              >
-                <button
-                  type="button"
-                  aria-label={t("editor.history.redoAria")}
-                  data-testid="tl-redo"
-                  disabled={!history.canRedo}
-                  onClick={() => runHistory("redo")}
-                  className="inline-flex items-center rounded-md border border-border bg-background px-1.5 py-1 text-foreground/70 hover:bg-muted disabled:opacity-40"
-                >
-                  <Redo2 className="h-3.5 w-3.5" />
-                </button>
-              </AppTooltip>
-            </>
-          )}
           {/* AQU-1767: the blade. (Sam, 2026-10-14: no "cut at the playhead"
               button — it cut every voice track at once. S splits the one
               selected take at the playhead instead.) */}

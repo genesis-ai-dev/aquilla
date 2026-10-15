@@ -46,7 +46,6 @@ import { eventLaneTag } from '../../../src/lib/lanes/event-lane'
 import { visibleCellIdSql, visibleSourceSql } from './hidden-cells-scope'
 import { liveCellIdSql, liveSourceSql } from './tombstoned-cells-scope'
 import { coerceExternalIds } from '../../../src/lib/terminology/external-ids'
-import { buildRemovedCellArchiveStmt, buildRemovedCellRestoreStmts } from './removed-cell-archive'
 
 export { laneIdResolveBinds, laneIdResolveSql } from './lane-id-sql'
 
@@ -1305,24 +1304,6 @@ export function buildEventProjectionStmts(
       // they are testing still exists when they run.
       const dependentBinds = [event.projectId, event.fileId, event.cellId]
       if (event.kind === 'source.cell.delete') {
-        // AQU-1767 phase 2: FIRST, copy what the cascade below is about to take,
-        // so `source.cell.restore` can put it back (removed-cell-archive.ts).
-        // Same gate as the cascade: a delete that lost its slot archives nothing.
-        stmts.push(
-          buildRemovedCellArchiveStmt(
-            db,
-            {
-              id: event.id,
-              projectId: event.projectId,
-              fileId: event.fileId,
-              cellId: event.cellId,
-              author: event.author,
-              serverTs: event.serverTs,
-            },
-            dependentGateAnd,
-            dependentGateBinds,
-          ),
-        )
         // THE TRANSLATIONS GO WITH THE SOURCE, in every lane.
         //
         // The client used to batch one `target.cell.delete` per lane beside
@@ -1502,43 +1483,6 @@ export function buildEventProjectionStmts(
             'cell_word_morph',
           ]
         : ['cells', 'files', 'cell_validators', 'cell_backtranslations']
-    }
-
-    case 'source.cell.restore': {
-      const p = event.payload as EventPayloads['source.cell.restore']
-      if (!event.fileId || !event.cellId) {
-        throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
-      }
-      // AQU-1767 phase 2: undo a removal from its archive. Non-chain-mutating:
-      // the row is gone, so there is no head to extend; the restored source row
-      // keeps the head it had, and the removal's claim is released so the next
-      // edit chained on that head can take its slot (removed-cell-archive.ts).
-      stmts.push(
-        ...buildRemovedCellRestoreStmts(
-          db,
-          {
-            id: event.id,
-            projectId: event.projectId,
-            fileId: event.fileId,
-            cellId: event.cellId,
-            serverTs: event.serverTs,
-          },
-          typeof p?.deleteEventId === 'string' && p.deleteEventId !== '' ? p.deleteEventId : null,
-        ),
-      )
-      if (!opts?.deferFileCounters)
-        stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
-      return [
-        'cells',
-        'files',
-        'cell_validators',
-        'cell_audio',
-        'cell_links',
-        'comments',
-        'cell_waivers',
-        'cell_backtranslations',
-        'cell_word_morph',
-      ]
     }
 
     case 'source.cell.reorder':
@@ -3821,17 +3765,6 @@ export function isChainArbitrated(kind: string, parentId: string | null | undefi
 }
 
 /**
- * AQU-1767: a removal that was later undone (`source.cell.restore` stamps its
- * archive `restored_by`) holds no slot any more. The restore releases its
- * `chain_claims` row, but the winner rules read the `events` log, where the
- * old removal stays the parent's first child forever — so without this every
- * later remove (or reorder) of the restored row lost as a "stale sibling".
- * Kept in step with `prefetchChainWinners` in route.ts.
- */
-export const RESTORED_REMOVAL_SQL = `EXISTS (SELECT 1 FROM removed_cell_archive a
-            WHERE a.delete_event_id = events.id AND a.restored_by IS NOT NULL)`
-
-/**
  * AD-2 first-child-of-parent guard. Returns true if this event is the
  * winning child for its `(project_id, file_id, cell_id, parent_id)` — that
  * is, no other CHAIN-MUTATING event with the same key has been accepted
@@ -3878,19 +3811,17 @@ export async function isWinningChild(
        WHERE project_id = ? AND file_id = ? AND cell_id = ?
          AND parent_id IS NULL
          AND kind IN (${kindList})
-         AND (id = ? OR NOT ${RESTORED_REMOVAL_SQL})
        ORDER BY server_seq ASC, id ASC
        LIMIT 100`
     : `SELECT id, server_seq, kind, payload FROM events
        WHERE project_id = ? AND file_id = ? AND cell_id = ? AND parent_id = ?
          AND kind IN (${kindList})
-         AND (id = ? OR NOT ${RESTORED_REMOVAL_SQL})
        ORDER BY server_seq ASC, id ASC
        LIMIT 100`
 
   const stmt = parentIsNull
-    ? db.prepare(sql).bind(candidate.projectId, candidate.fileId, candidate.cellId, candidate.id)
-    : db.prepare(sql).bind(candidate.projectId, candidate.fileId, candidate.cellId, candidate.parentId, candidate.id)
+    ? db.prepare(sql).bind(candidate.projectId, candidate.fileId, candidate.cellId)
+    : db.prepare(sql).bind(candidate.projectId, candidate.fileId, candidate.cellId, candidate.parentId)
 
   const { results } = await stmt.all<{ id: string; server_seq: number; kind: string; payload: string }>()
 

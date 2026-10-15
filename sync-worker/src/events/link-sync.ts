@@ -162,9 +162,6 @@ const LANE_KINDS_SOURCE = [
   // `loadDelta` was never even called. A downstream then kept showing (and
   // counting, exporting and drafting) a verse the upstream had parked.
   'source.cell.visibility.set',
-  // AQU-1767 phase 2: an upstream lead undoing a removal brings the cell back,
-  // so it has to count as a change and reach the downstream like the delete did.
-  'source.cell.restore',
   'source.cell.mirror',
   'cell.retime',
   'cast.assign',
@@ -484,9 +481,7 @@ interface UpstreamDeltaRow {
  * head (see ChainHeadReplay).
  */
 const CHAIN_REPLAY_KINDS = {
-  // AQU-1767: `source.cell.restore` moves no head (it is not chain-mutating) but
-  // decides whether a deleted cell exists again — see deletedByHead.
-  source: ['source.cell.create', 'source.cell.commit', 'source.cell.delete', 'source.cell.reorder', 'source.cell.mirror', 'source.cell.restore'],
+  source: ['source.cell.create', 'source.cell.commit', 'source.cell.delete', 'source.cell.reorder', 'source.cell.mirror'],
   target: ['target.cell.create', 'target.cell.commit', 'target.cell.delete', 'target.cell.reorder'],
 } as const
 
@@ -792,23 +787,11 @@ async function loadDelta(
     { fileId: string; cellId: string; eventId: string; seq: number; hidden: boolean }
   >()
 
-  /**
-   * AQU-1767 phase 2: cells the upstream RESTORED in this window (a removal
-   * undone). A restore carries no text — the upstream put back its archived
-   * rows — so, like a hide, it cannot be folded as content; it is resolved
-   * against the upstream's live row after the window is read.
-   */
-  const restored = new Map<string, { fileId: string; cellId: string; eventId: string; seq: number }>()
-
   for (const row of results) {
     if (!row.file_id) continue
     fileIds.add(row.file_id)
     if (!row.cell_id || stale.has(row.id)) continue
     const key = `${row.file_id}\0${row.cell_id}`
-    if (row.kind === 'source.cell.restore') {
-      restored.set(key, { fileId: row.file_id, cellId: row.cell_id, eventId: row.id, seq: row.server_seq })
-      continue
-    }
     let payload: Record<string, unknown>
     try {
       payload = JSON.parse(row.payload) as Record<string, unknown>
@@ -929,65 +912,6 @@ async function loadDelta(
     // before downstream has diverged?"). They still count toward `head` so
     // the freshness probe and cursor advance correctly; a future slice can
     // extend the fold to carry timing/cast deltas.
-  }
-
-  // AQU-1767 phase 2: a restored cell is live again with the content it had —
-  // unless a later event in this window already says what it is now (an edit,
-  // or another removal). Read from the upstream's live row, the one record of
-  // what the restore put back.
-  const restoredPending = [...restored.values()].filter((r) => {
-    const content = cells.get(`${r.fileId}\0${r.cellId}`)
-    return !content || content.seq < r.seq
-  })
-  if (restoredPending.length > 0) {
-    const liveRows = await selectByCellKeys<{
-      file_id: string
-      cell_id: string
-      value: string | null
-      value_html: string | null
-      type: string | null
-      canonical_ref: string | null
-      anchor_cell_id: string | null
-      start_ms: number | string | null
-      end_ms: number | string | null
-      metadata: Record<string, unknown> | null
-      hidden_at: number | string | null
-      tombstoned_at: number | string | null
-    }>(
-      db,
-      restoredPending,
-      [upstreamProjectId],
-      (placeholders) =>
-        `SELECT file_id, cell_id, value, value_html, type, canonical_ref, anchor_cell_id,
-                start_ms, end_ms, metadata, hidden_at, tombstoned_at
-           FROM cells
-          WHERE project_id = ? AND side = 'source'
-            AND (file_id, cell_id) IN (${placeholders})`,
-    )
-    const liveByKey = new Map(liveRows.map((r) => [`${r.file_id}\0${r.cell_id}`, r]))
-    for (const r of restoredPending) {
-      const key = `${r.fileId}\0${r.cellId}`
-      const live = liveByKey.get(key)
-      // Gone again by the time we read (removed after the window closed, or a
-      // tombstoned chain row): the next window's delete says so on its own.
-      if (!live || live.tombstoned_at != null) continue
-      cells.set(key, {
-        fileId: r.fileId,
-        cellId: r.cellId,
-        eventId: r.eventId,
-        seq: r.seq,
-        deleted: false,
-        value: live.value ?? '',
-        valueHtml: live.value_html,
-        type: live.type,
-        canonicalRef: live.canonical_ref,
-        anchorCellId: live.anchor_cell_id,
-        startMs: live.start_ms == null ? null : Number(live.start_ms),
-        endMs: live.end_ms == null ? null : Number(live.end_ms),
-        metadata: live.metadata,
-        hidden: live.hidden_at != null,
-      })
-    }
   }
 
   // AQU-1546: merge the window's visibility onto the window's content. A cell
@@ -1640,7 +1564,7 @@ async function deletedByHead(
               END AS deleted
          FROM events
         WHERE project_id = ? AND server_seq > ? AND server_seq <= ?
-          AND kind IN ('source.cell.create', 'source.cell.delete', 'source.cell.mirror', 'source.cell.restore')
+          AND kind IN ('source.cell.create', 'source.cell.delete', 'source.cell.mirror')
           AND (file_id, cell_id) IN (${placeholders})
         ORDER BY file_id, cell_id, server_seq DESC`,
   )
@@ -1657,7 +1581,7 @@ async function deletedByHead(
   for (const e of await replayUpstreamChains(db, upstreamProjectId, doomed, 'source', head)) {
     if (!e.won || e.seq <= afterSeq) continue
     const key = `${e.fileId}\0${e.cellId}`
-    if (e.kind === 'source.cell.create' || e.kind === 'source.cell.restore') deletedAtHead.set(key, false)
+    if (e.kind === 'source.cell.create') deletedAtHead.set(key, false)
     else if (e.kind === 'source.cell.delete') deletedAtHead.set(key, true)
     else if (e.kind === 'source.cell.mirror') deletedAtHead.set(key, e.mirrorDeleted)
   }

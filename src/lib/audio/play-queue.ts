@@ -9,6 +9,7 @@ import type { CellData } from "@/hooks/useCells"
 import { fetchCellAudio, getCellAudioStreamUrl, parseFrontierAudioUrl, audioIdSeededWith, probeCellAudioPresent } from "./upload"
 import { activeTargetForCell, resolveTargetAudio, resolveTargetPieces, sourceClipAudioForCell, type TargetAudioRef } from "./track-audio"
 import { isDefaultTrackSlot, RECORDING_SLOT, slotAudible } from "@/lib/timeline/track-slots"
+import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 import { effectiveAttachmentDurationMs, targetChipGeom, targetDueSec } from "@/lib/timeline/lane-timing"
 import { hasTiming, sortByLens } from "@/lib/timeline/derive"
 import { buildProgramme, slotAtProgrammeSec, type Programme, type ProgrammeSlot } from "@/lib/timeline/programme"
@@ -692,6 +693,33 @@ async function resolveAudioSrc(
   if (streamUrl) return { src: streamUrl, objectUrl: null, streaming: true, frontier, swapped }
   const url = await fetchFullBlobUrl(frontier, projectId, fileId, session, swapped)
   return { src: url, objectUrl: url, streaming: false, frontier, swapped }
+}
+
+/**
+ * AQU-1767: a split webm take's other pieces made seekable ahead of their turn
+ * (seekableClip caches them), so none waits for a decode when it is due. The
+ * bytes are fetched for it when this piece was streamed.
+ */
+function warmSplitPieces(
+  cell: CellData,
+  firedId: string,
+  audioId: string,
+  ext: string,
+  bytes: Uint8Array | undefined,
+  ctx: PlayContext,
+): void {
+  const others = selectedPieceIds(cell.attachments, firedId).filter((id) => id !== firedId)
+  if (others.length === 0) return
+  const ends = others.map((id) => {
+    const ms = cell.attachments?.[id]?.trimEndMs
+    return ms != null && Number.isFinite(ms) ? ms / 1000 : null
+  })
+  const warm = (b: Uint8Array) => { for (const end of ends) void seekableClip(audioId, ext, b, end) }
+  if (bytes) { warm(bytes); return }
+  void fetchCellAudio({
+    projectId: ctx.projectId, fileId: cell.fileId, audioId, ext,
+    getSyncToken: audioSyncTokenFetcherForSession(ctx.session),
+  }).then(warm, () => { /* they will be made when due */ })
 }
 
 /**
@@ -2135,6 +2163,9 @@ function executeFire(
           })
         } catch { /* play it as resolved; the head is the worst of it */ }
       }
+      // The take's other pieces will want the same, moments from now: start
+      // on them while this one plays, so they are ready when they are due.
+      if (ext.toLowerCase() !== "wav") warmSplitPieces(cell, plan.audioId, audioId, ext, bytes, ctx)
       const cut = !bytes
         ? null
         : mustSeek

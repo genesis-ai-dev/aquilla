@@ -117,13 +117,20 @@ describe("a trimmed dub's bytes end at its trim", () => {
 // "test three" was due). A dub that must start partway in gets a WAV first.
 describe("a dub that starts partway into a webm", () => {
   class FakeOffline {
-    constructor(_c: number, _l: number, public sampleRate: number) {}
+    sampleRate: number
+    constructor(_c: number, _l: number, sampleRate: number) { this.sampleRate = sampleRate }
     async decodeAudioData() {
       const length = 4 * this.sampleRate
       return { sampleRate: this.sampleRate, length, numberOfChannels: 1, getChannelData: () => new Float32Array(length) }
     }
   }
-  beforeEach(() => { vi.stubGlobal("OfflineAudioContext", FakeOffline) })
+  let decodes = 0
+  beforeEach(() => {
+    decodes = 0
+    vi.stubGlobal("OfflineAudioContext", class extends FakeOffline {
+      async decodeAudioData() { decodes += 1; return super.decodeAudioData() }
+    })
+  })
 
   it("plays a WAV of it, cut at its trim end, so the seek to its start can happen", async () => {
     cached.bytes = new Uint8Array(64) // a webm's bytes; decoded by the fake
@@ -141,4 +148,30 @@ describe("a dub that starts partway into a webm", () => {
     expect(played.type).toBe("audio/wav")
     expect(played.size).toBe(44 + 3 * 48000 * 2)
   })
+
+  it("gets the take's next piece ready while the first one plays", async () => {
+    cached.bytes = new Uint8Array(64)
+    const A = `${TAKE}.webm`, B = "audio-a-1700000500-piece.webm"
+    const split = {
+      ...line("webm"),
+      selectedAudioId: A,
+      attachments: {
+        [A]: { type: "audio", url: `frontier-audio://${TAKE}.webm`, slot: "recording", durationMs: 4000, trimEndMs: 1500 },
+        [B]: { type: "audio", url: `frontier-audio://${TAKE}.webm`, slot: "recording", pieceOf: A, durationMs: 4000, trimStartMs: 2000, trimEndMs: 3500 },
+      },
+    } as unknown as CellData
+    startExternalDubs(ctxFor([split]))
+    setExternalDubsPlaying(true)
+    tickExternalDubs(10.2)
+    await settle()
+    // The first piece's clip, and the second's, made while the first plays.
+    expect(decodes).toBe(2)
+    tickExternalDubs(12.1)
+    await settle()
+    // Due, the second piece waits for nothing new.
+    expect(decodes).toBe(2)
+    const el = FakeAudio.instances.at(-1)!
+    expect(blobs[Number(el.src.split("/").pop()) - 1].size).toBe(44 + 3.5 * 48000 * 2)
+  })
 })
+

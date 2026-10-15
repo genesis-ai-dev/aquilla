@@ -699,6 +699,8 @@ export interface OutboxEventPayloads {
     assigneeUserId: number
     deadline?: string | null
     note?: string | null
+    /** AQU-1969: absent = 'translate', the only kind before this field. */
+    kind?: "translate" | "validate"
   }
   "assignment.reassign": {
     assignmentId: string

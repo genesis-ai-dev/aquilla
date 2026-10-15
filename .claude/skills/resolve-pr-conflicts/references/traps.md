@@ -72,17 +72,26 @@ the push usually means exactly that migration is pending - say so in the report.
 
 ## Dependencies in a worktree
 
-`link-deps.sh` handles the normal case. When results still look wrong:
+`link-deps.sh` handles the normal case: the root `node_modules` is linked to the main checkout's
+entry by entry when the installed versions match (a real install otherwise), and each worker gets
+a real install. When results still look wrong:
 
 - **Module-resolution errors or a wall of type errors in files the PR never touched** mean
-  mismatched dependencies, not a regression. Replace the links with a real install:
-  `rm -rf node_modules && pnpm install --frozen-lockfile` at the root, or
-  `rm -rf node_modules && pnpm install --ignore-workspace --frozen-lockfile` in the worker.
+  mismatched dependencies, not a regression. At the root, replace the links with a real install:
+  `rm -rf node_modules && pnpm install --frozen-lockfile`. A worker's install is real but may
+  predate a lockfile change: `rm -rf node_modules && pnpm install --ignore-workspace --frozen-lockfile`
+  in the worker.
+- **`git push` refused with "node_modules is a symlink that does not resolve inside this
+  worktree"** - the hook's first step (`scripts/assert-worktree-node-modules.ts`) checks
+  `node_modules`, `auth-worker/node_modules` and `sync-worker/node_modules` and refuses any that is
+  itself a symlink out of the worktree; links *inside* a real directory pass. That is why the root
+  is linked entry by entry and the workers are never linked. Re-run `link-deps.sh`: it replaces a
+  whole-directory symlink (made by hand, or by a copy of the script from before the hook).
 - **Stack boot dies waiting on a `/healthz`** with `Cannot find package …` in the e2e logs: a
   worker has no `node_modules`. Re-run `link-deps.sh`.
 - The root `tsc -b` writes incremental state into `node_modules/.tmp`. `link-deps.sh` gives the
   worktree its own; if you symlinked `node_modules` wholesale by hand instead, a green `tsc -b`
-  may be reading the main checkout's state and is not trustworthy.
+  may be reading the main checkout's state and is not trustworthy - and the hook refuses it.
 - `tsx` is only a local bin: `pnpm exec tsx …`, never bare `tsx`.
 
 ## Gate failures

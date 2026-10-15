@@ -9,6 +9,8 @@ import {
   laneOptionLabel,
   laneRowLabel,
   laneRowLanguage,
+  liveTargetLaneLanguages,
+  sourceLaneLanguage,
   type LaneLanguageRow,
 } from "./lane-language"
 
@@ -317,5 +319,54 @@ describe("laneLanguageCodeForTag (AQU-1908)", () => {
 
   it("never answers an opaque lane id, which is an event key and not a language", () => {
     expect(laneLanguageCodeForTag("a3f09c1e", null)).toBeNull()
+  })
+})
+
+describe("sourceLaneLanguage (AQU-1978)", () => {
+  it("is the source lane row's language, never a target lane's", () => {
+    const lanes = [
+      row({ id: "tgt00001", role: "target", language: "Spanish", legacyTag: "Spanish" }),
+      row({ id: "src00001", role: "source", language: "English" }),
+    ]
+    expect(sourceLaneLanguage(lanes)).toBe("English")
+  })
+
+  it("is null when no source lane names a language — not the retired settings key", () => {
+    expect(sourceLaneLanguage([], { sourceLanguage: "English" })).toBeNull()
+    expect(sourceLaneLanguage(undefined)).toBeNull()
+  })
+})
+
+describe("liveTargetLaneLanguages (AQU-1978)", () => {
+  const lane = (
+    over: Partial<LaneLanguageRow> & { id: string; position: number; archivedAt?: string | null },
+  ) => ({ role: "target" as const, archivedAt: null, ...row(over), position: over.position })
+
+  it("lists the live target lanes' languages in switcher order, from the rows", () => {
+    const lanes = [
+      { ...row({ id: "src00001", role: "source", language: "English" }), position: 0, archivedAt: null },
+      lane({ id: "frc00002", language: "French", legacyTag: "French", position: 2 }),
+      // A second lane tagged with its own id: its LANGUAGE is listed, never the tag.
+      lane({ id: "a3f09c1e", language: "Portuguese", legacyTag: "a3f09c1e", position: 1 }),
+      lane({ id: "swa00003", language: "Swahili", legacyTag: "", position: 0 }),
+    ]
+    expect(liveTargetLaneLanguages(lanes)).toEqual(["Swahili", "Portuguese", "French"])
+  })
+
+  it("leaves out an archived lane, the former default lane included", () => {
+    const lanes = [
+      lane({ id: "swa00003", language: "Swahili", legacyTag: "", position: 0, archivedAt: "2026-10-01" }),
+      lane({ id: "frc00002", language: "French", legacyTag: "French", position: 1 }),
+    ]
+    expect(liveTargetLaneLanguages(lanes)).toEqual(["French"])
+  })
+
+  it("names each language once and skips a lane that names none", () => {
+    const lanes = [
+      lane({ id: "spa00001", language: "Spanish", legacyTag: "Spanish", position: 0 }),
+      lane({ id: "b4e10d2f", language: "spanish", legacyTag: "b4e10d2f", position: 1 }),
+      lane({ id: "c5f21e3a", language: null, name: null, legacyTag: "c5f21e3a", position: 2 }),
+    ]
+    expect(liveTargetLaneLanguages(lanes)).toEqual(["Spanish"])
   })
 })

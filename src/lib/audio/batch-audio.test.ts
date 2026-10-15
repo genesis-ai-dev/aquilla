@@ -121,6 +121,23 @@ describe("runTranscribeAll", () => {
     // Progress clears to null after completion.
     expect(getBatchProgress()).toBeNull()
   })
+
+  it("hands every cell the lane being worked in (AQU-1978)", async () => {
+    // Each take's timings ride a re-attach that deselects within the lane it
+    // names; with no lane that was the `''` lane, on every line of the batch.
+    const { transcribeCell } = await import("./transcribe")
+    const cells = [
+      makeCell({
+        id: "c1",
+        selectedAudioId: "a1",
+        attachments: { a1: { url: "frontier-audio://p/f/a1.wav" } as unknown as import("@/lib/codex-editor/types").CodexCellAttachment },
+      }),
+    ]
+    await runTranscribeAll({ cells, projectId: "proj1", session: mockSession, targetLanguage: "Spanish", targetLang: "es-lane" })
+    expect(transcribeCell).toHaveBeenCalledWith(
+      expect.objectContaining({ language: "Spanish", targetLang: "es-lane" }),
+    )
+  })
 })
 
 // AQU-928: the timeline's "transcribe these sections" row passes an explicit

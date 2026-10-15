@@ -49,6 +49,22 @@ export interface PortfolioLane {
   archived?: boolean
   /** Source rows are for the language pair. Chips list target lanes only. */
   role?: "source" | "target"
+  /**
+   * AQU-1951: this language's recordings — cells with a selected dub take in
+   * this lane, and those whose takes meet the audio threshold. Absent on older
+   * servers.
+   */
+  audioCells?: number
+  validatedAudioCells?: number
+  /**
+   * AQU-1954: what this language's recordings are measured against: every
+   * file when its "Records audio" switch is on, else the files it has recorded
+   * in (and any file with a cue sheet). 0 means the language owes no audio.
+   * Absent on older servers, which measured against the project's total.
+   */
+  audioTotalCells?: number
+  /** AQU-1954: the language row's "Records audio" switch. */
+  recordsAudio?: boolean
 }
 
 export interface PortfolioProject {
@@ -80,6 +96,12 @@ export interface PortfolioProject {
    * total, as it always did.
    */
   audioTotalCells?: number
+  /**
+   * AQU-1954: whether any of the project's languages has its "Records audio"
+   * switch on, so the Progress card shows audio before the first take.
+   * Optional because an older server sends none, which reads as off.
+   */
+  recordsAudio?: boolean
   audioCells: number
   /**
    * AQU-508: cells whose selected audio take has been validated by a reviewer —
@@ -152,13 +174,32 @@ export function portfolioTargetLabel(p: {
   return fromLane || p.targetLanguage?.trim() || null
 }
 
+/**
+ * AQU-1977: the project's MAIN target language — its former default ('')
+ * lane while it has one, which keeps an old project's label, otherwise its
+ * first live target lane in position order, the lane the editor opens. A
+ * project made since AQU-1594 has no '' lane, so the '' lookup alone named
+ * nothing and its pair read "English" with no target.
+ */
+export function portfolioMainTargetLabel(p: {
+  lanes?: PortfolioLane[]
+  targetLanguage?: string | null
+}): string | null {
+  const fromDefault = portfolioTargetLabel(p)
+  if (fromDefault) return fromDefault
+  const first = (p.lanes ?? [])
+    .filter((lane) => lane.role !== "source" && lane.archived !== true)
+    .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))[0]
+  return laneLabelText(first) ?? null
+}
+
 export function languagePairLabel(p: {
   lanes?: PortfolioLane[]
   sourceLanguage?: string | null
   targetLanguage?: string | null
 }): string | null {
   const source = portfolioSourceLabel(p)
-  const target = portfolioTargetLabel(p)
+  const target = portfolioMainTargetLabel(p)
   if (source && target) return `${source} → ${target}`
   return target ?? source ?? null
 }

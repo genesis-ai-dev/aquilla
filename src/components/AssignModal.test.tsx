@@ -512,6 +512,35 @@ describe("lane select (AQU-538)", () => {
     expect(mockCreate.mock.calls[0][0].targetLang).toBeUndefined()
   })
 
+  // ── AQU-1977: a project made since AQU-1594 has no '' lane ────────────────
+  // Offering "Default language" there, and submitting it, saved an assignment
+  // that belongs to no lane, whose progress reads 0% for ever.
+  it("offers only the project's own lanes, and opens a '' default on the first", async () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        lanes={[{ legacyTag: "Spanish", label: "Spanish" }, { legacyTag: "French", label: "French" }]}
+        defaultLane=""
+      />,
+    )
+    const laneTrigger = screen.getByRole("combobox", { name: /language lane/i })
+    expect(laneTrigger.textContent).toMatch(/spanish/i)
+    fireEvent.click(laneTrigger)
+    expect(await screen.findByRole("option", { name: /french/i })).toBeTruthy()
+    expect(screen.queryByRole("option", { name: /default language/i })).toBeNull()
+  })
+
+  it("saves the work into that lane, not into a '' lane the project lacks", async () => {
+    render(
+      <AssignModal {...BASE_PROPS} lanes={[{ legacyTag: "Spanish", label: "Spanish" }]} defaultLane="" />,
+    )
+    expect(screen.getByTestId("assign-modal-lane-fixed")).toHaveTextContent("Spanish")
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /assign/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+    expect(mockCreate.mock.calls[0][0].targetLang).toBe("Spanish")
+  })
+
   // ── AQU-728: the default ('') lane must be labeled by its real language ──────
   // The default lane IS a real language lane (the project's own default target
   // language). Launched from a Portuguese-default project it previously showed

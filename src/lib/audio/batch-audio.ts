@@ -156,6 +156,12 @@ export interface TranscribeAllArgs {
   targetLanguage?: string
   /** @deprecated single-language callers; used as targetLanguage fallback. */
   language?: string
+  /**
+   * AQU-1462: lane the member is working in. Omitted for the default lane.
+   * AQU-1978: forwarded to every take's timings re-attach (see
+   * `TranscribeCellArgs.targetLang`) — not the language above, the lane's tag.
+   */
+  targetLang?: string
   /** AQU-928: run every cell that HAS audio, not just the ones missing a
    *  transcript. For an explicitly chosen scope — the sections the user
    *  selected on the timeline — "already transcribed" is not a reason to do
@@ -210,7 +216,7 @@ export function isSourceSegmentSelected(c: CellData): boolean {
  */
 export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
   const { cells, projectId, session } = args
-  const targetLang = args.targetLanguage ?? args.language
+  const targetLanguage = args.targetLanguage ?? args.language
 
   const targets = cells.filter((c) => {
     // AQU-928: a forced run keeps only the "has audio" half of the gate — the
@@ -239,7 +245,8 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
         // AQU-646/SUB-29: language follows the audio by PROVENANCE — source
         // segments are source speech; every take (incl. dub takes on media
         // cells) voices the target text.
-        language: isSourceSegmentSelected(cell) ? (args.sourceLanguage ?? targetLang) : targetLang,
+        language: isSourceSegmentSelected(cell) ? (args.sourceLanguage ?? targetLanguage) : targetLanguage,
+        ...(args.targetLang ? { targetLang: args.targetLang } : {}),
       }),
     {
       kind: "transcribe",

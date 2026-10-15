@@ -23,7 +23,7 @@ is not a stage on this line.
 | Stage | Who acts | Gate |
 | --- | --- | --- |
 | PR → `dev` | The agent who opened it | Walk **PASS** at the head sha, no proven unresolved finding, required checks green. |
-| `dev` → release branch | Deploy bot | `node scripts/release-plan.mjs` says `cut: true`. |
+| `dev` → release branch | A person presses **Release cut** in GitHub Actions | `node scripts/release-plan.mjs` says `cut: true`. |
 | Release HEAD → deploy | A person, after smart Jev | A smart-Jev `FAIL` holds that HEAD. `PASS`, inconclusive, and harness unavailable do not. |
 | Release → prod | Kieran or Matthew | Always a person. The tag is `YYYY.MM.DD.NN`. See "Deployment ownership" in [DEPLOYMENT-ENVIRONMENTS.md](../../docs/DEPLOYMENT-ENVIRONMENTS.md). |
 
@@ -63,7 +63,8 @@ trial only works if that account does not merge around a red check.
 ## 2. Cutting a release: one in flight, no ceiling
 
 The Deploy bot's only job is cutting the branch — it never deploys, and it
-never touches production. Full step-by-step mechanics, hard stops, and the
+never touches production. The **Release cut** workflow now runs these steps when a
+person presses its button; there is no polling bot. Full step-by-step mechanics, hard stops, and the
 comment template are in [DEPLOY-BOT.md](DEPLOY-BOT.md); the summary:
 
 1. `git fetch origin --tags` and fetch `release/*`.

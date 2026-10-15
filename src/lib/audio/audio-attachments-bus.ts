@@ -88,6 +88,15 @@ interface ShadowCore {
   /** Anchor for the phase's deadline: inject time while `binding`, and reset
    *  to "now" at the moment a fetch first observes the event left the outbox. */
   graceStartedAt: number
+  /**
+   * AQU-1978: the lane this overlay was made in, learned from the event it is
+   * bound to (`learnShadowLanes`): that event's tag, `''` being the former
+   * default lane; `null` for a shared write (an import's programme audio);
+   * `undefined` until the event is known. A read paints only its own lane's
+   * overlays (`shadowInLane`) — before this, a take still waiting to sync in
+   * Spanish showed in every lane the editor was switched to.
+   */
+  lane?: string | null
 }
 
 export type OptimisticShadow = ShadowCore &
@@ -511,6 +520,68 @@ export function clearOptimisticShadows(fileId: string): void {
   shadowsByFile.delete(fileId)
 }
 
+/**
+ * AQU-1978: the lane a `cell.audio.*` event writes in, as its payload says:
+ * the tag (`''` when it names none — the former default lane, which every
+ * audio emitter spells by omission), or `null` for the shared programme audio
+ * an import declares (`role: "source"`), which belongs to every lane. An event
+ * naming its lane only by id cannot be mapped to a tag here: `undefined`.
+ */
+export function audioEventLane(payload: unknown): string | null | undefined {
+  const p = (payload ?? {}) as { targetLang?: unknown; laneId?: unknown; role?: unknown }
+  if (p.role === "source") return null
+  if (typeof p.targetLang === "string") return p.targetLang
+  if (typeof p.laneId === "string" && p.laneId !== "") return undefined
+  return ""
+}
+
+/**
+ * AQU-1978: stamp each overlay with the lane of the event it is bound to, read
+ * off that event's outbox record. Write-once: the event is fixed once bound,
+ * and a record that has left the outbox can no longer be read, so the lane is
+ * kept from the first sighting. Records without an event (or for no overlay
+ * here) are ignored.
+ */
+export function learnShadowLanes(
+  fileId: string,
+  records: readonly { id: string; event?: { payload?: unknown } | null }[],
+): void {
+  const byCell = shadowsByFile.get(fileId)
+  if (!byCell || records.length === 0) return
+  const laneByEvent = new Map<string, string | null>()
+  for (const record of records) {
+    if (!record.event) continue
+    const lane = audioEventLane(record.event.payload)
+    if (lane !== undefined) laneByEvent.set(record.id, lane)
+  }
+  if (laneByEvent.size === 0) return
+  for (const list of byCell.values()) {
+    for (const s of list) {
+      if (s.lane !== undefined || !s.eventId || !laneByEvent.has(s.eventId)) continue
+      s.lane = laneByEvent.get(s.eventId)!
+    }
+  }
+}
+
+/**
+ * AQU-1978: does this overlay belong on a read of `lane`?
+ *
+ *   - a read of every lane (`undefined`) shows every overlay, as before;
+ *   - the shared programme audio's own clip data (a trim, a placement) is the
+ *     same row in every lane, so it shows everywhere — but choosing it as a
+ *     lane's take (an overlay that claims the slot) is that lane's choice;
+ *   - an overlay whose lane is not known yet shows, as before: it was made in
+ *     the lane on screen moments ago;
+ *   - otherwise only on its own lane's read. `''` matches `''`, so an old
+ *     project's default lane is unchanged.
+ */
+export function shadowInLane(shadow: OptimisticShadow, lane: string | undefined): boolean {
+  if (lane === undefined) return true
+  if (shadow.kind === "attach" && shadow.att.role === "source" && !shadow.claimsSelection) return true
+  if (shadow.lane === undefined || shadow.lane === null) return true
+  return shadow.lane === lane
+}
+
 // ── Rehydration from the durable outbox (fortify round) ─────────────────────
 // This registry is memory-only, but the outbox it anchors to survives reloads
 // — so a still-queued attach used to VANISH from the takes strip and timeline
@@ -629,4 +700,8 @@ export async function rehydrateShadowsFromOutbox(projectId: string, fileId: stri
       injectOptimisticAudioDeselect(fileId, cellId, slot, record.id)
     }
   }
+  // AQU-1978: each rebuilt overlay keeps to the lane its queued event names.
+  // Without this a take queued in one lane came back after a reload painted
+  // into every lane until the flusher delivered it.
+  learnShadowLanes(fileId, records)
 }

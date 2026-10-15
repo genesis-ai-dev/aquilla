@@ -263,6 +263,8 @@ function CellTakeBlockView({
       session,
       projectId: project.id,
       language,
+      // AQU-1978: the timings are written in this lane, never the `''` one.
+      ...(targetLang ? { targetLang } : {}),
       askAgain: true,
       // A split take is transcribed whole (Sam, 2026-10-14).
       ...(split ? { pieces: split } : {}),

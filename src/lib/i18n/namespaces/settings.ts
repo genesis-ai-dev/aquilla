@@ -75,6 +75,43 @@ export const settings = defineNamespace({
     // like a bug.
     "settings.structuralCells.resetKeep": "Leave unchanged",
     "settings.structuralCells.resetConfirm": "Reset to the default",
+    // ── ValidationDefaultsSection ── AQU-1771
+    "settings.validationDefaults.textDescription":
+      "How many people must validate a translation before it counts as validated. " +
+      "Projects use this unless they set their own number.",
+    "settings.validationDefaults.audioDescription":
+      "How many people must validate a recording before it counts as validated. " +
+      "Projects use this unless they set their own number.",
+    "settings.validationDefaults.resetTitle": plural({
+      one: "{count} project has its own number",
+      other: "{count} projects have their own number",
+    }, "count"),
+    "settings.validationDefaults.resetDescription": plural({
+      one: "It will keep its own number and ignore this default. Reset it to follow the organization instead?",
+      other: "They will keep their own number and ignore this default. Reset them to follow the organization instead?",
+    }, "count"),
+    // ── OverrideStatus ── AQU-1771
+    "settings.overrideStatus.allFollow": "All projects follow this default.",
+    "settings.overrideStatus.someOwnNumber": plural({
+      one: "{count} project sets its own number",
+      other: "{count} projects set their own number",
+    }, "count"),
+    "settings.overrideStatus.someOwnSetting": plural({
+      one: "{count} project sets its own setting",
+      other: "{count} projects set their own setting",
+    }, "count"),
+    "settings.overrideStatus.reset": "Reset to default",
+    // AQU-1771: under "Who can see the member list" / "Who can see member
+    // progress" — projects may only make these stricter.
+    "settings.overrideStatus.someStricter": plural({
+      one: "{count} project is stricter than this",
+      other: "{count} projects are stricter than this",
+    }, "count"),
+    // AQU-1938: the last line of the project list those counts open.
+    "settings.overrideStatus.andMore": plural({
+      one: "and {count} more",
+      other: "and {count} more",
+    }, "count"),
 
     // ── RepetitionPropagationSection (AQU-1391) ──
     "settings.autoPropagateRepetitions.label": "Auto-propagate repetitions",
@@ -408,6 +445,75 @@ export const settings = defineNamespace({
           "setting so they follow the organization again; the cancel button " +
           "leaves them alone. Pluralized on the same count as the title, " +
           "which it does not print — only 'it' versus 'them' changes.",
+      },
+      "settings.validationDefaults.textDescription": {
+        description:
+          "Help text under the 'Required validators (text)' row on the organization's " +
+          "Project defaults page. A number picker (1 to 15) sits beside it.",
+      },
+      "settings.validationDefaults.audioDescription": {
+        description:
+          "Help text under the 'Required validators (audio)' row on the same page, " +
+          "for recordings instead of translations.",
+      },
+      "settings.validationDefaults.resetTitle": {
+        description:
+          "Title of the dialog shown after an org maintainer changes one of these " +
+          "numbers, when some projects set their own number and will ignore it. " +
+          "Asked only when that number of projects is above zero.",
+        placeholders: { count: "How many projects set their own number." },
+      },
+      "settings.validationDefaults.resetDescription": {
+        description:
+          "Body of that dialog. The confirm button clears those projects' own " +
+          "number so they follow the organization; the cancel button leaves them alone.",
+      },
+      "settings.overrideStatus.allFollow": {
+        description:
+          "Small status line under an organization default on the Project defaults page " +
+          "(validations needed, counting headings, timeline and recording settings). " +
+          "Shown when no project has set its own value, so every project uses this default " +
+          "and changing it asks no follow-up question.",
+      },
+      "settings.overrideStatus.someOwnNumber": {
+        description:
+          "Same status line when some projects set their own number for this default " +
+          "(e.g. how many validators are required) and so ignore it. A 'Reset to default' " +
+          "link follows it after a middle dot.",
+        placeholders: { count: "How many projects set their own number." },
+      },
+      "settings.overrideStatus.someOwnSetting": {
+        description:
+          "Same status line for on/off or choice defaults (counting headings, timing lock, " +
+          "who may add rows…) when some projects set their own value and ignore the default. " +
+          "A 'Reset to default' link follows it after a middle dot.",
+        placeholders: { count: "How many projects set their own setting." },
+      },
+      "settings.overrideStatus.someStricter": {
+        description:
+          "Status line under the organization's 'who can see the member list' and 'who can see " +
+          "member progress' settings (Settings → Security). A project may only make these stricter " +
+          "(hide more), never looser; this says how many projects in the organization chose to. " +
+          "There is no reset: a stricter project is a deliberate choice.",
+        placeholders: {
+          count: "Whole number of projects, 1 or more.",
+        },
+      },
+      "settings.overrideStatus.reset": {
+        description:
+          "Link after that status line. It opens a confirmation asking whether those " +
+          "projects should go back to following the organization's default.",
+      },
+      "settings.overrideStatus.andMore": {
+        description:
+          "Last line of the list that opens when someone clicks one of the status lines above " +
+          "(e.g. '2 projects set their own number'). The list names those projects, one per " +
+          "line, each a link to that project; this line counts the ones not named — because " +
+          "the list stops at 50, or because the person may not see some of those projects. " +
+          "Lower-case 'and': it continues the list of names above it.",
+        placeholders: {
+          count: "Whole number of projects not named in the list, 1 or more.",
+        },
       },
       "settings.personalProvider.trailingPathHint": {
         description:

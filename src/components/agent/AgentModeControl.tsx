@@ -40,6 +40,7 @@ import {
   patchAgentMode,
   presetFor,
   type AgentMode,
+  type AgentModeBase,
   type AgentModeScope,
 } from "@/lib/agent/agent-mode"
 import type { MessageKey } from "@/lib/i18n/messages/en"
@@ -74,7 +75,9 @@ export function AgentModeControl({ projectId, jwt, roleLevel }: AgentModeControl
   // AQU-1685: the graph's Bible data steps, only with the experiment on here.
   const bibleData = useBibleDataExperiment(projectId)
   const [mode, setMode] = useState<AgentMode | null>(null)
-  const [version, setVersion] = useState<number | null>(null)
+  // The settings row the next write is built on. The settings PATCH replaces
+  // the whole blob, so the write carries every other setting from here.
+  const [base, setBase] = useState<AgentModeBase | null>(null)
   const [loadFailed, setLoadFailed] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [check, setCheck] = useState<CheckState>({ kind: "idle" })
@@ -93,7 +96,7 @@ export function AgentModeControl({ projectId, jwt, roleLevel }: AgentModeControl
         return
       }
       setMode(state.mode)
-      setVersion(state.version)
+      setBase({ version: state.version, settings: state.settings })
       setLoadFailed(false)
     })
     return () => {
@@ -103,26 +106,26 @@ export function AgentModeControl({ projectId, jwt, roleLevel }: AgentModeControl
 
   const save = useCallback(
     (next: AgentMode) => {
-      if (!jwt || !mode || version === null) return
+      if (!jwt || !mode || !base) return
       const previous = mode
-      const previousVersion = version
+      const previousBase = base
       setMode(next)
       setSaveError(null)
-      void patchAgentMode(jwt, projectId, next, version).then((outcome) => {
+      void patchAgentMode(jwt, projectId, next, base).then((outcome) => {
         if (outcome.kind === "ok") {
           setMode(outcome.state.mode)
-          setVersion(outcome.state.version)
+          setBase({ version: outcome.state.version, settings: outcome.state.settings })
           return
         }
         // Optimism is only honest if it un-does itself out loud.
         setMode(previous)
-        setVersion(previousVersion)
+        setBase(previousBase)
         setSaveError(
           outcome.kind === "forbidden" ? t("agent.mode.forbidden") : t("agent.mode.saveFailed"),
         )
       })
     },
-    [jwt, mode, projectId, t, version],
+    [base, jwt, mode, projectId, t],
   )
 
   const runCheck = useCallback(() => {

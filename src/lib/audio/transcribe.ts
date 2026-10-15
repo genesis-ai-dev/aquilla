@@ -300,6 +300,19 @@ export interface TranscribeCellArgs {
    * trim wipe). An explicit argument cannot be silently omitted by a stub.
    */
   slot?: string
+  /**
+   * AQU-1462: lane the member is working in. Omitted for the default lane.
+   *
+   * AQU-1978: the timings ride a re-attach, and the server scopes that
+   * re-attach's sibling-deselect to the lane the event names. With no tag it
+   * named the `''` lane, so saving a Spanish take's word timings on an old
+   * multi-language project deselected the `''` lane's chosen take on that
+   * line. Every caller is working in a lane and passes it.
+   *
+   * Not sent for a SOURCE segment: the shared programme clip is no lane's
+   * take, and a source transcription is a shared write (see authorize.ts).
+   */
+  targetLang?: string
   /** Set by the Transcribe button so a prior Cancel shows the prompt again. */
   askAgain?: boolean
   /**
@@ -350,7 +363,7 @@ export function __setTranscribeAudioForTests(fn: typeof transcribeAudio | null):
  * was denied. Never throws — errors are stored in transcribe-status.
  */
 export async function transcribeCell(args: TranscribeCellArgs): Promise<number> {
-  const { cell, session, projectId, language, slot: slotArg, askAgain } = args
+  const { cell, session, projectId, language, slot: slotArg, targetLang, askAgain } = args
   const audioId = cell.selectedAudioId
   if (!audioId) return 0
 
@@ -530,6 +543,9 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
         // guard is attachment PROVENANCE, not cell medium, so a dub take
         // recorded onto a media section can never clobber its transcript.
         ...(isSourceSegment && transcriptText ? { transcription: transcriptText } : {}),
+        // AQU-1978: a take's timings are written in the take's own lane, so
+        // the re-attach can never deselect another language's take.
+        ...(!isSourceSegment && targetLang ? { targetLang } : {}),
         author: session?.username ?? "local",
       }).catch((err) => {
         console.warn("[transcribe] emitCellAudioAttach failed (timings not persisted):", err)

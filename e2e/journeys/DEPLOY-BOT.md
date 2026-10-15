@@ -6,6 +6,15 @@ This is the whole of the job: **decide nothing, cut what the plan says, tell
 QA where to look, stop.** Who reads the cut and who deploys it is set by
 [QA-BOT-REGIMEN.md](QA-BOT-REGIMEN.md).
 
+**Today a workflow runs this playbook, not a bot.** A person opens the
+**Release cut** workflow in GitHub Actions
+(`.github/workflows/release-cut.yml`) and presses **Run workflow**, or runs
+`gh workflow run release-cut.yml --ref dev`. It runs Steps 1 to 4 below
+through `scripts/release-cut.mjs` and writes the outcome to the run
+summary. Tick **Show the plan without pushing a branch** to see what it
+would cut. Nothing runs on a timer, so there is no 4-hour nudge: a press
+that finds a release in flight names it in the summary instead.
+
 The Deploy bot never deploys and never touches production. It does not run
 `pnpm run deploy:aquilla`, `scripts/tag-release.sh`, or
 `scripts/record-github-deployment.mjs` — those are a person's job, always,

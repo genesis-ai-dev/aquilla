@@ -23,7 +23,7 @@
 
 import { countedFileSql } from "./counted-files"
 import type { AquillaDb, AquillaStatement } from "../shim/postgres"
-import { laneIndependentProgressSql, targetLaneIdSql } from "./lane-sql"
+import { laneIndependentProgressSql } from "./lane-sql"
 
 /**
  * Which files can hold plan units.
@@ -188,7 +188,16 @@ export function readPlanUnitsSql(extraScope = ""): string {
   // JOIN it would silently extend that join's ON condition instead — every
   // unit would still come back, and a caller reading the first row would get
   // the wrong one. The `TRUE` base keeps the composition safe when empty.
-  return `WITH units AS (${planUnitsSql("f.project_id = ?")})
+  //
+  // AQU-1977: the requested lane is resolved ONCE, in want_lane, and both the
+  // unit's own row (pl) and its cue sheet's row (psl) join on it — one bind,
+  // in the place the single lane bind always sat.
+  return `WITH units AS (${planUnitsSql("f.project_id = ?")}),
+     want_lane AS (
+       SELECT project_id, id AS lane_id FROM public.lanes
+        WHERE role = 'target' AND legacy_tag = ?
+          AND project_id IN (SELECT project_id FROM units)
+     )
      SELECT u.project_id, u.file_id, u.file_name, u.file_role, u.file_kind,
             u.file_book_code, u.file_meta, u.file_updated_at, u.section_key,
             COALESCE(pl.total_count, pd.total_count,
@@ -204,23 +213,28 @@ export function readPlanUnitsSql(extraScope = ""): string {
             -- yet has recorded nothing, and borrowing the anchor's numbers
             -- there would put the subtitle file's (always zero) takes back on
             -- the board wearing the cue sheet's denominator.
-            CASE WHEN cs.id IS NOT NULL THEN COALESCE(ps.audio_count, 0)
+            CASE WHEN cs.id IS NOT NULL THEN COALESCE(psl.audio_count, ps.audio_count, 0)
                  ELSE COALESCE(pl.audio_count, pd.audio_count, 0) END AS audio_count,
-            CASE WHEN cs.id IS NOT NULL THEN COALESCE(ps.audio_validated_count, 0)
+            CASE WHEN cs.id IS NOT NULL THEN COALESCE(psl.audio_validated_count, ps.audio_validated_count, 0)
                  ELSE COALESCE(pl.audio_validated_count, pd.audio_validated_count, 0) END AS audio_validated_count,
-            CASE WHEN cs.id IS NOT NULL THEN COALESCE(ps.structural_audio_count, 0)
+            CASE WHEN cs.id IS NOT NULL THEN COALESCE(psl.structural_audio_count, ps.structural_audio_count, 0)
                  ELSE COALESCE(pl.structural_audio_count, pd.structural_audio_count, 0) END AS structural_audio_count,
-            CASE WHEN cs.id IS NOT NULL THEN COALESCE(ps.structural_audio_validated_count, 0)
+            CASE WHEN cs.id IS NOT NULL THEN COALESCE(psl.structural_audio_validated_count, ps.structural_audio_validated_count, 0)
                  ELSE COALESCE(pl.structural_audio_validated_count, pd.structural_audio_validated_count, 0) END
               AS structural_audio_validated_count,
             -- Audio counts come from the requested lane's row (pl). A lane
             -- with no projection row yet falls back to the source-lane row
-            -- (pd). A cue sheet stays on ps: those takes live on the cue
-            -- file, and reading pl there is the zero-audio bug AQU-1278 fixed.
-            CASE WHEN cs.id IS NOT NULL THEN COALESCE(ps.audio_validator_histogram, '{}'::jsonb)
+            -- (pd). A cue sheet reads the CUE FILE's rows: those takes live on
+            -- the cue file, and reading pl there is the zero-audio bug AQU-1278
+            -- fixed. AQU-1977: the cue file's row in the requested lane (psl),
+            -- not its lane-independent one (ps) — since AQU-1591 a take belongs
+            -- to a target lane and ps is the source lane's row, which never
+            -- holds one, so every dubbed episode read 0 recorded in every
+            -- language. ps stays the fallback, as pd is for pl.
+            CASE WHEN cs.id IS NOT NULL THEN COALESCE(psl.audio_validator_histogram, ps.audio_validator_histogram, '{}'::jsonb)
                  ELSE COALESCE(pl.audio_validator_histogram, pd.audio_validator_histogram, '{}'::jsonb) END
               AS audio_validator_histogram,
-            CASE WHEN cs.id IS NOT NULL THEN COALESCE(ps.structural_audio_validator_histogram, '{}'::jsonb)
+            CASE WHEN cs.id IS NOT NULL THEN COALESCE(psl.structural_audio_validator_histogram, ps.structural_audio_validator_histogram, '{}'::jsonb)
                  ELSE COALESCE(pl.structural_audio_validator_histogram, pd.structural_audio_validator_histogram, '{}'::jsonb) END
               AS structural_audio_validator_histogram,
             -- NULL where there is no sheet: the reader's signal to measure
@@ -229,7 +243,7 @@ export function readPlanUnitsSql(extraScope = ""): string {
                  THEN COALESCE(ps.total_count, cs.cell_count, 0) END AS audio_total_count,
             COALESCE(pl.last_edit_at, pd.last_edit_at) AS last_edit_at,
             GREATEST(COALESCE(pl.revision, 0), COALESCE(pd.revision, 0),
-                     COALESCE(ps.revision, 0)) AS revision,
+                     COALESCE(ps.revision, 0), COALESCE(psl.revision, 0)) AS revision,
             -- The projection stamps this on every recompute. A backfill can
             -- fill in audio counts and activity WITHOUT advancing the event
             -- sequence, so the revision alone would leave the plan ETag
@@ -239,7 +253,7 @@ export function readPlanUnitsSql(extraScope = ""): string {
             -- subtitle file, and without this the board that now reads its
             -- audio from the sheet would answer 304 to every request after it.
             GREATEST(COALESCE(pl.updated_at, 0), COALESCE(pd.updated_at, 0),
-                     COALESCE(ps.updated_at, 0),
+                     COALESCE(ps.updated_at, 0), COALESCE(psl.updated_at, 0),
                      -- The cue sheet's own row, so adding, removing or
                      -- restoring one moves the board ETag. See the cst join.
                      COALESCE(cst.touched_at, 0)) AS progress_updated_at,
@@ -258,7 +272,7 @@ export function readPlanUnitsSql(extraScope = ""): string {
          ON pl.project_id = u.project_id AND pl.file_id = u.file_id
         AND pl.scope = CASE WHEN u.section_key = '' THEN 'file' ELSE 'book' END
         AND pl.section_key = u.section_key
-        AND pl.lane_id = ${targetLaneIdSql("u.project_id")}
+        AND pl.lane_id = (SELECT w.lane_id FROM want_lane w WHERE w.project_id = u.project_id)
        LEFT JOIN LATERAL (
          SELECT s.id, s.cell_count
            FROM files s
@@ -304,6 +318,10 @@ export function readPlanUnitsSql(extraScope = ""): string {
            sectionKeySql: "''",
          })}
        ) ps ON TRUE
+       LEFT JOIN file_section_progress psl
+         ON psl.project_id = u.project_id AND psl.file_id = cs.id
+        AND psl.scope = 'file' AND psl.section_key = ''
+        AND psl.lane_id = (SELECT w.lane_id FROM want_lane w WHERE w.project_id = u.project_id)
        LEFT JOIN plan_units pu
          ON pu.project_id = u.project_id AND pu.file_id = u.file_id
         AND pu.section_key = u.section_key

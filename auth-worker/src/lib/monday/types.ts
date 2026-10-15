@@ -92,6 +92,12 @@ export interface IntegrationConnectionRow {
   /** Set when a refresh fails (revoked / max lifetime); cleared on re-auth. */
   needs_reauth: boolean
   scopes: string | null
+  /**
+   * AQU-1775: the deployment that made the row (`ENVIRONMENT` at OAuth time —
+   * 'production', 'development', 'local', …). NULL predates migration 0175 and
+   * is usable by production only; see lib/monday/tokens.ts foreignConnectionError.
+   */
+  environment: string | null
   created_by: string
   created_at: string
   updated_at: string

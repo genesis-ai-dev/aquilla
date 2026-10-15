@@ -55,6 +55,12 @@
 // Everything else keeps the maintainer gate, unchanged. Each carve-out is
 // scoped to a write that changes NOTHING ELSE, so none widens access to any
 // other key.
+//
+// AQU-1771: `rosterViewMinRole` and `memberProgressViewMinRole` are this
+// project's own, stricter-only copies of the org's visibility floors. They
+// keep the maintainer gate (org owners reach it through their org role), are
+// refused below the org's floor, and only a caller at or above a stored value
+// may lower or remove it — see visibilityFloorWriteRefusal.
 
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
@@ -63,13 +69,21 @@ import { pushDirtyLinksAfterResponse } from "../lib/monday/push"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE, type AuthUser } from "../types"
 import { ROLE_NAMES, resolveProjectRole } from "../services/project-permissions"
-import { roleRequiredBody } from "../lib/role-denial"
+import { roleRequiredBody, type RoleRequiredBody } from "../lib/role-denial"
 import {
   getTermbaseEditMinRoleForProject,
   getOrgCountStructuralCellsForProject,
   getOrgAllowBulkValidateAiDraftsForProject,
   getLanguageEditMinRoleForProject,
+  getProjectOrgPolicy,
+  type ProjectOrgPolicy,
 } from "../services/org-permissions"
+import {
+  parseProjectVisibilityFloor,
+  VISIBILITY_FLOOR_KEYS,
+  VISIBILITY_FLOOR_LEVELS,
+  type VisibilityFloorKey,
+} from "../../../db/shared/visibility-floors"
 import { notifySyncWorkerOfProjectSettingsChange } from "../services/sync-worker-notify"
 import {
   loadProjectSettings,
@@ -86,6 +100,7 @@ import {
   readLaneLastChange,
   updateTargetLane,
   setTargetLaneArchived,
+  setTargetLaneRecordsAudio,
 } from "../../../db/shared/lanes"
 import {
   filterSettingsToVisibleLanes,
@@ -104,6 +119,7 @@ import {
   preserveRetiredLaneSettings,
   RETIRED_LANE_SETTINGS_MESSAGE,
 } from "../../../db/shared/retired-lane-settings"
+import { loadOrgValidationDefaults } from "../../../db/shared/validation-threshold"
 import { ttsSettingsCapProblem } from "../../../db/shared/tts-settings-caps"
 
 const projectSettings = new Hono<AuthHonoEnv>()
@@ -219,12 +235,112 @@ async function withOrgDefaults(
 ): Promise<ProjectSettingsResponse & {
   orgCountStructuralCells: boolean | null
   orgAllowBulkValidateAiDrafts: boolean | null
+  orgValidationCount: number | null
+  orgValidationCountAudio: number | null
+  orgPolicy: ProjectOrgPolicy
+  visibilityFloors: VisibilityFloorsView
 }> {
-  const [orgCountStructuralCells, orgAllowBulkValidateAiDrafts] = await Promise.all([
+  const [orgCountStructuralCells, orgAllowBulkValidateAiDrafts, orgThresholds, policy] = await Promise.all([
     getOrgCountStructuralCellsForProject(env, projectId),
     getOrgAllowBulkValidateAiDraftsForProject(env, projectId),
+    // AQU-1771: the org's validation defaults, null when it set none. Read
+    // here for the same reason as the two above: a project member who is not
+    // in the org cannot read the org settings route.
+    loadOrgValidationDefaults(env.AQUILLA_PG, projectId),
+    // AQU-1771: and the rest of the org policy the project's own surfaces
+    // need, for the same reason — plus the visibility floors this project
+    // actually enforces, its own stricter values included.
+    getProjectOrgPolicy(env, projectId, response.settings),
   ])
-  return { ...response, orgCountStructuralCells, orgAllowBulkValidateAiDrafts }
+  const { visibility } = policy
+  return {
+    ...response,
+    orgCountStructuralCells,
+    orgAllowBulkValidateAiDrafts,
+    orgValidationCount: orgThresholds.validationCount,
+    orgValidationCountAudio: orgThresholds.validationCountAudio,
+    orgPolicy: policy.orgPolicy,
+    visibilityFloors: {
+      rosterViewMinRole: {
+        org: visibility.org.rosterViewMinRole,
+        project: visibility.project.rosterViewMinRole,
+        effective: visibility.rosterViewMinRole,
+      },
+      memberProgressViewMinRole: {
+        org: visibility.org.memberProgressViewMinRole,
+        project: visibility.project.memberProgressViewMinRole,
+        effective: visibility.memberProgressViewMinRole,
+      },
+    },
+  }
+}
+
+/**
+ * AQU-1771: each visibility floor as the org sets it, as this project sets it
+ * (null when the project follows the org, including a stored value that is
+ * not stricter), and the floor the project enforces — the higher of the two.
+ */
+type VisibilityFloorsView = Record<VisibilityFloorKey, { org: number; project: number | null; effective: number }>
+
+/**
+ * AQU-1771: the rules for changing a project's own visibility floors. Judged
+ * on the CHANGE, so a stored value rides along unchanged on an unrelated save.
+ *
+ *   - A value set must be a role-ladder level at or above the org's floor: a
+ *     project can make who sees its member list or each member's progress
+ *     stricter, never looser (400). A stored value the org has since
+ *     overtaken is inert — the floor is the higher of the two.
+ *   - Lowering or removing a stored value needs a role at least that value
+ *     (Sam, 2026-10-13: "Owners only" binds maintainers — only an owner may
+ *     loosen it). Removing the key by leaving it out of the whole-object write
+ *     counts as removing it (403, the role-required shape). Raising stays open
+ *     to anyone who may write the project's settings.
+ */
+async function visibilityFloorWriteRefusal(
+  env: AuthHonoEnv["Bindings"],
+  projectId: string,
+  stored: Record<string, unknown>,
+  next: Record<string, unknown>,
+  role: { level: number; source?: string | null },
+): Promise<{ status: 400 | 403; body: { error: string } | RoleRequiredBody } | null> {
+  const changed = VISIBILITY_FLOOR_KEYS.filter(
+    (key) => JSON.stringify(stored[key]) !== JSON.stringify(next[key]),
+  )
+  if (changed.length === 0) return null
+  const { orgPolicy } = await getProjectOrgPolicy(env, projectId, next)
+  for (const key of changed) {
+    const what = key === "rosterViewMinRole" ? "the member list" : "each member's progress"
+    if (next[key] != null) {
+      const level = parseProjectVisibilityFloor(next[key])
+      if (level == null) {
+        return { status: 400, body: { error: `${key} must be a role level: one of ${VISIBILITY_FLOOR_LEVELS.join(", ")}` } }
+      }
+      const orgFloor = orgPolicy[key]
+      if (level < orgFloor) {
+        return {
+          status: 400,
+          body: {
+            error: `${key} ${level} is below the organization's setting (${orgFloor}). A project can only make who sees ${what} stricter than its organization does: choose ${orgFloor} or higher, or remove ${key} to follow the organization.`,
+          },
+        }
+      }
+    }
+    const storedLevel = parseProjectVisibilityFloor(stored[key])
+    const nextLevel = parseProjectVisibilityFloor(next[key])
+    const loosens = storedLevel != null && (nextLevel == null || nextLevel < storedLevel)
+    if (loosens && role.level < storedLevel) {
+      const name = (ROLE_NAMES[storedLevel] ?? `role ${storedLevel}`).replaceAll("_", " ")
+      return {
+        status: 403,
+        body: roleRequiredBody(
+          `${name} or higher is required to make who sees ${what} on this project less strict (${key} is ${storedLevel})`,
+          storedLevel,
+          role,
+        ),
+      }
+    }
+  }
+  return null
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -501,6 +617,10 @@ projectSettings.on(
       }
     }
 
+    // AQU-1771: a project's own visibility floors can only be stricter.
+    const floorRefusal = await visibilityFloorWriteRefusal(c.env, projectId, stored.settings, settings, role)
+    if (floorRefusal) return c.json(floorRefusal.body, floorRefusal.status)
+
     const queryVersion = parseIntOrNull(c.req.query("ifMatchVersion"))
     const headerVersion = parseIntOrNull(c.req.header("If-Match-Version"))
     const ifMatchVersion =
@@ -605,6 +725,10 @@ const createLaneSchema = z.object({
 
 const archiveLaneSchema = z.object({
   archived: z.boolean(),
+})
+
+const laneRecordsAudioSchema = z.object({
+  recordsAudio: z.boolean(),
 })
 
 /**
@@ -838,6 +962,33 @@ projectSettings.get("/:projectId/lanes/:laneId/last-change", authMiddleware, asy
     return c.json({ error: `read failed: ${message}` }, 500)
   }
 })
+
+// AQU-1954: "Records audio" on one language row. Off (the default), a file
+// counts this language's audio only once it has a recording in it; on, every
+// file owes it — the plan board, the Progress card and the org's numbers all
+// follow. Gated like every other change to the Languages card.
+projectSettings.post(
+  "/:projectId/lanes/:laneId/records-audio",
+  authMiddleware,
+  zValidator("json", laneRecordsAudioSchema),
+  async (c) => {
+    const user = c.get("user")
+    const projectId = c.req.param("projectId") as string
+    const laneId = c.req.param("laneId") as string
+    const denied = await denyLanguageWrite(c.env, user, projectId)
+    if (denied) return c.json(denied, 403)
+    const result = await setTargetLaneRecordsAudio(
+      c.env.AQUILLA_PG,
+      projectId,
+      laneId,
+      c.req.valid("json").recordsAudio,
+    )
+    if (result.status === "not_found") return c.json({ error: "lane not found" }, 404)
+    const fresh = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
+    notifySettingsChangedBestEffort(c, projectId, fresh.version)
+    return c.json({ lane: fresh.lanes?.find((row) => row.id === laneId) ?? result.lane })
+  },
+)
 
 projectSettings.post(
   "/:projectId/lanes/:laneId/archive",

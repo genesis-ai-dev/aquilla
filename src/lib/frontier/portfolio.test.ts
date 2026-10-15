@@ -324,6 +324,29 @@ describe("languagePairLabel (AQU-523)", () => {
   })
 })
 
+describe("languagePairLabel on lane rows (AQU-1977)", () => {
+  const lane = (l: string, name: string, over: Partial<PortfolioLane> = {}): PortfolioLane => ({
+    lane: l, name, totalCells: 0, filledCells: 0, validatedCells: 0, lastEditAt: null, role: "target", ...over,
+  })
+
+  it("names a new project's first live language, which has no '' lane", () => {
+    expect(languagePairLabel(project({ lanes: [
+      lane("", "English", { role: "source", position: 0 }),
+      lane("French", "French", { position: 2 }),
+      lane("German", "German", { position: 0, archived: true }),
+      lane("Spanish", "Spanish", { position: 1 }),
+    ] }))).toBe("English → Spanish")
+  })
+
+  it("keeps an old project's '' lane as its target", () => {
+    expect(languagePairLabel(project({ lanes: [
+      lane("", "Greek", { role: "source", position: 0 }),
+      lane("es", "Spanish", { position: 0 }),
+      lane("", "Bambara", { position: 1 }),
+    ] }))).toBe("Greek → Bambara")
+  })
+})
+
 describe("attentionRank", () => {
   it("an overdue project out-ranks a merely-stalled one", () => {
     const now = Date.parse("2026-06-01T00:00:00Z")

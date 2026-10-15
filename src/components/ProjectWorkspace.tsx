@@ -33,7 +33,8 @@ import { ROLE } from "@/lib/frontier/roles"
 import { languagesEqual } from "@/lib/language-normalize"
 import { importLanguageDecision } from "@/lib/import-language"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
-import { laneCodesByTag, laneLabelsByTag, laneRowLanguage, type LaneLanguageRow } from "@/lib/lanes/lane-language"
+import { assignLaneOptions } from "@/lib/sync/assignment-lane"
+import { laneCodesByTag, laneLabelsByTag, laneRowLanguage, liveTargetLaneLanguages, type LaneLanguageRow } from "@/lib/lanes/lane-language"
 import { switcherLaneTags } from "@/lib/lanes/switcher-lanes"
 import {
   acknowledgeLaneArchive,
@@ -98,6 +99,7 @@ import { buildLibraryLintResolver } from "@/lib/rules/effective-rules"
 import { resolveFileGenre } from "@/lib/rules/file-genre"
 import { bookGenre } from "@/lib/scripture/book-genres"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
+import { effectiveRepetitionPropagation, resolveProjectPolicy } from "@/lib/sync/project-org-policy"
 import { useActiveOrg } from "@/context/OrgContext"
 import { resolveOverlayFileId } from "@/lib/navigation/overlay-file-restore"
 import {
@@ -2245,6 +2247,13 @@ export function ProjectWorkspace() {
     () => (project ? { ...project, ttsSettings: tts.settings } : null),
     [project, tts.settings],
   )
+  // AQU-1977: what the Assign dialog offers — the project's own languages, in
+  // order, by name, with no invented "Default language" (a project made since
+  // AQU-1594 has no '' lane, and work assigned into one belongs to no lane).
+  const assignLanes = useMemo(
+    () => assignLaneOptions(project?.lanes, t("dialog.assign.defaultLaneFallback")),
+    [project?.lanes, t],
+  )
   // 2026-08-07: on a TIME-ORDERED file the Media lens stacks the timeline over
   // the plain text table — audioLens (the per-row voice-panel mode) applies
   // only to sequence-ordered voice-over files now. With it null, useCellIds
@@ -2381,6 +2390,8 @@ export function ProjectWorkspace() {
   // the same label apart in the switcher, the TARGET pill and the import
   // destination picker.
   const laneCodes = useMemo(() => laneCodesByTag(laneRows), [laneRows])
+  // AQU-1978: the live lanes' languages, for the voice roster's language list.
+  const liveLaneLanguages = useMemo(() => liveTargetLaneLanguages(laneRows), [laneRows])
   // AQU-602: the target language of the ACTIVE lane, so switching lanes
   // switches what the editor reads/writes/translates into (source stays
   // shared). The completion path was already lane-aware; this routes the
@@ -5502,21 +5513,7 @@ export function ProjectWorkspace() {
   // on Y.Doc maps and the v1.x event grammar isn't in this build, so these are
   // no-ops and the drawer renders empty.
   // Org-level rules: fetch from org settings and merge with project rules.
-  const {
-    orgRules,
-    canExport: canExportByOrgPolicy,
-    hasFetched: orgSettingsFetched,
-    // AQU-496: whether below-lead members may self-assign work.
-    allowSelfAssignment,
-    // AQU-581: whether a lane-scoped member may assign work to OTHERS inside
-    // the lanes the org scoped them to.
-    allowScopedLaneAssignment,
-    // AQU-1037: org-configured floor for assigning work to anyone.
-    assignmentMinRole,
-    // AQU-1391: org default for repetition auto-propagation (a project may
-    // override it either way).
-    autoPropagateRepetitions: orgAutoPropagateRepetitions,
-  } = useOrgSettings(
+  const orgSettingsForProject = useOrgSettings(
     project?.orgId ?? activeOrg?.id,
     projectOrg?.role?.level ?? null,
     // FRO-253 WARN fix: compare the project-resolved role (AD-12 max-wins), not
@@ -5525,6 +5522,32 @@ export function ProjectWorkspace() {
     // written by the sync-token onRole callback above.
     project?.syncRole?.level ?? null,
   )
+  const { orgRules } = orgSettingsForProject
+  // AQU-1771: the org policy THIS project applies, from the project's own
+  // settings response — which a member outside the org can read, unlike the
+  // org's settings. The org read above is only the fallback for a server that
+  // predates it. See src/lib/sync/project-org-policy.ts.
+  const projectPolicy = resolveProjectPolicy({
+    orgPolicy: projectSettings?.orgPolicy,
+    visibilityFloors: projectSettings?.visibilityFloors,
+    projectSettings: projectSettings?.settings,
+    org: orgSettingsForProject,
+    roleLevel: project?.syncRole?.level ?? null,
+  })
+  const {
+    canExport: canExportByOrgPolicy,
+    ready: orgSettingsFetched,
+    // AQU-496: whether below-lead members may self-assign work.
+    allowSelfAssignment,
+    // AQU-581: whether a lane-scoped member may assign work to OTHERS inside
+    // the lanes the org scoped them to.
+    allowScopedLaneAssignment,
+    // AQU-1037: org-configured floor for assigning work to anyone.
+    assignmentMinRole,
+    // AQU-1391: org default for repetition auto-propagation (a project may
+    // override it either way). OFF until the org's answer is known.
+    autoPropagateRepetitions: orgAutoPropagateRepetitions,
+  } = projectPolicy
   const { rules } = useRules(
     project ?? null,
     refresh,
@@ -10820,6 +10843,8 @@ export function ProjectWorkspace() {
           // speech, recorded takes voice the target text (per-cell in the batch).
           sourceLanguage: activeSourceLanguage,
           targetLanguage: activeLaneTargetLanguage,
+          // AQU-1978: each take's timings are written in this lane.
+          ...(activeLane ? { targetLang: activeLane } : {}),
           onProgress: (done, total) => {
             lastDone = done
             lastTotal = total
@@ -11490,6 +11515,8 @@ export function ProjectWorkspace() {
           session: frontierSession ?? null,
           sourceLanguage: activeSourceLanguage,
           targetLanguage: activeLaneTargetLanguage,
+          // AQU-1978: each take's timings are written in this lane.
+          ...(activeLane ? { targetLang: activeLane } : {}),
           force: true,
         })
         // AQU-783: the batch enqueues one cell.audio.attach per cell but never
@@ -11503,7 +11530,7 @@ export function ProjectWorkspace() {
     [
       activeFileId, project, takeCellsFor, frontierSession,
       getTokenForProjectFile, refreshOutboxPending, revalidateCells,
-      activeSourceLanguage, activeLaneTargetLanguage,
+      activeSourceLanguage, activeLaneTargetLanguage, activeLane,
     ],
   )
 
@@ -13532,9 +13559,14 @@ export function ProjectWorkspace() {
   // answer, else its org's, else on. Same three-state shape as
   // `countStructuralCells`: an absent project key means "inherit", so a
   // project that has never been configured follows its org.
-  const autoPropagateRepetitions =
-    projectSettings?.settings?.autoPropagateRepetitions
-    ?? orgAutoPropagateRepetitions
+  //
+  // AQU-1771: the org's half comes with the PROJECT's settings, so a member
+  // outside the org (who cannot read the org's settings) no longer reads it as
+  // the built-in ON and writes copies the org turned off.
+  const autoPropagateRepetitions = effectiveRepetitionPropagation(
+    projectSettings?.settings?.autoPropagateRepetitions,
+    { autoPropagateRepetitions: orgAutoPropagateRepetitions },
+  )
 
   // AQU-1391: which sources repeat in the OPEN file, for the "Repetition ×N"
   // badge. Gated on the setting so a project that opted out grows no new
@@ -16156,6 +16188,7 @@ export function ProjectWorkspace() {
           activeFileId={assignTargetFileId ?? activeFileId}
           projectFiles={projectFiles}
           targetLanes={extraRegistryLanes(project.targetLanes, activeTargetLanguage)}
+          lanes={assignLanes}
           laneLabels={laneLabels}
           defaultLane={activeLane}
           defaultLaneLabel={activeTargetLanguage ?? ""}
@@ -16467,8 +16500,9 @@ export function ProjectWorkspace() {
           fileId={activeFileId}
           session={frontierSession ?? null}
           targetLanguage={activeLaneTargetLanguage}
-          targetLanes={project.targetLanes}
-          archivedLanes={project.archivedLanes}
+          // AQU-1978: the live lanes' languages, from the lane rows — not the
+          // retired `targetLanes` / `archivedLanes` keys (see VoiceSidebar).
+          targetLanes={liveLaneLanguages}
           cells={audioMergedCells}
           roleLevel={project.syncRole?.level ?? null}
         />

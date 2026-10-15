@@ -408,3 +408,42 @@ describe("transcribeCell — a split take, whole (AQU-1767)", () => {
     expect(opts.trim).toBeUndefined()
   })
 })
+
+// AQU-1978: the timings re-attach is a write in the TAKE's lane. The server
+// scopes its sibling-deselect to the lane the event names, and with no tag that
+// was the `''` lane — so saving a Spanish take's word timings on an old
+// multi-language project deselected the `''` lane's chosen take on that line.
+describe("transcribeCell — the timings re-attach names the take's lane (AQU-1978)", () => {
+  it("carries the caller's lane on a take's re-attach", async () => {
+    await audioCachePut(AUDIO_ID, EXT, new Uint8Array([1, 2, 3]))
+    __setTranscribeAudioForTests(fakeTranscribe(["hola"]))
+
+    await transcribeCell({ cell: makeCell(), session, projectId: "proj-1", targetLang: "Spanish" })
+
+    const input = emitCellAudioAttach.mock.calls[0][0] as Record<string, unknown>
+    expect(input.targetLang).toBe("Spanish")
+  })
+
+  it("names no lane on the default lane, exactly as before", async () => {
+    await audioCachePut(AUDIO_ID, EXT, new Uint8Array([1, 2, 3]))
+    __setTranscribeAudioForTests(fakeTranscribe(["hola"]))
+
+    await transcribeCell({ cell: makeCell(), session, projectId: "proj-1" })
+
+    const input = emitCellAudioAttach.mock.calls[0][0] as Record<string, unknown>
+    expect(input).not.toHaveProperty("targetLang")
+  })
+
+  it("keeps a SOURCE segment's transcription a shared write, whatever lane is open", async () => {
+    // The programme clip is no lane's take. A tag would let an archived lane
+    // refuse the source text, and file the shared clip under one language.
+    await audioCachePut(AUDIO_ID, EXT, new Uint8Array([1, 2, 3]))
+    __setTranscribeAudioForTests(fakeTranscribe(["bonjour"]))
+
+    await transcribeCell({ cell: makeMediaCell(), session, projectId: "proj-1", targetLang: "Spanish" })
+
+    const input = emitCellAudioAttach.mock.calls[0][0] as Record<string, unknown>
+    expect(input.transcription).toBe("bonjour")
+    expect(input).not.toHaveProperty("targetLang")
+  })
+})

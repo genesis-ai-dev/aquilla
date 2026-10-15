@@ -9,6 +9,7 @@ import { schema } from "./schema"
 import { isTauriRuntime } from "./is-tauri"
 import { installBfcacheGuard, trackLeaderWorker } from "./bfcache-guard"
 import { checkClientSessionHead } from "./head-check"
+import { startLocalCheckpoints } from "./local-checkpoint"
 import { claimOfflineGeneration, opfsGenerationMarker, type GenerationMarker } from "./generation-guard"
 
 // Names the OPFS dir; changing it strands every device's data (pinned by eventlog-compat.test.ts).
@@ -61,6 +62,7 @@ export function getOfflineStore(
       // A stale client session must not take writes; hold the store back
       // while the page reloads (see head-check.ts).
       if ((await checkClientSessionHead(store)) === "reloading") return new Promise<never>(() => {})
+      startLocalCheckpoints(store)
       return store
     })
   return storePromise

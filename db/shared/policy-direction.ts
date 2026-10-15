@@ -16,8 +16,13 @@
 // Two readings make the table total:
 // - An UNSET key reads as its effective default — the value the enforcing
 //   reader actually applies when the key is absent (references per key below).
+//   Since AQU-1771 some keys inherit an ORG default first: the caller passes
+//   those as `inherited`, and an unset key reads as the org's value, then the
+//   built-in one. Without it, a project following an org default of 3
+//   approvals read as 1, and an agent lowering it to 2 passed as a "tighten".
 // - A `null` proposed value means "clear to default" (JSON cannot carry
-//   undefined; see PatchSettingsOp), so it is compared as that default.
+//   undefined; see PatchSettingsOp), so it is compared as that default (the
+//   org's, when there is one: clearing means following the org).
 // A no-op write (proposed equals the effective current) counts as `tighten`:
 // it changes nothing, so refusing it would only be noise.
 
@@ -50,6 +55,9 @@ export const POLICY_DIRECTION_TABLE: readonly { key: string; restrictiveDirectio
   { key: 'cellEditingFloor', restrictiveDirection: 'a higher rung: commenter < reviewer < contributor < project_lead < maintainer < "none" (unset reads as "none" — nobody)' },
   { key: 'validationNamedUsers', restrictiveDirection: 'empty → named, or dropping names from a non-empty list (unset/empty reads as anyone above the floor; adding a name to a non-empty list admits someone new)' },
   { key: 'validationNamedUsersAudio', restrictiveDirection: 'empty → named, or dropping names from a non-empty list (unset/empty reads as anyone above the floor; adding a name to a non-empty list admits someone new)' },
+  // AQU-1771: who may see the project's member list / each member's progress.
+  { key: 'rosterViewMinRole', restrictiveDirection: "a higher role level, 100 viewer … 700 owner (unset reads as the org's floor, Maintainer 600 by default; a project is never looser than its org)" },
+  { key: 'memberProgressViewMinRole', restrictiveDirection: "a higher role level, 100 viewer … 700 owner (unset reads as the org's floor, Maintainer 600 by default; a project is never looser than its org)" },
 ]
 
 // ── Per-key rules ────────────────────────────────────────────────────────────
@@ -65,6 +73,12 @@ interface PolicyRule {
   /** Comparable rank; higher = more restrictive. `null` = not accepted. */
   rank: (value: unknown) => number | null
   describe: (value: unknown) => string
+  /**
+   * The inherited org value is a FLOOR, not only a fallback: the project
+   * enforces the higher of its own value and the org's (AQU-1771), so a stored
+   * value below the org's reads as the org's.
+   */
+  inheritedIsFloor?: boolean
 }
 
 /** Booleans where `false` is the restrictive value and unset means `true`:
@@ -99,6 +113,16 @@ const countRule: PolicyRule = {
   describe: String,
 }
 
+/** A project's visibility floor (db/shared/visibility-floors.ts): a role
+ *  level, Maintainer when neither the project nor its org set one, and never
+ *  below the org's. Raising it hides more. */
+const visibilityFloorRule: PolicyRule = {
+  defaultValue: 600,
+  rank: (v) => (typeof v === 'number' && [100, 200, 300, 400, 500, 600, 700].includes(v) ? v : null),
+  describe: String,
+  inheritedIsFloor: true,
+}
+
 const RULES: Readonly<Record<string, PolicyRule>> = {
   contributeToGlobalTm: falseIsTighter,
   allowSelfValidation: falseIsTighter,
@@ -122,6 +146,8 @@ const RULES: Readonly<Record<string, PolicyRule>> = {
     ['commenter', 'reviewer', 'contributor', 'project_lead', 'maintainer', 'none'],
     'none',
   ),
+  rosterViewMinRole: visibilityFloorRule,
+  memberProgressViewMinRole: visibilityFloorRule,
 }
 
 /** `agentAuthorship` is a one-value enum: "none" hides translator identity
@@ -184,15 +210,28 @@ export function policyWriteDirection(
   key: string,
   current: unknown,
   proposed: unknown,
+  /** The org default this key falls back to before the built-in one (AQU-1771). */
+  inherited?: unknown,
 ): PolicyDirectionVerdict {
   if (NAMED_USERS_KEYS.has(key)) return namedUsersDirection(key, current, proposed)
   const rule = key === 'agentAuthorship' ? agentAuthorshipRule : RULES[key]
   if (!rule) {
     return { key, direction: 'invalid', current, proposed, reason: `${key} is not a policy key` }
   }
-  const effectiveCurrent = current === undefined || current === null ? rule.defaultValue : current
-  const currentRank = rule.rank(effectiveCurrent) ?? rule.rank(rule.defaultValue)
-  const effectiveProposed = proposed === null ? rule.defaultValue : proposed
+  // An org default only counts when it is a value this key accepts.
+  const fallback = inherited !== undefined && inherited !== null && rule.rank(inherited) !== null
+    ? inherited
+    : rule.defaultValue
+  let effectiveCurrent = current === undefined || current === null ? fallback : current
+  let currentRank = rule.rank(effectiveCurrent) ?? rule.rank(fallback)
+  // A value below an inherited floor is inert: the project already enforces
+  // the org's, so that is what a write is judged against.
+  const fallbackRank = rule.rank(fallback)
+  if (rule.inheritedIsFloor && currentRank !== null && fallbackRank !== null && fallbackRank > currentRank) {
+    effectiveCurrent = fallback
+    currentRank = fallbackRank
+  }
+  const effectiveProposed = proposed === null ? fallback : proposed
   const proposedRank = rule.rank(effectiveProposed)
   if (currentRank === null || proposedRank === null) {
     return { key, direction: 'invalid', current, proposed, reason: `${key}: ${JSON.stringify(proposed)} is not an accepted value` }
@@ -215,11 +254,13 @@ export function policyWriteDirection(
 export function loosensPolicy(
   ops: readonly { key: string; value: unknown }[],
   live: Record<string, unknown>,
+  /** Org defaults by key, for keys a project inherits when unset (AQU-1771). */
+  inherited: Readonly<Record<string, unknown>> = {},
 ): PolicyDirectionVerdict[] {
   const out: PolicyDirectionVerdict[] = []
   for (const op of ops) {
     if (!POLICY_DIRECTION_TABLE.some((row) => row.key === op.key)) continue
-    const verdict = policyWriteDirection(op.key, live[op.key], op.value)
+    const verdict = policyWriteDirection(op.key, live[op.key], op.value, inherited[op.key])
     if (verdict.direction !== 'tighten') out.push(verdict)
   }
   return out

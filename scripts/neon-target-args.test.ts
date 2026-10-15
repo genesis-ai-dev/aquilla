@@ -25,6 +25,9 @@ describe("neon-target hands the backfill its flags", () => {
     // AQU-1953: the seed extract reads --no-upload itself (one-off hand-off, no R2 put).
     expect(childArgs("seed-extract", ["--no-upload"]))
       .toEqual(["scripts/seed-extract.ts", "--no-upload"])
+    // AQU-1775: --dry-run must reach the scrub, or a rehearsal deletes for real.
+    expect(childArgs("scrub-integrations", ["--dry-run"]))
+      .toEqual(["scripts/neon-scrub-integrations.ts", "--dry-run"])
   })
 
   it("still runs an unscoped backfill when nothing follows the command", () => {

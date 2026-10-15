@@ -33,6 +33,8 @@ import {
   audioLaneDualReadSql,
   audioLaneResolveBinds,
   audioLaneResolveSql,
+  audioSelectScopeBinds,
+  audioSelectScopeSql,
   backtranslationLaneMatchBinds,
   backtranslationLaneMatchSql,
   laneIdResolveBinds,
@@ -1853,9 +1855,15 @@ case 'cell.audio.attach': {
       // decided what sounds. A SOURCE attach keeps the unscoped form: the clip
       // it declares is shared, so it genuinely does claim the slot in every
       // lane.
-      const attachDeselectLaneSql = audioRole === 'source' ? '' : ` AND ${audioLaneDualReadSql()}`
+      //
+      // AQU-1978: a RE-attach of a dub already on file deselects within that
+      // dub's own stored lane, not the event's tag. Re-attaches are routine and
+      // many name no lane (the word-timings write did not), and an absent tag
+      // reads as the `''` lane — another language's chosen take on this line.
+      // A brand-new take still has only the event's tag to go on, as before.
+      const attachDeselectLaneSql = audioRole === 'source' ? '' : ` AND ${audioSelectScopeSql()}`
       const attachDeselectLaneBinds =
-        audioRole === 'source' ? [] : audioLaneDualReadBinds(event.projectId, audioLane)
+        audioRole === 'source' ? [] : audioSelectScopeBinds(event.projectId, p.audioId, audioLane)
       //
       // AQU-1767: and never the attached take's own PIECES. A take cut in two is
       // one group (`piece_of`), and a group is selected or not as a whole; a
@@ -2066,12 +2074,16 @@ case 'cell.audio.attach': {
       // AQU-1767: selection is per GROUP. Picking any piece of a cut take picks
       // the whole take — every live piece sounds — and deselects other groups,
       // never the named take's own pieces.
+      // AQU-1978: selecting a dub already on file clears its siblings in THAT
+      // dub's stored lane, whatever tag the event carries — the same rule as a
+      // re-attach above. Handing the slot back to the shared source clip is a
+      // choice made in one lane, so that keeps the event's tag.
       stmts.push(
         db
           .prepare(
             `UPDATE cell_audio SET selected = 0
               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND slot = ? AND audio_id != ?
-                AND ${PIECE_GROUP_SQL} <> ${pieceGroupOfSql()}${selectLaneSql}`,
+                AND ${PIECE_GROUP_SQL} <> ${pieceGroupOfSql()} AND ${audioSelectScopeSql()}`,
           )
           .bind(
             event.projectId,
@@ -2080,7 +2092,7 @@ case 'cell.audio.attach': {
             p.slot,
             p.audioId,
             ...pieceGroupOfBinds(event.projectId, event.fileId, event.cellId, p.audioId),
-            ...selectLaneBinds,
+            ...audioSelectScopeBinds(event.projectId, p.audioId, laneOfAudioEvent(event.payload)),
           ),
       )
       // The named piece is un-deleted as before (re-selecting a removed take

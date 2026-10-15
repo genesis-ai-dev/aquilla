@@ -32,8 +32,8 @@ async function seed() {
     .bind(JSON.stringify({ countStructuralCells: false }))
     .run()
   await env.AQUILLA_PG.prepare(
-    `INSERT INTO integration_connections (id, org_id, provider, account, access_token_enc, created_by) VALUES
-       ('c1', '1', 'monday', '{}', 'x', 'olive'), ('c2', '2', 'monday', '{}', 'x', 'olive')`,
+    `INSERT INTO integration_connections (id, org_id, provider, account, access_token_enc, created_by, environment) VALUES
+       ('c1', '1', 'monday', '{}', 'x', 'olive', 'test'), ('c2', '2', 'monday', '{}', 'x', 'olive', 'test')`,
   ).run()
   for (const [id, projectId, conn] of [
     ["l-inherit", "p-inherit", "c1"],
@@ -100,6 +100,18 @@ describe("Monday boards follow settings changes (AQU-1771)", () => {
   it("the org's headings rule marks every board in that org and none in another", async () => {
     await seed()
     expect((await patchOrg({ countStructuralCells: false })).status).toBe(200)
+    expect(await dirtyLinks()).toEqual(["l-inherit", "l-over"])
+  })
+
+  it("the org's approvals default marks every board in that org and none in another", async () => {
+    await seed()
+    expect((await patchOrg({ validationCount: 2 })).status).toBe(200)
+    expect(await dirtyLinks()).toEqual(["l-inherit", "l-over"])
+  })
+
+  it("the org's audio approvals default marks them too", async () => {
+    await seed()
+    expect((await patchOrg({ validationCountAudio: 3 })).status).toBe(200)
     expect(await dirtyLinks()).toEqual(["l-inherit", "l-over"])
   })
 

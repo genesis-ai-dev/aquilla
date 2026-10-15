@@ -21,8 +21,10 @@ import {
   UNBOUND_TTL_MS,
   fileHasLiveShadowEvents,
   getOptimisticShadows,
+  learnShadowLanes,
   markShadowsSettled,
   rehydrateShadowsFromOutbox,
+  shadowInLane,
   subscribeAudioAttachments,
   subscribeOptimisticAudioAttachment,
   type OptimisticShadow,
@@ -197,6 +199,10 @@ function keepShadow(
   entry: CellAudioEntry | undefined,
   outboxStatus: Map<string, "pending" | "failed">,
   now: number,
+  /** AQU-1978: false for another lane's overlay. This read holds none of that
+   *  lane's server truth, so it cannot confirm the overlay — only the outbox
+   *  and the clock retire it here. */
+  inLane = true,
 ): boolean {
   if (shadow.eventId) {
     const status = outboxStatus.get(shadow.eventId)
@@ -225,7 +231,7 @@ function keepShadow(
     // lie would be silent. Letting the clip reappear IS the honest signal.
     if (status === "failed") return shadow.kind === "attach"
   }
-  if (shadowConfirmed(entry, shadow)) return false
+  if (inLane && shadowConfirmed(entry, shadow)) return false
   if (shadow.phase === "settled") return now - shadow.graceStartedAt <= SETTLED_GRACE_MS
   if (shadow.phase === "binding") return now - shadow.graceStartedAt <= UNBOUND_TTL_MS
   return true
@@ -341,17 +347,25 @@ export function useFileAudioAttachments(
       const outboxStatus = new Map(outboxRecords.map((r) => [r.id, r.status]))
       const departed = new Set(queuedIds.filter((id) => !outboxStatus.has(id)))
       markShadowsSettled(fileId, departed, now)
+      // AQU-1978: the same records say which lane each overlay was made in.
+      learnShadowLanes(fileId, outboxRecords)
       for (const [cellId, shadows] of registry) {
-        const live = shadows.filter((s) => keepShadow(s, map.get(cellId), outboxStatus, now))
+        const live = shadows.filter((s) =>
+          keepShadow(s, map.get(cellId), outboxStatus, now, shadowInLane(s, lane)),
+        )
         if (live.length === 0) {
           registry.delete(cellId)
           continue
         }
         registry.set(cellId, live)
         // Chronological replay so delete-then-rerecord composes correctly.
+        // AQU-1978: only this lane's overlays (and shared ones) are painted on
+        // this lane's read; another lane's stay registered for that lane.
         let entry = map.get(cellId)
-        for (const s of live) entry = applyShadow(entry, s, syncViewFor(s, outboxStatus))
-        map.set(cellId, entry as CellAudioEntry)
+        for (const s of live) {
+          if (shadowInLane(s, lane)) entry = applyShadow(entry, s, syncViewFor(s, outboxStatus))
+        }
+        if (entry) map.set(cellId, entry)
       }
       setByCellId(map)
       // Re-arm a sweep for the EARLIEST grace deadline still outstanding.
@@ -440,6 +454,8 @@ export function useFileAudioAttachments(
   useEffect(() => {
     if (!fileId) return
     return subscribeOptimisticAudioAttachment(fileId, (cellId, shadow) => {
+      // AQU-1978: another lane's overlay is not painted on this lane's read.
+      if (!shadowInLane(shadow, lane)) return
       setByCellId((prev) => {
         const next = new Map(prev)
         // A just-injected overlay is always in flight; the next fetch re-derives
@@ -448,7 +464,7 @@ export function useFileAudioAttachments(
         return next
       })
     })
-  }, [fileId])
+  }, [fileId, lane])
 
   return { byCellId, isLoading, hasLoaded, revalidate: doFetch }
 }

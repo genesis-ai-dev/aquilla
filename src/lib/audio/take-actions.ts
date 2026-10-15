@@ -9,14 +9,6 @@ import { audioIdSeededWith } from "@/lib/audio/upload"
 import { recordStep } from "@/lib/history/history"
 
 /**
- * AQU-1419: the lane a take step belongs to, for the history — it is undone
- * only while that lane is open, because from any other the take reads as gone
- * (or, for a delete, its undo would choose in the wrong language). Callers omit
- * `targetLang` for the `''` lane, so absent reads back as `''`.
- */
-const laneOfStep = (targetLang: string | undefined): string => targetLang ?? ""
-
-/**
  * Remove one take. SUB-48: the remove gets its own overlay, so the take leaves
  * the screen now and stays gone for as long as its event sits in the outbox —
  * and a still-queued attach for the same clip cannot paint it back. Rejects
@@ -49,7 +41,6 @@ export async function removeTake(args: {
       data: { cellId, audioId, slot, wasSelected: args.history.wasSelected, selectedBefore: null },
       labelKey: "editor.history.stepDeleteTake",
       fileId,
-      lane: laneOfStep(targetLang),
     })
   }
 }
@@ -99,7 +90,6 @@ export async function removeWholeTake(args: {
     },
     labelKey: "editor.history.stepDeleteTake",
     fileId,
-    lane: laneOfStep(targetLang),
   })
 }
 
@@ -162,7 +152,6 @@ export async function renameTake(args: {
       data: { cellId: args.cellId, audioId: args.audioId, before: labelBefore, after: args.label },
       labelKey: "editor.history.stepRenameTake",
       fileId: args.fileId,
-      lane: laneOfStep(args.targetLang),
     })
   }
 }

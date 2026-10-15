@@ -241,7 +241,7 @@ import { injectOptimisticAudioTrim,
   injectOptimisticAudioPlace, injectOptimisticAudioAttachment, injectOptimisticAudioRemove, injectOptimisticAudioDeselect,
   notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { attachmentOutFrom, canCutAt, newPieceAudioId, pieceLabels } from "@/lib/audio/cut-take"
-import { recordStep, registerStepKinds, setHistoryScope, setOpenFileProbe, setOpenLaneProbe, withGroup, type HistoryResult } from "@/lib/history/history"
+import { recordStep, registerStepKinds, setHistoryScope, setOpenFileProbe, withGroup, type HistoryResult } from "@/lib/history/history"
 import { rowStepHandlers } from "@/lib/history/row-steps"
 import { HistoryPanel } from "./history/HistoryPanel"
 import { editStepHandlers } from "@/lib/history/edit-steps"
@@ -3499,11 +3499,10 @@ export function ProjectWorkspace() {
         labelKey: "editor.history.stepTrim",
         fileId: activeFileId,
         fileName: activeFileNameRef.current,
-        lane: activeLane, // AQU-1419: takes belong to a lane.
       })
       await applyTakeTrim(cellId, audioId, trims)
     },
-    [applyTakeTrim, readTake, activeFileId, activeLane],
+    [applyTakeTrim, readTake, activeFileId],
   )
 
   // Round 6 (SUB-38), re-homed 2026-08-07: assign a voice/character from the
@@ -3614,11 +3613,10 @@ export function ProjectWorkspace() {
         labelKey: "editor.history.stepMove",
         fileId: activeFileId,
         fileName: activeFileNameRef.current,
-        lane: activeLane, // AQU-1419: takes belong to a lane.
       })
       await applyTakePlace(cellId, audioId, targetOffsetMs)
     },
-    [applyTakePlace, activeFileId, activeLane],
+    [applyTakePlace, activeFileId],
   )
 
   // AQU-1767 phase 1: CUT dub takes into independent pieces — from the blade
@@ -3779,11 +3777,10 @@ export function ProjectWorkspace() {
         labelKey: made.length === 1 ? "editor.history.stepCut" : "editor.history.stepCutMany",
         fileId: activeFileId,
         fileName: activeFileNameRef.current,
-        lane: activeLane, // AQU-1419: takes belong to a lane.
       })
       for (const c of made) await applyTakeCut(c.cellId, c.audioId, c.atMs, c.newAudioId)
     },
-    [readTake, applyTakeCut, t, activeFileId, activeLane],
+    [readTake, applyTakeCut, t, activeFileId],
   )
   // Cmd/Ctrl+Z and its friends, app-wide; say what was undone, or why not.
   useEffect(() => {
@@ -3801,18 +3798,6 @@ export function ProjectWorkspace() {
         })
       } else if (o.kind === "done") {
         toast.add({ type: "info", title: t(which === "undo" ? "editor.history.undone" : "editor.history.redone", { step: name }) })
-      } else if (o.kind === "blocked" && result.step.lane != null && result.step.lane !== activeLane) {
-        // AQU-1419: made in another language; it waits on the stack. Named the
-        // way the lane switcher names it (the import picker's options are the
-        // switcher's own labels), never by its tag, which can be an opaque id.
-        const lane = result.step.lane
-        const language = fileImportLaneOptions?.find((opt) => opt.value === lane)?.label ?? laneLabels[lane] ?? null
-        toast.add({
-          type: "info",
-          title: language
-            ? t("editor.history.blockedOtherLane", { language, step: name })
-            : t("editor.history.blockedOtherLaneNoName", { step: name }),
-        })
       } else if (o.kind === "blocked") {
         // AQU-1767 phase 2: made in another file; it waits on the stack.
         toast.add({
@@ -3837,7 +3822,7 @@ export function ProjectWorkspace() {
         toast.add({ type: "error", title: t("editor.history.failed", { step: name }) })
       }
     },
-    [t, activeLane, fileImportLaneOptions, laneLabels],
+    [t],
   )
   useHistoryShortcuts(reportHistory)
 
@@ -10686,7 +10671,6 @@ export function ProjectWorkspace() {
                   data: { cellId: cell.id, lane: activeLane, voted: true, editEventId: cell.targetEventId! },
                   labelKey: "editor.history.stepValidate",
                   fileId: cell.fileId,
-                  lane: activeLane,
                 })
               }
             },
@@ -10785,7 +10769,6 @@ export function ProjectWorkspace() {
                 data: { cellId: target.cellId, audioId: target.audioId, voted: true },
                 labelKey: "editor.history.stepValidateAudio",
                 fileId: activeFileId,
-                lane: activeLane, // AQU-1419: the takes voted on are this lane's.
               })
             }
           },
@@ -11284,7 +11267,6 @@ export function ProjectWorkspace() {
           labelKey: validated ? "editor.history.stepValidateAudio" : "editor.history.stepUnvalidateAudio",
           fileId: activeFileId,
           fileName: activeFileNameRef.current,
-          lane: activeLane, // AQU-1419: the take is this lane's.
         },
         undefined,
         { pending: new Promise<boolean>((resolve) => { settle = resolve }) },
@@ -12324,13 +12306,9 @@ export function ProjectWorkspace() {
         labelParams: { count: changes.length },
         fileId: activeFileId,
         fileName: activeFileNameRef.current,
-        // AQU-1419: a track is shared by every language, but the recordings a
-        // delete took with it were this lane's — bringing them back has to
-        // happen here too. A step with no recordings undoes from any lane.
-        ...(takes && takes.length > 0 ? { lane: activeLane } : {}),
       })
     },
-    [serverTimelineTracks, activeFileId, activeLane],
+    [serverTimelineTracks, activeFileId],
   )
 
   /**
@@ -13205,18 +13183,6 @@ export function ProjectWorkspace() {
   useEffect(() => {
     setOpenFileProbe((fileId) => openFileIdsRef.current.has(fileId))
     return () => setOpenFileProbe(null)
-  }, [])
-  // AQU-1419: and a step made in another language waits until that lane is
-  // open again. Every write above goes to the OPEN lane and every read sees
-  // only its takes and text, so from another lane a deleted take's undo would
-  // choose in the wrong language, and the rest would look gone and be dropped.
-  const openLaneRef = useRef(activeLane)
-  useEffect(() => {
-    openLaneRef.current = activeLane
-  }, [activeLane])
-  useEffect(() => {
-    setOpenLaneProbe((lane) => lane === openLaneRef.current)
-    return () => setOpenLaneProbe(null)
   }, [])
 
   // The transport speaks file seconds in dubbing and programme seconds in

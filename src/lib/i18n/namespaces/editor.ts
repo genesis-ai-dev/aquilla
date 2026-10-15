@@ -1000,9 +1000,6 @@ export const editor = defineNamespace({
     "editor.history.skippedUnavailable": "Skipped “{step}”: it can't be undone any more",
     "editor.history.blockedElsewhere": "Open “{file}” to undo “{step}”",
     "editor.history.blockedElsewhereNoName": "Open the file it was made in to undo “{step}”",
-    // AQU-1419: made in another language lane; it waits until that lane is open.
-    "editor.history.blockedOtherLane": "Switch to {language} to undo “{step}”",
-    "editor.history.blockedOtherLaneNoName": "Switch to the language it was made in to undo “{step}”",
     "editor.history.undonePartly": plural({
       one: "Undid “{step}” — {count} part was changed since and was left alone",
       other: "Undid “{step}” — {count} parts were changed since and were left alone",
@@ -6063,8 +6060,6 @@ export const editor = defineNamespace({
       "editor.history.skippedUnavailable": { description: "Toast when Undo/Redo could not run because this kind of step can no longer be undone (for example, it was made by an older version of the app). Nothing was changed.", placeholders: { step: "The step's name." } },
       "editor.history.blockedElsewhere": { description: "Toast when Undo is waiting because the step was made in another file. The step is kept; it can be undone after opening that file.", placeholders: { file: "The file's name, as the user named it.", step: "The step's name." } },
       "editor.history.blockedElsewhereNoName": { description: "Same as blockedElsewhere, when the file's name is not known.", placeholders: { step: "The step's name." } },
-      "editor.history.blockedOtherLane": { description: "Toast when Undo is waiting because the step (a recording, a translation, a validation) was made while working in another language of the project. The step is kept; it can be undone after switching the editor to that language.", placeholders: { language: "The language's name, as the editor's language switcher shows it, e.g. 'Spanish'.", step: "The step's name." } },
-      "editor.history.blockedOtherLaneNoName": { description: "Same as blockedOtherLane, when the language's name is not known.", placeholders: { step: "The step's name." } },
       "editor.history.undonePartly": { description: "Toast after Undo of a step made of several parts (e.g. validating many lines) where some parts were changed by someone since and were left alone.", placeholders: { step: "The step's name.", count: "How many parts were left alone." } },
       "editor.history.redonePartly": { description: "Toast after Redo of a step made of several parts where some parts were changed since and were left alone.", placeholders: { step: "The step's name.", count: "How many parts were left alone." } },
       "editor.history.panelTitle": { description: "Title of the History panel, which lists the user's recent steps they can undo." },

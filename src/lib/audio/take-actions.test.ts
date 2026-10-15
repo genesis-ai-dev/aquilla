@@ -74,14 +74,4 @@ describe("removeWholeTake", () => {
       data: { cellId: "c1", audioId: "t1", slot: "recording", wasSelected: true, pieces: ["p2"] },
     })
   })
-
-  // AQU-1419: undone only while that language is open — from any other the
-  // pieces read as gone, and choosing them would choose in the wrong language.
-  it("records the lane it was made in, '' for the lane whose tag is omitted", async () => {
-    const pieces = [{ audioId: "t1", slot: "recording" }, { audioId: "p2", slot: "recording" }]
-    recorded.steps = []
-    await removeWholeTake({ projectId: "p", fileId: "f", cellId: "c1", author: "tester", history: { wasSelected: true }, pieces, targetLang: "es" })
-    await removeWholeTake({ projectId: "p", fileId: "f", cellId: "c1", author: "tester", history: { wasSelected: true }, pieces })
-    expect(recorded.steps.map((step) => step.lane)).toEqual(["es", ""])
-  })
 })

@@ -1,7 +1,6 @@
 // AQU-1767: the per-user edit history, who owns Cmd/Ctrl+Z, and (phase 2)
-// steps as data, groups, "undo to here", blocked steps and persistence; and
-// (AQU-1419) steps that wait for the language they were made in.
-import { describe, it, expect, beforeEach, vi } from "vitest"
+// steps as data, groups, "undo to here", blocked steps and persistence.
+import { describe, it, expect, beforeEach } from "vitest"
 import {
   flushHistorySaveForTests,
   historyReady,
@@ -13,7 +12,6 @@ import {
   resetHistoryForTests,
   setHistoryScope,
   setOpenFileProbe,
-  setOpenLaneProbe,
   undoLast,
   undoTo,
   withGroup,
@@ -22,9 +20,6 @@ import {
 } from "./history"
 import { clearHistoryStoreForTests } from "./history-store"
 import { setToastUndoAt, undoShortcutOwner } from "./arbiter"
-import { takeStepHandlers } from "./take-steps"
-import { editStepHandlers } from "./edit-steps"
-import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 
 /** A step kind whose undo/redo log what they did, with a scripted outcome. */
 function logKind(log: string[], outcomes: Record<string, StepOutcome> = {}): StepHandler<never> {
@@ -288,125 +283,6 @@ describe("undo to here", () => {
     const results = await undoTo(historyView().undoSteps[0].id)
     expect(results.map((r) => r.outcome.kind)).toEqual(["done", "blocked"])
     expect(log).toEqual(["undo c"])
-  })
-})
-
-// AQU-1419: takes, translations and votes belong to a language lane, and the
-// workspace reads and writes only the open lane's. The fakes below do the same.
-describe("language lanes", () => {
-  it("a take deleted in Spanish is not undone from French: nothing is chosen there, and it waits for Spanish", async () => {
-    let open = "es"
-    const takes: Record<string, Record<string, { isDeleted?: boolean }>> = {
-      es: { "take-es": { isDeleted: true } },
-      fr: { "take-fr": {} },
-    }
-    const chosen: Record<string, string | null> = { es: null, fr: "take-fr" }
-    const select = vi.fn(async (_cellId: string, _slot: string, audioId: string | null) => {
-      chosen[open] = audioId
-      if (audioId && takes[open][audioId]) takes[open][audioId] = {}
-    })
-    registerStepKinds(
-      takeStepHandlers({
-        readTake: (_cellId, id) => {
-          const take = takes[open][id]
-          return take && !take.isDeleted ? (take as CodexCellAttachment) : null
-        },
-        selectedIn: () => chosen[open],
-        applyTrim: vi.fn(async () => {}),
-        applyPlace: vi.fn(async () => {}),
-        cut: vi.fn(async () => true),
-        uncut: vi.fn(async () => {}),
-        newPieceId: () => "fresh",
-        select,
-        remove: vi.fn(async () => {}),
-        rename: vi.fn(async () => {}),
-      }),
-    )
-    setOpenLaneProbe((lane) => lane === open)
-    recordStep({
-      kind: "take.remove",
-      data: { cellId: "c1", audioId: "take-es", slot: "recording", wasSelected: true, selectedBefore: null },
-      labelKey: "delete take",
-      lane: "es",
-    })
-
-    open = "fr"
-    const r = await undoLast()
-    expect(r?.outcome).toEqual({ kind: "blocked", reason: "elsewhere" })
-    expect(r?.step.lane).toBe("es")
-    expect(select).not.toHaveBeenCalled()
-    expect(chosen.fr).toBe("take-fr")
-    expect(historyView().nextUndo?.labelKey).toBe("delete take")
-    expect(historyView().skipped).toEqual([])
-
-    open = "es"
-    expect((await undoLast())?.outcome).toEqual({ kind: "done" })
-    expect(chosen).toEqual({ es: "take-es", fr: "take-fr" })
-  })
-
-  it("a translation edited in Spanish can still be undone after a visit to French", async () => {
-    let open = "es"
-    const text: Record<string, string> = { es: "hola", fr: "bonjour" }
-    registerStepKinds(
-      editStepHandlers({
-        readText: (_cellId, _side, lane) => (lane === open ? { value: text[lane] } : null),
-        commitText: vi.fn(async (_cellId, _side, lane, value) => { text[lane] = value.value }),
-        readTextVote: () => null,
-        setTextVote: vi.fn(async () => {}),
-        readAudioVote: () => null,
-        setAudioVote: vi.fn(async () => {}),
-        readSettings: () => null,
-        writeSettings: vi.fn(async () => {}),
-      }),
-    )
-    setOpenLaneProbe((lane) => lane === open)
-    recordStep({
-      kind: "text.commit",
-      data: { cellId: "c1", lane: "es", side: "target", before: { value: "hi" }, after: { value: "hola" } },
-      labelKey: "edit",
-      lane: "es",
-    })
-
-    open = "fr"
-    expect((await undoLast())?.outcome).toEqual({ kind: "blocked", reason: "elsewhere" })
-    expect(historyView().skipped).toEqual([])
-    open = "es"
-    expect((await undoLast())?.outcome).toEqual({ kind: "done" })
-    expect(text).toEqual({ es: "hi", fr: "bonjour" })
-  })
-
-  it("'' is a lane like any other, and a step with no lane is undone from any of them", async () => {
-    const log: string[] = []
-    registerStepKinds({ "test.log": logKind(log) })
-    recordStep({ ...step("default lane"), lane: "" })
-    recordStep(step("row")) // rows are shared by every language
-    setOpenLaneProbe((lane) => lane === "es")
-    expect((await undoLast())?.outcome).toEqual({ kind: "done" })
-    expect((await undoLast())?.outcome).toEqual({ kind: "blocked", reason: "elsewhere" })
-    expect(log).toEqual(["undo row"])
-    setOpenLaneProbe((lane) => lane === "")
-    expect((await undoLast())?.outcome).toEqual({ kind: "done" })
-    expect(log).toEqual(["undo row", "undo default lane"])
-  })
-
-  it("a group waits for its parts' lane, for redo as well as undo", async () => {
-    const log: string[] = []
-    registerStepKinds({ "test.log": logKind(log) })
-    let open = "es"
-    setOpenLaneProbe((lane) => lane === open)
-    await withGroup({ labelKey: "bulk" }, async () => {
-      recordStep({ ...step("a"), lane: "es" })
-      recordStep({ ...step("b"), lane: "es" })
-    })
-    expect((await undoLast())?.outcome).toEqual({ kind: "done" })
-    open = "fr"
-    expect((await redoLast())?.outcome).toEqual({ kind: "blocked", reason: "elsewhere" })
-    expect(historyView().nextRedo?.labelKey).toBe("bulk")
-    recordGroup({ labelKey: "bulk-2" }, [{ ...step("c"), lane: "es" }])
-    expect((await undoLast())?.outcome).toEqual({ kind: "blocked", reason: "elsewhere" })
-    open = "es"
-    expect((await undoLast())?.outcome).toEqual({ kind: "done" })
-    expect(log).toEqual(["undo b", "undo a", "undo c"])
   })
 })
 

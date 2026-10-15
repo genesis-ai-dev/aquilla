@@ -9,6 +9,8 @@
 // above all) is applied by stopping the listener process, not from the addon.
 // See docs/TAURI-NETWORK-FAULTS.md for the evidence behind that split.
 
+import { renameSync, writeFileSync } from "node:fs"
+
 /** Faults applied by taking the listener down — these drop live sockets. */
 export const LISTENER_MODES = ["offline", "flap"] as const
 /** Faults applied by the addon, with the listener up and forwarding. */
@@ -40,4 +42,33 @@ export function wantsListenerDown(mode: MitmMode, flapPhaseDown: boolean): boole
   if (mode === "offline") return true
   if (mode === "flap") return flapPhaseDown
   return false
+}
+
+/**
+ * Parses the state file's contents, returning `fallback` for anything that is
+ * not a complete, valid state. Readers poll the file while `mitm-mode.ts` may
+ * be writing it, so an unreadable or unknown value must mean "no change" —
+ * snapping to `pass` would briefly heal an outage mid-observation.
+ */
+export function parseMitmState(raw: string, fallback: MitmState): MitmState {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return fallback
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return fallback
+  const state = { ...DEFAULT_MITM_STATE, ...(parsed as Partial<MitmState>) }
+  if (!MITM_MODES.includes(state.mode)) return fallback
+  return state
+}
+
+/**
+ * Writes the state file via temp-file + rename, so a concurrent reader sees
+ * either the old contents or the new ones — never a truncated file.
+ */
+export function writeMitmStateFile(file: string, state: object): void {
+  const tmp = `${file}.${process.pid}.tmp`
+  writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`)
+  renameSync(tmp, file)
 }

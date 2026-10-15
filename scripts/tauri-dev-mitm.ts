@@ -37,7 +37,7 @@
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process"
 import { createConnection } from "node:net"
-import { readFileSync, rmSync, writeFileSync, existsSync } from "node:fs"
+import { readFileSync, rmSync, existsSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { loadEnv } from "vite"
@@ -46,6 +46,8 @@ import {
   MITM_MODES,
   DEFAULT_MITM_STATE,
   wantsListenerDown,
+  parseMitmState,
+  writeMitmStateFile,
   type MitmMode,
   type MitmState,
 } from "./lib/mitm-state"
@@ -79,8 +81,16 @@ async function shutdown(code = 0): Promise<never> {
   process.exit(code)
 }
 
-process.on("SIGINT", () => void shutdown(130))
-process.on("SIGTERM", () => void shutdown(143))
+// Ctrl+C signals the whole process group, so the tsx wrapper and this process
+// can both deliver one. A repeat signal mid-cleanup must not cut it short and
+// strand the state file — cleanup is already bounded by killChildTree's 5s.
+function onSignal(code: number): void {
+  if (shuttingDown) return
+  void shutdown(code)
+}
+
+process.on("SIGINT", () => onSignal(130))
+process.on("SIGTERM", () => onSignal(143))
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -125,18 +135,16 @@ async function waitForPort(port: number, timeoutMs = 15_000): Promise<void> {
   }
 }
 
-function readState(): MitmState {
-  if (!existsSync(STATE_FILE)) return { ...DEFAULT_MITM_STATE }
+/**
+ * Reads the state file, falling back to `lastGood` when it is missing or
+ * unreadable — a transient read failure must not be treated as a mode change.
+ */
+function readState(lastGood: MitmState): MitmState {
+  if (!existsSync(STATE_FILE)) return lastGood
   try {
-    const parsed: unknown = JSON.parse(readFileSync(STATE_FILE, "utf8"))
-    if (typeof parsed !== "object" || parsed === null) return { ...DEFAULT_MITM_STATE }
-    const state = { ...DEFAULT_MITM_STATE, ...(parsed as Partial<MitmState>) }
-    if (!MITM_MODES.includes(state.mode)) return { ...DEFAULT_MITM_STATE }
-    return state
+    return parseMitmState(readFileSync(STATE_FILE, "utf8"), lastGood)
   } catch {
-    // A half-written file (mitm-mode.ts writing as we read) must not be
-    // treated as a mode change — keep the last good state and retry next poll.
-    return { ...DEFAULT_MITM_STATE }
+    return lastGood
   }
 }
 
@@ -146,7 +154,8 @@ function readState(): MitmState {
 
 class Listener {
   private child: ChildProcess | null = null
-  private stoppingIntentionally = false
+  /** Children we stopped on purpose, so their exit isn't treated as a crash. */
+  private readonly stopping = new WeakSet<ChildProcess>()
   private readonly targets: ProxyTarget[]
 
   constructor(targets: ProxyTarget[]) {
@@ -159,7 +168,6 @@ class Listener {
 
   async up(): Promise<void> {
     if (this.child) return
-    this.stoppingIntentionally = false
     const child = spawn(
       "mitmdump",
       [
@@ -182,8 +190,9 @@ class Listener {
     )
     this.child = child
     child.on("exit", (code) => {
-      this.child = null
-      if (!this.stoppingIntentionally && !shuttingDown) {
+      // A previous child's late exit must not clobber its replacement.
+      if (this.child === child) this.child = null
+      if (!this.stopping.has(child) && !shuttingDown) {
         console.error(`[mitm] mitmdump exited unexpectedly (code ${String(code)})`)
         void shutdown(1)
       }
@@ -198,7 +207,7 @@ class Listener {
   async down(): Promise<void> {
     const child = this.child
     if (!child) return
-    this.stoppingIntentionally = true
+    this.stopping.add(child)
     this.child = null
     await killChildTree(child)
   }
@@ -249,10 +258,7 @@ async function main(): Promise<void> {
   for (const warning of plan.warnings) console.warn(`[mitm] WARNING: ${warning}`)
   describe(plan.targets, plan.env)
 
-  writeFileSync(
-    STATE_FILE,
-    `${JSON.stringify({ ...DEFAULT_MITM_STATE, mode: initialMode }, null, 2)}\n`,
-  )
+  writeMitmStateFile(STATE_FILE, { ...DEFAULT_MITM_STATE, mode: initialMode })
   cleanup.push(() => rmSync(STATE_FILE, { force: true }))
 
   const listener = new Listener(plan.targets)
@@ -262,11 +268,19 @@ async function main(): Promise<void> {
   console.log(`[mitm] change it with: pnpm mitm:mode <${MITM_MODES.join("|")}>`)
 
   // Supervisor: the only thing that decides whether the listener is up.
+  let lastGood: MitmState = { ...DEFAULT_MITM_STATE, mode: initialMode }
   let lastMode: MitmMode | null = null
   let flapSince = Date.now()
+  // Ticks must not overlap: up()/down() take seconds (port wait, graceful
+  // kill), and a tick that sees the listener "down" while the old mitmdump is
+  // still exiting would spawn a replacement that races it for the port.
+  let ticking = false
   const poll = setInterval(() => {
+    if (ticking) return
+    ticking = true
     void (async () => {
-      const state = readState()
+      const state = readState(lastGood)
+      lastGood = state
       if (state.mode !== lastMode) {
         if (state.mode === "flap") flapSince = Date.now()
         lastMode = state.mode
@@ -283,7 +297,11 @@ async function main(): Promise<void> {
         await listener.up()
         console.log("[mitm] listener UP — traffic forwarding again")
       }
-    })().catch((err: unknown) => console.error("[mitm] supervisor error:", err))
+    })()
+      .catch((err: unknown) => console.error("[mitm] supervisor error:", err))
+      .finally(() => {
+        ticking = false
+      })
   }, POLL_MS)
   cleanup.push(() => clearInterval(poll))
 

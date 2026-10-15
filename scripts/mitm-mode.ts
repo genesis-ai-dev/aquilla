@@ -6,10 +6,15 @@
 // conditions mid-session without restarting anything — restarting the proxy
 // would reset the very outbox/reconnect state you are trying to watch.
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs"
+import { readFileSync, existsSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { MITM_MODES, type MitmMode, DEFAULT_MITM_STATE } from "./lib/mitm-state"
+import {
+  MITM_MODES,
+  type MitmMode,
+  DEFAULT_MITM_STATE,
+  writeMitmStateFile,
+} from "./lib/mitm-state"
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const STATE_FILE = process.env.AQUILLA_MITM_STATE ?? path.join(REPO_ROOT, ".mitm-state.json")
@@ -98,7 +103,9 @@ function main(): void {
   if (stall !== undefined) next.stallSeconds = stall
   if (period !== undefined) next.periodSeconds = period
 
-  writeFileSync(STATE_FILE, `${JSON.stringify(next, null, 2)}\n`)
+  // Atomic: the supervisor and fault.py poll this file, and a truncated read
+  // mid-write must never look like a mode change.
+  writeMitmStateFile(STATE_FILE, next)
 
   const detail =
     mode === "error"

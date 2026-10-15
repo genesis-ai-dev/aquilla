@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
-import { readFileSync } from "node:fs"
+import { mkdtempSync, readdirSync, readFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import {
@@ -8,6 +9,9 @@ import {
   ADDON_MODES,
   DEFAULT_MITM_STATE,
   wantsListenerDown,
+  parseMitmState,
+  writeMitmStateFile,
+  type MitmState,
 } from "./mitm-state"
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..")
@@ -68,5 +72,39 @@ describe("DEFAULT_MITM_STATE", () => {
     // stall shorter than that would answer before the probe gives up and the
     // chip would never go offline.
     expect(DEFAULT_MITM_STATE.stallSeconds).toBeGreaterThan(3)
+  })
+})
+
+describe("parseMitmState", () => {
+  const lastGood: MitmState = { ...DEFAULT_MITM_STATE, mode: "offline" }
+
+  it("parses a valid state, filling in missing knobs from the defaults", () => {
+    expect(parseMitmState('{"mode":"flap","periodSeconds":5}', lastGood)).toEqual({
+      ...DEFAULT_MITM_STATE,
+      mode: "flap",
+      periodSeconds: 5,
+    })
+  })
+
+  it("keeps the last good state for a truncated or empty file instead of snapping to pass", () => {
+    // The supervisor can read mid-write; that must not briefly heal an outage.
+    expect(parseMitmState("", lastGood)).toBe(lastGood)
+    expect(parseMitmState('{"mode":"pa', lastGood)).toBe(lastGood)
+  })
+
+  it("keeps the last good state for non-objects and unknown modes", () => {
+    expect(parseMitmState("null", lastGood)).toBe(lastGood)
+    expect(parseMitmState("[]", lastGood)).toBe(lastGood)
+    expect(parseMitmState('{"mode":"sideways"}', lastGood)).toBe(lastGood)
+  })
+})
+
+describe("writeMitmStateFile", () => {
+  it("writes the state and leaves no temp file behind", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "mitm-state-"))
+    const file = path.join(dir, "state.json")
+    writeMitmStateFile(file, { ...DEFAULT_MITM_STATE, mode: "error" })
+    expect(parseMitmState(readFileSync(file, "utf8"), DEFAULT_MITM_STATE).mode).toBe("error")
+    expect(readdirSync(dir)).toEqual(["state.json"])
   })
 })

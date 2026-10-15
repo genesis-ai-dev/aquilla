@@ -23,6 +23,7 @@ Modes handled here
 blackhole  Hold the request open and never answer. The captive-portal case:
            the Rust probe gives up at its own 3s timeout, but webview `fetch`
            has no timeout and hangs indefinitely.
+           Switching modes releases held requests within a fraction of a second.
 error      Answer with an HTTP status (default 503). Note this does NOT flip
            the connectivity chip: `check_connectivity_once` in
            `src-tauri/src/connectivity.rs` is `send().await.is_ok()`, which is
@@ -48,6 +49,9 @@ log = logging.getLogger("aquilla.fault")
 # when the orchestrator wants those enforced, there is no listener to reach.
 ADDON_MODES = frozenset({"blackhole", "error"})
 KNOWN_MODES = ADDON_MODES | {"pass", "offline", "flap"}
+
+# How often a blackholed request re-checks whether the fault has been lifted.
+HOLD_POLL_SECONDS = 0.25
 
 DEFAULT_STATE = {
     "mode": "pass",
@@ -105,11 +109,27 @@ class Fault:
         if mode == "blackhole":
             stall = float(state.get("stallSeconds", 600))
             log.info("blackhole %s (holding %.0fs)", where, stall)
-            await asyncio.sleep(stall)
-            # If the client is somehow still waiting, end it rather than
-            # forwarding a request whose fault window has long expired.
-            flow.kill()
-        elif mode == "error":
+            # Hold in short slices, re-checking the mode, so switching to
+            # `pass` releases requests already held instead of leaving them
+            # hung for the rest of the stall.
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + stall
+            while loop.time() < deadline:
+                await asyncio.sleep(min(HOLD_POLL_SECONDS, deadline - loop.time()))
+                state = self._state_now()
+                mode = state.get("mode", "pass")
+                if mode != "blackhole":
+                    log.info("released %s (mode -> %s)", where, mode)
+                    break
+            else:
+                # The stall ran out with the fault still active: end the
+                # request rather than forwarding it after its window expired.
+                flow.kill()
+                return
+            if mode != "error":
+                return
+
+        if mode == "error":
             status = int(state.get("status", 503))
             log.info("error %d %s", status, where)
             flow.response = http.Response.make(

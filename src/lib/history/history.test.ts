@@ -316,3 +316,45 @@ describe("persistence", () => {
     expect(historyView().undoSteps.map((s) => s.labelKey)).toEqual(["old", "new"])
   })
 })
+
+// Sam, 2026-10-14: each language keeps its own history. Undo in French undoes
+// French's last step and never touches or waits on a Spanish one.
+describe("one history per language", () => {
+  it("undoes and redoes only the open language's steps", async () => {
+    const log: string[] = []
+    registerStepKinds({ "test.log": logKind(log) })
+    setHistoryScope("p1", "sam", "Spanish")
+    await historyReady()
+    recordStep(step("es-delete"))
+    setHistoryScope("p1", "sam", "French")
+    await historyReady()
+    // French has done nothing yet: nothing to undo, and Spanish's step stays put.
+    expect(await undoLast()).toBeNull()
+    recordStep(step("fr-trim"))
+    expect((await undoLast())?.step.labelKey).toBe("fr-trim")
+    expect(historyView().undoSteps.map((s) => s.labelKey)).toEqual([])
+    setHistoryScope("p1", "sam", "Spanish")
+    await historyReady()
+    expect(historyView().undoSteps.map((s) => s.labelKey)).toEqual(["es-delete"])
+    expect((await undoLast())?.step.labelKey).toBe("es-delete")
+    // French's undone step is French's to redo, not Spanish's.
+    expect((await redoLast())?.step.labelKey).toBe("es-delete")
+    expect(log).toEqual(["undo fr-trim", "undo es-delete", "redo es-delete"])
+  })
+
+  it("files a step recorded from outside the editor under the language last open", async () => {
+    const log: string[] = []
+    registerStepKinds({ "test.log": logKind(log) })
+    setHistoryScope("p1", "sam", "French")
+    await historyReady()
+    setHistoryScope(null, null)
+    // A settings save names only its project and person.
+    recordStep(step("settings"), { projectId: "p1", username: "sam" })
+    setHistoryScope("p1", "sam", "Spanish")
+    await historyReady()
+    expect(await undoLast()).toBeNull()
+    setHistoryScope("p1", "sam", "French")
+    await historyReady()
+    expect((await undoLast())?.step.labelKey).toBe("settings")
+  })
+})

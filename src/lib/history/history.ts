@@ -21,7 +21,8 @@
  *
  * WHEN IT CANNOT BE DONE FROM HERE. A step made in another file is BLOCKED
  * while that file is not open: it stays on the stack and says which file to
- * open. Nothing is lost by switching files.
+ * open. Nothing is lost by switching files. Each language has its own
+ * history (see `scopeKey`), so switching language switches history.
  *
  * GROUPS. One action that writes many things (bulk validation, applying a
  * voice to many lines) is ONE step: `withGroup` collects the steps recorded
@@ -103,9 +104,20 @@ let idCounter = 0
 /** Steps recorded while a `withGroup` runs, innermost last. */
 const groupBuffers: StepRecord[][] = []
 
-function scopeKey(projectId: string, username: string): string {
-  return `${projectId}\u0000${username}`
+/**
+ * One history per project, person and LANGUAGE (Sam, 2026-10-14). Takes, text
+ * and votes belong to a language lane, and the workspace reads and writes only
+ * the open one, so each language keeps its own undo and redo: Cmd+Z in French
+ * undoes French's last step, never a Spanish one, and never waits on one. A
+ * step that touches every language (a row, a track, a setting) belongs to the
+ * history of the language it was made in. `''` is a lane like any other.
+ */
+function scopeKey(projectId: string, username: string, lane: string): string {
+  return `${projectId}\u0000${username}\u0000${lane}`
 }
+
+/** The language each project's history was last opened in, for a step recorded from outside it. */
+const laneByProject = new Map<string, string>()
 
 function stacksFor(key: string): Stacks {
   let s = stacks.get(key)
@@ -184,11 +196,13 @@ export function historyReady(): Promise<void> {
 // ── Scope, handlers, open-file probe ─────────────────────────────────────────
 
 /**
- * Which project and person the shortcut and the buttons act for. The workspace
- * sets it when a project opens; `null` when none is open.
+ * Which project, person and language the shortcut and the buttons act for.
+ * The workspace sets it when a project opens and whenever the open language
+ * changes; `null` when none is open.
  */
-export function setHistoryScope(projectId: string | null, username: string | null): void {
-  const next = projectId && username ? scopeKey(projectId, username) : null
+export function setHistoryScope(projectId: string | null, username: string | null, lane = ""): void {
+  if (projectId) laneByProject.set(projectId, lane)
+  const next = projectId && username ? scopeKey(projectId, username, lane) : null
   if (next === activeScope) return
   activeScope = next
   activeUser = username
@@ -238,7 +252,9 @@ export function recordStep<D>(
   scope?: { projectId: string; username: string },
   opts?: { pending?: Promise<boolean> },
 ): void {
-  const key = scope ? scopeKey(scope.projectId, scope.username) : activeScope
+  // A step recorded from outside the workspace (a settings save) joins the
+  // history of the language that project was last open in.
+  const key = scope ? scopeKey(scope.projectId, scope.username, laneByProject.get(scope.projectId) ?? "") : activeScope
   if (!key) return
   const record: StepRecord<D> = { ...input, id: newId(), at: input.at ?? Date.now() }
   if (opts?.pending) {

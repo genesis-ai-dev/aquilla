@@ -3784,9 +3784,11 @@ export function ProjectWorkspace() {
   )
   // Cmd/Ctrl+Z and its friends, app-wide; say what was undone, or why not.
   useEffect(() => {
-    setHistoryScope(project?.id ?? null, currentUsername || null)
+    // Sam, 2026-10-14: one history per language — switching language switches
+    // to that language's own undo and redo.
+    setHistoryScope(project?.id ?? null, currentUsername || null, activeLane)
     return () => setHistoryScope(null, null)
-  }, [project?.id, currentUsername])
+  }, [project?.id, currentUsername, activeLane])
   const reportHistory = useCallback(
     (which: "undo" | "redo", result: HistoryResult) => {
       const name = t(result.step.labelKey as never, result.step.labelParams as never)

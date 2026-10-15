@@ -52,7 +52,7 @@ function ToastViewport({ className, ...props }: ToastPrimitive.Viewport.Props) {
     <ToastPrimitive.Viewport
       data-slot="toast-viewport"
       className={cn(
-        "pointer-events-none fixed inset-x-4 bottom-4 z-50 mx-auto w-auto max-w-sm outline-none sm:right-4 sm:left-auto sm:mx-0 sm:w-full",
+        "pointer-events-none fixed inset-x-4 bottom-4 z-[100] mx-auto w-auto max-w-sm outline-none sm:right-4 sm:left-auto sm:mx-0 sm:w-full",
         className
       )}
       {...props}
@@ -147,6 +147,7 @@ function ToastItem({
             <ToastTitle />
             <ToastDescription />
           </div>
+          <ToastSecondaryAction toastId={toastItem.id} action={secondaryActionFromToast(toastItem.data)} />
           <ToastAction />
           <ToastClose />
         </ToastContent>
@@ -159,6 +160,51 @@ function iconFromToast(data: object | undefined): React.ReactNode | null {
   if (!data || !("icon" in data)) return null
   const icon = (data as { icon?: unknown }).icon
   return React.isValidElement(icon) ? icon : null
+}
+
+/**
+ * A second button beside `actionProps`, passed as `data.secondaryAction`
+ * (AQU-1486: "Validate all" next to "Undo"). Base UI's toast carries one
+ * action; this one closes its toast after running, as the primary does.
+ */
+export interface ToastSecondaryActionData {
+  label: string
+  onClick: () => void
+}
+
+function secondaryActionFromToast(data: object | undefined): ToastSecondaryActionData | null {
+  if (!data || !("secondaryAction" in data)) return null
+  const action = (data as { secondaryAction?: unknown }).secondaryAction
+  if (!action || typeof action !== "object") return null
+  const { label, onClick } = action as { label?: unknown; onClick?: unknown }
+  return typeof label === "string" && typeof onClick === "function"
+    ? { label, onClick: onClick as () => void }
+    : null
+}
+
+function ToastSecondaryAction({
+  toastId,
+  action,
+}: {
+  toastId: string
+  action: ToastSecondaryActionData | null
+}) {
+  const manager = ToastPrimitive.useToastManager()
+  if (!action) return null
+  return (
+    <Button
+      data-slot="toast-secondary-action"
+      variant="outline"
+      size="sm"
+      className="shrink-0"
+      onClick={() => {
+        action.onClick()
+        manager.close(toastId)
+      }}
+    >
+      {action.label}
+    </Button>
+  )
 }
 
 function undoFromToast(data: object | undefined): (() => void) | null {

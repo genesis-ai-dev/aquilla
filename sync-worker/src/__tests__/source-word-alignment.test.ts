@@ -22,12 +22,27 @@ const VIEWER = 100
 const TEXT_7 = "When a Samaritan woman came to draw water, Jesus said to her, “Give Me a drink.”"
 const TEXT_8 = "(His disciples had gone into the town to buy food.)"
 
+// Source rows are keyed by lane_id like every projection row (AQU-1611c
+// dropped `target_lang`). A project has one source lane; the seed names it
+// the way production writers do rather than leaning on the harness to mint
+// one, so the route runs against the real column set (AQU-1904).
+const SOURCE_LANE = "a1b2c3d4"
+const OTHER_PROJECT_SOURCE_LANE = "e5f6a7b8"
+const sourceLane = (id: string, projectId: string) => ({
+  id,
+  project_id: projectId,
+  role: "source",
+  language: "English",
+  name: "Source",
+  position: 0,
+})
+
 const sourceRow = (cellId: string, value: string, extra: Record<string, unknown> = {}) => ({
   project_id: PROJECT,
   file_id: FILE,
   cell_id: cellId,
   side: "source",
-  target_lang: "",
+  lane_id: SOURCE_LANE,
   value,
   content_hash: contentHash(value),
   canonical_ref: cellId === "c7" ? "JHN 4:7" : "JHN 4:8",
@@ -37,12 +52,13 @@ const sourceRow = (cellId: string, value: string, extra: Record<string, unknown>
 })
 
 const SEED = {
+  lanes: [sourceLane(SOURCE_LANE, PROJECT), sourceLane(OTHER_PROJECT_SOURCE_LANE, "proj-b")],
   cells: [
     sourceRow("c7", TEXT_7),
     sourceRow("c8", TEXT_8),
     // Same cell id in another file and another project: must never be read or written.
     { ...sourceRow("c7", TEXT_7), file_id: "file-other" },
-    { ...sourceRow("c7", TEXT_7), project_id: "proj-b" },
+    { ...sourceRow("c7", TEXT_7), project_id: "proj-b", lane_id: OTHER_PROJECT_SOURCE_LANE },
   ],
 }
 

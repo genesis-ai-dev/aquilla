@@ -22,6 +22,14 @@ export interface WorkspaceSearchResult {
   /** Optional paired-side snippet for parallel passage results. Populated
    *  by `searchParallelPassages`; absent on regular `search` results. */
   paired?: string | null
+  /** Verse address (`GEN 1:1`). Absent when the cell has none. */
+  canonicalRef?: string | null
+  /** Source cell type (`verse`, `heading`, …). */
+  cellType?: string | null
+  /** Section title, cell label, or import display label. */
+  placeLabel?: string | null
+  /** 1-based place among the file's visible source cells. */
+  position?: number | null
 }
 
 export interface SearchOptions {
@@ -29,6 +37,15 @@ export interface SearchOptions {
   fileId?: string
   caseSensitive?: boolean
   matchWord?: boolean
+  /** Interpret the query as a regular expression. */
+  useRegexp?: boolean
   /** Content-side filter. "source" | "target"; omit (or "both") to return both sides. */
   side?: "both" | "source" | "target"
+}
+
+/** Find-widget toggles. All false keeps the default full-text search. */
+export interface FindToggles {
+  caseSensitive: boolean
+  matchWord: boolean
+  useRegexp: boolean
 }

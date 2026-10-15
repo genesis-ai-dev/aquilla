@@ -51,6 +51,12 @@ function base(): ProjectRecord {
 
 const noop = () => {}
 
+function deferred<T>() {
+  let resolve!: (v: T) => void
+  const promise = new Promise<T>((r) => { resolve = r })
+  return { promise, resolve }
+}
+
 const punctuationOf = (rules: TranslationRule[], checkId: string) => {
   const rule = rules.find((r) => r.id === `builtin:${checkId}`)
   return rule?.check.type === "builtin" ? rule.check.punctuation : undefined
@@ -127,5 +133,45 @@ describe("useRules — per-lane built-in check overrides", () => {
     const sent = patchShared.mock.calls[0][0]
     expect(sent.algorithmicChecks?.["end-punctuation-mismatch"]).toEqual({ enabled: false })
     expect(sent.algorithmicChecksByLane).toBeUndefined()
+  })
+
+  it("shows a lane toggle at once through checkOverrides, before the write settles", async () => {
+    // The Rules page resolves the lane it views from these maps, not from
+    // `project` (which has no optimistic state — PR #1438's flip-back).
+    const write = deferred<{ kind: "ok" }>()
+    const patchShared = vi.fn((_partial: ProjectWideSettings) => write.promise)
+    const { result } = renderHook(() => useRules(base(), noop, patchShared))
+
+    let pending!: Promise<void>
+    act(() => {
+      pending = result.current.setBuiltinOverride("end-punctuation-mismatch", { enabled: false }, "th-lane")
+    })
+    expect(result.current.checkOverrides.algorithmicChecksByLane).toEqual({
+      "th-lane": { "end-punctuation-mismatch": { enabled: false } },
+    })
+    expect(result.current.checkOverrides.algorithmicChecks).toBeUndefined()
+
+    await act(async () => { write.resolve({ kind: "ok" }); await pending })
+  })
+
+  it("keeps both of two quick lane toggles fired before a re-render", async () => {
+    const patchShared = vi.fn(async (_partial: ProjectWideSettings) => ({ kind: "ok" as const }))
+    const { result } = renderHook(() => useRules(base(), noop, patchShared))
+
+    await act(async () => {
+      const { setBuiltinOverride } = result.current
+      await Promise.all([
+        setBuiltinOverride("end-punctuation-mismatch", { enabled: false }, "th-lane"),
+        setBuiltinOverride("punctuation-integrity", { enabled: false }, "th-lane"),
+      ])
+    })
+
+    expect(patchShared).toHaveBeenCalledTimes(1)
+    expect(patchShared.mock.calls[0][0].algorithmicChecksByLane).toEqual({
+      "th-lane": {
+        "end-punctuation-mismatch": { enabled: false },
+        "punctuation-integrity": { enabled: false },
+      },
+    })
   })
 })

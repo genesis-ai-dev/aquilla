@@ -1,7 +1,7 @@
 // Types for the sync-worker per-cell history read API (Phase 2b).
 //
-// Mirror of `sync-worker/src/events/cell-history-read-route.ts`.
-// Move to `packages/data-model` in Phase 3.
+// Mirror of `sync-worker/src/events/cell-history-read-route.ts`. Hand-
+// authored client-side: the SPA's tsconfig covers `src` only.
 
 /**
  * One event from a cell's history chain. Returned by

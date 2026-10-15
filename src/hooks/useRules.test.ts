@@ -224,7 +224,8 @@ describe("useRules — addRule under sequential multi-accept commit (AQU-455)", 
     // Now release the gate and confirm addRule completes and the write landed.
     await act(async () => {
       releasePatchShared()
-      await new Promise((r) => setTimeout(r, 0))
+      // Past useRules' write-batch window (250 ms), which delays the send.
+      await new Promise((r) => setTimeout(r, 300))
     })
 
     expect(addRuleSettled).toBe(true)

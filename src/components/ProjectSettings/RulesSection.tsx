@@ -110,7 +110,7 @@ export function RulesSettingsSection({
   // evaluated here include them, and a failed read gets the same notice.
   const { concepts: subscribedConcepts, error: subscribedConceptsError } = useSubscribedConcepts(projectId)
 
-  const { rules, userRules, builtinRules, addRule, updateRule, deleteRule, setBuiltinOverride } = useRules(
+  const { rules, userRules, builtinRules, checkOverrides, addRule, updateRule, deleteRule, setBuiltinOverride } = useRules(
     project ?? null,
     refresh,
     patchSettings as Parameters<typeof useRules>[2],
@@ -189,6 +189,7 @@ export function RulesSettingsSection({
         updateRule={updateRule}
         deleteRule={deleteRule}
         setBuiltinOverride={setBuiltinOverride}
+        checkOverrides={checkOverrides}
         infractions={infractions}
         cells={cells}
         cellsLoading={cellsLoading}

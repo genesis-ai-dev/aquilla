@@ -61,4 +61,19 @@ describe("SearchDockPanel — labelled mode switcher (AQU-597)", () => {
       screen.getByRole("button", { name: /open find & replace/i }),
     ).toBeInTheDocument()
   })
+
+  it("opens the full panel in replace mode with the dock query", () => {
+    const onOpenFullPanel = vi.fn()
+    render(<SearchDockPanel {...baseProps({ onOpenFullPanel })} />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Find & Replace" }))
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "teste" } })
+    fireEvent.click(screen.getByRole("button", { name: /open find & replace/i }))
+
+    expect(onOpenFullPanel).toHaveBeenCalledWith({
+      mode: "replace",
+      query: "teste",
+      find: { caseSensitive: false, matchWord: false, useRegexp: false },
+    })
+  })
 })

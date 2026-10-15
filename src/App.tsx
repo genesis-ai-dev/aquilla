@@ -37,6 +37,7 @@ import { LocalLlmConfigMount } from "@/components/LocalLlmConfigMount"
 import { ConflictToast } from "@/components/ConflictToast"
 import { OfflineLeaderWatchdog } from "@/components/OfflineLeaderWatchdog"
 import { DesktopUpdatePrompt } from "@/components/DesktopUpdatePrompt"
+import { NewerOfflineDataNotice } from "@/components/NewerOfflineDataNotice"
 import { OfflineProjectAccessWatch } from "@/components/OfflineProjectAccessWatch"
 import { OfflineRefusedWritesNotice } from "@/components/OfflineRefusedWritesNotice"
 import { NavHistoryProvider } from "@/context/NavHistoryContext"
@@ -69,6 +70,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { useGlobalAudioShortcuts } from "@/hooks/useGlobalAudioShortcuts"
 import { useSessionRefresh } from "@/hooks/useSessionRefresh"
 import { ProjectWorkspaceRoute } from "@/components/ProjectWorkspaceRoute"
+import { ProjectElevationBoundary } from "@/components/ProjectElevationBoundary"
 import { RedirectToProjectOverview } from "@/components/RedirectToProjectOverview"
 
 // Heavy workspace / admin routes — loaded only when navigated to
@@ -322,6 +324,7 @@ export default function App() {
           <ConflictToast />
           <OfflineLeaderWatchdog />
           <DesktopUpdatePrompt />
+          <NewerOfflineDataNotice />
           <OfflineProjectAccessWatch />
           <OfflineRefusedWritesNotice />
           {/* AQU-293: session-expiry banner — must be inside Router (uses useLocation) */}
@@ -377,7 +380,7 @@ function AppRoutes() {
         <Route path="/oauth/consent" element={<LazyRoute><OAuthConsent /></LazyRoute>} />
         <Route path="/app" element={<AppEntry />} />
         <Route path="/projects" element={<Navigate to={resumeOrgPath()} replace />} />
-        <Route path="/projects/:id" element={<ProjectOverview />} />
+        <Route path="/projects/:id" element={<ProjectElevationBoundary><ProjectOverview /></ProjectElevationBoundary>} />
         <Route path="/shared" element={<SharedProjectsPage />} />
         <Route path="/join/:token" element={<JoinPage />} />
         {/* AQU-626: per-user deep link + PIN — public, eager (fresh-browser
@@ -450,12 +453,12 @@ function AppRoutes() {
         <Route path="/project/:id" element={<RedirectToProjectOverview />} />
         <Route path="/project/:id/editor" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
         <Route path="/project/:id/editor/file/:fileId" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
-        <Route path="/project/:id/settings" element={<LazyRoute><ProjectSettings /></LazyRoute>} />
-        <Route path="/project/:id/settings/:section" element={<LazyRoute><ProjectSettings /></LazyRoute>} />
+        <Route path="/project/:id/settings" element={<ProjectElevationBoundary><LazyRoute><ProjectSettings /></LazyRoute></ProjectElevationBoundary>} />
+        <Route path="/project/:id/settings/:section" element={<ProjectElevationBoundary><LazyRoute><ProjectSettings /></LazyRoute></ProjectElevationBoundary>} />
         {/* Rules now live on Living Memory's "Translation quality" pane. */}
         <Route path="/project/:id/rules" element={<RedirectToProjectMemory section="quality" />} />
         {/* AQU-841 — in-app approvals queue for agent-staged changesets. */}
-        <Route path="/project/:id/approvals" element={<LazyRoute><ProjectApprovals /></LazyRoute>} />
+        <Route path="/project/:id/approvals" element={<ProjectElevationBoundary><LazyRoute><ProjectApprovals /></LazyRoute></ProjectElevationBoundary>} />
         <Route path="/project/:id/agent" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
         <Route path="/project/:id/voice" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
         <Route path="/project/:id/terminology" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
@@ -486,8 +489,8 @@ function AppRoutes() {
         <Routes>
           <Route path="/preferences" element={<PreferencesDialog />} />
           <Route path="/preferences/:section" element={<PreferencesDialog />} />
-          <Route path="/project/:id/settings" element={<LazyRoute><ProjectSettingsDialog /></LazyRoute>} />
-          <Route path="/project/:id/settings/:section" element={<LazyRoute><ProjectSettingsDialog /></LazyRoute>} />
+          <Route path="/project/:id/settings" element={<ProjectElevationBoundary><LazyRoute><ProjectSettingsDialog /></LazyRoute></ProjectElevationBoundary>} />
+          <Route path="/project/:id/settings/:section" element={<ProjectElevationBoundary><LazyRoute><ProjectSettingsDialog /></LazyRoute></ProjectElevationBoundary>} />
         </Routes>
       ) : null}
     </>

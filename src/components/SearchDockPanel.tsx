@@ -31,8 +31,11 @@ import { SegmentTabs } from "@/components/ui/tabs"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { MarkedSnippet } from "@/components/search/MarkedSnippet"
+import { FindOptionToggles } from "@/components/search/FindOptionToggles"
 import { ChatMarkdown } from "@/components/chat/ChatMarkdown"
 import type { WorkspaceSearchResult } from "@/hooks/useWorkspaceSearch"
+import type { FindToggles } from "@/lib/search/workspace-index"
+import { findPatternError } from "../../db/shared/find-pattern"
 import type { ReplaceAllPayload } from "./ParallelPassagesPanel"
 import {
   aquiferSearch,
@@ -52,15 +55,18 @@ export interface SearchDockPanelProps {
   ready: boolean
   results: WorkspaceSearchResult[]
   onReady: () => void
-  onSearch: (query: string, options?: { fileId?: string; side?: "both" | "source" | "target" }) => void
+  onSearch: (query: string, options?: { fileId?: string; side?: "both" | "source" | "target" } & Partial<FindToggles>) => void
   onSearchPassages: (query: string) => void
   onClearResults: () => void
   onSelect: (result: WorkspaceSearchResult, query: string) => void
   isReadOnly: boolean
   onAfterReplace?: () => void
   onReplaceAll?: (payload: ReplaceAllPayload) => void
-  /** Called when user wants to open the full ParallelPassagesPanel dialog */
-  onOpenFullPanel?: () => void
+  /** Called when user wants to open the full ParallelPassagesPanel dialog.
+   *  `mode` is "replace" from the Find & Replace button and "search" from the
+   *  expand icon. `query` is the dock's current term so the dialog can
+   *  continue it. */
+  onOpenFullPanel?: (intent: { mode: "search" | "replace"; query: string; find: FindToggles }) => void
   /** AQU-309: Called when user wants to expand all results into the main area */
   onExpandResults?: (query: string) => void
   /** Bible Aquifer reference mode — when true, a "Bible resources" mode is
@@ -94,6 +100,15 @@ export function SearchDockPanel({
   const [mode, setMode] = useState<SearchDockMode>("search")
   const [query, setQuery] = useState("")
   const [scope, setScope] = useState<"file" | "project">(activeFileId ? "file" : "project")
+  const [matchCase, setMatchCase] = useState(false)
+  const [wholeWord, setWholeWord] = useState(false)
+  const [useRegexp, setUseRegexp] = useState(false)
+  const find: FindToggles = { caseSensitive: matchCase, matchWord: wholeWord, useRegexp }
+  const patternError = findPatternError(query, {
+    matchCase,
+    wholeWord,
+    useRegexp,
+  })
 
   // Update scope when file changes
   useEffect(() => {
@@ -107,19 +122,32 @@ export function SearchDockPanel({
   }, [])
 
   const handleSearch = useCallback(
-    (q: string) => {
+    (q: string, flags: FindToggles) => {
       if (!q.trim()) {
         onClearResults()
         return
       }
-      onSearch(q, scope === "file" && activeFileId ? { fileId: activeFileId } : {})
+      if (findPatternError(q, { matchCase: flags.caseSensitive, wholeWord: flags.matchWord, useRegexp: flags.useRegexp })) {
+        onClearResults()
+        return
+      }
+      onSearch(q, {
+        ...(scope === "file" && activeFileId ? { fileId: activeFileId } : {}),
+        ...(flags.caseSensitive ? { caseSensitive: true } : {}),
+        ...(flags.matchWord ? { matchWord: true } : {}),
+        ...(flags.useRegexp ? { useRegexp: true } : {}),
+      })
     },
-    [onSearch, onClearResults, scope],
+    [onSearch, onClearResults, scope, activeFileId],
   )
+
+  function searchWith(flags: FindToggles) {
+    handleSearch(query, flags)
+  }
 
   function handleQueryChange(q: string) {
     setQuery(q)
-    handleSearch(q)
+    handleSearch(q, find)
   }
 
   const searchPlaceholder =
@@ -205,7 +233,7 @@ export function SearchDockPanel({
               variant="ghost"
               size="icon-xs"
               aria-label={t("search.openFullPanel")}
-              onClick={onOpenFullPanel}
+              onClick={() => onOpenFullPanel({ mode: "search", query, find })}
               className="ms-0.5"
             >
               <BookOpen className="h-3 w-3" />
@@ -237,8 +265,33 @@ export function SearchDockPanel({
             onValueChange={handleQueryChange}
             placeholder={searchPlaceholder}
             aria-label={searchPlaceholder}
+            aria-invalid={patternError ? true : undefined}
             className="text-xs"
+            trailing={
+              <FindOptionToggles
+                matchCase={matchCase}
+                wholeWord={wholeWord}
+                useRegexp={useRegexp}
+                onMatchCaseChange={(next) => {
+                  setMatchCase(next)
+                  searchWith({ ...find, caseSensitive: next })
+                }}
+                onWholeWordChange={(next) => {
+                  setWholeWord(next)
+                  searchWith({ ...find, matchWord: next })
+                }}
+                onUseRegexpChange={(next) => {
+                  setUseRegexp(next)
+                  searchWith({ ...find, useRegexp: next })
+                }}
+              />
+            }
           />
+          {patternError ? (
+            <p className="px-1 pt-1 text-[10px] text-destructive" role="alert">
+              {t("search.find.invalidRegexp")}
+            </p>
+          ) : null}
         </div>
 
         <CommandList className="max-h-none flex-1 overflow-y-auto px-2 py-1">
@@ -281,8 +334,8 @@ export function SearchDockPanel({
               )}
               {results.slice(0, 50).map((r) => (
                 <CommandItem
-                  key={`${r.fileId}:${r.cellId}`}
-                  value={`${r.fileId}:${r.cellId}`}
+                  key={`${r.fileId}:${r.cellId}:${r.original ? "src" : "tgt"}`}
+                  value={`${r.fileId}:${r.cellId}:${r.original ? "src" : "tgt"}`}
                   className="flex flex-col items-start rounded px-1.5 py-1 text-xs"
                   onSelect={() => onSelect(r, query)}
                 >
@@ -290,8 +343,15 @@ export function SearchDockPanel({
                     <span className="text-[10px] text-muted-foreground">{r.context}</span>
                   )}
                   <span className="block w-full truncate">
-                    <MarkedSnippet text={r.snippet || r.original} />
+                    <MarkedSnippet text={r.snippet || r.original || r.translated} />
                   </span>
+                  {r.paired ? (
+                    <span className="block w-full truncate text-[10px] text-muted-foreground">
+                      {r.original ? t("editor.column.target") : t("editor.column.source")}
+                      {": "}
+                      {r.paired}
+                    </span>
+                  ) : null}
                 </CommandItem>
               ))}
               {results.length > 50 && (
@@ -312,7 +372,7 @@ export function SearchDockPanel({
               <Button
                 size="sm"
                 variant="outline"
-                onClick={onOpenFullPanel}
+                onClick={() => onOpenFullPanel?.({ mode: "replace", query, find })}
                 className="h-6 w-full text-[10px]"
               >
                 {t("search.dock.openReplace")}

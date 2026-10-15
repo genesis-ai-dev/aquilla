@@ -14,6 +14,7 @@ import { describe, it, expect, beforeEach } from "vitest"
 import { handleExternalReadRequest } from "../external/read-routes"
 import { mintApiToken } from "../../../db/shared/api-credentials"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
+import { bumpRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 
 const SECRET = "test-secret"
 const CRED_1 = "00000000-0000-0000-0000-000000000001"
@@ -247,11 +248,8 @@ describe("external similarity search (AQU-1232)", () => {
   })
 
   it("throttles a credential that floods the read tier", async () => {
-    await testDb.pg.query(
-      `INSERT INTO auth_rate_limit_events (kind, identifier, success)
-       SELECT 'external_read', $1, 1 FROM generate_series(1, 300)`,
-      [`credential:${CRED_1}`],
-    )
+    // AQU-1843: the read budget belongs to the credential's OWNER now.
+    await bumpRateLimit(testDb.db, "external_read", userRateLimitIdentifier(2), 300)
     const res = await similar(testDb, "cellId=cell-q", token)
     expect(res.status).toBe(429)
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("rate_limited")

@@ -65,6 +65,7 @@ export type AudioOrigin = "attach" | "generate" | "record"
  * - `voice-together` the selection's "Voice together"
  * - `generate-all` the file's "Generate all" voice run
  * - `timeline` a file or link dropped onto the timeline
+ * - `repetition` a repeated row signed off by "Validate all" (AQU-1486)
  * - `api` the Agent API, reported by the sync-worker
  */
 export type TelemetrySurface =
@@ -80,6 +81,7 @@ export type TelemetrySurface =
   | "voice-together"
   | "generate-all"
   | "timeline"
+  | "repetition"
   | "api"
 
 export type TelemetryProps = Record<string, string | number | boolean>

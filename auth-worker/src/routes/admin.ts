@@ -236,9 +236,10 @@ admin.post("/elevation/verify", zValidator("json", elevationVerifySchema), async
 
   // OPS-35: elevations are now one row per (user, session) rather than one per
   // user, so lapsed rows no longer get overwritten by the next grant. Prune
-  // this operator's expired rows here — the same opportunistic-cleanup posture
-  // `pruneOldEvents` takes in utils/rate-limit.ts, and for the same reason
-  // (no scheduled job to hang it off).
+  // this operator's expired rows here, opportunistically: the rows are scoped
+  // to the one operator this request already identified, so the DELETE costs
+  // nothing extra. (The rate-limit tables' own prunes moved to the 5-minute
+  // cron in AQU-1843; this one stays here because it is per-operator.)
   await c.env.AQUILLA_PG.prepare(
     `DELETE FROM admin_elevations WHERE user_id = ? AND elevated_until <= now()`,
   )
@@ -969,6 +970,9 @@ const platformSettingsPatchSchema = z.object({
   aiUserDailyLimit:   z.number().int().nonnegative().optional(),
   aiGlobalDailyLimit: z.number().int().nonnegative().optional(),
   aiBudgetEnforce:    z.boolean().optional(),
+  // AQU-1869. Negative switches the platform spend ceiling off, so the bound is
+  // -1, not nonnegative — and 0 is a legitimate "no paid AI" panic position.
+  aiDailySpendCeilingUsd: z.number().min(-1).optional(),
   abTest: z
     .object({
       enabled: z.boolean(),

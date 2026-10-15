@@ -24,13 +24,16 @@ import {
   Eye,
   EyeOff,
   BookOpenText,
+  CloudOff,
 } from "lucide-react"
 import { FillsTwiceIndicator } from "@/components/ui/fills-twice-indicator"
 import { Spinner } from "@/components/ui/spinner"
+import type { RepetitionGesture } from "@/lib/workflow/repetition-validation"
 import { Button } from "@/components/ui/button"
 import { Badge, badgeVariants } from "@/components/ui/badge"
 import { LaneCombobox } from "@/components/LaneCombobox"
 import { laneOptionLabels, toLaneComboboxOptions } from "@/components/lane-options"
+import { laneLanguageCodeForTag } from "@/lib/lanes/lane-language"
 import { withLaneLabelSuffix } from "@/lib/lanes/lane-label-suffix"
 import { EmptyState } from "@/components/ui/page"
 import type { CellData } from "@/hooks/useCells"
@@ -251,6 +254,8 @@ import { TermLookupPopover } from "./TermLookupPopover"
 import type { Concept, ConceptDraft, TermMatchingSettings } from "@/lib/terminology/types"
 import { conceptsForLaneTag } from "@/lib/terminology/rendering-lane"
 import { findConceptMatches } from "@/lib/terminology/match"
+import { useOnline } from "@/hooks/useOnline"
+import { useConnectivity } from "@/lib/offline/connectivity"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { bidiIsolate } from "@/lib/i18n/format"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
@@ -897,8 +902,10 @@ interface EditorTableProps {
    *  Fired by the explicit validate gesture and (AQU-1484) by the commit
    *  path's auto-validate-on-edit once that edit is SETTLED — the editor has
    *  been left. Never on unvalidate, never from an idle save mid-typing — see
-   *  `handleCellValidated` in ProjectWorkspace for why. */
-  onValidated?: (cellId: string) => void | Promise<void>
+   *  `handleCellValidated` in ProjectWorkspace for why. AQU-1486: `gesture`
+   *  says which: a "click" may ask whether to validate the repetitions too;
+   *  a "typed" edit never opens a dialog. */
+  onValidated?: (cellId: string, gesture: RepetitionGesture) => void | Promise<void>
   /** AQU-1391: cellId → how many cells in this file share its normalized
    *  source. Only repeated cells (count ≥ 2) appear; absent = no badge. */
   repetitionCounts?: ReadonlyMap<string, number>
@@ -3081,7 +3088,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             data-chapter-nav-slot=""
             className="me-auto flex min-w-24 max-w-full flex-1 items-center lg:me-0 lg:flex-none lg:shrink"
           >
-            <div className="min-w-0 max-w-full w-full lg:w-auto">
+            <div className="min-w-0 max-w-full flex-1 lg:flex-none">
               <MilestoneNavigator
                 items={milestoneNavigationItems}
                 activeKey={activeChapterLabel!}
@@ -4004,7 +4011,7 @@ interface MemoizedRowProps {
   /** AQU-1391: fires after a validation lands — the explicit gesture, or
    *  (AQU-1484) a settled auto-validated edit; the workspace auto-propagates
    *  the confirmed text to repeated source segments. */
-  onValidated?: (cellId: string) => void | Promise<void>
+  onValidated?: (cellId: string, gesture: RepetitionGesture) => void | Promise<void>
   /** AQU-1391: cellId -> count of cells in this file sharing its normalized
    *  source. Only repeated cells appear. */
   repetitionCounts?: ReadonlyMap<string, number>
@@ -4453,7 +4460,7 @@ interface EditorRowProps {
   /** AQU-1391: fires after a validation lands — the explicit gesture, or
    *  (AQU-1484) a settled auto-validated edit; the workspace auto-propagates
    *  the confirmed text to repeated source segments. */
-  onValidated?: (cellId: string) => void | Promise<void>
+  onValidated?: (cellId: string, gesture: RepetitionGesture) => void | Promise<void>
   /** AQU-1391: how many cells in this file share THIS cell's normalized
    *  source. Undefined (or < 2) when it isn't a repetition — no badge. */
   repetitionCount?: number
@@ -5337,11 +5344,7 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
       {renderable.map((att, i) =>
         att.type === "video" ? (
           <AppTooltip key={i} content={att.title ?? undefined} disabled={!att.title}>
-            <video
-              src={att.url}
-              controls
-              className="max-h-32 rounded border object-contain"
-            />
+            <AttachmentVideo src={att.url!} />
           </AppTooltip>
         ) : (
           <AppTooltip key={i} content={att.title ?? undefined} disabled={!att.title}>
@@ -5355,6 +5358,36 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
         ),
       )}
     </div>
+  )
+}
+
+/** A source-reference video. Offline, an unreachable URL shows a plain
+ *  "Not available offline" box instead of a broken player. */
+function AttachmentVideo({ src }: { src: string }) {
+  const t = useT()
+  const online = useOnline()
+  const backendReachable = useConnectivity()
+  const [failedSrc, setFailedSrc] = useState<string | null>(null)
+  const offline = !online || backendReachable === false
+  if (failedSrc === src && offline) {
+    return (
+      <div
+        role="status"
+        data-testid="video-offline-unavailable"
+        className="flex h-20 w-36 items-center justify-center gap-1.5 rounded border bg-muted/40 text-xs text-muted-foreground"
+      >
+        <CloudOff className="size-3.5" aria-hidden />
+        {t("audio.error.notAvailableOffline")}
+      </div>
+    )
+  }
+  return (
+    <video
+      src={src}
+      controls
+      onError={() => setFailedSrc(src)}
+      className="max-h-32 rounded border object-contain"
+    />
   )
 }
 
@@ -5871,6 +5904,19 @@ function EditorRow({
     ),
     [targetDirectionMode, targetTextDirection, showCompletionOverlay, completionPreview, visibleTranslatedHtml, visibleTranslated],
   )
+  // AQU-1908: the `lang` the target editor advertises — what the browser's
+  // spell-checker reads to pick a dictionary, and what smart quotes read for
+  // their style. It is the ACTIVE LANE's language code, so a Spanish lane and a
+  // French lane in one project are each checked against their own dictionary.
+  // The project's `targetLanguage` is the freeform label the user typed
+  // ("Spanish", "Grade 7 English") — a name, not a language tag, so the
+  // spell-checker could not resolve it to a dictionary at all. A lane whose
+  // label matches no catalog entry resolves to nothing and the attribute is
+  // omitted, leaving the browser its own default.
+  const targetLanguageCode = useMemo(
+    () => laneLanguageCodeForTag(activeLane, project.lanes, project) ?? undefined,
+    [activeLane, project],
+  )
   const hasTargetFootnoteMarker = (visibleTranslated ?? "").includes("\\f")
   const mayHaveFootnotes = hasSourceFootnoteMarker || hasTargetFootnoteMarker
   const showFootnotesInExpansion = footnoteViewMode === "off" && mayHaveFootnotes
@@ -6140,7 +6186,7 @@ function EditorRow({
   const settleOwedRepetitions = useCallback(() => {
     if (!repetitionOwedRef.current || editorFocusedRef.current) return
     repetitionOwedRef.current = false
-    void Promise.resolve(onValidatedRef.current?.(cell.id)).catch((err) => {
+    void Promise.resolve(onValidatedRef.current?.(cell.id, "typed")).catch((err) => {
       console.warn("[repetition-propagation] failed:", err)
     })
   }, [cell.id])
@@ -6716,7 +6762,7 @@ function EditorRow({
       // AQU-1391: only on the way IN. Un-validating a cell must not push its
       // text anywhere, and the propagation runs after the commit has flushed
       // so it reads this cell's settled head.
-      if (validated) await onValidated?.(cell.id)
+      if (validated) await onValidated?.(cell.id, "click")
       return true
     } catch (err) {
       console.warn(`[${validated ? "validate" : "unvalidate"}] emit failed:`, err)
@@ -8388,7 +8434,7 @@ function EditorRow({
                     onSelectionChange={handleTargetPresenceSelection}
                     textDirection={targetCellDirection}
                     directionMode={targetDirectionMode}
-                    lang={project.targetLanguage || undefined}
+                    lang={targetLanguageCode}
                     smartQuotes={project.smartQuotes}
                     className={cn(
                       "w-full",
@@ -8433,7 +8479,7 @@ function EditorRow({
                     data-target-read-view
                     data-target-locked-by={lockHolderLabel ?? undefined}
                     dir={targetCellDirection}
-                    lang={project.targetLanguage || undefined}
+                    lang={targetLanguageCode}
                     // AQU-1163: a lease-locked cell is a READ-ONLY textbox, not a
                     // disabled control, so it keeps its place in the tab order.
                     // Dropping tabIndex while a peer held the lease removed the

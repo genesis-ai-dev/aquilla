@@ -114,6 +114,62 @@ describe("local dev artifact schema reconciliation", () => {
     expect(await finalizeArtifactBindingSchema(client(), run)).toEqual([])
   })
 
+  it("adds the lane-member unique a long-lived database is missing", async () => {
+    // Pre-0134 shape: lane_id exists, but the only upsert key is still the
+    // tag-keyed unique. Source uploads ON CONFLICT on lane_id and Postgres
+    // rejects that until this key exists.
+    await pg.exec(`
+      CREATE TABLE lanes (
+        project_id TEXT NOT NULL,
+        id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        PRIMARY KEY (project_id, id)
+      );
+      INSERT INTO lanes (project_id, id, role) VALUES ('p1', 'src', 'source');
+      INSERT INTO files (id, project_id) VALUES ('f1', 'p1');
+      INSERT INTO artifacts (id, project_id, credential_id)
+        VALUES ('00000000-0000-4000-8000-000000000010', 'p1', 'cred');
+      CREATE TABLE artifact_bindings (
+        id UUID PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        artifact_id UUID NOT NULL,
+        file_id TEXT NOT NULL,
+        binding_role TEXT NOT NULL,
+        target_lang TEXT NOT NULL DEFAULT '',
+        member_path TEXT NOT NULL DEFAULT '',
+        lane_id TEXT NOT NULL,
+        UNIQUE (artifact_id, file_id, binding_role, target_lang, member_path)
+      );
+    `)
+
+    await prepareArtifactBindingSchema(client(), run)
+    expect(await finalizeArtifactBindingSchema(client(), run)).toEqual(expect.arrayContaining([
+      "added constraint artifact_bindings_lane_member_key",
+    ]))
+
+    const insert = `INSERT INTO artifact_bindings (
+         id, project_id, artifact_id, file_id, binding_role, member_path, lane_id
+       ) VALUES (
+         '00000000-0000-4000-8000-000000000011', 'p1',
+         '00000000-0000-4000-8000-000000000010', 'f1', 'source', '', 'src'
+       )
+       ON CONFLICT (artifact_id, file_id, binding_role, lane_id, member_path)
+       DO UPDATE SET lane_id = EXCLUDED.lane_id`
+    await expect(pg.query(insert)).resolves.toBeDefined()
+    await expect(pg.query(insert.replace(
+      "00000000-0000-4000-8000-000000000011",
+      "00000000-0000-4000-8000-000000000012",
+    ))).resolves.toBeDefined()
+
+    const { rows } = await pg.query<{ id: string }>(
+      "SELECT id::text AS id FROM artifact_bindings",
+    )
+    expect(rows).toEqual([{ id: "00000000-0000-4000-8000-000000000011" }])
+    expect(await finalizeArtifactBindingSchema(client(), run)).not.toContain(
+      "added constraint artifact_bindings_lane_member_key",
+    )
+  })
+
   it("allows R2-backed originals in a long-lived pre-0046 local database", async () => {
     expect(await finalizeSourceBlobSchema(client(), run)).toEqual([
       "made file_source_blobs.raw_source nullable",

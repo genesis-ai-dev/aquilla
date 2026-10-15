@@ -13,12 +13,21 @@
 //   POST /:projectId/contextual/segmentation/generate     AI re-segmentation (PROJECT_LEAD)
 //   POST /:projectId/contextual/drafts/:draftId/review    {action: applied|rejected}
 //
-// v1 execution (documented deviation): no Workflows binding — POST /runs kicks
-// selfTickLoop via executionCtx.waitUntil; the loop drives lib/contextual/tick
-// runOneTick until the run pauses/parks/fails or a safety cap, on its OWN
-// makePostgres connection (the request-scoped AQUILLA_PG shim closes when the
-// Response returns — same gotcha as routes/agent.ts). All run state lives in
-// Postgres, so a dropped loop resumes exactly where it stopped.
+// Execution (no Workflows binding): POST /runs hands the run to its per-run
+// Durable Object (src/contextual-run-do.ts, `CONTEXTUAL_RUN_DRIVER`), whose
+// alarm drives lib/contextual/tick runOneTick in bounded batches of waves and
+// re-arms itself until the run pauses/parks/fails. Where the binding is absent
+// — the vitest route suites, an environment deployed before the DO migration —
+// `kickLoop` falls back to driving selfTickLoop inside the request's
+// executionCtx.waitUntil, which is what this route did before AQU-1845 and
+// which the 5-minute cron sweep has always had to rescue.
+//
+// Either way the driver runs on its OWN makePostgres connection (the
+// request-scoped AQUILLA_PG shim closes when the Response returns — same
+// gotcha as routes/agent.ts). All run state lives in Postgres, so a dropped
+// driver resumes exactly where it stopped; AQU-1845's per-call checkpoint
+// (lib/contextual/checkpoint.ts) means it does not re-pay for the model calls
+// the dead attempt had already finished.
 
 import { Hono, type Context } from "hono"
 import { zValidator } from "@hono/zod-validator"
@@ -29,6 +38,7 @@ import { ROLE, type Env } from "../types"
 import { errorJson, requireAutopilotReleased, requireRole } from "./_contextual-helpers"
 import { isAutopilotReleased } from "../lib/contextual/release-gate"
 import { runAiGuard } from "../lib/ai-budget"
+import { AI_SPEND_CEILING_ERROR, checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
 import { getPlatformSettingsCached } from "../lib/platform-settings"
 import { creditGuard } from "../lib/credits"
 import { wordCapBody, wordGuard } from "../lib/billing/words"
@@ -123,6 +133,8 @@ import { decide } from "../lib/jev/decide"
 import { makeBibleTickDeps } from "../lib/contextual/bible-deps"
 import { reactCheckProject, type StartReactionRun, type WakeReactionRun } from "../lib/react-loop"
 import type { LlmCall } from "../lib/contextual/types"
+import { checkpointedLlm, discardCheckpoints } from "../lib/contextual/checkpoint"
+import { kickRunDriver } from "../lib/contextual/run-driver"
 
 const contextual = new Hono<AuthHonoEnv>()
 
@@ -433,11 +445,30 @@ async function contextualUsageAdmit(
   }
 }
 
-async function selfTickLoop(
+/** How a driver invocation bounds itself, and what it does when that bound is
+ *  reached with spans still queued. The defaults reproduce the waitUntil
+ *  driver exactly: 50 waves, then park. The DO driver (contextual-run-do.ts)
+ *  passes a much smaller budget and re-arms instead of parking, which is what
+ *  lets a run outlive the request that started it (AQU-1845). */
+export interface ContextualDriverOptions {
+  /** Waves this invocation may drive. Default MAX_WAVES_PER_LOOP. */
+  maxWaves?: number
+  /**
+   * Called instead of parking when the wave budget runs out while the run
+   * still has queued spans. Return true to leave the run `running` because
+   * another invocation is now scheduled; return false (or omit the hook) to
+   * fall back to parking, which is the only safe end state for a run with no
+   * driver — `resumeRun` refuses a `running` run, so nothing could restart it.
+   */
+  onWaveBudgetExhausted?: () => Promise<boolean>
+}
+
+export async function selfTickLoop(
   env: Env,
   projectId: string,
   runId: string,
   concurrency?: number,
+  options?: ContextualDriverOptions,
 ): Promise<void> {
   const shim = env.PG_CONNECTION_STRING ? makePostgres(env.PG_CONNECTION_STRING) : null
   const db: AquillaDb = (shim as unknown as AquillaDb) ?? env.AQUILLA_PG
@@ -493,7 +524,22 @@ async function selfTickLoop(
       org: resolveMaxOrgConcurrency(env.CONTEXTUAL_MAX_ORG_CONCURRENCY),
       global: resolveMaxGlobalConcurrency(env.CONTEXTUAL_MAX_GLOBAL_CONCURRENCY),
     }
-    for (let wave = 0; wave < MAX_WAVES_PER_LOOP; wave++) {
+    const maxWaves = Math.max(1, Math.floor(options?.maxWaves ?? MAX_WAVES_PER_LOOP))
+    for (let wave = 0; wave < maxWaves; wave++) {
+      // Platform daily spend ceiling (AQU-1869), re-checked at every wave
+      // edge. Checking only at start would let a run already in flight keep
+      // spending for the rest of the day after the floor trips, and one wave
+      // is several model calls. Park rather than fail: the work is still
+      // queued, and Continue (or the sweeper) resumes it once the ceiling
+      // resets at the next UTC day or an operator raises it.
+      const spendCeiling = await checkAiSpendCeiling(db, env, "autopilot-tick")
+      if (!spendCeiling.ok) {
+        const paused = await parkRun(db, runId, "awaiting_input")
+        if (paused.status === "ok") {
+          await publishRunStateOutsideTick(env, db, projectId, paused.run)
+        }
+        return
+      }
       const weight = Math.max(1, Math.min(
         capacityLimits.project,
         concurrency ?? MAX_WAVE_CONCURRENCY,
@@ -510,9 +556,13 @@ async function selfTickLoop(
         if (!lease) {
           return settleRunWithoutProjectLease(db, runId, notify)
         }
-        const guarded = leaseAwareLlm(db, lease, llm)
+        // AQU-1845: one checkpoint per model call, scoped to THIS attempt of
+        // THIS wave. A driver killed mid-wave leaves its finished calls behind
+        // for the replay to read back instead of re-paying for them.
+        const checkpoint = checkpointedLlm(db, { runId, projectId }, llm)
+        const guarded = leaseAwareLlm(db, lease, checkpoint.llm)
         try {
-          return await runOneTick({
+          const ticked = await runOneTick({
             db,
             runId,
             llm: guarded.llm,
@@ -521,6 +571,19 @@ async function selfTickLoop(
             triage: (input) => decide(env, { purpose: "triage", projectId, ...input }),
             bible,
           })
+          if (checkpoint.reused > 0) {
+            console.log(
+              `[contextual] run ${runId} reused ${checkpoint.reused} checkpointed model call(s) on replay`,
+            )
+          }
+          // The wave is over and runOneTick advanced the cursor past it in one
+          // guarded write, so nothing here can replay: drop the checkpoints
+          // before the next wave writes its own. A throw above deliberately
+          // skips this — those rows are precisely what the retry needs. A span
+          // that was re-enqueued (blocked) therefore starts cold next time,
+          // which is right: "blocked" means its input moved.
+          await discardCheckpoints(db, runId)
+          return ticked
         } finally {
           await guarded.stop()
           try {
@@ -539,6 +602,19 @@ async function selfTickLoop(
       // shorter retry interval, so a different file/isolate gets a chance to
       // acquire before this holder begins its next wave.
       await yieldLeaseTurn()
+    }
+    // Wave budget spent with spans still queued. A driver that bounds itself
+    // per invocation (the DO alarm) re-arms here and keeps the run `running`,
+    // because it genuinely still has a driver.
+    if (options?.onWaveBudgetExhausted) {
+      let rearmed = false
+      try {
+        rearmed = await options.onWaveBudgetExhausted()
+      } catch (err) {
+        // A failed re-arm must not leave the run 'running' with no driver.
+        console.warn(`[contextual] driver re-arm failed for run ${runId}:`, err)
+      }
+      if (rearmed) return
     }
     // Cap reached with spans still queued. Park (never leave it 'running' with
     // no driver) so resume, steering, or the sweeper can pick it back up.
@@ -567,6 +643,12 @@ async function selfTickLoop(
     // Drain before the connection closes — a return/throw above skips the
     // per-wave flush, and those rows are the tail of the run.
     await meter.flush()
+    // Checkpoints only exist to serve a replay of the wave in flight. Once
+    // this driver is leaving, the only replay that could use them is one this
+    // invocation already served, so drop them rather than leave the retention
+    // sweep to it. A crash that skips this `finally` entirely is the case the
+    // sweep covers.
+    await discardCheckpoints(db, runId)
     if (shim) {
       try {
         await shim.close()
@@ -577,8 +659,20 @@ async function selfTickLoop(
   }
 }
 
-/** Kick the loop in the background. Hono throws on `c.executionCtx` when there
- *  is none (vitest) — fall back to a floating promise, tracked in _test. */
+/**
+ * Hand a run to its Durable Object driver (AQU-1845), falling back to the
+ * in-request `waitUntil` loop when `CONTEXTUAL_RUN_DRIVER` is not bound.
+ *
+ * The DO is the real driver: it owns its own invocation budget and re-arms
+ * itself, so the run finishes whether or not the browser tab that started it
+ * is still open. The fallback keeps the route working wherever the binding is
+ * absent — the vitest route suites and any environment deployed before the
+ * migration lands — with exactly the behaviour it had before: waves until the
+ * request's `waitUntil` runs out, then the cron re-adopts.
+ *
+ * Either way the work this schedules is exposed on `_test.lastLoop` for tests
+ * to await; production code never reads it.
+ */
 export function kickLoop(
   c: Context<AuthHonoEnv>,
   projectId: string,
@@ -590,18 +684,34 @@ export function kickLoop(
   // ceiling is narrower than its normal six-span maximum.
   const boundedConcurrency = concurrency
     ?? (projectConcurrency < MAX_WAVE_CONCURRENCY ? projectConcurrency : undefined)
+  const kicked = kickRunDriver(c.env, projectId, runId, boundedConcurrency)
+  if (kicked) {
+    _test.lastLoop = kicked
+    background(c, kicked)
+    return
+  }
   const loop = selfTickLoop(c.env, projectId, runId, boundedConcurrency)
   _test.lastLoop = loop
+  background(c, loop)
+}
+
+/** `c.executionCtx` throws when there is none (vitest) — fall back to a
+ *  floating promise, which `_test.lastLoop` has already captured. */
+function background(c: Context<AuthHonoEnv>, work: Promise<void>): void {
   try {
-    c.executionCtx.waitUntil(loop)
+    c.executionCtx.waitUntil(work)
   } catch {
-    void loop.catch(() => {})
+    void work.catch(() => {})
   }
 }
 
-/** Start one loop per selected file. Each wave independently acquires the
+/** Start one driver per selected file. Each wave independently acquires the
  * durable weighted project lease; the aggregate promise also makes the real
- * route test wait for every producer, not whichever loop was kicked last. */
+ * route test wait for every producer, not whichever loop was kicked last.
+ *
+ * With `CONTEXTUAL_RUN_DRIVER` bound these are N independent Durable Objects,
+ * so a 24-file project no longer depends on one request's `waitUntil` budget
+ * to reach its last file (AQU-1845). */
 function kickProjectLoops(
   c: Context<AuthHonoEnv>,
   projectId: string,
@@ -610,38 +720,46 @@ function kickProjectLoops(
 ): void {
   if (runIds.length === 0) return
   const loops = runIds.map((runId) =>
-    selfTickLoop(c.env, projectId, runId, perFileConcurrency),
+    kickRunDriver(c.env, projectId, runId, perFileConcurrency)
+      ?? selfTickLoop(c.env, projectId, runId, perFileConcurrency),
   )
   const settled = Promise.allSettled(loops).then(() => {})
   _test.lastLoop = settled
-  try {
-    c.executionCtx.waitUntil(settled)
-  } catch {
-    void settled.catch(() => {})
-  }
+  background(c, settled)
 }
 
 /**
  * Restart runs whose driver died, and wake runs that parked with spans left.
  *
  * Called from the auth-worker cron (every 5 minutes). Without it, a run whose
- * Worker request ended mid-flight stays 'running' with nothing driving it —
- * unresumable, because `resumeRun` only accepts paused|parked — and the pill
- * spins until a human terminates it. Best-effort by contract: a sweep that
- * throws must never fail the cron's other work.
+ * driver died stays 'running' with nothing driving it — unresumable, because
+ * `resumeRun` only accepts paused|parked — and the pill spins until a human
+ * terminates it. Best-effort by contract: a sweep that throws must never fail
+ * the cron's other work.
+ *
+ * Since AQU-1845 this is the safety net it was always described as rather than
+ * the main driver: a healthy run is driven by its own Durable Object between
+ * waves, so it never waits five minutes for this sweep, and the `limit` here
+ * is no longer a platform-wide throughput ceiling. The sweep hands each
+ * adopted run to its DO where the binding exists, which is also why its
+ * `done` handle now usually settles as soon as the handshakes do.
  */
 export interface SweepResult {
   /** Runs this sweep adopted. */
   adopted: number
   /**
-   * Settles when every adopted run's loop finishes.
+   * Settles when every adopted run has a driver that no longer needs this
+   * caller's connection.
    *
    * The caller MUST keep its Postgres connection alive until this resolves.
-   * `selfTickLoop` only opens its own connection when `PG_CONNECTION_STRING`
-   * is configured; otherwise it borrows `env.AQUILLA_PG`, and the cron closes
-   * that in its `finally`. Without this handle the sweep would adopt runs and
-   * then yank the connection out from under them — worse than not sweeping,
-   * because the adoption already refreshed their heartbeats.
+   * Where the run went to its Durable Object (AQU-1845) that is just the
+   * handshake, and the object opens its own connection. Where it fell back to
+   * the in-request loop, `selfTickLoop` only opens its own connection when
+   * `PG_CONNECTION_STRING` is configured; otherwise it borrows
+   * `env.AQUILLA_PG`, and the cron closes that in its `finally`. Without this
+   * handle the sweep would adopt runs and then yank the connection out from
+   * under them — worse than not sweeping, because the adoption already
+   * refreshed their heartbeats.
    */
   done: Promise<void>
 }
@@ -695,7 +813,10 @@ export async function sweepStrandedContextualRuns(env: Env, limit = 10): Promise
       Math.max(1, Math.floor(projectConcurrency / runs.length)),
     )
     return Promise.allSettled(
-      runs.map((run) => selfTickLoop(env, projectId, run.id, perFile)),
+      runs.map((run) =>
+        kickRunDriver(env, projectId, run.id, perFile)
+          ?? selfTickLoop(env, projectId, run.id, perFile),
+      ),
     ).then(() => {})
   })
   const done = Promise.allSettled(projectLoops).then(() => {})
@@ -747,6 +868,10 @@ export const startReactionRun: StartReactionRun = async (env, input) => {
   if (!credit.ok) return { status: "skipped", reason: `credit_cap_exceeded (${credit.reason})` }
   const words = await wordGuard(env.AQUILLA_PG, orgId)
   if (!words.ok) return { status: "skipped", reason: `word_cap_exceeded (${words.reason})` }
+  // Platform daily spend ceiling (AQU-1869). An autonomous reaction has no
+  // user to tell, so it simply declines to start and says why.
+  const spendCeiling = await checkAiSpendCeiling(env.AQUILLA_PG, env, "autopilot-reaction")
+  if (!spendCeiling.ok) return { status: "skipped", reason: AI_SPEND_CEILING_ERROR }
 
   const created = await createRun(env.AQUILLA_PG, {
     projectId: input.projectId,
@@ -784,7 +909,8 @@ export const startReactionRun: StartReactionRun = async (env, input) => {
   return {
     status: "ok",
     runId: created.run.id,
-    done: selfTickLoop(env, input.projectId, created.run.id),
+    done: kickRunDriver(env, input.projectId, created.run.id)
+      ?? selfTickLoop(env, input.projectId, created.run.id),
   }
 }
 
@@ -808,6 +934,10 @@ export const wakeReactionRun: WakeReactionRun = async (env, input) => {
   if (!credit.ok) return { status: "skipped", reason: `credit_cap_exceeded (${credit.reason})` }
   const words = await wordGuard(env.AQUILLA_PG, orgId)
   if (!words.ok) return { status: "skipped", reason: `word_cap_exceeded (${words.reason})` }
+  // Platform daily spend ceiling (AQU-1869) — waking a parked run resumes
+  // paid work, so it is gated exactly like starting one.
+  const spendCeiling = await checkAiSpendCeiling(env.AQUILLA_PG, env, "autopilot-wake")
+  if (!spendCeiling.ok) return { status: "skipped", reason: AI_SPEND_CEILING_ERROR }
 
   // An EXHAUSTED parked run (every span settled) has nothing left to drive —
   // waking it would consume the steering and re-park untouched. Retire it and
@@ -877,7 +1007,8 @@ export const wakeReactionRun: WakeReactionRun = async (env, input) => {
   return {
     status: "ok",
     runId: input.runId,
-    done: selfTickLoop(env, input.projectId, input.runId),
+    done: kickRunDriver(env, input.projectId, input.runId)
+      ?? selfTickLoop(env, input.projectId, input.runId),
   }
 }
 
@@ -987,6 +1118,11 @@ contextual.post(
     const models = resolveContextualModels(c.env, settings)
     const guard = await runAiGuard(models.mid, user.id, c.env.AQUILLA_PG, c.env)
     if (!guard.ok) return c.json(guard.body, guard.status)
+
+    // Platform daily spend ceiling (AQU-1869). Autopilot is the heaviest paid
+    // surface per start, so it is refused before a run row exists.
+    const spendCeiling = await checkAiSpendCeiling(c.env.AQUILLA_PG, c.env, "autopilot-start")
+    if (!spendCeiling.ok) return c.json(spendCeiling.body, spendCeiling.status)
 
     let orgId = 0
     try {
@@ -2162,6 +2298,10 @@ contextual.post(
     // will actually call, not the one the drafting pipeline uses.
     const guard = await runAiGuard(models.fast, user.id, db, c.env)
     if (!guard.ok) return c.json(guard.body, guard.status)
+
+    // Platform daily spend ceiling (AQU-1869).
+    const spendCeiling = await checkAiSpendCeiling(db, c.env, "autopilot-note")
+    if (!spendCeiling.ok) return c.json(spendCeiling.body, spendCeiling.status)
 
     let orgId = 0
     try {

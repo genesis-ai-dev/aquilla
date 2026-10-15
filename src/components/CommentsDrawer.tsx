@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord, CommentThread as CommentThreadType } from "@/lib/parsers/types"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
+import type { CommentRefusal } from "@/lib/sync/comment-refusals"
+import { forbiddenReasonCopy } from "@/lib/sync/forbidden-copy"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { canMutateComment, commentFloorsFrom } from "@/lib/sync/role-policy"
 import { denialMessage } from "@/lib/permissions/denial"
@@ -60,6 +62,14 @@ interface CommentsDrawerProps {
    * the reply; opening the cell from its comment badge does not.
    */
   focusCommentId?: string | null
+  /**
+   * AQU-1957: `comment.*` events the outbox gave up on (`useComments().refusals`).
+   * Their optimistic comments are already gone from `liveComments`, so without
+   * this the text would simply vanish from the thread with no explanation —
+   * which is the half of the report that said submitting "did nothing". Say
+   * which refusal killed it, in the panel where the person was typing.
+   */
+  submitRefusals?: readonly CommentRefusal[]
 }
 
 /** Convert flat CommentRecord[] (event-log model) → CommentThread[] (legacy cell model) */
@@ -100,7 +110,7 @@ function recordsToThreads(records: CommentRecord[]): CommentThreadType[] {
   })
 }
 
-export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThread, onReply, onResolve, onReopen, onEdit, onDelete, currentUsername, isError = false, isLoadingRest = false, onRetry, mentionRoster = [], mentionRestricted = false, focusCommentId = null }: CommentsDrawerProps) {
+export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThread, onReply, onResolve, onReopen, onEdit, onDelete, currentUsername, isError = false, isLoadingRest = false, onRetry, mentionRoster = [], mentionRestricted = false, focusCommentId = null, submitRefusals = [] }: CommentsDrawerProps) {
   const t = useT()
   const [newThreadText, setNewThreadText] = useState("")
   const permissions = useProjectPermissions(project)
@@ -131,6 +141,24 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
   const commentDenialReason = !canComment
     ? denialMessage(t, floors.createMinRole, roleLevel)
     : null
+
+  // AQU-1957: one line for the refused comments, naming the dominant reason.
+  // `forbiddenReasonCopy` turns the server's reason into a past-tense clause
+  // (the refusal may predate a settings change), and falls back to the raw
+  // reason so an unmapped server message is still shown rather than swallowed.
+  const refusalNotice = ((): string | null => {
+    if (submitRefusals.length === 0) return null
+    const counts = new Map<string, number>()
+    for (const refusal of submitRefusals) {
+      const copy = forbiddenReasonCopy(refusal.reason ?? "forbidden")
+      counts.set(copy, (counts.get(copy) ?? 0) + 1)
+    }
+    const [dominant] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]
+    return t("comments.drawer.submitRefused", {
+      count: submitRefusals.length,
+      reason: dominant,
+    })
+  })()
 
   // AQU-1000: resolve authority is per THREAD, not per user. The server
   // re-checks the thread's author and 403s a foreign resolve below the foreign
@@ -273,6 +301,21 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
             )
           })
         )}
+
+      {/* AQU-1957: a comment the server refused is gone from the thread above —
+          say so here, next to the field it was typed in, rather than letting it
+          disappear silently. Reports the dominant reason, like the workspace's
+          forbidden banner, and clears when that banner is dismissed. */}
+      {refusalNotice ? (
+        <p
+          className="flex items-start gap-1.5 text-xs text-destructive"
+          data-testid="comments-drawer-submit-refused"
+          role="status"
+        >
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>{refusalNotice}</span>
+        </p>
+      ) : null}
 
       {canComment ? (
         <div className="relative">

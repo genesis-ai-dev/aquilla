@@ -149,6 +149,7 @@ export function formatPercent(
 // ---------------------------------------------------------------------------
 
 const BYTES_PER_MB = 1024 * 1024
+const BYTES_PER_GB = 1024 * BYTES_PER_MB
 
 /**
  * Format a byte count as a one-decimal megabyte string, e.g. `"40.0 MB"`.
@@ -164,6 +165,23 @@ const BYTES_PER_MB = 1024 * 1024
 export function formatMB(bytes: number, locale: string = DEFAULT_LOCALE): string {
   const mb = Math.max(0, bytes) / BYTES_PER_MB
   return `${formatNumber(mb, locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} MB`
+}
+
+/**
+ * Format a byte *ceiling* the way a limit message should state it: whole
+ * gigabytes from 1 GB up (`"2 GB"`), one-decimal megabytes below that
+ * (`"95.0 MB"`). A cap announced as `"2,048.0 MB"` reads like a bug, which is
+ * what `formatMB` alone would produce for the media import ceiling (AQU-1975).
+ *
+ * Same unit-symbol rule as `formatMB`: `MB`/`GB` stay untranslated, the number
+ * in front of them goes through `Intl.NumberFormat`.
+ */
+export function formatByteLimit(bytes: number, locale: string = DEFAULT_LOCALE): string {
+  const safe = Math.max(0, bytes)
+  if (safe < BYTES_PER_GB) return formatMB(safe, locale)
+  const gb = safe / BYTES_PER_GB
+  const digits = Number.isInteger(gb) ? 0 : 1
+  return `${formatNumber(gb, locale, { minimumFractionDigits: digits, maximumFractionDigits: digits })} GB`
 }
 
 /**

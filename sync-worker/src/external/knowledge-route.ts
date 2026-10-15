@@ -33,7 +33,7 @@ import {
   MAX_KB_ORIGINAL_BYTES,
   kbExtension,
 } from '../../../db/shared/knowledge'
-import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
+import { enforceRateLimit, userRateLimitIdentifier } from '../../../db/shared/rate-limit'
 
 const ROUTE_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/knowledge$/
 
@@ -50,21 +50,24 @@ function safeDecode(value: string): string {
 
 /** Mirrors the artifact-upload cap: comparable bytes moved per call, and a
  *  legitimate rollout uploads a handful of reference documents, not hundreds. */
-const KNOWLEDGE_UPLOAD_MAX_PER_CREDENTIAL = 120
+const KNOWLEDGE_UPLOAD_MAX_PER_USER = 120
 /** Cheap single-query read, so the looser search/metadata cap applies. */
-const KNOWLEDGE_LIST_MAX_PER_CREDENTIAL = 300
+const KNOWLEDGE_LIST_MAX_PER_USER = 300
 
+/** AQU-1843: atomic, keyed on the credential's owner rather than the
+ *  credential. `failMode` is per call site: the upload moves bytes and bridges
+ *  them to auth-worker for extraction, so it fails closed; the list read fails
+ *  open like every other cheap read. */
 async function checkRateLimit(
   db: AquillaDb,
   kind: string,
-  credentialId: string,
+  userId: string,
   max: number,
   message: string,
+  failMode: 'open' | 'closed',
 ): Promise<Response | null> {
-  const identifier = `credential:${credentialId}`
-  const recent = await countRecentRateLimitEvents(db, kind, identifier)
-  if (recent >= max) return errorResponse('rate_limited', message)
-  await recordRateLimitEvent(db, kind, identifier)
+  const decision = await enforceRateLimit(db, { kind, identifier: userRateLimitIdentifier(userId), limit: max, failMode })
+  if (!decision.allowed) return errorResponse('rate_limited', message)
   return null
 }
 
@@ -83,9 +86,10 @@ async function handleUpload(
   const limited = await checkRateLimit(
     db,
     'external_knowledge_upload',
-    authed.cred.credentialId,
-    KNOWLEDGE_UPLOAD_MAX_PER_CREDENTIAL,
+    authed.cred.userId,
+    KNOWLEDGE_UPLOAD_MAX_PER_USER,
     'knowledge upload rate limit exceeded, slow down',
+    'closed',
   )
   if (limited) return limited
 
@@ -151,9 +155,10 @@ async function handleList(
   const limited = await checkRateLimit(
     db,
     'external_knowledge_list',
-    authed.cred.credentialId,
-    KNOWLEDGE_LIST_MAX_PER_CREDENTIAL,
+    authed.cred.userId,
+    KNOWLEDGE_LIST_MAX_PER_USER,
     'knowledge read rate limit exceeded, slow down',
+    'open',
   )
   if (limited) return limited
 

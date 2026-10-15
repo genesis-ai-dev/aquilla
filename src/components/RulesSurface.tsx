@@ -55,6 +55,10 @@ interface Props {
   updateRule: UseRulesReturn["updateRule"]
   deleteRule: UseRulesReturn["deleteRule"]
   setBuiltinOverride: UseRulesReturn["setBuiltinOverride"]
+  /** The check override maps as useRules holds them, optimistic overlay
+   *  included (PR #1438), so a built-in toggle moves at once on this page.
+   *  Absent, the viewed lane resolves from the record itself. */
+  checkOverrides?: UseRulesReturn["checkOverrides"]
   infractions: Map<string, import("@/lib/parsers/types").RuleInfraction[]>
   cells: CellData[]
   /** The corpus behind `cells` is still loading; mining it now would see nothing. */
@@ -90,6 +94,7 @@ export function RulesSurface({
   updateRule,
   deleteRule,
   setBuiltinOverride,
+  checkOverrides,
   infractions,
   cells,
   cellsLoading,
@@ -167,7 +172,7 @@ export function RulesSurface({
   const lanePunctuationResolved = lanePunctuation(project, viewLane)
   const laneBuiltinRules = withBuiltinOverrides(
     builtinRules,
-    laneCheckOverrides(project, viewLane),
+    laneCheckOverrides(checkOverrides ?? project, viewLane),
     lanePunctuationResolved.conventions,
   )
   const punctuationOrigin = lanePunctuationResolved.origin

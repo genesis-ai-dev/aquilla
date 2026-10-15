@@ -4,7 +4,12 @@
 # pr:      attacks the PR branch's own full-stack preview once it serves the
 #          head commit, then updates one sticky PR comment. Files no tickets:
 #          a PR's findings belong to its author.
-# nightly: attacks the deployed dev build and files Linear Triage tickets.
+# nightly: attacks the deployed dev build at 09:00 UTC and files Linear
+#          Triage tickets. It does not affect the cut or the deploy.
+#
+# No job attacks a release preview or production: a release preview writes
+# to the shared dev database, and a preview sync worker cannot call a
+# preview auth worker.
 #
 # Repository secrets: ADVERSARIAL_USER_1..3 (username:password on dev
 # storage), TYPESAFE_API_KEY, TEXT_MODEL_API_KEY. LINEAR_API_KEY lives only

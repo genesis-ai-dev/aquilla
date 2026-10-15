@@ -31,7 +31,8 @@ import {
   synthesizeInworldSpeech,
   type InworldTtsConfig,
 } from "./inworld-tts"
-import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../db/shared/rate-limit"
+import { enforceRateLimit, userRateLimitIdentifier } from "../../db/shared/rate-limit"
+import { checkAiSpendCeiling } from "../../db/shared/ai-spend-ceiling"
 
 // [Pen test] API security & data exposure (2026-09-03): runTtsGuard's daily
 // seconds cap is log-only unless TTS_BUDGET_ENFORCE is set, which it isn't in
@@ -58,12 +59,20 @@ async function guardVoiceMutation(
   }
   const db = env.AQUILLA_PG
   if (!db) return new Response("database not configured", { status: 500 })
-  const identifier = `user:${claims.userId}`
-  const recent = await countRecentRateLimitEvents(db, bucket, identifier)
-  if (recent >= TTS_VOICE_MUTATION_MAX_PER_USER_PER_WINDOW) {
-    return Response.json({ error: "rate_limited", message: "Too many requests, slow down." }, { status: 429 })
+  // AQU-1843: atomic, and FAIL CLOSED — these call the paid Inworld API, so a
+  // limiter outage must not uncap them.
+  const limit = await enforceRateLimit(db, {
+    kind: bucket,
+    identifier: userRateLimitIdentifier(claims.userId),
+    limit: TTS_VOICE_MUTATION_MAX_PER_USER_PER_WINDOW,
+    failMode: "closed",
+  })
+  if (!limit.allowed) {
+    return Response.json(
+      { error: "rate_limited", message: "Too many requests, slow down." },
+      { status: 429, headers: { "Retry-After": String(limit.retryAfterSeconds) } },
+    )
   }
-  await recordRateLimitEvent(db, bucket, identifier)
   return null
 }
 
@@ -86,6 +95,10 @@ export interface TtsEnv {
   TTS_USER_DAILY_SECONDS_LIMIT?: string
   /** "true" → enforce the cap with 429; anything else → log-only. */
   TTS_BUDGET_ENFORCE?: string
+  /** Platform-wide daily AI spend ceiling in USD (AQU-1869). */
+  AI_DAILY_SPEND_CEILING_USD?: string
+  /** Deployment profile; "test" bypasses the spend-ceiling read cache. */
+  ENVIRONMENT?: string
   /** Postgres (Neon) handle — required for metering. */
   AQUILLA_PG?: AquillaDb
   /**
@@ -231,12 +244,21 @@ export async function handleTtsRequest(
 
   // Volumetric floor: unlike runTtsGuard below, this actually blocks (see
   // comment at TTS_MAX_PER_USER_PER_WINDOW).
-  const rateLimitIdentifier = `user:${userId}`
-  const recentTtsCalls = await countRecentRateLimitEvents(db, "tts_synthesize", rateLimitIdentifier)
-  if (recentTtsCalls >= TTS_MAX_PER_USER_PER_WINDOW) {
-    return Response.json({ error: "rate_limited", message: "Too many TTS requests, slow down." }, { status: 429 })
+  // AQU-1843: atomic, and FAIL CLOSED — hosted synthesis spends on the shared
+  // Inworld endpoint, and runTtsGuard below is log-only in every deployed
+  // environment, so this window is the only thing actually blocking a flood.
+  const ttsLimit = await enforceRateLimit(db, {
+    kind: "tts_synthesize",
+    identifier: userRateLimitIdentifier(userId),
+    limit: TTS_MAX_PER_USER_PER_WINDOW,
+    failMode: "closed",
+  })
+  if (!ttsLimit.allowed) {
+    return Response.json(
+      { error: "rate_limited", message: "Too many TTS requests, slow down." },
+      { status: 429, headers: { "Retry-After": String(ttsLimit.retryAfterSeconds) } },
+    )
   }
-  await recordRateLimitEvent(db, "tts_synthesize", rateLimitIdentifier)
 
   const projectRow = await db
     .prepare(`SELECT org_id FROM projects WHERE id = ?`)
@@ -249,6 +271,16 @@ export async function handleTtsRequest(
   const guard = await runTtsGuard(db, userId, env)
   if (!guard.ok) {
     return Response.json(guard.body, { status: guard.status })
+  }
+
+  // Platform daily spend ceiling (AQU-1869) — unlike runTtsGuard above this
+  // is never log-only, and it counts dollars across every paid surface rather
+  // than this user's audio seconds, so it holds even for a first-time caller.
+  // Checked before the org credit guard below, as in auth-worker's chat
+  // route: it protects the shared Inworld key, not one org's allowance.
+  const spendCeiling = await checkAiSpendCeiling(db, env, "tts")
+  if (!spendCeiling.ok) {
+    return Response.json(spendCeiling.body, { status: spendCeiling.status })
   }
 
   // Pre-check the ORG's remaining credit (AQU-1872). The per-user window above

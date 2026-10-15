@@ -42,6 +42,38 @@ export interface DcsClientOptions {
 
 export const MAX_DCS_RAW_BYTES = 20 * 1024 * 1024
 
+/**
+ * `fetchRaw` could not find the member at that ref (HTTP 404).
+ *
+ * Separated from every other fetch failure because an absent member is NORMAL
+ * input, not an error: `compareRefs` returns the union of the filenames touched
+ * by every commit in the range (the Gitea per-commit quirk documented in
+ * delta.ts), so a path that was renamed or deleted part-way through the range
+ * appears in the changed list and does not exist at the new ref. Measured on
+ * WycliffeAssociates/en_udb v19-01...v19-10: 84 changed paths, 73 present at
+ * v19-10, 11 absent. Callers that walk a changed list skip these; callers that
+ * walk a tree can still treat one as fatal, because a tree lists what is there.
+ */
+export class DcsRawNotFoundError extends Error {
+  /** The repo-relative path that was absent. */
+  readonly path: string
+  readonly status = 404
+  constructor(url: string, path: string) {
+    super(`DCS raw fetch failed (HTTP 404) for ${url}`)
+    this.name = "DcsRawNotFoundError"
+    this.path = path
+  }
+}
+
+/** True for a "member absent at this ref" failure from any DcsClient. */
+export function isDcsRawNotFound(error: unknown): boolean {
+  if (error instanceof DcsRawNotFoundError) return true
+  // An injected client (tests, alternative transports) may still throw the
+  // plain Error that fetchRaw raised before this type existed. Match the one
+  // message fetchRaw itself produces rather than any 404-shaped string.
+  return error instanceof Error && error.message.includes("DCS raw fetch failed (HTTP 404)")
+}
+
 /** Params accepted by /catalog/search. All optional; passed through verbatim
  *  as query-string values. */
 export interface CatalogSearchParams {
@@ -270,6 +302,9 @@ export class DcsClient {
     const url = `${this.rawBaseUrl}/${owner}/${repo}/raw/${refKind}/${ref}/${path}`
     const res = await this.fetchImpl(url, { signal })
     if (!res.ok) {
+      // Same message either way — only the type is new, so anything matching on
+      // the text keeps working.
+      if (res.status === 404) throw new DcsRawNotFoundError(url, path)
       throw new Error(`DCS raw fetch failed (HTTP ${res.status}) for ${url}`)
     }
     const declaredLength = Number(res.headers?.get?.("Content-Length"))

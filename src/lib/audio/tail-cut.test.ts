@@ -1,6 +1,6 @@
 // AQU-1767: a trimmed dub's bytes, cut to end at the trim (Sam's walk, 2026-10-15).
 import { describe, it, expect, beforeEach } from "vitest"
-import { tailCutWav, tailCutNow, __resetTailCutForTests } from "./tail-cut"
+import { joinWavSpans, joinedClip, tailCutWav, tailCutNow, __resetTailCutForTests } from "./tail-cut"
 import { encodeWavPcm16 } from "./wav-encode"
 
 async function wav(seconds: number, rate = 48000): Promise<Uint8Array> {
@@ -73,5 +73,29 @@ describe("tailCutNow", () => {
 
   it("never holds a due dub back for a decode: another format answers null until it is ready", async () => {
     expect(tailCutNow("take", "webm", new Uint8Array(64), 0.5)).toBeNull()
+  })
+})
+
+// AQU-1767 (Sam, 2026-10-15): Free timing plays a split take's pieces as one clip.
+describe("joining a split take's pieces", () => {
+  it("joins the pieces' audio in the order given, skipping what lies between", async () => {
+    const full = await wav(1)
+    const joined = joinWavSpans(full, [{ start: 0.1, end: 0.3 }, { start: 0.5, end: 0.6 }])!
+    expect(joined.length).toBe(44 + (9600 + 4800) * 2)
+    expect(u32(joined, 4)).toBe(joined.length - 8)
+    expect(u32(joined, 40)).toBe((9600 + 4800) * 2)
+    // The second piece's first sample follows the first piece's last.
+    const at = (sec: number) => 44 + Math.round(sec * 48000) * 2
+    expect([...joined.subarray(44, 54)]).toEqual([...full.subarray(at(0.1), at(0.1) + 10)])
+    expect([...joined.subarray(44 + 9600 * 2, 44 + 9600 * 2 + 10)]).toEqual([...full.subarray(at(0.5), at(0.5) + 10)])
+  })
+
+  it("refuses an empty piece", async () => {
+    expect(joinWavSpans(await wav(1), [{ start: 0.3, end: 0.3 }])).toBeNull()
+  })
+
+  it("answers a WAV with a WAV blob", async () => {
+    const blob = await joinedClip(await wav(1), "wav", [{ start: 0, end: 0.5 }, { start: 0.75, end: 1 }])
+    expect(blob?.size).toBe(44 + (24000 + 12000) * 2)
   })
 })

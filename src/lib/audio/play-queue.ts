@@ -7,7 +7,7 @@
 import { useMemo, useSyncExternalStore } from "react"
 import type { CellData } from "@/hooks/useCells"
 import { fetchCellAudio, getCellAudioStreamUrl, parseFrontierAudioUrl, audioIdSeededWith, probeCellAudioPresent } from "./upload"
-import { activeTargetForCell, resolveTargetAudio, resolveTargetPieces, sourceClipAudioForCell } from "./track-audio"
+import { activeTargetForCell, resolveTargetAudio, resolveTargetPieces, sourceClipAudioForCell, type TargetAudioRef } from "./track-audio"
 import { isDefaultTrackSlot, RECORDING_SLOT, slotAudible } from "@/lib/timeline/track-slots"
 import { effectiveAttachmentDurationMs, targetChipGeom, targetDueSec } from "@/lib/timeline/lane-timing"
 import { hasTiming, sortByLens } from "@/lib/timeline/derive"
@@ -15,7 +15,7 @@ import { buildProgramme, slotAtProgrammeSec, type Programme, type ProgrammeSlot 
 import type { AudioTimingMode } from "@/lib/parsers/types"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
-import { tailCutNow } from "./tail-cut"
+import { joinedClip, tailCutNow } from "./tail-cut"
 import { preferredPlaybackExt } from "./lossless-sibling"
 import { getAudioQualityPref, type AudioQuality } from "@/lib/store/audio-quality-pref"
 import { audioMimeForExt } from "./mime"
@@ -692,6 +692,52 @@ async function resolveAudioSrc(
   if (streamUrl) return { src: streamUrl, objectUrl: null, streaming: true, frontier, swapped }
   const url = await fetchFullBlobUrl(frontier, projectId, fileId, session, swapped)
   return { src: url, objectUrl: url, streaming: false, frontier, swapped }
+}
+
+/**
+ * AQU-1767: the take Free timing plays for a line — its FIRST piece in the
+ * recording, which names the take for a split one (buildProgramme reads the
+ * same), so the pool entry, the prefetch and the reconcile all agree.
+ */
+function progTargetFor(cell: CellData): TargetAudioRef | null {
+  return resolveTargetPieces(cell)[0] ?? null
+}
+
+/** Which pieces a slot's joined clip holds, for matching a prefetched one. */
+function progJoinKey(slot: ProgrammeSlot): string {
+  return slot.targetPieces?.map((p) => `${p.audioId}@${p.start}-${p.end}`).join("|") ?? ""
+}
+
+/**
+ * AQU-1767 (Sam, 2026-10-15): a split take for Free timing — its pieces'
+ * audio joined into one clip, played as one take. Built from the on-device
+ * bytes, or from a full download written through to the cache.
+ */
+async function resolveJoinedSrc(
+  url: string,
+  pieces: readonly { start: number; end: number }[],
+  projectId: string,
+  fileId: string,
+  session: FrontierSession,
+): Promise<ResolvedAudioSrc> {
+  const frontier = parseFrontierAudioUrl(url)
+  if (!frontier) throw new Error("Couldn't play this take's pieces")
+  if (!session.jwt) throw new Error("Sign in to play audio")
+  let bytes = await audioCacheGet(frontier.audioId, frontier.ext)
+  if (!bytes) {
+    bytes = await fetchCellAudio({
+      projectId,
+      fileId,
+      audioId: frontier.audioId,
+      ext: frontier.ext,
+      getSyncToken: audioSyncTokenFetcherForSession(session),
+    })
+    void audioCachePut(frontier.audioId, frontier.ext, bytes)
+  }
+  const joined = await joinedClip(bytes, frontier.ext, pieces)
+  if (!joined) throw new Error("Couldn't play this take's pieces")
+  const objectUrl = URL.createObjectURL(joined)
+  return { src: objectUrl, objectUrl, streaming: false, frontier, swapped: false }
 }
 
 // ── Programme transport (SUB-53, audio-first only) ──────────────────────────
@@ -1400,7 +1446,7 @@ async function progPlaySlot(
   pendingDubs = []
   pendingEarlyDubs = [] // belt-and-braces: dubbing-only state, dead in audio-first
 
-  const target = slot.targetWindow ? resolveTargetAudio(cell) : null
+  const target = slot.targetWindow ? progTargetFor(cell) : null
   const dubDue = Boolean(slot.targetWindow && target && into < slot.targetLenSec)
   const sourceDue = Boolean(slot.sourceWindow && into < slot.sourceLenSec)
 
@@ -2260,6 +2306,8 @@ interface ProgPrefetch {
   cellId: string
   audioId: string
   url: string
+  /** AQU-1767: which pieces a split take's joined clip holds ("" for a take never split). */
+  joinKey: string
   /** The device quality pref this stash was resolved under — a flip makes it
    *  inert (never adopted, restocked fresh) with zero event wiring. */
   quality: AudioQuality
@@ -2291,16 +2339,18 @@ function progPrefetchNext(): void {
   const next = progNextPlayable(progIndex + 1)
   const slot = next >= 0 ? prog.slots[next] : null
   const cell = slot ? ctx.cells.find((c) => c.id === slot.cellId) : null
-  const target = cell && slot?.targetWindow ? resolveTargetAudio(cell) : null
+  const target = cell && slot?.targetWindow ? progTargetFor(cell) : null
   if (!slot || !cell || !target) {
     disposeProgPrefetch()
     return
   }
+  const joinKey = progJoinKey(slot)
   if (
     progPrefetch &&
     progPrefetch.cellId === slot.cellId &&
     progPrefetch.audioId === target.audioId &&
     progPrefetch.url === target.url &&
+    progPrefetch.joinKey === joinKey &&
     progPrefetch.quality === getAudioQualityPref()
   ) {
     return // already stocked
@@ -2310,6 +2360,7 @@ function progPrefetchNext(): void {
     cellId: slot.cellId,
     audioId: target.audioId,
     url: target.url,
+    joinKey,
     quality: getAudioQualityPref(),
     element: null,
     objectUrl: null,
@@ -2319,7 +2370,9 @@ function progPrefetchNext(): void {
   void (async () => {
     let resolved: ResolvedAudioSrc
     try {
-      resolved = await resolveAudioSrc(target.url, ctx.projectId, cell.fileId, ctx.session, cell)
+      resolved = slot.targetPieces
+        ? await resolveJoinedSrc(target.url, slot.targetPieces, ctx.projectId, cell.fileId, ctx.session)
+        : await resolveAudioSrc(target.url, ctx.projectId, cell.fileId, ctx.session, cell)
     } catch {
       if (progPrefetch === stash) progPrefetch = null
       return
@@ -2415,6 +2468,7 @@ function progCueTarget(
     stash.cellId === slot.cellId &&
     stash.audioId === target.audioId &&
     stash.url === target.url &&
+    stash.joinKey === progJoinKey(slot) &&
     // A quality flip after stocking makes the stash the WRONG bytes — fall
     // through to a fresh resolve, exactly like a take swap.
     stash.quality === getAudioQualityPref()
@@ -2426,7 +2480,9 @@ function progCueTarget(
   void (async () => {
     let resolved: ResolvedAudioSrc
     try {
-      resolved = await resolveAudioSrc(target.url, ctx.projectId, cell.fileId, ctx.session, cell)
+      resolved = slot.targetPieces
+        ? await resolveJoinedSrc(target.url, slot.targetPieces, ctx.projectId, cell.fileId, ctx.session)
+        : await resolveAudioSrc(target.url, ctx.projectId, cell.fileId, ctx.session, cell)
     } catch (e) {
       removeOverlayEntry(entry)
       // Routes to the gate while pending; the caught error rides along so a
@@ -3007,7 +3063,7 @@ export async function resumeQueue(): Promise<void> {
       const cell = activeContext?.cells.find((c) => c.id === slot.cellId)
       const into = Math.max(0, progress.currentTime - slot.startSec)
       const dubDue = Boolean(
-        slot.targetWindow && cell && resolveTargetAudio(cell) && into < slot.targetLenSec,
+        slot.targetWindow && cell && progTargetFor(cell) && into < slot.targetLenSec,
       )
       const sourceDue = Boolean(slot.sourceWindow && into < slot.sourceLenSec)
       const dubReady = overlayPool.some((e) => e.element && e.element.readyState >= 3)
@@ -3149,7 +3205,7 @@ export function updateQueueCells(cells: CellData[]): void {
       const entry = overlayPool.find((e) => e.cellId === onCellId)
       if (entry) {
         const cell = activeContext?.cells.find((c) => c.id === onCellId)
-        const target = cell ? resolveTargetAudio(cell) : null
+        const target = cell ? progTargetFor(cell) : null
         const slot = slots[i]
         if (!target || !slot.targetWindow || target.audioId !== entry.audioId) {
           removeOverlayEntry(entry)

@@ -127,6 +127,26 @@ function audioFirstLayout(_cells: readonly CellData[], dialogue: readonly CellDa
         usingFallback: true,
       }
     }
+    // AQU-1767 (Sam, 2026-10-15): a split take's pieces sit end to end in
+    // the line's slot, in the order they come in the recording — the way its
+    // joined copy plays them. A piece is known by where it starts in the
+    // recording; pieces never share audio, so no two start in the same place.
+    const pieces = slot.targetPieces
+    const at = pieces ? pieces.findIndex((p) => Math.abs(p.start - trimStartSec) < 1e-6) : -1
+    if (pieces && at >= 0) {
+      let offset = 0
+      for (let i = 0; i < at; i++) offset += pieces[i].end - pieces[i].start
+      const start = slot.startSec + offset
+      return {
+        anchor: start - trimStartSec,
+        start,
+        end: start + (pieces[at].end - pieces[at].start),
+        trimStartSec,
+        trimEndSec,
+        durationSec,
+        usingFallback: false,
+      }
+    }
     return {
       anchor,
       start: slot.startSec,

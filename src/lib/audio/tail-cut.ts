@@ -1,4 +1,5 @@
-// AQU-1767: a dub that ends exactly where its trim says, by construction.
+// AQU-1767: a dub that ends exactly where its trim says, by construction —
+// and a split take's pieces joined into one clip, for Free timing.
 //
 // The timeline stops a trimmed dub with a timer (play-queue's armDubEndStop),
 // and a timer fires late whenever the page is busy: measured 60-90ms on a dev
@@ -23,7 +24,23 @@ const tag = (b: Uint8Array, o: number) => String.fromCharCode(b[o], b[o + 1], b[
  * a WAV this can read, or when there is nothing after `endSec` to cut.
  */
 export function tailCutWav(bytes: Uint8Array, endSec: number): Uint8Array | null {
-  if (!(endSec > 0) || bytes.length < 44 || tag(bytes, 0) !== "RIFF" || tag(bytes, 8) !== "WAVE") return null
+  if (!(endSec > 0)) return null
+  // A header written before the length was known says 0 or 0xFFFFFFFF;
+  // wavLayout reads the audio as running to the end of the bytes then.
+  const w = wavLayout(bytes)
+  if (!w) return null
+  const keep = Math.min(w.dataBytes, Math.round(endSec * w.sampleRate) * w.blockAlign)
+  if (keep <= 0 || keep >= w.dataBytes) return null
+  const out = bytes.slice(0, w.dataStart + keep)
+  const odv = new DataView(out.buffer)
+  odv.setUint32(4, out.length - 8, true)
+  odv.setUint32(w.sizeAt, keep, true)
+  return out
+}
+
+/** Where a PCM WAV's audio sits: its header bytes, and its frames' size and rate. */
+function wavLayout(bytes: Uint8Array): { dataStart: number; dataBytes: number; sizeAt: number; sampleRate: number; blockAlign: number } | null {
+  if (bytes.length < 44 || tag(bytes, 0) !== "RIFF" || tag(bytes, 8) !== "WAVE") return null
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   let sampleRate = 0
   let blockAlign = 0
@@ -36,41 +53,94 @@ export function tailCutWav(bytes: Uint8Array, endSec: number): Uint8Array | null
       blockAlign = dv.getUint16(off + 20, true)
     } else if (id === "data") {
       if (!sampleRate || !blockAlign) return null
-      const start = off + 8
-      // A header written before the length was known says 0 or 0xFFFFFFFF.
-      const declared = size === 0 || size === 0xffffffff ? bytes.length - start : size
-      const available = Math.min(declared, bytes.length - start)
-      const keep = Math.min(available - (available % blockAlign), Math.round(endSec * sampleRate) * blockAlign)
-      if (keep <= 0 || keep >= available) return null
-      const out = bytes.slice(0, start + keep)
-      const odv = new DataView(out.buffer)
-      odv.setUint32(4, out.length - 8, true)
-      odv.setUint32(off + 4, keep, true)
-      return out
+      const dataStart = off + 8
+      const declared = size === 0 || size === 0xffffffff ? bytes.length - dataStart : size
+      const avail = Math.min(declared, bytes.length - dataStart)
+      return { dataStart, dataBytes: avail - (avail % blockAlign), sizeAt: off + 4, sampleRate, blockAlign }
     }
     off += 8 + size + (size & 1)
   }
   return null
 }
 
-/** Any other format: decoded (no output device opened), cut, re-encoded as WAV. */
-async function tailCutDecoded(bytes: Uint8Array, endSec: number): Promise<Blob | null> {
+/**
+ * A PCM WAV's audio between each span's start and end (seconds on its own
+ * clock), joined in the order given into one WAV of the same format. Null
+ * when it is not a WAV this can read or a span is empty.
+ */
+export function joinWavSpans(bytes: Uint8Array, spans: readonly { start: number; end: number }[]): Uint8Array | null {
+  const w = wavLayout(bytes)
+  if (!w || spans.length === 0) return null
+  const ranges: [number, number][] = []
+  let total = 0
+  for (const s of spans) {
+    const a = Math.min(w.dataBytes, Math.max(0, Math.round(s.start * w.sampleRate)) * w.blockAlign)
+    const b = Math.min(w.dataBytes, Math.max(0, Math.round(s.end * w.sampleRate)) * w.blockAlign)
+    if (b <= a) return null
+    ranges.push([a, b])
+    total += b - a
+  }
+  const out = new Uint8Array(w.dataStart + total)
+  out.set(bytes.subarray(0, w.dataStart))
+  let at = w.dataStart
+  for (const [a, b] of ranges) {
+    out.set(bytes.subarray(w.dataStart + a, w.dataStart + b), at)
+    at += b - a
+  }
+  const odv = new DataView(out.buffer)
+  odv.setUint32(4, out.length - 8, true)
+  odv.setUint32(w.sizeAt, total, true)
+  return out
+}
+
+/** Any other format: decoded (no output device opened) to mono, or null. */
+async function decodeMono(bytes: Uint8Array): Promise<{ pcm: Float32Array; sampleRate: number } | null> {
   const g = globalThis as unknown as { OfflineAudioContext?: typeof OfflineAudioContext; webkitOfflineAudioContext?: typeof OfflineAudioContext }
   const Ctor = g.OfflineAudioContext ?? g.webkitOfflineAudioContext
   if (!Ctor) return null
   try {
     const decoded = await new Ctor(1, 1, 48000).decodeAudioData(bytes.slice().buffer)
-    const frames = Math.round(endSec * decoded.sampleRate)
-    if (frames <= 0 || frames >= decoded.length) return null
-    const mono = new Float32Array(frames)
+    const pcm = new Float32Array(decoded.length)
     for (let ch = 0; ch < decoded.numberOfChannels; ch++) {
       const data = decoded.getChannelData(ch)
-      for (let i = 0; i < frames; i++) mono[i] += data[i] / decoded.numberOfChannels
+      for (let i = 0; i < pcm.length; i++) pcm[i] += data[i] / decoded.numberOfChannels
     }
-    return encodeWavPcm16(mono, decoded.sampleRate)
+    return { pcm, sampleRate: decoded.sampleRate }
   } catch {
     return null
   }
+}
+
+/** Any other format: decoded, cut, re-encoded as WAV. */
+async function tailCutDecoded(bytes: Uint8Array, endSec: number): Promise<Blob | null> {
+  const d = await decodeMono(bytes)
+  if (!d) return null
+  const frames = Math.round(endSec * d.sampleRate)
+  if (frames <= 0 || frames >= d.pcm.length) return null
+  return encodeWavPcm16(d.pcm.subarray(0, frames), d.sampleRate)
+}
+
+/**
+ * AQU-1767 (Sam, 2026-10-15): a split take as Free timing plays it — its
+ * pieces' audio back to back in one clip, so the player never has to skip
+ * between them (and so can never overrun into the audio between pieces).
+ * A WAV is joined by bytes; any other format is decoded and re-encoded.
+ */
+export async function joinedClip(bytes: Uint8Array, ext: string, spans: readonly { start: number; end: number }[]): Promise<Blob | null> {
+  if (ext.toLowerCase() === "wav") {
+    const joined = joinWavSpans(bytes, spans)
+    if (joined) return new Blob([joined as BlobPart], { type: "audio/wav" })
+  }
+  const d = await decodeMono(bytes)
+  if (!d) return null
+  const parts = spans.map((s) => d.pcm.subarray(
+    Math.max(0, Math.round(s.start * d.sampleRate)),
+    Math.min(d.pcm.length, Math.round(s.end * d.sampleRate)),
+  ))
+  const out = new Float32Array(parts.reduce((n, p) => n + p.length, 0))
+  let at = 0
+  for (const p of parts) { out.set(p, at); at += p.length }
+  return out.length > 0 ? encodeWavPcm16(out, d.sampleRate) : null
 }
 
 const MAX_CACHED = 32

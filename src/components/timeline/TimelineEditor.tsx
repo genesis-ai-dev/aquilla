@@ -2703,9 +2703,13 @@ export function TimelineEditor({
       const { startTime, endTime } = currentCell
       const srcDurationSec =
         typeof startTime === "number" && typeof endTime === "number" ? endTime - startTime : null
-      const item = targetItems.find((t) => t.cell.id === currentCell.id)
-      const geom = item ? layout.targetGeom(item.cell, item.cell.attachments?.[item.audioId]) : null
-      const tgtDurationSec = geom && !geom.usingFallback ? geom.end - geom.start : null
+      // AQU-1767: a split take's length is all its pieces'.
+      const geoms = targetItems
+        .filter((t) => t.cell.id === currentCell.id)
+        .map((t) => layout.targetGeom(t.cell, t.cell.attachments?.[t.audioId]))
+      const tgtDurationSec = geoms.length > 0 && geoms.every((g) => g && !g.usingFallback)
+        ? geoms.reduce((sum, g) => sum + (g!.end - g!.start), 0)
+        : null
       if (srcDurationSec == null && tgtDurationSec == null) return null
       return { kind: "free" as const, srcDurationSec, tgtDurationSec }
     }

@@ -1,0 +1,66 @@
+name: Release cut
+
+# Cuts the next production release branch when a person presses "Run
+# workflow". It replaces the Deploy bot's polling routine: the same steps as
+# e2e/journeys/DEPLOY-BOT.md, run on demand instead of on a timer.
+#
+# scripts/release-plan.mjs decides whether to cut and what; this workflow
+# only acts on its JSON. It never deploys and never tags. The branch push is
+# what starts smart Jev (docs/runbooks/smart-testing-webhook.md).
+
+on:
+  workflow_dispatch:
+    inputs:
+      plan_only:
+        description: 'Show the plan without pushing a branch'
+        required: false
+        type: boolean
+        default: false
+
+# Two presses at once would plan the same branch name. Queue the second run;
+# it then sees the first release in flight and stops.
+concurrency:
+  group: release-cut
+  cancel-in-progress: false
+
+jobs:
+  cut:
+    runs-on: ubuntu-latest
+    permissions:
+      # Push the release branch and post the release notes commit comment.
+      contents: write
+      # The walk lookup reads the QA bot's comments on each merged PR.
+      pull-requests: read
+      issues: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: dev
+          fetch-depth: 0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+
+      # The plan reads refs/remotes/origin/release/* and 20* tags directly;
+      # a stale fetch is a stale plan.
+      - name: Fetch tags and release branches
+        run: |
+          git fetch origin --tags
+          git fetch origin 'refs/heads/release/*:refs/remotes/origin/release/*'
+
+      - name: Plan
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/release-plan.mjs > "$RUNNER_TEMP/plan.json"
+
+      - name: Cut
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PLAN_ONLY: ${{ inputs.plan_only }}
+        run: |
+          if [ "$PLAN_ONLY" = "true" ]; then
+            node scripts/release-cut.mjs "$RUNNER_TEMP/plan.json" --plan-only
+          else
+            node scripts/release-cut.mjs "$RUNNER_TEMP/plan.json"
+          fi

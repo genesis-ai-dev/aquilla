@@ -123,3 +123,6 @@ perf-report/
 # AQU-1941 — pre-write copies of project TTS settings taken by
 # `pnpm neon:prune-phantom-voices … --apply`. Customer data; never commit.
 .phantom-voice-backups/
+
+# Fault-injection state for `pnpm tauri:dev:mitm` — per-session, deleted on clean shutdown.
+.mitm-state.json

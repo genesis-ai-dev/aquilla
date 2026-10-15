@@ -40,6 +40,9 @@ interface SearchOptionsApi {
   limit?: number
   /** "source" | "target" | "both". When omitted or "both", both sides are returned. */
   side?: "both" | "source" | "target"
+  caseSensitive?: boolean
+  matchWord?: boolean
+  useRegexp?: boolean
 }
 
 function makeResult(row: SearchResult, files: FileReference[] | undefined): WorkspaceSearchResult {
@@ -59,6 +62,13 @@ function makeResult(row: SearchResult, files: FileReference[] | undefined): Work
     matchedTokens: [],
     snippet: row.snippet,
     rank: row.rank,
+    // Opposite side of this hit: source text on a target match, target text
+    // on a source match. Find & Replace reads this without a second fetch.
+    paired: row.pairedValue ?? null,
+    canonicalRef: row.canonicalRef ?? null,
+    cellType: row.cellType ?? null,
+    placeLabel: row.placeLabel ?? null,
+    position: row.position ?? null,
   }
 }
 
@@ -183,7 +193,13 @@ export function useWorkspaceSearch(
       const rows = await fetchProjectSearch(
         pid,
         cleaned,
-        { side: sideParam, limit: opts.limit },
+        {
+          side: sideParam,
+          limit: opts.limit,
+          matchCase: opts.caseSensitive,
+          wholeWord: opts.matchWord,
+          useRegexp: opts.useRegexp,
+        },
         token,
       )
       if (generationRef.current !== gen) return

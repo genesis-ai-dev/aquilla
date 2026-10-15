@@ -676,8 +676,10 @@ describe("POST /api/v2/orgs/portfolio", () => {
     expect(aggregateOrgBinds).toEqual([[2, 1, 2, 1, "2026-09-01", 2, 1, 2, 1, 0, 99, 99, 99, 99]])
     // Driven FROM projects and left-joined to its settings, so a project with
     // no settings row still inherits the org's structural-cell answer.
-    const settingsQuery = preparedQueries.find((query) => query.includes("ps.validation_count AS validation_count"))
+    const settingsQuery = preparedQueries.find((query) => query.includes("AS validation_count,"))
     expect(settingsQuery).toContain("ps.validation_count")
+    // AQU-1771: the threshold falls back to the org's default.
+    expect(settingsQuery).toContain("os.validation_count")
     expect(settingsQuery).not.toContain("ps.target_lanes")
     expect(settingsQuery).toContain("COALESCE(ps.count_structural, os.count_structural, 'true')")
     expect(settingsQuery).not.toContain("ps.settings AS settings")

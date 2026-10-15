@@ -29,6 +29,15 @@
 //            of the stored value is not a change and passes. (AQU-822 used to
 //            give it its own `termbaseEditMinRole` floor.)
 //
+// One key is also SIZE-capped:
+//
+//   AQU-1943 `ttsSettings`. The voice library and cast-assignment map are
+//            refused with 422 beyond the ceiling in
+//            db/shared/tts-settings-caps.ts, because every member re-reads
+//            this blob on workspace open and on focus. Judged on the change,
+//            so an already-over project can still save the rest and can still
+//            write the prune that brings it under.
+//
 // These keys are permission-scoped rather than dumb-stored:
 //
 //   AQU-1086 the project-language keys (`sourceLanguage`, `targetLanguage`,
@@ -46,20 +55,35 @@
 // Everything else keeps the maintainer gate, unchanged. Each carve-out is
 // scoped to a write that changes NOTHING ELSE, so none widens access to any
 // other key.
+//
+// AQU-1771: `rosterViewMinRole` and `memberProgressViewMinRole` are this
+// project's own, stricter-only copies of the org's visibility floors. They
+// keep the maintainer gate (org owners reach it through their org role), are
+// refused below the org's floor, and only a caller at or above a stored value
+// may lower or remove it — see visibilityFloorWriteRefusal.
 
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
+import { pushDirtyLinksAfterResponse } from "../lib/monday/push"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE, type AuthUser } from "../types"
 import { ROLE_NAMES, resolveProjectRole } from "../services/project-permissions"
-import { roleRequiredBody } from "../lib/role-denial"
+import { roleRequiredBody, type RoleRequiredBody } from "../lib/role-denial"
 import {
   getTermbaseEditMinRoleForProject,
   getOrgCountStructuralCellsForProject,
   getOrgAllowBulkValidateAiDraftsForProject,
   getLanguageEditMinRoleForProject,
+  getProjectOrgPolicy,
+  type ProjectOrgPolicy,
 } from "../services/org-permissions"
+import {
+  parseProjectVisibilityFloor,
+  VISIBILITY_FLOOR_KEYS,
+  VISIBILITY_FLOOR_LEVELS,
+  type VisibilityFloorKey,
+} from "../../../db/shared/visibility-floors"
 import { notifySyncWorkerOfProjectSettingsChange } from "../services/sync-worker-notify"
 import {
   loadProjectSettings,
@@ -85,6 +109,7 @@ import {
 import { lanesForScopeVisibility } from "../../../src/lib/lanes/scope-ids"
 import { loadTargetLaneIdentities, visibleTagsForMember } from "../../../db/shared/lane-visibility"
 import { grantNewLane } from "../../../db/shared/lane-grants"
+import { markProjectMondayLinksDirty } from "../../../db/shared/monday-dirty"
 import type { AquillaDb } from "../../../db/shim/postgres"
 import { laneLanguage } from "../../../src/lib/lanes/lane-display"
 import { validateSettingsKeyValue } from "../../../db/shared/project-settings-keys"
@@ -93,6 +118,8 @@ import {
   preserveRetiredLaneSettings,
   RETIRED_LANE_SETTINGS_MESSAGE,
 } from "../../../db/shared/retired-lane-settings"
+import { loadOrgValidationDefaults } from "../../../db/shared/validation-threshold"
+import { ttsSettingsCapProblem } from "../../../db/shared/tts-settings-caps"
 
 const projectSettings = new Hono<AuthHonoEnv>()
 
@@ -207,12 +234,112 @@ async function withOrgDefaults(
 ): Promise<ProjectSettingsResponse & {
   orgCountStructuralCells: boolean | null
   orgAllowBulkValidateAiDrafts: boolean | null
+  orgValidationCount: number | null
+  orgValidationCountAudio: number | null
+  orgPolicy: ProjectOrgPolicy
+  visibilityFloors: VisibilityFloorsView
 }> {
-  const [orgCountStructuralCells, orgAllowBulkValidateAiDrafts] = await Promise.all([
+  const [orgCountStructuralCells, orgAllowBulkValidateAiDrafts, orgThresholds, policy] = await Promise.all([
     getOrgCountStructuralCellsForProject(env, projectId),
     getOrgAllowBulkValidateAiDraftsForProject(env, projectId),
+    // AQU-1771: the org's validation defaults, null when it set none. Read
+    // here for the same reason as the two above: a project member who is not
+    // in the org cannot read the org settings route.
+    loadOrgValidationDefaults(env.AQUILLA_PG, projectId),
+    // AQU-1771: and the rest of the org policy the project's own surfaces
+    // need, for the same reason — plus the visibility floors this project
+    // actually enforces, its own stricter values included.
+    getProjectOrgPolicy(env, projectId, response.settings),
   ])
-  return { ...response, orgCountStructuralCells, orgAllowBulkValidateAiDrafts }
+  const { visibility } = policy
+  return {
+    ...response,
+    orgCountStructuralCells,
+    orgAllowBulkValidateAiDrafts,
+    orgValidationCount: orgThresholds.validationCount,
+    orgValidationCountAudio: orgThresholds.validationCountAudio,
+    orgPolicy: policy.orgPolicy,
+    visibilityFloors: {
+      rosterViewMinRole: {
+        org: visibility.org.rosterViewMinRole,
+        project: visibility.project.rosterViewMinRole,
+        effective: visibility.rosterViewMinRole,
+      },
+      memberProgressViewMinRole: {
+        org: visibility.org.memberProgressViewMinRole,
+        project: visibility.project.memberProgressViewMinRole,
+        effective: visibility.memberProgressViewMinRole,
+      },
+    },
+  }
+}
+
+/**
+ * AQU-1771: each visibility floor as the org sets it, as this project sets it
+ * (null when the project follows the org, including a stored value that is
+ * not stricter), and the floor the project enforces — the higher of the two.
+ */
+type VisibilityFloorsView = Record<VisibilityFloorKey, { org: number; project: number | null; effective: number }>
+
+/**
+ * AQU-1771: the rules for changing a project's own visibility floors. Judged
+ * on the CHANGE, so a stored value rides along unchanged on an unrelated save.
+ *
+ *   - A value set must be a role-ladder level at or above the org's floor: a
+ *     project can make who sees its member list or each member's progress
+ *     stricter, never looser (400). A stored value the org has since
+ *     overtaken is inert — the floor is the higher of the two.
+ *   - Lowering or removing a stored value needs a role at least that value
+ *     (Sam, 2026-10-13: "Owners only" binds maintainers — only an owner may
+ *     loosen it). Removing the key by leaving it out of the whole-object write
+ *     counts as removing it (403, the role-required shape). Raising stays open
+ *     to anyone who may write the project's settings.
+ */
+async function visibilityFloorWriteRefusal(
+  env: AuthHonoEnv["Bindings"],
+  projectId: string,
+  stored: Record<string, unknown>,
+  next: Record<string, unknown>,
+  role: { level: number; source?: string | null },
+): Promise<{ status: 400 | 403; body: { error: string } | RoleRequiredBody } | null> {
+  const changed = VISIBILITY_FLOOR_KEYS.filter(
+    (key) => JSON.stringify(stored[key]) !== JSON.stringify(next[key]),
+  )
+  if (changed.length === 0) return null
+  const { orgPolicy } = await getProjectOrgPolicy(env, projectId, next)
+  for (const key of changed) {
+    const what = key === "rosterViewMinRole" ? "the member list" : "each member's progress"
+    if (next[key] != null) {
+      const level = parseProjectVisibilityFloor(next[key])
+      if (level == null) {
+        return { status: 400, body: { error: `${key} must be a role level: one of ${VISIBILITY_FLOOR_LEVELS.join(", ")}` } }
+      }
+      const orgFloor = orgPolicy[key]
+      if (level < orgFloor) {
+        return {
+          status: 400,
+          body: {
+            error: `${key} ${level} is below the organization's setting (${orgFloor}). A project can only make who sees ${what} stricter than its organization does: choose ${orgFloor} or higher, or remove ${key} to follow the organization.`,
+          },
+        }
+      }
+    }
+    const storedLevel = parseProjectVisibilityFloor(stored[key])
+    const nextLevel = parseProjectVisibilityFloor(next[key])
+    const loosens = storedLevel != null && (nextLevel == null || nextLevel < storedLevel)
+    if (loosens && role.level < storedLevel) {
+      const name = (ROLE_NAMES[storedLevel] ?? `role ${storedLevel}`).replaceAll("_", " ")
+      return {
+        status: 403,
+        body: roleRequiredBody(
+          `${name} or higher is required to make who sees ${what} on this project less strict (${key} is ${storedLevel})`,
+          storedLevel,
+          role,
+        ),
+      }
+    }
+  }
+  return null
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -466,6 +593,33 @@ projectSettings.on(
       }
     }
 
+    // AQU-1943: the ceiling on the TTS blob. Every member re-reads these
+    // settings on workspace open and on window focus, so a runaway voice
+    // library is not this project's problem alone — one production project
+    // reached 5.45 MB (31,287 voices) and the Voices panel died on open. The
+    // refusal is 422 rather than 400: the shape is legal, the size is not.
+    //
+    // Judged on the CHANGE, like bibleEnrichments and bibleVoiceOverrides
+    // above: a project that is already over the cap must still be able to
+    // save the rest of its settings while its blob rides along unchanged, and
+    // must still be able to write the prune that brings it back under
+    // (AQU-1941). What it cannot do is grow further.
+    const rawTtsSettings = (settings as Record<string, unknown>).ttsSettings
+    if (rawTtsSettings !== undefined) {
+      const over = ttsSettingsCapProblem(rawTtsSettings)
+      if (over && JSON.stringify(stored.settings.ttsSettings) !== JSON.stringify(rawTtsSettings)) {
+        console.warn(
+          `[project-settings] ttsSettings over cap for ${projectId}: `
+          + `${over.size.voices} voices, ${over.size.assignments} assignments, ${over.size.bytes} bytes`,
+        )
+        return c.json({ error: over.message }, 422)
+      }
+    }
+
+    // AQU-1771: a project's own visibility floors can only be stricter.
+    const floorRefusal = await visibilityFloorWriteRefusal(c.env, projectId, stored.settings, settings, role)
+    if (floorRefusal) return c.json(floorRefusal.body, floorRefusal.status)
+
     const queryVersion = parseIntOrNull(c.req.query("ifMatchVersion"))
     const headerVersion = parseIntOrNull(c.req.header("If-Match-Version"))
     const ifMatchVersion =
@@ -531,6 +685,11 @@ projectSettings.on(
       // remains best-effort there just as it is in a deployed Worker.
       void notifyPromise
     }
+    // AQU-1771: a change to what a linked Monday board shows marked its link
+    // dirty in the write above; push it now rather than at the next cron.
+    pushDirtyLinksAfterResponse(c, {
+      projectIds: [projectId, ...(result.propagated ?? []).map((copy) => copy.projectId)],
+    })
     // `lanes` predates the write. A lane the write minted carries no grant,
     // so the newer list would hide exactly the same labels.
     return c.json(
@@ -648,6 +807,19 @@ function notifySettingsChangedBestEffort(
   }
 }
 
+// AQU-1770: a language added, renamed or archived changes what a linked Monday
+// board shows — its Languages column, and which languages its percentages
+// cover — with no project edit to trigger a push. Mark the project's boards
+// dirty and push after the response, as a counting-settings change does; the
+// cron flush picks up anything this misses.
+async function pushMondayAfterLaneChange(
+  c: { env: AuthHonoEnv["Bindings"]; executionCtx: { waitUntil(promise: Promise<unknown>): void } },
+  projectId: string,
+): Promise<void> {
+  await markProjectMondayLinksDirty(c.env.AQUILLA_PG, [projectId])
+  pushDirtyLinksAfterResponse(c, { projectIds: [projectId] })
+}
+
 // AQU-1418: lane rows are what the screen edits. The settings string registry
 // stays in step so events, the external API, and older clients still resolve
 // a lane by its legacy tag. The id is never shown. A duplicate display name
@@ -717,6 +889,7 @@ projectSettings.post(
     const fresh = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
     notifySettingsChangedBestEffort(c, projectId, fresh.version)
     const lane = fresh.lanes?.find((row) => row.id === created.laneId) ?? null
+    await pushMondayAfterLaneChange(c, projectId)
     return c.json({ lane }, 201)
   },
 )
@@ -751,6 +924,7 @@ projectSettings.patch(
     if (result.status !== "ok") return c.json({ error: result.status }, 400)
     const fresh = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
     notifySettingsChangedBestEffort(c, projectId, fresh.version)
+    await pushMondayAfterLaneChange(c, projectId)
     return c.json({ lane: fresh.lanes?.find((row) => row.id === laneId) ?? result.lane })
   },
 )
@@ -826,6 +1000,7 @@ projectSettings.post(
     } catch {
       void notifyPromise
     }
+    await pushMondayAfterLaneChange(c, projectId)
     return c.json({ lane: fresh.lanes?.find((row) => row.id === laneId) ?? result.lane })
   },
 )

@@ -18,7 +18,11 @@ import type {
   AlgorithmicCheckOverride,
   BuiltinCheckId,
 } from "@/lib/parsers/types"
-import { translateRuleName, translateRuleDescription } from "@/lib/lqa/builtin-resolver"
+import {
+  PUNCTUATION_CHECK_IDS,
+  translateRuleName,
+  translateRuleDescription,
+} from "@/lib/lqa/builtin-resolver"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { isBibleCheckId, type BibleCheckSlot } from "../../db/shared/bible-checks/types"
@@ -77,6 +81,18 @@ interface Props {
    * check that needs them says so.
    */
   bibleReadiness?: BibleCheckReadiness
+  /**
+   * AQU-1906: said above the list when these switches change ONE lane rather
+   * than the whole project — which is what a multi-lane project does. Absent
+   * on a single-lane project, where the overrides stay project-wide.
+   */
+  laneNote?: string
+  /**
+   * AQU-1906: which punctuation conventions the two punctuation checks are
+   * judging the target by in the lane being viewed ("Thai conventions", "from
+   * the Language profile"). Shown on those two rows only.
+   */
+  punctuationNote?: string
 }
 
 const isBibleRule = (rule: TranslationRule) => rule.check.type === "builtin" && isBibleCheckId(rule.check.checkId)
@@ -90,6 +106,8 @@ export function BuiltinChecksList({
   canManage = true,
   languageProfile,
   bibleReadiness,
+  laneNote,
+  punctuationNote,
 }: Props) {
   const t = useT()
   const SEVERITY_OPTIONS: { value: "major" | "minor"; label: string }[] = [
@@ -133,6 +151,11 @@ export function BuiltinChecksList({
               {t(key)}
             </div>
           ))}
+          {punctuationNote && PUNCTUATION_CHECK_IDS.includes(checkId) && (
+            <div data-testid="builtin-row-conventions" className="text-xs text-muted-foreground">
+              {punctuationNote}
+            </div>
+          )}
         </div>
         {count > 0 && (
           <Badge variant="secondary" className="tabular-nums">
@@ -206,8 +229,13 @@ export function BuiltinChecksList({
   return (
     <>
       <div className="rounded-md border">
-        <div className="border-b bg-muted/30 px-4 py-2 text-sm font-medium">
-          {t("rules.builtinChecks.heading")}
+        <div className="border-b bg-muted/30 px-4 py-2">
+          <div className="text-sm font-medium">{t("rules.builtinChecks.heading")}</div>
+          {laneNote && (
+            <p data-testid="builtin-checks-lane-note" className="text-xs text-muted-foreground">
+              {laneNote}
+            </p>
+          )}
         </div>
         <ul className="divide-y">{textRules.map(renderRow)}</ul>
       </div>

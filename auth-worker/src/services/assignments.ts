@@ -45,6 +45,7 @@ import { planUnitsSql } from "../../../db/shared/plan-units"
 import { AUDIO_CTE_SQL } from "../../../db/shared/audio-progress"
 import { laneDisplayNameSql } from "../../../db/shared/lanes"
 import { wireLegacyTagSql } from "../../../db/shared/lane-sql"
+import { loadEffectiveThreshold } from "../../../db/shared/validation-threshold"
 
 /** Per-assignee rollup for the manager workload view. */
 export interface AssigneeWorkload {
@@ -410,13 +411,9 @@ async function readThreshold(
   projectId: string,
   column: "validation_count" | "validation_count_audio",
 ): Promise<number> {
-  const row = await env.AQUILLA_PG.prepare(
-    `SELECT ${column} AS threshold FROM project_settings WHERE project_id = ?`,
-  )
-    .bind(projectId)
-    .first<{ threshold: string | number | null }>()
-  const value = Math.floor(Number(row?.threshold))
-  return Number.isFinite(value) ? Math.min(MAX_VALIDATION_LEVEL, Math.max(1, value)) : 1
+  // AQU-1771: project → org → 1, from the generated columns on both tables.
+  const key = column === "validation_count" ? "validationCount" : "validationCountAudio"
+  return Math.min(MAX_VALIDATION_LEVEL, await loadEffectiveThreshold(env.AQUILLA_PG, projectId, key))
 }
 
 /**

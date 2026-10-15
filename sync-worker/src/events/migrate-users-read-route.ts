@@ -32,7 +32,11 @@ export async function handleMigrateUsersReadRequest(
       email: string | null
     }>()
   ).results
+  const identityLinks = new URL(request.url).searchParams.get("identityLinks") === "1"
+    ? (await env.AQUILLA_PG.prepare("SELECT DISTINCT gitlab_user_id, neon_user_id FROM legacy_identity_links WHERE source = 'frontier-db-v2' AND gitlab_user_id IS NOT NULL").all<{gitlab_user_id:number;neon_user_id:number}>()).results.map(r=>({gitlabUserId:Number(r.gitlab_user_id),userId:Number(r.neon_user_id)}))
+    : undefined
   return Response.json({
+    ...(identityLinks ? {identityLinks} : {}),
     users: rows.map((r) => ({ id: Number(r.id), username: r.username, email: r.email })),
   })
 }

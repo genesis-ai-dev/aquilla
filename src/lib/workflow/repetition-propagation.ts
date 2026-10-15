@@ -143,20 +143,34 @@ export function planRepetitionPropagation({
   for (const update of updates) {
     const cell = byId.get(update.id)
     if (!cell) continue
-    commits.push({
-      cellId: cell.id,
-      fileId: cell.fileId,
-      value: update.translated,
-      // The confirmed cell's rich text travels with its plain text: the
-      // receiving cells are, by definition, the same string.
-      valueHtml: confirmed.translatedHtml,
-      parentId: parentIdFor(cell, resolveParentId),
-      sourceEventId: cell.sourceEventId ?? null,
-      previousValue: cell.translated,
-      previousValueHtml: cell.translatedHtml,
-    })
+    // The confirmed cell's rich text travels with its plain text: the
+    // receiving cells are, by definition, the same string.
+    commits.push(repetitionCommitFor(cell, update.translated, confirmed.translatedHtml, resolveParentId))
   }
   return commits
+}
+
+/**
+ * One receiving cell's commit, pinned to ITS OWN chain head and source (see
+ * the module note). Exported for AQU-1486's bulk planner, which picks the text
+ * per repetition group instead of from one confirmed cell.
+ */
+export function repetitionCommitFor(
+  cell: RepetitionCell,
+  value: string,
+  valueHtml: string | undefined,
+  resolveParentId?: PlanRepetitionPropagationInput["resolveParentId"],
+): RepetitionCommit {
+  return {
+    cellId: cell.id,
+    fileId: cell.fileId,
+    value,
+    valueHtml,
+    parentId: parentIdFor(cell, resolveParentId),
+    sourceEventId: cell.sourceEventId ?? null,
+    previousValue: cell.translated,
+    previousValueHtml: cell.translatedHtml,
+  }
 }
 
 /**

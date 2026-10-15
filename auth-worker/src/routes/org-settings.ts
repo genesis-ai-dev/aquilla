@@ -71,8 +71,21 @@ import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { notifySyncWorkerOfProjectSettingsChange } from "../services/sync-worker-notify"
 import { ROLE } from "../types"
-import { getEffectiveOrgRole, getOrgMemberRole } from "../services/org-permissions"
+import {
+  countStricterVisibilityProjects,
+  getEffectiveOrgRole,
+  getOrgMemberRole,
+} from "../services/org-permissions"
 import { hasActiveElevation } from "../middleware/platform-admin"
+import {
+  MAX_VALIDATION_THRESHOLD,
+  VALIDATION_THRESHOLD_COLUMNS,
+  listInheritingProjects,
+  reprojectValidatedStmts,
+  type ValidationThresholdKey,
+} from "../../../db/shared/validation-threshold"
+import { markOrgMondayLinksDirty, markProjectMondayLinksDirty } from "../../../db/shared/monday-dirty"
+import { pushDirtyLinksAfterResponse } from "../lib/monday/push"
 
 const orgSettings = new Hono<AuthHonoEnv>()
 
@@ -154,6 +167,34 @@ const COUNT_STRUCTURAL_KEY = "countStructuralCells"
  * Agent API keeps its own no-bypass check in sync-worker (AQU-1184).
  */
 const ALLOW_BULK_AI_DRAFTS_KEY = "allowBulkValidateAiDrafts"
+
+/**
+ * AQU-1771: the org defaults for how many validations a cell
+ * (validationCount) and a recorded take (validationCountAudio) need. Like
+ * countStructuralCells they decide how a number is calculated, not who may
+ * see or do anything, so they ride the general MAINTAINER gate. A project may
+ * override either; absent on both reads as 1.
+ */
+const VALIDATION_THRESHOLD_KEYS: readonly ValidationThresholdKey[] = ["validationCount", "validationCountAudio"]
+
+/**
+ * Org settings a PROJECT resolves through (project → org → default), and the
+ * project_settings generated column that says whether a project has its own.
+ * A change to any of these alters what inheriting projects read, so their
+ * rooms are told; the reset endpoint below clears one key's overrides.
+ */
+const INHERITED_KEY_COLUMNS: Record<string, string> = {
+  [COUNT_STRUCTURAL_KEY]: "count_structural",
+  validationCount: VALIDATION_THRESHOLD_COLUMNS.validationCount,
+  validationCountAudio: VALIDATION_THRESHOLD_COLUMNS.validationCountAudio,
+}
+
+/** URL slug → settings key for the per-key "reset project overrides" endpoint. */
+const RESET_SLUGS: Record<string, string> = {
+  "count-structural": COUNT_STRUCTURAL_KEY,
+  "validation-count": "validationCount",
+  "validation-count-audio": "validationCountAudio",
+}
 
 /**
  * AQU-1083: tell each project's realtime room that its effective settings
@@ -287,12 +328,9 @@ orgSettings.get("/:orgId/settings", authMiddleware, async (c) => {
   if (role == null) return c.json({ error: "no access to org" }, 403)
 
   const response = await loadSettings(c.env, orgId)
-  // AQU-1083: how many projects have opted out of the org's structural-cell
-  // default. The Project defaults page needs it to know whether changing that
-  // default would silently miss anyone — a project with its own answer is
-  // deliberately deaf to this switch, and saying nothing about that is how the
-  // switch becomes a no-op nobody can see.
-  const overrides = await countStructuralOverrides(c.env, orgId)
+  // AQU-1083 / AQU-1771: how many projects have their own answer for each
+  // inherited default (see loadOverrideCounts).
+  const counts = await loadOverrideCounts(c.env, orgId)
   // OPS-44: the unredacted branch hands back the org's LIVE vendor API keys
   // (D7 — someone else's credential we chose to hold). getEffectiveOrgRole
   // returns 700 for any platform operator on any org, so without this an
@@ -313,16 +351,66 @@ orgSettings.get("/:orgId/settings", authMiddleware, async (c) => {
     return c.json({
       ...response,
       settings: redactSecrets(response.settings),
-      countStructuralOverrides: overrides,
+      ...counts,
     })
   }
-  return c.json({ ...response, countStructuralOverrides: overrides })
+  return c.json({ ...response, ...counts })
 })
 
-/** Projects in this org whose settings carry their own countStructuralCells. */
-async function countStructuralOverrides(
+/**
+ * AQU-1771: how many of the org's projects make "who sees the member list" /
+ * "who sees each member's progress" stricter than the org does. Its own route
+ * rather than part of every settings response: the settings GET is read on
+ * nearly every page and only the Security page shows this line, so only it
+ * pays for the per-project read (the 0174 generated columns, org-scoped).
+ * Any org member may read it; it is a count, and names no project.
+ */
+orgSettings.get("/:orgId/settings/visibility-overrides", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId") ?? "", 10)
+  if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
+  const role = await getEffectiveOrgRole(c.env, orgId, user)
+  if (role == null) return c.json({ error: "no access to org" }, 403)
+  return c.json(await countStricterVisibilityProjects(c.env, orgId))
+})
+
+/**
+ * AQU-1083: how many projects have opted out of each org default the Project
+ * defaults page offers. The page needs it to know whether changing a default
+ * would silently miss anyone — a project with its own answer is deliberately
+ * deaf to the org's switch, and saying nothing about that is how the switch
+ * becomes a no-op nobody can see. AQU-1771: the same count for the two
+ * validation thresholds.
+ *
+ * Every response that carries the settings carries these too (GET, PATCH and
+ * its 409s): the client replaces its whole copy with each response, so a
+ * response without them read as "no overrides" and the reset prompt never
+ * came back after the first save.
+ */
+async function loadOverrideCounts(env: AuthHonoEnv["Bindings"], orgId: number) {
+  const [countStructuralOverrides, validationCountOverrides, validationCountAudioOverrides] =
+    await Promise.all([
+      countOverrides(env, orgId, "count_structural"),
+      countOverrides(env, orgId, VALIDATION_THRESHOLD_COLUMNS.validationCount),
+      countOverrides(env, orgId, VALIDATION_THRESHOLD_COLUMNS.validationCountAudio),
+    ])
+  return { countStructuralOverrides, validationCountOverrides, validationCountAudioOverrides }
+}
+
+/** The settings plus the override counts: the shape every settings response carries. */
+async function loadSettingsWithCounts(env: AuthHonoEnv["Bindings"], orgId: number) {
+  const [settings, counts] = await Promise.all([loadSettings(env, orgId), loadOverrideCounts(env, orgId)])
+  return { ...settings, ...counts }
+}
+
+/**
+ * Projects in this org whose settings carry their own value for an inherited
+ * key. `column` is one of INHERITED_KEY_COLUMNS' values, never caller input.
+ */
+async function countOverrides(
   env: AuthHonoEnv["Bindings"],
   orgId: number,
+  column: string,
 ): Promise<number> {
   try {
     // The STORED generated column, never the multi-MB settings blob.
@@ -331,7 +419,7 @@ async function countStructuralOverrides(
          FROM project_settings ps
          JOIN projects p ON p.id = ps.project_id
         WHERE p.org_id = ? AND p.archived_at IS NULL
-          AND ps.count_structural IS NOT NULL`,
+          AND ps.${column} IS NOT NULL`,
     ).bind(orgId).first<{ n: number }>()
     return Number(row?.n) || 0
   } catch {
@@ -339,6 +427,28 @@ async function countStructuralOverrides(
     // whole settings page down; the prompt simply does not appear.
     return 0
   }
+}
+
+/**
+ * AQU-1771: an org threshold moved, so every project that inherits it now
+ * resolves a different number. The text threshold is projected into
+ * `cells.validated` / `files.approved_count`, so those are re-derived here,
+ * one project at a time (each is the same work a project's own threshold
+ * change does). The audio threshold is applied at read time and needs only
+ * the room notification. Returns the projects whose rooms should re-read.
+ */
+async function applyOrgThresholdChange(
+  env: AuthHonoEnv["Bindings"],
+  orgId: number,
+  key: ValidationThresholdKey,
+): Promise<Array<{ projectId: string; version: number }>> {
+  const inheriting = await listInheritingProjects(env.AQUILLA_PG, orgId, key)
+  if (key === "validationCount") {
+    for (const project of inheriting) {
+      await env.AQUILLA_PG.batch(reprojectValidatedStmts(env.AQUILLA_PG, project.projectId, project.threshold))
+    }
+  }
+  return inheriting.map(({ projectId, version }) => ({ projectId, version }))
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -442,6 +552,14 @@ orgSettings.on(
     if (rawCountStructural !== undefined && typeof rawCountStructural !== "boolean") {
       return c.json({ error: `${COUNT_STRUCTURAL_KEY} must be a boolean` }, 400)
     }
+    // AQU-1771: a whole number 1..15, or absent ("no org default").
+    for (const key of VALIDATION_THRESHOLD_KEYS) {
+      const raw = body.settings[key]
+      if (raw === undefined) continue
+      if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 1 || raw > MAX_VALIDATION_THRESHOLD) {
+        return c.json({ error: `${key} must be a whole number from 1 to ${MAX_VALIDATION_THRESHOLD}` }, 400)
+      }
+    }
     // Same reason: a string "true" would read as off and nobody would know why.
     const rawAllowBulkAiDrafts = body.settings[ALLOW_BULK_AI_DRAFTS_KEY]
     if (rawAllowBulkAiDrafts !== undefined && typeof rawAllowBulkAiDrafts !== "boolean") {
@@ -462,7 +580,7 @@ orgSettings.on(
     const current = await loadSettings(c.env, orgId)
 
     if (ifMatchVersion !== current.version) {
-      return c.json({ error: "version mismatch", current }, 409)
+      return c.json({ error: "version mismatch", current: { ...current, ...(await loadOverrideCounts(c.env, orgId)) } }, 409)
     }
 
     const newSettingsJson = JSON.stringify(body.settings)
@@ -477,7 +595,7 @@ orgSettings.on(
           .bind(orgId, newSettingsJson, newVersion, user.id)
           .run()
       } catch (err) {
-        const fresh = await loadSettings(c.env, orgId)
+        const fresh = await loadSettingsWithCounts(c.env, orgId)
         if (fresh.version !== newVersion) {
           return c.json({ error: "version mismatch", current: fresh }, 409)
         }
@@ -498,7 +616,7 @@ orgSettings.on(
 
       const changes = result.meta?.changes
       if (typeof changes === "number" && changes === 0) {
-        const fresh = await loadSettings(c.env, orgId)
+        const fresh = await loadSettingsWithCounts(c.env, orgId)
         return c.json({ error: "version mismatch", current: fresh }, 409)
       }
     }
@@ -515,7 +633,9 @@ orgSettings.on(
     // read-modify-write, so every org settings save echoes this key back, and
     // notifying on presence would wake every project room in the org whenever
     // anyone touched an unrelated setting.
-    if (current.settings[COUNT_STRUCTURAL_KEY] !== body.settings[COUNT_STRUCTURAL_KEY]) {
+    const toNotify = new Map<string, number>()
+    const headingsRuleChanged = current.settings[COUNT_STRUCTURAL_KEY] !== body.settings[COUNT_STRUCTURAL_KEY]
+    if (headingsRuleChanged) {
       const { results: inheriting } = await c.env.AQUILLA_PG.prepare(
         `SELECT p.id AS project_id, COALESCE(ps.version, 0) AS version
            FROM projects p
@@ -524,16 +644,43 @@ orgSettings.on(
             AND ps.count_structural IS NULL`,
       ).bind(orgId).all<{ project_id: string; version: number }>()
       // Their own settings row is untouched — only what it RESOLVES to moved.
-      notifyProjectRoomsBestEffort(
-        c,
-        (inheriting ?? []).map((row) => ({
-          projectId: row.project_id,
-          version: Number(row.version),
-        })),
-      )
+      for (const row of inheriting ?? []) toNotify.set(row.project_id, Number(row.version))
     }
+    // AQU-1771: the validation thresholds, same rule. The settings row is
+    // already saved, so a failed re-projection is logged and flagged on the
+    // response rather than turned into an error the client would read as "not
+    // saved". The histogram-based progress reads resolve the new threshold
+    // either way; only the per-cell validated flag lags until the project's
+    // next threshold change.
+    let reprojectionFailed = false
+    let thresholdChanged = false
+    for (const key of VALIDATION_THRESHOLD_KEYS) {
+      if (current.settings[key] === body.settings[key]) continue
+      thresholdChanged = true
+      try {
+        for (const row of await applyOrgThresholdChange(c.env, orgId, key)) {
+          toNotify.set(row.projectId, row.version)
+        }
+      } catch (err) {
+        reprojectionFailed = true
+        console.error(`[org-settings] ${key} re-projection failed for org ${orgId}:`, err)
+      }
+    }
+    // AQU-1771: what the inheriting projects push to Monday moved too — for the
+    // headings rule and for an approvals default alike (db/shared/monday-dirty.ts
+    // lists the keys computeProjectMetrics reads). Marked once per save, however
+    // many of those keys it changed; the push itself runs after the response.
+    if (headingsRuleChanged || thresholdChanged) {
+      await markOrgMondayLinksDirty(c.env.AQUILLA_PG, orgId)
+      pushDirtyLinksAfterResponse(c, { orgId })
+    }
+    notifyProjectRoomsBestEffort(
+      c,
+      [...toNotify].map(([projectId, version]) => ({ projectId, version })),
+    )
 
-    return c.json(fresh)
+    const saved = { ...fresh, ...(await loadOverrideCounts(c.env, orgId)) }
+    return c.json(reprojectionFailed ? { ...saved, warning: "reprojection_failed" } : saved)
   },
 )
 
@@ -678,13 +825,18 @@ export default orgSettings
 // would be one typo away from wiping AI config or languages org-wide.
 // ──────────────────────────────────────────────────────────────────────────
 
+// AQU-1771: the same reset for validation-count and validation-count-audio.
+// Still key-specific: the slug must be one of RESET_SLUGS, never a free key.
 orgSettings.post(
-  "/:orgId/settings/count-structural/reset-project-overrides",
+  "/:orgId/settings/:slug/reset-project-overrides",
   authMiddleware,
   async (c) => {
     const user = c.get("user")
     const orgId = parseInt(c.req.param("orgId") ?? "", 10)
     if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
+    const key = RESET_SLUGS[c.req.param("slug") ?? ""]
+    if (!key) return c.json({ error: "unknown setting" }, 404)
+    const column = INHERITED_KEY_COLUMNS[key]
 
     const role = await getEffectiveOrgRole(c.env, orgId, user)
     if (role == null) return c.json({ error: "no access to org" }, 403)
@@ -704,7 +856,7 @@ orgSettings.post(
          FROM project_settings ps
          JOIN projects p ON p.id = ps.project_id
         WHERE p.org_id = ? AND p.archived_at IS NULL
-          AND ps.count_structural IS NOT NULL`,
+          AND ps.${column} IS NOT NULL`,
     ).bind(orgId).all<{ project_id: string; version: number }>()
 
     if (affected.length === 0) return c.json({ cleared: 0, projectIds: [] })
@@ -723,9 +875,28 @@ orgSettings.post(
         WHERE p.id = ps.project_id
           AND p.org_id = ?
           AND p.archived_at IS NULL
-          AND ps.count_structural IS NOT NULL`,
-    ).bind(COUNT_STRUCTURAL_KEY, user.id, orgId).run()
+          AND ps.${column} IS NOT NULL`,
+    ).bind(key, user.id, orgId).run()
 
+    // AQU-1771: those projects now take the org's text threshold, which is
+    // projected into cells.validated — re-derive it for exactly them.
+    if (key === "validationCount") {
+      const affectedIds = new Set(affected.map((row) => row.project_id))
+      const inheriting = await listInheritingProjects(c.env.AQUILLA_PG, orgId, "validationCount")
+      for (const project of inheriting) {
+        if (!affectedIds.has(project.projectId)) continue
+        await c.env.AQUILLA_PG.batch(
+          reprojectValidatedStmts(c.env.AQUILLA_PG, project.projectId, project.threshold),
+        )
+      }
+    }
+
+    // AQU-1771: they now resolve to the org's value, so their boards are stale.
+    await markProjectMondayLinksDirty(
+      c.env.AQUILLA_PG,
+      affected.map((row) => row.project_id),
+    )
+    pushDirtyLinksAfterResponse(c, { projectIds: affected.map((row) => row.project_id) })
     // The UPDATE above bumped each of these rows by one.
     notifyProjectRoomsBestEffort(
       c,

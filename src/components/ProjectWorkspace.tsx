@@ -100,6 +100,7 @@ import { buildLibraryLintResolver } from "@/lib/rules/effective-rules"
 import { resolveFileGenre } from "@/lib/rules/file-genre"
 import { bookGenre } from "@/lib/scripture/book-genres"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
+import { effectiveRepetitionPropagation, resolveProjectPolicy } from "@/lib/sync/project-org-policy"
 import { useActiveOrg } from "@/context/OrgContext"
 import { resolveOverlayFileId } from "@/lib/navigation/overlay-file-restore"
 import {
@@ -185,6 +186,7 @@ import {
 import type { PaintGate } from "./project-workspace-helpers"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
 import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope, type ReplaceAllPayload } from "./ParallelPassagesPanel"
+import type { FindToggles } from "@/lib/search/workspace-index"
 import type { EditorTableHandle } from "./EditorTable"
 import type { WorkspaceSearchResult } from "@/hooks/useWorkspaceSearch"
 import { StatusBar } from "./StatusBar"
@@ -527,7 +529,8 @@ import { useMentionCandidates } from "@/hooks/useMentionCandidates"
 import { useMyScopeGrant } from "@/hooks/useMyScopes"
 import { slotSelections } from "@/lib/sync/cell-audio-read-types"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
-import { planRepetitionPropagation, buildRepetitionCounts } from "@/lib/workflow/repetition-propagation"
+import { buildRepetitionCounts } from "@/lib/workflow/repetition-propagation"
+import { showBulkValidateToast, useRepetitionValidation, type BulkRepetitionOutcome, type UseRepetitionValidation } from "@/hooks/useRepetitionValidation"
 import {
   batchValidateTelemetry,
   batchValidateToast,
@@ -556,13 +559,13 @@ import {
   useTrackedCellRef as useEditorViewportTrackedCellRef,
 } from "@/hooks/useEditorViewportStore"
 
-// Import runs inline in the workspace (upload + eBible corpus tabs). The
-// AD-11 plan carves import into a standalone apps/import Worker, but that
-// app is still a placeholder shell — routing users there is a dead end.
-// The import pipeline (parsers + outbox + events-emit) is workspace-
-// internal and not yet extracted into a shared package the standalone app
-// could consume, so the working ImportDialog stays hosted here. Lazy-loaded
-// because the eBible parser bundles a ~2MB vref table.
+// Import runs inline in the workspace (upload + eBible corpus tabs). An
+// earlier AD-11 plan carved import out into a standalone import Worker; that
+// monorepo layout was abandoned (see CLAUDE.md), so there is nowhere to route
+// users to. The import pipeline (parsers + outbox + events-emit) is
+// workspace-internal and was never extracted into a shared package, so the
+// ImportDialog stays hosted here. Lazy-loaded because the eBible parser
+// bundles a ~2MB vref table.
 const ImportDialog = lazy(() =>
   import("./ImportDialog").then((mod) => ({ default: mod.ImportDialog })),
 )
@@ -1350,6 +1353,8 @@ export function ProjectWorkspace() {
   const [parallelOpen, setParallelOpen] = useState(false)
   const [parallelMode, setParallelMode] = useState<ParallelPanelMode>("search")
   const [parallelScope, setParallelScope] = useState<ParallelPanelScope>("project")
+  const [parallelSeedQuery, setParallelSeedQuery] = useState("")
+  const [parallelSeedFind, setParallelSeedFind] = useState<FindToggles | undefined>(undefined)
   // FRO-308: the last real dock tab is restored per project from localStorage.
   const {
     activeTab: dockTab,
@@ -2241,7 +2246,18 @@ export function ProjectWorkspace() {
     project?.id ?? null,
     project?.ttsSettings,
     cellSummaries,
-    (profiles) => { void patchSettings({ ttsSettings: profiles }) },
+    // AQU-1943: the server caps the voice library and the cast-assignment map.
+    // A 422 means this value is never going to be stored, so say so where the
+    // person who just created the voice is looking, and report the refusal so
+    // the durable local copy is rolled back instead of silently diverging.
+    async (profiles) => {
+      const outcome = await patchSettings({ ttsSettings: profiles })
+      if (outcome.kind === "error" && outcome.status === 422) {
+        toast.add({ type: "error", title: outcome.message })
+        return { rejected: true }
+      }
+      return { rejected: false }
+    },
     resolveActiveTargetLanguage(
       activeLane,
       null,
@@ -5150,21 +5166,7 @@ export function ProjectWorkspace() {
   // on Y.Doc maps and the v1.x event grammar isn't in this build, so these are
   // no-ops and the drawer renders empty.
   // Org-level rules: fetch from org settings and merge with project rules.
-  const {
-    orgRules,
-    canExport: canExportByOrgPolicy,
-    hasFetched: orgSettingsFetched,
-    // AQU-496: whether below-lead members may self-assign work.
-    allowSelfAssignment,
-    // AQU-581: whether a lane-scoped member may assign work to OTHERS inside
-    // the lanes the org scoped them to.
-    allowScopedLaneAssignment,
-    // AQU-1037: org-configured floor for assigning work to anyone.
-    assignmentMinRole,
-    // AQU-1391: org default for repetition auto-propagation (a project may
-    // override it either way).
-    autoPropagateRepetitions: orgAutoPropagateRepetitions,
-  } = useOrgSettings(
+  const orgSettingsForProject = useOrgSettings(
     project?.orgId ?? activeOrg?.id,
     projectOrg?.role?.level ?? null,
     // FRO-253 WARN fix: compare the project-resolved role (AD-12 max-wins), not
@@ -5173,6 +5175,32 @@ export function ProjectWorkspace() {
     // written by the sync-token onRole callback above.
     project?.syncRole?.level ?? null,
   )
+  const { orgRules } = orgSettingsForProject
+  // AQU-1771: the org policy THIS project applies, from the project's own
+  // settings response — which a member outside the org can read, unlike the
+  // org's settings. The org read above is only the fallback for a server that
+  // predates it. See src/lib/sync/project-org-policy.ts.
+  const projectPolicy = resolveProjectPolicy({
+    orgPolicy: projectSettings?.orgPolicy,
+    visibilityFloors: projectSettings?.visibilityFloors,
+    projectSettings: projectSettings?.settings,
+    org: orgSettingsForProject,
+    roleLevel: project?.syncRole?.level ?? null,
+  })
+  const {
+    canExport: canExportByOrgPolicy,
+    ready: orgSettingsFetched,
+    // AQU-496: whether below-lead members may self-assign work.
+    allowSelfAssignment,
+    // AQU-581: whether a lane-scoped member may assign work to OTHERS inside
+    // the lanes the org scoped them to.
+    allowScopedLaneAssignment,
+    // AQU-1037: org-configured floor for assigning work to anyone.
+    assignmentMinRole,
+    // AQU-1391: org default for repetition auto-propagation (a project may
+    // override it either way). OFF until the org's answer is known.
+    autoPropagateRepetitions: orgAutoPropagateRepetitions,
+  } = projectPolicy
   const { rules } = useRules(
     project ?? null,
     refresh,
@@ -5256,6 +5284,10 @@ export function ProjectWorkspace() {
     deleteComment,
     resolveThread: resolveCommentThread,
     refresh: refreshComments,
+    // AQU-1957: comment.* events the outbox gave up on. The hook has already
+    // pulled their optimistic comments back out, so the drawer needs these to
+    // explain the text that disappeared instead of posting.
+    refusals: commentSubmitRefusals,
   } = useComments({
     projectId: project?.id ?? null,
     getToken: getTokenForFile,
@@ -7268,6 +7300,8 @@ export function ProjectWorkspace() {
       if ((e.metaKey || e.ctrlKey) && !e.altKey && (key === "f" || key === "k")) {
         e.preventDefault()
         setParallelMode("search")
+        setParallelSeedQuery("")
+        setParallelSeedFind(undefined)
         setParallelScope(
           key === "k" ? "project" : e.shiftKey ? "project" : activeFileId ? "file" : "project",
         )
@@ -7277,6 +7311,8 @@ export function ProjectWorkspace() {
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && key === "r") {
         e.preventDefault()
         setParallelMode("replace")
+        setParallelSeedQuery("")
+        setParallelSeedFind(undefined)
         setParallelScope("project")
         setParallelOpen(true)
       }
@@ -10171,6 +10207,14 @@ export function ProjectWorkspace() {
     setExportOpen(true)
   }, [orgSettingsFetched])
 
+  // AQU-1486: the bulk repetition planner lives in `useRepetitionValidation`,
+  // which needs the commit plumbing declared further down; the batch action
+  // and its report are built here, so they reach it through this ref.
+  const prepareBulkRepetitionsRef = useRef<{
+    prepare: UseRepetitionValidation["prepareBulkRepetitions"]
+    toastExtras: UseRepetitionValidation["bulkToastExtras"]
+  } | null>(null)
+
   /**
    * AQU-1503: the single exit of a batch text validation — ONE visible message
    * and ONE PostHog event, on every outcome, including the outcomes that
@@ -10179,17 +10223,19 @@ export function ProjectWorkspace() {
    * tell "the click did nothing" apart from "nobody clicked".
    */
   const reportBatchValidate = useCallback(
-    (summary: BatchValidateSummary, source: "selection" | "workspace-action") => {
+    (
+      summary: BatchValidateSummary,
+      source: "selection" | "workspace-action",
+      repetitions: BulkRepetitionOutcome | null = null,
+    ) => {
       posthog.capture(BATCH_VALIDATE_ATTEMPTED, batchValidateTelemetry(summary, source))
       const message = batchValidateToast(summary, t, formatLocaleList)
-      toast.add({
-        type: message.type,
-        title: message.title,
-        ...(message.description ? { description: message.description } : {}),
-      })
+      // AQU-1486: still ONE message — the repetitions' note and Undo ride on it.
+      showBulkValidateToast(message, prepareBulkRepetitionsRef.current?.toastExtras(repetitions) ?? { note: null })
     },
     [t, formatLocaleList],
   )
+
 
   // AQU-983: the file modal writes these, then the menu action runs. Defaults
   // match the old one-shot actions: next package of empty cells, and no
@@ -10261,6 +10307,13 @@ export function ProjectWorkspace() {
       }
       void (async () => {
         try {
+          // AQU-1486: ask what the run's repetitions get BEFORE anything is
+          // written, so the dialog's counts are a promise, not a report.
+          const asking = prepareBulkRepetitionsRef.current?.prepare(
+            summary.validatable.map((cell) => cell.id),
+            { cap: project?.completionSettings?.validationBatchSize },
+          ) ?? null
+          const repetitionRun = asking ? await asking : null
           for (const cell of summary.validatable) {
             await emitCellValidate({
               projectId,
@@ -10272,11 +10325,19 @@ export function ProjectWorkspace() {
               surface: "batch", // AQU-1572
             })
           }
+          const repetitions = repetitionRun
+            ? await repetitionRun.apply(summary.validatable.map((cell) => ({
+              cellId: cell.id,
+              fileId: cell.fileId,
+              editEventId: cell.targetEventId!,
+            })))
+            : null
           await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
           await refreshOutboxPending()
           revalidateAuditStats()
-          for (const cell of summary.validatable) revalidateCell(cell.id)
-          reportBatchValidate(summary, "workspace-action")
+          if (repetitions) revalidateCells()
+          else for (const cell of summary.validatable) revalidateCell(cell.id)
+          reportBatchValidate(summary, "workspace-action", repetitions)
         } catch {
           // A throw part-way leaves SOME cells queued, so the message says the
           // run may be partial rather than inviting a blind retry.
@@ -12565,9 +12626,14 @@ export function ProjectWorkspace() {
   // answer, else its org's, else on. Same three-state shape as
   // `countStructuralCells`: an absent project key means "inherit", so a
   // project that has never been configured follows its org.
-  const autoPropagateRepetitions =
-    projectSettings?.settings?.autoPropagateRepetitions
-    ?? orgAutoPropagateRepetitions
+  //
+  // AQU-1771: the org's half comes with the PROJECT's settings, so a member
+  // outside the org (who cannot read the org's settings) no longer reads it as
+  // the built-in ON and writes copies the org turned off.
+  const autoPropagateRepetitions = effectiveRepetitionPropagation(
+    projectSettings?.settings?.autoPropagateRepetitions,
+    { autoPropagateRepetitions: orgAutoPropagateRepetitions },
+  )
 
   // AQU-1391: which sources repeat in the OPEN file, for the "Repetition ×N"
   // badge. Gated on the setting so a project that opted out grows no new
@@ -12582,6 +12648,13 @@ export function ProjectWorkspace() {
     [autoPropagateRepetitions, cellStore, cellStoreVersion],
   )
 
+  const isRepetitionWritable = useCallback(
+    (cell: { id: string; fileId: string }) =>
+      !checkLockHolder(cell.id) && isInMemberScope(myScopes, cell.fileId, activeLane),
+    [checkLockHolder, myScopes, activeLane],
+  )
+  const flushRepetitionWrites = useCallback(() => handleCellCommitted(), [handleCellCommitted])
+
   /**
    * AQU-1391: carry a just-validated cell's translation to every repeated
    * source segment in the open file, the way Trados/memoQ/Matecat do.
@@ -12595,120 +12668,45 @@ export function ProjectWorkspace() {
    * was done. The row owns that timing (`settleOwedRepetitions` in
    * EditorTable); this handler only ever sees a settled cell.
    *
-   * Propagated cells land UNVALIDATED: this fills work in, it does not sign
-   * it off. The commits carry `propagatedFromCellId` so history can say where
-   * the text came from.
+   * AQU-1486: the repetitions are filled either way; the reviewer chooses
+   * whether to validate them too — a dialog after a click, a "Validate all"
+   * button on a typed edit's toast, one question for a bulk validation. The
+   * commits carry `propagatedFromCellId` so history can say where the text
+   * came from. See `useRepetitionValidation`.
    */
-  const handleCellValidated = useCallback(async (cellId: string) => {
-    if (!autoPropagateRepetitions) return
-    if (!project?.id || laneWriteFrozen) return
-    if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) return
-
-    const planned = planRepetitionPropagation({
-      confirmedCellId: cellId,
-      // Fresh read at call time — no version dependency (React Compiler would
-      // memoize a versioned read away; see readAtVersion's note).
-      cells: cellStore.getAllCellViews(),
-      resolveParentId: resolveTargetCommitParentId,
-    })
+  const repetitionRoleLevel = project?.syncRole?.level ?? null
+  const {
+    handleCellValidated,
+    prepareBulkRepetitions,
+    bulkToastExtras,
+    dialogs: repetitionDialogs,
+  } = useRepetitionValidation({
+    enabled: autoPropagateRepetitions,
+    projectId: project?.id,
+    username: currentUsername,
+    lane: activeLane,
+    canCommit: !laneWriteFrozen && canPerform("target.cell.commit", repetitionRoleLevel),
+    canValidateRepeats: Boolean(project)
+      && !laneWriteFrozen
+      && canPerform("cell.validate", repetitionRoleLevel)
+      && project!.allowSelfValidation !== false
+      && textValidationScope(project!, { roleLevel: repetitionRoleLevel, username: currentUsername }).canValidate,
+    // Fresh read at call time — no version dependency (React Compiler would
+    // memoize a versioned read away; see readAtVersion's note).
+    getCells: getActiveCells,
     // Never write a cell somebody else holds, or one outside the caller's
     // assigned scope — a guaranteed 403 that would only dead-letter.
-    const commits = planned.filter(
-      (c) => !checkLockHolder(c.cellId) && isInMemberScope(myScopes, c.fileId, activeLane),
-    )
-    if (commits.length === 0) return
-
-    const commitInputs = commits.map((c) => ({
-      projectId: project.id,
-      fileId: c.fileId,
-      cellId: c.cellId,
-      parentId: c.parentId,
-      sourceEventId: c.sourceEventId,
-      value: c.value,
-      valueHtml: c.valueHtml,
-      author: currentUsername,
-      targetLang: activeLane,
-      propagatedFromCellId: cellId,
-    }))
-    for (const c of commits) {
-      applyOptimisticTargetEdit(c.cellId, { value: c.value, valueHtml: c.valueHtml })
-    }
-    let eventIds: string[]
-    try {
-      eventIds = await emitTargetCellCommits(commitInputs)
-    } catch (error) {
-      console.warn("[repetition-propagation] enqueue failed:", error)
-      for (const c of commits) {
-        applyOptimisticTargetEdit(c.cellId, {
-          value: c.previousValue,
-          valueHtml: c.previousValueHtml ?? "",
-        })
-      }
-      return
-    }
-    commits.forEach((c, i) => rememberPendingTargetCommit(c.cellId, eventIds[i], c.parentId))
-    await handleCellCommitted()
-
-    toast.add({
-      title: t("editor.repetition.applied", { count: commits.length }),
-      timeout: 10_000,
-      actionProps: {
-        children: t("editor.repetition.undo"),
-        onClick: () => {
-          void (async () => {
-            // Each undo chains on the propagation commit it reverses — that
-            // event is this cell's head now, so the CAS accepts it. No
-            // `propagatedFromCellId`: the restored text is the cell's own.
-            const undoInputs = commits.map((c, i) => ({
-              projectId: project.id,
-              fileId: c.fileId,
-              cellId: c.cellId,
-              parentId: eventIds[i],
-              sourceEventId: c.sourceEventId,
-              value: c.previousValue,
-              // Explicit '' rather than an absent key: undoing into a cell that
-              // had no rich text must CLEAR the html the propagation wrote,
-              // and an omitted field would leave it standing.
-              valueHtml: c.previousValueHtml ?? "",
-              author: currentUsername,
-              targetLang: activeLane,
-            }))
-            for (const c of commits) {
-              applyOptimisticTargetEdit(c.cellId, {
-                value: c.previousValue,
-                valueHtml: c.previousValueHtml ?? "",
-              })
-            }
-            try {
-              const undoIds = await emitTargetCellCommits(undoInputs)
-              commits.forEach((c, i) =>
-                rememberPendingTargetCommit(c.cellId, undoIds[i], eventIds[i]),
-              )
-              await handleCellCommitted()
-            } catch (error) {
-              console.warn("[repetition-propagation] undo failed:", error)
-              toast.add({ type: "error", title: t("editor.repetition.undoFailed") })
-            }
-          })()
-        },
-      },
-    })
-  }, [
-    activeLane,
+    isWritable: isRepetitionWritable,
+    resolveParentId: resolveTargetCommitParentId,
     applyOptimisticTargetEdit,
-    autoPropagateRepetitions,
-    cellStore,
-    checkLockHolder,
-    currentUsername,
-    handleCellCommitted,
-    laneWriteFrozen,
-    myScopes,
-    project,
     rememberPendingTargetCommit,
-    resolveTargetCommitParentId,
-    t,
-    toast,
-  ])
+    afterWrite: flushRepetitionWrites,
+  })
+  // The "Batch validate text…" action is built above this point; it reaches
+  // the bulk planner through this ref.
+  useEffect(() => {
+    prepareBulkRepetitionsRef.current = { prepare: prepareBulkRepetitions, toastExtras: bulkToastExtras }
+  }, [prepareBulkRepetitions, bulkToastExtras])
 
   // Target edits made beside the agent use the editor's normal commit chain;
   // the workbench is another view of the document, not a separate draft store.
@@ -14013,8 +14011,10 @@ export function ProjectWorkspace() {
                 isReadOnly={laneWriteFrozen}
                 onAfterReplace={rebuildSearchIndex}
                 onReplaceAll={handleReplaceAll}
-                onOpenFullPanel={() => {
-                  setParallelMode("search")
+                onOpenFullPanel={(intent) => {
+                  setParallelMode(intent.mode)
+                  setParallelSeedQuery(intent.query)
+                  setParallelSeedFind(intent.find)
                   setParallelScope(activeFileId ? "file" : "project")
                   setParallelOpen(true)
                 }}
@@ -14103,6 +14103,8 @@ export function ProjectWorkspace() {
                   completeSingle={completeSingle}
                   completeBatch={completeBatch}
                   onValidationCommitted={handleBulkValidationCommitted}
+                  prepareBulkRepetitions={prepareBulkRepetitions}
+                  bulkRepetitionToastExtras={bulkToastExtras}
                   audioMode={lens === "audio"}
                   orderedBy={activeFile ? fileOrderedBy(activeFile) : undefined}
                   mediaLayer={!!audioLens}
@@ -15149,7 +15151,7 @@ export function ProjectWorkspace() {
                   rides in asideEdge so it isn't stretched by Resizable. */}
               {rightRail.biblesPanel && (
                 <ParallelBiblesSidebar
-                  key={activeFile!.id}
+                  key={`${activeFile!.id}-bibles`}
                   trackedRef={trackedCellRef}
                   open
                   onToggle={() => {
@@ -15163,7 +15165,7 @@ export function ProjectWorkspace() {
                   collapsed edge tab rides in asideEdge alongside the bibles'. */}
               {rightRail.resourcesPanel && (
                 <VerseResourcesSidebar
-                  key={activeFile!.id}
+                  key={`${activeFile!.id}-resources`}
                   projectId={project!.id}
                   trackedRef={trackedCellRef}
                   getJwt={() => jwtRef.current}
@@ -15323,6 +15325,7 @@ export function ProjectWorkspace() {
                 isError={commentsIsError}
                 isLoadingRest={commentsIsLoadingRest}
                 onRetry={() => { void refreshComments() }}
+                submitRefusals={commentSubmitRefusals}
               />
             )}
             {attachmentsDrawerOpen && project && activeFileId && (
@@ -15741,6 +15744,8 @@ export function ProjectWorkspace() {
             return outcome.kind === "ok"
           }} />
       </Suspense>
+      {/* AQU-1486: "Validate the repeated rows too?" and the bulk conflict picker. */}
+      {repetitionDialogs}
       {/* Label-import / direction-role results use toast (see toast.add above). */}
       <Suspense fallback={null}>
         <ExportDialog
@@ -15839,6 +15844,8 @@ export function ProjectWorkspace() {
         isReadOnly={laneWriteFrozen}
         onAfterReplace={rebuildSearchIndex}
         onReplaceAll={handleReplaceAll}
+        initialQuery={parallelSeedQuery}
+        initialFind={parallelSeedFind}
       />
       {project && (
         <CloneVoiceModalHost

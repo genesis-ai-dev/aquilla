@@ -144,7 +144,16 @@ export type RuleCheck =
   | { type: "source-requires-target"; sourcePattern: string; targetPattern: string; caseSensitive?: boolean }
   | { type: "target-forbids"; targetPattern: string; caseSensitive?: boolean }
   | { type: "source-target-match"; pattern: string }
-  | { type: "builtin"; checkId: BuiltinCheckId }
+  /**
+   * `punctuation` (AQU-1906) is resolved per LANE by `resolveBuiltinRules`
+   * and read by `rule-engine`'s builtin branch. It is never stored: built-in
+   * rules are synthesized on read, so nothing persists a `check` carrying it.
+   */
+  | {
+      type: "builtin"
+      checkId: BuiltinCheckId
+      punctuation?: import("../../../db/shared/punctuation-conventions").PunctuationConventions | null
+    }
 
 export type RuleAutofix =
   | { kind: "regex-replace"; pattern: string; replacement: string; flags: string }
@@ -563,6 +572,12 @@ export interface ProjectRecord {
   /** Per-project enable/severity overrides for built-in algorithmic checks.
    *  Absent → registry defaults apply. */
   algorithmicChecks?: Partial<Record<BuiltinCheckId, AlgorithmicCheckOverride>>
+  /** AQU-1906: the same overrides for ONE target lane, keyed by legacy tag
+   *  (`''` = the default lane). Overlaid from
+   *  ProjectWideSettings.algorithmicChecksByLane. Read it through
+   *  `laneCheckOverrides` (src/lib/lqa/lane-builtin-checks.ts), never directly:
+   *  a lane's entry lies over `algorithmicChecks` rather than replacing it. */
+  algorithmicChecksByLane?: Record<string, Partial<Record<BuiltinCheckId, AlgorithmicCheckOverride>>>
   rulePenalties?: RulePenalties
   origin?: ProjectOrigin
   permissions?: ProjectPermissions

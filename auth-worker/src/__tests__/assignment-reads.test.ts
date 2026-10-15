@@ -126,6 +126,62 @@ describe("GET /api/v2/orgs/:orgId/assignments/workload", () => {
   })
 })
 
+// AQU-1771: the org's member-progress and roster floors decide who may read
+// the org workload, not a hard Maintainer gate; and a caller below Owner sees
+// only rows from projects whose Team card they could read themselves.
+describe("GET /api/v2/orgs/:orgId/assignments/workload — the org's floors", () => {
+  async function setOrgFloors(settings: Record<string, unknown>) {
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_settings (org_id, settings, version, updated_by) VALUES (1, ?, 1, 1)",
+    ).bind(JSON.stringify(settings)).run()
+  }
+  async function workloadIds(username: string): Promise<{ status: number; ids: string[] }> {
+    const res = await app.request(
+      "/api/v2/orgs/1/assignments/workload",
+      { headers: authHeader(await jwtFor(username)) },
+      env,
+    )
+    if (res.status !== 200) return { status: res.status, ids: [] }
+    const body = (await res.json()) as { assignments: Array<{ assignmentId: string }> }
+    return { status: 200, ids: body.assignments.map((a) => a.assignmentId).sort() }
+  }
+
+  it("lets a contributor read it once the org opens both floors to contributors", async () => {
+    await seedOrgWithAssignments()
+    await setOrgFloors({ memberProgressViewMinRole: 400, rosterViewMinRole: 400 })
+    expect(await workloadIds("anna")).toEqual({ status: 200, ids: ["as-anna", "as-bob"] })
+  })
+
+  it("still refuses a contributor when only the progress floor is opened", async () => {
+    await seedOrgWithAssignments()
+    await setOrgFloors({ memberProgressViewMinRole: 400 })
+    expect((await workloadIds("anna")).status).toBe(403)
+  })
+
+  it("refuses a maintainer once the progress floor is raised to owners", async () => {
+    await seedOrgWithAssignments()
+    await setOrgFloors({ memberProgressViewMinRole: 700 })
+    expect((await workloadIds("wendi")).status).toBe(403)
+  })
+
+  it("hides a contributor's view of projects they are not on", async () => {
+    await seedOrgWithAssignments()
+    await setOrgFloors({ memberProgressViewMinRole: 400, rosterViewMinRole: 400 })
+    // 'pb' is in the same org; anna has no grant on it, so an org contributor
+    // does not reach it (AQU-435) and its assignments are not hers to see.
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES ('pb', 'Mark', 1, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, cells_total, created_by, created_at)
+       VALUES ('as-pb', 'pb', 3, 'books', 'Mark', 1, 1, 1200)`,
+    ).run()
+    expect(await workloadIds("anna")).toEqual({ status: 200, ids: ["as-anna", "as-bob"] })
+    // The org maintainer reaches every project.
+    expect(await workloadIds("wendi")).toEqual({ status: 200, ids: ["as-anna", "as-bob", "as-pb"] })
+  })
+})
+
 describe("GET /api/v2/projects/:projectId/assignments/mine", () => {
   it("returns the caller's open assignments with derived progress", async () => {
     await seedOrgWithAssignments()
@@ -420,6 +476,54 @@ describe("GET /api/v2/projects/:projectId/assignments/all (per-project roster)",
     const body = (await res.json()) as { rosterHidden?: boolean; roster?: unknown }
     expect(body.rosterHidden).toBe(true)
     expect(body.roster).toBeUndefined()
+  })
+
+  // AQU-1771: the Team card shows itself from the progress and roster floors,
+  // so this read answers from the same two floors, not a hard Maintainer gate.
+  it("lets a contributor read it once the org opens both floors to contributors", async () => {
+    await seedOrgWithAssignments()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_settings (org_id, settings, version, updated_by) VALUES (1, ?, 1, 1)",
+    ).bind(JSON.stringify({ memberProgressViewMinRole: 400, rosterViewMinRole: 400 })).run()
+    const res = await app.request(
+      "/api/v2/projects/pa/assignments/all",
+      { headers: authHeader(await jwtFor("anna")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { roster: Array<{ userId: number }> }
+    expect(body.roster.map((w) => w.userId).sort()).toEqual([2, 3])
+  })
+
+  it("still refuses a contributor when only the progress floor is opened", async () => {
+    await seedOrgWithAssignments()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_settings (org_id, settings, version, updated_by) VALUES (1, ?, 1, 1)",
+    ).bind(JSON.stringify({ memberProgressViewMinRole: 400 })).run()
+    const res = await app.request(
+      "/api/v2/projects/pa/assignments/all",
+      { headers: authHeader(await jwtFor("anna")) },
+      env,
+    )
+    expect(res.status).toBe(403)
+    expect(((await res.json()) as { rosterHidden?: boolean }).rosterHidden).toBe(true)
+  })
+
+  it("refuses a project maintainer once the progress floor is raised to owners", async () => {
+    await seedOrgWithAssignments()
+    await seedUser(4, "mia")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('pa', 4, 600, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_settings (org_id, settings, version, updated_by) VALUES (1, ?, 1, 1)",
+    ).bind(JSON.stringify({ memberProgressViewMinRole: 700 })).run()
+    const res = await app.request(
+      "/api/v2/projects/pa/assignments/all",
+      { headers: authHeader(await jwtFor("mia")) },
+      env,
+    )
+    expect(res.status).toBe(403)
   })
 
   it("403s a contributor (anna) and a non-member (outsider)", async () => {

@@ -404,6 +404,7 @@ export async function normalizeProtectedCompletionWithRepair(
       throw new IdmlCompletionError(
         `The AI structure repair returned an empty draft for cell ${cell.id}; nothing was saved.`,
         error.diagnostics,
+        true,
       )
     }
     try {
@@ -417,6 +418,7 @@ export async function normalizeProtectedCompletionWithRepair(
         throw new IdmlCompletionError(
           `The AI draft changed a protected IDML anchor in cell ${cell.id}; a repair pass also failed. Nothing was saved.`,
           repairError.diagnostics.length > 0 ? repairError.diagnostics : error.diagnostics,
+          true,
         )
       }
       throw repairError
@@ -426,11 +428,23 @@ export async function normalizeProtectedCompletionWithRepair(
 
 export class IdmlCompletionError extends Error {
   readonly diagnostics: readonly IdmlDiagnostic[]
+  /**
+   * AQU-1964: true when the slot-stitch repair pass ran and still could not
+   * recover the draft. Carried on the error rather than re-derived from its
+   * wording, so the telemetry boundary can count "refused outright" apart from
+   * "refused after a repair attempt" without parsing the message.
+   */
+  readonly repairAttempted: boolean
 
-  constructor(message: string, diagnostics: readonly IdmlDiagnostic[] = []) {
+  constructor(
+    message: string,
+    diagnostics: readonly IdmlDiagnostic[] = [],
+    repairAttempted = false,
+  ) {
     super(diagnostics[0]?.message ? `${message} ${diagnostics[0].message}` : message)
     this.name = "IdmlCompletionError"
     this.diagnostics = diagnostics
+    this.repairAttempted = repairAttempted
   }
 }
 

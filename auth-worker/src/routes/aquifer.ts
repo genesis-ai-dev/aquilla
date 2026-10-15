@@ -23,6 +23,7 @@ import { Hono, type Context } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
+import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 import { resolveProjectRole } from "../services/project-permissions"
 import { isBibleResourcesEnabled } from "../lib/aquifer/gate"
 import {
@@ -37,6 +38,28 @@ const aquifer = new Hono<AuthHonoEnv>()
 
 /** Shared guard: member access + feature gate. Returns null when allowed,
  *  or a Response to short-circuit when not. */
+// Pen-test 2026-10-15: these routes fan out to third-party hosts (and
+// POST /answers publishes publicly) but had no per-user throttle.
+async function throttle(
+  c: Context<AuthHonoEnv>,
+  kind: string,
+  limit: number,
+  failMode: "open" | "closed",
+): Promise<Response | null> {
+  const r = await enforceRateLimit(c.env.AQUILLA_PG, {
+    kind,
+    identifier: userRateLimitIdentifier(c.get("user").id),
+    limit,
+    failMode,
+  })
+  if (r.allowed) return null
+  return c.json(
+    { error: "Too many requests. Try again shortly." },
+    429,
+    { "Retry-After": String(r.retryAfterSeconds) },
+  )
+}
+
 async function guard(c: Context<AuthHonoEnv>, projectId: string): Promise<Response | null> {
   const user = c.get("user")
   if (!projectId) return c.json({ error: "projectId required" }, 400)
@@ -54,6 +77,8 @@ aquifer.get("/search", authMiddleware, async (c) => {
   const projectId = c.req.query("projectId") ?? ""
   const blocked = await guard(c, projectId)
   if (blocked) return blocked
+  const throttled = await throttle(c, "aquifer_read", 300, "open")
+  if (throttled) return throttled
 
   const q = c.req.query("q") ?? ""
   if (!q.trim()) return c.json({ error: "q required" }, 400)
@@ -71,6 +96,8 @@ aquifer.get("/page", authMiddleware, async (c) => {
   const projectId = c.req.query("projectId") ?? ""
   const blocked = await guard(c, projectId)
   if (blocked) return blocked
+  const throttled = await throttle(c, "aquifer_read", 300, "open")
+  if (throttled) return throttled
 
   const path = c.req.query("path") ?? ""
   if (!path) return c.json({ error: "path required" }, 400)
@@ -87,6 +114,8 @@ aquifer.get("/tabitha", authMiddleware, async (c) => {
   const projectId = c.req.query("projectId") ?? ""
   const blocked = await guard(c, projectId)
   if (blocked) return blocked
+  const throttled = await throttle(c, "aquifer_read", 300, "open")
+  if (throttled) return throttled
 
   const book = c.req.query("book") ?? ""
   const chapter = Number(c.req.query("chapter"))
@@ -118,6 +147,9 @@ aquifer.post("/answers", authMiddleware, zValidator("json", publishSchema), asyn
   const body = c.req.valid("json")
   const blocked = await guard(c, body.projectId)
   if (blocked) return blocked
+  // Publishes to a public third-party site: fail closed, tight cap.
+  const throttled = await throttle(c, "aquifer_publish", 20, "closed")
+  if (throttled) return throttled
 
   const payload: AquiferPublishPayload = {
     question: body.question,

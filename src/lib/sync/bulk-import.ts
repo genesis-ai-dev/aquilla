@@ -1,4 +1,4 @@
-// Fast source-import upload path (pairs with apps/sync `POST /import`).
+// Fast source-import upload path (pairs with sync-worker's `POST /import`).
 //
 // A fresh source file (eBible = ~31k cells, USFM books, DOCX, …) is a genesis
 // import: one file.create plus N chained source.cell.create events. Rather than

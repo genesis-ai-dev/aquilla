@@ -7,6 +7,7 @@ import { readCountStructuralCells, structuralPredicateSql } from './structural-c
 import { visibleSourceSql } from './hidden-cells-scope'
 import { liveSourceSql } from './tombstoned-cells-scope'
 import { walkAnchorChain } from './cells-read-route'
+import { loadEffectiveThreshold } from '../../../db/shared/validation-threshold'
 
 export interface ProgressReadEnv {
   AQUILLA_PG?: AquillaDb
@@ -331,19 +332,17 @@ function compareCanonicalRefs(a: string, b: string): number {
     || a.localeCompare(b)
 }
 
+/**
+ * AQU-1771: project → org → 1, clamped to 1..15. Read through the STORED
+ * generated columns on both settings tables, never the multi-MB blob.
+ */
 async function readSettingsCount(
   db: AquillaDb,
   projectId: string,
   key: 'validationCount' | 'validationCountAudio',
 ): Promise<number> {
-  const row = await db
-    .prepare('SELECT settings FROM project_settings WHERE project_id = ?')
-    .bind(projectId)
-    .first<{ settings: string | null }>()
   try {
-    const parsed = row?.settings ? JSON.parse(row.settings) as Record<string, unknown> : null
-    const value = Math.floor(Number(parsed?.[key]))
-    return Number.isFinite(value) ? Math.min(MAX_VALIDATION_LEVELS, Math.max(1, value)) : 1
+    return Math.min(MAX_VALIDATION_LEVELS, await loadEffectiveThreshold(db, projectId, key))
   } catch {
     return 1
   }

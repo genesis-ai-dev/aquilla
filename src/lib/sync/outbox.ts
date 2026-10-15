@@ -257,6 +257,8 @@ const OFFLINE_ROUTABLE_KINDS: ReadonlySet<OutboxEventKind> = new Set<OutboxEvent
  * case — an event kind that never routes offline — never pays for the import
  * or a store round-trip at all.
  */
+let warnedOfflineStoreUnavailable = false
+
 async function routeToOfflineQueueIfEligible(event: CqrsRawEvent): Promise<boolean> {
   if (!OFFLINE_ROUTABLE_KINDS.has(event.kind)) return false
   const [{ getOfflineStore }, { isProjectOfflineReady }, { events: offlineEvents }] = await Promise.all([
@@ -264,8 +266,15 @@ async function routeToOfflineQueueIfEligible(event: CqrsRawEvent): Promise<boole
     import("@/lib/offline/offline-reads"),
     import("@/lib/offline/schema"),
   ])
-  const store = await getOfflineStore()
-  if (!isProjectOfflineReady(store, event.projectId)) return false
+  // Unopenable store (e.g. newer build owns it): queue in IndexedDB. Boot failure is memoized, so warn once.
+  const store = await getOfflineStore().catch((error: unknown) => {
+    if (!warnedOfflineStoreUnavailable) {
+      warnedOfflineStoreUnavailable = true
+      console.warn("[outbox] offline store unavailable — queueing in IndexedDB", error)
+    }
+    return null
+  })
+  if (!store || !isProjectOfflineReady(store, event.projectId)) return false
   store.commit(
     offlineEvents.eventQueued({
       id: event.id,
@@ -648,10 +657,14 @@ export async function getOutboxRecordsForCell(
   }
 }
 
-/** Oldest-first rows with status `pending` only, at most `limit`. Used by the flusher. */
+/** Oldest-first rows with status `pending` only, at most `limit`. Used by the flusher.
+ *  `skip` drops rows the caller is deliberately holding back (OPS-44) before
+ *  they count toward `limit`, so a large held backlog cannot fill the window
+ *  and hide the rows behind it. */
 export async function peekPendingOutboxBatch(
   limit: number,
   scope?: OutboxOwnerScope,
+  skip?: (record: OutboxRecord) => boolean,
 ): Promise<OutboxRecord[]> {
   const ownerKey = ownerForScope(scope)
   try {
@@ -668,7 +681,11 @@ export async function peekPendingOutboxBatch(
           return
         }
         const record = cursor.value as OutboxRecord
-        if (belongsToOwner(record, ownerKey) && (record.status ?? "pending") === "pending") {
+        if (
+          belongsToOwner(record, ownerKey) &&
+          (record.status ?? "pending") === "pending" &&
+          !skip?.(record)
+        ) {
           pending.push(record)
         }
         cursor.continue()

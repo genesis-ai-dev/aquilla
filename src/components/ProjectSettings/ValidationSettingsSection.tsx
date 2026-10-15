@@ -36,11 +36,21 @@ function roleOptionsFor(t: ReturnType<typeof useT>): { value: ValidationRoleFloo
   }))
 }
 
+/** AQU-1771: the counts may be null, meaning "use the organization's default". */
+type CountUpdates = { validationCount?: number | null; validationCountAudio?: number | null }
+
 interface Props {
   /** Project id for loading member usernames into the named-validators combobox. */
   projectId?: string | null
-  validationCount: number
-  validationCountAudio: number
+  /**
+   * AQU-1771: the project's OWN numbers. Null means it has none and takes the
+   * organization's default (`orgValidationCount`, then 1).
+   */
+  validationCount: number | null
+  validationCountAudio: number | null
+  /** AQU-1771: what "Organization default" currently resolves to. Null = the org set none (1). */
+  orgValidationCount?: number | null
+  orgValidationCountAudio?: number | null
   validationRoleFloor?: ValidationRoleFloor
   /** Named-user allowlist (usernames). Empty = any sufficiently-privileged user. */
   validationNamedUsers?: string[]
@@ -82,11 +92,9 @@ interface Props {
    */
   notice?: ReactNode
   onChange: (
-    updates: Partial<
+    updates: CountUpdates & Partial<
       Pick<
         ProjectRecord,
-        | "validationCount"
-        | "validationCountAudio"
         | "validationRoleFloor"
         | "validationNamedUsers"
         | "allowSelfValidation"
@@ -114,6 +122,8 @@ export function ValidationSettingsSection({
   projectId = null,
   validationCount,
   validationCountAudio,
+  orgValidationCount = null,
+  orgValidationCountAudio = null,
   validationRoleFloor = "reviewer",
   validationNamedUsers = [],
   allowSelfValidation = true,
@@ -148,28 +158,87 @@ export function ValidationSettingsSection({
     return n
   }
 
+  // AQU-1771: "Organization default (N)" or this project's own number, then
+  // the number itself when it is the project's own. Picking the default clears
+  // the project's value; picking "Set for this project" starts from the number
+  // in force, so nothing changes until the user edits it.
+  function countControl(opts: {
+    id: string
+    label: string
+    sourceAria: string
+    value: number | null
+    orgValue: number | null
+    emit: (next: number | null) => void
+  }) {
+    const sourceItems = [
+      { value: "inherit", label: t("projectSettings.validation.orgDefaultOption", { number: opts.orgValue ?? 1 }) },
+      { value: "custom", label: t("projectSettings.validation.customOption") },
+    ]
+    const source = opts.value == null ? "inherit" : "custom"
+    return (
+      <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
+        <div className="flex items-center gap-2">
+          <Select
+            items={sourceItems}
+            disabled={disabled}
+            value={source}
+            onValueChange={(v) => {
+              if (v === source) return
+              opts.emit(v === "inherit" ? null : (opts.orgValue ?? 1))
+            }}
+          >
+            <SelectTrigger
+              id={`${opts.id}-source`}
+              className="w-56 bg-background"
+              aria-label={opts.sourceAria}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {sourceItems.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          {opts.value != null && (
+            <Input
+              id={opts.id}
+              type="number"
+              min={1}
+              max={15}
+              disabled={disabled}
+              value={opts.value}
+              onChange={(e) => opts.emit(clamp(e.target.value))}
+              className="w-20 bg-background"
+              aria-label={opts.label}
+            />
+          )}
+        </div>
+      </DisabledFieldTooltip>
+    )
+  }
+
   return (
     <>
       {notice}
       <SettingsGroup label={t("projectSettings.validation.textGroup")}>
         <SettingsRow
-          label={<label htmlFor="validation-count">{t("projectSettings.validation.requiredTextLabel")}</label>}
+          // AQU-1771: while inheriting there is no number box, so the label names
+          // the "Organization default" select instead.
+          label={<label htmlFor={validationCount == null ? "validation-count-source" : "validation-count"}>{t("projectSettings.validation.requiredTextLabel")}</label>}
           description={t("projectSettings.validation.requiredTextDescription")}
-          control={
-            <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
-              <Input
-                id="validation-count"
-                type="number"
-                min={1}
-                max={15}
-                disabled={disabled}
-                value={validationCount}
-                onChange={(e) => onChange({ validationCount: clamp(e.target.value) })}
-                className="w-24 bg-background"
-                aria-label={t("projectSettings.validation.requiredTextLabel")}
-              />
-            </DisabledFieldTooltip>
-          }
+          control={countControl({
+            id: "validation-count",
+            label: t("projectSettings.validation.requiredTextLabel"),
+            sourceAria: t("projectSettings.validation.requiredTextSourceAria"),
+            value: validationCount,
+            orgValue: orgValidationCount,
+            emit: (next) => onChange({ validationCount: next }),
+          })}
         />
         <SettingsRow
           label={<label htmlFor="validation-role-floor">{t("projectSettings.validation.minRoleLabel")}</label>}
@@ -255,28 +324,21 @@ export function ValidationSettingsSection({
           (Sam, PR 1 test pass). */}
       <SettingsGroup label={t("projectSettings.validation.audioGroup")}>
         <SettingsRow
-          label={<label htmlFor="validation-count-audio">{t("projectSettings.validation.requiredAudioLabel")}</label>}
+          label={<label htmlFor={validationCountAudio == null ? "validation-count-audio-source" : "validation-count-audio"}>{t("projectSettings.validation.requiredAudioLabel")}</label>}
           description={t("projectSettings.validation.requiredAudioAppliesNote")}
-          control={
-            <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
-              <Input
-                id="validation-count-audio"
-                type="number"
-                min={1}
-                max={15}
-                // AQU-490: never gated on "audio exists". That gate read a
-                // device-local latch and locked a fully dubbed project's
-                // threshold on any browser that had not itself recorded; the
-                // number is a policy the projection applies at read time and
-                // is harmless to set before the first take.
-                disabled={disabled}
-                value={validationCountAudio}
-                onChange={(e) => onChange({ validationCountAudio: clamp(e.target.value) })}
-                className="w-24 bg-background"
-                aria-label={t("projectSettings.validation.requiredAudioLabel")}
-              />
-            </DisabledFieldTooltip>
-          }
+          // AQU-490: never gated on "audio exists". That gate read a
+          // device-local latch and locked a fully dubbed project's threshold
+          // on any browser that had not itself recorded; the number is a
+          // policy the projection applies at read time and is harmless to
+          // set before the first take.
+          control={countControl({
+            id: "validation-count-audio",
+            label: t("projectSettings.validation.requiredAudioLabel"),
+            sourceAria: t("projectSettings.validation.requiredAudioSourceAria"),
+            value: validationCountAudio,
+            orgValue: orgValidationCountAudio,
+            emit: (next) => onChange({ validationCountAudio: next }),
+          })}
         />
         <SettingsRow
           label={<label htmlFor="validation-role-floor-audio">{t("projectSettings.validation.minRoleAudioLabel")}</label>}

@@ -15,7 +15,7 @@ import { buildProgramme, slotAtProgrammeSec, type Programme, type ProgrammeSlot 
 import type { AudioTimingMode } from "@/lib/parsers/types"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
-import { joinedClip, tailCutNow } from "./tail-cut"
+import { joinedClip, seekableClip, tailCutNow } from "./tail-cut"
 import { preferredPlaybackExt } from "./lossless-sibling"
 import { getAudioQualityPref, type AudioQuality } from "@/lib/store/audio-quality-pref"
 import { audioMimeForExt } from "./mime"
@@ -2098,7 +2098,8 @@ function executeFire(
     stopAtClipSec: plan.stopAtClipSec,
   }
   overlayPool.push(entry)
-  const startAtClipSec = plan.startAtClipSec
+  let startAtClipSec = plan.startAtClipSec
+  const firedAtMs = performance.now()
   void (async () => {
     let resolved: ResolvedAudioSrc
     try {
@@ -2119,12 +2120,42 @@ function executeFire(
     // AQU-1767: a trimmed dub plays bytes that END at its trim end, so it stops
     // there by itself, however busy the page is; the timer stays as the
     // fallback for a clip that could not be cut (streamed, or not yet decoded).
-    if (timingMode !== "audioFirst" && plan.stopAtClipSec != null && resolved.bytes && resolved.frontier) {
-      const cut = tailCutNow(resolved.frontier.audioId, resolved.frontier.ext, resolved.bytes, plan.stopAtClipSec)
+    // A dub that must start partway into a clip that states no length (a
+    // webm) gets a WAV of it first, or it could not be seeked and would play
+    // from the recording's head (Sam's walk: a split take's later pieces).
+    if (timingMode !== "audioFirst" && resolved.frontier) {
+      const { audioId, ext } = resolved.frontier
+      const mustSeek = startAtClipSec > 0.05 && ext.toLowerCase() !== "wav"
+      let bytes = resolved.bytes
+      if (!bytes && mustSeek) {
+        try {
+          bytes = await fetchCellAudio({
+            projectId: ctx.projectId, fileId: cell.fileId, audioId, ext,
+            getSyncToken: audioSyncTokenFetcherForSession(ctx.session),
+          })
+        } catch { /* play it as resolved; the head is the worst of it */ }
+      }
+      const cut = !bytes
+        ? null
+        : mustSeek
+          ? await seekableClip(audioId, ext, bytes, plan.stopAtClipSec)
+          : plan.stopAtClipSec != null
+            ? tailCutNow(audioId, ext, bytes, plan.stopAtClipSec)
+            : null
+      if (!overlayPool.includes(entry)) {
+        if (resolved.objectUrl) URL.revokeObjectURL(resolved.objectUrl)
+        return
+      }
       if (cut) {
         if (resolved.objectUrl) URL.revokeObjectURL(resolved.objectUrl)
         const url = URL.createObjectURL(cut)
-        resolved = { ...resolved, src: url, objectUrl: url }
+        resolved = { ...resolved, src: url, objectUrl: url, streaming: false }
+      }
+      // The time that took, made up: the clock ran on while the clip was got
+      // ready, so the dub joins where the line is now, not where it was.
+      if (mustSeek && (progRunning() || (currentAudio && !currentAudio.paused) || externalDubsRunning())) {
+        const lateSec = ((performance.now() - firedAtMs) / 1000) * (progress.rate || 1)
+        startAtClipSec = plan.stopAtClipSec != null ? Math.min(startAtClipSec + lateSec, plan.stopAtClipSec) : startAtClipSec + lateSec
       }
     }
     wireOverlayElement(entry, { resolved }, startAtClipSec, { autostart: true })

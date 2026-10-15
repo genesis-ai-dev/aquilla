@@ -110,3 +110,35 @@ describe("a trimmed dub's bytes end at its trim", () => {
     expect(FakeAudio.instances.at(-1)!.src).toBe("http://stream.test/a.webm")
   })
 })
+
+// AQU-1767 (Sam's walk, 2026-10-15): a split take cleaned by Remove noise is a
+// webm, which states no length, so the queue would not seek it — and every
+// piece but the first played from the recording's head ("test one" where
+// "test three" was due). A dub that must start partway in gets a WAV first.
+describe("a dub that starts partway into a webm", () => {
+  class FakeOffline {
+    constructor(_c: number, _l: number, public sampleRate: number) {}
+    async decodeAudioData() {
+      const length = 4 * this.sampleRate
+      return { sampleRate: this.sampleRate, length, numberOfChannels: 1, getChannelData: () => new Float32Array(length) }
+    }
+  }
+  beforeEach(() => { vi.stubGlobal("OfflineAudioContext", FakeOffline) })
+
+  it("plays a WAV of it, cut at its trim end, so the seek to its start can happen", async () => {
+    cached.bytes = new Uint8Array(64) // a webm's bytes; decoded by the fake
+    const piece = {
+      ...line("webm", 3000),
+      attachments: { [`${TAKE}.webm`]: { type: "audio", url: `frontier-audio://${TAKE}.webm`, durationMs: 4000, trimStartMs: 1500, trimEndMs: 3000 } },
+    } as unknown as CellData
+    startExternalDubs(ctxFor([piece]))
+    setExternalDubsPlaying(true)
+    // 11.6s: 0.1s into a piece that starts 1.5s into its recording.
+    tickExternalDubs(11.6)
+    await settle()
+    const el = FakeAudio.instances.at(-1)!
+    const played = blobs[Number(el.src.split("/").pop()) - 1]
+    expect(played.type).toBe("audio/wav")
+    expect(played.size).toBe(44 + 3 * 48000 * 2)
+  })
+})

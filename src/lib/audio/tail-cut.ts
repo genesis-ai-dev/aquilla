@@ -180,6 +180,34 @@ export function tailCutNow(audioId: string, ext: string, bytes: Uint8Array, endS
   return null
 }
 
+/** Any other format, decoded whole and re-encoded as WAV: a clip that can be seeked. */
+async function wavOfDecoded(bytes: Uint8Array): Promise<Blob | null> {
+  const d = await decodeMono(bytes)
+  return d && d.pcm.length > 0 ? encodeWavPcm16(d.pcm, d.sampleRate) : null
+}
+
+/**
+ * AQU-1767 (Sam's walk, 2026-10-15): the clip as a dub that must START partway
+ * in can play it — a WAV, cut at `endSec` when given. A webm states no length
+ * (a recording, or a take cleaned by Remove noise), and the queue rightly will
+ * not seek one, so every piece but a split take's first played from the
+ * recording's head. Awaited — the dub is due, but a few milliseconds late
+ * beats the wrong words — and cached, so it is paid once per piece. A WAV is
+ * already seekable: null unless it needs cutting (tailCutNow does that).
+ */
+export async function seekableClip(audioId: string, ext: string, bytes: Uint8Array, endSec: number | null): Promise<Blob | null> {
+  if (ext.toLowerCase() === "wav") return endSec != null ? tailCutNow(audioId, ext, bytes, endSec) : null
+  if (endSec != null && endSec > TAIL_CUT_MAX_SEC) return null
+  const key = endSec != null ? `${audioId}.${ext}@${Math.round(endSec * 1000)}` : `${audioId}.${ext}@whole`
+  const hit = cache.get(key)
+  if (hit !== undefined) return await hit
+  const pending = endSec != null ? tailCutDecoded(bytes, endSec) : wavOfDecoded(bytes)
+  remember(key, pending)
+  const blob = await pending
+  if (cache.get(key) === pending) remember(key, blob)
+  return blob
+}
+
 export function __resetTailCutForTests(): void {
   cache.clear()
 }

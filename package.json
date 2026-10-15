@@ -169,6 +169,8 @@
     "neon:prune-phantom-voices:prod": "tsx scripts/neon-target.ts production prune-phantom-voices",
     "neon:verify:lanes:dev": "tsx scripts/neon-target.ts dev verify-lanes",
     "neon:verify:lanes:prod": "tsx scripts/neon-target.ts production verify-lanes",
+    "neon:scrub:local": "tsx scripts/neon-target.ts local scrub-integrations",
+    "neon:scrub:dev": "tsx scripts/neon-target.ts dev scrub-integrations",
     "migrate:users": "tsx scripts/migrate-users.ts",
     "neon:refresh:dev": "tsx scripts/refresh-neon-branch.ts dev",
     "neon:refresh-dev": "pnpm neon:refresh:dev",

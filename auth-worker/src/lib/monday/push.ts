@@ -29,7 +29,7 @@ import {
   type MondayMapping,
   type MondayMetricKey,
 } from "./types"
-import { getConnectionAccessToken } from "./tokens"
+import { getConnectionAccessToken, MondayForeignConnectionError } from "./tokens"
 import {
   fetchBoardItemNameIndex,
   findItemsByColumnValues,
@@ -253,6 +253,13 @@ export async function pushBoardLink(env: Env, link: IntegrationLinkRow): Promise
   try {
     token = await loadConnectionToken(env, link.connection_id)
   } catch (err) {
+    // AQU-1775: a row another deployment made is refused before any decrypt
+    // or refresh. Permanent — this worker can never use it — so it clears
+    // dirty_at like every other permanent failure.
+    if (err instanceof MondayForeignConnectionError) {
+      await recordPushOutcome(env, link, "error", err.message)
+      return { ok: false, pushed: false, linked: true, error: err.message }
+    }
     const message = err instanceof Error ? err.message : String(err)
     await recordPushOutcome(env, link, "error", `token decrypt failed: ${message}`)
     return { ok: false, pushed: false, linked: true, error: "token decrypt failed" }

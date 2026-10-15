@@ -34,6 +34,54 @@ export class MondayAuthError extends Error {
   }
 }
 
+/**
+ * AQU-1775: the connection row was made by another deployment. The dev Neon
+ * branch is restored from production, so without this a dev worker holding the
+ * shared signing key would decrypt a production org's tokens, refresh them
+ * (rotating production's refresh token away) and push dev's numbers onto a
+ * board linked on production. Raised BEFORE any decrypt or refresh, and never
+ * marks needs_reauth — the row is fine where it came from.
+ */
+export class MondayForeignConnectionError extends MondayAuthError {
+  constructor(
+    readonly connectionEnvironment: string | null,
+    readonly runningEnvironment: string,
+  ) {
+    super(
+      `Monday connection was made on ${connectionEnvironment ?? "an unknown environment"}; refusing to use it from ${runningEnvironment}`,
+    )
+    this.name = "MondayForeignConnectionError"
+  }
+}
+
+/**
+ * The environment this worker runs as — stamped on every new connection and
+ * compared on every token read. A local stack (WRANGLER_LOCAL=1, which the
+ * environment guard never allows on a first-party host) is "local" whatever
+ * its profile's ENVIRONMENT says, so a seeded local database never passes as
+ * production.
+ */
+export function runningEnvironment(env: Pick<Env, "ENVIRONMENT" | "WRANGLER_LOCAL">): string {
+  if (env.WRANGLER_LOCAL) return "local"
+  return env.ENVIRONMENT?.trim() || "unknown"
+}
+
+/**
+ * Null when this worker may use the row, else the refusal. A NULL environment
+ * predates migration 0175: production owns those rows, and no other deployment
+ * could have made one, so only production accepts them.
+ */
+export function foreignConnectionError(
+  env: Pick<Env, "ENVIRONMENT" | "WRANGLER_LOCAL">,
+  conn: Pick<IntegrationConnectionRow, "environment">,
+): MondayForeignConnectionError | null {
+  const running = runningEnvironment(env)
+  const origin = conn.environment ?? null
+  if (origin === running) return null
+  if (origin === null && running === "production") return null
+  return new MondayForeignConnectionError(origin, running)
+}
+
 export interface MondayTokenSet {
   accessToken: string
   refreshToken: string | null
@@ -164,6 +212,11 @@ export async function getConnectionAccessToken(
   env: Env,
   conn: IntegrationConnectionRow,
 ): Promise<string> {
+  // AQU-1775: another deployment's row is refused before any decrypt or
+  // refresh — a refresh here would rotate THAT deployment's token away.
+  const foreign = foreignConnectionError(env, conn)
+  if (foreign) throw foreign
+
   const expiresAt = conn.access_token_expires_at
   const expMs = expiresAt ? new Date(expiresAt).getTime() : null
   if (expMs == null || expMs - Date.now() > REFRESH_SKEW_MS) {

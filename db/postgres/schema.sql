@@ -1816,6 +1816,7 @@ CREATE TABLE IF NOT EXISTS integration_connections (
   access_token_expires_at TIMESTAMPTZ,-- from the access-token JWT exp claim; NULL = non-expiring (legacy flow)
   needs_reauth BOOLEAN NOT NULL DEFAULT FALSE, -- set when refresh fails (revoked/max lifetime); cleared on successful OAuth callback
   scopes TEXT,
+  environment TEXT,                   -- deployment that made the row (ENVIRONMENT at OAuth time); NULL = pre-0175 row, usable by production only (AQU-1775)
   created_by TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),

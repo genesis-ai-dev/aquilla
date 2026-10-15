@@ -8,7 +8,7 @@
  *   pnpm gate            # default sizes
  *   pnpm gate --quick    # smaller, for CI
  */
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import fc from "fast-check"
@@ -68,8 +68,9 @@ class Counting implements Translator {
   }
 }
 
+/** Public corpus plus any private customer files in fixtures/private/ (git-ignored). */
 const corpus = (): Array<[string, Uint8Array]> =>
-  ["fixtures/cc0", "fixtures/third-party/simpleidml"].flatMap((d) =>
+  ["fixtures/cc0", "fixtures/third-party/simpleidml", ...(existsSync(join(ROOT, "fixtures/private")) ? ["fixtures/private"] : [])].flatMap((d) =>
     readdirSync(join(ROOT, d))
       .filter((f) => f.endsWith(".idml"))
       .map((f): [string, Uint8Array] => [`${d}/${f}`, new Uint8Array(readFileSync(join(ROOT, d, f)))]),

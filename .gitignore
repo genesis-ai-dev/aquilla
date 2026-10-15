@@ -3,3 +3,4 @@ demo-workspace/
 .scratch/
 *.log
 .DS_Store
+fixtures/private/

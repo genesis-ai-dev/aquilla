@@ -50,6 +50,7 @@ describe("ViolationToast", () => {
     expect(screen.getByRole("button", { name: /waive/i })).toBeInTheDocument()
     expect(document.querySelector('[data-slot="toast-viewport"]')).toHaveClass(
       "bottom-4",
+      "z-[100]",
       "sm:right-4",
       "sm:left-auto",
     )

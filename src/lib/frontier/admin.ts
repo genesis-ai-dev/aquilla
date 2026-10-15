@@ -7,6 +7,7 @@
 import { FRONTIER_BASE } from "./auth"
 import { fetchWithTimeout } from "./orgs"
 import { UserError } from "@/lib/errors/user-error"
+import { notifyElevationGranted } from "@/lib/errors/elevation-required-signal"
 
 const authHeaders = (jwt: string): Record<string, string> => ({
   Authorization: `Bearer ${jwt}`,
@@ -247,7 +248,11 @@ export async function verifyAdminElevation(jwt: string, code: string): Promise<{
     body: JSON.stringify({ code }),
   })
   if (!res.ok) throw new UserError(res.status, await readError(res))
-  return (await res.json()) as { elevatedUntil: string }
+  const body = (await res.json()) as { elevatedUntil: string }
+  // OPS-44: every step-up path (the global prompt, the admin console gate)
+  // lands here, so this is where waiting work hears that it may retry.
+  notifyElevationGranted()
+  return body
 }
 
 export async function getPlatformSettings(jwt: string): Promise<PlatformSettingsResponse> {

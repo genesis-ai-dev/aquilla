@@ -106,7 +106,7 @@ export async function refusalForArchivedLane(
   visibleLaneIds: ReadonlySet<string> | null = null,
 ): Promise<string | null> {
   const [settings, lanes] = await Promise.all([
-    cache.projectSettings(projectId),
+    cache.writePathSettings(projectId),
     rowsFor(db, projectId, cache),
   ])
   return archivedLaneReason({

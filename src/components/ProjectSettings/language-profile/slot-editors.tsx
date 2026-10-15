@@ -15,13 +15,16 @@ import {
 } from "@/components/ui/select"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
-import type {
-  DivineNamesDraft,
-  KinTermsDraft,
-  NumberWordsDraft,
-  PronounsDraft,
-  QuestionMarkersDraft,
-  TriState,
+import {
+  PUNCTUATION_MARK_CLASSES,
+  type DivineNamesDraft,
+  type KinTermsDraft,
+  type NumberWordsDraft,
+  type PronounsDraft,
+  type PunctuationDraft,
+  type PunctuationMarkClass,
+  type QuestionMarkersDraft,
+  type TriState,
 } from "@/lib/bible-data/language-profile-drafts"
 
 export interface EditorProps<D> {
@@ -130,6 +133,43 @@ export function QuestionMarkersEditor({ draft, setDraft, disabled }: EditorProps
         hint={t("languageProfile.listHint")}
         value={draft.suffix}
         onChange={(suffix) => setDraft({ ...draft, suffix })}
+        disabled={disabled}
+      />
+    </>
+  )
+}
+
+/** AQU-1906: one field per mark class, plus "sentences end with no mark". */
+const PUNCTUATION_LABELS: Readonly<Record<PunctuationMarkClass, MessageKey>> = {
+  question: "languageProfile.punctuation.question",
+  exclamation: "languageProfile.punctuation.exclamation",
+  statement: "languageProfile.punctuation.statement",
+  colon: "languageProfile.punctuation.colon",
+  semicolon: "languageProfile.punctuation.semicolon",
+}
+
+export function PunctuationEditor({ draft, setDraft, disabled }: EditorProps<PunctuationDraft>) {
+  const t = useT()
+  const tri = useTriOptions()
+  return (
+    <>
+      {PUNCTUATION_MARK_CLASSES.map((markClass) => (
+        <TextField
+          key={markClass}
+          id={`profile-punctuation-${markClass}`}
+          label={t(PUNCTUATION_LABELS[markClass])}
+          hint={t("languageProfile.punctuation.marksHint")}
+          value={draft[markClass]}
+          onChange={(value) => setDraft({ ...draft, [markClass]: value })}
+          disabled={disabled}
+        />
+      ))}
+      <Choice
+        id="profile-punctuation-no-terminal"
+        label={t("languageProfile.punctuation.noTerminalMark")}
+        value={draft.noTerminalMark}
+        options={tri}
+        onChange={(noTerminalMark) => setDraft({ ...draft, noTerminalMark })}
         disabled={disabled}
       />
     </>

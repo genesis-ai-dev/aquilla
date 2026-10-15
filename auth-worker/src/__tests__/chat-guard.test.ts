@@ -16,6 +16,7 @@ import { describe, it, expect, afterEach, vi } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import { pg } from "./helpers/pg-test-env"
+import { bumpRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 
 const ALLOWED_MODEL = "anthropic/claude-sonnet-4.5"
 const DISALLOWED_MODEL = "openai/gpt-4o-ultra-max"
@@ -186,10 +187,8 @@ describe("chat /api/v1/chat/completions — rate limiting", () => {
     await seedUser(7, "grace")
     const jwt = await jwtFor("grace")
     const upstream = mockUpstreamSuccess()
-    await pg.exec(
-      `INSERT INTO auth_rate_limit_events (kind, identifier, success)
-       SELECT 'chat_completions', 'user:7', 1 FROM generate_series(1, 300)`,
-    )
+    // AQU-1843: the throttle is an atomic counter now, not an event log.
+    await bumpRateLimit(env.AQUILLA_PG, "chat_completions", userRateLimitIdentifier(7), 300)
     const testEnv = withEnvOverrides({ OPENROUTER_API_KEY: "test-key" })
 
     const res = await app.request(
@@ -208,10 +207,7 @@ describe("chat /api/v1/chat/completions — rate limiting", () => {
     await seedUser(8, "heidi")
     const jwt = await jwtFor("heidi")
     mockUpstreamSuccess()
-    await pg.exec(
-      `INSERT INTO auth_rate_limit_events (kind, identifier, success)
-       SELECT 'chat_completions', 'user:999', 1 FROM generate_series(1, 300)`,
-    )
+    await bumpRateLimit(env.AQUILLA_PG, "chat_completions", userRateLimitIdentifier(999), 300)
     const testEnv = withEnvOverrides({ OPENROUTER_API_KEY: "test-key" })
 
     const res = await app.request(

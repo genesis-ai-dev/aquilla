@@ -1,4 +1,5 @@
 import type { BuiltinCheckId, InfractionSpan } from "@/lib/parsers/types"
+import type { BuiltinCheckRunContext } from "./builtin-run-context"
 import * as emptyTarget from "./check-functions/empty-target"
 import * as targetEqualsSource from "./check-functions/target-equals-source"
 import * as placeholderIntegrity from "./check-functions/placeholder-integrity"
@@ -23,7 +24,12 @@ export interface BuiltinCheckDefinition {
   defaultEnabled: boolean
   /** True if the check should run even when target is empty. */
   runsOnEmptyTarget: boolean
-  run: (source: string, target: string) => InfractionSpan[] | null
+  /**
+   * AQU-1906: `context` carries the per-LANE inputs a check may read (the
+   * target language's punctuation conventions today). Every existing check
+   * ignores it; the two punctuation checks read `context.punctuation`.
+   */
+  run: (source: string, target: string, context?: BuiltinCheckRunContext) => InfractionSpan[] | null
   /** Static copy, or a builder that derives copy from the offending spans
    *  (e.g. placeholder-integrity names the missing token). Dead field as of
    *  AQU-832 — no consumer reads it (rule-engine.ts uses only `run` and

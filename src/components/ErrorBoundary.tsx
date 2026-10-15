@@ -7,7 +7,9 @@
  * already respects isAnalyticsEnabled() on init and responds to
  * onAnalyticsConsentChange). Also registers window error + unhandledrejection
  * handlers for chunk-reload recovery; uncaught errors reach PostHog through its
- * own exception autocapture (AQU-1572, see the handlers below).
+ * own exception autocapture (AQU-1572, see the handlers below). AQU-1966 adds
+ * the `vite:preloadError` handler, which is the only one that sees a stale
+ * chunk whose rejection the calling code catches itself.
  *
  * SWARM-TODO(AQU-266): UI-QA — force a render throw (e.g. via a dev-only query
  * param ?__crash=1 or React devtools) and confirm the branded recovery screen
@@ -79,6 +81,32 @@ if (typeof window !== "undefined") {
       : new Error(String(event.reason ?? "Unhandled promise rejection"))
     if (isTauriRuntime()) posthog.captureException(err, { source: "unhandledrejection" })
     recoverFromChunkError(err)
+  })
+
+  // AQU-1966: the two handlers above only ever see a chunk failure that nobody
+  // caught — an uncaught throw or an unhandled rejection. Most of this app's
+  // dynamic imports are awaited inside a try/catch that owns the failure:
+  // ExportDialog loads every exporter with `await import(…)` under one
+  // `catch (e)` that renders the message as "export failed", and the audio
+  // denoiser, the upstream-changes panel and the workspace's sync helpers do
+  // the same. After a deploy those rejections never reach `window`, so a
+  // translator on a day-old tab was told their export broke rather than that
+  // the app had updated — the misattributed "random breakage" in this ticket.
+  //
+  // Vite dispatches `vite:preloadError` from the preload helper itself, before
+  // the rejection is handed to the caller, so it is the only hook that covers a
+  // dynamic import whose failure is caught locally. The event is left to run
+  // its course (no `preventDefault`), so when the one reload per chunk is
+  // already spent the caller still shows its own failure path instead of the
+  // click going dead.
+  //
+  // The event only exists in a build, where Vite wraps each dynamic import in
+  // its `__vitePreload` helper — the dev server serves native `import()`. That
+  // matches the bug, which only happens when hashed assets are replaced by a
+  // deploy. Nothing here disables `build.modulePreload`; if anything ever does,
+  // this handler stops firing and the swallowed-rejection hole reopens.
+  window.addEventListener("vite:preloadError", (event: Event) => {
+    recoverFromChunkError((event as Event & { payload?: unknown }).payload)
   })
 }
 

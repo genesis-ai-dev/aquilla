@@ -34,6 +34,17 @@ import {
   type OrgPortfolioAggregate,
   type PortfolioAggregate,
 } from "../../../src/lib/frontier/portfolio-metrics"
+import { effectiveThresholdSql } from "../../../db/shared/validation-threshold"
+import {
+  loadOrgProjectVisibilityOverrides,
+  loadProjectVisibilityOverride,
+  loadProjectVisibilityOverrides,
+  parseProjectVisibilityFloor,
+  stricterProjectFloor,
+  VISIBILITY_FLOOR_KEYS,
+  type ProjectVisibilityOverrides,
+  type VisibilityFloorKey,
+} from "../../../db/shared/visibility-floors"
 
 /** Map numeric role level to a human-readable name. Used for secondarySources. */
 function roleNameForLevel(level: number): string {
@@ -1550,9 +1561,11 @@ async function fetchPortfolioLanes(
       // joining the settings table hides exactly those projects. The columns
       // this used to read come back null for them, which is what they meant
       // before anyway (default threshold, no registered lanes).
+      // AQU-1771: both thresholds (text, and AQU-1951's audio) resolve
+      // project → org → 1 like the structural policy beside them.
       `SELECT p.id AS project_id,
-              ps.validation_count AS validation_count,
-              ps.validation_count_audio AS validation_count_audio,
+              ${effectiveThresholdSql("ps.validation_count", "os.validation_count")} AS validation_count,
+              ${effectiveThresholdSql("ps.validation_count_audio", "os.validation_count_audio")} AS validation_count_audio,
               COALESCE(ps.count_structural, os.count_structural, 'true') AS count_structural
          FROM projects p
          LEFT JOIN project_settings ps ON ps.project_id = p.id
@@ -1957,9 +1970,8 @@ const portfolioCtes = (orgPredicate: string) => `
               -- decoration: the column is TEXT off a jsonb ->>, so a project
               -- that ever stored a non-integer would abort the whole portfolio
               -- query with a cast error rather than just reading wrong.
-              GREATEST(1, LEAST(15, COALESCE(
-                CASE WHEN ps.validation_count_audio ~ '^[0-9]+$'
-                     THEN ps.validation_count_audio::integer END, 1))) AS audio_threshold
+              -- AQU-1771: project → org → 1.
+              ${effectiveThresholdSql("ps.validation_count_audio", "os.validation_count_audio")} AS audio_threshold
          FROM projects p
          LEFT JOIN project_settings ps ON ps.project_id = p.id
          LEFT JOIN org_settings os ON os.org_id = p.org_id
@@ -2712,16 +2724,9 @@ export function canViewRoster(callerRoleLevel: number | null, rosterMinRole: num
 
 /**
  * True when `callerRoleLevel` meets or exceeds the org's configured
- * member-progress floor.
- *
- * SWARM-TODO(AQU-498): still unconsumed by any auth-worker route — the
- * per-member activity view AQU-498 shipped reads straight from sync-worker
- * (GET /api/v1/projects/:projectId/members/:author/activity, gated by its
- * own resolveMemberProgressFloor in member-progress-floor.ts, since
- * sync-worker doesn't depend on auth-worker). If a future auth-worker route
- * needs the same floor (e.g. a member-progress summary folded into
- * /projects/:projectId/members), it should call this helper rather than
- * re-deriving the comparison.
+ * member-progress floor. The sync-worker's per-member activity read has its
+ * own copy of the floor (member-progress-floor.ts), since sync-worker does
+ * not depend on auth-worker.
  */
 export function canViewMemberProgress(callerRoleLevel: number | null, progressMinRole: number): boolean {
   if (callerRoleLevel == null) return false
@@ -2903,13 +2908,237 @@ export async function getAssignmentMinRoleForProject(
  * members list keeps the plain `rosterViewMinRole` gate — assigning work is a
  * project-scoped authority and confers no org-wide roster visibility.
  */
-export async function getProjectRosterViewMinRole(env: Env, orgId: number): Promise<number> {
-  const [rosterFloor, assignmentFloor] = await Promise.all([
+export async function getProjectRosterViewMinRole(
+  env: Env,
+  orgId: number,
+  projectId?: string,
+): Promise<number> {
+  const [rosterFloor, assignmentFloor, own] = await Promise.all([
     getRosterViewMinRole(env, orgId),
     getAssignmentMinRole(env, orgId),
+    projectId != null ? loadProjectVisibilityOverride(env.AQUILLA_PG, projectId) : null,
   ])
-  if (rosterFloor > DEFAULT_ROSTER_VIEW_MIN_ROLE) return rosterFloor
-  return Math.min(rosterFloor, assignmentFloor)
+  return resolveProjectRosterListFloor(rosterFloor, assignmentFloor, own?.rosterViewMinRole)
+}
+
+/**
+ * The project member-list floor from its parts: the org's roster floor with
+ * the assigner carve-out above, raised by the project's own stricter value.
+ *
+ * AQU-1771: the carve-out is the ORG's (its assignment floor reading its
+ * roster), so it never lowers a project's own stricter value — that would let
+ * a project lead read a roster the project closed to them. A project value at
+ * or below the org's is inert and leaves the carve-out alone.
+ */
+function resolveProjectRosterListFloor(
+  rosterFloor: number,
+  assignmentFloor: number,
+  ownRaw: unknown,
+): number {
+  const orgResolved = rosterFloor > DEFAULT_ROSTER_VIEW_MIN_ROLE
+    ? rosterFloor
+    : Math.min(rosterFloor, assignmentFloor)
+  return Math.max(orgResolved, stricterProjectFloor(rosterFloor, ownRaw) ?? 0)
+}
+
+/**
+ * AQU-1771: `getProjectRosterViewMinRole` for several projects of one org in
+ * one read each — for the org surfaces that list many projects' members at
+ * once (the members matrix).
+ */
+export async function getProjectRosterListFloors(
+  env: Env,
+  orgId: number,
+  projectIds: readonly string[],
+): Promise<Map<string, number>> {
+  const [rosterFloor, assignmentFloor, overrides] = await Promise.all([
+    getRosterViewMinRole(env, orgId),
+    getAssignmentMinRole(env, orgId),
+    loadProjectVisibilityOverrides(env.AQUILLA_PG, projectIds),
+  ])
+  return new Map(projectIds.map((id) => [
+    id,
+    resolveProjectRosterListFloor(rosterFloor, assignmentFloor, overrides.get(id)?.rosterViewMinRole),
+  ]))
+}
+
+/**
+ * AQU-1771: the floor on a project's own member list (GET …/members and the
+ * mention candidates): `getProjectRosterViewMinRole` for a project in an org.
+ * A project with no org has no org policy and its list was never gated, so
+ * only its own value can gate it. Null = ungated.
+ */
+export async function getProjectRosterListFloor(
+  env: Env,
+  projectId: string,
+  orgId: number | null,
+): Promise<number | null> {
+  if (orgId != null) return getProjectRosterViewMinRole(env, orgId, projectId)
+  return (await loadProjectVisibilityOverride(env.AQUILLA_PG, projectId)).rosterViewMinRole
+}
+
+/**
+ * AQU-1771: the roster and member-progress floors that apply to ONE project:
+ * the org's (AQU-485), raised by the project's own stricter values. A project
+ * can make either floor stricter and never looser — a stored value at or below
+ * the org's has no effect. A project with no org has no org policy to read, so
+ * it starts from the defaults, the same reading /assignments/unit has always
+ * taken for one.
+ */
+export interface VisibilityFloors {
+  rosterViewMinRole: number
+  memberProgressViewMinRole: number
+}
+
+export interface ProjectVisibilityFloors extends VisibilityFloors {
+  /** The org's floors, defaults applied. */
+  org: VisibilityFloors
+  /** The project's own values where STRICTER than the org's, else null. */
+  project: { rosterViewMinRole: number | null; memberProgressViewMinRole: number | null }
+}
+
+/** The org's two floors, defaults applied; the defaults for no org. */
+export async function getOrgVisibilityFloors(env: Env, orgId: number | null): Promise<VisibilityFloors> {
+  if (orgId == null) {
+    return {
+      rosterViewMinRole: DEFAULT_ROSTER_VIEW_MIN_ROLE,
+      memberProgressViewMinRole: DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE,
+    }
+  }
+  const settings = await loadOrgSettingsBlob(env, orgId)
+  return {
+    rosterViewMinRole: extractRoleFloor(settings, "rosterViewMinRole", DEFAULT_ROSTER_VIEW_MIN_ROLE),
+    memberProgressViewMinRole: extractRoleFloor(
+      settings, "memberProgressViewMinRole", DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE,
+    ),
+  }
+}
+
+/** Combine the org's floors with one project's own values. */
+export function combineVisibilityFloors(
+  org: VisibilityFloors,
+  own: ProjectVisibilityOverrides,
+): ProjectVisibilityFloors {
+  const project = {
+    rosterViewMinRole: stricterProjectFloor(org.rosterViewMinRole, own.rosterViewMinRole),
+    memberProgressViewMinRole: stricterProjectFloor(
+      org.memberProgressViewMinRole, own.memberProgressViewMinRole,
+    ),
+  }
+  return {
+    org,
+    project,
+    rosterViewMinRole: project.rosterViewMinRole ?? org.rosterViewMinRole,
+    memberProgressViewMinRole: project.memberProgressViewMinRole ?? org.memberProgressViewMinRole,
+  }
+}
+
+export async function getProjectVisibilityFloors(
+  env: Env,
+  projectId: string,
+  orgId: number | null,
+): Promise<ProjectVisibilityFloors> {
+  const [org, own] = await Promise.all([
+    getOrgVisibilityFloors(env, orgId),
+    loadProjectVisibilityOverride(env.AQUILLA_PG, projectId),
+  ])
+  return combineVisibilityFloors(org, own)
+}
+
+/**
+ * AQU-1771: how many of the org's live projects make each floor stricter than
+ * the org does — the "N projects are stricter" line under the org's setting.
+ */
+export async function countStricterVisibilityProjects(
+  env: Env,
+  orgId: number,
+): Promise<Record<VisibilityFloorKey, number>> {
+  const [org, rows] = await Promise.all([
+    getOrgVisibilityFloors(env, orgId),
+    loadOrgProjectVisibilityOverrides(env.AQUILLA_PG, orgId),
+  ])
+  const counts: Record<VisibilityFloorKey, number> = { rosterViewMinRole: 0, memberProgressViewMinRole: 0 }
+  for (const own of rows.values()) {
+    for (const key of VISIBILITY_FLOOR_KEYS) {
+      if (stricterProjectFloor(org[key], own[key]) != null) counts[key] += 1
+    }
+  }
+  return counts
+}
+
+/**
+ * AQU-1771: per-member progress is shown with the member's NAME, so reading it
+ * needs both floors — the stricter one wins. True when `roleLevel` meets both.
+ */
+export function canViewNamedProgress(
+  roleLevel: number | null,
+  floors: VisibilityFloors,
+): boolean {
+  return canViewMemberProgress(roleLevel, floors.memberProgressViewMinRole)
+    && canViewRoster(roleLevel, floors.rosterViewMinRole)
+}
+
+/**
+ * AQU-1771: the org values a project's own surfaces need, carried on the
+ * project's settings response. A member who is in the project but not in its
+ * org cannot read the org's settings (GET /orgs/:id/settings answers 403), so
+ * without these the browser fell back to built-in defaults: the wrong
+ * visibility floors, the wrong assignment authority, and repetition copying
+ * switched ON in a project whose org had turned it off.
+ */
+export interface ProjectOrgPolicy {
+  /** The org's floors (defaults applied). The project's own are in its settings. */
+  rosterViewMinRole: number
+  memberProgressViewMinRole: number
+  allowSelfAssignment: boolean
+  allowScopedLaneAssignment: boolean
+  assignmentMinRole: number
+  autoPropagateRepetitions: boolean
+  /** Null when the org set none (the client applies no export gate then). */
+  exportMinRole: number | null
+}
+
+export async function getProjectOrgPolicy(
+  env: Env,
+  projectId: string,
+  /** The project's own settings blob, when the caller already holds it. */
+  projectSettings?: Readonly<Record<string, unknown>>,
+): Promise<{ orgPolicy: ProjectOrgPolicy; visibility: ProjectVisibilityFloors }> {
+  const project = await env.AQUILLA_PG.prepare("SELECT org_id FROM projects WHERE id = ?")
+    .bind(projectId)
+    .first<{ org_id: number | null }>()
+  const orgId = project?.org_id ?? null
+  const [settings, own] = await Promise.all([
+    orgId != null ? loadOrgSettingsBlob(env, orgId) : Promise.resolve({} as Record<string, unknown>),
+    projectSettings
+      ? {
+          rosterViewMinRole: parseProjectVisibilityFloor(projectSettings.rosterViewMinRole),
+          memberProgressViewMinRole: parseProjectVisibilityFloor(projectSettings.memberProgressViewMinRole),
+        }
+      : loadProjectVisibilityOverride(env.AQUILLA_PG, projectId),
+  ])
+  const org: VisibilityFloors = {
+    rosterViewMinRole: extractRoleFloor(settings, "rosterViewMinRole", DEFAULT_ROSTER_VIEW_MIN_ROLE),
+    memberProgressViewMinRole: extractRoleFloor(
+      settings, "memberProgressViewMinRole", DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE,
+    ),
+  }
+  const exportRaw = settings.exportMinRole
+  return {
+    orgPolicy: {
+      ...org,
+      allowSelfAssignment: settings.allowSelfAssignment === true,
+      allowScopedLaneAssignment: settings.allowScopedLaneAssignment === true,
+      assignmentMinRole: extractRoleFloor(settings, "assignmentMinRole", DEFAULT_ASSIGNMENT_MIN_ROLE),
+      // Unset is ON (AQU-1391); only an explicit false turns it off.
+      autoPropagateRepetitions: settings.autoPropagateRepetitions !== false,
+      exportMinRole:
+        typeof exportRaw === "number" && Number.isFinite(exportRaw) && exportRaw >= 100 && exportRaw <= 700
+          ? exportRaw
+          : null,
+    },
+    visibility: combineVisibilityFloors(org, own),
+  }
 }
 
 // ──────────────────────────────────────────────────────────────────────────

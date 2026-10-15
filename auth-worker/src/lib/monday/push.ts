@@ -19,6 +19,7 @@
 // per file.
 
 import type { Env } from "../../types"
+import { makePostgres, type AquillaDb } from "../../../../db/shim/postgres"
 import {
   parseJsonColumn,
   sanitizeMapping,
@@ -73,6 +74,9 @@ function columnValueFor(
     case "completion_pct":
     case "validated_pct":
     case "audio_validated_pct":
+    case "has_audio_pct":
+    case "active_contributors_30d":
+    case "recorded_minutes":
     case "filled_count":
     case "total_count":
     case "validated_count":
@@ -84,6 +88,25 @@ function columnValueFor(
       return columnType === "date" ? { date: m.last_activity } : m.last_activity
     case "status_auto":
       return columnType === "status" ? { label: m.status_auto } : m.status_auto
+    case "deadline":
+      // No deadline clears the cell: Monday treats an empty string as "clear"
+      // for every column type, a date column included.
+      if (!m.deadline) return ""
+      return columnType === "date" ? { date: m.deadline } : m.deadline
+    case "next_target_date":
+      if (!m.next_target_date) return ""
+      return columnType === "date" ? { date: m.next_target_date } : m.next_target_date
+    case "days_since_activity":
+      return m.days_since_activity == null ? "" : String(m.days_since_activity)
+    case "project_link":
+      return columnType === "link" ? { url: m.project_link, text: "Open in Aquilla" } : m.project_link
+    case "schedule_status":
+      return columnType === "status" ? { label: m.schedule_status } : m.schedule_status
+    case "books_done":
+    case "project_manager":
+    case "languages":
+    case "books_in_progress":
+      return m[metric]
     case "project_name":
       return entity.itemName
     case "external_id":
@@ -239,7 +262,7 @@ export async function pushBoardLink(env: Env, link: IntegrationLinkRow): Promise
     return { ok: false, pushed: false, linked: true, error: "org connection missing" }
   }
 
-  const summary = await computeProjectMetrics(env.AQUILLA_PG, link.project_id)
+  const summary = await computeProjectMetrics(env.AQUILLA_PG, link.project_id, { appBaseUrl: env.BASE_URL })
   if (!summary) {
     await recordPushOutcome(env, link, "error", "project not found")
     return { ok: false, pushed: false, linked: true, error: "project not found" }
@@ -353,6 +376,16 @@ async function upsertEntities(
       }
     }
     await saveItemLinks(env, link.id, matchedLinks)
+    // A row Aquilla adopts from the board (found by its Aquilla ID or name,
+    // not created) joins the projects group, like a row it creates. Only at
+    // adoption: later pushes never move a row the user dragged elsewhere.
+    if (mapping.groupId && matchedLinks.length > 0) {
+      await moveItemsToGroupBestEffort(
+        token,
+        matchedLinks.map((m) => m.itemId),
+        mapping.groupId,
+      )
+    }
   }
 
   // 3. Create missing items (aliased batches; column values included up-front).
@@ -401,6 +434,21 @@ async function upsertEntities(
   }
 
   return entities.length
+}
+
+/** Move rows into a group; a failure never fails the push (the values still land). */
+async function moveItemsToGroupBestEffort(token: string, itemIds: string[], groupId: string): Promise<void> {
+  try {
+    await runAliasedMutations(
+      token,
+      itemIds.map((itemId, i) => ({
+        alias: `g${i}`,
+        body: `move_item_to_group(item_id: ${gqlString(itemId)}, group_id: ${gqlString(groupId)}) { id }`,
+      })),
+    )
+  } catch (err) {
+    console.warn("[monday] moving adopted rows into the projects group failed (best-effort):", err)
+  }
 }
 
 /** Rows per item-link upsert statement — keeps a 66-file push to one write. */
@@ -504,4 +552,85 @@ export async function flushDirtyLinks(env: Env, cap = 20): Promise<number> {
     }
   }
   return flushed
+}
+
+/** Which links a settings change touched: named projects, or a whole org. */
+export type SettingsPushScope = { projectIds: readonly string[] } | { orgId: number }
+
+/**
+ * AQU-1771: push now the links a settings change just marked dirty, instead of
+ * leaving them for the 5-minute cron. Only DIRTY links are pushed, so a save
+ * that changed nothing the board shows finds nothing to do. Links waiting out
+ * an AQU-1828 retry backoff are skipped, and an org-wide change pushes at most
+ * `cap` links (the cron's per-run cap); the rest stay dirty for the cron.
+ * Bypasses the edit debounce on purpose: someone just changed what the board
+ * should say, so the board should say it.
+ */
+export async function pushDirtyLinksNow(
+  env: Env,
+  scope: SettingsPushScope,
+  cap = 20,
+): Promise<number> {
+  const byOrg = "orgId" in scope
+  if (!byOrg && scope.projectIds.length === 0) return 0
+  const where = byOrg
+    ? "il.project_id IN (SELECT p.id FROM projects p WHERE p.org_id = ? AND p.archived_at IS NULL)"
+    : `il.project_id IN (${scope.projectIds.map(() => "?").join(", ")})`
+  const result = await env.AQUILLA_PG.prepare(
+    `SELECT il.* FROM integration_links il
+      WHERE il.dirty_at IS NOT NULL AND il.enabled = TRUE AND il.provider = ?
+        AND (il.next_retry_at IS NULL OR il.next_retry_at <= now())
+        AND ${where}
+      ORDER BY il.dirty_at ASC
+      LIMIT ?`,
+  )
+    .bind(PROVIDER, ...(byOrg ? [scope.orgId] : scope.projectIds), cap)
+    .all<IntegrationLinkRow>()
+  let pushed = 0
+  for (const link of result.results ?? []) {
+    try {
+      await pushBoardLink(env, link)
+      pushed++
+    } catch (err) {
+      console.error(`[monday] settings push failed for link ${link.id}:`, err)
+    }
+  }
+  return pushed
+}
+
+/**
+ * Run `pushDirtyLinksNow` after the response, so a settings save never waits
+ * on Monday. Without an ExecutionContext (Hono's bare test harness) it does
+ * nothing and the cron flush pushes the dirty links as before.
+ *
+ * The push must not use the request-scoped `AQUILLA_PG`: index.ts closes that
+ * shim the moment the Response returns (the AQU-1763 trap), so it opens its own
+ * connection from PG_CONNECTION_STRING and releases it when the push settles.
+ * The vitest harness injects AQUILLA_PG directly and sets no connection string,
+ * so it keeps using the injected handle.
+ */
+export function pushDirtyLinksAfterResponse(
+  c: { env: Env; executionCtx: { waitUntil(promise: Promise<unknown>): void } },
+  scope: SettingsPushScope,
+): void {
+  let ctx: { waitUntil(promise: Promise<unknown>): void }
+  try {
+    ctx = c.executionCtx
+  } catch {
+    return
+  }
+  ctx.waitUntil(pushOnOwnConnection(c.env, scope))
+}
+
+async function pushOnOwnConnection(env: Env, scope: SettingsPushScope): Promise<void> {
+  const own = env.PG_CONNECTION_STRING ? makePostgres(env.PG_CONNECTION_STRING) : null
+  try {
+    await pushDirtyLinksNow(own ? { ...env, AQUILLA_PG: own as unknown as AquillaDb } : env, scope)
+  } catch (err) {
+    console.error("[monday] settings push failed:", err)
+  } finally {
+    await own?.close().catch((err: unknown) => {
+      console.error("[monday] releasing the settings-push connection failed:", err)
+    })
+  }
 }

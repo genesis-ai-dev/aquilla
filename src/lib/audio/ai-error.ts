@@ -74,6 +74,7 @@ export type ErrorCategory =
   | "ai-spend-ceiling"
   | "model-not-allowed"
   | "request-too-large"
+  | "protected-format"
   | "rate-limited"
   | "timed-out"
   | "provider-unavailable"
@@ -157,6 +158,31 @@ export function categorizeAiError(rawMessage: string): ActionableError {
       category: "model-not-allowed",
       title: t("audio.aiError.modelNotAvailableTitle"),
       body: raw,
+      raw,
+    }
+  }
+
+  // AQU-1964: an AI draft refused for touching a protected IDML anchor. This
+  // MUST have its own branch, and it must sit above the generic fallback,
+  // because `looksLikeMachineDump` rejects this message on two counts at once:
+  // an IDML cell id IS its anchor locator
+  // (`Stories/Story_u363.xml#/idPkg:Story[1]/…:part-1`), so the sentence we
+  // threw carries square brackets and runs past 180 characters. It therefore
+  // scored as a payload and the reader got "The AI request didn't finish" —
+  // which is how a correct, deliberate refusal reached a Biblica reviewer as
+  // "nothing happened". The locator still matters for support, so it stays in
+  // the Technical detail disclosure; what changes is the primary message,
+  // which now names the cause and what to do instead.
+  if (
+    m.includes("protected idml anchor") ||
+    m.includes("protected idml slot") ||
+    m.includes("editable idml slot") ||
+    m.includes("canonical idml paragraph")
+  ) {
+    return {
+      category: "protected-format",
+      title: t("audio.aiError.protectedFormatTitle"),
+      body: t("audio.aiError.protectedFormatBody"),
       raw,
     }
   }

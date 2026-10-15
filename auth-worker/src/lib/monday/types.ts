@@ -1,18 +1,30 @@
-// Monday.com integration — shared shapes (contract v1).
+// Monday.com integration — shared shapes (contract v1, docs/MONDAY-INTEGRATION.md).
 //
-// MondayMapping is the `config` JSONB on monday_board_links. The SPA mirrors
+// MondayMapping is the `config` JSONB on integration_links. The SPA mirrors
 // these types in src/lib/monday/types.ts — keep them in lockstep.
 
 export type MondayMetricKey =
   | "completion_pct" // filled/total across project (or file) as number 0-100, 1dp
   | "validated_pct" // cells meeting text validation threshold %
   | "audio_validated_pct" // cells meeting audio validation threshold %
+  | "has_audio_pct" // cells with a recording (selected dub take) %, the dashboard's "Has audio"
   | "filled_count"
   | "total_count"
   | "validated_count"
   | "translators" // comma-joined display names of contributors (text col)
   | "last_activity" // date of last event (date col, UTC date-only)
   | "status_auto" // derived label: 'Not started' | 'In progress' | 'Complete'
+  | "deadline" // the project's deadline (date col, 'YYYY-MM-DD'); empty when unset
+  | "project_link" // link to the project in Aquilla (link col; a file row opens that file)
+  | "schedule_status" // 'On track' | 'Due soon' | 'Overdue' | 'Behind plan' (status col), the org dashboard's flags
+  | "books_done" // '12 of 27': plan units marked Done of all units (text col)
+  | "next_target_date" // nearest upcoming plan target date (date col); empty when none
+  | "days_since_activity" // whole days since the last activity (number col)
+  | "project_manager" // the project manager's display name (text col)
+  | "languages" // active target language names, comma-joined (text col)
+  | "active_contributors_30d" // distinct people active in the last 30 days (number col)
+  | "books_in_progress" // units started and not marked Done, comma-joined (text col)
+  | "recorded_minutes" // minutes of selected dub audio (number col)
   | "project_name" // item name source when creating items
   | "external_id" // aquilla entity id (text col; used for idempotent re-linking)
 
@@ -44,7 +56,7 @@ export interface MondayBoardGroup {
   title: string
 }
 
-/** Cached board structure stored on monday_board_links.board_structure. */
+/** Cached board structure stored on integration_links.remote_state. */
 export interface MondayBoardStructure {
   url?: string | null
   name?: string | null
@@ -118,12 +130,24 @@ export const METRIC_KEYS: readonly MondayMetricKey[] = [
   "completion_pct",
   "validated_pct",
   "audio_validated_pct",
+  "has_audio_pct",
   "filled_count",
   "total_count",
   "validated_count",
   "translators",
   "last_activity",
   "status_auto",
+  "deadline",
+  "project_link",
+  "schedule_status",
+  "books_done",
+  "next_target_date",
+  "days_since_activity",
+  "project_manager",
+  "languages",
+  "active_contributors_30d",
+  "books_in_progress",
+  "recorded_minutes",
   "project_name",
   "external_id",
 ]
@@ -151,12 +175,24 @@ export const WRITABLE_TYPES_BY_METRIC: Record<MondayMetricKey, readonly string[]
   completion_pct: NUMERIC_TYPES,
   validated_pct: NUMERIC_TYPES,
   audio_validated_pct: NUMERIC_TYPES,
+  has_audio_pct: NUMERIC_TYPES,
   filled_count: NUMERIC_TYPES,
   total_count: NUMERIC_TYPES,
   validated_count: NUMERIC_TYPES,
   translators: TEXT_TYPES,
   last_activity: ["date", "text"],
   status_auto: ["status", "text"],
+  deadline: ["date", "text"],
+  project_link: ["link", "text"],
+  schedule_status: ["status", "text"],
+  books_done: TEXT_TYPES,
+  next_target_date: ["date", "text"],
+  days_since_activity: NUMERIC_TYPES,
+  project_manager: TEXT_TYPES,
+  languages: TEXT_TYPES,
+  active_contributors_30d: NUMERIC_TYPES,
+  books_in_progress: TEXT_TYPES,
+  recorded_minutes: NUMERIC_TYPES,
   project_name: TEXT_TYPES,
   external_id: TEXT_TYPES,
 }
@@ -172,6 +208,11 @@ export function parseJsonColumn<T>(raw: unknown, fallback: T): T {
     }
   }
   return raw as T
+}
+
+/** "Aquilla ID", "Aquilla id", "aquilla_id", "AquillaID" … */
+function isAquillaIdTitle(title: string | undefined): boolean {
+  return (title ?? "").toLowerCase().replace(/[^a-z]/g, "") === "aquillaid"
 }
 
 export interface SanitizeResult {
@@ -271,6 +312,25 @@ export function sanitizeMapping(
       matchExisting = { byName: true }
     }
   }
+
+  // Re-linking a board Aquilla has written to before must reuse its items, not
+  // add a second copy of each. The Aquilla ID column is what identifies them,
+  // so whenever the board has one it is mapped and matched on, whatever the
+  // AI or the user proposed.
+  let idColumn = columns.find((c) => c.metric === "external_id")
+  if (!idColumn && byId) {
+    const named = [...byId.values()].find(
+      (c) =>
+        isAquillaIdTitle(c.title) &&
+        (c.type === "text" || c.type === "long_text") &&
+        !columns.some((m) => m.columnId === c.id),
+    )
+    if (named) {
+      idColumn = { columnId: named.id, columnType: named.type, metric: "external_id" }
+      columns.push(idColumn)
+    }
+  }
+  if (idColumn) matchExisting = { columnId: idColumn.columnId }
 
   return {
     mapping: {

@@ -40,6 +40,9 @@ export function deserializeBibleVerseIndexForAnalysis(
         const entry: VerseEntry = {
             text: serialized.text,
             segments: [serialized.text],
+            // Analysis-only index: the plan compares verse text, never styled
+            // runs, so divine-name runs are not carried across the wire.
+            divineSegments: [],
             paragraphSig: serialized.paragraphSig ?? "",
             paragraphChunks: [],
             verseSpanXml: "",

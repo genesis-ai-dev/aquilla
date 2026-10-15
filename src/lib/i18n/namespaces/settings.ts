@@ -75,6 +75,38 @@ export const settings = defineNamespace({
     // like a bug.
     "settings.structuralCells.resetKeep": "Leave unchanged",
     "settings.structuralCells.resetConfirm": "Reset to the default",
+    // ── ValidationDefaultsSection ── AQU-1771
+    "settings.validationDefaults.textDescription":
+      "How many people must validate a translation before it counts as validated. " +
+      "Projects use this unless they set their own number.",
+    "settings.validationDefaults.audioDescription":
+      "How many people must validate a recording before it counts as validated. " +
+      "Projects use this unless they set their own number.",
+    "settings.validationDefaults.resetTitle": plural({
+      one: "{count} project has its own number",
+      other: "{count} projects have their own number",
+    }, "count"),
+    "settings.validationDefaults.resetDescription": plural({
+      one: "It will keep its own number and ignore this default. Reset it to follow the organization instead?",
+      other: "They will keep their own number and ignore this default. Reset them to follow the organization instead?",
+    }, "count"),
+    // ── OverrideStatus ── AQU-1771
+    "settings.overrideStatus.allFollow": "All projects follow this default.",
+    "settings.overrideStatus.someOwnNumber": plural({
+      one: "{count} project sets its own number",
+      other: "{count} projects set their own number",
+    }, "count"),
+    "settings.overrideStatus.someOwnSetting": plural({
+      one: "{count} project sets its own setting",
+      other: "{count} projects set their own setting",
+    }, "count"),
+    "settings.overrideStatus.reset": "Reset to default",
+    // AQU-1771: under "Who can see the member list" / "Who can see member
+    // progress" — projects may only make these stricter.
+    "settings.overrideStatus.someStricter": plural({
+      one: "{count} project is stricter than this",
+      other: "{count} projects are stricter than this",
+    }, "count"),
 
     // ── RepetitionPropagationSection (AQU-1391) ──
     "settings.autoPropagateRepetitions.label": "Auto-propagate repetitions",
@@ -299,7 +331,14 @@ export const settings = defineNamespace({
     "settings.monday.connectedNotice": "Monday.com connected.",
     "settings.monday.dismissNoticeAriaLabel": "Dismiss notice",
     "settings.monday.connectFailed": "Connecting to Monday.com failed. Try again.",
-    "settings.monday.connectFailedWithReason": "Connecting to Monday.com failed ({reason}). Try again.",
+    // Plain-language reasons a Monday.com connection failed, shown on the
+    // /oauth/callback page and in the org settings notice (lib/monday/oauth-return.ts).
+    "settings.monday.failure.cancelled": "Connecting was cancelled in Monday.com, so nothing was connected.",
+    "settings.monday.failure.expired":
+      "This connection request expired. It has to be approved in Monday.com within 10 minutes. Start again from Aquilla.",
+    "settings.monday.failure.rejected": "Monday.com didn't accept the approval. Try connecting again.",
+    "settings.monday.failure.timeout":
+      "No word from the Monday.com tab. If you approved there, reload this page; otherwise connect again.",
     "settings.monday.connectionCardTitle": "Connection",
     "settings.monday.loadingStatus": "Loading connection status…",
     "settings.monday.reauthExpiredNotice":
@@ -308,7 +347,9 @@ export const settings = defineNamespace({
     "settings.monday.reconnectButton": "Reconnect",
     "settings.monday.connectedAsRow": "Connected as {username}",
     "settings.monday.connectedOnRow": "Connected {date}",
+    "settings.monday.connectedAsOnRow": "Connected as {username} on {date}",
     "settings.monday.disconnectButton": "Disconnect",
+    "settings.monday.openMondayButton": "Open Monday.com",
     "settings.monday.manageRestrictedNotice": "Only org maintainers and owners can manage this connection.",
     "settings.monday.connectPrompt":
       "Connect a Monday.com account to let projects in this organization link " +
@@ -399,6 +440,64 @@ export const settings = defineNamespace({
           "setting so they follow the organization again; the cancel button " +
           "leaves them alone. Pluralized on the same count as the title, " +
           "which it does not print — only 'it' versus 'them' changes.",
+      },
+      "settings.validationDefaults.textDescription": {
+        description:
+          "Help text under the 'Required validators (text)' row on the organization's " +
+          "Project defaults page. A number picker (1 to 15) sits beside it.",
+      },
+      "settings.validationDefaults.audioDescription": {
+        description:
+          "Help text under the 'Required validators (audio)' row on the same page, " +
+          "for recordings instead of translations.",
+      },
+      "settings.validationDefaults.resetTitle": {
+        description:
+          "Title of the dialog shown after an org maintainer changes one of these " +
+          "numbers, when some projects set their own number and will ignore it. " +
+          "Asked only when that number of projects is above zero.",
+        placeholders: { count: "How many projects set their own number." },
+      },
+      "settings.validationDefaults.resetDescription": {
+        description:
+          "Body of that dialog. The confirm button clears those projects' own " +
+          "number so they follow the organization; the cancel button leaves them alone.",
+      },
+      "settings.overrideStatus.allFollow": {
+        description:
+          "Small status line under an organization default on the Project defaults page " +
+          "(validations needed, counting headings, timeline and recording settings). " +
+          "Shown when no project has set its own value, so every project uses this default " +
+          "and changing it asks no follow-up question.",
+      },
+      "settings.overrideStatus.someOwnNumber": {
+        description:
+          "Same status line when some projects set their own number for this default " +
+          "(e.g. how many validators are required) and so ignore it. A 'Reset to default' " +
+          "link follows it after a middle dot.",
+        placeholders: { count: "How many projects set their own number." },
+      },
+      "settings.overrideStatus.someOwnSetting": {
+        description:
+          "Same status line for on/off or choice defaults (counting headings, timing lock, " +
+          "who may add rows…) when some projects set their own value and ignore the default. " +
+          "A 'Reset to default' link follows it after a middle dot.",
+        placeholders: { count: "How many projects set their own setting." },
+      },
+      "settings.overrideStatus.someStricter": {
+        description:
+          "Status line under the organization's 'who can see the member list' and 'who can see " +
+          "member progress' settings (Settings → Security). A project may only make these stricter " +
+          "(hide more), never looser; this says how many projects in the organization chose to. " +
+          "There is no reset: a stricter project is a deliberate choice.",
+        placeholders: {
+          count: "Whole number of projects, 1 or more.",
+        },
+      },
+      "settings.overrideStatus.reset": {
+        description:
+          "Link after that status line. It opens a confirmation asking whether those " +
+          "projects should go back to following the organization's default.",
       },
       "settings.personalProvider.trailingPathHint": {
         description:
@@ -510,14 +609,35 @@ export const settings = defineNamespace({
           "'7-day audio history' heading above it — this one names the chart " +
           "as a chart, for a screen-reader user who can't see the bars.",
       },
-      "settings.monday.connectFailedWithReason": {
+      "settings.monday.failure.cancelled": {
         description:
-          "Inline error notice after a failed Monday.com OAuth round trip, " +
-          "shown instead of settings.monday.connectFailed when the server " +
-          "returned a specific reason.",
-        placeholders: {
-          reason: "Short, already-English machine/server-provided failure reason (not translated).",
-        },
+          "Why connecting Monday.com failed: the person cancelled or declined on Monday's " +
+          "approval screen. Shown on the page Monday returns to and in a red notice on " +
+          "the organization's Monday.com settings.",
+      },
+      "settings.monday.failure.expired": {
+        description:
+          "Why connecting Monday.com failed: the approval came back more than 10 minutes " +
+          "after it was started (or the same approval link was used twice). Shown on the " +
+          "page Monday returns to and in a red notice on the organization's Monday.com settings.",
+      },
+      "settings.monday.failure.rejected": {
+        description:
+          "Why connecting Monday.com failed: Monday refused to hand over access after the " +
+          "person approved. Shown on the page Monday returns to and in a red notice on the " +
+          "organization's Monday.com settings.",
+      },
+      "settings.monday.failure.timeout": {
+        description:
+          "Red notice in the tab that opened Monday.com for connecting, when 11 minutes " +
+          "pass with no word from the Monday tab. \"Reload this page\" means the current " +
+          "Aquilla settings page.",
+      },
+      "settings.monday.openMondayButton": {
+        description:
+          "Button on the organization's Monday.com settings, beside Disconnect, shown once " +
+          "an account is connected. Opens the connected Monday.com account's home page in a " +
+          "new tab. \"Monday.com\" is a product name and is not translated.",
       },
       "settings.monday.connectedAsRow": {
         description: "Row on the Monday.com connection card naming the connected Monday user.",
@@ -529,6 +649,14 @@ export const settings = defineNamespace({
         description:
           "Row on the Monday.com connection card giving the date the connection was made.",
         placeholders: {
+          date: "A locale-formatted date string (already localized by the caller before interpolation).",
+        },
+      },
+      "settings.monday.connectedAsOnRow": {
+        description:
+          "Row under the Monday.com account name on the connection card: who connected it and when.",
+        placeholders: {
+          username: "The connected Monday.com account's display username. Not translated.",
           date: "A locale-formatted date string (already localized by the caller before interpolation).",
         },
       },

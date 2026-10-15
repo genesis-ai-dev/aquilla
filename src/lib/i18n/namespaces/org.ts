@@ -245,6 +245,10 @@ export const org = defineNamespace({
     "org.orgHome.workloadVisibilityDescription":
       "Who can see each teammate's assignment progress on this org's overview.",
     "org.orgHome.usageVisibilityDescription": "Who can see each teammate's usage on this org's overview.",
+    // AQU-1771: the org overview's Team workload / Team usage cards list
+    // people by name, so they can never be more open than the member list.
+    "org.orgHome.teamVisibilityRosterFloorHint":
+      "This card lists members by name, and the member list is set to “{floor}”. To go lower, lower the member list in Settings → Security first.",
 
     "org.orgHome.lens.recentLabel": "Recently updated",
     "org.orgHome.lens.recentDescription": "Latest project activity across all organizations",
@@ -517,6 +521,14 @@ export const org = defineNamespace({
     "org.projectOverview.offlineDownloading": "Downloading…",
     "org.projectOverview.offlineDownloadingProgress": "Downloading… ({done}/{total} files)",
     "org.projectOverview.offlineReadyBadge": "Available offline",
+    "org.projectOverview.saveMediaOffline": "Save audio for offline",
+    "org.projectOverview.offlineMediaSaving": "Saving audio {done}/{total}",
+    "org.projectOverview.offlineMediaSaved": plural({
+      one: "{count} clip saved on this device ({failed} unavailable)",
+      other: "{count} clips saved on this device ({failed} unavailable)",
+    }),
+    "org.projectOverview.offlineMediaBudget": "Storage full: {count} of {total} clips saved",
+    "org.projectOverview.offlineMediaUnavailable": "This device can't store audio",
     "org.projectOverview.removeOfflineCopy": "Remove offline copy",
     "org.projectOverview.offlineRemoveBlocked": plural({
       one: "Can't remove yet — {count} change hasn't synced to the server. Reconnect and wait for it to sync first.",
@@ -613,6 +625,21 @@ export const org = defineNamespace({
     // never be more open than the member list.
     "org.projectOverview.teamVisibilityRosterFloorHint":
       "This card lists members, and the member list is set to “{floor}”. To go lower, lower it on the Members card or in Settings → Security first.",
+    // AQU-1771: amber line under the Team card's visibility badge right after a
+    // Members change moved the Team card's level with it.
+    "org.projectOverview.teamVisibilityAdjusted": "Visibility adjusted",
+    "org.projectOverview.teamVisibilityAdjustedWhyAriaLabel": "Why the visibility was adjusted",
+    "org.projectOverview.teamVisibilityMovedByMembers":
+      "Changed to “{level}” because Members changed. This card lists members, so it is never more open than the member list.",
+    // AQU-1771: under a project's Team / Members visibility picker when the
+    // options below the organization's setting are greyed out.
+    "org.projectOverview.visibilityOrgFloorHint":
+      "A project can only be stricter than its organization, which is set to “{floor}”. To go lower, an org owner lowers it in Settings → Security first.",
+    // AQU-1771: a toast when a project's Team / Members visibility change was not saved.
+    "org.projectOverview.visibilitySaveFailed": "Couldn't change who can see this section",
+    "org.projectOverview.visibilitySaveOffline": "You're offline. Reconnect, then change it again.",
+    "org.projectOverview.visibilitySaveForbidden":
+      "Only people who can change this project's settings can change who sees this.",
     "org.projectOverview.noOpenAssignments": "No open assignments in this project yet.",
     "org.projectOverview.openAssignmentsStat": "{count} open · {percent}",
     "org.projectOverview.viewActivityAria": "View activity for {username}",
@@ -960,6 +987,16 @@ export const org = defineNamespace({
     "org.sectionVisibilityBadge.changeVisibilityAriaLabel": "{label}. Change section visibility",
     "org.sectionVisibilityBadge.whoCanSeeLabel": "Who can see this section",
     "org.sectionVisibilityBadge.whyOptionsOffAriaLabel": "Why some options are unavailable",
+    // AQU-1771: on a project's Team / Members badge, where the shown setting
+    // comes from — the organization, or this project's own stricter choice.
+    "org.sectionVisibilityBadge.originOrg": "Org default",
+    "org.sectionVisibilityBadge.originProject": "Stricter for this project",
+    "org.sectionVisibilityBadge.orgDefaultOption": "{label} (org default)",
+    "org.sectionVisibilityBadge.followOrgOption": "Follow the org ({label})",
+    // AQU-1771: the same, said under the picker in the badge's popover.
+    "org.sectionVisibilityBadge.originOrgLine": "Follows your org's setting.",
+    "org.sectionVisibilityBadge.originProjectLine": "Stricter than your org ({label}).",
+    "org.sectionVisibilityBadge.originUndoHint": "Pick “{option}” to undo.",
 
     // -- WorkloadRollup: org Overview team-workload manager rollup --
     "org.workloadRollup.title": "Team workload",
@@ -2664,11 +2701,92 @@ export const org = defineNamespace({
           pct: "Whole-number completion percentage, e.g. 40.",
         },
       },
+      "org.orgHome.teamVisibilityRosterFloorHint": {
+        description:
+          "Note in the org overview's Team workload and Team usage visibility popovers, expanded from a small circled-i button when the options below the member-list setting are greyed out. Explains why (the cards show people by name, so they can't be more open than the member list) and where to lower the member list first. 'Settings → Security' is the org settings page — use its localized name.",
+        placeholders: {
+          floor: "The member list's current setting as its already-localized picker label, e.g. 'Maintainers and owners' or 'Owners only'.",
+        },
+      },
+      "org.projectOverview.teamVisibilityAdjusted": {
+        description:
+          "Two-word amber warning under the project overview's Team card visibility badge, shown right after a change to the Members card's visibility moved who can see the Team card. A small circled-i beside it opens the full explanation.",
+      },
+      "org.projectOverview.teamVisibilityAdjustedWhyAriaLabel": {
+        description:
+          "Screen-reader label for the small circled-i button beside 'Visibility adjusted' on the Team card; pressing it shows why the visibility changed.",
+      },
+      "org.projectOverview.teamVisibilityMovedByMembers": {
+        description:
+          "The full explanation opened from the circled-i beside the Team card's 'Visibility adjusted' note: a small line under the project overview's Team card visibility badge, shown right after a change to the Members card's visibility (or the org's member-list setting) moved who can see the Team card. 'Members' is the card of that name on the same page — use its localized name.",
+        placeholders: {
+          level: "The Team card's new setting as its already-localized picker label, e.g. 'Project leads and up'.",
+        },
+      },
       "org.projectOverview.teamVisibilityRosterFloorHint": {
         description:
           "Note in the project overview's Team card visibility popover, expanded from a small circled-i button when the options below the member-list setting are greyed out. Explains why (the card shows people, so it can't be more open than the member list) and where to lower the member list first. 'Members card' is the card of that name on the same page; 'Settings → Security' is the org settings page — use the localized names of both.",
         placeholders: {
           floor: "The member list's current setting as its already-localized picker label, e.g. 'Maintainers and owners' or 'Owners only'.",
+        },
+      },
+      "org.sectionVisibilityBadge.originOrg": {
+        description:
+          "Short tag after a project's 'who can see this section' badge (e.g. 'Only maintainers & owners can see this · Org default') when the project follows its organization's setting.",
+      },
+      "org.sectionVisibilityBadge.originProject": {
+        description:
+          "Short tag after a project's 'who can see this section' badge when the project chose its own setting, which can only ever be stricter (hide more) than the organization's.",
+      },
+      "org.sectionVisibilityBadge.orgDefaultOption": {
+        description:
+          "An option in a project's 'Who can see this section' picker: the role choice that equals the organization's setting. Choosing it makes the project follow the organization again.",
+        placeholders: {
+          label: "The option's already-localized role label, e.g. 'Maintainers and owners'.",
+        },
+      },
+      "org.projectOverview.visibilitySaveFailed": {
+        description:
+          "Title of an error toast on the project overview when changing a Team or Members card's 'who can see this section' setting was not saved. The toast body gives the reason (sometimes the server's own English text).",
+      },
+      "org.projectOverview.visibilitySaveOffline": {
+        description:
+          "Body of that error toast when the device is offline, so the visibility change could not be saved.",
+      },
+      "org.projectOverview.visibilitySaveForbidden": {
+        description:
+          "Body of that error toast when the person's role does not allow changing this project's settings.",
+      },
+      "org.sectionVisibilityBadge.originOrgLine": {
+        description:
+          "Line under the picker in a project's 'Who can see this section' popover when the project follows its organization's setting.",
+      },
+      "org.sectionVisibilityBadge.originProjectLine": {
+        description:
+          "Line under the picker in a project's 'Who can see this section' popover when the project chose its own setting, which can only be stricter (hide more) than its organization's. The label in parentheses is the organization's setting.",
+        placeholders: {
+          label: "The organization's already-localized role label, e.g. 'Contributors and up'.",
+        },
+      },
+      "org.sectionVisibilityBadge.originUndoHint": {
+        description:
+          "Follows 'Stricter than your org (…).' in the same popover: which picker option returns the project to its organization's setting.",
+        placeholders: {
+          option: "The exact label of that option, e.g. 'Follow the org (Maintainers and owners)' or 'Contributors and up (org default)'.",
+        },
+      },
+      "org.sectionVisibilityBadge.followOrgOption": {
+        description:
+          "First option in a project's 'Who can see this section' picker when the project has its own (stricter) setting. Choosing it removes the project's own setting so the project follows its organization again; the label in parentheses is what the section would then show.",
+        placeholders: {
+          label: "The resulting already-localized role label, e.g. 'Maintainers and owners'.",
+        },
+      },
+      "org.projectOverview.visibilityOrgFloorHint": {
+        description:
+          "Note in a project's Team / Members visibility popover, expanded from a small circled-i button when the options below the organization's setting are greyed out. A project may only hide more than its organization. 'Settings → Security' is the org settings page — use its localized name.",
+        placeholders: {
+          floor: "The organization's current setting as its already-localized picker label, e.g. 'Maintainers and owners'.",
         },
       },
       "org.sectionVisibilityBadge.whyOptionsOffAriaLabel": {
@@ -3713,6 +3831,24 @@ export const org = defineNamespace({
           done: "Files downloaded so far — a number.",
           total: "Total files in the project being downloaded — a number.",
         },
+      },
+      "org.projectOverview.saveMediaOffline": {
+        description: "Overflow-menu item on ProjectOverview (Tauri desktop) for a project already available offline: copies its recorded and generated audio onto this device so it plays without a connection.",
+      },
+      "org.projectOverview.offlineMediaSaving": {
+        description: "Badge next to the project title while 'Save audio for offline' runs.",
+        placeholders: { done: "Audio clips processed so far — a number.", total: "Total audio clips in the project — a number." },
+      },
+      "org.projectOverview.offlineMediaSaved": {
+        description: "Badge after 'Save audio for offline' finishes.",
+        placeholders: { count: "Audio clips now on this device — a number.", failed: "Clips that could not be downloaded (deleted or failed) — a number." },
+      },
+      "org.projectOverview.offlineMediaBudget": {
+        description: "Badge when 'Save audio for offline' stopped because the on-device audio storage limit was reached.",
+        placeholders: { count: "Audio clips on this device — a number.", total: "Total audio clips in the project — a number." },
+      },
+      "org.projectOverview.offlineMediaUnavailable": {
+        description: "Badge when this device has no persistent storage for audio, so 'Save audio for offline' could not run.",
       },
       "org.projectOverview.offlineRemoveBlocked": {
         description:

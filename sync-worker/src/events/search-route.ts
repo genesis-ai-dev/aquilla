@@ -10,10 +10,12 @@
 //   limit — optional. Default 50, max 500.
 //
 // /search returns:
-//   { results: [{ cellId, fileId, side, value, snippet, rank }] }
+//   { results: [{ cellId, fileId, side, value, snippet, rank, pairedValue,
+//                canonicalRef, cellType, placeLabel, position }] }
 //
 // /search/passages additionally returns the opposite-side cell value:
-//   { results: [{ cellId, fileId, side, value, snippet, rank, pairedValue }] }
+//   { results: [{ cellId, fileId, side, value, snippet, rank, pairedValue,
+//                canonicalRef, cellType, placeLabel, position }] }
 //
 // Auth: sync-token JWT scoped to `projectId`; minimum role viewer (100).
 //
@@ -24,6 +26,7 @@ import { verifyTokenForProject } from "../auth"
 import {
   makeVerifiedProjectId,
   queryScopedSearch,
+  queryScopedPattern,
   queryScopedExact,
   // Re-exported so existing tests importing sanitizeFtsQuery from this module
   // continue to compile without modification (Task 7 will migrate them).
@@ -60,7 +63,13 @@ const MAX_LIMIT = 500
  */
 function parseCommonParams(
   url: URL,
-): { error: Response } | { sideFilter: "source" | "target" | undefined; limit: number } {
+): { error: Response } | {
+  sideFilter: "source" | "target" | undefined
+  limit: number
+  matchCase: boolean
+  wholeWord: boolean
+  useRegexp: boolean
+} {
   const qSide = url.searchParams.get("side")
   let sideFilter: "source" | "target" | undefined = undefined
   if (qSide !== null) {
@@ -79,7 +88,18 @@ function parseCommonParams(
     }
   }
 
-  return { sideFilter, limit }
+  return {
+    sideFilter,
+    limit,
+    matchCase: flagOn(url, "case"),
+    wholeWord: flagOn(url, "word"),
+    useRegexp: flagOn(url, "regexp"),
+  }
+}
+
+function flagOn(url: URL, name: string): boolean {
+  const value = url.searchParams.get(name)
+  return value === "1" || value === "true"
 }
 
 /**
@@ -94,7 +114,7 @@ function mapSearchError(err: unknown): Response {
   // "no results" UI instead of an error banner.
   const message = err instanceof Error ? err.message : String(err)
   console.error('search request failed:', message)
-  if (/syntax error|fts5/i.test(message)) {
+  if (/syntax error|fts5|invalid regexp|invalid regular expression/i.test(message)) {
     return new Response('invalid search query', { status: 400 })
   }
   return new Response('search failed', { status: 500 })
@@ -144,13 +164,22 @@ export async function handleSearchReadRequest(
 
   const parsed = parseCommonParams(url)
   if ("error" in parsed) return parsed.error
-  const { sideFilter, limit } = parsed
+  const { sideFilter, limit, matchCase, wholeWord, useRegexp } = parsed
 
   try {
-    const results = await queryScopedSearch(env.AQUILLA_PG, verifiedProjectId, q, {
-      side: sideFilter,
-      limit,
-    })
+    const pattern = matchCase || wholeWord || useRegexp
+    const results = pattern
+      ? await queryScopedPattern(env.AQUILLA_PG, verifiedProjectId, q, {
+          side: sideFilter,
+          limit,
+          matchCase,
+          wholeWord,
+          useRegexp,
+        })
+      : await queryScopedSearch(env.AQUILLA_PG, verifiedProjectId, q, {
+          side: sideFilter,
+          limit,
+        })
     return Response.json({ results })
   } catch (err) {
     return mapSearchError(err)

@@ -36,6 +36,10 @@ describe("buildCastAdditions", () => {
 // must not be imported as one fabricated "voice" per clip.
 describe("castLikeSpeakers", () => {
   const pairsFrom = (labels: string[]) => labels.map((speaker, i) => ({ cellId: `c${i}`, speaker }))
+  const minter = () => {
+    let n = 0
+    return () => `v${n++}`
+  }
 
   it("keeps a real cast — a few names recurring across many lines", () => {
     const pairs = pairsFrom(["MARY", "PETER", "MARY", "JOHN", "PETER", "MARY", "JOHN", "MARY"])
@@ -99,6 +103,61 @@ describe("castLikeSpeakers", () => {
     const result = buildCastAdditions(castLikeSpeakers(pairs), { voices: [] }, () => "x")
     expect(result.castAssignments).toEqual({})
     expect(result.voices.every((v) => v.builtIn)).toBe(true)
+  })
+
+  // ── Verse references are never a cast (AQU-1942) ──────────────────────
+  //
+  // A Bible notebook's `cellLabel` is the verse reference, and the repetition
+  // guard above only judges sets of four or more — so the batch size must not
+  // be what saves us here.
+
+  it("drops scripture-reference labels whatever the batch size", () => {
+    for (const refs of [
+      ["GEN 1:1"],
+      ["GEN 1:1", "GEN 1:2", "GEN 1:3"],
+      ["1JN 2:3", "1 JN 2:4", "MAT 5:1-10", "PSA 23:1a", "REV 21:1–2"],
+    ]) {
+      expect(castLikeSpeakers(pairsFrom(refs))).toEqual([])
+    }
+  })
+
+  it("mints no voices for a three-verse Bible file (the delta-run case)", () => {
+    const pairs = pairsFrom(["GEN 1:1", "GEN 1:2", "GEN 1:3"])
+    const result = buildCastAdditions(castLikeSpeakers(pairs), { voices: [] }, () => "x")
+    expect(result.castAssignments).toEqual({})
+    expect(result.voices.every((v) => v.builtIn)).toBe(true)
+  })
+
+  it("still builds the character cast for a subtitle notebook", () => {
+    const pairs = pairsFrom(["MARY MAGDALENE", "SIMON", "MARY MAGDALENE", "SIMON", "MARY MAGDALENE"])
+    expect(castLikeSpeakers(pairs)).toEqual(pairs)
+    const result = buildCastAdditions(castLikeSpeakers(pairs), { voices: [] }, minter())
+    expect(new Set(Object.values(result.castAssignments)).size).toBe(2)
+    expect(result.voices.filter((v) => !v.builtIn).map((v) => v.name))
+      .toEqual(["MARY MAGDALENE", "SIMON"])
+  })
+
+  it("keeps only the character voices for a mixed Bible + subtitle project", () => {
+    // One project's labels arrive as a single flat list (the cast is a
+    // whole-project judgement), so the Bible file's references sit alongside
+    // the Chosen file's characters.
+    const pairs = [
+      { cellId: "gen1", speaker: "GEN 1:1" },
+      { cellId: "gen2", speaker: "GEN 1:2" },
+      { cellId: "gen3", speaker: "GEN 1:3" },
+      { cellId: "ch1", speaker: "MARY MAGDALENE" },
+      { cellId: "ch2", speaker: "SIMON" },
+      { cellId: "ch3", speaker: "MARY MAGDALENE" },
+    ]
+    expect(castLikeSpeakers(pairs)).toEqual([
+      { cellId: "ch1", speaker: "MARY MAGDALENE" },
+      { cellId: "ch2", speaker: "SIMON" },
+      { cellId: "ch3", speaker: "MARY MAGDALENE" },
+    ])
+    const result = buildCastAdditions(castLikeSpeakers(pairs), { voices: [] }, minter())
+    expect(Object.keys(result.castAssignments)).toEqual(["ch1", "ch2", "ch3"])
+    expect(result.voices.filter((v) => !v.builtIn).map((v) => v.name))
+      .toEqual(["MARY MAGDALENE", "SIMON"])
   })
 })
 

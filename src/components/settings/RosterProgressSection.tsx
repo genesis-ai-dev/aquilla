@@ -20,7 +20,7 @@
 // every project member — see the SWARM-TODO in ProjectOverview.tsx next to
 // `selectedMemberUsername` for why and what widening it would take.
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { FieldError } from "@/components/ui/field"
 import { SettingsGroup, SettingsRow } from "@/components/ui/page"
 import {
@@ -36,11 +36,41 @@ import { useI18n } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { FLOOR_LABEL } from "@/pages/settings/constants"
 import type { UseOrgSettings } from "@/hooks/useOrgSettings"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { fetchVisibilityOverrideCounts, type VisibilityOverrideCounts } from "@/lib/sync/org-settings"
+import { OverrideStatus } from "./OverrideStatus"
 
 interface RosterProgressSectionProps {
   orgSettings: UseOrgSettings
   /** True when the caller's org role meets the OWNER-only write gate. */
   canEdit: boolean
+  /** The org these settings belong to — for the "N projects are stricter" counts. */
+  orgId?: number | null
+}
+
+/**
+ * AQU-1771: how many projects make each floor stricter than the org does.
+ * Re-read whenever either floor moves, since that changes which projects are
+ * stricter. Null until known (or on a server without the count).
+ */
+function useStricterProjectCounts(
+  orgId: number | null | undefined,
+  rosterFloor: number,
+  progressFloor: number,
+): VisibilityOverrideCounts | null {
+  const { session } = useFrontierSession()
+  const jwt = session?.jwt ?? null
+  const [counts, setCounts] = useState<{ key: string; value: VisibilityOverrideCounts | null } | null>(null)
+  const key = `${orgId ?? ""}:${rosterFloor}:${progressFloor}`
+  useEffect(() => {
+    if (!jwt || orgId == null) return
+    let cancelled = false
+    void fetchVisibilityOverrideCounts(jwt, orgId).then((value) => {
+      if (!cancelled) setCounts({ key, value })
+    })
+    return () => { cancelled = true }
+  }, [jwt, orgId, key])
+  return counts?.key === key ? counts.value : null
 }
 
 // The closed-trigger text comes from FLOOR_LABEL (short); labelKey is the
@@ -53,9 +83,14 @@ const ROSTER_PROGRESS_ROLE_OPTIONS: { level: number; labelKey: MessageKey }[] = 
   { level: ROLE.OWNER, labelKey: "settings.rosterProgress.optionOwner" },
 ]
 
-export function RosterProgressSection({ orgSettings, canEdit }: RosterProgressSectionProps) {
+export function RosterProgressSection({ orgSettings, canEdit, orgId }: RosterProgressSectionProps) {
   const { t } = useI18n()
   const { rosterViewMinRole, memberProgressViewMinRole, patch } = orgSettings
+  // AQU-1771: a project may make either floor stricter, never looser. Each
+  // row says how many did, like the other org defaults. No reset link: a
+  // project that hides more than the org asked for chose to, and putting it
+  // back is that project's call.
+  const stricter = useStricterProjectCounts(orgId, rosterViewMinRole, memberProgressViewMinRole)
 
   const [rosterBusy, setRosterBusy] = useState(false)
   const [rosterError, setRosterError] = useState<string | null>(null)
@@ -93,7 +128,18 @@ export function RosterProgressSection({ orgSettings, canEdit }: RosterProgressSe
     >
       <SettingsRow
         label={t("settings.rosterProgress.rosterLabel")}
-        description={t("settings.rosterProgress.rosterDescription")}
+        description={
+          <>
+            {t("settings.rosterProgress.rosterDescription")}
+            {orgId != null && (
+              <OverrideStatus
+                count={stricter?.rosterViewMinRole ?? 0}
+                kind="stricter"
+                loading={stricter == null}
+              />
+            )}
+          </>
+        }
         control={
           <FloorSelect
             id="roster-min-role"
@@ -107,7 +153,18 @@ export function RosterProgressSection({ orgSettings, canEdit }: RosterProgressSe
       />
       <SettingsRow
         label={t("settings.rosterProgress.progressLabel")}
-        description={t("settings.rosterProgress.progressDescription")}
+        description={
+          <>
+            {t("settings.rosterProgress.progressDescription")}
+            {orgId != null && (
+              <OverrideStatus
+                count={stricter?.memberProgressViewMinRole ?? 0}
+                kind="stricter"
+                loading={stricter == null}
+              />
+            )}
+          </>
+        }
         control={
           <FloorSelect
             id="progress-min-role"

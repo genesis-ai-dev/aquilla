@@ -17,13 +17,20 @@ import {
   paragraph,
   run,
 } from "@/partner-integrations/biblica/__fixtures__/biblica-idml"
+import {
+  SAMPLE_EBL,
+  makeEblIdml,
+  styled,
+} from "@/partner-integrations/biblica/ebl/__fixtures__/ebl-idml"
 import { extractBiblicaStudyNoteStrings } from "@/partner-integrations/biblica/parsers/biblica"
+import { extractEblStrings } from "@/partner-integrations/biblica/parsers/biblica-ebl"
 import { normalizeProtectedCompletion } from "@/lib/idml/completion"
 import type { TranslatableString } from "@/lib/parsers/types"
 import {
   biblicaApostropheGlueSlots,
   clearBiblicaApostropheGlue,
   isBiblicaBookVolumeCell,
+  isBiblicaGlueEligibleCell,
 } from "./apostrophe-glue"
 
 const PLAIN = "$ID/[No character style]"
@@ -40,6 +47,31 @@ const BOOK_VOLUME_STORY = [
       + run(PLAIN, "s covenant history begins here."),
   ),
 ]
+
+/**
+ * AQU-1961: the same English possessive inside an EBL lesson. EBL guides come
+ * out of the same InDesign templates, so the apostrophe is set in its own
+ * `source serif` run there too — but an EBL cell's content type is `lesson`,
+ * never `notes`.
+ */
+const EBL_POSSESSIVE_BODY: readonly string[] = [
+  styled("b-l1-tag", "07_Lessons:ms1", SAMPLE_EBL.lessonOneTag),
+  styled("b-l1-title", "07_Lessons:ms2", SAMPLE_EBL.lessonOneTitle),
+  paragraph(
+    "b-l1-possessive",
+    "07_Lessons%3am",
+    run(PLAIN, "Israel")
+      + run("source%20serif", GLUE)
+      + run(PLAIN, "s covenant history begins here."),
+  ),
+]
+
+async function importEblCells(): Promise<TranslatableString[]> {
+  const bytes = await makeEblIdml({ body: EBL_POSSESSIVE_BODY, badge: [], summary: [] })
+  const parsed = await parseIdml(bytes.slice(0))
+  const { strings } = await extractEblStrings(bytes.slice(0), async () => parsed)
+  return strings
+}
 
 async function importCells(
   story?: readonly string[],
@@ -165,5 +197,70 @@ describe("Biblica apostrophe glue", () => {
       drafted,
       idmlMetadataOf(cell),
     )).toBe(drafted)
+  })
+
+  // AQU-1961 — Anastasia and Atul kept seeing the stray apostrophe after the
+  // AQU-1174 fix deployed because the fix only ever matched one content type.
+  it("drops glue an AI draft copied into an EBL lesson", async () => {
+    const strings = await importEblCells()
+    const cell = strings.find((entry) => entry.original.includes("Israel"))
+    expect(cell).toBeDefined()
+    // The EBL importer records the division, never the study-note type the
+    // first fix gated on.
+    expect((cell!.metadata as { biblica?: { contentType?: unknown } }).biblica?.contentType)
+      .not.toBe("notes")
+    expect(isBiblicaBookVolumeCell(cell!.metadata)).toBe(false)
+    expect(isBiblicaGlueEligibleCell(cell!.metadata)).toBe(true)
+    expect([...biblicaApostropheGlueSlots(cell!.originalHtml!, idmlMetadataOf(cell!))])
+      .toEqual([1])
+
+    const drafted = draftFrom(
+      cell!.originalHtml!,
+      (text) => text === GLUE ? GLUE : text.toUpperCase(),
+    )
+    const normalized = normalizeProtectedCompletion(
+      { id: cell!.id, originalHtml: cell!.originalHtml, metadata: cell!.metadata },
+      drafted,
+    )
+
+    expect(normalized.value).not.toContain(GLUE)
+    expect(normalized.valueHtml).not.toContain(GLUE)
+    // The span survives, so the protected anchor sequence still exports.
+    expect(normalized.valueHtml).toContain('data-idml-slot="1"')
+    expect(normalized.value).toBe("ISRAELS COVENANT HISTORY BEGINS HERE.")
+  })
+
+  it("treats every edition's translatable content as glue-eligible, prose matter aside", () => {
+    // Every content type the Biblica parsers actually write, per edition.
+    const cases: readonly { contentType: string | undefined; eligible: boolean }[] = [
+      // Study-Bible volumes (parsers/biblica.ts).
+      { contentType: "notes", eligible: true },
+      { contentType: "scripture", eligible: true },
+      { contentType: "front-back-matter", eligible: false },
+      // EBL (parsers/biblica-ebl.ts).
+      { contentType: "section", eligible: true },
+      { contentType: "topic-intro", eligible: true },
+      { contentType: "lesson", eligible: true },
+      { contentType: "boxes", eligible: true },
+      // Reach4Life (reach4life/note-rules.ts).
+      { contentType: "book-intro", eligible: true },
+      { contentType: "front-matter", eligible: false },
+      // Treasure Hunt (treasure-hunt/notes.ts).
+      { contentType: "hunt", eligible: true },
+      { contentType: "intro", eligible: true },
+      // A unit outside any division carries no content type at all.
+      { contentType: undefined, eligible: true },
+    ]
+
+    for (const { contentType, eligible } of cases) {
+      const metadata = {
+        biblica: contentType === undefined ? { version: 1 } : { version: 1, contentType },
+      }
+      expect(isBiblicaGlueEligibleCell(metadata), `contentType=${contentType}`).toBe(eligible)
+    }
+
+    // A generic IDML cell has no Biblica bucket, so nothing is ever stripped.
+    expect(isBiblicaGlueEligibleCell({})).toBe(false)
+    expect(isBiblicaGlueEligibleCell(null)).toBe(false)
   })
 })

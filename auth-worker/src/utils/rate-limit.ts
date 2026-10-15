@@ -9,6 +9,13 @@
 // window over a handful of minutes), which a plain indexed COUNT(*) handles
 // fine at this traffic level. Revisit with a Durable Object or Cloudflare
 // Rate Limiting rule if login volume ever makes the DB round-trip a problem.
+//
+// These throttles deliberately did NOT move to the atomic counter AQU-1843 gave
+// the shared limiter (db/shared/rate-limit.ts): they count FAILURES only, which
+// needs the per-attempt rows this log keeps, and none of them spends money, so
+// a near-miss under concurrency costs an extra password guess rather than an
+// extra vendor call. Their rows are now pruned on the cron (see
+// pruneAuthRateLimitEvents below) instead of opportunistically.
 
 const WINDOW_MINUTES = 15
 
@@ -108,12 +115,16 @@ export type RateLimitKind =
   | "access_link_redeem"
   | "feedback"
 
-/** Roughly 1-in-50 calls also prunes stale rows so the table stays bounded
- *  without a scheduled job. Cheap (indexed on created_at via the lookup
- *  index's leading columns being kind/identifier — this scan is intentionally
- *  unindexed-but-rare) and safe to skip on any given call. */
-async function pruneOldEventsOccasionally(db: AquillaDb): Promise<void> {
-  if (Math.random() >= 0.02) return
+/**
+ * Keep `auth_rate_limit_events` bounded.
+ *
+ * AQU-1843: this used to fire on a random 2% of calls, because there was no
+ * scheduled job to hang it off. There is one now — the auth-worker 5-minute
+ * cron (index.ts `scheduled`) — so the DELETE runs there instead of on an
+ * unlucky user's login, the same move `pruneExpiredRevokedTokens` made.
+ * Non-throwing: hygiene must never fail the cron.
+ */
+export async function pruneAuthRateLimitEvents(db: AquillaDb): Promise<void> {
   try {
     await db
       .prepare("DELETE FROM auth_rate_limit_events WHERE created_at < now() - interval '1 day'")
@@ -157,7 +168,6 @@ export async function recordAuthEvent(
   } catch (err) {
     console.warn("[rate-limit] record failed (non-fatal):", err)
   }
-  await pruneOldEventsOccasionally(db)
 }
 
 /**

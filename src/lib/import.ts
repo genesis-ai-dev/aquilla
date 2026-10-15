@@ -21,9 +21,12 @@ import { proxyOrigin } from "./net/resource-proxy"
 // This module runs outside React (plain import-pipeline code, no hooks), so it
 // uses the standalone t() rather than useT() — see src/lib/i18n/standalone.ts.
 import { t } from "./i18n/standalone"
+import { formatByteLimit } from "./i18n/format"
+import { normalizeLocale } from "./i18n/locales"
+import { readStoredLocale } from "./i18n/store"
 import type { CellUnit, FileType, FileReference, TranslatableString, OrderedBy } from "./parsers/types"
 import { detectFileType, isMediaFileType, TRANSLATION_MEMORY_FILE_KIND } from "./parsers/types"
-import { buildAudioId, MAX_AUDIO_UPLOAD_BYTES, uploadCellAudio } from "./audio/upload"
+import { buildAudioId, MAX_AUDIO_OBJECT_BYTES, uploadCellAudio } from "./audio/upload"
 import { analyseSpeechInFile } from "./audio/speech-analysis"
 import { tileSegments } from "./timeline/tile-segments"
 import { recordMediaImportSeed, buildMediaSeedCells } from "./audio/auto-transcribe"
@@ -1878,8 +1881,15 @@ export function createMediaFileCommit(
   const prepare = async () => {
     if (ctx.mediaPictureUrl && !videoId) throw new Error("Enter a YouTube video link.")
     if (file.size === 0) throw new Error(t("importExport.errors.emptyFile", { fileName: file.name }))
-    if (file.size > MAX_AUDIO_UPLOAD_BYTES) {
-      throw new Error(t("importExport.errors.mediaFileTooLarge", { fileName: file.name }))
+    // AQU-1853: large media rides the multipart upload path, so the gate is
+    // the whole-object ceiling, not the single-request one.
+    if (file.size > MAX_AUDIO_OBJECT_BYTES) {
+      // AQU-1975: interpolate the ceiling rather than naming it in the copy —
+      // the string outlived the 95 MB cap it used to quote.
+      const locale = normalizeLocale(readStoredLocale())
+      throw new Error(t("importExport.errors.mediaFileTooLarge", {
+        fileName: file.name, limit: formatByteLimit(MAX_AUDIO_OBJECT_BYTES, locale),
+      }))
     }
     ctx.signal?.throwIfAborted()
     const suppliedDuration = ctx.mediaTextSource

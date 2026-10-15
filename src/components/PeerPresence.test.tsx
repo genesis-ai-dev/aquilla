@@ -1,6 +1,9 @@
 import { fireEvent, render, screen, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { PeerPresence } from "./PeerPresence"
+
+let backendReachable: boolean | null = null
+vi.mock("@/lib/offline/connectivity", () => ({ useConnectivity: () => backendReachable }))
 import { act } from "react"
 import { createProjectPresenceStore, type ProjectPresencePeer } from "@/lib/sync/presence-store"
 
@@ -98,5 +101,20 @@ describe("PeerPresence", () => {
     expect(rows[0]).toHaveAccessibleName(/pmbah/i)
     expect(rows[0]).toHaveAccessibleName(/×3/)
     expect(rows[0]).toHaveAccessibleName(/editing/i)
+  })
+
+  // The roster is a snapshot from the last socket frame; with the backend
+  // unreachable it cannot be trusted, so it must not claim people are here.
+  it("hides the roster while the desktop probe says the backend is unreachable", () => {
+    const peer = { peerId: "p1", username: "alice", color: "#000" } as ProjectPresencePeer
+    backendReachable = false
+    try {
+      const { container } = render(<PeerPresence peers={[peer]} />)
+      expect(container).toBeEmptyDOMElement()
+    } finally {
+      backendReachable = null
+    }
+    render(<PeerPresence peers={[peer]} />)
+    expect(screen.getByText("alice")).toBeInTheDocument()
   })
 })

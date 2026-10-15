@@ -23,6 +23,8 @@ import {
   numberWordsValue,
   pronounsDraft,
   pronounsValue,
+  punctuationDraft,
+  punctuationValue,
   questionMarkersDraft,
   questionMarkersValue,
   splitList,
@@ -35,6 +37,7 @@ import {
   readLanguageProfile,
   type LanguageProfile,
   type LanguageProfileSlot,
+  type PunctuationProfile,
 } from "../../../../db/shared/language-profile"
 import { ProfileSlotRow } from "./ProfileSlotRow"
 import { profileSaveError } from "./save-error"
@@ -45,12 +48,19 @@ import {
   NumberWordsEditor,
   PolicyEditor,
   PronounsEditor,
+  PunctuationEditor,
   QuestionMarkersEditor,
 } from "./slot-editors"
 
 export interface LanguageProfileSlotsProps {
   /** The stored `languageProfile`, as it is. */
   value: LanguageProfile | undefined
+  /**
+   * AQU-1906: the table's punctuation answer for this project's target
+   * language, pre-filling the Punctuation row while its slot is empty. Null
+   * for a language the table says nothing about — the row then opens blank.
+   */
+  punctuationPrefill?: PunctuationProfile | null
   canEdit: boolean
   disabledTooltip: ReactNode
   patch: (partial: ProjectWideSettings) => Promise<PatchOutcome>
@@ -98,6 +108,11 @@ const COPY: Readonly<Record<RowSlot, { title: MessageKey; description: MessageKe
     description: "languageProfile.negators.description",
     example: "languageProfile.negators.example",
   },
+  punctuation: {
+    title: "languageProfile.punctuation.title",
+    description: "languageProfile.punctuation.description",
+    example: "languageProfile.punctuation.example",
+  },
   numberWords: {
     title: "languageProfile.numberWords.title",
     description: "languageProfile.numberWords.description",
@@ -143,7 +158,13 @@ const listValue = (draft: string) => {
   return items.length > 0 ? items : null
 }
 
-export function LanguageProfileSlots({ value, canEdit, disabledTooltip, patch }: LanguageProfileSlotsProps) {
+export function LanguageProfileSlots({
+  value,
+  punctuationPrefill,
+  canEdit,
+  disabledTooltip,
+  patch,
+}: LanguageProfileSlotsProps) {
   const t = useT()
   // The stored object as it is, unknown slots included: rows merge over this.
   const stored: Record<string, unknown> =
@@ -205,6 +226,13 @@ export function LanguageProfileSlots({ value, canEdit, disabledTooltip, patch }:
         {(draft, setDraft, disabled) => <PronounsEditor draft={draft} setDraft={setDraft} disabled={disabled} />}
       </ProfileSlotRow>
       {listRow("negators")}
+      <ProfileSlotRow
+        {...row("punctuation")}
+        toDraft={(held) => punctuationDraft(held, punctuationPrefill)}
+        toValue={punctuationValue}
+      >
+        {(draft, setDraft, disabled) => <PunctuationEditor draft={draft} setDraft={setDraft} disabled={disabled} />}
+      </ProfileSlotRow>
       <ProfileSlotRow {...row("numberWords")} toDraft={numberWordsDraft} toValue={numberWordsValue}>
         {(draft, setDraft, disabled) => <NumberWordsEditor draft={draft} setDraft={setDraft} disabled={disabled} />}
       </ProfileSlotRow>

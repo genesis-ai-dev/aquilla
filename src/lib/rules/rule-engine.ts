@@ -221,7 +221,14 @@ function checkRule(
       if (isBibleCheckId(check.checkId)) {
         return bibleCheckInfraction(rule.id, check.checkId, cell.id, fileId, cell.translated, context?.bible)
       }
-      const spans = def.run(source, cell.translated)
+      // AQU-1906: the lane's punctuation conventions ride on the rule's check
+      // descriptor (resolveBuiltinRules stamped them), so no per-cell input is
+      // needed for them and a keystroke still re-evaluates one cell. Built only
+      // when there are conventions to pass: this runs once per rule per cell,
+      // and a whole Bible is ~31k cells × ~20 rules (AQU-1864).
+      const spans = check.punctuation
+        ? def.run(source, cell.translated, { punctuation: check.punctuation })
+        : def.run(source, cell.translated)
       if (!spans || spans.length === 0) return null
       return {
         ruleId: rule.id,

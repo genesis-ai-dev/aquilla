@@ -2029,7 +2029,7 @@ export function ExportDialog({
           const unrecorded = preview.filter((p) => p.clipCount === 0)
           const untimedTotal = preview.reduce((n, p) => n + p.untimedCount, 0)
           return (
-          <div className="flex flex-col gap-1 text-xs">
+          <div className="flex flex-col gap-1 text-xs" data-testid="export-character-preview">
             <p className="font-medium text-muted-foreground text-[10px]">{t("importExport.dialog.characterPreviewHeading")}</p>
             {preview.length === 0 ? (
               <p className="text-muted-foreground">{t("importExport.dialog.noCharactersInFile")}</p>

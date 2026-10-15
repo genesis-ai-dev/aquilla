@@ -183,6 +183,7 @@ import {
 import type { PaintGate } from "./project-workspace-helpers"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
 import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope, type ReplaceAllPayload } from "./ParallelPassagesPanel"
+import type { FindToggles } from "@/lib/search/workspace-index"
 import type { EditorTableHandle } from "./EditorTable"
 import type { WorkspaceSearchResult } from "@/hooks/useWorkspaceSearch"
 import { StatusBar } from "./StatusBar"
@@ -1329,6 +1330,8 @@ export function ProjectWorkspace() {
   const [parallelOpen, setParallelOpen] = useState(false)
   const [parallelMode, setParallelMode] = useState<ParallelPanelMode>("search")
   const [parallelScope, setParallelScope] = useState<ParallelPanelScope>("project")
+  const [parallelSeedQuery, setParallelSeedQuery] = useState("")
+  const [parallelSeedFind, setParallelSeedFind] = useState<FindToggles | undefined>(undefined)
   // FRO-308: the last real dock tab is restored per project from localStorage.
   const {
     activeTab: dockTab,
@@ -7238,6 +7241,8 @@ export function ProjectWorkspace() {
       if ((e.metaKey || e.ctrlKey) && !e.altKey && (key === "f" || key === "k")) {
         e.preventDefault()
         setParallelMode("search")
+        setParallelSeedQuery("")
+        setParallelSeedFind(undefined)
         setParallelScope(
           key === "k" ? "project" : e.shiftKey ? "project" : activeFileId ? "file" : "project",
         )
@@ -7247,6 +7252,8 @@ export function ProjectWorkspace() {
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && key === "r") {
         e.preventDefault()
         setParallelMode("replace")
+        setParallelSeedQuery("")
+        setParallelSeedFind(undefined)
         setParallelScope("project")
         setParallelOpen(true)
       }
@@ -13714,8 +13721,10 @@ export function ProjectWorkspace() {
                 isReadOnly={laneWriteFrozen}
                 onAfterReplace={rebuildSearchIndex}
                 onReplaceAll={handleReplaceAll}
-                onOpenFullPanel={() => {
-                  setParallelMode("search")
+                onOpenFullPanel={(intent) => {
+                  setParallelMode(intent.mode)
+                  setParallelSeedQuery(intent.query)
+                  setParallelSeedFind(intent.find)
                   setParallelScope(activeFileId ? "file" : "project")
                   setParallelOpen(true)
                 }}
@@ -15500,6 +15509,8 @@ export function ProjectWorkspace() {
         isReadOnly={laneWriteFrozen}
         onAfterReplace={rebuildSearchIndex}
         onReplaceAll={handleReplaceAll}
+        initialQuery={parallelSeedQuery}
+        initialFind={parallelSeedFind}
       />
       {project && (
         <CloneVoiceModalHost

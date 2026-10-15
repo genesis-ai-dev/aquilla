@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { createMediaFileCommit, probeMediaDurationMs,
   type EmitParsedFileResult, type ImportContext } from "@/lib/import"
-import { MAX_AUDIO_UPLOAD_BYTES } from "@/lib/audio/upload"
+import { MAX_AUDIO_OBJECT_BYTES } from "@/lib/audio/upload"
 import { prepareEmbeddedSubtitleSources } from "@/lib/import/embedded-subtitle-sources"
 import { type MediaTextSourceOption } from "@/lib/import/media-cues"
 import { MediaImportPreviewDialog } from "./MediaImportPreviewDialog"
@@ -62,7 +62,8 @@ export function YouTubeImportPanel({ ctx, onImported }: {
         if (!fileType || !isMediaFileType(fileType)) {
           throw new Error("Choose a supported audio or video file.")
         }
-        if (media.size === 0 || media.size > MAX_AUDIO_UPLOAD_BYTES) {
+        // AQU-1853: multipart upload handles anything over the single-request cap.
+        if (media.size === 0 || media.size > MAX_AUDIO_OBJECT_BYTES) {
           throw new Error("Choose a non-empty audio or video within the upload limit.")
         }
         const prepared = prepareYouTubePictureImport({ url, name: media.name })

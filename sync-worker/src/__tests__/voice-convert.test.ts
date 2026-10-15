@@ -73,10 +73,12 @@ function makeStubBucket() {
 
 /**
  * Minimal `AquillaDb` stand-in for the per-user conversion throttle (AQU-1854).
- * It understands exactly the two statements db/shared/rate-limit.ts issues: the
- * COUNT over the trailing window, and the INSERT that records a call. `recorded`
- * starts at `seedRecorded` so a test can place a user already at the cap without
- * firing N requests.
+ * It understands the one statement db/shared/rate-limit.ts issues (AQU-1843):
+ * the `INSERT … ON CONFLICT DO UPDATE … RETURNING hits` upsert, whose
+ * post-increment `hits` is this call's ordinal in the window. `recorded` starts
+ * at `seedRecorded` so a test can place a user already at the cap without
+ * firing N requests. Any other read (the AQU-1869 spend-ceiling snapshot)
+ * answers with no row.
  */
 function makeRateLimitDb(seedRecorded = 0) {
   const state = { recorded: seedRecorded, inserts: [] as string[] }
@@ -84,13 +86,18 @@ function makeRateLimitDb(seedRecorded = 0) {
     prepare(sql: string) {
       return {
         bind(...args: unknown[]) {
+          const upsert = () => {
+            state.recorded += 1
+            state.inserts.push(String(args[0]))
+            return state.recorded
+          }
           return {
-            async first<T>() {
-              return { n: state.recorded } as unknown as T
+            async first<T>(): Promise<T | null> {
+              if (!sql.includes("INTO rate_limit_counters")) return null
+              return { hits: upsert() } as unknown as T
             },
             async run() {
-              state.recorded += 1
-              state.inserts.push(String(args[0]))
+              if (sql.includes("INTO rate_limit_counters")) upsert()
             },
           }
         },
@@ -457,8 +464,9 @@ describe("POST /api/v1/voice/convert", () => {
       message: "Too many requests, slow down.",
     })
     expect(modalCalls).toHaveLength(0)
-    // A throttled call must not also count against the window.
-    expect(state.recorded).toBe(VOICE_CONVERT_MAX_PER_USER_PER_WINDOW)
+    // AQU-1843: the check and the count are one upsert, so a throttled call is
+    // counted too — hammering while blocked never frees budget inside the window.
+    expect(state.recorded).toBe(VOICE_CONVERT_MAX_PER_USER_PER_WINDOW + 1)
   })
 
   it("records one throttle event per accepted conversion, keyed by user", async () => {

@@ -58,7 +58,11 @@ async function importBiblicaCells(
 ): Promise<{ bytes: ArrayBuffer; cells: CellData[] }> {
   const bytes = await makeBiblicaIdml(paragraphs)
   const parsed = await parseIdml(bytes.slice(0))
-  const { strings } = await extractBiblicaStudyNoteStrings(bytes.slice(0), async () => parsed)
+  // The study-note import leaves Bible text out. This file is the export
+  // contract for a verse that was imported, so it asks for those cells.
+  const { strings } = await extractBiblicaStudyNoteStrings(bytes.slice(0), async () => parsed, {
+    includeScripture: true,
+  })
   const { cells: bulk } = buildBulkCellsWithSpeakers(strings, {
     fileName: "ukEngNIVSB_GEN-DEU.idml",
     fileType: "idml",

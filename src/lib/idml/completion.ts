@@ -31,9 +31,12 @@ export type IdmlStructureRepairFn = (
 
 export const IDML_COMPLETION_INSTRUCTION = [
   "IDML protected-anchor output contract:",
-  "A Source value beginning with <p data-idml-version=\"2\"> is canonical protected HTML.",
+  "A Source value beginning with <p data-idml-version=\"2\"> is one sentence split across style runs.",
+  "Read the editable <span data-idml-slot> elements in order as that single sentence, then translate the sentence as a whole.",
+  "Do not translate each run by itself. Grammar, word order, and agreement come from the whole sentence.",
+  "Place that finished translation back into the same runs so reading the runs in order is the full sentence.",
+  "Put the words that translate a bold or italic source phrase into the run with that same face when the target language still has a corresponding phrase.",
   "Return that complete <p> element as the translation.",
-  "Translate only text inside editable <span data-idml-slot> elements.",
   "Copy every tag and every data-idml-*, contenteditable, and character-style attribute exactly.",
   "Do not delete, duplicate, renumber, reorder, or rename slot or token elements.",
   "Do not add formatting, wrapper tags, comments, Markdown fences, or explanatory text.",
@@ -48,6 +51,8 @@ export const IDML_STRUCTURE_REPAIR_INSTRUCTION = [
   "Return STRICT JSON only, no prose, no Markdown fences:",
   '{"slots":[{"i":0,"t":"translated text for slot 0"},{"i":1,"t":"…"}]}',
   "Include every editable slot index listed below, even if a slot stays empty.",
+  "The slots are pieces of one sentence. Place the draft's wording so the slots still read as that sentence in order.",
+  "Do not retranslate each slot as its own phrase.",
   "Put the translated wording from the broken draft into the matching slots.",
   "Do not return HTML tags. Newlines inside a slot are allowed as \\n in the JSON string.",
 ].join("\n")
@@ -99,7 +104,7 @@ export function buildIdmlStructureRepairMessages(
         "SOURCE (canonical protected HTML — for reference only; do not return HTML):",
         sourceHtml,
         "",
-        "EDITABLE SLOTS (translate each; return every index):",
+        "EDITABLE SLOTS (parts of one sentence; return every index):",
         slotLines || "(none)",
         "",
         "BROKEN DRAFT (recover its translated wording into the slots):",
@@ -399,6 +404,7 @@ export async function normalizeProtectedCompletionWithRepair(
       throw new IdmlCompletionError(
         `The AI structure repair returned an empty draft for cell ${cell.id}; nothing was saved.`,
         error.diagnostics,
+        true,
       )
     }
     try {
@@ -412,6 +418,7 @@ export async function normalizeProtectedCompletionWithRepair(
         throw new IdmlCompletionError(
           `The AI draft changed a protected IDML anchor in cell ${cell.id}; a repair pass also failed. Nothing was saved.`,
           repairError.diagnostics.length > 0 ? repairError.diagnostics : error.diagnostics,
+          true,
         )
       }
       throw repairError
@@ -421,11 +428,23 @@ export async function normalizeProtectedCompletionWithRepair(
 
 export class IdmlCompletionError extends Error {
   readonly diagnostics: readonly IdmlDiagnostic[]
+  /**
+   * AQU-1964: true when the slot-stitch repair pass ran and still could not
+   * recover the draft. Carried on the error rather than re-derived from its
+   * wording, so the telemetry boundary can count "refused outright" apart from
+   * "refused after a repair attempt" without parsing the message.
+   */
+  readonly repairAttempted: boolean
 
-  constructor(message: string, diagnostics: readonly IdmlDiagnostic[] = []) {
+  constructor(
+    message: string,
+    diagnostics: readonly IdmlDiagnostic[] = [],
+    repairAttempted = false,
+  ) {
     super(diagnostics[0]?.message ? `${message} ${diagnostics[0].message}` : message)
     this.name = "IdmlCompletionError"
     this.diagnostics = diagnostics
+    this.repairAttempted = repairAttempted
   }
 }
 

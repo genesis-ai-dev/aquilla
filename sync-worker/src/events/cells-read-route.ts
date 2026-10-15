@@ -653,6 +653,15 @@ const MAX_LIMIT = 2000
 // resync. Bulk imports / bulk completions are the realistic way past it.
 const DELTA_RESYNC_LIMIT = 500
 
+// AQU-1842: what the changed-cell probe asks Postgres for — the cap plus one.
+// One row past the cap is all the resync gate needs: the gate only ever asks
+// "more than DELTA_RESYNC_LIMIT?", so row 502 onwards is work whose answer is
+// already decided. Without it a client back from a week offline, or one whose
+// cursor predates a bulk import or an agent apply, pulls every changed cell id
+// in the range into the Worker and serializes it into the array, just to be
+// told to resync.
+const DELTA_PROBE_LIMIT = DELTA_RESYNC_LIMIT + 1
+
 interface Watermarks {
   /** MAX(server_seq) over the file's events; 0 for files with no events. */
   maxSeq: number
@@ -942,12 +951,20 @@ export async function handleCellsReadRequest(
       // (file.rename, project-scoped) bump the watermark but change no rows.
       // idx_events_project_seq makes the seq-range scan cheap when `since`
       // is recent — the overwhelmingly common case (focus / post-commit).
+      //
+      // AQU-1842: bounded at DELTA_PROBE_LIMIT (the cap + 1). Under the cap the
+      // LIMIT never bites, so the delta is exactly what it was; at or over it
+      // the only thing the extra rows could tell us is a resync we already
+      // know to send. The ids no longer reach the Worker, so a huge gap costs
+      // 501 rows instead of every changed cell in the range.
       const changedRes = await env.AQUILLA_PG.prepare(
-        "SELECT DISTINCT cell_id FROM events WHERE project_id = ? AND file_id = ? AND server_seq > ? AND cell_id IS NOT NULL",
+        "SELECT DISTINCT cell_id FROM events WHERE project_id = ? AND file_id = ? AND server_seq > ? AND cell_id IS NOT NULL LIMIT ?",
       )
-        .bind(projectId, fileId, since)
+        .bind(projectId, fileId, since, DELTA_PROBE_LIMIT)
         .all<{ cell_id: string }>()
       const changedCellIds = changedRes.results.map((r) => r.cell_id)
+      // > the cap, i.e. the probe came back full: the gap is too wide to ship
+      // as a delta. Equality cannot happen — the probe stops one row past.
       if (changedCellIds.length > DELTA_RESYNC_LIMIT) {
         return Response.json(
           { resync: true, maxServerSeq, projectEpoch },

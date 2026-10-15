@@ -46,6 +46,9 @@ export interface VerifySpanDeps {
   draft: SpanDraft
   /** Source pairs for the drafted cells (verifiers compare against source). */
   pairs: CellPair[]
+  /** AQU-1690: the drafter's Bible facts line per cell id, so the force
+   *  verifier can catch a wrong speaker or referent. */
+  facts?: ReadonlyMap<string, string>
   llm: LlmCall
   budget: RunBudget
 }
@@ -57,11 +60,14 @@ function verifierSystemPrompt(key: VerifierKey, deps: VerifySpanDeps): string {
     deps.sceneBrief.ambiguityRegister.length > 0
       ? `\nAmbiguity register (each item must stay OPEN in the draft):\n${deps.sceneBrief.ambiguityRegister.map((a) => `- [${a.id}] ${a.question}`).join("\n")}\n`
       : "\nAmbiguity register: (empty)\n"
+  const factsNote = deps.draft.cells.some((c) => deps.facts?.has(c.cellId))
+    ? "\nA cell's \"facts\" line comes from Bible data (who speaks to whom, quote levels, who is named, \"you\" singular or plural). It is true: a draft that contradicts it fails.\n"
+    : ""
   // [[ctx:verify:<stance>]] routes the scripted e2e mock (scripts/mock-openrouter.ts).
   return `[[ctx:verify:${key}]] You are an independent translation verifier. Your single stance: ${STANCES[key].stance}
 
 Scene brief: ${deps.sceneBrief.l1Summary}
-${registerBlock}
+${registerBlock}${factsNote}
 You see the brief and the draft only — you have no access to the drafter's reasoning, and you owe it nothing. Approve a cell only if you actively looked for your failure mode there and found none.
 
 Output STRICT JSON only, no prose, no code fences:
@@ -75,7 +81,8 @@ function draftBlock(deps: VerifySpanDeps): string {
     .map((c, i) => {
       const p = sourceById.get(c.cellId)
       const ref = p?.canonicalRef ? ` (${p.canonicalRef})` : ""
-      return `${i + 1}.${ref}\n   source: ${p?.source ?? "(unknown)"}\n   draft:  ${c.text}`
+      const facts = deps.facts?.get(c.cellId)
+      return `${i + 1}.${ref}\n   source: ${p?.source ?? "(unknown)"}${facts ? `\n   facts:  ${facts}` : ""}\n   draft:  ${c.text}`
     })
     .join("\n")
 }

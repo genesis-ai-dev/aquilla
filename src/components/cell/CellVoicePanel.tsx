@@ -59,6 +59,11 @@ import type { CodexCell } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { ProjectRecord as Project, ProjectTtsSettings } from "@/lib/parsers/types"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { useOnline } from "@/hooks/useOnline"
+import { useConnectivity } from "@/lib/offline/connectivity"
+import { ttsOfflineGate } from "@/lib/audio/tts-offline"
+import { useModelStatus } from "@/lib/audio/prefetch"
+import { providerInfo, resolveTtsProvider, ttsProviderModel } from "@/lib/audio/tts-providers"
 
 interface CellVoicePanelProps {
   cell: CellData
@@ -260,6 +265,19 @@ export function CellVoicePanel({
 
   // Always in the line's own voice — the picker sets it; picking never
   // generates.
+  const provider = active.provider ?? resolveTtsProvider(settings)
+  const engineName = providerInfo(provider).shortTitle
+  const browserOnline = useOnline()
+  const backendReachable = useConnectivity()
+  const mmsStatus = useModelStatus("mms")
+  const offlineGate = ttsOfflineGate({
+    offline: !browserOnline || backendReachable === false,
+    // This card always saves, so even the on-device voice is blocked here;
+    // only the suggestion to switch to it depends on the model.
+    usesLocalModel: false,
+    localModelReady: ttsProviderModel(provider) !== "mms" && mmsStatus.kind === "ready",
+  })
+
   const generate = useCallback(async () => {
     if (isVoicing || !canGenerate || !canEdit) return
     autoplayRef.current = true
@@ -421,7 +439,7 @@ export function CellVoicePanel({
     </AppTooltip>
   ) : null
 
-  const state = isVoicing ? "generating" : failure ? "failed" : !canGenerate ? "notext" : "ready"
+  const state = isVoicing ? "generating" : failure ? "failed" : !canGenerate ? "notext" : offlineGate.kind !== "ok" ? "offline" : "ready"
   return (
     <div className="min-w-0" dir="ltr" data-voice-card="">
       <div data-testid="voice-card-empty" data-state={state} className={slotClass} style={trackVars}>
@@ -444,6 +462,24 @@ export function CellVoicePanel({
           // a wrapper that does.
           <AppTooltip content={t("editor.voice.nothingToReadTooltip")}>
             <span tabIndex={0} className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <Button type="button" variant="outline" size="xs" disabled data-testid="voice-card-generate">
+                <Sparkles />
+                {t("editor.voice.generateWith", { voice: active.name })}
+              </Button>
+            </span>
+          </AppTooltip>
+        )}
+        {state === "offline" && (
+          // Every clip made here is saved to the server, so offline it can't
+          // run at all — say so before the user clicks, not after a spinner.
+          <AppTooltip
+            content={
+              offlineGate.kind === "blocked" && offlineGate.suggestLocal
+                ? t("audio.tts.offlineSuggestLocal", { engine: engineName })
+                : t("audio.tts.offlineBlocked", { engine: engineName })
+            }
+          >
+            <span tabIndex={0} data-testid="voice-card-offline" className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
               <Button type="button" variant="outline" size="xs" disabled data-testid="voice-card-generate">
                 <Sparkles />
                 {t("editor.voice.generateWith", { voice: active.name })}

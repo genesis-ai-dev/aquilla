@@ -1,5 +1,11 @@
 import { describe, it, expect, vi } from "vitest"
-import { DcsClient, DEFAULT_DCS_BASE, DEFAULT_DCS_RAW_BASE } from "./catalog"
+import {
+  DcsClient,
+  DcsRawNotFoundError,
+  isDcsRawNotFound,
+  DEFAULT_DCS_BASE,
+  DEFAULT_DCS_RAW_BASE,
+} from "./catalog"
 
 /** Build a fetch stub that records the URL it was called with and returns the
  *  given JSON (or text). Asserting on `calls` verifies the client hit the right
@@ -282,6 +288,69 @@ describe("DcsClient.fetchRaw", () => {
 
     await expect(client.fetchRaw("owner", "repo", "v1", "huge.usfm"))
       .rejects.toThrow(/safety limit.*huge\.usfm/i)
+  })
+
+  // AQU-1860: an absent member is normal input for a changed-file walk (a path
+  // renamed mid-range is in the compare union but not at the new ref), so it is
+  // typed apart from a real transport failure. The MESSAGE is unchanged, so
+  // anything matching on the text still works.
+  it("throws a typed, path-carrying error for a missing member (404)", async () => {
+    const { fetchImpl } = stubFetch(() => ({ ok: false, status: 404, text: "not found" }))
+    const client = new DcsClient({ fetchImpl })
+    const path = "00-UDB_front&back/UDB-3-Appendix.md"
+
+    await expect(client.fetchRaw("WycliffeAssociates", "en_udb", "v19-10", path))
+      .rejects.toBeInstanceOf(DcsRawNotFoundError)
+
+    let caught: unknown
+    try {
+      await client.fetchRaw("WycliffeAssociates", "en_udb", "v19-10", path)
+    } catch (e) {
+      caught = e
+    }
+    expect(caught).toBeInstanceOf(DcsRawNotFoundError)
+    const error = caught as DcsRawNotFoundError
+    expect(error.path).toBe(path)
+    expect(error.status).toBe(404)
+    expect(error.message).toContain("DCS raw fetch failed (HTTP 404) for")
+    // The '&' is left as-is in the path: it is a legal path character and
+    // git.door43.org serves it unencoded (verified against the live host).
+    expect(error.message).toContain(path)
+  })
+
+  it("keeps every other status a plain, fatal error", async () => {
+    const { fetchImpl } = stubFetch(() => ({ ok: false, status: 503, text: "busy" }))
+    const client = new DcsClient({ fetchImpl })
+    let error: unknown
+    try {
+      await client.fetchRaw("owner", "repo", "v1", "57-TIT.usfm")
+    } catch (e) {
+      error = e
+    }
+    expect(error).toBeInstanceOf(Error)
+    expect(error).not.toBeInstanceOf(DcsRawNotFoundError)
+    expect(isDcsRawNotFound(error)).toBe(false)
+  })
+})
+
+describe("isDcsRawNotFound", () => {
+  it("recognizes the typed error", () => {
+    expect(isDcsRawNotFound(new DcsRawNotFoundError("https://x/y", "y"))).toBe(true)
+  })
+
+  it("recognizes the plain Error an injected client may still throw", () => {
+    // Test doubles and alternative transports predate the typed error; the
+    // skip-the-missing-member behaviour must not silently stop working for them.
+    expect(
+      isDcsRawNotFound(new Error("DCS raw fetch failed (HTTP 404) for https://x/y")),
+    ).toBe(true)
+  })
+
+  it("does not swallow other failures, or non-errors", () => {
+    expect(isDcsRawNotFound(new Error("DCS raw fetch failed (HTTP 500) for https://x/y"))).toBe(false)
+    expect(isDcsRawNotFound(new Error("DCS raw file is not valid UTF-8 text: y"))).toBe(false)
+    expect(isDcsRawNotFound("404")).toBe(false)
+    expect(isDcsRawNotFound(null)).toBe(false)
   })
 })
 

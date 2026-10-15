@@ -96,6 +96,8 @@ import { isAutopilotVisible } from "@/lib/features/flags"
 import { isBibleDataExperimentOn } from "@/lib/bible-data/experiment"
 import type { BibleEnrichmentSettings } from "../../db/shared/bible-enrichments"
 import { BibleDataSection } from "./ProjectSettings/BibleDataSection"
+import { LanguageProfileSection } from "./ProjectSettings/LanguageProfileSection"
+import { ProjectDecisionsSection } from "./ProjectSettings/ProjectDecisionsSection"
 import {
   resolveTimingLocked,
   createProjectLane,
@@ -1453,7 +1455,16 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     { id: "section-upstream-changes", label: "Upstream changes", keywords: ["upstream", "changes", "repin", "review", "mirror", "stale"], visible: hasLiveSourceLink },
     { id: "section-dcs-upstream", label: "Door43 upstream", keywords: ["door43", "dcs", "unfoldingword", "upstream", "check for updates", "import changes", "release"], visible: hasDcsUpstream },
     { id: "section-project-info", label: "Project Info", keywords: ["name", "source language", "target language", "smart quotes", "curly quotes", "quotation marks", "typography"] },
-    { id: "section-languages", label: "Languages", keywords: ["languages", "target lanes", "lane", "target language", "dialect"] },
+    // AQU-1688: the Language profile for checks lives here too, while this
+    // device has the Bible data experiment on (AQU-1685).
+    {
+      id: "section-languages",
+      label: "Languages",
+      keywords: [
+        "languages", "target lanes", "lane", "target language", "dialect",
+        ...(bibleDataExperiment ? ["language profile", "quotation marks", "quote marks", "bible data checks"] : []),
+      ],
+    },
     // AQU-1686: "translation notes" stays. It used to mislead (this card did
     // not control the Translation Notes sidebar, and still does not), but the
     // card now holds the Translation helps enrichment, which shows
@@ -2095,6 +2106,32 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             onCreateLane={isCloudProject ? createLane : undefined}
             onSetLaneArchived={isCloudProject ? setLaneArchived : undefined}
             onLoadLaneLastChange={isCloudProject ? loadLaneLastChange : undefined}
+          />
+        )}
+        {/* AQU-1688: facts about the target language that Bible data checks
+            need. Only with the Bible data experiment on (AQU-1685): without
+            it there are no Bible data checks to configure. */}
+        {bibleDataExperiment && sectionsToRender.some((s) => s.id === "section-languages") && (
+          <LanguageProfileSection
+            value={sharedSettingsBlob?.languageProfile}
+            targetLanguage={sharedSettingsBlob?.targetLanguage ?? project?.targetLanguage ?? ""}
+            canEdit={canEditShared}
+            disabledTooltip={sharedDisabledTooltip ?? null}
+            patch={patchShared}
+          />
+        )}
+        {/* AQU-1691: the decision log, the team's answers to Autopilot's
+            questions. Only with the Bible data experiment on (AQU-1685): the
+            questions that record a decision are Bible data questions
+            (AQU-1690), so without the experiment the card has nothing to
+            show. Autopilot follows the stored decisions either way. */}
+        {bibleDataExperiment && sectionsToRender.some((s) => s.id === "section-languages") && (
+          <ProjectDecisionsSection
+            value={sharedSettingsBlob?.projectFacts}
+            canEdit={canEditShared}
+            disabledTooltip={sharedDisabledTooltip ?? null}
+            username={session?.username ?? ""}
+            patch={patchShared}
           />
         )}
 

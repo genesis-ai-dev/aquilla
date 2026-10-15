@@ -70,7 +70,11 @@ function classify(rec: OutboxRecord): Status {
   const s = rec.lastError.status
   // 403 is checked before the generic `failed` rollup so a permission failure
   // reads as "not allowed", never as the misleading "session expired".
-  if (s === 403) return "no-permission"
+  // OPS-44: only a QUARANTINED 403 is a refusal. A 403 stamp on a record still
+  // `pending` is the flusher holding a platform admin's edit until they enter
+  // the emailed code; offering Discard there would invite them to throw away
+  // a change that saves on its own once they verify.
+  if (s === 403) return rec.status === "failed" ? "no-permission" : "pending"
   if (s === 401) return "needs-signin"
   if (rec.status === "failed") return "stuck"
   if (s === 0 || s >= 500) return "retrying"

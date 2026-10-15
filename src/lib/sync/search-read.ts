@@ -58,6 +58,9 @@ export async function fetchProjectSearch(
   params.set("q", q)
   if (opts.side) params.set("side", opts.side)
   if (typeof opts.limit === "number") params.set("limit", String(opts.limit))
+  if (opts.matchCase) params.set("case", "1")
+  if (opts.wholeWord) params.set("word", "1")
+  if (opts.useRegexp) params.set("regexp", "1")
   const url =
     `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}` +
     `/search?${params.toString()}`

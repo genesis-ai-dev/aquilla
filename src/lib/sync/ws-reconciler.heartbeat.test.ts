@@ -80,7 +80,10 @@ describe("ws-reconciler heartbeat", () => {
 
     await vi.advanceTimersByTimeAsync(INTERVAL * 3)
     expect(ws.pings()).toBe(3)
-    expect(JSON.parse(ws.sent[0])).toMatchObject({ t: "ping", ts: expect.any(Number) })
+    // AQU-1836: byte-stable frame — the DO's setWebSocketAutoResponse pair
+    // matches on string equality, so a per-ping `ts` would stop the runtime
+    // answering heartbeats for a hibernating DO.
+    expect(ws.sent[0]).toBe('{"t":"ping"}')
     rec.close()
   })
 

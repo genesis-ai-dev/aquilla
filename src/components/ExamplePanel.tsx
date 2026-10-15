@@ -93,15 +93,33 @@ export function ExamplePanel({
           align="start"
           side="bottom"
           sideOffset={6}
-          // `max-h-(--available-height)` + `overflow-y-auto`: the popup is
-          // portalled and position-fixed, so without a height cap long example
-          // pairs run off the viewport with nothing to scroll (AQU-1264). This
-          // is the same affordance Menu/Select/Combobox popups already carry.
+          // The height cap + `overflow-y-auto`: the popup is portalled and
+          // position-fixed, so without one, long example pairs run off the
+          // viewport with nothing to scroll (AQU-1264). This is the same
+          // affordance Menu/Select/Combobox popups already carry.
+          // AQU-1502: the cap is `min(24rem, available)` — the Combobox
+          // pattern — not the bare available height. A bare available height
+          // lets a long list stretch to the full height of a tall screen,
+          // which is the "cut off by the page" complaint from the other end:
+          // the list owns the viewport instead of being a readable panel you
+          // scroll. 24rem shows ~3 pairs, and `min()` still never exceeds the
+          // room the positioner actually has at a viewport edge.
           // `overscroll-contain` stops wheel/trackpad momentum from chaining
           // into the editor grid behind the panel once the list bottoms out.
-          className="w-80 max-h-(--available-height) space-y-2 overflow-y-auto overscroll-contain p-3 text-xs"
+          className="w-80 max-h-[min(24rem,var(--available-height))] space-y-2 overflow-y-auto overscroll-contain p-3 text-xs"
           aria-label={t("search.examples.popoverAriaLabel")}
         >
+          {/* AQU-1502: the count, pinned inside the scroller. Once the list is
+              capped and scrolled, the trigger's count is the only thing saying
+              how many pairs there are — and it is behind the popup. Sticking it
+              to the top of the scrollport is what tells a reader scrolling the
+              list that there is more below the fold. */}
+          <div
+            data-testid="example-count-header"
+            className="sticky top-0 z-10 -mx-3 -mt-3 border-b bg-popover px-3 pt-3 pb-1.5 text-[11px] font-medium text-muted-foreground"
+          >
+            {t("search.examples.count", { count: examples.length })}
+          </div>
           {rows.map((ex, i) => {
             const colorIndex =
               ((retrievalIndex.get(ex.cellId) ?? i) + globalColorOffset) % EXAMPLE_COLORS.length

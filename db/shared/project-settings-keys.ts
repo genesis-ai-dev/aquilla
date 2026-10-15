@@ -20,6 +20,9 @@
 
 import { TEXT_DIRECTION_SETTING_VALUES } from './text-direction'
 import { BIBLE_ENRICHMENT_IDS } from './bible-enrichments'
+import { BIBLE_VOICE_OVERRIDES_TYPE_NAME, bibleVoiceOverridesProblem } from './bible-voice-overrides'
+import { LANGUAGE_PROFILE_TYPE_NAME, languageProfileProblem } from './language-profile'
+import { PROJECT_FACTS_TYPE_NAME, projectFactsProblem } from './project-facts'
 
 /** How a key's value is described to callers (validation errors + docs). */
 export type SettingsValueKind =
@@ -40,6 +43,14 @@ export interface SettingsKeySpec {
    * each must hold a boolean. Absent means any plain object.
    */
   booleanFlags?: readonly string[]
+  /**
+   * AQU-1688: when `kind` is 'object' (or, since AQU-1691, 'object[]'), a
+   * structural check the value must also pass. Returns null when it is fine,
+   * else what is wrong.
+   */
+  problem?: (value: unknown) => string | null
+  /** AQU-1688: the type shown in errors and describe_command, when `kind` undersells it. */
+  typeName?: string
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -48,6 +59,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 
 /** Human-readable type name for a spec — used in errors and describe_command. */
 export function settingsTypeName(spec: SettingsKeySpec): string {
+  if (spec.typeName) return spec.typeName
   if (spec.kind === 'enum') return (spec.values ?? []).map((v) => `"${v}"`).join(' | ')
   if (spec.kind === 'object' && spec.booleanFlags) {
     return `{ ${spec.booleanFlags.map((flag) => `"${flag}"?: boolean`).join(', ')} }`
@@ -67,6 +79,7 @@ function matchesSpec(spec: SettingsKeySpec, value: unknown): boolean {
       return Array.isArray(value) && value.every((v) => typeof v === 'string')
     case 'object': {
       if (!isPlainObject(value)) return false
+      if (spec.problem && spec.problem(value) !== null) return false
       const flags = spec.booleanFlags
       if (!flags) return true
       return Object.entries(value).every(
@@ -74,7 +87,7 @@ function matchesSpec(spec: SettingsKeySpec, value: unknown): boolean {
       )
     }
     case 'object[]':
-      return Array.isArray(value) && value.every(isPlainObject)
+      return Array.isArray(value) && value.every(isPlainObject) && (!spec.problem || spec.problem(value) === null)
     case 'enum':
       return typeof value === 'string' && (spec.values ?? []).includes(value)
   }
@@ -110,7 +123,23 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
   rules: { kind: 'object[]' },
   rulePenalties: { kind: 'object' },
   algorithmicChecks: { kind: 'object' },
-  terminology: { kind: 'object[]' },
+  // `terminology` is NOT here: it is retired (AQU-1724) — see
+  // RETIRED_TERMINOLOGY_KEY below.
+  // AQU-1688: facts about the target language that Bible data checks need
+  // (db/shared/language-profile.ts). A check whose slot is empty is dormant.
+  languageProfile: {
+    kind: 'object',
+    problem: (value) => languageProfileProblem(value),
+    typeName: LANGUAGE_PROFILE_TYPE_NAME,
+  },
+  // AQU-1691: the decision log — answers to one-off questions that later
+  // drafts must honour (db/shared/project-facts.ts). One entry per key; a key
+  // that names a Language-profile slot belongs in languageProfile instead.
+  projectFacts: {
+    kind: 'object[]',
+    problem: (value) => projectFactsProblem(value),
+    typeName: PROJECT_FACTS_TYPE_NAME,
+  },
 
   // Validation policy (all POLICY keys — writable in the restrictive direction
   // only, see db/shared/policy-direction.ts; a loosening write resolves to
@@ -159,6 +188,14 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
   // AQU-1686: one switch per Bible data enrichment (db/shared/bible-enrichments.ts).
   // A missing id means that enrichment's default.
   bibleEnrichments: { kind: 'object', booleanFlags: BIBLE_ENRICHMENT_IDS },
+  // AQU-1692: maintainers' corrections of who speaks a pack speech, and to whom
+  // (db/shared/bible-voice-overrides.ts). Maintainer-only like every key with
+  // no carve-out.
+  bibleVoiceOverrides: {
+    kind: 'object',
+    problem: (value) => bibleVoiceOverridesProblem(value),
+    typeName: BIBLE_VOICE_OVERRIDES_TYPE_NAME,
+  },
   knowledgeBaseEnabled: { kind: 'boolean' },
   importExcludeFrontMatter: { kind: 'boolean' },
   // AQU-1720: what one imported cell is for docx/txt/md uploads.
@@ -175,6 +212,21 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
 
 export const PROJECT_SETTINGS_KEYS: readonly string[] = Object.keys(PROJECT_SETTINGS_KEY_SPECS)
 
+/**
+ * AQU-1724: the settings key that used to hold a project's termbase. Key terms
+ * now live in the Postgres `concepts` table, projected from term.* events
+ * (db/postgres/migrations/0084_concepts.sql); scripts/migrate-concepts.ts
+ * deletes this key once a project migrates, and the editor reads it only while
+ * the table has no live rows. A settings write to it is therefore lost without
+ * a word, so every settings door refuses one with this message instead.
+ */
+export const RETIRED_TERMINOLOGY_KEY = 'terminology'
+
+export const RETIRED_TERMINOLOGY_MESSAGE =
+  'settings key "terminology" is retired — key terms live in the concepts table, and a settings write to ' +
+  'this key never reaches the editor. Write terms with term.create / term.update events in an EmitEvents ' +
+  'changeset (read the current termbase with list_terms first).'
+
 export function isKnownSettingsKey(key: string): boolean {
   return Object.prototype.hasOwnProperty.call(PROJECT_SETTINGS_KEY_SPECS, key)
 }
@@ -183,18 +235,23 @@ export function isKnownSettingsKey(key: string): boolean {
  * Validate one `{key, value}` settings op against the registry.
  *
  * Returns null when it is fine, else a message naming what is wrong — the
- * unknown key, or the type the key actually expects. `null` is accepted for
- * every key: JSON cannot carry `undefined`, so storing null is the only way a
- * caller can clear a key (see PatchSettingsOp).
+ * unknown key, the retired one, or the type the key actually expects. `null`
+ * is accepted for every live key: JSON cannot carry `undefined`, so storing
+ * null is the only way a caller can clear a key (see PatchSettingsOp).
  */
 export function validateSettingsKeyValue(key: string, value: unknown): string | null {
+  // Before the null pass-through: clearing the retired key is a write to it
+  // too, and on a project not yet migrated it would delete its only termbase.
+  if (key === RETIRED_TERMINOLOGY_KEY) return RETIRED_TERMINOLOGY_MESSAGE
   const spec = PROJECT_SETTINGS_KEY_SPECS[key]
   if (!spec) {
     return `unknown settings key "${key}" — call describe_command("PatchSettings") for the valid keys`
   }
   if (value === null) return null
   if (!matchesSpec(spec, value)) {
-    return `settings key "${key}" expects ${settingsTypeName(spec)}`
+    // A structural problem names the field at fault, not only the expected type.
+    const detail = spec.problem && (isPlainObject(value) || Array.isArray(value)) ? spec.problem(value) : null
+    return `settings key "${key}" expects ${settingsTypeName(spec)}${detail ? ` (${detail})` : ''}`
   }
   return null
 }

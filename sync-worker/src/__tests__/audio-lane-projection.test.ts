@@ -246,6 +246,71 @@ describe('selection is per (cell, slot, lane)', () => {
   })
 })
 
+const selectedIds = async (): Promise<string[]> =>
+  (await takes()).filter((r) => r.selected === 1).map((r) => r.audio_id).sort()
+
+describe('a write selecting a take already on file stays in that take’s lane (AQU-1978)', () => {
+  // The take's own row says which lane it is in (lane_id is fill-only), so a
+  // re-attach or a select of it must deselect within THAT lane. The event's
+  // tag is only what the writer remembered to send: the word-timings re-attach
+  // sent none, which reads as the default lane, and cleared that lane's take.
+
+  it('a lane-less re-attach of a French take leaves the default lane’s take selected', async () => {
+    await attach('take-sw', { lane: '' })
+    await attach('take-fr', { lane: 'fr' })
+    // The word timings land on the French take with no tag.
+    await attach('take-fr', { eventId: 'evt-timings' })
+    expect(await selectedIds()).toEqual(['take-fr', 'take-sw'])
+  })
+
+  it('a stale tag naming another lane cannot reach that lane either', async () => {
+    await attach('take-sw', { lane: '' })
+    await attach('take-fr', { lane: 'fr' })
+    await attach('take-sw', { lane: 'fr', eventId: 'evt-stale' })
+    expect(await selectedIds()).toEqual(['take-fr', 'take-sw'])
+  })
+
+  it('still hands the slot back within the take’s OWN lane', async () => {
+    await attach('take-sw', { lane: '' })
+    await attach('take-fr-1', { lane: 'fr' })
+    await attach('take-fr-2', { lane: 'fr' })
+    // A lane-less re-attach of the first French take re-selects it, which
+    // must deselect the second — French's own sibling — and nothing else.
+    await attach('take-fr-1', { eventId: 'evt-reattach' })
+    expect(await selectedIds()).toEqual(['take-fr-1', 'take-sw'])
+  })
+
+  it('a brand-new take with no lane keeps today’s rule: the default lane', async () => {
+    await attach('take-sw', { lane: '' })
+    await attach('take-fr', { lane: 'fr' })
+    await attach('take-new')
+    expect(await selectedIds()).toEqual(['take-fr', 'take-new'])
+    expect((await takes()).find((r) => r.audio_id === 'take-new')!.lane_id).toBe(DEFAULT_LANE)
+  })
+
+  it('a lane-less select of a French take deselects only French siblings', async () => {
+    await attach('take-sw', { lane: '' })
+    await attach('take-fr-1', { lane: 'fr' })
+    await attach('take-fr-2', { lane: 'fr' })
+    await project('cell.audio.select', { audioId: 'take-fr-1', slot: 'recording' }, { id: 'evt-select' })
+    expect(await selectedIds()).toEqual(['take-fr-1', 'take-sw'])
+  })
+
+  it('handing the slot back to the programme audio is still the lane the event names', async () => {
+    // The shared clip has no lane of its own, so choosing it is a choice made
+    // in one lane — the event's — exactly as before.
+    await attach('programme', { role: 'source' })
+    await attach('take-sw', { lane: '' })
+    await attach('take-fr', { lane: 'fr' })
+    await project(
+      'cell.audio.select',
+      { audioId: 'programme', slot: 'recording', targetLang: 'fr' },
+      { id: 'evt-back-to-programme' },
+    )
+    expect(await selectedIds()).toEqual(['programme', 'take-sw'])
+  })
+})
+
 describe('the per-file read is lane-scoped', () => {
   beforeEach(async () => {
     await attach('programme', { role: 'source' })

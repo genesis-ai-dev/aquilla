@@ -26,6 +26,7 @@ import { effectiveTranslation, humanConflicts, lastPublish, openConflicts, unitK
 import type { LedgerState } from "../core/ledger.ts"
 import { unitContext } from "../core/context.ts"
 import { plainOf } from "../core/tagged.ts"
+import { findUnit } from "./ops.ts"
 import { toPosix, Workspace } from "./workspace.ts"
 import type { SyncSummary } from "./workspace.ts"
 
@@ -91,15 +92,7 @@ export const printSummary = (s: SyncSummary, log: (m: string) => void = console.
   else log("everything is up to date")
 }
 
-const unitInfo = (state: LedgerState, docId: string, ref: string): { logicalId: string; tagged: string; plain: string; contentHash: string; structuralPath: string } | undefined => {
-  const doc = state.docs.get(docId)
-  if (!doc) return undefined
-  const byId = doc.units.find((u) => u.logicalId === ref || u.structuralPath === ref || u.structuralPath.endsWith(ref))
-  if (byId) return byId
-  const n = Number(ref)
-  if (Number.isInteger(n) && n >= 1 && n <= doc.units.length) return doc.units[n - 1]
-  return doc.units.find((u) => u.plain.toLowerCase().includes(ref.toLowerCase()))
-}
+const unitInfo = findUnit
 
 export const main = async (argv: string[]): Promise<number> => {
   const { _, flags } = parse(argv)

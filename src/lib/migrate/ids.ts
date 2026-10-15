@@ -225,3 +225,5 @@ export const audioSelectEventId = (
   cellId: string,
   audioId: string,
 ): string => u5(`audio-select:${projectId}:${fileId}:${cellId}:${audioId}`)
+
+export const personalOrgLegacyUuidFor = (namespaceId: number): string => u5(`gitlab-personal-namespace:${namespaceId}`)

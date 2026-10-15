@@ -1,3 +1,4 @@
+import { handleMigratePersonalProjectRequest } from "./events/migrate-personal-project-route"
 import { handleCheckingRequest } from "./checking/route"
 // Aquilla sync worker.
 //
@@ -567,6 +568,8 @@ const worker = {
     if (migrateOrgTeamMapsResponse) return migrateOrgTeamMapsResponse
     const migrateGroupsResponse = await handleMigrateGroupsRequest(request, env)
     if (migrateGroupsResponse) return migrateGroupsResponse
+    const personalProjectResponse = await handleMigratePersonalProjectRequest(request, env)
+    if (personalProjectResponse) return personalProjectResponse
     const migrateUsersReadResponse = await handleMigrateUsersReadRequest(request, env)
     if (migrateUsersReadResponse) return migrateUsersReadResponse
     const migrateWebhookInbox = await handleMigrateWebhookRequest(request, env)

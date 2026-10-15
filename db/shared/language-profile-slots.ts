@@ -20,6 +20,16 @@ export const MAX_SLOT_NOTE_CHARS = 500
 export const MAX_HONORIFIC_LEVELS = 8
 /** Most explicit number words. */
 export const MAX_NUMBER_WORDS = 200
+/** Most marks in one punctuation class. A class with more than a handful is a mistake. */
+export const MAX_PUNCTUATION_MARKS = 12
+
+/**
+ * AQU-1906: the marks this language uses where the source uses "?", "!", ".",
+ * ":" and ";". Shape and semantics (including `noTerminalMark`) live with the
+ * per-language table in ./punctuation-conventions.ts; this slot is the project
+ * lead's override of it.
+ */
+export type { PunctuationProfile } from './punctuation-conventions'
 
 /** How the language marks a question besides a question mark. */
 export interface QuestionMarkersProfile {
@@ -94,6 +104,30 @@ function charCount(value: string): number {
 }
 
 const bool: FieldCheck = (value, path) => (typeof value === 'boolean' ? null : `${path} must be true or false`)
+
+/**
+ * Exactly one character that is not a letter, a digit or whitespace. The
+ * checks count marks character by character, so a longer string could never
+ * match. Shared by the quoteMarks and punctuation slots.
+ */
+export function isMarkCharacter(value: unknown): value is string {
+  if (typeof value !== 'string') return false
+  const chars = Array.from(value)
+  if (chars.length !== 1) return false
+  return !/[\p{L}\p{N}\s]/u.test(value)
+}
+
+/** A list of distinct single punctuation marks, possibly empty. */
+const markList: FieldCheck = (value, path) => {
+  if (!Array.isArray(value) || value.length > MAX_PUNCTUATION_MARKS) {
+    return `${path} must be a list of at most ${MAX_PUNCTUATION_MARKS} marks`
+  }
+  for (const [index, item] of value.entries()) {
+    if (!isMarkCharacter(item)) return `${path}[${index}] must be one punctuation character`
+  }
+  if (new Set(value).size !== value.length) return `${path} lists a mark twice`
+  return null
+}
 
 /** Text that is not empty after trimming, up to `max` characters. */
 function text(max: number): FieldCheck {
@@ -232,6 +266,26 @@ export function divineNamesProblem(value: unknown): string | null {
   return Object.keys(value as Record<string, unknown>).length === 0 ? 'divineNames needs at least one field' : null
 }
 
+/**
+ * AQU-1906. Every class is optional, and an omitted class means "nothing
+ * beyond the universal marks" rather than "fall back to the language table":
+ * a filled slot wins WHOLE (resolvePunctuation), so a lead who answers it gets
+ * exactly what they answered. `{}` says nothing and is rejected for the same
+ * reason `pronouns` and `divineNames` reject it.
+ */
+export function punctuationProblem(value: unknown): string | null {
+  const problem = fields('punctuation', value, {
+    question: markList,
+    exclamation: markList,
+    statement: markList,
+    colon: markList,
+    semicolon: markList,
+    noTerminalMark: bool,
+  })
+  if (problem) return problem
+  return Object.keys(value as Record<string, unknown>).length === 0 ? 'punctuation needs at least one field' : null
+}
+
 export function measuresProblem(value: unknown): string | null {
   return oneOf(MEASURES_STRATEGIES)(value, 'measures')
 }
@@ -256,6 +310,9 @@ export const SLOT_TYPE_NAMES = {
     'thirdPerson?: { genderOrClass: boolean, forms?: string[] }, ' +
     'honorifics?: { levels: { name: string, forms?: string[] }[] } }',
   negators: 'string[]',
+  punctuation:
+    '{ question?, exclamation?, statement?, colon?, semicolon?: string[] ' +
+    '(one punctuation character each), noTerminalMark?: boolean }',
   numberWords: '"cldr" | { [number: string]: string }',
   speechVerbs: 'string[]',
   kinTerms: '{ relativeAgeDistinction: boolean, notes?: string }',

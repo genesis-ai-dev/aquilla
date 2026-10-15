@@ -162,8 +162,9 @@ describe("MondayIntegrationSection", () => {
     expect(screen.getByRole("switch")).toBeTruthy()
     expect(screen.getByRole("button", { name: /sync now/i })).toBeTruthy()
     expect(screen.getByText(/last push .*ok/i)).toBeTruthy()
-    // Mapping editor is present for maintainers, seeded from config.
-    expect(screen.getByTestId("monday-mapping-editor")).toBeTruthy()
+    // Mapping editor is present for maintainers, seeded from config. It waits
+    // for the board-columns read (AQU-1770), which settles after the link does.
+    expect(await screen.findByTestId("monday-mapping-editor")).toBeTruthy()
     expect(screen.getByLabelText(/reconfigure with ai/i)).toBeTruthy()
   })
 
@@ -193,7 +194,9 @@ describe("MondayIntegrationSection", () => {
     renderSection()
     await waitFor(() => expect(screen.getByText(/board structure changed/i)).toBeTruthy())
 
-    fireEvent.click(screen.getByRole("button", { name: /remove mapping row/i }))
+    // The banner comes from the link alone; the editor only renders once the
+    // board-columns read has settled, so wait for its first row.
+    fireEvent.click(await screen.findByRole("button", { name: /remove mapping row/i }))
     fireEvent.click(screen.getByRole("button", { name: /save mapping/i }))
 
     await waitFor(() => expect(screen.getByText(dropped)).toBeTruthy())

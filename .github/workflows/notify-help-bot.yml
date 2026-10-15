@@ -24,15 +24,15 @@ jobs:
     steps:
       - name: Ping the aquilla-help bot
         env:
-          # URL, key, and header name all come from the bot's trigger panel.
-          # The header name is not secret, so it is a repo variable.
+          # Both come from the bot's trigger panel. The panel's header name
+          # carries key material, so the whole header line, "Name: key",
+          # is a secret.
           WEBHOOK_URL: ${{ secrets.GROK_HELP_WEBHOOK_URL }}
-          WEBHOOK_KEY: ${{ secrets.GROK_HELP_WEBHOOK_KEY }}
-          WEBHOOK_HEADER: ${{ vars.GROK_HELP_WEBHOOK_HEADER }}
+          WEBHOOK_AUTH_HEADER: ${{ secrets.GROK_HELP_WEBHOOK_AUTH_HEADER }}
           TAG: ${{ github.ref_name }}
           SHA: ${{ github.sha }}
         run: |
-          for name in WEBHOOK_URL WEBHOOK_KEY WEBHOOK_HEADER; do
+          for name in WEBHOOK_URL WEBHOOK_AUTH_HEADER; do
             if [ -z "${!name}" ]; then
               echo "::error::GROK_HELP_$name is not set."
               exit 1
@@ -41,5 +41,5 @@ jobs:
           # A failed ping fails the run, so a missed docs update shows up red.
           curl -fsS --max-time 30 --retry 3 --retry-all-errors -X POST "$WEBHOOK_URL" \
             -H 'Content-Type: application/json' \
-            -H "$WEBHOOK_HEADER: $WEBHOOK_KEY" \
+            -H "$WEBHOOK_AUTH_HEADER" \
             -d "{\"tag\":\"$TAG\",\"sha\":\"$SHA\"}"

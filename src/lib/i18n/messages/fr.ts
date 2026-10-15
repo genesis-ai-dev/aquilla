@@ -3239,7 +3239,6 @@ export const fr: Catalog = {
   "org.projectOverview.plan.statusNotStarted": "Non commencé",
   "org.projectOverview.plan.groupHintOverdue": "date cible dépassée, non marqué terminé",
   "org.projectOverview.plan.groupHintSoon": "cible dans la semaine",
-  "org.projectOverview.plan.groupHintNearlyComplete": "à moins de 6 % ou 7 cellules de la fin",
   "org.projectOverview.plan.groupHintInProgress": "actif, largement en avance",
   "org.projectOverview.plan.groupHintNotStarted": "aucun contenu pour l'instant",
   "org.projectOverview.plan.groupHintDone": "marqué terminé par un responsable",

@@ -86,10 +86,12 @@ const FOLDER_TALLY_KEY: Record<PlanUnitStatus, string> = {
   done: "org.projectOverview.plan.folderTallyDone",
 }
 
-const GROUP_HINT_KEY: Record<PlanUnitStatus, string> = {
+// Nearly complete has no hint (Sam, 2026-10-14): its rule ("within 6% or 7
+// cells of done") is the board's arithmetic, not something a manager needs to
+// read on every header.
+const GROUP_HINT_KEY: Partial<Record<PlanUnitStatus, string>> = {
   overdue: "org.projectOverview.plan.groupHintOverdue",
   soon: "org.projectOverview.plan.groupHintSoon",
-  nearly_complete: "org.projectOverview.plan.groupHintNearlyComplete",
   in_progress: "org.projectOverview.plan.groupHintInProgress",
   not_started: "org.projectOverview.plan.groupHintNotStarted",
   done: "org.projectOverview.plan.groupHintDone",
@@ -847,9 +849,11 @@ export function PlanBoard({
                       <span className="rounded-full border bg-card px-[7px] text-[11px] font-bold tabular-nums text-muted-foreground">
                         {group.units.length}
                       </span>
-                      <span className="ms-auto hidden font-normal text-[11.5px] text-muted-foreground sm:block">
-                        {t(GROUP_HINT_KEY[group.status] as never)}
-                      </span>
+                      {GROUP_HINT_KEY[group.status] && (
+                        <span className="ms-auto hidden font-normal text-[11.5px] text-muted-foreground sm:block">
+                          {t(GROUP_HINT_KEY[group.status] as never)}
+                        </span>
+                      )}
                     </button>
                   </h3>
                   {!folded && group.units.length > 0 && (

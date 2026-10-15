@@ -3252,7 +3252,6 @@ export const ms: Catalog = {
   "org.projectOverview.plan.statusNotStarted": "Belum bermula",
   "org.projectOverview.plan.groupHintOverdue": "melepasi sasaran, belum ditandakan selesai",
   "org.projectOverview.plan.groupHintSoon": "sasaran dalam seminggu",
-  "org.projectOverview.plan.groupHintNearlyComplete": "dalam lingkungan 6% atau 7 sel daripada siap",
   "org.projectOverview.plan.groupHintInProgress": "aktif, jauh di hadapan",
   "org.projectOverview.plan.groupHintNotStarted": "belum ada kandungan",
   "org.projectOverview.plan.groupHintDone": "ditandakan lengkap oleh pengurus",

@@ -1408,7 +1408,6 @@ export const org = defineNamespace({
     // plan-status.ts is max(6% of the cells, 7). Nothing links the sentence to
     // the function, so a change to one is a change to both; the hint exists
     // because a group nobody can predict the membership of reads as a bug.
-    "org.projectOverview.plan.groupHintNearlyComplete": "within 6% or 7 cells of done",
     "org.projectOverview.plan.groupHintInProgress": "active, comfortably ahead",
     "org.projectOverview.plan.groupHintNotStarted": "no content yet",
     "org.projectOverview.plan.groupHintDone": "marked complete by a manager",
@@ -3133,10 +3132,6 @@ export const org = defineNamespace({
       },
       "org.projectOverview.plan.groupHintSoon": {
         description: "Hint on the Due soon group header.",
-      },
-      "org.projectOverview.plan.groupHintNearlyComplete": {
-        description:
-          "Hint on the Nearly complete group header, stating the rule that puts a unit there: its worse medium is short by at most six percent of its cells, or seven cells, whichever is larger. The two numbers are the rule itself, not an illustration — keep them exact.",
       },
       "org.projectOverview.plan.groupHintInProgress": {
         description: "Hint on the In progress group header.",

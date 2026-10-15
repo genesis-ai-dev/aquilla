@@ -3264,7 +3264,6 @@ export const th: Catalog = {
   "org.projectOverview.plan.statusNotStarted": "ยังไม่เริ่ม",
   "org.projectOverview.plan.groupHintOverdue": "เลยเป้าหมาย ยังไม่ทำเครื่องหมายเสร็จ",
   "org.projectOverview.plan.groupHintSoon": "เป้าหมายภายในหนึ่งสัปดาห์",
-  "org.projectOverview.plan.groupHintNearlyComplete": "เหลือไม่เกิน 6% หรือ 7 เซลล์",
   "org.projectOverview.plan.groupHintInProgress": "กำลังทำ ล่วงหน้าสบาย ๆ",
   "org.projectOverview.plan.groupHintNotStarted": "ยังไม่มีเนื้อหา",
   "org.projectOverview.plan.groupHintDone": "ผู้จัดการทำเครื่องหมายว่าเสร็จ",

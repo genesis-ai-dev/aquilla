@@ -56,6 +56,15 @@ describe("grouping", () => {
     ])
   })
 
+  it("shows no rule under the Nearly complete header", () => {
+    // Sam, 2026-10-14: "within 6% or 7 cells of done" is the board's
+    // arithmetic, not something a manager needs to read. The other headers
+    // keep their one-line descriptions.
+    renderBoard([nearlyDone({ fileId: "near" }), unit({ fileId: "mid", filledCount: 40 })])
+    expect(screen.getByTestId("plan-group-nearly_complete").textContent).not.toMatch(/cells of done|within/i)
+    expect(screen.getByTestId("plan-group-in_progress")).toHaveTextContent("active, comfortably ahead")
+  })
+
   it("sends a unit a handful of cells from done to the new group, not to In progress", () => {
     // The row this feature is for: before AQU-1278 a book four cells short and
     // a book at 40% sat in the same group, sorted by a date neither of them

@@ -3265,7 +3265,6 @@ export const zh_Hant: Catalog = {
   "org.projectOverview.plan.statusNotStarted": "尚未開始",
   "org.projectOverview.plan.groupHintOverdue": "已超過目標日期，尚未標記完成",
   "org.projectOverview.plan.groupHintSoon": "一週內到期",
-  "org.projectOverview.plan.groupHintNearlyComplete": "距完成不足 6% 或 7 個儲存格",
   "org.projectOverview.plan.groupHintInProgress": "進行中，進度充裕",
   "org.projectOverview.plan.groupHintNotStarted": "尚無內容",
   "org.projectOverview.plan.groupHintDone": "已由管理者標記完成",

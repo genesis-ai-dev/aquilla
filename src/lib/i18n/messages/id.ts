@@ -3264,7 +3264,6 @@ export const id: Catalog = {
   "org.projectOverview.plan.statusNotStarted": "Belum dimulai",
   "org.projectOverview.plan.groupHintOverdue": "lewat target, belum ditandai selesai",
   "org.projectOverview.plan.groupHintSoon": "target dalam sepekan",
-  "org.projectOverview.plan.groupHintNearlyComplete": "tinggal 6% atau 7 sel lagi menuju selesai",
   "org.projectOverview.plan.groupHintInProgress": "aktif, jauh di depan jadwal",
   "org.projectOverview.plan.groupHintNotStarted": "belum ada isi",
   "org.projectOverview.plan.groupHintDone": "ditandai rampung oleh seorang manajer",

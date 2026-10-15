@@ -3267,7 +3267,6 @@ export const ar: Catalog = {
   "org.projectOverview.plan.statusNotStarted": "لم يبدأ",
   "org.projectOverview.plan.groupHintOverdue": "تجاوز الموعد المستهدف ولم توضع عليه علامة «منجز»",
   "org.projectOverview.plan.groupHintSoon": "الموعد المستهدف خلال أسبوع",
-  "org.projectOverview.plan.groupHintNearlyComplete": "ضمن 6% أو 7 خلايا من الإنجاز",
   "org.projectOverview.plan.groupHintInProgress": "نشط ومتقدم بارتياح",
   "org.projectOverview.plan.groupHintNotStarted": "لا محتوى بعد",
   "org.projectOverview.plan.groupHintDone": "وضع المدير علامة الاكتمال عليه",

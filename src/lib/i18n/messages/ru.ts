@@ -3294,7 +3294,6 @@ export const ru: Catalog = {
   "org.projectOverview.plan.statusNotStarted": "Не начато",
   "org.projectOverview.plan.groupHintOverdue": "срок прошёл, готовность не отмечена",
   "org.projectOverview.plan.groupHintSoon": "срок в течение недели",
-  "org.projectOverview.plan.groupHintNearlyComplete": "до готовности не более 6% или 7 ячеек",
   "org.projectOverview.plan.groupHintInProgress": "в работе, с хорошим запасом по срокам",
   "org.projectOverview.plan.groupHintNotStarted": "содержимого пока нет",
   "org.projectOverview.plan.groupHintDone": "отмечено менеджером как завершённое",

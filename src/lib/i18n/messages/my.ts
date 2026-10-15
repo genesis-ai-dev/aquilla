@@ -3264,7 +3264,6 @@ export const my: Catalog = {
   "org.projectOverview.plan.statusNotStarted": "မစသေးပါ",
   "org.projectOverview.plan.groupHintOverdue": "ပစ်မှတ်ကျော်၊ ပြီးစီးအဖြစ် မမှတ်ရသေး",
   "org.projectOverview.plan.groupHintSoon": "ပစ်မှတ်သည် တစ်ပတ်အတွင်း",
-  "org.projectOverview.plan.groupHintNearlyComplete": "ပြီးစီးရန် ၆% သို့မဟုတ် ဆဲလ် ၇ ခုအတွင်း",
   "org.projectOverview.plan.groupHintInProgress": "ဆောင်ရွက်နေ၊ သက်သာစွာ ရှေ့ရောက်",
   "org.projectOverview.plan.groupHintNotStarted": "အကြောင်းအရာ မရှိသေး",
   "org.projectOverview.plan.groupHintDone": "မန်နေဂျာက ပြီးစီးအဖြစ် မှတ်ထားသည်",

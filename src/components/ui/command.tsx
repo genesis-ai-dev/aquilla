@@ -53,7 +53,7 @@ function CommandDialog({
       </DialogHeader>
       <DialogContent
         className={cn(
-          "top-1/3 translate-y-0 overflow-hidden rounded-xl! p-0",
+          "top-[25%] max-h-[46rem] translate-y-0 overflow-hidden rounded-xl! p-0",
           className
         )}
         showCloseButton={showCloseButton}
@@ -67,11 +67,15 @@ function CommandDialog({
 function CommandInput({
   className,
   autoComplete = "off",
+  trailing,
   ...props
-}: React.ComponentProps<typeof CommandPrimitive.Input>) {
+}: React.ComponentProps<typeof CommandPrimitive.Input> & {
+  /** Controls drawn inside the field, after the text (find-option toggles). */
+  trailing?: React.ReactNode
+}) {
   return (
     <div data-slot="command-input-wrapper" className="p-1 pb-0">
-      <InputGroup className="h-8! rounded-lg! border-input/30 bg-input/30 shadow-none! *:data-[slot=input-group-addon]:ps-2!">
+      <InputGroup className="h-8! rounded-lg! border-input/30 bg-input/30 shadow-none! *:data-[slot=input-group-addon]:data-[align=inline-start]:ps-2! has-[>[data-align=inline-end]]:[&>input]:pe-2!">
         <InputGroupAddon>
           <SearchIcon />
         </InputGroupAddon>
@@ -84,6 +88,18 @@ function CommandInput({
           )}
           {...props}
         />
+        {trailing ? (
+          <InputGroupAddon
+            align="inline-end"
+            className="cursor-default gap-0.5 ps-0! pe-1.5 me-0!"
+            onClick={(event) => {
+              if ((event.target as HTMLElement).closest("button")) return
+              event.preventDefault()
+            }}
+          >
+            {trailing}
+          </InputGroupAddon>
+        ) : null}
       </InputGroup>
     </div>
   )

@@ -9,6 +9,8 @@
  * These render the real EditorTable + TranslatedEditor and pin WHEN the row
  * hands its cell to `onValidated`: once the edit is settled (the editor is
  * left), never from an idle save while the caret is still in the cell.
+ * AQU-1486: and with which gesture — "typed" never opens the "validate the
+ * repeated rows too?" dialog, "click" may.
  */
 
 import { describe, it, expect, afterEach, vi } from "vitest"
@@ -23,6 +25,7 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import { ROLE } from "@/lib/frontier/roles"
 import { emitCellValidate, emitTargetCellCommit } from "@/lib/sync/events-emit"
+import type { RepetitionGesture } from "@/lib/workflow/repetition-validation"
 
 vi.mock("@/lib/sync/events-emit", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/sync/events-emit")>()
@@ -95,7 +98,7 @@ function makeRows(targetValue: string): CellRow[] {
   ]
 }
 
-function renderTable(onValidated: (cellId: string) => void, opts: { project?: ProjectRecord; targetValue?: string } = {}) {
+function renderTable(onValidated: (cellId: string, gesture: RepetitionGesture) => void, opts: { project?: ProjectRecord; targetValue?: string } = {}) {
   const project = opts.project ?? baseProject
   const store = new CellStore()
   store.setRuntime({ projectId: project.id, fileId: "file-1", username: "tester", requiredValidations: 1, auditStats: new Map() })
@@ -175,7 +178,7 @@ describe("EditorTable — AQU-1484 a typed, auto-validated edit reaches onValida
     await autoValidateSettled()
     expect(vi.mocked(emitCellValidate).mock.calls[0][0]).toMatchObject({ cellId: "cell-1", editEventId: "E-commit" })
     await waitFor(() => expect(onValidated).toHaveBeenCalledTimes(1))
-    expect(onValidated).toHaveBeenCalledWith("cell-1")
+    expect(onValidated).toHaveBeenCalledWith("cell-1", "typed")
   })
 
   it("holds back while the caret is still in the cell — an idle save must not broadcast half-typed text — then fires once on leaving", async () => {
@@ -199,7 +202,7 @@ describe("EditorTable — AQU-1484 a typed, auto-validated edit reaches onValida
       fireEvent.blur(pm)
     })
     await waitFor(() => expect(onValidated).toHaveBeenCalledTimes(1))
-    expect(onValidated).toHaveBeenCalledWith("cell-1")
+    expect(onValidated).toHaveBeenCalledWith("cell-1", "typed")
     expect(emitTargetCellCommit).toHaveBeenCalledTimes(1)
   })
 
@@ -244,7 +247,7 @@ describe("EditorTable — AQU-1484 a typed, auto-validated edit reaches onValida
     fireEvent.click(await screen.findByRole("button", { name: /Click to validate/ }))
 
     await waitFor(() => expect(onValidated).toHaveBeenCalledTimes(1))
-    expect(onValidated).toHaveBeenCalledWith("cell-1")
+    expect(onValidated).toHaveBeenCalledWith("cell-1", "click")
     expect(emitCellValidate).toHaveBeenCalledTimes(1)
   })
 })

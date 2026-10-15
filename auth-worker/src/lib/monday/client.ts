@@ -164,6 +164,23 @@ export interface MondayBoardSummary {
 
 /** List boards the token can see (paginated, up to ~200). */
 export async function listBoards(accessToken: string): Promise<MondayBoardSummary[]> {
+  try {
+    return await listBoardsPage(accessToken, true)
+  } catch (err) {
+    // Under Monday's OAuth 2.1 flow, reading a board's workspace needs the
+    // workspaces:read scope. An app installed without it still lists boards,
+    // just without workspace names (AQU-1770 walk, Oct 12).
+    if (err instanceof MondayApiError && /missing required scopes/i.test(err.message)) {
+      return listBoardsPage(accessToken, false)
+    }
+    throw err
+  }
+}
+
+async function listBoardsPage(
+  accessToken: string,
+  withWorkspace: boolean,
+): Promise<MondayBoardSummary[]> {
   const boards: MondayBoardSummary[] = []
   for (let page = 1; page <= 4; page++) {
     const data = await mondayGraphQL<{
@@ -171,11 +188,11 @@ export async function listBoards(accessToken: string): Promise<MondayBoardSummar
         id: string | number
         name: string
         state?: string
-        workspace: { id: string | number; name: string } | null
+        workspace?: { id: string | number; name: string } | null
       }> | null
     }>(
       accessToken,
-      `query { boards(limit: 50, page: ${page}, state: active) { id name state workspace { id name } } }`,
+      `query { boards(limit: 50, page: ${page}, state: active) { id name state${withWorkspace ? " workspace { id name }" : ""} } }`,
     )
     const pageBoards = data.boards ?? []
     for (const b of pageBoards) {

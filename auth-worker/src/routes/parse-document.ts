@@ -18,6 +18,7 @@
 
 import { Hono } from "hono"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
+import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 import { unzipSync, unzlibSync, inflateSync } from "fflate"
 import { readBytesWithLimit } from "../../../shared/http-body-limit"
 
@@ -27,6 +28,8 @@ const MAX_FILE_BYTES = 2 * 1024 * 1024 // 2 MB
 // materialize an arbitrarily large upload it was always going to refuse. The
 // slack over MAX_FILE_BYTES covers the boundary markers and part headers
 // wrapping a file that is itself exactly at the limit.
+/** Parses per user per rate-limit window (generous for bulk import). */
+const PARSE_MAX_PER_USER_PER_WINDOW = 120
 const MAX_UPLOAD_BYTES = MAX_FILE_BYTES + 16 * 1024
 // word/document.xml inflated size cap (AQU pen-test finding, 2026-07-29): a
 // small deflate-based zip can decompress to gigabytes before this route ever
@@ -424,6 +427,21 @@ function decodePdfString(s: string): string {
 // ── Route ─────────────────────────────────────────────────────────────────────
 
 parseDocument.post("/", authMiddleware, async (c) => {
+  // Pen-test 2026-10-15: CPU-heavy PDF/DOCX parsing was unthrottled per user.
+  const parseLimit = await enforceRateLimit(c.env.AQUILLA_PG, {
+    kind: "parse_document",
+    identifier: userRateLimitIdentifier(c.get("user").id),
+    limit: PARSE_MAX_PER_USER_PER_WINDOW,
+    failMode: "open",
+  })
+  if (!parseLimit.allowed) {
+    return c.json(
+      { error: "Too many documents parsed. Try again shortly." },
+      429,
+      { "Retry-After": String(parseLimit.retryAfterSeconds) },
+    )
+  }
+
   // Size-gate the upload before the form is parsed (AQU-1858): an oversize
   // Content-Length is refused from the headers alone, and a chunked body with
   // no declared length is read through the same byte cap. Only the capped

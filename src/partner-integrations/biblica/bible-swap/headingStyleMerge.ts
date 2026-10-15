@@ -1,5 +1,7 @@
 /**
- * Copy Bible heading-role paragraph styles into the Study IDML style sheet.
+ * Copy Bible styles the swapped-in text needs into the Study IDML style sheet:
+ * heading-role paragraph styles, and the small-caps character styles that
+ * carry the divine name (AQU-1959).
  *
  * Structure swap inserts Portuguese `title:s1` (and the rest of the `title:*`
  * heading family) as whole paragraphs. The Study package only defines the
@@ -14,6 +16,10 @@
  */
 
 import { isHeadingRoleTitleStyle } from "./paragraphStyleRoles";
+import {
+    characterStyleBlockIsSmallCaps,
+    isDivineNameCharacterStyle,
+} from "./divineNameStyles";
 
 interface StyleRecord {
     self: string;
@@ -56,6 +62,78 @@ export function mergeBibleHeadingStylesIntoStudyStylesXml(
     }
 
     return insertParagraphStyles(studyStylesXml, toInsert);
+}
+
+
+/**
+ * Copy the Bible's small-caps character styles into the Study style sheet
+ * (AQU-1959).
+ *
+ * Structure swap — and the surgical swap's span-layout path — splice whole
+ * Bible paragraphs into the Study stories, divine-name (`nd`)
+ * `<CharacterStyleRange>`s included. The Study package defines only its own
+ * character styles, so a Bible style it has never heard of resolves to
+ * nothing and InDesign prints the divine name as ordinary body text: the
+ * small caps BGP asked for are lost even though the run survived the swap.
+ *
+ * Only two narrow families are copied — a style the Bible marks as the divine
+ * name, and any style whose definition declares small-caps capitalization —
+ * so the Study's own styling is never otherwise disturbed. A copied style's
+ * `BasedOn` parent is copied with it when the Study lacks that too, since
+ * InDesign resolves capitalization through the chain.
+ */
+export function mergeBibleSmallCapsCharacterStylesIntoStudyStylesXml(
+    studyStylesXml: string,
+    bibleStylesXml: string
+): string {
+    if (!studyStylesXml || !bibleStylesXml) {
+        return studyStylesXml;
+    }
+
+    const studyStyles = extractNamedBlocks(studyStylesXml, "CharacterStyle");
+    const bibleStyles = extractNamedBlocks(bibleStylesXml, "CharacterStyle");
+    const toInsert = new Map<string, string>();
+
+    // `BasedOn` is written either qualified ("CharacterStyle/nd") or bare
+    // ("nd"); `Self` is always qualified, so bare refs need the prefix to
+    // resolve against either style table.
+    const qualify = (ref: string): string =>
+        ref.startsWith("CharacterStyle/") ? ref : `CharacterStyle/${ref}`;
+
+    const addWithParents = (self: string): void => {
+        let current: string | undefined = self;
+        while (current && !studyStyles.has(current) && !toInsert.has(current)) {
+            const style: StyleRecord | undefined = bibleStyles.get(current);
+            if (!style) return;
+            toInsert.set(current, style.block);
+            current = style.basedOn ? qualify(style.basedOn) : undefined;
+        }
+    };
+
+    for (const [self, bible] of bibleStyles) {
+        if (studyStyles.has(self)) continue;
+        if (!isDivineNameCharacterStyle(self) && !characterStyleBlockIsSmallCaps(bible.block)) {
+            continue;
+        }
+        addWithParents(self);
+    }
+
+    if (toInsert.size === 0) {
+        return studyStylesXml;
+    }
+
+    return insertCharacterStyles(studyStylesXml, [...toInsert.values()]);
+}
+
+function insertCharacterStyles(studyStylesXml: string, blocks: string[]): string {
+    const joined = blocks.join("\n");
+    const rootClose = studyStylesXml.lastIndexOf("</RootCharacterStyleGroup>");
+    if (rootClose >= 0) {
+        return (
+            studyStylesXml.slice(0, rootClose) + joined + "\n\t" + studyStylesXml.slice(rootClose)
+        );
+    }
+    return `${studyStylesXml}\n${joined}`;
 }
 
 function extractNamedBlocks(xml: string, tagName: string): Map<string, StyleRecord> {

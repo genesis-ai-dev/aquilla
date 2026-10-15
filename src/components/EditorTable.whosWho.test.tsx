@@ -46,7 +46,7 @@ import {
   MRK1_STRUCTURE_JSON,
   MRK1_TEXT_JSON,
 } from "@/lib/bible-data/__fixtures__/mrk1"
-import { __resetBkpMemoryCache } from "@/lib/bible-data/pack-client"
+import { __bkpSettled, __resetBkpMemoryCache } from "@/lib/bible-data/pack-client"
 import { __clearPackStore } from "@/lib/bible-data/pack-store"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import {
@@ -236,6 +236,17 @@ function litMentions(): HTMLElement[] {
   return allMentions().filter((el) => el.dataset.mentionLit === "true")
 }
 
+/**
+ * The mentions lit for `entity`, once its whole thread is. A mention
+ * subscribes to the highlight store in a passive effect of the render that
+ * brought it in, and that effect may still be pending when the test hovers or
+ * focuses: the light reaches the mentions as it runs, so wait for the state.
+ */
+async function litThread(entity: string, verses: readonly string[] = VERSES): Promise<HTMLElement[]> {
+  await waitFor(() => expect(litMentions().length).toBe(packMentionCount(entity, verses)))
+  return litMentions()
+}
+
 /** The mention token for one Macula word, found by its text in a row. */
 function mentionWord(cellId: string, word: string): HTMLElement {
   const found = mentionsIn(cellId).find((el) => el.textContent === word)
@@ -275,7 +286,11 @@ beforeEach(async () => {
   await __clearPackStore()
 })
 
-afterEach(() => {
+afterEach(async () => {
+  // A load the test did not wait for outlives its table: let it finish here,
+  // so its fetches and IndexedDB writes never land in the next test's cleared
+  // mock and store. In act, because a pack arriving late is a React update.
+  await act(() => __bkpSettled())
   vi.unstubAllGlobals()
 })
 
@@ -298,8 +313,7 @@ describe("word tints on a Greek source", () => {
     expect(auton.dataset.mentionEntity).toBe(JESUS)
 
     fireEvent.pointerEnter(auton)
-    const lit = litMentions()
-    expect(lit.length).toBe(packMentionCount(JESUS, VERSES))
+    const lit = await litThread(JESUS)
     expect(new Set(lit.map((el) => el.dataset.mentionEntity))).toEqual(new Set([JESUS]))
     // Every verse on screen takes part, from 4:6 to 4:10.
     for (const verse of VERSES) {
@@ -317,7 +331,7 @@ describe("word tints on a Greek source", () => {
     expect(visible(auton.getAttribute("aria-label"))).toBe("αὐτὸν: Pronoun, Jesus")
 
     act(() => auton.focus())
-    expect(litMentions().length).toBe(packMentionCount(JESUS, VERSES))
+    await litThread(JESUS)
     const details = await screen.findByTestId("mention-details")
     expect(visible(within(details).getByRole("heading").textContent)).toBe("Jesus")
     expect(visible(details.textContent)).toContain("First mention in this passage: JHN 4:1")
@@ -330,8 +344,7 @@ describe("word tints on a Greek source", () => {
     renderTable(makeProject())
     await mentionsLoaded()
     fireEvent.pointerEnter(mentionWord(cellIdFor("4:7"), "γυνὴ"))
-    const lit = litMentions()
-    expect(lit.length).toBe(packMentionCount(SAMARITAN_WOMAN, VERSES))
+    const lit = await litThread(SAMARITAN_WOMAN)
     expect(new Set(lit.map((el) => el.dataset.mentionEntity))).toEqual(new Set([SAMARITAN_WOMAN]))
   })
 
@@ -528,9 +541,7 @@ describe("off means off", () => {
     rerender(makeProject({ bibleEnrichments: { "whos-who": false } }))
     // The Context tab still needs the people layer: let that reload settle,
     // so the check is on where things end up, not on a loading moment.
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 20))
-    })
+    await act(() => __bkpSettled())
     expect(allMentions()).toEqual([])
     expect(row(cellIdFor("4:10")).textContent).toContain("αὐτὸν")
   })
@@ -543,9 +554,9 @@ describe("off means off", () => {
     ["when no Bible is open", {}, false],
   ] as const)("shows no tints and no Context tab, and fetches nothing, %s", async (_, overrides, bibleOpen) => {
     renderTable(makeProject(overrides), greekSource, makeRows(greekSource), bibleOpen)
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 20))
-    })
+    // A load the table did start would be in flight now: wait for it, so the
+    // checks below see every fetch it makes.
+    await act(() => __bkpSettled())
     expect(allMentions()).toEqual([])
     fireEvent.click(within(row(cellIdFor("4:10"))).getByRole("button", { name: "Open cell details" }))
     await waitFor(() => expect(within(row(cellIdFor("4:10"))).getAllByRole("tab").length).toBeGreaterThan(0))
@@ -555,9 +566,7 @@ describe("off means off", () => {
 
   it("fetches no people data when Bible data itself is off", async () => {
     renderTable(makeProject({ bibleResourcesEnabled: false }))
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 20))
-    })
+    await act(() => __bkpSettled())
     expect(allMentions()).toEqual([])
     expect(layerFetches()).toEqual([])
   })

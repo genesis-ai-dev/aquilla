@@ -291,6 +291,19 @@ describe("commitChangeset", () => {
     // The commit endpoint was never reached.
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
+
+  it("OPS-44: names the admin step-up for an elevation-required mint instead of 'refresh'", async () => {
+    // Literal from auth-worker/src/routes/sync-token.ts, case "elevation_required".
+    fetchMock.mockResolvedValueOnce(jsonResponse(
+      { error: "elevation required to mint a project sync token with platform-admin access" },
+      403,
+    ))
+    const err = await commitChangeset(JWT, PROJECT_ID, CHANGESET_ID).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ChangesetApiError)
+    expect(err).toMatchObject({ status: 403, code: "elevation_required" })
+    expect((err as ChangesetApiError).message).toBe("Verify with your admin code, then try again.")
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe("discardChangeset", () => {

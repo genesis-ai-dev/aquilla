@@ -521,6 +521,14 @@ export const org = defineNamespace({
     "org.projectOverview.offlineDownloading": "Downloading…",
     "org.projectOverview.offlineDownloadingProgress": "Downloading… ({done}/{total} files)",
     "org.projectOverview.offlineReadyBadge": "Available offline",
+    "org.projectOverview.saveMediaOffline": "Save audio for offline",
+    "org.projectOverview.offlineMediaSaving": "Saving audio {done}/{total}",
+    "org.projectOverview.offlineMediaSaved": plural({
+      one: "{count} clip saved on this device ({failed} unavailable)",
+      other: "{count} clips saved on this device ({failed} unavailable)",
+    }),
+    "org.projectOverview.offlineMediaBudget": "Storage full: {count} of {total} clips saved",
+    "org.projectOverview.offlineMediaUnavailable": "This device can't store audio",
     "org.projectOverview.removeOfflineCopy": "Remove offline copy",
     "org.projectOverview.offlineRemoveBlocked": plural({
       one: "Can't remove yet — {count} change hasn't synced to the server. Reconnect and wait for it to sync first.",
@@ -3823,6 +3831,24 @@ export const org = defineNamespace({
           done: "Files downloaded so far — a number.",
           total: "Total files in the project being downloaded — a number.",
         },
+      },
+      "org.projectOverview.saveMediaOffline": {
+        description: "Overflow-menu item on ProjectOverview (Tauri desktop) for a project already available offline: copies its recorded and generated audio onto this device so it plays without a connection.",
+      },
+      "org.projectOverview.offlineMediaSaving": {
+        description: "Badge next to the project title while 'Save audio for offline' runs.",
+        placeholders: { done: "Audio clips processed so far — a number.", total: "Total audio clips in the project — a number." },
+      },
+      "org.projectOverview.offlineMediaSaved": {
+        description: "Badge after 'Save audio for offline' finishes.",
+        placeholders: { count: "Audio clips now on this device — a number.", failed: "Clips that could not be downloaded (deleted or failed) — a number." },
+      },
+      "org.projectOverview.offlineMediaBudget": {
+        description: "Badge when 'Save audio for offline' stopped because the on-device audio storage limit was reached.",
+        placeholders: { count: "Audio clips on this device — a number.", total: "Total audio clips in the project — a number." },
+      },
+      "org.projectOverview.offlineMediaUnavailable": {
+        description: "Badge when this device has no persistent storage for audio, so 'Save audio for offline' could not run.",
       },
       "org.projectOverview.offlineRemoveBlocked": {
         description:

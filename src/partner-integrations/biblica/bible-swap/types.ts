@@ -12,6 +12,12 @@ export interface ParagraphChunkEntry {
 export interface VerseEntry {
     text: string;
     segments: string[];
+    /**
+     * Text of this verse's divine-name (`nd`) character runs, in reading
+     * order — kept apart from `segments` so the small-caps runs map onto the
+     * study's own small-caps runs rather than into plain prose (AQU-1959).
+     */
+    divineSegments: string[];
     paragraphSig: string;
     paragraphChunks: ParagraphChunkEntry[];
     verseSpanXml: string;
@@ -52,6 +58,21 @@ export interface SwapStats {
     /** Structure mode: chapter text blocks swapped from the Bible file. */
     chaptersReplaced?: number;
     chaptersMissing?: Array<{ book: string; chapter: string }>;
+    /** AQU-1959: divine-name (`nd`) runs replaced with the Bible's own. */
+    divineNamesReplaced?: number;
+    /**
+     * AQU-1959: verses where the study and the Bible disagree on how many
+     * divine-name runs the verse has. Those runs are left untouched rather
+     * than guessed at, and reported here so the export can say so (AQU-276's
+     * structure honesty).
+     */
+    divineNamesUnmatched?: Array<{
+        book: string;
+        chapter: string;
+        verse: string;
+        studyRuns: number;
+        bibleRuns: number;
+    }>;
 }
 
 export function verseKey(book: string, chapter: string, verse: string): VerseKey {

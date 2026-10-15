@@ -71,7 +71,7 @@ async function handleExternalOrgs(request: Request, env: ExternalReadsEnv): Prom
   if (!env.AQUILLA_PG) return externalError("job_failed", "AQUILLA_PG not configured", 500)
   const authed = await authenticateCredential(request, env)
   if (!authed.ok) return authed.response
-  const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.credential.credentialId)
+  const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.credential)
   if (limited) return limited
   const orgs = await listOrgsForCredential(env.AQUILLA_PG, authed.credential)
   return Response.json({ data: orgs, nextCursor: null })
@@ -89,7 +89,7 @@ async function handleExternalOrgProjects(
   if (!env.AQUILLA_PG) return externalError("job_failed", "AQUILLA_PG not configured", 500)
   const authed = await authenticateCredential(request, env)
   if (!authed.ok) return authed.response
-  const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.credential.credentialId)
+  const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.credential)
   if (limited) return limited
 
   const denied = await assertOrgInCredentialScope(env.AQUILLA_PG, authed.credential, orgId)

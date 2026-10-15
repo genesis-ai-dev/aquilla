@@ -123,6 +123,21 @@ describe("useCompletion IDML protected-output boundary", () => {
     expect(saved).toBe(false)
     expect(commit).not.toHaveBeenCalled()
     expect(result.current.errors.get(cell.id)).toMatch(/repair pass also failed|protected IDML anchor/i)
+    // AQU-1964: the refusal is correct, but it used to be uncountable. One
+    // event per refused draft, carrying codes and counts only.
+    const { default: posthog } = await import("@/lib/posthog")
+    expect(posthog.capture).toHaveBeenCalledWith(
+      "idml draft rejected for protected anchor",
+      expect.objectContaining({
+        draft_mode: "single",
+        repair_attempted: true,
+        unit_count: 1,
+      }),
+    )
+    const [, properties] = vi.mocked(posthog.capture).mock.calls.find(
+      ([event]) => event === "idml draft rejected for protected anchor",
+    )!
+    expect(JSON.stringify(properties)).not.toMatch(/part-|Stories\//i)
   })
 
   it("repairs a broken IDML draft via slot-JSON stitch before committing", async () => {

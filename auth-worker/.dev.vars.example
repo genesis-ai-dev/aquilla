@@ -130,8 +130,8 @@ MONDAY_REDIRECT_URI="http://localhost:5173/oauth/callback"
 # AQUIFER_BASE_URL="https://api.aquifer.bible"
 # AQUIFER_USER_AGENT="aquilla-dev"
 
-# Public API base used in generated links (e.g. invite emails). Falls back to
-# request origin when unset.
+# This worker's own public base (the Monday webhook address is built from it).
+# Falls back to MCP_OAUTH_ISSUER, then the request origin, when unset.
 # BASE_URL_API="http://127.0.0.1:8788"
 
 # Support/help-menu contact links surfaced to the client.

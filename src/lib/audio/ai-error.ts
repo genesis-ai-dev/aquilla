@@ -71,8 +71,10 @@ export type ErrorCategory =
   | "model-load-failed"
   | "audio-format-unsupported"
   | "daily-quota-exceeded"
+  | "ai-spend-ceiling"
   | "model-not-allowed"
   | "request-too-large"
+  | "protected-format"
   | "rate-limited"
   | "timed-out"
   | "provider-unavailable"
@@ -113,6 +115,21 @@ export function categorizeAiError(rawMessage: string): ActionableError {
   const m = raw.toLowerCase()
   const status = extractStatus(m)
 
+  // Platform daily SPEND ceiling (AQU-1869): a 503 from any paid AI path once
+  // the platform's dollar floor for the day is reached. It must be matched
+  // BEFORE the daily-quota branch below, whose "resets at midnight" substring
+  // also appears here — and it must not wear that branch's copy, because this
+  // is not the user's own limit and "switch to a custom AI provider" is the
+  // only thing they could actually do about it.
+  if (m.includes("ai_spend_ceiling_reached") || m.includes("daily ai spend ceiling")) {
+    return {
+      category: "ai-spend-ceiling",
+      title: t("audio.aiError.providerUnavailableTitle"),
+      body: t("audio.aiError.spendCeilingBody"),
+      raw,
+    }
+  }
+
   // Platform daily quota (AQU-265): 429 responses from the Frontier/Aquilla proxy.
   if (
     m.includes("daily ai limit") ||
@@ -141,6 +158,31 @@ export function categorizeAiError(rawMessage: string): ActionableError {
       category: "model-not-allowed",
       title: t("audio.aiError.modelNotAvailableTitle"),
       body: raw,
+      raw,
+    }
+  }
+
+  // AQU-1964: an AI draft refused for touching a protected IDML anchor. This
+  // MUST have its own branch, and it must sit above the generic fallback,
+  // because `looksLikeMachineDump` rejects this message on two counts at once:
+  // an IDML cell id IS its anchor locator
+  // (`Stories/Story_u363.xml#/idPkg:Story[1]/…:part-1`), so the sentence we
+  // threw carries square brackets and runs past 180 characters. It therefore
+  // scored as a payload and the reader got "The AI request didn't finish" —
+  // which is how a correct, deliberate refusal reached a Biblica reviewer as
+  // "nothing happened". The locator still matters for support, so it stays in
+  // the Technical detail disclosure; what changes is the primary message,
+  // which now names the cause and what to do instead.
+  if (
+    m.includes("protected idml anchor") ||
+    m.includes("protected idml slot") ||
+    m.includes("editable idml slot") ||
+    m.includes("canonical idml paragraph")
+  ) {
+    return {
+      category: "protected-format",
+      title: t("audio.aiError.protectedFormatTitle"),
+      body: t("audio.aiError.protectedFormatBody"),
       raw,
     }
   }

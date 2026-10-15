@@ -7,7 +7,7 @@
 import { env } from "cloudflare:test"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { decide, JEV_BIBLE_QA_CAP_PER_WINDOW, JEV_PROJECT_CAP_PER_WINDOW, type JevAnswer, type JevPurpose } from "../lib/jev/decide"
-import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../../db/shared/rate-limit"
+import { bumpRateLimit, peekRateLimit, projectRateLimitIdentifier } from "../../../db/shared/rate-limit"
 
 const QUESTIONS = {
   substantive: { type: "noul" as const, instructions: { question: "Is it substantive?" } },
@@ -98,9 +98,12 @@ describe("decide()", () => {
   it("stops calling Jev for a project past its cap", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch")
     const req = input()
-    for (let i = 0; i < JEV_PROJECT_CAP_PER_WINDOW; i++) {
-      await recordRateLimitEvent(env.AQUILLA_PG, "jev_decisions", `project:${req.projectId}`)
-    }
+    await bumpRateLimit(
+      env.AQUILLA_PG,
+      "jev_decisions",
+      projectRateLimitIdentifier(req.projectId),
+      JEV_PROJECT_CAP_PER_WINDOW,
+    )
     const out = await decide(testEnv(), req)
     expect(out).toMatchObject({ decidedBy: "heuristic", reason: "capped" })
     expect(fetchSpy).not.toHaveBeenCalled()
@@ -121,24 +124,20 @@ describe("decide() — purpose bible-qa", () => {
   it("counts against its own bucket: triage's cap is not consumed", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => jevReply({ substantive: { type: "noul", noul: 0.8 } }))
     const req = input("bible-qa")
-    const identifier = `project:${req.projectId}`
+    const identifier = projectRateLimitIdentifier(req.projectId)
     for (let i = 0; i < 3; i++) await decide(testEnv(), req)
-    expect(await countRecentRateLimitEvents(env.AQUILLA_PG, "jev_decisions", identifier)).toBe(0)
-    expect(await countRecentRateLimitEvents(env.AQUILLA_PG, "jev_bible_qa", identifier)).toBe(3)
+    expect(await peekRateLimit(env.AQUILLA_PG, "jev_decisions", identifier)).toBe(0)
+    expect(await peekRateLimit(env.AQUILLA_PG, "jev_bible_qa", identifier)).toBe(3)
   })
 
   it("still calls Jev when triage's shared cap is spent, and stops at its own", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => jevReply({ substantive: { type: "noul", noul: 0.8 } }))
     const req = input("bible-qa")
-    for (let i = 0; i < JEV_PROJECT_CAP_PER_WINDOW; i++) {
-      await recordRateLimitEvent(env.AQUILLA_PG, "jev_decisions", `project:${req.projectId}`)
-    }
+    await bumpRateLimit(env.AQUILLA_PG, "jev_decisions", projectRateLimitIdentifier(req.projectId), JEV_PROJECT_CAP_PER_WINDOW)
     expect((await decide(testEnv(), req)).decidedBy).not.toBe("heuristic")
     expect(fetchSpy).toHaveBeenCalledTimes(1)
 
-    for (let i = 0; i < JEV_BIBLE_QA_CAP_PER_WINDOW; i++) {
-      await recordRateLimitEvent(env.AQUILLA_PG, "jev_bible_qa", `project:${req.projectId}`)
-    }
+    await bumpRateLimit(env.AQUILLA_PG, "jev_bible_qa", projectRateLimitIdentifier(req.projectId), JEV_BIBLE_QA_CAP_PER_WINDOW)
     expect(await decide(testEnv(), req)).toMatchObject({ decidedBy: "heuristic", reason: "capped" })
     expect(fetchSpy).toHaveBeenCalledTimes(1)
   })

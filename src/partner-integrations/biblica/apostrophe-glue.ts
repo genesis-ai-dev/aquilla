@@ -18,6 +18,17 @@
  * Front and back matter is prose-heavy English where the same runs are ordinary
  * possessives and contractions, so there the apostrophe is real text and is
  * left alone — the same split `noteHasVisibleText` already makes at import.
+ *
+ * AQU-1961: the glue is a property of the English InDesign templates, not of one
+ * Biblica edition, so the eligibility test is "any Biblica cell that is not
+ * front/back matter" rather than the study-note content type the first fix
+ * matched. Every other edition writes its own content types — EBL's
+ * `section` / `topic-intro` / `lesson` / `boxes`, Reach4Life's `book-intro` /
+ * `lesson`, Treasure Hunt's `hunt` / `intro` — and a study volume's verse cells
+ * carry `scripture` (AQU-1285). None of those ever equalled `notes`, so none of
+ * them were reached: an EBL guide translated out of the same possessive runs
+ * kept the publisher's apostrophe, which is what Anastasia and Atul still saw
+ * two weeks after the first fix deployed.
  */
 
 import type { IdmlFormatMetadataV2 } from "@aquilla/idml-roundtrip"
@@ -42,6 +53,43 @@ export function isBiblicaBookVolumeCell(
 ): boolean {
   const biblica = cellMetadata?.biblica
   return isRecord(biblica) && (biblica as BiblicaCellMetadata).contentType === "notes"
+}
+
+/**
+ * The content types whose English apostrophes are ordinary prose punctuation:
+ * a study volume's front/back matter (`front-back-matter`) and the front matter
+ * of the workbook editions (`front-matter`). Those pages are English prose a
+ * translator renders as prose, so a lone apostrophe run there is text.
+ */
+const PROSE_MATTER_CONTENT_TYPES: ReadonlySet<string> = new Set([
+  "front-back-matter",
+  "front-matter",
+])
+
+/**
+ * True for a Biblica cell whose English source may carry publisher apostrophe
+ * glue — every edition's translatable content, front/back matter excepted.
+ *
+ * Eligibility is deliberately the complement of the prose-matter types rather
+ * than a list of the note-like ones: a new edition's content type is glue-
+ * eligible the day it is added, whereas an allow-list would silently repeat
+ * AQU-1961 (the first fix matched only `notes`, so EBL, Reach4Life, Treasure
+ * Hunt and a study volume's `scripture` cells were all left out). A cell with a
+ * Biblica bucket but no content type is translatable content too — EBL writes
+ * no content type for a unit that falls outside any division.
+ *
+ * Widening the gate cannot by itself strip anything new: `clearBiblicaApostropheGlue`
+ * still requires the SOURCE slot to be glue AND the draft to have put nothing
+ * but apostrophes in it, so a cell without the glue signature is a no-op.
+ */
+export function isBiblicaGlueEligibleCell(
+  cellMetadata: Record<string, unknown> | null | undefined,
+): boolean {
+  const biblica = cellMetadata?.biblica
+  if (!isRecord(biblica)) return false
+  const contentType = (biblica as BiblicaCellMetadata).contentType
+  if (typeof contentType !== "string") return true
+  return !PROSE_MATTER_CONTENT_TYPES.has(contentType)
 }
 
 /**
@@ -79,7 +127,7 @@ export function clearBiblicaApostropheGlue(
   targetHtml: string,
   metadata: IdmlFormatMetadataV2,
 ): string {
-  if (!isBiblicaBookVolumeCell(cellMetadata) || typeof document === "undefined") return targetHtml
+  if (!isBiblicaGlueEligibleCell(cellMetadata) || typeof document === "undefined") return targetHtml
   const glue = biblicaApostropheGlueSlots(sourceHtml, metadata)
   if (glue.size === 0) return targetHtml
 

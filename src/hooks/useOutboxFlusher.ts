@@ -1,5 +1,11 @@
 import { useEffect, useState, useRef, useCallback } from "react"
-import { flushOutboxBatch, type StaleSiblingEntry, type TokenMintResult } from "@/lib/sync/outbox-flush"
+import {
+  flushOutboxBatch,
+  releaseElevationHolds,
+  type StaleSiblingEntry,
+  type TokenMintResult,
+} from "@/lib/sync/outbox-flush"
+import { onElevationGranted } from "@/lib/errors/elevation-required-signal"
 import {
   ONLINE_FLUSH_SPREAD_MS,
   staggerMs,
@@ -252,6 +258,9 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
   }, [])
 
   const flushNow = useCallback(() => {
+    // OPS-44: an explicit retry includes projects held for admin step-up. One
+    // mint each tells the flusher whether they are still waiting.
+    releaseElevationHolds()
     backoffExp.current = 0
     for (const retry of targetRetryStates.current.values()) {
       // Explicit retry/reconnect may recover network, 5xx, and even a 401 that
@@ -497,6 +506,13 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
       if (staggerTimer !== null) clearTimeout(staggerTimer)
     }
   }, [options.enabled, flushNow, requeueTransientForEligibleOwners])
+
+  // OPS-44: the admin just stepped up, so projects the flusher held for
+  // elevation can mint now. Drain them without waiting out the sleep.
+  useEffect(() => {
+    if (!options.enabled) return
+    return onElevationGranted(flushNow)
+  }, [options.enabled, flushNow])
 
   // Auth identity changed (sign-in / re-auth / account switch) → a previously
   // un-mintable queue may now succeed; requeue transient failures, reset backoff

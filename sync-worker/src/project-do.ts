@@ -40,9 +40,13 @@ import {
   applyFocusRenew,
   applyPresenceUpdate,
   parseProjectDoClientMessage,
-  PresenceDraftThrottle,
+  PresenceFloodGuard,
+  presenceFrameAudience,
   presenceFrameOwnerConnId,
-  presenceSnapshot,
+  presenceSnapshotFor,
+  presenceTier1Row,
+  PresenceTier1Batcher,
+  PresenceTier2Batcher,
   PROJECT_DO_DEFAULT_LEASE_MS,
   releaseUserLocks,
   resolveConnId,
@@ -52,9 +56,11 @@ import {
   sweepExpiredLeases,
   sweepOrphanedPresence,
   unpackBroadcastBody,
+  type ClientPresenceUpdate,
   type LockState,
   type PresenceState,
   type ProjectDoServerMessage,
+  type ServerPresenceTier1,
 } from "./project-do-handlers"
 import {
   ALARM_SLACK_MS,
@@ -141,6 +147,34 @@ export const PRESENCE_STALE_CLOSE_CODE = 4408
  * settles the pair after one round.
  */
 export const CONNECTION_SUPERSEDED_CLOSE_CODE = 4409
+
+/**
+ * AQU-1831: the most live sockets one project DO will hold.
+ *
+ * A DO is a single thread, and every connection adds to the fan-out cost of
+ * every broadcast — so an unbounded room degrades for everyone in it rather
+ * than refusing the socket that tipped it over. 200 is well above the
+ * 50-connection live-coordination floor the perf budgets measure
+ * (`scripts/perf/budgets.json` → `presence.sockets.open`) and above any real
+ * workshop, so reaching it means either a runaway client or a project that
+ * needs its own answer, not a silent slowdown.
+ */
+export const PROJECT_DO_MAX_CONNECTIONS = 200
+
+/**
+ * AQU-1831: app-specific WS close code for "this project is already holding
+ * PROJECT_DO_MAX_CONNECTIONS sockets". The client treats it as a full room and
+ * waits out its longest backoff window instead of hammering the door.
+ */
+export const CONNECTION_LIMIT_CLOSE_CODE = 4429
+
+/**
+ * AQU-1831: app-specific WS close code for "this socket sent presence frames
+ * faster than PresenceFloodGuard allows". The client reconnects under normal
+ * backoff and republishes its presence on open, so the roster re-converges —
+ * see PresenceFloodGuard for why closing beats dropping frames.
+ */
+export const PRESENCE_FLOOD_CLOSE_CODE = 4430
 
 /**
  * AQU-1839: minimum gap between `token.refresh` frames honoured on one
@@ -254,8 +288,17 @@ export class ProjectSync extends DurableObject<DOEnv> {
   private locks = new Map<string, LockState>()
   /** Set when `locks` diverged from storage; flushed by settle(). */
   private locksDirty = false
-  /** Per-user rate limit for `presence.draft` frames (in-memory, like all DO state). */
-  private draftThrottle = new PresenceDraftThrottle((frame) => this.broadcast(frame))
+  /**
+   * AQU-1831: per-connection coalescing tick for inbound `presence.update`
+   * frames (in-memory, like all DO state) — see PresenceTier2Batcher.
+   */
+  private presenceBatcher = new PresenceTier2Batcher((connId, msg) =>
+    this.applyBatchedPresence(connId, msg),
+  )
+  /** AQU-1831: per-connection inbound floodgate for presence frames. */
+  private presenceFloodGuard = new PresenceFloodGuard()
+  /** AQU-1825: coarse project-wide presence, batched to one frame per tick. */
+  private tier1 = new PresenceTier1Batcher((frame) => this.sendTier1(frame))
   /**
    * AQU-346: numeric userIds whose membership was revoked, mapped to the
    * deny-until timestamp. Blocks reconnects with still-valid (≤15 min)
@@ -594,6 +637,16 @@ export class ProjectSync extends DurableObject<DOEnv> {
     // the socket stays open.
     this.ctx.acceptWebSocket(server)
 
+    // AQU-1831: refuse the socket once the room is full. The close happens
+    // after accept() because the point is a legible close CODE — a bare HTTP
+    // error here reaches the reconciler as an indistinguishable failed
+    // connect. No connection or presence row is registered, so a turned-away
+    // client costs this DO nothing beyond the handshake.
+    if (this.connections.size >= PROJECT_DO_MAX_CONNECTIONS) {
+      server.close(CONNECTION_LIMIT_CLOSE_CODE, "project connection limit reached")
+      return new Response(null, { status: 101, webSocket: client })
+    }
+
     const conn: ConnectionState = {
       ws: server,
       projectId,
@@ -612,7 +665,10 @@ export class ProjectSync extends DurableObject<DOEnv> {
     this.persistConnection(conn)
     // Snapshot of current roster (drafts stripped) so the new client sees
     // existing peers; everyone else learns about the newcomer via a diff.
-    this.sendTo(server, presenceSnapshot(this.presence))
+    // AQU-1825: a socket has not announced a file yet, so peers already in one
+    // arrive coarse; backfillFileDetail fills in the tier-2 detail for the file
+    // this client then opens.
+    this.sendTo(server, presenceSnapshotFor(this.presence, undefined))
     // AQU-1839: tell the client when this connection's authorization lapses so
     // it can refresh in band instead of waiting to be closed. Sending the
     // frame at all is what signals support — see ServerTokenExpiry.
@@ -730,17 +786,62 @@ export class ProjectSync extends DurableObject<DOEnv> {
   }
 
   /**
-   * AQU-1162: broadcast, but never echo a presence frame back to the socket it
-   * describes. A typing client publishes presence roughly every 650ms and
-   * moves the cursor every ~120ms; each echo costs that same client a socket
-   * frame, a parse, a presence-store apply and a `ProjectWorkspace` shell pass
-   * — for a row every consumer then filters out as its own (`isSelfRow` in the
+   * Send one frame to its audience, never echoing a presence frame back to the
+   * socket it describes.
+   *
+   * AQU-1162: a typing client publishes presence roughly every 650ms and moves
+   * the cursor every ~120ms; each echo costs that same client a socket frame,
+   * a parse, a presence-store apply and a `ProjectWorkspace` shell pass — for
+   * a row every consumer then filters out as its own (`isSelfRow` in the
    * presence store, the `currentUsername` check in `applyPresenceFrame`).
-   * Non-presence frames (locks, content, project events) are unaffected: the
-   * originator does act on those.
+   *
+   * AQU-1825: and presence is tiered. A `presence.diff` carries tier-2 detail
+   * (cursor selection, the viewed row) that only matters to the people looking
+   * at the same file, so it goes to that file's sockets; its coarse half goes
+   * to the whole project through the batcher, at one frame per tick. Same for
+   * `presence.draft`. Everything else (locks, content, settings,
+   * `presence.left`) is project-wide and immediate as before.
    */
   private broadcast(msg: ProjectDoServerMessage): void {
-    this.broadcastToAll(msg, presenceFrameOwnerConnId(msg))
+    if (msg.t === "presence.diff") this.tier1.push(presenceTier1Row(msg.user))
+    const audience = presenceFrameAudience(msg, this.presence)
+    if (audience.scope === "all") {
+      this.broadcastToAll(msg, presenceFrameOwnerConnId(msg))
+      return
+    }
+    this.broadcastToFile(msg, audience.fileId, presenceFrameOwnerConnId(msg))
+  }
+
+  /** Send to the sockets whose own open file is `fileId` (undefined = no file). */
+  private broadcastToFile(
+    msg: ProjectDoServerMessage,
+    fileId: string | undefined,
+    exceptConnId?: string,
+  ): void {
+    const payload = JSON.stringify(msg)
+    for (const [ws, conn] of this.connections) {
+      if (exceptConnId !== undefined && conn.connId === exceptConnId) continue
+      if (this.presence.get(conn.connId)?.currentFileId !== fileId) continue
+      try {
+        ws.send(payload)
+      } catch {
+        /* swallow */
+      }
+    }
+  }
+
+  /**
+   * AQU-1825: deliver a batched tier-1 frame, dropping each receiver's own row
+   * (the AQU-1162 no-self-echo rule, applied per row because one frame covers
+   * several connections). A socket whose own row is the only one in the batch
+   * gets nothing.
+   */
+  private sendTier1(frame: ServerPresenceTier1): void {
+    for (const [ws, conn] of this.connections) {
+      const users = frame.users.filter((row) => row.connId !== conn.connId)
+      if (users.length === 0) continue
+      this.sendTo(ws, { t: "presence.tier1", users })
+    }
   }
 
   // ── Inbound handling ───────────────────────────────────────────────────
@@ -817,19 +918,68 @@ export class ProjectSync extends DurableObject<DOEnv> {
       return
     }
     if (msg.t === "presence.update") {
-      const result = applyPresenceUpdate(this.presence, conn, msg, now)
-      this.presence = result.presence
-      if (result.emit.length > 0) this.persistConnection(conn)
-      for (const m of result.emit) {
-        if (m.t === "presence.draft") this.draftThrottle.push(m)
-        else this.broadcast(m)
+      // AQU-1831: the floodgate first (cheapest refusal), then the coalescing
+      // tick. Between them one connection costs the DO at most one presence
+      // apply + fan-out per PRESENCE_TIER2_TICK_MS however fast it publishes.
+      if (!this.presenceFloodGuard.allow(conn.connId, now)) {
+        try {
+          conn.ws.close(PRESENCE_FLOOD_CLOSE_CODE, "presence rate limit exceeded")
+        } catch {
+          /* swallow */
+        }
+        // Server-initiated close doesn't reliably fire our own close path —
+        // drop the row, the locks and this connection's pending patch
+        // explicitly, as every other server-side close here does
+        // (idempotent; see the connections.has guard in handleConnectionClose).
+        this.handleConnectionClose(conn)
+        return
       }
+      this.presenceBatcher.push(conn.connId, msg)
       return
     }
     if (msg.t === "outbox.event") {
       void this.forwardOutboxEvent(msg.event)
       return
     }
+  }
+
+  /**
+   * AQU-1831: apply one (possibly coalesced) presence patch handed back by the
+   * tier-2 batcher.
+   *
+   * This runs up to PRESENCE_TIER2_TICK_MS after the frame arrived, so it
+   * re-resolves the connection rather than closing over it: a socket that shut
+   * down in the meantime had its pending patch cleared, and must not get a
+   * presence row back through a tick that was already in flight.
+   *
+   * It also runs from the batcher's timer rather than from a hibernation entry
+   * point (AQU-1836), so nothing here may depend on settle(): the row is written
+   * straight into the socket attachment, and presence never moves the sweep
+   * alarm (nextSweepDeadlineAt reads leases and connection liveness only).
+   */
+  private applyBatchedPresence(connId: string, msg: ClientPresenceUpdate): void {
+    let conn: ConnectionState | undefined
+    for (const state of this.connections.values()) {
+      if (state.connId !== connId) continue
+      conn = state
+      break
+    }
+    // The batcher's own next tick closes a window with nothing pending, so
+    // there is nothing to clean up here — and clearing from inside its
+    // callback would only be re-armed by the tick that called us.
+    if (!conn) return
+    const fileBefore = this.presence.get(conn.connId)?.currentFileId
+    const result = applyPresenceUpdate(this.presence, conn, msg, Date.now())
+    this.presence = result.presence
+    // AQU-1836: the row has to reach the socket attachment, or an eviction
+    // would wake to the presence this patch replaced.
+    if (result.emit.length > 0) this.persistConnection(conn)
+    // AQU-1825: broadcast() scopes each frame to its audience — the coarse
+    // half project-wide through the tier-1 batcher, the detail (and the
+    // bounded draft) only to the sockets in the same file.
+    for (const m of result.emit) this.broadcast(m)
+    const fileAfter = this.presence.get(conn.connId)?.currentFileId
+    if (fileAfter !== fileBefore) this.backfillFileDetail(conn, fileAfter)
   }
 
   /**
@@ -913,6 +1063,25 @@ export class ProjectSync extends DurableObject<DOEnv> {
     console.log(`[ProjectSync] outbox.event passthrough (no-op)`, event.id)
   }
 
+  /**
+   * AQU-1825: this socket just opened `fileId`, so hand it the tier-2 detail
+   * for the peers already sitting there.
+   *
+   * Tier-2 frames are only sent to the sockets in the subject's file, which
+   * means a peer who went quiet before we arrived would otherwise never
+   * resolve past the coarse row the roster frame gave us — no caret, no "X is
+   * editing" badge on their cell until they happened to move. Bounded by the
+   * number of people in one file, and sent only on an actual file change.
+   */
+  private backfillFileDetail(conn: ConnectionState, fileId: string | undefined): void {
+    for (const user of this.presence.values()) {
+      if (user.connId === conn.connId) continue
+      if (user.currentFileId !== fileId) continue
+      if (user.viewingCell === undefined && user.selection === undefined) continue
+      this.sendTo(conn.ws, { t: "presence.diff", user: stripPresenceDraft(user) })
+    }
+  }
+
   // ── Lifecycle ──────────────────────────────────────────────────────────
 
   private handleConnectionClose(conn: ConnectionState): void {
@@ -933,8 +1102,11 @@ export class ProjectSync extends DurableObject<DOEnv> {
     if (result.emit.some((m) => m.t === "lock.released")) this.locksDirty = true
     this.locks = result.locks
     this.presence = result.presence
-    this.draftThrottle.clear(conn.connId)
+    this.presenceBatcher.clear(conn.connId)
+    this.presenceFloodGuard.clear(conn.connId)
+    this.tier1.clear(conn.connId)
     for (const m of result.emit) this.broadcast(m)
+    if (this.connections.size === 0) this.tier1.dispose()
   }
 
   /**
@@ -1016,7 +1188,11 @@ export class ProjectSync extends DurableObject<DOEnv> {
     if (result.emit.length === 0) return
     this.presence = result.presence
     for (const m of result.emit) {
-      if (m.t === "presence.left") this.draftThrottle.clear(m.connId)
+      if (m.t === "presence.left") {
+        this.presenceBatcher.clear(m.connId)
+        this.presenceFloodGuard.clear(m.connId)
+        this.tier1.clear(m.connId)
+      }
       this.broadcastToAll(m)
     }
   }

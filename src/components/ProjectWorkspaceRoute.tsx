@@ -1,4 +1,5 @@
 import type { ReactNode } from "react"
+import { ProjectElevationBoundary } from "@/components/ProjectElevationBoundary"
 
 /**
  * Route element for **every** `/project/:id/...` workspace surface.
@@ -17,7 +18,10 @@ import type { ReactNode } from "react"
  * workbench did not fit there; the Team workspace is single-column below `lg`,
  * so Agent stays reachable on a phone. A route-level guard that comes back
  * belongs in here, keyed on the path — never as a wrapper on one surface.
+ *
+ * OPS-44: it also hosts the ProjectElevationBoundary, which remounts the
+ * workspace once an admin step-up unblocks this project's sync-token mint.
  */
 export function ProjectWorkspaceRoute({ children }: { children: ReactNode }) {
-  return <>{children}</>
+  return <ProjectElevationBoundary>{children}</ProjectElevationBoundary>
 }

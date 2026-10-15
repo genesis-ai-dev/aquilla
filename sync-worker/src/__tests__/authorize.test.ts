@@ -4,6 +4,7 @@ import { authorize, AuthorizedEvent, isAuthorizedEvent, PROJECT_SENTINEL_FILE_ID
 import { makeTestToken } from "./helpers/auth"
 import type { RawEvent } from "../events/types"
 import type { SyncTokenClaims } from "../auth"
+import { projectSettingsRow } from "./helpers/project-settings-db"
 
 /**
  * AQU-496: minimal AquillaDb stub for the self-assign carve-out — mirrors
@@ -53,7 +54,7 @@ function makeDb(options: {
               }
               if (sql.includes("FROM assignments")) return assignmentRow
               if (sql.includes("FROM project_settings")) {
-                return projectSettings == null ? null : { settings: JSON.stringify(projectSettings) }
+                return projectSettingsRow(sql, projectSettings == null ? null : JSON.stringify(projectSettings))
               }
               if (sql.includes("FROM projects")) return { org_id: orgId, created_by: 999, archived_at: null }
               if (sql.includes("FROM org_settings")) {

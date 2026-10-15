@@ -1,5 +1,7 @@
-import { notifyElevationRequired } from "@/lib/errors/elevation-required-signal"
+import { notifyElevationRequired, type ElevationReason } from "@/lib/errors/elevation-required-signal"
 import { isElevationRequiredBody, UserError } from "@/lib/errors/user-error"
+import { loadActiveSession } from "./session-store"
+import type { FrontierSession } from "./types"
 
 /**
  * AQU-1322: call before the generic `if (!res.ok)` on any route the auth-worker
@@ -23,4 +25,27 @@ export async function throwIfElevationRequired(res: Response, context?: string):
  */
 export function isElevationRequiredError(err: unknown): err is UserError {
   return err instanceof UserError && err.status === 403 && isElevationRequiredBody(err.raw)
+}
+
+/**
+ * OPS-44: raise the step-up prompt for a request made with `jwt`, but only
+ * while that JWT is the active session's. Elevation is bound to the session
+ * token and the prompt verifies the ACTIVE one, so a 403 from the outbox's
+ * background drain of another stored account must not open it: verifying
+ * would elevate the wrong session. That account's work is retried when the
+ * user switches to it. An unreadable session store raises the prompt anyway;
+ * a redundant dialog is cheaper than a silent stall.
+ */
+export async function notifyElevationRequiredIfCurrent(
+  jwt: string,
+  reason: ElevationReason,
+  readActive: () => Promise<FrontierSession | null> = loadActiveSession,
+): Promise<void> {
+  try {
+    const active = await readActive()
+    if (active?.jwt !== jwt) return
+  } catch {
+    // Fall through: staleness can't be proven.
+  }
+  notifyElevationRequired(reason)
 }

@@ -63,7 +63,9 @@ import {
   sectionsProgressRecomputeStmt,
 } from './progress-projection'
 import { makeRequestCache } from './request-cache'
+import type { WritePathSettings } from './write-path-settings'
 import { dbFailureInfo, reportServerRejections } from './rejection-telemetry'
+import { reportStaleSiblings } from './stale-sibling-telemetry'
 
 // Max statements per batch() transaction — a conservative self-imposed cap (Postgres has no hard limit; keeps any single transaction bounded).
 const BATCH_LIMIT = 100
@@ -944,9 +946,9 @@ export async function handleEventsWriteRequest(
   const requestCache = makeRequestCache(db)
   const readProjectSettings = async (
     projectId: string,
-  ): Promise<Record<string, unknown> | null> => {
+  ): Promise<WritePathSettings | null> => {
     try {
-      return await requestCache.projectSettings(projectId)
+      return await requestCache.writePathSettings(projectId)
     } catch {
       // Settings load failure is non-fatal — callers fall back to their
       // defaults rather than blocking the batch.
@@ -1960,13 +1962,17 @@ export async function handleEventsWriteRequest(
       // These 5xx results ride inside a 200, which the request wrapper in
       // index.ts never ships — report them here (grouped, throttled).
       reportServerRejections(env, ctx, rawEvents, rejected, batchFailure)
+      const staleOnPartialCommit = accepted
+        .filter((a) => staleEntries.has(a.id))
+        .map((a) => staleEntries.get(a.id)!)
+      // AQU-1965: an accepted-but-not-applied event ships too — a 200 with a
+      // dropped write is otherwise invisible to operations.
+      reportStaleSiblings(env, ctx, rawEvents, staleOnPartialCommit)
       return Response.json(
         {
           accepted,
           rejected,
-          stale: accepted
-            .filter((a) => staleEntries.has(a.id))
-            .map((a) => staleEntries.get(a.id)!),
+          stale: staleOnPartialCommit,
           staleSource: staleSourceEntries.filter((entry) => !replayedCellEventIds.has(entry.id)),
         },
         { status: 200 },
@@ -2206,12 +2212,16 @@ export async function handleEventsWriteRequest(
 
   // A handler / auth 5xx inside this 200 (the batch itself committed).
   reportServerRejections(env, ctx, rawEvents, rejected)
+  const stale = accepted
+    .filter((a) => staleEntries.has(a.id))
+    .map((a) => staleEntries.get(a.id)!)
+  // AQU-1965: and the dead-letters that rode this same 200 — grouped per cell,
+  // so a chain that keeps losing is countable instead of partner-reported.
+  reportStaleSiblings(env, ctx, rawEvents, stale)
   return Response.json({
     accepted,
     rejected,
-    stale: accepted
-      .filter((a) => staleEntries.has(a.id))
-      .map((a) => staleEntries.get(a.id)!),
+    stale,
     staleSource: staleSourceEntries.filter((entry) => !replayedCellEventIds.has(entry.id)),
     // Same shape as the `event.applied` WS frame, one per committed event.
     // Lets the author's client land its own write's projected rows straight

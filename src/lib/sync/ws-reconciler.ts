@@ -18,6 +18,14 @@
  *   { t: "presence", users: [{ connId, userId, focusedCell?, currentFileId?, selection?, ts }] }
  *       Roster snapshot, one row per CONNECTION (a user with two tabs is two
  *       rows). Sent on connect; later changes arrive as presence.diff/left.
+ *       AQU-1825: rows for peers in a file other than the receiver's carry
+ *       tier-1 fields only (no selection, no viewingCell).
+ *   { t: "presence.tier1", users: [{ connId, userId, currentFileId?, focusedCell?, ts }] }
+ *       AQU-1825: batched coarse roster delta, project-wide, one frame per
+ *       server tick (~250 ms) and only for connections whose coarse state
+ *       changed. Tier-2 detail (cursor selection, viewingCell, live draft)
+ *       travels in presence.diff / presence.draft, which the server sends
+ *       only to the sockets that have the same file open.
  *   { t: "lock.claimed", cellId, by: { userId, ts } }
  *   { t: "lock.released", cellId, by: { userId, ts } }
  *       Focus-lock transitions by another user.
@@ -80,6 +88,19 @@ export interface PresenceUser {
 }
 
 /**
+ * AQU-1825 tier 1: the coarse half of a presence row — who, and which file
+ * they have open. Carries no cursor selection and no `viewingCell`; those are
+ * tier 2 and only reach the sockets in that same file.
+ */
+export interface PresenceTier1Row {
+  connId: string
+  userId: string
+  currentFileId?: string
+  focusedCell?: string
+  ts: number
+}
+
+/**
  * AQU-1832: the counts block of a pushed progress frame — the same object the
  * `/progress` GET returns for a file or a section.
  *
@@ -137,6 +158,9 @@ export type ProjectWsServerMessage =
   | { t: "presence.left"; userId: string; connId: string }
   /** Live draft text for one cell; server coalesces to ≤1 per connection per 150 ms. */
   | { t: "presence.draft"; userId: string; connId: string; cellId: string; draftText: string; ts: number }
+  /** AQU-1825: batched coarse roster delta — one frame per server tick (~250 ms),
+   *  carrying only the connections whose file or lease-held cell changed. */
+  | { t: "presence.tier1"; users: PresenceTier1Row[] }
   | { t: "lock.claimed"; cellId: string; by: { userId: string; ts: number } }
   | { t: "lock.released"; cellId: string; by: { userId: string; ts: number } }
   | { t: "project.archived"; project: string; archivedAt?: string; deletedBy?: string }
@@ -491,6 +515,16 @@ export function newConnId(): string {
  */
 export const CONNECTION_SUPERSEDED_CLOSE_CODE = 4409
 
+/**
+ * AQU-1831: the DO's close code for "this project is already holding its
+ * maximum number of sockets" (sync-worker `project-do.ts`
+ * PROJECT_DO_MAX_CONNECTIONS). The socket opens and closes immediately, which
+ * would otherwise reset the backoff window on every attempt and turn a full
+ * room into a reconnect loop — so this code sends the window straight to its
+ * ceiling instead.
+ */
+export const CONNECTION_LIMIT_CLOSE_CODE = 4429
+
 /** Forget a tab's stored presence key so the next connect mints a fresh one. */
 function rotateTabConnId(key: string): void {
   try {
@@ -838,6 +872,11 @@ export function createWsReconciler(
       if (closeEvent.code === CONNECTION_SUPERSEDED_CLOSE_CODE && options.connIdStorageKey) {
         rotateTabConnId(options.connIdStorageKey)
       }
+      // AQU-1831: a full room is not a transient failure of this socket — the
+      // DO accepted and immediately closed it, which already reset the window
+      // in onopen. Wait out the longest window rather than retrying in a
+      // second, which is all a turned-away client can usefully do.
+      if (closeEvent.code === CONNECTION_LIMIT_CLOSE_CODE) reconnectWindow = maxBackoff
       safeEmit(() => handlers.onClose?.(closeEvent))
       socket = null
       scheduleReconnect()
@@ -1014,6 +1053,16 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
     const user = parsePresenceUser(m.user)
     if (!user) return null
     return { t: "presence.diff", user }
+  }
+  if (t === "presence.tier1") {
+    if (!Array.isArray(m.users)) return null
+    const users: PresenceTier1Row[] = []
+    for (const u of m.users) {
+      const row = parsePresenceTier1Row(u)
+      if (!row) return null
+      users.push(row)
+    }
+    return { t: "presence.tier1", users }
   }
   if (t === "presence.left") {
     if (typeof m.userId !== "string") return null
@@ -1295,6 +1344,19 @@ function parsePresenceUser(u: unknown): PresenceUser | null {
     ...(typeof r.viewingCell === "string" ? { viewingCell: r.viewingCell } : {}),
     ...(typeof r.currentFileId === "string" ? { currentFileId: r.currentFileId } : {}),
     ...(r.selection !== undefined ? { selection: r.selection } : {}),
+  }
+}
+
+function parsePresenceTier1Row(u: unknown): PresenceTier1Row | null {
+  if (!u || typeof u !== "object") return null
+  const r = u as Record<string, unknown>
+  if (typeof r.userId !== "string" || typeof r.ts !== "number" || !Number.isFinite(r.ts)) return null
+  return {
+    connId: typeof r.connId === "string" ? r.connId : r.userId,
+    userId: r.userId,
+    ts: r.ts,
+    ...(typeof r.currentFileId === "string" ? { currentFileId: r.currentFileId } : {}),
+    ...(typeof r.focusedCell === "string" ? { focusedCell: r.focusedCell } : {}),
   }
 }
 

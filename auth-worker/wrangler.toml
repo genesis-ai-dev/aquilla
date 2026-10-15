@@ -72,6 +72,26 @@ id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 binding = "SNAPSHOTS"
 bucket_name = "aquilla-snapshots"
 
+# AQU-1845 — the per-run Autopilot driver (src/contextual-run-do.ts). One
+# object per run; its alarm drives the run's waves and re-arms itself, so a run
+# finishes whether or not the request (or tab) that started it is still around,
+# instead of dying with that request's `waitUntil` budget and waiting for the
+# 5-minute cron to re-adopt it. Holds no authoritative state — every cursor,
+# status and staged draft is in Postgres — so an evicted object or a redeploy
+# costs at most the wave in flight.
+#
+# Wrangler environments do NOT inherit top-level bindings or migrations, so
+# every live named environment re-declares both below. Deleting the binding is
+# safe at the code level (routes/contextual.ts falls back to the in-request
+# loop) but gives up the long-run driver, so don't.
+[[durable_objects.bindings]]
+name = "CONTEXTUAL_RUN_DRIVER"
+class_name = "ContextualRunDriver"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ContextualRunDriver"]
+
 # Keep the top-level email binding for default-profile compatibility. Every live
 # named environment also declares its own binding because Wrangler environments
 # do not inherit top-level bindings.
@@ -252,6 +272,15 @@ bucket_name = "aquilla-snapshots"
 [[env.production.send_email]]
 name = "EMAIL"
 
+# See the top-level [[durable_objects.bindings]] — env blocks don't inherit it.
+[[env.production.durable_objects.bindings]]
+name = "CONTEXTUAL_RUN_DRIVER"
+class_name = "ContextualRunDriver"
+
+[[env.production.migrations]]
+tag = "v1"
+new_sqlite_classes = ["ContextualRunDriver"]
+
 [env.production.vars]
 ALGORITHM = "HS256"
 # [Pen test] Auth & session mgmt (2026-09-28): see [vars] above for why this
@@ -360,6 +389,15 @@ bucket_name = "aquilla-snapshots-dev"
 [[env.development.send_email]]
 name = "EMAIL"
 
+# See the top-level [[durable_objects.bindings]] — env blocks don't inherit it.
+[[env.development.durable_objects.bindings]]
+name = "CONTEXTUAL_RUN_DRIVER"
+class_name = "ContextualRunDriver"
+
+[[env.development.migrations]]
+tag = "v1"
+new_sqlite_classes = ["ContextualRunDriver"]
+
 [env.development.version_metadata]
 binding = "CF_VERSION_METADATA"
 
@@ -432,6 +470,15 @@ id = "REPLACE_WITH_E2E_HYPERDRIVE_ID"
 [[env.e2e.r2_buckets]]
 binding = "SNAPSHOTS"
 bucket_name = "aquilla-snapshots-dev"
+
+# See the top-level [[durable_objects.bindings]] — env blocks don't inherit it.
+[[env.e2e.durable_objects.bindings]]
+name = "CONTEXTUAL_RUN_DRIVER"
+class_name = "ContextualRunDriver"
+
+[[env.e2e.migrations]]
+tag = "v1"
+new_sqlite_classes = ["ContextualRunDriver"]
 
 [env.e2e.vars]
 ALGORITHM = "HS256"

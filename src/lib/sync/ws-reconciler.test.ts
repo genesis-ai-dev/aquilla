@@ -4,6 +4,7 @@ import {
   createLinkUpstreamChangedHandler,
   createReconnectResyncHandler,
   createScopedRefreshScheduler,
+  CONNECTION_LIMIT_CLOSE_CODE,
   CONNECTION_SUPERSEDED_CLOSE_CODE,
   createWsReconciler,
   fileInventoryChanged,
@@ -302,6 +303,31 @@ describe("parseProjectWsMessage", () => {
         selection: { side: "target", anchor: 0, head: 0, draftText: "x".repeat(16_385) },
         ts: 100,
       }],
+    }))).toBeNull()
+  })
+
+  it("parses presence.tier1, a batch of coarse rows (AQU-1825)", () => {
+    expect(parseProjectWsMessage(JSON.stringify({
+      t: "presence.tier1",
+      users: [
+        { connId: "tab-a", userId: "alice", currentFileId: "file-1", focusedCell: "c1", ts: 10 },
+        { userId: "bob", ts: 11 },
+      ],
+    }))).toEqual({
+      t: "presence.tier1",
+      users: [
+        { connId: "tab-a", userId: "alice", currentFileId: "file-1", focusedCell: "c1", ts: 10 },
+        // No connId on the wire → keyed by userId, as the roster frame does.
+        { connId: "bob", userId: "bob", ts: 11 },
+      ],
+    })
+    // Strict field validation — one bad row marks the whole frame malformed.
+    expect(parseProjectWsMessage(JSON.stringify({ t: "presence.tier1", users: {} }))).toBeNull()
+    expect(parseProjectWsMessage(JSON.stringify({
+      t: "presence.tier1", users: [{ userId: "alice" }],
+    }))).toBeNull()
+    expect(parseProjectWsMessage(JSON.stringify({
+      t: "presence.tier1", users: [{ userId: "alice", ts: 1 }, { ts: 2 }],
     }))).toBeNull()
   })
 
@@ -805,6 +831,34 @@ describe("createWsReconciler", () => {
     await Promise.resolve()
     expect(FakeWebSocket.instances).toHaveLength(1)
     await vi.advanceTimersByTimeAsync(200)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    r.close()
+  })
+
+  it("AQU-1831: a 4429 \"room is full\" close waits out the longest window", async () => {
+    vi.useFakeTimers()
+    const r = createWsReconciler({
+      projectId: "p",
+      baseUrl: "https://example.com",
+      getToken: async () => "tok",
+      webSocketCtor: FakeWsCtor,
+      // Top-of-window draw, so the delay IS the window and the jump is visible.
+      randomSource: () => 1,
+      maxBackoffMs: 30_000,
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    // The DO accepts the socket and closes it at once, so onopen has already
+    // reset the window to its first value — a 5s draw if nothing intervenes.
+    FakeWebSocket.instances[0].open()
+    FakeWebSocket.instances[0].close(CONNECTION_LIMIT_CLOSE_CODE, "project connection limit reached")
+    await vi.advanceTimersByTimeAsync(29_000)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(1_000)
     await Promise.resolve()
     await Promise.resolve()
     expect(FakeWebSocket.instances).toHaveLength(2)

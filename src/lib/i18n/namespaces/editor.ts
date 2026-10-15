@@ -254,6 +254,34 @@ export const editor = defineNamespace({
     "editor.media.linkedVideoStudioVideo": "The video's owner can download the video file from YouTube Studio.",
     "editor.media.useTrackAsRows": "Use \"{track}\" as this file's rows",
     "editor.media.useTrackAsRowsHint": "Other caption tracks stay on the timeline.",
+    // AQU-1681: a linked video NOT on YouTube can give its own sound. Aquilla
+    // fetches it, keeps a copy, and splits it into rows like an upload.
+    "editor.media.linkedVideoUseSoundLink": "make rows from the video's own sound",
+    "editor.media.linkedVideoSoundTitle": "Make rows from the video's own sound",
+    "editor.media.linkedVideoSoundHint":
+      "Aquilla saves a copy of the video's sound with this file, splits it into rows " +
+      "where the speech pauses, and transcribes them. The rows are timed to the video.",
+    "editor.media.linkedVideoSoundReadingTracks": "Reading the video's sound tracks…",
+    "editor.media.linkedVideoSoundTrackLabel": "Sound track",
+    "editor.media.linkedVideoSoundStart": "Make rows",
+    "editor.media.linkedVideoSoundDownloading": "Downloading the video's sound…",
+    "editor.media.linkedVideoSoundDownloadingPercent": "Downloading the video's sound… {percent}%",
+    "editor.media.linkedVideoSoundSaving": "Saving a copy of the sound…",
+    "editor.media.linkedVideoSoundMakingRows": "Making rows…",
+    "editor.media.linkedVideoSoundCancelled": "Stopped. Nothing was saved.",
+    "editor.media.videoSound.fetchFailed":
+      "Couldn't download the video's sound. Check your connection and try again.",
+    "editor.media.videoSound.fileUnreadable":
+      "Couldn't download this video. Its server may not let other sites read it.",
+    "editor.media.videoSound.tooLarge": "This video is too large to keep a copy of.",
+    "editor.media.videoSound.empty": "The video's sound came back empty.",
+    "editor.media.videoSound.noSeparateSound": "This video's stream has no separate sound track to read.",
+    "editor.media.videoSound.encrypted": "This video's sound is encrypted, so Aquilla can't read it.",
+    "editor.media.videoSound.unsupportedFormat": "This video's sound is in a streaming format Aquilla can't read yet.",
+    "editor.media.videoSound.decodeFailed": "This browser couldn't decode the video's sound.",
+    "editor.media.videoSound.offset":
+      "The video's sound starts {seconds} s away from its picture, so rows made from it " +
+      "would be out of step with the video.",
 
     // — Footnotes: the inline strip, the bottom tray, and one note's row ——
     "editor.footnotes.label": "Footnotes",
@@ -3271,9 +3299,13 @@ export const editor = defineNamespace({
           "Quiet line under the 'Attach captions' button in the linked-video empty " +
           "state, offering a second way in. Lower-case and starting with 'or' " +
           "because it continues the button above it. {link} is the clickable part " +
-          "(editor.media.linkedVideoUseRecordingLink); only it is underlined.",
+          "(editor.media.linkedVideoUseRecordingLink); only it is underlined. " +
+          "AQU-1681: a second line of the same shape wraps " +
+          "editor.media.linkedVideoUseSoundLink.",
         placeholders: {
-          link: "The clickable words, editor.media.linkedVideoUseRecordingLink.",
+          link:
+            "The clickable words, editor.media.linkedVideoUseRecordingLink or " +
+            "editor.media.linkedVideoUseSoundLink.",
         },
         maxLength: 40,
       },
@@ -3356,6 +3388,119 @@ export const editor = defineNamespace({
         description:
           "Note under those buttons when there is more than one caption track: " +
           "only the chosen track becomes rows, the others stay on the timeline.",
+      },
+      "editor.media.linkedVideoUseSoundLink": {
+        description:
+          "Clickable part of a second quiet line in the linked-video empty state, " +
+          "shown only to a maintainer on a video that is not on YouTube. It sits " +
+          "inside editor.media.linkedVideoUseRecording ('or {link}'), so it is " +
+          "lower-case and continues that sentence. It opens a step where Aquilla " +
+          "takes the video's OWN soundtrack (nothing to upload) and splits its " +
+          "speech into this file's rows.",
+        maxLength: 44,
+      },
+      "editor.media.linkedVideoSoundTitle": {
+        description:
+          "Heading of that step: the rows of this file are made from the speech in " +
+          "the linked video's own soundtrack.",
+        maxLength: 44,
+      },
+      "editor.media.linkedVideoSoundHint": {
+        description:
+          "Explanation under that heading. Aquilla downloads the video's soundtrack " +
+          "and stores a copy with this file (so it keeps working if the video moves), " +
+          "cuts it into one row per stretch of speech wherever the speaking pauses, " +
+          "and turns each row's speech into text automatically. 'Timed to the video' " +
+          "means each row starts and ends at the moment in the video where it is said.",
+      },
+      "editor.media.linkedVideoSoundReadingTracks": {
+        description:
+          "Status beside a spinner while the step reads which soundtracks the video " +
+          "offers (a streamed film has one per dubbed language).",
+      },
+      "editor.media.linkedVideoSoundTrackLabel": {
+        description:
+          "Label before the button that picks which of the video's soundtracks to " +
+          "use; each soundtrack is a language the film is dubbed into. Defaults to " +
+          "the project's source language.",
+        maxLength: 24,
+      },
+      "editor.media.linkedVideoSoundStart": {
+        description:
+          "Primary button on that step that starts downloading the soundtrack and " +
+          "making the rows. Imperative.",
+        maxLength: 20,
+      },
+      "editor.media.linkedVideoSoundDownloading": {
+        description:
+          "Progress line while the video's soundtrack downloads, when its size is " +
+          "not known in advance (the progress bar under it is indeterminate).",
+      },
+      "editor.media.linkedVideoSoundDownloadingPercent": {
+        description:
+          "The same progress line when the share already downloaded is known.",
+        placeholders: { percent: "Whole number from 0 to 100." },
+      },
+      "editor.media.linkedVideoSoundSaving": {
+        description:
+          "Progress line while the downloaded soundtrack is uploaded and stored with " +
+          "this file, after the download and before the rows are made.",
+      },
+      "editor.media.linkedVideoSoundMakingRows": {
+        description:
+          "Progress line while the rows are being created from the stored soundtrack. " +
+          "It stays until the rows appear.",
+      },
+      "editor.media.linkedVideoSoundCancelled": {
+        description:
+          "Shown after the person pressed Cancel during the download or the upload: " +
+          "the run stopped and no rows or copy were kept.",
+      },
+      "editor.media.videoSound.fetchFailed": {
+        description:
+          "Error on that step when the video's soundtrack could not be downloaded " +
+          "even after retrying.",
+      },
+      "editor.media.videoSound.fileUnreadable": {
+        description:
+          "Error when the linked video is a direct link to a video file and the " +
+          "browser could not download it, most often because the server hosting it " +
+          "does not allow pages on other websites to read it.",
+      },
+      "editor.media.videoSound.tooLarge": {
+        description:
+          "Error when the linked video file is larger than Aquilla stores for one " +
+          "file, so no copy of it can be kept.",
+      },
+      "editor.media.videoSound.empty": {
+        description: "Error when the video's soundtrack downloaded with nothing in it.",
+      },
+      "editor.media.videoSound.noSeparateSound": {
+        description:
+          "Error when the streamed video carries its sound only inside the picture " +
+          "streams, with no soundtrack Aquilla can download on its own.",
+      },
+      "editor.media.videoSound.encrypted": {
+        description:
+          "Error when the streamed video's soundtrack is encrypted (copy-protected), " +
+          "which Aquilla does not try to get around.",
+      },
+      "editor.media.videoSound.unsupportedFormat": {
+        description:
+          "Error when the streamed video's soundtrack uses an older streaming format " +
+          "(MPEG-TS) that the browser cannot decode on its own.",
+      },
+      "editor.media.videoSound.decodeFailed": {
+        description:
+          "Error when the browser could not turn the downloaded soundtrack into " +
+          "sound it can analyse, usually because it does not support the audio codec.",
+      },
+      "editor.media.videoSound.offset": {
+        description:
+          "Error when the soundtrack does not start at the same moment as the " +
+          "picture (for example, one has an intro the other lacks). Rows made from " +
+          "it would not line up with the video, so none are made. 's' is seconds.",
+        placeholders: { seconds: "Seconds of difference, one decimal place, e.g. 4.0." },
       },
       "editor.timeline.trackUseAsRows": {
         description:

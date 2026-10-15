@@ -1,6 +1,6 @@
-// Decides whether the release bot may cut a release slice from the unreleased
-// PRs on origin/dev, and what to cut. Deterministic by design: the bot reads
-// this JSON instead of judging these questions itself.
+// Decides whether the Release cut workflow may cut a release slice from the
+// unreleased PRs on origin/dev, and what to cut. Deterministic by design: the
+// workflow acts on this JSON and judges nothing itself.
 // Usage: node scripts/release-plan.mjs [--now=<iso>]   (run after `git fetch origin --tags`)
 import { execFileSync } from "node:child_process"
 import { pathToFileURL } from "node:url"

@@ -11,7 +11,8 @@ name: Notify help bot
 
 on:
   push:
-    tags: ['20*']
+    # Calver only: YYYY.MM.DD.NN, as tag-release.sh writes it.
+    tags: ['20[0-9][0-9].[0-9][0-9].[0-9][0-9].[0-9][0-9]']
 
 # Sends one request to the bot; needs no access to the repo.
 permissions: {}
@@ -19,6 +20,7 @@ permissions: {}
 jobs:
   ping:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Ping the aquilla-help bot
         env:
@@ -30,6 +32,7 @@ jobs:
             echo "::error::GROK_HELP_WEBHOOK_URL is not set."
             exit 1
           fi
-          curl -fsS --max-time 30 -X POST "$WEBHOOK_URL" \
+          # A failed ping fails the run, so a missed docs update shows up red.
+          curl -fsS --max-time 30 --retry 3 --retry-all-errors -X POST "$WEBHOOK_URL" \
             -H 'Content-Type: application/json' \
             -d "{\"tag\":\"$TAG\",\"sha\":\"$SHA\"}"

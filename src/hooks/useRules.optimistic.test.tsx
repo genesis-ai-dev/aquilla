@@ -110,6 +110,40 @@ describe("useRules — optimistic toggles", () => {
     expect(last.algorithmicChecks?.["repeated-word"]).toEqual({ enabled: false })
   })
 
+  it("sends two quick toggles as one PATCH carrying both", async () => {
+    const patchShared = vi.fn(async (_p: ProjectWideSettings) => ({ kind: "ok" as const }))
+    const { result } = renderHook(() =>
+      useRules(project([rule("r1", false), rule("r2", false)]), () => {}, patchShared),
+    )
+
+    await act(async () => {
+      const first = result.current.updateRule("r1", { enabled: true })
+      const second = result.current.updateRule("r2", { enabled: true })
+      await Promise.all([first, second])
+    })
+
+    // One round trip: a reload right after the clicks no longer has a
+    // seconds-long window where only the first toggle has been sent.
+    expect(patchShared).toHaveBeenCalledTimes(1)
+    expect(patchShared.mock.calls[0][0].rules?.map((r) => r.enabled)).toEqual([true, true])
+  })
+
+  it("asks the browser to confirm leaving while a write is unsent", async () => {
+    const write = deferred<{ kind: "ok" }>()
+    const { result } = renderHook(() => useRules(project([rule("r1", false)]), () => {}, () => write.promise))
+    const leave = () => {
+      const e = new Event("beforeunload", { cancelable: true })
+      window.dispatchEvent(e)
+      return e.defaultPrevented
+    }
+
+    let pending!: Promise<void>
+    act(() => { pending = result.current.updateRule("r1", { enabled: true }) })
+    expect(leave()).toBe(true)
+    await act(async () => { write.resolve({ kind: "ok" }); await pending })
+    expect(leave()).toBe(false)
+  })
+
   it("rolls the toggle back when the server rejects the write", async () => {
     const patchShared = vi.fn(async () => ({ kind: "blocked" as const, reason: "role" as const }))
     const { result } = renderHook(() => useRules(project([rule("r1", false)]), () => {}, patchShared))

@@ -33,6 +33,9 @@ function writeFailed(outcome: unknown): boolean {
 
 const EMPTY_RULES: TranslationRule[] = []
 
+/** Rule-setting writes this close together go to the server as one PATCH. */
+const WRITE_BATCH_MS = 250
+
 export function useRules(
   project: ProjectRecord | null,
   refresh: () => void,
@@ -203,17 +206,20 @@ export function useRules(
 
   // Apply locally, wait for the server write, then refresh — refreshing
   // before the PATCH lands is what read the stale row back.
-  const writeShared = useCallback(async (partial: RuleSettingsOverlay) => {
-    inFlightRef.current++
-    setSettledAt(undefined)
-    setOverlay((prev) => ({ ...prev, ...partial }))
+  //
+  // Writes within WRITE_BATCH_MS share one PATCH. Each save is a serialized
+  // probe GET + PATCH, so a second toggle sent on its own reached the server
+  // ~4 s after the click and a reload in that window lost it (QA, PR #1438).
+  // Every key here carries its whole value, so merging partials by key is safe.
+  const batchRef = useRef<{ partial: RuleSettingsOverlay; calls: number; done: Promise<void> } | null>(null)
+  const sendBatch = useCallback(async (partial: RuleSettingsOverlay, calls: number) => {
     let failed: boolean
     try {
       failed = writeFailed(await patchShared?.(partial))
     } catch {
       failed = true
     } finally {
-      inFlightRef.current--
+      inFlightRef.current -= calls
       if (inFlightRef.current === 0) pendingChecksRef.current = null
     }
     if (failed) {
@@ -224,6 +230,36 @@ export function useRules(
     }
     refresh()
   }, [patchShared, refresh])
+
+  const writeShared = useCallback((partial: RuleSettingsOverlay): Promise<void> => {
+    inFlightRef.current++
+    setSettledAt(undefined)
+    setOverlay((prev) => ({ ...prev, ...partial }))
+    const open = batchRef.current
+    if (open) {
+      Object.assign(open.partial, partial)
+      open.calls++
+      return open.done
+    }
+    const batch = { partial: { ...partial }, calls: 1, done: Promise.resolve() }
+    batch.done = new Promise<void>((resolve) => setTimeout(resolve, WRITE_BATCH_MS)).then(() => {
+      batchRef.current = null
+      return sendBatch(batch.partial, batch.calls)
+    })
+    batchRef.current = batch
+    return batch.done
+  }, [sendBatch])
+
+  // A reload or tab close before the PATCH answers drops the change, and the
+  // sync indicator (outbox-based) still reads "synced". Ask the browser to
+  // confirm leaving while a settings write is unsent.
+  useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => {
+      if (inFlightRef.current > 0) e.preventDefault()
+    }
+    window.addEventListener("beforeunload", warn)
+    return () => window.removeEventListener("beforeunload", warn)
+  }, [])
 
   const addRule = useCallback(async (rule: Omit<TranslationRule, "id" | "createdAt">) => {
     if (!project) return

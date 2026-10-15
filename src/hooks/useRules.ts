@@ -91,6 +91,9 @@ export function useRules(
     setSettledAt(undefined)
     setOverlay({})
   }
+  // Checks map as last written, for clicks that land before a re-render;
+  // null once no write is in flight (the rendered map is current again).
+  const pendingChecksRef = useRef<ProjectRecord["algorithmicChecks"] | null>(null)
   const projectRef = useRef(project)
   useEffect(() => { projectRef.current = project }, [project])
 
@@ -211,6 +214,7 @@ export function useRules(
       failed = true
     } finally {
       inFlightRef.current--
+      if (inFlightRef.current === 0) pendingChecksRef.current = null
     }
     if (failed) {
       if (partial.rules) latestRulesRef.current = projectRef.current?.rules ?? EMPTY_RULES
@@ -307,10 +311,11 @@ export function useRules(
     // Sync to Postgres like `rules`/`rulePenalties`: under AD-3 the read path is the
     // server projection, so an IDB-only write here is invisible to useProject.
     // Top-level settings keys replace wholesale — send the full merged map,
-    // overlay included so a second quick toggle keeps the first.
-    await writeShared({
-      algorithmicChecks: { ...(algorithmicChecks ?? {}), [checkId]: override },
-    })
+    // built from the last-written map so a second click before a re-render
+    // keeps the first (QA on PR #1438 lost one of two quick toggles).
+    const next = { ...(pendingChecksRef.current ?? algorithmicChecks ?? {}), [checkId]: override }
+    pendingChecksRef.current = next
+    await writeShared({ algorithmicChecks: next })
   }, [project, algorithmicChecks, writeShared])
 
   return {

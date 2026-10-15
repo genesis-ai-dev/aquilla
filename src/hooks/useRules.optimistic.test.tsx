@@ -91,6 +91,25 @@ describe("useRules — optimistic toggles", () => {
     expect(last.rules?.map((r) => r.enabled)).toEqual([true, true])
   })
 
+  it("keeps both of two quick built-in check toggles fired before a re-render", async () => {
+    const patchShared = vi.fn(async (_p: ProjectWideSettings) => ({ kind: "ok" as const }))
+    const { result } = renderHook(() => useRules(project([]), () => {}, patchShared))
+
+    await act(async () => {
+      // Same render's callback twice: an automated driver can click two
+      // switches before React re-renders, so the closure map is stale.
+      const { setBuiltinOverride } = result.current
+      await Promise.all([
+        setBuiltinOverride("double-space", { enabled: false }),
+        setBuiltinOverride("repeated-word", { enabled: false }),
+      ])
+    })
+
+    const last = patchShared.mock.calls.at(-1)![0]
+    expect(last.algorithmicChecks?.["double-space"]).toEqual({ enabled: false })
+    expect(last.algorithmicChecks?.["repeated-word"]).toEqual({ enabled: false })
+  })
+
   it("rolls the toggle back when the server rejects the write", async () => {
     const patchShared = vi.fn(async () => ({ kind: "blocked" as const, reason: "role" as const }))
     const { result } = renderHook(() => useRules(project([rule("r1", false)]), () => {}, patchShared))

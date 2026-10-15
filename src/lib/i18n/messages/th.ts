@@ -5798,7 +5798,6 @@ export const th: Catalog = {
   "settings.monday.connectedNotice": "Monday.com เชื่อมต่อแล้ว",
   "settings.monday.dismissNoticeAriaLabel": "ปิดประกาศ",
   "settings.monday.connectFailed": "การเชื่อมต่อกับ Monday.com ล้มเหลว ลองอีกครั้ง",
-  "settings.monday.connectFailedWithReason": "การเชื่อมต่อกับ Monday.com ล้มเหลว ({reason}) ลองอีกครั้ง",
   "settings.monday.connectionCardTitle": "การเชื่อมต่อ",
   "settings.monday.loadingStatus": "กำลังโหลดสถานะการเชื่อมต่อ…",
   "settings.monday.reauthExpiredNotice": "การให้สิทธิ์ Monday.com หมดอายุแล้ว (Monday จำกัดไว้ 6 เดือน) เชื่อมต่ออีกครั้งเพื่อแสดงการซิงค์ — ลิงก์กระดานและการแมปจะถูกเก็บไว้",

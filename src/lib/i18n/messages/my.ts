@@ -5796,7 +5796,6 @@ export const my: Catalog = {
   "settings.monday.connectedNotice": "Monday.com ချိတ်ဆက်ထားသည်။",
   "settings.monday.dismissNoticeAriaLabel": "သတိပေးချက်ကို ဖယ်ထုတ်ပါ",
   "settings.monday.connectFailed": "Monday.com နှင့် ချိတ်ဆက်မှု ပျက်ကွက်ခဲ့သည်။ ထပ်မံစမ်းပါ။",
-  "settings.monday.connectFailedWithReason": "Monday.com နှင့် ချိတ်ဆက်မှု ပျက်ကွက်ခဲ့သည် ({reason})။ ထပ်မံစမ်းပါ။",
   "settings.monday.connectionCardTitle": "ချိတ်ဆက်မှု",
   "settings.monday.loadingStatus": "ချိတ်ဆက်မှု အခြေအနေ ဆွဲယူနေသည်…",
   "settings.monday.reauthExpiredNotice": "Monday.com အခွင့်အာဏာ နုံးပြီးဆုံးသည် (Monday သည် လ 6 အထိ ကန့်သတ်သည်)။ ပေါင်းစပ်မှု ပြန်စတင်ရန် ထပ်မံချိတ်ဆက်ပါ — ဘုတ်စာတင်များ နှင့် မြေပုံများ အသေးစိတ်ထည့်သွင်းထားသည်။",

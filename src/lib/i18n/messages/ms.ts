@@ -5774,7 +5774,6 @@ export const ms: Catalog = {
   "settings.monday.connectedNotice": "Monday.com terhubung.",
   "settings.monday.dismissNoticeAriaLabel": "Tutup pemberitahuan",
   "settings.monday.connectFailed": "Koneksi ke Monday.com gagal. Coba lagi.",
-  "settings.monday.connectFailedWithReason": "Koneksi ke Monday.com gagal ({reason}). Coba lagi.",
   "settings.monday.connectionCardTitle": "Koneksi",
   "settings.monday.loadingStatus": "Memuat status koneksi…",
   "settings.monday.reauthExpiredNotice": "Otorisasi Monday.com telah kadaluarsa (Monday membatasnya hingga 6 bulan). Hubungkan kembali untuk melanjutkan penyinkronan — tautan papan dan pemetaan disimpan.",

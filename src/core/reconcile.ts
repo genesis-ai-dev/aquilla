@@ -365,10 +365,10 @@ export const reconcile = (
         for (let e = s + 2; e <= Math.min(leftC.length, s + 6); e++) {
           const run = leftC.slice(s, e)
           if (run.some((ci) => slots[ci]!.logicalId)) break
-          if (!run.every((ci) => containment(current[ci]!.plain, previous[pi]!.plain) >= 0.7)) continue
+          if (!run.every((ci) => containment(current[ci]!.plain, previous[pi]!.plain) >= 0.85)) continue
           const sim = similarity(previous[pi]!.plain, joinPlain(run, current))
           const bestSingle = Math.max(...run.map((ci) => similarity(previous[pi]!.plain, current[ci]!.plain)))
-          if (sim < 0.7 || sim < bestSingle + 0.1) continue
+          if (sim < 0.75 || sim < bestSingle + 0.1) continue
           if (run.some((ci) => bestFreePrevious(ci, pi) >= sim)) continue
           if (!best || sim > best.sim + 1e-9) best = { run, sim }
         }
@@ -397,10 +397,10 @@ export const reconcile = (
             variants.push([full[0]!, ...interior.filter((_, k) => !(mask & (1 << k))), full.at(-1)!])
           }
           for (const run of variants) {
-            if (!run.every((pi) => containment(previous[pi]!.plain, current[ci]!.plain) >= 0.7)) continue
+            if (!run.every((pi) => containment(previous[pi]!.plain, current[ci]!.plain) >= 0.85)) continue
             const sim = similarity(joinPlain(run, previous), current[ci]!.plain)
             const bestSingle = Math.max(...run.map((pi) => similarity(previous[pi]!.plain, current[ci]!.plain)))
-            if (sim < 0.7 || sim < bestSingle + 0.1) continue
+            if (sim < 0.75 || sim < bestSingle + 0.1) continue
             // Do not swallow a paragraph that has its own, better 1→1 match elsewhere.
             if (run.some((pi) => bestFreeCurrent(pi, ci) >= sim)) continue
             if (!best || sim > best.sim + 1e-9 || (Math.abs(sim - best.sim) <= 1e-9 && run.length < best.run.length)) best = { run, sim }

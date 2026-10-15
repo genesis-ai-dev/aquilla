@@ -382,21 +382,31 @@ const distribute = (su: StoryUnit, tagged: string): { assignments: Map<Slot, str
   if (tgtTokenOrder.join(",") !== srcTokenOrder.join(",")) simplified = true
   const runOfKey = (s: Slot): number | undefined => (su.multiRun ? su.runIds.get(s.runKey) : undefined)
 
+  // Text the translation places where the source has no writable slot (e.g.
+  // before an anchored object that opens the paragraph) is carried to the
+  // nearest stretch that has one, keeping reading order.
+  let carry = ""
   for (let k = 0; k < srcStretches.length; k++) {
     const slots = srcStretches[k]!
     // With reordered tokens we still map stretch k → stretch k: text stays in reading order.
-    const segs = tgtStretches[k] ?? []
+    let segs = tgtStretches[k] ?? []
     for (const s of slots) assignments.set(s, "")
-    if (segs.length === 0) continue
     if (slots.length === 0) {
-      // Translation put text where the source has none (between two adjacent tokens): append to previous stretch.
-      const prev = srcStretches.slice(0, k).reverse().find((x) => x.length > 0) ?? srcStretches.slice(k + 1).find((x) => x.length > 0)
-      if (!prev) continue
-      const host = prev.at(-1)!
-      assignments.set(host, (assignments.get(host) ?? "") + segs.map((x) => x.text).join(""))
+      if (segs.length === 0) continue
+      const text = segs.map((x) => x.text).join("")
+      const prev = srcStretches.slice(0, k).reverse().find((x) => x.length > 0)
+      if (prev) {
+        const host = prev.at(-1)!
+        assignments.set(host, (assignments.get(host) ?? "") + text)
+      } else carry += text
       simplified = true
       continue
     }
+    if (carry) {
+      segs = [{ run: segs[0]?.run, text: carry }, ...segs]
+      carry = ""
+    }
+    if (segs.length === 0) continue
     if (!su.multiRun) {
       assignments.set(slots[0]!, segs.map((x) => x.text).join(""))
       continue

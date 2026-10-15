@@ -1375,6 +1375,11 @@ export class Workspace {
     await expect(this.page.getByRole("heading", { name: /^Edit history/ })).toBeVisible()
   }
 
+  /** The history drawer's Retry control, shown when a history load failed. */
+  historyRetryButton(): Locator {
+    return this.page.getByRole("button", { name: "Retry", exact: true })
+  }
+
   /** A history-drawer revision card whose shown (terminal) value is `text`. */
   historyEntry(text: string): Locator {
     return this.page.locator("ol > li").filter({ hasText: text })

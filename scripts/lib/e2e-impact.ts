@@ -84,6 +84,13 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     sentinels: ["e2e/specs/editor/ghost-text.spec.ts"],
   },
   {
+    // AQU-1248: Edit History's read retries transient failures with backoff
+    // and names a network vs server failure; the throttled-network spec
+    // drives it through the real history route.
+    source: /^src\/(?:lib\/sync\/(?:history-read|read-retry)|hooks\/useCellEditHistory|components\/HistoryDrawer)/,
+    sentinels: ["e2e/specs/editor/history-load-retry.spec.ts"],
+  },
+  {
     source: /^src\/(?:components|lib)\/(?:terminology|termbase)/i,
     sentinels: ["e2e/specs/terminology/wildcard-term-chip.smoke.spec.ts"],
   },

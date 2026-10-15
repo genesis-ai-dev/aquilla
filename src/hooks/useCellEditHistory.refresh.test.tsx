@@ -25,7 +25,9 @@ const fetchCellHistoryMock = vi.fn<
   ) => Promise<CellHistoryEvent[]>
 >()
 
-vi.mock("@/lib/sync/history-read", () => ({
+vi.mock("@/lib/sync/history-read", async (importOriginal) => ({
+  // Keep the real HistoryReadError: the hook classifies failures by it.
+  ...(await importOriginal<typeof import("@/lib/sync/history-read")>()),
   fetchCellHistory: (...args: unknown[]) =>
     fetchCellHistoryMock(...(args as Parameters<typeof fetchCellHistoryMock>)),
 }))

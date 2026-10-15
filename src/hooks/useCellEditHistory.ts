@@ -17,7 +17,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { CellHistoryEntry } from "@/lib/parsers/types"
-import { fetchCellHistory } from "@/lib/sync/history-read"
+import { fetchCellHistory, HistoryReadError, type HistoryReadFailureKind } from "@/lib/sync/history-read"
 import type { CellHistoryEvent } from "@/lib/sync/history-read-types"
 import {
   getOutboxRecordsForCell,
@@ -47,10 +47,20 @@ export interface UseCellEditHistoryOptions {
   currentEventId?: string | null
 }
 
+/** AQU-1248: why the last load failed, after fetchCellHistory's retries.
+ *  `status` is the HTTP status of a server error, 0 for a network failure. */
+export interface CellEditHistoryFailure {
+  kind: HistoryReadFailureKind
+  status: number
+}
+
 export interface UseCellEditHistoryResult {
   history: CellHistoryEntry[]
   isLoading: boolean
   isError: boolean
+  /** Set with `isError` when the history read itself failed; null when the
+   *  failure had no classification (no sync token, an unparseable reply). */
+  failure: CellEditHistoryFailure | null
   revalidate: () => void
 }
 
@@ -155,6 +165,7 @@ export function useCellEditHistory(opts: UseCellEditHistoryOptions): UseCellEdit
   const [history, setHistory] = useState<CellHistoryEntry[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [isError, setIsError] = useState(false)
+  const [failure, setFailure] = useState<CellEditHistoryFailure | null>(null)
 
   const projectRef = useRef(projectId)
   const fileRef = useRef(fileId)
@@ -181,11 +192,13 @@ export function useCellEditHistory(opts: UseCellEditHistoryOptions): UseCellEdit
       setHistory([])
       setIsLoading(false)
       setIsError(false)
+      setFailure(null)
       return
     }
     const gen = ++generationRef.current
     setIsLoading(true)
     setIsError(false)
+    setFailure(null)
     try {
       // IndexedDB is the local durability point. Show those commits even when
       // auth, network, or server projection is temporarily unavailable.
@@ -223,6 +236,7 @@ export function useCellEditHistory(opts: UseCellEditHistoryOptions): UseCellEdit
       if (generationRef.current !== gen) return
       console.warn("[useCellEditHistory] fetch failed:", err)
       setIsError(true)
+      setFailure(err instanceof HistoryReadError ? { kind: err.kind, status: err.status } : null)
       setIsLoading(false)
     }
   }, [])
@@ -264,5 +278,5 @@ export function useCellEditHistory(opts: UseCellEditHistoryOptions): UseCellEdit
     void doFetch()
   }, [doFetch])
 
-  return { history, isLoading, isError, revalidate }
+  return { history, isLoading, isError, failure, revalidate }
 }

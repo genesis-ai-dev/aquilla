@@ -53,7 +53,7 @@ function edits(baseMs: number, syncState?: CellHistoryEntry["syncState"]): CellH
 }
 
 function hookResult(history: CellHistoryEntry[]) {
-  return { history, isLoading: false, isError: false, revalidate: vi.fn() }
+  return { history, isLoading: false, isError: false, failure: null, revalidate: vi.fn() }
 }
 
 beforeEach(() => vi.clearAllMocks())

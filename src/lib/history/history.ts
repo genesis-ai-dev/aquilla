@@ -157,8 +157,8 @@ function scheduleSave(scope: string): void {
     for (const key of dirtyScopes) {
       const s = stacks.get(key)
       if (!s) continue
-      const [projectId, username] = key.split("\u0000")
-      void saveHistory(projectId, username, { undo: s.undo, redo: s.redo, log: s.log })
+      const [projectId, username, lane = ""] = key.split("\u0000")
+      void saveHistory(projectId, username, lane, { undo: s.undo, redo: s.redo, log: s.log })
     }
     dirtyScopes.clear()
   }, 0)
@@ -176,8 +176,8 @@ function loadScope(key: string): Promise<void> {
 }
 
 async function readScope(key: string): Promise<void> {
-  const [projectId, username] = key.split("\u0000")
-  const saved: StoredHistory | null = await loadHistory(projectId, username)
+  const [projectId, username, lane = ""] = key.split("\u0000")
+  const saved: StoredHistory | null = await loadHistory(projectId, username, lane)
   if (!saved) return
   const s = stacksFor(key)
   const known = new Set([...s.undo, ...s.redo].map((r) => r.id))
@@ -592,8 +592,8 @@ export async function flushHistorySaveForTests(): Promise<void> {
   await Promise.all(
     pending.map((key) => {
       const s = stacks.get(key)
-      const [projectId, username] = key.split("\u0000")
-      return s ? saveHistory(projectId, username, { undo: s.undo, redo: s.redo, log: s.log }) : Promise.resolve()
+      const [projectId, username, lane = ""] = key.split("\u0000")
+      return s ? saveHistory(projectId, username, lane, { undo: s.undo, redo: s.redo, log: s.log }) : Promise.resolve()
     }),
   )
 }

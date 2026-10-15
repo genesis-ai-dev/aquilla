@@ -1,6 +1,7 @@
 /**
  * Where the edit history is kept between sessions: this browser's IndexedDB,
- * one entry per (project, user). (AQU-1767 phase 2)
+ * one entry per (project, user, language lane). (AQU-1767 phase 2; per lane,
+ * Sam 2026-10-14 — each language keeps its own history.)
  *
  * Best-effort throughout, like the other local caches (export-cache.ts): a
  * history that cannot be saved or read is an empty history, never a broken
@@ -24,6 +25,8 @@ interface Row extends StoredHistory {
   key: string
   projectId: string
   username: string
+  /** The language lane's tag; `''` is a lane like any other. */
+  lane: string
   savedAt: number
 }
 
@@ -48,17 +51,17 @@ function openDb(): Promise<IDBDatabase> {
   return dbPromise
 }
 
-const keyOf = (projectId: string, username: string) => `${projectId}\u0000${username}`
+const keyOf = (projectId: string, username: string, lane: string) => `${projectId}\u0000${username}\u0000${lane}`
 
-export async function loadHistory(projectId: string, username: string): Promise<StoredHistory | null> {
+export async function loadHistory(projectId: string, username: string, lane: string): Promise<StoredHistory | null> {
   try {
     const db = await openDb()
     const row = await new Promise<Row | undefined>((resolve, reject) => {
-      const req = db.transaction(STORE, "readonly").objectStore(STORE).get(keyOf(projectId, username))
+      const req = db.transaction(STORE, "readonly").objectStore(STORE).get(keyOf(projectId, username, lane))
       req.onsuccess = () => resolve(req.result as Row | undefined)
       req.onerror = () => reject(req.error ?? new Error("IDB get failed"))
     })
-    if (!row || row.projectId !== projectId || row.username !== username) return null
+    if (!row || row.projectId !== projectId || row.username !== username || row.lane !== lane) return null
     return {
       undo: Array.isArray(row.undo) ? row.undo : [],
       redo: Array.isArray(row.redo) ? row.redo : [],
@@ -69,15 +72,16 @@ export async function loadHistory(projectId: string, username: string): Promise<
   }
 }
 
-export async function saveHistory(projectId: string, username: string, value: StoredHistory): Promise<void> {
+export async function saveHistory(projectId: string, username: string, lane: string, value: StoredHistory): Promise<void> {
   try {
     const db = await openDb()
     // Structured clone refuses functions; steps are plain data by design, but
     // a JSON round trip makes sure nothing live slips into storage.
     const row: Row = {
-      key: keyOf(projectId, username),
+      key: keyOf(projectId, username, lane),
       projectId,
       username,
+      lane,
       savedAt: Date.now(),
       ...(JSON.parse(JSON.stringify(value)) as StoredHistory),
     }

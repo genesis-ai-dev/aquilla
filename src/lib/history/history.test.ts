@@ -306,6 +306,27 @@ describe("persistence", () => {
     expect(log).toEqual(["undo saved-b"])
   })
 
+  it("each language's steps come back after a reload in that language only", async () => {
+    // Sam, 2026-10-14: the per-language histories are saved apart too. Saved
+    // under one key, a reload in French read back Spanish's steps, and Cmd+Z
+    // in French undid a Spanish delete.
+    setHistoryScope("p1", "sam", "Spanish")
+    await historyReady()
+    recordStep(step("es-delete"))
+    setHistoryScope("p1", "sam", "French")
+    await historyReady()
+    recordStep(step("fr-trim"))
+    await flushHistorySaveForTests()
+
+    resetHistoryForTests() // a reload: nothing in memory
+    setHistoryScope("p1", "sam", "French")
+    await historyReady()
+    expect(historyView().undoSteps.map((s) => s.labelKey)).toEqual(["fr-trim"])
+    setHistoryScope("p1", "sam", "Spanish")
+    await historyReady()
+    expect(historyView().undoSteps.map((s) => s.labelKey)).toEqual(["es-delete"])
+  })
+
   it("saved steps sit under anything recorded before the load finished", async () => {
     recordStep(step("old"))
     await flushHistorySaveForTests()

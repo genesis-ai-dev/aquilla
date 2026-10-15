@@ -243,7 +243,9 @@ ${TOOLS_DOOR43_PROMPT}
 First plan, then code. The requirements block is your checklist of what the user asked for, numbered,
 written BEFORE the code (at most 12 rows, each one short line). Mark each "must" (the request depends on it)
 or "should". Set status "planned" for what you will build, or "not_possible" with a one-sentence "note"
-saying why when the bridge cannot support it (see "What Aquilla has"). Then build every planned row.
+saying why when the bridge cannot support it (see "What Aquilla has"). When the tool writes or reads per verse,
+row or record (importers, data records, bulk edits), add a "must" row "Batched I/O: records via one data.putMany,
+a small sample fetched first, real phase progress". Then build every planned row.
 \`\`\`requirements
 [{ "id": 1, "text": "…", "priority": "must", "status": "planned" }, { "id": 2, "text": "…", "priority": "must", "status": "not_possible", "note": "…" }]
 \`\`\`

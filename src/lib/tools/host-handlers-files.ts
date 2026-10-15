@@ -16,6 +16,7 @@
  *   export.deliver                  a headless export hands its files back
  */
 
+import { createDataPutCoalescer } from "./data-put-coalescer"
 import { BridgeError, type BridgeHandler } from "./host-bridge"
 import { MAX_FILE_LABEL_CHARS, parseFileExtension, parseFileLabel, type FileExtensionKind } from "../../../shared/tools/file-extension"
 
@@ -309,6 +310,11 @@ function parseDelivered(v: unknown): ToolDeliveredFile[] {
 }
 
 export function createFilesHandlers(data: ToolFilesHostData): Record<string, BridgeHandler> {
+  // AQU-1937: data.put calls fired together (forEach / map / Promise.all) go out as one putMany.
+  const coalescedPut = createDataPutCoalescer({
+    dataPut: (ns, coll, id, doc, anchor) => data.dataPut(ns, coll, id, doc, anchor),
+    dataPutMany: (ns, coll, items) => data.dataPutMany(ns, coll, items),
+  })
   return {
     "files.upsert": async (params) => data.upsertFile(parseUpsert(params)),
     "files.setMeta": async (params) => {
@@ -359,7 +365,7 @@ export function createFilesHandlers(data: ToolFilesHostData): Record<string, Bri
       const id = str(p.id, "id", 300)
       const json = JSON.stringify(p.doc ?? null)
       if (json.length > MAX_DATA_DOC_CHARS) bad(`doc exceeds ${MAX_DATA_DOC_CHARS} characters`)
-      return data.dataPut(n, coll, id, JSON.parse(json), parseAnchor(p.anchor))
+      return coalescedPut(n, coll, id, JSON.parse(json), parseAnchor(p.anchor))
     },
     "data.putMany": async (params) => {
       const p = obj(params)

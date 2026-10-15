@@ -236,6 +236,30 @@ describe("static UI findings", () => {
     expect(staticUiFindings(`<body><div class="skel"></div><script>await aquilla.web.fetch(u + "/archive/v1.zip")</script></body>`, { name: "X" }).join("\n")).not.toMatch(/fetch-small-first/)
   })
 
+  it("flags per-item data.put / cells.byRef in a loop, and files.upsert two loops deep (batched-io)", () => {
+    const wrap = (code: string) => `<body><div class="skel"></div><script>${code}</script></body>`
+    const forLoop = wrap(`for (const v of verses) { await aquilla.data.put("ns", v.ref, v.doc, { anchor: v.anchor }) }`)
+    const forEachLoop = wrap(`verses.forEach((v) => aquilla.data.put("ns", v.ref, v.doc))`)
+    const mapLoop = wrap(`await Promise.all(refs.map(async (r) => { const c = await aquilla.cells.byRef({ refs: [r], tags: ["x"] }); return c }))`)
+    for (const src of [forLoop, forEachLoop]) expect(staticUiFindings(src, { name: "X" }).join("\n")).toMatch(/batched-io: aquilla\.data\.put is called once per item/)
+    expect(staticUiFindings(mapLoop, { name: "X" }).join("\n")).toMatch(/batched-io: aquilla\.cells\.byRef is called once per item/)
+    const perVerseUpsert = wrap(`for (const book of books) {\n  for (const v of verses(book)) {\n    await aquilla.files.upsert({ key: v.ref, name: v.ref, cells: [] })\n  }\n}`)
+    expect(staticUiFindings(perVerseUpsert, { name: "X" }).join("\n")).toMatch(/batched-io: aquilla\.files\.upsert/)
+
+    // The batched forms pass: putMany after collecting, one upsert per book, a put outside any loop.
+    const good = wrap(`const items = verses.map((v) => ({ id: v.ref, doc: v.doc }))
+      await aquilla.data.putMany("ns", items, { coll: "tit" })
+      for (const book of books) { await aquilla.files.upsert({ key: book, name: book, cells: cellsOf(book) }) }
+      for (const x of xs) { total += x }
+      await aquilla.data.put("ns", "settings", { on: true })`)
+    expect(staticUiFindings(good, { name: "X" }).join("\n")).not.toMatch(/batched-io/)
+  })
+
+  it("puts the batched-io rule in the review checks and the design prompt", () => {
+    expect(UI_CHECKS.some((c) => c.startsWith("batched-io:"))).toBe(true)
+    expect(TOOLS_REVIEW_SYSTEM_PROMPT).toContain("batched-io:")
+  })
+
   it("passes an SDK build with a skeleton", () => {
     expect(staticUiFindings(`<body><div class="skel"></div><script>aq.mount(aq.CellList({}))</script></body>`, { name: "Grid" })).toEqual([])
   })

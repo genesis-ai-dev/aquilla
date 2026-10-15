@@ -12,6 +12,7 @@ export const UI_CHECKS = [
   "accessible: every control has a visible label or aria-label; icon-only buttons have aria-label",
   "empty-and-error states: no files, no cells, empty translations and bridge errors each render something sensible",
   "mount-fit: the declared mounts match what the request implies",
+  "batched-io: no aquilla.data.put or aquilla.cells.byRef once per item inside a loop (for / forEach / map / while) — records go through ONE aquilla.data.putMany, refs through ONE cells.byRef with all of them; web.fetch and files.upsert at most once per book or file, never per verse or row; importers report real phase progress (aquilla.import.progress with the phase and n/N); any such loop is rewritten before returning",
   "fetch-small-first: web reads fetch the smallest thing first (a list, then details only for what the user picks), reuse what was already read, never download a full catalog, archive or tree to fill a dropdown, and show progress while loading",
 ] as const
 
@@ -29,6 +30,13 @@ export const TOOLS_DESIGN_PROMPT = `## Design rules (every build is reviewed aga
   buttons, tabs, inputs, badges, empty states. Hand-roll UI (with the host CSS variables) only when no
   component fits. Never restyle the SDK components.
 - Every control has a label or aria-label. Empty and error states render inside the UI, never throw.
+- Performance (every build is reviewed for this; per-record round trips once made a book import take six
+  minutes instead of seconds): never call aquilla.data.put, aquilla.cells.byRef, aquilla.files.upsert or
+  aquilla.web.fetch once per ITEM (verse, row, record, word) inside a loop. Collect first, then write once:
+  aquilla.data.putMany(ns, [{ id, doc, anchor }…]) for records (up to 5000 per call), ONE cells.byRef with every
+  ref, ONE files.upsert per file with all its cells, ONE web.fetch per book/file (or a zip). Importers report the
+  real phase with aquilla.import.progress ("Saving alignment 120/404"), not one message for the whole run.
+  Fetch a small sample first (one book, one page) so the user sees something, then the rest.
 - Web reads (aquilla.web.fetch): fetch the smallest thing first — a list that names the choices, then the
   details only for what the user picked (one resource's manifest, one book), never a whole catalog with every
   entry's contents, a zip archive or a recursive tree just to fill a dropdown. Ask the site for less (filters,

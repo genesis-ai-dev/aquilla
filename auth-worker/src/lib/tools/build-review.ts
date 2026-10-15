@@ -66,6 +66,7 @@ export function staticUiFindings(source: string, manifest: { name?: string; desc
     out.push("loading-skeleton: no loading placeholder in the static HTML")
   }
   for (const finding of largeFetchFindings(source)) out.push(finding)
+  for (const finding of perItemLoopFindings(source)) out.push(finding)
   if (/aquilla\.cells\.(list|page|commit)/.test(source) && !/aq\.(celllist|cellrow|targeteditor)/i.test(lower)) {
     out.push("sdk-components: cells are read/edited with hand-rolled UI instead of aq.CellList / aq.CellRow / aq.TargetEditor")
   }
@@ -88,6 +89,71 @@ export function largeFetchFindings(source: string): string[] {
   return KNOWN_LARGE_FETCHES.filter((k) => k.re.test(source) && !k.unless?.test(source)).map(
     (k) => `fetch-small-first: the choices path may fetch ${k.what} to fill a dropdown; ${k.instead}`,
   )
+}
+
+/** The calls that must not run once per item: each is a bridge round trip
+ *  (and a write or a network read) per verse/row. */
+const PER_ITEM_CALLS: { re: RegExp; call: string; instead: string; depth: number }[] = [
+  { re: /aquilla\.data\.put\s*\(/, call: "aquilla.data.put", instead: "collect the records and write them with ONE aquilla.data.putMany", depth: 1 },
+  { re: /aquilla\.cells\.byRef\s*\(/, call: "aquilla.cells.byRef", instead: "pass every ref to ONE aquilla.cells.byRef", depth: 1 },
+  // One upsert per book/file in a loop is the importer pattern; inside a loop
+  // within that loop it is per item.
+  { re: /aquilla\.files\.upsert\s*\(/, call: "aquilla.files.upsert", instead: "build the file's cells first and upsert each file ONCE", depth: 2 },
+]
+const LOOP_OPEN = /\bfor\s*\(|\bwhile\s*\(|\.forEach\s*\(|\.map\s*\(/g
+
+/** Is the end of `tail` (starting at a loop's opening "(") still inside that
+ *  loop? A forEach/map callback: inside while its parentheses are open. A
+ *  for/while: inside while its body braces are open (or, without braces, until
+ *  the statement's semicolon). */
+function stillInside(tail: string, call: boolean): boolean {
+  let parens = 0
+  let i = 0
+  for (; i < tail.length; i++) {
+    const ch = tail[i]
+    if (ch === "(") parens++
+    else if (ch === ")") {
+      parens--
+      if (parens === 0) break
+    }
+  }
+  if (call) return parens > 0
+  if (i >= tail.length) return false // still in the header
+  const body = tail.slice(i + 1)
+  if (!body.trimStart().startsWith("{")) return !body.includes(";")
+  let braces = 0
+  for (const ch of body) {
+    if (ch === "{") braces++
+    else if (ch === "}") {
+      braces--
+      if (braces === 0) return false
+    }
+  }
+  return braces > 0
+}
+
+/** batched-io: a per-item data.put / cells.byRef inside a for / while /
+ *  forEach / map body (a loop opener before it whose brace is still open),
+ *  or a files.upsert two loops deep. Cheap string checks, fed to the review
+ *  as hints. */
+export function perItemLoopFindings(source: string): string[] {
+  const out: string[] = []
+  for (const { re, call, instead, depth } of PER_ITEM_CALLS) {
+    const global = new RegExp(re.source, "g")
+    for (let m = global.exec(source); m; m = global.exec(source)) {
+      const before = source.slice(Math.max(0, m.index - (depth > 1 ? 1200 : 400)), m.index)
+      let open = 0
+      for (let l = LOOP_OPEN.exec(before); l; l = LOOP_OPEN.exec(before)) {
+        if (stillInside(before.slice(l.index + l[0].length - 1), l[0].startsWith("."))) open++
+      }
+      LOOP_OPEN.lastIndex = 0
+      if (open >= depth) {
+        out.push(`batched-io: ${call} is called once per item inside a loop; ${instead}`)
+        break
+      }
+    }
+  }
+  return out
 }
 
 export function buildReviewMessage(input: {

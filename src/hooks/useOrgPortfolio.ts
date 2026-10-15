@@ -14,6 +14,7 @@ import { portfolioActivityStatus, portfolioAttentionReasons } from "@/lib/projec
 import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { withOptimisticLane } from "@/components/org/project-lanes"
+import { useRereadWhenSettingsMayHaveMoved } from "@/hooks/useRereadWhenSettingsMayHaveMoved"
 
 export type PortfolioProjectRow = PortfolioProject & {
   orgId?: number
@@ -31,8 +32,15 @@ export type AttentionRow = {
 /**
  * Single-org portfolio load + derived rollups for Overview and Projects pages.
  * All-orgs portfolio stays in OrgHome (multi-org fetch).
+ *
+ * `orgSettingsVersion` is the org's settings version from the page's own
+ * useOrgSettings, so a changed org default re-reads the numbers (AQU-1913).
  */
-export function useOrgPortfolio(orgId: number | null, orgName?: string | null) {
+export function useOrgPortfolio(
+  orgId: number | null,
+  orgName?: string | null,
+  options: { orgSettingsVersion?: number | null } = {},
+) {
   const { session, loading: sessionLoading } = useFrontierSession()
   const {
     accessibleProjects,
@@ -100,6 +108,15 @@ export function useOrgPortfolio(orgId: number | null, orgName?: string | null) {
       cancelled = true
     }
   }, [jwt, orgId, orgName, portfolioScopeKey, refreshTick])
+
+  // AQU-1913: a setting someone else changed (headings counted, validations
+  // needed) moves every percentage here; re-read on return to the tab and
+  // when the org's settings version moves, rather than at the next reload.
+  useRereadWhenSettingsMayHaveMoved(bumpRefresh, {
+    enabled: jwt != null && orgId != null,
+    orgId,
+    orgSettingsVersion: options.orgSettingsVersion,
+  })
 
   // Freeze "now" per portfolio resolve so sort keys stay stable while viewing.
   const now = useMemo(() => Date.now(), [resolvedScopeKey, refreshTick])

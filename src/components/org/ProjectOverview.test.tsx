@@ -7,6 +7,7 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import { ROLE } from "@/lib/frontier/roles"
 import { fmtDeadlineDate } from "@/lib/format-date"
 import { PROGRESS_BG } from "@/lib/progress/progress-palette"
+import { resetWindowFocusRevalidateForTests } from "@/lib/sync/window-focus-revalidate"
 
 // Keep the overview suite's project-member reads local.
 vi.mock("@/lib/frontier/members", async (importActual) => ({
@@ -2982,6 +2983,46 @@ describe("plan board on the overview", () => {
     })
     await new Promise((r) => setTimeout(r, 50))
     expect(fetchProjectPlan.mock.calls.length).toBe(planReads)
+  })
+
+  // AQU-1913: a change made by someone else, another tab or an agent sends
+  // this tab no settings-updated event, so the page re-reads on its own.
+  it("reads every count again when the tab comes back (AQU-1913)", async () => {
+    resetWindowFocusRevalidateForTests()
+    useProject.mockReturnValue({ project: projectRecord({ level: 600 }), status: "ready", refresh })
+    getPortfolio.mockResolvedValue([])
+    fetchProjectPlan.mockResolvedValue({
+      projectId: "p1", lane: "", validationCount: 1, revision: 1, units: [planUnit()],
+    })
+    renderOverview()
+    await screen.findByTestId("plan-row-f1-")
+    await waitFor(() => expect(getPortfolio).toHaveBeenCalled())
+    const planReads = fetchProjectPlan.mock.calls.length
+    const rowReads = getPortfolio.mock.calls.length
+
+    act(() => { window.dispatchEvent(new Event("focus")) })
+
+    await waitFor(() => expect(fetchProjectPlan.mock.calls.length).toBeGreaterThan(planReads))
+    await waitFor(() => expect(getPortfolio.mock.calls.length).toBeGreaterThan(rowReads))
+  })
+
+  it("reads every count again when the org's settings version moves (AQU-1913)", async () => {
+    useProject.mockReturnValue({ project: projectRecord({ level: 600 }), status: "ready", refresh })
+    getPortfolio.mockResolvedValue([])
+    fetchProjectPlan.mockResolvedValue({
+      projectId: "p1", lane: "", validationCount: 1, revision: 1, units: [planUnit()],
+    })
+    const { rerender } = renderOverview()
+    await screen.findByTestId("plan-row-f1-")
+    await waitFor(() => expect(getPortfolio).toHaveBeenCalled())
+    const planReads = fetchProjectPlan.mock.calls.length
+
+    // Another owner turned "count headings" off for the org; this tab's org
+    // settings read picked up the new version.
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), version: 2 })
+    rerender(overviewTree())
+
+    await waitFor(() => expect(fetchProjectPlan.mock.calls.length).toBeGreaterThan(planReads))
   })
 })
 

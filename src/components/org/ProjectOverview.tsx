@@ -101,6 +101,7 @@ import {
   type UnitAssignment,
 } from "@/lib/sync/assignments"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
+import { useRereadWhenSettingsMayHaveMoved } from "@/hooks/useRereadWhenSettingsMayHaveMoved"
 import { UserError } from "@/lib/errors/user-error"
 import { resolveProjectPolicy } from "@/lib/sync/project-org-policy"
 import { ROLE } from "@/lib/frontier/roles"
@@ -1012,21 +1013,32 @@ export function ProjectOverview() {
    * a reload (AQU-1493). So it is one signal for all of them.
    */
   const [planDataVersion, setPlanDataVersion] = useState(0)
+  const rereadNumbers = useCallback(() => {
+    refreshPlan()
+    setPlanDataVersion((n) => n + 1)
+    // Assignment counts leave headings out by the same policy.
+    setPlanAssignmentsNonce((n) => n + 1)
+    void loadRow()
+    void loadWorkload()
+  }, [refreshPlan, loadRow, loadWorkload])
   useEffect(() => {
     if (!id || typeof window === "undefined") return
     const onSettingsUpdated = (event: Event) => {
       const detail = (event as CustomEvent<ProjectSettingsUpdatedDetail>).detail
       if (detail?.projectId !== id) return
-      refreshPlan()
-      setPlanDataVersion((n) => n + 1)
-      // Assignment counts leave headings out by the same policy.
-      setPlanAssignmentsNonce((n) => n + 1)
-      void loadRow()
-      void loadWorkload()
+      rereadNumbers()
     }
     window.addEventListener(PROJECT_SETTINGS_UPDATED_EVENT, onSettingsUpdated)
     return () => window.removeEventListener(PROJECT_SETTINGS_UPDATED_EVENT, onSettingsUpdated)
-  }, [id, refreshPlan, loadRow, loadWorkload])
+  }, [id, rereadNumbers])
+  // AQU-1913: that event only carries a change made in THIS tab. One made by
+  // someone else, another tab or an agent reaches the page when the tab comes
+  // back, or when the org's settings version moves (an org default changed).
+  useRereadWhenSettingsMayHaveMoved(rereadNumbers, {
+    enabled: !!id,
+    orgId: portfolioOrgId,
+    orgSettingsVersion: orgSettings.version,
+  })
 
   /**
    * The files whose sections the board actually needs, as ONE string.

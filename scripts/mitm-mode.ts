@@ -14,10 +14,11 @@ import {
   type MitmMode,
   DEFAULT_MITM_STATE,
   writeMitmStateFile,
+  resolveMitmStateFile,
 } from "./lib/mitm-state"
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
-const STATE_FILE = process.env.AQUILLA_MITM_STATE ?? path.join(REPO_ROOT, ".mitm-state.json")
+const STATE_FILE = resolveMitmStateFile(REPO_ROOT)
 
 const USAGE = `Usage: pnpm mitm:mode <mode> [options]
 

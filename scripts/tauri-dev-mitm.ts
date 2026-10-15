@@ -48,6 +48,7 @@ import {
   wantsListenerDown,
   parseMitmState,
   writeMitmStateFile,
+  resolveMitmStateFile,
   type MitmMode,
   type MitmState,
 } from "./lib/mitm-state"
@@ -55,7 +56,7 @@ import { killChildTree } from "./lib/spawn-worker"
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const ADDON = path.join(REPO_ROOT, "scripts", "mitm", "fault.py")
-const STATE_FILE = path.join(REPO_ROOT, ".mitm-state.json")
+const STATE_FILE = resolveMitmStateFile(REPO_ROOT)
 const MITM_TAURI_CONFIG = "src-tauri/tauri.mitm.conf.json"
 /** How often the supervisor re-reads the state file. */
 const POLL_MS = 250

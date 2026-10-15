@@ -120,8 +120,10 @@ startup.
 
 The shipped CSP allows only `https:`/`wss:` for backend calls, which blocks a
 plain-HTTP loopback proxy. `src-tauri/tauri.mitm.conf.json` is a dev-only
-overlay adding `http://127.0.0.1:* ws://127.0.0.1:*` to `connect-src`, passed
-via `tauri dev --config`. `tauri:build` never sees it, so the signed release CSP
+overlay adding `http://127.0.0.1:* ws://127.0.0.1:*` to `connect-src`, plus
+`http://127.0.0.1:*` to `media-src` (streamed cell audio) and `img-src`
+(attachment previews) — both load straight from the rewritten sync host by URL
+— passed via `tauri dev --config`. `tauri:build` never sees it, so the signed release CSP
 is unaffected — and `scripts/lib/tauri-mitm-config.test.ts` pins the overlay as
 a pure superset of the shipped CSP so the two cannot drift.
 

@@ -11,6 +11,7 @@ import {
   wantsListenerDown,
   parseMitmState,
   writeMitmStateFile,
+  resolveMitmStateFile,
   type MitmState,
 } from "./mitm-state"
 
@@ -106,5 +107,28 @@ describe("writeMitmStateFile", () => {
     writeMitmStateFile(file, { ...DEFAULT_MITM_STATE, mode: "error" })
     expect(parseMitmState(readFileSync(file, "utf8"), DEFAULT_MITM_STATE).mode).toBe("error")
     expect(readdirSync(dir)).toEqual(["state.json"])
+  })
+})
+
+describe("resolveMitmStateFile", () => {
+  const root = path.resolve("/repo")
+
+  it("defaults to .mitm-state.json at the repo root", () => {
+    expect(resolveMitmStateFile(root, {})).toBe(path.join(root, ".mitm-state.json"))
+  })
+
+  it("honours AQUILLA_MITM_STATE, resolving a relative path against the repo root", () => {
+    expect(resolveMitmStateFile(root, { AQUILLA_MITM_STATE: "tmp/state.json" })).toBe(
+      path.join(root, "tmp", "state.json"),
+    )
+    expect(resolveMitmStateFile(root, { AQUILLA_MITM_STATE: "/abs/state.json" })).toBe(
+      path.resolve("/abs/state.json"),
+    )
+  })
+
+  it("treats an empty AQUILLA_MITM_STATE as unset", () => {
+    expect(resolveMitmStateFile(root, { AQUILLA_MITM_STATE: "" })).toBe(
+      path.join(root, ".mitm-state.json"),
+    )
   })
 })

@@ -70,14 +70,25 @@ describe("tauri.mitm.conf.json CSP overlay", () => {
     }
   })
 
-  it("widens connect-src and nothing else", () => {
-    for (const [directive, baseValue] of Object.entries(BASE)) {
-      if (directive === "connect-src") continue
-      expect(MITM[directive], `${directive} must match tauri.conf.json exactly`).toBe(baseValue)
+  it("widens only the directives the rewritten backend hosts reach", () => {
+    // connect-src: fetch + the sync WebSocket. media-src: streamed cell audio
+    // (`new Audio(<sync>/audio/...?t=)`). img-src: attachment previews
+    // (`<img src=<sync>/attachments/...?t=>`). Every other directive must
+    // match the shipped CSP exactly.
+    const widened: Record<string, string[]> = {
+      "connect-src": ALLOWED_ADDITIONS,
+      "media-src": ["http://127.0.0.1:*"],
+      "img-src": ["http://127.0.0.1:*"],
     }
-    const extra = MITM["connect-src"]!
-      .split(/\s+/)
-      .filter((s) => s && !BASE["connect-src"]!.split(/\s+/).includes(s))
-    expect(extra.sort()).toEqual([...ALLOWED_ADDITIONS].sort())
+    for (const [directive, baseValue] of Object.entries(BASE)) {
+      const additions = widened[directive]
+      if (!additions) {
+        expect(MITM[directive], `${directive} must match tauri.conf.json exactly`).toBe(baseValue)
+        continue
+      }
+      const baseSources = baseValue.split(/\s+/)
+      const extra = MITM[directive]!.split(/\s+/).filter((s) => s && !baseSources.includes(s))
+      expect(extra.sort(), `${directive} additions`).toEqual([...additions].sort())
+    }
   })
 })

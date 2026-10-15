@@ -10,6 +10,17 @@
 // See docs/TAURI-NETWORK-FAULTS.md for the evidence behind that split.
 
 import { renameSync, writeFileSync } from "node:fs"
+import path from "node:path"
+
+/**
+ * The state file path. Both the supervisor and `pnpm mitm:mode` resolve it
+ * here so an exported `AQUILLA_MITM_STATE` moves them together — otherwise
+ * mode flips would land in a file nothing reads.
+ */
+export function resolveMitmStateFile(repoRoot: string, env: NodeJS.ProcessEnv = process.env): string {
+  const override = env.AQUILLA_MITM_STATE
+  return override ? path.resolve(repoRoot, override) : path.join(repoRoot, ".mitm-state.json")
+}
 
 /** Faults applied by taking the listener down — these drop live sockets. */
 export const LISTENER_MODES = ["offline", "flap"] as const

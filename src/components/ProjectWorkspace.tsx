@@ -33,7 +33,7 @@ import { ROLE } from "@/lib/frontier/roles"
 import { languagesEqual } from "@/lib/language-normalize"
 import { importLanguageDecision } from "@/lib/import-language"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
-import { laneCodesByTag, laneLabelsByTag, laneRowLanguage, type LaneLanguageRow } from "@/lib/lanes/lane-language"
+import { laneCodesByTag, laneLabelsByTag, laneRowLanguage, liveTargetLaneLanguages, type LaneLanguageRow } from "@/lib/lanes/lane-language"
 import { switcherLaneTags } from "@/lib/lanes/switcher-lanes"
 import {
   acknowledgeLaneArchive,
@@ -2363,6 +2363,8 @@ export function ProjectWorkspace() {
   // the same label apart in the switcher, the TARGET pill and the import
   // destination picker.
   const laneCodes = useMemo(() => laneCodesByTag(laneRows), [laneRows])
+  // AQU-1978: the live lanes' languages, for the voice roster's language list.
+  const liveLaneLanguages = useMemo(() => liveTargetLaneLanguages(laneRows), [laneRows])
   // AQU-602: the target language of the ACTIVE lane, so switching lanes
   // switches what the editor reads/writes/translates into (source stays
   // shared). The completion path was already lane-aware; this routes the
@@ -15502,8 +15504,9 @@ export function ProjectWorkspace() {
           fileId={activeFileId}
           session={frontierSession ?? null}
           targetLanguage={activeLaneTargetLanguage}
-          targetLanes={project.targetLanes}
-          archivedLanes={project.archivedLanes}
+          // AQU-1978: the live lanes' languages, from the lane rows — not the
+          // retired `targetLanes` / `archivedLanes` keys (see VoiceSidebar).
+          targetLanes={liveLaneLanguages}
           cells={audioMergedCells}
           roleLevel={project.syncRole?.level ?? null}
         />

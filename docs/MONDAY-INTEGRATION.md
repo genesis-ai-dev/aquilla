@@ -148,7 +148,7 @@ contract beyond "maintainer can, member can view":
   once if the last one was over 2 minutes ago, otherwise the link is marked
   dirty and the 5-minute cron flushes it.
 - Settings that change the pushed numbers mark links dirty too (AQU-1771,
-  `db/shared/monday-dirty.ts`): a project's `countStructuralCells`,
+  `db/shared/progress-sync-dirty.ts`): a project's `countStructuralCells`,
   `validationCount` or `validationCountAudio`; the org's headings rule or its
   approvals defaults (every link in the org); and clearing project overrides. The settings routes then
   push those dirty links straight after the response (`pushDirtyLinksNow`,

@@ -75,7 +75,8 @@ import {
   AnalyzeUpstreamError,
   NoBoardsError,
 } from "../lib/monday/analyze"
-import { pushBoardLink, schedulePush } from "../lib/monday/push"
+import { pushBoardLink } from "../lib/monday/push"
+import { schedulePush } from "../lib/integrations/push"
 import {
   addMissingColumns,
   ensureProjectsGroup,

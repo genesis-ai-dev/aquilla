@@ -17,13 +17,14 @@
 // them changes nothing and would starve the flush cap. Item resolution for a
 // first push is batched into one Monday query for all entities rather than one
 // per file.
+//
+// When a link pushes (edit nudge, cron flush, settings change) is decided for
+// every provider at once in lib/integrations/push.ts (AQU-804).
 
 import type { Env } from "../../types"
-import { makePostgres, type AquillaDb } from "../../../../db/shim/postgres"
 import {
   parseJsonColumn,
   sanitizeMapping,
-  PROVIDER,
   type IntegrationLinkRow,
   type IntegrationConnectionRow,
   type MondayMapping,
@@ -40,21 +41,9 @@ import {
   type AliasedMutation,
 } from "./client"
 import { computeProjectMetrics, type MondayEntityMetrics } from "./metrics"
+import { recordPushOutcome, type PushResult } from "../integrations/push-state"
 
-export interface PushResult {
-  ok: boolean
-  pushed: boolean
-  /**
-   * AQU-1828: whether the project has an enabled Monday link at all. The
-   * sync-worker DO caches `false` and stops nudging us on every edit, so an
-   * unlinked project costs one request instead of one per 60s forever.
-   */
-  linked?: boolean
-  itemsUpserted?: number
-  error?: string
-  /** Set when the failure was transient and a retry is already scheduled. */
-  retryScheduled?: boolean
-}
+export type { PushResult } from "../integrations/push-state"
 
 interface PushEntity {
   kind: "project" | "file"
@@ -165,23 +154,6 @@ async function loadConnectionToken(
   return getConnectionAccessToken(env, conn)
 }
 
-/** First retry delay; each further consecutive failure doubles it (AQU-1828). */
-export const RETRY_BASE_SECONDS = 60
-/** Backoff ceiling — a persistently failing board is retried hourly, not faster. */
-export const RETRY_MAX_SECONDS = 3600
-/**
- * Consecutive transient failures before we give up and clear the dirty marker.
- * Without a cap one broken board would occupy a slot in every cron flush
- * (`flushDirtyLinks` cap = 20) forever. 8 attempts ≈ 2h of retries.
- */
-export const MAX_PUSH_ATTEMPTS = 8
-
-/** Seconds to wait before the Nth consecutive retry (1-based). */
-export function retryDelaySeconds(attempt: number): number {
-  const exponent = Math.max(0, attempt - 1)
-  return Math.min(RETRY_BASE_SECONDS * 2 ** exponent, RETRY_MAX_SECONDS)
-}
-
 /**
  * Is this failure worth retrying? Rate limits, Monday server faults and
  * network/unknown throws are; a rejected query, an unknown column or a dead
@@ -197,45 +169,6 @@ export function isTransientPushError(err: unknown): boolean {
   }
   // fetch failures, aborts and anything unclassified: one more go is cheap.
   return true
-}
-
-/**
- * Record the outcome. A success or a permanent failure clears `dirty_at` and
- * resets the retry counter; a transient failure KEEPS the link dirty and
- * schedules the next attempt, which is what makes the cron flush retry it
- * (AQU-1828 — this used to clear `dirty_at` unconditionally, so every failed
- * push was silently dropped).
- */
-async function recordPushOutcome(
-  env: Env,
-  link: Pick<IntegrationLinkRow, "id" | "push_attempts">,
-  status: "ok" | "error",
-  error: string | null,
-  transient = false,
-): Promise<{ retryScheduled: boolean }> {
-  const attempts = (link.push_attempts ?? 0) + 1
-  const retry = transient && attempts < MAX_PUSH_ATTEMPTS
-  if (!retry) {
-    await env.AQUILLA_PG.prepare(
-      `UPDATE integration_links
-          SET last_pushed_at = now(), last_push_status = ?, last_push_error = ?,
-              dirty_at = NULL, push_attempts = 0, next_retry_at = NULL, updated_at = now()
-        WHERE id = ?`,
-    )
-      .bind(status, error, link.id)
-      .run()
-    return { retryScheduled: false }
-  }
-  await env.AQUILLA_PG.prepare(
-    `UPDATE integration_links
-        SET last_pushed_at = now(), last_push_status = ?, last_push_error = ?,
-            dirty_at = COALESCE(dirty_at, now()), push_attempts = ?,
-            next_retry_at = now() + make_interval(secs => ?::int), updated_at = now()
-      WHERE id = ?`,
-  )
-    .bind(status, error, attempts, retryDelaySeconds(attempts), link.id)
-    .run()
-  return { retryScheduled: true }
 }
 
 /**
@@ -488,156 +421,5 @@ async function saveItemLinks(
     )
       .bind(...bindings)
       .run()
-  }
-}
-
-/** How recent a push must be for /internal/push to debounce instead (seconds). */
-export const PUSH_DEBOUNCE_SECONDS = 120
-
-/**
- * Debounced push for one project (fired by sync-worker on progress change):
- * push now if the last push is older than the debounce window, else mark
- * dirty for the cron to flush.
- */
-export async function schedulePush(env: Env, projectId: string): Promise<PushResult> {
-  const link = await env.AQUILLA_PG.prepare(
-    "SELECT * FROM integration_links WHERE project_id = ? AND provider = ? AND enabled = TRUE",
-  )
-    .bind(projectId, PROVIDER)
-    .first<IntegrationLinkRow>()
-  // `linked: false` is the signal the caller caches to stop nudging us at all
-  // for this project (AQU-1828).
-  if (!link) return { ok: true, pushed: false, linked: false }
-
-  // In backoff after a transient failure: stay dirty and let the cron flush
-  // own the retry, or an edit-driven nudge would defeat the backoff.
-  if (link.next_retry_at && Date.parse(link.next_retry_at) > Date.now()) {
-    await markDirty(env, link.id)
-    return { ok: true, pushed: false, linked: true, retryScheduled: true }
-  }
-
-  if (link.last_pushed_at) {
-    const ageMs = Date.now() - new Date(link.last_pushed_at).getTime()
-    if (ageMs < PUSH_DEBOUNCE_SECONDS * 1000) {
-      await markDirty(env, link.id)
-      return { ok: true, pushed: false, linked: true }
-    }
-  }
-  return pushBoardLink(env, link)
-}
-
-async function markDirty(env: Env, linkId: string): Promise<void> {
-  await env.AQUILLA_PG.prepare(
-    "UPDATE integration_links SET dirty_at = COALESCE(dirty_at, now()) WHERE id = ?",
-  )
-    .bind(linkId)
-    .run()
-}
-
-/**
- * Cron flush: push dirty enabled links, oldest first, capped per run. Links
- * waiting out a retry backoff are skipped so one failing board cannot occupy
- * the whole cap every minute (AQU-1828).
- */
-export async function flushDirtyLinks(env: Env, cap = 20): Promise<number> {
-  const result = await env.AQUILLA_PG.prepare(
-    `SELECT * FROM integration_links
-      WHERE dirty_at IS NOT NULL AND enabled = TRUE AND provider = ?
-        AND (next_retry_at IS NULL OR next_retry_at <= now())
-      ORDER BY dirty_at ASC
-      LIMIT ?`,
-  )
-    .bind(PROVIDER, cap)
-    .all<IntegrationLinkRow>()
-  let flushed = 0
-  for (const link of result.results ?? []) {
-    try {
-      await pushBoardLink(env, link)
-      flushed++
-    } catch (err) {
-      console.error(`[monday] cron push failed for link ${link.id}:`, err)
-    }
-  }
-  return flushed
-}
-
-/** Which links a settings change touched: named projects, or a whole org. */
-export type SettingsPushScope = { projectIds: readonly string[] } | { orgId: number }
-
-/**
- * AQU-1771: push now the links a settings change just marked dirty, instead of
- * leaving them for the 5-minute cron. Only DIRTY links are pushed, so a save
- * that changed nothing the board shows finds nothing to do. Links waiting out
- * an AQU-1828 retry backoff are skipped, and an org-wide change pushes at most
- * `cap` links (the cron's per-run cap); the rest stay dirty for the cron.
- * Bypasses the edit debounce on purpose: someone just changed what the board
- * should say, so the board should say it.
- */
-export async function pushDirtyLinksNow(
-  env: Env,
-  scope: SettingsPushScope,
-  cap = 20,
-): Promise<number> {
-  const byOrg = "orgId" in scope
-  if (!byOrg && scope.projectIds.length === 0) return 0
-  const where = byOrg
-    ? "il.project_id IN (SELECT p.id FROM projects p WHERE p.org_id = ? AND p.archived_at IS NULL)"
-    : `il.project_id IN (${scope.projectIds.map(() => "?").join(", ")})`
-  const result = await env.AQUILLA_PG.prepare(
-    `SELECT il.* FROM integration_links il
-      WHERE il.dirty_at IS NOT NULL AND il.enabled = TRUE AND il.provider = ?
-        AND (il.next_retry_at IS NULL OR il.next_retry_at <= now())
-        AND ${where}
-      ORDER BY il.dirty_at ASC
-      LIMIT ?`,
-  )
-    .bind(PROVIDER, ...(byOrg ? [scope.orgId] : scope.projectIds), cap)
-    .all<IntegrationLinkRow>()
-  let pushed = 0
-  for (const link of result.results ?? []) {
-    try {
-      await pushBoardLink(env, link)
-      pushed++
-    } catch (err) {
-      console.error(`[monday] settings push failed for link ${link.id}:`, err)
-    }
-  }
-  return pushed
-}
-
-/**
- * Run `pushDirtyLinksNow` after the response, so a settings save never waits
- * on Monday. Without an ExecutionContext (Hono's bare test harness) it does
- * nothing and the cron flush pushes the dirty links as before.
- *
- * The push must not use the request-scoped `AQUILLA_PG`: index.ts closes that
- * shim the moment the Response returns (the AQU-1763 trap), so it opens its own
- * connection from PG_CONNECTION_STRING and releases it when the push settles.
- * The vitest harness injects AQUILLA_PG directly and sets no connection string,
- * so it keeps using the injected handle.
- */
-export function pushDirtyLinksAfterResponse(
-  c: { env: Env; executionCtx: { waitUntil(promise: Promise<unknown>): void } },
-  scope: SettingsPushScope,
-): void {
-  let ctx: { waitUntil(promise: Promise<unknown>): void }
-  try {
-    ctx = c.executionCtx
-  } catch {
-    return
-  }
-  ctx.waitUntil(pushOnOwnConnection(c.env, scope))
-}
-
-async function pushOnOwnConnection(env: Env, scope: SettingsPushScope): Promise<void> {
-  const own = env.PG_CONNECTION_STRING ? makePostgres(env.PG_CONNECTION_STRING) : null
-  try {
-    await pushDirtyLinksNow(own ? { ...env, AQUILLA_PG: own as unknown as AquillaDb } : env, scope)
-  } catch (err) {
-    console.error("[monday] settings push failed:", err)
-  } finally {
-    await own?.close().catch((err: unknown) => {
-      console.error("[monday] releasing the settings-push connection failed:", err)
-    })
   }
 }

@@ -1,7 +1,7 @@
 import { ProjectMondayCard } from "./ProjectMondayCard"
 import { useState, useEffect, useCallback, useMemo, useRef, useId } from "react"
 import { useParams, useNavigate, useLocation, Link } from "react-router-dom"
-import { MoreHorizontal, Download, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil, CloudDownload, CloudOff, HardDriveDownload, ChevronDown, ChevronRight, Info } from "lucide-react"
+import { MoreHorizontal, Download, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil, CloudDownload, CloudOff, HardDriveDownload, Headphones, ChevronDown, ChevronRight, Info } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { DateTooltip } from "@/components/ui/date-tooltip"
@@ -43,6 +43,7 @@ import {
   useDownloadProgress,
   useOfflineProjectStatus,
 } from "@/lib/offline/download"
+import { cacheProjectMediaOffline, type CacheProjectMediaResult } from "@/lib/offline/media-cache"
 import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioDenominator, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { OverviewLaneTable } from "./OverviewLaneTable"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
@@ -1581,6 +1582,26 @@ export function ProjectOverview() {
     }
   }
 
+  // R2 clips this project points at, copied into the on-device audio cache so
+  // the players work with the network gone (the offline copy is text only).
+  const [mediaSave, setMediaSave] = useState<
+    { kind: "running"; done: number; total: number } | { kind: "done"; result: CacheProjectMediaResult } | null
+  >(null)
+  async function handleSaveMediaOffline() {
+    if (!session || !id) return
+    setError(null)
+    setMediaSave({ kind: "running", done: 0, total: 0 })
+    try {
+      const result = await cacheProjectMediaOffline(id, session, {
+        onProgress: (done, total) => setMediaSave({ kind: "running", done, total }),
+      })
+      setMediaSave({ kind: "done", result })
+    } catch (e) {
+      setMediaSave(null)
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
   function handleRemoveOfflineCopy() {
     if (!offlineStore || !id) return
     setError(null)
@@ -1701,6 +1722,18 @@ export function ProjectOverview() {
                           {t("org.projectOverview.offlineReadyBadge")}
                         </Badge>
                       )}
+                      {isTauriRuntime() && mediaSave && (
+                        <Badge variant="outline" className="shrink-0" data-testid="offline-media-badge">
+                          {mediaSave.kind === "running" ? <Spinner className="size-3" /> : <Headphones className="size-3" aria-hidden />}
+                          {mediaSave.kind === "running"
+                            ? t("org.projectOverview.offlineMediaSaving", { done: mediaSave.done, total: mediaSave.total })
+                            : mediaSave.result.stopped === "budget"
+                              ? t("org.projectOverview.offlineMediaBudget", { count: mediaSave.result.cached + mediaSave.result.alreadyCached, total: mediaSave.result.total })
+                              : mediaSave.result.stopped === "cache-unavailable"
+                                ? t("org.projectOverview.offlineMediaUnavailable")
+                                : t("org.projectOverview.offlineMediaSaved", { count: mediaSave.result.cached + mediaSave.result.alreadyCached, failed: mediaSave.result.failed })}
+                        </Badge>
+                      )}
                       {isTauriRuntime() && offlineStatus?.status === "downloading" && (
                         <Badge variant="outline" className="shrink-0" data-testid="offline-downloading-badge">
                           <Spinner className="size-3" />
@@ -1810,6 +1843,18 @@ export function ProjectOverview() {
                               {offlineStatus?.status === "downloading"
                                 ? t("org.projectOverview.offlineDownloading")
                                 : t("org.projectOverview.makeAvailableOffline")}
+                            </DropdownMenuItem>
+                          )}
+                          {isTauriRuntime() && offlineStatus?.status === "ready" && (
+                            <DropdownMenuItem
+                              onClick={() => {
+                                void handleSaveMediaOffline()
+                              }}
+                              disabled={!jwt || mediaSave?.kind === "running"}
+                              data-testid="save-media-offline"
+                            >
+                              <Headphones className="size-4" />
+                              {t("org.projectOverview.saveMediaOffline")}
                             </DropdownMenuItem>
                           )}
                           {isTauriRuntime() && offlineStatus?.status === "ready" && (

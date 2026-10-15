@@ -35,6 +35,8 @@ const MAX_BATCH = 100
  * event head-of-line block the entire queue.
  *
  *   token != null            → mint succeeded
+ *   token == null, status=403, elevationRequired → admin step-up pending: hold
+ *                               the project's events, advance past them
  *   token == null, status=403 → permanent: quarantine the batch and advance
  *   token == null, status=401 → stale JWT: keep retryable, self-heals on re-auth
  *   token == null, status=other/null → transient: keep retryable, back off
@@ -42,6 +44,9 @@ const MAX_BATCH = 100
 export interface TokenMintResult {
   token: string | null
   status: number | null
+  /** OPS-44: the 403 only asks a platform admin to step up (see
+   *  SyncTokenError.elevationRequired). */
+  elevationRequired?: boolean
 }
 
 interface PostBody {
@@ -193,6 +198,38 @@ function forbiddenEntriesFor(
     fileId: record.event.fileId ?? null,
     cellId: record.event.cellId ?? null,
   }))
+}
+
+/**
+ * OPS-44: (owner, project) pairs whose sync-token mint answered "elevation
+ * required". A platform admin who edits a project they reach only through
+ * platform power gets that 403 until they enter the emailed code. It is not a
+ * verdict on access, so quarantining the edits (the generic mint-403 path) threw
+ * away writes a step-up would have saved. Instead the flusher skips these
+ * projects' rows, which stay `pending` in IndexedDB, and carries on with
+ * everything else. Held in memory only: a reload starts clean, and the first
+ * flush mints once more, re-raising the prompt if the session is still not
+ * elevated.
+ */
+const elevationHolds = new Set<string>()
+
+export const ELEVATION_HOLD_REASON = "waiting for admin verification"
+
+function elevationHoldKey(record: OutboxRecord): string {
+  return `${record.ownerKey ?? ""}\u0000${record.event.projectId}`
+}
+
+function isElevationHeld(record: OutboxRecord): boolean {
+  return elevationHolds.has(elevationHoldKey(record))
+}
+
+/**
+ * Let held projects mint again. useOutboxFlusher calls this on every explicit
+ * retry (Retry now, reconnect, re-auth) and when the admin's step-up verifies.
+ * A project still refused is simply held again after one mint.
+ */
+export function releaseElevationHolds(): void {
+  elevationHolds.clear()
 }
 
 function groupOldestFileFirst(records: OutboxRecord[]): OutboxRecord[] {
@@ -399,7 +436,7 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
   }
   const shouldSurface = (): boolean => deps.ownerScope?.shouldSurface?.() ?? true
   const fetchFn = deps.fetchImpl ?? fetch
-  const records = await peekPendingOutboxBatch(MAX_BATCH * 2, outboxScope)
+  const records = await peekPendingOutboxBatch(MAX_BATCH * 2, outboxScope, isElevationHeld)
   if (records.length === 0 || !(await isCredentialCurrent())) {
     return { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
   }
@@ -436,6 +473,20 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
     // un-mintable file can't head-of-line block the rest of the queue (the
     // original wedge: any null token was treated as a transient auth blip,
     // retried forever, and the queue never advanced past the oldest event).
+    if (mint.status === 403 && mint.elevationRequired) {
+      // OPS-44: the minter has already raised the step-up prompt. Keep the
+      // events pending with no budget burn and no onForbidden (which rolls back
+      // optimistic state), hold the project so later peeks skip it, and flush
+      // the next batch now so other projects do not wait a tick behind it.
+      // Each pass holds one more project, so this recursion ends.
+      elevationHolds.add(elevationHoldKey(batch[0]))
+      await stampOutboxError(
+        batch.map((r) => r.id),
+        { status: 403, reason: ELEVATION_HOLD_REASON },
+        outboxScope,
+      )
+      return flushOutboxBatchUnserialized(deps)
+    }
     if (mint.status === 403) {
       // No access to THIS event's project — e.g. it was queued under a
       // different account/role. Re-auth won't fix it. Quarantine the batch and

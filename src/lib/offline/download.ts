@@ -29,7 +29,7 @@ import { fetchSyncToken as fetchSyncTokenDefault } from "@/lib/sync/sync-token"
 // projectId claim, not fileId, so one token scoped to this constant, unused
 // fileId authorizes every file's read for the whole download — no real file
 // needs to exist yet, which matters for a project with zero files.
-const OFFLINE_DOWNLOAD_TOKEN_FILE_ID = "__offline_download__"
+export const OFFLINE_DOWNLOAD_TOKEN_FILE_ID = "__offline_download__"
 
 export interface DownloadProgress {
   projectId: string

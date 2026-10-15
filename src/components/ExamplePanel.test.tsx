@@ -76,10 +76,66 @@ describe("ExamplePanel", () => {
     expect(popup!).toContainElement(screen.getByText(/God said let there be light/))
 
     const classes = popup!.className
-    expect(classes).toContain("max-h-(--available-height)")
+    // AQU-1502: capped at a readable panel height AND never beyond the room
+    // the positioner has at a viewport edge — the Combobox `min()` pattern.
+    expect(classes).toContain("max-h-[min(24rem,var(--available-height))]")
     expect(classes).toContain("overflow-y-auto")
     // wheel/trackpad momentum must not chain into the editor grid behind it
     expect(classes).toContain("overscroll-contain")
+  })
+
+  // WHY (AQU-1502): with the list capped and scrolling, the trigger's count is
+  // behind the popup, so nothing tells a reader how many pairs there are or
+  // that more sit below the fold. The count has to live inside the scroller and
+  // stay pinned to its top edge.
+  describe("the count inside the popup (AQU-1502)", () => {
+    const longList: ScoredPair[] = Array.from({ length: 12 }, (_, i) => ({
+      cellId: `cell-${i}`,
+      fileId: "file-1",
+      source: `Source line ${i}`,
+      target: `Target line ${i}`,
+      score: 0.5,
+      coverageWeight: 1,
+      matchedTokens: [],
+    }))
+
+    it("pins the total count to the top of the scroller", async () => {
+      render(<ExamplePanel examples={longList} />)
+
+      fireEvent.click(screen.getByRole("button", { name: /12 examples/i }))
+      const header = await screen.findByTestId("example-count-header")
+
+      expect(header).toHaveTextContent("12 examples")
+      expect(header.className).toContain("sticky")
+      // it must scroll WITH the examples, not sit outside them in a wrapper
+      // that the AQU-1264 cap does not apply to
+      const popup = document.querySelector<HTMLElement>('[data-slot="popover-content"]')
+      expect(popup!).toContainElement(header)
+    })
+
+    it("counts the retrieved pairs, not the rows a ranking pass kept", async () => {
+      render(<ExamplePanel examples={longList} currentSource="Source line 3" />)
+
+      fireEvent.click(screen.getByRole("button", { name: /12 examples/i }))
+
+      expect(await screen.findByTestId("example-count-header")).toHaveTextContent("12 examples")
+    })
+  })
+
+  // WHY (AQU-1502): the panel was reported as a hover surface, and a hover
+  // surface cannot be scrolled — moving the pointer off the trigger closes it
+  // before the pointer reaches the list. Click has to pin it open.
+  it("stays open once clicked, with the pointer off the trigger", async () => {
+    render(<ExamplePanel examples={examples} />)
+
+    const trigger = screen.getByRole("button", { name: /2 examples/i })
+    fireEvent.click(trigger)
+    await screen.findByText(/In the beginning God created/)
+
+    fireEvent.pointerLeave(trigger)
+    fireEvent.mouseLeave(trigger)
+
+    expect(screen.getByText(/In the beginning God created/)).toBeInTheDocument()
   })
 
   it("renders nothing when there are no examples", () => {

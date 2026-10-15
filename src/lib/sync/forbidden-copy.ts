@@ -61,6 +61,16 @@ export function forbiddenReasonCopy(reason: string): string {
   if (r.includes("role too low for target.")) {
     return "your role wasn't allowed to edit translations on this project"
   }
+  // AQU-1957: a refused comment used to reach the banner as the generic
+  // "this change", which told a commenter nothing about the comment sitting in
+  // their thread. The comment kinds are named so the sentence matches what the
+  // person was doing.
+  if (r.includes("role too low for comment.create")) {
+    return "your role wasn't allowed to comment on this project"
+  }
+  if (r.includes("role too low for comment.")) {
+    return "your role wasn't allowed to change comments on this project"
+  }
   if (r.includes("role too low")) {
     return "your role wasn't allowed to make this change on this project"
   }

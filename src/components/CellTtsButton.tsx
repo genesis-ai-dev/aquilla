@@ -22,12 +22,15 @@ import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioMimeForExt } from "@/lib/audio/mime"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useOnline } from "@/hooks/useOnline"
+import { useConnectivity } from "@/lib/offline/connectivity"
+import { ttsOfflineGate } from "@/lib/audio/tts-offline"
 import type {
   CellTtsSettings, ProjectTtsSettings,
 } from "@/lib/parsers/types"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { resolveVoice, resolveCastVoice } from "@/lib/audio/voices"
-import { normalizeVoiceForProvider, resolveTtsProvider, providerInfo, isServerTtsProvider } from "@/lib/audio/tts-providers"
+import { normalizeVoiceForProvider, resolveTtsProvider, providerInfo, isServerTtsProvider, ttsProviderModel } from "@/lib/audio/tts-providers"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 
 interface Props {
@@ -153,6 +156,16 @@ export function CellTtsButton({
   const provider = baseVoice.provider ?? resolveTtsProvider(projectTtsSettings)
   const voice = normalizeVoiceForProvider(baseVoice, provider, { targetLanguage })
   const modelStatus = useModelStatus("mms")
+  // Desktop/web offline: refuse hosted engines up front, preview-only for
+  // the on-device voice (src/lib/audio/tts-offline.ts).
+  const browserOnline = useOnline()
+  const backendReachable = useConnectivity()
+  const offlineGate = ttsOfflineGate({
+    offline: !browserOnline || backendReachable === false,
+    usesLocalModel: ttsProviderModel(provider) === "mms",
+    localModelReady: modelStatus.kind === "ready",
+  })
+  const previewOnly = playOnly || offlineGate.kind === "previewOnly"
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const { session } = useFrontierSession()
   const [isPlaying, setIsPlaying] = useState(false)
@@ -227,7 +240,7 @@ export function CellTtsButton({
             }
           }
           let blob: Blob
-          if (!playOnly && projectId && fileId && session?.jwt) {
+          if (!previewOnly && projectId && fileId && session?.jwt) {
             const gen = await generateAndAttachCellVoice({
               projectId,
               fileId,
@@ -376,7 +389,7 @@ export function CellTtsButton({
     original,
     context,
     cellLabel,
-    playOnly,
+    previewOnly,
     alsoAttachTo,
     t,
   ])
@@ -403,8 +416,16 @@ export function CellTtsButton({
   // resolution generateAndAttachCellVoice/synthesizeForCell use, so the label
   // can't drift from the real synthesis path.
   const engineName = providerInfo(provider).shortTitle
+  // Playing an attached clip may still work offline (on-device cache).
+  const offlineBlocked = offlineGate.kind === "blocked" && !playableAttachId
   const tooltip = noText
     ? "Translate this line first to generate voice"
+    : offlineBlocked
+      ? offlineGate.suggestLocal
+        ? t("audio.tts.offlineSuggestLocal", { engine: engineName })
+        : t("audio.tts.offlineBlocked", { engine: engineName })
+    : offlineGate.kind === "previewOnly" && !playableAttachId && !isError && !isLoadingModel && !isSynthesizing && !isPlaying
+      ? t("audio.tts.offlinePreviewOnly")
     : isError
       ? t("audio.tts.failedTooltip", { reason: status.message })
       : isLoadingModel
@@ -423,7 +444,7 @@ export function CellTtsButton({
       variant="ghost"
       size={isLoadingModel ? "xs" : "icon-xs"}
       onClick={onClick}
-      disabled={disabled || noText || isLoadingModel || isSynthesizing}
+      disabled={disabled || noText || offlineBlocked || isLoadingModel || isSynthesizing}
       aria-label={tooltip}
       className={cn(
         isError
@@ -432,7 +453,7 @@ export function CellTtsButton({
             ? "text-primary"
             : isLoadingModel
               ? "text-amber-600 dark:text-amber-400"
-              : noText || disabled
+              : noText || disabled || offlineBlocked
                 // SUB-35: can't-run state stays washed out…
                 ? "text-muted-foreground/40"
                 // …but READY must look ready — the old muted/50 idle tint made a

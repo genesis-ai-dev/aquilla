@@ -115,7 +115,7 @@ export async function handleExternalSearch(
   if (!authed.ok) return authed.response
 
   if (env.AQUILLA_PG) {
-    const limited = await checkSearchRateLimit(env.AQUILLA_PG, authed.ctx.credential.credentialId)
+    const limited = await checkSearchRateLimit(env.AQUILLA_PG, authed.ctx.credential)
     if (limited) return limited
   }
 
@@ -198,7 +198,7 @@ export async function handleExternalCrossProjectSearch(
   // Charged per project searched — see checkSearchRateLimit's `cost`.
   const limited = await checkSearchRateLimit(
     env.AQUILLA_PG,
-    authed.credential.credentialId,
+    authed.credential,
     projectIds.length,
   )
   if (limited) return limited

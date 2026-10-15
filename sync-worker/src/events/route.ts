@@ -41,6 +41,8 @@ import {
   slotKey,
   type ChainSlot,
 } from './chain-claims'
+import { buildFileProgressPushFrames } from './progress-push'
+import type { FileProgressPushFrame, RecomputedFile } from './progress-push'
 import { broadcastRealtime } from './broadcast'
 import type { BroadcastEnv } from './broadcast'
 import { deferBestEffort } from './defer-best-effort'
@@ -52,12 +54,18 @@ import { dispatchCommentNotification } from '../side-effects/queue'
 import type { SideEffectMessage } from '../side-effects/types'
 import { collectLaneTouches, notifyLiveDownstreamsOfUpstreamChanges } from './link-notify'
 import {
+  coalesceFileCounterRecompute,
+  type CounterImpact,
+} from './counter-recompute-coalescer'
+import {
   fileProgressRecomputeStmt,
   fullProgressRecomputeStmts,
   sectionsProgressRecomputeStmt,
 } from './progress-projection'
 import { makeRequestCache } from './request-cache'
+import type { WritePathSettings } from './write-path-settings'
 import { dbFailureInfo, reportServerRejections } from './rejection-telemetry'
+import { reportStaleSiblings } from './stale-sibling-telemetry'
 
 // Max statements per batch() transaction — a conservative self-imposed cap (Postgres has no hard limit; keeps any single transaction bounded).
 const BATCH_LIMIT = 100
@@ -160,6 +168,15 @@ export interface AppliedFrame {
   via?: 'external'
   serverSeq?: number
   rows?: CellRowOut[]
+  /**
+   * AQU-1832: this request also broadcast a `file.progress.pushed` frame for
+   * this event's file, later in the same batch. Clients that understand it
+   * skip the `/progress` refetch this frame used to trigger and wait the few
+   * milliseconds for the numbers themselves. Absent from an older worker, and
+   * absent whenever no fan-out happened at all, so absent always means
+   * "refetch as before".
+   */
+  progressPushed?: boolean
 }
 
 function buildAppliedFrame(
@@ -170,6 +187,7 @@ function buildAppliedFrame(
     serverSeq: number
   },
   rowsByCell: Map<string, CellRowOut[]> | null,
+  progressPushedFiles: ReadonlySet<string>,
 ): AppliedFrame {
   const frame = entry.eventFrame
   const carriesRows =
@@ -194,6 +212,13 @@ function buildAppliedFrame(
     ...(carriesRows ? { serverSeq: entry.serverSeq } : {}),
     ...(carriesRows && rowsByCell
       ? { rows: rowsByCell.get(cellRowsKey(frame.project, frame.file!, frame.cell!)) ?? [] }
+      : {}),
+    // AQU-1832: built into the SHARED frame so the author's `applied[]` and
+    // the peers' broadcast stay byte-identical. The author is a peer of its
+    // own write — the DO echoes every winning event back to its origin — so
+    // the flag is as true on the HTTP copy as on the WS one.
+    ...(frame.file && progressPushedFiles.has(`${frame.project}|${frame.file}`)
+      ? { progressPushed: true as const }
       : {}),
   }
 }
@@ -921,9 +946,9 @@ export async function handleEventsWriteRequest(
   const requestCache = makeRequestCache(db)
   const readProjectSettings = async (
     projectId: string,
-  ): Promise<Record<string, unknown> | null> => {
+  ): Promise<WritePathSettings | null> => {
     try {
-      return await requestCache.projectSettings(projectId)
+      return await requestCache.writePathSettings(projectId)
     } catch {
       // Settings load failure is non-fatal — callers fall back to their
       // defaults rather than blocking the batch.
@@ -1722,13 +1747,13 @@ export async function handleEventsWriteRequest(
     // later chunk fails still recomputes over its durable prefix — the totals
     // match the events that actually landed rather than the ones we hoped to
     // write.
-    const buildRecomputeStmts = (entries: readonly PendingEntry[]): AquillaStatement[] => {
-      const counterFiles = new Map<string, {
-        projectId: string
-        fileId: string
-        fullSections: boolean
-        cellIds: Set<string>
-      }>()
+    //
+    // AQU-1826: and once per FILE across concurrent requests, not just within
+    // one request — see counter-recompute-coalescer.ts. The impact is collected
+    // per file here and the pass itself is coalesced, so ten editors saving one
+    // cell each in the same file no longer scan it ten times.
+    const collectCounterImpacts = (entries: readonly PendingEntry[]): CounterImpact[] => {
+      const counterFiles = new Map<string, CounterImpact>()
       for (const entry of entries) {
         if (entry.counterFile) {
           const key = `${entry.counterFile.projectId}|${entry.counterFile.fileId}`
@@ -1744,21 +1769,26 @@ export async function handleEventsWriteRequest(
           }
         }
       }
-      const recomputeTs = Date.now()
+      return [...counterFiles.values()]
+    }
+
+    // AQU-1832: `recomputeTs` is the stamp the pass writes into every row it
+    // rewrites, and the push read selects the pass's own output by it. The
+    // pass that runs these statements hands the stamp back (recomputeCommitted
+    // below) instead of keeping it in a closure this request may never run.
+    const buildRecomputeStmts = (f: CounterImpact, recomputeTs: number): AquillaStatement[] => {
       const stmts: AquillaStatement[] = []
-      for (const f of counterFiles.values()) {
-        stmts.push(fileCountersRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
-        if (f.fullSections) {
-          // A full rebuild supersedes any per-cell section recompute for the
-          // same file, so the touched cell ids are deliberately dropped here.
-          stmts.push(...fullProgressRecomputeStmts(db, f.projectId, f.fileId, recomputeTs))
-        } else {
-          stmts.push(fileProgressRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
-          if (f.cellIds.size > 0) {
-            stmts.push(
-              sectionsProgressRecomputeStmt(db, f.projectId, f.fileId, recomputeTs, [...f.cellIds]),
-            )
-          }
+      stmts.push(fileCountersRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
+      if (f.fullSections) {
+        // A full rebuild supersedes any per-cell section recompute for the
+        // same file, so the touched cell ids are deliberately dropped here.
+        stmts.push(...fullProgressRecomputeStmts(db, f.projectId, f.fileId, recomputeTs))
+      } else {
+        stmts.push(fileProgressRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
+        if (f.cellIds.size > 0) {
+          stmts.push(
+            sectionsProgressRecomputeStmt(db, f.projectId, f.fileId, recomputeTs, [...f.cellIds]),
+          )
         }
       }
       return stmts
@@ -1845,24 +1875,61 @@ export async function handleEventsWriteRequest(
     const runBatch = (stmts: AquillaStatement[]) =>
       db.batchPipelined ? db.batchPipelined(stmts) : db.batch(stmts)
 
+    // AQU-1832: what each coalesced pass rewrote for this request, and when.
+    // Filled from the pass's RETURN VALUE, which the coalescer hands to every
+    // request that pass answers — under AQU-1826 the pass answering us may have
+    // been started by another request's callback, so anything that callback
+    // merely closed over would be invisible here and this request would
+    // silently push nothing.
+    const recomputedFiles: Array<{ file: RecomputedFile; recomputeTs: number }> = []
+
     /**
      * One recompute pass over everything that committed, in its own
      * transaction. Called exactly once per request — on the success path after
      * the last chunk, and on the failure path over the durable prefix.
      */
     const recomputeCommitted = async (): Promise<void> => {
-      try {
-        const stmts = buildRecomputeStmts(committedEntries)
-        if (stmts.length === 0) return
-        await runBatch(stmts)
-      } catch (recomputeErr) {
-        // The events are committed; only the derived counters are behind.
-        // Loud, because a silent miss here is a counter drift nobody can
-        // trace back — but not fatal, and NOT reported as a rejection.
-        console.error(
-          `[events] file counter recompute failed after commit (${committedEntries.length} events accepted; counters self-heal on the next commit):`,
-          recomputeErr,
-        )
+      // Sequential, as the single all-files batch it replaced was: a wide
+      // request must not open one transaction per file at once.
+      for (const impact of collectCounterImpacts(committedEntries)) {
+        try {
+          // AQU-1826: coalesced per file across requests. The pass that answers
+          // us always starts after this impact was merged, so the counters are
+          // still correct by the time the request responds.
+          const pass = await coalesceFileCounterRecompute(impact, async (drained) => {
+            const recomputeTs = Date.now()
+            const stmts = buildRecomputeStmts(drained, recomputeTs)
+            if (stmts.length === 0) return null
+            await runBatch(stmts)
+            return { recomputeTs, fullSections: drained.fullSections }
+          })
+          // AQU-1832: the pass may have drained other requests' cells along
+          // with ours; the rows it stamped are fresher for them, not wrong,
+          // and the client's revision guard orders them. `fullSections` is the
+          // drained pass's — if any sharer moved section membership, every
+          // section row was rewritten and the frame must say so (`complete`).
+          if (pass) {
+            recomputedFiles.push({
+              file: { projectId: impact.projectId, fileId: impact.fileId, fullSections: pass.fullSections },
+              recomputeTs: pass.recomputeTs,
+            })
+          }
+        } catch (recomputeErr) {
+          // AQU-1832: nothing was rewritten for this file, so nothing is
+          // pushed for it — it was never added to `recomputedFiles`. A frame
+          // built now would publish the PREVIOUS pass's numbers as this
+          // commit's answer, and the client would stop asking for the right
+          // ones. Clients fall back to the read, which is where the self-heal
+          // below becomes visible.
+          //
+          // The events are committed; only the derived counters are behind.
+          // Loud, because a silent miss here is a counter drift nobody can
+          // trace back — but not fatal, and NOT reported as a rejection.
+          console.error(
+            `[events] file counter recompute failed after commit (${committedEntries.length} events accepted; counters self-heal on the next commit):`,
+            recomputeErr,
+          )
+        }
       }
     }
 
@@ -1895,13 +1962,17 @@ export async function handleEventsWriteRequest(
       // These 5xx results ride inside a 200, which the request wrapper in
       // index.ts never ships — report them here (grouped, throttled).
       reportServerRejections(env, ctx, rawEvents, rejected, batchFailure)
+      const staleOnPartialCommit = accepted
+        .filter((a) => staleEntries.has(a.id))
+        .map((a) => staleEntries.get(a.id)!)
+      // AQU-1965: an accepted-but-not-applied event ships too — a 200 with a
+      // dropped write is otherwise invisible to operations.
+      reportStaleSiblings(env, ctx, rawEvents, staleOnPartialCommit)
       return Response.json(
         {
           accepted,
           rejected,
-          stale: accepted
-            .filter((a) => staleEntries.has(a.id))
-            .map((a) => staleEntries.get(a.id)!),
+          stale: staleOnPartialCommit,
           staleSource: staleSourceEntries.filter((entry) => !replayedCellEventIds.has(entry.id)),
         },
         { status: 200 },
@@ -1992,6 +2063,33 @@ export async function handleEventsWriteRequest(
       await Promise.all(broadcasts)
     }
 
+    // AQU-1832: read back the progress rows this request's recompute just
+    // wrote and broadcast them, so a peer's client applies the new numbers
+    // instead of firing the `/progress` GET its `event.applied` handler used
+    // to. One read per file here replaces one read per file PER VIEWER there.
+    //
+    // Built before the applied frames because it decides their
+    // `progressPushed` flag, and only when there is a DO to broadcast
+    // through: with no fan-out there is no push for a client to wait for, so
+    // the flag would be a promise nothing keeps.
+    const pushFramesByFile = new Map<string, FileProgressPushFrame[]>()
+    if (env.ProjectSync && env.SYNC_SECRET_KEY && recomputedFiles.length > 0) {
+      const built = await Promise.all(
+        recomputedFiles.map(({ file, recomputeTs }) =>
+          buildFileProgressPushFrames(db, file, recomputeTs).catch((err) => {
+            // Non-fatal by construction: without a frame the client refetches,
+            // which is exactly the behaviour this replaces.
+            console.warn('[events/route] progress push build failed:', err)
+            return [] as FileProgressPushFrame[]
+          }),
+        ),
+      )
+      for (const frames of built) {
+        if (frames.length === 0) continue
+        pushFramesByFile.set(`${frames[0].project}|${frames[0].file}`, frames)
+      }
+    }
+
     // Inline each committed cell's CURRENT projected rows (post-commit) so
     // clients apply the head directly instead of a GET …/cells?cellIds=
     // round-trip per event. ONE SELECT for every cell this request touched;
@@ -2000,8 +2098,9 @@ export async function handleEventsWriteRequest(
     // (the author's own client, which would otherwise refetch after its
     // outbox flush — see src/lib/sync/outbox-flush.ts onApplied).
     const rowsByCell = await readEventAppliedRows(db, newEntries)
+    const progressPushedFiles = new Set(pushFramesByFile.keys())
     for (const entry of newEntries) {
-      appliedFrames.push(buildAppliedFrame(entry, rowsByCell))
+      appliedFrames.push(buildAppliedFrame(entry, rowsByCell, progressPushedFiles))
     }
 
     // Fan-out event.applied frames to ProjectSync DO so UI clients receive
@@ -2009,11 +2108,23 @@ export async function handleEventsWriteRequest(
     // broadcast means the client will reconcile on its next poll/revalidate.
     if (env.ProjectSync && env.SYNC_SECRET_KEY) {
       // Group by project — one DO stub per project.
-      const byProject = new Map<string, AppliedFrame[]>()
+      const byProject = new Map<string, Array<AppliedFrame | FileProgressPushFrame>>()
       for (const frame of appliedFrames) {
         const list = byProject.get(frame.project)
         if (list) list.push(frame)
         else byProject.set(frame.project, [frame])
+      }
+      // AQU-1832: appended after the applied frames they belong to. A client
+      // reads `progressPushed` and holds its refetch, so the numbers it is
+      // holding out for must follow rather than lead. One `__broadcast` body
+      // per project, fanned out to each socket in order, is what makes that
+      // an ordering and not a hope.
+      for (const frames of pushFramesByFile.values()) {
+        for (const frame of frames) {
+          const list = byProject.get(frame.project)
+          if (list) list.push(frame)
+          else byProject.set(frame.project, [frame])
+        }
       }
       const doFanOut: Promise<void>[] = []
       for (const [project, messages] of byProject) {
@@ -2101,12 +2212,16 @@ export async function handleEventsWriteRequest(
 
   // A handler / auth 5xx inside this 200 (the batch itself committed).
   reportServerRejections(env, ctx, rawEvents, rejected)
+  const stale = accepted
+    .filter((a) => staleEntries.has(a.id))
+    .map((a) => staleEntries.get(a.id)!)
+  // AQU-1965: and the dead-letters that rode this same 200 — grouped per cell,
+  // so a chain that keeps losing is countable instead of partner-reported.
+  reportStaleSiblings(env, ctx, rawEvents, stale)
   return Response.json({
     accepted,
     rejected,
-    stale: accepted
-      .filter((a) => staleEntries.has(a.id))
-      .map((a) => staleEntries.get(a.id)!),
+    stale,
     staleSource: staleSourceEntries.filter((entry) => !replayedCellEventIds.has(entry.id)),
     // Same shape as the `event.applied` WS frame, one per committed event.
     // Lets the author's client land its own write's projected rows straight

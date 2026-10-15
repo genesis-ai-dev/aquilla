@@ -117,7 +117,7 @@ async function handleExternalSimilar(
   if (!authed.ok) return authed.response
   const db = env.AQUILLA_PG as AquillaDb
 
-  const limited = await checkReadRateLimit(db, authed.ctx.credential.credentialId)
+  const limited = await checkReadRateLimit(db, authed.ctx.credential)
   if (limited) return limited
 
   const url = new URL(request.url)

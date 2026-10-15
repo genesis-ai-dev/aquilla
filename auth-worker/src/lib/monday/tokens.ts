@@ -13,7 +13,7 @@
 
 import type { Env } from "../../types"
 import type { IntegrationConnectionRow } from "./types"
-import { decryptMondayToken, encryptMondayToken } from "./crypto"
+import { decryptMondayToken, encryptMondayToken, mondayTokenKeyMaterial } from "./crypto"
 import {
   isAbortTimeout,
   logVendorTimeout,
@@ -181,9 +181,9 @@ export async function persistTokenSet(
   connectionId: string,
   tokens: MondayTokenSet,
 ): Promise<void> {
-  const accessEnc = await encryptMondayToken(env.SECRET_KEY, tokens.accessToken)
+  const accessEnc = await encryptMondayToken(mondayTokenKeyMaterial(env), tokens.accessToken)
   const refreshEnc = tokens.refreshToken
-    ? await encryptMondayToken(env.SECRET_KEY, tokens.refreshToken)
+    ? await encryptMondayToken(mondayTokenKeyMaterial(env), tokens.refreshToken)
     : null
   await env.AQUILLA_PG.prepare(
     `UPDATE integration_connections
@@ -220,7 +220,7 @@ export async function getConnectionAccessToken(
   const expiresAt = conn.access_token_expires_at
   const expMs = expiresAt ? new Date(expiresAt).getTime() : null
   if (expMs == null || expMs - Date.now() > REFRESH_SKEW_MS) {
-    return decryptMondayToken(env.SECRET_KEY, conn.access_token_enc)
+    return decryptMondayToken(mondayTokenKeyMaterial(env), conn.access_token_enc)
   }
 
   const existing = inflightRefresh.get(conn.id)
@@ -235,7 +235,7 @@ async function doRefresh(env: Env, conn: IntegrationConnectionRow): Promise<stri
     if (!conn.refresh_token_enc) {
       throw new MondayAuthError("no refresh token stored")
     }
-    const refreshToken = await decryptMondayToken(env.SECRET_KEY, conn.refresh_token_enc)
+    const refreshToken = await decryptMondayToken(mondayTokenKeyMaterial(env), conn.refresh_token_enc)
     const tokens = await refreshTokenGrant(env, refreshToken)
     await persistTokenSet(env, conn.id, tokens)
     return tokens.accessToken

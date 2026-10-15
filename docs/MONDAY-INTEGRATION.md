@@ -229,6 +229,14 @@ board linked on production. The refresh also deletes the copied rows
 the backstop. A disconnect on dev still works for a copied row: the webhook
 cleanup is best-effort and the row is deleted without calling Monday.
 
+The key is separate too. The Monday token encryption key derives from
+`MONDAY_TOKEN_KEY` when that secret is set and from `SECRET_KEY` otherwise
+(`mondayTokenKeyMaterial` in `lib/monday/crypto.ts`). The dev Worker sets it
+and production does not, so a production token copied to dev is unreadable
+there even if the gate were bypassed: the push records "token decrypt failed"
+as a permanent error. Setting or rotating it makes every connection made on
+that Worker before it unreadable; the orgs reconnect.
+
 Testing the two environments stays independent: the same Monday app has each
 origin's `/oauth/callback` registered, so connect on dev.aquilla.app with a
 Frontier Monday user and a test board, and on aquilla.app with the customer's

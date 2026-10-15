@@ -151,12 +151,24 @@ its job. Keep this section in step with that manifest — a contract test assert
 | Web (production) | `.` (repo root) | `aquilla-web` | `DIARIZATION_MODAL_URL`, `DIARIZATION_PUBLIC_BASE` |
 | Web (development) | `.` (repo root) | `aquilla-web-development` | none |
 | Identity (production) | `auth-worker` | `aquilla-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET` |
-| Identity (development) | `auth-worker` | `aquilla-dev-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET` |
+| Identity (development) | `auth-worker` | `aquilla-dev-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET`, `MONDAY_TOKEN_KEY` |
 | Sync (production) | `sync-worker` | `aquilla-sync-worker` | `SYNC_SECRET_KEY`, `DIARIZATION_MODAL_URL`, `DIARIZATION_PUBLIC_BASE`, `DIARIZATION_SHARED_SECRET`, `INWORLD_API_KEY`, `SEED_VC_TOKEN`, `SEED_VC_URL` |
 | Sync (development) | `sync-worker` | `aquilla-sync-worker-dev` | `SYNC_SECRET_KEY` |
 
 `SYNC_SECRET_KEY` signs the `/sync-token` JWTs the sync Worker verifies, so the identity
 and sync Workers in the same environment must hold the identical value.
+
+`MONDAY_TOKEN_KEY` is development-only (AQU-1775): the Monday token encryption key is
+derived from it instead of `SECRET_KEY`, which production and development still share,
+so a production org's Monday tokens copied onto the dev Neon branch are unreadable on
+dev. Production leaves it unset and keeps the `SECRET_KEY` derivation. Setting or
+rotating it makes every Monday connection made on that Worker before it unreadable;
+reconnect the orgs afterwards. Set it with the rotation script, never bare
+`wrangler secret put`:
+
+```bash
+printf %s "$(openssl rand -base64 48 | tr -d '\n')" | pnpm run secrets:rotate identity development MONDAY_TOKEN_KEY
+```
 
 ### The AI provider key (`OPENROUTER_API_KEY`)
 

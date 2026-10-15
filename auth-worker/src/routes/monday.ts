@@ -38,6 +38,7 @@ import {
   decryptMondayToken,
   generateCodeVerifier,
   codeChallengeS256,
+  mondayTokenKeyMaterial,
 } from "../lib/monday/crypto"
 import {
   exchangeAuthorizationCode,
@@ -270,7 +271,7 @@ monday.post(
     // it INSIDE the signed state JWT as the `cv` claim. Stateless, no table.
     const codeVerifier = generateCodeVerifier()
     const codeChallenge = await codeChallengeS256(codeVerifier)
-    const cv = await encryptMondayToken(c.env.SECRET_KEY, codeVerifier)
+    const cv = await encryptMondayToken(mondayTokenKeyMaterial(c.env), codeVerifier)
     const now = Math.floor(Date.now() / 1000)
     const state = await sign(
       {
@@ -326,7 +327,7 @@ monday.get("/oauth/callback", async (c) => {
   if (typeof state.cv !== "string" || !state.cv) return fail("bad_state", 401)
   let codeVerifier: string
   try {
-    codeVerifier = await decryptMondayToken(c.env.SECRET_KEY, state.cv)
+    codeVerifier = await decryptMondayToken(mondayTokenKeyMaterial(c.env), state.cv)
   } catch {
     return fail("bad_state", 401)
   }
@@ -351,9 +352,9 @@ monday.get("/oauth/callback", async (c) => {
       console.warn("[monday] me query failed after token exchange:", err)
     }
 
-    const accessEnc = await encryptMondayToken(c.env.SECRET_KEY, tokens.accessToken)
+    const accessEnc = await encryptMondayToken(mondayTokenKeyMaterial(c.env), tokens.accessToken)
     const refreshEnc = tokens.refreshToken
-      ? await encryptMondayToken(c.env.SECRET_KEY, tokens.refreshToken)
+      ? await encryptMondayToken(mondayTokenKeyMaterial(c.env), tokens.refreshToken)
       : null
     const account: IntegrationAccountInfo = {
       accountId: me.account?.id != null ? String(me.account.id) : null,

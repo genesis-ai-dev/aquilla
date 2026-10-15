@@ -105,6 +105,10 @@ name = "EMAIL"
 # docs/DEPLOYMENT-ENVIRONMENTS.md § "Worker secrets (per environment)" (AQU-762):
 #   SECRET_KEY      — identity access-token signing key.
 #   SYNC_SECRET_KEY — signs /sync-token JWTs. MUST match aquilla-sync-worker.
+#   MONDAY_TOKEN_KEY — development only (AQU-1775): the Monday token encryption
+#                      key is derived from it instead of SECRET_KEY, so a
+#                      production token copied onto the dev Neon branch is
+#                      unreadable on dev. Unset keeps the SECRET_KEY derivation.
 #   OPENROUTER_API_KEY — Bearer key forwarded by /api/v1/chat/completions
 #                        to OpenRouter (folded in from aquilla-chat-worker).
 #   AGENT_SANDBOX_KEY  — shared bearer secret for the sandbox worker

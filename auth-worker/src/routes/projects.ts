@@ -104,6 +104,7 @@ import {
 } from "../services/lane-grants"
 import { resolveExplicitLaneChoice } from "../services/lane-choice"
 import { createProjectShared } from "../../../db/shared/projects"
+import { readLaneTag } from "../../../db/shared/lane-ref"
 import { countedFileSql } from "../../../db/shared/counted-files"
 import { readDeclaredLanguages } from "../../../db/shared/file-declared-languages"
 import { loadRosterOrigins, type RosterOrigin } from "../services/roster-origins"
@@ -1329,7 +1330,11 @@ projects.get("/:projectId/assignments/unit", authMiddleware, async (c) => {
   // tag to the lane it names. An unresolvable tag yields '', which matches no
   // lane_id, so the per-lane progress columns read zero rather than silently
   // counting another lane's work.
-  const laneId = laneIdParam ?? (await resolveTargetLaneId(c.env, projectId, laneTag))
+  // AQU-1977: no lane named reads the project's own default — its '' lane on
+  // an old project, its first language on one made since AQU-1594 — rather
+  // than a '' lane a new project does not have, which read every count as 0.
+  const laneId = laneIdParam
+    ?? (await resolveTargetLaneId(c.env, projectId, await readLaneTag(c.env.AQUILLA_PG, projectId, laneTag)))
   const assignments = await getUnitAssignments(c.env, projectId, fileId, sectionKey, laneId)
   return c.json({ assignments })
 })

@@ -16,7 +16,10 @@ function envWith(db: AquillaDb) {
 
 function makeCell(
   over: Partial<CellRow> &
-    Pick<CellRow, "cell_id" | "side" | "value">,
+    Pick<CellRow, "cell_id" | "side" | "value"> & {
+      sequence_index?: number | null
+      metadata?: Record<string, unknown> | null
+    },
 ): CellRow {
   return {
     project_id: "proj-a",
@@ -71,6 +74,7 @@ describe("GET /api/v1/projects/:projectId/search", () => {
     expect(body.results).toHaveLength(1)
     expect(body.results[0].cellId).toBe("c1")
     expect(body.results[0].side).toBe("source")
+    expect(body.results[0].pairedValue).toBe("En el principio creó Dios")
   })
 
   // AQU-1566: a promoted caption leaves its cues live in a deleted staging (or
@@ -124,9 +128,25 @@ describe("GET /api/v1/projects/:projectId/search", () => {
       { headers: { Authorization: `Bearer ${token}` } },
     )
     const res = (await handleSearchReadRequest(req, envWith(db)))!
-    const body = (await res.json()) as { results: Array<{ side: string }> }
+    const body = (await res.json()) as { results: Array<{ side: string; pairedValue: string | null }> }
     expect(body.results).toHaveLength(1)
     expect(body.results[0].side).toBe("target")
+    expect(body.results[0].pairedValue).toBe("hola")
+  })
+
+  it("returns pairedValue null when the opposite side has no row", async () => {
+    const { db } = await makeTestDb({
+      cells: [makeCell({ cell_id: "c1", side: "target", value: "orphan target" })],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "any" })
+    const req = new Request(
+      "https://w/api/v1/projects/proj-a/search?q=orphan&side=target",
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const res = (await handleSearchReadRequest(req, envWith(db)))!
+    const body = (await res.json()) as { results: Array<{ pairedValue: string | null }> }
+    expect(body.results).toHaveLength(1)
+    expect(body.results[0].pairedValue).toBeNull()
   })
 
   it("returns 400 when q is missing", async () => {
@@ -179,6 +199,135 @@ describe("GET /api/v1/projects/:projectId/search", () => {
     })
     const res = (await handleSearchReadRequest(req, envWith(db)))!
     expect(res.status).toBe(403)
+  })
+
+  it("honors match case, whole word, and a regular expression", async () => {
+    const { db } = await makeTestDb({
+      cells: [
+        makeCell({ cell_id: "god", side: "target", value: "the God of heaven" }),
+        makeCell({ cell_id: "lower", side: "target", value: "a god among idols" }),
+        makeCell({ cell_id: "goddess", side: "target", value: "the Goddess" }),
+        makeCell({ cell_id: "color", side: "target", value: "color and colour" }),
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "any" })
+    const search = async (query: string) => {
+      const res = (await handleSearchReadRequest(
+        new Request(`https://w/api/v1/projects/proj-a/search?${query}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        envWith(db),
+      ))!
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { results: Array<{ cellId: string; snippet: string }> }
+      return body.results
+    }
+
+    const cased = await search("q=God&case=1")
+    expect(cased.map((row) => row.cellId).sort()).toEqual(["god", "goddess"])
+    expect(cased.find((row) => row.cellId === "god")?.snippet).toContain("<mark>God</mark>")
+
+    const words = await search("q=God&word=1")
+    expect(words.map((row) => row.cellId).sort()).toEqual(["god", "lower"])
+
+    const pattern = await search("q=colou%3Fr&regexp=1")
+    expect(pattern.map((row) => row.cellId)).toEqual(["color"])
+    expect(pattern[0].snippet).toContain("<mark>")
+  })
+
+  it("matches a JavaScript word-boundary regexp in the worker", async () => {
+    const { db } = await makeTestDb({
+      cells: [
+        makeCell({ cell_id: "god", side: "target", value: "the God of heaven" }),
+        makeCell({ cell_id: "goddess", side: "target", value: "the Goddess" }),
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "any" })
+    const res = (await handleSearchReadRequest(
+      new Request("https://w/api/v1/projects/proj-a/search?q=%5CbGod%5Cb&regexp=1", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      envWith(db),
+    ))!
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { results: Array<{ cellId: string }> }
+    expect(body.results.map((row) => row.cellId)).toEqual(["god"])
+  })
+
+  it("names a target hit by the source verse, and a heading by its label", async () => {
+    const { db } = await makeTestDb({
+      cells: [
+        makeCell({
+          cell_id: "head", side: "source", value: "The creation", type: "heading",
+          sequence_index: 0,
+          metadata: { aquillaImport: { milestone: { label: "Creation" } } },
+        }),
+        makeCell({ cell_id: "head", side: "target", value: "God made the heading" }),
+        makeCell({
+          cell_id: "a", side: "source", value: "In the beginning",
+          canonical_ref: "GEN 1:1", type: "verse", sequence_index: 1,
+        }),
+        makeCell({ cell_id: "a", side: "target", value: "God made the light first" }),
+        makeCell({
+          cell_id: "b", side: "source", value: "And the light",
+          canonical_ref: "GEN 1:1", type: "verse", sequence_index: 2,
+        }),
+        makeCell({ cell_id: "b", side: "target", value: "God made the light second" }),
+        makeCell({
+          cell_id: "note", side: "source", value: "a study note", sequence_index: 3,
+        }),
+        makeCell({ cell_id: "note", side: "target", value: "God made a note" }),
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "any" })
+    const search = async (query: string) => {
+      const res = (await handleSearchReadRequest(
+        new Request(`https://w/api/v1/projects/proj-a/search?${query}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        envWith(db),
+      ))!
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as {
+        results: Array<{
+          cellId: string
+          canonicalRef: string | null
+          cellType: string | null
+          placeLabel: string | null
+          position: number
+        }>
+      }
+      return body.results
+    }
+
+    const hits = await search("q=God&side=target")
+    const byId = new Map(hits.map((row) => [row.cellId, row]))
+    expect(byId.get("a")).toMatchObject({
+      canonicalRef: "GEN 1:1", cellType: "verse", position: 2,
+    })
+    expect(byId.get("b")).toMatchObject({
+      canonicalRef: "GEN 1:1", cellType: "verse", position: 3,
+    })
+    expect(byId.get("head")).toMatchObject({
+      cellType: "heading", placeLabel: "Creation", position: 1,
+    })
+    expect(byId.get("note")?.position).toBe(4)
+    expect(byId.get("note")?.canonicalRef).toBeNull()
+
+    const cased = await search("q=God&side=target&case=1")
+    expect(cased.find((row) => row.cellId === "a")?.canonicalRef).toBe("GEN 1:1")
+  })
+
+  it("rejects an invalid regular expression", async () => {
+    const { db } = await makeTestDb({ cells: [] })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "any" })
+    const res = (await handleSearchReadRequest(
+      new Request("https://w/api/v1/projects/proj-a/search?q=(&regexp=1", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      envWith(db),
+    ))!
+    expect(res.status).toBe(400)
   })
 
   it("returns null when the route doesn't match", async () => {

@@ -361,11 +361,13 @@ export const reconcile = (
     for (const pi of leftP) {
       if (prevUsed.has(pi)) continue
       let best: { run: number[]; sim: number } | undefined
+      const fits = (ci: number): boolean => containment(current[ci]!.plain, previous[pi]!.plain) >= 0.85
       for (let s = 0; s < leftC.length; s++) {
+        if (!fits(leftC[s]!)) continue
         for (let e = s + 2; e <= Math.min(leftC.length, s + 6); e++) {
           const run = leftC.slice(s, e)
-          if (run.some((ci) => slots[ci]!.logicalId)) break
-          if (!run.every((ci) => containment(current[ci]!.plain, previous[pi]!.plain) >= 0.85)) continue
+          if (run.some((ci) => slots[ci]!.logicalId) || !fits(run.at(-1)!)) break
+          if (!run.every(fits)) continue
           const sim = similarity(previous[pi]!.plain, joinPlain(run, current))
           const bestSingle = Math.max(...run.map((ci) => similarity(previous[pi]!.plain, current[ci]!.plain)))
           if (sim < 0.75 || sim < bestSingle + 0.1) continue
@@ -385,19 +387,21 @@ export const reconcile = (
     for (const ci of leftC) {
       if (slots[ci]!.logicalId) continue
       let best: { run: number[]; sim: number } | undefined
+      const fits = (pi: number): boolean => containment(previous[pi]!.plain, current[ci]!.plain) >= 0.85
       for (let s = 0; s < stillP.length; s++) {
+        if (!fits(stillP[s]!)) continue
         for (let e = s + 2; e <= Math.min(stillP.length, s + 6); e++) {
           const full = stillP.slice(s, e)
           if (full.some((pi) => prevUsed.has(pi))) break
+          if (!fits(full.at(-1)!)) continue
           // Also consider the run with interior units left out: paragraphs
           // deleted between merged ones must not be swept into the merge.
-          const interior = full.slice(1, -1)
+          const interior = full.slice(1, -1).filter(fits)
           const variants: number[][] = []
           for (let mask = 0; mask < 1 << interior.length; mask++) {
             variants.push([full[0]!, ...interior.filter((_, k) => !(mask & (1 << k))), full.at(-1)!])
           }
           for (const run of variants) {
-            if (!run.every((pi) => containment(previous[pi]!.plain, current[ci]!.plain) >= 0.85)) continue
             const sim = similarity(joinPlain(run, previous), current[ci]!.plain)
             const bestSingle = Math.max(...run.map((pi) => similarity(previous[pi]!.plain, current[ci]!.plain)))
             if (sim < 0.75 || sim < bestSingle + 0.1) continue

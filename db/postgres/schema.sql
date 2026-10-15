@@ -1529,6 +1529,9 @@ CREATE TABLE IF NOT EXISTS lanes (
     archived_at TIMESTAMPTZ,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- 0173 (AQU-1954): does every file owe audio in this language? Off, a file
+    -- counts this language's audio only once it has a recording in it.
+    records_audio BOOLEAN NOT NULL DEFAULT false,
     PRIMARY KEY (project_id, id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_lanes_id

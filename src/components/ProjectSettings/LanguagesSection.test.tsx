@@ -847,3 +847,63 @@ describe("LanguagesSection — lanes that read the same (AQU-1784)", () => {
     expect(screen.getByTestId("add-lane-duplicate-notice")).toBeTruthy()
   })
 })
+
+// AQU-1954 (Sam, 2026-10-14): "Records audio" lives on each language's row.
+describe("LanguagesSection — Records audio per language (AQU-1954)", () => {
+  const GERMAN: ProjectLaneView = {
+    id: "lane-de", role: "target", name: "German", langCode: "de", legacyTag: "", position: 0, archivedAt: null,
+    recordsAudio: true,
+  }
+  const TOK_PISIN: ProjectLaneView = {
+    id: "lane-tpi", role: "target", name: "Tok Pisin", langCode: "tpi", legacyTag: "tpi", position: 1, archivedAt: null,
+  }
+
+  function renderRows(onSetLaneRecordsAudio?: (laneId: string, on: boolean) => Promise<boolean>, canEdit = true) {
+    render(
+      <LanguagesSection
+        defaultTargetLanguage="German"
+        targetLanes={["de", "tpi"]}
+        canEdit={canEdit}
+        disabledTooltip={null}
+        patch={vi.fn(async (): Promise<PatchOutcome> => ({ kind: "ok" }))}
+        laneRecords={[GERMAN, TOK_PISIN]}
+        onRenameLane={vi.fn(async () => "ok" as const)}
+        onCreateLane={vi.fn(async () => "ok" as const)}
+        onSetLaneArchived={vi.fn(async () => true)}
+        onSetLaneRecordsAudio={onSetLaneRecordsAudio}
+      />,
+    )
+  }
+
+  it("shows each language's own switch, off when the row says nothing", () => {
+    renderRows(vi.fn(async () => true))
+    expect(screen.getByRole("switch", { name: "German records audio" })).toHaveAttribute("aria-checked", "true")
+    expect(screen.getByRole("switch", { name: "Tok Pisin records audio" })).toHaveAttribute("aria-checked", "false")
+  })
+
+  it("saves one language at a time", async () => {
+    const save = vi.fn(async () => true)
+    renderRows(save)
+    fireEvent.click(screen.getByRole("switch", { name: "Tok Pisin records audio" }))
+    await waitFor(() => expect(save).toHaveBeenCalledWith("lane-tpi", true))
+    expect(save).toHaveBeenCalledTimes(1)
+  })
+
+  it("says so when the save fails", async () => {
+    renderRows(vi.fn(async () => false))
+    fireEvent.click(screen.getByRole("switch", { name: "German records audio" }))
+    expect(await screen.findByText("Saving failed.")).toBeInTheDocument()
+  })
+
+  it("cannot be changed by someone who may not edit languages", () => {
+    const save = vi.fn(async () => true)
+    renderRows(save, false)
+    fireEvent.click(screen.getByRole("switch", { name: "Tok Pisin records audio" }))
+    expect(save).not.toHaveBeenCalled()
+  })
+
+  it("is not drawn where there is nothing to save it to", () => {
+    renderRows(undefined)
+    expect(screen.queryByRole("switch")).toBeNull()
+  })
+})

@@ -553,6 +553,9 @@ describe("the link into the editor (AQU-1278)", () => {
     await waitFor(() => expect(screen.getByTestId("plan-chapter-grid")).toBeInTheDocument())
 
     expect(goLinks()).toHaveLength(1)
+    // AQU-1764: text-coloured now, so it is underlined at rest, not on hover
+    // only, or it would read as a plain phrase beside the shortfall.
+    expect(screen.getByTestId("plan-go-to-first-open").className).toMatch(/(^|\s)underline(\s|$)/)
     fireEvent.click(screen.getByTestId("plan-go-to-first-open"))
     expect(onGoToFirstOpen).toHaveBeenCalledWith("unvalidated")
   })
@@ -706,7 +709,7 @@ describe("the chapter card", () => {
     // Not the raw "GEN 12" the build showed.
     expect(within(detail).getByTestId("plan-chapter-detail-title")).toHaveTextContent("Chapter 12")
     expect(within(detail).getByTestId("plan-chapter-detail-left"))
-      .toHaveTextContent("2 cells not yet validated")
+      .toHaveTextContent("2 cells to validate")
   })
 
   it("reads its bars in percentages, with the counts on hover", async () => {
@@ -942,6 +945,27 @@ describe("the chapter card", () => {
     expect([...row.children].map((c) => c.textContent)).toEqual(["12:2"])
   })
 
+  it("lists every queue under its own label, each line once (AQU-1973)", async () => {
+    // One line nobody has translated, one translated but not validated: the
+    // chapter's badge says 2, so the card must show both, not the first alone.
+    await openChapter(
+      unit({ sectionKey: "DEU", totalCount: 100, filledCount: 99, validatedCount: 98 }),
+      [section("DEU 4", { totalCount: 10, filledCount: 9, validatedCount: 8 })],
+      [
+        verse("c1", "DEU 4:1", { filled: false, validated: false }),
+        verse("c2", "DEU 4:2", { validated: false }),
+        verse("c3", "DEU 4:3"),
+      ],
+    )
+    expect(screen.getByTestId("plan-chapter-detail-left").textContent).toMatch(/1 .*to translate.*1 .*to validate/)
+    const translate = screen.getByTestId("plan-chapter-queue-untranslated")
+    expect(translate).toHaveTextContent("Requires translation and validation (1)")
+    expect([...within(translate).getByTestId("plan-chapter-verses").children].map((c) => c.textContent)).toEqual(["4:1"])
+    const validate = screen.getByTestId("plan-chapter-queue-unvalidated")
+    expect(validate).toHaveTextContent("Requires validation (1)")
+    expect([...within(validate).getByTestId("plan-chapter-verses-unvalidated").children].map((c) => c.textContent)).toEqual(["4:2"])
+  })
+
   it("draws chips on a chapter of a unit that is nowhere near done", async () => {
     // Sam chose this over gating them the way the badges and the link are
     // gated: a chip says which verse, and that is worth the same on a book at
@@ -989,7 +1013,7 @@ describe("the chapter card", () => {
       ],
     )
     expect(screen.getByTestId("plan-chapter-detail-left"))
-      .toHaveTextContent("2 takes not yet recorded")
+      .toHaveTextContent("2 takes to record")
     const row = screen.getByTestId("plan-chapter-verses")
     expect([...row.children].map((c) => c.textContent)).toEqual(["12:2", "12:4"])
   })
@@ -1037,7 +1061,7 @@ describe("the chapter card", () => {
     await waitFor(() => expect(screen.getByTestId("plan-tile-JON 1")).toBeInTheDocument())
     fireEvent.click(screen.getByTestId("plan-tile-JON 1"))
     await waitFor(() => expect(screen.getByTestId("plan-verse-chip-h1")).toBeInTheDocument())
-    expect(screen.getByTestId("plan-chapter-detail-left")).toHaveTextContent("4 cells not yet translated")
+    expect(screen.getByTestId("plan-chapter-detail-left")).toHaveTextContent("4 cells to translate")
 
     withSections([section("JON 1", { totalCount: 17, filledCount: 16, validatedCount: 16 })])
     vi.mocked(getFileSectionProgress).mockResolvedValue({
@@ -1048,7 +1072,7 @@ describe("the chapter card", () => {
     await waitFor(() => expect(screen.queryByTestId("plan-verse-chip-h1")).toBeNull())
     expect(screen.getByTestId("plan-verse-chip-v5")).toBeInTheDocument()
     await waitFor(() =>
-      expect(screen.getByTestId("plan-chapter-detail-left")).toHaveTextContent("1 cell not yet translated"))
+      expect(screen.getByTestId("plan-chapter-detail-left")).toHaveTextContent("1 cell to translate"))
     expect(getFileProgress).toHaveBeenCalledTimes(2)
     expect(getFileSectionProgress).toHaveBeenCalledTimes(2)
   })

@@ -100,6 +100,7 @@ import {
   readLaneLastChange,
   updateTargetLane,
   setTargetLaneArchived,
+  setTargetLaneRecordsAudio,
 } from "../../../db/shared/lanes"
 import {
   filterSettingsToVisibleLanes,
@@ -726,6 +727,10 @@ const archiveLaneSchema = z.object({
   archived: z.boolean(),
 })
 
+const laneRecordsAudioSchema = z.object({
+  recordsAudio: z.boolean(),
+})
+
 /**
  * Same floor as a language-only settings write, lanes included: the org's
  * languageEditMinRole, or PROJECT_LEAD when that key was never set.
@@ -957,6 +962,33 @@ projectSettings.get("/:projectId/lanes/:laneId/last-change", authMiddleware, asy
     return c.json({ error: `read failed: ${message}` }, 500)
   }
 })
+
+// AQU-1954: "Records audio" on one language row. Off (the default), a file
+// counts this language's audio only once it has a recording in it; on, every
+// file owes it — the plan board, the Progress card and the org's numbers all
+// follow. Gated like every other change to the Languages card.
+projectSettings.post(
+  "/:projectId/lanes/:laneId/records-audio",
+  authMiddleware,
+  zValidator("json", laneRecordsAudioSchema),
+  async (c) => {
+    const user = c.get("user")
+    const projectId = c.req.param("projectId") as string
+    const laneId = c.req.param("laneId") as string
+    const denied = await denyLanguageWrite(c.env, user, projectId)
+    if (denied) return c.json(denied, 403)
+    const result = await setTargetLaneRecordsAudio(
+      c.env.AQUILLA_PG,
+      projectId,
+      laneId,
+      c.req.valid("json").recordsAudio,
+    )
+    if (result.status === "not_found") return c.json({ error: "lane not found" }, 404)
+    const fresh = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
+    notifySettingsChangedBestEffort(c, projectId, fresh.version)
+    return c.json({ lane: fresh.lanes?.find((row) => row.id === laneId) ?? result.lane })
+  },
+)
 
 projectSettings.post(
   "/:projectId/lanes/:laneId/archive",

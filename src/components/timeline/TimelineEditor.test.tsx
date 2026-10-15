@@ -1309,6 +1309,30 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(onChange).toHaveBeenCalledWith("dubbing")
   })
 
+  // Sam, 2026-10-15: the Bluetooth note is a small amber pill beside the
+  // timing switch, its explanation behind an info button — not a full line.
+  it("says Bluetooth in a pill after the timing switch, the full message behind its info button", async () => {
+    mockOutputLatencySec = 0.178
+    try {
+      renderAt("dubbing", { onChangeTimingMode: vi.fn() })
+      const pill = screen.getByTestId("tl-output-latency-note")
+      expect(pill).toHaveTextContent(/^Bluetooth$/)
+      const switchEl = screen.getByTestId("tl-timing-mode")
+      expect(switchEl.compareDocumentPosition(pill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(switchEl.parentElement).toBe(pill.parentElement)
+      expect(screen.queryByText(/arrives a moment after the app sends it/)).toBeNull()
+      fireEvent.click(screen.getByRole("button", { name: "About playing through Bluetooth" }))
+      expect(await screen.findByText(/arrives a moment after the app sends it/)).toBeInTheDocument()
+    } finally {
+      mockOutputLatencySec = 0
+    }
+  })
+
+  it("shows no Bluetooth pill on a wired or measured output", () => {
+    renderAt("dubbing", { onChangeTimingMode: vi.fn() })
+    expect(screen.queryByTestId("tl-output-latency-note")).toBeNull()
+  })
+
   it("hides a linked video and says why — it runs on the original's timing", () => {
     render(
       <TimelineEditor

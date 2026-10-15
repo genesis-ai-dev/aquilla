@@ -1025,6 +1025,8 @@ export const editor = defineNamespace({
     "editor.history.reasonFailed": "It couldn't be saved. Try again.",
     "editor.timeline.videoHiddenNote":
       "The linked video is hidden here — it plays on the original recording's timing, which this view no longer follows.",
+    "editor.timeline.bluetoothPill": "Bluetooth",
+    "editor.timeline.bluetoothPillInfo": "About playing through Bluetooth",
     "editor.timeline.outputLatencyNote":
       "Bluetooth audio arrives a moment after the app sends it. The playhead is adjusted for the delay it can measure, but a little is unmeasurable — trust your ears over the line for fine timing.",
     "editor.timeline.outputDeviceChangedToast": "Playback paused — the audio output changed.",
@@ -6084,10 +6086,21 @@ export const editor = defineNamespace({
           "view no longer lays clips out on that clock, so showing it would drift " +
           "against the audio. Explains an absence — not an error.",
       },
+      "editor.timeline.bluetoothPill": {
+        description:
+          "Small amber pill beside the timeline's heading, shown only while the " +
+          "audio output looks like Bluetooth. One word: the name of the " +
+          "connection. Its info button opens editor.timeline.outputLatencyNote.",
+      },
+      "editor.timeline.bluetoothPillInfo": {
+        description:
+          "Screen-reader label of the info button on the Bluetooth pill; it opens " +
+          "the explanation that Bluetooth audio arrives slightly late.",
+      },
       "editor.timeline.outputLatencyNote": {
         description:
-          "Quiet line in the timeline chrome, shown only while the audio output " +
-          "looks like Bluetooth. The app already shifts the playhead by the delay " +
+          "The explanation behind the Bluetooth pill's info button in the timeline " +
+          "header, shown only while the audio output looks like Bluetooth. The app already shifts the playhead by the delay " +
           "the browser reports; this says the REMAINDER cannot be measured, so the " +
           "line may still sit slightly ahead of what is heard. Not a warning and " +
           "not an error — the person can do nothing about it, and nothing is broken.",

@@ -33,6 +33,7 @@ import {
   FolderInput,
   FolderPlus,
   GripVertical,
+  Info,
   Link2,
   LocateFixed,
   Magnet,
@@ -66,6 +67,7 @@ import type { LaneLinkOverlay } from "./CueLinkOverlay"
 import { CueLinkConfirmDialog } from "./CueLinkConfirmDialog"
 import { AddTrackDialog } from "./AddTrackDialog"
 import { RenameTakeDialog } from "./RenameTakeDialog"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { DeleteTrackDialog } from "./DeleteTrackDialog"
 import { trackMenuItems, trackMenuIsEmpty, trackMenuScopes } from "./TrackMenuItems"
 import {
@@ -4093,6 +4095,38 @@ export function TimelineEditor({
             )}
           </div>
         )}
+        {/* AQU-646: the playhead is already shifted back by the delay the
+            browser reports, so this does NOT say "there is latency" — it says
+            the part we cannot measure is still there. Shown only on a path
+            slow enough that the reading is untrustworthy, which in practice
+            means Bluetooth. Sam, 2026-10-15: a small amber pill beside the
+            heading (after the timing switch, when there is one), the full
+            message behind its info button — it was a full-width line. */}
+        {outputLatencySec >= HIGH_LATENCY_SEC && (
+          <span
+            data-testid="tl-output-latency-note"
+            className="ms-1 inline-flex items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300"
+          >
+            {t("editor.timeline.bluetoothPill")}
+            <Popover>
+              <PopoverTrigger
+                render={
+                  <button
+                    type="button"
+                    data-testid="tl-output-latency-info"
+                    aria-label={t("editor.timeline.bluetoothPillInfo")}
+                    className="inline-flex rounded-full text-amber-700/80 outline-none hover:text-amber-800 focus-visible:ring-2 focus-visible:ring-amber-500/50 dark:text-amber-300/80 dark:hover:text-amber-200"
+                  />
+                }
+              >
+                <Info className="h-3 w-3" />
+              </PopoverTrigger>
+              <PopoverContent side="bottom" align="start" sideOffset={6} className="w-72 p-3 text-xs leading-relaxed">
+                {t("editor.timeline.outputLatencyNote")}
+              </PopoverContent>
+            </Popover>
+          </span>
+        )}
         <div className="ms-auto flex items-center gap-1.5">
           {/* Meeting 2026-08-05: generated voices default to compressed
               playback; fast connections can opt into the original WAV. Mic
@@ -4435,21 +4469,6 @@ export function TimelineEditor({
           className="shrink-0 border-b border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground"
         >
           {t("editor.timeline.videoHiddenNote")}
-        </div>
-      )}
-
-      {/* AQU-646: the playhead is already shifted back by the delay the browser
-          reports, so this does NOT say "there is latency" — it says the part we
-          cannot measure is still there. Shown only on a path slow enough that
-          the reading is untrustworthy, which in practice means Bluetooth. Same
-          quiet treatment as the note above: nothing is broken and there is
-          nothing to do about it. */}
-      {outputLatencySec >= HIGH_LATENCY_SEC && (
-        <div
-          data-testid="tl-output-latency-note"
-          className="shrink-0 border-b border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground"
-        >
-          {t("editor.timeline.outputLatencyNote")}
         </div>
       )}
 

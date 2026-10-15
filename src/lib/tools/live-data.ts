@@ -271,6 +271,7 @@ export class LiveToolData implements ToolHostData {
   cellsByRef = (query: { refs: string[]; prefix: string | null; fileIds: string[] | null; tags: string[] | null; lane: string }) => this.files.cellsByRef(query)
   dataGet = (ns: string, coll: string, id: string) => this.files.dataGet(ns, coll, id)
   dataPut = (ns: string, coll: string, id: string, doc: unknown, anchor: ToolDataAnchor | null) => this.files.dataPut(ns, coll, id, doc, anchor)
+  dataPutMany = (ns: string, coll: string, items: Array<{ id: string; doc: unknown; anchor: ToolDataAnchor | null }>) => this.files.dataPutMany(ns, coll, items)
   dataQuery = (ns: string, coll: string, filter: { anchorFileId: string | null; anchorCellIds: string[] | null; ref: string | null }) =>
     this.files.dataQuery(ns, coll, filter)
   dataDelete = (ns: string, coll: string, id: string) => this.files.dataDelete(ns, coll, id)

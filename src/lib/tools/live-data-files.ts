@@ -46,6 +46,9 @@ import type {
 
 /** Fixed namespace for extension-derived ids. NEVER CHANGE: every extension
  *  file/cell id in every project derives from it. */
+
+/** More anchors than this in one file: read the file once instead of by id. */
+const ANCHOR_WHOLE_FILE_THRESHOLD = 200
 export const EXTENSION_NS = "0f3c9a52-6d1e-4b8a-9e57-2a7c61d4b3f0"
 
 export const extensionFileId = (projectId: string, key: string): string => uuidv5(`${projectId}|ext-file|${key}`, EXTENSION_NS)
@@ -435,9 +438,14 @@ export class LiveFilesData implements ToolFilesHostData {
   }
 
   private async ensureDataFile(ns: string, coll: string): Promise<string> {
+    return (await this.ensureDataFileWith(ns, coll, [])).fileId
+  }
+
+  /** The data file, created (with `cells`, in one bulk import) when it does not exist yet. */
+  private async ensureDataFileWith(ns: string, coll: string, cells: BulkImportCell[]): Promise<{ fileId: string; created: boolean }> {
     const fileId = extensionDataFileId(this.opts.projectId, ns, coll)
-    if ((await this.files()).some((f) => f.fileId === fileId)) return fileId
-    if ((await this.files(true)).some((f) => f.fileId === fileId)) return fileId
+    if ((await this.files()).some((f) => f.fileId === fileId)) return { fileId, created: false }
+    if ((await this.files(true)).some((f) => f.fileId === fileId)) return { fileId, created: false }
     const origin = this.opts.toolOrigin()
     await bulkUploadSource({
       projectId: this.opts.projectId,
@@ -450,29 +458,38 @@ export class LiveFilesData implements ToolFilesHostData {
         importFormat: `extension:${origin.toolId}`,
         extension: { kind: "data", tags: [`data:${ns}`], owner: origin.toolId, meta: { ns, coll } },
       },
-      cells: [],
+      cells,
       getToken: (id) => this.opts.tokenFor(this.opts.projectId, id),
       toolOrigin: origin,
     })
     this.filesCache = null
     this.dataCache.delete(fileId)
-    return fileId
+    return { fileId, created: true }
   }
 
   /** The anchored cell's heads now: for drift checks and to stamp a write. */
   private async anchorHeads(anchors: ToolDataAnchor[]): Promise<Map<string, { source: CellRow | null; targets: Map<string, CellRow> }>> {
     const out = new Map<string, { source: CellRow | null; targets: Map<string, CellRow> }>()
     const byFile = new Map<string, Set<string>>()
+    const targetAnchored = new Set<string>()
     for (const a of anchors) {
       const set = byFile.get(a.fileId) ?? new Set<string>()
       set.add(a.cellId)
       byFile.set(a.fileId, set)
+      if (a.side !== "source") targetAnchored.add(a.fileId)
     }
     for (const [fileId, ids] of byFile) {
       const list = [...ids]
       const token = await this.token(fileId)
-      for (let i = 0; i < list.length; i += 100) {
-        const rows = await fetchCellsByIds(this.opts.projectId, fileId, list.slice(i, i + 100), token)
+      // AQU-1937: a whole book's worth of SOURCE anchors reads the file's
+      // source side once (paged) instead of one request per hundred ids;
+      // target anchors (every lane) keep the by-id reads, in parallel.
+      const batches = list.length > ANCHOR_WHOLE_FILE_THRESHOLD && !targetAnchored.has(fileId)
+        ? [(await fetchAllFileCells(this.opts.projectId, fileId, token, "source")).filter((r) => ids.has(r.cellId))]
+        : await Promise.all(
+          Array.from({ length: Math.ceil(list.length / 100) }, (_, i) => fetchCellsByIds(this.opts.projectId, fileId, list.slice(i * 100, i * 100 + 100), token)),
+        )
+      for (const rows of batches) {
         for (const r of rows) {
           const key = `${fileId}|${r.cellId}`
           const entry = out.get(key) ?? { source: null, targets: new Map<string, CellRow>() }
@@ -594,6 +611,84 @@ export class LiveFilesData implements ToolFilesHostData {
     } as CellRow)
     this.opts.flush()
     return { id, version }
+  }
+
+  /** AQU-1937: many records in one call. One anchor lookup for all of them;
+   *  a data file that does not exist yet is created WITH its records in one
+   *  bulk import; otherwise only new or changed records are written (unchanged
+   *  ones cost nothing) and the outbox is flushed once. */
+  async dataPutMany(ns: string, coll: string, items: Array<{ id: string; doc: unknown; anchor: ToolDataAnchor | null }>): Promise<Array<{ id: string; version: string }>> {
+    await this.ready
+    if (items.length === 0) return []
+    const fileId = extensionDataFileId(this.opts.projectId, ns, coll)
+    const anchors = items.flatMap((it) => (it.anchor ? [it.anchor] : []))
+    const heads = anchors.length > 0 ? await this.anchorHeads(anchors) : new Map()
+    const laneTags = new Map<string, string>()
+    const planned: Array<{ id: string; cellId: string; value: string; ref: string | null }> = []
+    for (const [i, it] of items.entries()) {
+      let stamped: DataEnvelope["anchor"] = null
+      let ref: string | null = null
+      if (it.anchor) {
+        const lane = it.anchor.lane ?? ""
+        if (!laneTags.has(lane)) laneTags.set(lane, await this.opts.resolveLaneTag(lane))
+        const head = this.headOf(heads, it.anchor, laneTags.get(lane) ?? "")
+        if (!head.exists) throw new Error(`items[${i}]: the anchor cell does not exist`)
+        stamped = { ...it.anchor, eventId: head.eventId }
+        ref = head.ref
+      }
+      const envelope: DataEnvelope = { v: 1, id: it.id, doc: it.doc, anchor: stamped }
+      planned.push({ id: it.id, cellId: extensionCellId(fileId, it.id), value: JSON.stringify(envelope), ref })
+    }
+
+    const origin = this.opts.toolOrigin()
+    const fresh: BulkImportCell[] = planned.map((pl, i) => ({
+      id: uuidv7(),
+      cellId: pl.cellId,
+      anchorCellId: i === 0 ? null : planned[i - 1].cellId,
+      value: pl.value,
+      type: "data",
+      ...(pl.ref ? { canonicalRef: pl.ref } : {}),
+    }))
+    const { created } = await this.ensureDataFileWith(ns, coll, fresh)
+    if (created) return fresh.map((c, i) => ({ id: planned[i].id, version: c.id }))
+
+    const rows = await this.dataRows(fileId)
+    let tail = [...rows.values()].pop()?.cellId ?? null
+    const out: Array<{ id: string; version: string }> = []
+    for (const pl of planned) {
+      const existing = rows.get(pl.cellId)
+      let version: string
+      if (existing) {
+        if (existing.value === pl.value) {
+          out.push({ id: pl.id, version: existing.eventId })
+          continue
+        }
+        version = await emitSourceCellCommit({ projectId: this.opts.projectId, fileId, cellId: pl.cellId, parentId: existing.eventId, value: pl.value, author: this.opts.author, toolOrigin: origin })
+      } else {
+        version = await emitSourceCellCreate({
+          projectId: this.opts.projectId,
+          fileId,
+          cellId: pl.cellId,
+          anchorCellId: tail,
+          value: pl.value,
+          type: "data",
+          ...(pl.ref ? { canonicalRef: pl.ref } : {}),
+          author: this.opts.author,
+          toolOrigin: origin,
+        })
+        tail = pl.cellId
+      }
+      rows.set(pl.cellId, {
+        ...(existing ?? { cellId: pl.cellId, side: "source", valueHtml: null, type: "data", canonicalRef: pl.ref, anchorCellId: null, sourceEventId: null, validated: false, wordCount: 0 }),
+        value: pl.value,
+        eventId: version,
+        lastEditor: this.opts.author,
+        lastEditAt: Date.now(),
+      } as CellRow)
+      out.push({ id: pl.id, version })
+    }
+    this.opts.flush()
+    return out
   }
 
   async dataDelete(ns: string, coll: string, id: string): Promise<boolean> {

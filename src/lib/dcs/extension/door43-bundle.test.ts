@@ -206,6 +206,46 @@ describe("running the shipped bundle", () => {
     expect(touched).toEqual([])
   })
 
+  it("writes a book's word alignment in a few batched calls, not one per verse (round-trip budget)", async () => {
+    // AQU-1937: per-verse data.put made ULT Revelation take ~40 s and Psalms ~6 min.
+    const ultTit = readFileSync(path.join(ROOT, "src/lib/parsers/__fixtures__/ult-tit-1.usfm"), "utf8")
+    const ultManifest = MANIFEST.replace("identifier: 'tn'", "identifier: 'ult'").replace("TSV Translation Notes", "Aligned Bible").replace("format: 'text/tsv'", "format: 'text/usfm3'")
+      .replace("  - identifier: 'tit'\n    path: './tn_TIT.tsv'\n  - identifier: 'phm'\n    path: './tn_PHM.tsv'\n", "  - identifier: 'tit'\n    path: './57-TIT.usfm'\n")
+    const ULT_FILES: Record<string, string> = { "manifest.yaml": ultManifest, "57-TIT.usfm": ultTit }
+    const ultEntry = { ...RAW_ENTRY, name: "en_ult", full_name: "unfoldingWord/en_ult", subject: "Aligned Bible", content_format: "usfm", abbreviation: "ult" }
+    const ultSite = (url: string) => {
+      const u = new URL(url)
+      if (u.pathname.endsWith("/catalog/search")) return { status: 200, contentType: "application/json", body: JSON.stringify({ data: [ultEntry] }), url }
+      if (u.pathname.includes("/git/trees/")) return { status: 200, contentType: "application/json", body: JSON.stringify({ tree: Object.keys(ULT_FILES).map((p) => ({ path: p, type: "blob" })) }), url }
+      const raw = /\/raw\/(?:tag|branch)\/[^/]+\/(.+)$/.exec(u.pathname)
+      if (raw) return { status: 200, contentType: "text/plain", body: ULT_FILES[raw[1]] ?? "", url }
+      return { status: 404, contentType: "text/plain", body: "", url }
+    }
+    const single = vi.fn(async () => ({ id: "x", version: "v" }))
+    const batches: number[] = []
+    const progress: string[] = []
+    const { done } = await runBundle(
+      { importerId: "door43", phase: "run", options: { lang: "en", resource: "unfoldingWord/en_ult", books: ["TIT"], alignment: true } },
+      {
+        webFetch: async (url) => ultSite(url),
+        upsertFile: async (spec) => ({ fileId: spec.fileId ?? "", created: true, creates: spec.cells.length, commits: 0, deletes: 0, unchanged: 0, cellIds: {} }),
+        dataPut: single,
+        dataPutMany: async (_ns, coll, items) => {
+          batches.push(items.length)
+          expect(coll).toBe("tit")
+          return items.map((it) => ({ id: it.id, version: "v" }))
+        },
+        actionProgress: async (message) => (progress.push(message), true),
+      },
+    )
+    expect(done[0]).toMatchObject({ ok: true, message: expect.stringMatching(/\d+ aligned verse\(s\) kept as data/) })
+    expect(single).not.toHaveBeenCalled()
+    // One record per aligned verse (the fixture's 3), all in ONE call; a whole
+    // book is one call (ALIGNMENT_BATCH covers Psalms).
+    expect(batches).toEqual([3])
+    expect(progress.some((m) => /^Saving alignment 0\/\d+ \(TIT\)$/.test(m))).toBe(true)
+  })
+
   it("reports a choices failure instead of answering an empty list", async () => {
     const { choices, done } = await runBundle(
       { importerId: "door43", phase: "choices", field: "resource", options: { lang: "en" } },

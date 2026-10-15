@@ -139,6 +139,8 @@ export interface ToolFilesHostData {
   cellsByRef: (query: { refs: string[]; prefix: string | null; fileIds: string[] | null; tags: string[] | null; lane: string }) => Promise<Record<string, ToolRefCell[]>>
   dataGet: (ns: string, coll: string, id: string) => Promise<ToolDataDoc | null>
   dataPut: (ns: string, coll: string, id: string, doc: unknown, anchor: ToolDataAnchor | null) => Promise<{ id: string; version: string }>
+  /** AQU-1937: many records, one anchor lookup, one write batch. */
+  dataPutMany: (ns: string, coll: string, items: Array<{ id: string; doc: unknown; anchor: ToolDataAnchor | null }>) => Promise<Array<{ id: string; version: string }>>
   dataQuery: (ns: string, coll: string, filter: { anchorFileId: string | null; anchorCellIds: string[] | null; ref: string | null }) => Promise<ToolDataDoc[]>
   dataDelete: (ns: string, coll: string, id: string) => Promise<boolean>
   actionProgress: (message: string, fraction: number | null) => Promise<boolean>
@@ -151,6 +153,8 @@ export interface ToolFilesHostData {
 export const MAX_UPSERT_CELLS = 50_000
 export const MAX_UPSERT_VALUE_CHARS = 100_000
 export const MAX_RAW_CHARS = 20 * 1024 * 1024
+/** AQU-1937: records per data.putMany call: the largest book (Psalms, 2,461 verses) fits in one. */
+export const MAX_DATA_PUT_MANY = 5000
 export const MAX_DATA_DOC_CHARS = 200_000
 export const MAX_DELIVER_FILES = 200
 export const MAX_DELIVER_BYTES = 100 * 1024 * 1024
@@ -356,6 +360,23 @@ export function createFilesHandlers(data: ToolFilesHostData): Record<string, Bri
       const json = JSON.stringify(p.doc ?? null)
       if (json.length > MAX_DATA_DOC_CHARS) bad(`doc exceeds ${MAX_DATA_DOC_CHARS} characters`)
       return data.dataPut(n, coll, id, JSON.parse(json), parseAnchor(p.anchor))
+    },
+    "data.putMany": async (params) => {
+      const p = obj(params)
+      const { ns: n, coll } = ns(p)
+      if (!Array.isArray(p.items)) bad("items must be a list of { id, doc, anchor? }")
+      if (p.items.length > MAX_DATA_PUT_MANY) bad(`at most ${MAX_DATA_PUT_MANY} items per call`)
+      const seen = new Set<string>()
+      const items = p.items.map((raw, i) => {
+        if (!isRecord(raw)) bad(`items[${i}] must be an object`)
+        const id = str(raw.id, `items[${i}].id`, 300)
+        if (seen.has(id)) bad(`items[${i}].id "${id}" is used twice`)
+        seen.add(id)
+        const json = JSON.stringify(raw.doc ?? null)
+        if (json.length > MAX_DATA_DOC_CHARS) bad(`items[${i}].doc exceeds ${MAX_DATA_DOC_CHARS} characters`)
+        return { id, doc: JSON.parse(json) as unknown, anchor: parseAnchor(raw.anchor) }
+      })
+      return data.dataPutMany(n, coll, items)
     },
     "data.query": async (params) => {
       const p = obj(params)

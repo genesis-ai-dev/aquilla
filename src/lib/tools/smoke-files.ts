@@ -81,6 +81,10 @@ export function stubFilesData(populated: boolean): ToolFilesHostData {
         .map(([, d]) => d)
         .filter((d) => (!filter.anchorFileId || d.anchor?.fileId === filter.anchorFileId) && (!filter.anchorCellIds || (d.anchor && filter.anchorCellIds.includes(d.anchor.cellId))) && (!filter.ref || d.ref === filter.ref)),
     dataDelete: async (ns, coll, id) => docs.delete(key(ns, coll, id)),
+    dataPutMany: async (ns, coll, items) => {
+      for (const it of items) docs.set(key(ns, coll, it.id), { id: it.id, doc: it.doc, anchor: it.anchor ? { ...it.anchor, eventId: "e-smoke" } : null, drift: it.anchor ? "current" : null, ref: it.anchor ? "MAT 1:1" : null, updatedBy: "smoke", updatedAt: Date.now() })
+      return items.map((it) => ({ id: it.id, version: "smoke" }))
+    },
     actionProgress: async () => true,
     actionDone: async () => true,
     exportDeliver: async () => true,

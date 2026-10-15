@@ -103,6 +103,7 @@ export const METHOD_SCOPES: Readonly<Record<string, ToolScope>> = {
   "data.get": "read:cells",
   "data.query": "read:cells",
   "data.put": "write:data",
+  "data.putMany": "write:data",
   "data.delete": "write:data",
 }
 

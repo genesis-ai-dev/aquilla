@@ -180,6 +180,9 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
     data: {
       get: function (ns, id, opts) { return call("data.get", { ns: ns, id: id, coll: opts && opts.coll ? opts.coll : null }); },
       put: function (ns, id, doc, opts) { return call("data.put", { ns: ns, id: id, doc: doc === undefined ? null : doc, coll: opts && opts.coll ? opts.coll : null, anchor: opts && opts.anchor ? opts.anchor : null }); },
+      // AQU-1937: many records in one call ([{ id, doc, anchor? }], at most 5000): one
+      // anchor lookup, one write batch — use it for anything per verse.
+      putMany: function (ns, items, opts) { return call("data.putMany", { ns: ns, items: items || [], coll: opts && opts.coll ? opts.coll : null }); },
       query: function (ns, opts) {
         var o = opts || {};
         return call("data.query", { ns: ns, coll: o.coll || null, anchorFileId: o.anchorFileId || null, anchorCellIds: o.anchorCellIds || null, ref: o.ref || null });

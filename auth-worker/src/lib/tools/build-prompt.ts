@@ -181,6 +181,7 @@ and an exporter that writes them back out. Everything lands as ordinary, attribu
     → { [ref]: [{ fileId, cellId, ref, source, target, sourceHtml, targetHtml, type, metadata, validated }] }   scope read:cells
     One round trip for a verse (or chapter) across up to 50 files — use it instead of reading whole books per pane.
 - aquilla.data.put(ns, id, doc, { coll?, anchor?: { fileId, cellId, side?: "target"|"source", lane? } }) → { id, version }   scope write:data
+- aquilla.data.putMany(ns, [{ id, doc, anchor? }…], { coll? }) → [{ id, version }]   scope write:data. Up to 5000 records in ONE call (one anchor lookup, one write batch; unchanged records cost nothing): use it for anything per verse or per row, never data.put in a loop.
   aquilla.data.get(ns, id, { coll? }) → { id, doc, anchor, drift, ref, updatedBy, updatedAt } | null   scope read:cells
   aquilla.data.query(ns, { coll?, anchorFileId?, anchorCellIds?, ref? }) → [doc…]   scope read:cells
   aquilla.data.delete(ns, id, { coll? }) → boolean   scope write:data

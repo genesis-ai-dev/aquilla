@@ -29,7 +29,10 @@ interface Bridge {
     upsert: (spec: Door43UpsertSpec & { meta?: Record<string, unknown> }) => Promise<{ fileId: string; created: boolean; creates: number; commits: number; deletes: number }>
     list: (filter?: Record<string, unknown>) => Promise<FileView[]>
   }
-  data: { put: (ns: string, id: string, doc: unknown, opts: Record<string, unknown>) => Promise<unknown> }
+  data: {
+    put: (ns: string, id: string, doc: unknown, opts: Record<string, unknown>) => Promise<unknown>
+    putMany: (ns: string, items: Array<{ id: string; doc: unknown; anchor?: Record<string, unknown> }>, opts: Record<string, unknown>) => Promise<unknown>
+  }
   import: {
     progress: (message: string, fraction: number | null) => Promise<unknown>
     done: (message: string, opts?: { ok?: boolean }) => Promise<unknown>
@@ -125,21 +128,35 @@ async function upsertAll(specs: Door43UpsertSpec[], label: (s: Door43UpsertSpec)
   return { files: specs.length, changed }
 }
 
-async function alignmentAsData(spec: Door43UpsertSpec, rawUsfm: string, entry: DcsCatalogEntry): Promise<number> {
+/** Records per data.putMany call: every book in one call (Psalms is 2,461
+ *  verses, ~6 MB), so a new book's alignment lands as ONE bulk import. */
+const ALIGNMENT_BATCH = 2500
+
+/** Word alignment as data: parse once, then write the whole book's records in
+ *  a few batched calls (AQU-1937: one call per verse made a large book take
+ *  minutes), reporting "Saving alignment n/N" as they land. */
+async function alignmentAsData(
+  spec: Door43UpsertSpec,
+  rawUsfm: string,
+  entry: DcsCatalogEntry,
+  progress: (message: string, fraction: number) => Promise<unknown>,
+): Promise<number> {
   if (!/\\zaln-s/.test(rawUsfm) || !w.aq?.parse?.usfm) return 0
+  const book = spec.bookCode ?? "all"
+  await progress(`Reading word alignment (${book})`, 0)
   const byRef = new Map(spec.cells.filter((c) => c.ref).map((c) => [c.ref as string, c.cellId]))
   const groups = alignmentsFromWords(w.aq.parse.usfm(rawUsfm).verses)
-  let n = 0
+  const items: Array<{ id: string; doc: unknown; anchor: Record<string, unknown> }> = []
   for (const [ref, g] of groups) {
     const cellId = byRef.get(ref)
     if (!cellId) continue
-    await w.aquilla.data.put("door43.alignment", `${ref}|${entry.name}`, { groups: g }, {
-      coll: (spec.bookCode ?? "all").toLowerCase(),
-      anchor: { fileId: spec.fileId, cellId, side: "source" },
-    })
-    n++
+    items.push({ id: `${ref}|${entry.name}`, doc: { groups: g }, anchor: { fileId: spec.fileId, cellId, side: "source" } })
   }
-  return n
+  for (let i = 0; i < items.length; i += ALIGNMENT_BATCH) {
+    await progress(`Saving alignment ${i}/${items.length} (${book})`, i / Math.max(1, items.length))
+    await w.aquilla.data.putMany("door43.alignment", items.slice(i, i + ALIGNMENT_BATCH), { coll: book.toLowerCase() })
+  }
+  return items.length
 }
 
 async function importResource(options: Record<string, unknown>, onlyBooks: string[] | null): Promise<string> {
@@ -194,10 +211,17 @@ async function importResource(options: Record<string, unknown>, onlyBooks: strin
   for (const [i, p] of planned.entries()) {
     const bookTitle = fetched.manifest.projects.find((m) => m.identifier.toUpperCase() === p.file.bookCode)?.title
     const spec = specForPlanned(entry, p, bookTitle)
-    await w.aquilla.import.progress(`Importing ${spec.name}`, 0.5 + (i / Math.max(1, planned.length)) * 0.5)
+    // The second half of the bar, split per file: the file's cells, then
+    // (aligned Bibles) the word alignment, which is most of the work.
+    const slot = 0.5 / Math.max(1, planned.length)
+    const base = 0.5 + i * slot
+    const withAlignment = options.alignment !== false && p.fileType === "usfm"
+    await w.aquilla.import.progress(`Saving ${spec.label ?? spec.name}`, base)
     const out = await w.aquilla.files.upsert({ ...spec, meta: metaOf(spec) })
     if (out.created || out.creates + out.commits + out.deletes > 0) changed++
-    if (options.alignment !== false && p.fileType === "usfm") aligned += await alignmentAsData(spec, p.rawSource, entry)
+    if (withAlignment) {
+      aligned += await alignmentAsData(spec, p.rawSource, entry, (message, f) => w.aquilla.import.progress(message, base + slot * (0.3 + 0.7 * f)))
+    }
   }
   return [
     `${planned.length} file(s) from ${entry.fullName} ${entry.ref}; ${changed} changed.`,

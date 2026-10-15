@@ -21,6 +21,7 @@
 
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { audioIdSeededWith } from "@/lib/audio/upload"
+import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 
 export interface KeptWindow {
   /** Seconds into the clip, or null for the clip's start. */
@@ -112,4 +113,30 @@ export function piecesWindowSec(
   const gaps = merged.slice(1).map((m, i) => ({ start: merged[i].end, end: m.start }))
   const end = merged.length > 0 ? merged[merged.length - 1].end : Infinity
   return { start: merged[0]?.start ?? 0, end: Number.isFinite(end) ? end : null, gaps, cuts }
+}
+
+/**
+ * AQU-1767 (Sam's walk, 2026-10-15): how a line's take PLAYS — its trimmed
+ * part, or for a split take its pieces' span with the space between them as
+ * gaps. Null when the whole clip plays. Every player of the take applies the
+ * same, so the line's own play button, the Recording tab and the recorder
+ * all sound alike — and only then count as copies of one another.
+ */
+export function takePlayWindow(
+  attachments:
+    | Record<string, { pieceOf?: string | null; slot?: string; trimStartMs?: number | null; trimEndMs?: number | null; isDeleted?: boolean }>
+    | undefined,
+  audioId: string | null | undefined,
+): { start: number | null; end: number | null; gaps?: { start: number; end: number }[] } | null {
+  if (!audioId || !attachments?.[audioId]) return null
+  const ids = selectedPieceIds(attachments, audioId)
+  if (ids.length > 1) {
+    const w = piecesWindowSec(ids.map((id) => attachments[id] ?? {}))
+    return { start: w.start, end: w.end, gaps: w.gaps }
+  }
+  const att = attachments[audioId]
+  const startMs = att.trimStartMs ?? null
+  const endMs = att.trimEndMs ?? null
+  if (startMs == null && endMs == null) return null
+  return { start: startMs != null ? startMs / 1000 : null, end: endMs != null ? endMs / 1000 : null }
 }

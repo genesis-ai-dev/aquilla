@@ -120,11 +120,15 @@ export function TakeWaveform({
   }
   const live = draft && draft.audioId === audioId && !sameTrim(draft, stored) ? draft : null
   const trim: TrimValue = live ?? stored
+  // AQU-1767: a split take's gaps ride with the window, so the player skips
+  // them itself — on every frame, on a click and on play — whichever of the
+  // take's players is the one sounding.
+  const gapsKey = pieces?.gaps.map((g) => `${g.start}-${g.end}`).join(",") ?? ""
   useEffect(() => {
-    setTrim(trim.start, trim.end)
+    setTrim(trim.start, trim.end, pieces?.gaps)
     // audioId: the controller drops its window when the take changes, so an
     // identical window on the new take must re-apply.
-  }, [setTrim, trim.start, trim.end, audioId])
+  }, [setTrim, trim.start, trim.end, audioId, gapsKey]) // eslint-disable-line react-hooks/exhaustive-deps -- gapsKey stands for pieces.gaps
 
   // ── What is drawn: the whole clip, or a source section's slice of it ──
   const dur = duration > 0 ? duration : 0
@@ -150,12 +154,6 @@ export function TakeWaveform({
     ? { start: toFrac(trim.start ?? 0), end: toFrac(trim.end ?? dur) }
     : null
 
-  // AQU-1767: a split take plays its pieces and skips what lies between.
-  useEffect(() => {
-    if (!pieces || !isPlaying) return
-    const gap = pieces.gaps.find((g) => currentTime >= g.start && currentTime < g.end - 0.01)
-    if (gap) seek(gap.end)
-  }, [pieces, isPlaying, currentTime, seek])
   const gaps = pieces && dur > 0 ? pieces.gaps.map((g) => ({ start: toFrac(g.start), end: toFrac(g.end) })) : undefined
 
   // ── Edges ─────────────────────────────────────────────────────────────

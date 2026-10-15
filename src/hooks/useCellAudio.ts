@@ -49,6 +49,13 @@ function setPlayhead(a: HTMLMediaElement, t: number): void {
   try { a.currentTime = t } catch { /* not seekable yet */ }
 }
 
+/** AQU-1767: where playback resumes when `t` lies in a gap that does not play, or null. */
+export function gapEndAt(gaps: readonly { start: number; end: number }[] | undefined, t: number): number | null {
+  if (!gaps) return null
+  for (const g of gaps) if (t >= g.start && t < g.end - 0.005) return g.end
+  return null
+}
+
 /** How far inside a trim window's end a seek lands — see `clampToTrim`. */
 export const SEEK_END_GUARD_SEC = 0.05
 
@@ -87,8 +94,10 @@ export interface UseCellAudioResult {
    *  next element created on play. */
   setVolume: (v: number) => void
   /** Constrain playback to a [start,end] window in seconds; null = clip edge.
-   *  Both null (default) = unconstrained, byte-identical to no-trim behaviour. */
-  setTrim: (start: number | null, end: number | null) => void
+   *  Both null (default) = unconstrained, byte-identical to no-trim behaviour.
+   *  `gaps` (AQU-1767): stretches inside it that do not play — the space
+   *  between a split take's pieces — skipped by playback, a seek and a play. */
+  setTrim: (start: number | null, end: number | null, gaps?: readonly { start: number; end: number }[]) => void
   /** Decode and cache peaks for a target bin count. Safe to call repeatedly.
    *  Pass { force: true } to retry after a previous failure. */
   requestPeaks: (bins: number, opts?: { force?: boolean }) => Promise<void>
@@ -154,7 +163,7 @@ export function useCellAudio(
   const bytesPromiseRef = useRef<Promise<Uint8Array> | null>(null)
   const peaksReadyRef = useRef(false)
   const volumeRef = useRef(1)
-  const trimRef = useRef<{ start: number | null; end: number | null }>({ start: null, end: null })
+  const trimRef = useRef<{ start: number | null; end: number | null; gaps?: readonly { start: number; end: number }[] }>({ start: null, end: null })
 
   // Keep the latest session reachable from the token fetcher without
   // recreating it on every session field update. The underlying token cache
@@ -179,12 +188,25 @@ export function useCellAudio(
   const seekRef = useRef<(t: number) => void>(() => undefined)
   const coordinatorControllerRef = useRef<ActiveAudioController | null>(null)
   const clipKeyRef = useRef<string | null>(null)
+  // AQU-1767 (Sam's walk, 2026-10-15): two players of one take are COPIES only
+  // while they play it the same way. The line's own play button played a split
+  // take whole and raw, the Recording tab its pieces — and a click on the tab's
+  // waveform was handed to the row's player, which played the gaps and ran
+  // past the last piece. The window is part of which take this is.
+  const copyKeyRef = useRef<() => string | null>(() => null)
+  copyKeyRef.current = () => {
+    const key = clipKeyRef.current
+    if (!key) return null
+    const { start, end, gaps } = trimRef.current
+    const sig = (n: number | null) => (n == null ? "" : n.toFixed(3))
+    return `${key}@${sig(start)}-${sig(end)}${gaps?.length ? `~${gaps.map((g) => `${sig(g.start)}-${sig(g.end)}`).join(",")}` : ""}`
+  }
   if (coordinatorControllerRef.current === null) {
     coordinatorControllerRef.current = {
       isPlaying: () => Boolean(audioRef.current && !audioRef.current.paused),
       play: () => playRef.current(),
       pause: () => pauseRef.current(),
-      clipKey: () => clipKeyRef.current,
+      clipKey: () => copyKeyRef.current(),
       currentTime: () => audioRef.current?.currentTime ?? 0,
       seek: (t: number) => seekRef.current(t),
     }
@@ -370,6 +392,9 @@ export function useCellAudio(
       setCurrentTime(start ?? 0)
       return // onpause → stopTicking
     }
+    // AQU-1767: across the space between a split take's pieces.
+    const pastGap = gapEndAt(trimRef.current.gaps, a.currentTime)
+    if (pastGap != null) setPlayhead(a, pastGap)
     publishTime(a.currentTime)
     rafRef.current = requestAnimationFrame(() => tickPlayheadRef.current())
   }, [publishTime, setCurrentTime])
@@ -391,7 +416,7 @@ export function useCellAudio(
     // The take was last played from another of its copies: resume it THERE,
     // where it was left, rather than start a second playback from the top.
     const self = coordinatorControllerRef.current
-    const other = self ? otherCopyOf(self, clipKeyRef.current) : null
+    const other = self ? otherCopyOf(self, copyKeyRef.current()) : null
     if (other && !(audioRef.current && !audioRef.current.paused)) { await other.play(); return }
     // CLAIM, not just record: whatever else is sounding stops — another take,
     // or another copy of this one (Sam, 2026-09-29: the Audio view card and
@@ -407,6 +432,8 @@ export function useCellAudio(
       if (start != null && (a.ended || a.currentTime < start || (end != null && a.currentTime >= end - 0.01))) {
         setPlayhead(a, start)
       }
+      const pastGap = gapEndAt(trimRef.current.gaps, a.currentTime)
+      if (pastGap != null) setPlayhead(a, pastGap)
       try { await a.play() } catch (e) {
         console.error("[useCellAudio] play() rejected", e)
       }
@@ -484,6 +511,8 @@ export function useCellAudio(
           setCurrentTime(start ?? 0)
           return
         }
+        const pastGap = gapEndAt(trimRef.current.gaps, audio.currentTime)
+        if (pastGap != null) setPlayhead(audio, pastGap)
         publishTime(audio.currentTime)
       }
       audioRef.current = audio
@@ -569,7 +598,7 @@ export function useCellAudio(
     if (own && !own.paused) { own.pause(); return }
     // Sounding from another copy of this take: stop it there.
     const self = coordinatorControllerRef.current
-    if (self) playingElsewhere(self, clipKeyRef.current)?.pause()
+    if (self) playingElsewhere(self, copyKeyRef.current())?.pause()
   }, [])
 
   const setVolume = useCallback((v: number) => {
@@ -578,8 +607,8 @@ export function useCellAudio(
     if (audioRef.current) audioRef.current.volume = clamped
   }, [])
 
-  const setTrim = useCallback((start: number | null, end: number | null) => {
-    trimRef.current = { start, end }
+  const setTrim = useCallback((start: number | null, end: number | null, gaps?: readonly { start: number; end: number }[]) => {
+    trimRef.current = gaps && gaps.length > 0 ? { start, end, gaps } : { start, end }
     const a = audioRef.current
     if (a && start != null && Number.isFinite(a.duration)) {
       // Snap the playhead into the new window if it fell outside.
@@ -597,7 +626,9 @@ export function useCellAudio(
   const clampToTrim = (t: number, dur: number): number => {
     const lo = trimRef.current.start ?? 0
     const hi = trimRef.current.end ?? dur
-    return Math.max(lo, Math.min(t, Math.max(lo, hi - SEEK_END_GUARD_SEC)))
+    const inWindow = Math.max(lo, Math.min(t, Math.max(lo, hi - SEEK_END_GUARD_SEC)))
+    // A click in the space between pieces starts the next piece.
+    return gapEndAt(trimRef.current.gaps, inWindow) ?? inWindow
   }
 
   // A drag reports every pointer move; the element is moved once a frame, to
@@ -612,7 +643,7 @@ export function useCellAudio(
   const seek = useCallback((t: number) => {
     // Scrubbing a copy of the take another copy last played moves THAT one.
     const self = coordinatorControllerRef.current
-    const other = self ? otherCopyOf(self, clipKeyRef.current) : null
+    const other = self ? otherCopyOf(self, copyKeyRef.current()) : null
     if (other?.seek) { other.seek(t); return }
     const a = audioRef.current
     if (a) {
@@ -717,7 +748,7 @@ export function useCellAudio(
     const self = coordinatorControllerRef.current
     if (!self) return
     const check = () => {
-      const other = otherCopyOf(self, clipKey)
+      const other = otherCopyOf(self, copyKeyRef.current())
       setMirrored(other)
       setMirrorPlaying(Boolean(other?.isPlaying()))
       if (other?.currentTime) setMirrorTime(other.currentTime())

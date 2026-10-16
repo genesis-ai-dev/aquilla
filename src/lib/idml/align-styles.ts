@@ -18,6 +18,11 @@ import {
   type IdmlRepairMessage,
   type NormalizedCompletion,
 } from "./completion"
+import { idmlPlainMatchesTranslation } from "./protected-html"
+import {
+  distributeTranslationLikeSource,
+  targetDistributionCollapsesSource,
+} from "./segment-distribution"
 
 export interface AlignStylesCell extends IdmlCompletionCell {
   readonly translated?: string
@@ -123,14 +128,32 @@ export async function alignIdmlStyles(
     throw new Error(t("editor.idml.alignStylesEmpty"))
   }
 
-  const placed = joined(prepared.metadata.editableSlotIndexes, slotTexts)
+  let placed = joined(prepared.metadata.editableSlotIndexes, slotTexts)
   if (idmlWordingKey(placed) !== prepared.wording) {
     throw new Error(t("editor.idml.alignStylesChangedWording"))
   }
 
+  const sourceSlots = prepared.runs
+    .filter((run) => run.editable)
+    .map((run) => ({ index: run.index, style: run.styleId, text: run.text }))
+  if (targetDistributionCollapsesSource(sourceSlots, slotTexts)) {
+    const expected = (cell.translated ?? "").length > 0 ? cell.translated! : placed
+    const fixed = distributeTranslationLikeSource(sourceSlots, expected)
+    const fixedJoin = fixed ? joined(prepared.metadata.editableSlotIndexes, fixed) : ""
+    if (fixed && idmlPlainMatchesTranslation(fixedJoin, expected)) {
+      slotTexts = fixed
+      placed = fixedJoin
+    }
+  }
+
   let completion: NormalizedCompletion
   try {
-    completion = stitchIdmlSlotTexts(cell, slotTexts)
+    const original = cell.translated ?? ""
+    completion = stitchIdmlSlotTexts(cell, slotTexts, {
+      preserveWording: original.length > 0 && idmlPlainMatchesTranslation(placed, original)
+        ? original
+        : placed,
+    })
   } catch (error) {
     console.warn("[align-styles] stitch failed", error)
     throw new Error(t("editor.idml.alignStylesFailed"))

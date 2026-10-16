@@ -387,8 +387,12 @@ interface ExportDialogProps {
   getToken: (fileId: string) => Promise<string | null>
   /** Organization identifier used for internal/beta rollout allowlists. */
   orgId?: string
-  /** Opens the import flow when an IDML locator or anchor needs repair. */
-  onReimport?: () => void
+  /** Builds a repaired IDML copy of the file being exported. The original file is not modified. */
+  onRepairIdmlCopy?: (args: {
+    fileId: string
+    fileName: string
+    onProgress?: (label: string) => void
+  }) => Promise<{ name: string; unmatched: number }>
   /**
    * AQU-654: count of outstanding (non-waived) LQA/validation "health"
    * infractions on the active file. Export NEVER hard-blocks on these — the
@@ -459,7 +463,7 @@ export function ExportDialog({
   ttsSettings,
   getToken,
   orgId,
-  onReimport,
+  onRepairIdmlCopy,
   outstandingInfractionCount = 0,
 }: ExportDialogProps) {
   const { locale } = useI18n()
@@ -1006,6 +1010,39 @@ export function ExportDialog({
     bytes: ArrayBuffer
     downloadName: string
   } | null>(null)
+  const [repairingCopy, setRepairingCopy] = useState(false)
+
+  const repairCopy = async () => {
+    if (!activeFileId || !activeFileName || !onRepairIdmlCopy || repairingCopy) return
+    setRepairingCopy(true)
+    setStatus({
+      kind: "busy",
+      msg: t("importExport.dialog.repairingIdmlCopy", { fileName: activeFileName }),
+    })
+    try {
+      const result = await onRepairIdmlCopy({
+        fileId: activeFileId,
+        fileName: activeFileName,
+        onProgress: (label) => setStatus({ kind: "busy", msg: label }),
+      })
+      setStatus({
+        kind: "ok",
+        msg: result.unmatched > 0
+          ? t("importExport.dialog.repairIdmlCopyDoneUnmatched", {
+              fileName: result.name,
+              count: result.unmatched,
+            })
+          : t("importExport.dialog.repairIdmlCopyDone", { fileName: result.name }),
+      })
+    } catch (error) {
+      setStatus({
+        kind: "error",
+        msg: error instanceof Error ? error.message : t("importExport.dialog.repairIdmlCopyNeedsOriginal"),
+      })
+    } finally {
+      setRepairingCopy(false)
+    }
+  }
 
   const selectedFormat = formatOptions.find((f) => f.id === format)!
   const isLossy = selectedFormat.lossy
@@ -2790,11 +2827,8 @@ export function ExportDialog({
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => {
-                      handleOpenChange(false)
-                      onReimport?.()
-                    }}
-                    disabled={!onReimport}
+                    onClick={() => { void repairCopy() }}
+                    disabled={!onRepairIdmlCopy || repairingCopy}
                   >
                     {t("importExport.dialog.repairByReimporting")}
                   </Button>

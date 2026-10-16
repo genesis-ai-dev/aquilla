@@ -54,6 +54,7 @@ import {
 import { extractDocxStrings } from "./parsers/docx"
 import { extractPptxStrings } from "./parsers/pptx"
 import { extractIdmlStrings } from "./parsers/idml"
+import { alignReimportedIdmlFile, type IdmlReimportAlignHost } from "./idml/align-reimported-targets"
 // Partner readers are NOT imported here — they arrive on the `edition` descriptor
 // passed to `importPartnerNotes`, so this module still compiles with the
 // partner-integrations folders deleted. See docs/PARTNER-INTEGRATIONS.md.
@@ -540,6 +541,12 @@ export interface ImportContext {
   /** Existing files selected for safe unit-identity reconciliation. Keys use
    * the same normalized book-code/name vocabulary as skipKeys. */
   reimportFileIds?: ReadonlyMap<string, string>
+  /** IDML Update Existing: after reconcile, place each kept translation into
+   *  the new style runs. Absent when AI completion is not configured. */
+  alignReimportedIdml?: IdmlReimportAlignHost
+  /** Replaces the upload phase label, for example while styles are aligning. */
+  onPhase?: (label: string) => void
+  onAlignProgress?: (done: number, total: number) => void
   /** Advanced orchestrators can keep fresh files hidden while persisting
    * package-level or format-specific secondary data. */
   deferPublication?: boolean
@@ -1712,6 +1719,31 @@ export async function emitParsedFile(
     onProgress: ctx.onCellEnqueued,
     signal: ctx.signal,
   })
+
+  if (existingFileId && fileType === "idml" && ctx.alignReimportedIdml) {
+    try {
+      await alignReimportedIdmlFile({
+        projectId: ctx.projectId,
+        fileId,
+        lane: ctx.targetLang,
+        getToken: ctx.getToken,
+        host: ctx.alignReimportedIdml,
+        sourceLanguage: ctx.sourceLanguage ?? "",
+        targetLanguage: ctx.targetLanguage ?? "",
+        signal: ctx.signal,
+        onProgress: (done, total) => {
+          ctx.onPhase?.(t("importExport.upload.aligningIdmlStyles", {
+            fileName: result.name,
+            count: done.toLocaleString(),
+            total: total.toLocaleString(),
+          }))
+          ctx.onAlignProgress?.(done, total)
+        },
+      })
+    } catch (error) {
+      console.warn("[idml-reimport] style alignment failed", error)
+    }
+  }
 
   return {
     ref: {

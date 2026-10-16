@@ -18,6 +18,10 @@ import {
   readIdmlRejoinMetadata,
   type IdmlRejoinMetadata,
 } from "@/lib/idml/rejoin"
+import {
+  chooseIdmlHtmlMatchingTranslation,
+  idmlEditableSlotText,
+} from "@/lib/idml/protected-html"
 import { normalizePartnerIdmlTargetHtml } from "@/lib/partners/registry"
 
 const IDML_MIME = "application/vnd.adobe.indesign-idml-package"
@@ -296,8 +300,17 @@ function cellContract(cell: CellData): CellContract {
   if (reflowedHtml !== targetHtml) {
     const reflowed = validateIdmlTranslation(cell.originalHtml, reflowedHtml, metadata)
     if (reflowed.valid) {
-      targetHtml = reflowedHtml
-      targetSlots = reflowed.slots
+      const chosen = chooseIdmlHtmlMatchingTranslation(
+        targetHtml,
+        reflowedHtml,
+        idmlEditableSlotText(targetSlots, metadata.editableSlotIndexes),
+        idmlEditableSlotText(reflowed.slots, metadata.editableSlotIndexes),
+        cell.translated,
+      )
+      if (chosen !== targetHtml) {
+        targetHtml = reflowedHtml
+        targetSlots = reflowed.slots
+      }
     }
   }
 

@@ -77,6 +77,7 @@ import {
   idmlCompletionPromptSource,
   idmlCompletionSystemAddendum,
   normalizeProtectedCompletionWithRepair,
+  type IdmlRepairMessage,
 } from "@/lib/idml/completion"
 import { alignIdmlStyles, cellCanAlignStyles } from "@/lib/idml/align-styles"
 import { t } from "@/lib/i18n/standalone"
@@ -685,6 +686,17 @@ export function useCompletion(
       return false
     }
   }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, lk, recordModelCall])
+
+  const askAlignStyles = useCallback(async (
+    messages: readonly IdmlRepairMessage[],
+    signal?: AbortSignal,
+  ) => complete({
+    settings: { ...effectiveSettings, temperature: 0 },
+    session,
+    messages: [...messages],
+    stream: false,
+    signal,
+  }), [effectiveSettings, session])
 
   // Segmented batch translation: each small sub-batch goes out as one
   // <vN>-framed prompt and the response is demuxed back to cells. This preserves
@@ -1452,5 +1464,5 @@ export function useCompletion(
   const completingForLane = useMemo(() => sliceCompletionLaneMap(completing, lane), [completing, lane])
   const errorsForLane = useMemo(() => sliceCompletionLaneMap(errors, lane), [errors, lane])
 
-  return { completeSingle, alignCellStyles, prepareSingleEvidence, prefetchSingleEvidence, completeBatch, completeParagraph, cancelCompletion: cancelBatchCompletion, clearCellError, isConfigured, isAvailable, completing: completingForLane, examples: examplesForLane, errors: errorsForLane, previews: previewsForLane }
+  return { completeSingle, alignCellStyles, askAlignStyles, alignStylesModel: { model: modelName, provider }, prepareSingleEvidence, prefetchSingleEvidence, completeBatch, completeParagraph, cancelCompletion: cancelBatchCompletion, clearCellError, isConfigured, isAvailable, completing: completingForLane, examples: examplesForLane, errors: errorsForLane, previews: previewsForLane }
 }

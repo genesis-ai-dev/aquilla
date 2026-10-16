@@ -65,6 +65,34 @@ describe("align IDML styles", () => {
     await expect(alignIdmlStyles(misalignedCell(unit), ask)).rejects.toThrow(/changed the wording/)
   })
 
+  it("moves a note out of the first bold run when that run is only the headword", async () => {
+    const unit = await parsedRuns([
+      ["CharacterStyle/k", "Devil:"],
+      ["CharacterStyle/Plain", " The leader. ("],
+      ["CharacterStyle/k_xt", "Evil beings"],
+      ["CharacterStyle/Plain", ".)"],
+    ])
+    const translation = "Diabo: O líder. (Seres maus.)"
+    const ask = vi.fn().mockResolvedValue(JSON.stringify({
+      slots: [
+        { i: 0, t: translation },
+        { i: 1, t: "" },
+        { i: 2, t: "" },
+        { i: 3, t: "" },
+      ],
+    }))
+
+    const aligned = await alignIdmlStyles(noteCell(unit, translation), ask)
+    const checked = validateIdmlTranslation(unit.sourceHtml, aligned.completion.valueHtml!, unit.metadata)
+
+    expect(checked.valid).toBe(true)
+    expect(checked.slots[0]).toBe("Diabo:")
+    expect(checked.slots[1]).toBe(" O líder. (")
+    expect(checked.slots[2]).toBe("Seres maus")
+    expect(checked.slots[3]).toBe(".)")
+    expect(aligned.completion.value).toBe(translation)
+  })
+
   it("reports when the model leaves the runs as they are", async () => {
     const unit = await parsedUnit()
     const ask = vi.fn().mockResolvedValue(JSON.stringify({
@@ -107,7 +135,34 @@ function misalignedCell(unit: IdmlTranslationUnit): AlignStylesCell {
   }
 }
 
+function noteCell(unit: IdmlTranslationUnit, translation: string): AlignStylesCell {
+  return {
+    id: unit.id,
+    originalHtml: unit.sourceHtml,
+    translated: translation,
+    translatedHtml: `<p>${translation}</p>`,
+    metadata: {
+      idml: unit.metadata,
+      biblica: { contentType: "notes" },
+    },
+  }
+}
+
+async function parsedRuns(runs: readonly (readonly [string, string])[]): Promise<IdmlTranslationUnit> {
+  const ranges = runs.map(([style, text]) =>
+    `<CharacterStyleRange AppliedCharacterStyle="${style}"><Content>${text}</Content></CharacterStyleRange>`,
+  ).join("")
+  return parsedStory(ranges)
+}
+
 async function parsedUnit(): Promise<IdmlTranslationUnit> {
+  return parsedStory([
+    '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Plain"><Content>Hello</Content></CharacterStyleRange>',
+    '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Bold"><Content>WORLD</Content></CharacterStyleRange>',
+  ].join(""))
+}
+
+async function parsedStory(ranges: string): Promise<IdmlTranslationUnit> {
   const storyPath = "Stories/Story_u100.xml"
   const zip = new JSZip()
   zip.file("mimetype", IDML_MIME, { compression: "STORE", createFolders: false })
@@ -121,8 +176,7 @@ async function parsedUnit(): Promise<IdmlTranslationUnit> {
     [
       `<?xml version="1.0"?><idPkg:Story ${IDPKG}><Story Self="u100">`,
       '<ParagraphStyleRange Self="mixed" AppliedParagraphStyle="ParagraphStyle/Body">',
-      '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Plain"><Content>Hello</Content></CharacterStyleRange>',
-      '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Bold"><Content>WORLD</Content></CharacterStyleRange>',
+      ranges,
       "</ParagraphStyleRange></Story></idPkg:Story>",
     ].join(""),
     { compression: "DEFLATE", createFolders: false },

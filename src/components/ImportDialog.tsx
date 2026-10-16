@@ -142,6 +142,7 @@ import {
 } from "@/lib/import/import-file-gate"
 import { filesForBook, type TranslationDestination } from "@/lib/import/translation-destination"
 import { parsedResultBooks, reimportKeysFor } from "@/lib/import/reimport-keys"
+import type { IdmlReimportAlignHost } from "@/lib/idml/align-reimported-targets"
 import { TranslationCheckPanel } from "@/components/import/TranslationCheckPanel"
 import { ImportOptionCard } from "@/components/import/ImportOptionCard"
 import {
@@ -372,6 +373,10 @@ interface ImportDialogProps {
   /** AQU-1365: the "A translation" path. Absent, the dialog offers source
    *  import only, as before. */
   translation?: TranslationImportHost
+  /** IDML Update Existing places kept translations into the new style runs.
+   *  Absent when AI completion is not configured; the re-import still updates
+   *  the source and leaves every translation where it is. */
+  alignReimportedIdml?: IdmlReimportAlignHost
 }
 
 /** localStorage key used to persist the per-project "skip direction prompt" choice. */
@@ -401,6 +406,7 @@ export function ImportDialog({
   linkSource,
   sourceDisabledReason = null,
   translation,
+  alignReimportedIdml,
 }: ImportDialogProps) {
   const t = useT()
   const [screen, setScreen] = useState<Screen>("landing")
@@ -1257,6 +1263,7 @@ export function ImportDialog({
             onImported={handleChildImported}
             excludeFrontMatter={excludeFrontMatter}
             cellUnit={cellUnit}
+            alignReimportedIdml={alignReimportedIdml}
             onTranslationCheck={translationCheckFor("upload")}
           />
         )}
@@ -1300,6 +1307,7 @@ export function ImportDialog({
             onImported={handleChildImported}
             excludeFrontMatter={excludeFrontMatter}
             cellUnit={cellUnit}
+            alignReimportedIdml={alignReimportedIdml}
             onTranslationCheck={translationCheckFor("gdrive")}
           />
         )}
@@ -2006,6 +2014,8 @@ interface UploadPanelProps {
     /** Every file in the batch, flagged or not, media included. */
     fileCount: number,
   ) => Promise<boolean>
+  /** IDML Update Existing places kept translations into the new style runs. */
+  alignReimportedIdml?: IdmlReimportAlignHost
 }
 
 /** AQU-1365: one parsed text upload, as the translation check sees it. */
@@ -2101,7 +2111,7 @@ function idmlParsePhase(
   })
 }
 
-function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, excludeFrontMatter, cellUnit, variant = "upload", onTranslationCheck }: UploadPanelProps) {
+function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, excludeFrontMatter, cellUnit, variant = "upload", onTranslationCheck, alignReimportedIdml }: UploadPanelProps) {
   const t = useT()
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
@@ -2437,6 +2447,22 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             mediaTextSource: mediaSources?.get(file),
             origins: originsRef.current ?? undefined,
             getToken,
+            alignReimportedIdml,
+            onPhase: (phase) => {
+              setPhase(phase)
+              onCommitPhase?.(phase)
+            },
+            onAlignProgress: (count, total) => {
+              const frac = total > 0 ? Math.min(count / total, 1) : 0
+              const next: ImportUploadProgress = {
+                count,
+                total,
+                bytesReceived: bytesBefore + Math.round(frac * (file.size || 0)),
+                bytesTotal,
+              }
+              setProgress(next)
+              onCommitProgress?.(next)
+            },
             onCellEnqueued: (count, total) => {
               const p = t("importExport.upload.uploadingFile", { fileName: file.name })
               setPhase(p)
@@ -2527,7 +2553,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
         onCommitPhase?.("")
       }
     },
-    [projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onCommitPhase, onCommitProgress, onCommitError, t]
+    [projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onCommitPhase, onCommitProgress, onCommitError, alignReimportedIdml, t]
   )
 
   function handleDrop(e: React.DragEvent) {

@@ -461,7 +461,11 @@ export function AirtableIntegrationSection({ projectId, orgId, roleLevel }: Prop
 
       <AirtableSetupWizard
         open={wizardOpen}
-        onOpenChange={setWizardOpen}
+        onOpenChange={(open) => {
+          setWizardOpen(open)
+          // The wizard links, then pushes: re-read the link so its last push shows.
+          if (!open) void load()
+        }}
         projectId={projectId}
         orgId={orgId}
         jwt={jwt}

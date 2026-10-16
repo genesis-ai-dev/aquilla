@@ -25,8 +25,21 @@ vi.mock("@/hooks/useFrontierSession", () => ({
 }))
 // The setup steps are their own component with their own tests.
 vi.mock("./AirtableSetupWizard", () => ({
-  AirtableSetupWizard: ({ open, mode }: { open: boolean; mode: string }) =>
-    open ? <div data-testid="airtable-wizard">{mode}</div> : null,
+  AirtableSetupWizard: ({
+    open,
+    mode,
+    onOpenChange,
+  }: {
+    open: boolean
+    mode: string
+    onOpenChange: (open: boolean) => void
+  }) =>
+    open ? (
+      <div>
+        <span data-testid="airtable-wizard">{mode}</span>
+        <button onClick={() => onOpenChange(false)}>close wizard</button>
+      </div>
+    ) : null,
 }))
 
 const mocked = vi.mocked(api)
@@ -100,6 +113,17 @@ describe("AirtableIntegrationSection", () => {
     renderSection()
     fireEvent.click(await screen.findByTestId("airtable-setup-with-ai"))
     expect(screen.getByTestId("airtable-wizard").textContent).toBe("ai")
+  })
+
+  it("closing the setup re-reads the link, so the first push it made shows", async () => {
+    mocked.fetchAirtableLink.mockResolvedValueOnce({ linked: false, orgConnected: true, orgId: 7 })
+    mocked.fetchAirtableLink.mockResolvedValue({ linked: true, orgConnected: true, orgId: 7, link: makeLink() })
+    renderSection()
+    fireEvent.click(await screen.findByTestId("airtable-setup-with-ai"))
+    fireEvent.click(screen.getByRole("button", { name: "close wizard" }))
+    await waitFor(() =>
+      expect(document.querySelector("#section-airtable")?.textContent).toMatch(/Last push .* — ok\./),
+    )
   })
 
   it("linked: the table, its records line, last push and the mapping in Airtable's words", async () => {

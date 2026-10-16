@@ -703,7 +703,9 @@ export const projectSettings = defineNamespace({
     "projectSettings.autoPropagateRepetitions.off": "Don't propagate",
     "projectSettings.autoPropagateRepetitions.saveFailed": "Could not save that change",
 
-    "projectSettings.validation.allowSelfLabel": "Allow self-validation",
+    // AQU-1768: "(text)", like "Required validators (text)" above it — the
+    // recordings' own switch sits further down under Audio validation.
+    "projectSettings.validation.allowSelfLabel": "Allow self-validation (text)",
     // AQU-1571: the server refuses the vote up front, for every role, and the
     // editor greys the check out; "ignored" and "a contributor's" were both wrong.
     "projectSettings.validation.allowSelfDescription":

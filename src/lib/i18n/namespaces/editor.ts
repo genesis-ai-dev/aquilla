@@ -1597,6 +1597,9 @@ export const editor = defineNamespace({
       "This edit would change the protected IDML document structure.",
     "editor.idml.editWouldChangeFormattingError":
       "This edit would change protected IDML formatting.",
+    "editor.idml.noEditableSlotError":
+      "Every text run in this IDML cell is protected, so there is nowhere for " +
+      "your typing to go. Re-import the IDML to make the text editable.",
     "editor.idml.alignStylesChangedWording":
       "Align styles would have changed the wording, so nothing was saved.",
     "editor.idml.alignStylesUnchanged":
@@ -6240,6 +6243,13 @@ export const editor = defineNamespace({
           "Rejection message (role=alert, via reportIdmlError) for an in-progress " +
           "edit that would alter protected IDML formatting anchors — the edit is " +
           "refused before it lands. 'IDML' is the file-format name and stays as-is.",
+      },
+      "editor.idml.noEditableSlotError": {
+        description:
+          "Rejection message (role=alert, via reportIdmlError) shown when a typed " +
+          "or pasted character has no editable slot to land in because every run " +
+          "in the cell is protected (AQU-1962) — the keystroke used to vanish with " +
+          "no message. 'IDML' is the file-format name and stays as-is.",
       },
       "editor.tts.translatingBeforeVoicing": {
         description:

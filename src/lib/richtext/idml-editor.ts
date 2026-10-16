@@ -429,17 +429,64 @@ export function idmlDeletionRange(
   granularity: IdmlDeleteGranularity,
 ): IdmlRange | null {
   if (!selection.empty) return { from: selection.from, to: selection.to }
-  const position = selection.from
-  const slot = editableSlotAt(doc, position)
-  if (!slot) return null
+  const caret = editableSlotForCaret(doc, selection.from)
+  if (!caret) return null
   const within = slotDeletionRange(
-    slot.start,
-    slotPlainText(slot.node),
-    position - slot.start,
+    caret.slot.start,
+    slotPlainText(caret.slot.node),
+    caret.position - caret.slot.start,
     direction,
     granularity,
   )
-  return within ?? adjacentSlotDeletionRange(doc, slot.start, direction, granularity)
+  return within ?? adjacentSlotDeletionRange(doc, caret.slot.start, direction, granularity)
+}
+
+/**
+ * AQU-1962: the position to read or write at for a caret that sits *between*
+ * two protected runs instead of inside one.
+ *
+ * Adjacent runs put a caret position in the paragraph itself, outside every
+ * slot — the paragraph's content is slot and token nodes, so it is a textblock
+ * and that boundary is a real place to click. Nothing there belongs to a slot,
+ * so a caret left at the boundary read as "not in an editable slot": a typed
+ * character was re-aimed at the cell's FIRST editable run (so a space typed
+ * between "Иафета" and "и" appeared at the start of the cell, which reads as
+ * the cell refusing it) and Backspace/Delete found no range at all. Separating
+ * a word pair InDesign split across runs is exactly the edit that lands here.
+ *
+ * The run before the caret wins, the way a caret inserts into the text on its
+ * left; a boundary against a protected token or the paragraph edge has no
+ * editable run to take the edit and stays unresolved.
+ */
+export function idmlBoundarySlotPosition(
+  doc: ProseMirrorNode,
+  position: number,
+): number | null {
+  if (position < 0 || position > doc.content.size) return null
+  const resolved = doc.resolve(position)
+  if (resolved.parent.type.name !== IDML_PARAGRAPH_NODE_NAME) return null
+  const before = resolved.nodeBefore
+  if (before?.type.name === IDML_SLOT_NODE_NAME && before.attrs.editable === true) {
+    return position - 1
+  }
+  const after = resolved.nodeAfter
+  if (after?.type.name === IDML_SLOT_NODE_NAME && after.attrs.editable === true) {
+    return position + 1
+  }
+  return null
+}
+
+/** The editable slot a caret edits, snapping a run boundary into its run. */
+function editableSlotForCaret(
+  doc: ProseMirrorNode,
+  position: number,
+): { position: number; slot: { start: number; node: ProseMirrorNode } } | null {
+  const direct = editableSlotAt(doc, position)
+  if (direct) return { position, slot: direct }
+  const snapped = idmlBoundarySlotPosition(doc, position)
+  if (snapped === null) return null
+  const slot = editableSlotAt(doc, snapped)
+  return slot ? { position: snapped, slot } : null
 }
 
 export function isEditableIdmlSelection(selection: {
@@ -665,6 +712,21 @@ const IdmlSlot = TiptapNode.create({
   isolating: true,
   selectable: false,
   defining: true,
+  /**
+   * AQU-1962: a slot's text is translator content, so its spaces are content
+   * too — including the one at a run boundary, which is the whole point of the
+   * edit when InDesign split a word pair across runs ("книги" | "Бытие").
+   *
+   * ProseMirror's default parse normalization drops whitespace at the edges of
+   * a node's inline content, so without this the schema does NOT hold that
+   * invariant: a boundary space survives today only because `TranslatedEditor`
+   * passes `preserveWhitespace: "full"`, by hand, at each of the two places it
+   * parses a slot document. Any third parse — another editor, a `setContent`
+   * that forgets the option — silently merged the words back together, and the
+   * next commit then wrote the merged text. Declaring it on the node puts the
+   * invariant where it cannot be forgotten.
+   */
+  whitespace: "pre",
 
   addAttributes() {
     return {

@@ -16,7 +16,7 @@ import { useSyncExternalStore } from "react"
 // Progress store
 // ---------------------------------------------------------------------------
 
-export type BatchKind = "transcribe" | "synth" | "measure"
+export type BatchKind = "transcribe" | "synth" | "measure" | "changeVoice"
 
 export interface BatchProgress {
   kind: BatchKind

@@ -283,7 +283,6 @@ export function VoiceLibraryPanel({
                   <VoiceRow
                     voice={voice}
                     projectProvider={projectProvider}
-                    fallbackLanguage={targetLanguage}
                     showLanguageBadge={languageBadge}
                     active={voice.id === selectedId}
                     isDefault={voice.id === defaultVoiceId}
@@ -387,13 +386,12 @@ function VoiceActionMenu({
  *  selected check · hover ⋯ menu. Click selects; drag assigns onto a line.
  *  Right-click (and the ⋯ button) open the same items as a file-tab row. */
 function VoiceRow({
-  voice, projectProvider, fallbackLanguage, showLanguageBadge, active, isDefault, stats, canEdit, onSelect, onEdit, onMakeDefault, onDelete,
+  voice, projectProvider, showLanguageBadge, active, isDefault, stats, canEdit, onSelect, onEdit, onMakeDefault, onDelete,
 }: {
   voice: Voice
   /** The project's configured TTS provider — the fallback for voices that
    *  don't carry their own (e.g. cast minted on import). */
   projectProvider: TtsProvider
-  fallbackLanguage?: string
   showLanguageBadge: boolean
   active: boolean
   isDefault: boolean
@@ -416,7 +414,7 @@ function VoiceRow({
   const engineLabel = voice.referenceAudioId
     ? t("audio.library.cloneEngineLabel")
     : providerInfo(voice.provider ?? projectProvider).shortTitle
-  const languageTag = languageForVoiceDescription(voice.language, fallbackLanguage)
+  const languageTag = languageForVoiceDescription(voice.language)
   const languageName = languageTag ? formatVoiceLanguageName(languageTag, locale) : ""
   const actions = (
     <VoiceActionMenu

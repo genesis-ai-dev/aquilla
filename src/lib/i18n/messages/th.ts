@@ -3188,8 +3188,6 @@ export const th: Catalog = {
   "org.staffLanePopover.searchScopeNote": "ค้นหาในองค์กรของคุณเท่านั้น เพิ่มใครจากนอกมันได้หรือไม่",
   "org.staffLanePopover.inviteToProjectLink": "เชิญพวกเขาเข้าสู่โครงการ",
   "org.staffLanePopover.addToLaneButton": "เพิ่มไปยัง {lane}",
-  "org.staffLanePopover.broaderAccessNote": "ต้องการเข้าถึงกว้างขึ้นหรือไม่ ผู้นำเห็นภาษาทั้งหมด",
-  "org.staffLanePopover.addAsLeadButton": "เพิ่มเป็นผู้นำ (ไม่มีขอบเขต)",
   "org.archivedProjects.deletedColumnLabel": "ลบแล้ว",
   "org.archivedProjects.viewsAriaLabel": "มุมมองที่เก็บถาวร",
   "org.archivedProjects.emptyDescription": "เมื่อคุณเก็บถาวรโครงการ มันจะปรากฏที่นี่จนกว่าคุณจะคืนค่า",

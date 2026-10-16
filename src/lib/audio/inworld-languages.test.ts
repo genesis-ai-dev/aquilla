@@ -143,17 +143,12 @@ describe("formatVoiceLanguageName", () => {
 })
 
 describe("languageForVoiceDescription", () => {
-  it("prefers the voice's own language", () => {
-    expect(languageForVoiceDescription("fr-FR", "en")).toBe("fr-FR")
+  it("uses the voice's own language", () => {
+    expect(languageForVoiceDescription("fr-FR")).toBe("fr-FR")
   })
 
-  it("falls back to the active target language when the voice has none", () => {
-    expect(languageForVoiceDescription(undefined, "es")).toBe("es")
-    expect(languageForVoiceDescription("  ", "French")).toBe("French")
-  })
-
-  it("is undefined when neither the voice nor the project has a language", () => {
-    expect(languageForVoiceDescription(undefined, undefined)).toBeUndefined()
-    expect(languageForVoiceDescription("  ", "")).toBeUndefined()
+  it("does not invent a language from the open project lane", () => {
+    expect(languageForVoiceDescription(undefined)).toBeUndefined()
+    expect(languageForVoiceDescription("  ")).toBeUndefined()
   })
 })

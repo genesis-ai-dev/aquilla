@@ -399,6 +399,28 @@ describe("LivingMemoryPage — examples pane", () => {
     }))
   })
 
+  // AQU-2001: the page already knows the editor's lane (AQU-1509) and hands it
+  // to the Rules pane. The Examples query has to get it too — read at the
+  // default lane, a project translated into a named lane has no target rows to
+  // aggregate, so the pane showed "no validated translations" no matter how
+  // much the team had validated.
+  it("reads validated examples in the lane the page is viewing", () => {
+    renderPage("/project/proj-1/memory/examples", { activeLane: "de" })
+
+    expect(vi.mocked(useLivingMemory)).toHaveBeenLastCalledWith(expect.objectContaining({
+      enabled: true,
+      lane: "de",
+    }))
+  })
+
+  it("asks for the default lane when the page has no active lane", () => {
+    renderPage("/project/proj-1/memory/examples")
+
+    expect(vi.mocked(useLivingMemory)).toHaveBeenLastCalledWith(expect.objectContaining({
+      lane: "",
+    }))
+  })
+
   // AQU-921: the pane is an inspection surface, so its body starts collapsed.
   it("collapses Recent Examples by default, leaving the disclosure control visible", () => {
     renderPage("/project/proj-1/memory/examples")

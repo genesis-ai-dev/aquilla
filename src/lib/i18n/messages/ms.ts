@@ -3176,8 +3176,6 @@ export const ms: Catalog = {
   "org.staffLanePopover.searchScopeNote": "Cari dalam organisasi anda sahaja. Menambah seseorang dari luar?",
   "org.staffLanePopover.inviteToProjectLink": "Jemput mereka ke projek",
   "org.staffLanePopover.addToLaneButton": "Tambah ke {lane}",
-  "org.staffLanePopover.broaderAccessNote": "Perlukan akses lebih luas? Ketua melihat semua bahasa.",
-  "org.staffLanePopover.addAsLeadButton": "Tambah sebagai ketua (tiada skop)",
   "org.archivedProjects.deletedColumnLabel": "Dipadamkan",
   "org.archivedProjects.viewsAriaLabel": "Pandangan yang diarkipkan",
   "org.archivedProjects.emptyDescription": "Apabila anda mengarkipkan projek, ia akan muncul di sini sehingga anda memulihkannya.",

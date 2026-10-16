@@ -36,7 +36,11 @@ const file = hidden(
   async (z, bundle) => {
     if (!bundle.inputData.projectId) return [];
     const body = await get(z, `/projects/${enc(bundle.inputData.projectId)}/files`, { limit: 500 });
-    return rows(body).map((f) => ({ id: f.id, name: f.name || f.id }));
+    // File rows are keyed `fileId` (they come from the SPA's files route), not `id`.
+    // An entry without an id would leave every fileId input empty, so drop it.
+    return rows(body)
+      .map((f) => ({ id: f.fileId ?? f.id, name: f.name || f.fileId || f.id }))
+      .filter((f) => f.id);
   },
   [{ key: 'id', label: 'File ID' }, { key: 'name', label: 'Name' }],
   { id: 'fil_123', name: 'MRK.usfm' },

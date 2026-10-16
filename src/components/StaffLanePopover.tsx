@@ -20,6 +20,14 @@
 // and offered no way forward. Each state now names itself and points at the
 // project-invite path, which works without org-roster access.
 //
+// AQU-1998 — the popover is also where a lane staffing is UNDONE. It lists
+// the people already scoped to this lane (the same set the lane's People
+// column shows) with a Remove beside each, so the undo lives next to the do
+// instead of in the org Members → Matrix tab. Remove rewrites that one
+// member's scopes without this lane's row: their other lanes and any file
+// limits are read back first and written through untouched. Someone whose
+// ONLY lane is this one is guarded, not removed — see StaffedLaneMembers.
+//
 // Leads/maintainers (effective role >= project_lead) can't be lane-scoped —
 // the server rejects PUT scopes for them with 400 ("scopes are for
 // contributor/reviewer roles"), since leads see every language by design.
@@ -29,7 +37,7 @@
 // non-error "already unscoped" outcome. Adding someone AS a lead is a
 // distinct, deliberately unscoped action (no scope PUT at all).
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
 import { Link, useLocation } from "react-router-dom"
 import { Search, UserPlus } from "lucide-react"
@@ -39,6 +47,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Spinner } from "@/components/ui/spinner"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { RoleSelect } from "@/components/RoleSelect"
+import { StaffedLaneMembers, type StaffedLanePerson } from "@/components/StaffedLaneMembers"
 import { ROLE, roleName, roleDescription } from "@/lib/frontier/roles"
 import { useOrgMembers } from "@/hooks/useOrg"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
@@ -77,6 +86,17 @@ export interface StaffLanePopoverProps {
    * row ⋯ menu and only needs an anchor in the actions cell.
    */
   anchorOnly?: boolean
+}
+
+/**
+ * Whether a stored scope row names the lane this popover is staffing.
+ *
+ * AQU-1607: a lane scope holds `lanes.id`, but rows written before that hold
+ * the language tag, so both spellings of the same lane count — the rule the
+ * add path already applies when it merges a lane scope on.
+ */
+function scopeNamesLane(scope: MemberScope, laneValue: string, laneTag: string): boolean {
+  return scope.kind === "lane" && (scope.value === laneValue || scope.value === laneTag)
 }
 
 /** The staffing role select is intentionally scoped to reviewer/contributor
@@ -135,6 +155,19 @@ export function StaffLanePopover({
   const [phase, setPhase] = useState<Phase>("idle")
   const [message, setMessage] = useState<string | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  /**
+   * AQU-1998: who is already staffed on this lane. `null` until the first
+   * scope read for an open popover has come back, so "nobody yet" and "not
+   * loaded" never render the same.
+   */
+  const [staffed, setStaffed] = useState<StaffedLanePerson[] | null>(null)
+  const [removingUserId, setRemovingUserId] = useState<number | null>(null)
+  const [removeError, setRemoveError] = useState<{ userId: number; message: string } | null>(null)
+  /** Bumped after a staffing change so the list re-reads the scopes. */
+  const [staffedNonce, setStaffedNonce] = useState(0)
+
+  /** The value a scope row for this lane holds — its id where the caller knows it. */
+  const laneValue = laneId || lane
 
   /**
    * Why the org roster can't be searched, or null when it can. Ordered most
@@ -157,6 +190,51 @@ export function StaffLanePopover({
             : rosterError !== null
               ? "error"
               : null
+
+  /**
+   * Leads and above are never lane-scoped — they see every language by design,
+   * so they belong to no lane row and can't be removed from one (the server
+   * refuses to scope them at all). The list below is drawn from the members
+   * BELOW project lead, exactly like the lane's People column.
+   */
+  const scopableMembers = useMemo(
+    () => projectMembers.filter((m) => m.role.level < ROLE.PROJECT_LEAD),
+    [projectMembers],
+  )
+  // Joined ids rather than the array: the roster hook hands back a new array
+  // on every refresh, and re-running this effect for an unchanged membership
+  // would re-fetch every member's scopes on each render.
+  const scopableKey = scopableMembers.map((m) => m.userId).join(",")
+
+  // Read each scopable member's scopes while the popover is open and keep the
+  // ones scoped to this lane. A failed read counts as "unscoped" — the same
+  // tolerance the People column applies — never as "staffed here", so one bad
+  // fetch can't offer a Remove that would rewrite scopes we couldn't see.
+  useEffect(() => {
+    if (!open || !jwt) {
+      return
+    }
+    let alive = true
+    void (async () => {
+      const rows = await Promise.all(
+        scopableMembers.map(async (m) => {
+          const scopes = (await fetchMemberScopes(jwt, projectId, m.userId)) ?? []
+          const laneScopes = scopes.filter((s) => s.kind === "lane")
+          return {
+            person: { userId: m.userId, username: m.username, laneCount: laneScopes.length },
+            onThisLane: laneScopes.some((s) => scopeNamesLane(s, laneValue, lane)),
+          }
+        }),
+      )
+      // An empty roster lands here too, as an empty list rather than a
+      // still-loading one.
+      if (alive) setStaffed(rows.filter((r) => r.onThisLane).map((r) => r.person))
+    })()
+    return () => {
+      alive = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- scopableKey stands in for scopableMembers
+  }, [open, jwt, projectId, scopableKey, laneValue, lane, staffedNonce])
 
   const searchPool = useMemo(() => {
     const orgIds = new Set(orgMembers.map((m) => m.userId))
@@ -185,6 +263,11 @@ export function StaffLanePopover({
     setPhase("idle")
     setMessage(null)
     setErrorMsg(null)
+    // Drop the staffed list too: a reopened popover re-reads it rather than
+    // showing who was on the lane when it was last closed.
+    setStaffed(null)
+    setRemovingUserId(null)
+    setRemoveError(null)
   }
 
   function handleOpenChange(next: boolean) {
@@ -214,11 +297,49 @@ export function StaffLanePopover({
   function mergeLaneScope(existing: MemberScope[]): MemberScope[] {
     // AQU-1607: write the lane id when we have it, and drop a row that named
     // this same lane the old way so the member ends up with one scope for it.
-    const value = laneId || lane
-    return [
-      ...existing.filter((s) => !(s.kind === "lane" && (s.value === value || s.value === lane))),
-      { kind: "lane", value },
-    ]
+    const value = laneValue
+    return [...existing.filter((s) => !scopeNamesLane(s, value, lane)), { kind: "lane", value }]
+  }
+
+  /**
+   * Take this lane off one member's scopes, leaving everything else as it was.
+   *
+   * Their scopes are re-read first: the PUT is a replace-set, and one built
+   * from the rows this popover loaded when it opened would quietly restore a
+   * lane or file limit changed since. If what's left names no lane at all the
+   * removal is refused rather than saved — an empty lane list means every
+   * lane, so it would widen the person's access (the guard normally keeps the
+   * button disabled; this catches the member's other lanes going away while
+   * the popover sat open).
+   */
+  async function handleRemove(person: StaffedLanePerson) {
+    if (!jwt) return
+    setRemovingUserId(person.userId)
+    setRemoveError(null)
+    try {
+      const existing = (await fetchMemberScopes(jwt, projectId, person.userId)) ?? []
+      const remaining = existing.filter((s) => !scopeNamesLane(s, laneValue, lane))
+      if (!remaining.some((s) => s.kind === "lane")) {
+        setRemoveError({ userId: person.userId, message: t("org.staffLanePopover.lastLaneRefused") })
+        setStaffed(
+          (prev) =>
+            prev?.map((p) => (p.userId === person.userId ? { ...p, laneCount: 1 } : p)) ?? prev,
+        )
+        return
+      }
+      await putMemberScopes(jwt, projectId, person.userId, remaining)
+      // Only now does the row go: a failed save leaves the person listed.
+      setStaffed((prev) => (prev ?? []).filter((p) => p.userId !== person.userId))
+      await refreshProjectMembers()
+      onDone?.()
+    } catch (err) {
+      setRemoveError({
+        userId: person.userId,
+        message: err instanceof Error ? err.message : String(err),
+      })
+    } finally {
+      setRemovingUserId(null)
+    }
   }
 
   async function handleConfirm() {
@@ -247,6 +368,9 @@ export function StaffLanePopover({
         throw scopeErr
       }
       await refreshProjectMembers()
+      // AQU-1998: the person just staffed belongs in the list above, so
+      // re-read the scopes rather than leaving it as it was on open.
+      setStaffedNonce((n) => n + 1)
       setPhase("done")
       const sentence = describeGrant(t, {
         names: [selected.username],
@@ -355,6 +479,18 @@ export function StaffLanePopover({
 
         {!selected ? (
           <div className="space-y-2">
+            {/* AQU-1998 — who is on this lane now, each with Remove. Above the
+                search so the lane's current staffing is what the popover
+                opens on, with adding someone underneath it. */}
+            <StaffedLaneMembers
+              projectId={projectId}
+              laneLabel={laneLabel}
+              people={staffed}
+              busyUserId={removingUserId}
+              error={removeError}
+              onRemove={handleRemove}
+              onNavigate={() => handleOpenChange(false)}
+            />
             <div className="relative">
               <Search
                 className="pointer-events-none absolute start-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"

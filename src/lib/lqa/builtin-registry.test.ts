@@ -18,6 +18,10 @@ describe("builtin-registry", () => {
       "usfm-structure",
       "capitalization",
       "footnote-quote-mismatch",
+      "corrupted-characters",
+      "unpaired-quotes",
+      "untranslated-fragment",
+      "length-ratio",
     ])
   })
 
@@ -36,10 +40,11 @@ describe("builtin-registry", () => {
     }
   })
 
-  it("only abbreviation-mismatch is off by default", () => {
+  // length-ratio is off because normal length varies too much by language pair.
+  it("only abbreviation-mismatch and length-ratio are off by default", () => {
     for (const id of BUILTIN_CHECK_IDS) {
       const def = BUILTIN_CHECKS[id]
-      if (id === "abbreviation-mismatch") expect(def.defaultEnabled).toBe(false)
+      if (id === "abbreviation-mismatch" || id === "length-ratio") expect(def.defaultEnabled).toBe(false)
       else expect(def.defaultEnabled).toBe(true)
     }
   })

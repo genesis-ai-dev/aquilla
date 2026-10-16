@@ -16088,7 +16088,9 @@ export function ProjectWorkspace() {
             getStatisticalBt={getStatisticalBt}
             onAlignmentSeedChange={handleAlignmentSeedChange}
             onSeekToCue={isSubtitleFile && timelineStacked ? handleCueSeek : undefined}
-            playingCueCellId={isSubtitleFile && timelineStacked ? playingCueCellId : null}
+            // AQU-1642: in the Audio view too — the line the bottom bar is
+            // playing is marked, and its card's play button pauses the run.
+            playingCueCellId={(isSubtitleFile && timelineStacked) || audioLens ? playingCueCellId : null}
             onPauseCue={pauseAllTransports}
             sourceLineEditing={sourceLineEditing}
             lineNumbersEnabled={fileMeta.lineNumbersEnabled}

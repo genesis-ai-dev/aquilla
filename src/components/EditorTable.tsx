@@ -8082,6 +8082,10 @@ function EditorRow({
               recordUnavailable={getUnsupportedReason()}
               onAfterGenerate={audioLens.onAfterGenerate}
               onPlay={() => audioLens.onPlayCell(cell.id, cell)}
+              // AQU-1642: the bottom bar is playing this line — the card's
+              // play button is the bar's pause while it does.
+              playingInBar={cuePlaying}
+              onPauseBar={onPauseCue}
               onMakeCharacter={() => audioLens.onMakeCharacterFromCell(cell.id)}
               voicePicker={audioVoice && (
                 <CastGutterVoice

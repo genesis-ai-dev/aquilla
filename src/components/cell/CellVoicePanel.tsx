@@ -107,6 +107,13 @@ interface CellVoicePanelProps {
   /** Retained for host compatibility; per-cell playback now runs locally. */
   onPlay?: () => void
   /**
+   * AQU-1642: the bottom play bar is playing this line, one line after
+   * another. The card's play button shows Pause and pauses the whole run (the
+   * bar's own pause); the waveform stays still — the bar shows the progress.
+   */
+  playingInBar?: boolean
+  onPauseBar?: () => void
+  /**
    * The row's player for this line's recording (or generated voice). Play,
    * pause, and seek go through it so the cell highlight tracks this button.
    */
@@ -275,6 +282,8 @@ export function CellVoicePanel({
   controller,
   targetLang,
   voicePicker,
+  playingInBar = false,
+  onPauseBar,
 }: CellVoicePanelProps) {
   const t = useT()
   const sess = session as FrontierSession | null
@@ -585,6 +594,7 @@ export function CellVoicePanel({
           trimEditable={!isSourceClip && canEdit}
           {...(pieceLimits ? { trimLimits: pieceLimits } : {})}
           onCommitTrim={commitTrim}
+          barPlayback={playingInBar && onPauseBar ? { onPause: onPauseBar } : null}
           className="voice-card-wave"
           testId="voice-card-waveform"
         >

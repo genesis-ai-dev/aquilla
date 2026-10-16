@@ -138,6 +138,24 @@ describe("CellVoicePanel — the take, then a row with its voice", () => {
     expect(screen.getByTestId("voice-card-waveform-play")).toHaveAttribute("aria-label", "Play audio")
   })
 
+  // AQU-1642 (Sam's decision): the bottom bar playing this line shows on its
+  // card — Pause, which pauses the whole run like the bar's own; the waveform
+  // stays still, as the bar already shows the progress.
+  it("is the bar's Pause while the bottom bar plays this line, and the waveform stays still", () => {
+    const onPauseBar = vi.fn()
+    draw({ playingInBar: true, onPauseBar })
+    const button = screen.getByTestId("voice-card-waveform-play")
+    expect(button).toHaveAttribute("aria-label", "Pause")
+    expect(screen.queryByTestId("voice-card-waveform-playline")).toBeNull()
+    fireEvent.click(button)
+    expect(onPauseBar).toHaveBeenCalledTimes(1)
+  })
+
+  it("is its own Play again once the bar has moved on", () => {
+    draw({ playingInBar: false, onPauseBar: vi.fn() })
+    expect(screen.getByTestId("voice-card-waveform-play")).toHaveAttribute("aria-label", "Play audio")
+  })
+
   it("trims a generated voice right on the card", () => {
     draw()
     expect(screen.getByRole("slider", { name: "Start of the kept audio" })).toBeInTheDocument()

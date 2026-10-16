@@ -68,6 +68,12 @@ export interface TakeWaveformProps {
   trimLimits?: { minStart: number | null; maxEnd: number | null }
   /** Persist a finished drag or nudge. Null = back to the clip's edge. */
   onCommitTrim?: (start: number | null, end: number | null) => void
+  /**
+   * AQU-1642: a transport elsewhere — the bottom play bar — is playing this
+   * take. The corner button is Pause and pauses that transport; the waveform
+   * does not follow it (the bar shows its progress). Null when it is not.
+   */
+  barPlayback?: { onPause: () => void } | null
   onRecord?: () => void
   recordLabel?: string
   recordGlyph?: React.ReactNode
@@ -94,6 +100,7 @@ export function TakeWaveform({
   trimEditable = false,
   trimLimits,
   onCommitTrim,
+  barPlayback = null,
   onRecord,
   recordLabel,
   recordGlyph,
@@ -243,7 +250,11 @@ export function TakeWaveform({
     </button>
   ) : null
 
-  const playGlyph = state === "loading"
+  // AQU-1642: playing in the bar, and not in this take's own player.
+  const inBar = barPlayback != null && !isPlaying
+  const playGlyph = inBar
+    ? undefined
+    : state === "loading"
     ? <Spinner className="size-2.5" />
     : state === "error" && error?.kind === "offline-unavailable"
       ? <CloudOff className="h-2.5 w-2.5 text-muted-foreground" />
@@ -261,13 +272,18 @@ export function TakeWaveform({
       trackVars={trackVars}
       keep={keep}
       gaps={gaps}
-      playing={isPlaying}
-      progress={viewLen > 0 ? toFrac(currentTime) : null}
-      onTogglePlay={() => { if (isPlaying) pause(); else void play() }}
+      playing={isPlaying || inBar}
+      // In the bar, no progress: WaveformRect draws it only with one.
+      progress={!inBar && viewLen > 0 ? toFrac(currentTime) : null}
+      onTogglePlay={() => {
+        if (inBar) barPlayback.onPause()
+        else if (isPlaying) pause()
+        else void play()
+      }}
       playLabel={t("editor.audio.play")}
       stopLabel={t("common.pause")}
       playGlyph={playGlyph}
-      playDisabled={state === "loading"}
+      playDisabled={!inBar && state === "loading"}
       onRecord={onRecord}
       recordLabel={recordLabel}
       recordGlyph={recordGlyph}

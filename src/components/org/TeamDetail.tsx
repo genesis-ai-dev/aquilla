@@ -827,7 +827,7 @@ export function TeamDetail() {
                         }
                       >
                         {laneEditBusy && <Spinner data-icon="inline-start" />}
-                        {laneEditBusy ? "Saving…" : "Save"}
+                        {laneEditBusy ? t("common.saving") : t("common.save")}
                       </Button>
                     </DialogFooter>
                   </DialogContent>

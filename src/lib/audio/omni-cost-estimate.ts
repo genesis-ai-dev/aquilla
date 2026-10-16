@@ -16,10 +16,10 @@ export const OMNI_ASR_AMORTIZATION = 1.5
 export const DEFAULT_CREDIT_MARKUP = 4
 /**
  * GPU-seconds per audio-second when `/status` does not say. The server owns
- * the real figure (`estGpuSecPerAudioSec`); this is upstream's A100 RTF
- * (0.194) rounded up for the slower L40S.
+ * the real figure (`estGpuSecPerAudioSec`); this is the conservative value
+ * the 2026-10-16 Modal spike measured for ZS on the L40S (spec §8).
  */
-export const ZS_EST_GPU_SEC_PER_AUDIO_SEC_FALLBACK = 0.25
+export const ZS_EST_GPU_SEC_PER_AUDIO_SEC_FALLBACK = 0.5
 
 /** Credits a zero-shot run over `audioSec` seconds of audio should cost. */
 export function estimateZeroShotCredits(

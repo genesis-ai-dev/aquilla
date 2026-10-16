@@ -52,8 +52,9 @@ describe("zero-shot batch estimate", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => String(input).includes("/status")
       ? Response.json({ state: "cold" })
       : new Response(null, { status: 403 }))
-    // No server figure: the 0.25 fallback, the default ×4 markup → 9 credits.
+    // No server figure: the spike's 0.5 fallback, the default ×4 markup →
+    // 100 × 0.5 × 0.0542 × 1.5 × 4 = 16.26 → 17 credits.
     await expect(zeroShotBatchCostLine({ jwt: "j", projectId: "p", orgId: 7, audioSec: 100 }))
-      .resolves.toBe("≈ 9 cr for this batch")
+      .resolves.toBe("≈ 17 cr for this batch")
   })
 })

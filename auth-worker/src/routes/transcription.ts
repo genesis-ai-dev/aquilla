@@ -18,7 +18,7 @@ import {
 import { omniLanguageFromTag, whisperLanguageFromTag } from "../lib/transcription-language"
 import {
   isAllowedExampleUrl, omniConfigured, omniFetch, omniStatusSchema, omniTranscribe,
-  omniTranscribeResponseSchema, OMNI_MAX_AUDIO_SECONDS, zeroShotEnabledForOrg,
+  omniTranscribeResponseSchema, omniWarmingSchema, OMNI_MAX_AUDIO_SECONDS, zeroShotEnabledForOrg,
 } from "../lib/omni-asr"
 import {
   transcriptionSeconds, transcriptionCostBound, WHISPER_MODEL,
@@ -180,7 +180,14 @@ transcription.post("/transcriptions", authMiddleware,
         }
         return c.json({ error: "Transcription provider failed" }, 502)
       }
-      const parsed = omniTranscribeResponseSchema.safeParse(await response.json().catch(() => null))
+      const reply: unknown = await response.json().catch(() => null)
+      if (omniWarmingSchema.safeParse(reply).success) {
+        // Proven free: the service only spawned a warm-up. The client shows
+        // the warm-up toast and retries (spec §4).
+        if (usage) await releaseChatUsage(c.env, usage)
+        return c.json({ error: "asr_warming" }, 503, { "Retry-After": "10" })
+      }
+      const parsed = omniTranscribeResponseSchema.safeParse(reply)
       if (!parsed.success) return c.json({ error: "Invalid transcription response" }, 502)
       const { text, words, gpuSeconds, gpu, timingsApproximate } = parsed.data
       const rawCents = omniRawCostCents(gpuSeconds, gpu, amortization)

@@ -4,7 +4,7 @@
 
 import { z } from "zod"
 import type { Env } from "../types"
-import { OMNI_GPUS, type OmniModel } from "../../../db/shared/omni-asr-cost"
+import type { OmniModel } from "../../../db/shared/omni-asr-cost"
 
 /** The service rejects input at or over 40 s; reject before reserving spend. */
 export const OMNI_MAX_AUDIO_SECONDS = 40
@@ -17,9 +17,13 @@ export const omniTranscribeResponseSchema = z.object({
     end: z.number().finite().nonnegative(),
   })),
   gpuSeconds: z.number().finite().nonnegative(),
-  gpu: z.enum(OMNI_GPUS),
+  /** CUDA device name, e.g. "NVIDIA L4"; unknown names bill at the top rate. */
+  gpu: z.string().min(1).max(100),
   timingsApproximate: z.boolean().optional(),
 })
+
+/** A cold ZS container answers this (HTTP 200) instead of blocking; no GPU ran. */
+export const omniWarmingSchema = z.object({ warming: z.literal(true) })
 
 export const omniStatusSchema = z.object({
   state: z.enum(["cold", "starting", "ready"]),

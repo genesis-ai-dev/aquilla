@@ -46,13 +46,13 @@ describe("omniLanguageFromTag", () => {
 
 describe("Omnilingual cost", () => {
   it("bounds a call at ceil(audio × max RTF + 30) GPU seconds", () => {
-    expect(omniCostBoundCents("ctc", 30, 1.5)).toBeCloseTo(Math.ceil(30 * 0.1 + 30) * OMNI_GPU_CENTS_PER_SEC.L4 * 1.5, 9)
-    // ZS bounds at the dearer GPU so a move to A100 cannot under-reserve.
-    expect(omniCostBoundCents("zs", 30, 1.5)).toBeCloseTo(60 * OMNI_GPU_CENTS_PER_SEC.A100_80 * 1.5, 9)
+    expect(omniCostBoundCents("ctc", 30, 1.5)).toBeCloseTo(Math.ceil(30 * 0.5 + 30) * OMNI_GPU_CENTS_PER_SEC["NVIDIA L4"] * 1.5, 9)
+    expect(omniCostBoundCents("zs", 30, 1.5)).toBeCloseTo(Math.ceil(30 * 2 + 30) * OMNI_GPU_CENTS_PER_SEC["NVIDIA L40S"] * 1.5, 9)
   })
-  it("reserves at least as much as a run near the worst case settles", () => {
-    const bound = omniCostBoundCents("zs", 30, 1.5)
-    expect(omniRawCostCents(30 * 0.194, "A100_80", 1.5)).toBeLessThan(bound)
+  it("reserves more than the Modal spike's measured worst runs settle", () => {
+    // Spike (spec §8): CTC ≈0.09, ZS 0.3–0.45 GPU-s per audio-s.
+    expect(omniRawCostCents(30 * 0.09, "NVIDIA L4", 1.5)).toBeLessThan(omniCostBoundCents("ctc", 30, 1.5))
+    expect(omniRawCostCents(30 * 0.45, "NVIDIA L40S", 1.5)).toBeLessThan(omniCostBoundCents("zs", 30, 1.5))
   })
   it("defaults amortization to 1.5 and refuses values that would discount", () => {
     expect(omniAmortization(undefined)).toBe(1.5)

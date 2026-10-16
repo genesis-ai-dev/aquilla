@@ -154,7 +154,9 @@ const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Headers": "Authorization, Content-Type, Idempotency-Key, If-Match-Version, X-Artifact-Name, X-Doc-Name, X-Source-Language, X-Target-Language",
   // Model A/B assignment echo (routes/chat.ts) — the SPA reads these off the
   // completion response to attribute accept/edit outcomes to the served model.
-  "Access-Control-Expose-Headers": "X-AB-Request-Id, X-AB-Arm, X-AB-Model",
+  // Retry-After (AQU-1681): a batch transcription refused by the per-user
+  // limit waits exactly as long as the limiter says, instead of guessing.
+  "Access-Control-Expose-Headers": "X-AB-Request-Id, X-AB-Arm, X-AB-Model, Retry-After",
   "Access-Control-Max-Age": "86400",
   Vary: "Origin",
 }

@@ -485,7 +485,9 @@ export function StaffLanePopover({
             <StaffedLaneMembers
               projectId={projectId}
               laneLabel={laneLabel}
-              people={staffed}
+              // No jwt means no scope read ever fires, so the list is empty
+              // rather than loading forever.
+              people={jwt ? staffed : []}
               busyUserId={removingUserId}
               error={removeError}
               onRemove={handleRemove}

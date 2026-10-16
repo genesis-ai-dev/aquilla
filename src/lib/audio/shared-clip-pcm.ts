@@ -12,6 +12,13 @@
 // minutes, half of what every row used to allocate for itself), and cuts each
 // row's window out of that. One clip at a time, and dropped after a minute
 // without use so the memory goes back when the batch is done.
+//
+// A linked video's sound is better still: it was already decoded at 16 kHz, a
+// minute at a time, to find its pauses, so that PCM is handed over here
+// (`primeSharedClipPcm`) and the clip is never decoded whole at all. That is
+// not only cheaper. Safari's `decodeAudioData` stops short on a long file —
+// measured on episode 101's 52 MB copy, it returned 35 of its 55 minutes —
+// so every row past that point would otherwise have nothing to transcribe.
 
 import { resolvePcmWindow, type PcmTrimWindow } from "./pcm-window"
 
@@ -21,6 +28,11 @@ const SAMPLE_RATE = 16_000
 /** How long the PCM outlives its last use. Rows of one batch follow each
  *  other within seconds; a minute covers a slow hosted request. */
 export const SHARED_CLIP_IDLE_MS = 60_000
+
+/** How long a primed clip waits for its first row. The batch starts only
+ *  once every row has reached the server, which takes minutes for an
+ *  episode's ~900 rows. */
+export const SHARED_CLIP_PRIMED_MS = 10 * 60_000
 
 let held: { key: string; pcm: Promise<Float32Array> } | null = null
 let releaseTimer: ReturnType<typeof setTimeout> | null = null
@@ -38,9 +50,16 @@ export function releaseSharedClipPcm(): void {
   releaseTimer = null
 }
 
-function keepAlive(): void {
+function keepAlive(ms = SHARED_CLIP_IDLE_MS): void {
   if (releaseTimer !== null) clearTimeout(releaseTimer)
-  releaseTimer = setTimeout(releaseSharedClipPcm, SHARED_CLIP_IDLE_MS)
+  releaseTimer = setTimeout(releaseSharedClipPcm, ms)
+}
+
+/** Hold a clip's 16 kHz mono PCM that was decoded some other way, so its
+ *  rows never decode it. Replaces whatever clip was held. */
+export function primeSharedClipPcm(key: string, pcm: Float32Array): void {
+  held = { key, pcm: Promise.resolve(pcm) }
+  keepAlive(SHARED_CLIP_PRIMED_MS)
 }
 
 /**
@@ -68,6 +87,14 @@ export async function sharedClipWindow(
   }
   const whole = await entry.pcm
   keepAlive()
+  // A row that starts past the end of what decoded (a decode that stopped
+  // short) has nothing to transcribe. The window rule below would hand it
+  // the WHOLE clip instead — an hour of audio per row, to a paid service.
+  const startSample = Math.round(((trim.trimStartMs ?? 0) / 1000) * SAMPLE_RATE)
+  if (whole.length > 0 && startSample >= whole.length) {
+    console.warn(`[transcribe] AQU-1681: ${key} decoded to ${whole.length / SAMPLE_RATE}s; a row at ${startSample / SAMPLE_RATE}s has no audio`)
+    return new Float32Array(0)
+  }
   const win = resolvePcmWindow(whole.length, SAMPLE_RATE, trim)
   return whole.slice(win.start, win.end)
 }

@@ -55,6 +55,7 @@ vi.mock("@/lib/audio/auto-transcribe", () => ({
 import { attachMediaFileToTimeline, type AttachMediaContext } from "./attach-media"
 import { setCqrsOutboxBridge } from "@/lib/sync/cqrs-bridge"
 import { ROLE } from "@/lib/frontier/roles"
+import { hasSharedClipPcm, releaseSharedClipPcm } from "@/lib/audio/shared-clip-pcm"
 
 const ctx: AttachMediaContext = { projectId: "p1", fileId: "f1", author: "maint", getToken: async () => "tok" }
 
@@ -95,5 +96,14 @@ describe("attachMediaFileToTimeline with speech already found", () => {
     for (const a of emitted.attaches) {
       expect(a).toMatchObject({ url: "frontier-audio://f1-clip.m4a", role: "source", slot: "recording", durationMs: 8000, mimeType: "audio/mp4" })
     }
+  })
+
+  it("hands the sound's 16 kHz PCM to transcription under the stored copy's name", async () => {
+    const file = new File([new Uint8Array(32)], "Episode 1 (English).m4a", { type: "audio/mp4" })
+    await attachMediaFileToTimeline(file, ctx, {
+      analysis: { durationMs: 8000, segments: [{ startMs: 0, endMs: 2050 }, { startMs: 2950, endMs: 4050 }], pcm16k: new Float32Array(8 * 16_000) },
+    })
+    expect(hasSharedClipPcm("f1-clip.m4a")).toBe(true)
+    releaseSharedClipPcm()
   })
 })

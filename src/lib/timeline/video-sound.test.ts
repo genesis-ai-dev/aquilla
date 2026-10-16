@@ -141,7 +141,7 @@ describe("extractVideoSound — a streamed film", () => {
       Uint8Array.from(expected.flatMap((b) => [...b])),
     )
     // Speech 0–2 s, 3–4 s, 6–8 s, padded 50 ms each side by the splitter.
-    expect(out.analysis).toEqual({
+    expect(out.analysis).toMatchObject({
       durationMs: 8000,
       segments: [
         { startMs: 0, endMs: 2050 },
@@ -151,6 +151,11 @@ describe("extractVideoSound — a streamed film", () => {
     })
     expect(progress.at(-1)).toBe(1)
     expect(s.fetched).not.toContain(`${BASE}audio_es.m3u8`)
+    // The 16 kHz sound the rows are transcribed from: the film's whole length,
+    // speech where it speaks.
+    const pcm = out.analysis!.pcm16k
+    expect(pcm.length).toBe(8 * RATE)
+    expect([pcm[0.5 * RATE], pcm[2.5 * RATE], pcm[3.5 * RATE]]).toEqual([0.5, 0, 0.5])
   })
 
   it("fetches the track the maintainer picked instead of the default", async () => {
@@ -183,6 +188,7 @@ describe("extractVideoSound — a streamed film", () => {
     })
     expect(out.analysis?.durationMs).toBe(8000)
     expect(out.analysis?.segments.at(-1)).toEqual({ startMs: 5950, endMs: 8000 })
+    expect(out.analysis?.pcm16k.length).toBe(8 * RATE)
   })
 
   it("measures the sound from its boxes, not from a playlist that rounds its durations", async () => {

@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
   hasSharedClipPcm,
+  primeSharedClipPcm,
   releaseSharedClipPcm,
   sharedClipWindow,
   SHARED_CLIP_IDLE_MS,
+  SHARED_CLIP_PRIMED_MS,
 } from "./shared-clip-pcm"
 
 // AQU-1681. WHY: every row of an imported recording (and of a linked video's
@@ -70,5 +72,35 @@ describe("sharedClipWindow", () => {
     expect(hasSharedClipPcm("clip.m4a")).toBe(true)
     vi.advanceTimersByTime(1)
     expect(hasSharedClipPcm("clip.m4a")).toBe(false)
+  })
+
+  // A linked video's sound was decoded a minute at a time to find its pauses;
+  // its rows are transcribed from that, never from a whole-file decode (which
+  // Safari cuts short on an hour of audio).
+  it("uses PCM handed over by the sound's own analysis, without decoding anything", async () => {
+    vi.useFakeTimers()
+    primeSharedClipPcm("film.m4a", Float32Array.from({ length: 32_000 }, (_, i) => i))
+    const decode = vi.fn(async () => new Float32Array(0))
+    const load = vi.fn(() => new Uint8Array())
+    const win = await sharedClipWindow("film.m4a", { trimStartMs: 1000, trimEndMs: 1500 }, load, decode)
+    expect([win.length, win[0]]).toEqual([8_000, 16_000])
+    expect(decode).not.toHaveBeenCalled()
+    expect(load).not.toHaveBeenCalled()
+  })
+
+  it("keeps a primed clip until its batch starts, which can be minutes away", () => {
+    vi.useFakeTimers()
+    primeSharedClipPcm("film.m4a", new Float32Array(16))
+    vi.advanceTimersByTime(SHARED_CLIP_IDLE_MS * 2)
+    expect(hasSharedClipPcm("film.m4a")).toBe(true)
+    vi.advanceTimersByTime(SHARED_CLIP_PRIMED_MS)
+    expect(hasSharedClipPcm("film.m4a")).toBe(false)
+  })
+
+  it("gives a row past the end of a short decode nothing, never the whole clip", async () => {
+    const decode = rampDecoder(35)
+    const win = await sharedClipWindow("long.m4a", { trimStartMs: 50 * 60_000, trimEndMs: 50 * 60_000 + 3000 },
+      () => new Uint8Array(), decode)
+    expect(win.length).toBe(0)
   })
 })

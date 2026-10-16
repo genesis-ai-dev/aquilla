@@ -16,6 +16,7 @@ import { buildAudioId, deleteCellAudio, uploadCellAudio } from "@/lib/audio/uplo
 import { emitCellAudioAttach, emitSourceCellCreate, InsufficientRoleError } from "@/lib/sync/events-emit"
 import { getCqrsOutboxBridge } from "@/lib/sync/cqrs-bridge"
 import { canAttachSourceAudio, SOURCE_AUDIO_ATTACH_FLOOR } from "@/lib/sync/role-policy"
+import { primeSharedClipPcm } from "@/lib/audio/shared-clip-pcm"
 
 export interface AttachMediaContext {
   projectId: string
@@ -28,8 +29,13 @@ export interface AttachMediaContext {
 
 export interface AttachMediaFileOptions {
   /** AQU-1681: speech already found in this clip (a linked video's sound is
-   *  analysed while it is fetched). Given, the clip is not decoded again. */
-  analysis?: { segments: readonly { startMs: number; endMs: number }[]; durationMs: number }
+   *  analysed while it is fetched). Given, the clip is not decoded again —
+   *  and with its 16 kHz PCM, not even to transcribe the rows. */
+  analysis?: {
+    segments: readonly { startMs: number; endMs: number }[]
+    durationMs: number
+    pcm16k?: Float32Array
+  }
   /** Cancels the upload. Once the bytes are stored the rows go in regardless:
    *  a half-made set of rows is worse than a finished one. */
   signal?: AbortSignal
@@ -67,6 +73,8 @@ export async function attachMediaFileToTimeline(
     ...(opts.signal ? { signal: opts.signal } : {}),
   })
   opts.onPhase?.("rows")
+  // Keyed the way transcription names a shared clip: its stored object.
+  if (opts.analysis?.pcm16k) primeSharedClipPcm(`${upload.audioId}.${upload.ext}`, opts.analysis.pcm16k)
 
   try {
     let prevCellId: string | null = null

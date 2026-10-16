@@ -132,7 +132,13 @@ export interface ExtractedVideoSound {
   file: File
   /** A stream's speech, found while it was fetched — so it is not decoded a
    *  second time. Absent for a direct file, which the importer analyses. */
-  analysis?: { segments: SpeechSegment[]; durationMs: number }
+  analysis?: {
+    segments: SpeechSegment[]
+    durationMs: number
+    /** The sound at 16 kHz (first channel), as the splitter read it: what
+     *  the rows are transcribed from, so the copy is never decoded whole. */
+    pcm16k: Float32Array
+  }
 }
 
 function videoSoundError(key: MessageKey, values?: Record<string, string | number>, cause?: unknown): Error {
@@ -427,6 +433,12 @@ async function extractStreamSound(
   }
 
   const envelope = createRmsEnvelope(ANALYSIS_SAMPLE_RATE, DEFAULT_WINDOW_MS)
+  // Kept for transcription (see `analysis.pcm16k`). Sized from the playlist
+  // up front, so an hour is one allocation rather than a pile of minutes.
+  let pcm16k = new Float32Array(
+    Math.ceil(playlist.segments.reduce((sec, seg) => sec + seg.durationSec, 0) * ANALYSIS_SAMPLE_RATE) +
+      ANALYSIS_SAMPLE_RATE,
+  )
   const stored: Uint8Array[] = [init]
   const total = playlist.segments.length
   let fetched = 0
@@ -458,12 +470,14 @@ async function extractStreamSound(
     } catch (err) {
       throw videoSoundError("editor.media.videoSound.decodeFailed", undefined, err)
     }
-    if (pcm.length >= expected) envelope.push(pcm.subarray(0, expected))
-    else {
-      const padded = new Float32Array(expected)
-      padded.set(pcm)
-      envelope.push(padded)
+    const minute = pcm.length >= expected ? pcm.subarray(0, expected) : padTo(pcm, expected)
+    envelope.push(minute)
+    if (endSample > pcm16k.length) {
+      const grown = new Float32Array(endSample + ANALYSIS_SAMPLE_RATE * 60)
+      grown.set(pcm16k)
+      pcm16k = grown
     }
+    pcm16k.set(minute, endSample - expected)
 
     stored.push(...parts)
     fetched += parts.length
@@ -479,6 +493,13 @@ async function extractStreamSound(
     analysis: {
       segments: detectSpeechSegmentsFromEnvelope(envelope.finish()),
       durationMs: soundSec * 1000,
+      pcm16k: pcm16k.subarray(0, samplesSoFar),
     },
   }
+}
+
+function padTo(samples: Float32Array, length: number): Float32Array {
+  const out = new Float32Array(length)
+  out.set(samples)
+  return out
 }

@@ -37,8 +37,8 @@ async function seed() {
   ).run()
   const token = await encryptMondayToken(env.SECRET_KEY, "monday-plain-token")
   await env.AQUILLA_PG.prepare(
-    `INSERT INTO integration_connections (id, org_id, provider, account, access_token_enc, created_by) VALUES
-       ('c1', '1', 'monday', '{}', ?, 'olive'), ('c2', '2', 'monday', '{}', ?, 'olive')`,
+    `INSERT INTO integration_connections (id, org_id, provider, account, access_token_enc, created_by, environment) VALUES
+       ('c1', '1', 'monday', '{}', ?, 'olive', 'test'), ('c2', '2', 'monday', '{}', ?, 'olive', 'test')`,
   )
     .bind(token, token)
     .run()

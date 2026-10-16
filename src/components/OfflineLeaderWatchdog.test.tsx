@@ -10,13 +10,19 @@ type Status = { isSynced: boolean; pendingCount: number; localHead: string; upst
 
 let status: Status
 const fakeStore = { syncStatus: () => status }
+let offlineStore: { store: typeof fakeStore | null; loading: boolean; error: null } = {
+  store: fakeStore,
+  loading: false,
+  error: null,
+}
 
 vi.mock("@/context/OfflineStoreContext", () => ({
-  useOfflineStore: () => ({ store: fakeStore, loading: false, error: null }),
+  useOfflineStore: () => offlineStore,
   OfflineStoreProvider: ({ children }: { children: ReactNode }) => children,
 }))
 
 afterEach(() => {
+  offlineStore = { store: fakeStore, loading: false, error: null }
   toast.close()
   vi.restoreAllMocks()
   __resetLeaderStalledForTests()
@@ -69,5 +75,62 @@ describe("OfflineLeaderWatchdog", () => {
     status = synced
     await waitFor(() => expect(document.querySelector('[data-slot="toast"]')).toBeNull())
     expect(isLeaderStalled()).toBe(false)
+  })
+
+  describe("while the store hasn't booted", () => {
+    const booting = () => {
+      offlineStore = { store: null, loading: true, error: null }
+    }
+    const renderBooting = (restart = vi.fn()) =>
+      render(
+        <>
+          <Toaster />
+          <OfflineLeaderWatchdog bootStallMs={40} restart={restart} />
+        </>,
+      )
+
+    it("prompts a restart once boot has taken too long", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {})
+      booting()
+      const user = userEvent.setup()
+      const restart = vi.fn()
+      renderBooting(restart)
+
+      expect(await screen.findByText(/taking a while to open/)).toBeInTheDocument()
+      await user.click(screen.getByRole("button", { name: /restart app/i }))
+      expect(restart).toHaveBeenCalledTimes(1)
+    })
+
+    it("closes the prompt once the store boots", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {})
+      booting()
+      const { rerender } = renderBooting()
+      await screen.findByText(/taking a while to open/)
+
+      offlineStore = { store: fakeStore, loading: false, error: null }
+      status = synced
+      rerender(
+        <>
+          <Toaster />
+          <OfflineLeaderWatchdog bootStallMs={40} />
+        </>,
+      )
+      await waitFor(() => expect(document.querySelector('[data-slot="toast"]')).toBeNull())
+    })
+
+    it("stays quiet for a boot that finishes in time", async () => {
+      booting()
+      const { rerender } = renderBooting()
+      offlineStore = { store: fakeStore, loading: false, error: null }
+      status = synced
+      rerender(
+        <>
+          <Toaster />
+          <OfflineLeaderWatchdog bootStallMs={40} />
+        </>,
+      )
+      await act(() => new Promise((r) => setTimeout(r, 120)))
+      expect(document.querySelector('[data-slot="toast"]')).toBeNull()
+    })
   })
 })

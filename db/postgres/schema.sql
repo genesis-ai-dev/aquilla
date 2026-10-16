@@ -225,7 +225,22 @@ CREATE TABLE group_project_grants (
     role_level INTEGER NOT NULL,
     granted_by BIGINT,
     granted_at TIMESTAMPTZ DEFAULT now(),
+    -- AQU-1813: false = this attachment still means every target lane, including
+    -- one created later (Codex attaches before the content sweep builds lanes).
+    -- true = group_project_lanes is the whole set, and a lane created later
+    -- stays off until someone edits the attachment.
+    lanes_explicit BOOLEAN NOT NULL DEFAULT false,
     PRIMARY KEY (group_id, project_id)
+);
+
+-- The lanes checked on an explicit team attachment (AQU-1813). Empty when
+-- lanes_explicit is false. All checks the lanes that exist at that moment;
+-- it does not keep watching for new ones.
+CREATE TABLE IF NOT EXISTS group_project_lanes (
+    group_id   BIGINT NOT NULL,
+    project_id TEXT NOT NULL,
+    lane_id    TEXT NOT NULL,
+    PRIMARY KEY (group_id, project_id, lane_id)
 );
 
 CREATE TABLE project_invites (
@@ -352,7 +367,15 @@ CREATE TABLE project_settings (
     roster_view_min_role TEXT
       GENERATED ALWAYS AS (CASE WHEN jsonb_typeof((settings::jsonb) -> 'rosterViewMinRole') = 'number' THEN (settings::jsonb) ->> 'rosterViewMinRole' END) STORED,
     member_progress_view_min_role TEXT
-      GENERATED ALWAYS AS (CASE WHEN jsonb_typeof((settings::jsonb) -> 'memberProgressViewMinRole') = 'number' THEN (settings::jsonb) ->> 'memberProgressViewMinRole' END) STORED
+      GENERATED ALWAYS AS (CASE WHEN jsonb_typeof((settings::jsonb) -> 'memberProgressViewMinRole') = 'number' THEN (settings::jsonb) ->> 'memberProgressViewMinRole' END) STORED,
+    -- 0176 (AQU-1768): whether the project sets its own media settings, so
+    -- org-default overrides can be counted and cleared without the blob. NULL
+    -- = inherits the org's default. One line each (dev-stack reconciler).
+    timing_locked TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'timingLocked') STORED,
+    allow_track_editing TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'allowTrackEditing') STORED,
+    cell_editing_floor TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'cellEditingFloor') STORED,
+    allow_self_validation_audio TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'allowSelfValidationAudio') STORED,
+    validation_role_floor_audio TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationRoleFloorAudio') STORED
 );
 CREATE INDEX project_settings_agent_react ON project_settings(project_id) WHERE agent_react;
 
@@ -1008,6 +1031,12 @@ CREATE TABLE cell_audio (
     -- permanent home for every take that predates this column (rebuild replays
     -- historical cell.lane.retime events into it forever).
     target_offset_ms   BIGINT,
+    -- AQU-1767 (0177): the take this row was CUT from, when it is a piece of
+    -- one. NULL for every whole take and for a cut's first piece (the root).
+    -- Group key = COALESCE(piece_of, audio_id); selection is per group — every
+    -- live piece of a selected group is selected, so a row needs every piece
+    -- validated (the progress MIN over selected dubs already says so).
+    piece_of           TEXT,
     PRIMARY KEY (project_id, file_id, cell_id, audio_id)
 );
 
@@ -1457,8 +1486,9 @@ CREATE INDEX IF NOT EXISTS idx_model_ab_events_user ON model_ab_events(user_id);
 -- pair = unscoped = today's behavior. 'lane' rows restrict target-side writes
 -- to those lanes (default lane stored as literal ''); 'file' rows restrict
 -- writes to those fileIds. Kinds compose with AND. Enforced in sync-worker
--- authorize; source/comment/audio/file-level events are never gated. Leads
--- (role >= 500) must stay unscoped (auth-worker CRUD rejects scoping them).
+-- authorize; source/comment/audio/file-level events are never gated.
+-- Maintainer and above (role >= 600) stay unscoped. A project lead may hold
+-- lane rows: those are the target lanes they can see.
 CREATE TABLE IF NOT EXISTS project_member_scopes (
     project_id TEXT NOT NULL,
     user_id    BIGINT NOT NULL,
@@ -1529,6 +1559,9 @@ CREATE TABLE IF NOT EXISTS lanes (
     archived_at TIMESTAMPTZ,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- 0173 (AQU-1954): does every file owe audio in this language? Off, a file
+    -- counts this language's audio only once it has a recording in it.
+    records_audio BOOLEAN NOT NULL DEFAULT false,
     PRIMARY KEY (project_id, id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_lanes_id
@@ -1813,6 +1846,7 @@ CREATE TABLE IF NOT EXISTS integration_connections (
   access_token_expires_at TIMESTAMPTZ,-- from the access-token JWT exp claim; NULL = non-expiring (legacy flow)
   needs_reauth BOOLEAN NOT NULL DEFAULT FALSE, -- set when refresh fails (revoked/max lifetime); cleared on successful OAuth callback
   scopes TEXT,
+  environment TEXT,                   -- deployment that made the row (ENVIRONMENT at OAuth time); NULL = pre-0175 row, usable by production only (AQU-1775)
   created_by TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),

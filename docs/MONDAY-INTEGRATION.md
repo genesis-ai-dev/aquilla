@@ -205,3 +205,40 @@ Links saved before this ships have an empty webhook list. Saving such a link
 again (project settings → Monday → save the mapping) creates the webhooks, because
 the link route creates them whenever the stored list is empty. Unlinking and
 linking again also works. No data migration is needed.
+
+## Environments (AQU-1775)
+
+A connection belongs to the deployment that made it. The OAuth callback stamps
+the Worker's `ENVIRONMENT` (`production`, `development`; a local stack with
+`WRANGLER_LOCAL=1` is `local`) on the `integration_connections` row, and
+`getConnectionAccessToken`, the one accessor every Monday call path goes
+through, refuses a row from another environment before it decrypts or
+refreshes anything. The refusal is a `MondayForeignConnectionError`: the push
+engine records it as a permanent push error (no retry, `dirty_at` cleared),
+the routes answer 409 with `foreignConnection: true`, and
+`GET /orgs/:orgId/connection` reports `environment` and `usable`. A row with no
+environment predates the column; production accepts it, nothing else does.
+
+Why: dev's Neon branch is restored from production, and that copy carries
+every org's encrypted Monday tokens. Production and development share the
+signing key the token key is derived from, so without the gate the dev Worker
+could decrypt a production org's token, refresh it (Monday rotates refresh
+tokens, so production's copy would stop working) and push dev's numbers onto a
+board linked on production. The refresh also deletes the copied rows
+(`scripts/neon-scrub-integrations.ts`, `pnpm neon:scrub:dev`), so the gate is
+the backstop. A disconnect on dev still works for a copied row: the webhook
+cleanup is best-effort and the row is deleted without calling Monday.
+
+The key is separate too. The Monday token encryption key derives from
+`MONDAY_TOKEN_KEY` when that secret is set and from `SECRET_KEY` otherwise
+(`mondayTokenKeyMaterial` in `lib/monday/crypto.ts`). The dev Worker sets it
+and production does not, so a production token copied to dev is unreadable
+there even if the gate were bypassed: the push records "token decrypt failed"
+as a permanent error. Setting or rotating it makes every connection made on
+that Worker before it unreadable; the orgs reconnect.
+
+Testing the two environments stays independent: the same Monday app has each
+origin's `/oauth/callback` registered, so connect on dev.aquilla.app with a
+Frontier Monday user and a test board, and on aquilla.app with the customer's
+user and board. Once the nightly refresh runs again, dev's own connections go
+with the rest of dev's data each night and are made again in the morning.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { isSourceClipFor, keptWindowSec } from "./kept-window"
+import { isSourceClipFor, keptWindowSec, piecesWindowSec, takePlayWindow } from "./kept-window"
 
 // Ids follow buildAudioId's seeding: a take carries its CELL id, the imported
 // source clip carries its FILE id.
@@ -48,5 +48,33 @@ describe("isSourceClipFor", () => {
     expect(isSourceClipFor(cell, take)).toBe(false)
     expect(isSourceClipFor({ ...cell, medium: "text" }, source)).toBe(false)
     expect(isSourceClipFor({ ...cell, selectedAudioId: take }, source)).toBe(false)
+  })
+})
+
+// AQU-1767 (Sam, 2026-10-14): a split take's pieces, for its waveform.
+describe("piecesWindowSec", () => {
+  it("runs first start to last end, marks cuts where pieces meet, and keeps the space between apart", () => {
+    expect(piecesWindowSec([
+      { trimStartMs: 1500, trimEndMs: 2500 },
+      { trimStartMs: 200, trimEndMs: 1500 },
+      { trimStartMs: 3000, trimEndMs: null },
+    ])).toEqual({ start: 0.2, end: null, cuts: [1.5], gaps: [{ start: 2.5, end: 3 }] })
+  })
+})
+
+// AQU-1767 (Sam's walk, 2026-10-15): every player of a take plays it alike.
+describe("takePlayWindow", () => {
+  it("plays a split take's pieces with the space between them as gaps", () => {
+    const atts = {
+      a: { slot: "recording", trimEndMs: 1000 },
+      b: { slot: "recording", pieceOf: "a", trimStartMs: 1500, trimEndMs: 2500 },
+    }
+    expect(takePlayWindow(atts, "b")).toEqual({ start: 0, end: 2.5, gaps: [{ start: 1, end: 1.5 }] })
+  })
+  it("plays a whole take's trimmed part, and an untrimmed one whole", () => {
+    expect(takePlayWindow({ a: { trimStartMs: 300, trimEndMs: 2700 } }, "a")).toEqual({ start: 0.3, end: 2.7 })
+    expect(takePlayWindow({ a: { trimEndMs: 2700 } }, "a")).toEqual({ start: null, end: 2.7 })
+    expect(takePlayWindow({ a: {} }, "a")).toBeNull()
+    expect(takePlayWindow({}, "a")).toBeNull()
   })
 })

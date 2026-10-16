@@ -66,6 +66,7 @@
 // module self-contained — needed the moment event-projection began importing
 // it, which pulled this file into the root graph for the first time.
 import type { AquillaDb } from '../../../db/shim/postgres'
+import { effectiveMediaSettings } from './media-settings'
 import { makeRequestCache, type RequestCache } from './request-cache'
 
 /**
@@ -160,7 +161,8 @@ export async function resolveAllowTrackEditing(
   // `authorize` and 500s the whole batch, which can wedge a durable outbox on
   // one poisoned event. An unreachable settings row reads as OFF.
   try {
-    const parsed = await cache.writePathSettings(projectId)
+    // AQU-1768: a project with no setting of its own follows its org's.
+    const parsed = await effectiveMediaSettings(cache, projectId)
     return parsed?.allowTrackEditing === true
   } catch {
     return false

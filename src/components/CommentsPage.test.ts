@@ -187,12 +187,53 @@ describe("applySorting", () => {
 // The badge next to the "Comments" title shows the project total when no
 // filter is active, but the number of *visible threads* once any filter is on.
 
+// ── AQU-1958: the org-wide view's extra narrowing ────────────────────────
+
+describe("applyFilters — project and date range (AQU-1958)", () => {
+  const noReplies2 = new Map<string, CommentRecord[]>()
+  // Local midday so the local-timezone day bounds hold wherever this runs.
+  const oct2 = new Date(2026, 9, 2, 12).getTime()
+  const oct5 = new Date(2026, 9, 5, 12).getTime()
+
+  it("keeps only the picked project's threads", () => {
+    const roots = [
+      makeComment({ commentId: "a", projectId: "p-oromo" }),
+      makeComment({ commentId: "b", projectId: "p-marathi" }),
+    ]
+    const result = applyFilters(roots, noReplies2, { ...DEFAULT_FILTER, projectId: "p-oromo" })
+    expect(result.map((r) => r.commentId)).toEqual(["a"])
+  })
+
+  it("bounds the list by when the thread was started, both ends inclusive", () => {
+    const roots = [
+      makeComment({ commentId: "early", createdAt: oct2 }),
+      makeComment({ commentId: "late", createdAt: oct5 }),
+    ]
+    expect(applyFilters(roots, noReplies2, { ...DEFAULT_FILTER, from: "2026-10-05" })
+      .map((r) => r.commentId)).toEqual(["late"])
+    expect(applyFilters(roots, noReplies2, { ...DEFAULT_FILTER, to: "2026-10-02" })
+      .map((r) => r.commentId)).toEqual(["early"])
+    // The picked days themselves are in range on both ends.
+    expect(applyFilters(roots, noReplies2, {
+      ...DEFAULT_FILTER, from: "2026-10-02", to: "2026-10-05",
+    })).toHaveLength(2)
+  })
+
+  it("treats an unparseable date as no bound rather than matching nothing", () => {
+    const roots = [makeComment({ commentId: "a", createdAt: oct2 })]
+    expect(applyFilters(roots, noReplies2, { ...DEFAULT_FILTER, from: "2026-10" })).toHaveLength(1)
+  })
+})
+
 describe("countActiveFilters", () => {
   it("is 0 with the default (no) filter", () => {
     expect(countActiveFilters(DEFAULT_FILTER)).toBe(0)
   })
 
   it("counts each narrowing filter type", () => {
+    expect(countActiveFilters({ ...DEFAULT_FILTER, projectId: "p1" })).toBe(1)
+    expect(countActiveFilters({ ...DEFAULT_FILTER, from: "2026-10-01" })).toBe(1)
+    expect(countActiveFilters({ ...DEFAULT_FILTER, to: "2026-10-31" })).toBe(1)
     expect(countActiveFilters({ ...DEFAULT_FILTER, fileId: "GEN.sfm" })).toBe(1)
     expect(countActiveFilters({ ...DEFAULT_FILTER, authorId: "user-alice" })).toBe(1)
     expect(countActiveFilters({ ...DEFAULT_FILTER, participant: "user-bob" })).toBe(1)

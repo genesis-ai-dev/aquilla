@@ -607,7 +607,16 @@ describe("counting the org's stricter projects (AQU-1771)", () => {
     await project("e", { systemPrompt: "nothing about visibility" })
     const res = await counts("tom")
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ rosterViewMinRole: 1, memberProgressViewMinRole: 1 })
+    // AQU-1938: the projects behind each count ride along, named only where
+    // the caller may see them — tom is a contributor on none of these.
+    expect(await res.json()).toEqual({
+      rosterViewMinRole: 1,
+      memberProgressViewMinRole: 1,
+      overrideProjects: {
+        rosterViewMinRole: { total: 1, projects: [] },
+        memberProgressViewMinRole: { total: 1, projects: [] },
+      },
+    })
   })
 
   it("refuses someone outside the org", async () => {

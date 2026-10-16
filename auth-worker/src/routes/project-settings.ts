@@ -100,6 +100,7 @@ import {
   readLaneLastChange,
   updateTargetLane,
   setTargetLaneArchived,
+  setTargetLaneRecordsAudio,
 } from "../../../db/shared/lanes"
 import {
   filterSettingsToVisibleLanes,
@@ -109,6 +110,7 @@ import {
 import { lanesForScopeVisibility } from "../../../src/lib/lanes/scope-ids"
 import { loadTargetLaneIdentities, visibleTagsForMember } from "../../../db/shared/lane-visibility"
 import { grantNewLane } from "../../../db/shared/lane-grants"
+import { grantCreatedLaneToActor } from "../services/lane-grants"
 import { markProjectMondayLinksDirty } from "../../../db/shared/monday-dirty"
 import type { AquillaDb } from "../../../db/shim/postgres"
 import { laneLanguage } from "../../../src/lib/lanes/lane-display"
@@ -120,6 +122,7 @@ import {
 } from "../../../db/shared/retired-lane-settings"
 import { loadOrgValidationDefaults } from "../../../db/shared/validation-threshold"
 import { ttsSettingsCapProblem } from "../../../db/shared/tts-settings-caps"
+import { mediaDefaultsFromOrgSettings, type MediaDefaults } from "../../../db/shared/media-setting-defaults"
 
 const projectSettings = new Hono<AuthHonoEnv>()
 
@@ -238,8 +241,9 @@ async function withOrgDefaults(
   orgValidationCountAudio: number | null
   orgPolicy: ProjectOrgPolicy
   visibilityFloors: VisibilityFloorsView
+  orgMediaDefaults: MediaDefaults
 }> {
-  const [orgCountStructuralCells, orgAllowBulkValidateAiDrafts, orgThresholds, policy] = await Promise.all([
+  const [orgCountStructuralCells, orgAllowBulkValidateAiDrafts, orgThresholds, policy, orgMediaDefaults] = await Promise.all([
     getOrgCountStructuralCellsForProject(env, projectId),
     getOrgAllowBulkValidateAiDraftsForProject(env, projectId),
     // AQU-1771: the org's validation defaults, null when it set none. Read
@@ -250,6 +254,8 @@ async function withOrgDefaults(
     // need, for the same reason — plus the visibility floors this project
     // actually enforces, its own stricter values included.
     getProjectOrgPolicy(env, projectId, response.settings),
+    // AQU-1768: and its media defaults, for the same reason.
+    loadOrgMediaDefaults(env, projectId),
   ])
   const { visibility } = policy
   return {
@@ -271,6 +277,30 @@ async function withOrgDefaults(
         effective: visibility.memberProgressViewMinRole,
       },
     },
+    orgMediaDefaults,
+  }
+}
+
+/**
+ * AQU-1768: the media defaults the project's org set (valid values only;
+ * empty when it set none or the project has no org). Best-effort: a failed
+ * read reports none, so the page shows each control's built-in default rather
+ * than failing the settings response.
+ */
+async function loadOrgMediaDefaults(
+  env: AuthHonoEnv["Bindings"],
+  projectId: string,
+): Promise<MediaDefaults> {
+  try {
+    const row = await env.AQUILLA_PG.prepare(
+      `SELECT os.settings
+         FROM projects p
+         JOIN org_settings os ON os.org_id = p.org_id
+        WHERE p.id = ?`,
+    ).bind(projectId).first<{ settings: string | null }>()
+    return mediaDefaultsFromOrgSettings(row?.settings ? JSON.parse(row.settings) : null)
+  } catch {
+    return {}
   }
 }
 
@@ -362,10 +392,9 @@ projectSettings.get("/:projectId/settings", authMiddleware, async (c) => {
   // unchanged. Does not read lanes.language, so a row the backfill has not
   // filled yet filters the same way.
   //
-  // AQU-1795: this runs whenever the wall left the caller unrestricted, wall
-  // on or off, so it stops at the wall's own floor. A project lead who still
-  // carries a scope row from before a promotion sees every lane, the same as
-  // the sync worker's scopeReadClause and the portfolio give them.
+  // This runs whenever the wall left the caller unrestricted, wall on or
+  // off, so it stops at the wall's own floor. A project lead is below that
+  // floor: a leftover lane scope still limits them.
   if (visible === null && role.level < READ_WALL_MAINTAINER) {
     const scoped = await laneScopeValuesFor(c.env.AQUILLA_PG, projectId, user.id)
     if (scoped.length > 0) {
@@ -726,6 +755,10 @@ const archiveLaneSchema = z.object({
   archived: z.boolean(),
 })
 
+const laneRecordsAudioSchema = z.object({
+  recordsAudio: z.boolean(),
+})
+
 /**
  * Same floor as a language-only settings write, lanes included: the org's
  * languageEditMinRole, or PROJECT_LEAD when that key was never set.
@@ -880,6 +913,7 @@ projectSettings.post(
     // "Unscoped — full access". Grant it in the same request that creates it.
     try {
       await grantNewLane(c.env.AQUILLA_PG, projectId, { laneId: created.laneId }, user.id)
+      await grantCreatedLaneToActor(c.env.AQUILLA_PG, projectId, created.laneId, user.id)
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
       return c.json({ error: `write failed: ${message}` }, 500)
@@ -957,6 +991,33 @@ projectSettings.get("/:projectId/lanes/:laneId/last-change", authMiddleware, asy
     return c.json({ error: `read failed: ${message}` }, 500)
   }
 })
+
+// AQU-1954: "Records audio" on one language row. Off (the default), a file
+// counts this language's audio only once it has a recording in it; on, every
+// file owes it — the plan board, the Progress card and the org's numbers all
+// follow. Gated like every other change to the Languages card.
+projectSettings.post(
+  "/:projectId/lanes/:laneId/records-audio",
+  authMiddleware,
+  zValidator("json", laneRecordsAudioSchema),
+  async (c) => {
+    const user = c.get("user")
+    const projectId = c.req.param("projectId") as string
+    const laneId = c.req.param("laneId") as string
+    const denied = await denyLanguageWrite(c.env, user, projectId)
+    if (denied) return c.json(denied, 403)
+    const result = await setTargetLaneRecordsAudio(
+      c.env.AQUILLA_PG,
+      projectId,
+      laneId,
+      c.req.valid("json").recordsAudio,
+    )
+    if (result.status === "not_found") return c.json({ error: "lane not found" }, 404)
+    const fresh = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
+    notifySettingsChangedBestEffort(c, projectId, fresh.version)
+    return c.json({ lane: fresh.lanes?.find((row) => row.id === laneId) ?? result.lane })
+  },
+)
 
 projectSettings.post(
   "/:projectId/lanes/:laneId/archive",

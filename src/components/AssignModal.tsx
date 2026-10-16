@@ -82,6 +82,7 @@ import {
   buildLaneItems,
   laneTagForAssignment,
   selectValueForLane,
+  type AssignLaneOption,
 } from "@/lib/sync/assignment-lane"
 
 type ScopeKind = "selection" | "verses" | "chapters" | "books"
@@ -102,6 +103,13 @@ interface AssignModalProps {
    * to the pre-lane flow).
    */
   targetLanes?: string[]
+  /**
+   * AQU-1977: the project's own target lanes, in order (`assignLaneOptions`).
+   * When given they are the lane select's options and nothing else, so no
+   * "Default language" is offered on a project that has no '' lane — and a
+   * `defaultLane` that names none of them opens on the first.
+   */
+  lanes?: readonly AssignLaneOption[]
   /** Display names keyed by lane tag, including '' for the default lane. */
   laneLabels?: Readonly<Record<string, string>>
   /**
@@ -197,6 +205,7 @@ export function AssignModal({
   activeFileId,
   projectFiles,
   targetLanes,
+  lanes,
   laneLabels,
   defaultLane = "",
   defaultLaneLabel,
@@ -324,7 +333,7 @@ export function AssignModal({
   // AQU-676: the assignee picker must list only the project's own members,
   // never everyone with org-baseline access. Org members inherit access to
   // every project via AD-12 max-wins, so without this filter a per-team mentor
-  // doing assignments sees (and could assign to) other language teams' people.
+  // doing assignments sees (and could assign to) people staffed on other lanes.
   // partitionMembers (AQU-454) keeps only members with a project-specific path
   // (override / group / creator); org-baseline-only members drop out.
   //
@@ -354,14 +363,21 @@ export function AssignModal({
   const laneItems = useMemo(
     () =>
       buildLaneItems({
+        lanes,
         targetLanes,
         laneLabels,
         defaultLaneLabel,
         defaultLaneFallback: t("dialog.assign.defaultLaneFallback"),
         allowedTags: laneDelegateLanes(effectiveDelegate),
       }),
-    [targetLanes, laneLabels, defaultLaneLabel, effectiveDelegate, t],
+    [lanes, targetLanes, laneLabels, defaultLaneLabel, effectiveDelegate, t],
   )
+  // AQU-1977: given the project's own lanes, a pick that names none of them —
+  // an empty default on a project that has no '' lane — reads as the first.
+  const laneValue =
+    lanes?.length && !laneItems.some((item) => item.value === selectedLane)
+      ? (laneItems[0]?.value ?? selectedLane)
+      : selectedLane
   // fileId -> named group label (excludes the synthetic "Ungrouped" bucket),
   // used to prefix each bulk-created assignment's scopeLabel so a PM can see
   // which season an individually-removable row came from.
@@ -424,11 +440,11 @@ export function AssignModal({
     (message: string, username: string): string | null => {
       if (!message.includes("cannot take work in")) return null
       const language =
-        laneItems.find((item) => item.value === selectedLane)?.label ??
+        laneItems.find((item) => item.value === laneValue)?.label ??
         (defaultLaneLabel?.trim() || t("dialog.assign.defaultLaneFallback"))
       return t("dialog.assign.error.assigneeNotEligible", { username, language })
     },
-    [laneItems, selectedLane, defaultLaneLabel, t],
+    [laneItems, laneValue, defaultLaneLabel, t],
   )
 
   const handleSubmit = useCallback(async () => {
@@ -461,7 +477,7 @@ export function AssignModal({
       effectiveDelegate,
       // AQU-729: the policy takes the raw lane tag ('' = default), not the
       // picker's select value.
-      laneTagForAssignment(selectedLane) ?? "",
+      laneTagForAssignment(laneValue) ?? "",
     )) {
       // AQU-581: a delegate who picked a lane outside their scopes gets the
       // lane message; everyone else below the floor is still self-only.
@@ -490,7 +506,7 @@ export function AssignModal({
           author,
           assigneeUserId: member.userId,
           entries,
-          targetLang: laneTagForAssignment(selectedLane),
+          targetLang: laneTagForAssignment(laneValue),
           deadline,
           note: note.trim() || null,
         })
@@ -569,7 +585,7 @@ export function AssignModal({
         scope,
         scopeKind: apiScopeKind,
         scopeLabel,
-        targetLang: laneTagForAssignment(selectedLane),
+        targetLang: laneTagForAssignment(laneValue),
         deadline,
         note: note.trim() || null,
       })
@@ -598,7 +614,7 @@ export function AssignModal({
     jwt, projectId, author, note, onAssigned, onOpenChange,
     roleLevel, allowSelfAssignment, assignmentMinRole, effectiveDelegate, isLaneDelegate,
     effectiveCallerUserId, deadlineDate, groupLabelByFileId,
-    selectedLane, isScripture, segmentNoun, selectUnitErrorKey, assigneeRefusal, t,
+    laneValue, isScripture, segmentNoun, selectUnitErrorKey, assigneeRefusal, t,
   ])
 
   // Role gate (AQU-496 / AQU-581): a caller at the org's assignment floor
@@ -685,7 +701,7 @@ export function AssignModal({
               <FieldLabel htmlFor="assign-modal-lane">{t("dialog.assign.laneLabel")}</FieldLabel>
               <Select
                 items={laneItems}
-                value={selectedLane}
+                value={laneValue}
                 onValueChange={(v) => setSelectedLane(selectValueForLane(v))}
               >
                 <SelectTrigger id="assign-modal-lane">

@@ -186,6 +186,7 @@ import {
 } from "./cell/EditorCellContent"
 import { TargetDraftActions, TargetReferenceActions } from "./cell/TargetCellActions"
 import { TargetValidationControl } from "./cell/TargetValidationControl"
+import { takePlayWindow } from "@/lib/audio/kept-window"
 import { AudioValidationControl } from "./cell/AudioValidationControl"
 import { audioBlockedReason, lineValidationTakes } from "@/lib/audio/audio-validation-permissions"
 import { slotSelections } from "@/lib/sync/cell-audio-read-types"
@@ -499,6 +500,8 @@ export function applyRowOverlays(
         ...(attachment.validators ? { validators: attachment.validators } : {}),
         ...(attachment.role ? { role: attachment.role } : {}),
         ...(attachment.recordedBy != null ? { recordedBy: attachment.recordedBy } : {}),
+        // AQU-1767: see mergeCellsWithAudio — the same list, the same rule.
+        ...(attachment.pieceOf ? { pieceOf: attachment.pieceOf } : {}),
       }
     }
     next = {
@@ -2789,11 +2792,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           cuePlayingRow && "bg-primary/[0.07] before:pointer-events-none before:absolute before:inset-y-0 before:start-0 before:z-10 before:w-[3px] before:bg-primary",
         )}
       >
-        {isScriptureRow && (
-          <span className="pointer-events-none absolute end-1 top-1 z-10 rounded bg-sky-400/15 px-1 text-[9px] font-medium text-sky-600 dark:text-sky-400">
-            {t("editor.row.scriptureBadge")}
-          </span>
-        )}
         {untimedInTimeLens && (
           <span className="pointer-events-none absolute start-1 top-1 z-10 rounded bg-amber-400/15 px-1 text-[9px] font-medium text-amber-600 dark:text-amber-400">
             {t("editor.row.noTimingBadge")}
@@ -2938,6 +2936,30 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           sourceFootnoteNumberOffset={footnoteOffsets.source}
           targetFootnoteNumberOffset={footnoteOffsets.target}
         />
+        {/* AQU-1716: the verse badge sits at the row's FOOT, not its top-right
+            corner — that corner belongs to the row's "…" menu, and the two
+            crowded each other badly enough on a translated Biblica file that
+            another control painted over the badge's text ("ve●se").
+            Deliberately a flow element rather than an `absolute` corner pin:
+            the row's foot already carries the AI-draft progress bar
+            (`FillsTwiceIndicator`, pinned to the target well's bottom) and the
+            last line of translation text, and an overlay at `bottom-1` lands
+            on top of both the moment a verse's last line runs the cell's full
+            width. Taking its own ~16px of height instead means "clear of the
+            text and the loading bar" holds by construction at every row
+            height and viewport, with nothing to re-tune. `justify-end` +
+            `pe-1` are logical, so the badge mirrors to the bottom-LEFT under
+            an RTL UI language like the rest of the editor chrome. */}
+        {isScriptureRow && (
+          <div
+            data-testid="scripture-badge-row"
+            className="pointer-events-none flex justify-end pe-1 pb-0.5"
+          >
+            <span className="rounded bg-sky-400/15 px-1 text-[9px] font-medium text-sky-600 dark:text-sky-400">
+              {t("editor.row.scriptureBadge")}
+            </span>
+          </div>
+        )}
       </div>
           )
         }}
@@ -6956,12 +6978,23 @@ function EditorRow({
     cell.endTime > cell.startTime
       ? { start: cell.startTime, end: cell.endTime }
       : null
+  // AQU-1767 (Sam's walk, 2026-10-15): a take plays here as it plays
+  // everywhere else — its trimmed part, and a split take its pieces with the
+  // space between them skipped. This player played the raw recording, gaps
+  // and all, and being a copy of the take the Recording tab shows, it took
+  // over the tab's waveform once it had played.
+  const takeWindow = railSectionWindow ? null : takePlayWindow(cell.attachments, cell.selectedAudioId)
+  const railWindowKey = railSectionWindow
+    ? `s${railSectionWindow.start}-${railSectionWindow.end}`
+    : takeWindow
+      ? `t${takeWindow.start}-${takeWindow.end}~${takeWindow.gaps?.map((g) => `${g.start}-${g.end}`).join(",") ?? ""}`
+      : ""
   const { setTrim: setRailTrim } = audioController
   useEffect(() => {
-    if (cell.medium !== "media") return
     if (railSectionWindow) setRailTrim(railSectionWindow.start, railSectionWindow.end)
+    else if (takeWindow) setRailTrim(takeWindow.start, takeWindow.end, takeWindow.gaps)
     else setRailTrim(null, null)
-  }, [cell.medium, railSectionWindow?.start, railSectionWindow?.end, setRailTrim]) // eslint-disable-line react-hooks/exhaustive-deps -- window identity varies per render; primitives cover it
+  }, [railWindowKey, setRailTrim]) // eslint-disable-line react-hooks/exhaustive-deps -- railWindowKey stands for both windows
   const cellForGeneratedVoice = useMemo(() => ({
     metadata: {
       attachments: cell.attachments,
@@ -8983,6 +9016,9 @@ function EditorRow({
                 attachments={audioHome?.attachments ?? cell.attachments}
                 projectId={project.id}
                 fileId={audioHome?.fileId ?? cell.fileId}
+                // AQU-1978: the voice is a take in the lane on screen, like the
+                // mic and the upload beside it.
+                targetLang={activeLane || undefined}
                 // Sam, 2026-08-25: a subtitle performed by two heard lines
                 // voices BOTH, so neither is left silent. Only the first is
                 // played back; the rest are generated alongside it.

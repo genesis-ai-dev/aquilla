@@ -116,27 +116,52 @@ export async function loadProjectVisibilityOverrides(
   return out
 }
 
+/** One live project's own values, as the org's stricter-projects line reads them. */
+export interface OrgProjectVisibilityRow extends ProjectVisibilityOverrides {
+  projectId: string
+  /** AQU-1938: the line names the projects, not only counts them. */
+  name: string
+  /** Whether the caller may see this project's name (the rule the caller passed in). */
+  nameVisible: boolean
+}
+
 /**
  * The own values of every live (unarchived) project in an org that sets any —
- * for the org's "N projects are stricter" line. Projects that follow the org
- * on both are left out. Starts from the org's projects (idx_projects_org), so
- * only this org's settings rows are ever opened.
+ * for the org's "N projects are stricter" line and, since AQU-1938, the list of
+ * which projects those are. Projects that follow the org on both are left out.
+ * Starts from the org's projects (idx_projects_org), so only this org's
+ * settings rows are ever opened. Ordered by name, as the list shows them.
+ *
+ * `nameVisible` is a condition over `projects p` saying whether the CALLER may
+ * see a project's name, with its binds in order. Every row still comes back —
+ * the count covers projects the caller cannot see — but those are flagged, so
+ * the line can say "and N more" without naming them. The rule itself lives
+ * with the auth-worker's other access rules; this module only applies it.
  */
 export async function loadOrgProjectVisibilityOverrides(
   db: AquillaDb,
   orgId: number,
-): Promise<Map<string, ProjectVisibilityOverrides>> {
+  nameVisible: { sql: string; binds: readonly unknown[] },
+): Promise<OrgProjectVisibilityRow[]> {
   const { results } = await db
     .prepare(
-      `SELECT ${OVERRIDE_COLUMNS}
+      `SELECT ${OVERRIDE_COLUMNS},
+              p.name AS name,
+              CASE WHEN ${nameVisible.sql} THEN 1 ELSE 0 END AS name_visible
          FROM projects p
          JOIN project_settings ps ON ps.project_id = p.id
         WHERE p.org_id = ? AND p.archived_at IS NULL
-          AND (ps.roster_view_min_role IS NOT NULL OR ps.member_progress_view_min_role IS NOT NULL)`,
+          AND (ps.roster_view_min_role IS NOT NULL OR ps.member_progress_view_min_role IS NOT NULL)
+        ORDER BY LOWER(p.name), p.id`,
     )
-    .bind(orgId)
-    .all<OverrideRow>()
-  return new Map((results ?? []).map((row) => [row.project_id, overridesFromRow(row)]))
+    .bind(...nameVisible.binds, orgId)
+    .all<OverrideRow & { name: string; name_visible: number | string }>()
+  return (results ?? []).map((row) => ({
+    projectId: row.project_id,
+    name: row.name,
+    nameVisible: Number(row.name_visible) === 1,
+    ...overridesFromRow(row),
+  }))
 }
 
 /** One project's own values. */

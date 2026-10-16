@@ -86,6 +86,8 @@ const AUDIO_ROLLUP_KINDS: ReadonlySet<string> = new Set([
   'cell.audio.remove',
   'cell.audio.validate',
   'cell.audio.unvalidate',
+  // AQU-1767: a cut adds a selected dub piece and resets both halves' votes.
+  'cell.audio.cut',
 ])
 
 function touchesAudioRollup(kind: string, touches: readonly ProjectionTable[]): boolean {

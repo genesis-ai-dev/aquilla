@@ -548,6 +548,9 @@ export const org = defineNamespace({
     "org.projectOverview.audioValidatedOfRecorded":
       "Of the audio recorded, {percent}% is validated.",
     "org.projectOverview.crossLaneTooltip": "Cross-language stat — not broken down per language.",
+    // AQU-1954: a language tab whose language is off and has no recordings.
+    "org.projectOverview.laneNoAudioTooltip":
+      "This language doesn't record audio. Turn on Records audio for it in Project settings → Languages.",
     "org.projectOverview.cellsSuffix": "cells",
     "org.projectOverview.laneDefaultFallback": "Default",
     "org.projectOverview.legendTranslated": "translated",
@@ -606,10 +609,12 @@ export const org = defineNamespace({
     "org.projectOverview.assignProjectManagerDialogTitle": "Assign project manager",
     "org.projectOverview.pmDialogDescription":
       "The project manager is responsible for this project. They must be a member of the project.",
-    // Shown when a person is the PM (overview) or is selected in the dialog.
-    // Hidden while the field is Unassigned — clearing does not add a role.
+    // Shown when a person is the PM (overview, behind the circled-i beside the
+    // heading) or is selected in the dialog. Hidden while the field is
+    // Unassigned — clearing does not add a role.
     "org.projectOverview.pmGrantsProjectLead":
       "Naming them project manager also adds them as a Project lead on this project. An existing higher role is kept. Clearing the project manager does not remove that membership.",
+    "org.projectOverview.pmGrantsProjectLeadAriaLabel": "What naming a project manager does",
     "org.projectOverview.selectMemberPlaceholder": "Select a member",
     "org.projectOverview.teamVisibilityDescription":
       "Who can see each teammate's assignment progress on this project.",
@@ -1440,7 +1445,6 @@ export const org = defineNamespace({
     // plan-status.ts is max(6% of the cells, 7). Nothing links the sentence to
     // the function, so a change to one is a change to both; the hint exists
     // because a group nobody can predict the membership of reads as a bug.
-    "org.projectOverview.plan.groupHintNearlyComplete": "within 6% or 7 cells of done",
     "org.projectOverview.plan.groupHintInProgress": "active, comfortably ahead",
     "org.projectOverview.plan.groupHintNotStarted": "no content yet",
     "org.projectOverview.plan.groupHintDone": "marked complete by a manager",
@@ -1631,10 +1635,12 @@ export const org = defineNamespace({
     // The title names the chapter the way the reader just clicked it; the line
     // beside it says what is outstanding in the medium that leads.
     "org.projectOverview.plan.chapterTitle": "Chapter {chapter}",
-    "org.projectOverview.plan.chapterCellsUntranslated": plural({ one: "{count} cell not yet translated", other: "{count} cells not yet translated" }),
-    "org.projectOverview.plan.chapterCellsUnvalidated": plural({ one: "{count} cell not yet validated", other: "{count} cells not yet validated" }),
-    "org.projectOverview.plan.chapterTakesUnrecorded": plural({ one: "{count} take not yet recorded", other: "{count} takes not yet recorded" }),
-    "org.projectOverview.plan.chapterTakesUnvalidated": plural({ one: "{count} take not yet validated", other: "{count} takes not yet validated" }),
+    // Sam, 2026-10-14 (meeting): the chapter card lists each queue under its
+    // own label, every line once, under the first job it still needs.
+    "org.projectOverview.plan.queueTranslateValidate": "Requires translation and validation ({count})",
+    "org.projectOverview.plan.queueValidate": "Requires validation ({count})",
+    "org.projectOverview.plan.queueRecordValidate": "Requires a recording and its validation ({count})",
+    "org.projectOverview.plan.queueValidateRecording": "Recording requires validation ({count})",
     // The overflow chip at the end of the verse row, when the outstanding
     // verses outnumber the chips one row can hold.
     // …and its sibling for a document, which has no sections at all.
@@ -1653,7 +1659,6 @@ export const org = defineNamespace({
     // Audio hangs off the file, not off a target language, so every lane reads
     // the same recordings — a manager comparing two lanes' audio bars and
     // finding them identical is seeing the truth, not a stuck filter.
-    "org.projectOverview.plan.audioSharedAcrossLanes": "audio is shared by every language",
     // ── AQU-1278: per-assignment progress ──────────────────────────────
     // Who owns which slice of a unit, and how far along their slice is.
     "org.projectOverview.plan.assignedTo": "Assigned to",
@@ -2194,6 +2199,10 @@ export const org = defineNamespace({
       },
       "org.projectOverview.sortFilesByAria": {
         description: "Accessible name for the dropdown that chooses the sort order of the per-file breakdown list.",
+      },
+      "org.projectOverview.pmGrantsProjectLeadAriaLabel": {
+        description:
+          "Accessible name for the small circled-i button beside the 'Project manager' heading on the project overview. It appears while a project manager is set, and clicking it expands a sentence explaining that naming a project manager also makes them a Project lead.",
       },
       "org.projectOverview.fileListActionsAria": {
         description:
@@ -3241,10 +3250,6 @@ export const org = defineNamespace({
       "org.projectOverview.plan.groupHintSoon": {
         description: "Hint on the Due soon group header.",
       },
-      "org.projectOverview.plan.groupHintNearlyComplete": {
-        description:
-          "Hint on the Nearly complete group header, stating the rule that puts a unit there: its worse medium is short by at most six percent of its cells, or seven cells, whichever is larger. The two numbers are the rule itself, not an illustration — keep them exact.",
-      },
       "org.projectOverview.plan.groupHintInProgress": {
         description: "Hint on the In progress group header.",
       },
@@ -3700,27 +3705,26 @@ export const org = defineNamespace({
         placeholders: { chapter: "The chapter number — a number, not translated." },
         maxLength: 18,
       },
-      "org.projectOverview.plan.chapterCellsUntranslated": {
+      "org.projectOverview.plan.queueTranslateValidate": {
         description:
-          "Beside the chapter card's heading: how many cells in this chapter still have no target text. Shown when translation is the outstanding work; its two siblings cover validation and recording. Reads as a fact about the chapter, not as an instruction.",
-        placeholders: { count: "Cells with no target text — a number; it also selects the plural form." },
+          "Label above a row of verse buttons on the plan board's chapter card: the lines nobody has " +
+          "translated yet, which then also need validating. {count} is how many lines are in the row.",
+        placeholders: { count: "How many lines (a number)." },
       },
-      "org.projectOverview.plan.chapterTakesUnvalidated": {
+      "org.projectOverview.plan.queueValidate": {
         description:
-          "Beside the chapter card's heading (see chapterCellsUntranslated): how many recorded takes nobody has validated yet. Distinct from chapterTakesUnrecorded — these ARE recorded.",
-        placeholders: {
-          count: "How many takes await validation — a number; the plural form is selected by it.",
-        },
+          "Label above the chapter card's row of lines that are translated but not validated yet.",
+        placeholders: { count: "How many lines (a number)." },
       },
-      "org.projectOverview.plan.chapterCellsUnvalidated": {
+      "org.projectOverview.plan.queueRecordValidate": {
         description:
-          "Beside the chapter card's heading (see chapterCellsUntranslated): how many translated cells nobody has validated yet.",
-        placeholders: { count: "Translated cells awaiting validation — a number; it also selects the plural form." },
+          "Label above the chapter card's row of lines with no recording yet (which then also need " +
+          "the recording validated).",
+        placeholders: { count: "How many lines (a number)." },
       },
-      "org.projectOverview.plan.chapterTakesUnrecorded": {
-        description:
-          "Beside the chapter card's heading (see chapterCellsUntranslated), for a file that carries recordings: how many cells have no take against them. A 'take' is one recorded clip for one cell.",
-        placeholders: { count: "Cells with no recording — a number; it also selects the plural form." },
+      "org.projectOverview.plan.queueValidateRecording": {
+        description: "Label above the chapter card's row of lines whose recording nobody has validated yet.",
+        placeholders: { count: "How many lines (a number)." },
       },
       "org.projectOverview.plan.frontMatter": {
         description:
@@ -3742,10 +3746,6 @@ export const org = defineNamespace({
           section: "The section's own key, e.g. a book code or a scene name. Not translated.",
           count: "Outstanding cells in that section — a number, and the one the plural agrees with.",
         },
-      },
-      "org.projectOverview.plan.audioSharedAcrossLanes": {
-        description:
-          "Note beside the inspector's audio bars: recordings hang off the file rather than off one target language, so every lane reads the same audio figures. Lower case because it is read as a parenthetical beside the bars, not as a sentence of its own.",
       },
       "org.projectOverview.plan.assignedTo": {
         description:

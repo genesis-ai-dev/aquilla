@@ -29,7 +29,7 @@ import {
 import type { TimelineTrack } from "@/lib/timeline/tracks"
 import { DEFAULT_TARGET_TRACK_ID } from "@/lib/timeline/track-slots"
 import { slotSelections, type AudioAttachmentOut, type CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
-import { groupSelection, groupTakesByTrack } from "@/lib/audio/take-groups"
+import { groupSelection, groupTakesByTrack, piecesOf, takeBaseLabel } from "@/lib/audio/take-groups"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { composeTakeWindow, defaultTakeWindow } from "@/lib/audio/take-margins"
 import { keptLengthSec } from "@/lib/audio/trim-edit"
@@ -46,13 +46,13 @@ import { useMediaPictureUrl } from "@/hooks/useMediaPictureUrl"
 import { useOnline } from "@/hooks/useOnline"
 import { getActiveAudio, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { useCellAudio } from "@/hooks/useCellAudio"
-import { keptWindowSec, type KeptWindow } from "@/lib/audio/kept-window"
+import { keptWindowSec, piecesWindowSec, type KeptWindow } from "@/lib/audio/kept-window"
 import { takeBadgeState } from "@/components/cell/audio-validation-state"
 import { readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { TakeWaveform } from "@/components/audio/TakeWaveform"
 import type { CodexCell, CodexCellAttachment } from "@/lib/codex-editor/types"
 import { probeDurationMsSafe } from "@/lib/import"
-import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
+import { regenerateVoiceTake } from "./regenerate-voice"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { COUNTDOWN_FROM, useCountdown } from "./useCountdown"
@@ -79,14 +79,15 @@ import { ACCEPT, OFFLINE_MESSAGE, attachAudioFileToCell, validateAudioFile } fro
 import { recordingLimitsFor } from "@/lib/audio/recording-limits"
 import { MAX_AUDIO_UPLOAD_BYTES, audioIdSeededWith, buildAudioId, uploadCellAudio, deleteCellAudio, fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
-import { emitCellAudioAttach, emitCellAudioDeselect, emitCellAudioSelect, emitCellAudioValidate, emitCellLaneRetime } from "@/lib/sync/events-emit"
+import { emitCellAudioAttach, emitCellAudioValidate, emitCellLaneRetime } from "@/lib/sync/events-emit"
 import { audioValidationScope } from "@/lib/audio/audio-validation-permissions"
 import { shouldAutoValidateFreshRecording } from "@/lib/review/auto-validation"
-import { notifyAudioAttachmentsChanged, injectOptimisticAudioAttachment, injectOptimisticAudioDeselect } from "@/lib/audio/audio-attachments-bus"
+import { notifyAudioAttachmentsChanged, injectOptimisticAudioAttachment } from "@/lib/audio/audio-attachments-bus"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
 import { setTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeCell } from "@/lib/audio/transcribe"
+import { laneLanguageForTag } from "@/lib/lanes/lane-language"
 import { probeMicPermission } from "./probeMicPermission"
 
 interface Props {
@@ -705,12 +706,23 @@ export function AudioRecordingModal({
     return take(slotSelections(audioEntry)[targetSlot])
   }, [audioEntry, activeCell, targetSlot])
   const readyAtt = readyTakeId ? audioEntry?.attachments[readyTakeId] : undefined
+  // AQU-1767 (Sam, 2026-10-15): a split take is shown WHOLE, as the Recording
+  // tab shows it — every piece lit, each cut a dashed line, its name and its
+  // full length — never as its selected piece with the rest faded out, which
+  // read as the other pieces being dropped.
+  const readySplit = useMemo(() => {
+    const pieces = piecesOf(recordingTakes, readyTakeId)
+    return pieces.length > 1 ? pieces : null
+  }, [recordingTakes, readyTakeId])
+  const readyPieces = useMemo(() => (readySplit ? piecesWindowSec(readySplit) : null), [readySplit])
   const readyCell = useMemo(() => ({
     metadata: { attachments: audioEntry?.attachments ?? {}, selectedAudioId: readyTakeId ?? undefined },
   }) as unknown as CodexCell, [audioEntry?.attachments, readyTakeId])
   const readyAudio = useCellAudio(project, readyCell, activeCell?.fileId ?? "")
-  const readyKept = activeCell && readyTakeId
-    ? keptWindowSec(
+  const readyKept: KeptWindow | null = activeCell && readyTakeId
+    ? readyPieces
+      ? { start: readyPieces.start, end: readyPieces.end, kind: "trim" }
+      : keptWindowSec(
         { id: activeCell.id, medium: activeCell.medium, selectedAudioId: audioEntry?.selectedAudioId ?? undefined, startTime: activeCell.startTime, endTime: activeCell.endTime },
         readyTakeId,
         readyAtt as unknown as Pick<CodexCellAttachment, "trimStartMs" | "trimEndMs">,
@@ -719,7 +731,9 @@ export function AudioRecordingModal({
   // What the target bar is fed at rest: the part of the selected take that
   // plays, so an over-long take reads as over before anyone records (trim-aware:
   // a take trimmed on the timeline shows its trimmed length).
-  const readyKeptMs = readyAtt
+  const readyKeptMs = readySplit
+    ? readySplit.reduce((sum, piece) => sum + (effectiveAttachmentDurationMs(piece as never) ?? 0), 0)
+    : readyAtt
     ? effectiveAttachmentDurationMs(readyAtt as unknown as Pick<CodexCellAttachment, "durationMs" | "trimStartMs" | "trimEndMs">)
     : null
   const readyBadge = readyAtt
@@ -1197,59 +1211,21 @@ export function AudioRecordingModal({
     setTtsBusy(true)
     setTtsDone(false)
     try {
-      // Round 8c: the TTS take is born with its permanent name like any take.
-      const ok = await generateCellVoice({
-        project, cell: activeCell, session, username,
+      // AQU-1767: shared with the timeline take's "Regenerate voice", so both
+      // name the new take and make it the one that sounds the same way.
+      const ok = await regenerateVoiceTake({
+        project, cell: activeCell, entry: audioEntry, session, username,
         surface: "recorder",
-        label: nextTakeLabel(recordingTakes),
-        // The WORDS come from the subtitle this line performs, and the VOICE
-        // from that subtitle's cast assignment — neither of which the cue
-        // carries itself. Both undefined off a cue file, which is the cell's
-        // own text and its own assignment, exactly as before.
+        targetSlot,
+        laneTag,
         text: ttsText,
         voiceCellId: readAloud?.voiceCellId ?? undefined,
-        // The voice lands on the track the recorder is pointed at, not always
-        // on the default row's generated-voice slot.
-        slot: isDefaultTrackSlot(targetSlot) ? undefined : targetSlot,
-        ...(laneTag ? { targetLang: laneTag } : {}),
       })
-      if (ok) {
-        setTtsDone(true)
-        // You asked for this voice — make it the one that sounds. A recorded
-        // take holding the recording slot would shadow it, so hand the slot
-        // back to the source clip (the "no take" state).
-        //
-        // THE DEFAULT TRACK ONLY, and this is why added tracks were given ONE
-        // slot rather than a pair. The juggle exists because the default row's
-        // resolution prefers whatever holds `"recording"`, and it works only
-        // because there is a shared source clip to park that slot on. An added
-        // track has no such clip — and needs no juggle, because its recorded
-        // and generated takes are siblings in one slot, so picking either
-        // deselects the other through the per-(cell, slot) rule the server
-        // already enforces.
-        //
-        // With no source clip (every text file) there is nothing to park the
-        // slot on, and this used to do nothing — the new voice was saved and
-        // never played. The slot is emptied instead (2026-09-28).
-        const recSel = isDefaultTrackSlot(targetSlot) ? audioEntry?.selectedAudioId : null
-        if (recSel && audioIdSeededWith(recSel, activeCell.id)) {
-          const where = {
-            projectId: project.id, fileId: activeCell.fileId, cellId: activeCell.id, slot: "recording", author: username,
-            ...(laneTag ? { targetLang: laneTag } : {}),
-          }
-          const displaceP = sourceClip
-            ? emitCellAudioSelect({ ...where, audioId: sourceClip.audioId })
-            : emitCellAudioDeselect(where)
-          if (sourceClip) injectOptimisticAudioAttachment(activeCell.fileId, activeCell.id, sourceClip, displaceP)
-          else injectOptimisticAudioDeselect(activeCell.fileId, activeCell.id, "recording", displaceP)
-          await displaceP
-          notifyAudioAttachmentsChanged(activeCell.fileId)
-        }
-      }
+      if (ok) setTtsDone(true)
     } finally {
       setTtsBusy(false)
     }
-  }, [online, activeCell, session, ttsBusy, project, username, recordingTakes, audioEntry?.selectedAudioId, sourceClip, targetSlot, laneTag])
+  }, [online, activeCell, session, ttsBusy, project, username, audioEntry, targetSlot, laneTag, ttsText, readAloud?.voiceCellId])
 
   // Settle on the next line after a brief success indication. The RECORDED path
   // only: this used to be shared with the uploaded one so that keeping a take
@@ -1530,7 +1506,10 @@ export function AudioRecordingModal({
         },
         session,
         projectId: project.id,
-        language: project.targetLanguage,
+        // AQU-1978: Whisper hears the LANE's language. The project-level one is
+        // retired and empty on a new project, so every fresh take was
+        // transcribed with no language at all (auto-detect).
+        language: laneLanguageForTag(laneTag ?? "", project.lanes) ?? undefined,
         // AQU-646: state the slot rather than letting transcription infer it
         // from the stub above. The stub carries `selectedAudioId` and no slot,
         // so the inference would read every take as "recording" — which was
@@ -1539,6 +1518,9 @@ export function AudioRecordingModal({
         // sibling-deselect would drop that track's real take. This is the
         // caller that knows, so it says.
         slot: targetSlot,
+        // AQU-1978: …and the lane, for the same reason: the timings re-attach
+        // deselects within the lane it names, and naming none meant `''`.
+        ...(laneTag ? { targetLang: laneTag } : {}),
       })
       scheduleAutoAdvance()
     } catch (e) {
@@ -1553,7 +1535,7 @@ export function AudioRecordingModal({
       // that struck mid-upload retries with the SAME take after reconnect.
       setPhase(recorder.state.kind === "stopped" ? "preview" : "error")
     }
-  }, [recorder.state, online, session, activeCell, project.id, username, recordingTakes, scheduleAutoAdvance, returnToReady, laneTag, previewTrim])
+  }, [recorder.state, online, session, activeCell, project.id, project.lanes, username, recordingTakes, scheduleAutoAdvance, returnToReady, laneTag, previewTrim])
 
   // Attach an existing FILE as a take, through this dialog's phase machine.
   //
@@ -1812,8 +1794,10 @@ export function AudioRecordingModal({
       ? activeCell.startTime + laneOffsetMs / 1000
       : targetChipGeom(activeCell, undefined)?.anchor ?? activeCell.startTime
   })()
-  const readyAnchorSec = readyAtt
-    ? targetChipGeom(activeCell, readyAtt as unknown as ChipAtt)?.anchor ?? null
+  // A split take plays from its first piece, so the film follows that piece.
+  const readyAnchorAtt = readySplit?.[0] ?? readyAtt
+  const readyAnchorSec = readyAnchorAtt
+    ? targetChipGeom(activeCell, readyAnchorAtt as unknown as ChipAtt)?.anchor ?? null
     : null
   const filmFollowTarget =
     displayPhase === "preview" && previewAnchorSec != null
@@ -2401,7 +2385,7 @@ export function AudioRecordingModal({
                   <div data-testid="rec-ready-take" className="space-y-1">
                     <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                       {t("audio.recordingModal.readyTakeCaption", {
-                        label: readyAtt.label ?? t("audio.takesStrip.takeFallback"),
+                        label: (readySplit ? takeBaseLabel(readyAtt.label) : readyAtt.label) ?? t("audio.takesStrip.takeFallback"),
                         // Tenths rounded DOWN, as the target bar below
                         // prints them — the two must never disagree.
                         seconds: (Math.floor((readyKeptMs ?? 0) / 100) / 10).toFixed(1),
@@ -2426,6 +2410,7 @@ export function AudioRecordingModal({
                       controller={readyController}
                       audioId={readyTakeId}
                       kept={readyKept}
+                      {...(readyPieces ? { pieces: readyPieces } : {})}
                       // Compact in both layouts: beside the film so Record
                       // keeps its place, and without it so a long line still
                       // leaves the takes drawer its room (Sam, 2026-09-28).

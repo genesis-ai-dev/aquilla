@@ -20,6 +20,7 @@ import { getMyAssignments, type MyAssignment } from "@/lib/sync/assignments"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { progressPercent } from "@/lib/progress/progress-percent"
+import { PROGRESS_BG } from "@/lib/progress/progress-palette"
 
 interface ProjectAssignedToMeProps {
   projectId: string
@@ -126,9 +127,13 @@ export function ProjectAssignedToMe({
                       </span>
                       <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">{pct}%</span>
                     </div>
-                    {/* Progress bar */}
+                    {/* Progress bar. AQU-1764: done cells are VALIDATED
+                        cells — the shared palette's text-validated blue. */}
                     <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-muted">
-                      <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${pct}%` }} />
+                      <div
+                        className={`h-full rounded-full transition-[width] ${PROGRESS_BG.textValidated}`}
+                        style={{ width: `${pct}%` }}
+                      />
                     </div>
                     <p className="mt-0.5 text-[10px] text-muted-foreground">
                       {t("workspace.assignedToMe.cellsProgress", { done: a.cellsDone, total: a.cellsTotal })}

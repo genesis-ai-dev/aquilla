@@ -32,8 +32,8 @@ async function seed() {
     .bind(JSON.stringify({ countStructuralCells: false }))
     .run()
   await env.AQUILLA_PG.prepare(
-    `INSERT INTO integration_connections (id, org_id, provider, account, access_token_enc, created_by) VALUES
-       ('c1', '1', 'monday', '{}', 'x', 'olive'), ('c2', '2', 'monday', '{}', 'x', 'olive')`,
+    `INSERT INTO integration_connections (id, org_id, provider, account, access_token_enc, created_by, environment) VALUES
+       ('c1', '1', 'monday', '{}', 'x', 'olive', 'test'), ('c2', '2', 'monday', '{}', 'x', 'olive', 'test')`,
   ).run()
   for (const [id, projectId, conn] of [
     ["l-inherit", "p-inherit", "c1"],

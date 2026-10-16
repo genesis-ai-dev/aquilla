@@ -94,8 +94,8 @@ async function seedConnection(
   const expiresAt =
     opts.expiresInMs != null ? new Date(Date.now() + opts.expiresInMs).toISOString() : null
   await env.AQUILLA_PG.prepare(
-    `INSERT INTO integration_connections (id, org_id, provider, account, access_token_enc, refresh_token_enc, access_token_expires_at, created_by)
-     VALUES ('conn-1', '1', 'monday', '{"accountSlug":"acme"}', ?, ?, ?, 'wendi')`,
+    `INSERT INTO integration_connections (id, org_id, provider, account, access_token_enc, refresh_token_enc, access_token_expires_at, created_by, environment)
+     VALUES ('conn-1', '1', 'monday', '{"accountSlug":"acme"}', ?, ?, ?, 'wendi', 'test')`,
   )
     .bind(accessEnc, refreshEnc, expiresAt)
     .run()
@@ -240,7 +240,7 @@ describe("GET /api/v2/monday/oauth/callback", () => {
     expect(await codeChallengeS256(sentVerifier)).toBe(codeChallenge)
 
     const row = await env.AQUILLA_PG.prepare(
-      `SELECT access_token_enc, refresh_token_enc, access_token_expires_at, needs_reauth, provider, account
+      `SELECT access_token_enc, refresh_token_enc, access_token_expires_at, needs_reauth, provider, account, environment
          FROM integration_connections WHERE org_id = '1'`,
     ).first<{
       access_token_enc: string
@@ -249,8 +249,11 @@ describe("GET /api/v2/monday/oauth/callback", () => {
       needs_reauth: boolean
       provider: string
       account: { accountSlug?: string; userName?: string } | string
+      environment: string | null
     }>()
     expect(row).not.toBeNull()
+    // AQU-1775: stamped with the deployment that made it, so another one refuses it.
+    expect(row!.environment).toBe(env.ENVIRONMENT)
     // Neither token stored in plaintext — both round-trip through decrypt.
     expect(row!.access_token_enc).not.toContain(accessJwt)
     expect(await decryptMondayToken(env.SECRET_KEY, row!.access_token_enc)).toBe(accessJwt)

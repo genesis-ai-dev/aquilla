@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { ROLE } from "@/lib/frontier/roles"
@@ -10,12 +10,28 @@ import {
   resetCountStructuralOverrides,
   resetProjectOverrides,
   type OrgSettingsResponse,
+  type ProjectOverrideSlug,
   type OrgWideSettings,
   type OrgPatchResult,
   type PromotionRequestResult,
 } from "@/lib/sync/org-settings"
 import type { TranslationRule, PromotionRequest } from "@/lib/parsers/types"
 import type { OrgProviderKeys } from "@/lib/sync/org-settings"
+import {
+  parseOverrideProjectList,
+  type InheritedOverrideKey,
+  type OverrideProjectList,
+} from "@/lib/sync/override-projects"
+import {
+  MEDIA_DEFAULT_KEYS,
+  MEDIA_DEFAULT_SLUGS,
+  mediaDefaultsFromOrgSettings,
+  type MediaDefaultKey,
+  type MediaDefaults,
+} from "../../db/shared/media-setting-defaults"
+
+/** AQU-1768: one stable empty value for an org that has no overrides yet. */
+const EMPTY_OVERRIDES: Partial<Record<MediaDefaultKey, number>> = Object.freeze({})
 
 // ─── Cross-instance sync ───────────────────────────────────────────────────
 // Several surfaces mount their own useOrgSettings for the SAME org at the same
@@ -277,9 +293,28 @@ export interface UseOrgSettings {
   /** How many projects set their own count and so ignore the default above. */
   validationCountOverrides: number
   validationCountAudioOverrides: number
+  /**
+   * AQU-1938: which projects the three counts above are — by name, only those
+   * the caller may see, at most 50. Null where the server did not say (an
+   * older server), and the line then shows its bare count.
+   */
+  overrideProjects: Record<InheritedOverrideKey, OverrideProjectList | null>
+  /** AQU-1768: the same, for each media default's "N projects set their own". */
+  mediaOverrideProjects: Partial<Record<MediaDefaultKey, OverrideProjectList | null>>
   /** Put the projects that set their own count back on the org default. */
   resetValidationCountOverrides: (
     key: "validationCount" | "validationCountAudio",
+  ) => Promise<{ ok: boolean; cleared: number; message?: string }>
+  /**
+   * AQU-1768: the org's media defaults (valid values only; a key it never set
+   * is absent, and each reader then keeps its built-in default).
+   */
+  mediaDefaults: MediaDefaults
+  /** Per media default, how many projects set their own value and ignore it. */
+  mediaDefaultOverrides: Partial<Record<MediaDefaultKey, number>>
+  /** Put the projects that set their own value back on the org default. */
+  resetMediaDefaultOverrides: (
+    key: MediaDefaultKey,
   ) => Promise<{ ok: boolean; cleared: number; message?: string }>
   /**
    * AQU-1037: effective floor for assigning work to anyone, including
@@ -353,7 +388,19 @@ const OVERRIDE_COUNT_KEYS = [
   "countStructuralOverrides",
   "validationCountOverrides",
   "validationCountAudioOverrides",
+  // AQU-1938: the projects behind those counts, kept for the same reason.
+  "overrideProjects",
+  "mediaDefaultOverrides",
 ] as const satisfies ReadonlyArray<keyof OrgSettingsResponse>
+
+/** Keep `from`'s value for `key` when `to` arrived without one. */
+function carryOver<K extends keyof OrgSettingsResponse>(
+  to: OrgSettingsResponse,
+  from: OrgSettingsResponse,
+  key: K,
+): void {
+  if (to[key] === undefined && from[key] !== undefined) to[key] = from[key]
+}
 
 const REFETCH_ON_RETURN_MS = 10_000
 
@@ -378,9 +425,7 @@ export function useOrgSettings(
     const prev = serverRef.current
     if (next && prev && prev.orgId === next.orgId) {
       const filled = { ...next }
-      for (const key of OVERRIDE_COUNT_KEYS) {
-        if (filled[key] === undefined && prev[key] !== undefined) filled[key] = prev[key]
-      }
+      for (const key of OVERRIDE_COUNT_KEYS) carryOver(filled, prev, key)
       next = filled
     }
     serverRef.current = next
@@ -445,6 +490,16 @@ export function useOrgSettings(
     const result = await resetProjectOverrides(
       jwt, orgId, key === "validationCount" ? "validation-count" : "validation-count-audio",
     )
+    if (result.kind === "error") return { ok: false, cleared: 0, message: result.message }
+    await refresh()
+    return { ok: true, cleared: result.cleared }
+  }, [orgId, jwt, refresh])
+
+  /** AQU-1768: the same reset for one media default. */
+  const resetMediaOverrides = useCallback(async (key: MediaDefaultKey) => {
+    if (!orgId || !jwt) return { ok: false, cleared: 0, message: "no session" }
+    const slug = Object.entries(MEDIA_DEFAULT_SLUGS).find(([, k]) => k === key)?.[0] as ProjectOverrideSlug
+    const result = await resetProjectOverrides(jwt, orgId, slug)
     if (result.kind === "error") return { ok: false, cleared: 0, message: result.message }
     await refresh()
     return { ok: true, cleared: result.cleared }
@@ -562,6 +617,23 @@ export function useOrgSettings(
   const validationCountAudioDefault = thresholdOrNull(server?.settings?.validationCountAudio)
   const validationCountOverrides = server?.validationCountOverrides ?? 0
   const validationCountAudioOverrides = server?.validationCountAudioOverrides ?? 0
+  // AQU-1938: the projects behind each count, read defensively.
+  const overrideProjects: Record<InheritedOverrideKey, OverrideProjectList | null> = {
+    countStructuralCells: parseOverrideProjectList(server?.overrideProjects?.countStructuralCells),
+    validationCount: parseOverrideProjectList(server?.overrideProjects?.validationCount),
+    validationCountAudio: parseOverrideProjectList(server?.overrideProjects?.validationCountAudio),
+  }
+  // AQU-1768: valid values only, the same filter the server applies.
+  const mediaDefaults = useMemo(() => mediaDefaultsFromOrgSettings(server?.settings), [server?.settings])
+  const mediaDefaultOverrides = server?.mediaDefaultOverrides ?? EMPTY_OVERRIDES
+  // AQU-1768: which projects those are, like the three counts above (AQU-1938).
+  const serverOverrideProjects = server?.overrideProjects
+  const mediaOverrideProjects = useMemo(
+    () => Object.fromEntries(
+      MEDIA_DEFAULT_KEYS.map((key) => [key, parseOverrideProjectList(serverOverrideProjects?.[key])]),
+    ) as Partial<Record<MediaDefaultKey, OverrideProjectList | null>>,
+    [serverOverrideProjects],
+  )
   // AQU-1391: same `!== false` shape and for the same reason — unset is ON,
   // and only an explicit opt-out turns repetition propagation off org-wide.
   const autoPropagateRepetitions = server?.settings?.autoPropagateRepetitions !== false
@@ -721,7 +793,12 @@ export function useOrgSettings(
     validationCountAudioDefault,
     validationCountOverrides,
     validationCountAudioOverrides,
+    overrideProjects,
+    mediaOverrideProjects,
     resetValidationCountOverrides: resetValidationOverrides,
+    mediaDefaults,
+    mediaDefaultOverrides,
+    resetMediaDefaultOverrides: resetMediaOverrides,
     assignmentMinRole,
     termbaseEditMinRole,
     languageEditMinRole,

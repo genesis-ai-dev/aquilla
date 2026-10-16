@@ -142,6 +142,7 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
     history: d1History,
     isLoading: d1Loading,
     isError: d1Error,
+    failure,
     revalidate,
   } = useCellEditHistory({
     enabled,
@@ -211,7 +212,13 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
           // A failed history fetch on a synced project used to fall through to
           // "No edits yet." — confidently wrong for cells with real history.
           <div className="space-y-1.5">
-            <p className="text-xs text-muted-foreground">{t("editor.history.loadFailed")}</p>
+            <p className="text-xs text-muted-foreground">
+              {failure?.kind === "network"
+                ? t("editor.history.loadFailedNetwork")
+                : failure?.kind === "server"
+                  ? t("editor.history.loadFailedServer", { status: failure.status })
+                  : t("editor.history.loadFailed")}
+            </p>
             <button
               type="button"
               onClick={revalidate}
@@ -226,7 +233,11 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
           <>
             {isSynced && d1Error && (
               <p className="text-[10px] text-muted-foreground">
-                {t("editor.history.refreshFailed")}{" "}
+                {failure?.kind === "network"
+                  ? t("editor.history.refreshFailedNetwork")
+                  : failure?.kind === "server"
+                    ? t("editor.history.refreshFailedServer", { status: failure.status })
+                    : t("editor.history.refreshFailed")}{" "}
                 <button
                   type="button"
                   onClick={revalidate}

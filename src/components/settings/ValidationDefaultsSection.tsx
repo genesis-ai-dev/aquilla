@@ -22,6 +22,7 @@ import {
   Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import { useI18n } from "@/lib/i18n/I18nProvider"
+import { projectSettingsPath } from "@/lib/navigation/org-paths"
 import type { UseOrgSettings } from "@/hooks/useOrgSettings"
 
 type ThresholdKey = "validationCount" | "validationCountAudio"
@@ -33,6 +34,9 @@ interface ValidationDefaultsSectionProps {
 }
 
 const COUNTS = Array.from({ length: 15 }, (_, i) => i + 1)
+
+/** AQU-1938: a listed project's own number is set on its Validation settings pane. */
+const validationSettingsHref = (projectId: string) => projectSettingsPath(projectId, "validation")
 
 export function ValidationDefaultsSection({ orgSettings, canEdit }: ValidationDefaultsSectionProps) {
   const { t } = useI18n()
@@ -123,6 +127,8 @@ function ThresholdDefaultRow({
               onReset={canEdit ? () => setPendingOverrides(overrides) : undefined}
               disabled={busy}
               loading={!loaded}
+              projects={orgSettings.overrideProjects?.[settingKey] ?? null}
+              projectHref={validationSettingsHref}
             />
           </>
         }

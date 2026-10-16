@@ -19,7 +19,7 @@
 
 import { useEditor, EditorContent, type Editor as TiptapEditor } from "@tiptap/react"
 import { BubbleMenu } from "@tiptap/react/menus"
-import { Fragment, type Node as ProseMirrorNode } from "@tiptap/pm/model"
+import { Fragment, type Node as ProseMirrorNode, type ResolvedPos } from "@tiptap/pm/model"
 import { TextSelection, type Transaction } from "@tiptap/pm/state"
 import type { EditorView } from "@tiptap/pm/view"
 import StarterKit from "@tiptap/starter-kit"
@@ -52,8 +52,10 @@ import { WordsThatFitMenu } from "@/components/WordsThatFitMenu"
 import { UsfmFootnote } from "@/lib/richtext/footnote-node"
 import { resolveEditorClickTarget } from "@/lib/richtext/editor-click-target"
 import {
+  IDML_PARAGRAPH_NODE_NAME,
   IDML_SLOT_NODE_NAME,
   editableIdmlRangesIn,
+  idmlBoundarySlotPosition,
   idmlDeletionRange,
   idmlEditableSlotPosition,
   idmlEditableSlotOffsetPosition,
@@ -247,11 +249,34 @@ function idmlSlotBoundaryChar(
   if (resolved.parent.type.name !== IDML_SLOT_NODE_NAME) return ""
   const offset = resolved.parentOffset
   if (side === "before") {
-    if (offset <= 0) return ""
+    if (offset <= 0) return adjacentIdmlSlotEdgeChar(resolved, "before")
     return resolved.parent.textBetween(offset - 1, offset)
   }
-  if (offset >= resolved.parent.content.size) return ""
+  if (offset >= resolved.parent.content.size) return adjacentIdmlSlotEdgeChar(resolved, "after")
   return resolved.parent.textBetween(offset, offset + 1)
+}
+
+/**
+ * AQU-1962: at a slot edge the neighbouring character lives in the *next*
+ * protected run, not in this slot, so the doubling rule has to read across the
+ * boundary. Now that a boundary space survives the hydrate round trip, a space
+ * typed at the start of "Бытие" has to see the one already ending "книги " —
+ * otherwise separating a word pair InDesign split across runs is the one place
+ * the AQU-758 no-doubled-space invariant could not hold. Only an adjacent slot
+ * counts: a protected token or the paragraph edge is not slot text, and reads
+ * as a boundary exactly as before.
+ */
+function adjacentIdmlSlotEdgeChar(resolved: ResolvedPos, side: "before" | "after"): string {
+  const depth = resolved.depth - 1
+  if (depth < 0) return ""
+  const paragraph = resolved.node(depth)
+  if (paragraph.type.name !== IDML_PARAGRAPH_NODE_NAME) return ""
+  const index = resolved.index(depth)
+  const sibling = paragraph.maybeChild(side === "before" ? index - 1 : index + 1)
+  if (!sibling || sibling.type.name !== IDML_SLOT_NODE_NAME) return ""
+  const size = sibling.content.size
+  if (size === 0) return ""
+  return side === "before" ? sibling.textBetween(size - 1, size) : sibling.textBetween(0, 1)
 }
 
 /**
@@ -265,9 +290,14 @@ function idmlWriteRanges(view: EditorView): IdmlInsertedRange[] {
     const editable = editableIdmlRangesIn(view.state.doc, selection.from, selection.to)
     if (editable.length > 0) return editable
   }
+  // AQU-1962: a caret parked between two adjacent runs belongs to no slot, so
+  // it is snapped into the run it abuts before falling back to the cell's first
+  // editable run — otherwise a character typed at a run boundary silently
+  // appeared at the start of the cell.
   const position = isEditableIdmlSelection(selection)
     ? selection.from
-    : idmlEditableSlotPosition(view.state.doc)
+    : idmlBoundarySlotPosition(view.state.doc, selection.from)
+      ?? idmlEditableSlotPosition(view.state.doc)
   return position === null ? [] : [{ from: position, to: position }]
 }
 
@@ -709,6 +739,24 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   }, [])
 
   /**
+   * AQU-1962: write typed or pasted text into a slot, and say so when there is
+   * nowhere for it to go. A cell whose every run is protected has no editable
+   * write target, so the keystroke was swallowed with no message — the editor
+   * looked like it was simply refusing to accept the character. An edit the
+   * round-trip guard refuses already surfaces its diagnostic through
+   * `onRejected`; this covers the one refusal that never reached a guard.
+   */
+  const writeIdmlPlainText = useCallback((
+    view: EditorView,
+    text: string,
+    mode: "paste" | "type" = "type",
+  ): void => {
+    if (replaceIdmlSelectionWithPlainText(view, text, mode) === null) {
+      reportIdmlError(t("editor.idml.noEditableSlotError"))
+    }
+  }, [reportIdmlError, t])
+
+  /**
    * The editor's own serialized HTML, by the same serializer a commit uses —
    * but WITHOUT validation or error reporting, so seeding the committed
    * baseline can never surface a diagnostic on mount.
@@ -914,7 +962,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         // editable slot. Redirecting it here would dispatch during the
         // composition and double-commit every IME update.
         if (idmlComposingRef.current || view.composing) return false
-        replaceIdmlSelectionWithPlainText(view, text)
+        writeIdmlPlainText(view, text)
         return true
       },
       handlePaste(view, event, slice) {
@@ -927,7 +975,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         event.preventDefault()
         // AQU-758: paste mode strips leading/trailing/doubled spaces so a paste
         // never injects the spurious whitespace the health check later flags.
-        replaceIdmlSelectionWithPlainText(view, plainText, "paste")
+        writeIdmlPlainText(view, plainText, "paste")
         return true
       },
       handleDoubleClick(view, pos, event) {
@@ -1249,7 +1297,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           && event.keyCode !== 229
         ) {
           event.preventDefault()
-          replaceIdmlSelectionWithPlainText(view, event.key)
+          writeIdmlPlainText(view, event.key)
           return true
         }
         // AQU-740: own the delete keys too. Native deletion empties the slot's

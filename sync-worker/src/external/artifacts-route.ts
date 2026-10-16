@@ -29,6 +29,7 @@ import { ROLE } from '../events/role-policy'
 import type { ExternalEnv } from './types'
 import { validateApiCredentialRequest, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
+import { attachmentDisposition } from '../events/content-disposition'
 import { enforceRateLimit, userRateLimitIdentifier } from '../../../db/shared/rate-limit'
 
 /** Max artifact size — 25 MB. Published in get_capabilities (operational
@@ -421,18 +422,10 @@ async function handleGetContent(
     headers: {
       'Content-Type': safeContentTypeFor(row.content_type),
       'Content-Length': String(buf.byteLength),
-      'Content-Disposition': `attachment; filename="${sanitizeFilename(row.name)}"`,
+      'Content-Disposition': attachmentDisposition(row.name),
       'X-Content-Type-Options': 'nosniff',
     },
   })
-}
-
-/** Strip characters that would break the Content-Disposition header value or
- *  let the artifact's client-chosen name inject additional header
- *  parameters; the artifact id (not this name) is what identifies the row. */
-function sanitizeFilename(name: string): string {
-  const cleaned = name.replace(/[\r\n"]/g, '_')
-  return cleaned.length > 0 ? cleaned : 'artifact'
 }
 
 // ── GET inspect (lightweight format detection) ──────────────────────────────

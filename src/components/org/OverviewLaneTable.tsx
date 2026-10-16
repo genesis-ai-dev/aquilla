@@ -49,8 +49,11 @@ import { ROLE } from "@/lib/frontier/roles"
 import { laneTranslatedPct, laneValidatedPct, type PortfolioLane } from "@/lib/frontier/portfolio"
 import type { FileReference } from "@/lib/parsers/types"
 import type { ProjectMember } from "@/lib/frontier/members"
+import type { AssignLaneOption } from "@/lib/sync/assignment-lane"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { progressPercentOfFraction } from "@/lib/progress/progress-percent"
+import { textProgressSegments } from "@/lib/progress/progress-palette"
+import { ProgressSplitBar } from "@/components/progress/ProgressSplitBar"
 
 export interface OverviewLaneTableProps {
   projectId: string
@@ -67,6 +70,8 @@ export interface OverviewLaneTableProps {
   defaultLanguageLabel: string
   /** Non-default lane registry (project.targetLanes) — AssignModal's lane select. */
   extraLanes: string[]
+  /** AQU-1977: the project's own languages, in order — what Assign offers. See AssignModal's `lanes`. */
+  assignLanes?: readonly AssignLaneOption[]
   /** All project files — AssignModal's book/file scope picker. */
   files: FileReference[]
   /** Caller's project role level — gates + passed to AssignModal. */
@@ -115,15 +120,31 @@ function LanePeople({ members }: { members: ProjectMember[] }) {
   )
 }
 
-function LaneProgressBar({ pct, fillClass }: { pct: number; fillClass: string }) {
+/**
+ * A lane's progress as ONE two-part bar (AQU-1764, Sam 2026-10-13): validated
+ * in the dark blue, then translated but not validated in the light one,
+ * ending at the translated figure printed beside it. This replaced a pair of
+ * single bars, amber for translated and emerald for validated. The validated
+ * figure is printed separately — under its own column heading in the table,
+ * as "N% validated" on an archived row — so both percentages stay in view.
+ * Lanes carry no AI-draft count, so there is no striped part.
+ */
+function LaneProgressBar({ lane, dimmed = false }: {
+  lane: PortfolioLane
+  /** An archived lane: the bar drawn back, as its fills were at 70% before. */
+  dimmed?: boolean
+}) {
   // AQU-1493: never 100 while a cell in the lane is outstanding.
-  const width = progressPercentOfFraction(pct)
+  const translated = progressPercentOfFraction(laneTranslatedPct(lane))
+  const validated = progressPercentOfFraction(laneValidatedPct(lane))
   return (
     <span className="flex items-center gap-2">
-      <span className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
-        <span className={`block h-full rounded-full ${fillClass}`} style={{ width: `${width}%` }} />
-      </span>
-      <span className="w-9 text-right text-sm tabular-nums text-muted-foreground">{width}%</span>
+      <ProgressSplitBar
+        segments={textProgressSegments({ validated, translated, total: 100 })}
+        height={6}
+        className={dimmed ? "w-16 opacity-70" : "w-16"}
+      />
+      <span className="w-9 text-right text-sm tabular-nums text-muted-foreground">{translated}%</span>
     </span>
   )
 }
@@ -137,6 +158,7 @@ export function OverviewLaneTable({
   archivedLanes = [],
   defaultLanguageLabel,
   extraLanes,
+  assignLanes,
   files,
   roleLevel,
   author,
@@ -224,17 +246,19 @@ export function OverviewLaneTable({
         accessorFn: (l) => laneTranslatedPct(l),
         header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.orgHome.table.translatedHeaderLabel")} />,
         meta: { className: "w-[9rem]" },
-        cell: ({ row }) => (
-          <LaneProgressBar pct={laneTranslatedPct(row.original)} fillClass="bg-amber-500" />
-        ),
+        cell: ({ row }) => <LaneProgressBar lane={row.original} />,
       },
       {
         id: "validated",
         accessorFn: (l) => laneValidatedPct(l),
         header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.orgHome.table.validatedHeaderLabel")} />,
         meta: { className: "w-[9rem]" },
+        // The figure only: the Translated column's bar already draws the
+        // validated part, in the dark blue (AQU-1764).
         cell: ({ row }) => (
-          <LaneProgressBar pct={laneValidatedPct(row.original)} fillClass="bg-emerald-500" />
+          <span className="text-sm tabular-nums text-muted-foreground">
+            {progressPercentOfFraction(laneValidatedPct(row.original))}%
+          </span>
         ),
       },
       {
@@ -411,8 +435,12 @@ export function OverviewLaneTable({
                       {label}
                     </Link>
                     <Badge variant="outline">{t("org.overviewLaneTable.archivedBadge")}</Badge>
-                    <LaneProgressBar pct={laneTranslatedPct(lane)} fillClass="bg-amber-500/70" />
-                    <LaneProgressBar pct={laneValidatedPct(lane)} fillClass="bg-emerald-500/70" />
+                    <LaneProgressBar lane={lane} dimmed />
+                    {/* No column heading here, so the validated figure names
+                        itself, as the org table's expanded lane rows do. */}
+                    <span className="text-sm tabular-nums text-muted-foreground">
+                      {t("org.orgHome.pctValidated", { pct: progressPercentOfFraction(laneValidatedPct(lane)) })}
+                    </span>
                   </li>
                 )
               })}
@@ -429,6 +457,7 @@ export function OverviewLaneTable({
         activeFileId={null}
         projectFiles={files}
         targetLanes={extraLanes}
+        lanes={assignLanes}
         defaultLane={assignLane ?? ""}
         members={members}
         roleLevel={roleLevel}

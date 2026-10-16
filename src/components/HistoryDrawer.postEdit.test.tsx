@@ -55,6 +55,7 @@ function renderWith(history: CellHistoryEntry[]) {
     history,
     isLoading: false,
     isError: false,
+    failure: null,
     revalidate: vi.fn(),
   })
   return render(

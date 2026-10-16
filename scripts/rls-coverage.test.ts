@@ -94,6 +94,9 @@ const UNCOVERED: Record<string, string> = {
   chain_claims: "never granted to app_runtime",
   concepts: "never granted to app_runtime",
   file_segmentation: "never granted to app_runtime",
+  // AQU-1813 (0172): the lanes a team attachment covers. Unlike
+  // group_project_grants, app_user_can_access_project() never reads it.
+  group_project_lanes: "never granted to app_runtime",
   integration_links: "never granted to app_runtime",
   knowledge_docs: "never granted to app_runtime",
   lanes: "never granted to app_runtime",

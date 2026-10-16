@@ -248,6 +248,7 @@ beforeEach(() => {
   fetchAgentMode.mockResolvedValue({
     mode: { initiative: false, react: false, scope: "full" },
     version: 1,
+    settings: {},
   })
 })
 

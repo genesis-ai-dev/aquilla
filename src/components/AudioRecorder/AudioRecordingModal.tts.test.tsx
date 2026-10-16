@@ -369,6 +369,52 @@ describe("AudioRecordingModal — transcription gets the REAL attachment (SUB-49
     expect(att).toBeDefined()
     expect(att.durationMs).toBe(9500)
   })
+
+  it("transcribes the fresh take in the lane it was recorded in (AQU-1978)", async () => {
+    // The timings land ~800ms after every take through a re-attach that
+    // deselects within the lane it names. With no lane that was the `''`
+    // lane's chosen take on this line, whichever lane the take was made in.
+    recorderState.value = {
+      kind: "stopped",
+      blob: new Blob(["x"], { type: "audio/webm" }),
+      mimeType: "audio/webm",
+      ext: "webm",
+      durationSec: 2,
+    }
+    renderModal(cellWith("bonjour"), { laneTag: "fr" })
+    fireEvent.click(screen.getByRole("button", { name: /Save/ }))
+
+    await waitFor(() => expect(transcribeCell).toHaveBeenCalledTimes(1))
+    const [args] = transcribeCell.mock.calls[0] as unknown as [{ targetLang?: string }]
+    expect(args.targetLang).toBe("fr")
+  })
+
+  it("asks Whisper for the LANE's language, not the retired project one (AQU-1978)", async () => {
+    // A project made since AQU-1594 has no project-level language at all; the
+    // take is in the open lane's language, read off that lane's row — never
+    // its tag, which here is the lane's own id.
+    const laneProject = {
+      ...project,
+      targetLanguage: "",
+      lanes: [
+        { id: "spa00001", role: "target", language: "Spanish", name: null, langCode: null, legacyTag: "Spanish", position: 0, archivedAt: null },
+        { id: "a3f09c1e", role: "target", language: "Portuguese", name: null, langCode: null, legacyTag: "a3f09c1e", position: 1, archivedAt: null },
+      ],
+    } as unknown as ProjectRecord
+    recorderState.value = {
+      kind: "stopped",
+      blob: new Blob(["x"], { type: "audio/webm" }),
+      mimeType: "audio/webm",
+      ext: "webm",
+      durationSec: 2,
+    }
+    renderModal(cellWith("olá"), { project: laneProject, laneTag: "a3f09c1e" })
+    fireEvent.click(screen.getByRole("button", { name: /Save/ }))
+
+    await waitFor(() => expect(transcribeCell).toHaveBeenCalledTimes(1))
+    const [args] = transcribeCell.mock.calls[0] as unknown as [{ language?: string }]
+    expect(args.language).toBe("Portuguese")
+  })
 })
 
 describe("AudioRecordingModal — auto-advance toggle (SUB-50)", () => {

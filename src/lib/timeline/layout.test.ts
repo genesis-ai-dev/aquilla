@@ -217,3 +217,28 @@ describe("video-less subtitle import (AQU-1704)", () => {
     expect(layout.targetGeom(cues[1], att(cues[1]))).toMatchObject({ start: 3 })
   })
 })
+
+// AQU-1767 (Sam, 2026-10-15): in Free timing a split take's pieces sit end to
+// end in the line's slot, in recording order, the way its joined clip plays.
+describe("audio-first layout — a split take", () => {
+  it("places each piece right after the one before it", () => {
+    const TAKE = "audio-a-1700000000-take.wav"
+    const PIECE = "audio-a-1700000500-piece.wav"
+    const cell = {
+      id: "a", fileId: "f1", original: "", translated: "", medium: "media", startTime: 0, endTime: 2,
+      selectedAudioId: TAKE,
+      attachments: {
+        [TAKE]: { type: "audio", url: "frontier-audio://take", slot: "recording", durationMs: 4000, trimStartMs: 200, trimEndMs: 1500 },
+        [PIECE]: { type: "audio", url: "frontier-audio://take", slot: "recording", pieceOf: TAKE, durationMs: 4000, trimStartMs: 2500, trimEndMs: 3700 },
+      },
+    } as unknown as CellData
+    const l = buildTimelineLayout("audioFirst", [cell], [cell])
+    const first = l.targetGeom(cell, cell.attachments![TAKE] as never)!
+    const second = l.targetGeom(cell, cell.attachments![PIECE] as never)!
+    expect([first.start, first.end]).toEqual([0, expect.closeTo(1.3)] as never)
+    expect(second.start).toBeCloseTo(1.3)
+    expect(second.end).toBeCloseTo(2.5)
+    // Its sample zero sits a head-trim before where it is drawn.
+    expect(second.anchor).toBeCloseTo(1.3 - 2.5)
+  })
+})

@@ -34,6 +34,8 @@ import {
   audioLaneDualReadSql,
   audioLaneResolveBinds,
   audioLaneResolveSql,
+  audioSelectScopeBinds,
+  audioSelectScopeSql,
   backtranslationLaneMatchBinds,
   backtranslationLaneMatchSql,
   laneIdResolveBinds,
@@ -207,6 +209,68 @@ export function laneOfEvent(kind: string, payload: unknown): string {
  * lane ROW the resolver would have named, and a second spelling of "the default
  * lane" is one more thing that can disagree.
  */
+/**
+ * AQU-1767: the shortest piece a cut may leave on either side, in ms. Mirrored
+ * by the client's `CUT_MIN_PIECE_MS` (src/lib/audio/cut-take.ts) so the blade
+ * is never offered where the server would refuse it.
+ */
+export const CUT_MIN_PIECE_MS = 100
+
+/** AQU-1767: a take's piece GROUP — the take it was cut from, or itself. */
+const PIECE_GROUP_SQL = 'COALESCE(piece_of, audio_id)'
+
+/**
+ * AQU-1767: the group of one named take, as a scalar subquery. A take that does
+ * not exist yet (a fresh attach) is its own group, which is what the outer
+ * COALESCE says.
+ */
+function pieceGroupOfSql(): string {
+  return `COALESCE((SELECT g.piece_of FROM cell_audio g
+                     WHERE g.project_id = ? AND g.file_id = ? AND g.cell_id = ? AND g.audio_id = ?), ?)`
+}
+
+/**
+ * AQU-1767: the group an ATTACH lands in, as a scalar subquery. An existing
+ * take's own (its root, or itself); otherwise the last bind — the payload's
+ * `pieceOf` for a piece being born, else the attached id. Binds: the first four
+ * of {@link pieceGroupOfBinds}, then that fallback.
+ */
+function attachGroupOfSql(): string {
+  return `COALESCE((SELECT COALESCE(g.piece_of, g.audio_id) FROM cell_audio g
+                     WHERE g.project_id = ? AND g.file_id = ? AND g.cell_id = ? AND g.audio_id = ?), ?)`
+}
+
+/** Binds for {@link pieceGroupOfSql}. */
+function pieceGroupOfBinds(projectId: string, fileId: string, cellId: string, audioId: string): unknown[] {
+  return [projectId, fileId, cellId, audioId, audioId]
+}
+
+/**
+ * AQU-1767: the lane a piece BORN through an attach (`pieceOf`) lands in — the
+ * lane of the take it is a piece of, when that take has a row, copied as
+ * `cell.audio.cut` copies its parent's `lane_id` (NULL included). A split take
+ * is one take, so its pieces never span two languages, whatever lane the event
+ * names; the payload's `targetLang` decides only while the root has no row.
+ * Binds: {@link attachPieceLaneBinds}.
+ */
+function attachPieceLaneSql(): string {
+  const root = `FROM cell_audio r WHERE r.project_id = ? AND r.file_id = ? AND r.cell_id = ? AND r.audio_id = ?`
+  return `CASE WHEN EXISTS (SELECT 1 ${root}) THEN (SELECT r.lane_id ${root}) ELSE ${audioLaneResolveSql()} END`
+}
+
+/** Binds for {@link attachPieceLaneSql}: the root's key twice, then {@link audioLaneResolveBinds}. */
+function attachPieceLaneBinds(
+  projectId: string,
+  fileId: string,
+  cellId: string,
+  pieceOf: string,
+  role: string,
+  targetLang: string,
+): unknown[] {
+  const root = [projectId, fileId, cellId, pieceOf]
+  return [...root, ...root, ...audioLaneResolveBinds(projectId, role, targetLang)]
+}
+
 export function laneOfAudioEvent(payload: unknown): string {
   const lang = (payload as { targetLang?: unknown } | null | undefined)?.targetLang
   return typeof lang === 'string' ? lang : ''
@@ -1736,14 +1800,32 @@ case 'cell.audio.attach': {
       // decided what sounds. A SOURCE attach keeps the unscoped form: the clip
       // it declares is shared, so it genuinely does claim the slot in every
       // lane.
-      const attachDeselectLaneSql = audioRole === 'source' ? '' : ` AND ${audioLaneDualReadSql()}`
+      //
+      // AQU-1978: a RE-attach of a dub already on file deselects within that
+      // dub's own stored lane, not the event's tag. Re-attaches are routine and
+      // many name no lane (the word-timings write did not), and an absent tag
+      // reads as the `''` lane — another language's chosen take on this line.
+      // A brand-new take still has only the event's tag to go on, as before.
+      const attachDeselectLaneSql = audioRole === 'source' ? '' : ` AND ${audioSelectScopeSql()}`
       const attachDeselectLaneBinds =
-        audioRole === 'source' ? [] : audioLaneDualReadBinds(event.projectId, audioLane)
+        audioRole === 'source' ? [] : audioSelectScopeBinds(event.projectId, p.audioId, audioLane)
+      //
+      // AQU-1767: and never the attached take's own PIECES. A take cut in two is
+      // one group (`piece_of`), and a group is selected or not as a whole; a
+      // routine re-attach of either piece must not deselect the other. A piece
+      // being BORN (`pieceOf` in the payload) names its group itself, since
+      // there is no row yet to read it from.
+      // An existing take keeps the group it has: the payload's only counts for
+      // a take with no row yet (see the fill-only `piece_of` below).
+      const attachPieceOf = typeof p.pieceOf === 'string' && p.pieceOf !== '' && p.pieceOf !== p.audioId
+        ? p.pieceOf
+        : null
       stmts.push(
         db
           .prepare(
             `UPDATE cell_audio SET selected = 0
-              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND slot = ? AND audio_id != ?${attachDeselectLaneSql}`,
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND slot = ? AND audio_id != ?
+                AND ${PIECE_GROUP_SQL} <> ${attachGroupOfSql()}${attachDeselectLaneSql}`,
           )
           .bind(
             event.projectId,
@@ -1751,6 +1833,8 @@ case 'cell.audio.attach': {
             event.cellId,
             p.slot,
             p.audioId,
+            ...pieceGroupOfBinds(event.projectId, event.fileId, event.cellId, p.audioId).slice(0, 4),
+            attachPieceOf ?? p.audioId,
             ...attachDeselectLaneBinds,
           ),
       )
@@ -1801,8 +1885,9 @@ case 'cell.audio.attach': {
             `INSERT INTO cell_audio (
               project_id, file_id, cell_id, audio_id, slot, url, mime_type,
               voice_id, reference_audio_id, duration_ms, label, trim_start_ms, trim_end_ms,
-              timings_json, selected, deleted, event_id, created_ts, role, created_by, lane_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ${audioLaneResolveSql()})
+              timings_json, selected, deleted, event_id, created_ts, role, created_by, lane_id, piece_of
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?,
+                      ${attachPieceOf ? attachPieceLaneSql() : audioLaneResolveSql()}, ?)
             ON CONFLICT(project_id, file_id, cell_id, audio_id) DO UPDATE SET
               slot               = excluded.slot,
               url                = excluded.url,
@@ -1845,7 +1930,10 @@ case 'cell.audio.attach': {
               -- an absent targetLang resolves to the '' lane, so assigning it
               -- here would quietly drag a take recorded in another language
               -- into the default one. A take's lane is decided when it is born.
-              lane_id            = COALESCE(cell_audio.lane_id, excluded.lane_id)`,
+              lane_id            = COALESCE(cell_audio.lane_id, excluded.lane_id)
+              -- AQU-1767: piece_of is deliberately NOT updated. A take joins a
+              -- group when its row is born; no re-attach moves it into or out
+              -- of one.`,
           )
           .bind(
             event.projectId,
@@ -1872,7 +1960,11 @@ case 'cell.audio.attach': {
             audioRole,
             event.author,
             // AQU-1591: the lane_id subquery's binds, at the column's position.
-            ...audioLaneResolveBinds(event.projectId, audioRole, audioLane),
+            // AQU-1767: a piece being born takes its root's lane when it can.
+            ...(attachPieceOf
+              ? attachPieceLaneBinds(event.projectId, event.fileId, event.cellId, attachPieceOf, audioRole, audioLane)
+              : audioLaneResolveBinds(event.projectId, audioRole, audioLane)),
+            attachPieceOf,
           ),
       )
       // AQU-646: an attach may carry the ASR transcript of a media segment.
@@ -1924,21 +2016,52 @@ case 'cell.audio.attach': {
         )
         return ['cell_audio']
       }
+      // AQU-1767: selection is per GROUP. Picking any piece of a cut take picks
+      // the whole take — every live piece sounds — and deselects other groups,
+      // never the named take's own pieces.
+      // AQU-1978: selecting a dub already on file clears its siblings in THAT
+      // dub's stored lane, whatever tag the event carries — the same rule as a
+      // re-attach above. Handing the slot back to the shared source clip is a
+      // choice made in one lane, so that keeps the event's tag.
       stmts.push(
         db
           .prepare(
             `UPDATE cell_audio SET selected = 0
-              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND slot = ? AND audio_id != ?${selectLaneSql}`,
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND slot = ? AND audio_id != ?
+                AND ${PIECE_GROUP_SQL} <> ${pieceGroupOfSql()} AND ${audioSelectScopeSql()}`,
           )
-          .bind(event.projectId, event.fileId, event.cellId, p.slot, p.audioId, ...selectLaneBinds),
+          .bind(
+            event.projectId,
+            event.fileId,
+            event.cellId,
+            p.slot,
+            p.audioId,
+            ...pieceGroupOfBinds(event.projectId, event.fileId, event.cellId, p.audioId),
+            ...audioSelectScopeBinds(event.projectId, p.audioId, laneOfAudioEvent(event.payload)),
+          ),
       )
+      // The named piece is un-deleted as before (re-selecting a removed take
+      // brings it back); its LIVE siblings are selected with it. A removed
+      // sibling stays removed — re-picking one piece is not an undelete of the
+      // others.
       stmts.push(
         db
           .prepare(
-            `UPDATE cell_audio SET selected = 1, deleted = 0
-              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+            `UPDATE cell_audio
+                SET selected = 1,
+                    deleted = CASE WHEN audio_id = ? THEN 0 ELSE deleted END
+              WHERE project_id = ? AND file_id = ? AND cell_id = ?
+                AND (audio_id = ?
+                     OR (deleted = 0 AND ${PIECE_GROUP_SQL} = ${pieceGroupOfSql()}))`,
           )
-          .bind(event.projectId, event.fileId, event.cellId, p.audioId),
+          .bind(
+            p.audioId,
+            event.projectId,
+            event.fileId,
+            event.cellId,
+            p.audioId,
+            ...pieceGroupOfBinds(event.projectId, event.fileId, event.cellId, p.audioId),
+          ),
       )
       return ['cell_audio']
     }
@@ -2038,6 +2161,101 @@ case 'cell.audio.attach': {
           ),
       )
       return ['cell_audio']
+    }
+
+    case 'cell.audio.cut': {
+      // AQU-1767 phase 1: one dub piece becomes two over the SAME bytes. See
+      // the payload doc in types.ts for the rules; the statements are:
+      //   1. copy the piece into `newAudioId`, windowed [atMs, old end] —
+      //      only when the cut is legal (live dub, known end, atMs at least
+      //      CUT_MIN_PIECE_MS inside the window). ON CONFLICT DO NOTHING, so a
+      //      replay lands on the same row.
+      //   2-4. ONLY IF step 1's row exists with THIS event's id: shorten the
+      //      original to [old start, atMs], drop its votes, recount them.
+      //      Gating on the new row means a refused cut changes nothing at all.
+      const p = event.payload as EventPayloads['cell.audio.cut']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`cell.audio.cut event ${event.id} is missing fileId or cellId`)
+      }
+      if (
+        typeof p.audioId !== 'string' ||
+        typeof p.newAudioId !== 'string' ||
+        p.newAudioId === '' ||
+        p.newAudioId === p.audioId ||
+        typeof p.atMs !== 'number' ||
+        !Number.isFinite(p.atMs)
+      ) {
+        throw new Error(`cell.audio.cut event ${event.id} has a malformed payload`)
+      }
+      const atMs = Math.round(p.atMs)
+      stmts.push(
+        db
+          .prepare(
+            `INSERT INTO cell_audio (
+              project_id, file_id, cell_id, audio_id, slot, url, mime_type, voice_id,
+              reference_audio_id, duration_ms, timings_json, selected, deleted, event_id,
+              created_ts, lane_id, trim_start_ms, trim_end_ms, label, validator_count,
+              created_by, role, target_offset_ms, piece_of
+            )
+            SELECT a.project_id, a.file_id, a.cell_id, ?, a.slot, a.url, a.mime_type, a.voice_id,
+                   a.reference_audio_id, a.duration_ms, a.timings_json, a.selected, 0, ?,
+                   ?, a.lane_id, ?, a.trim_end_ms, COALESCE(?, a.label), 0,
+                   a.created_by, a.role, a.target_offset_ms, COALESCE(a.piece_of, a.audio_id)
+              FROM cell_audio a
+             WHERE a.project_id = ? AND a.file_id = ? AND a.cell_id = ? AND a.audio_id = ?
+               AND a.deleted = 0 AND a.role = 'dub'
+               AND ? >= COALESCE(a.trim_start_ms, 0) + ${CUT_MIN_PIECE_MS}
+               AND ? <= COALESCE(a.trim_end_ms, a.duration_ms) - ${CUT_MIN_PIECE_MS}
+            ON CONFLICT (project_id, file_id, cell_id, audio_id) DO NOTHING`,
+          )
+          .bind(
+            p.newAudioId,
+            event.id,
+            event.serverTs,
+            atMs,
+            p.newLabel ?? null,
+            event.projectId,
+            event.fileId,
+            event.cellId,
+            p.audioId,
+            atMs,
+            atMs,
+          ),
+      )
+      const cutLanded = `EXISTS (SELECT 1 FROM cell_audio n
+                          WHERE n.project_id = ? AND n.file_id = ? AND n.cell_id = ?
+                            AND n.audio_id = ? AND n.event_id = ?)`
+      const cutLandedBinds = [event.projectId, event.fileId, event.cellId, p.newAudioId, event.id]
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio SET trim_end_ms = ?, label = COALESCE(?, label)
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?
+                AND ${cutLanded}`,
+          )
+          .bind(
+            atMs,
+            p.firstLabel ?? null,
+            event.projectId,
+            event.fileId,
+            event.cellId,
+            p.audioId,
+            ...cutLandedBinds,
+          ),
+      )
+      // Both halves start unvalidated (Sam, 2026-10-12): what a reviewer
+      // approved was the whole take, and neither half is that any more.
+      stmts.push(
+        db
+          .prepare(
+            `DELETE FROM cell_audio_validators
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?
+                AND ${cutLanded}`,
+          )
+          .bind(event.projectId, event.fileId, event.cellId, p.audioId, ...cutLandedBinds),
+      )
+      stmts.push(audioValidatorCountRecomputeStmt(db, event.projectId, event.fileId, event.cellId, p.audioId))
+      return ['cell_audio', 'cell_audio_validators']
     }
 
     case 'cell.link.set': {

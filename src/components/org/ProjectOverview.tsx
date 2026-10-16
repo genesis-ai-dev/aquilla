@@ -1,5 +1,5 @@
 import { ProjectMondayCard } from "./ProjectMondayCard"
-import { useState, useEffect, useCallback, useMemo, useRef } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef, useId } from "react"
 import { useParams, useNavigate, useLocation, Link } from "react-router-dom"
 import { MoreHorizontal, Download, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil, CloudDownload, CloudOff, HardDriveDownload, Headphones, ChevronDown, ChevronRight, Info } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
@@ -48,7 +48,9 @@ import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioDenominat
 import { OverviewLaneTable } from "./OverviewLaneTable"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { isLaneArchived } from "@/components/project-lane-archive"
-import { laneLabelForTag, laneLabelsByTag } from "@/lib/lanes/lane-language"
+import { laneLabelForTag, laneLabelsByTag, laneRowLabel } from "@/lib/lanes/lane-language"
+import { assignLaneOptions } from "@/lib/sync/assignment-lane"
+import { firstPositionLaneId, laneTagForId } from "@/lib/lanes/active-lane-choice"
 import { laneChipLabel } from "./project-lanes"
 import { isHiddenTimelineFile } from "@/lib/parsers/types"
 import { downloadBlob } from "@/lib/export/export-service"
@@ -162,6 +164,7 @@ import {
 } from "@/hooks/useProjectSettings"
 import { toast } from "@/components/ui/toast"
 import { progressPercent, progressPercentOfFraction } from "@/lib/progress/progress-percent"
+import { PROGRESS_BG, type ProgressTone } from "@/lib/progress/progress-palette"
 
 
 function ProjectOverviewSkeleton() {
@@ -285,16 +288,34 @@ function MetaFieldEditButton({
 
 // ── Stat tiles (big %) ────────────────────────────────────────────────────────
 
-function StatTile({ label, pct, colorClass, tooltip }: {
+/**
+ * AQU-1764 (Sam, 2026-10-13, "Layout A, softest"): the number is in the text
+ * colour, and the colour lives in a small swatch before the label — the same
+ * tone that measure's bar below is drawn in (AI drafted: the stripes). The
+ * numbers used to be amber, violet, emerald and sky, four colours that meant
+ * nothing anywhere else.
+ */
+function StatTile({ label, pct, tone, muted = false, tooltip }: {
   label: string
   pct: number
-  colorClass: string
+  tone: ProgressTone
+  /** A cross-language figure while one language is selected: greyed, swatch faded. */
+  muted?: boolean
   tooltip?: string
 }) {
   const tile = (
     <div className="flex flex-col items-center rounded-lg bg-muted/40 px-5 py-3 text-center">
-      <p className={`text-2xl font-bold tabular-nums ${colorClass}`}>{`${progressPercentOfFraction(pct)}%`}</p>
-      <p className="mt-0.5 text-[11px] text-muted-foreground">{label}</p>
+      <p className={`text-2xl font-bold tabular-nums ${muted ? "text-muted-foreground/60" : "text-foreground"}`}>
+        {`${progressPercentOfFraction(pct)}%`}
+      </p>
+      <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <span
+          aria-hidden
+          data-progress-swatch={tone}
+          className={cn("h-1.5 w-3.5 shrink-0 rounded-full", PROGRESS_BG[tone], muted && "opacity-40")}
+        />
+        {label}
+      </p>
     </div>
   )
   return tooltip ? <AppTooltip content={tooltip}>{tile}</AppTooltip> : tile
@@ -326,20 +347,30 @@ function tabToLaneTag(tab: string): string | null {
 
 // ── Stat bar ──────────────────────────────────────────────────────────────────
 
-function StatBar({ label, value, total, fillClass, suffix }: {
+/**
+ * One measure, one bar, one colour, starting at zero (AQU-1764, "Layout A"):
+ * the card keeps a separate bar per measure, so each reads by its length alone,
+ * in that measure's tone from the shared progress palette.
+ */
+function StatBar({ label, value, total, tone, suffix }: {
   label: string
   value: number
   total: number
-  fillClass: string
+  tone: ProgressTone
   suffix?: string
 }) {
   const pct = progressPercent(value, total)
   return (
-    <div className="flex items-center gap-3">
-      <span className="w-20 shrink-0 text-xs font-medium text-muted-foreground">{label}</span>
+    <div className="flex items-center gap-3" data-testid={`stat-bar-${tone}`}>
+      {/* w-28, not w-20: "Audio Validated" (AQU-1764 added its bar) is the
+          longest label and wrapped onto two lines at 80px. */}
+      <span className="w-28 shrink-0 text-xs font-medium text-muted-foreground">{label}</span>
       <div className="flex flex-1 items-center gap-2">
         <span className="h-2 flex-1 rounded-full bg-muted overflow-hidden">
-          <span className={`block h-full rounded-full transition-all ${fillClass}`} style={{ width: `${pct}%` }} />
+          <span
+            className={`block h-full rounded-full transition-all ${PROGRESS_BG[tone]}`}
+            style={{ width: `${pct}%` }}
+          />
         </span>
         <span className="w-20 shrink-0 text-end text-xs tabular-nums text-muted-foreground">
           {pct}%
@@ -426,6 +457,14 @@ export function ProjectOverview() {
   const targetLaneRows = useMemo(
     () => (project?.lanes ?? []).filter((lane) => lane.role === "target"),
     [project?.lanes],
+  )
+  // AQU-1977: what every Assign surface on this page offers — the project's own
+  // languages, in order, by name. Never an invented "Default language": a
+  // project made since AQU-1594 has no '' lane, and an assignment saved into
+  // one belongs to no lane and reads 0% for ever.
+  const assignLanes = useMemo(
+    () => assignLaneOptions(targetLaneRows, t("dialog.assign.defaultLaneFallback")),
+    [targetLaneRows, t],
   )
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -524,6 +563,10 @@ export function ProjectOverview() {
   // stringified userId, or "" for unassigned) while the dialog is open.
   const [pmDialogOpen, setPmDialogOpen] = useState(false)
   const [pmSelection, setPmSelection] = useState<string>("")
+  // AQU-1950: the "naming them PM also adds them as Project lead" note, shut
+  // until its circled-i is clicked.
+  const [pmNoteOpen, setPmNoteOpen] = useState(false)
+  const pmNoteId = useId()
   const [workload, setWorkload] = useState<AssigneeWorkload[]>([])
   const [workloadRefused, setWorkloadRefused] = useState(false)
 
@@ -788,11 +831,20 @@ export function ProjectOverview() {
   const [selectedPlanUnitId, setSelectedPlanUnitId] = useState<string | null>(null)
   const [planCsvCopied, setPlanCsvCopied] = useState(false)
   /**
-   * The lane every plan read is measured in. "All" (null) and the default-lane
-   * tab both mean the default lane server-side, exactly as the progress reads
-   * resolve them — see the lane-tab note above.
+   * The lane every plan read is measured in: the tab picked, or with none
+   * picked ("All"), the lane the editor opens — the first live lane in
+   * position order.
+   *
+   * Not simply '': since AQU-1594 a new project's first language is tagged
+   * with its own name and the project has no '' lane, so asking for '' read no
+   * lane at all — every row 0% text and no audio bar, however much had been
+   * recorded. A project whose '' lane is still first reads what it always did.
    */
-  const planLane = selectedLaneTag ?? ""
+  const defaultPlanLane = useMemo(
+    () => laneTagForId(firstPositionLaneId(targetLaneRows), targetLaneRows),
+    [targetLaneRows],
+  )
+  const planLane = selectedLaneTag ?? defaultPlanLane
   /**
    * ONE token for the whole plan, not one per read.
    *
@@ -853,7 +905,13 @@ export function ProjectOverview() {
     patchUnit: patchPlanUnit,
     status: planStatus,
     refresh: refreshPlan,
-  } = useProjectPlan({ projectId: id ?? null, lane: planLane, getToken: getPlanToken })
+  } = useProjectPlan({
+    // Wait for the project: its lane rows decide `planLane`, and a read made
+    // before they arrive asks for '' and flashes 0% on a project with no '' lane.
+    projectId: project ? id ?? null : null,
+    lane: planLane,
+    getToken: getPlanToken,
+  })
   /**
    * The rows the board is actually drawing, in drawn order. The board owns the
    * filter, the arrangement and the folds that decide this, so the inspector's
@@ -867,7 +925,14 @@ export function ProjectOverview() {
     () => planUnits.find((u) => planUnitId(u) === selectedPlanUnitId) ?? null,
     [planUnits, selectedPlanUnitId],
   )
-  const planShowAudio = useMemo(() => planHasAudio(planUnits), [planUnits])
+  /**
+   * AQU-1954: the "Records audio" switch of the language the plan is reading,
+   * from that language's row (Project settings → Languages). Carried on the
+   * portfolio row, so it is read again with the row whenever settings change.
+   */
+  const recordsAudio =
+    (audio?.lanes ?? []).find((l) => l.role !== "source" && l.lane === planLane)?.recordsAudio === true
+  const planShowAudio = useMemo(() => planHasAudio(planUnits, recordsAudio), [planUnits, recordsAudio])
   /**
    * Which FILES carry recordings. Audio expectation is judged per file, never
    * per project (`planShowAudio` above answers the different question "does
@@ -875,7 +940,7 @@ export function ProjectOverview() {
    * beside sixty-five text books would otherwise owe a recording for every
    * verse in the Bible. See `audioFileIds`.
    */
-  const planAudioFiles = useMemo(() => audioFileIds(planUnits), [planUnits])
+  const planAudioFiles = useMemo(() => audioFileIds(planUnits, recordsAudio), [planUnits, recordsAudio])
   /**
    * AQU-955: the mirror set — which FILES carry text work. An audio-only file
    * (recordings present, no target text anywhere in this lane) is charged no
@@ -1262,24 +1327,16 @@ export function ProjectOverview() {
   )
   // The lane whose numbers the inspector is showing, named the way the lane
   // tabs name it — so nobody reads a French percentage as a Spanish one.
-  // Labeled exactly as the lane tabs label it: the project's target language
-  // for the default lane, the lane row's own name for any other (AQU-1586 —
-  // never the tag, which can be the lane id). Derived here rather than read
-  // off `selectedLane`, which is declared further down.
-  const planLanguageLabel = selectedLaneTag
-    ? laneLabelForTag(selectedLaneTag, targetLaneRows)
-    : project?.targetLanguage || null
-  /**
-   * How many target languages this project carries: its declared extra lanes
-   * plus the default one, which is a real language and always exists (AQU-728).
-   * Counted from the project record rather than from the portfolio's `lanes`,
-   * which only lists lanes that already have progress in them — a lane added
-   * this morning has none, and the inspector's "audio is shared by every
-   * language" note is exactly as true on the day a second lane is created.
-   * The primary language is the default lane even when it also sits in
-   * targetLanes (AQU-1473).
-   */
-  const planLaneCount = extraRegistryLanes(project?.targetLanes, project?.targetLanguage).length + 1
+  // Labeled exactly as the lane tabs label it: the lane row's own name
+  // (AQU-1586 — never the tag, which can be the lane id). Derived here rather
+  // than read off `selectedLane`, which is declared further down. AQU-1977:
+  // `planLane` always names a lane now, so with no tab picked this is the
+  // language the plan opens on — not the retired project-level target
+  // language, which is empty on a project made since AQU-1594.
+  const planLanguageLabel =
+    (targetLaneRows.length > 0 ? laneLabelForTag(planLane, targetLaneRows) : null) ||
+    project?.targetLanguage ||
+    null
   // Selecting a unit that a refetch removed (a file deleted elsewhere) would
   // leave the inspector pointing at nothing.
   useEffect(() => {
@@ -1288,7 +1345,10 @@ export function ProjectOverview() {
     }
   }, [planUnits, selectedPlanUnitId])
 
-  const planCsv = useCallback(() => planRowsToCsv(planUnits, tableNow), [planUnits, tableNow])
+  const planCsv = useCallback(
+    () => planRowsToCsv(planUnits, tableNow, recordsAudio),
+    [planUnits, tableNow, recordsAudio],
+  )
   const handleCopyPlanCsv = useCallback(() => {
     void navigator.clipboard.writeText(planCsv()).then(() => {
       setPlanCsvCopied(true)
@@ -1324,6 +1384,7 @@ export function ProjectOverview() {
       activeFileId: selectedUnitFileId,
       files: documentFiles.map((f) => ({ id: f.id, name: f.name })),
       targetLanes: extraRegistryLanes(project?.targetLanes, project?.targetLanguage),
+      lanes: assignLanes,
       jwt,
       author: session?.username ?? "",
       roleLevel: project?.syncRole?.level ?? 0,
@@ -1340,7 +1401,7 @@ export function ProjectOverview() {
     }
   }, [
     canAssign, isArchived, jwt, id, selectedUnitFileId, documentFiles, project?.targetLanes,
-    project?.targetLanguage, project?.syncRole?.level, session?.username, policyAllowSelfAssignment,
+    project?.targetLanguage, assignLanes, project?.syncRole?.level, session?.username, policyAllowSelfAssignment,
     policyAssignmentMinRole, handleAssigned,
   ])
 
@@ -1356,7 +1417,6 @@ export function ProjectOverview() {
       lane={planLane}
       dataVersion={planDataVersion}
       languageLabel={planLanguageLabel}
-      laneCount={planLaneCount}
       // The SAME set the board judges by. Audio expectation is a fact about a
       // file, so a text-only book inside a dubbed file must read the same way
       // in this panel as it does in the row that opened it — without this the
@@ -1429,15 +1489,17 @@ export function ProjectOverview() {
 
   // Conditionality flags
   const hasText = audio != null && audio.totalCells > 0
-  const hasAudio = audio != null && audio.audioCells > 0
+  // AQU-1954: a project that says it records audio shows its audio from the
+  // first day, at 0%, rather than hiding it until the first take.
+  const hasAudio = audio != null && (audio.audioCells > 0 || (audio.recordsAudio === true && audioDenominator(audio) > 0))
   const showText = hasText
   const showAudio = hasAudio
 
   // AQU-538 §3.3: lane tabs + tile recompute. Tabs only surface once a project
   // has more than one lane (N=1 stays byte-identical). `activeLane` is the
   // PortfolioLane the tabs are filtered to (null = "All"); when set, the
-  // Translated/Validated tiles + bars read that lane, and the cross-language
-  // tiles (AI Drafted, audio) grey out — they have no per-lane breakdown.
+  // Translated/Validated tiles + bars read that lane, and so do the audio ones
+  // (AQU-1951). AI Drafted greys out — it has no per-lane breakdown.
   // AQU-1796: a source lane rides along in the portfolio with lane "" so the
   // source-language label can find it. It is not a target lane. Listing it
   // here put the source language in the Languages table and, because the
@@ -1490,6 +1552,31 @@ export function ProjectOverview() {
   const tileTranslatedPct = activeLane ? laneTranslatedPct(activeLane) : audio ? translatedPct(audio) : 0
   const tileValidatedPct = activeLane ? laneValidatedPct(activeLane) : audio ? validatedPct(audio) : 0
   const CROSS_LANE_TOOLTIP = t("org.projectOverview.crossLaneTooltip")
+  // AQU-1951: audio follows the language tab as text does. Each take belongs
+  // to a language (AQU-1591), so the lane's own recordings replace the
+  // project's, over the project's audio denominator: which cells exist does
+  // not change with the language. Only a server too old to send lane audio
+  // leaves a language tab with nothing to show, and there the audio tiles
+  // grey out as they used to.
+  //
+  // AQU-1954: over the LANGUAGE's own audio total too: every file when its
+  // "Records audio" switch is on, else the files it has recorded in. A
+  // language that is off and has recorded nothing owes no audio; its tiles grey
+  // out and say how to turn it on, rather than reading "0/0 cells".
+  const laneAudioMissing = activeLane != null && activeLane.audioCells == null
+  const laneOwesNoAudio =
+    activeLane != null && !laneAudioMissing && activeLane.audioTotalCells === 0
+  const audioOnTab = (p: PortfolioProject): PortfolioProject =>
+    activeLane != null && activeLane.audioCells != null
+      ? {
+          ...p,
+          audioCells: activeLane.audioCells,
+          validatedAudioCells: activeLane.validatedAudioCells ?? 0,
+          ...(activeLane.audioTotalCells != null ? { audioTotalCells: activeLane.audioTotalCells } : {}),
+        }
+      : p
+  const audioTileTooltip = (fallback: string): string =>
+    laneAudioMissing ? CROSS_LANE_TOOLTIP : laneOwesNoAudio ? t("org.projectOverview.laneNoAudioTooltip") : fallback
 
   // AQU-593: which stat widgets are applicable to this project (drives the
   // Customize menu). Audio tiles only apply to audio projects; the AI-Drafted
@@ -1595,6 +1682,9 @@ export function ProjectOverview() {
   const { store: offlineStore } = useOfflineStore()
   const offlineStatus = useOfflineProjectStatus(offlineStore, id || null)
   const downloadProgress = useDownloadProgress(id)
+  // A `downloading` row with no download running in this session was left
+  // half-done by an earlier one; downloadProjectOffline restarts it.
+  const offlineDownloading = offlineStatus?.status === "downloading" && downloadProgress !== null
 
   async function handleMakeAvailableOffline() {
     if (!offlineStore || !jwt || !id) return
@@ -1644,13 +1734,24 @@ export function ProjectOverview() {
 
   // Language pair label, e.g. "Greek → Bambara". Arrow is wrapped so it
   // visually mirrors under RTL instead of pointing away from the target.
+  // AQU-1977: both sides come off the lane rows (AQU-1593). The project-level
+  // keys are retired — empty on a project made since AQU-1594, a stale
+  // snapshot on an older one — so the pair read nothing or an old language.
+  // The target is the language the plan opens on.
+  const sourceLaneRow = (project?.lanes ?? []).find((lane) => lane.role === "source")
+  const sourceLanguageLabel =
+    (sourceLaneRow ? laneRowLabel(sourceLaneRow) : null) || project?.sourceLanguage || null
+  const targetLanguageLabel =
+    (targetLaneRows.length > 0 ? laneLabelForTag(defaultPlanLane, targetLaneRows) : null) ||
+    project?.targetLanguage ||
+    null
   const languagePair =
-    project?.sourceLanguage && project?.targetLanguage ? (
+    sourceLanguageLabel && targetLanguageLabel ? (
       <>
-        {project.sourceLanguage} <span className="inline-block rtl:-scale-x-100">→</span> {project.targetLanguage}
+        {sourceLanguageLabel} <span className="inline-block rtl:-scale-x-100">→</span> {targetLanguageLabel}
       </>
     ) : (
-      project?.targetLanguage ?? project?.sourceLanguage ?? null
+      targetLanguageLabel ?? sourceLanguageLabel ?? null
     )
 
   if (status === "no-session") {
@@ -1758,15 +1859,13 @@ export function ProjectOverview() {
                                 : t("org.projectOverview.offlineMediaSaved", { count: mediaSave.result.cached + mediaSave.result.alreadyCached, failed: mediaSave.result.failed })}
                         </Badge>
                       )}
-                      {isTauriRuntime() && offlineStatus?.status === "downloading" && (
+                      {isTauriRuntime() && offlineDownloading && (
                         <Badge variant="outline" className="shrink-0" data-testid="offline-downloading-badge">
                           <Spinner className="size-3" />
-                          {downloadProgress
-                            ? t("org.projectOverview.offlineDownloadingProgress", {
-                                done: downloadProgress.filesDone,
-                                total: downloadProgress.filesTotal,
-                              })
-                            : t("org.projectOverview.offlineDownloading")}
+                          {t("org.projectOverview.offlineDownloadingProgress", {
+                            done: downloadProgress.filesDone,
+                            total: downloadProgress.filesTotal,
+                          })}
                         </Badge>
                       )}
                       {isArchived && <ProjectStatusChip kind="archived" className="shrink-0" />}
@@ -1861,10 +1960,10 @@ export function ProjectOverview() {
                               onClick={() => {
                                 void handleMakeAvailableOffline()
                               }}
-                              disabled={!jwt || offlineStatus?.status === "downloading"}
+                              disabled={!jwt || offlineDownloading}
                             >
                               <CloudDownload className="size-4" />
-                              {offlineStatus?.status === "downloading"
+                              {offlineDownloading
                                 ? t("org.projectOverview.offlineDownloading")
                                 : t("org.projectOverview.makeAvailableOffline")}
                             </DropdownMenuItem>
@@ -1905,9 +2004,29 @@ export function ProjectOverview() {
 
                 <div className="mt-4 flex flex-wrap items-start gap-4" data-testid="overview-project-meta">
                   <Field className="w-auto min-w-48">
-                    <FieldLabel className="text-xs font-semibold text-muted-foreground">
-                      {t("org.projectOverview.projectManagerHeading")}
-                    </FieldLabel>
+                    <div className="flex items-center gap-1">
+                      <FieldLabel className="text-xs font-semibold text-muted-foreground">
+                        {t("org.projectOverview.projectManagerHeading")}
+                      </FieldLabel>
+                      {/* A click, not a hover, like the Team picker's circled-i
+                          (AQU-1779): a tooltip would not reach touch screens.
+                          -my-0.5 keeps the row at the label's own height, so
+                          this column still lines up with Deadline beside it. */}
+                      {pm ? (
+                        <button
+                          type="button"
+                          data-testid="overview-pm-lead-info"
+                          className="-my-0.5 inline-flex size-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground data-[state=open]:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                          aria-label={t("org.projectOverview.pmGrantsProjectLeadAriaLabel")}
+                          aria-expanded={pmNoteOpen}
+                          aria-controls={pmNoteId}
+                          data-state={pmNoteOpen ? "open" : "closed"}
+                          onClick={() => setPmNoteOpen((v) => !v)}
+                        >
+                          <Info className="size-3.5" aria-hidden />
+                        </button>
+                      ) : null}
+                    </div>
                     <div className="flex flex-wrap items-center gap-2 text-sm">
                       {pm ? (
                         <UsernameWithAvatar userId={pm.id} username={pm.username} nameTestId="overview-pm-name" />
@@ -1932,10 +2051,25 @@ export function ProjectOverview() {
                         />
                       )}
                     </div>
+                    {/* Stays mounted so it animates both ways: the 0fr→1fr grid
+                        row grows to the text's own height without measuring it,
+                        and the negative margin cancels the Field's gap while it
+                        is shut. */}
                     {pm ? (
-                      <p className="mt-1 max-w-sm text-xs text-muted-foreground" data-testid="overview-pm-lead-note">
-                        {t("org.projectOverview.pmGrantsProjectLead")}
-                      </p>
+                      <div
+                        className={cn(
+                          "grid transition-[grid-template-rows,opacity,margin] duration-200 ease-out motion-reduce:transition-none",
+                          pmNoteOpen ? "grid-rows-[1fr] opacity-100" : "-mt-1.5 grid-rows-[0fr] opacity-0",
+                        )}
+                        data-state={pmNoteOpen ? "open" : "closed"}
+                        data-testid="overview-pm-lead-note"
+                        aria-hidden={!pmNoteOpen}
+                        inert={!pmNoteOpen}
+                      >
+                        <p id={pmNoteId} className="min-h-0 max-w-sm overflow-hidden text-xs text-muted-foreground">
+                          {t("org.projectOverview.pmGrantsProjectLead")}
+                        </p>
+                      </div>
                     ) : null}
                   </Field>
                   <Field className="w-auto min-w-56">
@@ -2195,18 +2329,19 @@ export function ProjectOverview() {
                     {showText && (
                       <>
                         {statVisible("translated") && (
-                          <StatTile label={t("org.orgHome.table.translatedHeaderLabel")} pct={tileTranslatedPct} colorClass="text-amber-600" />
+                          <StatTile label={t("org.orgHome.table.translatedHeaderLabel")} pct={tileTranslatedPct} tone="textTranslated" />
                         )}
                         {audio.aiDraftedCells > 0 && statVisible("ai-drafted") && (
                           <StatTile
                             label={t("org.projectOverview.aiDrafted")}
                             pct={aiDraftedPct(audio)}
-                            colorClass={activeLane ? "text-muted-foreground/60" : "text-violet-600"}
+                            tone="textAi"
+                            muted={!!activeLane}
                             tooltip={activeLane ? CROSS_LANE_TOOLTIP : t("org.projectOverview.aiDraftedTooltip")}
                           />
                         )}
                         {statVisible("validated") && (
-                          <StatTile label={t("org.orgHome.table.validatedHeaderLabel")} pct={tileValidatedPct} colorClass="text-emerald-600" />
+                          <StatTile label={t("org.orgHome.table.validatedHeaderLabel")} pct={tileValidatedPct} tone="textValidated" />
                         )}
                       </>
                     )}
@@ -2215,9 +2350,10 @@ export function ProjectOverview() {
                         {statVisible("has-audio") && (
                           <StatTile
                             label={t("org.orgHome.table.audioHeaderLabel")}
-                            pct={audioPct(audio)}
-                            colorClass={activeLane ? "text-muted-foreground/60" : "text-sky-600"}
-                            tooltip={activeLane ? CROSS_LANE_TOOLTIP : t("org.projectOverview.hasAudioTooltip")}
+                            pct={audioPct(audioOnTab(audio))}
+                            tone="audioRecorded"
+                            muted={laneAudioMissing || laneOwesNoAudio}
+                            tooltip={audioTileTooltip(t("org.projectOverview.hasAudioTooltip"))}
                           />
                         )}
                         {/*
@@ -2234,19 +2370,19 @@ export function ProjectOverview() {
                          * the more natural reviewer's question, so it survives in the
                          * tooltip rather than being dropped.
                          *
-                         * Greyed with the cross-lane tooltip like "Has Audio": takes hang
-                         * off the cell, not a language lane, so there is nothing per-lane
-                         * to show.
+                         * AQU-1951: on a language tab it reads that language's takes,
+                         * like "Has audio" beside it.
                          */}
                         {statVisible("audio-validated") && (
                           <StatTile
                             label={t("org.projectOverview.audioValidated")}
-                            pct={audioValidatedPct(audio)}
-                            colorClass={activeLane ? "text-muted-foreground/60" : "text-sky-700"}
-                            tooltip={activeLane ? CROSS_LANE_TOOLTIP : [
+                            pct={audioValidatedPct(audioOnTab(audio))}
+                            tone="audioValidated"
+                            muted={laneAudioMissing || laneOwesNoAudio}
+                            tooltip={laneAudioMissing || laneOwesNoAudio ? audioTileTooltip("") : [
                               t("org.projectOverview.audioValidatedTooltip"),
                               t("org.projectOverview.audioValidatedOfRecorded", {
-                                percent: progressPercentOfFraction(audioValidatedOfRecordedPct(audio)),
+                                percent: progressPercentOfFraction(audioValidatedOfRecordedPct(audioOnTab(audio))),
                               }),
                             ].join(" ")}
                           />
@@ -2256,8 +2392,11 @@ export function ProjectOverview() {
                   </div>
 
                   {/* Detail bars below tiles. AQU-538: Translated/Validated
-                      follow the active lane; the cross-language AI/audio bars
-                      only render in the "All" view (no per-lane breakdown). */}
+                      follow the active lane, and AQU-1951 the audio bars too;
+                      the cross-language AI bar only renders in the "All" view
+                      (no per-lane breakdown).
+                      AQU-1764: one single-colour bar per measure, each in its
+                      tile's tone, and Audio validated gets the bar it never had. */}
                   <div className="space-y-2.5">
                     {showText && (
                       <>
@@ -2266,7 +2405,7 @@ export function ProjectOverview() {
                             label={t("org.orgHome.table.translatedHeaderLabel")}
                             value={activeLane ? activeLane.filledCells : audio.filledCells}
                             total={activeLane ? activeLane.totalCells : audio.totalCells}
-                            fillClass="bg-amber-500"
+                            tone="textTranslated"
                             suffix={t("org.projectOverview.cellsSuffix")}
                           />
                         )}
@@ -2275,7 +2414,7 @@ export function ProjectOverview() {
                             label={t("org.projectOverview.aiDrafted")}
                             value={audio.aiDraftedCells}
                             total={audio.totalCells}
-                            fillClass="bg-violet-500"
+                            tone="textAi"
                             suffix={t("org.projectOverview.cellsSuffix")}
                           />
                         )}
@@ -2284,23 +2423,35 @@ export function ProjectOverview() {
                             label={t("org.orgHome.table.validatedHeaderLabel")}
                             value={activeLane ? activeLane.validatedCells : audio.validatedCells}
                             total={activeLane ? activeLane.totalCells : audio.totalCells}
-                            fillClass="bg-emerald-500"
+                            tone="textValidated"
                             suffix={t("org.projectOverview.cellsSuffix")}
                           />
                         )}
                       </>
                     )}
-                    {showAudio && !activeLane && statVisible("has-audio") && (
+                    {showAudio && !laneAudioMissing && !laneOwesNoAudio && statVisible("has-audio") && (
                       <>
                         <StatBar
                           label={t("org.orgHome.table.audioHeaderLabel")}
-                          value={audio.audioCells}
-                          total={audioDenominator(audio)}
-                          fillClass="bg-sky-500"
+                          value={audioOnTab(audio).audioCells}
+                          total={audioDenominator(audioOnTab(audio))}
+                          tone="audioRecorded"
                           suffix={t("org.projectOverview.cellsSuffix")}
                         />
                         {/* TODO: confirm whether legacy GitLab project import populated audio (cell_audio) — see AQU-160 data gap */}
                       </>
+                    )}
+                    {/* Over the same cells as Has audio and as its tile
+                        (`audioValidatedPct`), so the bar, the tile and the
+                        plan board's audio bars agree. */}
+                    {showAudio && !laneAudioMissing && !laneOwesNoAudio && statVisible("audio-validated") && (
+                      <StatBar
+                        label={t("org.projectOverview.audioValidated")}
+                        value={audioOnTab(audio).validatedAudioCells}
+                        total={audioDenominator(audioOnTab(audio))}
+                        tone="audioValidated"
+                        suffix={t("org.projectOverview.cellsSuffix")}
+                      />
                     )}
                   </div>
                   {!activeLane && audio.recordedMs > 0 && statVisible("has-audio") && (
@@ -2327,6 +2478,7 @@ export function ProjectOverview() {
                   archivedLanes={archivedProjectLanes}
                   defaultLanguageLabel={project?.targetLanguage || t("org.projectOverview.laneDefaultFallback")}
                   extraLanes={extraRegistryLanes(project?.targetLanes, project?.targetLanguage)}
+                  assignLanes={assignLanes}
                   files={documentFiles}
                   roleLevel={project?.syncRole?.level ?? 0}
                   author={session?.username ?? ""}
@@ -2378,6 +2530,7 @@ export function ProjectOverview() {
               <PlanBoard
                 units={planUnits}
                 now={tableNow}
+                recordsAudio={recordsAudio}
                 projectId={id ?? null}
                 status={planStatus}
                 onRetry={refreshPlan}
@@ -2722,8 +2875,13 @@ export function ProjectOverview() {
                                     size="sm"
                                     className="w-40 shrink-0"
                                   />
+                                  {/* AQU-1764: an assignment's done cells are its
+                                      VALIDATED cells, so the text-validated tone. */}
                                   <span className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                                    <span className="block h-full rounded-full bg-primary transition-all" style={{ width: `${donePct}%` }} />
+                                    <span
+                                      className={`block h-full rounded-full transition-all ${PROGRESS_BG.textValidated}`}
+                                      style={{ width: `${donePct}%` }}
+                                    />
                                   </span>
                                   <span className="w-20 shrink-0 text-end text-xs tabular-nums text-muted-foreground">
                                     {t("org.projectOverview.openAssignmentsStat", {
@@ -2777,6 +2935,7 @@ export function ProjectOverview() {
                               }
                               laneLabels={autopilotLaneLabels}
                               defaultLaneLabel={project?.targetLanguage ?? ""}
+                              lanes={assignLanes}
                               laneRows={targetLaneRows}
                               roleLevel={project?.syncRole?.level ?? 0}
                               allowSelfAssignment={policyAllowSelfAssignment}

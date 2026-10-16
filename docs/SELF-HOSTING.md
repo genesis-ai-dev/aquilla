@@ -757,6 +757,9 @@ Aquilla's software license.
 - **Monday.com:** create your own application. Configure `MONDAY_CLIENT_ID`,
   `MONDAY_APP_ID`, `MONDAY_APP_SLUG`, and the exact `MONDAY_REDIRECT_URI`.
   Provision `MONDAY_CLIENT_SECRET` and `MONDAY_SIGNING_SECRET` on identity.
+  If a non-production identity Worker ever runs against a copy of your
+  production database, give it a `MONDAY_TOKEN_KEY` of its own so the copied
+  Monday tokens are unreadable there (unset, the key derives from `SECRET_KEY`).
   Adapt and verify cron flushing before relying on background pushes.
 - **PostHog:** omit `VITE_POSTHOG_KEY` and Worker `POSTHOG_KEY` to disable those
   telemetry clients. For your own project, configure the correct ingest host

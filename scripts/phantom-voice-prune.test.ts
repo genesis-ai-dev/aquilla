@@ -92,11 +92,14 @@ const SCHEMA = `
     settings   TEXT NOT NULL DEFAULT '{}',
     version    INTEGER NOT NULL DEFAULT 0,
     updated_at TIMESTAMPTZ DEFAULT now(),
-    updated_by BIGINT
+    updated_by BIGINT,
+    validation_count TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationCount') STORED,
+    validation_count_audio TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationCountAudio') STORED
   );
   CREATE TABLE projects (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
+    org_id BIGINT,
     source_project_id TEXT,
     source_link_mode TEXT,
     source_link_consumes TEXT,
@@ -104,7 +107,15 @@ const SCHEMA = `
   );
   CREATE TABLE lanes (
     id TEXT PRIMARY KEY, project_id TEXT NOT NULL, role TEXT NOT NULL, language TEXT,
-    name TEXT, lang_code TEXT, legacy_tag TEXT, position INTEGER, archived_at TIMESTAMPTZ
+    name TEXT, lang_code TEXT, legacy_tag TEXT, position INTEGER, archived_at TIMESTAMPTZ,
+    records_audio BOOLEAN NOT NULL DEFAULT false
+  );
+  -- AQU-1771: a settings write resolves the org's validation defaults (0174).
+  CREATE TABLE org_settings (
+    org_id   BIGINT PRIMARY KEY,
+    settings TEXT NOT NULL DEFAULT '{}',
+    validation_count TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationCount') STORED,
+    validation_count_audio TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationCountAudio') STORED
   );
 `
 

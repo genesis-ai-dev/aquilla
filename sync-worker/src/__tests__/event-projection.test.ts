@@ -1034,6 +1034,8 @@ describe('isChainMutatingKind', () => {
     'cell.audio.rename': false,
     'cell.audio.trim': false,
     'cell.audio.place': false,
+    // AQU-1767: a cut makes a second take row; it never moves the text chain.
+    'cell.audio.cut': false,
     // A link says which subtitle a heard line performs; it never moves the
     // cell's own text chain.
     'cell.link.set': false,

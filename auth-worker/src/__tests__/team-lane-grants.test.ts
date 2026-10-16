@@ -117,14 +117,17 @@ describe("team writes — lane grants (AQU-1801)", () => {
       expect(await grantsFor(3)).toEqual([])
     })
 
-    it("grants only the scoped lane when the member already has a lane scope on the project", async () => {
+    it("replaces a leftover lane scope with the team's lanes", async () => {
       await seedOrg()
       await env.AQUILLA_PG.prepare(
         `INSERT INTO project_member_scopes (project_id, user_id, kind, value, created_by, created_at)
          VALUES ('p1', 3, 'lane', 'lane0002', '1', 0)`,
       ).run()
       expect((await addToTeam()).status).toBe(200)
-      expect(await grantsFor(3)).toEqual([{ lane: "lane0002", level: CONTRIBUTOR }])
+      expect(await grantsFor(3)).toEqual([
+        { lane: "lane0001", level: CONTRIBUTOR },
+        { lane: "lane0002", level: CONTRIBUTOR },
+      ])
     })
 
     it("adds the member without grants when the team has no project attached", async () => {
@@ -189,7 +192,7 @@ describe("team writes — lane grants (AQU-1801)", () => {
       expect(await grantsFor(5)).toEqual([])
     })
 
-    it("leaves a member's scoped lane set alone when the team is attached", async () => {
+    it("gives a leftover scope the lanes of the attachment", async () => {
       await seedOrg({ attach: false })
       await onTeam(3)
       await env.AQUILLA_PG.prepare(
@@ -197,7 +200,26 @@ describe("team writes — lane grants (AQU-1801)", () => {
          VALUES ('p1', 3, 'lane', 'lane0001', '1', 0)`,
       ).run()
       expect((await attachProject()).status).toBe(200)
-      expect(await grantsFor(3)).toEqual([{ lane: "lane0001", level: CONTRIBUTOR }])
+      expect(await grantsFor(3)).toEqual([
+        { lane: "lane0001", level: CONTRIBUTOR },
+        { lane: "lane0002", level: CONTRIBUTOR },
+      ])
+    })
+
+    it("grants only the lanes the attachment checks", async () => {
+      await seedOrg({ attach: false })
+      await onTeam(3)
+      const res = await app.request(
+        "/api/v2/orgs/1/groups/1/projects",
+        {
+          method: "POST",
+          headers: authHeader(await jwtFor("alice")),
+          body: JSON.stringify({ projectId: "p1", roleLevel: CONTRIBUTOR, laneIds: ["lane0002"] }),
+        },
+        env,
+      )
+      expect(res.status).toBe(200)
+      expect(await grantsFor(3)).toEqual([{ lane: "lane0002", level: CONTRIBUTOR }])
     })
 
     it("re-attaching the same project does not duplicate grant rows", async () => {

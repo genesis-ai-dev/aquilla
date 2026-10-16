@@ -73,11 +73,20 @@ describe("cell-audio projection", () => {
     // lane predicate's (project, tag, tag); the event names no lane, so the tag
     // is '' — the default lane. A dub recorded in French no longer clears the
     // Swahili selection in the same slot; audio-lane-projection.test.ts asserts
-    // on the rows that proves.
+    // on the rows that proves. AQU-1978: the two audio ids ahead of them look
+    // the take up — a dub already on file deselects in its OWN stored lane,
+    // and only a new take falls back to the event's tag.
     expect(recorded[0].sql).toContain("UPDATE cell_audio SET selected = 0")
     expect(recorded[0].sql).toContain("slot = ? AND audio_id != ?")
     expect(recorded[0].sql).toContain("lane_id")
-    expect(recorded[0].args).toEqual(["p1", "f1", "c1", "generatedVoice", "audio-x.wav", "p1", "", ""])
+    // AQU-1767: + the piece-group subquery's (project, file, cell, audio,
+    // audio) — the attached take's own pieces are never deselected.
+    expect(recorded[0].sql).toContain("COALESCE(piece_of, audio_id) <>")
+    expect(recorded[0].args).toEqual([
+      "p1", "f1", "c1", "generatedVoice", "audio-x.wav",
+      "p1", "f1", "c1", "audio-x.wav", "audio-x.wav",
+      "audio-x.wav", "audio-x.wav", "p1", "", "",
+    ])
 
     // AQU-1571: then drop the take's votes, but only if this attach swaps its
     // audio (a different url) — votes were cast on the audio it used to play.
@@ -113,7 +122,9 @@ describe("cell-audio projection", () => {
     expect(a[15]).toBe(100) // created_ts = serverTs
     expect(a[16]).toBe("dub") // role — nothing said 'source'
     // AQU-1591: lane_id's resolve subquery binds (project, role, role, tag).
-    expect(a.slice(18)).toEqual(["p1", "dub", "dub", ""])
+    expect(a.slice(18, 22)).toEqual(["p1", "dub", "dub", ""])
+    // AQU-1767: piece_of, last — null unless the attach is a piece being born.
+    expect(a.slice(22)).toEqual([null])
   })
 
   it("attach: binds NULL for optional fields the payload omits", () => {
@@ -201,10 +212,23 @@ describe("cell-audio projection", () => {
     expect(recorded[0].sql).toContain("SET selected = 0")
     // AQU-1591: + the lane predicate's (project, tag, tag). A select switches
     // the active take in ONE lane; it used to empty the slot in all of them.
-    expect(recorded[0].args).toEqual(["p1", "f1", "c1", "recording", "audio-y.wav", "p1", "", ""])
-    // The select itself is keyed on audio_id, which is unique without a lane.
-    expect(recorded[1].sql).toContain("SET selected = 1, deleted = 0")
-    expect(recorded[1].args).toEqual(["p1", "f1", "c1", "audio-y.wav"])
+    // AQU-1767: + the piece-group subquery — other GROUPS are deselected.
+    // AQU-1978: and the take's id twice ahead of the lane predicate — a dub
+    // already on file is selected within its own stored lane, not the event's tag.
+    expect(recorded[0].args).toEqual([
+      "p1", "f1", "c1", "recording", "audio-y.wav",
+      "p1", "f1", "c1", "audio-y.wav", "audio-y.wav",
+      "audio-y.wav", "audio-y.wav", "p1", "", "",
+    ])
+    // The select itself is keyed on audio_id, which is unique without a lane —
+    // and (AQU-1767) brings the take's live pieces with it. Rows are asserted
+    // in cell-audio-cut.test.ts.
+    expect(recorded[1].sql).toContain("SET selected = 1")
+    expect(recorded[1].sql).toContain("deleted = CASE WHEN audio_id = ? THEN 0 ELSE deleted END")
+    expect(recorded[1].args).toEqual([
+      "audio-y.wav", "p1", "f1", "c1", "audio-y.wav",
+      "p1", "f1", "c1", "audio-y.wav", "audio-y.wav",
+    ])
   })
 
   // 2026-09-28: a line with no imported source clip switches to its generated

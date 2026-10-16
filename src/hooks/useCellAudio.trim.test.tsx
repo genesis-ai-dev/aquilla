@@ -132,6 +132,60 @@ describe("useCellAudio — scrubbing and one playback per take", () => {
   })
 })
 
+// AQU-1767 (Sam's walk, 2026-10-15): clicking around a split take's waveform
+// in the Recording tab played the gaps and ran past the last piece — the
+// line's own play button had played the take raw, and as a "copy" of the
+// same take it took over the tab's clicks.
+describe("useCellAudio — a split take's gaps, and copies that play alike", () => {
+  const gaps = [{ start: 1, end: 1.5 }]
+
+  it("skips the space between pieces as it plays, on a click and on play", async () => {
+    const { result } = renderHook(() => useCellAudio(project, cellWith("a1", 3000), "f1"))
+    act(() => result.current.setTrim(0, 2.5, gaps))
+    await act(async () => { await result.current.play() })
+    const a = instances[0]
+    // A click in the gap starts the next piece.
+    await seekTo(result, 1.2)
+    expect(a.currentTime).toBeCloseTo(1.5)
+    // Played into the gap: the next frame moves past it.
+    a.currentTime = 1.1
+    await act(async () => { await new Promise((r) => requestAnimationFrame(() => r(null))) })
+    expect(a.currentTime).toBeCloseTo(1.5)
+    // Paused in the gap, play starts the next piece.
+    act(() => result.current.pause())
+    a.currentTime = 1.3
+    await act(async () => { await result.current.play() })
+    expect(a.currentTime).toBeCloseTo(1.5)
+  })
+
+  it("is not a copy of a player that plays the same take another way", async () => {
+    const row = renderHook(() => useCellAudio(project, cellWith("a1", 3000), "f1"))
+    const tab = renderHook(() => useCellAudio(project, cellWith("a1", 3000), "f1"))
+    act(() => tab.result.current.setTrim(0, 2.5, gaps))
+    await act(async () => { await row.result.current.play() })
+    act(() => row.result.current.pause())
+    // The tab's click plays the tab's own player, through its own window,
+    // starting where it was clicked once the clip has loaded.
+    await seekTo(tab.result, 1.2)
+    expect(instances).toHaveLength(2)
+    expect(instances[0].paused).toBe(true)
+    act(() => instances[1].onloadedmetadata?.())
+    expect(instances[1].currentTime).toBeCloseTo(1.5)
+  })
+
+  it("is a copy of one that plays it alike, as before", async () => {
+    const row = renderHook(() => useCellAudio(project, cellWith("a1", 3000), "f1"))
+    const tab = renderHook(() => useCellAudio(project, cellWith("a1", 3000), "f1"))
+    act(() => row.result.current.setTrim(0, 2.5, gaps))
+    act(() => tab.result.current.setTrim(0, 2.5, gaps))
+    await act(async () => { await row.result.current.play() })
+    expect(tab.result.current.isPlaying).toBe(true)
+    act(() => tab.result.current.pause())
+    expect(instances).toHaveLength(1)
+    expect(instances[0].paused).toBe(true)
+  })
+})
+
 describe("useCellAudio trim window", () => {
   it("reports the attachment's measured length before the element loads", () => {
     const { result } = renderHook(() => useCellAudio(project, cellWith("a1", 3600), "f1"))

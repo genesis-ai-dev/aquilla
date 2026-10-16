@@ -98,11 +98,14 @@ import {
 import { loadLinkFileIds } from "../services/source-linking"
 import {
   applyDirectAddLaneGrants,
+  grantCurrentLanesToMember,
+  reconcileMemberProjectLanes,
   replaceMemberLaneScopes,
   syncMemberLaneGrants,
 } from "../services/lane-grants"
 import { resolveExplicitLaneChoice } from "../services/lane-choice"
 import { createProjectShared } from "../../../db/shared/projects"
+import { readLaneTag } from "../../../db/shared/lane-ref"
 import { countedFileSql } from "../../../db/shared/counted-files"
 import { readDeclaredLanguages } from "../../../db/shared/file-declared-languages"
 import { loadRosterOrigins, type RosterOrigin } from "../services/roster-origins"
@@ -1356,7 +1359,11 @@ projects.get("/:projectId/assignments/unit", authMiddleware, async (c) => {
   // tag to the lane it names. An unresolvable tag yields '', which matches no
   // lane_id, so the per-lane progress columns read zero rather than silently
   // counting another lane's work.
-  const laneId = laneIdParam ?? (await resolveTargetLaneId(c.env, projectId, laneTag))
+  // AQU-1977: no lane named reads the project's own default — its '' lane on
+  // an old project, its first language on one made since AQU-1594 — rather
+  // than a '' lane a new project does not have, which read every count as 0.
+  const laneId = laneIdParam
+    ?? (await resolveTargetLaneId(c.env, projectId, await readLaneTag(c.env.AQUILLA_PG, projectId, laneTag)))
   const assignments = await getUnitAssignments(c.env, projectId, fileId, sectionKey, laneId)
   return c.json({ assignments })
 })
@@ -1669,8 +1676,9 @@ async function grantProjectMemberOne(
     }
   }
 
-  // AQU-1808: a new member below project lead must say which lanes. A role
+  // AQU-1808: a new member below maintainer must say which lanes. A role
   // change does not ask again — the lanes they already hold stay put.
+  // A new project lead is snapshotted onto the lanes that exist then.
   const laneChoice = await resolveExplicitLaneChoice(env, [projectId], {
     role,
     allCurrentLanes: entry.allCurrentLanes,
@@ -1701,8 +1709,11 @@ async function grantProjectMemberOne(
   // the client on that one lane), and they kept an earlier every-lane grant
   // set under a re-add that named one lane. So a fresh membership starts from
   // no lane rows, and a lane list given for an existing member replaces the
-  // lanes they held. A project lead is never lane-scoped (AD-12): a promotion
-  // drops the stale scope rows the client's lane list would narrow by.
+  // lanes they held.
+  //
+  // A fresh project lead is given the lanes that exist then, as scope rows,
+  // so a lane created later is not theirs until someone grants it. Raising
+  // someone who is already a member to project lead does not reveal a lane.
   //
   // AQU-1782: a role change of an existing member that names no lanes keeps
   // the lanes they hold and rewrites only the level on those rows.
@@ -1710,13 +1721,12 @@ async function grantProjectMemberOne(
   if (laneChoice.kind === "lanes") {
     await replaceMemberLaneScopes(env.AQUILLA_PG, projectId, target.id, laneChoice.laneIds, callerUserId)
     await syncMemberLaneGrants(env.AQUILLA_PG, projectId, target.id, laneChoice.laneIds, callerUserId)
+  } else if (laneChoice.kind === "snapshot") {
+    await grantCurrentLanesToMember(env.AQUILLA_PG, projectId, target.id, callerUserId)
   } else if (laneChoice.kind === "all" || freshMembership) {
     await replaceMemberLaneScopes(env.AQUILLA_PG, projectId, target.id, [], callerUserId)
     await syncMemberLaneGrants(env.AQUILLA_PG, projectId, target.id, [], callerUserId)
   } else {
-    if (role >= ROLE.PROJECT_LEAD) {
-      await replaceMemberLaneScopes(env.AQUILLA_PG, projectId, target.id, [], callerUserId)
-    }
     await applyDirectAddLaneGrants(env.AQUILLA_PG, projectId, target.id, role, callerUserId)
   }
   await auditMembershipChange(env, actor, {
@@ -1875,6 +1885,10 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
   )
     .bind(projectId, targetUserId)
     .run()
+  // AQU-1818: a removed direct membership must not leave lane rows behind.
+  // A team that still reaches the person keeps that team's lanes.
+  forgetProjectRole(c.env, projectId, targetUserId)
+  await reconcileMemberProjectLanes(c.env.AQUILLA_PG, projectId, targetUserId, user.id)
   await auditMembershipChange(c.env, user, {
     action: "project.member.remove",
     where: { scope: "project", projectId },

@@ -63,6 +63,10 @@ import {
   validatedOnly as isValidatedOnlyMode,
   type ExportContentMode,
 } from "@/lib/export/validation-scope"
+import {
+  scopeAudioCellsForExport,
+  unvalidatedAudioLineIds,
+} from "@/lib/export/audio-validation-scope"
 import { downloadSourceFile, downloadProjectZip, fetchSourceSidecar, fetchRemovedCells } from "@/lib/sync/source-export"
 import { exportPlainTextStructured } from "@/lib/export/exporters/plaintext"
 import { exportMarkdownStructured } from "@/lib/export/exporters/markdown"
@@ -409,6 +413,23 @@ interface ExportDialogProps {
    * "HTML/validation health errors" blocked export). Defaults to 0.
    */
   outstandingInfractionCount?: number
+  /**
+   * AQU-965: the project's required number of audio validators
+   * (`readValidationCountAudio`) — the same number the line's audio check
+   * compares against, so the dialog's count of unvalidated lines and the
+   * gutter's ticks answer one question. Defaults to 1, the floor every audio
+   * surface already applies.
+   */
+  audioValidationRequirement?: number
+  /**
+   * Take the viewer to one line that has no validated take.
+   *
+   * On a dubbing file this is a HEARD LINE in the audio-cue sibling, where the
+   * recordings live — so the handler seats it on the timeline as well as
+   * trying the dialogue table. Absent, the count is still shown and simply
+   * does not offer the jump.
+   */
+  onJumpToAudioLine?: (cellId: string) => void
 }
 
 function profileIdFromCells(cells: readonly CellData[]): string | null {
@@ -472,6 +493,8 @@ export function ExportDialog({
   orgId,
   onReimport,
   outstandingInfractionCount = 0,
+  audioValidationRequirement = 1,
+  onJumpToAudioLine,
 }: ExportDialogProps) {
   const { locale } = useI18n()
   const t = useT()
@@ -1103,6 +1126,33 @@ export function ExportDialog({
     [cells],
   )
 
+  /**
+   * AQU-965: THE LINES THAT WOULD SHIP A TAKE NOBODY HAS SIGNED OFF.
+   *
+   * Read off the unscoped `audioSourceCells` on purpose — this describes the
+   * FILE, not this download, so the number is the same in both content modes:
+   * under "current" it is the warning the Come and See export never gave, and
+   * under "validated only" it is how many lines are about to fall silent.
+   */
+  const unvalidatedAudioLines = useMemo(
+    () => unvalidatedAudioLineIds(audioSourceCells, audioValidationRequirement),
+    [audioSourceCells, audioValidationRequirement],
+  )
+
+  /**
+   * The cells the AUDIO deliverables export from, with the content mode
+   * applied. Identical to `audioSourceCells` by identity under "current", so
+   * every existing audio export is byte-for-byte what it was.
+   *
+   * The previews above deliberately keep reading the unscoped array: they
+   * describe who is recorded in the file, which is true whatever this download
+   * is allowed to contain.
+   */
+  const audioExportCells = useMemo(
+    () => scopeAudioCellsForExport(audioSourceCells, contentMode, audioValidationRequirement),
+    [audioSourceCells, contentMode, audioValidationRequirement],
+  )
+
   const chapterLabels = useMemo(() => listChapterLabels(cells), [cells])
 
   // Base UI resolves the trigger's label from the root's `items`, not from
@@ -1401,7 +1451,7 @@ export function ExportDialog({
         // (projectId, fileId) — wrap it to match the fetchCellAudio signature.
         const getSyncToken = (_pid: string, fileId: string) => getToken(fileId)
         const result = await exportAudioByCharacter({
-          cells: audioSourceCells,
+          cells: audioExportCells,
           resolveName: resolveCharacterName,
           settings: ttsSettings,
           projectId,
@@ -1486,7 +1536,7 @@ export function ExportDialog({
         const { fetchCellAudio } = await import("@/lib/audio/upload")
         const getSyncToken = (_pid: string, fileId: string) => getToken(fileId)
         const result = await exportAudioPerLine({
-          cells: audioSourceCells,
+          cells: audioExportCells,
           resolveName: resolveCharacterName,
           // AQU-646 stage 4: per line is the deliverable that carries every
           // track (Sam, 2026-08-26). Absent, or with only the derived rows, it
@@ -1546,7 +1596,7 @@ export function ExportDialog({
         const { fetchCellAudio } = await import("@/lib/audio/upload")
         const getSyncToken = (_pid: string, fileId: string) => getToken(fileId)
         const result = await exportAudioByChapter({
-          cells: audioSourceCells,
+          cells: audioExportCells,
           projectId,
           fetchBytes: ({ projectId: pid, fileId, audioId, ext }) =>
             fetchCellAudio({ projectId: pid, fileId, audioId, ext, getSyncToken }),
@@ -1922,6 +1972,50 @@ export function ExportDialog({
   )
 
   /**
+   * AQU-965: HOW MANY LINES WOULD SHIP A RECORDING NOBODY HAS VALIDATED —
+   * before the press, not after the studio asks.
+   *
+   * A dubbing export went out with every line unvalidated and the dialog said
+   * nothing: there was no count, and no way to find the lines. It sits with
+   * the previews, so it reaches both surfaces that export audio (the Audio
+   * card on a dubbing file, the format list on a scripture file), and it never
+   * gates — "validated takes only" is a choice in the Content list, and this
+   * is the sentence that makes that choice an informed one.
+   */
+  const renderUnvalidatedAudioNote = () => {
+    if (unvalidatedAudioLines.length === 0) return null
+    return (
+      <p
+        data-testid="export-audio-unvalidated-note"
+        className="text-xs leading-relaxed text-amber-700 dark:text-amber-400"
+      >
+        {t(
+          validatedOnly
+            ? "importExport.dialog.audioUnvalidatedOmittedNote"
+            : "importExport.dialog.audioUnvalidatedNote",
+          { count: unvalidatedAudioLines.length },
+        )}
+        {onJumpToAudioLine && (
+          <>
+            {" "}
+            <button
+              type="button"
+              className="underline underline-offset-2 hover:no-underline"
+              onClick={() => {
+                // The dialog covers the line it is about to show.
+                onOpenChange(false)
+                onJumpToAudioLine(unvalidatedAudioLines[0])
+              }}
+            >
+              {t("importExport.dialog.audioUnvalidatedJump")}
+            </button>
+          </>
+        )}
+      </p>
+    )
+  }
+
+  /**
    * Who is recorded and who is not. Lives beside whichever control is about to
    * export audio: inside the Audio card for a dubbing file, under the format
    * list everywhere else.
@@ -1936,7 +2030,7 @@ export function ExportDialog({
           const unrecorded = preview.filter((p) => p.clipCount === 0)
           const untimedTotal = preview.reduce((n, p) => n + p.untimedCount, 0)
           return (
-          <div className="flex flex-col gap-1 text-xs">
+          <div className="flex flex-col gap-1 text-xs" data-testid="export-character-preview">
             <p className="font-medium text-muted-foreground text-[10px]">{t("importExport.dialog.characterPreviewHeading")}</p>
             {preview.length === 0 ? (
               <p className="text-muted-foreground">{t("importExport.dialog.noCharactersInFile")}</p>
@@ -2198,6 +2292,7 @@ export function ExportDialog({
               </RadioGroup>
               {/* The preview belongs WITH the button that acts on it. */}
               {audioMode === "audio-chapter" ? renderChapterPreview() : renderCharacterPreview()}
+              {renderUnvalidatedAudioNote()}
               <Button
                 size="lg"
                 className="w-full justify-center"
@@ -2665,6 +2760,11 @@ export function ExportDialog({
           && effectiveScope === "file" && renderCharacterPreview()}
         {!isDubbingFile && format === "audio-chapter"
           && effectiveScope === "file" && renderChapterPreview()}
+        {/* AQU-965: the same warning on the format-list side — a scripture
+            file's chapter stitch has no Audio card to carry it. */}
+        {!isDubbingFile
+          && (format === "audio-by-character" || format === "audio-by-line" || format === "audio-chapter")
+          && effectiveScope === "file" && renderUnvalidatedAudioNote()}
 
         {/* Lossy warning banner */}
         {isLossy && (

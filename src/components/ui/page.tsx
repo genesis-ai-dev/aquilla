@@ -315,8 +315,12 @@ function SettingsRow({
       </div>
     )
   }
+  // AQU-1768: the control sits at the top, level with the label, not centred.
+  // A description can grow while the page is open (a "N projects set their
+  // own setting" list opening under it), and a centred control slid down to
+  // the new middle each time.
   return (
-    <div className={cn("flex items-center justify-between gap-4 px-4 py-3", className)}>
+    <div className={cn("flex items-start justify-between gap-4 px-4 py-3", className)}>
       <div className="min-w-0 space-y-1">
         <p className="text-sm font-medium text-foreground">{label}</p>
         {description ? (

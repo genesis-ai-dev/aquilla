@@ -17,6 +17,7 @@ import type { TranslationBrief } from "@/lib/brief/types"
 import type { InheritedFromLink } from "@/lib/sync/inherited-settings"
 import type { DraftContextSettings } from "@/lib/completion/draft-context"
 import type { DirectionMode } from "@/lib/text-direction"
+import type { MediaDefaults } from "../../../db/shared/media-setting-defaults"
 
 /** Initial server version for projects with no settings row. */
 export const PROJECT_SETTINGS_VERSION_INITIAL = 0
@@ -508,6 +509,12 @@ export interface ProjectSettingsResponse {
   orgValidationCount?: number | null
   orgValidationCountAudio?: number | null
   /**
+   * AQU-1768: the org's media defaults (valid values only; empty when it set
+   * none). A project with no value of its own for one of these keys follows
+   * the org's; the server gates resolve the same way.
+   */
+  orgMediaDefaults?: MediaDefaults
+  /**
    * Whether the org lets bulk text validation take untouched AI drafts. On
    * this response for the same reason as the line above, and because a project
    * member outside the org cannot read the org's settings at all. Null when
@@ -545,6 +552,12 @@ export interface ProjectLaneView {
   legacyTag: string | null
   position: number
   archivedAt: string | null
+  /**
+   * AQU-1954: does every file owe audio in this language? Off, a file counts
+   * this language's audio only once it has a recording in it. Absent from a
+   * server that predates migration 0173, which reads as off.
+   */
+  recordsAudio?: boolean
 }
 
 export type PatchResult =
@@ -675,6 +688,31 @@ export async function createProjectLane(
   if (!res.ok) return { kind: "error", message: `create failed (${res.status})` }
   const body = (await res.json()) as { lane: ProjectLaneView }
   return { kind: "ok", lane: body.lane }
+}
+
+/** AQU-1954: POST /api/v2/projects/:id/lanes/:laneId/records-audio. */
+export async function setProjectLaneRecordsAudio(
+  jwt: string,
+  projectId: string,
+  laneId: string,
+  recordsAudio: boolean,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<{ kind: "ok" } | { kind: "error"; message: string }> {
+  let res: Response
+  try {
+    res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/lanes/${encodeURIComponent(laneId)}/records-audio`,
+      {
+        method: "POST",
+        headers: authHeaders(jwt),
+        body: JSON.stringify({ recordsAudio }),
+      },
+    )
+  } catch (e) {
+    return { kind: "error", message: e instanceof Error ? e.message : String(e) }
+  }
+  if (!res.ok) return { kind: "error", message: `save failed (${res.status})` }
+  return { kind: "ok" }
 }
 
 /** POST /api/v2/projects/:id/lanes/:laneId/archive. */

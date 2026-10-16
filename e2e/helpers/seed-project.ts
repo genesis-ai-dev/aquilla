@@ -38,7 +38,7 @@ import {
 } from "../../src/lib/parsers/helloao"
 import { aquillaImportMetadata, normalizeTranslatableStrings } from "../../src/lib/import/normalized-manifest"
 import { readPersistedSession } from "./auth-state"
-import { createProjectServerSide, setProjectLanguagePair, updateProjectSettings } from "./frontier-api"
+import { createProjectServerSide, readProjectLanes, setProjectLanguagePair, updateProjectSettings } from "./frontier-api"
 import { postIdempotentJson } from "./idempotent-request"
 import { Workspace } from "./page-objects/Workspace"
 
@@ -459,6 +459,44 @@ export async function readCellHistory(
   const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
   if (!r.ok) throw new Error(`cell history read failed: HTTP ${r.status} — ${await r.text()}`)
   return ((await r.json()) as { events: CellHistoryEventRow[] }).events
+}
+
+/** Commit one target value on the project's target lane through `POST
+ * /events` — the editor's own write path — so a cell has server-side history
+ * (and nothing in the browser's outbox) before a spec opens it. */
+export async function commitTargetServerSide(
+  jwt: string,
+  seeded: Pick<SeededProject, "projectId" | "fileId">,
+  cellId: string,
+  value: string,
+  author: "alice" | "bob" | "carol",
+): Promise<void> {
+  const lane = (await readProjectLanes(jwt, seeded.projectId))
+    .find((l) => l.role === "target" && !l.archivedAt)
+  if (!lane) throw new Error("seeded project has no target lane")
+  const token = await mintSyncToken(jwt, seeded.projectId, seeded.fileId)
+  const event = {
+    schemaVersion: 1,
+    id: randomUUID(),
+    projectId: seeded.projectId,
+    fileId: seeded.fileId,
+    cellId,
+    author,
+    parentId: null,
+    kind: "target.cell.commit",
+    payload: { value, laneId: lane.id },
+    clientTs: Date.now(),
+  }
+  const r = await fetch(`${SYNC_BASE}/events`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ events: [event] }),
+  })
+  if (!r.ok) throw new Error(`target commit failed: HTTP ${r.status} — ${await r.text()}`)
+  const body = (await r.json()) as { accepted?: unknown[]; rejected?: unknown[] }
+  if ((body.rejected ?? []).length > 0 || (body.accepted ?? []).length !== 1) {
+    throw new Error(`target commit was not accepted: ${JSON.stringify(body).slice(0, 500)}`)
+  }
 }
 
 /** Navigate an authed page straight into the seeded file's editor and wait

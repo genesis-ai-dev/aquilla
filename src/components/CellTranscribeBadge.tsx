@@ -98,6 +98,17 @@ export function CellTranscribeBadge({ audioId, hasTimings: _hasTimings, onJumpTo
     )
   }
 
+  if (status.kind === "transcribing" && status.waiting === "model") {
+    return (
+      <AppTooltip content={t("workspace.transcribeBadge.waitingForModelTooltip")}>
+        <Badge variant="secondary" className={cn(PILL, "text-amber-700 dark:text-amber-300")}>
+          <Spinner className="size-2.5" />
+          <span>{t("workspace.transcribeBadge.waitingForModelPill")}</span>
+        </Badge>
+      </AppTooltip>
+    )
+  }
+
   if (status.kind === "transcribing") {
     return (
       <AppTooltip content={t("workspace.transcribeBadge.transcribingTooltip")}>

@@ -26,6 +26,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
   setTranscriptionProvider, useTranscriptionProvider,
 } from "@/lib/audio/transcription-preference"
+import { TranscriptionModelPicker } from "./TranscriptionModelPicker"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 interface ModelMeta {
@@ -94,6 +95,7 @@ export function LocalModelsSection() {
               </span>
             </label>
           ))}
+          {provider === "hosted" && <TranscriptionModelPicker />}
         </fieldset>
       </SettingsGroup>
       <SettingsGroup label={t("projectSettings.localModels.onDeviceLabel")}>

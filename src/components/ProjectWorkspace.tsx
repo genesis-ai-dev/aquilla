@@ -10783,6 +10783,7 @@ export function ProjectWorkspace() {
           cells,
           projectId: project.id,
           session: frontierSession ?? null,
+          orgId: project.orgId,
           // AQU-646: language follows the audio — media segments are source
           // speech, recorded takes voice the target text (per-cell in the batch).
           sourceLanguage: activeSourceLanguage,
@@ -11457,6 +11458,7 @@ export function ProjectWorkspace() {
           cells,
           projectId: project.id,
           session: frontierSession ?? null,
+          orgId: project.orgId,
           sourceLanguage: activeSourceLanguage,
           targetLanguage: activeLaneTargetLanguage,
           // AQU-1978: each take's timings are written in this lane.

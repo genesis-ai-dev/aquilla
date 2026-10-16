@@ -113,6 +113,10 @@ export async function runBatchJobs<T>(
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { transcribeCell } from "./transcribe"
+import { usesHostedTranscription } from "./transcription-preference"
+import { getTranscriptionModel } from "./transcription-model"
+import { batchAudioSeconds, zeroShotBatchCostLine } from "./zero-shot-batch"
+import { confirmZeroShotBatch } from "./omni-warmup-toast"
 import { audioIdSeededWith } from "./upload"
 import { getTranscribeStatus } from "./transcribe-status"
 import { generateCellVoice } from "./voice-generate-helpers"
@@ -177,6 +181,11 @@ export interface TranscribeAllArgs {
    * transcribing, so a caller can tell "no work" from "no progress yet".
    */
   onProgress?: (done: number, total: number) => void
+  /** The project's org, so a zero-shot batch can show its share of the
+   *  week's remaining credits. Without it the confirm shows credits. */
+  orgId?: number | null
+  /** @internal — test seam for the zero-shot confirm toast. */
+  confirmZeroShot?: typeof confirmZeroShotBatch
 }
 
 /** AQU-928: is there any audio on this cell to run ASR over? The first gate of
@@ -231,6 +240,18 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
 
   if (targets.length === 0) return
 
+  // A zero-shot batch shows its cost first; a single run never does.
+  let forceAutoModel = false
+  if (session && usesHostedTranscription(session, projectId)
+    && getTranscriptionModel(session.username) === "zs") {
+    const costLine = await zeroShotBatchCostLine({
+      jwt: session.jwt, projectId, orgId: args.orgId, audioSec: batchAudioSeconds(targets),
+    })
+    const choice = await (args.confirmZeroShot ?? confirmZeroShotBatch)({ count: targets.length, costLine })
+    if (choice === "cancel") return
+    forceAutoModel = choice === "auto"
+  }
+
   _transcribeCancelFlag = false
   args.onProgress?.(0, targets.length)
   let completed = 0
@@ -247,6 +268,7 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
         // cells) voices the target text.
         language: isSourceSegmentSelected(cell) ? (args.sourceLanguage ?? targetLanguage) : targetLanguage,
         ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+        ...(forceAutoModel ? { forceAutoModel } : {}),
       }),
     {
       kind: "transcribe",

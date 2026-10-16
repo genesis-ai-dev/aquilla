@@ -19,7 +19,7 @@ import { makeAudioSyncTokenFetcher } from "./sync-token-fetcher"
 import { keepSpans, resolvePcmWindow, type KeepSpan, type PcmTrimWindow } from "./pcm-window"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { t } from "@/lib/i18n/standalone"
-import { transcribeHostedPcm } from "./transcribe-hosted"
+import { transcribeHosted, type ZeroShotCellContext } from "./transcribe-hosted"
 import type {
   ResultMessage,
   ErrorMessage,
@@ -46,6 +46,11 @@ export interface TranscriptionOptions {
   session?: FrontierSession | null
   projectId?: string
   language?: string
+  /** The lane's raw language tag, for the hosted path (the server routes by
+   *  it). `language` is the Whisper-mapped code the local worker needs. */
+  languageTag?: string
+  /** A take on a cell: what a zero-shot hosted run draws its examples from. */
+  zeroShot?: ZeroShotCellContext
   model?: string
   onProgress?: (p: TranscriptionProgress) => void
   /** AQU-646: transcribe only this window of the clip (shared imported clip →
@@ -198,7 +203,13 @@ export async function transcribeAudio(
 ): Promise<TranscriptionResult> {
   if (usesHostedTranscription(opts.session, opts.projectId)) {
     const kept = keepSpans(await audioBytesToWhisperPcm(bytes, opts.trim), opts.keep, WHISPER_SAMPLE_RATE)
-    return onWindowClock(await transcribeHostedPcm(kept.pcm, opts.session!.jwt, opts.projectId!, opts.language), kept.toWindowSec)
+    return onWindowClock(await transcribeHosted(kept.pcm, {
+      jwt: opts.session!.jwt,
+      projectId: opts.projectId!,
+      username: opts.session!.username,
+      language: opts.languageTag ?? opts.language,
+      zeroShot: opts.zeroShot,
+    }), kept.toWindowSec)
   }
   const consented = await requestAiModelConsent(WHISPER_MODEL, { askAgain: opts.askAgain })
   if (!consented) throw new AiModelConsentDeniedError(WHISPER_MODEL.id)
@@ -315,6 +326,9 @@ export interface TranscribeCellArgs {
   targetLang?: string
   /** Set by the Transcribe button so a prior Cancel shows the prompt again. */
   askAgain?: boolean
+  /** The batch's "Use automatic": this run skips zero-shot whatever the
+   *  account chose. */
+  forceAutoModel?: boolean
   /**
    * AQU-1767 (Sam, 2026-10-14): the live pieces of a SPLIT take, in clip order.
    * The take is transcribed whole — every piece, together, and nothing a
@@ -450,6 +464,20 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
       session,
       projectId,
       language: whisperLanguageFromTag(language) ?? undefined,
+      // Omnilingual spec §4: the hosted path sends the raw tag and the server
+      // decides between Whisper and Omnilingual.
+      ...(language ? { languageTag: language } : {}),
+      // Zero-shot learns from the lane's takes, so only a take can use it;
+      // the shared source clip is no lane's speech.
+      ...(!isSourceSegment && session && !args.forceAutoModel ? {
+        zeroShot: {
+          cellId: cell.id,
+          fileId: cell.fileId,
+          sourceText: cell.original,
+          ...(targetLang ? { lane: targetLang } : {}),
+          getSyncToken: makeAudioSyncTokenFetcher(() => session),
+        },
+      } : {}),
       askAgain,
       trim,
       ...(split ? { keep: split.keep } : {}),

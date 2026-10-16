@@ -26,6 +26,12 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
   setTranscriptionProvider, useTranscriptionProvider,
 } from "@/lib/audio/transcription-preference"
+import {
+  setTranscriptionModel, useTranscriptionModel, type TranscriptionModel,
+} from "@/lib/audio/transcription-model"
+import { warmZeroShot } from "@/lib/audio/omni-warmup"
+import { useActiveOrgOptional } from "@/context/OrgContext"
+import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 interface ModelMeta {
@@ -94,6 +100,7 @@ export function LocalModelsSection() {
               </span>
             </label>
           ))}
+          {provider === "hosted" && <HostedModelChoice />}
         </fieldset>
       </SettingsGroup>
       <SettingsGroup label={t("projectSettings.localModels.onDeviceLabel")}>
@@ -102,6 +109,54 @@ export function LocalModelsSection() {
         ))}
       </SettingsGroup>
     </div>
+  )
+}
+
+/** Omnilingual ASR: Automatic, or the opt-in zero-shot model when the org allows it. */
+function HostedModelChoice() {
+  const t = useT()
+  const { session } = useFrontierSession()
+  const org = useActiveOrgOptional()
+  const { settings } = useOrgSettings(org?.activeOrgId, org?.activeOrg?.role?.level)
+  const zeroShotAllowed = settings.transcription?.zeroShotEnabled !== false
+  const stored = useTranscriptionModel(session?.username)
+  const model: TranscriptionModel = zeroShotAllowed ? stored : "auto"
+  const options: TranscriptionModel[] = zeroShotAllowed ? ["auto", "zs"] : ["auto"]
+
+  const choose = (value: TranscriptionModel) => {
+    setTranscriptionModel(session?.username, value)
+    // Start the slow model now, so the first run does not wait 1–3 minutes.
+    if (value === "zs" && session?.jwt) void warmZeroShot(session.jwt)
+  }
+
+  return (
+    <fieldset className="ms-7 space-y-3 border-s ps-4">
+      <legend className="mb-2 text-xs font-medium text-muted-foreground">
+        {t("settings.transcription.model.legend")}
+      </legend>
+      {options.map(value => (
+        <label key={value} className="flex items-start gap-3 text-sm">
+          <input
+            type="radio"
+            name="transcription-model"
+            value={value}
+            checked={model === value}
+            onChange={() => choose(value)}
+            className="mt-1 accent-primary"
+          />
+          <span>
+            <span className="font-medium">
+              {t(value === "zs" ? "settings.transcription.model.zeroShot" : "settings.transcription.model.auto")}
+            </span>
+            <span className="mt-1 block text-xs text-muted-foreground">
+              {t(value === "zs"
+                ? "settings.transcription.model.zeroShotDescription"
+                : "settings.transcription.model.autoDescription")}
+            </span>
+          </span>
+        </label>
+      ))}
+    </fieldset>
   )
 }
 

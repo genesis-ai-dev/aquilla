@@ -1,138 +1,222 @@
-# Omnilingual ASR transcription (CTC auto + zero-shot opt-in)
+# Transcription models: Omnilingual ASR (CTC + zero-shot), Qwen3-ASR, model picker
 
 Status: design, 2026-10-16. Branch `feat/omnilingual-asr` (off origin/dev).
+This spec merges two drafts written the same day. The first is this file's
+earlier version, which covered Modal, zero-shot, billing and warm-up. The second
+is `2026-10-16-omnilingual-asr-design.md`, which covered the model picker, the
+language catalogs and Qwen3-ASR; that file is now deleted. Where the two drafts
+named the same thing differently, this spec keeps the names that the
+in-progress server and client branches already use.
 
 ## Goal
 
-Transcribe low-resource languages that Whisper cannot handle. We do this with Meta's
-[Omnilingual ASR](https://github.com/facebookresearch/omnilingual-asr) (Apache 2.0),
-self-hosted on Modal. The service has two models:
+Hosted transcription today always calls OpenRouter `openai/whisper-1`. Whisper
+covers 99 languages, so many of our projects get auto-detect and poor output.
+This work adds three models and a picker that tells the user which model supports
+the project's language.
 
-- **Omnilingual CTC 1B.** It runs automatically when Whisper does not support the
-  audio's language. Whisper (OpenRouter `whisper-1`) still runs for every language it
-  supports.
-- **Omnilingual LLM 7B Zero-Shot (ZS).** A user opts into it in their Preferences. It
-  learns the language from up to 10 (audio, transcript) pairs taken from the same
-  project. This model matters most for languages that no ASR model has seen.
+| Model id (ours) | Backend | Languages | Word timings | Cost basis |
+|---|---|---|---|---|
+| `whisper` | OpenRouter `openai/whisper-1` (unchanged) | 99 | provider | provider `usage.cost` |
+| `qwen3-asr` | OpenRouter `qwen/qwen3-asr-1.7b` | 30 + 22 Chinese dialects | provider (verified 2026-10-16) | provider `usage.cost` |
+| `omni-ctc` | Modal, `omniASR_CTC_1B` (v2 card if present) | 1,600+ | ours (CTC forced alignment) | metered GPU-seconds |
+| `omni-zs` | Modal, `omniASR_LLM_7B_ZS` + project examples | any (few-shot) | ours (CTC forced alignment) | metered GPU-seconds |
 
 ## Decisions (from Ryder, 2026-10-16)
 
 | Topic | Decision |
 |---|---|
-| Model selection | **Automatic by language.** Whisper when Whisper supports the language, otherwise Omnilingual CTC. ZS is an explicit opt-in per user. |
-| ZS examples | **Automatic from the project.** Prefer examples whose *source text* is similar to the cell being transcribed. Otherwise use any valid examples. Skip ultra-short clips. |
-| Org gate | **Org admins** can turn ZS off. The setting is **on by default**, and each user must still pick ZS. |
-| Pricing | **Metered GPU time.** Cost = GPU-seconds × GPU rate × amortization factor, then the usual credit markup. **No price before a single run.** Before a **batch** run, show the % of remaining credits the batch will use. |
-| Cold start | ZS starts slowly. A toast with a progress indicator polls the service's status until the model is ready, then the run starts. |
+| Model selection | **Automatic by language** is the default; the server picks the model. Users can override the choice in Preferences with the picker. Automatic never picks ZS. |
+| Picker | A catalog shows, for each model, whether it supports the project language, plus a searchable list of all the languages it supports. |
+| ZS examples | **Automatic from the project.** Examples whose *source text* is similar to the cell's source text rank first. Clips under 2 s are excluded. |
+| Org gate | **Org admins** can turn ZS off. It is **on by default**, and each user must still pick it. |
+| Pricing | **Metered GPU time**: GPU-seconds × GPU rate × amortization, then the usual 4× credit markup. **No price is shown before a single run.** A **batch** run first shows the % of this week's remaining credits it will use. |
+| Cold start | ZS starts slowly. A toast with a progress indicator polls the status endpoint until the model is ready, and then the queued work continues. |
+| Agents | External agents can trigger transcription, including ZS, through the Agent API (REST) and the MCP server (§7). |
 
-## Facts from the upstream repo
+## Upstream facts (checked 2026-10-16)
 
-- CTC 1B: about 3 GiB of VRAM and 3.7 GiB of weights. RTF is 0.002 on an A100 (RTF = processing time ÷ audio length).
-- LLM 7B ZS: about 20 GiB of VRAM and 30 GiB of weights. RTF is 0.194 on an A100.
-- Input must be **shorter than 40 s**. ZS was trained on context clips of up to 30 s.
-- ZS API: `pipeline.transcribe_with_context(audio, context_examples=[[ContextExample(path, text), …]], batch_size=1)`. It takes 1–10 examples. The model has exactly 10 slots: it duplicates examples when there are fewer than 10 and drops examples beyond 10.
-- Language codes have the form `{iso639-3}_{Script}`, for example `eng_Latn`. CTC has no language conditioning. The LLM models accept an optional `lang`.
-- **The pipeline does not output timestamps.** Aquilla needs word timings (`chunks`), so the service must align the words itself (see below).
+- **Clip length.** Omnilingual CTC and LLM accept clips **under 40 s** only. ZS was trained on context clips of ≤30 s.
+- **CTC 1B.** About 3 GiB of VRAM. Real-time factor (RTF) 0.002 on an A100.
+- **ZS 7B.** About 20 GiB of VRAM and 30 GiB of weights. RTF 0.194 on an A100.
+- **ZS context.** `pipeline.transcribe_with_context(audio, context_examples=[[ContextExample(audio, text), …]])` takes 1–10 examples. It repeats the examples to fill 10 slots when there are fewer, and crops anything beyond 10.
+- **Timestamps.** Omnilingual returns plain text with no timestamps. Its tokenizer is a **char tokenizer** (`omniASR_tokenizer_v1`, `char_tokenizer`), so CTC forced alignment over characters is viable.
+- **Qwen3-ASR on OpenRouter.** It accepts our current request shape and returns `words[]` and `usage.cost`. It costs about $0.00045/min, against $0.006/min for whisper-1.
+- **Licenses.** Omnilingual and Qwen3-ASR are both Apache 2.0.
 
-## Architecture
+## 1. Automatic routing (server, `pickAsrModel(languageTag)`)
 
-```
-client (transcribe-hosted.ts)
-  ├─ ZS selected? → POST /api/v1/audio/transcriptions/warm + poll …/status  (toast)
-  ├─ ZS selected? → GET sync-worker /api/v1/projects/:id/transcription-examples   (pick ≤10 pairs)
-  └─ POST auth-worker /api/v1/audio/transcriptions { model, language(BCP-47), examples? }
-        ├─ Whisper-supported + model=auto → OpenRouter whisper-1   (unchanged)
-        └─ otherwise → Modal omnilingual-asr /transcribe  (shared secret)
-               returns { text, words[{text,start,end}], gpuSeconds, gpu }
-        billing: rawCents = gpuSeconds × rate[gpu] × OMNI_ASR_AMORTIZATION → reserve/settle
-```
+1. If the tag is a Chinese variety (`zh*`, `yue`, `cmn`, `wuu`, `nan`, `hak`, …) or is in the Qwen-only set, use `qwen3-asr`.
+2. If the tag is in the Whisper set, use `whisper`. Existing users see no change.
+3. If the tag is in the Omnilingual set, use `omni-ctc`.
+4. If the tag is unknown or empty, use `whisper` with auto-detect, which is today's behavior.
 
-### 1. Modal service: `infra/modal/omnilingual_asr.py`
+**Open question (Ryder):** Qwen3-ASR is about 13× cheaper than Whisper. Should it
+replace Whisper in step 2 for its 30 languages? Until Ryder answers, Whisper stays.
 
-The structure, decorators, pins and secrets follow `diarization.py`.
+## 2. Language catalogs (picker)
 
-- `OmniCTC` class, **L4**. It loads `omniASR_CTC_1B`. Weights are baked into the image at build time. `scaledown_window=300`.
-- `OmniZS` class, **L40S 48 GB** to start. If benchmarks show it doesn't fit, switch to an A100-80GB. It loads `omniASR_LLM_7B_ZS`, with weights in a `modal.Volume` because a 30 GB image layer is too large. `scaledown_window=600`.
-- Both classes also load **CTC 300M as the aligner**. It runs CTC forced alignment (`torchaudio.functional.forced_align`) of the hypothesis text against the audio's CTC emissions. The aligner produces word start/end times. If forced alignment fails for a script, the fallback spreads timings evenly by character within the segment. The response then carries `timingsApproximate: true`.
-- Web endpoints (FastAPI). Every endpoint checks `X-Omni-Secret` with a constant-time compare.
-  - `POST /transcribe`: body `{ model: "ctc"|"zs", audio: <base64 16 kHz mono WAV, <40 s>, lang?: "xxx_Scrp", examples?: [{ url, text }] }`. The service fetches each example URL (presigned R2 URL, host allow-listed as in diarization), resamples it, and trims it to 30 s. Response: `{ text, words, gpuSeconds, gpu, timingsApproximate }`. `gpuSeconds` is the wall time inside the GPU method.
-  - `POST /warm {model}`: `.spawn()`s a no-op on the class so a container starts. Returns immediately.
-  - `GET /status?model=zs`: returns `{ state: "cold"|"starting"|"ready" }`. This reads a `modal.Dict` that `@modal.enter` sets (`starting` → `ready` with a heartbeat timestamp) and `@modal.exit` clears. Any state whose heartbeat is older than 90 s counts as `cold`.
-- Secrets: `aquilla-omni-asr` (`OMNI_SHARED_SECRET`). Deploy is manual (`modal deploy`), in the genesis-ai-dev workspace.
+`src/lib/audio/asr-catalog/` ships one static list per model:
 
-### 2. Example selection: sync-worker `GET /api/v1/projects/:projectId/transcription-examples`
+- **`whisper.ts`** reuses `WHISPER_TWO_LETTER` and `THREE_TO_TWO` from `language.ts`.
+- **`qwen3-asr.ts`** lists the 30 ISO codes plus the 22 named dialects. The dialects are display-only: OpenRouter has no dialect parameter, so they are recognized under `zh`/`yue`.
+- **`omnilingual.json`** holds the `xxx_Script` codes from upstream `omnilingual_asr/models/wav2vec2_llama/lang_ids.py`. It is lazy-loaded so it stays out of the main bundle.
 
-The query takes `lane` (target lane tag), `sourceText?`, `excludeCellId?` and `limit` (default 10, max 10). The route sits behind the normal project read wall (role ≥ contributor).
+Each model gets one row in the picker:
 
-- Candidates come from `cell_audio a` (`deleted=0`, `selected=1`, same lane resolution as `cell-audio-read-route.ts`) joined to the target `cells c` with non-empty `value`.
-  - The effective duration is `duration_ms` minus trims. Only **2 s ≤ duration ≤ 30 s** qualifies; clips under 2 s teach the model almost nothing.
-  - Rank 0: validated take or validated cell (`validator_count > 0` or `c.validated`).
-- **Similarity.** When `sourceText` is given, the route scores each candidate by token overlap with the candidate's source cell text: lower-cased word sets, Jaccard similarity. The score is computed in the Worker over at most the 500 newest qualifying candidates. Order: validated first, then similarity descending, then a duration near 8–15 s, then newest. With no `sourceText`, the order is validated, then duration, then newest.
-- Response: `[{ cellId, fileId, text, durationMs, audioUrl }]`. `audioUrl` is a short-lived (10 min) presigned R2 GET URL.
-- With zero results, the client blocks ZS for that run and falls back to the automatic model. A toast tells the user that ZS needs at least one recorded and transcribed cell in this language.
+- The row shows **"Supports <project language>" ✓/✗** and a "See all N languages" disclosure with a search box.
+- The `omni-zs` row shows "Any language — learns from your project's recorded takes" and the number of usable examples the project has. That number comes from the examples route with `limit=10`.
 
-### 3. auth-worker route `routes/transcription.ts`
+Shared mapping helpers: `toWhisperCode`, `toQwenCode` and `toOmniCode`. They live in one
+module that the client and the auth-worker both import, or that is duplicated with a parity test.
 
-- Schema: add `model?: "auto" | "zs"` (default `auto`). `language` is loosened to a BCP-47 tag (`^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$`). Add `examples?: [{ url, text }]` (≤10, URLs must be our R2 presign host).
-- Routing:
-  - `auto`: when `whisperLanguageFromTag(tag)` is defined, use the existing Whisper path, **byte-for-byte unchanged**. Otherwise call Modal `ctc` with `lang` from `omniLanguageFromTag(tag)`.
-  - `zs`: org gate (below), at least one example required, then call Modal `zs`.
-- The audio cap stays at 60 s per request. The **client** cuts audio into windows of 30 s or less for Omnilingual (`windowSamples` depends on the route). The server rejects Omnilingual audio of 40 s or longer.
-- Org gate: read `org_settings.settings.transcription?.zeroShotEnabled` for the project's org. If it is `false`, return 403 `zero_shot_disabled`. Absent means enabled.
-- Billing, for Omnilingual only:
-  - Bound = `ceil(audioSec × MAX_RTF[model] + 30) × rate[gpu] × amort`.
-  - `reserveWorkspaceUsage` with that bound.
-  - After the call: `rawCents = gpuSeconds × rate[gpu] × OMNI_ASR_AMORTIZATION`. Settle with this through `settleWorkspaceUsage`, or `recordCredit` in legacy mode.
-  - The rates live in `db/shared/billing-cost.ts`-style constants (`OMNI_GPU_CENTS_PER_SEC = { L4: 0.0222, L40S: 0.0542, A100_80: 0.0694 }`). They must be checked against Modal pricing at deploy time. `OMNI_ASR_AMORTIZATION` is an env var with default 1.5; it covers idle scaledown time and cold starts.
-  - The existing ×4 credit markup applies on top.
-- New thin proxies `POST /api/v1/audio/transcriptions/warm` and `GET …/status?model=zs` check auth, then forward to Modal. Warming is free, and only a project member can trigger it.
+- `toOmniCode` maps ISO 639-1 to 639-3.
+- It then takes the script from the tag's script subtag.
+- Without a script subtag, it uses the first upstream code for that language.
 
-### 4. Language mapping: `src/lib/audio/omni-language.ts` (also imported by the worker, or duplicated)
+## 3. Modal service `infra/modal/omni_asr.py`
 
-`omniLanguageFromTag(bcp47)` maps the tag to `xxx_Scrp`:
+The service follows the `diarization.py` conventions: a shared secret, and a URL allow-list for every fetched URL.
 
-- An ISO 639-1 code becomes 639-3 (extend the existing map in `language.ts`).
-- The script comes from an explicit subtag, or a small default-script table. When the script is unknown, the function returns `undefined` and the request goes to CTC without `lang`.
+**Classes**
 
-`whisperLanguageFromTag` itself does not change. The client now sends the **raw tag** to the server, and the server makes the decision.
+- **`OmniCTC`** runs on an L4 with CTC 1B. `scaledown_window` is 300 s.
+- **`OmniZS`** runs on an L40S 48 GB, or an A100-80GB if the spike shows that is needed. It loads ZS 7B. `scaledown_window` is 600 s.
+- **Weights** for both classes live in the `aquilla-omni-asr-weights` Volume. The 30 GB ZS checkpoint is too big for an image layer.
+- **Word timings.** Both classes also load **CTC 300M as the aligner**. It runs a self-contained CTC Viterbi alignment (`_ctc_viterbi`) of the hypothesis text against the CTC emissions to produce word timings. We do not use `torchaudio.functional.forced_align`, which newer torchaudio drops. If alignment fails, the service spreads the timings proportionally and returns `timingsApproximate: true`.
 
-### 5. Client
+**Endpoints.** Every endpoint is FastAPI and authenticated with `X-Omni-Secret`.
 
-- **Preferences → Transcription** (`LocalModelsSection.tsx`): when the provider is Hosted, show a model radio. "Automatic (Whisper, or Omnilingual for languages Whisper doesn't know)" is the default. "Omnilingual Zero-Shot (learns from this project's recordings; slower; uses more credits)" is hidden when the active org has turned it off. The choice is stored per user in localStorage, like the provider (`aq.transcription-model.v1.<username>`). Selecting ZS fires `/warm`.
-- **Org settings**: org admins get a toggle "Allow zero-shot transcription" (`OrgWideSettings.transcription.zeroShotEnabled`, default true). The permission policy key is owner/maintainer.
-- **Warm-up toast** (`src/lib/audio/omni-warmup.ts` + component). When a ZS run starts and `/status` is not `ready`, the client fires `/warm` and shows a persistent toast. The toast has `IntelligentProgress` and the text "Starting the zero-shot model, about 1–3 minutes". It polls `/status` every 4 s with a 6 min cap. When the status is `ready`, the toast closes and the queued transcription runs. If the cap is reached, the toast shows an error and offers Retry or Use automatic. All runs that are queued at once share a single warm-up.
-- **Batch** (`batch-audio.ts` / `BatchVoiceDialog`): with ZS selected, the dialog shows a confirm line before the run, for example "≈ 12% of this week's remaining credits".
-  - Estimate = total audio sec × `ZS_EST_GPU_SEC_PER_AUDIO_SEC` × rate × amort × markup.
-  - The client takes `ZS_EST_GPU_SEC_PER_AUDIO_SEC` from `/status`, so the server owns it.
-  - The remaining credits come from `GET /api/v1/usage/org/:orgId/credits` (`remaining`). When that endpoint returns 403, the dialog shows an absolute "≈ N credits" instead.
-- `transcribe-hosted.ts`: for Omnilingual routes, use a 30 s window instead of 60 s. Pass `model`, the raw `language` tag and `examples`. Fetch examples once per cell, keyed by `sourceText` = the cell's source text.
+- **`POST /transcribe`**
+  - Request: `{ model: "ctc"|"zs", audio: <base64 16 kHz mono WAV, <40 s>, lang?: "xxx_Scrp", examples?: [{ url, text }] }`.
+  - Response: `{ text, words:[{text,start,end}], gpuSeconds, gpu, timingsApproximate }`.
+  - If the ZS container is cold, it returns `{ warming: true }` immediately instead of blocking.
+- **`POST /warm {model}`** `.spawn()`s a no-op so that a container starts, and returns immediately.
+- **`GET /status?model=`** returns `{ state: "cold"|"starting"|"ready", estGpuSecPerAudioSec }`.
+  - The state comes from a `modal.Dict` heartbeat. `@modal.enter` sets `starting` and then `ready`, every call refreshes the heartbeat, and `@modal.exit` clears it.
+  - A heartbeat older than the ZS scaledown window plus 60 s (660 s) counts as `cold`. A shorter window would report an idle but still-warm container as cold.
 
-## Risks / unknowns to retire first
+**Secrets and deploy**
 
-1. **Forced alignment with the Omnilingual CTC vocabulary.** We need to confirm that the tokenizer is character-level enough for `forced_align`, by spiking it on the Modal box. The fallback is approximate timings. Prior art: `fia_align` (MMS_FA) in the sibling fia repo.
-2. **ZS memory with 10 × 30 s context.** Check whether it fits on an L40S. A benchmark run decides between L40S and A100-80GB. It also measures the real GPU-seconds per audio-second that feed `ZS_EST_GPU_SEC_PER_AUDIO_SEC`.
-3. **Cold start for 30 GB of weights from a Volume.** A cold start takes an estimated 1–3 min. Measure it and put the real number in the toast copy.
-4. **fairseq2 / torch pins on Modal.** The upstream repo does not pin versions. Expect a pinning pass like the pyannote one.
-5. **Preview limitation.** The client calls sync-worker (examples) and auth-worker (transcribe) separately, so preview deploys can test this path, because it doesn't cross the sync→auth seam. Modal calls from a preview need the secret set on the preview auth-worker.
+- Modal secret `aquilla-omni-asr` holds `OMNI_SHARED_SECRET`.
+- The auth-worker needs `OMNI_ASR_MODAL_URL` (a var) and `OMNI_SHARED_SECRET` (a secret).
 
-## Out of scope (this PR)
+## 4. ZS example selection (sync-worker)
 
-- On-device or Tauri Omnilingual (sherpa-onnx CTC 300M). That is a follow-up.
-- User-pinned example sets, and the "Unlimited" long-form variants.
-- Platform-admin feature-flag system (lives on unmerged `feat/dcs-package-flags`).
+`GET /api/v1/projects/:projectId/transcription-examples?lane=<tag>&cellId=<id>&sourceText=<optional override>&limit=10`
 
-## Verification
+The route sits behind the normal project read wall.
 
-- Modal: run `modal run` with a smoke script on a known-language clip (eng) and on a low-resource clip, for both CTC and ZS. Record the RTF, the cold-start time and the GPU used.
-- auth-worker unit tests:
-  - Whisper routing does not change for supported tags.
-  - Unsupported tags route to Modal CTC.
-  - ZS returns 403 when the org disables it.
-  - ZS returns 400 without examples.
-  - Billing settles `gpuSeconds × rate × amort` and never zero.
-- sync-worker tests: the examples route skips clips under 2 s and over 30 s, ranks validated and similar examples first, and enforces the read wall.
-- Client tests:
-  - Window size per route.
-  - The warm-up poller resolves when the state is ready and times out at the cap.
-  - The batch % estimate.
-- Live: transcribe a real low-resource-language take in the dev stack with ZS.
+**Candidates.** The route takes selected, non-deleted `cell_audio` takes on the lane (same lane resolution as
+`cell-audio-read-route.ts`) whose target cell has non-empty text. The effective duration (`duration_ms` minus trims) must be between **2 s and 30 s**. The requesting cell itself is excluded.
+
+**Ranking.** When the requesting cell (looked up by `cellId`) or the `sourceText` override has source text, the route ranks candidates by word overlap between their source text and that text, in this order:
+
+1. Token overlap (BM25 or Jaccard over lower-cased words; the implementation picks one, computed over at most the 500 newest candidates).
+2. Validation (`validator_count > 0` or a validated cell).
+3. Duration closest to 8–15 s.
+
+Without source text, the order is validation, then spread across files, then newest.
+
+**Response.** `[{ cellId, fileId, text, durationMs, audioUrl }]`. `audioUrl` is a presigned R2 URL that is valid for 10 minutes.
+
+The client calls this route and forwards the examples in the transcription request. The examples are the user's own project data and the user pays the credits, so the auth-worker does not choose the examples again. This also avoids the sync→auth hop, which previews cannot exercise.
+
+## 5. Route changes (`auth-worker/src/routes/transcription.ts`)
+
+**Request and response**
+
+- The request gains `model?: "auto"|"whisper"|"qwen3-asr"|"omni-ctc"|"omni-zs"` (default `auto`) and `examples?` (≤10, URLs on the R2 presign host only).
+- `language` widens from `^[a-z]{2,3}$` to a BCP-47 tag, and the server maps it for each model.
+- The response gains `model` (the model actually used) and `timingsApproximate`.
+
+**OpenRouter models.** `whisper` and `qwen3-asr` share today's path. Only the model string and the per-model price lookup change; `transcriptionCostBound` already reads the price catalog per model.
+
+**Omnilingual models**
+
+- **Length.** Audio of 40 s or longer is rejected with 400.
+- **ZS org gate.** If `org_settings.settings.transcription?.zeroShotEnabled === false`, the route returns 403 `zero_shot_disabled`. A missing setting counts as enabled.
+- **ZS examples.** ZS with no examples returns 400 `zs_no_examples`.
+- **Billing.** Reserve with the bound `ceil(audioSec × MAX_RTF[model] + examplesSec × k + 30) × rate × amort`. After the call, settle `rawCents = gpuSeconds × OMNI_GPU_CENTS_PER_SEC[gpu] × OMNI_ASR_AMORTIZATION`. The amortization is an env var with default 1.5. The normal 4× multiplier from `db/shared/billing-cost.ts` applies on top. A settlement must never be zero.
+- **Cold start.** If Modal answers `{warming:true}`, the route releases the reservation and returns 503 `asr_warming` with `Retry-After: 10`.
+
+**Warm-up proxies.** `POST /api/v1/audio/transcriptions/warm` and `GET …/status?model=` check auth and project membership, then forward to Modal.
+
+**Windowing.** The client chunks Omnilingual audio into **≤30 s windows**, splitting at the lowest-energy point near each boundary. Whisper and Qwen keep 60 s windows.
+
+## 6. Client
+
+- **Preference.** `aq.transcription-model.v1.<username>` holds the model choice, default `auto`. It sits next to the existing hosted/local provider key.
+- **Picker.** `LocalModelsSection.tsx` (Preferences) shows a radio list: Automatic, Whisper, Qwen3-ASR, Omnilingual, Omnilingual Zero-Shot. Each row shows its catalog entry from §2. The ZS row is hidden when the org has disabled ZS. Selecting ZS fires `/warm`.
+- **Org setting.** Org admins get a toggle, "Allow zero-shot transcription", stored as `OrgWideSettings.transcription.zeroShotEnabled`. A missing value means on.
+- **Warm-up.** `src/lib/audio/omni-warmup.ts` runs a single shared warm-up for all callers.
+  - When a ZS transcription starts and `/status` is not `ready`, or the route returns `asr_warming`, one persistent toast appears with `IntelligentProgress`: "Starting the zero-shot model — about 1–3 minutes".
+  - The toast polls `/status` every 4 s, with a 6-minute cap.
+  - When the status turns `ready`, the toast resolves and the queued cells run, each exactly once. Waiting cells show "Waiting for model" in `transcribe-status`.
+  - When the cap is reached, the toast shows an error with Retry and "Use automatic".
+- **No examples.** On `zs_no_examples`, or when the examples route returns zero results, a toast offers "Use Omnilingual standard instead".
+- **Batch estimate.** `BatchVoiceDialog` / batch-audio estimates the credits as total audio seconds × `estGpuSecPerAudioSec` (from `/status`) × rate × amortization × markup.
+  - The estimate is shown as a percentage of `remaining` from `GET /api/v1/usage/org/:orgId/credits`.
+  - That endpoint returns 403 for non-maintainers; in that case the dialog shows the absolute credit count instead.
+
+## 7. Agent API / MCP
+
+sync-worker's external surface (`/api/v1/external/*`, the MCP server, and the discovery doc) gains two tools:
+
+- **`transcribe_audio`.**
+  - Input: `(projectId, fileId, cellId)` or raw audio, plus `model` (same enum as §5), an optional `language`, and optional `exampleCellIds`. Without `exampleCellIds`, the tool picks examples automatically with the §4 ranking.
+  - Output: `{text, words, model, timingsApproximate, creditsCharged}`.
+  - The tool applies the same org gate, billing and windowing as §5. Agents get server-side windowing.
+  - The output is read-only. Writing timings back to a cell goes through the changeset/approval gate.
+  - Credentials are project-scoped PATs.
+- **`transcription_status`** lets an agent warm ZS and poll for readiness.
+
+docs/AGENT-API.md gets a worked ZS example for a low-resource language.
+
+**Preview caveat.** A preview sync-worker cannot call a preview auth-worker. If the agent tool calls across that seam, the Modal call and the billing move into a shared module that both workers use.
+
+## 8. Modal spike results (2026-10-16)
+
+All four risks are retired. Test audio: FLEURS Dholuo (`luo_Latn`) test clips, with 10 other Dholuo utterances as ZS examples. Plus one English `say` clip.
+
+| | CTC 1B (L4) | ZS 7B (L40S 48 GB) |
+|---|---|---|
+| Peak GPU memory | 2.7 GiB | 16.4 GiB with 10 examples (fits; no A100 needed) |
+| GPU-seconds, 10.6 s clip | 0.92 | 4.7 |
+| GPU-seconds, 20 s clip | — | 6.1 |
+| `estGpuSecPerAudioSec` (conservative) | 0.1 | 0.5 |
+| Model load, weights cached on the Volume | 23 s | 62 s (~113 s end-to-end cold start) |
+| First-ever load (downloads weights) | 165 s | 678 s (29 GB) |
+
+- **Quality (one clip).** Reference: "…malo 20 te mar pi ma pukore oko e-aoche…". CTC heard "maloe mar pima pukore". ZS heard "malo te mar pi mapukore". ZS was closer on every clip we checked.
+- **Alignment.** The char vocabulary works. `bos_idx = 0` is the CTC blank, and `pad = 1`, `eos = 2`. Real word timings come back with `timingsApproximate: false` for both models.
+- **Pins.** fairseq2n 0.6 pins torch 2.8.0, so torchaudio must also be 2.8.0 (an unpinned install pulls a CUDA 13 build). Use `pyarrow==21.0.0`, because 22+ needs numpy 2. `XDG_CACHE_HOME` must not point at the Volume: the Modal runtime writes there before the Volume mounts.
+- **The service file must not be called `omnilingual_asr.py`.** That name shadows the package, so it is `omni_asr.py`.
+- **HTTP path checked with `modal serve`:**
+  - A bad secret gets 401.
+  - A cold ZS container returns `{warming:true}` and spawns a warm-up, and `/status` moves to `ready`.
+  - ZS fetches 10 https example URLs and returns a transcript and timings in about 8 s while warm.
+- **ZS cold-start copy.** "about 1–3 minutes" holds, at about 2 min.
+
+## 9. Tests (intent)
+
+- `pickAsrModel` routes Cantonese to Qwen, Swahili to Whisper, and a Whisper-unsupported code (Tok Pisin, `tpi`) to Omnilingual. Requests that resolve to Whisper are byte-for-byte unchanged.
+- **ZS gate.** An org with `zeroShotEnabled:false` gets 403 even when the client sends `omni-zs`. ZS with no examples gets 400 `zs_no_examples`.
+- **Billing.** Settlement uses Modal's `gpuSeconds`, not the audio length: a 10 s clip that uses 40 s of GPU time is billed for 40 s. A settlement is never zero.
+- **Example ranking.** A candidate that shares source words outranks a validated but unrelated one. Clips under 2 s or over 30 s are excluded. The read wall is enforced.
+- **Warm-up.** `asr_warming` leads to the toast, then `ready`, and the queued cell is transcribed exactly once. Reaching the cap shows the error. Concurrent callers share one warm-up.
+- **Client.** The window size is chosen per model. The batch % calculation is tested.
+- **Agent tool.** The gate and billing match the in-app path. A write-back attempt produces a changeset, not a commit.
+
+## 10. Out of scope
+
+- On-device Omnilingual (sherpa-onnx CTC 300M for Tauri).
+- User-pinned example sets.
+- Omnilingual "Unlimited" long-form variants. We chunk the audio, so we don't need them.
+- The platform-admin feature-flag system (it lives on the unmerged `feat/dcs-package-flags` branch).
+
+## 11. Ryder-only steps
+
+- Run `modal deploy infra/modal/omni_asr.py` in the genesis-ai-dev workspace, and `modal secret create aquilla-omni-asr OMNI_SHARED_SECRET=…`.
+- Run `wrangler secret put OMNI_SHARED_SECRET` and set `OMNI_ASR_MODAL_URL` on the auth-worker environments.
+- Give launch timing for the announcement page and the LinkedIn post (drafts are on the aquilla-marketing branch `omnilingual-asr-announce`).

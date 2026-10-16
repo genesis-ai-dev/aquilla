@@ -236,6 +236,12 @@ export interface Env {
   /** Local stacks only (honoured with WRANGLER_LOCAL=1): a JSON array of
    *  client metadata documents served instead of fetching their client_id. */
   MCP_OAUTH_PINNED_CLIENTS?: string
+  /** Zapier's pre-registered OAuth client (docs/ZAPIER.md). All three unset →
+   *  no Zapier client in this environment. The secret is a wrangler secret. */
+  ZAPIER_CLIENT_ID?: string
+  ZAPIER_CLIENT_SECRET?: string
+  /** https://zapier.com/dashboard/auth/oauth/return/App<ID>CLIAPI/ */
+  ZAPIER_REDIRECT_URI?: string
 
   // ── AQU-AGENT harness (routes/agent.ts new tools) ────────────────────────
   /** Base URL of the sandbox worker (aquilla-agent-sandbox). Local dev may

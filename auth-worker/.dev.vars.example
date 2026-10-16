@@ -176,3 +176,10 @@ MONDAY_REDIRECT_URI="http://localhost:5173/oauth/callback"
 # Stripe keys
 #STRIPE_SECRET_KEY=sk_live_1234.... (Or sk_test_ for sandbox key)
 #STRIPE_PUBLISHABLE_KEY=pk_live_1234....
+
+# Zapier's pre-registered OAuth client (docs/ZAPIER.md). Leave all three unset
+# unless you are testing the Zapier connection locally. Production values come
+# from `zapier register` (client id, redirect) and `wrangler secret put`.
+# ZAPIER_CLIENT_ID=aquilla-zapier-local
+# ZAPIER_CLIENT_SECRET=local-only-secret
+# ZAPIER_REDIRECT_URI=https://zapier.com/dashboard/auth/oauth/return/App000000CLIAPI/

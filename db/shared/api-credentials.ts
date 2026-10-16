@@ -229,7 +229,7 @@ export async function validateApiCredential(
 
   if (!row) return fail()
   if (row.revoked_at) return fail()
-  if (row.oauth_resource != null && row.oauth_resource !== expectedResource) return fail()
+  if (row.oauth_resource != null && !oauthResourceAccepted(row.oauth_resource, expectedResource)) return fail()
   if (row.expires_at && new Date(row.expires_at).getTime() <= Date.now()) return fail()
 
   // Throttled last-used bump: only when the row hasn't been touched in 5min.
@@ -287,6 +287,17 @@ export class McpDelegatedRequest extends Request {
     super(input, init)
     this.oauthResource = resource
   }
+}
+
+/** OAuth audience for the external REST API (Zapier). MCP's audience is
+ *  `${REST}/mcp`, so the two never match each other. */
+export const REST_OAUTH_RESOURCE_SUFFIX = "/api/v1/external"
+
+/** MCP passes its exact resource URL. REST passes none and accepts only a
+ *  REST-audience token: the sync-worker cannot see its public mount prefix,
+ *  and every row here was minted by this deployment, so the suffix is enough. */
+function oauthResourceAccepted(resource: string, expected: string | undefined): boolean {
+  return expected !== undefined ? resource === expected : resource.endsWith(REST_OAUTH_RESOURCE_SUFFIX)
 }
 
 /** External REST never accepts an OAuth credential for a different resource. */

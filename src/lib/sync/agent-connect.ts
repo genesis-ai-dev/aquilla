@@ -26,7 +26,10 @@ export interface McpOAuthClient {
   clientHost: string
   /** Where the browser goes back to after the decision. */
   redirectHost: string
-  mode: "act"
+  /** The default mode; `act` is the only one for MCP hosts. */
+  mode: "act" | "ask"
+  /** Pre-registered clients (Zapier): the page offers mode and access. */
+  scopeChoices?: boolean
   organizations: { id: string; name: string | null }[]
 }
 

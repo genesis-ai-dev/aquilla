@@ -370,6 +370,8 @@ export const audio = defineNamespace({
       "Couldn't save to the server — this take is still on this device. Retry to send it again.",
     "audio.takesStrip.syncFailedRetry": "Not saved — retry",
     "audio.takesStrip.recordedByBadge": "{date} · {author}",
+    "audio.takesStrip.recordedLabel": "Recorded",
+    "audio.takesStrip.generatedLabel": "Generated",
     "audio.takesStrip.recordedByTooltip": "Recorded {datetime} by {author}",
     "audio.takesStrip.generatedByTooltip": "Generated {datetime} by {author}",
     "audio.takesStrip.textDriftBadge": "Text changed",
@@ -2266,24 +2268,41 @@ export const audio = defineNamespace({
       },
       "audio.takesStrip.recordedByBadge": {
         description:
-          "Inline provenance stamp on a compact take row: the day the take was " +
-          "made and the person who made it, separated by a middle dot. Answers " +
-          "'when was this recorded, and by whom' at a glance while auditing a " +
-          "line's takes. The separator may be replaced with whatever punctuation " +
-          "reads naturally in the target language; keep it very short, as it " +
-          "shares one row with the take's name, length and action buttons and is " +
-          "truncated when the column is narrow.",
-        maxLength: 32,
+          "Inline provenance stamp on a compact take row: the short calendar " +
+          "date the take was made and the person who made it, separated by a " +
+          "middle dot. Answers 'when was this recorded, and by whom' at a glance " +
+          "while auditing a line's takes. The separator may be replaced with " +
+          "whatever punctuation reads naturally in the target language; keep it " +
+          "very short, as it shares one row with the take's name, length and " +
+          "action buttons and is truncated when the column is narrow. The exact " +
+          "time is the DateTooltip hover, prefixed by recordedLabel or " +
+          "generatedLabel — not this string.",
+        maxLength: 40,
         placeholders: {
-          date: "Day the take was made, already formatted for the user's locale.",
+          date: "Short calendar date the take was made (fmtShortCalendarDate), already formatted for the user's locale — e.g. 'September 24' within the last year, else 'Sep 2024'.",
           author: "Name of the person who made the take, as recorded on the event log.",
         },
       },
+      "audio.takesStrip.recordedLabel": {
+        description:
+          "DateTooltip hover prefix on a take a person RECORDED with a microphone. " +
+          "The visible stamp is the short calendar date; this word prefixes the " +
+          "full datetime on hover ('Recorded September 24, 10:52:02 PM').",
+        maxLength: 16,
+      },
+      "audio.takesStrip.generatedLabel": {
+        description:
+          "DateTooltip hover prefix on a take SYNTHESISED by a text-to-speech " +
+          "voice rather than spoken into a microphone. Same role as " +
+          "audio.takesStrip.recordedLabel; the verb differs because the named " +
+          "person chose to generate the take, they did not perform it.",
+        maxLength: 16,
+      },
       "audio.takesStrip.recordedByTooltip": {
         description:
-          "Hover title on that stamp, for a take a person RECORDED with a " +
-          "microphone. Gives the full date and time rather than just the day, " +
-          "since the badge beside it is abbreviated. Purely informational.",
+          "Unused in the current UI (the take stamp's hover is DateTooltip with " +
+          "audio.takesStrip.recordedLabel). Kept so existing translations do not " +
+          "go missing. Was the native browser title on a recorded take's stamp.",
         placeholders: {
           datetime: "Date AND time the take was recorded, already formatted for the user's locale.",
           author: "Name of the person who recorded the take.",
@@ -2291,10 +2310,9 @@ export const audio = defineNamespace({
       },
       "audio.takesStrip.generatedByTooltip": {
         description:
-          "Hover title on that same stamp, for a take that was SYNTHESISED by a " +
-          "text-to-speech voice rather than spoken into a microphone. Same shape " +
-          "as audio.takesStrip.recordedByTooltip; the verb differs because the " +
-          "named person chose to generate the take, they did not perform it.",
+          "Unused in the current UI (the take stamp's hover is DateTooltip with " +
+          "audio.takesStrip.generatedLabel). Kept so existing translations do not " +
+          "go missing. Was the native browser title on a generated take's stamp.",
         placeholders: {
           datetime: "Date AND time the take was generated, already formatted for the user's locale.",
           author: "Name of the person who generated the take.",

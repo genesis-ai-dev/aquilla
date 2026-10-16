@@ -140,12 +140,25 @@ describe("auto routing", () => {
     expect(calls.modal).toHaveLength(0)
   })
 
-  it("answers 503 for a non-Whisper language when Modal is not configured", async () => {
+  // Shipping this code before the Modal deploy must not break projects in
+  // languages Whisper lacks: they got Whisper auto-detect before, and still do.
+  it("falls back to Whisper auto-detect for a non-Whisper language when Modal is not configured", async () => {
     const jwt = await owner()
     const calls = stubProviders()
     const response = await post(jwt, await audio(1, "tpi"), { OMNI_ASR_MODAL_URL: undefined })
+    expect(response.status).toBe(200)
+    expect(calls.modal).toHaveLength(0)
+    expect(calls.whisper).toHaveLength(1)
+    expect(calls.whisper[0].language).toBeUndefined()
+  })
+
+  it("still refuses an explicit Omnilingual choice with 503 when Modal is not configured", async () => {
+    const jwt = await owner()
+    const calls = stubProviders()
+    const response = await post(jwt, { ...(await audio(1, "tpi")), model: "omni-ctc" }, { OMNI_ASR_MODAL_URL: undefined })
     expect(response.status).toBe(503)
     expect(calls.modal).toHaveLength(0)
+    expect(calls.whisper).toHaveLength(0)
   })
 })
 

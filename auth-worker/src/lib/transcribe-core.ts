@@ -90,7 +90,12 @@ export function resolveAsrModel(choice: AsrModelChoice, language: string | undef
 }
 
 export async function transcribe(env: Env, input: TranscribeInput): Promise<TranscribeResult> {
-  const model = resolveAsrModel(input.model, input.language)
+  const picked = resolveAsrModel(input.model, input.language)
+  // Without the Modal service, Automatic keeps the pre-Omnilingual behaviour
+  // for languages Whisper lacks: Whisper auto-detect, not a 503. Only an
+  // explicit Omnilingual choice is refused.
+  const model: AsrModel = input.model === "auto" && picked === "omni-ctc" && !omniConfigured(env)
+    ? "whisper" : picked
   const omniModel: OmniModel | null = model === "omni-zs" ? "zs" : model === "omni-ctc" ? "ctc" : null
   if (omniModel === null && !env.OPENROUTER_API_KEY) return fail(503, "Hosted transcription is not configured")
   if (omniModel !== null && !omniConfigured(env)) return fail(503, "Omnilingual transcription is not configured")

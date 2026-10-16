@@ -212,6 +212,21 @@ describe("AQU-1609: GET /assignments/unit identifies the lane by id", () => {
     expect(body.assignments.find((a) => a.assignmentId === "as-one")?.validated).toBe(1)
   })
 
+  it("reads the project's first language when neither laneId nor lane is given", async () => {
+    // AQU-1977: this project has no '' lane, as no project made since AQU-1594
+    // does. Reading '' measured nothing and showed every person at 0; the
+    // project's first language (ln-es1, position 1) is what the plan shows.
+    await seedTwoSameLanguageLanes()
+    const res = await app.request(
+      "/api/v2/projects/pb/assignments/unit?fileId=f1&section=ACT",
+      { headers: authHeader(await jwtFor("wendi")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { assignments: Array<{ assignmentId: string; validated: number }> }
+    expect(body.assignments.find((a) => a.assignmentId === "as-one")?.validated).toBe(1)
+  })
+
   it("prefers laneId over a lane tag naming a different lane", async () => {
     await seedTwoSameLanguageLanes()
     const res = await app.request(

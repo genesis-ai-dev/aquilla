@@ -439,8 +439,13 @@ export const editor = defineNamespace({
     "editor.view.showTranslationNotes": "Show translation notes",
     "editor.view.showHealthIndicators": "Show health indicators",
     "editor.view.highlightUnresolvedComments": "Highlight open comments",
+    "editor.view.ghostText": "Suggest next words",
+    "editor.wordsThatFit.button": "Words that fit here",
+    "editor.wordsThatFit.empty": "No suggestions yet",
+    "editor.wordsThatFit.replace": "Replace with {word}",
     "editor.view.healthScoreColorCoding": "Health Score Color Coding",
     "editor.health.citedExample": "{source} → {target}",
+    "editor.view.visibleStyleSegments": "Visible style segments",
     "editor.view.lowMemory": "Low-memory mode",
     "editor.view.lowMemoryAuto": "Auto",
     "editor.view.lowMemoryOn": "On",
@@ -576,9 +581,17 @@ export const editor = defineNamespace({
     "editor.history.close": "Close history",
     "editor.history.loading": "Loading history…",
     "editor.history.loadFailed": "Couldn't load edit history.",
+    "editor.history.loadFailedNetwork":
+      "Couldn't load edit history — network error. Check your connection.",
+    "editor.history.loadFailedServer":
+      "Couldn't load edit history — the server returned an error ({status}).",
     "editor.history.noEdits": "No edits yet.",
     "editor.history.refreshFailed":
       "Couldn't refresh from the server — showing local edits.",
+    "editor.history.refreshFailedNetwork":
+      "Couldn't refresh from the server (network error) — showing local edits.",
+    "editor.history.refreshFailedServer":
+      "Couldn't refresh from the server (error {status}) — showing local edits.",
     "editor.history.revisions": plural({
       one: "{count} significant revision",
       other: "{count} significant revisions",
@@ -1584,6 +1597,9 @@ export const editor = defineNamespace({
       "This edit would change the protected IDML document structure.",
     "editor.idml.editWouldChangeFormattingError":
       "This edit would change protected IDML formatting.",
+    "editor.idml.noEditableSlotError":
+      "Every text run in this IDML cell is protected, so there is nowhere for " +
+      "your typing to go. Re-import the IDML to make the text editable.",
     "editor.idml.alignStylesChangedWording":
       "Align styles would have changed the wording, so nothing was saved.",
     "editor.idml.alignStylesUnchanged":
@@ -1594,6 +1610,8 @@ export const editor = defineNamespace({
       "Align styles could not place this cell. Nothing was saved.",
     "editor.idml.alignStylesUnavailable":
       "This cell has no style runs to align.",
+    "editor.idml.segmentRegular": "Regular",
+    "editor.idml.segmentBoldItalic": "Bold italic",
 
     // — Text-to-speech status badge on a row ————————————————————————
     "editor.tts.translatingBeforeVoicing": "Translating before voicing",
@@ -1801,8 +1819,10 @@ export const editor = defineNamespace({
     "editor.ai.draftParagraph": "Draft paragraph ({count} cells)",
     "editor.ai.regenerate": "Regenerate — another AI variation",
     "editor.ai.alignStyles": "Align styles",
+    "editor.ai.passToStyleSegments": "Pass to Style Segments",
     "editor.ai.aligningStyles": "Aligning styles…",
     "editor.ai.alignStylesNeedsText": "Translate this cell before aligning styles",
+    "editor.ai.alignStylesNeeded": "This cell needs Align styles",
 
     // — Remaining action-rail tooltips ————————————————————————————
     "editor.audio.play": "Play audio",
@@ -2010,6 +2030,13 @@ export const editor = defineNamespace({
       other: "{count} changes queued for server sync. Click to review.",
     }),
     "editor.outbox.syncedTooltip": "All changes synced. Click to review pending changes.",
+    "editor.outbox.savedLocallyLabel": plural({ other: "On device · {count}" }),
+    "editor.outbox.savedLocallyTooltip": plural({
+      one: "Saved on this device, {count} change not uploaded. It uploads when the server is reachable again.",
+      other: "Saved on this device, {count} changes not uploaded. They upload when the server is reachable again.",
+    }),
+    "editor.outbox.syncTimes": "Last upload: {upload}. Last download: {download}.",
+    "editor.outbox.never": "never",
     // Tauri desktop: the on-device store stopped saving (src/lib/offline/leader-watchdog.ts).
     "editor.outbox.notSavingLabel": "Not saving",
     "editor.outbox.notSavingTooltip": "Changes on this device aren't being saved. Restart the app to fix this.",
@@ -2025,6 +2052,62 @@ export const editor = defineNamespace({
     }, "count"),
     "editor.repetition.undo": "Undo",
     "editor.repetition.undoFailed": "Couldn't undo the propagation.",
+    // AQU-1486 — "Validate all repeated rows, or just this one?"
+    "editor.repetition.choiceTitle": "Validate the repeated rows too?",
+    "editor.repetition.choiceSingleBody": plural({
+      one: "This text appears in {count} other row of this file. It gets this translation either way. Validate it now, or leave it to be validated later?",
+      other: "This text appears in {count} other rows of this file. They get this translation either way. Validate them now, or leave them to be validated later?",
+    }, "count"),
+    "editor.repetition.choiceBulkBody": plural({
+      one: "The rows you are validating repeat in {count} other row of this file. It gets the same translation either way. Validate it now, or leave it to be validated later?",
+      other: "The rows you are validating repeat in {count} other rows of this file. They get the same translation either way. Validate them now, or leave them to be validated later?",
+    }, "count"),
+    "editor.repetition.choiceCapNote": plural({
+      one: "The project's batch validation size leaves room to validate {count} of them. The rest are filled but not validated.",
+      other: "The project's batch validation size leaves room to validate {count} of them. The rest are filled but not validated.",
+    }, "count"),
+    "editor.repetition.validateMore": plural({
+      one: "Validate {count} more row",
+      other: "Validate {count} more rows",
+    }, "count"),
+    "editor.repetition.justThisRow": "Just this row",
+    "editor.repetition.justTheseRows": "Just these rows",
+    "editor.repetition.dontAskAgain": "Don't ask again",
+    "editor.repetition.dontAskAgainHelp": "To be asked again, use “Ask me each time” on the message that follows a validation.",
+    "editor.repetition.validated": plural({
+      one: "Validated {count} repeated row",
+      other: "Validated {count} repeated rows",
+    }, "count"),
+    "editor.repetition.unvalidatedRepeats": plural({
+      one: "{count} repeated row has this text but isn't validated",
+      other: "{count} repeated rows have this text but aren't validated",
+    }, "count"),
+    "editor.repetition.validateAll": "Validate all",
+    "editor.repetition.askEachTime": "Ask me each time",
+    "editor.repetition.validateFailed": "Couldn't validate the repeated rows.",
+    "editor.repetition.bulkValidatedNote": plural({
+      one: "Also validated {count} repeated row.",
+      other: "Also validated {count} repeated rows.",
+    }, "count"),
+    "editor.repetition.bulkFilledNote": plural({
+      one: "Filled {count} repeated row, which still needs validating.",
+      other: "Filled {count} repeated rows, which still need validating.",
+    }, "count"),
+    "editor.repetition.bulkSkippedNote": plural({
+      one: "Left {count} repeated row as it was, because the translations disagreed.",
+      other: "Left {count} repeated rows as they were, because the translations disagreed.",
+    }, "count"),
+    "editor.repetition.conflictTitle": "These repeated rows disagree",
+    "editor.repetition.conflictBody": plural({
+      one: "Rows you are validating translate this source text in different ways. Which translation should the {count} other row get?",
+      other: "Rows you are validating translate this source text in different ways. Which translation should the {count} other rows get?",
+    }, "count"),
+    "editor.repetition.conflictFrom": "From {rows}",
+    "editor.repetition.conflictRowName": "row {number}",
+    "editor.repetition.conflictSkip": "Skip: leave those rows as they are",
+    "editor.repetition.conflictApplyToRest": "Do the same for the rest of this run",
+    "editor.repetition.conflictApplyToRestHelp": "Uses the first or last row's translation, or skips, for every other disagreement in this run.",
+    "editor.repetition.conflictConfirm": "Use this choice",
   },
   context: {
     _context: {
@@ -2071,6 +2154,117 @@ export const editor = defineNamespace({
           "as a report of something already done, not a question.",
         placeholders: {
           count: "How many other cells received the translation. Always 1 or more.",
+        },
+      },
+      // AQU-1486 — the "validate the repeated rows too?" dialog, its toasts,
+      // and the bulk-run conflict picker. Each carries a placeholder.
+      "editor.repetition.choiceSingleBody": {
+        description:
+          "Body of a dialog shown right after the user validated one row whose " +
+          "source text repeats elsewhere in the file. The other rows receive the " +
+          "same translation whatever the user picks; the question is only whether " +
+          "they are also marked validated now or left for someone to validate later.",
+        placeholders: {
+          count: "How many other rows share this source text and would be validated. Always 1 or more.",
+        },
+      },
+      "editor.repetition.choiceBulkBody": {
+        description:
+          "Body of the same dialog when the user validated many rows at once " +
+          "(a selection, or a whole-file batch). Some of those rows repeat in " +
+          "rows outside the run; those rows receive the matching translation " +
+          "either way, and the question is whether to validate them too.",
+        placeholders: {
+          count: "How many rows outside the run would receive a translation and be validated. Always 1 or more.",
+        },
+      },
+      "editor.repetition.choiceCapNote": {
+        description:
+          "Extra line in the bulk dialog when the project limits how many rows " +
+          "one batch validation may validate. Only part of the repeated rows fit " +
+          "under that limit; the others still receive the translation but stay " +
+          "unvalidated.",
+        placeholders: {
+          count: "How many of the repeated rows can still be validated under the limit. Always 1 or more.",
+        },
+      },
+      "editor.repetition.validateMore": {
+        description:
+          "Primary button of the dialog: validate the repeated rows as well as " +
+          "the row(s) the user already validated. A button label — keep it short.",
+        placeholders: {
+          count: "How many additional rows the button validates. Always 1 or more.",
+        },
+      },
+      "editor.repetition.validated": {
+        description:
+          "Toast confirming that the repeated rows were filled in and marked " +
+          "validated. Paired with an Undo action.",
+        placeholders: {
+          count: "How many repeated rows were validated. Always 1 or more.",
+        },
+      },
+      "editor.repetition.unvalidatedRepeats": {
+        description:
+          "Toast after a typed translation, when the repeated rows already hold " +
+          "the same text but nobody has validated them. Paired with a " +
+          "'Validate all' button.",
+        placeholders: {
+          count: "How many repeated rows are waiting for validation. Always 1 or more.",
+        },
+      },
+      "editor.repetition.bulkValidatedNote": {
+        description:
+          "Sentence appended to the summary toast of a bulk validation, saying " +
+          "rows outside the selection were validated as well because they repeat " +
+          "a validated row's source text.",
+        placeholders: {
+          count: "How many repeated rows were also validated. Always 1 or more.",
+        },
+      },
+      "editor.repetition.bulkFilledNote": {
+        description:
+          "Sentence appended to the summary toast of a bulk validation, saying " +
+          "rows outside the selection received a translation but were not " +
+          "validated and still need someone to validate them.",
+        placeholders: {
+          count: "How many repeated rows were filled but not validated. Always 1 or more.",
+        },
+      },
+      "editor.repetition.bulkSkippedNote": {
+        description:
+          "Sentence appended to the summary toast of a bulk validation, saying " +
+          "some repeated rows were left untouched because the validated rows " +
+          "disagreed about their translation and the user chose to skip them.",
+        placeholders: {
+          count: "How many repeated rows were left unchanged. Always 1 or more.",
+        },
+      },
+      "editor.repetition.conflictBody": {
+        description:
+          "Body of a dialog in a bulk validation: two or more of the rows being " +
+          "validated share a source text but hold different translations, so " +
+          "the user picks which translation the remaining rows with that source " +
+          "receive. The options follow as a list.",
+        placeholders: {
+          count: "How many rows would receive the chosen translation. Always 1 or more.",
+        },
+      },
+      "editor.repetition.conflictFrom": {
+        description:
+          "Small caption under one translation option in the conflict dialog, " +
+          "naming which validated rows hold that translation.",
+        placeholders: {
+          rows: "A list of row names, already joined, e.g. 'row 3 and row 7' or 'GEN 1:1 and GEN 2:4'.",
+        },
+      },
+      "editor.repetition.conflictRowName": {
+        description:
+          "How one row is named inside the conflict dialog's caption when it has " +
+          "no reference of its own. Lower-case because it is joined into a list " +
+          "inside a sentence.",
+        placeholders: {
+          number: "The row's number in the editor table's # column.",
         },
       },
       "editor.row.draftSearching": {
@@ -3845,6 +4039,37 @@ export const editor = defineNamespace({
           "this browser only.",
         maxLength: 32,
       },
+      "editor.view.ghostText": {
+        description:
+          "Label of the switch that shows a faint suggested next word (learned " +
+          "from this project's own translated lines) after the caret while " +
+          "typing a translation. Tab accepts it; Esc hides it. Applies to this " +
+          "browser only.",
+        maxLength: 32,
+      },
+      "editor.wordsThatFit.button": {
+        description:
+          "Tooltip and screen-reader name of the toolbar button, shown above a " +
+          "selected word in the translation, that lists other words this " +
+          "project's translation uses in the same kinds of places (a project " +
+          "thesaurus), so the translator can swap the selected word.",
+        maxLength: 40,
+      },
+      "editor.wordsThatFit.empty": {
+        description:
+          "Shown in the alternative-words list when the project has not " +
+          "translated enough text yet to suggest any.",
+        maxLength: 40,
+      },
+      "editor.wordsThatFit.replace": {
+        description:
+          "Screen-reader name of one alternative-word button. {word} is the " +
+          "alternative that will replace the selected word in the translation.",
+        placeholders: {
+          word: "The alternative word, in the translation's own language and script.",
+        },
+        maxLength: 60,
+      },
       "editor.view.healthScoreColorCoding": {
         description:
           "Label of the switch that colours words in an AI draft: green when the " +
@@ -3861,6 +4086,19 @@ export const editor = defineNamespace({
           source: "The example's source-language text, already truncated.",
           target: "The example's target-language text, already truncated.",
         },
+      },
+      "editor.view.visibleStyleSegments": {
+        description:
+          "Label of the switch that draws bold and italic runs as small inline " +
+          "blocks inside the cell, once a translation has been placed into those " +
+          "runs. An empty untranslated cell stays blank. Regular text stays " +
+          "ordinary, so the translator types around those blocks and can click or " +
+          "arrow into one to type that phrase in bold or italic. An empty block " +
+          "in a placed translation shows a faint name until they type. Consecutive " +
+          "regular runs are one typing space: an empty one shows a single faint " +
+          "Regular, with no box and no gap between the runs. Applies to this " +
+          "browser only.",
+        maxLength: 32,
       },
       "editor.view.lowMemory": {
         description:
@@ -4516,6 +4754,22 @@ export const editor = defineNamespace({
           "read like 'this cell has no history' — the distinction matters, because " +
           "the cell probably does. A Retry control follows.",
       },
+      "editor.history.loadFailedNetwork": {
+        description:
+          "Variant of 'Couldn't load edit history.' shown after several automatic " +
+          "attempts all failed without reaching the server (slow, dropped or " +
+          "offline connection). It must say the network failed, not the server, " +
+          "so the user checks their connection. A Retry control follows.",
+      },
+      "editor.history.loadFailedServer": {
+        description:
+          "Variant of 'Couldn't load edit history.' shown when the server was " +
+          "reached but answered with an error, so the user's connection is not " +
+          "the problem. A Retry control follows.",
+        placeholders: {
+          status: "The HTTP status code the server answered with, such as 503. Keep it as digits.",
+        },
+      },
       "editor.history.noEdits": {
         description:
           "Genuine empty state: the cell has never been edited. Full sentence with " +
@@ -4527,6 +4781,22 @@ export const editor = defineNamespace({
           "Quiet 10px warning above the list when the server could not be reached " +
           "but locally-known edits are being shown. The clause after the dash is " +
           "what the user is looking at. A Retry control follows.",
+      },
+      "editor.history.refreshFailedNetwork": {
+        description:
+          "Variant of the refresh warning above the list when every automatic " +
+          "attempt failed without reaching the server. The parenthesis names the " +
+          "network as the cause; the clause after the dash is what the user is " +
+          "looking at. A Retry control follows.",
+      },
+      "editor.history.refreshFailedServer": {
+        description:
+          "Variant of the refresh warning above the list when the server answered " +
+          "with an error. The clause after the dash is what the user is looking " +
+          "at. A Retry control follows.",
+        placeholders: {
+          status: "The HTTP status code the server answered with, such as 503. Keep it as digits.",
+        },
       },
       "editor.history.revisions": {
         description:
@@ -5193,7 +5463,11 @@ export const editor = defineNamespace({
         description: "Shown when the current ticks would draft nothing.",
       },
       "editor.batchFile.confirmDraft": {
-        description: "Confirm button of the draft modal. Imperative.",
+        description:
+          "Confirm button of the batch draft modal: the imperative command that "
+          + "starts drafting the chosen cells, in the slot where validate mode shows "
+          + "'Validate'. A verb, not the autopilot pipeline's 'Draft' stage caption "
+          + "(autopilot.graph.node.draft), which is a noun.",
         maxLength: 16,
       },
       "editor.batchValidate.skip.alreadyMine": {
@@ -5969,6 +6243,13 @@ export const editor = defineNamespace({
           "Rejection message (role=alert, via reportIdmlError) for an in-progress " +
           "edit that would alter protected IDML formatting anchors — the edit is " +
           "refused before it lands. 'IDML' is the file-format name and stays as-is.",
+      },
+      "editor.idml.noEditableSlotError": {
+        description:
+          "Rejection message (role=alert, via reportIdmlError) shown when a typed " +
+          "or pasted character has no editable slot to land in because every run " +
+          "in the cell is protected (AQU-1962) — the keystroke used to vanish with " +
+          "no message. 'IDML' is the file-format name and stays as-is.",
       },
       "editor.tts.translatingBeforeVoicing": {
         description:
@@ -6927,6 +7208,14 @@ export const editor = defineNamespace({
           "Imperative, two words.",
         maxLength: 16,
       },
+      "editor.ai.passToStyleSegments": {
+        description:
+          "Hover tooltip and accessible name of the arrow button in the bottom " +
+          "corner of an InDesign cell. Shown while the translation is still one " +
+          "unstyled preview sentence. Clicking it places that sentence into the " +
+          "source's bold, italic, and plain runs. Imperative.",
+        maxLength: 28,
+      },
       "editor.ai.aligningStyles": {
         description:
           "Tooltip and status while Align styles is in flight. Present participle, " +
@@ -6937,6 +7226,14 @@ export const editor = defineNamespace({
         description:
           "Tooltip on Align styles when the cell has no translation yet, so there " +
           "are no words to move into style runs. Imperative — translate first.",
+      },
+      "editor.ai.alignStylesNeeded": {
+        description:
+          "Hover tooltip and accessible name of the yellow warning in the " +
+          "bottom corner of a cell. Shown after the translator typed into plain " +
+          "style runs that the editor draws as one piece of text, when those " +
+          "words are not yet sitting in each of the source's runs. Clicking it " +
+          "runs Align styles. Keep 'Align styles' identical to editor.ai.alignStyles.",
       },
       "editor.audio.play": {
         description:
@@ -7681,6 +7978,29 @@ export const editor = defineNamespace({
         description:
           "Tooltip/aria-label of the outbox chip in its queued state.",
         placeholders: { count: "Number of local writes waiting to sync." },
+      },
+      "editor.outbox.savedLocallyLabel": {
+        description:
+          "Short chip text (Tauri desktop) when edits are saved in the on-device " +
+          "offline store but the server is unreachable, so they are not uploaded yet.",
+        placeholders: { count: "Number of edits saved on this device but not uploaded." },
+        maxLength: 16,
+      },
+      "editor.outbox.savedLocallyTooltip": {
+        description: "Tooltip/aria-label of the outbox chip in its saved-on-this-device (offline) state.",
+        placeholders: { count: "Number of edits saved on this device but not uploaded." },
+      },
+      "editor.outbox.syncTimes": {
+        description:
+          "Appended to the outbox chip tooltip for a project downloaded for offline use: " +
+          "when this device last uploaded and last downloaded changes.",
+        placeholders: {
+          upload: "Relative time like '5 minutes ago', or editor.outbox.never.",
+          download: "Relative time like '5 minutes ago'.",
+        },
+      },
+      "editor.outbox.never": {
+        description: "Stands in for a time in editor.outbox.syncTimes when nothing was ever uploaded.",
       },
       "editor.outbox.syncedTooltip": {
         description:

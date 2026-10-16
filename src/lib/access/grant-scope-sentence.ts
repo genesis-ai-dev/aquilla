@@ -80,17 +80,38 @@ function scopeParts(
       echo: t("org.grantScope.echo.allLanes"),
     }
   }
+  // labels is non-empty here, so the echo is never the all-lanes fallback.
+  const echo = laneScopeEcho(t, labels, locale) ?? t("org.grantScope.echo.allLanes")
   if (labels.length === 1) {
     return {
       scope: t("org.grantScope.scope.laneOnly", { project, lane: labels[0] }),
-      echo: t("org.grantScope.echo.laneOnly", { lane: labels[0] }),
+      echo,
     }
   }
-  const lanes = formatList(labels, locale)
   return {
-    scope: t("org.grantScope.scope.lanesOnly", { project, lanes }),
-    echo: t("org.grantScope.echo.lanesOnly", { lanes }),
+    scope: t("org.grantScope.scope.lanesOnly", { project, lanes: formatList(labels, locale) }),
+    echo,
   }
+}
+
+/**
+ * AQU-528: the "which lanes" phrase on its own ("French lane only", "French
+ * and Spanish lanes only"), for surfaces that report an existing grant's lane
+ * scope rather than a form's pending choice — the active invite-link rows,
+ * where two links differing only by language must not read identically.
+ *
+ * Returns null for an empty list: no lane scope is not a phrase, and the
+ * caller decides what "every lane" should look like on its surface.
+ */
+export function laneScopeEcho(
+  t: GrantTranslator,
+  labels: readonly string[],
+  locale = "en",
+): string | null {
+  const clean = labels.map((label) => label.trim()).filter(Boolean)
+  if (clean.length === 0) return null
+  if (clean.length === 1) return t("org.grantScope.echo.laneOnly", { lane: clean[0] })
+  return t("org.grantScope.echo.lanesOnly", { lanes: formatList(clean, locale) })
 }
 
 /** Sentence + button echo for the form's current subject, role, and scope. */

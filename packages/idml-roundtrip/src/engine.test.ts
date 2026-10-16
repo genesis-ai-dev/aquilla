@@ -475,6 +475,47 @@ describe("strict surgical IDML export", () => {
     })
   })
 
+
+  it("keeps the divine-name character style around translated text and rejects flattening it", async () => {
+    // AQU-1959: the divine name (YHWH) is marked by the source's `\nd`
+    // character style, which the Biblica IDML exports as a `cv:nd`
+    // CharacterStyleRange. A translator types inside that run; the run — and
+    // so its small caps — must survive the commit and the export.
+    const divineNameStory = `<?xml version="1.0" encoding="UTF-8"?>
+<idPkg:Story xmlns:idPkg="urn:adobe:ns:indesign/idml/1.0/packaging"><Story Self="u1"><ParagraphStyleRange Self="pnd" AppliedParagraphStyle="ParagraphStyle/text%3ap"><CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]"><Content>When the </Content></CharacterStyleRange><CharacterStyleRange AppliedCharacterStyle="CharacterStyle/cv%3and"><Content>LORD</Content></CharacterStyleRange><CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]"><Content> God made</Content></CharacterStyleRange></ParagraphStyleRange></Story></idPkg:Story>`
+    const bytes = await makeIdml({ "Stories/Story_u1.xml": divineNameStory })
+    const parsed = await parseIdml(bytes)
+    const unit = unitById(parsed.units, "pnd")
+
+    expect(unit.slots.map((slot) => slot.characterStyleId)).toEqual([
+      "CharacterStyle/$ID/[No character style]",
+      "CharacterStyle/cv%3and",
+      "CharacterStyle/$ID/[No character style]",
+    ])
+
+    const targetHtml = unit.sourceHtml
+      .replace(">When the <", ">Quando o <")
+      .replace(">LORD<", ">SENHOR<")
+      .replace("> God made<", "> Deus fez<")
+    const exported = await exportIdml(bytes, [translationFor(unit, targetHtml)], {
+      strict: true,
+    })
+    const storyXml = await memberText(exported.bytes, "Stories/Story_u1.xml")
+
+    expect(storyXml).toContain(
+      'AppliedCharacterStyle="CharacterStyle/cv%3and"><Content>SENHOR</Content>',
+    )
+    expect(storyXml).not.toContain("LORD")
+    await expect(validateExport(exported.bytes, parsed.manifest)).resolves.toEqual([])
+
+    // Dropping the marked run — what a plain-text editor would do — is not a
+    // valid target: the commit is refused rather than silently unstyled.
+    const flattened = `<p data-idml-version="2"><span data-idml-slot="0" data-idml-character-style="CharacterStyle/$ID/[No character style]" data-idml-protected="slot">Quando o SENHOR Deus fez</span></p>`
+    expect(
+      validateIdmlTranslation(unit.sourceHtml, flattened, unit.metadata).valid,
+    ).toBe(false)
+  })
+
   it("encodes user line breaks as Br and additional Content nodes in the original style run", async () => {
     const bytes = await makeIdml()
     const parsed = await parseIdml(bytes)

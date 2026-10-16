@@ -6,7 +6,9 @@
 // audio controls is hosted at the workspace root (CloneVoiceModalHost) so
 // the modal opens in place without the Voices tab having to be mounted.
 
+import { useMemo } from "react"
 import { VoiceLibraryPanel } from "../VoiceLibraryPanel"
+import { liveTargetLaneLanguages } from "@/lib/lanes/lane-language"
 import type { ProjectTtsApi } from "@/hooks/useProjectTts"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -32,6 +34,12 @@ export function VoiceSidebar({
   // but the cast roster reads everything else it needs off `tts`.
   // AQU-365: `project.syncRole?.level` gates character CRUD in VoiceLibraryPanel.
   void username
+  // AQU-1978: the languages the roster offers come from the lane ROWS — the
+  // live target lanes, in switcher order. `targetLanes` / `archivedLanes` are
+  // retired settings keys (AQU-1594/1595): absent on a new project, and tags
+  // rather than languages on a lane tagged with its own id. Archived lanes are
+  // already left out, so no archive list is passed on.
+  const laneLanguages = useMemo(() => liveTargetLaneLanguages(project.lanes), [project.lanes])
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -40,9 +48,8 @@ export function VoiceSidebar({
           <VoiceLibraryPanel
             settings={tts.settings}
             onSettingsChange={tts.saveTts}
-            targetLanguage={targetLanguage ?? project.targetLanguage}
-            targetLanes={project.targetLanes}
-            archivedLanes={project.archivedLanes}
+            targetLanguage={targetLanguage}
+            targetLanes={laneLanguages}
             projectId={projectId}
             fileId={fileId}
             session={session}

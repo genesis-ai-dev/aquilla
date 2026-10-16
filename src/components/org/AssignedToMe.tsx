@@ -20,6 +20,7 @@ import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { getMyAssignmentsForOrg, type MyOrgAssignment } from "@/lib/sync/assignments"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { progressPercent } from "@/lib/progress/progress-percent"
+import { PROGRESS_BG } from "@/lib/progress/progress-palette"
 import { getFileSectionProgress } from "@/lib/progress/file-progress-resource"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
 import { editorCellHref } from "@/components/project-workspace-lane-deeplink"
@@ -237,8 +238,10 @@ export function AssignedToMe() {
           const pct = progressPct(a)
           return (
             <div className="flex flex-col items-end gap-1">
+              {/* AQU-1764: done cells are VALIDATED cells — the shared
+                  palette's text-validated blue. */}
               <div className="h-1.5 w-full max-w-[7.5rem] overflow-hidden rounded-full bg-muted">
-                <div className="h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
+                <div className={`h-full rounded-full ${PROGRESS_BG.textValidated}`} style={{ width: `${pct}%` }} />
               </div>
               <span className="text-xs tabular-nums text-muted-foreground">
                 {t("org.assignedToMe.cellsProgress", { done: a.cellsDone, total: a.cellsTotal, pct })}

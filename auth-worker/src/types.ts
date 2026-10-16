@@ -178,6 +178,10 @@ export interface Env {
   /** Kill switch for Jev react decisions (lib/jev/decide.ts): "off" makes the
    *  react loop use its fixed rules without calling Jev. Unset = on. */
   JEV_REACT?: string
+  /** AQU-1690 kill switch for autopilot's Bible-data Jev questions
+   *  (lib/contextual/judge-expectations.ts): "off" leaves every question the
+   *  code cannot settle unanswered. Unset = on. */
+  JEV_BIBLE_QA?: string
   /** Kill switch for smart edits (routes/ai-smart-edits.ts): "off" answers
    *  every suggest request with no suggestions. Unset = on. */
   SMART_EDITS?: string
@@ -201,6 +205,15 @@ export interface Env {
   MONDAY_CLIENT_SECRET?: string
   /** Monday app Signing Secret — verifies webhook JWTs (secret). */
   MONDAY_SIGNING_SECRET?: string
+  /**
+   * AQU-1775: optional secret the Monday token encryption key is derived from
+   * instead of SECRET_KEY (lib/monday/crypto.ts mondayTokenKeyMaterial). Set
+   * on the dev worker only, so a production token copied to dev is unreadable
+   * there whatever the environment gate decides; unset keeps the SECRET_KEY
+   * derivation (production, local, e2e). Setting or rotating it makes every
+   * token encrypted before it unreadable — the org reconnects.
+   */
+  MONDAY_TOKEN_KEY?: string
   /** Monday app id (plain var; informational/config). */
   MONDAY_APP_ID?: string
   /** Monday app slug (plain var; informational/config). */
@@ -236,9 +249,26 @@ export interface Env {
   /** Per-run OpenRouter cost cap in whole cents. Default 500 (frames.ts). The
    *  run halts gracefully with a budget.exhausted frame at this ceiling. */
   AGENT_RUN_COST_CAP_CENTS?: string
+  /** Per-run Autopilot driver (src/contextual-run-do.ts) — AQU-1845. One
+   *  object per run; its alarm drives the run's waves and re-arms itself, so a
+   *  run outlives the request that started it instead of dying with that
+   *  request's `waitUntil` budget and waiting for the 5-minute cron. Optional:
+   *  where it is unbound (vitest route suites, an environment deployed before
+   *  the DO migration) routes/contextual.ts falls back to the in-request loop. */
+  CONTEXTUAL_RUN_DRIVER?: DurableObjectNamespace
   /** Spans a project-wide autopilot start may drive at once. Lower it for a
    *  self-hosted upstream with few slots (see routes/contextual.ts). */
   CONTEXTUAL_MAX_CONCURRENCY?: string
+  /** AQU-1847 — aggregate autopilot span width one billing workspace may hold
+   *  across ALL its projects. Default 24. The per-project ceiling above
+   *  multiplies by project count without this; with it, two heavy projects in
+   *  one workspace share capacity instead of adding up. */
+  CONTEXTUAL_MAX_ORG_CONCURRENCY?: string
+  /** AQU-1847 — aggregate autopilot span width across the whole platform.
+   *  Default 96. Set BELOW the provider's real rate limit: autopilot takes a
+   *  lease and interactive chat/suggestions do not, so the gap is the headroom
+   *  that keeps user-facing calls responsive while autopilot runs hot. */
+  CONTEXTUAL_MAX_GLOBAL_CONCURRENCY?: string
   /** Hard cap on autopilot model requests in flight at once. Unset = uncapped.
    *  Set to the upstream's slot count when it has a fixed one; span concurrency
    *  bursts ~3x wider than it looks (verifier fan-out). */
@@ -273,6 +303,12 @@ export interface Env {
   //   Default (unset / "false"): LOG-ONLY mode — over-budget requests are logged
   //   but allowed through. Flip to "true" after sizing thresholds.
   AI_BUDGET_ENFORCE?: string
+  // AI_DAILY_SPEND_CEILING_USD: platform-wide daily spend ceiling in US dollars,
+  //   checked before every paid AI call (db/shared/ai-spend-ceiling.ts, AQU-1869).
+  //   Unlike the controls above this is NOT behind an enforce flag — it is the
+  //   floor that keeps the shared vendor keys solvent. Unset → $500/day. "0"
+  //   blocks all paid AI; "off"/"none"/"unlimited" switches the ceiling off.
+  AI_DAILY_SPEND_CEILING_USD?: string
 
   // ── Bible Aquifer reference data (bibletranslation.org) ──────────────────
   // Server-side proxy + agent integration of our scholarly reference API,
@@ -284,6 +320,9 @@ export interface Env {
   /** User-Agent sent to the Aquifer API — the live site 403s generic UAs.
    *  Default: "Aquilla/1.0 (+https://aquilla.app)". */
   AQUIFER_USER_AGENT?: string
+  /** AQU-1690: base URL of the Bible Knowledge Pack that autopilot reads
+   *  (lib/bkp/pack-loader.ts). Default https://bibletranslation.org/bkp/v1. */
+  BKP_BASE?: string
 
   // ── Org credit accounting (WS-AUTH-CREDITS) ──────────────────────────────
   // Platform-level defaults; per-org overrides live in org_settings.credits.

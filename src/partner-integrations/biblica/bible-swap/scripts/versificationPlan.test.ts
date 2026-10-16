@@ -74,6 +74,7 @@ describe("versificationPlan", () => {
                 {
                     text: "s1",
                     segments: ["s1"],
+                    divineSegments: [],
                     paragraphSig: "p",
                     paragraphChunks: [],
                     verseSpanXml: "",
@@ -85,6 +86,7 @@ describe("versificationPlan", () => {
                 {
                     text: "s20",
                     segments: ["s20"],
+                    divineSegments: [],
                     paragraphSig: "p",
                     paragraphChunks: [],
                     verseSpanXml: "",
@@ -98,6 +100,7 @@ describe("versificationPlan", () => {
                 {
                     text: "b1",
                     segments: ["b1"],
+                    divineSegments: [],
                     paragraphSig: "p",
                     paragraphChunks: [],
                     verseSpanXml: "",
@@ -109,6 +112,7 @@ describe("versificationPlan", () => {
                 {
                     text: "b21",
                     segments: ["b21"],
+                    divineSegments: [],
                     paragraphSig: "p",
                     paragraphChunks: [],
                     verseSpanXml: "",

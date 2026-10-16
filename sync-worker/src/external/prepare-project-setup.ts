@@ -31,7 +31,6 @@ import {
 import {
   previewSettingValue,
   resolveLanguageEditMinRole,
-  resolveTermbaseEditMinRole,
   LANGUAGE_SETTINGS_KEYS,
   type PatchSettingsOp,
 } from './commands-patch-settings'
@@ -58,6 +57,7 @@ import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { loadProjectSettings } from '../../../db/shared/projects'
 import { validateSettingsKeyValue } from '../../../db/shared/project-settings-keys'
 import { loosensPolicy } from '../../../db/shared/policy-direction'
+import { loadInheritedPolicyDefaults } from '../../../db/shared/validation-threshold'
 import { BRIEF_SETTINGS_KEY, isBriefFieldId, isBriefPatchSatisfied, readBriefFromSettings } from '../../../db/shared/brief'
 import { REQUIRED_ROLE } from '../events/role-policy'
 
@@ -92,10 +92,8 @@ export async function projectSetupFloor(
   if (cmd.imports?.length) {
     floor = Math.max(floor, REQUIRED_ROLE['file.create'], REQUIRED_ROLE['source.cell.create'])
   }
+  // No termbase floor: `terminology` is refused at prepare (AQU-1724).
   const allOps = [...ops.plain, ...ops.policy]
-  if (allOps.some((op) => op.key === 'terminology')) {
-    floor = Math.max(floor, await resolveTermbaseEditMinRole(db, projectId))
-  }
   if (allOps.some((op) => LANGUAGE_KEY_SET.has(op.key))) {
     floor = Math.max(floor, await resolveLanguageEditMinRole(db, projectId))
   }
@@ -162,7 +160,7 @@ export async function prepareProjectSetup(
   }
 
   const current = await loadProjectSettings(db, urlProjectId)
-  const loosening = loosensPolicy(ops.policy, current.settings)
+  const loosening = loosensPolicy(ops.policy, current.settings, await loadInheritedPolicyDefaults(db, urlProjectId))
   if (loosening.length > 0) {
     return fieldError(
       'permission_denied',

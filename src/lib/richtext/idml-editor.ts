@@ -14,7 +14,7 @@ import {
   idmlStyleCatalogFromMetadata,
 } from "@/lib/idml/style-catalog"
 import { sanitizeIdmlEditorHtml } from "@/lib/richtext/editor-content"
-import { decorateIdmlStyleElement } from "@/lib/richtext/idml-style-display"
+import { decorateIdmlStyleElement, syncIdmlStyleSegmentEmpty } from "@/lib/richtext/idml-style-display"
 import { t } from "@/lib/i18n/standalone"
 
 export const IDML_PARAGRAPH_NODE_NAME = "idmlParagraph"
@@ -429,17 +429,64 @@ export function idmlDeletionRange(
   granularity: IdmlDeleteGranularity,
 ): IdmlRange | null {
   if (!selection.empty) return { from: selection.from, to: selection.to }
-  const position = selection.from
-  const slot = editableSlotAt(doc, position)
-  if (!slot) return null
+  const caret = editableSlotForCaret(doc, selection.from)
+  if (!caret) return null
   const within = slotDeletionRange(
-    slot.start,
-    slotPlainText(slot.node),
-    position - slot.start,
+    caret.slot.start,
+    slotPlainText(caret.slot.node),
+    caret.position - caret.slot.start,
     direction,
     granularity,
   )
-  return within ?? adjacentSlotDeletionRange(doc, slot.start, direction, granularity)
+  return within ?? adjacentSlotDeletionRange(doc, caret.slot.start, direction, granularity)
+}
+
+/**
+ * AQU-1962: the position to read or write at for a caret that sits *between*
+ * two protected runs instead of inside one.
+ *
+ * Adjacent runs put a caret position in the paragraph itself, outside every
+ * slot — the paragraph's content is slot and token nodes, so it is a textblock
+ * and that boundary is a real place to click. Nothing there belongs to a slot,
+ * so a caret left at the boundary read as "not in an editable slot": a typed
+ * character was re-aimed at the cell's FIRST editable run (so a space typed
+ * between "Иафета" and "и" appeared at the start of the cell, which reads as
+ * the cell refusing it) and Backspace/Delete found no range at all. Separating
+ * a word pair InDesign split across runs is exactly the edit that lands here.
+ *
+ * The run before the caret wins, the way a caret inserts into the text on its
+ * left; a boundary against a protected token or the paragraph edge has no
+ * editable run to take the edit and stays unresolved.
+ */
+export function idmlBoundarySlotPosition(
+  doc: ProseMirrorNode,
+  position: number,
+): number | null {
+  if (position < 0 || position > doc.content.size) return null
+  const resolved = doc.resolve(position)
+  if (resolved.parent.type.name !== IDML_PARAGRAPH_NODE_NAME) return null
+  const before = resolved.nodeBefore
+  if (before?.type.name === IDML_SLOT_NODE_NAME && before.attrs.editable === true) {
+    return position - 1
+  }
+  const after = resolved.nodeAfter
+  if (after?.type.name === IDML_SLOT_NODE_NAME && after.attrs.editable === true) {
+    return position + 1
+  }
+  return null
+}
+
+/** The editable slot a caret edits, snapping a run boundary into its run. */
+function editableSlotForCaret(
+  doc: ProseMirrorNode,
+  position: number,
+): { position: number; slot: { start: number; node: ProseMirrorNode } } | null {
+  const direct = editableSlotAt(doc, position)
+  if (direct) return { position, slot: direct }
+  const snapped = idmlBoundarySlotPosition(doc, position)
+  if (snapped === null) return null
+  const slot = editableSlotAt(doc, snapped)
+  return slot ? { position: snapped, slot } : null
 }
 
 export function isEditableIdmlSelection(selection: {
@@ -665,6 +712,21 @@ const IdmlSlot = TiptapNode.create({
   isolating: true,
   selectable: false,
   defining: true,
+  /**
+   * AQU-1962: a slot's text is translator content, so its spaces are content
+   * too — including the one at a run boundary, which is the whole point of the
+   * edit when InDesign split a word pair across runs ("книги" | "Бытие").
+   *
+   * ProseMirror's default parse normalization drops whitespace at the edges of
+   * a node's inline content, so without this the schema does NOT hold that
+   * invariant: a boundary space survives today only because `TranslatedEditor`
+   * passes `preserveWhitespace: "full"`, by hand, at each of the two places it
+   * parses a slot document. Any third parse — another editor, a `setContent`
+   * that forgets the option — silently merged the words back together, and the
+   * next commit then wrote the merged text. Declaring it on the node puts the
+   * invariant where it cannot be forgotten.
+   */
+  whitespace: "pre",
 
   addAttributes() {
     return {
@@ -726,6 +788,13 @@ const IdmlSlot = TiptapNode.create({
           editor.storage.idmlTransactionGuard?.styleCatalog,
           editor.storage.idmlTransactionGuard?.paragraphStyleId,
         )
+        let text = ""
+        let hasBreak = false
+        currentNode.forEach((child) => {
+          if (child.type.name === "hardBreak") hasBreak = true
+          else if (child.isText) text += child.text ?? ""
+        })
+        syncIdmlStyleSegmentEmpty(dom, text, hasBreak)
       }
       render(node)
       return {
@@ -1039,16 +1108,16 @@ export function idmlDiagnosticMessage(diagnostic: IdmlDiagnostic | undefined): s
  * accepting-then-flagging.
  *
  * `\n` is preserved (it becomes an InDesign `<Br/>`); a run of spaces/tabs is
- * collapsed to a single space, and any space that would abut a line break, a
- * slot boundary, or an existing space is dropped. Only literal ASCII spaces and
- * tabs are touched, so meaningful non-breaking spaces and other Unicode
- * whitespace pass through unchanged.
+ * collapsed to a single space. A space that would abut a line break or an
+ * existing space is dropped. A paste also drops a space at either edge of the
+ * slot. While typing, a space at the slot start is kept: it is the first
+ * character of that Bold or Regular run, and the word can follow it. A lone
+ * trailing space typed at the end of a word is kept too, so the next word can
+ * follow. Only literal ASCII spaces and tabs are touched, so meaningful
+ * non-breaking spaces and other Unicode whitespace pass through unchanged.
  *
  * `before`/`after` are the slot characters flanking the insertion point (empty
- * at a slot edge or against a protected token / line break). `mode` separates a
- * paste — where a space landing at the slot end is trailing whitespace and is
- * removed — from live typing, where a lone trailing space begins the next word
- * and must survive so the user can keep typing.
+ * at a slot edge or against a protected token / line break).
  */
 export function sanitizeIdmlSlotInsertion(
   text: string,
@@ -1061,9 +1130,9 @@ export function sanitizeIdmlSlotInsertion(
   return lines
     .map((line, index) => {
       let next = line.replace(/[ \t]+/g, " ")
-      // Trim a leading space when it would abut the slot start, a preceding
-      // line break (any line after the first), or an existing space.
-      if (index > 0 || before === "" || before.endsWith(" ")) {
+      // Trim a leading space after a line break, against an existing space, or
+      // — on paste — at the slot start. Typing may begin the run with a space.
+      if (index > 0 || before.endsWith(" ") || (mode === "paste" && before === "")) {
         next = next.replace(/^ +/, "")
       }
       // Trim a trailing space when it would abut a following line break (any

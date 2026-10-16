@@ -6,7 +6,7 @@
 
 import { describe, it, expect } from "vitest"
 import { categorizeAiError } from "./ai-error"
-import { HOSTED_TTS_CREDIT_CAP_BODY } from "./tts-engine-error"
+import { errorFromHostedTts, errorFromVoiceConvert, HOSTED_TTS_CREDIT_CAP_BODY } from "./tts-engine-error"
 
 const OPENROUTER_413 =
   'Completion failed: 413 {"error":{"message":"request too large for model `meta-llama/llama-3.3-70b-instruct`, max 131072 tokens","code":413},"user_id":"user_2abc"}'
@@ -71,12 +71,83 @@ describe("categorizeAiError — AI request failures (AQU-891)", () => {
     const result = categorizeAiError("Daily AI limit reached — resets at midnight UTC")
     expect(result.category).toBe("daily-quota-exceeded")
   })
+
+  // AQU-1869: the platform spend ceiling. Its server message also says "resets
+  // at midnight UTC", so without its own earlier branch it would wear the
+  // personal-quota copy and tell the user they had used up their own limit.
+  it("separates the platform spend ceiling from the user's own daily quota", () => {
+    // The real producer's output, not a hand-written string: the ceiling's 503
+    // body reaches the user only through these formatters, and a fixture that
+    // skipped them would not prove the composition.
+    const ceilingBody = JSON.stringify({
+      error: "ai_spend_ceiling_reached",
+      message:
+        "AI is temporarily unavailable: the platform's daily AI spend ceiling has been reached. It resets at midnight UTC.",
+    })
+    for (const err of [errorFromHostedTts(503, ceilingBody), errorFromVoiceConvert(503, ceilingBody)]) {
+      const result = categorizeAiError(err.message)
+      expect(result.category).toBe("ai-spend-ceiling")
+      expect(result.title).toMatch(/unavailable/i)
+      // It must not read as the user's own allowance, it must not be mistaken
+      // for an unconfigured voice engine, and it must not dump the machine
+      // payload the way `unknown` would.
+      expect(result.body).not.toMatch(/daily AI limit reached/i)
+      expect(result.body).not.toMatch(/isn't configured|not set up/i)
+      expect(result.body).not.toContain("{")
+      expect(result.body).toMatch(/midnight UTC/)
+    }
+  })
 })
 
 // AQU-646 stage 4c: the audio failures. Every one of these reached a user as a
 // raw server fragment before this round — not because the branches below were
 // missing, but because `extractStatus` could not read the format this app
 // writes, so all of them fell through to `unknown`.
+describe("categorizeAiError — a protected-IDML refusal (AQU-1964)", () => {
+  // The message the drafting pipeline throws for the reported cell. An IDML
+  // cell id IS its anchor locator, which is why this sentence carries square
+  // brackets and runs long — the two things `looksLikeMachineDump` rejects.
+  const PROTECTED_ANCHOR_REFUSAL =
+    "The AI draft changed a protected IDML anchor in cell "
+    + "Stories/Story_u363.xml#/idPkg:Story[1]/Story[1]/ParagraphStyleRange[11]:part-1; "
+    + "a repair pass also failed. Nothing was saved. "
+    + "IDML anchor sequence does not match its metadata hash"
+
+  it("explains the refusal instead of falling through to the generic line", () => {
+    const result = categorizeAiError(PROTECTED_ANCHOR_REFUSAL)
+
+    expect(result.category).toBe("protected-format")
+    expect(result.title).toBe("Protected formatting stopped this draft")
+    // The reader is told the draft was discarded AND what to do next — the
+    // "nothing happened" report is exactly the absence of this sentence.
+    expect(result.body).toMatch(/discarded/i)
+    expect(result.body).toMatch(/draft the cell again|type the translation/i)
+    expect(result.body).not.toBe(
+      categorizeAiError("some wholly unrecognized {payload}").body,
+    )
+    // The locator still reaches support through the technical detail.
+    expect(result.raw).toBe(PROTECTED_ANCHOR_REFUSAL)
+  })
+
+  it("would have been swallowed as a machine dump without its own branch", () => {
+    // Pins the root cause so a future shortening of the message does not make
+    // this test pass for the wrong reason.
+    expect(PROTECTED_ANCHOR_REFUSAL.length).toBeGreaterThan(180)
+    expect(PROTECTED_ANCHOR_REFUSAL).toMatch(/[[\]]/)
+  })
+
+  it("covers the refusals thrown before any repair pass runs", () => {
+    for (const raw of [
+      "The AI draft changed a protected IDML anchor in cell c1; nothing was saved.",
+      "The AI returned no text inside the editable IDML slots for cell c1; nothing was saved.",
+      "Cell c1 is missing protected IDML slot 3.",
+      "Cell c1 does not contain one canonical IDML paragraph.",
+    ]) {
+      expect(categorizeAiError(raw).category).toBe("protected-format")
+    }
+  })
+})
+
 describe("categorizeAiError — the audio failures (AQU-646 stage 4c)", () => {
   it("reads a status written in brackets, which is how every audio error writes it", () => {
     // The literal shape from upload.ts — the one audio error that still rides

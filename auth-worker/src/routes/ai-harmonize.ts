@@ -18,7 +18,7 @@ import type { Env, Variables } from "../types"
 import { ROLE } from "../types"
 import { authMiddleware } from "../middleware/auth"
 import { resolveProjectRole } from "../services/project-permissions"
-import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../../db/shared/rate-limit"
+import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 import { callJev } from "../lib/jev/client"
 import { JEV_MODEL } from "../../../src/lib/completion/seam-request"
 import { harmonizerFindings, planHarmonizer } from "../../../src/lib/harmonizer/runner"
@@ -78,11 +78,17 @@ aiHarmonize.post("/passage", authMiddleware, zValidator("json", passageSchema), 
   if (!run.request) return c.json({ suggestions: [], jev: "skipped" as JevOutcome })
 
   const db = c.env.AQUILLA_PG
-  const identifier = `user:${user.id}`
-  if ((await countRecentRateLimitEvents(db, "ai_harmonize", identifier)) >= MAX_PER_USER_PER_WINDOW) {
+  // AQU-1843: atomic, and FAIL CLOSED — the window bounds Jev spend here, and
+  // "no suggestions" is this route's documented degradation.
+  const harmonizeLimit = await enforceRateLimit(db, {
+    kind: "ai_harmonize",
+    identifier: userRateLimitIdentifier(user.id),
+    limit: MAX_PER_USER_PER_WINDOW,
+    failMode: "closed",
+  })
+  if (!harmonizeLimit.allowed) {
     return c.json({ suggestions: [], jev: "skipped" as JevOutcome, rateLimited: true })
   }
-  await recordRateLimitEvent(db, "ai_harmonize", identifier)
 
   const called = await callJev(c.env, run.request, JEV_TIMEOUT_MS)
   if (!called.ok) return c.json({ suggestions: [], jev: called.reason as JevOutcome })

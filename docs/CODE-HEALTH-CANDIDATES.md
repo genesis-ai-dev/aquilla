@@ -1637,3 +1637,343 @@ pattern. It presents as a run that produces no output and leaves the previous lo
 which looks exactly like the command silently failing. Use `kill -9` on PIDs collected via
 `ps -eo pid,args | grep -E "[w]orkerd serve"` (bracket the first letter), never a bare
 `pkill -f`.
+
+## 2026-10-12 — `planLaneBatch`'s duplicated report row shipped; the rest of that file deferred
+
+- **Done this run** (theme 2, complexity reduction inside one file):
+  `src/lib/lanes/lane-batch-backfill.ts`. All 15 `unresolvable.push({ … })` sites inside
+  `planLaneBatch`'s per-project loop spelled out `projectId: project.id` and
+  `projectName: project.name` verbatim; a local `unresolved(rule, key, reason)` closure
+  declared once at the top of that loop replaced them. Net −55 lines, one file, no public
+  surface change (`UnresolvableRow` property order is preserved by the helper's object
+  literal, which matters because `scripts/neon-backfill-lane-batch.ts` serializes the report
+  to JSON).
+- **Deferred — `planLaneBatch` is still ~440 lines in a 1,201-line file.** Two seams exist
+  and neither fits this run's theme or budget:
+  - The report renderer (`cell`, `countLines`, `renderLaneBatchReport`, ~105 lines at the
+    end of the file) shares no closure state with the planner and would move cleanly to a
+    `lane-batch-report.ts` re-exported from the original path — but that is theme 5, and on
+    its own it only takes the file from 1,201 to ~1,100 lines, so it buys little.
+  - Splitting `planLaneBatch`'s nine per-entity passes (lanes, scopes, invites, links,
+    audio, audio validators, backtranslations, concepts, progress) into functions would need
+    all of `counts`, `writes`, `unresolvable`, `scopeZero`, `scopeTwo`, `takeLane` and
+    `progressFiles` threaded through as parameters — a real refactor whose proof would want
+    a characterization test this routine cannot add.
+  - **Proof it would need**: the existing `lane-batch-backfill.test.ts` (15 tests) plus a
+    byte-diff of `renderLaneBatchReport(planLaneBatch(snapshot))` over a real snapshot
+    before and after, since the markdown report and the JSON sidecar are both consumed by
+    the ops script.
+- **Deliberately NOT touched in the same file**: the two 4-branch `assigned.rule === …`
+  ladders that increment `counts.audio.byRule.*` (926-929) and
+  `counts.backtranslations.byRule.*` (999-1002). They look like the
+  if/else-ladder-to-lookup-table smell, but each ladder's `else` is a catch-all onto
+  `emptyTag` over a *wider* union than its own `byRule` record carries (`AssignmentRule`
+  includes `targetEvent`, which `assignAudio` cannot return but the type permits), so a
+  lookup rewrite needs a `rule in byRule ? rule : "emptyTag"` guard that is cleverer than
+  the eight lines it replaces. Left as-is on purpose.
+
+### Baseline 2026-10-12: three red test files on `dev` (all reproduce in isolation)
+
+Clean tree at `origin/dev` `68679349`. `pnpm lint` fails (1 error) and `pnpm test` fails
+(3 files / 5 tests); `pnpm build` is green. None are full-suite ordering flakes — each was
+re-run on its own and failed the same way, so future runs should expect them:
+
+- **`pnpm lint`** — exit 1, 1 error + 993 warnings:
+  `auth-worker/src/routes/monday.ts:801:55` `no-control-regex` ("Unexpected control
+  character(s) in regular expression: \x00, \x1f"). `monday.ts` is the in-flight Monday.com
+  nudge work CLAUDE.md calls out, so it is frozen for this routine twice over.
+- **`src/lib/i18n/namespaces/no-duplicates.test.ts`** — `does not let one exception excuse a
+  second unrelated collision`: `"Draft"` now collides across
+  `editor.batchFile.confirmDraft` and `autopilot.graph.node.draft` with only one documented
+  exception between them. This is a real catalog regression on trunk, not an inert orphan —
+  and per the 2026-09-21 entry above, a red whole-catalog invariant test freezes every
+  `src/lib/i18n/namespaces/*.ts` file for this routine. **Worth a ticket.**
+- **`src/partner-integrations/biblica/__tests__/idml.biblica-scripture.test.ts`** — 3 of 4
+  tests fail with `Missing imported cell for "In the beginning God created the heavens and
+  the earth."` at the shared `cellFor` helper, i.e. the import step produced no cell for the
+  fixture's first verse. Reproduced alone after a green `pnpm build` (so a missing
+  `packages/idml-roundtrip/dist` is not the cause). Partner-owned path. **Worth a ticket.**
+- **`src/lib/egress/zip-core.test.ts`** — `packZip > survives output larger than one flush
+  window` times out at the 60s `testTimeout` (62.4s in-suite, 79.3s alone). Reproduces in
+  isolation, but it is a wall-clock budget failure on a shared container rather than a
+  logic failure, so it may well be green on CI hardware. Lower confidence than the two
+  above; check against a CI run before filing.
+
+### Container setup 2026-10-12: the `--ignore-scripts` dance is no longer needed
+
+`ONNXRUNTIME_NODE_INSTALL=skip pnpm i` installs cleanly (exit 0, 20s) and needs no
+`pnpm rebuild` follow-up and no edit to `pnpm-workspace.yaml`. The env var is the
+`onnxruntime-node` install script's own documented skip flag (`script/install.js`), so it
+suppresses exactly the CUDA-EP download that `ECONNRESET`s on the proxy and nothing else.
+Prefer this over both earlier recipes.
+
+### Smoke 2026-10-12: 92/99, and a NEW full-suite-only flake worth a ledger line
+
+`npx tsx scripts/e2e-shard.ts 1 -- smoke.spec` (one shard, per the 2026-10-09 recipe):
+**92 passed, 7 failed, 18.7m.** Six of the seven are the documented Chromium-revision-gap
+media set from the 2026-10-02 run, at their current line numbers after intervening churn:
+`import-and-edit.smoke.spec.ts:177` (imported video keeps its authenticated picture — was
+`:138`), `import-and-edit.smoke.spec.ts:333` × 3 (the YouTube srt/vtt/sbv caption exports —
+was `:294`), and `import-media-captions.smoke.spec.ts:132` × 2 (embedded m4a/mp4). That
+entry's standing advice holds: do not read them as an import regression without a machine
+carrying the real rev-1243 Chromium.
+
+**The seventh is new to this ledger**: `collab/bt-edit-locked-for-reviewer.smoke.spec.ts:79`
+("BT Edit is locked with Contributor+ tooltip for reviewer") failed at line 136 —
+`expect.poll(() => hasPersistedBacktranslation(…, "fr"), { timeout: 30_000 }).toBe(true)`
+never became true, i.e. alice's backtranslation never showed up server-side within 30s,
+before the test even reaches the reviewer-lock assertion the spec is named for.
+
+It is a **full-suite-only flake, A/B'd rather than assumed**. Both arms were re-run as a
+single-spec shard in the same container:
+
+| arm | result |
+| --- | --- |
+| `lane-batch-backfill.ts` reverted to `HEAD~1` (pristine `dev`) | 1 passed, 19.0s |
+| the shipped change in place | 1 passed, 17.7s |
+
+Same spec, same stack, passes either way — so it is ordering/timing under the full 99-test
+run, not this diff (which cannot reach the SPA at all: a grep of all 192 `dist/assets/*.js`
+chunks for `planLaneBatch`/`unresolvable` after a green `pnpm build` returns nothing, because
+the module's only non-test importer is the `scripts/neon-backfill-lane-batch.ts` ops script).
+Same family as the `AssignedToMe`/`TeamsList`/`ArchivedProjects` full-suite flakes under
+issue [#410](https://github.com/genesis-ai-dev/aquilla/issues/410), but on the Playwright
+side rather than vitest's. **So the expected smoke baseline in this container is 92/99, not
+88/96** — the four-test delta from the 2026-10-02 figure is spec growth plus
+`project-trash` and `agent-connection` having since been fixed; neither appeared this run.
+
+**And one more re-confirmation of the stale-wrangler rule, because it bit again and cost a
+whole arm**: killing `wrangler`/`workerd` and *immediately* launching the next shard is not
+enough. The first attempt at arm B died at `[e2e-up] fatal: Error: [sync] timed out waiting
+for :9788` / `exit 143` — the previous stack's processes were gone from `ps` but the port was
+still held. Poll until **both** `ps -eo pid,comm | grep -E "workerd|wrangler"` and
+`ss -ltn | grep -E "9787|9788|6173"` come back empty before re-launching; the retry then
+booted and passed in 18.8s.
+
+## 2026-10-14 — doc-drift run: the abandoned-monorepo (`apps/*` / `packages/*`) path pointers
+
+- **Done this run** (theme 6, comment/doc drift), 9 files, comment-only, 21 lines changed:
+  every live-framed reference in `src/` to the two abandoned layouts CLAUDE.md warns about
+  (the AD-11 `apps/*` monorepo and the `packages/*` shared-libs tree). Each rewritten pointer
+  was verified to resolve at its real path before the edit:
+  - `src/lib/audio/voice-clone.ts:1` — `apps/sync` → `sync-worker` (routes confirmed live at
+    `sync-worker/src/voice-convert.ts`, mounted in `index.ts:422-425`).
+  - `src/lib/sync/cell-audio-read-types.ts:2`,
+    `src/lib/sync/branching-search-read-types.ts:3`,
+    `src/lib/sync/branching-search-passages-read-types.ts:3` — `apps/sync/src/events/*` →
+    `sync-worker/src/events/*` (all three route files confirmed present).
+  - `src/lib/sync/bulk-import.ts:1` — `apps/sync` → `sync-worker` (`POST /import` is
+    `handleBulkImportRequest`, `sync-worker/src/index.ts:49`).
+  - `src/lib/sync/sync-worker-host.ts:3` — `cd apps/sync && wrangler dev` →
+    `cd sync-worker && wrangler dev`. Left the `:8787` DEV_HOST constant alone: it is the
+    bare-`wrangler dev` default, and `scripts/dev-stack.ts:541` overrides it with
+    `VITE_SYNC_WORKER_HOST=127.0.0.1:8789`, so the comment is accurate as written.
+  - `src/lib/sync/cells-read-types.ts:7-10`, `src/lib/sync/history-read-types.ts:4` — dropped
+    the "will move into `packages/data-model` in Phase 3" plan (that layout was abandoned)
+    in favour of the real reason the mirrors stay hand-authored: `tsconfig.app.json`'s
+    `include` is `["src"]`, so the SPA cannot import worker sources. Verified by grep that
+    nothing in `src/` imports from `*-worker/src`.
+  - `src/components/ProjectWorkspace.tsx:540-546` — the highest-value one. It claimed "the
+    AD-11 plan carves import into a standalone apps/import Worker, but that app is still a
+    placeholder shell — routing users there is a dead end", describing a shell app that does
+    not exist in this tree at all. Reframed historically (the convention this ledger has used
+    since 2026-09-02: historical framing is correct, live framing is drift).
+- **Deliberately NOT touched**: `src/lib/migrate/ids.ts:10` cites
+  `tools/legacy-user-import, apps/migrate per aquilla-specs/30-aquilla-alpha/migrate.md`.
+  Those are the Rust migrate tools in the *separate* aquilla-alpha repo, not this repo's
+  abandoned layout — correct as-is, do not "fix" it. Same for every `03-data-model.md`
+  mention (a spec filename, not `packages/data-model`) and every `chat-worker` mention in
+  `src/lib/completion/completion-service.ts`, `auth-worker/src/{index,routes/chat,types}.ts`
+  and `scripts/{dev-stack,e2e-up}.ts` — all already framed as "former"/"folded in".
+
+### Deferred: the same drift in `auth-worker/` (3 lines, 2 files)
+
+- `auth-worker/src/routes/sync-token.ts:8` ("must match apps/sync/src/auth.ts
+  SyncTokenClaims"), `auth-worker/src/types.ts:451` (same pointer) and
+  `auth-worker/src/types.ts:565` ("mirrors src/lib/frontier/roles.ts and apps/sync/").
+  All three should read `sync-worker/src/auth.ts` / `sync-worker/`.
+- `auth-worker/src/types.ts:394` cites `apps/identity/migrations/0001_initial.sql`. Needs a
+  judgement call this run did not spend budget on: per CLAUDE.md `auth-worker/migrations/` is
+  retained only as a historical D1 record, so the right fix may be historical framing rather
+  than a path swap — check whether the cited table shape still matches
+  `db/postgres/schema.sql` before rewording.
+- **Why deferred**: a different package with its own test universe (`cd auth-worker &&
+  npm test`), which this run neither baselined nor ran, and the `types.ts:394` line needs the
+  schema check above. ~4 lines of work; cheap, but it needs its own baseline.
+- **Proof needed**: `cd auth-worker && npm test` green before and after, plus the root
+  `pnpm lint`/`pnpm build`/`pnpm test` gate (auth-worker is in `tsc -b`'s project graph).
+
+### New: `src/partner-integrations/biblica/bible-swap/bibleVerseIndexSerialize.ts` — dead, but partner-owned
+
+- 51 lines, 4 exports (`SerializedVerseEntry`, `SerializedBibleVerseIndex`,
+  `serializeBibleVerseIndexForAnalysis`, `deserializeBibleVerseIndexForAnalysis`), and a
+  word-boundary grep for each across `src`, `e2e` and `scripts` returns nothing outside the
+  defining file. Its own doc comment says it exists "for passing a Bible verse index between
+  worker threads during compatibility analysis"; `compatVerseIndex.ts` is the live sibling.
+- **Why deferred**: `src/partner-integrations/<partner>/` is partner-owned per CLAUDE.md and
+  `docs/PARTNER-INTEGRATIONS.md`. Deleting a publisher's file is Biblica's call, not a
+  routine cleanup's, even when it is provably unreferenced.
+- **Proof needed**: zero-importer re-verification at the time of deletion, plus `npx tsx
+  scripts/make-public-copy.ts` still passing and the partner's own specs under
+  `e2e/specs/partner-integrations/biblica/` green — and a partner-side sign-off that the
+  worker-thread path it was written for is not being revived.
+
+### Zero-importer sweep, 2026-10-14: no new SPA orphans
+
+A fresh repo-wide sweep (every non-test `src/**/*.ts{,x}`, matching `"…/<stem>"` in any
+import/export specifier across `src`, `e2e`, `scripts`, all four worker packages, `parity`
+and the HTML entries) returned only known entries: the 11 remaining
+`src/components/import/*` files (blocked on issue #410 — note the cluster is 11 now, not the
+15 the 2026-09-18 entry logged, since intervening deletions), the three deliberately-kept
+`src/components/ui/*` primitives, and the Biblica file above. **`src/components/ui/toggle-group.tsx`
+has since gained a real importer** — `src/components/import/MediaImportPreviewDialog.tsx`,
+itself live — and has dropped off the list; prune it from the 2026-09-18 "unused shadcn/ui
+primitives" note's file list (`attachment`, `item`, `bar-spinner` remain).
+
+### Candidate: ~hundreds of `export`ed types in `src/lib/` with no cross-file referent
+
+- **Found**: a dead-*export* sweep (every `export (async function|function|const|class|type|
+  interface|enum) <Name>` in non-test `src/lib/**/*.ts`, then a word-boundary grep for
+  `<Name>` across `src`, `e2e`, `scripts`, all four workers and `parity`, excluding the
+  defining file) flags a very large number of hits — `src/lib/agent/` alone contributes 30+
+  (`personas.ts`'s `AgentPersona`/`AgentPersonaCapabilities`/`AGENT_READ_SOURCES`,
+  `run-state.ts`'s `TimelineItem`/`ProposalItem`/`TextItem`, `context-chip.ts`'s six tuning
+  constants, …). Dropping the `export` keyword on a type used only inside its own file is
+  mechanically behavior-preserving and `pnpm build` proves it.
+- **Why deferred, and why it may not be worth doing at all**: the sweep's raw output is in
+  the hundreds, so any single run could only take an arbitrary slice, and the slice would
+  touch far more than 8 files for no reader-facing gain. More importantly the smell is
+  ambiguous: in this repo an exported type next to its exported function is often the
+  subsystem's *documented* surface (the `*-read-types.ts` mirrors this run just reworded are
+  exactly that), and `export`ing a tuning constant is how several modules make it
+  test-visible — so a mechanical `export`-stripping pass would erode intent, not accidental
+  complexity. Not a rotation theme as written.
+- **Proof it would need**: beyond `pnpm build`, a human call per subsystem on whether the
+  type is surface or accident. Worth asking Ryder whether the repo wants a
+  strictly-used-only export policy before any run spends budget here; if the answer is no,
+  delete this entry rather than re-deriving the sweep.
+
+### Baseline 2026-10-14: `dev` is GREEN on all three gates — the first time in this ledger
+
+Clean tree at `origin/dev` `230fff9a`. Worth recording because the five preceding runs all
+opened with a red trunk and the ledger's freezes were written against that:
+
+| gate | result |
+| --- | --- |
+| `pnpm lint` | **exit 0** — 0 errors, 999 warnings |
+| `pnpm build` | **exit 0** |
+| `pnpm test` | **exit 0** — 1887 files passed / 2 skipped (1889); 21317 tests passed / 23 skipped (21340), 1231s |
+
+**Consequences for this ledger's standing freezes** — each should be re-checked by the next
+run that wants the work, not assumed still blocked:
+
+- The 2026-10-12 `monday.ts` `no-control-regex` lint error is **gone**; `pnpm lint` has no
+  errors at all now. (`auth-worker/src/routes/monday.ts` is still the in-flight Monday work
+  CLAUDE.md calls out, so it stays frozen on that ground alone.)
+- `src/lib/i18n/namespaces/no-duplicates.test.ts` is **green** — the `"Draft"` collision
+  between `editor.batchFile.confirmDraft` and `autopilot.graph.node.draft` that the
+  2026-10-12 entry called "a real catalog regression on trunk" has been fixed upstream.
+  Likewise `src/lib/i18n/context.test.ts`. **So the i18n catalog is no longer frozen**, and
+  the `terminology.*` 51-orphan-key sweep logged above (the one queued since 2026-09-21,
+  waiting on exactly this) is unblocked — modulo its own all-or-nothing scope across
+  `namespaces/terminology.ts`, the six locale catalogs, `duplicate-exceptions.ts` and
+  `source-hashes.json`. **That is the obvious next run's theme.**
+- `src/partner-integrations/biblica/__tests__/idml.biblica-scripture.test.ts` (3 failing on
+  2026-10-12) and `src/lib/egress/zip-core.test.ts` (the 62s/79s timeout) are both **green**.
+  The zip-core one resolving on its own supports that entry's own low-confidence read of it
+  as a shared-container wall-clock budget failure rather than a logic failure.
+
+### Lint non-determinism, re-confirmed 2026-10-14 (and it is a gate-ordering trap)
+
+The nested-`packages/*/dist` entry above bit this run in a new way worth spelling out: the
+baseline `pnpm lint` ran **before** `pnpm build` and reported 999 problems; the final-gate
+`pnpm lint` ran **after** and reported 1001 — the two extra being
+`Unused eslint-disable directive (no-control-regex)` in
+`packages/idml-roundtrip/dist/{engine,legacy}.js`, which `pnpm build`'s `tsc -b` had just
+emitted. That reads exactly like a regression introduced by the run's own diff. Confirmed
+otherwise-identical by `rm -rf packages/idml-roundtrip/dist && pnpm lint` → back to 999
+problems, 0 errors, byte-identical file list. **Future runs: either run `pnpm lint` on both
+sides of the build-artifact state, or delete `packages/idml-roundtrip/dist` before the
+comparison lint.** Exit code stayed 0 either way (all warnings).
+
+### Container setup 2026-10-14: the smoke gate needs FOUR things this container lacks
+
+The root gate (`pnpm lint`/`build`/`test`) ran out of the box after
+`ONNXRUNTIME_NODE_INSTALL=skip pnpm i` (the 2026-10-12 recipe still holds). `pnpm
+test:e2e:smoke` did **not** — it died four times in a row, each time on a different missing
+prerequisite. Recipe, in order, so the next run does not rediscover it:
+
+1. **Chromium revision gap — now fatal, not just the six media failures.** The container
+   ships rev **1194** (`/opt/pw-browsers/chromium-1194`, Chromium 141.0.7390.37) while
+   `@playwright/test@1.63.0` resolves `chromium.executablePath()` to rev **1243**, so
+   `refuseMissingPlaywrightChromium()` (`scripts/lib/worktree-install-guard.ts:150`) exits
+   every shard in 0.0s before any stack boots. Do **not** run `playwright install` (the
+   environment forbids it). Shim the revision instead — container-only, no repo files, no
+   download:
+   ```sh
+   B=/opt/pw-browsers
+   mkdir -p $B/chromium-1243 $B/chromium_headless_shell-1243/chrome-headless-shell-linux64
+   ln -sfn $B/chromium-1194/chrome-linux $B/chromium-1243/chrome-linux64
+   cd $B/chromium_headless_shell-1243/chrome-headless-shell-linux64
+   for f in $B/chromium_headless_shell-1194/chrome-linux/*; do ln -sfn "$f" "$(basename "$f")"; done
+   ln -sfn $B/chromium_headless_shell-1194/chrome-linux/headless_shell chrome-headless-shell
+   ```
+   Two traps in that guard, both of which cost an iteration: `headlessShellPresent()` matches
+   on a file named exactly **`chrome-headless-shell`** (rev 1194 ships it as `headless_shell`,
+   hence the last symlink), and it only recurses into entries where `entry.isDirectory()` is
+   true — a symlink **to** a directory is not, so `chrome-headless-shell-linux64` has to be a
+   real directory of symlinks, not a symlinked directory.
+2. **Postgres is installed but not listening.** `/usr/lib/postgresql/16` exists with a
+   populated `/var/lib/postgresql/16/main`, but nothing is running and
+   `listen_addresses` is commented out. Uncomment it to `'localhost'` in
+   `/etc/postgresql/16/main/postgresql.conf`, then
+   `su postgres -c "/usr/lib/postgresql/16/bin/pg_ctl -D /var/lib/postgresql/16/main -o '-c config_file=/etc/postgresql/16/main/postgresql.conf' -w start"`.
+   If it reports `pre-existing shared memory block … still in use`, `rm -f
+   /var/lib/postgresql/16/main/postmaster.pid` first. **`ss` is not installed in this
+   container**, so `ss -ltn | grep 5432` silently returns nothing whether or not the port is
+   open — the 2026-10-12 stale-wrangler poll recipe's `ss` half is useless here; use
+   `psql -h 127.0.0.1` or `pgrep -af "postgres -D"` to decide.
+3. **The `aquilla` role, and the admin URL override.** `e2e-up` wants
+   `postgresql://aquilla:aquilla@localhost:5432/...`, so
+   `create role aquilla with login superuser password 'aquilla';`. Separately its admin
+   connection defaults to `postgresql:///postgres` — a *unix socket* as the OS user, which is
+   `root` here, and there is no `root` role. Use the escape hatch the script documents at
+   `scripts/e2e-up.ts:70`: `E2E_PG_ADMIN_URL="postgresql://aquilla:aquilla@localhost:5432/postgres"`.
+   No file edit needed.
+4. **The worker packages' own `node_modules` are absent**, and `scripts/mock-legacy-migration.ts`
+   imports `auth-worker/src/utils/password.ts` → `bcryptjs`, so boot 3/8 times out waiting for
+   `:10460/healthz` with a `ERR_MODULE_NOT_FOUND` buried in
+   `.e2e-logs/mock-legacy-migration.log` (the console only shows the healthz timeout — look in
+   that log). `cd sync-worker && npm ci` works; **`cd auth-worker && npm ci` does not** — see
+   the finding below. `npm ci --legacy-peer-deps` installs it and, being `ci`, provably leaves
+   `package-lock.json` untouched (`git status` clean), which matters because lockfiles are a
+   frozen zone for this routine.
+
+### Finding: `cd auth-worker && npm ci` is broken on trunk (ERESOLVE)
+
+Not caused by this run's diff — reproduced on a clean tree. `auth-worker/package-lock.json`
+pins `vitest@5.0.1` while `@cloudflare/vitest-pool-workers@0.22.0` declares
+`peer vitest@"^4.1.0"`, so `npm ci` exits with `ERESOLVE could not resolve` /
+`Conflicting peer dependency: vitest@4.1.11`. CLAUDE.md tells contributors to run
+`cd auth-worker && npm test` for this package, which is unreachable from a fresh clone
+without `--legacy-peer-deps`. `sync-worker`'s equivalent install is clean, so it is
+auth-worker-specific. **Worth a ticket** — this routine cannot fix it (dependencies and
+lockfiles are both frozen zones, twice over).
+
+### Smoke 2026-10-14: 95/101 — and the revision gap is now *confirmed*, not inferred
+
+`E2E_PG_ADMIN_URL=… npx tsx scripts/e2e-shard.ts 1 -- smoke.spec`: **95 passed, 6 failed,
+16.4m**. The six are precisely the documented media set, at unchanged line numbers:
+`import-and-edit.smoke.spec.ts:177` (imported video keeps its authenticated picture),
+`import-and-edit.smoke.spec.ts:333` × 3 (YouTube srt/vtt/sbv caption exports), and
+`import-media-captions.smoke.spec.ts:132` × 2 (embedded m4a/mp4). Zero new failures, and the
+2026-10-12 `collab/bt-edit-locked-for-reviewer.smoke.spec.ts:79` full-suite flake did **not**
+reproduce.
+
+Two corrections to the standing baseline figure: the suite is **101 tests now, not 99**
+(spec growth), so **the expected figure in this container is 95/101**. And the 2026-10-02
+entry's standing advice ("do not read them as an import regression without a machine carrying
+the real rev-1243 Chromium") is now more than advice — step 1 above *measures* the gap: this
+container has rev 1194/Chromium 141 and the shim is what makes the suite runnable at all, so
+those six failing against a deliberately mismatched browser is the expected outcome, not a
+finding.

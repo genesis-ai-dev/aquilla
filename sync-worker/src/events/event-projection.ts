@@ -33,6 +33,8 @@ import {
   audioLaneDualReadSql,
   audioLaneResolveBinds,
   audioLaneResolveSql,
+  audioSelectScopeBinds,
+  audioSelectScopeSql,
   backtranslationLaneMatchBinds,
   backtranslationLaneMatchSql,
   laneIdResolveBinds,
@@ -43,8 +45,25 @@ import {
 import { eventLaneTag } from '../../../src/lib/lanes/event-lane'
 import { visibleCellIdSql, visibleSourceSql } from './hidden-cells-scope'
 import { liveCellIdSql, liveSourceSql } from './tombstoned-cells-scope'
+import { coerceExternalIds } from '../../../src/lib/terminology/external-ids'
 
 export { laneIdResolveBinds, laneIdResolveSql } from './lane-id-sql'
+
+// AQU-1693: a concept's Bible entity link. Nothing upstream validates an
+// app-pushed term.* payload, so the projector coerces it: a malformed value
+// must never become a link that names someone.
+
+/** term.create: the link as JSON, or NULL (absent, malformed or empty). */
+function createExternalIdsJson(raw: unknown): string | null {
+  const ids = raw === undefined ? undefined : coerceExternalIds(raw)
+  return ids?.acai ? JSON.stringify(ids) : null
+}
+
+/** term.update, for COALESCE: NULL leaves the column alone (absent or malformed); `{}` unlinks. */
+function updateExternalIdsJson(raw: unknown): string | null {
+  const ids = raw === undefined ? undefined : coerceExternalIds(raw)
+  return ids === undefined ? null : JSON.stringify(ids)
+}
 
 // A single event row as it lives in Postgres. JSON.parse on `payload` is the
 // caller's responsibility — `payload` here is already an object.
@@ -1642,20 +1661,26 @@ export function buildEventProjectionStmts(
         throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
       }
 
-      // DELETE-on-unwaive (mirrors cell_validators): a row exists iff the rule
-      // is currently waived on this cell. `cell.waive` upserts one row per
-      // (cell, rule); `cell.unwaive` deletes it. The waived_ts guard keeps an
-      // out-of-order replay from clobbering a newer decision. Waivers do not
-      // touch cells.event_id or the file counters — they only suppress a QA
-      // blot in the client, so no `cells` / `files` recompute here.
+      // DELETE-on-unwaive (mirrors cell_validators): a row exists iff that
+      // finding is currently waived on this cell. `cell.waive` upserts one row
+      // per (cell, rule, matchHash); `cell.unwaive` deletes it. The waived_ts
+      // guard keeps an out-of-order replay from clobbering a newer decision.
+      // Waivers do not touch cells.event_id or the file counters — they only
+      // suppress a QA blot in the client, so no `cells` / `files` recompute.
+      //
+      // AQU-1740: an absent `matchHash` stores as `''` — "no finding named",
+      // i.e. the rule is waived across the whole cell. That is both the
+      // pre-AQU-1740 meaning of every stored row and what an un-updated client
+      // still emits, so old events replay to the same state they always did.
+      const matchHash = p.matchHash ?? ''
       if (event.kind === 'cell.waive') {
         stmts.push(
           db
             .prepare(
               `INSERT INTO cell_waivers (
-                project_id, file_id, cell_id, rule_id, reason, waived_by, waived_ts
-              ) VALUES (?, ?, ?, ?, ?, ?, ?)
-              ON CONFLICT(project_id, file_id, cell_id, rule_id)
+                project_id, file_id, cell_id, rule_id, match_hash, reason, waived_by, waived_ts
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(project_id, file_id, cell_id, rule_id, match_hash)
               DO UPDATE SET
                 reason     = excluded.reason,
                 waived_by  = excluded.waived_by,
@@ -1667,6 +1692,7 @@ export function buildEventProjectionStmts(
               event.fileId,
               event.cellId,
               p.ruleId,
+              matchHash,
               p.reason ?? null,
               event.author,
               event.serverTs,
@@ -1677,9 +1703,9 @@ export function buildEventProjectionStmts(
           db
             .prepare(
               `DELETE FROM cell_waivers
-                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND rule_id = ?`,
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND rule_id = ? AND match_hash = ?`,
             )
-            .bind(event.projectId, event.fileId, event.cellId, p.ruleId),
+            .bind(event.projectId, event.fileId, event.cellId, p.ruleId, matchHash),
         )
       }
 
@@ -1711,9 +1737,15 @@ case 'cell.audio.attach': {
       // decided what sounds. A SOURCE attach keeps the unscoped form: the clip
       // it declares is shared, so it genuinely does claim the slot in every
       // lane.
-      const attachDeselectLaneSql = audioRole === 'source' ? '' : ` AND ${audioLaneDualReadSql()}`
+      //
+      // AQU-1978: a RE-attach of a dub already on file deselects within that
+      // dub's own stored lane, not the event's tag. Re-attaches are routine and
+      // many name no lane (the word-timings write did not), and an absent tag
+      // reads as the `''` lane — another language's chosen take on this line.
+      // A brand-new take still has only the event's tag to go on, as before.
+      const attachDeselectLaneSql = audioRole === 'source' ? '' : ` AND ${audioSelectScopeSql()}`
       const attachDeselectLaneBinds =
-        audioRole === 'source' ? [] : audioLaneDualReadBinds(event.projectId, audioLane)
+        audioRole === 'source' ? [] : audioSelectScopeBinds(event.projectId, p.audioId, audioLane)
       stmts.push(
         db
           .prepare(
@@ -1899,13 +1931,24 @@ case 'cell.audio.attach': {
         )
         return ['cell_audio']
       }
+      // AQU-1978: selecting a dub already on file clears its siblings in THAT
+      // dub's stored lane, whatever tag the event carries — the same rule as a
+      // re-attach above. Handing the slot back to the shared source clip is a
+      // choice made in one lane, so that keeps the event's tag.
       stmts.push(
         db
           .prepare(
             `UPDATE cell_audio SET selected = 0
-              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND slot = ? AND audio_id != ?${selectLaneSql}`,
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND slot = ? AND audio_id != ? AND ${audioSelectScopeSql()}`,
           )
-          .bind(event.projectId, event.fileId, event.cellId, p.slot, p.audioId, ...selectLaneBinds),
+          .bind(
+            event.projectId,
+            event.fileId,
+            event.cellId,
+            p.slot,
+            p.audioId,
+            ...audioSelectScopeBinds(event.projectId, p.audioId, laneOfAudioEvent(event.payload)),
+          ),
       )
       stmts.push(
         db
@@ -2399,8 +2442,8 @@ case 'cell.audio.attach': {
             // is an idempotent no-op rather than a duplicate concept.
             `INSERT INTO concepts (
               concept_id, project_id, source_term, renderings, notes,
-              status, case_sensitive, match_options, created_by, created_at, updated_at, deleted_at
-            ) VALUES (?, ?, ?, ${STAMP_RENDERINGS_SQL}, ?, ?, ?, ?::text::jsonb, ?, ?, ?, NULL)
+              status, case_sensitive, match_options, external_ids, created_by, created_at, updated_at, deleted_at
+            ) VALUES (?, ?, ?, ${STAMP_RENDERINGS_SQL}, ?, ?, ?, ?::text::jsonb, ?::text::jsonb, ?, ?, ?, NULL)
             ON CONFLICT(concept_id) DO NOTHING`,
           )
           .bind(
@@ -2413,6 +2456,7 @@ case 'cell.audio.attach': {
             p.status,
             p.caseSensitive ? 1 : 0,
             p.match === undefined ? null : JSON.stringify(p.match),
+            createExternalIdsJson(p.externalIds),
             event.author,
             event.serverTs,
             event.serverTs,
@@ -2447,6 +2491,7 @@ case 'cell.audio.attach': {
                notes          = COALESCE(?, notes),
                case_sensitive = COALESCE(?, case_sensitive),
                match_options  = COALESCE(?::text::jsonb, match_options),
+               external_ids   = COALESCE(?::text::jsonb, external_ids),
                updated_at     = ?
              WHERE concept_id = ? AND project_id = ? AND deleted_at IS NULL`,
           )
@@ -2456,6 +2501,7 @@ case 'cell.audio.attach': {
             p.notes ?? null,
             p.caseSensitive === undefined ? null : p.caseSensitive ? 1 : 0,
             p.match === undefined ? null : JSON.stringify(p.match),
+            updateExternalIdsJson(p.externalIds),
             event.serverTs,
             p.conceptId,
             event.projectId,

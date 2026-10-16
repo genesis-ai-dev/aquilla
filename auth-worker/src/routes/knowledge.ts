@@ -393,7 +393,11 @@ async function handleOriginal(c: Context<AuthHonoEnv>, meta: KnowledgeDocMeta): 
     status: 200,
     headers: {
       "Content-Type": meta.contentType ?? "application/octet-stream",
-      "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(meta.name)}`,
+      // `attachment` + nosniff: the bytes are user-uploaded (a PDF has a
+      // scripting model), so they must never render inline on the API origin.
+      // The SPA reads this as a blob, so forcing a download costs no UX.
+      "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(meta.name)}`,
+      "X-Content-Type-Options": "nosniff",
     },
   })
 }

@@ -192,7 +192,7 @@ describe("worker deployment environment contract", () => {
     },
   )
 
-  // The release bot cuts release/YYYY/MM/DD-NN for the Nth slice cut on a given
+  // The Release cut workflow cuts release/YYYY/MM/DD-NN for the Nth slice cut on a given
   // day. Four checkers each decide whether a branch name counts as a release
   // branch: the three shell scripts here, plus isReleaseBranch in
   // release-plan.mjs. One shared table is what keeps their four regexes in
@@ -721,21 +721,25 @@ describe("worker deployment environment contract", () => {
 
     expect(ciWorkflow).not.toContain("cloudflare-version-deploy.mjs")
     expect(ciTriggers).not.toContain("push:")
-    expect(ciTriggers).not.toContain("pull_request:")
+    expect(ciTriggers).toContain("pull_request:")
     expect(ciTriggers).toContain("workflow_dispatch:")
     expect(workerTriggers).not.toContain("push:")
     expect(workerTriggers).toContain("workflow_dispatch:")
   })
 
-  it("keeps GitHub CI available only by explicit dispatch", () => {
+  it("runs the test gate on pull requests into dev and keeps dispatch", () => {
     const workflow = readRepoFile(".github", "workflows", "ci.yml")
     const triggers = workflow.slice(workflow.indexOf("\non:"), workflow.indexOf("\nconcurrency:"))
 
+    expect(triggers).toContain("pull_request:")
+    expect(triggers).toContain("branches: [dev]")
     expect(triggers).not.toContain("paths-ignore")
     expect(triggers).not.toContain("paths:")
-    expect(triggers).not.toContain("pull_request:")
     expect(triggers).not.toContain("push:")
     expect(triggers).toContain("workflow_dispatch:")
+    expect(workflow).toContain("Reporting success so a path-filter skip cannot block branch protection.")
+    expect(workflow).toContain("if: github.event_name == 'workflow_dispatch'")
+    expect(workflow).toContain("pnpm test:idml")
   })
 
   it("fails worker-suite change detection open for shared deployment inputs", () => {

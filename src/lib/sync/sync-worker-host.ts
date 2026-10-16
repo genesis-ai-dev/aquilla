@@ -1,6 +1,6 @@
 // Sync-worker host resolution for REST routes and the ProjectSync WebSocket.
 
-// Dev default assumes `cd apps/sync && wrangler dev`. Prod deploys must set
+// Dev default assumes `cd sync-worker && wrangler dev`. Prod deploys must set
 // VITE_SYNC_WORKER_HOST at build time. The value may carry a path segment
 // (e.g. `api.aquilla.app/sync`) when the worker is mounted under a subdomain
 // via Workers Routes — `syncWorkerHttpOrigin()` and the WS URL builder

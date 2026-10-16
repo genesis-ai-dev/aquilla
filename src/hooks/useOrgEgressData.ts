@@ -16,6 +16,7 @@ import { fetchAccessibleProjectsResult, type CloudProjectSummary } from "@/lib/s
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import {
   getPortfolio,
+  portfolioMainTargetLabel,
   portfolioSourceLabel,
   portfolioTargetLabel,
   type PortfolioLane,
@@ -160,7 +161,8 @@ export function useOrgEgressData(jwt: string | null, orgId: number | null): OrgE
       for (const p of projectsRes.projects) {
         const pf = portfolioById.get(p.id)
         const sourceLanguage = pf ? portfolioSourceLabel(pf) ?? "" : ""
-        const targetLanguage = pf ? portfolioTargetLabel(pf) ?? "" : ""
+        // AQU-1977: the project's main target language, not only its '' lane's.
+        const targetLanguage = pf ? portfolioMainTargetLabel(pf) ?? "" : ""
         projectMeta.set(p.id, {
           projectId: p.id,
           projectName: p.name,

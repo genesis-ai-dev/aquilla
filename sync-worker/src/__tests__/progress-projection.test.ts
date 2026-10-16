@@ -1177,3 +1177,93 @@ describe('file progress follows the lanes that exist (AQU-1594)', () => {
     ])
   })
 })
+
+// AQU-1977: since AQU-1594 a new project's first language is tagged with its
+// own name and there is no '' lane. A read naming no lane asked for '', found
+// no lane, and answered from the file counters with no chapters, every line
+// untranslated, and every other language's takes counted as this one's.
+describe('a read that names no lane (AQU-1977)', () => {
+  const P = 'proj-no-lane'
+  const F = 'bible'
+  const ES = 'e5e5e5e5'
+  const FR = 'f4f4f4f4'
+  const lanes = [
+    { id: 'a0a0a0a0', project_id: P, role: 'source', legacy_tag: null, position: 0 },
+    { id: FR, project_id: P, role: 'target', language: 'French', legacy_tag: 'French', position: 2 },
+    { id: ES, project_id: P, role: 'target', language: 'Spanish', legacy_tag: 'Spanish', position: 1 },
+  ]
+  const src = (cellId: string, ref: string) => ({
+    project_id: P, file_id: F, cell_id: cellId, side: 'source', type: 'verse',
+    value: `source ${cellId}`, canonical_ref: ref, event_id: `ev-${cellId}`, last_editor: 'alice',
+    last_edit_at: 1, validated: 0, endorsement_count: 0, word_count: 2,
+  })
+  const tgt = (cellId: string, laneId: string, tag: string) => ({
+    project_id: P, file_id: F, cell_id: cellId, side: 'target', target_lang: tag, lane_id: laneId,
+    value: `${tag} ${cellId}`, event_id: `tev-${cellId}-${tag}`, last_editor: 'alice',
+    last_edit_at: 2, validated: 0, endorsement_count: 0, word_count: 1,
+  })
+  const take = (cellId: string, laneId: string) => ({
+    project_id: P, file_id: F, cell_id: cellId, audio_id: `take-${cellId}-${laneId}`, lane_id: laneId,
+    slot: 'take', url: `local://${cellId}.webm`, selected: 1, deleted: 0, validator_count: 0,
+    event_id: `aev-${cellId}-${laneId}`, created_ts: 3,
+  })
+  const row = (laneId: string, filled: number) => ({
+    project_id: P, file_id: F, scope: 'file', section_key: '', lane_id: laneId,
+    total_count: 3, filled_count: filled, validator_histogram: {},
+    revision: 1, updated_at: 1, audio_count: 0, audio_validated_count: 0,
+  })
+
+  it("reads the file's progress in the project's first language", async () => {
+    const { db } = await makeTestDb({
+      files: [{ id: F, project_id: P, name: 'Genesis', event_id: 'file-event', cell_count: 3 }],
+      lanes,
+      file_section_progress: [row('a0a0a0a0', 0), row(ES, 2), row(FR, 1)],
+    })
+    const token = await makeTestToken(SECRET, { projectId: P, fileId: F })
+    const res = (await handleProgressReadRequest(
+      new Request(`https://w/api/v1/projects/${P}/files/${F}/progress`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET },
+    ))!
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as FileProgressResponse
+    expect(body.file).toMatchObject({ totalCount: 3, filledCount: 2 })
+  })
+
+  it("lands on the first line untranslated in that language", async () => {
+    const { db } = await makeTestDb({
+      files: [{ id: F, project_id: P, name: 'Genesis', event_id: 'file-event' }],
+      lanes,
+      cells: [
+        src('v1', 'GEN 1:1'), tgt('v1', ES, 'Spanish'), tgt('v1', FR, 'French'),
+        src('v2', 'GEN 1:2'), tgt('v2', FR, 'French'),
+        src('v3', 'GEN 1:3'),
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: P, fileId: F })
+    const res = (await handleProgressReadRequest(
+      new Request(`https://w/api/v1/projects/${P}/files/${F}/progress/first-open?unit=GEN&kind=untranslated`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET },
+    ))!
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ unit: 'GEN', kind: 'untranslated', cellId: 'v2' })
+  })
+
+  it("never counts another language's takes for a language the project lacks", async () => {
+    const { db } = await makeTestDb({
+      files: [{ id: F, project_id: P, name: 'Genesis', event_id: 'file-event' }],
+      project_settings: [{ project_id: P, settings: JSON.stringify({ validationCount: 1 }), version: 1 }],
+      lanes,
+      cells: [src('v1', 'GEN 1:1'), src('v2', 'GEN 1:2')],
+      cell_audio: [take('v1', FR)],
+    })
+    // v1 is recorded in French only. Spanish has recorded nothing, and a tag
+    // no lane carries has recorded nothing either — not French's v1.
+    expect(await readFirstOpenCell(db, P, F, 'GEN', 'unrecorded', 'Spanish')).toBe('v1')
+    expect(await readFirstOpenCell(db, P, F, 'GEN', 'unrecorded', 'Klingon')).toBe('v1')
+    expect(await readFirstOpenCell(db, P, F, 'GEN', 'unrecorded', 'French')).toBe('v2')
+  })
+})

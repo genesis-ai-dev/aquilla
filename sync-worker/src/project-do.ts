@@ -1,19 +1,32 @@
 /**
  * Per-project Durable Object — AD-1 live coordination.
  *
- * One DO instance per project. Holds **only transient state**:
+ * One DO instance per project. Holds the live coordination state:
  *   - Connected clients' presence (who's on which cell)
  *   - Focus-lock leases (per cell, with auto-expiry)
  *   - A relay channel for `event.applied` / `event.stale` frames coming
  *     from POST /events broadcasts (cross-DO via the standard
  *     SYNC_SECRET_KEY-gated __broadcast hook).
  *
- * No durable state is written to DO storage — when the room empties, the
- * DO is allowed to evict naturally. Matches AD-1 / data-model lifecycle:
- * "discarded when no clients are connected".
+ * AQU-1836: sockets are accepted through the **WebSocket Hibernation API**,
+ * so between frames the DO is evicted from memory while its connections stay
+ * open — a project left open in a tab costs no DO duration until something
+ * actually happens. Three consequences shape everything below:
+ *
+ *   - Per-connection state lives in each socket's `serializeAttachment`, and
+ *     the maps in this class are a cache rebuilt from it on wake (see the
+ *     constructor's `blockConcurrencyWhile` hydration).
+ *   - The focus leases and the AQU-346 member-removed denylist outlive an
+ *     eviction, so they are the DO's only durable state: two keys in DO
+ *     storage (never Postgres/R2 — the event log is still sync-worker's).
+ *   - The periodic sweep is one `ctx.storage` alarm armed for the next real
+ *     deadline, not a 5 s `setInterval` that kept every open project awake
+ *     around the clock. Client heartbeats are answered by the runtime
+ *     (`setWebSocketAutoResponse`) without waking us at all.
  *
  * The bulk of the logic lives in `project-do-handlers.ts` as pure
- * functions (testable without a DO host); this class is the WebSocket
+ * functions (testable without a DO host), with the hibernation-specific
+ * pieces in `project-do-hibernation.ts`; this class is the WebSocket
  * lifecycle wrapper.
  */
 
@@ -27,9 +40,13 @@ import {
   applyFocusRenew,
   applyPresenceUpdate,
   parseProjectDoClientMessage,
-  PresenceDraftThrottle,
+  PresenceFloodGuard,
+  presenceFrameAudience,
   presenceFrameOwnerConnId,
-  presenceSnapshot,
+  presenceSnapshotFor,
+  presenceTier1Row,
+  PresenceTier1Batcher,
+  PresenceTier2Batcher,
   PROJECT_DO_DEFAULT_LEASE_MS,
   releaseUserLocks,
   resolveConnId,
@@ -39,10 +56,25 @@ import {
   sweepExpiredLeases,
   sweepOrphanedPresence,
   unpackBroadcastBody,
+  type ClientPresenceUpdate,
   type LockState,
   type PresenceState,
   type ProjectDoServerMessage,
+  type ServerPresenceTier1,
 } from "./project-do-handlers"
+import {
+  ALARM_SLACK_MS,
+  AUTO_RESPONSE_PING_FRAME,
+  AUTO_RESPONSE_PONG_FRAME,
+  DENIED_USERS_STORAGE_KEY,
+  foldAutoResponse,
+  LOCKS_STORAGE_KEY,
+  nextSweepDeadlineAt,
+  parseConnectionAttachment,
+  pruneDeniedUsers,
+  shouldMoveAlarm,
+  toConnectionAttachment,
+} from "./project-do-hibernation"
 import type { OutboxRawEvent } from "./project-do-types"
 import { mondayNotifyProject, notifyMondayProgress } from "./monday-notify"
 import { LINK_SYNC_INVOCATION_BUDGET_MS, mirrorSync, type MirrorSyncResult } from "./events/link-sync"
@@ -50,17 +82,28 @@ import { makePostgres } from "../../db/shim/postgres"
 import { createRerunSingleFlight } from "./lib/rerun-single-flight"
 import { serviceBearerMatches } from "./lib/service-auth"
 
-const LEASE_SWEEP_INTERVAL_MS = 5_000
-
 /**
  * AQU-346: how long a member-removed denylist entry blocks reconnects.
  * Must exceed the sync-token TTL (15 min, auth-worker SYNC_TOKEN_TTL_SECONDS)
  * so a removed user's cached-but-still-valid token cannot rejoin; after this
  * window every token minted before the removal has expired and the mint-time
- * gate (auth-worker resolveProjectRole) is the authority again. In-memory
- * only — DO eviction clears it, which is safe for the same TTL reason.
+ * gate (auth-worker resolveProjectRole) is the authority again.
+ *
+ * AQU-1836: mirrored into DO storage (DENIED_USERS_STORAGE_KEY). It used to
+ * be in-memory only, which was safe while the DO stayed resident for the
+ * whole window — under hibernation an eviction (or a deploy) inside those 16
+ * minutes would have handed a removed member its channel back.
  */
 const MEMBER_REMOVED_DENY_MS = 16 * 60 * 1000
+
+/**
+ * AQU-1836: how often a legacy (ts-stamping) client's ping refreshes its
+ * socket attachment. Only those pings reach the DO at all, and the attachment
+ * is the sweep's only liveness record across an eviction, so it must not go
+ * stale for longer than the heartbeat TTL — but it needn't be rewritten on
+ * every single ping either.
+ */
+const HEARTBEAT_PERSIST_INTERVAL_MS = 30_000
 
 /** App-specific WS close code for "your membership was revoked". */
 export const MEMBER_REMOVED_CLOSE_CODE = 4403
@@ -104,6 +147,34 @@ export const PRESENCE_STALE_CLOSE_CODE = 4408
  * settles the pair after one round.
  */
 export const CONNECTION_SUPERSEDED_CLOSE_CODE = 4409
+
+/**
+ * AQU-1831: the most live sockets one project DO will hold.
+ *
+ * A DO is a single thread, and every connection adds to the fan-out cost of
+ * every broadcast — so an unbounded room degrades for everyone in it rather
+ * than refusing the socket that tipped it over. 200 is well above the
+ * 50-connection live-coordination floor the perf budgets measure
+ * (`scripts/perf/budgets.json` → `presence.sockets.open`) and above any real
+ * workshop, so reaching it means either a runaway client or a project that
+ * needs its own answer, not a silent slowdown.
+ */
+export const PROJECT_DO_MAX_CONNECTIONS = 200
+
+/**
+ * AQU-1831: app-specific WS close code for "this project is already holding
+ * PROJECT_DO_MAX_CONNECTIONS sockets". The client treats it as a full room and
+ * waits out its longest backoff window instead of hammering the door.
+ */
+export const CONNECTION_LIMIT_CLOSE_CODE = 4429
+
+/**
+ * AQU-1831: app-specific WS close code for "this socket sent presence frames
+ * faster than PresenceFloodGuard allows". The client reconnects under normal
+ * backoff and republishes its presence on open, so the roster re-converges —
+ * see PresenceFloodGuard for why closing beats dropping frames.
+ */
+export const PRESENCE_FLOOD_CLOSE_CODE = 4430
 
 /**
  * AQU-1839: minimum gap between `token.refresh` frames honoured on one
@@ -209,16 +280,30 @@ const MONDAY_NOTIFY_THROTTLE_MS = 60_000
 const MONDAY_UNLINKED_TTL_MS = 30 * 60_000
 
 export class ProjectSync extends DurableObject<DOEnv> {
+  /** Cache of the live sockets, rebuilt from their attachments on wake. */
   private connections = new Map<WebSocket, ConnectionState>()
+  /** Cache too: every row is owned by one socket's attachment. */
   private presence = new Map<string, PresenceState>()
+  /** Durable (LOCKS_STORAGE_KEY) — a lease is per user, not per socket. */
   private locks = new Map<string, LockState>()
-  private sweepTimer: ReturnType<typeof setInterval> | null = null
-  /** Per-user rate limit for `presence.draft` frames (in-memory, like all DO state). */
-  private draftThrottle = new PresenceDraftThrottle((frame) => this.broadcast(frame))
+  /** Set when `locks` diverged from storage; flushed by settle(). */
+  private locksDirty = false
+  /**
+   * AQU-1831: per-connection coalescing tick for inbound `presence.update`
+   * frames (in-memory, like all DO state) — see PresenceTier2Batcher.
+   */
+  private presenceBatcher = new PresenceTier2Batcher((connId, msg) =>
+    this.applyBatchedPresence(connId, msg),
+  )
+  /** AQU-1831: per-connection inbound floodgate for presence frames. */
+  private presenceFloodGuard = new PresenceFloodGuard()
+  /** AQU-1825: coarse project-wide presence, batched to one frame per tick. */
+  private tier1 = new PresenceTier1Batcher((frame) => this.sendTier1(frame))
   /**
    * AQU-346: numeric userIds whose membership was revoked, mapped to the
    * deny-until timestamp. Blocks reconnects with still-valid (≤15 min)
-   * tokens after an eject. In-memory by design (no durable DO state).
+   * tokens after an eject. Durable (DENIED_USERS_STORAGE_KEY) since AQU-1836
+   * — see MEMBER_REMOVED_DENY_MS.
    */
   private removedUsers = new Map<number, number>()
   /**
@@ -240,6 +325,70 @@ export class ProjectSync extends DurableObject<DOEnv> {
   private lastMondayNotifyAt = 0
   /** Epoch ms until which identity said this project has no Monday link. */
   private mondayUnlinkedUntil = 0
+
+  constructor(ctx: DurableObjectState, env: DOEnv) {
+    super(ctx, env)
+    // AQU-1836: the runtime answers the client heartbeat for us. An
+    // auto-responded ping never wakes the DO, and
+    // `getWebSocketAutoResponseTimestamp` still records that the socket is
+    // alive, which is what the stale sweep reads (see foldAutoResponse).
+    ctx.setWebSocketAutoResponse(
+      new WebSocketRequestResponsePair(AUTO_RESPONSE_PING_FRAME, AUTO_RESPONSE_PONG_FRAME),
+    )
+    // Rebuild the caches before any event is delivered: after a hibernation
+    // the sockets are back but every field above is a fresh empty map.
+    ctx.blockConcurrencyWhile(() => this.hydrate())
+  }
+
+  /**
+   * AQU-1836: restore this DO's view of the world — leases and the denylist
+   * from storage, every connection from its own socket's attachment.
+   */
+  private async hydrate(): Promise<void> {
+    const [storedLocks, storedDenied] = await Promise.all([
+      this.ctx.storage.get<LockState[]>(LOCKS_STORAGE_KEY),
+      this.ctx.storage.get<Record<string, number>>(DENIED_USERS_STORAGE_KEY),
+    ])
+    for (const lock of storedLocks ?? []) this.locks.set(lock.cellId, lock)
+    for (const [userId, until] of Object.entries(storedDenied ?? {})) {
+      const numeric = Number(userId)
+      if (Number.isFinite(numeric) && typeof until === "number") this.removedUsers.set(numeric, until)
+    }
+    for (const ws of this.ctx.getWebSockets()) {
+      const attachment = parseConnectionAttachment(ws.deserializeAttachment())
+      if (!attachment) {
+        // No identity we recognise (a socket from a pre-hibernation deploy, a
+        // shape change). Guessing one would mis-attribute presence and locks,
+        // so retire it — the client reconnects and re-authenticates.
+        this.closeUnidentified(ws)
+        continue
+      }
+      const seen = foldAutoResponse(attachment, this.ctx.getWebSocketAutoResponseTimestamp(ws))
+      this.connections.set(ws, {
+        ws,
+        projectId: attachment.projectId,
+        connId: attachment.connId,
+        userId: attachment.userId,
+        numericUserId: attachment.numericUserId,
+        role: attachment.role,
+        tokenExpiresAt: attachment.tokenExpiresAt,
+        lastSeenAt: seen.lastSeenAt,
+        heartbeatSeen: seen.heartbeatSeen,
+        // The AQU-1839 refresh rate limit is in-memory on purpose: a socket
+        // only gets here after an idle gap far longer than the limit itself.
+        lastTokenRefreshAt: 0,
+      })
+      this.presence.set(attachment.connId, attachment.presence)
+    }
+  }
+
+  private closeUnidentified(ws: WebSocket): void {
+    try {
+      ws.close(1012, "sync worker restarted")
+    } catch {
+      /* swallow */
+    }
+  }
 
   private async runLinkSync(projectId: string): Promise<MirrorSyncResult> {
     // Test seam takes priority; otherwise build a short-lived PG connection
@@ -356,6 +505,9 @@ export class ProjectSync extends DurableObject<DOEnv> {
         return new Response("userId (number) and project (string) required", { status: 400 })
       }
       this.removedUsers.set(body.userId, Date.now() + MEMBER_REMOVED_DENY_MS)
+      // AQU-1836: durable, so an eviction inside the deny window can't let
+      // the removed member back in on a cached-but-valid token.
+      await this.persistDeniedUsers()
       let ejected = 0
       for (const [ws, conn] of [...this.connections]) {
         const matches =
@@ -374,6 +526,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
         this.handleConnectionClose(conn)
         ejected++
       }
+      await this.settle()
       return Response.json({ ok: true, ejected })
     }
 
@@ -405,6 +558,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
           (body.username != null && conn.userId === body.username)
         if (!matches) continue
         conn.role = body.role
+        this.persistConnection(conn)
         updated++
       }
       return Response.json({ ok: true, updated })
@@ -455,6 +609,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
           return new Response("membership revoked", { status: 403 })
         }
         this.removedUsers.delete(auth.claims.userId)
+        await this.persistDeniedUsers()
       }
       userId = auth.claims.username ?? `user:${auth.claims.userId}`
       numericUserId = auth.claims.userId
@@ -476,7 +631,21 @@ export class ProjectSync extends DurableObject<DOEnv> {
     const client = pair[0]
     const server = pair[1]
 
-    server.accept()
+    // AQU-1836: hibernatable accept. Frames arrive at webSocketMessage /
+    // webSocketClose below rather than at listeners closed over this scope —
+    // that indirection is what lets the runtime evict us between frames while
+    // the socket stays open.
+    this.ctx.acceptWebSocket(server)
+
+    // AQU-1831: refuse the socket once the room is full. The close happens
+    // after accept() because the point is a legible close CODE — a bare HTTP
+    // error here reaches the reconciler as an indistinguishable failed
+    // connect. No connection or presence row is registered, so a turned-away
+    // client costs this DO nothing beyond the handshake.
+    if (this.connections.size >= PROJECT_DO_MAX_CONNECTIONS) {
+      server.close(CONNECTION_LIMIT_CLOSE_CODE, "project connection limit reached")
+      return new Response(null, { status: 101, webSocket: client })
+    }
 
     const conn: ConnectionState = {
       ws: server,
@@ -493,24 +662,86 @@ export class ProjectSync extends DurableObject<DOEnv> {
     this.connections.set(server, conn)
     const joined: PresenceState = { connId, userId, ts: Date.now() }
     this.presence.set(connId, joined)
-    this.startLeaseSweep()
+    this.persistConnection(conn)
     // Snapshot of current roster (drafts stripped) so the new client sees
     // existing peers; everyone else learns about the newcomer via a diff.
-    this.sendTo(server, presenceSnapshot(this.presence))
+    // AQU-1825: a socket has not announced a file yet, so peers already in one
+    // arrive coarse; backfillFileDetail fills in the tier-2 detail for the file
+    // this client then opens.
+    this.sendTo(server, presenceSnapshotFor(this.presence, undefined))
     // AQU-1839: tell the client when this connection's authorization lapses so
     // it can refresh in band instead of waiting to be closed. Sending the
     // frame at all is what signals support — see ServerTokenExpiry.
     this.sendTo(server, { t: "token.expiry", expiresAt: tokenExpiresAt })
     this.broadcast({ t: "presence.diff", user: stripPresenceDraft(joined) })
-
-    server.addEventListener("message", (ev) => {
-      const raw = typeof ev.data === "string" ? ev.data : ""
-      this.handleClientMessage(conn, raw)
-    })
-    server.addEventListener("close", () => this.handleConnectionClose(conn))
-    server.addEventListener("error", () => this.handleConnectionClose(conn))
+    await this.settle()
 
     return new Response(null, { status: 101, webSocket: client })
+  }
+
+  // ── Hibernatable socket events ─────────────────────────────────────────
+
+  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    const conn = this.connections.get(ws)
+    if (!conn) {
+      // hydrate() retires sockets it can't identify, so this is only reachable
+      // if one arrived between that sweep and now. Same answer: let the client
+      // reconnect rather than act without an identity.
+      this.closeUnidentified(ws)
+      return
+    }
+    await this.handleClientMessage(conn, typeof message === "string" ? message : "")
+    await this.settle()
+  }
+
+  async webSocketClose(ws: WebSocket, code?: number, reason?: string): Promise<void> {
+    const conn = this.connections.get(ws)
+    if (conn) this.handleConnectionClose(conn)
+    // Complete the closing handshake so the runtime stops handing this socket
+    // back from `getWebSockets()` — otherwise a later hydrate() would rebuild
+    // a presence row for a connection that is already gone, and only the
+    // heartbeat TTL would clear it.
+    try {
+      ws.close(code === undefined || code === 1005 || code === 1006 ? 1000 : code, reason)
+    } catch {
+      /* already closed */
+    }
+    await this.settle()
+  }
+
+  async webSocketError(ws: WebSocket): Promise<void> {
+    await this.webSocketClose(ws, 1011, "socket error")
+  }
+
+  /**
+   * AQU-1836: the sweep that the 5 s `setInterval` used to run, now armed for
+   * the next real deadline (earliest lease expiry, token expiry or heartbeat
+   * TTL — see nextSweepDeadlineAt). An alarm that fires with nothing to do
+   * just re-arms, so arming early is always safe; arming nothing at all is
+   * how an untouched project stops costing DO duration.
+   */
+  async alarm(): Promise<void> {
+    const now = Date.now()
+    // AQU-1374: drop rows for sockets that died without firing close/error
+    // BEFORE the lease sweep, so it doesn't emit presence.diff frames for
+    // rows that are about to disappear anyway.
+    this.reapOrphanedPresence()
+    // AQU-1791: retire half-open sockets BEFORE the lease sweep too — they
+    // are still in `connections`, so reapOrphanedPresence treats their rows
+    // as live; closing them here runs the normal disconnect path.
+    this.sweepStaleConnections(now)
+    const result = sweepExpiredLeases(this.locks, this.presence, now)
+    this.locks = result.locks
+    this.presence = result.presence
+    if (result.emit.length > 0) {
+      this.locksDirty = true
+      for (const m of result.emit) this.broadcast(m)
+      // A cleared focusedCell belongs to the socket's attachment too.
+      this.persistAllConnections()
+    }
+    this.sweepExpiredConnections(now)
+    await this.prunePersistedDenials(now)
+    await this.settle()
   }
 
   // ── Outbound helpers ───────────────────────────────────────────────────
@@ -555,37 +786,93 @@ export class ProjectSync extends DurableObject<DOEnv> {
   }
 
   /**
-   * AQU-1162: broadcast, but never echo a presence frame back to the socket it
-   * describes. A typing client publishes presence roughly every 650ms and
-   * moves the cursor every ~120ms; each echo costs that same client a socket
-   * frame, a parse, a presence-store apply and a `ProjectWorkspace` shell pass
-   * — for a row every consumer then filters out as its own (`isSelfRow` in the
+   * Send one frame to its audience, never echoing a presence frame back to the
+   * socket it describes.
+   *
+   * AQU-1162: a typing client publishes presence roughly every 650ms and moves
+   * the cursor every ~120ms; each echo costs that same client a socket frame,
+   * a parse, a presence-store apply and a `ProjectWorkspace` shell pass — for
+   * a row every consumer then filters out as its own (`isSelfRow` in the
    * presence store, the `currentUsername` check in `applyPresenceFrame`).
-   * Non-presence frames (locks, content, project events) are unaffected: the
-   * originator does act on those.
+   *
+   * AQU-1825: and presence is tiered. A `presence.diff` carries tier-2 detail
+   * (cursor selection, the viewed row) that only matters to the people looking
+   * at the same file, so it goes to that file's sockets; its coarse half goes
+   * to the whole project through the batcher, at one frame per tick. Same for
+   * `presence.draft`. Everything else (locks, content, settings,
+   * `presence.left`) is project-wide and immediate as before.
    */
   private broadcast(msg: ProjectDoServerMessage): void {
-    this.broadcastToAll(msg, presenceFrameOwnerConnId(msg))
+    if (msg.t === "presence.diff") this.tier1.push(presenceTier1Row(msg.user))
+    const audience = presenceFrameAudience(msg, this.presence)
+    if (audience.scope === "all") {
+      this.broadcastToAll(msg, presenceFrameOwnerConnId(msg))
+      return
+    }
+    this.broadcastToFile(msg, audience.fileId, presenceFrameOwnerConnId(msg))
+  }
+
+  /** Send to the sockets whose own open file is `fileId` (undefined = no file). */
+  private broadcastToFile(
+    msg: ProjectDoServerMessage,
+    fileId: string | undefined,
+    exceptConnId?: string,
+  ): void {
+    const payload = JSON.stringify(msg)
+    for (const [ws, conn] of this.connections) {
+      if (exceptConnId !== undefined && conn.connId === exceptConnId) continue
+      if (this.presence.get(conn.connId)?.currentFileId !== fileId) continue
+      try {
+        ws.send(payload)
+      } catch {
+        /* swallow */
+      }
+    }
+  }
+
+  /**
+   * AQU-1825: deliver a batched tier-1 frame, dropping each receiver's own row
+   * (the AQU-1162 no-self-echo rule, applied per row because one frame covers
+   * several connections). A socket whose own row is the only one in the batch
+   * gets nothing.
+   */
+  private sendTier1(frame: ServerPresenceTier1): void {
+    for (const [ws, conn] of this.connections) {
+      const users = frame.users.filter((row) => row.connId !== conn.connId)
+      if (users.length === 0) continue
+      this.sendTo(ws, { t: "presence.tier1", users })
+    }
   }
 
   // ── Inbound handling ───────────────────────────────────────────────────
 
-  private handleClientMessage(conn: ConnectionState, raw: string): void {
+  private handleClientMessage(conn: ConnectionState, raw: string): Promise<void> | void {
     const msg = parseProjectDoClientMessage(raw)
     if (!msg) return
+    const now = Date.now()
     // AQU-1791: any frame proves the socket is alive; a `ping` additionally
     // proves this client heartbeats, which is what arms the stale sweep.
-    conn.lastSeenAt = Date.now()
+    conn.lastSeenAt = now
     if (msg.t === "ping") {
+      // Only a ping the runtime could not auto-respond to (an older client
+      // stamps `ts`, so the frame misses the pair) reaches us here. Record
+      // the liveness it proves in the attachment, since the sweep may next
+      // read it after an eviction.
+      const firstHeartbeat = !conn.heartbeatSeen
       conn.heartbeatSeen = true
+      if (firstHeartbeat || now - this.lastPersistedSeenAt(conn) > HEARTBEAT_PERSIST_INTERVAL_MS) {
+        this.persistConnection(conn)
+      }
       this.sendTo(conn.ws, msg.ts === undefined ? { t: "pong" } : { t: "pong", ts: msg.ts })
       return
     }
     if (msg.t === "token.refresh") {
-      void this.handleTokenRefresh(conn, msg.token)
-      return
+      // AQU-1836: awaited rather than fired-and-forgotten so webSocketMessage's
+      // settle() runs AFTER the refresh has landed — the new expiry has to
+      // reach the socket attachment and any locks a downgrade released have
+      // to reach storage before the DO may hibernate again.
+      return this.handleTokenRefresh(conn, msg.token)
     }
-    const now = Date.now()
     if (msg.t === "focus.claim") {
       // [Pen test 2026-08-10] a read-only role (viewer/commenter/reviewer)
       // can observe and render the editor but must not be able to hold an
@@ -594,38 +881,105 @@ export class ProjectSync extends DurableObject<DOEnv> {
       // applied to actual content writes (see shouldBeReadOnly callers).
       if (shouldBeReadOnly(conn.role)) return
       const result = applyFocusClaim(this.locks, this.presence, conn, msg, now)
+      const granted = result.emit.length > 0
       this.locks = result.locks
       this.presence = result.presence
+      if (granted) {
+        this.locksDirty = true
+        this.persistConnection(conn)
+      }
       for (const m of result.emit) this.broadcast(m)
       for (const m of result.emitTo) this.sendTo(conn.ws, m)
       return
     }
     if (msg.t === "focus.renew") {
       if (shouldBeReadOnly(conn.role)) return
+      const previousExpiry = this.locks.get(msg.cellId)?.expiresAt
       const result = applyFocusRenew(this.locks, this.presence, conn, msg, now)
       this.locks = result.locks
+      // The renewed expiry is what keeps the lease alive across an eviction,
+      // so it has to reach storage — otherwise the alarm would wake to a
+      // stale deadline and release a cell its owner is still editing. A renew
+      // against a lease that is gone (or someone else's) is a no-op here, as
+      // it always was, and writes nothing.
+      if (this.locks.get(msg.cellId)?.expiresAt !== previousExpiry) this.locksDirty = true
       return
     }
     if (msg.t === "focus.release") {
       const result = applyFocusRelease(this.locks, this.presence, conn, msg, now)
+      const released = result.emit.length > 0
       this.locks = result.locks
       this.presence = result.presence
+      if (released) {
+        this.locksDirty = true
+        this.persistConnection(conn)
+      }
       for (const m of result.emit) this.broadcast(m)
       return
     }
     if (msg.t === "presence.update") {
-      const result = applyPresenceUpdate(this.presence, conn, msg, now)
-      this.presence = result.presence
-      for (const m of result.emit) {
-        if (m.t === "presence.draft") this.draftThrottle.push(m)
-        else this.broadcast(m)
+      // AQU-1831: the floodgate first (cheapest refusal), then the coalescing
+      // tick. Between them one connection costs the DO at most one presence
+      // apply + fan-out per PRESENCE_TIER2_TICK_MS however fast it publishes.
+      if (!this.presenceFloodGuard.allow(conn.connId, now)) {
+        try {
+          conn.ws.close(PRESENCE_FLOOD_CLOSE_CODE, "presence rate limit exceeded")
+        } catch {
+          /* swallow */
+        }
+        // Server-initiated close doesn't reliably fire our own close path —
+        // drop the row, the locks and this connection's pending patch
+        // explicitly, as every other server-side close here does
+        // (idempotent; see the connections.has guard in handleConnectionClose).
+        this.handleConnectionClose(conn)
+        return
       }
+      this.presenceBatcher.push(conn.connId, msg)
       return
     }
     if (msg.t === "outbox.event") {
       void this.forwardOutboxEvent(msg.event)
       return
     }
+  }
+
+  /**
+   * AQU-1831: apply one (possibly coalesced) presence patch handed back by the
+   * tier-2 batcher.
+   *
+   * This runs up to PRESENCE_TIER2_TICK_MS after the frame arrived, so it
+   * re-resolves the connection rather than closing over it: a socket that shut
+   * down in the meantime had its pending patch cleared, and must not get a
+   * presence row back through a tick that was already in flight.
+   *
+   * It also runs from the batcher's timer rather than from a hibernation entry
+   * point (AQU-1836), so nothing here may depend on settle(): the row is written
+   * straight into the socket attachment, and presence never moves the sweep
+   * alarm (nextSweepDeadlineAt reads leases and connection liveness only).
+   */
+  private applyBatchedPresence(connId: string, msg: ClientPresenceUpdate): void {
+    let conn: ConnectionState | undefined
+    for (const state of this.connections.values()) {
+      if (state.connId !== connId) continue
+      conn = state
+      break
+    }
+    // The batcher's own next tick closes a window with nothing pending, so
+    // there is nothing to clean up here — and clearing from inside its
+    // callback would only be re-armed by the tick that called us.
+    if (!conn) return
+    const fileBefore = this.presence.get(conn.connId)?.currentFileId
+    const result = applyPresenceUpdate(this.presence, conn, msg, Date.now())
+    this.presence = result.presence
+    // AQU-1836: the row has to reach the socket attachment, or an eviction
+    // would wake to the presence this patch replaced.
+    if (result.emit.length > 0) this.persistConnection(conn)
+    // AQU-1825: broadcast() scopes each frame to its audience — the coarse
+    // half project-wide through the tier-1 batcher, the detail (and the
+    // bounded draft) only to the sockets in the same file.
+    for (const m of result.emit) this.broadcast(m)
+    const fileAfter = this.presence.get(conn.connId)?.currentFileId
+    if (fileAfter !== fileBefore) this.backfillFileDetail(conn, fileAfter)
   }
 
   /**
@@ -681,12 +1035,19 @@ export class ProjectSync extends DurableObject<DOEnv> {
     const wasWriteCapable = !shouldBeReadOnly(conn.role)
     conn.role = outcome.role
     conn.tokenExpiresAt = outcome.tokenExpiresAt
+    // AQU-1836: the attachment is what sweepExpiredConnections reads after a
+    // wake — left at the old expiry, the alarm armed for it would close this
+    // socket on the very schedule the refresh exists to avoid. The alarm
+    // itself stays where it is: it fires at the old deadline, finds nothing
+    // expired and re-arms for the new one (see settle()).
+    this.persistConnection(conn)
     // A downgrade now has to release the locks the close used to release on
     // this socket's way out — otherwise a demoted user keeps every cell they
     // hold until the lease lapses.
     if (wasWriteCapable && shouldBeReadOnly(outcome.role)) {
       const released = releaseUserLocks(this.locks, conn.userId, now)
       this.locks = released.locks
+      if (released.emit.length > 0) this.locksDirty = true
       for (const m of released.emit) this.broadcast(m)
     }
     this.sendTo(conn.ws, { t: "token.expiry", expiresAt: outcome.tokenExpiresAt })
@@ -700,6 +1061,25 @@ export class ProjectSync extends DurableObject<DOEnv> {
     // (useOutboxFlusher) on the same JWT. Logging only here so the path is
     // observable in worker logs.
     console.log(`[ProjectSync] outbox.event passthrough (no-op)`, event.id)
+  }
+
+  /**
+   * AQU-1825: this socket just opened `fileId`, so hand it the tier-2 detail
+   * for the peers already sitting there.
+   *
+   * Tier-2 frames are only sent to the sockets in the subject's file, which
+   * means a peer who went quiet before we arrived would otherwise never
+   * resolve past the coarse row the roster frame gave us — no caret, no "X is
+   * editing" badge on their cell until they happened to move. Bounded by the
+   * number of people in one file, and sent only on an actual file change.
+   */
+  private backfillFileDetail(conn: ConnectionState, fileId: string | undefined): void {
+    for (const user of this.presence.values()) {
+      if (user.connId === conn.connId) continue
+      if (user.currentFileId !== fileId) continue
+      if (user.viewingCell === undefined && user.selection === undefined) continue
+      this.sendTo(conn.ws, { t: "presence.diff", user: stripPresenceDraft(user) })
+    }
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────
@@ -719,31 +1099,80 @@ export class ProjectSync extends DurableObject<DOEnv> {
     }
     const now = Date.now()
     const result = applyDisconnect(this.locks, this.presence, conn, now, remaining)
+    if (result.emit.some((m) => m.t === "lock.released")) this.locksDirty = true
     this.locks = result.locks
     this.presence = result.presence
-    this.draftThrottle.clear(conn.connId)
+    this.presenceBatcher.clear(conn.connId)
+    this.presenceFloodGuard.clear(conn.connId)
+    this.tier1.clear(conn.connId)
     for (const m of result.emit) this.broadcast(m)
-    if (this.connections.size === 0) this.stopLeaseSweep()
+    if (this.connections.size === 0) this.tier1.dispose()
   }
 
-  private startLeaseSweep(): void {
-    if (this.sweepTimer !== null) return
-    this.sweepTimer = setInterval(() => {
-      const now = Date.now()
-      // AQU-1374: drop rows for sockets that died without firing close/error
-      // BEFORE the lease sweep, so it doesn't emit presence.diff frames for
-      // rows that are about to disappear anyway.
-      this.reapOrphanedPresence()
-      // AQU-1791: retire half-open sockets BEFORE the lease sweep too — they
-      // are still in `connections`, so reapOrphanedPresence treats their rows
-      // as live; closing them here runs the normal disconnect path.
-      this.sweepStaleConnections(now)
-      const result = sweepExpiredLeases(this.locks, this.presence, now)
-      this.locks = result.locks
-      this.presence = result.presence
-      for (const m of result.emit) this.broadcast(m)
-      this.sweepExpiredConnections(now)
-    }, LEASE_SWEEP_INTERVAL_MS)
+  /**
+   * AQU-1836: flush what must outlive an eviction, then re-arm the alarm for
+   * the next real deadline. Every entry point ends here, and it is the only
+   * place that writes DO storage.
+   */
+  private async settle(): Promise<void> {
+    if (this.locksDirty) {
+      this.locksDirty = false
+      if (this.locks.size === 0) await this.ctx.storage.delete(LOCKS_STORAGE_KEY)
+      else await this.ctx.storage.put(LOCKS_STORAGE_KEY, [...this.locks.values()])
+    }
+    const next = nextSweepDeadlineAt({
+      now: Date.now(),
+      locks: this.locks.values(),
+      connections: this.connections.values(),
+    })
+    const current = await this.ctx.storage.getAlarm()
+    if (next === null) {
+      if (current !== null) await this.ctx.storage.deleteAlarm()
+      return
+    }
+    if (shouldMoveAlarm(current, next, ALARM_SLACK_MS)) await this.ctx.storage.setAlarm(next)
+  }
+
+  /** Write a connection's identity + presence row into its socket attachment. */
+  private persistConnection(conn: ConnectionState): void {
+    try {
+      conn.ws.serializeAttachment(toConnectionAttachment(conn, this.presence.get(conn.connId)))
+    } catch {
+      /* a socket already gone needs no attachment */
+    }
+  }
+
+  private persistAllConnections(): void {
+    for (const conn of this.connections.values()) this.persistConnection(conn)
+  }
+
+  /** What this socket's attachment currently claims as its last-seen time. */
+  private lastPersistedSeenAt(conn: ConnectionState): number {
+    const stored = parseConnectionAttachment(conn.ws.deserializeAttachment())
+    return stored?.lastSeenAt ?? 0
+  }
+
+  private async persistDeniedUsers(): Promise<void> {
+    if (this.removedUsers.size === 0) {
+      await this.ctx.storage.delete(DENIED_USERS_STORAGE_KEY)
+      return
+    }
+    const entries: Record<string, number> = {}
+    for (const [userId, until] of this.removedUsers) entries[String(userId)] = until
+    await this.ctx.storage.put(DENIED_USERS_STORAGE_KEY, entries)
+  }
+
+  /** Drop denylist entries whose window has passed (storage hygiene only —
+   *  /connect also checks the deadline per entry). */
+  private async prunePersistedDenials(now: number): Promise<void> {
+    const entries: Record<string, number> = {}
+    for (const [userId, until] of this.removedUsers) entries[String(userId)] = until
+    const pruned = pruneDeniedUsers(entries, now)
+    if (!pruned.changed) return
+    this.removedUsers = new Map(
+      Object.entries(pruned.entries).map(([userId, until]) => [Number(userId), until]),
+    )
+    await this.persistDeniedUsers()
   }
 
   /**
@@ -759,7 +1188,11 @@ export class ProjectSync extends DurableObject<DOEnv> {
     if (result.emit.length === 0) return
     this.presence = result.presence
     for (const m of result.emit) {
-      if (m.t === "presence.left") this.draftThrottle.clear(m.connId)
+      if (m.t === "presence.left") {
+        this.presenceBatcher.clear(m.connId)
+        this.presenceFloodGuard.clear(m.connId)
+        this.tier1.clear(m.connId)
+      }
       this.broadcastToAll(m)
     }
   }
@@ -777,6 +1210,14 @@ export class ProjectSync extends DurableObject<DOEnv> {
    * releases the same per-user locks a clean close would.
    */
   private sweepStaleConnections(now: number): void {
+    // AQU-1836: an auto-responded ping never reached webSocketMessage, so the
+    // only record that this client is still heartbeating is the runtime's.
+    // Fold it in before judging anyone silent.
+    for (const conn of this.connections.values()) {
+      const seen = foldAutoResponse(conn, this.ctx.getWebSocketAutoResponseTimestamp(conn.ws))
+      conn.lastSeenAt = seen.lastSeenAt
+      conn.heartbeatSeen = seen.heartbeatSeen
+    }
     for (const conn of selectStaleConnections([...this.connections.values()], now)) {
       try {
         conn.ws.close(PRESENCE_STALE_CLOSE_CODE, "presence heartbeat timeout")
@@ -814,8 +1255,9 @@ export class ProjectSync extends DurableObject<DOEnv> {
    * and cached for the socket's life (see ConnectionState.role) — closing at
    * the token's own expiry re-runs that resolution on reconnect instead of
    * letting a stale role (e.g. after a mid-session downgrade) ride an
-   * indefinitely-open socket. Bounded by LEASE_SWEEP_INTERVAL_MS, well under
-   * the sync-token TTL.
+   * indefinitely-open socket. AQU-1836: the alarm is armed for the earliest
+   * `tokenExpiresAt` across live sockets, so this now runs when a token
+   * actually expires rather than within 5 s of it.
    */
   private sweepExpiredConnections(now: number): void {
     for (const [ws, conn] of [...this.connections]) {
@@ -829,13 +1271,6 @@ export class ProjectSync extends DurableObject<DOEnv> {
       // clean up presence/locks explicitly (idempotent; see the
       // connections.has guard in handleConnectionClose).
       this.handleConnectionClose(conn)
-    }
-  }
-
-  private stopLeaseSweep(): void {
-    if (this.sweepTimer !== null) {
-      clearInterval(this.sweepTimer)
-      this.sweepTimer = null
     }
   }
 

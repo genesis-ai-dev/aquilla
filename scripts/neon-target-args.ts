@@ -20,7 +20,10 @@ export type NeonTargetCommand =
   | "backfill-lanes"
   | "backfill-lane-batch"
   | "repair-lane-grants"
+  | "prune-phantom-voices"
   | "verify-lanes"
+  | "seed-extract"
+  | "scrub-integrations"
 
 export function scriptFor(command: NeonTargetCommand): string {
   if (command === "backfill-progress") return "scripts/neon-backfill-progress.ts"
@@ -28,7 +31,13 @@ export function scriptFor(command: NeonTargetCommand): string {
   if (command === "backfill-lanes") return "scripts/neon-backfill-lanes.ts"
   if (command === "backfill-lane-batch") return "scripts/neon-backfill-lane-batch.ts"
   if (command === "repair-lane-grants") return "scripts/neon-repair-lane-grants.ts"
+  if (command === "prune-phantom-voices") return "scripts/neon-prune-phantom-voices.ts"
   if (command === "verify-lanes") return "scripts/neon-verify-lanes.ts"
+  // AQU-1953: the dev-DB seed extract runs under neon-target so the source
+  // branch is explicit and recorded (AQUILLA_NEON_TARGET) in seed.meta.json.
+  if (command === "seed-extract") return "scripts/seed-extract.ts"
+  // AQU-1775: strip the integration tokens a production copy carries.
+  if (command === "scrub-integrations") return "scripts/neon-scrub-integrations.ts"
   return "scripts/neon-migrate.ts"
 }
 
@@ -41,6 +50,11 @@ export function scriptFor(command: NeonTargetCommand): string {
 export function childArgs(command: NeonTargetCommand, passthrough: readonly string[]): string[] {
   const script = scriptFor(command)
   const forwardsFlags =
-    command.startsWith("backfill-") || command === "verify-lanes" || command === "repair-lane-grants"
+    command.startsWith("backfill-") ||
+    command === "verify-lanes" ||
+    command === "repair-lane-grants" ||
+    command === "prune-phantom-voices" ||
+    command === "seed-extract" ||
+    command === "scrub-integrations"
   return forwardsFlags ? [script, ...passthrough] : [script, command]
 }

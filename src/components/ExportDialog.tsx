@@ -62,6 +62,10 @@ import {
   validatedOnly as isValidatedOnlyMode,
   type ExportContentMode,
 } from "@/lib/export/validation-scope"
+import {
+  scopeAudioCellsForExport,
+  unvalidatedAudioLineIds,
+} from "@/lib/export/audio-validation-scope"
 import { downloadSourceFile, downloadProjectZip, fetchSourceSidecar, fetchRemovedCells } from "@/lib/sync/source-export"
 import { exportPlainTextStructured } from "@/lib/export/exporters/plaintext"
 import { exportMarkdownStructured } from "@/lib/export/exporters/markdown"
@@ -108,7 +112,7 @@ import {
 import { idmlTelemetryProperties } from "@/lib/idml/telemetry"
 import { hasPackageLocators } from "@/lib/export/import-locators"
 
-export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "audio-by-line" | "audio-chapter" | "character-sheets" | "project-report" | "docx" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
+export type ExportFormat = "usfm" | "txt" | "md" | "json" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "audio-by-line" | "audio-chapter" | "character-sheets" | "project-report" | "docx" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
 export type ExportScope = "file" | "project"
 type AudioMode = "audio-by-character" | "audio-by-line" | "audio-chapter"
 
@@ -165,6 +169,15 @@ const BASE_FORMAT_OPTIONS: FormatOption[] = [
     labelKey: "importExport.format.sdbhXml.label",
     ext: ".XML",
     descriptionKey: "importExport.format.sdbhXml.description",
+    lossy: false,
+  },
+  {
+    // AQU-525: JSON round-trip. Translations go back in by JSON path, so only
+    // the keys picked at import change. Only shown for files imported as JSON.
+    id: "json",
+    labelKey: "importExport.format.json.label",
+    ext: ".json",
+    descriptionKey: "importExport.format.json.description",
     lossy: false,
   },
   {
@@ -290,6 +303,7 @@ const NATIVE_EXPORT_BY_FILE_TYPE: Partial<Record<string, ExportFormat>> = {
   idml: "idml",
   md: "md",
   txt: "txt",
+  json: "json",
   vtt: "vtt",
   srt: "srt",
   xliff: "xlf",
@@ -402,6 +416,23 @@ interface ExportDialogProps {
    * "HTML/validation health errors" blocked export). Defaults to 0.
    */
   outstandingInfractionCount?: number
+  /**
+   * AQU-965: the project's required number of audio validators
+   * (`readValidationCountAudio`) — the same number the line's audio check
+   * compares against, so the dialog's count of unvalidated lines and the
+   * gutter's ticks answer one question. Defaults to 1, the floor every audio
+   * surface already applies.
+   */
+  audioValidationRequirement?: number
+  /**
+   * Take the viewer to one line that has no validated take.
+   *
+   * On a dubbing file this is a HEARD LINE in the audio-cue sibling, where the
+   * recordings live — so the handler seats it on the timeline as well as
+   * trying the dialogue table. Absent, the count is still shown and simply
+   * does not offer the jump.
+   */
+  onJumpToAudioLine?: (cellId: string) => void
 }
 
 function profileIdFromCells(cells: readonly CellData[]): string | null {
@@ -465,6 +496,8 @@ export function ExportDialog({
   orgId,
   onRepairIdmlCopy,
   outstandingInfractionCount = 0,
+  audioValidationRequirement = 1,
+  onJumpToAudioLine,
 }: ExportDialogProps) {
   const { locale } = useI18n()
   const t = useT()
@@ -917,7 +950,7 @@ export function ExportDialog({
   const effectiveSubtitleTarget: SubtitleTarget =
     subtitleTarget === "audio" && hasAudioSibling ? "audio" : "subtitle"
 
-  const fileOnlyFormats = ["audio-by-character", "audio-by-line", "audio-chapter", "character-sheets", "vtt", "docx", "pptx", "idml", "plain-text-dump"] as const
+  const fileOnlyFormats = ["audio-by-character", "audio-by-line", "audio-chapter", "character-sheets", "vtt", "docx", "pptx", "idml", "json", "plain-text-dump"] as const
   const isFileOnlyFormat = fileOnlyFormats.includes(format as typeof fileOnlyFormats[number])
   // SDBH XML reinjection spans every lexicon file — inherently project scope.
   // The report describes a PROJECT: name consistency only means anything across
@@ -931,7 +964,7 @@ export function ExportDialog({
    *
    * Exactly the formats built from the in-memory cell array (the `filteredCells`
    * branch of handleExport). The round-trip formats are deliberately absent:
-   * USFM/DOCX/PPTX/IDML reinject translations into the ORIGINAL document —
+   * USFM/DOCX/PPTX/IDML/JSON reinject translations into the ORIGINAL document —
    * USFM server-side — so there is no cell array to filter, and handing back a
    * one-chapter .docx would mean rebuilding the document rather than exporting
    * it. Those stay whole-file.
@@ -961,6 +994,7 @@ export function ExportDialog({
       if (f.id === "docx") return activeFileType === "docx" // AQU-233: only for docx imports
       if (f.id === "pptx") return activeFileType === "pptx" // AQU-152a: only for pptx imports
       if (f.id === "idml") return activeFileType === "idml" // only for idml imports
+      if (f.id === "json") return activeFileType === "json" // AQU-525: only for json imports
       if (f.id === "sdbh-xml") return hasSdbhFiles // SDBH round-trip: only for lexicon projects
       if (f.id === "plain-text-dump") return false // shown in Advanced section only
       return true
@@ -1128,6 +1162,33 @@ export function ExportDialog({
     [cells],
   )
 
+  /**
+   * AQU-965: THE LINES THAT WOULD SHIP A TAKE NOBODY HAS SIGNED OFF.
+   *
+   * Read off the unscoped `audioSourceCells` on purpose — this describes the
+   * FILE, not this download, so the number is the same in both content modes:
+   * under "current" it is the warning the Come and See export never gave, and
+   * under "validated only" it is how many lines are about to fall silent.
+   */
+  const unvalidatedAudioLines = useMemo(
+    () => unvalidatedAudioLineIds(audioSourceCells, audioValidationRequirement),
+    [audioSourceCells, audioValidationRequirement],
+  )
+
+  /**
+   * The cells the AUDIO deliverables export from, with the content mode
+   * applied. Identical to `audioSourceCells` by identity under "current", so
+   * every existing audio export is byte-for-byte what it was.
+   *
+   * The previews above deliberately keep reading the unscoped array: they
+   * describe who is recorded in the file, which is true whatever this download
+   * is allowed to contain.
+   */
+  const audioExportCells = useMemo(
+    () => scopeAudioCellsForExport(audioSourceCells, contentMode, audioValidationRequirement),
+    [audioSourceCells, contentMode, audioValidationRequirement],
+  )
+
   const chapterLabels = useMemo(() => listChapterLabels(cells), [cells])
 
   // Base UI resolves the trigger's label from the root's `items`, not from
@@ -1165,7 +1226,7 @@ export function ExportDialog({
   // Load cells for all project files when project scope is selected and the
   // format is a client-side one. Disabled until the user actually picks
   // project scope so we don't fan-out N fetches on dialog open.
-  const projectScopeEnabled = format === "sdbh-xml" || (scope === "project" && format !== "usfm" && format !== "audio-by-character" && format !== "audio-by-line" && format !== "audio-chapter" && format !== "vtt" && format !== "docx" && format !== "pptx" && format !== "plain-text-dump")
+  const projectScopeEnabled = format === "sdbh-xml" || (scope === "project" && format !== "usfm" && format !== "audio-by-character" && format !== "audio-by-line" && format !== "audio-chapter" && format !== "vtt" && format !== "docx" && format !== "pptx" && format !== "json" && format !== "plain-text-dump")
 
   const { files: projectFileCells, isLoading: projectCellsLoading, error: projectCellsError } =
     useProjectCells({
@@ -1378,6 +1439,34 @@ export function ExportDialog({
         }
         downloadBlob(blob, fileName)
         setStatus({ kind: "ok", msg })
+      } else if (fmt === "json") {
+        // AQU-525: JSON round-trip. Each cell carries its JSON path in
+        // `context`, so translations are placed BY KEY: only the keys the user
+        // picked at import change, and every other key, value and nesting
+        // level of the original document is preserved byte-for-byte.
+        //
+        // A hidden or (in validated-only mode) unvalidated cell contributes no
+        // translation (scopeRoundTripCells blanks it), so `exportJson` falls
+        // back to that key's original value. Unlike docx/pptx this export
+        // never drops the key: removing it would change the document's shape,
+        // which is exactly what the importer promised to preserve.
+        setStatus({ kind: "busy", msg: t("importExport.status.fetchingOriginalDocument") })
+        const rawBytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken, targetLang })
+        setStatus({ kind: "busy", msg: t("importExport.status.injectingTranslations") })
+        const { exportJson } = await import("@/lib/parsers/json-i18n")
+        const scoped = scopeRoundTripCells(cells, contentMode)
+        // TextDecoder strips a UTF-8 BOM, which JSON.parse would otherwise reject.
+        const jsonBlob = exportJson(new TextDecoder().decode(rawBytes), scoped, { keyed: true })
+        const baseName = buildExportStem(false) // AQU-437: user-chosen stem
+        const fileName = `${baseName}.json`
+        downloadBlob(jsonBlob, fileName)
+        const injected = scoped.filter((c) => c.translated.trim().length > 0).length
+        setStatus({
+          kind: "ok",
+          msg: injected === 0
+            ? t("importExport.status.downloadedNoTranslations", { fileName })
+            : t("importExport.status.downloadedJsonValuesTranslated", { fileName, count: injected }),
+        })
       } else if (fmt === "audio-by-character") {
         // A TOAST, not just the dialog's own line (Sam, 2026-08-18). This is
         // the one export that takes real time — every take is fetched, decoded
@@ -1398,7 +1487,7 @@ export function ExportDialog({
         // (projectId, fileId) — wrap it to match the fetchCellAudio signature.
         const getSyncToken = (_pid: string, fileId: string) => getToken(fileId)
         const result = await exportAudioByCharacter({
-          cells: audioSourceCells,
+          cells: audioExportCells,
           resolveName: resolveCharacterName,
           settings: ttsSettings,
           projectId,
@@ -1483,7 +1572,7 @@ export function ExportDialog({
         const { fetchCellAudio } = await import("@/lib/audio/upload")
         const getSyncToken = (_pid: string, fileId: string) => getToken(fileId)
         const result = await exportAudioPerLine({
-          cells: audioSourceCells,
+          cells: audioExportCells,
           resolveName: resolveCharacterName,
           // AQU-646 stage 4: per line is the deliverable that carries every
           // track (Sam, 2026-08-26). Absent, or with only the derived rows, it
@@ -1543,7 +1632,7 @@ export function ExportDialog({
         const { fetchCellAudio } = await import("@/lib/audio/upload")
         const getSyncToken = (_pid: string, fileId: string) => getToken(fileId)
         const result = await exportAudioByChapter({
-          cells: audioSourceCells,
+          cells: audioExportCells,
           projectId,
           fetchBytes: ({ projectId: pid, fileId, audioId, ext }) =>
             fetchCellAudio({ projectId: pid, fileId, audioId, ext, getSyncToken }),
@@ -1919,6 +2008,50 @@ export function ExportDialog({
   )
 
   /**
+   * AQU-965: HOW MANY LINES WOULD SHIP A RECORDING NOBODY HAS VALIDATED —
+   * before the press, not after the studio asks.
+   *
+   * A dubbing export went out with every line unvalidated and the dialog said
+   * nothing: there was no count, and no way to find the lines. It sits with
+   * the previews, so it reaches both surfaces that export audio (the Audio
+   * card on a dubbing file, the format list on a scripture file), and it never
+   * gates — "validated takes only" is a choice in the Content list, and this
+   * is the sentence that makes that choice an informed one.
+   */
+  const renderUnvalidatedAudioNote = () => {
+    if (unvalidatedAudioLines.length === 0) return null
+    return (
+      <p
+        data-testid="export-audio-unvalidated-note"
+        className="text-xs leading-relaxed text-amber-700 dark:text-amber-400"
+      >
+        {t(
+          validatedOnly
+            ? "importExport.dialog.audioUnvalidatedOmittedNote"
+            : "importExport.dialog.audioUnvalidatedNote",
+          { count: unvalidatedAudioLines.length },
+        )}
+        {onJumpToAudioLine && (
+          <>
+            {" "}
+            <button
+              type="button"
+              className="underline underline-offset-2 hover:no-underline"
+              onClick={() => {
+                // The dialog covers the line it is about to show.
+                onOpenChange(false)
+                onJumpToAudioLine(unvalidatedAudioLines[0])
+              }}
+            >
+              {t("importExport.dialog.audioUnvalidatedJump")}
+            </button>
+          </>
+        )}
+      </p>
+    )
+  }
+
+  /**
    * Who is recorded and who is not. Lives beside whichever control is about to
    * export audio: inside the Audio card for a dubbing file, under the format
    * list everywhere else.
@@ -1933,7 +2066,7 @@ export function ExportDialog({
           const unrecorded = preview.filter((p) => p.clipCount === 0)
           const untimedTotal = preview.reduce((n, p) => n + p.untimedCount, 0)
           return (
-          <div className="flex flex-col gap-1 text-xs">
+          <div className="flex flex-col gap-1 text-xs" data-testid="export-character-preview">
             <p className="font-medium text-muted-foreground text-[10px]">{t("importExport.dialog.characterPreviewHeading")}</p>
             {preview.length === 0 ? (
               <p className="text-muted-foreground">{t("importExport.dialog.noCharactersInFile")}</p>
@@ -2195,6 +2328,7 @@ export function ExportDialog({
               </RadioGroup>
               {/* The preview belongs WITH the button that acts on it. */}
               {audioMode === "audio-chapter" ? renderChapterPreview() : renderCharacterPreview()}
+              {renderUnvalidatedAudioNote()}
               <Button
                 size="lg"
                 className="w-full justify-center"
@@ -2662,6 +2796,11 @@ export function ExportDialog({
           && effectiveScope === "file" && renderCharacterPreview()}
         {!isDubbingFile && format === "audio-chapter"
           && effectiveScope === "file" && renderChapterPreview()}
+        {/* AQU-965: the same warning on the format-list side — a scripture
+            file's chapter stitch has no Audio card to carry it. */}
+        {!isDubbingFile
+          && (format === "audio-by-character" || format === "audio-by-line" || format === "audio-chapter")
+          && effectiveScope === "file" && renderUnvalidatedAudioNote()}
 
         {/* Lossy warning banner */}
         {isLossy && (

@@ -11,6 +11,14 @@ export function overlaySettings(
   record: ProjectRecord,
   settings: ProjectWideSettings,
   lanes?: ProjectLaneView[] | null,
+  /**
+   * AQU-1771: the org's validation defaults. When given, a project with no
+   * value of its own carries the org's, so every reader of the record
+   * (readValidationCount and friends) sees the threshold actually in force.
+   * The Project settings form leaves this out: it must see only the project's
+   * own value, to tell "inherit" from an explicit number.
+   */
+  orgDefaults?: { validationCount?: number | null; validationCountAudio?: number | null },
 ): ProjectRecord {
   let next: ProjectRecord | null = null
   const draft = () => {
@@ -44,6 +52,7 @@ export function overlaySettings(
   assign("rules", settings.rules)
   assign("rulePenalties", settings.rulePenalties)
   assign("algorithmicChecks", settings.algorithmicChecks)
+  assign("algorithmicChecksByLane", settings.algorithmicChecksByLane)
   assign("terminology", settings.terminology)
   assign("termMatching", settings.termMatching)
   assign("fileGenres", settings.fileGenres)
@@ -55,8 +64,8 @@ export function overlaySettings(
   assign("alignmentSeeds", settings.alignmentSeeds)
   assign("livingMemoryEntries", settings.livingMemoryEntries)
   assign("translationBrief", settings.translationBrief)
-  assign("validationCount", settings.validationCount)
-  assign("validationCountAudio", settings.validationCountAudio)
+  assign("validationCount", settings.validationCount ?? orgDefaults?.validationCount)
+  assign("validationCountAudio", settings.validationCountAudio ?? orgDefaults?.validationCountAudio)
   assign("validationRoleFloor", settings.validationRoleFloor)
   assign("validationNamedUsers", settings.validationNamedUsers)
   assign("allowSelfValidation", settings.allowSelfValidation)
@@ -86,6 +95,14 @@ export function overlaySettings(
     "bibleEnrichments",
     settings.bibleEnrichments == null ? settings.bibleEnrichments : readBibleEnrichments(settings.bibleEnrichments),
   )
+  // AQU-1688: quotation marks enable Bible data checks in the workspace.
+  assign("languageProfile", settings.languageProfile)
+  // AQU-1699: must reach the workspace, or the name and clusivity checks never
+  // see the project's render.* and clusivity.* decisions.
+  assign("projectFacts", settings.projectFacts)
+  // AQU-1692: must reach the workspace, or a saved voice correction never
+  // shows in the editor.
+  assign("bibleVoiceOverrides", settings.bibleVoiceOverrides)
   assign("draftContext", settings.draftContext)
   // AQU-646 SUB-53: the Media lens reads this to decide whether to draw the
   // timeline against the imported file's clock or lay the verses out end to end.

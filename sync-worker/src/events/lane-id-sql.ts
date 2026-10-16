@@ -188,3 +188,46 @@ export function audioLaneDualReadSql(alias = ''): string {
 export function audioLaneDualReadBinds(projectId: string, tag: string): unknown[] {
   return [projectId, tag, tag]
 }
+
+/**
+ * AQU-1978: whose selection a write that SELECTS `audioId` may clear — a
+ * `cell.audio.attach` (as a dub) or a `cell.audio.select` naming a take.
+ *
+ * A take's lane is decided when it is born and `lane_id` is fill-only, so once
+ * a dub is on file its own row says which lane it belongs to. Scoping its
+ * siblings' deselect by the EVENT's tag instead trusted every later writer to
+ * restate that lane, and the routine ones did not: the word-timings re-attach
+ * named none, which reads as the `''` lane, and so saving a Spanish take's
+ * timings deselected the `''` lane's chosen take on that line.
+ *
+ *   - `audioId` is a dub already on file → the slot's clips in THAT dub's lane
+ *     (a `lane_id` NULL counting as the `''` lane, the read's own rule), plus
+ *     the shared source clip, which a dub takes the slot over from exactly as
+ *     before. The event's tag is not consulted, so a missing or stale one can
+ *     never reach another language.
+ *   - anything else — a brand-new take, or the shared source clip itself,
+ *     whose selection IS a per-lane choice the event names → the event's tag,
+ *     {@link audioLaneDualReadSql}, unchanged.
+ *
+ * Inlined into `UPDATE cell_audio … WHERE`, so `cell_audio` names the row being
+ * deselected. Binds: {@link audioSelectScopeBinds}.
+ */
+export function audioSelectScopeSql(): string {
+  const storedDub = `SELECT 1 FROM cell_audio t
+     WHERE t.project_id = cell_audio.project_id AND t.file_id = cell_audio.file_id
+       AND t.cell_id = cell_audio.cell_id AND t.audio_id = ? AND t.role <> 'source'`
+  const formerDefaultLane = `(SELECT id FROM public.lanes
+     WHERE project_id = cell_audio.project_id AND role = 'target' AND legacy_tag = '')`
+  return `(
+    EXISTS (${storedDub}
+      AND (cell_audio.role = 'source'
+        OR COALESCE(cell_audio.lane_id, ${formerDefaultLane})
+           IS NOT DISTINCT FROM COALESCE(t.lane_id, ${formerDefaultLane})))
+    OR (NOT EXISTS (${storedDub}) AND ${audioLaneDualReadSql()})
+  )`
+}
+
+/** Binds for {@link audioSelectScopeSql}: audioId, audioId, then the tag's. */
+export function audioSelectScopeBinds(projectId: string, audioId: string, tag: string): unknown[] {
+  return [audioId, audioId, ...audioLaneDualReadBinds(projectId, tag)]
+}

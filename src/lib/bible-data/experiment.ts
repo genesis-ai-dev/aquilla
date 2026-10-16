@@ -15,7 +15,13 @@
 // data" enrichment).
 
 import { isFlagEnabled } from "@/lib/features/flags"
-import { fileHasSections, type FileReference, type ProjectRecord } from "@/lib/parsers/types"
+import {
+  fileHasSections,
+  projectHasScriptureFiles,
+  resolveBibleResourcesEnabled,
+  type FileReference,
+  type ProjectRecord,
+} from "@/lib/parsers/types"
 
 export const BIBLE_DATA_FLAG = "bibleData"
 
@@ -35,4 +41,24 @@ export function isBibleOpen(
   activeFile: Pick<FileReference, "type" | "hasScriptureContent"> | null | undefined,
 ): boolean {
   return centerSurface === "editor" && !!activeFile && fileHasSections(activeFile)
+}
+
+/**
+ * AQU-1693: may Terminology offer "Link to a Bible person, place or group"?
+ * The concept editor is not a Bible-open surface, so it needs this device's
+ * experiment and the project's Bible data switch, and no open Bible. The
+ * picker reads the pack directly, so it must not bypass that switch. A link a
+ * concept already has is plain data: it is stored, synced and exported
+ * whatever this says.
+ */
+export function isBibleEntityLinkAvailable(
+  project:
+    | (Pick<ProjectRecord, "experimentalFlags" | "bibleResourcesEnabled"> & {
+        files?: Pick<FileReference, "type" | "hasScriptureContent">[]
+      })
+    | null
+    | undefined,
+): boolean {
+  if (!project || !isBibleDataExperimentOn(project)) return false
+  return resolveBibleResourcesEnabled(project.bibleResourcesEnabled, projectHasScriptureFiles(project.files))
 }

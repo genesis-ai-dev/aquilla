@@ -1,0 +1,44 @@
+name: Notify help bot
+
+# Wakes the aquilla-help Grok bot after each production release so it can
+# bring help.aquilla.app up to date. scripts/tag-release.sh pushes the calver
+# tag only after aquilla.app/version.json serves the release HEAD, so a tag
+# push means the release is live. A redeploy that reuses an existing tag
+# pushes nothing, so the bot is not pinged twice.
+#
+# GitHub reads this file from the tagged commit, so it fires only for
+# releases cut from a dev that already carries it.
+
+on:
+  push:
+    # Calver only: YYYY.MM.DD.NN, as tag-release.sh writes it.
+    tags: ['20[0-9][0-9].[0-9][0-9].[0-9][0-9].[0-9][0-9]']
+
+# Sends one request to the bot; needs no access to the repo.
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping the aquilla-help bot
+        env:
+          # Both come from the bot's trigger panel. The auth header secret is
+          # the whole line, "Authorization: Bearer <key>".
+          WEBHOOK_URL: ${{ secrets.GROK_HELP_WEBHOOK_URL }}
+          WEBHOOK_AUTH_HEADER: ${{ secrets.GROK_HELP_WEBHOOK_AUTH_HEADER }}
+          TAG: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          for name in WEBHOOK_URL WEBHOOK_AUTH_HEADER; do
+            if [ -z "${!name}" ]; then
+              echo "::error::GROK_HELP_$name is not set."
+              exit 1
+            fi
+          done
+          # A failed ping fails the run, so a missed docs update shows up red.
+          curl -fsS --max-time 30 --retry 3 --retry-all-errors -X POST "$WEBHOOK_URL" \
+            -H 'Content-Type: application/json' \
+            -H "$WEBHOOK_AUTH_HEADER" \
+            -d "{\"tag\":\"$TAG\",\"sha\":\"$SHA\"}"

@@ -36,6 +36,7 @@
  * working over the same open socket, which is why it looked like "Tauri pulls
  * changes down but never pushes them up".
  */
+import { recordOfflineUpload } from "./sync-times"
 import type { Store } from "@livestore/livestore"
 import {
   createWsReconciler,
@@ -49,6 +50,10 @@ import { cellRowId, events, localLaneKey, tables, type schema } from "./schema"
 import { markConflict } from "./conflicts"
 import { catchUpProject, toCellSyncedArgs, type CatchUpDeps } from "./catch-up"
 import { markProjectAvailable, withAccessTracking } from "./project-access"
+import { desktopConnectivity, type ConnectivitySource } from "./connectivity"
+
+/** Events per POST. sync-worker refuses more than 500 (413); a week offline can queue thousands. */
+export const MAX_FLUSH_BATCH = 200
 
 /** Matches buildProjectAwareMinter's signature (src/lib/sync/cqrs-bridge.ts) —
  *  callers typically pass that function directly. */
@@ -86,6 +91,8 @@ export interface OfflineSyncAdapterOptions {
   maxFlushRetryMs?: number
   /** Test seam for the catch-up pull's HTTP reads (catch-up.ts). */
   catchUpDeps?: CatchUpDeps
+  /** While this reports offline, nothing is attempted; coming online flushes. Defaults to the Rust probe. */
+  connectivity?: ConnectivitySource
 }
 
 export interface OfflineSyncAdapter {
@@ -119,6 +126,11 @@ interface EventQueueRow {
   status: "pending" | "flushing" | "failed"
 }
 
+/** Queue order: oldest first, ties broken by the (time-ordered UUIDv7) id. */
+function byQueueOrder(a: EventQueueRow, b: EventQueueRow): number {
+  return a.clientTs.getTime() - b.clientTs.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+}
+
 function toRawEvent(row: EventQueueRow): OutboxRawEvent {
   return {
     id: row.id,
@@ -145,6 +157,10 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
   const flushDebounceMs = options.flushDebounceMs ?? 250
   const minFlushRetryMs = options.minFlushRetryMs ?? 2_000
   const maxFlushRetryMs = options.maxFlushRetryMs ?? 60_000
+
+  const connectivity = options.connectivity ?? desktopConnectivity
+  // Unknown (no probe yet, or web) counts as online: try, and let a failure back off.
+  const isOffline = (): boolean => connectivity.current() === false
 
   let closed = false
   let flushInFlight = false
@@ -179,7 +195,9 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
    *  or permanently rejected) — a no-op if `id` isn't in the queue. */
   function dequeueIfQueued(id: string): void {
     const queued = store.query(tables.eventQueue.select().where({ id }).first())
-    if (queued) store.commit(events.eventDequeued({ id }))
+    if (!queued) return
+    store.commit(events.eventDequeued({ id }))
+    recordOfflineUpload(projectId)
   }
 
   function handleMessage(msg: ProjectWsServerMessage): void {
@@ -252,28 +270,47 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
   type FlushOutcome = "idle" | "ok" | "retry"
 
   async function flushQueue(): Promise<FlushOutcome> {
-    const pending = store.query(
-      tables.eventQueue.select().where({ projectId, status: "pending" }),
-    ) as readonly EventQueueRow[]
+    // Nothing is written to the store until the server answers: a queue that
+    // sits through weeks of failed attempts must not grow the eventlog with
+    // each one. An in-flight row is simply one a running flush holds.
+    const pending = (
+      store.query(tables.eventQueue.select().where({ projectId, status: "pending" })) as readonly EventQueueRow[]
+    ).toSorted(byQueueOrder)
     if (pending.length === 0) return "idle"
 
-    const ids = pending.map((r) => r.id)
-    for (const id of ids) store.commit(events.eventQueueStatusSet({ id, status: "flushing" }))
-
-    const revertToPending = (): void => {
-      for (const id of ids) store.commit(events.eventQueueStatusSet({ id, status: "pending" }))
-    }
-
     const file = store.query(tables.files.select().where({ projectId }).first())
-    if (!file) {
-      revertToPending()
-      return "retry"
+    if (!file) return "retry"
+
+    // A sync token is scoped to one file; the server refuses events for any
+    // other file with 403 "token scoped to different file". So each file's
+    // rows go up in their own POSTs under their own token.
+    const byFile = new Map<string, EventQueueRow[]>()
+    for (const r of pending) {
+      const fileId = r.fileId ?? file.id
+      const group = byFile.get(fileId)
+      if (group) group.push(r)
+      else byFile.set(fileId, [r])
     }
-    const mint = await mintToken(projectId, file.id)
-    if (!mint.token) {
-      revertToPending()
-      return "retry"
+    let outcome: FlushOutcome = "ok"
+    for (const [fileId, rows] of byFile) {
+      // Oldest first, and stop at the first failure: a later edit to a cell
+      // chains on an earlier one, so sending it first would only come back stale.
+      for (let i = 0; i < rows.length; i += MAX_FLUSH_BATCH) {
+        if (isOffline() || closed) return "retry"
+        if ((await flushFileRows(fileId, rows.slice(i, i + MAX_FLUSH_BATCH))) === "retry") {
+          outcome = "retry"
+          break
+        }
+      }
     }
+    return outcome
+  }
+
+  async function flushFileRows(fileId: string, pending: readonly EventQueueRow[]): Promise<FlushOutcome> {
+    const ids = pending.map((r) => r.id)
+
+    const mint = await mintToken(projectId, fileId)
+    if (!mint.token) return "retry"
 
     const rawEvents = pending.map(toRawEvent)
     let res: Response
@@ -284,19 +321,14 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
         body: JSON.stringify({ events: rawEvents }),
       })
     } catch {
-      revertToPending()
       return "retry"
     }
-    if (!res.ok) {
-      revertToPending()
-      return "retry"
-    }
+    if (!res.ok) return "retry"
 
     let body: FlushResponseBody
     try {
       body = (await res.json()) as FlushResponseBody
     } catch {
-      revertToPending()
       return "retry"
     }
 
@@ -331,6 +363,7 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
       }
       if (acceptedIds.has(id)) {
         store.commit(events.eventDequeued({ id }))
+        recordOfflineUpload(projectId)
         continue
       }
       const refusal = refused.get(id)
@@ -342,9 +375,8 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
         store.commit(events.eventQueueStatusSet({ id, status: "failed" }))
         continue
       }
-      // 401 / 5xx / unacknowledged — transient, retry on the next reconnect
-      // or explicit flushNow().
-      store.commit(events.eventQueueStatusSet({ id, status: "pending" }))
+      // 401 / 5xx / unacknowledged — transient: still "pending", so the next
+      // reconnect or flushNow() sends it again.
     }
 
     // Land the server's projected rows for our own accepted writes directly,
@@ -375,6 +407,8 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
    *  holds nothing to send. */
   function armFlush(delayMs: number): void {
     if (closed || flushTimer !== null) return
+    // Offline, the queue just waits on disk; coming online flushes it.
+    if (isOffline()) return
     if (!hasPending()) return
     flushTimer = setTimeout(() => {
       flushTimer = null
@@ -397,6 +431,8 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
     // outcome below is the authority on when the next attempt happens.
     cancelFlushTimer()
     if (outcome === "retry") {
+      // Dropped offline mid-flush: no backoff earned, the online edge retries.
+      if (isOffline()) return
       armFlush(flushRetryDelay)
       flushRetryDelay = Math.min(flushRetryDelay * 2, maxFlushRetryMs)
       return
@@ -466,6 +502,16 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
     store.commit(events.eventQueueStatusSet({ id: row.id, status: "pending" }))
   }
 
+  // The network came back: send what queued up while it was gone, from a
+  // clean backoff. (The socket's onOpen does the same once it reconnects;
+  // flushes are serialized, so the second finds less or nothing to send.)
+  const unsubscribeConnectivity = connectivity.subscribe((online) => {
+    if (closed || online !== true) return
+    flushRetryDelay = minFlushRetryMs
+    cancelFlushTimer()
+    void flushNow()
+  })
+
   // Anything already queued from a previous session (the app was closed with
   // unsynced work) goes out without waiting for the socket.
   armFlush(flushDebounceMs)
@@ -480,6 +526,7 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
       markProjectAvailable(projectId)
       cancelFlushTimer()
       unsubscribeQueue()
+      unsubscribeConnectivity()
       reconciler.close()
     },
   }

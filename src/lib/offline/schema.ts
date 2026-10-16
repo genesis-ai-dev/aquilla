@@ -1,7 +1,7 @@
 import { Events, Schema, State, makeSchema } from "@livestore/livestore"
 
 /** Bump on any offline event change, then run `pnpm offline:fixture` (enforced by eventlog-compat.test.ts). */
-export const OFFLINE_DATA_GENERATION = 1
+export const OFFLINE_DATA_GENERATION = 2
 
 /**
  * AQU-1614: prefix for a lane key derived from a lane's legacy tag rather than
@@ -161,10 +161,18 @@ export const syncCursorId = (projectId: string, fileId: string) => `${projectId}
 
 export const tables = { projects, files, cells, eventQueue, offlineProjects, syncCursors }
 
-// All events are client-only: the server projection is authoritative and reaches
-// LiveStore only through the custom sync adapter (Phase 3), never through LiveStore's
-// own sync backend. These events exist purely to drive local SQLite materialization.
+// All events but `localCheckpoint` are client-only: the server projection is
+// authoritative and reaches LiveStore only through the custom sync adapter (Phase 3),
+// never through LiveStore's own sync backend. These events exist purely to drive local
+// SQLite materialization.
 const events = {
+  // The one global event, pushed only to local-sync-backend.ts and materializing
+  // nothing: confirming it lets LiveStore drop every client event before it from
+  // memory. See local-checkpoint.ts.
+  localCheckpoint: Events.synced({
+    name: "v1.LocalCheckpoint",
+    schema: Schema.Struct({}),
+  }),
   projectSynced: Events.clientOnly({
     name: "v1.ProjectSynced",
     schema: Schema.Struct({
@@ -391,6 +399,7 @@ const events = {
 export { events }
 
 const materializers = State.SQLite.materializers(events, {
+  "v1.LocalCheckpoint": () => [],
   "v1.ProjectSynced": ({ id, name, orgId, settings, syncedAt }) =>
     tables.projects.insert({ id, name, orgId, settings, syncedAt }).onConflict("id", "update", {
       name,

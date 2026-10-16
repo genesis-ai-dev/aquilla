@@ -44,6 +44,9 @@ export const workspace = defineNamespace({
     // writes (src/lib/offline/leader-watchdog.ts). Restarting the app fixes it.
     "workspace.offline.leaderStalledToast": "Your recent changes aren't being saved on this device. Restart the app to fix this — changes made since it started may be lost.",
     "workspace.offline.leaderStalledRestart": "Restart app",
+    "workspace.offline.slowBootToast": "Your offline projects are taking a while to open. This can take a few minutes after an update. If it doesn't finish, restart the app.",
+    // Tauri: a newer build owns the offline data (src/lib/offline/generation-guard.ts).
+    "workspace.offline.newerDataToast": "Your offline projects were saved by a newer version of Aquilla. Update the app to use them — until then, changes save only while you're online.",
     // Desktop update prompt (DesktopUpdatePrompt.tsx).
     "workspace.update.readyToast": "Aquilla {version} is ready to install.",
     "workspace.update.restartToUpdate": "Restart to update",
@@ -106,6 +109,8 @@ export const workspace = defineNamespace({
     // -- ProjectWorkspace: AppShell chrome --
     "workspace.sidebar.collapse": "Collapse sidebar",
     "workspace.readOnlyGitBanner": "Read-only — imported from git. Push is coming in Phase 2.",
+    // AQU-1902: edits wait for the project's languages so none lands on the wrong lane.
+    "workspace.loadingLanguagesBanner": "Loading languages… editing starts in a moment.",
     "workspace.staleSibling.viewInHistory": "View in history",
     // AQU-1340: a failed concepts read compiles to an EMPTY terminology rule
     // set, which silently switches off every term check in the editor. Say so
@@ -589,6 +594,23 @@ export const workspace = defineNamespace({
           "Action button on the 'changes aren't being saved' toast; quits and " +
           "relaunches the desktop app. Short imperative.",
       },
+      "workspace.offline.slowBootToast": {
+        description:
+          "Title of a persistent warning toast in the Tauri desktop app when the " +
+          "on-device storage for offline projects still hasn't opened after 30 " +
+          "seconds — usually it's rebuilding after an app update, but it may be " +
+          "stuck. Paired with a 'Restart app' action " +
+          "(workspace.offline.leaderStalledRestart). Three short sentences with " +
+          "periods. Plain language — no 'worker', 'store' or 'sync' jargon.",
+      },
+      "workspace.offline.newerDataToast": {
+        description:
+          "Title of a persistent warning toast in the Tauri desktop app when an " +
+          "older app version starts on a device whose offline data a newer version " +
+          "wrote, so offline projects are switched off until the user updates. " +
+          "Edits still reach the server while online. Two full sentences with " +
+          "periods. Plain language — no 'store', 'generation' or 'sync' jargon.",
+      },
       "workspace.update.readyToast": {
         description:
           "Title of a persistent toast in the Tauri desktop app when a new app " +
@@ -782,6 +804,14 @@ export const workspace = defineNamespace({
           "chrome that collapses the expanded left dock back to its narrow icon " +
           "rail. Mirrors nav.dock.expandSidebar for the opposite direction.",
         screenshot: "workspace-nav",
+      },
+      "workspace.loadingLanguagesBanner": {
+        description:
+          "Banner across the top of the editor while the project's target " +
+          "languages are still loading. The editor is briefly read-only so an " +
+          "edit cannot be saved into the wrong language; it usually lasts a " +
+          "second or less.",
+        maxLength: 90,
       },
       "workspace.readOnlyGitBanner": {
         description:

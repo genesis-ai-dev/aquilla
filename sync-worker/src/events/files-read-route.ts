@@ -25,6 +25,7 @@ import { readDeclaredLanguages } from "../../../db/shared/file-declared-language
 import { notHiddenFileSql } from "../../../db/shared/counted-files"
 import { legacyTagsForVisibleLanes } from "../../../src/lib/lanes/read-wall"
 import { visibleLanesForRead } from "./lane-read-wall"
+import { effectiveThresholdSql } from '../../../db/shared/validation-threshold'
 
 export interface FilesReadEnv {
   AQUILLA_PG?: AquillaDb
@@ -295,8 +296,8 @@ export async function handleFilesReadRequest(
   // still gets its org's default, and the threshold still resolves from the
   // settings alone.
   const thresholdCte =
-    "WITH thr AS (SELECT LEAST(15, GREATEST(1, CASE WHEN (ps.settings::jsonb->>'validationCount') ~ '^[0-9]+$' " +
-    "THEN (ps.settings::jsonb->>'validationCount')::integer ELSE 1 END)) AS n, " +
+    // AQU-1771: project → org → 1, from the generated columns.
+    `WITH thr AS (SELECT ${effectiveThresholdSql('ps.validation_count', 'os.validation_count')} AS n, ` +
     "COALESCE(ps.count_structural, os.count_structural) = 'false' AS exclude_structural, " +
     "(SELECT COUNT(*) FROM lanes l WHERE l.project_id = q.id AND l.role = 'target') <= 1 AS one_target_lane " +
     "FROM (SELECT ?::text AS id) q " +
@@ -507,8 +508,7 @@ async function hideUngrantedDefaultLaneCounts(
     `CASE WHEN COALESCE(thr.exclude_structural, false) THEN ${amount} ELSE 0 END`
   const { results } = await env.AQUILLA_PG.prepare(
     `WITH thr AS (
-       SELECT LEAST(15, GREATEST(1, CASE WHEN (ps.settings::jsonb->>'validationCount') ~ '^[0-9]+$'
-              THEN (ps.settings::jsonb->>'validationCount')::integer ELSE 1 END)) AS n,
+       SELECT ${effectiveThresholdSql('ps.validation_count', 'os.validation_count')} AS n,
               COALESCE(ps.count_structural, os.count_structural) = 'false' AS exclude_structural
          FROM (SELECT ?::text AS id) q
          LEFT JOIN project_settings ps ON ps.project_id = q.id

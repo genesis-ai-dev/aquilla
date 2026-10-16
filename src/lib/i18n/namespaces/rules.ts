@@ -47,6 +47,7 @@ export const rules = defineNamespace({
     "rules.infraction.builtin.repeatedWord": "Word repeated in translation",
     "rules.infraction.builtin.unpairedSymbols": "Unpaired bracket/parenthesis/brace in translation",
     "rules.infraction.builtin.abbreviationMismatch": "Abbreviation from source missing in translation",
+    "rules.infraction.builtin.usfmStructure": "Unrecognized or unclosed USFM marker in translation",
     "rules.infraction.builtin.capitalization": "Lowercase letter where a capital is expected",
     "rules.infraction.builtin.footnoteQuoteMismatch":
       "This footnote quotes text that is not in the verse",
@@ -85,6 +86,9 @@ export const rules = defineNamespace({
     "rules.builtin.unpairedSymbols.name": "Unpaired brackets",
     "rules.builtin.unpairedSymbols.description":
       "Mismatched parentheses, brackets, or braces in translation.",
+    "rules.builtin.usfmStructure.name": "USFM markers",
+    "rules.builtin.usfmStructure.description":
+      "Markers in the translation must be ones USFM defines, and paired markers must be closed.",
     "rules.builtin.abbreviationMismatch.name": "Abbreviation pass-through",
     "rules.builtin.abbreviationMismatch.description":
       "ALL-CAPS abbreviations from source missing in translation.",
@@ -101,6 +105,14 @@ export const rules = defineNamespace({
 
     // ── Built-in checks list (RulesSurface) ─────────────────────────────────
     "rules.builtinChecks.heading": "Built-in checks",
+    // AQU-1906: these switches are per-lane once a project has several lanes,
+    // and the two punctuation rows say which conventions they are applying.
+    "rules.builtinChecks.laneScopeNote":
+      "These switches apply to the {lane} lane only. Other lanes keep their own.",
+    "rules.builtinChecks.punctuation.fromLanguage": "Using {language} punctuation conventions.",
+    "rules.builtinChecks.punctuation.fromProfile": "Using the punctuation from the Language profile.",
+    "rules.builtinChecks.punctuation.sourceRelative":
+      "Judged by the source's own marks — this lane records no language.",
     "rules.builtinChecks.violationCount": plural({
       one: "{count} violation",
       other: "{count} violations",
@@ -486,6 +498,28 @@ export const rules = defineNamespace({
         placeholders: {
           tokens: "The missing placeholder token(s), comma-joined — raw text, never translated.",
         },
+      },
+      "rules.builtinChecks.laneScopeNote": {
+        description:
+          "Note above the built-in checks list on a project with several target lanes: the switches and severities below belong to the lane the page is viewing, not the whole project (AQU-1906).",
+        placeholders: {
+          lane: "The viewed lane's display name — the user's own lane name or its language, verbatim, never translated.",
+        },
+      },
+      "rules.builtinChecks.punctuation.fromLanguage": {
+        description:
+          "Note on the End punctuation and Punctuation integrity rows: those checks are judging the translation by this language's own marks rather than the source's (AQU-1906).",
+        placeholders: {
+          language: "The lane's language as the user typed it — verbatim, never translated.",
+        },
+      },
+      "rules.builtinChecks.punctuation.fromProfile": {
+        description:
+          "Same note, when the project's Language profile fills in the punctuation itself and so wins over the per-language defaults.",
+      },
+      "rules.builtinChecks.punctuation.sourceRelative": {
+        description:
+          "Same note, when the lane records no language: the two punctuation checks fall back to comparing against the source's own marks.",
       },
       "rules.builtinChecks.violationCount": {
         description:

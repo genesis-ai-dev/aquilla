@@ -94,6 +94,10 @@ export const comments = defineNamespace({
     "comments.drawer.newThreadHeading": "New thread",
     "comments.drawer.newThreadPlaceholder": "Leave a comment...",
     "comments.drawer.post": "Post",
+    "comments.drawer.submitRefused": plural({
+      one: "{count} comment you wrote wasn't posted — {reason}.",
+      other: "{count} comments you wrote weren't posted — {reason}.",
+    }),
 
     // In-app mention inbox (workspace header bell)
     "comments.inbox.title": "Notifications",
@@ -103,7 +107,8 @@ export const comments = defineNamespace({
     "comments.inbox.markAllRead": "Mark all as read",
     "comments.inbox.markRead": "Mark as read",
     "comments.inbox.markUnread": "Mark unread",
-    "comments.inbox.commented": "{author} commented: {excerpt}",
+    "comments.inbox.verseInFile": "{verse} in {file}",
+    "comments.inbox.commented": "{author} commented: {message}",
     "comments.inbox.unreadsOnly": "Show unreads only",
     "comments.inbox.actionsAria": "Notification actions",
     "comments.inbox.delete": "Delete notification",
@@ -509,6 +514,21 @@ export const comments = defineNamespace({
           "fills in. Enter posts the comment. Imperative verb.",
         screenshot: "cell-editor",
       },
+      "comments.drawer.submitRefused": {
+        description:
+          "Inline warning above the new-thread field in the per-cell drawer, shown " +
+          "when the server permanently refused a comment this person wrote, so it " +
+          "has been taken back out of the thread. Past tense: it reports what " +
+          "happened to that comment, not current project policy. {count} is how many " +
+          "of their comments were refused; {reason} is a lower-case clause naming the " +
+          "refusal (e.g. \"your role wasn't allowed to comment on this project\") and " +
+          "completes the sentence after the dash.",
+        placeholders: {
+          reason: "Lower-case clause naming why the server refused the comment.",
+          count: "How many of this person's comments were refused.",
+        },
+        screenshot: "cell-editor",
+      },
       "comments.inbox.title": {
         description: "Heading of the notifications popover opened from the bell in the project header.",
       },
@@ -541,13 +561,23 @@ export const comments = defineNamespace({
           "Item in the right-click menu on one notification. Marks that row unread again. " +
           "Shown only while the row is already read.",
       },
+      "comments.inbox.verseInFile": {
+        description:
+          "First line of a notification when the mention is on a verse in a file. " +
+          "{verse} is a Bible reference such as GEN 1:1. {file} is the file's display " +
+          "name. Example: \"GEN 1:1 in Genesis.usfm\".",
+        placeholders: {
+          verse: "Bible book, chapter, and verse, such as GEN 1:1.",
+          file: "Display name of the file the verse is in.",
+        },
+      },
       "comments.inbox.commented": {
         description:
-          "Second line of a notification row. Names who wrote the comment, then the " +
-          "comment itself. Example: \"dev commented: @carol yes\".",
+          "Second line of a notification, under the verse and file. Names who wrote " +
+          "the comment, then the comment itself. Example: \"keeandev commented: @keean hello\".",
         placeholders: {
           author: "Display name of the person who wrote the comment.",
-          excerpt: "The comment text, with @mentions kept as @name.",
+          message: "The comment text, with @mentions shown as @name.",
         },
       },
       "comments.inbox.unreadsOnly": {

@@ -4,10 +4,13 @@ import {
   laneLabelForTag,
   laneLabelsByTag,
   laneLabelSuffixesById,
+  laneLanguageCodeForTag,
   laneLanguageForTag,
   laneOptionLabel,
   laneRowLabel,
   laneRowLanguage,
+  liveTargetLaneLanguages,
+  sourceLaneLanguage,
   type LaneLanguageRow,
 } from "./lane-language"
 
@@ -275,5 +278,95 @@ describe("laneLabelSuffixesById (AQU-1784)", () => {
         row({ id: "bbbb0002", language: "Tshangla", name: "Tshangla East", legacyTag: "bbbb0002" }),
       ]),
     ).toEqual({})
+  })
+})
+
+describe("laneLanguageCodeForTag (AQU-1908)", () => {
+  const lanes = [
+    row({ id: "aaaa0001", language: "Spanish", legacyTag: "" }),
+    row({ id: "bbbb0002", language: "French", legacyTag: "bbbb0002" }),
+    row({ id: "cccc0003", language: "Grade 7 English", legacyTag: "cccc0003" }),
+    row({ id: "dddd0004", language: "Tshangla", langCode: "tsj", legacyTag: "dddd0004" }),
+  ]
+
+  it("derives each lane's own code, so two target lanes get two dictionaries", () => {
+    expect(laneLanguageCodeForTag("", lanes)).toBe("es")
+    expect(laneLanguageCodeForTag("bbbb0002", lanes)).toBe("fr")
+  })
+
+  it("is null for a freeform label no catalog entry matches", () => {
+    expect(laneLanguageCodeForTag("cccc0003", lanes)).toBeNull()
+  })
+
+  it("prefers the row's code override over the derived code", () => {
+    expect(laneLanguageCodeForTag("dddd0004", lanes)).toBe("tsj")
+  })
+
+  it("is null for a lane that records no language at all", () => {
+    expect(laneLanguageCodeForTag("eeee0005", [row({ id: "eeee0005", legacyTag: "eeee0005" })])).toBeNull()
+  })
+
+  it("does not read project settings — a blank default lane stays blank", () => {
+    expect(
+      laneLanguageCodeForTag("", [row({ id: "aaaa0001", legacyTag: "" })], { targetLanguage: "Spanish" }),
+    ).toBeNull()
+  })
+
+  it("falls back to the tag itself when no row matches (a pre-lane-rows server)", () => {
+    expect(laneLanguageCodeForTag("Spanish", null)).toBe("es")
+    expect(laneLanguageCodeForTag("fr", null)).toBe("fr")
+  })
+
+  it("never answers an opaque lane id, which is an event key and not a language", () => {
+    expect(laneLanguageCodeForTag("a3f09c1e", null)).toBeNull()
+  })
+})
+
+describe("sourceLaneLanguage (AQU-1978)", () => {
+  it("is the source lane row's language, never a target lane's", () => {
+    const lanes = [
+      row({ id: "tgt00001", role: "target", language: "Spanish", legacyTag: "Spanish" }),
+      row({ id: "src00001", role: "source", language: "English" }),
+    ]
+    expect(sourceLaneLanguage(lanes)).toBe("English")
+  })
+
+  it("is null when no source lane names a language — not the retired settings key", () => {
+    expect(sourceLaneLanguage([], { sourceLanguage: "English" })).toBeNull()
+    expect(sourceLaneLanguage(undefined)).toBeNull()
+  })
+})
+
+describe("liveTargetLaneLanguages (AQU-1978)", () => {
+  const lane = (
+    over: Partial<LaneLanguageRow> & { id: string; position: number; archivedAt?: string | null },
+  ) => ({ role: "target" as const, archivedAt: null, ...row(over), position: over.position })
+
+  it("lists the live target lanes' languages in switcher order, from the rows", () => {
+    const lanes = [
+      { ...row({ id: "src00001", role: "source", language: "English" }), position: 0, archivedAt: null },
+      lane({ id: "frc00002", language: "French", legacyTag: "French", position: 2 }),
+      // A second lane tagged with its own id: its LANGUAGE is listed, never the tag.
+      lane({ id: "a3f09c1e", language: "Portuguese", legacyTag: "a3f09c1e", position: 1 }),
+      lane({ id: "swa00003", language: "Swahili", legacyTag: "", position: 0 }),
+    ]
+    expect(liveTargetLaneLanguages(lanes)).toEqual(["Swahili", "Portuguese", "French"])
+  })
+
+  it("leaves out an archived lane, the former default lane included", () => {
+    const lanes = [
+      lane({ id: "swa00003", language: "Swahili", legacyTag: "", position: 0, archivedAt: "2026-10-01" }),
+      lane({ id: "frc00002", language: "French", legacyTag: "French", position: 1 }),
+    ]
+    expect(liveTargetLaneLanguages(lanes)).toEqual(["French"])
+  })
+
+  it("names each language once and skips a lane that names none", () => {
+    const lanes = [
+      lane({ id: "spa00001", language: "Spanish", legacyTag: "Spanish", position: 0 }),
+      lane({ id: "b4e10d2f", language: "spanish", legacyTag: "b4e10d2f", position: 1 }),
+      lane({ id: "c5f21e3a", language: null, name: null, legacyTag: "c5f21e3a", position: 2 }),
+    ]
+    expect(liveTargetLaneLanguages(lanes)).toEqual(["Spanish"])
   })
 })

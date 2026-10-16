@@ -48,6 +48,17 @@ function fail(description: string): ClientResult {
   return { ok: false, error: "invalid_client", description }
 }
 
+/** The server fetches the client_id, so refuse hosts that only make sense
+ *  inside a network: IP literals (v4/v6), localhost, and internal-only suffixes.
+ *  Real clients publish their metadata under a public DNS name. */
+export function isInternalHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/\.$/, "")
+  if (host.startsWith("[") || host.includes(":")) return true // IPv6 literal
+  if (/^\d+(\.\d+){0,3}$/.test(host) || /^0x[0-9a-f]+$/i.test(host)) return true // IPv4 literal, any notation
+  if (host === "localhost" || !host.includes(".")) return true
+  return /\.(localhost|local|internal|lan|home|corp|intranet)$/.test(host)
+}
+
 /** A client_id must be an HTTPS URL with a path, no fragment, no userinfo, and
  *  no dot segments (draft §3). */
 export function isClientIdUrl(clientId: string): boolean {
@@ -59,6 +70,7 @@ export function isClientIdUrl(clientId: string): boolean {
   }
   if (url.protocol !== "https:") return false
   if (url.username || url.password || url.hash) return false
+  if (isInternalHostname(url.hostname)) return false
   if (url.pathname === "/" || url.pathname === "") return false
   if (url.pathname.split("/").some((seg) => seg === "." || seg === "..")) return false
   // The parsed form must be the literal string: no normalisation games.

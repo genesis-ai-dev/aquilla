@@ -32,6 +32,64 @@ describe("isRestrictedFloor / sectionTintClass", () => {
 })
 
 describe("SectionVisibilityBadge", () => {
+  // AQU-1771: on a section a project can make stricter, the popover says where
+  // the shown setting comes from, under the picker. The badge itself only says
+  // who can see the section (Sam, 2026-10-13).
+  it("says the setting's origin under the picker, never on the badge", async () => {
+    const onChangeMinRole = vi.fn()
+    const { rerender } = render(
+      <SectionVisibilityBadge minRole={ROLE.MAINTAINER} canEdit onChangeMinRole={onChangeMinRole} origin="org" orgDefaultRole={ROLE.MAINTAINER} />,
+    )
+    expect(screen.getByTestId("section-visibility-badge")).toHaveTextContent(/^Only maintainers & owners can see this$/)
+    fireEvent.click(screen.getByTestId("section-visibility-badge"))
+    expect(await screen.findByTestId("section-visibility-origin")).toHaveTextContent("Follows your org's setting.")
+
+    rerender(
+      <SectionVisibilityBadge
+        minRole={ROLE.OWNER}
+        canEdit
+        onChangeMinRole={onChangeMinRole}
+        origin="project"
+        followOrgRole={ROLE.MAINTAINER}
+        onFollowOrg={vi.fn()}
+      />,
+    )
+    expect(screen.getByTestId("section-visibility-badge")).toHaveTextContent(/^Only owners can see this$/)
+    expect(await screen.findByTestId("section-visibility-origin")).toHaveTextContent(
+      "Stricter than your org (Maintainers and owners). Pick “Follow the org (Maintainers and owners)” to undo.",
+    )
+  })
+
+  it("says nothing about origin on org-only sections", async () => {
+    render(<SectionVisibilityBadge minRole={ROLE.MAINTAINER} canEdit onChangeMinRole={vi.fn()} />)
+    fireEvent.click(screen.getByTestId("section-visibility-badge"))
+    await screen.findByRole("combobox", { name: /who can see this section/i })
+    expect(screen.queryByTestId("section-visibility-origin")).toBeNull()
+  })
+
+  // AQU-1771: a project's own value can always be cleared from the badge.
+  it("offers a 'Follow the org' first option only when given one, and calls onFollowOrg", async () => {
+    const onFollowOrg = vi.fn()
+    const onChangeMinRole = vi.fn()
+    render(
+      <SectionVisibilityBadge
+        minRole={ROLE.OWNER}
+        canEdit
+        onChangeMinRole={onChangeMinRole}
+        followOrgRole={ROLE.MAINTAINER}
+        onFollowOrg={onFollowOrg}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("section-visibility-badge"))
+    fireEvent.click(await screen.findByRole("combobox", { name: /who can see this section/i }))
+    const follow = await screen.findByRole("option", { name: "Follow the org (Maintainers and owners)" })
+    fireEvent.pointerMove(follow)
+    fireEvent.mouseMove(follow)
+    fireEvent.keyDown(follow, { key: "Enter" })
+    await waitFor(() => expect(onFollowOrg).toHaveBeenCalledOnce())
+    expect(onChangeMinRole).not.toHaveBeenCalled()
+  })
+
   it("renders a plain, non-interactive badge when the caller cannot edit", () => {
     render(<SectionVisibilityBadge minRole={ROLE.MAINTAINER} />)
     const badge = screen.getByTestId("section-visibility-badge")

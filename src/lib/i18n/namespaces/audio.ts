@@ -285,6 +285,9 @@ export const audio = defineNamespace({
     "audio.tts.serverOnlyNeedsGenerate":
       "Generate audio on this line first to hear {engine} TTS.",
     "audio.tts.playbackFailed": "That voice clip couldn't be played.",
+    "audio.tts.offlineBlocked": "Offline: {engine} needs a connection to generate audio.",
+    "audio.tts.offlineSuggestLocal": "Offline: {engine} needs a connection. Switch this voice to the on-device MMS voice to preview it offline.",
+    "audio.tts.offlinePreviewOnly": "Offline: preview with the on-device voice. The clip won't be saved.",
     "audio.tts.failedTooltip": "Couldn't generate a voice — {reason}",
     "audio.recordingModal.cueReferenceLabel": "This cue:",
     "audio.recordingModal.ttsSharedNotice": plural({
@@ -506,6 +509,7 @@ export const audio = defineNamespace({
       "count",
     ),
     "audio.batchVoice.failedTitle": "Couldn't generate voice for these lines",
+    "audio.batchVoice.offline": "You're offline. Generating voice for these lines needs a connection.",
     "audio.batchVoice.moreFailures": plural(
       { one: "{count} more failure", other: "{count} more failures" },
       "count",
@@ -580,6 +584,7 @@ export const audio = defineNamespace({
     "audio.error.noAttachment": "No audio attachment on this cell",
     "audio.error.legacyLfsUnsupported": "Unsupported audio URL (legacy LFS): {url}",
     "audio.error.notSignedIn": "Not signed in",
+    "audio.error.notAvailableOffline": "Not available offline",
     "audio.error.recordingDeleted": "This audio recording has been deleted and cannot be played.",
     "audio.error.streamingFailed": "Playback failed — the media source could not be streamed.",
 
@@ -614,6 +619,7 @@ export const audio = defineNamespace({
     "audio.aiError.dailyLimitTitle": "Daily AI limit reached",
     "audio.aiError.modelNotAvailableTitle": "Model not available",
     "audio.aiError.tooLargeTitle": "Too much text for this model",
+    "audio.aiError.protectedFormatTitle": "Protected formatting stopped this draft",
     "audio.aiError.geminiKeyRequiredTitle": "Gemini API key required",
     "audio.aiError.openRouterKeyRequiredTitle": "OpenRouter API key required",
     "audio.aiError.geminiFailedTitle": "Gemini TTS failed",
@@ -641,8 +647,15 @@ export const audio = defineNamespace({
     // actually reads to decide what to do was the untranslated half.
     "audio.aiError.dailyLimitBody":
       "Daily AI limit reached — resets at midnight UTC. Try again tomorrow, or switch this project to a custom AI provider.",
+    // AQU-1869: the platform-wide spend ceiling, not the user's own quota.
+    "audio.aiError.spendCeilingBody":
+      "Hosted AI is paused for the rest of the day — the platform reached its daily AI spend ceiling. It resets at midnight UTC. Nothing is wrong with your project; your own work is unaffected. To keep going now, switch this project to a custom AI provider in Project Settings.",
     "audio.aiError.tooLargeBody":
       "This request was larger than the selected model can handle. Draft fewer cells at once, lower the number of examples in AI settings, or pick a model with a larger context window.",
+    // AQU-1964: a draft refused for changing a protected IDML anchor. The
+    // refusal is correct; the silence was the bug.
+    "audio.aiError.protectedFormatBody":
+      "The AI draft changed formatting this document protects, so it was discarded and nothing was saved. Draft the cell again, or type the translation yourself around the protected part. The technical detail below names the protected part of the file.",
     "audio.aiError.geminiKeyRequiredBody":
       "Add a Gemini API key to use this Gemini voice, or switch the line to Inworld TTS (hosted, no key) or a local MMS engine.",
     "audio.aiError.geminiFailedBody":
@@ -1894,6 +1907,17 @@ export const audio = defineNamespace({
           "wordings distinct — merging them would re-point a string translators " +
           "were given a specific surface for.",
       },
+      "audio.tts.offlineBlocked": {
+        description: "Tooltip on the disabled generate-voice button while offline when the voice uses a hosted engine.",
+        placeholders: { engine: "Short engine name, e.g. 'Inworld' or 'Gemini'." },
+      },
+      "audio.tts.offlineSuggestLocal": {
+        description: "Tooltip on the disabled generate-voice button while offline when the on-device MMS voice model is downloaded and could be used instead.",
+        placeholders: { engine: "Short engine name, e.g. 'Inworld' or 'Gemini'." },
+      },
+      "audio.tts.offlinePreviewOnly": {
+        description: "Tooltip on the generate-voice button while offline when the voice is the on-device MMS model: it plays but is not saved.",
+      },
       "audio.tts.failedTooltip": {
         description:
           "AQU-510: tooltip and accessible name of the line's voice button once " +
@@ -2634,6 +2658,9 @@ export const audio = defineNamespace({
           "lines that failed and why.",
         placeholders: { count: "Number of lines that got a take." },
       },
+      "audio.batchVoice.offline": {
+        description: "Note beside the disabled Generate button in the batch voice dialog while the device is offline.",
+      },
       "audio.batchVoice.failedTitle": {
         description:
           "Heading of the error notice when a batch voice run could not start at " +
@@ -2791,6 +2818,12 @@ export const audio = defineNamespace({
           url: "The unsupported attachment URL. Technical value — do not translate.",
         },
       },
+      "audio.error.notAvailableOffline": {
+        description:
+          "Shown on an audio or video player when the media is not saved on this device " +
+          "and the server can't be reached. Short.",
+        maxLength: 32,
+      },
       "audio.error.notSignedIn": {
         description:
           "Internal error message on a thrown AudioError when a network fetch of a " +
@@ -2894,6 +2927,13 @@ export const audio = defineNamespace({
         description:
           "Popover heading when a completion/TTS request exceeded the selected " +
           "model's context window (a 413 or an explicit 'too large' provider error).",
+      },
+      "audio.aiError.protectedFormatTitle": {
+        description:
+          "Popover heading (AQU-1964) when an AI draft was discarded because it "
+          + "changed formatting the imported document protects — an IDML anchor. "
+          + "The draft was refused on purpose and nothing was saved, so the "
+          + "heading must read as a deliberate refusal, not a crash or an outage.",
       },
       "audio.aiError.geminiKeyRequiredTitle": {
         description:
@@ -3035,6 +3075,18 @@ export const audio = defineNamespace({
           "budget stops applying. 'UTC' is a technical term the sentence needs — " +
           "keep it recognizable rather than translating it to a local zone.",
       },
+      "audio.aiError.spendCeilingBody": {
+        description:
+          "Body shown under providerUnavailableTitle when the PLATFORM has hit its " +
+          "daily dollar ceiling for hosted AI (AQU-1869) and every paid AI call is " +
+          "refused until the next UTC day. This is a platform-wide pause, not the " +
+          "user's own allowance — unlike dailyLimitBody it must not read as a " +
+          "personal quota or tell them to wait out their own limit. Names the one " +
+          "thing they can do now: switch the project to its own AI provider in " +
+          "Project Settings. 'UTC' and 'Project Settings' are a technical term " +
+          "and a UI location — keep the first recognizable and match the second " +
+          "to that settings page's translated name.",
+      },
       "audio.aiError.tooLargeBody": {
         description:
           "Body for a prompt that exceeded the model's context window (HTTP 413 " +
@@ -3042,6 +3094,14 @@ export const audio = defineNamespace({
           "can act on them: draft fewer cells, lower the example count in AI " +
           "settings, or choose a bigger model. 'AI settings' is a UI location — " +
           "match the translation used for that settings section.",
+      },
+      "audio.aiError.protectedFormatBody": {
+        description:
+          "Body for protectedFormatTitle (AQU-1964). Says three things in order: "
+          + "the draft was discarded, nothing was saved, and the two ways "
+          + "forward — draft again, or translate by hand around the protected "
+          + "part. 'Technical detail' names the disclosure control beneath it: "
+          + "use the same wording as that control's label.",
       },
       "audio.aiError.geminiKeyRequiredBody": {
         description:

@@ -15,6 +15,70 @@ import { defineNamespace, plural } from "./types"
  */
 export const projectSettings = defineNamespace({
   keys: {
+    "projectSettings.checking.position": "{current} of {total}",
+    "projectSettings.checking.creatorTitle": "Community checking links",
+    "projectSettings.checking.wipNotice": "Feature-flagged WIP. Guests hear selected recordings and leave feedback in project comments. Reviewer links currently collect feedback; formal validation is not included.",
+    "projectSettings.checking.loadingProject": "Loading project passages…",
+    "projectSettings.checking.linkTitle": "Link title",
+    "projectSettings.checking.guestAccess": "Guest access",
+    "projectSettings.checking.viewerOption": "Viewer — listen",
+    "projectSettings.checking.commenterOption": "Commenter — listen and comment",
+    "projectSettings.checking.reviewerOption": "Reviewer — listen and give review feedback",
+    "projectSettings.checking.pinOptional": "PIN (optional)",
+    "projectSettings.checking.pinHelp": "Use 4–12 digits. Share the PIN separately.",
+    "projectSettings.checking.createLink": "Create checking link",
+    "projectSettings.checking.revoked": "Revoked",
+    "projectSettings.checking.copied": "Copied",
+    "projectSettings.checking.copyLink": "Copy link",
+    "projectSettings.checking.openGuest": "Open guest view",
+    "projectSettings.checking.revoke": "Revoke",
+    "projectSettings.checking.brand": "Aquilla · Community checking",
+    "projectSettings.checking.welcome": "Listen together",
+    "projectSettings.checking.joinHelp": "Listen to the passages shared with you. Enter your name so the team knows who is giving feedback.",
+    "projectSettings.checking.name": "Your name",
+    "projectSettings.checking.guestPin": "PIN, if you received one",
+    "projectSettings.checking.opening": "Opening…",
+    "projectSettings.checking.start": "Start listening",
+    "projectSettings.checking.listenOnly": "Listen only",
+    "projectSettings.checking.reviewFeedback": "Review feedback",
+    "projectSettings.checking.listenComment": "Listen and comment",
+    "projectSettings.checking.loadingPassages": "Loading passages…",
+    "projectSettings.checking.unavailablePassages": "These passages are no longer available.",
+    "projectSettings.checking.player": "Passage player",
+    "projectSettings.checking.recording": "Passage recording",
+    "projectSettings.checking.pause": "Pause",
+    "projectSettings.checking.play": "Play continuously",
+    "projectSettings.checking.noRecording": "No selected recording for this passage.",
+    "projectSettings.checking.playbackHelp": "Playback continues through available recordings in passage order.",
+    "projectSettings.checking.feedbackPlaceholder": "What is clear? What could be improved?",
+    "projectSettings.checking.sendFeedback": "Send feedback",
+    "projectSettings.checking.retry": "Retry pending feedback",
+    "projectSettings.checking.passages": "Shared passages",
+    "projectSettings.checking.scopeTitle": "Passages to share",
+    "projectSettings.checking.emptyProject": "This project has no passages to share.",
+    "projectSettings.checking.wholeProject": "Whole project",
+    "projectSettings.checking.defaultTitle": "Community listening",
+    "projectSettings.checking.signIn": "Sign in to create checking links.",
+    "projectSettings.checking.createFailed": "Could not create link.",
+    "projectSettings.checking.revokeFailed": "Could not revoke link.",
+    "projectSettings.checking.copyFailed": "Copy failed. Select and copy the URL above.",
+    "projectSettings.checking.saved": "Feedback saved to the project. Thank you.",
+    "projectSettings.checking.recordingUnavailable": "This recording is unavailable. Try another passage or retry the link.",
+    "projectSettings.checking.pressPlay": "Press Play to continue listening.",
+    "projectSettings.checking.end": "You have reached the end of the recordings.",
+    "projectSettings.checking.openFailed": "Could not open this link.",
+    "projectSettings.checking.syncing": "Feedback saved on this device. Syncing…",
+    "projectSettings.checking.saveFailed": "Could not save feedback.",
+    "projectSettings.checking.pendingFeedback": "Feedback stays on this device until it can sync. {reason}",
+    "projectSettings.checking.playFailed": "This recording could not play. Please try another passage.",
+    "projectSettings.checking.playRetry": "The recording could not play. Please try again.",
+    "projectSettings.checking.selectionSummary": "{count} units selected. New units are not added to existing links. This sample supports up to 2,000 units per link.",
+    "projectSettings.checking.urlLabel": "Checking URL for {title}",
+    "projectSettings.checking.feedbackOn": "Feedback on {label}",
+    "projectSettings.checking.allSection": "All {section}",
+
+    "projectSettings.checking.flagLabel": "Community checking (WIP)",
+    "projectSettings.checking.flagDescription": "Try scoped listening links with guest feedback. Experimental; links expire after 30 days.",
     // ── Permission-denied (shared component, project-settings call sites) ──
     "projectSettings.permission.changeSharedSettingsAction": "change shared settings",
     "projectSettings.permission.roleOrHigher": "{role} or higher",
@@ -596,6 +660,11 @@ export const projectSettings = defineNamespace({
     "projectSettings.validation.requiredTextDescription": "Cells need this many distinct validators to count as validated.",
     "projectSettings.validation.requiredAudioLabel": "Required validators (audio)",
     "projectSettings.validation.requiredAudioAppliesNote": "Applies to audio translations, once recordings exist.",
+    // AQU-1771: the count can follow the organization's default or be set here.
+    "projectSettings.validation.orgDefaultOption": "Organization default ({number})",
+    "projectSettings.validation.customOption": "Set for this project",
+    "projectSettings.validation.requiredTextSourceAria": "Text validators: use the organization default or set a number for this project",
+    "projectSettings.validation.requiredAudioSourceAria": "Audio validators: use the organization default or set a number for this project",
     "projectSettings.validation.minRoleLabel": "Minimum validator role",
     "projectSettings.validation.minRoleDescription": "Only users with at least this role can cast a validation vote. Defaults to reviewer.",
     // ── StructuralCellsProjectSection ── AQU-1083
@@ -1032,6 +1101,12 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.archivingButton": "Archiving…",
     "projectSettings.languages.confirmArchiveButton": "Confirm archive",
     "projectSettings.languages.archiveLaneAriaLabel": "Archive lane {lane}",
+    // AQU-1954 — each language row's "Records audio" switch.
+    "projectSettings.languages.recordsAudioLabel": "Records audio",
+    "projectSettings.languages.recordsAudioAriaLabel": "{lane} records audio",
+    "projectSettings.languages.recordsAudioHint":
+      "Records audio: when on, every book needs audio in that language. When " +
+      "off, a book counts audio only once it has a recording in that language.",
     "projectSettings.languages.archivedLanesLabel": "Archived lanes",
     "projectSettings.languages.archivedLanesDescription":
       "Hidden from the lane switcher by default. Their translations are kept; " +
@@ -1095,6 +1170,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.overviewLinkBoard": "Link a board",
     "projectSettings.monday.overviewUrlUnavailable": "The board link is unavailable. Find the board by name in Monday.",
     "projectSettings.monday.wizardDoneNeedsAttentionTitle": "Board linked — sync needs attention",
+    "projectSettings.monday.wizardLinkWarningsTitle": "The board is linked, but Monday reported a problem:",
     "projectSettings.monday.wizardRecommendation": plural({
       one: "Recommended: one item per {granularity}, with {mappedCount} progress column.",
       other: "Recommended: one item per {granularity}, with {mappedCount} progress columns.",
@@ -1110,8 +1186,16 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.orgProjectsLoading": "Loading projects…",
     "projectSettings.monday.orgProjectsRetry": "Retry projects",
     "projectSettings.monday.orgNoAccessibleProjects": "No accessible projects in this organization.",
-    "projectSettings.monday.orgSetUpOrManageBoard": "Set up or manage board",
-    "projectSettings.monday.orgViewIntegration": "View Monday integration",
+    "projectSettings.monday.orgProjectLinkedTo": "Linked to {board}",
+    "projectSettings.monday.orgProjectNotLinked": "Not linked yet",
+    "projectSettings.monday.orgProjectLinksLoading": "Checking which projects are linked…",
+    "projectSettings.monday.orgProjectLinksFailed": "Couldn't check which projects are linked to Monday.",
+    "projectSettings.monday.orgProjectSetUp": "Set up",
+    "projectSettings.monday.orgProjectManageInSettings": "Manage in project settings",
+    "projectSettings.monday.orgProjectViewInSettings": "View in project settings",
+    "projectSettings.monday.orgProjectSyncPaused": "Sync paused",
+    "projectSettings.monday.orgProjectBoardChanged": "Board changed",
+    "projectSettings.monday.orgProjectPushFailed": "Last push failed",
     "projectSettings.monday.boardSyncLabel": "Board sync",
     "projectSettings.monday.loadingIntegration": "Loading Monday integration…",
     "projectSettings.monday.orgNotConnected": "Your organization hasn't connected Monday.com yet.",
@@ -1138,6 +1222,12 @@ export const projectSettings = defineNamespace({
       "untouched on Monday.",
     "projectSettings.monday.removeLinkButton": "Remove link",
     "projectSettings.monday.structureStaleWarning": "Board structure changed — review the mapping below.",
+    "projectSettings.monday.boardChangesIntro":
+      "New on your Monday board since it was linked. Map a column to fill it from Aquilla (then pick what it shows and save the mapping), or mark it not needed.",
+    "projectSettings.monday.boardChangesMap": "Map it",
+    "projectSettings.monday.loadingBoardColumns": "Loading the board's columns…",
+    "projectSettings.monday.boardChangesDismiss": "Not needed",
+    "projectSettings.monday.boardChangesReadOnly": "Aquilla can't fill this kind of column.",
     "projectSettings.monday.linkedBoardPrefix": "Linked board:",
     "projectSettings.monday.oneItemPerLabel": "One item per {granularity}.",
     "projectSettings.monday.lastPushOk": "Last push {date} — ok.",
@@ -1145,6 +1235,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.notPushedYet": "Not pushed yet.",
     "projectSettings.monday.syncToggleLabel": "Sync",
     "projectSettings.monday.syncNowButton": "Sync now",
+    "projectSettings.monday.syncNowPausedTooltip": "Sync is off. Turn it on to push progress to Monday.",
     "projectSettings.monday.removeBoardLinkAriaLabel": "Remove board link",
     "projectSettings.monday.columnMappingLabel": "Column mapping",
     "projectSettings.monday.reconfigureWithAiLabel": "Reconfigure with AI",
@@ -1180,12 +1271,78 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.granularityProjectLabel": "One item for the whole project",
     "projectSettings.monday.granularityFileLabel": "One item per file",
     "projectSettings.monday.someColumnsSkipped": "Some columns were skipped",
+    "projectSettings.monday.columnPickerOnBoard": "On your board",
+    "projectSettings.monday.columnInfo.completion_pct": "How much of the project or file is translated, as a percentage.",
+    "projectSettings.monday.columnInfo.validated_pct": "How much is translated and approved by enough reviewers, as a percentage.",
+    "projectSettings.monday.columnInfo.has_audio_pct": "How many lines have a recording, as a percentage.",
+    "projectSettings.monday.columnInfo.audio_validated_pct": "How many lines have an approved recording, as a percentage.",
+    "projectSettings.monday.columnInfo.status_auto": "Not started, In progress or Complete, worked out from the translation progress.",
+    "projectSettings.monday.columnInfo.deadline": "The project's deadline. Empty when the project has none.",
+    "projectSettings.monday.columnInfo.last_activity": "The date someone last worked on the project.",
+    "projectSettings.monday.columnInfo.translators": "The names of the people who can translate in the project.",
+    "projectSettings.monday.columnInfo.filled_count": "How many lines are translated.",
+    "projectSettings.monday.columnInfo.validated_count": "How many lines are translated and approved.",
+    "projectSettings.monday.columnInfo.total_count": "How many lines there are to translate.",
+    "projectSettings.monday.columnInfo.project_link": "A link that opens the project in Aquilla. On a row per file, it opens that file.",
+    "projectSettings.monday.columnInfo.schedule_status": "On track, Due soon, Overdue or Behind plan, from the deadline and the plan's target dates.",
+    "projectSettings.monday.columnInfo.books_done": "How many books (or files) are marked Done on the plan, like \"12 of 27\".",
+    "projectSettings.monday.columnInfo.next_target_date": "The nearest target date on the plan that isn't done or past yet.",
+    "projectSettings.monday.columnInfo.days_since_activity": "How many days since anyone last worked on the project.",
+    "projectSettings.monday.columnInfo.project_manager": "The project manager's name.",
+    "projectSettings.monday.columnInfo.languages": "The languages the project translates into.",
+    "projectSettings.monday.columnInfo.active_contributors_30d": "How many different people worked on the project in the last 30 days.",
+    "projectSettings.monday.columnInfo.books_in_progress": "The books (or files) that have been started and aren't marked Done.",
+    "projectSettings.monday.columnInfo.recorded_minutes": "Minutes of recorded audio in the project.",
+    "projectSettings.monday.columnInfo.external_id": "Aquilla's own ID for each item. Needed so a later setup finds and reuses the items Aquilla made.",
     "projectSettings.monday.reviewRowsCaption": "What gets pushed — change any row before applying",
     "projectSettings.monday.applyingStatus": "Linking the board and pushing your progress…",
     "projectSettings.monday.progressPushesAutomatically": "Progress pushes automatically as translators work.",
     "projectSettings.monday.viewBoardLink": "View board on Monday",
     "projectSettings.monday.connectButton": "Connect Monday.com",
     "projectSettings.monday.applyAndPushButton": "Apply and push",
+    "projectSettings.monday.wizardIntroLine":
+      "Aquilla picks a board and suggests what to show. Nothing changes in Monday until you confirm.",
+    "projectSettings.monday.wizardStepOf": "Step {step} of {total}",
+    "projectSettings.monday.wizardBoardTitle": "Which board?",
+    "projectSettings.monday.wizardColumnsTitle": "What should your board show?",
+    "projectSettings.monday.wizardConfirmTitle": "Ready to connect",
+    "projectSettings.monday.wizardAdvancedShow": "Advanced: match columns myself",
+    "projectSettings.monday.wizardAdvancedHide": "Hide advanced",
+    "projectSettings.monday.wizardConfirmAdds": plural({
+      one: "Aquilla will add {count} column to your Monday board and keep one row for this project up to date in an “Aquilla projects” group.",
+      other: "Aquilla will add {count} columns to your Monday board and keep one row for this project up to date in an “Aquilla projects” group.",
+    }, "count"),
+    "projectSettings.monday.wizardConfirmAddsPerFile": plural({
+      one: "Aquilla will add {count} column to your Monday board and keep one row per file up to date in an “Aquilla projects” group.",
+      other: "Aquilla will add {count} columns to your Monday board and keep one row per file up to date in an “Aquilla projects” group.",
+    }, "count"),
+    "projectSettings.monday.wizardConfirmNoAdds": "Aquilla will keep one row for this project up to date on {board}, in an “Aquilla projects” group.",
+    "projectSettings.monday.wizardConfirmNoAddsPerFile": "Aquilla will keep one row per file up to date on {board}, in an “Aquilla projects” group.",
+    "projectSettings.monday.wizardAddAndConnectButton": "Add columns and connect",
+    "projectSettings.monday.wizardAddingColumns": "Adding columns to your board…",
+    "projectSettings.monday.wizardAddColumnsFailed": "Couldn't add the columns: {reason}. Nothing was connected yet.",
+    "projectSettings.monday.wizardSomeColumnsNotAdded":
+      "Monday didn't add: {columns} ({reason}). Everything else is connected; you can add them later from this page.",
+    "projectSettings.monday.chooser.intro":
+      "Tick what you want on your Monday board. We'll use columns you already have and add any that are missing.",
+    "projectSettings.monday.chooser.groupSchedule": "Schedule",
+    "projectSettings.monday.chooser.groupTeam": "Team and activity",
+    "projectSettings.monday.chooser.newColumn": "New column",
+    "projectSettings.monday.chooser.alwaysIncluded": "Always included, so Aquilla can find this project's row again.",
+    "projectSettings.monday.chooser.summaryAdds": plural({
+      one: "Adds {count} new column to {board} and uses {uses} already there.",
+      other: "Adds {count} new columns to {board} and uses {uses} already there.",
+    }, "count"),
+    "projectSettings.monday.chooser.summaryNoAdds": plural({
+      one: "Uses {count} column already on {board}; nothing new is added.",
+      other: "Uses {count} columns already on {board}; nothing new is added.",
+    }, "count"),
+    "projectSettings.monday.addColumnsButton": "Add columns",
+    "projectSettings.monday.addColumnsDialogTitle": "Add columns to your board",
+    "projectSettings.monday.addColumnsConfirm": plural({
+      one: "Add {count} column",
+      other: "Add {count} columns",
+    }, "count"),
 
     // ── Terminology source-term matching (AQU-1271) ──
     "projectSettings.termMatching.title": "Prefixes and suffixes",
@@ -1214,7 +1371,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.inherit.field.knowledgeDocs": "Knowledge-base documents",
     "projectSettings.inherit.field.workflowPolicy": "Workflow policy",
     "projectSettings.inherit.field.workflowPolicyDetail":
-      "Validation count and role floors, self-validation, autopilot and agent mode, structural-cell counting, and check penalties.",
+      "Who may validate, self-validation, autopilot and agent mode, and check penalties.",
     "projectSettings.inherit.field.livingMemory": "Living-memory notes",
     "projectSettings.inherit.field.smartQuotes": "Smart quotes",
     "projectSettings.inherit.field.systemPrompt": "AI instructions",
@@ -1870,6 +2027,12 @@ export const projectSettings = defineNamespace({
           date: "The already-formatted, locale-aware date of the edit (data) — insert exactly as given, do not reformat or reorder its parts.",
         },
       },
+      "projectSettings.languages.recordsAudioAriaLabel": {
+        description: "Accessible name of the switch on one target language row that says every file needs audio in that language.",
+        placeholders: {
+          lane: "The language's display name (data, not translated).",
+        },
+      },
       "projectSettings.languages.archiveLaneAriaLabel": {
         description: "Accessible name of the archive-icon button for one target lane row.",
         placeholders: {
@@ -1924,12 +2087,238 @@ export const projectSettings = defineNamespace({
           boardName: "The linked board's name (data, not translated), or a generic fallback noun if unknown.",
         },
       },
+      "projectSettings.monday.columnPickerOnBoard": {
+        description:
+          "Small badge beside a column in the picker when that column already exists on the " +
+          "user's Monday board (so it can't be ticked to add again).",
+      },
+      "projectSettings.monday.columnInfo.completion_pct": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.validated_pct": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.has_audio_pct": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.audio_validated_pct": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.status_auto": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.deadline": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.last_activity": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.translators": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.filled_count": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.validated_count": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.total_count": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.project_link": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.schedule_status": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.books_done": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.next_target_date": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.days_since_activity": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.project_manager": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.languages": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.active_contributors_30d": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.books_in_progress": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.recorded_minutes": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.external_id": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.wizardIntroLine": {
+        description: "One-sentence description at the start of the Monday.com setup dialog in project settings.",
+      },
+      "projectSettings.monday.wizardStepOf": {
+        description: "Small step counter above the title of each step of the three-step Monday.com setup dialog.",
+        placeholders: { step: "The current step number, e.g. 2.", total: "How many steps there are (3)." },
+      },
+      "projectSettings.monday.wizardBoardTitle": {
+        description: "Title of step 1 of the Monday.com setup: choosing which Monday board the project's progress goes to.",
+      },
+      "projectSettings.monday.wizardColumnsTitle": {
+        description:
+          "Title of step 2 of the Monday.com setup: a checklist of the columns (progress figures, dates, names) " +
+          "Aquilla can show on the user's Monday board.",
+      },
+      "projectSettings.monday.wizardConfirmTitle": {
+        description: "Title of step 3 of the Monday.com setup, a summary before anything is written to Monday.",
+      },
+      "projectSettings.monday.wizardAdvancedShow": {
+        description:
+          "Link under the column checklist that reveals per-row controls for sending each figure to a column " +
+          "of the user's choosing. For admins who want to pick columns themselves.",
+      },
+      "projectSettings.monday.wizardAdvancedHide": {
+        description: "The same link once the advanced controls are open; hides them again.",
+      },
+      "projectSettings.monday.wizardConfirmAdds": {
+        description: "Summary on the last setup step when new columns will be created on the Monday board.",
+        placeholders: { count: "How many columns Aquilla will create." },
+      },
+      "projectSettings.monday.wizardConfirmAddsPerFile": {
+        description: "Same summary when the board gets one row per file of the project instead of one for the whole project.",
+        placeholders: { count: "How many columns Aquilla will create." },
+      },
+      "projectSettings.monday.wizardConfirmNoAdds": {
+        description: "Summary on the last setup step when the board already has every chosen column.",
+        placeholders: { board: "The Monday board's name (Monday data, not translated)." },
+      },
+      "projectSettings.monday.wizardConfirmNoAddsPerFile": {
+        description: "Same summary when the board gets one row per file of the project.",
+        placeholders: { board: "The Monday board's name (Monday data, not translated)." },
+      },
+      "projectSettings.monday.wizardAddAndConnectButton": {
+        description: "Final button of the Monday.com setup when new columns must be created first; then the board is connected.",
+      },
+      "projectSettings.monday.wizardAddingColumns": {
+        description: "Progress line while Aquilla creates the chosen columns on the user's Monday board.",
+      },
+      "projectSettings.monday.wizardAddColumnsFailed": {
+        description: "Error when creating the columns on Monday failed entirely; the board was not connected.",
+        placeholders: { reason: "The error message, usually Monday's own, shown as received." },
+      },
+      "projectSettings.monday.wizardSomeColumnsNotAdded": {
+        description:
+          "Warning after setup when Monday refused to create some of the chosen columns; the board is " +
+          "connected with the rest, and the missing ones can be added later.",
+        placeholders: {
+          columns: "Comma-separated titles of the refused columns (Monday data, untranslated).",
+          reason: "Monday's own error message, in English, shown as received.",
+        },
+      },
+      "projectSettings.monday.chooser.intro": {
+        description:
+          "Instruction at the top of the Monday.com column checklist. 'We' is Aquilla. Columns the board lacks " +
+          "are created on the user's Monday board.",
+      },
+      "projectSettings.monday.chooser.groupSchedule": {
+        description: "Group heading in the Monday.com column checklist for deadline, status and plan dates.",
+      },
+      "projectSettings.monday.chooser.groupTeam": {
+        description: "Group heading in the Monday.com column checklist for people and recent activity.",
+      },
+      "projectSettings.monday.orgProjectLinkedTo": {
+        description: "Under a project's name in Org settings → Monday.com: the Monday board the project pushes to.",
+        placeholders: { board: "The Monday board's name (Monday data, not translated)." },
+      },
+      "projectSettings.monday.orgProjectLinksLoading": {
+        description: "Shown above the project list in Org settings → Monday.com while Aquilla reads which projects have a board.",
+      },
+      "projectSettings.monday.orgProjectLinksFailed": {
+        description: "Shown above the project list in Org settings → Monday.com when reading which projects have a board failed; a Retry button sits beside it.",
+      },
+      "projectSettings.monday.orgProjectNotLinked": {
+        description: "Under a project's name in Org settings → Monday.com when the project has no board yet.",
+      },
+      "projectSettings.monday.orgProjectSetUp": {
+        description: "Button beside an unlinked project in Org settings → Monday.com. Opens the board setup right there, without leaving org settings.",
+      },
+      "projectSettings.monday.orgProjectManageInSettings": {
+        description: "Link beside a linked project in Org settings → Monday.com. Leaves org settings for that project's own settings page, where the mapping and Sync live.",
+      },
+      "projectSettings.monday.orgProjectViewInSettings": {
+        description: "Link beside a project the viewer can't manage, in Org settings → Monday.com. Leaves org settings for that project's settings page.",
+      },
+      "projectSettings.monday.orgProjectSyncPaused": {
+        description: "Small tag beside a linked project in Org settings → Monday.com when its Sync switch is off.",
+      },
+      "projectSettings.monday.orgProjectBoardChanged": {
+        description: "Small tag beside a linked project in Org settings → Monday.com when its board has new columns to review.",
+      },
+      "projectSettings.monday.orgProjectPushFailed": {
+        description: "Small tag beside a linked project in Org settings → Monday.com when its last push to Monday failed.",
+      },
+      "projectSettings.monday.boardChangesIntro": {
+        description: "Amber banner on a linked Monday board listing columns someone added on Monday since the link was saved; each listed column has 'Map it' and 'Not needed' buttons.",
+      },
+      "projectSettings.monday.loadingBoardColumns": {
+        description: "Shown in place of the column mapping on a linked Monday board while Aquilla reads the board's column names.",
+      },
+      "projectSettings.monday.boardChangesMap": {
+        description: "Button beside a new Monday column: adds a row for it to the mapping table below, to fill it from Aquilla.",
+      },
+      "projectSettings.monday.boardChangesDismiss": {
+        description: "Button beside a new Monday column: the column stays on the board, Aquilla stops asking about it.",
+      },
+      "projectSettings.monday.boardChangesReadOnly": {
+        description: "Shown instead of 'Map it' for a new Monday column Aquilla can't write to (a formula, mirror or similar column).",
+      },
+      "projectSettings.monday.chooser.newColumn": {
+        description: "Small tag beside a column in the checklist that isn't on the Monday board yet and would be created.",
+      },
+      "projectSettings.monday.chooser.alwaysIncluded": {
+        description: "Note under the locked 'Aquilla ID' column in the checklist, saying why it can't be unticked.",
+      },
+      "projectSettings.monday.chooser.summaryAdds": {
+        description: "Live summary under the column checklist when some ticked columns will be created.",
+        placeholders: {
+          count: "How many new columns will be created.",
+          board: "The Monday board's name (Monday data, not translated).",
+          uses: "How many ticked columns are already on the board (a number).",
+        },
+      },
+      "projectSettings.monday.chooser.summaryNoAdds": {
+        description: "Live summary under the column checklist when every ticked column is already on the board.",
+        placeholders: {
+          count: "How many ticked columns are already on the board.",
+          board: "The Monday board's name (Monday data, not translated).",
+        },
+      },
+      "projectSettings.monday.addColumnsButton": {
+        description: "Button on a project's linked Monday board settings that opens the column checklist to add more columns.",
+      },
+      "projectSettings.monday.addColumnsDialogTitle": {
+        description: "Title of the dialog for adding more columns to an already linked Monday board.",
+      },
+      "projectSettings.monday.addColumnsConfirm": {
+        description: "Confirm button of that dialog: create the ticked new columns on the Monday board.",
+        placeholders: { count: "How many columns will be created." },
+      },
       "projectSettings.monday.wizardRecommendation": {
         description: "Summary line in the Monday setup wizard review step: the recommended item granularity and how many progress columns are mapped.",
         placeholders: {
           granularity: "The literal, untranslated word 'file' or 'project' (data) — matches the value stored on the link's itemGranularity setting, not a separately translated enum.",
           mappedCount: "How many progress columns are mapped to project metrics.",
         },
+      },
+      "projectSettings.monday.wizardLinkWarningsTitle": {
+        description:
+          "Heading of a warning box on the last step of the Monday setup wizard, above " +
+          "a list of server messages (shown in English) about the link that was just " +
+          "saved, for example that Monday's change notifications could not be set up.",
       },
       "projectSettings.monday.wizardFindBoardManually": {
         description: "Fallback note in the Monday setup wizard when Monday returned no direct board URL, telling the user to find the board by name.",
@@ -1971,6 +2360,12 @@ export const projectSettings = defineNamespace({
           "Accessible name of the Monday-board picker select, in both the manual link " +
           "flow and the AI setup wizard's board-change control. No separate visible " +
           "label — only a placeholder inside the closed select.",
+      },
+      "projectSettings.monday.syncNowPausedTooltip": {
+        description:
+          "Tooltip on the disabled \"Sync now\" button in a project's Monday.com settings " +
+          "while the Sync switch beside it is off. \"Sync\" is that switch's label " +
+          "(projectSettings.monday.syncToggleLabel).",
       },
       "projectSettings.monday.removeBoardLinkAriaLabel": {
         description: "Accessible name of the icon-only trash button that opens the remove-board-link confirmation.",
@@ -2378,6 +2773,30 @@ export const projectSettings = defineNamespace({
           "Label of the switch that sets the project-wide default for ignoring vowel marks/accents " +
           "when matching terms, absent a per-concept override.",
       },
+      "projectSettings.checking.position": {
+        description: "Progress line on the community checking guest page, showing which passage is open out of all passages in the link.",
+        placeholders: { current: "1-based number of the open passage.", total: "Number of passages in the link." },
+      },
+      "projectSettings.checking.pendingFeedback": {
+        description: "Notice on the guest page when feedback could not reach the project yet; it is kept on the guest's device and retried.",
+        placeholders: { reason: "The server's own error sentence, already localized or in English; may be empty." },
+      },
+      "projectSettings.checking.selectionSummary": {
+        description: "Summary under the passage picker when a project lead builds a community checking link.",
+        placeholders: { count: "Number of selected units (verses or lines)." },
+      },
+      "projectSettings.checking.urlLabel": {
+        description: "Accessible name of the read-only field holding a checking link's URL.",
+        placeholders: { title: "The link title the project lead typed (data, not translated)." },
+      },
+      "projectSettings.checking.feedbackOn": {
+        description: "Label of the feedback box on the guest page, naming the passage the feedback is about.",
+        placeholders: { label: "The passage reference, e.g. 'MRK 1:2', or 'Unit 3' when it has none." },
+      },
+      "projectSettings.checking.allSection": {
+        description: "Checkbox in the passage picker that selects every unit in one chapter or section.",
+        placeholders: { section: "The chapter or section name, e.g. 'MRK 1' (data, not translated)." },
+      },
       "projectSettings.termMatching.loadPreset": {
         description: "Button that opens a menu of built-in affix presets (Hebrew, Arabic, Swahili, Turkish, …) to load.",
       },
@@ -2432,7 +2851,7 @@ export const projectSettings = defineNamespace({
       },
       "projectSettings.inherit.field.workflowPolicy": {
         description:
-          "Checkbox label. Validation counts, role floors, self-validation, autopilot, agent mode, structural-cell counting, and check penalties are copied when this is on.",
+          "Checkbox label. Validation role floors, self-validation, autopilot, agent mode, and check penalties are copied when this is on.",
       },
       "projectSettings.inherit.field.workflowPolicyDetail": {
         description: "Secondary line under the workflow-policy checkbox, listing what that one choice covers.",
@@ -2453,6 +2872,25 @@ export const projectSettings = defineNamespace({
         placeholders: {
           upstream: "The upstream project's name, as its maintainers named it — never translated.",
         },
+      },
+      "projectSettings.validation.orgDefaultOption": {
+        description:
+          "Option in a dropdown beside 'Required validators'. Choosing it means this project uses the number its organization set, shown in brackets.",
+        placeholders: {
+          number: "How many validators the organization's default requires, a number from 1 to 15.",
+        },
+      },
+      "projectSettings.validation.customOption": {
+        description:
+          "Option in the same dropdown. Choosing it lets this project set its own number of required validators, in a box that appears next to it.",
+      },
+      "projectSettings.validation.requiredTextSourceAria": {
+        description:
+          "Screen-reader label for that dropdown on the text-validation row. Not shown on screen.",
+      },
+      "projectSettings.validation.requiredAudioSourceAria": {
+        description:
+          "Screen-reader label for that dropdown on the audio-validation row. Not shown on screen.",
       },
       "projectSettings.inherit.detach": {
         description:

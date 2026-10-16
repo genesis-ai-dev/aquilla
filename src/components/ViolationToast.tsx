@@ -3,16 +3,24 @@ import type { RuleInfraction, RuleWaiver } from "@/lib/parsers/types"
 import { toast } from "@/components/ui/toast"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { formatInfractionReason } from "@/lib/rules/format-infraction"
+import { waiverKey } from "@/lib/rules/waivers"
 
 interface ViolationToastProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   infraction: RuleInfraction
+  /**
+   * AQU-1740: the finding the reviewer clicked, when the blot named one.
+   * Waiving then accepts THIS match and leaves the rule's other matches on the
+   * cell flagged. Absent (absence rules, or a card opened from the Issues tab
+   * header) falls back to the cell-wide waiver.
+   */
+  matchHash?: string
   ruleName: string
   waivers: RuleWaiver[]
   onOpenRule: (ruleId: string) => void
-  onWaive: (input: { ruleId: string; reason?: string }) => void
-  onUnwaive: (ruleId: string) => void
+  onWaive: (input: { ruleId: string; matchHash?: string; reason?: string }) => void
+  onUnwaive: (ruleId: string, matchHash?: string) => void
 }
 
 /**
@@ -23,6 +31,7 @@ export function ViolationToast({
   open,
   onOpenChange,
   infraction,
+  matchHash,
   ruleName,
   waivers,
   onOpenRule,
@@ -30,7 +39,14 @@ export function ViolationToast({
   onUnwaive,
 }: ViolationToastProps) {
   const t = useT()
-  const waiver = waivers.find((candidate) => candidate.ruleId === infraction.ruleId)
+  // The waiver this card acts on: the clicked finding's own, else the cell-wide
+  // one. A cell-wide waiver also covers the clicked match, so it is the
+  // fallback either way — but a per-finding waiver on some OTHER match must not
+  // make this card read as already waived (AQU-1740).
+  const key = waiverKey(infraction.ruleId, matchHash)
+  const waiver =
+    waivers.find((c) => waiverKey(c.ruleId, c.matchHash) === key) ??
+    waivers.find((c) => c.ruleId === infraction.ruleId && !c.matchHash)
   const description = waiver
     ? waiverSummary(waiver, t)
     : formatInfractionReason(infraction, t)
@@ -45,7 +61,7 @@ export function ViolationToast({
     const toastId = toast.add({
       // Keep one visible toast while tracking effect setups separately. The
       // generation prevents StrictMode's discarded close from clearing state.
-      id: `violation:${infraction.cellId}:${infraction.ruleId}`,
+      id: `violation:${infraction.cellId}:${key}`,
       type: waiver ? "info" : "warning",
       timeout: 0,
       title: (
@@ -66,8 +82,15 @@ export function ViolationToast({
           ? t("rules.violationPopover.unwaive")
           : t("rules.violationPopover.waive"),
         onClick: () => {
-          if (waiver) callbacksRef.current.onUnwaive(infraction.ruleId)
-          else callbacksRef.current.onWaive({ ruleId: infraction.ruleId })
+          // Un-waive lifts exactly the waiver this card found, so a cell-wide
+          // waiver is lifted cell-wide and a per-finding one only here.
+          if (waiver) callbacksRef.current.onUnwaive(infraction.ruleId, waiver.matchHash)
+          else {
+            callbacksRef.current.onWaive({
+              ruleId: infraction.ruleId,
+              ...(matchHash ? { matchHash } : {}),
+            })
+          }
           toast.close(toastId)
         },
       },
@@ -97,7 +120,7 @@ export function ViolationToast({
       }
       toast.close(toastId)
     }
-  }, [description, infraction.cellId, infraction.ruleId, open, ruleName, t, waiver])
+  }, [description, infraction.cellId, infraction.ruleId, key, matchHash, open, ruleName, t, waiver])
 
   return null
 }

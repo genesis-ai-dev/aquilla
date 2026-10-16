@@ -41,6 +41,8 @@ import {
   type ChangesetApproval,
   type ChangesetListItem,
   type ChangesetStatus,
+  needsCommitOnApproval,
+  SESSION_CREDENTIAL_ID,
 } from "./changeset-api"
 
 const JWT = "session-jwt"
@@ -289,6 +291,19 @@ describe("commitChangeset", () => {
     // The commit endpoint was never reached.
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
+
+  it("OPS-44: names the admin step-up for an elevation-required mint instead of 'refresh'", async () => {
+    // Literal from auth-worker/src/routes/sync-token.ts, case "elevation_required".
+    fetchMock.mockResolvedValueOnce(jsonResponse(
+      { error: "elevation required to mint a project sync token with platform-admin access" },
+      403,
+    ))
+    const err = await commitChangeset(JWT, PROJECT_ID, CHANGESET_ID).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ChangesetApiError)
+    expect(err).toMatchObject({ status: 403, code: "elevation_required" })
+    expect((err as ChangesetApiError).message).toBe("Verify with your admin code, then try again.")
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe("discardChangeset", () => {
@@ -420,5 +435,39 @@ describe("listProjectChangesets (P1 §3.3)", () => {
     const err = await listProjectChangesets(JWT, PROJECT_ID).catch((e: unknown) => e)
     expect(err).toBeInstanceOf(ChangesetApiError)
     expect((err as ChangesetApiError).code).toBe("validation_failed")
+  })
+})
+
+/**
+ * AQU-1673 — who commits an approved plan.
+ *
+ * Approval and commit are two calls. For an AGENT's plan the agent polls and
+ * commits, so the approval surfaces must not. For a plan staged from the app
+ * itself ("Import as proposals") nobody is watching, and a QA walk of PR #1176
+ * caught exactly that: the approval page said "Approved", the plan stayed
+ * `staged`, and the approved text never reached a cell. These pin the
+ * discriminator the surfaces branch on.
+ */
+describe("needsCommitOnApproval (AQU-1673)", () => {
+  it("commits a plan staged from a browser session — no agent will", () => {
+    expect(needsCommitOnApproval({ credentialId: SESSION_CREDENTIAL_ID })).toBe(true)
+  })
+
+  it("leaves an agent's plan alone, so the approval never races the agent's commit", () => {
+    expect(needsCommitOnApproval({ credentialId: "cred-pat-123" })).toBe(false)
+  })
+
+  it("treats an older server that omits the field as an agent's plan", () => {
+    // Pre-AQU-1673 the approval payload had no credentialId. Reading that as
+    // "an agent's" keeps the old behaviour and can never double-commit.
+    expect(needsCommitOnApproval({})).toBe(false)
+    expect(needsCommitOnApproval({ credentialId: undefined })).toBe(false)
+  })
+
+  it("matches the worker's sentinel exactly, not by prefix or case", () => {
+    expect(SESSION_CREDENTIAL_ID).toBe("session")
+    for (const near of ["Session", "session-1", "sessions", " session", ""]) {
+      expect(needsCommitOnApproval({ credentialId: near })).toBe(false)
+    }
   })
 })

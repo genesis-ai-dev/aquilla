@@ -74,8 +74,10 @@ FROM cells WHERE project_id = :project AND side = 'target'
 LIMIT 30
 
 5. Check waived rules before re-flagging something:
-SELECT cell_id, rule_id, reason FROM cell_waivers
+SELECT cell_id, rule_id, match_hash, reason FROM cell_waivers
 WHERE project_id = :project AND file_id = :file
+-- match_hash '' = the whole rule is waived on that cell; otherwise it names
+-- the one finding (a hash of the matched text) that was accepted.
 
 6. Report findings as comments (COMMENTER+):
 emit: [{kind:'comment.create', fileId:':file', cellId:'#c3',
@@ -160,7 +162,10 @@ below; only the human's own review validates a cell.
 The project's validation thresholds. threshold is how many validators a cell's
 text needs (the validationCount setting); audio_threshold is how many a recorded
 take needs (validationCountAudio). Both read as 1 when unset and cap at 15, as
-the app does. No row means the project has no settings yet, so both are 1:
+the app does. One caveat: a project with no value of its own uses its
+organization's default, which this query cannot see, so it may really need
+more than the 1 shown. cells.validated always reflects the threshold actually
+in force, so prefer it for "is this cell validated":
 SELECT GREATEST(1, LEAST(15, COALESCE(CASE WHEN validation_count ~ '^[0-9]+$'
          THEN validation_count::int END, 1))) AS threshold,
        GREATEST(1, LEAST(15, COALESCE(CASE WHEN validation_count_audio ~ '^[0-9]+$'

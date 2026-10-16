@@ -21,9 +21,12 @@ import { proxyOrigin } from "./net/resource-proxy"
 // This module runs outside React (plain import-pipeline code, no hooks), so it
 // uses the standalone t() rather than useT() — see src/lib/i18n/standalone.ts.
 import { t } from "./i18n/standalone"
+import { formatByteLimit } from "./i18n/format"
+import { normalizeLocale } from "./i18n/locales"
+import { readStoredLocale } from "./i18n/store"
 import type { CellUnit, FileType, FileReference, TranslatableString, OrderedBy } from "./parsers/types"
 import { detectFileType, isMediaFileType, TRANSLATION_MEMORY_FILE_KIND } from "./parsers/types"
-import { buildAudioId, MAX_AUDIO_UPLOAD_BYTES, uploadCellAudio } from "./audio/upload"
+import { buildAudioId, MAX_AUDIO_OBJECT_BYTES, uploadCellAudio } from "./audio/upload"
 import { analyseSpeechInFile } from "./audio/speech-analysis"
 import { tileSegments } from "./timeline/tile-segments"
 import { recordMediaImportSeed, buildMediaSeedCells } from "./audio/auto-transcribe"
@@ -31,6 +34,7 @@ import { createMediaCueSpecs } from "./import/media-cues"
 import { youTubeVideoId } from "./video/youtube"
 import { parseTextFormatOffMainThread } from "./parsers/parse-worker-client"
 import { usfmSectionToStrings } from "./parsers/parse-text-formats"
+import type { UsfmStructureFinding } from "./parsers/usfm-structure-check"
 import {
   assembleParatextProject,
   type ParatextBook,
@@ -61,7 +65,8 @@ import { alignReimportedIdmlFile, type IdmlReimportAlignHost } from "./idml/alig
 import type { PartnerImportEdition, PartnerImportProgress } from "./partners/types"
 import { extractHtmlStrings } from "./parsers/html"
 import { extractEpubImport, type EpubSpineMember } from "./parsers/epub"
-import { bulkUploadSource, type BulkImportCell } from "./sync/bulk-import"
+import { bulkUploadSource, BULK_IMPORT_CHUNK, type BulkImportCell } from "./sync/bulk-import"
+import { importCellEventId, releaseImportSession, resolveImportSession } from "./sync/import-session"
 import {
   assertSourceUploadByteLength,
   assertSourceUploadSize,
@@ -496,6 +501,9 @@ export interface ImportResult {
   importRecipe?: DeclarativeImportRecipe
   importClassification?: Omit<AiImportClassification, "recipe"> & { recipe: DeclarativeImportRecipe }
   importNotices?: ImportPreviewNotice[]
+  /** Paratext-parity chapter/verse + marker findings (AQU-1731), USFM only.
+   *  Carried as codes + refs and translated in the preview. */
+  structureFindings?: UsfmStructureFinding[]
   roundTripFidelity?: RoundTripFidelity
   /** Exact container for a multi-book import. Stored once and bound to every
    * emitted book instead of becoming every book's export skeleton. */
@@ -1617,6 +1625,21 @@ export function buildBulkCells(
   return buildBulkCellsWithSpeakers(strings, options).cells
 }
 
+/**
+ * How one parsed source file is recognised again across import attempts
+ * (`resolveImportSession`). Deliberately the same shape of identity
+ * `reimportKeysFor` uses — format, book, name — so retrying "Jonah.usfm" into
+ * a project resolves the session the failed attempt left, while a different
+ * file in the same project gets its own.
+ */
+export function importSessionKeyFor(
+  fileType: FileType,
+  result: { name: string; originalName?: string; bookCode?: string },
+): string {
+  const name = (result.originalName ?? result.name).trim().toLowerCase()
+  return `${fileType}:${result.bookCode?.trim().toUpperCase() ?? ""}:${name}`
+}
+
 export interface EmitParsedFileResult {
   ref: FileReference
   /** (cellId, speaker) pairs from the same `buildBulkCellsWithSpeakers` call
@@ -1640,7 +1663,6 @@ export async function emitParsedFile(
   const existingFileId = reimportKeysFor(result)
     .map((key) => ctx.reimportFileIds?.get(key))
     .find((id): id is string => Boolean(id))
-  const fileId = existingFileId ?? uuidv7()
 
   const normalized = normalizedFile ?? normalizeTranslatableStrings(result.strings, {
     fileName: result.name,
@@ -1661,12 +1683,39 @@ export async function emitParsedFile(
   const { cells, speakerPairs } = buildBulkCellsWithSpeakers(result.strings, {
     normalizedFile: normalized,
   })
+
+  // AQU-1859: a fresh import runs inside a resumable session, so a chunk that
+  // fails half-way through a Bible can be retried into the same file instead
+  // of leaving a hidden partial file behind and starting a second one. A
+  // re-import of an EXISTING file already has its own identity and goes
+  // through the reconcile path, which is not chunked.
+  const session = existingFileId
+    ? undefined
+    : await resolveImportSession({
+      projectId: ctx.projectId,
+      importKey: importSessionKeyFor(fileType, result),
+      fileName: result.name,
+      cellKeys: cells.map((cell) => cell.cellId),
+      chunkSize: BULK_IMPORT_CHUNK,
+    })
+  const fileId = existingFileId ?? session?.fileId ?? uuidv7()
+
+  // Inside a session the event ids are derived from the file id rather than
+  // minted per parse, so re-parsing the file to retry produces byte-identical
+  // chunks and the already-landed ones replay as no-ops. Mutated in place
+  // because `speakerPairs` is keyed to these same cell objects' `cellId`.
+  if (session) {
+    cells.forEach((cell, index) => {
+      cell.id = importCellEventId(fileId, index, cell.cellId)
+    })
+  }
+
   const targets: TargetCommit[] = cells.flatMap((cell, index) => {
     const value = result.strings[index]?.translated
     const valueHtml = result.strings[index]?.translatedHtml
     return value || valueHtml
       ? [{
-          id: uuidv7(),
+          id: session ? importCellEventId(fileId, index, cell.cellId, "target") : uuidv7(),
           cellId: cell.cellId,
           parentId: cell.id,
           value: value ?? "",
@@ -1684,14 +1733,23 @@ export async function emitParsedFile(
   // AQU-990: the bulk-import route rejects an oversized cell with a bare 413
   // after the whole payload has been chunked and uploaded. Check the same
   // ceiling here so an unsplittable section fails immediately, naming itself.
-  assertImportCellsWithinSizeLimit(result.name, cells, targets)
+  try {
+    assertImportCellsWithinSizeLimit(result.name, cells, targets)
+  } catch (error) {
+    // Nothing was uploaded, so hand the session key back here rather than
+    // leaving this file un-resumable for the rest of the tab's life;
+    // `bulkUploadSource` owns the release once the upload has started.
+    if (session) releaseImportSession(session.key)
+    throw error
+  }
 
   const upload = existingFileId ? reconcileSourceImport : bulkUploadSource
   await upload({
     projectId: ctx.projectId,
     fileId,
+    ...(session ? { session } : {}),
     file: {
-      id: uuidv7(),
+      id: session?.fileEventId ?? uuidv7(),
       name: result.name,
       fileType,
       role: "source",
@@ -1855,8 +1913,15 @@ export function createMediaFileCommit(
   const prepare = async () => {
     if (ctx.mediaPictureUrl && !videoId) throw new Error("Enter a YouTube video link.")
     if (file.size === 0) throw new Error(t("importExport.errors.emptyFile", { fileName: file.name }))
-    if (file.size > MAX_AUDIO_UPLOAD_BYTES) {
-      throw new Error(t("importExport.errors.mediaFileTooLarge", { fileName: file.name }))
+    // AQU-1853: large media rides the multipart upload path, so the gate is
+    // the whole-object ceiling, not the single-request one.
+    if (file.size > MAX_AUDIO_OBJECT_BYTES) {
+      // AQU-1975: interpolate the ceiling rather than naming it in the copy —
+      // the string outlived the 95 MB cap it used to quote.
+      const locale = normalizeLocale(readStoredLocale())
+      throw new Error(t("importExport.errors.mediaFileTooLarge", {
+        fileName: file.name, limit: formatByteLimit(MAX_AUDIO_OBJECT_BYTES, locale),
+      }))
     }
     ctx.signal?.throwIfAborted()
     const suppliedDuration = ctx.mediaTextSource
@@ -2092,6 +2157,9 @@ export interface ParatextBookPlan {
   strings: TranslatableString[]
   /** Verse refs that appear more than once in the book (surfaced in preview). */
   duplicateRefs: string[]
+  /** Paratext-parity chapter/verse + marker findings for this book (AQU-1731),
+   *  surfaced in preview next to the duplicate-ref count. */
+  structureFindings: UsfmStructureFinding[]
   cellCount: number
 }
 
@@ -2124,10 +2192,10 @@ export async function prepareParatextProject(
     throw new Error(t("importExport.errors.notAParatextProject"))
   }
   const books: ParatextBookPlan[] = project.books.map((book) => {
-    const { strings, duplicateRefs } = usfmSectionToStrings(book.rawSource, {
+    const { strings, duplicateRefs, structureFindings } = usfmSectionToStrings(book.rawSource, {
       excludeFrontMatter: opts?.excludeFrontMatter,
     })
-    return { book, strings, duplicateRefs, cellCount: strings.length }
+    return { book, strings, duplicateRefs, structureFindings, cellCount: strings.length }
   })
   // Materialize and validate the complete package during preview. Commit then
   // uploads these exact immutable bytes; a large folder-derived ZIP cannot

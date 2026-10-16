@@ -6,8 +6,32 @@ import {
   makeSyncTokenMinter,
   SyncTokenError,
 } from "./sync-token"
+import {
+  clearElevationRequired,
+  getElevationWaitingOn,
+  isElevationRequired,
+  notifyElevationGranted,
+  onElevationGranted,
+} from "@/lib/errors/elevation-required-signal"
+import type { FrontierSession } from "@/lib/frontier/types"
+
+// OPS-44: the step-up prompt only opens for the ACTIVE session's JWT, so the
+// tests choose which JWT is active instead of touching the real session store.
+const activeSession = vi.hoisted(() => ({ jwt: null as string | null }))
+vi.mock("@/lib/frontier/session-store", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/frontier/session-store")>()),
+  loadActiveSession: async () =>
+    activeSession.jwt ? ({ jwt: activeSession.jwt } as FrontierSession) : null,
+}))
 
 const API = "https://api.example.test"
+
+/** auth-worker/src/routes/sync-token.ts, case "elevation_required". */
+const ELEVATION_BODY = {
+  error: "elevation required to mint a project sync token with platform-admin access",
+}
+/** Same route, case "no_access". */
+const NO_ACCESS_BODY = { error: "No access to project" }
 
 function mockFetch(response: { status: number; body: unknown }) {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -105,6 +129,62 @@ describe("fetchSyncToken", () => {
     const err = await fetchSyncToken("bad", "p", "f", {}, API).catch((e) => e as SyncTokenError)
     expect(err).toBeInstanceOf(SyncTokenError)
     expect((err as SyncTokenError).status).toBe(401)
+  })
+})
+
+describe("fetchSyncToken — OPS-44 elevation required", () => {
+  const originalFetch = global.fetch
+  beforeEach(() => {
+    clearElevationRequired()
+    activeSession.jwt = "jwt-admin"
+  })
+  afterEach(() => {
+    global.fetch = originalFetch
+    clearElevationRequired()
+    activeSession.jwt = null
+  })
+
+  it("raises the step-up prompt and flags the error as elevation-required", async () => {
+    global.fetch = mockFetch({ status: 403, body: ELEVATION_BODY }) as unknown as typeof fetch
+    const err = await fetchSyncToken("jwt-admin", "burmese-ot", "f", {}, API).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(SyncTokenError)
+    expect(err).toMatchObject({ status: 403, elevationRequired: true })
+    expect(isElevationRequired()).toBe(true)
+  })
+
+  it("tells the prompt it was a sync-token mint, and names the project in the next grant", async () => {
+    notifyElevationGranted() // start from an empty refused set
+    const granted = vi.fn()
+    const unsubscribe = onElevationGranted(granted)
+    global.fetch = mockFetch({ status: 403, body: ELEVATION_BODY }) as unknown as typeof fetch
+    await fetchSyncToken("jwt-admin", "burmese-ot", "f", {}, API).catch(() => undefined)
+    expect(getElevationWaitingOn()).toBe("sync-token")
+
+    notifyElevationGranted()
+    expect([...granted.mock.calls[0][0]]).toEqual(["burmese-ot"])
+    unsubscribe()
+  })
+
+  it("leaves a generic 403 alone: no prompt, not elevation-required", async () => {
+    global.fetch = mockFetch({ status: 403, body: NO_ACCESS_BODY }) as unknown as typeof fetch
+    const err = await fetchSyncToken("jwt-admin", "p", "f", {}, API).catch((e: unknown) => e)
+    expect(err).toMatchObject({ status: 403, elevationRequired: false })
+    expect(isElevationRequired()).toBe(false)
+  })
+
+  it("does not prompt for a JWT that is not the active session's (background account drain)", async () => {
+    notifyElevationGranted() // start from an empty refused set
+    const granted = vi.fn()
+    const unsubscribe = onElevationGranted(granted)
+    global.fetch = mockFetch({ status: 403, body: ELEVATION_BODY }) as unknown as typeof fetch
+    const err = await fetchSyncToken("jwt-other-account", "p", "f", {}, API).catch((e: unknown) => e)
+    // Still classified, so the outbox holds rather than quarantines it.
+    expect(err).toMatchObject({ status: 403, elevationRequired: true })
+    expect(isElevationRequired()).toBe(false)
+    // Nor does the active account's step-up reload that account's project.
+    notifyElevationGranted()
+    expect([...granted.mock.calls[0][0]]).toEqual([])
+    unsubscribe()
   })
 })
 
@@ -302,6 +382,52 @@ describe("makeSyncTokenFetcher", () => {
     expect(onForbidden).toHaveBeenCalledTimes(1)
     expect(onUnauthorized).not.toHaveBeenCalled()
     ;(console.warn as ReturnType<typeof vi.spyOn>).mockRestore()
+  })
+})
+
+describe("makeSyncTokenMinter — OPS-44 elevation required", () => {
+  const originalFetch = global.fetch
+  beforeEach(() => {
+    clearElevationRequired()
+    activeSession.jwt = "jwt-admin"
+    vi.spyOn(console, "warn").mockImplementation(() => undefined)
+  })
+  afterEach(() => {
+    global.fetch = originalFetch
+    clearElevationRequired()
+    activeSession.jwt = null
+    vi.restoreAllMocks()
+  })
+
+  it("reports elevationRequired and does NOT fire onForbidden (the project is not gone)", async () => {
+    global.fetch = mockFetch({ status: 403, body: ELEVATION_BODY }) as unknown as typeof fetch
+    const onForbidden = vi.fn()
+    const mint = makeSyncTokenMinter(() => "jwt-admin", "burmese-ot", "f", {}, API, { onForbidden })
+    expect(await mint()).toEqual({ token: null, status: 403, elevationRequired: true })
+    expect(onForbidden).not.toHaveBeenCalled()
+    expect(isElevationRequired()).toBe(true)
+  })
+
+  it("keeps a generic 403 on the onForbidden path, with no elevation flag", async () => {
+    global.fetch = mockFetch({ status: 403, body: NO_ACCESS_BODY }) as unknown as typeof fetch
+    const onForbidden = vi.fn()
+    const mint = makeSyncTokenMinter(() => "jwt-admin", "p", "f", {}, API, { onForbidden })
+    expect(await mint()).toEqual({ token: null, status: 403 })
+    expect(onForbidden).toHaveBeenCalledTimes(1)
+    expect(isElevationRequired()).toBe(false)
+  })
+
+  it("mints normally once the admin has stepped up (nothing cached from the refusal)", async () => {
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(ELEVATION_BODY), { status: 403 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        token: "tok-elevated",
+        expiresIn: 900,
+        role: { level: 700, name: "owner", source: "platform" },
+      }), { status: 200 })) as unknown as typeof fetch
+    const mint = makeSyncTokenMinter(() => "jwt-admin", "burmese-ot", "f", {}, API)
+    expect(await mint()).toMatchObject({ token: null, elevationRequired: true })
+    expect(await mint()).toEqual({ token: "tok-elevated", status: 200 })
   })
 })
 

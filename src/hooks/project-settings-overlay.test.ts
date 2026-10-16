@@ -20,6 +20,28 @@ function makeRecord(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
 }
 
 describe("overlaySettings", () => {
+  // AQU-1771: the workspace passes the org's validation defaults so every
+  // reader of the record sees the threshold actually in force.
+  it("takes the org's validation defaults when the project has none", () => {
+    const out = overlaySettings(makeRecord(), {}, null, { validationCount: 3, validationCountAudio: 2 })
+    expect(out.validationCount).toBe(3)
+    expect(out.validationCountAudio).toBe(2)
+  })
+
+  it("keeps the project's own numbers over the org's", () => {
+    const out = overlaySettings(
+      makeRecord(), { validationCount: 1, validationCountAudio: 4 }, null,
+      { validationCount: 3, validationCountAudio: 2 },
+    )
+    expect(out.validationCount).toBe(1)
+    expect(out.validationCountAudio).toBe(4)
+  })
+
+  it("leaves the count unset without org defaults (the Project settings form's view)", () => {
+    const out = overlaySettings(makeRecord(), {})
+    expect(out.validationCount).toBeUndefined()
+  })
+
   it("carries the text validation trio and count", () => {
     const out = overlaySettings(makeRecord(), {
       validationCount: 2,
@@ -70,6 +92,10 @@ describe("overlaySettings", () => {
       cellEditingFloor: "contributor",
       bibleResourcesEnabled: false,
       bibleEnrichments: { voices: false, autopilot: true },
+      languageProfile: {
+        quoteMarks: { levels: [{ open: "«", close: "»" }], continuation: "continuation-mark" },
+      },
+      bibleVoiceOverrides: { "sp:a-b": { speaker: "person:Jesus", note: "FCBH", by: "mara", at: "2026-10-06T00:00:00Z" } },
       importExcludeFrontMatter: true,
       draftContext: { precedingTargetCells: 4 },
       termMatching: { prefixes: ["re"], suffixes: [] },
@@ -84,6 +110,12 @@ describe("overlaySettings", () => {
     // AQU-1686: a dropped key would load layers for enrichments the project
     // switched off.
     expect(out.bibleEnrichments).toEqual({ voices: false, autopilot: true })
+    // AQU-1688: a dropped profile would leave Bible data checks dormant for a
+    // project that has set its quotation marks.
+    expect(out.languageProfile?.quoteMarks?.levels).toEqual([{ open: "«", close: "»" }])
+    // AQU-1692: a dropped key would save a maintainer's voice correction and
+    // never show it.
+    expect(out.bibleVoiceOverrides?.["sp:a-b"]?.speaker).toBe("person:Jesus")
     expect(out.importExcludeFrontMatter).toBe(true)
     expect(out.draftContext).toEqual({ precedingTargetCells: 4 })
     expect(out.termMatching).toEqual({ prefixes: ["re"], suffixes: [] })

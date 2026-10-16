@@ -233,6 +233,8 @@ function CellTakeBlockView({
       session,
       projectId: project.id,
       language,
+      // AQU-1978: the timings are written in this lane, never the `''` one.
+      ...(targetLang ? { targetLang } : {}),
       askAgain: true,
     })
     // The transcript rides a queued cell.audio.attach — flush it, then poke the

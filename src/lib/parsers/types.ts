@@ -107,6 +107,10 @@ export type BuiltinCheckId =
   | "repeated-word"
   | "unpaired-symbols"
   | "abbreviation-mismatch"
+  /** AQU-1688: Bible data checks ("bkp:V1" …), run from pack facts. Present
+   *  only while the project's Bible data checks enrichment is on. */
+  | import("../../../db/shared/bible-checks/types").BibleCheckId
+  | "usfm-structure"
   | "capitalization"
   | "footnote-quote-mismatch"
 
@@ -140,7 +144,16 @@ export type RuleCheck =
   | { type: "source-requires-target"; sourcePattern: string; targetPattern: string; caseSensitive?: boolean }
   | { type: "target-forbids"; targetPattern: string; caseSensitive?: boolean }
   | { type: "source-target-match"; pattern: string }
-  | { type: "builtin"; checkId: BuiltinCheckId }
+  /**
+   * `punctuation` (AQU-1906) is resolved per LANE by `resolveBuiltinRules`
+   * and read by `rule-engine`'s builtin branch. It is never stored: built-in
+   * rules are synthesized on read, so nothing persists a `check` carrying it.
+   */
+  | {
+      type: "builtin"
+      checkId: BuiltinCheckId
+      punctuation?: import("../../../db/shared/punctuation-conventions").PunctuationConventions | null
+    }
 
 export type RuleAutofix =
   | { kind: "regex-replace"; pattern: string; replacement: string; flags: string }
@@ -168,6 +181,14 @@ export interface PromotionRequest {
 
 export interface RuleWaiver {
   ruleId: string
+  /**
+   * AQU-1740: when present, this waiver dismisses only the ONE finding whose
+   * matched text hashes to this value (`spanMatchHash` in
+   * `src/lib/rules/match-hash.ts`); other matches of the same rule on the same
+   * cell stay active. Absent = the rule is waived on the whole cell, which is
+   * what every waiver stored before AQU-1740 means.
+   */
+  matchHash?: string
   /** Optional human-entered reason. */
   reason?: string
   /** ISO timestamp. */
@@ -211,6 +232,22 @@ export interface RuleInfraction {
    *  concrete match (e.g. absence rules with no source trigger) — those
    *  fall back to the gutter icon only. */
   spans: InfractionSpan[]
+  /**
+   * AQU-1699: this infraction's own severity, when it is LOWER than its
+   * rule's. A Bible data check can report a minor finding under a major rule:
+   * P5 names a stray person (major) but also a stray place or group (minor).
+   * It never raises a rule's severity, so a project's own severity choice
+   * still holds. Read it through `infractionSeverity`.
+   */
+  severity?: "minor"
+}
+
+/** The severity an infraction shows at: its rule's, or lower when the infraction says so. */
+export function infractionSeverity(
+  infraction: Pick<RuleInfraction, "severity">,
+  ruleSeverity: "major" | "minor" | undefined,
+): "major" | "minor" | undefined {
+  return infraction.severity === "minor" ? "minor" : ruleSeverity
 }
 
 export interface RulePenalties {
@@ -535,6 +572,12 @@ export interface ProjectRecord {
   /** Per-project enable/severity overrides for built-in algorithmic checks.
    *  Absent → registry defaults apply. */
   algorithmicChecks?: Partial<Record<BuiltinCheckId, AlgorithmicCheckOverride>>
+  /** AQU-1906: the same overrides for ONE target lane, keyed by legacy tag
+   *  (`''` = the default lane). Overlaid from
+   *  ProjectWideSettings.algorithmicChecksByLane. Read it through
+   *  `laneCheckOverrides` (src/lib/lqa/lane-builtin-checks.ts), never directly:
+   *  a lane's entry lies over `algorithmicChecks` rather than replacing it. */
+  algorithmicChecksByLane?: Record<string, Partial<Record<BuiltinCheckId, AlgorithmicCheckOverride>>>
   rulePenalties?: RulePenalties
   origin?: ProjectOrigin
   permissions?: ProjectPermissions
@@ -756,6 +799,18 @@ export interface ProjectRecord {
    *  (db/shared/bible-enrichments.ts), which also applies the Bible data
    *  switch above. */
   bibleEnrichments?: import("../../../db/shared/bible-enrichments").BibleEnrichmentSettings
+  /** AQU-1688: the Language profile Bible data checks read, synced via
+   *  ProjectWideSettings. Read it through `readLanguageProfile`
+   *  (db/shared/language-profile.ts), which drops a damaged slot. */
+  languageProfile?: import("../../../db/shared/language-profile").LanguageProfile
+  /** AQU-1699: the decision log, synced via ProjectWideSettings. Bible data
+   *  check pack B reads its `render.*` and `clusivity.*` decisions. Read it
+   *  through `readProjectFacts` (db/shared/project-facts.ts); never write it
+   *  from here (ProjectDecisionsSection writes the stored list). */
+  projectFacts?: unknown[]
+  /** AQU-1692: maintainers' voice corrections, synced via ProjectWideSettings.
+   *  Read it through `readBibleVoiceOverrides` (db/shared/bible-voice-overrides.ts). */
+  bibleVoiceOverrides?: import("../../../db/shared/bible-voice-overrides").BibleVoiceOverrides
   /** AI-draft context budget. Synced via ProjectWideSettings; absent →
    *  DEFAULT_DRAFT_CONTEXT applies. See D10 in paragraph-drafting spec. */
   draftContext?: import("@/lib/completion/draft-context").DraftContextSettings

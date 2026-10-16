@@ -88,7 +88,10 @@
           "requiredSecrets": [
             "FRONTIER_D1_API_TOKEN",
             "FRONTIER_D1_DATABASE_ID",
-            "GITLAB_ADMIN_TOKEN"
+            "GITLAB_ADMIN_TOKEN",
+            "MONDAY_CLIENT_SECRET",
+            "MONDAY_SIGNING_SECRET",
+            "MONDAY_TOKEN_KEY"
           ],
           "plainText": {
             "ENVIRONMENT": "development",

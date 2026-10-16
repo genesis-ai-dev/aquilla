@@ -15,12 +15,16 @@ import { useProject } from "@/hooks/useProject"
 import { useProjectCells } from "@/hooks/useProjectCells"
 import { useRules } from "@/hooks/useRules"
 import { useProjectInfractions } from "@/hooks/useProjectInfractions"
+import { withBuiltinOverrides } from "@/lib/lqa/builtin-resolver"
+import { laneCheckOverrides, lanePunctuation } from "@/lib/lqa/lane-builtin-checks"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { RulesSurface } from "@/components/RulesSurface"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { UseProjectSettings } from "@/hooks/useProjectSettings"
+import { readinessFromDecisions } from "../../../db/shared/bible-checks/agreed-names"
+import { readProjectFacts } from "../../../db/shared/project-facts"
 
 interface RulesSettingsSectionProps {
   projectId: string
@@ -106,7 +110,7 @@ export function RulesSettingsSection({
   // evaluated here include them, and a failed read gets the same notice.
   const { concepts: subscribedConcepts, error: subscribedConceptsError } = useSubscribedConcepts(projectId)
 
-  const { rules, userRules, builtinRules, addRule, updateRule, deleteRule, setBuiltinOverride } = useRules(
+  const { rules, userRules, builtinRules, checkOverrides, addRule, updateRule, deleteRule, setBuiltinOverride } = useRules(
     project ?? null,
     refresh,
     patchSettings as Parameters<typeof useRules>[2],
@@ -129,7 +133,28 @@ export function RulesSettingsSection({
 
   const cells = useMemo(() => files.flatMap((file) => file.cells), [files])
 
-  const enabledRules = useMemo(() => rules.filter((rule) => rule.enabled), [rules])
+  // AQU-1699: the Bible data checks that need decisions or terminology say so while they have none.
+  const projectFacts = project?.projectFacts
+  const bibleReadiness = useMemo(
+    () => readinessFromDecisions(readProjectFacts(projectFacts), localConcepts),
+    [projectFacts, localConcepts],
+  )
+
+  // AQU-1906: the corpus above is read in the lane this page is viewing, so the
+  // violation counts must use that lane's built-in resolution too — its own
+  // on/off and severity overrides, and its punctuation conventions. `rules`
+  // arrives project-wide (useRules is called with no lane so the management
+  // list keeps every lane's user rules).
+  const laneRules = useMemo(
+    () =>
+      withBuiltinOverrides(
+        rules,
+        laneCheckOverrides(project, activeLane ?? ""),
+        lanePunctuation(project, activeLane ?? "").conventions,
+      ),
+    [rules, project, activeLane],
+  )
+  const enabledRules = useMemo(() => laneRules.filter((rule) => rule.enabled), [laneRules])
   // AQU-1864: the scan used to run right here, in a render-time memo — every
   // enabled rule over every cell of the project, synchronously. A full Bible
   // (~31k cells, ~20 rules) froze the page for seconds on open, and again on
@@ -164,6 +189,7 @@ export function RulesSettingsSection({
         updateRule={updateRule}
         deleteRule={deleteRule}
         setBuiltinOverride={setBuiltinOverride}
+        checkOverrides={checkOverrides}
         infractions={infractions}
         cells={cells}
         cellsLoading={cellsLoading}
@@ -180,6 +206,7 @@ export function RulesSettingsSection({
         setEditingRuleId={setEditingRuleId}
         activeLane={activeLane}
         onActiveLaneChange={onActiveLaneChange}
+        bibleReadiness={bibleReadiness}
       />
     </>
   )

@@ -611,6 +611,21 @@ Set `AI_ALLOWED_MODELS` and appropriate request limits. Enable
 over-budget requests. `CREDIT_ENFORCE` controls separate credit checks.
 Provider-side limits remain useful even when application limits are disabled.
 
+`AI_DAILY_SPEND_CEILING_USD` is different from all of those: it is a
+platform-wide ceiling in dollars on one UTC day's real provider cost, checked
+before every paid AI call in both workers (chat, agent, autopilot, drafting,
+brief, smart edits, import classification, import sandbox, transcription, TTS,
+voice conversion, diarization), and it has no enforce flag — it always applies.
+**It also applies when you set nothing: the default is $500/day.** Set it to
+your own number on both `auth-worker` and `sync-worker`, `0` to refuse all paid
+AI, or `off` to switch the ceiling off entirely. A platform admin can override
+it at runtime from the admin console's Settings tab, which wins over the
+variable. Past the ceiling, paid calls answer `503 ai_spend_ceiling_reached`
+with "AI is temporarily unavailable", one `[ai-spend-ceiling] ALERT` line is
+logged for the day, and service returns at the next UTC day. The ceiling is only
+as accurate as the recorded provider cost it reads, so measure before you tighten
+it.
+
 Some code supports `OPENROUTER_BASE_URL`, but other paths call OpenRouter
 directly. Running all AI through a local OpenAI-compatible server requires
 tracing and adapting every AI caller, including import parsing.
@@ -742,6 +757,9 @@ Aquilla's software license.
 - **Monday.com:** create your own application. Configure `MONDAY_CLIENT_ID`,
   `MONDAY_APP_ID`, `MONDAY_APP_SLUG`, and the exact `MONDAY_REDIRECT_URI`.
   Provision `MONDAY_CLIENT_SECRET` and `MONDAY_SIGNING_SECRET` on identity.
+  If a non-production identity Worker ever runs against a copy of your
+  production database, give it a `MONDAY_TOKEN_KEY` of its own so the copied
+  Monday tokens are unreadable there (unset, the key derives from `SECRET_KEY`).
   Adapt and verify cron flushing before relying on background pushes.
 - **PostHog:** omit `VITE_POSTHOG_KEY` and Worker `POSTHOG_KEY` to disable those
   telemetry clients. For your own project, configure the correct ingest host

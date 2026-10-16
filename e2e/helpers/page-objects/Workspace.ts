@@ -1159,6 +1159,19 @@ export class Workspace {
     await expect(this.validationToggle(index)).toHaveAttribute("aria-pressed", "true", { timeout: 10_000 })
   }
 
+  /** Tick a row's selection checkbox, which opens the bottom selection bar. */
+  async selectRow(index: number): Promise<void> {
+    const toggle = this.cellRow(index).getByRole("checkbox", { name: /^Select cell/ })
+    await toggle.click()
+    await expect(this.cellRow(index).getByRole("checkbox", { name: /^Selected cell/ })).toBeVisible()
+  }
+
+  /** The selection bar's "Validate text" — bulk-validates the selected rows.
+   *  Its name carries the eligible count ("Validate text 2"). */
+  async validateSelection(): Promise<void> {
+    await this.page.getByRole("button", { name: /^Validate text \d+$/ }).click()
+  }
+
   /** Remove the current user's validation and wait for the row state to settle. */
   async unvalidateCell(index: number): Promise<void> {
     const row = this.cellRow(index)
@@ -1360,6 +1373,11 @@ export class Workspace {
     const button = await this.openRowAction(this.cellRow(index), "Edit history")
     await button.click()
     await expect(this.page.getByRole("heading", { name: /^Edit history/ })).toBeVisible()
+  }
+
+  /** The history drawer's Retry control, shown when a history load failed. */
+  historyRetryButton(): Locator {
+    return this.page.getByRole("button", { name: "Retry", exact: true })
   }
 
   /** A history-drawer revision card whose shown (terminal) value is `text`. */

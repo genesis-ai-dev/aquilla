@@ -12,6 +12,8 @@
  * blank, and an 8-hex lane id is never either answer.
  */
 
+import { orderedLaneChoices, type LaneChoiceRow } from "./active-lane-choice"
+import { codeForLanguageLabel } from "./backfill-plan"
 import {
   hasLaneCodeOverride,
   laneDisplayName,
@@ -131,6 +133,34 @@ export function laneLanguageForTag(
 }
 
 /**
+ * The BCP 47 code of the lane carrying `tag`, or `null` when nothing names one.
+ *
+ * This is the lane's language rendered as a tag a *machine* can act on — the
+ * browser's spell-checker picking a dictionary, a `lang` attribute (AQU-1908).
+ * {@link laneLanguageForTag} answers the other question, "what language is this
+ * lane for", in the freeform words the user typed ("Spanish", "Grade 7
+ * English"); that string is what the model is told and what every "same
+ * language?" comparison reads, and it is NOT a valid language tag.
+ *
+ * The row's code override wins (AQU-1784), else the code is derived from the
+ * row's language at read time — never stored, so nothing drifts when the label
+ * is edited (AQU-1585). A freeform label no catalog entry matches derives
+ * nothing and answers `null`, which is honest: no dictionary exists for it.
+ */
+export function laneLanguageCodeForTag(
+  tag: string,
+  lanes: readonly LaneLanguageRow[] | null | undefined,
+  settings?: LaneLanguageSettings | null,
+): string | null {
+  const row = rowForTag(tag, lanes)
+  if (row) {
+    return laneLanguageCode(row, { settings, role: row.role, legacyTag: row.legacyTag })
+  }
+  // No row: the tag is all a caller has, by the same rule as the language.
+  return codeForLanguageLabel(laneLanguageForTag(tag, lanes, settings))
+}
+
+/**
  * The label a picker shows for the lane carrying `tag`.
  *
  * Always a string: an unresolvable lane falls back to its tag, because a blank
@@ -205,4 +235,49 @@ export function laneLabelSuffixesById(
     if (suffix) byId[lane.id] = suffix
   }
   return byId
+}
+
+/**
+ * AQU-1978: the language of the project's SOURCE lane, or `null` when nothing
+ * names one — the same rule the editor's source language follows.
+ *
+ * For the code that speaks or transcribes source audio. They read the retired
+ * project-level `sourceLanguage` before, which is empty on every project made
+ * since AQU-1594/1595, so the engine was told no language at all.
+ */
+export function sourceLaneLanguage(
+  lanes: readonly LaneLanguageRow[] | null | undefined,
+  settings?: LaneLanguageSettings | null,
+): string | null {
+  const source = (lanes ?? []).find((lane) => lane.role === "source")
+  const resolved = laneLanguage(source ?? { role: "source", language: null }, {
+    settings,
+    role: "source",
+    legacyTag: source?.legacyTag ?? null,
+  })
+  return resolved || null
+}
+
+/**
+ * AQU-1978: the languages of the project's LIVE target lanes, each once, in the
+ * order the lane switcher offers them (`position`, then id).
+ *
+ * For surfaces that list "the languages this project is voiced in" (the voice
+ * roster's catalog and language badge). They read the retired `targetLanes` /
+ * `archivedLanes` settings keys before: absent on a project made since
+ * AQU-1594, and tags rather than languages on a lane tagged with its own id.
+ * An archived lane is left out; a lane whose row names no language is skipped.
+ */
+export function liveTargetLaneLanguages(
+  lanes: readonly (LaneLanguageRow & LaneChoiceRow)[] | null | undefined,
+): string[] {
+  const live = (lanes ?? []).filter((lane) => lane.role !== "source" && !lane.archivedAt)
+  const out: string[] = []
+  for (const lane of orderedLaneChoices(live)) {
+    const language = laneRowLanguage(lane)
+    if (!language) continue
+    if (out.some((seen) => seen.toLowerCase() === language.toLowerCase())) continue
+    out.push(language)
+  }
+  return out
 }

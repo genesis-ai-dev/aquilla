@@ -77,9 +77,12 @@ import {
   idmlCompletionPromptSource,
   idmlCompletionSystemAddendum,
   normalizeProtectedCompletionWithRepair,
+  IdmlCompletionError,
   type IdmlRepairMessage,
 } from "@/lib/idml/completion"
+import { idmlDraftRejectionProperties } from "@/lib/idml/telemetry"
 import { alignIdmlStyles, cellCanAlignStyles } from "@/lib/idml/align-styles"
+import { clearStyleAlignDirty } from "@/lib/store/style-align-dirty"
 import { t } from "@/lib/i18n/standalone"
 
 // Cap per LLM call. Above this we split into independent review packages.
@@ -218,6 +221,34 @@ function unionStyleInstructions(
     for (const instruction of resolve(cell)) seen.add(instruction)
   }
   return seen.size > 0 ? [...seen] : undefined
+}
+
+/**
+ * AQU-1964: count the drafts refused for touching a protected IDML anchor.
+ * The refusal itself is correct behaviour, but it was invisible — no exception
+ * reached PostHog from the batch-commit seam, and the single-cell path reported
+ * it only as a generic exception, so nobody could tell whether this happened
+ * once or on every cell of a Biblica file.
+ *
+ * Properties come from the IDML telemetry boundary, which emits codes and
+ * counts only: an IDML cell id IS its anchor locator, so it must never ride
+ * along here.
+ */
+function captureIdmlDraftRejection(
+  cells: readonly { metadata?: Record<string, unknown> | null }[],
+  error: unknown,
+  mode: string,
+): void {
+  if (!(error instanceof IdmlCompletionError)) return
+  posthog.capture(
+    "idml draft rejected for protected anchor",
+    idmlDraftRejectionProperties({
+      cells,
+      diagnostics: error.diagnostics,
+      mode,
+      repairAttempted: error.repairAttempted,
+    }),
+  )
 }
 
 export function useCompletion(
@@ -583,6 +614,7 @@ export function useCompletion(
       // rethrows after reverting its optimistic patch). Record the error and
       // report failure so the caller does not show a "Saved" confirmation.
       posthog.captureException(err instanceof Error ? err : new Error(String(err)))
+      captureIdmlDraftRejection([cell], err, opts?.mode ?? "single")
       setPreviews((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
       setCompleting((p) => new Map(p).set(lk(cell.id), "error"))
       setErrors((p) => new Map(p).set(lk(cell.id), err instanceof Error ? err.message : "Failed"))
@@ -625,6 +657,7 @@ export function useCompletion(
         return rawOutput
       })
       if (!aligned.changed) {
+        clearStyleAlignDirty(cell.id)
         setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
         setErrors((p) => new Map(p).set(lk(cell.id), t("editor.idml.alignStylesUnchanged")))
         return false
@@ -673,6 +706,7 @@ export function useCompletion(
           exampleCellIds: [],
         }],
       })
+      clearStyleAlignDirty(cell.id)
       setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
       return true
     } catch (err) {
@@ -1018,6 +1052,7 @@ export function useCompletion(
             } catch (err) {
               if (err instanceof DOMException && err.name === "AbortError") throw err
               posthog.captureException(err instanceof Error ? err : new Error(String(err)))
+              captureIdmlDraftRejection([cell], err, "batch")
               setPreviews((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
               setCompleting((p) => new Map(p).set(lk(cell.id), "error"))
               setErrors((p) => new Map(p).set(lk(cell.id), err instanceof Error ? err.message : "Failed"))
@@ -1105,6 +1140,7 @@ export function useCompletion(
           }
           const err = outcome.reason
           posthog.captureException(err instanceof Error ? err : new Error(String(err)))
+          captureIdmlDraftRejection([cell], err, "batch")
           setCompleting((p) => new Map(p).set(lk(cell.id), "error"))
           setErrors((p) => new Map(p).set(lk(cell.id), err instanceof Error ? err.message : "Failed"))
           incrementBatchCompletionFailed(runId, 1)
@@ -1420,6 +1456,7 @@ export function useCompletion(
         return
       }
       posthog.captureException(err instanceof Error ? err : new Error(String(err)))
+      captureIdmlDraftRejection(draftCells, err, "paragraph")
       const msg = err instanceof Error ? err.message : "Failed"
       for (const c of draftCells) {
         // Don't relabel a cell that was already committed before the failure —

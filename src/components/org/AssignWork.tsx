@@ -6,6 +6,7 @@ import {
   buildLaneItems,
   initialAssignmentLane,
   laneIdForTag,
+  lanesStaffedBy,
   laneTagForAssignment,
   type AssignLaneOption,
 } from "@/lib/sync/assignment-lane"
@@ -96,6 +97,15 @@ export interface AssignWorkProps {
    * Absent before the lane rows exist; the tag still goes out.
    */
   laneRows?: readonly { id: string; legacyTag: string | null }[]
+  /**
+   * AQU-1994: the project's lanes at least one of its people is on. The field
+   * offers only these, so a manager cannot route work to a language nobody on
+   * the project can work in. `null`/omitted is "the server did not say" — not
+   * "nobody" — and leaves the list as it was.
+   */
+  staffedLaneIds?: ReadonlySet<string> | readonly string[] | null
+  /** Called when the panel is opened, so staffing can be re-read. */
+  onOpen?: () => void
 }
 
 const DEFAULT_ROLE_LEVEL = 500
@@ -117,6 +127,8 @@ export function AssignWork({
   laneLabels,
   defaultLaneLabel,
   laneRows,
+  staffedLaneIds,
+  onOpen,
 }: AssignWorkProps) {
   const t = useT()
   const isSelfAssignMode = roleLevel < assignmentMinRole
@@ -139,9 +151,16 @@ export function AssignWork({
         laneLabels,
         defaultLaneLabel,
         defaultLaneFallback: t("dialog.assign.defaultLaneFallback"),
+        staffedLaneIds,
       }),
-    [lanes, laneTags, laneLabels, defaultLaneLabel, t],
+    [lanes, laneTags, laneLabels, defaultLaneLabel, staffedLaneIds, t],
   )
+  // AQU-1994: nobody on the project is on any of its lanes. There is nothing
+  // truthful to offer, so the field says so and Assign is refused rather than
+  // listing languages no one can work in. Asked of staffing alone, so the
+  // legacy `laneTags` shape (a project with no lane rows) is untouched.
+  const noStaffedLanes =
+    Boolean(lanes?.length) && lanesStaffedBy(lanes ?? [], staffedLaneIds).length === 0
   // undefined = the arrival rule; a string or null is the manager's own pick.
   // Reset when the panel opens or the lane they arrived from changes, so a
   // previous choice doesn't survive into the All tab.
@@ -270,6 +289,10 @@ export function AssignWork({
       setError(t("dialog.assign.error.selfOnly"))
       return
     }
+    if (noStaffedLanes) {
+      setError(t("org.assignWork.noStaffedLanes"))
+      return
+    }
     // One lane names itself. Several lanes pre-fill only from the tab the
     // manager arrived from; the All tab pre-fills nothing and cannot submit.
     const chosenLane = laneItems.length === 1 ? laneItems[0]!.value : selectedLane
@@ -319,7 +342,12 @@ export function AssignWork({
 
   if (!open) {
     return (
-      <Button type="button" size="sm" variant="outline" onClick={() => setOpen(true)}>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={() => { setOpen(true); onOpen?.() }}
+      >
         {t("org.assignWork.assignButtonLabel")}
       </Button>
     )
@@ -332,7 +360,11 @@ export function AssignWork({
           <FieldLabel htmlFor={laneItems.length > 1 ? "assign-work-lane" : undefined}>
             {t("dialog.assign.laneLabel")}
           </FieldLabel>
-          {laneItems.length === 1 ? (
+          {noStaffedLanes ? (
+            <FieldError data-testid="assign-work-no-staffed-lanes">
+              {t("org.assignWork.noStaffedLanes")}
+            </FieldError>
+          ) : laneItems.length === 1 ? (
             <p data-testid="assign-work-lane-fixed" className="text-sm">
               {laneItems[0]!.label}
             </p>
@@ -521,7 +553,7 @@ export function AssignWork({
           <Button
             type="button"
             onClick={() => void submit()}
-            disabled={busy}
+            disabled={busy || noStaffedLanes}
           >
             {t("dialog.assign.submit")}
           </Button>

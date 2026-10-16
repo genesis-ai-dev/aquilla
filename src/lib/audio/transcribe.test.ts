@@ -213,6 +213,22 @@ describe("transcribeCell — imported media segments (AQU-646)", () => {
     releaseSharedClipPcm()
   })
 
+  // AQU-1681: a minute of the shared recording was recognised in one request
+  // (transcribe-chunked.ts); each row then only stores its share — its audio
+  // is not read, and nothing more is sent anywhere.
+  it("stores a row's share of a minute without reading or sending its audio", async () => {
+    const impl = fakeTranscribe(["never"])
+    __setTranscribeAudioForTests(impl)
+    const words = await transcribeCell({
+      cell: makeMediaCell(), session, projectId: "proj-1", language: "es",
+      prerecognised: { text: "Hola, mundo.", chunks: [{ text: "Hola,", start: 0.1, end: 0.4 }, { text: "mundo.", start: 0.5, end: 0.9 }] },
+    })
+    expect(words).toBe(2)
+    expect(impl).not.toHaveBeenCalled()
+    expect(fetchCellAudio).not.toHaveBeenCalled()
+    expect(emitCellAudioAttach).toHaveBeenCalledWith(expect.objectContaining({ transcription: "Hola, mundo." }))
+  })
+
   it("leaves language undefined (auto-detect) for unmapped tags", async () => {
     await audioCachePut(AUDIO_ID, EXT, new Uint8Array([1, 2, 3]))
     const impl = fakeTranscribe(["x"])

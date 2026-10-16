@@ -12,6 +12,8 @@ import { useState } from "react"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NewVoiceModal } from "./NewVoiceModal"
+import { expectTooltip } from "@/test-utils/tooltip"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import type { TtsProvider, Voice } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { GEMINI_TTS_VOICES } from "@/lib/audio/tts-providers"
@@ -746,5 +748,55 @@ describe("NewVoiceModal Inworld Voice Design", () => {
     await user.click(screen.getByRole("button", { name: "Cancel" }))
     expect(screen.queryByRole("dialog")).toBeNull()
     expect(pause).toHaveBeenCalled()
+  })
+})
+
+describe("NewVoiceModal narrator control", () => {
+  const voice: Voice = {
+    id: "v1",
+    name: "Mary",
+    color: "#be123c",
+    provider: "gemini",
+    voiceName: "Kore",
+  }
+
+  function modal(isDefault: boolean, onMakeDefault: () => void) {
+    return (
+      <TooltipProvider delay={0}>
+        <NewVoiceModal
+          open
+          onClose={vi.fn()}
+          voice={voice}
+          provider="gemini"
+          isDefault={isDefault}
+          paletteIndex={0}
+          cells={[]}
+          onSave={vi.fn()}
+          onMakeDefault={onMakeDefault}
+        />
+      </TooltipProvider>
+    )
+  }
+
+  it("uses a filled-star button, with the narrator name only in the tooltip", async () => {
+    const onMakeDefault = vi.fn()
+    const { rerender } = render(modal(false, onMakeDefault))
+
+    const makeNarrator = screen.getByRole("button", { name: "Make narrator" })
+    expect(makeNarrator.textContent).not.toContain("Make narrator")
+    expect(makeNarrator.querySelector("svg")?.getAttribute("class")).toContain("fill-current")
+    await expectTooltip(makeNarrator, "Make this the narrator")
+    fireEvent.click(makeNarrator)
+    expect(onMakeDefault).toHaveBeenCalledTimes(1)
+
+    rerender(modal(true, onMakeDefault))
+    const narrator = screen.getByRole("button", { name: "Narrator" })
+    expect(narrator.textContent).not.toContain("Narrator")
+    expect(narrator.className).toContain("border-primary")
+    expect(narrator.querySelector("svg")?.getAttribute("class")).toContain("fill-current")
+    expect(narrator).not.toBeDisabled()
+    await expectTooltip(narrator, "Narrator")
+    fireEvent.click(narrator)
+    expect(onMakeDefault).toHaveBeenCalledTimes(1)
   })
 })

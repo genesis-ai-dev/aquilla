@@ -10,7 +10,7 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
-import { EditorTable } from "./EditorTable"
+import { EditorTable, type AudioLensContext } from "./EditorTable"
 import { EditorActionsProvider, type EditorActionsContextValue } from "@/context/EditorActionsContext"
 import { CellStore } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord, ProjectTtsSettings } from "@/lib/parsers/types"
@@ -114,6 +114,8 @@ function makeStore(): CellStore {
       row("cell-dangling", "target", ""),
       row("cell-heading", "source", "Section title", "paratext"),
       row("cell-heading", "target", "", "paratext"),
+      row("cell-section", "source", "The Creation", "heading"),
+      row("cell-section", "target", "The Creation", "heading"),
       row("cell-empty", "source", ""),
       row("cell-empty", "target", ""),
       // A transcribed media cell whose stored `value` is the import filename:
@@ -128,8 +130,25 @@ function makeStore(): CellStore {
   return store
 }
 
+function audioLens(): AudioLensContext {
+  return {
+    voices: TTS.voices ?? [],
+    settings: TTS,
+    defaultVoiceId: "v-narr",
+    project,
+    projectId: project.id,
+    session: null,
+    username: "tester",
+    onAssignCast: () => {},
+    onAfterGenerate: () => {},
+    onPlayCell: () => {},
+    onMakeCharacterFromCell: () => {},
+  }
+}
+
 function renderTable(opts: {
   castGutter?: boolean
+  audioLens?: AudioLensContext | null
   actions?: Partial<EditorActionsContextValue>
 } = {}) {
   const qc = new QueryClient()
@@ -154,6 +173,7 @@ function renderTable(opts: {
           sourceTextDirection="ltr"
           targetTextDirection="ltr"
           castGutter={opts.castGutter ?? true}
+          audioLens={opts.audioLens}
           ttsSettings={TTS}
         />
       </EditorActionsProvider>
@@ -226,6 +246,15 @@ describe("EditorTable — character gutter", () => {
     expect(cellArg.id).toBe("cell-plain")
     expect(voiceId).toBe("v-john")
     expect(opts).toEqual({ applyToSpeaker: false })
+  })
+
+  it("the Audio view offers the voice dropdown on a heading, and not on a section break", async () => {
+    renderTable({ castGutter: false, audioLens: audioLens() })
+    await screen.findByText("The Creation")
+    expect(within(rowEl("cell-section")).getByTestId("voice-field")).toBeInTheDocument()
+    expect(within(rowEl("cell-plain")).getByTestId("voice-field")).toBeInTheDocument()
+    expect(within(rowEl("cell-heading")).queryByTestId("voice-field")).toBeNull()
+    expect(within(rowEl("cell-heading")).queryByTestId("voice-card-empty")).toBeNull()
   })
 
   it("the diarized speaker's apply-to-all footer rides along in the gutter popover", async () => {

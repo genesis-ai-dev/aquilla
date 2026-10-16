@@ -7,7 +7,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Bird, Check, CloudAlert, CloudUpload, FileClock, Pause, Pencil, Play, RotateCcw, Sparkles, Trash2 } from "lucide-react"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { fmtShortCalendarDate } from "@/lib/format-date"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -148,7 +150,7 @@ export function TakesStrip({
   readOnly = false,
 }: Props) {
   const tab = variant === "tab"
-  const t = useT()
+  const { t, locale } = useI18n()
   const audioValidation = useAudioValidation({
     project, fileId, cellId, username: author, jwt: session?.jwt ?? null,
     ...(targetLang ? { targetLang } : {}),
@@ -642,26 +644,25 @@ export function TakesStrip({
                     )}
                     {/* AQU-1372: "recorded when, by whom" — the answer the
                         event log already holds, on the row that asks it.
-                        Compact by necessity (this row is dense): the date and
-                        the person inline, the exact time in the tooltip. */}
+                        Compact by necessity (this row is dense): the short
+                        calendar date and the person inline; the exact time
+                        opens in DateTooltip, the same hover every other date
+                        uses. */}
                     {provenance && (
                       <span
                         data-testid={`take-recorded-${att.audioId}`}
-                        title={t(
-                          isGenerated
-                            ? "audio.takesStrip.generatedByTooltip"
-                            : "audio.takesStrip.recordedByTooltip",
-                          {
-                            datetime: new Date(provenance.recordedAt).toLocaleString(),
-                            author: provenance.recordedBy,
-                          },
-                        )}
-                        className="min-w-0 shrink truncate text-[10px] text-muted-foreground/60"
+                        className="inline-flex min-w-0 max-w-full shrink items-center text-[10px] text-muted-foreground/60"
                       >
-                        {t("audio.takesStrip.recordedByBadge", {
-                          date: new Date(provenance.recordedAt).toLocaleDateString(),
-                          author: provenance.recordedBy,
-                        })}
+                        <DateTooltip
+                          value={provenance.recordedAt}
+                          label={t(isGenerated ? "audio.takesStrip.generatedLabel" : "audio.takesStrip.recordedLabel")}
+                          className="min-w-0 truncate"
+                        >
+                          {t("audio.takesStrip.recordedByBadge", {
+                            date: fmtShortCalendarDate(provenance.recordedAt, undefined, locale),
+                            author: provenance.recordedBy,
+                          })}
+                        </DateTooltip>
                       </span>
                     )}
                     {/* AQU-464: this take speaks wording the line no longer

@@ -293,7 +293,7 @@ export function WaveformRect({
           aria-valuenow={Math.round(clamp01(progress ?? 0) * 100)}
           tabIndex={-1}
           data-testid={testId ? `${testId}-seek` : undefined}
-          className="absolute inset-0 cursor-pointer"
+          className="absolute inset-0 cursor-default"
           {...seekHandlers}
         />
       )}

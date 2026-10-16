@@ -370,6 +370,8 @@ export const audio = defineNamespace({
       "Couldn't save to the server — this take is still on this device. Retry to send it again.",
     "audio.takesStrip.syncFailedRetry": "Not saved — retry",
     "audio.takesStrip.recordedByBadge": "{date} · {author}",
+    "audio.takesStrip.recordedLabel": "Recorded",
+    "audio.takesStrip.generatedLabel": "Generated",
     "audio.takesStrip.recordedByTooltip": "Recorded {datetime} by {author}",
     "audio.takesStrip.generatedByTooltip": "Generated {datetime} by {author}",
     "audio.takesStrip.textDriftBadge": "Text changed",
@@ -714,10 +716,11 @@ export const audio = defineNamespace({
     keys: {
       "audio.narrator": {
         description:
-          "Status word/badge meaning this voice is the project's default narrator — " +
-          "used for any line that has no explicit speaker assigned. Appears both as a " +
-          "small badge on a voice's row in the Voices list and as inline status text " +
-          "in the voice editor's footer. Noun, not a verb.",
+          "Status word meaning this voice is the project's default narrator — " +
+          "used for any line that has no explicit speaker assigned. Tooltip on the " +
+          "narrator star in the Voices list, and the accessible name plus tooltip of " +
+          "the filled-star button in the voice editor's footer (no visible label). " +
+          "Noun, not a verb.",
       },
       "audio.newVoice.createLabel": {
         description:
@@ -1352,14 +1355,17 @@ export const audio = defineNamespace({
       },
       "audio.newVoice.makeNarratorHint": {
         description:
-          "Tooltip on the 'Make narrator' button in the voice editor's footer, " +
-          "explaining what the narrator role means before the user clicks it.",
+          "Tooltip on the star button in the voice editor's footer that sets this " +
+          "voice as narrator. The button shows only a star; this sentence is the " +
+          "hover explanation of what the narrator role means before the user clicks it.",
       },
       "audio.newVoice.makeNarratorButton": {
         description:
-          "Button in the voice editor's footer that sets this voice as the " +
-          "project's default narrator (see audio.narrator). Imperative, short — " +
-          "sits beside Cancel/Save.",
+          "Sets this voice as the project's default narrator (see audio.narrator). " +
+          "Accessible name of the star-only button in the voice editor's footer " +
+          "(the visible label was removed; the tooltip is makeNarratorHint), and " +
+          "the visible label of the same action in a voice row's overflow menu. " +
+          "Imperative, short.",
         maxLength: 20,
       },
       "audio.newVoice.createButton": {
@@ -2279,24 +2285,41 @@ export const audio = defineNamespace({
       },
       "audio.takesStrip.recordedByBadge": {
         description:
-          "Inline provenance stamp on a compact take row: the day the take was " +
-          "made and the person who made it, separated by a middle dot. Answers " +
-          "'when was this recorded, and by whom' at a glance while auditing a " +
-          "line's takes. The separator may be replaced with whatever punctuation " +
-          "reads naturally in the target language; keep it very short, as it " +
-          "shares one row with the take's name, length and action buttons and is " +
-          "truncated when the column is narrow.",
-        maxLength: 32,
+          "Inline provenance stamp on a compact take row: the short calendar " +
+          "date the take was made and the person who made it, separated by a " +
+          "middle dot. Answers 'when was this recorded, and by whom' at a glance " +
+          "while auditing a line's takes. The separator may be replaced with " +
+          "whatever punctuation reads naturally in the target language; keep it " +
+          "very short, as it shares one row with the take's name, length and " +
+          "action buttons and is truncated when the column is narrow. The exact " +
+          "time is the DateTooltip hover, prefixed by recordedLabel or " +
+          "generatedLabel — not this string.",
+        maxLength: 40,
         placeholders: {
-          date: "Day the take was made, already formatted for the user's locale.",
+          date: "Short calendar date the take was made (fmtShortCalendarDate), already formatted for the user's locale — e.g. 'September 24' within the last year, else 'Sep 2024'.",
           author: "Name of the person who made the take, as recorded on the event log.",
         },
       },
+      "audio.takesStrip.recordedLabel": {
+        description:
+          "DateTooltip hover prefix on a take a person RECORDED with a microphone. " +
+          "The visible stamp is the short calendar date; this word prefixes the " +
+          "full datetime on hover ('Recorded September 24, 10:52:02 PM').",
+        maxLength: 16,
+      },
+      "audio.takesStrip.generatedLabel": {
+        description:
+          "DateTooltip hover prefix on a take SYNTHESISED by a text-to-speech " +
+          "voice rather than spoken into a microphone. Same role as " +
+          "audio.takesStrip.recordedLabel; the verb differs because the named " +
+          "person chose to generate the take, they did not perform it.",
+        maxLength: 16,
+      },
       "audio.takesStrip.recordedByTooltip": {
         description:
-          "Hover title on that stamp, for a take a person RECORDED with a " +
-          "microphone. Gives the full date and time rather than just the day, " +
-          "since the badge beside it is abbreviated. Purely informational.",
+          "Unused in the current UI (the take stamp's hover is DateTooltip with " +
+          "audio.takesStrip.recordedLabel). Kept so existing translations do not " +
+          "go missing. Was the native browser title on a recorded take's stamp.",
         placeholders: {
           datetime: "Date AND time the take was recorded, already formatted for the user's locale.",
           author: "Name of the person who recorded the take.",
@@ -2304,10 +2327,9 @@ export const audio = defineNamespace({
       },
       "audio.takesStrip.generatedByTooltip": {
         description:
-          "Hover title on that same stamp, for a take that was SYNTHESISED by a " +
-          "text-to-speech voice rather than spoken into a microphone. Same shape " +
-          "as audio.takesStrip.recordedByTooltip; the verb differs because the " +
-          "named person chose to generate the take, they did not perform it.",
+          "Unused in the current UI (the take stamp's hover is DateTooltip with " +
+          "audio.takesStrip.generatedLabel). Kept so existing translations do not " +
+          "go missing. Was the native browser title on a generated take's stamp.",
         placeholders: {
           datetime: "Date AND time the take was generated, already formatted for the user's locale.",
           author: "Name of the person who generated the take.",

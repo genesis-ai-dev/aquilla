@@ -18,6 +18,21 @@ const generateCellVoice = vi.hoisted(() => vi.fn(async (..._a: unknown[]) => tru
 vi.mock("@/lib/audio/voice-generate-helpers", () => ({
   generateCellVoice: (...a: unknown[]) => generateCellVoice(...a),
 }))
+const emitCellAudioDeselect = vi.hoisted(() => vi.fn(async (..._a: unknown[]) => "evt-1"))
+const injectOptimisticAudioDeselect = vi.hoisted(() => vi.fn())
+const notifyAudioAttachmentsChanged = vi.hoisted(() => vi.fn())
+vi.mock("@/lib/sync/events-emit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/sync/events-emit")>()
+  return { ...actual, emitCellAudioDeselect: (...a: unknown[]) => emitCellAudioDeselect(...a) }
+})
+vi.mock("@/lib/audio/audio-attachments-bus", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/audio/audio-attachments-bus")>()
+  return {
+    ...actual,
+    injectOptimisticAudioDeselect: (...a: unknown[]) => injectOptimisticAudioDeselect(...a),
+    notifyAudioAttachmentsChanged: (...a: unknown[]) => notifyAudioAttachmentsChanged(...a),
+  }
+})
 
 import { CellVoicePanel } from "./CellVoicePanel"
 
@@ -75,6 +90,9 @@ function draw(over: Partial<React.ComponentProps<typeof CellVoicePanel>> = {}) {
 
 beforeEach(() => {
   generateCellVoice.mockClear()
+  emitCellAudioDeselect.mockClear()
+  injectOptimisticAudioDeselect.mockClear()
+  notifyAudioAttachmentsChanged.mockClear()
   setTtsStatus(ttsStatusKey("cell-1"), { kind: "idle" })
 })
 
@@ -130,8 +148,8 @@ describe("CellVoicePanel — the take, then a row with its voice", () => {
     draw()
     const wave = screen.getByTestId("voice-card-waveform")
     const tools = row().lastElementChild!.querySelectorAll("button")
-    expect([...tools].map((b) => b.getAttribute("aria-label"))).toEqual(["Record audio", "Volume", "Clone a voice from this take"])
-    for (const name of ["Record audio", "Volume", "Clone a voice from this take"]) {
+    expect([...tools].map((b) => b.getAttribute("aria-label"))).toEqual(["Change voice", "Generate audio from text", "Record audio", "Volume", "Clone voice from take"])
+    for (const name of ["Change voice", "Generate audio from text", "Record audio", "Volume", "Clone voice from take"]) {
       const b = screen.getByRole("button", { name })
       expect(row().lastElementChild!.contains(b)).toBe(true)
       expect(wave.contains(b)).toBe(false)
@@ -184,9 +202,42 @@ describe("CellVoicePanel — the recorder, from a line with audio", () => {
     }
   })
 
-  it("offers no Generate again of its own", () => {
+  it("offers no Generate again of its own while the take's audio is here", () => {
     draw()
+    expect(screen.queryByTestId("voice-card-generate")).toBeNull()
     expect(screen.queryByRole("button", { name: /Generate again/ })).toBeNull()
+  })
+
+  it("offers Generate on the card when this line's own clip is missing, and clears a recording so the new voice plays", async () => {
+    const missing = {
+      state: "error" as const, error: null, isPlaying: false, currentTime: 0, duration: 2,
+      peaks: null, peaksState: "missing" as const,
+      play: vi.fn(), pause: vi.fn(), seek: vi.fn(), setVolume: vi.fn(),
+      setTrim: vi.fn(), requestPeaks: vi.fn(), ensureBytes: vi.fn(),
+    }
+    draw({ cell: generated, controller: missing })
+    const wave = screen.getByTestId("voice-card-waveform")
+    expect(wave).toHaveTextContent("This clip's audio is missing.")
+    const generate = screen.getByTestId("voice-card-generate")
+    expect(wave.contains(generate)).toBe(true)
+    expect(generate).toHaveTextContent("Generate · Mary")
+    await act(async () => { fireEvent.click(generate) })
+    expect((generateCellVoice.mock.calls[0][0] as { voiceId: string }).voiceId).toBe("v-mary")
+    expect(emitCellAudioDeselect).not.toHaveBeenCalled()
+    cleanup()
+
+    const cell = {
+      id: "cell-1", fileId: "file-1", type: "text", translated: "hola",
+      selectedAudioId: "take-cell-1-abc.wav",
+      attachments: { "take-cell-1-abc.wav": { url: "blob:r", type: "audio/wav", slot: "recording" } },
+    } as unknown as CellData
+    draw({ cell, controller: missing })
+    await act(async () => { fireEvent.click(screen.getByTestId("voice-card-generate")) })
+    expect(emitCellAudioDeselect).toHaveBeenCalledWith(expect.objectContaining({
+      cellId: "cell-1", slot: "recording",
+    }))
+    expect(injectOptimisticAudioDeselect).toHaveBeenCalledWith("file-1", "cell-1", "recording", expect.any(Promise))
+    expect(notifyAudioAttachmentsChanged).toHaveBeenCalledWith("file-1")
   })
 
   it("keeps the mic but refuses it, with the reason, where this browser can't record", async () => {

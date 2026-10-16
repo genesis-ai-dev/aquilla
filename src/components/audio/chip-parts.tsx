@@ -26,7 +26,8 @@ export interface ChipCornerButtonProps {
 }
 
 /**
- * A 16px round corner button, exactly the chip's.
+ * A 16px corner button, exactly the chip's, with the same radius as the
+ * small icon buttons outside the editor.
  *
  * A `span role="button"`, not a `<button>`, for the same reason as on the chip:
  * it sits inside surfaces that are themselves pressable, and a real button

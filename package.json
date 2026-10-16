@@ -135,6 +135,7 @@
     "seed:fetch": "tsx scripts/seed-fetch.ts",
     "seed:load": "tsx scripts/seed-load.ts",
     "seed:dev": "tsx scripts/seed-load.ts --local",
+    "seed-vc:local": "bash scripts/seed-vc-local.sh",
     "perf:seed": "tsx scripts/perf/seed-big-bible.ts",
     "perf:measure": "tsx scripts/perf/measure.ts",
     "perf:presence": "tsx scripts/perf/presence-load.ts",

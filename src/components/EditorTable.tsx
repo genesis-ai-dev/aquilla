@@ -186,6 +186,7 @@ import {
 } from "./cell/EditorCellContent"
 import { TargetDraftActions, TargetReferenceActions } from "./cell/TargetCellActions"
 import { TargetValidationControl } from "./cell/TargetValidationControl"
+import { takePlayWindow } from "@/lib/audio/kept-window"
 import { AudioValidationControl } from "./cell/AudioValidationControl"
 import { audioBlockedReason, lineValidationTakes } from "@/lib/audio/audio-validation-permissions"
 import { slotSelections } from "@/lib/sync/cell-audio-read-types"
@@ -499,6 +500,8 @@ export function applyRowOverlays(
         ...(attachment.validators ? { validators: attachment.validators } : {}),
         ...(attachment.role ? { role: attachment.role } : {}),
         ...(attachment.recordedBy != null ? { recordedBy: attachment.recordedBy } : {}),
+        // AQU-1767: see mergeCellsWithAudio — the same list, the same rule.
+        ...(attachment.pieceOf ? { pieceOf: attachment.pieceOf } : {}),
       }
     }
     next = {
@@ -7021,12 +7024,23 @@ function EditorRow({
     cell.endTime > cell.startTime
       ? { start: cell.startTime, end: cell.endTime }
       : null
+  // AQU-1767 (Sam's walk, 2026-10-15): a take plays here as it plays
+  // everywhere else — its trimmed part, and a split take its pieces with the
+  // space between them skipped. This player played the raw recording, gaps
+  // and all, and being a copy of the take the Recording tab shows, it took
+  // over the tab's waveform once it had played.
+  const takeWindow = railSectionWindow ? null : takePlayWindow(cell.attachments, cell.selectedAudioId)
+  const railWindowKey = railSectionWindow
+    ? `s${railSectionWindow.start}-${railSectionWindow.end}`
+    : takeWindow
+      ? `t${takeWindow.start}-${takeWindow.end}~${takeWindow.gaps?.map((g) => `${g.start}-${g.end}`).join(",") ?? ""}`
+      : ""
   const { setTrim: setRailTrim } = audioController
   useEffect(() => {
-    if (cell.medium !== "media") return
     if (railSectionWindow) setRailTrim(railSectionWindow.start, railSectionWindow.end)
+    else if (takeWindow) setRailTrim(takeWindow.start, takeWindow.end, takeWindow.gaps)
     else setRailTrim(null, null)
-  }, [cell.medium, railSectionWindow?.start, railSectionWindow?.end, setRailTrim]) // eslint-disable-line react-hooks/exhaustive-deps -- window identity varies per render; primitives cover it
+  }, [railWindowKey, setRailTrim]) // eslint-disable-line react-hooks/exhaustive-deps -- railWindowKey stands for both windows
   const cellForGeneratedVoice = useMemo(() => ({
     metadata: {
       attachments: cell.attachments,

@@ -16,6 +16,7 @@ import {
 } from "@/lib/sync/cell-audio-read-types"
 // AQU-1571: one floor table for text and audio, as the server keeps one.
 import { VALIDATION_ROLE_FLOOR } from "@/lib/review/text-validation-policy"
+import { pieceNames } from "@/lib/audio/take-groups"
 
 /**
  * The shape every surface actually holds: a row of the editor's `CellData`,
@@ -39,6 +40,10 @@ export interface CellLikeAudio {
     validatorCount?: number
     validators?: string[]
     recordedBy?: string | null
+    /** AQU-1767: the take a piece was cut from, and where it starts in the clip. */
+    pieceOf?: string | null
+    trimStartMs?: number | null
+    isDeleted?: boolean
   }>
   selectedBySlot?: Record<string, string>
   selectedAudioId?: string | null
@@ -49,6 +54,8 @@ export function audioEntryFromCell(cell: CellLikeAudio | undefined): CellAudioEn
   if (!cell?.attachments) return undefined
   const attachments: Record<string, AudioAttachmentOut> = {}
   for (const [audioId, att] of Object.entries(cell.attachments)) {
+    // AQU-1767: a removed piece is not one of the line's takes any more.
+    if (att.isDeleted) continue
     attachments[audioId] = {
       audioId,
       url: "",
@@ -58,8 +65,11 @@ export function audioEntryFromCell(cell: CellLikeAudio | undefined): CellAudioEn
       referenceAudioId: null,
       durationMs: null,
       label: att.label ?? null,
-      trimStartMs: null,
+      // AQU-1767: carried so a cut take's pieces are found and ordered — every
+      // piece is a take this line's approval is measured over.
+      trimStartMs: att.trimStartMs ?? null,
       trimEndMs: null,
+      ...(att.pieceOf ? { pieceOf: att.pieceOf } : {}),
       ...(att.role ? { role: att.role } : {}),
       ...(att.validatorCount != null ? { validatorCount: att.validatorCount } : {}),
       ...(att.validators ? { validators: att.validators } : {}),
@@ -156,11 +166,13 @@ export function audioValidationTakes(
 ): AudioValidationTake[] {
   if (!entry) return []
   const scope = audioValidationScope(project, policy)
+  // AQU-1767: a piece goes by its take's name, numbered by where it sits.
+  const names = pieceNames(Object.values(entry.attachments))
   return selectedDubTakes(entry).map((take) => {
     const verdict = canValidateTake(take, project, scope, policy.username)
     return {
       audioId: take.audioId,
-      label: take.label ?? null,
+      label: names.get(take.audioId) ?? take.label ?? null,
       slot: take.slot,
       validatorCount: take.validatorCount ?? 0,
       validators: take.validators ?? [],

@@ -918,8 +918,36 @@ export const editor = defineNamespace({
     "editor.timeline.snapToggleAria": "Snap to neighboring edges",
     "editor.timeline.snapOnTooltip": "Snapping on — edges magnet to neighbors",
     "editor.timeline.snapOffTooltip": "Snapping off",
+    // AQU-1767 phase 1: cutting takes into independent pieces.
+    "editor.timeline.bladeToggleAria": "Blade: cut a take where you click",
+    "editor.timeline.bladeOnTooltip": "Blade on: click a take to cut it there (B)",
+    "editor.timeline.bladeOffTooltip": "Blade (B): click to cut · S splits at the playhead",
+    "editor.timeline.bladeFreeTiming": "Cutting takes isn't available in Free timing yet",
+    // AQU-1767 (Sam, 2026-10-14): a take's right-click menu.
+    "editor.timeline.takeMenuSplit": "Split here",
+    "editor.timeline.takeMenuReRecord": "Re-record this line",
+    "editor.timeline.takeMenuRegenerate": "Regenerate voice",
+    "editor.timeline.takeMenuApprove": "Approve this take",
+    "editor.timeline.takeMenuApprovePiece": "Approve this piece",
+    "editor.timeline.takeMenuUnapprove": "Remove my approval",
+    "editor.timeline.takeMenuRename": "Rename…",
+    "editor.timeline.takeMenuDeleteTake": "Delete take",
+    "editor.timeline.takeMenuDeletePiece": "Delete this piece",
+    "editor.timeline.renameTakeTitle": "Rename take",
+    "editor.timeline.renameTakeLabel": "Name",
+    "editor.timeline.renameTakeFailed": "Couldn't rename that take",
+    "editor.timeline.deleteTakeFailed": "Couldn't delete that take",
+    "editor.timeline.voteTakeFailed": "Couldn't save your approval",
+    "editor.timeline.regenerateStarted": "Generating a new voice for this line…",
+    "editor.timeline.regenerateDone": "New voice ready",
+    "editor.timeline.regenerateFailed": "Couldn't generate a voice for this line",
+    "editor.timeline.regenerateNoText": "This line has no translation to speak yet",
+    // AQU-1767: what S says when there is no take under the playhead.
+    "editor.history.nothingToCut": "No take to cut there",
     "editor.timeline.videoHiddenNote":
       "The linked video is hidden here — it plays on the original recording's timing, which this view no longer follows.",
+    "editor.timeline.bluetoothPill": "Bluetooth",
+    "editor.timeline.bluetoothPillInfo": "About playing through Bluetooth",
     "editor.timeline.outputLatencyNote":
       "Bluetooth audio arrives a moment after the app sends it. The playhead is adjusted for the delay it can measure, but a little is unmeasurable — trust your ears over the line for fine timing.",
     "editor.timeline.outputDeviceChangedToast": "Playback paused — the audio output changed.",
@@ -1909,6 +1937,16 @@ export const editor = defineNamespace({
     "editor.recordingTab.otherTakes": plural({
       one: "{count} other take",
       other: "{count} other takes",
+    }),
+    // AQU-1767 (Sam, 2026-10-14): a split take is one take made of pieces.
+    "editor.recordingTab.splitInto": plural({
+      one: "split in {count}",
+      other: "split in {count}",
+    }),
+    "editor.recordingTab.cutAt": "Cut",
+    "editor.recordingTab.pieces": plural({
+      one: "{count} piece",
+      other: "{count} pieces",
     }),
     "editor.recordingTab.matches": "Matches the text",
     "editor.recordingTab.differs": plural({
@@ -5821,6 +5859,56 @@ export const editor = defineNamespace({
           "wherever they are dropped. Two words, no sentence.",
         maxLength: 20,
       },
+      "editor.timeline.bladeToggleAria": {
+        description:
+          "Screen-reader name of the timeline toolbar's blade toggle. With the blade on, " +
+          "clicking a recorded or generated take on the timeline cuts it in two at that " +
+          "point; the two pieces stay on the same line. 'Blade' is the editing tool, as " +
+          "in audio and video editors — not a knife.",
+      },
+      "editor.timeline.bladeOnTooltip": {
+        description:
+          "Tooltip of the blade toggle while it is on. (B) is the keyboard shortcut — keep it " +
+          "as the Latin letter B.",
+        maxLength: 60,
+      },
+      "editor.timeline.bladeOffTooltip": {
+        description:
+          "Tooltip of the blade toggle while it is off. (B) is the toggle's keyboard shortcut " +
+          "and S splits the selected take at the playhead without the blade — keep both as the " +
+          "Latin letters B and S.",
+        maxLength: 60,
+      },
+      "editor.timeline.bladeFreeTiming": {
+        description:
+          "Tooltip of the disabled blade button when the file is in 'Free timing' " +
+          "(the mode where lines are laid out end to end). Use the same name for Free timing " +
+          "as the timing-mode picker does.",
+      },
+      "editor.timeline.takeMenuSplit": {
+        description:
+          "Item in the menu that opens when you right-click a take on the timeline: cuts the " +
+          "take in two at the point you right-clicked. A 'take' is one recording or generated " +
+          "voice on a line.",
+        maxLength: 30,
+      },
+      "editor.timeline.takeMenuRegenerate": {
+        description:
+          "Item in a take's right-click menu: generates a new AI voice for the line at once, " +
+          "with the line's cast voice, and makes it the one that plays.",
+        maxLength: 30,
+      },
+      "editor.timeline.takeMenuDeletePiece": {
+        description:
+          "Item in a take's right-click menu when the take has been cut: deletes only this " +
+          "piece, not the other pieces of the same take.",
+        maxLength: 30,
+      },
+      "editor.history.nothingToCut": {
+        description:
+          "Toast after 'Cut takes at the playhead' when no recorded or generated take lies under " +
+          "the playhead, or it is too close to a take's edge to cut.",
+      },
       "editor.timeline.videoHiddenNote": {
         description:
           "Note replacing the linked video player when the file is in free-timing " +
@@ -5828,10 +5916,21 @@ export const editor = defineNamespace({
           "view no longer lays clips out on that clock, so showing it would drift " +
           "against the audio. Explains an absence — not an error.",
       },
+      "editor.timeline.bluetoothPill": {
+        description:
+          "Small amber pill beside the timeline's heading, shown only while the " +
+          "audio output looks like Bluetooth. One word: the name of the " +
+          "connection. Its info button opens editor.timeline.outputLatencyNote.",
+      },
+      "editor.timeline.bluetoothPillInfo": {
+        description:
+          "Screen-reader label of the info button on the Bluetooth pill; it opens " +
+          "the explanation that Bluetooth audio arrives slightly late.",
+      },
       "editor.timeline.outputLatencyNote": {
         description:
-          "Quiet line in the timeline chrome, shown only while the audio output " +
-          "looks like Bluetooth. The app already shifts the playhead by the delay " +
+          "The explanation behind the Bluetooth pill's info button in the timeline " +
+          "header, shown only while the audio output looks like Bluetooth. The app already shifts the playhead by the delay " +
           "the browser reports; this says the REMAINDER cannot be measured, so the " +
           "line may still sit slightly ahead of what is heard. Not a warning and " +
           "not an error — the person can do nothing about it, and nothing is broken.",
@@ -7552,6 +7651,27 @@ export const editor = defineNamespace({
           "Heading over the list of a line's takes other than the one that plays, in " +
           "the Recording tab. Count-governed.",
         placeholders: { count: "How many other takes the line has. Always 1 or more here." },
+        maxLength: 24,
+      },
+      "editor.recordingTab.splitInto": {
+        description:
+          "After a take's name when it has been split into pieces on the timeline, e.g. " +
+          "'Take 1 · split in 2'. The take is still one recording; the pieces are parts of it. " +
+          "Count-governed.",
+        placeholders: { count: "How many pieces the take is in. Always 2 or more." },
+        maxLength: 24,
+      },
+      "editor.recordingTab.cutAt": {
+        description:
+          "Screen-reader name of a line on a take's waveform marking where it was split into " +
+          "two pieces (a noun: the cut).",
+        maxLength: 20,
+      },
+      "editor.recordingTab.pieces": {
+        description:
+          "Heading over the list of a split take's pieces in the Recording tab. A piece is " +
+          "one part of a take that was split on the timeline. Count-governed.",
+        placeholders: { count: "How many pieces the take is in. Always 2 or more." },
         maxLength: 24,
       },
       "editor.recordingTab.matches": {

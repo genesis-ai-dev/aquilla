@@ -37,6 +37,7 @@ import { isDefaultTrackSlot, slotForTrack } from "@/lib/timeline/track-slots"
 import type { TimelineTrack } from "@/lib/timeline/tracks"
 import { trimWav, withBwfTimestamp } from "./audio-bwf"
 import { targetChipGeom } from "@/lib/timeline/lane-timing"
+import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 import { stripInternalIds } from "./internal-id-names"
 import { isSilencedForExport } from "./audio-validation-scope"
 import {
@@ -74,6 +75,19 @@ export interface PerLineClip {
    *  and generated alike, so it comes off the attachment's `voiceId` — the
    *  discriminator stage 3 verified against all three synthesis paths. */
   generated?: boolean
+  /**
+   * AQU-1767: which PIECE of a cut take this is (1-based, in clip order).
+   * Absent for a take that was never cut. Each piece is its own file, named
+   * `…_L0047p2_…`, with its own timestamp — a DAW gets the pieces where the
+   * timeline has them, and joining them is a later choice.
+   */
+  piece?: number
+}
+
+/** AQU-1767: a line's take as its pieces — just itself when it was never cut. */
+function piecesOfTake(cell: CellData, audioId: string): string[] {
+  const ids = selectedPieceIds(cell.attachments, audioId)
+  return ids.length > 0 ? ids : [audioId]
 }
 
 /**
@@ -128,20 +142,27 @@ export function collectPerLineClips(
     if (audioTracks.length === 0) {
       const audioId = cell.selectedAudioId ?? cell.selectedGeneratedVoiceAudioId
       if (!audioId) continue
-      const attachment = cell.attachments?.[audioId]
-      const url = attachment?.url
-      if (!url) continue
-      // AQU-965: validated-only withdrew this take. In THIS deliverable the
-      // omission is the absence of the file — the same shape an unrecorded
-      // line's absence already has — so there is nothing to write and the
-      // line numbering is untouched (it counts every timed line, recorded or
-      // not, so the remaining files keep the numbers they would have had).
-      if (isSilencedForExport(attachment)) continue
-      clips.push({
-        ...base,
-        audioId,
-        url,
-        generated: audioId === cell.selectedGeneratedVoiceAudioId,
+      const pieces = piecesOfTake(cell, audioId)
+      pieces.forEach((pieceId, i) => {
+        const attachment = cell.attachments?.[pieceId]
+        const url = attachment?.url
+        if (!url) return
+        // AQU-965: validated-only withdrew this take. In THIS deliverable the
+        // omission is the absence of the file — the same shape an unrecorded
+        // line's absence already has — so there is nothing to write and the
+        // line numbering is untouched (it counts every timed line, recorded or
+        // not, so the remaining files keep the numbers they would have had).
+        // AQU-1767: the scope marks each piece of a cut take on its own, so a
+        // withdrawn piece drops only its own file and the others keep their
+        // piece numbers.
+        if (isSilencedForExport(attachment)) return
+        clips.push({
+          ...base,
+          audioId: pieceId,
+          url,
+          generated: audioId === cell.selectedGeneratedVoiceAudioId,
+          ...(pieces.length > 1 ? { piece: i + 1 } : {}),
+        })
       })
       continue
     }
@@ -152,21 +173,25 @@ export function collectPerLineClips(
         ? (cell.selectedAudioId ?? cell.selectedGeneratedVoiceAudioId)
         : cell.selectedBySlot?.[track.id]
       if (!audioId) continue
-      const attachment = cell.attachments?.[audioId]
-      if (!attachment?.url) continue
-      // AQU-965, as above: a withdrawn take writes no file, on any track.
-      if (isSilencedForExport(attachment)) continue
-      clips.push({
-        ...base,
-        audioId,
-        url: attachment.url,
-        trackId: track.id,
-        trackName: track.name,
-        // On the default row the pointer names it; on an added track the one
-        // slot holds both kinds, so the take itself has to say.
-        generated: isDefault
-          ? audioId === cell.selectedGeneratedVoiceAudioId
-          : attachment.voiceId != null,
+      const pieces = piecesOfTake(cell, audioId)
+      pieces.forEach((pieceId, i) => {
+        const attachment = cell.attachments?.[pieceId]
+        if (!attachment?.url) return
+        // AQU-965, as above: a withdrawn take writes no file, on any track.
+        if (isSilencedForExport(attachment)) return
+        clips.push({
+          ...base,
+          audioId: pieceId,
+          url: attachment.url,
+          trackId: track.id,
+          trackName: track.name,
+          // On the default row the pointer names it; on an added track the one
+          // slot holds both kinds, so the take itself has to say.
+          generated: isDefault
+            ? audioId === cell.selectedGeneratedVoiceAudioId
+            : attachment.voiceId != null,
+          ...(pieces.length > 1 ? { piece: i + 1 } : {}),
+        })
       })
     }
   }
@@ -232,7 +257,9 @@ export function perLineFileName(
   const fileStem = opts.fileBase ? stripInternalIds(opts.fileBase) : ""
   const stem = fileStem.trim() ? `${characterKey(fileStem)}_` : ""
   const line = String(clip.lineNumber).padStart(4, "0")
-  return `${stem}${opts.langCode}_L${line}_${characterFileKey(clip.character)}.${ext}`
+  // AQU-1767: a cut take's pieces are told apart right after the line number.
+  const piece = clip.piece != null ? `p${clip.piece}` : ""
+  return `${stem}${opts.langCode}_L${line}${piece}_${characterFileKey(clip.character)}.${ext}`
 }
 
 function csvCell(value: string | number | null): string {

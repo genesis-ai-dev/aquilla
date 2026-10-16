@@ -90,6 +90,9 @@ export type EventKind =
   // expressed as an absent field. See the payload doc below.
   | 'cell.audio.trim'
   | 'cell.audio.place'
+  // AQU-1767: cut one dub piece in two at a point in its own audio. Both
+  // pieces share the bytes, stay on the same row, and start unvalidated.
+  | 'cell.audio.cut'
   // Backfill a measured duration onto a take that predates duration capture.
   // Fills only a NULL duration_ms — never selects, never touches url/slot/
   // trims (a re-attach would re-select the clip and plain-assign trims).
@@ -568,6 +571,16 @@ export interface EventPayloads {
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
     laneId?: string
+    /**
+     * AQU-1767 (Sam, 2026-10-14): this clip is born a PIECE of the take
+     * `pieceOf` (the group's root) — how "Remove noise" on a split take keeps
+     * its cuts: the cleaned root is attached first, then each other piece
+     * naming it. Fill-only, like `created_by`: a routine re-attach never names
+     * a group, and cannot move a take into or out of one. The attach's
+     * deselect spares this group, so attaching a piece never unselects its
+     * siblings.
+     */
+    pieceOf?: string
   }
   'cell.audio.select': {
     /** The take to select — or null to leave the slot with NOTHING selected
@@ -630,6 +643,35 @@ export interface EventPayloads {
   'cell.audio.place': {
     audioId: string
     targetOffsetMs: number | null
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
+  }
+  /**
+   * AQU-1767 phase 1: CUT a dub piece in two, at `atMs` — a position in the
+   * clip's OWN audio (the same domain as the trim window), not in the file.
+   *
+   * The projection copies the piece into a new row `newAudioId` over the SAME
+   * bytes (same url), windowed `[atMs, old end]`, and shortens the original to
+   * `[old start, atMs]`. Both stay on this row and in this slot, both stay
+   * selected exactly as the original was, and BOTH START UNVALIDATED (Sam,
+   * 2026-10-12: cutting changes what a reviewer heard). The new row's
+   * `piece_of` names the group's root, so selection treats the pieces as one.
+   *
+   * Refused (a no-op) unless the piece is live, a dub (`role = 'dub'`), has a
+   * known end, and `atMs` lies at least CUT_MIN_PIECE_MS inside its window.
+   * `newAudioId` is minted by the client so the step can be undone (remove it)
+   * and a replay lands on the same row (ON CONFLICT DO NOTHING).
+   */
+  'cell.audio.cut': {
+    audioId: string
+    atMs: number
+    newAudioId: string
+    /** The new (second) piece's permanent name. Absent = the original's. */
+    newLabel?: string
+    /** Optional rename of the first piece in the same step ("Take 3 · 1"). */
+    firstLabel?: string
     /** AQU-1462: see `cell.audio.attach`. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */

@@ -33,10 +33,12 @@ import {
   FolderInput,
   FolderPlus,
   GripVertical,
+  Info,
   Link2,
   LocateFixed,
   Magnet,
   Minus,
+  Scissors,
   MoreHorizontal,
   Plus,
   Users,
@@ -46,6 +48,7 @@ import {
   X,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { canCutAt } from "@/lib/audio/cut-take"
 import { deriveLanes } from "@/lib/timeline/lanes"
 import { deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
 import { isUserAddedLine } from "@/lib/timeline/user-lines"
@@ -58,6 +61,8 @@ import type { PlaybackSource } from "@/lib/audio/playback-source"
 import type { LaneLinkOverlay } from "./CueLinkOverlay"
 import { CueLinkConfirmDialog } from "./CueLinkConfirmDialog"
 import { AddTrackDialog } from "./AddTrackDialog"
+import { RenameTakeDialog } from "./RenameTakeDialog"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { DeleteTrackDialog } from "./DeleteTrackDialog"
 import { trackMenuItems, trackMenuIsEmpty, trackMenuScopes } from "./TrackMenuItems"
 import {
@@ -123,7 +128,7 @@ import { seedAudibility, toggleAudibility, trackAudible, useQueueAudibility } fr
 
 import { isInEditableContext, isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
-import { resolveTargetAudio } from "@/lib/audio/track-audio"
+import { resolveTargetAudio, resolveTargetPieces, type TargetAudioRef } from "@/lib/audio/track-audio"
 import { RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
 import { nextFolderName, nextTrackName } from "@/lib/timeline/track-names"
 import { loadSnapEnabled, saveSnapEnabled } from "@/lib/timeline/snap"
@@ -137,7 +142,7 @@ import { useBatchProgress, canTranscribeCell } from "@/lib/audio/batch-audio"
 import { useOnline } from "@/hooks/useOnline"
 import { TimelineRuler } from "./TimelineRuler"
 import { TimelineLane } from "./TimelineLane"
-import { TargetAudioLane, type TargetAudioItem } from "./TargetAudioLane"
+import { TargetAudioLane, type TakeMenuActions, type TargetAudioItem } from "./TargetAudioLane"
 import { TimelinePlayhead } from "./TimelinePlayhead"
 import { MediaTextHeader, TimelineTimingRow } from "./TimelineChipStrip"
 import {
@@ -212,6 +217,19 @@ export interface TimelineEditorProps {
   onRetimeCue?(cellId: string, startSec: number, endSec: number): void
   /** Round 7: trim a dub chip — complete trim state (undefined clears). */
   onTrimTarget?(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): void
+  /** AQU-1767 phase 1: cut dub takes into independent pieces. `atMs` is a
+   *  position in each take's OWN audio. One call is one user action (one
+   *  history step), however many cuts it carries. Absent = no blade. */
+  onCutTargets?(cuts: { cellId: string; audioId: string; atMs: number }[]): void
+  /**
+   * AQU-1767 (Sam, 2026-10-14): a take's right-click menu. Each absent action
+   * is left out of the menu. `slot` is the take's track's storage slot.
+   */
+  onRegenerateVoice?(cellId: string, slot: string): void
+  onRenameTake?(cellId: string, audioId: string, label: string): void
+  onRemoveTake?(cellId: string, audioId: string): void
+  onVoteTake?(cellId: string, audioId: string, validated: boolean): void
+  voteStateFor?(cellId: string, audioId: string): { canVote: boolean; voted: boolean }
   /** Round 7 (SUB-44): Space — toggle queue playback (playing→pause,
    *  paused→resume, idle→start). The editor claims the app-wide audio
    *  shortcut while mounted so a last-played single cell can't steal Space. */
@@ -631,6 +649,28 @@ const SPEAKER_TOGGLE_KEYS: Record<
 }
 
 const zoomKey = (fileId: string) => `aquilla:timelineZoom:${fileId}`
+
+/** A key typed into a text field is the field's, not the timeline's (S, B). */
+function isTextEntryTarget(target: EventTarget | null): boolean {
+  if (typeof HTMLElement === "undefined" || !(target instanceof HTMLElement)) return false
+  if (target.isContentEditable) return true
+  const tag = target.tagName
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT"
+}
+
+/**
+ * AQU-1767: one lane item per PIECE of a line's take. A take never cut is one
+ * item, exactly as before; a cut take is its pieces, numbered in clip order so
+ * each chip has a stable test id ("…-p2") beside the first's unchanged one.
+ */
+function piecesAsItems(cell: CellData, pieces: readonly TargetAudioRef[]): TargetAudioItem[] {
+  return pieces.map((p, i) => ({
+    cell,
+    kind: p.kind,
+    audioId: p.audioId,
+    ...(pieces.length > 1 ? { pieceIndex: i, pieceCount: pieces.length } : {}),
+  }))
+}
 
 function loadZoom(fileId: string): number {
   try {
@@ -1121,6 +1161,12 @@ export function TimelineEditor({
   virtualIsTransport = false,
   timingLocked = false,
   onTrimTarget,
+  onCutTargets,
+  onRegenerateVoice,
+  onRenameTake,
+  onRemoveTake,
+  onVoteTake,
+  voteStateFor,
   onTogglePlay,
   onRequestLinkVideo,
   onAddLine,
@@ -1225,6 +1271,13 @@ export function TimelineEditor({
   // through toggleAudibility, which merges against the store.
   const audibility = useQueueAudibility()
   const [snapOn, setSnapOn] = useState(loadSnapEnabled)
+  // AQU-1767: the blade. Personal and per-session — a tool in your hand, not a
+  // setting — and off whenever cutting is not possible here.
+  const [bladeOn, setBladeOn] = useState(false)
+  // AQU-1767 (Sam, 2026-10-14): the take a click selected — a line on one
+  // track. S splits it at the playhead. It lapses the moment the selected line
+  // is a different one, and a click on a card or row drops it.
+  const [selectedTake, setSelectedTake] = useState<{ cellId: string; slot: string } | null>(null)
   // AQU-646 stage 2: which folders this person has closed, on THIS file.
   // Personal state — folder membership syncs, but whether a folder is open is
   // where somebody is looking, and syncing that would fold a collaborator's
@@ -2328,13 +2381,11 @@ export function TimelineEditor({
   // media cells — and picking the cell set above already decides that, so the
   // gate was guarding a case that can no longer arise.
   const resolveTarget = resolveTargetAudio
+  // AQU-1767: ONE CHIP PER PIECE. A take cut in two is two selected pieces of
+  // one group; each is drawn, moved, trimmed and approved on its own.
   const targetItems = useMemo<TargetAudioItem[]>(
-    () =>
-      targetSource.flatMap((c) => {
-        const target = resolveTarget(c)
-        return target ? [{ cell: c, kind: target.kind, audioId: target.audioId }] : []
-      }),
-    [targetSource, resolveTarget],
+    () => targetSource.flatMap((c) => piecesAsItems(c, resolveTargetPieces(c))),
+    [targetSource],
   )
   // SUB-51: the complement — sections still waiting for a dub. Their empty
   // space in the Target row offers a record button on hover.
@@ -2412,12 +2463,83 @@ export function TimelineEditor({
     const items: TargetAudioItem[] = []
     const empty: CellData[] = []
     for (const c of cellList) {
-      const target = resolveTargetAudio(c, slot)
-      if (target) items.push({ cell: c, kind: target.kind, audioId: target.audioId })
+      const pieces = resolveTargetPieces(c, slot)
+      if (pieces.length > 0) items.push(...piecesAsItems(c, pieces))
       else empty.push(c)
     }
     return { items, empty }
   }
+
+  // ── AQU-1767: cutting takes ─────────────────────────────────────────────
+  // Free timing lays lines out end to end and computes every position, so a
+  // piece has nowhere of its own to be; cutting waits for phase 4 there.
+  const canCut = Boolean(onCutTargets) && editable && !audioFirst
+  const bladeActive = bladeOn && canCut
+  // AQU-1767 (Sam, 2026-10-14): S splits the SELECTED take at the PLAYHEAD,
+  // and nothing else — "splitting should never take place where the mouse is
+  // hovering. We have the B mode for that." No take selected, or the playhead
+  // not over it: S does nothing.
+  const takeSel = selectedTake && selectedTake.cellId === selectedId ? selectedTake : null
+  const takeSelCellFor = (slot: string) => (takeSel?.slot === slot ? takeSel.cellId : null)
+  function selectedTakeCutAtPlayhead(): { cellId: string; audioId: string; atMs: number } | null {
+    if (!takeSel) return null
+    const sec = displayCurrentSec
+    const items =
+      takeSel.slot === RECORDING_SLOT
+        ? targetItems
+        : tracks
+            .filter((tr) => tr.kind === "audio" && slotForTrack(tr.id) === takeSel.slot)
+            .flatMap((tr) => targetItemsForTrack(tr).items)
+    // A cut take is several chips on its line; the one the playhead is over.
+    for (const item of items) {
+      if (item.cell.id !== takeSel.cellId) continue
+      const att = item.cell.attachments?.[item.audioId]
+      const geom = layout.targetGeom(item.cell, att)
+      if (!geom || geom.usingFallback || sec <= geom.start || sec >= geom.end) continue
+      const atMs = (sec - geom.anchor) * 1000
+      return canCutAt(att, atMs) ? { cellId: item.cell.id, audioId: item.audioId, atMs } : null
+    }
+    return null
+  }
+  const splitAtPlayheadRef = useRef(selectedTakeCutAtPlayhead)
+  splitAtPlayheadRef.current = selectedTakeCutAtPlayhead
+  useEffect(() => {
+    if (!canCut) return
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) return
+      if (isTextEntryTarget(event.target)) return
+      if (event.key === "b" || event.key === "B") {
+        event.preventDefault()
+        setBladeOn((on) => !on)
+      } else if (event.key === "s" || event.key === "S") {
+        const cut = splitAtPlayheadRef.current()
+        if (!cut || !onCutTargets) return
+        event.preventDefault()
+        onCutTargets([cut])
+      } else if (event.key === "Escape") {
+        setBladeOn(false)
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [canCut, onCutTargets])
+  // AQU-1767 (Sam, 2026-10-14): a take's right-click menu, per track slot.
+  const [renamingTake, setRenamingTake] = useState<{ cellId: string; audioId: string; label: string } | null>(null)
+  const takeMenuFor = (slot: string): TakeMenuActions | undefined =>
+    editable
+      ? {
+          ...(onOpenRecording ? { reRecord: (cellId: string) => onOpenRecording(cellId, slot) } : {}),
+          ...(onRegenerateVoice ? { regenerate: (cellId: string) => onRegenerateVoice(cellId, slot) } : {}),
+          ...(onRenameTake
+            ? { rename: (cellId: string, audioId: string, current: string | null) => setRenamingTake({ cellId, audioId, label: current ?? "" }) }
+            : {}),
+          ...(onRemoveTake ? { remove: onRemoveTake } : {}),
+          ...(onVoteTake && voteStateFor ? { vote: onVoteTake, voteState: voteStateFor } : {}),
+        }
+      : undefined
+  const cutOne = canCut && onCutTargets
+    ? (cellId: string, audioId: string, atMs: number) => onCutTargets([{ cellId, audioId, atMs }])
+    : undefined
 
   /**
    * Does this lane have anything its mute button would silence? (AQU-1682)
@@ -2576,9 +2698,13 @@ export function TimelineEditor({
       const { startTime, endTime } = currentCell
       const srcDurationSec =
         typeof startTime === "number" && typeof endTime === "number" ? endTime - startTime : null
-      const item = targetItems.find((t) => t.cell.id === currentCell.id)
-      const geom = item ? layout.targetGeom(item.cell, item.cell.attachments?.[item.audioId]) : null
-      const tgtDurationSec = geom && !geom.usingFallback ? geom.end - geom.start : null
+      // AQU-1767: a split take's length is all its pieces'.
+      const geoms = targetItems
+        .filter((t) => t.cell.id === currentCell.id)
+        .map((t) => layout.targetGeom(t.cell, t.cell.attachments?.[t.audioId]))
+      const tgtDurationSec = geoms.length > 0 && geoms.every((g) => g && !g.usingFallback)
+        ? geoms.reduce((sum, g) => sum + (g!.end - g!.start), 0)
+        : null
       if (srcDurationSec == null && tgtDurationSec == null) return null
       return { kind: "free" as const, srcDurationSec, tgtDurationSec }
     }
@@ -3347,6 +3473,7 @@ export function TimelineEditor({
   // id, and a cue has no row there to scroll to. The table is reached through
   // the cue's LINKS instead, which is the workspace's job.
   const selectCueFromChip = (cueCellId: string) => {
+    setSelectedTake(null)
     setSelectedId(cueCellId)
     onCueActivated?.(cueCellId)
   }
@@ -3359,6 +3486,12 @@ export function TimelineEditor({
     // a batch scope, and scroll-yanking the text table on each ⌘-click would
     // make picking a handful of sections unusable.
     if (!mods) onChipActivated?.(cellId)
+  }
+  /** A card, row or list click selects the LINE, and drops any selected take
+   *  (AQU-1767) — a take is selected only by clicking the take itself. */
+  const selectLine = (cellId: string, mods?: SelectMods) => {
+    setSelectedTake(null)
+    selectFromChip(cellId, mods)
   }
 
   // AQU-928: the batch scope the transcribe row acts on. `selectedIdsInOrder`
@@ -3462,7 +3595,7 @@ export function TimelineEditor({
     selectedId,
     multiSelectedIds,
     editable,
-    onSelect: selectFromChip,
+    onSelect: selectLine,
     onRetime: onRetimeSubtitle,
     // Clean card click → navigate playback to the clip's start (both lanes;
     // untimed chips have no timecode to seek to). SUB-53: "the clip's start"
@@ -3746,17 +3879,22 @@ export function TimelineEditor({
             viewStartSec={viewStartSec}
             viewEndSec={viewEndSec}
             selectedId={selectedId}
+            selectedTakeCellId={takeSelCellFor(RECORDING_SLOT)}
             loadingCellId={loadingCellId}
             missingCellIds={missingCellIds}
             editable={editable}
             masterHonorsTrims={masterHonorsTrims}
             snapEnabled={snapOn && !audioFirst}
             onSelect={selectFromChip}
+            onSelectTake={(cellId) => setSelectedTake({ cellId, slot: RECORDING_SLOT })}
             onSeek={laneProps.onSeek}
             // SUB-53: a chip's position is computed in audio-first, so there
             // is nothing to drag it to. Trimming stays — and re-flows.
             onRetimeTarget={audioFirst ? undefined : onRetimeTarget}
             onTrimTarget={onTrimTarget}
+            bladeActive={bladeActive}
+            onCutTarget={cutOne}
+            takeMenu={takeMenuFor(RECORDING_SLOT)}
             onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, RECORDING_SLOT) : undefined}
             emptyCells={emptyTargets}
             // AQU-646: the mic over a stretch with no cell at all creates the
@@ -3816,15 +3954,20 @@ export function TimelineEditor({
             viewStartSec={viewStartSec}
             viewEndSec={viewEndSec}
             selectedId={selectedId}
+            selectedTakeCellId={takeSelCellFor(slotForTrack(track.id))}
             loadingCellId={loadingCellId}
             missingCellIds={missingCellIds}
             editable={editable}
             masterHonorsTrims={masterHonorsTrims}
             snapEnabled={snapOn && !audioFirst}
             onSelect={selectFromChip}
+            onSelectTake={(cellId) => setSelectedTake({ cellId, slot: slotForTrack(track.id) })}
             onSeek={laneProps.onSeek}
             onRetimeTarget={audioFirst ? undefined : onRetimeTarget}
             onTrimTarget={onTrimTarget}
+            bladeActive={bladeActive}
+            onCutTarget={cutOne}
+            takeMenu={takeMenuFor(slotForTrack(track.id))}
             emptyCells={own.empty}
             onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, slotForTrack(track.id)) : undefined}
             projectId={project?.id ?? null}
@@ -3945,6 +4088,38 @@ export function TimelineEditor({
             )}
           </div>
         )}
+        {/* AQU-646: the playhead is already shifted back by the delay the
+            browser reports, so this does NOT say "there is latency" — it says
+            the part we cannot measure is still there. Shown only on a path
+            slow enough that the reading is untrustworthy, which in practice
+            means Bluetooth. Sam, 2026-10-15: a small amber pill beside the
+            heading (after the timing switch, when there is one), the full
+            message behind its info button — it was a full-width line. */}
+        {outputLatencySec >= HIGH_LATENCY_SEC && (
+          <span
+            data-testid="tl-output-latency-note"
+            className="ms-1 inline-flex items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300"
+          >
+            {t("editor.timeline.bluetoothPill")}
+            <Popover>
+              <PopoverTrigger
+                render={
+                  <button
+                    type="button"
+                    data-testid="tl-output-latency-info"
+                    aria-label={t("editor.timeline.bluetoothPillInfo")}
+                    className="inline-flex rounded-full text-amber-700/80 outline-none hover:text-amber-800 focus-visible:ring-2 focus-visible:ring-amber-500/50 dark:text-amber-300/80 dark:hover:text-amber-200"
+                  />
+                }
+              >
+                <Info className="h-3 w-3" />
+              </PopoverTrigger>
+              <PopoverContent side="bottom" align="start" sideOffset={6} className="w-72 p-3 text-xs leading-relaxed">
+                {t("editor.timeline.outputLatencyNote")}
+              </PopoverContent>
+            </Popover>
+          </span>
+        )}
         <div className="ms-auto flex items-center gap-1.5">
           {/* Meeting 2026-08-05: generated voices default to compressed
               playback; fast connections can opt into the original WAV. Mic
@@ -3972,6 +4147,39 @@ export function TimelineEditor({
               <AudioLines className="h-3.5 w-3.5" />
             </button>
           </AppTooltip>
+          {/* AQU-1767: the blade. (Sam, 2026-10-14: no "cut at the playhead"
+              button — it cut every voice track at once. S splits the one
+              selected take at the playhead instead.) */}
+          {onCutTargets && editable && (
+            <>
+              <AppTooltip
+                content={
+                  audioFirst
+                    ? t("editor.timeline.bladeFreeTiming")
+                    : bladeActive
+                      ? t("editor.timeline.bladeOnTooltip")
+                      : t("editor.timeline.bladeOffTooltip")
+                }
+              >
+                <button
+                  type="button"
+                  aria-label={t("editor.timeline.bladeToggleAria")}
+                  aria-pressed={bladeActive}
+                  data-testid="tl-blade-toggle"
+                  disabled={!canCut}
+                  onClick={() => setBladeOn((on) => !on)}
+                  className={cn(
+                    "inline-flex items-center rounded-md border border-border px-1.5 py-1 disabled:opacity-40",
+                    bladeActive
+                      ? "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300"
+                      : "bg-background text-foreground/70 hover:bg-muted",
+                  )}
+                >
+                  <Scissors className="h-3.5 w-3.5" />
+                </button>
+              </AppTooltip>
+            </>
+          )}
           {/* SUB-53: nothing to snap to when positions are computed. */}
           {!audioFirst && (
           <AppTooltip content={snapOn ? t("editor.timeline.snapOnTooltip") : t("editor.timeline.snapOffTooltip")}>
@@ -4213,21 +4421,6 @@ export function TimelineEditor({
           className="shrink-0 border-b border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground"
         >
           {t("editor.timeline.videoHiddenNote")}
-        </div>
-      )}
-
-      {/* AQU-646: the playhead is already shifted back by the delay the browser
-          reports, so this does NOT say "there is latency" — it says the part we
-          cannot measure is still there. Shown only on a path slow enough that
-          the reading is untrustworthy, which in practice means Bluetooth. Same
-          quiet treatment as the note above: nothing is broken and there is
-          nothing to do about it. */}
-      {outputLatencySec >= HIGH_LATENCY_SEC && (
-        <div
-          data-testid="tl-output-latency-note"
-          className="shrink-0 border-b border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground"
-        >
-          {t("editor.timeline.outputLatencyNote")}
         </div>
       )}
 
@@ -4755,7 +4948,7 @@ export function TimelineEditor({
                       key={c.id}
                       type="button"
                       data-testid={`tl-untimed-${c.id}`}
-                      onClick={() => selectFromChip(c.id)}
+                      onClick={() => selectLine(c.id)}
                       className={cn(
                         "shrink-0 rounded-md border border-dashed border-zinc-400 bg-background px-2 py-1 text-[10px] text-foreground/80 hover:bg-muted dark:border-zinc-600",
                         selectedId === c.id && "ring-2 ring-sky-500",
@@ -4837,6 +5030,17 @@ export function TimelineEditor({
         }
         onConfirm={commitPendingLink}
         onCancel={() => setPendingLink(null)}
+      />
+      {/* AQU-1767 (Sam, 2026-10-14): "Rename…" from a take's right-click menu. */}
+      <RenameTakeDialog
+        open={renamingTake != null}
+        current={renamingTake?.label ?? ""}
+        onCancel={() => setRenamingTake(null)}
+        onConfirm={(label) => {
+          const r = renamingTake
+          setRenamingTake(null)
+          if (r) onRenameTake?.(r.cellId, r.audioId, label)
+        }}
       />
       {/* AQU-646 stage 2. Both are mounted only while track editing is on —
           not merely closed, absent — so a project that never turns the setting

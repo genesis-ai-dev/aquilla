@@ -187,6 +187,25 @@ describe("POST /api/v2/auth/register", () => {
     expect(body.gitlab_token).toBeUndefined()
   })
 
+  it("refuses to self-register an ADMIN_EMAILS address on non-production deploys", async () => {
+    const register = (e: typeof env) =>
+      app.request(
+        "/api/v2/auth/register",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username: "qa-fixture",
+            email: "QA-Admin@local.test",
+            password: "very-secure",
+          }),
+        },
+        e,
+      )
+    const preview = { ...env, ENVIRONMENT: "development", ADMIN_EMAILS: "qa-admin@local.test" }
+    expect((await register(preview)).status).toBe(409)
+  })
+
   it("sends a welcome email on successful registration", async () => {
     const send = vi.fn(
       async (_message: {

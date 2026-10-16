@@ -3,14 +3,15 @@
  *
  * The wall is on when `LANE_READ_WALL` is "1" or "true". Deployed dev and prod
  * set that in wrangler. Local and e2e leave it unset, so every caller still
- * sees every lane. Below project lead, no grant means no target lane — the
+ * sees every lane. Below maintainer, no grant means no target lane — the
  * grant phase of scripts/neon-backfill-lanes.ts has to have been applied in
  * that environment before the workers that set the flag are deployed.
  *
  * A grant is a lane id. The screen shows that lane's name, which may be the
- * language. A grant below Viewer (100) does not reveal a lane. Project lead
- * (500) and above, and platform operators, see every lane (AQU-1795). Source
- * text is not a lane and is never hidden by these rules.
+ * language. A grant below Viewer (100) does not reveal a lane. Maintainer
+ * (600) and above, and platform operators, see every lane. A project lead
+ * sees a target lane only when they hold a grant on it. Source text is not
+ * a lane and is never hidden by these rules.
  */
 
 /** Viewer. A grant below this does not reveal a lane. Matches frontier/roles. */
@@ -18,13 +19,12 @@ const VIEWER = 100
 /**
  * Floor at which the read wall stops hiding lanes.
  *
- * Historically Maintainer (600). AQU-1795 lowered it to project lead (500):
- * a project lead sees every target lane, the same as a maintainer. A
- * contributor or reviewer still sees only the lanes they hold a grant on.
+ * Maintainer (600). AQU-1795 lowered it to project lead (500); that is
+ * reversed. A project lead sees only the target lanes they are granted.
  * The export name is unchanged so every wall check — settings, portfolio,
  * cells, and the sync worker — moves together.
  */
-export const READ_WALL_MAINTAINER = 500
+export const READ_WALL_MAINTAINER = 600
 
 /** `lane` is `lanes.id`, never a language name or code. */
 export interface LaneGrant {

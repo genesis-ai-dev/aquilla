@@ -30,6 +30,7 @@ import { encodeWavPcm16Blobs, toPcm16, WAV_HEADER_BYTES } from "@/lib/audio/wav-
 import { TARGET_RATE } from "@/lib/audio/decode-mono"
 import { audioMimeForExt } from "@/lib/audio/mime"
 import { characterKey } from "@/lib/export/audio-by-character"
+import { isSilencedForExport } from "@/lib/export/audio-validation-scope"
 
 export type AudioAssemblyMode = Exclude<EgressAudioMode, "none">
 
@@ -187,6 +188,15 @@ export async function assembleAudioEntries(args: AudioAssemblyArgs): Promise<Aud
     const attachment = attachedId ? cell.attachments?.[attachedId] : undefined
     if (!attachedId || !attachment?.url) {
       skipped.push({ cellId: cell.id, reason: "no audio" })
+      return
+    }
+    // AQU-965: validated-only withdrew this take. Leaving it out of `resolved`
+    // IS silence in place — every clip is laid on a silent track at its own
+    // timeline second, so the line falls quiet and nothing else moves — and
+    // the manifest says so rather than losing it, which is the transparency
+    // contract this list exists for.
+    if (isSilencedForExport(attachment)) {
+      skipped.push({ cellId: cell.id, reason: "no validated take" })
       return
     }
     const parsed = parseFrontierAudioUrl(attachment.url)

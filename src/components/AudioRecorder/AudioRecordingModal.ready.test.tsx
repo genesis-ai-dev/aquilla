@@ -233,6 +233,42 @@ describe("the selected take, before recording", () => {
     expect(screen.getByRole("slider", { name: "Start of the kept audio" })).toHaveAttribute("aria-readonly", "true")
   })
 
+  // AQU-1767 (Sam, 2026-10-15): a split take is one take. Shown as its first
+  // piece with the rest washed out, it read as the other piece being dropped.
+  it("shows a split take whole: its name, its full length, the cut as a dashed line", () => {
+    attachmentsState.byCellId = entry({
+      selectedAudioId: "audio-c1-1.wav",
+      attachments: {
+        "audio-c1-1.wav": take("audio-c1-1.wav", { label: "Take 1 · 1", durationMs: 4000, trimEndMs: 2000 }),
+        "audio-c1-2.wav": take("audio-c1-2.wav", { label: "Take 1 · 2", durationMs: 4000, trimStartMs: 2000, pieceOf: "audio-c1-1.wav" }),
+      },
+    })
+    render(modalEl())
+    expect(screen.getByTestId("rec-ready-take")).toHaveTextContent("Take 1 · 4.0s")
+    expect(screen.getByText("0:04.0")).toBeInTheDocument()
+    // Nothing of the take is washed out, and it plays end to end.
+    expect(screen.queryByTestId("rec-ready-waveform-fade-end")).toBeNull()
+    expect(screen.queryByTestId("rec-ready-waveform-fade-gap")).toBeNull()
+    expect(player.trims.at(-1)).toEqual([0, null])
+    const cut = screen.getByRole("slider", { name: "Cut" })
+    expect(cut).toHaveAttribute("aria-readonly", "true")
+    expect(cut.querySelector("[data-dashed='true']")).not.toBeNull()
+  })
+
+  it("names and measures a split take the same whichever piece is selected", () => {
+    attachmentsState.byCellId = entry({
+      selectedAudioId: "audio-c1-2.wav",
+      attachments: {
+        "audio-c1-1.wav": take("audio-c1-1.wav", { label: "Take 1 · 1", durationMs: 4000, trimEndMs: 2000 }),
+        "audio-c1-2.wav": take("audio-c1-2.wav", { label: "Take 1 · 2", durationMs: 4000, trimStartMs: 2500, pieceOf: "audio-c1-1.wav" }),
+      },
+    })
+    render(modalEl())
+    // 2.0s + 1.5s; the half second trimmed off between them does not play.
+    expect(screen.getByTestId("rec-ready-take")).toHaveTextContent("Take 1 · 3.5s")
+    expect(screen.getByTestId("rec-ready-waveform-fade-gap")).toBeInTheDocument()
+  })
+
   it("falls back to the generated voice when the recording slot holds no take", () => {
     attachmentsState.byCellId = entry({
       selectedGeneratedVoiceAudioId: "gen-c1-1.wav",

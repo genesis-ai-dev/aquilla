@@ -3,9 +3,10 @@ import { ROLE } from "@/lib/frontier/roles"
 import { laneChoiceReady, needsLaneChoice, toMemberLaneAccess } from "./lane-access-choice"
 
 describe("lane access choice", () => {
-  it("asks only a below-lead role when the project has a target lane", () => {
+  it("asks a project lead, and not a maintainer, when the project has a target lane", () => {
     expect(needsLaneChoice(ROLE.CONTRIBUTOR, 2)).toBe(true)
-    expect(needsLaneChoice(ROLE.PROJECT_LEAD, 2)).toBe(false)
+    expect(needsLaneChoice(ROLE.PROJECT_LEAD, 2)).toBe(true)
+    expect(needsLaneChoice(ROLE.MAINTAINER, 2)).toBe(false)
     expect(needsLaneChoice(ROLE.CONTRIBUTOR, 0)).toBe(false)
   })
 

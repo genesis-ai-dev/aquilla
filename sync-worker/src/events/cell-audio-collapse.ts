@@ -37,6 +37,8 @@ interface AudioRowRaw {
   created_by?: string | null
   /** Who has validated THIS take, newest vote first. Joined in by the route. */
   validators?: string[]
+  /** AQU-1767: the take this row was cut from (its group's root), or null. */
+  piece_of?: string | null
 }
 
 export interface AttachmentOut {
@@ -86,6 +88,13 @@ export interface AttachmentOut {
    * must never be treated as a match for the current viewer.
    */
   recordedBy: string | null
+  /**
+   * AQU-1767: the take this one was CUT from — its piece group's root — or
+   * null for a whole take and for a cut's first piece (which IS the root).
+   * Group key = `pieceOf ?? audioId`. Selection is per group: when one piece
+   * of a group is selected, every live piece of it is.
+   */
+  pieceOf: string | null
 }
 
 /**
@@ -135,6 +144,7 @@ export type { AudioRowRaw }
 /** Fold the file's rows into the per-cell response body. */
 export function collapseCellAudioRows(rows: readonly AudioRowRaw[]): Record<string, CellAudioOut> {
   const cells: Record<string, CellAudioOut> = {}
+  const rowsById = new Map<string, AudioRowRaw>()
   for (const r of rows) {
     let entry = cells[r.cell_id]
     if (!entry) {
@@ -167,6 +177,7 @@ export function collapseCellAudioRows(rows: readonly AudioRowRaw[]): Record<stri
       validators: normalizeValidators(r.validators),
       role: r.role === "source" ? "source" : "dub",
       recordedBy: r.created_by ?? null,
+      pieceOf: r.piece_of ?? null,
     }
     if (r.timings_json) {
       try {
@@ -175,7 +186,23 @@ export function collapseCellAudioRows(rows: readonly AudioRowRaw[]): Record<stri
         // ignore malformed timings — playback degrades to no karaoke
       }
     }
-    if (r.selected === 1) entry.selectedBySlot[r.slot] = r.audio_id
+    if (r.selected === 1) {
+      // AQU-1767: a cut take keeps EVERY live piece selected, so a slot can
+      // hold several selected rows. The pointer names the group by its EARLIEST
+      // piece in the clip — "the take that plays" first — and `selectedPieces`
+      // on the client expands it back to all of them. Without this the newest
+      // piece (the last row in created order) would win by accident.
+      const prior = entry.selectedBySlot[r.slot]
+      const priorRow = prior ? rowsById.get(`${r.cell_id}\u0000${prior}`) : undefined
+      // Two selected rows from DIFFERENT groups is not a state the projection
+      // produces; if old data holds one, the last row still wins as before.
+      const sameGroup =
+        priorRow != null && (priorRow.piece_of ?? priorRow.audio_id) === (r.piece_of ?? r.audio_id)
+      if (!sameGroup || Number(r.trim_start_ms ?? 0) < Number(priorRow.trim_start_ms ?? 0)) {
+        entry.selectedBySlot[r.slot] = r.audio_id
+      }
+    }
+    rowsById.set(`${r.cell_id}\u0000${r.audio_id}`, r)
   }
 
   // The two named pointers, derived from the map rather than written beside it.

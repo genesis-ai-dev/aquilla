@@ -19,7 +19,7 @@
 // a recording in it".
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 
 import { ExportDialog } from "./ExportDialog"
 import type { CellData } from "@/hooks/useCells"
@@ -99,7 +99,8 @@ describe("the audio export finds the takes wherever they live", () => {
     chooseAudioByCharacter()
     // The preview counts what will be exported, from the same array the export
     // reads — so it is the cheapest proof of which one was chosen.
-    expect(await screen.findByText(/2 lines/)).toBeInTheDocument()
+    expect(await within(await screen.findByTestId("export-character-preview")).findByText(/2 lines/))
+      .toBeInTheDocument()
   })
 
   it("uses the file's OWN cells when there is no cue sibling", async () => {
@@ -108,7 +109,8 @@ describe("the audio export finds the takes wherever they live", () => {
       <ExportDialog {...BASE_PROPS} cells={[recorded("s1", 5)]} audioCells={undefined} />,
     )
     chooseAudioByCharacter()
-    expect(await screen.findByText(/1 line/)).toBeInTheDocument()
+    expect(await within(await screen.findByTestId("export-character-preview")).findByText(/1 line/))
+      .toBeInTheDocument()
   })
 
   it("uses the file's own cells when the sibling is still loading", async () => {
@@ -116,7 +118,8 @@ describe("the audio export finds the takes wherever they live", () => {
     // the hook returns [] for a sibling whose cues have not arrived yet.
     render(<ExportDialog {...BASE_PROPS} cells={[recorded("s1", 5)]} audioCells={[]} />)
     chooseAudioByCharacter()
-    expect(await screen.findByText(/1 line/)).toBeInTheDocument()
+    expect(await within(await screen.findByTestId("export-character-preview")).findByText(/1 line/))
+      .toBeInTheDocument()
   })
 
   it("refuses honestly when nothing anywhere has a recording", async () => {
@@ -139,7 +142,8 @@ describe("the audio export finds the takes wherever they live", () => {
     )
     chooseAudioByCharacter()
     expect(screen.queryByText(/nothing to export/i)).not.toBeInTheDocument()
-    expect(await screen.findByText(/1 line/)).toBeInTheDocument()
+    expect(await within(await screen.findByTestId("export-character-preview")).findByText(/1 line/))
+      .toBeInTheDocument()
   })
 })
 
@@ -218,7 +222,8 @@ describe("the second audio shape", () => {
     )
     fireEvent.click(screen.getByText("Audio by line"))
     expect(await screen.findByText("JESUS")).toBeVisible()
-    expect(await screen.findByText(/1 line/)).toBeInTheDocument()
+    expect(await within(await screen.findByTestId("export-character-preview")).findByText(/1 line/))
+      .toBeInTheDocument()
   })
 
   it("refuses honestly when there is nothing recorded", async () => {

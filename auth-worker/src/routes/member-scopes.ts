@@ -294,9 +294,10 @@ memberScopes.put(
       .first<{ id: string; created_by: number; org_id: number | null }>()
     if (!projectRow) return c.json({ error: "project not found" }, 404)
 
-    // Leads must stay unscoped: reject scoping any member whose EFFECTIVE role
-    // is at or above PROJECT_LEAD (500). Scopes are for contributor/reviewer.
-    // An empty replace-set (clearing) is always allowed regardless of role.
+    // Maintainer and above see every lane through the wall, so a scope list
+    // would not change what they can read. A project lead can be limited to
+    // the lanes they are granted. An empty replace-set (clearing) is always
+    // allowed.
     if (scopes.length > 0) {
       const effectiveMembers = await listEffectiveProjectMembers(
         c.env,
@@ -305,9 +306,9 @@ memberScopes.put(
         projectRow.created_by,
       )
       const target = effectiveMembers.find((m) => m.userId === targetUserId)
-      if (target && target.roleLevel >= ROLE.PROJECT_LEAD) {
+      if (target && target.roleLevel >= ROLE.MAINTAINER) {
         return c.json(
-          { error: "scopes are for contributor/reviewer roles" },
+          { error: "scopes are for roles below maintainer" },
           400,
         )
       }

@@ -141,15 +141,16 @@ afterEach(() => {
 })
 
 describe("settings writes behind the lane read wall (AQU-1750)", () => {
-  it("a project lead sees every target lane; a contributor still sees only grants (AQU-1795)", async () => {
+  it("a project lead sees only granted lanes; a lead with no grant sees none", async () => {
     await seed()
     env.LANE_READ_WALL = "1"
     const lead = await getSettings("dan")
-    expect(lead.settings.targetLanguage).toBe("French")
-    expect(lead.settings.targetLanes).toEqual(["de", "es"])
-    expect(targetLaneIds(lead).sort()).toEqual(["ln-de", "ln-es", "ln-main"])
+    expect(lead.settings.targetLanguage).toBe("")
+    expect(lead.settings.targetLanes).toEqual(["es"])
+    expect(targetLaneIds(lead)).toEqual(["ln-es"])
     const ungrantedLead = await getSettings("erin")
-    expect(targetLaneIds(ungrantedLead).sort()).toEqual(["ln-de", "ln-es", "ln-main"])
+    expect(ungrantedLead.settings.targetLanguage).toBe("")
+    expect(targetLaneIds(ungrantedLead)).toEqual([])
 
     const contributor = await getSettings("carla")
     expect(contributor.settings.targetLanguage).toBe("")
@@ -223,9 +224,9 @@ describe("settings writes behind the lane read wall (AQU-1750)", () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as SettingsBody
     expect(body.settings).toEqual({ ...(await getSettings("dan")).settings })
-    expect(body.settings.targetLanguage).toBe("French")
-    expect(body.settings.targetLanes).toEqual(["de", "es"])
-    expect(targetLaneIds(body).sort()).toEqual(["ln-de", "ln-es", "ln-main"])
+    expect(body.settings.targetLanguage).toBe("")
+    expect(body.settings.targetLanes).toEqual(["es"])
+    expect(targetLaneIds(body)).toEqual(["ln-es"])
   })
 
   it("the 409 body is filtered like the GET, and the retry built on it loses nothing", async () => {
@@ -240,10 +241,10 @@ describe("settings writes behind the lane read wall (AQU-1750)", () => {
     const res = await patchSettings("dan", { ...clientBody(seen.settings), ...edit }, 0)
     expect(res.status).toBe(409)
     const body = (await res.json()) as { current: SettingsBody }
-    expect(body.current.settings.targetLanguage).toBe("French")
-    expect(body.current.settings.targetLanes).toEqual(["de", "es"])
-    expect(body.current.settings.archivedLanes).toEqual(["de"])
-    expect(targetLaneIds(body.current).sort()).toEqual(["ln-de", "ln-es", "ln-main"])
+    expect(body.current.settings.targetLanguage).toBe("")
+    expect(body.current.settings.targetLanes).toEqual(["es"])
+    expect(body.current.settings.archivedLanes).toEqual([])
+    expect(targetLaneIds(body.current)).toEqual(["ln-es"])
     expect(await storedSettings()).toEqual(STORED)
 
     const retry = await patchSettings("dan", { ...clientBody(body.current.settings), ...edit }, body.current.version)

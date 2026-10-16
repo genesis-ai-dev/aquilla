@@ -129,10 +129,25 @@ export interface CodexCellAttachment {
   validators?: string[];
   role?: "dub" | "source";
   recordedBy?: string | null;
+  /** AQU-1767: the take this one was cut from (its piece group's root). */
+  pieceOf?: string | null;
   /** AQU-646 round 8: the take's permanent display name ("Take 3", or a
    *  rename). Carried so the Recording tab can head an added-track take with
    *  its own name rather than its track id. */
   label?: string | null;
+  /**
+   * AQU-965: this take was withdrawn from the export in flight, for want of
+   * validation. Set only on the COPIES an export's scoping step makes
+   * (`scopeAudioCellsForExport`) and never on a stored attachment or on
+   * anything a read path produces, so no surface outside an export in progress
+   * ever sees it.
+   *
+   * It marks rather than removes because what withdrawing means differs per
+   * deliverable — missing from the per-line zip, silence in place in a mixed
+   * or chapter track — and the url, `durationMs` and trim window have to
+   * survive for the chapter stitch to size the gap it writes.
+   */
+  silencedForExport?: true;
 }
 
 // Per-word timing for karaoke / forced-alignment / ASR output. Character

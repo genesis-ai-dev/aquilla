@@ -5,7 +5,7 @@
 //     someone else's needs project_lead (500+).
 //   * PUT floors — replace-set requires project_lead (500+).
 //   * Replace-set semantics — PUT overwrites, empty clears.
-//   * The 500+-unscopable rule — scoping a lead/maintainer/owner is a 400.
+//   * Maintainer and above stay unscoped. A project lead can be lane-scoped.
 //   * The sync-token `scopes` claim — included when the user has scope rows,
 //     OMITTED entirely when they don't.
 
@@ -23,12 +23,13 @@ interface TokenClaims {
 }
 
 // user 1 = owner (700), user 2 = contributor (400), user 3 = lead (500),
-// user 4 = reviewer (300).
+// user 4 = reviewer (300), user 6 = maintainer (600).
 async function seedProject(): Promise<void> {
   await seedUser(1, "owner")
   await seedUser(2, "carol") // contributor
   await seedUser(3, "lead")
   await seedUser(4, "rev") // reviewer
+  await seedUser(6, "mina") // maintainer
   await env.AQUILLA_PG.prepare(
     "INSERT INTO projects (id, name, org_id, created_by) VALUES ('proj-s', 'Scopes', NULL, 1)",
   ).run()
@@ -40,6 +41,9 @@ async function seedProject(): Promise<void> {
   ).run()
   await env.AQUILLA_PG.prepare(
     "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj-s', 4, 300, 1)",
+  ).run()
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj-s', 6, 600, 1)",
   ).run()
 }
 
@@ -254,13 +258,19 @@ describe("AQU-581 member-scopes — `me` is GET-only", () => {
   })
 })
 
-describe("AQU-553 member-scopes — leads must stay unscoped", () => {
-  it("400s scoping a member whose role is >= 500", async () => {
+describe("member-scopes — maintainer and above stay unscoped", () => {
+  it("scopes a project lead onto a lane", async () => {
     const jwt = await jwtFor("owner")
-    const res = await putScopes(jwt, 3, [{ kind: "lane", value: "es" }]) // user 3 = lead 500
+    const res = await putScopes(jwt, 3, [{ kind: "lane", value: "es" }])
+    expect(res.status).toBe(200)
+  })
+
+  it("400s scoping a maintainer", async () => {
+    const jwt = await jwtFor("owner")
+    const res = await putScopes(jwt, 6, [{ kind: "lane", value: "es" }])
     expect(res.status).toBe(400)
     expect(await res.json()).toEqual({
-      error: "scopes are for contributor/reviewer roles",
+      error: "scopes are for roles below maintainer",
     })
   })
 

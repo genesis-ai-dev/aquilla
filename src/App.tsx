@@ -96,6 +96,11 @@ const OrgAccessPage = lazy(() =>
 const OrgAccessAuditPage = lazy(() =>
   import("@/pages/OrgAccessAuditPage").then((m) => ({ default: m.OrgAccessAuditPage })),
 )
+// AQU-1958: org-wide comments view — the project Comments page's list across
+// every project in the org the caller can see.
+const OrgCommentsPage = lazy(() =>
+  import("@/pages/OrgCommentsPage").then((m) => ({ default: m.OrgCommentsPage })),
+)
 const MembersPage = lazy(() =>
   import("@/pages/MembersPage").then((m) => ({ default: m.MembersPage })),
 )
@@ -427,6 +432,7 @@ function AppRoutes() {
           />
           <Route path="members" element={<OrgLazyRoute><MembersPage /></OrgLazyRoute>} />
           <Route path="members/matrix" element={<OrgLazyRoute><MembersPage /></OrgLazyRoute>} />
+          <Route path="comments" element={<OrgLazyRoute><OrgCommentsPage /></OrgLazyRoute>} />
           <Route path="access" element={<OrgLazyRoute><OrgAccessPage /></OrgLazyRoute>} />
           <Route path="access-audit" element={<OrgLazyRoute><OrgAccessAuditPage /></OrgLazyRoute>} />
           <Route path="settings" element={<OrgLazyRoute><Settings /></OrgLazyRoute>} />

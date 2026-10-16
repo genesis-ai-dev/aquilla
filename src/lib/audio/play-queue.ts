@@ -7,14 +7,16 @@
 import { useMemo, useSyncExternalStore } from "react"
 import type { CellData } from "@/hooks/useCells"
 import { fetchCellAudio, getCellAudioStreamUrl, parseFrontierAudioUrl, audioIdSeededWith, probeCellAudioPresent } from "./upload"
-import { activeTargetForCell, resolveTargetAudio, sourceClipAudioForCell } from "./track-audio"
+import { activeTargetForCell, resolveTargetAudio, resolveTargetPieces, sourceClipAudioForCell, type TargetAudioRef } from "./track-audio"
 import { isDefaultTrackSlot, RECORDING_SLOT, slotAudible } from "@/lib/timeline/track-slots"
+import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 import { effectiveAttachmentDurationMs, targetChipGeom, targetDueSec } from "@/lib/timeline/lane-timing"
 import { hasTiming, sortByLens } from "@/lib/timeline/derive"
 import { buildProgramme, slotAtProgrammeSec, type Programme, type ProgrammeSlot } from "@/lib/timeline/programme"
 import type { AudioTimingMode } from "@/lib/parsers/types"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
+import { joinedClip, seekableClip, tailCutNow } from "./tail-cut"
 import { preferredPlaybackExt } from "./lossless-sibling"
 import { getAudioQualityPref, type AudioQuality } from "@/lib/store/audio-quality-pref"
 import { audioMimeForExt } from "./mime"
@@ -347,6 +349,8 @@ interface OverlayEntry {
   url: string | null
   /** Trim end on the CLIP's clock; null = play to natural end. */
   stopAtClipSec: number | null
+  /** AQU-1767: dubbing's timer aimed at `stopAtClipSec`, between timeupdate ticks. */
+  endStopTimer?: ReturnType<typeof setTimeout> | null
 }
 
 const overlayPool: OverlayEntry[] = []
@@ -381,7 +385,14 @@ function overlayCapacity(): number {
 /** The (cell, slot) pairs currently sounding. A cell alone is not enough: two
  *  takes on one line, on different tracks, are the point of multi-track. */
 function soundingKeys(): ReadonlySet<string> {
-  return new Set(overlayPool.map((e) => `${e.cellId}\u0000${e.slot}`))
+  // AQU-1767: each entry answers for its track AND for its own piece, so a cut
+  // line's second piece is not mistaken for the first one still ringing.
+  return new Set(overlayPool.flatMap((e) => [`${e.cellId}\u0000${e.slot}`, overlayPieceKey(e.cellId, e.slot, e.audioId)]))
+}
+
+/** AQU-1767: one PIECE of a cut take on one track. */
+export function overlayPieceKey(cellId: string, slot: string, audioId: string): string {
+  return `${cellId}\u0000${slot}\u0000${audioId}`
 }
 
 export function overlayKey(cellId: string, slot: string): string {
@@ -452,11 +463,16 @@ const coordinatorController: ActiveAudioController = {
 function removeOverlayEntry(entry: OverlayEntry): void {
   const i = overlayPool.indexOf(entry)
   if (i >= 0) overlayPool.splice(i, 1)
+  if (entry.endStopTimer != null) {
+    clearTimeout(entry.endStopTimer)
+    entry.endStopTimer = null
+  }
   const el = entry.element
   if (el) {
     el.onended = null
     el.onerror = null
     el.ontimeupdate = null
+    el.onplaying = null
     el.onloadedmetadata = null
     el.pause()
     el.src = ""
@@ -470,6 +486,7 @@ function removeOverlayEntry(entry: OverlayEntry): void {
 
 function disposeAllOverlays(): void {
   while (overlayPool.length > 0) removeOverlayEntry(overlayPool[overlayPool.length - 1])
+  disposeDubStash()
 }
 
 function disposeCurrent(): void {
@@ -581,6 +598,8 @@ interface ResolvedAudioSrc {
   src: string
   /** Object URL to revoke on dispose (blob playback only). */
   objectUrl: string | null
+  /** AQU-1767: the bytes behind a cached blob, so a trimmed dub can be cut to end at its trim. */
+  bytes?: Uint8Array
   /** True when src is an authenticated streaming URL — on media error the
    *  queue retries once via the full-bytes blob path. */
   streaming: boolean
@@ -663,7 +682,7 @@ async function resolveAudioSrc(
     const url = URL.createObjectURL(
       new Blob([cached as BlobPart], { type: audioMimeForExt(frontier.ext) }),
     )
-    return { src: url, objectUrl: url, streaming: false, frontier, swapped }
+    return { src: url, objectUrl: url, streaming: false, frontier, swapped, bytes: cached }
   }
   const streamUrl = await getCellAudioStreamUrl({
     projectId,
@@ -675,6 +694,79 @@ async function resolveAudioSrc(
   if (streamUrl) return { src: streamUrl, objectUrl: null, streaming: true, frontier, swapped }
   const url = await fetchFullBlobUrl(frontier, projectId, fileId, session, swapped)
   return { src: url, objectUrl: url, streaming: false, frontier, swapped }
+}
+
+/**
+ * AQU-1767: a split webm take's other pieces made seekable ahead of their turn
+ * (seekableClip caches them), so none waits for a decode when it is due. The
+ * bytes are fetched for it when this piece was streamed.
+ */
+function warmSplitPieces(
+  cell: CellData,
+  firedId: string,
+  audioId: string,
+  ext: string,
+  bytes: Uint8Array | undefined,
+  ctx: PlayContext,
+): void {
+  const others = selectedPieceIds(cell.attachments, firedId).filter((id) => id !== firedId)
+  if (others.length === 0) return
+  const ends = others.map((id) => {
+    const ms = cell.attachments?.[id]?.trimEndMs
+    return ms != null && Number.isFinite(ms) ? ms / 1000 : null
+  })
+  const warm = (b: Uint8Array) => { for (const end of ends) void seekableClip(audioId, ext, b, end) }
+  if (bytes) { warm(bytes); return }
+  void fetchCellAudio({
+    projectId: ctx.projectId, fileId: cell.fileId, audioId, ext,
+    getSyncToken: audioSyncTokenFetcherForSession(ctx.session),
+  }).then(warm, () => { /* they will be made when due */ })
+}
+
+/**
+ * AQU-1767: the take Free timing plays for a line — its FIRST piece in the
+ * recording, which names the take for a split one (buildProgramme reads the
+ * same), so the pool entry, the prefetch and the reconcile all agree.
+ */
+function progTargetFor(cell: CellData): TargetAudioRef | null {
+  return resolveTargetPieces(cell)[0] ?? null
+}
+
+/** Which pieces a slot's joined clip holds, for matching a prefetched one. */
+function progJoinKey(slot: ProgrammeSlot): string {
+  return slot.targetPieces?.map((p) => `${p.audioId}@${p.start}-${p.end}`).join("|") ?? ""
+}
+
+/**
+ * AQU-1767 (Sam, 2026-10-15): a split take for Free timing — its pieces'
+ * audio joined into one clip, played as one take. Built from the on-device
+ * bytes, or from a full download written through to the cache.
+ */
+async function resolveJoinedSrc(
+  url: string,
+  pieces: readonly { start: number; end: number }[],
+  projectId: string,
+  fileId: string,
+  session: FrontierSession,
+): Promise<ResolvedAudioSrc> {
+  const frontier = parseFrontierAudioUrl(url)
+  if (!frontier) throw new Error("Couldn't play this take's pieces")
+  if (!session.jwt) throw new Error("Sign in to play audio")
+  let bytes = await audioCacheGet(frontier.audioId, frontier.ext)
+  if (!bytes) {
+    bytes = await fetchCellAudio({
+      projectId,
+      fileId,
+      audioId: frontier.audioId,
+      ext: frontier.ext,
+      getSyncToken: audioSyncTokenFetcherForSession(session),
+    })
+    void audioCachePut(frontier.audioId, frontier.ext, bytes)
+  }
+  const joined = await joinedClip(bytes, frontier.ext, pieces)
+  if (!joined) throw new Error("Couldn't play this take's pieces")
+  const objectUrl = URL.createObjectURL(joined)
+  return { src: objectUrl, objectUrl, streaming: false, frontier, swapped: false }
 }
 
 // ── Programme transport (SUB-53, audio-first only) ──────────────────────────
@@ -1383,7 +1475,7 @@ async function progPlaySlot(
   pendingDubs = []
   pendingEarlyDubs = [] // belt-and-braces: dubbing-only state, dead in audio-first
 
-  const target = slot.targetWindow ? resolveTargetAudio(cell) : null
+  const target = slot.targetWindow ? progTargetFor(cell) : null
   const dubDue = Boolean(slot.targetWindow && target && into < slot.targetLenSec)
   const sourceDue = Boolean(slot.sourceWindow && into < slot.sourceLenSec)
 
@@ -1735,6 +1827,14 @@ export type TargetOverlayPlan =
       /** Seek semantics: clear the pool first (an earlier section's
        *  overhanging tail does NOT resurrect on seek — documented rule). */
       exclusive: boolean
+      /** AQU-1767: the piece after this one, so its player is made and loaded
+       *  while this one plays — a player made at its due time starts late
+       *  (Safari takes ~200ms to sound a fresh element). */
+      nextPiece?: { audioId: string; url: string; startAtClipSec: number; stopAtClipSec: number | null }
+      /** AQU-1767: when this line's take was CUT, the start (file seconds) of
+       *  the piece after this one — armed as soon as this one fires, so the
+       *  next piece sounds even under a master that only re-plans on arms. */
+      nextDueSec?: number
     }
   | { kind: "arm"; cellId: string; dueSec: number; overlay: "keep" | "silence" }
 
@@ -1799,11 +1899,23 @@ export function planTargetOverlay(
   if (!cell || !target || (needsSourceClip && !sourceClipAudioForCell(cell))) {
     return reason === "seek" ? { kind: "silence" } : { kind: "keep" }
   }
+  // AQU-1767: a take CUT into pieces sounds piece by piece. The one that
+  // matters now is the first whose audible end is still ahead of the clock;
+  // the piece after it is armed when it fires (`nextDueSec`).
+  const pieces = resolveTargetPieces(cell, isDefaultSlot ? undefined : slot)
+    .map((p) => ({ ref: p, geom: targetChipGeom(cell, cell.attachments?.[p.audioId]) }))
+    .sort((a, b) => (a.geom?.start ?? 0) - (b.geom?.start ?? 0))
+  const cut = pieces.length > 1
+  const currentIdx = cut ? pieces.findIndex((p) => (p.geom?.end ?? Infinity) > masterSec) : 0
+  if (currentIdx < 0) return reason === "seek" ? { kind: "silence" } : { kind: "keep" }
+  const piece = cut ? pieces[currentIdx].ref : target
+  const nextDueSec = cut ? pieces[currentIdx + 1]?.geom?.start : undefined
   // (cell, slot), not cell: two takes on ONE line, on DIFFERENT tracks, are
   // the point of multi-track — suppressing the second is what this key change
-  // exists to stop.
-  if (reason === "advance" && sounding.has(overlayKey(cell.id, slot))) return { kind: "keep" }
-  const att = cell.attachments?.[target.audioId]
+  // exists to stop. A cut line asks after its own PIECE (AQU-1767).
+  const soundingKey = cut ? overlayPieceKey(cell.id, slot, piece.audioId) : overlayKey(cell.id, slot)
+  if (reason === "advance" && sounding.has(soundingKey)) return { kind: "keep" }
+  const att = cell.attachments?.[piece.audioId]
   const geom = targetChipGeom(cell, att)
   const dueSec = geom?.start ?? cell.startTime ?? 0
   if (masterSec < dueSec) {
@@ -1820,11 +1932,22 @@ export function planTargetOverlay(
     kind: "fire",
     cellId: cell.id,
     slot,
-    audioId: target.audioId,
-    url: target.url,
+    audioId: piece.audioId,
+    url: piece.url,
     startAtClipSec: trimStartSec + intoDubSec,
     stopAtClipSec: geom?.trimEndSec ?? null,
     exclusive: reason === "seek",
+    ...(nextDueSec != null ? { nextDueSec } : {}),
+    ...(cut && pieces[currentIdx + 1]
+      ? {
+          nextPiece: {
+            audioId: pieces[currentIdx + 1].ref.audioId,
+            url: pieces[currentIdx + 1].ref.url,
+            startAtClipSec: pieces[currentIdx + 1].geom?.trimStartSec ?? 0,
+            stopAtClipSec: pieces[currentIdx + 1].geom?.trimEndSec ?? null,
+          },
+        }
+      : {}),
   }
 }
 
@@ -1944,6 +2067,11 @@ function applyTargetOverlay(
   }
   pendingDubs = others
   executeFire(plan, opts)
+  // AQU-1767: the next piece of a cut take, armed now — under the queue master
+  // nothing else would ask for it before the line ends.
+  if (plan.nextDueSec != null) {
+    pendingDubs = [...pendingDubs, { cellId: plan.cellId, slot, dueSec: plan.nextDueSec }]
+  }
 }
 
 /**
@@ -2013,7 +2141,17 @@ function executeFire(
     stopAtClipSec: plan.stopAtClipSec,
   }
   overlayPool.push(entry)
-  const startAtClipSec = plan.startAtClipSec
+  let startAtClipSec = plan.startAtClipSec
+  const firedAtMs = performance.now()
+  // AQU-1767: the piece after this one, made and loaded while this one plays.
+  stockNextPiece(plan, cell, ctx)
+  // This piece's own player, made while the one before it played: adopted
+  // ready, so it sounds on time.
+  const stashed = takeStashedDub(plan)
+  if (stashed) {
+    wireOverlayElement(entry, stashed, startAtClipSec, { autostart: true })
+    return
+  }
   void (async () => {
     let resolved: ResolvedAudioSrc
     try {
@@ -2031,8 +2169,152 @@ function executeFire(
       if (resolved.objectUrl) URL.revokeObjectURL(resolved.objectUrl)
       return
     }
+    // AQU-1767: a trimmed dub plays bytes that END at its trim end, so it stops
+    // there by itself, however busy the page is; the timer stays as the
+    // fallback for a clip that could not be cut (streamed, or not yet decoded).
+    // A dub that must start partway into a clip that states no length (a
+    // webm) gets a WAV of it first, or it could not be seeked and would play
+    // from the recording's head (Sam's walk: a split take's later pieces).
+    if (timingMode !== "audioFirst" && resolved.frontier) {
+      const ext = resolved.frontier.ext
+      const mustSeek = startAtClipSec > 0.05 && ext.toLowerCase() !== "wav"
+      // The take's other pieces will want the same, moments from now: start
+      // on them while this one plays, so they are ready when they are due.
+      if (ext.toLowerCase() !== "wav") warmSplitPieces(cell, plan.audioId, resolved.frontier.audioId, ext, resolved.bytes, ctx)
+      resolved = await prepareDubClip(resolved, startAtClipSec, plan.stopAtClipSec, cell, ctx)
+      if (!overlayPool.includes(entry)) {
+        if (resolved.objectUrl) URL.revokeObjectURL(resolved.objectUrl)
+        return
+      }
+      // The time that took, made up: the clock ran on while the clip was got
+      // ready, so the dub joins where the line is now, not where it was.
+      if (mustSeek && (progRunning() || (currentAudio && !currentAudio.paused) || externalDubsRunning())) {
+        const lateSec = ((performance.now() - firedAtMs) / 1000) * (progress.rate || 1)
+        startAtClipSec = plan.stopAtClipSec != null ? Math.min(startAtClipSec + lateSec, plan.stopAtClipSec) : startAtClipSec + lateSec
+      }
+    }
     wireOverlayElement(entry, { resolved }, startAtClipSec, { autostart: true })
   })()
+}
+
+/**
+ * AQU-1767: the clip a dubbing dub plays. A trimmed dub plays bytes that END at
+ * its trim end, so it stops there by itself, however busy the page is (the
+ * timer stays as the fallback for a clip that could not be cut — streamed, or
+ * not yet decoded). A dub that must start partway into a clip that states no
+ * length (a webm) gets a WAV of it first, or it could not be seeked and would
+ * play from the recording's head (Sam's walk: a split take's later pieces).
+ */
+async function prepareDubClip(
+  resolved: ResolvedAudioSrc,
+  startAtClipSec: number,
+  stopAtClipSec: number | null,
+  cell: CellData,
+  ctx: PlayContext,
+): Promise<ResolvedAudioSrc> {
+  if (!resolved.frontier) return resolved
+  const { audioId, ext } = resolved.frontier
+  const mustSeek = startAtClipSec > 0.05 && ext.toLowerCase() !== "wav"
+  let bytes = resolved.bytes
+  if (!bytes && mustSeek) {
+    try {
+      bytes = await fetchCellAudio({
+        projectId: ctx.projectId, fileId: cell.fileId, audioId, ext,
+        getSyncToken: audioSyncTokenFetcherForSession(ctx.session),
+      })
+    } catch { /* play it as resolved; the head is the worst of it */ }
+  }
+  const cut = !bytes
+    ? null
+    : mustSeek
+      ? await seekableClip(audioId, ext, bytes, stopAtClipSec)
+      : stopAtClipSec != null
+        ? tailCutNow(audioId, ext, bytes, stopAtClipSec)
+        : null
+  if (!cut) return resolved
+  if (resolved.objectUrl) URL.revokeObjectURL(resolved.objectUrl)
+  const url = URL.createObjectURL(cut)
+  return { ...resolved, src: url, objectUrl: url, streaming: false }
+}
+
+// ── AQU-1767: the next piece, made ready while this one plays ───────────────
+// A dub's player is made when the dub is due, and a fresh element takes time to
+// sound — about a fifth of a second in Safari — so the piece after a cut began
+// audibly after its waveform did (Sam's walk, 2026-10-15). While a piece plays,
+// the one after it is resolved, made, loaded and parked at its start; when it
+// is due it is adopted and only has to play.
+
+interface StashedDub {
+  element: HTMLAudioElement | null
+  objectUrl: string | null
+  stopAtClipSec: number | null
+}
+const dubStash = new Map<string, StashedDub>()
+const stashKey = (cellId: string, slot: string, audioId: string) => `${cellId}|${slot}|${audioId}`
+
+function stockNextPiece(plan: Extract<TargetOverlayPlan, { kind: "fire" }>, cell: CellData, ctx: PlayContext): void {
+  const next = plan.nextPiece
+  if (!next || timingMode === "audioFirst") return
+  const key = stashKey(plan.cellId, plan.slot, next.audioId)
+  const had = dubStash.get(key)
+  if (had && had.stopAtClipSec === next.stopAtClipSec) return
+  if (had) disposeStashed(key)
+  const stash: StashedDub = { element: null, objectUrl: null, stopAtClipSec: next.stopAtClipSec }
+  dubStash.set(key, stash)
+  void (async () => {
+    let resolved: ResolvedAudioSrc
+    try {
+      resolved = await resolveAudioSrc(next.url, ctx.projectId, cell.fileId, ctx.session, cell)
+      resolved = await prepareDubClip(resolved, next.startAtClipSec, next.stopAtClipSec, cell, ctx)
+    } catch {
+      if (dubStash.get(key) === stash) dubStash.delete(key)
+      return
+    }
+    if (dubStash.get(key) !== stash) {
+      if (resolved.objectUrl) URL.revokeObjectURL(resolved.objectUrl)
+      return
+    }
+    const el = new Audio(resolved.src)
+    el.preload = "auto"
+    stash.element = el
+    stash.objectUrl = resolved.objectUrl
+    el.onerror = () => { if (dubStash.get(key) === stash) disposeStashed(key) }
+    // Parked at its start; never seek a clip whose length is unknown.
+    el.onloadedmetadata = () => {
+      if (next.startAtClipSec > 0 && Number.isFinite(el.duration)) {
+        el.currentTime = Math.min(next.startAtClipSec, el.duration)
+      }
+    }
+  })()
+}
+
+/** This fire's own player, if one was made and loaded for it — taken out of the stash. */
+function takeStashedDub(plan: Extract<TargetOverlayPlan, { kind: "fire" }>): { element: HTMLAudioElement; objectUrl: string | null } | null {
+  const key = stashKey(plan.cellId, plan.slot, plan.audioId)
+  const stash = dubStash.get(key)
+  if (!stash?.element || stash.element.error != null || stash.element.readyState < 1 || stash.stopAtClipSec !== plan.stopAtClipSec) return null
+  dubStash.delete(key)
+  const { element } = stash
+  element.onerror = null
+  element.onloadedmetadata = null
+  return { element, objectUrl: stash.objectUrl }
+}
+
+function disposeStashed(key: string): void {
+  const stash = dubStash.get(key)
+  dubStash.delete(key)
+  if (!stash) return
+  if (stash.element) {
+    stash.element.onerror = null
+    stash.element.onloadedmetadata = null
+    stash.element.pause()
+    stash.element.src = ""
+  }
+  if (stash.objectUrl) URL.revokeObjectURL(stash.objectUrl)
+}
+
+function disposeDubStash(): void {
+  for (const key of [...dubStash.keys()]) disposeStashed(key)
 }
 
 /**
@@ -2139,13 +2421,12 @@ function wireOverlayElement(
         progCheckBoundary()
         return
       }
-      // Dubbing: pool entries own their frozen trim end-stop (~250ms
-      // timeupdate slop; pause immediately at the threshold to bound it).
-      if (entry.stopAtClipSec != null && audio.currentTime >= entry.stopAtClipSec) {
-        removeOverlayEntry(entry)
-        progOnTargetFinished(entry, "ended")
-      }
+      // Dubbing: pool entries own their frozen trim end-stop. A tick lands
+      // only every ~250ms, so each one re-aims the timer that stops it on time.
+      armDubEndStop(entry, audio)
     }
+    // A resume after a pause re-aims it too (a paused dub's timer lapses).
+    if (timingMode !== "audioFirst") audio.onplaying = () => armDubEndStop(entry, audio)
   }
   if (opts.autostart) {
     // SUB-53: in audio-first a verse can be dub-only, so the source element
@@ -2168,6 +2449,39 @@ function wireOverlayElement(
   }
 }
 
+/** Less than this left and the dub is stopped now rather than timed again. */
+const DUB_ENDSTOP_EPS_SEC = 0.004
+
+/**
+ * Stop a dubbing dub AT its trim end, not on the next timeupdate. (AQU-1767)
+ *
+ * Ticks land ~every 250ms, so a dub used to run up to a quarter-second past
+ * its end. A trimmed tail is usually silence and nobody heard it — but a CUT
+ * falls mid-speech: Sam's walk (2026-10-15) heard the next piece's first word
+ * spoken in the gap, then again when that piece began. A timer is aimed a
+ * little short of the end and re-aimed from the live clock until under
+ * DUB_ENDSTOP_EPS_SEC remains, so a late timer never carries the dub past it.
+ * Audio-first has its own 60ms authority (progCheckBoundary) and is left to it.
+ */
+function armDubEndStop(entry: OverlayEntry, audio: HTMLAudioElement): void {
+  if (entry.endStopTimer != null) {
+    clearTimeout(entry.endStopTimer)
+    entry.endStopTimer = null
+  }
+  const stop = entry.stopAtClipSec
+  if (stop == null || timingMode === "audioFirst" || audio.paused || !overlayPool.includes(entry)) return
+  const leftSec = (stop - audio.currentTime) / (audio.playbackRate || 1)
+  if (leftSec <= DUB_ENDSTOP_EPS_SEC) {
+    removeOverlayEntry(entry)
+    progOnTargetFinished(entry, "ended")
+    return
+  }
+  entry.endStopTimer = setTimeout(() => {
+    entry.endStopTimer = null
+    if (entry.element === audio) armDubEndStop(entry, audio)
+  }, Math.max(1, leftSec * 900))
+}
+
 // ── Next-verse prefetch (smooth-playback round) ─────────────────────────────
 // While verse N plays, verse N+1's dub is resolved into a cued, pre-seeked
 // element. At the boundary the cue path ADOPTS it — readiness is synchronous,
@@ -2178,6 +2492,8 @@ interface ProgPrefetch {
   cellId: string
   audioId: string
   url: string
+  /** AQU-1767: which pieces a split take's joined clip holds ("" for a take never split). */
+  joinKey: string
   /** The device quality pref this stash was resolved under — a flip makes it
    *  inert (never adopted, restocked fresh) with zero event wiring. */
   quality: AudioQuality
@@ -2209,16 +2525,18 @@ function progPrefetchNext(): void {
   const next = progNextPlayable(progIndex + 1)
   const slot = next >= 0 ? prog.slots[next] : null
   const cell = slot ? ctx.cells.find((c) => c.id === slot.cellId) : null
-  const target = cell && slot?.targetWindow ? resolveTargetAudio(cell) : null
+  const target = cell && slot?.targetWindow ? progTargetFor(cell) : null
   if (!slot || !cell || !target) {
     disposeProgPrefetch()
     return
   }
+  const joinKey = progJoinKey(slot)
   if (
     progPrefetch &&
     progPrefetch.cellId === slot.cellId &&
     progPrefetch.audioId === target.audioId &&
     progPrefetch.url === target.url &&
+    progPrefetch.joinKey === joinKey &&
     progPrefetch.quality === getAudioQualityPref()
   ) {
     return // already stocked
@@ -2228,6 +2546,7 @@ function progPrefetchNext(): void {
     cellId: slot.cellId,
     audioId: target.audioId,
     url: target.url,
+    joinKey,
     quality: getAudioQualityPref(),
     element: null,
     objectUrl: null,
@@ -2237,7 +2556,9 @@ function progPrefetchNext(): void {
   void (async () => {
     let resolved: ResolvedAudioSrc
     try {
-      resolved = await resolveAudioSrc(target.url, ctx.projectId, cell.fileId, ctx.session, cell)
+      resolved = slot.targetPieces
+        ? await resolveJoinedSrc(target.url, slot.targetPieces, ctx.projectId, cell.fileId, ctx.session)
+        : await resolveAudioSrc(target.url, ctx.projectId, cell.fileId, ctx.session, cell)
     } catch {
       if (progPrefetch === stash) progPrefetch = null
       return
@@ -2333,6 +2654,7 @@ function progCueTarget(
     stash.cellId === slot.cellId &&
     stash.audioId === target.audioId &&
     stash.url === target.url &&
+    stash.joinKey === progJoinKey(slot) &&
     // A quality flip after stocking makes the stash the WRONG bytes — fall
     // through to a fresh resolve, exactly like a take swap.
     stash.quality === getAudioQualityPref()
@@ -2344,7 +2666,9 @@ function progCueTarget(
   void (async () => {
     let resolved: ResolvedAudioSrc
     try {
-      resolved = await resolveAudioSrc(target.url, ctx.projectId, cell.fileId, ctx.session, cell)
+      resolved = slot.targetPieces
+        ? await resolveJoinedSrc(target.url, slot.targetPieces, ctx.projectId, cell.fileId, ctx.session)
+        : await resolveAudioSrc(target.url, ctx.projectId, cell.fileId, ctx.session, cell)
     } catch (e) {
       removeOverlayEntry(entry)
       // Routes to the gate while pending; the caught error rides along so a
@@ -2925,7 +3249,7 @@ export async function resumeQueue(): Promise<void> {
       const cell = activeContext?.cells.find((c) => c.id === slot.cellId)
       const into = Math.max(0, progress.currentTime - slot.startSec)
       const dubDue = Boolean(
-        slot.targetWindow && cell && resolveTargetAudio(cell) && into < slot.targetLenSec,
+        slot.targetWindow && cell && progTargetFor(cell) && into < slot.targetLenSec,
       )
       const sourceDue = Boolean(slot.sourceWindow && into < slot.sourceLenSec)
       const dubReady = overlayPool.some((e) => e.element && e.element.readyState >= 3)
@@ -3067,7 +3391,7 @@ export function updateQueueCells(cells: CellData[]): void {
       const entry = overlayPool.find((e) => e.cellId === onCellId)
       if (entry) {
         const cell = activeContext?.cells.find((c) => c.id === onCellId)
-        const target = cell ? resolveTargetAudio(cell) : null
+        const target = cell ? progTargetFor(cell) : null
         const slot = slots[i]
         if (!target || !slot.targetWindow || target.audioId !== entry.audioId) {
           removeOverlayEntry(entry)

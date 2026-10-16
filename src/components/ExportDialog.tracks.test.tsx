@@ -13,7 +13,7 @@
 // been a promise you could not reach from the dialog.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 
 import { ExportDialog } from "./ExportDialog"
 import type { CellData } from "@/hooks/useCells"
@@ -204,7 +204,9 @@ describe("a file whose recordings are ONLY on an added track", () => {
   it("does not pretend by character will include them", () => {
     render(<ExportDialog {...props} />)
     openAudioCard()
-    expect(screen.queryByText(/1 line/)).toBeNull()
+    // Scoped to the by-character preview: AQU-965's unvalidated-recording
+    // warning sits in the same card and counts lines of its own.
+    expect(within(screen.getByTestId("export-character-preview")).queryByText(/1 line/)).toBeNull()
   })
 
   // …BUT IT MUST NOT CLAIM THE FILE IS EMPTY EITHER (2026-08-27). The preview

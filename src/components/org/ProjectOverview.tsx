@@ -1682,6 +1682,9 @@ export function ProjectOverview() {
   const { store: offlineStore } = useOfflineStore()
   const offlineStatus = useOfflineProjectStatus(offlineStore, id || null)
   const downloadProgress = useDownloadProgress(id)
+  // A `downloading` row with no download running in this session was left
+  // half-done by an earlier one; downloadProjectOffline restarts it.
+  const offlineDownloading = offlineStatus?.status === "downloading" && downloadProgress !== null
 
   async function handleMakeAvailableOffline() {
     if (!offlineStore || !jwt || !id) return
@@ -1856,15 +1859,13 @@ export function ProjectOverview() {
                                 : t("org.projectOverview.offlineMediaSaved", { count: mediaSave.result.cached + mediaSave.result.alreadyCached, failed: mediaSave.result.failed })}
                         </Badge>
                       )}
-                      {isTauriRuntime() && offlineStatus?.status === "downloading" && (
+                      {isTauriRuntime() && offlineDownloading && (
                         <Badge variant="outline" className="shrink-0" data-testid="offline-downloading-badge">
                           <Spinner className="size-3" />
-                          {downloadProgress
-                            ? t("org.projectOverview.offlineDownloadingProgress", {
-                                done: downloadProgress.filesDone,
-                                total: downloadProgress.filesTotal,
-                              })
-                            : t("org.projectOverview.offlineDownloading")}
+                          {t("org.projectOverview.offlineDownloadingProgress", {
+                            done: downloadProgress.filesDone,
+                            total: downloadProgress.filesTotal,
+                          })}
                         </Badge>
                       )}
                       {isArchived && <ProjectStatusChip kind="archived" className="shrink-0" />}
@@ -1959,10 +1960,10 @@ export function ProjectOverview() {
                               onClick={() => {
                                 void handleMakeAvailableOffline()
                               }}
-                              disabled={!jwt || offlineStatus?.status === "downloading"}
+                              disabled={!jwt || offlineDownloading}
                             >
                               <CloudDownload className="size-4" />
-                              {offlineStatus?.status === "downloading"
+                              {offlineDownloading
                                 ? t("org.projectOverview.offlineDownloading")
                                 : t("org.projectOverview.makeAvailableOffline")}
                             </DropdownMenuItem>

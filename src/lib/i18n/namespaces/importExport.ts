@@ -871,6 +871,17 @@ export const importExport = defineNamespace({
       one: "{count} character with nothing recorded yet",
       other: "{count} characters with nothing recorded yet",
     }),
+    // AQU-965: what the audio card says before the export runs about lines
+    // whose shipping take nobody has validated.
+    "importExport.dialog.audioUnvalidatedNote": plural({
+      one: "{count} line will export a recording nobody has validated.",
+      other: "{count} lines will export recordings nobody has validated.",
+    }),
+    "importExport.dialog.audioUnvalidatedOmittedNote": plural({
+      one: "{count} line has no validated recording and will be left silent.",
+      other: "{count} lines have no validated recording and will be left silent.",
+    }),
+    "importExport.dialog.audioUnvalidatedJump": "Show me",
     "importExport.dialog.untimedRecordingsNote": plural({
       one: "{count} recording has no timing and cannot be placed.",
       other: "{count} recordings have no timing and cannot be placed.",
@@ -2255,6 +2266,21 @@ export const importExport = defineNamespace({
         description:
           "Clickable summary line on the Export dialog that opens the folded-away list of characters nobody has recorded a single line for yet.",
         placeholders: { count: "Number of characters with no recordings at all." },
+      },
+      "importExport.dialog.audioUnvalidatedNote": {
+        description:
+          "Amber warning in the Export dialog's Audio card, shown before the export runs: this many lines would ship a recording that nobody has validated. Does not block the export.",
+        placeholders: { count: "Number of lines whose exported recording is not validated." },
+      },
+      "importExport.dialog.audioUnvalidatedOmittedNote": {
+        description:
+          "The same amber warning in the Export dialog's Audio card when the Content setting is 'Validated only': these lines have no validated recording, so the audio export leaves them silent (and omits their file from the per-line zip).",
+        placeholders: { count: "Number of lines with no validated recording." },
+      },
+      "importExport.dialog.audioUnvalidatedJump": {
+        description:
+          "Link at the end of the Export dialog's unvalidated-recordings warning. Closes the dialog and takes the user to the first line that has no validated recording. Two or three words.",
+        maxLength: 24,
       },
       "importExport.dialog.untimedRecordingsNote": {
         description:

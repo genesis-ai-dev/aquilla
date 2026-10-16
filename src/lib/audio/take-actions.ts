@@ -32,6 +32,42 @@ export async function removeTake(args: {
   notifyAudioAttachmentsChanged(fileId)
 }
 
+/**
+ * AQU-1767 (Sam, 2026-10-14): delete a split take — every piece. The pieces go
+ * in one outbox transaction, each with the overlay `removeTake` gives one. A
+ * take of one piece is just `removeTake`.
+ */
+export async function removeWholeTake(args: {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** Every live piece, first one first. */
+  pieces: readonly { audioId: string; slot: string }[]
+  targetLang?: string
+  author: string
+}): Promise<void> {
+  const { projectId, fileId, cellId, pieces, author, targetLang } = args
+  const [first, ...rest] = pieces
+  if (!first) return
+  if (rest.length === 0) {
+    await removeTake({ projectId, fileId, cellId, audioId: first.audioId, slot: first.slot, author, ...(targetLang ? { targetLang } : {}) })
+    return
+  }
+  const queued = await enqueueEvents(
+    pieces.map((piece) => ({
+      kind: "cell.audio.remove" as const,
+      projectId,
+      fileId,
+      cellId,
+      parentId: null,
+      author,
+      payload: { audioId: piece.audioId, ...(targetLang ? { targetLang } : {}) },
+    })),
+  )
+  pieces.forEach((piece, i) => injectOptimisticAudioRemove(fileId, cellId, piece.audioId, piece.slot, queued[i]?.eventId))
+  notifyAudioAttachmentsChanged(fileId)
+}
+
 export interface TakeRemoval {
   projectId: string
   /** The file the CELL lives in — a heard line's take is the cue sibling's. */
@@ -82,6 +118,28 @@ export async function renameTake(args: {
 }): Promise<void> {
   await emitCellAudioRename(args)
   notifyAudioAttachmentsChanged(args.fileId)
+}
+
+/**
+ * AQU-1767 (Sam, 2026-10-15): rename a split take — every piece. Each is
+ * stored as the new name numbered by where it sits in the recording, the way
+ * the pieces are shown anyway (pieceNames works the numbers out every time,
+ * whatever a piece has stored).
+ */
+export async function renameWholeTake(args: {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** The take's pieces in the order they sit in the recording. */
+  pieces: readonly { audioId: string; label?: string | null }[]
+  name: string
+  targetLang?: string
+  author: string
+}): Promise<void> {
+  const { pieces, name, ...where } = args
+  for (const [i, piece] of pieces.entries()) {
+    await renameTake({ ...where, audioId: piece.audioId, label: `${name} · ${i + 1}` })
+  }
 }
 
 /**

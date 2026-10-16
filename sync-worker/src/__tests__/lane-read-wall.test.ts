@@ -64,7 +64,7 @@ describe("AQU-730 read wall", () => {
       envWith(db, true),
     ))!
     const leadBody = (await leadRead.json()) as { cells: Array<{ value: string }> }
-    expect(leadBody.cells.map((c) => c.value).sort()).toEqual(["bonjour", "default-hola", "hola", "source-text"])
+    expect(leadBody.cells.map((c) => c.value).sort()).toEqual(["source-text"])
 
     const dark = (await handleCellsReadRequest(
       new Request(`https://w/api/v1/projects/${PROJECT}/files/${FILE}/cells`, {

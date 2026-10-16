@@ -107,16 +107,16 @@ function OfflineProjectBadge({ projectId }: { projectId: string }) {
       </Badge>
     )
   }
-  if (status?.status === "downloading") {
+  // Without progress, a `downloading` row is one an earlier session left
+  // half-done — nothing is downloading, and the row menu offers a retry.
+  if (status?.status === "downloading" && progress) {
     return (
       <Badge variant="outline" className="shrink-0" data-testid="offline-downloading-badge">
         <Spinner className="size-3" />
-        {progress
-          ? t("org.projectOverview.offlineDownloadingProgress", {
-              done: progress.filesDone,
-              total: progress.filesTotal,
-            })
-          : t("org.projectOverview.offlineDownloading")}
+        {t("org.projectOverview.offlineDownloadingProgress", {
+          done: progress.filesDone,
+          total: progress.filesTotal,
+        })}
       </Badge>
     )
   }
@@ -134,6 +134,8 @@ function OfflineRowMenuItems({ projectId, jwt }: { projectId: string; jwt: strin
   const { store } = useOfflineStore()
   const { t } = useI18n()
   const status = useOfflineProjectStatus(store, projectId)
+  const progress = useDownloadProgress(projectId)
+  const downloading = status?.status === "downloading" && progress !== null
 
   if (!isTauriRuntime()) return null
 
@@ -174,10 +176,10 @@ function OfflineRowMenuItems({ projectId, jwt }: { projectId: string; jwt: strin
           onClick={() => {
             void handleMakeAvailableOffline()
           }}
-          disabled={!jwt || status?.status === "downloading"}
+          disabled={!jwt || downloading}
         >
           <CloudDownload className="size-4" />
-          {status?.status === "downloading"
+          {downloading
             ? t("org.projectOverview.offlineDownloading")
             : t("org.projectOverview.makeAvailableOffline")}
         </MenuItem>

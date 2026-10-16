@@ -89,6 +89,9 @@ export function assignLaneOptionsForPortfolio(
   return displayLanes(p).map((lane) => ({
     legacyTag: lane.lane,
     label: laneChipLabel(lane.lane, defaultLabel, fallbackLabel, lane.name),
+    // AQU-1994: carry the lane id where the portfolio row has one, so a
+    // staffing set can be matched against it. An older server omits it.
+    ...(lane.laneId ? { laneId: lane.laneId } : {}),
   }))
 }
 

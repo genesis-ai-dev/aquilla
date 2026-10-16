@@ -187,6 +187,9 @@ vi.mock("@/components/StaffLanePopover", () => ({
 vi.mock("@/lib/sync/member-scopes", () => ({
   fetchMemberScopes: vi.fn(async () => []),
   putMemberScopes: vi.fn(async () => ({ scopes: [], laneNames: {} })),
+  // AQU-1994: `null` is "the server did not say", which leaves every Assign
+  // surface offering the project's own lanes exactly as it did before.
+  fetchProjectLaneStaffing: vi.fn(async () => null),
 }))
 const setProjectPm = vi.fn(async (_jwt: string, _projectId: string, _pmUserId: number | null): Promise<{ id: number; username: string } | null> => null)
 const setProjectDeadline = vi.fn(async (_jwt: string, _projectId: string, _deadline: string | null): Promise<void> => {})

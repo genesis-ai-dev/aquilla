@@ -130,6 +130,8 @@ export interface PlanAssignTarget {
   targetLanes: string[]
   /** AQU-1977: the project's own target lanes, in order. See AssignModal's `lanes`. */
   lanes?: readonly AssignLaneOption[]
+  /** AQU-1994: the lanes someone on the project is on. See AssignModal's own prop. */
+  staffedLaneIds?: ReadonlySet<string> | readonly string[] | null
   jwt: string
   author: string
   roleLevel: number
@@ -483,6 +485,7 @@ function PlanAssignHost({
       projectFiles={projectFiles}
       targetLanes={target.targetLanes}
       lanes={target.lanes}
+      staffedLaneIds={target.staffedLaneIds}
       // The lane the inspector is showing, so work assigned from here lands in
       // the language whose numbers the manager was just reading.
       defaultLane={lane}

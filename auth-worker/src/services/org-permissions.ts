@@ -1084,7 +1084,14 @@ export interface OrgGroupDetail {
     teamRoleLevel: number | null
     addedAt: string | null
   }>
-  projects: Array<{ id: string; name: string; grantedRoleLevel: number; grantedAt: string | null }>
+  projects: Array<{
+    id: string
+    name: string
+    grantedRoleLevel: number
+    grantedAt: string | null
+    lanesExplicit: boolean
+    laneIds: string[]
+  }>
 }
 
 /** Members + attached projects of a single group. Null if not in this org. */
@@ -1114,14 +1121,31 @@ export async function getOrgGroupDetail(
 
   const projects = await env.AQUILLA_PG.prepare(
     `SELECT gpg.project_id AS id, p.name AS name, gpg.role_level AS granted,
-            gpg.granted_at AS granted_at
+            gpg.granted_at AS granted_at, gpg.lanes_explicit AS lanes_explicit
        FROM group_project_grants gpg
        JOIN projects p ON p.id = gpg.project_id
       WHERE gpg.group_id = ? AND p.org_id = ?
       ORDER BY LOWER(p.name)`,
   )
     .bind(groupId, orgId)
-    .all<{ id: string; name: string; granted: number; granted_at: string | Date | null }>()
+    .all<{
+      id: string
+      name: string
+      granted: number
+      granted_at: string | Date | null
+      lanes_explicit: boolean | number | string
+    }>()
+  const laneRows = await env.AQUILLA_PG.prepare(
+    "SELECT project_id, lane_id FROM group_project_lanes WHERE group_id = ? ORDER BY lane_id",
+  )
+    .bind(groupId)
+    .all<{ project_id: string; lane_id: string }>()
+  const lanesByProject = new Map<string, string[]>()
+  for (const row of laneRows.results ?? []) {
+    const list = lanesByProject.get(row.project_id) ?? []
+    list.push(row.lane_id)
+    lanesByProject.set(row.project_id, list)
+  }
 
   return {
     id: group.id,
@@ -1140,6 +1164,12 @@ export async function getOrgGroupDetail(
       name: p.name,
       grantedRoleLevel: p.granted,
       grantedAt: timestampIso(p.granted_at),
+      lanesExplicit:
+        p.lanes_explicit === true ||
+        p.lanes_explicit === 1 ||
+        p.lanes_explicit === "t" ||
+        p.lanes_explicit === "true",
+      laneIds: lanesByProject.get(p.id) ?? [],
     })),
   }
 }
@@ -1236,6 +1266,7 @@ export async function updateGroupProjectRole(env: Env, groupId: number, projectI
 }
 
 export async function detachGroupProject(env: Env, groupId: number, projectId: string): Promise<void> {
+  await env.AQUILLA_PG.prepare("DELETE FROM group_project_lanes WHERE group_id = ? AND project_id = ?").bind(groupId, projectId).run()
   await env.AQUILLA_PG.prepare("DELETE FROM group_project_grants WHERE group_id = ? AND project_id = ?").bind(groupId, projectId).run()
 }
 
@@ -2182,8 +2213,8 @@ async function aiDraftedByLane(
 /**
  * Per-project text the caller may see. Null when the wall is off, the caller
  * is a platform admin, or every project on the page is already unrestricted
- * (org role at project lead or above, creator, or a resolved project role at
- * project lead or above — AQU-1795). A missing map entry means that project
+ * (org role at maintainer or above, creator, or a resolved project role at
+ * maintainer or above). A missing map entry means that project
  * stays on the SQL totals.
  */
 async function visiblePortfolioText(

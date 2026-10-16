@@ -298,7 +298,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.share.laneChoiceAll": "Every current target lane",
     "projectSettings.share.laneChoiceSome": "Only selected lanes",
     "projectSettings.share.laneChoiceRequired": "Choose the lanes before adding this person.",
-    "projectSettings.share.laneChoiceLeadNote": "A project lead sees every target lane.",
+    "projectSettings.share.laneChoiceLeadNote": "A maintainer sees every target lane.",
     "projectSettings.share.laneChoiceAdminHint":
       "To limit someone to some lanes, use that project's share panel.",
     "projectSettings.share.inviteLinkReady": "Invite link ready. Send it to the recipient.",

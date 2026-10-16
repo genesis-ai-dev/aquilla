@@ -1,8 +1,9 @@
 // AQU-1808 — the sharer's lane choice, before it becomes a request body.
 //
-// Below project lead, a missing choice is not "every lane". The server
-// rejects that. Project lead and above are not asked: they see every lane
-// and are not given lane scopes.
+// Below maintainer, a missing choice is not "every lane". The server
+// rejects that for a role below project lead. A project lead is asked too:
+// they see only the lanes they are granted. Maintainer and above are not
+// asked.
 
 import { ROLE } from "@/lib/frontier/roles"
 
@@ -14,7 +15,7 @@ export type LaneAccessChoice =
 export type MemberLaneAccess = { allCurrentLanes: true } | { scopeLanes: string[] }
 
 export function needsLaneChoice(roleLevel: number, laneCount: number): boolean {
-  return roleLevel < ROLE.PROJECT_LEAD && laneCount > 0
+  return roleLevel < ROLE.MAINTAINER && laneCount > 0
 }
 
 export function laneChoiceReady(

@@ -133,6 +133,45 @@ describe("AQU-1781 POST /lanes grants the new lane", () => {
     ])
   })
 
+  it("grants the new lane to the project lead who created it", async () => {
+    await seedUser(6, "lead")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, 6, 500, 1)",
+    )
+      .bind(PROJECT)
+      .run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_member_scopes (project_id, user_id, kind, value, created_by, created_at)
+       VALUES (?, 6, 'lane', 'ln-fr', '1', 0)`,
+    )
+      .bind(PROJECT)
+      .run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level, granted_by)
+       VALUES (?, 6, 'ln-fr', 400, 1)`,
+    )
+      .bind(PROJECT)
+      .run()
+    const res = await app.request(
+      `/api/v2/projects/${PROJECT}/lanes`,
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("lead")),
+        body: JSON.stringify({ name: "", language: "Spanish" }),
+      },
+      env,
+    )
+    expect(res.status).toBe(201)
+    const laneId = await laneIdForTag("Spanish")
+    expect(await grantsFor(6)).toEqual(
+      [
+        { lane: laneId, level: 400 },
+        { lane: "ln-fr", level: 400 },
+      ].sort((a, b) => a.lane.localeCompare(b.lane)),
+    )
+    expect(await grantsFor(3)).toEqual([{ lane: "ln-fr", level: 400 }])
+  })
+
   it("does not grant a lane-scoped member", async () => {
     expect((await createLane("Spanish")).status).toBe(201)
     expect(await grantsFor(3)).toEqual([{ lane: "ln-fr", level: 400 }])

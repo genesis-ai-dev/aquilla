@@ -127,6 +127,8 @@ export const rules = defineNamespace({
       "These switches apply to the {lane} lane only. Other lanes keep their own.",
     "rules.builtinChecks.punctuation.fromLanguage": "Using {language} punctuation conventions.",
     "rules.builtinChecks.punctuation.fromProfile": "Using the punctuation from the Language profile.",
+    "rules.builtinChecks.punctuation.noSpecialConventions":
+      "Judged by the source's own marks. {language} has no special punctuation conventions.",
     "rules.builtinChecks.punctuation.sourceRelative":
       "Judged by the source's own marks — this lane records no language.",
     "rules.builtinChecks.violationCount": plural({
@@ -591,6 +593,13 @@ export const rules = defineNamespace({
       "rules.builtinChecks.punctuation.fromProfile": {
         description:
           "Same note, when the project's Language profile fills in the punctuation itself and so wins over the per-language defaults.",
+      },
+      "rules.builtinChecks.punctuation.noSpecialConventions": {
+        description:
+          "Same note, when the lane records a language with no special punctuation marks of its own (Spanish, English, French, …): the two punctuation checks compare against the source's own marks (AQU-2000).",
+        placeholders: {
+          language: "The lane's language as the user typed it — verbatim, never translated.",
+        },
       },
       "rules.builtinChecks.punctuation.sourceRelative": {
         description:

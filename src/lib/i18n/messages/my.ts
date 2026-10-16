@@ -3188,8 +3188,6 @@ export const my: Catalog = {
   "org.staffLanePopover.searchScopeNote": "သင်၏ အဖွဲ့အစည်းသည့်အတည်း ရှာဖွေသည်။ အဖွဲ့အစည်းထစ်သူများထည့်သွင်းခြင်း?",
   "org.staffLanePopover.inviteToProjectLink": "ပရောဂျက်သို့ သူတို့ကို ဆန္ဒြန်းဆိုပါ",
   "org.staffLanePopover.addToLaneButton": "{lane} သို့ ထည့်သွင်းပါ",
-  "org.staffLanePopover.broaderAccessNote": "အဆင့်မြင့် အယူခွင့်လိုအပ်သည်? ကြီးကြပ်သူများသည် ဘာသာစကားအားလုံးကို မြင်သည်။",
-  "org.staffLanePopover.addAsLeadButton": "ကြီးကြပ်သူအဖြစ် ထည့်သွင်းပါ (အမြင်အောင်လုံးပိုင်းမပြုလုပ်)",
   "org.archivedProjects.deletedColumnLabel": "ဖြုတ်သည်",
   "org.archivedProjects.viewsAriaLabel": "သိမ်းဆည်းထားသည့် အမြင်များ",
   "org.archivedProjects.emptyDescription": "သင်သည် ပရောဂျက်မျးကို သိမ်းဆည်းခြင်းအခါ၊ ဤတွင် ပေါ်လာသည် ပြန်လည်ရယူခြင်းအခါ သည်အတည်း။",

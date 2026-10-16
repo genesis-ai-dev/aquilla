@@ -7,8 +7,9 @@
 //   - Existing-member: if the picked person already holds >= the picked
 //     role, the POST membership call is skipped (never a downgrade) but the
 //     scope PUT still runs.
-//   - Lead path: "Add as lead (unscoped)" issues membership at project_lead
-//     and never calls the scopes PUT at all (leads can't be scoped).
+//   - AQU-2004: there is no lead path here at all — no "Leads see all
+//     languages" note, no "Add as lead" button, and no catalog in any locale
+//     still carrying those retired messages.
 //   - Graceful handling of the server's "leads unscopable" 400: if the scope
 //     PUT is rejected because the target's effective role is already lead+,
 //     the popover reports success ("already leads … no lane scope needed"),
@@ -25,6 +26,7 @@ import { MemoryRouter } from "react-router-dom"
 import type { ColumnDef } from "@tanstack/react-table"
 import { DataTable } from "@/components/ui/data-table"
 import { StaffLanePopover } from "./StaffLanePopover"
+import { CATALOGS } from "@/lib/i18n/messages"
 
 // The popover links out to the project's invite page (AQU-607), so every
 // render needs a Router in context.
@@ -275,22 +277,39 @@ describe("StaffLanePopover", () => {
     expect(mockAddProjectMember).not.toHaveBeenCalled()
   })
 
-  it("lead path: 'Add as lead (unscoped)' POSTs project_lead membership and never PUTs scopes", async () => {
+  // AQU-2004 — the popover used to end in a dashed box promising "Leads see
+  // all languages" beside an "Add as lead — every lane" link. Both claims died
+  // with AQU-1813 (a lead sees only the lanes they are granted), and the link
+  // never granted every lane. The lane control must stay lane-scoped: no lead
+  // note, no lead button, and no path from here to a project_lead membership.
+  it("offers no lead path once a person is picked (AQU-2004)", async () => {
     renderPopover()
     openPopover()
     pickMaria()
 
-    fireEvent.click(screen.getByRole("button", { name: /add as lead — every lane/i }))
-
+    const popover = screen.getByTestId("staff-lane-popover")
+    expect(popover).not.toHaveTextContent(/broader access|see all languages/i)
+    expect(screen.queryByRole("button", { name: /as lead/i })).not.toBeInTheDocument()
+    // The lane-scoped add is the only submit left, and it still works.
+    fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
     await waitFor(() => expect(mockAddProjectMember).toHaveBeenCalledTimes(1))
-    expect(mockAddProjectMember).toHaveBeenCalledWith("jwt-pm", "proj-1", "maria", 500)
-    expect(mockPutMemberScopes).not.toHaveBeenCalled()
+    expect(mockAddProjectMember).toHaveBeenCalledWith("jwt-pm", "proj-1", "maria", 300, {
+      scopeLanes: ["es"],
+    })
+  })
 
-    await waitFor(() =>
-      expect(screen.getByTestId("grant-scope-result")).toHaveTextContent(
-        /maria will join as a project lead on mark — every lane/i,
-      ),
+  // Same guard one layer down: a translated note or lead link would reappear
+  // in a non-English UI if any catalog still carried the retired keys.
+  it("carries no lead-note or lead-button message in any locale (AQU-2004)", () => {
+    const retired = [
+      "org.staffLanePopover.broaderAccessNote",
+      "org.staffLanePopover.addAsLeadButton",
+      "org.grantScope.action.addAsLead",
+    ]
+    const survivors = Object.entries(CATALOGS).flatMap(([locale, catalog]) =>
+      retired.filter((key) => key in catalog).map((key) => `${locale}: ${key}`),
     )
+    expect(survivors).toEqual([])
   })
 
   it("handles the server's 'leads unscopable' 400 gracefully as a success outcome", async () => {

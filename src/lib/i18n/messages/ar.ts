@@ -3191,8 +3191,6 @@ export const ar: Catalog = {
   "org.staffLanePopover.searchScopeNote": "يبحث عن المنظمة فقط. إضافة شخص من خارجها؟",
   "org.staffLanePopover.inviteToProjectLink": "ادعهم للمشروع",
   "org.staffLanePopover.addToLaneButton": "إضافة إلى {lane}",
-  "org.staffLanePopover.broaderAccessNote": "تحتاج إلى وصول أوسع؟ يرى المسؤولون جميع اللغات.",
-  "org.staffLanePopover.addAsLeadButton": "إضافة كمسؤول (بدون نطاق)",
   "org.archivedProjects.deletedColumnLabel": "محذوف",
   "org.archivedProjects.viewsAriaLabel": "المناظر المؤرشفة",
   "org.archivedProjects.emptyDescription": "عندما تؤرشف مشروعاً، يظهر هنا حتى تعيده.",

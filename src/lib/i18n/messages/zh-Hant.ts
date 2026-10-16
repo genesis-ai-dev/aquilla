@@ -3189,8 +3189,6 @@ export const zh_Hant: Catalog = {
   "org.staffLanePopover.searchScopeNote": "只會搜尋您的組織。想加入組織以外的人嗎？",
   "org.staffLanePopover.inviteToProjectLink": "邀請他們加入這個專案",
   "org.staffLanePopover.addToLaneButton": "加入 {lane}",
-  "org.staffLanePopover.broaderAccessNote": "需要更廣的存取權嗎？專案負責人可以看到所有語言。",
-  "org.staffLanePopover.addAsLeadButton": "以專案負責人身分加入（不限定範圍）",
   "org.archivedProjects.deletedColumnLabel": "刪除時間",
   "org.archivedProjects.viewsAriaLabel": "封存檢視方式",
   "org.archivedProjects.emptyDescription": "當您封存一個專案後，它會出現在這裡，直到您將它還原為止。",

@@ -444,4 +444,22 @@ describe("runTranscribeAll — a minute at a time (AQU-1681)", () => {
     expect(getBatchProgress()).toBeNull()
     vi.useRealTimers()
   })
+
+  it("keeps the decoded recording for the whole run, a long wait included", async () => {
+    vi.useFakeTimers()
+    const { primeSharedClipPcm, hasSharedClipPcm, SHARED_CLIP_IDLE_MS } = await import("./shared-clip-pcm")
+    const { transcribeChunk } = await import("./transcribe-chunked")
+    primeSharedClipPcm(`${CLIP}.m4a`, new Float32Array(16))
+    vi.mocked(transcribeChunk).mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20 * 60_000))
+    })
+    const run = runTranscribeAll({ cells: rows(), projectId: "p1", session: mockSession })
+    await vi.advanceTimersByTimeAsync(19 * 60_000)
+    expect(hasSharedClipPcm(`${CLIP}.m4a`)).toBe(true)
+    await vi.advanceTimersByTimeAsync(60_000)
+    await run
+    await vi.advanceTimersByTimeAsync(SHARED_CLIP_IDLE_MS)
+    expect(hasSharedClipPcm(`${CLIP}.m4a`)).toBe(false)
+    vi.useRealTimers()
+  })
 })

@@ -36,6 +36,8 @@ export const SHARED_CLIP_PRIMED_MS = 10 * 60_000
 
 let held: { key: string; pcm: Promise<Float32Array> } | null = null
 let releaseTimer: ReturnType<typeof setTimeout> | null = null
+/** Batches running now (see `pinSharedClipPcm`). */
+let pins = 0
 
 /** Is this clip already decoded (or being decoded)? A caller can then skip
  *  reading its bytes at all. */
@@ -52,7 +54,31 @@ export function releaseSharedClipPcm(): void {
 
 function keepAlive(ms = SHARED_CLIP_IDLE_MS): void {
   if (releaseTimer !== null) clearTimeout(releaseTimer)
-  releaseTimer = setTimeout(releaseSharedClipPcm, ms)
+  releaseTimer = setTimeout(releaseIfIdle, ms)
+}
+
+function releaseIfIdle(): void {
+  if (pins > 0) keepAlive()
+  else releaseSharedClipPcm()
+}
+
+/**
+ * AQU-1681: keep the held clip for as long as a batch runs, however long it
+ * goes without a row. A batch that meets the hosted limit sits out up to a
+ * quarter of an hour; letting the clip go meanwhile meant downloading the
+ * whole recording and decoding it again afterwards — measured at a 6 GB tab
+ * on a 55-minute episode, and in Safari a decode that stops short. Returns
+ * the unpin; the usual minute's grace starts from it.
+ */
+export function pinSharedClipPcm(): () => void {
+  pins += 1
+  let done = false
+  return () => {
+    if (done) return
+    done = true
+    pins -= 1
+    if (pins === 0 && held) keepAlive()
+  }
 }
 
 /** Hold a clip's 16 kHz mono PCM that was decoded some other way, so its

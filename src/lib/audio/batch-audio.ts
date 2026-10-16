@@ -153,6 +153,7 @@ import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { transcribeCell, type TranscriptionResult } from "./transcribe"
 import { planTranscriptionChunks, transcribeChunk, type TranscriptionChunk } from "./transcribe-chunked"
+import { pinSharedClipPcm } from "./shared-clip-pcm"
 import { usesHostedTranscription } from "./transcription-preference"
 import { getTranscriptionModel } from "./transcription-model"
 import { batchAudioSeconds, zeroShotBatchCostLine } from "./zero-shot-batch"
@@ -331,31 +332,37 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
   const jobs: Job[] = [...plan.chunks.map((chunk) => ({ chunk })), ...plan.single.map((cell) => ({ cell }))]
   const weightOf = (job: Job) => ("chunk" in job ? job.chunk.rows.length : 1)
 
-  await runBatchJobs(
-    jobs,
-    (job) =>
-      "chunk" in job
-        ? transcribeChunk(job.chunk, {
-            session: session!,
-            projectId,
-            language: languageFor(job.chunk.rows[0]!.cell),
-            onRateLimited: waitForLimit,
-            transcribeRow,
-            isCancelled: () => _transcribeCancelFlag,
-          })
-        : transcribeRow(job.cell),
-    {
-      kind: "transcribe",
-      isCancelled: () => _transcribeCancelFlag,
-      weightOf,
-      onItemDone: (job) => {
-        // The per-cell badge handles its own state; this is for whoever is
-        // watching the whole batch rather than one line.
-        completed += weightOf(job)
-        args.onProgress?.(completed, targets.length)
+  // The decoded recording stays for the whole run, waits included.
+  const unpin = pinSharedClipPcm()
+  try {
+    await runBatchJobs(
+      jobs,
+      (job) =>
+        "chunk" in job
+          ? transcribeChunk(job.chunk, {
+              session: session!,
+              projectId,
+              language: languageFor(job.chunk.rows[0]!.cell),
+              onRateLimited: waitForLimit,
+              transcribeRow,
+              isCancelled: () => _transcribeCancelFlag,
+            })
+          : transcribeRow(job.cell),
+      {
+        kind: "transcribe",
+        isCancelled: () => _transcribeCancelFlag,
+        weightOf,
+        onItemDone: (job) => {
+          // The per-cell badge handles its own state; this is for whoever is
+          // watching the whole batch rather than one line.
+          completed += weightOf(job)
+          args.onProgress?.(completed, targets.length)
+        },
       },
-    },
-  )
+    )
+  } finally {
+    unpin()
+  }
 }
 
 // ---------------------------------------------------------------------------

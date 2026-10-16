@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
   hasSharedClipPcm,
+  pinSharedClipPcm,
   primeSharedClipPcm,
   releaseSharedClipPcm,
   sharedClipWindow,
@@ -102,5 +103,24 @@ describe("sharedClipWindow", () => {
     const win = await sharedClipWindow("long.m4a", { trimStartMs: 50 * 60_000, trimEndMs: 50 * 60_000 + 3000 },
       () => new Uint8Array(), decode)
     expect(win.length).toBe(0)
+  })
+})
+
+// AQU-1681: a batch that meets the hosted limit sits out up to a quarter of an
+// hour without a row. Letting the clip go meanwhile meant downloading and
+// decoding the whole recording again afterwards (a 6 GB tab on an episode).
+describe("pinSharedClipPcm", () => {
+  it("keeps the clip while a batch runs, and lets it go a minute after", async () => {
+    vi.useFakeTimers()
+    await sharedClipWindow("clip.m4a", { trimStartMs: 0, trimEndMs: 500 }, () => new Uint8Array(), rampDecoder(1))
+    const unpin = pinSharedClipPcm()
+    vi.advanceTimersByTime(20 * 60_000)
+    expect(hasSharedClipPcm("clip.m4a")).toBe(true)
+    unpin()
+    unpin()
+    vi.advanceTimersByTime(SHARED_CLIP_IDLE_MS - 1)
+    expect(hasSharedClipPcm("clip.m4a")).toBe(true)
+    vi.advanceTimersByTime(1)
+    expect(hasSharedClipPcm("clip.m4a")).toBe(false)
   })
 })

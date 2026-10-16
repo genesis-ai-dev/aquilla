@@ -3,7 +3,9 @@
 Pushes each project's progress into a Monday.com board. Built in AQU-506,
 moved onto the generic `integration_*` tables in AQU-683, fixed up in AQU-1770.
 This is the short contract the code comments point at; the code is the
-detail.
+detail. The Airtable integration (AQU-804, [AIRTABLE-INTEGRATION.md](AIRTABLE-INTEGRATION.md))
+has the same shape and shares the push triggers, the push bookkeeping
+(`lib/integrations/`) and most of the settings components.
 
 ## Shape
 
@@ -146,7 +148,8 @@ contract beyond "maintainer can, member can view":
   column anyone else adds still does.
 - `POST /internal/push` is sync-worker's nudge after an edit. A push runs at
   once if the last one was over 2 minutes ago, otherwise the link is marked
-  dirty and the 5-minute cron flushes it.
+  dirty and the 5-minute cron flushes it. It schedules every progress-sync
+  link of the project, Airtable's too (`lib/integrations/push.ts`).
 - Settings that change the pushed numbers mark links dirty too (AQU-1771,
   `db/shared/progress-sync-dirty.ts`): a project's `countStructuralCells`,
   `validationCount` or `validationCountAudio`; the org's headings rule or its

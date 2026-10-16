@@ -18,6 +18,7 @@ import { handleTtsRequest } from "./tts"
 import { handleDiarizationRequest } from "./diarization"
 import { notifyProjectDo } from "./archive-broadcast"
 import { handleCorsPreflight, withCors } from "./cors"
+import { handleRobotsTxt } from "./robots"
 import { handleProjectArchiveRequest } from "./project-archive"
 import { handleMemberRemovedRequest, notifyProjectDoMemberRemoved } from "./member-removed"
 import {
@@ -323,6 +324,11 @@ const worker = {
     // response for the real request instead of hiding it behind a CORS error.
     const preflight = handleCorsPreflight(request)
     if (preflight) return preflight
+
+    // Static and data-free, so it answers ahead of the environment guards and
+    // the Postgres handle below.
+    const robots = handleRobotsTxt(request)
+    if (robots) return robots
 
     const environmentError = deploymentEnvironmentError(request.url, env)
     if (environmentError) {

@@ -36,6 +36,10 @@ const STATIC_REASON_KEY: Partial<Record<RuleInfractionReason, MessageKey>> = {
   "builtin:usfm-structure": "rules.infraction.builtin.usfmStructure",
   "builtin:capitalization": "rules.infraction.builtin.capitalization",
   "builtin:footnote-quote-mismatch": "rules.infraction.builtin.footnoteQuoteMismatch",
+  "builtin:corrupted-characters": "rules.infraction.builtin.corruptedCharacters",
+  "builtin:unpaired-quotes": "rules.infraction.builtin.unpairedQuotes",
+  "builtin:untranslated-fragment": "rules.infraction.builtin.untranslatedFragment",
+  "builtin:length-ratio": "rules.infraction.builtin.lengthRatio",
 }
 
 /** Just the predicate — "This term is in the source…", "Placeholder {age} missing…". */

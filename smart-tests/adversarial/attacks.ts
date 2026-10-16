@@ -93,7 +93,8 @@ export const ATTACKS: Attack[] = [
     secondRole: ROLE.CONTRIBUTOR, observe: "target-text",
     goal: (ctx) => editGoal(ctx, 0, ctx.expected),
     secondGoal: (ctx) => editGoal(ctx, 0, ctx.expected2),
-    // Either edit may win the head; neither may vanish from the audit log.
+    // The focus lock (AD-1) admits one writer; either may win. Any edit a
+    // writer typed must survive in the audit log (run.ts excuses the one refused).
     contract: (ids, ctx) => ({
       allowed: [{ kind: "target", cellId: ids.cellIds[0] }],
       required: [

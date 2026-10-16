@@ -780,3 +780,43 @@ describe("validation", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 })
+
+/**
+ * AQU-1994 — the dialog offers the same lanes the project overview's Team card
+ * does: only the lanes somebody on the project is staffed on. Criterion 8 of
+ * the issue ("every other Assign entry point offers the same lanes") is why
+ * this lives on the shared modal and not only on the Team card's panel.
+ */
+describe("only the lanes the project's people are on (AQU-1994)", () => {
+  const LANES = [
+    { legacyTag: "French", label: "French", laneId: "lane-fr" },
+    { legacyTag: "Mandarin Chinese", label: "Mandarin Chinese", laneId: "lane-zh" },
+    { legacyTag: "Swedish", label: "Swedish", laneId: "lane-sv" },
+  ]
+
+  it("names the one staffed lane rather than offering all three", () => {
+    render(<AssignModal {...BASE_PROPS} lanes={LANES} staffedLaneIds={new Set(["lane-zh"])} />)
+
+    expect(screen.getByTestId("assign-modal-lane-fixed")).toHaveTextContent("Mandarin Chinese")
+    expect(screen.queryByRole("combobox", { name: /language lane/i })).not.toBeInTheDocument()
+  })
+
+  it("offers every lane when the server said nothing about staffing", () => {
+    render(<AssignModal {...BASE_PROPS} lanes={LANES} staffedLaneIds={null} />)
+
+    expect(screen.queryByTestId("assign-modal-lane-fixed")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("assign-modal-no-staffed-lanes")).not.toBeInTheDocument()
+  })
+
+  it("says so and refuses Assign when nobody on the project is on any lane", async () => {
+    render(<AssignModal {...BASE_PROPS} lanes={LANES} staffedLaneIds={new Set<string>()} />)
+
+    expect(screen.getByTestId("assign-modal-no-staffed-lanes")).toHaveTextContent(
+      /no one on this project is on any of its languages/i,
+    )
+    const submit = screen.getByRole("button", { name: "Assign" })
+    expect(submit).toBeDisabled()
+    fireEvent.click(submit)
+    await waitFor(() => expect(mockCreate).not.toHaveBeenCalled())
+  })
+})

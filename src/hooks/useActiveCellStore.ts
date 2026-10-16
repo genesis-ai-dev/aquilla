@@ -941,6 +941,16 @@ export class CellStore {
   }
 
   /**
+   * AQU-1767 phase 2: a source row's place in the anchor chain and its head —
+   * what undoing a removal needs to point the next row back at the restored one
+   * (only if nobody has moved it since). Null when there is no source row.
+   */
+  getSourceChainInfo(cellId: string): { anchorCellId: string | null; eventId: string } | null {
+    const source = this.sourceById.get(cellId)
+    return source ? { anchorCellId: source.anchorCellId ?? null, eventId: source.eventId } : null
+  }
+
+  /**
    * AQU-646: everything removing a line needs — its own source-side chain head,
    * the cell it is anchored to, and the row anchored TO it, whose anchor has to
    * be re-pointed or `walkAnchorChain` appends it at the tail of the file and a
@@ -1287,6 +1297,17 @@ export class CellStore {
    */
   wasRemoved(cellId: string): boolean {
     return this.removedCellIds.has(cellId)
+  }
+
+  /**
+   * AQU-1767 phase 2: a removal was undone (`source.cell.restore`), so the
+   * cell is back in the file. Forget that it left — or writes made to it from
+   * now on would drop themselves as writes to a removed cell — and lift its
+   * freshness floor so the confirming read can bring its rows in.
+   */
+  markRestored(cellId: string): void {
+    this.removedCellIds.delete(cellId)
+    this.freshnessFloors.delete(cellId)
   }
 
   toRows(): CellRow[] {

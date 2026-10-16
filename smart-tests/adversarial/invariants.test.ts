@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { verifyInvariants, type Contract, type Observed, type Snapshot } from "./invariants"
+import { verifyInvariants, withoutLockedOut, type Contract, type Observed, type Snapshot } from "./invariants"
 
 const before: Snapshot = {
   projects: [{ id: "p", name: "Project", present: true }],
@@ -86,6 +86,16 @@ describe("adversarial invariant oracle", () => {
       required: [{ kind: "history-contains", cellId: "c1", values: ["a", "b"] }] }
     const onlyA = { ...edited("a"), histories: { c1: [{ kind: "target.cell.commit", author: "adv1", value: "a" }] } }
     expect(verifyInvariants(before, onlyA, contract, seen).verdict).toBe("product_failure")
+  })
+
+  it("excuses only a writer the focus lock refused; a typed edit that vanishes still fails", () => {
+    // AD-1: the lock admits one writer, so the refused one never made an edit
+    // and its value cannot be in the log. Excusing it must not excuse the winner.
+    const contract: Contract = { allowed: [{ kind: "target", cellId: "c1" }],
+      required: [{ kind: "history-contains", cellId: "c1", values: ["a", "b"] }] }
+    const onlyA = { ...edited("a"), histories: { c1: [{ kind: "target.cell.commit", author: "adv1", value: "a" }] } }
+    expect(verifyInvariants(before, onlyA, withoutLockedOut(contract, ["b"]), seen).verdict).toBe("passed")
+    expect(verifyInvariants(before, onlyA, withoutLockedOut(contract, ["a"]), seen).verdict).toBe("product_failure")
   })
 
   it("rejects a renamed project the contract did not allow", () => {

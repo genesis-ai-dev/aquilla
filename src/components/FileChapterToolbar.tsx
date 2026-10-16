@@ -48,6 +48,8 @@ interface FileChapterToolbarProps {
   translateAsReadDisabled?: boolean
   translateAsReadActive?: boolean
   onTranslateAsReadChange?: (enabled: boolean) => void
+  /** AQU-1767 phase 2: the History panel's button, beside the lens switch. */
+  historyControl?: ReactNode
 }
 
 /** Chapter-row right-side controls: mode switch and file-options menu. */
@@ -69,6 +71,7 @@ export function FileChapterToolbar({
   translateAsReadDisabled = false,
   translateAsReadActive = false,
   onTranslateAsReadChange,
+  historyControl,
 }: FileChapterToolbarProps) {
   const t = useT()
 
@@ -166,6 +169,7 @@ export function FileChapterToolbar({
             </button>
           </AppTooltip>
         )}
+        {historyControl}
         <EditorModeToggle
           lens={lens}
           onChange={onLensChange}

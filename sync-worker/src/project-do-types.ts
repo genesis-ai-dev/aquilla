@@ -10,6 +10,7 @@ export type OutboxEventKind =
   | "source.cell.delete"
   | "source.cell.reorder"
   | "source.cell.metadata.patch"
+  | "source.cell.restore"
   | "target.cell.create"
   | "target.cell.commit"
   | "target.cell.delete"

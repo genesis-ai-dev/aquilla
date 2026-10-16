@@ -138,7 +138,7 @@ Initial catalogue (v1):
 | condition | `edit.offline-then-online` | Context goes offline after the fill, stays offline 5 s, comes back; oracle after reconnect |
 | condition | `edit.back-button` | Browser history back immediately after fill, then forward |
 | condition | `edit.duplicate-tab` | Second tab, same user, same cell, opened before the fill; both stay open |
-| condition | `edit.two-agents-same-cell` | Two users, two Jev runs, same cell, different expected text, started concurrently; oracle accepts either winner but requires one linear chain and both edits in history |
+| condition | `edit.two-agents-same-cell` | Two users, two Jev runs, same cell, different expected text, started concurrently; oracle accepts either winner; the focus lock (AD-1) refuses the other, which counts as observed when its cell shows `data-target-locked-by`; every edit a writer typed must be in history |
 | condition | `edit.rapid-retarget` | Goal asks for two edits in two rows in one breath; oracle checks both |
 | condition | `edit.throttled-3g` | CDP HTTP throttling (as in the collab smoke) |
 | condition | `signoff.reload-mid-click` | Sign-off goal; reload the instant `aria-pressed` flips |

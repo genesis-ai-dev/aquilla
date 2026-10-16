@@ -289,8 +289,8 @@ function CellTakeBlockView({
     setDeleting(true)
     const slot = attachment.slot ?? (selectedAudioId === owner.selectedGeneratedVoiceAudioId ? GENERATED_VOICE_SLOT : RECORDING_SLOT)
     const lane = targetLang ? { targetLang } : {}
-    const removal = { projectId: project.id, fileId: owner.fileId, cellId: owner.id, audioId: selectedAudioId, slot, ...lane, author: username }
-    // A split take goes whole, every piece (Sam, 2026-10-14).
+    const removal = { projectId: project.id, fileId: owner.fileId, cellId: owner.id, audioId: selectedAudioId, slot, ...lane, author: username, history: { wasSelected: true } }
+    // A split take goes whole, every piece in one step (Sam, 2026-10-14).
     const removing = split ? split.map((piece) => ({ audioId: piece.audioId, slot: piece.slot ?? slot })) : null
     const remove = removing
       ? () => removeWholeTake({ ...removal, pieces: removing })
@@ -346,7 +346,7 @@ function CellTakeBlockView({
     const where = { projectId: project.id, fileId: owner.fileId, cellId: owner.id, author: username, ...lane }
     const save = split
       ? () => renameWholeTake({ ...where, pieces: split, name: label })
-      : () => renameTake({ ...where, audioId: selectedAudioId, label })
+      : () => renameTake({ ...where, audioId: selectedAudioId, label, labelBefore: storedLabel })
     try {
       await save()
     } catch {

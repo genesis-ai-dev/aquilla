@@ -871,6 +871,17 @@ export const importExport = defineNamespace({
       one: "{count} character with nothing recorded yet",
       other: "{count} characters with nothing recorded yet",
     }),
+    // AQU-965: what the audio card says before the export runs about lines
+    // whose shipping take nobody has validated.
+    "importExport.dialog.audioUnvalidatedNote": plural({
+      one: "{count} line will export a recording nobody has validated.",
+      other: "{count} lines will export recordings nobody has validated.",
+    }),
+    "importExport.dialog.audioUnvalidatedOmittedNote": plural({
+      one: "{count} line has no validated recording and will be left silent.",
+      other: "{count} lines have no validated recording and will be left silent.",
+    }),
+    "importExport.dialog.audioUnvalidatedJump": "Show me",
     "importExport.dialog.untimedRecordingsNote": plural({
       one: "{count} recording has no timing and cannot be placed.",
       other: "{count} recordings have no timing and cannot be placed.",
@@ -993,7 +1004,7 @@ export const importExport = defineNamespace({
       "{fileName} parsed successfully but contained no study notes. Biblica notes live in `intro:*` " +
       "paragraph styles — check that this is the notes document.",
     "importExport.errors.invalidIdmlPackage": "{fileName} is not a valid IDML package. IDML files are ZIP archives and start with \"PK\".",
-    "importExport.errors.mediaFileTooLarge": "{fileName} exceeds the 95 MB media import limit.",
+    "importExport.errors.mediaFileTooLarge": "{fileName} exceeds the {limit} media import limit.",
     "importExport.errors.couldNotDecodeAudio":
       "Couldn't decode {fileName} — the file may be corrupt or in an unsupported codec. Try " +
       "re-exporting it as mp3 or wav.",
@@ -2256,6 +2267,21 @@ export const importExport = defineNamespace({
           "Clickable summary line on the Export dialog that opens the folded-away list of characters nobody has recorded a single line for yet.",
         placeholders: { count: "Number of characters with no recordings at all." },
       },
+      "importExport.dialog.audioUnvalidatedNote": {
+        description:
+          "Amber warning in the Export dialog's Audio card, shown before the export runs: this many lines would ship a recording that nobody has validated. Does not block the export.",
+        placeholders: { count: "Number of lines whose exported recording is not validated." },
+      },
+      "importExport.dialog.audioUnvalidatedOmittedNote": {
+        description:
+          "The same amber warning in the Export dialog's Audio card when the Content setting is 'Validated only': these lines have no validated recording, so the audio export leaves them silent (and omits their file from the per-line zip).",
+        placeholders: { count: "Number of lines with no validated recording." },
+      },
+      "importExport.dialog.audioUnvalidatedJump": {
+        description:
+          "Link at the end of the Export dialog's unvalidated-recordings warning. Closes the dialog and takes the user to the first line that has no validated recording. Two or three words.",
+        maxLength: 24,
+      },
       "importExport.dialog.untimedRecordingsNote": {
         description:
           "Warning under the Export dialog's list of who is recorded: recordings with no timing cannot be positioned in the exported audio and will be left out.",
@@ -2468,8 +2494,14 @@ export const importExport = defineNamespace({
         placeholders: { fileName: "Name of the file — not translated." },
       },
       "importExport.errors.mediaFileTooLarge": {
-        description: "Thrown when an audio/video file exceeds the media import size ceiling.",
-        placeholders: { fileName: "Name of the file — not translated." },
+        description:
+          "Thrown when an audio/video file exceeds the media import size ceiling. The ceiling " +
+          "is interpolated from MAX_AUDIO_OBJECT_BYTES so the number cannot drift out of the " +
+          "copy again when the cap moves (AQU-1975).",
+        placeholders: {
+          fileName: "Name of the file — not translated.",
+          limit: "The media import ceiling, already formatted (e.g. '2 GB') — not translated.",
+        },
       },
       "importExport.errors.couldNotDecodeAudio": {
         description: "Thrown when the browser's Web Audio API fails to decode an uploaded audio/video file.",

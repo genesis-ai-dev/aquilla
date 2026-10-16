@@ -23,6 +23,7 @@ export type NeonTargetCommand =
   | "prune-phantom-voices"
   | "verify-lanes"
   | "seed-extract"
+  | "scrub-integrations"
 
 export function scriptFor(command: NeonTargetCommand): string {
   if (command === "backfill-progress") return "scripts/neon-backfill-progress.ts"
@@ -35,6 +36,8 @@ export function scriptFor(command: NeonTargetCommand): string {
   // AQU-1953: the dev-DB seed extract runs under neon-target so the source
   // branch is explicit and recorded (AQUILLA_NEON_TARGET) in seed.meta.json.
   if (command === "seed-extract") return "scripts/seed-extract.ts"
+  // AQU-1775: strip the integration tokens a production copy carries.
+  if (command === "scrub-integrations") return "scripts/neon-scrub-integrations.ts"
   return "scripts/neon-migrate.ts"
 }
 
@@ -51,6 +54,7 @@ export function childArgs(command: NeonTargetCommand, passthrough: readonly stri
     command === "verify-lanes" ||
     command === "repair-lane-grants" ||
     command === "prune-phantom-voices" ||
-    command === "seed-extract"
+    command === "seed-extract" ||
+    command === "scrub-integrations"
   return forwardsFlags ? [script, ...passthrough] : [script, command]
 }

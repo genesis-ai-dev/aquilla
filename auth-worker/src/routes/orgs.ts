@@ -18,12 +18,16 @@ import {
   deleteGroup,
   deleteOrganization,
   detachGroupProject,
+  canViewNamedProgress,
   getEffectiveOrgRole,
   getMemberEffectiveAccess,
   getOrCreateUserOrg,
   getOrgGroupDetail,
   getOrgDeletedFiles,
   getOrgMemberRole,
+  combineVisibilityFloors,
+  getOrgVisibilityFloors,
+  getProjectRosterListFloors,
   getRosterViewMinRole,
   groupExistsInOrg,
   listEffectiveMembersForOrg,
@@ -52,12 +56,15 @@ import {
 import {
   ALL_ROLE_LEVELS,
   isCanonicalRoleLevel,
+  resolveProjectRoles,
   ROLE_NAMES,
 } from "../services/project-permissions"
 import { countTargetLanesByOrg } from "../lib/billing/words"
 import { lookupUserByUsername } from "../services/user-lookup"
 import { auditMembershipChange, isAdminActor, priorMembershipRole } from "../services/admin-audit"
 import { getOrgAssignmentWorkload, getMyAssignmentsAcrossOrg } from "../services/assignments"
+import { loadProjectVisibilityOverrides } from "../../../db/shared/visibility-floors"
+import { ViewerScope } from "../services/access-payload"
 import { sendOrgInviteEmail } from "../services/email"
 import { getTeamMemberRole, setTeamMemberRole, TEAM_SCOPE_ROLES } from "../services/team-roles"
 import {
@@ -482,6 +489,11 @@ orgs.get("/:orgId/deleted-files", async (c) => {
  * GET /api/v2/orgs/:orgId/members/:userId/access — AD-12 effective-access
  * breakdown: every grant path (direct/group/org/creator) per project + the
  * resolved max. Maintainer+ (managers) only.
+ *
+ * AQU-1771: a project whose member list the caller may not read (it closed it
+ * to owners) is left out, as the access inspector leaves it out — otherwise
+ * asking this about each person in turn rebuilds the roster the project hid.
+ * Owners, and a person reading their own access, see every project.
  */
 orgs.get("/:orgId/members/:userId/access", async (c) => {
   const user = c.get("user")
@@ -495,7 +507,13 @@ orgs.get("/:orgId/members/:userId/access", async (c) => {
     return c.json({ error: "org role >= maintainer required" }, 403)
   }
   const access = await getMemberEffectiveAccess(c.env, orgId, targetUserId)
-  return c.json(access)
+  if (role >= ROLE.OWNER || Number(user.id) === targetUserId) return c.json(access)
+  const vs = new ViewerScope(c.env, user)
+  const projects = []
+  for (const project of access.projects) {
+    if (await vs.canSeeProject(project.projectId, orgId)) projects.push(project)
+  }
+  return c.json({ ...access, projects })
 })
 
 /**
@@ -503,18 +521,43 @@ orgs.get("/:orgId/members/:userId/access", async (c) => {
  * the org's active projects, with project + progress attribution (AQU-494:
  * one row per assignment, not aggregated by assignee, so the manager can see
  * which project each assignment belongs to and remove any one of them).
- * Maintainer+ (managers).
+ *
+ * AQU-1771: gated on the org's member-progress AND roster floors (each row is
+ * a named person's progress), not on a hard Maintainer floor — the org
+ * overview shows the Team workload card from those floors, so an org that
+ * opened them to contributors got a card that never loaded. Each row is then
+ * kept only when the caller could read that project's own Team card: they
+ * reach the project, and their role there meets its floors. Opening the floors
+ * to contributors must not hand them the assignments of projects they are not
+ * on.
  */
 orgs.get("/:orgId/assignments/workload", async (c) => {
   const user = c.get("user")
   const orgId = parseInt(c.req.param("orgId"), 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
   const role = await getEffectiveOrgRole(c.env, orgId, user)
-  if (role == null || role < ROLE.MAINTAINER) {
-    return c.json({ error: "org role >= maintainer required" }, 403)
+  if (role == null) return c.json({ error: "not an org member" }, 403)
+  const orgFloors = await getOrgVisibilityFloors(c.env, orgId)
+  if (!canViewNamedProgress(role, orgFloors)) {
+    return c.json({ error: "member progress hidden by org policy" }, 403)
   }
   const assignments = await getOrgAssignmentWorkload(c.env, orgId)
-  return c.json({ assignments })
+  // An owner meets every floor (a project can raise one to Owner at most) and
+  // reaches every project in the org.
+  if (role >= ROLE.OWNER) return c.json({ assignments })
+  // A project may be stricter than the org (AQU-1771), so each row answers to
+  // its own project's floors, read for the projects on the list only.
+  const projectIds = [...new Set(assignments.map((a) => a.projectId))]
+  const [projectRoles, overrides] = await Promise.all([
+    resolveProjectRoles(c.env, user, projectIds),
+    loadProjectVisibilityOverrides(c.env.AQUILLA_PG, projectIds),
+  ])
+  const visible = assignments.filter((a) => {
+    const own = overrides.get(a.projectId)
+    const floors = own ? combineVisibilityFloors(orgFloors, own) : orgFloors
+    return canViewNamedProgress(projectRoles.get(a.projectId)?.level ?? null, floors)
+  })
+  return c.json({ assignments: visible })
 })
 
 /**
@@ -537,6 +580,13 @@ orgs.get("/:orgId/assignments/mine", async (c) => {
  * the caller can access in the org, in ONE request (AQU-218). Replaces the
  * client's per-project /:projectId/members fan-out that flooded the connection
  * pool and 500'd the page. Any org member.
+ *
+ * AQU-1771: a project's roster is in the answer only when the caller could
+ * read it from GET /projects/:id/members — their role on that project meets
+ * its member-list floor (the org's, with the assigner carve-out on the org's
+ * value only, raised by the project's own stricter value). Before this the
+ * matrix handed every org member every reachable project's full roster,
+ * whatever the org or the project had hidden. An owner meets every floor.
  */
 orgs.get("/:orgId/members-matrix", async (c) => {
   const user = c.get("user")
@@ -546,7 +596,18 @@ orgs.get("/:orgId/members-matrix", async (c) => {
   const role = await getEffectiveOrgRole(c.env, orgId, user)
   if (role == null) return c.json({ error: "not an org member" }, 403)
 
-  const projects = await listEffectiveMembersForOrg(c.env, orgId, user.id)
+  let projects = await listEffectiveMembersForOrg(c.env, orgId, user.id)
+  if (role < ROLE.OWNER && projects.length > 0) {
+    const ids = projects.map((p) => p.projectId)
+    const [floors, projectRoles] = await Promise.all([
+      getProjectRosterListFloors(c.env, orgId, ids),
+      resolveProjectRoles(c.env, user, ids),
+    ])
+    projects = projects.filter((p) => {
+      const floor = floors.get(p.projectId)
+      return floor != null && canViewRoster(projectRoles.get(p.projectId)?.level ?? null, floor)
+    })
+  }
   await bumpOrgActivity(c.env, user.id, orgId)
   return c.json({
     projects: projects.map((p) => ({

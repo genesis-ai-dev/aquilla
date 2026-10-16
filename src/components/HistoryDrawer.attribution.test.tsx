@@ -44,6 +44,7 @@ describe("HistoryDrawer revision attribution", () => {
       history: [entry],
       isLoading: false,
       isError: false,
+      failure: null,
       revalidate: vi.fn(),
     })
     render(

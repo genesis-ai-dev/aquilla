@@ -245,6 +245,10 @@ export const org = defineNamespace({
     "org.orgHome.workloadVisibilityDescription":
       "Who can see each teammate's assignment progress on this org's overview.",
     "org.orgHome.usageVisibilityDescription": "Who can see each teammate's usage on this org's overview.",
+    // AQU-1771: the org overview's Team workload / Team usage cards list
+    // people by name, so they can never be more open than the member list.
+    "org.orgHome.teamVisibilityRosterFloorHint":
+      "This card lists members by name, and the member list is set to “{floor}”. To go lower, lower the member list in Settings → Security first.",
 
     "org.orgHome.lens.recentLabel": "Recently updated",
     "org.orgHome.lens.recentDescription": "Latest project activity across all organizations",
@@ -517,6 +521,14 @@ export const org = defineNamespace({
     "org.projectOverview.offlineDownloading": "Downloading…",
     "org.projectOverview.offlineDownloadingProgress": "Downloading… ({done}/{total} files)",
     "org.projectOverview.offlineReadyBadge": "Available offline",
+    "org.projectOverview.saveMediaOffline": "Save audio for offline",
+    "org.projectOverview.offlineMediaSaving": "Saving audio {done}/{total}",
+    "org.projectOverview.offlineMediaSaved": plural({
+      one: "{count} clip saved on this device ({failed} unavailable)",
+      other: "{count} clips saved on this device ({failed} unavailable)",
+    }),
+    "org.projectOverview.offlineMediaBudget": "Storage full: {count} of {total} clips saved",
+    "org.projectOverview.offlineMediaUnavailable": "This device can't store audio",
     "org.projectOverview.removeOfflineCopy": "Remove offline copy",
     "org.projectOverview.offlineRemoveBlocked": plural({
       one: "Can't remove yet — {count} change hasn't synced to the server. Reconnect and wait for it to sync first.",
@@ -536,6 +548,9 @@ export const org = defineNamespace({
     "org.projectOverview.audioValidatedOfRecorded":
       "Of the audio recorded, {percent}% is validated.",
     "org.projectOverview.crossLaneTooltip": "Cross-language stat — not broken down per language.",
+    // AQU-1954: a language tab whose language is off and has no recordings.
+    "org.projectOverview.laneNoAudioTooltip":
+      "This language doesn't record audio. Turn on Records audio for it in Project settings → Languages.",
     "org.projectOverview.cellsSuffix": "cells",
     "org.projectOverview.laneDefaultFallback": "Default",
     "org.projectOverview.legendTranslated": "translated",
@@ -594,10 +609,12 @@ export const org = defineNamespace({
     "org.projectOverview.assignProjectManagerDialogTitle": "Assign project manager",
     "org.projectOverview.pmDialogDescription":
       "The project manager is responsible for this project. They must be a member of the project.",
-    // Shown when a person is the PM (overview) or is selected in the dialog.
-    // Hidden while the field is Unassigned — clearing does not add a role.
+    // Shown when a person is the PM (overview, behind the circled-i beside the
+    // heading) or is selected in the dialog. Hidden while the field is
+    // Unassigned — clearing does not add a role.
     "org.projectOverview.pmGrantsProjectLead":
       "Naming them project manager also adds them as a Project lead on this project. An existing higher role is kept. Clearing the project manager does not remove that membership.",
+    "org.projectOverview.pmGrantsProjectLeadAriaLabel": "What naming a project manager does",
     "org.projectOverview.selectMemberPlaceholder": "Select a member",
     "org.projectOverview.teamVisibilityDescription":
       "Who can see each teammate's assignment progress on this project.",
@@ -608,6 +625,21 @@ export const org = defineNamespace({
     // never be more open than the member list.
     "org.projectOverview.teamVisibilityRosterFloorHint":
       "This card lists members, and the member list is set to “{floor}”. To go lower, lower it on the Members card or in Settings → Security first.",
+    // AQU-1771: amber line under the Team card's visibility badge right after a
+    // Members change moved the Team card's level with it.
+    "org.projectOverview.teamVisibilityAdjusted": "Visibility adjusted",
+    "org.projectOverview.teamVisibilityAdjustedWhyAriaLabel": "Why the visibility was adjusted",
+    "org.projectOverview.teamVisibilityMovedByMembers":
+      "Changed to “{level}” because Members changed. This card lists members, so it is never more open than the member list.",
+    // AQU-1771: under a project's Team / Members visibility picker when the
+    // options below the organization's setting are greyed out.
+    "org.projectOverview.visibilityOrgFloorHint":
+      "A project can only be stricter than its organization, which is set to “{floor}”. To go lower, an org owner lowers it in Settings → Security first.",
+    // AQU-1771: a toast when a project's Team / Members visibility change was not saved.
+    "org.projectOverview.visibilitySaveFailed": "Couldn't change who can see this section",
+    "org.projectOverview.visibilitySaveOffline": "You're offline. Reconnect, then change it again.",
+    "org.projectOverview.visibilitySaveForbidden":
+      "Only people who can change this project's settings can change who sees this.",
     "org.projectOverview.noOpenAssignments": "No open assignments in this project yet.",
     "org.projectOverview.openAssignmentsStat": "{count} open · {percent}",
     "org.projectOverview.viewActivityAria": "View activity for {username}",
@@ -955,6 +987,16 @@ export const org = defineNamespace({
     "org.sectionVisibilityBadge.changeVisibilityAriaLabel": "{label}. Change section visibility",
     "org.sectionVisibilityBadge.whoCanSeeLabel": "Who can see this section",
     "org.sectionVisibilityBadge.whyOptionsOffAriaLabel": "Why some options are unavailable",
+    // AQU-1771: on a project's Team / Members badge, where the shown setting
+    // comes from — the organization, or this project's own stricter choice.
+    "org.sectionVisibilityBadge.originOrg": "Org default",
+    "org.sectionVisibilityBadge.originProject": "Stricter for this project",
+    "org.sectionVisibilityBadge.orgDefaultOption": "{label} (org default)",
+    "org.sectionVisibilityBadge.followOrgOption": "Follow the org ({label})",
+    // AQU-1771: the same, said under the picker in the badge's popover.
+    "org.sectionVisibilityBadge.originOrgLine": "Follows your org's setting.",
+    "org.sectionVisibilityBadge.originProjectLine": "Stricter than your org ({label}).",
+    "org.sectionVisibilityBadge.originUndoHint": "Pick “{option}” to undo.",
 
     // -- WorkloadRollup: org Overview team-workload manager rollup --
     "org.workloadRollup.title": "Team workload",
@@ -1403,7 +1445,6 @@ export const org = defineNamespace({
     // plan-status.ts is max(6% of the cells, 7). Nothing links the sentence to
     // the function, so a change to one is a change to both; the hint exists
     // because a group nobody can predict the membership of reads as a bug.
-    "org.projectOverview.plan.groupHintNearlyComplete": "within 6% or 7 cells of done",
     "org.projectOverview.plan.groupHintInProgress": "active, comfortably ahead",
     "org.projectOverview.plan.groupHintNotStarted": "no content yet",
     "org.projectOverview.plan.groupHintDone": "marked complete by a manager",
@@ -1594,10 +1635,12 @@ export const org = defineNamespace({
     // The title names the chapter the way the reader just clicked it; the line
     // beside it says what is outstanding in the medium that leads.
     "org.projectOverview.plan.chapterTitle": "Chapter {chapter}",
-    "org.projectOverview.plan.chapterCellsUntranslated": plural({ one: "{count} cell not yet translated", other: "{count} cells not yet translated" }),
-    "org.projectOverview.plan.chapterCellsUnvalidated": plural({ one: "{count} cell not yet validated", other: "{count} cells not yet validated" }),
-    "org.projectOverview.plan.chapterTakesUnrecorded": plural({ one: "{count} take not yet recorded", other: "{count} takes not yet recorded" }),
-    "org.projectOverview.plan.chapterTakesUnvalidated": plural({ one: "{count} take not yet validated", other: "{count} takes not yet validated" }),
+    // Sam, 2026-10-14 (meeting): the chapter card lists each queue under its
+    // own label, every line once, under the first job it still needs.
+    "org.projectOverview.plan.queueTranslateValidate": "Requires translation and validation ({count})",
+    "org.projectOverview.plan.queueValidate": "Requires validation ({count})",
+    "org.projectOverview.plan.queueRecordValidate": "Requires a recording and its validation ({count})",
+    "org.projectOverview.plan.queueValidateRecording": "Recording requires validation ({count})",
     // The overflow chip at the end of the verse row, when the outstanding
     // verses outnumber the chips one row can hold.
     // …and its sibling for a document, which has no sections at all.
@@ -1616,7 +1659,6 @@ export const org = defineNamespace({
     // Audio hangs off the file, not off a target language, so every lane reads
     // the same recordings — a manager comparing two lanes' audio bars and
     // finding them identical is seeing the truth, not a stuck filter.
-    "org.projectOverview.plan.audioSharedAcrossLanes": "audio is shared by every language",
     // ── AQU-1278: per-assignment progress ──────────────────────────────
     // Who owns which slice of a unit, and how far along their slice is.
     "org.projectOverview.plan.assignedTo": "Assigned to",
@@ -2158,6 +2200,10 @@ export const org = defineNamespace({
       "org.projectOverview.sortFilesByAria": {
         description: "Accessible name for the dropdown that chooses the sort order of the per-file breakdown list.",
       },
+      "org.projectOverview.pmGrantsProjectLeadAriaLabel": {
+        description:
+          "Accessible name for the small circled-i button beside the 'Project manager' heading on the project overview. It appears while a project manager is set, and clicking it expands a sentence explaining that naming a project manager also makes them a Project lead.",
+      },
       "org.projectOverview.fileListActionsAria": {
         description:
           "Accessible name for the icon-only overflow (⋯) button beside the file-list filter/sort controls. Distinct from org.projectOverview.moreActionsAria, which names the project-header overflow.",
@@ -2655,11 +2701,92 @@ export const org = defineNamespace({
           pct: "Whole-number completion percentage, e.g. 40.",
         },
       },
+      "org.orgHome.teamVisibilityRosterFloorHint": {
+        description:
+          "Note in the org overview's Team workload and Team usage visibility popovers, expanded from a small circled-i button when the options below the member-list setting are greyed out. Explains why (the cards show people by name, so they can't be more open than the member list) and where to lower the member list first. 'Settings → Security' is the org settings page — use its localized name.",
+        placeholders: {
+          floor: "The member list's current setting as its already-localized picker label, e.g. 'Maintainers and owners' or 'Owners only'.",
+        },
+      },
+      "org.projectOverview.teamVisibilityAdjusted": {
+        description:
+          "Two-word amber warning under the project overview's Team card visibility badge, shown right after a change to the Members card's visibility moved who can see the Team card. A small circled-i beside it opens the full explanation.",
+      },
+      "org.projectOverview.teamVisibilityAdjustedWhyAriaLabel": {
+        description:
+          "Screen-reader label for the small circled-i button beside 'Visibility adjusted' on the Team card; pressing it shows why the visibility changed.",
+      },
+      "org.projectOverview.teamVisibilityMovedByMembers": {
+        description:
+          "The full explanation opened from the circled-i beside the Team card's 'Visibility adjusted' note: a small line under the project overview's Team card visibility badge, shown right after a change to the Members card's visibility (or the org's member-list setting) moved who can see the Team card. 'Members' is the card of that name on the same page — use its localized name.",
+        placeholders: {
+          level: "The Team card's new setting as its already-localized picker label, e.g. 'Project leads and up'.",
+        },
+      },
       "org.projectOverview.teamVisibilityRosterFloorHint": {
         description:
           "Note in the project overview's Team card visibility popover, expanded from a small circled-i button when the options below the member-list setting are greyed out. Explains why (the card shows people, so it can't be more open than the member list) and where to lower the member list first. 'Members card' is the card of that name on the same page; 'Settings → Security' is the org settings page — use the localized names of both.",
         placeholders: {
           floor: "The member list's current setting as its already-localized picker label, e.g. 'Maintainers and owners' or 'Owners only'.",
+        },
+      },
+      "org.sectionVisibilityBadge.originOrg": {
+        description:
+          "Short tag after a project's 'who can see this section' badge (e.g. 'Only maintainers & owners can see this · Org default') when the project follows its organization's setting.",
+      },
+      "org.sectionVisibilityBadge.originProject": {
+        description:
+          "Short tag after a project's 'who can see this section' badge when the project chose its own setting, which can only ever be stricter (hide more) than the organization's.",
+      },
+      "org.sectionVisibilityBadge.orgDefaultOption": {
+        description:
+          "An option in a project's 'Who can see this section' picker: the role choice that equals the organization's setting. Choosing it makes the project follow the organization again.",
+        placeholders: {
+          label: "The option's already-localized role label, e.g. 'Maintainers and owners'.",
+        },
+      },
+      "org.projectOverview.visibilitySaveFailed": {
+        description:
+          "Title of an error toast on the project overview when changing a Team or Members card's 'who can see this section' setting was not saved. The toast body gives the reason (sometimes the server's own English text).",
+      },
+      "org.projectOverview.visibilitySaveOffline": {
+        description:
+          "Body of that error toast when the device is offline, so the visibility change could not be saved.",
+      },
+      "org.projectOverview.visibilitySaveForbidden": {
+        description:
+          "Body of that error toast when the person's role does not allow changing this project's settings.",
+      },
+      "org.sectionVisibilityBadge.originOrgLine": {
+        description:
+          "Line under the picker in a project's 'Who can see this section' popover when the project follows its organization's setting.",
+      },
+      "org.sectionVisibilityBadge.originProjectLine": {
+        description:
+          "Line under the picker in a project's 'Who can see this section' popover when the project chose its own setting, which can only be stricter (hide more) than its organization's. The label in parentheses is the organization's setting.",
+        placeholders: {
+          label: "The organization's already-localized role label, e.g. 'Contributors and up'.",
+        },
+      },
+      "org.sectionVisibilityBadge.originUndoHint": {
+        description:
+          "Follows 'Stricter than your org (…).' in the same popover: which picker option returns the project to its organization's setting.",
+        placeholders: {
+          option: "The exact label of that option, e.g. 'Follow the org (Maintainers and owners)' or 'Contributors and up (org default)'.",
+        },
+      },
+      "org.sectionVisibilityBadge.followOrgOption": {
+        description:
+          "First option in a project's 'Who can see this section' picker when the project has its own (stricter) setting. Choosing it removes the project's own setting so the project follows its organization again; the label in parentheses is what the section would then show.",
+        placeholders: {
+          label: "The resulting already-localized role label, e.g. 'Maintainers and owners'.",
+        },
+      },
+      "org.projectOverview.visibilityOrgFloorHint": {
+        description:
+          "Note in a project's Team / Members visibility popover, expanded from a small circled-i button when the options below the organization's setting are greyed out. A project may only hide more than its organization. 'Settings → Security' is the org settings page — use its localized name.",
+        placeholders: {
+          floor: "The organization's current setting as its already-localized picker label, e.g. 'Maintainers and owners'.",
         },
       },
       "org.sectionVisibilityBadge.whyOptionsOffAriaLabel": {
@@ -3123,10 +3250,6 @@ export const org = defineNamespace({
       "org.projectOverview.plan.groupHintSoon": {
         description: "Hint on the Due soon group header.",
       },
-      "org.projectOverview.plan.groupHintNearlyComplete": {
-        description:
-          "Hint on the Nearly complete group header, stating the rule that puts a unit there: its worse medium is short by at most six percent of its cells, or seven cells, whichever is larger. The two numbers are the rule itself, not an illustration — keep them exact.",
-      },
       "org.projectOverview.plan.groupHintInProgress": {
         description: "Hint on the In progress group header.",
       },
@@ -3582,27 +3705,26 @@ export const org = defineNamespace({
         placeholders: { chapter: "The chapter number — a number, not translated." },
         maxLength: 18,
       },
-      "org.projectOverview.plan.chapterCellsUntranslated": {
+      "org.projectOverview.plan.queueTranslateValidate": {
         description:
-          "Beside the chapter card's heading: how many cells in this chapter still have no target text. Shown when translation is the outstanding work; its two siblings cover validation and recording. Reads as a fact about the chapter, not as an instruction.",
-        placeholders: { count: "Cells with no target text — a number; it also selects the plural form." },
+          "Label above a row of verse buttons on the plan board's chapter card: the lines nobody has " +
+          "translated yet, which then also need validating. {count} is how many lines are in the row.",
+        placeholders: { count: "How many lines (a number)." },
       },
-      "org.projectOverview.plan.chapterTakesUnvalidated": {
+      "org.projectOverview.plan.queueValidate": {
         description:
-          "Beside the chapter card's heading (see chapterCellsUntranslated): how many recorded takes nobody has validated yet. Distinct from chapterTakesUnrecorded — these ARE recorded.",
-        placeholders: {
-          count: "How many takes await validation — a number; the plural form is selected by it.",
-        },
+          "Label above the chapter card's row of lines that are translated but not validated yet.",
+        placeholders: { count: "How many lines (a number)." },
       },
-      "org.projectOverview.plan.chapterCellsUnvalidated": {
+      "org.projectOverview.plan.queueRecordValidate": {
         description:
-          "Beside the chapter card's heading (see chapterCellsUntranslated): how many translated cells nobody has validated yet.",
-        placeholders: { count: "Translated cells awaiting validation — a number; it also selects the plural form." },
+          "Label above the chapter card's row of lines with no recording yet (which then also need " +
+          "the recording validated).",
+        placeholders: { count: "How many lines (a number)." },
       },
-      "org.projectOverview.plan.chapterTakesUnrecorded": {
-        description:
-          "Beside the chapter card's heading (see chapterCellsUntranslated), for a file that carries recordings: how many cells have no take against them. A 'take' is one recorded clip for one cell.",
-        placeholders: { count: "Cells with no recording — a number; it also selects the plural form." },
+      "org.projectOverview.plan.queueValidateRecording": {
+        description: "Label above the chapter card's row of lines whose recording nobody has validated yet.",
+        placeholders: { count: "How many lines (a number)." },
       },
       "org.projectOverview.plan.frontMatter": {
         description:
@@ -3624,10 +3746,6 @@ export const org = defineNamespace({
           section: "The section's own key, e.g. a book code or a scene name. Not translated.",
           count: "Outstanding cells in that section — a number, and the one the plural agrees with.",
         },
-      },
-      "org.projectOverview.plan.audioSharedAcrossLanes": {
-        description:
-          "Note beside the inspector's audio bars: recordings hang off the file rather than off one target language, so every lane reads the same audio figures. Lower case because it is read as a parenthetical beside the bars, not as a sentence of its own.",
       },
       "org.projectOverview.plan.assignedTo": {
         description:
@@ -3713,6 +3831,24 @@ export const org = defineNamespace({
           done: "Files downloaded so far — a number.",
           total: "Total files in the project being downloaded — a number.",
         },
+      },
+      "org.projectOverview.saveMediaOffline": {
+        description: "Overflow-menu item on ProjectOverview (Tauri desktop) for a project already available offline: copies its recorded and generated audio onto this device so it plays without a connection.",
+      },
+      "org.projectOverview.offlineMediaSaving": {
+        description: "Badge next to the project title while 'Save audio for offline' runs.",
+        placeholders: { done: "Audio clips processed so far — a number.", total: "Total audio clips in the project — a number." },
+      },
+      "org.projectOverview.offlineMediaSaved": {
+        description: "Badge after 'Save audio for offline' finishes.",
+        placeholders: { count: "Audio clips now on this device — a number.", failed: "Clips that could not be downloaded (deleted or failed) — a number." },
+      },
+      "org.projectOverview.offlineMediaBudget": {
+        description: "Badge when 'Save audio for offline' stopped because the on-device audio storage limit was reached.",
+        placeholders: { count: "Audio clips on this device — a number.", total: "Total audio clips in the project — a number." },
+      },
+      "org.projectOverview.offlineMediaUnavailable": {
+        description: "Badge when this device has no persistent storage for audio, so 'Save audio for offline' could not run.",
       },
       "org.projectOverview.offlineRemoveBlocked": {
         description:

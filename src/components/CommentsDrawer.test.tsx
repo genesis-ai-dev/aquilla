@@ -9,6 +9,7 @@ import { CommentsDrawer } from "./CommentsDrawer"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { ROLE } from "@/lib/frontier/roles"
+import type { CommentRefusal } from "@/lib/sync/comment-refusals"
 
 // CommentsDrawer renders CommentThread — mock it to avoid deep render trees.
 vi.mock("./CommentThread", () => ({
@@ -198,5 +199,71 @@ describe("CommentsDrawer — lane-scoped mention list (AQU-1815)", () => {
     await user.type(screen.getByRole("textbox", { name: "New thread" }), "@")
     expect(screen.getByRole("option", { name: "@bob" })).toBeInTheDocument()
     expect(screen.getByRole("option", { name: "@mia" })).toBeInTheDocument()
+  })
+})
+
+// ── AQU-1957: a refused comment says so where it was typed ───────────────────
+
+describe("CommentsDrawer — refused comment submissions (AQU-1957)", () => {
+  function renderWithRefusals(refusals: CommentRefusal[], roleLevel: number = ROLE.COMMENTER) {
+    return render(
+      <CommentsDrawer
+        project={makeProject(roleLevel)}
+        cell={CELL}
+        liveComments={[]}
+        onClose={noop}
+        onNewThread={noop}
+        onReply={noop}
+        onResolve={noop}
+        onReopen={noop}
+        submitRefusals={refusals}
+      />,
+    )
+  }
+
+  const refusal = (id: string, reason: string): CommentRefusal => ({
+    id,
+    commentId: `cmt-${id}`,
+    kind: "comment.create",
+    status: 403,
+    reason,
+  })
+
+  it("shows nothing when no comment was refused", () => {
+    renderWithRefusals([])
+    expect(screen.queryByTestId("comments-drawer-submit-refused")).not.toBeInTheDocument()
+  })
+
+  it("names the role refusal for a single refused comment", () => {
+    renderWithRefusals([refusal("r1", "role too low for comment.create")])
+    expect(screen.getByTestId("comments-drawer-submit-refused")).toHaveTextContent(
+      "1 comment you wrote wasn't posted — your role wasn't allowed to comment on this project.",
+    )
+  })
+
+  it("counts several refusals and reports the dominant reason", () => {
+    renderWithRefusals([
+      refusal("r1", "role too low for comment.create"),
+      refusal("r2", "role too low for comment.create"),
+      refusal("r3", "file 'file-1' not in scope for comment.create"),
+    ])
+    expect(screen.getByTestId("comments-drawer-submit-refused")).toHaveTextContent(
+      "3 comments you wrote weren't posted — your role wasn't allowed to comment on this project.",
+    )
+  })
+
+  it("falls back to the server's raw reason rather than swallowing an unmapped one", () => {
+    renderWithRefusals([refusal("r1", "some brand new server refusal")])
+    expect(screen.getByTestId("comments-drawer-submit-refused")).toHaveTextContent(
+      "some brand new server refusal",
+    )
+  })
+
+  it("still reports the refusal to a role that can no longer comment", () => {
+    // The refusal is the past tense of a role that may have changed since; the
+    // denial and the refusal are different sentences and both must be visible.
+    renderWithRefusals([refusal("r1", "role too low for comment.create")], ROLE.VIEWER)
+    expect(screen.getByTestId("comments-drawer-denial")).toBeInTheDocument()
+    expect(screen.getByTestId("comments-drawer-submit-refused")).toBeInTheDocument()
   })
 })

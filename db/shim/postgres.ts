@@ -157,6 +157,12 @@ export const LONG_OPERATION_TIMEOUTS = {
    *  one-off that replays a project's entire event log; minutes are the
    *  expected cost, and nobody is waiting on a page. */
   "project-rebuild": 300_000,
+  /** Projection snapshot write (AQU-1833, the nightly sweep and the admin
+   *  route). Walks a project's whole `cells` table in keyset pages; one page of
+   *  a large project's wide rows legitimately outruns the request-path cap, and
+   *  nobody is waiting on it. No transaction is held across the R2 writes — see
+   *  the consistency check in events/projection-snapshot.ts. */
+  "projection-snapshot": 120_000,
   /** D1→Postgres migration finalize (`/migrate/projects/:id/finalize`). Runs
    *  the same project-wide counter recompute as a rebuild, across a whole
    *  project's file set, at the end of a bulk ingest. */

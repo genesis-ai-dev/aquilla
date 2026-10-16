@@ -15,12 +15,15 @@ const fetchCellHistoryMock = vi.fn<
   ) => Promise<CellHistoryEvent[]>
 >()
 
-vi.mock("@/lib/sync/history-read", () => ({
+vi.mock("@/lib/sync/history-read", async (importOriginal) => ({
+  // Keep the real HistoryReadError: the hook classifies failures by it.
+  ...(await importOriginal<typeof import("@/lib/sync/history-read")>()),
   fetchCellHistory: (...args: unknown[]) =>
     fetchCellHistoryMock(...(args as Parameters<typeof fetchCellHistoryMock>)),
 }))
 
 import { useCellEditHistory } from "./useCellEditHistory"
+import { HistoryReadError } from "@/lib/sync/history-read"
 import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
 
 function makeEvent(
@@ -197,8 +200,14 @@ describe("useCellEditHistory (Phase 2b)", () => {
     expect(fetchCellHistoryMock).not.toHaveBeenCalled()
   })
 
-  it("surfaces isError when the fetch wrapper throws", async () => {
-    fetchCellHistoryMock.mockRejectedValueOnce(new Error("boom"))
+  // AQU-1248: the drawer names the network or the server, so the hook passes
+  // the read's classification through; anything else stays unclassified.
+  it.each([
+    ["an unclassified error", new Error("boom"), null],
+    ["a network failure", new HistoryReadError(0, "Failed to fetch"), { kind: "network", status: 0 }],
+    ["a server error", new HistoryReadError(503, "unavailable"), { kind: "server", status: 503 }],
+  ])("surfaces isError and the failure for %s", async (_label, error, failure) => {
+    fetchCellHistoryMock.mockRejectedValueOnce(error)
     const { result } = renderHook(() =>
       useCellEditHistory({
         enabled: true,
@@ -209,6 +218,7 @@ describe("useCellEditHistory (Phase 2b)", () => {
       }),
     )
     await waitFor(() => expect(result.current.isError).toBe(true))
+    expect(result.current.failure).toEqual(failure)
     expect(result.current.history).toEqual([])
   })
 

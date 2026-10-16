@@ -22,6 +22,7 @@ import type { CellData } from "@/hooks/useCells"
 import { parseCanonicalRef } from "@/lib/progress/canonical-rollup"
 import { chapterLabelForCell } from "./chapter-scope"
 import { characterKey } from "./audio-by-character"
+import { isSilencedForExport } from "./audio-validation-scope"
 
 export interface ChapterClip {
   cellId: string
@@ -37,6 +38,20 @@ export interface ChapterClip {
   heading: boolean
   trimStartMs?: number | null
   trimEndMs?: number | null
+  /**
+   * AQU-965: validated-only withdrew this take, so the stitch writes a GAP of
+   * its length here instead of its audio.
+   *
+   * It stays in the group rather than being filtered out because this
+   * deliverable concatenates: dropping it would close the gap up and shorten
+   * the chapter, which is a chapter that silently disagrees with the one the
+   * reader hears in the app. The clip keeps its url and trim window so the gap
+   * can be sized from the take it replaces.
+   */
+  silenced?: boolean
+  /** The withdrawn take's own length, when the attachment knows it — the gap
+   *  is written from this without fetching anything. */
+  durationMs?: number | null
 }
 
 export interface GroupAudioByChapterOptions {
@@ -230,6 +245,9 @@ export function groupAudioByChapter(
       heading,
       trimStartMs: attachment.trimStartMs ?? null,
       trimEndMs: attachment.trimEndMs ?? null,
+      ...(isSilencedForExport(attachment)
+        ? { silenced: true, durationMs: attachment.durationMs ?? null }
+        : {}),
     })
   })
 
@@ -262,6 +280,32 @@ export function previewAudioByChapter(
   }
 }
 
+/**
+ * How long a withdrawn take's gap is, in samples, from what the attachment
+ * already knew.
+ *
+ * The trim window first, exactly as the audible slice is taken
+ * (`resolvePcmWindow`): the stitch writes the length that WOULD have sounded,
+ * not the length of the stored clip, or a line trimmed down to three words
+ * would leave a gap the size of the whole take it was cut from. Returns null
+ * when the duration is unknown or the window is incoherent, and the caller
+ * then sizes the gap off the decoded samples rather than guessing.
+ */
+export function silencedGapSamples(
+  clip: Pick<ChapterClip, "durationMs" | "trimStartMs" | "trimEndMs">,
+  rate: number,
+): number | null {
+  const durationMs = clip.durationMs
+  if (durationMs == null || !Number.isFinite(durationMs) || durationMs < 0) return null
+  const start = Math.max(0, Math.min(durationMs, clip.trimStartMs ?? 0))
+  const end = clip.trimEndMs == null ? durationMs : Math.max(0, Math.min(durationMs, clip.trimEndMs))
+  // An inverted or empty window means the FULL clip downstream, so it means
+  // the full clip here too — the two must agree or the gap misreports the
+  // audio it stands in for.
+  const ms = end > start ? end - start : durationMs
+  return Math.max(0, Math.round((ms / 1000) * rate))
+}
+
 /** Filesystem-safe entry name for one chapter: `MAT_1.wav`. */
 export function chapterFileName(group: ChapterGroup): string {
   if (group.key === FILE_GROUP_KEY) return "stitched.wav"
@@ -286,6 +330,8 @@ export interface ExportChapterResult {
   chapters: number
   clips: number
   skipped: number
+  /** AQU-965: takes withdrawn for want of validation, written as gaps. */
+  silenced: number
 }
 
 export async function exportAudioByChapter(args: ExportChapterArgs): Promise<ExportChapterResult> {
@@ -298,11 +344,26 @@ export async function exportAudioByChapter(args: ExportChapterArgs): Promise<Exp
   const chapterWavs: { name: string; blob: Blob }[] = []
   let done = 0
   let skipped = 0
+  let silenced = 0
 
   for (const group of groups) {
     const pcmClips: Float32Array[] = []
     for (const clip of group.clips) {
       const cell = cellById.get(clip.cellId)!
+      // AQU-965: a withdrawn take is a GAP OF ITS OWN LENGTH, so the verses
+      // around it stay where the reader heard them. Written straight from the
+      // attachment's duration where it has one — the common case, and it costs
+      // no fetch of audio that is not going to ship. Where it has none the
+      // clip falls through to the decode below and the gap is sized from the
+      // samples, which is slower but exact.
+      const gap = clip.silenced ? silencedGapSamples(clip, TARGET_RATE) : null
+      if (gap != null) {
+        pcmClips.push(new Float32Array(gap))
+        silenced += 1
+        done += 1
+        args.onProgress?.(done, totalClips)
+        continue
+      }
       const parsed = parseFrontierAudioUrl(clip.url)
       if (!parsed) {
         skipped += 1
@@ -342,7 +403,16 @@ export async function exportAudioByChapter(args: ExportChapterArgs): Promise<Exp
             trimStartMs: clip.trimStartMs,
             trimEndMs: clip.trimEndMs,
           })
-          pcmClips.push(win.isFull ? pcm : pcm.subarray(win.start, win.end))
+          const slice = win.isFull ? pcm : pcm.subarray(win.start, win.end)
+          if (clip.silenced) {
+            // Withdrawn, and its length was not known up front — so it was
+            // decoded only to measure. The samples are discarded; the gap they
+            // sized is what ships.
+            pcmClips.push(new Float32Array(slice.length))
+            silenced += 1
+          } else {
+            pcmClips.push(slice)
+          }
         }
       } catch (err) {
         console.warn(`[audio-chapter] skipping clip ${clip.audioId} (${clip.cellId}):`, err)
@@ -364,6 +434,7 @@ export async function exportAudioByChapter(args: ExportChapterArgs): Promise<Exp
       chapters: 0,
       clips: totalClips,
       skipped,
+      silenced,
     }
   }
 
@@ -377,6 +448,7 @@ export async function exportAudioByChapter(args: ExportChapterArgs): Promise<Exp
       chapters: 1,
       clips: totalClips,
       skipped,
+      silenced,
     }
   }
 
@@ -405,5 +477,6 @@ export async function exportAudioByChapter(args: ExportChapterArgs): Promise<Exp
     chapters: chapterWavs.length,
     clips: totalClips,
     skipped,
+    silenced,
   }
 }

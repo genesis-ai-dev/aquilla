@@ -46,9 +46,10 @@ function renderFloor(validationRoleFloor: "reviewer" | "project_lead" | "maintai
 }
 
 function floorValueText(container: HTMLElement): string {
-  // The floor <Select> is the only one in this section; its displayed value
-  // lives on the [data-slot="select-value"] node.
-  const value = container.querySelector('[data-slot="select-value"]')
+  // The text floor <Select>'s displayed value lives on its
+  // [data-slot="select-value"] node. Found through its trigger's id, because
+  // the count rows carry their own "Organization default" selects (AQU-1771).
+  const value = container.querySelector('#validation-role-floor [data-slot="select-value"]')
   return value?.textContent ?? ""
 }
 

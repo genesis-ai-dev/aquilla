@@ -9,6 +9,7 @@
 
 import type { PortfolioLane, PortfolioProject } from "@/lib/frontier/portfolio"
 import { progressPercentOfFraction } from "@/lib/progress/progress-percent"
+import type { AssignLaneOption } from "@/lib/sync/assignment-lane"
 
 /**
  * Display lanes for a project: the default ('') lane is always first, followed
@@ -23,7 +24,10 @@ export function displayLanes(p: PortfolioProject): PortfolioLane[] {
     validatedCells: p.validatedCells,
     lastEditAt: p.lastEditAt,
   }
-  const lanes = (p.lanes ?? []).filter((lane) => lane.role !== "source")
+  // AQU-1977: archived languages are not live work. The overview's own lane
+  // tabs and Languages table already leave them out (AQU-1458); here they were
+  // chips and Assign options like any other.
+  const lanes = (p.lanes ?? []).filter((lane) => lane.role !== "source" && lane.archived !== true)
   if (lanes.length === 0) return [synthesizedDefault]
   // Every target row stays, including two that share a tag. The server orders them.
   return lanes
@@ -62,9 +66,30 @@ export function laneChipLabel(
  * file as import information and is never read as a lane's language.
  */
 export function resolveDefaultLaneLabel(
-  project: Pick<PortfolioProject, "targetLanguage">,
+  project: Pick<PortfolioProject, "targetLanguage" | "lanes">,
 ): string {
-  return project.targetLanguage?.trim() || ""
+  // AQU-1977: the '' lane's own row name first. The portfolio stopped sending
+  // the retired project-level `targetLanguage`, so on its own this read '' for
+  // every project and the lane showed as "Default language".
+  const row = project.lanes?.find((lane) => lane.role !== "source" && lane.lane === "")
+  return row?.name?.trim() || project.targetLanguage?.trim() || ""
+}
+
+/**
+ * AQU-1977: what an Assign launched from the org table offers — the project's
+ * own live languages, in the table's order, labelled as their chips are. No
+ * invented default: on a project with no '' lane, an assignment saved into ''
+ * belongs to no lane and its progress reads 0.
+ */
+export function assignLaneOptionsForPortfolio(
+  p: PortfolioProject,
+  fallbackLabel: string,
+): AssignLaneOption[] {
+  const defaultLabel = resolveDefaultLaneLabel(p)
+  return displayLanes(p).map((lane) => ({
+    legacyTag: lane.lane,
+    label: laneChipLabel(lane.lane, defaultLabel, fallbackLabel, lane.name),
+  }))
 }
 
 /**

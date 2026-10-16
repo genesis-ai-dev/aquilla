@@ -36,6 +36,7 @@ import {
   type LanguageProfile,
   type QuoteContinuationStyle,
 } from "../../../db/shared/language-profile"
+import { punctuationProfileForLanguage } from "../../../db/shared/punctuation-conventions"
 import { DisabledFieldTooltip } from "./DisabledFieldTooltip"
 import { LanguageProfileSlots } from "./language-profile/LanguageProfileSlots"
 import { profileSaveError } from "./language-profile/save-error"
@@ -223,7 +224,15 @@ export function LanguageProfileSection({ value, targetLanguage, canEdit, disable
                 : null}
         </p>
       </SettingsBlock>
-      <LanguageProfileSlots value={value} canEdit={canEdit} disabledTooltip={disabledTooltip} patch={patch} />
+      <LanguageProfileSlots
+        value={value}
+        // AQU-1906: the Punctuation row opens pre-filled from the project's
+        // target language, the same source "Use defaults for …" above reads.
+        punctuationPrefill={punctuationProfileForLanguage(targetLanguage)}
+        canEdit={canEdit}
+        disabledTooltip={disabledTooltip}
+        patch={patch}
+      />
     </SettingsGroup>
   )
 }

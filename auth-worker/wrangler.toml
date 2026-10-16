@@ -105,6 +105,10 @@ name = "EMAIL"
 # docs/DEPLOYMENT-ENVIRONMENTS.md § "Worker secrets (per environment)" (AQU-762):
 #   SECRET_KEY      — identity access-token signing key.
 #   SYNC_SECRET_KEY — signs /sync-token JWTs. MUST match aquilla-sync-worker.
+#   MONDAY_TOKEN_KEY — development only (AQU-1775): the Monday token encryption
+#                      key is derived from it instead of SECRET_KEY, so a
+#                      production token copied onto the dev Neon branch is
+#                      unreadable on dev. Unset keeps the SECRET_KEY derivation.
 #   OPENROUTER_API_KEY — Bearer key forwarded by /api/v1/chat/completions
 #                        to OpenRouter (folded in from aquilla-chat-worker).
 #   AGENT_SANDBOX_KEY  — shared bearer secret for the sandbox worker
@@ -303,6 +307,10 @@ SYNC_WORKER_URL = "https://api.aquilla.app/sync"
 # MCP OAuth issuer (routes/mcp-oauth.ts). Must equal the sync worker's
 # AUTH_WORKER_URL, which its protected-resource metadata names.
 MCP_OAUTH_ISSUER = "https://api.aquilla.app/identity"
+# This worker's own public base (routes/monday.ts builds the Monday webhook
+# address from it). The identity API host, NOT BASE_URL: the website answers
+# a webhook POST with 405 and Monday then refuses to create the webhook.
+BASE_URL_API = "https://api.aquilla.app/identity"
 DEFAULT_LLM_MODEL = "openai/gpt-5.6-luna"
 ENVIRONMENT = "production"
 # AQU-730 read wall. Deploy this only after neon-backfill-lanes --apply has
@@ -424,6 +432,8 @@ BASE_URL = "https://dev.aquilla.app"
 # MCP OAuth issuer (routes/mcp-oauth.ts). Must equal the sync worker's
 # AUTH_WORKER_URL, which its protected-resource metadata names.
 MCP_OAUTH_ISSUER = "https://api.dev.aquilla.app/identity"
+# This worker's own public base (Monday webhook address); see production.
+BASE_URL_API = "https://api.dev.aquilla.app/identity"
 # Stripe SANDBOX billing on the dev deployment (AQU-837). The gate also
 # requires ENVIRONMENT=development and an sk_test_/rk_test_ secret, so these
 # two vars cannot enable anything on production even if copied there.

@@ -18,6 +18,7 @@ import {
   buildBibleSwapSharedResources,
   deserializeVersificationPlan,
   mergeBibleHeadingStylesIntoStudyStylesXml,
+  mergeBibleSmallCapsCharacterStylesIntoStudyStylesXml,
   normalizeBibleStoryXmlGlyphs,
   type BibleSwapMode,
   type SerializedVersificationPlan,
@@ -31,6 +32,15 @@ export interface BibleSwapReport {
   psalmSubheaderOffsets: number
   psalmVersesInserted: number
   modifiedStories: number
+  /** AQU-1959: divine-name (`nd`) runs filled from the Bible's own runs. */
+  divineNamesReplaced: number
+  /**
+   * AQU-1959: verses whose divine-name runs were left untouched because the
+   * study and the Bible mark a different number of them. Those verses keep
+   * the study's own divine name, so a non-zero count means the output still
+   * has untranslated divine names in it.
+   */
+  divineNamesUnmatched: number
 }
 
 export interface BibleSwapStoryInput {
@@ -120,6 +130,8 @@ async function largestBibleStoryXml(bibleZip: JSZip): Promise<string> {
 
 interface SwapTotals {
   totalReplaced: number
+  totalDivineReplaced: number
+  totalDivineUnmatched: number
   totalAppendedExtras: number
   totalMissing: number
   totalPsalmOffsets: number
@@ -149,6 +161,8 @@ function aggregateSwapResult(
     )
   }
   totals.totalReplaced += stats.replacedCount
+  totals.totalDivineReplaced += stats.divineNamesReplaced ?? 0
+  totals.totalDivineUnmatched += stats.divineNamesUnmatched?.length ?? 0
   totals.totalAppendedExtras += stats.extraInBibleAppended.length
   totals.totalMissing += stats.missingFromBible.length
   totals.totalPsalmOffsets += stats.psalmSubheaderOffsets
@@ -164,6 +178,8 @@ async function spliceBibleSwapIntoZip(
 
   const totals: SwapTotals = {
     totalReplaced: 0,
+    totalDivineReplaced: 0,
+    totalDivineUnmatched: 0,
     totalAppendedExtras: 0,
     totalMissing: 0,
     totalPsalmOffsets: 0,
@@ -217,7 +233,9 @@ async function spliceBibleSwapIntoZip(
       `Psalm subheader offsets: ${totals.totalPsalmOffsets}. ` +
       `Psalm verses inserted: ${totals.totalPsalmInserted}. ` +
       `Appended extras: ${totals.totalAppendedExtras}. ` +
-      `Missing from Bible: ${totals.totalMissing}.`,
+      `Missing from Bible: ${totals.totalMissing}. ` +
+      `Divine-name runs replaced: ${totals.totalDivineReplaced} ` +
+      `(unmatched verses left as-is: ${totals.totalDivineUnmatched}).`,
   )
 
   return {
@@ -227,6 +245,8 @@ async function spliceBibleSwapIntoZip(
     psalmSubheaderOffsets: totals.totalPsalmOffsets,
     psalmVersesInserted: totals.totalPsalmInserted,
     modifiedStories: totals.modifiedStories,
+    divineNamesReplaced: totals.totalDivineReplaced,
+    divineNamesUnmatched: totals.totalDivineUnmatched,
   }
 }
 
@@ -254,13 +274,16 @@ export async function applyBibleSwapToIdml(
   // Those styles live only in the Bible package; without them InDesign
   // falls back to body text (Charis SIL Regular) instead of Source Sans 3
   // Semibold. Merge the missing heading-role styles before rewriting stories.
+  // The same is true of the Bible's divine-name small-caps character style
+  // (AQU-1959), which rides along on every spliced Bible paragraph.
   const studyStylesFile = studyZip.file("Resources/Styles.xml")
   const bibleStylesFile = bibleZip.file("Resources/Styles.xml")
   if (studyStylesFile && bibleStylesFile) {
     const studyStylesXml = await studyStylesFile.async("text")
-    const mergedStylesXml = mergeBibleHeadingStylesIntoStudyStylesXml(
-      studyStylesXml,
-      await bibleStylesFile.async("text"),
+    const bibleStylesXml = await bibleStylesFile.async("text")
+    const mergedStylesXml = mergeBibleSmallCapsCharacterStylesIntoStudyStylesXml(
+      mergeBibleHeadingStylesIntoStudyStylesXml(studyStylesXml, bibleStylesXml),
+      bibleStylesXml,
     )
     if (mergedStylesXml !== studyStylesXml) {
       studyZip.file("Resources/Styles.xml", mergedStylesXml)

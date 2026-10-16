@@ -51,6 +51,7 @@ import {
 } from "@aquilla/idml-roundtrip"
 import { biblicaSentenceCutPoints } from "./sentence-cuts"
 import {
+  BIBLICA_BOOK_CODES,
   bookCodeFromParagraphText,
   computeChapterRangeLabel,
   isBiblicaBookMarkerStyle,
@@ -190,13 +191,40 @@ interface UnitScan {
   readonly bookCode?: string
 }
 
+/** The book abbreviation a `meta:bk` paragraph's text reads as, if any. */
+function bookAbbreviation(text: string): string | undefined {
+  const abbreviation = text.replace(/\s+/g, "")
+  return abbreviation.length >= 2 && abbreviation.length <= 4 ? abbreviation : undefined
+}
+
 /**
  * A `meta:bk` paragraph's text is the book abbreviation, but InDesign may split
  * it across several `<Content>` runs, so read the joined unit text.
+ *
+ * The same marker bleed AQU-860 found in `intro:ie` reaches this paragraph too
+ * (AQU-1963): the closing `meta:c`/`meta:v` markers of the previous book's last
+ * verse are flushed into the next paragraph of the flow, which at a book
+ * boundary is the next book's `meta:bk`. Reading the whole paragraph then gives
+ * "50:26EXO", which is no abbreviation at all — the boundary goes unseen, and
+ * the next book's title and preface are filed under the previous book's last
+ * chapter instead of its own `Preface`. The paragraph is therefore read both
+ * ways — whole, and with the coordinate runs read past the way they are
+ * everywhere else a Biblica cell is cut — and the two readings are resolved
+ * against the canon below.
  */
 function bookMarkerCode(unit: IdmlTranslationUnit): string | undefined {
-  const abbreviation = unit.sourceText.replace(/\s+/g, "")
-  return abbreviation.length >= 2 && abbreviation.length <= 4 ? abbreviation : undefined
+  const whole = bookAbbreviation(unit.sourceText)
+  const words = bookAbbreviation(unit.slots
+    .filter((slot) => !isBiblicaScriptureCoordinateCharacterStyle(slot.characterStyleId))
+    .map((slot) => slot.text)
+    .join(""))
+  // A code the canon knows decides it outright, read whichever way finds one:
+  // a package that set the "1" of "1SA" in a coordinate style would otherwise
+  // hand back "SA". Only then does the words-first order below apply, which is
+  // what a code outside the canon (a deuterocanonical volume) still relies on.
+  if (whole && BIBLICA_BOOK_CODES.has(whole.toUpperCase())) return whole
+  if (words && BIBLICA_BOOK_CODES.has(words.toUpperCase())) return words
+  return words ?? whole
 }
 
 function chapterFromAnchors(unit: IdmlTranslationUnit, chapterAtStart: string): string {

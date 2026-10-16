@@ -38,6 +38,7 @@ import type { TimelineTrack } from "@/lib/timeline/tracks"
 import { trimWav, withBwfTimestamp } from "./audio-bwf"
 import { targetChipGeom } from "@/lib/timeline/lane-timing"
 import { stripInternalIds } from "./internal-id-names"
+import { isSilencedForExport } from "./audio-validation-scope"
 import {
   characterFileKey,
   characterIdentity,
@@ -127,8 +128,15 @@ export function collectPerLineClips(
     if (audioTracks.length === 0) {
       const audioId = cell.selectedAudioId ?? cell.selectedGeneratedVoiceAudioId
       if (!audioId) continue
-      const url = cell.attachments?.[audioId]?.url
+      const attachment = cell.attachments?.[audioId]
+      const url = attachment?.url
       if (!url) continue
+      // AQU-965: validated-only withdrew this take. In THIS deliverable the
+      // omission is the absence of the file — the same shape an unrecorded
+      // line's absence already has — so there is nothing to write and the
+      // line numbering is untouched (it counts every timed line, recorded or
+      // not, so the remaining files keep the numbers they would have had).
+      if (isSilencedForExport(attachment)) continue
       clips.push({
         ...base,
         audioId,
@@ -146,6 +154,8 @@ export function collectPerLineClips(
       if (!audioId) continue
       const attachment = cell.attachments?.[audioId]
       if (!attachment?.url) continue
+      // AQU-965, as above: a withdrawn take writes no file, on any track.
+      if (isSilencedForExport(attachment)) continue
       clips.push({
         ...base,
         audioId,

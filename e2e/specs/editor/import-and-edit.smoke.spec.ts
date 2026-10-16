@@ -225,7 +225,12 @@ test("alice imports markdown, edits a cell, and the edit persists across reload"
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  const text = `Hello e2e ${Date.now()}`
+  // Letters only: since the built-in "Extra numbers" check (AQU-1761, #1269),
+  // digits the source lacks render as clickable issue ranges in the read view,
+  // and activateTargetCell's one centre click then opens that rule instead of
+  // the editor. A digit-free unique token keeps this test about persistence.
+  const unique = () => Date.now().toString(36).replace(/[0-9]/g, (d) => "abcdefghij"[Number(d)])
+  const text = `Hello from alice ${unique()}`
   await ws.editCell(0, text)
 
   // Reload and assert the text survived
@@ -237,7 +242,7 @@ test("alice imports markdown, edits a cell, and the edit persists across reload"
   // AQU-1336 / AQU-1334: hard navigation does not run React cleanup. Leave
   // immediately after input, while the idle commit is still pending.
   const editorUrl = alice.url()
-  const correction = `Immediate correction ${Date.now()}`
+  const correction = `Immediate correction ${unique()}`
   const editor = await ws.activateTargetCell(0)
   await editor.fill(correction)
   await alice.goto("about:blank")

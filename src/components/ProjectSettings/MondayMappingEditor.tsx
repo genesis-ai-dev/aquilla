@@ -234,14 +234,25 @@ export function MondayMappingEditor({
   disabled,
   saving,
   onSave,
+  requestedRow = null,
 }: {
   initialColumns: MondayColumnMapping[]
   structure: MondayBoardStructure | null
   disabled: boolean
   saving: boolean
   onSave: (columns: MondayColumnMapping[]) => void
+  /** "Map it" on a new board column: add a row for it (once per click). */
+  requestedRow?: { row: MondayColumnMapping; nonce: number } | null
 }) {
   const [rows, setRows] = useState<MondayColumnMapping[]>(initialColumns)
+  // "Map it" adds the column's row once per click. Adjusting state while
+  // rendering (not in an effect) so the row is there on the same paint.
+  const [seenNonce, setSeenNonce] = useState(requestedRow?.nonce)
+  if (requestedRow && requestedRow.nonce !== seenNonce) {
+    setSeenNonce(requestedRow.nonce)
+    const { row } = requestedRow
+    setRows((prev) => (prev.some((r) => r.columnId === row.columnId) ? prev : [...prev, row]))
+  }
 
   const isDirty = useMemo(() => {
     const current = rows.map((r) => `${r.columnId}:${r.metric}`).join("|")

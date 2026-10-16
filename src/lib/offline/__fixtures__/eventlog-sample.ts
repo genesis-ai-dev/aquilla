@@ -77,5 +77,6 @@ export function buildSampleSession() {
     events.fileRemoved({ id: "file3" }),
     events.projectRemoved({ id: "proj2" }),
     events.offlineProjectRemoved({ projectId: "proj2" }),
+    events.localCheckpoint({}),
   ]
 }

@@ -8,6 +8,11 @@ import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
 import type { PortfolioProject } from "@/lib/frontier/portfolio"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 
+/** A progress bar's parts inside `el`, as "tone width" in drawing order (AQU-1764). */
+const barParts = (el: HTMLElement) =>
+  [...el.querySelectorAll<HTMLElement>("[data-progress-tone]")]
+    .map((part) => `${part.dataset.progressTone} ${part.style.width}`)
+
 // StaffLanePopover pulls org/project members over the network on mount — stub
 // it (it's covered by its own wave-A suite). We only assert it's wired here.
 vi.mock("@/components/StaffLanePopover", () => ({
@@ -232,6 +237,10 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
     expect(esChip).toHaveTextContent("es")
     expect(esChip).toHaveTextContent("22%")
     expect(screen.getByTestId("lane-chip-p1-fr")).toBeInTheDocument()
+    // AQU-1764: each chip's mini bar is the shared two-part bar — validated,
+    // then translated but not validated — ending at the printed percentage.
+    expect(barParts(defaultChip)).toEqual(["textValidated 40%", "textTranslated 28%"])
+    expect(barParts(esChip)).toEqual(["textValidated 8%", "textTranslated 14%"])
 
     // Default lane chip is rendered before the named lane chips.
     const position = esChip.compareDocumentPosition(defaultChip)
@@ -311,6 +320,8 @@ describe("OrgProjectsDataTable expandable lane sub-rows (AQU-538 §3.2)", () => 
     expect(defaultRow).toHaveTextContent("en-target")
     expect(defaultRow).toHaveTextContent("68%")
     expect(defaultRow).toHaveTextContent("40% validated")
+    // AQU-1764: the row's bar is the shared two-part bar, not a translated-only fill.
+    expect(barParts(defaultRow)).toEqual(["textValidated 40%", "textTranslated 28%"])
 
     const esRow = screen.getByTestId("project-lane-row-p1-es")
     expect(esRow).toHaveTextContent("22%")

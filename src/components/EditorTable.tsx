@@ -24,9 +24,11 @@ import {
   Eye,
   EyeOff,
   BookOpenText,
+  CloudOff,
 } from "lucide-react"
 import { FillsTwiceIndicator } from "@/components/ui/fills-twice-indicator"
 import { Spinner } from "@/components/ui/spinner"
+import type { RepetitionGesture } from "@/lib/workflow/repetition-validation"
 import { Button } from "@/components/ui/button"
 import { Badge, badgeVariants } from "@/components/ui/badge"
 import { LaneCombobox } from "@/components/LaneCombobox"
@@ -252,6 +254,8 @@ import { TermLookupPopover } from "./TermLookupPopover"
 import type { Concept, ConceptDraft, TermMatchingSettings } from "@/lib/terminology/types"
 import { conceptsForLaneTag } from "@/lib/terminology/rendering-lane"
 import { findConceptMatches } from "@/lib/terminology/match"
+import { useOnline } from "@/hooks/useOnline"
+import { useConnectivity } from "@/lib/offline/connectivity"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { bidiIsolate } from "@/lib/i18n/format"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
@@ -898,8 +902,10 @@ interface EditorTableProps {
    *  Fired by the explicit validate gesture and (AQU-1484) by the commit
    *  path's auto-validate-on-edit once that edit is SETTLED — the editor has
    *  been left. Never on unvalidate, never from an idle save mid-typing — see
-   *  `handleCellValidated` in ProjectWorkspace for why. */
-  onValidated?: (cellId: string) => void | Promise<void>
+   *  `handleCellValidated` in ProjectWorkspace for why. AQU-1486: `gesture`
+   *  says which: a "click" may ask whether to validate the repetitions too;
+   *  a "typed" edit never opens a dialog. */
+  onValidated?: (cellId: string, gesture: RepetitionGesture) => void | Promise<void>
   /** AQU-1391: cellId → how many cells in this file share its normalized
    *  source. Only repeated cells (count ≥ 2) appear; absent = no badge. */
   repetitionCounts?: ReadonlyMap<string, number>
@@ -2801,11 +2807,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           cuePlayingRow && "bg-primary/[0.07] before:pointer-events-none before:absolute before:inset-y-0 before:start-0 before:z-10 before:w-[3px] before:bg-primary",
         )}
       >
-        {isScriptureRow && (
-          <span className="pointer-events-none absolute end-1 top-1 z-10 rounded bg-sky-400/15 px-1 text-[9px] font-medium text-sky-600 dark:text-sky-400">
-            {t("editor.row.scriptureBadge")}
-          </span>
-        )}
         {untimedInTimeLens && (
           <span className="pointer-events-none absolute start-1 top-1 z-10 rounded bg-amber-400/15 px-1 text-[9px] font-medium text-amber-600 dark:text-amber-400">
             {t("editor.row.noTimingBadge")}
@@ -2950,6 +2951,30 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           sourceFootnoteNumberOffset={footnoteOffsets.source}
           targetFootnoteNumberOffset={footnoteOffsets.target}
         />
+        {/* AQU-1716: the verse badge sits at the row's FOOT, not its top-right
+            corner — that corner belongs to the row's "…" menu, and the two
+            crowded each other badly enough on a translated Biblica file that
+            another control painted over the badge's text ("ve●se").
+            Deliberately a flow element rather than an `absolute` corner pin:
+            the row's foot already carries the AI-draft progress bar
+            (`FillsTwiceIndicator`, pinned to the target well's bottom) and the
+            last line of translation text, and an overlay at `bottom-1` lands
+            on top of both the moment a verse's last line runs the cell's full
+            width. Taking its own ~16px of height instead means "clear of the
+            text and the loading bar" holds by construction at every row
+            height and viewport, with nothing to re-tune. `justify-end` +
+            `pe-1` are logical, so the badge mirrors to the bottom-LEFT under
+            an RTL UI language like the rest of the editor chrome. */}
+        {isScriptureRow && (
+          <div
+            data-testid="scripture-badge-row"
+            className="pointer-events-none flex justify-end pe-1 pb-0.5"
+          >
+            <span className="rounded bg-sky-400/15 px-1 text-[9px] font-medium text-sky-600 dark:text-sky-400">
+              {t("editor.row.scriptureBadge")}
+            </span>
+          </div>
+        )}
       </div>
           )
         }}
@@ -3082,7 +3107,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             data-chapter-nav-slot=""
             className="me-auto flex min-w-24 max-w-full flex-1 items-center lg:me-0 lg:flex-none lg:shrink"
           >
-            <div className="min-w-0 max-w-full w-full lg:w-auto">
+            <div className="min-w-0 max-w-full flex-1 lg:flex-none">
               <MilestoneNavigator
                 items={milestoneNavigationItems}
                 activeKey={activeChapterLabel!}
@@ -4005,7 +4030,7 @@ interface MemoizedRowProps {
   /** AQU-1391: fires after a validation lands — the explicit gesture, or
    *  (AQU-1484) a settled auto-validated edit; the workspace auto-propagates
    *  the confirmed text to repeated source segments. */
-  onValidated?: (cellId: string) => void | Promise<void>
+  onValidated?: (cellId: string, gesture: RepetitionGesture) => void | Promise<void>
   /** AQU-1391: cellId -> count of cells in this file sharing its normalized
    *  source. Only repeated cells appear. */
   repetitionCounts?: ReadonlyMap<string, number>
@@ -4454,7 +4479,7 @@ interface EditorRowProps {
   /** AQU-1391: fires after a validation lands — the explicit gesture, or
    *  (AQU-1484) a settled auto-validated edit; the workspace auto-propagates
    *  the confirmed text to repeated source segments. */
-  onValidated?: (cellId: string) => void | Promise<void>
+  onValidated?: (cellId: string, gesture: RepetitionGesture) => void | Promise<void>
   /** AQU-1391: how many cells in this file share THIS cell's normalized
    *  source. Undefined (or < 2) when it isn't a repetition — no badge. */
   repetitionCount?: number
@@ -5338,11 +5363,7 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
       {renderable.map((att, i) =>
         att.type === "video" ? (
           <AppTooltip key={i} content={att.title ?? undefined} disabled={!att.title}>
-            <video
-              src={att.url}
-              controls
-              className="max-h-32 rounded border object-contain"
-            />
+            <AttachmentVideo src={att.url!} />
           </AppTooltip>
         ) : (
           <AppTooltip key={i} content={att.title ?? undefined} disabled={!att.title}>
@@ -5356,6 +5377,36 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
         ),
       )}
     </div>
+  )
+}
+
+/** A source-reference video. Offline, an unreachable URL shows a plain
+ *  "Not available offline" box instead of a broken player. */
+function AttachmentVideo({ src }: { src: string }) {
+  const t = useT()
+  const online = useOnline()
+  const backendReachable = useConnectivity()
+  const [failedSrc, setFailedSrc] = useState<string | null>(null)
+  const offline = !online || backendReachable === false
+  if (failedSrc === src && offline) {
+    return (
+      <div
+        role="status"
+        data-testid="video-offline-unavailable"
+        className="flex h-20 w-36 items-center justify-center gap-1.5 rounded border bg-muted/40 text-xs text-muted-foreground"
+      >
+        <CloudOff className="size-3.5" aria-hidden />
+        {t("audio.error.notAvailableOffline")}
+      </div>
+    )
+  }
+  return (
+    <video
+      src={src}
+      controls
+      onError={() => setFailedSrc(src)}
+      className="max-h-32 rounded border object-contain"
+    />
   )
 }
 
@@ -6154,7 +6205,7 @@ function EditorRow({
   const settleOwedRepetitions = useCallback(() => {
     if (!repetitionOwedRef.current || editorFocusedRef.current) return
     repetitionOwedRef.current = false
-    void Promise.resolve(onValidatedRef.current?.(cell.id)).catch((err) => {
+    void Promise.resolve(onValidatedRef.current?.(cell.id, "typed")).catch((err) => {
       console.warn("[repetition-propagation] failed:", err)
     })
   }, [cell.id])
@@ -6730,7 +6781,7 @@ function EditorRow({
       // AQU-1391: only on the way IN. Un-validating a cell must not push its
       // text anywhere, and the propagation runs after the commit has flushed
       // so it reads this cell's settled head.
-      if (validated) await onValidated?.(cell.id)
+      if (validated) await onValidated?.(cell.id, "click")
       return true
     } catch (err) {
       console.warn(`[${validated ? "validate" : "unvalidate"}] emit failed:`, err)
@@ -8997,6 +9048,9 @@ function EditorRow({
                 attachments={audioHome?.attachments ?? cell.attachments}
                 projectId={project.id}
                 fileId={audioHome?.fileId ?? cell.fileId}
+                // AQU-1978: the voice is a take in the lane on screen, like the
+                // mic and the upload beside it.
+                targetLang={activeLane || undefined}
                 // Sam, 2026-08-25: a subtitle performed by two heard lines
                 // voices BOTH, so neither is left silent. Only the first is
                 // played back; the rest are generated alongside it.

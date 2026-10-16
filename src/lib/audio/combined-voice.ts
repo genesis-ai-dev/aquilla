@@ -33,6 +33,7 @@ import { synthesizeCellTts } from "@/lib/sync/tts"
 import { inworldSynthFieldsFromVoice } from "./inworld-voice-settings"
 import { inworldLanguageForRequest } from "./inworld-languages"
 import { effectiveSourceText } from "@/lib/cell-text"
+import { laneLanguageForTag, sourceLaneLanguage } from "@/lib/lanes/lane-language"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord, ProjectTtsSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -109,6 +110,10 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
   const provider = voice.provider ?? resolveTtsProvider(settings)
   const joined = chosen.map((c) => c.translated.trim()).join(SEPARATOR)
   const getSyncToken = audioSyncTokenFetcherForSession(session)
+  // AQU-1978: the languages of the lanes this clip performs, not the retired
+  // project-level pair (AQU-1594/1595), which is empty on a new project.
+  const targetLanguage = laneLanguageForTag(args.targetLang ?? "", project.lanes, project) ?? undefined
+  const sourceLanguage = sourceLaneLanguage(project.lanes, project) ?? undefined
 
   setAll({ kind: "synthesizing" })
   try {
@@ -123,7 +128,7 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
       // Server-side: one Inworld call for the whole joined clip; the worker
       // stores it (native clone when a reference is set) and returns its id.
       onProgress?.("Synthesizing combined clip…")
-      const language = inworldLanguageForRequest(voice, project.targetLanguage)
+      const language = inworldLanguageForRequest(voice, targetLanguage)
       const result = await synthesizeCellTts(
         {
           projectId: project.id,
@@ -146,8 +151,8 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
         projectTtsSettings: settings,
         cellVoiceId: voice.id,
         geminiContext: {
-          sourceLanguage: project.sourceLanguage,
-          targetLanguage: project.targetLanguage,
+          sourceLanguage,
+          targetLanguage,
           original: effectiveSourceText(chosen[0]),
           context: chosen[0].context,
           cellLabel: chosen[0].cellLabel,

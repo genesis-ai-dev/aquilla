@@ -53,11 +53,15 @@ function setBatchProgress(p: BatchProgress | null) {
  * the batch carries on. Checks the cancel flag every second so Cancel does not
  * have to sit out a 15-minute window; throws when cancelled.
  */
-async function waitOutTranscriptionLimit(retryAfterSeconds: number): Promise<void> {
+async function waitOutTranscriptionLimit(
+  retryAfterSeconds: number,
+  onWaiting?: (untilMs: number | null) => void,
+): Promise<void> {
   // A second over what the limiter asked for, so the retry lands in the new window.
   const until = Date.now() + Math.ceil(retryAfterSeconds + 1) * 1000
   _waits.push(until)
   if (_progress) setBatchProgress(_progress)
+  onWaiting?.(until)
   try {
     while (Date.now() < until) {
       if (_transcribeCancelFlag) throw new Error("transcription cancelled")
@@ -65,6 +69,7 @@ async function waitOutTranscriptionLimit(retryAfterSeconds: number): Promise<voi
     }
   } finally {
     _waits.splice(_waits.indexOf(until), 1)
+    onWaiting?.(null)
     if (_progress) {
       const { waitingUntil: _done, ...rest } = _progress
       setBatchProgress(rest)
@@ -221,6 +226,9 @@ export interface TranscribeAllArgs {
   orgId?: number | null
   /** @internal — test seam for the zero-shot confirm toast. */
   confirmZeroShot?: typeof confirmZeroShotBatch
+  /** AQU-1681: the hosted limit paused the batch until this time (epoch ms);
+   *  null when it carries on. For a caller showing its own progress. */
+  onWaiting?: (untilMs: number | null) => void
 }
 
 /** AQU-928: is there any audio on this cell to run ASR over? The first gate of
@@ -296,6 +304,7 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
   // voices the target text.
   const languageFor = (cell: CellData) =>
     isSourceSegmentSelected(cell) ? (args.sourceLanguage ?? targetLanguage) : targetLanguage
+  const waitForLimit = (retryAfterSeconds: number) => waitOutTranscriptionLimit(retryAfterSeconds, args.onWaiting)
   const transcribeRow = (cell: CellData, prerecognised?: TranscriptionResult) =>
     transcribeCell({
       cell,
@@ -305,7 +314,7 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
       ...(args.targetLang ? { targetLang: args.targetLang } : {}),
       ...(forceAutoModel ? { forceAutoModel } : {}),
       // AQU-1681: a batch waits out the hosted limit instead of failing rows.
-      onRateLimited: waitOutTranscriptionLimit,
+      onRateLimited: waitForLimit,
       ...(prerecognised ? { prerecognised } : {}),
     })
 
@@ -330,7 +339,7 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
             session: session!,
             projectId,
             language: languageFor(job.chunk.rows[0]!.cell),
-            onRateLimited: waitOutTranscriptionLimit,
+            onRateLimited: waitForLimit,
             transcribeRow,
             isCancelled: () => _transcribeCancelFlag,
           })

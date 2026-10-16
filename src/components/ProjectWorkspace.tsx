@@ -129,7 +129,7 @@ import { fetchContextualDrafts } from "@/lib/contextual/transport"
 import { ContextualRunPillMount } from "./contextual/ContextualRunPill"
 import type { CellData } from "@/hooks/useCells"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
-import { consumeMediaImportSeed, autoTranscribeImportedMedia } from "@/lib/audio/auto-transcribe"
+import { consumeMediaImportSeed, autoTranscribeImportedMedia, type MediaImportSeed } from "@/lib/audio/auto-transcribe"
 import { warmFileDubs } from "@/lib/audio/warm-dubs"
 import { effectiveSourceText } from "@/lib/cell-text"
 import {
@@ -705,7 +705,7 @@ export function ProjectWorkspace() {
   const t = useT()
   // AQU-1503: the batch-validate skip clauses are joined the way a list is
   // written in the reader's language, not with a hardcoded "; ".
-  const { list: formatLocaleList } = useFormat()
+  const { list: formatLocaleList, time: formatLocaleTime } = useFormat()
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
   const navigate = useNavigate()
   // Declared up here because effects further down set and read them long before
@@ -3168,30 +3168,86 @@ export function ProjectWorkspace() {
   // Media-lens empty state: attach a clip to the ACTIVE file by upload or
   // direct URL. The Import dialog can't do this — it always creates a new
   // time-ordered file. Errors propagate to TimelineAddMedia, which renders them.
+  /**
+   * AQU-646: auto-transcribe a file's new media sections — importing (or
+   * attaching) a recording must surface source text without hunting for the
+   * Transcribe button. Fire and forget: the consent dialog (first run) +
+   * progress toast + per-cell badges carry the UX; a denial simply leaves
+   * manual transcribe available.
+   *
+   * Sam, 2026-08-18: an imported MP3 takes about a minute to come back with
+   * any text, and until it does the file looks empty and broken. The toast is
+   * CREATED LAZILY, on the first progress call — a consent denial or a file
+   * with nothing to transcribe never reports, so neither of those leaves a
+   * spinner hanging over a run that is not happening.
+   *
+   * AQU-1681: shared by the import, the recording upload and the linked
+   * video's own sound (the two attach flows had no toast at all), and the
+   * toast says when the hosted limit has paused the run and when it carries
+   * on — up to a quarter of an hour that would otherwise look like a hang.
+   */
+  const startAutoTranscribe = useCallback((seed: MediaImportSeed, fileName: string) => {
+    if (!project?.id) return
+    let toastId: string | null = null
+    let lastTotal = 0
+    let title = ""
+    let waitingUntil: number | null = null
+    const plural = (n: number) => (n === 1 ? "" : "s")
+    const show = () => {
+      const description = waitingUntil !== null
+        ? t("audio.bulkProgress.waitingForLimit", { time: formatLocaleTime(waitingUntil) })
+        : undefined
+      if (toastId === null) toastId = toast.add({ type: "loading", title, description, timeout: 0 })
+      else toast.update(toastId, { type: "loading", title, description })
+    }
+    void autoTranscribeImportedMedia({
+      seed,
+      projectId: project.id,
+      session: frontierSession ?? null,
+      sourceLanguage: activeSourceLanguage,
+      targetLanguage: activeLaneTargetLanguage,
+      onProgress: (done, total) => {
+        lastTotal = total
+        // The zeroth call lands BEFORE the Whisper model is fetched, which on
+        // a cold run is most of the minute — so the first thing on screen
+        // says what is happening rather than counting from nothing.
+        title =
+          done === 0
+            ? `Transcribing ${total} section${plural(total)} of "${fileName}"\u2026`
+            : `Transcribing \u2014 ${done} of ${total} done\u2026`
+        show()
+      },
+      onWaiting: (until) => {
+        waitingUntil = until
+        if (toastId !== null) show()
+      },
+      onFailed: (message) => {
+        if (toastId !== null) toast.update(toastId, { type: "error", title: `Couldn't transcribe "${fileName}": ${message}`, description: undefined })
+      },
+      onDone: async () => {
+        // Transcripts ride outbox-queued cell.audio.attach emits — flush so
+        // they land, then pull the projection with the new source text.
+        await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+        revalidateCells()
+        // Only if something was actually reported — see the lazy toast above.
+        if (toastId !== null) {
+          toast.update(toastId, { type: "success", title: `Transcribed ${lastTotal} section${plural(lastTotal)} of "${fileName}".`, description: undefined })
+        }
+      },
+    })
+  }, [project?.id, activeSourceLanguage, activeLaneTargetLanguage, frontierSession, getTokenForProjectFile, revalidateCells, t, formatLocaleTime])
+
   /** After a recording lands on a file as its rows: send the rows, show
    *  them, and transcribe them. Shared by the upload and, AQU-1681, the
    *  linked video's own sound. */
-  const finishSourceMediaAttach = useCallback(async (fileId: string) => {
-    if (!project?.id) return
+  const finishSourceMediaAttach = useCallback(async (fileId: string, fileName: string) => {
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     revalidateCells()
     // AQU-646: the attach flow seeds auto-transcribe too — same "file gained
     // media sections" moment as an import (see handleImported).
     const seed = consumeMediaImportSeed(fileId)
-    if (seed) {
-      void autoTranscribeImportedMedia({
-        seed,
-        projectId: project.id,
-        session: frontierSession ?? null,
-        sourceLanguage: activeSourceLanguage,
-        targetLanguage: activeLaneTargetLanguage,
-        onDone: async () => {
-          await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
-          revalidateCells()
-        },
-      })
-    }
-  }, [project?.id, activeSourceLanguage, activeLaneTargetLanguage, frontierSession, getTokenForProjectFile, revalidateCells])
+    if (seed) startAutoTranscribe(seed, fileName)
+  }, [getTokenForProjectFile, revalidateCells, startAutoTranscribe])
 
   const handleAttachMediaFile = useCallback(async (file: File) => {
     if (!project?.id || !activeFileId) return
@@ -3201,8 +3257,8 @@ export function ProjectWorkspace() {
       author: currentUsername,
       getToken: getTokenForFile,
     })
-    await finishSourceMediaAttach(activeFileId)
-  }, [project?.id, activeFileId, currentUsername, getTokenForFile, finishSourceMediaAttach])
+    await finishSourceMediaAttach(activeFileId, activeFile?.name ?? file.name)
+  }, [project?.id, activeFileId, activeFile?.name, currentUsername, getTokenForFile, finishSourceMediaAttach])
 
   const handleAttachMediaUrl = useCallback(async (url: string) => {
     if (!project?.id || !activeFileId) return
@@ -12199,7 +12255,7 @@ export function ProjectWorkspace() {
           signal,
           onPhase: (phase) => onProgress({ phase }),
         })
-        await finishSourceMediaAttach(fileId)
+        await finishSourceMediaAttach(fileId, linkedVideoBaseName)
       },
     }
   }, [offerVideoSoundRows, project?.id, activeFileId, linkedVideoUrl, linkedVideoBaseName, sourceLanguageCode, currentUsername, getTokenForFile, finishSourceMediaAttach])
@@ -14786,54 +14842,11 @@ export function ProjectWorkspace() {
     refresh()
     revalidateCells()
 
-    // AQU-646: auto-transcribe the imported sections — importing an MP3 must
-    // surface source text without hunting for the Transcribe button. Fire and
-    // forget: the consent dialog (first run) + progress banner + per-cell
-    // badges carry the UX; a denial simply leaves manual transcribe available.
+    // AQU-646: auto-transcribe the imported sections (startAutoTranscribe).
     for (const ref of refs) {
       if (!isMediaFileType(ref.type)) continue
       const seed = consumeMediaImportSeed(ref.id)
-      if (!seed || !project?.id) continue
-      // Sam, 2026-08-18: an imported MP3 takes about a minute to come back with
-      // any text, and until it does the file looks empty and broken. The toast
-      // is CREATED LAZILY, on the first progress call — a consent denial or a
-      // file with nothing to transcribe never reports, so neither of those
-      // leaves a spinner hanging over a run that is not happening.
-      let toastId: string | null = null
-      let lastTotal = 0
-      const plural = (n: number) => (n === 1 ? "" : "s")
-      void autoTranscribeImportedMedia({
-        seed,
-        projectId: project.id,
-        session: frontierSession ?? null,
-        sourceLanguage: activeSourceLanguage,
-        targetLanguage: activeLaneTargetLanguage,
-        onProgress: (done, total) => {
-          lastTotal = total
-          // The zeroth call lands BEFORE the Whisper model is fetched, which on
-          // a cold run is most of the minute — so the first thing on screen
-          // says what is happening rather than counting from nothing.
-          const title =
-            done === 0
-              ? `Transcribing ${total} section${plural(total)} of "${ref.name}"\u2026`
-              : `Transcribing \u2014 ${done} of ${total} done\u2026`
-          if (toastId === null) toastId = toast.add({ type: "loading", title, timeout: 0 })
-          else toast.update(toastId, { type: "loading", title })
-        },
-        onFailed: (message) => {
-          if (toastId !== null) toast.update(toastId, { type: "error", title: `Couldn't transcribe "${ref.name}": ${message}` })
-        },
-        onDone: async () => {
-          // Transcripts ride outbox-queued cell.audio.attach emits — flush so
-          // they land, then pull the projection with the new source text.
-          await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
-          revalidateCells()
-          // Only if something was actually reported — see the lazy toast above.
-          if (toastId !== null) {
-            toast.update(toastId, { type: "success", title: `Transcribed ${lastTotal} section${plural(lastTotal)} of "${ref.name}".` })
-          }
-        },
-      })
+      if (seed) startAutoTranscribe(seed, ref.name)
     }
   }
 

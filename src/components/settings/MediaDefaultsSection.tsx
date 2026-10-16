@@ -32,6 +32,16 @@ import type { UseOrgSettings } from "@/hooks/useOrgSettings"
 import type { OrgWideSettings } from "@/lib/sync/org-settings"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { MediaDefaultKey } from "../../../db/shared/media-setting-defaults"
+import { projectSettingsPath } from "@/lib/navigation/org-paths"
+
+/** Where each setting's own value is set on Project settings, for the listed projects' links. */
+const MEDIA_SETTING_SECTION: Record<MediaDefaultKey, string> = {
+  timingLocked: "audio-media",
+  allowTrackEditing: "audio-media",
+  cellEditingFloor: "general",
+  allowSelfValidationAudio: "validation",
+  validationRoleFloorAudio: "validation",
+}
 
 interface MediaDefaultsSectionProps {
   orgSettings: UseOrgSettings
@@ -189,6 +199,8 @@ function MediaDefaultRow({
               kind="setting"
               onReset={canEdit ? () => setPendingOverrides(overrides) : undefined}
               disabled={busy}
+              projects={orgSettings.mediaOverrideProjects?.[settingKey] ?? null}
+              projectHref={(projectId) => projectSettingsPath(projectId, MEDIA_SETTING_SECTION[settingKey])}
             />
           </>
         }

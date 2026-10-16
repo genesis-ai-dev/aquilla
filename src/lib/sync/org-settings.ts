@@ -232,9 +232,9 @@ export interface OrgSettingsResponse {
   /**
    * AQU-1938: which projects those counts are, keyed by the setting they set
    * their own value for. Absent from an older server: the line then shows the
-   * bare count, as it did before.
+   * bare count, as it did before. AQU-1768: and the five media defaults.
    */
-  overrideProjects?: Partial<Record<InheritedOverrideKey, OverrideProjectList>>
+  overrideProjects?: Partial<Record<InheritedOverrideKey | MediaDefaultKey, OverrideProjectList>>
   /** AQU-1768: per media default, how many projects set their own value. */
   mediaDefaultOverrides?: Partial<Record<MediaDefaultKey, number>>
 }

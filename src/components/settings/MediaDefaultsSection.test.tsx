@@ -1,7 +1,8 @@
 // AQU-1768: the org's defaults for the timeline and recording settings, on
 // the Project defaults page.
 import { describe, it, expect, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import userEvent from "@testing-library/user-event"
 import { MediaDefaultsSection } from "./MediaDefaultsSection"
 import type { UseOrgSettings } from "@/hooks/useOrgSettings"
@@ -12,6 +13,7 @@ function orgSettings(over: Partial<UseOrgSettings> = {}): UseOrgSettings {
     resetMediaDefaultOverrides: vi.fn().mockResolvedValue({ ok: true, cleared: 1 }),
     mediaDefaults: {},
     mediaDefaultOverrides: {},
+    mediaOverrideProjects: {},
     ...over,
   } as unknown as UseOrgSettings
 }
@@ -95,5 +97,27 @@ describe("MediaDefaultsSection", () => {
     await userEvent.click(screen.getByRole("button", { name: "Reset to the default" }))
     expect(settings.resetMediaDefaultOverrides).toHaveBeenCalledExactlyOnceWith("timingLocked")
     expect(settings.patch).not.toHaveBeenCalled()
+  })
+
+  it("each count opens its projects, each linking to where that setting is set (AQU-1768)", async () => {
+    const settings = orgSettings({
+      mediaDefaultOverrides: { timingLocked: 2, cellEditingFloor: 1, allowSelfValidationAudio: 1 },
+      mediaOverrideProjects: {
+        timingLocked: { total: 2, projects: [{ id: "p-gen", name: "Genesis" }, { id: "p-exo", name: "Exodus" }] },
+        cellEditingFloor: { total: 1, projects: [{ id: "p-lev", name: "Leviticus" }] },
+        allowSelfValidationAudio: { total: 1, projects: [{ id: "p-num", name: "Numbers" }] },
+      },
+    })
+    render(<MemoryRouter><MediaDefaultsSection orgSettings={settings} canEdit /></MemoryRouter>)
+    const [lockLine, tierLine, selfLine] = screen.getAllByTestId("override-status").filter((el) => /set their own|sets its own/.test(el.textContent ?? ""))
+    await userEvent.click(within(lockLine).getByRole("button", { name: "2 projects set their own setting" }))
+    expect(within(lockLine).getByRole("link", { name: "Genesis" })).toHaveAttribute("href", "/project/p-gen/settings/audio-media")
+    expect(within(lockLine).getByRole("link", { name: "Exodus" })).toHaveAttribute("href", "/project/p-exo/settings/audio-media")
+    await userEvent.click(within(tierLine).getByRole("button", { name: "1 project sets its own setting" }))
+    expect(within(tierLine).getByRole("link", { name: "Leviticus" })).toHaveAttribute("href", "/project/p-lev/settings/general")
+    await userEvent.click(within(selfLine).getByRole("button", { name: "1 project sets its own setting" }))
+    expect(within(selfLine).getByRole("link", { name: "Numbers" })).toHaveAttribute("href", "/project/p-num/settings/validation")
+    // The reset still sits beside each count.
+    expect(within(lockLine).getByRole("button", { name: "Reset to default" })).toBeInTheDocument()
   })
 })

@@ -303,6 +303,7 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   resetValidationCountOverrides: vi.fn(),
   mediaDefaults: {},
   mediaDefaultOverrides: {},
+  mediaOverrideProjects: {},
   resetMediaDefaultOverrides: vi.fn(),
   // AQU-1037: assignment authority defaults to project_lead.
   assignmentMinRole: 500,

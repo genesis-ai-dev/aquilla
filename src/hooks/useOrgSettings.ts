@@ -23,6 +23,7 @@ import {
   type OverrideProjectList,
 } from "@/lib/sync/override-projects"
 import {
+  MEDIA_DEFAULT_KEYS,
   MEDIA_DEFAULT_SLUGS,
   mediaDefaultsFromOrgSettings,
   type MediaDefaultKey,
@@ -298,6 +299,8 @@ export interface UseOrgSettings {
    * older server), and the line then shows its bare count.
    */
   overrideProjects: Record<InheritedOverrideKey, OverrideProjectList | null>
+  /** AQU-1768: the same, for each media default's "N projects set their own". */
+  mediaOverrideProjects: Partial<Record<MediaDefaultKey, OverrideProjectList | null>>
   /** Put the projects that set their own count back on the org default. */
   resetValidationCountOverrides: (
     key: "validationCount" | "validationCountAudio",
@@ -623,6 +626,14 @@ export function useOrgSettings(
   // AQU-1768: valid values only, the same filter the server applies.
   const mediaDefaults = useMemo(() => mediaDefaultsFromOrgSettings(server?.settings), [server?.settings])
   const mediaDefaultOverrides = server?.mediaDefaultOverrides ?? EMPTY_OVERRIDES
+  // AQU-1768: which projects those are, like the three counts above (AQU-1938).
+  const serverOverrideProjects = server?.overrideProjects
+  const mediaOverrideProjects = useMemo(
+    () => Object.fromEntries(
+      MEDIA_DEFAULT_KEYS.map((key) => [key, parseOverrideProjectList(serverOverrideProjects?.[key])]),
+    ) as Partial<Record<MediaDefaultKey, OverrideProjectList | null>>,
+    [serverOverrideProjects],
+  )
   // AQU-1391: same `!== false` shape and for the same reason — unset is ON,
   // and only an explicit opt-out turns repetition propagation off org-wide.
   const autoPropagateRepetitions = server?.settings?.autoPropagateRepetitions !== false
@@ -783,6 +794,7 @@ export function useOrgSettings(
     validationCountOverrides,
     validationCountAudioOverrides,
     overrideProjects,
+    mediaOverrideProjects,
     resetValidationCountOverrides: resetValidationOverrides,
     mediaDefaults,
     mediaDefaultOverrides,

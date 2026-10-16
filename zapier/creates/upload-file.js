@@ -70,11 +70,12 @@ module.exports = {
       laneField(false, 'Optional. The lane to import into.'),
     ],
     perform,
-    sample: { ...resultSample, summary: 'Import MRK.usfm (678 cells)', artifactId: 'art_123', fileName: 'MRK.usfm' },
+    sample: { ...resultSample, summary: { filesCreated: 1, sourceCellsAdded: 678, warnings: [] }, artifactId: 'art_123', fileName: 'MRK.usfm' },
     outputFields: [
       ...resultOutputFields,
       { key: 'artifactId', label: 'Uploaded artifact ID' },
       { key: 'fileName', label: 'File name' },
+      { key: 'summary__sourceCellsAdded', label: 'Cells imported', type: 'integer' },
     ],
   },
 };

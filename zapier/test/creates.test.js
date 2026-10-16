@@ -8,7 +8,7 @@ const perform = (key, inputData) => appTester(App.creates[key].operation.perform
 
 const staged = (id = 'cs_1') => ({
   changeset: { id, status: 'staged' },
-  summary: 'Add 1 comment',
+  summary: { warnings: [] },
   digest: 'd',
   approvalUrl: `https://aquilla.app/approve/${id}`,
 });
@@ -56,7 +56,7 @@ describe('Add Comment', () => {
     expect(result).toEqual({
       status: 'awaiting_approval',
       changesetId: 'cs_1',
-      summary: 'Add 1 comment',
+      summary: { warnings: [] },
       approvalUrl: 'https://aquilla.app/approve/cs_1',
     });
     scope.done();
@@ -129,7 +129,7 @@ describe('Upload & Import File', () => {
       .matchHeader('content-type', 'text/plain')
       .reply(201, { artifactId: 'art_1', sha256: 'x', sizeBytes: 30, kind: 'source' })
       .post(`${API}/projects/prj_1/artifacts/art_1/parse`, { stage: true, fileName: 'MRK.usfm', laneId: 'lan_tpi' })
-      .reply(200, { ...staged(), summary: 'Import MRK.usfm' })
+      .reply(200, { ...staged(), summary: { filesCreated: 1, sourceCellsAdded: 3, warnings: [] }, parse: {} })
       .post(`${API}/projects/prj_1/changesets/cs_1/commit`)
       .reply(200, receipt);
 
@@ -137,7 +137,7 @@ describe('Upload & Import File', () => {
       projectId: 'prj_1', file: 'https://files.example.com/uploads/MRK.usfm', laneId: 'lan_tpi',
     });
 
-    expect(result).toMatchObject({ status: 'committed', artifactId: 'art_1', fileName: 'MRK.usfm', summary: 'Import MRK.usfm' });
+    expect(result).toMatchObject({ status: 'committed', artifactId: 'art_1', fileName: 'MRK.usfm', summary: { sourceCellsAdded: 3 } });
     fileHost.done();
     scope.done();
   });

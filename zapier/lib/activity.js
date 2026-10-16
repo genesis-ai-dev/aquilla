@@ -7,6 +7,9 @@ const { projectField, fileField } = require('./fields');
 // and only looks at the first page, so results must be newest first with
 // unique ids. The API already sorts by serverSeq descending; we re-sort and
 // drop duplicate ids so a reordered or overlapping page cannot hide new events.
+// serverTs is epoch milliseconds; Zapier users want a readable time too.
+const isoTime = (ms) => (Number.isFinite(Number(ms)) ? new Date(Number(ms)).toISOString() : null);
+
 const fetchActivity = async (z, bundle, kinds) => {
   const params = { kinds: kinds.join(','), limit: 50 };
   if (bundle.inputData.fileId) params.fileId = bundle.inputData.fileId;
@@ -15,7 +18,7 @@ const fetchActivity = async (z, bundle, kinds) => {
   return rows(body)
     .filter((item) => item && item.id && !seen.has(item.id) && seen.add(item.id))
     .sort((a, b) => Number(b.serverSeq) - Number(a.serverSeq))
-    .map((item) => ({ ...item, projectId: bundle.inputData.projectId }));
+    .map((item) => ({ ...item, projectId: bundle.inputData.projectId, occurredAt: isoTime(item.serverTs) }));
 };
 
 const baseOutputFields = [
@@ -25,8 +28,9 @@ const baseOutputFields = [
   { key: 'fileId', label: 'File ID' },
   { key: 'cellId', label: 'Cell ID' },
   { key: 'serverSeq', label: 'Sequence number', type: 'integer' },
-  { key: 'serverTs', label: 'Time', type: 'datetime' },
-  { key: 'author__name', label: 'Author name' },
+  { key: 'serverTs', label: 'Time (milliseconds since 1970)', type: 'integer' },
+  { key: 'occurredAt', label: 'Time', type: 'datetime' },
+  { key: 'author', label: 'Author' },
 ];
 
 const baseSample = {
@@ -35,8 +39,9 @@ const baseSample = {
   fileId: 'fil_123',
   cellId: 'MRK 1:1',
   serverSeq: 4821,
-  serverTs: '2026-10-16T14:05:00.000Z',
-  author: { id: 'usr_1', name: 'Alex Translator' },
+  serverTs: 1792159500000,
+  occurredAt: '2026-10-16T14:05:00.000Z',
+  author: 'alex.translator',
 };
 
 // Build one activity trigger. `kinds` is fixed for the specific triggers; the

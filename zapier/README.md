@@ -116,9 +116,9 @@ terms and help URLs.
 
 ## Known gaps
 
-- The activity feed (`/projects/:pid/activity`), `/changesets/pending` and `sort=created`
-  are being added to sync-worker in parallel. The fixtures follow the planned shapes
-  (`{ data | items, nextCursor }`, items `{ id, kind, fileId, cellId, serverSeq, serverTs, author, data }`).
-  Check them against the merged routes before the first push.
+- Fixtures match the trigger feeds in commit beadb5f38 (`claude/zapier-trigger-feeds`):
+  `/activity` answers `{ items, nextCursor }` with `author` a string and `serverTs` in epoch ms;
+  `/changesets/pending` answers `{ data }` with `summary` as counts plus `command`.
+  Re-check if those routes change before they merge.
 - Cell fields take a typed cell ID (validate warns D004). There is no cell dropdown,
   because files can hold thousands of cells. Use **Find Cell** to fill them.

@@ -40,7 +40,7 @@ module.exports = {
       },
     ],
     perform,
-    sample: { ...resultSample, summary: 'Draft 3 cells' },
+    sample: { ...resultSample, summary: { translationsAdded: 3, warnings: [] } },
     outputFields: resultOutputFields,
   },
 };

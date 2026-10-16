@@ -25,7 +25,7 @@ module.exports = {
       { key: 'value', label: 'Translation', required: true, type: 'text' },
     ],
     perform,
-    sample: { ...resultSample, summary: 'Set translation for 1 cell' },
+    sample: { ...resultSample, summary: { translationsModified: 1, warnings: [] } },
     outputFields: resultOutputFields,
   },
 };

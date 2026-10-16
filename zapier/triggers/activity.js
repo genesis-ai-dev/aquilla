@@ -8,11 +8,12 @@ const newComment = activityTrigger({
   label: 'New Comment',
   description: 'Triggers when someone comments on a cell in a project.',
   kinds: ['comment.create'],
-  sample: { kind: 'comment.create', data: { commentId: 'cmt_1', body: 'Should this be "teacher" here?', parentCommentId: null } },
+  sample: { kind: 'comment.create', data: { commentId: 'cmt_1', body: 'Should this be "teacher" here?', parentCommentId: null, viaAgent: false, scope: 'cell' } },
   outputFields: [
     { key: 'data__commentId', label: 'Comment ID' },
     { key: 'data__body', label: 'Comment text' },
     { key: 'data__parentCommentId', label: 'Reply to comment ID' },
+    { key: 'data__viaAgent', label: 'Posted by an agent', type: 'boolean' },
   ],
 });
 
@@ -22,10 +23,12 @@ const cellTranslated = activityTrigger({
   label: 'Cell Translated',
   description: 'Triggers when a translation is saved for a cell.',
   kinds: ['target.cell.commit'],
-  sample: { kind: 'target.cell.commit', data: { laneId: 'lan_123', value: 'Dispela em i stat bilong gutnius bilong Jisas Krais.' } },
+  sample: { kind: 'target.cell.commit', data: { laneId: 'lan_123', targetLang: 'tpi', value: 'Dispela em i stat bilong gutnius bilong Jisas Krais.', aiDrafted: false } },
   outputFields: [
     { key: 'data__laneId', label: 'Lane ID' },
+    { key: 'data__targetLang', label: 'Language' },
     { key: 'data__value', label: 'Translation text' },
+    { key: 'data__aiDrafted', label: 'Drafted by AI', type: 'boolean' },
   ],
 });
 
@@ -35,8 +38,12 @@ const cellValidated = activityTrigger({
   label: 'Cell Validated',
   description: 'Triggers when someone marks a cell translation as checked.',
   kinds: ['cell.validate'],
-  sample: { kind: 'cell.validate', data: { laneId: 'lan_123' } },
-  outputFields: [{ key: 'data__laneId', label: 'Lane ID' }],
+  sample: { kind: 'cell.validate', data: { editEventId: '01929c4e-7b1a-7c3e-9f00-000000000002', laneId: 'lan_123', targetLang: 'tpi' } },
+  outputFields: [
+    { key: 'data__laneId', label: 'Lane ID' },
+    { key: 'data__targetLang', label: 'Language' },
+    { key: 'data__editEventId', label: 'Checked translation event ID' },
+  ],
 });
 
 const newFile = activityTrigger({
@@ -45,8 +52,12 @@ const newFile = activityTrigger({
   label: 'New File',
   description: 'Triggers when a file is added to a project.',
   kinds: ['file.create'],
-  sample: { kind: 'file.create', cellId: null, data: { name: 'MRK.usfm' } },
-  outputFields: [{ key: 'data__name', label: 'File name' }],
+  sample: { kind: 'file.create', cellId: null, data: { name: 'MRK.usfm', fileType: 'usfm', bookCode: 'MRK' } },
+  outputFields: [
+    { key: 'data__name', label: 'File name' },
+    { key: 'data__fileType', label: 'Format' },
+    { key: 'data__bookCode', label: 'Book code' },
+  ],
 });
 
 // Event kinds people are most likely to want.
@@ -80,7 +91,7 @@ const projectActivity = activityTrigger({
       helpText: 'Pick one or more kinds of change.',
     },
   ],
-  sample: { kind: 'comment.resolve', data: {} },
+  sample: { kind: 'comment.resolve', data: { commentId: 'cmt_1', resolved: true } },
 });
 
 module.exports = { newComment, cellTranslated, cellValidated, newFile, projectActivity };

@@ -3,17 +3,13 @@
 const { get, rows } = require('../lib/api');
 const { orgField } = require('../lib/fields');
 
-const createdAt = (p) => Date.parse(p.created_at || p.createdAt || '') || 0;
-
-// Zapier treats the first item as the newest. `sort=created` asks the API for
-// newest first; we sort again here in case the API ignores the parameter
-// (older deployments sort by name) so a new project is never buried.
+// Zapier treats the first item as the newest and dedupes on `id`.
+// `sort=created` makes the API list newest first (the default is by name,
+// which would bury a new project under older ones).
 const perform = async (z, bundle) => {
   const params = { sort: 'created' };
   if (bundle.inputData.orgId) params.orgId = bundle.inputData.orgId;
-  return rows(await get(z, '/projects', params))
-    .slice()
-    .sort((a, b) => createdAt(b) - createdAt(a));
+  return rows(await get(z, '/projects', params));
 };
 
 module.exports = {
@@ -30,13 +26,13 @@ module.exports = {
       id: 'prj_123',
       name: 'Mark in Tok Pisin',
       org_id: 'org_123',
-      created_at: '2026-10-16T14:05:00.000Z',
+      role_source: 'member',
     },
     outputFields: [
       { key: 'id', label: 'Project ID' },
       { key: 'name', label: 'Project name' },
       { key: 'org_id', label: 'Organization ID' },
-      { key: 'created_at', label: 'Created at', type: 'datetime' },
+      { key: 'role_source', label: 'Your access (creator, member or org)' },
     ],
   },
 };

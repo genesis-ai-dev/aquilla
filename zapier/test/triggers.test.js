@@ -12,8 +12,8 @@ const event = (id, serverSeq, kind = 'comment.create', extra = {}) => ({
   fileId: 'fil_1',
   cellId: 'MRK 1:1',
   serverSeq,
-  serverTs: '2026-10-16T14:05:00.000Z',
-  author: { name: 'Alex' },
+  serverTs: 1792159500000,
+  author: 'u_1a2b3c4d',
   data: {},
   ...extra,
 });
@@ -26,12 +26,14 @@ describe('activity triggers', () => {
     api()
       .get(`${API}/projects/prj_1/activity`)
       .query({ kinds: 'comment.create', limit: '50' })
-      .reply(200, { data: [event('e1', 10), event('e3', 30), event('e2', 20), event('e3', 30)], nextCursor: 'c' });
+      .reply(200, { items: [event('e1', 10), event('e3', 30), event('e2', 20), event('e3', 30)], nextCursor: 'c' });
 
     const results = await perform('new_comment', { projectId: 'prj_1' });
 
     expect(results.map((r) => r.id)).toEqual(['e3', 'e2', 'e1']);
     expect(results[0].projectId).toBe('prj_1');
+    // serverTs is epoch ms; the step adds a readable time for Zap fields.
+    expect(results[0].occurredAt).toBe('2026-10-16T14:05:00.000Z');
   });
 
   it.each([
@@ -43,7 +45,7 @@ describe('activity triggers', () => {
     const scope = api()
       .get(`${API}/projects/prj_1/activity`)
       .query({ kinds: kind, limit: '50' })
-      .reply(200, { data: [event('e1', 1, kind)], nextCursor: null });
+      .reply(200, { items: [event('e1', 1, kind)], nextCursor: null });
 
     const results = await perform(key, { projectId: 'prj_1' });
 
@@ -55,7 +57,7 @@ describe('activity triggers', () => {
     const scope = api()
       .get(`${API}/projects/prj_1/activity`)
       .query({ kinds: 'comment.create', limit: '50', fileId: 'fil_9' })
-      .reply(200, { data: [], nextCursor: null });
+      .reply(200, { items: [], nextCursor: null });
 
     await perform('new_comment', { projectId: 'prj_1', fileId: 'fil_9' });
     scope.done();
@@ -65,25 +67,27 @@ describe('activity triggers', () => {
     const scope = api()
       .get(`${API}/projects/prj_1/activity`)
       .query({ kinds: 'comment.resolve,file.rename', limit: '50' })
-      .reply(200, { items: [event('e1', 5, 'file.rename')] });
+      // `data` is accepted as well as the feed's `items`, like every other list route.
+      .reply(200, { data: [event('e1', 5, 'file.rename')] });
 
     const results = await perform('project_activity', { projectId: 'prj_1', kinds: ['comment.resolve', 'file.rename'] });
 
-    // `items` is accepted as well as `data`, so either envelope works.
     expect(results.map((r) => r.kind)).toEqual(['file.rename']);
     scope.done();
   });
 });
 
 describe('New Project', () => {
-  it('puts the newest project first even if the API sorted by name', async () => {
-    api()
+  // The default order is by name, which would put a new "Acts" project below
+  // older ones and Zapier would never see it as new.
+  it('asks for newest-first order and keeps it', async () => {
+    const scope = api()
       .get(`${API}/projects`)
       .query({ sort: 'created', orgId: 'org_1' })
       .reply(200, {
         data: [
-          { id: 'p_a', name: 'Acts', created_at: '2026-01-01T00:00:00Z' },
-          { id: 'p_z', name: 'Zechariah', created_at: '2026-10-01T00:00:00Z' },
+          { id: 'p_z', name: 'Zechariah', org_id: 'org_1', role_source: 'member' },
+          { id: 'p_a', name: 'Acts', org_id: 'org_1', role_source: 'org' },
         ],
         nextCursor: null,
       });
@@ -91,6 +95,7 @@ describe('New Project', () => {
     const results = await perform('new_project', { orgId: 'org_1' });
 
     expect(results.map((p) => p.id)).toEqual(['p_z', 'p_a']);
+    scope.done();
   });
 });
 
@@ -99,7 +104,15 @@ describe('Changeset Needs Approval', () => {
     api()
       .get(`${API}/projects/prj_1/changesets/pending`)
       .reply(200, {
-        data: [{ id: 'cs_2', createdAt: '2026-10-16T14:05:00Z', summary: 'Set 3 cells', approvalUrl: 'https://aquilla.app/a/cs_2' }],
+        data: [
+          {
+            id: 'cs_2',
+            createdAt: '2026-10-16T14:05:00.000Z',
+            summary: { command: 'SetTranslation', translationsModified: 3 },
+            author: 'u_1a2b3c4d',
+            approvalUrl: 'https://aquilla.app/a/cs_2',
+          },
+        ],
         nextCursor: null,
       });
 
@@ -111,9 +124,17 @@ describe('Changeset Needs Approval', () => {
   it('surfaces the API message when the user lacks the role to see approvals', async () => {
     api()
       .get(`${API}/projects/prj_1/changesets/pending`)
-      .reply(403, { error: { code: 'permission_denied', message: 'requires MAINTAINER' } });
+      .reply(403, {
+        error: {
+          code: 'permission_denied',
+          message: 'pending changesets are visible to project maintainers and above (the people who can approve them)',
+        },
+      });
 
-    await expect(perform('changeset_pending', { projectId: 'prj_1' })).rejects.toThrow('requires MAINTAINER');
+    // A role problem, not a dead token: the user sees why, and is not told to reconnect.
+    const err = await perform('changeset_pending', { projectId: 'prj_1' }).catch((e) => e);
+    expect(err.name).toBe('AppError');
+    expect(err.message).toContain('maintainers and above');
   });
 });
 

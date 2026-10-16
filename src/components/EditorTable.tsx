@@ -7184,12 +7184,12 @@ function EditorRow({
     displayLabel: importDisplayLabel(cell.metadata),
   })
   // ── Character gutter (2026-08-07, stacked media lens only) ──────────────
-  // A row "speaks" unless it's STRUCTURE (paratext/heading) — the same set
-  // whose number pill is suppressed, so the two left-edge columns read
-  // consistently. The voice resolves through the LIVE tts settings
-  // (castAssignments → per-cell pin → default); "explicit" is gated through
-  // findVoice so an assignment pointing at a DELETED voice truthfully renders
-  // as the faded fallback rather than solid-but-narrator.
+  // A media-gutter row "speaks" unless it's STRUCTURE (paratext/heading) —
+  // the same set whose number pill is suppressed, so the two left-edge
+  // columns read consistently. The voice resolves through the LIVE tts
+  // settings (castAssignments → per-cell pin → default); "explicit" is gated
+  // through findVoice so an assignment pointing at a DELETED voice truthfully
+  // renders as the faded fallback rather than solid-but-narrator.
   //
   // AQU-646 round 8: the rule used to ALSO require source text, which is what
   // the comment above has always claimed the number pill does — and it does
@@ -7202,14 +7202,22 @@ function EditorRow({
   // missing circle read as a missing CONTROL rather than a missing column.
   //
   // The Audio view uses the same picker, opened from a field under each line's
-  // waveform rather than from a gutter (Sam, 2026-09-28).
-  const gutterSpeaking = (castGutter || Boolean(audioLens)) && !isStructuralCell(cell.type)
-  const gutterVoice = gutterSpeaking
+  // waveform rather than from a gutter (Sam, 2026-09-28). Headings get that
+  // field too: Generate and Record already sit on a heading, and the dropdown
+  // is how you choose who reads it. Section breaks (paratext) stay silent —
+  // the card itself renders nothing for them.
+  const speaksInGutter = castGutter && !isStructuralCell(cell.type)
+  const speaksInAudio = Boolean(audioLens) && cell.type !== "paratext"
+  const resolvedVoice = (speaksInGutter || speaksInAudio)
     ? resolveCastVoice(ttsSettings, cell.id, cell.ttsSettings?.voiceId)
     : null
-  const gutterExplicit =
-    gutterSpeaking &&
-    Boolean(findVoice(ttsSettings, assignedCastVoiceId(ttsSettings, cell.id) ?? cell.ttsSettings?.voiceId))
+  const gutterVoice = speaksInGutter ? resolvedVoice : null
+  const audioVoice = speaksInAudio ? resolvedVoice : null
+  const assignmentResolves = Boolean(
+    findVoice(ttsSettings, assignedCastVoiceId(ttsSettings, cell.id) ?? cell.ttsSettings?.voiceId),
+  )
+  const gutterExplicit = speaksInGutter && assignmentResolves
+  const audioExplicit = speaksInAudio && assignmentResolves
   const gutterCastName =
     cell.metadata && typeof cell.metadata.cast_name === "string" ? (cell.metadata.cast_name as string) : null
   const gutterVoices = useMemo(() => getVoiceLibrary(ttsSettings), [ttsSettings])
@@ -8013,11 +8021,11 @@ function EditorRow({
               onAfterGenerate={audioLens.onAfterGenerate}
               onPlay={() => audioLens.onPlayCell(cell.id, cell)}
               onMakeCharacter={() => audioLens.onMakeCharacterFromCell(cell.id)}
-              voicePicker={gutterVoice && (
+              voicePicker={audioVoice && (
                 <CastGutterVoice
                   variant="field"
-                  voice={gutterVoice}
-                  explicit={gutterExplicit}
+                  voice={audioVoice}
+                  explicit={audioExplicit}
                   castName={gutterCastName}
                   editable={editable && Boolean(onAssignCastVoice)}
                   voices={gutterVoices}

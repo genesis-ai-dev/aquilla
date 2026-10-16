@@ -5,6 +5,8 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { fmtLabeledDateTime, fmtShortCalendarDate } from "@/lib/format-date"
+import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 
 const emitSelect = vi.fn(async (..._args: unknown[]) => "evt-1")
@@ -630,30 +632,33 @@ describe("TakesStrip — reporting the last take", () => {
 
       const stamp = await screen.findByTestId("take-recorded-a")
       expect(stamp.textContent).toContain("mariette")
-      expect(stamp.textContent).toContain(
-        new Date(Date.parse("2026-06-30T10:00:00Z")).toLocaleDateString(),
-      )
+      expect(stamp.textContent).toContain(fmtShortCalendarDate(Date.parse("2026-06-30T10:00:00Z")))
+      expect(stamp.querySelector("[title]")).toBeNull()
     })
 
-    it("gives the exact time in the tooltip, since the stamp shows only the day", async () => {
+    it("gives the exact time in the date tooltip, since the stamp shows only the day", async () => {
+      const recordedAt = Date.parse("2026-06-30T10:00:00Z")
       driftResult = new Map([["a", drift("a")]])
-      render(<TakesStrip {...common} takes={[take("a", 1000)]} selectedAudioId="a" />)
+      renderWithTooltips(<TakesStrip {...common} takes={[take("a", 1000)]} selectedAudioId="a" />)
 
-      const title = (await screen.findByTestId("take-recorded-a")).getAttribute("title")
-      expect(title).toContain("Recorded")
-      expect(title).toContain("mariette")
-      expect(title).toContain(new Date(Date.parse("2026-06-30T10:00:00Z")).toLocaleString())
+      const stamp = await screen.findByTestId("take-recorded-a")
+      const trigger = stamp.querySelector("[data-slot=tooltip-trigger]")
+      expect(trigger).toBeTruthy()
+      await expectTooltip(trigger!, fmtLabeledDateTime(recordedAt, "Recorded"))
     })
 
     it("says a synthesised take was GENERATED, not recorded", async () => {
       // The named person chose to generate it; they did not perform it, and
       // calling a TTS render a recording misattributes human performance.
+      const recordedAt = Date.parse("2026-06-30T10:00:00Z")
       driftResult = new Map([["g", drift("g", { drifted: false })]])
-      render(<TakesStrip {...common} takes={[genTake("g")]} selectedGeneratedAudioId="g" selectedAudioId={null} />)
+      renderWithTooltips(<TakesStrip {...common} takes={[genTake("g")]} selectedGeneratedAudioId="g" selectedAudioId={null} />)
 
-      const title = (await screen.findByTestId("take-recorded-g")).getAttribute("title")
-      expect(title).toContain("Generated")
-      expect(title).not.toContain("Recorded")
+      const stamp = await screen.findByTestId("take-recorded-g")
+      const trigger = stamp.querySelector("[data-slot=tooltip-trigger]")
+      expect(trigger).toBeTruthy()
+      await expectTooltip(trigger!, fmtLabeledDateTime(recordedAt, "Generated"))
+      expect(screen.getByRole("tooltip").textContent).not.toContain("Recorded")
     })
 
     it("never badges a synthesised take as text-drifted", async () => {

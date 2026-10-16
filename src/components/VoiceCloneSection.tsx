@@ -276,11 +276,17 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
         </p>
       )}
 
+      {/* Not `hidden` (`display: none`). This section lives in the new-voice
+          dialog's focus trap, and a display:none file input ignores the
+          button's .click() there — the same reason the recorder's upload
+          input is sr-only. tabIndex keeps it out of the trap's tab order. */}
       <input
         ref={fileInputRef}
         type="file"
         accept="audio/*"
-        className="hidden"
+        className="sr-only"
+        tabIndex={-1}
+        aria-label={t("audio.clone.uploadButton")}
         onChange={onPickFile}
       />
     </div>

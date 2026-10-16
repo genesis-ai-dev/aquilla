@@ -2,14 +2,18 @@
 // the two can never drift apart (AQU-1210 / AQU-1217). Kept out of
 // chip-parts.tsx so that file exports only components (fast refresh).
 
+/** Same corner radius as the small icon buttons outside the editor
+ *  (`icon-sm`), so a 16px control reads as one of those buttons. */
+const CORNER_BUTTON_RADIUS = "rounded-[min(var(--radius-md),12px)]"
+
 /** A corner button's classes. `reveal: "hover"` is the timeline's — invisible
  *  until the pointer is over the chip. `"always"` is for surfaces that are not
  *  a chip in a crowded lane (a card, a recorder), where a control you have to
  *  discover by hovering would simply go unfound. */
 export function chipCornerButtonClass(side: "left" | "right", reveal: "hover" | "always" = "hover"): string {
   return reveal === "hover"
-    ? `absolute ${side === "left" ? "left-2" : "right-2"} top-1 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-background/80 opacity-0 shadow-sm ring-1 ring-border transition-opacity hover:bg-background group-hover/chip:opacity-100 focus-visible:opacity-100`
-    : `absolute ${side === "left" ? "left-2" : "right-2"} top-1 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-background/80 shadow-sm ring-1 ring-border transition-colors hover:bg-background`
+    ? `absolute ${side === "left" ? "left-2" : "right-2"} top-1 z-10 flex h-4 w-4 items-center justify-center ${CORNER_BUTTON_RADIUS} bg-background/80 opacity-0 shadow-sm ring-1 ring-border transition-opacity hover:bg-background group-hover/chip:opacity-100 focus-visible:opacity-100`
+    : `absolute ${side === "left" ? "left-2" : "right-2"} top-1 z-10 flex h-4 w-4 items-center justify-center ${CORNER_BUTTON_RADIUS} bg-background/80 shadow-sm ring-1 ring-border transition-colors hover:bg-background`
 }
 
 /** The validated tick's classes (bottom-right). */

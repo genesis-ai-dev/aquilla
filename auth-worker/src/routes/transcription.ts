@@ -7,9 +7,19 @@ import { authMiddleware } from "../middleware/auth"
 import { creditGuard, recordCredit } from "../lib/credits"
 import { checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
 import { weeklyUsageActive } from "../lib/billing/usage-mode"
-import { reserveWorkspaceUsage } from "../lib/billing/workspace-usage"
-import { settleChatUsage, holdChatUsage, type ChatUsage } from "../lib/billing/chat-usage"
+import { reserveWorkspaceUsage, settleWorkspaceUsage } from "../lib/billing/workspace-usage"
+import {
+  settleChatUsage, holdChatUsage, releaseChatUsage, type ChatUsage,
+} from "../lib/billing/chat-usage"
 import { readProviderCostCents } from "../../../db/shared/billing-cost"
+import {
+  omniAmortization, omniCostBoundCents, omniRawCostCents, type OmniModel,
+} from "../../../db/shared/omni-asr-cost"
+import { omniLanguageFromTag, whisperLanguageFromTag } from "../lib/transcription-language"
+import {
+  isAllowedExampleUrl, omniConfigured, omniFetch, omniStatusSchema, omniTranscribe,
+  omniTranscribeResponseSchema, OMNI_MAX_AUDIO_SECONDS, zeroShotEnabledForOrg,
+} from "../lib/omni-asr"
 import {
   transcriptionSeconds, transcriptionCostBound, WHISPER_MODEL,
 } from "../lib/billing/transcription-usage"
@@ -31,7 +41,15 @@ const requestSchema = z.object({
     data: z.string().min(1).max(2600000).regex(/^[A-Za-z0-9+/]+={0,2}$/),
     format: z.literal("wav"),
   }),
-  language: z.string().regex(/^[a-z]{2,3}$/).optional(),
+  /** The project's raw BCP-47 tag; the server picks the model from it. */
+  language: z.string().max(64).regex(/^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$/).optional(),
+  /** "zs" is the per-user zero-shot opt-in; "auto" picks Whisper or CTC. */
+  model: z.enum(["auto", "zs"]).default("auto"),
+  /** Zero-shot context pairs from GET …/transcription-examples. */
+  examples: z.array(z.object({
+    url: z.string().max(4096),
+    text: z.string().min(1).max(4000),
+  })).max(10).optional(),
 })
 const upstreamSchema = z.object({
   text: z.string(),
@@ -52,16 +70,39 @@ transcription.post("/transcriptions", authMiddleware,
     const request = c.req.valid("json")
     const role = await resolveProjectRole(c.env, user, request.projectId)
     if (!role || role.level < 400) return c.json({ error: "forbidden" }, 403)
-    if (!c.env.OPENROUTER_API_KEY) {
+    // auto: Whisper for every tag it supports, and when no tag is sent (its
+    // auto-detect, as before). Otherwise Omnilingual — CTC, or ZS on opt-in.
+    const whisperLanguage = whisperLanguageFromTag(request.language)
+    const omniModel: OmniModel | null = request.model === "zs" ? "zs"
+      : request.language === undefined || whisperLanguage !== undefined ? null : "ctc"
+    if (omniModel === null && !c.env.OPENROUTER_API_KEY) {
       return c.json({ error: "Hosted transcription is not configured" }, 503)
+    }
+    if (omniModel !== null && !omniConfigured(c.env)) {
+      return c.json({ error: "Omnilingual transcription is not configured" }, 503)
+    }
+    if (omniModel === "zs") {
+      if (!request.examples?.length) return c.json({ error: "zero_shot_examples_required" }, 400)
+      if (!request.examples.every(example => isAllowedExampleUrl(c.env, example.url))) {
+        return c.json({ error: "invalid_example_url" }, 400)
+      }
     }
     let seconds: number
     try { seconds = transcriptionSeconds(request.input_audio.data) }
     catch { return c.json({ error: "Invalid transcription audio" }, 400) }
+    if (omniModel !== null && seconds >= OMNI_MAX_AUDIO_SECONDS) {
+      return c.json({ error: "omnilingual_audio_too_long" }, 400)
+    }
     const project = await c.env.AQUILLA_PG.prepare(
       "SELECT org_id FROM projects WHERE id = ?",
     ).bind(request.projectId).first<{ org_id: number | null }>()
     const orgId = project?.org_id ?? 0
+    if (omniModel === "zs") {
+      let enabled: boolean
+      try { enabled = await zeroShotEnabledForOrg(c.env.AQUILLA_PG, orgId) }
+      catch { return c.json({ error: "Transcription settings unavailable" }, 503) }
+      if (!enabled) return c.json({ error: "zero_shot_disabled" }, 403)
+    }
     const weekly = weeklyUsageActive(c.env, c.req.url)
     if (weekly === "unavailable") {
       return c.json({ error: "usage_rehearsal_unavailable" }, 503)
@@ -89,8 +130,14 @@ transcription.post("/transcriptions", authMiddleware,
       })
     }
     let bound: number
-    try { bound = await transcriptionCostBound(c.env, seconds) }
-    catch { return c.json({ error: "Transcription price unavailable" }, 503) }
+    let amortization = 0
+    try {
+      if (omniModel === null) bound = await transcriptionCostBound(c.env, seconds)
+      else {
+        amortization = omniAmortization(c.env.OMNI_ASR_AMORTIZATION)
+        bound = omniCostBoundCents(omniModel, seconds, amortization)
+      }
+    } catch { return c.json({ error: "Transcription price unavailable" }, 503) }
     let usage: ChatUsage | undefined
     if (weekly === "on") {
       const suppliedId = c.req.header("Idempotency-Key")
@@ -111,6 +158,51 @@ transcription.post("/transcriptions", authMiddleware,
         return c.json({ error: "Transcription accounting unavailable" }, 503)
       }
     }
+    if (omniModel !== null && omniConfigured(c.env)) {
+      const lang = omniLanguageFromTag(request.language)
+      let response: Response
+      try {
+        response = await omniTranscribe(c.env, {
+          model: omniModel, audio: request.input_audio.data,
+          ...(lang ? { lang } : {}),
+          ...(omniModel === "zs" ? { examples: request.examples } : {}),
+        })
+      } catch {
+        // A timeout may follow GPU work: keep the reservation held.
+        return c.json({ error: "Transcription provider unavailable" }, 502)
+      }
+      if (!response.ok) {
+        // Our service validates (secret, body, example fetch) before it starts
+        // the GPU timer, so a 4xx other than 408 is proven free. 5xx and 408
+        // stay held, as with chat (chat-usage.ts providerRejectedPreModel).
+        if (usage && response.status >= 400 && response.status < 500 && response.status !== 408) {
+          await releaseChatUsage(c.env, usage)
+        }
+        return c.json({ error: "Transcription provider failed" }, 502)
+      }
+      const parsed = omniTranscribeResponseSchema.safeParse(await response.json().catch(() => null))
+      if (!parsed.success) return c.json({ error: "Invalid transcription response" }, 502)
+      const { text, words, gpuSeconds, gpu, timingsApproximate } = parsed.data
+      const rawCents = omniRawCostCents(gpuSeconds, gpu, amortization)
+      if (usage) {
+        let status: "settled" | "pending" = "settled"
+        try { await settleWorkspaceUsage(c.env.AQUILLA_PG, usage.orgId, usage.requestId, rawCents) }
+        catch {
+          console.warn("[billing] omnilingual usage requires reconciliation", usage, { rawCents })
+          status = "pending"
+        }
+        c.header("X-Billing-Usage-Status", status)
+      } else {
+        await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", rawCents, Math.ceil(seconds))
+      }
+      if (text.trim() && !words.length) {
+        return c.json({ error: "Transcription provider returned no timings" }, 502)
+      }
+      return c.json({
+        text, chunks: words.map(({ text, start, end }) => ({ text, start, end })),
+        ...(timingsApproximate ? { timingsApproximate: true } : {}),
+      })
+    }
     const base = c.env.OPENROUTER_BASE_URL?.replace(/\/+$/, "")
       ?? "https://openrouter.ai/api/v1"
     let generationId: string | undefined
@@ -123,7 +215,7 @@ transcription.post("/transcriptions", authMiddleware,
         },
         body: JSON.stringify({
           model: WHISPER_MODEL, input_audio: request.input_audio,
-          language: request.language, response_format: "verbose_json",
+          language: whisperLanguage, response_format: "verbose_json",
           timestamp_granularities: ["word", "segment"],
         }),
         signal: AbortSignal.timeout(65000),
@@ -158,6 +250,65 @@ transcription.post("/transcriptions", authMiddleware,
       if (usage) await holdChatUsage(c.env, usage, generationId)
       return c.json({ error: "Transcription provider unavailable" }, 502)
     }
+  })
+
+// ── Warm-up + status proxies (spec §3/§5). Warming is free; only a project
+// contributor can trigger it, and ZS respects the org gate so a disabled org
+// cannot spin up the expensive container.
+
+const warmSchema = z.object({
+  projectId: z.string().min(1).max(200),
+  model: z.enum(["ctc", "zs"]),
+})
+const statusQuerySchema = z.object({
+  projectId: z.string().min(1).max(200),
+  model: z.enum(["ctc", "zs"]).default("zs"),
+})
+
+/** Membership + org gate shared by both proxies; null means proceed. */
+async function omniProxyGate(
+  env: Env, user: Variables["user"], projectId: string, model: OmniModel,
+): Promise<{ error: string; status: 403 | 503 } | null> {
+  const role = await resolveProjectRole(env, user, projectId)
+  if (!role || role.level < 400) return { error: "forbidden", status: 403 }
+  if (!omniConfigured(env)) return { error: "Omnilingual transcription is not configured", status: 503 }
+  if (model === "zs") {
+    const project = await env.AQUILLA_PG.prepare("SELECT org_id FROM projects WHERE id = ?")
+      .bind(projectId).first<{ org_id: number | null }>()
+    let enabled: boolean
+    try { enabled = await zeroShotEnabledForOrg(env.AQUILLA_PG, project?.org_id ?? 0) }
+    catch { return { error: "Transcription settings unavailable", status: 503 } }
+    if (!enabled) return { error: "zero_shot_disabled", status: 403 }
+  }
+  return null
+}
+
+transcription.post("/transcriptions/warm", authMiddleware,
+  zValidator("json", warmSchema), async c => {
+    const { projectId, model } = c.req.valid("json")
+    const denied = await omniProxyGate(c.env, c.get("user"), projectId, model)
+    if (denied) return c.json({ error: denied.error }, denied.status)
+    if (!omniConfigured(c.env)) return c.json({ error: "Omnilingual transcription is not configured" }, 503)
+    try {
+      const response = await omniFetch(c.env, "/warm", { method: "POST", body: { model }, timeoutMs: 10000 })
+      if (!response.ok) return c.json({ error: "Warm-up failed" }, 502)
+    } catch { return c.json({ error: "Warm-up unavailable" }, 502) }
+    return c.json({ ok: true }, 202)
+  })
+
+transcription.get("/transcriptions/status", authMiddleware,
+  zValidator("query", statusQuerySchema), async c => {
+    const { projectId, model } = c.req.valid("query")
+    const denied = await omniProxyGate(c.env, c.get("user"), projectId, model)
+    if (denied) return c.json({ error: denied.error }, denied.status)
+    if (!omniConfigured(c.env)) return c.json({ error: "Omnilingual transcription is not configured" }, 503)
+    try {
+      const response = await omniFetch(c.env, `/status?model=${model}`, { method: "GET", timeoutMs: 10000 })
+      if (!response.ok) return c.json({ error: "Status unavailable" }, 502)
+      const parsed = omniStatusSchema.safeParse(await response.json().catch(() => null))
+      if (!parsed.success) return c.json({ error: "Invalid status response" }, 502)
+      return c.json(parsed.data, 200, { "Cache-Control": "no-store" })
+    } catch { return c.json({ error: "Status unavailable" }, 502) }
   })
 
 export default transcription

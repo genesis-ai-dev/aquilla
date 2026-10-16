@@ -175,6 +175,15 @@ export interface Env {
   /** Dev/e2e only: override the OpenRouter API base (e.g. the scripted mock
    *  in scripts/mock-openrouter.ts). Never set in prod. */
   OPENROUTER_BASE_URL?: string
+  /** Omnilingual ASR Modal app base URL (infra/modal/omnilingual_asr.py),
+   *  e.g. https://<workspace>--omnilingual-asr-web.modal.run. Unset = hosted
+   *  transcription for non-Whisper languages answers 503. */
+  OMNI_ASR_MODAL_URL?: string
+  /** Secret: shared with the Modal app's `aquilla-omni-asr` secret, sent as
+   *  X-Omni-Secret. `wrangler secret put OMNI_SHARED_SECRET`. */
+  OMNI_SHARED_SECRET?: string
+  /** Multiplier on metered GPU cost for idle/cold-start time. Default 1.5. */
+  OMNI_ASR_AMORTIZATION?: string
   /** Kill switch for Jev react decisions (lib/jev/decide.ts): "off" makes the
    *  react loop use its fixed rules without calling Jev. Unset = on. */
   JEV_REACT?: string

@@ -35,6 +35,7 @@ import { handleCellsReadRequest } from "./events/cells-read-route"
 import { handleCellConfidenceRequest } from "./events/cell-confidence-route"
 import { handleHealthRollupRequest } from "./events/health-rollup-route"
 import { handleCellAudioReadRequest } from "./events/cell-audio-read-route"
+import { handleTranscriptionExamplesRequest } from "./events/transcription-examples-route"
 import { handleCellLinksReadRequest } from "./events/cell-links-read-route"
 import { handleCellMorphReadRequest } from "./events/cell-morph-read-route"
 import { handleSourceWordAlignmentRequest } from "./events/source-word-alignment-route"
@@ -461,6 +462,9 @@ const worker = {
     if (healthRollupResponse) return withCors(healthRollupResponse, request)
     const cellAudioReadResponse = await handleCellAudioReadRequest(request, env)
     if (cellAudioReadResponse) return withCors(cellAudioReadResponse, request)
+    // Omnilingual ASR zero-shot examples + their signed audio (spec §2).
+    const transcriptionExamplesResponse = await handleTranscriptionExamplesRequest(request, env)
+    if (transcriptionExamplesResponse) return withCors(transcriptionExamplesResponse, request)
     const cellLinksReadResponse = await handleCellLinksReadRequest(request, env)
     if (cellLinksReadResponse) return withCors(cellLinksReadResponse, request)
     const cellMorphReadResponse = await handleCellMorphReadRequest(request, env)

@@ -120,6 +120,9 @@ name = "EMAIL"
 #   GITLAB_ADMIN_TOKEN      — trusted service token for access reconstruction.
 #   STRIPE_SECRET_KEY       — Stripe secret (sk_test_… / sk_live_…). Never commit.
 #   STRIPE_WEBHOOK_SECRET   — Stripe webhook signing secret (whsec_…).
+#   OMNI_SHARED_SECRET      — sent as X-Omni-Secret to the Omnilingual ASR Modal
+#                             app; MUST match its `aquilla-omni-asr` Modal secret.
+#                             Unset → non-Whisper hosted transcription answers 503.
 # Plain vars: see types.ts for the full list.
 #
 # Outbound email (password reset + project invites) goes through Cloudflare
@@ -156,6 +159,14 @@ mode = "smart"
 crons = ["*/5 * * * *", "0 14 * * 1", "0 14 1 * *"]
 
 [vars]
+# Omnilingual ASR on Modal (infra/modal/omnilingual_asr.py). Hosted
+# transcription for languages Whisper lacks, plus the zero-shot opt-in. Empty =
+# those requests answer 503 (Whisper languages are unaffected). Set the deployed
+# Modal web URL, then `wrangler secret put OMNI_SHARED_SECRET --env=<env>` with
+# the value of the Modal secret `aquilla-omni-asr`. OMNI_ASR_AMORTIZATION
+# (default 1.5) multiplies metered GPU cost to cover idle and cold-start time.
+OMNI_ASR_MODAL_URL = ""
+OMNI_ASR_AMORTIZATION = "1.5"
 ALGORITHM = "HS256"
 # [Pen test] Auth & session mgmt (2026-09-28): was 43200 (30 days). Lowered per
 # docs/OPSEC.md V8 — with server-side jti revocation now in place
@@ -286,6 +297,14 @@ tag = "v1"
 new_sqlite_classes = ["ContextualRunDriver"]
 
 [env.production.vars]
+# Omnilingual ASR on Modal (infra/modal/omnilingual_asr.py). Hosted
+# transcription for languages Whisper lacks, plus the zero-shot opt-in. Empty =
+# those requests answer 503 (Whisper languages are unaffected). Set the deployed
+# Modal web URL, then `wrangler secret put OMNI_SHARED_SECRET --env=<env>` with
+# the value of the Modal secret `aquilla-omni-asr`. OMNI_ASR_AMORTIZATION
+# (default 1.5) multiplies metered GPU cost to cover idle and cold-start time.
+OMNI_ASR_MODAL_URL = ""
+OMNI_ASR_AMORTIZATION = "1.5"
 ALGORITHM = "HS256"
 # [Pen test] Auth & session mgmt (2026-09-28): see [vars] above for why this
 # dropped from 43200 (30 days) — same reasoning applies to production.
@@ -410,6 +429,14 @@ new_sqlite_classes = ["ContextualRunDriver"]
 binding = "CF_VERSION_METADATA"
 
 [env.development.vars]
+# Omnilingual ASR on Modal (infra/modal/omnilingual_asr.py). Hosted
+# transcription for languages Whisper lacks, plus the zero-shot opt-in. Empty =
+# those requests answer 503 (Whisper languages are unaffected). Set the deployed
+# Modal web URL, then `wrangler secret put OMNI_SHARED_SECRET --env=<env>` with
+# the value of the Modal secret `aquilla-omni-asr`. OMNI_ASR_AMORTIZATION
+# (default 1.5) multiplies metered GPU cost to cover idle and cold-start time.
+OMNI_ASR_MODAL_URL = ""
+OMNI_ASR_AMORTIZATION = "1.5"
 POSTHOG_HOST = "https://eu.i.posthog.com"
 POSTHOG_KEY = "phc_qy5gb7wTaW5RbmMW8SEyQPSLKtYFtUobaqKZWiUs7cBt"
 ALGORITHM = "HS256"

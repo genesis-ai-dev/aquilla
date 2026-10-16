@@ -7,7 +7,7 @@
 // Lives on the personal Preferences page (device-scoped, like the model cache
 // itself). Project Settings links here rather than duplicating the controls.
 
-import { useEffect, useState } from "react"
+import { Fragment, useEffect, useState } from "react"
 import { CheckCircle2, AlertCircle, Download, RotateCw, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -72,7 +72,8 @@ export function LocalModelsSection() {
             {t("settings.transcription.scope")}
           </p>
           {(["hosted", "local"] as const).map(value => (
-            <label key={value} className="flex items-start gap-3 text-sm">
+            <Fragment key={value}>
+            <label className="flex items-start gap-3 text-sm">
               <input
                 type="radio"
                 name="transcription-provider"
@@ -94,8 +95,10 @@ export function LocalModelsSection() {
                 </span>
               </span>
             </label>
+            {/* The model list belongs to the hosted option, so it sits under it. */}
+            {value === "hosted" && provider === "hosted" && <TranscriptionModelPicker />}
+            </Fragment>
           ))}
-          {provider === "hosted" && <TranscriptionModelPicker />}
         </fieldset>
       </SettingsGroup>
       <SettingsGroup label={t("projectSettings.localModels.onDeviceLabel")}>

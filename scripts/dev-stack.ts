@@ -100,6 +100,12 @@ const SYNC_PORT = Number(process.env.DEV_STACK_SYNC_PORT) || 8789
 // the local auth worker at a deployed sandbox, or let Wrangler start the
 // container locally when a compatible Docker engine is available.
 const AGENT_PORT = Number(process.env.DEV_STACK_AGENT_PORT) || 8790
+// Optional public URL (e.g. a `cloudflared tunnel --url http://127.0.0.1:8789`)
+// for the sync-worker. Cloud services that fetch from it — the Modal
+// Omnilingual zero-shot example audio and diarization — cannot reach
+// 127.0.0.1. When set, identity's SYNC_WORKER_URL and sync's
+// DIARIZATION_PUBLIC_BASE both use it, so the example-URL allow-list matches.
+const SYNC_PUBLIC_URL = process.env.DEV_STACK_SYNC_PUBLIC_URL?.trim().replace(/\/+$/, "") || ""
 const AGENT_SANDBOX_KEY_DEV = "dev-sandbox-key"
 const DEFAULT_VITE_PORT = 5173
 // Scripted OpenRouter mock (scripts/mock-openrouter.ts) — booted when the
@@ -706,7 +712,7 @@ async function main(): Promise<void> {
       // never reaches c.env, so the prod URL from wrangler.toml [vars] would
       // win and local calls would silently hit prod (found independently by
       // both the linked-projects and PD7 live QA passes).
-      "--var", `SYNC_WORKER_URL:http://127.0.0.1:${SYNC_PORT}`,
+      "--var", `SYNC_WORKER_URL:${SYNC_PUBLIC_URL || `http://127.0.0.1:${SYNC_PORT}`}`,
       "--var", "ENVIRONMENT:development",
       // AQU-AGENT §6: point the harness (auth-worker) at the local sandbox
       // service. Only passed when the agent-worker actually came up — absent
@@ -739,7 +745,10 @@ async function main(): Promise<void> {
         // sync-worker also binds HYPERDRIVE → same local Postgres.
         WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: PG_URL,
       },
-      extraArgs: ["--persist-to", PERSIST_DIR],
+      extraArgs: [
+        "--persist-to", PERSIST_DIR,
+        ...(SYNC_PUBLIC_URL ? ["--var", `DIARIZATION_PUBLIC_BASE:${SYNC_PUBLIC_URL}`] : []),
+      ],
       logFile: openLogFile(path.join(LOG_DIR, "sync.log")),
       streamToParent: VERBOSE,
     })

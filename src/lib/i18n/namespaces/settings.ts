@@ -41,7 +41,7 @@ export const settings = defineNamespace({
     "settings.transcription.title": "Transcription",
     "settings.transcription.scope":
       "This choice applies to your account in this browser.",
-    "settings.transcription.hosted": "Aquilla hosted Whisper (recommended)",
+    "settings.transcription.hosted": "Aquilla hosted (recommended)",
     "settings.transcription.hostedDescription":
       "Ready immediately. Uses your workspace's AI capacity. No key or download needed.",
     "settings.transcription.local": "Local Whisper in this browser",

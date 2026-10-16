@@ -5703,7 +5703,7 @@ export const ar: Catalog = {
   "settings.notifications.section.description": "اختر متى يراسلك Aquilla بشأن التعليقات.",
   "settings.transcription.title": "النسخ الصوتي",
   "settings.transcription.scope": "ينطبق هذا الاختيار على حسابك في هذا المتصفح.",
-  "settings.transcription.hosted": "Whisper المستضاف من Aquilla (موصى به)",
+  "settings.transcription.hosted": "النموذج المستضاف من Aquilla (موصى به)",
   "settings.transcription.hostedDescription": "جاهز فورًا. يستخدم سعة الذكاء الاصطناعي في مساحة عملك. لا حاجة إلى مفتاح أو تنزيل.",
   "settings.transcription.local": "Whisper محلي في هذا المتصفح",
   "settings.transcription.localDescription": "نزّل Whisper أدناه. يعمل على جهازك دون استخدام سعة الذكاء الاصطناعي المستضافة. تعتمد السرعة على جهازك.",

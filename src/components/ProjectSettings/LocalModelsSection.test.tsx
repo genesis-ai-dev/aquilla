@@ -20,7 +20,7 @@ beforeEach(() => { localStorage.clear(); prefetch.mockClear() })
 const content = () => <I18nProvider><LocalModelsSection /></I18nProvider>
 it("defaults to hosted transcription without downloading a model", () => {
   render(content())
-  expect(screen.getByRole("radio", { name: /Aquilla hosted Whisper/ })).toBeChecked()
+  expect(screen.getByRole("radio", { name: /Aquilla hosted/ })).toBeChecked()
   expect(screen.getByRole("radio", { name: /Local Whisper in this browser/ }))
     .not.toBeChecked()
   expect(prefetch).not.toHaveBeenCalled()
@@ -39,7 +39,7 @@ it("persists the local choice for this account and lets the user load Whisper", 
   render(content())
   expect(screen.getByRole("radio", { name: /Local Whisper in this browser/ }))
     .toBeChecked()
-  await user.click(screen.getByRole("radio", { name: /Aquilla hosted Whisper/ }))
+  await user.click(screen.getByRole("radio", { name: /Aquilla hosted/ }))
   expect(getTranscriptionProvider("alice")).toBe("hosted")
 })
 it("describes Whisper with the shared consent copy", () => {

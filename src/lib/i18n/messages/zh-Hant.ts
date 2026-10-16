@@ -5712,7 +5712,7 @@ export const zh_Hant: Catalog = {
   "settings.notifications.section.description": "選擇 Aquilla 何時以電子郵件通知您留言。",
   "settings.transcription.title": "語音轉文字",
   "settings.transcription.scope": "此選擇僅適用於您在此瀏覽器中的帳號。",
-  "settings.transcription.hosted": "Aquilla 代管的 Whisper（建議）",
+  "settings.transcription.hosted": "Aquilla 代管（建議）",
   "settings.transcription.hostedDescription": "立即可用。使用您工作區的 AI 額度。無需金鑰或下載。",
   "settings.transcription.local": "此瀏覽器中的本機 Whisper",
   "settings.transcription.localDescription": "請於下方下載 Whisper。在您的裝置上執行，不使用代管的 AI 額度。速度取決於您的裝置。",

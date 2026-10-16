@@ -59,7 +59,10 @@ describe("useHealth with Bible data checks", () => {
     expect(lookup.mock.calls.map(([cell]) => cell.id)).toEqual(["c9"])
     expect(vi.mocked(checkRulesForCell).mock.calls.map(([cell]) => cell.id)).toEqual(["c9"])
     expect(vi.mocked(checkRulesForCell).mock.calls[0][3]).toBe(contexts.get("c9"))
-    expect(result.current.infractions.get("c9")?.map((i) => i.ruleId)).toEqual(["builtin:bkp:V2"])
+    // The text checks also see the dropped quote (unpaired-quotes); this test pins the Bible data check.
+    expect(
+      result.current.infractions.get("c9")?.map((i) => i.ruleId).filter((id) => id.startsWith("builtin:bkp:")),
+    ).toEqual(["builtin:bkp:V2"])
   })
 
   it("re-checks every cell when the pack, refs or Language profile change (a new signature)", () => {

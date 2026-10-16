@@ -40,6 +40,10 @@ export interface TranscriptionProgress {
 export interface TranscriptionResult {
   text: string
   chunks: Array<{ text: string; start: number; end: number }>
+  /** Hosted only: the model the server actually ran. */
+  model?: string
+  /** Hosted Omnilingual: the word times were spread, not aligned. */
+  timingsApproximate?: boolean
 }
 
 export interface TranscriptionOptions {
@@ -51,6 +55,8 @@ export interface TranscriptionOptions {
   languageTag?: string
   /** A take on a cell: what a zero-shot hosted run draws its examples from. */
   zeroShot?: ZeroShotCellContext
+  /** A hosted zero-shot run is waiting for the model to start. */
+  onWaitingForModel?: (waiting: boolean) => void
   model?: string
   onProgress?: (p: TranscriptionProgress) => void
   /** AQU-646: transcribe only this window of the clip (shared imported clip →
@@ -209,6 +215,7 @@ export async function transcribeAudio(
       username: opts.session!.username,
       language: opts.languageTag ?? opts.language,
       zeroShot: opts.zeroShot,
+      onWaitingForModel: opts.onWaitingForModel,
     }), kept.toWindowSec)
   }
   const consented = await requestAiModelConsent(WHISPER_MODEL, { askAgain: opts.askAgain })
@@ -473,11 +480,13 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
         zeroShot: {
           cellId: cell.id,
           fileId: cell.fileId,
-          sourceText: cell.original,
           ...(targetLang ? { lane: targetLang } : {}),
           getSyncToken: makeAudioSyncTokenFetcher(() => session),
         },
       } : {}),
+      onWaitingForModel: (waiting) => {
+        setTranscribeStatus(audioId, waiting ? { kind: "transcribing", waiting: "model" } : { kind: "transcribing" })
+      },
       askAgain,
       trim,
       ...(split ? { keep: split.keep } : {}),

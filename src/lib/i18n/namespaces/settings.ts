@@ -53,17 +53,35 @@ export const settings = defineNamespace({
     "settings.transcription.model.legend": "Hosted model",
     "settings.transcription.model.auto": "Automatic",
     "settings.transcription.model.autoDescription":
-      "Whisper, or Omnilingual for languages Whisper doesn't know.",
+      "Picks the model that knows the project's language: Qwen3-ASR for Chinese, Whisper, then Omnilingual.",
+    "settings.transcription.model.whisper": "Whisper",
+    "settings.transcription.model.whisperDescription": "OpenAI's model. Strong in widely spoken languages.",
+    "settings.transcription.model.qwen": "Qwen3-ASR",
+    "settings.transcription.model.qwenDescription":
+      "Strong in Chinese and its dialects, and lower cost than Whisper.",
+    "settings.transcription.model.omni": "Omnilingual",
+    "settings.transcription.model.omniDescription":
+      "Meta's model for more than 1,600 languages, including many that no other model knows.",
     "settings.transcription.model.zeroShot": "Omnilingual Zero-Shot",
     "settings.transcription.model.zeroShotDescription":
-      "Learns from this project's recordings. Slower, and uses more credits.",
+      "Any language — learns from your project's recorded takes. Slower, and uses more credits.",
+    "settings.transcription.model.supports": "Supports {language}",
+    "settings.transcription.model.doesNotSupport": "Does not support {language}",
+    "settings.transcription.model.seeAll": "See all {count} languages",
+    "settings.transcription.model.search": "Search languages",
+    "settings.transcription.model.dialects": "Chinese dialects",
+    "settings.transcription.model.examples": plural({
+      one: "{count} usable example in this project",
+      other: "{count} usable examples in this project",
+    }, "count"),
     "settings.transcription.zeroShot.warmupTitle": "Starting the zero-shot model — about 1–3 minutes",
     "settings.transcription.zeroShot.warmupTimeout": "The zero-shot model did not start in time.",
     "settings.transcription.zeroShot.warmupFailed":
       "The zero-shot model did not start. Try again, or choose Automatic in Preferences.",
     "settings.transcription.zeroShot.useAutomatic": "Use automatic",
     "settings.transcription.zeroShot.noExamples":
-      "Zero-shot needs at least one recorded and transcribed line in this language. Aquilla used the automatic model instead.",
+      "Zero-shot needs at least one recorded and transcribed line in this language.",
+    "settings.transcription.zeroShot.useOmniStandard": "Use Omnilingual standard instead",
     "settings.transcription.zeroShot.disabledByOrg":
       "Your organization has turned off zero-shot transcription. Aquilla used the automatic model instead.",
     "settings.transcription.zeroShot.examplesFailed":
@@ -471,6 +489,23 @@ export const settings = defineNamespace({
       screenshot: "project-settings",
     },
     keys: {
+      "settings.transcription.model.supports": {
+        description: "Tick line on a transcription model's row: the model knows the project's language.",
+        placeholders: { language: "The project's language name, e.g. 'Tok Pisin'." },
+      },
+      "settings.transcription.model.doesNotSupport": {
+        description: "Cross line on a transcription model's row: the model does not know the project's language.",
+        placeholders: { language: "The project's language name, e.g. 'Tok Pisin'." },
+      },
+      "settings.transcription.model.seeAll": {
+        description: "Disclosure that opens a searchable list of every language a transcription model knows.",
+        placeholders: { count: "How many languages, a plain number, e.g. '99'." },
+      },
+      "settings.transcription.model.examples": {
+        description:
+          "Under the zero-shot model: how many recorded and transcribed takes in this project it can learn from (at most 10).",
+        placeholders: { count: "A plain number from 0 to 10." },
+      },
       "settings.transcription.zeroShot.warmupTitle": {
         description:
           "Persistent toast title while the zero-shot speech-recognition model starts on the " +

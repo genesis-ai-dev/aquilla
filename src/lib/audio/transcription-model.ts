@@ -1,11 +1,15 @@
 import { useSyncExternalStore } from "react"
 
 /**
- * Which hosted model runs (Omnilingual ASR spec §5). "auto" lets the server
- * pick Whisper or Omnilingual CTC by language; "zs" is the per-user opt-in to
- * Omnilingual Zero-Shot, which learns the language from this project's takes.
+ * Which hosted model runs (transcription-models spec §6). "auto" lets the
+ * server pick by language (Qwen3-ASR for Chinese varieties, Whisper, then
+ * Omnilingual CTC) and never picks zero-shot; the rest pin one model.
  */
-export type TranscriptionModel = "auto" | "zs"
+export type TranscriptionModel = "auto" | "whisper" | "qwen3-asr" | "omni-ctc" | "omni-zs"
+export const TRANSCRIPTION_MODELS: readonly TranscriptionModel[] =
+  ["auto", "whisper", "qwen3-asr", "omni-ctc", "omni-zs"]
+const isModel = (value: string | null): value is TranscriptionModel =>
+  (TRANSCRIPTION_MODELS as readonly (string | null)[]).includes(value)
 const prefix = "aq.transcription-model.v1."
 const listeners = new Set<() => void>()
 const memory = new Map<string, TranscriptionModel>()
@@ -15,7 +19,10 @@ const keyFor = (username?: string) => prefix + encodeURIComponent(username ?? "s
 export function getTranscriptionModel(username?: string): TranscriptionModel {
   const key = keyFor(username)
   if (memory.has(key)) return memory.get(key)!
-  try { return localStorage.getItem(key) === "zs" ? "zs" : "auto" }
+  try {
+    const stored = localStorage.getItem(key)
+    return isModel(stored) ? stored : "auto"
+  }
   catch { return "auto" }
 }
 

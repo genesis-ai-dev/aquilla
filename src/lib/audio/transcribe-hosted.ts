@@ -1,20 +1,26 @@
 import { t } from "@/lib/i18n/standalone"
 import { AUTH_BASE } from "@/lib/frontier/auth"
 import { buildTranscriptionRequest, type TranscriptionRequestExample } from "./transcription-request"
-import { whisperLanguageFromTag } from "./language"
+import { autoRouteIsOpenRouter } from "./asr-catalog"
+import { windowStarts } from "./asr-windows"
 import { getTranscriptionModel, type TranscriptionModel } from "./transcription-model"
 import { fetchTranscriptionExamples } from "./transcription-examples"
 import { ensureZsReady, type WarmupUi } from "./omni-warmup"
-import { toastWarmupUi, toastZeroShotDisabled, toastZeroShotNoExamples } from "./omni-warmup-toast"
+import { promptZeroShotNoExamples, toastWarmupUi, toastZeroShotDisabled } from "./omni-warmup-toast"
 import type { SyncTokenForFile } from "./upload"
 import type { TranscriptionResult } from "./transcribe"
 
 export interface HostedTranscriptionOptions {
-  /** The lane's raw language tag; the server picks Whisper or Omnilingual by it. */
+  /** The lane's raw language tag; the server maps it for each model. */
   language?: string
   model?: TranscriptionModel
   /** Zero-shot only: the project's (audio, transcript) pairs. */
   examples?: TranscriptionRequestExample[]
+  /**
+   * The server answered 503 `asr_warming`: wait for the model, then say
+   * whether to send the same window again. Asked at most once per clip.
+   */
+  onWarming?: () => Promise<boolean>
 }
 
 /** The server answered 403 `zero_shot_disabled`: the org turned ZS off. */
@@ -25,15 +31,31 @@ export class ZeroShotDisabledError extends Error {
   }
 }
 
+/** ZS has nothing to learn from: no examples in this project's lane. */
+export class ZeroShotNoExamplesError extends Error {
+  constructor() {
+    super(t("settings.transcription.zeroShot.noExamples"))
+    this.name = "ZeroShotNoExamplesError"
+  }
+}
+
+/** The server answered 503 `asr_warming`: the model is still starting. */
+export class AsrWarmingError extends Error {
+  constructor() {
+    super(t("settings.transcription.zeroShot.warmupTitle"))
+    this.name = "AsrWarmingError"
+  }
+}
+
 /**
- * Seconds of audio per request. Whisper takes a minute; Omnilingual must stay
- * under 40 s and ZS learned on 30 s clips, so anything the server will not send
- * to Whisper goes in 30 s windows. With no tag at all the server auto-detects
- * with Whisper, so that keeps the minute too.
+ * Seconds of audio per request. Whisper and Qwen take a minute; Omnilingual
+ * must stay under 40 s and ZS learned on 30 s clips, so 30 s for anything the
+ * server will send there — including "auto" for a language only Omnilingual has.
  */
 export function hostedWindowSeconds(model: TranscriptionModel, language?: string): number {
-  if (model !== "auto") return 30
-  return !language || whisperLanguageFromTag(language) !== undefined ? 60 : 30
+  if (model === "whisper" || model === "qwen3-asr") return 60
+  if (model === "omni-ctc" || model === "omni-zs") return 30
+  return autoRouteIsOpenRouter(language) ? 60 : 30
 }
 
 /**
@@ -48,6 +70,41 @@ export function hostedLanguageTag(tag?: string): string | undefined {
   return /^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$/.test(value) ? value : undefined
 }
 
+type HostedPart = TranscriptionResult
+
+async function postWindow(
+  pcm: Float32Array, jwt: string, projectId: string, opts: HostedTranscriptionOptions,
+): Promise<HostedPart> {
+  const model = opts.model ?? "auto"
+  const response = await fetch(`${AUTH_BASE}/api/v1/audio/transcriptions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${jwt}`,
+      "Content-Type": "application/json",
+      "Idempotency-Key": crypto.randomUUID(),
+    },
+    body: JSON.stringify(await buildTranscriptionRequest(
+      pcm, projectId, opts.language,
+      // "auto" is the server default: its requests carry no model field.
+      model === "auto" ? {} : { model, ...(model === "omni-zs" ? { examples: opts.examples } : {}) },
+    )),
+    signal: AbortSignal.timeout(90000),
+  })
+  if (response.ok) return await response.json() as HostedPart
+  const failure = await response.json().catch(() => null) as { error?: string } | null
+  const code = failure?.error ?? ""
+  if (["weekly_ai_allowance_exhausted", "credit_cap_exceeded"].includes(code)) {
+    throw new Error(t("settings.transcription.capacityExceeded"))
+  }
+  if (response.status === 403 && code === "zero_shot_disabled") throw new ZeroShotDisabledError()
+  // `zero_shot_examples_required` is the server branch's name for the same answer.
+  if (response.status === 400 && (code === "zs_no_examples" || code === "zero_shot_examples_required")) {
+    throw new ZeroShotNoExamplesError()
+  }
+  if (response.status === 503 && code === "asr_warming") throw new AsrWarmingError()
+  throw new Error(`Hosted transcription failed (${response.status}). Try again.`)
+}
+
 // Each request is one window. Long clips retain clip-relative timings.
 export async function transcribeHostedPcm(
   pcm: Float32Array,
@@ -57,35 +114,26 @@ export async function transcribeHostedPcm(
 ): Promise<TranscriptionResult> {
   const result: TranscriptionResult = { text: "", chunks: [] }
   const model = opts.model ?? "auto"
-  const windowSamples = hostedWindowSeconds(model, opts.language) * 16000
-  for (let offset = 0; offset < pcm.length; offset += windowSamples) {
-    const response = await fetch(`${AUTH_BASE}/api/v1/audio/transcriptions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${jwt}`,
-        "Content-Type": "application/json",
-        "Idempotency-Key": crypto.randomUUID(),
-      },
-      body: JSON.stringify(await buildTranscriptionRequest(
-        pcm.subarray(offset, offset + windowSamples), projectId, opts.language,
-        model === "zs" ? { model, examples: opts.examples } : {},
-      )),
-      signal: AbortSignal.timeout(90000),
-    })
-    if (!response.ok) {
-      const failure = await response.json().catch(() => null) as { error?: string } | null
-      if (["weekly_ai_allowance_exhausted", "credit_cap_exceeded"].includes(failure?.error ?? "")) {
-        throw new Error(t("settings.transcription.capacityExceeded"))
-      }
-      if (response.status === 403 && failure?.error === "zero_shot_disabled") throw new ZeroShotDisabledError()
-      throw new Error(`Hosted transcription failed (${response.status}). Try again.`)
+  const windowSec = hostedWindowSeconds(model, opts.language)
+  const starts = windowStarts(pcm, windowSec, windowSec === 30)
+  let warmRetries = 1
+  for (let i = 0; i < starts.length; i++) {
+    const window = pcm.subarray(starts[i], starts[i + 1] ?? pcm.length)
+    let part: HostedPart
+    try {
+      part = await postWindow(window, jwt, projectId, opts)
+    } catch (error) {
+      if (!(error instanceof AsrWarmingError) || !opts.onWarming || warmRetries-- <= 0) throw error
+      if (!await opts.onWarming()) throw error
+      part = await postWindow(window, jwt, projectId, opts)
     }
-    const part = await response.json() as TranscriptionResult
     result.text = [result.text, part.text].filter(Boolean).join(" ")
-    const seconds = offset / 16000
+    const seconds = starts[i] / 16000
     result.chunks.push(...part.chunks.map(chunk => ({
       ...chunk, start: chunk.start + seconds, end: chunk.end + seconds,
     })))
+    if (part.model) result.model = part.model
+    if (part.timingsApproximate) result.timingsApproximate = true
   }
   return result
 }
@@ -94,17 +142,38 @@ export async function transcribeHostedPcm(
 export interface ZeroShotCellContext {
   cellId: string
   fileId: string
-  /** The cell's source text, which the server ranks examples against. */
-  sourceText?: string
   /** The target lane the take was recorded in. */
   lane?: string
   getSyncToken: SyncTokenForFile
 }
 
 /**
+ * A batch where the project has no examples asks once, not once per cell: the
+ * answer is kept for a few minutes per project. Recording more takes is the fix
+ * for "none", so the memory is short.
+ */
+const NO_EXAMPLES_MEMORY_MS = 5 * 60 * 1000
+const noExamplesChoice = new Map<string, { at: number; choice: Promise<"omni-ctc" | "cancel"> }>()
+
+function noExamplesChoiceFor(projectId: string): Promise<"omni-ctc" | "cancel"> {
+  const kept = noExamplesChoice.get(projectId)
+  if (kept && Date.now() - kept.at < NO_EXAMPLES_MEMORY_MS) return kept.choice
+  const choice = promptZeroShotNoExamples()
+  noExamplesChoice.set(projectId, { at: Date.now(), choice })
+  return choice
+}
+
+/** @internal — test-only. */
+export function __resetHostedTranscriptionForTests(): void {
+  noExamplesChoice.clear()
+}
+
+/**
  * The hosted path with the account's model choice applied. ZS runs only for a
  * take on a cell (`zeroShot`), with at least one example, once the model is
- * warm; otherwise — and when the org has turned ZS off — the automatic model.
+ * warm. Without examples it offers Omnilingual standard; when the org has
+ * turned ZS off, or the person picks it at the warm-up timeout, it runs the
+ * automatic model.
  */
 export async function transcribeHosted(
   pcm: Float32Array,
@@ -114,36 +183,55 @@ export async function transcribeHosted(
     username?: string
     language?: string
     zeroShot?: ZeroShotCellContext
+    /** The take is waiting for the model to start (true), or no longer (false). */
+    onWaitingForModel?: (waiting: boolean) => void
     warmupUi?: WarmupUi
   },
 ): Promise<TranscriptionResult> {
   const language = hostedLanguageTag(args.language)
-  const auto = () => transcribeHostedPcm(pcm, args.jwt, args.projectId, { language, model: "auto" })
+  const run = (model: TranscriptionModel, extra: Partial<HostedTranscriptionOptions> = {}) =>
+    transcribeHostedPcm(pcm, args.jwt, args.projectId, { language, model, ...extra })
+  const chosen = getTranscriptionModel(args.username)
   const cell = args.zeroShot
-  if (getTranscriptionModel(args.username) !== "zs" || !cell) return auto()
+  // Zero-shot learns from this lane's takes; a source clip has none to use.
+  if (chosen !== "omni-zs") return run(chosen)
+  if (!cell) return run("auto")
 
+  const withoutExamples = async () => {
+    if (await noExamplesChoiceFor(args.projectId) === "omni-ctc") return run("omni-ctc")
+    throw new ZeroShotNoExamplesError()
+  }
   const examples = await fetchTranscriptionExamples({
     projectId: args.projectId,
     fileId: cell.fileId,
     lane: cell.lane,
-    sourceText: cell.sourceText,
-    excludeCellId: cell.cellId,
+    cellId: cell.cellId,
     getSyncToken: cell.getSyncToken,
   })
-  if (examples.length === 0) {
-    toastZeroShotNoExamples()
-    return auto()
+  if (examples.length === 0) return withoutExamples()
+
+  const ui = args.warmupUi ?? toastWarmupUi
+  const waitForModel = async () => {
+    args.onWaitingForModel?.(true)
+    try { return await ensureZsReady(args.jwt, args.projectId, ui) }
+    finally { args.onWaitingForModel?.(false) }
   }
-  const warm = await ensureZsReady(args.jwt, args.projectId, args.warmupUi ?? toastWarmupUi)
-  if (warm.kind === "use-auto") return auto()
+  if ((await waitForModel()).kind === "use-auto") return run("auto")
+
+  let switchToAuto = false
   try {
-    return await transcribeHostedPcm(pcm, args.jwt, args.projectId, {
-      language, model: "zs",
+    return await run("omni-zs", {
       examples: examples.map(example => ({ url: example.audioUrl, text: example.text })),
+      onWarming: async () => {
+        switchToAuto = (await waitForModel()).kind === "use-auto"
+        return !switchToAuto
+      },
     })
   } catch (error) {
+    if (error instanceof AsrWarmingError && switchToAuto) return run("auto")
+    if (error instanceof ZeroShotNoExamplesError) return withoutExamples()
     if (!(error instanceof ZeroShotDisabledError)) throw error
     toastZeroShotDisabled()
-    return auto()
+    return run("auto")
   }
 }

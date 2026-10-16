@@ -38,7 +38,7 @@ describe("zero-shot batch confirm", () => {
   })
 
   it("asks once with the count and cost line, then runs zero-shot", async () => {
-    setTranscriptionModel("user1", "zs")
+    setTranscriptionModel("user1", "omni-zs")
     const confirmZeroShot = vi.fn(async () => "zs" as const)
     await runTranscribeAll({ cells, projectId: "p", session, orgId: 7, confirmZeroShot })
     expect(confirmZeroShot).toHaveBeenCalledWith({ count: 2, costLine: "≈ 12% of this week's remaining credits" })
@@ -47,13 +47,13 @@ describe("zero-shot batch confirm", () => {
   })
 
   it("closing the confirm transcribes nothing", async () => {
-    setTranscriptionModel("user1", "zs")
+    setTranscriptionModel("user1", "omni-zs")
     await runTranscribeAll({ cells, projectId: "p", session, confirmZeroShot: async () => "cancel" })
     expect(transcribeCell).not.toHaveBeenCalled()
   })
 
   it("Use automatic runs the batch without zero-shot, leaving the choice stored", async () => {
-    setTranscriptionModel("user1", "zs")
+    setTranscriptionModel("user1", "omni-zs")
     await runTranscribeAll({ cells, projectId: "p", session, confirmZeroShot: async () => "auto" })
     expect(vi.mocked(transcribeCell).mock.calls.map(([args]) => args.forceAutoModel)).toEqual([true, true])
   })

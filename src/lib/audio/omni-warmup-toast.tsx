@@ -1,5 +1,5 @@
 // The toasts the zero-shot path shows: the cold-start wait, its timeout, the
-// two fallbacks to the automatic model, and the batch cost confirmation.
+// missing-examples offer, the org-disabled fallback, and the batch confirm.
 
 import { IntelligentProgress } from "@/components/IntelligentProgress"
 import { toast } from "@/components/ui/toast"
@@ -66,9 +66,34 @@ export const toastWarmupUi: WarmupUi = {
   },
 }
 
-/** ZS needs at least one example; the run went to the automatic model. */
-export function toastZeroShotNoExamples(): void {
-  toast.add({ type: "info", title: t("settings.transcription.zeroShot.noExamples") })
+/**
+ * ZS has no examples to learn from. Offer Omnilingual standard (CTC) for the
+ * run instead; closing the toast leaves the take untranscribed.
+ */
+export function promptZeroShotNoExamples(): Promise<"omni-ctc" | "cancel"> {
+  const id = "omni-zs-no-examples"
+  return new Promise((resolve) => {
+    let settled = false
+    const settle = (choice: "omni-ctc" | "cancel") => {
+      if (settled) return
+      settled = true
+      resolve(choice)
+    }
+    toast.add({
+      id,
+      type: "info",
+      timeout: 0,
+      title: t("settings.transcription.zeroShot.noExamples"),
+      actionProps: {
+        children: t("settings.transcription.zeroShot.useOmniStandard"),
+        onClick: () => {
+          settle("omni-ctc")
+          toast.close(id)
+        },
+      },
+      onClose: () => settle("cancel"),
+    })
+  })
 }
 
 /** The org turned ZS off; the run went to the automatic model. */

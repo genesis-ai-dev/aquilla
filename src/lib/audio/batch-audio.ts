@@ -243,7 +243,7 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
   // A zero-shot batch shows its cost first; a single run never does.
   let forceAutoModel = false
   if (session && usesHostedTranscription(session, projectId)
-    && getTranscriptionModel(session.username) === "zs") {
+    && getTranscriptionModel(session.username) === "omni-zs") {
     const costLine = await zeroShotBatchCostLine({
       jwt: session.jwt, projectId, orgId: args.orgId, audioSec: batchAudioSeconds(targets),
     })

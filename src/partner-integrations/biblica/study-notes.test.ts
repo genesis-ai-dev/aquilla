@@ -10,6 +10,8 @@ import {
   SAMPLE_NOTES,
   biblicaFrontBackMatterStory,
   biblicaSampleStory,
+  bookMarker,
+  bookMarkerWithBledVerseMarkers,
   bookTitle,
   chapterStraddle,
   closedVerse,
@@ -452,6 +454,54 @@ describe("Biblica study-note selection", () => {
       "The Gospel of Mark",
     ])
     expect(selection.otherUnitCount).toBe(2)
+  })
+
+  it("lands each book's preface in its own book across a multi-book package", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      bookMarker("p-bk-gen", "GEN"),
+      bookTitle("p-t-gen", "Genesis"),
+      note("p-pref-gen", "Genesis introduces the story of beginnings."),
+      closedVerse("p-v-gen", "26", "So Joseph died at a hundred and ten years old.", "50"),
+      // The book boundary InDesign flushed Genesis 50:26's closing markers into,
+      // so the paragraph reads "50:26EXO" rather than "EXO" (AQU-1963).
+      bookMarkerWithBledVerseMarkers("p-bk-exo", "EXO", "50", "26"),
+      bookTitle("p-t-exo", "Exodus"),
+      note("p-pref-exo", "Exodus tells how God rescued his people."),
+      closedVerse("p-v-exo", "1", "These are the names of the sons of Israel.", "1"),
+      bookMarker("p-bk-lev", "LEV"),
+      bookTitle("p-t-lev", "Leviticus"),
+      note("p-pref-lev", "Leviticus sets out how Israel was to worship."),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.map((entry) => [
+      entry.unit.sourceText,
+      entry.bookCode,
+      entry.chapterLabel,
+    ])).toEqual([
+      ["Genesis", "GEN", "Preface"],
+      ["Genesis introduces the story of beginnings.", "GEN", "Preface"],
+      ["Exodus", "EXO", "Preface"],
+      ["Exodus tells how God rescued his people.", "EXO", "Preface"],
+      ["Leviticus", "LEV", "Preface"],
+      ["Leviticus sets out how Israel was to worship.", "LEV", "Preface"],
+    ])
+  })
+
+  it("reads a book code the canon knows even when its digit is set in a coordinate style", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph(
+        "p-bk",
+        "meta%3abk",
+        run("cv%3av1", "1") + run("$ID/[No character style]", "SA"),
+      ),
+      note("p-pref", "Samuel opens with the birth of a prophet."),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.map((entry) => [entry.unit.sourceText, entry.bookCode])).toEqual([
+      ["Samuel opens with the birth of a prophet.", "1SA"],
+    ])
   })
 
   it("cuts a verse marker off the end of the note it was flushed into", async () => {

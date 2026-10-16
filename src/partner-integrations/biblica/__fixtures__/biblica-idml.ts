@@ -132,6 +132,29 @@ export function verseMarkerOnlyNote(self: string, chapter: string, verse: string
   return paragraph(self, "intro%3aie", run("meta%3ac", `${chapter}:`) + run("meta%3av", verse))
 }
 
+/** The `meta:bk` paragraph that names a book ("GEN", "EXO"). */
+export function bookMarker(self: string, code: string): string {
+  return paragraph(self, "meta%3abk", run(PLAIN, code))
+}
+
+/**
+ * A `meta:bk` paragraph carrying the previous book's closing chapter/verse
+ * markers ahead of its own code — the book-boundary face of the bleed that puts
+ * "28:20" in Mark's preface, so the paragraph reads "50:26EXO" (AQU-1963).
+ */
+export function bookMarkerWithBledVerseMarkers(
+  self: string,
+  code: string,
+  chapter: string,
+  verse: string,
+): string {
+  return paragraph(
+    self,
+    "meta%3abk",
+    run("meta%3ac", `${chapter}:`) + run("meta%3av", verse) + run(PLAIN, code),
+  )
+}
+
 /**
  * The `intro:imt2` heading that opens a division — a group of books such as
  * "Israelʼs covenant history". InDesign sets it inside the following book's

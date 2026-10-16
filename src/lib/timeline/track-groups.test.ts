@@ -14,6 +14,7 @@ import {
   folderMembers,
   FOLDER_DROP_INDENT_PX,
   folderReachInPx,
+  hiddenTracksOf,
   orderForScopeAppend,
   resolveDropTarget,
   scopeSiblings,
@@ -616,5 +617,34 @@ describe("folderReachInPx", () => {
   // essentially the whole column.
   it("leaves a real reorder zone on the wide gutter", () => {
     expect(folderReachInPx(240)).toBeGreaterThan(FOLDER_DROP_INDENT_PX * 4)
+  })
+})
+
+// AQU-1684: a track this person hid is not drawn — nor counted among its
+// folder's rows — but a folder is never hidden, and an id left behind by a
+// deleted track names nothing to show again.
+describe("buildTrackRows — hidden tracks (AQU-1684)", () => {
+  const tracks = [
+    track("source-subtitles", "source-subtitles", 0),
+    track("f", "folder", 1),
+    track("a1", "audio", 0, "f"),
+    track("a2", "audio", 1, "f"),
+    track("target-audio", "target-audio", 3),
+  ]
+
+  it("leaves a hidden track out, in or out of a folder, and keeps every other in its place", () => {
+    const rows = buildTrackRows(tracks, null, new Set(["a1", "source-subtitles"]))
+    expect(rows.map((r) => r.track.id)).toEqual(["f", "a2", "target-audio"])
+    expect(rows[0].members.map((m) => m.id)).toEqual(["a2"])
+  })
+
+  it("never hides a folder", () => {
+    expect(buildTrackRows(tracks, null, new Set(["f"])).map((r) => r.track.id))
+      .toEqual(["source-subtitles", "f", "a1", "a2", "target-audio"])
+  })
+
+  it("lists only hidden tracks that still exist, and never a folder", () => {
+    expect(hiddenTracksOf(tracks, new Set(["a2", "f", "deleted-long-ago"])).map((t) => t.id)).toEqual(["a2"])
+    expect(hiddenTracksOf(tracks, null)).toEqual([])
   })
 })

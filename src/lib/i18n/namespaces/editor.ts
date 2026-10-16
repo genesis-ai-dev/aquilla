@@ -1241,6 +1241,22 @@ export const editor = defineNamespace({
     // AQU-1566: a caption track on a linked video with no rows can become the
     // file's rows. It asks first, because the track leaves the timeline.
     "editor.timeline.trackUseAsRows": "Use as this file's rows",
+    // AQU-1684: hiding a track is personal — this screen only — and there is
+    // always a way back, the "Hidden tracks" menu in the timeline's toolbar.
+    "editor.timeline.trackHide": "Hide track",
+    "editor.timeline.trackHideCount": plural({
+      one: "Hide {count} track",
+      other: "Hide {count} tracks",
+    }),
+    "editor.timeline.trackHideBusy": "Can't hide a track while it's recording or being dragged",
+    "editor.timeline.hiddenTracks": plural({
+      one: "Hidden tracks ({count})",
+      other: "Hidden tracks ({count})",
+    }),
+    "editor.timeline.hiddenTracksAria": "Tracks you have hidden on this timeline",
+    "editor.timeline.hiddenTracksNote": "Hidden for you, on this device",
+    "editor.timeline.showTrack": "Show {name}",
+    "editor.timeline.showAllTracks": "Show all tracks",
     "editor.timeline.useAsRowsTitle": "Use \"{track}\" as this file's rows?",
     "editor.timeline.useAsRowsBody":
       "Its captions become rows you can translate in the Text view. The track " +
@@ -3363,6 +3379,55 @@ export const editor = defineNamespace({
           "timeline, offered only on a linked video that has no rows yet. It turns " +
           "this track's captions into the file's own rows (after a confirmation).",
         maxLength: 32,
+      },
+      "editor.timeline.trackHide": {
+        description:
+          "Item in a timeline track's right-click menu (and its ⋯ menu) on the Media " +
+          "view. It hides the track's lane on this person's own screen only — nothing " +
+          "is deleted or muted, and nobody else is affected. A 'track' is one row of the " +
+          "timeline, e.g. the source audio or a dub track.",
+        maxLength: 30,
+      },
+      "editor.timeline.trackHideCount": {
+        description:
+          "The same item when several timeline tracks are selected: hides all of them " +
+          "on this person's own screen.",
+        placeholders: { count: "How many tracks will be hidden; it also selects the plural form." },
+        maxLength: 30,
+      },
+      "editor.timeline.trackHideBusy": {
+        description:
+          "Hover text on the greyed-out 'Hide track' item while that track is recording " +
+          "a take or being dragged, which is when it may not be hidden.",
+      },
+      "editor.timeline.hiddenTracks": {
+        description:
+          "Label of a toolbar menu button on the Media view's timeline, shown only while " +
+          "the person has hidden some tracks. Opening it lists those tracks so each can " +
+          "be shown again. Keep the count in brackets after the words.",
+        placeholders: { count: "How many tracks are hidden; it also selects the plural form." },
+        maxLength: 26,
+      },
+      "editor.timeline.hiddenTracksAria": {
+        description:
+          "Screen-reader name of that 'Hidden tracks' menu button.",
+      },
+      "editor.timeline.hiddenTracksNote": {
+        description:
+          "A heading at the top of the 'Hidden tracks' menu saying that hiding applies " +
+          "only to this person, on this device — collaborators still see the tracks.",
+        maxLength: 40,
+      },
+      "editor.timeline.showTrack": {
+        description:
+          "Item in the 'Hidden tracks' menu that brings one hidden timeline track back " +
+          "into view.",
+        placeholders: { name: "The track's own name, e.g. 'Source audio' or a name someone gave it. Content, never translate." },
+      },
+      "editor.timeline.showAllTracks": {
+        description:
+          "Last item in the 'Hidden tracks' menu: brings every hidden track back into view.",
+        maxLength: 30,
       },
       "editor.timeline.useAsRowsTitle": {
         description:

@@ -29,7 +29,7 @@ import type { AuthHonoEnv } from "./auth"
 import { memoize } from "../lib/request-memo"
 
 /** Parse the optional `ADMIN_EMAILS` bootstrap var into trimmed, lowercased emails. */
-const parseAdminEmails = (env: Env): Set<string> => {
+export const parseAdminEmails = (env: Env): Set<string> => {
   const raw = env.ADMIN_EMAILS ?? ""
   return new Set(
     raw

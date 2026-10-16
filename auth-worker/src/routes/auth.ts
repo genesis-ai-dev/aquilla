@@ -38,6 +38,7 @@ import {
   RESET_REQUEST_MAX_PER_IDENTIFIER,
 } from "../utils/rate-limit"
 import { revokeToken } from "../utils/token-revocation"
+import { parseAdminEmails } from "../middleware/platform-admin"
 import { evictUserSessions } from "../lib/session-cache"
 import {
   LegacyUserMigrationError,
@@ -197,6 +198,19 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
       )
     }
     await recordAuthEvent(c.env.AQUILLA_PG, "register", ipIdent, true)
+
+    // [Pen test] Infra (2026-10-16): on non-production deploys (PR previews)
+    // the ADMIN_EMAILS bootstrap names a fixture account, and the admin
+    // step-up code is returned inline (`devCode`). If that fixture row is
+    // missing (e.g. after the nightly dev-branch restore) anyone could
+    // self-register the address and become platform admin. Refuse to mint
+    // public accounts for allowlisted addresses; same 409 shape as a duplicate.
+    if (c.env.ENVIRONMENT !== "production") {
+      const reserved = parseAdminEmails(c.env)
+      if (reserved.has(email.trim().toLowerCase()) || reserved.has(username.trim().toLowerCase())) {
+        return c.json({ detail: "User already exists", error: "Registration failed" }, 409)
+      }
+    }
 
     // Uniqueness is case-insensitive (AQU-340): reject `ryan` when `Ryan`
     // already exists so we never mint case-twin accounts that then collide in

@@ -3218,8 +3218,6 @@ export const ru: Catalog = {
   "org.staffLanePopover.searchScopeNote": "Поиск только по вашей организации. Добавляете кого-то извне?",
   "org.staffLanePopover.inviteToProjectLink": "Пригласите его в проект",
   "org.staffLanePopover.addToLaneButton": "Добавить в {lane}",
-  "org.staffLanePopover.broaderAccessNote": "Нужен более широкий доступ? Руководители видят все языки.",
-  "org.staffLanePopover.addAsLeadButton": "Добавить как руководителя (без ограничений)",
   "org.archivedProjects.deletedColumnLabel": "Удалено",
   "org.archivedProjects.viewsAriaLabel": "Представления архива",
   "org.archivedProjects.emptyDescription": "Когда вы отправите проект в архив, он появится здесь и останется до восстановления.",

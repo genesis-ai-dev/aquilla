@@ -3165,8 +3165,6 @@ export const fr: Catalog = {
   "org.staffLanePopover.searchScopeNote": "Recherche uniquement dans votre organisation. Vous ajoutez quelqu'un de l'extérieur ?",
   "org.staffLanePopover.inviteToProjectLink": "Invitez-les au projet",
   "org.staffLanePopover.addToLaneButton": "Ajouter à {lane}",
-  "org.staffLanePopover.broaderAccessNote": "Besoin d'un accès plus large ? Les responsables voient toutes les langues.",
-  "org.staffLanePopover.addAsLeadButton": "Ajouter comme responsable (sans portée)",
   "org.archivedProjects.deletedColumnLabel": "Supprimé",
   "org.archivedProjects.viewsAriaLabel": "Vues des archives",
   "org.archivedProjects.emptyDescription": "Lorsque vous archivez un projet, il apparaît ici jusqu'à ce que vous le restauriez.",

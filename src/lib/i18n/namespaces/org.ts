@@ -1216,8 +1216,6 @@ export const org = defineNamespace({
     "org.staffLanePopover.lastLaneRefused":
       "This is now their only language. Removing it would open every language to them, so nothing was saved.",
     "org.staffLanePopover.addToLaneButton": "Add to {lane}",
-    "org.staffLanePopover.broaderAccessNote": "Need broader access? Leads see all languages.",
-    "org.staffLanePopover.addAsLeadButton": "Add as lead (unscoped)",
 
     // AQU-1030: one sentence for the grant the form will make, shared by every
     // add/invite submit. {scope} is one of the scope.* phrases below.
@@ -1236,7 +1234,6 @@ export const org = defineNamespace({
     "org.grantScope.echo.lanesOnly": "{lanes} lanes only",
     "org.grantScope.button": "{action} — {scope}",
     "org.grantScope.thisProject": "this project",
-    "org.grantScope.action.addAsLead": "Add as lead",
 
     // -- ArchivedProjects: org-level archived-projects / recently-deleted-files admin page --
     // "Project" header → common.project (identical text)

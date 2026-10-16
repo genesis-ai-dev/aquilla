@@ -1,7 +1,7 @@
 // AQU-538 §3.4 — one-gesture staffing control. "Add María as reviewer on
 // Spanish" in a single confirm: pick a person from the org roster, pick a
-// role (reviewer/contributor — leads are a separate, always-unscoped
-// affordance), confirm. Confirm then:
+// role (reviewer/contributor only — see AQU-2004 below), confirm. Confirm
+// then:
 //   1. ensures project membership at that role (skips the POST when the
 //      person already holds >= that role — never downgrades someone);
 //   2. merges a `{ kind: 'lane', value: lane }` scope onto whatever scopes
@@ -30,12 +30,21 @@
 //
 // Leads/maintainers (effective role >= project_lead) can't be lane-scoped —
 // the server rejects PUT scopes for them with 400 ("scopes are for
-// contributor/reviewer roles"), since leads see every language by design.
-// The role select here only ever offers reviewer/contributor, so that 400
-// can only happen when the picked person's EXISTING effective role is
+// contributor/reviewer roles"), since maintainers see every language by
+// design. The role select here only ever offers reviewer/contributor, so that
+// 400 can only happen when the picked person's EXISTING effective role is
 // already lead+ (e.g. an org-wide maintainer) — handled gracefully as a
-// non-error "already unscoped" outcome. Adding someone AS a lead is a
-// distinct, deliberately unscoped action (no scope PUT at all).
+// non-error "already unscoped" outcome.
+//
+// AQU-2004 — this popover offers NO lead path. It used to end in a dashed box
+// reading "Need broader access? Leads see all languages." beside an "Add as
+// lead — every lane" link, and since AQU-1813 both sentences are false: a
+// project lead sees a lane only where they hold a grant for it, and the link
+// granted either the lanes the person already had or only the lanes that
+// existed at that moment — never "every lane". Promoting someone to lead
+// means choosing their lanes, so it belongs in the project's Members / Share
+// flows where lanes are explicit, not behind a one-click link in a
+// lane-scoped control. Keep this surface to the lane you clicked.
 
 import { useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
@@ -100,7 +109,8 @@ function scopeNamesLane(scope: MemberScope, laneValue: string, laneTag: string):
 }
 
 /** The staffing role select is intentionally scoped to reviewer/contributor
- * only — lead+ is a separate, always-unscoped action (see file header). */
+ * only — raising someone to lead+ means choosing their lanes explicitly, so it
+ * lives in the project's Members / Share flows (AQU-2004, see file header). */
 const STAFFABLE_ROLES: readonly number[] = [ROLE.REVIEWER, ROLE.CONTRIBUTOR]
 
 const MAX_RESULTS = 20
@@ -391,35 +401,6 @@ export function StaffLanePopover({
     }
   }
 
-  /** "Leads see all languages" — a distinct, always-unscoped add. No scope
-   * PUT is issued at all, so the 500+ rejection never applies here. */
-  async function handleAddAsLead() {
-    if (!selected || !jwt) return
-    setPhase("submitting")
-    setErrorMsg(null)
-    try {
-      await ensureMembership(selected.userId, selected.username, ROLE.PROJECT_LEAD)
-      await refreshProjectMembers()
-      setPhase("done")
-      const sentence = describeGrant(t, {
-        names: [selected.username],
-        roleLevel: ROLE.PROJECT_LEAD,
-        scope: {
-          kind: "project",
-          projectName: grantProjectName(t, projectName),
-          lanes: "all",
-        },
-        locale,
-      }).sentence
-      setMessage(sentence)
-      toast.add({ type: "success", title: sentence })
-      onDone?.()
-    } catch (err) {
-      setPhase("error")
-      setErrorMsg(err instanceof Error ? err.message : String(err))
-    }
-  }
-
   const busy = phase === "submitting"
 
   return (
@@ -623,31 +604,6 @@ export function StaffLanePopover({
                 }).scopeEcho,
               )}
             </Button>
-
-            <div className="rounded border border-dashed p-2 text-[11px] text-muted-foreground">
-              {t("org.staffLanePopover.broaderAccessNote")}{" "}
-              <button
-                type="button"
-                className="font-medium text-foreground underline underline-offset-2 disabled:opacity-60"
-                onClick={handleAddAsLead}
-                disabled={busy || !jwt}
-              >
-                {grantButtonLabel(
-                  t,
-                  t("org.grantScope.action.addAsLead"),
-                  describeGrant(t, {
-                    names: [selected.username],
-                    roleLevel: ROLE.PROJECT_LEAD,
-                    scope: {
-                      kind: "project",
-                      projectName: grantProjectName(t, projectName),
-                      lanes: "all",
-                    },
-                    locale,
-                  }).scopeEcho,
-                )}
-              </button>
-            </div>
 
             {phase === "done" && message && (
               <p data-testid="grant-scope-result" className="text-[11px] text-emerald-600 dark:text-emerald-400">{message}</p>

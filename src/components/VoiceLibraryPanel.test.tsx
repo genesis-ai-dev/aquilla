@@ -285,7 +285,7 @@ describe("VoiceLibraryPanel (selector)", () => {
     expect(row).toHaveTextContent(/0\/2 voiced/)
   })
 
-  it("uses the project language on a voice that has none of its own", () => {
+  it("does not label a voice with the open project lane when the voice has no language", () => {
     const onSettingsChange = vi.fn()
     render(
       <VoiceLibraryPanel
@@ -301,7 +301,8 @@ describe("VoiceLibraryPanel (selector)", () => {
       />,
     )
     const row = screen.getByText("Narrator").closest("[role='button']")
-    expect(row).toHaveTextContent(/Spanish/i)
+    expect(row).not.toHaveTextContent(/Spanish/i)
+    expect(row).not.toHaveTextContent(/French/i)
   })
 })
 

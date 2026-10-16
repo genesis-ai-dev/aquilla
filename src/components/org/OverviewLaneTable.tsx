@@ -72,6 +72,11 @@ export interface OverviewLaneTableProps {
   extraLanes: string[]
   /** AQU-1977: the project's own languages, in order — what Assign offers. See AssignModal's `lanes`. */
   assignLanes?: readonly AssignLaneOption[]
+  /**
+   * AQU-1994: the lanes someone on the project is on. The row's Assign…
+   * dialog offers the same narrowed list the Team card's panel does.
+   */
+  staffedLaneIds?: ReadonlySet<string> | readonly string[] | null
   /** All project files — AssignModal's book/file scope picker. */
   files: FileReference[]
   /** Caller's project role level — gates + passed to AssignModal. */
@@ -159,6 +164,7 @@ export function OverviewLaneTable({
   defaultLanguageLabel,
   extraLanes,
   assignLanes,
+  staffedLaneIds,
   files,
   roleLevel,
   author,
@@ -458,6 +464,7 @@ export function OverviewLaneTable({
         projectFiles={files}
         targetLanes={extraLanes}
         lanes={assignLanes}
+        staffedLaneIds={staffedLaneIds}
         defaultLane={assignLane ?? ""}
         members={members}
         roleLevel={roleLevel}

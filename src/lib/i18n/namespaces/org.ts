@@ -960,6 +960,10 @@ export const org = defineNamespace({
     }),
     "org.assignWork.clearAllChapters": "Clear all",
     "org.assignWork.selfAssignNote": "Self-assignment is on — you can claim this work for yourself.",
+    // AQU-1994: the lane field offers only lanes someone on the project is on.
+    // When that is none, there is nothing truthful to offer.
+    "org.assignWork.noStaffedLanes":
+      "No one on this project is on any of its languages yet, so there is no language to assign work in. Staff someone on a language first.",
     // AQU-1308: the assignee picker must never render an empty "Select
     // member…" when the roster fetch failed — say which failure it was.
     "org.assignWork.rosterHiddenError":
@@ -2683,6 +2687,10 @@ export const org = defineNamespace({
         description:
           "Status line above the chapter checkbox list in the Assign work panel, counting how many chapters are currently checked (zero checked means 'whole book').",
         placeholders: { count: "How many chapters are currently checked; also selects the plural form." },
+      },
+      "org.assignWork.noStaffedLanes": {
+        description:
+          "Shown where the language-lane picker would be, in the Assign work panel and the Assign dialog, when nobody on the project holds access to any of its target languages — and as the error if Assign is pressed anyway. Explains why there is nothing to choose and what to do about it.",
       },
       "org.assignWork.rosterHiddenError": {
         description:

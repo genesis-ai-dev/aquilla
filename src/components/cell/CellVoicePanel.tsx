@@ -13,7 +13,9 @@
 //                          then the take's tools: the recorder, volume, clone
 //
 // The mic opens the recorder, which records over, uploads, generates again and
-// switches takes — it replaced a Generate again button here. And since picking
+// switches takes. A take whose audio is still here has no Generate of its own.
+// A take whose bytes are gone does: Generate sits on the card, because opening
+// the recorder is the long way around a clip you cannot play. And since picking
 // a voice only assigns it, a generated take can be in a voice the line no
 // longer has: then a pill beside the time names the take's voice.
 //
@@ -45,13 +47,18 @@ import { TakeTimeReadout } from "@/components/audio/TakeTimeReadout"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Slider } from "@/components/ui/slider"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
+import { audioIdSeededWith } from "@/lib/audio/upload"
+import { injectOptimisticAudioDeselect, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { assignedCastVoiceId, findVoice, resolveCastVoice } from "@/lib/audio/voices"
+import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { useCellAudio, type UseCellAudioResult } from "@/hooks/useCellAudio"
 import { setCellPref, useCellPref } from "@/lib/store/audio-cell-prefs"
 import { persistTakeTrim, trimMs } from "@/lib/audio/persist-trim"
 import { keptWindowSec } from "@/lib/audio/kept-window"
+import { emitCellAudioDeselect } from "@/lib/sync/events-emit"
 import { TRACK_DASH_CLASS } from "@/lib/timeline/track-colors"
+import { RECORDING_SLOT } from "@/lib/timeline/track-slots"
 import { takeTrackColor, takeTrackVars } from "@/lib/timeline/take-colors"
 import { cn } from "@/lib/utils"
 import type { CellData } from "@/hooks/useCells"
@@ -286,9 +293,34 @@ export function CellVoicePanel({
       ...(targetLang ? { targetLang } : {}),
       surface: "voice-panel",
     })
-    if (ok) onAfterGenerate()
-    else autoplayRef.current = false
-  }, [isVoicing, canGenerate, canEdit, project, cell, sess, username, active.id, onAfterGenerate, targetLang])
+    if (!ok) {
+      autoplayRef.current = false
+      return
+    }
+    // A line plays its recording ahead of a generated voice. The recorder
+    // already clears a cell-owned take so the voice just made is what sounds;
+    // do the same here, or Generate on a missing recording would leave the
+    // card sitting on the clip that has no bytes. A shared source clip stays.
+    if (
+      playableId &&
+      playableId === cell.selectedAudioId &&
+      !isSourceClip &&
+      audioIdSeededWith(playableId, cell.id)
+    ) {
+      const displaceP = emitCellAudioDeselect({
+        projectId,
+        fileId: cell.fileId,
+        cellId: cell.id,
+        slot: RECORDING_SLOT,
+        author: username,
+        ...(targetLang ? { targetLang } : {}),
+      })
+      injectOptimisticAudioDeselect(cell.fileId, cell.id, RECORDING_SLOT, displaceP)
+      await displaceP
+      notifyAudioAttachmentsChanged(cell.fileId)
+    }
+    onAfterGenerate()
+  }, [isVoicing, canGenerate, canEdit, project, cell, sess, username, active.id, onAfterGenerate, targetLang, playableId, isSourceClip, projectId])
 
   // Section breaks (paratext) aren't voiced — render nothing.
   if (isParatext) return null
@@ -326,6 +358,71 @@ export function CellVoicePanel({
     // Amber, except on a file coloured amber, where it would sink into the
     // waveform: there it is blue.
     const pillOnAmber = takeTrackColor(trackInput) === "amber"
+    // Generate only when this line's own take is the one with no bytes. A
+    // shared source clip is the file's audio; regenerating would not replace
+    // it, so the sentence stays and the recorder remains the way in.
+    const missingOwnTake = audio.peaksState === "missing" && !isSourceClip && Boolean(
+      playableId && (
+        playableId === cell.selectedGeneratedVoiceAudioId ||
+        (playableId === cell.selectedAudioId && audioIdSeededWith(playableId, cell.id))
+      ),
+    )
+    const missingGenerate = !missingOwnTake || !canEdit ? undefined : (
+      <div
+        className="flex max-w-[calc(100%-2.5rem)] flex-wrap items-center justify-center gap-x-2 gap-y-1"
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        {isVoicing ? (
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
+            <Spinner className="size-3" />
+            {t("editor.voice.generatingAs", { voice: active.name })}
+          </span>
+        ) : (
+          <>
+            <span role="status" className="text-center text-[10px] font-medium text-muted-foreground">{MISSING_AUDIO_MESSAGE}</span>
+            {failure ? (
+              <AppTooltip content={t("editor.voice.failedTooltip", { reason: failure })}>
+                <Button type="button" variant="outline" size="xs" data-testid="voice-card-retry" onClick={() => void generate()}>
+                  <CircleAlert className="text-destructive" />
+                  {t("editor.voice.tryAgain")}
+                </Button>
+              </AppTooltip>
+            ) : !canGenerate ? (
+              <AppTooltip content={t("editor.voice.nothingToReadTooltip")}>
+                <span tabIndex={0} className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  <Button type="button" variant="outline" size="xs" disabled data-testid="voice-card-generate">
+                    <Sparkles />
+                    {t("editor.voice.generateWith", { voice: active.name })}
+                  </Button>
+                </span>
+              </AppTooltip>
+            ) : offlineGate.kind !== "ok" ? (
+              <AppTooltip
+                content={
+                  offlineGate.kind === "blocked" && offlineGate.suggestLocal
+                    ? t("audio.tts.offlineSuggestLocal", { engine: engineName })
+                    : t("audio.tts.offlineBlocked", { engine: engineName })
+                }
+              >
+                <span tabIndex={0} className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  <Button type="button" variant="outline" size="xs" disabled data-testid="voice-card-generate">
+                    <Sparkles />
+                    {t("editor.voice.generateWith", { voice: active.name })}
+                  </Button>
+                </span>
+              </AppTooltip>
+            ) : (
+              <AppTooltip content={t("editor.voice.generateDefaultTooltip")} disabled={explicitVoice}>
+                <Button type="button" variant="outline" size="xs" data-testid="voice-card-generate" onClick={() => void generate()}>
+                  <Sparkles />
+                  {t("editor.voice.generateWith", { voice: active.name })}
+                </Button>
+              </AppTooltip>
+            )}
+          </>
+        )}
+      </div>
+    )
     return (
       <div className="min-w-0" dir="ltr" data-voice-card="">
         <TakeWaveform
@@ -333,6 +430,7 @@ export function CellVoicePanel({
           audioId={playableId}
           kept={kept}
           height={56}
+          missingAction={missingGenerate}
           // A source section wears the lighter rung, as the source row's own
           // chips do; a take the dub track's (or its own track's) colour.
           kind={isSourceClip || isGenerated ? "generated" : "take"}

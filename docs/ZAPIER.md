@@ -79,7 +79,7 @@ field-level detail.
    - On auth-worker, for each environment: set `ZAPIER_CLIENT_ID` and
      `ZAPIER_REDIRECT_URI` as vars, and run
      `wrangler secret put ZAPIER_CLIENT_SECRET --env <env>`.
-4. Apply migration `0178_mcp_oauth_codes_access.sql`.
+4. Apply migration `0179_mcp_oauth_codes_access.sql`.
 
 ## Public listing checklist
 

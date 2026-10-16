@@ -697,10 +697,11 @@ export const audio = defineNamespace({
     keys: {
       "audio.narrator": {
         description:
-          "Status word/badge meaning this voice is the project's default narrator — " +
-          "used for any line that has no explicit speaker assigned. Appears both as a " +
-          "small badge on a voice's row in the Voices list and as inline status text " +
-          "in the voice editor's footer. Noun, not a verb.",
+          "Status word meaning this voice is the project's default narrator — " +
+          "used for any line that has no explicit speaker assigned. Tooltip on the " +
+          "narrator star in the Voices list, and the accessible name plus tooltip of " +
+          "the filled-star button in the voice editor's footer (no visible label). " +
+          "Noun, not a verb.",
       },
       "audio.newVoice.createLabel": {
         description:
@@ -1335,14 +1336,17 @@ export const audio = defineNamespace({
       },
       "audio.newVoice.makeNarratorHint": {
         description:
-          "Tooltip on the 'Make narrator' button in the voice editor's footer, " +
-          "explaining what the narrator role means before the user clicks it.",
+          "Tooltip on the star button in the voice editor's footer that sets this " +
+          "voice as narrator. The button shows only a star; this sentence is the " +
+          "hover explanation of what the narrator role means before the user clicks it.",
       },
       "audio.newVoice.makeNarratorButton": {
         description:
-          "Button in the voice editor's footer that sets this voice as the " +
-          "project's default narrator (see audio.narrator). Imperative, short — " +
-          "sits beside Cancel/Save.",
+          "Sets this voice as the project's default narrator (see audio.narrator). " +
+          "Accessible name of the star-only button in the voice editor's footer " +
+          "(the visible label was removed; the tooltip is makeNarratorHint), and " +
+          "the visible label of the same action in a voice row's overflow menu. " +
+          "Imperative, short.",
         maxLength: 20,
       },
       "audio.newVoice.createButton": {

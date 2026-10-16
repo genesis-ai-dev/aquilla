@@ -177,10 +177,15 @@ export function LivingMemoryPage({
   // The full validated-cell corpus is an expensive all-files query. Only the
   // Examples pane consumes it; every other pane renders from project/settings.
   const validatedExamplesEnabled = activeSection?.id === "examples"
+  // AQU-2001: read the corpus in the lane this page is viewing. An omitted
+  // lane selects the legacy default lane, which holds no target rows on a
+  // project translated into a named lane — the Examples pane then showed its
+  // empty state however many cells the team had validated.
   const { cells, isLoading, isEmpty, error: cellsError } = useLivingMemory({
     projectId: projectId ?? "",
     project,
     enabled: validatedExamplesEnabled,
+    lane: activeLane ?? "",
   })
 
   const { state: livenessState, label: livenessLabel } = useLiveness(cells.length)

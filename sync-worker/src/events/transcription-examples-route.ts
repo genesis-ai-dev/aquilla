@@ -1,7 +1,10 @@
 // Zero-shot transcription examples (Omnilingual ASR spec §2).
 //
 //   GET /api/v1/projects/:projectId/transcription-examples
-//        ?lane=<target lane tag>&sourceText=&excludeCellId=&limit=
+//        ?lane=<target lane tag>&cellId=&fileId=&sourceText=&limit=
+//   (cellId names the cell being transcribed: it is excluded, and its source
+//   text ranks the rest unless sourceText overrides it. excludeCellId is an
+//   older alias for the exclusion alone.)
 //   GET /api/v1/transcription-examples/audio?p=&f=&a=&exp=&sig=
 //
 // The first picks up to 10 (audio, transcript) pairs from this project for the
@@ -78,24 +81,42 @@ function durationPenalty(ms: number): number {
   return 0
 }
 
-/** Validated first, then source-text similarity (when given), then a duration
- *  near 8–15 s, then newest. Pure, so the order is testable without a DB. */
+/** Spec §4. Pure, so the order is testable without a DB.
+ *  With source text: word overlap (Jaccard), then validated, then a duration
+ *  near 8–15 s, then newest — a take that shares the cell's words teaches more
+ *  than a validated but unrelated one.
+ *  Without: validated, then spread across files (each file's newest before any
+ *  file's second), then newest. */
 export function rankExamples(
   candidates: readonly ExampleCandidate[],
   sourceText: string | undefined,
   limit: number,
 ): ExampleCandidate[] {
   const query = sourceText?.trim() ? sourceText : undefined
-  const scored = candidates.map(candidate => ({
-    candidate,
-    similarity: query ? jaccard(query, candidate.sourceText) : 0,
-  }))
-  scored.sort((a, b) =>
+  if (query) {
+    const scored = candidates.map(candidate => ({ candidate, similarity: jaccard(query, candidate.sourceText) }))
+    scored.sort((a, b) =>
+      b.similarity - a.similarity
+      || Number(b.candidate.validated) - Number(a.candidate.validated)
+      || durationPenalty(a.candidate.durationMs) - durationPenalty(b.candidate.durationMs)
+      || b.candidate.createdTs - a.candidate.createdTs)
+    return scored.slice(0, limit).map(s => s.candidate)
+  }
+  const newestFirst = [...candidates].sort((a, b) =>
+    Number(b.validated) - Number(a.validated) || b.createdTs - a.createdTs)
+  // Position of each take within its (validation tier, file), newest = 0.
+  const seen = new Map<string, number>()
+  const spread = newestFirst.map(candidate => {
+    const key = `${candidate.validated ? 1 : 0}\u0000${candidate.fileId}`
+    const position = seen.get(key) ?? 0
+    seen.set(key, position + 1)
+    return { candidate, position }
+  })
+  spread.sort((a, b) =>
     Number(b.candidate.validated) - Number(a.candidate.validated)
-    || b.similarity - a.similarity
-    || durationPenalty(a.candidate.durationMs) - durationPenalty(b.candidate.durationMs)
+    || a.position - b.position
     || b.candidate.createdTs - a.candidate.createdTs)
-  return scored.slice(0, limit).map(s => s.candidate)
+  return spread.slice(0, limit).map(s => s.candidate)
 }
 
 function hex(bytes: ArrayBuffer): string {
@@ -137,6 +158,9 @@ interface CandidateRow {
 export async function handleTranscriptionExamplesRequest(
   request: Request,
   env: TranscriptionExamplesEnv,
+  /** "/sync" when reached through api.<env>.aquilla.app/sync/*: the signed
+   *  URLs must carry it, or the fetch lands on another worker. */
+  mountPrefix = "",
 ): Promise<Response | null> {
   const url = new URL(request.url)
   if (url.pathname === AUDIO_PATH && request.method === "GET") return serveExampleAudio(url, env)
@@ -172,6 +196,58 @@ export async function handleTranscriptionExamplesRequest(
     `SELECT id FROM lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ? LIMIT 1`,
   ).bind(projectId, lane).first<{ id: string }>()
   if (!laneRow) return Response.json([], noStore)
+  const cellId = url.searchParams.get("cellId") ?? ""
+  const examples = await selectTranscriptionExamples(env, {
+    projectId, laneId: laneRow.id, laneTag: lane,
+    excludeCellId: cellId || excludeCellId,
+    sourceText: sourceText ?? (cellId
+      ? await sourceTextOf(env.AQUILLA_PG, projectId, cellId, url.searchParams.get("fileId") ?? undefined)
+      : undefined),
+    limit, publicBase: env.DIARIZATION_PUBLIC_BASE?.trim() || `${url.origin}${mountPrefix}`,
+  })
+  return Response.json(examples, noStore)
+}
+
+/** The source text of the cell being transcribed (ranking input). */
+export async function sourceTextOf(
+  db: AquillaDb, projectId: string, cellId: string, fileId?: string,
+): Promise<string | undefined> {
+  const row = await db.prepare(
+    `SELECT value FROM cells WHERE project_id = ? AND cell_id = ? AND side = 'source'
+        ${fileId ? "AND file_id = ?" : ""} LIMIT 1`,
+  ).bind(projectId, cellId, ...(fileId ? [fileId] : [])).first<{ value: string }>()
+  return row?.value || undefined
+}
+
+export interface TranscriptionExample {
+  cellId: string
+  fileId: string
+  text: string
+  durationMs: number
+  audioUrl: string
+}
+
+/** Pick and sign examples for one target lane. The CALLER has already applied
+ *  the read wall to that lane (the sync-token route above, or the Agent API's
+ *  lane resolution). `onlyCellIds` restricts to caller-named cells; the 2–30 s
+ *  rule still applies to them. */
+export async function selectTranscriptionExamples(
+  env: Pick<TranscriptionExamplesEnv, "AQUILLA_PG" | "SYNC_SECRET_KEY">,
+  args: {
+    projectId: string
+    laneId: string
+    /** legacy_tag of the lane: a dub with no lane_id yet belongs to ''. */
+    laneTag: string | null
+    excludeCellId?: string
+    sourceText?: string
+    limit: number
+    publicBase: string
+    onlyCellIds?: readonly string[]
+  },
+): Promise<TranscriptionExample[]> {
+  if (!env.AQUILLA_PG || !env.SYNC_SECRET_KEY) throw new Error("transcription examples are not configured")
+  const { projectId } = args
+  const only = args.onlyCellIds?.length ? args.onlyCellIds : null
 
   // Human recordings only (role 'dub', slot 'recording' — not programme audio
   // or generated voices), the selected take, live, and a target cell with
@@ -196,14 +272,15 @@ export async function handleTranscriptionExamplesRequest(
           AND (a.lane_id = ? OR (a.lane_id IS NULL AND ? = ''))
           AND btrim(c.value) <> '' AND a.cell_id <> ?
           AND (s.hidden_at IS NULL)
+          ${only ? `AND a.cell_id IN (${only.map(() => "?").join(", ")})` : ""}
         ORDER BY a.file_id, a.cell_id, a.created_ts DESC
      ) picked
      WHERE effective_ms >= ? AND effective_ms <= ?
      ORDER BY created_ts DESC
      LIMIT ?`,
   ).bind(
-    laneRow.id, projectId, laneRow.id, lane, excludeCellId,
-    EXAMPLE_MIN_MS, EXAMPLE_MAX_MS, EXAMPLE_CANDIDATE_CAP,
+    args.laneId, projectId, args.laneId, args.laneTag ?? "\u0000no-legacy-lane", args.excludeCellId ?? "",
+    ...(only ?? []), EXAMPLE_MIN_MS, EXAMPLE_MAX_MS, EXAMPLE_CANDIDATE_CAP,
   ).all<CandidateRow>()
 
   const candidates: ExampleCandidate[] = (res.results ?? []).map(row => ({
@@ -221,17 +298,16 @@ export async function handleTranscriptionExamplesRequest(
     .filter(c => c.durationMs >= EXAMPLE_MIN_MS && c.durationMs <= EXAMPLE_MAX_MS)
     .filter(c => isPathSafeId(c.fileId) && isPathSafeId(c.audioId))
 
-  const base = env.DIARIZATION_PUBLIC_BASE?.trim() || url.origin
   const exp = Math.floor(Date.now() / 1000) + EXAMPLE_URL_TTL_SEC
-  const picked = rankExamples(candidates, sourceText, limit)
-  const body = await Promise.all(picked.map(async c => ({
+  const secret = env.SYNC_SECRET_KEY
+  const picked = rankExamples(candidates, args.sourceText, args.limit)
+  return Promise.all(picked.map(async c => ({
     cellId: c.cellId,
     fileId: c.fileId,
     text: c.text,
     durationMs: c.durationMs,
-    audioUrl: await signedExampleAudioUrl(base, env.SYNC_SECRET_KEY!, projectId, c.fileId, c.audioId, exp),
+    audioUrl: await signedExampleAudioUrl(args.publicBase, secret, projectId, c.fileId, c.audioId, exp),
   })))
-  return Response.json(body, noStore)
 }
 
 async function serveExampleAudio(url: URL, env: TranscriptionExamplesEnv): Promise<Response> {

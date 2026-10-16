@@ -1,12 +1,29 @@
-// Server-side language routing for hosted transcription (Omnilingual ASR spec
-// §3/§4). The client sends the project's raw BCP-47 tag; this module decides
-// whether Whisper supports it and, if not, which Omnilingual `xxx_Scrp` code
-// to pass along.
+// Hosted transcription model routing and per-model language codes
+// (docs/superpowers/specs/2026-10-16-omnilingual-asr.md §1/§2). The client
+// sends the project's raw BCP-47 tag; the server picks the model with
+// pickAsrModel and maps the tag with toWhisperCode / toQwenCode / toOmniCode.
+// Shared by auth-worker (the transcription route) and sync-worker (the Agent
+// API tool, which windows audio by the model it will hit).
 //
-// `whisperLanguageFromTag` is a copy of src/lib/audio/language.ts — the SPA
-// keeps its own for the on-device path. transcription-language.test.ts loads
-// the SPA module and asserts both agree on every tag, so the copies cannot
-// drift silently.
+// `toWhisperCode` is a copy of src/lib/audio/language.ts whisperLanguageFromTag
+// — the SPA keeps its own for the on-device path.
+// auth-worker/src/__tests__/asr-models.test.ts loads the SPA module and asserts
+// both agree on every tag, so the copies cannot drift silently.
+
+/** Our model ids (spec table). "auto" is resolved by pickAsrModel. */
+export const ASR_MODELS = ["whisper", "qwen3-asr", "omni-ctc", "omni-zs"] as const
+export type AsrModel = typeof ASR_MODELS[number]
+export const ASR_MODEL_CHOICES = ["auto", ...ASR_MODELS] as const
+export type AsrModelChoice = typeof ASR_MODEL_CHOICES[number]
+
+export const isOmniModel = (model: AsrModel): model is "omni-ctc" | "omni-zs" =>
+  model === "omni-ctc" || model === "omni-zs"
+
+/** Longest audio one request may carry, per model. Omnilingual rejects 40 s
+ *  and up; ZS was trained on ≤30 s clips, so callers window at 30 s. */
+export const ASR_WINDOW_SECONDS: Record<AsrModel, number> = {
+  "whisper": 60, "qwen3-asr": 60, "omni-ctc": 30, "omni-zs": 30,
+}
 
 const WHISPER_TWO_LETTER = new Set<string>([
   "en", "zh", "de", "es", "ru", "ko", "fr", "ja", "pt", "tr", "pl", "ca",
@@ -46,8 +63,8 @@ const THREE_TO_TWO: Record<string, string> = {
 /** A lane id (8 hex) is not a language; one that leaked through is ignored. */
 const LANE_ID_RE = /^[0-9a-f]{8}$/
 
-/** Copy of the SPA's mapping — see the header comment. */
-export function whisperLanguageFromTag(tag: string | undefined | null): string | undefined {
+/** Copy of the SPA's whisperLanguageFromTag — see the header comment. */
+export function toWhisperCode(tag: string | undefined | null): string | undefined {
   if (!tag) return undefined
   const norm = tag.trim().toLowerCase()
   if (!norm) return undefined
@@ -103,7 +120,7 @@ const BIBLIOGRAPHIC_TO_THREE: Record<string, string> = {
  *  conditioning anyway), rather than a guessed script. */
 const DEFAULT_SCRIPT: Record<string, string> = {
   // Non-Latin scripts.
-  cmn: "Hans", jpn: "Jpan", kor: "Hang", rus: "Cyrl", ukr: "Cyrl", bel: "Cyrl",
+  cmn: "Hans", yue: "Hant", wuu: "Hans", nan: "Hant", hak: "Hant", jpn: "Jpan", kor: "Hang", rus: "Cyrl", ukr: "Cyrl", bel: "Cyrl",
   bul: "Cyrl", mkd: "Cyrl", srp: "Cyrl", kaz: "Cyrl", kir: "Cyrl", tgk: "Cyrl",
   khk: "Cyrl", tat: "Cyrl", bak: "Cyrl", arb: "Arab", pes: "Arab", urd: "Arab",
   pbt: "Arab", snd: "Arab", uig: "Arab", heb: "Hebr", ydd: "Hebr", ell: "Grek",
@@ -131,7 +148,7 @@ const DEFAULT_SCRIPT: Record<string, string> = {
 
 /** Map a BCP-47 tag to Omnilingual's `{iso639-3}_{Script}` code, or undefined
  *  when the script cannot be known (the request then goes without `lang`). */
-export function omniLanguageFromTag(tag: string | undefined | null): string | undefined {
+export function toOmniCode(tag: string | undefined | null): string | undefined {
   if (!tag) return undefined
   const norm = tag.trim()
   if (!norm || LANE_ID_RE.test(norm.toLowerCase())) return undefined
@@ -146,4 +163,41 @@ export function omniLanguageFromTag(tag: string | undefined | null): string | un
     ? scriptSubtag[0].toUpperCase() + scriptSubtag.slice(1).toLowerCase()
     : DEFAULT_SCRIPT[code]
   return script ? `${code}_${script}` : undefined
+}
+
+/** Chinese varieties (639-3 macro-language members plus zh). Ryder,
+ *  2026-10-16: "Keep Whisper as the default for its languages; Qwen only for
+ *  Chinese varieties." */
+const CHINESE_VARIETIES = new Set<string>([
+  "zh", "zho", "chi", "cmn", "yue", "wuu", "nan", "hak", "cdo", "cjy", "cpx",
+  "czh", "czo", "gan", "hsn", "mnp", "lzh",
+])
+
+function languageHead(tag: string | undefined | null): string | undefined {
+  const norm = tag?.trim().toLowerCase()
+  if (!norm || LANE_ID_RE.test(norm)) return undefined
+  const head = norm.split(/[-_]/, 1)[0]
+  return /^[a-z]{2,3}$/.test(head) ? head : undefined
+}
+
+/** Qwen3-ASR's language code: Cantonese is its own, every other Chinese
+ *  variety is recognised under `zh` (OpenRouter has no dialect parameter). */
+export function toQwenCode(tag: string | undefined | null): string | undefined {
+  const head = languageHead(tag)
+  if (!head || !CHINESE_VARIETIES.has(head)) return undefined
+  return head === "yue" ? "yue" : "zh"
+}
+
+/** Automatic routing (spec §1). Never picks zero-shot.
+ *  1. Chinese variety → qwen3-asr. 2. Whisper language → whisper.
+ *  3. Any other language code → omni-ctc (Omnilingual covers 1,600+; CTC needs
+ *     no language conditioning, so an unlisted code is still served).
+ *  4. No tag, or not a language code (a lane id, `x-private`) → whisper with
+ *     auto-detect, today's behaviour. */
+export function pickAsrModel(tag: string | undefined | null): "whisper" | "qwen3-asr" | "omni-ctc" {
+  const head = languageHead(tag)
+  if (!head) return "whisper"
+  if (CHINESE_VARIETIES.has(head)) return "qwen3-asr"
+  if (toWhisperCode(tag) !== undefined) return "whisper"
+  return "omni-ctc"
 }

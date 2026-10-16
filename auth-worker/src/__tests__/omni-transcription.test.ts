@@ -94,7 +94,8 @@ describe("auto routing", () => {
     expect(calls.modal).toHaveLength(0)
     expect(calls.whisper).toHaveLength(1)
     expect(calls.whisper[0]).toMatchObject({ model: "openai/whisper-1", language: "fr" })
-    expect(await response.json()).toEqual({ text: "bonjour", chunks: [{ text: "bonjour", start: 0, end: 0.5 }] })
+    expect(await response.json()).toEqual({ text: "bonjour", chunks: [{ text: "bonjour", start: 0, end: 0.5 }],
+      model: "whisper", timingsApproximate: false })
   })
 
   it("keeps Whisper auto-detect when the client sends no language", async () => {
@@ -118,7 +119,7 @@ describe("auto routing", () => {
     expect(calls.modal[0].body).toEqual({ model: "ctc", audio: request.input_audio.data, lang: "tpi_Latn" })
     expect(await response.json()).toEqual({ text: "ami ya", chunks: [
       { text: "ami", start: 0, end: 0.4 }, { text: "ya", start: 0.5, end: 0.8 },
-    ] })
+    ], model: "omni-ctc", timingsApproximate: false })
   })
 
   it("omits lang when the script cannot be known, and flags approximate timings", async () => {
@@ -150,7 +151,7 @@ describe("auto routing", () => {
 
 describe("zero-shot", () => {
   const zs = async (examples?: unknown) => ({
-    ...(await audio(2, "tpi")), model: "zs", ...(examples === undefined ? {} : { examples }),
+    ...(await audio(2, "tpi")), model: "omni-zs", ...(examples === undefined ? {} : { examples }),
   })
 
   it("forwards the examples to the ZS model", async () => {
@@ -182,7 +183,7 @@ describe("zero-shot", () => {
     for (const examples of [undefined, []]) {
       const response = await post(jwt, await zs(examples))
       expect(response.status).toBe(400)
-      expect(await response.json()).toEqual({ error: "zero_shot_examples_required" })
+      expect(await response.json()).toEqual({ error: "zs_no_examples" })
     }
     expect(calls.modal).toHaveLength(0)
   })
@@ -282,7 +283,8 @@ describe("Omnilingual billing — edge replies", () => {
     const { response } = await weekly({ text: "ami", words: [{ text: "ami", start: 0, end: 1 }],
       gpuSeconds: 1, gpu: "NVIDIA L4", peakMemGiB: 3.1, loadSec: 12 })
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ text: "ami", chunks: [{ text: "ami", start: 0, end: 1 }] })
+    expect(await response.json()).toEqual({ text: "ami", chunks: [{ text: "ami", start: 0, end: 1 }],
+      model: "omni-ctc", timingsApproximate: false })
   })
 })
 
@@ -302,7 +304,7 @@ describe("warm-up and status proxies", () => {
     const jwt = await owner()
     const calls = stubProviders({ ok: true })
     const response = await app.request("/api/v1/audio/transcriptions/warm", {
-      method: "POST", headers: authHeader(jwt), body: JSON.stringify({ projectId, model: "zs" }),
+      method: "POST", headers: authHeader(jwt), body: JSON.stringify({ projectId, model: "omni-zs" }),
     }, settings())
     expect(response.status).toBe(202)
     expect(calls.modal[0]).toMatchObject({ url: `${MODAL}/warm`, body: { model: "zs" } })
@@ -313,7 +315,7 @@ describe("warm-up and status proxies", () => {
     await seedUser(2, "stranger")
     const calls = stubProviders({ ok: true })
     const response = await app.request("/api/v1/audio/transcriptions/warm", {
-      method: "POST", headers: authHeader(await jwtFor("stranger")), body: JSON.stringify({ projectId, model: "zs" }),
+      method: "POST", headers: authHeader(await jwtFor("stranger")), body: JSON.stringify({ projectId, model: "omni-zs" }),
     }, settings())
     expect(response.status).toBe(403)
     expect(calls.modal).toHaveLength(0)
@@ -323,7 +325,7 @@ describe("warm-up and status proxies", () => {
     const jwt = await owner({ transcription: { zeroShotEnabled: false } })
     const calls = stubProviders({ ok: true })
     const response = await app.request("/api/v1/audio/transcriptions/warm", {
-      method: "POST", headers: authHeader(jwt), body: JSON.stringify({ projectId, model: "zs" }),
+      method: "POST", headers: authHeader(jwt), body: JSON.stringify({ projectId, model: "omni-zs" }),
     }, settings())
     expect(response.status).toBe(403)
     expect(calls.modal).toHaveLength(0)
@@ -349,7 +351,7 @@ describe("org admins control transcription.zeroShotEnabled", () => {
     await seedOrgRoles()
     expect((await patch("mara", { zeroShotEnabled: false })).status).toBe(200)
     const calls = stubProviders()
-    const response = await post(jwt, { ...(await audio(2, "tpi")), model: "zs", examples: [{ url: exampleUrl, text: "ami" }] })
+    const response = await post(jwt, { ...(await audio(2, "tpi")), model: "omni-zs", examples: [{ url: exampleUrl, text: "ami" }] })
     expect(response.status).toBe(403)
     expect(calls.modal).toHaveLength(0)
   })
@@ -365,5 +367,93 @@ describe("org admins control transcription.zeroShotEnabled", () => {
     await seedOrgRoles()
     expect((await patch("mara", { zeroShotEnabled: "false" })).status).toBe(400)
     expect((await patch("mara", "off")).status).toBe(400)
+  })
+})
+
+describe("Qwen3-ASR for Chinese varieties", () => {
+  it("routes Cantonese to qwen/qwen3-asr-1.7b through the OpenRouter path", async () => {
+    const jwt = await owner()
+    const calls = stubProviders()
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      const url = String(input)
+      if (url.includes("/models?")) return Response.json({ data: [{ id: "qwen/qwen3-asr-1.7b", pricing: { prompt: "0.0000075" } }] })
+      calls.whisper.push(JSON.parse(String(init?.body)))
+      return Response.json({ text: "你好", words: [{ word: "你好", start: 0, end: 0.5 }], usage: { cost: 0.0001 } })
+    })
+    const response = await post(jwt, await audio(1, "yue-HK"))
+    expect(response.status).toBe(200)
+    expect(calls.whisper[0]).toMatchObject({ model: "qwen/qwen3-asr-1.7b", language: "yue" })
+    expect(await response.json()).toMatchObject({ model: "qwen3-asr" })
+  })
+
+  it("lets a user force Whisper even for a Chinese tag", async () => {
+    const jwt = await owner()
+    const calls = stubProviders()
+    expect((await post(jwt, { ...(await audio(1, "zh-CN")), model: "whisper" })).status).toBe(200)
+    expect(calls.whisper[0]).toMatchObject({ model: "openai/whisper-1", language: "zh" })
+  })
+})
+
+describe("internal route for Agent API tools", () => {
+  const internal = async (body: Record<string, unknown>, secret = "sync-secret", path = "/api/v1/audio/internal/transcriptions") =>
+    app.request(path, {
+      method: "POST", headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }, settings({ SYNC_SECRET_KEY: "sync-secret" }))
+  const webm = { data: btoa("not-really-webm-bytes"), format: "webm", durationMs: 5000 }
+
+  it("refuses callers without the shared secret", async () => {
+    await owner()
+    const calls = stubProviders()
+    expect((await internal({ projectId, userId: 1, audio: webm, language: "tpi" }, "wrong")).status).toBe(401)
+    expect(calls.modal).toHaveLength(0)
+  })
+
+  it("re-checks the user's live project role", async () => {
+    await owner()
+    await seedUser(2, "stranger")
+    const calls = stubProviders()
+    expect((await internal({ projectId, userId: 2, audio: webm, language: "tpi" })).status).toBe(403)
+    expect(calls.modal).toHaveLength(0)
+  })
+
+  it("forwards a stored webm take to Omnilingual and reports credits charged", async () => {
+    await owner()
+    const calls = stubProviders({ text: "ami", words: [{ text: "ami", start: 0, end: 1 }], gpuSeconds: 2, gpu: "NVIDIA L4" })
+    const response = await internal({ projectId, userId: 1, audio: webm, language: "tpi" })
+    expect(response.status).toBe(200)
+    expect(calls.modal[0].body).toMatchObject({ model: "ctc", audio: webm.data })
+    const body = await response.json() as { model: string; creditsCharged: number }
+    expect(body.model).toBe("omni-ctc")
+    expect(body.creditsCharged).toBeCloseTo(2 * OMNI_GPU_CENTS_PER_SEC["NVIDIA L4"] * 1.5 * 4, 9)
+  })
+
+  it("applies the same org zero-shot gate as the app", async () => {
+    await owner({ transcription: { zeroShotEnabled: false } })
+    const calls = stubProviders()
+    const response = await internal({ projectId, userId: 1, audio: webm, language: "tpi", model: "omni-zs",
+      examples: [{ url: exampleUrl, text: "ami" }] })
+    expect(response.status).toBe(403)
+    expect(await response.json()).toEqual({ error: "zero_shot_disabled" })
+    expect(calls.modal).toHaveLength(0)
+  })
+
+  it("refuses a webm take for Whisper, which OpenRouter does not document", async () => {
+    await owner()
+    const calls = stubProviders()
+    const response = await internal({ projectId, userId: 1, audio: webm, language: "fr" })
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: "audio_format_unsupported_for_model" })
+    expect(calls.whisper).toHaveLength(0)
+  })
+
+  it("warms then reports status for an agent", async () => {
+    await owner()
+    const calls = stubProviders({ state: "starting", estGpuSecPerAudioSec: 0.5 })
+    const response = await internal({ projectId, userId: 1, model: "omni-zs", action: "warm" },
+      "sync-secret", "/api/v1/audio/internal/transcriptions/status")
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ state: "starting", estGpuSecPerAudioSec: 0.5 })
+    expect(calls.modal.map(call => call.url)).toEqual([`${MODAL}/warm`, `${MODAL}/status?model=zs`])
   })
 })

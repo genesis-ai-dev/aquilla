@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest"
-import { omniLanguageFromTag, whisperLanguageFromTag } from "../lib/transcription-language"
+import { pickAsrModel, toOmniCode, toQwenCode, toWhisperCode } from "../../../db/shared/asr-models"
 import {
   OMNI_GPU_CENTS_PER_SEC, omniAmortization, omniCostBoundCents, omniRawCostCents,
 } from "../../../db/shared/omni-asr-cost"
@@ -11,36 +11,58 @@ beforeAll(async () => {
   ;({ whisperLanguageFromTag: spaWhisper } = await import(path))
 })
 
-describe("whisperLanguageFromTag (server copy)", () => {
+describe("toWhisperCode (server copy)", () => {
   // The server now decides Whisper vs Omnilingual from the raw tag. If its copy
   // drifted from the SPA's, the on-device and hosted paths would disagree about
   // which languages Whisper handles.
   it("agrees with the SPA's mapping on every tag", () => {
     const tags = ["en", "en-US", "fr_CA", "fre", "ger", "zh-Hant", "tpi", "kmr", "xx", "deadbeef",
       "", "  ", "jw", "jv", "eng", "pus_x", "qxy-Latn", "sr-Cyrl-RS", "x-private"]
-    for (const tag of tags) expect(whisperLanguageFromTag(tag), tag).toBe(spaWhisper(tag))
+    for (const tag of tags) expect(toWhisperCode(tag), tag).toBe(spaWhisper(tag))
   })
 })
 
-describe("omniLanguageFromTag", () => {
+describe("pickAsrModel (spec §1)", () => {
+  it("keeps Whisper for its languages, so existing users see no change", () => {
+    for (const tag of ["sw", "en-US", "fr", "fra", "es-419"]) expect(pickAsrModel(tag), tag).toBe("whisper")
+  })
+  it("sends Chinese varieties, and only those, to Qwen3-ASR", () => {
+    // Ryder: "Keep Whisper as the default for its languages; Qwen only for Chinese varieties."
+    for (const tag of ["zh", "zh-Hant-TW", "yue", "cmn", "wuu", "nan", "hak"]) expect(pickAsrModel(tag), tag).toBe("qwen3-asr")
+    for (const tag of ["ja", "ko", "vi"]) expect(pickAsrModel(tag), tag).toBe("whisper")
+  })
+  it("sends a language Whisper lacks to Omnilingual CTC", () => {
+    for (const tag of ["tpi", "luo", "qxy-Latn"]) expect(pickAsrModel(tag), tag).toBe("omni-ctc")
+  })
+  it("falls back to Whisper auto-detect when there is no language code", () => {
+    for (const tag of [undefined, "", "deadbeef", "x-private"]) expect(pickAsrModel(tag), String(tag)).toBe("whisper")
+  })
+  it("maps Cantonese to yue and other Chinese varieties to zh for Qwen", () => {
+    expect(toQwenCode("yue-HK")).toBe("yue")
+    expect(toQwenCode("cmn")).toBe("zh")
+    expect(toQwenCode("fr")).toBeUndefined()
+  })
+})
+
+describe("toOmniCode", () => {
   it("maps 639-1 to 639-3 with the default script", () => {
-    expect(omniLanguageFromTag("en")).toBe("eng_Latn")
-    expect(omniLanguageFromTag("ru")).toBe("rus_Cyrl")
-    expect(omniLanguageFromTag("am-ET")).toBe("amh_Ethi")
+    expect(toOmniCode("en")).toBe("eng_Latn")
+    expect(toOmniCode("ru")).toBe("rus_Cyrl")
+    expect(toOmniCode("am-ET")).toBe("amh_Ethi")
   })
   it("honours an explicit script subtag over the default", () => {
-    expect(omniLanguageFromTag("sr-Latn")).toBe("srp_Latn")
-    expect(omniLanguageFromTag("zh-hant-TW")).toBe("cmn_Hant")
-    expect(omniLanguageFromTag("qxy-Latn")).toBe("qxy_Latn")
+    expect(toOmniCode("sr-Latn")).toBe("srp_Latn")
+    expect(toOmniCode("zh-hant-TW")).toBe("cmn_Hant")
+    expect(toOmniCode("qxy-Latn")).toBe("qxy_Latn")
   })
   it("normalises bibliographic 639-2 codes", () => {
-    expect(omniLanguageFromTag("fre")).toBe("fra_Latn")
+    expect(toOmniCode("fre")).toBe("fra_Latn")
   })
   it("returns undefined rather than guessing an unknown script", () => {
     // The request then goes to CTC without lang (CTC has no conditioning).
-    expect(omniLanguageFromTag("qxy")).toBeUndefined()
-    expect(omniLanguageFromTag("deadbeef")).toBeUndefined()
-    expect(omniLanguageFromTag(undefined)).toBeUndefined()
+    expect(toOmniCode("qxy")).toBeUndefined()
+    expect(toOmniCode("deadbeef")).toBeUndefined()
+    expect(toOmniCode(undefined)).toBeUndefined()
   })
 })
 

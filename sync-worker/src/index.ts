@@ -45,6 +45,7 @@ import { handleExternalChangesetsRequest } from "./external/changesets-route"
 import { handleSessionChangesetsRequest } from "./external/session-routes"
 import { handleExternalArtifactsRequest } from "./external/artifacts-route"
 import { handleExternalKnowledgeRequest } from "./external/knowledge-route"
+import { handleExternalTranscriptionRequest } from "./external/transcription-route"
 import { handleFilesReadRequest } from "./events/files-read-route"
 import { handleProgressReadRequest } from "./events/progress-read-route"
 import { handlePlanRequest } from "./events/plan-route"
@@ -463,7 +464,7 @@ const worker = {
     const cellAudioReadResponse = await handleCellAudioReadRequest(request, env)
     if (cellAudioReadResponse) return withCors(cellAudioReadResponse, request)
     // Omnilingual ASR zero-shot examples + their signed audio (spec §2).
-    const transcriptionExamplesResponse = await handleTranscriptionExamplesRequest(request, env)
+    const transcriptionExamplesResponse = await handleTranscriptionExamplesRequest(request, env, mountPrefix)
     if (transcriptionExamplesResponse) return withCors(transcriptionExamplesResponse, request)
     const cellLinksReadResponse = await handleCellLinksReadRequest(request, env)
     if (cellLinksReadResponse) return withCors(cellLinksReadResponse, request)
@@ -615,6 +616,9 @@ const worker = {
 
     // AQU-1762: Agent API knowledge-base (reference document) upload / list.
     // Bridged to auth-worker, which owns extraction + indexing.
+    // Omnilingual ASR spec §7: agent transcription + ZS warm-up status.
+    const externalTranscriptionResponse = await handleExternalTranscriptionRequest(request, env, mountPrefix)
+    if (externalTranscriptionResponse) return withCors(externalTranscriptionResponse, request)
     const externalKnowledgeResponse = await handleExternalKnowledgeRequest(request, env)
     if (externalKnowledgeResponse) return withCors(externalKnowledgeResponse, request)
 

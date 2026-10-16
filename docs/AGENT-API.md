@@ -450,6 +450,7 @@ CRUD surface with MCP bolted on.
 | Reading | `search_project`, `search_projects` (cross-project, explicit id list, max 10 — AQU-1236), `read_content`, `read_history`, `read_comments`, `find_similar_cells`, `get_prompt_preview`, `list_memory`, `read_cell_memory`, `list_terms` (AQU-1175 — the termbase) |
 | Quality | `read_quality`, `read_term_consistency` — **implemented (AQU-1231)**: per-file health (0-100) + coverage (total/filled/validated + percentages) and the project rollup; and the term-consistency drift list (per active concept: occurrences, consistent count/percent, which approved rendering was used in which cells, and the cells that used none). Both are PARITY reads — `read_quality` delegates to the internal `health-rollup` and `files/:fileId/progress` routes the in-app health ring and progress surfaces read, and `read_term_consistency` runs the SPA's own scan (`src/lib/check/term-consistency-scan.ts`, shared with the in-app "Check file" pass). Whatever counting rules the progress projection applies (e.g. AQU-1083's headings/paratextual exclusion) the API inherits by construction — there is no second denominator to keep in step. REST equivalents: `GET …/projects/:projectId/quality` and `GET …/projects/:projectId/terms/consistency` (both take optional `fileId`, `lane`; the latter also `onlyDrift=1`). |
 | Translation | `prepare_translations` |
+| Transcription | `transcribe_audio`, `transcription_status` — **implemented (Omnilingual ASR, 2026-10-16)**: speech to text with word timings for a cell's selected take or raw WAV, including low-resource languages through Omnilingual zero-shot. Output only; store results with a changeset (`SetTranslation` for a target take, `SetTranscription` for a source media cell). See the addendum at the end. |
 | Verification | `run_checks` — structured, actionable failures (e.g. `"term 'covenant' rendered 3 ways: [refs]"`), never a bare 400. The term-consistency half of this now exists as `read_term_consistency` (above); `run_checks` remains unimplemented for the RULE pass. |
 | Changesets | `get_changeset`, `confirm_changeset`, `discard_changeset` |
 | Jobs | `get_job` |
@@ -1217,3 +1218,84 @@ Write patterns in the non-`u` dialect instead: explicit ranges (`[\u0400-\u04FF]
 Cyrillic, verified to work in both modes), `\uXXXX` escapes rather than `\u{...}`, and
 literal characters where you can. Then **confirm the rule fires** against a cell you know
 violates it — `read_quality` after the commit — rather than trusting the changeset receipt.
+
+## Status addendum (2026-10-16, Omnilingual ASR — agent transcription)
+
+Spec: `docs/superpowers/specs/2026-10-16-omnilingual-asr.md` §7.
+
+**Tools.** `transcribe_audio` and `transcription_status`. REST:
+`POST /api/v1/external/projects/:projectId/transcriptions` and
+`POST /api/v1/external/projects/:projectId/transcriptions/status`.
+
+**What it does.** Transcribes either a cell's selected recorded take
+(`laneId` + `fileId` + `cellId`) or raw audio (`audio: { data, format: "wav" }`,
+16 kHz mono PCM16, up to 10 min). Returns
+`{ text, words: [{ text, start, end }], model, timingsApproximate, creditsCharged }`.
+Times are seconds from the start of the whole clip.
+
+**Models.** `model` is `auto` (default) | `whisper` | `qwen3-asr` | `omni-ctc` | `omni-zs`.
+`auto` picks Whisper for its 99 languages, Qwen3-ASR for Chinese varieties, and
+Omnilingual CTC for any other language code. It never picks zero-shot. `language`
+(BCP-47) defaults to the lane's language code.
+
+**Zero-shot (`omni-zs`).** It learns the language from up to 10 of the lane's own
+takes that have a transcript (2–30 s each). By default the examples are ranked by
+word overlap with the cell's source text, then validation, then length near 8–15 s;
+`exampleCellIds` names them instead. It cold-starts in about 2 minutes, so warm it first.
+
+**Same terms as the app.** Every request window goes to auth-worker's
+`POST /api/v1/audio/internal/transcriptions` (shared `SYNC_SECRET_KEY`, like
+DraftCells). That route runs the same code as the in-app route: the org's
+`transcription.zeroShotEnabled` gate, the AI spend ceiling, the per-user rate limit,
+the weekly-allowance reservation, and settlement on provider cost (Whisper/Qwen) or
+metered GPU-seconds (Omnilingual). `creditsCharged` is that settlement in credit units;
+it is `null` while a provider cost is still being reconciled.
+
+**Credentials.** The tools need a **project-scoped** `aqk_` credential with
+**read-write** access (the call spends credits), and a contributor role or higher.
+
+**Windowing.** WAV is cut server-side: 30 s windows for Omnilingual, 60 s for
+Whisper/Qwen. Each boundary moves back up to 2 s to the quietest 20 ms frame, so
+a word is not split. A stored compressed take (webm/ogg) cannot be decoded in a
+Worker, so it must fit one window. webm goes only to `omni-ctc`/`omni-zs`, because
+OpenRouter does not document webm input.
+
+**Errors.**
+
+| Situation | Code | `details.reason` |
+| --- | --- | --- |
+| Zero-shot model is cold | `job_failed` | `asr_warming` (with `retryAfterSeconds` and `nextStep`) |
+| Org turned zero-shot off | `permission_denied` | `zero_shot_disabled` |
+| No usable examples in the lane | `validation_failed` | `zs_no_examples` |
+| A webm take was sent to Whisper/Qwen | `validation_failed` | `audio_format_unsupported_for_model` |
+| Allowance or credit cap reached | `rate_limited` | — |
+
+**Preview limitation.** A PR-preview sync-worker cannot call a preview auth-worker
+(see `docs/DEPLOYMENT-ENVIRONMENTS.md`), so these tools work on dev and prod only.
+
+### Worked example: a Dholuo lane (`luo`), zero-shot
+
+```jsonc
+// 1. Warm the model and poll until it is ready (~2 min when cold).
+{ "name": "transcription_status", "arguments": { "projectId": "p1", "model": "omni-zs", "warm": true } }
+// → { "state": "starting", "estGpuSecPerAudioSec": 0.5 }
+{ "name": "transcription_status", "arguments": { "projectId": "p1", "model": "omni-zs" } }
+// → { "state": "ready", "estGpuSecPerAudioSec": 0.5 }
+
+// 2. Transcribe one cell's take. Examples come from the lane's own recordings.
+{ "name": "transcribe_audio", "arguments": {
+    "projectId": "p1", "laneId": "a1b2c3d4", "fileId": "jhn", "cellId": "JHN 1:1",
+    "model": "omni-zs" } }
+// → { "text": "Chakruok ne Wach ni", "words": [{ "text": "Chakruok", "start": 0.42, "end": 1.1 }, …],
+//     "model": "omni-zs", "timingsApproximate": false, "creditsCharged": 1.9 }
+
+// 3. To keep it, stage it as the lane's text. The approval gate applies as for any write.
+{ "name": "prepare_translations", "arguments": { "projectId": "p1", "commands": [
+    { "kind": "SetTranslation", "laneId": "a1b2c3d4", "fileId": "jhn", "cellId": "JHN 1:1",
+      "value": "Chakruok ne Wach ni" } ] } }
+```
+
+A take in a target lane is a recording of that lane's text, so its transcript
+is stored with `SetTranslation`. A source media cell's transcript uses
+`SetTranscription` instead (project-lead floor). Call `describe_command` for the
+exact parameters before staging either.

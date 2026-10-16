@@ -140,32 +140,52 @@ describe("transcription examples — what qualifies", () => {
 })
 
 describe("transcription examples — ranking", () => {
-  it("puts validated first, then the most similar source text", async () => {
-    const pg = await db({
-      cells: cells({
-        similar: ["in the beginning god created", "t1"],
-        unrelated: ["the lord is my shepherd", "t2"],
-        validatedCell: ["love one another", "t3"],
-        validatedTake: ["blessed are the meek", "t4"],
-      }, DEFAULT_LANE, ["validatedCell"]),
-      cell_audio: [
-        take({ cell: "similar", durationMs: 9000, createdTs: 1 }),
-        take({ cell: "unrelated", durationMs: 9000, createdTs: 9 }),
-        take({ cell: "validatedCell", durationMs: 9000, createdTs: 2 }),
-        take({ cell: "validatedTake", durationMs: 9000, createdTs: 3, validators: 1 }),
-      ],
-    })
-    const order = await ids(await get(pg, `?lane=&sourceText=${encodeURIComponent("In the beginning God created the heavens")}`))
-    expect(order.slice(0, 2).sort()).toEqual(["validatedCell", "validatedTake"])
-    expect(order.slice(2)).toEqual(["similar", "unrelated"])
+  const rankingSeed = () => db({
+    cells: cells({
+      target: ["in the beginning god created the heavens", "t0"],
+      similar: ["in the beginning god created", "t1"],
+      // Shares no word with the query, so it ranks on recency alone.
+      unrelated: ["a lord is my shepherd", "t2"],
+      validatedCell: ["love one another", "t3"],
+      validatedTake: ["blessed are the meek", "t4"],
+    }, DEFAULT_LANE, ["validatedCell"]),
+    cell_audio: [
+      take({ cell: "target", durationMs: 9000, createdTs: 10 }),
+      take({ cell: "similar", durationMs: 9000, createdTs: 1 }),
+      take({ cell: "unrelated", durationMs: 9000, createdTs: 9 }),
+      take({ cell: "validatedCell", durationMs: 9000, createdTs: 2 }),
+      take({ cell: "validatedTake", durationMs: 9000, createdTs: 3, validators: 1 }),
+    ],
   })
 
-  it("without source text prefers 8–15 s clips, then newest", () => {
-    const c = (cellId: string, durationMs: number, createdTs: number): ExampleCandidate => ({
-      cellId, fileId: F, audioId: cellId, text: "t", sourceText: "", durationMs, validated: false, createdTs,
+  it("ranks a take sharing the cell's source words above validated but unrelated ones", async () => {
+    // Spec §9: the overlap is what teaches the model this cell's vocabulary.
+    const pg = await rankingSeed()
+    const order = await ids(await get(pg, `?lane=&sourceText=${encodeURIComponent("In the beginning God created the heavens")}`))
+    expect(order[0]).toBe("target")
+    expect(order[1]).toBe("similar")
+    expect(order.slice(2, 4).sort()).toEqual(["validatedCell", "validatedTake"])
+    expect(order[4]).toBe("unrelated")
+  })
+
+  it("reads the ranking text from cellId's source cell and leaves that cell out", async () => {
+    const pg = await rankingSeed()
+    const order = await ids(await get(pg, "?lane=&cellId=target"))
+    expect(order).not.toContain("target")
+    expect(order[0]).toBe("similar")
+    // An explicit sourceText overrides the cell's own.
+    expect((await ids(await get(pg, `?lane=&cellId=target&sourceText=${encodeURIComponent("blessed meek")}`)))[0])
+      .toBe("validatedTake")
+  })
+
+  it("without source text: validated first, then one take per file before seconds", () => {
+    const c = (cellId: string, fileId: string, createdTs: number, validated = false): ExampleCandidate => ({
+      cellId, fileId, audioId: cellId, text: "t", sourceText: "", durationMs: 9000, validated, createdTs,
     })
-    const ranked = rankExamples([c("short", 3000, 9), c("mid", 10000, 1), c("mid-new", 12000, 5), c("long", 28000, 8)], undefined, 10)
-    expect(ranked.map(r => r.cellId)).toEqual(["mid-new", "mid", "short", "long"])
+    const ranked = rankExamples([
+      c("a1", "A", 9), c("a2", "A", 8), c("a3", "A", 7), c("b1", "B", 2), c("v", "C", 1, true),
+    ], undefined, 10)
+    expect(ranked.map(r => r.cellId)).toEqual(["v", "a1", "b1", "a2", "a3"])
   })
 
   it("scores similarity as Jaccard over lower-cased words of any script", () => {

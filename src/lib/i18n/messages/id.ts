@@ -5744,6 +5744,7 @@ export const id: Catalog = {
   "knowledgeBase.status.ready": "Terindeks",
   "knowledgeBase.status.failed": "Pengindeksan gagal",
   "knowledgeBase.status.stalled": "Pengindeksan mandek",
+  "knowledgeBase.status.partial": "Terindeks tanpa ringkasan",
   "knowledgeBase.open": "Lihat dokumen",
   "knowledgeBase.openOriginal": "Buka berkas asli",
   "knowledgeBase.reindex": "Coba indeks lagi",

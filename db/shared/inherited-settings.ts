@@ -294,6 +294,7 @@ interface OwnedDoc {
   extracted_text: string
   doc_summary: string | null
   index_status: string
+  index_error: string | null
   index_tree: unknown
   created_by: string
 }
@@ -302,7 +303,7 @@ async function listOwnedDocs(db: AquillaDb, projectId: string): Promise<OwnedDoc
   const { results } = await db
     .prepare(
       `SELECT id, name, content_type, size_bytes, sha256, r2_key, extracted_text,
-              doc_summary, index_status, index_tree, created_by
+              doc_summary, index_status, index_error, index_tree, created_by
          FROM knowledge_docs
         WHERE project_id = ?
         ORDER BY created_at ASC`,
@@ -359,7 +360,7 @@ async function syncKnowledgeDocs(
           `UPDATE knowledge_docs
               SET name = ?, content_type = ?, size_bytes = ?, sha256 = ?,
                   extracted_text = ?, doc_summary = ?, index_status = ?,
-                  index_tree = ?::jsonb, updated_at = now()
+                  index_error = ?, index_tree = ?::jsonb, updated_at = now()
             WHERE id = ? AND project_id = ?`,
         )
         .bind(
@@ -370,6 +371,7 @@ async function syncKnowledgeDocs(
           doc.extracted_text,
           doc.doc_summary,
           doc.index_status,
+          doc.index_error,
           tree,
           existingId,
           downstreamProjectId,
@@ -389,8 +391,8 @@ async function syncKnowledgeDocs(
       .prepare(
         `INSERT INTO knowledge_docs
            (id, org_id, project_id, name, content_type, size_bytes, sha256, r2_key,
-            extracted_text, doc_summary, index_status, index_tree, created_by)
-         VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)`,
+            extracted_text, doc_summary, index_status, index_error, index_tree, created_by)
+         VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)`,
       )
       .bind(
         id,
@@ -403,6 +405,7 @@ async function syncKnowledgeDocs(
         doc.extracted_text,
         doc.doc_summary,
         doc.index_status,
+        doc.index_error,
         tree,
         doc.created_by,
       )

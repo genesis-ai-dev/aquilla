@@ -92,11 +92,22 @@ function formatBytes(bytes: number, locale: string): string {
 }
 
 /** A stalled doc reads as a failure, because that is what it is — the job that
- *  owned it is gone (AQU-1376). */
-function statusVariant(status: KnowledgeDocument["indexStatus"], stalled: boolean) {
-  if (status === "failed" || stalled) return "destructive" as const
-  if (status === "pending") return "outline" as const
-  return "secondary" as const
+ *  owned it is gone (AQU-1376). A doc indexed without its summaries is not a
+ *  failure and must not read as one (AQU-2002) — it is searchable and
+ *  navigable — but it isn't the clean "Indexed" either, so it gets the neutral
+ *  outline and the reason underneath. */
+function statusVariant(doc: KnowledgeDocument, stalled: boolean) {
+  if (doc.indexStatus === "failed" || stalled) return "destructive" as const
+  if (doc.indexStatus === "pending") return "outline" as const
+  return doc.indexError ? "outline" as const : "secondary" as const
+}
+
+/** Which status message a row shows. `indexError` on a `ready` doc means the
+ *  structure landed without summaries (AQU-2002). */
+function statusKey(doc: KnowledgeDocument, stalled: boolean) {
+  if (stalled) return "knowledgeBase.status.stalled" as const
+  if (doc.indexStatus === "ready" && doc.indexError) return "knowledgeBase.status.partial" as const
+  return `knowledgeBase.status.${doc.indexStatus}` as const
 }
 
 /** How often the open list re-checks whether a pending doc has gone stale. The
@@ -237,7 +248,10 @@ export function KnowledgeBaseSurface({
       // offering the button that just fired.
       setDocs((current) => current.map((item) =>
         item.id === doc.id
-          ? { ...item, indexStatus: "pending", updatedAt: new Date().toISOString() }
+          // The server clears index_error along with the status (AQU-2002);
+          // leaving it here would show the last run's reason against a run
+          // that has only just started.
+          ? { ...item, indexStatus: "pending", indexError: null, updatedAt: new Date().toISOString() }
           : item,
       ))
       toast.add({ type: "success", title: t("knowledgeBase.reindexing") })
@@ -391,17 +405,28 @@ export function KnowledgeBaseSurface({
                     <CardAction>
                       <div className="flex items-center gap-2">
                         {inherited ? <Badge variant="outline">{t("common.org")}</Badge> : null}
-                        <Badge variant={statusVariant(doc.indexStatus, stalled)}>
-                          {stalled
-                            ? t("knowledgeBase.status.stalled")
-                            : t(`knowledgeBase.status.${doc.indexStatus}`)}
+                        <Badge variant={statusVariant(doc, stalled)}>
+                          {t(statusKey(doc, stalled))}
                         </Badge>
                       </div>
                     </CardAction>
                   </CardHeader>
-                  {doc.docSummary || inherited ? (
+                  {doc.docSummary || doc.indexError || inherited ? (
                     <CardContent className="flex flex-col gap-2">
                       {doc.docSummary ? <p className="text-sm text-muted-foreground">{doc.docSummary}</p> : null}
+                      {/* AQU-2002: the server's own sentence, shown as sent. A
+                          badge alone told the uploader nothing they could act
+                          on — and "Try indexing again" on a document whose
+                          model leg is out of credit is worse than nothing. */}
+                      {doc.indexError ? (
+                        <p className={doc.indexStatus === "failed"
+                          ? "text-xs text-destructive"
+                          // Missing summaries are a note, not an alarm: the
+                          // document works, so the row must not read red.
+                          : "text-xs text-muted-foreground"}>
+                          {doc.indexError}
+                        </p>
+                      ) : null}
                       {inherited ? <p className="text-xs text-muted-foreground">{t("knowledgeBase.readOnlyHelp")}</p> : null}
                     </CardContent>
                   ) : null}
@@ -414,7 +439,7 @@ export function KnowledgeBaseSurface({
                       <ExternalLink data-icon="inline-start" />
                       {t("knowledgeBase.openOriginal")}
                     </Button>
-                    {manageable && (doc.indexStatus === "failed" || stalled) ? (
+                    {manageable && (doc.indexStatus === "failed" || stalled || doc.indexError) ? (
                       <Button variant="ghost" size="sm" onClick={() => void handleReindex(doc)} disabled={reindexingId === doc.id}>
                         {reindexingId === doc.id
                           ? <Spinner data-icon="inline-start" />

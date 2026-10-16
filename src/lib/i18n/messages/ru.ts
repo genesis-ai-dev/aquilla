@@ -5787,6 +5787,7 @@ export const ru: Catalog = {
   "knowledgeBase.status.ready": "Проиндексировано",
   "knowledgeBase.status.failed": "Индексация не удалась",
   "knowledgeBase.status.stalled": "Индексация зависла",
+  "knowledgeBase.status.partial": "Проиндексировано без сводок",
   "knowledgeBase.open": "Посмотреть документ",
   "knowledgeBase.openOriginal": "Открыть оригинал",
   "knowledgeBase.reindex": "Повторить индексацию",

@@ -1785,6 +1785,11 @@ CREATE TABLE IF NOT EXISTS knowledge_docs (
     index_status TEXT NOT NULL DEFAULT 'pending'
       CHECK (index_status IN ('pending','ready','failed')),
     index_tree JSONB,
+    -- Why the last indexing run ended where it did, in words the uploader can
+    -- act on (0179; AQU-2002). Set with index_status='ready' when the structure
+    -- landed but its summaries did not, and with 'failed' when there was
+    -- nothing to index. NULL = nothing to report.
+    index_error TEXT,
     created_by TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),

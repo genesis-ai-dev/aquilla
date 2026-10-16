@@ -5704,6 +5704,7 @@ export const fr: Catalog = {
   "knowledgeBase.status.ready": "Indexé",
   "knowledgeBase.status.failed": "Échec de l'indexation",
   "knowledgeBase.status.stalled": "Indexation bloquée",
+  "knowledgeBase.status.partial": "Indexé sans résumés",
   "knowledgeBase.open": "Afficher le document",
   "knowledgeBase.openOriginal": "Ouvrir l'original",
   "knowledgeBase.reindex": "Réessayer l'indexation",

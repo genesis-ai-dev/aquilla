@@ -5660,6 +5660,7 @@ export const ar: Catalog = {
   "knowledgeBase.status.ready": "تمت الفهرسة",
   "knowledgeBase.status.failed": "فشلت الفهرسة",
   "knowledgeBase.status.stalled": "تعطّلت الفهرسة",
+  "knowledgeBase.status.partial": "تمت الفهرسة بدون ملخصات",
   "knowledgeBase.open": "عرض المستند",
   "knowledgeBase.openOriginal": "فتح المستند الأصلي",
   "knowledgeBase.reindex": "إعادة محاولة الفهرسة",

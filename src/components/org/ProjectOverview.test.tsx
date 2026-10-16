@@ -180,8 +180,15 @@ vi.mock("@/components/AssignModal", () => ({
     ) : null,
 }))
 vi.mock("@/components/StaffLanePopover", () => ({
-  StaffLanePopover: ({ lane, laneLabel }: { lane: string; laneLabel: string }) => (
-    <div data-testid="staff-lane-mock" data-lane={lane} data-label={laneLabel} />
+  // `open` is surfaced because the lane table drives it from two places now
+  // (the ⋯ menu's Staff… and, since AQU-1998, the People cell itself).
+  StaffLanePopover: ({ lane, laneLabel, open }: { lane: string; laneLabel: string; open?: boolean }) => (
+    <div
+      data-testid="staff-lane-mock"
+      data-lane={lane}
+      data-label={laneLabel}
+      data-open={String(open ?? false)}
+    />
   ),
 }))
 vi.mock("@/lib/sync/member-scopes", () => ({
@@ -2600,6 +2607,43 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     const defaultStaff = within(within(table).getByTestId("overview-lane-row-default")).getByTestId("staff-lane-mock")
     expect(defaultStaff.getAttribute("data-lane")).toBe("")
     expect(defaultStaff.getAttribute("data-label")).toBe("Bambara")
+  })
+
+  // AQU-1998: the People column is the natural place to go looking for who is
+  // on a lane, so it is also the way in to the control that adds and removes
+  // them — not just a read-only badge beside the ⋯ menu.
+  it("clicking a lane's People avatars opens that lane's Staff popover", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject()])
+    renderOverview()
+
+    const table = await screen.findByTestId("overview-lane-table")
+    const esRow = within(table).getByTestId("overview-lane-row-es")
+    expect(within(esRow).getByTestId("staff-lane-mock").getAttribute("data-open")).toBe("false")
+
+    fireEvent.click(within(table).getByTestId("overview-lane-people-es"))
+
+    expect(within(esRow).getByTestId("staff-lane-mock").getAttribute("data-open")).toBe("true")
+    // Only that lane's popover opens.
+    const defaultRow = within(table).getByTestId("overview-lane-row-default")
+    expect(within(defaultRow).getByTestId("staff-lane-mock").getAttribute("data-open")).toBe("false")
+    // The row's own click handler must not also fire and navigate away.
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it("a contributor gets no Staff affordance on the People cell", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: ROLE.CONTRIBUTOR, targetLanguage: "Bambara", targetLanes: ["es"] }),
+      status: "ready",
+      refresh,
+    })
+    getPortfolio.mockResolvedValue([laneProject()])
+    renderOverview()
+
+    const table = await screen.findByTestId("overview-lane-table")
+    expect(within(table).queryByTestId("overview-lane-people-es")).not.toBeInTheDocument()
+    expect(within(table).queryByTestId("overview-lane-actions-es")).not.toBeInTheDocument()
+    expect(within(table).queryByTestId("staff-lane-mock")).not.toBeInTheDocument()
   })
 
   it("the '+ Add language' link routes to the project settings Languages section", async () => {

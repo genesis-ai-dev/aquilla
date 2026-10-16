@@ -15,9 +15,13 @@
 // - Clicking a row opens the workspace at that lane (§3.1). Actions live in
 //   the row ⋯ menu (and right-click): Assign… (AssignModal pinned via
 //   defaultLane, §3.5), Staff… (StaffLanePopover, §3.4).
+// - AQU-1998: the People cell is also a way IN to that popover — clicking the
+//   avatars opens Staff… for the lane, where the people listed can be removed
+//   from it. The scope reads behind the column are re-run after any staffing
+//   change, so a removal leaves the column without a reload.
 // - "+ Add language" routes to the project's settings Languages section.
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Link, useLocation, useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
 import { ChevronRight, UserPlus, Users } from "lucide-react"
@@ -107,21 +111,55 @@ function laneOpenTo(projectId: string, lane: { lane: string; laneId?: string | n
   return `/project/${projectId}/editor?lane=${encodeURIComponent(key)}`
 }
 
-/** People avatars for a lane, with an overflow "+N" bubble past the cap. */
-function LanePeople({ members }: { members: ProjectMember[] }) {
+/**
+ * People avatars for a lane, with an overflow "+N" bubble past the cap.
+ *
+ * AQU-1998: where the caller can staff the lane, the whole cell opens that
+ * lane's Staff… popover — the one place that both adds someone to the lane and
+ * takes them off it. The press is stopped here because lane rows navigate to
+ * the workspace on click, the same guard the popover's own trigger applies.
+ * Without `onOpenStaff` (a Contributor) it stays plain, unclickable avatars.
+ */
+function LanePeople({
+  members,
+  laneLabel,
+  testId,
+  onOpenStaff,
+}: {
+  members: ProjectMember[]
+  laneLabel: string
+  testId: string
+  onOpenStaff?: () => void
+}) {
+  const t = useT()
   const CAP = 4
-  if (members.length === 0) {
-    return <span className="text-sm text-muted-foreground">—</span>
-  }
   const shown = members.slice(0, CAP)
   const extra = members.length - shown.length
+  const avatars =
+    members.length === 0 ? (
+      <span className="text-sm text-muted-foreground">—</span>
+    ) : (
+      <AvatarGroup data-size="sm">
+        {shown.map((m) => (
+          <UserChip key={m.userId} userId={m.userId} username={m.username} size="sm" avatarOnly />
+        ))}
+        {extra > 0 && <AvatarGroupCount>+{extra}</AvatarGroupCount>}
+      </AvatarGroup>
+    )
+  if (!onOpenStaff) return avatars
   return (
-    <AvatarGroup data-size="sm">
-      {shown.map((m) => (
-        <UserChip key={m.userId} userId={m.userId} username={m.username} size="sm" avatarOnly />
-      ))}
-      {extra > 0 && <AvatarGroupCount>+{extra}</AvatarGroupCount>}
-    </AvatarGroup>
+    <button
+      type="button"
+      data-testid={testId}
+      className="-mx-1 flex items-center rounded px-1 py-0.5 hover:bg-muted"
+      aria-label={t("org.overviewLaneTable.peopleCellAriaLabel", { lane: laneLabel })}
+      onClick={(event) => {
+        event.stopPropagation()
+        onOpenStaff()
+      }}
+    >
+      {avatars}
+    </button>
   )
 }
 
@@ -183,6 +221,13 @@ export function OverviewLaneTable({
   const [assignLane, setAssignLane] = useState<string | null>(null)
   const [staffLane, setStaffLane] = useState<string | null>(null)
   const [archivedOpen, setArchivedOpen] = useState(false)
+  /**
+   * AQU-1998: bumped after a staffing change so the per-member scope reads
+   * below re-run. The roster itself doesn't change when someone is added to or
+   * removed from a lane — only their scopes do — so refreshing the members
+   * alone left this column showing the staffing as it was before the change.
+   */
+  const [scopesNonce, setScopesNonce] = useState(0)
 
   // Scopable members = below project_lead (leads are unscoped, see every lane).
   const scopableUserIds = useMemo(
@@ -207,7 +252,7 @@ export function OverviewLaneTable({
       if (alive) setScopesByUser(Object.fromEntries(entries))
     })()
     return () => { alive = false }
-  }, [jwt, projectId, scopableUserIds])
+  }, [jwt, projectId, scopableUserIds, scopesNonce])
 
   // AQU-1607: a lane scope is a lane id; the rows below are keyed by lane
   // tag, so read the ids back as tags through the portfolio's own lane rows.
@@ -233,8 +278,13 @@ export function OverviewLaneTable({
     return map
   }, [members, scopesByUser, laneIdentities])
 
-  const laneLabel = (lane: PortfolioLane) =>
-    lane.name?.trim() || (lane.lane === "" ? defaultLanguageLabel : lane.lane)
+  // Stable across renders so the column definitions below, which now name a
+  // lane in the People cell's accessible name, don't rebuild on every render.
+  const laneLabel = useCallback(
+    (lane: PortfolioLane) =>
+      lane.name?.trim() || (lane.lane === "" ? defaultLanguageLabel : lane.lane),
+    [defaultLanguageLabel],
+  )
 
   const columns = useMemo<ColumnDef<PortfolioLane>[]>(
     () => [
@@ -273,7 +323,14 @@ export function OverviewLaneTable({
         header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.overviewLaneTable.peopleColumn")} />,
         meta: { className: "w-[6.5rem]" },
         cell: ({ row }) => (
-          <LanePeople members={membersByLane.get(row.original.lane) ?? []} />
+          <LanePeople
+            members={membersByLane.get(row.original.lane) ?? []}
+            laneLabel={laneLabel(row.original)}
+            testId={`overview-lane-people-${laneTagId(row.original.lane)}`}
+            onOpenStaff={
+              canManageLanes ? () => setStaffLane(laneStaffKey(row.original)) : undefined
+            }
+          />
         ),
       },
       {
@@ -334,7 +391,11 @@ export function OverviewLaneTable({
                         {t("org.staffLanePopover.staffLaneHeading", { lane: label })}
                       </span>
                     }
-                    onDone={() => { void refreshMembers(); onChanged?.() }}
+                    onDone={() => {
+                      void refreshMembers()
+                      setScopesNonce((n) => n + 1)
+                      onChanged?.()
+                    }}
                   />
                 </span>
               )
@@ -344,11 +405,12 @@ export function OverviewLaneTable({
     ],
     [
       canManageLanes,
-      defaultLanguageLabel,
       membersByLane,
+      laneLabel,
       onChanged,
       orgId,
       projectId,
+      projectName,
       refreshMembers,
       staffLane,
       t,

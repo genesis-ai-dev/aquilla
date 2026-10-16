@@ -1204,6 +1204,17 @@ export const org = defineNamespace({
     "org.staffLanePopover.inviteToProjectLink": "Invite them to the project",
     // "Change" → org.projectOverview.change (identical text)
     // "Role" aria-label → common.roleLabel (identical text)
+    // AQU-1998: the popover's unstaff half — who is on this lane now, and the
+    // guard that refuses the last one. "Remove" itself reuses
+    // org.membersPage.remove (identical text).
+    "org.staffLanePopover.staffedHeading": "On this lane",
+    "org.staffLanePopover.staffedEmpty": "No one is staffed on this lane yet.",
+    "org.staffLanePopover.removeFromLaneAriaLabel": "Remove {name} from {lane}",
+    "org.staffLanePopover.lastLaneNote":
+      "This is {name}’s only language, and an empty lane list means every language — so removing it would widen their access, not narrow it. Take them off the project instead:",
+    "org.staffLanePopover.teamMembersLink": "Project Settings → Team members",
+    "org.staffLanePopover.lastLaneRefused":
+      "This is now their only language. Removing it would open every language to them, so nothing was saved.",
     "org.staffLanePopover.addToLaneButton": "Add to {lane}",
     "org.staffLanePopover.broaderAccessNote": "Need broader access? Leads see all languages.",
     "org.staffLanePopover.addAsLeadButton": "Add as lead (unscoped)",
@@ -1397,6 +1408,11 @@ export const org = defineNamespace({
     // -- OverviewLaneTable: per-project lane table (AQU-538 §3.3) --
     // "Actions" sr-only header → org.overviewLaneTable.actionsColumn (identical text)
     // "Staff {label}" sr-only trigger text → org.staffLanePopover.staffLaneHeading (identical text)
+    // AQU-1998: the People cell is a button that opens the lane's Staff
+    // popover. Named for what it shows rather than reusing the Staff heading —
+    // the row's hidden popover anchor already carries that, and two buttons
+    // with one name in a row tell a screen-reader user nothing apart.
+    "org.overviewLaneTable.peopleCellAriaLabel": "People on {lane}",
     "org.overviewLaneTable.sectionDescription":
       "Progress, people, and actions for each target language on this project.",
 
@@ -1424,7 +1440,7 @@ export const org = defineNamespace({
     "org.projectOverview.plan.loading": "Loading the plan\u2026",
     "org.projectOverview.plan.saveFailed": "That change could not be saved, so it has been undone. Try again.",
     "org.projectOverview.plan.errorTitle": "The plan could not be loaded",
-    "org.projectOverview.plan.error": "Something went wrong reading this project's plan. Nothing has been lost \u2014 try again.",
+    "org.projectOverview.plan.error": "Something went wrong reading this project's plan. Nothing has been lost — try again.",
     "org.projectOverview.plan.importSource": "Import source",
     "org.projectOverview.plan.empty":
       "Import a source and its books, episodes or documents appear here as rows you can give target dates and mark done.",
@@ -1475,14 +1491,14 @@ export const org = defineNamespace({
     // one. It stays done (that is a person's call); this says what came back.
     "org.projectOverview.plan.markedDoneWithWork": "Marked done \u00b7 {work}",
     "org.projectOverview.plan.doneBelowFullNudge":
-      "Validated is at {validated}%. Marking done records your judgment, not the numbers \u2014 the bars stay visible beside the mark.",
+      "Validated is at {validated}%. Marking done records your judgment, not the numbers — the bars stay visible beside the mark.",
     "org.projectOverview.plan.progress": "Progress",
     "org.projectOverview.plan.lastActivity": "Last activity {when}.",
     "org.projectOverview.plan.noActivity": "No activity yet.",
     "org.projectOverview.plan.resizeInspector": "Resize the details panel",
     "org.projectOverview.plan.textBarLabel": "TXT",
     "org.projectOverview.plan.audioBarLabel": "AUD",
-    "org.projectOverview.plan.noTargetShort": "\u2014",
+    "org.projectOverview.plan.noTargetShort": "—",
     "org.projectOverview.plan.daysLate": plural({ one: "{count} day late", other: "{count} days late" }),
     "org.projectOverview.plan.markedOn": "marked {date}",
     "org.projectOverview.plan.daysUntil": plural({ one: "in {count} day", other: "in {count} days" }),
@@ -1506,7 +1522,7 @@ export const org = defineNamespace({
     "org.projectOverview.plan.shortfallAudioValidate": plural({ one: "{count} take to validate", other: "{count} takes to validate" }),
     // AQU-1278: the SHORT forms, used when two terms share one line. In full
     // they read "6 cells to translate \u00b7 8 cells to validate", which wraps in
-    // the narrowest column on the board and takes the row's height with it \u2014
+    // the narrowest column on the board and takes the row's height with it —
     // and the second noun is the same word as the first, so the line spends
     // its width saying "cells" twice. The noun survives in the single-term
     // case, where there is room and no context to borrow from.
@@ -1611,14 +1627,14 @@ export const org = defineNamespace({
     "org.projectOverview.plan.unnumberedAfter": "Unnumbered line after {verse}",
     "org.projectOverview.plan.wordChipOrdinal": "{line} ({index} of {count})",
     "org.projectOverview.plan.unnumberedInChapter": plural({
-      one: "{count} unnumbered line here has no verse reference; it\u2019s counted with this chapter.",
-      other: "{count} unnumbered lines here have no verse reference; they\u2019re counted with this chapter.",
+      one: "{count} unnumbered line here has no verse reference; it’s counted with this chapter.",
+      other: "{count} unnumbered lines here have no verse reference; they’re counted with this chapter.",
     }),
     // AQU-1493: the same note on a book's front-matter card, which is not a
     // chapter: lines added above a book's first verse count there.
     "org.projectOverview.plan.unnumberedInFrontMatter": plural({
-      one: "{count} unnumbered line here has no verse reference; it\u2019s counted with the book\u2019s front matter.",
-      other: "{count} unnumbered lines here have no verse reference; they\u2019re counted with the book\u2019s front matter.",
+      one: "{count} unnumbered line here has no verse reference; it’s counted with the book’s front matter.",
+      other: "{count} unnumbered lines here have no verse reference; they’re counted with the book’s front matter.",
     }),
     "org.projectOverview.plan.chaptersComplete": "{done} of {total} complete",
     // "all complete", not the bare "complete" this legend would otherwise
@@ -3053,6 +3069,24 @@ export const org = defineNamespace({
         description:
           "Shown when the roster loaded successfully and the organization genuinely has no other members. Reserved for that one case — the unavailable-roster cases have their own keys.",
       },
+      "org.overviewLaneTable.peopleCellAriaLabel": {
+        description:
+          "Accessible name for the People cell of a lane row on the project overview's Languages table, which is a button opening that lane's Staff popover (where people are added to and removed from the lane). Only rendered for an operator who can staff the lane; for everyone else the cell is plain avatars with no name of its own.",
+        placeholders: { lane: "The target language lane's display label — not translated." },
+      },
+      "org.staffLanePopover.removeFromLaneAriaLabel": {
+        description:
+          "Accessible name for the Remove button beside a person already staffed on the lane, in the Staff popover's “On this lane” list. The visible label is just “Remove” (org.membersPage.remove); this names who and which lane for a screen reader. It takes the person off that one lane only — not off the project.",
+        placeholders: {
+          name: "The person's username — not translated.",
+          lane: "The target language lane's display label — not translated.",
+        },
+      },
+      "org.staffLanePopover.lastLaneNote": {
+        description:
+          "Note under a disabled Remove button explaining why this person cannot be taken off the lane: it is their only one, and a member with no lane limits can write in every language, so the removal would grant access rather than revoke it. The sentence runs on into a link labelled org.staffLanePopover.teamMembersLink, so keep the trailing colon and do not end it as a standalone sentence.",
+        placeholders: { name: "The person's username — not translated." },
+      },
       "org.staffLanePopover.addToLaneButton": {
         description: "Primary confirm button that grants the selected role scoped to the named lane.",
         placeholders: { lane: "The target language lane's display label — not translated." },
@@ -3161,7 +3195,7 @@ export const org = defineNamespace({
         description:
           "Second sentence of the Audio Validated tooltip, appended after org.projectOverview.audioValidatedTooltip. Gives the other ratio a reviewer usually wants: validated audio measured against the audio that exists rather than against every cell. A separate sentence, and a separate key, so it can be ordered independently.",
         placeholders: {
-          percent: "Validated audio as a percentage of the audio actually recorded \u2014 a whole number, no % sign.",
+          percent: "Validated audio as a percentage of the audio actually recorded — a whole number, no % sign.",
         },
       },
       "org.projectOverview.plan.heading": {
@@ -3351,7 +3385,7 @@ export const org = defineNamespace({
       },
       "org.projectOverview.plan.lastActivity": {
         description: "When this unit was last edited.",
-        placeholders: { when: "How long ago the unit was last edited \u2014 already-formatted relative time." },
+        placeholders: { when: "How long ago the unit was last edited — already-formatted relative time." },
       },
       "org.projectOverview.plan.resizeInspector": {
         description:
@@ -3527,8 +3561,8 @@ export const org = defineNamespace({
         description:
           "Footer line under a filtered plan, saying how much of it is on screen. The summary pills above always count the WHOLE project, so this is the only place the filtered figure appears.",
         placeholders: {
-          shown: "Units passing the filter \u2014 a number.",
-          total: "Units in the project \u2014 a number.",
+          shown: "Units passing the filter — a number.",
+          total: "Units in the project — a number.",
         },
       },
       "org.projectOverview.plan.viewStatus": {
@@ -3538,12 +3572,12 @@ export const org = defineNamespace({
       },
       "org.projectOverview.plan.viewOrder": {
         description:
-          "Button that arranges the plan as one flat list in canonical order \u2014 Bible book order, or file order. Paired with 'By status'.",
+          "Button that arranges the plan as one flat list in canonical order — Bible book order, or file order. Paired with 'By status'.",
         maxLength: 14,
       },
       "org.projectOverview.plan.needsDate": {
         description:
-          "Toggle that narrows the plan to units with no target date and no Done mark \u2014 a planner's to-do list.",
+          "Toggle that narrows the plan to units with no target date and no Done mark — a planner's to-do list.",
         maxLength: 16,
       },
       "org.projectOverview.plan.collapseAll": {

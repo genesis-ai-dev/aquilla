@@ -104,7 +104,9 @@ test("language fields suggest from the catalog and still accept custom text", as
   const settings = new ProjectSettings(alice)
   await settings.openSettings()
 
-  await expect(alice.locator("#sl")).toHaveValue("French", { timeout: 10_000 })
-  // The first chip becomes the project's default target language.
-  await expect(alice.locator("#tl")).toHaveValue(CUSTOM_LANGUAGE, { timeout: 10_000 })
+  // AQU-1594: what was committed is a source lane and one target lane per chip.
+  await expect(alice.getByLabel(/^Source Language$/i)).toHaveValue("French", { timeout: 10_000 })
+  const laneLanguages = alice.locator("[data-testid^='lane-language-']")
+  await expect(laneLanguages).toHaveCount(4, { timeout: 10_000 })
+  await expect(laneLanguages.nth(1)).toHaveValue(CUSTOM_LANGUAGE)
 })

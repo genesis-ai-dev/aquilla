@@ -11,6 +11,8 @@ export type RenderingStatus = "preferred" | "admitted" | "forbidden"
 export interface TermRendering {
   rendering: string
   status: RenderingStatus
+  /** `lanes.id`. Absent means the project's `legacy_tag === ''` lane. */
+  laneId?: string
 }
 
 /**
@@ -27,6 +29,18 @@ export interface TermMatchOptions {
   forms?: string[]
   /** Matched surface forms the user rejected; compared after folding. */
   excludedForms?: string[]
+}
+
+/**
+ * Links from a concept to records outside the termbase (AQU-1693). Stored
+ * verbatim in `concepts.external_ids`; NULL or `{}` there means no link.
+ */
+export interface ConceptExternalIds {
+  /**
+   * An ACAI entity id, as the Bible Knowledge Pack keys it: "person:Jesus.2".
+   * Voices and Who's Who name that entity with the concept's agreed rendering.
+   */
+  acai?: string
 }
 
 /**

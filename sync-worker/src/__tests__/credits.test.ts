@@ -15,7 +15,15 @@
 //     contract from the credits module side).
 
 import { describe, it, expect } from "vitest"
-import { creditsFor, recordCredit } from "../credits"
+import {
+  checkCredits,
+  creditsFor,
+  readOrgSpend,
+  recordCredit,
+  resolveCreditConfig,
+  runOrgCreditGuard,
+  type ResolvedCreditConfig,
+} from "../credits"
 
 // ── creditsFor ────────────────────────────────────────────────────────────────
 
@@ -251,5 +259,247 @@ describe("no credit recorded on Modal failure (contract verification)", () => {
     const db = makeStubDb()
     // Intentionally NOT calling recordCredit here.
     expect(db._rows()).toHaveLength(0)
+  })
+})
+
+// ── Org credit pre-check (AQU-1872) ──────────────────────────────────────────
+//
+// WHY these tests matter:
+//   - The pre-check is the only ORG-level ceiling on TTS spend. The per-user
+//     request window in tts.ts is volumetric: several users batch-narrating a
+//     Bible in one org each stay under it while the org's bill runs away.
+//   - Enforcement must stay off by default — mirroring auth-worker's
+//     creditGuard and runTtsGuard, an over-cap org is logged, not blocked,
+//     while the caps are being sized.
+//   - The caps are compared in CREDITS (markup applied), not raw cents; a
+//     missing markup would under-count spend 4×.
+//   - An unreadable ledger must degrade to "allow", never to "block".
+
+const UTC_TODAY = new Date().toISOString().slice(0, 10)
+
+function daysAgoUtc(n: number): string {
+  const d = new Date()
+  d.setUTCDate(d.getUTCDate() - n)
+  return d.toISOString().slice(0, 10)
+}
+
+const BASE_CFG: ResolvedCreditConfig = {
+  markup: 4,
+  agentMarkup: 5,
+  dailyCap: 1000,
+  weeklyCap: 5000,
+  enforce: false,
+}
+
+/** Stub supporting resolveCreditConfig's org_settings read + readOrgSpend's rollup. */
+function makeGuardDb(opts: { rows?: CreditRow[]; orgSettings?: string; throwOn?: "settings" | "spend" } = {}) {
+  const rows = opts.rows ?? []
+  return {
+    prepare(sql: string) {
+      let boundArgs: unknown[] = []
+      const stmt = {
+        bind(...args: unknown[]) {
+          boundArgs = args
+          return stmt
+        },
+        async first<T = unknown>(): Promise<T | null> {
+          if (sql.includes("FROM org_settings")) {
+            if (opts.throwOn === "settings") throw new Error("boom")
+            return (opts.orgSettings ? { settings: opts.orgSettings } : null) as unknown as T
+          }
+          return null
+        },
+        async run() {
+          return { results: [], success: true as const, meta: {} as never }
+        },
+        async all<T = unknown>() {
+          if (sql.includes("FROM org_credit_usage_daily")) {
+            if (opts.throwOn === "spend") throw new Error("relation \"org_credit_usage_daily\" does not exist")
+            const [orgId, since] = boundArgs as [number, string]
+            const grouped = new Map<string, { date_utc: string; rail: string; raw_cost_cents: number }>()
+            for (const row of rows) {
+              if (row.org_id !== orgId || row.date_utc < since) continue
+              const key = `${row.date_utc}|${row.rail}`
+              const acc = grouped.get(key)
+              if (acc) acc.raw_cost_cents += row.raw_cost_cents
+              else grouped.set(key, { date_utc: row.date_utc, rail: row.rail, raw_cost_cents: row.raw_cost_cents })
+            }
+            return { results: [...grouped.values()] as T[], success: true as const, meta: {} as never }
+          }
+          return { results: [] as T[], success: true as const, meta: {} as never }
+        },
+        async raw() {
+          return []
+        },
+      }
+      return stmt
+    },
+    async batch() {
+      return []
+    },
+    async exec() {
+      return { count: 0, duration: 0 }
+    },
+    async close() {},
+  } as unknown as AquillaDb
+}
+
+function row(over: Partial<CreditRow> = {}): CreditRow {
+  return {
+    org_id: 5,
+    user_id: 1,
+    date_utc: UTC_TODAY,
+    rail: "tts",
+    raw_cost_cents: 0,
+    units: 0,
+    ...over,
+  }
+}
+
+describe("checkCredits", () => {
+  it("passes an org below both caps", () => {
+    expect(checkCredits({ dayCredits: 10, weekCredits: 20 }, BASE_CFG)).toEqual({ ok: true })
+  })
+
+  it("fails with reason 'daily' at the daily cap", () => {
+    // WHY: the comparison is >=, so landing exactly on the cap is exhausted.
+    expect(checkCredits({ dayCredits: 1000, weekCredits: 1000 }, BASE_CFG)).toEqual({
+      ok: false,
+      reason: "daily",
+    })
+  })
+
+  it("fails with reason 'weekly' when only the weekly cap is hit", () => {
+    expect(checkCredits({ dayCredits: 1, weekCredits: 5000 }, BASE_CFG)).toEqual({
+      ok: false,
+      reason: "weekly",
+    })
+  })
+
+  it("reports 'daily' first when both caps are blown", () => {
+    // WHY: precedence matters for the message the user sees — the daily cap is
+    // the one that resets soonest.
+    expect(checkCredits({ dayCredits: 9999, weekCredits: 9999 }, BASE_CFG).reason).toBe("daily")
+  })
+})
+
+describe("resolveCreditConfig", () => {
+  it("falls back to platform defaults with no env and no org settings", async () => {
+    const cfg = await resolveCreditConfig({}, makeGuardDb(), 5)
+    expect(cfg).toEqual(BASE_CFG)
+  })
+
+  it("reads platform env overrides", async () => {
+    const cfg = await resolveCreditConfig(
+      { CREDIT_MARKUP: "2.5", CREDIT_DAILY_CAP: "50", CREDIT_WEEKLY_CAP: "99", CREDIT_ENFORCE: "true" },
+      makeGuardDb(),
+      5,
+    )
+    expect(cfg).toMatchObject({ markup: 2.5, dailyCap: 50, weeklyCap: 99, enforce: true })
+  })
+
+  it("lets org_settings.credits override the env per field", async () => {
+    // WHY: an org on a bigger plan gets a bigger cap without a redeploy.
+    const db = makeGuardDb({ orgSettings: JSON.stringify({ credits: { dailyCap: 7, enforce: true } }) })
+    const cfg = await resolveCreditConfig({ CREDIT_DAILY_CAP: "1000" }, db, 5)
+    expect(cfg.dailyCap).toBe(7)
+    expect(cfg.enforce).toBe(true)
+    expect(cfg.weeklyCap).toBe(BASE_CFG.weeklyCap) // untouched field keeps the default
+  })
+
+  it("ignores a malformed org_settings blob rather than throwing", async () => {
+    const db = makeGuardDb({ orgSettings: "{not json" })
+    const cfg = await resolveCreditConfig({}, db, 5)
+    expect(cfg).toEqual(BASE_CFG)
+  })
+
+  it("skips the org_settings lookup for the unattributed org (0)", async () => {
+    // WHY: org 0 is the no-org sentinel — there is no settings row to read.
+    const db = makeGuardDb({ throwOn: "settings" })
+    await expect(resolveCreditConfig({}, db, 0)).resolves.toEqual(BASE_CFG)
+  })
+})
+
+describe("readOrgSpend", () => {
+  it("sums today's rows into dayCredits with markup applied", async () => {
+    const db = makeGuardDb({ rows: [row({ raw_cost_cents: 10 })] })
+    const spend = await readOrgSpend(db, 5, BASE_CFG)
+    expect(spend.dayCredits).toBe(40) // 10¢ × 4
+    expect(spend.weekCredits).toBe(40)
+  })
+
+  it("counts an older row in the week total but not the day total", async () => {
+    const db = makeGuardDb({ rows: [row({ raw_cost_cents: 10, date_utc: daysAgoUtc(3) })] })
+    const spend = await readOrgSpend(db, 5, BASE_CFG)
+    expect(spend.dayCredits).toBe(0)
+    expect(spend.weekCredits).toBe(40)
+  })
+
+  it("excludes rows outside the rolling 7-day window", async () => {
+    const db = makeGuardDb({ rows: [row({ raw_cost_cents: 10, date_utc: daysAgoUtc(30) })] })
+    const spend = await readOrgSpend(db, 5, BASE_CFG)
+    expect(spend).toEqual({ dayCredits: 0, weekCredits: 0 })
+  })
+
+  it("applies the agent markup to agent-rail rows", async () => {
+    // WHY: spend is cross-rail — TTS is capped against the org's whole bill,
+    // and the agent rail is marked up 5×, not 4×.
+    const db = makeGuardDb({ rows: [row({ rail: "agent", raw_cost_cents: 10 })] })
+    const spend = await readOrgSpend(db, 5, BASE_CFG)
+    expect(spend.dayCredits).toBe(50)
+  })
+
+  it("returns zeros when the ledger table is missing", async () => {
+    const db = makeGuardDb({ throwOn: "spend" })
+    await expect(readOrgSpend(db, 5, BASE_CFG)).resolves.toEqual({ dayCredits: 0, weekCredits: 0 })
+  })
+})
+
+describe("runOrgCreditGuard", () => {
+  /** 300¢ × 4 = 1200 credits — past the 1000/day default. */
+  const exhausted = [row({ raw_cost_cents: 300 })]
+
+  it("allows an exhausted org through in log-only mode (the default)", async () => {
+    // WHY: enforcement off must never block, exactly like runTtsGuard.
+    const db = makeGuardDb({ rows: exhausted })
+    await expect(runOrgCreditGuard(db, {}, 5, "tts")).resolves.toEqual({ ok: true })
+  })
+
+  it("refuses an exhausted org with a 429 and a named error when enforcing", async () => {
+    const db = makeGuardDb({ rows: exhausted })
+    const outcome = await runOrgCreditGuard(db, { CREDIT_ENFORCE: "true" }, 5, "tts")
+    expect(outcome.ok).toBe(false)
+    if (outcome.ok) throw new Error("expected refusal")
+    expect(outcome.status).toBe(429)
+    expect(outcome.body.error).toBe("credit_cap_exceeded")
+    expect(outcome.body.reason).toBe("daily")
+    // The message is user-facing: it must say no audio was produced.
+    expect(outcome.body.message).toMatch(/no audio was generated/i)
+  })
+
+  it("allows an org that still has credit, even when enforcing", async () => {
+    const db = makeGuardDb({ rows: [row({ raw_cost_cents: 10 })] })
+    await expect(runOrgCreditGuard(db, { CREDIT_ENFORCE: "true" }, 5, "tts")).resolves.toEqual({ ok: true })
+  })
+
+  it("enforces a per-org cap the org set itself", async () => {
+    const db = makeGuardDb({
+      rows: [row({ raw_cost_cents: 10 })], // 40 credits
+      orgSettings: JSON.stringify({ credits: { dailyCap: 20, enforce: true } }),
+    })
+    const outcome = await runOrgCreditGuard(db, {}, 5, "tts")
+    expect(outcome.ok).toBe(false)
+  })
+
+  it("allows through when the ledger cannot be read, even while enforcing", async () => {
+    // WHY: a DB hiccup must not take TTS down — degrade to allow, like
+    // auth-worker's creditGuard and tts-budget's runTtsGuard.
+    const db = makeGuardDb({ throwOn: "spend" })
+    await expect(runOrgCreditGuard(db, { CREDIT_ENFORCE: "true" }, 5, "tts")).resolves.toEqual({ ok: true })
+  })
+
+  it("does not charge one org for another org's spend", async () => {
+    const db = makeGuardDb({ rows: [row({ org_id: 99, raw_cost_cents: 9000 })] })
+    await expect(runOrgCreditGuard(db, { CREDIT_ENFORCE: "true" }, 5, "tts")).resolves.toEqual({ ok: true })
   })
 })

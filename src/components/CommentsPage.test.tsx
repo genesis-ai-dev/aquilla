@@ -8,13 +8,14 @@ import { CommentsPage } from "./CommentsPage"
 
 const mockComments = vi.fn<() => CommentRecord[]>(() => [])
 const mockRefresh = vi.fn()
+const mockResolveThread = vi.fn()
 
 vi.mock("@/hooks/useComments", () => ({
   useComments: () => ({
     comments: mockComments(),
     isLoading: false,
     isError: false,
-    resolveThread: vi.fn(),
+    resolveThread: mockResolveThread,
     editComment: vi.fn(async () => {}),
     deleteComment: vi.fn(async () => {}),
     refresh: mockRefresh,
@@ -53,6 +54,26 @@ vi.mock("@/hooks/useUserSearch", () => ({
 vi.mock("@/lib/sync/cqrs-bridge", () => ({
   buildFileScopedTokenFetcher: () => async () => "file-tok",
 }))
+
+const { fetchCellsByIds } = vi.hoisted(() => ({
+  fetchCellsByIds: vi.fn(async () => [] as Array<Record<string, unknown>>),
+}))
+
+vi.mock("@/lib/sync/cells-read", () => ({
+  fetchCellsByIds,
+}))
+
+const downloadBlob = vi.fn()
+vi.mock("@/lib/export/export-service", () => ({
+  downloadBlob: (...args: unknown[]) => downloadBlob(...args),
+}))
+
+/** The CSV text handed to the download, for asserting on the exported rows. */
+async function exportedCsv(): Promise<string> {
+  expect(downloadBlob).toHaveBeenCalledTimes(1)
+  const [blob] = downloadBlob.mock.calls[0] as [Blob, string]
+  return await blob.text()
+}
 
 function makeComment(overrides: Partial<CommentRecord> = {}): CommentRecord {
   return {
@@ -226,6 +247,37 @@ describe("CommentsPage chrome", () => {
     expect(screen.getByTestId("comments-count-badge")).toHaveTextContent("1")
   })
 
+  it("labels a thread with the book, chapter, and verse", async () => {
+    fetchCellsByIds.mockResolvedValueOnce([
+      {
+        cellId: "cell-heading",
+        side: "source",
+        canonicalRef: null,
+        value: "The Creation",
+        valueHtml: null,
+        metadata: { aquillaImport: { milestone: { label: "Genesis 1" } } },
+      },
+      {
+        cellId: "cell-verse",
+        side: "source",
+        canonicalRef: "GEN 1:2",
+        value: "Now the earth was formless",
+        valueHtml: null,
+      },
+    ])
+    mockComments.mockReturnValue([
+      makeComment({ commentId: "heading", cellId: "cell-heading", cellRef: null, body: "on the heading" }),
+      makeComment({ commentId: "verse", cellId: "cell-verse", cellRef: null, body: "on the verse" }),
+    ])
+    renderPage()
+
+    expect(await screen.findByText("Genesis 1")).toBeInTheDocument()
+    expect(screen.getByText("Genesis 1:2")).toBeInTheDocument()
+    expect(screen.queryByText("The Creation")).not.toBeInTheDocument()
+    expect(screen.queryByText("Now the earth was formless")).not.toBeInTheDocument()
+    expect(screen.queryByText(/cell-heading/)).not.toBeInTheDocument()
+  })
+
   it("shows No comments without Clear filters when only resolved threads exist", () => {
     mockComments.mockReturnValue([makeComment({ resolved: true })])
     renderPage()
@@ -270,9 +322,14 @@ describe("CommentsPage — jump to a comment", () => {
     mockComments.mockReturnValue([makeComment()])
     renderWithEditorRoute()
 
-    fireEvent.click(screen.getByRole("button", { name: /Open file/i }))
+    expect(screen.queryByRole("button", { name: /Open file/i })).not.toBeInTheDocument()
+    const comment = screen.getByRole("button", { name: /unique-search-token/i })
+    expect(comment.closest(".rounded-lg")).toHaveClass("bg-card")
+    fireEvent.click(screen.getByText("Alice"))
 
-    expect(jumpedTo()).toBe("/project/proj-1/editor/file/file-1?cellId=cell-1&comments=1")
+    expect(jumpedTo()).toBe(
+      "/project/proj-1/editor/file/file-1?cellId=cell-1&comments=1&commentId=c1",
+    )
   })
 
   it("carries the flag for a resolved thread too", () => {
@@ -285,9 +342,97 @@ describe("CommentsPage — jump to a comment", () => {
     // reviewer revisiting old notes does.
     fireEvent.click(screen.getByRole("button", { name: /^Filters$/i }))
     fireEvent.click(screen.getByRole("switch", { name: "Show resolved" }))
-
-    fireEvent.click(screen.getByRole("button", { name: /Open file/i }))
+    fireEvent.click(screen.getByRole("button", { name: /resolved comment from/i }))
 
     expect(jumpedTo()).toContain("comments=1")
+    expect(jumpedTo()).toContain("commentId=c1")
+  })
+
+  it("does not offer a comment actions menu or a right-click menu", () => {
+    mockComments.mockReturnValue([makeComment()])
+    renderWithEditorRoute()
+
+    expect(screen.queryByRole("button", { name: "Comment actions" })).not.toBeInTheDocument()
+    fireEvent.contextMenu(screen.getByText("unique-search-token"))
+    expect(screen.queryByRole("menuitem")).not.toBeInTheDocument()
+  })
+
+  it("scrolls to the reply that was clicked, not the top of the thread", () => {
+    mockComments.mockReturnValue([
+      makeComment({ commentId: "root", body: "the question" }),
+      makeComment({
+        commentId: "reply-9",
+        parentCommentId: "root",
+        body: "the answer further down",
+        authorId: "bob",
+        authorLabel: "Bob",
+      }),
+    ])
+    renderWithEditorRoute()
+
+    fireEvent.click(screen.getByText("Bob"))
+
+    expect(jumpedTo()).toBe(
+      "/project/proj-1/editor/file/file-1?cellId=cell-1&comments=1&commentId=reply-9",
+    )
+  })
+})
+
+// ── AQU-1958: CSV export of the visible list ─────────────────────────────
+
+describe("CommentsPage export", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockComments.mockReturnValue([])
+  })
+
+  it("exports the threads on screen, with file names and the thread's replies", async () => {
+    mockComments.mockReturnValue([
+      makeComment({ body: "the question" }),
+      makeComment({
+        commentId: "reply-1",
+        parentCommentId: "c1",
+        body: "the answer",
+        authorId: "bob",
+        authorLabel: "Bob",
+      }),
+    ])
+    renderPage()
+
+    fireEvent.click(screen.getByRole("button", { name: /Export as CSV/i }))
+
+    const csv = await exportedCsv()
+    const lines = csv.split("\r\n")
+    expect(lines[0]).toContain("Project,File,Reference")
+    // Root then reply — two message rows for one thread.
+    expect(lines).toHaveLength(3)
+    expect(lines[1]).toContain("Test Project")
+    expect(lines[1]).toContain("GEN.usfm")
+    expect(lines[1]).toContain("the question")
+    expect(lines[2]).toContain("the answer")
+    expect(downloadBlob.mock.calls[0][1]).toBe("Test-Project-comments.csv")
+  })
+
+  it("exports only what the filters leave on screen", async () => {
+    mockComments.mockReturnValue([
+      makeComment({ commentId: "keep", body: "unique-search-token" }),
+      makeComment({ commentId: "drop", body: "another thread entirely" }),
+    ])
+    renderPage()
+
+    fireEvent.change(screen.getByPlaceholderText("Search comments…"), {
+      target: { value: "unique-search-token" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /Export as CSV/i }))
+
+    const csv = await exportedCsv()
+    expect(csv).toContain("unique-search-token")
+    expect(csv).not.toContain("another thread entirely")
+  })
+
+  it("has nothing to export while the list is empty", () => {
+    renderPage()
+    expect(screen.getByRole("button", { name: /Export as CSV/i })).toBeDisabled()
+    expect(downloadBlob).not.toHaveBeenCalled()
   })
 })

@@ -149,7 +149,7 @@ async function downstreamCell(
 ): Promise<{ value: string; metadata: unknown } | undefined> {
   const r = await t.pg.query<{ value: string; metadata: unknown }>(
     `SELECT value, metadata FROM cells
-      WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = 'source' AND target_lang = ''`,
+      WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = 'source'`,
     [DOWNSTREAM, DOWNSTREAM_FILE, cellId],
   )
   return r.rows[0]
@@ -215,7 +215,7 @@ describe("mirrorSync — the live link carries the import envelope (AQU-1520)", 
 
       const r = await t.pg.query<{ metadata: unknown }>(
         `SELECT metadata FROM cells
-          WHERE project_id = $1 AND file_id = $2 AND cell_id = 'cell-9' AND side = 'source' AND target_lang = ''`,
+          WHERE project_id = $1 AND file_id = $2 AND cell_id = 'cell-9' AND side = 'source'`,
         [DOWNSTREAM, deterministicDownstreamFileId(DOWNSTREAM, LATER)],
       )
       expect(labelOf(r.rows[0]?.metadata)).toBe("Isaiah Preface")
@@ -268,7 +268,7 @@ describe("mirrorSync — the live link carries the import envelope (AQU-1520)", 
 
       const r = await t.pg.query<{ metadata: unknown; hidden_at: string | null }>(
         `SELECT metadata, hidden_at FROM cells
-          WHERE project_id = $1 AND file_id = $2 AND cell_id = 'cell-3' AND side = 'source' AND target_lang = ''`,
+          WHERE project_id = $1 AND file_id = $2 AND cell_id = 'cell-3' AND side = 'source'`,
         [DOWNSTREAM, DOWNSTREAM_FILE],
       )
       expect(r.rows[0]?.hidden_at).not.toBeNull()

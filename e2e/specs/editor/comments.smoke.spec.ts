@@ -25,9 +25,9 @@ test("alice posts a comment on a cell and it appears in the drawer", async ({ al
 
   // Type and post the comment.
   const commentText = `e2e-comment-${Date.now()}`
-  const textarea = drawer.locator("textarea").first()
-  await textarea.waitFor({ state: "visible" })
-  await textarea.fill(commentText)
+  const composer = drawer.getByRole("textbox", { name: "New thread" })
+  await composer.waitFor({ state: "visible" })
+  await composer.fill(commentText)
 
   const postBtn = drawer.getByRole("button", { name: /post|submit|send/i }).first()
   await expect(postBtn).toBeVisible()

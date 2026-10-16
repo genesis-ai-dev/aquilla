@@ -27,6 +27,7 @@ import { ROLE } from '../events/role-policy'
 import type { AiDraftProvenance } from '../events/types'
 import { ExternalError } from './errors'
 import type { CommandValidationIssue } from './commands'
+import { laneIdRequiredMessage } from './external-lane'
 
 /** Draft named cells with the project's copilot; stages as AI drafts. */
 export interface DraftCellsCommand {
@@ -34,8 +35,8 @@ export interface DraftCellsCommand {
   fileId: string
   /** Explicit cell ids — never a wildcard, never "everything". */
   cellIds: string[]
-  /** Target-language lane (AQU-538); omit for the default lane. */
-  laneId?: string
+  /** Target lane id (`lanes.id`). Required. */
+  laneId: string
   /** Optional extra steer passed through to the drafting prompt. */
   instructions?: string
 }
@@ -84,11 +85,12 @@ export function validateDraftCellsCommand(
     }
     if (!cellIds.includes(raw)) cellIds.push(raw)
   }
-  if (c.laneId !== undefined && (!isNonEmptyString(c.laneId) || c.laneId.length > 64)) {
-    issues.push({
-      index,
-      message: 'DraftCells.laneId must be a non-empty string (max 64 chars) when present — omit it for the default lane',
-    })
+  if (c.laneId === undefined) {
+    issues.push({ index, message: laneIdRequiredMessage('DraftCells.laneId') })
+    return null
+  }
+  if (!isNonEmptyString(c.laneId) || c.laneId.length > 64) {
+    issues.push({ index, message: 'DraftCells.laneId lane does not exist' })
     return null
   }
   if (c.instructions !== undefined) {
@@ -104,7 +106,7 @@ export function validateDraftCellsCommand(
     kind: 'DraftCells',
     fileId: c.fileId,
     cellIds,
-    ...(c.laneId !== undefined ? { laneId: c.laneId as string } : {}),
+    laneId: c.laneId,
     ...(c.instructions !== undefined ? { instructions: c.instructions as string } : {}),
   }
 }

@@ -79,7 +79,7 @@ describe("buildGlosserSeeds — alignment seeds reach the glosser (AQU-207)", ()
     })
 
     expect(seeds).toEqual([
-      { source: "word", target: "mot", weight: 5 },
+      { source: "word", target: "mot", weight: 5, originId: "c1" },
       { source: "covenant", target: "alliance", weight: 3 },
       { source: "scripture", target: "mot", weight: ALIGNMENT_SEED_BT_WEIGHT },
     ])

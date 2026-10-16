@@ -5,6 +5,7 @@
 
 import { Hono } from "hono"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
+import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 import { isPlatformAdmin } from "../middleware/platform-admin"
 import {
   lookupUserByUsername,
@@ -15,6 +16,11 @@ import {
 const SEARCH_MIN_PREFIX_LEN = 2
 const SEARCH_DEFAULT_LIMIT = 10
 const SEARCH_MAX_LIMIT = 25
+
+// Pen-test 2026-10-15: /lookup is an exact username -> id oracle open to any
+// self-registered account. A per-user window makes bulk enumeration slow while
+// leaving the Add-member flow (a handful of lookups) untouched.
+const LOOKUP_MAX_PER_USER_PER_WINDOW = 60
 
 const users = new Hono<AuthHonoEnv>()
 
@@ -32,6 +38,19 @@ users.get("/lookup", async (c) => {
   const trimmed = username?.trim() ?? ""
   if (!trimmed) {
     return c.json({ error: "username query parameter is required" }, 400)
+  }
+  const limit = await enforceRateLimit(c.env.AQUILLA_PG, {
+    kind: "users_lookup",
+    identifier: userRateLimitIdentifier(c.get("user").id),
+    limit: LOOKUP_MAX_PER_USER_PER_WINDOW,
+    failMode: "open",
+  })
+  if (!limit.allowed) {
+    return c.json(
+      { error: "Too many lookups. Try again shortly." },
+      429,
+      { "Retry-After": String(limit.retryAfterSeconds) },
+    )
   }
   const user = await lookupUserByUsername(c.env, trimmed)
   if (!user) {
@@ -57,7 +76,7 @@ users.get("/lookup", async (c) => {
  * Platform admins (ADMIN_EMAILS) keep the unscoped path for cross-tenant
  * support lookups, mirroring the access they already have via /admin/users.
  * Exact-match lookup for out-of-scope users is done via GET /users/lookup, which
- * does not confirm-or-deny on miss for privacy reasons.
+ * is per-user rate limited (it does confirm hits, so it must not be bulk-walkable).
  */
 users.get("/search", async (c) => {
   const user = c.get("user")
@@ -82,7 +101,7 @@ users.get("/search", async (c) => {
     c.req.query("scoped") === "1" || c.req.query("scoped") === "true"
   )
   const matches =
-    wantsUnscoped && isPlatformAdmin(c)
+    wantsUnscoped && await isPlatformAdmin(c)
       ? await searchUsersByPrefix(c.env, prefix, limit)
       : await searchUsersByScopedPrefix(c.env, user.id, prefix, limit)
 

@@ -204,6 +204,31 @@ export async function listProjectDocs(db: AquillaDb, projectId: string): Promise
   return results.map(rowToMeta)
 }
 
+/** Project + org-inherited docs with each doc's flattened index-node count —
+ *  the "chunk count" the Agent API publishes so a caller can tell an indexed
+ *  doc from one that merely uploaded (AQU-1762). Separate from
+ *  `listProjectDocs` because it reads `index_tree`, which the in-app list does
+ *  not need; trees are node metadata only (title/summary/char-range) and
+ *  capped at MAX_NODES per doc, so the extra column stays small. */
+export async function listProjectDocsWithNodeCounts(
+  db: AquillaDb,
+  projectId: string,
+): Promise<(KnowledgeDocMeta & { nodeCount: number })[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT ${META_COLS}, index_tree FROM knowledge_docs
+       WHERE project_id = ?
+          OR org_id = (SELECT org_id FROM projects WHERE id = ?)
+       ORDER BY created_at DESC`,
+    )
+    .bind(projectId, projectId)
+    .all<Row & { index_tree: unknown }>()
+  return results.map((r) => ({
+    ...rowToMeta(r),
+    nodeCount: flattenNodes(parseTree(r.index_tree)).length,
+  }))
+}
+
 export async function listOrgDocs(db: AquillaDb, orgId: number): Promise<KnowledgeDocMeta[]> {
   const { results } = await db
     .prepare(`SELECT ${META_COLS} FROM knowledge_docs WHERE org_id = ? ORDER BY created_at DESC`)

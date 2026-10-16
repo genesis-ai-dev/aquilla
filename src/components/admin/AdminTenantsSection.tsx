@@ -101,12 +101,12 @@ export function AdminTenantsSection({
       },
       {
         // AQU-1071: the billing band's own count, per tenant. Sorts missing last
-        // so a server without the field cannot read as "fewest languages".
+        // so a server without the field cannot read as "fewest lanes".
         id: "languages",
         accessorFn: (o) => missingLast(o.activeLanguageCount),
         sortUndefined: SORT_MISSING_LAST,
         header: ({ column }) => (
-          <DataTableColumnHeader column={column} title="Languages" className="justify-end" />
+          <DataTableColumnHeader column={column} title="Lanes" className="justify-end" />
         ),
         cell: ({ row }) =>
           row.original.activeLanguageCount == null ? (

@@ -22,6 +22,11 @@ vi.mock("@/lib/sync/link-source-preview", async (importOriginal) => {
     loadUpstreamFileChoices: vi
       .fn()
       .mockResolvedValue([{ id: "up-file-1", name: "MAT", clashes: false }]),
+    // AQU-1605: the chain case also asks which of the upstream's translations to
+    // read. One lane, so it is pre-filled and this file's cases ask nothing more
+    // than they did — which translation gets picked is pinned in
+    // ProjectCreateDialog.upstreamLane.test.tsx.
+    loadUpstreamLaneChoices: vi.fn().mockResolvedValue([{ id: "lane-up-1", label: "French" }]),
   }
 })
 
@@ -65,6 +70,9 @@ vi.mock("@/lib/sync/cloud-projects", async (importOriginal) => {
   return { ...actual, createCloudProject: vi.fn().mockResolvedValue(undefined) }
 })
 vi.mock("@/lib/sync/project-settings", () => ({
+  createProjectLane: vi.fn().mockResolvedValue({ kind: "ok", lane: { id: "lane" } }),
+  renameProjectLane: vi.fn().mockResolvedValue({ kind: "ok", lane: { id: "source-lane" } }),
+
   PROJECT_SETTINGS_VERSION_INITIAL: 0,
   fetchProjectSettings: vi.fn(),
   patchProjectSettings: vi.fn().mockResolvedValue({
@@ -174,6 +182,8 @@ describe("ProjectCreateDialog — searchable upstream picker (AQU-1518)", () => 
     const corpus = await screen.findByText(/Which corpus should become this project's source\?/i)
     expect(corpus).toBeInTheDocument()
     fireEvent.click(screen.getByText(/One of its Targets/i))
+    // AQU-1605: and waits for the lane list, which is pre-filled at one lane.
+    await screen.findByRole("combobox", { name: /Which of its translations\?/i })
 
     fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
     await waitFor(() => expect(mockLinkProjectSource).toHaveBeenCalledTimes(1))

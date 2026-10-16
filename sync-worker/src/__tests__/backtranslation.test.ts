@@ -121,7 +121,8 @@ describe('cell.backtranslation.set projection', () => {
       stmts,
     )
     const args = recorded[0].args
-    // project_id, file_id, cell_id, target_event_id, bt_text, bt_html, polished, author, event_id, server_seq, created_at
+    // project_id, file_id, cell_id, target_event_id, bt_text, bt_html, polished,
+    // author, event_id, server_seq, created_at, then lane resolve (project, tag).
     expect(args[0]).toBe('p1')
     expect(args[1]).toBe('f1')
     expect(args[2]).toBe('c1')
@@ -133,6 +134,30 @@ describe('cell.backtranslation.set projection', () => {
     expect(args[8]).toBe('evt-bt-1')  // event_id
     expect(args[9]).toBe(5)           // server_seq
     expect(args[10]).toBe(100)        // created_at = serverTs
+    expect(recorded[0].sql).toContain('lane_id')
+    expect(recorded[0].sql).toContain("legacy_tag = ?")
+    // Absent targetLang resolves to the lane whose legacy_tag is ''.
+    expect(args[11]).toBe('p1')
+    expect(args[12]).toBe('')
+  })
+
+  it('resolves lane_id from targetLang, not from a lane name', () => {
+    const { db, recorded } = makeRecordingDb()
+    const stmts: AquillaStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeBtEvent({
+        payload: {
+          btText: 'hola',
+          targetEventId: 'evt-target-es',
+          polished: false,
+          targetLang: 'es',
+        },
+      }),
+      stmts,
+    )
+    expect(recorded[0].args[11]).toBe('p1')
+    expect(recorded[0].args[12]).toBe('es')
   })
 
   it('serializes polished=false as 0', () => {
@@ -358,6 +383,16 @@ describe('GET /api/v1/projects/:p/files/:f/backtranslations', () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as { backtranslations: unknown[] }
     expect(body.backtranslations).toHaveLength(0)
+  })
+
+  it('400 when lane is longer than 64 characters', async () => {
+    const token = await makeTestToken(SECRET, { projectId: 'p1', fileId: 'f1', role: 100 })
+    const res = (await readReq(
+      { AQUILLA_PG: makeReadDb([]), SYNC_SECRET_KEY: SECRET },
+      token,
+      `?lane=${'e'.repeat(65)}`,
+    ))!
+    expect(res.status).toBe(400)
   })
 
   it('500 without SYNC_SECRET_KEY configured', async () => {

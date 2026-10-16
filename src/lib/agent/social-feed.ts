@@ -53,7 +53,17 @@ export interface TeamFeedMessage {
   body: TeamFeedBody
   /** The durable event behind the sentence, for the step inspector — the
    *  plain-language line is the surface, this is the receipt. */
-  raw: { kind: string; details: Record<string, unknown> }
+  raw: {
+    kind: string
+    details: Record<string, unknown>
+    /** Correlation for the inspector's evidence + model-call trace lookups.
+     *  Optional so hand-built test messages stay valid. */
+    runId?: string
+    spanId?: string
+    spanLabel?: string
+    /** The server's own one-line account of the event. */
+    summary?: string
+  }
 }
 
 const EXCERPT_MAX = 240
@@ -195,7 +205,14 @@ export function buildRunFeed(
     feed.push({
       ...message,
       id: uses === 0 ? message.id : `${message.id}#${uses + 1}`,
-      raw: { kind: event.kind, details: event.details },
+      raw: {
+        kind: event.kind,
+        details: event.details,
+        runId: event.runId,
+        ...(event.spanId ? { spanId: event.spanId } : {}),
+        ...(event.spanLabel ? { spanLabel: event.spanLabel } : {}),
+        ...(event.summary ? { summary: event.summary } : {}),
+      },
     })
   }
   return feed

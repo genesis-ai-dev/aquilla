@@ -122,16 +122,6 @@ export function useOrgPortfolio(orgId: number | null, orgName?: string | null) {
     () => new Map(accessibleProjects.map((project) => [project.id, project.role])),
     [accessibleProjects],
   )
-  const defaultLaneLabelByProjectId = useMemo(
-    () =>
-      new Map(
-        accessibleProjects.map((project) => [
-          project.id,
-          project.files?.find((f) => f.targetLanguage)?.targetLanguage ?? "",
-        ]),
-      ),
-    [accessibleProjects],
-  )
   const filesByProjectId = useMemo(
     () =>
       new Map(
@@ -213,7 +203,6 @@ export function useOrgPortfolio(orgId: number | null, orgName?: string | null) {
     overdueCount,
     attentionProjects,
     roleByProjectId,
-    defaultLaneLabelByProjectId,
     filesByProjectId,
     handleLaneAdded,
     bumpRefresh,

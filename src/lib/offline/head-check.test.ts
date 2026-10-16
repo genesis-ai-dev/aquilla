@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { checkClientSessionHead } from "./head-check"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const seq = (client: number) => ({ global: 0, client, rebaseGeneration: 0 })
 
@@ -71,6 +72,17 @@ describe("checkClientSessionHead", () => {
     const slow = { _dev: { syncStates: () => new Promise<ReturnType<typeof states>>((r) => (answer = r)) } }
     expect(await checkClientSessionHead(slow, { reload, timeoutMs: 10 })).toBe("timeout")
     answer(states(2309, 2299))
-    await vi.waitFor(() => expect(reload).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(reload).toHaveBeenCalledOnce(), { timeout: STALL_WATCHDOG_MS })
+  })
+
+  it("reports a slow leader's late \"ok\" through onVerdict, and never a timeout", async () => {
+    const onVerdict = vi.fn()
+    let answer: (s: ReturnType<typeof states>) => void = () => {}
+    const slow = { _dev: { syncStates: () => new Promise<ReturnType<typeof states>>((r) => (answer = r)) } }
+    expect(await checkClientSessionHead(slow, { reload: vi.fn(), timeoutMs: 10, onVerdict })).toBe("timeout")
+    expect(onVerdict).not.toHaveBeenCalled()
+    answer(states(7, 7))
+    await vi.waitFor(() => expect(onVerdict).toHaveBeenCalledWith("ok"), { timeout: STALL_WATCHDOG_MS })
+    expect(onVerdict).toHaveBeenCalledOnce()
   })
 })

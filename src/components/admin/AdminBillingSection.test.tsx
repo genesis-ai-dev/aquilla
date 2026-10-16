@@ -9,6 +9,7 @@ vi.mock("@/lib/frontier/admin", () => ({
   getAdminBillingOrgs: vi.fn(),
   updateAdminBillingPlans: vi.fn(),
   patchAdminBillingOrg: vi.fn(),
+  patchAdminWeeklyAllowance: vi.fn(),
   grantAdminWords: vi.fn(),
   resetAdminWords: vi.fn(),
   grantAdminCredits: vi.fn(),
@@ -16,6 +17,7 @@ vi.mock("@/lib/frontier/admin", () => ({
 }))
 
 import {
+  patchAdminWeeklyAllowance,
   getAdminBillingOrgs,
   getAdminBillingPlans,
   grantAdminWords,
@@ -202,4 +204,22 @@ describe("AdminBillingSection — AQU-942: the resolved shell survives revalidat
     release(CATALOG)
     await waitFor(() => expect(screen.getByTestId("admin-billing")).toBeDefined())
   })
+})
+
+it('saves the runtime Free weekly allowance through the versioned catalog', async () => {
+  render(<AdminBillingSection jwt="jwt" />)
+  fireEvent.change(await screen.findByLabelText('Free weekly AI allowance (internal units)'), {
+    target: { value: '100' },
+  })
+  fireEvent.click(screen.getByTestId('save-field-plan'))
+  await waitFor(() => expect(mockSave).toHaveBeenCalledWith('jwt',
+    expect.objectContaining({ freeWeeklyAllowance: 100, ifMatchVersion: 1 })))
+})
+it('sets and clears a partner weekly grant without changing its Stripe plan', async () => {
+  vi.mocked(patchAdminWeeklyAllowance).mockResolvedValue()
+  render(<AdminBillingSection jwt="jwt" />)
+  const input = await screen.findByLabelText('weekly allowance for Biblica')
+  fireEvent.change(input, { target: { value: '1000' } })
+  fireEvent.blur(input)
+  await waitFor(() => expect(patchAdminWeeklyAllowance).toHaveBeenCalledWith('jwt', 2, 1000))
 })

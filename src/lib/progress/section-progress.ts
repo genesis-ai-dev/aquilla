@@ -1,5 +1,6 @@
 import type { CellData } from "@/hooks/useCells"
 import { buildSectionIndex, type SectionInfo } from "./section-index"
+import { progressPercent } from "./progress-percent"
 
 export interface SectionProgress extends SectionInfo {
   textCompleted: number      // 0..100
@@ -27,10 +28,8 @@ type ProgressCell = Pick<CellData, "id" | "group" | "section" | "translated" | "
 
 const MAX_VALIDATION_LEVELS = 15
 
-function pct(num: number, denom: number): number {
-  if (denom === 0) return 0
-  return Math.round((num / denom) * 100)
-}
+// AQU-1493: never 100 while a cell in the section is outstanding.
+const pct = progressPercent
 
 export function computeSectionProgress(
   cells: ProgressCell[],

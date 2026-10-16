@@ -1,4 +1,5 @@
 import { GrantOriginBadge } from "@/components/access/GrantOriginBadge"
+import { UserChip } from "@/components/UserChip"
 import { MemberInspectorTrigger } from "@/components/access/MemberInspectorTrigger"
 import { roleLabel } from "@/components/access/labels"
 import { formatScopePath, scopePathKey } from "@/lib/access/scope-path"
@@ -15,7 +16,7 @@ export function AccessPeopleView({ people, org }: { people: OrgAccessPerson[]; o
         <li key={p.userId} className="flex flex-col gap-2 px-3 py-2 sm:flex-row sm:items-start">
           <div className="flex w-48 shrink-0 items-baseline gap-2">
             <MemberInspectorTrigger userId={p.userId} username={p.displayName} from={{ type: "org", id: org.id }} herePath={[org]}>
-              {p.displayName}
+              <UserChip userId={p.userId} username={p.displayName} size="xs" nameClassName="text-sm font-normal" />
             </MemberInspectorTrigger>
             {p.isGuest && <span className="text-xs text-muted-foreground">{t("org.access.inspector.guest")}</span>}
           </div>

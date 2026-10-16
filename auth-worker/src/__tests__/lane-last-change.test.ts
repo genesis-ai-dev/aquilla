@@ -24,7 +24,7 @@ const DEFAULT_LANE = "lane-default"
 
 /**
  * One project with a default target lane and an extra "Spanish" lane.
- * `dan` is a maintainer (600, at the default language-edit floor); `carla` is a
+ * `dan` is a maintainer (600, above the language-edit floor); `carla` is a
  * contributor (400, below it).
  */
 async function seed(): Promise<void> {

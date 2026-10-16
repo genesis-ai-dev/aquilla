@@ -1,3 +1,4 @@
+import { workspaceBillingMode, workspaceCheckoutEnabled } from '../lib/billing/environment'
 import { expect, it } from 'vitest'
 import type { Env } from '../types'
 import { weeklyUsageActive, weeklyUsageMode } from '../lib/billing/usage-mode'
@@ -22,4 +23,27 @@ it('enforce meters any provider and outranks rehearsal', () => {
   expect(weeklyUsageMode(enforce)).toBe('enforce')
   expect(weeklyUsageActive(enforce, 'https://api.aquilla.app/chat')).toBe('on')
   expect(weeklyUsageActive({ ...enforce, OPENROUTER_BASE_URL: undefined })).toBe('on')
+})
+
+const production = { ENVIRONMENT: 'production', STRIPE_SECRET_KEY: 'sk_live_fixture',
+  BILLING_LIVE_HOSTS: 'api.aquilla.app,aquilla.app', BASE_URL: 'https://aquilla.app',
+  BILLING_WORKSPACE_CHECKOUT_ENABLED: 'true', BILLING_WEEKLY_USAGE_ENFORCE: 'true' } as Env
+it('separates the live sales switch from existing subscription processing', () => {
+  expect(workspaceCheckoutEnabled(production, 'https://api.aquilla.app/identity')).toBe(true)
+  const stopped = { ...production, BILLING_WORKSPACE_CHECKOUT_ENABLED: 'false' }
+  expect(workspaceCheckoutEnabled(stopped, 'https://api.aquilla.app/identity')).toBe(false)
+  expect(workspaceBillingMode(stopped, 'https://api.aquilla.app/identity')).toBe('live')
+})
+it.each([
+  { BILLING_WEEKLY_USAGE_ENFORCE: undefined }, { BILLING_WEEKLY_USAGE_ENFORCE: 'false' },
+  { ENVIRONMENT: 'development' }, { WRANGLER_LOCAL: '1' },
+  { STRIPE_SECRET_KEY: 'sk_test_fixture' }, { BILLING_LIVE_HOSTS: undefined },
+  { BASE_URL: 'https://evil.test' }, { BASE_URL: 'http://aquilla.app' },
+  { BASE_URL: 'https://user@aquilla.app' }, { BASE_URL: 'https://aquilla.app:1234' },
+])('refuses mismatched production configuration %j', override => {
+  expect(workspaceCheckoutEnabled({ ...production, ...override }, 'https://api.aquilla.app/identity')).toBe(false)
+})
+it.each(['http://api.aquilla.app', 'https://evil.test', 'https://user@api.aquilla.app',
+  'http://127.0.0.1', 'https://api.aquilla.app:1234'])('refuses live checkout from %s', url => {
+  expect(workspaceCheckoutEnabled(production, url)).toBe(false)
 })

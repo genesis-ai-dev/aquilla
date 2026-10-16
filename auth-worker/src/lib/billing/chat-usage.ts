@@ -80,6 +80,81 @@ export async function releaseChatUsage(env: Env, usage: ChatUsage) {
   }
 }
 
+/** What an SSE scan learned about the provider's own cost report. Shared by
+ * both chat rails so each reads one parser's answer rather than its own.
+ */
+interface SseScan {
+  /** The frame carrying the provider's usage block, once one has been seen. */
+  cost: unknown
+  /** The provider's generation id, for reconciling a held reservation later. */
+  ref: string | undefined
+  /** The `[DONE]` frame has been seen, so the reply is complete. */
+  terminal: boolean
+  /** The stream is not trustworthy: malformed, truncated, oversized, or an
+   *  error frame. A cost read off an invalid stream is not a cost. */
+  invalid: boolean
+}
+
+/** Scan SSE `data:` frames with bounded parser state, only to learn the cost
+ * the provider reports for itself. Bytes are never altered or withheld — the
+ * caller forwards every chunk it hands in.
+ */
+function sseCostScanner() {
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let event = ''
+  const scan: SseScan = { cost: undefined, ref: undefined, terminal: false, invalid: false }
+  function line(value: string) {
+    if (value === '') {
+      const data = event.trim(); event = ''
+      if (!data) return
+      if (scan.terminal) { scan.invalid = true; return }
+      if (data === '[DONE]') { scan.terminal = true; return }
+      try {
+        const parsed = JSON.parse(data)
+        scan.ref ??= providerRefOf(parsed)
+        if (parsed.error) scan.invalid = true
+        if (parsed.usage?.cost !== undefined) {
+          // Validate now so a malformed final cost cannot reuse an earlier one.
+          readProviderCostCents(parsed)
+          scan.cost = parsed
+        }
+      } catch { scan.invalid = true }
+    } else if (value.startsWith('data:')) {
+      event += value.slice(5).trimStart() + '\n'
+      if (event.length > 65536) { scan.invalid = true; event = '' }
+    }
+  }
+  return {
+    scan,
+    observe(bytes: Uint8Array) {
+      if (scan.invalid) return
+      buffer += decoder.decode(bytes, { stream: true })
+      let newline: number
+      while ((newline = buffer.indexOf('\n')) >= 0) {
+        line(buffer.slice(0, newline).replace(/\r$/, ''))
+        buffer = buffer.slice(newline + 1)
+        if (scan.invalid) { buffer = ''; return }
+      }
+      if (buffer.length > 65536) { scan.invalid = true; buffer = '' }
+    },
+    /** Flush at EOF: anything still buffered is a half-delivered frame. */
+    finish() {
+      buffer += decoder.decode()
+      if (buffer.trim() || event.trim()) scan.invalid = true
+    },
+  }
+}
+
+/** The provider-reported cost of a completed stream, or undefined when the
+ * stream reported none, broke, or was never trustworthy. Never a guess.
+ */
+function scannedCostCents(scan: SseScan): number | undefined {
+  if (scan.invalid || scan.cost === undefined) return undefined
+  try { return readProviderCostCents(scan.cost) }
+  catch { return undefined }
+}
+
 /** Observe SSE with backpressure and bounded parser state; output bytes remain
  * unchanged. Settle before forwarding the terminal frame: clients may stop
  * reading immediately at [DONE], without draining transport EOF.
@@ -87,64 +162,25 @@ export async function releaseChatUsage(env: Env, usage: ChatUsage) {
  */
 export function meterChatStream(source: ReadableStream<Uint8Array>, env: Env, usage: ChatUsage) {
   const reader = source.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  let event = ''
-  let cost: unknown
-  let ref: string | undefined
-  let terminal = false
-  let invalid = false
+  const { scan, observe, finish } = sseCostScanner()
   let settlementAttempted = false
-  function line(value: string) {
-    if (value === '') {
-      const data = event.trim(); event = ''
-      if (!data) return
-      if (terminal) { invalid = true; return }
-      if (data === '[DONE]') { terminal = true; return }
-      try {
-        const parsed = JSON.parse(data)
-        ref ??= providerRefOf(parsed)
-        if (parsed.error) invalid = true
-        if (parsed.usage?.cost !== undefined) {
-          // Validate now so a malformed final cost cannot reuse an earlier one.
-          readProviderCostCents(parsed)
-          cost = parsed
-        }
-      } catch { invalid = true }
-    } else if (value.startsWith('data:')) {
-      event += value.slice(5).trimStart() + '\n'
-      if (event.length > 65536) { invalid = true; event = '' }
-    }
-  }
-  function observe(bytes: Uint8Array) {
-    if (invalid) return
-    buffer += decoder.decode(bytes, { stream: true })
-    let newline: number
-    while ((newline = buffer.indexOf('\n')) >= 0) {
-      line(buffer.slice(0, newline).replace(/\r$/, ''))
-      buffer = buffer.slice(newline + 1)
-      if (invalid) { buffer = ''; return }
-    }
-    if (buffer.length > 65536) { invalid = true; buffer = '' }
-  }
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
         const next = await reader.read()
         if (next.done) {
-          buffer += decoder.decode()
-          if (buffer.trim() || event.trim()) invalid = true
+          finish()
           if (!settlementAttempted) {
             settlementAttempted = true
             console.warn('[billing] incomplete chat stream requires reconciliation', usage)
-            await holdChatUsage(env, usage, ref)
+            await holdChatUsage(env, usage, scan.ref)
           }
           controller.close(); reader.releaseLock()
         } else {
           observe(next.value)
-          if (terminal && !invalid && cost !== undefined && !settlementAttempted) {
+          if (scan.terminal && !scan.invalid && scan.cost !== undefined && !settlementAttempted) {
             settlementAttempted = true
-            await settleChatUsage(env, usage, { ...(cost as object), ...(ref ? { id: ref } : {}) })
+            await settleChatUsage(env, usage, { ...(scan.cost as object), ...(scan.ref ? { id: scan.ref } : {}) })
           }
           controller.enqueue(next.value)
         }
@@ -156,7 +192,67 @@ export function meterChatStream(source: ReadableStream<Uint8Array>, env: Env, us
     },
     async cancel(reason) {
       try { await reader.cancel(reason) } finally { reader.releaseLock() }
-      if (!settlementAttempted) { settlementAttempted = true; await holdChatUsage(env, usage, ref) }
+      if (!settlementAttempted) { settlementAttempted = true; await holdChatUsage(env, usage, scan.ref) }
     },
   })
+}
+
+/** A streamed reply whose provider-reported cost the legacy credit ledger can
+ * read once the stream is over (AQU-1871).
+ */
+export interface ObservedChatStream {
+  /** Forward this in place of the upstream body; the bytes are identical. */
+  body: ReadableStream<Uint8Array>
+  /** Resolves when the stream ends — completed, cancelled, or failed. */
+  ended: Promise<void>
+  /** Provider-reported cost in cents, set by the time `ended` resolves.
+   *  Undefined means the provider reported no usable cost for this stream. */
+  costCents?: number
+}
+
+/** Read the cost of a streamed reply on the legacy (unmetered) rail.
+ *
+ * The legacy rail has no reservation to settle, so unlike `meterChatStream`
+ * this withholds nothing and awaits nothing in the client's path: it scans the
+ * frames as they pass, and the caller's deferred ledger write reads the answer
+ * once `ended` resolves. A stream that never reports a cost leaves `costCents`
+ * undefined — an unresolved cost, never an invented flat charge.
+ */
+export function observeChatStreamCost(source: ReadableStream<Uint8Array>): ObservedChatStream {
+  const reader = source.getReader()
+  const { scan, observe, finish } = sseCostScanner()
+  let resolveEnded: () => void
+  const ended = new Promise<void>((resolve) => { resolveEnded = resolve })
+  const observed: ObservedChatStream = { body: undefined as unknown as ReadableStream<Uint8Array>, ended }
+  let ending = false
+  /** Idempotent: the stream ends exactly once, however it ends. */
+  function end() {
+    if (ending) return
+    ending = true
+    observed.costCents = scannedCostCents(scan)
+    resolveEnded()
+  }
+  observed.body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const next = await reader.read()
+        if (next.done) {
+          finish()
+          controller.close(); reader.releaseLock(); end()
+        } else {
+          observe(next.value)
+          controller.enqueue(next.value)
+        }
+      } catch (error) {
+        controller.error(error)
+        await reader.cancel().catch(() => undefined)
+        reader.releaseLock()
+        end()
+      }
+    },
+    async cancel(reason) {
+      try { await reader.cancel(reason) } finally { reader.releaseLock(); end() }
+    },
+  })
+  return observed
 }

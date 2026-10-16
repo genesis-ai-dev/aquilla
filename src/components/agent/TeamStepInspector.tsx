@@ -30,6 +30,8 @@ import { useI18n } from "@/lib/i18n/I18nProvider"
 import { AGENT_PERSONAS } from "@/lib/agent/personas"
 import type { TeamFeedMessage } from "@/lib/agent/social-feed"
 import { PersonaAvatar } from "./PersonaAvatar"
+import type { StepEvidence } from "@/lib/agent/step-evidence"
+import { StepModelCalls, StepOutputs } from "./TeamStepEvidence"
 
 /** Per-browser, not per-project: this is a chrome preference, like a sidebar
  *  width — it should not follow a project or a run around. */
@@ -90,9 +92,20 @@ export interface TeamStepInspectorProps {
    *  formatter so the two panes never disagree). */
   sentence: string
   onClose: () => void
+  /** Enables the on-demand model-call trace section (needs the step's span). */
+  projectId?: string
+  /** What the step's span produced, joined from the run's activity bundle. */
+  evidence?: StepEvidence
 }
 
-export function TeamStepInspector({ id, message, sentence, onClose }: TeamStepInspectorProps) {
+export function TeamStepInspector({
+  id,
+  message,
+  sentence,
+  onClose,
+  projectId,
+  evidence,
+}: TeamStepInspectorProps) {
   const { locale, t } = useI18n()
   const titleId = useId()
   const persona = AGENT_PERSONAS[message.persona]
@@ -254,6 +267,18 @@ export function TeamStepInspector({ id, message, sentence, onClose }: TeamStepIn
             </InspectorSection>
           )}
 
+          {evidence && <StepOutputs evidence={evidence} />}
+
+          {projectId && message.raw.runId && message.raw.spanId && (
+            <StepModelCalls
+              // Remount per span so one step's traces never show under another.
+              key={`${message.raw.runId}:${message.raw.spanId}`}
+              projectId={projectId}
+              runId={message.raw.runId}
+              spanId={message.raw.spanId}
+            />
+          )}
+
           <InspectorSection title={t("agent.team.inspector.details")}>
             <dl className="flex flex-col gap-1 text-[11px]">
               <div className="flex gap-2">
@@ -263,6 +288,20 @@ export function TeamStepInspector({ id, message, sentence, onClose }: TeamStepIn
                 </dt>
                 <dd className="min-w-0 break-words font-mono">{message.raw.kind}</dd>
               </div>
+              {message.raw.summary && (
+                <div className="flex gap-2">
+                  {/* i18n-exempt machine field name, not copy */}
+                  <dt className="shrink-0 font-mono text-muted-foreground">summary</dt>
+                  <dd className="min-w-0 break-words">{message.raw.summary}</dd>
+                </div>
+              )}
+              {message.raw.spanId && (
+                <div className="flex gap-2">
+                  {/* i18n-exempt machine field name, not copy */}
+                  <dt className="shrink-0 font-mono text-muted-foreground">span</dt>
+                  <dd className="min-w-0 break-words font-mono">{message.raw.spanId}</dd>
+                </div>
+              )}
               {detailEntries.length === 0 ? (
                 <p className="text-muted-foreground">{t("agent.team.inspector.noDetails")}</p>
               ) : (

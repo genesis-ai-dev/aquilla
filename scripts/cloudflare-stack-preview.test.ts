@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { describe, expect, it, vi } from "vitest"
 import { workersBuildPreviewAlias } from "./cloudflare-pr-preview.mjs"
 import { deployStackPreview, previewConfig, previewOrigin, PREVIEW_WORKERS } from "./cloudflare-stack-preview.mjs"
+import { hostedPosthog } from "./hosted-posthog.mjs"
 
 const env = { WORKERS_CI: "1", WORKERS_CI_BRANCH: "feature/example", WORKERS_CI_COMMIT_SHA: "abc123", WRANGLER_CI_OVERRIDE_NAME: "aquilla-web-preview" }
 
@@ -26,6 +27,8 @@ describe("full-stack Cloudflare previews", () => {
         expect(options.env.VITE_AUTH_BASE).toBe(`${authOrigin}/identity`)
         expect(options.env.VITE_CHAT_BASE).toBe(`${authOrigin}/chat`)
         expect(options.env.VITE_SYNC_WORKER_HOST).toBe(`${new URL(syncOrigin).host}/sync`)
+        expect(options.env.VITE_POSTHOG_KEY).toBe(hostedPosthog.projectToken)
+        expect(options.env.VITE_POSTHOG_HOST).toBe(hostedPosthog.ingestHost)
         return { stdout: "" }
       }
       expect(args.slice(0, 3)).toEqual(["exec", "wrangler", "preview"])
@@ -48,6 +51,12 @@ describe("full-stack Cloudflare previews", () => {
     const result = await deployStackPreview({ cwd: "/tmp/preview-contract-fixture", env: { ...env, WRANGLER_OUTPUT_FILE_DIRECTORY: outputDirectory }, run, verify, notify })
     expect(configs.map(({ surface }) => surface)).toEqual(["auth", "sync", "web", "auth", "sync"])
     expect(configs[0].config.previews.vars.SYNC_WORKER_URL).toBe("https://preview-not-ready.invalid")
+    for (const { config } of configs.filter(({ surface }) => surface !== "web")) {
+      expect(config.previews.vars).toMatchObject({
+        POSTHOG_KEY: hostedPosthog.projectToken,
+        POSTHOG_HOST: hostedPosthog.ingestHost,
+      })
+    }
     expect(configs[3].config.previews.vars).toMatchObject({
       BASE_URL: result.urls.web, SYNC_WORKER_URL: `${result.urls.sync}/sync`,
     })
@@ -72,6 +81,65 @@ describe("full-stack Cloudflare previews", () => {
     expect(config.previews.vars).not.toHaveProperty("WRANGLER_LOCAL")
     expect(config.previews.vars).not.toHaveProperty("ALLOW_UNAUTHENTICATED")
     expect(JSON.stringify(config)).not.toContain("api.aquilla.app")
+  })
+
+  // AQU-1353: the QA bots could not walk /admin at all, because a preview named
+  // no platform admin — every claim about an admin surface came back NOT CHECKED.
+  // The fixture that fixed that is also the one thing in this config that hands
+  // out cross-tenant read access, so pin its whole shape here.
+  it("grants preview platform admin to the QA fixture only, with the step-up gate still on", () => {
+    const vars = previewConfig("auth", { cwd: "/repo" }).previews.vars ?? {}
+    expect(vars.ADMIN_EMAILS).toBe("qa-admin@local.test")
+    // One address, not a list: a second entry is how an operator account would
+    // sneak onto a preview.
+    expect((vars.ADMIN_EMAILS ?? "").split(",")).toHaveLength(1)
+    // Elevation is NOT relaxed for the bots. adminElevationRequired() is
+    // `ADMIN_REQUIRE_ELEVATION === "true" && WRANGLER_LOCAL !== "1"`, so both
+    // halves have to hold for the real gate to run on a preview.
+    expect(vars.ADMIN_REQUIRE_ELEVATION).toBe("true")
+    expect(vars).not.toHaveProperty("WRANGLER_LOCAL")
+    // Nothing admin-shaped leaks onto the sync preview, which has no such routes.
+    expect(previewConfig("sync", { cwd: "/repo" }).previews.vars).not.toHaveProperty("ADMIN_EMAILS")
+  })
+
+  it("never names a live operator address in the preview admin allowlist", () => {
+    // The live allowlists live in auth-worker/wrangler.toml (top-level [vars]
+    // plus every [env.*.vars]). A preview must not share an address with any of
+    // them: a preview admin who is also an operator would make this config a
+    // path to real credentials rather than a QA fixture.
+    const toml = readFileSync(join(import.meta.dirname, "..", "auth-worker", "wrangler.toml"), "utf8")
+    const operators = [...toml.matchAll(/^ADMIN_EMAILS\s*=\s*"([^"]*)"/gm)]
+      .flatMap(([, value]) => value.split(","))
+      .map((email) => email.trim().toLowerCase())
+      .filter((email) => email.length > 0)
+    expect(operators.length).toBeGreaterThan(0)
+    const preview = (previewConfig("auth", { cwd: "/repo" }).previews.vars ?? {}).ADMIN_EMAILS
+    expect(preview).toBeTruthy()
+    expect(operators).not.toContain(preview.toLowerCase())
+  })
+
+  it.each(["auth", "sync"])("runs %s previews behind the lane wall, like the development Worker whose rows they read", (surface) => {
+    // Unset, every member sees every lane and a lane-scoped change cannot be
+    // walked on its preview. Read from wrangler so the two cannot drift apart.
+    const wrangler = readFileSync(join(import.meta.dirname, "..", `${surface}-worker`, "wrangler.toml"), "utf8")
+    const start = wrangler.indexOf("\n[env.development.vars]\n")
+    expect(start).toBeGreaterThan(-1)
+    const end = wrangler.indexOf("\n[", start + 1)
+    const wall = /^LANE_READ_WALL = "(.*)"$/m.exec(wrangler.slice(start, end === -1 ? undefined : end))?.[1]
+    expect(wall).toBe("1")
+    expect(previewConfig(surface, { cwd: "/repo" }).previews.vars?.LANE_READ_WALL).toBe(wall)
+  })
+
+  it("keeps auth previews free of a Durable Object, so they still get a preview URL", () => {
+    // AQU-1845: auth-worker declares the ContextualRunDriver DO in every real
+    // environment, but Cloudflare generates no preview URL for a Worker that
+    // implements one — and previewOrigin treats a missing URL as fatal, so
+    // adding it here would risk the whole PR preview stack. The cost, noted in
+    // docs/DEPLOYMENT-ENVIRONMENTS.md, is that a preview runs the in-request
+    // fallback driver and cannot be used to walk "the run outlives the tab".
+    const config = previewConfig("auth", { cwd: "/repo" })
+    expect(config.previews).not.toHaveProperty("durable_objects")
+    expect(config).not.toHaveProperty("migrations")
   })
 
   it("preserves the sync Durable Object migration history", () => {

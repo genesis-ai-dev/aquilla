@@ -13,12 +13,21 @@
 //   POST /:projectId/contextual/segmentation/generate     AI re-segmentation (PROJECT_LEAD)
 //   POST /:projectId/contextual/drafts/:draftId/review    {action: applied|rejected}
 //
-// v1 execution (documented deviation): no Workflows binding — POST /runs kicks
-// selfTickLoop via executionCtx.waitUntil; the loop drives lib/contextual/tick
-// runOneTick until the run pauses/parks/fails or a safety cap, on its OWN
-// makePostgres connection (the request-scoped AQUILLA_PG shim closes when the
-// Response returns — same gotcha as routes/agent.ts). All run state lives in
-// Postgres, so a dropped loop resumes exactly where it stopped.
+// Execution (no Workflows binding): POST /runs hands the run to its per-run
+// Durable Object (src/contextual-run-do.ts, `CONTEXTUAL_RUN_DRIVER`), whose
+// alarm drives lib/contextual/tick runOneTick in bounded batches of waves and
+// re-arms itself until the run pauses/parks/fails. Where the binding is absent
+// — the vitest route suites, an environment deployed before the DO migration —
+// `kickLoop` falls back to driving selfTickLoop inside the request's
+// executionCtx.waitUntil, which is what this route did before AQU-1845 and
+// which the 5-minute cron sweep has always had to rescue.
+//
+// Either way the driver runs on its OWN makePostgres connection (the
+// request-scoped AQUILLA_PG shim closes when the Response returns — same
+// gotcha as routes/agent.ts). All run state lives in Postgres, so a dropped
+// driver resumes exactly where it stopped; AQU-1845's per-call checkpoint
+// (lib/contextual/checkpoint.ts) means it does not re-pay for the model calls
+// the dead attempt had already finished.
 
 import { Hono, type Context } from "hono"
 import { zValidator } from "@hono/zod-validator"
@@ -29,10 +38,12 @@ import { ROLE, type Env } from "../types"
 import { errorJson, requireAutopilotReleased, requireRole } from "./_contextual-helpers"
 import { isAutopilotReleased } from "../lib/contextual/release-gate"
 import { runAiGuard } from "../lib/ai-budget"
+import { AI_SPEND_CEILING_ERROR, checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
 import { getPlatformSettingsCached } from "../lib/platform-settings"
 import { creditGuard } from "../lib/credits"
 import { wordCapBody, wordGuard } from "../lib/billing/words"
 import { makeCostMeter } from "../lib/cost-meter"
+import { listRunTraces, makeTraceRecorder, TRACE_LIST_LIMIT } from "../lib/contextual/traces"
 import { AgentUsageMeter, agentUsageAllowed, agentUsageEnabled, backgroundUsageAllowed, paidCallAdmit, type PaidCallAdmit } from "../lib/billing/agent-usage"
 import { notifySyncWorkerOfContextualActivity } from "../services/sync-worker-notify"
 import { makePostgres, type AquillaDb } from "../../../db/shim/postgres"
@@ -82,6 +93,9 @@ import {
   tryAcquireContextualProjectLease,
   renewContextualProjectLease,
   releaseContextualProjectLease,
+  countRecentContextualStarts,
+  CONTEXTUAL_MAX_STARTS_PER_USER,
+  CONTEXTUAL_START_THROTTLE_WINDOW_SECONDS,
   CONTEXTUAL_PROJECT_LEASE_SECONDS,
   getProjectAutopilotSummary,
   type ContextualRun,
@@ -90,7 +104,9 @@ import {
   type AppendContextualRunEventInput,
 } from "../../../db/shared/contextual-runs"
 import { getSceneBrief, listSceneBriefsByRun } from "../../../db/shared/scene-briefs"
-import { isRegisteredTargetLane, loadProjectContext } from "../lib/contextual/project-context"
+import { isRegisteredLaneId, isRegisteredTargetLane, loadProjectContext } from "../lib/contextual/project-context"
+import { resolveLane, type LaneRef } from "../../../db/shared/lane-ref"
+import { callerMayReadLane } from "../../../db/shared/lane-visibility"
 import { computeContextReadiness, computeStartBlockers, type ContextReadiness } from "../lib/contextual/readiness"
 import {
   runOneTick,
@@ -114,8 +130,11 @@ import {
   invalidateContextualReads,
 } from "../lib/contextual/read-cache"
 import { decide } from "../lib/jev/decide"
+import { makeBibleTickDeps } from "../lib/contextual/bible-deps"
 import { reactCheckProject, type StartReactionRun, type WakeReactionRun } from "../lib/react-loop"
 import type { LlmCall } from "../lib/contextual/types"
+import { checkpointedLlm, discardCheckpoints } from "../lib/contextual/checkpoint"
+import { kickRunDriver } from "../lib/contextual/run-driver"
 
 const contextual = new Hono<AuthHonoEnv>()
 
@@ -139,6 +158,47 @@ const DEFAULT_MAX_PROJECT_CONCURRENCY = 12
 function resolveMaxProjectConcurrency(raw: string | undefined): number {
   const n = Number(raw)
   return Number.isFinite(n) && n >= 1 ? Math.floor(n) : DEFAULT_MAX_PROJECT_CONCURRENCY
+}
+
+/** AQU-1847 — the two ceilings ABOVE the per-project one.
+ *
+ *  The per-project ceiling alone multiplies: one user with ten self-created
+ *  projects had ten times DEFAULT_MAX_PROJECT_CONCURRENCY in flight (~360
+ *  requests with the verifier fan-out) and could exhaust the shared provider
+ *  key's rate limit for every other tenant.
+ *
+ *  `org` is the fairness ceiling: two heavy projects in one workspace share it
+ *  instead of adding up. `global` is the platform ceiling, and is deliberately
+ *  set BELOW what the provider will actually serve — autopilot is background
+ *  work and takes a lease, while interactive suggestions and chat take none, so
+ *  the gap between this ceiling and the provider's real limit is the headroom
+ *  that keeps a user-facing request responsive while autopilot runs hot. */
+const DEFAULT_MAX_ORG_CONCURRENCY = 24
+const DEFAULT_MAX_GLOBAL_CONCURRENCY = 96
+function resolveMaxOrgConcurrency(raw: string | undefined): number {
+  const n = Number(raw)
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : DEFAULT_MAX_ORG_CONCURRENCY
+}
+function resolveMaxGlobalConcurrency(raw: string | undefined): number {
+  const n = Number(raw)
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : DEFAULT_MAX_GLOBAL_CONCURRENCY
+}
+
+/** The project's billing workspace, or 0 when it has none. Every unowned
+ *  project shares the org-0 bucket on purpose: having no workspace must not be
+ *  a way out of the org ceiling. */
+async function resolveProjectOrgId(db: AquillaDb, projectId: string): Promise<number> {
+  try {
+    const row = await db
+      .prepare("SELECT org_id FROM projects WHERE id = ?")
+      .bind(projectId)
+      .first<{ org_id: number | null }>()
+    return Number(row?.org_id ?? 0)
+  } catch {
+    // Capacity must fail SAFE, not open: an unreadable org lands this project
+    // in the shared org-0 bucket, which is more restrictive, never less.
+    return 0
+  }
 }
 /** Files a single project-wide start will fan out to. Additional eligible
  * files are reported as deferred and become reachable on the next start. */
@@ -219,24 +279,51 @@ function yieldLeaseTurn(): Promise<void> {
 
 /** Wait on the durable cross-isolate capacity authority. A pause/terminate
  * must not sit behind model work: return without a lease so runOneTick can
- * observe and settle that control state immediately. */
+ * observe and settle that control state immediately.
+ *
+ * AQU-1847: unattended work QUEUES for a slot rather than failing, and says so
+ * once. Without that activity line a run waiting behind another project — or
+ * another tenant — in the org or platform ceiling was indistinguishable from
+ * one that had quietly stalled. The event is written at most once per wave, on
+ * the first refusal; acquiring is reported by the ordinary span activity that
+ * follows it. */
 async function waitForProjectLease(
   db: AquillaDb,
   projectId: string,
   runId: string,
   weight: number,
-  limit: number,
+  limits: { project: number; org: number; global: number },
+  orgId: number,
 ): Promise<ContextualProjectLease | null> {
+  let announcedQueued = false
   for (;;) {
     const lease = await tryAcquireContextualProjectLease(db, {
       projectId,
       runId,
+      orgId,
       weight,
-      limit,
+      limit: limits.project,
+      orgLimit: limits.org,
+      globalLimit: limits.global,
     })
     if (lease) return lease
     const current = await getRun(db, runId)
     if (!current || current.status !== "running") return null
+    if (!announcedQueued) {
+      announcedQueued = true
+      await appendActivitySafely(db, {
+        runId,
+        projectId,
+        fileId: current.fileId,
+        kind: "run_state",
+        status: "queued",
+        details: {
+          done: current.doneSpans,
+          total: current.totalSpans,
+          failed: current.failedSpans,
+        },
+      })
+    }
     await waitForLeaseRetry()
   }
 }
@@ -358,11 +445,30 @@ async function contextualUsageAdmit(
   }
 }
 
-async function selfTickLoop(
+/** How a driver invocation bounds itself, and what it does when that bound is
+ *  reached with spans still queued. The defaults reproduce the waitUntil
+ *  driver exactly: 50 waves, then park. The DO driver (contextual-run-do.ts)
+ *  passes a much smaller budget and re-arms instead of parking, which is what
+ *  lets a run outlive the request that started it (AQU-1845). */
+export interface ContextualDriverOptions {
+  /** Waves this invocation may drive. Default MAX_WAVES_PER_LOOP. */
+  maxWaves?: number
+  /**
+   * Called instead of parking when the wave budget runs out while the run
+   * still has queued spans. Return true to leave the run `running` because
+   * another invocation is now scheduled; return false (or omit the hook) to
+   * fall back to parking, which is the only safe end state for a run with no
+   * driver — `resumeRun` refuses a `running` run, so nothing could restart it.
+   */
+  onWaveBudgetExhausted?: () => Promise<boolean>
+}
+
+export async function selfTickLoop(
   env: Env,
   projectId: string,
   runId: string,
   concurrency?: number,
+  options?: ContextualDriverOptions,
 ): Promise<void> {
   const shim = env.PG_CONNECTION_STRING ? makePostgres(env.PG_CONNECTION_STRING) : null
   const db: AquillaDb = (shim as unknown as AquillaDb) ?? env.AQUILLA_PG
@@ -372,6 +478,10 @@ async function selfTickLoop(
   // per wave. Buffered so the ledger write never lands inside the model hot
   // path and skews the latency it is recording.
   const meter = makeCostMeter(env, db)
+  // Prompt/reply per call for the Team step inspector; flushed with the meter.
+  const traces = makeTraceRecorder(env, db, { runId, projectId })
+  // AQU-1690: Bible data for the run; its caches last across waves.
+  const bible = makeBibleTickDeps(env, db, { projectId, runId }, { traces, meter })
   try {
     const settings = await getPlatformSettingsCached(env)
     // AQU-837 weekly allowance: every graph call reserves before the provider
@@ -403,10 +513,35 @@ async function selfTickLoop(
           ok: u.ok,
           ...(u.tokensPerSecond !== undefined ? { tokensPerSecond: u.tokensPerSecond } : {}),
         }),
+      onTrace: (t) => traces.add(t),
     })
-    for (let wave = 0; wave < MAX_WAVES_PER_LOOP; wave++) {
+    // AQU-1847: resolved once per loop, not per wave — the project's billing
+    // workspace cannot change under a run, and the org ceiling is checked on
+    // every acquire anyway.
+    const orgId = await resolveProjectOrgId(db, projectId)
+    const capacityLimits = {
+      project: resolveMaxProjectConcurrency(env.CONTEXTUAL_MAX_CONCURRENCY),
+      org: resolveMaxOrgConcurrency(env.CONTEXTUAL_MAX_ORG_CONCURRENCY),
+      global: resolveMaxGlobalConcurrency(env.CONTEXTUAL_MAX_GLOBAL_CONCURRENCY),
+    }
+    const maxWaves = Math.max(1, Math.floor(options?.maxWaves ?? MAX_WAVES_PER_LOOP))
+    for (let wave = 0; wave < maxWaves; wave++) {
+      // Platform daily spend ceiling (AQU-1869), re-checked at every wave
+      // edge. Checking only at start would let a run already in flight keep
+      // spending for the rest of the day after the floor trips, and one wave
+      // is several model calls. Park rather than fail: the work is still
+      // queued, and Continue (or the sweeper) resumes it once the ceiling
+      // resets at the next UTC day or an operator raises it.
+      const spendCeiling = await checkAiSpendCeiling(db, env, "autopilot-tick")
+      if (!spendCeiling.ok) {
+        const paused = await parkRun(db, runId, "awaiting_input")
+        if (paused.status === "ok") {
+          await publishRunStateOutsideTick(env, db, projectId, paused.run)
+        }
+        return
+      }
       const weight = Math.max(1, Math.min(
-        resolveMaxProjectConcurrency(env.CONTEXTUAL_MAX_CONCURRENCY),
+        capacityLimits.project,
         concurrency ?? MAX_WAVE_CONCURRENCY,
       ))
       const tick = async () => {
@@ -415,21 +550,40 @@ async function selfTickLoop(
           projectId,
           runId,
           weight,
-          resolveMaxProjectConcurrency(env.CONTEXTUAL_MAX_CONCURRENCY),
+          capacityLimits,
+          orgId,
         )
         if (!lease) {
           return settleRunWithoutProjectLease(db, runId, notify)
         }
-        const guarded = leaseAwareLlm(db, lease, llm)
+        // AQU-1845: one checkpoint per model call, scoped to THIS attempt of
+        // THIS wave. A driver killed mid-wave leaves its finished calls behind
+        // for the replay to read back instead of re-paying for them.
+        const checkpoint = checkpointedLlm(db, { runId, projectId }, llm)
+        const guarded = leaseAwareLlm(db, lease, checkpoint.llm)
         try {
-          return await runOneTick({
+          const ticked = await runOneTick({
             db,
             runId,
             llm: guarded.llm,
             notify,
             ...(concurrency ? { concurrency } : {}),
             triage: (input) => decide(env, { purpose: "triage", projectId, ...input }),
+            bible,
           })
+          if (checkpoint.reused > 0) {
+            console.log(
+              `[contextual] run ${runId} reused ${checkpoint.reused} checkpointed model call(s) on replay`,
+            )
+          }
+          // The wave is over and runOneTick advanced the cursor past it in one
+          // guarded write, so nothing here can replay: drop the checkpoints
+          // before the next wave writes its own. A throw above deliberately
+          // skips this — those rows are precisely what the retry needs. A span
+          // that was re-enqueued (blocked) therefore starts cold next time,
+          // which is right: "blocked" means its input moved.
+          await discardCheckpoints(db, runId)
+          return ticked
         } finally {
           await guarded.stop()
           try {
@@ -442,12 +596,25 @@ async function selfTickLoop(
         }
       }
       const result = await tick()
-      await meter.flush()
+      await Promise.all([meter.flush(), traces.flush()])
       if (!result.continueRun) return
       // The lease was released in tick()'s finally. Waiters poll at the
       // shorter retry interval, so a different file/isolate gets a chance to
       // acquire before this holder begins its next wave.
       await yieldLeaseTurn()
+    }
+    // Wave budget spent with spans still queued. A driver that bounds itself
+    // per invocation (the DO alarm) re-arms here and keeps the run `running`,
+    // because it genuinely still has a driver.
+    if (options?.onWaveBudgetExhausted) {
+      let rearmed = false
+      try {
+        rearmed = await options.onWaveBudgetExhausted()
+      } catch (err) {
+        // A failed re-arm must not leave the run 'running' with no driver.
+        console.warn(`[contextual] driver re-arm failed for run ${runId}:`, err)
+      }
+      if (rearmed) return
     }
     // Cap reached with spans still queued. Park (never leave it 'running' with
     // no driver) so resume, steering, or the sweeper can pick it back up.
@@ -476,6 +643,12 @@ async function selfTickLoop(
     // Drain before the connection closes — a return/throw above skips the
     // per-wave flush, and those rows are the tail of the run.
     await meter.flush()
+    // Checkpoints only exist to serve a replay of the wave in flight. Once
+    // this driver is leaving, the only replay that could use them is one this
+    // invocation already served, so drop them rather than leave the retention
+    // sweep to it. A crash that skips this `finally` entirely is the case the
+    // sweep covers.
+    await discardCheckpoints(db, runId)
     if (shim) {
       try {
         await shim.close()
@@ -486,8 +659,20 @@ async function selfTickLoop(
   }
 }
 
-/** Kick the loop in the background. Hono throws on `c.executionCtx` when there
- *  is none (vitest) — fall back to a floating promise, tracked in _test. */
+/**
+ * Hand a run to its Durable Object driver (AQU-1845), falling back to the
+ * in-request `waitUntil` loop when `CONTEXTUAL_RUN_DRIVER` is not bound.
+ *
+ * The DO is the real driver: it owns its own invocation budget and re-arms
+ * itself, so the run finishes whether or not the browser tab that started it
+ * is still open. The fallback keeps the route working wherever the binding is
+ * absent — the vitest route suites and any environment deployed before the
+ * migration lands — with exactly the behaviour it had before: waves until the
+ * request's `waitUntil` runs out, then the cron re-adopts.
+ *
+ * Either way the work this schedules is exposed on `_test.lastLoop` for tests
+ * to await; production code never reads it.
+ */
 export function kickLoop(
   c: Context<AuthHonoEnv>,
   projectId: string,
@@ -499,18 +684,34 @@ export function kickLoop(
   // ceiling is narrower than its normal six-span maximum.
   const boundedConcurrency = concurrency
     ?? (projectConcurrency < MAX_WAVE_CONCURRENCY ? projectConcurrency : undefined)
+  const kicked = kickRunDriver(c.env, projectId, runId, boundedConcurrency)
+  if (kicked) {
+    _test.lastLoop = kicked
+    background(c, kicked)
+    return
+  }
   const loop = selfTickLoop(c.env, projectId, runId, boundedConcurrency)
   _test.lastLoop = loop
+  background(c, loop)
+}
+
+/** `c.executionCtx` throws when there is none (vitest) — fall back to a
+ *  floating promise, which `_test.lastLoop` has already captured. */
+function background(c: Context<AuthHonoEnv>, work: Promise<void>): void {
   try {
-    c.executionCtx.waitUntil(loop)
+    c.executionCtx.waitUntil(work)
   } catch {
-    void loop.catch(() => {})
+    void work.catch(() => {})
   }
 }
 
-/** Start one loop per selected file. Each wave independently acquires the
+/** Start one driver per selected file. Each wave independently acquires the
  * durable weighted project lease; the aggregate promise also makes the real
- * route test wait for every producer, not whichever loop was kicked last. */
+ * route test wait for every producer, not whichever loop was kicked last.
+ *
+ * With `CONTEXTUAL_RUN_DRIVER` bound these are N independent Durable Objects,
+ * so a 24-file project no longer depends on one request's `waitUntil` budget
+ * to reach its last file (AQU-1845). */
 function kickProjectLoops(
   c: Context<AuthHonoEnv>,
   projectId: string,
@@ -519,38 +720,46 @@ function kickProjectLoops(
 ): void {
   if (runIds.length === 0) return
   const loops = runIds.map((runId) =>
-    selfTickLoop(c.env, projectId, runId, perFileConcurrency),
+    kickRunDriver(c.env, projectId, runId, perFileConcurrency)
+      ?? selfTickLoop(c.env, projectId, runId, perFileConcurrency),
   )
   const settled = Promise.allSettled(loops).then(() => {})
   _test.lastLoop = settled
-  try {
-    c.executionCtx.waitUntil(settled)
-  } catch {
-    void settled.catch(() => {})
-  }
+  background(c, settled)
 }
 
 /**
  * Restart runs whose driver died, and wake runs that parked with spans left.
  *
  * Called from the auth-worker cron (every 5 minutes). Without it, a run whose
- * Worker request ended mid-flight stays 'running' with nothing driving it —
- * unresumable, because `resumeRun` only accepts paused|parked — and the pill
- * spins until a human terminates it. Best-effort by contract: a sweep that
- * throws must never fail the cron's other work.
+ * driver died stays 'running' with nothing driving it — unresumable, because
+ * `resumeRun` only accepts paused|parked — and the pill spins until a human
+ * terminates it. Best-effort by contract: a sweep that throws must never fail
+ * the cron's other work.
+ *
+ * Since AQU-1845 this is the safety net it was always described as rather than
+ * the main driver: a healthy run is driven by its own Durable Object between
+ * waves, so it never waits five minutes for this sweep, and the `limit` here
+ * is no longer a platform-wide throughput ceiling. The sweep hands each
+ * adopted run to its DO where the binding exists, which is also why its
+ * `done` handle now usually settles as soon as the handshakes do.
  */
 export interface SweepResult {
   /** Runs this sweep adopted. */
   adopted: number
   /**
-   * Settles when every adopted run's loop finishes.
+   * Settles when every adopted run has a driver that no longer needs this
+   * caller's connection.
    *
    * The caller MUST keep its Postgres connection alive until this resolves.
-   * `selfTickLoop` only opens its own connection when `PG_CONNECTION_STRING`
-   * is configured; otherwise it borrows `env.AQUILLA_PG`, and the cron closes
-   * that in its `finally`. Without this handle the sweep would adopt runs and
-   * then yank the connection out from under them — worse than not sweeping,
-   * because the adoption already refreshed their heartbeats.
+   * Where the run went to its Durable Object (AQU-1845) that is just the
+   * handshake, and the object opens its own connection. Where it fell back to
+   * the in-request loop, `selfTickLoop` only opens its own connection when
+   * `PG_CONNECTION_STRING` is configured; otherwise it borrows
+   * `env.AQUILLA_PG`, and the cron closes that in its `finally`. Without this
+   * handle the sweep would adopt runs and then yank the connection out from
+   * under them — worse than not sweeping, because the adoption already
+   * refreshed their heartbeats.
    */
   done: Promise<void>
 }
@@ -604,7 +813,10 @@ export async function sweepStrandedContextualRuns(env: Env, limit = 10): Promise
       Math.max(1, Math.floor(projectConcurrency / runs.length)),
     )
     return Promise.allSettled(
-      runs.map((run) => selfTickLoop(env, projectId, run.id, perFile)),
+      runs.map((run) =>
+        kickRunDriver(env, projectId, run.id, perFile)
+          ?? selfTickLoop(env, projectId, run.id, perFile),
+      ),
     ).then(() => {})
   })
   const done = Promise.allSettled(projectLoops).then(() => {})
@@ -656,11 +868,16 @@ export const startReactionRun: StartReactionRun = async (env, input) => {
   if (!credit.ok) return { status: "skipped", reason: `credit_cap_exceeded (${credit.reason})` }
   const words = await wordGuard(env.AQUILLA_PG, orgId)
   if (!words.ok) return { status: "skipped", reason: `word_cap_exceeded (${words.reason})` }
+  // Platform daily spend ceiling (AQU-1869). An autonomous reaction has no
+  // user to tell, so it simply declines to start and says why.
+  const spendCeiling = await checkAiSpendCeiling(env.AQUILLA_PG, env, "autopilot-reaction")
+  if (!spendCeiling.ok) return { status: "skipped", reason: AI_SPEND_CEILING_ERROR }
 
   const created = await createRun(env.AQUILLA_PG, {
     projectId: input.projectId,
     fileId: input.fileId,
-    targetLang: input.targetLang,
+    // AQU-1610: the lane id when the edit resolved to one, the tag otherwise.
+    ...(input.laneId ? { laneId: input.laneId } : { targetLang: input.targetLang }),
     initiatedBy: REACTION_INITIATOR,
     ...(input.anchorCellId ? { anchorCellId: input.anchorCellId } : {}),
   })
@@ -692,7 +909,8 @@ export const startReactionRun: StartReactionRun = async (env, input) => {
   return {
     status: "ok",
     runId: created.run.id,
-    done: selfTickLoop(env, input.projectId, created.run.id),
+    done: kickRunDriver(env, input.projectId, created.run.id)
+      ?? selfTickLoop(env, input.projectId, created.run.id),
   }
 }
 
@@ -716,6 +934,10 @@ export const wakeReactionRun: WakeReactionRun = async (env, input) => {
   if (!credit.ok) return { status: "skipped", reason: `credit_cap_exceeded (${credit.reason})` }
   const words = await wordGuard(env.AQUILLA_PG, orgId)
   if (!words.ok) return { status: "skipped", reason: `word_cap_exceeded (${words.reason})` }
+  // Platform daily spend ceiling (AQU-1869) — waking a parked run resumes
+  // paid work, so it is gated exactly like starting one.
+  const spendCeiling = await checkAiSpendCeiling(env.AQUILLA_PG, env, "autopilot-wake")
+  if (!spendCeiling.ok) return { status: "skipped", reason: AI_SPEND_CEILING_ERROR }
 
   // An EXHAUSTED parked run (every span settled) has nothing left to drive —
   // waking it would consume the steering and re-park untouched. Retire it and
@@ -736,6 +958,7 @@ export const wakeReactionRun: WakeReactionRun = async (env, input) => {
     return startReactionRun(env, {
       projectId: input.projectId,
       fileId: input.fileId,
+      laneId: input.laneId,
       targetLang: input.targetLang,
       anchorCellId: input.anchorCellId,
       direction: input.direction,
@@ -784,7 +1007,8 @@ export const wakeReactionRun: WakeReactionRun = async (env, input) => {
   return {
     status: "ok",
     runId: input.runId,
-    done: selfTickLoop(env, input.projectId, input.runId),
+    done: kickRunDriver(env, input.projectId, input.runId)
+      ?? selfTickLoop(env, input.projectId, input.runId),
   }
 }
 
@@ -793,6 +1017,10 @@ export const wakeReactionRun: WakeReactionRun = async (env, input) => {
 const startSchema = z.object({
   // Optional only for a project-wide start, which derives its own file list.
   fileId: z.string().min(1).optional(),
+  /** AQU-1610: the lane's id — the identity a run is keyed on. */
+  laneId: z.string().max(64).optional(),
+  /** Legacy tag. Still accepted: the SPA deploys separately from the Worker
+   *  and switches to ids in AQU-1613. */
   targetLang: z.string().max(64).optional(),
   /** Cell the user was looking at — the first wave starts there. */
   anchorCellId: z.string().max(256).optional(),
@@ -830,9 +1058,34 @@ contextual.post(
     }
 
     const user = c.get("user")
+
+    // AQU-1847 — per-user start throttle, checked before the lane, context and
+    // budget lookups below: the point of a throttle is to refuse without doing
+    // the work. It bounds what the capacity ceilings cannot. A start is cheap
+    // in slots but creates up to MAX_PROJECT_FILES runs, and a loop of starts
+    // leaves the lease table full of queued waves no human is waiting on.
+    const recentStarts = await countRecentContextualStarts(c.env.AQUILLA_PG, user.id)
+    if (recentStarts >= CONTEXTUAL_MAX_STARTS_PER_USER) {
+      const { body: err, status } = errorJson(
+        "start_throttled",
+        `Too many Autopilot runs started. You can start ${CONTEXTUAL_MAX_STARTS_PER_USER} runs every `
+          + `${Math.round(CONTEXTUAL_START_THROTTLE_WINDOW_SECONDS / 60)} minutes — wait a moment and try again.`,
+        429,
+        { retryAfterSeconds: CONTEXTUAL_START_THROTTLE_WINDOW_SECONDS },
+      )
+      return c.json(err, status)
+    }
+
     const body = c.req.valid("json")
-    const lane = (body.targetLang ?? "").trim()
-    if (!(await isRegisteredTargetLane(c.env.AQUILLA_PG, projectId, lane))) {
+    // AQU-1610: a lane id names exactly one lane and is checked against its
+    // own row; a tag is still accepted and checked the old way.
+    const laneIdParam = (body.laneId ?? "").trim()
+    const laneTag = (body.targetLang ?? "").trim()
+    const lane: LaneRef = laneIdParam ? { laneId: laneIdParam } : { targetLang: laneTag }
+    const registered = laneIdParam
+      ? await isRegisteredLaneId(c.env.AQUILLA_PG, projectId, laneIdParam)
+      : await isRegisteredTargetLane(c.env.AQUILLA_PG, projectId, laneTag)
+    if (!registered) {
       const { body: err, status } = errorJson(
         "validation_failed",
         "That target-language lane is not registered on this project.",
@@ -840,6 +1093,8 @@ contextual.post(
       )
       return c.json(err, status)
     }
+    const laneDenied = await laneAccessResponse(c, projectId, gate.level, lane)
+    if (laneDenied) return laneDenied
 
     // Minimum steering context (AQU-827). Checked before the budget/credit
     // guards because it is a precondition, not a spend decision: a project
@@ -863,6 +1118,11 @@ contextual.post(
     const models = resolveContextualModels(c.env, settings)
     const guard = await runAiGuard(models.mid, user.id, c.env.AQUILLA_PG, c.env)
     if (!guard.ok) return c.json(guard.body, guard.status)
+
+    // Platform daily spend ceiling (AQU-1869). Autopilot is the heaviest paid
+    // surface per start, so it is refused before a run row exists.
+    const spendCeiling = await checkAiSpendCeiling(c.env.AQUILLA_PG, c.env, "autopilot-start")
+    if (!spendCeiling.ok) return c.json(spendCeiling.body, spendCeiling.status)
 
     let orgId = 0
     try {
@@ -958,7 +1218,7 @@ contextual.post(
             made = await createRun(c.env.AQUILLA_PG, {
               projectId,
               fileId: file.fileId,
-              targetLang: lane,
+              ...lane,
               initiatedBy: user.username,
               roleSnapshot,
               scopeGroup,
@@ -1019,7 +1279,7 @@ contextual.post(
     const created = await createRun(c.env.AQUILLA_PG, {
       projectId,
       fileId: body.fileId,
-      targetLang: lane,
+      ...lane,
       initiatedBy: user.username,
       roleSnapshot,
       ...(body.anchorCellId ? { anchorCellId: body.anchorCellId } : {}),
@@ -1054,6 +1314,60 @@ contextual.post(
  * last body per URL and replays it. `no-store` keeps the browser's own HTTP
  * cache out of the loop so the conditional round-trip is explicit.
  */
+/** 400 when a lane id is not a target lane; 403 when the read wall hides it. */
+async function laneAccessResponse(
+  c: Context<AuthHonoEnv>,
+  projectId: string,
+  roleLevel: number,
+  lane: LaneRef,
+): Promise<Response | null> {
+  if (lane.laneId) {
+    const resolved = await resolveLane(c.env.AQUILLA_PG, projectId, lane)
+    if (!resolved.laneId) {
+      const { body, status } = errorJson(
+        "validation_failed",
+        "That lane is not a target lane on this project.",
+        400,
+      )
+      return c.json(body, status)
+    }
+  }
+  const user = c.get("user")
+  const allowed = await callerMayReadLane(
+    c.env.AQUILLA_PG,
+    c.env.LANE_READ_WALL,
+    projectId,
+    user.id,
+    roleLevel,
+    lane,
+  )
+  if (!allowed) {
+    const { body, status } = errorJson(
+      "permission_denied",
+      "you do not have access to that lane",
+      403,
+    )
+    return c.json(body, status)
+  }
+  return null
+}
+
+/**
+ * The lane a request is about (AQU-1610). `?laneId=` is the lane's identity
+ * and wins; `?targetLang=` is the legacy tag older clients still send, and
+ * goes away with AQU-1613. Absent means the project's former default lane
+ * (tag `''`), which is what every single-lane caller has always meant.
+ */
+function laneFromQuery(c: Context<AuthHonoEnv>): LaneRef {
+  const laneId = (c.req.query("laneId") ?? "").trim()
+  return laneId ? { laneId } : { targetLang: c.req.query("targetLang") ?? "" }
+}
+
+/** Cache-key spelling of a {@link LaneRef}: the two forms must not collide. */
+function laneCacheKey(lane: LaneRef): string {
+  return lane.laneId ? `id:${lane.laneId}` : `tag:${lane.targetLang ?? ""}`
+}
+
 async function cachedPollJson(
   c: Context<AuthHonoEnv>,
   projectId: string,
@@ -1067,13 +1381,26 @@ async function cachedPollJson(
   return c.body(cached.body, 200, { "Content-Type": "application/json" })
 }
 
-/** Readiness cell counts: a full-project `cells` self-join. Off the poll hot
- *  path — cached per project for CONTEXTUAL_READINESS_TTL_MS. */
+/**
+ * Readiness cell counts for ONE lane: a full-project `cells` self-join. Off
+ * the poll hot path — cached per (project, lane) for
+ * CONTEXTUAL_READINESS_TTL_MS.
+ *
+ * AQU-1610: the target side joins on `lane_id`, not on `target_lang = ''`, and
+ * the cache key carries the lane. Keyed on the tag, every lane was handed the
+ * former default lane's numbers: a second language with nothing translated
+ * read as "plenty of validated examples, little work left", which is exactly
+ * the wrong advice at the moment someone starts drafting it. The source side
+ * drops its `target_lang = ''` too — a source row is `side = 'source'`,
+ * whatever its lane.
+ */
 async function readinessCellCounts(
   db: AquillaDb,
   projectId: string,
+  lane: LaneRef,
 ): Promise<{ validated: number; untranslated: number }> {
-  return getCachedContextualReadiness(projectId, async () => {
+  const { laneId } = await resolveLane(db, projectId, lane)
+  return getCachedContextualReadiness(`${projectId}\u0000${laneId ?? ""}`, async () => {
     const counts = await db
       .prepare(
         `SELECT COUNT(*) FILTER (WHERE t.validated = 1 AND COALESCE(t.value,'') <> '') AS validated,
@@ -1081,13 +1408,13 @@ async function readinessCellCounts(
            FROM cells s
            LEFT JOIN cells t
              ON t.project_id = s.project_id AND t.file_id = s.file_id
-            AND t.cell_id = s.cell_id AND t.side = 'target' AND t.target_lang = ''
-          WHERE s.project_id = ? AND s.side = 'source' AND s.target_lang = ''
+            AND t.cell_id = s.cell_id AND t.side = 'target' AND t.lane_id = ?
+          WHERE s.project_id = ? AND s.side = 'source'
             -- AQU-1424: a parked cell is not untranslated work waiting for
             -- autopilot, so it leaves both of these counts.
             AND ${visibleSourceSql('s')}`,
       )
-      .bind(projectId)
+      .bind(laneId, projectId)
       .first<{ validated: number; untranslated: number }>()
     return {
       validated: Number(counts?.validated ?? 0),
@@ -1102,7 +1429,12 @@ contextual.get("/:projectId/contextual/overview", authMiddleware, async (c) => {
   const projectId = c.req.param("projectId") ?? ""
   const gate = await requireRole(c, projectId, ROLE.VIEWER)
   if (!gate.ok) return gate.res
-  return cachedPollJson(c, projectId, "overview", async () => {
+  // The rollup itself spans every lane; readiness advises about ONE, so it
+  // reads the lane the caller asked about (AQU-1610).
+  const lane = laneFromQuery(c)
+  const laneDenied = await laneAccessResponse(c, projectId, gate.level, lane)
+  if (laneDenied) return laneDenied
+  return cachedPollJson(c, projectId, `overview?lane=${laneCacheKey(lane)}`, async () => {
     const summary = await getProjectAutopilotSummary(c.env.AQUILLA_PG, projectId)
 
     // What autopilot actually KNOWS about this project. A run with no brief, no
@@ -1112,8 +1444,8 @@ contextual.get("/:projectId/contextual/overview", authMiddleware, async (c) => {
     // is the only way a PM finds out before spending the run.
     let readiness: ContextReadiness | null = null
     try {
-      const context = await loadProjectContext(c.env.AQUILLA_PG, projectId)
-      const counts = await readinessCellCounts(c.env.AQUILLA_PG, projectId)
+      const context = await loadProjectContext(c.env.AQUILLA_PG, projectId, lane)
+      const counts = await readinessCellCounts(c.env.AQUILLA_PG, projectId, lane)
       readiness = computeContextReadiness({
         context,
         validatedExamples: counts.validated,
@@ -1137,6 +1469,7 @@ function runSnapshot(
     runId: run.id,
     fileId: run.fileId,
     status: run.status,
+    laneId: run.laneId,
     targetLang: run.targetLang,
     initiatedBy: run.initiatedBy,
     scopeGroup: run.scopeGroup,
@@ -1218,18 +1551,20 @@ contextual.get("/:projectId/contextual/runs", authMiddleware, async (c) => {
       nextCursor: page.nextCursor,
     })
   }
-  const targetLang = c.req.query("targetLang") ?? ""
-  return cachedPollJson(c, projectId, `runs?fileId=${fileId}&targetLang=${targetLang}`, async () => {
-    const active = await getActiveRun(c.env.AQUILLA_PG, projectId, fileId, targetLang)
+  const lane = laneFromQuery(c)
+  const laneDenied = await laneAccessResponse(c, projectId, gate.level, lane)
+  if (laneDenied) return laneDenied
+  return cachedPollJson(c, projectId, `runs?fileId=${fileId}&lane=${laneCacheKey(lane)}`, async () => {
+    const active = await getActiveRun(c.env.AQUILLA_PG, projectId, fileId, lane)
     const latest = active
       ? null
-      : (await listRuns(c.env.AQUILLA_PG, projectId, { fileId, targetLang, limit: 1 })).runs[0] ?? null
+      : (await listRuns(c.env.AQUILLA_PG, projectId, { fileId, ...lane, limit: 1 })).runs[0] ?? null
     const run = active ?? latest
     const steering = run
       ? await readUnconsumedSteering(c.env.AQUILLA_PG, { projectId, fileId, runId: run.id })
       : []
     const [draftCounts, runDraftCounts] = await Promise.all([
-      countDrafts(c.env.AQUILLA_PG, projectId, fileId, targetLang),
+      countDrafts(c.env.AQUILLA_PG, projectId, fileId, lane),
       run
         ? countDraftsByRun(c.env.AQUILLA_PG, projectId, run.id)
         : Promise.resolve({ proposed: 0, applied: 0, rejected: 0, superseded: 0 }),
@@ -1245,6 +1580,49 @@ contextual.get("/:projectId/contextual/runs", authMiddleware, async (c) => {
       draftCounts,
     }
   })
+})
+
+// GET /:projectId/contextual/runs/:runId/traces?spanId= — prompt and reply of
+// each model call (VIEWER), oldest first, for the Team step inspector. Rows
+// expire after 30 days, so an older run answers with an empty list.
+contextual.get("/:projectId/contextual/runs/:runId/traces", authMiddleware, async (c) => {
+  const projectId = c.req.param("projectId") ?? ""
+  const runId = c.req.param("runId") ?? ""
+  const gate = await requireRole(c, projectId, ROLE.VIEWER)
+  if (!gate.ok) return gate.res
+
+  const run = await getRun(c.env.AQUILLA_PG, runId)
+  if (!run || run.projectId !== projectId) {
+    const { body, status } = errorJson("not_found", `run ${runId} not found`, 404)
+    return c.json(body, status)
+  }
+  const spanId = c.req.query("spanId") || undefined
+  // AQU-1690: ?label=bible-facts lists one kind of row (the inspector's facts).
+  const label = c.req.query("label") || undefined
+  if (label !== undefined && !/^[a-z0-9:_-]{1,64}$/.test(label)) {
+    const { body, status } = errorJson("validation_failed", "label must be 1 to 64 of a-z 0-9 : _ -", 400)
+    return c.json(body, status)
+  }
+  const limitRaw = c.req.query("limit")
+  const limit = limitRaw === undefined ? TRACE_LIST_LIMIT : Number(limitRaw)
+  if (!Number.isInteger(limit) || limit < 1 || limit > TRACE_LIST_LIMIT) {
+    const { body, status } = errorJson(
+      "validation_failed",
+      `limit must be an integer from 1 to ${TRACE_LIST_LIMIT}`,
+      400,
+    )
+    return c.json(body, status)
+  }
+  const result = await listRunTraces(c.env.AQUILLA_PG, {
+    projectId,
+    runId,
+    limit,
+    ...(spanId ? { spanId } : {}),
+    ...(label ? { label } : {}),
+    // AQU-1690: shadow-mode Jev answers (Jev and metrics rows) are for maintainers only.
+    maintainer: gate.level >= ROLE.MAINTAINER,
+  })
+  return c.json(result)
 })
 
 // GET /:projectId/contextual/runs/:runId/activity — durable inspector bundle
@@ -1516,7 +1894,7 @@ contextual.post(
         !brief ||
         brief.projectId !== projectId ||
         brief.fileId !== target.fileId ||
-        brief.targetLang !== target.targetLang
+        brief.laneId !== target.laneId
       ) {
         const { body: err, status } = errorJson(
           "validation_failed",
@@ -1608,7 +1986,8 @@ contextual.post("/:projectId/contextual/react-check", authMiddleware, async (c) 
   return c.json({ reactions: result.reactions, questions: result.questions, skipped: result.skipped })
 })
 
-// GET /:projectId/contextual/drafts?fileId=&status=&targetLang= — staged drafts (VIEWER).
+// GET /:projectId/contextual/drafts?fileId=&status=&laneId= — staged drafts
+// (VIEWER). `?targetLang=` is still accepted as the legacy tag (AQU-1610).
 contextual.get("/:projectId/contextual/drafts", authMiddleware, async (c) => {
   const projectId = c.req.param("projectId") ?? ""
   const gate = await requireRole(c, projectId, ROLE.VIEWER)
@@ -1623,12 +2002,15 @@ contextual.get("/:projectId/contextual/drafts", authMiddleware, async (c) => {
     const { body, status } = errorJson("validation_failed", `unknown status "${statusParam}"`, 400)
     return c.json(body, status)
   }
+  const lane = laneFromQuery(c)
+  const laneDenied = await laneAccessResponse(c, projectId, gate.level, lane)
+  if (laneDenied) return laneDenied
   const drafts = await listDrafts(
     c.env.AQUILLA_PG,
     projectId,
     fileId,
     statusParam as "proposed" | "applied" | "rejected" | "superseded" | undefined,
-    c.req.query("targetLang") ?? "",
+    lane,
   )
   return c.json({ drafts })
 })
@@ -1916,6 +2298,10 @@ contextual.post(
     // will actually call, not the one the drafting pipeline uses.
     const guard = await runAiGuard(models.fast, user.id, db, c.env)
     if (!guard.ok) return c.json(guard.body, guard.status)
+
+    // Platform daily spend ceiling (AQU-1869).
+    const spendCeiling = await checkAiSpendCeiling(db, c.env, "autopilot-note")
+    if (!spendCeiling.ok) return c.json(spendCeiling.body, spendCeiling.status)
 
     let orgId = 0
     try {

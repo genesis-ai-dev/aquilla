@@ -15,6 +15,70 @@ import { defineNamespace, plural } from "./types"
  */
 export const projectSettings = defineNamespace({
   keys: {
+    "projectSettings.checking.position": "{current} of {total}",
+    "projectSettings.checking.creatorTitle": "Community checking links",
+    "projectSettings.checking.wipNotice": "Feature-flagged WIP. Guests hear selected recordings and leave feedback in project comments. Reviewer links currently collect feedback; formal validation is not included.",
+    "projectSettings.checking.loadingProject": "Loading project passages…",
+    "projectSettings.checking.linkTitle": "Link title",
+    "projectSettings.checking.guestAccess": "Guest access",
+    "projectSettings.checking.viewerOption": "Viewer — listen",
+    "projectSettings.checking.commenterOption": "Commenter — listen and comment",
+    "projectSettings.checking.reviewerOption": "Reviewer — listen and give review feedback",
+    "projectSettings.checking.pinOptional": "PIN (optional)",
+    "projectSettings.checking.pinHelp": "Use 4–12 digits. Share the PIN separately.",
+    "projectSettings.checking.createLink": "Create checking link",
+    "projectSettings.checking.revoked": "Revoked",
+    "projectSettings.checking.copied": "Copied",
+    "projectSettings.checking.copyLink": "Copy link",
+    "projectSettings.checking.openGuest": "Open guest view",
+    "projectSettings.checking.revoke": "Revoke",
+    "projectSettings.checking.brand": "Aquilla · Community checking",
+    "projectSettings.checking.welcome": "Listen together",
+    "projectSettings.checking.joinHelp": "Listen to the passages shared with you. Enter your name so the team knows who is giving feedback.",
+    "projectSettings.checking.name": "Your name",
+    "projectSettings.checking.guestPin": "PIN, if you received one",
+    "projectSettings.checking.opening": "Opening…",
+    "projectSettings.checking.start": "Start listening",
+    "projectSettings.checking.listenOnly": "Listen only",
+    "projectSettings.checking.reviewFeedback": "Review feedback",
+    "projectSettings.checking.listenComment": "Listen and comment",
+    "projectSettings.checking.loadingPassages": "Loading passages…",
+    "projectSettings.checking.unavailablePassages": "These passages are no longer available.",
+    "projectSettings.checking.player": "Passage player",
+    "projectSettings.checking.recording": "Passage recording",
+    "projectSettings.checking.pause": "Pause",
+    "projectSettings.checking.play": "Play continuously",
+    "projectSettings.checking.noRecording": "No selected recording for this passage.",
+    "projectSettings.checking.playbackHelp": "Playback continues through available recordings in passage order.",
+    "projectSettings.checking.feedbackPlaceholder": "What is clear? What could be improved?",
+    "projectSettings.checking.sendFeedback": "Send feedback",
+    "projectSettings.checking.retry": "Retry pending feedback",
+    "projectSettings.checking.passages": "Shared passages",
+    "projectSettings.checking.scopeTitle": "Passages to share",
+    "projectSettings.checking.emptyProject": "This project has no passages to share.",
+    "projectSettings.checking.wholeProject": "Whole project",
+    "projectSettings.checking.defaultTitle": "Community listening",
+    "projectSettings.checking.signIn": "Sign in to create checking links.",
+    "projectSettings.checking.createFailed": "Could not create link.",
+    "projectSettings.checking.revokeFailed": "Could not revoke link.",
+    "projectSettings.checking.copyFailed": "Copy failed. Select and copy the URL above.",
+    "projectSettings.checking.saved": "Feedback saved to the project. Thank you.",
+    "projectSettings.checking.recordingUnavailable": "This recording is unavailable. Try another passage or retry the link.",
+    "projectSettings.checking.pressPlay": "Press Play to continue listening.",
+    "projectSettings.checking.end": "You have reached the end of the recordings.",
+    "projectSettings.checking.openFailed": "Could not open this link.",
+    "projectSettings.checking.syncing": "Feedback saved on this device. Syncing…",
+    "projectSettings.checking.saveFailed": "Could not save feedback.",
+    "projectSettings.checking.pendingFeedback": "Feedback stays on this device until it can sync. {reason}",
+    "projectSettings.checking.playFailed": "This recording could not play. Please try another passage.",
+    "projectSettings.checking.playRetry": "The recording could not play. Please try again.",
+    "projectSettings.checking.selectionSummary": "{count} units selected. New units are not added to existing links. This sample supports up to 2,000 units per link.",
+    "projectSettings.checking.urlLabel": "Checking URL for {title}",
+    "projectSettings.checking.feedbackOn": "Feedback on {label}",
+    "projectSettings.checking.allSection": "All {section}",
+
+    "projectSettings.checking.flagLabel": "Community checking (WIP)",
+    "projectSettings.checking.flagDescription": "Try scoped listening links with guest feedback. Experimental; links expire after 30 days.",
     // ── Permission-denied (shared component, project-settings call sites) ──
     "projectSettings.permission.changeSharedSettingsAction": "change shared settings",
     "projectSettings.permission.roleOrHigher": "{role} or higher",
@@ -54,23 +118,24 @@ export const projectSettings = defineNamespace({
     // projectSettings.info.{nameLabel,sourceLanguageLabel}. Target label is
     // create-dialog-only and stays "Target Language(s)" for any lane count.
     "projectSettings.create.namePlaceholder": "My Translation Project",
-    "projectSettings.create.sourceLanguagePlaceholder": "English, Grade 7 English, es-419…",
+    "projectSettings.create.sourceLanguagePlaceholder": "English, Grade 7 English…",
     "projectSettings.create.targetLanguagesLabel": "Target Language(s)",
-    "projectSettings.create.targetLanguagePlaceholder": "French, conversational Swahili, zh-Hant…",
+    "projectSettings.create.targetLanguagePlaceholder": "French, conversational Swahili, Traditional Han…",
     "projectSettings.create.additionalTargetPlaceholder": "Add another…",
     "projectSettings.create.addTargetLanguageAction": "Add another language",
     "projectSettings.create.bulkTargetLanguagesHint":
       "That's all {max} boxes. Add any remaining languages here, separated by commas.",
     "projectSettings.create.bulkTargetLanguagesPlaceholder":
-      "Swahili, Yoruba, Hausa, zh-Hant…",
+      "Swahili, Yoruba, Hausa, Traditional Han…",
     "projectSettings.create.bulkTargetLanguagesCount": plural({
       one: "Adds {count} more lane.",
       other: "Adds {count} more lanes.",
     }),
     "projectSettings.create.languageHintAriaLabel": "What can I enter here?",
     "projectSettings.create.languageHintTooltip":
-      "Any label works — a BCP-47 tag, a language name, or a register description " +
-      "(e.g. \"Grade 7 English\", \"conversational Swahili\").",
+      "Type a language name or a description (e.g. \"Grade 7 English\", " +
+      "\"conversational Swahili\"). The language code is filled in from the name, " +
+      "and you can edit that code if it is wrong.",
     "projectSettings.create.advancedShapeSummary": "Advanced: project shape",
     "projectSettings.create.shapeSelfContainedName": "Self Contained (Default)",
     "projectSettings.create.shapeSelfContained": plural({
@@ -125,6 +190,22 @@ export const projectSettings = defineNamespace({
       "targets, e.g. French → Chaluba).",
     "projectSettings.create.validationLinkConsumesRequired":
       "Choose which corpus should become this project's source",
+    // ── AQU-1605: which of the upstream's lanes a chain link consumes. Only
+    // asked for "One of its Targets" — the sibling case consumes the upstream's
+    // one source lane, so there is nothing to choose. Offered only for the lanes
+    // the user may see, and pre-filled when that is a single lane.
+    "projectSettings.create.upstreamLaneLabel": "Which of its translations?",
+    "projectSettings.create.upstreamLanePlaceholder": "Choose a translation…",
+    "projectSettings.create.upstreamLaneUnnamed": "Untitled lane",
+    "projectSettings.create.upstreamLaneLoading": "Loading translations…",
+    "projectSettings.create.upstreamLaneNone":
+      "This project has no translation you can use as a source. Choose its source " +
+      "instead, or ask for access to one of its translations.",
+    "projectSettings.create.upstreamLaneLoadError":
+      "Couldn't load this project's translations.",
+    "projectSettings.create.upstreamLaneRetry": "Try again",
+    "projectSettings.create.validationUpstreamLaneRequired":
+      "Choose which of the upstream project's translations to use",
     // ── AQU-1561: which of the upstream's files the new project brings in.
     // Same question the Source & sync link flow asks, so the list itself reuses
     // `projectSettings.linkSource.selectAllFiles` / `fileClashBadge` — only the
@@ -168,9 +249,9 @@ export const projectSettings = defineNamespace({
     "projectSettings.create.extraLanguagesDescription":
       "Optional — add more target languages for this project (e.g. dialect variants " +
       "or parallel drafts of the same source).",
-    "projectSettings.create.extraLanguagesPlaceholder": "e.g. fr-CA",
+    "projectSettings.create.extraLanguagesPlaceholder": "e.g. Traditional Han",
     "projectSettings.create.extraLanguagesRemoveAriaLabel": "Remove {lang}",
-    "projectSettings.create.extraLanguagesEmptyError": "Enter a language tag.",
+    "projectSettings.create.extraLanguagesEmptyError": "Enter a language name.",
     "projectSettings.create.extraLanguagesTooLongError": "Must be {max} characters or fewer.",
     "projectSettings.create.extraLanguagesDuplicatePrimaryError":
       "This is already the primary target language.",
@@ -213,6 +294,13 @@ export const projectSettings = defineNamespace({
     "projectSettings.share.signInToInvite": "Sign in to create an invite link.",
     "projectSettings.share.createInviteFailed":
       "Couldn't create invite. You may not have permission, or the server is unreachable.",
+    "projectSettings.share.laneChoiceLegend": "Target lanes",
+    "projectSettings.share.laneChoiceAll": "Every current target lane",
+    "projectSettings.share.laneChoiceSome": "Only selected lanes",
+    "projectSettings.share.laneChoiceRequired": "Choose the lanes before adding this person.",
+    "projectSettings.share.laneChoiceLeadNote": "A maintainer sees every target lane.",
+    "projectSettings.share.laneChoiceAdminHint":
+      "To limit someone to some lanes, use that project's share panel.",
     "projectSettings.share.inviteLinkReady": "Invite link ready. Send it to the recipient.",
     "projectSettings.share.copyUrlLabel": "Copy URL",
     "projectSettings.share.copied": "Copied!",
@@ -288,6 +376,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.field.apiKeyNoAuth": "Leave blank for no auth",
     "projectSettings.advancedLlm.modelPlaceholder": "Type a model id",
     "projectSettings.shared.lastEdited": "Last edited by {name} · {date}",
+    "projectSettings.shared.lastEditedOn": "Last edited {date}",
     "projectSettings.shared.nameHint": "Shown across the workspace and project list.",
     "projectSettings.timeline.lockLabel": "Lock the timings against dragging",
     "projectSettings.timeline.lockHint":
@@ -401,6 +490,8 @@ export const projectSettings = defineNamespace({
     "projectSettings.info.lastEditedBy": "Last edited by {username} · {date}",
     "projectSettings.info.sourceLanguageLabel": "Source Language",
     "projectSettings.info.targetLanguageLabel": "Target Language",
+    "projectSettings.info.smartQuotesLabel": "Smart quotes",
+    "projectSettings.info.smartQuotesDescription": "Turn straight quotes into curly quotes as you type, in the target language's style. Press Backspace right after to keep a straight quote.",
 
     // ── Bible resources card ──
     "projectSettings.bible.enableLabel": "Enable Bible resources",
@@ -415,6 +506,15 @@ export const projectSettings = defineNamespace({
       "When on, USFM imports drop the book name, running header, TOC, main title, and " +
       "introduction paragraphs. Section headings and Psalm titles still import. Off " +
       "(the default) imports front matter as translatable cells.",
+    "projectSettings.import.cellUnitLabel": "Import cell unit",
+    "projectSettings.import.cellUnitDescription":
+      "What one cell is when a Word, text, or Markdown file is imported. " +
+      "\u201cSentence\u201d splits long paragraphs into shorter cells \u2014 right for subtitles and " +
+      "documents. \u201cParagraph\u201d keeps each paragraph whole, with no sentence splitting and " +
+      "no length limit \u2014 right for dubbing, where one cell becomes one voice clip. " +
+      "Formats that define their own cells (USFM verses, subtitle cues) are unaffected.",
+    "projectSettings.import.cellUnitOptionSentence": "Sentence (split long paragraphs)",
+    "projectSettings.import.cellUnitOptionParagraph": "Paragraph (one cell per paragraph)",
 
     // ── User card ──
     "projectSettings.user.usernameLabel": "Username",
@@ -496,7 +596,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.advancedLlm.apiKeyLabelOptional": "API key (optional)",
     "projectSettings.advancedLlm.apiKeyPlaceholderRequired": "Paste your API key",
     "projectSettings.advancedLlm.apiKeyPlaceholderNoAuth": "Leave blank for no auth",
-    "projectSettings.advancedLlm.apiKeyHelp": "Sent as Authorization: Bearer <key>. Stored locally in your browser; never uploaded to Frontier.",
+    "projectSettings.advancedLlm.apiKeyHelp": "Sent as Authorization: Bearer <key>. Stored in your browser; never uploaded to Frontier.",
     "projectSettings.advancedLlm.apiKeyDeviceOnlyNote": "Stays on this device — not shared with collaborators.",
     "projectSettings.advancedLlm.modelLabel": "Model",
     "projectSettings.advancedLlm.modelManualLabel": "Model (if not listed)",
@@ -507,7 +607,7 @@ export const projectSettings = defineNamespace({
       "that don't expose {modelsPath}).",
     "projectSettings.advancedLlm.modelOverrideLabel": "Model override (optional)",
     "projectSettings.advancedLlm.modelOverridePlaceholder": "Leave blank for Frontier's default",
-    "projectSettings.advancedLlm.modelOverrideHelp": "Optionally specify an OpenRouter model (e.g. {example}).",
+    "projectSettings.advancedLlm.modelOverrideHelp": "Enter an OpenRouter model (optional), for example {example}.",
     "projectSettings.advancedLlm.maxTokensLabel": "Max Tokens",
     "projectSettings.advancedLlm.temperatureLabel": "Temperature ({value})",
     "projectSettings.advancedLlm.healthPenaltyLabel": "LLM Health Penalty ({percent}%)",
@@ -553,10 +653,18 @@ export const projectSettings = defineNamespace({
     "projectSettings.terminology.openButton": "Open Terminology Library",
 
     // ── ValidationSettingsSection.tsx ──
+    // Card headings: the text and audio rules each get their own card.
+    "projectSettings.validation.textGroup": "Text validation",
+    "projectSettings.validation.audioGroup": "Audio validation",
     "projectSettings.validation.requiredTextLabel": "Required validators (text)",
-    "projectSettings.validation.requiredTextDescription": "Cells need this many distinct validators to count as fully validated.",
+    "projectSettings.validation.requiredTextDescription": "Cells need this many distinct validators to count as validated.",
     "projectSettings.validation.requiredAudioLabel": "Required validators (audio)",
     "projectSettings.validation.requiredAudioAppliesNote": "Applies to audio translations, once recordings exist.",
+    // AQU-1771: the count can follow the organization's default or be set here.
+    "projectSettings.validation.orgDefaultOption": "Organization default ({number})",
+    "projectSettings.validation.customOption": "Set for this project",
+    "projectSettings.validation.requiredTextSourceAria": "Text validators: use the organization default or set a number for this project",
+    "projectSettings.validation.requiredAudioSourceAria": "Audio validators: use the organization default or set a number for this project",
     "projectSettings.validation.minRoleLabel": "Minimum validator role",
     "projectSettings.validation.minRoleDescription": "Only users with at least this role can cast a validation vote. Defaults to reviewer.",
     // ── StructuralCellsProjectSection ── AQU-1083
@@ -590,13 +698,19 @@ export const projectSettings = defineNamespace({
     "projectSettings.autoPropagateRepetitions.saveFailed": "Could not save that change",
 
     "projectSettings.validation.allowSelfLabel": "Allow self-validation",
-    "projectSettings.validation.allowSelfDescription": "When off, a contributor's vote on their own commit is ignored.",
-    "projectSettings.validation.namedValidatorsLabel": "Named validators (optional)",
+    // AQU-1571: the server refuses the vote up front, for every role, and the
+    // editor greys the check out; "ignored" and "a contributor's" were both wrong.
+    "projectSettings.validation.allowSelfDescription":
+      "When off, nobody can validate a line whose latest change is their own, whatever " +
+      "their role. Someone else has to.",
+    "projectSettings.validation.namedValidatorsLabel": "Named validators",
     "projectSettings.validation.namedValidatorsPlaceholder": "alice, bob, carol",
+    // AQU-1571: people off the list cannot vote at all (the server refuses it),
+    // and the field is a member picker, not a comma-separated box.
     "projectSettings.validation.namedValidatorsDescription":
-      "Comma-separated usernames. When set, only these users' votes count toward the " +
-      "threshold (AND'd with the role floor). Leave empty to allow any " +
-      "sufficiently-privileged user.",
+      "When anyone is listed, only these people can validate text, and they still " +
+      "need the minimum role above. Leave empty to allow anyone who meets the " +
+      "minimum role.",
 
     // ── AQU-490: the audio policy, beside the text policy rather than folded
     // into it. Sam's ruling is that these are SEPARATE settings, so every
@@ -638,9 +752,9 @@ export const projectSettings = defineNamespace({
       "Decide when audio recordings are downloaded from storage to this device. You " +
       "can switch any time without re-recording — only future loads are affected.",
     "projectSettings.audioMedia.strategyStreamName": "Stream",
-    "projectSettings.audioMedia.strategyStreamDescription": "Play directly from the network. No local cache, no waveforms unless you opt in.",
+    "projectSettings.audioMedia.strategyStreamDescription": "Play from the network. No cache on this device, no waveforms unless you opt in.",
     "projectSettings.audioMedia.strategyLazyName": "Lazy (default)",
-    "projectSettings.audioMedia.strategyLazyDescription": "Download a cell's audio when you scroll to it or press play. Caches locally.",
+    "projectSettings.audioMedia.strategyLazyDescription": "Download a cell's audio when you scroll to it or press play. Keeps a copy on this device.",
     "projectSettings.audioMedia.strategyEagerName": "Eager",
     "projectSettings.audioMedia.strategyEagerDescription": "Prefetch every cell's waveform when the file opens. Best for offline review.",
     "projectSettings.audioMedia.strategyManualName": "Manual",
@@ -656,6 +770,8 @@ export const projectSettings = defineNamespace({
     "projectSettings.sourceLink.consumesTranslations": "consumes translations",
     "projectSettings.sourceLink.consumesSource": "consumes source",
     "projectSettings.sourceLink.gateLabel": "gate: {value}",
+    // AQU-1605: which of the upstream's translations the link consumes.
+    "projectSettings.sourceLink.laneLabel": "translation: {value}",
     "projectSettings.sourceLink.gateValidatedOnly": "validated only",
     "projectSettings.sourceLink.gateEveryCommit": "every commit",
     "projectSettings.sourceLink.cursorLabel": "cursor: {value}",
@@ -743,6 +859,22 @@ export const projectSettings = defineNamespace({
         "Their source text will be replaced with the source project's current " +
         "text. Their translations, validations and comments stay.",
     }),
+    // AQU-1679: an added upstream file can instead follow INTO a file this
+    // project already has — the link flow's replace option, here too.
+    "projectSettings.sourceLink.chooseFilesReplaceHeading": plural({
+      one: "Replace the source in this file you already have:",
+      other: "Replace the source in these files you already have:",
+    }),
+    "projectSettings.sourceLink.chooseFilesReplaceBody": plural({
+      one:
+        "It stays the same file, with its translations, validations and comments " +
+        "on the same lines. Its source text becomes the source project's, and it " +
+        "receives the source project's changes from then on. No second copy is added.",
+      other:
+        "They stay the same files, with their translations, validations and comments " +
+        "on the same lines. Their source text becomes the source project's, and they " +
+        "receive the source project's changes from then on. No second copies are added.",
+    }),
     "projectSettings.sourceLink.chooseFilesAddHeading": plural({
       one: "Add this file:",
       other: "Add these files:",
@@ -800,6 +932,14 @@ export const projectSettings = defineNamespace({
       "everything this project already holds, and later upstream edits keep " +
       "flowing through. Existing files, translations and validations are left as " +
       "they are. Detach later to stop following the upstream.",
+    // AQU-1679: the same promise when the lead has chosen to replace the source
+    // of a file they already have — "existing files are left as they are" is
+    // no longer true of those.
+    "projectSettings.linkSource.additiveNoteReplacing":
+      "The link is live: later upstream edits keep flowing through, including " +
+      "into the files whose source you are replacing. Your other files, and every " +
+      "translation and validation, are left as they are. Detach later to stop " +
+      "following the upstream.",
     "projectSettings.linkSource.linkButton": "Link source project",
     "projectSettings.linkSource.linkingButton": "Linking…",
     "projectSettings.linkSource.roleGateNote":
@@ -826,6 +966,51 @@ export const projectSettings = defineNamespace({
     "projectSettings.linkSource.fileClashBadge": "same name here",
     "projectSettings.linkSource.previewNoneSelected":
       "Pick at least one file to link.",
+    // ── AQU-1679: a file this project already has can follow the link itself,
+    // instead of gaining a second copy. Offered per same-named file, off by
+    // default, and shown with what it will do before anything is linked.
+    "projectSettings.linkSource.replaceOption":
+      "Replace the source in my existing {name} and keep its translations",
+    "projectSettings.linkSource.replaceComparing": "Comparing the two files…",
+    "projectSettings.linkSource.replaceCompareFailed":
+      "Couldn't compare the two files. Turn this off and on to try again, or " +
+      "leave it off to add the file as a separate copy.",
+    "projectSettings.linkSource.replaceMatchSame": plural({
+      one: "{same} of {count} line is the same in both files.",
+      other: "{same} of {count} lines are the same in both files.",
+    }),
+    "projectSettings.linkSource.replaceMatchChanged": plural({
+      one:
+        "{count} line differs and will take the source project's text. Its " +
+        "translation will be flagged as source changed.",
+      other:
+        "{count} lines differ and will take the source project's text. Their " +
+        "translations will be flagged as source changed.",
+    }),
+    "projectSettings.linkSource.replaceMatchAdded": plural({
+      one: "{count} line only the source project has will be added to your file.",
+      other: "{count} lines only the source project has will be added to your file.",
+    }),
+    "projectSettings.linkSource.replaceMatchKept": plural({
+      one: "{count} line only your file has will stay as it is.",
+      other: "{count} lines only your file has will stay as they are.",
+    }),
+    "projectSettings.linkSource.replaceNoMatch": plural({
+      one:
+        "These two files are not the same material: {same} of {count} line matches. " +
+        "Turn this off to add the file as a separate copy.",
+      other:
+        "These two files are not the same material: only {same} of {count} lines " +
+        "match. Turn this off to add the file as a separate copy.",
+    }),
+    "projectSettings.linkSource.replaceCount": plural({
+      one:
+        "{count} file you already have will take its source from this link and " +
+        "keep its translations.",
+      other:
+        "{count} files you already have will take their source from this link and " +
+        "keep their translations.",
+    }),
     "projectSettings.linkSource.scopeAllNote":
       "This link follows the whole project, so files the source project adds " +
       "later will arrive here too.",
@@ -865,17 +1050,39 @@ export const projectSettings = defineNamespace({
 
     // ── LanguagesSection.tsx ──
     "projectSettings.languages.defaultTargetLabel": "Default target language",
-    "projectSettings.languages.defaultTargetNote": "The default (unnamed) lane. Change it on Project Info, above.",
-    "projectSettings.languages.additionalLanesLabel": "Additional target lanes",
+    "projectSettings.languages.additionalLanesLabel": "Target lanes",
     "projectSettings.languages.additionalLanesDescription":
-      "Extra target-language lanes for this project — e.g. dialect variants or " +
+      "Target-language lanes for this project — e.g. dialect variants or " +
       "parallel drafts of the same source.",
     "projectSettings.languages.laneNameLabel": "Lane name",
     "projectSettings.languages.laneNamePlaceholder": "Name this lane",
+    // AQU-1592: a lane stores the language the user typed, an OPTIONAL display
+    // name, and an OPTIONAL code override. The name's placeholder is the
+    // language itself, because that is what the lane shows when no name is set.
+    "projectSettings.languages.laneLanguageLabel": "Lane language",
+    "projectSettings.languages.laneLanguagePlaceholder": "Language this lane translates into",
+    "projectSettings.languages.laneLanguageRequiredError":
+      "A lane needs a language. Type the language it translates into.",
+    "projectSettings.languages.laneAdvancedToggle": "Advanced",
+    "projectSettings.languages.laneCodeLabel": "Language code",
+    "projectSettings.languages.laneCodeNote":
+      "Leave blank to derive the code from the language. Set it only when the " +
+      "derived code is wrong.",
+    "projectSettings.languages.laneCodeDerivedPlaceholder": "Derived from the language",
+    "projectSettings.languages.laneCodeMalformedError":
+      "That is not a valid language code. Use a BCP 47 tag such as \"es\" or \"es-MX\".",
     "projectSettings.languages.duplicateNameError":
       "Another lane already has this name. Change one of them.",
+    // AQU-1784: adding a lane that reads the same as an active one is allowed —
+    // two teams may translate into one language — so this warns before the save
+    // rather than refusing it afterwards, and says how the pair will be told
+    // apart once both exist.
+    "projectSettings.languages.duplicateNameNotice":
+      "\"{lane}\" already reads the same as another active lane. You can still add " +
+      "it — the lane switcher will number them.",
+    "projectSettings.languages.laneShownAs": "Shown as \"{label}\"",
     "projectSettings.languages.nameTooLongError": "That name is too long.",
-    "projectSettings.languages.noAdditionalLanes": "No additional lanes yet.",
+    "projectSettings.languages.noAdditionalLanes": "No target lanes yet.",
     "projectSettings.languages.archiveConfirm":
       "Archive \"{lane}\"? It's hidden from the lane switcher by default but kept — " +
       "its cell data is preserved and you can restore it anytime.",
@@ -886,9 +1093,20 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.lastChangeUnknownEditor": "Last change in this lane: {date}",
     "projectSettings.languages.lastChangeNone": "No changes in this lane yet.",
     "projectSettings.languages.lastChangeUnavailable": "Last change unavailable.",
+    // AQU-1600: every target lane is archivable, including the former default
+    // one — but a project must keep one active, so the last one's archive
+    // control is disabled with this reason.
+    "projectSettings.languages.lastActiveLaneTooltip":
+      "This is the project's only active lane. Add another target lane before archiving this one.",
     "projectSettings.languages.archivingButton": "Archiving…",
     "projectSettings.languages.confirmArchiveButton": "Confirm archive",
     "projectSettings.languages.archiveLaneAriaLabel": "Archive lane {lane}",
+    // AQU-1954 — each language row's "Records audio" switch.
+    "projectSettings.languages.recordsAudioLabel": "Records audio",
+    "projectSettings.languages.recordsAudioAriaLabel": "{lane} records audio",
+    "projectSettings.languages.recordsAudioHint":
+      "Records audio: when on, every book needs audio in that language. When " +
+      "off, a book counts audio only once it has a recording in that language.",
     "projectSettings.languages.archivedLanesLabel": "Archived lanes",
     "projectSettings.languages.archivedLanesDescription":
       "Hidden from the lane switcher by default. Their translations are kept; " +
@@ -898,7 +1116,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.restoreLaneAriaLabel": "Restore lane {lane}",
     "projectSettings.languages.addLaneLabel": "Add a target lane",
     "projectSettings.languages.suggestionsAriaLabel": "Language suggestions",
-    // "e.g. fr-CA" placeholder → projectSettings.create.extraLanguagesPlaceholder (identical text)
+    // "e.g. Traditional Han" placeholder → projectSettings.create.extraLanguagesPlaceholder (identical text)
     // "Adding…" busy label → common.adding (identical text)
     "projectSettings.languages.addLaneButton": "Add lane",
     "projectSettings.languages.alreadyDefaultError": "This is already the default target language.",
@@ -946,6 +1164,38 @@ export const projectSettings = defineNamespace({
     //    in MondayIntegrationSection.tsx scoped this trio to a dedicated later
     //    wave; this is that wave. "Monday"/"Monday.com" is the product's own
     //    name and stays as-is in every locale.
+    "projectSettings.monday.overviewConnectDescription": "Your organization is connected. Link a board to share this project's progress.",
+    "projectSettings.monday.overviewOpenBoard": "Open board in Monday",
+    "projectSettings.monday.overviewConfigureLink": "Configure link",
+    "projectSettings.monday.overviewLinkBoard": "Link a board",
+    "projectSettings.monday.overviewUrlUnavailable": "The board link is unavailable. Find the board by name in Monday.",
+    "projectSettings.monday.wizardDoneNeedsAttentionTitle": "Board linked — sync needs attention",
+    "projectSettings.monday.wizardLinkWarningsTitle": "The board is linked, but Monday reported a problem:",
+    "projectSettings.monday.wizardRecommendation": plural({
+      one: "Recommended: one item per {granularity}, with {mappedCount} progress column.",
+      other: "Recommended: one item per {granularity}, with {mappedCount} progress columns.",
+    }, "mappedCount"),
+    "projectSettings.monday.wizardPreviewBoardLink": "Preview board in Monday",
+    "projectSettings.monday.wizardHideCustomization": "Hide customization",
+    "projectSettings.monday.wizardShowCustomization": "Customize data and columns",
+    "projectSettings.monday.wizardFindBoardManually": "Find {name} in Monday. The direct board link is unavailable.",
+    "projectSettings.monday.connectionCheckFailed": "Could not check the Monday connection. Try again.",
+    "projectSettings.monday.retryAction": "Retry",
+    "projectSettings.monday.orgNextLinkProjectsTitle": "Next: link your projects",
+    "projectSettings.monday.orgNextLinkProjectsDescription": "Your organization is connected. Choose a project to review its recommended board and progress columns. You only authorize Monday once for this organization.",
+    "projectSettings.monday.orgProjectsLoading": "Loading projects…",
+    "projectSettings.monday.orgProjectsRetry": "Retry projects",
+    "projectSettings.monday.orgNoAccessibleProjects": "No accessible projects in this organization.",
+    "projectSettings.monday.orgProjectLinkedTo": "Linked to {board}",
+    "projectSettings.monday.orgProjectNotLinked": "Not linked yet",
+    "projectSettings.monday.orgProjectLinksLoading": "Checking which projects are linked…",
+    "projectSettings.monday.orgProjectLinksFailed": "Couldn't check which projects are linked to Monday.",
+    "projectSettings.monday.orgProjectSetUp": "Set up",
+    "projectSettings.monday.orgProjectManageInSettings": "Manage in project settings",
+    "projectSettings.monday.orgProjectViewInSettings": "View in project settings",
+    "projectSettings.monday.orgProjectSyncPaused": "Sync paused",
+    "projectSettings.monday.orgProjectBoardChanged": "Board changed",
+    "projectSettings.monday.orgProjectPushFailed": "Last push failed",
     "projectSettings.monday.boardSyncLabel": "Board sync",
     "projectSettings.monday.loadingIntegration": "Loading Monday integration…",
     "projectSettings.monday.orgNotConnected": "Your organization hasn't connected Monday.com yet.",
@@ -972,6 +1222,12 @@ export const projectSettings = defineNamespace({
       "untouched on Monday.",
     "projectSettings.monday.removeLinkButton": "Remove link",
     "projectSettings.monday.structureStaleWarning": "Board structure changed — review the mapping below.",
+    "projectSettings.monday.boardChangesIntro":
+      "New on your Monday board since it was linked. Map a column to fill it from Aquilla (then pick what it shows and save the mapping), or mark it not needed.",
+    "projectSettings.monday.boardChangesMap": "Map it",
+    "projectSettings.monday.loadingBoardColumns": "Loading the board's columns…",
+    "projectSettings.monday.boardChangesDismiss": "Not needed",
+    "projectSettings.monday.boardChangesReadOnly": "Aquilla can't fill this kind of column.",
     "projectSettings.monday.linkedBoardPrefix": "Linked board:",
     "projectSettings.monday.oneItemPerLabel": "One item per {granularity}.",
     "projectSettings.monday.lastPushOk": "Last push {date} — ok.",
@@ -979,6 +1235,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.notPushedYet": "Not pushed yet.",
     "projectSettings.monday.syncToggleLabel": "Sync",
     "projectSettings.monday.syncNowButton": "Sync now",
+    "projectSettings.monday.syncNowPausedTooltip": "Sync is off. Turn it on to push progress to Monday.",
     "projectSettings.monday.removeBoardLinkAriaLabel": "Remove board link",
     "projectSettings.monday.columnMappingLabel": "Column mapping",
     "projectSettings.monday.reconfigureWithAiLabel": "Reconfigure with AI",
@@ -1014,12 +1271,78 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.granularityProjectLabel": "One item for the whole project",
     "projectSettings.monday.granularityFileLabel": "One item per file",
     "projectSettings.monday.someColumnsSkipped": "Some columns were skipped",
+    "projectSettings.monday.columnPickerOnBoard": "On your board",
+    "projectSettings.monday.columnInfo.completion_pct": "How much of the project or file is translated, as a percentage.",
+    "projectSettings.monday.columnInfo.validated_pct": "How much is translated and approved by enough reviewers, as a percentage.",
+    "projectSettings.monday.columnInfo.has_audio_pct": "How many lines have a recording, as a percentage.",
+    "projectSettings.monday.columnInfo.audio_validated_pct": "How many lines have an approved recording, as a percentage.",
+    "projectSettings.monday.columnInfo.status_auto": "Not started, In progress or Complete, worked out from the translation progress.",
+    "projectSettings.monday.columnInfo.deadline": "The project's deadline. Empty when the project has none.",
+    "projectSettings.monday.columnInfo.last_activity": "The date someone last worked on the project.",
+    "projectSettings.monday.columnInfo.translators": "The names of the people who can translate in the project.",
+    "projectSettings.monday.columnInfo.filled_count": "How many lines are translated.",
+    "projectSettings.monday.columnInfo.validated_count": "How many lines are translated and approved.",
+    "projectSettings.monday.columnInfo.total_count": "How many lines there are to translate.",
+    "projectSettings.monday.columnInfo.project_link": "A link that opens the project in Aquilla. On a row per file, it opens that file.",
+    "projectSettings.monday.columnInfo.schedule_status": "On track, Due soon, Overdue or Behind plan, from the deadline and the plan's target dates.",
+    "projectSettings.monday.columnInfo.books_done": "How many books (or files) are marked Done on the plan, like \"12 of 27\".",
+    "projectSettings.monday.columnInfo.next_target_date": "The nearest target date on the plan that isn't done or past yet.",
+    "projectSettings.monday.columnInfo.days_since_activity": "How many days since anyone last worked on the project.",
+    "projectSettings.monday.columnInfo.project_manager": "The project manager's name.",
+    "projectSettings.monday.columnInfo.languages": "The languages the project translates into.",
+    "projectSettings.monday.columnInfo.active_contributors_30d": "How many different people worked on the project in the last 30 days.",
+    "projectSettings.monday.columnInfo.books_in_progress": "The books (or files) that have been started and aren't marked Done.",
+    "projectSettings.monday.columnInfo.recorded_minutes": "Minutes of recorded audio in the project.",
+    "projectSettings.monday.columnInfo.external_id": "Aquilla's own ID for each item. Needed so a later setup finds and reuses the items Aquilla made.",
     "projectSettings.monday.reviewRowsCaption": "What gets pushed — change any row before applying",
     "projectSettings.monday.applyingStatus": "Linking the board and pushing your progress…",
     "projectSettings.monday.progressPushesAutomatically": "Progress pushes automatically as translators work.",
     "projectSettings.monday.viewBoardLink": "View board on Monday",
     "projectSettings.monday.connectButton": "Connect Monday.com",
     "projectSettings.monday.applyAndPushButton": "Apply and push",
+    "projectSettings.monday.wizardIntroLine":
+      "Aquilla picks a board and suggests what to show. Nothing changes in Monday until you confirm.",
+    "projectSettings.monday.wizardStepOf": "Step {step} of {total}",
+    "projectSettings.monday.wizardBoardTitle": "Which board?",
+    "projectSettings.monday.wizardColumnsTitle": "What should your board show?",
+    "projectSettings.monday.wizardConfirmTitle": "Ready to connect",
+    "projectSettings.monday.wizardAdvancedShow": "Advanced: match columns myself",
+    "projectSettings.monday.wizardAdvancedHide": "Hide advanced",
+    "projectSettings.monday.wizardConfirmAdds": plural({
+      one: "Aquilla will add {count} column to your Monday board and keep one row for this project up to date in an “Aquilla projects” group.",
+      other: "Aquilla will add {count} columns to your Monday board and keep one row for this project up to date in an “Aquilla projects” group.",
+    }, "count"),
+    "projectSettings.monday.wizardConfirmAddsPerFile": plural({
+      one: "Aquilla will add {count} column to your Monday board and keep one row per file up to date in an “Aquilla projects” group.",
+      other: "Aquilla will add {count} columns to your Monday board and keep one row per file up to date in an “Aquilla projects” group.",
+    }, "count"),
+    "projectSettings.monday.wizardConfirmNoAdds": "Aquilla will keep one row for this project up to date on {board}, in an “Aquilla projects” group.",
+    "projectSettings.monday.wizardConfirmNoAddsPerFile": "Aquilla will keep one row per file up to date on {board}, in an “Aquilla projects” group.",
+    "projectSettings.monday.wizardAddAndConnectButton": "Add columns and connect",
+    "projectSettings.monday.wizardAddingColumns": "Adding columns to your board…",
+    "projectSettings.monday.wizardAddColumnsFailed": "Couldn't add the columns: {reason}. Nothing was connected yet.",
+    "projectSettings.monday.wizardSomeColumnsNotAdded":
+      "Monday didn't add: {columns} ({reason}). Everything else is connected; you can add them later from this page.",
+    "projectSettings.monday.chooser.intro":
+      "Tick what you want on your Monday board. We'll use columns you already have and add any that are missing.",
+    "projectSettings.monday.chooser.groupSchedule": "Schedule",
+    "projectSettings.monday.chooser.groupTeam": "Team and activity",
+    "projectSettings.monday.chooser.newColumn": "New column",
+    "projectSettings.monday.chooser.alwaysIncluded": "Always included, so Aquilla can find this project's row again.",
+    "projectSettings.monday.chooser.summaryAdds": plural({
+      one: "Adds {count} new column to {board} and uses {uses} already there.",
+      other: "Adds {count} new columns to {board} and uses {uses} already there.",
+    }, "count"),
+    "projectSettings.monday.chooser.summaryNoAdds": plural({
+      one: "Uses {count} column already on {board}; nothing new is added.",
+      other: "Uses {count} columns already on {board}; nothing new is added.",
+    }, "count"),
+    "projectSettings.monday.addColumnsButton": "Add columns",
+    "projectSettings.monday.addColumnsDialogTitle": "Add columns to your board",
+    "projectSettings.monday.addColumnsConfirm": plural({
+      one: "Add {count} column",
+      other: "Add {count} columns",
+    }, "count"),
 
     // ── Terminology source-term matching (AQU-1271) ──
     "projectSettings.termMatching.title": "Prefixes and suffixes",
@@ -1036,6 +1359,24 @@ export const projectSettings = defineNamespace({
     "projectSettings.termMatching.preset.arabic": "Arabic",
     "projectSettings.termMatching.preset.swahili": "Swahili",
     "projectSettings.termMatching.preset.turkish": "Turkish",
+
+    // ── AQU-1075: settings copied from the upstream project ──
+    "projectSettings.inherit.title": "Settings from {upstream}",
+    "projectSettings.inherit.description":
+      "This project keeps a copy of what you turn on. When {upstream} saves one of them, the copy updates, and so does the next project in the chain. Detach a field to keep your own.",
+    "projectSettings.inherit.linkTitle": "Copy these from the upstream project",
+    "projectSettings.inherit.linkDescription":
+      "Turn on what this project should receive. You can detach any of them later in its settings.",
+    "projectSettings.inherit.field.translationBrief": "Translation brief",
+    "projectSettings.inherit.field.knowledgeDocs": "Knowledge-base documents",
+    "projectSettings.inherit.field.workflowPolicy": "Workflow policy",
+    "projectSettings.inherit.field.workflowPolicyDetail":
+      "Who may validate, self-validation, autopilot and agent mode, and check penalties.",
+    "projectSettings.inherit.field.livingMemory": "Living-memory notes",
+    "projectSettings.inherit.field.smartQuotes": "Smart quotes",
+    "projectSettings.inherit.field.systemPrompt": "AI instructions",
+    "projectSettings.inherit.fromUpstream": "from {upstream}",
+    "projectSettings.inherit.detach": "Detach",
   },
   context: {
     _context: {
@@ -1053,6 +1394,14 @@ export const projectSettings = defineNamespace({
           "period. Separated by a middle dot.",
         placeholders: {
           name: "Username of the person who last saved the shared settings.",
+          date: "Date of that save, already formatted for the viewer's locale.",
+        },
+      },
+      "projectSettings.shared.lastEditedOn": {
+        description:
+          "The same provenance line as lastEdited, when the app does not know " +
+          "who saved the shared settings, only when. Not a sentence, no period.",
+        placeholders: {
           date: "Date of that save, already formatted for the viewer's locale.",
         },
       },
@@ -1602,6 +1951,16 @@ export const projectSettings = defineNamespace({
           value: "The rendered projectSettings.sourceLink.gateValidatedOnly or gateEveryCommit string — insert exactly as given.",
         },
       },
+      "projectSettings.sourceLink.laneLabel": {
+        description:
+          "Small badge naming WHICH of the upstream project's translations a chain " +
+          "(consumes-target) link reads — shown beside the corpus and gate badges on " +
+          "the confirm step of the linking flow. 'translation' here means one of the " +
+          "upstream's target languages, not the act of translating.",
+        placeholders: {
+          value: "The lane's own name as the upstream project set it (a language name such as 'Quebec French'), inserted as given and never translated.",
+        },
+      },
       "projectSettings.sourceLink.scopeSomeFiles": {
         description:
           "Small badge on the Source link card saying how many of the upstream project's files this link follows, for a link made with only some of them picked.",
@@ -1621,6 +1980,25 @@ export const projectSettings = defineNamespace({
         description: "Instruction above the detach-confirmation input, naming the exact word the user must type.",
         placeholders: {
           word: "The literal, untranslated confirmation word 'DETACH' the user must type verbatim — styled bold-monospace by the caller. Never translate this word: the input is validated against the exact English literal.",
+        },
+      },
+      "projectSettings.languages.duplicateNameNotice": {
+        description:
+          "Notice under the add-lane fields when the lane being added would read " +
+          "the same as a lane the project already has. Not an error — adding it is " +
+          "allowed, and the lane switcher then numbers the pair. Appears while the " +
+          "name is typed, before anything is saved.",
+        placeholders: {
+          lane: "The existing lane's display name, as the switcher shows it (data, not translated).",
+        },
+      },
+      "projectSettings.languages.laneShownAs": {
+        description:
+          "Small muted note on a lane row whose name another lane also uses, giving " +
+          "the label this lane is shown under elsewhere in the app — the name plus " +
+          "the suffix that tells the two apart. Not a sentence; no period.",
+        placeholders: {
+          label: "The lane's disambiguated display label, e.g. 'Tshangla · 2' (data, not translated).",
         },
       },
       "projectSettings.languages.archiveConfirm": {
@@ -1647,6 +2025,12 @@ export const projectSettings = defineNamespace({
           "wordings consistent — only the trailing \"by <name>\" is dropped.",
         placeholders: {
           date: "The already-formatted, locale-aware date of the edit (data) — insert exactly as given, do not reformat or reorder its parts.",
+        },
+      },
+      "projectSettings.languages.recordsAudioAriaLabel": {
+        description: "Accessible name of the switch on one target language row that says every file needs audio in that language.",
+        placeholders: {
+          lane: "The language's display name (data, not translated).",
         },
       },
       "projectSettings.languages.archiveLaneAriaLabel": {
@@ -1703,6 +2087,245 @@ export const projectSettings = defineNamespace({
           boardName: "The linked board's name (data, not translated), or a generic fallback noun if unknown.",
         },
       },
+      "projectSettings.monday.columnPickerOnBoard": {
+        description:
+          "Small badge beside a column in the picker when that column already exists on the " +
+          "user's Monday board (so it can't be ticked to add again).",
+      },
+      "projectSettings.monday.columnInfo.completion_pct": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.validated_pct": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.has_audio_pct": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.audio_validated_pct": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.status_auto": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.deadline": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.last_activity": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.translators": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.filled_count": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.validated_count": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.total_count": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.project_link": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.schedule_status": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.books_done": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.next_target_date": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.days_since_activity": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.project_manager": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.languages": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.active_contributors_30d": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.books_in_progress": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.recorded_minutes": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.external_id": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.wizardIntroLine": {
+        description: "One-sentence description at the start of the Monday.com setup dialog in project settings.",
+      },
+      "projectSettings.monday.wizardStepOf": {
+        description: "Small step counter above the title of each step of the three-step Monday.com setup dialog.",
+        placeholders: { step: "The current step number, e.g. 2.", total: "How many steps there are (3)." },
+      },
+      "projectSettings.monday.wizardBoardTitle": {
+        description: "Title of step 1 of the Monday.com setup: choosing which Monday board the project's progress goes to.",
+      },
+      "projectSettings.monday.wizardColumnsTitle": {
+        description:
+          "Title of step 2 of the Monday.com setup: a checklist of the columns (progress figures, dates, names) " +
+          "Aquilla can show on the user's Monday board.",
+      },
+      "projectSettings.monday.wizardConfirmTitle": {
+        description: "Title of step 3 of the Monday.com setup, a summary before anything is written to Monday.",
+      },
+      "projectSettings.monday.wizardAdvancedShow": {
+        description:
+          "Link under the column checklist that reveals per-row controls for sending each figure to a column " +
+          "of the user's choosing. For admins who want to pick columns themselves.",
+      },
+      "projectSettings.monday.wizardAdvancedHide": {
+        description: "The same link once the advanced controls are open; hides them again.",
+      },
+      "projectSettings.monday.wizardConfirmAdds": {
+        description: "Summary on the last setup step when new columns will be created on the Monday board.",
+        placeholders: { count: "How many columns Aquilla will create." },
+      },
+      "projectSettings.monday.wizardConfirmAddsPerFile": {
+        description: "Same summary when the board gets one row per file of the project instead of one for the whole project.",
+        placeholders: { count: "How many columns Aquilla will create." },
+      },
+      "projectSettings.monday.wizardConfirmNoAdds": {
+        description: "Summary on the last setup step when the board already has every chosen column.",
+        placeholders: { board: "The Monday board's name (Monday data, not translated)." },
+      },
+      "projectSettings.monday.wizardConfirmNoAddsPerFile": {
+        description: "Same summary when the board gets one row per file of the project.",
+        placeholders: { board: "The Monday board's name (Monday data, not translated)." },
+      },
+      "projectSettings.monday.wizardAddAndConnectButton": {
+        description: "Final button of the Monday.com setup when new columns must be created first; then the board is connected.",
+      },
+      "projectSettings.monday.wizardAddingColumns": {
+        description: "Progress line while Aquilla creates the chosen columns on the user's Monday board.",
+      },
+      "projectSettings.monday.wizardAddColumnsFailed": {
+        description: "Error when creating the columns on Monday failed entirely; the board was not connected.",
+        placeholders: { reason: "The error message, usually Monday's own, shown as received." },
+      },
+      "projectSettings.monday.wizardSomeColumnsNotAdded": {
+        description:
+          "Warning after setup when Monday refused to create some of the chosen columns; the board is " +
+          "connected with the rest, and the missing ones can be added later.",
+        placeholders: {
+          columns: "Comma-separated titles of the refused columns (Monday data, untranslated).",
+          reason: "Monday's own error message, in English, shown as received.",
+        },
+      },
+      "projectSettings.monday.chooser.intro": {
+        description:
+          "Instruction at the top of the Monday.com column checklist. 'We' is Aquilla. Columns the board lacks " +
+          "are created on the user's Monday board.",
+      },
+      "projectSettings.monday.chooser.groupSchedule": {
+        description: "Group heading in the Monday.com column checklist for deadline, status and plan dates.",
+      },
+      "projectSettings.monday.chooser.groupTeam": {
+        description: "Group heading in the Monday.com column checklist for people and recent activity.",
+      },
+      "projectSettings.monday.orgProjectLinkedTo": {
+        description: "Under a project's name in Org settings → Monday.com: the Monday board the project pushes to.",
+        placeholders: { board: "The Monday board's name (Monday data, not translated)." },
+      },
+      "projectSettings.monday.orgProjectLinksLoading": {
+        description: "Shown above the project list in Org settings → Monday.com while Aquilla reads which projects have a board.",
+      },
+      "projectSettings.monday.orgProjectLinksFailed": {
+        description: "Shown above the project list in Org settings → Monday.com when reading which projects have a board failed; a Retry button sits beside it.",
+      },
+      "projectSettings.monday.orgProjectNotLinked": {
+        description: "Under a project's name in Org settings → Monday.com when the project has no board yet.",
+      },
+      "projectSettings.monday.orgProjectSetUp": {
+        description: "Button beside an unlinked project in Org settings → Monday.com. Opens the board setup right there, without leaving org settings.",
+      },
+      "projectSettings.monday.orgProjectManageInSettings": {
+        description: "Link beside a linked project in Org settings → Monday.com. Leaves org settings for that project's own settings page, where the mapping and Sync live.",
+      },
+      "projectSettings.monday.orgProjectViewInSettings": {
+        description: "Link beside a project the viewer can't manage, in Org settings → Monday.com. Leaves org settings for that project's settings page.",
+      },
+      "projectSettings.monday.orgProjectSyncPaused": {
+        description: "Small tag beside a linked project in Org settings → Monday.com when its Sync switch is off.",
+      },
+      "projectSettings.monday.orgProjectBoardChanged": {
+        description: "Small tag beside a linked project in Org settings → Monday.com when its board has new columns to review.",
+      },
+      "projectSettings.monday.orgProjectPushFailed": {
+        description: "Small tag beside a linked project in Org settings → Monday.com when its last push to Monday failed.",
+      },
+      "projectSettings.monday.boardChangesIntro": {
+        description: "Amber banner on a linked Monday board listing columns someone added on Monday since the link was saved; each listed column has 'Map it' and 'Not needed' buttons.",
+      },
+      "projectSettings.monday.loadingBoardColumns": {
+        description: "Shown in place of the column mapping on a linked Monday board while Aquilla reads the board's column names.",
+      },
+      "projectSettings.monday.boardChangesMap": {
+        description: "Button beside a new Monday column: adds a row for it to the mapping table below, to fill it from Aquilla.",
+      },
+      "projectSettings.monday.boardChangesDismiss": {
+        description: "Button beside a new Monday column: the column stays on the board, Aquilla stops asking about it.",
+      },
+      "projectSettings.monday.boardChangesReadOnly": {
+        description: "Shown instead of 'Map it' for a new Monday column Aquilla can't write to (a formula, mirror or similar column).",
+      },
+      "projectSettings.monday.chooser.newColumn": {
+        description: "Small tag beside a column in the checklist that isn't on the Monday board yet and would be created.",
+      },
+      "projectSettings.monday.chooser.alwaysIncluded": {
+        description: "Note under the locked 'Aquilla ID' column in the checklist, saying why it can't be unticked.",
+      },
+      "projectSettings.monday.chooser.summaryAdds": {
+        description: "Live summary under the column checklist when some ticked columns will be created.",
+        placeholders: {
+          count: "How many new columns will be created.",
+          board: "The Monday board's name (Monday data, not translated).",
+          uses: "How many ticked columns are already on the board (a number).",
+        },
+      },
+      "projectSettings.monday.chooser.summaryNoAdds": {
+        description: "Live summary under the column checklist when every ticked column is already on the board.",
+        placeholders: {
+          count: "How many ticked columns are already on the board.",
+          board: "The Monday board's name (Monday data, not translated).",
+        },
+      },
+      "projectSettings.monday.addColumnsButton": {
+        description: "Button on a project's linked Monday board settings that opens the column checklist to add more columns.",
+      },
+      "projectSettings.monday.addColumnsDialogTitle": {
+        description: "Title of the dialog for adding more columns to an already linked Monday board.",
+      },
+      "projectSettings.monday.addColumnsConfirm": {
+        description: "Confirm button of that dialog: create the ticked new columns on the Monday board.",
+        placeholders: { count: "How many columns will be created." },
+      },
+      "projectSettings.monday.wizardRecommendation": {
+        description: "Summary line in the Monday setup wizard review step: the recommended item granularity and how many progress columns are mapped.",
+        placeholders: {
+          granularity: "The literal, untranslated word 'file' or 'project' (data) — matches the value stored on the link's itemGranularity setting, not a separately translated enum.",
+          mappedCount: "How many progress columns are mapped to project metrics.",
+        },
+      },
+      "projectSettings.monday.wizardLinkWarningsTitle": {
+        description:
+          "Heading of a warning box on the last step of the Monday setup wizard, above " +
+          "a list of server messages (shown in English) about the link that was just " +
+          "saved, for example that Monday's change notifications could not be set up.",
+      },
+      "projectSettings.monday.wizardFindBoardManually": {
+        description: "Fallback note in the Monday setup wizard when Monday returned no direct board URL, telling the user to find the board by name.",
+        placeholders: {
+          name: "The linked board's name (data, not translated), or the board id if no name is known.",
+        },
+      },
       "projectSettings.monday.oneItemPerLabel": {
         description:
           "Small note under the linked-board status row, naming what one Monday board " +
@@ -1737,6 +2360,12 @@ export const projectSettings = defineNamespace({
           "Accessible name of the Monday-board picker select, in both the manual link " +
           "flow and the AI setup wizard's board-change control. No separate visible " +
           "label — only a placeholder inside the closed select.",
+      },
+      "projectSettings.monday.syncNowPausedTooltip": {
+        description:
+          "Tooltip on the disabled \"Sync now\" button in a project's Monday.com settings " +
+          "while the Sync switch beside it is off. \"Sync\" is that switch's label " +
+          "(projectSettings.monday.syncToggleLabel).",
       },
       "projectSettings.monday.removeBoardLinkAriaLabel": {
         description: "Accessible name of the icon-only trash button that opens the remove-board-link confirmation.",
@@ -1928,6 +2557,20 @@ export const projectSettings = defineNamespace({
           "replaced with the source project's current text — the lead may have been editing " +
           "it in the meantime — while the translations on it are kept. Both halves matter.",
       },
+      "projectSettings.sourceLink.chooseFilesReplaceHeading": {
+        description:
+          "Heading in the Choose files confirm step over the list of files the project " +
+          "already has whose source the added upstream files will replace (AQU-1679). Ends " +
+          "in a colon; names follow. Kept apart from the add heading: these files are not " +
+          "arriving, they are being joined to the link.",
+      },
+      "projectSettings.sourceLink.chooseFilesReplaceBody": {
+        description:
+          "Under the replace list: the file keeps its identity and everything on it " +
+          "(translations, validations, comments) line by line; only its source text " +
+          "becomes the source project's, and it follows the source project afterwards. " +
+          "Says explicitly that no second copy is added \u2014 the thing a lead fears here.",
+      },
       "projectSettings.sourceLink.chooseFilesAddHeading": {
         description:
           "Heading over the list of files being added that this project never held. Ends in " +
@@ -2000,6 +2643,90 @@ export const projectSettings = defineNamespace({
           "empty, so there was nothing to copy. Reassuring, not an error: files will " +
           "appear once the source project has some.",
       },
+      "projectSettings.linkSource.additiveNoteReplacing": {
+        description:
+          "Replaces additiveNote under the link confirm step once at least one " +
+          "existing file is set to have its source replaced. Same reassurance, minus " +
+          "the claim that existing files are untouched: the replaced files' source " +
+          "text changes and keeps following the upstream; translations and " +
+          "validations are still never touched.",
+      },
+      "projectSettings.linkSource.replaceOption": {
+        description:
+          "Checkbox under an upstream file in the link confirm step, shown when this " +
+          "project already has exactly one file of the same name. On: the link " +
+          "follows into that existing file \u2014 its source text is replaced by the " +
+          "source project's and its translations stay \u2014 instead of adding a second " +
+          "file of that name. Off by default.",
+        placeholders: {
+          name: "The file's name as the user named it \u2014 never translated.",
+        },
+      },
+      "projectSettings.linkSource.replaceComparing": {
+        description:
+          "Shown under replaceOption right after it is turned on, while the server " +
+          "compares the project's file with the source project's file.",
+      },
+      "projectSettings.linkSource.replaceCompareFailed": {
+        description:
+          "Shown under replaceOption when the comparison could not be made. The link " +
+          "cannot be confirmed with the option on until a comparison succeeds; the " +
+          "sentence gives both ways out. No error code.",
+      },
+      "projectSettings.linkSource.replaceMatchSame": {
+        description:
+          "First line of the comparison under replaceOption: how many lines of text " +
+          "are word-for-word identical in the project's file and the source project's " +
+          "file. \"Lines\" are the file's translation units (verses, paragraphs).",
+        placeholders: {
+          same: "How many lines are identical in both files.",
+          count: "How many lines the longer of the two files has; governs the plural form.",
+        },
+      },
+      "projectSettings.linkSource.replaceMatchChanged": {
+        description:
+          "Comparison line, shown only when above zero: lines that correspond but " +
+          "whose source text differs. They take the source project's text, and their " +
+          "existing translations get the app's \"source changed\" flag for review.",
+        placeholders: {
+          count: "How many lines will take the source project's text; governs the plural form.",
+        },
+      },
+      "projectSettings.linkSource.replaceMatchAdded": {
+        description:
+          "Comparison line, shown only when above zero: lines the source project's " +
+          "file has and the project's file does not. They are added to the project's file.",
+        placeholders: {
+          count: "How many lines will be added; governs the plural form.",
+        },
+      },
+      "projectSettings.linkSource.replaceMatchKept": {
+        description:
+          "Comparison line, shown only when above zero: lines the project's file has " +
+          "and the source project's file does not. Nothing happens to them.",
+        placeholders: {
+          count: "How many lines only this project's file has; governs the plural form.",
+        },
+      },
+      "projectSettings.linkSource.replaceNoMatch": {
+        description:
+          "Replaces the comparison when fewer than half of the lines are identical: " +
+          "the two files share a name but are not the same text, so the source cannot " +
+          "be replaced. The link stays unconfirmable until the option is turned off.",
+        placeholders: {
+          same: "How many lines are identical in both files.",
+          count: "How many lines the longer of the two files has; governs the plural form.",
+        },
+      },
+      "projectSettings.linkSource.replaceCount": {
+        description:
+          "Summary sentence in the link confirm step, beside the count of files that " +
+          "will be added: how many existing files will follow the link in place " +
+          "(source replaced, translations kept) rather than gaining a second copy.",
+        placeholders: {
+          count: "How many existing files will follow the link; governs the plural form.",
+        },
+      },
       "projectSettings.linkSource.clashWarningHeading": {
         description:
           "Opens the confirm step's warning that some upstream files share a name with " +
@@ -2046,6 +2773,30 @@ export const projectSettings = defineNamespace({
           "Label of the switch that sets the project-wide default for ignoring vowel marks/accents " +
           "when matching terms, absent a per-concept override.",
       },
+      "projectSettings.checking.position": {
+        description: "Progress line on the community checking guest page, showing which passage is open out of all passages in the link.",
+        placeholders: { current: "1-based number of the open passage.", total: "Number of passages in the link." },
+      },
+      "projectSettings.checking.pendingFeedback": {
+        description: "Notice on the guest page when feedback could not reach the project yet; it is kept on the guest's device and retried.",
+        placeholders: { reason: "The server's own error sentence, already localized or in English; may be empty." },
+      },
+      "projectSettings.checking.selectionSummary": {
+        description: "Summary under the passage picker when a project lead builds a community checking link.",
+        placeholders: { count: "Number of selected units (verses or lines)." },
+      },
+      "projectSettings.checking.urlLabel": {
+        description: "Accessible name of the read-only field holding a checking link's URL.",
+        placeholders: { title: "The link title the project lead typed (data, not translated)." },
+      },
+      "projectSettings.checking.feedbackOn": {
+        description: "Label of the feedback box on the guest page, naming the passage the feedback is about.",
+        placeholders: { label: "The passage reference, e.g. 'MRK 1:2', or 'Unit 3' when it has none." },
+      },
+      "projectSettings.checking.allSection": {
+        description: "Checkbox in the passage picker that selects every unit in one chapter or section.",
+        placeholders: { section: "The chapter or section name, e.g. 'MRK 1' (data, not translated)." },
+      },
       "projectSettings.termMatching.loadPreset": {
         description: "Button that opens a menu of built-in affix presets (Hebrew, Arabic, Swahili, Turkish, …) to load.",
       },
@@ -2069,6 +2820,81 @@ export const projectSettings = defineNamespace({
       },
       "projectSettings.termMatching.preset.turkish": {
         description: "Name of a language whose affix preset can be loaded into the terminology matching settings.",
+      },
+      "projectSettings.inherit.title": {
+        description:
+          "Heading of the inherited-settings card in Project Settings, shown only when this project is linked to an upstream. Names the upstream.",
+        placeholders: {
+          upstream: "The upstream project's name, as its maintainers named it — never translated.",
+        },
+      },
+      "projectSettings.inherit.description": {
+        description:
+          "Explanation under that heading: turned-on fields are copies that update when the upstream saves, including further down a chain, and Detach keeps a local copy.",
+        placeholders: {
+          upstream: "The upstream project's name, as its maintainers named it — never translated.",
+        },
+      },
+      "projectSettings.inherit.linkTitle": {
+        description:
+          "Heading of the same choice on the link confirm step, before the link exists. The checkboxes under it are what this new link will copy.",
+      },
+      "projectSettings.inherit.linkDescription": {
+        description:
+          "One sentence under that heading: the choice can be changed later, per field, from the downstream project's settings.",
+      },
+      "projectSettings.inherit.field.translationBrief": {
+        description: "Checkbox label. The translation brief is copied from the upstream when this is on.",
+      },
+      "projectSettings.inherit.field.knowledgeDocs": {
+        description: "Checkbox label. The upstream project's knowledge-base documents are copied when this is on.",
+      },
+      "projectSettings.inherit.field.workflowPolicy": {
+        description:
+          "Checkbox label. Validation role floors, self-validation, autopilot, agent mode, and check penalties are copied when this is on.",
+      },
+      "projectSettings.inherit.field.workflowPolicyDetail": {
+        description: "Secondary line under the workflow-policy checkbox, listing what that one choice covers.",
+      },
+      "projectSettings.inherit.field.livingMemory": {
+        description: "Checkbox label. Living-memory notes are copied when this is on. Off by default.",
+      },
+      "projectSettings.inherit.field.smartQuotes": {
+        description: "Checkbox label. The smart-quotes switch is copied when this is on. Off by default.",
+      },
+      "projectSettings.inherit.field.systemPrompt": {
+        description:
+          "Checkbox label. AI instructions (the system prompt) are copied when this is on. Off by default, because those instructions usually name the language pair.",
+      },
+      "projectSettings.inherit.fromUpstream": {
+        description:
+          "Shown beside a field that is still being copied, both in the inherited-settings card and next to the field itself.",
+        placeholders: {
+          upstream: "The upstream project's name, as its maintainers named it — never translated.",
+        },
+      },
+      "projectSettings.validation.orgDefaultOption": {
+        description:
+          "Option in a dropdown beside 'Required validators'. Choosing it means this project uses the number its organization set, shown in brackets.",
+        placeholders: {
+          number: "How many validators the organization's default requires, a number from 1 to 15.",
+        },
+      },
+      "projectSettings.validation.customOption": {
+        description:
+          "Option in the same dropdown. Choosing it lets this project set its own number of required validators, in a box that appears next to it.",
+      },
+      "projectSettings.validation.requiredTextSourceAria": {
+        description:
+          "Screen-reader label for that dropdown on the text-validation row. Not shown on screen.",
+      },
+      "projectSettings.validation.requiredAudioSourceAria": {
+        description:
+          "Screen-reader label for that dropdown on the audio-validation row. Not shown on screen.",
+      },
+      "projectSettings.inherit.detach": {
+        description:
+          "Button beside a field that is still being copied. Stops future updates of that field and keeps the current copy.",
       },
     },
   },

@@ -23,12 +23,14 @@ import { AUTH_HINT } from './discovery-route'
 import { handleParseArtifact } from './import-parse'
 import { assertCredentialMayWrite, assertCredentialScope } from './token-bridge'
 import { uuidv7 } from './uuid'
+import { resolveAuthorshipPolicy } from './pii'
 import { r2KeyPrefix, audioObjectKey } from '../audio'
 import { ROLE } from '../events/role-policy'
 import type { ExternalEnv } from './types'
-import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
+import { validateApiCredentialRequest, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
-import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
+import { attachmentDisposition } from '../events/content-disposition'
+import { enforceRateLimit, userRateLimitIdentifier } from '../../../db/shared/rate-limit'
 
 /** Max artifact size — 25 MB. Published in get_capabilities (operational
  *  contract §4); surfaced in the oversize error so an agent can self-correct. */
@@ -54,11 +56,6 @@ const AUDIO_CONTENT_TYPES: Record<string, string> = {
 const ROUTE_RE =
   /^\/api\/v1\/external\/projects\/([^/]+)\/artifacts(?:\/([^/]+)(?:\/(content|inspect|parse))?)?$/
 
-function bearer(request: Request): string | null {
-  const h = request.headers.get('Authorization') ?? ''
-  return h.startsWith('Bearer ') ? h.slice(7) : null
-}
-
 function artifactR2Key(env: ExternalEnv, projectId: string, artifactId: string): string {
   return `${r2KeyPrefix(env)}artifacts/${projectId}/${artifactId}`
 }
@@ -82,16 +79,19 @@ export async function authArtifact(
   env: ExternalEnv,
   projectId: string,
   minRole: number,
-  opts: { writes?: boolean } = {},
+  /** `action` names the refused operation in the read-only message, so a
+   *  sibling write surface sharing this gate (the knowledge-base upload,
+   *  AQU-1762) does not tell its caller it cannot "upload an artifact". */
+  opts: { writes?: boolean; action?: string } = {},
 ): Promise<AuthResult> {
   const db = env.AQUILLA_PG
   if (!db) return { ok: false, response: errorResponse('job_failed', 'AQUILLA_PG not configured') }
 
-  const cred = await validateApiCredential(db, bearer(request) ?? '', request.headers.get('CF-Connecting-IP'))
+  const cred = await validateApiCredentialRequest(db, request)
   if (!cred) return { ok: false, response: errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`) }
 
   try {
-    if (opts.writes === true) assertCredentialMayWrite(cred, 'upload an artifact')
+    if (opts.writes === true) assertCredentialMayWrite(cred, opts.action ?? 'upload an artifact')
     await assertCredentialScope(db, cred, projectId)
   } catch (err) {
     return { ok: false, response: toErrorResponse(err) }
@@ -121,12 +121,16 @@ export interface ArtifactRow {
   created_at: unknown
 }
 
-function rowToMeta(row: ArtifactRow): Record<string, unknown> {
+function rowToMeta(row: ArtifactRow, exposeIdentity = false): Record<string, unknown> {
   return {
     artifactId: row.id,
     projectId: row.project_id,
-    uploadedByUserId: row.uploaded_by_user_id,
-    credentialId: row.credential_id,
+    // Uploader identity follows the same PII policy as every other Agent API
+    // payload (external/pii.ts): absent unless the credential is `pii` and the
+    // project hasn't opted out.
+    ...(exposeIdentity
+      ? { uploadedByUserId: row.uploaded_by_user_id, credentialId: row.credential_id }
+      : {}),
     name: row.name,
     contentType: row.content_type,
     sizeBytes: Number(row.size_bytes),
@@ -165,7 +169,7 @@ export async function loadArtifact(
 // MAX_ARTIFACT_BYTES = 25 MB each) had no per-credential throttle, unlike
 // /search — a leaked/malicious PAT could hammer R2 storage and DB inserts.
 // Capped well below what a legitimate import batch needs.
-const UPLOAD_MAX_PER_CREDENTIAL = 120
+const UPLOAD_MAX_PER_USER = 120
 
 async function handleUpload(
   request: Request,
@@ -177,12 +181,18 @@ async function handleUpload(
   if (!authed.ok) return authed.response
   const db = env.AQUILLA_PG as AquillaDb
 
-  const identifier = `credential:${authed.cred.credentialId}`
-  const recent = await countRecentRateLimitEvents(db, 'external_artifact_upload', identifier)
-  if (recent >= UPLOAD_MAX_PER_CREDENTIAL) {
+  // AQU-1843: atomic, keyed on the credential's owner (a second PAT must not
+  // buy a second upload budget), and FAIL CLOSED — an upload moves up to
+  // MAX_ARTIFACT_BYTES into R2, so a limiter outage must not uncap it.
+  const uploadLimit = await enforceRateLimit(db, {
+    kind: 'external_artifact_upload',
+    identifier: userRateLimitIdentifier(authed.cred.userId),
+    limit: UPLOAD_MAX_PER_USER,
+    failMode: 'closed',
+  })
+  if (!uploadLimit.allowed) {
     return errorResponse('rate_limited', 'artifact upload rate limit exceeded, slow down')
   }
-  await recordRateLimitEvent(db, 'external_artifact_upload', identifier)
 
   const name = request.headers.get('x-artifact-name')
   if (!name || name.trim() === '') {
@@ -301,20 +311,26 @@ async function sha256HexBytes(bytes: Uint8Array): Promise<string> {
 // [Pen test] API security & data exposure (2026-08-27): metadata/inspect had
 // no throttle at all — only upload did. Cheap DB/64KB-sniff reads, so this
 // mirrors search's cap rather than upload's tighter one.
-const ARTIFACT_META_MAX_PER_CREDENTIAL = 300
+const ARTIFACT_META_MAX_PER_USER = 300
 
+/** AQU-1843: keyed on the owner, not the credential, and fails OPEN — these are
+ *  the cheap metadata/sniff reads, so a limiter outage must not take them down
+ *  with it. Upload (above) fails closed. */
 async function checkArtifactRateLimit(
   db: AquillaDb,
   kind: string,
-  credentialId: string,
+  userId: string,
   max: number,
 ): Promise<Response | null> {
-  const identifier = `credential:${credentialId}`
-  const recent = await countRecentRateLimitEvents(db, kind, identifier)
-  if (recent >= max) {
+  const decision = await enforceRateLimit(db, {
+    kind,
+    identifier: userRateLimitIdentifier(userId),
+    limit: max,
+    failMode: 'open',
+  })
+  if (!decision.allowed) {
     return errorResponse('rate_limited', 'artifact read rate limit exceeded, slow down')
   }
-  await recordRateLimitEvent(db, kind, identifier)
   return null
 }
 
@@ -330,13 +346,14 @@ async function handleGetMeta(
   const limited = await checkArtifactRateLimit(
     db,
     'external_artifact_meta',
-    authed.cred.credentialId,
-    ARTIFACT_META_MAX_PER_CREDENTIAL,
+    authed.cred.userId,
+    ARTIFACT_META_MAX_PER_USER,
   )
   if (limited) return limited
   const row = await loadArtifact(db, projectId, artifactId)
   if (!row) return errorResponse('not_found', `artifact ${artifactId} not found`)
-  return Response.json({ artifact: rowToMeta(row) })
+  const policy = await resolveAuthorshipPolicy(db, authed.cred, projectId)
+  return Response.json({ artifact: rowToMeta(row, policy === 'real') })
 }
 
 // [Pen test] API security & data exposure (2026-08-20): unlike the knowledge
@@ -375,7 +392,7 @@ function safeContentTypeFor(stored: string | null): string {
 // MAX_ARTIFACT_BYTES (25 MB) per call and had no throttle — a leaked PAT could
 // repeat-download to run up R2 egress costs. Mirrors upload's cap: same order
 // of bytes moved, just in the opposite direction.
-const ARTIFACT_CONTENT_MAX_PER_CREDENTIAL = 120
+const ARTIFACT_CONTENT_MAX_PER_USER = 120
 
 async function handleGetContent(
   request: Request,
@@ -390,8 +407,8 @@ async function handleGetContent(
   const limited = await checkArtifactRateLimit(
     db,
     'external_artifact_content',
-    authed.cred.credentialId,
-    ARTIFACT_CONTENT_MAX_PER_CREDENTIAL,
+    authed.cred.userId,
+    ARTIFACT_CONTENT_MAX_PER_USER,
   )
   if (limited) return limited
   const row = await loadArtifact(db, projectId, artifactId)
@@ -405,18 +422,10 @@ async function handleGetContent(
     headers: {
       'Content-Type': safeContentTypeFor(row.content_type),
       'Content-Length': String(buf.byteLength),
-      'Content-Disposition': `attachment; filename="${sanitizeFilename(row.name)}"`,
+      'Content-Disposition': attachmentDisposition(row.name),
       'X-Content-Type-Options': 'nosniff',
     },
   })
-}
-
-/** Strip characters that would break the Content-Disposition header value or
- *  let the artifact's client-chosen name inject additional header
- *  parameters; the artifact id (not this name) is what identifies the row. */
-function sanitizeFilename(name: string): string {
-  const cleaned = name.replace(/[\r\n"]/g, '_')
-  return cleaned.length > 0 ? cleaned : 'artifact'
 }
 
 // ── GET inspect (lightweight format detection) ──────────────────────────────
@@ -573,8 +582,8 @@ async function handleInspect(
   const limited = await checkArtifactRateLimit(
     db,
     'external_artifact_meta',
-    authed.cred.credentialId,
-    ARTIFACT_META_MAX_PER_CREDENTIAL,
+    authed.cred.userId,
+    ARTIFACT_META_MAX_PER_USER,
   )
   if (limited) return limited
   const row = await loadArtifact(db, projectId, artifactId)

@@ -42,6 +42,15 @@ export const IMPORT_COLLISION_SKIPPED = "import collision skipped"
 /** User chose to overwrite/duplicate colliding files in the collision resolution prompt. */
 export const IMPORT_COLLISION_DUPLICATED = "import collision duplicated"
 
+/**
+ * AQU-1365: a New source text upload looked like a translation of a file
+ * already in the project (its book is here, or it says it's in the target
+ * language), and the person answered "Is this a translation?". Properties:
+ * signal (book | language | both), file_count, flagged_count, choice
+ * (translation | update | separate | choose-file | leave-out | import-all | back).
+ */
+export const IMPORT_TRANSLATION_CHECK = "import translation check"
+
 // ── Editor — first commit + validation ───────────────────────────────────
 
 /**
@@ -88,6 +97,19 @@ export const INVITE_REDEEMED = "invite redeemed"
  * returned an irrecoverable 403 (quarantineOutboxEvents).
  */
 export const OUTBOX_QUARANTINED = "outbox record quarantined"
+
+// ── Comment submission (AQU-1957) ─────────────────────────────────────────
+
+/**
+ * A `comment.*` event the outbox gave up on — quarantined on a 403 (role
+ * floor, the org's `commentCreateMinRole`, membership revoked mid-session) or
+ * retry-exhausted on a deterministic 4xx. OUTBOX_QUARANTINED already counts
+ * the record but names no kind, so a comment that never posted was
+ * indistinguishable from any other refused write: the only report of
+ * AQU-1957 reached us through meeting notes. Fired once per outbox record,
+ * and never with the comment body.
+ */
+export const COMMENT_SUBMIT_REFUSED = "comment submit refused"
 
 // ── TTS provider cutover (AQU-1189) ───────────────────────────────────────
 

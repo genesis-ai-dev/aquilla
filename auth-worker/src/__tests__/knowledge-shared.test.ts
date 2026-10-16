@@ -33,7 +33,7 @@ async function seedScope() {
 async function seedDoc(id: string, scope: { projectId: string } | { orgId: number }, name = "guide.md") {
   await createDoc(env.AQUILLA_PG, {
     id, scope, name, contentType: "text/markdown", sizeBytes: TEXT.length,
-    sha256: "abc", r2Key: `kb/x/${id}`, extractedText: TEXT, createdBy: "ryder",
+    sha256: "abc", r2Key: `kb/x/${id}`, extractedText: TEXT, createdBy: "test-user",
   })
 }
 

@@ -34,7 +34,7 @@ export async function fetchConceptOccurrences(
   const params = new URLSearchParams()
   if (options.offset) params.set("offset", String(options.offset))
   if (options.limit) params.set("limit", String(options.limit))
-  if (options.lane) params.set("lane", options.lane)
+  if (options.lane !== undefined) params.set("lane", options.lane)
   const qs = params.toString()
   const url =
     `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/concepts/${encodeURIComponent(conceptId)}/occurrences` +

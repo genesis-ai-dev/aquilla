@@ -15,6 +15,7 @@ import { prefetchAiModels, type ModelId } from "@/lib/audio/prefetch"
 import { DEFAULT_MMS_LANGUAGE } from "@/lib/audio/tts-providers"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { Kbd } from "@/components/ui/kbd"
 import { altClickModifierLabel, isApplePlatform } from "@/lib/platform"
 import { cn } from "@/lib/utils"
 
@@ -30,13 +31,7 @@ const DISMISS_REASONS: ReadonlySet<string> = new Set(["escape-key", "outside-pre
 function AltClickModifierKbd() {
   const apple = isApplePlatform()
   return (
-    <kbd
-      data-slot="kbd"
-      className="inline-flex h-[1.15em] min-w-[1.15em] items-center justify-center rounded-sm border border-border/80 bg-muted px-1 align-baseline font-sans text-[0.7rem] font-medium text-foreground"
-      aria-label={altClickModifierLabel()}
-    >
-      {apple ? "⌥" : "Alt"}
-    </kbd>
+    <Kbd aria-label={altClickModifierLabel()}>{apple ? "⌥" : "Alt"}</Kbd>
   )
 }
 

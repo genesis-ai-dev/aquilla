@@ -21,6 +21,7 @@ import type { OutboxPayloadFor } from "@/lib/sync/outbox-types"
 import type { StagedEvent } from "./protocol"
 import { isSupportedApplyKind } from "./role-floors"
 import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
+import { captureCellValidation } from "@/lib/cell-telemetry"
 
 /**
  * Sentinel fileId for project-scoped comment.* events.
@@ -174,6 +175,19 @@ export async function applyStagedEvent(
         parentId: null,
         author: ctx.author,
         payload: { ...ev.payload, editEventId } as OutboxPayloadFor<"cell.validate">,
+      })
+      // AQU-1572: this path enqueues the event itself rather than through
+      // `emitCellValidate`, so the emit seam never sees it and it reports its
+      // own line here, after the enqueue, in the seam's shape. The person
+      // approved it, but the agent chose the line, so `source: "agent"`.
+      captureCellValidation(true, {
+        medium: "text",
+        projectId: ctx.projectId,
+        fileId: ev.fileId,
+        cellId: ev.cellId,
+        lane: typeof ev.payload.targetLang === "string" ? ev.payload.targetLang : "",
+        source: "agent",
+        surface: "proposal",
       })
       return eventId
     }

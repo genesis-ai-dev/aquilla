@@ -20,11 +20,14 @@ import {
   type PortfolioLane,
 } from "@/lib/frontier/portfolio"
 import { laneChipLabel, safePct } from "./project-lanes"
+import { textProgressSegments } from "@/lib/progress/progress-palette"
+import { ProgressSplitBar } from "@/components/progress/ProgressSplitBar"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 
 export interface ProjectLaneSubRowsProps {
   projectId: string
+  projectName?: string | null
   lanes: PortfolioLane[]
   defaultLaneLabel: string
   colSpan: number
@@ -43,6 +46,7 @@ function laneOpenTo(projectId: string, lane: { lane: string; laneId?: string | n
 
 export function ProjectLaneSubRows({
   projectId,
+  projectName,
   lanes,
   defaultLaneLabel,
   colSpan,
@@ -65,16 +69,21 @@ export function ProjectLaneSubRows({
             const lastEdit = lane.lastEditAt
             return (
               <div
-                key={lane.lane || "__default__"}
+                key={lane.laneId || lane.lane || "__default__"}
                 data-testid={`project-lane-row-${projectId}-${lane.lane}`}
                 className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2 text-sm"
               >
                 <span className="min-w-[6rem] font-medium">{label}</span>
 
                 <span className="flex min-w-[9rem] flex-1 items-center gap-2">
-                  <span className="h-1.5 w-full max-w-[8rem] overflow-hidden rounded-full bg-muted" aria-hidden>
-                    <span className="block h-full rounded-full bg-primary" style={{ width: `${tpct}%` }} />
-                  </span>
+                  {/* AQU-1764: the shared two-part bar — validated, then
+                      translated but not validated — ending at the translated
+                      figure beside it; the validated figure follows. */}
+                  <ProgressSplitBar
+                    segments={textProgressSegments({ validated: vpct, translated: tpct, total: 100 })}
+                    height={6}
+                    className="w-full max-w-[8rem]"
+                  />
                   <span className="tabular-nums text-muted-foreground" aria-label={t("org.orgHome.pctTranslated", { pct: tpct })}>
                     {tpct}%
                   </span>
@@ -110,7 +119,9 @@ export function ProjectLaneSubRows({
                   <StaffLanePopover
                     projectId={projectId}
                     lane={lane.lane}
+                    laneId={lane.laneId}
                     laneLabel={label}
+                    projectName={projectName}
                     orgId={orgId}
                     onDone={onStaffed}
                     trigger={

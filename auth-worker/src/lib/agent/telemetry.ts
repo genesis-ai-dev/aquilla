@@ -1,9 +1,10 @@
 // telemetry — PostHog events for one in-app agent run (AQU-1467).
 //
-// Three events, all buffered and sent in ONE request when the run ends:
-//   agent_tool_run  one per tool call the loop executes
-//   $ai_generation  one per model call (orchestrator turns and tool-internal)
-//   $ai_trace       one per run; every generation shares its $ai_trace_id
+// Four events, all buffered and sent in ONE request when the run ends:
+//   agent_tool_run         one per tool call the loop executes
+//   agent_changeset_stage  one per staging batch (AQU-1670)
+//   $ai_generation         one per model call (orchestrator turns and tool-internal)
+//   $ai_trace              one per run; every generation shares its $ai_trace_id
 //
 // Data policy: counts only. Nothing a user or the model wrote leaves the
 // worker: no prompt, reply, cell text, SQL, search query, or tool result. We
@@ -14,6 +15,7 @@
 // POSTHOG_KEY is blank, and then no method does any work.
 
 import { resolvePosthogHost } from "../../posthog-logs"
+import type { StageOutcome } from "./emit-stage"
 import type { ToolResultData } from "./tools/types"
 
 export interface AgentTelemetryEnv {
@@ -126,12 +128,15 @@ export function classifyToolRun(input: {
 
 export interface AgentTelemetry {
   toolRun(input: ToolRunInput): void
+  /** AQU-1670: one staging batch — cell count, duration, outcome. */
+  stageOutcome(input: StageOutcome): void
   generation(input: GenerationInput): void
   flush(status: "ok" | "capped" | "error"): Promise<void>
 }
 
 const NOOP: AgentTelemetry = {
   toolRun() {},
+  stageOutcome() {},
   generation() {},
   async flush() {},
 }
@@ -186,6 +191,30 @@ class PosthogAgentTelemetry implements AgentTelemetry {
         error_class: outcome === "error" ? errorClassOf(input.resultText) : undefined,
         latency_ms: input.latencyMs,
         result_chars: input.resultText.length,
+      })
+    } catch {
+      /* telemetry must not break the run */
+    }
+  }
+
+  /**
+   * AQU-1670. The whole point is the duration/count pair: a staging path that
+   * scales with cell count is a 522 waiting for a big enough file, and that is
+   * only visible if both numbers are on the same event.
+   */
+  stageOutcome(input: StageOutcome): void {
+    try {
+      this.push("agent_changeset_stage", {
+        run_id: input.runId,
+        project_id: input.projectId,
+        requested: input.requested,
+        staged: input.staged,
+        rejected: input.rejected,
+        stale: input.stale,
+        duration_ms: input.durationMs,
+        cells_prefetched: input.cellsPrefetched,
+        fallback_queries: input.fallbackQueries,
+        status: input.status,
       })
     } catch {
       /* telemetry must not break the run */

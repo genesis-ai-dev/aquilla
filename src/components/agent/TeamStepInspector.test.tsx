@@ -17,6 +17,12 @@ import { render, screen, fireEvent, within } from "@testing-library/react"
 import type { TeamFeedMessage } from "@/lib/agent/social-feed"
 import { TeamStepInspector } from "./TeamStepInspector"
 
+const fetchTraces = vi.hoisted(() => vi.fn())
+vi.mock("@/lib/contextual/transport", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/contextual/transport")>()),
+  fetchContextualRunTraces: fetchTraces,
+}))
+
 const WIDTH_KEY = "aquilla:team-step-inspector-width"
 const DEFAULT_WIDTH = 320
 const MIN_WIDTH = 260
@@ -218,5 +224,61 @@ describe("TeamStepInspector copy", () => {
     fireEvent.click(screen.getByRole("button", { name: "Situation note" }))
     const note = screen.getByText("Jesus teaches by the lake.")
     expect(note.className).not.toContain("font-mono")
+  })
+})
+
+// The "This step recorded no further detail" dead end (2026-10-01): a reader
+// who opens a step must be able to see what it produced and what the model
+// was actually asked and answered.
+describe("TeamStepInspector evidence", () => {
+  beforeEach(() => fetchTraces.mockReset())
+
+  function renderWithEvidence() {
+    return render(
+      <TeamStepInspector
+        id="step-inspector"
+        message={message({ raw: { kind: "drafts_staged", details: {}, runId: "run-1", spanId: "span-1" } })}
+        sentence="Put 3 drafts out for your review."
+        onClose={() => {}}
+        projectId="proj-1"
+        evidence={{
+          sceneBrief: { construal: "A crowd gathers by the lake." },
+          drafts: [{ id: "d1", cellLabel: "MRK 4:1", text: "Jesus began to teach" }],
+        }}
+      />,
+    )
+  }
+
+  it("shows what the span produced from the activity bundle", () => {
+    renderWithEvidence()
+    fireEvent.click(screen.getByRole("button", { name: "What this step produced" }))
+    expect(screen.getByText("A crowd gathers by the lake.")).toBeInTheDocument()
+    expect(screen.getByText("Jesus began to teach")).toBeInTheDocument()
+  })
+
+  it("fetches the span's model calls only when the section is opened", async () => {
+    fetchTraces.mockResolvedValue({
+      truncated: false,
+      traces: [{
+        id: 1, spanId: "span-1", label: "draft", tier: "mid", model: "m-mid",
+        system: "you are a drafter", user: "translate Mark 4:1", output: "Jesus began",
+        error: null, generationId: "gen-1", promptTokens: 10, completionTokens: 4,
+        costCents: 0, latencyMs: 1200, attempts: 1, truncated: false, createdAt: "",
+      }],
+    })
+    renderWithEvidence()
+    expect(fetchTraces).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Model calls" }))
+    expect(fetchTraces).toHaveBeenCalledWith("proj-1", "run-1", "span-1")
+    fireEvent.click(await screen.findByRole("button", { name: /draft/ }))
+    expect(screen.getByText("translate Mark 4:1")).toBeInTheDocument()
+    expect(screen.getByText("Jesus began")).toBeInTheDocument()
+  })
+
+  it("explains an empty trace list instead of showing nothing", async () => {
+    fetchTraces.mockResolvedValue({ traces: [], truncated: false })
+    renderWithEvidence()
+    fireEvent.click(screen.getByRole("button", { name: "Model calls" }))
+    expect(await screen.findByText(/kept for 30 days/)).toBeInTheDocument()
   })
 })

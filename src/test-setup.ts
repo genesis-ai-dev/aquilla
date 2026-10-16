@@ -1,15 +1,22 @@
 import "fake-indexeddb/auto"
 import "@testing-library/jest-dom/vitest"
 import { afterEach, expect, vi } from "vitest"
-import { cleanup } from "@testing-library/react"
+import { cleanup, configure } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { resetWindowFocusRevalidateForTests } from "@/lib/sync/window-focus-revalidate"
 import { resetAllRequestCoalescersForTests } from "@/lib/request-coalescer"
 import { clearResolvedProjectSeeds } from "@/lib/sync/project-record-seed"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 import {
   createOffMachineFetchGuard,
   takeOffMachineRequestViolations,
 } from "./test-setup.fetch-guard"
+
+// Every findBy* / waitFor waits for observable state, so its timeout is a stall
+// watchdog, not a speed limit (AGENTS.md rule 15, AQU-1749). The default 1 s
+// failed correct tests on a loaded machine. The default onTimeout stays, so a
+// stalled wait still prints the DOM.
+configure({ asyncUtilTimeout: STALL_WATCHDOG_MS })
 
 // Block unit tests from reaching anything off this machine (AQU-1277). The
 // auth/sync base URLs fall back to production when VITE_AUTH_BASE is unset, so

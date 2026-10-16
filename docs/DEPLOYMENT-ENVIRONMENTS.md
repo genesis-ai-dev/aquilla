@@ -14,7 +14,8 @@ profile or fall back from an unknown branch.
 Each API host exposes `/identity/*` and `/chat/*` through the identity Worker and
 `/sync/*` through the sync Worker. The identity Worker also owns
 `/.well-known/oauth-authorization-server/*`, the RFC 8414 discovery location for
-its MCP OAuth issuer (`docs/CHATGPT-PLUGIN.md`). Staging is retired from the deployable
+its MCP OAuth issuer (`docs/CHATGPT-PLUGIN.md`), and
+`/.well-known/openai-apps-challenge`, OpenAI's plugin domain check. Staging is retired from the deployable
 application contract; development is the only non-production live environment.
 
 `config/cloudflare-deployments.json` is the machine-readable source for Worker
@@ -49,6 +50,24 @@ applies pending `db/postgres/migrations/` files to the target Neon branch; only
 then does any deploy command get past its guard. Migrations are never applied
 automatically by a deploy path or by an agent — that is a deliberate human step
 (`npm run neon:status:dev` / `:prod` is the read-only check the guard runs).
+
+Each file commits together with its `schema_migrations` row, so a migration is
+either applied and recorded or neither; a file needing `CREATE INDEX
+CONCURRENTLY` takes an explicit non-transactional path and must stay idempotent
+(AQU-1877, `scripts/neon-migration-file.ts`). Both paths run under
+`lock_timeout` — 5 s by default, `AQUILLA_MIGRATION_LOCK_TIMEOUT` to widen it
+for a window where blocking every write to `events`/`cells` is acceptable — so a
+migration queued behind a long transaction fails fast instead of holding the
+write queue open. **`neon:apply:prod` refuses without a snapshot decision:**
+pass `--snapshot` to have it cut a `premigrate-<timestamp>` Neon branch off
+production first (instant and copy-on-write, and what you restore from if the
+apply goes wrong), or `--no-snapshot` if one already exists. `dev` and `local`
+are ungated — they are refreshable by design (`pnpm neon:refresh:dev`). The
+refresh deletes `integration_connections` (and by cascade the Monday board
+links) right after the restore, because the copy carries every production
+org's encrypted Monday tokens and the dev Worker could otherwise use them
+(AQU-1775; `pnpm neon:scrub:dev` runs the same scrub by hand, `--dry-run` to
+count first).
 
 All unnamed Wrangler profiles are local-only, including the SPA, identity, sync,
 agent sandbox, and resource proxy Workers. A bare
@@ -131,13 +150,25 @@ its job. Keep this section in step with that manifest — a contract test assert
 | --- | --- | --- | --- |
 | Web (production) | `.` (repo root) | `aquilla-web` | `DIARIZATION_MODAL_URL`, `DIARIZATION_PUBLIC_BASE` |
 | Web (development) | `.` (repo root) | `aquilla-web-development` | none |
-| Identity (production) | `auth-worker` | `aquilla-identity` | `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET` |
-| Identity (development) | `auth-worker` | `aquilla-dev-identity` | `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN` |
+| Identity (production) | `auth-worker` | `aquilla-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET` |
+| Identity (development) | `auth-worker` | `aquilla-dev-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET`, `MONDAY_TOKEN_KEY` |
 | Sync (production) | `sync-worker` | `aquilla-sync-worker` | `SYNC_SECRET_KEY`, `DIARIZATION_MODAL_URL`, `DIARIZATION_PUBLIC_BASE`, `DIARIZATION_SHARED_SECRET`, `INWORLD_API_KEY`, `SEED_VC_TOKEN`, `SEED_VC_URL` |
 | Sync (development) | `sync-worker` | `aquilla-sync-worker-dev` | `SYNC_SECRET_KEY` |
 
 `SYNC_SECRET_KEY` signs the `/sync-token` JWTs the sync Worker verifies, so the identity
 and sync Workers in the same environment must hold the identical value.
+
+`MONDAY_TOKEN_KEY` is development-only (AQU-1775): the Monday token encryption key is
+derived from it instead of `SECRET_KEY`, which production and development still share,
+so a production org's Monday tokens copied onto the dev Neon branch are unreadable on
+dev. Production leaves it unset and keeps the `SECRET_KEY` derivation. Setting or
+rotating it makes every Monday connection made on that Worker before it unreadable;
+reconnect the orgs afterwards. Set it with the rotation script, never bare
+`wrangler secret put`:
+
+```bash
+printf %s "$(openssl rand -base64 48 | tr -d '\n')" | pnpm run secrets:rotate identity development MONDAY_TOKEN_KEY
+```
 
 ### The AI provider key (`OPENROUTER_API_KEY`)
 
@@ -168,8 +199,9 @@ branches cut from `dev`; `main` is retired.
    which `dev` PRs shipped). A release branch may carry the plain cut date,
    `release/YYYY/MM/DD`, or a same-day `-NN` suffix for the Nth slice cut that
    date; both are production branches (see `e2e/journeys/QA-BOT-REGIMEN.md`
-   for how a slice is built and when it deploys itself versus waiting for a
-   person).
+   for how a slice is built). The **Release cut** workflow runs the plan and
+   pushes the branch after every production deploy's tag push, or when a
+   person presses its button (`e2e/journeys/RELEASE-CUT.md`).
 2. QA tests the branch's preview.
 3. From a clean checkout of that branch, checked out by name (not a detached
    HEAD — the branch guard and the tag script both need it), run
@@ -215,8 +247,10 @@ route. Its build deploys matching auth/sync previews and never promotes a live v
 production/development traffic. `versification-tool` remains disconnected
 because it has no deployable Wrangler application.
 
-The consolidated `.github/workflows/ci.yml` is `workflow_dispatch`-only. Normal
-pull-request and push activity consumes no GitHub-hosted runner minutes. Cloudflare
+The consolidated `.github/workflows/ci.yml` runs on pull requests into `dev`
+(lint, `i18n:check`, the secret scan, unit tests, worker tests, and
+`pnpm neon:check`) and on `workflow_dispatch` (that set, plus typecheck, the
+Vite build, Tauri, and the IDML browser suite). It does not deploy. Cloudflare
 receives GitHub repository events, runs the repository-owned build commands, and
 reports compilation results and preview links back to GitHub. The local pre-push
 hook runs a secret scan and the existing commit-based affected E2E selection,
@@ -279,6 +313,19 @@ generated for Workers that implement a Durable Object", which sync-worker does
 (`ProjectSync`). Proving it needs either Cloudflare support or a throwaway pair of
 Workers reproducing the hop outside this repo.
 
+**No Autopilot run driver on a preview (AQU-1845).** auth-worker declares the
+per-run `ContextualRunDriver` Durable Object in every real environment, but
+`scripts/cloudflare-stack-preview.mjs` deliberately omits it from the auth
+preview config — by the same Cloudflare limitation quoted above, a Worker that
+implements a Durable Object gets no preview URL, and `previewOrigin` treats a
+missing URL as fatal, so declaring it would risk the whole PR preview stack
+(the web preview is built from the auth preview's origin). With the binding
+absent, `routes/contextual.ts` falls back to the pre-AQU-1845 in-request
+`waitUntil` loop. So a preview can show that a run starts, drafts and stages
+reviewable work, but it CANNOT show that the run outlives the request that
+started it, or that an interrupted run resumes without re-paying for finished
+model calls. Walk those on development or production.
+
 **What to do instead.** Verify the two halves separately rather than end to end:
 
 1. Probe the auth preview directly to prove the route exists and is gated —
@@ -288,6 +335,27 @@ Workers reproducing the hop outside this repo.
    human approval not being consumed, and any partial work still committing.
 3. Cover the success path in worker tests, which stub the bridge and run the real
    HTTP handlers.
+
+**A preview recognises one platform admin, and it is a QA fixture (AQU-1353).** A
+preview's `ADMIN_EMAILS` is set in `scripts/cloudflare-stack-preview.mjs` to the single
+address `qa-admin@local.test` — the QA fixture account on development storage — so the
+bots can walk `/admin` instead of reporting `NOT CHECKED` for want of a fixture. Three
+properties keep that contained, and a change to any of them is a production auth change:
+
+- The preview config is generated by that script and never reads or writes
+  `auth-worker/wrangler.toml`. The operator allowlists on `aquilla-identity` and
+  `aquilla-dev-identity` are untouched; `scripts/cloudflare-stack-preview.test.ts`
+  asserts no address is shared between the two.
+- The allowlist holds exactly one entry and it is not an operator's address, so no
+  human identity gains anything from a preview. The fixture sees only the Neon dev
+  branch and dev R2 bucket the preview is already bound to.
+- Step-up elevation stays `true` on previews, so the real gate runs. Previews declare
+  no `send_email` binding, so `POST /admin/elevation/request` returns the code as
+  `devCode` (its condition is `ENVIRONMENT !== "production"` **and** no `EMAIL`, both of
+  which production fails) and a bot can complete the flow without mail.
+
+The journey is `e2e/journeys/admin-console-platform.md`; the fixture recipe is in
+`e2e/journeys/README.md`.
 
 The agent sandbox and not-yet-enabled resource proxy follow the same rule: their
 production profiles are main-only, their unnamed profiles have distinct local
@@ -300,6 +368,46 @@ Environment and replace the repository-level token with a non-production-scoped
 token. The branch policy, fail-closed resolver, local-only default Worker names,
 and Wrangler branch hooks protect deployments independently of that final token
 split.
+
+## How to add or remove a platform admin
+
+Platform admins (the cross-tenant console accounts) are rows in the
+`platform_admins` table, not Worker config (AQU-1239: the repo is public, so
+the list cannot live in `wrangler.toml`). Deployed dev and prod do not set
+`ADMIN_EMAILS`; it exists only as a bootstrap for local dev, e2e and
+self-hosters.
+
+Rows are written by hand, on purpose: no API route can grant admin. The
+`neon:*` scripts only migrate, so connect with `psql` to the target Neon branch
+(connection string from the Neon console for the `dev` or production branch):
+
+```sh
+psql "$DEV_DATABASE_URL"    # or "$PROD_DATABASE_URL"
+```
+
+```sql
+-- add (email must be lowercase and trimmed; the table refuses anything else)
+INSERT INTO platform_admins (email, added_by, note)
+VALUES ('someone@example.com', 42, 'support lead, added per AQU-0000')
+ON CONFLICT (email) DO NOTHING;
+
+-- list
+SELECT email, added_by, note, created_at FROM platform_admins ORDER BY email;
+
+-- remove (takes effect on that person's next request)
+DELETE FROM platform_admins WHERE email = 'someone@example.com';
+```
+
+`added_by` is the `users.id` of the admin granting access, or `NULL` if you
+leave it out. `note` is free text for why the person has access. An email can
+be added before the person signs up; `GET /api/v2/admin/admins` shows it with
+`hasAccount: false` until they do.
+
+Order for a first rollout: apply the migration (`neon:apply:dev` /
+`neon:apply:prod`), insert the admins, then deploy the auth Worker that no
+longer sets `ADMIN_EMAILS`. Deploying first locks everyone out of the console
+until the rows exist. If the table is missing the Worker treats nobody as a
+table admin and logs `platform_admins read failed`; it does not fail requests.
 
 ## Change checklist
 

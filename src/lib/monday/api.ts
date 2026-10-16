@@ -1,17 +1,18 @@
 /**
  * Client for the Monday.com integration API (auth-worker /api/v2/monday/*).
  *
- * Server contract: monday-integration-contract.md (routes in
+ * Server contract: docs/MONDAY-INTEGRATION.md (routes in
  * auth-worker/src/routes/monday.ts). Every function takes the caller's Bearer
  * JWT (from `useFrontierSession().session.jwt`) and hits `${AUTH_BASE}/api/v2/monday/...`
  * — same fetch/auth/error style as src/lib/terminology/subscriptions-api.ts and
  * src/lib/sync/org-settings.ts.
  */
 
+import { notifyMondayLinkChanged } from "./events"
 import { AUTH_BASE } from "../frontier/auth"
 import type { MessageKey } from "../i18n/messages/en"
 import { t } from "../i18n/standalone"
-import type { MondayMapping } from "./types"
+import type { MondayMapping, MondayMetricKey } from "./types"
 
 function authHeaders(jwt: string): HeadersInit {
   return {
@@ -73,12 +74,15 @@ export interface MondayBoard {
 
 /** GET /orgs/:orgId/boards/:boardId/structure. */
 export interface MondayBoardStructure {
+  url?: string | null
+  name?: string | null
   columns: { id: string; title: string; type: string }[]
   groups: { id: string; title: string }[]
 }
 
 /** The `link` object from GET/PUT/PATCH /projects/:projectId/link. */
 export interface MondayBoardLink {
+  boardUrl?: string | null
   id: string
   boardId: string
   boardName: string | null
@@ -92,6 +96,8 @@ export interface MondayBoardLink {
 }
 
 export interface MondayLinkStatus {
+  orgConnected?: boolean
+  orgId?: number | null
   linked: boolean
   link?: MondayBoardLink
 }
@@ -227,24 +233,34 @@ export async function putMondayLink(
   })
   if (!res.ok) await readError(res, "error.monday.saveLink")
   const out = (await res.json()) as { link: MondayBoardLink; warnings?: string[] }
+  notifyMondayLinkChanged(projectId)
   return { link: out.link, warnings: out.warnings ?? [] }
 }
 
-/** PATCH /api/v2/monday/projects/:projectId/link (maintainer+). */
+/**
+ * PATCH /api/v2/monday/projects/:projectId/link (maintainer+). A config change
+ * is checked against the board's current columns; `warnings` names anything
+ * the server dropped, as PUT's do.
+ */
 export async function patchMondayLink(
   jwt: string,
   projectId: string,
   body: { enabled?: boolean; config?: MondayMapping },
-): Promise<MondayBoardLink> {
+): Promise<{ link: MondayBoardLink; warnings: string[]; push?: MondaySyncResult }> {
   const res = await fetch(`${AUTH_BASE}/api/v2/monday/projects/${projectId}/link`, {
     method: "PATCH",
     headers: authHeaders(jwt),
     body: JSON.stringify(body),
   })
   if (!res.ok) await readError(res, "error.monday.updateLink")
-  // Accept both `{ link }` (PUT-style envelope) and a bare link object.
-  const out = (await res.json()) as MondayBoardLink | { link: MondayBoardLink }
-  return "link" in out && typeof out.link === "object" ? out.link : (out as MondayBoardLink)
+  // Accept both `{ link, warnings }` (PUT-style envelope) and a bare link object.
+  const out = (await res.json()) as
+    | MondayBoardLink
+    | { link: MondayBoardLink; warnings?: string[]; push?: MondaySyncResult }
+  notifyMondayLinkChanged(projectId)
+  return "link" in out && typeof out.link === "object"
+    ? { link: out.link, warnings: out.warnings ?? [], ...(out.push && { push: out.push }) }
+    : { link: out as MondayBoardLink, warnings: [] }
 }
 
 /** DELETE /api/v2/monday/projects/:projectId/link (maintainer+). */
@@ -254,11 +270,13 @@ export async function deleteMondayLink(jwt: string, projectId: string): Promise<
     headers: authHeaders(jwt),
   })
   if (!res.ok) await readError(res, "error.monday.removeLink")
+  notifyMondayLinkChanged(projectId)
 }
 
 // ── AI configure + sync ────────────────────────────────────────────────────
 
 export interface MondayAnalysis {
+  boardUrl?: string | null
   proposal: MondayMapping
   summary: string
   /** Why a board column the user can see isn't in the proposal (read-only type,
@@ -301,8 +319,106 @@ export async function analyzeMondayMapping(
     warnings: data.warnings ?? [],
     boardId: data.boardId ?? body.boardId ?? "",
     boardName: data.boardName ?? null,
+    boardUrl: data.boardUrl ?? null,
     boardReason: data.boardReason ?? "",
   }
+}
+
+/** One column on the board that now serves an Aquilla number. */
+export interface MondayAddedColumn {
+  metric: MondayMetricKey
+  columnId: string
+  columnType: string
+  title: string
+}
+
+export interface MondayAddColumnsResult {
+  /** Columns Aquilla created on the board just now. */
+  created: MondayAddedColumn[]
+  /** Columns that were already there under Aquilla's title; nothing created. */
+  reused: MondayAddedColumn[]
+  /** Columns Monday refused, with its reason (shown in English). */
+  failed: Array<{ metric: MondayMetricKey; title: string; error: string }>
+  /** The board's columns after the change. */
+  structure: MondayBoardStructure
+}
+
+/**
+ * POST /api/v2/monday/projects/:projectId/columns (maintainer+). "Add the
+ * missing columns for me": creates the board columns for `metrics` that the
+ * board lacks (plus an "Aquilla ID" column when it has none) and reuses any
+ * already there under the same title.
+ */
+export async function addMondayColumns(
+  jwt: string,
+  projectId: string,
+  body: { boardId: string; metrics: MondayMetricKey[] },
+): Promise<MondayAddColumnsResult> {
+  const res = await fetch(`${AUTH_BASE}/api/v2/monday/projects/${projectId}/columns`, {
+    method: "POST",
+    headers: authHeaders(jwt),
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) await readError(res, "error.monday.addColumns")
+  const data = (await res.json()) as Partial<MondayAddColumnsResult> & { structure: MondayBoardStructure }
+  return {
+    created: data.created ?? [],
+    reused: data.reused ?? [],
+    failed: data.failed ?? [],
+    structure: data.structure,
+  }
+}
+
+/** One project's link, as Org settings → Monday.com lists it. */
+export interface MondayOrgProjectLink {
+  projectId: string
+  boardId: string
+  boardName: string | null
+  boardUrl: string | null
+  enabled: boolean
+  structureStale: boolean
+  lastPushedAt: string | null
+  lastPushStatus: string | null
+}
+
+/** GET /api/v2/monday/orgs/:orgId/links (org maintainer+). */
+export async function fetchMondayOrgLinks(jwt: string, orgId: number): Promise<MondayOrgProjectLink[]> {
+  const res = await fetch(`${AUTH_BASE}/api/v2/monday/orgs/${orgId}/links`, { headers: authHeaders(jwt) })
+  if (!res.ok) await readError(res, "error.monday.loadLink")
+  return ((await res.json()) as { links: MondayOrgProjectLink[] }).links
+}
+
+/** Columns on the linked board that weren't there when the link was saved. */
+export interface MondayBoardChanges {
+  /** The server's verdict, saved on the link: true while anything is new. */
+  structureStale: boolean
+  newColumns: { id: string; title: string; type: string }[]
+  /** The board as it is now. */
+  structure: MondayBoardStructure
+}
+
+/** GET /api/v2/monday/projects/:projectId/board-changes (maintainer+). */
+export async function fetchMondayBoardChanges(jwt: string, projectId: string): Promise<MondayBoardChanges> {
+  const res = await fetch(`${AUTH_BASE}/api/v2/monday/projects/${projectId}/board-changes`, {
+    headers: authHeaders(jwt),
+  })
+  if (!res.ok) await readError(res, "error.monday.loadBoardStructure")
+  return (await res.json()) as MondayBoardChanges
+}
+
+/** POST /api/v2/monday/projects/:projectId/board-changes/dismiss — "Not needed". */
+export async function dismissMondayBoardChanges(
+  jwt: string,
+  projectId: string,
+  columnIds: string[],
+): Promise<MondayBoardChanges> {
+  const res = await fetch(`${AUTH_BASE}/api/v2/monday/projects/${projectId}/board-changes/dismiss`, {
+    method: "POST",
+    headers: authHeaders(jwt),
+    body: JSON.stringify({ columnIds }),
+  })
+  if (!res.ok) await readError(res, "error.monday.loadBoardStructure")
+  return (await res.json()) as MondayBoardChanges
 }
 
 /** POST /api/v2/monday/projects/:projectId/sync (maintainer+). Push now. */

@@ -1,14 +1,20 @@
 import type { BuiltinCheckId, InfractionSpan } from "@/lib/parsers/types"
+import type { BuiltinCheckRunContext } from "./builtin-run-context"
 import * as emptyTarget from "./check-functions/empty-target"
 import * as targetEqualsSource from "./check-functions/target-equals-source"
 import * as placeholderIntegrity from "./check-functions/placeholder-integrity"
 import * as numberIntegrity from "./check-functions/number-integrity"
+import * as numberIntegrityExtra from "./check-functions/number-integrity-extra"
 import * as endPunctuationMismatch from "./check-functions/end-punctuation-mismatch"
 import * as punctuationIntegrity from "./check-functions/punctuation-integrity"
 import * as doubleSpace from "./check-functions/double-space"
 import * as repeatedWord from "./check-functions/repeated-word"
 import * as unpairedSymbols from "./check-functions/unpaired-symbols"
 import * as abbreviationMismatch from "./check-functions/abbreviation-mismatch"
+import { BIBLE_BUILTIN_CHECKS } from "./bible-builtin-checks"
+import * as usfmStructure from "./check-functions/usfm-structure"
+import * as capitalization from "./check-functions/capitalization"
+import * as footnoteQuoteMismatch from "./check-functions/footnote-quote-mismatch"
 
 export interface BuiltinCheckDefinition {
   id: BuiltinCheckId
@@ -18,7 +24,12 @@ export interface BuiltinCheckDefinition {
   defaultEnabled: boolean
   /** True if the check should run even when target is empty. */
   runsOnEmptyTarget: boolean
-  run: (source: string, target: string) => InfractionSpan[] | null
+  /**
+   * AQU-1906: `context` carries the per-LANE inputs a check may read (the
+   * target language's punctuation conventions today). Every existing check
+   * ignores it; the two punctuation checks read `context.punctuation`.
+   */
+  run: (source: string, target: string, context?: BuiltinCheckRunContext) => InfractionSpan[] | null
   /** Static copy, or a builder that derives copy from the offending spans
    *  (e.g. placeholder-integrity names the missing token). Dead field as of
    *  AQU-832 — no consumer reads it (rule-engine.ts uses only `run` and
@@ -80,6 +91,18 @@ export const BUILTIN_CHECKS: Record<BuiltinCheckId, BuiltinCheckDefinition> = {
     run: numberIntegrity.runCheck,
     message: numberIntegrity.MESSAGE,
   },
+  // AQU-1761: the other direction, as its own check so it has its own switch
+  // and severity. Minor by default: an added number is sometimes legitimate.
+  "number-integrity-extra": {
+    id: "number-integrity-extra",
+    name: "Extra numbers",
+    description: "Numerals in the translation should also appear in the source — catches a number the translator added.",
+    defaultSeverity: "minor",
+    defaultEnabled: true,
+    runsOnEmptyTarget: false,
+    run: numberIntegrityExtra.runCheck,
+    message: numberIntegrityExtra.MESSAGE,
+  },
   "end-punctuation-mismatch": {
     id: "end-punctuation-mismatch",
     name: "End punctuation",
@@ -140,17 +163,56 @@ export const BUILTIN_CHECKS: Record<BuiltinCheckId, BuiltinCheckDefinition> = {
     run: abbreviationMismatch.runCheck,
     message: abbreviationMismatch.MESSAGE,
   },
+  // AQU-1688: the Bible data checks. Not in BUILTIN_CHECK_IDS: they become
+  // rules only while the project's Bible data checks enrichment is on.
+  ...BIBLE_BUILTIN_CHECKS,
+  "usfm-structure": {
+    id: "usfm-structure",
+    name: "USFM markers",
+    description: "Markers in the translation must be recognized and closed (\\f … \\f*).",
+    defaultSeverity: "major",
+    defaultEnabled: true,
+    runsOnEmptyTarget: false,
+    run: usfmStructure.runCheck,
+    message: usfmStructure.MESSAGE,
+  },
+  "capitalization": {
+    id: "capitalization",
+    name: "Capitalization",
+    description: "A lowercase letter where a capital is expected — opening a sentence, or opening a paragraph or heading after its marker.",
+    defaultSeverity: "minor",
+    defaultEnabled: true,
+    runsOnEmptyTarget: false,
+    run: capitalization.runCheck,
+    message: capitalization.MESSAGE,
+  },
+  "footnote-quote-mismatch": {
+    id: "footnote-quote-mismatch",
+    name: "Footnote quote",
+    description:
+      "Text a footnote or cross-reference quotes from the verse (\\fq, \\fk, \\xq, \\xk) must appear in that verse's translation.",
+    defaultSeverity: "minor",
+    defaultEnabled: true,
+    runsOnEmptyTarget: false,
+    run: footnoteQuoteMismatch.runCheck,
+    message: footnoteQuoteMismatch.MESSAGE,
+  },
 }
 
+/** The text checks every project has. Bible data checks: BIBLE_BUILTIN_CHECK_IDS. */
 export const BUILTIN_CHECK_IDS: BuiltinCheckId[] = [
   "empty-target",
   "target-equals-source",
   "placeholder-integrity",
   "number-integrity",
+  "number-integrity-extra",
   "end-punctuation-mismatch",
   "punctuation-integrity",
   "double-space",
   "repeated-word",
   "unpaired-symbols",
   "abbreviation-mismatch",
+  "usfm-structure",
+  "capitalization",
+  "footnote-quote-mismatch",
 ]

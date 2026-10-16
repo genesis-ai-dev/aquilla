@@ -9,21 +9,49 @@ import { translate } from "@/lib/i18n/translate"
 export type SortOrder = "recent-activity" | "creation" | "unresolved-first"
 
 export interface FilterState {
+  /** AQU-1958: "" = every project. Only the org-wide view ever sets this —
+   *  the project page's list is one project by construction. */
+  projectId: string
   fileId: string    // "" = all
   authorId: string  // "" = all
   participant: string // "" = all
   showResolved: boolean
   search: string    // client-side substring search over body
+  /** AQU-1958: inclusive `YYYY-MM-DD` bounds on when the thread was started;
+   *  "" = unbounded on that end. */
+  from: string
+  to: string
   sort: SortOrder
 }
 
 export const DEFAULT_FILTER: FilterState = {
+  projectId: "",
   fileId: "",
   authorId: "",
   participant: "",
   showResolved: false,
   search: "",
+  from: "",
+  to: "",
   sort: "unresolved-first",
+}
+
+/**
+ * Epoch bounds for a `YYYY-MM-DD` filter value, in the reader's own timezone —
+ * someone who picks "2 Oct" means their 2 Oct, not UTC's. `from` is the start
+ * of that day and `to` the end of it, so both ends are inclusive. Returns null
+ * for "" and for anything that isn't a calendar date (a half-typed value from
+ * a text-input fallback), which reads as "no bound" rather than "nothing
+ * matches".
+ */
+export function dayBound(value: string, edge: "start" | "end"): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim())
+  if (!match) return null
+  const [, year, month, day] = match
+  const date = edge === "start"
+    ? new Date(Number(year), Number(month) - 1, Number(day), 0, 0, 0, 0)
+    : new Date(Number(year), Number(month) - 1, Number(day), 23, 59, 59, 999)
+  return Number.isNaN(date.getTime()) ? null : date.getTime()
 }
 
 export function applyFilters(
@@ -35,8 +63,18 @@ export function applyFilters(
     // show-resolved toggle
     if (!filter.showResolved && root.resolved) return false
 
+    // project filter (org-wide view)
+    if (filter.projectId && root.projectId !== filter.projectId) return false
+
     // file filter
     if (filter.fileId && root.fileId !== filter.fileId) return false
+
+    // date range — on when the thread was started, which is what a reviewer
+    // asking "what came in last week" means.
+    const from = dayBound(filter.from, "start")
+    if (from != null && root.createdAt < from) return false
+    const to = dayBound(filter.to, "end")
+    if (to != null && root.createdAt > to) return false
 
     // author filter — matches root author
     if (filter.authorId && root.authorId !== filter.authorId) return false
@@ -87,11 +125,14 @@ export function applySorting(roots: CommentRecord[], sort: SortOrder): CommentRe
  */
 export function countActiveFilters(filter: FilterState): number {
   return [
+    filter.projectId,
     filter.fileId,
     filter.authorId,
     filter.participant,
     filter.showResolved ? "1" : "",
     filter.search.trim(),
+    filter.from.trim(),
+    filter.to.trim(),
   ].filter(Boolean).length
 }
 

@@ -247,7 +247,12 @@ describe("applyEBibleTargetImport — commit shape", () => {
     expect(await peekOutboxBatch(100)).toHaveLength(0)
   })
 
-  it("counts a selected cell without a valid parent as skipped", async () => {
+  // AQU-1669: this used to assert the opposite — that an unchainable selected
+  // cell was quietly "skipped", returning committedCount 0 and reporting
+  // success. That is the silent data loss a partner hit: the dialog closed over
+  // an optimistic patch nobody undid, so the translations looked saved and were
+  // gone on reopen. A selected cell with no AD-2 parent must fail the apply.
+  it("throws instead of silently skipping a selected cell with no valid parent", async () => {
     const missingParent: EBibleMatchResult = {
       matched: [{
         ...matchResult.matched[0],
@@ -262,10 +267,31 @@ describe("applyEBibleTargetImport — commit shape", () => {
       },
     }
 
-    const result = await applyEBibleTargetImport(missingParent, new Set(["cell-1"]), ctx)
+    await expect(
+      applyEBibleTargetImport(missingParent, new Set(["cell-1"]), ctx),
+    ).rejects.toThrow(/no event to chain/i)
 
-    expect(result).toEqual({ committedCount: 0, skippedCount: 1 })
+    // Nothing was uploaded and nothing was queued — the failure is total, so
+    // the caller's rollback leaves no half-import behind.
     expect(fetchCalls).toBe(0)
+    expect(await peekOutboxBatch(100)).toHaveLength(0)
+  })
+
+  it("fails the whole apply when only SOME selected cells are unchainable", async () => {
+    // The partial case is the dangerous one: the chainable cells would commit,
+    // the rest would vanish, and committedCount would under-report the result
+    // the user approved without ever saying so.
+    const partial: EBibleMatchResult = {
+      ...matchResult,
+      matched: [
+        matchResult.matched[0],
+        { ...matchResult.matched[1], parentId: "" },
+      ],
+    }
+
+    await expect(
+      applyEBibleTargetImport(partial, new Set(["cell-1", "cell-2"]), ctx),
+    ).rejects.toThrow(/no event to chain/i)
     expect(await peekOutboxBatch(100)).toHaveLength(0)
   })
 
@@ -317,5 +343,39 @@ describe("applyEBibleTargetImport — commit shape", () => {
       targetLang: "fr-CA",
     })
     expect(await peekOutboxBatch(100)).toHaveLength(2)
+  })
+
+  // AQU-1365: the Import button now opens a translation import for
+  // Contributors (400), while the artifact routes refuse anyone below
+  // Project lead (500). That refusal must not cost them the import itself.
+  it("still imports a Contributor's text when the server refuses the preserved copy for their role", async () => {
+    const requests: string[] = []
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      requests.push(url)
+      return new Response("role too low for source upload", { status: 403 })
+    }))
+    const withArtifact: EBibleMatchResult = {
+      ...matchResult,
+      sourceArtifact: { name: "JON-tatar.usfm", bytes: new TextEncoder().encode("\\id JON").buffer, format: "usfm" },
+    }
+
+    const result = await applyEBibleTargetImport(withArtifact, new Set(["cell-1", "cell-3"]), { ...ctx, targetLang: "tt" })
+
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toMatch(/\/files\/file-a\/source$/)
+    expect(result.committedCount).toBe(2)
+    const rows = await peekOutboxBatch(100)
+    expect(rows.map((row) => row.event.cellId).sort()).toEqual(["cell-1", "cell-3"])
+  })
+
+  it("still stops before any edit when preserving the copy fails for another reason", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("bad format", { status: 400 })))
+    const withArtifact: EBibleMatchResult = {
+      ...matchResult,
+      sourceArtifact: { name: "JON-tatar.usfm", bytes: new TextEncoder().encode("\\id JON").buffer, format: "usfm" },
+    }
+
+    await expect(applyEBibleTargetImport(withArtifact, new Set(["cell-1"]), ctx)).rejects.toThrow()
+    expect(await peekOutboxBatch(100)).toHaveLength(0)
   })
 })

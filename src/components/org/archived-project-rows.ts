@@ -19,7 +19,6 @@ export function toArchivedProjectRow(
   project: CloudProjectSummary,
   fallbackOrgName?: string | null,
 ): OrgProjectRow {
-  const files = project.files ?? []
   return {
     id: project.id,
     name: project.name,
@@ -32,8 +31,12 @@ export function toArchivedProjectRow(
     validatedAudioCells: 0,
     recordedMs: 0,
     deadlineAt: null,
-    sourceLanguage: files.find((f) => f.sourceLanguage)?.sourceLanguage ?? null,
-    targetLanguage: files.find((f) => f.targetLanguage)?.targetLanguage ?? null,
+    // AQU-1596: null, not a language guessed from the first file that declared
+    // one. The archived-list endpoint carries no lane rows and no project
+    // settings, and a file's declared language can disagree with its lane, so
+    // there is nothing here that could name the project's language honestly.
+    sourceLanguage: null,
+    targetLanguage: null,
     pm: project.pm ?? null,
     orgId: project.orgId ?? undefined,
     orgName: project.orgName ?? fallbackOrgName ?? null,

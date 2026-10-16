@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils"
 import { useCellEditHistory } from "@/hooks/useCellEditHistory"
 import { FootnotedTextValue } from "./footnotes/FootnoteInline"
 import { RightSidebarPanel } from "./RightSidebarPanel"
+import { AiTracePanel } from "./AiTracePanel"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import { DateTooltip } from "@/components/ui/date-tooltip"
@@ -141,6 +142,7 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
     history: d1History,
     isLoading: d1Loading,
     isError: d1Error,
+    failure,
     revalidate,
   } = useCellEditHistory({
     enabled,
@@ -210,7 +212,13 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
           // A failed history fetch on a synced project used to fall through to
           // "No edits yet." — confidently wrong for cells with real history.
           <div className="space-y-1.5">
-            <p className="text-xs text-muted-foreground">{t("editor.history.loadFailed")}</p>
+            <p className="text-xs text-muted-foreground">
+              {failure?.kind === "network"
+                ? t("editor.history.loadFailedNetwork")
+                : failure?.kind === "server"
+                  ? t("editor.history.loadFailedServer", { status: failure.status })
+                  : t("editor.history.loadFailed")}
+            </p>
             <button
               type="button"
               onClick={revalidate}
@@ -225,7 +233,11 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
           <>
             {isSynced && d1Error && (
               <p className="text-[10px] text-muted-foreground">
-                {t("editor.history.refreshFailed")}{" "}
+                {failure?.kind === "network"
+                  ? t("editor.history.refreshFailedNetwork")
+                  : failure?.kind === "server"
+                    ? t("editor.history.refreshFailedServer", { status: failure.status })
+                    : t("editor.history.refreshFailed")}{" "}
                 <button
                   type="button"
                   onClick={revalidate}
@@ -265,6 +277,7 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
                     postEdit={postEditSeries[group.terminalIndex] ?? null}
                     refForFirstStale={isFirstStale ? firstStaleGroupRef : null}
                     onPromote={onPromote}
+                    projectId={projectId ?? null}
                   />
                 )
               })}
@@ -298,6 +311,7 @@ function GroupItem({
   postEdit,
   refForFirstStale,
   onPromote,
+  projectId,
 }: {
   group: EntryGroup
   isCurrent: boolean
@@ -308,6 +322,7 @@ function GroupItem({
    *  opens via the F6 banner. */
   refForFirstStale: React.RefObject<HTMLLIElement | null> | null
   onPromote?: (entry: CellHistoryEntry) => void
+  projectId: string | null
 }) {
   const t = useT()
   const [expanded, setExpanded] = useState(false)
@@ -429,6 +444,9 @@ function GroupItem({
           <BookOpen className="h-3 w-3" />
           {t("editor.history.examples", { count: terminal.examples.length })}
         </div>
+      )}
+      {projectId && terminal.interventionId && (
+        <AiTracePanel projectId={projectId} interventionId={terminal.interventionId} isCurrent={isCurrent} />
       )}
       {canRestore && !pendingPromote && (
         <button

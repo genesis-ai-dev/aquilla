@@ -12,8 +12,22 @@ describe("neon-target hands the backfill its flags", () => {
     // AQU-1240: the lane backfill takes --apply / --project / --limit the same way.
     expect(childArgs("backfill-lanes", ["--apply", "--project", "p1", "--limit", "5"]))
       .toEqual(["scripts/neon-backfill-lanes.ts", "--apply", "--project", "p1", "--limit", "5"])
+    expect(childArgs("backfill-lane-batch", ["--apply", "--project", "p1", "--out", "reports"]))
+      .toEqual(["scripts/neon-backfill-lane-batch.ts", "--apply", "--project", "p1", "--out", "reports"])
     expect(childArgs("verify-lanes", ["--require-complete"]))
       .toEqual(["scripts/neon-verify-lanes.ts", "--require-complete"])
+    expect(childArgs("repair-lane-grants", ["--out", "report.json", "--project", "p1"]))
+      .toEqual(["scripts/neon-repair-lane-grants.ts", "--out", "report.json", "--project", "p1"])
+    // AQU-1941: --production is the prune's write gate — dropping it would turn
+    // a refused production apply into a silent dry run.
+    expect(childArgs("prune-phantom-voices", ["--apply", "--production", "--only", "p1"]))
+      .toEqual(["scripts/neon-prune-phantom-voices.ts", "--apply", "--production", "--only", "p1"])
+    // AQU-1953: the seed extract reads --no-upload itself (one-off hand-off, no R2 put).
+    expect(childArgs("seed-extract", ["--no-upload"]))
+      .toEqual(["scripts/seed-extract.ts", "--no-upload"])
+    // AQU-1775: --dry-run must reach the scrub, or a rehearsal deletes for real.
+    expect(childArgs("scrub-integrations", ["--dry-run"]))
+      .toEqual(["scripts/neon-scrub-integrations.ts", "--dry-run"])
   })
 
   it("still runs an unscoped backfill when nothing follows the command", () => {

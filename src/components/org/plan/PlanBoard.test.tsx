@@ -56,6 +56,15 @@ describe("grouping", () => {
     ])
   })
 
+  it("shows no rule under the Nearly complete header", () => {
+    // Sam, 2026-10-14: "within 6% or 7 cells of done" is the board's
+    // arithmetic, not something a manager needs to read. The other headers
+    // keep their one-line descriptions.
+    renderBoard([nearlyDone({ fileId: "near" }), unit({ fileId: "mid", filledCount: 40 })])
+    expect(screen.getByTestId("plan-group-nearly_complete").textContent).not.toMatch(/cells of done|within/i)
+    expect(screen.getByTestId("plan-group-in_progress")).toHaveTextContent("active, comfortably ahead")
+  })
+
   it("sends a unit a handful of cells from done to the new group, not to In progress", () => {
     // The row this feature is for: before AQU-1278 a book four cells short and
     // a book at 40% sat in the same group, sorted by a date neither of them
@@ -102,6 +111,45 @@ describe("grouping", () => {
   })
 })
 
+// AQU-1764 (Sam, 2026-10-13): In progress and Nearly complete gave their blue
+// to the progress bars. They are told apart by the mark instead, in the text
+// colour: a hollow ring, and the same ring half filled. Done, Overdue, Due soon
+// and Not started keep their coloured dots.
+describe("status marks (AQU-1764)", () => {
+  const RING = "border-[1.5px] border-foreground"
+  const HALF = "bg-[linear-gradient(90deg,var(--foreground)_50%,transparent_50%)]"
+  /** Each status's mark, by status. */
+  const marks = () => Object.fromEntries(
+    [...document.querySelectorAll<HTMLElement>("[data-plan-mark]")]
+      .map((mark) => [mark.dataset.planMark, mark.className]),
+  )
+  const expectMarks = () => {
+    const mark = marks()
+    expect(mark.in_progress).toContain(RING)
+    expect(mark.in_progress).not.toContain(HALF)
+    expect(mark.nearly_complete).toContain(RING)
+    expect(mark.nearly_complete).toContain(HALF)
+    expect(mark.done).toContain("bg-emerald-500")
+    expect(mark.done).not.toContain("border-")
+  }
+
+  it("rings In progress and half-fills Nearly complete, in the group headers and on the rows' status", () => {
+    renderBoard([
+      nearlyDone({ fileId: "near" }),
+      unit({ fileId: "mid", filledCount: 40 }),
+      unit({ fileId: "fin", doneAt: NOW, doneBy: "r" }),
+    ])
+    expectMarks()
+    // And the header words are in the text colour rather than a blue.
+    expect(screen.getByTestId("plan-fold-in_progress").className).toContain("text-foreground")
+    expect(screen.getByTestId("plan-fold-nearly_complete").className).toContain("text-foreground")
+    // The in-order arrangement moves the status onto each row, same marks.
+    fireEvent.click(screen.getByTestId("plan-view-order"))
+    expect(screen.queryByTestId("plan-fold-in_progress")).toBeNull()
+    expectMarks()
+  })
+})
+
 describe("summary", () => {
   it("reports done out of total and flags overdue", () => {
     renderBoard([
@@ -142,6 +190,31 @@ describe("summary", () => {
     renderBoard([unit({ filledCount: 40 })])
     expect(screen.queryByTestId("plan-summary-nearly-complete")).toBeNull()
   })
+
+  // AQU-1950: the overview passes its buttons as one fragment. Placed straight
+  // into the justify-between header, each button became its own item and the
+  // first one sat stranded in the middle of the row.
+  it("keeps every action together in one group at the end of the header", () => {
+    render(
+      <PlanBoard
+        units={[unit({ filledCount: 40 })]}
+        now={NOW}
+        projectId="p1"
+        selectedId={null}
+        onSelect={vi.fn()}
+        actions={
+          <>
+            <button type="button">Analyze word counts</button>
+            <button type="button">Copy CSV</button>
+          </>
+        }
+      />,
+    )
+    const group = screen.getByTestId("plan-board-actions")
+    expect(within(group).getByRole("button", { name: "Analyze word counts" })).toBeInTheDocument()
+    expect(within(group).getByRole("button", { name: "Copy CSV" })).toBeInTheDocument()
+    expect(group).toHaveClass("ms-auto")
+  })
 })
 
 describe("the date column", () => {
@@ -163,9 +236,31 @@ describe("the date column", () => {
   })
 
   it("says when a done unit was marked, rather than how stale it is", () => {
-    renderBoard([unit({ doneAt: Date.parse("2026-08-20T00:00:00Z"), doneBy: "r" })])
+    // Finished: a unit marked done with work in it says that instead (AQU-1494).
+    renderBoard([unit({ filledCount: 100, validatedCount: 100, doneAt: Date.parse("2026-08-20T00:00:00Z"), doneBy: "r" })])
     // Scoped to the row: the Done group header also contains the word "marked".
     const row = screen.getByTestId("plan-row-f1-")
+    expect(within(row).getByText(/^marked /)).toBeInTheDocument()
+  })
+
+  it("says when a unit marked done has work in it again, and keeps it in Done (AQU-1494)", () => {
+    // Sam, 2026-10-03: Ruth was marked done, then a setting started counting
+    // its headings and it was six cells short — and the row still read only
+    // "marked <date>". It stays in Done (the mark is a person's decision), but
+    // the row says what came back, in the words every other row uses.
+    renderBoard([unit({ totalCount: 93, filledCount: 87, validatedCount: 87, doneAt: NOW, doneBy: "r" })])
+    const row = screen.getByTestId("plan-row-f1-")
+    expect(within(screen.getByTestId("plan-group-done")).getByTestId("plan-row-f1-")).toBe(row)
+    const note = within(row).getByTestId("plan-done-with-work-f1-")
+    expect(note).toHaveTextContent(/^Marked done \u00b7 6 cells to translate$/)
+    expect(note.className).toContain("text-amber-700")
+    expect(within(row).queryByText(/^marked /)).toBeNull()
+  })
+
+  it("keeps a finished unit marked done as just 'marked <date>' (AQU-1494)", () => {
+    renderBoard([unit({ filledCount: 100, validatedCount: 100, doneAt: NOW, doneBy: "r" })])
+    const row = screen.getByTestId("plan-row-f1-")
+    expect(within(row).queryByTestId("plan-done-with-work-f1-")).toBeNull()
     expect(within(row).getByText(/^marked /)).toBeInTheDocument()
   })
 
@@ -191,6 +286,43 @@ describe("audio columns", () => {
     // Labelled, so "20% | 5%" is not a riddle.
     expect(screen.getByText("AUD")).toBeInTheDocument()
     expect(screen.getByText("TXT")).toBeInTheDocument()
+  })
+
+  // AQU-1954 (Sam, 2026-10-14): a book in a file nobody records showed a 0%
+  // audio bar its status ignored.
+  const recorded = unit({ fileId: "audio", fileName: "Exodus", filledCount: 50, audioCount: 20 })
+  const textOnly = unit({ fileId: "text", fileName: "Numbers", filledCount: 50 })
+
+  it("draws the audio bar only on rows whose file carries audio", () => {
+    renderBoard([recorded, textOnly])
+    expect(screen.getAllByText("AUD")).toHaveLength(1)
+    const exodus = screen.getByText("Exodus").closest("li")!
+    const numbers = screen.getByText("Numbers").closest("li")!
+    expect(within(exodus).getByText("AUD")).toBeInTheDocument()
+    expect(within(numbers).queryByText("AUD")).toBeNull()
+  })
+
+  it("draws it on every row when the project records audio, before any take", () => {
+    render(
+      <PlanBoard
+        units={[textOnly, unit({ fileId: "text2", fileName: "Titus", filledCount: 5 })]}
+        now={NOW}
+        projectId="p1"
+        selectedId={null}
+        onSelect={vi.fn()}
+        recordsAudio
+      />,
+    )
+    expect(screen.getAllByText("AUD")).toHaveLength(2)
+  })
+
+  it("keeps the summary strip in step with the groups when the project records audio", () => {
+    const finished = unit({ fileId: "text", fileName: "Numbers", filledCount: 100, validatedCount: 100 })
+    render(
+      <PlanBoard units={[finished]} now={NOW} projectId="p1" selectedId={null} onSelect={vi.fn()} recordsAudio />,
+    )
+    expect(screen.queryByTestId("plan-summary-nearly-complete")).toBeNull()
+    expect(screen.getByTestId("plan-summary-in-progress")).toBeInTheDocument()
   })
 })
 
@@ -623,6 +755,23 @@ describe("what the third column says", () => {
     expect(dateCell()).toHaveTextContent("4, 9, 17 and 2 more")
   })
 
+  it("names the front matter, first, when cells before chapter 1 are short too (AQU-1493)", () => {
+    // A line added above a book's first verse counts in its front matter. The
+    // row used to name only the chapters, or nothing when only it was short.
+    withProps([nearlyDone()], {
+      shortChaptersByUnit: new Map([["f1:", ["2", "3"]]]),
+      frontMatterShortUnits: new Set(["f1:"]),
+    })
+    expect(dateCell()).toHaveTextContent("front matter and chapters 2 and 3")
+  })
+
+  it("names the front matter alone when no chapter is short (AQU-1493)", () => {
+    withProps([nearlyDone()], { frontMatterShortUnits: new Set(["f1:"]) })
+    expect(dateCell()).toHaveTextContent("4 cells to validate")
+    expect(dateCell()).toHaveTextContent("front matter")
+    expect(dateCell()).not.toHaveTextContent("chapter")
+  })
+
   it("says a finished unit is not marked done, rather than that it has no date", () => {
     withProps([unit({ filledCount: 100, validatedCount: 100, lastEditAt: NOW - 3600_000 })])
     const cell = dateCell()
@@ -683,6 +832,9 @@ describe("a target date does not cost the row its link", () => {
     const onSelect = vi.fn()
     const onOpenShortfall = vi.fn()
     withRow([dated()], { onSelect, onOpenShortfall })
+    // AQU-1764: in the text colour now, so the underline is always there, not
+    // only on hover — without it the link reads as plain words.
+    expect(shortfall().className).toMatch(/(^|\s)underline(\s|$)/)
     fireEvent.click(shortfall())
     expect(onOpenShortfall).toHaveBeenCalledTimes(1)
     expect(onSelect).not.toHaveBeenCalled()

@@ -328,6 +328,23 @@ describe("GET /:projectId — followed-file selection (AQU-1559)", () => {
     expect(body.sourceLinkUpstreamFileCount).toBe(3)
   })
 
+  // AQU-1566: the upstream's hidden timeline files (a dubbing cue sheet, a
+  // caption track's content) are not files anyone can pick, so they are not in M.
+  it("leaves the upstream's hidden timeline files out of its file count", async () => {
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO files (id, project_id, name, kind, role, anchor_file_id, event_id, created_at, updated_at, meta)
+       VALUES ('up-cues', ?, 'MAT audio', 'vtt', 'audio-cues', ?, 'e-up-cues', 1000, 1000, '{}'),
+              ('up-track', ?, 'MAT captions', 'vtt', 'timeline-content', ?, 'e-up-track', 1000, 1000, '{}')`,
+    )
+      .bind(UP, MAT, UP, MAT)
+      .run()
+    await linkRequest({ sourceProjectId: UP, mode: "live", consumes: "source", fileIds: [MAT, MRK] })
+
+    const res = await app.request(`/api/v2/projects/${DOWN}`, { headers: authHeader(await jwtFor("lead")) }, env)
+    const body = (await res.json()) as { sourceLinkUpstreamFileCount: number | null }
+    expect(body.sourceLinkUpstreamFileCount).toBe(3)
+  })
+
   // WHY: a whole-project link is stated without a count ("All files"), so it must
   // come back as null rather than as a list of everything — which would read as a
   // pinned link.

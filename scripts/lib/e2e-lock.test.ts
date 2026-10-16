@@ -1,9 +1,9 @@
-import { spawn, spawnSync, type ChildProcess } from "node:child_process"
+import { spawn, type ChildProcess } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { fileURLToPath } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import { afterEach, describe, expect, it } from "vitest"
 import {
   acquireE2eSlotLock,
@@ -67,15 +67,18 @@ async function deadPid(): Promise<number> {
   return pid
 }
 
-/** Vitest's happy-dom process.kill does not report ESRCH. Ask the OS. */
+/** Real Node: ESRCH means the pid is gone, EPERM means it exists but isn't ours. */
 function osPidAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false
-  const result = spawnSync("kill", ["-0", String(pid)], { encoding: "utf8" })
-  if (result.status === 0) return true
-  const message = result.stderr ?? ""
-  if (/operation not permitted/i.test(message)) return true
-  if (/no such process/i.test(message)) return false
-  throw new Error(`kill -0 ${pid} failed: ${message || result.status}`)
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? error.code : undefined
+    if (code === "ESRCH") return false
+    if (code === "EPERM") return true
+    throw error
+  }
 }
 
 describe("e2e slot lock", () => {
@@ -416,7 +419,7 @@ async function waitFor(predicate: () => boolean, timeoutMs: number, detail: () =
 function raceRunnerSource(): string {
   return `
 import fs from "node:fs"
-import { acquireE2eSlotLock } from ${JSON.stringify(LOCK_MODULE)}
+import { acquireE2eSlotLock } from ${JSON.stringify(pathToFileURL(LOCK_MODULE).href)}
 
 const root = process.argv[2]
 const slot = Number(process.argv[3])

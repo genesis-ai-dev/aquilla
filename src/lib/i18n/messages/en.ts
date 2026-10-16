@@ -45,6 +45,16 @@ import { agent } from "../namespaces/agent"
 import { agentDraftReview } from "../namespaces/agentDraftReview"
 import { workspace } from "../namespaces/workspace"
 import { segmentation } from "../namespaces/segmentation"
+import { smartEdits } from "../namespaces/smartEdits"
+import { harmonizer } from "../namespaces/harmonizer"
+import { bibleData } from "../namespaces/bibleData"
+import { languageProfile } from "../namespaces/languageProfile"
+import { projectDecisions } from "../namespaces/projectDecisions"
+import { bibleAlignment } from "../namespaces/bibleAlignment"
+import { bibleChecks } from "../namespaces/bibleChecks"
+import { bibleHelps } from "../namespaces/bibleHelps"
+import { bibleParticipants } from "../namespaces/bibleParticipants"
+import { bibleVoices } from "../namespaces/bibleVoices"
 import type { MessageValue } from "../plurals"
 
 export const en = {
@@ -74,6 +84,16 @@ export const en = {
   ...agentDraftReview.keys,
   ...workspace.keys,
   ...segmentation.keys,
+  ...smartEdits.keys,
+  ...harmonizer.keys,
+  ...bibleData.keys,
+  ...languageProfile.keys,
+  ...projectDecisions.keys,
+  ...bibleAlignment.keys,
+  ...bibleChecks.keys,
+  ...bibleHelps.keys,
+  ...bibleParticipants.keys,
+  ...bibleVoices.keys,
 } as const
 
 export type MessageKey = keyof typeof en

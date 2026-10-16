@@ -17,7 +17,9 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { getAssignmentsGivenByMe, unassignAssignment, type GivenAssignment } from "@/lib/sync/assignments"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { UserChip } from "@/components/UserChip"
 
 interface ProjectHandedOutProps {
   projectId: string
@@ -81,7 +83,7 @@ export function ProjectHandedOut({ projectId, jwt, author, refreshKey = 0, onRem
       {expanded && (
         <div className="mt-1 space-y-0.5">
           {assignments.map((a) => {
-            const username = a.username ?? t("org.workloadRollup.unknownUser", { id: a.assigneeUserId })
+            const who = a.username ?? t("common.userChip.anonymous")
             return (
               <div key={a.assignmentId} className="flex items-center gap-1 rounded px-2 py-1.5">
                 <div className="min-w-0 flex-1">
@@ -93,8 +95,20 @@ export function ProjectHandedOut({ projectId, jwt, author, refreshKey = 0, onRem
                       </Badge>
                     )}
                   </span>
-                  <p className="truncate text-[10px] text-muted-foreground">
-                    {t("workspace.handedOut.assignee", { username })}
+                  <p className="flex min-w-0 items-center gap-1 truncate text-[10px] text-muted-foreground">
+                    <RichMessage
+                      k="workspace.handedOut.assignee"
+                      values={{
+                        username: (
+                          <UserChip
+                            userId={a.assigneeUserId}
+                            username={a.username}
+                            size="xs"
+                            nameClassName="text-[10px] font-medium text-foreground"
+                          />
+                        ),
+                      }}
+                    />
                   </p>
                 </div>
                 <AppTooltip content={t("org.workloadRollup.removeTooltip")}>
@@ -102,7 +116,7 @@ export function ProjectHandedOut({ projectId, jwt, author, refreshKey = 0, onRem
                     type="button"
                     variant="ghost"
                     size="icon-sm"
-                    aria-label={t("org.workloadRollup.removeAriaLabel", { scope: a.scopeLabel, user: username })}
+                    aria-label={t("org.workloadRollup.removeAriaLabel", { scope: a.scopeLabel, user: who })}
                     disabled={removingId === a.assignmentId}
                     onClick={() => void handleRemove(a)}
                   >

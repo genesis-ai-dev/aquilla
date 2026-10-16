@@ -64,7 +64,7 @@ export interface SetBriefCommand {
   ifMatchVersion: number
 }
 
-/** Same floor PatchSettings applies to a non-`terminology` settings key. Kept
+/** Same floor PatchSettings applies to the `translationBrief` key. Kept
  *  identical on purpose — see the header note on not being a cheaper door. */
 export const SET_BRIEF_REQUIRED_ROLE = ROLE.MAINTAINER
 
@@ -319,6 +319,7 @@ export async function commitSetBrief(
     ops: [{ key: BRIEF_SETTINGS_KEY, value: nextBrief }],
     ifMatchVersion: expectedVersion,
     updatedBy: cred.userId,
+    registerLanes: false,
   })
 
   if (result.status === 'conflict') {
@@ -392,6 +393,7 @@ async function autoRenderL1(
     ops: [{ key: BRIEF_SETTINGS_KEY, value: withL1 }],
     ifMatchVersion: version,
     updatedBy: cred.userId,
+    registerLanes: false,
   })
   if (write.status !== 'ok') {
     const reason = write.status === 'conflict' ? 'settings changed while the summary was rendering' : write.message

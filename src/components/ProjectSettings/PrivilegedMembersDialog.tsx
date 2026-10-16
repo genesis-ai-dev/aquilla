@@ -8,7 +8,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
-import { InitialsAvatar } from "@/components/InitialsAvatar"
+import { UserChip } from "@/components/UserChip"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
   fetchPrivilegedProjectMembers,
@@ -125,15 +125,10 @@ function PrivilegedMemberRow({ member }: { member: ProjectMember }) {
   const showEmail = email.length > 0 && email.toLowerCase() !== member.username.toLowerCase()
   return (
     <li className="flex min-w-0 items-center gap-2.5 py-2">
-      <span aria-hidden className="shrink-0">
-        <InitialsAvatar name={member.username} size="sm" />
-      </span>
-      <span className="min-w-0">
-        <span className="block truncate font-medium text-foreground">{member.username}</span>
-        {showEmail ? (
-          <span className="block truncate text-muted-foreground">{email}</span>
-        ) : null}
-      </span>
+      <UserChip userId={member.userId} username={member.username} size="sm" className="min-w-0" />
+      {showEmail ? (
+        <span className="min-w-0 truncate text-muted-foreground">{email}</span>
+      ) : null}
     </li>
   )
 }

@@ -4,12 +4,26 @@
 // looks up a lane row that does not exist (NULL lane_id → 500).
 
 import { canonicalLaneId } from '../../../src/lib/lanes/registry-lanes'
+import { laneLanguage, type LaneIdentity, type LaneLanguageSettings } from '../../../src/lib/lanes/lane-display'
 
 export { canonicalLaneId }
 
-/** `settings.targetLanguage`, or null when unset or not a string. */
-export function settingsTargetLanguage(settings: Record<string, unknown>): string | null {
-  return typeof settings.targetLanguage === 'string' ? settings.targetLanguage : null
+/**
+ * The former default lane's language. Callers that have lane rows pass them
+ * so a typed `language` wins; otherwise the migration fallback inside
+ * `laneLanguage` answers from settings.
+ */
+export function settingsTargetLanguage(
+  settings: Record<string, unknown>,
+  lanes?: readonly (LaneIdentity & { legacyTag?: string | null })[],
+): string | null {
+  const row = lanes?.find((lane) => lane.role !== "source" && (lane.legacyTag ?? "") === "")
+  const language = laneLanguage(row ?? { role: "target", language: null }, {
+    settings: settings as LaneLanguageSettings,
+    role: "target",
+    legacyTag: "",
+  })
+  return language || null
 }
 
 /**

@@ -42,6 +42,16 @@ import { agent } from "./agent"
 import { agentDraftReview } from "./agentDraftReview"
 import { workspace } from "./workspace"
 import { segmentation } from "./segmentation"
+import { smartEdits } from "./smartEdits"
+import { harmonizer } from "./harmonizer"
+import { bibleData } from "./bibleData"
+import { languageProfile } from "./languageProfile"
+import { projectDecisions } from "./projectDecisions"
+import { bibleAlignment } from "./bibleAlignment"
+import { bibleChecks } from "./bibleChecks"
+import { bibleHelps } from "./bibleHelps"
+import { bibleParticipants } from "./bibleParticipants"
+import { bibleVoices } from "./bibleVoices"
 
 export const NAMESPACES = [
   common,
@@ -70,4 +80,14 @@ export const NAMESPACES = [
   agentDraftReview,
   workspace,
   segmentation,
+  smartEdits,
+  harmonizer,
+  bibleData,
+  languageProfile,
+  projectDecisions,
+  bibleAlignment,
+  bibleChecks,
+  bibleHelps,
+  bibleParticipants,
+  bibleVoices,
 ] as const

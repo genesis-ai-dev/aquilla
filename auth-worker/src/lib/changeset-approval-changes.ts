@@ -11,6 +11,7 @@
 // file stays plain text and diffs are reviewable. Same string value.
 
 import type { AuthHonoEnv } from "../middleware/auth"
+import { wireLegacyTagSql } from "../../../db/shared/lane-sql"
 
 /** Hard cap on per-cell change rows returned to the approval page. A plan can
  *  hold thousands of SetTranslation commands; the page needs enough to audit,
@@ -30,6 +31,10 @@ interface SetTranslationCommandLike {
   cellId: string
   value: string
   laneId?: string
+  /** AQU-1673: present when the value came from an uploaded translation set
+   *  staged as proposals. Rendered as provenance so a reviewer can tell
+   *  imported text from an AI draft. */
+  importOrigin?: { fileName?: unknown; importedAt?: unknown }
 }
 
 interface PlanImportCommandLike {
@@ -54,6 +59,10 @@ export interface ApprovalChange {
   before: string | null
   /** The text the changeset will write. */
   after: string
+  /** AQU-1673: set only on a proposal imported from a file — the name of that
+   *  file. Absent on AI drafts and on hand-written agent proposals, which is
+   *  exactly the distinction the reviewer needs. */
+  importedFrom?: string
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -124,7 +133,7 @@ export async function buildChangeDetails(
   const inList = pairs.map(() => "(?, ?)").join(", ")
   const cellRows = await db
     .prepare(
-      `SELECT file_id, cell_id, side, target_lang, value, canonical_ref
+      `SELECT file_id, cell_id, side, ${wireLegacyTagSql("cells")} AS target_lang, value, canonical_ref
          FROM cells
         WHERE project_id = ? AND (file_id, cell_id) IN (${inList})`,
     )
@@ -145,7 +154,9 @@ export async function buildChangeDetails(
     if (row.side === "source") {
       sourceByCell.set(key, { value: row.value, canonicalRef: row.canonical_ref })
     } else {
-      targetByLane.set(`${key}\u0000${row.target_lang}`, row.value)
+      // Commands still name a lane by its legacy tag ('' = the default lane).
+      // The tag is the lane's, not the projection column.
+      targetByLane.set(`${key}\u0000${row.target_lang ?? ""}`, row.value)
     }
   }
 
@@ -175,6 +186,9 @@ export async function buildChangeDetails(
         source: source?.value ?? null,
         before: targetByLane.get(`${key}\u0000${lane}`) ?? null,
         after: s.value,
+        ...(typeof s.importOrigin?.fileName === "string" && s.importOrigin.fileName !== ""
+          ? { importedFrom: s.importOrigin.fileName }
+          : {}),
       }
     }),
   }

@@ -61,8 +61,14 @@ const CONCURRENCY = 2
  * Run `fn` over `items` with a sliding concurrency window.
  * Stops accepting new work when `isCancelled()` returns true (in-flight jobs
  * complete naturally).
+ *
+ * AQU-1722: exported as `runBatchJobs` so the selection-driven voice batch
+ * (`batch-voice.ts`) runs on THIS queue rather than standing up a second one.
+ * One queue means one progress slot, one banner, and one Cancel button — two
+ * would both write `_progress` and the banner's Cancel would reach whichever
+ * happened to be on screen.
  */
-export async function runBatch<T>(
+export async function runBatchJobs<T>(
   items: T[],
   fn: (item: T) => Promise<unknown>,
   opts: {
@@ -125,6 +131,17 @@ export function cancelBatchSynth() {
   _synthCancelFlag = true
 }
 
+/** AQU-1722: arm the synth cancel flag for a fresh run. Shared by
+ *  `runSynthAll` and the selection-driven voice batch, which share the flag
+ *  because they share the one progress slot the banner's Cancel targets. */
+export function resetBatchSynthCancel() {
+  _synthCancelFlag = false
+}
+
+export function isBatchSynthCancelled(): boolean {
+  return _synthCancelFlag
+}
+
 export function cancelBatchMeasure() {
   _measureCancelFlag = true
 }
@@ -139,6 +156,12 @@ export interface TranscribeAllArgs {
   targetLanguage?: string
   /** @deprecated single-language callers; used as targetLanguage fallback. */
   language?: string
+  /**
+   * AQU-1462: lane the member is working in. Omitted for the default lane.
+   * AQU-1978: forwarded to every take's timings re-attach (see
+   * `TranscribeCellArgs.targetLang`) — not the language above, the lane's tag.
+   */
+  targetLang?: string
   /** AQU-928: run every cell that HAS audio, not just the ones missing a
    *  transcript. For an explicitly chosen scope — the sections the user
    *  selected on the timeline — "already transcribed" is not a reason to do
@@ -193,7 +216,7 @@ export function isSourceSegmentSelected(c: CellData): boolean {
  */
 export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
   const { cells, projectId, session } = args
-  const targetLang = args.targetLanguage ?? args.language
+  const targetLanguage = args.targetLanguage ?? args.language
 
   const targets = cells.filter((c) => {
     // AQU-928: a forced run keeps only the "has audio" half of the gate — the
@@ -212,7 +235,7 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
   args.onProgress?.(0, targets.length)
   let completed = 0
 
-  await runBatch(
+  await runBatchJobs(
     targets,
     (cell) =>
       transcribeCell({
@@ -222,7 +245,8 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
         // AQU-646/SUB-29: language follows the audio by PROVENANCE — source
         // segments are source speech; every take (incl. dub takes on media
         // cells) voices the target text.
-        language: isSourceSegmentSelected(cell) ? (args.sourceLanguage ?? targetLang) : targetLang,
+        language: isSourceSegmentSelected(cell) ? (args.sourceLanguage ?? targetLanguage) : targetLanguage,
+        ...(args.targetLang ? { targetLang: args.targetLang } : {}),
       }),
     {
       kind: "transcribe",
@@ -407,7 +431,7 @@ export async function runMeasureAll(args: MeasureAllArgs): Promise<MeasureAllRes
 
   _measureCancelFlag = false
 
-  await runBatch(
+  await runBatchJobs(
     targets,
     async ({ cellId, att }) => {
       try {
@@ -508,7 +532,7 @@ export async function runSynthAll(args: SynthAllArgs): Promise<void> {
 
   _synthCancelFlag = false
 
-  await runBatch(
+  await runBatchJobs(
     targets,
     (t) =>
       generateCellVoice({
@@ -519,6 +543,7 @@ export async function runSynthAll(args: SynthAllArgs): Promise<void> {
         username,
         text: t.text,
         voiceCellId: t.voiceCellId,
+        surface: "generate-all", // AQU-1572
       }),
     {
       kind: "synth",

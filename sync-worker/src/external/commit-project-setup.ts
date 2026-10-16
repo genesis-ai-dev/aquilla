@@ -38,6 +38,7 @@ import {
 import { briefPatchOfSetup, splitSettingsOps, type ProjectSetupCommand } from './commands-project-setup'
 import { projectSetupFloor } from './prepare-project-setup'
 import type { PatchSettingsOp } from './commands-patch-settings'
+import { ensureProjectLanes, listProjectLanes } from '../../../db/shared/lanes'
 import type { PlanImportCommand } from './commands'
 import type {
   ExternalEnv,
@@ -54,6 +55,7 @@ import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { loadProjectSettings, patchProjectSettingsShared } from '../../../db/shared/projects'
 import { loosensPolicy } from '../../../db/shared/policy-direction'
+import { loadInheritedPolicyDefaults } from '../../../db/shared/validation-threshold'
 import {
   applyBriefL1Summary,
   applyBriefPatch,
@@ -136,6 +138,19 @@ export async function commitProjectSetup(
     return errorResponse('job_failed', 'ProjectSetup changeset is missing its step ledger')
   }
 
+  if (cmd.plannedLanes && cmd.plannedLanes.length > 0) {
+    try {
+      const existing = await listProjectLanes(db, projectId)
+      await ensureProjectLanes(db, projectId, {
+        lanes: cmd.plannedLanes,
+        existingLanes: existing,
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'could not create the project lanes'
+      return errorResponse('validation_failed', message)
+    }
+  }
+
   const gate = await receiptOnlyGates(db, cs)
   if (gate instanceof Response) return gate
 
@@ -212,6 +227,7 @@ async function writeSettingsOps(
       ops: [...ops],
       ifMatchVersion: live.version,
       updatedBy,
+      registerLanes: false,
     })
     if (result.status === 'ok') return { ok: true, version: result.settings.version }
     if (result.status === 'error') return { ok: false, error: result.message }
@@ -219,7 +235,12 @@ async function writeSettingsOps(
   return { ok: false, error: 'the project settings were being written concurrently — retry the commit' }
 }
 
+/**
+ * Settings ops other than the retired language keys. Lanes are created from
+ * `cmd.plannedLanes` before this step, not from settings.
+ */
 async function applySettingsStep(step: StepContext, ops: PatchSettingsOp[]): Promise<StepOutcome> {
+  if (ops.length === 0) return { ok: true }
   const written = await writeSettingsOps(step.db, step.cs.projectId, ops, step.cred.userId)
   return written.ok ? { ok: true } : { ok: false, error: written.error }
 }
@@ -232,7 +253,8 @@ async function applySettingsStep(step: StepContext, ops: PatchSettingsOp[]): Pro
  */
 async function applyPolicyStep(step: StepContext, ops: PatchSettingsOp[]): Promise<StepOutcome> {
   const live = await loadProjectSettings(step.db, step.cs.projectId)
-  const refused = new Set(loosensPolicy(ops, live.settings).map((verdict) => verdict.key))
+  const inherited = await loadInheritedPolicyDefaults(step.db, step.cs.projectId)
+  const refused = new Set(loosensPolicy(ops, live.settings, inherited).map((verdict) => verdict.key))
   const admissible = ops.filter((op) => !refused.has(op.key))
   for (const key of refused) {
     if (!step.policyKeysNotApplied.includes(key)) step.policyKeysNotApplied.push(key)
@@ -369,6 +391,7 @@ async function applyImportStep(
   const parsed = await parseArtifactToCells(step.env, projectId, current.artifactId, {
     fileType: current.fileType,
     ...(current.resultIndex !== undefined ? { resultIndex: current.resultIndex } : {}),
+    ...(current.laneId !== undefined ? { laneId: current.laneId } : {}),
     requireSingleResult: true,
   })
   if (!parsed.ok) {
@@ -389,6 +412,8 @@ async function applyImportStep(
     fileType: current.fileType,
     ...(current.sourceLanguage !== undefined ? { sourceLanguage: current.sourceLanguage } : {}),
     ...(current.targetLanguage !== undefined ? { targetLanguage: current.targetLanguage } : {}),
+    ...(current.sourceTextDirection !== undefined ? { sourceTextDirection: current.sourceTextDirection } : {}),
+    ...(current.targetTextDirection !== undefined ? { targetTextDirection: current.targetTextDirection } : {}),
     artifactId: current.artifactId,
     cells: parsed.parsed.cells,
   }
@@ -605,7 +630,7 @@ async function verifyBriefReachesCopilot(
   const preview = await buildPromptPreview(step.db, {
     projectId: step.cs.projectId,
     cellId: cell.cell_id,
-    targetLang: typeof settings.targetLanguage === 'string' ? settings.targetLanguage : '',
+    targetLang: '',
     fileId: first.fileId,
   })
   if (!preview.ok) return { reaches: true, details: caveat }

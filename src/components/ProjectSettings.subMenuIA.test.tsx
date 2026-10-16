@@ -59,11 +59,12 @@ const PROJECT_ID = "proj-submenu-ia"
 function makeProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
   return {
     id: PROJECT_ID,
+    orgId: 7,
     name: "Sub-menu IA Test Project",
     files: [{ id: "f1", name: "GEN.usfm", type: "usfm", createdAt: "", cellCount: 1 }],
     sourceLanguage: "English",
     targetLanguage: "French",
-    syncRole: { level: 700, source: "creator" },
+    syncRole: { level: rosterSettings.roleLevel, source: "creator" },
     // Give every group something to render: git-sync origin, no source link
     // (kept simple — source-link/upstream tested for visibility separately
     // isn't needed here since "General" and "AI" alone already prove the
@@ -95,11 +96,24 @@ vi.mock("@/hooks/useProjectSettings", () => ({
     hasFetched: true,
     isOnline: true,
     refresh: vi.fn(),
+    orgPolicy: rosterSettings.visibilityFloors ? carriedOrgPolicy : null,
+    visibilityFloors: rosterSettings.visibilityFloors,
   }),
 }))
 
+// AQU-1771: the org policy the project's settings response carries.
+const carriedOrgPolicy = {
+  rosterViewMinRole: 600,
+  memberProgressViewMinRole: 600,
+  allowSelfAssignment: false,
+  allowScopedLaneAssignment: false,
+  assignmentMinRole: 500,
+  autoPropagateRepetitions: true,
+  exportMinRole: null,
+}
+
 vi.mock("@/hooks/useOrg", () => ({
-  useOrg: () => ({ org: null }),
+  useOrg: () => ({ org: { id: 99 } }),
 }))
 
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -182,7 +196,17 @@ vi.mock("@/hooks/useProjectOrgId", () => ({
   useProjectOrgId: () => ({ orgId: null, isLoading: false, error: null }),
 }))
 
-const rosterSettings = vi.hoisted(() => ({ canViewRoster: true }))
+// AQU-1771: the Members pane follows the roster floor THIS project enforces —
+// the org's (here 600, from the org read below) or the project's own stricter
+// one carried on its settings response — against the caller's project role.
+const rosterSettings = vi.hoisted(() => ({
+  canViewRoster: true,
+  roleLevel: 700,
+  visibilityFloors: null as null | {
+    rosterViewMinRole: { org: number; project: number | null; effective: number }
+    memberProgressViewMinRole: { org: number; project: number | null; effective: number }
+  },
+}))
 vi.mock("@/hooks/useOrgSettings", () => ({
   useOrgSettings: () => ({
     settings: {},
@@ -281,6 +305,8 @@ function renderModalAt(path: string) {
 beforeEach(() => {
   vi.clearAllMocks()
   rosterSettings.canViewRoster = true
+  rosterSettings.roleLevel = 700
+  rosterSettings.visibilityFloors = null
 })
 
 describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
@@ -451,8 +477,10 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.getByText(/^harmonization$/i)).toBeTruthy()
     expect(screen.getByText(/^health$/i)).toBeTruthy()
     // AQU-764: the decay panel is named "Health", not "Retrieval support".
-    // It sits under Validation + Harmonization on this pane.
-    const validationHeading = screen.getByText(/^validation$/i)
+    // It sits under the validation cards + Harmonization on this pane. The
+    // text and audio rules are two cards since 2026-10-03.
+    expect(screen.getByText(/^audio validation$/i)).toBeTruthy()
+    const validationHeading = screen.getByText(/^text validation$/i)
     const retrievalHeading = screen.getByText(/^health$/i)
     expect(
       validationHeading.compareDocumentPosition(retrievalHeading) &
@@ -529,6 +557,7 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
 
   it("hides the Members settings pane when the caller is below the roster floor", () => {
     rosterSettings.canViewRoster = false
+    rosterSettings.roleLevel = 400
     renderAt(`/project/${PROJECT_ID}/settings`)
 
     expect(screen.queryByRole("link", { name: "Members" })).toBeNull()
@@ -540,4 +569,35 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.queryByText(/roster hidden/i)).toBeNull()
     expect(screen.getByText("General")).toBeTruthy()
   })
+
+  it("hides the Members pane from a maintainer when this project raised its member list to owners (AQU-1771)", () => {
+    rosterSettings.roleLevel = 600
+    rosterSettings.visibilityFloors = {
+      rosterViewMinRole: { org: 600, project: 700, effective: 700 },
+      memberProgressViewMinRole: { org: 600, project: null, effective: 600 },
+    }
+    renderAt(`/project/${PROJECT_ID}/settings`)
+    expect(screen.queryByText("Members")).toBeNull()
+    expect(screen.getByText("General")).toBeTruthy()
+  })
+
+  it("shows the Members pane to a maintainer when the project follows the org (AQU-1771)", () => {
+    rosterSettings.roleLevel = 600
+    rosterSettings.visibilityFloors = {
+      rosterViewMinRole: { org: 600, project: null, effective: 600 },
+      memberProgressViewMinRole: { org: 600, project: null, effective: 600 },
+    }
+    renderAt(`/project/${PROJECT_ID}/settings`)
+    expect(screen.getByText("Members")).toBeTruthy()
+  })
+})
+
+vi.mock("./ProjectSettings/MondayIntegrationSection", () => ({
+  MondayIntegrationSection: ({ orgId }: { orgId: number | null }) => (
+    <div data-testid="monday-project-org">{orgId}</div>
+  ),
+}))
+it("AQU-1208: Monday setup uses the project's organization, not the personal organization", () => {
+  renderAt(`/project/${PROJECT_ID}/settings/integrations`)
+  expect(screen.getByTestId("monday-project-org")).toHaveTextContent("7")
 })

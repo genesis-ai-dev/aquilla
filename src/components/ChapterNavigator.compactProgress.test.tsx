@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 
 import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
+import { PROGRESS_BG } from "@/lib/progress/progress-palette"
 
 /**
  * AQU-1485 — the milestone picker used to spell out "N% translated" / "N%
@@ -118,6 +119,25 @@ describe("MilestoneNavigator progress column (AQU-1485)", () => {
       "0% validated",
     )
   })
+
+  it("puts a progress-palette swatch before each figure and greys the icons (AQU-1764)", () => {
+    // The icons were amber and emerald; the colour now lives in a swatch in
+    // the tones the file rows' bars use.
+    render(
+      <MilestoneNavigator items={corinthians} activeKey="scripture:1CO:1" onSelect={() => {}} />,
+    )
+    openPicker()
+
+    for (const [wording, fill] of [
+      ["25% translated", PROGRESS_BG.textTranslated],
+      ["0% validated", PROGRESS_BG.textValidated],
+    ]) {
+      const line = screen.getByText(wording).closest("[title]")!
+      expect(line.querySelector("[data-progress-swatch]")!.className, wording).toContain(fill)
+      expect(line.querySelector("svg")!.getAttribute("class"), wording).toContain("text-muted-foreground")
+      expect(line.querySelector("svg")!.getAttribute("class"), wording).not.toMatch(/amber|emerald/)
+    }
+  })
 })
 
 describe("MilestoneNavigator clipped titles (AQU-1485)", () => {
@@ -175,5 +195,26 @@ describe("MilestoneNavigator clipped titles (AQU-1485)", () => {
     expect(
       screen.getByRole("combobox", { name: /Current chapter: 1 Corinthians 1:1–31/ }),
     ).toHaveAttribute("title", "1 Corinthians 1:1–31")
+  })
+
+  it("never shows 100% beside the marker while a cell is left (AQU-1493)", () => {
+    const jude: MilestoneNavigationItem[] = [
+      {
+        key: "scripture:JUD:1",
+        kind: "chapter",
+        label: "Jude 1:1–25",
+        shortLabel: "1",
+        description: "220 cells",
+        translated: 219,
+        validated: 219,
+        total: 220,
+      },
+    ]
+    render(<MilestoneNavigator items={jude} activeKey="scripture:JUD:1" onSelect={() => {}} />)
+    fireEvent.click(screen.getByRole("combobox", { name: /Current chapter: Jude 1:1–25/ }))
+
+    expect(screen.getAllByText("99%")).toHaveLength(2)
+    expect(screen.queryByText("100%")).not.toBeInTheDocument()
+    expect(screen.getByText("99% translated")).toHaveClass("sr-only")
   })
 })

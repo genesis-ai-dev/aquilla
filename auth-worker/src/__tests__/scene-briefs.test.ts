@@ -177,8 +177,8 @@ describe("scene-brief run evidence", () => {
     let adapterProvenance: unknown
     const executor: PgExecutor = {
       async run(_sql, params) {
-        adapterRegister = params[7]
-        adapterProvenance = params[11]
+        adapterRegister = params[6]
+        adapterProvenance = params[10]
         return {
           rows: [{
             id: params[0],
@@ -186,18 +186,19 @@ describe("scene-brief run evidence", () => {
             file_id: params[2],
             start_cell_id: params[3],
             end_cell_id: params[4],
-            target_lang: params[5],
-            construal: params[6],
-            ambiguity_register: params[7],
-            l1_summary: params[8],
-            l1_generated_at: params[9],
-            l1_model_id: params[10],
+            target_lang: "",
+            lane_id: params[12],
+            construal: params[5],
+            ambiguity_register: params[6],
+            l1_summary: params[7],
+            l1_generated_at: params[8],
+            l1_model_id: params[9],
             status: "proposed",
             human_edited: false,
             stale_since: null,
             stale_reason: null,
-            provenance: params[11],
-            created_by: params[12],
+            provenance: params[10],
+            created_by: params[11],
             reviewed_by: null,
             version: 1,
             created_at: "2026-08-11T00:00:00.000Z",
@@ -257,7 +258,12 @@ describe("scene-brief run evidence", () => {
     // Execute the exact prerequisite and activity migrations so policy/function
     // dependencies match production rather than being stubbed in the test.
     await pg.exec(RLS_MIGRATION)
-    await pg.exec(ACTIVITY_MIGRATION)
+    // 0074 also creates contextual_runs_project_lane_time on target_lang.
+    // That index already exists, on lane_id, and 0155 dropped the column.
+    await pg.exec(ACTIVITY_MIGRATION.replace(
+      /CREATE INDEX IF NOT EXISTS contextual_runs_project_lane_time[\s\S]*?;/,
+      "-- contextual_runs_project_lane_time already exists on lane_id\n",
+    ))
 
     const recovered = await listSceneBriefsByRun(env.AQUILLA_PG, PROJECT, "legacy-run")
     expect(recovered.map((brief) => brief.id)).toEqual(["legacy-object"])

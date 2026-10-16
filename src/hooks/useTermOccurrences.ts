@@ -15,6 +15,8 @@ export interface UseTermOccurrencesOpts {
   conceptId: string | null
   getToken?: (fileId: string) => Promise<string | null>
   enabled?: boolean
+  /** Legacy tag of the lane whose renderings judge the target. `''` is the former default lane. */
+  lane?: string
 }
 
 export interface UseTermOccurrences {
@@ -40,7 +42,7 @@ export interface UseTermOccurrences {
 const EMPTY: CellData[] = []
 
 export function useTermOccurrences(opts: UseTermOccurrencesOpts): UseTermOccurrences {
-  const { projectId, conceptId, getToken, enabled = true } = opts
+  const { projectId, conceptId, getToken, enabled = true, lane } = opts
   const [cells, setCells] = useState<CellData[]>(EMPTY)
   const [total, setTotal] = useState(0)
   const [enforced, setEnforced] = useState(0)
@@ -93,6 +95,7 @@ export function useTermOccurrences(opts: UseTermOccurrencesOpts): UseTermOccurre
               offset: index * PAGE_SIZE,
               limit: PAGE_SIZE,
               signal: controller.signal,
+              lane,
             }),
           ),
         )
@@ -125,7 +128,7 @@ export function useTermOccurrences(opts: UseTermOccurrencesOpts): UseTermOccurre
     return () => {
       controller.abort()
     }
-  }, [projectId, conceptId, enabled, pageCount, reloadNonce])
+  }, [projectId, conceptId, enabled, pageCount, reloadNonce, lane])
 
   useEffect(() => {
     setPageCount(1)

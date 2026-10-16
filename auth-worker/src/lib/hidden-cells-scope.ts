@@ -53,7 +53,6 @@ export function notHiddenSql(alias = 'cells'): string {
        AND hidden_src.file_id = ${alias}.file_id
        AND hidden_src.cell_id = ${alias}.cell_id
        AND hidden_src.side = 'source'
-       AND COALESCE(hidden_src.target_lang, '') = ''
        AND hidden_src.hidden_at IS NOT NULL
   )`
 }

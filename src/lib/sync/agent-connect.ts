@@ -1,5 +1,6 @@
 import { AUTH_BASE } from "@/lib/frontier/auth"
 import { fetchWithTimeout } from "@/lib/frontier/orgs"
+import { openExternal } from "@/lib/open-external"
 
 export interface AgentConnectionRequest {
   agentName: string
@@ -48,9 +49,14 @@ export async function mcpOAuthCall<T>(jwt: string, path: "request" | "decision",
   return { ok: false, status: response.status, redirect: parsed?.redirect }
 }
 
-/** Leave Aquilla for the requesting app. Its own function so tests can stub it. */
+/**
+ * Leave Aquilla for the requesting app. Its own function so tests can stub it.
+ * In the desktop app this opens the system browser (see open-external.ts);
+ * the opener only allows http(s), so a custom-scheme redirect (vscode://…)
+ * falls back to navigating the window, which bfcache-guard.ts covers.
+ */
 export function leaveForClient(url: string): void {
-  window.location.assign(url)
+  openExternal(url).catch(() => window.location.assign(url))
 }
 
 /** Shown after approval for the human to paste back to an agent whose polling

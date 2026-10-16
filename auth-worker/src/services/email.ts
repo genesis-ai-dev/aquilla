@@ -66,6 +66,17 @@ function escapeHtml(value: string): string {
 }
 
 /**
+ * Subjects interpolate user-controlled names (username, project/org name,
+ * public form fields). Collapse CR/LF and other control chars so a name can
+ * never inject headers (Bcc:, etc.) regardless of the mail transport's own
+ * validation. Mirrors sync-worker/src/notification-email.ts.
+ */
+export function oneLine(value: string): string {
+  // eslint-disable-next-line no-control-regex
+  return value.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").trim()
+}
+
+/**
  * Build the project-invite email (subject + HTML + text). Pure and exported so
  * the invite-context copy can be unit-tested without an EMAIL binding.
  */
@@ -117,7 +128,7 @@ export function buildProjectInviteEmail(
     ? `${inviter} invited you to ${scope}. Accept: ${joinUrl}`
     : `You've been invited to ${scope}. Accept: ${joinUrl}`
 
-  return { subject, html, text }
+  return { subject: oneLine(subject), html, text }
 }
 
 function buildWelcomeHtml(
@@ -308,7 +319,7 @@ export function buildOrgInviteEmail(
     ? `${inviter} invited you to join ${orgName} on Aquilla. Join: ${joinUrl}`
     : `You've been invited to join ${orgName} on Aquilla. Join: ${joinUrl}`
 
-  return { subject, html, text }
+  return { subject: oneLine(subject), html, text }
 }
 
 /**
@@ -408,7 +419,7 @@ export function buildBookCallEmail(
     (message ? `\nMessage:\n${message}\n` : "") +
     `\nReply to this email to respond directly.`
 
-  return { subject, html, text }
+  return { subject: oneLine(subject), html, text }
 }
 
 /**
@@ -516,7 +527,7 @@ export function buildNewsletterRequestEmail(
     `send a one-line welcome (Reply-To is their address). To decline: reply\n` +
     `politely or archive.`
 
-  return { subject, html, text }
+  return { subject: oneLine(subject), html, text }
 }
 
 /**
@@ -648,141 +659,11 @@ export async function sendRetentionReportEmail(
   const from = env.EMAIL_FROM || "noreply@support.aquilla.app"
   const replyTo = env.EMAIL_REPLY_TO || DEFAULT_REPLY_TO
   try {
-    await env.EMAIL.send({ from, replyTo, to, subject: report.subject, html: report.html, text: report.text })
+    await env.EMAIL.send({ from, replyTo, to, subject: oneLine(report.subject), html: report.html, text: report.text })
     return true
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.warn("[retention-report] email failed:", message)
     return false
   }
-}
-
-/** An in-app feedback submission (routes/feedback.ts). Unlike the marketing
- *  forms above, the sender is an authenticated Aquilla user, so identity comes
- *  from the session rather than the form — only `description` is typed. */
-export interface FeedbackSubmission {
-  /** Free text the user typed. */
-  description: string
-  /** Account the feedback was sent from (session-derived, not user-typed). */
-  username: string
-  /** Account email — used as Reply-To so the team can answer directly. */
-  email: string
-  /** SPA route the user was on when they opened the dialog. */
-  route: string
-  projectId?: string | null
-  fileId?: string | null
-  /** posthog-js session replay URL, when analytics are on. */
-  sessionReplayUrl?: string | null
-  /** R2 key of the attached screenshot in `aquilla-snapshots`, when one was
-   *  captured AND storage was available. `null` distinguishes "no screenshot"
-   *  from "screenshot dropped" — the copy says which. */
-  screenshotKey?: string | null
-  /** True when the user attached a screenshot but R2 was unavailable, so the
-   *  team knows an image existed and is not hunting for a key that was never
-   *  written. */
-  screenshotDropped?: boolean
-}
-
-/**
- * Build the internal notification email for an in-app feedback submission.
- * Pure and exported so the copy can be unit-tested without an EMAIL binding.
- * `description` is user-typed and `username`/`email` are user-chosen at signup,
- * so every interpolated value is escaped.
- */
-export function buildFeedbackEmail(
-  submission: FeedbackSubmission,
-): { subject: string; html: string; text: string } {
-  const username = submission.username.trim()
-  const description = submission.description.trim()
-  const route = submission.route.trim() || "(unknown)"
-  const projectId = submission.projectId?.trim() || null
-  const fileId = submission.fileId?.trim() || null
-  const replayUrl = submission.sessionReplayUrl?.trim() || null
-  const screenshotKey = submission.screenshotKey?.trim() || null
-
-  const subject = `Aquilla feedback from ${username}`
-
-  const screenshotValue = screenshotKey
-    ? `${screenshotKey} (aquilla-snapshots R2)`
-    : submission.screenshotDropped
-      ? "attached by the user, but object storage was unavailable — not saved"
-      : null
-
-  const rows: [string, string][] = [
-    ["From", `${username} <${submission.email.trim()}>`],
-    ["Route", route],
-    ...((projectId ? [["Project", projectId]] : []) as [string, string][]),
-    ...((fileId ? [["File", fileId]] : []) as [string, string][]),
-    ...((replayUrl ? [["Session replay", replayUrl]] : []) as [string, string][]),
-    ...((screenshotValue ? [["Screenshot", screenshotValue]] : []) as [string, string][]),
-  ]
-
-  const rowsHtml = rows
-    .map(
-      ([label, value]) =>
-        `<tr>
-          <td style="padding: 6px 12px 6px 0; color: #6b7280; white-space: nowrap; vertical-align: top;">${label}</td>
-          <td style="padding: 6px 0; word-break: break-all;">${escapeHtml(value)}</td>
-        </tr>`,
-    )
-    .join("")
-
-  const html = `
-    <html>
-      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #111;">
-        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-          <h2 style="color: #2563eb; margin-bottom: 16px;">New in-app feedback</h2>
-          <p style="background-color: #f3f4f6; padding: 12px; border-radius: 6px; white-space: pre-wrap;">${escapeHtml(description)}</p>
-          <table style="border-collapse: collapse; margin: 16px 0;">${rowsHtml}</table>
-          <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
-          <p style="color: #6b7280; font-size: 0.875rem;">
-            Reply to this email to answer the user directly — Reply-To is set to their account address.
-          </p>
-        </div>
-      </body>
-    </html>
-  `.trim()
-
-  const text =
-    `New in-app feedback from ${username} <${submission.email.trim()}>.\n\n` +
-    `${description}\n\n` +
-    rows
-      .slice(1)
-      .map(([label, value]) => `${label}: ${value}`)
-      .join("\n") +
-    `\n\nReply to this email to answer the user directly.`
-
-  return { subject, html, text }
-}
-
-/**
- * Forward an in-app feedback submission to the team inbox (CONTACT_EMAIL,
- * same destination as the marketing forms above). Mirrors sendBookCallEmail:
- * `{ delivered: false }` without error when the EMAIL binding is absent
- * (local/e2e profiles) so the in-app flow still succeeds in dev; throws when a
- * configured send actually fails so the route can tell the user it didn't land.
- */
-export async function sendFeedbackEmail(
-  env: Env,
-  submission: FeedbackSubmission,
-): Promise<{ delivered: boolean }> {
-  if (!env.EMAIL) return { delivered: false }
-  const from = env.EMAIL_FROM || "noreply@support.aquilla.app"
-  const to = env.CONTACT_EMAIL || "joel@frontierrnd.com"
-  const { subject, html, text } = buildFeedbackEmail(submission)
-  try {
-    await env.EMAIL.send({
-      from,
-      // Reply-To is the reporter so a plain reply starts the conversation.
-      replyTo: submission.email.trim(),
-      to: [to],
-      subject,
-      html,
-      text,
-    })
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    throw new Error(`Failed to send feedback email: ${message}`)
-  }
-  return { delivered: true }
 }

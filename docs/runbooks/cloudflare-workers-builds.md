@@ -86,9 +86,10 @@ separately in Cloudflare. Any retained Neon branch or R2 data is not deployable
 application infrastructure and requires its own backup/retention decision before
 deletion.
 
-`.github/workflows/ci.yml` and `.github/workflows/deploy-workers.yml` are retained
-as explicit `workflow_dispatch` fallbacks. Neither has a `pull_request` or `push`
-trigger. Scheduled Neon/content workflows and tag-triggered Tauri releases are
+`.github/workflows/ci.yml` runs its test gate on pull requests into `dev` and
+keeps `workflow_dispatch` for typecheck, the production build, Tauri, and IDML.
+`.github/workflows/deploy-workers.yml` stays `workflow_dispatch` only. Neither
+workflow has a `push` trigger. Scheduled Neon/content workflows and tag-triggered Tauri releases are
 separate operational workloads and are not silently reassigned to Workers Builds.
 Playwright smoke on a dedicated Hetzner box is also separate — see
 [hetzner-ci.md](hetzner-ci.md). It is `workflow_dispatch`-only until a
@@ -144,7 +145,10 @@ Generated `previews` configs bind both backends to development Hyperdrive
 and Durable Objects, **not database rows or blobs**. QA should use a separate
 project per preview; development and preview sessions of the same project do
 not share a Durable Object broadcast namespace. Schema-changing PRs need a
-separate database branch. Automatic migrations, legacy identity migration,
+separate database branch. Both backends set `LANE_READ_WALL=1`, as the
+development Workers do, so a member below Maintainer sees only the lanes they
+were granted; a member added without a lane grant sees no target lane.
+Automatic migrations, legacy identity migration,
 cron jobs, outbound email, and local authentication bypasses are not enabled.
 Password login uses existing development accounts. Email/invite delivery,
 external integrations, and optional agent infrastructure need separate preview

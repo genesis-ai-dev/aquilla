@@ -7,6 +7,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { CellAudioUploadButton } from "./CellAudioUploadButton"
+import { I18nProvider } from "@/lib/i18n/I18nProvider"
+import { LOCALE_STORAGE_KEY } from "@/lib/i18n/store"
+import { CATALOGS } from "@/lib/i18n/messages"
+import { translate } from "@/lib/i18n/translate"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({
@@ -153,5 +157,105 @@ describe("CellAudioUploadButton", () => {
     const clickSpy = vi.spyOn(input, "click")
     fireEvent.click(screen.getByRole("button", { name: "Upload audio file" }))
     expect(clickSpy).toHaveBeenCalled()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AQU-510: the reason a translator reads is localized, not the raw throw.
+//
+// Producer → consumer, not two isolated halves: the real `attachAudioFileToCell`
+// raises the failure, `toUserFacingError` classifies it, and this asserts on the
+// text that actually lands in the popover. A unit test of the mapper plus a
+// hand-built string would not have caught the bug — the mapper was already
+// correct and already localized; the component simply never called it.
+// ---------------------------------------------------------------------------
+describe("CellAudioUploadButton — localized failure text (AQU-510)", () => {
+  function setLocale(code: string) {
+    window.localStorage.setItem(LOCALE_STORAGE_KEY, code)
+  }
+
+  /**
+   * The hidden picker, found by type rather than by label: its accessible name
+   * is localized too, so `getByLabelText("Upload audio file")` finds nothing
+   * once the locale is Burmese — which is the point of the feature.
+   */
+  function fileInput(): HTMLElement {
+    const input = document.querySelector('input[type="file"]')
+    if (!input) throw new Error("no file input rendered")
+    return input as HTMLElement
+  }
+
+  beforeEach(() => {
+    window.localStorage.clear()
+  })
+
+  /** The shape our fetch helpers throw: "<op> failed: HTTP <status> — <body>". */
+  const RAW_403 =
+    "uploadCellAudio failed: HTTP 403 — {\"error\":\"forbidden\",\"detail\":\"audio_write_denied for role viewer\"}"
+
+  it("renders the Burmese sentence for an HTTP 403, and none of the raw body", async () => {
+    setLocale("my")
+    uploadCellAudio.mockRejectedValue(new Error(RAW_403))
+
+    render(
+      <I18nProvider>
+        <CellAudioUploadButton {...PROPS} />
+      </I18nProvider>,
+    )
+    selectFile(fileInput(), new File(["wav-bytes"], "recording.wav", { type: "audio/wav" }))
+
+    const expected = translate(CATALOGS.my, "error.network.forbidden", { contextSuffix: "" }, "my")
+    await waitFor(() => expect(screen.getByText(expected)).toBeTruthy())
+
+    // The failure mode this ticket exists for: English/diagnostic text on screen.
+    const shown = document.body.textContent ?? ""
+    expect(shown).not.toContain("HTTP 403")
+    expect(shown).not.toContain("audio_write_denied")
+    expect(shown).not.toContain("forbidden")
+
+    // Stronger than naming the strings we happen to expect: under a
+    // non-Latin-script locale the reason must carry NO Latin letters at all.
+    // A half-translated sentence — the catalogue's frame around an English noun
+    // interpolated by the caller, which is what `toUserFacingError`'s `context`
+    // argument produces — passes every assertion above and fails this one.
+    expect(expected).not.toMatch(/[A-Za-z]/)
+    const reason = screen.getByText(expected).textContent ?? ""
+    expect(reason).not.toMatch(/[A-Za-z]/)
+  })
+
+  it("renders the Malay sentence for the same failure", async () => {
+    setLocale("ms")
+    uploadCellAudio.mockRejectedValue(new Error(RAW_403))
+
+    render(
+      <I18nProvider>
+        <CellAudioUploadButton {...PROPS} />
+      </I18nProvider>,
+    )
+    selectFile(fileInput(), new File(["wav-bytes"], "recording.wav", { type: "audio/wav" }))
+
+    await waitFor(() =>
+      expect(screen.getByText(/tidak mempunyai kebenaran/i)).toBeTruthy(),
+    )
+    expect(document.body.textContent ?? "").not.toContain("HTTP 403")
+  })
+
+  it("falls back to English rather than a raw key when the locale omits the string", async () => {
+    // `zz` is not a registered locale, so the catalog lookup misses entirely —
+    // the AC#4 path. English text, never a bare `error.network.*` key.
+    setLocale("zz")
+    uploadCellAudio.mockRejectedValue(new Error(RAW_403))
+
+    render(
+      <I18nProvider>
+        <CellAudioUploadButton {...PROPS} />
+      </I18nProvider>,
+    )
+    selectFile(fileInput(), new File(["wav-bytes"], "recording.wav", { type: "audio/wav" }))
+
+    await waitFor(() =>
+      expect(screen.getByText(/don't have permission to do that/i)).toBeTruthy(),
+    )
+    expect(document.body.textContent ?? "").not.toContain("error.network.")
   })
 })

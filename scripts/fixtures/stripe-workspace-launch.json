@@ -1,0 +1,392 @@
+{
+  "accountId": "acct_1U47kG7SR91OrWMS",
+  "products": [
+    {
+      "id": "aquilla_native_pro_2026_09",
+      "active": true,
+      "livemode": false
+    },
+    {
+      "id": "aquilla_native_max_5x_2026_09",
+      "active": true,
+      "livemode": false
+    },
+    {
+      "id": "aquilla_native_max_20x_2026_09",
+      "active": true,
+      "livemode": false
+    },
+    {
+      "id": "aquilla_native_team_2026_09",
+      "active": true,
+      "livemode": false
+    },
+    {
+      "id": "aquilla_native_team_20x_2026_09",
+      "active": true,
+      "livemode": false
+    }
+  ],
+  "prices": [
+    {
+      "id": "price_1UMhs87SR91OrWMSBZtxlIyo",
+      "product": "aquilla_native_pro_2026_09",
+      "active": true,
+      "livemode": false,
+      "type": "recurring",
+      "billing_scheme": "per_unit",
+      "currency": "usd",
+      "unit_amount": 2000,
+      "recurring": {
+        "interval": "month",
+        "interval_count": 1,
+        "meter": null,
+        "trial_period_days": null,
+        "usage_type": "licensed"
+      },
+      "transform_quantity": null,
+      "lookup_key": "aquilla_native_2026_09_pro_month"
+    },
+    {
+      "id": "price_1UMhs87SR91OrWMSKCa25SiU",
+      "product": "aquilla_native_pro_2026_09",
+      "active": true,
+      "livemode": false,
+      "type": "recurring",
+      "billing_scheme": "per_unit",
+      "currency": "usd",
+      "unit_amount": 20000,
+      "recurring": {
+        "interval": "year",
+        "interval_count": 1,
+        "meter": null,
+        "trial_period_days": null,
+        "usage_type": "licensed"
+      },
+      "transform_quantity": null,
+      "lookup_key": "aquilla_native_2026_09_pro_year"
+    },
+    {
+      "id": "price_1UMhs87SR91OrWMSACWJG927",
+      "product": "aquilla_native_max_5x_2026_09",
+      "active": true,
+      "livemode": false,
+      "type": "recurring",
+      "billing_scheme": "per_unit",
+      "currency": "usd",
+      "unit_amount": 6000,
+      "recurring": {
+        "interval": "month",
+        "interval_count": 1,
+        "meter": null,
+        "trial_period_days": null,
+        "usage_type": "licensed"
+      },
+      "transform_quantity": null,
+      "lookup_key": "aquilla_native_2026_09_max_5x_month"
+    },
+    {
+      "id": "price_1UMhs97SR91OrWMSB8dyyYfX",
+      "product": "aquilla_native_max_5x_2026_09",
+      "active": true,
+      "livemode": false,
+      "type": "recurring",
+      "billing_scheme": "per_unit",
+      "currency": "usd",
+      "unit_amount": 60000,
+      "recurring": {
+        "interval": "year",
+        "interval_count": 1,
+        "meter": null,
+        "trial_period_days": null,
+        "usage_type": "licensed"
+      },
+      "transform_quantity": null,
+      "lookup_key": "aquilla_native_2026_09_max_5x_year"
+    },
+    {
+      "id": "price_1UMhs97SR91OrWMSb2ZZ03Ny",
+      "product": "aquilla_native_max_20x_2026_09",
+      "active": true,
+      "livemode": false,
+      "type": "recurring",
+      "billing_scheme": "per_unit",
+      "currency": "usd",
+      "unit_amount": 12000,
+      "recurring": {
+        "interval": "month",
+        "interval_count": 1,
+        "meter": null,
+        "trial_period_days": null,
+        "usage_type": "licensed"
+      },
+      "transform_quantity": null,
+      "lookup_key": "aquilla_native_2026_09_max_20x_month"
+    },
+    {
+      "id": "price_1UMhs97SR91OrWMSynLK5GuJ",
+      "product": "aquilla_native_max_20x_2026_09",
+      "active": true,
+      "livemode": false,
+      "type": "recurring",
+      "billing_scheme": "per_unit",
+      "currency": "usd",
+      "unit_amount": 120000,
+      "recurring": {
+        "interval": "year",
+        "interval_count": 1,
+        "meter": null,
+        "trial_period_days": null,
+        "usage_type": "licensed"
+      },
+      "transform_quantity": null,
+      "lookup_key": "aquilla_native_2026_09_max_20x_year"
+    },
+    {
+      "id": "price_1UMhsA7SR91OrWMSJPvqOCks",
+      "product": "aquilla_native_team_2026_09",
+      "active": true,
+      "livemode": false,
+      "type": "recurring",
+      "billing_scheme": "per_unit",
+      "currency": "usd",
+      "unit_amount": 60000,
+      "recurring": {
+        "interval": "month",
+        "interval_count": 1,
+        "meter": null,
+        "trial_period_days": null,
+        "usage_type": "licensed"
+      },
+      "transform_quantity": null,
+      "lookup_key": "aquilla_native_2026_09_team_month"
+    },
+    {
+      "id": "price_1UMhsA7SR91OrWMSURsBC5Xe",
+      "product": "aquilla_native_team_2026_09",
+      "active": true,
+      "livemode": false,
+      "type": "recurring",
+      "billing_scheme": "per_unit",
+      "currency": "usd",
+      "unit_amount": 600000,
+      "recurring": {
+        "interval": "year",
+        "interval_count": 1,
+        "meter": null,
+        "trial_period_days": null,
+        "usage_type": "licensed"
+      },
+      "transform_quantity": null,
+      "lookup_key": "aquilla_native_2026_09_team_year"
+    },
+    {
+      "id": "price_1UMhsA7SR91OrWMSyN1FNJHx",
+      "product": "aquilla_native_team_20x_2026_09",
+      "active": true,
+      "livemode": false,
+      "type": "recurring",
+      "billing_scheme": "per_unit",
+      "currency": "usd",
+      "unit_amount": 72000,
+      "recurring": {
+        "interval": "month",
+        "interval_count": 1,
+        "meter": null,
+        "trial_period_days": null,
+        "usage_type": "licensed"
+      },
+      "transform_quantity": null,
+      "lookup_key": "aquilla_native_2026_09_team_20x_month"
+    },
+    {
+      "id": "price_1UMhsA7SR91OrWMSetCWinSP",
+      "product": "aquilla_native_team_20x_2026_09",
+      "active": true,
+      "livemode": false,
+      "type": "recurring",
+      "billing_scheme": "per_unit",
+      "currency": "usd",
+      "unit_amount": 720000,
+      "recurring": {
+        "interval": "year",
+        "interval_count": 1,
+        "meter": null,
+        "trial_period_days": null,
+        "usage_type": "licensed"
+      },
+      "transform_quantity": null,
+      "lookup_key": "aquilla_native_2026_09_team_20x_year"
+    }
+  ],
+  "configurations": [
+    {
+      "id": "bpc_1UMhtH7SR91OrWMSdhHTkD6o",
+      "active": true,
+      "livemode": false,
+      "metadata": {
+        "aquilla_native": "2026-09-native-personal"
+      },
+      "features": {
+        "customer_update": {
+          "allowed_updates": [],
+          "enabled": false
+        },
+        "invoice_history": {
+          "enabled": true
+        },
+        "payment_method_update": {
+          "enabled": true,
+          "payment_method_configuration": null
+        },
+        "subscription_cancel": {
+          "cancellation_reason": {
+            "enabled": false,
+            "feedback_options": [],
+            "options": [
+              "too_expensive",
+              "missing_features",
+              "switched_service",
+              "unused",
+              "other"
+            ]
+          },
+          "enabled": true,
+          "mode": "at_period_end",
+          "proration_behavior": "none"
+        },
+        "subscription_pause": {
+          "enabled": false
+        },
+        "subscription_update": {
+          "billing_cycle_anchor": "unchanged",
+          "default_allowed_updates": [
+            "price"
+          ],
+          "enabled": true,
+          "products": [
+            {
+              "adjustable_quantity": {
+                "enabled": false,
+                "maximum": null,
+                "minimum": 1
+              },
+              "prices": [
+                "price_1UMhs87SR91OrWMSBZtxlIyo",
+                "price_1UMhs87SR91OrWMSKCa25SiU"
+              ],
+              "product": "aquilla_native_pro_2026_09"
+            },
+            {
+              "adjustable_quantity": {
+                "enabled": false,
+                "maximum": null,
+                "minimum": 1
+              },
+              "prices": [
+                "price_1UMhs87SR91OrWMSACWJG927",
+                "price_1UMhs97SR91OrWMSB8dyyYfX"
+              ],
+              "product": "aquilla_native_max_5x_2026_09"
+            },
+            {
+              "adjustable_quantity": {
+                "enabled": false,
+                "maximum": null,
+                "minimum": 1
+              },
+              "prices": [
+                "price_1UMhs97SR91OrWMSb2ZZ03Ny",
+                "price_1UMhs97SR91OrWMSynLK5GuJ"
+              ],
+              "product": "aquilla_native_max_20x_2026_09"
+            }
+          ],
+          "proration_behavior": "always_invoice",
+          "schedule_at_period_end": {
+            "conditions": []
+          },
+          "trial_update_behavior": "end_trial"
+        }
+      }
+    },
+    {
+      "id": "bpc_1UMhty7SR91OrWMSiI34Arkf",
+      "active": true,
+      "livemode": false,
+      "metadata": {
+        "aquilla_native": "2026-09-native-team"
+      },
+      "features": {
+        "customer_update": {
+          "allowed_updates": [],
+          "enabled": false
+        },
+        "invoice_history": {
+          "enabled": true
+        },
+        "payment_method_update": {
+          "enabled": true,
+          "payment_method_configuration": null
+        },
+        "subscription_cancel": {
+          "cancellation_reason": {
+            "enabled": false,
+            "feedback_options": [],
+            "options": [
+              "too_expensive",
+              "missing_features",
+              "switched_service",
+              "unused",
+              "other"
+            ]
+          },
+          "enabled": true,
+          "mode": "at_period_end",
+          "proration_behavior": "none"
+        },
+        "subscription_pause": {
+          "enabled": false
+        },
+        "subscription_update": {
+          "billing_cycle_anchor": "unchanged",
+          "default_allowed_updates": [
+            "price"
+          ],
+          "enabled": true,
+          "products": [
+            {
+              "adjustable_quantity": {
+                "enabled": false,
+                "maximum": null,
+                "minimum": 1
+              },
+              "prices": [
+                "price_1UMhsA7SR91OrWMSJPvqOCks",
+                "price_1UMhsA7SR91OrWMSURsBC5Xe"
+              ],
+              "product": "aquilla_native_team_2026_09"
+            },
+            {
+              "adjustable_quantity": {
+                "enabled": false,
+                "maximum": null,
+                "minimum": 1
+              },
+              "prices": [
+                "price_1UMhsA7SR91OrWMSyN1FNJHx",
+                "price_1UMhsA7SR91OrWMSetCWinSP"
+              ],
+              "product": "aquilla_native_team_20x_2026_09"
+            }
+          ],
+          "proration_behavior": "always_invoice",
+          "schedule_at_period_end": {
+            "conditions": []
+          },
+          "trial_update_behavior": "end_trial"
+        }
+      }
+    }
+  ]
+}

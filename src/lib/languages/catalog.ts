@@ -11,11 +11,12 @@
  * reads its two-letter `code` synchronously to map lanes onto Inworld tags.
  *
  * Suggestions only. Language fields stay freeform: the product contract is
- * "any label works — a BCP-47 tag, a language name, or a register description
- * (e.g. 'Grade 7 English')". Picking an entry stores its `name` (the display
- * name), i.e. exactly the string a user would have typed by hand, so nothing
- * downstream (agent prompts, export, lane counting, editor badges) changes
- * shape. Codes are shown as a hint and are searchable, never stored.
+ * a language name or a register description (e.g. 'Grade 7 English'). Picking
+ * an entry stores its `name`, i.e. exactly the string a user would have typed
+ * by hand, so nothing downstream (agent prompts, export, lane counting,
+ * editor badges) changes shape. Codes are searchable so a typed tag still
+ * finds the name, and they are never stored and never shown in the list
+ * (AQU-1792). The code is derived from the stored name and can be overridden.
  */
 
 export type LanguageEntry = {
@@ -222,8 +223,30 @@ export const LANGUAGES: readonly LanguageEntry[] = [
   { code: "zu", name: "Zulu" },
 ]
 
+/**
+ * AQU-1792 — script and region varieties ISO 639 does not name on its own.
+ * The picker suggests the name ("Traditional Han"), never the tag ("zh-Hant").
+ * `codeForLanguageLabel` derives the tag from that name; the advanced code
+ * field is where a wrong derivation gets corrected.
+ */
+export const NAMED_VARIETY_LANGUAGES: readonly LanguageEntry[] = [
+  { code: "zh-Hans", name: "Simplified Han" },
+  { code: "zh-Hant", name: "Traditional Han" },
+  { code: "es-419", name: "Latin American Spanish" },
+  { code: "fr-CA", name: "Canadian French" },
+]
+
 /** Default cap on rendered suggestions — enough to scroll, cheap to render. */
 export const LANGUAGE_SUGGESTION_LIMIT = 50
+
+/** Append named varieties the bundled or full catalog does not already carry. */
+function catalogWithNamedVarieties(
+  catalog: readonly LanguageEntry[],
+): readonly LanguageEntry[] {
+  const codes = new Set(catalog.map((entry) => fold(entry.code)))
+  const extra = NAMED_VARIETY_LANGUAGES.filter((entry) => !codes.has(fold(entry.code)))
+  return extra.length === 0 ? catalog : [...catalog, ...extra]
+}
 
 /**
  * Fold case and diacritics so "espanol" matches "Español" and "FRE" matches
@@ -235,6 +258,40 @@ function fold(value: string): string {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
+}
+
+/**
+ * Code for an exact catalog name or code. A 639-1 `altCode` wins over the
+ * 639-3 id ("Spanish" → "es", not "spa"). A language with no two-letter code
+ * keeps its 639-3 id ("Turkana" → "tuv"). Not a fuzzy search: "Grade 7
+ * English" matches nothing.
+ */
+export function codeFromLanguageCatalog(
+  label: string | null | undefined,
+  catalog: readonly LanguageEntry[],
+): string | null {
+  const folded = fold((label ?? "").trim())
+  if (!folded) return null
+  const byName = catalog.find((entry) => fold(entry.name) === folded)
+  if (byName) return byName.altCode ?? byName.code
+  const byCode = catalog.find(
+    (entry) =>
+      fold(entry.code) === folded || (entry.altCode !== undefined && fold(entry.altCode) === folded),
+  )
+  if (!byCode) return null
+  if (byCode.altCode !== undefined && fold(byCode.altCode) === folded) return byCode.altCode
+  return byCode.code
+}
+
+/** Display name for a known code, so a seeded tag can be shown as a name. */
+export function nameForLanguageCode(code: string): string | null {
+  const folded = fold(code.trim())
+  if (!folded) return null
+  return (
+    NAMED_VARIETY_LANGUAGES.find((entry) => fold(entry.code) === folded)?.name ??
+    LANGUAGES.find((entry) => fold(entry.code) === folded)?.name ??
+    null
+  )
 }
 
 /**
@@ -361,12 +418,13 @@ export function filterLanguages(
   } = {},
 ): LanguageEntry[] {
   const { limit = LANGUAGE_SUGGESTION_LIMIT, exclude, catalog = LANGUAGES } = options
+  const source = catalogWithNamedVarieties(catalog)
   const excluded = exclude?.length
     ? new Set(exclude.map((value) => fold(value.trim())))
     : null
   const allowed = excluded
-    ? catalog.filter((entry) => !excluded.has(fold(entry.name)))
-    : catalog
+    ? source.filter((entry) => !excluded.has(fold(entry.name)))
+    : source
 
   const folded = fold(query.trim())
   if (!folded) return allowed.slice(0, limit)

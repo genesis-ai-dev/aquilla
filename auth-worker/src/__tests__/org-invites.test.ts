@@ -167,6 +167,36 @@ describe("GET /api/v2/orgs/invite-preview/:token (AQU-347 still-member re-click)
   })
 })
 
+describe("same-user re-redeem of a used org invite (pen test 2026-10-06)", () => {
+  beforeEach(seedOrg)
+
+  it("does not re-add a member who was removed", async () => {
+    const minted = (await (await mint("wendi", { role: 400 })).json()) as { token: string }
+    await accept("bob", minted.token)
+    await env.AQUILLA_PG.prepare("DELETE FROM org_members WHERE org_id = 1 AND user_id = 3").run()
+    const res = await accept("bob", minted.token)
+    expect(res.status).toBe(410)
+    const mem = await env.AQUILLA_PG.prepare(
+      "SELECT role_level FROM org_members WHERE org_id = 1 AND user_id = 3",
+    ).first()
+    expect(mem).toBeNull()
+  })
+
+  it("does not restore a demoted member's role", async () => {
+    const minted = (await (await mint("wendi", { role: 400 })).json()) as { token: string }
+    await accept("bob", minted.token)
+    await env.AQUILLA_PG.prepare(
+      "UPDATE org_members SET role_level = 100 WHERE org_id = 1 AND user_id = 3",
+    ).run()
+    const res = await accept("bob", minted.token)
+    expect(res.status).toBe(200)
+    const mem = await env.AQUILLA_PG.prepare(
+      "SELECT role_level FROM org_members WHERE org_id = 1 AND user_id = 3",
+    ).first<{ role_level: number }>()
+    expect(mem?.role_level).toBe(100)
+  })
+})
+
 describe("GET + DELETE /api/v2/orgs/:orgId/invites", () => {
   beforeEach(seedOrg)
 

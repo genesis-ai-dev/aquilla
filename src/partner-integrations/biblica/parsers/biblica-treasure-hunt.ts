@@ -43,6 +43,9 @@ export async function extractTreasureHuntStrings(
     ...(options?.signal ? { signal: options.signal } : {}),
     ...(options?.onProgress ? { onProgress: options.onProgress } : {}),
   })
+  // Scripture is always skipped. Unlike the study Bible there is no
+  // includeScripture switch: a paragraph classified as Bible text never
+  // becomes a cell, because that text is swapped in later.
   const selection = selectTreasureHuntNotes(result.units, {
     ...(options?.splitSentences !== undefined
       ? { splitSentences: options.splitSentences }

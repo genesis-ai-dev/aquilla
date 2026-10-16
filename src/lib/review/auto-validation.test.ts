@@ -26,6 +26,15 @@ describe("shouldAutoValidateHumanEdit", () => {
     expect(decision({ canValidate: false })).toBe(false)
     expect(decision({ roleLevel: ROLE.VIEWER })).toBe(false)
   })
+
+  // AQU-1571: a contributor editing under a "project lead and above" floor (or
+  // outside the named-validator list) used to queue a validation the server
+  // refused — the red "1 failed" banner on an ordinary edit.
+  it("does not auto-validate when the project's validator rules exclude the editor", () => {
+    expect(decision({ scopeCanValidate: false })).toBe(false)
+    expect(decision({ scopeCanValidate: true })).toBe(true)
+    expect(decision({ scopeCanValidate: undefined })).toBe(true)
+  })
 })
 
 // AQU-490: the audio twin. Same shape of negative cases as the text rule, plus

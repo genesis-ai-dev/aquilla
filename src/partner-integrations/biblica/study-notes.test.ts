@@ -10,6 +10,8 @@ import {
   SAMPLE_NOTES,
   biblicaFrontBackMatterStory,
   biblicaSampleStory,
+  bookMarker,
+  bookMarkerWithBledVerseMarkers,
   bookTitle,
   chapterStraddle,
   closedVerse,
@@ -454,6 +456,54 @@ describe("Biblica study-note selection", () => {
     expect(selection.otherUnitCount).toBe(2)
   })
 
+  it("lands each book's preface in its own book across a multi-book package", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      bookMarker("p-bk-gen", "GEN"),
+      bookTitle("p-t-gen", "Genesis"),
+      note("p-pref-gen", "Genesis introduces the story of beginnings."),
+      closedVerse("p-v-gen", "26", "So Joseph died at a hundred and ten years old.", "50"),
+      // The book boundary InDesign flushed Genesis 50:26's closing markers into,
+      // so the paragraph reads "50:26EXO" rather than "EXO" (AQU-1963).
+      bookMarkerWithBledVerseMarkers("p-bk-exo", "EXO", "50", "26"),
+      bookTitle("p-t-exo", "Exodus"),
+      note("p-pref-exo", "Exodus tells how God rescued his people."),
+      closedVerse("p-v-exo", "1", "These are the names of the sons of Israel.", "1"),
+      bookMarker("p-bk-lev", "LEV"),
+      bookTitle("p-t-lev", "Leviticus"),
+      note("p-pref-lev", "Leviticus sets out how Israel was to worship."),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.map((entry) => [
+      entry.unit.sourceText,
+      entry.bookCode,
+      entry.chapterLabel,
+    ])).toEqual([
+      ["Genesis", "GEN", "Preface"],
+      ["Genesis introduces the story of beginnings.", "GEN", "Preface"],
+      ["Exodus", "EXO", "Preface"],
+      ["Exodus tells how God rescued his people.", "EXO", "Preface"],
+      ["Leviticus", "LEV", "Preface"],
+      ["Leviticus sets out how Israel was to worship.", "LEV", "Preface"],
+    ])
+  })
+
+  it("reads a book code the canon knows even when its digit is set in a coordinate style", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph(
+        "p-bk",
+        "meta%3abk",
+        run("cv%3av1", "1") + run("$ID/[No character style]", "SA"),
+      ),
+      note("p-pref", "Samuel opens with the birth of a prophet."),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.map((entry) => [entry.unit.sourceText, entry.bookCode])).toEqual([
+      ["Samuel opens with the birth of a prophet.", "1SA"],
+    ])
+  })
+
   it("cuts a verse marker off the end of the note it was flushed into", async () => {
     const parsed = await parseIdml(await makeBiblicaIdml([
       paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "REV")),
@@ -818,5 +868,94 @@ describe("scripture as verse-keyed cells (AQU-1285)", () => {
     expect(selection.notes.every((entry) => entry.kind === "note")).toBe(true)
     expect(selection.scriptureUnitCount).toBe(0)
     expect(selection.verseUnitCount).toBe(5)
+  })
+})
+
+describe("Biblica study-note selection — book names", () => {
+  it("takes the running head and contents entries so they can be translated", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-id", "meta%3aid", run("$ID/[No character style]", "JOS - New International Readers Version")),
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "JOS")),
+      paragraph("p-h", "meta%3ah", run("$ID/[No character style]", "Joshua")),
+      paragraph("p-toc1", "meta%3atoc1", run("$ID/[No character style]", "Joshua")),
+      paragraph("p-toc2", "meta%3atoc2", run("$ID/[No character style]", "Joshua")),
+      paragraph("p-toc3", "meta%3atoc3", run("$ID/[No character style]", "Jos")),
+      bookTitle("p-title", "Joshua"),
+      note("p-n", "What is the book of Joshua?"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.map((entry) => entry.unit.sourceText)).toEqual([
+      "Joshua",
+      "Joshua",
+      "Joshua",
+      "Joshua",
+      "Jos",
+      "What is the book of Joshua?",
+    ])
+    expect(selection.notes.map((entry) => entry.unit.sourceText).join("\n"))
+      .not.toContain("JOS")
+    expect(selection.notes.map((entry) => entry.unit.sourceText).join("\n"))
+      .not.toMatch(/Readers Version/)
+  })
+
+  it("puts them in the book preface, after the title they name", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "JOS")),
+      paragraph("p-h", "meta%3ah", run("$ID/[No character style]", "Joshua")),
+      paragraph("p-toc1", "meta%3atoc1", run("$ID/[No character style]", "Joshua")),
+      bookTitle("p-title", "Joshua"),
+      note("p-n", "What is the book of Joshua?"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.map((entry) => [
+      entry.unit.sourceText,
+      entry.chapterLabel,
+      entry.bookCode,
+    ])).toEqual([
+      ["Joshua", "Preface", "JOS"],
+      ["Joshua", "Preface", "JOS"],
+      ["Joshua", "Preface", "JOS"],
+      ["What is the book of Joshua?", "Preface", "JOS"],
+    ])
+  })
+
+  it("holds them back past a division heading that introduces the book", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "MAT")),
+      paragraph("p-h", "meta%3ah", run("$ID/[No character style]", "Matthew")),
+      divisionHeading("p-div", "Stories about Jesus"),
+      note("p-n", "The books from Matthew to Acts are stories about Jesus."),
+      bookTitle("p-title", "The Gospel of Matthew"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    const runningHead = selection.notes.find((entry) => entry.unit.sourceText === "Matthew")
+    expect(runningHead?.chapterLabel).toBe("Preface")
+    expect(runningHead?.bookCode).toBe("MAT")
+    expect(selection.notes.map((entry) => entry.section?.label ?? entry.chapterLabel)).toEqual([
+      "Stories about Jesus",
+      "Stories about Jesus",
+      "Preface",
+      "Preface",
+    ])
+  })
+
+  it("does not hand a titleless book's names to the next book", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-2jn", "meta%3abk", run("$ID/[No character style]", "2JN")),
+      paragraph("p-2h", "meta%3ah", run("$ID/[No character style]", "2 John")),
+      paragraph("p-3jn", "meta%3abk", run("$ID/[No character style]", "3JN")),
+      paragraph("p-3h", "meta%3ah", run("$ID/[No character style]", "3 John")),
+      bookTitle("p-title", "3 John"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.map((entry) => [entry.unit.sourceText, entry.bookCode])).toEqual([
+      ["2 John", "2JN"],
+      ["3 John", "3JN"],
+      ["3 John", "3JN"],
+    ])
   })
 })

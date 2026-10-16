@@ -17,13 +17,16 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
 import {
-  createServerInvite,
   listProjectInvites,
   revokeProjectInvite,
   type ActiveProjectInvite,
+  type ServerInviteCreated,
 } from "@/lib/sync/invites"
-import { fetchProjectSettings } from "@/lib/sync/project-settings"
+import { createServerInviteWithChoice } from "@/lib/sync/invite-with-choice"
+import { fetchProjectSettings, type ProjectLaneView } from "@/lib/sync/project-settings"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
+import { laneLanguageForTag, laneOptionLabel } from "@/lib/lanes/lane-language"
+import { resolveLaneScopeValue } from "@/lib/lanes/scope-ids"
 import { resolveCloudProjectResult } from "@/lib/sync/cloud-projects"
 import { fetchMemberScopes, putMemberScopes } from "@/lib/sync/member-scopes"
 import posthog from "@/lib/posthog"
@@ -31,11 +34,28 @@ import { isElevationRequiredError } from "@/lib/frontier/elevation"
 import { INVITE_SENT } from "@/lib/event-names"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
+import { useCurrentTargetLanes, type TargetLaneOption } from "@/hooks/useCurrentTargetLanes"
+import { LaneAccessFields } from "@/components/LaneAccessFields"
+import {
+  chosenLaneLabels,
+  laneChoiceReady,
+  needsLaneChoice,
+  toMemberLaneAccess,
+  type LaneAccessChoice,
+} from "@/lib/lanes/lane-access-choice"
 import { useProjectOrgId } from "@/hooks/useProjectOrgId"
 import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
 import { partitionMembers } from "@/lib/frontier/members"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { toUserFacingError } from "@/lib/errors/user-error"
+import { GrantScopeNotice } from "@/components/GrantScopeNotice"
+import { toast } from "@/components/ui/toast"
+import {
+  describeGrant,
+  grantButtonLabel,
+  grantProjectName,
+  laneScopeEcho,
+} from "@/lib/access/grant-scope-sentence"
 import {
   MembersPanel,
   type MembersPanelMember,
@@ -56,6 +76,8 @@ interface SharePanelProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   projectId: string
+  /** Display name for the grant sentence. Falls back to "this project" while loading. */
+  projectName?: string | null
   /** Fires after a server invite is successfully minted so the parent can
    * refresh any "you have outstanding shares" UI (onboarding checklist). */
   onSharesChanged?: () => void
@@ -69,7 +91,7 @@ const DEFAULT_INVITE_ROLE = ROLE.CONTRIBUTOR
 
 type Tab = "members" | "link"
 
-export function SharePanel({ open, onOpenChange, projectId, onSharesChanged }: SharePanelProps) {
+export function SharePanel({ open, onOpenChange, projectId, projectName, onSharesChanged }: SharePanelProps) {
   const t = useT()
   const [tab, setTab] = useState<Tab>("members")
 
@@ -107,10 +129,11 @@ export function SharePanel({ open, onOpenChange, projectId, onSharesChanged }: S
 
         <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-1.5 pb-1.5">
           {tab === "members" ? (
-            <MembersTab projectId={projectId} />
+            <MembersTab projectId={projectId} projectName={projectName} />
           ) : (
             <InviteLinkTab
               projectId={projectId}
+              projectName={projectName}
               onSharesChanged={onSharesChanged}
             />
           )}
@@ -120,7 +143,7 @@ export function SharePanel({ open, onOpenChange, projectId, onSharesChanged }: S
   )
 }
 
-function MembersTab({ projectId }: { projectId: string }) {
+function MembersTab({ projectId, projectName }: { projectId: string; projectName?: string | null }) {
   const t = useT()
   // FrontierSession has no userId — server enforces self-grant rejection so we
   // pass null and skip the local self-block.
@@ -221,6 +244,9 @@ function MembersTab({ projectId }: { projectId: string }) {
   const [scopeLanes, setScopeLanes] = useState<Array<{ value: string; label: string }>>([
     { value: "", label: "Default" },
   ])
+  // AQU-1607: the project's lane rows behind those options — they turn a
+  // scope still holding a legacy tag into the lane id the checkbox uses.
+  const [scopeLaneRows, setScopeLaneRows] = useState<ProjectLaneView[]>([])
   const [scopeFiles, setScopeFiles] = useState<Array<{ id: string; name: string }>>([])
   const [scopesByUser, setScopesByUser] = useState<Record<number, MemberScopeValue[]>>({})
   const [scopeOptionsError, setScopeOptionsError] = useState<string | null>(null)
@@ -240,6 +266,7 @@ function MembersTab({ projectId }: { projectId: string }) {
     setLoadedScopeOptionsKey(null)
     setScopeOptionsError(null)
     setScopeLanes([{ value: "", label: "Default" }])
+    setScopeLaneRows([])
     setScopeFiles([])
     if (!canManageScopes || !jwt) return
     let alive = true
@@ -250,11 +277,28 @@ function MembersTab({ projectId }: { projectId: string }) {
           resolveCloudProjectResult(projectId, jwt),
         ])
         if (!alive) return
-        const defaultLabel = settingsRes?.settings.targetLanguage || "Default"
-        setScopeLanes([
-          { value: "", label: defaultLabel },
-          ...extraRegistryLanes(settingsRes?.settings.targetLanes, defaultLabel).map((t) => ({ value: t, label: t })),
-        ])
+        const defaultLanguage = laneLanguageForTag("", settingsRes?.lanes, settingsRes?.settings) ?? ""
+        const defaultLabel = defaultLanguage || "Default"
+        // AQU-1607: one option per lane ROW, valued by lane id, so scoping
+        // someone to one of two lanes sharing a language picks that lane.
+        // A server predating lane rows keeps the old tag-derived list.
+        const laneRows = (settingsRes?.lanes ?? []).filter(
+          (lane) => lane.role === "target" && !lane.archivedAt,
+        )
+        setScopeLaneRows(laneRows)
+        setScopeLanes(
+          laneRows.length > 0
+            ? laneRows.map((lane) => ({
+                value: lane.id,
+                // AQU-1586: name, else language, else a tag that is not the
+                // opaque lane id.
+                label: laneOptionLabel(lane, defaultLabel),
+              }))
+            : [
+                { value: "", label: defaultLabel },
+                ...extraRegistryLanes(settingsRes?.settings.targetLanes, defaultLanguage).map((t) => ({ value: t, label: t })),
+              ],
+        )
         if (!projectRes.ok) {
           if (projectRes.reason === "unauthenticated") void notifySessionExpiredIfCurrent(jwt)
           throw new Error("Could not load project scope details.")
@@ -267,6 +311,7 @@ function MembersTab({ projectId }: { projectId: string }) {
       } catch (caught) {
         if (alive) {
           setScopeLanes([{ value: "", label: "Default" }])
+          setScopeLaneRows([])
           setScopeFiles([])
           setScopeOptionsReady(false)
           setLoadedScopeOptionsKey(null)
@@ -321,13 +366,29 @@ function MembersTab({ projectId }: { projectId: string }) {
   const handleSaveScopes = useCallback(async (userId: number, scopes: MemberScopeValue[]) => {
     if (!jwt) throw new Error("Sign in to manage scopes.")
     const saved = await putMemberScopes(jwt, projectId, userId, scopes)
-    setScopesByUser((prev) => ({ ...prev, [userId]: saved }))
+    setScopesByUser((prev) => ({ ...prev, [userId]: saved.scopes }))
   }, [jwt, projectId])
+
+  // AQU-1607: lane scopes are lane ids. A row written before the backfill
+  // still holds a legacy tag, so resolve it to its lane id for display —
+  // otherwise its checkbox reads as unticked and saving would drop it.
+  const normalizedScopesByUser = useMemo(() => {
+    if (scopeLaneRows.length === 0) return scopesByUser
+    const out: Record<number, MemberScopeValue[]> = {}
+    for (const [userId, scopes] of Object.entries(scopesByUser)) {
+      out[Number(userId)] = scopes.map((scope) => {
+        if (scope.kind !== "lane") return scope
+        const resolved = resolveLaneScopeValue(scope.value, scopeLaneRows)
+        return resolved.ok ? { kind: "lane" as const, value: resolved.laneId } : scope
+      })
+    }
+    return out
+  }, [scopesByUser, scopeLaneRows])
 
   const scopeConfig: MembersPanelScopeConfig | undefined = canManageScopes &&
     scopeOptionsReady && memberScopesReady &&
     loadedScopeOptionsKey === currentScopeKey && loadedMemberScopesKey === currentScopeKey
-    ? { lanes: scopeLanes, files: scopeFiles, scopesByUser, onSave: handleSaveScopes }
+    ? { lanes: scopeLanes, files: scopeFiles, scopesByUser: normalizedScopesByUser, onSave: handleSaveScopes }
     : undefined
   const scopeError = scopeOptionsError ?? memberScopesError
   const supplementalErrors = Array.from(
@@ -353,8 +414,14 @@ function MembersTab({ projectId }: { projectId: string }) {
           newMemberDefaultRole={ROLE.CONTRIBUTOR}
           callerUserId={callerUserId}
           callerMaxRole={callerMaxRole}
-          onAdd={async (usernames, role) => {
-            const results = await addMany(usernames.map((username) => ({ username, role })))
+          onAdd={async (usernames, role, laneAccess) => {
+            const results = await addMany(
+              usernames.map((username) => ({
+                username,
+                role,
+                ...(laneAccess ? { laneAccess } : {}),
+              })),
+            )
             return results.map((r) => ({
               username: r.username,
               ok: r.ok,
@@ -366,6 +433,18 @@ function MembersTab({ projectId }: { projectId: string }) {
           scopeConfig={scopeConfig}
           suggestions={suggestions}
           emptySuggestionsHint={t("projectSettings.share.emptySuggestionsHint")}
+          grantScope={{
+            kind: "project",
+            projectName: grantProjectName(t, projectName),
+            lanes: "all",
+          }}
+          targetLanes={
+            scopeLaneRows.length > 0
+              ? scopeLanes
+                  .filter((lane) => lane.value !== "")
+                  .map((lane) => ({ id: lane.value, label: lane.label }))
+              : undefined
+          }
         />
       )}
     </div>
@@ -374,6 +453,7 @@ function MembersTab({ projectId }: { projectId: string }) {
 
 interface InviteLinkTabProps {
   projectId: string
+  projectName?: string | null
   onSharesChanged?: () => void
 }
 
@@ -390,8 +470,8 @@ const EXPIRY_OPTIONS: { labelKey: MessageKey; value: number | null }[] = [
 ]
 const DEFAULT_EXPIRY_DAYS = 30
 
-function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
-  const t = useT()
+function InviteLinkTab({ projectId, projectName, onSharesChanged }: InviteLinkTabProps) {
+  const { t, locale } = useI18n()
   const { session } = useFrontierSession()
   const [inviteRole, setInviteRole] = useState<number>(DEFAULT_INVITE_ROLE)
   const [inviteEmail, setInviteEmail] = useState<string>("")
@@ -403,6 +483,20 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
   const [serverError, setServerError] = useState<string | null>(null)
   // Bump this to trigger the active-invites list to re-fetch after a new invite is created.
   const [inviteListVersion, setInviteListVersion] = useState(0)
+  const { lanes: targetLanes } = useCurrentTargetLanes(projectId)
+  const [laneChoice, setLaneChoice] = useState<LaneAccessChoice | null>(null)
+  const choiceReady = laneChoiceReady(laneChoice, inviteRole, targetLanes.length)
+  const inviteCopy = describeGrant(t, {
+    link: inviteEmail.trim().length === 0,
+    names: inviteEmail.trim() ? [inviteEmail.trim()] : [],
+    roleLevel: inviteRole,
+    scope: {
+      kind: "project",
+      projectName: grantProjectName(t, projectName),
+      lanes: chosenLaneLabels(targetLanes, inviteRole, laneChoice),
+    },
+    locale,
+  })
 
   async function handleCreate() {
     setEmailError(null)
@@ -417,17 +511,24 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
       setServerError(t("projectSettings.share.signInToInvite"))
       return
     }
+    if (!choiceReady) {
+      setServerError(t("projectSettings.share.laneChoiceRequired"))
+      return
+    }
+    const laneAccess = needsLaneChoice(inviteRole, targetLanes.length) && laneChoice
+      ? toMemberLaneAccess(laneChoice)
+      : undefined
     setBusy(true)
     try {
-      let serverInvite: Awaited<ReturnType<typeof createServerInvite>>
+      let serverInvite: ServerInviteCreated | null
       try {
-        serverInvite = await createServerInvite(
+        serverInvite = await createServerInviteWithChoice(
           session.jwt,
           projectId,
           inviteRole,
-          undefined,
           trimmedEmail || undefined,
-          expiresInDays
+          expiresInDays,
+          laneAccess,
         )
       } catch (err) {
         // AQU-1541: the step-up dialog is already open; say why, not "no permission".
@@ -441,6 +542,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
       }
       const url = `${window.location.origin}/join/${serverInvite.token}`
       setIssuedUrl(url)
+      toast.add({ type: "success", title: inviteCopy.sentence })
       posthog.capture(INVITE_SENT, {
         project_id: projectId,
         role: inviteRole,
@@ -465,6 +567,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
     setInviteEmail("")
     setInviteRole(DEFAULT_INVITE_ROLE)
     setExpiresInDays(DEFAULT_EXPIRY_DAYS)
+    setLaneChoice(null)
   }
 
   return (
@@ -582,12 +685,23 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
               <span>{serverError}</span>
             </p>
           )}
+          {needsLaneChoice(inviteRole, targetLanes.length) && (
+            <LaneAccessFields
+              lanes={targetLanes}
+              value={laneChoice}
+              onChange={setLaneChoice}
+              disabled={!session?.jwt || busy}
+            />
+          )}
+          <GrantScopeNotice sentence={inviteCopy.sentence} />
           <Button
             onClick={handleCreate}
-            disabled={busy || !session?.jwt}
+            disabled={busy || !session?.jwt || !choiceReady}
             className="w-full"
           >
-            {busy ? t("common.creating") : t("projectSettings.share.createInviteLinkButton")}
+            {busy
+              ? t("common.creating")
+              : grantButtonLabel(t, t("projectSettings.share.createInviteLinkButton"), inviteCopy.scopeEcho)}
           </Button>
         </div>
       )}
@@ -597,6 +711,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
           projectId={projectId}
           jwt={session.jwt}
           version={inviteListVersion}
+          targetLanes={targetLanes}
           onRevoked={() => setInviteListVersion((v) => v + 1)}
         />
       )}
@@ -611,10 +726,18 @@ interface ActiveInvitesListProps {
   jwt: string
   /** Incrementing this value triggers a re-fetch. */
   version: number
+  /** AQU-528: current target lanes, to name a link's lane scope by language. */
+  targetLanes: readonly TargetLaneOption[]
   onRevoked: () => void
 }
 
-function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvitesListProps) {
+function ActiveInvitesList({
+  projectId,
+  jwt,
+  version,
+  targetLanes,
+  onRevoked,
+}: ActiveInvitesListProps) {
   const { locale } = useI18n()
   const t = useT()
   const [invites, setInvites] = useState<ActiveProjectInvite[] | null>(null)
@@ -657,6 +780,29 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
     }
   }
 
+  /**
+   * AQU-528: the languages a lane-scoped link auto-grants on join, as the same
+   * phrase the mint button echoes. A language-scoped link has to be
+   * distinguishable here from an unscoped one AND from a link scoped to a
+   * different language — otherwise the only way to tell which of two links to
+   * revoke is to redeem one.
+   *
+   * A stored value that is not a current lane (a stale lane id, or the legacy
+   * `''` default lane) still renders, as the raw value or "Default language".
+   * Rendering nothing is the one wrong answer: it reads as an unscoped link,
+   * which grants every lane.
+   */
+  function laneScopeFor(invite: ActiveProjectInvite): string | null {
+    const values = invite.scopeLanes ?? []
+    if (values.length === 0) return null
+    const labels = values.map((value) => {
+      const lane = targetLanes.find((candidate) => candidate.id === value)
+      if (lane) return lane.label
+      return value.trim() || t("dialog.assign.defaultLaneFallback")
+    })
+    return laneScopeEcho(t, labels, locale)
+  }
+
   function formatExpiry(expiresAt: string | null) {
     if (!expiresAt) return t("common.noExpiry")
     return (
@@ -690,6 +836,15 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
                 {inv.email ? ` · ${inv.email}` : ` · ${t("projectSettings.share.openLinkConnector")}`}
                 {" · "}
                 {formatExpiry(inv.expiresAt)}
+                {(() => {
+                  const laneScope = laneScopeFor(inv)
+                  return laneScope ? (
+                    <>
+                      {" · "}
+                      <span className="font-medium text-foreground">{laneScope}</span>
+                    </>
+                  ) : null
+                })()}
               </p>
             </div>
             {revokeTarget === inv.token ? (

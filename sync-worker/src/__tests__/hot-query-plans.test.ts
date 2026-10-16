@@ -45,8 +45,7 @@ describe('hot query plan shapes (PGlite)', () => {
         [`ev-${i}`, PROJECT, FILE, `cell-${i % 50}`, i],
       )
       await t.pg.query(
-        `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_edit_at, word_count)
-         VALUES ($1, $2, $3, $4, '', 'word', $5, $6, 1)`,
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, word_count) VALUES ($1, $2, $3, $4, 'word', $5, $6, 1)`,
         [PROJECT, FILE, `cell-${i}`, i % 2 ? 'source' : 'target', `ev-${i}`, i],
       )
     }

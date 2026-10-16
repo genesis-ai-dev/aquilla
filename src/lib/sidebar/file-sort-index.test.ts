@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import {
   SORT_INDEX_STEP,
   hasPlacedFiles,
+  planFileInsert,
   planFileMove,
   planFileNudge,
   planFileOrderReset,
@@ -178,5 +179,75 @@ describe("hasPlacedFiles", () => {
     expect(hasPlacedFiles(group(["a"], ["b"]))).toBe(false)
     expect(hasPlacedFiles(group(["a"], ["b", 0]))).toBe(true)
     expect(hasPlacedFiles([{ id: "a", sortIndex: Number.NaN }])).toBe(false)
+  })
+})
+
+// AQU-1702 — a file arriving from another group. The slot is counted in the
+// TARGET group's order, which does not contain the newcomer, so an insert has
+// one more slot than a move does: `length` appends.
+describe("planFileInsert", () => {
+  it("writes one midpoint when every file in the target group is placed", () => {
+    const target = group(["a", 0], ["b", SORT_INDEX_STEP], ["c", SORT_INDEX_STEP * 2])
+    expect(planFileInsert(target, { id: "newcomer" }, 1)).toEqual([
+      { fileId: "newcomer", sortIndex: SORT_INDEX_STEP / 2 },
+    ])
+  })
+
+  it("places above the first file and below the last", () => {
+    const target = group(["a", 0], ["b", SORT_INDEX_STEP])
+    expect(planFileInsert(target, { id: "newcomer" }, 0)).toEqual([
+      { fileId: "newcomer", sortIndex: -SORT_INDEX_STEP },
+    ])
+    expect(planFileInsert(target, { id: "newcomer" }, target.length)).toEqual([
+      { fileId: "newcomer", sortIndex: SORT_INDEX_STEP * 2 },
+    ])
+  })
+
+  it("carries the newcomer's own index over rather than reusing it", () => {
+    const target = group(["a", 0], ["b", SORT_INDEX_STEP])
+    // 9999 came from the group it is leaving and says nothing here.
+    expect(planFileInsert(target, { id: "newcomer", sortIndex: 9999 }, 1)).toEqual([
+      { fileId: "newcomer", sortIndex: SORT_INDEX_STEP / 2 },
+    ])
+  })
+
+  it("stamps the whole target group when it holds anything unplaced", () => {
+    // No number can put the newcomer ABOVE an unplaced file — unplaced sorts
+    // last — so the arrival normalises the group, exactly like a first move.
+    const target = group(["a"], ["b"], ["c"])
+    const writes = planFileInsert(target, { id: "newcomer" }, 1)
+    expect(writes).toEqual([
+      { fileId: "a", sortIndex: 0 },
+      { fileId: "newcomer", sortIndex: SORT_INDEX_STEP },
+      { fileId: "b", sortIndex: SORT_INDEX_STEP * 2 },
+      { fileId: "c", sortIndex: SORT_INDEX_STEP * 3 },
+    ])
+    expect(applied([...target.slice(0, 1), { id: "newcomer" }, ...target.slice(1)], writes))
+      .toEqual(["a", "newcomer", "b", "c"])
+  })
+
+  it("renumbers when the neighbours have run out of room between them", () => {
+    const target = group(["a", 0], ["b", 0])
+    expect(planFileInsert(target, { id: "newcomer" }, 1)).toEqual([
+      { fileId: "a", sortIndex: 0 },
+      { fileId: "newcomer", sortIndex: SORT_INDEX_STEP },
+      { fileId: "b", sortIndex: SORT_INDEX_STEP * 2 },
+    ])
+  })
+
+  it("places the first file of an empty group at zero", () => {
+    expect(planFileInsert([], { id: "newcomer" }, 0)).toEqual([
+      { fileId: "newcomer", sortIndex: 0 },
+    ])
+  })
+
+  it("clamps a slot outside the target group", () => {
+    const target = group(["a", 0], ["b", SORT_INDEX_STEP])
+    expect(planFileInsert(target, { id: "newcomer" }, 99)).toEqual(
+      planFileInsert(target, { id: "newcomer" }, target.length),
+    )
+    expect(planFileInsert(target, { id: "newcomer" }, -3)).toEqual(
+      planFileInsert(target, { id: "newcomer" }, 0),
+    )
   })
 })

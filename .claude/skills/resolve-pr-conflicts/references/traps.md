@@ -72,17 +72,33 @@ the push usually means exactly that migration is pending - say so in the report.
 
 ## Dependencies in a worktree
 
-`link-deps.sh` handles the normal case. When results still look wrong:
+`link-deps.sh` does a real frozen install from the worktree's own lockfiles - root
+`pnpm install --frozen-lockfile`, and `pnpm install --ignore-workspace --frozen-lockfile` in
+auth-worker, sync-worker and agent-worker - then arms the hook and runs the hook's
+`node_modules` check. Nothing is linked to the main checkout; from a warm pnpm store the whole
+run takes about 10 s. When results still look wrong:
 
-- **Module-resolution errors or a wall of type errors in files the PR never touched** mean
-  mismatched dependencies, not a regression. Replace the links with a real install:
-  `rm -rf node_modules && pnpm install --frozen-lockfile` at the root, or
-  `rm -rf node_modules && pnpm install --ignore-workspace --frozen-lockfile` in the worker.
+- **Module-resolution errors or a wall of type errors in files the PR never touched** mean the
+  install predates a lockfile change (a second merge, a hand-resolved `pnpm-lock.yaml`). Re-run
+  `link-deps.sh`; it re-installs every package and is a no-op where nothing changed.
+- **`git push` refused with "node_modules is a symlink that does not resolve inside this
+  worktree"** - the hook's first step (`scripts/assert-worktree-node-modules.ts`) checks
+  `node_modules`, `auth-worker/node_modules` and `sync-worker/node_modules` and refuses any that is
+  itself a symlink out of the worktree. The current `link-deps.sh` never leaves one and runs the
+  same check before it exits, so this means an older copy ran. `$SKILL` is the main checkout's
+  copy, and that follows whatever branch the main checkout has out. Run dev's copy instead, from
+  the worktree: `bash <(git show origin/dev:.claude/skills/resolve-pr-conflicts/scripts/link-deps.sh)
+  "$PWD"`. It removes whole-directory symlinks and older per-entry links and installs
+  in their place.
+- **Links inside a real `node_modules` pass the hook and still break the e2e app.** Each one
+  resolves into the main checkout's `node_modules/.pnpm`, outside `server.fs.allow` in
+  `vite.config.ts`, so Vite refuses the wa-sqlite wasm. Older copies of `link-deps.sh` built the
+  root this way; re-run the current one.
 - **Stack boot dies waiting on a `/healthz`** with `Cannot find package …` in the e2e logs: a
   worker has no `node_modules`. Re-run `link-deps.sh`.
-- The root `tsc -b` writes incremental state into `node_modules/.tmp`. `link-deps.sh` gives the
-  worktree its own; if you symlinked `node_modules` wholesale by hand instead, a green `tsc -b`
-  may be reading the main checkout's state and is not trustworthy.
+- The root `tsc -b` writes incremental state into `node_modules/.tmp`. A `node_modules`
+  symlinked by hand shares the main checkout's, so a green `tsc -b` there is not trustworthy -
+  and the hook refuses it.
 - `tsx` is only a local bin: `pnpm exec tsx …`, never bare `tsx`.
 
 ## Gate failures
@@ -107,8 +123,9 @@ the push usually means exactly that migration is pending - say so in the report.
 - The hook sizes the run from `remote tip..local tip`. To see what the branch alone would
   select (informational, not a substitute for the gate):
   `pnpm exec tsx scripts/e2e-affected.ts --base origin/<base> < /dev/null`.
-- The pre-commit warning that the branch "already has commits for OTHER tickets" is noise on any
-  branch cut from `dev`; it compares against `main`. It never blocks.
+- The pre-commit warning that the branch "already has commits for OTHER tickets" compares against
+  the nearer of `origin/dev` and `origin/main`, so a listed ticket really is on this branch and not
+  yet on `dev`. It never blocks.
 
 ## Shell traps on this machine
 

@@ -36,7 +36,11 @@ and target-format writers beyond the imported original are still open. Full deta
 in `docs/swarm/AGENT-API-TRACES.md`. Rate limiting is now complete: `/search` (2026-07-30 pen
 test), changeset prepare/commit, and artifact upload (2026-08-20 pen test), plus `/me`,
 `/projects`, project/file/cell GETs, artifact meta/content/inspect, and changeset GET/discard
-(2026-08-27 pen test) are all throttled per credential.
+(2026-08-27 pen test) are all throttled. AQU-1843 made every one of those checks a
+single atomic counter upsert keyed on the credential's **owner** rather than the
+credential — minting a second PAT no longer buys a second budget — and made the
+money-spending and write routes fail *closed* when the limiter itself is unavailable,
+while the free paginated reads keep failing open.
 
 ---
 
@@ -305,30 +309,41 @@ Initial command set:
   pinned to `sourceEventId`, parented on the prior target event)
 - `LinkMedia` (attach audio/alignment relationships)
 
-### Multi-language projects: target-language lanes
+### Multi-language projects: lanes by id
 
-A project can hold several target languages at once via AQU-538 **lanes** — a lane is
-a language tag (e.g. `es`, `pt`) registered in the project settings array
-`settings.targetLanes`; every cell keeps one shared source plus one independent
-target row/chain per lane. The external surface is lane-aware end to end:
+A project holds a source lane and any number of target lanes. Each lane is a row
+(`lanes.id`, name, language, role). A language tag is not a lane id and is not
+aliased. Agents read `GET /api/v1/external` and then
+`GET /api/v1/external/projects/:projectId`, which returns the lanes that caller
+may see (`lanes: [{ id, name, language, role }]`). A lane the caller cannot see
+is absent, the same as one that does not exist.
 
-1. **Register lanes** (once): `UpdateProjectSettings` writing `settings.targetLanes:
-   ["es", "pt"]` (merge into the existing blob; pass the live `ifMatchVersion`).
-2. **Write per lane**: `SetTranslation` takes an optional `laneId` — the compiled
-   `target.cell.commit` is stamped `payload.targetLang` and lands on that lane's row
-   and chain slot. An unregistered `laneId` is rejected at prepare
-   (`validation_failed`). The project's primary `targetLanguage` **is** the default
-   lane: omitting `laneId` and passing the primary (in any spelling — `"bla"`,
-   `"BLA"`, or `"es"` for a `"Spanish"` project) both write the same default row
-   (AQU-1532). A regional lane beside the primary (`fr-CA` in a `French` project)
-   is its own lane and must be registered.
-3. **Read per lane**: `GET .../files/:fileId/cells?lane=es` (and the MCP
-   `read_content` `lane` argument) filters target cells to one lane; source cells are
-   always included. Without `lane`, every lane's targets are returned, each carrying
-   its `targetLang`.
+1. **Create lanes**: `CreateProject` or `ProjectSetup` take
+   `lanes: [{ role, language, name?, code? }]`. They do not write
+   `sourceLanguage`, `targetLanguage`, `targetLanes`, or `archivedLanes`.
+   `PatchSettings` and `UpdateProjectSettings` reject those four keys and point
+   at lanes.
+2. **Write per lane**: `laneId` is required on `SetTranslation`, `DraftCells`,
+   `PlanImport` variants, `SplitCell` `targetOffsets`, and the `EmitEvents`
+   kinds that address one target cell (`cell.validate`, `cell.unvalidate`,
+   `cell.backtranslation.set`, `target.cell.repin`). The value is `lanes.id`.
+   Omitting it is `validation_failed` and the message names
+   `GET /api/v1/external`. An unknown id, a tag, or a lane the caller cannot
+   see is `validation_failed` with `lane does not exist` (no name, no
+   "archived"). A visible archived lane is `validation_failed` naming that lane
+   as archived. The compiled event still stores the lane's frozen tag as
+   `payload.targetLang` and the id as `payload.laneId`.
+3. **Read per lane**: `GET .../files/:fileId/cells?lane=<id>` (and export,
+   quality, and the MCP `read_content` `lane` argument) require that id.
+   Prompt preview takes `?targetLang=<id>` — the value is the lane id, not a
+   language tag. Cells come back with `laneId`. Quality and term consistency
+   return `laneId` (the lane's id, including the blank bridge). Similar results
+   return `laneId` and omit rows on a lane the caller cannot see.
 4. **Import several lanes at once**: each `PlanImport` cell takes
-   `variants: [{ laneId, languageTag?, content, contentHtml? }]` sharing that cell's
-   source.
+   `variants: [{ laneId, languageTag?, content, contentHtml? }]`. `laneId` is
+   the lane's id. A bilingual parse passes the same id. A ProjectSetup import
+   that omits it lands on the single target lane that plan leaves; with none
+   or several, `laneId` is required.
 
 Preconditions and drift are lane-scoped — the same cell edited concurrently in two
 different lanes never triggers `plan_stale` across lanes. The self-discovery
@@ -721,7 +736,7 @@ it live in the same thread the people on the project are reading.
 Parity epic AQU-1181 item 7: agents could only write text they wrote themselves, and had
 no way to tell a pending AI draft from a committed human value.
 
-- **New command — `DraftCells`** (`{ fileId, cellIds, laneId?, instructions? }`, sole
+- **New command — `DraftCells`** (`{ fileId, cellIds, laneId, instructions? }`, sole
   command, CONTRIBUTOR). Runs the **project's own copilot** over the named cells and stages
   the result as one changeset. It is a *prepare-time expansion*: drafting happens once, at
   prepare, and the generated text is materialized into ordinary `SetTranslation` commands
@@ -761,7 +776,7 @@ never seen.
 
 - **`GET /api/v1/external/projects/:projectId/settings`** — `{ projectId, settings,
   version, updatedAt }` (`read-routes.ts`). Same credential/scope/role gate and
-  per-credential throttle as every other project read (VIEWER floor; wrong-project PAT
+  per-user throttle as every other project read (VIEWER floor; wrong-project PAT
   gets `scope_denied`). A project with no `project_settings` row reads as `{}` at
   version 0 — patch against 0 to create it. `updated_by` is deliberately NOT echoed:
   this is an agent-facing surface and that id names a human.
@@ -860,7 +875,7 @@ path can add concepts, but nothing showed what the copilot actually receives aft
 injection. An agent had to change a setting, draft a cell, and infer.
 
 - **New read** — `GET /api/v1/external/projects/:projectId/cells/:cellId/prompt-preview`
-  (optional `targetLang=<lane>`, `fileId=<id>`), MCP tool `get_prompt_preview`. Returns
+  (required `targetLang=<lane id>`, optional `fileId=<id>`), MCP tool `get_prompt_preview`. Returns
   the assembled `messages` (system + user, exactly as sent) alongside `parts` — base
   instructions after language substitution, the brief block, the compiled rules block,
   `injectedTerms`, the retrieved `examples`, and the preceding approved-target discourse

@@ -257,6 +257,11 @@ beforeEach(async () => {
   bucket = makeStubBucket()
   env = makeEnv(tdb.db, bucket)
   leadToken = await credToken(tdb, { credentialId: CRED_LEAD, userId: 1, username: 'lead' })
+  await tdb.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', $1, 'target', '', 1)`,
+    [PROJECT],
+  )
 })
 
 // ── REST: preview ────────────────────────────────────────────────────────────
@@ -288,14 +293,17 @@ describe('artifact parse — preview (REST)', () => {
 
   it('parses a bilingual CSV into cells with default-lane variants', async () => {
     const artifactId = await upload(env, leadToken, 'pairs.csv', CSV_BILINGUAL, 'text/csv')
-    const res = (await handleExternalArtifactsRequest(parseReq(leadToken, artifactId), env))!
+    const res = (await handleExternalArtifactsRequest(
+      parseReq(leadToken, artifactId, { laneId: 'deflane1' }),
+      env,
+    ))!
     expect(res.status).toBe(200)
     const body = (await res.json()) as PreviewBody
 
     expect(body.fileType).toBe('csv')
     expect(body.totalCells).toBe(3)
     expect(body.sampleCells[0].content).toBe('Hello')
-    expect(body.sampleCells[0].variants).toEqual([{ laneId: '', content: 'Bonjour' }])
+    expect(body.sampleCells[0].variants).toEqual([{ laneId: 'deflane1', content: 'Bonjour' }])
     // RFC-4180 quoting survives the round trip.
     expect(body.sampleCells[2].content).toBe('One, two')
   })
@@ -532,10 +540,10 @@ describe('artifact parse — stage (REST)', () => {
     ).toEqual(DOCX_PARITY_EXPECTED_CELLS.map((c) => c.original))
   })
 
-  it('stages a bilingual CSV whose PlanImport cells carry default-lane variants', async () => {
+  it('stages a bilingual CSV whose PlanImport cells carry the caller lane id', async () => {
     const artifactId = await upload(env, leadToken, 'pairs.csv', CSV_BILINGUAL, 'text/csv')
     const res = (await handleExternalArtifactsRequest(
-      parseReq(leadToken, artifactId, { stage: true }),
+      parseReq(leadToken, artifactId, { stage: true, laneId: 'deflane1' }),
       env,
     ))!
     expect(res.status).toBe(200)
@@ -550,7 +558,7 @@ describe('artifact parse — stage (REST)', () => {
     expect(commands[0].artifactId).toBe(artifactId)
     expect(commands[0].cells[1]).toMatchObject({
       content: 'Goodbye',
-      variants: [{ laneId: '', content: 'Au revoir' }],
+      variants: [{ laneId: 'deflane1', content: 'Au revoir' }],
     })
   })
 

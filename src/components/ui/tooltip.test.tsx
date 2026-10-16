@@ -133,6 +133,57 @@ describe("AppTooltip", () => {
       })
     })
 
+    /**
+     * The control turning enabled or disabled while on screen swaps the
+     * element the tooltip is attached to: the stand-in span one moment, the
+     * button the next. Base UI binds its hover listeners to the trigger
+     * element ONCE, when the trigger mounts, so after the swap they stayed on
+     * the old element and hover never opened the tooltip again; focus still
+     * did, because focus handlers are React props on whatever is rendered.
+     *
+     * Live: select rows with the row checkboxes starting on a line "Validate
+     * text" cannot take (it renders disabled), shift-click to a line it can
+     * (it turns enabled) — and hovering the button showed nothing.
+     */
+    describe("when the control turns enabled or disabled after mounting", () => {
+      const tip = "Validate 3 of 10 selected cells"
+      function Bar({ disabled }: { disabled: boolean }) {
+        return (
+          <TooltipProvider delay={0}>
+            <AppTooltip content={tip}>
+              <Button type="button" disabled={disabled}>Validate text</Button>
+            </AppTooltip>
+          </TooltipProvider>
+        )
+      }
+
+      it("opens on hover after a disabled control becomes enabled", async () => {
+        const { rerender } = render(<Bar disabled />)
+        rerender(<Bar disabled={false} />)
+        const button = screen.getByRole("button", { name: "Validate text" })
+        expect(document.querySelector('[data-slot="tooltip-disabled-trigger"]')).toBeNull()
+        fireEvent.pointerEnter(button, { pointerType: "mouse" })
+        fireEvent.mouseEnter(button)
+
+        await waitFor(() => {
+          expect(screen.getByRole("tooltip")).toHaveTextContent(tip)
+        }, { timeout: 500 })
+      })
+
+      it("opens on hover after an enabled control becomes disabled", async () => {
+        const { rerender } = render(<Bar disabled={false} />)
+        rerender(<Bar disabled />)
+        const standIn = document.querySelector('[data-slot="tooltip-disabled-trigger"]')!
+        expect(standIn).not.toBeNull()
+        fireEvent.pointerEnter(standIn, { pointerType: "mouse" })
+        fireEvent.mouseEnter(standIn)
+
+        await waitFor(() => {
+          expect(screen.getByRole("tooltip")).toHaveTextContent(tip)
+        }, { timeout: 500 })
+      })
+    })
+
     it("does NOT wrap an enabled trigger — no extra tab stop, no layout shim", () => {
       render(
         <TooltipProvider delay={0}>

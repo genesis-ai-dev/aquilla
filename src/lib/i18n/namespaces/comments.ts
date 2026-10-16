@@ -1,4 +1,4 @@
-import { defineNamespace } from "./types"
+import { defineNamespace, plural } from "./types"
 
 export const comments = defineNamespace({
   keys: {
@@ -19,8 +19,11 @@ export const comments = defineNamespace({
     // @mention composer (shared by the reply and edit textareas)
     "comments.mention.typeMore": "Type more to search…",
     "comments.mention.noResults": "No users found.",
+    "comments.mention.noMembers": "No one on this project to mention.",
+    "comments.mention.restricted": "No one in your lanes to mention yet.",
+    "comments.mention.suggestionsAria": "Project members",
     "comments.composer.editPlaceholder": "Edit comment…",
-    "comments.composer.replyPlaceholder": "Reply… (type @ to mention)",
+    "comments.composer.replyPlaceholder": "Leave a reply...",
 
     // Single comment bubble
     "comments.bubble.actionsLabel": "Comment actions",
@@ -48,9 +51,20 @@ export const comments = defineNamespace({
       "Replies from this view are not yet wired — open the cell in the editor to reply.",
 
     // In-thread reply composer (CommentThread.tsx — no @mention hint here)
-    "comments.thread.replyPlaceholder": "Reply...",
+    "comments.thread.replyPlaceholder": "Leave a reply...",
     "comments.thread.reply": "Reply",
     "comments.thread.closeWithReply": "Close with reply",
+    "comments.thread.actionsAria": "Comment actions",
+    "comments.thread.resolve": "Resolve thread",
+    "comments.thread.reopen": "Reopen thread",
+    "comments.thread.copyUrl": "Copy comment URL",
+    "comments.thread.enterReply": "to reply",
+    "comments.thread.optionEnterResolve": "to reply and resolve",
+    "comments.thread.collapse": "Collapse",
+    "comments.thread.resolvedSummary": plural({
+      one: "{count} resolved comment from {authors}",
+      other: "{count} resolved comments from {authors}",
+    }),
 
     // Filter bar
     "comments.filter.searchPlaceholder": "Search comments…",
@@ -61,6 +75,27 @@ export const comments = defineNamespace({
     "comments.filter.authorLabel": "Author",
     "comments.filter.participantLabel": "Participant",
     "comments.filter.anyone": "Anyone",
+    // AQU-1958: org-wide list only — the project page filters one project.
+    "comments.filter.allProjects": "All projects",
+    "comments.filter.fromLabel": "Started on or after",
+    "comments.filter.toLabel": "Started on or before",
+
+    // Export (AQU-1958)
+    "comments.export.csv": "Export as CSV",
+
+    // Org-wide comments page (AQU-1958)
+    "comments.org.title": "Comments across projects",
+    "comments.org.description":
+      "Every comment thread from the projects you can see in this organization, " +
+      "in one list.",
+    "comments.org.selectOrgDescription":
+      "Choose an organization to review the comments from its projects.",
+    "comments.org.roleRequired":
+      "Only maintainers and owners can review comments across an organization's projects.",
+    "comments.org.empty.body":
+      "Comments from every project you can see here will appear in this list.",
+    "comments.org.partialError":
+      "Comments could not be loaded from: {projects}. The list below is incomplete — try refreshing.",
 
     // Page chrome
     "comments.page.titleWithProject": "{projectName} — Comments",
@@ -78,8 +113,46 @@ export const comments = defineNamespace({
     "comments.drawer.noComments": "No comments yet.",
     "comments.drawer.loadError": "Couldn't load comments. Existing threads may be missing.",
     "comments.drawer.newThreadHeading": "New thread",
-    "comments.drawer.newThreadPlaceholder": "Start a new comment thread...",
+    "comments.drawer.newThreadPlaceholder": "Leave a comment...",
     "comments.drawer.post": "Post",
+    "comments.drawer.submitRefused": plural({
+      one: "{count} comment you wrote wasn't posted — {reason}.",
+      other: "{count} comments you wrote weren't posted — {reason}.",
+    }),
+
+    // In-app mention inbox (workspace header bell)
+    "comments.inbox.title": "Notifications",
+    "comments.inbox.unreadCount": "{count} unread",
+    "comments.inbox.emptyTitle": "No mentions yet",
+    "comments.inbox.empty": "When a teammate @mentions you in a comment, it shows up here.",
+    "comments.inbox.markAllRead": "Mark all as read",
+    "comments.inbox.markRead": "Mark as read",
+    "comments.inbox.markUnread": "Mark unread",
+    "comments.inbox.verseInFile": "{verse} in {file}",
+    "comments.inbox.commented": "{author} commented: {message}",
+    "comments.inbox.unreadsOnly": "Show unreads only",
+    "comments.inbox.actionsAria": "Notification actions",
+    "comments.inbox.delete": "Delete notification",
+    "comments.inbox.deletedToast": "Notification deleted",
+    "comments.inbox.undo": "Undo",
+    "comments.inbox.undoneToast": "Undo \"{action}\"",
+    "comments.inbox.deleteAll": "Delete all",
+    "comments.inbox.deleteAllRead": "Delete all read",
+    "comments.inbox.deleteTitle": "Delete notification?",
+    "comments.inbox.deleteDescription":
+      "This removes the notification from your inbox. The comment stays.",
+    "comments.inbox.deleteAllTitle": "Delete all notifications?",
+    "comments.inbox.deleteAllDescription":
+      "This removes every notification from your inbox. The comments stay.",
+    "comments.inbox.deleteAllReadTitle": "Delete read notifications?",
+    "comments.inbox.deleteAllReadDescription":
+      "This removes notifications you have already read. Unread ones stay, and the comments stay.",
+    "comments.inbox.noUnreadTitle": "No unread notifications",
+    "comments.inbox.noUnread": "You're caught up.",
+    "comments.inbox.unreadBadge": "Unread",
+    "comments.inbox.footer": "Mentions in this project.",
+    "comments.inbox.openAria": "Notifications",
+    "comments.inbox.openUnreadAria": "Notifications, {count} unread",
   },
   context: {
     _context: {
@@ -146,7 +219,23 @@ export const comments = defineNamespace({
           "short to search on.",
       },
       "comments.mention.noResults": {
-        description: "Empty-state row in the @mention dropdown when no user matches the query.",
+        description: "Empty-state row in the @mention dropdown when no project member matches the query.",
+      },
+      "comments.mention.noMembers": {
+        description:
+          "Empty-state row in the @mention dropdown when this project has no other members " +
+          "to mention (the signed-in user is not listed).",
+      },
+      "comments.mention.restricted": {
+        description:
+          "Empty-state row in the @mention dropdown for a member whose organisation hides the " +
+          "project's member list from them: they can only mention people who share a lane " +
+          "with them plus the project's maintainers, and none are available yet.",
+      },
+      "comments.mention.suggestionsAria": {
+        description:
+          "Accessible name of the @mention suggestion listbox that opens under a comment " +
+          "composer. Not visible on screen; announced with the list of project members.",
       },
       "comments.composer.editPlaceholder": {
         description:
@@ -155,9 +244,9 @@ export const comments = defineNamespace({
       },
       "comments.composer.replyPlaceholder": {
         description:
-          "Placeholder text of the reply textarea on the full-page thread list, which " +
-          "supports @mention — distinct from comments.thread.replyPlaceholder, the " +
-          "plainer reply box inside the editor's per-cell drawer.",
+          "Placeholder of the reply field on an existing thread in the full-page " +
+          "list. Same wording as comments.thread.replyPlaceholder. Typing @ still " +
+          "mentions a project member.",
       },
       "comments.bubble.actionsLabel": {
         description:
@@ -202,9 +291,8 @@ export const comments = defineNamespace({
       },
       "comments.resolve": {
         description:
-          "Button that marks an open thread resolved. Shown both as the toggle in a " +
-          "thread card's header and as a standalone action inside an open thread's " +
-          "reply area (comments.thread.* strings). Imperative verb.",
+          "Button that marks an open thread resolved. Shown as the toggle in a " +
+          "thread card's header and as an item in the thread's … menu. Imperative verb.",
       },
       "comments.reopen": {
         description:
@@ -254,15 +342,16 @@ export const comments = defineNamespace({
       },
       "comments.thread.replyPlaceholder": {
         description:
-          "Placeholder text of the reply textarea inside the editor's per-cell " +
-          "comments drawer (CommentThread). Plainer than " +
-          "comments.composer.replyPlaceholder — this box has no @mention support.",
+          "Placeholder of the reply field on an existing thread in the per-cell " +
+          "drawer. Short prompt, not instructions. Typing @ still mentions a " +
+          "project member.",
         screenshot: "cell-editor",
       },
       "comments.thread.reply": {
         description:
-          "Button that submits the reply textarea's contents as a new reply in the " +
-          "thread. Imperative verb, paired with a send icon.",
+          "Accessible name of the arrow button at the bottom right of the reply " +
+          "field. Enter sends the reply; Option-Enter or Alt-Enter also resolves " +
+          "the thread. Imperative verb.",
         screenshot: "cell-editor",
       },
       "comments.thread.closeWithReply": {
@@ -271,6 +360,58 @@ export const comments = defineNamespace({
           "Sits beside comments.thread.reply; should read as doing both things, not " +
           "just closing.",
         screenshot: "cell-editor",
+      },
+      "comments.thread.actionsAria": {
+        description:
+          "Accessible name of the … button at the top right of a comment thread. " +
+          "The menu holds Edit, Resolve thread (or Reopen thread), Copy comment URL, " +
+          "and Delete. Not visible.",
+      },
+      "comments.thread.resolve": {
+        description:
+          "Menu item that marks this open thread resolved. Longer than " +
+          "comments.resolve because it sits in the thread's … menu beside Edit " +
+          "and Delete. Imperative.",
+        screenshot: "cell-editor",
+      },
+      "comments.thread.reopen": {
+        description:
+          "Menu item that reopens a resolved thread. Pairs with " +
+          "comments.thread.resolve in the thread's … menu. Imperative.",
+        screenshot: "cell-editor",
+      },
+      "comments.thread.copyUrl": {
+        description:
+          "Menu item that copies a link to this comment — the editor URL that " +
+          "opens the cell and highlights the message. Imperative.",
+        screenshot: "cell-editor",
+      },
+      "comments.thread.enterReply": {
+        description:
+          "Second half of the reply button's tooltip, after an Enter keycap. " +
+          "Reads as 'Enter to reply'. Lowercase, no period.",
+      },
+      "comments.thread.optionEnterResolve": {
+        description:
+          "Second half of the reply button's tooltip, after the Option/Alt and " +
+          "Enter keycaps. Reads as 'Option Enter to reply and resolve'. Lowercase, " +
+          "no period.",
+      },
+      "comments.thread.collapse": {
+        description:
+          "Label on an expanded resolved thread that folds it back into the " +
+          "summary row. Also the accessible name of the close icon beside it.",
+        screenshot: "cell-editor",
+      },
+      "comments.thread.resolvedSummary": {
+        description:
+          "Collapsed summary of a resolved thread. Names how many messages it " +
+          "holds and who wrote them. Clicking it expands the thread.",
+        screenshot: "cell-editor",
+        placeholders: {
+          count: "Number of messages in the resolved thread. Selects the plural form.",
+          authors: "The people who wrote those messages, already joined for the locale (for example 'Keean' or 'Keean and Alice').",
+        },
       },
       "comments.filter.searchPlaceholder": {
         description: "Placeholder text of the free-text search box in the thread-list filter bar.",
@@ -303,6 +444,64 @@ export const comments = defineNamespace({
         description:
           "Option shared by both the author and participant pickers meaning no " +
           "person filter is applied.",
+      },
+      "comments.filter.allProjects": {
+        description:
+          "Option in the project picker on the organization-wide comments page " +
+          "meaning no project filter is applied.",
+      },
+      "comments.filter.fromLabel": {
+        description:
+          "Form label beside the start-date picker in the filter menu. Bounds the " +
+          "list to threads STARTED on that date or later; it does not filter on " +
+          "when a reply was written.",
+      },
+      "comments.filter.toLabel": {
+        description:
+          "Form label beside the end-date picker in the filter menu — the other " +
+          "end of the thread-start date range. Inclusive of the date picked.",
+      },
+      "comments.export.csv": {
+        description:
+          "Tooltip and accessible name of the download icon button that saves the " +
+          "threads currently visible (filters and sort included) as a CSV file.",
+      },
+      "comments.org.title": {
+        description:
+          "Heading, breadcrumb and sidebar entry of the organization-wide comments " +
+          "page, which lists threads from every project the viewer can see. Shown " +
+          "in a narrow nav column, so keep it short.",
+        maxLength: 32,
+      },
+      "comments.org.description": {
+        description:
+          "Sub-heading under the organization-wide comments title, shown while the " +
+          "list itself is not available (no organization chosen, or the viewer is " +
+          "below the maintainer floor).",
+      },
+      "comments.org.selectOrgDescription": {
+        description:
+          "Empty-state body on the organization-wide comments page when no single " +
+          "organization is in scope (the viewer is on 'All organizations').",
+      },
+      "comments.org.roleRequired": {
+        description:
+          "Empty-state heading shown instead of the organization-wide comment list " +
+          "to a viewer below maintainer. States who may use the surface.",
+      },
+      "comments.org.empty.body": {
+        description:
+          "Empty-state body on the organization-wide comments page when none of the " +
+          "viewer's projects has a comment yet.",
+      },
+      "comments.org.partialError": {
+        description:
+          "Error banner above the organization-wide comment list when some projects' " +
+          "comments failed to load — the list is incomplete, which matters because a " +
+          "short list otherwise reads as 'no feedback'.",
+        placeholders: {
+          projects: "Comma-separated display names of the projects that failed to load.",
+        },
       },
       "comments.page.titleWithProject": {
         description:
@@ -377,20 +576,187 @@ export const comments = defineNamespace({
       },
       "comments.drawer.newThreadHeading": {
         description:
-          "Small label above the new-thread composer at the bottom of the per-cell " +
-          "drawer.",
+          "Accessible name of the new-thread field at the bottom of the per-cell " +
+          "drawer. Not shown on screen.",
         screenshot: "cell-editor",
       },
       "comments.drawer.newThreadPlaceholder": {
-        description: "Placeholder text of the new-thread textarea in the per-cell drawer.",
+        description:
+          "Placeholder of the new-thread field at the bottom of the per-cell drawer. " +
+          "Short prompt. Typing @ still mentions a project member.",
         screenshot: "cell-editor",
       },
       "comments.drawer.post": {
         description:
-          "Button that submits the new-thread textarea, creating the first comment of " +
-          "a new thread on this cell. Imperative verb naming the act of publishing, " +
-          "not a generic 'Add' or 'Save'.",
+          "Accessible name of the arrow button at the bottom right of the new-thread " +
+          "field. It stays an outline icon button until the field has text, then " +
+          "fills in. Enter posts the comment. Imperative verb.",
         screenshot: "cell-editor",
+      },
+      "comments.drawer.submitRefused": {
+        description:
+          "Inline warning above the new-thread field in the per-cell drawer, shown " +
+          "when the server permanently refused a comment this person wrote, so it " +
+          "has been taken back out of the thread. Past tense: it reports what " +
+          "happened to that comment, not current project policy. {count} is how many " +
+          "of their comments were refused; {reason} is a lower-case clause naming the " +
+          "refusal (e.g. \"your role wasn't allowed to comment on this project\") and " +
+          "completes the sentence after the dash.",
+        placeholders: {
+          reason: "Lower-case clause naming why the server refused the comment.",
+          count: "How many of this person's comments were refused.",
+        },
+        screenshot: "cell-editor",
+      },
+      "comments.inbox.title": {
+        description: "Heading of the notifications popover opened from the bell in the project header.",
+      },
+      "comments.inbox.unreadCount": {
+        description:
+          "Count shown at the right of the notifications heading while mentions are unread. " +
+          "{count} is the number.",
+        placeholders: { count: "How many mention notifications are still unread." },
+      },
+      "comments.inbox.emptyTitle": {
+        description: "Short heading of the empty notifications popover.",
+      },
+      "comments.inbox.empty": {
+        description:
+          "Body under the empty-state heading when nobody has @mentioned the signed-in " +
+          "user in a comment on this project.",
+      },
+      "comments.inbox.markAllRead": {
+        description:
+          "Item in the notifications ⋯ menu that marks every mention in the inbox as read. " +
+          "Disabled when nothing is unread.",
+      },
+      "comments.inbox.markRead": {
+        description:
+          "Item in the right-click menu on one notification. Marks that row read without " +
+          "opening it. Shown only while the row is unread.",
+      },
+      "comments.inbox.markUnread": {
+        description:
+          "Item in the right-click menu on one notification. Marks that row unread again. " +
+          "Shown only while the row is already read.",
+      },
+      "comments.inbox.verseInFile": {
+        description:
+          "First line of a notification when the mention is on a verse in a file. " +
+          "{verse} is a Bible reference such as GEN 1:1. {file} is the file's display " +
+          "name. Example: \"GEN 1:1 in Genesis.usfm\".",
+        placeholders: {
+          verse: "Bible book, chapter, and verse, such as GEN 1:1.",
+          file: "Display name of the file the verse is in.",
+        },
+      },
+      "comments.inbox.commented": {
+        description:
+          "Second line of a notification, under the verse and file. Names who wrote " +
+          "the comment, then the comment itself. Example: \"keeandev commented: @keean hello\".",
+        placeholders: {
+          author: "Display name of the person who wrote the comment.",
+          message: "The comment text, with @mentions shown as @name.",
+        },
+      },
+      "comments.inbox.unreadsOnly": {
+        description:
+          "Tooltip and accessible name of the filter button at the top right of the " +
+          "notifications popover. Pressed, the list shows only unread rows.",
+      },
+      "comments.inbox.actionsAria": {
+        description:
+          "Accessible name of the ⋯ button at the top right of the notifications popover. " +
+          "The button itself has no visible text.",
+      },
+      "comments.inbox.delete": {
+        description:
+          "Item in the right-click menu on one notification. Removes that row from this " +
+          "device's inbox immediately. Does not delete the comment. A toast offers undo.",
+      },
+      "comments.inbox.deletedToast": {
+        description:
+          "Toast shown after one notification is removed from the inbox. Paired with " +
+          "an Undo button. The comment itself stays.",
+      },
+      "comments.inbox.undoneToast": {
+        description:
+          "Success toast after Undo (or Ctrl+Z) puts a notification back. {action} is " +
+          "the title of the toast that was undone, shown in quotes. A check icon sits " +
+          "beside it. The only button is close.",
+        placeholders: {
+          action: "Title of the toast that was undone, such as Notification deleted.",
+        },
+      },
+      "comments.inbox.undo": {
+        description:
+          "Button on the notification-deleted toast that puts that notification back " +
+          "in the inbox. Ctrl+Z does the same while this button is showing. Afterward " +
+          "the button is replaced by the normal close button.",
+        maxLength: 16,
+      },
+      "comments.inbox.deleteAll": {
+        description:
+          "Item in the notifications ⋯ menu. Removes every notification from this " +
+          "device's inbox. Does not delete the comments.",
+      },
+      "comments.inbox.deleteAllRead": {
+        description:
+          "Item in the notifications ⋯ menu. Removes notifications that have already " +
+          "been read. Unread ones stay. Does not delete the comments.",
+      },
+      "comments.inbox.deleteTitle": {
+        description:
+          "Heading of the confirmation dialog before removing one notification from the inbox.",
+      },
+      "comments.inbox.deleteDescription": {
+        description:
+          "Body of the confirmation dialog for deleting one notification. Says the " +
+          "comment itself is kept.",
+      },
+      "comments.inbox.deleteAllTitle": {
+        description: "Heading of the confirmation dialog before clearing the whole inbox.",
+      },
+      "comments.inbox.deleteAllDescription": {
+        description:
+          "Body of the confirmation dialog for deleting every notification. Says the " +
+          "comments themselves are kept.",
+      },
+      "comments.inbox.deleteAllReadTitle": {
+        description:
+          "Heading of the confirmation dialog before removing notifications that are already read.",
+      },
+      "comments.inbox.deleteAllReadDescription": {
+        description:
+          "Body of the confirmation dialog for deleting read notifications. Says unread " +
+          "rows and the comments themselves stay.",
+      },
+      "comments.inbox.noUnreadTitle": {
+        description:
+          "Heading shown in the notifications list when Show unreads only is on and " +
+          "every remaining notification has been read.",
+      },
+      "comments.inbox.noUnread": {
+        description: "Short line under the no-unread heading.",
+      },
+      "comments.inbox.unreadBadge": {
+        description: "Small badge on a notification row that has not been opened yet.",
+      },
+      "comments.inbox.footer": {
+        description:
+          "One-line note at the bottom of the notifications popover. Says these rows are " +
+          "mentions in the project that is open.",
+      },
+      "comments.inbox.openAria": {
+        description:
+          "Accessible name of the notifications bell in the project header when nothing " +
+          "is unread. Not visible; the control is a bell icon.",
+      },
+      "comments.inbox.openUnreadAria": {
+        description:
+          "Accessible name of the notifications bell when one or more mentions are unread. " +
+          "{count} is the number of unread mentions.",
+        placeholders: { count: "How many mention notifications are still unread." },
       },
     },
   },
@@ -401,10 +767,12 @@ export const comments = defineNamespace({
       route: "/project/:projectId/comments",
       notes:
         "Full-page thread list: header with title/count/back/refresh, the filter bar " +
-        "(search, sort, show-resolved, file/author/participant pickers), and either " +
-        "thread cards or an empty state below. The seeded dev project has no comments, " +
-        "so this shot shows the empty state — the chrome above it (header + filters) is " +
-        "what most of these keys describe.",
+        "(search, sort, show-resolved, file/author/participant pickers, Export), and " +
+        "either thread cards or an empty state below. The seeded dev project has no " +
+        "comments, so this shot shows the empty state — the chrome above it (header + " +
+        "filters) is what most of these keys describe. The organization-wide list " +
+        "(/orgs/:orgId/comments, AQU-1958) is the same chrome plus a project picker and " +
+        "a thread-start date range.",
     },
   ],
 })

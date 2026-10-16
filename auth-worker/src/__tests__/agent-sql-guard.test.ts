@@ -103,6 +103,7 @@ describe("guardSql — accepts", () => {
     "contextual_steering",
     "contextual_drafts",
     "contextual_project_leases",
+    "concepts",
   ])(
     "treats %s as project data in catalog joins",
     (table) => {
@@ -579,6 +580,28 @@ describe("runGuardedSql — cross-project isolation (2026-09-28)", () => {
     expect([...new Set(r.rows.map((row) => row.project_id))]).toEqual([PROJECT])
   })
 
+  // concepts (the termbase) joined the allowlist so the terminology cookbook
+  // can read it (AQU-1723). It must be scoped like every other readable table.
+  it("returns no other project's concepts from an unscoped join", async () => {
+    await seedTwoProjects()
+    for (const project of [PROJECT, OTHER]) {
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO concepts (concept_id, project_id, source_term, status, created_at, updated_at)
+         VALUES (?, ?, ?, 'active', 0, 0)`,
+      ).bind(crypto.randomUUID(), project, `term for ${project}`).run()
+    }
+    const r = await runGuardedSql(
+      env.AQUILLA_PG,
+      "SELECT k.project_id, k.source_term FROM cells c CROSS JOIN concepts k WHERE c.project_id = :project",
+      vars,
+      new AliasMap(),
+    )
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.rows.length).toBeGreaterThan(0)
+    expect([...new Set(r.rows.map((row) => row.project_id))]).toEqual([PROJECT])
+  })
+
   it("returns no other project's cells from a self-join whose second alias is unfiltered", async () => {
     await seedTwoProjects()
     const r = await runGuardedSql(
@@ -631,6 +654,18 @@ describe("guardSql — pen-test 2026-09-30 literal-desync and xml-function bypas
   it("rejects U&'…' literals", () => {
     expect(guard("SELECT U&'a' FROM cells WHERE project_id = :project").ok).toBe(false)
   })
+  it("rejects ts_stat / advisory locks / server-FS probes", () => {
+    for (const expr of [
+      "(ts_stat('select value_tsv from cells')).word",
+      "pg_advisory_lock(1)::text",
+      "pg_advisory_xact_lock(1)::text",
+      "(pg_stat_file('/etc/passwd')).size",
+    ]) {
+      const r = guard(`SELECT ${expr} FROM cells WHERE project_id = :project`)
+      expect(r.ok).toBe(false)
+    }
+  })
+
   it("rejects query_to_xml (runs an unscoped query from a string)", () => {
     const r = guard("SELECT query_to_xml('select * from users', true, false, '') FROM cells WHERE project_id = :project")
     expect(r.ok).toBe(false)

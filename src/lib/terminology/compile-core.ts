@@ -2,11 +2,13 @@
 //
 // `compile.ts` is the app-facing entry point and stays the only place that
 // knows about i18n; it passes a `CompileLabels` bundle backed by `t()`. This
-// module holds the compilation itself so the Agent API's effective-prompt
-// preview (sync-worker/src/external/prompt-preview.ts) can compile a project's
-// terminology into the SAME rules the editor compiles, and therefore into the
-// same prompt block — without dragging the 2.9 MB i18n catalogs into the
-// worker bundle.
+// module holds the compilation itself so workers compile a project's
+// terminology into the SAME rules the editor compiles: the Agent API's
+// effective-prompt preview (sync-worker/src/external/prompt-preview.ts) and
+// autopilot's terminology lint (lintTerminology in
+// auth-worker/src/lib/contextual/project-context.ts, AQU-1711) — without
+// dragging the 2.9 MB i18n catalogs into the worker bundle. Keep it the only
+// compiler: a second copy is how the editor and the workers drifted apart.
 //
 // Same constraints as src/lib/completion/prompt-build.ts: no `@/` aliases
 // (transitively), no DOM, no storage, no i18n. Parameter/return types are
@@ -18,11 +20,13 @@
 //     (instance counts add up 1:1: each sourceTerm hit needs a counterpart
 //      approved rendering, and extra renderings in the target are also a miss)
 //   each forbidden rendering → one `target-forbids` rule per rendering
-//     (source contains sourceTerm AND target contains forbidden text ⇒ violation)
+//     (target contains the forbidden text ⇒ violation; the rule has no source
+//      condition yet, see AQU-1712 — lintTerminology applies one itself)
 //
 // draft / deprecated concepts are skipped entirely.
 
-import { termToRegexSource } from "./match"
+import { conceptToRegexSource, termToRegexSource } from "./match"
+import type { TermMatchOptions, TermMatchingSettings } from "./model"
 
 /** Structural echo of `TermRendering` (./types). */
 export interface CompiledRendering {
@@ -37,6 +41,7 @@ export interface CompiledConcept {
   renderings: CompiledRendering[]
   status: string
   caseSensitive?: boolean
+  match?: TermMatchOptions
 }
 
 /** Structural echo of `TranslationRule` (../parsers/types) for the two check
@@ -84,10 +89,15 @@ function escapeRegex(s: string): string {
  *
  * Only `active` concepts produce rules. The returned rules use existing
  * TranslationRule check types — no new check kinds are introduced.
+ *
+ * `termMatching` is the consuming project's affix inventory
+ * (ProjectWideSettings.termMatching); without it the source pattern still
+ * applies the concept's own match options and script-derived mark folding.
  */
 export function compileConceptsToRulesCore(
   concepts: CompiledConcept[],
   labels: CompileLabels,
+  termMatching?: TermMatchingSettings,
 ): CompiledTermRule[] {
   const rules: CompiledTermRule[] = []
   const now = new Date().toISOString()
@@ -100,9 +110,14 @@ export function compileConceptsToRulesCore(
     )
     const forbidden = concept.renderings.filter((r) => r.status === "forbidden")
 
-    // Wildcard-aware source pattern (grac* matches grace/graced/gracia, etc.).
-    // termToRegexSource returns null for empty/whitespace terms → skip concept.
-    const sourcePattern = termToRegexSource(concept.sourceTerm)
+    // AQU-1271: the SOURCE side goes through the concept matcher, so the rule
+    // engine sees the same surface forms as chips, stats and the term page —
+    // wildcards plus mark-folding, project affixes, extra forms and exclusions.
+    // Returns null for empty/whitespace terms → skip concept.
+    const sourcePattern = conceptToRegexSource(
+      { sourceTerm: concept.sourceTerm, match: concept.match },
+      termMatching,
+    )
     if (sourcePattern === null) continue
 
     // source-requires-target: each source instance needs a counterpart rendering.

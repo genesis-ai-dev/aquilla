@@ -16,7 +16,13 @@ vi.mock("@/lib/sync/org-settings", async (importActual) => ({
   fetchOrgSettings: vi.fn(async () => null),
 }))
 
+const { targetLanes } = vi.hoisted(() => ({
+  targetLanes: vi.fn(() => ({ lanes: [] as { id: string; label: string }[], ready: true })),
+}))
 vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => ({ session: { jwt: "jwt", username: "wendi", createdAt: "x" }, loading: false }) }))
+vi.mock("@/hooks/useCurrentTargetLanes", () => ({
+  useCurrentTargetLanes: () => targetLanes(),
+}))
 const listMyOrgs = vi.fn()
 const listOrgMembers = vi.fn()
 const addOrgMember = vi.fn()
@@ -38,6 +44,7 @@ vi.mock("@/lib/frontier/teams", () => ({
   attachProject: (...a: unknown[]) => attachProject(...a),
   changeProjectRole: (...a: unknown[]) => changeProjectRole(...a),
   detachProject: (...a: unknown[]) => detachProject(...a),
+  setTeamProjectLanes: vi.fn(),
 }))
 // AQU-1357: partial mock — see src/lib/sync/cloud-projects-mock-guard.test.ts.
 vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
@@ -84,6 +91,7 @@ async function openTeamTab(name: RegExp) {
 }
 
 beforeEach(() => {
+  targetLanes.mockReturnValue({ lanes: [], ready: true })
   localStorage.clear()
   listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 700, name: "owner" } }])
   listOrgMembers.mockResolvedValue([
@@ -118,7 +126,46 @@ describe("TeamDetail project management", () => {
     await pickSelectOption(/project to attach/i, /bambara/i)
     await pickSelectOption(/granted role/i, /contributor/i)
     await act(async () => { screen.getByRole("button", { name: /^attach$/i }).click() })
-    await waitFor(() => expect(attachProject).toHaveBeenCalledWith("jwt", 1, 10, "pa", 400))
+    await waitFor(() => expect(attachProject).toHaveBeenCalledWith("jwt", 1, 10, "pa", 400, undefined))
+  })
+
+  it("checks every lane from All, and sends only the lanes left checked", async () => {
+    targetLanes.mockReturnValue({
+      lanes: [
+        { id: "lane-es", label: "Spanish" },
+        { id: "lane-fr", label: "French" },
+      ],
+      ready: true,
+    })
+    const cp = await import("@/lib/sync/cloud-projects")
+    ;(cp.fetchAccessibleProjectsResult as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      projects: [{ id: "pa", name: "Bambara", orgId: 1, role: { level: 700, name: "owner", source: "creator" }, files: [] }],
+    })
+    getTeam.mockResolvedValue({ id: 10, name: "WA", members: [], projects: [] })
+    renderDetail()
+    await openTeamTab(/^projects$/i)
+    await act(async () => { (await screen.findByRole("button", { name: /attach project/i })).click() })
+    const dialog = screen.getByRole("dialog", { name: /attach project to 'wa'/i })
+    const all = dialog.querySelector('input[type="checkbox"]') as HTMLInputElement
+    const spanish = screen.getByRole("checkbox", { name: "Spanish" })
+    const french = screen.getByRole("checkbox", { name: "French" })
+    expect(all.checked).toBe(true)
+    expect(spanish).toBeChecked()
+    expect(french).toBeChecked()
+
+    fireEvent.click(french)
+    expect(french).not.toBeChecked()
+    expect(all.checked).toBe(false)
+    expect(all.indeterminate).toBe(true)
+
+    fireEvent.click(all)
+    expect(spanish).toBeChecked()
+    expect(french).toBeChecked()
+
+    fireEvent.click(french)
+    await act(async () => { screen.getByRole("button", { name: /^attach$/i }).click() })
+    await waitFor(() => expect(attachProject).toHaveBeenCalledWith("jwt", 1, 10, "pa", 100, ["lane-es"]))
   })
 
   it("detaches a project", async () => {

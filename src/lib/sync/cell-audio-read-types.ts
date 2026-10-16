@@ -1,5 +1,5 @@
 // Client mirror of the sync-worker's GET /api/v1/projects/:p/files/:f/audio-attachments
-// response (apps/sync/src/events/cell-audio-read-route.ts).
+// response (sync-worker/src/events/cell-audio-read-route.ts).
 
 import { GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
 
@@ -215,8 +215,25 @@ export function cellAudioVotes(entry: CellAudioEntry): number | null {
   return min
 }
 
+/**
+ * Is ONE take validated at `threshold`?
+ *
+ * The single comparison behind every "validated" an audio surface draws: the
+ * line's control reads a take as `full` by it, `isCellAudioValidated` applies
+ * it to the weakest of a line's takes, and (AQU-965) the export's
+ * validated-only scope decides by it which takes may ship. Extracted so those
+ * three cannot drift apart on the `Math.max(1, …)` floor — a project whose
+ * threshold is 0 still needs one vote before anything counts as validated.
+ */
+export function isTakeValidated(
+  att: Pick<AudioAttachmentOut, "validatorCount">,
+  threshold: number,
+): boolean {
+  return takeValidatorCount(att) >= Math.max(1, threshold)
+}
+
 /** Is this cell's audio validated at `threshold`? False when not recorded. */
 export function isCellAudioValidated(entry: CellAudioEntry, threshold: number): boolean {
   const votes = cellAudioVotes(entry)
-  return votes != null && votes >= Math.max(1, threshold)
+  return votes != null && isTakeValidated({ validatorCount: votes }, threshold)
 }

@@ -101,7 +101,7 @@ SENTENCE="Cross-validate alice translation $(date +%H%M%S)"
 abA type "@$editRef" "$SENTENCE" >/dev/null || fail "type sentence"
 abA click "aside" >/dev/null || fail "commit edit"
 [ "$(countA "$SENTENCE" "[data-cell-id]:first-of-type [data-cell-type=target]")" -ge 1 ] || fail "sentence not committed"
-[ "$(countA "Validated — row 1. Click to remove your validation." "[data-cell-id]:first-of-type")" -ge 1 ] || fail "alice's own commit did not auto-validate"
+[ "$(countA "Validated by you, row 1. Click to see the list, where you can remove your validation." "[data-cell-id]:first-of-type")" -ge 1 ] || fail "alice's own commit did not auto-validate"
 
 url=$(abA get url)
 fileId=$(echo "$url" | sed -n 's#.*/file/\([^/?#]*\).*#\1#p')
@@ -127,6 +127,6 @@ done
 btn=$(findRef abB 'button "Validated by others[^]]*ref=e[0-9]*') || fail "'Validated by others' control not found for bob"
 abB click "@$btn" >/dev/null || fail "click validation control"
 sleep 1
-[ "$(countB "Validated — row 1. Click to remove your validation." "[data-cell-id]:first-of-type")" -ge 1 ] || fail "validation control did not switch to 'Validated — row 1. Click to remove your validation.' for bob"
+[ "$(countB "Validated by you, row 1. Click to see the list, where you can remove your validation." "[data-cell-id]:first-of-type")" -ge 1 ] || fail "validation control did not switch to 'Validated by you, row 1.' for bob"
 
 pass "bob validated cell 0 on project $projectId, file $fileId — control reads 'Validated — row 1. Click to remove your validation.'"

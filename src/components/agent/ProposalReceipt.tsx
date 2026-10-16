@@ -4,11 +4,12 @@
  * In the workbench the working set IS the review surface, so a proposal in
  * chat renders as a one-line receipt with LIVE counters (accepted / edited /
  * rejected / to review / checks) instead of a second full diff with its own
- * Apply. "Review" jumps focus to the first undecided row in the grid. The
+ * Apply. "Review" jumps focus to the first undecided row in the grid. Once
+ * every row is decided it collapses to a single muted line (outcomes + Undo). The
  * dock keeps the full ProposalCard — there is no grid beside it there.
  */
 
-import { AlertTriangle, ArrowRight, PenLine, Undo2 } from "lucide-react"
+import { AlertTriangle, ArrowRight, Check, PenLine, Undo2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -52,10 +53,43 @@ export function ProposalReceipt({ proposal, counts, onReview, onUndo }: Proposal
   const settled = counts.pending === 0
   const undoable = counts.accepted + counts.edited > 0
 
+  const undoButton = undoable && onUndo && (
+    <AppTooltip content={t("agent.receipt.undoTooltip")}>
+      <button
+        type="button"
+        onClick={onUndo}
+        className="inline-flex w-fit items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:underline"
+      >
+        <Undo2 className="h-3 w-3" />
+        {t("agent.receipt.undoApplied")}
+      </button>
+    </AppTooltip>
+  )
+
+  // Every row decided: the card has done its job, so it steps out of the way
+  // and leaves a one-line trace — kept (not removed) because it holds the
+  // only Undo for the applied rows.
+  if (settled) {
+    const outcomes = [
+      counts.accepted > 0 && t("agent.receipt.accepted", { count: counts.accepted }),
+      counts.edited > 0 && t("agent.receipt.editedAccepted", { count: counts.edited }),
+      counts.rejected > 0 && t("agent.receipt.rejected", { count: counts.rejected }),
+      counts.undone > 0 && t("agent.receipt.undone", { count: counts.undone }),
+    ].filter(Boolean)
+    return (
+      <div data-testid="proposal-receipt-settled" className="my-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+        <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-500" />
+        <span>{outcomes.join(" · ")}</span>
+        {span && <span className="font-mono text-[10px]">{span}</span>}
+        {undoButton}
+      </div>
+    )
+  }
+
   return (
-    <div className="my-1.5 flex flex-col gap-1.5 rounded-lg border border-sky-900/60 bg-sky-950/30 px-3 py-2">
+    <div className="my-1.5 flex flex-col gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 dark:border-sky-900/60 dark:bg-sky-950/30">
       <div className="flex flex-wrap items-center gap-1.5 text-xs">
-        <PenLine className="h-3.5 w-3.5 text-sky-500" />
+        <PenLine className="h-3.5 w-3.5 text-sky-600 dark:text-sky-500" />
         <span className="font-medium">
           {t("agent.receipt.draftsStaged", { count: proposal.events.length })}
         </span>
@@ -64,12 +98,12 @@ export function ProposalReceipt({ proposal, counts, onReview, onUndo }: Proposal
 
       <div className="flex flex-wrap items-center gap-1">
         {counts.accepted > 0 && (
-          <Badge variant="outline" className="border-emerald-800/60 text-[10px] text-emerald-600 dark:text-emerald-500">
+          <Badge variant="outline" className="border-emerald-300 text-[10px] text-emerald-700 dark:border-emerald-800/60 dark:text-emerald-500">
             {t("agent.receipt.accepted", { count: counts.accepted })}
           </Badge>
         )}
         {counts.edited > 0 && (
-          <Badge variant="outline" className="border-emerald-800/60 text-[10px] text-emerald-600 dark:text-emerald-500">
+          <Badge variant="outline" className="border-emerald-300 text-[10px] text-emerald-700 dark:border-emerald-800/60 dark:text-emerald-500">
             {t("agent.receipt.editedAccepted", { count: counts.edited })}
           </Badge>
         )}
@@ -79,52 +113,36 @@ export function ProposalReceipt({ proposal, counts, onReview, onUndo }: Proposal
           </Badge>
         )}
         {counts.undone > 0 && (
-          <Badge variant="outline" className="border-amber-700/50 text-[10px] text-amber-600 dark:text-amber-400">
+          <Badge variant="outline" className="border-amber-300 text-[10px] text-amber-700 dark:border-amber-700/50 dark:text-amber-400">
             {t("agent.receipt.undone", { count: counts.undone })}
           </Badge>
         )}
         {counts.pending > 0 && (
-          <Badge variant="outline" className="border-sky-800/60 text-[10px] text-sky-600 dark:text-sky-400">
+          <Badge variant="outline" className="border-sky-300 text-[10px] text-sky-700 dark:border-sky-800/60 dark:text-sky-400">
             {t("agent.receipt.toReview", { count: counts.pending })}
           </Badge>
         )}
         {counts.checks > 0 && (
-          <Badge variant="outline" className="border-amber-700/50 text-[10px] text-amber-600 dark:text-amber-400">
+          <Badge variant="outline" className="border-amber-300 text-[10px] text-amber-700 dark:border-amber-700/50 dark:text-amber-400">
             <AlertTriangle data-icon="inline-start" />
             {t("agent.receipt.checks", { count: counts.checks })}
           </Badge>
         )}
-        {settled && counts.accepted + counts.edited + counts.rejected + counts.undone > 0 && (
-          <Badge variant="ghost" className="text-[10px] text-muted-foreground">
-            {t("common.done")}
-          </Badge>
-        )}
       </div>
 
-      {(!settled || (undoable && onUndo)) && (
+      {(onReview || undoButton) && (
         <div className="flex items-center gap-3">
-          {!settled && onReview && (
+          {onReview && (
             <button
               type="button"
               onClick={onReview}
-              className="inline-flex w-fit items-center gap-1 text-[11px] font-medium text-sky-600 hover:underline dark:text-sky-400"
+              className="inline-flex w-fit items-center gap-1 text-[11px] font-medium text-sky-700 hover:underline dark:text-sky-400"
             >
               {t("agent.receipt.reviewInWorkingSet")}
               <ArrowRight className="h-3 w-3" />
             </button>
           )}
-          {undoable && onUndo && (
-            <AppTooltip content={t("agent.receipt.undoTooltip")}>
-              <button
-                type="button"
-                onClick={onUndo}
-                className="inline-flex w-fit items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:underline"
-              >
-                <Undo2 className="h-3 w-3" />
-                {t("agent.receipt.undoApplied")}
-              </button>
-            </AppTooltip>
-          )}
+          {undoButton}
         </div>
       )}
     </div>

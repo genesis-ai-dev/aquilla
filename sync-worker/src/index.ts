@@ -1,3 +1,5 @@
+import { handleMigratePersonalProjectRequest } from "./events/migrate-personal-project-route"
+import { handleCheckingRequest } from "./checking/route"
 // Aquilla sync worker.
 //
 // AD-1 keeps realtime state transient and project-scoped: ProjectSync owns
@@ -8,6 +10,7 @@
 // cutover is complete and D1 is no longer a datastore here.
 
 import { handleAdminRequest } from "./admin"
+import { handleDbTimeoutsRequest } from "./db-timeouts-route"
 import { handleAudioRequest } from "./audio"
 import { handleCellAttachmentRequest } from "./cell-attachments"
 import { handleVoiceConvertRequest, handleVoiceReferenceRequest } from "./voice-convert"
@@ -22,6 +25,7 @@ import {
   notifyProjectDoMemberRoleChanged,
 } from "./member-role-changed"
 import { handleProjectSettingsChangedRequest } from "./project-settings-notify"
+import { handleMondayLinkChangedRequest } from "./monday-notify"
 import { handleContextualActivityRequest } from "./contextual-activity-notify"
 import { handleCellsAuditReadRequest } from "./events/cells-audit-read-route"
 import { handleCellHistoryReadRequest } from "./events/cell-history-read-route"
@@ -33,11 +37,13 @@ import { handleHealthRollupRequest } from "./events/health-rollup-route"
 import { handleCellAudioReadRequest } from "./events/cell-audio-read-route"
 import { handleCellLinksReadRequest } from "./events/cell-links-read-route"
 import { handleCellMorphReadRequest } from "./events/cell-morph-read-route"
+import { handleSourceWordAlignmentRequest } from "./events/source-word-alignment-route"
 import { handleEventsReadRequest } from "./events/read-route"
 import { handleEventsWriteRequest } from "./events/route"
 import { handleExternalChangesetsRequest } from "./external/changesets-route"
 import { handleSessionChangesetsRequest } from "./external/session-routes"
 import { handleExternalArtifactsRequest } from "./external/artifacts-route"
+import { handleExternalKnowledgeRequest } from "./external/knowledge-route"
 import { handleFilesReadRequest } from "./events/files-read-route"
 import { handleProgressReadRequest } from "./events/progress-read-route"
 import { handlePlanRequest } from "./events/plan-route"
@@ -63,6 +69,10 @@ import { handleExportBundleRequest } from "./events/export-bundle-route"
 import { handleOriginalDownloadRequest } from "./events/original-download-route"
 import { handleOriginalsBundleRequest } from "./events/originals-bundle-route"
 import { handleRebuildProjectionRequest } from "./events/rebuild"
+import {
+  PROJECTION_SNAPSHOT_CRON,
+  runProjectionSnapshotSweep,
+} from "./projection-snapshot-cron"
 import { handleRebuildFtsRequest } from "./events/rebuild-fts"
 import { handleSearchReadRequest, handleSearchPassagesRequest } from "./events/search-route"
 import { handleStaleSourceRequest } from "./events/stale-source-route"
@@ -95,10 +105,14 @@ export { ProjectSync } from "./project-do"
 export { FileSync } from "./file-sync-legacy"
 import { makePostgres } from "../../db/shim/postgres"
 import { setAccessGrantsMode } from "../../db/shared/project-roles"
+import { trackBackgroundWork } from "./lib/background-work"
 import { migrateFenceResponse } from "./lib/migrate-fence"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
+import { handleSideEffectBatch } from "./side-effects/queue"
+import { redactLogPath } from "../../shared/log-path-redaction"
 import { deploymentEnvironmentError, unauthenticatedBypassError } from "./environment-guard"
 import { asReadonlyR2, type ReadonlyR2Bucket } from "./lib/readonly-r2"
+import { runR2GcSweep, R2_GC_CRON } from "./r2-gc-cron"
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace -- Cloudflare namespace augmentation requires this syntax
@@ -195,6 +209,12 @@ declare global {
       EMAIL?: import("./notification-email").EmailService
       /** Optional — From address for transactional email. Defaults to noreply@support.aquilla.app. */
       EMAIL_FROM?: string
+      /** AQU-1824 — producer binding for the side-effect queue (comment mail
+       *  today; Monday nudges, org-settings fan-out and link-notify next).
+       *  Declared only in deployed env blocks (wrangler.toml), where the
+       *  consumer config also carries max_retries + a dead-letter queue.
+       *  Absent locally/e2e, where side effects run inline as before. */
+      SIDE_EFFECTS?: Queue<import("./side-effects/types").SideEffectMessage>
       /** Optional — Base URL for deep links in notification emails (e.g. https://aquilla.app). */
       BASE_URL?: string
       /** PostHog project token (phc_…) — when set, 4xx/5xx responses are
@@ -212,6 +232,37 @@ declare global {
        * Tune once actual GPU billing is available.
        */
       TTS_COST_PER_AUDIO_SEC_CENTS?: string
+      /**
+       * Platform-wide daily AI spend ceiling in US dollars, checked before
+       * every paid AI call in this worker too — TTS, voice-convert,
+       * diarization (db/shared/ai-spend-ceiling.ts, AQU-1869). Unset →
+       * $500/day; "0" blocks all paid AI; "off" switches the ceiling off.
+       * Keep this value identical to auth-worker's.
+       */
+      AI_DAILY_SPEND_CEILING_USD?: string
+      /**
+       * Org credit caps, shared with auth-worker's llm/agent rails (spec
+       * § Config). The TTS pre-check reads these and is log-only unless
+       * CREDIT_ENFORCE === "true" or the org sets `credits.enforce`.
+       */
+      CREDIT_MARKUP?: string
+      CREDIT_AGENT_MARKUP?: string
+      CREDIT_DAILY_CAP?: string
+      CREDIT_WEEKLY_CAP?: string
+      CREDIT_ENFORCE?: string
+      /**
+       * AQU-1856 R2 orphan sweep (r2-gc-cron.ts): `off` skips it, `dry-run`
+       * reports without deleting, unset/anything else sweeps. A var so the
+       * sweep can be stopped or shadowed without waiting on a release.
+       */
+      R2_GC_MODE?: string
+      /**
+       * AQU-1833 projection-snapshot sweep (projection-snapshot-cron.ts): `off`
+       * skips it, unset/anything else runs it. A var so the sweep can be
+       * stopped without waiting on a release — a skipped night only means the
+       * next rebuild replays further back.
+       */
+      PROJECTION_SNAPSHOT_MODE?: string
     }
   }
 }
@@ -323,6 +374,15 @@ const worker = {
       AQUILLA_PG: pgShim as unknown as AquillaDb,
       LFS_SRC: rawLfsSrc ? asReadonlyR2(rawLfsSrc) : undefined,
     }
+    // AQU-1835: routes hand post-response work to ctx.waitUntil (comment
+    // notification emails, linked-project notify, import notifies) and keep
+    // querying on the connection above. Hand them a context that RECORDS those
+    // registrations, so the `finally` below can release the connection once
+    // they have settled instead of the moment the Response returns — which
+    // used to make those queries race `end()` and lose silently.
+    // See lib/background-work.ts.
+    const background = trackBackgroundWork(ctx)
+    const routeCtx = background.ctx
     try {
     const projectArchiveResponse = await handleProjectArchiveRequest(request, env, notifyProjectDo)
     if (projectArchiveResponse) return projectArchiveResponse
@@ -344,14 +404,26 @@ const worker = {
     if (memberRoleChangedResponse) return memberRoleChangedResponse
     const projectSettingsChangedResponse = await handleProjectSettingsChangedRequest(request, env)
     if (projectSettingsChangedResponse) return projectSettingsChangedResponse
+    // AQU-1828: drop the DO's cached "project has no Monday link" answer.
+    const mondayLinkChangedResponse = await handleMondayLinkChangedRequest(request, env)
+    if (mondayLinkChangedResponse) return mondayLinkChangedResponse
     const contextualActivityResponse = await handleContextualActivityRequest(request, env)
     if (contextualActivityResponse) return contextualActivityResponse
     const rebuildResponse = await handleRebuildProjectionRequest(request, env)
     if (rebuildResponse) return rebuildResponse
     const rebuildFtsResponse = await handleRebuildFtsRequest(request, env)
     if (rebuildFtsResponse) return rebuildFtsResponse
+    // Must precede handleAdminRequest: that handler owns the rest of /admin/*
+    // and 404s anything it does not recognise.
+    const dbTimeoutsResponse = await handleDbTimeoutsRequest(request, env)
+    if (dbTimeoutsResponse) return dbTimeoutsResponse
     const adminResponse = await handleAdminRequest(request, env)
     if (adminResponse) return adminResponse
+    const checkingResponse = await handleCheckingRequest(request, env, ctx)
+    if (checkingResponse) {
+      checkingResponse.headers.set("Cache-Control", "no-store")
+      return withCors(checkingResponse, request)
+    }
     const audioResponse = await handleAudioRequest(request, env)
     if (audioResponse) return audioResponse
     // AQU-777: per-cell attachment bytes. Its own R2 prefix and its own
@@ -393,6 +465,9 @@ const worker = {
     if (cellLinksReadResponse) return withCors(cellLinksReadResponse, request)
     const cellMorphReadResponse = await handleCellMorphReadRequest(request, env)
     if (cellMorphReadResponse) return withCors(cellMorphReadResponse, request)
+    // AQU-1694: Bridge 1 links (pack word ↔ source token), read and written.
+    const sourceAlignmentResponse = await handleSourceWordAlignmentRequest(request, env)
+    if (sourceAlignmentResponse) return withCors(sourceAlignmentResponse, request)
     const cellHistoryResponse = await handleCellHistoryReadRequest(request, env)
     if (cellHistoryResponse) return withCors(cellHistoryResponse, request)
     const removedCellsResponse = await handleRemovedCellsReadRequest(request, env)
@@ -454,9 +529,9 @@ const worker = {
     if (branchingPassagesResponse) return withCors(branchingPassagesResponse, request)
     const branchingSearchResponse = await handleBranchingSearchRequest(request, env)
     if (branchingSearchResponse) return withCors(branchingSearchResponse, request)
-    const bulkImportResponse = await handleBulkImportRequest(request, env, ctx)
+    const bulkImportResponse = await handleBulkImportRequest(request, env, routeCtx)
     if (bulkImportResponse) return bulkImportResponse
-    const importReconcileResponse = await handleImportReconcileRequest(request, env, ctx)
+    const importReconcileResponse = await handleImportReconcileRequest(request, env, routeCtx)
     if (importReconcileResponse) return importReconcileResponse
     const bulkMorphImportResponse = await handleBulkMorphImportRequest(request, env)
     if (bulkMorphImportResponse) return bulkMorphImportResponse
@@ -469,7 +544,7 @@ const worker = {
     // AQU-1005/AQU-1007: identification fence over the whole /migrate/*
     // surface — blocks header-less runners (503 + source log) and gives every
     // allowed run an audit trail. See lib/migrate-fence.ts.
-    const migrateFence = migrateFenceResponse(request, env, ctx)
+    const migrateFence = migrateFenceResponse(request, env, routeCtx)
     if (migrateFence) return migrateFence
     const migrateIngestResponse = await handleMigrateIngestRequest(request, env)
     if (migrateIngestResponse) return migrateIngestResponse
@@ -493,6 +568,8 @@ const worker = {
     if (migrateOrgTeamMapsResponse) return migrateOrgTeamMapsResponse
     const migrateGroupsResponse = await handleMigrateGroupsRequest(request, env)
     if (migrateGroupsResponse) return migrateGroupsResponse
+    const personalProjectResponse = await handleMigratePersonalProjectRequest(request, env)
+    if (personalProjectResponse) return personalProjectResponse
     const migrateUsersReadResponse = await handleMigrateUsersReadRequest(request, env)
     if (migrateUsersReadResponse) return migrateUsersReadResponse
     const migrateWebhookInbox = await handleMigrateWebhookRequest(request, env)
@@ -507,30 +584,35 @@ const worker = {
     if (originalDownloadResponse) return originalDownloadResponse
     const originalsBundleResponse = await handleOriginalsBundleRequest(request, env)
     if (originalsBundleResponse) return originalsBundleResponse
-    const eventsWriteResponse = await handleEventsWriteRequest(request, env, ctx)
+    const eventsWriteResponse = await handleEventsWriteRequest(request, env, routeCtx)
     if (eventsWriteResponse) return withCors(eventsWriteResponse, request)
 
     // AQU-533: Agent API changeset engine (external command layer).
-    const externalChangesetsResponse = await handleExternalChangesetsRequest(request, env, ctx)
+    const externalChangesetsResponse = await handleExternalChangesetsRequest(request, env, routeCtx)
     if (externalChangesetsResponse) return withCors(externalChangesetsResponse, request)
 
     // AQU-926: session-token changeset routes (/api/v1/changesets/*) — the
     // in-app agent harness + review card drive the same engine with the
     // browser's sync token. Disjoint from /api/v1/external/* and
     // /api/v1/projects/* so ordering here is not load-bearing.
-    const sessionChangesetsResponse = await handleSessionChangesetsRequest(request, env, ctx)
+    const sessionChangesetsResponse = await handleSessionChangesetsRequest(request, env, routeCtx)
     if (sessionChangesetsResponse) return withCors(sessionChangesetsResponse, request)
 
     // AQU-533: Agent API remote MCP server (tools-only, streamable HTTP).
     // The OAuth discovery document it points 401s at (RFC 9728) sits beside it.
     const mcpResourceMetadata = handleMcpProtectedResourceRequest(request, env, mountPrefix)
     if (mcpResourceMetadata) return withCors(mcpResourceMetadata, request)
-    const externalMcpResponse = await handleExternalMcpRequest(request, env, ctx, mountPrefix)
+    const externalMcpResponse = await handleExternalMcpRequest(request, env, routeCtx, mountPrefix)
     if (externalMcpResponse) return withCors(externalMcpResponse, request)
 
     // AQU-533 (W2-B): Agent API source-artifact upload / inspect.
     const externalArtifactsResponse = await handleExternalArtifactsRequest(request, env)
     if (externalArtifactsResponse) return withCors(externalArtifactsResponse, request)
+
+    // AQU-1762: Agent API knowledge-base (reference document) upload / list.
+    // Bridged to auth-worker, which owns extraction + indexing.
+    const externalKnowledgeResponse = await handleExternalKnowledgeRequest(request, env)
+    if (externalKnowledgeResponse) return withCors(externalKnowledgeResponse, request)
 
     // AQU-1294: partner intake template + agent skills. Static text / pure
     // transforms, unauthenticated like the command docs below.
@@ -557,7 +639,7 @@ const worker = {
 
     return new Response("not found", { status: 404 })
     } finally {
-      ctx.waitUntil(pgShim.close())
+      ctx.waitUntil(background.closeWhenSettled(pgShim))
     }
   },
 }
@@ -581,11 +663,11 @@ export default {
     try {
       response = await worker.fetch(request, env, ctx)
     } catch (err) {
-      const url = new URL(request.url)
+      const path = redactLogPath(new URL(request.url).pathname)
       ctx.waitUntil(
-        shipLog(env, "aquilla-sync-worker", "error", `unhandled: ${request.method} ${url.pathname}`, {
+        shipLog(env, "aquilla-sync-worker", "error", `unhandled: ${request.method} ${path}`, {
           "http.method": request.method,
-          "http.path": url.pathname,
+          "http.path": path,
           "http.duration_ms": Date.now() - startedAt,
           "error.message": err instanceof Error ? err.message : String(err),
         }),
@@ -594,14 +676,17 @@ export default {
     }
     const durationMs = Date.now() - startedAt
     if (durationMs >= SLOW_REQUEST_MS) {
-      const url = new URL(request.url)
+      // OPS-42: `redactLogPath`, not `url.pathname` — [slow-request] fires on
+      // SUCCESSFUL requests too and lands in Cloudflare Workers Logs, so an
+      // access-link redeem that merely ran slowly would log a live token.
+      const path = redactLogPath(new URL(request.url).pathname)
       console.warn(
-        `[slow-request] ${request.method} ${url.pathname} took ${durationMs}ms (status ${response.status})`,
+        `[slow-request] ${request.method} ${path} took ${durationMs}ms (status ${response.status})`,
       )
       ctx.waitUntil(
-        shipLog(env, "aquilla-sync-worker", "warn", `slow: ${request.method} ${url.pathname} (${durationMs}ms)`, {
+        shipLog(env, "aquilla-sync-worker", "warn", `slow: ${request.method} ${path} (${durationMs}ms)`, {
           "http.method": request.method,
-          "http.path": url.pathname,
+          "http.path": path,
           "http.status": response.status,
           "http.duration_ms": durationMs,
         }),
@@ -611,5 +696,68 @@ export default {
       ctx.waitUntil(shipErrorResponse(env, "aquilla-sync-worker", request, response))
     }
     return response
+  },
+
+  // Two crons on this worker: the AQU-1856 nightly R2 orphan sweep and the
+  // AQU-1833 projection-snapshot sweep. Unlike `fetch` above, each builds its
+  // own Postgres handle (r2-gc-cron.ts / projection-snapshot-cron.ts), since
+  // the scheduled entrypoint never passes through that wrapper.
+  //
+  // Both are bounded and resumable, so a cron that throws is logged and
+  // swallowed: the runtime's retry would otherwise thrash on a bad night, and
+  // a missed night costs only progress, never correctness.
+  async scheduled(
+    controller: ScheduledController,
+    env: Env,
+    _ctx: ExecutionContext,
+  ): Promise<void> {
+    if (controller.cron === R2_GC_CRON) {
+      try {
+        await runR2GcSweep(env)
+      } catch (err) {
+        console.error("[r2-gc] sweep failed:", err)
+      }
+      return
+    }
+    if (controller.cron === PROJECTION_SNAPSHOT_CRON) {
+      try {
+        await runProjectionSnapshotSweep(env)
+      } catch (err) {
+        console.error("[projection-snapshot] sweep failed:", err)
+      }
+      return
+    }
+    console.warn(`[cron] unrecognized schedule ${controller.cron} — ignoring`)
+  },
+
+  // Side-effect queue consumer (AQU-1824). Comment / @mention mail is resolved
+  // and sent here rather than in the request that created the comment, so a
+  // provider blip is retried instead of lost and a wide fan-out is not bounded
+  // by one invocation's subrequest budget.
+  //
+  // Postgres is set up exactly as `fetch` does it — a per-invocation shim over
+  // HYPERDRIVE, closed when the batch is done. The handler throws on a missing
+  // binding rather than acking: a config error must leave the messages on the
+  // queue, not silently consume them.
+  async queue(
+    batch: MessageBatch<import("./side-effects/types").SideEffectMessage>,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<void> {
+    if (!env.HYPERDRIVE) {
+      throw new Error(
+        "HYPERDRIVE not bound — the side-effect queue consumer needs Postgres",
+      )
+    }
+    const pgShim: { close(): Promise<void> } = makePostgres(env.HYPERDRIVE.connectionString)
+    setAccessGrantsMode(pgShim as unknown as AquillaDb, env.ACCESS_GRANTS_RESOLVER)
+    try {
+      await handleSideEffectBatch(batch, {
+        ...env,
+        AQUILLA_PG: pgShim as unknown as AquillaDb,
+      })
+    } finally {
+      ctx.waitUntil(pgShim.close())
+    }
   },
 }

@@ -38,6 +38,9 @@ export interface GroupSyncResult {
   /** True when apply was requested but the plan matched `lastPlanHash`, so the
    *  /migrate/groups upsert was not sent. */
   skipped: boolean
+  /** AQU-1800: lane-access rows written (apply) or that an apply would write
+   *  (dry run). Null when the upsert was skipped, so it is never read as 0. */
+  laneGrants: number | null
 }
 
 export interface GroupSyncHttp {
@@ -140,10 +143,35 @@ export async function syncGroupsToNeon(
 
   const planHash = hashGroupPlan(plan)
   if (!opts.apply) {
-    return { placeIdx, plan, orgIdByUuid: new Map(), teamIdByUuid: new Map(), planHash, skipped: false }
+    // AQU-1800: ask the endpoint what the apply would grant. Read-only on that
+    // side, so a dry run still writes nothing.
+    const dry = await doFetch(`${http.syncBase}/migrate/groups`, {
+      method: "POST",
+      headers: http.headers,
+      body: JSON.stringify({ plan, dryRun: true }),
+    })
+    if (!dry.ok) throw new Error(`migrate/groups dry-run HTTP ${dry.status}: ${(await dry.text()).slice(0, 200)}`)
+    const { would } = (await dry.json()) as { would?: { laneGrants?: number } }
+    return {
+      placeIdx,
+      plan,
+      orgIdByUuid: new Map(),
+      teamIdByUuid: new Map(),
+      planHash,
+      skipped: false,
+      laneGrants: would?.laneGrants ?? 0,
+    }
   }
   if (!opts.force && opts.lastPlanHash && opts.lastPlanHash === planHash) {
-    return { placeIdx, plan, orgIdByUuid: new Map(), teamIdByUuid: new Map(), planHash, skipped: true }
+    return {
+      placeIdx,
+      plan,
+      orgIdByUuid: new Map(),
+      teamIdByUuid: new Map(),
+      planHash,
+      skipped: true,
+      laneGrants: null,
+    }
   }
 
   // 4) Upsert into Neon, get back the legacy_uuid→id maps.
@@ -153,7 +181,11 @@ export async function syncGroupsToNeon(
     body: JSON.stringify({ plan }),
   })
   if (!res.ok) throw new Error(`migrate/groups HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`)
-  const body = (await res.json()) as { orgIdByUuid: Record<string, number>; teamIdByUuid: Record<string, number> }
+  const body = (await res.json()) as {
+    orgIdByUuid: Record<string, number>
+    teamIdByUuid: Record<string, number>
+    created?: { laneGrants?: number }
+  }
   return {
     placeIdx,
     plan,
@@ -161,5 +193,6 @@ export async function syncGroupsToNeon(
     teamIdByUuid: new Map(Object.entries(body.teamIdByUuid)),
     planHash,
     skipped: false,
+    laneGrants: body.created?.laneGrants ?? 0,
   }
 }

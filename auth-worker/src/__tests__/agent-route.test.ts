@@ -10,6 +10,7 @@ import { env } from "cloudflare:test"
 import { describe, it, expect, afterEach, vi } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
+import { bumpRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 
 const PROJECT = "11111111-1111-4111-8111-111111111111"
 const FILE = "22222222-2222-4222-8222-222222222222"
@@ -128,10 +129,8 @@ describe("POST /api/v1/ai/agent/run — rate limiting", () => {
     const upstream = vi
       .spyOn(globalThis, "fetch")
       .mockRejectedValue(new Error("must not reach upstream — rate limit should block first"))
-    await env.AQUILLA_PG.prepare(
-      `INSERT INTO auth_rate_limit_events (kind, identifier, success)
-       SELECT 'agent_run', 'user:1', 1 FROM generate_series(1, 60)`,
-    ).run()
+    // AQU-1843: the throttle is an atomic counter now, not an event log.
+    await bumpRateLimit(env.AQUILLA_PG, "agent_run", userRateLimitIdentifier(1), 60)
 
     const res = await postRun(jwt)
 
@@ -144,10 +143,7 @@ describe("POST /api/v1/ai/agent/run — rate limiting", () => {
   it("does not throttle a fresh user, even when another user has flooded the window", async () => {
     await seedProjectWorld()
     const jwt = await jwtFor("alice")
-    await env.AQUILLA_PG.prepare(
-      `INSERT INTO auth_rate_limit_events (kind, identifier, success)
-       SELECT 'agent_run', 'user:999', 1 FROM generate_series(1, 60)`,
-    ).run()
+    await bumpRateLimit(env.AQUILLA_PG, "agent_run", userRateLimitIdentifier(999), 60)
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       modelTurn({ role: "assistant", content: "All done." }),
     )

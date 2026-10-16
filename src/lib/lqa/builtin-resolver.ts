@@ -5,7 +5,9 @@ import type {
 } from "@/lib/parsers/types"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { TFunction } from "@/lib/i18n/I18nProvider"
+import type { PunctuationConventions } from "../../../db/shared/punctuation-conventions"
 import { BUILTIN_CHECKS, BUILTIN_CHECK_IDS } from "./builtin-registry"
+import { BIBLE_BUILTIN_CHECK_IDS } from "./bible-builtin-checks"
 
 const FROZEN_CREATED_AT = "1970-01-01T00:00:00.000Z"
 
@@ -26,12 +28,47 @@ const NAME_KEY: Record<BuiltinCheckId, MessageKey> = {
   "target-equals-source": "rules.builtin.targetEqualsSource.name",
   "placeholder-integrity": "rules.builtin.placeholderIntegrity.name",
   "number-integrity": "rules.builtin.numberIntegrity.name",
+  "number-integrity-extra": "rules.builtin.numberIntegrityExtra.name",
   "end-punctuation-mismatch": "rules.builtin.endPunctuationMismatch.name",
   "punctuation-integrity": "rules.builtin.punctuationIntegrity.name",
   "double-space": "rules.builtin.doubleSpace.name",
   "repeated-word": "rules.builtin.repeatedWord.name",
   "unpaired-symbols": "rules.builtin.unpairedSymbols.name",
   "abbreviation-mismatch": "rules.builtin.abbreviationMismatch.name",
+  "bkp:V1": "bibleData.check.v1.name",
+  "bkp:V2": "bibleData.check.v2.name",
+  "bkp:V3": "bibleData.check.v3.name",
+  "bkp:V5": "bibleData.check.v5.name",
+  "bkp:V7": "bibleData.check.v7.name",
+  "bkp:V8": "bibleData.check.v8.name",
+  "bkp:V9": "bibleData.check.v9.name",
+  "bkp:M1": "bibleData.check.m1.name",
+  "usfm-structure": "rules.builtin.usfmStructure.name",
+  "capitalization": "rules.builtin.capitalization.name",
+  "footnote-quote-mismatch": "rules.builtin.footnoteQuoteMismatch.name",
+  "bkp:N1": "bibleChecks.n1.name",
+  "bkp:N2": "bibleChecks.n2.name",
+  // AQU-1697: the name autopilot already shows for this check.
+  "bkp:M3": "agent.finding.bibleCheck.negation",
+  "bkp:S1": "bibleChecks.s1.name",
+  "bkp:S3": "bibleChecks.s3.name",
+  "bkp:S6": "bibleChecks.s6.name",
+  "bkp:S7": "bibleChecks.s7.name",
+  "bkp:S8": "bibleChecks.s8.name",
+  // AQU-1699: check pack B. P8 keeps the name autopilot already shows for it.
+  "bkp:P1": "bibleParticipants.p1.name",
+  "bkp:P2": "bibleParticipants.p2.name",
+  "bkp:P3": "bibleParticipants.p3.name",
+  "bkp:P4": "bibleParticipants.p4.name",
+  "bkp:P5": "bibleParticipants.p5.name",
+  "bkp:P6": "bibleParticipants.p6.name",
+  "bkp:P8": "agent.finding.bibleCheck.youNumber",
+  "bkp:P9": "bibleParticipants.p9.name",
+  "bkp:P10": "bibleParticipants.p10.name",
+  "bkp:P14": "bibleParticipants.p14.name",
+  "bkp:P15": "bibleParticipants.p15.name",
+  "bkp:X3": "bibleParticipants.x3.name",
+  "bkp:X4": "bibleParticipants.x4.name",
 }
 
 const DESCRIPTION_KEY: Record<BuiltinCheckId, MessageKey> = {
@@ -39,16 +76,49 @@ const DESCRIPTION_KEY: Record<BuiltinCheckId, MessageKey> = {
   "target-equals-source": "rules.builtin.targetEqualsSource.description",
   "placeholder-integrity": "rules.builtin.placeholderIntegrity.description",
   "number-integrity": "rules.builtin.numberIntegrity.description",
+  "number-integrity-extra": "rules.builtin.numberIntegrityExtra.description",
   "end-punctuation-mismatch": "rules.builtin.endPunctuationMismatch.description",
   "punctuation-integrity": "rules.builtin.punctuationIntegrity.description",
   "double-space": "rules.builtin.doubleSpace.description",
   "repeated-word": "rules.builtin.repeatedWord.description",
   "unpaired-symbols": "rules.builtin.unpairedSymbols.description",
   "abbreviation-mismatch": "rules.builtin.abbreviationMismatch.description",
+  "bkp:V1": "bibleData.check.v1.description",
+  "bkp:V2": "bibleData.check.v2.description",
+  "bkp:V3": "bibleData.check.v3.description",
+  "bkp:V5": "bibleData.check.v5.description",
+  "bkp:V7": "bibleData.check.v7.description",
+  "bkp:V8": "bibleData.check.v8.description",
+  "bkp:V9": "bibleData.check.v9.description",
+  "bkp:M1": "bibleData.check.m1.description",
+  "usfm-structure": "rules.builtin.usfmStructure.description",
+  "capitalization": "rules.builtin.capitalization.description",
+  "footnote-quote-mismatch": "rules.builtin.footnoteQuoteMismatch.description",
+  "bkp:N1": "bibleChecks.n1.description",
+  "bkp:N2": "bibleChecks.n2.description",
+  "bkp:M3": "bibleChecks.m3.description",
+  "bkp:S1": "bibleChecks.s1.description",
+  "bkp:S3": "bibleChecks.s3.description",
+  "bkp:S6": "bibleChecks.s6.description",
+  "bkp:S7": "bibleChecks.s7.description",
+  "bkp:S8": "bibleChecks.s8.description",
+  "bkp:P1": "bibleParticipants.p1.description",
+  "bkp:P2": "bibleParticipants.p2.description",
+  "bkp:P3": "bibleParticipants.p3.description",
+  "bkp:P4": "bibleParticipants.p4.description",
+  "bkp:P5": "bibleParticipants.p5.description",
+  "bkp:P6": "bibleParticipants.p6.description",
+  "bkp:P8": "bibleParticipants.p8.description",
+  "bkp:P9": "bibleParticipants.p9.description",
+  "bkp:P10": "bibleParticipants.p10.description",
+  "bkp:P14": "bibleParticipants.p14.description",
+  "bkp:P15": "bibleParticipants.p15.description",
+  "bkp:X3": "bibleParticipants.x3.description",
+  "bkp:X4": "bibleParticipants.x4.description",
 }
 
 /**
- * Display name for any `TranslationRule` — translated for the ten built-in
+ * Display name for any `TranslationRule` — translated for the built-in
  * checks (app-authored chrome; resolved off the `builtin:` id prefix),
  * returned verbatim for a user or org rule (their OWN name is content and
  * must never be translated).
@@ -67,10 +137,75 @@ export function translateRuleDescription(
   return checkId ? t(DESCRIPTION_KEY[checkId]) : rule.description
 }
 
+/** AQU-1906: the two checks that judge the target by its own language's marks. */
+export const PUNCTUATION_CHECK_IDS: readonly BuiltinCheckId[] = [
+  "end-punctuation-mismatch",
+  "punctuation-integrity",
+]
+
+export interface ResolveBuiltinRulesOptions {
+  /**
+   * AQU-1688: the project's Bible data checks enrichment is on
+   * (`resolveBibleEnrichment(project, "checks", …)`). Only then do the Bible
+   * data checks exist as rules, so a project without Bible data never sees,
+   * counts or evaluates them.
+   */
+  bibleChecks?: boolean
+  /**
+   * AQU-1906: the active target lane's punctuation conventions, from
+   * `resolvePunctuation` (db/shared/punctuation-conventions.ts). Stamped onto
+   * the two punctuation checks' `check` descriptors so every evaluation
+   * consumer of this rule set — editor underline, Issues tab, health ribbon,
+   * Check file — judges the target by the same marks.
+   *
+   * Omitted or null keeps the pre-AQU-1906 source-relative behaviour, which is
+   * what a lane with no recorded language and no Language profile slot gets.
+   */
+  punctuation?: PunctuationConventions | null
+}
+
+/**
+ * Re-resolve the built-in rules of an already-built list against a different
+ * override map — AQU-1906's Rules page, which lists the lane it is VIEWING
+ * while `useRules` resolved the editor's ACTIVE lane. Non-built-in rules are
+ * returned untouched.
+ *
+ * It re-reads the registry defaults rather than the rule's current values, so
+ * dropping a lane's override restores the default instead of freezing whatever
+ * the project-wide pass had resolved.
+ */
+export function withBuiltinOverrides(
+  rules: readonly TranslationRule[],
+  overrides: Partial<Record<BuiltinCheckId, AlgorithmicCheckOverride>> | undefined,
+  punctuation?: PunctuationConventions | null,
+): TranslationRule[] {
+  return rules.map((rule) => {
+    if (rule.check.type !== "builtin") return rule
+    const checkId = rule.check.checkId
+    const def = BUILTIN_CHECKS[checkId]
+    if (!def) return rule
+    const ov = overrides?.[checkId]
+    return {
+      ...rule,
+      severity: ov?.severity ?? def.defaultSeverity,
+      enabled: ov?.enabled ?? def.defaultEnabled,
+      check: {
+        type: "builtin",
+        checkId,
+        ...(punctuation && PUNCTUATION_CHECK_IDS.includes(checkId) ? { punctuation } : {}),
+      },
+    }
+  })
+}
+
 export function resolveBuiltinRules(
   overrides: Partial<Record<BuiltinCheckId, AlgorithmicCheckOverride>> | undefined,
+  options: ResolveBuiltinRulesOptions = {},
 ): TranslationRule[] {
-  return BUILTIN_CHECK_IDS.map((id) => {
+  const ids: readonly BuiltinCheckId[] = options.bibleChecks
+    ? [...BUILTIN_CHECK_IDS, ...BIBLE_BUILTIN_CHECK_IDS]
+    : BUILTIN_CHECK_IDS
+  return ids.map((id) => {
     const def = BUILTIN_CHECKS[id]
     const ov = overrides?.[id]
     return {
@@ -82,7 +217,13 @@ export function resolveBuiltinRules(
       scope: "project",
       enabled: ov?.enabled ?? def.defaultEnabled,
       createdAt: FROZEN_CREATED_AT,
-      check: { type: "builtin", checkId: id },
+      check: {
+        type: "builtin",
+        checkId: id,
+        ...(options.punctuation && PUNCTUATION_CHECK_IDS.includes(id)
+          ? { punctuation: options.punctuation }
+          : {}),
+      },
     }
   })
 }

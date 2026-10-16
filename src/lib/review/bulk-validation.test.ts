@@ -12,7 +12,6 @@ const cell = (over: Record<string, unknown> = {}) => ({
   translated: "hola",
   activeValidators: [] as string[],
   targetEventId: "evt-1",
-  aiDrafted: false,
   ...over,
 }) as Parameters<typeof isBulkValidatableByMe>[0]
 
@@ -41,5 +40,44 @@ describe("isBulkValidatableByMe", () => {
   it("skips a cell this user has already validated", () => {
     expect(isBulkValidatableByMe(cell({ activeValidators: ["ana"] }), "ana", unscoped, "")).toBe(false)
     expect(isBulkValidatableByMe(cell({ activeValidators: ["bo"] }), "ana", unscoped, "")).toBe(true)
+  })
+
+  // AQU-1703: a machine-drafted line is ordinary work to review — but the
+  // guards that say WHO may validate still apply, so a run never fires a
+  // guaranteed 403 or a repeat vote.
+  it("takes a machine-drafted line, and keeps the scope and already-mine guards", () => {
+    const draft = cell({ aiDrafted: true })
+    expect(isBulkValidatableByMe(draft, "ana", unscoped, "")).toBe(true)
+    const scopes = [{ kind: "file", value: "other" }] as unknown as MemberScope[]
+    expect(isBulkValidatableByMe(draft, "ana", scopes, "")).toBe(false)
+    expect(isBulkValidatableByMe(cell({ aiDrafted: true, activeValidators: ["ana"] }), "ana", unscoped, "")).toBe(false)
+  })
+})
+
+// AQU-1571: the server refuses a vote on the caller's own latest change when
+// the project switched self-validation off. Each one used to come back as a
+// line in the red "failed" banner after a bulk run.
+describe("isBulkValidatableByMe — own latest change", () => {
+  const off = { allowSelfValidation: false }
+
+  it("skips the caller's own latest change when self-validation is off", () => {
+    expect(isBulkValidatableByMe(cell({ lastEditor: "ana" }), "ana", unscoped, "", off)).toBe(false)
+    expect(isBulkValidatableByMe(cell({ lastEditor: "bo" }), "ana", unscoped, "", off)).toBe(true)
+  })
+
+  it("takes it when the setting is on or unset", () => {
+    expect(isBulkValidatableByMe(cell({ lastEditor: "ana" }), "ana", unscoped, "", { allowSelfValidation: true })).toBe(true)
+    expect(isBulkValidatableByMe(cell({ lastEditor: "ana" }), "ana", unscoped, "")).toBe(true)
+  })
+
+  it("never treats an unknown editor as the caller", () => {
+    expect(isBulkValidatableByMe(cell({ lastEditor: null }), "ana", unscoped, "", off)).toBe(true)
+    expect(isBulkValidatableByMe(cell(), "ana", unscoped, "", off)).toBe(true)
+  })
+
+  // AQU-1703: dropping the AI-draft exclusion widened what one gesture covers,
+  // not who may validate — the caller's own latest change is still theirs.
+  it("still skips the caller's own latest change on a machine-drafted line", () => {
+    expect(isBulkValidatableByMe(cell({ aiDrafted: true, lastEditor: "ana" }), "ana", unscoped, "", off)).toBe(false)
   })
 })

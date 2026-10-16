@@ -125,7 +125,15 @@ beforeEach(async () => {
   // Unlocked timing by default; track editing OFF by default (its own gate is
   // switched on per-test, matching the product default).
   await setSettings(tdb, { timingLocked: false })
+  const minted = await tdb.pg.query<{ id: string }>(
+    `SELECT id FROM lanes WHERE project_id = $1 AND role = 'target' AND legacy_tag = ''`,
+    [PROJECT],
+  )
+  bridgeLane = minted.rows[0]?.id ?? ''
 })
+
+/** The target lane the cell seed already minted (legacy_tag ''). */
+let bridgeLane = ''
 
 // ── validation ───────────────────────────────────────────────────────────────
 
@@ -204,7 +212,7 @@ describe('cell-field commands — validation', () => {
 describe('cell-field commands — role floors', () => {
   it('SetSource sits ABOVE SetTranslation, and each floor matches its compiled event', () => {
     const setTranslation = requiredRoleForCommand({
-      kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'x',
+      kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: '', value: 'x',
     })
     const setSource = requiredRoleForCommand({
       kind: 'SetSource', fileId: FILE, cellId: 'cell-1', value: 'x',
@@ -235,7 +243,7 @@ describe('cell-field commands — role floors', () => {
     // The same credential CAN stage the target-side write, so the refusal below
     // is about the source floor and not about membership or scope.
     const ok = await prepare(env, contributor, [
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'una traducción' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: bridgeLane, value: 'una traducción' },
     ])
     expect(ok.res.status).toBe(200)
 
@@ -443,7 +451,7 @@ describe('cell-field commands — changeset hygiene', () => {
     const lead = await memberToken(tdb, ROLE.PROJECT_LEAD)
     const { res, body } = await prepare(env, lead, [
       { kind: 'SetSource', fileId: FILE, cellId: 'cell-1', value: 'a' },
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'b' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: bridgeLane, value: 'b' },
     ])
     expect(res.status).toBe(400)
     expect(body.error.code).toBe('validation_failed')

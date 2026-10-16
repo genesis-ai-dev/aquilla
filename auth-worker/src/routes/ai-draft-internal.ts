@@ -26,6 +26,7 @@ import { z } from "zod"
 import type { Env, Variables } from "../types"
 import { secureCompare } from "../utils/secure-compare"
 import { runAiGuard } from "../lib/ai-budget"
+import { checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
 import { getPlatformSettingsCached } from "../lib/platform-settings"
 import { creditGuard, recordCredit } from "../lib/credits"
 import { AliasMap } from "../lib/agent/compress"
@@ -36,6 +37,9 @@ import {
   MAX_COMPLETION_BATCH_SIZE,
   completionBatchSizeFromSettings,
 } from "../../../db/shared/completion-batch"
+import { languagesForLanes, loadLaneRows } from "../lib/read-lane-language"
+import { resolveLaneIdOrTag } from "../../../db/shared/lane-ref"
+import { languageOfTargetLane } from "../../../db/shared/lane-language"
 
 const aiDraftInternal = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -92,6 +96,10 @@ aiDraftInternal.post("/internal/draft-cells", zValidator("json", bodySchema), as
   const guard = await runAiGuard(model, Number(body.userId), db, c.env)
   if (!guard.ok) return c.json(guard.body, guard.status)
 
+  // Platform daily spend ceiling (AQU-1869).
+  const spendCeiling = await checkAiSpendCeiling(db, c.env, "draft-cells")
+  if (!spendCeiling.ok) return c.json(spendCeiling.body, spendCeiling.status)
+
   // Org for the credit rails: the project's org (0 = personal/org-less).
   let orgId = 0
   try {
@@ -126,27 +134,25 @@ aiDraftInternal.post("/internal/draft-cells", zValidator("json", bodySchema), as
   try {
     const settings = await db
       .prepare(
-        `SELECT settings::jsonb ->> 'sourceLanguage' AS source_language,
-                settings::jsonb ->> 'targetLanguage' AS target_language,
-                settings::jsonb -> 'translationBrief' ->> 'l1Summary' AS brief_summary,
+        `SELECT settings::jsonb -> 'translationBrief' ->> 'l1Summary' AS brief_summary,
                 settings AS raw
            FROM project_settings WHERE project_id = ?`,
       )
       .bind(body.projectId)
       .first<{
-        source_language: string | null
-        target_language: string | null
         brief_summary: string | null
         raw: unknown
       }>()
     if (settings) {
-      sourceLanguage = settings.source_language ?? undefined
-      targetLanguage = settings.target_language ?? undefined
       briefSummary = settings.brief_summary ?? undefined
       const raw = typeof settings.raw === "string" ? JSON.parse(settings.raw) : settings.raw
-      batchCap = completionBatchSizeFromSettings(
-        raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null,
-      )
+      const parsed =
+        raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null
+      batchCap = completionBatchSizeFromSettings(parsed)
+      const lanes = await loadLaneRows(db, body.projectId)
+      const languages = languagesForLanes(lanes, parsed, body.laneId ?? "")
+      sourceLanguage = languages.sourceLanguage
+      targetLanguage = languages.targetLanguage
     }
   } catch {
     /* grounding is best-effort — drafting proceeds with the defaults */
@@ -162,13 +168,22 @@ aiDraftInternal.post("/internal/draft-cells", zValidator("json", bodySchema), as
   }
 
   let costCents = 0
+  let lane = body.laneId ?? ""
+  if (lane) {
+    const resolved = await resolveLaneIdOrTag(db, body.projectId, lane)
+    if (resolved.laneId) {
+      lane = resolved.laneId
+      const fromLane = await languageOfTargetLane(db, body.projectId, resolved.laneId)
+      if (fromLane) targetLanguage = fromLane
+    }
+  }
   const gen = await generateDrafts(
     db,
     { fileId: body.fileId, cellIds: body.cellIds, limit: body.cellIds.length, instructions: body.instructions },
     {
       projectId: body.projectId,
       focusedFileId: body.fileId,
-      lane: body.laneId ?? "",
+      lane,
       aliases: new AliasMap(),
       sourceLanguage,
       targetLanguage,

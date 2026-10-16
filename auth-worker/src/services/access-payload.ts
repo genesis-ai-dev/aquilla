@@ -15,10 +15,11 @@ import {
   type ChainLink,
 } from "../../../db/shared/access-grants"
 import { resolveProjectRole } from "./project-permissions"
+import { platformAdminEmailsParam } from "../middleware/platform-admin"
 import {
   canViewRoster,
   getEffectiveOrgRole,
-  getProjectRosterViewMinRole,
+  getProjectRosterListFloor,
   getRosterViewMinRole,
 } from "./org-permissions"
 
@@ -34,6 +35,8 @@ export interface AccessChainEntry {
   roleLevel: number | null
   origin: GrantOrigin
   grantedBy?: string
+  /** Account id of whoever granted this row. Set when `grantedBy` is their username. */
+  grantedByUserId?: string
   grantedAt?: string
   descendantCount?: number
 }
@@ -158,7 +161,9 @@ function originOf(g: NamedGrant): GrantOrigin {
 export class ViewerScope {
   private orgRoles = new Map<number, number | null>()
   private rosterFloors = new Map<number, number>()
-  private projectFloors = new Map<number, number>()
+  // Keyed by PROJECT: a project may make its member list stricter than its
+  // org's (AQU-1771), so two projects in one org can have different floors.
+  private projectFloors = new Map<string, number | null>()
   private projectRoles = new Map<string, number | null>()
 
   constructor(private env: Env, readonly viewer: AuthUser) {}
@@ -171,9 +176,12 @@ export class ViewerScope {
     if (!this.rosterFloors.has(orgId)) this.rosterFloors.set(orgId, await getRosterViewMinRole(this.env, orgId))
     return this.rosterFloors.get(orgId) as number
   }
-  private async projectFloor(orgId: number): Promise<number> {
-    if (!this.projectFloors.has(orgId)) this.projectFloors.set(orgId, await getProjectRosterViewMinRole(this.env, orgId))
-    return this.projectFloors.get(orgId) as number
+  /** The project's member-list floor (null = ungated), as GET …/members applies it. */
+  private async projectFloor(projectId: string, orgId: number | null): Promise<number | null> {
+    if (!this.projectFloors.has(projectId)) {
+      this.projectFloors.set(projectId, await getProjectRosterListFloor(this.env, projectId, orgId))
+    }
+    return this.projectFloors.get(projectId) ?? null
   }
   async projectRole(projectId: string): Promise<number | null> {
     if (!this.projectRoles.has(projectId)) {
@@ -189,12 +197,22 @@ export class ViewerScope {
     return (role ?? 0) >= 600 || canViewRoster(role, await this.rosterFloor(orgId))
   }
 
-  /** A project the viewer can open AND whose roster the org lets them list. */
+  /**
+   * A project the viewer can open AND whose roster its policy lets them list.
+   *
+   * AQU-1771: only an org OWNER skips the project's member-list floor. The
+   * shortcut used to start at Maintainer, so an org maintainer read the
+   * grantees of a project that had closed its member list to owners — through
+   * the access inspector and People & access — while GET …/members refused
+   * them. A maintainer now answers to the project's floor like anyone else
+   * (and meets it unless the project or org raised it to owners).
+   */
   async canSeeProject(projectId: string, orgId: number | null): Promise<boolean> {
-    if (orgId != null && ((await this.orgRole(orgId)) ?? 0) >= 600) return true
+    if (orgId != null && ((await this.orgRole(orgId)) ?? 0) >= 700) return true
     const role = await this.projectRole(projectId)
     if (role == null) return false
-    return orgId == null || canViewRoster(role, await this.projectFloor(orgId))
+    const floor = await this.projectFloor(projectId, orgId)
+    return floor == null || canViewRoster(role, floor)
   }
 }
 
@@ -252,7 +270,7 @@ export async function buildMemberAccess(
       env.AQUILLA_PG,
       { id: String(subjectId), email: subject.email },
       from.id,
-      env.ADMIN_EMAILS,
+      await platformAdminEmailsParam(env),
     )
     hereLevel = resolved?.level ?? null
     for (const link of resolved?.chain ?? []) {
@@ -293,7 +311,10 @@ export async function buildMemberAccess(
     ok: true,
     payload: {
       userId: String(subjectId),
-      displayName: subject.display_name?.trim() || subject.username,
+      // AQU-1411: the chip's label is the account username. users.display_name
+      // is a real name and stays off this payload, matching the AQU-1180 rule
+      // that a scrubbed identity is not filled back in from another column.
+      displayName: subject.username,
       isGuest,
       effectiveHere: { roleLevel: hereLevel, chain },
       elsewhere,
@@ -348,7 +369,7 @@ export async function hideUnseenAncestors(vs: ViewerScope, entries: AccessChainE
 
 const pathText = (p: ScopePath) => p.map((r) => r.name).join(" › ")
 
-// grantedBy carries a user id until nameGranters swaps in the display name.
+// grantedBy carries a user id until nameGranters swaps in the username.
 export function toEntry(g: NamedGrant): AccessChainEntry {
   return {
     scopePath: scopePathOf(g),
@@ -376,7 +397,7 @@ export async function nameGranters(env: Env, entries: AccessChainEntry[]): Promi
   const ids = [...new Set(entries.map((e) => e.grantedBy).filter((v): v is string => !!v))]
   if (ids.length === 0) return
   const { results } = await env.AQUILLA_PG.prepare(
-    `SELECT id, COALESCE(NULLIF(TRIM(display_name), ''), username) AS name FROM users
+    `SELECT id, username AS name FROM users
       WHERE id::TEXT IN (${ids.map(() => "?").join(", ")})`,
   )
     .bind(...ids)
@@ -385,7 +406,9 @@ export async function nameGranters(env: Env, entries: AccessChainEntry[]): Promi
   for (const e of entries) {
     if (!e.grantedBy) continue
     const n = names.get(e.grantedBy)
-    if (n) e.grantedBy = n
-    else delete e.grantedBy
+    if (n) {
+      e.grantedByUserId = e.grantedBy
+      e.grantedBy = n
+    } else delete e.grantedBy
   }
 }

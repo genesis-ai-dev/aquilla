@@ -15,7 +15,9 @@
  *   5. User resolves conflicts (keep vs replace)
  *   6. Apply target commits
  *
- * This panel plugs into the ImportDialog's "Paired Translation" landing card.
+ * This panel opens from the ImportDialog's "A translation" screen (Other ways
+ * to bring in a translation), for the file chosen there (AQU-1365). A host
+ * with no translation path still offers it as a landing card.
  */
 
 import { useState, useCallback } from "react"

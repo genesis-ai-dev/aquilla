@@ -1,4 +1,5 @@
 import type { AquillaDb } from "../../../../db/shim/postgres"
+import { cellMetadataWireSql } from "../../../../db/shared/cell-metadata-sql"
 import { orderPairs, type CellPair } from "../agent/tools/select-cells"
 import {
   cellDisplayTag,
@@ -113,9 +114,9 @@ export async function loadCellDisplayIndex(
 ): Promise<CellDisplayIndex> {
   const { results } = await db
     .prepare(
-      `SELECT cell_id, canonical_ref, sequence_index, anchor_cell_id, metadata, start_ms, end_ms
+      `SELECT cell_id, canonical_ref, sequence_index, anchor_cell_id, ${cellMetadataWireSql()} AS metadata, start_ms, end_ms
          FROM cells
-        WHERE project_id = ? AND file_id = ? AND side = 'source' AND target_lang = ''`,
+        WHERE project_id = ? AND file_id = ? AND side = 'source'`,
     )
     .bind(projectId, fileId)
     .all<CellLabelRow>()

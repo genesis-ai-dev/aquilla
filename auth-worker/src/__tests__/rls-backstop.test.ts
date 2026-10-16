@@ -22,51 +22,81 @@
 // any Postgres user and the GUC is readable via current_setting().
 
 import { describe, it, expect, beforeAll } from "vitest"
-import { pg, env } from "./helpers/pg-test-env"
+import { pg } from "./helpers/pg-test-env"
 import { PostgresDb, type PgExecutor } from "../../../db/shim/postgres"
+import { rewriteTestLaneResolve } from "../../../db/shared/test-lane-fill"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
 
-// ─── Load the RLS migration into the test database ───────────────────────────
-// The setup-migrations.ts already loads schema.sql.  We additionally load the
-// RLS migration here so the app_user_can_access_project function is present.
+// ─── Replay the RLS migrations into the test database ────────────────────────
+// pg-test-env.ts loads schema.sql, which carries no RLS DDL at all — policies
+// live only in migrations, and scripts/rls-coverage.test.ts folds them in from
+// there. So the function and policies under test are replayed here from the
+// four migrations that installed them.
+//
+// A historical migration does not necessarily replay cleanly on today's
+// schema: 0074 also created an index on contextual_runs.target_lang, which
+// 0151 re-keyed on lane_id and 0155 dropped. Until AQU-1881 that one statement
+// aborted the whole 0074 replay inside a swallowed try/catch, so RLS never
+// came on, 0136 never ran, and five tests failed on `relrowsecurity: false`
+// instead of on the real error. The replay now strips exactly the statements a
+// later migration superseded (and fails if one is no longer there to strip),
+// and any other error is fatal and names the file.
 
-const RLS_MIGRATION = readFileSync(
-  path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "../../../db/postgres/migrations/0034_rls_backstop.sql",
-  ),
-  "utf8",
+const MIGRATIONS_DIR = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../db/postgres/migrations",
 )
-const ORG_WIDE_FLOOR_MIGRATION = readFileSync(
-  path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "../../../db/postgres/migrations/0083_org_wide_access_floor.sql",
-  ),
-  "utf8",
-)
-const CONTEXTUAL_ACTIVITY_MIGRATION = readFileSync(
-  path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "../../../db/postgres/migrations/0074_contextual_run_events.sql",
-  ),
-  "utf8",
-)
+
+/**
+ * Statements in a replayed migration that a later migration superseded, so
+ * they cannot run against schema.sql any more. None of them is what this file
+ * tests. Each pattern must still match its file: a strip for a statement that
+ * is gone would hide the next drift exactly the way the old try/catch did.
+ */
+const SUPERSEDED_STATEMENTS: Record<string, ReadonlyArray<{ reason: string; pattern: RegExp }>> = {
+  "0074_contextual_run_events.sql": [
+    {
+      reason:
+        "contextual_runs_project_lane_time was re-keyed on lane_id by 0151 and " +
+        "its target_lang column dropped by 0155",
+      pattern:
+        /CREATE INDEX IF NOT EXISTS contextual_runs_project_lane_time\s+ON contextual_runs\([^;]*\btarget_lang\b[^;]*\);\n?/,
+    },
+  ],
+}
+
+function replayableMigration(file: string): string {
+  let sql = readFileSync(path.join(MIGRATIONS_DIR, file), "utf8")
+  for (const { reason, pattern } of SUPERSEDED_STATEMENTS[file] ?? []) {
+    if (!pattern.test(sql)) {
+      throw new Error(
+        `[rls-backstop] ${file} no longer contains the statement stripped because ${reason} — drop the strip`,
+      )
+    }
+    sql = sql.replace(pattern, "")
+  }
+  return sql
+}
+
+const RLS_MIGRATIONS = [
+  "0034_rls_backstop.sql",
+  "0083_org_wide_access_floor.sql",
+  "0074_contextual_run_events.sql",
+  "0136_contextual_run_traces_rls.sql",
+] as const
 
 beforeAll(async () => {
-  // Execute the RLS migration into the shared PGlite.
-  // PGlite will parse CREATE ROLE (idempotent DO block), GRANT, CREATE POLICY,
-  // and ENABLE ROW LEVEL SECURITY.  The DDL succeeds; role-level filtering
-  // is not enforced by PGlite but the SQL function is available.
-  try {
-    await pg.exec(RLS_MIGRATION)
-    await pg.exec(ORG_WIDE_FLOOR_MIGRATION)
-    await pg.exec(CONTEXTUAL_ACTIVITY_MIGRATION)
-  } catch (e) {
-    // If PGlite rejects a specific clause (e.g. FORCE ROW LEVEL SECURITY or
-    // policy syntax), log the error and continue — we still get function tests.
-    console.warn("[rls-backstop] RLS migration partial failure (expected on some PGlite versions):", String(e))
+  // PGlite accepts the CREATE ROLE (idempotent DO block), GRANT, CREATE POLICY
+  // and ENABLE/FORCE ROW LEVEL SECURITY DDL; role-level enforcement is what
+  // the contextual tests below then exercise with SET ROLE app_runtime.
+  for (const file of RLS_MIGRATIONS) {
+    try {
+      await pg.exec(replayableMigration(file))
+    } catch (error) {
+      throw new Error(`[rls-backstop] replaying ${file} failed: ${String(error)}`, { cause: error })
+    }
   }
 })
 
@@ -289,6 +319,86 @@ describe("contextual activity RLS migration", () => {
       await pg.exec("RESET ROLE; RESET app.user_id; RESET app.project_id;")
     }
   })
+
+  it("opts contextual_run_traces into exact-project RLS with read, append and prune grants only", async () => {
+    const relation = await pg.query<{ relrowsecurity: boolean; relforcerowsecurity: boolean }>(
+      `SELECT relrowsecurity, relforcerowsecurity
+         FROM pg_class WHERE oid = 'contextual_run_traces'::regclass`,
+    )
+    expect(relation.rows[0]).toEqual({ relrowsecurity: true, relforcerowsecurity: true })
+
+    const policies = await pg.query<{ cmd: string; roles: string; expression: string }>(
+      `SELECT cmd, roles::text AS roles, COALESCE(qual, with_check, '') AS expression
+         FROM pg_policies
+        WHERE tablename = 'contextual_run_traces'
+        ORDER BY cmd`,
+    )
+    expect(policies.rows.map((policy) => policy.cmd)).toEqual(["DELETE", "INSERT", "SELECT"])
+    expect(policies.rows.every((policy) => policy.roles === "{app_runtime}")).toBe(true)
+    expect(policies.rows.every((policy) =>
+      policy.expression.includes("app_contextual_project_scope(project_id)")))
+      .toBe(true)
+
+    // Rows are never rewritten: no UPDATE privilege reaches the runtime role.
+    const grants = await pg.query<{ privilege_type: string }>(
+      `SELECT privilege_type FROM information_schema.role_table_grants
+        WHERE grantee = 'app_runtime' AND table_name = 'contextual_run_traces'
+        ORDER BY privilege_type`,
+    )
+    expect(grants.rows.map((grant) => grant.privilege_type)).toEqual(["DELETE", "INSERT", "SELECT"])
+  })
+
+  it("contains app_runtime trace reads, writes and deletes to the scoped project while preserving the bare recorder and retention sweep", async () => {
+    const userId = 8_267_402
+    const projectOne = "trace-rls-project-one"
+    const projectTwo = "trace-rls-project-two"
+    const insertTrace = `INSERT INTO contextual_run_traces
+        (run_id, project_id, tier, model, system_prompt, user_prompt)
+      VALUES ($1, $2, 'draft', 'test-model', 'system', 'user')`
+    const tracedProjects = async () =>
+      (await pg.query<{ project_id: string }>(
+        `SELECT project_id FROM contextual_run_traces ORDER BY project_id, id`,
+      )).rows.map((row) => row.project_id)
+
+    await seedUser(userId, "trace-rls-member")
+    await seedProject(projectOne, userId)
+    await seedProject(projectTwo, userId)
+    await seedDirectMember(projectOne, userId)
+    await seedDirectMember(projectTwo, userId)
+    await pg.query(insertTrace, ["run-one", projectOne])
+    await pg.query(insertTrace, ["run-two", projectTwo])
+
+    try {
+      await pg.exec(
+        `SET ROLE app_runtime;
+         SET app.user_id = '${userId}';
+         SET app.project_id = '${projectOne}';`,
+      )
+
+      // Membership in projectTwo is deliberate, as above: the exact project
+      // GUC, not membership alone, is what keeps its prompts out of reach.
+      expect(await tracedProjects()).toEqual([projectOne])
+      await expect(pg.query(insertTrace, ["run-two", projectTwo])).rejects.toThrow(/row-level security/i)
+      await expect(pg.query(`UPDATE contextual_run_traces SET output = 'rewritten'`))
+        .rejects.toThrow(/permission denied/i)
+      const scopedDelete = await pg.query(`DELETE FROM contextual_run_traces`)
+      expect(scopedDelete.affectedRows).toBe(1)
+
+      // The recorder, the traces route and the retention sweep all use the
+      // identity-less runtime handle; both GUCs empty must keep working.
+      await pg.exec("RESET app.user_id; RESET app.project_id;")
+      expect(await tracedProjects()).toEqual([projectTwo])
+      // Also exercises the bigserial sequence grant.
+      await pg.query(insertTrace, ["run-one", projectOne])
+      expect(await tracedProjects()).toEqual([projectOne, projectTwo])
+      const sweep = await pg.query(
+        `DELETE FROM contextual_run_traces WHERE created_at < now() + make_interval(days => 1)`,
+      )
+      expect(sweep.affectedRows).toBe(2)
+    } finally {
+      await pg.exec("RESET ROLE; RESET app.user_id; RESET app.project_id;")
+    }
+  })
 })
 
 // Helper: build a PgExecutor-backed PostgresDb from the shared PGlite.
@@ -296,6 +406,7 @@ function makeShim(): PostgresDb {
   // Re-use the same pgliteExecutor pattern from pg-test-env.ts.
   const pgliteExec: PgExecutor = {
     async run(sql: string, params: unknown[]) {
+      sql = rewriteTestLaneResolve(sql)
       const r = await pg.query<Record<string, unknown>>(sql, params as unknown[])
       return { rows: r.rows, rowCount: (r as { affectedRows?: number }).affectedRows ?? r.rows.length }
     },
@@ -303,6 +414,7 @@ function makeShim(): PostgresDb {
       pg.transaction((tx) =>
         fn({
           async run(sql: string, params: unknown[]) {
+            sql = rewriteTestLaneResolve(sql)
             const r = await (tx as unknown as { query: typeof pg.query }).query<Record<string, unknown>>(sql, params as unknown[])
             return { rows: r.rows, rowCount: (r as { affectedRows?: number }).affectedRows ?? r.rows.length }
           },

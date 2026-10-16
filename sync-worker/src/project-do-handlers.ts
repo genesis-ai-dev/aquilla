@@ -15,6 +15,20 @@ import type { CellRowOut } from "./events/cell-row-serialize"
 export const PROJECT_DO_DEFAULT_LEASE_MS = 30_000
 export const PROJECT_DO_MAX_PRESENCE_DRAFT_LENGTH = 16_384
 
+/**
+ * AQU-1831: the most draft text the DO will put on the wire in one
+ * `presence.draft` frame.
+ *
+ * A cell's draft may legitimately run to PROJECT_DO_MAX_PRESENCE_DRAFT_LENGTH
+ * (16 KB) — a study note, a book introduction — and the DO keeps all of it in
+ * the author's presence row. But a remote caret only needs enough text to
+ * render, and re-sending 16 KB to every peer on each keystroke is what the
+ * 2026-10-10 scaling audit measured at ~5 MB/s of egress per typist in a
+ * 50-person project. Longer drafts go out clipped, with a trailing ellipsis
+ * so the peer can see live text and tell that it is clipped.
+ */
+export const PROJECT_DO_PRESENCE_DRAFT_WIRE_MAX = 2_048
+
 export interface PresenceState {
   /**
    * Stable id of the WebSocket connection this row belongs to. Presence is
@@ -105,8 +119,11 @@ export interface ServerPresenceLeft {
   connId: string
 }
 /**
- * Live draft text for a remote caret. The DO rate-limits this per user
- * (see PresenceDraftThrottle) — coalesce: latest wins.
+ * Live draft text for a remote caret. The DO rate-limits this per connection
+ * (see PresenceTier2Batcher) — coalesce: latest wins — and bounds the text
+ * itself (see PROJECT_DO_PRESENCE_DRAFT_WIRE_MAX): a draft longer than the
+ * wire cap arrives clipped, so this is not necessarily the author's whole
+ * draft.
  */
 export interface ServerPresenceDraft {
   t: "presence.draft"
@@ -115,6 +132,31 @@ export interface ServerPresenceDraft {
   cellId: string
   draftText: string
   ts: number
+}
+/**
+ * AQU-1825 tier 1: the coarse, project-wide half of presence — who is
+ * connected and which file each socket has open. One batched frame per tick
+ * (PRESENCE_TIER1_TICK_MS), carrying only the connections whose coarse state
+ * actually changed.
+ *
+ * `focusedCell` rides along because it is lock-bearing and changes at most
+ * once per cell the user takes the lease on — the same rate as the
+ * `lock.claimed` frame that already goes project-wide — so the roster can
+ * still say "editing" for someone in another file. What does NOT ride along
+ * is everything that moves at typing speed: `viewingCell`, the cursor
+ * `selection`, and live draft text. Those are tier 2, delivered only to the
+ * sockets in the same file (see presenceFrameAudience).
+ */
+export interface PresenceTier1Row {
+  connId: string
+  userId: string
+  currentFileId?: string
+  focusedCell?: string
+  ts: number
+}
+export interface ServerPresenceTier1 {
+  t: "presence.tier1"
+  users: PresenceTier1Row[]
 }
 export interface ServerLockClaimed {
   t: "lock.claimed"
@@ -145,6 +187,31 @@ export interface ServerFileProgressUpdated {
   project: string
   file: string
   fileCreated: boolean
+}
+/**
+ * AQU-1832: a file's post-commit progress, pushed instead of polled.
+ *
+ * Shaped field-for-field like the `/progress` GET body it replaces, so the
+ * client merges it into the resource that read feeds rather than keeping a
+ * second representation of the same numbers. One frame per target lane; the
+ * `event.applied` frames for the same request carry `progressPushed: true`
+ * and ride ahead of it in the same `broadcast.batch`.
+ *
+ * The DO relays it like every other frame — it holds no progress state and
+ * never synthesises one of these.
+ */
+export interface ServerFileProgressPushed {
+  t: "file.progress.pushed"
+  project: string
+  file: string
+  /** Target lane tag; '' is the default lane. */
+  lane: string
+  revision: number
+  validationCount: number
+  /** The pass rewrote every section row, so `sections` is the whole list. */
+  complete: boolean
+  counts: unknown
+  sections: unknown[]
 }
 /**
  * AQU-346: sent to a removed member's own sockets right before the DO
@@ -208,19 +275,37 @@ export interface ServerPong {
   /** Echo of the ping's `ts`, when it sent one. */
   ts?: number
 }
+/**
+ * AQU-1839: the expiry of the verified token this connection is currently
+ * authorized by, in epoch ms (null in ALLOW_UNAUTHENTICATED dev, where there
+ * is no token to expire). Sent to the socket at handshake and again after
+ * every accepted `token.refresh`.
+ *
+ * Its arrival is also how the client learns this worker supports in-band
+ * refresh at all: a worker that predates it sends nothing, and the client
+ * keeps the old behaviour of being closed at expiry and reconnecting.
+ */
+export interface ServerTokenExpiry {
+  t: "token.expiry"
+  expiresAt: number | null
+}
+
 export type ProjectDoServerMessage =
   | ServerPong
+  | ServerTokenExpiry
   | ServerEventApplied
   | ServerEventStale
   | ServerPresence
   | ServerPresenceDiff
   | ServerPresenceLeft
   | ServerPresenceDraft
+  | ServerPresenceTier1
   | ServerLockClaimed
   | ServerLockReleased
   | ServerProjectArchived
   | ServerProjectSettingsUpdated
   | ServerFileProgressUpdated
+  | ServerFileProgressPushed
   | ServerMemberRemoved
   | ServerLinkUpstreamChanged
   | ServerContextualActivity
@@ -287,8 +372,19 @@ export interface ClientPing {
   t: "ping"
   ts?: number
 }
+/**
+ * AQU-1839: a freshly minted sync token for THIS connection, sent before the
+ * current one expires. Accepting it in-band re-resolves the connection's role
+ * and pushes its expiry out, so a tab left open all day keeps one socket
+ * instead of being closed and reconnecting every token TTL (15 min).
+ */
+export interface ClientTokenRefresh {
+  t: "token.refresh"
+  token: string
+}
 export type ProjectDoClientMessage =
   | ClientPing
+  | ClientTokenRefresh
   | ClientOutboxEvent
   | ClientFocusClaim
   | ClientFocusRenew
@@ -311,6 +407,10 @@ export function parseProjectDoClientMessage(raw: string): ProjectDoClientMessage
   const t = m.t
   if (t === "ping") {
     return typeof m.ts === "number" && Number.isFinite(m.ts) ? { t: "ping", ts: m.ts } : { t: "ping" }
+  }
+  if (t === "token.refresh") {
+    if (typeof m.token !== "string" || m.token.length === 0) return null
+    return { t: "token.refresh", token: m.token }
   }
   if (t === "focus.claim") {
     if (typeof m.cellId !== "string") return null
@@ -354,24 +454,95 @@ export function parseProjectDoClientMessage(raw: string): ProjectDoClientMessage
 
 /**
  * Accept the client's connId when it is a sane opaque token and not already
- * held by a live socket; otherwise mint one. A collision can only come from a
- * buggy/malicious client — never merge two sockets onto one presence row.
+ * held by a live socket of a DIFFERENT user; otherwise mint one.
+ *
+ * AQU-1791: a collision is no longer necessarily a buggy client. The client
+ * now keeps one connId per tab in sessionStorage, so a tab that reconnects
+ * after a dirty drop re-presents the id its previous socket used — and that
+ * previous socket is still in the DO's connection map, because a socket that
+ * dies without a close frame is only noticed by the heartbeat sweep below.
+ * Refusing the id there is what produced the reported ghosts: the tab came
+ * back under a fresh id and the dead one's row stayed in the roster.
+ *
+ * So a collision whose holder is the SAME verified user is a takeover: the
+ * caller retires the superseded socket and the returning tab reuses its row.
+ * A collision across users is still refused (a client must not be able to
+ * evict someone else's presence by guessing their connId), as is a collision
+ * when the caller passes no identity.
  */
 export function resolveConnId(
   requested: string | null,
-  connections: ReadonlyMap<unknown, { connId: string }>,
+  connections: ReadonlyMap<unknown, { connId: string; userId?: string }>,
+  requestingUserId?: string,
 ): string {
   if (requested && /^[A-Za-z0-9_-]{8,64}$/.test(requested)) {
-    let taken = false
+    let takenByOther = false
     for (const c of connections.values()) {
-      if (c.connId === requested) {
-        taken = true
-        break
-      }
+      if (c.connId !== requested) continue
+      if (requestingUserId !== undefined && c.userId === requestingUserId) continue
+      takenByOther = true
+      break
     }
-    if (!taken) return requested
+    if (!takenByOther) return requested
   }
   return crypto.randomUUID()
+}
+
+/**
+ * AQU-1791: how long a connection that has proven it heartbeats may go silent
+ * before the DO treats its socket as dead and retires it.
+ *
+ * The client pings every 25s (`heartbeatIntervalMs` in ws-reconciler.ts), so
+ * three missed pings is the bar — short enough that a field team's ghost row
+ * clears within a couple of minutes, long enough that an ordinary GC pause,
+ * a backgrounded tab's throttled timer or one dropped frame never evicts a
+ * live user.
+ */
+export const PRESENCE_HEARTBEAT_TTL_MS = 90_000
+
+/** The per-connection bookkeeping the heartbeat sweep reads. */
+export interface HeartbeatTracked {
+  connId: string
+  userId: string
+  /** Epoch ms of the last frame received from this socket. */
+  lastSeenAt: number
+  /**
+   * Whether this socket has ever sent a `ping`. Only a connection that has
+   * proven it heartbeats is subject to the TTL — an older client that never
+   * pings would otherwise be evicted every TTL while perfectly alive, the
+   * same guard the client applies before killing silent sockets
+   * (`serverPongSeen` in ws-reconciler.ts).
+   */
+  heartbeatSeen: boolean
+}
+
+/**
+ * AQU-1791: connections that are half-open — still in the DO's map, so
+ * `sweepOrphanedPresence` (AQU-1374) considers their rows live, but silent
+ * well past the heartbeat they themselves established.
+ *
+ * This is the case AQU-1374 could not reach. A VPN drop, a sleeping laptop or
+ * a carrier handover leaves the socket OPEN on the server with no close/error
+ * event, so the row keeps a live connId and the roster keeps the ghost until
+ * the DO is evicted. The client's own reconnect then adds a second row, which
+ * is why one person in one tab was listed two or three times as "viewing".
+ *
+ * Returns the connections to retire; the caller closes each socket and runs
+ * its normal disconnect path, so presence.left / lock.released are emitted
+ * exactly as a clean close would.
+ */
+export function selectStaleConnections<T extends HeartbeatTracked>(
+  connections: Iterable<T>,
+  now: number,
+  ttlMs: number = PRESENCE_HEARTBEAT_TTL_MS,
+): T[] {
+  const stale: T[] = []
+  for (const conn of connections) {
+    if (!conn.heartbeatSeen) continue
+    if (now - conn.lastSeenAt <= ttlMs) continue
+    stale.push(conn)
+  }
+  return stale
 }
 
 // ── Lock state transitions (pure) ─────────────────────────────────────────
@@ -449,6 +620,22 @@ function samePresence(a: PresenceState | undefined, b: PresenceState | undefined
   )
 }
 
+/**
+ * AQU-1831: the wire form of a draft — itself when short enough, otherwise its
+ * first PROJECT_DO_PRESENCE_DRAFT_WIRE_MAX characters with the last replaced
+ * by an ellipsis.
+ */
+export function boundPresenceDraftText(text: string): string {
+  if (text.length <= PROJECT_DO_PRESENCE_DRAFT_WIRE_MAX) return text
+  let cut = text.slice(0, PROJECT_DO_PRESENCE_DRAFT_WIRE_MAX - 1)
+  // Never cut a surrogate pair in half: a lone high surrogate is an unpaired
+  // code unit, which renders as a replacement character rather than the
+  // emoji/CJK glyph it came from.
+  const last = cut.charCodeAt(cut.length - 1)
+  if (last >= 0xd800 && last <= 0xdbff) cut = cut.slice(0, -1)
+  return `${cut}\u2026`
+}
+
 /** Copy of a presence row with `selection.draftText` removed. */
 export function stripPresenceDraft(user: PresenceState): PresenceState {
   if (!user.selection || user.selection.draftText === undefined) return user
@@ -456,9 +643,85 @@ export function stripPresenceDraft(user: PresenceState): PresenceState {
   return { ...user, selection }
 }
 
-/** Full roster frame with every draft stripped (connect snapshot). */
-export function presenceSnapshot(presence: ReadonlyMap<string, PresenceState>): ServerPresence {
-  return { t: "presence", users: Array.from(presence.values(), stripPresenceDraft) }
+/**
+ * AQU-1825: copy of a presence row with the tier-2 detail removed — the
+ * cursor `selection` and the non-lock-bearing `viewingCell`. What is left is
+ * the coarse "who, and in which file" state that every member of the project
+ * may see.
+ */
+export function stripPresenceDetail(user: PresenceState): PresenceState {
+  if (user.selection === undefined && user.viewingCell === undefined) return user
+  const { selection: _sel, viewingCell: _viewing, ...coarse } = user
+  return coarse
+}
+
+/**
+ * AQU-1825: the connect snapshot as seen by a socket sitting in `viewerFileId`
+ * — full rows for the peers in that same file, coarse (tier-1) rows for
+ * everyone else. A socket connects before it has published a file, so at
+ * handshake every peer who IS in a file reads as coarse; the DO backfills the
+ * detail for one file's peers when the socket announces that it opened it.
+ */
+export function presenceSnapshotFor(
+  presence: ReadonlyMap<string, PresenceState>,
+  viewerFileId: string | undefined,
+): ServerPresence {
+  return {
+    t: "presence",
+    users: Array.from(presence.values(), (user) =>
+      // Dropping the whole `selection` takes the draft text with it, so the
+      // coarse branch needs no separate draft strip.
+      user.currentFileId === viewerFileId ? stripPresenceDraft(user) : stripPresenceDetail(user),
+    ),
+  }
+}
+
+/** AQU-1825: the tier-1 (coarse) projection of a presence row. */
+export function presenceTier1Row(user: PresenceState): PresenceTier1Row {
+  return {
+    connId: user.connId,
+    userId: user.userId,
+    ...(user.currentFileId !== undefined ? { currentFileId: user.currentFileId } : {}),
+    ...(user.focusedCell !== undefined ? { focusedCell: user.focusedCell } : {}),
+    ts: user.ts,
+  }
+}
+
+/**
+ * Coarse equality, deliberately ignoring `ts`: a cursor move restamps the
+ * presence row without changing anything tier 1 reports, and must not cost
+ * the project a frame.
+ */
+export function sameTier1Row(a: PresenceTier1Row | undefined, b: PresenceTier1Row | undefined): boolean {
+  if (!a && !b) return true
+  if (!a || !b) return false
+  return (
+    a.connId === b.connId &&
+    a.userId === b.userId &&
+    a.currentFileId === b.currentFileId &&
+    a.focusedCell === b.focusedCell
+  )
+}
+
+/**
+ * AQU-1825: who a server frame is for.
+ *
+ * `all` is the project: content events, locks, settings, `presence.left`, and
+ * the batched tier-1 roster frame. `file` is the tier-2 audience — the sockets
+ * whose own `currentFileId` matches, which is where a cursor or a live draft
+ * means anything. A frame about a socket that has no file open scopes to the
+ * sockets that likewise have none (clients predating `currentFileId` all sit
+ * in that one bucket, so they keep today's behaviour).
+ */
+export function presenceFrameAudience(
+  msg: ProjectDoServerMessage,
+  presence: ReadonlyMap<string, PresenceState>,
+): { scope: "all" } | { scope: "file"; fileId: string | undefined } {
+  if (msg.t === "presence.diff") return { scope: "file", fileId: msg.user.currentFileId }
+  if (msg.t === "presence.draft") {
+    return { scope: "file", fileId: presence.get(msg.connId)?.currentFileId }
+  }
+  return { scope: "all" }
 }
 
 function presenceDiff(user: PresenceState): ServerPresenceDiff {
@@ -650,53 +913,95 @@ export function applyPresenceUpdate(
   nextPresence.set(connId, next)
   const emit: ProjectDoServerMessage[] = [presenceDiff(next)]
   const draftText = next.selection?.draftText
-  if (
-    draftText !== undefined &&
-    next.focusedCell &&
-    draftText !== before?.selection?.draftText
-  ) {
-    emit.push({
-      t: "presence.draft",
-      userId,
-      connId,
-      cellId: next.focusedCell,
-      draftText,
-      ts: now,
-    })
+  if (draftText !== undefined && next.focusedCell) {
+    // AQU-1831: compare what would actually go OUT, not what is stored.
+    // Editing past the wire cap produces byte-identical frames, and noticing
+    // that is the cheapest way to stop paying 2 KB per keystroke for a draft
+    // whose visible head never changes.
+    const wire = boundPresenceDraftText(draftText)
+    const beforeDraft = before?.selection?.draftText
+    const beforeWire = beforeDraft === undefined ? undefined : boundPresenceDraftText(beforeDraft)
+    if (wire !== beforeWire) {
+      emit.push({
+        t: "presence.draft",
+        userId,
+        connId,
+        cellId: next.focusedCell,
+        draftText: wire,
+        ts: now,
+      })
+    }
   }
   return { presence: nextPresence, emit }
 }
 
 /**
- * Per-connection trailing throttle for `presence.draft` frames: the first draft in
- * a window goes out immediately; anything else arriving inside the window is
- * held and only the LATEST one is flushed when the window ends. In-memory
- * only (timers die with the DO instance, like the rest of its state).
+ * AQU-1831: coalescing tick for inbound `presence.update` frames.
+ *
+ * Tier-2 presence — the caret, the viewed row, the live draft — changes at
+ * typing speed: the editor publishes a selection roughly every 120 ms and a
+ * draft on each idle debounce. Every frame costs the project DO a parse, a
+ * presence-map clone, a content compare and a fan-out to every socket, all on
+ * the DO's single thread — so one fast (or misbehaving) client could spend the
+ * whole project's latency budget.
+ *
+ * This bounds that work per CONNECTION. The first update in a window is
+ * applied and broadcast immediately, because a one-off — opening a file,
+ * clicking a row — must not feel laggy. Everything arriving inside the window
+ * is merged into one pending patch and applied once when the window ends, so a
+ * client sending 100 frames/s costs the DO 1000/`tickMs` applies per second —
+ * five at a 200 ms tick — rather than a hundred.
+ *
+ * Merging rather than dropping is what makes it safe: `presence.update` is a
+ * PATCH, not a full publish — each call site in the workspace sends only the
+ * keys it owns — so a discarded frame could strand a peer's row in the file
+ * they just left. Coalescing loses intermediate positions (which nobody can
+ * read at 120 ms anyway) and never loses the latest one.
+ *
+ * In-memory only, like the rest of the DO's state, and safe to be: under
+ * AQU-1836 hibernation a pending tick keeps the DO resident until it fires
+ * (the runtime never hibernates with a `setTimeout` outstanding), so a queued
+ * patch is never lost to an eviction; and if the instance does die, the next
+ * client publish re-establishes the row.
  */
-export const PRESENCE_DRAFT_THROTTLE_MS = 150
+export const PRESENCE_TIER2_TICK_MS = 200
 
-export class PresenceDraftThrottle {
+/**
+ * Fold a later patch onto an earlier one. Later keys win; keys only the
+ * earlier patch carried survive — including ones explicitly set to `null`,
+ * which is how the client clears a field (the parser puts a key in the object
+ * only when the client sent it, so spreading preserves that distinction).
+ */
+export function mergePresenceUpdate(
+  base: ClientPresenceUpdate | null,
+  next: ClientPresenceUpdate,
+): ClientPresenceUpdate {
+  if (!base) return next
+  return { ...base, ...next, t: "presence.update" }
+}
+
+export class PresenceTier2Batcher {
   private readonly windows = new Map<
     string,
-    { timer: ReturnType<typeof setTimeout>; pending: ServerPresenceDraft | null }
+    { timer: ReturnType<typeof setTimeout>; pending: ClientPresenceUpdate | null }
   >()
 
   constructor(
-    private readonly send: (frame: ServerPresenceDraft) => void,
-    private readonly windowMs: number = PRESENCE_DRAFT_THROTTLE_MS,
+    private readonly apply: (connId: string, msg: ClientPresenceUpdate) => void,
+    private readonly tickMs: number = PRESENCE_TIER2_TICK_MS,
   ) {}
 
-  push(frame: ServerPresenceDraft): void {
-    const open = this.windows.get(frame.connId)
+  push(connId: string, msg: ClientPresenceUpdate): void {
+    const open = this.windows.get(connId)
     if (open) {
-      open.pending = frame
+      open.pending = mergePresenceUpdate(open.pending, msg)
       return
     }
-    this.send(frame)
-    this.arm(frame.connId)
+    this.apply(connId, msg)
+    this.arm(connId)
   }
 
-  /** Drop any held draft + timer for a connection (disconnect). */
+  /** Drop any held patch + timer for a connection (disconnect). */
   clear(connId: string): void {
     const open = this.windows.get(connId)
     if (!open) return
@@ -709,15 +1014,138 @@ export class PresenceDraftThrottle {
       const open = this.windows.get(connId)
       if (!open) return
       if (open.pending) {
-        const frame = open.pending
+        const msg = open.pending
         open.pending = null
-        this.send(frame)
+        this.apply(connId, msg)
         this.arm(connId)
       } else {
         this.windows.delete(connId)
       }
-    }, this.windowMs)
+    }, this.tickMs)
     this.windows.set(connId, { timer, pending: null })
+  }
+}
+
+/**
+ * AQU-1831: per-connection token bucket over inbound presence frames.
+ *
+ * The tick batcher bounds the work one connection can cause, but not the
+ * frames it can send: a client looping `presence.update` as fast as the socket
+ * drains still makes the DO JSON.parse every one. The bucket is the outer
+ * floodgate — wide enough that no legitimate client reaches it (the
+ * workspace's publishers together top out near 10/s between caret, draft and
+ * viewed-row updates, and the batcher keeps a burst from costing anything),
+ * and decisive when one does: the socket is closed rather than quietly
+ * degraded, so the condition is visible instead of looking like lag.
+ *
+ * Closing is also the state-safe answer. Dropping frames could strand a row,
+ * because the frames are patches; a closed socket reconnects under
+ * ws-reconciler's backoff and republishes its whole presence on open, so the
+ * roster re-converges.
+ */
+export const PRESENCE_FLOOD_BURST = 40
+export const PRESENCE_FLOOD_REFILL_PER_SEC = 20
+
+export class PresenceFloodGuard {
+  private readonly buckets = new Map<string, { tokens: number; at: number }>()
+
+  constructor(
+    private readonly burst: number = PRESENCE_FLOOD_BURST,
+    private readonly refillPerSec: number = PRESENCE_FLOOD_REFILL_PER_SEC,
+  ) {}
+
+  /** True while the connection is within budget; false once it is flooding. */
+  allow(connId: string, now: number): boolean {
+    const bucket = this.buckets.get(connId)
+    if (!bucket) {
+      this.buckets.set(connId, { tokens: this.burst - 1, at: now })
+      return true
+    }
+    const tokens = Math.min(
+      this.burst,
+      bucket.tokens + (Math.max(0, now - bucket.at) / 1000) * this.refillPerSec,
+    )
+    bucket.at = now
+    if (tokens < 1) {
+      bucket.tokens = tokens
+      return false
+    }
+    bucket.tokens = tokens - 1
+    return true
+  }
+
+  clear(connId: string): void {
+    this.buckets.delete(connId)
+  }
+}
+
+/**
+ * AQU-1825: the tier-1 tick. Project-wide presence is coarse enough that one
+ * frame every quarter second is indistinguishable from live (the ticket's bar
+ * is "within about one second"), and it turns a workshop's O(room²) stream of
+ * per-keystroke frames into a bounded trickle.
+ */
+export const PRESENCE_TIER1_TICK_MS = 250
+
+/**
+ * Batches coarse presence changes into one `presence.tier1` frame per tick.
+ *
+ * Latest-wins per connection, and a push whose coarse row matches what that
+ * connection last had sent is dropped outright — so a client publishing
+ * presence every ~650 ms while typing, and a cursor moving every ~120 ms,
+ * produce no project-wide frames at all between file switches.
+ *
+ * In-memory only, and safe to be: under AQU-1836 hibernation a pending tick
+ * keeps the DO resident until it fires (the runtime never hibernates with a
+ * `setTimeout` outstanding), so nothing queued is lost; and `lastSent` is a
+ * cache — after an eviction it is empty, so the first push per connection
+ * re-sends that connection's coarse row once, which the client merge absorbs.
+ */
+export class PresenceTier1Batcher {
+  private readonly pending = new Map<string, PresenceTier1Row>()
+  private readonly lastSent = new Map<string, PresenceTier1Row>()
+  private timer: ReturnType<typeof setTimeout> | null = null
+
+  constructor(
+    private readonly send: (frame: ServerPresenceTier1) => void,
+    private readonly windowMs: number = PRESENCE_TIER1_TICK_MS,
+  ) {}
+
+  /** Queue a row; no-op when nothing tier 1 reports has changed. */
+  push(row: PresenceTier1Row): void {
+    if (sameTier1Row(this.pending.get(row.connId) ?? this.lastSent.get(row.connId), row)) return
+    this.pending.set(row.connId, row)
+    if (this.timer === null) this.timer = setTimeout(() => this.flush(), this.windowMs)
+  }
+
+  /** Drop a connection's queued row and its sent-state (disconnect). */
+  clear(connId: string): void {
+    this.pending.delete(connId)
+    this.lastSent.delete(connId)
+    if (this.pending.size === 0) this.cancelTimer()
+  }
+
+  /** Send whatever is queued now and close the window. */
+  flush(): void {
+    this.cancelTimer()
+    if (this.pending.size === 0) return
+    const users = Array.from(this.pending.values())
+    this.pending.clear()
+    for (const row of users) this.lastSent.set(row.connId, row)
+    this.send({ t: "presence.tier1", users })
+  }
+
+  /** Drop every timer and all state (last socket closed / DO shutting down). */
+  dispose(): void {
+    this.cancelTimer()
+    this.pending.clear()
+    this.lastSent.clear()
+  }
+
+  private cancelTimer(): void {
+    if (this.timer === null) return
+    clearTimeout(this.timer)
+    this.timer = null
   }
 }
 
@@ -756,6 +1184,72 @@ export function applyDisconnect(
 }
 
 /**
+ * AQU-1839: decide whether an in-band `token.refresh` may re-authorize an open
+ * connection. Pure so the policy is testable without a DO host; the caller
+ * (ProjectSync) does the signature verification and applies the outcome.
+ *
+ * Two refusals matter:
+ *
+ *  - **identity mismatch.** A connection is authorized as one user for its
+ *    whole life — presence, lock ownership and event authorship all key off
+ *    that identity. Accepting a token minted for somebody else would let one
+ *    socket change who it is mid-session, so the refresh is refused and the
+ *    connection keeps the authorization it already had.
+ *  - **already expired.** A token that is past its own `exp` buys nothing: it
+ *    would leave the connection due for the very sweep it was meant to avoid,
+ *    and treating it as a refresh would hide a broken client clock.
+ *
+ * A refresh that does not extend the expiry (a replayed token, or one minted
+ * from the same cache) is still accepted: it re-resolves the role, which is
+ * the other half of what the expiry close bought (see TOKEN_EXPIRED_CLOSE_CODE).
+ */
+export type TokenRefreshOutcome =
+  | { ok: true; role: number | null; tokenExpiresAt: number }
+  | { ok: false; reason: "identity-mismatch" | "expired" }
+
+export function resolveTokenRefresh(
+  conn: { numericUserId: number | null },
+  claims: { userId: number; role: number | null; exp: number },
+  now: number,
+): TokenRefreshOutcome {
+  if (conn.numericUserId !== null && claims.userId !== conn.numericUserId) {
+    return { ok: false, reason: "identity-mismatch" }
+  }
+  const tokenExpiresAt = claims.exp * 1000
+  if (tokenExpiresAt <= now) return { ok: false, reason: "expired" }
+  return { ok: true, role: claims.role, tokenExpiresAt }
+}
+
+/**
+ * AQU-1839: drop every focus lock held by one user and emit the releases.
+ *
+ * Needed when a `token.refresh` downgrades a connection to a read-only role.
+ * Before in-band refresh existed, the role change took effect by closing the
+ * socket, and the disconnect path released the locks on the way out; keeping
+ * the socket open has to release them explicitly, or a demoted user holds
+ * every cell they had open until the lease lapses — the exact lock-out the
+ * role gate on `focus.claim` exists to prevent.
+ *
+ * Locks are per user rather than per socket (see applyDisconnect), so this is
+ * keyed by userId too: a role is a property of the account, so a downgrade
+ * seen on one of the user's sockets applies to all of them.
+ */
+export function releaseUserLocks(
+  locks: ReadonlyMap<string, LockState>,
+  userId: string,
+  now: number,
+): { locks: Map<string, LockState>; emit: ProjectDoServerMessage[] } {
+  const nextLocks = clone(locks)
+  const emit: ProjectDoServerMessage[] = []
+  for (const [cellId, lock] of nextLocks) {
+    if (lock.userId !== userId) continue
+    nextLocks.delete(cellId)
+    emit.push({ t: "lock.released", cellId, by: { userId, ts: now } })
+  }
+  return { locks: nextLocks, emit }
+}
+
+/**
  * AQU-1374: reconcile the presence roster against the DO's live sockets.
  *
  * Presence rows are created at handshake and removed by applyDisconnect, which
@@ -769,9 +1263,14 @@ export function applyDisconnect(
  *
  * Every row is keyed by the connId of the socket that created it, so a row
  * whose connId no longer has a live connection is definitively orphaned. That
- * makes this exact rather than heuristic — unlike a `ts`-based TTL, which would
- * evict a live but idle user, since the client sends `presence.update` only on
- * change and has no heartbeat.
+ * makes this exact rather than heuristic — unlike a `presence.update`-based
+ * TTL, which would evict a live but idle user, since the client publishes
+ * presence only on change.
+ *
+ * AQU-1791: this reaches only rows whose socket has LEFT the connection map.
+ * A half-open socket is still in it, so its row still looks live here — that
+ * residue is what `selectStaleConnections` (above) retires, keyed off the
+ * client's `ping` heartbeat rather than its presence traffic.
  *
  * Emits `presence.left` per dropped row, the same frame applyDisconnect sends,
  * so `PresenceStore.applyPresenceLeft` removes the peer with no client change.

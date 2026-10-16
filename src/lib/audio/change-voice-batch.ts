@@ -14,7 +14,7 @@
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
-import { runBatch } from "./batch-audio"
+import { runBatchJobs } from "./batch-audio"
 import { changeCellVoice, changeVoiceBlocker, changeVoiceSourceTake, type ChangeVoiceBlocker } from "./change-voice"
 import { getTtsStatus, ttsStatusKey } from "./tts"
 import { getVoiceLibrary, resolveCastVoice } from "./voices"
@@ -112,7 +112,7 @@ export async function runChangeVoiceAll(args: ChangeVoiceAllArgs): Promise<Chang
   if (targets.length === 0) return result
 
   _cancelFlag = false
-  await runBatch(
+  await runBatchJobs(
     targets,
     async ({ cell, voice }) => {
       const ok = await changeCellVoice({

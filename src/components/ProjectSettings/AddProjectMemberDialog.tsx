@@ -7,6 +7,8 @@ import { MemberMultiAddRow } from "@/components/MemberMultiAddRow"
 import { PermissionDeniedAlert } from "@/components/PermissionDeniedAlert"
 import { InviteLinkTab } from "@/components/ProjectMembersPage"
 import { useProjectOrgId } from "@/hooks/useProjectOrgId"
+import { useCurrentTargetLanes } from "@/hooks/useCurrentTargetLanes"
+import type { MemberLaneAccess } from "@/lib/lanes/lane-access-choice"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
 import { partitionMembers, type ProjectMember } from "@/lib/frontier/members"
@@ -18,6 +20,7 @@ import { toUserFacingError } from "@/lib/errors/user-error"
 import type { UseProjectMembers } from "@/hooks/useProjectMembers"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { formatScopePath } from "@/lib/access/scope-path"
+import { grantProjectName } from "@/lib/access/grant-scope-sentence"
 import type { ScopePath } from "@/lib/access/types"
 
 type AddDialogTab = "members" | "invite"
@@ -110,13 +113,26 @@ export function AddProjectMemberDialog({
     [visibleOrgMembers, directGrantUserIds],
   )
 
+  const { lanes: targetLanes } = useCurrentTargetLanes(open ? projectId : null)
   const grantableRoles = useMemo(
     () => grantableProjectRoles(callerLevel),
     [callerLevel],
   )
+  const projectName = grantProjectName(
+    t,
+    scopePath?.find((crumb) => crumb.type === "project" && !crumb.hidden)?.name,
+  )
 
-  const handleAddMany = useCallback(async (usernames: string[], role: number) => {
-    const results = await addMany(usernames.map((username) => ({ username, role })))
+  const handleAddMany = useCallback(async (
+    usernames: string[],
+    role: number,
+    laneAccess?: MemberLaneAccess,
+  ) => {
+    const results = await addMany(usernames.map((username) => ({
+      username,
+      role,
+      ...(laneAccess ? { laneAccess } : {}),
+    })))
     return results.map((r) => ({
       username: r.username,
       ok: r.ok,
@@ -164,8 +180,10 @@ export function AddProjectMemberDialog({
             <MemberMultiAddRow
               roleOptions={grantableRoles}
               defaultRole={ROLE.CONTRIBUTOR}
-              onAdd={async (usernames, role) => {
-                const outcomes = await handleAddMany(usernames, role)
+              grantScope={{ kind: "project", projectName, lanes: "all" }}
+              targetLanes={targetLanes}
+              onAdd={async (usernames, role, laneAccess) => {
+                const outcomes = await handleAddMany(usernames, role, laneAccess)
                 if (outcomes.some((o) => o.ok)) onAdded?.()
                 if (outcomes.every((o) => o.ok)) onOpenChange(false)
                 return outcomes
@@ -176,7 +194,7 @@ export function AddProjectMemberDialog({
                   ? eligibleOrgMembers.map((m) => ({ id: m.userId, username: m.username }))
                   : undefined
               }
-              emptySuggestionsHint="All org members are already on this project."
+              emptySuggestionsHint={t("org.membersPage.allOrgMembersAdded")}
               onAddStart={() => setAddForbidden(false)}
               onBatchErrorMessage={(e) => {
                 const uf = toUserFacingError(e, "project")
@@ -198,7 +216,7 @@ export function AddProjectMemberDialog({
             )}
           </TabsContent>
           <TabsContent value="invite">
-            <InviteLinkTab projectId={projectId} embedded />
+            <InviteLinkTab projectId={projectId} projectName={projectName} embedded />
           </TabsContent>
         </Tabs>
       </DialogContent>

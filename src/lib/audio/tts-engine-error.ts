@@ -4,10 +4,27 @@
 // titled popover so Inworld 503s never read as a missing Gemini key.
 
 export const HOSTED_TTS_NOT_CONFIGURED_BODY =
-  "This line uses Inworld TTS, not Gemini. Hosted TTS isn't wired on this server — a Gemini API key will not fix it."
+  "This line uses Inworld TTS, not Gemini. Hosted TTS isn't wired on this server, so a Gemini API key will not fix it."
 
 export const HOSTED_TTS_FAILED_BODY =
   "Inworld TTS couldn't generate this line. This is not a Gemini key problem."
+
+/**
+ * AQU-1872: the sync-worker refuses synthesis with `429 credit_cap_exceeded`
+ * once the org has spent its credit allowance. Without this branch that body
+ * fell through to HOSTED_TTS_FAILED_BODY, which told the user the opposite of
+ * the truth — "Inworld TTS couldn't generate this line" reads as a vendor
+ * fault when in fact nothing was ever sent to the vendor, and the one person
+ * who can clear it (an org admin, raising the cap) was never named.
+ *
+ * Unlike its siblings above, this body deliberately does NOT disclaim Gemini.
+ * That disclaimer earns its place when an ENGINE failed and the user might go
+ * hunting for a missing key; here the real cause is named outright, so naming
+ * Gemini only plants the idea it is meant to rule out. "The voice engine is
+ * fine" carries the useful half without mentioning a provider at all.
+ */
+export const HOSTED_TTS_CREDIT_CAP_BODY =
+  "This organization has used its AI credit allowance, so no audio was generated. The voice engine is fine — ask an org admin to raise the cap, or wait for the allowance to reset."
 
 export const SEED_VC_NOT_CONFIGURED_BODY =
   "This clone voice needs Seed-VC after Gemini or a local engine. Voice conversion isn't wired on this server. An Inworld clone wouldn't need this step."
@@ -50,6 +67,12 @@ export function errorFromHostedTts(status: number, body: string): Error {
   const detail = body.trim() || `HTTP ${status}`
   if (status === 503 && /tts not configured/i.test(detail)) {
     return new Error(HOSTED_TTS_NOT_CONFIGURED_BODY)
+  }
+  // AQU-1872: an org out of credit is refused before the vendor is called, so
+  // it must not be reported as a vendor failure. The gutter tooltip shows
+  // `err.message` raw, so this message has to stand on its own.
+  if (status === 429 && /credit_cap_exceeded/i.test(detail)) {
+    return new Error(HOSTED_TTS_CREDIT_CAP_BODY)
   }
   return new Error(`Inworld TTS failed (${status}): ${detail}`)
 }

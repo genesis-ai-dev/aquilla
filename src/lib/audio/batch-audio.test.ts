@@ -121,6 +121,23 @@ describe("runTranscribeAll", () => {
     // Progress clears to null after completion.
     expect(getBatchProgress()).toBeNull()
   })
+
+  it("hands every cell the lane being worked in (AQU-1978)", async () => {
+    // Each take's timings ride a re-attach that deselects within the lane it
+    // names; with no lane that was the `''` lane, on every line of the batch.
+    const { transcribeCell } = await import("./transcribe")
+    const cells = [
+      makeCell({
+        id: "c1",
+        selectedAudioId: "a1",
+        attachments: { a1: { url: "frontier-audio://p/f/a1.wav" } as unknown as import("@/lib/codex-editor/types").CodexCellAttachment },
+      }),
+    ]
+    await runTranscribeAll({ cells, projectId: "proj1", session: mockSession, targetLanguage: "Spanish", targetLang: "es-lane" })
+    expect(transcribeCell).toHaveBeenCalledWith(
+      expect.objectContaining({ language: "Spanish", targetLang: "es-lane" }),
+    )
+  })
 })
 
 // AQU-928: the timeline's "transcribe these sections" row passes an explicit
@@ -214,6 +231,16 @@ describe("runSynthAll", () => {
     ]
     await runSynthAll({ cells, project: mockProject, session: mockSession, username: "user1" })
     expect(generateCellVoice).toHaveBeenCalledTimes(2)
+  })
+
+  // AQU-1572: each line it voices reports its own `audio generated` from the
+  // attach; the run only says where they came from.
+  it("tells every generation it is part of Generate all", async () => {
+    const { generateCellVoice } = await import("./voice-generate-helpers")
+    vi.mocked(generateCellVoice).mockClear()
+    const cells = [makeCell({ id: "c1", translated: "Hola" }), makeCell({ id: "c2", translated: "Adios" })]
+    await runSynthAll({ cells, project: mockProject, session: mockSession, username: "user1" })
+    expect(vi.mocked(generateCellVoice).mock.calls.map(([a]) => a.surface)).toEqual(["generate-all", "generate-all"])
   })
 })
 

@@ -4,6 +4,8 @@ import { HealthRing } from "./HealthRing"
 import { DecayBreakdown } from "./DecayBreakdown"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { bidiIsolate, formatNumber, formatPercent } from "@/lib/i18n/format"
+import { progressPercent } from "@/lib/progress/progress-percent"
+import { PROGRESS_BG } from "@/lib/progress/progress-palette"
 
 interface StatusBarProps {
   progress: { total: number; translated: number; validated: number }
@@ -26,7 +28,8 @@ export function StatusBar({
   const { locale, t } = useI18n()
   const { total, translated, validated } = progress
   const unvalidated = translated - validated
-  const fraction = total > 0 ? translated / total : 0
+  // AQU-1493: never "100%" while a cell is still blank — 251 of 252 is 99%.
+  const fraction = progressPercent(translated, total) / 100
   // The ratio/percent run reorders under Arabic's bidi algorithm when this
   // footer sits inside an <html dir="rtl"> page (a user photographed exactly
   // this) even though the surrounding words stay English — isolate each
@@ -59,14 +62,25 @@ export function StatusBar({
             pct: pctDisplay,
           })}
         </span>
+        {/* Grouped like the counts beside them ("1,207 validated", not
+            "1207"); the plural form still reads the digits.
+            AQU-1764: the words are in the text colour and the colour sits in
+            a swatch before them, the same light and dark blue the file's bar
+            in the sidebar is drawn in. They were amber and green. */}
         {unvalidated > 0 && (
-          <Badge variant="secondary" className="text-amber-500">
-            {t("workspace.statusBar.unvalidatedBadge", { count: unvalidated })}
+          <Badge variant="secondary" className="text-foreground" data-testid="status-bar-unvalidated">
+            <span aria-hidden className={`size-2 shrink-0 rounded-[2px] ${PROGRESS_BG.textTranslated}`} />
+            {t("workspace.statusBar.unvalidatedBadge", {
+              count: bidiIsolate(formatNumber(unvalidated, locale)),
+            })}
           </Badge>
         )}
         {validated > 0 && (
-          <Badge variant="secondary" className="text-green-500">
-            {t("terminology.livingMemory.validatedCount", { count: validated })}
+          <Badge variant="secondary" className="text-foreground" data-testid="status-bar-validated">
+            <span aria-hidden className={`size-2 shrink-0 rounded-[2px] ${PROGRESS_BG.textValidated}`} />
+            {t("terminology.livingMemory.validatedCount", {
+              count: bidiIsolate(formatNumber(validated, locale)),
+            })}
           </Badge>
         )}
       </span>

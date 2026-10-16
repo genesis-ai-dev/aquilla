@@ -102,6 +102,40 @@ describe("hosted transcription", () => {
     ] })
   })
 
+  it("meters fractional-second clips as whole billed seconds on the legacy credit rail", async () => {
+    // Regression: with weekly usage off, the route recorded the WAV-derived
+    // duration (2.067 s here) as org_credit_usage_daily.units, an INTEGER
+    // column. Postgres rejected the upsert and recordCredit's graceful degrade
+    // swallowed it, so the org's llm-rail usage silently under-counted.
+    const jwt = await owner()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'Audio Org', 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare("UPDATE projects SET org_id = 1 WHERE id = ?")
+      .bind(body.projectId).run()
+    vi.spyOn(globalThis, "fetch").mockImplementation(async input =>
+      String(input).includes("/models?") ? catalog() : Response.json({
+        text: "recording now", words: [{ word: "recording", start: 0, end: 0.5 }],
+        usage: { seconds: 3, cost: 0.001 },
+      }))
+    const producerPath = new URL(
+      "../../../src/lib/audio/transcription-request.ts", import.meta.url,
+    ).pathname
+    const { buildTranscriptionRequest } = await import(producerPath)
+    // 33072 samples × 2 bytes ÷ 32000 bytes/s = 2.067 s — not a whole second.
+    const request = await buildTranscriptionRequest(new Float32Array(33072), body.projectId)
+    const response = await app.request("/api/v1/audio/transcriptions", {
+      method: "POST", headers: authHeader(jwt), body: JSON.stringify(request),
+    }, settings())
+    expect(response.status).toBe(200)
+    const row = await env.AQUILLA_PG.prepare(
+      "SELECT org_id, user_id, rail, raw_cost_cents, units FROM org_credit_usage_daily",
+    ).first<{ org_id: number; user_id: number; rail: string; raw_cost_cents: number; units: number }>()
+    // Whisper bills whole seconds (usage.seconds: 3), so the ledger stores 3.
+    expect(row).toMatchObject({ org_id: 1, user_id: 1, rail: "llm", units: 3 })
+    expect(row?.raw_cost_cents).toBeCloseTo(0.1, 9)
+  })
+
   it("rejects provider text without timings", async () => {
     const jwt = await owner()
     vi.spyOn(globalThis, "fetch").mockImplementation(async input =>

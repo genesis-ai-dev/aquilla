@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { InitialsAvatar } from "@/components/InitialsAvatar"
+import { UserChip } from "@/components/UserChip"
 import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -10,6 +10,7 @@ import {
   type ProjectPresenceStore,
 } from "@/lib/sync/presence-store"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { useConnectivity } from "@/lib/offline/connectivity"
 
 interface PeerPresenceProps {
   /** Pre-resolved roster. Prefer `store` so only this component re-renders on roster changes. */
@@ -26,8 +27,12 @@ export function PeerPresence({ peers: peersProp, store, onJumpToPeer, resolveCel
   const [showPopover, setShowPopover] = useState(false)
   const storePeers = usePresencePeers(store ?? null)
   const peers = peersProp ?? storePeers
+  // Tauri: with the backend unreachable the roster is a stale snapshot (the
+  // socket may not have noticed yet), so showing it would claim people are
+  // here when we cannot know.
+  const backendReachable = useConnectivity()
 
-  if (peers.length === 0) return null
+  if (peers.length === 0 || backendReachable === false) return null
 
   const visible = peers.slice(0, 5)
   const overflow = peers.length - 5
@@ -48,11 +53,13 @@ export function PeerPresence({ peers: peersProp, store, onJumpToPeer, resolveCel
             >
               <AvatarGroup className="-space-x-1 *:data-[slot=avatar]:ring-background">
                 {visible.map((peer) => (
-                  <InitialsAvatar
+                  <UserChip
                     key={peer.peerId}
-                    name={peer.username}
-                    size="xs"
+                    username={peer.username}
+                    distinguishId={peer.peerId}
                     color={peer.color}
+                    size="xs"
+                    avatarOnly
                   />
                 ))}
                 {overflow > 0 && (
@@ -91,9 +98,18 @@ export function PeerPresence({ peers: peersProp, store, onJumpToPeer, resolveCel
                     setShowPopover(false)
                   }}
                 >
-                  <InitialsAvatar name={peer.username} size="xs" color={peer.color} />
-                  <span className="truncate">{peer.username}</span>
+                  <UserChip
+                    username={peer.username}
+                    distinguishId={peer.peerId}
+                    color={peer.color}
+                    size="xs"
+                    className="min-w-0"
+                    nameClassName="truncate text-xs font-normal"
+                  />
                   <span className="ms-auto shrink-0 text-[10px] text-muted-foreground">
+                    {/* AQU-1791: one row per user; a genuine second tab or
+                        device reads as a count, never a duplicate row. */}
+                    {(peer.connectionCount ?? 1) > 1 ? `×${peer.connectionCount} · ` : ""}
                     {at ? `${at} · ` : ""}
                     {peer.isEditing
                       ? t("editor.presence.editing")

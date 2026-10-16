@@ -31,7 +31,7 @@ import { Plus } from "lucide-react"
 import { useT, useI18n } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { UserChip } from "@/components/UserChip"
 import { AssignModal } from "@/components/AssignModal"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { fmtDeadlineDate } from "@/lib/format-date"
@@ -39,11 +39,11 @@ import { formatList } from "@/lib/i18n/format"
 import { classifyPlanSection, isTimeBucketKey, numberedBookCodes, planSectionLabel } from "@/lib/plan/plan-section"
 import { planPct, planUnitShortfall, type PlanShortfall } from "@/lib/plan/plan-status"
 import type { UnitAssignment, UnitAssignmentChapter } from "@/lib/sync/assignments"
+import type { AssignLaneOption } from "@/lib/sync/assignment-lane"
 import type { FileReference, FileType } from "@/lib/parsers/types"
 import { SectionVisibilityGate } from "../SectionVisibilityBadge"
 import { laneChipLabel } from "../project-lanes"
 import { PlanBar } from "./PlanBar"
-import { PLAN_TONE } from "./plan-tone"
 import { usePlanShortfallRenderer, usePlanReadoutTips } from "./use-plan-note"
 
 /** AssignModal takes the editor's cell selection; a PM surface has none. */
@@ -128,6 +128,8 @@ export interface PlanAssignTarget {
   files: { id: string; name: string }[]
   /** Extra (non-default) lane tags, so the modal can offer its lane select. */
   targetLanes: string[]
+  /** AQU-1977: the project's own target lanes, in order. See AssignModal's `lanes`. */
+  lanes?: readonly AssignLaneOption[]
   jwt: string
   author: string
   roleLevel: number
@@ -174,7 +176,12 @@ export interface PlanAssignmentsProps {
    * behaves as it did.
    */
   unitSectionKeys?: readonly string[]
-  /** The org's memberProgressViewMinRole. Same floor the Team card uses. */
+  /**
+   * The floor the Team card uses: the HIGHER of the project's effective
+   * member-progress and member-list floors (each the org's, or the project's
+   * own when stricter — AQU-1771). Not the progress floor alone: every row
+   * prints a name, and a name is member-list information.
+   */
   minRole: number
   viewerRoleLevel: number | null | undefined
   /** True once that floor is known; false renders nothing at all. */
@@ -183,12 +190,13 @@ export interface PlanAssignmentsProps {
 }
 
 /**
- * GATED ON memberProgressViewMinRole (AQU-485), exactly as the Team card is —
- * this is one person's productivity broken out by name, which is precisely what
- * that org setting governs. NOT on `canPlan`: that is the MAINTAINER floor for
- * setting dates and marking units done, a different question with a different
- * answer, and reusing it here would both show this to maintainers whose org
- * hid per-member progress and hide it from the contributors an org deliberately
+ * GATED LIKE THE TEAM CARD (AQU-485, AQU-1771): one person's productivity
+ * broken out by name, so the caller needs the member-progress floor AND the
+ * member-list floor this project enforces — `minRole` is the higher of the
+ * two. NOT on `canPlan`: that is the MAINTAINER floor for setting dates and
+ * marking units done, a different question with a different answer, and
+ * reusing it here would both show this to maintainers whose org hid
+ * per-member progress and hide it from the contributors an org deliberately
  * opened it to.
  */
 export function PlanAssignments({
@@ -288,7 +296,6 @@ function PlanAssignmentRow({
   const t = useT()
   const readoutTips = usePlanReadoutTips()
   const { locale } = useI18n()
-  const name = a.username ?? t("org.workloadRollup.unknownUser", { id: a.assigneeUserId })
   // '' and a real tag are different lanes, so compare the values themselves
   // rather than falsiness — the default lane IS a lane (AQU-728).
   const otherLane = a.targetLang !== lane
@@ -366,7 +373,7 @@ function PlanAssignmentRow({
     <li className="flex flex-col gap-1" data-testid={`plan-assignment-${a.assignmentId}`}>
       <div className="flex min-w-0 items-center justify-between gap-2">
         <span className="flex min-w-0 items-center gap-2">
-          <UsernameWithAvatar username={name} size="xs" nameClassName="text-[13px]" />
+          <UserChip userId={a.assigneeUserId} username={a.username} size="xs" nameClassName="text-[13px]" />
           {/* The chip only appears on the rows that need explaining, so a
               single-lane project never grows a column of identical tags. */}
           {otherLane && (
@@ -378,13 +385,16 @@ function PlanAssignmentRow({
             </span>
           )}
         </span>
-        {/* WHAT THIS PERSON STILL OWES, on the name's own line and in the
-            board's azure — it is the one fact on the row that asks for an
-            action, and under the bars it read as a footnote to them. "Nothing
-            left" stays grey: it asks for nothing. */}
+        {/* WHAT THIS PERSON STILL OWES, on the name's own line and set in
+            the text colour at medium weight against the grey around it — it
+            is the one fact on the row that asks for an action, and under the
+            bars it read as a footnote to them. It was the board's azure until
+            that blue went to the progress bars (AQU-1764). Not underlined:
+            it is not a link, and an underline would promise a click that
+            goes nowhere. "Nothing left" stays grey: it asks for nothing. */}
         <span
           className={`shrink-0 text-[11px] tabular-nums ${
-            outstanding ? PLAN_TONE.nearly_complete.text : "text-muted-foreground"
+            outstanding ? "font-medium text-foreground" : "text-muted-foreground"
           }`}
           data-testid={`plan-assignment-left-${a.assignmentId}`}
         >
@@ -472,6 +482,7 @@ function PlanAssignHost({
       activeFileId={target.activeFileId}
       projectFiles={projectFiles}
       targetLanes={target.targetLanes}
+      lanes={target.lanes}
       // The lane the inspector is showing, so work assigned from here lands in
       // the language whose numbers the manager was just reading.
       defaultLane={lane}

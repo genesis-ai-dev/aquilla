@@ -15,7 +15,10 @@
 /**
  * Per-cell audio rollup for one file. Binds, in order: project id, file id.
  *
- * Returns one row per cell that has ANY live take, carrying:
+ * AQU-1591: one row per (cell, LANE) — see audioLaneTagSql below. Every caller
+ * joins the lane as well as the cell, or it counts another language's takes.
+ *
+ * Returns one row per cell-and-lane that has ANY live take, carrying:
  *
  *   has_dub   — 1 when a SELECTED take with role 'dub' exists. This is what
  *               "recorded" means. Not "any live take": on an imported media
@@ -46,7 +49,8 @@
  * require reprojecting anything — the same design text validation has used
  * since FRO-279, and the reason cell_audio.approved is no longer consulted.
  *
- * Reads through idx_cell_audio_file, the partial index on deleted = 0.
+ * Reads through idx_cell_audio_lane (AQU-1591), the partial index on
+ * deleted = 0 that carries the lane beside the file.
  */
 /**
  * Does this take SOUND on its track? Written once, used by every reader of
@@ -80,11 +84,48 @@ export function takeSoundsOnItsTrackSql(alias: string): string {
                  AND sib.role = 'dub' AND sib.slot = 'recording'))`
 }
 
+/**
+ * AQU-1591: a take's lane, as the legacy TAG the readers below group by.
+ *
+ * Both of them already have a lane in hand as a tag — the progress projection's
+ * `lanes` CTE is `DISTINCT COALESCE(target_lang, '')` over the file's cells, and
+ * the assignment panel binds `assignments.target_lang` — so the join is made in
+ * that currency rather than resolving every lane to an id first.
+ *
+ * `NULL` reads as the `''` lane, which is the rule the batch backfill (AQU-1616)
+ * applies to a lane-less dub. Readers and backfill therefore agree on a take's
+ * lane before that PR lands as well as after it; this is the whole reason
+ * `cell_audio.lane_id` could ship nullable.
+ *
+ * A `role = 'source'` take also lands in the `''` group (the source lane's
+ * `legacy_tag` is NULL by definition). Inert, not a claim: every aggregate below
+ * counts `role = 'dub'`, so the shared programme audio contributes the same zero
+ * it would contribute to any group. "Shared across every lane" is stated where
+ * it is actually read — `audioLaneDualReadSql` in sync-worker's lane-id-sql.ts.
+ */
+export function audioLaneTagSql(alias: string): string {
+  // `public.lanes`, never a bare `lanes`: the progress projection's WITH list
+  // already binds that name to its own tag CTE, so an unqualified reference
+  // here would silently resolve to it. Same discipline as lane-id-sql.ts.
+  return `COALESCE((SELECT l.legacy_tag FROM public.lanes l
+                     WHERE l.project_id = ${alias}.project_id AND l.id = ${alias}.lane_id), '')`
+}
+
+/**
+ * AQU-1591 added the `lane` column. Audio used to be lane-INDEPENDENT by
+ * construction — `cell_audio` had no lane at all — so one recording counted as
+ * the recording in every lane, and a file translated into three languages
+ * reported the same audio progress for all three no matter who had voiced what.
+ * AQU-1200 decided audio is per lane; every consumer of this CTE must now join
+ * `lane` as well as `cell_id` or it is back to counting another language's
+ * takes as its own.
+ */
 export const AUDIO_CTE_SQL = `SELECT ca.cell_id,
+            ${audioLaneTagSql('ca')} AS lane,
             MAX(CASE WHEN ca.selected = 1 AND ca.role = 'dub' THEN 1 ELSE 0 END) AS has_dub,
             MIN(CASE WHEN ca.selected = 1 AND ca.role = 'dub'
                           AND ${takeSoundsOnItsTrackSql('ca')}
                      THEN ca.validator_count END) AS dub_votes
        FROM cell_audio ca
       WHERE ca.project_id = ? AND ca.file_id = ? AND ca.deleted = 0
-      GROUP BY ca.cell_id`
+      GROUP BY ca.cell_id, ${audioLaneTagSql('ca')}`

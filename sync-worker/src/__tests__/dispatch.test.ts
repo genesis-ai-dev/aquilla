@@ -144,10 +144,13 @@ describe('dispatchEvent', () => {
     const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { serverSeq: 1, updateProjection: true })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
-    // 1 events INSERT + 1 chain-claim INSERT (AD-2 atomic arbitration)
-    // + 1 cells UPSERT + 1 files-counter recompute = 4
+    // 1 events INSERT
+    // + 1 blank-target bridge (AQU-1615; inserts only when the project has no target lane)
+    // + 1 grant for that bridge (AQU-1781)
+    // + 1 chain-claim INSERT (AD-2 atomic arbitration)
+    // + 1 cells UPSERT + 1 files-counter recompute = 6
     // (Postgres auto-maintains FTS via the value_tsv generated column).
-    expect(outcome.result.stmts.length).toBe(4)
+    expect(outcome.result.stmts.length).toBe(6)
     expect(outcome.result.dirtyTables).toContain('events')
     expect(outcome.result.dirtyTables).toContain('cells')
     expect(outcome.result.dirtyTables).toContain('files')

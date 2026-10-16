@@ -64,6 +64,7 @@ except `id`, so an integration contributes only the surfaces it needs:
 | --- | --- |
 | `importScreen` | A tile on the import dialog's landing screen plus the lazily-loaded panel behind it. The dialog routes to it generically — there is no per-partner `Screen` id. |
 | `idmlTargetHtmlNormalizers` | Synchronous normalizations applied to a translated IDML cell before validation, for typesetting a publisher's templates carry that is not text (see the apostrophe glue, AQU-1174). |
+| `idmlExportOptions` | Extra controls on the export dialog for files whose profile id the option lists, plus an optional rewrite of the finished IDML. The panel is a lazy import. |
 
 Editions are deliberately **not** in the registry. Which templates a publisher
 ships, and which one a given package is, is that partner's own business: its

@@ -87,6 +87,7 @@ import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
 import { setTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeCell } from "@/lib/audio/transcribe"
+import { laneLanguageForTag } from "@/lib/lanes/lane-language"
 import { probeMicPermission } from "./probeMicPermission"
 
 interface Props {
@@ -104,8 +105,12 @@ interface Props {
   targetSlot?: string
   /**
    * AQU-1462: the lane the member is recording in. A non-empty tag is stamped
-   * on the take's events so an archived lane can refuse them. Omitted for
-   * the default lane, which cannot be archived.
+   * on the take's events so an archived lane can refuse them. Omitted for the
+   * former default lane — an audio event with no tag is a SHARED write (source
+   * audio, an import), which the archive check deliberately does not freeze.
+   * So since AQU-1600 made that lane archivable, a take recorded into it is
+   * not frozen; closing that needs the event to carry a lane id (AQU-1591 /
+   * AQU-1615), not a tag.
    */
   laneTag?: string
   /** The file's tracks, so the takes list can be grouped under a heading per
@@ -603,7 +608,16 @@ export function AudioRecordingModal({
 
   // Recording-slot takes for the active cell — drives the takes strip. The bus
   // refetch (poked on save below) keeps this fresh as new takes land.
-  const { byCellId } = useFileAudioAttachments(open ? project.id : null, open ? (activeCell?.fileId ?? null) : null)
+  // AQU-1591: in THIS lane. `laneTag` is omitted for the default lane, and the
+  // read's own "omitted" means every lane — so it is spelled `?? ""`, the
+  // default lane's tag, rather than passed through. Without that, the takes
+  // strip on the default lane listed every language's takes and "Take N"
+  // numbered them as one series.
+  const { byCellId } = useFileAudioAttachments(
+    open ? project.id : null,
+    open ? (activeCell?.fileId ?? null) : null,
+    laneTag ?? "",
+  )
   const audioEntry = activeCell ? byCellId.get(activeCell.id) : undefined
   /**
    * The takes on THIS track. (AQU-646 stage 3)
@@ -1187,6 +1201,7 @@ export function AudioRecordingModal({
       // Round 8c: the TTS take is born with its permanent name like any take.
       const ok = await generateCellVoice({
         project, cell: activeCell, session, username,
+        surface: "recorder",
         label: nextTakeLabel(recordingTakes),
         // The WORDS come from the subtitle this line performs, and the VOICE
         // from that subtitle's cast assignment — neither of which the cue
@@ -1381,6 +1396,7 @@ export function AudioRecordingModal({
           // AQU-1572: the recorder's own save path — the heal re-attach above
           // passes no origin, so a take counts exactly once.
           audioOrigin: "record",
+          surface: "recorder",
           author: username,
         })
       } catch (emitErr) {
@@ -1447,6 +1463,9 @@ export function AudioRecordingModal({
           audioId: savedTakeId,
           ...(laneTag ? { targetLang: laneTag } : {}),
           author: username,
+          // AQU-1572: the recorder's own vote for its fresh take, not a review.
+          auto: true,
+          surface: "recorder",
         }).catch((err) => {
           // Non-blocking, as for text: the take itself already landed.
           console.warn("[audio auto-validate] emit failed:", err)
@@ -1512,7 +1531,10 @@ export function AudioRecordingModal({
         },
         session,
         projectId: project.id,
-        language: project.targetLanguage,
+        // AQU-1978: Whisper hears the LANE's language. The project-level one is
+        // retired and empty on a new project, so every fresh take was
+        // transcribed with no language at all (auto-detect).
+        language: laneLanguageForTag(laneTag ?? "", project.lanes) ?? undefined,
         // AQU-646: state the slot rather than letting transcription infer it
         // from the stub above. The stub carries `selectedAudioId` and no slot,
         // so the inference would read every take as "recording" — which was
@@ -1521,6 +1543,9 @@ export function AudioRecordingModal({
         // sibling-deselect would drop that track's real take. This is the
         // caller that knows, so it says.
         slot: targetSlot,
+        // AQU-1978: …and the lane, for the same reason: the timings re-attach
+        // deselects within the lane it names, and naming none meant `''`.
+        ...(laneTag ? { targetLang: laneTag } : {}),
       })
       scheduleAutoAdvance()
     } catch (e) {
@@ -1535,7 +1560,7 @@ export function AudioRecordingModal({
       // that struck mid-upload retries with the SAME take after reconnect.
       setPhase(recorder.state.kind === "stopped" ? "preview" : "error")
     }
-  }, [recorder.state, online, session, activeCell, project.id, username, recordingTakes, scheduleAutoAdvance, returnToReady, laneTag, previewTrim])
+  }, [recorder.state, online, session, activeCell, project.id, project.lanes, username, recordingTakes, scheduleAutoAdvance, returnToReady, laneTag, previewTrim])
 
   // Attach an existing FILE as a take, through this dialog's phase machine.
   //
@@ -1575,6 +1600,7 @@ export function AudioRecordingModal({
         // Sam, 2026-08-24: uploading is the other way audio gets onto an added
         // track, so it follows the recorder's target the same way a take does.
         slot: targetSlot,
+        surface: "recorder",
       })
       onTakeSaved?.(activeCell.id)
       returnToReady(`${label} added`)

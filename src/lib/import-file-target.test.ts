@@ -56,7 +56,7 @@ describe("matchTargetRowsByRef", () => {
   it("treats unknown refs as orphans, never silent drops", () => {
     const result = matchTargetRowsByRef([{ ref: "EXO 1:1", text: "orphan" }], cells)
     expect(result.matched).toHaveLength(0)
-    expect(result.orphans).toEqual([{ ref: "EXO 1:1", text: "orphan" }])
+    expect(result.orphans).toEqual([{ ref: "EXO 1:1", text: "orphan", reason: "refNotInFile", rowIndex: 0 }])
   })
 
   it("ignores rows with empty text so blanks never clear an existing translation", () => {
@@ -75,7 +75,157 @@ describe("matchTargetRowsByRef", () => {
     )
     expect(result.matched).toHaveLength(1)
     expect(result.matched[0].incomingText).toBe("first wins")
-    expect(result.orphans).toEqual([{ ref: "GEN 1:1", text: "second loses" }])
+    expect(result.orphans).toEqual([{ ref: "GEN 1:1", text: "second loses", reason: "refRepeated", rowIndex: 1 }])
+  })
+})
+
+// AQU-1375: every unmatched row used to show just its reference and text, so a
+// typo, a repeated verse and a verse bridge all read the same — and the same
+// as a harmless extra row.
+describe("matchTargetRowsByRef — why a row found no line (AQU-1375)", () => {
+  const cells: FileTargetCellRef[] = [
+    cell({ cellId: "v1", canonicalRef: "GEN 1:1" }),
+    cell({ cellId: "v2", canonicalRef: "GEN 1:2" }),
+    cell({ cellId: "v3", canonicalRef: "GEN 1:3" }),
+    cell({ cellId: "v45", canonicalRef: "GEN 1:4-5" }),
+  ]
+  const why = (rows: TargetRow[]) =>
+    matchTargetRowsByRef(rows, cells).orphans.map(({ ref, reason, verses }) => ({ ref, reason, verses }))
+
+  it("a reference no line carries, typo or not", () => {
+    expect(why([{ ref: "GNE 1:3", text: "typo" }, { ref: "GEN 1:9", text: "beyond" }])).toEqual([
+      { ref: "GNE 1:3", reason: "refNotInFile", verses: undefined },
+      { ref: "GEN 1:9", reason: "refNotInFile", verses: undefined },
+    ])
+  })
+
+  it("a reference that appears twice — the second one, however spelled", () => {
+    expect(why([{ ref: "GEN 1:2", text: "a" }, { ref: "Genesis 1:2", text: "b" }])).toEqual([
+      { ref: "Genesis 1:2", reason: "refRepeated", verses: undefined },
+    ])
+  })
+
+  it("a bridge over verses the file keeps as separate lines, naming the bridge", () => {
+    const rows = usfmToTargetRows("\\id GEN\n\\c 1\n\\v 1-2 In the beginning, and the earth\n\\v 3 Light\n")
+    expect(why(rows)).toEqual([
+      { ref: "GEN 1:1-2", reason: "bridgeOverSeparateLines", verses: { first: "1", last: "2" } },
+    ])
+  })
+
+  it("a single verse the file holds inside a bridged line, naming that line's bridge", () => {
+    expect(why([{ ref: "GEN 1:5", text: "five" }])).toEqual([
+      { ref: "GEN 1:5", reason: "partOfBridgedLine", verses: { first: "4", last: "5" } },
+    ])
+  })
+
+  it("a spreadsheet row whose reference cell is blank — no label of its own, only its place", () => {
+    const result = matchTargetRowsByRef([{ ref: "GEN 1:1", text: "one" }, { ref: undefined, text: "no ref" }], cells)
+    expect(result.orphans).toEqual([{ ref: "", text: "no ref", reason: "noReference", rowIndex: 1 }])
+  })
+})
+
+// AQU-1375: an Exodus file dropped on Genesis said only "0 matched, 3
+// unmatched rows, 5 cells not covered" — the same for the wrong chapter.
+describe("matchTargetRowsByRef — a file for somewhere else (AQU-1375)", () => {
+  const genesis1 = [1, 2, 3, 4, 5].map((v) => cell({ cellId: `g${v}`, canonicalRef: `GEN 1:${v}` }))
+  const verses = (book: string, chapter: number, count: number): TargetRow[] =>
+    Array.from({ length: count }, (_, i) => ({ ref: `${book} ${chapter}:${i + 1}`, text: `${book} ${chapter}:${i + 1}` }))
+
+  it("names both sides when the file is for another book", () => {
+    const rows = usfmToTargetRows("\\id EXO\n\\c 1\n\\v 1 a\n\\v 2 b\n\\v 3 c\n")
+    expect(matchTargetRowsByRef(rows, genesis1).elsewhere).toEqual({
+      incoming: [{ bookCode: "EXO", firstChapter: 1, lastChapter: 1 }],
+      file: [{ bookCode: "GEN", firstChapter: 1, lastChapter: 1 }],
+    })
+  })
+
+  it("names both sides when the file is for another chapter, and spans a whole book", () => {
+    expect(matchTargetRowsByRef(verses("GEN", 2, 4), genesis1).elsewhere?.incoming).toEqual([
+      { bookCode: "GEN", firstChapter: 2, lastChapter: 2 },
+    ])
+    // The whole book on one chapter's file: true, and worth saying.
+    const book = Array.from({ length: 50 }, (_, i) => verses("GEN", i + 1, 5)).flat()
+    expect(matchTargetRowsByRef(book, genesis1).elsewhere?.incoming).toEqual([
+      { bookCode: "GEN", firstChapter: 1, lastChapter: 50 },
+    ])
+  })
+
+  it("says so from four in five verses outside the file's chapters, not from three in five", () => {
+    const fourOutside = [...verses("GEN", 1, 1), ...verses("EXO", 1, 4)]
+    const threeOutside = [...verses("GEN", 1, 2), ...verses("EXO", 1, 3)]
+    expect(matchTargetRowsByRef(fourOutside, genesis1).elsewhere).toBeDefined()
+    expect(matchTargetRowsByRef(threeOutside, genesis1).elsewhere).toBeUndefined()
+  })
+
+  it("names only the incoming side when the open file's lines carry no verse refs", () => {
+    const untimed = [cell({ cellId: "m1" }), cell({ cellId: "m2" })]
+    expect(matchTargetRowsByRef(verses("JON", 1, 3), untimed).elsewhere).toEqual({
+      incoming: [{ bookCode: "JON", firstChapter: 1, lastChapter: 1 }],
+      file: [],
+    })
+  })
+
+  it("says nothing for the right file, gaps and all", () => {
+    expect(matchTargetRowsByRef(verses("GEN", 1, 3), genesis1).elsewhere).toBeUndefined()
+    expect(matchTargetRowsByRef(verses("GEN", 1, 9), genesis1).elsewhere).toBeUndefined()
+  })
+})
+
+// AQU-1375: a reference column is written in whatever spelling the partner's
+// tool or habit uses; an exact-key lookup left `Genesis 1:4` and `GEN 1.5`
+// unmatched beside the very lines they name.
+describe("matchTargetRowsByRef — reference spellings (AQU-1375)", () => {
+  const cells: FileTargetCellRef[] = [
+    cell({ cellId: "c1", canonicalRef: "GEN 1:1" }),
+    cell({ cellId: "c3", canonicalRef: "GEN 1:3" }),
+    cell({ cellId: "c4", canonicalRef: "GEN 1:4" }),
+    cell({ cellId: "c5", canonicalRef: "GEN 1:5" }),
+    cell({ cellId: "h1", canonicalRef: "GEN 1:s1" }),
+  ]
+
+  it("matches a verse however its reference is spelled, named by the line's own reference", () => {
+    const result = matchTargetRowsByRef(
+      [
+        { ref: "Genesis 1:4", text: "four" },
+        { ref: "gen 1:3", text: "three" },
+        { ref: "GEN 1.5", text: "five" },
+        { ref: "genesis 1.1", text: "one" },
+      ],
+      cells,
+    )
+    // The row reads as its line ("GEN 1:4"), with the file's own spelling
+    // kept beside it for the review's "as written" note.
+    expect(result.matched.map((m) => [m.cellId, m.incomingText, m.ref, m.writtenAs])).toEqual([
+      ["c4", "four", "GEN 1:4", "Genesis 1:4"],
+      ["c3", "three", "GEN 1:3", "gen 1:3"],
+      ["c5", "five", "GEN 1:5", "GEN 1.5"],
+      ["c1", "one", "GEN 1:1", "genesis 1.1"],
+    ])
+    expect(result.orphans).toEqual([])
+  })
+
+  it("adds no \"as written\" when the file spelled the reference as the line does", () => {
+    const result = matchTargetRowsByRef([{ ref: "GEN 1:4", text: "four" }], cells)
+    expect(result.matched[0].ref).toBe("GEN 1:4")
+    expect(result.matched[0]).not.toHaveProperty("writtenAs")
+  })
+
+  it("still matches a heading's synthetic ref exactly, and only exactly", () => {
+    const result = matchTargetRowsByRef(
+      [{ ref: "GEN 1:s1", text: "heading" }, { ref: "gen 1:s1", text: "lower-case heading" }],
+      cells,
+    )
+    expect(result.matched.map((m) => m.cellId)).toEqual(["h1"])
+    expect(result.orphans.map((o) => o.text)).toEqual(["lower-case heading"])
+  })
+
+  it("counts two spellings of one verse as the same verse twice", () => {
+    const result = matchTargetRowsByRef(
+      [{ ref: "GEN 1:4", text: "first" }, { ref: "Genesis 1:4", text: "second" }],
+      cells,
+    )
+    expect(result.matched.map((m) => m.incomingText)).toEqual(["first"])
+    expect(result.orphans.map((o) => o.text)).toEqual(["second"])
   })
 })
 
@@ -116,7 +266,8 @@ describe("matchTargetRowsByOrder", () => {
       cells,
     )
     expect(result.matched).toHaveLength(3)
-    expect(result.orphans).toEqual([{ ref: "Row 4", text: "overflow" }])
+    // No label of its own: the review names it by its place (AQU-1375).
+    expect(result.orphans).toEqual([{ ref: "", text: "overflow", rowIndex: 3 }])
   })
 
   it("AQU-1144: labels the row with the incoming row's own ref when it carries one", () => {
@@ -137,8 +288,10 @@ describe("matchTargetRowsByOrder", () => {
 
   it("AQU-1144: rows with no ref still fall back to the cell ref then the row number", () => {
     const result = matchTargetRowsByOrder([{ text: "a" }, { text: "b" }], cells)
-    // Spreadsheet-by-order rows carry no ref, so their labels are unchanged.
-    expect(result.matched.map((m) => m.ref)).toEqual(["GEN 1:1", "Row 2"])
+    // Spreadsheet-by-order rows carry no ref. With no cell ref either, the
+    // label is left empty and the review names the row by its place, in the
+    // reader's language (AQU-1375).
+    expect(result.matched.map((m) => [m.ref, m.rowIndex])).toEqual([["GEN 1:1", 0], ["", 1]])
   })
 })
 
@@ -301,6 +454,10 @@ describe("matchTargetRowsByOrder — cue timecode overlap", () => {
     )
     expect(result.alignedBy).toBe("order")
     expect(result.matched.map((m) => m.cellId)).toEqual(["u1", "u2"])
+    // AQU-1375: the review words it for cues on an untimed file, and the
+    // counts agree.
+    expect(result.untimed).toBe("lines")
+    expect(result.countMismatch).toBeUndefined()
   })
 
   it("falls back to raw order when an incoming row carries no timing", () => {
@@ -310,6 +467,7 @@ describe("matchTargetRowsByOrder — cue timecode overlap", () => {
     )
     expect(result.alignedBy).toBe("order")
     expect(result.matched.map((m) => m.cellId)).toEqual(["c1", "c2"])
+    expect(result.untimed).toBe("rows")
   })
 
   it("spreadsheet order matching is untouched — no timings on either side", () => {
@@ -321,6 +479,162 @@ describe("matchTargetRowsByOrder — cue timecode overlap", () => {
     expect(result.alignedBy).toBe("order")
     expect(result.matched.map((m) => m.cellId)).toEqual(["s1", "s3"])
     expect(result.unmatchedSourceCount).toBe(1)
+    expect(result.untimed).toBeUndefined()
+    expect(result.countMismatch).toBeUndefined()
+  })
+
+  it("AQU-1375: an order match says when its row and line counts differ", () => {
+    const untimed = [cell({ cellId: "s1" }), cell({ cellId: "s2" })]
+    expect(matchTargetRowsByOrder([{ text: "a" }, { text: "b" }, { text: "c" }], untimed).countMismatch)
+      .toEqual({ rows: 3, lines: 2 })
+    expect(matchTargetRowsByOrder([{ text: "a" }], untimed).countMismatch).toEqual({ rows: 1, lines: 2 })
+  })
+
+  it("AQU-1375: a timing match reports neither, whatever the counts", () => {
+    const result = matchTargetRowsByOrder([cueRow(1000, 1800, "one")], cells)
+    expect(result.alignedBy).toBe("overlap")
+    expect(result.untimed).toBeUndefined()
+    expect(result.countMismatch).toBeUndefined()
+  })
+})
+
+// AQU-1375: matched by position alone, one stray row at the top of a
+// spreadsheet put EVERY row one line off — 5 of 5 wrong — and the review said
+// only "1 unmatched row". With the Source column mapped, rows pair by it.
+describe("matchTargetRowsByOrder — pairing by source text (AQU-1375)", () => {
+  const SOURCES = [
+    "In the beginning God created the heavens and the earth.",
+    "The earth was without form and void, and darkness was over the deep.",
+    "And God said, Let there be light: and there was light.",
+    "And God saw the light, that it was good.",
+    "And God called the light Day, and the darkness he called Night.",
+  ]
+  const lines = SOURCES.map((original, i) => cell({ cellId: `l${i + 1}`, original }))
+  const sheet = (sources: string[]): TargetRow[] => sources.map((source, i) => ({ source, text: `T${i}:${source.slice(0, 12)}` }))
+  const pairs = (rows: TargetRow[]) => {
+    const result = matchTargetRowsByOrder(rows, lines)
+    return result.matched.map((m) => [m.cellId, m.incomingText.slice(m.incomingText.indexOf(":") + 1), m.flag ?? null])
+  }
+
+  it("a stray title row at the top shifts nothing, and is listed as not in the file", () => {
+    const rows = sheet(["Genesis — translation draft 3", ...SOURCES])
+    const result = matchTargetRowsByOrder(rows, lines)
+    expect(result.alignedBy).toBe("source")
+    expect(result.matched.map((m) => m.cellId)).toEqual(["l1", "l2", "l3", "l4", "l5"])
+    expect(result.matched.every((m) => m.incomingText.slice(m.incomingText.indexOf(":") + 1) === m.sourceText.slice(0, 12))).toBe(true)
+    expect(result.matched.some((m) => m.flag)).toBe(false)
+    expect(result.orphans).toEqual([{ ref: "", text: rows[0].text, reason: "sourceNotInFile", rowIndex: 0 }])
+  })
+
+  it("a row deleted from the spreadsheet leaves its line uncovered and every other row in place", () => {
+    const result = matchTargetRowsByOrder(sheet([SOURCES[0], SOURCES[1], SOURCES[3], SOURCES[4]]), lines)
+    expect(result.matched.map((m) => m.cellId)).toEqual(["l1", "l2", "l4", "l5"])
+    expect(result.uncovered.map((u) => u.cellId)).toEqual(["l3"])
+  })
+
+  it("ignores punctuation, case, spacing and markup, and survives a small edit unflagged", () => {
+    const rows = sheet([
+      "in the beginning god created the heavens and the earth",
+      "The earth was  without form and void and darkness was over the deep",
+      "And God said, Let there be light: and there was LIGHT!",
+      "And God saw the light, that it was very good.",
+      "And God called the light Day, and the darkness he called Night.",
+    ])
+    const withMarkup = lines.map((l, i) => (i === 4 ? { ...l, original: "\\w And|strong=\"H1\"\\w* God called the light Day, and the darkness he called Night." } : l))
+    const result = matchTargetRowsByOrder(rows, withMarkup)
+    expect(result.matched.map((m) => [m.cellId, m.flag ?? null])).toEqual([
+      ["l1", null], ["l2", null], ["l3", null], ["l4", null], ["l5", null],
+    ])
+  })
+
+  it("flags and unticks a row whose source doesn't match the line it was paired with", () => {
+    const rows = sheet([SOURCES[0], "Something else entirely, not in the file.", SOURCES[2], SOURCES[3], SOURCES[4]])
+    const result = matchTargetRowsByOrder(rows, lines)
+    // Same length on both sides of the gap: the text doesn't settle it, so
+    // position does — and says so.
+    const second = result.matched.find((m) => m.cellId === "l2")!
+    expect(second.flag).toBe("sourceDiffers")
+    expect(second.incomingSource).toBe("Something else entirely, not in the file.")
+    expect(result.matched.filter((m) => m.flag).map((m) => m.cellId)).toEqual(["l2"])
+  })
+
+  it("pairs a reworded row to its own line, not a neighbour, when a stray row sits beside it", () => {
+    const rows = sheet(["Draft 3", SOURCES[0], "The earth was without form and empty, and darkness was over the deep.", SOURCES[2]])
+    expect(pairs(rows)).toEqual([
+      ["l1", SOURCES[0].slice(0, 12), null],
+      ["l2", "The earth wa", null],
+      ["l3", SOURCES[2].slice(0, 12), null],
+    ])
+  })
+
+  it("repeated source text pairs in order", () => {
+    const repeated = ["Amen.", "Selah.", "Amen.", "Selah."].map((original, i) => cell({ cellId: `r${i + 1}`, original }))
+    const result = matchTargetRowsByOrder(sheet(["Title", "Amen.", "Selah.", "Amen.", "Selah."]), repeated)
+    expect(result.matched.map((m) => [m.cellId, m.flag ?? null])).toEqual([
+      ["r1", null], ["r2", null], ["r3", null], ["r4", null],
+    ])
+    expect(result.orphans.map((o) => o.reason)).toEqual(["sourceNotInFile"])
+  })
+
+  it("an empty translation keeps its row's place but commits nothing, and a spacer row takes no part", () => {
+    const rows: TargetRow[] = [
+      { source: SOURCES[0], text: "one" },
+      { source: "", text: "" },
+      { source: SOURCES[1], text: "" },
+      { source: SOURCES[2], text: "three" },
+    ]
+    const result = matchTargetRowsByOrder(rows, lines.slice(0, 3))
+    expect(result.matched.map((m) => [m.cellId, m.incomingText])).toEqual([["l1", "one"], ["l3", "three"]])
+    expect(result.orphans).toEqual([])
+  })
+
+  it("without a source column, order matching is exactly as before", () => {
+    const result = matchTargetRowsByOrder([{ text: "a" }, { text: "b" }], lines)
+    expect(result.alignedBy).toBe("order")
+    expect(result.matched.map((m) => m.cellId)).toEqual(["l1", "l2"])
+  })
+
+  it("a long file whose every source was reworded still pairs by position — every row flagged", () => {
+    const many = Array.from({ length: 150 }, (_, i) => cell({ cellId: `m${i}`, original: `Original wording of verse number ${i} here` }))
+    const rows = Array.from({ length: 151 }, (_, i) => ({ source: `Totally different words ${i * 7919}`, text: `t${i}` }))
+    const result = matchTargetRowsByOrder(rows, many)
+    expect(result.matched).toHaveLength(150)
+    expect(result.matched.every((m) => m.flag === "sourceDiffers")).toBe(true)
+  })
+})
+
+// AQU-1375 changed how untimed imports explain themselves; a clean import of
+// either kind must come out exactly as it did before.
+describe("clean imports are untouched (AQU-1375)", () => {
+  it("a clean reference import: every verse matched, nothing new reported", () => {
+    const cells = [1, 2, 3].map((v) => cell({ cellId: `v${v}`, canonicalRef: `GEN 1:${v}` }))
+    const rows = usfmToTargetRows("\\id GEN\n\\c 1\n\\v 1 Uno\n\\v 2 Dos\n\\v 3 Tres\n")
+    const result = matchTargetRowsByRef(rows, cells)
+    expect(Object.keys(result).sort()).toEqual(["matched", "orphans", "uncovered", "unmatchedSourceCount"])
+    expect(result.orphans).toEqual([])
+    expect(result.matched.map((m) => [m.cellId, m.incomingText, m.ref])).toEqual([
+      ["v1", "Uno", "GEN 1:1"], ["v2", "Dos", "GEN 1:2"], ["v3", "Tres", "GEN 1:3"],
+    ])
+    for (const m of result.matched) {
+      expect(m).not.toHaveProperty("flag")
+      expect(m).not.toHaveProperty("incomingSource")
+    }
+  })
+
+  it("a clean timed subtitle import: aligned by overlap, nothing new reported", () => {
+    const cells = [1, 2, 3].map((n) => cell({ cellId: `c${n}`, startMs: n * 1000, endMs: n * 1000 + 800 }))
+    const rows = vttToTargetRows([
+      "WEBVTT", "",
+      "00:00:01.000 --> 00:00:01.800", "Uno", "",
+      "00:00:02.000 --> 00:00:02.800", "Dos", "",
+      "00:00:03.000 --> 00:00:03.800", "Tres", "",
+    ].join("\n"))
+    const result = matchTargetRowsByOrder(rows, cells)
+    expect(result.alignedBy).toBe("overlap")
+    expect(Object.keys(result).sort()).toEqual(["alignedBy", "matched", "orphans", "uncovered", "unmatchedSourceCount"])
+    expect(result.matched.map((m) => [m.cellId, m.incomingText, m.flag])).toEqual([
+      ["c1", "Uno", undefined], ["c2", "Dos", undefined], ["c3", "Tres", undefined],
+    ])
   })
 })
 

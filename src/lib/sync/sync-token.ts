@@ -7,6 +7,9 @@
 // old frontier-server still work. The plain `FRONTIER_API_URL` re-export is
 // kept around for chat/LLM/payments routes that haven't been ported.
 
+import { isElevationRequiredBody } from "@/lib/errors/user-error"
+import { notifyElevationRequiredIfCurrent } from "@/lib/frontier/elevation"
+
 // Phase D: default points at aquilla-identity (aquilla-identity).
 // VITE_FRONTIER_BASE is retained as a fallback for E2E test environments that
 // set it to a mock server URL.
@@ -35,6 +38,16 @@ export class SyncTokenError extends Error {
     this.status = status
     this.body = body
     this.name = "SyncTokenError"
+  }
+
+  /**
+   * OPS-44: the auth-worker refused because platform-admin power was the
+   * caller's only path to this project and the session is not stepped up.
+   * Unlike every other 403 here this is not a verdict on access: the same
+   * request succeeds once the admin enters the emailed code.
+   */
+  get elevationRequired(): boolean {
+    return this.status === 403 && isElevationRequiredBody(this.body)
   }
 }
 
@@ -71,7 +84,13 @@ export async function fetchSyncToken(
   })
   if (!res.ok) {
     const errBody = await res.text().catch(() => "")
-    throw new SyncTokenError(res.status, errBody)
+    const err = new SyncTokenError(res.status, errBody)
+    // OPS-44: raise the step-up prompt here, at the one fetch every sync-token
+    // caller shares, rather than in each of them. Before this, an un-elevated
+    // admin opening a project they reach only through platform power saw
+    // nothing but console warnings.
+    if (err.elevationRequired) await notifyElevationRequiredIfCurrent(jwt, { kind: "sync-token", projectId })
+    throw err
   }
   return (await res.json()) as SyncTokenResponse
 }
@@ -108,7 +127,9 @@ export interface SyncTokenCallbacks {
    * a round-trip. */
   onRole?: (role: SyncTokenResponse["role"]) => void
   /** Fires when the server rejects with 403, typically because the project was
-   * archived. Callers use this to drive local tombstone reconciliation. */
+   * archived. Callers use this to drive local tombstone reconciliation. Not
+   * fired for the OPS-44 "elevation required" 403, which says nothing about
+   * the project and clears once the admin steps up. */
   onForbidden?: () => void
   /**
    * Fires when the session JWT is rejected with 401, passing the JWT the
@@ -137,6 +158,27 @@ export interface SyncTokenMintResult {
   /** HTTP status of the failed mint; 200 on success; null when there was no
    *  JWT to even attempt, or a non-HTTP failure. */
   status: number | null
+  /** OPS-44: set on a 403 that only asks the platform admin to step up. The
+   *  flusher holds these events instead of quarantining them. */
+  elevationRequired?: boolean
+}
+
+/** AQU-1788: options for one mint call. */
+export interface SyncTokenMintOptions {
+  /**
+   * Discard the in-memory token and mint a new one even though the cached one
+   * has not expired.
+   *
+   * The sync-token bakes in the member's role at mint time and lives for up to
+   * 15 minutes, so a role the server lowered mid-session keeps being asserted
+   * by a perfectly unexpired token. The sync-worker's downgrade gate refuses
+   * such a write with `role downgraded since token was issued`; the only way
+   * for the client to learn the live role is to mint again. Normal callers
+   * never pass this — a forced mint bypasses the cache AND any mint already
+   * in flight for this JWT, since that one may itself have been served from
+   * the same stale role.
+   */
+  forceRefresh?: boolean
 }
 
 /**
@@ -150,11 +192,12 @@ export function makeSyncTokenMinter(
   bootstrap: ProjectBootstrap = {},
   apiUrl?: string,
   callbacks: SyncTokenCallbacks = {}
-): () => Promise<SyncTokenMintResult> {
+): (opts?: SyncTokenMintOptions) => Promise<SyncTokenMintResult> {
   let cached: CachedToken | null = null
   const pending = new Map<string, Promise<SyncTokenMintResult>>()
-  return async () => {
+  return async (opts?: SyncTokenMintOptions) => {
     const now = Date.now()
+    const forceRefresh = opts?.forceRefresh === true
     // Resolve the active JWT BEFORE the cache check: the cached token is only
     // reusable for the identity that minted it. After an account switch
     // (owner→contributor) or logout+login without a page reload, getJwt()
@@ -165,10 +208,13 @@ export function makeSyncTokenMinter(
     // rather than handing back a token from the signed-out session. AQU-616.
     const jwt = getJwt()
     if (!jwt) return { token: null, status: null }
-    if (cached && cached.jwt === jwt && cached.expiresAtMs > now + REFRESH_SAFETY_MS) {
+    // AQU-1788: a forced mint evicts the cached token first, so a failed
+    // re-mint cannot leave the stale-role token available to the next caller.
+    if (forceRefresh) cached = null
+    if (!forceRefresh && cached && cached.jwt === jwt && cached.expiresAtMs > now + REFRESH_SAFETY_MS) {
       return { token: cached.value, status: 200 }
     }
-    const existing = pending.get(jwt)
+    const existing = forceRefresh ? undefined : pending.get(jwt)
     if (existing) return existing
     const request = (async (): Promise<SyncTokenMintResult> => {
       try {
@@ -182,9 +228,13 @@ export function makeSyncTokenMinter(
         return { token: resp.token, status: 200 }
       } catch (err) {
         let status: number | null = null
+        let elevationRequired = false
         if (err instanceof SyncTokenError) {
           status = err.status
-          if (err.status === 403) {
+          if (err.elevationRequired) {
+            // fetchSyncToken already raised the step-up prompt.
+            elevationRequired = true
+          } else if (err.status === 403) {
             callbacks.onForbidden?.()
           } else if (err.status === 401) {
             // Session JWT was rejected. Evict the in-memory sync token cache so
@@ -198,7 +248,7 @@ export function makeSyncTokenMinter(
         }
         // Most common paths: 401 (stale jwt), 403 (no project access), 5xx (transient).
         console.warn("[sync-token] fetch failed:", err)
-        return { token: null, status }
+        return elevationRequired ? { token: null, status, elevationRequired } : { token: null, status }
       }
     })()
     pending.set(jwt, request)

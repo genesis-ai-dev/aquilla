@@ -1,19 +1,26 @@
 // AQU-1569 — hand-placed file order in the editor sidebar: the drag, the
-// Move up/down menu items, the cross-group refusal, Reset order, and the role
-// gate. UI-only journey, so RTL rather than a smoke spec (AGENTS.md rule 4).
+// Move up/down menu items, Reset order, and the role gate. UI-only journey,
+// so RTL rather than a smoke spec (AGENTS.md rule 4).
+// AQU-1647 drives the drag with dnd-kit pointer events; the writes are unchanged.
+// AQU-1702 made a drop on ANOTHER group a move into it, so what used to be a
+// refusal is now the cross-group describe below; the one remaining refusal is
+// the drop the sidebar cannot express.
 //
 // What these tests pin is the WIRING, not the arithmetic: every assertion is
 // about which writes the component asks for. The numbers in those writes are
 // src/lib/sidebar/file-sort-index.test.ts's job, and keeping the two apart is
 // what lets the drag and the menu provably agree.
 
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, within, fireEvent } from "@testing-library/react"
 import { ExpandableFileList } from "./ExpandableFileList"
+import { FILE_DRAG_ACTIVATION_DISTANCE } from "./file-list-dnd-model"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { EditorScrollProvider } from "@/context/EditorScrollContext"
 import type { FileReference } from "@/lib/parsers/types"
 import { SORT_INDEX_STEP, type SortIndexWrite } from "@/lib/sidebar/file-sort-index"
+
+type GroupMove = { fileId: string; corpusMarker: string | null; writes: SortIndexWrite[] }
 
 const PROJECT_ID = "p1"
 
@@ -45,6 +52,7 @@ const UNPLACED_SEASON = [
 ]
 
 let onReorderFiles: ReturnType<typeof vi.fn<(writes: SortIndexWrite[]) => void>>
+let onMoveFileToGroup: ReturnType<typeof vi.fn<(move: GroupMove) => void>>
 
 function renderList(
   files: FileReference[],
@@ -66,6 +74,7 @@ function renderList(
           onMove={vi.fn()}
           canReorderFiles
           onReorderFiles={onReorderFiles}
+          onMoveFileToGroup={onMoveFileToGroup}
           {...props}
         />
       </EditorScrollProvider>
@@ -73,7 +82,7 @@ function renderList(
   )
 }
 
-/** The draggable wrapper around a file's row. */
+/** The dnd-kit slot around a file's row. */
 function slot(name: string): HTMLElement {
   const row = screen.getByRole("button", { name })
   const found = row.closest('[data-reorderable="true"]')
@@ -81,23 +90,106 @@ function slot(name: string): HTMLElement {
   return found as HTMLElement
 }
 
-/** A DataTransfer stand-in: happy-dom's drag events carry none. */
-function dataTransfer() {
-  const store = new Map<string, string>()
+function box(top: number, height: number, left = 0, width = 200): DOMRect {
   return {
-    effectAllowed: "",
-    dropEffect: "",
-    setData: (k: string, v: string) => { store.set(k, v) },
-    getData: (k: string) => store.get(k) ?? "",
+    x: left,
+    y: top,
+    top,
+    left,
+    width,
+    height,
+    right: left + width,
+    bottom: top + height,
+    toJSON() { return {} },
+  } as DOMRect
+}
+
+/** happy-dom reports every rect as empty, and dnd-kit decides the drop from those rects. */
+function layoutReorderTargets() {
+  const groups = [...document.querySelectorAll<HTMLElement>("[data-reorder-group]")]
+  let top = 200
+  for (const group of groups) {
+    const slots = [...group.querySelectorAll<HTMLElement>('[data-reorderable="true"]')]
+    const start = top
+    for (const slotEl of slots) {
+      const slotTop = top
+      slotEl.getBoundingClientRect = () => box(slotTop, 40)
+      top += 40
+    }
+    const groupTop = start - 28
+    group.getBoundingClientRect = () => box(groupTop, top - groupTop)
+    top += 16
   }
 }
 
-/** Drag `from` onto `to`, as a browser would. */
+function pointerInit(x: number, y: number, buttons = 1) {
+  return {
+    clientX: x,
+    clientY: y,
+    button: 0,
+    buttons,
+    isPrimary: true,
+    pointerId: 1,
+    pointerType: "mouse" as const,
+  }
+}
+
+function center(element: HTMLElement) {
+  const rect = element.getBoundingClientRect()
+  return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+}
+
+/** The grip. The row around it is a click, not a drag. */
+function reorderHandle(name: string): HTMLElement {
+  const found = slot(name).querySelector("[data-reorder-handle]")
+  if (!(found instanceof HTMLElement)) throw new Error(`no reorder handle for "${name}"`)
+  return found
+}
+
+function beginDrag(name: string) {
+  layoutReorderTargets()
+  const element = reorderHandle(name)
+  const host = slot(name).getBoundingClientRect()
+  element.getBoundingClientRect = () => box(host.top, host.height, host.left, 16)
+  const point = center(element)
+  fireEvent.pointerDown(element, pointerInit(point.x, point.y))
+  // The move that crosses the activation distance only starts the drag.
+  // A second move is what publishes the pointer position.
+  const nudged = pointerInit(point.x, point.y + FILE_DRAG_ACTIVATION_DISTANCE + 8)
+  fireEvent.pointerMove(document, nudged)
+  fireEvent.pointerMove(document, nudged)
+}
+
+function hoverDrag(name: string) {
+  const point = center(slot(name))
+  fireEvent.pointerMove(document, pointerInit(point.x, point.y))
+}
+
+function releaseDrag(name: string) {
+  const point = center(slot(name))
+  fireEvent.pointerUp(document, pointerInit(point.x, point.y, 0))
+}
+
+/** Drag `from` onto `to`, the way a pointer does. */
 function dragOnto(from: string, to: string) {
-  const dt = dataTransfer()
-  fireEvent.dragStart(slot(from), { dataTransfer: dt })
-  fireEvent.dragOver(slot(to), { dataTransfer: dt })
-  fireEvent.drop(slot(to), { dataTransfer: dt })
+  beginDrag(from)
+  hoverDrag(to)
+  releaseDrag(to)
+}
+
+// role="status" does not take its accessible name from its text, and dnd-kit
+// mounts a second (empty) status live region, so the messages are found by text.
+const unsupportedText = /only be reordered inside its own group/i
+const staysText = /filed under .* by its book code/i
+const dropHintText = /^Drop to move /i
+const dropHint = () => screen.queryByText(dropHintText)
+const insertionLine = () => document.querySelector("[data-insert-slot]")
+
+/** The frame of a corpus group, which carries the drop-target treatment. */
+function groupFrame(label: string): HTMLElement {
+  const found = document.querySelector(`[data-reorder-group="${label}"]`)
+  if (!(found instanceof HTMLElement)) throw new Error(`no group frame for "${label}"`)
+  return found
 }
 
 // Every row's ⋯ trigger has the same accessible name, so it has to be found
@@ -109,10 +201,41 @@ function openRowMenu(name: string) {
   fireEvent.click(within(row as HTMLElement).getByRole("button", { name: "File actions" }))
 }
 
+const clickCaptures: Array<{
+  fn: EventListenerOrEventListenerObject
+  options?: boolean | AddEventListenerOptions
+}> = []
+let restoreAddEventListener: (() => void) | null = null
+
 beforeEach(() => {
   localStorage.clear()
   onReorderFiles = vi.fn<(writes: SortIndexWrite[]) => void>()
+  onMoveFileToGroup = vi.fn<(move: GroupMove) => void>()
   HTMLElement.prototype.scrollIntoView = vi.fn()
+  // dnd-kit swallows the click that ends a drag, and only removes that
+  // document listener after 50ms. Later tests click menus in this same
+  // document, so the capture is recorded and dropped when the test ends.
+  const original = document.addEventListener.bind(document)
+  document.addEventListener = (
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: boolean | AddEventListenerOptions,
+  ) => {
+    if (type === "click") clickCaptures.push({ fn: listener, options })
+    original(type, listener, options)
+  }
+  restoreAddEventListener = () => {
+    document.addEventListener = original
+  }
+})
+
+afterEach(() => {
+  for (const capture of clickCaptures) {
+    document.removeEventListener("click", capture.fn, capture.options)
+  }
+  clickCaptures.length = 0
+  restoreAddEventListener?.()
+  restoreAddEventListener = null
 })
 
 describe("dragging a file within its group", () => {
@@ -144,37 +267,186 @@ describe("dragging a file within its group", () => {
     dragOnto("Episode 2", "Episode 2")
     expect(onReorderFiles).not.toHaveBeenCalled()
   })
+
+  it("still opens the file on click, and the slot is not a native drag source", () => {
+    const onSelectFile = vi.fn()
+    renderList(PLACED_SEASON, { onSelectFile })
+    const episode = slot("Episode 2")
+    expect(episode.getAttribute("draggable")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Episode 2" }))
+    expect(onSelectFile).toHaveBeenCalledWith("episode-2")
+    expect(onReorderFiles).not.toHaveBeenCalled()
+  })
+
+  it("does not reorder when the pointer slides across the file name", () => {
+    renderList(PLACED_SEASON)
+    layoutReorderTargets()
+    const name = screen.getByRole("button", { name: "Episode 10" })
+    const host = slot("Episode 10").getBoundingClientRect()
+    name.getBoundingClientRect = () => box(host.top, host.height, host.left + 24, host.width - 24)
+    const point = center(name)
+    fireEvent.pointerDown(name, pointerInit(point.x, point.y))
+    const nudged = pointerInit(point.x, point.y + FILE_DRAG_ACTIVATION_DISTANCE + 24)
+    fireEvent.pointerMove(document, nudged)
+    fireEvent.pointerMove(document, pointerInit(point.x, host.top + 120))
+    fireEvent.pointerUp(document, pointerInit(point.x, host.top + 120, 0))
+    expect(onReorderFiles).not.toHaveBeenCalled()
+  })
 })
 
-describe("a drop into another group is refused", () => {
+// AQU-1702 — the gesture AQU-1569 left out: dropping a file on a DIFFERENT
+// group moves it there. The group change and the slot inside the new group go
+// out together, as one call, because they are two events and a half-applied
+// move puts the file somewhere nobody dropped it.
+describe("dragging a file into another group", () => {
   const TWO_GROUPS = [
     ...PLACED_SEASON,
     file("Pilot", { corpusMarker: "Season 2", sortIndex: 0 }),
     file("Finale", { corpusMarker: "Season 2", sortIndex: SORT_INDEX_STEP }),
   ]
 
-  it("says so visibly and changes nothing — no move, no corpus change", () => {
+  it("asks for the new group and the dropped slot in one move", () => {
     renderList(TWO_GROUPS)
-    const dt = dataTransfer()
-    fireEvent.dragStart(slot("Episode 2"), { dataTransfer: dt })
-    fireEvent.dragOver(slot("Pilot"), { dataTransfer: dt })
-
-    // Visible, not just a cursor shape: a silent no-op is indistinguishable
-    // from a drop that failed.
-    expect(screen.getByRole("status")).toHaveTextContent(/only be reordered inside its own group/i)
-
-    fireEvent.drop(slot("Pilot"), { dataTransfer: dt })
+    dragOnto("Episode 2", "Pilot")
+    expect(onMoveFileToGroup).toHaveBeenCalledTimes(1)
+    expect(onMoveFileToGroup.mock.calls[0][0]).toEqual({
+      fileId: "episode-2",
+      corpusMarker: "Season 2",
+      // Above Pilot (0), the row it was dropped on.
+      writes: [{ fileId: "episode-2", sortIndex: -SORT_INDEX_STEP }],
+    })
+    // Not a within-group reorder: the slot write rides the move.
     expect(onReorderFiles).not.toHaveBeenCalled()
   })
 
-  it("clears the refusal once the drag ends", () => {
+  it("lands at the end of the group when the drop is on its header", () => {
     renderList(TWO_GROUPS)
-    const dt = dataTransfer()
-    fireEvent.dragStart(slot("Episode 2"), { dataTransfer: dt })
-    fireEvent.dragOver(slot("Pilot"), { dataTransfer: dt })
-    expect(screen.queryByRole("status")).not.toBeNull()
-    fireEvent.dragEnd(slot("Episode 2"))
-    expect(screen.queryByRole("status")).toBeNull()
+    beginDrag("Episode 2")
+    // The band above the group's first row — its header. dnd-kit decides the
+    // hit from the measured rects, so this is a pointer position, not a click.
+    const frame = groupFrame("Season 2").getBoundingClientRect()
+    const x = frame.left + frame.width / 2
+    const y = frame.top + 20
+    fireEvent.pointerMove(document, pointerInit(x, y))
+    fireEvent.pointerUp(document, pointerInit(x, y, 0))
+    expect(onMoveFileToGroup.mock.calls[0][0]).toEqual({
+      fileId: "episode-2",
+      corpusMarker: "Season 2",
+      // After Finale (STEP), the group's last file.
+      writes: [{ fileId: "episode-2", sortIndex: SORT_INDEX_STEP * 2 }],
+    })
+  })
+
+  it("marks the group as the drop target and the slot the file will take", () => {
+    renderList(TWO_GROUPS)
+    beginDrag("Episode 2")
+    hoverDrag("Pilot")
+    expect(screen.getByText(dropHintText)).toHaveAttribute("role", "status")
+    expect(screen.getByText(dropHintText)).toHaveTextContent(
+      "Drop to move Episode 2 into Season 2.",
+    )
+    expect(groupFrame("Season 2").className).toMatch(/ring-primary/)
+    expect(groupFrame("Season 2").querySelector("[data-insert-slot]")).not.toBeNull()
+    releaseDrag("Pilot")
+    expect(dropHint()).toBeNull()
+    expect(insertionLine()).toBeNull()
+  })
+
+  it("clears the preview when the drag is abandoned", () => {
+    renderList(TWO_GROUPS)
+    beginDrag("Episode 2")
+    hoverDrag("Pilot")
+    expect(dropHint()).not.toBeNull()
+    releaseDrag("Episode 2")
+    expect(dropHint()).toBeNull()
+    expect(groupFrame("Season 2").className).not.toMatch(/ring-primary/)
+  })
+
+  it("lets the only file of a group be dragged out of it", () => {
+    // A group of one has nothing to reorder inside it, but it does have
+    // somewhere else to go, so the grip is offered.
+    renderList([
+      file("Solo", { corpusMarker: "Season 2", sortIndex: 0 }),
+      ...PLACED_SEASON,
+    ])
+    dragOnto("Solo", "Episode 2")
+    expect(onMoveFileToGroup.mock.calls[0][0]).toMatchObject({
+      fileId: "solo",
+      corpusMarker: "Season 1",
+    })
+  })
+
+  it("moves the file back cleanly, undoing the move", () => {
+    // AQU-1702 acceptance: the way back is the same gesture. Re-render with
+    // the state the move produced and drag it home.
+    renderList([
+      ...PLACED_SEASON.filter((f) => f.name !== "Episode 2"),
+      file("Episode 2", { corpusMarker: "Season 2", sortIndex: -SORT_INDEX_STEP }),
+      file("Pilot", { corpusMarker: "Season 2", sortIndex: 0 }),
+      file("Finale", { corpusMarker: "Season 2", sortIndex: SORT_INDEX_STEP }),
+    ])
+    dragOnto("Episode 2", "Episode 3")
+    expect(onMoveFileToGroup.mock.calls[0][0]).toEqual({
+      fileId: "episode-2",
+      corpusMarker: "Season 1",
+      // Between Episode 1 (0) and Episode 3 (2 × STEP) — its old slot.
+      writes: [{ fileId: "episode-2", sortIndex: SORT_INDEX_STEP }],
+    })
+  })
+
+  it("stays a refusal on a file list wired without the move handler", () => {
+    renderList(TWO_GROUPS, { onMoveFileToGroup: undefined })
+    beginDrag("Episode 2")
+    hoverDrag("Pilot")
+    expect(screen.getByText(unsupportedText)).toHaveAttribute("role", "status")
+    releaseDrag("Pilot")
+    expect(onReorderFiles).not.toHaveBeenCalled()
+  })
+
+  it("ignores the native HTML drag events this list used to listen for", () => {
+    renderList(TWO_GROUPS)
+    fireEvent.dragStart(slot("Episode 2"))
+    fireEvent.dragOver(slot("Pilot"))
+    fireEvent.drop(slot("Pilot"))
+    expect(onReorderFiles).not.toHaveBeenCalled()
+    expect(onMoveFileToGroup).not.toHaveBeenCalled()
+    expect(dropHint()).toBeNull()
+  })
+})
+
+// The guardrail: a file's group is not always its marker. A Bible book with
+// no marker is filed by its book code, so dropping one on Ungrouped would
+// write a clear the sidebar immediately undoes — a move that looks like it
+// worked and did nothing. It says why instead.
+describe("a drop the sidebar cannot express", () => {
+  const BOOK_AND_NOTES = [
+    file("GEN", { corpusMarker: "Season 1", sortIndex: 0 }),
+    file("Episode 2", { corpusMarker: "Season 1", sortIndex: SORT_INDEX_STEP }),
+    file("notes", { type: "docx" }),
+    file("readme", { type: "docx" }),
+  ]
+
+  it("refuses sending a Bible book to Ungrouped, and says where it stays", () => {
+    renderList(BOOK_AND_NOTES)
+    beginDrag("GEN")
+    hoverDrag("notes")
+    const message = screen.getByText(staysText)
+    expect(message).toHaveAttribute("role", "status")
+    expect(message).toHaveTextContent(/GEN is filed under OT by its book code/)
+    expect(insertionLine()).toBeNull()
+
+    releaseDrag("notes")
+    expect(onMoveFileToGroup).not.toHaveBeenCalled()
+    expect(onReorderFiles).not.toHaveBeenCalled()
+  })
+
+  it("still lets a non-scripture file be dropped on Ungrouped", () => {
+    renderList(BOOK_AND_NOTES)
+    dragOnto("Episode 2", "readme")
+    expect(onMoveFileToGroup.mock.calls[0][0]).toMatchObject({
+      fileId: "episode-2",
+      corpusMarker: null,
+    })
   })
 })
 
@@ -302,11 +574,23 @@ describe("a project whose files are all ungrouped", () => {
   })
 })
 
-describe("a group of one", () => {
-  it("offers no reorder — there is nowhere to move the file to", () => {
+describe("the only file in the whole project", () => {
+  it("offers no reorder — there is nowhere to move it, inside its group or out", () => {
     renderList([file("Only", { corpusMarker: "Season 1", sortIndex: 0 })])
     expect(document.querySelector('[data-reorderable="true"]')).toBeNull()
     openRowMenu("Only")
     expect(screen.queryByRole("menuitem", { name: "Move up" })).toBeNull()
+  })
+
+  it("keeps Move up / Move down off a group of one that does have somewhere to go", () => {
+    // AQU-1702 gives its grip back (it can be dragged to the other group),
+    // but there is still no slot to nudge it to inside its own group.
+    renderList([
+      file("Only", { corpusMarker: "Season 2", sortIndex: 0 }),
+      ...PLACED_SEASON,
+    ])
+    openRowMenu("Only")
+    expect(screen.queryByRole("menuitem", { name: "Move up" })).toBeNull()
+    expect(screen.queryByRole("menuitem", { name: "Move down" })).toBeNull()
   })
 })

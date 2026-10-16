@@ -7,6 +7,7 @@
 import { FRONTIER_BASE } from "./auth"
 import { fetchWithTimeout } from "./orgs"
 import { UserError } from "@/lib/errors/user-error"
+import { notifyElevationGranted } from "@/lib/errors/elevation-required-signal"
 
 const authHeaders = (jwt: string): Record<string, string> => ({
   Authorization: `Bearer ${jwt}`,
@@ -43,10 +44,8 @@ export interface AdminOrg {
   memberCount: number
   projectCount: number
   /**
-   * AQU-1071: distinct ACTIVE target languages in the org (archived lanes and
-   * archived projects excluded) — the enterprise billing band's own count, which
-   * used to be visible one org at a time on the Billing tab. Optional so a
-   * server that predates the field renders "—" rather than a wrong 0.
+   * AQU-1071: active target lanes in the org — the enterprise billing band.
+   * Optional so a server that predates the field renders "—" rather than a wrong 0.
    */
   activeLanguageCount?: number
 }
@@ -249,7 +248,11 @@ export async function verifyAdminElevation(jwt: string, code: string): Promise<{
     body: JSON.stringify({ code }),
   })
   if (!res.ok) throw new UserError(res.status, await readError(res))
-  return (await res.json()) as { elevatedUntil: string }
+  const body = (await res.json()) as { elevatedUntil: string }
+  // OPS-44: every step-up path (the global prompt, the admin console gate)
+  // lands here, so this is where waiting work hears that it may retry.
+  notifyElevationGranted()
+  return body
 }
 
 export async function getPlatformSettings(jwt: string): Promise<PlatformSettingsResponse> {
@@ -339,6 +342,7 @@ export async function getAdminProjects(jwt: string): Promise<AdminProject[]> {
 }
 
 export interface AdminFieldPlan {
+  freeWeeklyAllowance?: number
   name: string
   intervalDays: number
   priceCents: number
@@ -356,6 +360,7 @@ export interface AdminFieldPlan {
 }
 
 export interface AdminBillingPlans {
+  weeklyUsageEnforced?: boolean
   plan: AdminFieldPlan
   version: number
   stripeConfigured: boolean
@@ -363,6 +368,8 @@ export interface AdminBillingPlans {
 }
 
 export interface AdminBillingOrg {
+  ownerUsername?: string | null
+  weeklyAllowance?: number | null
   orgId: number
   orgName: string | null
   plan: "none" | "explore" | "field" | "enterprise"
@@ -387,6 +394,7 @@ export interface AdminBillingOrg {
 }
 
 export interface FieldPlanPatch {
+  freeWeeklyAllowance?: number
   priceCents?: number
   addonPriceCents?: number
   includedWords?: number
@@ -621,4 +629,13 @@ export async function sendAdminRetentionReport(
   })
   if (!res.ok) throw new UserError(res.status, await readError(res))
   return (await res.json()) as { subject: string }
+}
+
+export async function patchAdminWeeklyAllowance(jwt: string, orgId: number, allowance: number | null) {
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/admin/billing/org/${orgId}/weekly-allowance`,
+    { method: 'PATCH', headers: { ...authHeaders(jwt), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ allowance, reason: 'Admin weekly capacity adjustment' }) },
+  )
+  if (!res.ok) throw new UserError(res.status, await readError(res))
 }

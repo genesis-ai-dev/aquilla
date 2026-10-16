@@ -1,21 +1,31 @@
-import { useId, useState, type ComponentType, type ReactNode, type Ref } from "react"
+import { Fragment, useId, useState, type ComponentType, type ReactNode, type Ref } from "react"
 import type { VariantProps } from "class-variance-authority"
 import { Info, MoreHorizontal } from "lucide-react"
 import { Button, buttonVariants } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { AppTooltip, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { cn } from "@/lib/utils"
+import { toSections } from "./overflow-menu-sections"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuCheckboxItem,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 
 export interface OverflowMenuItem {
   id: string
-  type?: "item" | "checkbox" | "separator"
+  /**
+   * `label` names the items that follow it instead of being one of them
+   * (AQU-358). Everything from a `label` up to the next one renders as its own
+   * group with that heading, so a menu that merged several smaller menus can
+   * say what each part of it is for rather than leaving a reader to infer it
+   * from anonymous separator lines.
+   */
+  type?: "item" | "checkbox" | "separator" | "label"
   label?: string
   icon?: ComponentType<{ className?: string }>
   /** Optional trailing badge (e.g. check-file finding count). */
@@ -29,6 +39,13 @@ export interface OverflowMenuItem {
    * somewhere, but not as a paragraph inside the menu).
    */
   description?: string
+  /**
+   * Why a disabled item is disabled, shown when you hover it. The row stays
+   * clean, greyed out with no inline text (Sam, Oct 5: "track editing off"
+   * beside "Attach captions" was too many words for one row), and the reason
+   * reaches assistive tech as the item's description.
+   */
+  disabledReason?: string
   onClick?: () => void
   checked?: boolean
   onCheckedChange?: (checked: boolean) => void
@@ -112,52 +129,88 @@ function OverflowMenuPanel({ items }: { items: OverflowMenuItem[] }) {
   // The hint text lives in a visually hidden span and reaches the item through
   // aria-describedby, so the accessible NAME stays the bare label and the copy
   // lands in the DESCRIPTION. Sighted users get the same text from the icon.
+  const reason = (item: OverflowMenuItem) => (item.disabled ? item.disabledReason : undefined)
   const describedBy = (item: OverflowMenuItem) =>
-    item.description ? `${menuId}-${item.id}-description` : undefined
-  const body = (item: OverflowMenuItem) => (
-    <>
-      {item.icon && <item.icon className="h-4 w-4" />}
-      <span className="flex-1">{item.label}</span>
-      {item.description && <ItemHint id={describedBy(item)!} text={item.description} />}
-      {item.badge}
-    </>
-  )
+    item.description || reason(item) ? `${menuId}-${item.id}-description` : undefined
+  const body = (item: OverflowMenuItem) => {
+    const why = reason(item)
+    const main = (
+      <>
+        {item.icon && <item.icon className="h-4 w-4" />}
+        <span className="flex-1">{item.label}</span>
+      </>
+    )
+    return (
+      <>
+        {why ? (
+          <>
+            <span id={describedBy(item)} aria-hidden="true" className="sr-only">{why}</span>
+            {/* A disabled row takes no pointer events, so its content takes
+                them back for itself, or the reason could never be hovered. */}
+            <AppTooltip content={why} side="right">
+              <span className="pointer-events-auto flex flex-1 items-center gap-1.5" data-testid={item.testId && `${item.testId}-reason`}>
+                {main}
+              </span>
+            </AppTooltip>
+          </>
+        ) : main}
+        {item.description && <ItemHint id={describedBy(item)!} text={item.description} />}
+        {item.badge}
+      </>
+    )
+  }
   // DropdownMenuContent sizes itself to its anchor with a 192px floor. The
   // info icon and the check indicator share the row with the label, so a
   // panel that carries a hint gets a slightly wider floor to keep short labels
   // on one line. Menus without a hint render exactly as before.
   const hasDescription = items.some((item) => item.description)
+  // A panel with status badges ("linked", "not imported", "track editing off")
+  // takes its content's width instead of its anchor's: at the anchor's width a
+  // badge squeezed its row's label onto two lines (Sam, Oct 5, the timeline's
+  // Sources menu). Capped so a long label still wraps inside the window.
+  const hasBadge = items.some((item) => item.badge)
+  const row = (item: OverflowMenuItem) =>
+    item.type === "separator" ? (
+      <DropdownMenuSeparator key={item.id} />
+    ) : item.type === "checkbox" ? (
+      <DropdownMenuCheckboxItem
+        key={item.id}
+        checked={item.checked}
+        disabled={item.disabled}
+        data-testid={item.testId}
+        aria-describedby={describedBy(item)}
+        onCheckedChange={(checked) => item.onCheckedChange?.(checked)}
+      >
+        {body(item)}
+      </DropdownMenuCheckboxItem>
+    ) : (
+      <DropdownMenuItem
+        key={item.id}
+        disabled={item.disabled}
+        variant={item.destructive ? "destructive" : "default"}
+        data-testid={item.testId}
+        aria-describedby={describedBy(item)}
+        onClick={item.onClick}
+      >
+        {body(item)}
+      </DropdownMenuItem>
+    )
   return (
-    <DropdownMenuContent align="end" className={hasDescription ? "min-w-56" : "min-w-48"}>
-      <DropdownMenuGroup>
-        {items.map((item) =>
-          item.type === "separator" ? (
-            <DropdownMenuSeparator key={item.id} />
-          ) : item.type === "checkbox" ? (
-            <DropdownMenuCheckboxItem
-              key={item.id}
-              checked={item.checked}
-              disabled={item.disabled}
-              data-testid={item.testId}
-              aria-describedby={describedBy(item)}
-              onCheckedChange={(checked) => item.onCheckedChange?.(checked)}
-            >
-              {body(item)}
-            </DropdownMenuCheckboxItem>
-          ) : (
-            <DropdownMenuItem
-              key={item.id}
-              disabled={item.disabled}
-              variant={item.destructive ? "destructive" : "default"}
-              data-testid={item.testId}
-              aria-describedby={describedBy(item)}
-              onClick={item.onClick}
-            >
-              {body(item)}
-            </DropdownMenuItem>
-          ),
-        )}
-      </DropdownMenuGroup>
+    <DropdownMenuContent align="end" className={cn(
+      hasDescription ? "min-w-56" : "min-w-48",
+      hasBadge && "w-max max-w-[min(24rem,calc(100vw-2rem))]",
+    )}>
+      {toSections(items).map((section) => (
+        <Fragment key={section.id}>
+          {section.dividerAbove && <DropdownMenuSeparator />}
+          <DropdownMenuGroup>
+            {section.heading !== undefined && (
+              <DropdownMenuLabel>{section.heading}</DropdownMenuLabel>
+            )}
+            {section.items.map(row)}
+          </DropdownMenuGroup>
+        </Fragment>
+      ))}
     </DropdownMenuContent>
   )
 }

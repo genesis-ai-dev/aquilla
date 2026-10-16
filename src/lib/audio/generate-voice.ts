@@ -31,6 +31,7 @@ import { synthesizeCellTts } from "@/lib/sync/tts"
 import { inworldSynthFieldsFromVoice } from "./inworld-voice-settings"
 import { inworldLanguageForRequest } from "./inworld-languages"
 import type { FrontierSession } from "@/lib/frontier/types"
+import type { TelemetrySurface } from "@/lib/cell-telemetry"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import type { GeminiTtsContext } from "./gemini-tts"
 import type { SynthOptions } from "./tts"
@@ -63,6 +64,8 @@ export interface GenerateAndAttachArgs {
   label?: string
   diffusionSteps?: number
   onProgress?: SynthOptions["onProgress"]
+  /** AQU-1572: where the generation was asked for ("recorder", "cell"…). Telemetry only. */
+  surface?: TelemetrySurface
 }
 
 export interface GenerateAndAttachResult {
@@ -125,6 +128,7 @@ export async function generateAndAttachCellVoice(
       // AQU-1572
       audioOrigin: "generate",
       ttsProvider: provider,
+      surface: args.surface,
       author: args.username,
     })
     // Round 8: shadow-inject so the sparkle chip appears at its real length
@@ -283,6 +287,7 @@ export async function generateAndAttachCellVoice(
     // AQU-1572
     audioOrigin: "generate",
     ttsProvider: provider,
+    surface: args.surface,
     author: args.username,
   })
   // Round 8: shadow-inject (see the hosted-TTS branch's comment).

@@ -57,7 +57,6 @@ export function liveCellIdSql(
      WHERE tombstoned_src.project_id = ${projectExpr}
        AND tombstoned_src.file_id = ${fileExpr}
        AND tombstoned_src.side = 'source'
-       AND COALESCE(tombstoned_src.target_lang, '') = ''
        AND tombstoned_src.tombstoned_at IS NOT NULL
   )`
 }

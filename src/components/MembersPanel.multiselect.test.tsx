@@ -92,8 +92,10 @@ describe("MembersPanel multi-select add (AQU-734)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add" }))
 
     // ONE batch call carrying both people at the chosen role — no fan-out.
+    // AQU-1808: the third argument is the lane choice; a project with no
+    // target lanes asks for none, so it is undefined here.
     await waitFor(() => expect(onAdd).toHaveBeenCalledTimes(1))
-    expect(onAdd).toHaveBeenCalledWith(["alice", "amir"], 400)
+    expect(onAdd).toHaveBeenCalledWith(["alice", "amir"], 400, undefined)
   })
 
   it("reports a partial failure per person: the failure is named and kept staged, successes drop", async () => {

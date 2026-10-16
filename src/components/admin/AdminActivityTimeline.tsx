@@ -2,7 +2,7 @@ import { Activity as ActivityIcon } from "lucide-react"
 import { EmptyState } from "@/components/ui/empty"
 import { Badge } from "@/components/ui/badge"
 import { DateTooltip } from "@/components/ui/date-tooltip"
-import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { UserChip } from "@/components/UserChip"
 import type { AdminActivity } from "@/lib/frontier/admin"
 
 /**
@@ -46,9 +46,9 @@ export function AdminActivityTimeline({
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 space-y-0.5">
               <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm text-foreground">
-                <UsernameWithAvatar
-                  username={a.username ?? `User ${a.userId}`}
-                  label={a.username ?? `#${a.userId}`}
+                <UserChip
+                  userId={a.userId}
+                  username={a.username}
                   size="xs"
                   nameClassName="text-sm"
                 />

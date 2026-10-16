@@ -42,12 +42,13 @@ import { OrgWithAvatar } from "@/components/OrgWithAvatar"
 import { LaneChips } from "./LaneChips"
 import { ProjectLaneSubRows } from "./ProjectLaneSubRows"
 import { OrgLaneAssignModal } from "./OrgLaneAssignModal"
-import { displayLanes, resolveDefaultLaneLabel } from "./project-lanes"
+import { assignLaneOptionsForPortfolio, displayLanes, resolveDefaultLaneLabel } from "./project-lanes"
 import { isManagedBy } from "./project-pm-filter"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { canOpenAssignUi } from "@/lib/sync/role-policy"
+import { progressPercentOfFraction } from "@/lib/progress/progress-percent"
 
 export type OrgProjectRow = PortfolioProject & {
   orgId?: number
@@ -106,16 +107,16 @@ function OfflineProjectBadge({ projectId }: { projectId: string }) {
       </Badge>
     )
   }
-  if (status?.status === "downloading") {
+  // Without progress, a `downloading` row is one an earlier session left
+  // half-done — nothing is downloading, and the row menu offers a retry.
+  if (status?.status === "downloading" && progress) {
     return (
       <Badge variant="outline" className="shrink-0" data-testid="offline-downloading-badge">
         <Spinner className="size-3" />
-        {progress
-          ? t("org.projectOverview.offlineDownloadingProgress", {
-              done: progress.filesDone,
-              total: progress.filesTotal,
-            })
-          : t("org.projectOverview.offlineDownloading")}
+        {t("org.projectOverview.offlineDownloadingProgress", {
+          done: progress.filesDone,
+          total: progress.filesTotal,
+        })}
       </Badge>
     )
   }
@@ -133,6 +134,8 @@ function OfflineRowMenuItems({ projectId, jwt }: { projectId: string; jwt: strin
   const { store } = useOfflineStore()
   const { t } = useI18n()
   const status = useOfflineProjectStatus(store, projectId)
+  const progress = useDownloadProgress(projectId)
+  const downloading = status?.status === "downloading" && progress !== null
 
   if (!isTauriRuntime()) return null
 
@@ -173,10 +176,10 @@ function OfflineRowMenuItems({ projectId, jwt }: { projectId: string; jwt: strin
           onClick={() => {
             void handleMakeAvailableOffline()
           }}
-          disabled={!jwt || status?.status === "downloading"}
+          disabled={!jwt || downloading}
         >
           <CloudDownload className="size-4" />
-          {status?.status === "downloading"
+          {downloading
             ? t("org.projectOverview.offlineDownloading")
             : t("org.projectOverview.makeAvailableOffline")}
         </MenuItem>
@@ -202,7 +205,6 @@ export function OrgProjectsDataTable({
   emptyAction,
   testId = "org-projects-table",
   layout = "page",
-  defaultLaneLabelByProjectId,
   filesByProjectId,
   orgId = null,
   jwt,
@@ -234,12 +236,6 @@ export function OrgProjectsDataTable({
   testId?: string
   /** `page` = panel shell; `embedded` = in-Section admin table chrome. */
   layout?: "page" | "embedded"
-  /**
-   * AQU-538 §3.2: project → per-file target-language hint for the '' lane chip.
-   * AQU-606: only a *fallback* — `resolveDefaultLaneLabel` prefers the project's
-   * own `targetLanguage`, which is where migrated projects carry it.
-   */
-  defaultLaneLabelByProjectId?: Map<string, string>
   /** AQU-538 §3.2: project → its files, for the lane sub-row "Assign…" action. */
   filesByProjectId?: Map<string, { id: string; name: string }[]>
   /** The active org id — threaded to StaffLanePopover / AssignModal. */
@@ -388,7 +384,7 @@ export function OrgProjectsDataTable({
                 <LaneChips
                   projectId={p.id}
                   lanes={displayLanes(p)}
-                  defaultLaneLabel={resolveDefaultLaneLabel(p, defaultLaneLabelByProjectId?.get(p.id))}
+                  defaultLaneLabel={resolveDefaultLaneLabel(p)}
                   onOverflowClick={embedded ? undefined : () => toggleExpand(p.id)}
                   maxVisible={embedded ? 2 : undefined}
                   className={cn("w-full", embedded && "flex-nowrap")}
@@ -410,7 +406,7 @@ export function OrgProjectsDataTable({
           ),
           meta: { align: "right", className: embedded ? "w-[6rem] whitespace-nowrap" : "w-[6.5rem]" },
           cell: ({ row }) => {
-            const pct = Math.round(translatedPct(row.original) * 100)
+            const pct = progressPercentOfFraction(translatedPct(row.original))
             return (
               <div
                 data-testid="project-table-translated-value"
@@ -435,7 +431,7 @@ export function OrgProjectsDataTable({
           ),
           meta: { align: "right", className: embedded ? "w-[6rem] whitespace-nowrap" : "w-[6.5rem]" },
           cell: ({ row }) => {
-            const pct = Math.round(validatedPct(row.original) * 100)
+            const pct = progressPercentOfFraction(validatedPct(row.original))
             return (
               <div
                 data-testid="project-table-validated-value"
@@ -460,7 +456,7 @@ export function OrgProjectsDataTable({
           ),
           meta: { align: "right", className: embedded ? "w-[4.5rem] whitespace-nowrap" : "w-[6.5rem]" },
           cell: ({ row }) => {
-            const pct = Math.round(audioPct(row.original) * 100)
+            const pct = progressPercentOfFraction(audioPct(row.original))
             return (
               <div
                 data-testid="project-table-audio-value"
@@ -560,6 +556,7 @@ export function OrgProjectsDataTable({
               }
               return (
                 <UsernameWithAvatar
+                  userId={row.original.pm?.id}
                   username={username}
                   size="xs"
                   nameClassName="font-normal"
@@ -646,7 +643,6 @@ export function OrgProjectsDataTable({
       showOrg,
       tableNow,
       toggleExpand,
-      defaultLaneLabelByProjectId,
       embedded,
       viewerUsername,
       t,
@@ -712,8 +708,9 @@ export function OrgProjectsDataTable({
                 expanded.has(p.id) ? (
                   <ProjectLaneSubRows
                     projectId={p.id}
+                    projectName={p.name}
                     lanes={displayLanes(p)}
-                    defaultLaneLabel={resolveDefaultLaneLabel(p, defaultLaneLabelByProjectId?.get(p.id))}
+                    defaultLaneLabel={resolveDefaultLaneLabel(p)}
                     colSpan={colSpan}
                     orgId={orgId}
                     onAssign={
@@ -738,7 +735,9 @@ export function OrgProjectsDataTable({
                 <>
                   {canAssignProject(p.id) && (
                     <MenuItem
-                      onClick={() => setAssignTarget({ projectId: p.id, lane: "" })}
+                      // AQU-1977: open on the project's first live language, not
+                      // a '' lane a project made since AQU-1594 does not have.
+                      onClick={() => setAssignTarget({ projectId: p.id, lane: displayLanes(p)[0]?.lane ?? "" })}
                     >
                       <UserPlus className="size-4" />
                       {t("dialog.assign.title")}
@@ -804,10 +803,8 @@ export function OrgProjectsDataTable({
           targetLanes={displayLanes(assignProject)
             .map((l) => l.lane)
             .filter((l) => l !== "")}
-          defaultLaneLabel={resolveDefaultLaneLabel(
-            assignProject,
-            defaultLaneLabelByProjectId?.get(assignTarget.projectId),
-          )}
+          lanes={assignLaneOptionsForPortfolio(assignProject, t("org.projectOverview.laneDefaultFallback"))}
+          defaultLaneLabel={resolveDefaultLaneLabel(assignProject)}
           files={filesByProjectId?.get(assignTarget.projectId) ?? []}
           roleLevel={roleByProjectId?.get(assignTarget.projectId)?.level ?? 0}
           jwt={jwt}

@@ -1,7 +1,10 @@
 import { describe, it, expect } from "vitest"
 import {
   renameFile, moveFileToCorpus, renameCorpus, deleteFile, applyFileSortIndexes,
+  overlayPendingSortIndexes, settlePendingSortIndexes,
 } from "./file-operations"
+import { planFileMove, planFileOrderReset, SORT_INDEX_STEP } from "@/lib/sidebar/file-sort-index"
+import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
 import type { ProjectRecord, FileReference } from "@/lib/parsers/types"
 
 function mkFile(overrides: Partial<FileReference>): FileReference {
@@ -172,5 +175,58 @@ describe("applyFileSortIndexes", () => {
     ])
     expect(next.files).toHaveLength(1)
     expect(next.files[0].sortIndex).toBe(1024)
+  })
+})
+
+// The list on screen is the server read. A drop has to move that list itself;
+// waiting for the file.reorder round-trip is the snap-back on let-go.
+describe("overlayPendingSortIndexes", () => {
+  function season(ids: string[]): FileReference[] {
+    return ids.map((id, index) => mkFile({
+      id,
+      name: id,
+      corpusMarker: "Season 1",
+      sortIndex: index * SORT_INDEX_STEP,
+    }))
+  }
+
+  function pendingOf(writes: { fileId: string; sortIndex: number | null }[]) {
+    return new Map(writes.map((write) => [write.fileId, write.sortIndex]))
+  }
+
+  it("puts a file dragged downward into the slot it was dropped on", () => {
+    const files = season(["a", "b", "c", "d"])
+    const writes = planFileMove(files, "a", 3)
+    const shown = overlayPendingSortIndexes(files, pendingOf(writes))
+    expect(groupByCorpus(shown)[0].files.map((file) => file.id)).toEqual(["b", "c", "d", "a"])
+  })
+
+  it("puts a file dragged upward into the slot it was dropped on", () => {
+    const files = season(["a", "b", "c", "d"])
+    const writes = planFileMove(files, "d", 1)
+    const shown = overlayPendingSortIndexes(files, pendingOf(writes))
+    expect(groupByCorpus(shown)[0].files.map((file) => file.id)).toEqual(["a", "d", "b", "c"])
+  })
+
+  it("returns the same array when nothing is pending", () => {
+    const files = season(["a", "b"])
+    expect(overlayPendingSortIndexes(files, new Map())).toBe(files)
+  })
+
+  it("clears a reset so the automatic order shows before the server agrees", () => {
+    const files = season(["b", "a"])
+    const writes = planFileOrderReset(files)
+    const shown = overlayPendingSortIndexes(files, pendingOf(writes))
+    expect(shown.every((file) => file.sortIndex === undefined)).toBe(true)
+    expect(groupByCorpus(shown)[0].files.map((file) => file.id)).toEqual(["a", "b"])
+  })
+
+  it("keeps the pending position until the server file carries it, then lets go", () => {
+    const files = season(["a", "b", "c", "d"])
+    const writes = planFileMove(files, "d", 1)
+    const pending = pendingOf(writes)
+    expect(settlePendingSortIndexes(files, pending)).toBe(pending)
+    const landed = applyFileSortIndexes(mkProject(files), writes).files
+    expect(settlePendingSortIndexes(landed, pending).size).toBe(0)
   })
 })

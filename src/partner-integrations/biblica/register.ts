@@ -14,6 +14,8 @@ import { BookOpen } from "lucide-react"
 import type { PartnerIntegration } from "@/lib/partners/types"
 import { clearBiblicaApostropheGlue } from "./apostrophe-glue"
 import { isBiblicaScriptureCell } from "./cell-kind"
+import { BIBLICA_NOTES_PROFILE_ID, TREASURE_HUNT_PROFILE_ID } from "./editions"
+import { applyBiblicaProtectedHtmlReflow } from "./export-reflow"
 
 const biblica: PartnerIntegration = {
   id: "biblica",
@@ -27,7 +29,16 @@ const biblica: PartnerIntegration = {
   },
   // AQU-1174: the "source serif" apostrophe glue is English typesetting in
   // Biblica's templates, not text, so it must not ride into a translation.
-  idmlTargetHtmlNormalizers: [clearBiblicaApostropheGlue],
+  // The reflow after it moves leftover English out of slots a translation
+  // did not fill, which is what lets a study-Bible package round-trip.
+  idmlTargetHtmlNormalizers: [clearBiblicaApostropheGlue, applyBiblicaProtectedHtmlReflow],
+  idmlExportOptions: [
+    {
+      id: "bible-swap",
+      profileIds: [BIBLICA_NOTES_PROFILE_ID, TREASURE_HUNT_PROFILE_ID],
+      panel: () => import("./bible-swap/ExportOption"),
+    },
+  ],
   // AQU-1285: a study-Bible volume carries its verses as cells next to the
   // notes; the editor marks those rows through this hook.
   isScriptureCell: isBiblicaScriptureCell,

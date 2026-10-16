@@ -6,13 +6,17 @@
 //   DELETE /orgs/:orgId/connection            org maintainer+ — disconnect (cascades links)
 //   GET    /orgs/:orgId/boards                org maintainer+ — board picker proxy
 //   GET    /orgs/:orgId/boards/:boardId/structure  org maintainer+
+//   GET    /orgs/:orgId/links                 org maintainer+ — each project's link, for org settings
 //   GET    /projects/:projectId/link          any project member
 //   PUT    /projects/:projectId/link          project maintainer+ — create/replace link
 //   PATCH  /projects/:projectId/link          project maintainer+ — enabled/config
 //   DELETE /projects/:projectId/link          project maintainer+
 //   POST   /projects/:projectId/analyze       project maintainer+ — AI mapping proposal
 //                                             (boardId optional — omit it and the AI picks the board too)
+//   POST   /projects/:projectId/columns       project maintainer+ — add the missing Aquilla columns to a board
 //   POST   /projects/:projectId/sync          project maintainer+ — push now
+//   GET    /projects/:projectId/board-changes project maintainer+ — columns new on the board since the link was saved
+//   POST   /projects/:projectId/board-changes/dismiss  project maintainer+ — "Not needed" for some of them
 //   POST   /webhook                           NO auth (Monday JWT via MONDAY_SIGNING_SECRET)
 //   POST   /internal/push                     Bearer SYNC_SECRET_KEY (sync-worker fire-and-forget)
 //
@@ -34,19 +38,25 @@ import {
   decryptMondayToken,
   generateCodeVerifier,
   codeChallengeS256,
+  mondayTokenKeyMaterial,
 } from "../lib/monday/crypto"
 import {
   exchangeAuthorizationCode,
+  foreignConnectionError,
   getConnectionAccessToken,
   MondayAuthError,
+  MondayForeignConnectionError,
+  runningEnvironment,
 } from "../lib/monday/tokens"
 import {
   createBoardWebhooks,
   deleteWebhooksBestEffort,
   fetchBoardItemsSample,
   fetchBoardStructure,
+  gqlString,
   listBoards,
   mondayGraphQL,
+  runAliasedMutations,
 } from "../lib/monday/client"
 import {
   parseJsonColumn,
@@ -66,15 +76,30 @@ import {
   NoBoardsError,
 } from "../lib/monday/analyze"
 import { pushBoardLink, schedulePush } from "../lib/monday/push"
+import {
+  addMissingColumns,
+  ensureProjectsGroup,
+  findExistingColumn,
+  isCreatableMetric,
+  PROJECTS_GROUP_TITLE,
+} from "../lib/monday/columns"
+import { notifySyncWorkerOfMondayLinkChange } from "../services/sync-worker-notify"
 import { secureCompare } from "../utils/secure-compare"
 
 const monday = new Hono<AuthHonoEnv>()
 
 const MANAGE_MIN_ROLE = ROLE.MAINTAINER
 
-/** API-facing base for webhook URLs (contract: BASE_URL_API || BASE_URL). */
-const apiBase = (env: Env): string =>
-  (env.BASE_URL_API || env.BASE_URL || "").replace(/\/$/, "")
+/**
+ * Public base of THIS worker, for the webhook URL Monday calls back. It must
+ * be the identity API host (api.<host>/identity), never BASE_URL: that is the
+ * website, which answers a webhook POST with 405, so Monday refuses to create
+ * the webhook. Falls back to MCP_OAUTH_ISSUER (the same identity API base in
+ * every deployed env), then to the request origin (right for local dev, where
+ * the worker is reached directly with no /identity prefix).
+ */
+const apiBase = (env: Env, requestUrl: string): string =>
+  (env.BASE_URL_API || env.MCP_OAUTH_ISSUER || new URL(requestUrl).origin).replace(/\/+$/, "")
 
 /**
  * OAuth redirect URI — must EXACTLY match the redirect URL registered in the
@@ -107,6 +132,19 @@ async function orgTokenOr409(
   try {
     return await getConnectionAccessToken(c.env, conn)
   } catch (err) {
+    // AQU-1775: the row was made by another deployment (a production row on
+    // dev after the Neon copy). Not a re-auth problem — reconnecting HERE is
+    // the only fix, and the UI must not send anyone to re-authorise.
+    if (err instanceof MondayForeignConnectionError) {
+      return c.json(
+        {
+          error: err.message,
+          foreignConnection: true,
+          connectionEnvironment: err.connectionEnvironment,
+        },
+        409,
+      )
+    }
     if (err instanceof MondayAuthError) {
       return c.json(
         { error: "Monday connection needs re-authorization", needsReauth: true },
@@ -167,6 +205,7 @@ function linkResponse(link: IntegrationLinkRow, orgConnected: boolean) {
     id: link.id,
     boardId: link.external_id,
     boardName: link.external_name,
+    boardUrl: parseJsonColumn<MondayBoardStructure | null>(link.remote_state, null)?.url ?? null,
     enabled: link.enabled,
     config: parseJsonColumn<MondayMapping | null>(link.config, null),
     structureStale: link.remote_state_stale,
@@ -200,10 +239,17 @@ monday.get("/orgs/:orgId/connection", authMiddleware, async (c) => {
     scopes: conn.scopes,
     createdAt: conn.created_at,
     needsReauth: conn.needs_reauth,
+    // AQU-1775: where the row was made, and whether THIS deployment may use
+    // it. False means the row was copied from another environment.
+    environment: conn.environment,
+    usable: foreignConnectionError(c.env, conn) === null,
   })
 })
 
 const startSchema = z.object({ backTo: z.string().optional() })
+
+/** The org's Monday settings page in the SPA — where a connect returns by default. */
+const orgMondaySettingsPath = (orgId: number): string => `/orgs/${orgId}/settings/monday`
 
 monday.post(
   "/orgs/:orgId/connection/start",
@@ -217,7 +263,7 @@ monday.post(
     }
     const { backTo } = c.req.valid("json")
     // backTo must be an app path, never an absolute URL (open-redirect guard).
-    if (backTo != null && (!backTo.startsWith("/") || backTo.startsWith("//"))) {
+    if (backTo != null && !isSafeAppPath(backTo)) {
       return c.json({ error: "backTo must be a path" }, 400)
     }
     // OAuth 2.1 PKCE: the code_verifier must survive to the callback without
@@ -225,13 +271,13 @@ monday.post(
     // it INSIDE the signed state JWT as the `cv` claim. Stateless, no table.
     const codeVerifier = generateCodeVerifier()
     const codeChallenge = await codeChallengeS256(codeVerifier)
-    const cv = await encryptMondayToken(c.env.SECRET_KEY, codeVerifier)
+    const cv = await encryptMondayToken(mondayTokenKeyMaterial(c.env), codeVerifier)
     const now = Math.floor(Date.now() / 1000)
     const state = await sign(
       {
         orgId: guard.orgId,
         userId: c.get("user").username,
-        backTo: backTo ?? "/settings/monday",
+        backTo: backTo ?? orgMondaySettingsPath(guard.orgId),
         cv,
         iat: now,
         exp: now + 600, // 10 minutes
@@ -269,19 +315,19 @@ monday.get("/oauth/callback", async (c) => {
   } catch {
     return fail("bad_state", 401)
   }
-  const backTo =
-    typeof state.backTo === "string" && state.backTo.startsWith("/") && !state.backTo.startsWith("//")
-      ? state.backTo
-      : "/settings/monday"
   const orgId = Number(state.orgId)
   if (!Number.isFinite(orgId)) return fail("bad_state", 401)
+  const backTo =
+    typeof state.backTo === "string" && isSafeAppPath(state.backTo)
+      ? state.backTo
+      : orgMondaySettingsPath(orgId)
 
   // PKCE: recover the code_verifier minted in /connection/start (encrypted
   // inside the signed state — the browser never saw the plaintext).
   if (typeof state.cv !== "string" || !state.cv) return fail("bad_state", 401)
   let codeVerifier: string
   try {
-    codeVerifier = await decryptMondayToken(c.env.SECRET_KEY, state.cv)
+    codeVerifier = await decryptMondayToken(mondayTokenKeyMaterial(c.env), state.cv)
   } catch {
     return fail("bad_state", 401)
   }
@@ -306,9 +352,9 @@ monday.get("/oauth/callback", async (c) => {
       console.warn("[monday] me query failed after token exchange:", err)
     }
 
-    const accessEnc = await encryptMondayToken(c.env.SECRET_KEY, tokens.accessToken)
+    const accessEnc = await encryptMondayToken(mondayTokenKeyMaterial(c.env), tokens.accessToken)
     const refreshEnc = tokens.refreshToken
-      ? await encryptMondayToken(c.env.SECRET_KEY, tokens.refreshToken)
+      ? await encryptMondayToken(mondayTokenKeyMaterial(c.env), tokens.refreshToken)
       : null
     const account: IntegrationAccountInfo = {
       accountId: me.account?.id != null ? String(me.account.id) : null,
@@ -319,8 +365,9 @@ monday.get("/oauth/callback", async (c) => {
     await c.env.AQUILLA_PG.prepare(
       `INSERT INTO integration_connections
          (id, org_id, provider, account,
-          access_token_enc, refresh_token_enc, access_token_expires_at, needs_reauth, scopes, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, FALSE, ?, ?)
+          access_token_enc, refresh_token_enc, access_token_expires_at, needs_reauth, scopes, created_by,
+          environment)
+       VALUES (?, ?, ?, ?, ?, ?, ?, FALSE, ?, ?, ?)
        ON CONFLICT (org_id, provider) DO UPDATE SET
          account = EXCLUDED.account,
          access_token_enc = EXCLUDED.access_token_enc,
@@ -328,6 +375,7 @@ monday.get("/oauth/callback", async (c) => {
          access_token_expires_at = EXCLUDED.access_token_expires_at,
          needs_reauth = FALSE,
          scopes = EXCLUDED.scopes,
+         environment = EXCLUDED.environment,
          updated_at = now()`,
     )
       .bind(
@@ -340,6 +388,8 @@ monday.get("/oauth/callback", async (c) => {
         tokens.expiresAt,
         tokens.scope,
         state.userId ?? "unknown",
+        // AQU-1775: a reconnect here re-stamps the row as this deployment's.
+        runningEnvironment(c.env),
       )
       .run()
 
@@ -399,8 +449,39 @@ monday.get("/orgs/:orgId/boards/:boardId/structure", authMiddleware, async (c) =
   if (!boardId) return c.json({ error: "invalid boardId" }, 400)
   const structure = await fetchBoardStructure(token, boardId)
   return c.json({
+    url: structure.url ?? null,
+    name: structure.name ?? null,
     columns: structure.columns.map(({ id, title, type }) => ({ id, title, type })),
     groups: structure.groups,
+  })
+})
+
+/**
+ * Every project in the org with a Monday link, for the org settings list
+ * ("link your projects"): which board, whether Sync is on, the last push.
+ * Org maintainers only, like the board list: board names are the org's
+ * business, not every member's.
+ */
+monday.get("/orgs/:orgId/links", authMiddleware, async (c) => {
+  const guard = await orgGuard(c, MANAGE_MIN_ROLE)
+  if (guard instanceof Response) return guard
+  const rows = await c.env.AQUILLA_PG.prepare(
+    `SELECT l.* FROM integration_links l JOIN projects p ON p.id = l.project_id
+      WHERE p.org_id = ? AND l.provider = ?`,
+  )
+    .bind(guard.orgId, PROVIDER)
+    .all<IntegrationLinkRow>()
+  return c.json({
+    links: (rows.results ?? []).map((link) => ({
+      projectId: link.project_id,
+      boardId: link.external_id,
+      boardName: link.external_name,
+      boardUrl: parseJsonColumn<MondayBoardStructure | null>(link.remote_state, null)?.url ?? null,
+      enabled: link.enabled,
+      structureStale: link.remote_state_stale,
+      lastPushedAt: link.last_pushed_at,
+      lastPushStatus: link.last_push_status,
+    })),
   })
 })
 
@@ -412,9 +493,31 @@ monday.get("/projects/:projectId/link", authMiddleware, async (c) => {
   const orgId = await getProjectOrgId(c.env, guard.projectId)
   const orgConnected = orgId != null && (await getConnection(c.env, orgId)) != null
   const link = await getLink(c.env, guard.projectId)
-  if (!link) return c.json({ linked: false, orgConnected })
-  return c.json({ linked: true, link: linkResponse(link, orgConnected) })
+  if (!link) return c.json({ linked: false, orgConnected, orgId })
+  return c.json({ linked: true, orgConnected, orgId, link: linkResponse(link, orgConnected) })
 })
+
+/**
+ * The groups projects already use on this board, this project's first: a
+ * renamed "Aquilla projects" group keeps collecting rows, and a second project
+ * on the board joins the first one's group instead of making another.
+ */
+async function projectsGroupIdsOnBoard(env: Env, boardId: string, projectId: string): Promise<string[]> {
+  const rows = await env.AQUILLA_PG.prepare(
+    "SELECT project_id, config FROM integration_links WHERE external_id = ? AND provider = ?",
+  )
+    .bind(boardId, PROVIDER)
+    .all<{ project_id: string; config: unknown }>()
+  const ordered = [...(rows.results ?? [])].sort(
+    (a, b) => Number(b.project_id === projectId) - Number(a.project_id === projectId),
+  )
+  const ids: string[] = []
+  for (const row of ordered) {
+    const groupId = parseJsonColumn<Partial<MondayMapping>>(row.config, {}).groupId
+    if (groupId && !ids.includes(groupId)) ids.push(groupId)
+  }
+  return ids
+}
 
 const putLinkSchema = z.object({
   boardId: z.string().min(1),
@@ -422,6 +525,28 @@ const putLinkSchema = z.object({
   config: z.record(z.string(), z.unknown()),
   enabled: z.boolean().optional(),
 })
+
+/**
+ * AQU-1828: the project's DO caches "this project has no Monday link" so it
+ * stops nudging identity on every edit. Any change to the link row has to drop
+ * that cache, or a freshly linked project would not start pushing until the
+ * DO's backstop TTL lapsed. Best-effort: `executionCtx` is absent in some test
+ * harnesses, and the link row itself is already durable.
+ */
+function notifyLinkChangedBestEffort(
+  c: {
+    env: Parameters<typeof notifySyncWorkerOfMondayLinkChange>[0]
+    executionCtx: { waitUntil(promise: Promise<unknown>): void }
+  },
+  projectId: string,
+): void {
+  const notifyPromise = notifySyncWorkerOfMondayLinkChange(c.env, projectId)
+  try {
+    c.executionCtx.waitUntil(notifyPromise)
+  } catch {
+    void notifyPromise
+  }
+}
 
 monday.put(
   "/projects/:projectId/link",
@@ -445,15 +570,39 @@ monday.put(
     const { mapping, warnings } = sanitizeMapping(body.config, structure)
     if (!mapping) return c.json({ error: "invalid config", warnings }, 400)
 
+    // New rows go in an "Aquilla projects" group so they sit together, not
+    // among the board's own rows. The server picks it: the AI may suggest a
+    // group, but on a fresh board that is Monday's sample "Group Title".
+    const previous = await getLink(c.env, guard.projectId)
+    const previousGroupId =
+      previous?.external_id === body.boardId
+        ? parseJsonColumn<Partial<MondayMapping>>(previous.config, {}).groupId
+        : undefined
+    let groups = structure.groups
+    try {
+      const preferred = await projectsGroupIdsOnBoard(c.env, body.boardId, guard.projectId)
+      const { group, created } = await ensureProjectsGroup(token, body.boardId, structure.groups, preferred)
+      mapping.groupId = group.id
+      if (created) groups = [group, ...structure.groups]
+    } catch (err) {
+      console.warn("[monday] projects group failed (link still saved):", err)
+      delete mapping.groupId
+      warnings.push(
+        `could not create the “${PROJECTS_GROUP_TITLE}” group; new rows go in the board's first group`,
+      )
+    }
+
     const cachedStructure: MondayBoardStructure = {
       fetchedAt: new Date().toISOString(),
+      url: structure.url ?? null,
+      name: structure.name ?? null,
       columns: structure.columns,
-      groups: structure.groups,
+      groups,
     }
 
     // Webhooks: keep existing ones when re-linking the same board; otherwise
     // clean up the old board's webhooks (best-effort) and create fresh ones.
-    const existing = await getLink(c.env, guard.projectId)
+    const existing = previous
     let webhookIds = parseJsonColumn<string[]>(existing?.webhook_ids ?? null, [])
     if (!existing || existing.external_id !== body.boardId || webhookIds.length === 0) {
       if (existing && webhookIds.length > 0) {
@@ -463,7 +612,7 @@ monday.put(
         webhookIds = await createBoardWebhooks(
           token,
           body.boardId,
-          `${apiBase(c.env)}/api/v2/monday/webhook`,
+          `${apiBase(c.env, c.req.url)}/api/v2/monday/webhook`,
         )
       } catch (err) {
         console.warn("[monday] webhook creation failed (link still saved):", err)
@@ -494,7 +643,7 @@ monday.put(
         PROVIDER,
         conn.id,
         body.boardId,
-        body.boardName ?? null,
+        structure.name ?? body.boardName ?? null,
         JSON.stringify(mapping),
         body.enabled ?? true,
         JSON.stringify(webhookIds),
@@ -503,11 +652,41 @@ monday.put(
       )
       .run()
 
+    // Rows this project already has on the board move into the group once,
+    // when its group changes. Never on a push: a row the user moves elsewhere
+    // in Monday stays where they put it.
+    if (mapping.groupId && previousGroupId !== mapping.groupId) {
+      await moveItemsToGroupBestEffort(c.env, token, linkId, mapping.groupId)
+    }
+
     const link = await getLink(c.env, guard.projectId)
     if (!link) return c.json({ error: "link write failed" }, 500)
+    notifyLinkChangedBestEffort(c, guard.projectId)
     return c.json({ link: linkResponse(link, true), warnings })
   },
 )
+
+async function moveItemsToGroupBestEffort(
+  env: Env,
+  token: string,
+  linkId: string,
+  groupId: string,
+): Promise<void> {
+  try {
+    const items = await env.AQUILLA_PG.prepare(
+      "SELECT external_item_id FROM integration_item_links WHERE link_id = ?",
+    )
+      .bind(linkId)
+      .all<{ external_item_id: string }>()
+    const mutations = (items.results ?? []).map((row, i) => ({
+      alias: `m${i}`,
+      body: `move_item_to_group(item_id: ${gqlString(row.external_item_id)}, group_id: ${gqlString(groupId)}) { id }`,
+    }))
+    if (mutations.length > 0) await runAliasedMutations(token, mutations)
+  } catch (err) {
+    console.warn("[monday] moving existing rows into the projects group failed (best-effort):", err)
+  }
+}
 
 const patchLinkSchema = z.object({
   enabled: z.boolean().optional(),
@@ -527,11 +706,41 @@ monday.patch(
 
     const warnings: string[] = []
     let configJson: string | null = null
+    // Set only when the board was re-read just now: replaces the link-time
+    // snapshot and clears the "Board structure changed" flag.
+    let freshStructureJson: string | null = null
     if (body.config !== undefined) {
-      const cached = parseJsonColumn<MondayBoardStructure | null>(link.remote_state, null)
-      const result = sanitizeMapping(body.config, cached)
-      if (!result.mapping) return c.json({ error: "invalid config", warnings: result.warnings }, 400)
+      // Check against the board's CURRENT columns. The snapshot taken at link
+      // time doesn't know columns added since, so validating against it drops
+      // every new column as "not found on the board".
+      let structure = parseJsonColumn<MondayBoardStructure | null>(link.remote_state, null)
+      try {
+        const token = await loadLinkToken(c.env, link)
+        if (!token) throw new Error("no Monday token for this link")
+        const live = await fetchBoardStructure(token, link.external_id)
+        structure = {
+          fetchedAt: new Date().toISOString(),
+          url: live.url ?? structure?.url ?? null,
+          name: live.name ?? null,
+          columns: live.columns,
+          groups: live.groups,
+        }
+        freshStructureJson = JSON.stringify(structure)
+      } catch (err) {
+        console.warn("[monday] board re-read on mapping change failed; using the saved structure:", err)
+        warnings.push(
+          "could not read the board's current columns from Monday; the mapping was checked against the columns saved when the board was linked",
+        )
+      }
+      const result = sanitizeMapping(body.config, structure)
+      if (!result.mapping) return c.json({ error: "invalid config", warnings: [...warnings, ...result.warnings] }, 400)
       warnings.push(...result.warnings)
+      // The client edits columns, not the group: keep the saved group unless
+      // it is gone from the board.
+      const savedGroupId = parseJsonColumn<Partial<MondayMapping>>(link.config, {}).groupId
+      if (!result.mapping.groupId && savedGroupId && structure?.groups.some((g) => g.id === savedGroupId)) {
+        result.mapping.groupId = savedGroupId
+      }
       configJson = JSON.stringify(result.mapping)
     }
 
@@ -539,15 +748,129 @@ monday.patch(
       `UPDATE integration_links
           SET enabled = COALESCE(?, enabled),
               config = COALESCE(?::jsonb, config),
+              remote_state = COALESCE(?::jsonb, remote_state),
+              remote_state_stale = CASE WHEN ?::jsonb IS NULL THEN remote_state_stale ELSE FALSE END,
               updated_at = now()
         WHERE id = ?`,
     )
-      .bind(body.enabled ?? null, configJson, link.id)
+      .bind(body.enabled ?? null, configJson, freshStructureJson, freshStructureJson, link.id)
       .run()
 
-    const fresh = await getLink(c.env, guard.projectId)
+    let fresh = await getLink(c.env, guard.projectId)
     if (!fresh) return c.json({ error: "link update failed" }, 500)
-    return c.json({ link: linkResponse(fresh, true), warnings })
+    // `enabled` is part of what the DO caches, so even a config-only edit
+    // re-checks rather than guessing which fields mattered.
+    notifyLinkChangedBestEffort(c, guard.projectId)
+
+    // Turning Sync back on pushes straight away: edits made while it was off
+    // were never queued, so nothing else would bring the board up to date.
+    let push: Awaited<ReturnType<typeof pushBoardLink>> | undefined
+    if (body.enabled === true && !link.enabled) {
+      push = await pushBoardLink(c.env, fresh)
+      fresh = (await getLink(c.env, guard.projectId)) ?? fresh
+    }
+    return c.json({ link: linkResponse(fresh, true), warnings, ...(push && { push }) })
+  },
+)
+
+// ── Board changes since the link was saved ─────────────────────────────────
+//
+// The link keeps the board's columns as they were when it was saved
+// (`remote_state`). A column on the board now that isn't in that list is new,
+// and the "Board structure changed" banner names it. The board read here is
+// the authority: a webhook that flagged a column which has since been deleted
+// leaves nothing new, so the flag clears itself; a column that arrived while
+// the webhooks were unreachable still shows up.
+
+type BoardChangesBody = {
+  structureStale: boolean
+  newColumns: Array<{ id: string; title: string; type: string }>
+  structure: Omit<MondayBoardStructure, "fetchedAt">
+}
+
+async function boardChanges(
+  env: Env,
+  link: IntegrationLinkRow,
+  acknowledge: string[] = [],
+): Promise<BoardChangesBody | null> {
+  const token = await loadLinkToken(env, link)
+  if (!token) return null
+  const live = await fetchBoardStructure(token, link.external_id)
+  const saved = parseJsonColumn<MondayBoardStructure | null>(link.remote_state, null)
+  const known = [...(saved?.columns ?? [])]
+  for (const id of acknowledge) {
+    const column = live.columns.find((col) => col.id === id)
+    if (column && !known.some((col) => col.id === id)) {
+      known.push({ id: column.id, title: column.title, type: column.type })
+    }
+  }
+  const newColumns = live.columns
+    .filter((col) => !known.some((k) => k.id === col.id))
+    .map(({ id, title, type }) => ({ id, title, type }))
+  const stale = newColumns.length > 0
+  if (stale !== link.remote_state_stale || acknowledge.length > 0) {
+    // With nothing new left, the saved list becomes the board as it is now
+    // (deleted columns drop out too); otherwise only acknowledged columns join.
+    const next: MondayBoardStructure = {
+      fetchedAt: new Date().toISOString(),
+      url: live.url ?? saved?.url ?? null,
+      name: live.name ?? saved?.name ?? null,
+      columns: stale ? known : live.columns.map(({ id, title, type }) => ({ id, title, type })),
+      groups: live.groups,
+    }
+    await env.AQUILLA_PG.prepare(
+      "UPDATE integration_links SET remote_state = ?::jsonb, remote_state_stale = ?, updated_at = now() WHERE id = ?",
+    )
+      .bind(JSON.stringify(next), stale, link.id)
+      .run()
+  }
+  return {
+    structureStale: stale,
+    newColumns,
+    structure: {
+      url: live.url ?? null,
+      name: live.name ?? null,
+      columns: live.columns.map(({ id, title, type }) => ({ id, title, type })),
+      groups: live.groups,
+    },
+  }
+}
+
+monday.get("/projects/:projectId/board-changes", authMiddleware, async (c) => {
+  const guard = await projectGuard(c, MANAGE_MIN_ROLE)
+  if (guard instanceof Response) return guard
+  const link = await getLink(c.env, guard.projectId)
+  if (!link) return c.json({ error: "project has no Monday link" }, 404)
+  try {
+    const body = await boardChanges(c.env, link)
+    if (!body) return c.json({ error: "no Monday token for this link" }, 409)
+    return c.json(body)
+  } catch (err) {
+    console.error("[monday] board changes: board read failed:", err)
+    return c.json({ error: "Monday API error" }, 502)
+  }
+})
+
+const dismissChangesSchema = z.object({ columnIds: z.array(z.string().min(1)).min(1).max(100) })
+
+/** "Not needed": the board keeps these columns, Aquilla stops asking about them. */
+monday.post(
+  "/projects/:projectId/board-changes/dismiss",
+  authMiddleware,
+  zValidator("json", dismissChangesSchema),
+  async (c) => {
+    const guard = await projectGuard(c, MANAGE_MIN_ROLE)
+    if (guard instanceof Response) return guard
+    const link = await getLink(c.env, guard.projectId)
+    if (!link) return c.json({ error: "project has no Monday link" }, 404)
+    try {
+      const body = await boardChanges(c.env, link, c.req.valid("json").columnIds)
+      if (!body) return c.json({ error: "no Monday token for this link" }, 409)
+      return c.json(body)
+    } catch (err) {
+      console.error("[monday] dismiss board changes: board read failed:", err)
+      return c.json({ error: "Monday API error" }, 502)
+    }
   },
 )
 
@@ -567,6 +890,7 @@ monday.delete("/projects/:projectId/link", authMiddleware, async (c) => {
   await c.env.AQUILLA_PG.prepare("DELETE FROM integration_links WHERE id = ?")
     .bind(link.id)
     .run()
+  notifyLinkChangedBestEffort(c, guard.projectId)
   return c.json({ ok: true, deleted: true })
 })
 
@@ -606,7 +930,7 @@ monday.post(
     const token = await orgTokenOr409(c, orgId)
     if (token instanceof Response) return token
 
-    const summary = await computeProjectMetrics(c.env.AQUILLA_PG, guard.projectId)
+    const summary = await computeProjectMetrics(c.env.AQUILLA_PG, guard.projectId, { appBaseUrl: c.env.BASE_URL })
     if (!summary) return c.json({ error: "project not found" }, 404)
 
     let boardId = body.boardId
@@ -656,7 +980,8 @@ monday.post(
         summary: result.summary,
         warnings: result.warnings,
         boardId,
-        boardName,
+        boardName: structure.name ?? boardName,
+        boardUrl: structure.url ?? null,
         boardReason,
       })
     } catch (err) {
@@ -672,11 +997,118 @@ monday.post(
   },
 )
 
+// "Add the missing columns for me": create the board columns a project's
+// progress needs, so a board with no number columns can still be linked
+// without leaving for Monday. Same permission as saving a link.
+const addColumnsSchema = z.object({
+  boardId: z.string().min(1),
+  metrics: z.array(z.string()).max(20),
+})
+
+monday.post(
+  "/projects/:projectId/columns",
+  authMiddleware,
+  zValidator("json", addColumnsSchema),
+  async (c) => {
+    const guard = await projectGuard(c, MANAGE_MIN_ROLE)
+    if (guard instanceof Response) return guard
+    const body = c.req.valid("json")
+
+    const orgId = await getProjectOrgId(c.env, guard.projectId)
+    if (orgId == null) return c.json({ error: "project has no org" }, 409)
+    const token = await orgTokenOr409(c, orgId)
+    if (token instanceof Response) return token
+
+    let before
+    try {
+      before = await fetchBoardStructure(token, body.boardId)
+    } catch (err) {
+      console.error("[monday] add columns: board read failed:", err)
+      return c.json({ error: "Monday API error" }, 502)
+    }
+
+    const metrics = body.metrics.filter(isCreatableMetric)
+    // Matching on re-link depends on the Aquilla ID column, so a board that
+    // lacks one always gets it, asked for or not.
+    if (!metrics.includes("external_id") && !findExistingColumn("external_id", before.columns)) {
+      metrics.push("external_id")
+    }
+
+    const result = await addMissingColumns(token, body.boardId, metrics, before.columns)
+
+    // Columns we create fire our own create_column webhook. Recording them in
+    // every link's saved structure for this board first means the webhook
+    // recognises them and doesn't raise "Board structure changed" for a
+    // change the user just asked for. Only OUR columns are added: anything
+    // else that appeared on the board meanwhile still flags the link.
+    if (result.created.length > 0) {
+      await rememberCreatedColumns(c.env, body.boardId, result.created)
+    }
+
+    let structure
+    try {
+      structure = await fetchBoardStructure(token, body.boardId)
+    } catch {
+      structure = {
+        ...before,
+        columns: [
+          ...before.columns,
+          ...result.created.map((col) => ({ id: col.columnId, title: col.title, type: col.columnType })),
+        ],
+      }
+    }
+    return c.json({
+      ...result,
+      structure: {
+        url: structure.url ?? null,
+        name: structure.name ?? null,
+        columns: structure.columns.map(({ id, title, type }) => ({ id, title, type })),
+        groups: structure.groups,
+      },
+    })
+  },
+)
+
+async function rememberCreatedColumns(
+  env: Env,
+  boardId: string,
+  created: Array<{ columnId: string; title: string; columnType: string }>,
+): Promise<void> {
+  const links = await env.AQUILLA_PG.prepare(
+    "SELECT id, remote_state FROM integration_links WHERE external_id = ? AND provider = ?",
+  )
+    .bind(boardId, PROVIDER)
+    .all<{ id: string; remote_state: unknown }>()
+  for (const link of links.results ?? []) {
+    const saved = parseJsonColumn<MondayBoardStructure | null>(link.remote_state, null)
+    const columns = [...(saved?.columns ?? [])]
+    for (const col of created) {
+      if (!columns.some((existing) => existing.id === col.columnId)) {
+        columns.push({ id: col.columnId, title: col.title, type: col.columnType })
+      }
+    }
+    const next: MondayBoardStructure = {
+      fetchedAt: saved?.fetchedAt ?? new Date().toISOString(),
+      url: saved?.url ?? null,
+      name: saved?.name ?? null,
+      columns,
+      groups: saved?.groups ?? [],
+    }
+    await env.AQUILLA_PG.prepare(
+      "UPDATE integration_links SET remote_state = ?::jsonb, updated_at = now() WHERE id = ?",
+    )
+      .bind(JSON.stringify(next), link.id)
+      .run()
+  }
+}
+
 monday.post("/projects/:projectId/sync", authMiddleware, async (c) => {
   const guard = await projectGuard(c, MANAGE_MIN_ROLE)
   if (guard instanceof Response) return guard
   const link = await getLink(c.env, guard.projectId)
   if (!link) return c.json({ error: "project has no Monday link" }, 404)
+  // The Sync switch is off: nothing writes to the board, a manual push included.
+  if (!link.enabled) return c.json({ error: "sync is paused for this project" }, 409)
   const result = await pushBoardLink(c.env, link)
   return c.json(result)
 })
@@ -722,10 +1154,16 @@ monday.post("/webhook", async (c) => {
 
   // Do the (cheap) work inline and always answer 200 fast.
   if ((type === "create_column" || type.startsWith("create_column")) && boardId) {
+    // A column the link already knows about is not a structure change: that
+    // is how a column Aquilla itself just added ("Add the missing columns for
+    // me") arrives here, recorded before the webhook could fire.
+    const columnId = event.columnId != null ? String(event.columnId) : null
     await c.env.AQUILLA_PG.prepare(
-      "UPDATE integration_links SET remote_state_stale = TRUE WHERE external_id = ? AND provider = ?",
+      `UPDATE integration_links SET remote_state_stale = TRUE
+        WHERE external_id = ? AND provider = ?
+          AND NOT COALESCE(remote_state -> 'columns' @> jsonb_build_array(jsonb_build_object('id', ?::text)), FALSE)`,
     )
-      .bind(boardId, PROVIDER)
+      .bind(boardId, PROVIDER, columnId)
       .run()
   } else if (
     (type === "item_deleted" || type === "item_archived" || type === "delete_pulse" || type === "archive_pulse") &&
@@ -756,5 +1194,16 @@ monday.post("/internal/push", zValidator("json", internalPushSchema), async (c) 
   const result = await schedulePush(c.env, projectId)
   return c.json(result)
 })
+
+/**
+ * [Pen test] Auth & session mgmt (2026-10-12): an app-relative path only.
+ * Browsers normalise `\` to `/`, so `/\evil.com` is a protocol-relative
+ * redirect that the old `startsWith("//")` check let through. Also reject
+ * control characters (tab/CR/LF are stripped by URL parsers: `/\t/evil.com`).
+ */
+export function isSafeAppPath(p: string): boolean {
+  // eslint-disable-next-line no-control-regex -- the control-character range is the point of this check
+  return p.startsWith("/") && !p.startsWith("//") && !/[\\\u0000-\u001f]/.test(p)
+}
 
 export default monday

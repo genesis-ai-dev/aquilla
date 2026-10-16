@@ -66,6 +66,7 @@ import { useRunReview } from "@/hooks/useRunReview"
 import { TeamChannelComposer } from "./TeamChannelComposer"
 import { TeamConversationHeader } from "./TeamConversationHeader"
 import { TeamStepInspector } from "./TeamStepInspector"
+import { evidenceForSpan } from "@/lib/agent/step-evidence"
 import { TeamThreadDetail } from "./TeamThreadDetail"
 import { isRunWorking } from "./team-run-status"
 
@@ -559,6 +560,8 @@ export function TeamThreadsView({
             id={inspectorId}
             message={inspectedMessage}
             sentence={feedMessageText(inspectedMessage, t)}
+            projectId={projectId}
+            evidence={evidenceForSpan(activity, inspectedMessage.raw.spanId, inspectedMessage.raw.spanLabel)}
             onClose={closeInspector}
           />
         )}

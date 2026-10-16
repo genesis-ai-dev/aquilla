@@ -14,24 +14,32 @@
 // PostHog capture, which means feedback only reaches the team when the user has
 // analytics consent ON — exactly the stuck, frustrated user least likely to have
 // opted in. Routing through the identity worker makes the message land in the
-// team inbox regardless of consent, and gives the screenshot somewhere to live:
-// a PostHog event property cannot carry an image.
+// team's private Discord channel regardless of consent, and gives the
+// screenshot somewhere to live: a PostHog event property cannot carry an image.
 //
 // The screenshot goes to the same `aquilla-snapshots` R2 bucket the agent
 // artifacts use (SNAPSHOTS binding), under `{prefix}feedback/{userId}/{id}.{ext}`
 // — a separate prefix from `artifacts/` so a retention sweep can treat support
-// attachments differently from project data. The email carries the KEY, not the
-// bytes: the Cloudflare Email Service binding takes html/text only, and an
-// inlined data URI would be stripped by most clients anyway.
+// attachments differently from project data. That copy is the archive; the
+// Discord post carries the image as an attachment (so it renders inline) plus
+// the key in its footer.
 //
-// Storage and mail both degrade rather than fail. A missing SNAPSHOTS binding
-// drops the image and says so in the email; a missing EMAIL binding (local/e2e)
-// returns `delivered: false` with a 200. The user's message is never lost to a
-// misconfigured side channel — the SPA shows what actually happened.
+// The card names the org, project and user id. The browser only sends the
+// project id, and a client-sent org name could be anything, so the server looks
+// the project and org up itself, and only when the reporter can read that
+// project: otherwise a user could probe org names by guessing project ids.
+//
+// Storage and Discord both degrade rather than fail. A missing SNAPSHOTS binding
+// drops the archive copy and says so on the card; a missing webhook secret
+// (local/e2e) returns `delivered: false` with a 200. The user's message is never
+// lost to a misconfigured side channel — the SPA shows what actually happened.
 
 import { Hono } from "hono"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
-import { sendFeedbackEmail } from "../services/email"
+import { sendFeedbackToDiscord, type FeedbackAttachment } from "../services/discord-feedback"
+import { getOrgMemberRole } from "../services/org-permissions"
+import { resolveProjectRole } from "../services/project-permissions"
+import type { AuthUser, Env } from "../types"
 import {
   FEEDBACK_MAX_PER_USER,
   countRecentEvents,
@@ -76,6 +84,51 @@ function field(body: Record<string, unknown>, name: string): string | null {
   if (typeof value !== "string") return null
   const trimmed = value.trim()
   return trimmed === "" ? null : trimmed
+}
+
+interface ProjectContext {
+  orgId: number | null
+  orgName: string | null
+  projectName: string | null
+}
+
+/** Project and org names for the card. Best effort: a failed lookup, an
+ *  unknown project or org, or one the reporter cannot read yields nulls and
+ *  the report still goes out (the user and route are always shown). */
+async function lookupProjectContext(
+  env: Env,
+  user: AuthUser,
+  projectId: string | null,
+  route: string,
+): Promise<ProjectContext> {
+  const none: ProjectContext = { orgId: null, orgName: null, projectName: null }
+  try {
+    if (!projectId) {
+      // No project: the user may be on an org page (/orgs/:orgId, e.g. stuck
+      // adding a member or creating a project). Name that org if they belong.
+      const orgId = Number(/^\/orgs\/(\d+)(?:\/|$)/.exec(route)?.[1])
+      if (!Number.isSafeInteger(orgId)) return none
+      if ((await getOrgMemberRole(env, orgId, user.id)) === null) return none
+      const org = await env.AQUILLA_PG.prepare("SELECT name FROM organizations WHERE id = ?")
+        .bind(orgId)
+        .first<{ name: string | null }>()
+      return { orgId, orgName: org?.name ?? null, projectName: null }
+    }
+    const role = await resolveProjectRole(env, user, projectId)
+    if (!role) return none
+    const row = await env.AQUILLA_PG.prepare(
+      `SELECT p.name AS project_name, p.org_id, o.name AS org_name
+         FROM projects p LEFT JOIN organizations o ON o.id = p.org_id
+        WHERE p.id = ?`,
+    )
+      .bind(projectId)
+      .first<{ project_name: string | null; org_id: number | null; org_name: string | null }>()
+    if (!row) return none
+    return { orgId: row.org_id, orgName: row.org_name, projectName: row.project_name }
+  } catch (err) {
+    console.warn("[feedback] project/org lookup failed:", err)
+    return none
+  }
 }
 
 feedback.post("/", authMiddleware, async (c) => {
@@ -154,24 +207,42 @@ feedback.post("/", authMiddleware, async (c) => {
     }
   }
 
+  const projectId = field(body, "projectId")
+  const route = field(body, "route") ?? ""
+  const context = await lookupProjectContext(c.env, user, projectId, route)
+  const attachment: FeedbackAttachment | null =
+    screenshotBytes && screenshotExt
+      ? {
+          bytes: screenshotBytes,
+          ext: screenshotExt,
+          contentType: `image/${screenshotExt === "jpg" ? "jpeg" : screenshotExt}`,
+        }
+      : null
+
   let delivered: boolean
   try {
-    const result = await sendFeedbackEmail(c.env, {
-      description,
-      username: user.username,
-      email: user.email,
-      route: field(body, "route") ?? "",
-      projectId: field(body, "projectId"),
-      fileId: field(body, "fileId"),
-      sessionReplayUrl: field(body, "sessionReplayUrl"),
-      screenshotKey,
-      screenshotDropped: screenshotBytes !== null && screenshotKey === null,
-    })
+    const result = await sendFeedbackToDiscord(
+      c.env,
+      {
+        description,
+        userId: user.id,
+        username: user.username,
+        email: user.email,
+        route,
+        ...context,
+        projectId,
+        fileId: field(body, "fileId"),
+        sessionReplayUrl: field(body, "sessionReplayUrl"),
+        screenshotKey,
+        screenshotDropped: screenshotBytes !== null && screenshotKey === null,
+      },
+      attachment,
+    )
     delivered = result.delivered
   } catch (err) {
-    // A configured-but-failing send is a real delivery failure: tell the SPA so
+    // A configured-but-failing post is a real delivery failure: tell the SPA so
     // it can offer the copy-to-clipboard fallback instead of claiming success.
-    console.error("[feedback] email send failed:", err)
+    console.error("[feedback] discord post failed:", err)
     return c.json({ error: "Feedback could not be delivered — please try again." }, 502)
   }
 

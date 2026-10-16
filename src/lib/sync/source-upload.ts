@@ -44,6 +44,22 @@ export interface UploadSourceResult {
   sha256: string
 }
 
+/** An HTTP refusal from the source-artifact routes, with its status, so a
+ *  caller can tell "your role can't do this" (403) from a failure. */
+export class SourceUploadHttpError extends Error {
+  readonly status: number
+  constructor(message: string, status: number, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "SourceUploadHttpError"
+    this.status = status
+  }
+}
+
+/** True when the server refused a source-artifact write for the caller's role. */
+export function isSourceUploadRoleRefusal(error: unknown): boolean {
+  return error instanceof SourceUploadHttpError && error.status === 403
+}
+
 // Same attempts/backoff as the bulk-import chunk uploads: a transient network
 // blip or 5xx on the R2 PUT shouldn't abort a whole import mid-way.
 const IMPORT_ATTEMPTS = 3
@@ -143,7 +159,7 @@ export async function uploadSourceOriginal(args: UploadSourceArgs): Promise<Uplo
       if (res.ok) return await res.json() as UploadSourceResult
       // HTTP diagnostic — keyed frame; raw status/body kept on `.cause` for DevTools.
       const detail = await res.text().catch(() => "")
-      lastError = new Error(t("importExport.errors.sourceUploadFailed"), {
+      lastError = new SourceUploadHttpError(t("importExport.errors.sourceUploadFailed"), res.status, {
         cause: `HTTP ${res.status}${detail ? `: ${detail}` : ""}`,
       })
 
@@ -229,7 +245,7 @@ export async function bindSourceArtifact(args: BindSourceArtifactArgs): Promise<
       if (response.ok) return
       // HTTP diagnostic — keyed frame; raw status/body kept on `.cause` for DevTools.
       const detail = await response.text().catch(() => "")
-      lastError = new Error(t("importExport.errors.artifactBindingFailed"), {
+      lastError = new SourceUploadHttpError(t("importExport.errors.artifactBindingFailed"), response.status, {
         cause: `HTTP ${response.status}${detail ? `: ${detail}` : ""}`,
       })
       if (response.status === 401 && attempt < IMPORT_ATTEMPTS - 1) {

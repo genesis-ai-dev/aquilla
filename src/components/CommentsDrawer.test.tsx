@@ -4,10 +4,12 @@
  */
 import { describe, it, expect, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { CommentsDrawer } from "./CommentsDrawer"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { ROLE } from "@/lib/frontier/roles"
+import type { CommentRefusal } from "@/lib/sync/comment-refusals"
 
 // CommentsDrawer renders CommentThread — mock it to avoid deep render trees.
 vi.mock("./CommentThread", () => ({
@@ -107,18 +109,161 @@ describe("CommentsDrawer — the new-thread field has a real accessible name", (
    * disappears on the first keystroke and which screen readers and DOM-reading
    * agents may never announce. A live Jev journey stalled on this field.
    */
-  it("names the field from the visible heading, not the placeholder", () => {
+  it("names the field without a visible heading", () => {
     renderDrawer(makeProject(ROLE.COMMENTER))
-    const field = screen.getByRole("textbox", { name: "New thread" })
-    expect(field).toBeInTheDocument()
-    expect(field.getAttribute("aria-labelledby")).toBe(
-      screen.getByText("New thread").getAttribute("id"),
-    )
+    expect(screen.getByRole("textbox", { name: "New thread" })).toHaveAttribute("aria-label", "New thread")
+    expect(screen.queryByText("New thread")).not.toBeInTheDocument()
   })
 
   it("keeps the placeholder as an additional hint", () => {
     renderDrawer(makeProject(ROLE.COMMENTER))
     expect(screen.getByRole("textbox", { name: "New thread" }))
-      .toHaveAttribute("placeholder", "Start a new comment thread...")
+      .toHaveAttribute("placeholder", "Leave a comment...")
+    expect(screen.getByRole("button", { name: "Post" })).toHaveAttribute("data-variant", "outline")
+  })
+})
+
+describe("CommentsDrawer — @mention a project member (AQU-761)", () => {
+  it("suggests roster members and inserts the one that is picked", async () => {
+    const user = userEvent.setup()
+    const onNewThread = vi.fn()
+    render(
+      <CommentsDrawer
+        project={makeProject(ROLE.COMMENTER)}
+        cell={CELL}
+        onClose={noop}
+        onNewThread={onNewThread}
+        onReply={noop}
+        onResolve={noop}
+        onReopen={noop}
+        currentUsername="alice"
+        mentionRoster={[{ username: "alice" }, { username: "bob" }, { username: "carol" }]}
+      />,
+    )
+    const field = screen.getByRole("textbox", { name: "New thread" })
+    await user.type(field, "Please review @b")
+    expect(screen.getByRole("option", { name: "@bob" })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "@alice" })).not.toBeInTheDocument()
+    await user.click(screen.getByRole("option", { name: "@bob" }))
+    expect(field.querySelector("[data-mention='bob']")).toHaveTextContent("@bob")
+    expect(screen.getByRole("button", { name: "Post" })).toHaveAttribute("data-variant", "default")
+    await user.click(screen.getByRole("button", { name: "Post" }))
+    expect(onNewThread).toHaveBeenCalledWith("Please review @[bob] ")
+  })
+})
+
+/**
+ * AQU-1815: the editor passes the drawer the caller's lane-scoped mention
+ * list when the org hides the roster from them. The drawer must carry the
+ * restricted flag to the composer, so an empty list reads "no one in your
+ * lanes", never "no one on this project".
+ */
+describe("CommentsDrawer — lane-scoped mention list (AQU-1815)", () => {
+  it("passes the restricted flag through to the new-thread composer", async () => {
+    const user = userEvent.setup()
+    render(
+      <CommentsDrawer
+        project={makeProject(ROLE.COMMENTER)}
+        cell={CELL}
+        onClose={noop}
+        onNewThread={noop}
+        onReply={noop}
+        onResolve={noop}
+        onReopen={noop}
+        currentUsername="carol"
+        mentionRoster={[]}
+        mentionRestricted
+      />,
+    )
+    await user.type(screen.getByRole("textbox", { name: "New thread" }), "@")
+    expect(screen.getByText("No one in your lanes to mention yet.")).toBeInTheDocument()
+    expect(screen.queryByText("No one on this project to mention.")).not.toBeInTheDocument()
+  })
+
+  it("still offers the lane-scoped names it was given", async () => {
+    const user = userEvent.setup()
+    render(
+      <CommentsDrawer
+        project={makeProject(ROLE.COMMENTER)}
+        cell={CELL}
+        onClose={noop}
+        onNewThread={noop}
+        onReply={noop}
+        onResolve={noop}
+        onReopen={noop}
+        currentUsername="carol"
+        mentionRoster={[{ username: "bob" }, { username: "mia" }]}
+        mentionRestricted
+      />,
+    )
+    await user.type(screen.getByRole("textbox", { name: "New thread" }), "@")
+    expect(screen.getByRole("option", { name: "@bob" })).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: "@mia" })).toBeInTheDocument()
+  })
+})
+
+// ── AQU-1957: a refused comment says so where it was typed ───────────────────
+
+describe("CommentsDrawer — refused comment submissions (AQU-1957)", () => {
+  function renderWithRefusals(refusals: CommentRefusal[], roleLevel: number = ROLE.COMMENTER) {
+    return render(
+      <CommentsDrawer
+        project={makeProject(roleLevel)}
+        cell={CELL}
+        liveComments={[]}
+        onClose={noop}
+        onNewThread={noop}
+        onReply={noop}
+        onResolve={noop}
+        onReopen={noop}
+        submitRefusals={refusals}
+      />,
+    )
+  }
+
+  const refusal = (id: string, reason: string): CommentRefusal => ({
+    id,
+    commentId: `cmt-${id}`,
+    kind: "comment.create",
+    status: 403,
+    reason,
+  })
+
+  it("shows nothing when no comment was refused", () => {
+    renderWithRefusals([])
+    expect(screen.queryByTestId("comments-drawer-submit-refused")).not.toBeInTheDocument()
+  })
+
+  it("names the role refusal for a single refused comment", () => {
+    renderWithRefusals([refusal("r1", "role too low for comment.create")])
+    expect(screen.getByTestId("comments-drawer-submit-refused")).toHaveTextContent(
+      "1 comment you wrote wasn't posted — your role wasn't allowed to comment on this project.",
+    )
+  })
+
+  it("counts several refusals and reports the dominant reason", () => {
+    renderWithRefusals([
+      refusal("r1", "role too low for comment.create"),
+      refusal("r2", "role too low for comment.create"),
+      refusal("r3", "file 'file-1' not in scope for comment.create"),
+    ])
+    expect(screen.getByTestId("comments-drawer-submit-refused")).toHaveTextContent(
+      "3 comments you wrote weren't posted — your role wasn't allowed to comment on this project.",
+    )
+  })
+
+  it("falls back to the server's raw reason rather than swallowing an unmapped one", () => {
+    renderWithRefusals([refusal("r1", "some brand new server refusal")])
+    expect(screen.getByTestId("comments-drawer-submit-refused")).toHaveTextContent(
+      "some brand new server refusal",
+    )
+  })
+
+  it("still reports the refusal to a role that can no longer comment", () => {
+    // The refusal is the past tense of a role that may have changed since; the
+    // denial and the refusal are different sentences and both must be visible.
+    renderWithRefusals([refusal("r1", "role too low for comment.create")], ROLE.VIEWER)
+    expect(screen.getByTestId("comments-drawer-denial")).toBeInTheDocument()
+    expect(screen.getByTestId("comments-drawer-submit-refused")).toBeInTheDocument()
   })
 })

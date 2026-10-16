@@ -177,6 +177,17 @@ describe("AudioRecordingModal — upload a file", () => {
     await waitFor(() => expect(onTakeSaved).toHaveBeenCalledWith("c1"))
   })
 
+  // AQU-1572: an upload is `audio attached`, never `audio recorded`.
+  // The emit seam counts one event per attach that carries an origin, so the
+  // upload must be exactly one attach, and it must say "attach".
+  it("reports the upload once as an attached file", async () => {
+    emitAttach.mockClear()
+    renderModal()
+    pick(new File(["bytes"], "line.wav", { type: "audio/wav" }))
+    await waitFor(() => expect(emitAttach).toHaveBeenCalledTimes(1))
+    expect(emitAttach.mock.calls[0][0]).toMatchObject({ fileId: "f1", cellId: "c1", audioOrigin: "attach", surface: "recorder" })
+  })
+
   it("keeping a take leaves every way of making another one live (2026-08-13)", async () => {
     renderModal()
     pick(new File(["bytes"], "line.wav", { type: "audio/wav" }))

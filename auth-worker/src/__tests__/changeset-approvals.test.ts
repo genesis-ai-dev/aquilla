@@ -96,9 +96,7 @@ async function seedCell(args: {
   targetLang?: string
 }): Promise<void> {
   await env.AQUILLA_PG.prepare(
-    `INSERT INTO cells
-        (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at, target_lang)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at, lane_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, (SELECT CASE WHEN ? = 'source' THEN aquilla_test_resolve_source_lane(?) ELSE aquilla_test_resolve_target_lane(?, ?) END))`,
   )
     .bind(
       args.projectId,
@@ -109,6 +107,9 @@ async function seedCell(args: {
       args.canonicalRef ?? null,
       crypto.randomUUID(),
       NOW,
+      args.side,
+      args.projectId,
+      args.projectId,
       args.targetLang ?? "",
     )
     .run()
@@ -171,6 +172,47 @@ describe("GET /api/v2/changesets/:id/approval", () => {
       digest: DEFAULT_DIGEST,
     })
     expect(body.summary.translationsAdded).toBe(3)
+  })
+
+  // AQU-1673: the approval payload has to say WHO staged the plan, because
+  // that decides whether approving it must also commit it. An agent commits
+  // its own plan; a plan staged from the app ("Import as proposals") has no
+  // agent coming back, so the approving surface commits it. Without this field
+  // the client cannot tell them apart, and a QA walk of PR #1176 caught the
+  // consequence: "Approved" over text that never reached a cell.
+  it("reports the credential that staged the plan", async () => {
+    await seedUser(1, "alice")
+    await seedProject("proj-1", "Blackfoot", 1)
+    const credId = await seedCredential(1)
+    await seedChangeset({ id: "cs-1", projectId: "proj-1", createdByUserId: 1, credentialId: credId })
+
+    const res = await app.request(
+      "/api/v2/changesets/cs-1/approval",
+      { method: "GET", headers: authHeader(await jwtFor("alice")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    expect((await res.json() as { credentialId: string }).credentialId).toBe(credId)
+  })
+
+  it("reports the session sentinel for a plan staged from the app itself", async () => {
+    await seedUser(1, "alice")
+    await seedProject("proj-1", "Blackfoot", 1)
+    // sync-worker's SESSION_CREDENTIAL_ID — a plain TEXT value, no credential row.
+    await seedChangeset({
+      id: "cs-session",
+      projectId: "proj-1",
+      createdByUserId: 1,
+      credentialId: "session",
+    })
+
+    const res = await app.request(
+      "/api/v2/changesets/cs-session/approval",
+      { method: "GET", headers: authHeader(await jwtFor("alice")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    expect((await res.json() as { credentialId: string }).credentialId).toBe("session")
   })
 
   it("returns per-cell before/after changes for SetTranslation commands", async () => {

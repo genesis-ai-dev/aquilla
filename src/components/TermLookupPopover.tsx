@@ -98,7 +98,9 @@ function ConceptPanel({ concept, onViewConcept }: ConceptPanelProps) {
         </p>
       )}
 
-      {onViewConcept && (
+      {/* AQU-1721: a concept from a subscribed termbase belongs to another
+          project. This project's Terminology page neither lists nor edits it. */}
+      {onViewConcept && !concept.termbaseProjectId && (
         <Button
           type="button"
           variant="outline"

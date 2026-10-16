@@ -1,0 +1,77 @@
+name: Release cut
+
+# Cuts the next production release branch. Steps and hard stops are in
+# e2e/journeys/RELEASE-CUT.md.
+#
+# Two triggers:
+# - A calver tag push. scripts/tag-release.sh pushes it at the end of
+#   `pnpm run deploy:aquilla`, once production serves the release, so the
+#   next slice is cut the moment the in-flight release closes. GitHub reads
+#   this file from the tagged commit, so it fires for releases cut after
+#   this trigger reached dev.
+# - "Run workflow", for a release branch deleted instead of deployed, or to
+#   see the plan without pushing.
+#
+# scripts/release-plan.mjs decides whether to cut and what; this workflow
+# only acts on its JSON. It never deploys and never tags. The branch push is
+# what starts smart Jev (docs/runbooks/smart-testing-webhook.md).
+
+on:
+  push:
+    # Calver only: YYYY.MM.DD.NN, as tag-release.sh writes it.
+    tags: ['20[0-9][0-9].[0-9][0-9].[0-9][0-9].[0-9][0-9]']
+  workflow_dispatch:
+    inputs:
+      plan_only:
+        description: 'Show the plan without pushing a branch'
+        required: false
+        type: boolean
+        default: false
+
+# Two runs at once would plan the same branch name. Queue the second run;
+# it then sees the first release in flight and stops.
+concurrency:
+  group: release-cut
+  cancel-in-progress: false
+
+jobs:
+  cut:
+    runs-on: ubuntu-latest
+    permissions:
+      # Push the release branch and post the release notes commit comment.
+      contents: write
+      # The walk lookup reads the QA bot's comments on each merged PR.
+      pull-requests: read
+      issues: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: dev
+          fetch-depth: 0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+
+      # The plan reads refs/remotes/origin/release/* and 20* tags directly;
+      # a stale fetch is a stale plan.
+      - name: Fetch tags and release branches
+        run: |
+          git fetch origin --tags
+          git fetch origin 'refs/heads/release/*:refs/remotes/origin/release/*'
+
+      - name: Plan
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/release-plan.mjs > "$RUNNER_TEMP/plan.json"
+
+      - name: Cut
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PLAN_ONLY: ${{ inputs.plan_only }}
+        run: |
+          if [ "$PLAN_ONLY" = "true" ]; then
+            node scripts/release-cut.mjs "$RUNNER_TEMP/plan.json" --plan-only
+          else
+            node scripts/release-cut.mjs "$RUNNER_TEMP/plan.json"
+          fi

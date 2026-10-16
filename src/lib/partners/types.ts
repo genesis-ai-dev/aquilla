@@ -104,6 +104,33 @@ export interface PartnerImportScreen {
 }
 
 /**
+ * A rewrite of an already-exported IDML package. `apply` receives the notes
+ * export and returns the bytes to download. Failure is the caller's to
+ * handle — the notes export is already valid on its own.
+ */
+export interface PartnerIdmlExportTransform {
+  busyMessage: string
+  failureMessage: (reason: string) => string
+  apply: (idml: Uint8Array) => Promise<{ bytes: Uint8Array; statusMessage: string }>
+}
+
+export interface PartnerIdmlExportPanelProps {
+  disabled?: boolean
+  /** Original imported file name, used to pick a language mapping volume. */
+  fileName: string | null
+  /** The imported package, not the notes-only export. Compatibility reads this. */
+  loadSourcePackage?: () => Promise<Uint8Array>
+  onTransformChange: (transform: PartnerIdmlExportTransform | null) => void
+}
+
+export interface PartnerIdmlExportOption {
+  id: string
+  /** `builtin:*` profile ids this option is offered for. */
+  profileIds: readonly string[]
+  panel: () => Promise<{ default: ComponentType<PartnerIdmlExportPanelProps> }>
+}
+
+/**
  * A publisher-specific normalization applied to a translated IDML cell before it
  * is validated, for typesetting a publisher's templates carry that is not text
  * (see the apostrophe glue in AQU-1174). Returns the html unchanged when it does
@@ -130,6 +157,14 @@ export interface PartnerIntegration {
   id: string
   importScreen?: PartnerImportScreen
   idmlTargetHtmlNormalizers?: readonly IdmlTargetHtmlNormalizer[]
+  /**
+   * Extra controls on the export dialog for files this partner imported, and
+   * an optional rewrite of the finished IDML. The panel is a lazy import so
+   * the partner's export tooling stays out of the app's initial bundle.
+   * Generic code never names the option — it offers whatever matches the
+   * file's profile id.
+   */
+  idmlExportOptions?: readonly PartnerIdmlExportOption[]
   /**
    * True for a cell that holds the partner's published Bible text rather than
    * apparatus about it (AQU-1285), so the editor can mark verse rows. Must be

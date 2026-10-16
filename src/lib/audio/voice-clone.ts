@@ -1,4 +1,4 @@
-// Voice-clone client: talks to apps/sync's /api/v1/voice/* routes.
+// Voice-clone client: talks to sync-worker's /api/v1/voice/* routes.
 //
 //   - reference clips (the timbre a clone Voice points at) are project-scoped
 //     blobs in R2, uploaded/fetched via /api/v1/voice/reference/:projectId/:id

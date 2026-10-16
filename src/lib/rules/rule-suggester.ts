@@ -48,22 +48,65 @@ export type UsageCallback = (meta: { kind: string; model?: string; provider: str
 // AQU-198: suggest rules from mined edit candidates
 // ---------------------------------------------------------------------------
 
+/** How many mined candidates one suggestion batch shows the LLM. */
+const CANDIDATES_PER_BATCH = 20
+/** A focused ask ("rules about punctuation") gets a wider window, since the
+ *  model filters it down to the edits that bear on the focus. */
+const CANDIDATES_PER_FOCUSED_BATCH = 40
+
+export interface SuggestFromCandidatesOptions {
+  /** What the user wants rules about, e.g. "punctuation". Empty = anything. */
+  focus?: string
+  /** Rule names already in the list (saved, drafted or dismissed) — the model
+   *  must not propose these again, so "suggest more" yields new rules. */
+  exclude?: string[]
+  /** Where this batch's window starts in the ranked candidates. Later batches
+   *  advance it so each one looks at different edits; it wraps around. */
+  offset?: number
+}
+
+/**
+ * Pick this batch's window of candidates: `size` items starting at `offset`,
+ * wrapping past the end so a later batch on a small corpus still sees a full
+ * window rather than an empty one.
+ */
+export function candidateWindow<T>(candidates: T[], offset: number, size: number): T[] {
+  if (candidates.length <= size) return candidates
+  const start = ((offset % candidates.length) + candidates.length) % candidates.length
+  return Array.from({ length: size }, (_, i) => candidates[(start + i) % candidates.length])
+}
+
 /**
  * Produce a prompt body from a list of (source, target) candidate pairs,
  * annotated with their evidence strings. Passed to the same LLM system
  * prompt as `suggestRulesFromPairs`.
  */
-function buildCandidatePrompt(
+export function buildCandidatePrompt(
   candidates: { sourceSample: string; targetSample: string; evidence: string }[],
+  { focus, exclude = [] }: Pick<SuggestFromCandidatesOptions, "focus" | "exclude"> = {},
 ): string {
   const lines = candidates
-    .slice(0, 20)
     .map(
       (c, i) =>
         `${i + 1}. Source: "${c.sourceSample}"\n   Target: "${c.targetSample}"\n   Evidence: ${c.evidence}`,
     )
     .join("\n\n")
-  return `Analyze these ${Math.min(candidates.length, 20)} translation patterns (some repeated across cells, some recent edits, some from validated pairs) and propose rules:\n\n${lines}\n\nReturn a JSON array of rule suggestions.`
+  const parts = [
+    `Analyze these ${candidates.length} translation patterns (some repeated across cells, some recent edits, some from validated pairs) and propose rules:\n\n${lines}`,
+  ]
+  const trimmedFocus = focus?.trim()
+  if (trimmedFocus) {
+    parts.push(
+      `The translator asked specifically for rules about: "${trimmedFocus}". Look only at the changes in these patterns that relate to that, and propose only rules about it. If none of the patterns bear on it, return [].`,
+    )
+  }
+  if (exclude.length > 0) {
+    parts.push(
+      `These rules already exist or were already proposed. Do not propose them again, or near-duplicates of them:\n${exclude.map((name) => `- ${name}`).join("\n")}`,
+    )
+  }
+  parts.push("Return a JSON array of rule suggestions.")
+  return parts.join("\n\n")
 }
 
 /**
@@ -78,10 +121,12 @@ export async function suggestRulesFromCandidates(
   settings: CompletionSettings,
   session: FrontierSession | null = null,
   onLlmCall?: UsageCallback,
+  { focus, exclude, offset = 0 }: SuggestFromCandidatesOptions = {},
 ): Promise<{ suggestions: RuleSuggestion[]; evidence: string[] }> {
   if (candidates.length === 0) return { suggestions: [], evidence: [] }
 
-  const prompt = buildCandidatePrompt(candidates)
+  const size = focus?.trim() ? CANDIDATES_PER_FOCUSED_BATCH : CANDIDATES_PER_BATCH
+  const prompt = buildCandidatePrompt(candidateWindow(candidates, offset, size), { focus, exclude })
   const response = await complete({
     settings: { ...settings, maxTokens: Math.min(settings.maxTokens, 2048), temperature: 0.2 },
     session,

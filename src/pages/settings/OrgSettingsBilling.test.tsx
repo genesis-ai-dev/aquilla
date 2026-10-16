@@ -115,9 +115,9 @@ beforeEach(() => {
 })
 afterEach(() => vi.clearAllMocks())
 
-function renderBilling() {
+function renderBilling(path = "/orgs/1/settings/billing") {
   return render(
-    <MemoryRouter initialEntries={["/orgs/1/settings/billing"]}>
+    <MemoryRouter initialEntries={[path]}>
       <OrgProvider>
         <Link to="/orgs/2/settings/billing">Switch workspace</Link>
         <Routes>
@@ -145,12 +145,14 @@ describe("OrgSettingsBilling", () => {
   it('shows an unavailable state instead of claiming Free or insufficient permissions', async () => {
     vi.mocked(getBillingWorkspace).mockRejectedValueOnce(new Error('offline'))
     renderBilling()
-    expect(await screen.findByRole('alert')).toHaveTextContent('Billing details are unavailable')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Billing details are unavailable. Try again; your access stays unchanged.')
     expect(screen.queryByTestId('billing-plan')).toBeNull()
     expect(mockGet).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Retry billing' }))
     mockGet.mockResolvedValue(unpaid)
     expect(await screen.findByTestId('billing-plan')).toHaveTextContent('Free')
+    // A retry that succeeds must clear the failure, not leave it beside the plan.
+    expect(screen.queryByRole('alert')).toBeNull()
   })
   it('discards an older workspace response after navigation', async () => {
     let resolve!: (workspace: BillingWorkspace) => void
@@ -174,6 +176,19 @@ describe("OrgSettingsBilling", () => {
     expect(screen.getByTestId("billing-usage").textContent).toMatch(/rolling seven-day/)
     expect(screen.getByRole("link", { name: "Check covered access" }).getAttribute("href")).toContain("ETEN%20affiliate")
     expect(screen.queryByText(/4 weeks|4-week|\$500|\$200/)).toBeNull()
+  })
+
+  // The notice is stored as a catalog key and translated at render (AQU-1401),
+  // so a dropped t() would show the raw key to someone back from Stripe.
+  it.each([
+    ["success", "Checkout completed. Your plan updates after payment is confirmed."],
+    ["cancel", "Checkout canceled."],
+    ["rehearsal", "Test checkout returned. Refresh billing to check payment confirmation."],
+  ])("announces a %s checkout return in catalog copy, not a message key", async (checkout, notice) => {
+    mockGet.mockResolvedValueOnce(unpaid)
+    renderBilling(`/orgs/1/settings/billing?checkout=${checkout}`)
+    expect(await screen.findByText(notice)).toBeVisible()
+    expect(document.body.textContent).not.toContain("billing.checkout.")
   })
 
   it("shows portal but no unavailable add-on purchases on an active Field Plan", async () => {
@@ -244,6 +259,15 @@ it('routes native paid billing to the workspace portal and preserves access on f
   expect(screen.getByTestId('billing-plan')).toHaveTextContent('Pro')
   expect(screen.getByRole('button', { name: 'Manage billing' })).toBeEnabled()
   expect(getBillingOffers).not.toHaveBeenCalled()
+})
+
+it('explains a portal failure that carries no message in catalog copy', async () => {
+  vi.mocked(getBillingWorkspace).mockResolvedValue({ ...paidWorkspace('pro'), portalEnabled: true })
+  vi.mocked(startWorkspaceBillingPortal).mockRejectedValueOnce('network down')
+  renderBilling()
+  fireEvent.click(await screen.findByRole('button', { name: 'Manage billing' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't start Stripe.")
+  expect(screen.getByRole('button', { name: 'Manage billing' })).toBeEnabled()
 })
 
 // AQU-1524: a settings card has no padding of its own — only its rows supply the

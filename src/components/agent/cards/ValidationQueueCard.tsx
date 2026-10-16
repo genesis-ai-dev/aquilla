@@ -10,7 +10,7 @@
  */
 
 import { useState } from "react"
-import { BadgeCheck, Check, X } from "lucide-react"
+import { BadgeCheck, Ban, Check, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
@@ -26,11 +26,19 @@ export interface ValidationQueueCardProps {
   onApplied?: (eventIds: string[], cellIds: string[]) => void | Promise<void>
   /** Below this role the buttons render disabled (server still enforces). */
   canValidate: boolean
+  /**
+   * AQU-1630: a per-row refusal the role floor can't see — today the project's
+   * "Allow self-validation" being off on a line this reader last edited.
+   * Returns the reason to show in place of the button, or null when the row is
+   * offerable. The server stays authoritative either way; this only stops a
+   * guaranteed-403 from being presented as an action.
+   */
+  blockedReasonFor?: (ev: StagedEvent) => string | null
 }
 
 type RowState = "idle" | "applying" | "done" | "error"
 
-export function ValidationQueueCard({ proposal, applyContext, onApplied, canValidate }: ValidationQueueCardProps) {
+export function ValidationQueueCard({ proposal, applyContext, onApplied, canValidate, blockedReasonFor }: ValidationQueueCardProps) {
   const t = useT()
   const [rowState, setRowState] = useState<ReadonlyMap<number, RowState>>(new Map())
   const [rowError, setRowError] = useState<string | null>(null)
@@ -72,6 +80,10 @@ export function ValidationQueueCard({ proposal, applyContext, onApplied, canVali
       <div className="divide-y divide-emerald-900/20">
         {validations.map((ev, idx) => {
           const state = rowState.get(idx) ?? "idle"
+          // Resolved per row, not per card: self-validation turns on the
+          // line's last editor, so one proposal can mix offerable rows with
+          // rows this reader must leave to someone else.
+          const blockedReason = state === "idle" ? blockedReasonFor?.(ev) ?? null : null
           return (
             <div key={`${ev.cellId}-${idx}`} className="flex items-start gap-2 px-3 py-1.5 text-xs">
               <span className="w-16 shrink-0 pt-0.5 font-mono text-[10px] text-muted-foreground">
@@ -83,6 +95,11 @@ export function ValidationQueueCard({ proposal, applyContext, onApplied, canVali
               {state === "done" ? (
                 <span className="flex shrink-0 items-center gap-1 pt-0.5 text-[10px] text-emerald-600 dark:text-emerald-500">
                   <Check className="h-3 w-3" /> {t("editor.state.validated")}
+                </span>
+              ) : blockedReason ? (
+                <span className="flex max-w-[14rem] shrink-0 items-start gap-1 pt-0.5 text-[10px] text-muted-foreground">
+                  <Ban className="mt-px h-3 w-3 shrink-0" />
+                  <span>{blockedReason}</span>
                 </span>
               ) : (
                 <AppTooltip

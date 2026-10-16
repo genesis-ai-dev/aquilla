@@ -8,6 +8,8 @@
 // project renders exactly one chip — visual parity with the pre-lane table.
 
 import type { PortfolioLane, PortfolioProject } from "@/lib/frontier/portfolio"
+import { progressPercentOfFraction } from "@/lib/progress/progress-percent"
+import type { AssignLaneOption } from "@/lib/sync/assignment-lane"
 
 /**
  * Display lanes for a project: the default ('') lane is always first, followed
@@ -22,11 +24,13 @@ export function displayLanes(p: PortfolioProject): PortfolioLane[] {
     validatedCells: p.validatedCells,
     lastEditAt: p.lastEditAt,
   }
-  if (!p.lanes || p.lanes.length === 0) return [synthesizedDefault]
-  const defaults = p.lanes.filter((l) => l.lane === "")
-  const rest = p.lanes.filter((l) => l.lane !== "")
-  const defaultLane = defaults.length > 0 ? defaults[0] : synthesizedDefault
-  return [defaultLane, ...rest]
+  // AQU-1977: archived languages are not live work. The overview's own lane
+  // tabs and Languages table already leave them out (AQU-1458); here they were
+  // chips and Assign options like any other.
+  const lanes = (p.lanes ?? []).filter((lane) => lane.role !== "source" && lane.archived !== true)
+  if (lanes.length === 0) return [synthesizedDefault]
+  // Every target row stays, including two that share a tag. The server orders them.
+  return lanes
 }
 
 /** Human label for a lane chip: the '' lane shows the project's default target
@@ -49,26 +53,51 @@ export function laneChipLabel(
 /**
  * AQU-606 — resolve the label for a project's '' (default) lane.
  *
- * After the lanes migration a project's target language lives on **project
- * settings** (surfaced as `PortfolioProject.targetLanguage`, AQU-523) while its
- * migrated files carry no per-file `targetLanguage` hint. Deriving the label
- * from the file hint alone therefore left every migrated project's default lane
- * showing the generic "Default" placeholder instead of e.g. "French".
+ * The label comes off the lane: a project's target language lives on **project
+ * settings** (surfaced as `PortfolioProject.targetLanguage`, AQU-523), and
+ * after AQU-1419 on the lane row itself. `''` when there is none, so the caller
+ * renders the neutral "no target set" placeholder.
  *
- * Resolution order: the project-level target language, then the per-file hint
- * (which still covers projects whose files were tagged before the migration),
- * then '' so the caller renders the neutral "no target set" placeholder.
+ * AQU-1596: this used to fall back to a per-file `targetLanguage` hint. A file
+ * only ever *declared* a language — a Macula file declares the corpus code
+ * `hbo`, and a translation imported into the French lane may declare Spanish —
+ * so that fallback could label a lane with a language the lane does not have.
+ * A missing label is better than a wrong one; the declared value stays on the
+ * file as import information and is never read as a lane's language.
  */
 export function resolveDefaultLaneLabel(
-  project: Pick<PortfolioProject, "targetLanguage">,
-  fileHint?: string,
+  project: Pick<PortfolioProject, "targetLanguage" | "lanes">,
 ): string {
-  return project.targetLanguage?.trim() || fileHint?.trim() || ""
+  // AQU-1977: the '' lane's own row name first. The portfolio stopped sending
+  // the retired project-level `targetLanguage`, so on its own this read '' for
+  // every project and the lane showed as "Default language".
+  const row = project.lanes?.find((lane) => lane.role !== "source" && lane.lane === "")
+  return row?.name?.trim() || project.targetLanguage?.trim() || ""
 }
 
-/** A 0..100 integer percentage guarded against NaN (missing counts). */
+/**
+ * AQU-1977: what an Assign launched from the org table offers — the project's
+ * own live languages, in the table's order, labelled as their chips are. No
+ * invented default: on a project with no '' lane, an assignment saved into ''
+ * belongs to no lane and its progress reads 0.
+ */
+export function assignLaneOptionsForPortfolio(
+  p: PortfolioProject,
+  fallbackLabel: string,
+): AssignLaneOption[] {
+  const defaultLabel = resolveDefaultLaneLabel(p)
+  return displayLanes(p).map((lane) => ({
+    legacyTag: lane.lane,
+    label: laneChipLabel(lane.lane, defaultLabel, fallbackLabel, lane.name),
+  }))
+}
+
+/**
+ * A 0..100 integer percentage guarded against NaN (missing counts), and never
+ * 100 while a cell in the lane is outstanding (AQU-1493).
+ */
 export function safePct(fraction: number): number {
-  return Number.isFinite(fraction) ? Math.round(fraction * 100) : 0
+  return progressPercentOfFraction(fraction)
 }
 
 /**

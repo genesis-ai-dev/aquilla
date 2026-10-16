@@ -23,6 +23,8 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
+import { UserChip } from "@/components/UserChip"
 import { formatDateTime } from "@/lib/i18n/format"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
@@ -111,15 +113,15 @@ export function LiveChangesetCard({
   const allConfirmed = testimony.every((entry) => confirmed.has(entry.key))
 
   // Routing (COMMAND-REGISTRY-P1 §2.2): the payload names an assignee by id,
-  // so the roster supplies the human name. A null projectId makes the hook
-  // inert, so an UNassigned card costs no request; when the roster is
-  // unavailable (org policy hides it, or it hasn't landed yet) the id is a
-  // truthful fallback.
+  // so the roster supplies the username. A null projectId makes the hook
+  // inert, so an unassigned card costs no request. When the roster can't name
+  // them, the chip says "User" and the tooltip keeps the id — the id is not
+  // the label.
   const assignedToUserId = approval?.assignedToUserId ?? null
   const { members } = useProjectMembers(assignedToUserId && approval ? approval.projectId : null)
-  const assignee = useMemo(() => {
+  const assigneeUsername = useMemo(() => {
     if (!assignedToUserId) return null
-    return members.find((m) => String(m.userId) === assignedToUserId)?.username ?? assignedToUserId
+    return members.find((m) => String(m.userId) === assignedToUserId)?.username ?? null
   }, [assignedToUserId, members])
 
   const refresh = () => {
@@ -223,12 +225,24 @@ export function LiveChangesetCard({
         </Badge>
       </div>
 
-      {assignee !== null && (
+      {assignedToUserId !== null && (
         <p className="flex items-start gap-1 text-[11px] text-muted-foreground">
           <UserRound className="mt-px h-3 w-3 shrink-0" />
           <span>
-            <span className="font-medium text-foreground">
-              {t("agent.changeset.routedTo", { user: assignee })}
+            <span className="inline-flex items-center gap-1 font-medium text-foreground">
+              <RichMessage
+                k="agent.changeset.routedTo"
+                values={{
+                  user: (
+                    <UserChip
+                      userId={assignedToUserId}
+                      username={assigneeUsername}
+                      size="xs"
+                      nameClassName="text-[11px]"
+                    />
+                  ),
+                }}
+              />
             </span>{" "}
             {t("agent.changeset.routedToNotice")}
           </span>

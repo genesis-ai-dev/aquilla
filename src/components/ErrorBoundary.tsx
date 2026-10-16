@@ -2,10 +2,14 @@
  * AQU-266: Global error boundary + crash telemetry.
  *
  * Wraps the router output so that any unhandled render throw shows a branded
- * recovery screen rather than a white screen of death. Also registers
- * window.onerror + unhandledrejection handlers that funnel uncaught errors into
- * posthog.captureException (consent-gated via the posthog module which already
- * respects isAnalyticsEnabled() on init and responds to onAnalyticsConsentChange).
+ * recovery screen rather than a white screen of death, and reports the throw
+ * via posthog.captureException (consent-gated via the posthog module which
+ * already respects isAnalyticsEnabled() on init and responds to
+ * onAnalyticsConsentChange). Also registers window error + unhandledrejection
+ * handlers for chunk-reload recovery; uncaught errors reach PostHog through its
+ * own exception autocapture (AQU-1572, see the handlers below). AQU-1966 adds
+ * the `vite:preloadError` handler, which is the only one that sees a stale
+ * chunk whose rejection the calling code catches itself.
  *
  * SWARM-TODO(AQU-266): UI-QA — force a render throw (e.g. via a dev-only query
  * param ?__crash=1 or React devtools) and confirm the branded recovery screen
@@ -20,6 +24,7 @@ import posthog from "@/lib/posthog"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { isChunkLoadError, recoverFromChunkError } from "@/lib/chunk-reload"
+import { isTauriRuntime } from "@/lib/offline/is-tauri"
 
 // ---------------------------------------------------------------------------
 // Dev-only crash trigger: appending ?__crash=1 to any URL while
@@ -48,15 +53,25 @@ function DevCrashTrigger() {
 
 // ---------------------------------------------------------------------------
 // Window-level error handlers — registered once when the module first loads.
-// Both forward to posthog.captureException; consent-gating is already baked
-// into posthog.ts (opt_out_capturing_by_default + onAnalyticsConsentChange).
+// They exist for chunk-reload recovery, which must run on every uncaught error.
+//
+// AQU-1572: on the web they no longer report to PostHog. posthog.ts inits with
+// `capture_exceptions: true`, which wraps window.onerror and
+// window.onunhandledrejection itself, so a capture here sent every uncaught
+// error twice.
+//
+// The desktop shell is the exception. posthog-js lazy-loads that autocapture
+// from its CDN as a <script>, and the shell's CSP (`script-src 'self'` in
+// src-tauri/tauri.conf.json) blocks it, so autocapture never starts there and
+// these handlers are the only capture. Consent-gating is baked into posthog.ts
+// either way (opt_out_capturing_by_default + onAnalyticsConsentChange).
 // ---------------------------------------------------------------------------
 if (typeof window !== "undefined") {
   window.addEventListener("error", (event: ErrorEvent) => {
     const err = event.error instanceof Error
       ? event.error
       : new Error(event.message || "Unknown window.onerror")
-    posthog.captureException(err, { properties: { source: "window.onerror" } })
+    if (isTauriRuntime()) posthog.captureException(err, { source: "window.onerror" })
     recoverFromChunkError(err)
   })
 
@@ -64,8 +79,34 @@ if (typeof window !== "undefined") {
     const err = event.reason instanceof Error
       ? event.reason
       : new Error(String(event.reason ?? "Unhandled promise rejection"))
-    posthog.captureException(err, { properties: { source: "unhandledrejection" } })
+    if (isTauriRuntime()) posthog.captureException(err, { source: "unhandledrejection" })
     recoverFromChunkError(err)
+  })
+
+  // AQU-1966: the two handlers above only ever see a chunk failure that nobody
+  // caught — an uncaught throw or an unhandled rejection. Most of this app's
+  // dynamic imports are awaited inside a try/catch that owns the failure:
+  // ExportDialog loads every exporter with `await import(…)` under one
+  // `catch (e)` that renders the message as "export failed", and the audio
+  // denoiser, the upstream-changes panel and the workspace's sync helpers do
+  // the same. After a deploy those rejections never reach `window`, so a
+  // translator on a day-old tab was told their export broke rather than that
+  // the app had updated — the misattributed "random breakage" in this ticket.
+  //
+  // Vite dispatches `vite:preloadError` from the preload helper itself, before
+  // the rejection is handed to the caller, so it is the only hook that covers a
+  // dynamic import whose failure is caught locally. The event is left to run
+  // its course (no `preventDefault`), so when the one reload per chunk is
+  // already spent the caller still shows its own failure path instead of the
+  // click going dead.
+  //
+  // The event only exists in a build, where Vite wraps each dynamic import in
+  // its `__vitePreload` helper — the dev server serves native `import()`. That
+  // matches the bug, which only happens when hashed assets are replaced by a
+  // deploy. Nothing here disables `build.modulePreload`; if anything ever does,
+  // this handler stops firing and the swallowed-rejection hole reopens.
+  window.addEventListener("vite:preloadError", (event: Event) => {
+    recoverFromChunkError((event as Event & { payload?: unknown }).payload)
   })
 }
 
@@ -82,14 +123,29 @@ function ErrorFallback({
   onReload,
   isChunkError,
   compact,
+  boundary,
 }: {
   onReload: () => void
   isChunkError?: boolean
   compact?: boolean
+  /** Which boundary is showing, mirrored into `data-boundary` — see the
+   * data-slot note below. */
+  boundary: string
 }) {
   const t = useT()
   return (
-    <div className={cn("flex items-center justify-center p-8", compact ? "h-full" : "min-h-screen")}>
+    // AQU-642: `data-slot` + `data-boundary` are the only machine-readable
+    // signal that a render throw replaced a surface with this screen. The e2e
+    // Workspace page object races them against the first cell row, so an
+    // editor that crashed at mount fails immediately and names the boundary
+    // instead of burning the readiness budget on a `[data-cell-id]` locator
+    // that can never appear. Keep them in sync with
+    // e2e/helpers/page-objects/Workspace.ts.
+    <div
+      data-slot="error-boundary-fallback"
+      data-boundary={boundary}
+      className={cn("flex items-center justify-center p-8", compact ? "h-full" : "min-h-screen")}
+    >
       <div className="flex max-w-sm flex-col items-center gap-2 text-center">
         <div className="text-muted-foreground">
           <AlertTriangle className="h-10 w-10" aria-hidden />
@@ -149,12 +205,16 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
+    // Not a duplicate of PostHog's autocapture (AQU-1572): React 19 reports an
+    // error a boundary caught to console.error, never to window.onerror, and
+    // `capture_exceptions: true` leaves console errors alone — so this is the
+    // only capture of a render throw. The second argument is the event's
+    // property bag itself; wrapping it in `{ properties: … }` filed all three
+    // under one nested `properties` key instead of as event properties.
     posthog.captureException(error, {
-      properties: {
-        source: "react_error_boundary",
-        boundary: this.props.label ?? "root",
-        componentStack: info.componentStack,
-      },
+      source: "react_error_boundary",
+      boundary: this.props.label ?? "root",
+      componentStack: info.componentStack,
     })
     // Stale-chunk render throws get one automatic reload before showing the
     // "App updated" fallback (see @/lib/chunk-reload).
@@ -183,6 +243,7 @@ export class ErrorBoundary extends Component<Props, State> {
           onReload={this.handleReload}
           isChunkError={this.state.isChunkError}
           compact={this.props.compact}
+          boundary={this.props.label ?? "root"}
         />
       )
     }

@@ -393,7 +393,7 @@ describe('SetBrief — validation (rejected at prepare, never staged)', () => {
     const maintainer = await memberToken(tdb, 600)
     const { res, body } = await prepare(env, maintainer.token, [
       ...setBrief({ parameters: { purpose: 'x' } }),
-      { kind: 'SetTranslation', fileId: 'f', cellId: 'c', value: 'v' },
+      { kind: 'SetTranslation', fileId: 'f', cellId: 'c', laneId: 'deflane1', value: 'v' },
     ])
     expect(res.status).toBe(400)
     expect(body.error.code).toBe('validation_failed')

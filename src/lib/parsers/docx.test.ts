@@ -103,6 +103,67 @@ describe("extractDocxStrings", () => {
     expect(result[0].originalHtml).toBe("<i>italic</i>")
   })
 
+  // AQU-1719: a Google Docs export writes an explicit off flag for every toggle
+  // on every run. Reading presence alone marked unformatted source text as
+  // struck/underlined/bold/italic.
+  it("treats explicit off toggles (w:val=\"0\") as unformatted", async () => {
+    const buffer = await makeDocx(`
+      <w:p>
+        <w:r>
+          <w:rPr>
+            <w:b w:val="0"/><w:bCs w:val="0"/>
+            <w:i w:val="0"/><w:iCs w:val="0"/>
+            <w:strike w:val="0"/>
+            <w:u w:val="none"/>
+          </w:rPr>
+          <w:t>But it impacts everything.</w:t>
+        </w:r>
+      </w:p>
+    `)
+    const result = await extractDocxStrings(buffer)
+    expect(result[0].original).toBe("But it impacts everything.")
+    expect(result[0].originalHtml).toBeUndefined()
+  })
+
+  it("treats w:val=\"false\" and w:val=\"off\" as unformatted", async () => {
+    const buffer = await makeDocx(`
+      <w:p>
+        <w:r>
+          <w:rPr><w:b w:val="false"/><w:i w:val="off"/></w:rPr>
+          <w:t>plain</w:t>
+        </w:r>
+      </w:p>
+    `)
+    const result = await extractDocxStrings(buffer)
+    expect(result[0].originalHtml).toBeUndefined()
+  })
+
+  it("still honours toggles turned on explicitly (w:val=\"1\")", async () => {
+    const buffer = await makeDocx(`
+      <w:p>
+        <w:r>
+          <w:rPr><w:b w:val="1"/><w:u w:val="single"/></w:rPr>
+          <w:t>loud</w:t>
+        </w:r>
+      </w:p>
+    `)
+    const result = await extractDocxStrings(buffer)
+    expect(result[0].originalHtml).toBe("<u><b>loud</b></u>")
+  })
+
+  it("keeps the on toggles of a run that also carries off toggles", async () => {
+    const buffer = await makeDocx(`
+      <w:p>
+        <w:r>
+          <w:rPr><w:b/><w:i w:val="0"/><w:strike w:val="0"/><w:u w:val="none"/></w:rPr>
+          <w:t>bold only</w:t>
+        </w:r>
+      </w:p>
+    `)
+    const result = await extractDocxStrings(buffer)
+    expect(result[0].originalHtml).toBe("<b>bold only</b>")
+  })
+
   it("concatenates multiple runs", async () => {
     const buffer = await makeDocx(`
       <w:p>

@@ -3,15 +3,24 @@
 // reconfigure-with-AI textarea. Split from MondayIntegrationSection to keep
 // each file under the ~500-line budget; all state lives in the parent.
 
+import type { ReactNode } from "react"
 import { AlertTriangle, RefreshCw, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { FieldLabel } from "@/components/ui/field"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { SparkleButton } from "@/components/SparkleButton"
 import type { MondayBoardLink, MondayBoardStructure } from "@/lib/monday/api"
-import type { MondayMapping } from "@/lib/monday/types"
+import {
+  MONDAY_METRIC_KEYS,
+  MONDAY_READONLY_COLUMN_TYPES,
+  MONDAY_WRITABLE_TYPES_BY_METRIC,
+  type MondayColumnMapping,
+  type MondayMapping,
+} from "@/lib/monday/types"
+import type { MondayNewColumn } from "./useMondayBoardChanges"
 import { MondayMappingEditor, MondayMappingTable } from "./MondayMappingEditor"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { DateTooltip } from "@/components/ui/date-tooltip"
@@ -34,6 +43,13 @@ export function MondayLinkedView({
   onReconfigure,
   onUnlink,
   warnings,
+  missingColumns = null,
+  newColumns = [],
+  requestedRow = null,
+  onMapColumn,
+  onDismissColumn,
+  checkingBoard = false,
+  structureLoading = false,
 }: {
   link: MondayBoardLink
   structure: MondayBoardStructure | null
@@ -51,17 +67,69 @@ export function MondayLinkedView({
   onReconfigure: () => void
   onUnlink: () => void
   warnings: string[]
+  /** The column picker: add Aquilla's columns to the board and map them. */
+  missingColumns?: ReactNode
+  /** Columns on the board that weren't there when the link was saved. */
+  newColumns?: MondayNewColumn[]
+  /** "Map it" was clicked: the editor adds a row for this column. */
+  requestedRow?: { column: MondayNewColumn; nonce: number } | null
+  onMapColumn?: (column: MondayNewColumn) => void
+  onDismissColumn?: (columnId: string) => void
+  /** A board read or a dismiss is running: what the box offers may change. */
+  checkingBoard?: boolean
+  /** The board's columns haven't loaded yet, so the mapping has no titles. */
+  structureLoading?: boolean
 }) {
   const { t } = useI18n()
+  const showNewColumns = canManage && newColumns.length > 0
   return (
     <div className="space-y-4">
       {link.structureStale && (
         <div
           role="alert"
           className="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+          data-testid="monday-board-changes"
         >
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{t("projectSettings.monday.structureStaleWarning")}</span>
+          {showNewColumns ? (
+            <div className="min-w-0 flex-1 space-y-2">
+              <p>{t("projectSettings.monday.boardChangesIntro")}</p>
+              <ul className="space-y-1.5">
+                {newColumns.map((column) => (
+                  <li key={column.id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="font-medium">{column.title}</span>
+                    {mappableMetric(column.type) ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={checkingBoard}
+                        onClick={() => {
+                          onMapColumn?.(column)
+                          document
+                            .querySelector('[data-testid="monday-mapping-editor"]')
+                            ?.scrollIntoView({ block: "nearest", behavior: "smooth" })
+                        }}
+                      >
+                        {t("projectSettings.monday.boardChangesMap")}
+                      </Button>
+                    ) : (
+                      <span className="text-xs">{t("projectSettings.monday.boardChangesReadOnly")}</span>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={checkingBoard}
+                      onClick={() => onDismissColumn?.(column.id)}
+                    >
+                      {t("projectSettings.monday.boardChangesDismiss")}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <span>{t("projectSettings.monday.structureStaleWarning")}</span>
+          )}
         </div>
       )}
       {warnings.length > 0 && (
@@ -78,6 +146,11 @@ export function MondayLinkedView({
             {t("projectSettings.monday.linkedBoardPrefix")}{" "}
             <span className="font-medium">{link.boardName ?? link.boardId}</span>
           </p>
+          {(link.boardUrl ?? structure?.url) && (
+            <a href={link.boardUrl ?? structure?.url ?? undefined} target="_blank" rel="noopener noreferrer" className="underline">
+              {t("projectSettings.monday.overviewOpenBoard")}
+            </a>
+          )}
           <p className="text-xs text-muted-foreground">
             {t("projectSettings.monday.oneItemPerLabel", {
               granularity: link.config.itemGranularity === "file" ? "file" : "project",
@@ -114,10 +187,14 @@ export function MondayLinkedView({
               disabled={!canManage || toggling}
             />
           </span>
-          <Button variant="outline" onClick={onSyncNow} disabled={!canManage || syncing}>
-            {syncing ? <Spinner data-icon="inline-start" /> : <RefreshCw data-icon="inline-start" />}
-            {t("projectSettings.monday.syncNowButton")}
-          </Button>
+          {/* "Sync now" is a push too: while the Sync switch is off, nothing
+              may write to the board, so it waits for the switch. */}
+          <AppTooltip content={link.enabled ? null : t("projectSettings.monday.syncNowPausedTooltip")}>
+            <Button variant="outline" onClick={onSyncNow} disabled={!canManage || syncing || !link.enabled}>
+              {syncing ? <Spinner data-icon="inline-start" /> : <RefreshCw data-icon="inline-start" />}
+              {t("projectSettings.monday.syncNowButton")}
+            </Button>
+          </AppTooltip>
           <Button
             variant="ghost"
             size="icon"
@@ -133,10 +210,16 @@ export function MondayLinkedView({
 
       <div className="space-y-2">
         <p className="text-sm font-medium">{t("projectSettings.monday.columnMappingLabel")}</p>
-        {canManage ? (
+        {missingColumns}
+        {canManage && structureLoading ? (
+          <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
+            <Spinner /> {t("projectSettings.monday.loadingBoardColumns")}
+          </p>
+        ) : canManage ? (
           <MondayMappingEditor
             key={JSON.stringify(link.config.columns)}
             initialColumns={link.config.columns}
+            requestedRow={requestedRow ? { row: rowFor(requestedRow.column), nonce: requestedRow.nonce } : null}
             structure={structure}
             disabled={!canManage}
             saving={savingMapping}
@@ -171,4 +254,14 @@ export function MondayLinkedView({
       )}
     </div>
   )
+}
+
+/** The first metric that can write to a column of this type, or null when none can. */
+function mappableMetric(columnType: string): MondayColumnMapping["metric"] | null {
+  if (MONDAY_READONLY_COLUMN_TYPES.has(columnType)) return null
+  return MONDAY_METRIC_KEYS.find((metric) => MONDAY_WRITABLE_TYPES_BY_METRIC[metric].includes(columnType)) ?? null
+}
+
+function rowFor(column: MondayNewColumn): MondayColumnMapping {
+  return { columnId: column.id, columnType: column.type, metric: mappableMetric(column.type) ?? "completion_pct" }
 }

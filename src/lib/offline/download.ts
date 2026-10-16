@@ -6,9 +6,10 @@
  * row with `status: "ready"` — until this module runs, `sync-manager.ts`
  * (Phase 3) has nothing to react to and stays inert.
  *
- * Cell rows land through catch-up.ts's `fullSyncFile` — the same mapping and
- * lane filter as live frames (`sync-adapter.ts`) and later catch-ups, and it
- * records each file's first `?since=` cursor.
+ * Cell rows land through catch-up.ts's `fullSyncFile` — the same mapping as
+ * live frames (`sync-adapter.ts`) and later catch-ups (every lane the caller
+ * can see, keyed per lane since AQU-1614), and it records each file's first
+ * `?since=` cursor.
  */
 import { useEffect, useState, useSyncExternalStore } from "react"
 import type { Store } from "@livestore/livestore"
@@ -28,7 +29,7 @@ import { fetchSyncToken as fetchSyncTokenDefault } from "@/lib/sync/sync-token"
 // projectId claim, not fileId, so one token scoped to this constant, unused
 // fileId authorizes every file's read for the whole download — no real file
 // needs to exist yet, which matters for a project with zero files.
-const OFFLINE_DOWNLOAD_TOKEN_FILE_ID = "__offline_download__"
+export const OFFLINE_DOWNLOAD_TOKEN_FILE_ID = "__offline_download__"
 
 export interface DownloadProgress {
   projectId: string
@@ -85,6 +86,31 @@ export interface DownloadProjectDeps {
   fetchSyncToken: typeof fetchSyncTokenDefault
   fetchProjectFiles: typeof fetchProjectFilesDefault
   streamFileCells: typeof streamFileCellsDefault
+  /** Resolves once the store's reads can be trusted — see whenOfflineStoreVerified. */
+  whenStoreVerified: () => Promise<void>
+  /** How long to wait for that before giving up on this attempt. */
+  verifyTimeoutMs?: number
+}
+
+// The store a download is handed has a booted leader, so a healthy one is
+// verified within moments. One that never is (a leader that died, or heads
+// still apart after the reload) won't be this session — fail the attempt
+// rather than hang it.
+const STORE_VERIFY_TIMEOUT_MS = 15_000
+
+async function waitForVerifiedStore(deps: DownloadProjectDeps): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timedOut = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error("The offline store isn't ready yet. Try again shortly, or restart the app if this keeps happening.")),
+      deps.verifyTimeoutMs ?? STORE_VERIFY_TIMEOUT_MS,
+    )
+  })
+  try {
+    await Promise.race([deps.whenStoreVerified(), timedOut])
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 const defaultDeps: DownloadProjectDeps = {
@@ -92,6 +118,8 @@ const defaultDeps: DownloadProjectDeps = {
   fetchSyncToken: fetchSyncTokenDefault,
   fetchProjectFiles: fetchProjectFilesDefault,
   streamFileCells: streamFileCellsDefault,
+  // Dynamic, as in outbox.ts: keeps the LiveStore adapter out of this module's static graph.
+  whenStoreVerified: () => import("./store").then((m) => m.whenOfflineStoreVerified()),
 }
 
 /** Deletes every locally held row for a project (cells, files, the project
@@ -100,7 +128,15 @@ const defaultDeps: DownloadProjectDeps = {
  *  than leave a partial copy masquerading as complete. */
 function deleteProjectRows(store: Store<typeof schema>, projectId: string): void {
   for (const row of store.query(tables.cells.select().where({ projectId }))) {
-    store.commit(events.cellRemoved({ projectId, fileId: row.fileId, cellId: row.cellId, side: row.side }))
+    store.commit(
+      events.cellRemoved({
+        projectId,
+        fileId: row.fileId,
+        cellId: row.cellId,
+        side: row.side,
+        laneKey: row.laneKey,
+      }),
+    )
   }
   for (const row of store.query(tables.files.select().where({ projectId }))) {
     store.commit(events.fileRemoved({ id: row.id }))
@@ -113,7 +149,14 @@ function deleteProjectRows(store: Store<typeof schema>, projectId: string): void
 /**
  * Downloads `projectId` into the local LiveStore offline store: project row,
  * every file, and every cell (both sides) in anchor-chain order. Idempotent —
- * a no-op if the project is already `downloading` or `ready`. Throws (after
+ * a no-op if the project is `ready` or already downloading in this session.
+ * A `downloading` row with no download behind it is one an earlier session
+ * left half-done: its partial copy is cleared and the download starts over,
+ * so the user can retry without waiting on recoverInterruptedDownloads. Like
+ * recovery, anything short of `ready` waits for the store to be verified
+ * first — an unverified store can show a ready project as `downloading`, or
+ * not at all, and a failed download's rollback would then wipe a good copy.
+ * Throws, touching nothing, if the store isn't verified in time. Throws (after
  * rolling back any partial rows) on failure, so the caller can surface the
  * error; the offline_projects row never lingers at `downloading` past the
  * call.
@@ -124,8 +167,15 @@ export async function downloadProjectOffline(
   jwt: string,
   deps: DownloadProjectDeps = defaultDeps,
 ): Promise<void> {
-  const existing = store.query(tables.offlineProjects.select().where({ projectId }).first())
-  if (existing && existing.status !== "removing") return
+  if (getDownloadProgress(projectId) !== null) return
+  let existing = store.query(tables.offlineProjects.select().where({ projectId }).first())
+  if (existing?.status === "ready") return
+  await waitForVerifiedStore(deps)
+  // Another click may have started this download while we waited.
+  if (getDownloadProgress(projectId) !== null) return
+  existing = store.query(tables.offlineProjects.select().where({ projectId }).first())
+  if (existing?.status === "ready") return
+  if (existing?.status === "downloading") deleteProjectRows(store, projectId)
 
   store.commit(
     events.offlineProjectStatusSet({ projectId, status: "downloading", syncedAt: null, queueDepth: 0 }),
@@ -208,6 +258,9 @@ export function recoverInterruptedDownloads(store: Store<typeof schema>): string
   const stuck = store
     .query(tables.offlineProjects.select())
     .filter((row) => row.status === "downloading" || row.status === "removing")
+    // Runs once the store is verified, which can be after the user has
+    // started a download this session: that one is live, not interrupted.
+    .filter((row) => getDownloadProgress(row.projectId) === null)
     .map((row) => row.projectId)
   for (const projectId of stuck) deleteProjectRows(store, projectId)
   return stuck

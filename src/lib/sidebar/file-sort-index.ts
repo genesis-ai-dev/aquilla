@@ -101,6 +101,40 @@ export function planFileMove(
 }
 
 /**
+ * AQU-1702: the writes that drop a file arriving from ANOTHER group into
+ * `ordered` at `toPosition`.
+ *
+ * `ordered` is the target group's current visual order and does NOT contain
+ * `moved`; `toPosition` is the insert slot counted in that list, so
+ * `ordered.length` appends. The same two shapes as `planFileMove` — one
+ * midpoint when every file already in the target group is placed, a full
+ * renumber otherwise — because the reason is the same: an unplaced file sorts
+ * after every placed one, so no single number can put the newcomer above one.
+ *
+ * The moved file's old index belongs to the group it is leaving; it is
+ * overwritten here rather than cleared, so nothing has to run first.
+ */
+export function planFileInsert(
+  ordered: readonly PlaceableFile[],
+  moved: PlaceableFile,
+  toPosition: number,
+): SortIndexWrite[] {
+  const to = Math.max(0, Math.min(ordered.length, toPosition))
+  const next = [...ordered.slice(0, to), moved, ...ordered.slice(to)]
+
+  const allPlaced = ordered.every((f) => usableSortIndex(f.sortIndex) !== undefined)
+  if (!allPlaced) return renumber(next)
+
+  const placed = midpoint(
+    to > 0 ? usableSortIndex(next[to - 1].sortIndex) : undefined,
+    to < next.length - 1 ? usableSortIndex(next[to + 1].sortIndex) : undefined,
+  )
+  return placed === null
+    ? renumber(next)
+    : [{ fileId: moved.id, sortIndex: placed }]
+}
+
+/**
  * The writes that move `fileId` one slot up (`-1`) or down (`+1`). Returns
  * nothing at the respective end of the group, which is also what disables the
  * menu item — the two agree because they ask this same function.

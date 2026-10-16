@@ -177,4 +177,48 @@ describe("terminology project scans", () => {
     expect((await get(db, `/api/v1/projects/${PROJECT}/terminology/violations`)).status).toBe(401)
     expect((await get(db, `/api/v1/projects/${PROJECT}/concepts/missing/suggestions`, token)).status).toBe(404)
   })
+
+  it("each lane's check sees only that lane's renderings", async () => {
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: "aaaaaaaa", project_id: PROJECT, role: "target", legacy_tag: "", position: 0 },
+        { id: "bbbbbbbb", project_id: PROJECT, role: "target", legacy_tag: "es", language: "Spanish", position: 1 },
+      ],
+      cells: [
+        cell({ cell_id: "c1", side: "source", value: "grace" }),
+        { ...cell({ cell_id: "c1", side: "target", value: "a curse", target_lang: "" }), lane_id: "aaaaaaaa" },
+        { ...cell({ cell_id: "c1", side: "target", value: "otra", target_lang: "es" }), lane_id: "bbbbbbbb" },
+      ],
+      concepts: [
+        {
+          concept_id: "grace",
+          project_id: PROJECT,
+          source_term: "grace",
+          renderings: [
+            { rendering: "favor", status: "preferred" },
+            { rendering: "curse", status: "forbidden" },
+            { rendering: "gracia", status: "preferred", laneId: "bbbbbbbb" },
+          ],
+          status: "active",
+          case_sensitive: 0,
+          match_options: null,
+          created_at: 1,
+          updated_at: 1,
+        },
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: PROJECT })
+    const english = parseTerminologyViolationsPage(
+      await (await get(db, `/api/v1/projects/${PROJECT}/terminology/violations?lane=`, token)).json(),
+    )
+    const spanish = parseTerminologyViolationsPage(
+      await (await get(db, `/api/v1/projects/${PROJECT}/terminology/violations?lane=es`, token)).json(),
+    )
+    expect(english!.violations.map((row) => `${row.cellId}:${row.kind}`).sort()).toEqual([
+      "c1:forbidden-present",
+      "c1:missing-approved",
+    ])
+    expect(spanish!.violations.map((row) => row.kind).sort()).toEqual(["missing-approved"])
+    expect(spanish!.violations.every((row) => row.cellId === "c1")).toBe(true)
+  })
 })

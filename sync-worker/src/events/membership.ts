@@ -17,16 +17,30 @@
 //   - Live WS session: ejected by the ProjectSync DO on the member-removed
 //     admin notification (see member-removed.ts / project-do.ts).
 //
-// Grant paths mirror auth-worker/src/services/project-permissions.ts
-// (AD-12): direct project_members, org_members via projects.org_id (gated at
-// ROLE.MAINTAINER — AQU-435: a sub-maintainer org_members row is not a grant
-// path, so demoting a Maintainer below the floor revokes their org-path
-// write access on the next flush, not just full org removal), group grants,
-// creator. Platform operators (ADMIN_EMAILS) have no membership rows — their
-// tokens carry `src: "platform"` and callers skip this check (the documented
-// platform-admin exemption).
+// Grant paths are resolved by the SHARED max-wins resolver in
+// db/shared/project-roles.ts (AD-12) — the same one auth-worker mints the
+// sync token from and the Agent API authority already uses. It encodes the
+// AQU-435 org floor, the AQU-1274 org-path rule, the creator path and the
+// `ACCESS_GRANTS_RESOLVER` view mode once, in one place.
+//
+// AQU-1787: this check used to carry its OWN copy of the grant SQL, which
+// counted `org_members` at ROLE.MAINTAINER+ only (the AQU-435 rule alone).
+// AQU-1274 then taught the mint-side resolver that a sub-Maintainer org role
+// DOES contribute when a team grant opens the project and there is no direct
+// project row — and never taught this query. The two resolvers disagreed by
+// exactly that case: an org Project Lead (500) reaching a project through a
+// team attached at Contributor (400) got a token claiming 500 and a live
+// re-resolve of 400, so the AQU-1331 downgrade gate 403'd every write with
+// "role downgraded since token was issued". Resolving through the shared
+// resolver means the mint side and the write perimeter cannot drift again.
+//
+// Platform operators (ADMIN_EMAILS) have no membership rows — their tokens
+// carry `src: "platform"` and callers skip this check (the documented
+// platform-admin exemption). The shared resolver's own ADMIN_EMAILS path is
+// therefore deliberately NOT used here: this check answers "what do this
+// user's membership rows say", exactly as before.
 
-import { ROLE } from "./role-policy"
+import { resolveProjectRoleIncludingArchivedShared } from "../../../db/shared/project-roles"
 
 export type MembershipCheck = "ok" | "revoked"
 
@@ -42,11 +56,6 @@ export interface MembershipDetail {
    * ok/revoked check misses this.
    */
   roleLevel: number | null
-}
-
-interface MembershipRoleRow {
-  project_exists: boolean | number
-  max_role: number | string | null
 }
 
 /**
@@ -90,36 +99,25 @@ export async function checkProjectMembershipDetailed(
   userId: number,
 ): Promise<MembershipDetail> {
   try {
-    const row = await db
-      .prepare(
-        `SELECT
-           EXISTS (SELECT 1 FROM projects WHERE id = ?) AS project_exists,
-           (SELECT MAX(role_level) FROM (
-             SELECT role_level FROM project_members WHERE project_id = ? AND user_id = ?
-             UNION ALL
-             SELECT ${ROLE.OWNER} AS role_level FROM projects WHERE id = ? AND created_by = ?
-             UNION ALL
-             SELECT om.role_level FROM org_members om
-               JOIN projects p ON p.org_id = om.org_id
-              WHERE p.id = ? AND om.user_id = ? AND om.role_level >= ${ROLE.MAINTAINER}
-             UNION ALL
-             SELECT gpg.role_level FROM group_members gm
-               JOIN group_project_grants gpg ON gpg.group_id = gm.group_id
-              WHERE gpg.project_id = ? AND gm.user_id = ?
-           ) grants) AS max_role`,
-      )
-      .bind(
-        projectId,
-        projectId, userId,
-        projectId, userId,
-        projectId, userId,
-        projectId, userId,
-      )
-      .first<MembershipRoleRow>()
-    if (!row) return { status: "ok", roleLevel: null }
-    const projectExists = row.project_exists === true || row.project_exists === 1
-    const roleLevel = row.max_role === null || row.max_role === undefined ? null : Number(row.max_role)
-    if (projectExists && roleLevel === null) return { status: "revoked", roleLevel: null }
+    // Independent reads. The resolver answers "what level, if any"; it
+    // returns null both for a missing project and for a fully revoked user,
+    // and only the second of those is a revocation — hence the separate
+    // existence probe. `IncludingArchived` keeps this check's long-standing
+    // contract: archiving a project is not a membership revocation, so an
+    // in-flight write to a just-trashed project still fails open to the
+    // token TTL rather than being reported as a downgrade.
+    const [projectRow, resolved] = await Promise.all([
+      db
+        .prepare(`SELECT 1 AS present FROM projects WHERE id = ?`)
+        .bind(projectId)
+        .first<{ present: number }>(),
+      // No adminEmails: see the platform-admin note in the file header.
+      // No explicit mode: the shared resolver reads ACCESS_GRANTS_RESOLVER
+      // off the request db handle, which sync-worker's fetch registers.
+      resolveProjectRoleIncludingArchivedShared(db, { id: String(userId) }, projectId),
+    ])
+    const roleLevel = resolved?.level ?? null
+    if (projectRow != null && roleLevel === null) return { status: "revoked", roleLevel: null }
     return { status: "ok", roleLevel }
   } catch (err) {
     console.warn(

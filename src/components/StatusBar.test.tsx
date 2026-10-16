@@ -4,6 +4,7 @@ import type { CellSummary } from "@/hooks/useActiveCellStore"
 import { StatusBar as StatusBarView } from "./StatusBar"
 import { useHealth } from "@/hooks/useHealth"
 import { applyStructuralPolicy } from "@/lib/cells/structural"
+import { PROGRESS_BG } from "@/lib/progress/progress-palette"
 import { useCallback, type ComponentProps } from "react"
 
 function StatusBar({ cells, healthMap, countStructural = true, ...props }: {
@@ -93,6 +94,22 @@ it("updates footer counts across empty, drafted, validated and removed cells", (
   expect(container.textContent?.replace(/[\u2066-\u2069]/g, "")).not.toContain("unvalidated")
 })
 
+// AQU-1764: the two counts lose their amber and green. They are in the text
+// colour, each after a swatch in the tone the sidebar's file bar uses for it.
+it("marks the unvalidated and validated counts with progress-palette swatches", () => {
+  const drafted = [{ ...cells[0], status: "unvalidated" as const }, cells[1]]
+  render(<StatusBar cells={drafted} healthMap={new Map()} projectHealth={0} />)
+  for (const [id, fill] of [
+    ["status-bar-unvalidated", PROGRESS_BG.textTranslated],
+    ["status-bar-validated", PROGRESS_BG.textValidated],
+  ]) {
+    const badge = screen.getByTestId(id)
+    expect(badge.className, id).toContain("text-foreground")
+    expect(badge.className, id).not.toMatch(/amber|green/)
+    expect(badge.querySelector("[aria-hidden]")!.className, id).toContain(fill)
+  }
+})
+
 // AQU-1083. The editor footer is the ONE progress surface whose number is
 // counted on the client (useHealth over the open file's cells) rather than
 // read from the server, so it is the one place the policy can silently
@@ -132,4 +149,27 @@ describe("StatusBar and the structural-cell policy", () => {
     expect(plain(container)).toContain("50")
     expect(plain(container)).not.toContain("4 cells")
   })
+})
+
+// AQU-1493: plain rounding put 251 of 252 at "100%" beside a blank line, the
+// one progress figure the shared rule had missed.
+it("never reads 100% while a cell is untranslated", () => {
+  const many = Array.from({ length: 252 }, (_, i) =>
+    ({ id: String(i), cellLabel: String(i), status: i === 0 ? "empty" : "validated" }) as CellSummary)
+  const { container, rerender } = render(<StatusBar cells={many} healthMap={new Map()} projectHealth={0} />)
+  const plain = () => (container.textContent ?? "").replace(/[\u2066-\u2069]/g, "")
+  expect(plain()).toContain("251 translated (99%)")
+  const done = many.map((c) => ({ ...c, status: "validated" as const }))
+  rerender(<StatusBar cells={done} healthMap={new Map()} projectHealth={0} />)
+  expect(plain()).toContain("252 translated (100%)")
+})
+
+it("groups the badge counts the way the counts beside them are grouped", () => {
+  // The footer read "1,208 cells · 1,207 translated" and then "1207 validated".
+  const many = Array.from({ length: 2500 }, (_, i) =>
+    ({ id: String(i), cellLabel: String(i), status: i < 1207 ? "validated" : "unvalidated" }) as CellSummary)
+  const { container } = render(<StatusBar cells={many} healthMap={new Map()} projectHealth={0} />)
+  const plain = (container.textContent ?? "").replace(/[\u2066-\u2069]/g, "")
+  expect(plain).toContain("1,207 validated")
+  expect(plain).toContain("1,293 unvalidated")
 })

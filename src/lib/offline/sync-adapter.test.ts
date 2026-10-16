@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { makeInMemoryAdapter } from "@livestore/adapter-web"
 import { createStorePromise, type Store } from "@livestore/livestore"
-import { schema, tables, events, cellRowId } from "./schema"
-import { createOfflineSyncAdapter, type MintToken } from "./sync-adapter"
+import { schema, tables, events, cellRowId, DEFAULT_LANE_KEY, localLaneKey } from "./schema"
+import { createOfflineSyncAdapter, MAX_FLUSH_BATCH, type MintToken } from "./sync-adapter"
 import { __resetConflictsForTests, getConflicts } from "./conflicts"
 import { catchUpProject } from "./catch-up"
+import { isProjectUnavailable, resetProjectAccessForTests } from "./project-access"
 
 // The catch-up pull reads over real HTTP; these tests are about the socket and
 // the flush, so stub it (catch-up.test.ts covers it). The row-mapping helpers
@@ -72,6 +73,7 @@ beforeEach(async () => {
   })
   FakeWebSocket.instances.length = 0
   __resetConflictsForTests()
+  resetProjectAccessForTests()
   vi.mocked(catchUpProject).mockClear()
 })
 
@@ -136,7 +138,7 @@ describe("createOfflineSyncAdapter", () => {
     })
 
     const row = store.query(
-      tables.cells.select().where({ id: cellRowId("proj1", "file1", "GEN 1:1", "target") }).first(),
+      tables.cells.select().where({ id: cellRowId("proj1", "file1", "GEN 1:1", "target", DEFAULT_LANE_KEY) }).first(),
     )
     expect(row).toMatchObject({ value: "En el principio", eventId: "evt-1" })
 
@@ -182,7 +184,7 @@ describe("createOfflineSyncAdapter", () => {
     ws.receive({ t: "event.stale", id: "q1", reason: "parent mismatch" })
 
     expect(store.query(tables.eventQueue.select().where({ id: "q1" }).first())).toBeUndefined()
-    expect(getConflicts().has(cellRowId("proj1", "file1", "GEN 1:1", "target"))).toBe(true)
+    expect(getConflicts().has(cellRowId("proj1", "file1", "GEN 1:1", "target", DEFAULT_LANE_KEY))).toBe(true)
 
     adapter.close()
   })
@@ -235,6 +237,34 @@ describe("flushNow", () => {
     adapter.close()
   })
 
+  it.each([
+    [403, "role too low for target.cell.commit"],
+    [422, 'unknown lane "fr"; register it in settings.targetLanes'],
+    [400, "event missing fileId"],
+  ])("keeps a write the server refuses with %i as failed, not dequeued", async (status, reason) => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    queueCommit("q1")
+
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ accepted: [], rejected: [{ id: "q1", status, reason }], stale: [] }), { status: 200 }),
+    )
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    })
+    await drainMicrotasks()
+
+    await adapter.flushNow()
+
+    expect(store.query(tables.eventQueue.select().where({ id: "q1" }).first())).toMatchObject({ status: "failed" })
+    adapter.close()
+  })
+
   it("marks a conflict and dequeues on a stale flush result", async () => {
     store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
     store.commit(
@@ -282,7 +312,73 @@ describe("flushNow", () => {
     await adapter.flushNow()
 
     expect(store.query(tables.eventQueue.select().where({ id: "q1" }).first())).toBeUndefined()
-    expect(getConflicts().has(cellRowId("proj1", "file1", "GEN 1:1", "target"))).toBe(true)
+    expect(getConflicts().has(cellRowId("proj1", "file1", "GEN 1:1", "target", DEFAULT_LANE_KEY))).toBe(true)
+
+    adapter.close()
+  })
+
+  // A sync token is scoped to one file and the server 403s events for any
+  // other file, so a single first-file token stranded offline edits to every
+  // other file as "failed" (reproduced in the Tauri app, 2026-10-14).
+  it("flushes each file's queued writes under a token minted for that file", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    store.commit(events.fileSynced({ id: "file2", projectId: "proj1", name: "Exodus", type: "usfm", sequenceIndex: 1 }))
+    for (const [id, fileId] of [["q1", "file1"], ["q2", "file2"]] as const) {
+      store.commit(
+        events.eventQueued({
+          id,
+          projectId: "proj1",
+          fileId,
+          cellId: "1:1",
+          kind: "target.cell.commit",
+          payload: { value: "hola" },
+          parentId: "head-1",
+          author: "dev@local.test",
+          schemaVersion: 1,
+          clientTs: new Date(),
+          createdAt: new Date(),
+        }),
+      )
+    }
+    const mintToken = vi.fn<MintToken>(async (_projectId, fileId) => ({ token: `tok-${fileId}`, status: null }))
+    // Behaves like the server: refuses any event whose file the token isn't scoped to.
+    const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+      const token = (init.headers as Record<string, string>).Authorization.replace("Bearer tok-", "")
+      const evs = (JSON.parse(init.body as string) as { events: Array<{ id: string; fileId: string }> }).events
+      return new Response(
+        JSON.stringify({
+          accepted: evs.filter((e) => e.fileId === token).map((e) => ({ id: e.id })),
+          rejected: evs
+            .filter((e) => e.fileId !== token)
+            .map((e) => ({ id: e.id, status: 403, reason: "token scoped to different file" })),
+          stale: [],
+        }),
+        { status: 200 },
+      )
+    })
+
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    })
+    await drainMicrotasks()
+    await adapter.flushNow()
+
+    const posted = fetchImpl.mock.calls.map(([, init]) => ({
+      auth: (init.headers as Record<string, string>).Authorization,
+      ids: (JSON.parse(init.body as string) as { events: Array<{ id: string }> }).events.map((e) => e.id),
+    }))
+    expect(posted).toEqual(
+      expect.arrayContaining([
+        { auth: "Bearer tok-file1", ids: ["q1"] },
+        { auth: "Bearer tok-file2", ids: ["q2"] },
+      ]),
+    )
+    expect(store.query(tables.eventQueue.select().where({ projectId: "proj1" }))).toHaveLength(0)
 
     adapter.close()
   })
@@ -576,7 +672,7 @@ describe("catch-up", () => {
     adapter.close()
   })
 
-  it("ignores rows for non-default target lanes in live frames", async () => {
+  it("stores every target lane's rows from a live frame, keyed per lane (AQU-1614)", async () => {
     store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
     const adapter = createOfflineSyncAdapter({
       projectId: "proj1",
@@ -611,10 +707,68 @@ describe("catch-up", () => {
       rows: [row("", "In the beginning"), row("es", "En el principio")],
     })
 
-    const stored = store.query(
-      tables.cells.select().where({ id: cellRowId("proj1", "file1", "GEN 1:1", "target") }).first(),
-    )
-    expect(stored).toMatchObject({ value: "In the beginning", eventId: "evt-default" })
+    const laneRow = (laneKey: string) =>
+      store.query(
+        tables.cells.select().where({ id: cellRowId("proj1", "file1", "GEN 1:1", "target", laneKey) }).first(),
+      )
+    expect(laneRow(DEFAULT_LANE_KEY)).toMatchObject({
+      value: "In the beginning",
+      eventId: "evt-default",
+      targetLang: "",
+    })
+    expect(laneRow(localLaneKey(null, "es"))).toMatchObject({
+      value: "En el principio",
+      eventId: "evt-es",
+      targetLang: "es",
+    })
+    // The second lane no longer overwrites the first: two rows, not one.
+    expect(store.query(tables.cells.select().where({ projectId: "proj1", fileId: "file1" }))).toHaveLength(2)
+
+    adapter.close()
+  })
+
+  it("keys a live frame's row by lanes.id once the server sends one (AQU-1614)", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+    })
+    await drainMicrotasks()
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+
+    ws.receive({
+      t: "event.applied",
+      id: "evt-1",
+      kind: "target.cell.commit",
+      project: "proj1",
+      file: "file1",
+      rows: [
+        {
+          cellId: "GEN 1:1",
+          side: "target",
+          targetLang: "es",
+          laneId: "lane-es",
+          value: "En el principio",
+          valueHtml: null,
+          eventId: "evt-es",
+          sourceEventId: null,
+          validated: false,
+          aiDrafted: false,
+          sequenceIndex: 0,
+          canonicalRef: null,
+        },
+      ],
+    })
+
+    expect(
+      store.query(
+        tables.cells.select().where({ id: cellRowId("proj1", "file1", "GEN 1:1", "target", "lane-es") }).first(),
+      ),
+    ).toMatchObject({ value: "En el principio", laneId: "lane-es", targetLang: "es" })
 
     adapter.close()
   })
@@ -641,6 +795,239 @@ describe("startup recovery", () => {
 
     await waitFor(() => fetchImpl.mock.calls.length > 0)
     expect(store.query(tables.eventQueue.select().where({ id: "q1" }).first())).toBeUndefined()
+
+    adapter.close()
+  })
+})
+
+// Project gone server-side (deleted, access removed, archived, frozen): every
+// mint 403s. Before, catch-up returned silently and the flush retried forever,
+// leaving the local copy "ready" but stale with nothing telling the user.
+describe("project no longer available on the server", () => {
+  beforeEach(() => {
+    vi.mocked(catchUpProject).mockImplementation(async () => ({ filesChecked: 0, rowsChanged: 0 }))
+  })
+
+  it("marks the project unavailable on a mint 403 and keeps its queued writes", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    queueCommit("q1")
+    const mintToken = vi.fn<MintToken>(async () => ({ token: null, status: 403 }))
+    const fetchImpl = vi.fn()
+
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 1,
+      minFlushRetryMs: 10_000,
+    })
+
+    await waitFor(() => isProjectUnavailable("proj1"))
+    await waitFor(() => store.query(tables.eventQueue.select().where({ id: "q1" }).first())?.status === "pending")
+    expect(fetchImpl).not.toHaveBeenCalled()
+
+    adapter.close()
+  })
+
+  it("clears the mark once a mint succeeds again (unarchived, access re-granted)", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    let status = 403
+    const mintToken = vi.fn<MintToken>(async () =>
+      status === 403 ? { token: null, status } : { token: "tok-1", status },
+    )
+
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      flushDebounceMs: 1,
+    })
+    await waitFor(() => isProjectUnavailable("proj1"))
+
+    status = 200
+    await adapter.catchUpNow()
+    expect(isProjectUnavailable("proj1")).toBe(false)
+
+    adapter.close()
+  })
+
+  it("does not treat an expired session or a server error as the project being gone", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    for (const status of [401, 503, null]) {
+      const adapter = createOfflineSyncAdapter({
+        projectId: "proj1",
+        store,
+        mintToken: async () => ({ token: null, status }),
+        baseUrl: "https://sync.example.com",
+        webSocketCtor: FakeWsCtor,
+      })
+      await adapter.catchUpNow()
+      expect(isProjectUnavailable("proj1")).toBe(false)
+      adapter.close()
+    }
+  })
+
+  it("drops the mark when the adapter closes (offline copy removed)", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: async () => ({ token: null, status: 403 }),
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+    })
+    await adapter.catchUpNow()
+    expect(isProjectUnavailable("proj1")).toBe(true)
+
+    adapter.close()
+    expect(isProjectUnavailable("proj1")).toBe(false)
+  })
+})
+
+describe("long offline stretches", () => {
+  function fakeConnectivity(initial: boolean | null) {
+    let online = initial
+    const listeners = new Set<(online: boolean | null) => void>()
+    return {
+      current: () => online,
+      subscribe(listener: (online: boolean | null) => void) {
+        listeners.add(listener)
+        return () => {
+          listeners.delete(listener)
+        }
+      },
+      set(next: boolean) {
+        online = next
+        for (const listener of listeners) listener(next)
+      },
+    }
+  }
+
+  /** `count` writes, oldest first, inserted in reverse to prove the flush sorts. */
+  function queueMany(count: number): string[] {
+    const base = Date.parse("2026-10-01T00:00:00Z")
+    const ids = Array.from({ length: count }, (_, i) => `q${String(i).padStart(4, "0")}`)
+    for (const [i, id] of [...ids.entries()].reverse()) {
+      store.commit(
+        events.eventQueued({
+          id,
+          projectId: "proj1",
+          fileId: "file1",
+          cellId: `GEN 1:${i + 1}`,
+          kind: "target.cell.commit",
+          payload: { value: `v${i}` },
+          parentId: `head-${i}`,
+          author: "dev@local.test",
+          schemaVersion: 1,
+          clientTs: new Date(base + i * 1_000),
+          createdAt: new Date(base + i * 1_000),
+        }),
+      )
+    }
+    return ids
+  }
+
+  const acceptAll = async (_url: string, init?: RequestInit) => {
+    const body = JSON.parse(init?.body as string) as { events: Array<{ id: string }> }
+    return new Response(JSON.stringify({ accepted: body.events.map((e) => ({ id: e.id })) }), { status: 200 })
+  }
+
+  const postedIds = (fetchImpl: ReturnType<typeof vi.fn>) =>
+    fetchImpl.mock.calls.map(([, init]) => (JSON.parse((init as RequestInit).body as string) as { events: Array<{ id: string }> }).events.map((e) => e.id))
+
+  const statusWrites = (commit: { mock: { calls: unknown[][] } }) =>
+    commit.mock.calls.filter(([e]) => (e as { name: string }).name === "v1.EventQueueStatusSet").length
+
+  it("attempts nothing and writes nothing while offline, then sends it all on reconnect", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    const connectivity = fakeConnectivity(false)
+    const fetchImpl = vi.fn(acceptAll)
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 1,
+      minFlushRetryMs: 5,
+      connectivity,
+    })
+    const commit = vi.spyOn(store, "commit")
+    const ids = queueMany(3)
+
+    await new Promise((r) => setTimeout(r, 80))
+    expect(fetchImpl).not.toHaveBeenCalled()
+    expect(statusWrites(commit)).toBe(0)
+
+    connectivity.set(true)
+    await waitFor(() => store.query(tables.eventQueue.select()).length === 0)
+    expect(postedIds(fetchImpl)).toEqual([ids])
+    expect(statusWrites(commit)).toBe(0)
+
+    adapter.close()
+  })
+
+  it(`sends a big backlog oldest first, at most ${MAX_FLUSH_BATCH} per POST`, async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    const connectivity = fakeConnectivity(false)
+    const fetchImpl = vi.fn(acceptAll)
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 1,
+      connectivity,
+    })
+    const ids = queueMany(450)
+
+    connectivity.set(true)
+    await waitFor(() => store.query(tables.eventQueue.select()).length === 0, 5_000)
+    const batches = postedIds(fetchImpl)
+    expect(batches.map((b) => b.length)).toEqual([200, 200, 50])
+    expect(batches.flat()).toEqual(ids)
+
+    adapter.close()
+  })
+
+  it("stops at the first failed batch, keeping order, without touching row status", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    const connectivity = fakeConnectivity(false)
+    let call = 0
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      call += 1
+      return call === 2 ? new Response("unavailable", { status: 503 }) : acceptAll(url, init)
+    })
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 1,
+      minFlushRetryMs: 60_000,
+      connectivity,
+    })
+    const commit = vi.spyOn(store, "commit")
+    const ids = queueMany(450)
+
+    connectivity.set(true)
+    await waitFor(() => fetchImpl.mock.calls.length === 2)
+    await new Promise((r) => setTimeout(r, 50))
+    expect(fetchImpl).toHaveBeenCalledTimes(2) // the third batch waits behind the second
+    const left = store.query(tables.eventQueue.select()).map((r) => r.id).sort()
+    expect(left).toEqual(ids.slice(200))
+    expect(store.query(tables.eventQueue.select()).every((r) => r.status === "pending")).toBe(true)
+    expect(statusWrites(commit)).toBe(0)
 
     adapter.close()
   })

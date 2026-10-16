@@ -36,8 +36,7 @@ async function event(kind: string, cellId: string, payload: unknown = {}): Promi
 
 async function liveSourceRow(cellId: string): Promise<void> {
   await t.pg.query(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_edit_at)
-     VALUES ($1, $2, $3, 'source', '', 'text', 'evt-head', 1)`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at) VALUES ($1, $2, $3, 'source', 'text', 'evt-head', 1)`,
     [PROJECT, FILE, cellId],
   )
 }

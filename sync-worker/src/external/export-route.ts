@@ -30,10 +30,11 @@
 // Errors use the standard external envelope { error: { code, message } }.
 
 import { externalError } from './errors'
+import { resolveExternalLaneParam } from './external-lane'
 import { mintInternalToken } from './read-routes'
 import { authenticateAndScope, type ExternalReadsEnv } from './read-auth'
 import { handleExportSourceRequest } from '../events/export-route'
-import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
+import { enforceRateLimit, userRateLimitIdentifier } from '../../../db/shared/rate-limit'
 
 export type ExternalExportEnv = ExternalReadsEnv & { SNAPSHOTS: R2Bucket }
 
@@ -44,7 +45,7 @@ const FILE_EXPORT_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/files\/([^/]+)\
 // 120 per 15 minutes per credential) rather than with the cheap paginated
 // reads at 300. Same reasoning as the 2026-08-20 pen-test pass that throttled
 // artifact content: the expensive thing here is bytes leaving storage.
-const EXPORT_MAX_PER_CREDENTIAL = 120
+const EXPORT_MAX_PER_USER = 120
 
 /** Fidelity/annotation headers the internal route sets — forwarded verbatim so
  *  an agent can tell a clean round-trip from a preserved-original fallback. */
@@ -91,21 +92,37 @@ export async function handleExternalExportRequest(
   const authed = await authenticateAndScope(request, env, projectId)
   if (!authed.ok) return authed.response
   if (env.AQUILLA_PG) {
-    const identifier = `credential:${authed.ctx.credential.credentialId}`
-    const recent = await countRecentRateLimitEvents(env.AQUILLA_PG, 'external_export', identifier)
-    if (recent >= EXPORT_MAX_PER_CREDENTIAL) {
+    // AQU-1843: atomic and keyed on the owner. Fails OPEN: an export is still a
+    // read, and blocking every one of them because the limiter is unavailable
+    // would turn a cost control into an outage.
+    const exportLimit = await enforceRateLimit(env.AQUILLA_PG, {
+      kind: 'external_export',
+      identifier: userRateLimitIdentifier(authed.ctx.credential.userId),
+      limit: EXPORT_MAX_PER_USER,
+      failMode: 'open',
+    })
+    if (!exportLimit.allowed) {
       return externalError('rate_limited', 'export rate limit exceeded, slow down', 429)
     }
-    await recordRateLimitEvent(env.AQUILLA_PG, 'external_export', identifier)
   }
 
-  // AQU-538: exports are lane-specific; an omitted lane means the default lane.
-  const lane = url.searchParams.get('lane')
+  // ?lane= is a lane id. The internal export still selects by the frozen tag.
+  if (!env.AQUILLA_PG) return externalError('job_failed', 'AQUILLA_PG not configured', 500)
+  const lane = await resolveExternalLaneParam(
+    env.AQUILLA_PG,
+    env.LANE_READ_WALL,
+    projectId,
+    Number(authed.ctx.credential.userId),
+    authed.ctx.role,
+    url.searchParams.get('lane'),
+    'lane',
+  )
+  if (!lane.ok) return externalError('validation_failed', lane.message, 400)
 
   const token = await mintInternalToken(env, authed.ctx, projectId, fileId)
   const internalUrl = new URL(request.url)
   internalUrl.pathname = `/api/v1/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileId)}/source`
-  internalUrl.search = lane === null ? '' : `?lane=${encodeURIComponent(lane)}`
+  internalUrl.search = `?lane=${encodeURIComponent(lane.lane.legacyTag ?? '')}`
 
   const internalRes = await handleExportSourceRequest(
     new Request(internalUrl.toString(), { headers: { Authorization: `Bearer ${token}` } }),

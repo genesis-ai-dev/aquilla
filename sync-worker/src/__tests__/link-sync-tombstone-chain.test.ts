@@ -125,7 +125,7 @@ interface SourceRow {
 async function sourceRow(t: TestDb, projectId: string, fileId: string, cellId: string): Promise<SourceRow | undefined> {
   const r = await t.pg.query<{ value: string; tombstoned_at: string | null }>(
     `SELECT value, tombstoned_at FROM cells
-      WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = 'source' AND target_lang = ''`,
+      WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = 'source'`,
     [projectId, fileId, cellId],
   )
   const row = r.rows[0]

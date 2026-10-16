@@ -35,6 +35,7 @@ vi.mock("@/lib/sync/stale-source-read", () => ({
 }))
 
 import { useStaleSourceCells } from "./useStaleSourceCells"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const getToken = async () => "jwt"
 
@@ -142,7 +143,7 @@ describe("useStaleSourceCells", () => {
       { timeout: 10_000 },
     )
     expect(result.current.isError).toBe(false)
-  }, 12_000)
+  })
 
   // QA-BUG-3: the lazy-pull sync and the stale-source read race — the read
   // can land before the mirror's writes are visible, showing a transient
@@ -155,7 +156,7 @@ describe("useStaleSourceCells", () => {
       const { result } = renderHook(() =>
         useStaleSourceCells({ projectId: "p1", fileId: "f1", getToken }),
       )
-      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1), { timeout: STALL_WATCHDOG_MS })
       expect(result.current.ancestorBehind).toBe(true)
 
       // The sync's mirror commit is now "done" server-side; the next read
@@ -166,7 +167,7 @@ describe("useStaleSourceCells", () => {
       // fetch mock resolves on the next microtask, so flush that first.
       await vi.advanceTimersByTimeAsync(2600)
 
-      await vi.waitFor(() => expect(result.current.ancestorBehind).toBe(false))
+      await vi.waitFor(() => expect(result.current.ancestorBehind).toBe(false), { timeout: STALL_WATCHDOG_MS })
       expect(fetchMock).toHaveBeenCalledTimes(2)
 
       // No further re-fetches beyond the one scheduled follow-up.
@@ -184,7 +185,7 @@ describe("useStaleSourceCells", () => {
       const { unmount } = renderHook(() =>
         useStaleSourceCells({ projectId: "p1", fileId: "f1", getToken }),
       )
-      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1), { timeout: STALL_WATCHDOG_MS })
 
       unmount()
       await vi.advanceTimersByTimeAsync(5000)

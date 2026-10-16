@@ -81,7 +81,6 @@ describe("project-settings alignment-seeds carve-out (AQU-1408)", () => {
   it("lets a contributor confirm an alignment", async () => {
     await seed()
     const res = await patchProjectSettings("carla", {
-      sourceLanguage: "en", // unchanged echo — the client sends the whole object
       alignmentSeeds: CONFIRMED,
     })
     expect(res.status).toBe(200)
@@ -91,7 +90,6 @@ describe("project-settings alignment-seeds carve-out (AQU-1408)", () => {
   it("lets a contributor reject an alignment (the negative seed is the same permission)", async () => {
     await seed()
     const res = await patchProjectSettings("carla", {
-      sourceLanguage: "en",
       alignmentSeeds: REJECTED,
     })
     expect(res.status).toBe(200)
@@ -104,7 +102,6 @@ describe("project-settings alignment-seeds carve-out (AQU-1408)", () => {
     // does; what matters is that it is admitted at all.
     await seed(`{"sourceLanguage":"en","alignmentSeeds":${JSON.stringify(CONFIRMED)}}`)
     const res = await patchProjectSettings("carla", {
-      sourceLanguage: "en",
       alignmentSeeds: [...CONFIRMED, ...REJECTED],
     })
     expect(res.status).toBe(200)
@@ -114,7 +111,6 @@ describe("project-settings alignment-seeds carve-out (AQU-1408)", () => {
   it("still lets a maintainer write them", async () => {
     await seed()
     const res = await patchProjectSettings("bob", {
-      sourceLanguage: "en",
       alignmentSeeds: CONFIRMED,
     })
     expect(res.status).toBe(200)
@@ -124,7 +120,6 @@ describe("project-settings alignment-seeds carve-out (AQU-1408)", () => {
   it("403s a reviewer (300) — contributor is the floor, not every member", async () => {
     await seed()
     const res = await patchProjectSettings("dan", {
-      sourceLanguage: "en",
       alignmentSeeds: CONFIRMED,
     })
     expect(res.status).toBe(403)
@@ -141,7 +136,7 @@ describe("project-settings alignment-seeds carve-out (AQU-1408)", () => {
       sourceLanguage: "fr",
       alignmentSeeds: CONFIRMED,
     })
-    expect(bundled.status).toBe(403)
+    expect(bundled.status).toBe(400)
     const stored = await storedSettings()
     expect(stored.alignmentSeeds).toBeUndefined()
     expect(stored.sourceLanguage).toBe("en")
@@ -151,7 +146,7 @@ describe("project-settings alignment-seeds carve-out (AQU-1408)", () => {
     // Sanity: the carve-out did not lower the floor for everything else.
     await seed()
     const res = await patchProjectSettings("carla", { sourceLanguage: "fr" })
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(400)
     expect((await storedSettings()).sourceLanguage).toBe("en")
   })
 
@@ -161,7 +156,7 @@ describe("project-settings alignment-seeds carve-out (AQU-1408)", () => {
       sourceLanguage: "fr",
       alignmentSeeds: CONFIRMED, // echoed, unchanged
     })
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(400)
     expect((await storedSettings()).sourceLanguage).toBe("en")
   })
 })

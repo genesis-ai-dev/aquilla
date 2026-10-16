@@ -96,8 +96,7 @@ async function seedUpstreamFile(t: TestDb): Promise<void> {
 /** A downstream translator's work on one mirrored cell: a validated draft. */
 async function translateDownstream(t: TestDb, cellId: string, value: string): Promise<void> {
   await t.pg.query(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_editor, last_edit_at, validated, word_count)
-     VALUES ($1, $2, $3, 'target', '', $4, $5, 'translator', 2, 1, 2)`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_editor, last_edit_at, validated, word_count) VALUES ($1, $2, $3, 'target', $4, $5, 'translator', 2, 1, 2)`,
     [DOWNSTREAM, DOWNSTREAM_FILE, cellId, value, `evt-down-${cellId}`],
   )
 }
@@ -124,11 +123,27 @@ interface ProgressRow {
   filled_count: number
 }
 
-async function progressOf(t: TestDb): Promise<ProgressRow[]> {
+/**
+ * The downstream's progress rows for ONE lane.
+ *
+ * AQU-1599 made the projection write a row per lane, the SOURCE lane included.
+ * Which lane a reader wants depends on the number: the denominator is
+ * lane-independent and lives on the source lane's row (the default here), while
+ * a filled count belongs to the lane it was translated in. Reading every row
+ * and taking `find(scope === 'file')` would return whichever lane the engine
+ * listed first — and the source lane's `filled_count` is 0 by design.
+ *
+ * The source lane is also the only one these fixtures are guaranteed to have:
+ * a downstream nobody has translated in yet has no target lane at all.
+ */
+async function progressOf(t: TestDb, role: "source" | "target" = "source"): Promise<ProgressRow[]> {
   const r = await t.pg.query<ProgressRow>(
-    `SELECT scope, section_key, total_count, filled_count FROM file_section_progress
-      WHERE project_id = $1 AND file_id = $2 ORDER BY scope, section_key`,
-    [DOWNSTREAM, DOWNSTREAM_FILE],
+    `SELECT p.scope, p.section_key, p.total_count, p.filled_count
+       FROM file_section_progress p
+       JOIN lanes l ON l.project_id = p.project_id AND l.id = p.lane_id
+      WHERE p.project_id = $1 AND p.file_id = $2 AND l.role = $3
+      ORDER BY p.scope, p.section_key`,
+    [DOWNSTREAM, DOWNSTREAM_FILE, role],
   )
   return r.rows
 }
@@ -233,7 +248,8 @@ describe("mirrorSync — a cell deleted upstream leaves the downstream's counts"
       await mirrorSync(t.db, DOWNSTREAM)
 
       expect(await countersOf(t)).toEqual({ cell_count: 2, filled_count: 1, approved_count: 1, word_count: 2 })
-      expect((await progressOf(t)).find((r) => r.scope === "file")).toMatchObject({ total_count: 2, filled_count: 1 })
+      expect((await progressOf(t, "target")).find((r) => r.scope === "file"))
+        .toMatchObject({ total_count: 2, filled_count: 1 })
       // The orphan itself is untouched.
       const orphan = await t.pg.query<{ value: string }>(
         `SELECT value FROM cells WHERE project_id = $1 AND file_id = $2 AND cell_id = 'c3' AND side = 'target'`,

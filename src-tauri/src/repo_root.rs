@@ -38,6 +38,12 @@ pub fn safe_join(root: &std::path::Path, rel: &str) -> Result<PathBuf, String> {
     let mut out = root.to_path_buf();
     for seg in rel.split('/') {
         if seg.is_empty() || seg == "." { continue; }
+        // `\` is a separator on Windows, so a segment like `..\..\x` would
+        // otherwise be pushed as several components; also reject drive/ADS `:`
+        // and NUL, which can re-root or alias a path there.
+        if seg.contains('\\') || seg.contains(':') || seg.contains('\0') {
+            return Err(format!("EINVAL: illegal characters in path: {rel:?}"));
+        }
         if seg == ".." {
             return Err(format!("EINVAL: path escapes repo root: {rel:?}"));
         }
@@ -92,6 +98,14 @@ mod tests {
         let root = PathBuf::from("/data/repos/foo");
         assert!(safe_join(&root, "../../etc/passwd").is_err());
         assert!(safe_join(&root, "a/../../b").is_err());
+    }
+
+    #[test]
+    fn safe_join_rejects_backslash_and_drive_segments() {
+        let root = PathBuf::from("/data/repos/foo");
+        assert!(safe_join(&root, "a/..\\..\\evil").is_err());
+        assert!(safe_join(&root, "C:/Windows").is_err());
+        assert!(safe_join(&root, "a/b\0c").is_err());
     }
 
     #[test]

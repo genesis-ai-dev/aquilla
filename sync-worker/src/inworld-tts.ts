@@ -18,6 +18,8 @@
 // Supported languages:
 //   GET https://api.inworld.ai/voices/v1/supportedLanguages
 //
+import { isAbortTimeout, VENDOR_TIMEOUT_MS } from "../../shared/vendor-timeouts"
+
 export const DEFAULT_INWORLD_API_BASE = "https://api.inworld.ai"
 export const DEFAULT_INWORLD_TTS_MODEL = "inworld-tts-2-flash"
 export const INWORLD_TTS_MODEL_HIGHEST = "inworld-tts-2"
@@ -37,14 +39,60 @@ export const INWORLD_DESIGN_PROMPT_MODE_VERBATIM = "DESIGN_PROMPT_MODE_VERBATIM"
  * (`INWORLD_MAX_TEXT_CHARS`), and below the client's own
  * `TTS_REQUEST_TIMEOUT_MS` so this specific 502 wins the race and the user
  * reads why generation failed instead of watching a spinner.
+ *
+ * AQU-1849: the number itself now lives in `shared/vendor-timeouts.ts` with
+ * every other vendor deadline; this stays as the name callers already import.
  */
-export const INWORLD_TTS_REQUEST_TIMEOUT_MS = 60_000
+export const INWORLD_TTS_REQUEST_TIMEOUT_MS = VENDOR_TIMEOUT_MS.inworldTts
 
-/** True for the DOMException `AbortSignal.timeout` rejects a fetch with. */
-export function isAbortTimeout(err: unknown): boolean {
-  if (typeof err !== "object" || err === null) return false
-  const name = (err as { name?: unknown }).name
-  return name === "TimeoutError" || name === "AbortError"
+// AQU-1849: `isAbortTimeout` moved to the shared registry so the Modal,
+// Monday, Aquifer and OpenRouter paths tell a blown deadline from a dead
+// upstream with the same check. Re-exported here because voice-convert.ts and
+// the TTS tests already import it from this module.
+export { isAbortTimeout }
+
+/** Statuses worth another attempt. A 4xx (other than 429) will not change if we call again. */
+const INWORLD_RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504])
+
+/**
+ * Waits before retry `index` (0-based). First wait is 1–2s so a burst does not
+ * line up, then 4s, then 8s. `null` means the retries are used up.
+ */
+export function inworldBackoffDelayMs(index: number, random: () => number = Math.random): number | null {
+  if (index === 0) return 1000 + Math.floor(random() * 1001)
+  if (index === 1) return 4000
+  if (index === 2) return 8000
+  return null
+}
+
+type InworldSleep = (ms: number) => Promise<void>
+
+const defaultInworldSleep: InworldSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+let inworldSleep: InworldSleep = defaultInworldSleep
+
+/** @internal Tests skip the real waits. */
+export function __setInworldBackoffSleepForTests(sleep: InworldSleep | null): void {
+  inworldSleep = sleep ?? defaultInworldSleep
+}
+
+/** One Inworld call, then up to three retries on a transient failure. A timeout is not retried. */
+export async function fetchInworld(url: string, init: RequestInit): Promise<Response> {
+  let index = 0
+  for (;;) {
+    try {
+      const res = await fetch(url, init)
+      const delay = INWORLD_RETRYABLE_STATUS.has(res.status) ? inworldBackoffDelayMs(index) : null
+      if (delay === null) return res
+      await res.arrayBuffer().catch(() => undefined)
+      await inworldSleep(delay)
+    } catch (err) {
+      if (isAbortTimeout(err)) throw err
+      const delay = inworldBackoffDelayMs(index)
+      if (delay === null) throw err
+      await inworldSleep(delay)
+    }
+    index += 1
+  }
 }
 /** BSB Revelation 1:17–18 — default spoken script for Voice Design previews. */
 export const INWORLD_DESIGN_DEFAULT_PREVIEW_TEXT =
@@ -266,7 +314,7 @@ export async function cloneInworldVoice(
 
   let res: Response
   try {
-    res = await fetch(`${inworldApiBase(config)}/voices/v1/voices:clone`, {
+    res = await fetchInworld(`${inworldApiBase(config)}/voices/v1/voices:clone`, {
       method: "POST",
       headers: {
         Authorization: inworldAuthHeader(config.apiKey),
@@ -329,7 +377,7 @@ export async function designInworldVoice(
 
   let res: Response
   try {
-    res = await fetch(`${inworldApiBase(config)}/voices/v1/voices:design`, {
+    res = await fetchInworld(`${inworldApiBase(config)}/voices/v1/voices:design`, {
       method: "POST",
       headers: {
         Authorization: inworldAuthHeader(config.apiKey),
@@ -374,7 +422,7 @@ export async function publishInworldVoice(
 
   let res: Response
   try {
-    res = await fetch(
+    res = await fetchInworld(
       `${inworldApiBase(config)}/voices/v1/voices/${encodeInworldVoiceId(voiceId)}:publish`,
       {
         method: "POST",
@@ -452,7 +500,7 @@ export async function synthesizeInworldSpeech(
 
   let res: Response
   try {
-    res = await fetch(`${inworldApiBase(config)}/tts/v1/voice`, {
+    res = await fetchInworld(`${inworldApiBase(config)}/tts/v1/voice`, {
       method: "POST",
       headers: {
         Authorization: inworldAuthHeader(config.apiKey),
@@ -514,7 +562,7 @@ export async function listInworldVoices(
 
     let res: Response
     try {
-      res = await fetch(`${inworldApiBase(config)}/voices/v1/voices?${params.toString()}`, {
+      res = await fetchInworld(`${inworldApiBase(config)}/voices/v1/voices?${params.toString()}`, {
         method: "GET",
         headers: { Authorization: inworldAuthHeader(config.apiKey) },
       })

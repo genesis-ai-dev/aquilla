@@ -1,3 +1,4 @@
+import type { Locator } from "@playwright/test"
 import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { expectSelectValue, pickSelectOption } from "../../helpers/base-ui"
 import { ensureAuthState } from "../../helpers/auth"
@@ -21,6 +22,13 @@ import {
  * True join/accept journeys stay hermetic per-test below.
  */
 
+/** A project with a target lane will not mint a link until this is chosen. */
+async function chooseEveryCurrentLane(dialog: Locator) {
+  const every = dialog.getByRole("radio", { name: /Every current target lane/i })
+  await expect(every).toBeVisible({ timeout: 10_000 })
+  await every.check()
+}
+
 test("share invite link chrome surface session", async ({ alice }) => {
   test.setTimeout(120_000)
 
@@ -34,6 +42,7 @@ test("share invite link chrome surface session", async ({ alice }) => {
 
     const createBtn = dialog.getByRole("button", { name: /Create invite link/i })
     await expect(createBtn).toBeVisible({ timeout: 3_000 })
+    await chooseEveryCurrentLane(dialog)
     await expect(createBtn).toBeEnabled()
     await expect(dialog.locator("#pm-invite-email")).toBeVisible({ timeout: 3_000 })
 
@@ -117,6 +126,7 @@ test("share invite link chrome surface session", async ({ alice }) => {
 
     const createBtn = dialog.getByRole("button", { name: /Create invite link/i })
     await expect(createBtn).toBeVisible({ timeout: 5_000 })
+    await chooseEveryCurrentLane(dialog)
     await createBtn.click()
 
     const copyBtn = dialog.getByRole("button", { name: "Copy URL" }).first()
@@ -133,6 +143,7 @@ test("share invite link chrome surface session", async ({ alice }) => {
     const emailInput = dialog.locator("#pm-invite-email")
     await expect(emailInput).toBeVisible({ timeout: 3_000 })
     await emailInput.fill("not-an-email")
+    await chooseEveryCurrentLane(dialog)
 
     await dialog.getByRole("button", { name: /Create invite link/i }).click()
     await expect(
@@ -219,6 +230,7 @@ test("invite accept shows confirmation and the project surfaces on the invitee's
 
   const settings = new ProjectSettings(alice)
   const dialog = await settings.openInviteLinkTab(settings.projectIdFromCurrentUrl())
+  await chooseEveryCurrentLane(dialog)
   await dialog.getByRole("button", { name: /Create invite link/i }).click()
 
   const urlInput = dialog.locator("input[readonly]")

@@ -38,7 +38,7 @@ import {
 } from "../../src/lib/parsers/helloao"
 import { aquillaImportMetadata, normalizeTranslatableStrings } from "../../src/lib/import/normalized-manifest"
 import { readPersistedSession } from "./auth-state"
-import { createProjectServerSide, updateProjectSettings } from "./frontier-api"
+import { createProjectServerSide, readProjectLanes, setProjectLanguagePair } from "./frontier-api"
 import { postIdempotentJson } from "./idempotent-request"
 import { Workspace } from "./page-objects/Workspace"
 
@@ -264,12 +264,20 @@ export async function seedProjectWithFile(
   })
   // A seeded project stands in for one a team has actually set up: autopilot
   // refuses to start without both languages and an answered brief question
-  // (AQU-827). Pass `steeringContext: false` to seed the unconfigured project
-  // a spec covering that gate needs.
+  // (AQU-827). Languages are lane rows (AQU-1594 / AQU-1595): English on the
+  // source lane this create already inserted, and one Swahili target lane
+  // (the old settings `targetLanguage: "sw"`). Only the brief goes through
+  // the settings PUT.
+  //
+  // `steeringContext: false` is the unconfigured project a spec covering that
+  // gate needs: no brief, no target lane, and the source lane's language left
+  // empty. No current caller passes the flag; the meaning stays that opt-out.
   if (opts.steeringContext !== false) {
-    await updateProjectSettings(jwt, projectId, {
-      sourceLanguage: "en",
-      targetLanguage: "sw",
+    await setProjectLanguagePair(jwt, projectId, {
+      sourceLanguage: "English",
+      sourceCode: "en",
+      targetLanguage: "Swahili",
+      targetCode: "sw",
       translationBrief: { parameters: { purpose: "Seeded fixture project" } },
     })
   }
@@ -360,6 +368,10 @@ export interface ProjectedCellRow {
   aiDrafted: boolean
   /** Chain head for this side/lane — the event id the projection last applied. */
   eventId: string
+  /** Target rows: the lane's frozen tag (`''` = a legacy default lane). */
+  targetLang?: string
+  /** Target rows: the lane row's id. */
+  laneId?: string | null
 }
 
 /** Read a seeded file's cell rows straight from the sync-worker projection —
@@ -435,6 +447,44 @@ export async function readCellHistory(
   const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
   if (!r.ok) throw new Error(`cell history read failed: HTTP ${r.status} — ${await r.text()}`)
   return ((await r.json()) as { events: CellHistoryEventRow[] }).events
+}
+
+/** Commit one target value on the project's target lane through `POST
+ * /events` — the editor's own write path — so a cell has server-side history
+ * (and nothing in the browser's outbox) before a spec opens it. */
+export async function commitTargetServerSide(
+  jwt: string,
+  seeded: Pick<SeededProject, "projectId" | "fileId">,
+  cellId: string,
+  value: string,
+  author: "alice" | "bob" | "carol",
+): Promise<void> {
+  const lane = (await readProjectLanes(jwt, seeded.projectId))
+    .find((l) => l.role === "target" && !l.archivedAt)
+  if (!lane) throw new Error("seeded project has no target lane")
+  const token = await mintSyncToken(jwt, seeded.projectId, seeded.fileId)
+  const event = {
+    schemaVersion: 1,
+    id: randomUUID(),
+    projectId: seeded.projectId,
+    fileId: seeded.fileId,
+    cellId,
+    author,
+    parentId: null,
+    kind: "target.cell.commit",
+    payload: { value, laneId: lane.id },
+    clientTs: Date.now(),
+  }
+  const r = await fetch(`${SYNC_BASE}/events`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ events: [event] }),
+  })
+  if (!r.ok) throw new Error(`target commit failed: HTTP ${r.status} — ${await r.text()}`)
+  const body = (await r.json()) as { accepted?: unknown[]; rejected?: unknown[] }
+  if ((body.rejected ?? []).length > 0 || (body.accepted ?? []).length !== 1) {
+    throw new Error(`target commit was not accepted: ${JSON.stringify(body).slice(0, 500)}`)
+  }
 }
 
 /** Navigate an authed page straight into the seeded file's editor and wait

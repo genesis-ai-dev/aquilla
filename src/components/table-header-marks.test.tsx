@@ -36,9 +36,22 @@ describe("the table header's column marks", () => {
   })
 
   it("tells the two check columns apart: text, then audio", async () => {
-    renderWithTooltips(<CheckMarks />)
+    renderWithTooltips(<CheckMarks audioColumn="on" />)
     const [text, audio] = screen.getAllByRole("img")
     await expectTooltip(text, "Text validation")
     await expectTooltip(audio, "Audio validation")
+  })
+
+  // AQU-1495: the audio mark stands over the rows' audio column, which a file
+  // with no audio does not have. Left there, it pushed the Target heading
+  // 30px past the rows' target boxes.
+  it("has no audio mark when the rows have no audio column", () => {
+    renderWithTooltips(<CheckMarks audioColumn="off" />)
+    expect(screen.getAllByRole("img").map((m) => m.getAttribute("aria-label"))).toEqual(["Text validation"])
+  })
+
+  it("keeps the audio mark while the rows hold their placeholder", () => {
+    renderWithTooltips(<CheckMarks audioColumn="checking" />)
+    expect(screen.getByRole("img", { name: "Audio validation" })).toBeInTheDocument()
   })
 })

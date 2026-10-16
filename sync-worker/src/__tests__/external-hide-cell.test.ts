@@ -120,7 +120,7 @@ async function apply(tdb: TestDb, token: string, commands: unknown[]) {
 /** The agent-facing cells read — what an external agent actually sees. */
 async function readCells(tdb: TestDb, token: string) {
   const res = (await handleExternalReadRequest(
-    new Request(`https://w/api/v1/external/projects/${PROJECT}/files/${FILE}/cells`, {
+    new Request(`https://w/api/v1/external/projects/${PROJECT}/files/${FILE}/cells?lane=${bridgeLane}`, {
       headers: { Authorization: `Bearer ${token}` },
     }),
     makeEnv(tdb.db),
@@ -165,7 +165,14 @@ beforeEach(async () => {
       },
     ],
   })
+  const lane = await tdb.pg.query<{ id: string }>(
+    `SELECT id FROM lanes WHERE project_id = $1 AND role = 'target' AND legacy_tag = ''`,
+    [PROJECT],
+  )
+  bridgeLane = lane.rows[0].id
 })
+
+let bridgeLane = ''
 
 // ── discovery (AC 1) ─────────────────────────────────────────────────────────
 
@@ -426,7 +433,7 @@ describe('HideCell / ShowCell — preconditions', () => {
     const lead = await memberToken(tdb, ROLE.PROJECT_LEAD)
     const out = await prepare(tdb, lead, [
       { kind: 'HideCell', fileId: FILE, cellId: 'cell-2' },
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'x' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: bridgeLane, value: 'x' },
     ])
     expect(out.res.status).toBe(400)
     expect(out.body.error.message).toContain('cannot be mixed')

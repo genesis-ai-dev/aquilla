@@ -20,6 +20,10 @@
  *                  that is already there is the reaction.
  *   • COOLDOWN   — REACT_COOLDOWN_MS between reactions on the same file.
  *
+ * Per-project durable state (the cursor, the per-file cooldown stamps and the
+ * round-robin visit stamp) lives in `agent_react_state`, not the settings blob
+ * — see db/shared/agent-react-state.ts and AQU-1846.
+ *
  * Two drivers share this module: the 5-minute cron (`runReactSweep`, wrapped
  * in try/catch by the caller — it must never fail the cron) and the manual
  * "check for updates now" route (`reactCheckProject`). Starting a run is
@@ -30,17 +34,14 @@
 
 import type { AquillaDb } from "../../../db/shim/postgres"
 import type { Env } from "../types"
+import { loadProjectSettings } from "../../../db/shared/projects"
 import {
-  loadProjectSettings,
-  patchProjectSettingsShared,
-} from "../../../db/shared/projects"
-import {
-  AGENT_REACT_STATE_KEY,
-  agentReactStateValue,
-  readAgentMode,
+  listReactProjects,
+  markAgentReactSwept,
   readAgentReactState,
-  type AgentReactState,
-} from "./agent-mode"
+  writeAgentReactState,
+} from "../../../db/shared/agent-react-state"
+import { readAgentMode } from "./agent-mode"
 import { appendMessage, touchThread } from "./team-channel"
 import { readAutopilotReleased } from "./contextual/release-gate"
 import { raiseDecision } from "../../../db/shared/contextual-decisions"
@@ -77,7 +78,10 @@ export const REACT_COOLDOWN_MS = 10 * 60_000
 /** First sweep of a newly-switched-on project looks back this far instead of
  *  reacting to the project's entire history. */
 export const REACT_INITIAL_LOOKBACK_MS = 60 * 60_000
-/** Projects one cron sweep will visit. */
+/** Projects one cron sweep will visit. Candidates come back least-recently-
+ *  swept first (AQU-1846), so this bounds one cycle's work without starving
+ *  anyone: with N enabled projects every one is visited within ceil(N / 10)
+ *  cycles. */
 export const REACT_MAX_PROJECTS_PER_SWEEP = 10
 /** Reactions one project may start in a single sweep. Files are considered
  *  freshest-first, so the cap drops the stalest signal, not the newest. */
@@ -91,7 +95,10 @@ export const REACT_JEV_BUDGET_MS = 20_000
 export interface StartReactionRunInput {
   projectId: string
   fileId: string
-  /** Lane the human edited ('' = default lane); the reaction drafts there. */
+  /** Lane the human edited — `lanes.id` (AQU-1610); the reaction drafts
+   *  there. `null` when the edit's tag named no lane. */
+  laneId: string | null
+  /** The same lane's legacy tag ('' = former default lane). */
   targetLang: string
   /** Most recently edited cell — the first wave starts there. */
   anchorCellId: string | null
@@ -113,7 +120,10 @@ export type StartReactionRun = (
 export interface WakeReactionRunInput {
   projectId: string
   fileId: string
-  /** Lane of the edit (and of the parked run — states are keyed per lane). */
+  /** Lane of the edit and of the parked run — `lanes.id`; run states are
+   *  keyed per lane (AQU-1610). */
+  laneId: string | null
+  /** The same lane's legacy tag. */
   targetLang: string
   /** The parked run to wake — the reaction continues ITS conversation. */
   runId: string
@@ -202,44 +212,15 @@ async function announceReaction(
 }
 
 // ── Cursor persistence ──────────────────────────────────────────────────────
+//
+// AQU-1846: the bookmark lives in `agent_react_state`, not the settings blob.
+// It used to be a read-modify-write of a multi-MB TEXT column every five
+// minutes per swept project, behind a version guard that turned a lost race
+// against a human settings edit into a silently dropped cursor advance.
+// See db/shared/agent-react-state.ts.
 
-/**
- * Read-modify-write `agentReactState` back into the settings blob.
- *
- * `patchProjectSettingsShared` replaces only the named top-level key, so a
- * concurrent settings edit elsewhere in the blob is preserved; its version
- * guard turns a lost race into `conflict`, which we retry ONCE and then drop.
- * Dropping is safe: the cursor simply does not advance, and the next sweep
- * reconsiders the same window (the per-file cooldown is what stops that
- * turning into a second reaction).
- */
-async function persistReactState(
-  db: AquillaDb,
-  projectId: string,
-  state: AgentReactState,
-): Promise<boolean> {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const current = await loadProjectSettings(db, projectId)
-    const result = await patchProjectSettingsShared(db, {
-      projectId,
-      ops: [{ key: AGENT_REACT_STATE_KEY, value: agentReactStateValue(state) }],
-      ifMatchVersion: current.version,
-      // System-authored: no human pressed anything, and settings.updated_by is
-      // informational (no FK), so 0 reads as "the platform did this".
-      updatedBy: 0,
-    })
-    if (result.status === "ok") return true
-    if (result.status === "error") {
-      console.warn(`[react] cursor write failed for ${projectId}: ${result.message}`)
-      return false
-    }
-  }
-  console.warn(`[react] cursor write lost two races for ${projectId} — retrying next sweep`)
-  return false
-}
-
-/** Forget cooldown stamps for files nothing will look at again, so the blob
- *  cannot grow without bound on a long-lived project. */
+/** Forget cooldown stamps for files nothing will look at again, so the state
+ *  row cannot grow without bound on a long-lived project. */
 function pruneCooldowns(
   lastReactionAt: Record<string, string>,
   now: number,
@@ -293,7 +274,7 @@ export async function reactCheckProject(
     return settle()
   }
 
-  const state = readAgentReactState(stored.settings)
+  const state = await readAgentReactState(db, projectId)
   const windowEnd = now - REACT_DEBOUNCE_MS
   const cursor = state.cursor ?? now - REACT_INITIAL_LOOKBACK_MS
   if (windowEnd <= cursor) {
@@ -348,7 +329,7 @@ export async function reactCheckProject(
         skipped.push({ fileId: signal.fileId, reason: "not a discourse file" })
         continue
       }
-      const runState = runStates.get(fileLaneKey(signal.fileId, signal.targetLang))
+      const runState = runStates.get(fileLaneKey(signal.fileId, signal.laneId))
       if (runState?.state === "busy") {
         skipped.push({ fileId: signal.fileId, reason: "a run is already active on this file" })
         continue
@@ -422,6 +403,7 @@ export async function reactCheckProject(
               await deps.wakeRun(env, {
                 projectId,
                 fileId: signal.fileId,
+                laneId: signal.laneId,
                 targetLang: signal.targetLang,
                 runId: runState.runId,
                 parkReason: runState.parkReason,
@@ -431,6 +413,7 @@ export async function reactCheckProject(
             : await deps.startRun(env, {
                 projectId,
                 fileId: signal.fileId,
+                laneId: signal.laneId,
                 targetLang: signal.targetLang,
                 anchorCellId: signal.anchorCellId,
                 direction,
@@ -468,28 +451,11 @@ export async function reactCheckProject(
   }
 
   state.cursor = nextCursor
-  await persistReactState(db, projectId, state)
+  await writeAgentReactState(db, { projectId, state })
   return settle()
 }
 
 // ── The cron sweep ──────────────────────────────────────────────────────────
-
-/** Live projects with `agentMode.react` on, read off the generated column
- *  (migration 0085) — never by parsing the multi-MB settings blobs. */
-async function listReactProjects(db: AquillaDb, limit: number): Promise<string[]> {
-  const { results } = await db
-    .prepare(
-      `SELECT ps.project_id FROM project_settings ps
-         JOIN projects p ON p.id = ps.project_id
-        WHERE ps.agent_react
-          AND p.is_active AND p.archived_at IS NULL
-        ORDER BY ps.project_id ASC
-        LIMIT ?`,
-    )
-    .bind(limit + 1)
-    .all<{ project_id: string }>()
-  return results.map((row) => row.project_id)
-}
 
 export interface ReactSweepResult {
   projects: number
@@ -519,16 +485,14 @@ export async function runReactSweep(
     console.warn("[react] candidate query failed:", err)
     return { projects: 0, reactions: [], done: Promise.resolve() }
   }
-  if (candidates.length > limit) {
-    console.log(
-      `[react] more than ${limit} projects have react on — sweeping the first ${limit}`,
-    )
-    candidates = candidates.slice(0, limit)
-  }
-
   const reactions: ReactSweepResult["reactions"] = []
   const drivers: Promise<void>[] = []
   for (const projectId of candidates) {
+    // Stamp the visit BEFORE the sweep, so this project goes to the back of
+    // the rotation even if its sweep short-circuits or throws. Stamping after
+    // would let one project with unreadable data hold the front of the queue
+    // forever — the starvation this issue is about, in a different shape.
+    await markAgentReactSwept(db, projectId)
     try {
       const result = await reactCheckProject(env, projectId, deps)
       for (const reaction of result.reactions) reactions.push({ projectId, ...reaction })

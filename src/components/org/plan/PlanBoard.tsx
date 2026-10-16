@@ -86,10 +86,12 @@ const FOLDER_TALLY_KEY: Record<PlanUnitStatus, string> = {
   done: "org.projectOverview.plan.folderTallyDone",
 }
 
-const GROUP_HINT_KEY: Record<PlanUnitStatus, string> = {
+// Nearly complete has no hint (Sam, 2026-10-14): its rule ("within 6% or 7
+// cells of done") is the board's arithmetic, not something a manager needs to
+// read on every header.
+const GROUP_HINT_KEY: Partial<Record<PlanUnitStatus, string>> = {
   overdue: "org.projectOverview.plan.groupHintOverdue",
   soon: "org.projectOverview.plan.groupHintSoon",
-  nearly_complete: "org.projectOverview.plan.groupHintNearlyComplete",
   in_progress: "org.projectOverview.plan.groupHintInProgress",
   not_started: "org.projectOverview.plan.groupHintNotStarted",
   done: "org.projectOverview.plan.groupHintDone",
@@ -209,10 +211,17 @@ function PlanStat({ value, label, tone, testId }: {
 export function PlanBoard({
   units, now, projectId, selectedId, onSelect, actions, emptyAction,
   status = "ready", onRetry, orderRef,
-  shortChaptersByUnit, assigneesByUnit, onOpenShortfall, laneLabel, lanes, lane, onLaneChange,
+  shortChaptersByUnit, frontMatterShortUnits, assigneesByUnit, onOpenShortfall, laneLabel, lanes, lane, onLaneChange,
+  recordsAudio = false,
 }: {
   units: PlanUnit[]
   now: number
+  /**
+   * AQU-1954: the "Records audio" switch of the language the board is reading.
+   * On, every file is expected to carry audio, so every row has an audio bar
+   * and is judged on its takes. Off, only files with a take or a cue sheet are.
+   */
+  recordsAudio?: boolean
   /** Scopes the per-project group folds. Null while the route id is unresolved. */
   projectId: string | null
   selectedId: string | null
@@ -248,6 +257,12 @@ export function PlanBoard({
    * hands back a map, so a unit with no entry simply draws no chapter line.
    */
   shortChaptersByUnit?: ReadonlyMap<string, string[]>
+  /**
+   * AQU-1493. The units whose book front matter is short too, keyed by
+   * `planUnitId`, so the row says "front matter and chapters 2 and 3".
+   * Routed like `shortChaptersByUnit`, from the same owner.
+   */
+  frontMatterShortUnits?: ReadonlySet<string>
   /**
    * AQU-1278. Who is working on each unit, keyed by `planUnitId`.
    *
@@ -344,7 +359,7 @@ export function PlanBoard({
     () => filterPlanUnits(units, { query, needsDateOnly }),
     [units, query, needsDateOnly],
   )
-  const audioFiles = useMemo(() => audioFileIds(units), [units])
+  const audioFiles = useMemo(() => audioFileIds(units, recordsAudio), [units, recordsAudio])
   // AQU-955: the mirror set — which files carry TEXT work. Same rule as
   // `audioFiles`: derived from the UNFILTERED units, because whether a file is
   // audio-only is a fact about the file and must not change when the search
@@ -422,11 +437,11 @@ export function PlanBoard({
   // The summary counts the WHOLE project, never the filtered view. "1 of 3
   // done" under a filter that hid the other sixty-three would be a lie, and
   // the strip is the one thing on this card a reader trusts without checking.
-  const summary = useMemo(() => planSummary(units, now), [units, now])
+  const summary = useMemo(() => planSummary(units, now, recordsAudio), [units, now, recordsAudio])
   // Audio bars vanish entirely on a text-only project rather than showing a
   // column of zeroes, matching what the Progress card already does. Judged on
   // the whole project so a filter cannot make a column appear and disappear.
-  const showAudio = useMemo(() => planHasAudio(units), [units])
+  const showAudio = useMemo(() => planHasAudio(units, recordsAudio), [units, recordsAudio])
   /**
    * AQU-1278: which FILES carry recordings. Computed ONCE over the whole board
    * and handed down, for two reasons that are both bugs if you skip it.
@@ -519,6 +534,7 @@ export function PlanBoard({
         // or assignees arrived, and on a sixty-six row board that is the whole
         // board re-rendering once per background read.
         shortChapters={shortChaptersByUnit?.get(id)}
+        frontMatterShort={frontMatterShortUnits?.has(id) ?? false}
         assignees={assigneesByUnit?.get(id)}
         // The SAME function to every row, never an arrow bound per row: the
         // row is memoized, and a per-row closure would be fresh on every
@@ -587,7 +603,13 @@ export function PlanBoard({
             />
           )}
         </div>
-        {actions}
+        {/* One group at the end of the row. Passed straight in, a fragment's
+            buttons became separate items of the justify-between row and the
+            first one (Analyze word counts) was stranded mid-row (AQU-1950).
+            ms-auto keeps the group at the end when the row wraps. */}
+        <div className="ms-auto flex flex-wrap items-center gap-2" data-testid="plan-board-actions">
+          {actions}
+        </div>
       </div>
 
       {/* Controls. Hidden when there is nothing to arrange — a filter box over
@@ -816,14 +838,22 @@ export function PlanBoard({
                       {folded
                         ? <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
                         : <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />}
-                      <span className={`h-[7px] w-[7px] shrink-0 rounded-full ${tone.dot}`} aria-hidden />
+                      {/* A dot, or for In progress / Nearly complete a ring the
+                          same size (AQU-1764) — `tone.dot` carries the border. */}
+                      <span
+                        data-plan-mark={group.status}
+                        className={`h-[7px] w-[7px] shrink-0 rounded-full ${tone.dot}`}
+                        aria-hidden
+                      />
                       {t(PLAN_STATUS_LABEL_KEY[group.status] as never)}
                       <span className="rounded-full border bg-card px-[7px] text-[11px] font-bold tabular-nums text-muted-foreground">
                         {group.units.length}
                       </span>
-                      <span className="ms-auto hidden font-normal text-[11.5px] text-muted-foreground sm:block">
-                        {t(GROUP_HINT_KEY[group.status] as never)}
-                      </span>
+                      {GROUP_HINT_KEY[group.status] && (
+                        <span className="ms-auto hidden font-normal text-[11.5px] text-muted-foreground sm:block">
+                          {t(GROUP_HINT_KEY[group.status] as never)}
+                        </span>
+                      )}
                     </button>
                   </h3>
                   {!folded && group.units.length > 0 && (

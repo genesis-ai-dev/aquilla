@@ -44,7 +44,7 @@ describe("CellPresenceBadges", () => {
     const badge = container.querySelector("[data-cell-presence]")
     expect(badge?.getAttribute("data-cell-presence-state")).toBe("editing")
     expect(badge?.textContent).toContain("+1")
-    expect(container.querySelectorAll("[data-cell-presence] [title]")).toHaveLength(2)
+    expect(container.querySelectorAll("[data-cell-presence] [data-slot=user-chip][aria-label]")).toHaveLength(2)
   })
 
   it("flips to typing while the live draft changes and back after the linger window", () => {

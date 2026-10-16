@@ -12,8 +12,10 @@ import { coerceMatchOptions, resolveMatchOptions } from "../../../src/lib/termin
 import type { ConceptMatchInput, TermMatchingSettings, TermRendering } from "../../../src/lib/terminology/model"
 import type { TermFormTally, TermOccurrencePage, TermOccurrenceWire } from "../../../src/lib/terminology/occurrence-page"
 import { verdictForKnownMatch } from "../../../src/lib/terminology/verdict"
+import { applyRenderingLaneScope, renderingLaneScope } from "./rendering-lane-scope"
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from "./lane-id-sql"
 import { visibleSourceSql } from "./hidden-cells-scope"
+import { inCountedFileSql } from "../../../db/shared/counted-files"
 
 /** Stop a pathological project from holding the request open. */
 const MAX_SCAN = 50_000
@@ -68,7 +70,12 @@ function parseRenderings(raw: unknown): TermRendering[] {
     const status = (item as { status?: unknown }).status
     if (typeof rendering !== "string" || !rendering.trim()) continue
     if (status !== "preferred" && status !== "admitted" && status !== "forbidden") continue
-    out.push({ rendering, status })
+    const laneId = (item as { laneId?: unknown }).laneId
+    out.push({
+      rendering,
+      status,
+      ...(typeof laneId === "string" && laneId !== "" ? { laneId } : {}),
+    })
   }
   return out
 }
@@ -165,6 +172,10 @@ async function fetchBatch(
     ` AND ${targetLaneDualReadSql("t")}`,
     "WHERE s.project_id = ? AND s.side = 'source'",
     ` AND ${visibleSourceSql("s")}`,
+    // AQU-1626: an occurrence inside a deleted file or a hidden companion is
+    // not an occurrence a translator can act on — the file is not openable from
+    // the sidebar, so the row was a dead end in the term drawer.
+    ` AND ${inCountedFileSql("s")}`,
     " AND s.tombstoned_at IS NULL AND s.value <> ''",
     cursorSql,
     "ORDER BY s.file_id, COALESCE(s.sequence_index, 1e300), s.cell_id",
@@ -206,6 +217,11 @@ export async function queryConceptOccurrences(
   opts: { offset: number; limit: number; lane?: string },
 ): Promise<TermOccurrencePage> {
   const lane = opts.lane ?? ""
+  const scope = await renderingLaneScope(db, projectId, lane)
+  const judged = {
+    ...concept,
+    renderings: applyRenderingLaneScope(concept.renderings ?? [], scope),
+  }
   const occurrences: TermOccurrenceWire[] = []
   const forms = new Map<string, TermFormTally>()
   const resolved = resolveMatchOptions(concept, termMatching)
@@ -244,7 +260,7 @@ export async function queryConceptOccurrences(
         if (!excluded) live = true
       }
       if (!live) continue
-      const verdict = verdictForKnownMatch(concept, translated)
+      const verdict = verdictForKnownMatch(judged, translated)
       if (verdict === "enforced") enforced += 1
       else infringed += 1
       total += 1
@@ -328,6 +344,9 @@ export async function loadVisibleSourceTexts(
         "FROM cells s",
         "WHERE s.project_id = ? AND s.side = 'source'",
         ` AND ${visibleSourceSql("s")}`,
+        // AQU-1626: and mining skips them too, or a dubbed project's suggested
+        // terminology comes back full of timecodes.
+        ` AND ${inCountedFileSql("s")}`,
         " AND s.tombstoned_at IS NULL AND s.value <> ''",
         "ORDER BY s.file_id, COALESCE(s.sequence_index, 1e300), s.cell_id",
         "LIMIT ?",

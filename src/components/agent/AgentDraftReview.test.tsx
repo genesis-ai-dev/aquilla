@@ -61,6 +61,8 @@ let reviewStatus: number
 let activityStatus: number
 let writeOutcome: "applied" | "offline" | "stale" | "rejected" | "staleSource"
 let allowSelfValidation: boolean
+let moreSettings: Record<string, unknown>
+let settingsLanes: Array<Record<string, unknown>> | undefined
 let activeRun: ContextualRunRecord
 
 function source(cellId: string, value = `Full source ${cellId}`): CellRow {
@@ -95,6 +97,8 @@ beforeEach(async () => {
   draftStatus = reviewStatus = activityStatus = 200
   writeOutcome = "applied"
   allowSelfValidation = false
+  moreSettings = {}
+  settingsLanes = undefined
   requests = []
   posted = []
   rejectedPosts = []
@@ -106,7 +110,10 @@ beforeEach(async () => {
     if (url.pathname.endsWith("/sync-token")) return json({
       token: "sync-jwt", expiresIn: 900, role: { level: mocks.role, name: "role", source: "org" },
     })
-    if (url.pathname.endsWith("/settings")) return json({ version: 1, settings: { allowSelfValidation } })
+    if (url.pathname.endsWith("/settings")) return json({
+      version: 1, settings: { allowSelfValidation, ...moreSettings },
+      ...(settingsLanes ? { lanes: settingsLanes } : {}),
+    })
     if (url.pathname.endsWith("/activity")) return json({
       run: { ...activeRun, id: activeRun.runId }, events: [], sceneBriefs: [], drafts: [],
       draftCounts: { proposed: drafts.filter((draft) => draft.runId === activeRun.runId).length, applied: 0, rejected: 0, superseded: 0 },
@@ -371,6 +378,24 @@ describe("AgentDraftReview", () => {
     expect(posted[1].payload).toMatchObject({ editEventId: posted[0].id })
   })
 
+  // AQU-1571: the project's minimum role and named-validator list refuse the
+  // vote server-side, after the text has already saved. Accepting must save
+  // the text and queue no vote, rather than end in "could not be confirmed".
+  it.each([
+    ["below the project's minimum role", { validationRoleFloor: "project_lead" }],
+    ["left off the named-validator list", { validationNamedUsers: ["bob"] }],
+  ])("queues no validation for a contributor %s", async (_label, rules) => {
+    allowSelfValidation = true
+    moreSettings = rules
+    mocks.role = 400
+    show()
+    await loaded()
+    fireEvent.click(screen.getByRole("button", { name: "Use this translation" }))
+    await screen.findByText("Suggestion 2")
+    expect(posted.map((event) => event.kind)).toEqual(["target.cell.commit"])
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+  })
+
   it.each(["source", "target", "proposal"])("fails closed when the %s changed after review", async (changed) => {
     show()
     await loaded()
@@ -495,6 +520,37 @@ describe("AgentDraftReview", () => {
     await loaded()
     expect(screen.getByRole("alert")).toHaveTextContent("source for this suggestion is unavailable")
     expect(screen.queryByRole("button", { name: "Use this translation" })).not.toBeInTheDocument()
+  })
+
+  // AQU-1902: the accept is stamped with the run's lane ROW, and a run that
+  // names no lane on a project whose lanes all carry a real tag is refused
+  // before anything is written (the server would refuse it and the outbox
+  // would drop the text).
+  const lane = (id: string, legacyTag: string, position: number) => ({
+    id, role: "target", name: null, langCode: null, legacyTag, position, archivedAt: null,
+  })
+
+  it("stamps the accepted draft with the run's lane id (AQU-1902)", async () => {
+    activeRun = { ...run, targetLang: "fr" }
+    settingsLanes = [lane("lane-fr", "fr", 0), lane("lane-de", "de", 1)]
+    rows.push({ ...source("c1"), side: "target", targetLang: "fr", value: "French stored", eventId: "french-head" })
+    show()
+    await loaded()
+    fireEvent.click(screen.getByRole("button", { name: "Use this translation" }))
+    await screen.findByText("Suggestion 2")
+    expect(posted).toHaveLength(1)
+    expect(posted[0].payload).toMatchObject({ targetLang: "fr", laneId: "lane-fr" })
+  })
+
+  it("refuses a lane-less run on an all-tagged project and writes nothing (AQU-1902)", async () => {
+    activeRun = { ...run, targetLang: "" }
+    settingsLanes = [lane("lane-fr", "fr", 0), lane("lane-de", "de", 1)]
+    show()
+    await loaded()
+    fireEvent.click(screen.getByRole("button", { name: "Use this translation" }))
+    expect(await screen.findByText(/Draft review is not available for this task\./)).toBeInTheDocument()
+    expect(posted).toEqual([])
+    expect(await peekOutboxBatch(10)).toEqual([])
   })
 
   it("observes lane-qualified focus leases before allowing any decision", async () => {

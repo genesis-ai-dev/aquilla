@@ -11,6 +11,7 @@
 
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import { timeoutSignal } from "./fetch-timeout"
+import { isTransientReadStatus, isTransportFailure, retryTransientRead } from "./read-retry"
 import { observedSyncFetch, readSyncJson } from "./connection-activity"
 import type { CellRow, CellsPage, FileSummary } from "./cells-read-types"
 // Re-export so consumers (e.g. org/ProjectOverview) can import FileSummary from
@@ -76,9 +77,9 @@ const READ_TIMEOUT_MS = 15_000
 // AQU-775: an initial editor load used to turn one transient worker/CORS
 // failure into a permanent, false "file is empty" screen. Cell projection
 // reads are idempotent, so retry the small class of errors that can recover
-// without user intervention. Keep the budget bounded: authorization and
-// other deterministic 4xx responses still fail immediately.
-const CELL_READ_ATTEMPTS = 3
+// without user intervention (see read-retry.ts). Keep the budget bounded:
+// three attempts, and authorization and other deterministic 4xx responses
+// still fail immediately.
 const CELL_READ_RETRY_DELAYS_MS = [100, 400] as const
 
 function fetchInit(jwt: string): RequestInit {
@@ -86,37 +87,16 @@ function fetchInit(jwt: string): RequestInit {
 }
 
 function isTransientCellsReadError(error: unknown): boolean {
-  if (error instanceof CellsReadError) {
-    return error.status === 408
-      || error.status === 425
-      || error.status === 429
-      || error.status >= 500
-  }
-  // Browser fetch rejects with TypeError for transport and CORS failures.
-  // AbortError/TimeoutError are the timeoutSignal watchdog firing.
-  return error instanceof TypeError
-    || (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError"))
-}
-
-async function waitForCellReadRetry(delayMs: number): Promise<void> {
-  await new Promise<void>((resolve) => setTimeout(resolve, delayMs))
+  if (error instanceof CellsReadError) return isTransientReadStatus(error.status)
+  return isTransportFailure(error)
 }
 
 async function fetchCellsJson<T>(url: string, jwt: string): Promise<T> {
-  let lastError: unknown
-  for (let attempt = 0; attempt < CELL_READ_ATTEMPTS; attempt++) {
-    try {
-      const res = await observedSyncFetch(url, fetchInit(jwt))
-      return await readJson<T>(res)
-    } catch (error) {
-      lastError = error
-      if (!isTransientCellsReadError(error) || attempt === CELL_READ_ATTEMPTS - 1) {
-        throw error
-      }
-      await waitForCellReadRetry(CELL_READ_RETRY_DELAYS_MS[attempt])
-    }
-  }
-  throw lastError
+  return retryTransientRead(
+    async () => readJson<T>(await observedSyncFetch(url, fetchInit(jwt))),
+    isTransientCellsReadError,
+    CELL_READ_RETRY_DELAYS_MS,
+  )
 }
 
 /** Page size the SPA asks the files listing for. */
@@ -390,6 +370,12 @@ export async function fetchCellsByIds(
  * is still an offset into that ordering and the cache is invalidated exactly
  * when the watermark changes — so this torn-snapshot reasoning, and the "no
  * `?since=` cursor from a mid-stream watermark change" rule, are unaffected.)
+ * (AQU-1841: the server now pins that ordering INTO the cursor, so while it
+ * can still honor the pin the watermark stays put across the whole stream and
+ * a mid-stream peer commit no longer tears it. Nothing here changes: the rule
+ * is still "same watermark on every page or no cursor", it just fires far less
+ * often. A page-to-page change still means the pin was retired or evicted and
+ * the stream really may be torn.)
  */
 export async function streamFileCells(
   projectId: string,

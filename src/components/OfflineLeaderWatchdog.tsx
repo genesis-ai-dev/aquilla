@@ -7,6 +7,11 @@ import type { LeaderLogEntry } from "@/lib/offline/leader-log-bridge"
 import { setLeaderStalled, watchLeaderLiveness } from "@/lib/offline/leader-watchdog"
 
 const LEADER_STALLED_TOAST_ID = "offline-leader-stalled"
+const SLOW_BOOT_TOAST_ID = "offline-slow-boot"
+// The store only exists once the leader has booted (store.ts disables the
+// fast path), which includes rebuilding the state db after a schema change —
+// minutes on a big store — so this prompts rather than giving up.
+const DEFAULT_BOOT_STALL_MS = 30_000
 const LOG_TAIL = 40
 
 // Module-level so it's referentially stable — a fresh default each render
@@ -28,6 +33,7 @@ const restartApp = (): void => {
 }
 
 type Props = {
+  bootStallMs?: number
   stallMs?: number
   checkEveryMs?: number
   restart?: () => void
@@ -36,14 +42,46 @@ type Props = {
 /**
  * Invisible mount: warns when the offline store's leader worker stops
  * persisting writes (see src/lib/offline/leader-watchdog.ts for why that is
- * otherwise silent). Prompts rather than auto-restarting, so an edit in
- * progress isn't yanked away mid-keystroke. A restart boots a fresh leader.
+ * otherwise silent), or never boots the store at all — a dead leader never
+ * hands one out, so there's nothing for the stall check to watch. Prompts
+ * rather than auto-restarting, so an edit in progress isn't yanked away
+ * mid-keystroke. A restart boots a fresh leader.
  *
  * Rendered alongside the other invisible offline mounts in App.tsx.
  */
-export function OfflineLeaderWatchdog({ stallMs, checkEveryMs, restart = restartApp }: Props): null {
-  const { store } = useOfflineStore()
+export function OfflineLeaderWatchdog({
+  bootStallMs = DEFAULT_BOOT_STALL_MS,
+  stallMs,
+  checkEveryMs,
+  restart = restartApp,
+}: Props): null {
+  const { store, loading } = useOfflineStore()
   const t = useT()
+
+  useEffect(() => {
+    if (!loading) return
+    const timer = setTimeout(() => {
+      const leaderLogs = (window as Window & { __leaderLogs?: LeaderLogEntry[] }).__leaderLogs
+      console.error("[offline] LiveStore store still hasn't booted", {
+        waitedMs: bootStallMs,
+        leaderLogs: leaderLogs?.slice(-LOG_TAIL),
+      })
+      toast.add({
+        id: SLOW_BOOT_TOAST_ID,
+        type: "warning",
+        timeout: 0,
+        title: t("workspace.offline.slowBootToast"),
+        actionProps: {
+          children: t("workspace.offline.leaderStalledRestart"),
+          onClick: restart,
+        },
+      })
+    }, bootStallMs)
+    return () => {
+      clearTimeout(timer)
+      toast.close(SLOW_BOOT_TOAST_ID)
+    }
+  }, [loading, bootStallMs, restart, t])
 
   useEffect(() => {
     if (!store) return

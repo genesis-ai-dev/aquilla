@@ -34,6 +34,7 @@ import {
   type FixtureUser,
 } from "./helpers/access-fixture"
 import { resolveProjectRole } from "../services/project-permissions"
+import { platformAdminEmailsParam } from "../middleware/platform-admin"
 import {
   resolveProjectRoleShared,
   type AccessGrantsMode,
@@ -65,7 +66,7 @@ const sharedResolverFor =
       env.AQUILLA_PG,
       { id: String(user.id), email: user.email },
       projectId,
-      env.ADMIN_EMAILS,
+      await platformAdminEmailsParam(env),
       mode,
     )
     return role ? { level: role.level, source: role.source as NonNullable<ExpectedRole>["source"] } : null

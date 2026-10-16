@@ -156,7 +156,7 @@ async function linkFromSettings(t: TestDb): Promise<void> {
 
 async function ownRows(t: TestDb): Promise<{ cells: unknown[]; files: unknown[]; validators: unknown[] }> {
   const cells = await t.pg.query(
-    `SELECT * FROM cells WHERE project_id = $1 AND file_id = $2 ORDER BY cell_id, side, target_lang`,
+    `SELECT * FROM cells WHERE project_id = $1 AND file_id = $2 ORDER BY cell_id, side, lane_id`,
     [ESTABLISHED, OWN_FILE],
   )
   const files = await t.pg.query(`SELECT * FROM files WHERE project_id = $1 AND id = $2`, [ESTABLISHED, OWN_FILE])

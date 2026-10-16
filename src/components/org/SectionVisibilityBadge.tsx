@@ -16,8 +16,8 @@
 // role-level number out. Callers own the actual permission source (org
 // settings patch, or a static floor) and the hide/show decision.
 
-import { useState } from "react"
-import { Lock, Eye, ChevronDown } from "lucide-react"
+import { useId, useState } from "react"
+import { Lock, Eye, ChevronDown, Info } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import {
   Popover,
@@ -67,6 +67,17 @@ export function visibilityFloorLabelKey(minRole: number): MessageKey {
   return "org.sectionVisibilityBadge.floorOwner"
 }
 
+/** Catalog key for a floor's picker label ("Maintainers and owners"), for
+ *  copy that names a floor mid-sentence. Same thresholds as
+ *  visibilityFloorLabelKey. */
+export function visibilityRolePickerLabelKey(minRole: number): MessageKey {
+  if (minRole <= ROLE.VIEWER) return "org.sectionVisibilityBadge.rolePickerEveryone"
+  if (minRole <= ROLE.CONTRIBUTOR) return "org.sectionVisibilityBadge.rolePickerContributor"
+  if (minRole <= ROLE.PROJECT_LEAD) return "org.sectionVisibilityBadge.rolePickerProjectLead"
+  if (minRole <= ROLE.MAINTAINER) return "org.sectionVisibilityBadge.rolePickerMaintainer"
+  return "org.sectionVisibilityBadge.rolePickerOwner"
+}
+
 /** True when a floor restricts the section beyond "everyone with access". */
 export function isRestrictedFloor(minRole: number): boolean {
   return minRole > ROLE.VIEWER
@@ -96,8 +107,45 @@ export interface SectionVisibilityBadgeProps {
   onChangeMinRole?: (nextMinRole: number) => void | Promise<void>
   /** One-line description shown above the picker in the advanced popover. */
   description?: string
+  /**
+   * Lowest floor this control can actually apply (AQU-1779). Options below it
+   * are disabled and never written: a section whose shown floor is the higher
+   * of two settings must not offer a value that saves but cannot show.
+   */
+  minSelectableRole?: number
+  /**
+   * The floor `onChangeMinRole` actually writes, when it differs from the
+   * shown `minRole` (AQU-1779: the Team card shows the higher of two floors
+   * but writes one). Picking the shown value then still writes when the
+   * stored one sits below it, which repairs a floor the old bug loosened.
+   */
+  storedMinRole?: number
+  /** Why the options below `minSelectableRole` are off. Whenever any option
+   *  is disabled, a circled-i beside the picker's label expands it in place. */
+  belowMinSelectableHint?: string
+  /**
+   * AQU-1771: where the shown floor comes from, on a section a PROJECT can make
+   * stricter than its org — "org" when the project follows its organization,
+   * "project" when the project set its own. Said in the popover, under the
+   * picker (Sam, 2026-10-13: never trailing inside the badge), so it is never a
+   * guess which one a change would touch. Omit on org-only sections.
+   */
+  origin?: "org" | "project"
+  /** AQU-1771: the option that means "follow the organization" — labelled so. */
+  orgDefaultRole?: number
+  /**
+   * AQU-1771: when set, a first option "Follow the org (<level>)" that clears
+   * this project's own value (`onFollowOrg`); `followOrgRole` is the level the
+   * section would then show. Offered while the project has its own value, so
+   * that value can always be cleared.
+   */
+  followOrgRole?: number
+  onFollowOrg?: () => void | Promise<void>
   className?: string
 }
+
+/** The Select value of the "Follow the org" option — never a role level. */
+const FOLLOW_ORG_VALUE = "follow-org"
 
 /**
  * Compact "who can see this" affordance for a dashboard section. Renders as a
@@ -110,14 +158,62 @@ export function SectionVisibilityBadge({
   canEdit = false,
   onChangeMinRole,
   description,
+  minSelectableRole,
+  storedMinRole,
+  belowMinSelectableHint,
+  origin,
+  orgDefaultRole,
+  followOrgRole,
+  onFollowOrg,
   className,
 }: SectionVisibilityBadgeProps) {
   const t = useT()
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
-  const label = t(visibilityFloorLabelKey(minRole))
+  const [hintOpen, setHintOpen] = useState(false)
+  const hintId = useId()
+  const floorLabel = t(visibilityFloorLabelKey(minRole))
+  const originLabel = origin === "project"
+    ? t("org.sectionVisibilityBadge.originProject")
+    : origin === "org"
+      ? t("org.sectionVisibilityBadge.originOrg")
+      : null
+  const label = originLabel ? `${floorLabel} · ${originLabel}` : floorLabel
+  const optionLabel = (opt: (typeof VISIBILITY_ROLE_OPTIONS)[number]) =>
+    opt.level === orgDefaultRole
+      ? t("org.sectionVisibilityBadge.orgDefaultOption", { label: t(opt.labelKey) })
+      : t(opt.labelKey)
+  // The org's level, for "Stricter than your org (…)": what the section shows
+  // once the project follows the org again.
+  const orgLevel = followOrgRole ?? orgDefaultRole
   const Icon = isRestrictedFloor(minRole) ? Lock : Eye
   const interactive = canEdit && typeof onChangeMinRole === "function"
+  const isSelectable = (level: number) => minSelectableRole == null || level >= minSelectableRole
+  const offersFollow = followOrgRole != null && typeof onFollowOrg === "function"
+  const someDisabled = VISIBILITY_ROLE_OPTIONS.some((opt) => !isSelectable(opt.level))
+  const followLabel = followOrgRole != null
+    ? t("org.sectionVisibilityBadge.followOrgOption", { label: t(visibilityRolePickerLabelKey(followOrgRole)) })
+    : ""
+  // How to get back to the org's setting, naming the option that does it.
+  const undoOption = offersFollow
+    ? followLabel
+    : orgDefaultRole != null
+      ? t("org.sectionVisibilityBadge.orgDefaultOption", { label: t(visibilityRolePickerLabelKey(orgDefaultRole)) })
+      : null
+  const originLine = origin === "project"
+    ? [
+        orgLevel != null
+          ? t("org.sectionVisibilityBadge.originProjectLine", { label: t(visibilityRolePickerLabelKey(orgLevel)) })
+          : t("org.sectionVisibilityBadge.originProject"),
+        undoOption ? t("org.sectionVisibilityBadge.originUndoHint", { option: undoOption }) : null,
+      ].filter(Boolean).join(" ")
+    : origin === "org"
+      ? t("org.sectionVisibilityBadge.originOrgLine")
+      : null
+  const selectItems = [
+    ...(offersFollow ? [{ value: FOLLOW_ORG_VALUE, label: followLabel }] : []),
+    ...VISIBILITY_ROLE_OPTIONS.map((opt) => ({ value: String(opt.level), label: optionLabel(opt) })),
+  ]
 
   const badgeContent = (
     <Badge
@@ -129,7 +225,7 @@ export function SectionVisibilityBadge({
       )}
     >
       <Icon className="size-3" />
-      {label}
+      {floorLabel}
       {interactive && <ChevronDown className="size-3" />}
     </Badge>
   )
@@ -139,9 +235,19 @@ export function SectionVisibilityBadge({
   }
 
   async function handleChange(value: string | null) {
+    if (value === FOLLOW_ORG_VALUE) {
+      if (!onFollowOrg) return
+      setBusy(true)
+      try {
+        await onFollowOrg()
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
     if (!value || !onChangeMinRole) return
     const next = Number(value)
-    if (!Number.isFinite(next) || next === minRole) return
+    if (!Number.isFinite(next) || next === (storedMinRole ?? minRole) || !isSelectable(next)) return
     setBusy(true)
     try {
       await onChangeMinRole(next)
@@ -151,7 +257,14 @@ export function SectionVisibilityBadge({
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        // Each opening starts with the why tucked away again.
+        if (!next) setHintOpen(false)
+      }}
+    >
       <PopoverTrigger
         render={(
           <button
@@ -164,29 +277,84 @@ export function SectionVisibilityBadge({
           </button>
         )}
       />
-      <PopoverContent align="end" className="w-64">
+      {/* Wide enough for the longest English choice ("Follow the org (Maintainers
+          and owners)"); at w-64 the picker hung out of the popover. Longer
+          translations truncate inside the picker instead. */}
+      <PopoverContent align="end" className="w-[22rem] max-w-[calc(100vw-2rem)]">
         <Field>
-          <FieldLabel className="text-xs font-medium">{t("org.sectionVisibilityBadge.whoCanSeeLabel")}</FieldLabel>
+          <div className="flex items-center justify-between gap-2">
+            <FieldLabel className="text-xs font-medium">{t("org.sectionVisibilityBadge.whoCanSeeLabel")}</FieldLabel>
+            {/* A click, not a hover: the disabled options themselves take no
+                pointer events, and a tooltip inside this popover would not
+                reach touch screens. */}
+            {someDisabled && belowMinSelectableHint && (
+              <button
+                type="button"
+                data-testid="section-visibility-min-info"
+                className="inline-flex size-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground data-[state=open]:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                aria-label={t("org.sectionVisibilityBadge.whyOptionsOffAriaLabel")}
+                aria-expanded={hintOpen}
+                data-state={hintOpen ? "open" : "closed"}
+                aria-controls={hintId}
+                onClick={() => setHintOpen((v) => !v)}
+              >
+                <Info className="size-3.5" aria-hidden />
+              </button>
+            )}
+          </div>
           <Select
-            items={VISIBILITY_ROLE_OPTIONS.map((opt) => ({ value: String(opt.level), label: t(opt.labelKey) }))}
+            items={selectItems}
             value={String(minRole)}
             onValueChange={(v) => void handleChange(v)}
             disabled={busy}
           >
-            <SelectTrigger aria-label={t("org.sectionVisibilityBadge.whoCanSeeLabel")} size="sm" className="w-full">
+            {/* w-full! beats the shared trigger's own w-fit!, so the picker fills the
+                popover and truncates instead of overflowing it. */}
+            <SelectTrigger aria-label={t("org.sectionVisibilityBadge.whoCanSeeLabel")} size="sm" className="w-full! min-w-0">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
+                {offersFollow && (
+                  <SelectItem value={FOLLOW_ORG_VALUE}>
+                    {followLabel}
+                  </SelectItem>
+                )}
                 {VISIBILITY_ROLE_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.level} value={String(opt.level)}>
-                    {t(opt.labelKey)}
+                  <SelectItem key={opt.level} value={String(opt.level)} disabled={!isSelectable(opt.level)}>
+                    {optionLabel(opt)}
                   </SelectItem>
                 ))}
               </SelectGroup>
             </SelectContent>
           </Select>
-          {description && <FieldDescription className="text-xs">{description}</FieldDescription>}
+          {originLine && (
+            <FieldDescription className="text-xs" data-testid="section-visibility-origin">
+              {originLine}
+            </FieldDescription>
+          )}
+          {/* nth-last-2:mt-0: with the hint after it, Field's own rule would
+              pull this up against the picker. */}
+          {description && <FieldDescription className="text-xs nth-last-2:mt-0">{description}</FieldDescription>}
+          {/* Stays mounted so it can animate both ways: the 0fr→1fr grid row
+              grows to the text's own height without measuring it, and the
+              negative margin cancels the Field's gap while it is shut. */}
+          {someDisabled && belowMinSelectableHint && (
+            <div
+              className={cn(
+                "grid transition-[grid-template-rows,opacity,margin] duration-200 ease-out motion-reduce:transition-none",
+                hintOpen ? "grid-rows-[1fr] opacity-100" : "-mt-1.5 grid-rows-[0fr] opacity-0",
+              )}
+              data-state={hintOpen ? "open" : "closed"}
+              data-testid="section-visibility-min-hint"
+              aria-hidden={!hintOpen}
+              inert={!hintOpen}
+            >
+              <FieldDescription id={hintId} className="min-h-0 overflow-hidden text-xs">
+                {belowMinSelectableHint}
+              </FieldDescription>
+            </div>
+          )}
         </Field>
       </PopoverContent>
     </Popover>

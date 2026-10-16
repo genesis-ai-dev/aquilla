@@ -11,9 +11,9 @@ function subtags(tag: string): string {
  * an additional lane. Readers that list the default lane beside this registry
  * must drop the primary or a new project shows its first language twice.
  *
- * `languagesEqual` alone is not enough: it strips the region, so "fr-CA" and
- * "French" both normalize to "fra". A regional lane in a project whose primary
- * is the base language is a real extra lane and must stay listed.
+ * `languagesEqual` answers "same language?", and a region is not a different
+ * language, so "fr-CA" and "French" compare equal. Whether that regional tag
+ * is the primary *lane* is a lane question: the subtags have to match too.
  */
 export function isPrimaryRegistryLane(
   tag: string,

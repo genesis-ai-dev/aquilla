@@ -53,7 +53,7 @@ import {
 } from "../src/lib/i18n/catalog-export"
 import { MESSAGE_KEYS, catalogContextIssues } from "../src/lib/i18n/context"
 import { DEFAULT_LOCALE, LOCALES, isSupportedLocale } from "../src/lib/i18n/locales"
-import { CATALOGS } from "../src/lib/i18n/messages"
+import { CATALOGS, unknownCatalogKeys } from "../src/lib/i18n/messages"
 import type { MessageKey } from "../src/lib/i18n/messages/en"
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..")
@@ -67,7 +67,7 @@ function fail(message: string): never {
 }
 
 function runCheck(): void {
-  const issues = catalogContextIssues()
+  const issues = [...catalogContextIssues(), ...unknownCatalogKeys()]
   if (issues.length > 0) {
     console.error(
       `i18n-catalog: ${issues.length} context issue(s) — every message key needs a ` +

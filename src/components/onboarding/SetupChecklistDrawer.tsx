@@ -20,10 +20,11 @@ import { ChecklistItem } from "./checklist/ChecklistItem"
 import { ImportFilesStep } from "./checklist/ImportFilesStep"
 import { AiInstructionsStep } from "./checklist/AiInstructionsStep"
 import { InviteStep } from "./checklist/InviteStep"
-import { ComingSoonStep } from "./checklist/ComingSoonStep"
+import { LinkStep } from "./checklist/LinkStep"
 import { AiModelsStep } from "./checklist/AiModelsStep"
 import { RoleGatedStep } from "./checklist/RoleGatedStep"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { projectMemoryPath } from "@/lib/navigation/org-paths"
 
 interface SetupChecklistDrawerProps {
   open: boolean
@@ -50,6 +51,9 @@ interface SetupChecklistDrawerProps {
   /** Opens the project's import dialog (owned by the parent). Required to
    *  power the "Import files" first step. */
   onOpenImport?: () => void
+  /** Hides the drawer (without dismissing setup) and navigates to `path`.
+   *  Powers the optional standards / terminology link steps. */
+  onNavigate?: (path: string) => void
 }
 
 export function SetupChecklistDrawer({
@@ -62,6 +66,7 @@ export function SetupChecklistDrawer({
   onSharesChanged,
   onDismiss,
   onOpenImport,
+  onNavigate,
 }: SetupChecklistDrawerProps) {
   const t = useT()
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false)
@@ -179,14 +184,22 @@ export function SetupChecklistDrawer({
               </RoleGatedStep>
             </ChecklistItem>
 
-            <ComingSoonStep
-              title={t("onboarding.checklist.comingSoon.standards.title")}
-              description={t("onboarding.checklist.comingSoon.standards.description")}
-            />
-            <ComingSoonStep
-              title={t("onboarding.checklist.comingSoon.glossary.title")}
-              description={t("onboarding.checklist.comingSoon.glossary.description")}
-            />
+            {onNavigate && (
+              <>
+                <LinkStep
+                  title={t("onboarding.checklist.standards.title")}
+                  description={t("onboarding.checklist.standards.description")}
+                  actionLabel={t("onboarding.checklist.standards.actionLabel")}
+                  onOpen={() => onNavigate(projectMemoryPath(project.id, "quality"))}
+                />
+                <LinkStep
+                  title={t("onboarding.checklist.glossary.title")}
+                  description={t("onboarding.checklist.glossary.description")}
+                  actionLabel={t("onboarding.checklist.glossary.actionLabel")}
+                  onOpen={() => onNavigate(`/project/${project.id}/terminology`)}
+                />
+              </>
+            )}
           </SettingsGroup>
         </div>
 

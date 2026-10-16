@@ -29,11 +29,27 @@ export interface PresenceUserSnapshot {
   ts: number
 }
 
+/**
+ * AQU-1825 tier 1: the coarse half of a presence row, as the batched
+ * `presence.tier1` frame carries it — who is connected, which file they have
+ * open, and the cell they hold the edit lease on. Everything that moves at
+ * typing speed (the cursor `selection`, `viewingCell`, live draft text) is
+ * tier 2 and arrives only while that peer shares our file.
+ */
+export interface PresenceTier1Row {
+  connId: string
+  userId: string
+  currentFileId?: string
+  focusedCell?: string
+  ts: number
+}
+
 export interface ProjectPresencePeer {
   /**
-   * The connection's `connId`. A user with two tabs is TWO peers sharing a
-   * username and colour — the roster and cell badges list connections, not
-   * accounts, so people sharing one test login still see each other.
+   * Identity of this row. **Cell** rows are per connection, so this is the
+   * connection's `connId` — a user with two tabs is two cell peers, which is
+   * what lets each tab's caret, selection and live draft render separately.
+   * **Roster** rows are per user (AQU-1791), so this is the username.
    */
   peerId: string
   username: string
@@ -45,6 +61,12 @@ export interface ProjectPresencePeer {
   /** True iff the peer holds the edit lease on `focusedCell`. */
   isEditing: boolean
   lastSeenAt: number
+  /**
+   * AQU-1791: how many live connections this row stands for. Set on roster
+   * rows, which collapse a user's connections into one entry; absent on cell
+   * rows, which stay per connection.
+   */
+  connectionCount?: number
 }
 
 export interface CellPresencePeer extends ProjectPresencePeer {
@@ -104,6 +126,40 @@ function sameRosterUser(
     a.viewingCell === b.viewingCell &&
     a.currentFileId === b.currentFileId
   )
+}
+
+/**
+ * AQU-1791: how prominent a connection's state is, so a user's connections can
+ * collapse to one roster row showing the strongest of them: holding an edit
+ * lease beats sitting on a row, which beats merely being online.
+ */
+function rosterActivityRank(peer: ProjectPresencePeer): number {
+  if (peer.isEditing) return 2
+  if (peer.focusedCell || peer.viewingCell || peer.currentFileId) return 1
+  return 0
+}
+
+/**
+ * AQU-1791: fold two connections of one user into a single roster row.
+ *
+ * Presence is keyed per socket, so every extra tab — and every socket a flaky
+ * link left behind before the server's heartbeat sweep retires it — used to be
+ * its own row: Biblica's field teams saw one colleague listed two or three
+ * times as "viewing". The roster is about people, so it shows one row per
+ * user, carrying their most active connection's state and a count of the rest.
+ */
+export function mergeRosterPeers(
+  a: ProjectPresencePeer,
+  b: ProjectPresencePeer,
+): ProjectPresencePeer {
+  const rankA = rosterActivityRank(a)
+  const rankB = rosterActivityRank(b)
+  const winner = rankB > rankA || (rankB === rankA && b.lastSeenAt > a.lastSeenAt) ? b : a
+  return {
+    ...winner,
+    lastSeenAt: Math.max(a.lastSeenAt, b.lastSeenAt),
+    connectionCount: (a.connectionCount ?? 1) + (b.connectionCount ?? 1),
+  }
 }
 
 /** The row a user is on: the lease-held cell wins, else the selected row. */
@@ -262,6 +318,62 @@ export class ProjectPresenceStore {
     for (const cellId of affectedCellIds(old, user)) this.updateCellSnapshot(cellId)
   }
 
+  /**
+   * AQU-1825 `presence.tier1`: a batch of coarse rows. Applied as a MERGE, not
+   * a replace — a tier-1 row says nothing about the cursor, so it must not
+   * erase the tier-2 detail we hold for a peer in our own file.
+   *
+   * The one exception is a peer whose `currentFileId` changed: their cursor,
+   * selection and live draft belonged to the file they just left, and we will
+   * receive no further tier-2 frames about them, so that detail is dropped
+   * here rather than left to linger as a ghost caret.
+   */
+  applyPresenceTier1(rows: readonly PresenceTier1Row[]): void {
+    const affected = new Set<string>()
+    let rosterChanged = false
+
+    for (const row of rows) {
+      const old = this.users.get(row.connId)
+      const coarse: PresenceUserSnapshot = {
+        connId: row.connId,
+        userId: row.userId,
+        ...(row.currentFileId !== undefined ? { currentFileId: row.currentFileId } : {}),
+        ...(row.focusedCell !== undefined ? { focusedCell: row.focusedCell } : {}),
+        ts: row.ts,
+      }
+      if (!old) {
+        this.users.set(row.connId, coarse)
+        rosterChanged = true
+        for (const cellId of affectedCellIds(undefined, coarse)) affected.add(cellId)
+        continue
+      }
+      const movedFile = old.currentFileId !== coarse.currentFileId
+      // Same file and same lease: nothing tier 1 reports has changed, so the
+      // row stands as it is (keeping the newer tier-2 detail untouched).
+      if (!movedFile && old.focusedCell === coarse.focusedCell) continue
+      // Coarse fields are authoritative (a cleared `focusedCell` means the
+      // lease was released); the tier-2 detail we already hold is re-attached
+      // only while the peer stays in the file we are watching.
+      const next: PresenceUserSnapshot = movedFile
+        ? coarse
+        : {
+            ...coarse,
+            ...(old.viewingCell !== undefined ? { viewingCell: old.viewingCell } : {}),
+            ...(old.selection !== undefined ? { selection: old.selection } : {}),
+          }
+      if (movedFile) this.drafts.delete(row.connId)
+      this.users.set(row.connId, next)
+      if (!sameRosterUser(old, next)) rosterChanged = true
+      for (const cellId of affectedCellIds(old, next)) affected.add(cellId)
+    }
+
+    if (rosterChanged) {
+      this.rosterSnapshot = this.computePeers()
+      this.emitRoster()
+    }
+    for (const cellId of affected) this.updateCellSnapshot(cellId)
+  }
+
   /** `presence.left`: one socket closed (`connId`; legacy workers send the userId). */
   applyPresenceLeft(connId: string): void {
     const old = this.users.get(connId)
@@ -336,12 +448,20 @@ export class ProjectPresenceStore {
     return this.cellSnapshots.get(cellId) ?? EMPTY_CELL_PEERS
   }
 
+  /**
+   * The roster: one row per USER (AQU-1791), keyed by username rather than
+   * connId, carrying that user's most active connection's state. Cell
+   * presence stays per connection — see computeCellPresence.
+   */
   private computePeers(): ProjectPresencePeer[] {
-    const peers: ProjectPresencePeer[] = []
+    const byUsername = new Map<string, ProjectPresencePeer>()
     for (const user of this.users.values()) {
       if (this.isSelfRow(user)) continue
-      peers.push(this.toPeer(user))
+      const peer: ProjectPresencePeer = { ...this.toPeer(user), peerId: user.userId, connectionCount: 1 }
+      const existing = byUsername.get(user.userId)
+      byUsername.set(user.userId, existing ? mergeRosterPeers(existing, peer) : peer)
     }
+    const peers = Array.from(byUsername.values())
     peers.sort((a, b) => a.username.localeCompare(b.username) || a.peerId.localeCompare(b.peerId))
     return peers
   }

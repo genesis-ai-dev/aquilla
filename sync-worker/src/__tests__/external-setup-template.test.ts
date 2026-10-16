@@ -20,8 +20,8 @@ import { BRIEF_FIELD_SPECS } from '../../../db/shared/brief'
 import { handleExternalSetupTemplateRequest } from '../external/setup-template-route'
 
 const REQUIRED_FIELDS = [
-  'settings.targetLanguage',
-  'settings.sourceLanguage',
+  'lanes.target.language',
+  'lanes.source.language',
   'brief.parameters.sourceTexts',
   'brief.parameters.keyTerms',
 ]
@@ -122,9 +122,11 @@ describe('parseSetupTemplate', () => {
 
     expect(setup.projectName).toBe('Siberian Tatar — IBT pilot')
     expect(setup.orgName).toBe('IBT')
+    expect(setup.lanes).toEqual([
+      { role: 'source', language: 'ru' },
+      { role: 'target', language: 'sty', name: 'Siberian Tatar' },
+    ])
     expect(setup.settings).toEqual({
-      targetLanguage: 'sty',
-      sourceLanguage: 'ru',
       agentAuthorship: 'none',
       contributeToGlobalTm: false,
     })
@@ -204,7 +206,11 @@ describe('parseSetupTemplate', () => {
       '## 5. Practical',
     ].join('\r\n')
     const { setup, warnings } = parseSetupTemplate(md)
-    expect(setup.settings).toEqual({ targetLanguage: 'sty', sourceLanguage: 'ru' })
+    expect(setup.lanes).toEqual([
+      { role: 'source', language: 'ru' },
+      { role: 'target', language: 'sty', name: 'Siberian Tatar' },
+    ])
+    expect(setup.settings).toEqual({})
     expect(setup.brief.parameters.sourceTexts).toBe('NRT and NA28')
     expect(setup.brief.parameters.keyTerms).toBe('God = Алла\nLord = Раббы')
     expect(setup.brief.freeformNotes).toContain('Target language name: Siberian Tatar')
@@ -290,11 +296,14 @@ describe('POST /api/v1/external/setup-template/parse', () => {
     const res = await parse(JSON.stringify({ markdown: filledForm() }))
     expect(res!.status).toBe(200)
     const body = (await res!.json()) as {
-      setup: { settings: Record<string, unknown>; members: unknown[]; imports: unknown[] }
+      setup: { settings: Record<string, unknown>; lanes?: { role: string; language: string }[]; members: unknown[]; imports: unknown[] }
       warnings: unknown[]
       nextStep: string
     }
-    expect(body.setup.settings.targetLanguage).toBe('sty')
+    expect(body.setup.lanes).toEqual([
+      { role: 'source', language: 'ru' },
+      { role: 'target', language: 'sty', name: 'Siberian Tatar' },
+    ])
     expect(body.setup.members).toHaveLength(3)
     expect(body.setup.imports).toEqual([])
     expect(body.warnings).toEqual([])

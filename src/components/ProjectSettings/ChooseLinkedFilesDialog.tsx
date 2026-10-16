@@ -40,6 +40,16 @@
 // flow's own (LinkSourceFlow, AQU-1526/AQU-1559) — the same file list, the same
 // preview read (`loadLinkSourcePreview`), the same words, so adding a file later
 // reads exactly like picking it at link time.
+//
+// AQU-1679: and so is "replace the source in my existing file". An added
+// upstream file whose name matches exactly one file this project already has
+// can follow INTO that file instead of arriving as a second copy — the file
+// keeps its translations and takes the upstream's source. The option, its
+// comparison and its refusals are the link flow's (`useReplaceFileChoices`,
+// `ReplaceMatchNote`); a replace carries a promise a checkbox does not, so it
+// goes through the confirm step like a stop or a resume. Only a link that
+// consumes the upstream's SOURCE offers it. Not offered on a stopped file: a
+// resume already brings the upstream's text into the same file.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { AlertTriangle } from "lucide-react"
@@ -54,7 +64,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { ReplaceMatchNote } from "@/components/UpstreamFileChoiceList"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useReplaceFileChoices } from "@/hooks/useReplaceFileChoices"
 import { addLinkedSourceFiles, loadLinkedSourceFileState, stopLinkedSourceFiles } from "@/lib/sync/archive"
 import { loadLinkSourcePreview, type LinkSourcePreview } from "@/lib/sync/link-source-preview"
 import { toUserFacingError } from "@/lib/errors/user-error"
@@ -64,6 +76,10 @@ export interface ChooseLinkedFilesDialogProps {
   projectId: string
   /** The upstream this project's live link reads from. */
   sourceProjectId: string
+  /** AQU-1679: which corpus the link consumes. Only a link to the upstream's
+   *  SOURCE can replace a file's source here; null/undefined reads as source,
+   *  the server's own default. */
+  sourceLinkConsumes?: "source" | "target" | null
   /** The UPSTREAM file ids the link follows, or null/undefined for a
    *  whole-project link (which already follows every file). Used until the
    *  server's own answer arrives, and as the fallback when it cannot. */
@@ -78,6 +94,7 @@ export interface ChooseLinkedFilesDialogProps {
 export function ChooseLinkedFilesDialog({
   projectId,
   sourceProjectId,
+  sourceLinkConsumes,
   followedFileIds,
   open,
   onOpenChange,
@@ -103,6 +120,17 @@ export function ChooseLinkedFilesDialog({
   const [view, setView] = useState<"list" | "confirm">("list")
   const [applying, setApplying] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const files = useMemo(() => preview?.files ?? [], [preview])
+  // AQU-1679: the picked upstream files set to replace the project's own
+  // same-named file, and the server's comparison of each pair.
+  const canReplace = sourceLinkConsumes !== "target"
+  const {
+    replaceFileIds,
+    matches: replaceMatches,
+    toggleReplace,
+    reset: resetReplace,
+    isUnresolved: replaceIsUnresolved,
+  } = useReplaceFileChoices({ jwt, projectId, sourceProjectId, files })
 
   // Both reads happen on every open: the list has to show files the upstream
   // gained since the link was made, and the selection can have moved on (a
@@ -142,9 +170,10 @@ export function ChooseLinkedFilesDialog({
     setLinkState(null)
     setPicked(new Set())
     setUnpicked(new Set())
+    resetReplace()
     setView("list")
     setError(null)
-  }, [onOpenChange])
+  }, [onOpenChange, resetReplace])
 
   // The server's answer wins once it is in; the prop carries the dialog until
   // then. A non-empty list is a fixed-list link, null/empty the whole project.
@@ -154,7 +183,6 @@ export function ChooseLinkedFilesDialog({
     [effectiveFollowed],
   )
   const stopped = useMemo(() => new Set(linkState?.stoppedFileIds ?? []), [linkState])
-  const files = useMemo(() => preview?.files ?? [], [preview])
   const isFollowed = useCallback((fileId: string) => followed === null || followed.has(fileId), [followed])
   // A row's state after the lead's edits: followed-and-kept, or checked-to-add.
   const isChecked = useCallback(
@@ -185,17 +213,38 @@ export function ChooseLinkedFilesDialog({
   // file this project never had, a stop ends the flow of changes to one.
   const stopNames = useMemo(() => named(unpicked), [named, unpicked])
   const resumeIds = useMemo(() => [...picked].filter((id) => stopped.has(id)), [picked, stopped])
-  const addIds = useMemo(() => [...picked].filter((id) => !stopped.has(id)), [picked, stopped])
+  // AQU-1679: a picked file set to follow INTO the project's own same-named
+  // file — the fourth thing a confirm can be about. Its row offers the option
+  // only while it is picked, has one file here to stand in for, and is not a
+  // stopped copy (resuming one already brings the upstream's text into it).
+  const replaceOffered = useCallback(
+    (f: { id: string; clashFileId?: string }) =>
+      canReplace && picked.has(f.id) && !stopped.has(f.id) && f.clashFileId !== undefined,
+    [canReplace, picked, stopped],
+  )
+  const replacing = useMemo(
+    () => files.filter((f) => replaceOffered(f) && replaceFileIds.has(f.id)),
+    [files, replaceOffered, replaceFileIds],
+  )
+  const replacingIds = useMemo(() => new Set(replacing.map((f) => f.id)), [replacing])
+  const addIds = useMemo(
+    () => [...picked].filter((id) => !stopped.has(id) && !replacingIds.has(id)),
+    [picked, stopped, replacingIds],
+  )
   const resumeNames = useMemo(() => named(new Set(resumeIds)), [named, resumeIds])
   const addNames = useMemo(() => named(new Set(addIds)), [named, addIds])
+  const replaceNames = useMemo(() => replacing.map((f) => f.name), [replacing])
+  // A replace the server has not cleared holds the action back; the row says why.
+  const replaceUnresolved = replaceIsUnresolved(replacing.map((f) => f.id))
   // A plain add of files this project never had is one press, as AQU-1560 made
-  // it. A stop or a resume says what it will do first.
-  const needsConfirm = unpicked.size > 0 || resumeIds.length > 0
+  // it. A stop, a resume or a replace says what it will do first.
+  const needsConfirm = unpicked.size > 0 || resumeIds.length > 0 || replacing.length > 0
 
   // Same rule as the link flow's warning: only files still coming can clash,
   // and a name is listed once however many rows carry it. A resumed file does
   // not clash with itself — it IS the file already here — so only genuine
-  // additions are weighed.
+  // additions are weighed; nor (AQU-1679) does a file replacing the project's
+  // own, which does not arrive as a copy.
   const pickedClashNames = useMemo(() => {
     const adding = new Set(addIds)
     const names: string[] = []
@@ -245,7 +294,13 @@ export function ChooseLinkedFilesDialog({
         stoppedAnything = result.stopped.length > 0
       }
       if (picked.size > 0) {
-        const result = await addLinkedSourceFiles(jwt, projectId, [...picked])
+        // AQU-1679: the pairs ride with the add. Three arguments when there are
+        // none, so the request is the one AQU-1560 made.
+        const pairs = replacing.map((f) => ({ upstreamFileId: f.id, fileId: f.clashFileId as string }))
+        const result =
+          pairs.length > 0
+            ? await addLinkedSourceFiles(jwt, projectId, [...picked], pairs)
+            : await addLinkedSourceFiles(jwt, projectId, [...picked])
         if (!result.complete) {
           // Nothing is half-added: the files are not in the project yet, and the
           // same press resumes where the server stopped. A stop that already
@@ -335,6 +390,21 @@ export function ChooseLinkedFilesDialog({
                   </p>
                 </div>
               )}
+              {replaceNames.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">
+                    {t("projectSettings.sourceLink.chooseFilesReplaceHeading", { count: replaceNames.length })}
+                  </p>
+                  <ul className="list-inside list-disc text-sm font-medium">
+                    {replaceNames.map((name) => (
+                      <li key={name}>{name}</li>
+                    ))}
+                  </ul>
+                  <p className="text-sm text-muted-foreground">
+                    {t("projectSettings.sourceLink.chooseFilesReplaceBody", { count: replaceNames.length })}
+                  </p>
+                </div>
+              )}
               {addNames.length > 0 && (
                 <div className="space-y-1">
                   <p className="text-sm font-medium">
@@ -406,6 +476,22 @@ export function ChooseLinkedFilesDialog({
                           )
                         )}
                       </label>
+                      {/* AQU-1679: follow INTO the file this project already has,
+                          instead of adding a copy beside it. */}
+                      {replaceOffered(f) && (
+                        <div className="mb-1 ml-6 space-y-1">
+                          <label className="flex items-start gap-2 text-xs">
+                            <Checkbox
+                              className="mt-0.5"
+                              checked={replaceFileIds.has(f.id)}
+                              disabled={applying}
+                              onCheckedChange={(checked) => toggleReplace(f.id, !!checked)}
+                            />
+                            {t("projectSettings.linkSource.replaceOption", { name: f.name })}
+                          </label>
+                          {replaceFileIds.has(f.id) && <ReplaceMatchNote state={replaceMatches.get(f.id)} />}
+                        </div>
+                      )}
                     </li>
                   )
                 })}
@@ -424,9 +510,16 @@ export function ChooseLinkedFilesDialog({
                 )
               ) : (
                 <>
-                  {picked.size > 0 && (
+                  {/* AQU-1679: a file replacing the project's own is not ADDED,
+                      so it leaves the count and gets a sentence of its own. */}
+                  {picked.size - replacing.length > 0 && (
                     <p className="text-sm">
-                      {t("projectSettings.linkSource.previewCount", { count: picked.size })}
+                      {t("projectSettings.linkSource.previewCount", { count: picked.size - replacing.length })}
+                    </p>
+                  )}
+                  {replacing.length > 0 && (
+                    <p className="text-sm">
+                      {t("projectSettings.linkSource.replaceCount", { count: replacing.length })}
                     </p>
                   )}
                   {unpicked.size > 0 && (
@@ -480,7 +573,7 @@ export function ChooseLinkedFilesDialog({
               : t("projectSettings.linkSource.cancelButton")}
           </Button>
           {confirming ? (
-            <Button onClick={() => void handleApply()} disabled={applying || !jwt}>
+            <Button onClick={() => void handleApply()} disabled={applying || !jwt || replaceUnresolved}>
               {applying
                 ? t("projectSettings.sourceLink.chooseFilesApplyingButton")
                 : t("common.confirm")}
@@ -488,7 +581,7 @@ export function ChooseLinkedFilesDialog({
           ) : (
             <Button
               onClick={() => (needsConfirm ? setView("confirm") : void handleApply())}
-              disabled={applying || !hasChanges || emptiesSelection || !jwt}
+              disabled={applying || !hasChanges || emptiesSelection || !jwt || replaceUnresolved}
             >
               {needsConfirm
                 ? t("projectSettings.sourceLink.chooseFilesReviewButton")

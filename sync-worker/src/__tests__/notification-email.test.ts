@@ -4,13 +4,14 @@
 // 1. extractMentions inline copy — mirrors comment-helpers tests to catch drift.
 // 2. deriveRecipientUsernames — correct union of mentions + participants, minus author.
 // 3. sendCommentNotifications — provider missing → no-op; send failure never throws.
-// 4. resolveRecipientProfiles — queries users table by username (email + preference).
+// 4. resolveRecipientProfiles — queries users table by username (id + email + preference).
 // 5. getThreadParticipants — returns existing thread authors for a reply.
 // 6. AQU-1193 — mention-only default, per-user preference, thread-stable subject.
 
 import { describe, it, expect, vi } from 'vitest'
 import {
   extractMentions,
+  mentionDisplayText,
   deriveRecipientUsernames,
   filterUsernamesWithProjectAccess,
   sendCommentNotifications,
@@ -31,15 +32,16 @@ type SendArg = Parameters<EmailService['send']>[0]
 
 describe('extractMentions (inline copy)', () => {
   it('finds @username mentions', () => {
-    expect(extractMentions('Hey @alice check this')).toEqual(['alice'])
+    expect(extractMentions('Hey @[alice] check this')).toEqual(['alice'])
+    expect(extractMentions('Hey @alice check this')).toEqual([])
   })
 
   it('finds multiple mentions', () => {
-    expect(extractMentions('@alice and @bob_smith both')).toEqual(['alice', 'bob_smith'])
+    expect(extractMentions('@[alice] and @[bob_smith] both')).toEqual(['alice', 'bob_smith'])
   })
 
   it('deduplicates mentions', () => {
-    expect(extractMentions('@alice talked to @alice')).toEqual(['alice'])
+    expect(extractMentions('@[alice] talked to @[alice]')).toEqual(['alice'])
   })
 
   it('ignores email-like patterns', () => {
@@ -48,6 +50,12 @@ describe('extractMentions (inline copy)', () => {
 
   it('handles empty string', () => {
     expect(extractMentions('')).toEqual([])
+  })
+
+  // AQU-761 bot walk: `@[qa-bot-2]` never matched, so no mention mail either.
+  it('accepts hyphenated and dotted usernames', () => {
+    expect(extractMentions('Hey @[qa-bot-2] and @[john.doe]')).toEqual(['qa-bot-2', 'john.doe'])
+    expect(mentionDisplayText('Hey @[qa-bot-2]')).toBe('Hey @qa-bot-2')
   })
 })
 
@@ -395,7 +403,7 @@ describe('sendCommentNotifications', () => {
       baseUrl: 'https://aquilla.app',
       projectId: 'proj-1',
       author: 'alice',
-      body: 'Hello @bob, check this out',
+      body: 'Hello @[bob], check this out',
       parentCommentId: null,
     })
 
@@ -569,8 +577,16 @@ describe('resolveRecipientProfiles', () => {
       .run()
 
     const profiles = await resolveRecipientProfiles(db, ['bob', 'carol', 'nobody'])
-    expect(profiles.get('bob')).toEqual({ email: 'bob@example.com', preference: 'all' })
+    // AQU-1824: userId rides along — it is the recipient half of the
+    // side-effect queue's (commentId, recipientUserId) idempotency key, so
+    // resolution has to carry it, not just the address.
+    expect(profiles.get('bob')).toEqual({
+      userId: '1',
+      email: 'bob@example.com',
+      preference: 'all',
+    })
     expect(profiles.get('carol')).toEqual({
+      userId: '2',
       email: 'carol@example.com',
       preference: 'mentions',
     })
@@ -659,7 +675,7 @@ describe('sendCommentNotifications — preference gating (AQU-1193)', () => {
       baseUrl: 'https://aquilla.app',
       projectId: 'proj-1',
       author: 'alice',
-      body: 'what do you think @bob?',
+      body: 'what do you think @[bob]?',
       parentCommentId: 'root-1',
       commentId: 'reply-1',
     })
@@ -678,7 +694,7 @@ describe('sendCommentNotifications — preference gating (AQU-1193)', () => {
       baseUrl: 'https://aquilla.app',
       projectId: 'proj-1',
       author: 'alice',
-      body: 'what do you think @bob?',
+      body: 'what do you think @[bob]?',
       parentCommentId: 'root-1',
       commentId: 'reply-1',
     })

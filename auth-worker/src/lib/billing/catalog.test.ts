@@ -1,11 +1,15 @@
+import { env as testEnv } from 'cloudflare:test'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import manifest from '../../../../config/pricing/stripe-sandbox.json'
 import { readBillingOffers } from './catalog'
 import type { Env } from '../../types'
+import { seedUser } from '../../__tests__/helpers/db'
 import { stripeCatalogResponse } from '../../__tests__/helpers/stripe-catalog'
-const env = {
-  STRIPE_SECRET_KEY: 'sk_test_fixture', STRIPE_PRICE_CATALOG: JSON.stringify(manifest),
-} as Env
+import { savePlatformSettings } from '../platform-settings'
+// The catalog reads the admin's Free weekly allowance through AQUILLA_PG (PGlite here).
+const env: Env = {
+  ...testEnv, STRIPE_SECRET_KEY: 'sk_test_fixture', STRIPE_PRICE_CATALOG: JSON.stringify(manifest),
+}
 function mockStripe(patch: Record<string, unknown> = {}) {
   const fetch = vi.fn(async (url: string) => {
     const path = new URL(url).pathname
@@ -23,8 +27,18 @@ describe('authenticated price catalog adapter', () => {
     expect(catalog).toMatchObject({ available: true, usageInterval: 'week', checkoutEnabled: false })
     expect(catalog.offers.find(o => o.offer === 'team_20x' && o.interval === 'year'))
       .toMatchObject({ totalAmount: 720000, monthlyEquivalent: 60000, capacityLabel: '20× Pro', scope: 'team' })
+    expect(catalog.offers.filter(o => o.offer === 'pro'))
+      .toMatchObject([{ interval: 'month', capacityLabel: '2× Free' }, { interval: 'year', capacityLabel: '2× Free' }])
     expect(JSON.stringify(catalog)).not.toMatch(/credits|price_1|sk_test/i)
     expect(fetch).toHaveBeenCalledTimes(11)
+  })
+  it('labels Pro capacity against the Free weekly allowance an admin saved', async () => {
+    await seedUser(1, 'root')
+    expect((await savePlatformSettings(env, { fieldPlan: { freeWeeklyAllowance: 10 } }, 0, 1)).ok).toBe(true)
+    mockStripe()
+    const catalog = await readBillingOffers(env)
+    expect(catalog.offers.filter(o => o.offer === 'pro'))
+      .toMatchObject([{ interval: 'month', capacityLabel: '5× Free' }, { interval: 'year', capacityLabel: '5× Free' }])
   })
   it.each([
     { active: false }, { livemode: true }, { currency: 'cad' },
@@ -33,7 +47,7 @@ describe('authenticated price catalog adapter', () => {
     { transform_quantity: { divide_by: 2 } },
   ])('rejects a mismatched Stripe component: %j', async patch => {
     mockStripe(patch)
-    await expect(readBillingOffers(env)).rejects.toThrow()
+    await expect(readBillingOffers(env)).rejects.toThrow('Stripe price does not match approved offer')
   })
   it('never substitutes baseline amounts when Stripe fails', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 503 })))

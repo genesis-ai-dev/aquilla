@@ -14,6 +14,25 @@ describe('useSectionProgress', () => {
   // below is only meaningful against a clean slate.
   beforeEach(() => invalidate.mockClear())
 
+  it('never rounds a chapter with outstanding cells up to 100% (AQU-1493)', () => {
+    // 199 of 200 is 99.5%. The sidebar's "complete" colour reads >= 100, so a
+    // rounded 100 also painted the chapter finished.
+    resource.mockReturnValue({
+      progress: {
+        fileId: 'file-1', revision: 7, validationCount: 1,
+        file: { totalCount: 200, filledCount: 199, validatedCount: 199, validationLevels: [199] },
+        sections: [{ key: 'PSA 119', totalCount: 200, filledCount: 199, validatedCount: 199, validationLevels: [199] }],
+      },
+      loading: false,
+      error: false,
+      retry: vi.fn(),
+    })
+    const { result } = renderHook(() => useSectionProgress('project-1', 'file-1', 1, vi.fn(async () => 'token')))
+    expect(result.current).toEqual([expect.objectContaining({
+      textCompleted: 99, textValidated: 99, textValidationLevels: [99],
+    })])
+  })
+
   it('maps compact server counts to sidebar percentages without loading cells', () => {
     resource.mockReturnValue({
       progress: {

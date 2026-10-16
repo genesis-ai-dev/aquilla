@@ -42,8 +42,8 @@
 // as cells-read; the indicator is purely a read-side derivation.
 
 import { verifyTokenForProject } from "../auth"
-import { laneRelevantHeadSeq } from "./link-sync"
-import { computeUpstreamStaleCellIds } from "./inherited-staleness"
+import { isUndefinedColumn, laneRelevantHeadSeq } from "./link-sync"
+import { computeUpstreamStaleCellIds, resolveConsumedTargetLane } from "./inherited-staleness"
 
 export interface StaleSourceEnv {
   AQUILLA_PG?: AquillaDb
@@ -223,7 +223,24 @@ export async function handleStaleSourceRequest(
   let behindSeq: BehindSeq | null = null
   if (upstreamProjectId && linkMode === "live") {
     try {
-      const head = await laneRelevantHeadSeq(env.AQUILLA_PG, upstreamProjectId, consumes)
+      // AQU-1644: a target link is behind only on the lane it follows. The
+      // column (migration 0138) is read on its own so a database without it
+      // still probes the '' lane.
+      let consumedLaneId: string | null = null
+      if (consumes === "target") {
+        try {
+          const lane = await env.AQUILLA_PG.prepare("SELECT source_link_lane_id FROM projects WHERE id = ?")
+            .bind(projectId)
+            .first<{ source_link_lane_id: string | null }>()
+          consumedLaneId = lane?.source_link_lane_id ?? null
+        } catch (err) {
+          if (!isUndefinedColumn(err)) throw err
+        }
+      }
+      const lane = consumes === "target"
+        ? await resolveConsumedTargetLane(env.AQUILLA_PG, upstreamProjectId, consumedLaneId)
+        : undefined
+      const head = await laneRelevantHeadSeq(env.AQUILLA_PG, upstreamProjectId, consumes, lane)
       if (head > linkCursor) {
         behindSeq = { upstream: head, cursor: linkCursor }
       }
@@ -236,10 +253,10 @@ export async function handleStaleSourceRequest(
   // 5. Inherited staleness (AQU-477 §6): the per-hop chain walk. Only
   // relevant for live-linked projects with at least one ancestor hop above
   // the immediate upstream — a direct (single-hop) link has nothing to
-  // inherit (its own staleCellIds query above already covers that case).
-  // Scoped to this file's cell ids (reuses whatever cell set the direct
-  // query already touched, via a plain file-scoped id read) so the walk
-  // never scans the whole project.
+  // inherit (its own staleCellIds query above already covers that case), and
+  // the walk returns nothing for one (AQU-1683). Scoped to this file and its
+  // cell ids (reuses whatever cell set the direct query already touched, via
+  // a plain file-scoped id read) so the walk never scans the whole project.
   let upstreamStaleCellIds: string[] = []
   let ancestorBehind = false
   if (upstreamProjectId && linkMode === "live") {
@@ -250,7 +267,7 @@ export async function handleStaleSourceRequest(
         .bind(projectId, fileId)
         .all<{ cell_id: string }>()
       const fileCellIds = (fileCellIdsRes.results ?? []).map((r) => r.cell_id)
-      const inherited = await computeUpstreamStaleCellIds({ AQUILLA_PG: env.AQUILLA_PG }, projectId, fileCellIds)
+      const inherited = await computeUpstreamStaleCellIds({ AQUILLA_PG: env.AQUILLA_PG }, projectId, fileId, fileCellIds)
       upstreamStaleCellIds = inherited.upstreamStaleCellIds
       ancestorBehind = inherited.ancestorBehind
     } catch (err) {

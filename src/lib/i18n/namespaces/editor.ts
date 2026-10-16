@@ -214,17 +214,46 @@ export const editor = defineNamespace({
     //   timeline, so none of the attach-media copy above applies.
     "editor.media.linkedVideoTitle": "Linked to a YouTube video",
     "editor.media.linkedVideoTitleGeneric": "Linked to a video",
+    // AQU-1566: shown to everyone below maintainer. Under option b the first
+    // captions become this file's rows, and only a maintainer attaches them.
+    // Sam's D1 (2026-10-05): one sentence.
     "editor.media.linkedVideoNoCaptions":
-      "No captions on this video yet. Caption tracks are added on the Media " +
-      "view's timeline.",
+      "When a maintainer attaches captions, they become this file's rows.",
     "editor.media.linkedVideoCaptionsOn":
       "Its captions are on the Media view's timeline, in {tracks}.",
     "editor.media.openMediaView": "Open Media view",
-    "editor.media.linkedVideoUpload":
-      "Have the original recording? Drag & drop the audio or video here, or",
+    // Sam's D1 (2026-10-05): the empty state is one card with one action;
+    // an audio or video file is a quiet second way in, and its explanation
+    // waits on the step it explains.
+    // Sam, Oct 5: only the action is underlined, not the "or" that joins it to
+    // the button above, so the link is its own key inside the sentence. Also
+    // Oct 5: "the original recording" read as "record your own voice", so the
+    // link says what it does and what you bring.
+    "editor.media.linkedVideoUseRecording": "or {link}",
+    "editor.media.linkedVideoUseRecordingLink": "make rows from an audio or video file",
+    "editor.media.linkedVideoAddRecording": "Make rows from an audio or video file",
+    "editor.media.linkedVideoRecordingTitle": "Make rows from an audio or video file",
+    "editor.media.linkedVideoBackToCaptions": "Back to captions",
+    // AQU-1565 follow-up: two hints, because only a YouTube picture keeps its
+    // own sound after an upload and offers the sound menu.
     "editor.media.linkedVideoUploadHint":
-      "The recording has to run to the same timing as the linked video — its " +
-      "segments become this file's rows.",
+      "The file has to run to the same timing as the video. Its speech becomes " +
+      "this file's rows. The video keeps playing with its own sound; to hear the " +
+      "file instead, pick it from the Sound menu on the video.",
+    "editor.media.linkedVideoUploadHintGeneric":
+      "The file has to run to the same timing as the linked video. Its speech " +
+      "becomes this file's rows.",
+    // AQU-1566 (option b): on such a file the first captions attached become
+    // its OWN rows, so a maintainer gets the action in place, and a caption
+    // track that is already on the timeline can be turned into the rows.
+    "editor.media.linkedVideoAttachHint":
+      "Attach its captions (VTT, SRT or SBV) and they become this file's rows, ready to translate.",
+    // Sam, Oct 5: Aquilla can't take a YouTube video's captions or sound, but
+    // its owner can download both from YouTube Studio, so the card says where.
+    "editor.media.linkedVideoStudioCaptions": "The video's owner can download its captions from YouTube Studio.",
+    "editor.media.linkedVideoStudioVideo": "The video's owner can download the video file from YouTube Studio.",
+    "editor.media.useTrackAsRows": "Use \"{track}\" as this file's rows",
+    "editor.media.useTrackAsRowsHint": "Other caption tracks stay on the timeline.",
 
     // — Footnotes: the inline strip, the bottom tray, and one note's row ——
     "editor.footnotes.label": "Footnotes",
@@ -410,6 +439,13 @@ export const editor = defineNamespace({
     "editor.view.showTranslationNotes": "Show translation notes",
     "editor.view.showHealthIndicators": "Show health indicators",
     "editor.view.highlightUnresolvedComments": "Highlight open comments",
+    "editor.view.ghostText": "Suggest next words",
+    "editor.wordsThatFit.button": "Words that fit here",
+    "editor.wordsThatFit.empty": "No suggestions yet",
+    "editor.wordsThatFit.replace": "Replace with {word}",
+    "editor.view.healthScoreColorCoding": "Health Score Color Coding",
+    "editor.health.citedExample": "{source} → {target}",
+    "editor.view.visibleStyleSegments": "Visible style segments",
     "editor.view.lowMemory": "Low-memory mode",
     "editor.view.lowMemoryAuto": "Auto",
     "editor.view.lowMemoryOn": "On",
@@ -452,7 +488,7 @@ export const editor = defineNamespace({
     "editor.bibles.removeVersion": "Remove {version}",
     "editor.bibles.scrollToVerse": "Scroll to a verse to see its text.",
     "editor.bibles.noTextForRef": "No text for {ref} in this version.",
-    "editor.bibles.searchPlaceholder": "Search versions (e.g. 'eng', 'BSB')",
+    "editor.bibles.searchPlaceholder": "Search versions (e.g. 'English', 'BSB')",
     "editor.bibles.searchLabel": "Search Bible versions",
     "editor.bibles.failedToLoad": "Failed to load: {error}",
     "editor.bibles.retryVersion": "Retry {version}",
@@ -545,9 +581,17 @@ export const editor = defineNamespace({
     "editor.history.close": "Close history",
     "editor.history.loading": "Loading history…",
     "editor.history.loadFailed": "Couldn't load edit history.",
+    "editor.history.loadFailedNetwork":
+      "Couldn't load edit history — network error. Check your connection.",
+    "editor.history.loadFailedServer":
+      "Couldn't load edit history — the server returned an error ({status}).",
     "editor.history.noEdits": "No edits yet.",
     "editor.history.refreshFailed":
       "Couldn't refresh from the server — showing local edits.",
+    "editor.history.refreshFailedNetwork":
+      "Couldn't refresh from the server (network error) — showing local edits.",
+    "editor.history.refreshFailedServer":
+      "Couldn't refresh from the server (error {status}) — showing local edits.",
     "editor.history.revisions": plural({
       one: "{count} significant revision",
       other: "{count} significant revisions",
@@ -559,6 +603,13 @@ export const editor = defineNamespace({
     "editor.history.draftKeptTooltip":
       "How much of the AI draft above survived this revision, measured character " +
       "by character. 100% means the draft was approved unchanged.",
+    "editor.history.aiTrace.show": "Show prompt",
+    "editor.history.aiTrace.hide": "Hide prompt",
+    "editor.history.aiTrace.output": "Model output",
+    "editor.history.aiTrace.olderVersion":
+      "This draft was made on an older version of the cell. The prompt below explains that version, not the current text.",
+    "editor.history.aiTrace.missing": "The prompt for this draft was not stored.",
+    "editor.history.aiTrace.loadFailed": "Couldn't load the prompt. Open it again to retry.",
     "editor.history.staleBadge": "stale branch",
     "editor.history.staleTooltip":
       "This edit lost the first-child-of-parent race for its slot. It was logged " +
@@ -594,6 +645,15 @@ export const editor = defineNamespace({
     "editor.selection.voiceUnavailable": "Voicing isn't available here",
     "editor.selection.voiceNeedTwo": "Select at least two translated lines",
     "editor.selection.voiceTooltip": "Voice {count} lines as one clip",
+    "editor.selection.voiceTogetherFailed": "Couldn't voice these lines together",
+    "editor.selection.voiceTogetherInworldNotConfigured":
+      "These lines use Inworld TTS, not Gemini. Inworld TTS isn't set up on this server, so a Gemini API key will not fix it.",
+    "editor.selection.voiceTogetherInworldFailed":
+      "Inworld TTS couldn't voice these lines. This is not a Gemini key problem.",
+    "editor.selection.voiceTogetherSeedVcNotConfigured":
+      "This clone voice needs Seed-VC, which isn't set up on this server. An Inworld clone wouldn't need this step.",
+    "editor.selection.voiceTogetherSeedVcFailed":
+      "Voice cloning (Seed-VC) couldn't convert these lines. This is not a Gemini key problem.",
     "editor.selection.translate": "Translate",
     "editor.selection.translateNotConfigured":
       "Translation isn't configured for this project",
@@ -607,11 +667,33 @@ export const editor = defineNamespace({
       one: "Validate {count} cell",
       other: "Validate {count} cells",
     }),
+    "editor.selection.validatePartial": plural({
+      one: "Validate {count} of {total} selected cells",
+      other: "Validate {count} of {total} selected cells",
+    }),
+    "editor.selection.validatePartialNamed": plural({
+      one: "Validate {count} of {total} selected cells: {refs}",
+      other: "Validate {count} of {total} selected cells: {refs}",
+    }),
+    "editor.selection.validatePartialRows": plural({
+      one: "Validate {count} of {total} selected cells: row {refs}",
+      other: "Validate {count} of {total} selected cells: rows {refs}",
+    }),
+    "editor.selection.validatePartialMoreRefs": plural({
+      one: "{count} more",
+      other: "{count} more",
+    }),
+    "editor.selection.validatePartialSkips": plural({
+      one: "{count} will be skipped — {reasons}",
+      other: "{count} will be skipped — {reasons}",
+    }),
     "editor.selection.validateOutOfScope":
       "Some selected cells are outside your assigned files or lanes",
     "editor.selection.validateAllMine": "All selected cells are already validated by you",
-    "editor.selection.validateAiDrafts":
-      "Nothing eligible — untouched AI drafts require individual review",
+    "editor.selection.validateOwnEdits":
+      "You made the latest change to these cells, so someone else must validate them",
+    "editor.selection.validateOwnEditsSome":
+      "Some selected cells have your latest change, so someone else must validate them",
     "editor.selection.validateNeedTranslation": "Selected cells need a translation first",
     "editor.selection.validateNothingEligible": "Nothing eligible to validate",
     "editor.selection.removeMyValidations": "Remove my text validations",
@@ -677,13 +759,72 @@ export const editor = defineNamespace({
       one: "{count} still needs a translation",
       other: "{count} still need a translation",
     }),
+    "editor.batchValidate.skip.aiDraft": plural({
+      one: "{count} AI draft was left for individual review",
+      other: "{count} AI drafts were left for individual review",
+    }),
+    "editor.batchValidate.skip.notChosen": plural({
+      one: "{count} you left unchecked",
+      other: "{count} you left unchecked",
+    }),
+    "editor.batchFile.validateTitle": "Batch validate this file",
+    "editor.batchFile.draftTitle": "Draft this file",
+    "editor.batchFile.legend": "What this run includes",
+    "editor.batchFile.ready": plural({
+      one: "{count} cell ready for your check",
+      other: "{count} cells ready for your check",
+    }),
+    "editor.batchFile.readyHelp":
+      "Committed text you have not signed off, including lines someone else already checked.",
+    "editor.batchFile.aiDrafts": plural({
+      one: "{count} AI draft nobody has checked",
+      other: "{count} AI drafts nobody has checked",
+    }),
+    "editor.batchFile.aiDraftsHelp":
+      "Leave this off to review each one yourself. Turn it on to sign them off together, under your name.",
+    "editor.batchFile.aiDraftsLocked":
+      "A translator reviews these one at a time. A reviewer or a project lead can include them here.",
+    "editor.batchFile.empty": plural({
+      one: "{count} empty cell",
+      other: "{count} empty cells",
+    }),
+    "editor.batchFile.emptyHelp": "Source text with no translation yet.",
+    "editor.batchFile.refresh": plural({
+      one: "{count} untouched AI draft to refresh",
+      other: "{count} untouched AI drafts to refresh",
+    }),
+    "editor.batchFile.refreshHelp":
+      "Replaces the current AI draft. Cells a person translated are left alone.",
+    "editor.batchFile.humanLeft": plural({
+      one: "{count} cell a person already translated stays as it is.",
+      other: "{count} cells a person already translated stay as they are.",
+    }),
+    "editor.batchFile.hiddenLeft": plural({
+      one: "{count} hidden cell stays parked.",
+      other: "{count} hidden cells stay parked.",
+    }),
+    "editor.batchFile.scopeLegend": "How many",
+    "editor.batchFile.scopeNext": plural({
+      one: "Next {count}",
+      other: "Next {count}",
+    }),
+    "editor.batchFile.scopeAll": plural({
+      one: "All {count}",
+      other: "All {count}",
+    }),
+    "editor.batchFile.draftWill": plural({
+      one: "This drafts {count} cell. Every draft still needs a person to review it.",
+      other: "This drafts {count} cells. Every draft still needs a person to review it.",
+    }),
+    "editor.batchFile.nothingToDraft": "Nothing in this file can be drafted with these choices.",
+    "editor.batchFile.confirmDraft": "Draft",
     "editor.batchValidate.skip.alreadyMine": plural({
       one: "{count} you had already validated",
       other: "{count} you had already validated",
     }),
-    "editor.batchValidate.skip.aiDraft": plural({
-      one: "{count} is an untouched AI draft, reviewed one at a time",
-      other: "{count} are untouched AI drafts, reviewed one at a time",
+    "editor.batchValidate.skip.ownEdit": plural({
+      one: "{count} has your latest change, so someone else must validate it",
+      other: "{count} have your latest change, so someone else must validate them",
     }),
     "editor.batchValidate.skip.outOfScope": plural({
       one: "{count} is outside your assigned files or lanes",
@@ -703,6 +844,8 @@ export const editor = defineNamespace({
     "editor.batchValidate.noCandidates": "There are no cells here to validate.",
     "editor.batchValidate.noPermission":
       "Your role cannot validate cells in this project.",
+    "editor.batchValidate.notNamedValidator":
+      "Only the people this project names can validate text.",
     "editor.batchValidate.noTarget": "Open a file before validating.",
     "editor.batchValidate.failedTitle": "Validation could not be saved",
     "editor.batchValidate.failedBody":
@@ -859,6 +1002,18 @@ export const editor = defineNamespace({
     "editor.timeline.audioTrackSearchAria": "Search languages",
     "editor.timeline.audioTrackNoMatch": "No language by that name.",
     "editor.timeline.audioTrackFilmAudio": "Film audio",
+    // AQU-1565 follow-up: which sound plays under a YouTube picture.
+    "editor.timeline.soundSourceTrigger": "Sound: {source}",
+    // Sam, Oct 5: the trigger is a text pill naming the choice, not a speaker
+    // icon (which read as mute/unmute), and the menu says what it chooses.
+    "editor.timeline.soundSourcePillVideo": "Sound: Video",
+    "editor.timeline.soundSourcePillRecording": "Sound: Recording",
+    "editor.timeline.soundSourceHeading": "Playback sound",
+    "editor.timeline.soundSourceVideo": "The video's own sound",
+    // Sam's D3 (2026-10-05): the empty Source text lane of a linked video.
+    "editor.timeline.noCaptionsYet": "No captions yet",
+    "editor.timeline.soundSourceRecording": "Uploaded recording ({name})",
+    "editor.timeline.soundSourceRecordingUnnamed": "Uploaded recording",
     "editor.timeline.pairingFromThis": "Pairing from this one — click a line on the other row",
     "editor.timeline.pairedClickToUnpair": "Paired · click to unpair",
     "editor.timeline.clickToPair": "Click to pair with the selected chip",
@@ -953,6 +1108,15 @@ export const editor = defineNamespace({
       one: "Delete {count} track",
       other: "Delete {count} tracks",
     }),
+    // AQU-1566: a caption track on a linked video with no rows can become the
+    // file's rows. It asks first, because the track leaves the timeline.
+    "editor.timeline.trackUseAsRows": "Use as this file's rows",
+    "editor.timeline.useAsRowsTitle": "Use \"{track}\" as this file's rows?",
+    "editor.timeline.useAsRowsBody":
+      "Its captions become rows you can translate in the Text view. The track " +
+      "leaves the timeline and its captions show in the Source text row instead.",
+    "editor.timeline.useAsRowsConfirm": "Use as rows",
+    "editor.timeline.useAsRowsFailed": "Couldn't use this track as the file's rows.",
     "editor.timeline.trackAdd": "Add track",
     "editor.timeline.trackAddTrack": "Audio track",
     "editor.timeline.trackAddFolder": "Folder",
@@ -1001,6 +1165,9 @@ export const editor = defineNamespace({
     "editor.timeline.badgeNotLinked": "not linked",
     "editor.timeline.badgeNotImported": "not imported",
     "editor.timeline.badgeImportedCount": "{count} imported",
+    // Sam, Oct 5: the Sources menu's track rows are just greyed out when track
+    // editing is off; this is what hovering one says.
+    "editor.timeline.trackEditingOffHint": "Track editing is off. Turn it on in Project Settings.",
 
     // — Row hover controls + assurance panel (editing table) ——————
     "editor.row.removeLine": "Remove this line",
@@ -1095,6 +1262,7 @@ export const editor = defineNamespace({
     "editor.row.addLineBelow": "Add a line below",
     "editor.row.draftSearching": "{cellRef}: Looking up similar examples…",
     "editor.row.draftGenerating": "{cellRef}: Generating translation…",
+    "editor.row.aligningStyles": "{cellRef}: Aligning styles…",
     "editor.row.draftPreviewReady": "{cellRef}: Translation preview available",
     "editor.assurance.validatedWithInfractions":
       "Validation is authoritative, but automatic checks still found an issue.",
@@ -1353,7 +1521,7 @@ export const editor = defineNamespace({
     "editor.timeline.cueLinkCrossScriptCandidatesHint":
       "The timings line up, but nothing could compare the words — so this was not " +
       "paired for you.",
-    "editor.timeline.cueLinkWeakTitle": "Overlapping, words barely agree",
+    "editor.timeline.cueLinkWeakTitle": "Overlapping, few words match",
     "editor.timeline.cueLinkWeakHint":
       "Enough shared wording to notice, not enough to pair on its own.",
     "editor.timeline.cueLinkUncertainTitle": "The only candidate nearby",
@@ -1362,7 +1530,7 @@ export const editor = defineNamespace({
     "editor.timeline.cueLinkCrossScriptTitle": "Paired on timing alone",
     "editor.timeline.cueLinkCrossScriptHint":
       "Different writing systems, so nothing compared the words.",
-    "editor.timeline.cueLinkLowConfidenceTitle": "Paired, but barely",
+    "editor.timeline.cueLinkLowConfidenceTitle": "Paired, with a weak match",
     "editor.timeline.cueLinkLowConfidenceHint": "Weak wording agreement. Probably fine.",
     "editor.timeline.cueLinkOrphanCues": plural({
       one: "{count} heard line with no subtitle nearby",
@@ -1439,6 +1607,21 @@ export const editor = defineNamespace({
       "This edit would change the protected IDML document structure.",
     "editor.idml.editWouldChangeFormattingError":
       "This edit would change protected IDML formatting.",
+    "editor.idml.noEditableSlotError":
+      "Every text run in this IDML cell is protected, so there is nowhere for " +
+      "your typing to go. Re-import the IDML to make the text editable.",
+    "editor.idml.alignStylesChangedWording":
+      "Align styles would have changed the wording, so nothing was saved.",
+    "editor.idml.alignStylesUnchanged":
+      "Align styles did not move any text. Nothing was changed.",
+    "editor.idml.alignStylesEmpty":
+      "Align styles returned no placement. Nothing was saved.",
+    "editor.idml.alignStylesFailed":
+      "Align styles could not place this cell. Nothing was saved.",
+    "editor.idml.alignStylesUnavailable":
+      "This cell has no style runs to align.",
+    "editor.idml.segmentRegular": "Regular",
+    "editor.idml.segmentBoldItalic": "Bold italic",
 
     // — Text-to-speech status badge on a row ————————————————————————
     "editor.tts.translatingBeforeVoicing": "Translating before voicing",
@@ -1455,16 +1638,29 @@ export const editor = defineNamespace({
     "editor.validation.notValidatedTooltip": "Text not validated — click to validate",
     "editor.validation.outOfScopeTooltip": "Outside your assigned files or lanes",
     "editor.validation.unavailableTooltip": "Text validation unavailable",
+    "editor.validation.ownEditTooltip":
+      "You made the latest change to this text, so someone else must validate it",
     "editor.validation.noContentTooltip": "No text to validate",
     "editor.validation.ariaNoContent": "No text to validate — {ref}.",
-    "editor.validation.ariaValidated":
-      "Validated — {ref}. Click to remove your validation.",
+    "editor.validation.ariaValidatedByYou":
+      "Validated by you, {ref}. Click to see the list, where you can remove your validation.",
+    "editor.validation.ariaValidatedByYouNoAction": "Validated by you, {ref}.",
     "editor.validation.ariaValidatedByOthers":
       "Validated by others — {ref}. Click to add your validation.",
     "editor.validation.ariaNotValidated": "Not validated — {ref}. Click to validate.",
     "editor.validation.ariaNotValidatedNoAction": "Not validated — {ref}.",
     "editor.validation.ariaValidatedByOthersNoAction": "Validated by others — {ref}.",
     "editor.validation.validatedBy": "Text validated by",
+    "editor.readOnly.reviewerNoTextValidation":
+      "Viewing as reviewer. You can comment, but this project does not let you validate text.",
+
+    // — Archived lane (AQU-1463): the lane you are in has been frozen ———————
+    "editor.laneArchived.title": "{lane} has been archived",
+    "editor.laneArchived.body":
+      "A project manager archived {lane}, so it is now read-only. You can still " +
+      "read, search, export and comment on it, and your other languages are " +
+      "unaffected.",
+    "editor.laneArchived.acknowledge": "Got it",
     "editor.validation.noActiveValidators": "No active validators",
     "editor.validation.removeYours": "Remove your validation",
     "editor.validation.history": "History",
@@ -1557,6 +1753,7 @@ export const editor = defineNamespace({
     "editor.lane.setTargetLanguage": "Set target language",
     "editor.lane.changeTargetLanguage": "Change target language",
     "editor.lane.changeTargetLanguageItem": "Change target language…",
+    "editor.lane.addLaneItem": "Add lane…",
     "editor.lane.searchPlaceholder": "Search lanes…",
     "editor.lane.searchAriaLabel": "Search lanes",
     "editor.lane.searchEmpty": "No lanes found.",
@@ -1564,6 +1761,11 @@ export const editor = defineNamespace({
     "editor.empty.noMediaSegments": "No media segments yet",
     "editor.empty.mediaLayerHint":
       "Import an audio or video file, or record a take, to populate the media layer.",
+    // AQU-1565 follow-up: the same empty file for someone who cannot add its
+    // recording (it is the file's source audio, Project Lead and up), so
+    // telling them to import or record would be a dead end.
+    "editor.empty.mediaLayerWaiting":
+      "This file's recording hasn't been added yet. A project lead can add it.",
 
     // — USFM note chips in the source text ————————————————————————
     "editor.note.footnote": "Footnote",
@@ -1616,7 +1818,7 @@ export const editor = defineNamespace({
 
     // — AI drafting on the target side ————————————————————————————
     "editor.ai.draftBadge": "AI draft · review required",
-    "editor.ai.draftBadgeAria": "AI draft — individual human review required",
+    "editor.ai.draftBadgeAria": "AI draft — human review required",
     "editor.ai.lookingUpExamples": "Looking up similar examples…",
     "editor.ai.generatingTranslation": "Generating translation…",
     "editor.ai.signInForTranslations": "Sign in for AI translations",
@@ -1626,10 +1828,17 @@ export const editor = defineNamespace({
     "editor.ai.translateWithAi": "Translate with AI",
     "editor.ai.draftParagraph": "Draft paragraph ({count} cells)",
     "editor.ai.regenerate": "Regenerate — another AI variation",
+    "editor.ai.alignStyles": "Align styles",
+    "editor.ai.passToStyleSegments": "Pass to Style Segments",
+    "editor.ai.aligningStyles": "Aligning styles…",
+    "editor.ai.alignStylesNeedsText": "Translate this cell before aligning styles",
+    "editor.ai.alignStylesNeeded": "This cell needs Align styles",
 
     // — Remaining action-rail tooltips ————————————————————————————
     "editor.audio.play": "Play audio",
     "editor.cue.playFrom": "Play from this cue",
+    // AQU-1118: the same button while this row's line is the one playing.
+    "editor.cue.pause": "Pause",
 
     // — Expansion tab: health ————————————————————————————————————
     "editor.expansion.retrievalSupport": "Health",
@@ -1731,6 +1940,8 @@ export const editor = defineNamespace({
     "editor.metadata.showOnCells": "Show {key} on cells",
     "editor.issues.none": "No translation rule issues on this cell.",
     "editor.issues.waived": "Waived",
+    "editor.issues.notYetValidated":
+      "Not yet validated — confidence on this line is still low",
 
     // — Draft-a-whole-paragraph confirm dialog ——————————————————————
     "editor.paragraph.confirmTitle": "Draft this paragraph?",
@@ -1806,7 +2017,7 @@ export const editor = defineNamespace({
     "editor.sync.connecting": "Connecting",
     "editor.sync.connectingTooltip": "Connecting to the sync server…",
     "editor.sync.offline": "Offline",
-    "editor.sync.offlineTooltip": "Offline — changes are saved locally and will sync when reconnected",
+    "editor.sync.offlineTooltip": "Offline — changes are saved on this device and will sync when reconnected",
     "editor.sync.paused": "Paused",
     "editor.sync.pausedTooltip": "Sync paused while the tab is hidden — will resume when you return",
     "editor.sync.noFileOpen": "No file open",
@@ -1829,6 +2040,13 @@ export const editor = defineNamespace({
       other: "{count} changes queued for server sync. Click to review.",
     }),
     "editor.outbox.syncedTooltip": "All changes synced. Click to review pending changes.",
+    "editor.outbox.savedLocallyLabel": plural({ other: "On device · {count}" }),
+    "editor.outbox.savedLocallyTooltip": plural({
+      one: "Saved on this device, {count} change not uploaded. It uploads when the server is reachable again.",
+      other: "Saved on this device, {count} changes not uploaded. They upload when the server is reachable again.",
+    }),
+    "editor.outbox.syncTimes": "Last upload: {upload}. Last download: {download}.",
+    "editor.outbox.never": "never",
     // Tauri desktop: the on-device store stopped saving (src/lib/offline/leader-watchdog.ts).
     "editor.outbox.notSavingLabel": "Not saving",
     "editor.outbox.notSavingTooltip": "Changes on this device aren't being saved. Restart the app to fix this.",
@@ -1844,6 +2062,62 @@ export const editor = defineNamespace({
     }, "count"),
     "editor.repetition.undo": "Undo",
     "editor.repetition.undoFailed": "Couldn't undo the propagation.",
+    // AQU-1486 — "Validate all repeated rows, or just this one?"
+    "editor.repetition.choiceTitle": "Validate the repeated rows too?",
+    "editor.repetition.choiceSingleBody": plural({
+      one: "This text appears in {count} other row of this file. It gets this translation either way. Validate it now, or leave it to be validated later?",
+      other: "This text appears in {count} other rows of this file. They get this translation either way. Validate them now, or leave them to be validated later?",
+    }, "count"),
+    "editor.repetition.choiceBulkBody": plural({
+      one: "The rows you are validating repeat in {count} other row of this file. It gets the same translation either way. Validate it now, or leave it to be validated later?",
+      other: "The rows you are validating repeat in {count} other rows of this file. They get the same translation either way. Validate them now, or leave them to be validated later?",
+    }, "count"),
+    "editor.repetition.choiceCapNote": plural({
+      one: "The project's batch validation size leaves room to validate {count} of them. The rest are filled but not validated.",
+      other: "The project's batch validation size leaves room to validate {count} of them. The rest are filled but not validated.",
+    }, "count"),
+    "editor.repetition.validateMore": plural({
+      one: "Validate {count} more row",
+      other: "Validate {count} more rows",
+    }, "count"),
+    "editor.repetition.justThisRow": "Just this row",
+    "editor.repetition.justTheseRows": "Just these rows",
+    "editor.repetition.dontAskAgain": "Don't ask again",
+    "editor.repetition.dontAskAgainHelp": "To be asked again, use “Ask me each time” on the message that follows a validation.",
+    "editor.repetition.validated": plural({
+      one: "Validated {count} repeated row",
+      other: "Validated {count} repeated rows",
+    }, "count"),
+    "editor.repetition.unvalidatedRepeats": plural({
+      one: "{count} repeated row has this text but isn't validated",
+      other: "{count} repeated rows have this text but aren't validated",
+    }, "count"),
+    "editor.repetition.validateAll": "Validate all",
+    "editor.repetition.askEachTime": "Ask me each time",
+    "editor.repetition.validateFailed": "Couldn't validate the repeated rows.",
+    "editor.repetition.bulkValidatedNote": plural({
+      one: "Also validated {count} repeated row.",
+      other: "Also validated {count} repeated rows.",
+    }, "count"),
+    "editor.repetition.bulkFilledNote": plural({
+      one: "Filled {count} repeated row, which still needs validating.",
+      other: "Filled {count} repeated rows, which still need validating.",
+    }, "count"),
+    "editor.repetition.bulkSkippedNote": plural({
+      one: "Left {count} repeated row as it was, because the translations disagreed.",
+      other: "Left {count} repeated rows as they were, because the translations disagreed.",
+    }, "count"),
+    "editor.repetition.conflictTitle": "These repeated rows disagree",
+    "editor.repetition.conflictBody": plural({
+      one: "Rows you are validating translate this source text in different ways. Which translation should the {count} other row get?",
+      other: "Rows you are validating translate this source text in different ways. Which translation should the {count} other rows get?",
+    }, "count"),
+    "editor.repetition.conflictFrom": "From {rows}",
+    "editor.repetition.conflictRowName": "row {number}",
+    "editor.repetition.conflictSkip": "Skip: leave those rows as they are",
+    "editor.repetition.conflictApplyToRest": "Do the same for the rest of this run",
+    "editor.repetition.conflictApplyToRestHelp": "Uses the first or last row's translation, or skips, for every other disagreement in this run.",
+    "editor.repetition.conflictConfirm": "Use this choice",
   },
   context: {
     _context: {
@@ -1892,6 +2166,117 @@ export const editor = defineNamespace({
           count: "How many other cells received the translation. Always 1 or more.",
         },
       },
+      // AQU-1486 — the "validate the repeated rows too?" dialog, its toasts,
+      // and the bulk-run conflict picker. Each carries a placeholder.
+      "editor.repetition.choiceSingleBody": {
+        description:
+          "Body of a dialog shown right after the user validated one row whose " +
+          "source text repeats elsewhere in the file. The other rows receive the " +
+          "same translation whatever the user picks; the question is only whether " +
+          "they are also marked validated now or left for someone to validate later.",
+        placeholders: {
+          count: "How many other rows share this source text and would be validated. Always 1 or more.",
+        },
+      },
+      "editor.repetition.choiceBulkBody": {
+        description:
+          "Body of the same dialog when the user validated many rows at once " +
+          "(a selection, or a whole-file batch). Some of those rows repeat in " +
+          "rows outside the run; those rows receive the matching translation " +
+          "either way, and the question is whether to validate them too.",
+        placeholders: {
+          count: "How many rows outside the run would receive a translation and be validated. Always 1 or more.",
+        },
+      },
+      "editor.repetition.choiceCapNote": {
+        description:
+          "Extra line in the bulk dialog when the project limits how many rows " +
+          "one batch validation may validate. Only part of the repeated rows fit " +
+          "under that limit; the others still receive the translation but stay " +
+          "unvalidated.",
+        placeholders: {
+          count: "How many of the repeated rows can still be validated under the limit. Always 1 or more.",
+        },
+      },
+      "editor.repetition.validateMore": {
+        description:
+          "Primary button of the dialog: validate the repeated rows as well as " +
+          "the row(s) the user already validated. A button label — keep it short.",
+        placeholders: {
+          count: "How many additional rows the button validates. Always 1 or more.",
+        },
+      },
+      "editor.repetition.validated": {
+        description:
+          "Toast confirming that the repeated rows were filled in and marked " +
+          "validated. Paired with an Undo action.",
+        placeholders: {
+          count: "How many repeated rows were validated. Always 1 or more.",
+        },
+      },
+      "editor.repetition.unvalidatedRepeats": {
+        description:
+          "Toast after a typed translation, when the repeated rows already hold " +
+          "the same text but nobody has validated them. Paired with a " +
+          "'Validate all' button.",
+        placeholders: {
+          count: "How many repeated rows are waiting for validation. Always 1 or more.",
+        },
+      },
+      "editor.repetition.bulkValidatedNote": {
+        description:
+          "Sentence appended to the summary toast of a bulk validation, saying " +
+          "rows outside the selection were validated as well because they repeat " +
+          "a validated row's source text.",
+        placeholders: {
+          count: "How many repeated rows were also validated. Always 1 or more.",
+        },
+      },
+      "editor.repetition.bulkFilledNote": {
+        description:
+          "Sentence appended to the summary toast of a bulk validation, saying " +
+          "rows outside the selection received a translation but were not " +
+          "validated and still need someone to validate them.",
+        placeholders: {
+          count: "How many repeated rows were filled but not validated. Always 1 or more.",
+        },
+      },
+      "editor.repetition.bulkSkippedNote": {
+        description:
+          "Sentence appended to the summary toast of a bulk validation, saying " +
+          "some repeated rows were left untouched because the validated rows " +
+          "disagreed about their translation and the user chose to skip them.",
+        placeholders: {
+          count: "How many repeated rows were left unchanged. Always 1 or more.",
+        },
+      },
+      "editor.repetition.conflictBody": {
+        description:
+          "Body of a dialog in a bulk validation: two or more of the rows being " +
+          "validated share a source text but hold different translations, so " +
+          "the user picks which translation the remaining rows with that source " +
+          "receive. The options follow as a list.",
+        placeholders: {
+          count: "How many rows would receive the chosen translation. Always 1 or more.",
+        },
+      },
+      "editor.repetition.conflictFrom": {
+        description:
+          "Small caption under one translation option in the conflict dialog, " +
+          "naming which validated rows hold that translation.",
+        placeholders: {
+          rows: "A list of row names, already joined, e.g. 'row 3 and row 7' or 'GEN 1:1 and GEN 2:4'.",
+        },
+      },
+      "editor.repetition.conflictRowName": {
+        description:
+          "How one row is named inside the conflict dialog's caption when it has " +
+          "no reference of its own. Lower-case because it is joined into a list " +
+          "inside a sentence.",
+        placeholders: {
+          number: "The row's number in the editor table's # column.",
+        },
+      },
       "editor.row.draftSearching": {
         description:
           "Screen-reader-only live-region announcement while an AI draft is " +
@@ -1907,6 +2292,16 @@ export const editor = defineNamespace({
           "Screen-reader-only live-region announcement while an AI draft is " +
           "being written for one row. Never visible. Leads with the row's " +
           "reference so a listener knows which line is speaking.",
+        placeholders: {
+          cellRef: "The row's reference, e.g. a verse or cue id.",
+        },
+      },
+      "editor.row.aligningStyles": {
+        description:
+          "Screen-reader-only live-region announcement while Align styles is " +
+          "moving this row's existing translation into the source's bold and " +
+          "italic runs. Never visible. It is not a new translation. Leads with " +
+          "the row's reference so a listener knows which line is speaking.",
         placeholders: {
           cellRef: "The row's reference, e.g. a verse or cue id.",
         },
@@ -2123,6 +2518,14 @@ export const editor = defineNamespace({
         placeholders: {
           count: "How many audio cues are imported on this file.",
         },
+      },
+      "editor.timeline.trackEditingOffHint": {
+        description:
+          "Tooltip on the Sources menu's greyed-out 'Attach captions' and 'Align " +
+          "script' rows. They are unavailable because the project's track-editing " +
+          "setting ('Let maintainers add and edit timeline tracks') is off, and only " +
+          "people who can turn it on see these rows. 'Project Settings' is the name " +
+          "of the settings page.",
       },
       "editor.timeline.noSpeechHere": {
         description:
@@ -2687,11 +3090,11 @@ export const editor = defineNamespace({
       },
       "editor.media.linkedVideoNoCaptions": {
         description:
-          "Line under that heading when no caption track has been attached yet. " +
-          "'Captions' are the timed lines of text the translator works from. The " +
-          "Media view is the editor's video-and-timeline view; its timeline is the " +
-          "only place caption tracks are attached, which is the point of the " +
-          "sentence. Match the Media-view name used in the view switcher.",
+          "Line under that heading when the file has no captions yet, shown to " +
+          "someone who cannot attach them (below maintainer). 'Captions' are the " +
+          "timed lines of text the translator works from; once attached they " +
+          "become this file's rows, which the reader will then translate. " +
+          "'Maintainer' is the project role name; match the members screen.",
       },
       "editor.media.linkedVideoCaptionsOn": {
         description:
@@ -2712,18 +3115,186 @@ export const editor = defineNamespace({
           "'Media view' must match the name in the view switcher.",
         maxLength: 24,
       },
-      "editor.media.linkedVideoUpload": {
+      "editor.media.linkedVideoUseRecording": {
         description:
-          "Offer under the linked-video empty state to upload the original audio " +
-          "or video recording, which does produce rows for this file. Like " +
-          "editor.media.dropHint it ends with 'or' on purpose — the file-picker " +
-          "button follows and completes the sentence.",
+          "Quiet line under the 'Attach captions' button in the linked-video empty " +
+          "state, offering a second way in. Lower-case and starting with 'or' " +
+          "because it continues the button above it. {link} is the clickable part " +
+          "(editor.media.linkedVideoUseRecordingLink); only it is underlined.",
+        placeholders: {
+          link: "The clickable words, editor.media.linkedVideoUseRecordingLink.",
+        },
+        maxLength: 40,
+      },
+      "editor.media.linkedVideoUseRecordingLink": {
+        description:
+          "The clickable part of that line. It opens a second step for uploading " +
+          "an audio or video file of this same video instead; its speech is split " +
+          "into rows for this file. Lower-case: it continues the sentence.",
+        maxLength: 44,
+      },
+      "editor.media.linkedVideoAddRecording": {
+        description:
+          "The same link when there is no 'Attach captions' button above it (the " +
+          "person may upload a file but not attach captions), so it stands on its " +
+          "own and starts with a capital.",
+        maxLength: 44,
+      },
+      "editor.media.linkedVideoRecordingTitle": {
+        description:
+          "Heading of that second step of the linked-video empty state: upload an " +
+          "audio or video file of this same video, and its speech becomes this " +
+          "file's rows.",
+        maxLength: 44,
+      },
+      "editor.media.linkedVideoBackToCaptions": {
+        description:
+          "Link at the bottom of that second step that goes back to the first " +
+          "one, where captions are attached.",
+        maxLength: 32,
       },
       "editor.media.linkedVideoUploadHint": {
         description:
-          "Caveat under that offer. The uploaded recording is cut into this file's " +
-          "rows by its own timings, so a recording that runs to a different " +
-          "timing than the linked video would put the rows out of step with it.",
+          "Caveat under that offer, for a YouTube video. The uploaded file is cut " +
+          "into this file's rows where its speech is, so a file that runs to a " +
+          "different timing than the video would put the rows out of step with it. " +
+          "The last sentence says the video keeps its own sound after the upload; " +
+          "'Sound menu' is the 'Sound: …' button in the video's bottom-right " +
+          "corner (editor.timeline.soundSourcePillVideo).",
+      },
+      "editor.media.linkedVideoUploadHintGeneric": {
+        description:
+          "The same caveat for a linked video that is not on YouTube, where there " +
+          "is no Sound menu: the uploaded file becomes what plays.",
+      },
+      "editor.media.linkedVideoAttachHint": {
+        description:
+          "Line under the linked-video empty state's heading, shown to a maintainer " +
+          "when the file has no captions yet. Attaching a caption file (the next " +
+          "button, 'Attach captions') turns its timed lines into this file's own " +
+          "rows, which is what the translator then works on. VTT, SRT and SBV are " +
+          "file formats; keep them as they are.",
+      },
+      "editor.media.linkedVideoStudioCaptions": {
+        description:
+          "Second line under that one, only for a YouTube video. Aquilla cannot read " +
+          "a YouTube video's captions itself, but whoever uploaded the video can " +
+          "download them as a caption file in YouTube Studio (YouTube's site for " +
+          "channel owners) and attach it here. 'YouTube Studio' is a product name; " +
+          "keep it as it is.",
+      },
+      "editor.media.linkedVideoStudioVideo": {
+        description:
+          "Line on the 'Make rows from an audio or video file' step, only for a " +
+          "YouTube video. " +
+          "Whoever uploaded the video can download it as a video file in YouTube " +
+          "Studio, and that file can be uploaded on this step. 'YouTube Studio' is a " +
+          "product name; keep it as it is.",
+      },
+      "editor.media.useTrackAsRows": {
+        description:
+          "Button in the same empty state, one per caption track already on the " +
+          "Media view's timeline. Pressing it (after a confirmation) copies that " +
+          "track's captions into this file as its rows, ready to translate.",
+        placeholders: {
+          track: "The caption track's name, user-authored, left untranslated.",
+        },
+        maxLength: 60,
+      },
+      "editor.media.useTrackAsRowsHint": {
+        description:
+          "Note under those buttons when there is more than one caption track: " +
+          "only the chosen track becomes rows, the others stay on the timeline.",
+      },
+      "editor.timeline.trackUseAsRows": {
+        description:
+          "Item in a caption track's right-click menu on the Media view's " +
+          "timeline, offered only on a linked video that has no rows yet. It turns " +
+          "this track's captions into the file's own rows (after a confirmation).",
+        maxLength: 32,
+      },
+      "editor.timeline.useAsRowsTitle": {
+        description:
+          "Heading of the confirmation that item opens. A question; the answer " +
+          "buttons are 'Cancel' and editor.timeline.useAsRowsConfirm.",
+        placeholders: {
+          track: "The caption track's name, user-authored, left untranslated.",
+        },
+      },
+      "editor.timeline.useAsRowsBody": {
+        description:
+          "Body of that confirmation. 'Text view' and 'Source text' must match the " +
+          "view switcher's Text tab and the timeline row named Source text. The " +
+          "track disappears from the timeline because its captions are now the " +
+          "file's rows, which the Source text row draws.",
+      },
+      "editor.timeline.useAsRowsConfirm": {
+        description: "Confirm button of that confirmation. Short imperative.",
+        maxLength: 24,
+      },
+      "editor.timeline.useAsRowsFailed": {
+        description:
+          "Error shown in that confirmation when the change could not be saved " +
+          "(for example the track changed meanwhile). The dialog stays open.",
+      },
+      "editor.timeline.soundSourceTrigger": {
+        description:
+          "Tooltip and accessible name of the 'Sound: …' button in a YouTube " +
+          "video's bottom-right corner, on a file that also has an uploaded " +
+          "recording. Says which sound is playing under the picture now.",
+        placeholders: {
+          source:
+            "The current choice, exactly as listed in the menu: " +
+            "editor.timeline.soundSourceVideo or editor.timeline.soundSourceRecording.",
+        },
+      },
+      "editor.timeline.soundSourcePillVideo": {
+        description:
+          "Text of that button when the video plays with its own sound (the " +
+          "default). Short: it sits over a small video picture, with a down arrow " +
+          "after it that opens the menu. 'Sound' is a noun, as in audio.",
+        maxLength: 18,
+      },
+      "editor.timeline.soundSourcePillRecording": {
+        description:
+          "Text of the same button when the uploaded recording plays instead and " +
+          "the video is silent. Short, like editor.timeline.soundSourcePillVideo.",
+        maxLength: 18,
+      },
+      "editor.timeline.soundSourceHeading": {
+        description:
+          "Heading of that menu: which sound plays with the video. A noun phrase, " +
+          "as in the audio you hear during playback, not a verb.",
+        maxLength: 24,
+      },
+      "editor.timeline.soundSourceVideo": {
+        description:
+          "Menu choice: play the YouTube video with its own soundtrack. The default. " +
+          "Also the label of the dashed placeholder on the timeline's Source audio " +
+          "lane of a linked video with no rows yet: what that lane holds is the " +
+          "video's own sound.",
+        maxLength: 40,
+      },
+      "editor.timeline.noCaptionsYet": {
+        description:
+          "Shown inside the empty 'Source text' lane of the Media view's timeline " +
+          "on a linked video with no rows yet. A maintainer sees an 'Attach " +
+          "captions' link after it (importExport.captionTrack.attach).",
+        maxLength: 32,
+      },
+      "editor.timeline.soundSourceRecording": {
+        description:
+          "Menu choice: play the recording the user uploaded to this file instead " +
+          "of the video's own sound. The video is then silent and follows the " +
+          "recording.",
+        placeholders: {
+          name: "The uploaded recording's file name, e.g. episode.wav. Left as is.",
+        },
+      },
+      "editor.timeline.soundSourceRecordingUnnamed": {
+        description:
+          "The same choice when the recording has no file name to show.",
+        maxLength: 40,
       },
       "editor.footnotes.label": {
         description:
@@ -3478,6 +4049,67 @@ export const editor = defineNamespace({
           "this browser only.",
         maxLength: 32,
       },
+      "editor.view.ghostText": {
+        description:
+          "Label of the switch that shows a faint suggested next word (learned " +
+          "from this project's own translated lines) after the caret while " +
+          "typing a translation. Tab accepts it; Esc hides it. Applies to this " +
+          "browser only.",
+        maxLength: 32,
+      },
+      "editor.wordsThatFit.button": {
+        description:
+          "Tooltip and screen-reader name of the toolbar button, shown above a " +
+          "selected word in the translation, that lists other words this " +
+          "project's translation uses in the same kinds of places (a project " +
+          "thesaurus), so the translator can swap the selected word.",
+        maxLength: 40,
+      },
+      "editor.wordsThatFit.empty": {
+        description:
+          "Shown in the alternative-words list when the project has not " +
+          "translated enough text yet to suggest any.",
+        maxLength: 40,
+      },
+      "editor.wordsThatFit.replace": {
+        description:
+          "Screen-reader name of one alternative-word button. {word} is the " +
+          "alternative that will replace the selected word in the translation.",
+        placeholders: {
+          word: "The alternative word, in the translation's own language and script.",
+        },
+        maxLength: 60,
+      },
+      "editor.view.healthScoreColorCoding": {
+        description:
+          "Label of the switch that colours words in an AI draft: green when the " +
+          "word also appears in a cited example translation, orange when the model " +
+          "produced it without that support. Turns the health percentage into " +
+          "something a consultant can inspect. Applies to this browser only.",
+        maxLength: 32,
+      },
+      "editor.health.citedExample": {
+        description:
+          "Tooltip on a green (supported) span in an AI draft. Names the cited " +
+          "example the span was found in, as source text then target text.",
+        placeholders: {
+          source: "The example's source-language text, already truncated.",
+          target: "The example's target-language text, already truncated.",
+        },
+      },
+      "editor.view.visibleStyleSegments": {
+        description:
+          "Label of the switch that draws bold and italic runs as small inline " +
+          "blocks inside the cell, once a translation has been placed into those " +
+          "runs. An empty untranslated cell stays blank. Regular text stays " +
+          "ordinary, so the translator types around those blocks and can click or " +
+          "arrow into one to type that phrase in bold or italic. An empty block " +
+          "in a placed translation shows a faint name until they type. Consecutive " +
+          "regular runs are one typing space: an empty one shows a single faint " +
+          "Regular, with no box and no gap between the runs. Applies to this " +
+          "browser only.",
+        maxLength: 32,
+      },
       "editor.view.lowMemory": {
         description:
           "Section heading for the setting that strips the editor back on a " +
@@ -3723,7 +4355,7 @@ export const editor = defineNamespace({
       "editor.bibles.searchPlaceholder": {
         description:
           "Placeholder in the search field of the add-translation picker. The two " +
-          "quoted items are examples of what to type — a language code and a " +
+          "quoted items are examples of what to type — a language name and a " +
           "translation abbreviation; keep them as-is and translate only the framing " +
           "words.",
       },
@@ -4132,6 +4764,22 @@ export const editor = defineNamespace({
           "read like 'this cell has no history' — the distinction matters, because " +
           "the cell probably does. A Retry control follows.",
       },
+      "editor.history.loadFailedNetwork": {
+        description:
+          "Variant of 'Couldn't load edit history.' shown after several automatic " +
+          "attempts all failed without reaching the server (slow, dropped or " +
+          "offline connection). It must say the network failed, not the server, " +
+          "so the user checks their connection. A Retry control follows.",
+      },
+      "editor.history.loadFailedServer": {
+        description:
+          "Variant of 'Couldn't load edit history.' shown when the server was " +
+          "reached but answered with an error, so the user's connection is not " +
+          "the problem. A Retry control follows.",
+        placeholders: {
+          status: "The HTTP status code the server answered with, such as 503. Keep it as digits.",
+        },
+      },
       "editor.history.noEdits": {
         description:
           "Genuine empty state: the cell has never been edited. Full sentence with " +
@@ -4143,6 +4791,22 @@ export const editor = defineNamespace({
           "Quiet 10px warning above the list when the server could not be reached " +
           "but locally-known edits are being shown. The clause after the dash is " +
           "what the user is looking at. A Retry control follows.",
+      },
+      "editor.history.refreshFailedNetwork": {
+        description:
+          "Variant of the refresh warning above the list when every automatic " +
+          "attempt failed without reaching the server. The parenthesis names the " +
+          "network as the cause; the clause after the dash is what the user is " +
+          "looking at. A Retry control follows.",
+      },
+      "editor.history.refreshFailedServer": {
+        description:
+          "Variant of the refresh warning above the list when the server answered " +
+          "with an error. The clause after the dash is what the user is looking " +
+          "at. A Retry control follows.",
+        placeholders: {
+          status: "The HTTP status code the server answered with, such as 503. Keep it as digits.",
+        },
       },
       "editor.history.revisions": {
         description:
@@ -4185,6 +4849,18 @@ export const editor = defineNamespace({
           "Tooltip explaining the draft-kept badge. Says what is being compared " +
           "(the AI draft against this revision) and that the unit is characters, so " +
           "a reader does not mistake it for a quality score.",
+      },
+      "editor.history.aiTrace.show": {
+        description:
+          "Toggle under an AI-drafted version in the cell history. Opens the exact " +
+          "instructions and examples sent to the AI model for that draft.",
+        maxLength: 24,
+      },
+      "editor.history.aiTrace.output": {
+        description:
+          "Heading above the AI model's raw reply, shown after the prompt messages. " +
+          "May differ from the saved text when the reply was cleaned up before saving.",
+        maxLength: 24,
       },
       "editor.history.staleBadge": {
         description:
@@ -4347,6 +5023,38 @@ export const editor = defineNamespace({
           "action. 'Voice' is a verb here: produce spoken audio.",
         placeholders: { count: "Number of translated lines that will be joined." },
       },
+      "editor.selection.voiceTogetherFailed": {
+        description:
+          "Heading of the error notice shown when 'Voice together' fails. The " +
+          "notice's body gives the reason in plain words. 'Voice' is a verb: " +
+          "produce one spoken recording of the selected lines.",
+      },
+      "editor.selection.voiceTogetherInworldNotConfigured": {
+        description:
+          "Body of the 'Voice together' error notice when the lines use the " +
+          "hosted Inworld voice engine and this server has no Inworld setup. Says " +
+          "plainly that adding a Gemini key would not help. 'Inworld TTS', " +
+          "'Gemini' and 'API key' are product and technical names: keep them.",
+      },
+      "editor.selection.voiceTogetherInworldFailed": {
+        description:
+          "Body of the 'Voice together' error notice when the hosted Inworld " +
+          "voice engine failed on the selected lines. Says plainly that this is " +
+          "not about the Gemini key. Keep 'Inworld TTS' and 'Gemini'.",
+      },
+      "editor.selection.voiceTogetherSeedVcNotConfigured": {
+        description:
+          "Body of the 'Voice together' error notice when the chosen clone voice " +
+          "needs the Seed-VC voice-conversion step and this server has none. Keep " +
+          "'Seed-VC' and 'Inworld'; a clone voice is a voice copied from a " +
+          "recording.",
+      },
+      "editor.selection.voiceTogetherSeedVcFailed": {
+        description:
+          "Body of the 'Voice together' error notice when the Seed-VC " +
+          "voice-conversion step failed on the selected lines. Says plainly that " +
+          "this is not about the Gemini key. Keep 'Seed-VC' and 'Gemini'.",
+      },
       "editor.selection.translate": {
         description:
           "Button in the selection toolbar that asks the AI to draft the untranslated " +
@@ -4394,6 +5102,53 @@ export const editor = defineNamespace({
             "The number the sentence counts; it also selects which plural form is used.",
         },
       },
+      "editor.selection.validatePartial": {
+        description:
+          "Tooltip on the enabled bulk-validate button when the click would sign " +
+          "off only some of the selected cells. A second line says why the rest " +
+          "are left.",
+        placeholders: {
+          count: "Cells the click would sign off; selects the plural form.",
+          total: "Cells selected in all (always more than count).",
+        },
+      },
+      "editor.selection.validatePartialNamed": {
+        description:
+          "Same tooltip as validatePartial, naming the cells the click would sign " +
+          "off by their references (verse or line labels).",
+        placeholders: {
+          count: "Cells the click would sign off; selects the plural form.",
+          total: "Cells selected in all (always more than count).",
+          refs: "A list of cell references such as \"GEN 1:1, GEN 1:2 and 3 more\".",
+        },
+      },
+      "editor.selection.validatePartialRows": {
+        description:
+          "Same tooltip as validatePartial, naming the cells the click would sign " +
+          "off by their row numbers in the editor's # column, for files whose " +
+          "lines have no verse or line labels.",
+        placeholders: {
+          count: "Cells the click would sign off; selects the plural form (row/rows).",
+          total: "Cells selected in all (always more than count).",
+          refs: "A list of row numbers such as \"4, 5 and 10\" or \"1, 2, 3 and 3 more\".",
+        },
+      },
+      "editor.selection.validatePartialMoreRefs": {
+        description:
+          "Last item of the cell list in validatePartialNamed when it is cut " +
+          "short: how many further cells the click would also sign off.",
+        placeholders: { count: "Cells not named in the list." },
+      },
+      "editor.selection.validatePartialSkips": {
+        description:
+          "Second line of the partial bulk-validate tooltip: how many selected " +
+          "cells the click will leave alone, then the reasons. Future tense: " +
+          "nothing has happened yet.",
+        placeholders: {
+          count: "Cells the click will leave alone; selects the plural form.",
+          reasons: "A list of reason clauses such as \"7 are outside your assigned files or lanes\".",
+        },
+      },
       "editor.selection.validateOutOfScope": {
         description:
           "Tooltip when bulk-validate is disabled because the selection reaches into " +
@@ -4405,12 +5160,19 @@ export const editor = defineNamespace({
           "Tooltip when bulk-validate is disabled because this user has already " +
           "signed off every selected cell. Nothing is wrong.",
       },
-      "editor.selection.validateAiDrafts": {
+      "editor.selection.validateOwnEdits": {
         description:
-          "Tooltip when bulk-validate is disabled because the selected cells are " +
-          "untouched AI drafts. Policy: a human must open each AI draft " +
-          "individually, so they cannot be approved in bulk. The reason after the " +
-          "dash is the important half.",
+          "Tooltip when bulk-validate is disabled because the project does not " +
+          "let people validate their own work and this user made the latest " +
+          "change to the selected cells. A project rule: someone else has to " +
+          "sign them off.",
+      },
+      "editor.selection.validateOwnEditsSome": {
+        description:
+          "Tooltip when bulk-validate is disabled and some, but not all, of the " +
+          "selected cells were last changed by this user on a project that does " +
+          "not let people validate their own work. The rest are blocked for " +
+          "another reason (already validated, or no translation yet).",
       },
       "editor.selection.validateNeedTranslation": {
         description:
@@ -4584,7 +5346,7 @@ export const editor = defineNamespace({
           count:
             "How many cells were skipped in total. Selects the plural form. Always the sum of the clauses in {reasons}.",
           reasons:
-            "The already-joined list of reasons, e.g. \"3 still need a translation, 2 are untouched AI drafts…\". Do not translate its contents here; translate the skip.* keys.",
+            "The already-joined list of reasons, e.g. \"3 still need a translation, 2 you had already validated…\". Do not translate its contents here; translate the skip.* keys.",
         },
       },
       "editor.batchValidate.skip.needsTranslation": {
@@ -4596,6 +5358,128 @@ export const editor = defineNamespace({
           count: "How many cells had no translation. Selects the plural form.",
         },
       },
+      "editor.batchValidate.skip.aiDraft": {
+        description:
+          "One clause inside {reasons}: untouched AI drafts this file-wide run "
+          + "left for individual review because the reader did not include them. "
+          + "A fragment, not a sentence. Not a refusal of cells someone else "
+          + "has already checked.",
+        placeholders: {
+          count: "How many untouched AI drafts were left out. Selects the plural form.",
+        },
+      },
+      "editor.batchValidate.skip.notChosen": {
+        description:
+          "One clause inside {reasons}: cells that were eligible, which the "
+          + "reader left unticked in the batch modal. A fragment, not a sentence.",
+        placeholders: {
+          count: "How many eligible cells the reader left unchecked. Selects the plural form.",
+        },
+      },
+      "editor.batchFile.validateTitle": {
+        description: "Title of the batch-validate modal for the open file.",
+        maxLength: 40,
+      },
+      "editor.batchFile.draftTitle": {
+        description: "Title of the batch-draft modal for the open file.",
+        maxLength: 32,
+      },
+      "editor.batchFile.legend": {
+        description: "Legend over the checkboxes that choose what this run includes.",
+        maxLength: 40,
+      },
+      "editor.batchFile.ready": {
+        description:
+          "Checkbox label for committed text this reader has not signed off, "
+          + "including a second pass on lines someone else already checked.",
+        placeholders: {
+          count: "How many such cells are in the open file. Selects the plural form.",
+        },
+      },
+      "editor.batchFile.readyHelp": {
+        description: "Help under that checkbox.",
+      },
+      "editor.batchFile.aiDrafts": {
+        description:
+          "Checkbox label for AI drafts nobody has validated yet. Off unless "
+          + "a reviewer or project lead turns it on.",
+        placeholders: {
+          count: "How many untouched AI drafts are in the open file. Selects the plural form.",
+        },
+      },
+      "editor.batchFile.aiDraftsHelp": {
+        description: "Help under that checkbox when the reader may turn it on.",
+      },
+      "editor.batchFile.aiDraftsLocked": {
+        description:
+          "Help under that checkbox when the reader is a contributor and cannot "
+          + "bulk-validate untouched AI drafts.",
+      },
+      "editor.batchFile.empty": {
+        description: "Checkbox label for cells with source text and no translation.",
+        placeholders: {
+          count: "How many empty cells are in the open file. Selects the plural form.",
+        },
+      },
+      "editor.batchFile.emptyHelp": {
+        description: "Help under the empty-cells checkbox.",
+      },
+      "editor.batchFile.refresh": {
+        description:
+          "Checkbox label for replacing untouched AI drafts. Off by default, "
+          + "because it spends a new draft.",
+        placeholders: {
+          count: "How many untouched AI drafts can be refreshed. Selects the plural form.",
+        },
+      },
+      "editor.batchFile.refreshHelp": {
+        description: "Help under the refresh checkbox. Says human translations are not replaced.",
+      },
+      "editor.batchFile.humanLeft": {
+        description: "Note that cells a person already translated are not drafted.",
+        placeholders: {
+          count: "How many such cells. Selects the plural form.",
+        },
+      },
+      "editor.batchFile.hiddenLeft": {
+        description: "Note that hidden cells stay parked and are not drafted.",
+        placeholders: {
+          count: "How many hidden cells. Selects the plural form.",
+        },
+      },
+      "editor.batchFile.scopeLegend": {
+        description: "Legend over the choice between the next package and the whole selection.",
+        maxLength: 24,
+      },
+      "editor.batchFile.scopeNext": {
+        description: "Radio label for drafting only the next package.",
+        placeholders: {
+          count: "How many cells that package will draft. Selects the plural form.",
+        },
+      },
+      "editor.batchFile.scopeAll": {
+        description: "Radio label for drafting every ticked cell.",
+        placeholders: {
+          count: "How many cells the full selection contains. Selects the plural form.",
+        },
+      },
+      "editor.batchFile.draftWill": {
+        description: "Sentence under the draft choices stating how many cells this run will draft.",
+        placeholders: {
+          count: "How many cells will be drafted. Selects the plural form.",
+        },
+      },
+      "editor.batchFile.nothingToDraft": {
+        description: "Shown when the current ticks would draft nothing.",
+      },
+      "editor.batchFile.confirmDraft": {
+        description:
+          "Confirm button of the batch draft modal: the imperative command that "
+          + "starts drafting the chosen cells, in the slot where validate mode shows "
+          + "'Validate'. A verb, not the autopilot pipeline's 'Draft' stage caption "
+          + "(autopilot.graph.node.draft), which is a noun.",
+        maxLength: 16,
+      },
       "editor.batchValidate.skip.alreadyMine": {
         description:
           "One clause inside {reasons}: cells this same reader had already signed "
@@ -4604,14 +5488,13 @@ export const editor = defineNamespace({
           count: "How many cells this reader had already validated. Selects the plural form.",
         },
       },
-      "editor.batchValidate.skip.aiDraft": {
+      "editor.batchValidate.skip.ownEdit": {
         description:
-          "One clause inside {reasons}: untouched AI drafts. Bulk validation "
-          + "deliberately excludes them — an unread machine draft must be "
-          + "approved individually — so this clause explains a RULE, not a "
-          + "failure. A fragment, not a sentence.",
+          "One clause inside {reasons}: cells whose latest change this reader "
+          + "made, on a project that does not let people validate their own "
+          + "work, so someone else has to. A fragment, not a sentence.",
         placeholders: {
-          count: "How many cells were untouched AI drafts. Selects the plural form.",
+          count: "How many cells carried this reader's own latest change. Selects the plural form.",
         },
       },
       "editor.batchValidate.skip.outOfScope": {
@@ -4645,7 +5528,7 @@ export const editor = defineNamespace({
         description:
           "Toast title when a bulk validation ran and signed off no cells at "
           + "all. Neutral, not an error: the usual cause is that every "
-          + "candidate was an AI draft or already validated. The reasons "
+          + "candidate was already validated by this reader. The reasons "
           + "follow on the next line.",
       },
       "editor.batchValidate.nothingEligibleNoReason": {
@@ -4663,6 +5546,13 @@ export const editor = defineNamespace({
           "Toast when the reader's project role is below the validation floor. "
           + "The server is authoritative; this is the client saying so first "
           + "rather than sending a request it knows will be refused.",
+      },
+      "editor.batchValidate.notNamedValidator": {
+        description:
+          "Toast, disabled-button tooltip and confirmation text when the project "
+          + "keeps a list of named people who may validate text and this user is "
+          + "not on it. Their role is not the reason, so the sentence must not "
+          + "mention roles.",
       },
       "editor.batchValidate.noTarget": {
         description:
@@ -5398,11 +6288,46 @@ export const editor = defineNamespace({
           "reports a structural break already detected on commit. 'IDML' is the " +
           "file-format name and stays as-is.",
       },
+      "editor.idml.alignStylesChangedWording": {
+        description:
+          "Inline error after Align styles. The model tried to rephrase the " +
+          "translation instead of only moving words between style runs, so the " +
+          "app refused to save. The 'nothing was saved' half must survive.",
+      },
+      "editor.idml.alignStylesUnchanged": {
+        description:
+          "Inline notice after Align styles when the model left every word in " +
+          "the run it was already in. Nothing was written. Not a failure of the " +
+          "translation itself.",
+      },
+      "editor.idml.alignStylesEmpty": {
+        description:
+          "Inline error when Align styles comes back without a placement for " +
+          "the runs. The 'nothing was saved' half must survive.",
+      },
+      "editor.idml.alignStylesFailed": {
+        description:
+          "Inline error when Align styles cannot rebuild the cell's protected " +
+          "structure. The 'nothing was saved' half must survive. 'Align styles' " +
+          "is the name of the action.",
+      },
+      "editor.idml.alignStylesUnavailable": {
+        description:
+          "Inline error when Align styles is asked of a cell that has no " +
+          "separate style runs to move words between. One sentence.",
+      },
       "editor.idml.editWouldChangeFormattingError": {
         description:
           "Rejection message (role=alert, via reportIdmlError) for an in-progress " +
           "edit that would alter protected IDML formatting anchors — the edit is " +
           "refused before it lands. 'IDML' is the file-format name and stays as-is.",
+      },
+      "editor.idml.noEditableSlotError": {
+        description:
+          "Rejection message (role=alert, via reportIdmlError) shown when a typed " +
+          "or pasted character has no editable slot to land in because every run " +
+          "in the cell is protected (AQU-1962) — the keystroke used to vanish with " +
+          "no message. 'IDML' is the file-format name and stays as-is.",
       },
       "editor.tts.translatingBeforeVoicing": {
         description:
@@ -5481,16 +6406,68 @@ export const editor = defineNamespace({
           "Tooltip when validation is unavailable for any other reason, typically " +
           "the user's project role. Deliberately vague — do not guess a cause.",
       },
-      "editor.validation.ariaValidated": {
+      "editor.validation.ownEditTooltip": {
+        description:
+          "Tooltip on a row's validation button when the project does not let " +
+          "people validate their own work and this user made the latest change " +
+          "to the cell's translation. A project rule, not a fault: someone else " +
+          "has to sign it off. Same idea as the audio control's \"You recorded " +
+          "this\" tooltip.",
+      },
+      "editor.validation.ariaValidatedByYou": {
         description:
           "Screen-reader name of the validation button when THIS user has already " +
-          "signed the cell off; pressing it withdraws that sign-off. Three parts: " +
-          "state, which cell, what the press does.",
+          "signed the cell off. Pressing it opens and keeps open the list of who " +
+          "validated the text; that list has a 'Remove your validation' button. " +
+          "The press itself does not withdraw anything. Three parts: state, which " +
+          "cell, what the press does.",
         placeholders: {
           ref:
             "The cell's reference, e.g. 'MAT 3:16', or a fallback row number. From " +
             "the data — do not translate.",
         },
+      },
+      "editor.validation.ariaValidatedByYouNoAction": {
+        description:
+          "Screen-reader name of the validation button when THIS user has already " +
+          "signed the cell off but can no longer change validations here (for " +
+          "example their role changed), so the press offers nothing.",
+        placeholders: {
+          ref: "The cell's reference or fallback row number. Do not translate.",
+        },
+      },
+      "editor.readOnly.reviewerNoTextValidation": {
+        description:
+          "Banner above the editor for a reviewer (who cannot edit) when the " +
+          "project's minimum role to validate or its list of named validators " +
+          "leaves them out, so they cannot validate text here either. Replaces " +
+          "the usual 'Viewing as reviewer, you can validate and comment' banner.",
+      },
+      "editor.laneArchived.title": {
+        description:
+          "Title of the modal that interrupts a member the moment the language " +
+          "they are translating in is archived by a project manager. Names the " +
+          "language, because the member may have several open in other tabs.",
+        placeholders: {
+          lane: "The archived language's own label, e.g. 'Spanish'. Content — do not translate.",
+        },
+      },
+      "editor.laneArchived.body": {
+        description:
+          "Body of that same modal. It has to carry three facts: a person did " +
+          "this deliberately, the language is now read-only rather than gone, " +
+          "and the member's other languages still work. Keep all three — the " +
+          "member's first fear is that they have lost their work.",
+        placeholders: {
+          lane: "The archived language's own label, e.g. 'Spanish'. Content — do not translate.",
+        },
+      },
+      "editor.laneArchived.acknowledge": {
+        description:
+          "The only button on that modal, and the only way to close it: Esc and " +
+          "a click outside deliberately do nothing. An acknowledgement, not an " +
+          "action — nothing is undone or confirmed by pressing it.",
+        maxLength: 20,
       },
       "editor.validation.ariaValidatedByOthers": {
         description:
@@ -5977,6 +6954,15 @@ export const editor = defineNamespace({
           "editor. Trailing ellipsis means 'opens a further dialog' — keep it.",
         maxLength: 28,
       },
+      "editor.lane.addLaneItem": {
+        description:
+          "Menu item inside the lane switcher, for a maintainer, that opens " +
+          "Languages settings to add another target-language lane. Shown even " +
+          "when the project has only one lane. Trailing ellipsis means it opens " +
+          "a further screen — keep it. Not shown to a member who can only see " +
+          "some lanes.",
+        maxLength: 16,
+      },
       "editor.lane.searchAriaLabel": {
         description:
           "Accessible label for the search field inside every lane-picker combobox (editor lane switcher, rule scope picker, rules lane filter). Filters the lane list as the user types.",
@@ -6000,6 +6986,13 @@ export const editor = defineNamespace({
           "Body under editor.empty.noMediaSegments, listing the two ways to get " +
           "clips: import a file, or record. 'Media layer' is the audio/video track " +
           "of the file.",
+      },
+      "editor.empty.mediaLayerWaiting": {
+        description:
+          "Body under editor.empty.noMediaSegments for someone who cannot add the " +
+          "file's recording themselves (below Project Lead, or a viewer): nothing " +
+          "is here until a project lead uploads the audio or video. 'Project lead' " +
+          "is the project role name; match the members screen.",
       },
       "editor.note.footnote": {
         description:
@@ -6227,8 +7220,8 @@ export const editor = defineNamespace({
       },
       "editor.ai.draftBadgeAria": {
         description:
-          "Screen-reader name of that badge, spelling out the policy: each AI draft " +
-          "must be reviewed one at a time and cannot be approved in bulk.",
+          "Screen-reader name of that badge, spelling out what it marks: text a " +
+          "model drafted, which a person still has to review and sign off.",
       },
       "editor.ai.lookingUpExamples": {
         description:
@@ -6283,6 +7276,43 @@ export const editor = defineNamespace({
           "of a cell that already has one. The clause after the dash is the point: " +
           "it produces an alternative, not a correction.",
       },
+      "editor.ai.alignStyles": {
+        description:
+          "Hover tooltip on the last icon in a cell's three-dot menu, on files whose " +
+          "layout must round-trip (Adobe InDesign). The button itself shows only an " +
+          "icon. It asks the model to move the existing translation into the " +
+          "source's bold, italic, and plain runs. It does not write a new " +
+          "translation. Also the button's accessible name when the action can run. " +
+          "Imperative, two words.",
+        maxLength: 16,
+      },
+      "editor.ai.passToStyleSegments": {
+        description:
+          "Hover tooltip and accessible name of the arrow button in the bottom " +
+          "corner of an InDesign cell. Shown while the translation is still one " +
+          "unstyled preview sentence. Clicking it places that sentence into the " +
+          "source's bold, italic, and plain runs. Imperative.",
+        maxLength: 28,
+      },
+      "editor.ai.aligningStyles": {
+        description:
+          "Tooltip and status while Align styles is in flight. Present participle, " +
+          "trailing ellipsis glyph. Not a translation draft.",
+        maxLength: 22,
+      },
+      "editor.ai.alignStylesNeedsText": {
+        description:
+          "Tooltip on Align styles when the cell has no translation yet, so there " +
+          "are no words to move into style runs. Imperative — translate first.",
+      },
+      "editor.ai.alignStylesNeeded": {
+        description:
+          "Hover tooltip and accessible name of the yellow warning in the " +
+          "bottom corner of a cell. Shown after the translator typed into plain " +
+          "style runs that the editor draws as one piece of text, when those " +
+          "words are not yet sitting in each of the source's runs. Clicking it " +
+          "runs Align styles. Keep 'Align styles' identical to editor.ai.alignStyles.",
+      },
       "editor.audio.play": {
         description:
           "Tooltip on the action-rail play button for a cell's recording. Swaps " +
@@ -6294,6 +7324,13 @@ export const editor = defineNamespace({
           "Tooltip on the action-rail button that starts the file's master " +
           "audio/video from this cell's timecode, rather than playing the cell's own " +
           "recording. 'Cue' is the timed entry.",
+        maxLength: 24,
+      },
+      "editor.cue.pause": {
+        description:
+          "Tooltip on that same action-rail button while this row's line is the one " +
+          "playing: it shows a pause icon, and pressing it stops playback. A verb, " +
+          "short like 'Play'.",
         maxLength: 24,
       },
       "editor.expansion.retrievalSupport": {
@@ -6748,6 +7785,12 @@ export const editor = defineNamespace({
           "'to waive' — a deliberate exemption, not something ignored by accident.",
         maxLength: 16,
       },
+      "editor.issues.notYetValidated": {
+        description:
+          "Hover text on a cell whose number is tinted only because confidence " +
+          "is still low — no specific check has fired. Explains the tint. One " +
+          "sentence, no period.",
+      },
       "editor.paragraph.confirmTitle": {
         description:
           "Title of the dialog confirming that the AI should draft every cell of the " +
@@ -7013,6 +8056,29 @@ export const editor = defineNamespace({
         description:
           "Tooltip/aria-label of the outbox chip in its queued state.",
         placeholders: { count: "Number of local writes waiting to sync." },
+      },
+      "editor.outbox.savedLocallyLabel": {
+        description:
+          "Short chip text (Tauri desktop) when edits are saved in the on-device " +
+          "offline store but the server is unreachable, so they are not uploaded yet.",
+        placeholders: { count: "Number of edits saved on this device but not uploaded." },
+        maxLength: 16,
+      },
+      "editor.outbox.savedLocallyTooltip": {
+        description: "Tooltip/aria-label of the outbox chip in its saved-on-this-device (offline) state.",
+        placeholders: { count: "Number of edits saved on this device but not uploaded." },
+      },
+      "editor.outbox.syncTimes": {
+        description:
+          "Appended to the outbox chip tooltip for a project downloaded for offline use: " +
+          "when this device last uploaded and last downloaded changes.",
+        placeholders: {
+          upload: "Relative time like '5 minutes ago', or editor.outbox.never.",
+          download: "Relative time like '5 minutes ago'.",
+        },
+      },
+      "editor.outbox.never": {
+        description: "Stands in for a time in editor.outbox.syncTimes when nothing was ever uploaded.",
       },
       "editor.outbox.syncedTooltip": {
         description:

@@ -33,6 +33,7 @@ import { synthesizeCellTts } from "@/lib/sync/tts"
 import { inworldSynthFieldsFromVoice } from "./inworld-voice-settings"
 import { inworldLanguageForRequest } from "./inworld-languages"
 import { effectiveSourceText } from "@/lib/cell-text"
+import { laneLanguageForTag, sourceLaneLanguage } from "@/lib/lanes/lane-language"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord, ProjectTtsSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -52,6 +53,10 @@ export interface CombinedVoiceArgs {
   settings?: ProjectTtsSettings
   session: FrontierSession | null
   username: string
+  /** AQU-1462/1591: the lane this generation performs. Stamped on every attach,
+   *  so the shared clip belongs to that lane rather than to the default one.
+   *  Omitted for the default lane, which is what an absent tag resolves to. */
+  targetLang?: string
   onProgress?: (msg: string) => void
 }
 
@@ -105,6 +110,10 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
   const provider = voice.provider ?? resolveTtsProvider(settings)
   const joined = chosen.map((c) => c.translated.trim()).join(SEPARATOR)
   const getSyncToken = audioSyncTokenFetcherForSession(session)
+  // AQU-1978: the languages of the lanes this clip performs, not the retired
+  // project-level pair (AQU-1594/1595), which is empty on a new project.
+  const targetLanguage = laneLanguageForTag(args.targetLang ?? "", project.lanes, project) ?? undefined
+  const sourceLanguage = sourceLaneLanguage(project.lanes, project) ?? undefined
 
   setAll({ kind: "synthesizing" })
   try {
@@ -119,7 +128,7 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
       // Server-side: one Inworld call for the whole joined clip; the worker
       // stores it (native clone when a reference is set) and returns its id.
       onProgress?.("Synthesizing combined clip…")
-      const language = inworldLanguageForRequest(voice, project.targetLanguage)
+      const language = inworldLanguageForRequest(voice, targetLanguage)
       const result = await synthesizeCellTts(
         {
           projectId: project.id,
@@ -142,8 +151,8 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
         projectTtsSettings: settings,
         cellVoiceId: voice.id,
         geminiContext: {
-          sourceLanguage: project.sourceLanguage,
-          targetLanguage: project.targetLanguage,
+          sourceLanguage,
+          targetLanguage,
           original: effectiveSourceText(chosen[0]),
           context: chosen[0].context,
           cellLabel: chosen[0].cellLabel,
@@ -222,9 +231,14 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
         mimeType: combinedMime,
         voiceId: voice.id,
         ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
+        // AQU-1591: a generated voice is a performance of ONE language, so it
+        // belongs to the lane it was generated in. Without the tag it landed in
+        // the default lane and was heard there instead.
+        ...(args.targetLang ? { targetLang: args.targetLang } : {}),
         // AQU-1572: one event per cell the clip was attached to, matching the
         // per-cell shape of every other audio event.
         audioOrigin: "generate",
+        surface: "voice-together",
         author: username,
       })
     }

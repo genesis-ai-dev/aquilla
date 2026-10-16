@@ -14,6 +14,7 @@ import {
   type InworldSupportedLanguage,
 } from "./inworld-supported-languages"
 import type { FrontierSession } from "@/lib/frontier/types"
+import { isLaneArchived } from "@/components/project-lane-archive"
 
 export type { InworldCatalogVoice }
 
@@ -27,25 +28,26 @@ export function fallbackInworldCatalog(): InworldCatalogVoice[] {
 
 /**
  * Default target language + extra active lanes, in display order.
- * Archived extra lanes are omitted (the default lane cannot be archived).
+ *
+ * Archived EXTRA lanes are omitted. This reads the legacy
+ * `settings.archivedLanes` tag list, which cannot name the former default lane
+ * (its tag is the empty string), so since AQU-1600 made that lane archivable
+ * its language is still offered here even when the lane is archived. Fixing
+ * that means reading the lane ROWS, which is the per-lane audio work
+ * (AQU-1591 / AQU-1615), not this helper.
  */
 export function projectTargetLaneLanguages(project: {
   targetLanguage?: string
   targetLanes?: readonly string[]
   archivedLanes?: readonly string[]
 }): string[] {
-  const archived = new Set(
-    (project.archivedLanes ?? [])
-      .map((lane) => lane.trim().toLowerCase())
-      .filter(Boolean),
-  )
+  const archived = project.archivedLanes ?? []
   const out: string[] = []
   const add = (raw: string | undefined) => {
     const value = raw?.trim()
     if (!value) return
-    const key = value.toLowerCase()
-    if (archived.has(key)) return
-    if (out.some((existing) => existing.toLowerCase() === key)) return
+    if (isLaneArchived(value, archived)) return
+    if (out.some((existing) => existing.toLowerCase() === value.toLowerCase())) return
     out.push(value)
   }
   add(project.targetLanguage)

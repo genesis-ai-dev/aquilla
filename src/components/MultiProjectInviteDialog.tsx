@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ComponentProps } from "react"
+import { useCallback, useEffect, useMemo, useState, type ComponentProps } from "react"
 import { Check, Search } from "lucide-react"
 import { LegendList, type LegendListRenderItemProps } from "@legendapp/list/react"
 import { Button } from "@/components/ui/button"
@@ -19,13 +19,21 @@ import {
   type RoleLevel,
 } from "@/lib/frontier/roles"
 import { addProjectMember, lookupUser } from "@/lib/frontier/members"
-import { createServerInvite } from "@/lib/sync/invites"
+import { createServerInviteWithChoice } from "@/lib/sync/invite-with-choice"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { toUserFacingError } from "@/lib/errors/user-error"
 import { UsernameTypeahead, type RecipientValue } from "@/components/UsernameTypeahead"
 import { RoleSelect } from "@/components/RoleSelect"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { useI18n } from "@/lib/i18n/I18nProvider"
+import { LaneAccessFields } from "@/components/LaneAccessFields"
+import { useCurrentTargetLanes, type TargetLaneOption } from "@/hooks/useCurrentTargetLanes"
+import {
+  laneChoiceReady,
+  needsLaneChoice,
+  toMemberLaneAccess,
+  type LaneAccessChoice,
+} from "@/lib/lanes/lane-access-choice"
 
 /**
  * AQU-1151: above this many rendered rows the checklist switches from a plain
@@ -57,6 +65,9 @@ interface ProjectChecklistRowProps {
   roleChoices: ComponentProps<typeof RoleSelect>["options"]
   onToggle: (projectId: string) => void
   onRoleChange: (projectId: string, level: RoleLevel) => void
+  laneChoice: LaneAccessChoice | null
+  onLaneChoice: (choice: LaneAccessChoice) => void
+  onLanes: (projectId: string, lanes: readonly TargetLaneOption[]) => void
   className?: string
 }
 
@@ -77,10 +88,19 @@ function ProjectChecklistRow({
   roleChoices,
   onToggle,
   onRoleChange,
+  laneChoice,
+  onLaneChoice,
+  onLanes,
   className,
 }: ProjectChecklistRowProps) {
   const { t } = useI18n()
   const isSelected = selectedRole !== undefined
+  const { lanes } = useCurrentTargetLanes(
+    isSelected && selectedRole < ROLE.PROJECT_LEAD ? project.id : null,
+  )
+  useEffect(() => {
+    onLanes(project.id, lanes)
+  }, [lanes, onLanes, project.id])
   return (
     <div
       className={`px-3 py-2 text-sm ${isSelected ? "bg-muted/40" : ""}${
@@ -143,6 +163,17 @@ function ProjectChecklistRow({
           <span aria-hidden className="w-0" />
         )}
       </div>
+      {isSelected && selectedRole !== undefined && needsLaneChoice(selectedRole, lanes.length) && (
+        <div className="mt-2 ps-7">
+          <LaneAccessFields
+            name={`lane-access-${project.id}`}
+            lanes={lanes}
+            value={laneChoice}
+            onChange={onLaneChoice}
+            disabled={busy}
+          />
+        </div>
+      )}
       {errorMsg && (
         <AppTooltip content={errorMsg} className="max-w-xs">
           <p className="mt-1 ps-7 text-[10px] text-destructive break-words">
@@ -197,6 +228,8 @@ export function MultiProjectInviteDialog({
     raw: "",
   })
   const [selections, setSelections] = useState<Record<string, RoleLevel>>({})
+  const [lanesByProject, setLanesByProject] = useState<Record<string, readonly TargetLaneOption[]>>({})
+  const [laneChoices, setLaneChoices] = useState<Record<string, LaneAccessChoice | null>>({})
   const [query, setQuery] = useState("")
   const [busy, setBusy] = useState(false)
   const [perProjectError, setPerProjectError] = useState<Record<string, string>>({})
@@ -238,6 +271,24 @@ export function MultiProjectInviteDialog({
     setSelections((prev) => ({ ...prev, [projectId]: level }))
   }, [])
 
+  const setProjectLanes = useCallback((projectId: string, lanes: readonly TargetLaneOption[]) => {
+    setLanesByProject((prev) => {
+      const current = prev[projectId]
+      if (
+        current &&
+        current.length === lanes.length &&
+        current.every((lane, index) => lane.id === lanes[index]?.id)
+      ) {
+        return prev
+      }
+      return { ...prev, [projectId]: lanes }
+    })
+  }, [])
+
+  const setProjectLaneChoice = useCallback((projectId: string, choice: LaneAccessChoice) => {
+    setLaneChoices((prev) => ({ ...prev, [projectId]: choice }))
+  }, [])
+
   async function handleInvite() {
     if (!session?.jwt) {
       setTopError("Sign in to invite collaborators.")
@@ -251,10 +302,29 @@ export function MultiProjectInviteDialog({
       setTopError("Select at least one project.")
       return
     }
+    const blocked: Record<string, string> = {}
+    const grantIds = selectedIds.filter((projectId) => {
+      const role = selections[projectId]
+      const lanes = lanesByProject[projectId] ?? []
+      if (laneChoiceReady(laneChoices[projectId] ?? null, role, lanes.length)) return true
+      blocked[projectId] = t("projectSettings.share.laneChoiceRequired")
+      return false
+    })
+    function accessFor(projectId: string) {
+      const role = selections[projectId]
+      const lanes = lanesByProject[projectId] ?? []
+      const choice = laneChoices[projectId] ?? null
+      if (!needsLaneChoice(role, lanes.length) || !choice) return undefined
+      return toMemberLaneAccess(choice)
+    }
     setBusy(true)
     setTopError(null)
-    setPerProjectError({})
+    setPerProjectError(blocked)
     setDone(null)
+    if (grantIds.length === 0) {
+      setBusy(false)
+      return
+    }
     try {
       // Email mode (AQU-471): mint one email-bound invite link per project —
       // the server sends each invite email. No pre-existing account needed.
@@ -262,14 +332,21 @@ export function MultiProjectInviteDialog({
         const email = recipient.raw.trim()
         const jwt = session.jwt
         const results = await Promise.all(
-          selectedIds.map((projectId) =>
-            createServerInvite(jwt, projectId, selections[projectId], undefined, email)
-          )
+          grantIds.map((projectId) => {
+            return createServerInviteWithChoice(
+              jwt,
+              projectId,
+              selections[projectId],
+              email,
+              undefined,
+              accessFor(projectId),
+            )
+          })
         )
-        const errors: Record<string, string> = {}
+        const errors: Record<string, string> = { ...blocked }
         const successes: Record<string, "ok"> = {}
         results.forEach((created, i) => {
-          const id = selectedIds[i]
+          const id = grantIds[i]
           if (created) {
             successes[id] = "ok"
           } else {
@@ -305,14 +382,17 @@ export function MultiProjectInviteDialog({
       // Issue grants in parallel — they're independent and we want the
       // round-trip cost to be O(1) round-trips, not O(N).
       const results = await Promise.allSettled(
-        selectedIds.map((projectId) =>
-          addProjectMember(session.jwt, projectId, target.username, selections[projectId])
-        )
+        grantIds.map((projectId) => {
+          const access = accessFor(projectId)
+          return access
+            ? addProjectMember(session.jwt, projectId, target.username, selections[projectId], access)
+            : addProjectMember(session.jwt, projectId, target.username, selections[projectId])
+        })
       )
-      const errors: Record<string, string> = {}
+      const errors: Record<string, string> = { ...blocked }
       const successes: Record<string, "ok"> = {}
       results.forEach((r, i) => {
-        const id = selectedIds[i]
+        const id = grantIds[i]
         if (r.status === "fulfilled") {
           successes[id] = "ok"
         } else {
@@ -343,6 +423,8 @@ export function MultiProjectInviteDialog({
     if (busy) return
     setRecipient({ mode: "username", raw: "" })
     setSelections({})
+    setLanesByProject({})
+    setLaneChoices({})
     setQuery("")
     setPerProjectError({})
     setTopError(null)
@@ -367,10 +449,13 @@ export function MultiProjectInviteDialog({
         roleChoices={roleChoices}
         onToggle={toggleProject}
         onRoleChange={setProjectRole}
+        laneChoice={laneChoices[project.id] ?? null}
+        onLaneChoice={(choice) => setProjectLaneChoice(project.id, choice)}
+        onLanes={setProjectLanes}
         className={className}
       />
     ),
-    [selections, perProjectError, done, busy, isEmailMode, roleChoices, toggleProject, setProjectRole],
+    [selections, laneChoices, perProjectError, done, busy, isEmailMode, roleChoices, toggleProject, setProjectRole, setProjectLaneChoice, setProjectLanes],
   )
 
   // Everything a row reads out of dialog state has to travel in `extraData`:
@@ -378,8 +463,8 @@ export function MultiProjectInviteDialog({
   // value left out of here would leave a checked row looking unchecked (or a
   // failed row without its error) until it scrolled out of view and back.
   const listExtraData = useMemo(
-    () => ({ selections, perProjectError, done, busy, isEmailMode }),
-    [selections, perProjectError, done, busy, isEmailMode],
+    () => ({ selections, laneChoices, perProjectError, done, busy, isEmailMode }),
+    [selections, laneChoices, perProjectError, done, busy, isEmailMode],
   )
 
   const renderVirtualRow = useCallback(

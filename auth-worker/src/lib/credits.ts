@@ -192,6 +192,14 @@ export async function recordCredit(
   units: number,
 ): Promise<void> {
   const today = utcDateKey()
+  // `units` is an INTEGER column (requests, or whole audio-seconds). Postgres
+  // rejects a fractional bind (22P02), and the graceful degrade below would then
+  // drop the whole row — hosted transcription lost its llm-rail usage this way
+  // by passing a 2.067 s WAV duration. Normalise here so no caller can repeat
+  // it: a partial unit consumed is a unit billed (ceil, as creditsFor does), and
+  // a non-finite value keeps the cost row with zero units rather than losing
+  // the $-truth.
+  const wholeUnits = Number.isFinite(units) ? Math.ceil(units) : 0
   try {
     await db
       .prepare(
@@ -203,7 +211,7 @@ export async function recordCredit(
            raw_cost_cents = org_credit_usage_daily.raw_cost_cents + EXCLUDED.raw_cost_cents,
            units          = org_credit_usage_daily.units          + EXCLUDED.units`,
       )
-      .bind(orgId, userId, today, rail, rawCostCents, units)
+      .bind(orgId, userId, today, rail, rawCostCents, wholeUnits)
       .run()
   } catch (err) {
     if (isMissingTableError(err)) return // table not yet migrated — silent degrade
@@ -217,12 +225,19 @@ export async function recordCredit(
  * Read the org's day + week (rolling 7d) spend, returned as CREDITS (markup
  * applied). Also returns agent-only sub-totals and a byRail breakdown.
  *
+ * `userId` narrows the read to one person's rows inside that org. Org 0 is the
+ * no-org fallback bucket every project-less AI call lands in, so reading it
+ * whole makes one user's spend everybody else's cap (AQU-1871) — callers that
+ * have no real org pass the caller's id and get a per-user cap instead. For a
+ * real org, leave it unset: the cap is the org's.
+ *
  * Returns zeros on missing table (graceful degrade).
  */
 export async function readSpend(
   db: AquillaDb,
   orgId: number,
   cfg: CreditConfig,
+  userId?: number,
 ): Promise<OrgSpend> {
   const today = utcDateKey()
   const weekStart = nDaysAgoUtc(6) // today − 6 = 7 days inclusive
@@ -243,10 +258,10 @@ export async function readSpend(
         `SELECT date_utc::text AS date_utc, rail,
                 COALESCE(SUM(raw_cost_cents), 0) AS raw_cost_cents
            FROM org_credit_usage_daily
-          WHERE org_id = ? AND date_utc >= ?
+          WHERE org_id = ? AND date_utc >= ?${userId === undefined ? "" : " AND user_id = ?"}
           GROUP BY date_utc, rail`,
       )
-      .bind(orgId, weekStart)
+      .bind(...(userId === undefined ? [orgId, weekStart] : [orgId, weekStart, userId]))
       .all<{ date_utc: string; rail: string; raw_cost_cents: number }>()
     rows = res.results ?? []
   } catch (err) {
@@ -298,6 +313,10 @@ export interface GuardResult {
  * when caps are exceeded — mirrors ai-budget.ts log-only mode. Logs a warning
  * so the operator sees the overage.
  *
+ * `userId` scopes the check to one person's spend within the org — pass it when
+ * the spend has no real org to bill (org 0), so the caps bound that user rather
+ * than the whole shared fallback bucket (AQU-1871).
+ *
  * Never throws — degrade to { ok: true } if readSpend fails.
  */
 export async function creditGuard(
@@ -305,6 +324,7 @@ export async function creditGuard(
   env: Env,
   orgId: number,
   rail: CreditRail,
+  userId?: number,
 ): Promise<GuardResult> {
   let cfg: CreditConfig
   try {
@@ -315,7 +335,7 @@ export async function creditGuard(
 
   let spend: OrgSpend
   try {
-    spend = await readSpend(db, orgId, cfg)
+    spend = await readSpend(db, orgId, cfg, userId)
   } catch {
     return { ok: true }
   }
@@ -323,7 +343,7 @@ export async function creditGuard(
   const check = checkCredits(spend, rail, cfg)
   if (!check.ok) {
     console.warn(
-      `[credits] org ${orgId} over ${check.reason} cap on rail=${rail}`,
+      `[credits] org ${orgId}${userId === undefined ? "" : ` user ${userId}`} over ${check.reason} cap on rail=${rail}`,
       cfg.enforce ? "(enforcing)" : "(log-only)",
       {
         dayCredits: spend.dayCredits,

@@ -22,6 +22,7 @@ import {
   loadVisibleSourceTexts,
   type VisiblePair,
 } from "./concept-occurrences"
+import { applyRenderingLaneScope, renderingLaneScope } from "./rendering-lane-scope"
 
 /** Stop a violations response from growing without a bound. */
 const MAX_VIOLATIONS = 8_000
@@ -52,8 +53,15 @@ export async function queryTerminologyViolations(
     loadProjectTermMatching(db, projectId),
     loadVisibleSourceTargets(db, projectId, lane),
   ])
+  const scope = await renderingLaneScope(db, projectId, lane)
   const scanned = concepts
-    .map((row) => toScanned(row, termMatching))
+    .map((row) => {
+      const match = conceptMatchFromRow(row)
+      return toScanned(
+        { ...row, renderings: applyRenderingLaneScope(match.renderings, scope) },
+        termMatching,
+      )
+    })
     .filter((row) => row.matcher)
   const violations: TerminologyViolationRow[] = []
   let truncated = false

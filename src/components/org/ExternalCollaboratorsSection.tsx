@@ -113,7 +113,7 @@ export function ExternalCollaboratorsSection({
       <ul className="divide-y rounded-lg border">
         {externals.map((e) => (
           <li key={e.userId} className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
-            <UsernameWithAvatar username={e.username} />
+            <UsernameWithAvatar userId={e.userId} username={e.username} />
             <Badge className="border-transparent bg-amber-500/15 text-[10px] text-amber-700 dark:text-amber-300">
               {t("org.externalCollaborators.badge")}
             </Badge>

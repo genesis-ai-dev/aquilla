@@ -206,6 +206,9 @@ describe("knowledge routes — project upload floor", () => {
     )
     expect(originalRes.status).toBe(200)
     expect(originalRes.headers.get("content-type")).toContain("text/markdown")
+    // Uploaded bytes must never render inline on the API origin.
+    expect(originalRes.headers.get("content-disposition")).toMatch(/^attachment;/)
+    expect(originalRes.headers.get("x-content-type-options")).toBe("nosniff")
   })
 })
 

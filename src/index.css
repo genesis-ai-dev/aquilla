@@ -24,6 +24,12 @@
     --color-chart-3: var(--chart-3);
     --color-chart-2: var(--chart-2);
     --color-chart-1: var(--chart-1);
+    /* AQU-1764: the progress palette, defined in the theme blocks below. */
+    --color-progress-text-validated: var(--progress-text-validated);
+    --color-progress-text-translated: var(--progress-text-translated);
+    --color-progress-ai-stripe: var(--progress-ai-stripe);
+    --color-progress-audio-validated: var(--progress-audio-validated);
+    --color-progress-audio-recorded: var(--progress-audio-recorded);
     --color-ring: var(--ring);
     --color-input: var(--input);
     --color-border: var(--border);
@@ -88,6 +94,18 @@
   }
 }
 
+/* AQU-1764: an AI draft nobody has validated yet, on any progress surface —
+   diagonal stripes of the translated colour and the stripe colour. One
+   utility so the Progress card, the bars and the swatches all draw the same
+   stripes; the colours are the palette tokens in the theme blocks below. */
+@utility bg-progress-ai {
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--progress-text-translated) 0 3px,
+    var(--progress-ai-stripe) 3px 6px
+  );
+}
+
 @layer base {
   :where(:root) {
     color-scheme: light;
@@ -136,6 +154,19 @@
     --chart-3: oklch(0.76 0.07 150);
     --chart-4: oklch(0.74 0.10 70);
     --chart-5: oklch(0.66 0.12 25);
+    /* AQU-1764: THE PROGRESS PALETTE. Sam picked it on 2026-10-13 ("Layout A,
+       softest"), and every progress bar, swatch and chapter square draws from
+       it (src/lib/progress/progress-palette.ts names the classes). Text is
+       blue, audio is magenta. Dark = validated, light = done but not
+       validated yet (translated, or recorded); the dark theme flips the
+       lightness so validated still stands out most. Stripes = AI drafts
+       nobody has validated: the translated colour striped with
+       --progress-ai-stripe, drawn by the `bg-progress-ai` utility below. */
+    --progress-text-validated: oklch(0.62 0.15 252);
+    --progress-text-translated: oklch(0.81 0.07 245);
+    --progress-ai-stripe: oklch(0.93 0.025 245);
+    --progress-audio-validated: oklch(0.64 0.14 355);
+    --progress-audio-recorded: oklch(0.84 0.06 355);
     --sidebar: oklch(0.965 0.002 264);
     --sidebar-foreground: oklch(0.32 0.008 264);
     --sidebar-primary: oklch(0.78 0.07 245);
@@ -180,6 +211,12 @@
     --chart-3: oklch(0.78 0.07 150);
     --chart-4: oklch(0.76 0.10 70);
     --chart-5: oklch(0.68 0.12 25);
+    /* AQU-1764: the progress palette's dark pair; see the light block. */
+    --progress-text-validated: oklch(0.80 0.12 245);
+    --progress-text-translated: oklch(0.52 0.10 248);
+    --progress-ai-stripe: oklch(0.36 0.05 248);
+    --progress-audio-validated: oklch(0.80 0.12 355);
+    --progress-audio-recorded: oklch(0.52 0.12 355);
     --sidebar: var(--surface);
     --sidebar-foreground: oklch(0.92 0.008 250);
     --sidebar-primary: oklch(0.78 0.09 245);
@@ -385,6 +422,22 @@ textarea,
   opacity: 0.6;
 }
 
+/* Smart edits: a straight, quieter underline than a rule violation's wavy
+   one — a suggestion from the team's own edits, not a broken rule. */
+.smart-edit-blot {
+  text-decoration-line: underline;
+  text-decoration-style: solid;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in oklch, var(--color-violet-500, oklch(0.606 0.25 292.717)) 70%, transparent);
+  cursor: pointer;
+}
+.smart-edit-blot-jev { text-decoration-style: dotted; }
+.smart-edit-blot-llm {
+  text-decoration-style: dashed;
+  text-decoration-color: color-mix(in oklch, var(--color-sky-500, oklch(0.685 0.169 237.323)) 75%, transparent);
+}
+
 /* Managed terminology uses one quiet, marker-like treatment. Target terms add
    this class only when their editor display preference calls for it. */
 .terminology-highlight,
@@ -421,6 +474,93 @@ textarea,
 .term-chip-host {
   position: relative;
   display: inline;
+}
+
+/* AQU-1689: Who's Who mention words in a Greek or Hebrew source. At rest a
+   dotted underline, so a mention can be found without hovering. Lit (its
+   participant is hovered or focused anywhere in view): the term marker's 12%
+   wash plus a solid underline. "Always" mode keeps every mention washed in
+   its participant's thread color. The underline style changes too, so the
+   state never rests on color alone. */
+.mention-mark {
+  --mention-color: var(--primary);
+  margin-inline: -0.08em;
+  padding-inline: 0.08em;
+  border-radius: 0.22em;
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in oklch, var(--mention-color) 55%, transparent);
+  text-underline-offset: 3px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.mention-mark[data-mention-tinted="true"],
+.mention-mark[data-mention-lit="true"] {
+  background-image: linear-gradient(
+    100deg,
+    transparent 0%,
+    color-mix(in oklch, var(--mention-color) 12%, transparent) 8%,
+    color-mix(in oklch, var(--mention-color) 12%, transparent) 92%,
+    transparent 100%
+  );
+}
+.mention-mark[data-mention-lit="true"] {
+  text-decoration-style: solid;
+  text-decoration-thickness: 2px;
+  text-decoration-color: var(--mention-color);
+}
+.mention-mark[data-thread-slot="1"] { --mention-color: var(--color-sky-600, oklch(0.588 0.158 241.966)); }
+.mention-mark[data-thread-slot="2"] { --mention-color: var(--color-rose-600, oklch(0.586 0.253 17.585)); }
+.mention-mark[data-thread-slot="3"] { --mention-color: var(--color-emerald-600, oklch(0.596 0.145 163.225)); }
+.mention-mark[data-thread-slot="4"] { --mention-color: var(--color-amber-600, oklch(0.666 0.179 58.318)); }
+.mention-mark[data-thread-slot="5"] { --mention-color: var(--color-violet-600, oklch(0.541 0.281 293.009)); }
+.mention-mark[data-thread-slot="6"] { --mention-color: var(--color-teal-600, oklch(0.6 0.118 184.704)); }
+
+/* AQU-1694: a mention placed by word alignment with low confidence is
+   "approximate". Lit or tinted, it keeps a dotted underline and a fainter
+   wash, so it never looks as sure as the rest. */
+.mention-mark[data-mention-approximate="true"][data-mention-tinted="true"],
+.mention-mark[data-mention-approximate="true"][data-mention-lit="true"] {
+  background-image: linear-gradient(
+    100deg,
+    transparent 0%,
+    color-mix(in oklch, var(--mention-color) 6%, transparent) 8%,
+    color-mix(in oklch, var(--mention-color) 6%, transparent) 92%,
+    transparent 100%
+  );
+}
+.mention-mark[data-mention-approximate="true"][data-mention-lit="true"] {
+  text-decoration-style: dotted;
+}
+
+/* AQU-1694: Who's Who tints on the target column, painted with the CSS
+   Custom Highlight API (src/components/bible-data/target-tint-layer.ts), so
+   the editor's rendering is untouched. Same language as the source: a wash
+   and a solid underline when lit, dotted when approximate. */
+::highlight(aq-mention-lit) {
+  background-color: color-mix(in oklch, var(--primary) 12%, transparent);
+  text-decoration: underline solid 2px var(--primary);
+}
+::highlight(aq-mention-lit-approx) {
+  background-color: color-mix(in oklch, var(--primary) 6%, transparent);
+  text-decoration: underline dotted 2px var(--primary);
+}
+::highlight(aq-mention-slot-0) { background-color: color-mix(in oklch, var(--primary) 12%, transparent); }
+::highlight(aq-mention-slot-1) { background-color: color-mix(in oklch, var(--color-sky-600, oklch(0.588 0.158 241.966)) 12%, transparent); }
+::highlight(aq-mention-slot-2) { background-color: color-mix(in oklch, var(--color-rose-600, oklch(0.586 0.253 17.585)) 12%, transparent); }
+::highlight(aq-mention-slot-3) { background-color: color-mix(in oklch, var(--color-emerald-600, oklch(0.596 0.145 163.225)) 12%, transparent); }
+::highlight(aq-mention-slot-4) { background-color: color-mix(in oklch, var(--color-amber-600, oklch(0.666 0.179 58.318)) 12%, transparent); }
+::highlight(aq-mention-slot-5) { background-color: color-mix(in oklch, var(--color-violet-600, oklch(0.541 0.281 293.009)) 12%, transparent); }
+::highlight(aq-mention-slot-6) { background-color: color-mix(in oklch, var(--color-teal-600, oklch(0.6 0.118 184.704)) 12%, transparent); }
+::highlight(aq-mention-slot-0-approx),
+::highlight(aq-mention-slot-1-approx),
+::highlight(aq-mention-slot-2-approx),
+::highlight(aq-mention-slot-3-approx),
+::highlight(aq-mention-slot-4-approx),
+::highlight(aq-mention-slot-5-approx),
+::highlight(aq-mention-slot-6-approx) {
+  text-decoration: underline dotted 1px currentColor;
 }
 
 .usfm-footnote-marker {
@@ -528,7 +668,11 @@ textarea,
   transition: background-color 80ms linear;
 }
 
-.codex-search-flash {
+/* AQU-1493: an attribute, not a class. The row's className is React's, and
+   React rewrites it whole whenever it changes, which wiped a class added from
+   outside. React leaves alone an attribute it does not render. See
+   src/lib/editor/row-flash.ts. */
+[data-row-flash] {
   animation: codex-search-flash 1.8s ease-out;
   border-radius: 4px;
 }
@@ -561,6 +705,68 @@ textarea,
    — never persisted, never editable. Bold and italic only. */
 .idml-style-bold { font-weight: 700; }
 .idml-style-italic { font-style: italic; }
+
+/* Visible style segments: only bold and italic runs are blocks. Consecutive
+   plain runs are one typing space. An empty plain run shows a single faint
+   "Regular" on its first slot, with no box; the plain slots after it add
+   neither another word nor a gap. An empty bold or italic run shows its own
+   faint label until the translator types. Labels are not document text. */
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold,
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic {
+  border-radius: 0.2em;
+  padding-inline: 0.18em;
+  margin-inline: 1px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  background-color: color-mix(in oklch, var(--color-foreground) 7%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-foreground) 16%, transparent);
+}
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold {
+  background-color: color-mix(in oklch, var(--color-foreground) 14%, transparent);
+}
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold[data-style-segment-empty],
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic[data-style-segment-empty] {
+  display: inline-block;
+  min-height: 1.15em;
+  vertical-align: baseline;
+}
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic:not(.idml-style-bold)[data-style-segment-empty]::before,
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold:not(.idml-style-italic)[data-style-segment-empty]::before,
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold.idml-style-italic[data-style-segment-empty]::before {
+  color: color-mix(in oklch, var(--color-foreground) 40%, transparent);
+  pointer-events: none;
+  user-select: none;
+}
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic:not(.idml-style-bold)[data-style-segment-empty]::before {
+  content: var(--aq-style-label-italic, "Italic");
+}
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold:not(.idml-style-italic)[data-style-segment-empty]::before {
+  content: var(--aq-style-label-bold, "Bold");
+}
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold.idml-style-italic[data-style-segment-empty]::before {
+  content: var(--aq-style-label-bold-italic, "Bold italic");
+}
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold.idml-segment-caret,
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic.idml-segment-caret {
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-foreground) 48%, transparent);
+}
+[data-visible-style-segments] [data-idml-protected="slot"][data-style-plain-group="label"] {
+  display: inline-block;
+  min-height: 1.15em;
+  vertical-align: baseline;
+}
+[data-visible-style-segments] [data-idml-protected="slot"][data-style-plain-group="label"]::before {
+  content: var(--aq-style-label-regular, "Regular");
+  color: color-mix(in oklch, var(--color-foreground) 32%, transparent);
+  pointer-events: none;
+  user-select: none;
+}
+[data-visible-style-segments] [data-idml-protected="slot"][data-style-plain-group="join"] {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  min-height: 0;
+}
 
 /* Audio view (Sam, 2026-09-28): a line's waveform and its audio check point at
    each other, since a validated line shows the same green check for text and

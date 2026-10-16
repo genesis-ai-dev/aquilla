@@ -37,7 +37,7 @@ import {
   readProjectLanes,
   readProjectSettings,
   renameProjectLane,
-  updateProjectSettings,
+  setProjectLanguagePair,
 } from "../../helpers/frontier-api"
 
 // The backend reset rides on the `alice` fixture; a bob-only spec does its own.
@@ -56,9 +56,13 @@ test("merging a sibling project gives the host a real lane holding the sibling's
   const donorId = randomUUID()
   const donorName = `MergeSibling ${stamp}`
   await createProjectServerSide(jwt, { id: donorId, name: donorName })
-  await updateProjectSettings(jwt, donorId, {
-    sourceLanguage: "en",
-    targetLanguage: "fr",
+  // French is the old settings `targetLanguage: "fr"`. The source lane already
+  // exists; its language is set there. The brief is the only settings write.
+  await setProjectLanguagePair(jwt, donorId, {
+    sourceLanguage: "English",
+    sourceCode: "en",
+    targetLanguage: "French",
+    targetCode: "fr",
     translationBrief: { parameters: { purpose: "Sibling fixture project" } },
   })
   const link = await linkProjectToSource(jwt, donorId, {

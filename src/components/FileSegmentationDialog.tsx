@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { formatNumber } from "@/lib/i18n/format"
+import { toUserFacingError } from "@/lib/errors/user-error"
 import {
   fetchSegmentation,
   generateSegmentation,
@@ -180,7 +181,9 @@ export function FileSegmentationDialog({
     } catch (err: unknown) {
       setSaveError(
         t("segmentation.saveFailed", {
-          message: err instanceof Error ? err.message : String(err),
+          // AQU-510: the sentence was localized but its reason was not. No
+          // `context` noun — it would be interpolated untranslated.
+          message: toUserFacingError(err).message,
         }),
       )
     } finally {

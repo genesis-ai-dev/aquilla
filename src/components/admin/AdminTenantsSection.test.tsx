@@ -39,11 +39,11 @@ describe("AdminTenantsSection", () => {
     expect(screen.getByText(created)).toBeInTheDocument()
   })
 
-  // AQU-1071: the billing band is a language count, and reading it meant opening
+  // AQU-1071: the billing band is a lane count, and reading it meant opening
   // one org's Billing tab at a time. The tenants table carries it per tenant.
-  it("shows each tenant's active-language count, and zero as a real zero", () => {
+  it("shows each tenant's active-lane count, and zero as a real zero", () => {
     render(<AdminTenantsSection orgs={orgs} teams={teams} onOpenOrg={vi.fn()} onOpenOrgPath={vi.fn()} />)
-    expect(screen.getByRole("columnheader", { name: /languages/i })).toBeInTheDocument()
+    expect(screen.getByRole("columnheader", { name: /lanes/i })).toBeInTheDocument()
     const alpha = screen.getByText("Alpha").closest("tr")!
     expect(alpha).toHaveTextContent("12")
     // An org with no active lane reads 0, not the "—" reserved for a server that
@@ -53,7 +53,7 @@ describe("AdminTenantsSection", () => {
     expect(beta).not.toHaveTextContent("—")
   })
 
-  it("shows an em dash for a server that does not report language counts", () => {
+  it("shows an em dash for a server that does not report lane counts", () => {
     render(
       <AdminTenantsSection
         orgs={[{ id: 3, name: "Gamma", createdAt: "2026-03-01", ownerUsername: "ga", memberCount: 1, projectCount: 1 }]}

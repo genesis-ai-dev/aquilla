@@ -30,7 +30,7 @@ import type { AgentProposal, StagedEvent } from "@/lib/agent/protocol"
 import { applyStagedEvents, type ApplyContext } from "@/lib/agent/apply"
 import { ValidationQueueCard } from "./cards/ValidationQueueCard"
 import { isValidationProposal } from "./cards/registry"
-import { canApply, isSupportedApplyKind } from "@/lib/agent/role-floors"
+import { canApply, canApplyStagedEvent, isSupportedApplyKind } from "@/lib/agent/role-floors"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { translateRuleName } from "@/lib/lqa/builtin-resolver"
 import { formatInfractionMessage } from "@/lib/rules/format-infraction"
@@ -249,6 +249,13 @@ export interface ProposalCardProps {
   applyContext: ApplyContext
   /** Called after a successful apply so the caller can flush + revalidate. */
   onApplied?: (eventIds: string[], cellIds: string[]) => void | Promise<void>
+  /**
+   * AQU-1630: the project's "Allow self-validation" setting
+   * (`project.allowSelfValidation`). When it is off, a prepared
+   * `cell.validate` on a line this reader last edited is shown as not
+   * applicable instead of being offered and refused by the server.
+   */
+  allowSelfValidation?: boolean
 }
 
 type CardState = "idle" | "applying" | "applied" | "discarded"
@@ -260,8 +267,18 @@ export function ProposalCard({
   resolveCell,
   applyContext,
   onApplied,
+  allowSelfValidation,
 }: ProposalCardProps) {
   const t = useT()
+  // The author the applied events carry, and the live last-editor lookup the
+  // self-validation rule compares it against (same column the server reads).
+  const selfGate = {
+    allowSelfValidation,
+    username: applyContext.author,
+    resolveLastEditor: resolveCell
+      ? (cellId: string) => resolveCell(cellId)?.lastEditor
+      : undefined,
+  }
   // Tier 2 (testimony): all-validation proposals get the per-item queue —
   // one Confirm per cell, no apply-all (agent-complete design §3/§6).
   // Before any hooks: a proposal's composition never changes, but React
@@ -273,10 +290,16 @@ export function ProposalCard({
         applyContext={applyContext}
         onApplied={onApplied}
         canValidate={canApply(t, "cell.validate", roleLevel).allowed}
+        blockedReasonFor={(ev) => {
+          // The role floor keeps its own treatment (disabled button + role
+          // tooltip, above) — this reports only the extra per-line refusal.
+          if (!canApply(t, ev.kind, roleLevel).allowed) return null
+          return canApplyStagedEvent(t, ev, roleLevel, selfGate).reason ?? null
+        }}
       />
     )
   }
-  return <StagedProposalCard proposal={proposal} roleLevel={roleLevel} rules={rules} resolveCell={resolveCell} applyContext={applyContext} onApplied={onApplied} />
+  return <StagedProposalCard proposal={proposal} roleLevel={roleLevel} rules={rules} resolveCell={resolveCell} applyContext={applyContext} onApplied={onApplied} allowSelfValidation={allowSelfValidation} />
 }
 
 /** The generic staged-diff card (tier 1 / mixed proposals). */
@@ -287,6 +310,7 @@ function StagedProposalCard({
   resolveCell,
   applyContext,
   onApplied,
+  allowSelfValidation,
 }: ProposalCardProps) {
   const t = useT()
   const [state, setState] = useState<CardState>("idle")
@@ -310,13 +334,23 @@ function StagedProposalCard({
   }, [proposal.events, enabledRules, resolveCell])
 
   const hasUnsupported = proposal.events.some((ev) => !isSupportedApplyKind(ev.kind))
+  // AQU-1630: a mixed proposal carrying a cell.validate this reader may not
+  // make is blocked here too, with the same reason the queue card shows —
+  // Apply is all-or-nothing, so one unapplicable row blocks the card.
   const roleBlock = useMemo(() => {
+    const gate = {
+      allowSelfValidation,
+      username: applyContext.author,
+      resolveLastEditor: resolveCell
+        ? (cellId: string) => resolveCell(cellId)?.lastEditor
+        : undefined,
+    }
     for (const ev of proposal.events) {
-      const verdict = canApply(t, ev.kind, roleLevel)
+      const verdict = canApplyStagedEvent(t, ev, roleLevel, gate)
       if (!verdict.allowed) return verdict
     }
     return null
-  }, [proposal.events, roleLevel, t])
+  }, [proposal.events, roleLevel, t, allowSelfValidation, applyContext.author, resolveCell])
 
   const blockedReason = hasUnsupported
     ? "Contains event kinds this app can't apply yet"

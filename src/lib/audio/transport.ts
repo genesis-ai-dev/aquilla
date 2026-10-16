@@ -117,16 +117,21 @@ export function videoOwnsFile(
  *    a plain document — has no timeline to run a playhead along, and offering a
  *    transport there would be a control that moves nothing.
  *
- * Free timing needs no clause: it re-flows the programme and the queue owns
- * playback there, which `anyCellClockIsFileTime` already reflects, and Sam
- * notes VTT files disable Free timing anyway.
+ *  - **Not Free timing.** (AQU-1704) Free timing re-flows the takes into the
+ *    queue's programme, and the queue is the only engine that plays it. This
+ *    used to need no clause, because subtitle files could not reach Free
+ *    timing. A subtitle file with no film now can, and it has no source
+ *    recording either, so without this clause the virtual clock claimed it and
+ *    fired every take at its CUE time: silence after a short take, overlap
+ *    after a long one, while the timeline drew them end to end.
  */
 export function virtualOwnsFile(
   videoIsTransport: boolean,
   anyCellClockIsFileTime: boolean,
   durationSec: number,
+  freeTiming = false,
 ): boolean {
-  return !videoIsTransport && !anyCellClockIsFileTime && durationSec > 0
+  return !videoIsTransport && !anyCellClockIsFileTime && durationSec > 0 && !freeTiming
 }
 
 /**
@@ -167,6 +172,10 @@ export function selectTransportForFile(
         duration,
         rate: virtual.rate,
         volume: virtual.volume,
+        // Neither of the two non-queue transports can ever be on the
+        // audio-first programme clock — that clock only exists inside the
+        // queue. (AQU-1747)
+        programmeClock: false,
       },
       source: "virtual",
     }
@@ -202,6 +211,7 @@ export function selectTransportForFile(
       // queue's 1.5x would be a readout about a transport that is not sounding.
       rate: video.rate,
       volume: video.volume,
+      programmeClock: false, // see the virtual branch above (AQU-1747)
     },
     source: "video",
   }

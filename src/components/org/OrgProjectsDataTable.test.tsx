@@ -8,6 +8,11 @@ import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
 import type { PortfolioProject } from "@/lib/frontier/portfolio"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 
+/** A progress bar's parts inside `el`, as "tone width" in drawing order (AQU-1764). */
+const barParts = (el: HTMLElement) =>
+  [...el.querySelectorAll<HTMLElement>("[data-progress-tone]")]
+    .map((part) => `${part.dataset.progressTone} ${part.style.width}`)
+
 // StaffLanePopover pulls org/project members over the network on mount — stub
 // it (it's covered by its own wave-A suite). We only assert it's wired here.
 vi.mock("@/components/StaffLanePopover", () => ({
@@ -80,7 +85,6 @@ function renderTable(
   projects: PortfolioProject[],
   opts: {
     role?: number
-    defaultLabels?: Record<string, string>
     jwt?: string | null
     viewerUsername?: string | null
     layout?: "page" | "embedded"
@@ -94,14 +98,12 @@ function renderTable(
   const roleByProjectId = new Map<string, CloudProjectSummary["role"]>(
     projects.map((p) => [p.id, { level: opts.role ?? 600, name: "maintainer", source: "direct" }]),
   )
-  const defaultLaneLabelByProjectId = new Map(Object.entries(opts.defaultLabels ?? {}))
   return render(
     <MemoryRouter>
       <OrgProjectsDataTable
         projects={projects}
         now={now}
         roleByProjectId={roleByProjectId}
-        defaultLaneLabelByProjectId={defaultLaneLabelByProjectId}
         filesByProjectId={new Map()}
         orgId={1}
         jwt={opts.jwt === undefined ? "jwt" : opts.jwt}
@@ -222,8 +224,9 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
         { lane: "es", totalCells: 100, filledCells: 22, validatedCells: 8, lastEditAt: now },
         { lane: "fr", totalCells: 100, filledCells: 50, validatedCells: 30, lastEditAt: now },
       ],
+      targetLanguage: "en-target",
     })
-    renderTable([p], { defaultLabels: { p1: "en-target" } })
+    renderTable([p])
 
     const defaultChip = screen.getByTestId("lane-chip-p1-")
     expect(defaultChip).toHaveTextContent("en-target")
@@ -234,6 +237,10 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
     expect(esChip).toHaveTextContent("es")
     expect(esChip).toHaveTextContent("22%")
     expect(screen.getByTestId("lane-chip-p1-fr")).toBeInTheDocument()
+    // AQU-1764: each chip's mini bar is the shared two-part bar — validated,
+    // then translated but not validated — ending at the printed percentage.
+    expect(barParts(defaultChip)).toEqual(["textValidated 40%", "textTranslated 28%"])
+    expect(barParts(esChip)).toEqual(["textValidated 8%", "textTranslated 14%"])
 
     // Default lane chip is rendered before the named lane chips.
     const position = esChip.compareDocumentPosition(defaultChip)
@@ -241,10 +248,10 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
   })
 
   it("labels a migrated project's default lane from the project target language (AQU-606)", () => {
-    // Post-lanes-migration shape: the target lives on project settings and no
-    // per-file hint reaches the table, so the chip used to read "Default".
+    // Post-lanes-migration shape: the target lives on project settings, which
+    // a resolver that did not read it rendered as "Default".
     const p = baseProject({ id: "p6", name: "Migrated", totalCells: 100, filledCells: 25, targetLanguage: "French" })
-    renderTable([p], { defaultLabels: {} })
+    renderTable([p])
 
     const chip = screen.getByTestId("lane-chip-p6-")
     expect(chip).toHaveTextContent("French")
@@ -253,14 +260,17 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
 
   it("shows the neutral placeholder when the project has no target language (AQU-606)", () => {
     const p = baseProject({ id: "p7", name: "Untargeted", totalCells: 100, filledCells: 25 })
-    renderTable([p], { defaultLabels: {} })
+    renderTable([p])
 
     expect(screen.getByTestId("lane-chip-p7-")).toHaveTextContent("Default")
   })
 
   it("renders a single chip for a project with no lane breakdown (single-lane, no regression)", () => {
-    const p = baseProject({ id: "p2", name: "Ruth", totalCells: 200, filledCells: 100 })
-    renderTable([p], { defaultLabels: { p2: "sw" } })
+    // AQU-1596: the chip's label comes off the project's own target language.
+    // It used to be able to come from a per-file declared-language hint, which
+    // could name a language the lane does not have.
+    const p = baseProject({ id: "p2", name: "Ruth", totalCells: 200, filledCells: 100, targetLanguage: "sw" })
+    renderTable([p])
 
     const chip = screen.getByTestId("lane-chip-p2-")
     expect(chip).toHaveTextContent("sw")
@@ -303,13 +313,15 @@ describe("OrgProjectsDataTable expandable lane sub-rows (AQU-538 §3.2)", () => 
       { lane: "fr", totalCells: 100, filledCells: 10, validatedCells: 0, lastEditAt: now },
       { lane: "de", totalCells: 100, filledCells: 10, validatedCells: 0, lastEditAt: now },
     ]
-    renderTable([baseProject({ id: "p1", name: "Gospels", lanes })], { defaultLabels: { p1: "en-target" } })
+    renderTable([baseProject({ id: "p1", name: "Gospels", lanes, targetLanguage: "en-target" })])
     fireEvent.click(screen.getByTestId("lane-chip-overflow-p1"))
 
     const defaultRow = screen.getByTestId("project-lane-row-p1-")
     expect(defaultRow).toHaveTextContent("en-target")
     expect(defaultRow).toHaveTextContent("68%")
     expect(defaultRow).toHaveTextContent("40% validated")
+    // AQU-1764: the row's bar is the shared two-part bar, not a translated-only fill.
+    expect(barParts(defaultRow)).toEqual(["textValidated 40%", "textTranslated 28%"])
 
     const esRow = screen.getByTestId("project-lane-row-p1-es")
     expect(esRow).toHaveTextContent("22%")
@@ -326,7 +338,7 @@ describe("OrgProjectsDataTable expandable lane sub-rows (AQU-538 §3.2)", () => 
       { lane: "fr", totalCells: 100, filledCells: 10, validatedCells: 0, lastEditAt: now },
       { lane: "de", totalCells: 100, filledCells: 10, validatedCells: 0, lastEditAt: now },
     ]
-    renderTable([baseProject({ id: "p1", name: "Gospels", lanes })], { defaultLabels: { p1: "en-target" } })
+    renderTable([baseProject({ id: "p1", name: "Gospels", lanes, targetLanguage: "en-target" })])
     fireEvent.click(screen.getByTestId("lane-chip-overflow-p1"))
 
     const defaultOpen = within(screen.getByTestId("project-lane-row-p1-")).getByRole("link", {

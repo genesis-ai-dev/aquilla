@@ -184,6 +184,22 @@ export const terminology = defineNamespace({
     "terminology.livingMemory.section.brief.statusNone": "Not started",
     "terminology.livingMemory.section.brief.statusDraft": "Draft",
     "terminology.livingMemory.section.brief.statusComplete": "Complete",
+    // AQU-1672: the status is DERIVED (briefStatus()) and there is nothing to
+    // approve — a user who had just generated a summary read the permanent
+    // "Draft" badge as an unfinished step blocking the AI. Each status says
+    // what it means for the draft prompts, so the badge stops reading as a
+    // pending action.
+    "terminology.livingMemory.section.brief.statusNoneExplainer":
+      "Optional for translating by hand. Autopilot will not start until at least " +
+      "one question is answered.",
+    "terminology.livingMemory.section.brief.statusDraftExplainer":
+      "Already in force — the AI drafts from every answer saved here, and this " +
+      "brief satisfies Autopilot’s start check. “Draft” only means some " +
+      "questions are unanswered or the summary predates your latest edit; there " +
+      "is nothing to approve.",
+    "terminology.livingMemory.section.brief.statusCompleteExplainer":
+      "Every question is answered and the summary matches your latest edit. The " +
+      "AI drafts from this brief.",
     "terminology.livingMemory.section.instructions.description":
       "How the AI should behave when drafting, and the default prediction prompt",
     "terminology.livingMemory.section.instructions.entryCount": plural({
@@ -585,7 +601,7 @@ export const terminology = defineNamespace({
     "terminology.match.optionsLabel": "Matching options",
     "terminology.match.foldMarks": "Ignore vowel marks and accents",
     "terminology.match.affixes": "Allow prefixes and suffixes",
-    "terminology.match.caseSensitive": "Match case exactly",
+    "terminology.match.caseSensitive": "Match case",
     "terminology.match.setUpAffixes": "Set up prefixes and suffixes for this project",
     "terminology.match.addFormLabel": "Add form",
     "terminology.match.addFormPlaceholder": "Another spelling of this term…",
@@ -665,6 +681,19 @@ export const terminology = defineNamespace({
     "terminology.page.addFirstConceptButton": "Add first concept",
     "terminology.page.renderingsColumnHeader": "Renderings",
     "terminology.page.deleteConceptDialogTitle": "Delete concept",
+    // ── BibleEntityLinkSection.tsx (AQU-1693): the Bible person, place or
+    // group a concept names, on the term detail page ────────────────────────
+    "terminology.bibleLink.heading": "Bible person, place or group",
+    "terminology.bibleLink.link": "Link to a Bible person, place or group",
+    "terminology.bibleLink.linkedTo": "Linked to {name}",
+    "terminology.bibleLink.change": "Change",
+    "terminology.bibleLink.unlink": "Unlink",
+    "terminology.bibleLink.book": "Book",
+    "terminology.bibleLink.search": "Search names",
+    "terminology.bibleLink.suggested": "Best matches",
+    "terminology.bibleLink.empty": "No person, place or group in this book matches.",
+    "terminology.bibleLink.loadFailed": "Bible data did not load. Try again when you are online.",
+    "terminology.bibleLink.hint": "Voices and Who's Who use this entry's preferred rendering as the name.",
   },
   context: {
     _context: {
@@ -1507,6 +1536,52 @@ export const terminology = defineNamespace({
       },
       "terminology.page.renderingsColumnHeader": {
         description: "Column heading over the renderings column in the concepts table.",
+      },
+      "terminology.bibleLink.heading": {
+        description:
+          "Heading of the term detail section that links a terminology entry to a " +
+          "person, place or group in the Bible data (for example Jesus, Jerusalem, " +
+          "the Pharisees).",
+      },
+      "terminology.bibleLink.link": {
+        description:
+          "Button on the term detail page that opens a list of Bible people, places " +
+          "and groups to link this entry to.",
+      },
+      "terminology.bibleLink.linkedTo": {
+        description: "States which Bible person, place or group this entry is linked to.",
+        placeholders: { name: "The person's, place's or group's name, e.g. Jesus." },
+      },
+      "terminology.bibleLink.change": {
+        description: "Button that reopens the list to link this entry to a different person, place or group.",
+        maxLength: 20,
+      },
+      "terminology.bibleLink.unlink": {
+        description: "Button that removes the link between this entry and the Bible person, place or group.",
+        maxLength: 20,
+      },
+      "terminology.bibleLink.book": {
+        description: "Accessible name of the drop-down that picks which Bible book's people, places and groups to list.",
+      },
+      "terminology.bibleLink.search": {
+        description: "Placeholder and accessible name of the field that filters the list of names.",
+      },
+      "terminology.bibleLink.suggested": {
+        description:
+          "Small heading over the people, places or groups whose name matches this " +
+          "entry's source term, listed first.",
+      },
+      "terminology.bibleLink.empty": {
+        description: "Shown in place of the list when no person, place or group matches the filter.",
+      },
+      "terminology.bibleLink.loadFailed": {
+        description: "Shown in place of the list when the Bible data could not be downloaded.",
+      },
+      "terminology.bibleLink.hint": {
+        description:
+          "Help text under the section heading. Voices and Who's Who are names of Bible " +
+          "data features (who speaks in a verse; who a word refers to); translate them " +
+          "the way the rest of the app does.",
       },
       "terminology.page.deleteConceptDialogTitle": {
         description:

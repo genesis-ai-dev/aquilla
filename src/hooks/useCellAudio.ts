@@ -4,6 +4,7 @@
 // selectedAudioId change. Also exposes currentTime/seek and lazy peak
 // decoding so that waveform UI and the play button can share one controller.
 
+import { isOnline } from "@/lib/offline/connectivity"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import posthog from "@/lib/posthog"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -33,6 +34,8 @@ export type AudioErrorKind =
   | "download-failed"
   | "audio-deleted"
   | "no-session"
+  /** Not in the local cache and the server is unreachable (desktop offline). */
+  | "offline-unavailable"
 
 export interface AudioError {
   kind: AudioErrorKind
@@ -51,7 +54,7 @@ export const SEEK_END_GUARD_SEC = 0.05
 
 /** "missing" = the clip's stored audio is permanently gone (404) — unlike
  *  "error" it is not retryable, so UI must not offer a retry affordance. */
-export type PeaksState = "idle" | "loading" | "ready" | "error" | "missing"
+export type PeaksState = "idle" | "loading" | "ready" | "error" | "missing" | "offline"
 
 /** External http(s) clip attached by URL (timeline media layer) — streamed
  *  straight from its source, never copied into R2. Playback uses the media
@@ -59,6 +62,14 @@ export type PeaksState = "idle" | "loading" | "ready" | "error" | "missing"
  *  transcription) fetch the bytes and need the host to allow CORS. */
 const isRemoteMediaUrl = (url: string): boolean =>
   url.startsWith("https://") || url.startsWith("http://")
+
+/** True only when we KNOW media can't be fetched: no network interface, or
+ *  the desktop probe says the backend is down. Unknown (web, first probe
+ *  pending) is not unreachable — the fetch gets its chance. */
+async function mediaUnreachable(): Promise<boolean> {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return true
+  return (await isOnline()) === false
+}
 
 export interface UseCellAudioResult {
   /** "cloud" = server pointer exists but bytes not yet fetched. */
@@ -294,6 +305,10 @@ export function useCellAudio(
           return cached
         }
 
+        if (await mediaUnreachable()) {
+          throw { kind: "offline-unavailable", message: t("audio.error.notAvailableOffline") } as AudioError
+        }
+
         if (!sessionRef.current?.jwt) {
           throw { kind: "no-session", message: t("audio.error.notSignedIn") } as AudioError
         }
@@ -479,6 +494,9 @@ export function useCellAudio(
       let streamingSrc = false
       const frontier = attachmentUrl ? parseFrontierAudioUrl(attachmentUrl) : null
       if (attachmentUrl && isRemoteMediaUrl(attachmentUrl)) {
+        if (await mediaUnreachable()) {
+          throw { kind: "offline-unavailable", message: t("audio.error.notAvailableOffline") } as AudioError
+        }
         // Stream straight from the source URL — no byte copy, no object URL.
         src = attachmentUrl
       } else if (frontier) {
@@ -496,6 +514,9 @@ export function useCellAudio(
           src = URL.createObjectURL(new Blob([bytes as BlobPart], blobOpts()))
           urlRef.current = src
         } else {
+          if (await mediaUnreachable()) {
+            throw { kind: "offline-unavailable", message: t("audio.error.notAvailableOffline") } as AudioError
+          }
           const streamUrl = sessionRef.current?.jwt
             ? await getCellAudioStreamUrl({
                 projectId: project.id,
@@ -654,7 +675,7 @@ export function useCellAudio(
       // pointer-missing / no-session are expected in many real-world states
       // (no recording for this cell yet, anonymous session); audio-deleted is a
       // handled permanent state. Don't spam the console for any of them.
-      if (kind !== "pointer-missing" && kind !== "no-session" && kind !== "audio-deleted") {
+      if (kind !== "pointer-missing" && kind !== "no-session" && kind !== "audio-deleted" && kind !== "offline-unavailable") {
         console.error("[useCellAudio] requestPeaks failed", e)
       }
       // Leave peaksRequestedRef pinned to bins so we don't retry in a loop.
@@ -663,7 +684,7 @@ export function useCellAudio(
       // second, redundant request failing must not blank a good render.
       // audio-deleted (permanent 404) → non-retryable "missing", not "error".
       if (!peaksReadyRef.current) {
-        setPeaksState(kind === "audio-deleted" ? "missing" : "error")
+        setPeaksState(kind === "audio-deleted" ? "missing" : kind === "offline-unavailable" ? "offline" : "error")
       }
     }
   }, [attachmentUrl, selectedAudioId, ensureBytes])

@@ -47,9 +47,18 @@ import type { RunCommandIntent } from "../../../shared/run-command-intent"
 /** Generic non-OK response from a contextual run route. */
 export class ContextualApiError extends Error {
   public status: number
-  constructor(message: string, status: number) {
+  /** Server error envelope's stable `error.code`, when it sent one. The
+   *  message is already interpolated into `message` for logs; callers that
+   *  need to render a SPECIFIC localized explanation (AQU-1847's start
+   *  throttle) branch on this instead of matching on prose. */
+  public code: string | null
+  /** AQU-1691: the server's reason code (`error.details.reason`), when it sent one. */
+  public reason: string | null
+  constructor(message: string, status: number, code: string | null = null, reason: string | null = null) {
     super(message)
     this.status = status
+    this.code = code
+    this.reason = reason
   }
 }
 
@@ -62,7 +71,7 @@ export class ContextualAuthError extends ContextualApiError {
 }
 
 interface ErrorEnvelope {
-  error?: { code?: string; message?: string }
+  error?: { code?: string; message?: string; details?: { reason?: unknown } }
 }
 
 async function throwFromResponse(res: Response, fallback: string): Promise<never> {
@@ -73,7 +82,13 @@ async function throwFromResponse(res: Response, fallback: string): Promise<never
     // non-JSON error body — fall through to generic error
   }
   const message = body?.error?.message ?? fallback
-  throw new ContextualApiError(`${fallback}: HTTP ${res.status} — ${message}`, res.status)
+  const reason = typeof body?.error?.details?.reason === "string" ? body.error.details.reason : null
+  throw new ContextualApiError(
+    `${fallback}: HTTP ${res.status} — ${message}`,
+    res.status,
+    body?.error?.code ?? null,
+    reason,
+  )
 }
 
 // ── Plumbing ────────────────────────────────────────────────────────────────
@@ -676,6 +691,75 @@ export async function fetchContextualRuns(
 /** Evidence bundle for one durable run. Historic deployments may know the
  * run but have no event log; an empty bundle keeps the durable summary usable
  * and lets the inspector explain that deeper history was not recorded. */
+/** One Autopilot model call: what the model was asked and what it said
+ *  (auth-worker lib/contextual/traces.ts). Kept 30 days server-side. */
+export interface ContextualRunTrace {
+  id: number
+  spanId: string
+  /** Pipeline node: "construe", "draft", "verify", … */
+  label: string
+  tier: string
+  model: string
+  system: string
+  user: string
+  output: string | null
+  error: string | null
+  generationId: string | null
+  promptTokens: number
+  completionTokens: number
+  costCents: number
+  latencyMs: number
+  attempts: number
+  truncated: boolean
+  createdAt: string
+}
+
+/** Model-call traces for a run, oldest first; narrowed to a span when given.
+ *  A run older than the retention window answers with an empty list.
+ *  AQU-1690: `label` lists one kind of row, e.g. "bible-facts". */
+export async function fetchContextualRunTraces(
+  projectId: string,
+  runId: string,
+  spanId?: string,
+  opts: { label?: string } = {},
+): Promise<{ traces: ContextualRunTrace[]; truncated: boolean }> {
+  const jwt = await requireJwt()
+  const params = new URLSearchParams({ ...(spanId ? { spanId } : {}), ...(opts.label ? { label: opts.label } : {}) })
+  const query = params.toString() ? `?${params.toString()}` : ""
+  const { res, body: raw } = await conditionalGet(
+    `${runsBase(projectId)}/${encodeURIComponent(runId)}/traces${query}`,
+    jwt,
+  )
+  if (res.status === 404 || res.status === 501) return { traces: [], truncated: false }
+  if (!conditionalOk(res)) return throwFromResponse(res, "fetch autopilot traces failed")
+  const body = objectValue(raw) ?? {}
+  const rows = Array.isArray(body.traces) ? body.traces : []
+  const traces = rows.flatMap((row): ContextualRunTrace[] => {
+    const r = objectValue(row)
+    if (!r) return []
+    return [{
+      id: numberValue(r.id),
+      spanId: stringValue(r.spanId),
+      label: stringValue(r.label),
+      tier: stringValue(r.tier),
+      model: stringValue(r.model),
+      system: stringValue(r.system),
+      user: stringValue(r.user),
+      output: typeof r.output === "string" ? r.output : null,
+      error: typeof r.error === "string" ? r.error : null,
+      generationId: typeof r.generationId === "string" ? r.generationId : null,
+      promptTokens: numberValue(r.promptTokens),
+      completionTokens: numberValue(r.completionTokens),
+      costCents: numberValue(r.costCents),
+      latencyMs: numberValue(r.latencyMs),
+      attempts: numberValue(r.attempts),
+      truncated: r.truncated === true,
+      createdAt: stringValue(r.createdAt),
+    }]
+  })
+  return { traces, truncated: body.truncated === true }
+}
+
 export async function fetchContextualRunActivity(
   projectId: string,
   runId: string,
@@ -945,7 +1029,8 @@ export async function sendContextualSteering(
 
 export interface ContextualDecisionView {
   id: string
-  fileId: string
+  /** AQU-1691: null for a project-wide question, such as most fact questions. */
+  fileId: string | null
   /** The span the run raised this question on. The server has always sent it;
    *  it is typed here so the pending surface can file the decision under its
    *  passage rather than into an undifferentiated pile (AQU-1301). Optional
@@ -953,10 +1038,14 @@ export interface ContextualDecisionView {
   spanId?: string | null
   cellIds: string[]
   reason: string
-  readinessItem: "terminology" | "brief" | "examples" | "rules" | "languages" | null
+  readinessItem: "terminology" | "brief" | "examples" | "rules" | "languages" | "bible-fact" | null
   blastRadius: number
   status: "open" | "researching" | "resolved" | "dismissed" | "superseded" | "expired"
   assignedUserId: number | null
+  /** AQU-1691: the project fact the answer is stored under. Optional: older backends omit it. */
+  factKey?: string | null
+  /** AQU-1691: one-click answers. `label` is data from the raiser, like `reason`. */
+  options?: { value: string; label?: string }[] | null
 }
 
 export interface ContextualDecisionsPage {

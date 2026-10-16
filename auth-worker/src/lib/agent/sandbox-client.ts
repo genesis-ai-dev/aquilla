@@ -30,7 +30,29 @@ export interface SandboxExecResult {
  *  carries the human-readable reason to surface to the model. */
 export type SandboxOutcome<T> =
   | { available: true; data: T }
-  | { available: false; reason: string }
+  | {
+      available: false
+      reason: string
+      /**
+       * AQU-1848: true when the sandbox refused because the container pool (or
+       * this tenant's share of it) is saturated, rather than because anything
+       * is broken. Callers must distinguish the two: `busy` is transient and
+       * the person should be told to retry, while a plain failure is a defect.
+       */
+      busy?: boolean
+    }
+
+/**
+ * AQU-1848: the tenant key the pool's per-tenant cap counts. Keyed by user, so
+ * one project lead firing off sandbox imports cannot take every slot — see
+ * `agent-worker/src/pool.ts`.
+ */
+export function sandboxTenant(userId: number): string {
+  return `user:${userId}`
+}
+
+/** Header the agent-worker reads the tenant from (`TENANT_HEADER` there). */
+const TENANT_HEADER = "X-Sandbox-Tenant"
 
 const SANDBOX_UNAVAILABLE =
   "sandbox unavailable — code execution is not configured for this deployment (AGENT_SANDBOX_URL/AGENT_SANDBOX_KEY unset)"
@@ -48,6 +70,7 @@ async function sandboxFetch(
   path: string,
   init: RequestInit,
   signal?: AbortSignal,
+  tenant?: string,
 ): Promise<SandboxOutcome<Response>> {
   const cfg = resolveSandbox(env)
   if (!cfg) return { available: false, reason: SANDBOX_UNAVAILABLE }
@@ -56,6 +79,7 @@ async function sandboxFetch(
       ...init,
       headers: {
         Authorization: `Bearer ${cfg.key}`,
+        ...(tenant ? { [TENANT_HEADER]: tenant } : {}),
         ...(init.headers ?? {}),
       },
       signal,
@@ -70,15 +94,32 @@ async function sandboxFetch(
   }
 }
 
-/** Parse a §1 error envelope `{error:{code,message}}` into a flat message. */
-async function readError(res: Response): Promise<string> {
+/**
+ * Parse a §1 error envelope `{error:{code,message}}` into a flat failure.
+ *
+ * AQU-1848: a `pool_busy` code comes back flagged `busy` AND with the
+ * sandbox's own human-readable message preserved verbatim, because that message
+ * is what the import dialog shows the person ("Waiting for a sandbox — …").
+ */
+async function readError(res: Response): Promise<{ available: false; reason: string; busy?: boolean }> {
   try {
     const body = (await res.json()) as { error?: { code?: string; message?: string } }
-    if (body?.error) return `${body.error.code ?? "error"}: ${body.error.message ?? ""}`.trim()
+    if (body?.error) {
+      const code = body.error.code ?? "error"
+      const message = body.error.message ?? ""
+      if (code === "pool_busy") {
+        return { available: false, reason: message || "every sandbox is busy right now", busy: true }
+      }
+      return { available: false, reason: `${code}: ${message}`.trim() }
+    }
   } catch {
     /* non-JSON body */
   }
-  return `sandbox returned HTTP ${res.status}`
+  // A bare 503 with no envelope is still the pool telling us to come back.
+  if (res.status === 503) {
+    return { available: false, reason: "every sandbox is busy right now", busy: true }
+  }
+  return { available: false, reason: `sandbox returned HTTP ${res.status}` }
 }
 
 /** POST /sessions/:sessionId/exec — run code in the session container. */
@@ -87,6 +128,8 @@ export async function sandboxExec(
   sessionId: string,
   body: { language: "js" | "python"; code: string; timeoutMs?: number },
   signal?: AbortSignal,
+  /** AQU-1848: pool tenant — see `sandboxTenant`. */
+  tenant?: string,
 ): Promise<SandboxOutcome<SandboxExecResult>> {
   const out = await sandboxFetch(
     env,
@@ -97,10 +140,11 @@ export async function sandboxExec(
       body: JSON.stringify(body),
     },
     signal,
+    tenant,
   )
   if (!out.available) return out
   const res = out.data
-  if (!res.ok) return { available: false, reason: await readError(res) }
+  if (!res.ok) return readError(res)
   const data = (await res.json()) as SandboxExecResult
   return { available: true, data }
 }
@@ -112,6 +156,8 @@ export async function sandboxFetchArtifact(
   sessionId: string,
   body: { key: string; path: string },
   signal?: AbortSignal,
+  /** AQU-1848: pool tenant — see `sandboxTenant`. */
+  tenant?: string,
 ): Promise<SandboxOutcome<{ bytes: number }>> {
   const out = await sandboxFetch(
     env,
@@ -122,10 +168,11 @@ export async function sandboxFetchArtifact(
       body: JSON.stringify(body),
     },
     signal,
+    tenant,
   )
   if (!out.available) return out
   const res = out.data
-  if (!res.ok) return { available: false, reason: await readError(res) }
+  if (!res.ok) return readError(res)
   const data = (await res.json()) as { ok: boolean; bytes: number }
   return { available: true, data: { bytes: data.bytes } }
 }
@@ -138,17 +185,20 @@ export async function sandboxReadFile(
   path: string,
   maxBytes: number,
   signal?: AbortSignal,
+  /** AQU-1848: pool tenant — see `sandboxTenant`. */
+  tenant?: string,
 ): Promise<SandboxOutcome<{ text: string; truncated: boolean }>> {
   const out = await sandboxFetch(
     env,
     `/sessions/${encodeURIComponent(sessionId)}/files?path=${encodeURIComponent(path)}`,
     { method: "GET" },
     signal,
+    tenant,
   )
   if (!out.available) return out
   const res = out.data
   if (res.status === 404) return { available: false, reason: `not_found: ${path}` }
-  if (!res.ok) return { available: false, reason: await readError(res) }
+  if (!res.ok) return readError(res)
   const buf = new Uint8Array(await res.arrayBuffer())
   const truncated = buf.byteLength > maxBytes
   const slice = truncated ? buf.subarray(0, maxBytes) : buf

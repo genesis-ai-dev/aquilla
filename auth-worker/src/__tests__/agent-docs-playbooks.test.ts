@@ -60,7 +60,7 @@ describe("onboarding playbooks", () => {
 
   it("bootstrap sequences import → settings → termbase → brief → routing", () => {
     const text = getCookbook("playbooks/project-bootstrap").text
-    const order = ["PlanImport", "targetLanes", "terminology", "translationBrief", "assignment.create"]
+    const order = ["PlanImport", "targetLanes", "term.create", "translationBrief", "assignment.create"]
     let cursor = -1
     for (const marker of order) {
       const at = text.indexOf(marker)
@@ -71,6 +71,19 @@ describe("onboarding playbooks", () => {
     expect(text).toContain("ifMatchVersion")
     expect(text).toContain("sole")
     expect(text).toContain("readiness has no blocking gaps")
+  })
+
+  it("seeds the termbase with term.* events, never the retired settings key", () => {
+    // Since 2026-09-04 the termbase is the `concepts` projection of term.*
+    // events. A PatchSettings op on 'terminology' writes the retired blob,
+    // which the editor ignores as soon as the project has any concept, so the
+    // seeded terms would silently vanish.
+    for (const topic of PLAYBOOKS) {
+      expect(getCookbook(topic).text, topic).not.toMatch(/key:\s*'terminology'/)
+    }
+    for (const topic of ["playbooks/project-bootstrap", "playbooks/first-cycle"]) {
+      expect(getCookbook(topic).text, topic).toContain("term.create")
+    }
   })
 
   it("qa-sweep filters drafted work and keeps testimony out of bulk", () => {

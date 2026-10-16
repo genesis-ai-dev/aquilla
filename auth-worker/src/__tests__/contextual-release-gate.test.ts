@@ -141,6 +141,15 @@ beforeEach(async () => {
   )
     .bind(FILE, PROJECT)
     .run()
+  // AQU-1595: the start gate reads both languages off the lane rows, not the
+  // settings blob. Seed them before the cells so the test trigger attaches the
+  // cells to these rows instead of minting language-less ones.
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position)
+     VALUES ('ctxg-src', ?, 'source', 'English', NULL, 0), ('ctxg-tgt', ?, 'target', 'Swahili', '', 1)`,
+  )
+    .bind(PROJECT, PROJECT)
+    .run()
   for (const [cellId, ref, text] of [
     ["c1", "MRK 1:1", "In the beginning"],
     ["c2", "MRK 1:2", "was the word"],

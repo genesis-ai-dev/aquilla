@@ -8,6 +8,21 @@
 // are unaffected. Do NOT add imports here that reach outside shared/.
 
 import type { ImportMilestone, ImportSourceLocator, SourceArtifactFormat } from "../../../shared/import-contract"
+import type { UsfmStructureFinding } from "./usfm-structure-check"
+
+/**
+ * What one imported cell is (AQU-1720).
+ *
+ * `sentence` (the default) runs the recursive segment splitter, so a long
+ * paragraph becomes several cells cut at sentence/clause/comma boundaries —
+ * right for subtitle and document work, where a cell is a readable unit.
+ *
+ * `paragraph` makes the cell the paragraph: one non-empty source paragraph
+ * becomes exactly one cell, with no sentence splitting and no length cap. A
+ * dubbing/podcast project generates one voice clip per cell, so a cell cut at
+ * a comma is an unusable clip; the paragraph is the unit the voice is for.
+ */
+export type CellUnit = "sentence" | "paragraph"
 
 export type CellType =
   | "text"
@@ -89,6 +104,11 @@ export interface ParsedTextFileResult {
   /** Raw source text for round-trip-fidelity formats (USFM today). */
   rawSource?: string
   rawSourceFormat?: SourceArtifactFormat
+  /** Paratext-parity chapter/verse + marker findings (AQU-1731), USFM only.
+   *  Codes and refs, never sentences — the preview translates at the render
+   *  site, the same way `rule-engine.ts` reason codes are handled. Absent when
+   *  the file is clean. */
+  structureFindings?: UsfmStructureFinding[]
 }
 
 /**

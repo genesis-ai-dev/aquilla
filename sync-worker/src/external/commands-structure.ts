@@ -18,6 +18,7 @@
 // (deferred)" for the semantics that could not be settled without a human call.
 
 import { REQUIRED_ROLE, ROLE } from '../events/role-policy'
+import { laneIdRequiredMessage } from './external-lane'
 
 /**
  * Insert a new source cell into a file's anchor chain.
@@ -69,8 +70,8 @@ export type SplitTargetHandling = 'blank' | 'divide'
 
 /** One lane's cut point for `targets: 'divide'`. */
 export interface SplitTargetOffset {
-  /** Target-language lane; omit for the default lane. */
-  laneId?: string
+  /** Target lane id (`lanes.id`). Required. */
+  laneId: string
   /** Character offset into that lane's target text. */
   offset: number
 }
@@ -232,19 +233,22 @@ export function validateStructureCommand(
       const seen = new Set<string>()
       for (const [i, raw] of c.targetOffsets.entries()) {
         if (!isPlainObject(raw)) return bad(`SplitCell.targetOffsets[${i}] must be an object`)
-        if (raw.laneId !== undefined && !isNonEmptyString(raw.laneId)) {
-          return bad(`SplitCell.targetOffsets[${i}].laneId must be a non-empty string when present`)
+        if (raw.laneId === undefined) {
+          return bad(laneIdRequiredMessage(`SplitCell.targetOffsets[${i}].laneId`))
+        }
+        if (!isNonEmptyString(raw.laneId)) {
+          return bad(`SplitCell.targetOffsets[${i}].laneId lane does not exist`)
         }
         if (!isIntegerAtLeast(raw.offset, 0)) {
           return bad(`SplitCell.targetOffsets[${i}].offset must be an integer >= 0`)
         }
-        const lane = (raw.laneId as string | undefined) ?? ''
+        const lane = raw.laneId as string
         if (seen.has(lane)) {
           return bad(`SplitCell.targetOffsets names lane "${lane}" twice — one offset per lane`)
         }
         seen.add(lane)
         targetOffsets.push({
-          ...(raw.laneId !== undefined ? { laneId: raw.laneId as string } : {}),
+          laneId: raw.laneId as string,
           offset: raw.offset as number,
         })
       }

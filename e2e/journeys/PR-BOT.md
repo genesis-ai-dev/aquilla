@@ -163,6 +163,17 @@ If the PR names roles, check the named roles or write **NOT CHECKED**
 with the role you lacked. "I was already an owner" does not cover
 "contributor cannot save."
 
+**The site-wide admin console is walkable now (AQU-1353), so a claim about
+`/admin` is not a role you lack.** Platform admin is an allowlist of account
+emails, not a rung on the org ladder, so `qa-bot` is redirected to `/orgs/all`
+there no matter what org role it holds — which is why `/admin` claims used to
+come back NOT CHECKED. Sign in as the `qa-admin` fixture instead
+(`AQUILLA_QA_ADMIN_USER` / `AQUILLA_QA_ADMIN_PASSWORD`, or `login_admin` in a
+replay) and pass the step-up gate, which on a preview prints its own code.
+`e2e/journeys/admin-console-platform.md` is the story. NOT CHECKED on an
+`/admin` claim is now a statement that the fixture is missing or broken on that
+target — say which, so it gets fixed rather than re-explained next PR.
+
 If the PR says a surface is *absent* (not disabled), assert absence: the
 heading, button, or test-id is not in the snapshot. A greyed-out control
 is a fail against an absence claim.
@@ -232,6 +243,14 @@ is any of:
 Those are notes, not a walk.
 
 ## Comment template
+
+The release planner reads the heading by machine
+(`scripts/release-plan-walk.mjs`). Write it exactly as
+`## Bot walk — PR <n> @ <sha>`, with `<sha>` the PR's full 40-character head
+sha, no backticks, nothing before or after. A re-walk uses the same heading;
+say why on the status line (`**PASS** · re-walk, Manager fixture · …`). A
+heading the planner cannot read counts as no walk, and that PR holds the
+release.
 
 Short. A reviewer reads the first line and knows whether to look. Status
 is exactly one of **PASS**, **FAIL**, **FLAKY**, **BLOCKED**,

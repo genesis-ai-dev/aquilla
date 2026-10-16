@@ -362,16 +362,13 @@ export function useLanguageSuggestions({
                     data-testid={`language-option-${entry.code}`}
                     data-highlighted={index === activeIndex ? "" : undefined}
                     className={cn(
-                      "flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-start text-sm",
+                      "flex w-full items-center rounded-md px-2 py-1.5 text-start text-sm",
                       index === activeIndex && "bg-accent/40 text-accent-foreground",
                     )}
                     onMouseEnter={() => setActiveIndex(index)}
                     onClick={() => pick(entry, "click")}
                   >
                     <span className="truncate">{entry.name}</span>
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {entry.code}
-                    </span>
                   </button>
                 </li>
               ))}

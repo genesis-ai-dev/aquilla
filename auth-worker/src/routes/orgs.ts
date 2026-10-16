@@ -16,13 +16,18 @@ import {
   createGroup,
   createOrgForUser,
   deleteGroup,
+  deleteOrganization,
   detachGroupProject,
+  canViewNamedProgress,
   getEffectiveOrgRole,
   getMemberEffectiveAccess,
   getOrCreateUserOrg,
   getOrgGroupDetail,
   getOrgDeletedFiles,
   getOrgMemberRole,
+  combineVisibilityFloors,
+  getOrgVisibilityFloors,
+  getProjectRosterListFloors,
   getRosterViewMinRole,
   groupExistsInOrg,
   listEffectiveMembersForOrg,
@@ -34,6 +39,7 @@ import {
   listPlatformAdminOrgsPage,
   listOrgPortfolioPage,
   listUserOrgs,
+  summarizeVisiblePortfolios,
   findPersonalOrg,
   clampOrgDirectoryLimit,
   clampProjectDirectoryLimit,
@@ -50,14 +56,25 @@ import {
 import {
   ALL_ROLE_LEVELS,
   isCanonicalRoleLevel,
+  resolveProjectRoles,
   ROLE_NAMES,
 } from "../services/project-permissions"
 import { countTargetLanesByOrg } from "../lib/billing/words"
 import { lookupUserByUsername } from "../services/user-lookup"
 import { auditMembershipChange, isAdminActor, priorMembershipRole } from "../services/admin-audit"
 import { getOrgAssignmentWorkload, getMyAssignmentsAcrossOrg } from "../services/assignments"
+import { loadProjectVisibilityOverrides } from "../../../db/shared/visibility-floors"
+import { ViewerScope } from "../services/access-payload"
 import { sendOrgInviteEmail } from "../services/email"
 import { getTeamMemberRole, setTeamMemberRole, TEAM_SCOPE_ROLES } from "../services/team-roles"
+import {
+  applyTeamMemberLaneGrants,
+  applyTeamProjectLaneGrants,
+  applyTeamRosterLaneChecks,
+  reconcileMemberProjectLanes,
+  resolveTeamLaneSelection,
+  saveTeamLaneSelection,
+} from "../services/lane-grants"
 
 const orgs = new Hono<AuthHonoEnv>()
 
@@ -196,7 +213,7 @@ orgs.get("/", async (c) => {
     : list
   const memberItems = memberships.map((o) => toMemberItem(o, personalId))
 
-  if (!pickerMode || !isPlatformAdminEmail(c.env, user.email)) {
+  if (!pickerMode || !(await isPlatformAdminEmail(c.env, user.email))) {
     return c.json({ orgs: memberItems, nextCursor: null })
   }
 
@@ -245,6 +262,32 @@ orgs.patch("/:orgId", zValidator("json", renameOrgBody), async (c) => {
   return c.json({ id: orgId, name })
 })
 
+/**
+ * DELETE /api/v2/orgs/:orgId — owner only (AQU-1108).
+ * Membership role, not getEffectiveOrgRole: a platform admin who is not an
+ * owner of this org cannot delete it.
+ */
+orgs.delete("/:orgId", async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
+  const row = await c.env.AQUILLA_PG.prepare(
+    "SELECT id FROM organizations WHERE id = ?",
+  ).bind(orgId).first<{ id: number }>()
+  if (!row) return c.json({ error: "not found" }, 404)
+  const role = await getOrgMemberRole(c.env, orgId, user.id)
+  if (role == null || role < ROLE.OWNER) return c.json({ error: "org owner required" }, 403)
+  const result = await deleteOrganization(c.env, orgId)
+  if (!result.ok) {
+    return c.json({
+      error: "organization_has_projects",
+      projectCount: result.projectCount,
+      message: "This organization still has projects. Remove them before deleting the organization.",
+    }, 409)
+  }
+  return c.json({ removed: true })
+})
+
 /** GET /api/v2/orgs/me — caller's owned organization (lazy-created). */
 orgs.get("/me", async (c) => {
   const user = c.get("user")
@@ -272,7 +315,7 @@ orgs.get("/:orgId", async (c) => {
   ).bind(orgId).first<{ id: number; name: string | null }>()
   if (!row) return c.json({ error: "not found" }, 404)
   const membership = await getOrgMemberRole(c.env, orgId, user.id)
-  const platform = isPlatformAdminEmail(c.env, user.email)
+  const platform = await isPlatformAdminEmail(c.env, user.email)
   if (membership == null) {
     if (!platform) return c.json({ error: "forbidden" }, 403)
     return c.json({
@@ -290,40 +333,70 @@ orgs.get("/:orgId", async (c) => {
   })
 })
 
-/** Cap on an explicit orgIds list. All-orgs omits orgIds and uses memberships. */
-export const PORTFOLIO_ORG_IDS_MAX = 500
+/** No length cap. Omitted orgIds resolves every membership (AQU-756). */
+const portfolioOrgIdsField = z.array(z.number().int().positive()).optional()
 
 const portfolioBatchBody = z.object({
-  orgIds: z.array(z.number().int().positive()).max(PORTFOLIO_ORG_IDS_MAX).optional(),
+  orgIds: portfolioOrgIdsField,
   q: z.string().max(200).optional(),
   limit: z.number().int().positive().max(100).optional(),
   cursor: z.string().optional(),
+})
+
+const portfolioSummaryBody = z.object({
+  orgIds: portfolioOrgIdsField,
+})
+
+/**
+ * AQU-756: an explicit list used to 400 at 101 orgs ("request was invalid
+ * for this org"). There is no org-count cap. Omitted orgIds means every
+ * membership. An empty array still means none. Platform admins may name
+ * orgs they are not members of; everyone else must belong to each explicit id.
+ */
+async function resolvePortfolioOrgIds(
+  env: Env,
+  user: AuthUser,
+  orgIds: number[] | undefined,
+): Promise<{ orgIds: number[]; isAdmin: boolean } | { error: "not an org member" }> {
+  const fromMemberships = orgIds == null
+  const uniqueOrgIds = fromMemberships
+    ? (await listUserOrgs(env, user)).map((org) => org.id)
+    : [...new Set(orgIds)]
+  const isAdmin = await isPlatformAdminEmail(env, user.email)
+  if (!isAdmin && !fromMemberships && uniqueOrgIds.length > 0) {
+    const placeholders = uniqueOrgIds.map(() => "?").join(", ")
+    const allowed = await env.AQUILLA_PG.prepare(
+      `SELECT org_id FROM org_members WHERE user_id = ? AND org_id IN (${placeholders})`,
+    ).bind(user.id, ...uniqueOrgIds).all<{ org_id: number }>()
+    const allowedOrgIds = new Set((allowed.results ?? []).map((row) => row.org_id))
+    if (uniqueOrgIds.some((orgId) => !allowedOrgIds.has(orgId))) {
+      return { error: "not an org member" }
+    }
+  }
+  return { orgIds: uniqueOrgIds, isAdmin }
+}
+
+/** POST /api/v2/orgs/portfolio/summary — overview totals, not the project list. */
+orgs.post("/portfolio/summary", zValidator("json", portfolioSummaryBody), async (c) => {
+  const user = c.get("user")
+  const scope = await resolvePortfolioOrgIds(c.env, user, c.req.valid("json").orgIds)
+  if ("error" in scope) return c.json({ error: scope.error }, 403)
+  const summary = await summarizeVisiblePortfolios(
+    c.env,
+    scope.orgIds,
+    { userId: user.id, isAdmin: scope.isAdmin },
+  )
+  return c.json({ ...summary.totals, orgs: summary.orgs })
 })
 
 /** POST /api/v2/orgs/portfolio — batched per-project rollups for all-org views. */
 orgs.post("/portfolio", zValidator("json", portfolioBatchBody), async (c) => {
   const user = c.get("user")
   const { orgIds, q: qRaw, limit: limitNum, cursor: cursorRaw } = c.req.valid("json")
-  // AQU-756: an explicit list used to 400 at 101 orgs ("request was invalid
-  // for this org"). Omitted orgIds means every membership, so all-orgs does
-  // not have to POST the whole id list. An empty array still means none.
-  const fromMemberships = orgIds == null
-  const uniqueOrgIds = fromMemberships
-    ? (await listUserOrgs(c.env, user)).map((org) => org.id)
-    : [...new Set(orgIds)]
+  const scope = await resolvePortfolioOrgIds(c.env, user, orgIds)
+  if ("error" in scope) return c.json({ error: scope.error }, 403)
+  const { orgIds: uniqueOrgIds, isAdmin } = scope
   if (uniqueOrgIds.length === 0) return c.json({ portfolios: [], nextCursor: null })
-
-  const isAdmin = isPlatformAdminEmail(c.env, user.email)
-  if (!isAdmin && !fromMemberships) {
-    const placeholders = uniqueOrgIds.map(() => "?").join(", ")
-    const allowed = await c.env.AQUILLA_PG.prepare(
-      `SELECT org_id FROM org_members WHERE user_id = ? AND org_id IN (${placeholders})`,
-    ).bind(user.id, ...uniqueOrgIds).all<{ org_id: number }>()
-    const allowedOrgIds = new Set((allowed.results ?? []).map((row) => row.org_id))
-    if (uniqueOrgIds.some((orgId) => !allowedOrgIds.has(orgId))) {
-      return c.json({ error: "not an org member" }, 403)
-    }
-  }
 
   const q = (qRaw ?? "").trim().toLowerCase()
   const pickerMode = limitNum != null || cursorRaw != null || q !== ""
@@ -368,7 +441,7 @@ orgs.get("/:orgId/portfolio", async (c) => {
   // AQU-745: filter to the caller's visible projects (creator/direct/group, or
   // all when Maintainer+/admin) so the org dashboard never leaks project names
   // a regular member has no access to.
-  const isAdmin = isPlatformAdminEmail(c.env, user.email)
+  const isAdmin = await isPlatformAdminEmail(c.env, user.email)
   const qRaw = (c.req.query("q") ?? "").trim()
   const q = qRaw.toLowerCase()
   const limitRaw = c.req.query("limit")
@@ -379,14 +452,12 @@ orgs.get("/:orgId/portfolio", async (c) => {
   const page = pickerMode
     ? { q, limit: clampProjectDirectoryLimit(limitRaw), cursor }
     : null
-  // AQU-1071: the active-language count rides along with the rollup the org
+  // AQU-1071: the active-lane count rides along with the rollup the org
   // dashboard is already asking for, so its tile costs no extra round trip. It
-  // is the same rule billing bills on (distinct active target-language tags;
-  // archived lanes, archived projects and — AQU-1070 — paused projects
-  // excluded), and deliberately org-wide
-  // rather than scoped to `page` or to the caller's visible projects (AQU-745):
-  // a partner reading a smaller figure than their invoice is the confusion this
-  // ticket exists to remove, and a bare count names no project, so it discloses
+  // is the same count billing bills on, and deliberately org-wide rather than
+  // scoped to `page` or to the caller's visible projects (AQU-745): a partner
+  // reading a smaller figure than their invoice is the confusion this ticket
+  // exists to remove, and a bare count names no project, so it discloses
   // nothing the visibility rule guards.
   const [{ projects, nextCursor }, laneCounts] = await Promise.all([
     listOrgPortfolioPage(c.env, [orgId], { userId: user.id, isAdmin }, page),
@@ -409,7 +480,7 @@ orgs.get("/:orgId/deleted-files", async (c) => {
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
   const role = await getEffectiveOrgRole(c.env, orgId, user)
   if (role == null) return c.json({ error: "not an org member" }, 403)
-  const isAdmin = isPlatformAdminEmail(c.env, user.email)
+  const isAdmin = await isPlatformAdminEmail(c.env, user.email)
   const files = await getOrgDeletedFiles(c.env, orgId, { userId: user.id, isAdmin })
   return c.json({ files })
 })
@@ -418,6 +489,11 @@ orgs.get("/:orgId/deleted-files", async (c) => {
  * GET /api/v2/orgs/:orgId/members/:userId/access — AD-12 effective-access
  * breakdown: every grant path (direct/group/org/creator) per project + the
  * resolved max. Maintainer+ (managers) only.
+ *
+ * AQU-1771: a project whose member list the caller may not read (it closed it
+ * to owners) is left out, as the access inspector leaves it out — otherwise
+ * asking this about each person in turn rebuilds the roster the project hid.
+ * Owners, and a person reading their own access, see every project.
  */
 orgs.get("/:orgId/members/:userId/access", async (c) => {
   const user = c.get("user")
@@ -431,7 +507,13 @@ orgs.get("/:orgId/members/:userId/access", async (c) => {
     return c.json({ error: "org role >= maintainer required" }, 403)
   }
   const access = await getMemberEffectiveAccess(c.env, orgId, targetUserId)
-  return c.json(access)
+  if (role >= ROLE.OWNER || Number(user.id) === targetUserId) return c.json(access)
+  const vs = new ViewerScope(c.env, user)
+  const projects = []
+  for (const project of access.projects) {
+    if (await vs.canSeeProject(project.projectId, orgId)) projects.push(project)
+  }
+  return c.json({ ...access, projects })
 })
 
 /**
@@ -439,18 +521,43 @@ orgs.get("/:orgId/members/:userId/access", async (c) => {
  * the org's active projects, with project + progress attribution (AQU-494:
  * one row per assignment, not aggregated by assignee, so the manager can see
  * which project each assignment belongs to and remove any one of them).
- * Maintainer+ (managers).
+ *
+ * AQU-1771: gated on the org's member-progress AND roster floors (each row is
+ * a named person's progress), not on a hard Maintainer floor — the org
+ * overview shows the Team workload card from those floors, so an org that
+ * opened them to contributors got a card that never loaded. Each row is then
+ * kept only when the caller could read that project's own Team card: they
+ * reach the project, and their role there meets its floors. Opening the floors
+ * to contributors must not hand them the assignments of projects they are not
+ * on.
  */
 orgs.get("/:orgId/assignments/workload", async (c) => {
   const user = c.get("user")
   const orgId = parseInt(c.req.param("orgId"), 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
   const role = await getEffectiveOrgRole(c.env, orgId, user)
-  if (role == null || role < ROLE.MAINTAINER) {
-    return c.json({ error: "org role >= maintainer required" }, 403)
+  if (role == null) return c.json({ error: "not an org member" }, 403)
+  const orgFloors = await getOrgVisibilityFloors(c.env, orgId)
+  if (!canViewNamedProgress(role, orgFloors)) {
+    return c.json({ error: "member progress hidden by org policy" }, 403)
   }
   const assignments = await getOrgAssignmentWorkload(c.env, orgId)
-  return c.json({ assignments })
+  // An owner meets every floor (a project can raise one to Owner at most) and
+  // reaches every project in the org.
+  if (role >= ROLE.OWNER) return c.json({ assignments })
+  // A project may be stricter than the org (AQU-1771), so each row answers to
+  // its own project's floors, read for the projects on the list only.
+  const projectIds = [...new Set(assignments.map((a) => a.projectId))]
+  const [projectRoles, overrides] = await Promise.all([
+    resolveProjectRoles(c.env, user, projectIds),
+    loadProjectVisibilityOverrides(c.env.AQUILLA_PG, projectIds),
+  ])
+  const visible = assignments.filter((a) => {
+    const own = overrides.get(a.projectId)
+    const floors = own ? combineVisibilityFloors(orgFloors, own) : orgFloors
+    return canViewNamedProgress(projectRoles.get(a.projectId)?.level ?? null, floors)
+  })
+  return c.json({ assignments: visible })
 })
 
 /**
@@ -473,6 +580,13 @@ orgs.get("/:orgId/assignments/mine", async (c) => {
  * the caller can access in the org, in ONE request (AQU-218). Replaces the
  * client's per-project /:projectId/members fan-out that flooded the connection
  * pool and 500'd the page. Any org member.
+ *
+ * AQU-1771: a project's roster is in the answer only when the caller could
+ * read it from GET /projects/:id/members — their role on that project meets
+ * its member-list floor (the org's, with the assigner carve-out on the org's
+ * value only, raised by the project's own stricter value). Before this the
+ * matrix handed every org member every reachable project's full roster,
+ * whatever the org or the project had hidden. An owner meets every floor.
  */
 orgs.get("/:orgId/members-matrix", async (c) => {
   const user = c.get("user")
@@ -482,7 +596,18 @@ orgs.get("/:orgId/members-matrix", async (c) => {
   const role = await getEffectiveOrgRole(c.env, orgId, user)
   if (role == null) return c.json({ error: "not an org member" }, 403)
 
-  const projects = await listEffectiveMembersForOrg(c.env, orgId, user.id)
+  let projects = await listEffectiveMembersForOrg(c.env, orgId, user.id)
+  if (role < ROLE.OWNER && projects.length > 0) {
+    const ids = projects.map((p) => p.projectId)
+    const [floors, projectRoles] = await Promise.all([
+      getProjectRosterListFloors(c.env, orgId, ids),
+      resolveProjectRoles(c.env, user, ids),
+    ])
+    projects = projects.filter((p) => {
+      const floor = floors.get(p.projectId)
+      return floor != null && canViewRoster(projectRoles.get(p.projectId)?.level ?? null, floor)
+    })
+  }
   await bumpOrgActivity(c.env, user.id, orgId)
   return c.json({
     projects: projects.map((p) => ({
@@ -694,6 +819,11 @@ async function grantGroupMemberOne(
   if (result === "not-org-member") {
     return { ok: false, username, code: "not_org_member", message: "user is not a member of this org" }
   }
+  // AQU-1801: the group_members row opens every project the team is attached
+  // to, but under the lane read wall a below-Maintainer member reads a target
+  // lane only through a grant row — so without this they reach each project
+  // and see no target lane at all, with every indicator still green.
+  await applyTeamMemberLaneGrants(env.AQUILLA_PG, groupId, target.id, addedBy)
   await auditMembershipChange(env, actor, {
     action: "team.member.add",
     where: { scope: "team", orgId, groupId },
@@ -783,7 +913,7 @@ orgs.patch("/:orgId/groups/:groupId/members/:userId", zValidator("json", teamRol
   let orgRole = (await getOrgMemberRole(c.env, orgId, user.id)) ?? 0
   const teamRole = (await getTeamMemberRole(c.env, groupId, user.id)) ?? 0
   if (orgRole < ROLE.MAINTAINER && teamRole < ROLE.MAINTAINER) {
-    if (!isPlatformAdminEmail(c.env, user.email)) {
+    if (!(await isPlatformAdminEmail(c.env, user.email))) {
       return c.json({ error: "org or team role >= maintainer required to change team roles" }, 403)
     }
     if (!(await hasActiveElevation(c))) {
@@ -893,7 +1023,7 @@ async function resolveOrgWriteRole(
   const user = c.get("user")
   const membership = (await getOrgMemberRole(c.env, orgId, user.id)) ?? 0
   if (membership >= minRole) return membership
-  if (!isPlatformAdminEmail(c.env, user.email)) {
+  if (!(await isPlatformAdminEmail(c.env, user.email))) {
     return c.json({ error: deniedError }, 403)
   }
   if (!(await hasActiveElevation(c))) {
@@ -1167,7 +1297,7 @@ orgs.delete("/:orgId/invites/:token", async (c) => {
   )
   if (typeof callerRole !== "number") return callerRole
 
-  const invite = isAdminActor(c.env, user)
+  const invite = await isAdminActor(c.env, user)
     ? await c.env.AQUILLA_PG.prepare(
         "SELECT role_level, email FROM org_invites WHERE token = ? AND org_id = ? AND used_at IS NULL",
       )
@@ -1229,8 +1359,16 @@ orgs.post("/accept-invite", zValidator("json", acceptOrgInviteBody), async (c) =
   )
     .bind(invite.org_id, user.id)
     .first<{ role_level: number }>()
+  // [Pen test 2026-10-06] Same-user re-redeem is idempotent-while-member only
+  // (mirrors AQU-347 for projects): a removed member's old link is dead and a
+  // demoted member's role is not restored.
+  if (invite.used_at && invite.used_by === user.id && !existing) {
+    return c.json({ error: "Invite already used" }, 410)
+  }
   const finalRole = existing
-    ? Math.max(existing.role_level, invite.role_level)
+    ? invite.used_at
+      ? existing.role_level
+      : Math.max(existing.role_level, invite.role_level)
     : invite.role_level
 
   try {
@@ -1373,8 +1511,15 @@ orgs.get("/:orgId/project-invites", async (c) => {
   })
 })
 
-const attachBody = z.object({ projectId: z.string().min(1), roleLevel: z.number().int() })
-const roleBody = z.object({ roleLevel: z.number().int() })
+const attachBody = z.object({
+  projectId: z.string().min(1),
+  roleLevel: z.number().int(),
+  laneIds: z.array(z.string()).optional(),
+})
+const roleBody = z.object({
+  roleLevel: z.number().int().optional(),
+  laneIds: z.array(z.string()).optional(),
+})
 
 orgs.post("/:orgId/groups/:groupId/projects", zValidator("json", attachBody), async (c) => {
   const user = c.get("user")
@@ -1384,11 +1529,17 @@ orgs.post("/:orgId/groups/:groupId/projects", zValidator("json", attachBody), as
   const callerRole = await resolveTeamWriteRole(c, orgId)
   if (typeof callerRole !== "number") return callerRole
   if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
-  const { projectId, roleLevel } = c.req.valid("json")
+  const { projectId, roleLevel, laneIds } = c.req.valid("json")
   if (!isCanonicalRoleLevel(roleLevel) || roleLevel > callerRole) return c.json({ error: "invalid or too-high role level" }, 403)
+  const selection = await resolveTeamLaneSelection(c.env.AQUILLA_PG, projectId, laneIds)
+  if (!selection.ok) return c.json({ error: selection.error }, 400)
   const result = await attachGroupProject(c.env, orgId, groupId, projectId, roleLevel, user.id)
   if (result === "no-project") return c.json({ error: "project not found" }, 404)
   if (result === "cross-org") return c.json({ error: "project is not in this org" }, 409)
+  // AQU-1813: a named lane list freezes the attachment to those lanes. Omitting
+  // it keeps the living "every lane" attachment the Codex sync still sends.
+  await saveTeamLaneSelection(c.env.AQUILLA_PG, groupId, projectId, selection.selection)
+  await applyTeamRosterLaneChecks(c.env.AQUILLA_PG, groupId, projectId, user.id)
   await auditMembershipChange(c.env, user, {
     action: "team.project.attach",
     where: { scope: "team", orgId, groupId },
@@ -1408,19 +1559,44 @@ orgs.patch("/:orgId/groups/:groupId/projects/:projectId", zValidator("json", rol
   const callerRole = await resolveTeamWriteRole(c, orgId)
   if (typeof callerRole !== "number") return callerRole
   if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
-  const { roleLevel } = c.req.valid("json")
-  if (!isCanonicalRoleLevel(roleLevel) || roleLevel > callerRole) return c.json({ error: "invalid or too-high role level" }, 403)
-  const ok = await updateGroupProjectRole(c.env, groupId, projectId, roleLevel)
-  if (!ok) return c.json({ error: "attachment not found" }, 404)
-  await auditMembershipChange(c.env, user, {
-    action: "team.project.role",
-    where: { scope: "team", orgId, groupId },
-    projectId,
-    roleBefore: null,
-    roleAfter: roleLevel,
-  })
-  return c.json({ projectId, roleLevel })
+  const { roleLevel, laneIds } = c.req.valid("json")
+  if (roleLevel == null && laneIds == null) return c.json({ error: "roleLevel or laneIds required" }, 400)
+  if (roleLevel != null && (!isCanonicalRoleLevel(roleLevel) || roleLevel > callerRole)) {
+    return c.json({ error: "invalid or too-high role level" }, 403)
+  }
+  if (roleLevel != null) {
+    const ok = await updateGroupProjectRole(c.env, groupId, projectId, roleLevel)
+    if (!ok) return c.json({ error: "attachment not found" }, 404)
+    // The role change re-levels the grants the members already hold. It does
+    // not change which lanes are checked.
+    await applyTeamProjectLaneGrants(c.env.AQUILLA_PG, groupId, projectId, user.id)
+    await auditMembershipChange(c.env, user, {
+      action: "team.project.role",
+      where: { scope: "team", orgId, groupId },
+      projectId,
+      roleBefore: null,
+      roleAfter: roleLevel,
+    })
+  } else if (!(await groupProjectAttached(c.env, groupId, projectId))) {
+    return c.json({ error: "attachment not found" }, 404)
+  }
+  if (laneIds != null) {
+    const selection = await resolveTeamLaneSelection(c.env.AQUILLA_PG, projectId, laneIds)
+    if (!selection.ok) return c.json({ error: selection.error }, 400)
+    await saveTeamLaneSelection(c.env.AQUILLA_PG, groupId, projectId, selection.selection)
+    await applyTeamRosterLaneChecks(c.env.AQUILLA_PG, groupId, projectId, user.id)
+  }
+  return c.json({ projectId, ...(roleLevel != null ? { roleLevel } : {}), ...(laneIds != null ? { laneIds } : {}) })
 })
+
+async function groupProjectAttached(env: Env, groupId: number, projectId: string): Promise<boolean> {
+  const row = await env.AQUILLA_PG.prepare(
+    "SELECT 1 AS ok FROM group_project_grants WHERE group_id = ? AND project_id = ?",
+  )
+    .bind(groupId, projectId)
+    .first<{ ok: number }>()
+  return row != null
+}
 
 orgs.delete("/:orgId/groups/:groupId/projects/:projectId", async (c) => {
   const user = c.get("user")
@@ -1431,7 +1607,15 @@ orgs.delete("/:orgId/groups/:groupId/projects/:projectId", async (c) => {
   const callerRole = await resolveTeamWriteRole(c, orgId)
   if (typeof callerRole !== "number") return callerRole
   if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
+  const members = await c.env.AQUILLA_PG.prepare(
+    "SELECT user_id FROM group_members WHERE group_id = ?",
+  )
+    .bind(groupId)
+    .all<{ user_id: number }>()
   await detachGroupProject(c.env, groupId, projectId)
+  for (const row of members.results ?? []) {
+    await reconcileMemberProjectLanes(c.env.AQUILLA_PG, projectId, Number(row.user_id), user.id)
+  }
   await auditMembershipChange(c.env, user, {
     action: "team.project.detach",
     where: { scope: "team", orgId, groupId },

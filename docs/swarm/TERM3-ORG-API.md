@@ -85,16 +85,32 @@ Access is the implicit grant, NOT a role check on the upstream — see
 - 403 `{ error: "no termbase read access" }` — not a subscriber-project member,
   no subscription row, upstream unpublished, or cross-org.
 
-**Concept source (resolved):** project terminology is NOT a dedicated table. Per
-AD-3 thin-client it is synced as the top-level `terminology` key inside
-`project_settings.settings` (a JSON-in-TEXT blob; see
-`src/lib/sync/project-settings.ts` `ProjectWideSettings.terminology` and the
-write path in `auth-worker/src/routes/project-settings.ts`). Route #8 reads that
-blob directly (`SELECT settings FROM project_settings WHERE project_id = ?`),
-parses `terminology`, and filters to `status === "active"`. It deliberately does
-NOT round-trip the settings route, which would require an upstream role the
-implicit grant intentionally withholds. Missing/corrupt settings → `[]` (never
-500s the subscriber's merge).
+**Concept source (AQU-1715):** since 2026-09-04 concepts live in the `concepts`
+table, the projection of `term.*` events. The concepts migration deletes the old
+`project_settings.settings.terminology` key after it copies the key's entries.
+Route #8 reads the upstream's termbase with `readProjectConcepts`
+(`auth-worker/src/lib/concepts-read.ts`), the same read the editor uses for a
+project's own concepts: the upstream's live rows (`deleted_at IS NULL`), or the
+legacy `terminology` key only when the table has no live rows. It filters to
+`status === "active"`. Autopilot's `loadSubscribedConcepts` uses the same
+function. Route #8 deliberately does NOT round-trip the settings or concepts
+routes, which would require an upstream role the implicit grant intentionally
+withholds. An upstream with no concepts, or with a corrupt legacy blob, gives
+`[]`.
+
+**Lane mapping (AQU-1777):** a rendering's `laneId` is a `lanes.id` of the
+project the concept is read in (AQU-1508), and the upstream's rows carry the
+UPSTREAM's lane ids. Route #8 rewrites each rendering onto the subscriber's
+lanes with `mapSubscribedConceptLanes` (`src/lib/terminology/rendering-lane.ts`)
+before answering: a rendering applies in every subscriber lane whose language
+equals the language of its upstream lane (the AQU-1597 normalizer, so "es" and
+"Spanish" agree); an upstream rendering with no `laneId` is read as the
+UPSTREAM's `legacy_tag ''` lane, never the subscriber's; when either lane has no
+language the two `legacy_tag`s must be equal; a rendering no subscriber lane
+matches is left out of the response. The returned `laneId`s are therefore the
+SUBSCRIBER's, and the editor's lane filter needs no subscription awareness.
+Autopilot (`loadSubscribedConcepts`) and the Agent API prompt preview apply the
+same function.
 
 ## Implicit grant (Q19) — RESOLVED
 

@@ -64,17 +64,67 @@ export function applyFileSortIndexes(
   writes: ReadonlyArray<{ fileId: string; sortIndex: number | null }>,
 ): ProjectRecord {
   if (writes.length === 0) return project
-  const byId = new Map(writes.map((w) => [w.fileId, w.sortIndex]))
-  const nextFiles = project.files.map((f) => {
-    if (!byId.has(f.id)) return f
-    const sortIndex = byId.get(f.id)
-    if (sortIndex === null || sortIndex === undefined) {
-      const { sortIndex: _dropped, ...rest } = f
-      return rest
-    }
-    return { ...f, sortIndex }
-  })
+  const nextFiles = overlayPendingSortIndexes(project.files, new Map(writes.map((w) => [w.fileId, w.sortIndex])))
+  if (nextFiles === project.files) return project
   return { ...project, files: nextFiles }
+}
+
+function finiteSortIndex(value: number | null | undefined): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined
+}
+
+/**
+ * The order the sidebar should show while a drop's `file.reorder` events are
+ * still on their way to the server. The list the user is looking at is the
+ * server read; the IDB patch from `applyFileSortIndexes` does not reach it.
+ * Without this overlay the row slides back to its old slot the moment the
+ * pointer lets go.
+ *
+ * `null` clears a position (Reset order). An empty pending map returns the
+ * same array.
+ */
+export function overlayPendingSortIndexes<T extends { id: string; sortIndex?: number }>(
+  files: readonly T[],
+  pending: ReadonlyMap<string, number | null>,
+): T[] {
+  if (pending.size === 0) return files as T[]
+  let changed = false
+  const next = files.map((file) => {
+    if (!pending.has(file.id)) return file
+    const sortIndex = pending.get(file.id)
+    if (sortIndex === null || sortIndex === undefined) {
+      if (file.sortIndex === undefined) return file
+      changed = true
+      const { sortIndex: _dropped, ...rest } = file
+      return rest as T
+    }
+    if (file.sortIndex === sortIndex) return file
+    changed = true
+    return { ...file, sortIndex }
+  })
+  return changed ? next : (files as T[])
+}
+
+/**
+ * Drop pending positions the server read has caught up with. Returns the same
+ * map when nothing has landed yet, so a render can bail out.
+ */
+export function settlePendingSortIndexes(
+  files: readonly { id: string; sortIndex?: number }[],
+  pending: ReadonlyMap<string, number | null>,
+): Map<string, number | null> {
+  if (pending.size === 0) return pending as Map<string, number | null>
+  let changed = false
+  const next = new Map(pending)
+  for (const file of files) {
+    if (!next.has(file.id)) continue
+    const wanted = finiteSortIndex(next.get(file.id) ?? undefined)
+    if (wanted === finiteSortIndex(file.sortIndex)) {
+      next.delete(file.id)
+      changed = true
+    }
+  }
+  return changed ? next : (pending as Map<string, number | null>)
 }
 
 export function deleteFile(project: ProjectRecord, fileId: string): ProjectRecord {

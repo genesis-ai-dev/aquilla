@@ -13,7 +13,10 @@ import {
   type ProjectWideSettings,
   type ProjectSettingsResponse,
   type ProjectLaneView,
+  type ProjectSettingsEditor,
+  settingsEditorName,
 } from "@/lib/sync/project-settings"
+import type { ProjectOrgPolicy, ProjectVisibilityFloors } from "@/lib/sync/project-org-policy"
 import posthog from "@/lib/posthog"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
 import { claimHydrationReport, retainProjectOpen } from "./project-settings-open"
@@ -61,11 +64,11 @@ export function isCountStructuralOnlyPatch(partial: ProjectWideSettings): boolea
 }
 
 /**
- * AQU-1086: the project-language keys, gated by the org's configurable
- * `languageEditMinRole` (default maintainer 600 — today's behaviour) rather
- * than {@link SETTINGS_EDIT_ROLE_FLOOR}. The default target language and the
- * extra-lane registry are one scope so the Project Info and Languages cards
- * can never disagree about who may edit them (AQU-898).
+ * AQU-1086 / AQU-984: the project-language keys, gated by the org's
+ * configurable `languageEditMinRole` (default project lead 500 when unset)
+ * rather than {@link SETTINGS_EDIT_ROLE_FLOOR}. The default target language
+ * and the extra-lane registry are one scope so the Project Info and Languages
+ * cards can never disagree about who may edit them (AQU-898).
  *
  * Mirrors the server carve-out in auth-worker/src/routes/project-settings.ts,
  * which re-derives the same "only language keys changed" test against the
@@ -224,7 +227,14 @@ export type PatchOutcome =
   | { kind: "ok" }
   | { kind: "conflict"; latest: ProjectSettingsResponse }
   | { kind: "blocked"; reason: "offline" | "role" }
-  | { kind: "error"; message: string }
+  /**
+   * `status` is the HTTP status when the server answered (0 on a transport
+   * failure). Callers that must tell a *refused value* apart from a flaky
+   * network read it: a 422 means the server will never accept this value, so
+   * a client-durable copy of it has to be rolled back rather than retried
+   * (AQU-1943, the TTS settings cap).
+   */
+  | { kind: "error"; message: string; status?: number }
 
 /**
  * Map a non-`ok` {@link PatchOutcome} to a user-facing message, or `null` when
@@ -255,7 +265,7 @@ export interface UseProjectSettings {
   /** Server version of the settings row. null = never fetched yet. */
   version: number | null
   /** "When was this last edited and by whom" — null if no server row yet. */
-  updatedBy: { id: number; username: string } | null
+  updatedBy: ProjectSettingsEditor
   updatedAt: string | null
   /** True after the first GET resolves (success OR network failure). */
   hasFetched: boolean
@@ -266,6 +276,25 @@ export interface UseProjectSettings {
    * `settings.countStructuralCells ?? orgCountStructuralCells ?? true`.
    */
   orgCountStructuralCells: boolean | null
+  /**
+   * AQU-1771: the org's validation defaults this project inherits when it has
+   * no `validationCount` / `validationCountAudio` of its own. Null when the
+   * org set none, or before the first response that carries them.
+   */
+  orgValidationCount: number | null
+  orgValidationCountAudio: number | null
+  /** The org's "Allow bulk validation of AI drafts", carried on the project's
+   *  own settings response so a member outside the org sees it too. Null when
+   *  the project has no org, or before the first response that carries it. */
+  orgAllowBulkValidateAiDrafts: boolean | null
+  /**
+   * AQU-1771: the org policy this project's surfaces apply, and the
+   * visibility floors it enforces, from the same response. Null before the
+   * first response that carries them, and on a server that predates them —
+   * read both through `resolveProjectPolicy` (src/lib/sync/project-org-policy.ts).
+   */
+  orgPolicy: ProjectOrgPolicy | null
+  visibilityFloors: ProjectVisibilityFloors | null
   /** AQU-1418: the project's lane rows from the last settings response.
    *  Null before the first response that carries them, and on a server
    *  that predates lane rows. */
@@ -294,6 +323,15 @@ export interface UseProjectSettings {
   dismissConflict: () => void
   /** Force a re-GET. */
   refresh: () => Promise<ProjectSettingsResponse | null>
+  /**
+   * AQU-1816: re-read after a write that went AROUND `patch` — the lane-row
+   * endpoints (create / rename / archive). `patch` tells every other settings
+   * consumer in this tab that the row moved; those writes never did, so the
+   * page behind the settings modal (overview, workspace) kept its old lanes
+   * until a reload. Broadcasts with this instance's origin — the writer
+   * re-reads through the returned refresh, not the event — then re-GETs.
+   */
+  refreshAfterWrite: () => Promise<ProjectSettingsResponse | null>
   /** Apply a partial settings update. Optimistic local update, server PATCH,
    *  conflict-snap on 409, returns outcome. Blocked when offline or below
    *  MAINTAINER (600) — except a terminology-only patch, gated by the org's
@@ -384,6 +422,8 @@ function localSettingsFrom(
   if (record.rules != null) out.rules = record.rules
   if (record.rulePenalties != null) out.rulePenalties = record.rulePenalties
   if (record.algorithmicChecks != null) out.algorithmicChecks = record.algorithmicChecks
+  if (record.algorithmicChecksByLane != null)
+    out.algorithmicChecksByLane = record.algorithmicChecksByLane
   if (record.validationCount != null) out.validationCount = record.validationCount
   if (record.validationCountAudio != null)
     out.validationCountAudio = record.validationCountAudio
@@ -476,6 +516,11 @@ export function useProjectSettings(
   // Either would otherwise blank the org default for a moment and flip the
   // project control's meaning while a save was in flight.
   const [orgCountStructuralCells, setOrgCountStructuralCells] = useState<boolean | null>(null)
+  const [orgAllowBulkValidateAiDrafts, setOrgAllowBulkValidateAiDrafts] = useState<boolean | null>(null)
+  const [orgValidationCount, setOrgValidationCount] = useState<number | null>(null)
+  const [orgValidationCountAudio, setOrgValidationCountAudio] = useState<number | null>(null)
+  const [orgPolicy, setOrgPolicy] = useState<ProjectOrgPolicy | null>(null)
+  const [visibilityFloors, setVisibilityFloors] = useState<ProjectVisibilityFloors | null>(null)
   const [lanes, setLanes] = useState<ProjectLaneView[] | null>(null)
   const writeServer = useCallback((next: ProjectSettingsResponse | null) => {
     serverRef.current = next
@@ -483,6 +528,13 @@ export function useProjectSettings(
     if (next?.orgCountStructuralCells !== undefined) {
       setOrgCountStructuralCells(next.orgCountStructuralCells)
     }
+    if (next?.orgAllowBulkValidateAiDrafts !== undefined) {
+      setOrgAllowBulkValidateAiDrafts(next.orgAllowBulkValidateAiDrafts)
+    }
+    if (next?.orgValidationCount !== undefined) setOrgValidationCount(next.orgValidationCount)
+    if (next?.orgValidationCountAudio !== undefined) setOrgValidationCountAudio(next.orgValidationCountAudio)
+    if (next?.orgPolicy !== undefined) setOrgPolicy(next.orgPolicy)
+    if (next?.visibilityFloors !== undefined) setVisibilityFloors(next.visibilityFloors)
     if (next?.lanes !== undefined) setLanes(next.lanes)
   }, [])
 
@@ -569,6 +621,9 @@ export function useProjectSettings(
             ...(got.settings.algorithmicChecks != null
               ? { algorithmicChecks: got.settings.algorithmicChecks }
               : {}),
+            ...(got.settings.algorithmicChecksByLane != null
+              ? { algorithmicChecksByLane: got.settings.algorithmicChecksByLane }
+              : {}),
             ...(got.settings.validationCount != null
               ? { validationCount: got.settings.validationCount }
               : {}),
@@ -601,6 +656,17 @@ export function useProjectSettings(
       if (refreshInFlightRef.current === request) refreshInFlightRef.current = null
     }
   }, [projectId, jwt])
+
+  // AQU-1816: what a writer that bypasses `patch` calls instead of a bare
+  // `refresh()`. The broadcast reaches the sibling instances (and the overview's
+  // portfolio row); the origin keeps this instance from answering its own
+  // event, since the refresh below already re-reads it.
+  const refreshAfterWrite = useCallback(async (): Promise<ProjectSettingsResponse | null> => {
+    if (projectId) {
+      broadcastProjectSettingsUpdated({ projectId, origin: instanceIdRef.current })
+    }
+    return refresh()
+  }, [projectId, refresh])
 
   // Hydrate local cache and server state in parallel on projectId change. The
   // server snapshot overlays local values, so their completion order is safe;
@@ -896,7 +962,7 @@ export function useProjectSettings(
       setConflict(true)
       posthog.capture("project settings sync conflict", {
         project_id: projectId,
-        conflicting_user: result.latest.updatedBy?.username ?? null,
+        conflicting_user: settingsEditorName(result.latest.updatedBy),
       })
       return { kind: "conflict", latest: result.latest }
     }
@@ -938,7 +1004,7 @@ export function useProjectSettings(
       const snapTarget: ProjectWideSettings = serverRef.current?.settings ?? {}
       return rollbackRejectedKeys(prev, partial, snapTarget)
     })
-    return { kind: "error", message: result.message }
+    return { kind: "error", message: result.message, status: result.status }
   }, [projectId, jwt, roleLevel, termbaseEditMinRole, languageEditFloor, refresh, runSerialized, t])
 
   return {
@@ -948,6 +1014,11 @@ export function useProjectSettings(
     updatedAt: server?.updatedAt ?? null,
     hasFetched,
     orgCountStructuralCells,
+    orgAllowBulkValidateAiDrafts,
+    orgValidationCount,
+    orgValidationCountAudio,
+    orgPolicy,
+    visibilityFloors,
     lanes,
     isOnline,
     canEdit,
@@ -958,6 +1029,7 @@ export function useProjectSettings(
     conflict,
     dismissConflict,
     refresh,
+    refreshAfterWrite,
     patch,
   }
 }

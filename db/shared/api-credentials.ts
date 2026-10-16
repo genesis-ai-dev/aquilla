@@ -14,7 +14,7 @@
 // revocation, and intersects OAuth organization grants with current membership.
 
 import type { AquillaDb } from "../shim/postgres"
-import { countRecentRateLimitEvents, recordRateLimitEvent } from "./rate-limit"
+import { bumpRateLimit, ipRateLimitIdentifier, peekRateLimit } from "./rate-limit"
 
 /** Fixed tag prefixing every Aquilla API token. */
 export const API_TOKEN_TAG = "aqk_"
@@ -55,6 +55,8 @@ export type ApiCredentialAccess = "read" | "write"
 /** The resolved credential context handed to the command/permission layer. */
 export interface ApiCredentialContext {
   credentialId: string
+  /** OAuth resource ceiling; absent for existing device/PAT credentials. */
+  oauthResource?: string
   userId: string
   username: string
   mode: "ask" | "act"
@@ -121,8 +123,30 @@ export async function mintApiToken(): Promise<MintedApiToken> {
   return { token, tokenHash, tokenPrefix: token.slice(0, TOKEN_PREFIX_LEN) }
 }
 
+/**
+ * Live-authority floor for re-filtering an OAuth credential's organization
+ * allowlist (AQU-1529) on every call: org MAINTAINER, or the org's owner.
+ *
+ * [Pen test] Auth & session mgmt (2026-10-05, OPS-43). This must equal the
+ * floor in `eligibleOrganizations()` (auth-worker/src/routes/mcp-oauth.ts),
+ * which gates both the consent screen and the mint-time re-check. It was
+ * VIEWER (100) here, so of the three places the grant floor is applied, the
+ * only one that runs AFTER the token exists was the one a demotion could not
+ * narrow — and that is the one the module header advertises as the live-role
+ * check. The practical blast radius was bounded by the per-project live-role
+ * gate every external route runs (`scopeCredentialToProject`,
+ * `mintInternalSyncToken`), which is why this is drift rather than a breach:
+ * the allowlist had stopped meaning "orgs this user may still delegate".
+ *
+ * Mirrors ROLE.MAINTAINER (auth-worker/src/types.ts); redeclared here because
+ * db/shared must not import from a worker package.
+ * `auth-worker/src/__tests__/mcp-oauth.test.ts` pins the two together.
+ */
+export const OAUTH_ORG_ALLOWLIST_FLOOR = 600
+
 interface CredentialRow {
   id: string
+  oauth_resource: string | null
   user_id: string
   mode: "ask" | "act"
   access: string | null
@@ -150,21 +174,29 @@ export async function validateApiCredential(
   /** Caller's source IP (e.g. the `CF-Connecting-IP` header), for the
    *  invalid-attempt throttle above. Omit to skip throttling (e.g. tests). */
   ipIdentifier?: string | null,
+  expectedResource?: string,
 ): Promise<ApiCredentialContext | null> {
   if (!token || !token.startsWith(API_TOKEN_TAG)) return null
 
-  const throttleKey = ipIdentifier ? `ip:${ipIdentifier.trim().toLowerCase()}` : null
+  const throttleKey = ipIdentifier ? ipRateLimitIdentifier(ipIdentifier) : null
   if (throttleKey) {
-    const recentFailures = await countRecentRateLimitEvents(
-      db,
-      INVALID_CREDENTIAL_RATE_LIMIT_KIND,
-      throttleKey,
-    )
-    if (recentFailures >= MAX_INVALID_ATTEMPTS_PER_IP) return null
+    // AQU-1843: peek + bump rather than the shared enforceRateLimit, because
+    // this counter is FAILURES ONLY — a caller presenting the same valid token
+    // all day must never be counted, let alone throttled. The peek is now a
+    // primary-key lookup on rate_limit_counters instead of a COUNT(*) over an
+    // event log, so the per-call cost on this hot path drops accordingly.
+    //
+    // Fail OPEN (a null peek means the lookup itself failed, and is not
+    // treated as "over limit"): this throttle exists to bound DB load from
+    // repeated invalid attempts, not to stand between an attacker and a
+    // 256-bit token, so a limiter hiccup must not reject every valid
+    // credential the Agent API is handed.
+    const recentFailures = await peekRateLimit(db, INVALID_CREDENTIAL_RATE_LIMIT_KIND, throttleKey)
+    if (recentFailures !== null && recentFailures >= MAX_INVALID_ATTEMPTS_PER_IP) return null
   }
 
   const fail = async (): Promise<null> => {
-    if (throttleKey) await recordRateLimitEvent(db, INVALID_CREDENTIAL_RATE_LIMIT_KIND, throttleKey)
+    if (throttleKey) await bumpRateLimit(db, INVALID_CREDENTIAL_RATE_LIMIT_KIND, throttleKey)
     return null
   }
 
@@ -172,7 +204,7 @@ export async function validateApiCredential(
   const row = await db
     .prepare(
       `SELECT ac.id AS id, ac.user_id AS user_id, ac.mode AS mode,
-              ac.access AS access,
+              ac.access AS access, ac.oauth_resource AS oauth_resource,
               ac.org_id AS org_id, ac.project_id AS project_id,
               ac.expires_at AS expires_at, ac.revoked_at AS revoked_at,
               ac.last_used_at AS last_used_at, u.username AS username,
@@ -184,7 +216,7 @@ export async function validateApiCredential(
                   o.owner_user_id::text = ac.user_id OR EXISTS (
                     SELECT 1 FROM org_members om
                     WHERE om.org_id = o.id AND om.user_id::text = ac.user_id
-                      AND om.role_level >= 100
+                      AND om.role_level >= ${OAUTH_ORG_ALLOWLIST_FLOOR}
                   )
                 )
               ), '[]'::jsonb) END AS org_ids
@@ -197,6 +229,7 @@ export async function validateApiCredential(
 
   if (!row) return fail()
   if (row.revoked_at) return fail()
+  if (row.oauth_resource != null && row.oauth_resource !== expectedResource) return fail()
   if (row.expires_at && new Date(row.expires_at).getTime() <= Date.now()) return fail()
 
   // Throttled last-used bump: only when the row hasn't been touched in 5min.
@@ -219,6 +252,7 @@ export async function validateApiCredential(
 
   return {
     credentialId: row.id,
+    ...(row.oauth_resource != null ? { oauthResource: row.oauth_resource } : {}),
     userId: row.user_id,
     username: row.username,
     mode: row.mode,
@@ -241,4 +275,26 @@ export function credentialAllowsOrganization(
 ): boolean {
   return (cred.orgId == null || cred.orgId === orgId)
     && (cred.orgIds === undefined || (orgId !== null && cred.orgIds.includes(orgId)))
+}
+
+/** Trusted in-process delegation after MCP authenticated the resource.
+ * A network client cannot manufacture this JavaScript Request subtype.
+ * Each delegated route still revalidates revocation and live permissions. */
+export class McpDelegatedRequest extends Request {
+  readonly oauthResource: string
+
+  constructor(resource: string, input: RequestInfo | URL, init?: RequestInit) {
+    super(input, init)
+    this.oauthResource = resource
+  }
+}
+
+/** External REST never accepts an OAuth credential for a different resource. */
+export function validateApiCredentialRequest(db: AquillaDb, request: Request) {
+  const header = request.headers.get("Authorization") ?? ""
+  const token = header.startsWith("Bearer ") ? header.slice(7) : ""
+  return validateApiCredential(
+    db, token, request.headers.get("CF-Connecting-IP"),
+    request instanceof McpDelegatedRequest ? request.oauthResource : undefined,
+  )
 }

@@ -31,8 +31,23 @@ declare module "react" {
 type Props = VideoHTMLAttributes<HTMLVideoElement> & { ref: RefObject<HTMLVideoElement | null> }
 /** The element forces YouTube's own captions on (cc_load_policy=1). The pane
  *  draws its captions itself, from the cells, so YouTube's must not stack on
- *  top of them. */
-const PLAYER_CONFIG = { cc_load_policy: 0 }
+ *  top of them.
+ *
+ *  `referrerpolicy` lands on the player's iframe. YouTube refuses to play an
+ *  embed whose request carries no Referer (player error 153, "Video player
+ *  configuration error"), and in Safari the pane's picture showed "This video
+ *  could not be loaded" on every try. Naming the policy on the iframe sends
+ *  the page's origin however the page or browser default is set.
+ *
+ *  `origin` is required once enablejsapi is on. Without it the iframe player
+ *  answers error 150 ("embedding not allowed") and the pane shows "This video
+ *  could not be loaded" for a video that plays fine. The library leaves origin
+ *  commented out; the page has to supply its own. */
+function playerConfig(): Record<string, string | number> {
+  const base = { cc_load_policy: 0, referrerpolicy: "strict-origin-when-cross-origin" }
+  const origin = typeof window !== "undefined" ? window.location.origin : ""
+  return origin ? { ...base, origin } : base
+}
 
 type Handler = (e: SyntheticEvent<HTMLVideoElement>) => void
 
@@ -45,7 +60,14 @@ function isHandlerProp(key: string, value: unknown): value is Handler {
   return key.startsWith("on") && typeof value === "function"
 }
 
-export function YouTubePicture({ ref, src, ...rest }: Props) {
+/** The element's own shadow style gives it `min-width: 300px; min-height:
+ *  150px`, so in a Video pane narrower than 300px (about 287px at 1440 wide)
+ *  the picture overflowed the pane and was cut off under the Text pane. A
+ *  style on the element outranks its `:host` rule, so these let it take the
+ *  pane's size like a <video> does. */
+const FIT_PANE = { minWidth: 0, minHeight: 0 }
+
+export function YouTubePicture({ ref, src, style, ...rest }: Props) {
   // Latest handlers, read at dispatch time, so listeners are attached once per
   // element rather than re-bound on every render (most are fresh closures).
   const propsRef = useRef<Record<string, unknown>>(rest)
@@ -84,7 +106,8 @@ export function YouTubePicture({ ref, src, ...rest }: Props) {
     <youtube-video
       {...(attrs as VideoHTMLAttributes<HTMLVideoElement>)}
       ref={ref}
-      config={PLAYER_CONFIG}
+      style={style ? { ...FIT_PANE, ...style } : FIT_PANE}
+      config={playerConfig()}
       // Canonical form: the element's own matcher misses some share-link shapes.
       src={id ? `https://www.youtube.com/watch?v=${id}` : src}
     />

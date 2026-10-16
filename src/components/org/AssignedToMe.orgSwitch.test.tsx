@@ -49,7 +49,8 @@ vi.mock("@/hooks/useFrontierSession", () => ({
     loading: false,
   }),
 }))
-vi.mock("@/lib/frontier/portfolio", () => ({
+vi.mock("@/lib/frontier/portfolio", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/frontier/portfolio")>()),
   getPortfolio: vi.fn(async () => [{ id: "pa", name: "John", targetLanguage: "Bambara" }]),
 }))
 vi.mock("@/lib/sync/assignments", () => ({ getMyAssignmentsForOrg: vi.fn() }))

@@ -6,11 +6,13 @@
 import { generateAndAttachCellVoice } from "./generate-voice"
 import { resolveCastVoice } from "./voices"
 import { effectiveSourceText } from "@/lib/cell-text"
+import { laneLanguageForTag, sourceLaneLanguage } from "@/lib/lanes/lane-language"
 import { setTtsStatus, ttsStatusKey, synthesizeForCell } from "./tts"
 import { AiModelConsentDeniedError } from "./ai-consent"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
+import type { TelemetrySurface } from "@/lib/cell-telemetry"
 
 export interface GenerateCellVoiceArgs {
   /**
@@ -52,6 +54,8 @@ export interface GenerateCellVoiceArgs {
   voiceCellId?: string
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
+  /** AQU-1572: see `GenerateAndAttachArgs.surface`. */
+  surface?: TelemetrySurface
 }
 
 /**
@@ -110,9 +114,13 @@ export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<bo
           args.voiceCellId ?? cell.id,
           cell.ttsSettings?.voiceId,
         ).id,
+      // AQU-1978: the languages of the LANES this voice belongs to. The
+      // project-level pair is retired (AQU-1594/1595) and empty on a new
+      // project, which left Inworld with no language and the default voice
+      // picked for none — on every regenerate, voice-panel and batch voice.
       geminiContext: {
-        sourceLanguage: project.sourceLanguage,
-        targetLanguage: project.targetLanguage,
+        sourceLanguage: sourceLaneLanguage(project.lanes, project) ?? undefined,
+        targetLanguage: laneLanguageForTag(args.targetLang ?? "", project.lanes, project) ?? undefined,
         // SUB-28: media sections speak through their transcript, not the filename.
         original: effectiveSourceText(cell),
         context: cell.context,
@@ -124,6 +132,7 @@ export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<bo
       ...(label ? { label } : {}),
       ...(args.targetLang ? { targetLang: args.targetLang } : {}),
       onProgress,
+      ...(args.surface ? { surface: args.surface } : {}),
     })
     setTtsStatus(statusKey, { kind: "idle" })
     return true

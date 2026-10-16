@@ -8,6 +8,7 @@ import {
   patchOrgSettings,
   postPromotionRequest,
   resetCountStructuralOverrides,
+  resetProjectOverrides,
   type OrgSettingsResponse,
   type OrgWideSettings,
   type OrgPatchResult,
@@ -15,6 +16,11 @@ import {
 } from "@/lib/sync/org-settings"
 import type { TranslationRule, PromotionRequest } from "@/lib/parsers/types"
 import type { OrgProviderKeys } from "@/lib/sync/org-settings"
+import {
+  parseOverrideProjectList,
+  type InheritedOverrideKey,
+  type OverrideProjectList,
+} from "@/lib/sync/override-projects"
 
 // ─── Cross-instance sync ───────────────────────────────────────────────────
 // Several surfaces mount their own useOrgSettings for the SAME org at the same
@@ -116,11 +122,11 @@ const VALID_ROLE_LEVELS = new Set<number>(Object.values(ROLE))
 const TERMBASE_FLOOR_WRITE_MIN_ROLE = ROLE.OWNER
 const DEFAULT_TERMBASE_EDIT_MIN_ROLE = ROLE.PROJECT_LEAD
 
-// AQU-1086: languageEditMinRole is the second write-gating permission-policy
-// key (who may change a project's source/target language and its extra target
-// lanes). Same OWNER-only write gate; its default is MAINTAINER — today's
-// behaviour — so an org opts IN to project-lead language editing. See
-// DEFAULT_LANGUAGE_EDIT_MIN_ROLE in src/lib/sync/role-policy.ts (the client
+// AQU-1086 / AQU-984: languageEditMinRole is the second write-gating
+// permission-policy key (who may change a project's source/target language
+// and its extra target lanes). Same OWNER-only write gate. Absent, the floor
+// is PROJECT_LEAD; a stored value, including an explicit MAINTAINER, is kept.
+// See DEFAULT_LANGUAGE_EDIT_MIN_ROLE in src/lib/sync/role-policy.ts (the client
 // gate) and in auth-worker/src/services/org-permissions.ts (the server
 // default) — all three must agree.
 const LANGUAGE_FLOOR_WRITE_MIN_ROLE = ROLE.OWNER
@@ -260,8 +266,32 @@ export interface UseOrgSettings {
    * org opts out; a project may still override it in either direction.
    */
   autoPropagateRepetitions: boolean
+  /**
+   * Whether bulk text validation may sign off untouched AI drafts. OFF unless
+   * the org opts in, which keeps the one-at-a-time rule for AI drafts.
+   */
+  allowBulkValidateAiDrafts: boolean
   /** Put those projects back on the org default. Clears their own key. */
   resetCountStructuralOverrides: () => Promise<{ ok: boolean; cleared: number; message?: string }>
+  /**
+   * AQU-1771: the org defaults for how many validations a cell / a take need.
+   * Null when the org set none, which reads as 1. A project may override.
+   */
+  validationCountDefault: number | null
+  validationCountAudioDefault: number | null
+  /** How many projects set their own count and so ignore the default above. */
+  validationCountOverrides: number
+  validationCountAudioOverrides: number
+  /**
+   * AQU-1938: which projects the three counts above are — by name, only those
+   * the caller may see, at most 50. Null where the server did not say (an
+   * older server), and the line then shows its bare count.
+   */
+  overrideProjects: Record<InheritedOverrideKey, OverrideProjectList | null>
+  /** Put the projects that set their own count back on the org default. */
+  resetValidationCountOverrides: (
+    key: "validationCount" | "validationCountAudio",
+  ) => Promise<{ ok: boolean; cleared: number; message?: string }>
   /**
    * AQU-1037: effective floor for assigning work to anyone, including
    * file/chapter/target-lane assignments and AI changeset routing.
@@ -324,6 +354,31 @@ export interface UseOrgSettings {
  * @param projectRoleLevel  Caller's project-resolved role (AD-12 max-wins). Used for canExport.
  *   Falls back to orgRoleLevel when not provided (personal projects / no-org contexts).
  */
+/** How often returning to the tab may re-read org settings (see the effect). */
+/**
+ * The per-default "how many projects set their own" counts a settings
+ * response carries (GET, PATCH, 409). writeServer keeps the last known counts
+ * when a response arrives without them.
+ */
+const OVERRIDE_COUNT_KEYS = [
+  "countStructuralOverrides",
+  "validationCountOverrides",
+  "validationCountAudioOverrides",
+  // AQU-1938: the projects behind those counts, kept for the same reason.
+  "overrideProjects",
+] as const satisfies ReadonlyArray<keyof OrgSettingsResponse>
+
+/** Keep `from`'s value for `key` when `to` arrived without one. */
+function carryOver<K extends keyof OrgSettingsResponse>(
+  to: OrgSettingsResponse,
+  from: OrgSettingsResponse,
+  key: K,
+): void {
+  if (to[key] === undefined && from[key] !== undefined) to[key] = from[key]
+}
+
+const REFETCH_ON_RETURN_MS = 10_000
+
 export function useOrgSettings(
   orgId: number | null | undefined,
   orgRoleLevel: number | null | undefined,
@@ -338,6 +393,16 @@ export function useOrgSettings(
 
   const serverRef = useRef<OrgSettingsResponse | null>(null)
   const writeServer = useCallback((next: OrgSettingsResponse | null) => {
+    // The override counts come with the GET; an optimistic write, a sibling's
+    // broadcast or an older server's PATCH reply may not carry them. Keep the
+    // last known counts rather than reading their absence as "no project
+    // overrides", which silently stopped the reset prompt after one save.
+    const prev = serverRef.current
+    if (next && prev && prev.orgId === next.orgId) {
+      const filled = { ...next }
+      for (const key of OVERRIDE_COUNT_KEYS) carryOver(filled, prev, key)
+      next = filled
+    }
     serverRef.current = next
     setServer(next)
   }, [])
@@ -368,8 +433,10 @@ export function useOrgSettings(
     return next
   }, [])
 
+  const lastFetchAtRef = useRef(0)
   const refresh = useCallback(async (): Promise<OrgSettingsResponse | null> => {
     if (!orgId || !jwt) return null
+    lastFetchAtRef.current = Date.now()
     const got = await fetchOrgSettings(jwt, orgId)
     if (!aliveRef.current) return null
     writeServer(got)
@@ -392,6 +459,17 @@ export function useOrgSettings(
     return { ok: true, cleared: result.cleared }
   }, [orgId, jwt, refresh])
 
+  /** AQU-1771: the same reset for the two validation defaults. */
+  const resetValidationOverrides = useCallback(async (key: "validationCount" | "validationCountAudio") => {
+    if (!orgId || !jwt) return { ok: false, cleared: 0, message: "no session" }
+    const result = await resetProjectOverrides(
+      jwt, orgId, key === "validationCount" ? "validation-count" : "validation-count-audio",
+    )
+    if (result.kind === "error") return { ok: false, cleared: 0, message: result.message }
+    await refresh()
+    return { ok: true, cleared: result.cleared }
+  }, [orgId, jwt, refresh])
+
   useEffect(() => {
     if (!orgId) {
       writeServer(null)
@@ -403,6 +481,27 @@ export function useOrgSettings(
     void refresh().then(() => { if (!alive) return }).catch(() => {})
     return () => { alive = false }
   }, [orgId, refresh, writeServer])
+
+  // Re-read when the tab comes back into view. The sibling sync above only
+  // reaches instances in THIS tab, so a setting changed in another tab — or
+  // by another maintainer — reached an open editor only on reload: turning
+  // bulk validation of AI drafts OFF left an already-open editor still
+  // offering it. At most once per REFETCH_ON_RETURN_MS, so tabbing back and
+  // forth does not hammer the endpoint.
+  useEffect(() => {
+    if (!orgId || typeof document === "undefined") return
+    const onReturn = () => {
+      if (document.visibilityState !== "visible") return
+      if (Date.now() - lastFetchAtRef.current < REFETCH_ON_RETURN_MS) return
+      void refresh().catch(() => {})
+    }
+    document.addEventListener("visibilitychange", onReturn)
+    window.addEventListener("focus", onReturn)
+    return () => {
+      document.removeEventListener("visibilitychange", onReturn)
+      window.removeEventListener("focus", onReturn)
+    }
+  }, [orgId, refresh])
 
   const canEdit =
     orgRoleLevel != null && orgRoleLevel >= ORG_SETTINGS_WRITE_MIN_ROLE
@@ -440,8 +539,8 @@ export function useOrgSettings(
     return DEFAULT_TERMBASE_EDIT_MIN_ROLE
   })()
 
-  // AQU-1086: effective language-edit floor — explicit org setting, or the
-  // MAINTAINER default when unset / out of the role ladder.
+  // AQU-1086 / AQU-984: effective language-edit floor — explicit org setting,
+  // or PROJECT_LEAD when unset / out of the role ladder.
   const languageEditMinRole = resolveLanguageEditFloor(
     typeof server?.settings?.languageEditMinRole === "number"
       ? (server.settings.languageEditMinRole as number)
@@ -476,9 +575,25 @@ export function useOrgSettings(
   // counting headings is what every org does today.
   const countStructuralCells = server?.settings?.countStructuralCells !== false
   const countStructuralOverrides = server?.countStructuralOverrides ?? 0
+  // AQU-1771: null when unset (reads as 1); only a whole number 1..15 counts.
+  const thresholdOrNull = (raw: unknown): number | null =>
+    typeof raw === "number" && Number.isInteger(raw) && raw >= 1 && raw <= 15 ? raw : null
+  const validationCountDefault = thresholdOrNull(server?.settings?.validationCount)
+  const validationCountAudioDefault = thresholdOrNull(server?.settings?.validationCountAudio)
+  const validationCountOverrides = server?.validationCountOverrides ?? 0
+  const validationCountAudioOverrides = server?.validationCountAudioOverrides ?? 0
+  // AQU-1938: the projects behind each count, read defensively.
+  const overrideProjects: Record<InheritedOverrideKey, OverrideProjectList | null> = {
+    countStructuralCells: parseOverrideProjectList(server?.overrideProjects?.countStructuralCells),
+    validationCount: parseOverrideProjectList(server?.overrideProjects?.validationCount),
+    validationCountAudio: parseOverrideProjectList(server?.overrideProjects?.validationCountAudio),
+  }
   // AQU-1391: same `!== false` shape and for the same reason — unset is ON,
   // and only an explicit opt-out turns repetition propagation off org-wide.
   const autoPropagateRepetitions = server?.settings?.autoPropagateRepetitions !== false
+  // `=== true`, the opposite of the two above: unset is OFF, because AI drafts
+  // have always been reviewed one at a time and an org must opt in.
+  const allowBulkValidateAiDrafts = server?.settings?.allowBulkValidateAiDrafts === true
   const allowSelfAssignment = server?.settings?.allowSelfAssignment === true
     ? true
     : DEFAULT_ALLOW_SELF_ASSIGNMENT
@@ -626,7 +741,14 @@ export function useOrgSettings(
     countStructuralCells,
     countStructuralOverrides,
     autoPropagateRepetitions,
+    allowBulkValidateAiDrafts,
     resetCountStructuralOverrides: resetOverrides,
+    validationCountDefault,
+    validationCountAudioDefault,
+    validationCountOverrides,
+    validationCountAudioOverrides,
+    overrideProjects,
+    resetValidationCountOverrides: resetValidationOverrides,
     assignmentMinRole,
     termbaseEditMinRole,
     languageEditMinRole,

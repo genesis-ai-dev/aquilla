@@ -53,12 +53,10 @@ test("comments page empty state, filters, search, and resolved surface session",
 
     const drawer = alice.locator('[data-testid="comments-drawer"]')
     await expect(drawer).toBeVisible({ timeout: 10_000 })
-    const textarea = drawer
-      .locator('textarea[placeholder*="comment" i], textarea[placeholder*="Comment" i]')
-      .first()
-    await expect(textarea).toBeVisible()
-    await textarea.fill(uniqueText)
-    await drawer.locator('button[type="submit"], button:has-text("Post")').first().click()
+    const composer = drawer.getByRole("textbox", { name: "New thread" })
+    await expect(composer).toBeVisible()
+    await composer.fill(uniqueText)
+    await drawer.getByRole("button", { name: "Post" }).click()
     await expect(drawer.getByText(uniqueText)).toBeVisible({ timeout: 10_000 })
 
     await alice.goto(`/project/${projectId}/comments`)
@@ -151,18 +149,18 @@ test("comments page empty state, filters, search, and resolved surface session",
     await addCommentBtn.click()
 
     const commentText = `resolved-comment-${Date.now()}`
-    const textarea = alice.locator("textarea").first()
-    await textarea.waitFor({ state: "visible", timeout: 5_000 })
-    await textarea.fill(commentText)
+    const composer = alice.getByRole("textbox", { name: "New thread" })
+    await composer.waitFor({ state: "visible", timeout: 5_000 })
+    await composer.fill(commentText)
     const postBtn = alice.getByRole("button", { name: /post|submit|send/i }).first()
     await expect(postBtn).toBeEnabled({ timeout: 3_000 })
     await postBtn.click()
     await expect(alice.getByText(commentText)).toBeVisible({ timeout: 5_000 })
 
-    const resolveBtn = alice.getByRole("button", { name: /^Resolve$/i })
-    await expect(resolveBtn).toBeVisible({ timeout: 5_000 })
-    await resolveBtn.click()
-    await expect(alice.getByRole("button", { name: /Reopen/i })).toBeVisible({
+    const drawer = alice.locator('[data-testid="comments-drawer"]')
+    await drawer.getByRole("button", { name: "Comment actions" }).click()
+    await alice.getByRole("menuitem", { name: "Resolve thread" }).click()
+    await expect(drawer.getByRole("button", { name: /1 resolved comment from/i })).toBeVisible({
       timeout: 5_000,
     })
 
@@ -173,25 +171,26 @@ test("comments page empty state, filters, search, and resolved surface session",
     await expect(showResolvedSwitch).toBeVisible({ timeout: 5_000 })
     await expect(showResolvedSwitch).not.toBeChecked()
 
-    const reopenBtn = alice.getByRole("button", { name: /^Reopen$/i }).first()
+    const summary = alice.getByRole("button", { name: /1 resolved comment from/i })
     await showResolvedSwitch.click()
     await expect(async () => {
       await alice.getByRole("button", { name: /^Refresh$/i }).click()
-      await expect(reopenBtn).toBeVisible({ timeout: 1_000 })
+      await expect(summary).toBeVisible({ timeout: 1_000 })
     }).toPass({ timeout: 15_000 })
 
-    const chevron = reopenBtn.locator("..").getByRole("button").last()
-    if (!(await alice.getByText(commentText).isVisible())) {
-      await chevron.click()
-    }
-    await expect(alice.getByText(commentText)).toBeVisible({ timeout: 5_000 })
-
-    await alice.getByRole("button", { name: /^Filters$/i }).click()
+    const filtersBtn = alice.getByRole("button", { name: /^Filters$/i })
+    await filtersBtn.click()
     await expect(showResolvedSwitch).toBeVisible({ timeout: 5_000 })
     await showResolvedSwitch.click()
-    await expect(reopenBtn).not.toBeVisible({ timeout: 5_000 })
+    await expect(summary).not.toBeVisible({ timeout: 5_000 })
 
     await showResolvedSwitch.click()
-    await expect(reopenBtn).toBeVisible({ timeout: 5_000 })
+    await expect(summary).toBeVisible({ timeout: 5_000 })
+    await filtersBtn.click()
+    await expect(showResolvedSwitch).not.toBeVisible({ timeout: 5_000 })
+
+    await summary.click()
+    await alice.waitForURL(/\/editor\/file\/[^/?]+[^#]*comments=1/, { timeout: 10_000 })
+    await expect(alice.getByText(commentText)).toBeVisible({ timeout: 5_000 })
   })
 })

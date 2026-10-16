@@ -1,4 +1,5 @@
 import { v4 as uuid } from "uuid"
+import type { CellUnit } from "./core-types"
 
 // Paragraph is a GROUPING over cells, never a re-segmentation of them. For aligned
 // corpora (USFM) the verse-cell is the alignment unit and must NOT be split below —
@@ -20,11 +21,16 @@ const BREAK_PATTERNS: RegExp[] = [
 
 export function splitIntoSegments(
   text: string,
-  maxLength = 200
+  maxLength = 200,
+  cellUnit: CellUnit = "sentence",
 ): { text: string; group: string }[] {
   const group = uuid()
 
-  if (text.length <= maxLength) {
+  // AQU-1720: in paragraph mode the paragraph IS the cell — no sentence split
+  // and no length cap, so a 400-character block stays one dubbing clip instead
+  // of being chopped at a comma. The group is still minted so the segment
+  // contract (one group per source paragraph) holds in both modes.
+  if (cellUnit === "paragraph" || text.length <= maxLength) {
     return [{ text, group }]
   }
 

@@ -13,12 +13,14 @@
 // and this board can never disagree about the total.
 
 import type { AquillaDb } from '../../../db/shim/postgres'
+import { markProjectMondayLinksDirty } from '../../../db/shared/monday-dirty'
 import { verifyTokenForProject } from '../auth'
 import { ROLE } from './role-policy'
 import { checkProjectMembershipDetailed } from './membership'
 import { counts, readValidationCount, readValidationCountAudio, BOOK_INDEX } from './progress-read-route'
 import { readCountStructuralCells } from './structural-cells'
 import { resolveCorpusMarker } from './corpus-marker'
+import { readLaneTag } from '../../../db/shared/lane-ref'
 import {
   readPlanUnitsSql,
   planUnitExistsStmt,
@@ -229,7 +231,9 @@ export async function handlePlanRequest(
   const auth = await verifyTokenForProject(token, projectId, env.SYNC_SECRET_KEY)
   if (!auth.ok) return new Response(auth.reason, { status: auth.status })
 
-  const lane = (url.searchParams.get('lane') ?? '').trim()
+  // AQU-1977: no lane named reads the project's own default — its '' lane on an
+  // old project, its first language on a new one — never a lane it lacks.
+  const lane = await readLaneTag(db, projectId, url.searchParams.get('lane'))
 
   if (request.method === 'GET') {
     const { units, revision, validationCount, validationCountAudio, countStructural, planUpdatedAt, progressUpdatedAt } =
@@ -342,6 +346,11 @@ export async function handlePlanRequest(
     author,
     now: Date.now(),
   }).run()
+  // AQU-1770: a linked Monday board can show plan figures (books done, next
+  // target date, schedule). Mark its link dirty; the identity worker's
+  // 5-minute flush pushes it. Pushing from here would need the identity
+  // worker's Monday token, so this path waits for the cron.
+  await markProjectMondayLinksDirty(db, [projectId])
 
   const { results } = await db
     .prepare(readPlanUnitsSql('AND u.file_id = ? AND u.section_key = ?'))

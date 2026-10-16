@@ -39,4 +39,23 @@ describe("ContextChipNode", () => {
     expect(chipNode!.attrs).toMatchObject({ chipId: "a", canonicalRef: "GEN 1:1", fileId: "f", cellId: "z" })
     editor.destroy()
   })
+
+  it("labels the pill with the selected wording and puts the full text in the tooltip", () => {
+    const selection = "In the beginning God created the heavens and the earth"
+    const editor = new Editor({
+      extensions: [StarterKit.configure({ heading: false }), ContextChipNode],
+      content: {
+        type: "doc",
+        content: [{ type: "paragraph", content: [{ type: "contextChip", attrs: {
+          chipId: "a", fileId: "f", cellId: "z", canonicalRef: "",
+          side: "source", selection, preview: selection,
+        } }] }],
+      },
+    })
+    const pill = editor.view.dom.querySelector(".context-chip") as HTMLElement
+    expect(pill.textContent).toContain("In the beginning God created the…")
+    expect(pill.textContent).not.toMatch(/^source/)
+    expect(pill.title).toBe(selection)
+    editor.destroy()
+  })
 })

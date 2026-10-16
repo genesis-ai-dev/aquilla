@@ -4,7 +4,7 @@ import { createStorePromise, type Store } from "@livestore/livestore"
 import type { CellRow, FileSummary } from "@/lib/sync/cells-read-types"
 import type { CellsDeltaResult } from "@/lib/sync/cells-read"
 import { catchUpProject, type CatchUpDeps } from "./catch-up"
-import { cellRowId, events, schema, syncCursorId, tables } from "./schema"
+import { cellRowId, DEFAULT_LANE_KEY, events, localLaneKey, schema, syncCursorId, tables } from "./schema"
 
 const P = "proj1"
 const F = "file1"
@@ -25,11 +25,18 @@ beforeEach(async () => {
   store.commit(events.offlineProjectStatusSet({ projectId: P, status: "ready", syncedAt: new Date(0), queueDepth: 0 }))
 })
 
-function row(cellId: string, side: "source" | "target", value: string, eventId = `ev-${cellId}-${side}-${value}`): CellRow {
+function row(
+  cellId: string,
+  side: "source" | "target",
+  value: string,
+  eventId = `ev-${cellId}-${side}-${value}`,
+  lane: { targetLang?: string; laneId?: string | null } = {},
+): CellRow {
   return {
     cellId,
     side,
-    targetLang: "",
+    targetLang: lane.targetLang ?? "",
+    laneId: lane.laneId ?? null,
     value,
     valueHtml: null,
     type: null,
@@ -53,6 +60,8 @@ function seedLocal(r: CellRow): void {
       fileId: F,
       cellId: r.cellId,
       side: r.side,
+      targetLang: r.targetLang ?? "",
+      laneId: r.laneId ?? null,
       value: r.value,
       valueHtml: r.valueHtml,
       eventId: r.eventId,
@@ -82,8 +91,8 @@ function makeDeps(opts: { files?: FileSummary[]; pages?: Page[]; delta?: CellsDe
   return { streamFileCells, fetchCellsDelta, fetchProjectFiles }
 }
 
-const cell = (cellId: string, side: "source" | "target") =>
-  store.query(tables.cells.select().where({ id: cellRowId(P, F, cellId, side) }).first())
+const cell = (cellId: string, side: "source" | "target", laneKey = DEFAULT_LANE_KEY) =>
+  store.query(tables.cells.select().where({ id: cellRowId(P, F, cellId, side, laneKey) }).first())
 const cursor = () => store.query(tables.syncCursors.select().where({ id: syncCursorId(P, F) }).first())
 
 describe("catchUpProject — full sync (no cursor)", () => {
@@ -202,14 +211,87 @@ describe("catchUpProject — delta (trusted cursor)", () => {
     expect(cursor()).toMatchObject({ serverSeq: 50, projectEpoch: 2 })
   })
 
-  it("ignores non-default target lanes", async () => {
+  it("lands every target lane's rows, keyed per lane (AQU-1614)", async () => {
     seedLocal(row("v1", "target", "default lane"))
-    const other = { ...row("v1", "target", "segunda lengua"), targetLang: "es" }
+    const other = row("v1", "target", "segunda lengua", undefined, { targetLang: "es" })
     const deps = makeDeps({
       delta: { kind: "delta", changedCellIds: ["v1"], cells: [row("v1", "target", "default v2"), other], maxServerSeq: 60, projectEpoch: 2 },
     })
     await catchUpProject(store, P, "tok", deps)
     expect(cell("v1", "target")?.value).toBe("default v2")
+    expect(cell("v1", "target", localLaneKey(null, "es"))?.value).toBe("segunda lengua")
+  })
+
+  it("protects only the lane with a queued local edit; its sibling lanes still land (AQU-1614)", async () => {
+    seedLocal(row("v1", "target", "my unsent es edit", undefined, { targetLang: "es" }))
+    seedLocal(row("v1", "target", "stale default"))
+    store.commit(
+      events.eventQueued({
+        id: "q-es",
+        projectId: P,
+        fileId: F,
+        cellId: "v1",
+        kind: "target.cell.commit",
+        payload: { value: "my unsent es edit", targetLang: "es" },
+        parentId: null,
+        author: "me",
+        schemaVersion: 1,
+        clientTs: new Date(),
+        createdAt: new Date(),
+      }),
+    )
+    const deps = makeDeps({
+      delta: {
+        kind: "delta",
+        changedCellIds: ["v1"],
+        cells: [
+          row("v1", "target", "peer es edit", undefined, { targetLang: "es" }),
+          row("v1", "target", "peer default edit"),
+        ],
+        maxServerSeq: 60,
+        projectEpoch: 2,
+      },
+    })
+
+    await catchUpProject(store, P, "tok", deps)
+
+    expect(cell("v1", "target", localLaneKey(null, "es"))?.value).toBe("my unsent es edit")
+    expect(cell("v1", "target")?.value).toBe("peer default edit")
+    // The cell still has unsent work, so the delta cursor holds.
+    expect(cursor()).toMatchObject({ serverSeq: 50, projectEpoch: 2 })
+  })
+
+  it("removes a lane's row once the server stops reporting it (AQU-1614)", async () => {
+    seedLocal(row("v1", "target", "default lane"))
+    seedLocal(row("v1", "target", "archived lane", undefined, { targetLang: "es" }))
+    const deps = makeDeps({
+      delta: {
+        kind: "delta",
+        changedCellIds: ["v1"],
+        cells: [row("v1", "target", "default lane")],
+        maxServerSeq: 60,
+        projectEpoch: 2,
+      },
+    })
+    await catchUpProject(store, P, "tok", deps)
+    expect(cell("v1", "target")?.value).toBe("default lane")
+    expect(cell("v1", "target", localLaneKey(null, "es"))).toBeUndefined()
+  })
+
+  it("re-keys a tag-keyed row onto lanes.id once the backfill populates it (AQU-1614)", async () => {
+    seedLocal(row("v1", "target", "es text", undefined, { targetLang: "es" }))
+    const deps = makeDeps({
+      delta: {
+        kind: "delta",
+        changedCellIds: ["v1"],
+        cells: [row("v1", "target", "es text", undefined, { targetLang: "es", laneId: "lane-es" })],
+        maxServerSeq: 60,
+        projectEpoch: 2,
+      },
+    })
+    await catchUpProject(store, P, "tok", deps)
+    expect(cell("v1", "target", "lane-es")).toMatchObject({ value: "es text", laneId: "lane-es" })
+    expect(cell("v1", "target", localLaneKey(null, "es"))).toBeUndefined()
   })
 
   it("falls back to a full stream when the server asks for a resync", async () => {
@@ -247,7 +329,7 @@ describe("catchUpProject — batching", () => {
     expect(result.rowsChanged).toBe(1200)
     expect(store.query(tables.cells.select().where({ projectId: P }))).toHaveLength(1200)
     const names = commit.mock.calls.flatMap((args) => args.map((e) => (e as { name: string }).name))
-    expect(names.filter((n) => n === "v1.CellsSynced")).toHaveLength(3)
-    expect(names).not.toContain("v1.CellSynced")
+    expect(names.filter((n) => n === "v2.CellsSynced")).toHaveLength(3)
+    expect(names).not.toContain("v2.CellSynced")
   })
 })

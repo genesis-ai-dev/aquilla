@@ -11,6 +11,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { renderHook, waitFor, act } from "@testing-library/react"
 import type { CellRow } from "@/lib/sync/cells-read-types"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const fetchAllMock = vi.fn<(projectId: string, fileId: string, jwt: string, side?: "source" | "target") => Promise<CellRow[]>>()
 // Seam for the targeted single-cell refetch (revalidateCell → fetchCellsByIds).
@@ -379,7 +380,7 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     await waitFor(() => expect(calls).toBeGreaterThanOrEqual(1))
     expect(result.current.isError).toBe(false)
     // After the backoff retry resolves, cells appear.
-    await waitFor(() => expect(result.current.cells.length).toBe(1), { timeout: 2000 })
+    await waitFor(() => expect(result.current.cells.length).toBe(1))
     expect(result.current.isError).toBe(false)
   })
 
@@ -393,11 +394,12 @@ describe("useCells (Phase 2a, D1-backed)", () => {
         enabled: true,
       }),
     )
-    // 6 attempts with 250→4000ms backoff exhausts in ~7.75s; allow headroom.
-    await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 10_000 })
+    // 6 attempts with 250→4000ms backoff exhausts in ~7.75s of real time, so
+    // the stall watchdog runs on top of that schedule.
+    await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 8_000 + STALL_WATCHDOG_MS })
     expect(result.current.cells).toEqual([])
     expect(fetchAllMock).not.toHaveBeenCalled()
-  }, 12_000)
+  })
 
   it("overlays activeValidators from auditStats over the empty default", async () => {
     fetchAllMock.mockResolvedValueOnce([

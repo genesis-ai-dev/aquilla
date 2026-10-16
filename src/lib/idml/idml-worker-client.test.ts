@@ -11,6 +11,7 @@ import {
   createIdmlWorkerClient,
   parseIdmlInWorker,
 } from "./idml-worker-client"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const EMPTY_MANIFEST: IdmlSourceManifest = {
   version: 2,
@@ -163,7 +164,7 @@ describe("IDML worker client", () => {
     const operation = client.parse(new Uint8Array([1]).buffer, "generic", {
       signal: controller.signal,
     })
-    await vi.waitFor(() => expect(endpoint.requests).toHaveLength(1))
+    await vi.waitFor(() => expect(endpoint.requests).toHaveLength(1), { timeout: STALL_WATCHDOG_MS })
     controller.abort()
 
     await expect(operation).rejects.toMatchObject({ name: "AbortError" })

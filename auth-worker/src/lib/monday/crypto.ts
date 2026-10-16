@@ -1,12 +1,31 @@
 // AES-GCM encryption for Monday OAuth access tokens (WebCrypto).
 //
 // Storage format: base64(iv || ciphertext), 12-byte random IV per encryption.
-// Key derivation: SHA-256(SECRET_KEY + ":monday-token") — deterministic from
-// the worker's existing JWT secret, so no new secret to provision, and the
-// ":monday-token" domain separator means a leak of a derived key never equals
-// the JWT signing key.
+// Key derivation: SHA-256(<key material> + ":monday-token"), where the key
+// material is MONDAY_TOKEN_KEY when set and SECRET_KEY otherwise
+// (mondayTokenKeyMaterial). The SECRET_KEY default means no new secret to
+// provision, and the ":monday-token" domain separator means a leak of a
+// derived key never equals the JWT signing key.
+//
+// AQU-1775: production and development share SECRET_KEY, and the dev Neon
+// branch is restored from production, so under the default derivation dev
+// could read every production org's copied Monday tokens. The dev worker sets
+// MONDAY_TOKEN_KEY so its Monday key is one no other deployment holds.
+
+import type { Env } from "../../types"
 
 const KEY_CONTEXT = ":monday-token"
+
+/**
+ * The key material Monday tokens are encrypted under on this deployment:
+ * MONDAY_TOKEN_KEY when set, else SECRET_KEY. Every encrypt and decrypt of a
+ * Monday token goes through this, so the two can never disagree.
+ */
+export function mondayTokenKeyMaterial(
+  env: Pick<Env, "SECRET_KEY" | "MONDAY_TOKEN_KEY">,
+): string {
+  return env.MONDAY_TOKEN_KEY?.trim() || env.SECRET_KEY
+}
 
 async function deriveKey(secretKey: string): Promise<CryptoKey> {
   const digest = await crypto.subtle.digest(

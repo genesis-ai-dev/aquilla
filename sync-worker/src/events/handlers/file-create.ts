@@ -11,6 +11,7 @@ import type { AuthorizedEvent } from '../authorize'
 import type { RealtimeMessage, ProjectionTable } from '../realtime'
 import { buildEventInsertStmt } from '../event-insert'
 import { usableCorpusMarker } from '../corpus-marker'
+import { assignDeclaredLanguages } from '../../../../db/shared/file-declared-languages'
 import type { DispatchResult } from './types'
 
 export function handleFileCreate(
@@ -50,8 +51,10 @@ export function handleFileCreate(
   const langMeta: Record<string, unknown> = event.payload.projectionMeta
     ? { ...event.payload.projectionMeta }
     : {}
-  if (event.payload.sourceLanguage) langMeta.sourceLanguage = event.payload.sourceLanguage
-  if (event.payload.targetLanguage) langMeta.targetLanguage = event.payload.targetLanguage
+  // AQU-1596: the payload field names are wire history and stay as they are,
+  // but what lands in `meta` is recorded as what the file *declared* — never as
+  // the language of the lane its rows belong to.
+  assignDeclaredLanguages(langMeta, event.payload.sourceLanguage, event.payload.targetLanguage)
   if (event.payload.sourceTextDirection) langMeta.sourceTextDirection = event.payload.sourceTextDirection
   if (event.payload.targetTextDirection) langMeta.targetTextDirection = event.payload.targetTextDirection
   if (event.payload.orderedBy) langMeta.orderedBy = event.payload.orderedBy

@@ -21,8 +21,10 @@ import {
   UNBOUND_TTL_MS,
   fileHasLiveShadowEvents,
   getOptimisticShadows,
+  learnShadowLanes,
   markShadowsSettled,
   rehydrateShadowsFromOutbox,
+  shadowInLane,
   subscribeAudioAttachments,
   subscribeOptimisticAudioAttachment,
   type OptimisticShadow,
@@ -197,6 +199,10 @@ function keepShadow(
   entry: CellAudioEntry | undefined,
   outboxStatus: Map<string, "pending" | "failed">,
   now: number,
+  /** AQU-1978: false for another lane's overlay. This read holds none of that
+   *  lane's server truth, so it cannot confirm the overlay — only the outbox
+   *  and the clock retire it here. */
+  inLane = true,
 ): boolean {
   if (shadow.eventId) {
     const status = outboxStatus.get(shadow.eventId)
@@ -225,7 +231,7 @@ function keepShadow(
     // lie would be silent. Letting the clip reappear IS the honest signal.
     if (status === "failed") return shadow.kind === "attach"
   }
-  if (shadowConfirmed(entry, shadow)) return false
+  if (inLane && shadowConfirmed(entry, shadow)) return false
   if (shadow.phase === "settled") return now - shadow.graceStartedAt <= SETTLED_GRACE_MS
   if (shadow.phase === "binding") return now - shadow.graceStartedAt <= UNBOUND_TTL_MS
   return true
@@ -251,9 +257,22 @@ const EMPTY: Map<string, CellAudioEntry> = new Map()
 // settled fetch is a real read.
 const attachmentsCoalescer = createRequestCoalescer<FileAudioAttachmentsResponse | null>({ joinWindowMs: 250 })
 
+/**
+ * `lane` (AQU-1591) is the target-language lane whose takes to read: its own
+ * dubs plus the shared programme audio, which belongs to every lane the way
+ * source text does. Omitting it reads every lane's takes — the pre-lane wire —
+ * and `''` is the default lane, a real lane and a different request.
+ *
+ * It is part of the read key AND of the coalescer key. Those are the two places
+ * a lane can be dropped silently: a stale `settledKey` would report another
+ * lane's answer as loaded, and a coalescer keyed on project/file alone would
+ * hand the second lane to open a file the FIRST lane's takes, within the join
+ * window, with no request of its own to show for it.
+ */
 export function useFileAudioAttachments(
   projectId: string | null,
   fileId: string | null,
+  lane?: string,
 ): UseFileAudioAttachmentsResult {
   const { session, loading: sessionLoading } = useFrontierSession()
   const sessionRef = useRef(session)
@@ -276,7 +295,8 @@ export function useFileAudioAttachments(
   // The project/file whose read last came back. Keyed rather than a boolean so
   // a file switch reads as "not loaded" at once, with no reset to forget.
   const [settledKey, setSettledKey] = useState<string | null>(null)
-  const readKey = projectId && fileId ? `${projectId}/${fileId}` : null
+  const laneKey = lane ?? "\u0000all"
+  const readKey = projectId && fileId ? `${projectId}/${fileId}/${laneKey}` : null
   const hasLoaded = readKey === null || (!jwt && !sessionLoading) || settledKey === readKey
   const generationRef = useRef(0)
   // One-shot sweep so a settled overlay still prunes when nothing else pokes.
@@ -311,9 +331,9 @@ export function useFileAudioAttachments(
       // instances via the module-level coalescer, so the three mounts
       // ProjectWorkspace keeps for one file cost one request each time.
       const [res, outboxRecords] = await Promise.all([
-        attachmentsCoalescer.run(`${projectId}/${fileId}`, async () => {
+        attachmentsCoalescer.run(`${projectId}/${fileId}/${laneKey}`, async () => {
           const token = await getToken(projectId, fileId)
-          return token ? fetchFileAudioAttachments(projectId, fileId, token) : null
+          return token ? fetchFileAudioAttachments(projectId, fileId, token, lane) : null
         }),
         getOutboxRecords(queuedIds),
       ])
@@ -327,17 +347,25 @@ export function useFileAudioAttachments(
       const outboxStatus = new Map(outboxRecords.map((r) => [r.id, r.status]))
       const departed = new Set(queuedIds.filter((id) => !outboxStatus.has(id)))
       markShadowsSettled(fileId, departed, now)
+      // AQU-1978: the same records say which lane each overlay was made in.
+      learnShadowLanes(fileId, outboxRecords)
       for (const [cellId, shadows] of registry) {
-        const live = shadows.filter((s) => keepShadow(s, map.get(cellId), outboxStatus, now))
+        const live = shadows.filter((s) =>
+          keepShadow(s, map.get(cellId), outboxStatus, now, shadowInLane(s, lane)),
+        )
         if (live.length === 0) {
           registry.delete(cellId)
           continue
         }
         registry.set(cellId, live)
         // Chronological replay so delete-then-rerecord composes correctly.
+        // AQU-1978: only this lane's overlays (and shared ones) are painted on
+        // this lane's read; another lane's stay registered for that lane.
         let entry = map.get(cellId)
-        for (const s of live) entry = applyShadow(entry, s, syncViewFor(s, outboxStatus))
-        map.set(cellId, entry as CellAudioEntry)
+        for (const s of live) {
+          if (shadowInLane(s, lane)) entry = applyShadow(entry, s, syncViewFor(s, outboxStatus))
+        }
+        if (entry) map.set(cellId, entry)
       }
       setByCellId(map)
       // Re-arm a sweep for the EARLIEST grace deadline still outstanding.
@@ -371,10 +399,10 @@ export function useFileAudioAttachments(
     } finally {
       if (gen === generationRef.current) {
         setIsLoading(false)
-        setSettledKey(`${projectId}/${fileId}`)
+        setSettledKey(`${projectId}/${fileId}/${laneKey}`)
       }
     }
-  }, [projectId, fileId, getToken, jwt])
+  }, [projectId, fileId, lane, laneKey, getToken, jwt])
 
   useEffect(() => {
     doFetchRef.current = doFetch
@@ -426,6 +454,8 @@ export function useFileAudioAttachments(
   useEffect(() => {
     if (!fileId) return
     return subscribeOptimisticAudioAttachment(fileId, (cellId, shadow) => {
+      // AQU-1978: another lane's overlay is not painted on this lane's read.
+      if (!shadowInLane(shadow, lane)) return
       setByCellId((prev) => {
         const next = new Map(prev)
         // A just-injected overlay is always in flight; the next fetch re-derives
@@ -434,7 +464,7 @@ export function useFileAudioAttachments(
         return next
       })
     })
-  }, [fileId])
+  }, [fileId, lane])
 
   return { byCellId, isLoading, hasLoaded, revalidate: doFetch }
 }

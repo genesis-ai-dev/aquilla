@@ -1,6 +1,6 @@
 import { startTransition, type ComponentProps, type MouseEvent } from "react"
 import { NavLink, useNavigate } from "react-router-dom"
-import { KeyRound, type LucideIcon } from "lucide-react"
+import { KeyRound, MessageSquare, ScrollText, type LucideIcon } from "lucide-react"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { usePlatformAdmin } from "@/hooks/usePlatformAdmin"
@@ -135,6 +135,15 @@ export function OrgSidebar() {
             <NavIcon icon={NAV_PAGE_ICONS.assigned} />
             {t("editor.navTitle.assignedToMe")}
           </OrgNavLink>
+          {/* AQU-1958: comments across the org's projects. Maintainer+, the
+              same floor the page itself applies — editorial leads review
+              feedback across projects, contributors work inside one. */}
+          {isAdmin && (
+            <OrgNavLink to={orgPath(activeOrgId, "/comments")} className={link}>
+              <NavIcon icon={MessageSquare} />
+              {t("comments.org.title")}
+            </OrgNavLink>
+          )}
         </>}
         {isMemberOrg && activeOrgId != null && (showMembersNav || isAdmin) && (
           <div className="my-1 border-t" />
@@ -150,6 +159,13 @@ export function OrgSidebar() {
           <OrgNavLink to={orgPath(activeOrgId, "/access")} className={link}>
             <NavIcon icon={KeyRound} />
             {t("org.access.page.title")}
+          </OrgNavLink>
+        )}
+        {/* AQU-1072: owners and maintainers. Platform operators resolve as owner. */}
+        {activeOrgId != null && (isAdmin || (isMemberOrg && isPlatformAdmin)) && (
+          <OrgNavLink to={orgPath(activeOrgId, "/access-audit")} className={link}>
+            <NavIcon icon={ScrollText} />
+            {t("org.accessAudit.title")}
           </OrgNavLink>
         )}
         {isAdmin && activeOrgId != null && (

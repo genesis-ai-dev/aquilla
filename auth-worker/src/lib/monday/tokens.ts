@@ -13,7 +13,13 @@
 
 import type { Env } from "../../types"
 import type { IntegrationConnectionRow } from "./types"
-import { decryptMondayToken, encryptMondayToken } from "./crypto"
+import { decryptMondayToken, encryptMondayToken, mondayTokenKeyMaterial } from "./crypto"
+import {
+  isAbortTimeout,
+  logVendorTimeout,
+  vendorTimeoutMessage,
+  VENDOR_TIMEOUT_MS,
+} from "../../../../shared/vendor-timeouts"
 
 export const MONDAY_TOKEN_URL = "https://auth.monday.com/oauth_ms/oauth/token"
 
@@ -26,6 +32,54 @@ export class MondayAuthError extends Error {
     super(message)
     this.name = "MondayAuthError"
   }
+}
+
+/**
+ * AQU-1775: the connection row was made by another deployment. The dev Neon
+ * branch is restored from production, so without this a dev worker holding the
+ * shared signing key would decrypt a production org's tokens, refresh them
+ * (rotating production's refresh token away) and push dev's numbers onto a
+ * board linked on production. Raised BEFORE any decrypt or refresh, and never
+ * marks needs_reauth — the row is fine where it came from.
+ */
+export class MondayForeignConnectionError extends MondayAuthError {
+  constructor(
+    readonly connectionEnvironment: string | null,
+    readonly runningEnvironment: string,
+  ) {
+    super(
+      `Monday connection was made on ${connectionEnvironment ?? "an unknown environment"}; refusing to use it from ${runningEnvironment}`,
+    )
+    this.name = "MondayForeignConnectionError"
+  }
+}
+
+/**
+ * The environment this worker runs as — stamped on every new connection and
+ * compared on every token read. A local stack (WRANGLER_LOCAL=1, which the
+ * environment guard never allows on a first-party host) is "local" whatever
+ * its profile's ENVIRONMENT says, so a seeded local database never passes as
+ * production.
+ */
+export function runningEnvironment(env: Pick<Env, "ENVIRONMENT" | "WRANGLER_LOCAL">): string {
+  if (env.WRANGLER_LOCAL) return "local"
+  return env.ENVIRONMENT?.trim() || "unknown"
+}
+
+/**
+ * Null when this worker may use the row, else the refusal. A NULL environment
+ * predates migration 0175: production owns those rows, and no other deployment
+ * could have made one, so only production accepts them.
+ */
+export function foreignConnectionError(
+  env: Pick<Env, "ENVIRONMENT" | "WRANGLER_LOCAL">,
+  conn: Pick<IntegrationConnectionRow, "environment">,
+): MondayForeignConnectionError | null {
+  const running = runningEnvironment(env)
+  const origin = conn.environment ?? null
+  if (origin === running) return null
+  if (origin === null && running === "production") return null
+  return new MondayForeignConnectionError(origin, running)
 }
 
 export interface MondayTokenSet {
@@ -60,11 +114,24 @@ interface TokenEndpointResponse {
 async function callTokenEndpoint(
   params: Record<string, string>,
 ): Promise<MondayTokenSet> {
-  const res = await fetch(MONDAY_TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams(params),
-  })
+  let res: Response
+  try {
+    res = await fetch(MONDAY_TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(params),
+      // AQU-1849: a token exchange/refresh is never slow when healthy, and it
+      // sits in front of every Monday push — an unbounded one stalled the
+      // whole integration, not just one request.
+      signal: AbortSignal.timeout(VENDOR_TIMEOUT_MS.mondayTokenEndpoint),
+    })
+  } catch (err) {
+    if (isAbortTimeout(err)) {
+      logVendorTimeout("mondayTokenEndpoint", err)
+      throw new MondayAuthError(vendorTimeoutMessage("mondayTokenEndpoint"))
+    }
+    throw err
+  }
   if (!res.ok) {
     throw new MondayAuthError(`monday token endpoint HTTP ${res.status}`)
   }
@@ -114,9 +181,9 @@ export async function persistTokenSet(
   connectionId: string,
   tokens: MondayTokenSet,
 ): Promise<void> {
-  const accessEnc = await encryptMondayToken(env.SECRET_KEY, tokens.accessToken)
+  const accessEnc = await encryptMondayToken(mondayTokenKeyMaterial(env), tokens.accessToken)
   const refreshEnc = tokens.refreshToken
-    ? await encryptMondayToken(env.SECRET_KEY, tokens.refreshToken)
+    ? await encryptMondayToken(mondayTokenKeyMaterial(env), tokens.refreshToken)
     : null
   await env.AQUILLA_PG.prepare(
     `UPDATE integration_connections
@@ -145,10 +212,15 @@ export async function getConnectionAccessToken(
   env: Env,
   conn: IntegrationConnectionRow,
 ): Promise<string> {
+  // AQU-1775: another deployment's row is refused before any decrypt or
+  // refresh — a refresh here would rotate THAT deployment's token away.
+  const foreign = foreignConnectionError(env, conn)
+  if (foreign) throw foreign
+
   const expiresAt = conn.access_token_expires_at
   const expMs = expiresAt ? new Date(expiresAt).getTime() : null
   if (expMs == null || expMs - Date.now() > REFRESH_SKEW_MS) {
-    return decryptMondayToken(env.SECRET_KEY, conn.access_token_enc)
+    return decryptMondayToken(mondayTokenKeyMaterial(env), conn.access_token_enc)
   }
 
   const existing = inflightRefresh.get(conn.id)
@@ -163,7 +235,7 @@ async function doRefresh(env: Env, conn: IntegrationConnectionRow): Promise<stri
     if (!conn.refresh_token_enc) {
       throw new MondayAuthError("no refresh token stored")
     }
-    const refreshToken = await decryptMondayToken(env.SECRET_KEY, conn.refresh_token_enc)
+    const refreshToken = await decryptMondayToken(mondayTokenKeyMaterial(env), conn.refresh_token_enc)
     const tokens = await refreshTokenGrant(env, refreshToken)
     await persistTokenSet(env, conn.id, tokens)
     return tokens.accessToken

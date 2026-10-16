@@ -25,8 +25,11 @@
 
 import { MEMBERSHIP_MAX_COMMANDS } from './commands-membership'
 import { POLICY_SETTINGS_KEYS, type PatchSettingsOp } from './commands-patch-settings'
+import { normalizeTextDirection, type TextDirection } from '../../../db/shared/text-direction'
 import type { BriefPatch } from '../../../db/shared/brief'
 import { ROLE } from '../events/role-policy'
+import type { AskedLane, ExternalLaneSpec } from '../../../db/shared/lanes'
+import { parseLaneSpecs, RETIRED_LANE_SETTINGS_KEYS, RETIRED_LANE_SETTINGS_MESSAGE } from './external-lane'
 
 export interface ProjectSetupMember {
   username: string
@@ -40,6 +43,13 @@ export interface ProjectSetupImport {
   resultIndex?: number
   sourceLanguage?: string
   targetLanguage?: string
+  /** AQU-1471: per-file direction override. Absent = the project's
+   *  `sourceTextDirection`/`targetTextDirection` setting (which this same plan
+   *  may be writing in its `settings` block), then the language. */
+  sourceTextDirection?: TextDirection
+  targetTextDirection?: TextDirection
+  /** Target lane id for translations this artifact already carries. */
+  laneId?: string
 }
 
 export interface ProjectSetupCommand {
@@ -53,6 +63,11 @@ export interface ProjectSetupCommand {
   /** Upsert semantics: InviteMember for a new person, SetRole for a member. */
   members?: ProjectSetupMember[]
   imports?: ProjectSetupImport[]
+  /** Lanes to create. They become lane rows; the four language settings keys
+   *  are rejected. Prepare fills {@link plannedLanes} with the ids to insert. */
+  lanes?: ExternalLaneSpec[]
+  /** Server-planned lane rows. Not accepted from the caller. */
+  plannedLanes?: AskedLane[]
   /** The unsupported spec §2.1 create-in-plan block. Carried through the shape
    *  validator ONLY so prepare can reject it with the field named rather than
    *  as an anonymous "unsupported field" issue. */
@@ -124,7 +139,23 @@ export function validateProjectSetupCommand(
       issues.push({ index, message: 'ProjectSetup.settings must be a plain object when present' })
       return null
     }
+    const settingsBlob = c.settings as Record<string, unknown>
+    const retired = RETIRED_LANE_SETTINGS_KEYS.filter((key) => key in settingsBlob)
+    if (retired.length > 0) {
+      issues.push({ index, message: RETIRED_LANE_SETTINGS_MESSAGE })
+      return null
+    }
     settings = c.settings
+  }
+
+  let lanes: ExternalLaneSpec[] | undefined
+  if (c.lanes !== undefined) {
+    const parsed = parseLaneSpecs(c.lanes, 'ProjectSetup.lanes')
+    if (!parsed.ok) {
+      issues.push({ index, message: parsed.message })
+      return null
+    }
+    lanes = parsed.lanes
   }
 
   let brief: ProjectSetupCommand['brief']
@@ -195,9 +226,19 @@ export function validateProjectSetupCommand(
         issues.push({ index, message: `ProjectSetup.imports[${i}].fileName must be a non-empty string` })
         return null
       }
+      if (raw.laneId !== undefined && typeof raw.laneId !== 'string') {
+        issues.push({ index, message: `ProjectSetup.imports[${i}].laneId must be a string when present` })
+        return null
+      }
       for (const key of ['fileType', 'sourceLanguage', 'targetLanguage'] as const) {
         if (raw[key] !== undefined && typeof raw[key] !== 'string') {
           issues.push({ index, message: `ProjectSetup.imports[${i}].${key} must be a string when present` })
+          return null
+        }
+      }
+      for (const key of ['sourceTextDirection', 'targetTextDirection'] as const) {
+        if (raw[key] !== undefined && normalizeTextDirection(raw[key]) === null) {
+          issues.push({ index, message: `ProjectSetup.imports[${i}].${key} must be "ltr" or "rtl" when present` })
           return null
         }
       }
@@ -215,6 +256,9 @@ export function validateProjectSetupCommand(
         ...(raw.resultIndex !== undefined ? { resultIndex: raw.resultIndex as number } : {}),
         ...(raw.sourceLanguage !== undefined ? { sourceLanguage: raw.sourceLanguage as string } : {}),
         ...(raw.targetLanguage !== undefined ? { targetLanguage: raw.targetLanguage as string } : {}),
+        ...(raw.sourceTextDirection !== undefined ? { sourceTextDirection: raw.sourceTextDirection as TextDirection } : {}),
+        ...(raw.targetTextDirection !== undefined ? { targetTextDirection: raw.targetTextDirection as TextDirection } : {}),
+        ...(raw.laneId !== undefined ? { laneId: raw.laneId as string } : {}),
       })
     }
   }
@@ -224,11 +268,12 @@ export function validateProjectSetupCommand(
     settings === undefined &&
     brief === undefined &&
     members === undefined &&
-    imports === undefined
+    imports === undefined &&
+    lanes === undefined
   ) {
     issues.push({
       index,
-      message: 'ProjectSetup needs at least one of settings, brief, members or imports',
+      message: 'ProjectSetup needs at least one of settings, lanes, brief, members or imports',
     })
     return null
   }
@@ -240,6 +285,7 @@ export function validateProjectSetupCommand(
     ...(brief !== undefined ? { brief } : {}),
     ...(members !== undefined ? { members } : {}),
     ...(imports !== undefined ? { imports } : {}),
+    ...(lanes !== undefined ? { lanes } : {}),
     ...(c.project !== undefined ? { project: c.project } : {}),
   }
 }

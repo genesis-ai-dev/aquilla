@@ -7,7 +7,7 @@ import {
   type DeltaEmitters,
   type CurrentCell,
 } from "./delta"
-import { dcsCellId, dcsFileId, dcsEventId } from "./cell-id"
+import { dcsCellId, dcsFileId, dcsEventId, dcsLegacyFileId } from "./cell-id"
 import { contentHash } from "./content-hash"
 import type { DcsCatalogEntry } from "./types"
 
@@ -50,7 +50,7 @@ const NEW_TIT_USFM = `\\id TIT
 \\v 3 A new verse added in v89.`
 
 const TIT_PATH = "57-TIT.usfm"
-const TIT_FILE_ID = dcsFileId(REPO, TIT_PATH)
+const TIT_FILE_ID = dcsFileId(PROJECT_ID, REPO, TIT_PATH)
 
 // cell ids for the four refs in play.
 const V1 = dcsCellId(`${REPO}|TIT 1:1`)
@@ -130,6 +130,7 @@ projects:
       }),
     }
     const delta = await computeDelta({
+      projectId: PROJECT_ID,
       client: client as never,
       cursor: { ...OLD_ENTRY, trackMode: "release", importedAt: "x" } as never,
       oldEntry: OLD_ENTRY,
@@ -150,6 +151,8 @@ projects:
 describe("computeDelta — classification (spec §6, THE money logic)", () => {
   it("classifies edited→commit, added→create, unchanged→nothing, vanished→delete", async () => {
     const delta = await computeDelta({
+       
+      projectId: PROJECT_ID,
        
       client: fakeClient() as any,
       cursor: { ...OLD_ENTRY, trackMode: "release", importedAt: "x" } as never,
@@ -201,6 +204,8 @@ describe("computeDelta — classification (spec §6, THE money logic)", () => {
     ])
     const delta = await computeDelta({
        
+      projectId: PROJECT_ID,
+       
       client: client as any,
       cursor: { ...OLD_ENTRY } as never,
       oldEntry: OLD_ENTRY,
@@ -218,6 +223,8 @@ describe("computeDelta — classification (spec §6, THE money logic)", () => {
       fetchRaw: vi.fn(),
     }
     const delta = await computeDelta({
+       
+      projectId: PROJECT_ID,
        
       client: client as any,
       cursor: { ...OLD_ENTRY } as never,
@@ -259,6 +266,7 @@ describe("computeRepairDelta — re-parses ALL held files at the pinned ref", ()
       "LICENSE.md": "license text",
     })
     const delta = await computeRepairDelta({
+      projectId: PROJECT_ID,
       client: client as never,
       entry: OLD_ENTRY,
       currentCells: currentCells(), // hashes match the pinned text exactly
@@ -280,6 +288,7 @@ describe("computeRepairDelta — re-parses ALL held files at the pinned ref", ()
     current.set(V1, { ...current.get(V1)!, contentHash: contentHash("Paul,") })
 
     const delta = await computeRepairDelta({
+      projectId: PROJECT_ID,
       client: client as never,
       entry: OLD_ENTRY,
       currentCells: current,
@@ -309,6 +318,7 @@ describe("computeRepairDelta — re-parses ALL held files at the pinned ref", ()
     const current = currentCells()
     current.delete(V2)
     const delta = await computeRepairDelta({
+      projectId: PROJECT_ID,
       client: client as never,
       entry: OLD_ENTRY,
       currentCells: current,
@@ -330,6 +340,7 @@ describe("computeRepairDelta — re-parses ALL held files at the pinned ref", ()
 \\v 1 Paul, a prisoner of Christ Jesus.`,
     })
     const delta = await computeRepairDelta({
+      projectId: PROJECT_ID,
       client: client as never,
       entry: OLD_ENTRY,
       currentCells: currentCells(), // TIT-only adapter
@@ -346,6 +357,7 @@ describe("computeRepairDelta — re-parses ALL held files at the pinned ref", ()
   it("fetches nothing when the adapter holds no cells", async () => {
     const client = repairClient({ "manifest.yaml": MANIFEST_YAML, [TIT_PATH]: PINNED_TIT_USFM })
     const delta = await computeRepairDelta({
+      projectId: PROJECT_ID,
       client: client as never,
       entry: OLD_ENTRY,
       currentCells: new Map(),
@@ -361,6 +373,7 @@ describe("repairRevisionToken — repair event ids must not collide with the imp
     const current = currentCells()
     current.set(V1, { ...current.get(V1)!, contentHash: contentHash("Paul,") })
     const delta = await computeRepairDelta({
+      projectId: PROJECT_ID,
       client: client as never,
       entry: OLD_ENTRY,
       currentCells: current,
@@ -383,6 +396,8 @@ describe("repairRevisionToken — repair event ids must not collide with the imp
 describe("applyDelta — routes to the injected emitters, idempotent event ids", () => {
   it("calls create/commit(chained)/delete with deterministic event ids", async () => {
     const delta = await computeDelta({
+       
+      projectId: PROJECT_ID,
        
       client: fakeClient() as any,
       cursor: { ...OLD_ENTRY } as never,
@@ -424,6 +439,8 @@ describe("applyDelta — routes to the injected emitters, idempotent event ids",
   it("running applyDelta twice yields the SAME event ids (idempotency)", async () => {
     const delta = await computeDelta({
        
+      projectId: PROJECT_ID,
+       
       client: fakeClient() as any,
       cursor: { ...OLD_ENTRY } as never,
       oldEntry: OLD_ENTRY,
@@ -456,6 +473,8 @@ describe("applyDelta — routes to the injected emitters, idempotent event ids",
     // silently drops the second project's import. The event id MUST carry the
     // projectId so both projects land their own events.
     const delta = await computeDelta({
+
+      projectId: PROJECT_ID,
 
       client: fakeClient() as any,
       cursor: { ...OLD_ENTRY } as never,
@@ -531,6 +550,7 @@ describe("front-matter opt-out survives re-parse (AQU-686)", () => {
 
   it("computeDelta does not re-create excluded front matter when the project opted out", async () => {
     const delta = await computeDelta({
+      projectId: PROJECT_ID,
       client: fmClient() as never,
       cursor: { ...OLD_ENTRY, trackMode: "release", importedAt: "x" } as never,
       oldEntry: OLD_ENTRY,
@@ -547,6 +567,7 @@ describe("front-matter opt-out survives re-parse (AQU-686)", () => {
     // Guards the AQU-634 default: the opt-out is off, the adapter never held the
     // front-matter cell, so it is a legitimate create.
     const delta = await computeDelta({
+      projectId: PROJECT_ID,
       client: fmClient() as never,
       cursor: { ...OLD_ENTRY, trackMode: "release", importedAt: "x" } as never,
       oldEntry: OLD_ENTRY,
@@ -560,6 +581,7 @@ describe("front-matter opt-out survives re-parse (AQU-686)", () => {
 
   it("computeRepairDelta reports an opted-out adapter as in sync, not diverging", async () => {
     const delta = await computeRepairDelta({
+      projectId: PROJECT_ID,
       client: fmClient() as never,
       entry: OLD_ENTRY,
       currentCells: optedOutCurrentCells(),
@@ -568,6 +590,236 @@ describe("front-matter opt-out survives re-parse (AQU-686)", () => {
     // Without the option this scan reported a create for every front-matter
     // cell, so "Re-sync content" offered to re-add content the project had
     // deliberately excluded.
+    expect(delta).toEqual({ creates: [], commits: [], deletes: [] })
+  })
+})
+
+describe("computeDelta — a changed path that is absent at the new ref (AQU-1860)", () => {
+  // compareRefs returns the union of the filenames touched by EVERY commit in
+  // the range, so a file renamed or deleted part-way through shows up in the
+  // changed list while not existing at the new ref. Measured on
+  // WycliffeAssociates/en_udb v19-01...v19-10: 84 changed paths, 73 present at
+  // v19-10, 11 absent (all historical front-matter .md folders, no .usfm).
+  // Letting one 404 abort the batch lost the entire release.
+  const STALE_MD = "00-UDBfront&back/UDB-3-Appendix.md"
+  const LIVE_MD = "00-UDB_front&back/UDB-1-Intro.md"
+
+  /** Built standalone rather than by mutating fakeClient(), so the raw-fetch
+   *  stub is typed as returning plain `string` instead of that helper's
+   *  inferred union of its own literals. */
+  function clientWithStalePath(
+    raw: (path: string) => Promise<string>,
+  ) {
+    return {
+      getCatalogEntry: vi.fn(),
+      searchCatalog: vi.fn(),
+      compareRefs: vi.fn(async () => ({
+        totalCommits: 479,
+        changedFiles: [STALE_MD, TIT_PATH, LIVE_MD],
+      })),
+      getTree: vi.fn(),
+      fetchRaw: vi.fn(
+        async (_o: string, _r: string, _ref: string, path: string): Promise<string> =>
+          raw(path),
+      ),
+    }
+  }
+
+  /** The measured en_udb case: one changed path absent at the new ref. */
+  const stalePathRaw = async (path: string): Promise<string> => {
+    if (path === "manifest.yaml") return MANIFEST_YAML
+    if (path === TIT_PATH) return NEW_TIT_USFM
+    if (path === LIVE_MD) return "# intro"
+    if (path === STALE_MD) {
+      // Exactly what DcsClient.fetchRaw raises for a 404.
+      throw new Error(
+        "DCS raw fetch failed (HTTP 404) for " +
+          `https://git.door43.org/WycliffeAssociates/en_udb/raw/tag/v19-10/${path}`,
+      )
+    }
+    return ""
+  }
+
+  it("skips the absent member and still delivers the rest of the release", async () => {
+    const client = clientWithStalePath(stalePathRaw)
+    const delta = await computeDelta({
+      projectId: PROJECT_ID,
+      client: client as never,
+      cursor: {
+        owner: "unfoldingWord",
+        repo: "en_ult",
+        subject: "Aligned Bible",
+        contentFormat: "usfm",
+        trackMode: "release",
+        ref: OLD_ENTRY.ref,
+        commitSha: OLD_ENTRY.commitSha,
+        released: OLD_ENTRY.released,
+        importedAt: "2026-05-02T00:00:00Z",
+      },
+      oldEntry: OLD_ENTRY,
+      newEntry: NEW_ENTRY,
+      currentCells: currentCells(),
+    })
+
+    // The USFM book still classified: v1 edited, v3 added, v4 tombstoned.
+    expect(delta.commits.map((c) => c.cell.cellId)).toEqual([V1])
+    expect(delta.creates.map((c) => c.cell.cellId)).toEqual([V3])
+    expect(delta.deletes).toEqual([V4_GONE])
+
+    // It was attempted, not silently dropped from the request list.
+    const requested = client.fetchRaw.mock.calls.map((call) => call[3])
+    expect(requested).toContain(STALE_MD)
+    expect(requested).toContain(TIT_PATH)
+  })
+
+  it("aborts on any failure that is NOT a missing member", async () => {
+    // A throttled or broken upstream must never look like an empty delta.
+    const client = clientWithStalePath(async (path) => {
+      if (path === "manifest.yaml") return MANIFEST_YAML
+      if (path === TIT_PATH) {
+        throw new Error("DCS raw fetch failed (HTTP 503) for https://git.door43.org/x")
+      }
+      return ""
+    })
+    await expect(
+      computeDelta({
+        projectId: PROJECT_ID,
+        client: client as never,
+        cursor: {
+          owner: "unfoldingWord",
+          repo: "en_ult",
+          subject: "Aligned Bible",
+          contentFormat: "usfm",
+          trackMode: "release",
+          ref: OLD_ENTRY.ref,
+          commitSha: OLD_ENTRY.commitSha,
+          released: OLD_ENTRY.released,
+          importedAt: "2026-05-02T00:00:00Z",
+        },
+        oldEntry: OLD_ENTRY,
+        newEntry: NEW_ENTRY,
+        currentCells: currentCells(),
+      }),
+    ).rejects.toThrow(/HTTP 503/)
+  })
+
+  it("never tombstones cells belonging to a member it could not read", async () => {
+    // The dangerous reading of "absent upstream" would be "delete its cells".
+    // classifyAgainstCurrent scopes deletes to the files the parse produced, so
+    // a skipped member's cells must survive untouched.
+    const client = clientWithStalePath(stalePathRaw)
+    const held = currentCells()
+    const staleFileId = dcsFileId(PROJECT_ID, REPO, STALE_MD)
+    const ORPHAN = dcsCellId(`${REPO}|appendix-1`)
+    held.set(ORPHAN, {
+      eventId: dcsEventId(PROJECT_ID, REPO, OLD_ENTRY.commitSha, ORPHAN),
+      contentHash: contentHash("appendix text"),
+      fileId: staleFileId,
+    })
+
+    const delta = await computeDelta({
+      projectId: PROJECT_ID,
+      client: client as never,
+      cursor: {
+        owner: "unfoldingWord",
+        repo: "en_ult",
+        subject: "Aligned Bible",
+        contentFormat: "usfm",
+        trackMode: "release",
+        ref: OLD_ENTRY.ref,
+        commitSha: OLD_ENTRY.commitSha,
+        released: OLD_ENTRY.released,
+        importedAt: "2026-05-02T00:00:00Z",
+      },
+      oldEntry: OLD_ENTRY,
+      newEntry: NEW_ENTRY,
+      currentCells: held,
+    })
+
+    expect(delta.deletes).not.toContain(ORPHAN)
+    expect(delta.deletes).toEqual([V4_GONE])
+  })
+})
+
+describe("AQU-1891 — a project imported BEFORE file ids were project-scoped", () => {
+  // Pre-fix projects hold file rows under the project-agnostic
+  // `dcsLegacyFileId(repo, path)`. The delta and repair paths derive the new
+  // scoped id, so without a read-side fallback every parsed file would fail the
+  // "does this adapter hold it?" test: "Check for updates" would silently
+  // report nothing and repair would fetch nothing, forever.
+  const LEGACY_FILE_ID = dcsLegacyFileId(REPO, TIT_PATH)
+
+  /** The same adapter cells, but filed under the LEGACY (unscoped) file id. */
+  function legacyCurrentCells(): Map<string, CurrentCell> {
+    const m = currentCells()
+    for (const [cellId, cell] of m) m.set(cellId, { ...cell, fileId: LEGACY_FILE_ID })
+    return m
+  }
+
+  it("the legacy id really is different from today's scoped id (else this proves nothing)", () => {
+    expect(LEGACY_FILE_ID).not.toBe(TIT_FILE_ID)
+  })
+
+  it("computeDelta still classifies a pre-fix project's files, and creates land in the HELD file", async () => {
+    const delta = await computeDelta({
+      projectId: PROJECT_ID,
+      client: fakeClient() as never,
+      cursor: { ...OLD_ENTRY, trackMode: "release", importedAt: "x" } as never,
+      oldEntry: OLD_ENTRY,
+      newEntry: NEW_ENTRY,
+      currentCells: legacyCurrentCells(),
+    })
+
+    // Same classification as the scoped-id case: v1 edited, v3 added, v4 gone.
+    expect(delta.commits.map((c) => c.cell.cellId)).toEqual([V1])
+    expect(delta.creates.map((c) => c.cell.cellId)).toEqual([V3])
+    expect(delta.deletes).toEqual([V4_GONE])
+    // The create must carry the id the PROJECTION holds, not the newly derived
+    // scoped one — otherwise the new cell projects into a file row that does
+    // not exist for this project.
+    expect(delta.creates[0].fileId).toBe(LEGACY_FILE_ID)
+  })
+
+  it("computeRepairDelta still fetches and repairs a pre-fix project's held files", async () => {
+    const client = repairClient({ "manifest.yaml": MANIFEST_YAML, [TIT_PATH]: PINNED_TIT_USFM })
+    const current = legacyCurrentCells()
+    // Make v1 diverge from the pinned text so a repair commit is expected.
+    current.set(V1, { ...current.get(V1)!, contentHash: contentHash("mis-parsed") })
+
+    const delta = await computeRepairDelta({
+      projectId: PROJECT_ID,
+      client: client as never,
+      entry: OLD_ENTRY,
+      currentCells: current,
+    })
+
+    // The held file was actually fetched (the pre-filter accepted the legacy id).
+    // The trailing argument is the abort signal the pooled fetch (AQU-1860)
+    // threads through; this call passed none.
+    expect(client.fetchRaw).toHaveBeenCalledWith(
+      OLD_ENTRY.owner,
+      OLD_ENTRY.name,
+      OLD_ENTRY.ref,
+      TIT_PATH,
+      "tag",
+      undefined,
+    )
+    expect(delta.commits.map((c) => c.cell.cellId)).toEqual([V1])
+  })
+
+  it("a project that holds NEITHER id is still ignored (no spurious creates)", async () => {
+    const foreign = currentCells()
+    for (const [cellId, cell] of foreign) {
+      foreign.set(cellId, { ...cell, fileId: dcsFileId("some-other-project", REPO, TIT_PATH) })
+    }
+    const delta = await computeDelta({
+      projectId: PROJECT_ID,
+      client: fakeClient() as never,
+      cursor: { ...OLD_ENTRY, trackMode: "release", importedAt: "x" } as never,
+      oldEntry: OLD_ENTRY,
+      newEntry: NEW_ENTRY,
+      currentCells: foreign,
+    })
     expect(delta).toEqual({ creates: [], commits: [], deletes: [] })
   })
 })

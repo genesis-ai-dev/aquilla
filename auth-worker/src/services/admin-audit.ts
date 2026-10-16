@@ -62,7 +62,7 @@ type MembershipScope =
 
 type ActingUser = Pick<AuthUser, "id" | "username" | "email">
 
-export const isAdminActor = (env: Env, actor: ActingUser): boolean =>
+export const isAdminActor = (env: Env, actor: ActingUser): Promise<boolean> =>
   isPlatformAdminEmail(env, actor.email)
 
 /**
@@ -76,7 +76,7 @@ export async function priorMembershipRole(
   where: Extract<MembershipScope, { scope: "org" | "project" }>,
   targetUserId: number,
 ): Promise<number | null> {
-  if (!isAdminActor(env, actor)) return null
+  if (!(await isAdminActor(env, actor))) return null
   const row =
     where.scope === "org"
       ? await env.AQUILLA_PG.prepare(
@@ -108,7 +108,7 @@ export async function auditMembershipChange(
     email?: string | null
   },
 ): Promise<void> {
-  if (!isAdminActor(env, actor)) return
+  if (!(await isAdminActor(env, actor))) return
   try {
     const target = entry.target ?? null
     const targetUsername = target

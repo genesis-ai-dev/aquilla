@@ -14,6 +14,7 @@ import {
   decryptMondayToken,
   codeChallengeS256,
 } from "../lib/monday/crypto"
+import { parseJsonColumn } from "../lib/monday/types"
 
 const menv = {
   ...env,
@@ -93,8 +94,8 @@ async function seedConnection(
   const expiresAt =
     opts.expiresInMs != null ? new Date(Date.now() + opts.expiresInMs).toISOString() : null
   await env.AQUILLA_PG.prepare(
-    `INSERT INTO integration_connections (id, org_id, provider, account, access_token_enc, refresh_token_enc, access_token_expires_at, created_by)
-     VALUES ('conn-1', '1', 'monday', '{"accountSlug":"acme"}', ?, ?, ?, 'wendi')`,
+    `INSERT INTO integration_connections (id, org_id, provider, account, access_token_enc, refresh_token_enc, access_token_expires_at, created_by, environment)
+     VALUES ('conn-1', '1', 'monday', '{"accountSlug":"acme"}', ?, ?, ?, 'wendi', 'test')`,
   )
     .bind(accessEnc, refreshEnc, expiresAt)
     .run()
@@ -226,7 +227,9 @@ describe("GET /api/v2/monday/oauth/callback", () => {
       menv,
     )
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ ok: true, backTo: "/settings/monday" })
+    // No backTo sent: return to the org's own Monday settings. (It used to be
+    // "/settings/monday", a page the app doesn't have.)
+    expect(await res.json()).toEqual({ ok: true, backTo: "/orgs/1/settings/monday" })
 
     // Token exchange hit the NEW OAuth 2.1 endpoint with the PKCE verifier —
     // and the verifier matches the challenge we sent in the authorize URL.
@@ -237,7 +240,7 @@ describe("GET /api/v2/monday/oauth/callback", () => {
     expect(await codeChallengeS256(sentVerifier)).toBe(codeChallenge)
 
     const row = await env.AQUILLA_PG.prepare(
-      `SELECT access_token_enc, refresh_token_enc, access_token_expires_at, needs_reauth, provider, account
+      `SELECT access_token_enc, refresh_token_enc, access_token_expires_at, needs_reauth, provider, account, environment
          FROM integration_connections WHERE org_id = '1'`,
     ).first<{
       access_token_enc: string
@@ -246,8 +249,11 @@ describe("GET /api/v2/monday/oauth/callback", () => {
       needs_reauth: boolean
       provider: string
       account: { accountSlug?: string; userName?: string } | string
+      environment: string | null
     }>()
     expect(row).not.toBeNull()
+    // AQU-1775: stamped with the deployment that made it, so another one refuses it.
+    expect(row!.environment).toBe(env.ENVIRONMENT)
     // Neither token stored in plaintext — both round-trip through decrypt.
     expect(row!.access_token_enc).not.toContain(accessJwt)
     expect(await decryptMondayToken(env.SECRET_KEY, row!.access_token_enc)).toBe(accessJwt)
@@ -392,7 +398,8 @@ describe("POST /api/v2/monday/internal/push", () => {
 
     const res = await internalPush(`Bearer ${env.SYNC_SECRET_KEY}`)
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ ok: true, pushed: false })
+    // `linked: true` is what the sync-worker DO caches (AQU-1828).
+    expect(await res.json()).toEqual({ ok: true, pushed: false, linked: true })
     expect(fetchMock).not.toHaveBeenCalled()
 
     const link = await env.AQUILLA_PG.prepare(
@@ -431,6 +438,189 @@ describe("POST /api/v2/monday/internal/push", () => {
   })
 })
 
+describe("POST /api/v2/monday/projects/:projectId/sync (Sync now)", () => {
+  it("refuses while the Sync switch is off, and writes nothing to the board", async () => {
+    await seedOrgProject()
+    await seedLink()
+    await env.AQUILLA_PG.prepare("UPDATE integration_links SET enabled = FALSE WHERE id = 'link-1'").run()
+    const fetchFn = mockFetch(() => null)
+    const res = await request("anna", "POST", "/api/v2/monday/projects/proj-1/sync")
+    expect(res.status).toBe(409)
+    expect(fetchFn).not.toHaveBeenCalled()
+  })
+})
+
+describe("PATCH link: turning Sync back on", () => {
+  it("pushes straight away and returns the result", async () => {
+    await seedOrgProject()
+    await seedLink({ lastPushedAt: null })
+    await env.AQUILLA_PG.prepare("UPDATE integration_links SET enabled = FALSE WHERE id = 'link-1'").run()
+    mockFetch((url, body) => {
+      if (url.startsWith("https://api.monday.com/v2") && body.includes("create_item")) {
+        return jsonResponse({ data: { c0: { id: "901" } } })
+      }
+      return null
+    })
+    const res = await request("anna", "PATCH", "/api/v2/monday/projects/proj-1/link", { enabled: true })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { link: { enabled: boolean; lastPushedAt: string | null }; push?: { ok: boolean; itemsUpserted?: number } }
+    expect(body.link.enabled).toBe(true)
+    expect(body.push).toMatchObject({ ok: true, itemsUpserted: 1 })
+    expect(body.link.lastPushedAt).not.toBeNull()
+  })
+
+  it("doesn't push when Sync was already on, or when turning it off", async () => {
+    await seedOrgProject()
+    await seedLink()
+    const fetchFn = mockFetch(() => null)
+    for (const enabled of [true, false]) {
+      const res = await request("anna", "PATCH", "/api/v2/monday/projects/proj-1/link", { enabled })
+      expect(res.status).toBe(200)
+      expect(((await res.json()) as { push?: unknown }).push).toBeUndefined()
+    }
+    const urls = fetchFn.mock.calls.map(([url]) => String(url))
+    expect(urls.filter((url) => url.startsWith("https://api.monday.com"))).toEqual([])
+  })
+})
+
+describe("re-linking a board Aquilla has written to before", () => {
+  it("reuses the item carrying this project's Aquilla ID instead of creating a second one", async () => {
+    await seedOrgProject()
+    // A link saved without a matchExisting rule (the AI didn't add one), but
+    // with the Aquilla ID column mapped. The board still has the item from
+    // before the disconnect; no integration_item_links row remembers it.
+    await seedLink({
+      lastPushedAt: null,
+      config: {
+        ...baseConfig,
+        columns: [...baseConfig.columns, { columnId: "text_aq", columnType: "text", metric: "external_id" }],
+      },
+    })
+    const calls: string[] = []
+    mockFetch((url, body) => {
+      if (!url.startsWith("https://api.monday.com/v2")) return null
+      calls.push(body)
+      if (body.includes("items_page_by_column_values")) {
+        expect(body).toContain("text_aq")
+        expect(body).toContain("proj-1")
+        return jsonResponse({
+          data: {
+            items_page_by_column_values: {
+              items: [{ id: 555, column_values: [{ id: "text_aq", text: "proj-1" }] }],
+            },
+          },
+        })
+      }
+      if (body.includes("change_multiple_column_values")) {
+        return jsonResponse({ data: { u0: { id: "555" } } })
+      }
+      return null
+    })
+
+    const res = await app.request(
+      "/api/v2/monday/internal/push",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.SYNC_SECRET_KEY}` },
+        body: JSON.stringify({ projectId: "proj-1" }),
+      },
+      menv,
+    )
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as { ok: boolean }).ok).toBe(true)
+    expect(calls.some((b) => b.includes("create_item"))).toBe(false)
+    const itemLink = await env.AQUILLA_PG.prepare(
+      "SELECT external_item_id FROM integration_item_links WHERE link_id = 'link-1' AND entity_id = 'proj-1'",
+    ).first<{ external_item_id: string }>()
+    expect(itemLink!.external_item_id).toBe("555")
+  })
+
+  it("moves the reused item into the projects group once, and never on later pushes", async () => {
+    await seedOrgProject()
+    await seedLink({
+      lastPushedAt: null,
+      config: {
+        ...baseConfig,
+        groupId: "group_aq",
+        columns: [...baseConfig.columns, { columnId: "text_aq", columnType: "text", metric: "external_id" }],
+      },
+    })
+    const calls: string[] = []
+    mockFetch((url, body) => {
+      if (!url.startsWith("https://api.monday.com/v2")) return null
+      calls.push(body)
+      if (body.includes("items_page_by_column_values")) {
+        return jsonResponse({
+          data: { items_page_by_column_values: { items: [{ id: 555, column_values: [{ id: "text_aq", text: "proj-1" }] }] } },
+        })
+      }
+      if (body.includes("move_item_to_group")) return jsonResponse({ data: { g0: { id: "555" } } })
+      if (body.includes("change_multiple_column_values")) return jsonResponse({ data: { u0: { id: "555" } } })
+      return null
+    })
+    const push = () =>
+      app.request(
+        "/api/v2/monday/internal/push",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.SYNC_SECRET_KEY}` },
+          body: JSON.stringify({ projectId: "proj-1" }),
+        },
+        menv,
+      )
+    expect((await push()).status).toBe(200)
+    const moves = calls.filter((b) => b.includes("move_item_to_group"))
+    expect(moves).toHaveLength(1)
+    expect(moves[0]).toContain('item_id: \\"555\\"')
+    expect(moves[0]).toContain('group_id: \\"group_aq\\"')
+
+    // The row is known now: a later push updates it where it is.
+    calls.length = 0
+    await env.AQUILLA_PG.prepare("UPDATE integration_links SET last_pushed_at = NULL WHERE id = 'link-1'").run()
+    expect((await push()).status).toBe(200)
+    expect(calls.some((b) => b.includes("move_item_to_group"))).toBe(false)
+    expect(calls.some((b) => b.includes("change_multiple_column_values"))).toBe(true)
+  })
+
+  it("saving a link to a board with an Aquilla ID column always adds the match rule and maps the column", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    mockFetch((url, body) => {
+      if (!url.startsWith("https://api.monday.com/v2")) return null
+      if (body.includes("settings_str")) {
+        return jsonResponse({
+          data: {
+            boards: [{
+              name: "Ruth Board",
+              columns: [
+                { id: "numbers_1", title: "Progress", type: "numbers" },
+                { id: "text_aq", title: "Aquilla ID", type: "text" },
+              ],
+              groups: [],
+            }],
+          },
+        })
+      }
+      if (body.includes("create_webhook")) return jsonResponse({ data: { create_webhook: { id: 111 } } })
+      return null
+    })
+
+    // The proposal matched by name and left the Aquilla ID column unmapped.
+    const res = await request("anna", "PUT", "/api/v2/monday/projects/proj-1/link", {
+      boardId: "board-9",
+      config: { ...baseConfig, matchExisting: { byName: true } },
+    })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      link: { config: { matchExisting?: unknown; columns: Array<{ columnId: string; metric: string }> } }
+    }
+    expect(body.link.config.matchExisting).toEqual({ columnId: "text_aq" })
+    expect(body.link.config.columns).toContainEqual(
+      expect.objectContaining({ columnId: "text_aq", metric: "external_id" }),
+    )
+  })
+})
+
 // ── Config validation (PUT link) ───────────────────────────────────────────
 
 describe("PUT /api/v2/monday/projects/:projectId/link", () => {
@@ -444,6 +634,8 @@ describe("PUT /api/v2/monday/projects/:projectId/link", () => {
           data: {
             boards: [
               {
+                name: "Authoritative board name",
+                url: "https://real-account.monday.com/boards/board-9",
                 columns: [
                   { id: "numbers_1", title: "Progress", type: "numbers" },
                   { id: "text_ext", title: "External Id", type: "text" },
@@ -474,10 +666,16 @@ describe("PUT /api/v2/monday/projects/:projectId/link", () => {
     })
     expect(res.status).toBe(200)
     const body = (await res.json()) as {
-      link: { boardId: string; config: { columns: Array<{ columnId: string }> } }
+      link: { boardId: string; boardUrl: string; boardName: string; config: { columns: Array<{ columnId: string }> } }
       warnings: string[]
     }
     expect(body.link.boardId).toBe("board-9")
+    expect(body.link.boardName).toBe("Authoritative board name")
+    expect(body.link.boardUrl).toBe("https://real-account.monday.com/boards/board-9")
+    const reloaded = await request("anna", "GET", "/api/v2/monday/projects/proj-1/link")
+    expect(await reloaded.json()).toMatchObject({ orgId: 1, orgConnected: true, link: {
+      boardUrl: body.link.boardUrl, boardName: body.link.boardName,
+    } })
     expect(body.link.config.columns.map((c) => c.columnId)).toEqual(["numbers_1"])
     expect(body.warnings.some((w) => w.includes("ghost_col"))).toBe(true)
 
@@ -487,6 +685,64 @@ describe("PUT /api/v2/monday/projects/:projectId/link", () => {
     expect(row).not.toBeNull()
   })
 
+  // Monday POSTs a challenge to the webhook address before it creates the
+  // webhook. The website (BASE_URL) answers that POST with 405, so the address
+  // must be the identity API host this worker is mounted on.
+  const linkCreatingWebhooks = async (envOverrides: Record<string, string | undefined>) => {
+    await seedOrgProject()
+    await seedConnection()
+    const webhookUrls: string[] = []
+    mockFetch((url, body) => {
+      if (!url.startsWith("https://api.monday.com/v2")) return null
+      if (body.includes("settings_str")) {
+        return jsonResponse({
+          data: { boards: [{ name: "Ruth Board", columns: [{ id: "numbers_1", title: "Progress", type: "numbers" }], groups: [] }] },
+        })
+      }
+      if (body.includes("create_webhook")) {
+        const query = (JSON.parse(body) as { query: string }).query
+        webhookUrls.push(/url: "([^"]+)"/.exec(query)?.[1] ?? "")
+        return jsonResponse({ data: { create_webhook: { id: 111 } } })
+      }
+      if (body.includes("create_group")) {
+        return jsonResponse({ data: { create_group: { id: "group_aq", title: "Aquilla projects" } } })
+      }
+      return null
+    })
+    const res = await app.request(
+      "/api/v2/monday/projects/proj-1/link",
+      {
+        method: "PUT",
+        headers: authHeader(await jwtFor("anna")),
+        body: JSON.stringify({ boardId: "board-9", config: baseConfig }),
+      },
+      { ...menv, BASE_URL: "https://dev.aquilla.app", ...envOverrides },
+    )
+    expect(res.status).toBe(200)
+    expect((await res.json()) as { warnings: string[] }).toMatchObject({ warnings: [] })
+    expect(webhookUrls.length).toBeGreaterThan(0)
+    return webhookUrls
+  }
+
+  it("points the webhooks at the identity API host, not the website", async () => {
+    const urls = await linkCreatingWebhooks({ BASE_URL_API: "https://api.dev.aquilla.app/identity/" })
+    expect(new Set(urls)).toEqual(new Set(["https://api.dev.aquilla.app/identity/api/v2/monday/webhook"]))
+  })
+
+  it("without BASE_URL_API, derives the API host from MCP_OAUTH_ISSUER, never BASE_URL", async () => {
+    const urls = await linkCreatingWebhooks({
+      BASE_URL_API: undefined,
+      MCP_OAUTH_ISSUER: "https://api.dev.aquilla.app/identity",
+    })
+    expect(new Set(urls)).toEqual(new Set(["https://api.dev.aquilla.app/identity/api/v2/monday/webhook"]))
+  })
+
+  it("with neither set, uses the address the worker itself was reached on", async () => {
+    const urls = await linkCreatingWebhooks({ BASE_URL_API: undefined, MCP_OAUTH_ISSUER: undefined })
+    expect(urls.every((u) => !u.startsWith("https://dev.aquilla.app"))).toBe(true)
+    expect(new Set(urls)).toEqual(new Set(["http://localhost/api/v2/monday/webhook"]))
+  })
+
   it("409s when the org has no Monday connection", async () => {
     await seedOrgProject()
     const res = await request("anna", "PUT", "/api/v2/monday/projects/proj-1/link", {
@@ -494,6 +750,103 @@ describe("PUT /api/v2/monday/projects/:projectId/link", () => {
       config: baseConfig,
     })
     expect(res.status).toBe(409)
+  })
+})
+
+describe("PATCH /api/v2/monday/projects/:projectId/link (mapping change)", () => {
+  // A link made before "Audio validated %" existed, flagged stale since.
+  async function seedStaleLink() {
+    await seedOrgProject()
+    await seedLink()
+    await env.AQUILLA_PG.prepare(
+      `UPDATE integration_links SET remote_state = ?::jsonb, remote_state_stale = TRUE WHERE id = 'link-1'`,
+    )
+      .bind(JSON.stringify({
+        fetchedAt: "2026-09-01T00:00:00.000Z",
+        url: "https://acme.monday.com/boards/board-9",
+        name: "Ruth Board",
+        columns: [{ id: "numbers_1", title: "Progress", type: "numbers" }],
+        groups: [],
+      }))
+      .run()
+  }
+
+  const withNewColumn = {
+    ...baseConfig,
+    columns: [
+      ...baseConfig.columns,
+      { columnId: "numbers_new", columnType: "numbers", metric: "audio_validated_pct" },
+    ],
+  }
+
+  it("checks the mapping against the board's current columns, and clears the stale banner", async () => {
+    await seedStaleLink()
+    let structureReads = 0
+    mockFetch((url, body) => {
+      if (!url.startsWith("https://api.monday.com/v2") || !body.includes("settings_str")) return null
+      structureReads++
+      return jsonResponse({
+        data: {
+          boards: [{
+            name: "Ruth Board",
+            url: "https://acme.monday.com/boards/board-9",
+            columns: [
+              { id: "numbers_1", title: "Progress", type: "numbers" },
+              { id: "numbers_new", title: "Audio validated %", type: "numbers" },
+            ],
+            groups: [],
+          }],
+        },
+      })
+    })
+
+    const res = await request("anna", "PATCH", "/api/v2/monday/projects/proj-1/link", { config: withNewColumn })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      link: { structureStale: boolean; config: { columns: Array<{ columnId: string }> } }
+      warnings: string[]
+    }
+    expect(structureReads).toBe(1)
+    expect(body.warnings).toEqual([])
+    expect(body.link.config.columns.map((col) => col.columnId)).toEqual(["numbers_1", "numbers_new"])
+    expect(body.link.structureStale).toBe(false)
+
+    const row = await env.AQUILLA_PG.prepare(
+      "SELECT remote_state, remote_state_stale FROM integration_links WHERE id = 'link-1'",
+    ).first<{ remote_state: unknown; remote_state_stale: boolean }>()
+    const saved = (typeof row?.remote_state === "string" ? JSON.parse(row.remote_state) : row?.remote_state) as {
+      columns: Array<{ id: string }>
+    }
+    expect(saved.columns.map((col) => col.id)).toContain("numbers_new")
+    expect(row?.remote_state_stale).toBe(false)
+  })
+
+  it("when Monday can't be read, falls back to the saved columns, says so, and keeps the banner", async () => {
+    await seedStaleLink()
+    mockFetch((url) =>
+      url.startsWith("https://api.monday.com/v2") ? jsonResponse({ error_message: "down" }, 500) : null,
+    )
+
+    const res = await request("anna", "PATCH", "/api/v2/monday/projects/proj-1/link", { config: withNewColumn })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      link: { structureStale: boolean; config: { columns: Array<{ columnId: string }> } }
+      warnings: string[]
+    }
+    expect(body.link.config.columns.map((col) => col.columnId)).toEqual(["numbers_1"])
+    expect(body.warnings.some((w) => w.includes("could not read the board's current columns"))).toBe(true)
+    expect(body.link.structureStale).toBe(true)
+  })
+
+  it("an enable/disable toggle alone doesn't call Monday or touch the stale flag", async () => {
+    await seedStaleLink()
+    const fetchFn = mockFetch(() => null)
+    const res = await request("anna", "PATCH", "/api/v2/monday/projects/proj-1/link", { enabled: false })
+    expect(res.status).toBe(200)
+    // The only call is the sync-worker's link-changed notice (AQU-1828), never Monday.
+    const urls = fetchFn.mock.calls.map(([url]) => String(url))
+    expect(urls.filter((url) => url.startsWith("https://api.monday.com"))).toEqual([])
+    expect(((await res.json()) as { link: { structureStale: boolean } }).link.structureStale).toBe(true)
   })
 })
 
@@ -1040,5 +1393,438 @@ describe("analyze board selection", () => {
     const body = (await res.json()) as { error: string; noBoards?: boolean }
     expect(body.noBoards).toBe(true)
     expect(body.error).toMatch(/no boards/i)
+  })
+})
+
+// ── "Add the missing columns for me" ───────────────────────────────────────
+
+describe("POST /api/v2/monday/projects/:projectId/columns", () => {
+  /** A fake board whose columns grow as create_column is called. */
+  function fakeBoard(initial: Array<{ id: string; title: string; type: string }>, failTitles: string[] = []) {
+    const columns = [...initial]
+    const creates: string[] = []
+    const fn = mockFetch((url, body) => {
+      if (!url.startsWith("https://api.monday.com/v2")) return null
+      if (body.includes("create_column(")) {
+        const title = /title: \\"([^"\\]+)\\"/.exec(body)?.[1] ?? "?"
+        const type = /column_type: (\w+)/.exec(body)?.[1] ?? "?"
+        creates.push(`${title}:${type}`)
+        if (failTitles.includes(title)) {
+          return jsonResponse({ errors: [{ message: `Column "${title}" refused` }] })
+        }
+        const col = { id: `col_${creates.length}`, title, type }
+        columns.push(col)
+        return jsonResponse({ data: { create_column: col } })
+      }
+      if (body.includes("settings_str")) {
+        return jsonResponse({
+          data: {
+            boards: [{ name: "Ruth Board", url: "https://acme.monday.com/boards/9", columns: [...columns], groups: [{ id: "topics", title: "Group" }] }],
+          },
+        })
+      }
+      return null
+    })
+    return { fn, columns, creates }
+  }
+
+  it("creates only the missing columns with plain titles and the right types, and always adds Aquilla ID", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    const board = fakeBoard([
+      { id: "name", title: "Name", type: "name" },
+      { id: "numbers_1", title: "Completion %", type: "numbers" },
+    ])
+
+    const res = await request("anna", "POST", "/api/v2/monday/projects/proj-1/columns", {
+      boardId: "board-9",
+      metrics: ["completion_pct", "validated_pct", "status_auto", "last_activity", "translators", "project_name"],
+    })
+    expect(res.status).toBe(200)
+    const out = (await res.json()) as {
+      created: Array<{ metric: string; columnId: string; title: string; columnType: string }>
+      reused: Array<{ metric: string; columnId: string }>
+      failed: unknown[]
+      structure: { columns: Array<{ id: string }> }
+    }
+    expect(board.creates).toEqual([
+      "Validated %:numbers",
+      "Status:status",
+      "Last activity:date",
+      "Translators:text",
+      "Aquilla ID:text",
+    ])
+    expect(out.reused).toEqual([{ metric: "completion_pct", columnId: "numbers_1", columnType: "numbers", title: "Completion %" }])
+    expect(out.created.map((col) => col.metric)).toEqual([
+      "validated_pct",
+      "status_auto",
+      "last_activity",
+      "translators",
+      "external_id",
+    ])
+    expect(out.failed).toEqual([])
+    expect(out.structure.columns.map((col) => col.id)).toContain("col_5")
+  })
+
+  it("gives percentage columns a % sign and no footer sum; other columns get no settings", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    const bodies: string[] = []
+    mockFetch((url, body) => {
+      if (!url.startsWith("https://api.monday.com/v2")) return null
+      if (body.includes("create_column(")) {
+        bodies.push((JSON.parse(body) as { query: string }).query)
+        return jsonResponse({ data: { create_column: { id: `col_${bodies.length}`, title: "t", type: "numbers" } } })
+      }
+      if (body.includes("settings_str")) {
+        return jsonResponse({ data: { boards: [{ name: "Ruth Board", columns: [{ id: "b", title: "Aquilla ID", type: "text" }], groups: [] }] } })
+      }
+      return null
+    })
+    await request("anna", "POST", "/api/v2/monday/projects/proj-1/columns", {
+      boardId: "board-9",
+      metrics: ["validated_pct", "status_auto"],
+    })
+    const defaultsOf = (query: string) => {
+      const raw = /defaults: ("(?:[^"\\]|\\.)*")/.exec(query)?.[1]
+      return raw ? (JSON.parse(JSON.parse(raw) as string) as unknown) : null
+    }
+    expect(defaultsOf(bodies[0]!)).toEqual({
+      unit: { symbol: "custom", custom_unit: "%", direction: "right" },
+      hide_footer: true,
+    })
+    expect(defaultsOf(bodies[1]!)).toBeNull()
+  })
+
+  it("is idempotent: asking again for columns the board now has creates nothing", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    const board = fakeBoard([
+      { id: "a", title: "validated %", type: "numbers" },
+      { id: "b", title: "Aquilla ID", type: "text" },
+    ])
+    const res = await request("anna", "POST", "/api/v2/monday/projects/proj-1/columns", {
+      boardId: "board-9",
+      metrics: ["validated_pct", "external_id"],
+    })
+    expect(res.status).toBe(200)
+    expect(board.creates).toEqual([])
+    const out = (await res.json()) as { created: unknown[]; reused: Array<{ columnId: string }> }
+    expect(out.created).toEqual([])
+    expect(out.reused.map((col) => col.columnId)).toEqual(["a", "b"])
+  })
+
+  it("does not reuse a same-titled column the metric can't write to", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    const board = fakeBoard([
+      { id: "f", title: "Validated %", type: "formula" },
+      { id: "b", title: "Aquilla ID", type: "text" },
+    ])
+    await request("anna", "POST", "/api/v2/monday/projects/proj-1/columns", {
+      boardId: "board-9",
+      metrics: ["validated_pct"],
+    })
+    expect(board.creates).toEqual(["Validated %:numbers"])
+  })
+
+  it("contributor (400) gets 403 and nothing is created", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    const board = fakeBoard([])
+    const res = await request("tom", "POST", "/api/v2/monday/projects/proj-1/columns", {
+      boardId: "board-9",
+      metrics: ["completion_pct"],
+    })
+    expect(res.status).toBe(403)
+    expect(board.creates).toEqual([])
+  })
+
+  it("a column Monday refuses is reported, and the others are still created", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    const board = fakeBoard([{ id: "b", title: "Aquilla ID", type: "text" }], ["Status"])
+    const res = await request("anna", "POST", "/api/v2/monday/projects/proj-1/columns", {
+      boardId: "board-9",
+      metrics: ["completion_pct", "status_auto", "validated_pct"],
+    })
+    expect(res.status).toBe(200)
+    const out = (await res.json()) as {
+      created: Array<{ metric: string }>
+      failed: Array<{ metric: string; title: string; error: string }>
+    }
+    expect(out.created.map((col) => col.metric)).toEqual(["completion_pct", "validated_pct"])
+    expect(out.failed).toEqual([{ metric: "status_auto", title: "Status", error: 'Column "Status" refused' }])
+    expect(board.creates).toHaveLength(3)
+  })
+
+  it("columns Aquilla adds don't raise 'Board structure changed'; a column someone else adds still does", async () => {
+    await seedOrgProject()
+    await seedLink()
+    await env.AQUILLA_PG.prepare(
+      "UPDATE integration_links SET remote_state = ?::jsonb WHERE id = 'link-1'",
+    )
+      .bind(JSON.stringify({ fetchedAt: "2026-10-01T00:00:00Z", columns: [{ id: "numbers_1", title: "Completion %", type: "numbers" }], groups: [] }))
+      .run()
+    fakeBoard([
+      { id: "numbers_1", title: "Completion %", type: "numbers" },
+      { id: "b", title: "Aquilla ID", type: "text" },
+    ])
+    const res = await request("anna", "POST", "/api/v2/monday/projects/proj-1/columns", {
+      boardId: "board-9",
+      metrics: ["validated_pct"],
+    })
+    expect(res.status).toBe(200)
+    const { created } = (await res.json()) as { created: Array<{ columnId: string }> }
+    expect(created).toHaveLength(1)
+
+    const now = Math.floor(Date.now() / 1000)
+    const webhookJwt = await sign({ iat: now, exp: now + 300 }, menv.MONDAY_SIGNING_SECRET, "HS256")
+    const post = (event: Record<string, unknown>) =>
+      app.request(
+        "/api/v2/monday/webhook",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${webhookJwt}` },
+          body: JSON.stringify({ event }),
+        },
+        menv,
+      )
+    const stale = async () =>
+      (
+        await env.AQUILLA_PG.prepare(
+          "SELECT remote_state_stale FROM integration_links WHERE id = 'link-1'",
+        ).first<{ remote_state_stale: boolean }>()
+      )!.remote_state_stale
+
+    expect((await post({ type: "create_column", boardId: "board-9", columnId: created[0]!.columnId })).status).toBe(200)
+    expect(await stale()).toBe(false)
+
+    expect((await post({ type: "create_column", boardId: "board-9", columnId: "someone_elses" })).status).toBe(200)
+    expect(await stale()).toBe(true)
+  })
+})
+
+// ── The "Aquilla projects" group ───────────────────────────────────────────
+
+describe("PUT link puts the project's rows in an \"Aquilla projects\" group", () => {
+  function fakeGroupedBoard(groups: Array<{ id: string; title: string }>) {
+    const calls: string[] = []
+    mockFetch((url, body) => {
+      if (!url.startsWith("https://api.monday.com/v2")) return null
+      const query = (JSON.parse(body) as { query: string }).query
+      if (query.includes("settings_str")) {
+        return jsonResponse({
+          data: { boards: [{ name: "Ruth Board", columns: [{ id: "numbers_1", title: "Progress", type: "numbers" }], groups }] },
+        })
+      }
+      calls.push(query)
+      if (query.includes("create_group")) {
+        return jsonResponse({ data: { create_group: { id: "group_aq", title: "Aquilla projects" } } })
+      }
+      if (query.includes("create_webhook")) return jsonResponse({ data: { create_webhook: { id: 111 } } })
+      if (query.includes("move_item_to_group")) return jsonResponse({ data: { m0: { id: "item-42" } } })
+      return null
+    })
+    return calls
+  }
+  const savedConfig = async () =>
+    (await env.AQUILLA_PG.prepare("SELECT config FROM integration_links WHERE project_id = 'proj-1'").first<{
+      config: unknown
+    }>())!.config
+
+  it("creates the group above the board's own groups, over the AI's pick of Monday's sample group", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    const calls = fakeGroupedBoard([{ id: "topics", title: "Group Title" }])
+    const res = await request("anna", "PUT", "/api/v2/monday/projects/proj-1/link", {
+      boardId: "board-9",
+      config: { ...baseConfig, groupId: "topics" },
+    })
+    expect(res.status).toBe(200)
+    const create = calls.find((q) => q.includes("create_group"))!
+    expect(create).toContain('group_name: "Aquilla projects"')
+    expect(create).toContain('relative_to: "topics", position_relative_method: before_at')
+    const body = (await res.json()) as { link: { config: { groupId?: string } }; warnings: string[] }
+    expect(body.link.config.groupId).toBe("group_aq")
+    expect(body.warnings).toEqual([])
+    expect(parseJsonColumn<{ groupId?: string }>(await savedConfig(), {}).groupId).toBe("group_aq")
+  })
+
+  it("uses an \"Aquilla projects\" group already on the board instead of making another", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    const calls = fakeGroupedBoard([
+      { id: "topics", title: "Group Title" },
+      { id: "g_existing", title: "Aquilla Projects" },
+    ])
+    const res = await request("anna", "PUT", "/api/v2/monday/projects/proj-1/link", { boardId: "board-9", config: baseConfig })
+    expect(res.status).toBe(200)
+    expect(calls.some((q) => q.includes("create_group"))).toBe(false)
+    expect(((await res.json()) as { link: { config: { groupId?: string } } }).link.config.groupId).toBe("g_existing")
+  })
+
+  it("keeps a group the user renamed, and moves nothing when the group didn't change", async () => {
+    await seedOrgProject()
+    await seedLink({ config: { ...baseConfig, groupId: "g_renamed" } })
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO integration_item_links (link_id, entity_kind, entity_id, external_item_id) VALUES ('link-1', 'project', 'proj-1', 'item-42')",
+    ).run()
+    const calls = fakeGroupedBoard([
+      { id: "topics", title: "Group Title" },
+      { id: "g_renamed", title: "Biblica projects" },
+    ])
+    const res = await request("anna", "PUT", "/api/v2/monday/projects/proj-1/link", { boardId: "board-9", config: baseConfig })
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as { link: { config: { groupId?: string } } }).link.config.groupId).toBe("g_renamed")
+    expect(calls.some((q) => q.includes("create_group") || q.includes("move_item_to_group"))).toBe(false)
+  })
+
+  it("moves the project's existing row into the group when the group is new", async () => {
+    await seedOrgProject()
+    await seedLink()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO integration_item_links (link_id, entity_kind, entity_id, external_item_id) VALUES ('link-1', 'project', 'proj-1', 'item-42')",
+    ).run()
+    const calls = fakeGroupedBoard([{ id: "topics", title: "Group Title" }])
+    const res = await request("anna", "PUT", "/api/v2/monday/projects/proj-1/link", { boardId: "board-9", config: baseConfig })
+    expect(res.status).toBe(200)
+    expect(calls.find((q) => q.includes("move_item_to_group"))).toContain(
+      'move_item_to_group(item_id: "item-42", group_id: "group_aq")',
+    )
+  })
+
+  it("still links when Monday refuses the group, and says where rows will go", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    mockFetch((url, body) => {
+      if (!url.startsWith("https://api.monday.com/v2")) return null
+      if (body.includes("settings_str")) {
+        return jsonResponse({ data: { boards: [{ name: "Ruth Board", columns: [{ id: "numbers_1", title: "Progress", type: "numbers" }], groups: [] }] } })
+      }
+      if (body.includes("create_group")) return jsonResponse({ errors: [{ message: "nope" }] })
+      if (body.includes("create_webhook")) return jsonResponse({ data: { create_webhook: { id: 111 } } })
+      return null
+    })
+    const res = await request("anna", "PUT", "/api/v2/monday/projects/proj-1/link", {
+      boardId: "board-9",
+      config: { ...baseConfig, groupId: "ai_pick" },
+    })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { link: { config: { groupId?: string } }; warnings: string[] }
+    expect(body.link.config.groupId).toBeUndefined()
+    expect(body.warnings.some((w) => w.includes("Aquilla projects"))).toBe(true)
+  })
+
+  it("a mapping edit keeps the saved group", async () => {
+    await seedOrgProject()
+    await seedLink({ config: { ...baseConfig, groupId: "group_aq" } })
+    fakeGroupedBoard([{ id: "group_aq", title: "Aquilla projects" }])
+    const res = await request("anna", "PATCH", "/api/v2/monday/projects/proj-1/link", { config: baseConfig })
+    expect(res.status).toBe(200)
+    expect(parseJsonColumn<{ groupId?: string }>(await savedConfig(), {}).groupId).toBe("group_aq")
+  })
+})
+
+// ── Board changes since the link was saved ─────────────────────────────────
+
+describe("GET/POST board-changes", () => {
+  /** A link whose saved list has Name + Progress, and a board with `live` columns. */
+  async function seedWithBoard(live: Array<{ id: string; title: string; type: string }>, stale = true) {
+    await seedOrgProject()
+    await seedLink()
+    await env.AQUILLA_PG.prepare(
+      "UPDATE integration_links SET remote_state = ?::jsonb, remote_state_stale = ? WHERE id = 'link-1'",
+    )
+      .bind(
+        JSON.stringify({
+          fetchedAt: "2026-10-01T00:00:00Z",
+          columns: [
+            { id: "name", title: "Name", type: "name" },
+            { id: "numbers_1", title: "Progress", type: "numbers" },
+          ],
+          groups: [],
+        }),
+        stale,
+      )
+      .run()
+    mockFetch((url, body) => {
+      if (url.startsWith("https://api.monday.com/v2") && body.includes("settings_str")) {
+        return jsonResponse({ data: { boards: [{ name: "Ruth Board", url: "https://acme.monday.com/boards/9", columns: live, groups: [] }] } })
+      }
+      return null
+    })
+  }
+  const linkRow = async () =>
+    (await env.AQUILLA_PG.prepare(
+      "SELECT remote_state, remote_state_stale FROM integration_links WHERE id = 'link-1'",
+    ).first<{ remote_state: unknown; remote_state_stale: boolean }>())!
+  const base = [
+    { id: "name", title: "Name", type: "name" },
+    { id: "numbers_1", title: "Progress", type: "numbers" },
+  ]
+
+  it("names the columns that are new on the board", async () => {
+    await seedWithBoard([...base, { id: "numeric_new", title: "Budget", type: "numbers" }])
+    const res = await request("anna", "GET", "/api/v2/monday/projects/proj-1/board-changes")
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { structureStale: boolean; newColumns: unknown[]; structure: { columns: unknown[] } }
+    expect(body.structureStale).toBe(true)
+    expect(body.newColumns).toEqual([{ id: "numeric_new", title: "Budget", type: "numbers" }])
+    expect(body.structure.columns).toHaveLength(3)
+  })
+
+  it("clears the banner by itself when the new column was deleted again", async () => {
+    await seedWithBoard(base)
+    const res = await request("anna", "GET", "/api/v2/monday/projects/proj-1/board-changes")
+    expect(((await res.json()) as { structureStale: boolean; newColumns: unknown[] })).toMatchObject({
+      structureStale: false,
+      newColumns: [],
+    })
+    expect((await linkRow()).remote_state_stale).toBe(false)
+  })
+
+  it("raises the banner for a column that arrived while no webhook reached us", async () => {
+    await seedWithBoard([...base, { id: "text_x", title: "Notes", type: "text" }], false)
+    const res = await request("anna", "GET", "/api/v2/monday/projects/proj-1/board-changes")
+    expect(((await res.json()) as { structureStale: boolean }).structureStale).toBe(true)
+    expect((await linkRow()).remote_state_stale).toBe(true)
+  })
+
+  it("\"Not needed\" stops asking about that column, and clears the banner once nothing is left", async () => {
+    await seedWithBoard([
+      ...base,
+      { id: "numeric_new", title: "Budget", type: "numbers" },
+      { id: "text_x", title: "Notes", type: "text" },
+    ])
+    const one = await request("anna", "POST", "/api/v2/monday/projects/proj-1/board-changes/dismiss", { columnIds: ["text_x"] })
+    expect(((await one.json()) as { structureStale: boolean; newColumns: Array<{ id: string }> })).toMatchObject({
+      structureStale: true,
+      newColumns: [{ id: "numeric_new" }],
+    })
+    const two = await request("anna", "POST", "/api/v2/monday/projects/proj-1/board-changes/dismiss", { columnIds: ["numeric_new"] })
+    expect(((await two.json()) as { structureStale: boolean }).structureStale).toBe(false)
+    const again = await request("anna", "GET", "/api/v2/monday/projects/proj-1/board-changes")
+    expect(((await again.json()) as { newColumns: unknown[] }).newColumns).toEqual([])
+  })
+
+  it("a contributor gets 403", async () => {
+    await seedWithBoard(base)
+    const res = await request("tom", "GET", "/api/v2/monday/projects/proj-1/board-changes")
+    expect(res.status).toBe(403)
+  })
+})
+
+describe("GET /api/v2/monday/orgs/:orgId/links", () => {
+  it("lists the org's project links for a maintainer, and refuses a contributor", async () => {
+    await seedOrgProject()
+    await seedLink({ lastPushedAt: "now" })
+    const res = await request("anna", "GET", "/api/v2/monday/orgs/1/links")
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { links: Array<{ projectId: string; boardName: string; enabled: boolean; lastPushedAt: string | null }> }
+    expect(body.links).toHaveLength(1)
+    expect(body.links[0]).toMatchObject({ projectId: "proj-1", boardName: "Ruth Board", enabled: true })
+    expect(body.links[0]!.lastPushedAt).not.toBeNull()
+    expect((await request("tom", "GET", "/api/v2/monday/orgs/1/links")).status).toBe(403)
   })
 })

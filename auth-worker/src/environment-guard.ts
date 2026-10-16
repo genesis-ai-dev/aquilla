@@ -85,6 +85,11 @@ export function deploymentEnvironmentError(
   const requestHostname = new URL(requestUrl).hostname
   const expected = EXPECTED_DEPLOYMENTS[requestHostname]
   if (!expected) return null
+  // WRANGLER_LOCAL=1 unlocks /__test__/reset, /__dev__/login and skips admin
+  // step-up. It must never be live on a first-party API hostname.
+  if (bindings.WRANGLER_LOCAL) {
+    return `${expected.apiHost} must not run with WRANGLER_LOCAL set`
+  }
   return expectedBindingError(expected, bindings)
 }
 

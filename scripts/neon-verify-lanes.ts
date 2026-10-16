@@ -18,7 +18,7 @@
 //   pnpm neon:verify:lanes:dev                     # report only
 //   pnpm neon:verify:lanes:dev --require-complete  # gate: fail if any nulls
 //   AQUILLA_DATABASE_URL=<local> tsx scripts/neon-verify-lanes.ts   # local
-import { makePostgres } from '../db/shim/postgres'
+import { makeMaintenancePostgres } from '../db/shim/postgres'
 
 function connectionString(): string {
   const direct = process.env.AQUILLA_DATABASE_URL?.trim()
@@ -74,7 +74,7 @@ function padNum(n: number, w: number): string {
 
 async function main(): Promise<void> {
   const requireComplete = process.argv.includes('--require-complete')
-  const db = makePostgres(connectionString(), 1)
+  const db = makeMaintenancePostgres(connectionString(), 1)
   let nullTotal = 0
   let orphanTotal = 0
   try {

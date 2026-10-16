@@ -59,6 +59,29 @@ export const org = defineNamespace({
     "org.access.page.csvGrantedBy": "Granted by",
     "org.access.page.csvGrantedAt": "Granted at",
 
+    // -- AQU-1072 access audit: owners and maintainers, one tree per person --
+    "org.accessAudit.title": "Access audit",
+    "org.accessAudit.description":
+      "Each person's organization role, the teams they belong to, and the role they actually have on each project — the same answer the access checks use — plus their lane grants.",
+    "org.accessAudit.print": "Print",
+    "org.accessAudit.loadError": "Couldn't load the access audit for this organization.",
+    "org.accessAudit.roleRequired":
+      "The access audit is available to organization owners and maintainers.",
+    "org.accessAudit.empty": "No people to list in this access audit.",
+    "org.accessAudit.noTeams": "No teams",
+    "org.accessAudit.noProjects": "No project access",
+    "org.accessAudit.noLanes": "No lane grants",
+    "org.accessAudit.notOrgMember": "Not an organization member",
+    "org.accessAudit.csvOrgRole": "Organization role",
+    "org.accessAudit.csvEffectiveRole": "Effective role",
+    "org.accessAudit.csvSource": "Comes from",
+    "org.accessAudit.csvLane": "Lane",
+    "org.accessAudit.csvLaneRole": "Lane role",
+    "org.accessAudit.generatedAt": "Generated {when}",
+    "org.accessAudit.teamMembership": "{name} ({role})",
+    "org.accessAudit.projectAccess": "{role} ({source})",
+    "org.accessAudit.laneGrant": "{lane} ({role})",
+
     // -- OrgDataEgress: maintainer/owner multi-project archive --
     "org.egress.title": "Data egress",
     "org.egress.description": "Everything your organization has stored — review it, filter it, and take it with you as one zip archive.",
@@ -88,7 +111,7 @@ export const org = defineNamespace({
     "org.egress.options.targetLanes": "Target lanes",
     "org.egress.options.lane": "Lane {lane}",
     "org.egress.options.includeSources": "Include original source documents",
-    "org.egress.options.includeSourcesDescription": "The raw files you uploaded, exactly as stored.",
+    "org.egress.options.includeSourcesDescription": "The raw files you uploaded, as stored.",
     "org.egress.options.audioMode": "Audio export mode",
     "org.egress.options.audio.none.description": "No audio in the export.",
     "org.egress.options.audio.separate.label": "Every clip separately",
@@ -158,10 +181,9 @@ export const org = defineNamespace({
     "org.orgHome.pendingInvitations.reviewAccept": "Review & accept",
 
     "org.orgHome.organizations": "Organizations",
-    // AQU-1071: the enterprise billing band is read off this number — distinct
-    // active target languages across the org, archived lanes excluded.
-    "org.orgHome.activeLanguages": "Active languages",
-    "org.orgHome.activeLanguagesHint": "Distinct target lanes",
+    // AQU-1071 / AQU-1598: the enterprise billing band — active target lanes.
+    "org.orgHome.activeLanguages": "Active lanes",
+    "org.orgHome.activeLanguagesHint": "Target lanes",
     "org.orgHome.avgTranslated": "Avg translated",
     "org.orgHome.avgValidated": "Avg validated",
     "org.orgHome.avgAudio": "Avg audio",
@@ -223,6 +245,10 @@ export const org = defineNamespace({
     "org.orgHome.workloadVisibilityDescription":
       "Who can see each teammate's assignment progress on this org's overview.",
     "org.orgHome.usageVisibilityDescription": "Who can see each teammate's usage on this org's overview.",
+    // AQU-1771: the org overview's Team workload / Team usage cards list
+    // people by name, so they can never be more open than the member list.
+    "org.orgHome.teamVisibilityRosterFloorHint":
+      "This card lists members by name, and the member list is set to “{floor}”. To go lower, lower the member list in Settings → Security first.",
 
     "org.orgHome.lens.recentLabel": "Recently updated",
     "org.orgHome.lens.recentDescription": "Latest project activity across all organizations",
@@ -277,7 +303,7 @@ export const org = defineNamespace({
       "This organization has restricted who can view the member list. Ask an owner or maintainer if you need access.",
     "org.membersPage.currentMembersHeading": "Current members",
     "org.membersPage.rosterHint":
-      "Everyone who currently has access to this project. Each row shows how they got it — direct invite, org membership, or team.",
+      "Everyone who has access to this project. Each row shows how they got it — direct invite, org membership, or team.",
     "org.membersPage.noMembersYet": "No members yet.",
     "org.membersPage.noDirectMembers": "No one has been added directly to this project yet.",
     "org.membersPage.orgAccessHeading": "Organization members with access",
@@ -495,6 +521,14 @@ export const org = defineNamespace({
     "org.projectOverview.offlineDownloading": "Downloading…",
     "org.projectOverview.offlineDownloadingProgress": "Downloading… ({done}/{total} files)",
     "org.projectOverview.offlineReadyBadge": "Available offline",
+    "org.projectOverview.saveMediaOffline": "Save audio for offline",
+    "org.projectOverview.offlineMediaSaving": "Saving audio {done}/{total}",
+    "org.projectOverview.offlineMediaSaved": plural({
+      one: "{count} clip saved on this device ({failed} unavailable)",
+      other: "{count} clips saved on this device ({failed} unavailable)",
+    }),
+    "org.projectOverview.offlineMediaBudget": "Storage full: {count} of {total} clips saved",
+    "org.projectOverview.offlineMediaUnavailable": "This device can't store audio",
     "org.projectOverview.removeOfflineCopy": "Remove offline copy",
     "org.projectOverview.offlineRemoveBlocked": plural({
       one: "Can't remove yet — {count} change hasn't synced to the server. Reconnect and wait for it to sync first.",
@@ -512,8 +546,11 @@ export const org = defineNamespace({
     "org.projectOverview.audioValidatedTooltip":
       "Share of every cell whose selected recording has been validated. Counted against every cell, the same way as Validated, so it agrees with the Plan below.",
     "org.projectOverview.audioValidatedOfRecorded":
-      "Of the audio actually recorded, {percent}% is validated.",
+      "Of the audio recorded, {percent}% is validated.",
     "org.projectOverview.crossLaneTooltip": "Cross-language stat — not broken down per language.",
+    // AQU-1954: a language tab whose language is off and has no recordings.
+    "org.projectOverview.laneNoAudioTooltip":
+      "This language doesn't record audio. Turn on Records audio for it in Project settings → Languages.",
     "org.projectOverview.cellsSuffix": "cells",
     "org.projectOverview.laneDefaultFallback": "Default",
     "org.projectOverview.legendTranslated": "translated",
@@ -572,11 +609,37 @@ export const org = defineNamespace({
     "org.projectOverview.assignProjectManagerDialogTitle": "Assign project manager",
     "org.projectOverview.pmDialogDescription":
       "The project manager is responsible for this project. They must be a member of the project.",
+    // Shown when a person is the PM (overview, behind the circled-i beside the
+    // heading) or is selected in the dialog. Hidden while the field is
+    // Unassigned — clearing does not add a role.
+    "org.projectOverview.pmGrantsProjectLead":
+      "Naming them project manager also adds them as a Project lead on this project. An existing higher role is kept. Clearing the project manager does not remove that membership.",
+    "org.projectOverview.pmGrantsProjectLeadAriaLabel": "What naming a project manager does",
     "org.projectOverview.selectMemberPlaceholder": "Select a member",
     "org.projectOverview.teamVisibilityDescription":
       "Who can see each teammate's assignment progress on this project.",
     "org.projectOverview.membersVisibilityDescription":
       "Who can see the member roster on this project.",
+    // AQU-1779: under the Team card's "Who can see this section" picker when
+    // the lower options are disabled. The Team card lists people, so it can
+    // never be more open than the member list.
+    "org.projectOverview.teamVisibilityRosterFloorHint":
+      "This card lists members, and the member list is set to “{floor}”. To go lower, lower it on the Members card or in Settings → Security first.",
+    // AQU-1771: amber line under the Team card's visibility badge right after a
+    // Members change moved the Team card's level with it.
+    "org.projectOverview.teamVisibilityAdjusted": "Visibility adjusted",
+    "org.projectOverview.teamVisibilityAdjustedWhyAriaLabel": "Why the visibility was adjusted",
+    "org.projectOverview.teamVisibilityMovedByMembers":
+      "Changed to “{level}” because Members changed. This card lists members, so it is never more open than the member list.",
+    // AQU-1771: under a project's Team / Members visibility picker when the
+    // options below the organization's setting are greyed out.
+    "org.projectOverview.visibilityOrgFloorHint":
+      "A project can only be stricter than its organization, which is set to “{floor}”. To go lower, an org owner lowers it in Settings → Security first.",
+    // AQU-1771: a toast when a project's Team / Members visibility change was not saved.
+    "org.projectOverview.visibilitySaveFailed": "Couldn't change who can see this section",
+    "org.projectOverview.visibilitySaveOffline": "You're offline. Reconnect, then change it again.",
+    "org.projectOverview.visibilitySaveForbidden":
+      "Only people who can change this project's settings can change who sees this.",
     "org.projectOverview.noOpenAssignments": "No open assignments in this project yet.",
     "org.projectOverview.openAssignmentsStat": "{count} open · {percent}",
     "org.projectOverview.viewActivityAria": "View activity for {username}",
@@ -668,9 +731,9 @@ export const org = defineNamespace({
     "org.addLanguagePopover.description":
       "Registers a new lane on this project. Manage or remove lanes in project settings.",
     "org.addLanguagePopover.loadingLanguages": "Loading languages…",
-    // "e.g. fr-CA" placeholder → projectSettings.create.extraLanguagesPlaceholder (identical text)
-    "org.addLanguagePopover.inputAriaLabel": "New target language tag",
-    // "Enter a language tag." → projectSettings.create.extraLanguagesEmptyError (identical text)
+    // "e.g. Traditional Han" placeholder → projectSettings.create.extraLanguagesPlaceholder (identical text)
+    "org.addLanguagePopover.inputAriaLabel": "New target language",
+    // "Enter a language name." → projectSettings.create.extraLanguagesEmptyError (identical text)
     // too-long error → projectSettings.create.extraLanguagesTooLongError (identical text)
     // already-default error → projectSettings.languages.alreadyDefaultError (identical text)
     // lane-already-exists error → projectSettings.languages.alreadyExistsError (identical text)
@@ -886,6 +949,7 @@ export const org = defineNamespace({
     "org.assignWork.assignButtonLabel": "Assign…",
     "org.assignWork.chooseAssignee": "Choose an assignee.",
     "org.assignWork.chooseFile": "Choose a file.",
+    "org.assignWork.chooseLane": "Choose the language lane this work is for.",
     "org.assignWork.assigneeLabel": "Assignee",
     "org.assignWork.bookLabel": "Book",
     "org.assignWork.wholeBookNoChapters": "Whole book — this file has no chapters to narrow to.",
@@ -922,6 +986,17 @@ export const org = defineNamespace({
     "org.sectionVisibilityBadge.rolePickerOwner": "Owners only",
     "org.sectionVisibilityBadge.changeVisibilityAriaLabel": "{label}. Change section visibility",
     "org.sectionVisibilityBadge.whoCanSeeLabel": "Who can see this section",
+    "org.sectionVisibilityBadge.whyOptionsOffAriaLabel": "Why some options are unavailable",
+    // AQU-1771: on a project's Team / Members badge, where the shown setting
+    // comes from — the organization, or this project's own stricter choice.
+    "org.sectionVisibilityBadge.originOrg": "Org default",
+    "org.sectionVisibilityBadge.originProject": "Stricter for this project",
+    "org.sectionVisibilityBadge.orgDefaultOption": "{label} (org default)",
+    "org.sectionVisibilityBadge.followOrgOption": "Follow the org ({label})",
+    // AQU-1771: the same, said under the picker in the badge's popover.
+    "org.sectionVisibilityBadge.originOrgLine": "Follows your org's setting.",
+    "org.sectionVisibilityBadge.originProjectLine": "Stricter than your org ({label}).",
+    "org.sectionVisibilityBadge.originUndoHint": "Pick “{option}” to undo.",
 
     // -- WorkloadRollup: org Overview team-workload manager rollup --
     "org.workloadRollup.title": "Team workload",
@@ -945,7 +1020,7 @@ export const org = defineNamespace({
     "org.accessModelLegend.meaningColumn": "Meaning",
     "org.accessModelLegend.maxWinsHeading": "Effective role = max-wins",
     "org.accessModelLegend.maxWinsDescription":
-      "A person's effective role on a project is the highest role they hold across all contributing paths. Adding a lower grant never reduces access. To fully remove someone, all contributing grant paths must be cleared.",
+      "A person's effective role on a project is the highest role they hold across all contributing paths. Adding a lower grant never reduces access. To remove someone, all contributing grant paths must be cleared.",
     "org.accessModelLegend.direct.label": "Direct",
     "org.accessModelLegend.direct.description":
       "A role granted explicitly to this person on this project only. The most specific path — adding or removing it affects only this project.",
@@ -1007,6 +1082,15 @@ export const org = defineNamespace({
     "org.memberLaneScopeEditor.newLaneCodeAriaLabel": "New lane code",
     // "Add" → common.add (identical text)
     "org.memberLaneScopeEditor.saveScopesButton": "Save scopes",
+    // AQU-1783: the read wall decides from lane GRANTS, not from these scopes,
+    // so the inspector reports the grants rather than claiming "full access".
+    "org.memberLaneScopeEditor.grantsLegend": "Lanes they can read",
+    "org.memberLaneScopeEditor.laneNoAccess": "no access",
+    "org.memberLaneScopeEditor.grantGapWarning":
+      "This member is unscoped, but has no grant for every lane. The lanes marked \u201cno access\u201d read as empty for them.",
+    "org.memberLaneScopeEditor.grantAllButton": "Grant all current lanes",
+    "org.memberLaneScopeEditor.grantAllHint": "Takes effect for them within 15 minutes, or on their next sign-in.",
+    "org.memberLaneScopeEditor.visibleByRole": "Every lane is visible to this member through their role.",
 
     // -- MemberMultiAddRow: shared staged-multi-add affordance (AQU-734) --
     "org.memberMultiAddRow.peopleToAddAriaLabel": "People to add",
@@ -1038,7 +1122,7 @@ export const org = defineNamespace({
     "org.membersMatrixView.memberColumnHeader": "Member",
     "org.membersMatrixView.howAccessResolvedAriaLabel": "How access is resolved",
     "org.membersMatrixView.accessResolutionExplanation":
-      "Every member's access is the highest role they hold across up to four paths: a direct project grant, any group attached to this project, a Maintainer+ org role, or creator status. Adding a lower grant never reduces access — to fully remove someone, all contributing paths must be cleared.",
+      "Every member's access is the highest role they hold across up to four paths: a direct project grant, any group attached to this project, a Maintainer+ org role, or creator status. Adding a lower grant never reduces access — to remove someone, all contributing paths must be cleared.",
     "org.membersMatrixView.soleOwnerWarning": "Sole Owner: losing this person locks the project",
     "org.membersMatrixView.orgInheritedTooltip":
       "Access on every project comes from a Maintainer or Owner org role; no per-project overrides.",
@@ -1119,6 +1203,25 @@ export const org = defineNamespace({
     "org.staffLanePopover.addToLaneButton": "Add to {lane}",
     "org.staffLanePopover.broaderAccessNote": "Need broader access? Leads see all languages.",
     "org.staffLanePopover.addAsLeadButton": "Add as lead (unscoped)",
+
+    // AQU-1030: one sentence for the grant the form will make, shared by every
+    // add/invite submit. {scope} is one of the scope.* phrases below.
+    "org.grantScope.sentence.person": "{name} will join as a {role} {scope}",
+    "org.grantScope.sentence.people": "{names} will join as {role} {scope}",
+    "org.grantScope.sentence.link": "Anyone with this link will join as a {role} {scope}",
+    "org.grantScope.sentence.unset": "They will join as a {role} {scope}",
+    "org.grantScope.scope.organization": "of the whole organization — every project",
+    "org.grantScope.scope.projectAllLanes": "on {project} — every lane",
+    "org.grantScope.scope.project": "on {project}",
+    "org.grantScope.scope.laneOnly": "on {project}, {lane} lane only",
+    "org.grantScope.scope.lanesOnly": "on {project}, {lanes} lanes only",
+    "org.grantScope.echo.organization": "every project",
+    "org.grantScope.echo.allLanes": "every lane",
+    "org.grantScope.echo.laneOnly": "{lane} lane only",
+    "org.grantScope.echo.lanesOnly": "{lanes} lanes only",
+    "org.grantScope.button": "{action} — {scope}",
+    "org.grantScope.thisProject": "this project",
+    "org.grantScope.action.addAsLead": "Add as lead",
 
     // -- ArchivedProjects: org-level archived-projects / recently-deleted-files admin page --
     // "Project" header → common.project (identical text)
@@ -1342,7 +1445,6 @@ export const org = defineNamespace({
     // plan-status.ts is max(6% of the cells, 7). Nothing links the sentence to
     // the function, so a change to one is a change to both; the hint exists
     // because a group nobody can predict the membership of reads as a bug.
-    "org.projectOverview.plan.groupHintNearlyComplete": "within 6% or 7 cells of done",
     "org.projectOverview.plan.groupHintInProgress": "active, comfortably ahead",
     "org.projectOverview.plan.groupHintNotStarted": "no content yet",
     "org.projectOverview.plan.groupHintDone": "marked complete by a manager",
@@ -1358,12 +1460,16 @@ export const org = defineNamespace({
     "org.projectOverview.plan.targetMaintainerOnly": "Only maintainers can set target dates.",
     "org.projectOverview.plan.completion": "Completion",
     "org.projectOverview.plan.markDone": "Mark done",
-    "org.projectOverview.plan.markDoneHint": "Undoable.",
+    "org.projectOverview.plan.markDoneTooltip": "You can unmark this later.",
     "org.projectOverview.plan.markDoneAnyway": "Mark done anyway",
-    "org.projectOverview.plan.unmarkDone": "Un-mark",
+    "org.projectOverview.plan.unmarkDone": "Unmark",
     "org.projectOverview.plan.notMarkedDone": "Not marked done.",
     "org.projectOverview.plan.aMaintainer": "a maintainer",
     "org.projectOverview.plan.markedDoneBy": "Marked done {date} by {user}",
+    // AQU-1494: a unit someone marked done that has work in it again — a
+    // setting that counts more cells, a line added, an edit that un-validated
+    // one. It stays done (that is a person's call); this says what came back.
+    "org.projectOverview.plan.markedDoneWithWork": "Marked done \u00b7 {work}",
     "org.projectOverview.plan.doneBelowFullNudge":
       "Validated is at {validated}%. Marking done records your judgment, not the numbers \u2014 the bars stay visible beside the mark.",
     "org.projectOverview.plan.progress": "Progress",
@@ -1426,6 +1532,10 @@ export const org = defineNamespace({
     // not in the string, the same arrangement the summary pills use.
     "org.projectOverview.plan.shortfallWhere": plural({ one: "chapter {list}", other: "chapters {list}" }),
     "org.projectOverview.plan.shortfallWhereMore": plural({ one: "chapters {list} and {count} more", other: "chapters {list} and {count} more" }),
+    // AQU-1493: when the book's front matter is short too (a title, or a line
+    // added above its first verse). Front matter alone reuses the grid tile's
+    // own words, `org.projectOverview.plan.frontMatter`.
+    "org.projectOverview.plan.shortfallWhereWithFrontMatter": "front matter and {chapters}",
     // The links out of the plan and into the editor, landing on the first cell
     // that is actually missing something. Two keys rather than one with a
     // {kind} placeholder: an inflecting language cannot build "first
@@ -1478,6 +1588,34 @@ export const org = defineNamespace({
     // question the grid poses at a glance — how much of this is left — for a
     // reader who is counting tiles instead of reading them.
     "org.projectOverview.plan.chaptersShort": plural({ one: "{count} chapter short", other: "{count} chapters short" }),
+    // AQU-1493: front matter is not a chapter, so when it is short it is named
+    // in its own words rather than counted as one more chapter.
+    "org.projectOverview.plan.frontMatterShort": "Front matter short",
+    "org.projectOverview.plan.frontMatterAndChaptersShort": plural({
+      one: "Front matter and {count} chapter short",
+      other: "Front matter and {count} chapters short",
+    }),
+    "org.projectOverview.plan.unnumberedLine": "Unnumbered line",
+    "org.projectOverview.plan.headingLine": "Heading",
+    // AQU-1493: the same chip when the heading has a verse below it — the verse
+    // it introduces, so a row of headings says where each one is.
+    "org.projectOverview.plan.headingChipAt": "Heading \u00b7 {verse}",
+    "org.projectOverview.plan.titleLine": "Title or intro",
+    "org.projectOverview.plan.headingBefore": "Heading before {verse}",
+    "org.projectOverview.plan.headingAfter": "Heading after {verse}",
+    "org.projectOverview.plan.unnumberedBefore": "Unnumbered line before {verse}",
+    "org.projectOverview.plan.unnumberedAfter": "Unnumbered line after {verse}",
+    "org.projectOverview.plan.wordChipOrdinal": "{line} ({index} of {count})",
+    "org.projectOverview.plan.unnumberedInChapter": plural({
+      one: "{count} unnumbered line here has no verse reference; it\u2019s counted with this chapter.",
+      other: "{count} unnumbered lines here have no verse reference; they\u2019re counted with this chapter.",
+    }),
+    // AQU-1493: the same note on a book's front-matter card, which is not a
+    // chapter: lines added above a book's first verse count there.
+    "org.projectOverview.plan.unnumberedInFrontMatter": plural({
+      one: "{count} unnumbered line here has no verse reference; it\u2019s counted with the book\u2019s front matter.",
+      other: "{count} unnumbered lines here have no verse reference; they\u2019re counted with the book\u2019s front matter.",
+    }),
     "org.projectOverview.plan.chaptersComplete": "{done} of {total} complete",
     // "all complete", not the bare "complete" this legend would otherwise
     // read: the catalog already spends that string on autopilot.status.complete
@@ -1497,15 +1635,18 @@ export const org = defineNamespace({
     // The title names the chapter the way the reader just clicked it; the line
     // beside it says what is outstanding in the medium that leads.
     "org.projectOverview.plan.chapterTitle": "Chapter {chapter}",
-    "org.projectOverview.plan.chapterCellsUntranslated": plural({ one: "{count} cell not yet translated", other: "{count} cells not yet translated" }),
-    "org.projectOverview.plan.chapterCellsUnvalidated": plural({ one: "{count} cell not yet validated", other: "{count} cells not yet validated" }),
-    "org.projectOverview.plan.chapterTakesUnrecorded": plural({ one: "{count} take not yet recorded", other: "{count} takes not yet recorded" }),
-    "org.projectOverview.plan.chapterTakesUnvalidated": plural({ one: "{count} take not yet validated", other: "{count} takes not yet validated" }),
+    // Sam, 2026-10-14 (meeting): the chapter card lists each queue under its
+    // own label, every line once, under the first job it still needs.
+    "org.projectOverview.plan.queueTranslateValidate": "Requires translation and validation ({count})",
+    "org.projectOverview.plan.queueValidate": "Requires validation ({count})",
+    "org.projectOverview.plan.queueRecordValidate": "Requires a recording and its validation ({count})",
+    "org.projectOverview.plan.queueValidateRecording": "Recording requires validation ({count})",
     // The overflow chip at the end of the verse row, when the outstanding
     // verses outnumber the chips one row can hold.
     // …and its sibling for a document, which has no sections at all.
-    // AQU-1278: the tile beneath the chapter grid for a book's USFM front
-    // matter — cells with no chapter number, filed before chapter 1.
+    // AQU-1278: a book's USFM front matter — cells with no chapter number,
+    // filed before chapter 1. Lower case for a plan row's fragment; the grid's
+    // tile and its card capitalise it (`useFrontMatterLabel`).
     "org.projectOverview.plan.frontMatter": "front matter",
     "org.projectOverview.plan.tileAria": plural({
       one: "Chapter {chapter}: {count} cell short",
@@ -1518,7 +1659,6 @@ export const org = defineNamespace({
     // Audio hangs off the file, not off a target language, so every lane reads
     // the same recordings — a manager comparing two lanes' audio bars and
     // finding them identical is seeing the truth, not a stuck filter.
-    "org.projectOverview.plan.audioSharedAcrossLanes": "audio is shared by every language",
     // ── AQU-1278: per-assignment progress ──────────────────────────────
     // Who owns which slice of a unit, and how far along their slice is.
     "org.projectOverview.plan.assignedTo": "Assigned to",
@@ -1593,6 +1733,32 @@ export const org = defineNamespace({
       "org.access.page.chip": {
         description: "People & access person view: one grant chip, the role held at a scope.",
         placeholders: { role: "Localized role label, e.g. \"Project lead\".", path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
+      },
+      "org.accessAudit.generatedAt": {
+        description: "Print header on the access audit: when this copy of the report was generated.",
+        placeholders: { when: "Localized date and time, already formatted. Not translated further." },
+      },
+      "org.accessAudit.teamMembership": {
+        description: "One team in the access audit, with the role stored on that membership.",
+        placeholders: {
+          name: "The team's name. Not translated.",
+          role: "Localized role label, e.g. \"Project lead\".",
+        },
+      },
+      "org.accessAudit.projectAccess": {
+        description:
+          "A project row in the access audit: the effective role and the grant path that produced it (direct, team, org-wide, creator, or platform admin).",
+        placeholders: {
+          role: "Localized role label, e.g. \"Contributor\".",
+          source: "Localized name of the winning grant path, e.g. \"Team\" or \"Creator\".",
+        },
+      },
+      "org.accessAudit.laneGrant": {
+        description: "One lane grant under a project in the access audit, named by the lane's display name.",
+        placeholders: {
+          lane: "The lane's display name, e.g. \"French\". Not translated.",
+          role: "Localized role label of the lane grant, e.g. \"Reviewer\".",
+        },
       },
       "org.access.effective.creator": {
         description: "Effective role held because the person created the scope.",
@@ -2033,6 +2199,10 @@ export const org = defineNamespace({
       },
       "org.projectOverview.sortFilesByAria": {
         description: "Accessible name for the dropdown that chooses the sort order of the per-file breakdown list.",
+      },
+      "org.projectOverview.pmGrantsProjectLeadAriaLabel": {
+        description:
+          "Accessible name for the small circled-i button beside the 'Project manager' heading on the project overview. It appears while a project manager is set, and clicking it expands a sentence explaining that naming a project manager also makes them a Project lead.",
       },
       "org.projectOverview.fileListActionsAria": {
         description:
@@ -2502,6 +2672,13 @@ export const org = defineNamespace({
           "Subheading on the shared-with-you page when arriving scoped to one guest organization (via the org switcher), naming that organization.",
         placeholders: { org: "Display name of the guest organization — not translated." },
       },
+      "org.assignWork.chooseLane": {
+        description:
+          "Shown in the Assign work panel's language-lane menu when no lane is " +
+          "selected, and as the error when Assign is pressed anyway. Happens on " +
+          "the All languages tab of a project that has several lanes: nothing is " +
+          "pre-selected. Imperative sentence.",
+      },
       "org.assignWork.chaptersSelectedCount": {
         description:
           "Status line above the chapter checkbox list in the Assign work panel, counting how many chapters are currently checked (zero checked means 'whole book').",
@@ -2523,6 +2700,98 @@ export const org = defineNamespace({
           total: "Whole-number count of cells total in this assignment's scope.",
           pct: "Whole-number completion percentage, e.g. 40.",
         },
+      },
+      "org.orgHome.teamVisibilityRosterFloorHint": {
+        description:
+          "Note in the org overview's Team workload and Team usage visibility popovers, expanded from a small circled-i button when the options below the member-list setting are greyed out. Explains why (the cards show people by name, so they can't be more open than the member list) and where to lower the member list first. 'Settings → Security' is the org settings page — use its localized name.",
+        placeholders: {
+          floor: "The member list's current setting as its already-localized picker label, e.g. 'Maintainers and owners' or 'Owners only'.",
+        },
+      },
+      "org.projectOverview.teamVisibilityAdjusted": {
+        description:
+          "Two-word amber warning under the project overview's Team card visibility badge, shown right after a change to the Members card's visibility moved who can see the Team card. A small circled-i beside it opens the full explanation.",
+      },
+      "org.projectOverview.teamVisibilityAdjustedWhyAriaLabel": {
+        description:
+          "Screen-reader label for the small circled-i button beside 'Visibility adjusted' on the Team card; pressing it shows why the visibility changed.",
+      },
+      "org.projectOverview.teamVisibilityMovedByMembers": {
+        description:
+          "The full explanation opened from the circled-i beside the Team card's 'Visibility adjusted' note: a small line under the project overview's Team card visibility badge, shown right after a change to the Members card's visibility (or the org's member-list setting) moved who can see the Team card. 'Members' is the card of that name on the same page — use its localized name.",
+        placeholders: {
+          level: "The Team card's new setting as its already-localized picker label, e.g. 'Project leads and up'.",
+        },
+      },
+      "org.projectOverview.teamVisibilityRosterFloorHint": {
+        description:
+          "Note in the project overview's Team card visibility popover, expanded from a small circled-i button when the options below the member-list setting are greyed out. Explains why (the card shows people, so it can't be more open than the member list) and where to lower the member list first. 'Members card' is the card of that name on the same page; 'Settings → Security' is the org settings page — use the localized names of both.",
+        placeholders: {
+          floor: "The member list's current setting as its already-localized picker label, e.g. 'Maintainers and owners' or 'Owners only'.",
+        },
+      },
+      "org.sectionVisibilityBadge.originOrg": {
+        description:
+          "Short tag after a project's 'who can see this section' badge (e.g. 'Only maintainers & owners can see this · Org default') when the project follows its organization's setting.",
+      },
+      "org.sectionVisibilityBadge.originProject": {
+        description:
+          "Short tag after a project's 'who can see this section' badge when the project chose its own setting, which can only ever be stricter (hide more) than the organization's.",
+      },
+      "org.sectionVisibilityBadge.orgDefaultOption": {
+        description:
+          "An option in a project's 'Who can see this section' picker: the role choice that equals the organization's setting. Choosing it makes the project follow the organization again.",
+        placeholders: {
+          label: "The option's already-localized role label, e.g. 'Maintainers and owners'.",
+        },
+      },
+      "org.projectOverview.visibilitySaveFailed": {
+        description:
+          "Title of an error toast on the project overview when changing a Team or Members card's 'who can see this section' setting was not saved. The toast body gives the reason (sometimes the server's own English text).",
+      },
+      "org.projectOverview.visibilitySaveOffline": {
+        description:
+          "Body of that error toast when the device is offline, so the visibility change could not be saved.",
+      },
+      "org.projectOverview.visibilitySaveForbidden": {
+        description:
+          "Body of that error toast when the person's role does not allow changing this project's settings.",
+      },
+      "org.sectionVisibilityBadge.originOrgLine": {
+        description:
+          "Line under the picker in a project's 'Who can see this section' popover when the project follows its organization's setting.",
+      },
+      "org.sectionVisibilityBadge.originProjectLine": {
+        description:
+          "Line under the picker in a project's 'Who can see this section' popover when the project chose its own setting, which can only be stricter (hide more) than its organization's. The label in parentheses is the organization's setting.",
+        placeholders: {
+          label: "The organization's already-localized role label, e.g. 'Contributors and up'.",
+        },
+      },
+      "org.sectionVisibilityBadge.originUndoHint": {
+        description:
+          "Follows 'Stricter than your org (…).' in the same popover: which picker option returns the project to its organization's setting.",
+        placeholders: {
+          option: "The exact label of that option, e.g. 'Follow the org (Maintainers and owners)' or 'Contributors and up (org default)'.",
+        },
+      },
+      "org.sectionVisibilityBadge.followOrgOption": {
+        description:
+          "First option in a project's 'Who can see this section' picker when the project has its own (stricter) setting. Choosing it removes the project's own setting so the project follows its organization again; the label in parentheses is what the section would then show.",
+        placeholders: {
+          label: "The resulting already-localized role label, e.g. 'Maintainers and owners'.",
+        },
+      },
+      "org.projectOverview.visibilityOrgFloorHint": {
+        description:
+          "Note in a project's Team / Members visibility popover, expanded from a small circled-i button when the options below the organization's setting are greyed out. A project may only hide more than its organization. 'Settings → Security' is the org settings page — use its localized name.",
+        placeholders: {
+          floor: "The organization's current setting as its already-localized picker label, e.g. 'Maintainers and owners'.",
+        },
+      },
+      "org.sectionVisibilityBadge.whyOptionsOffAriaLabel": {
+        description:
+          "Accessible name for the small circled-i button beside 'Who can see this section'. It appears only when some options in that picker are greyed out, and clicking it expands a sentence explaining why.",
       },
       "org.sectionVisibilityBadge.changeVisibilityAriaLabel": {
         description:
@@ -2780,6 +3049,92 @@ export const org = defineNamespace({
         description: "Primary confirm button that grants the selected role scoped to the named lane.",
         placeholders: { lane: "The target language lane's display label — not translated." },
       },
+      "org.grantScope.sentence.person": {
+        description:
+          "Live sentence above an add/invite submit button, and the success toast, when one person is named. States the role and the scope the click will grant.",
+        placeholders: {
+          name: "The person's username or email — not translated.",
+          role: "The role label already translated (singular), e.g. Contributor.",
+          scope: "The scope phrase from org.grantScope.scope.*, already translated, including its leading 'on' or 'of'.",
+        },
+      },
+      "org.grantScope.sentence.people": {
+        description:
+          "Same live sentence and success toast when more than one person is staged. The role is the plural noun.",
+        placeholders: {
+          names: "The staged names joined in a list, e.g. 'Maria and Luis' — names are not translated.",
+          role: "The role label already translated (plural), e.g. Contributors.",
+          scope: "The scope phrase from org.grantScope.scope.*, already translated.",
+        },
+      },
+      "org.grantScope.sentence.link": {
+        description:
+          "Live sentence and success toast for an invite link that is not bound to an email. The recipient is whoever opens the link.",
+        placeholders: {
+          role: "The role label already translated (singular).",
+          scope: "The scope phrase from org.grantScope.scope.*, already translated.",
+        },
+      },
+      "org.grantScope.sentence.unset": {
+        description:
+          "Live sentence before a person has been chosen, so the scope is visible as soon as the form opens.",
+        placeholders: {
+          role: "The role label already translated (singular).",
+          scope: "The scope phrase from org.grantScope.scope.*, already translated.",
+        },
+      },
+      "org.grantScope.scope.organization": {
+        description:
+          "Scope phrase for an organization grant: the person joins the whole organization and therefore every project. Begins with 'of' so it reads after 'as a {role}'.",
+      },
+      "org.grantScope.scope.projectAllLanes": {
+        description:
+          "Scope phrase for a project grant with no lane restriction. Begins with 'on'. The em dash clause says the grant is not limited to one lane.",
+        placeholders: { project: "The project's display name — not translated." },
+      },
+      "org.grantScope.scope.project": {
+        description:
+          "Scope phrase when the grant is on one project but the lane list is not known yet, so the sentence does not claim every lane or one lane.",
+        placeholders: { project: "The project's display name — not translated." },
+      },
+      "org.grantScope.scope.laneOnly": {
+        description:
+          "Scope phrase for a grant limited to one lane of one project. 'lane only' is the restriction.",
+        placeholders: {
+          project: "The project's display name — not translated.",
+          lane: "The lane's display label — not translated.",
+        },
+      },
+      "org.grantScope.scope.lanesOnly": {
+        description:
+          "Scope phrase for a grant limited to more than one named lane of one project.",
+        placeholders: {
+          project: "The project's display name — not translated.",
+          lanes: "The lane labels already joined in a list, e.g. 'French and Spanish' — not translated.",
+        },
+      },
+      "org.grantScope.echo.organization": {
+        description: "Short scope echo appended to an organization invite or add button.",
+      },
+      "org.grantScope.echo.allLanes": {
+        description: "Short scope echo appended to a button that grants a whole project, every lane.",
+      },
+      "org.grantScope.echo.laneOnly": {
+        description: "Short scope echo appended to a button that grants one lane.",
+        placeholders: { lane: "The lane's display label — not translated." },
+      },
+      "org.grantScope.echo.lanesOnly": {
+        description: "Short scope echo appended to a button that grants several lanes.",
+        placeholders: { lanes: "The lane labels already joined in a list — not translated." },
+      },
+      "org.grantScope.button": {
+        description:
+          "Submit-button label. {action} is the existing verb (Add, Send invite, Create invite link) and {scope} is the short echo, so the button repeats what the sentence above it says.",
+        placeholders: {
+          action: "The already-translated verb for this form, without the scope.",
+          scope: "The short scope echo from org.grantScope.echo.*, already translated.",
+        },
+      },
       "org.archivedProjects.viewsAriaLabel": {
         description:
           "Accessible name for the Projects/Recently deleted tab list on the org Archived page.",
@@ -2895,10 +3250,6 @@ export const org = defineNamespace({
       "org.projectOverview.plan.groupHintSoon": {
         description: "Hint on the Due soon group header.",
       },
-      "org.projectOverview.plan.groupHintNearlyComplete": {
-        description:
-          "Hint on the Nearly complete group header, stating the rule that puts a unit there: its worse medium is short by at most six percent of its cells, or seven cells, whichever is larger. The two numbers are the rule itself, not an illustration — keep them exact.",
-      },
       "org.projectOverview.plan.groupHintInProgress": {
         description: "Hint on the In progress group header.",
       },
@@ -2951,9 +3302,9 @@ export const org = defineNamespace({
         description: "Button marking a unit finished. An explicit human judgment, not derived from percentages.",
         maxLength: 14,
       },
-      "org.projectOverview.plan.markDoneHint": {
-        description: "Reassurance beside Mark done that the action can be reversed.",
-        maxLength: 14,
+      "org.projectOverview.plan.markDoneTooltip": {
+        description: "Hover tooltip on Mark done: reassurance that the mark can be removed again afterwards. Must read as reversible, never as \"cannot be undone\".",
+        maxLength: 60,
       },
       "org.projectOverview.plan.markDoneAnyway": {
         description: "Confirms marking a unit done although its validated percentage is below 100.",
@@ -2974,6 +3325,13 @@ export const org = defineNamespace({
       "org.projectOverview.plan.markedDoneBy": {
         description: "Provenance line: when a unit was marked done and by whom.",
         placeholders: { date: "ISO date, e.g. 2026-09-02.", user: "Username — not translated." },
+      },
+      "org.projectOverview.plan.markedDoneWithWork": {
+        description:
+          "Amber note on a plan row, and in the side panel beside 'Unmark', for a unit someone marked done that has outstanding cells again (a setting change, an added line, or an edit since). The unit stays in the Done group; this says that it was marked done AND what is left. Joined the way the board joins two fragments (see shortfallPair).",
+        placeholders: {
+          work: "What is left, already translated: one or two shortfall terms, e.g. '6 cells to translate' or '2 to translate \u00b7 3 to validate'.",
+        },
       },
       "org.projectOverview.plan.doneBelowFullNudge": {
         description: "Shown when marking a unit done whose validated share is under 100%. Informative, not blocking — the mark is a judgment the numbers cannot make.",
@@ -3103,6 +3461,13 @@ export const org = defineNamespace({
         placeholders: {
           list: "The first few chapter numbers, already joined for this locale.",
           count: "How many further chapters are short — a number. The plural form is selected by it.",
+        },
+      },
+      "org.projectOverview.plan.shortfallWhereWithFrontMatter": {
+        description:
+          "Replaces the chapter list on a plan row when the book's front matter (its title, introduction, or a line added above the first verse) is short as well as some chapters: \"front matter and chapters 2 and 3\". Lower case: a fragment after a separator. Use the same words for 'front matter' as the tile label frontMatter.",
+        placeholders: {
+          chapters: "The chapter part, already translated: shortfallWhere or shortfallWhereMore, e.g. 'chapters 2 and 3'.",
         },
       },
       "org.projectOverview.plan.goToFirstUntranslated": {
@@ -3240,10 +3605,79 @@ export const org = defineNamespace({
         description: "Part of the inspector subtitle for a non-Scripture unit.",
         placeholders: { count: "Sections in the unit — a number." },
       },
+      "org.projectOverview.plan.unnumberedLine": {
+        description:
+          "Chip in the plan inspector's chapter card for a line that has no verse reference — usually one added by hand in the editor — where a numbered verse's chip would print '12:4'. The line counts with the chapter of the line above it. It may already hold text, so do not call it empty.",
+        maxLength: 20,
+      },
+      "org.projectOverview.plan.headingLine": {
+        description:
+          "Chip in the plan inspector's chapter card for a section heading, such as 'The Creation', where a numbered verse's chip would print '12:4'. Opens that line in the editor. A heading with a verse below it shows headingChipAt instead; this bare word is for one at the end of a chapter.",
+        maxLength: 20,
+      },
+      "org.projectOverview.plan.headingChipAt": {
+        description:
+          "Chip in the plan inspector's chapter card for a section heading that has a verse below it: the word 'Heading' and the verse the heading introduces, joined the way the board joins two fragments (see shortfallPair). Use the same word as headingLine. Its tooltip is headingBefore.",
+        placeholders: { verse: "The verse just below the heading, as its chip prints it, e.g. '1:6'. Not translated." },
+        maxLength: 28,
+      },
+      "org.projectOverview.plan.titleLine": {
+        description:
+          "Chip on the plan inspector's front-matter card (the part of a book before chapter 1) for a book's title, running header, table-of-contents line or introduction paragraph. Opens that line in the editor.",
+        maxLength: 20,
+      },
+      "org.projectOverview.plan.headingBefore": {
+        description:
+          "Tooltip and screen-reader name of a 'Heading' chip in the plan inspector's chapter card, saying which line it opens: the heading printed just before that verse.",
+        placeholders: { verse: "The verse below the heading, as its chip prints it, e.g. '3:1'." },
+      },
+      "org.projectOverview.plan.headingAfter": {
+        description:
+          "Tooltip and screen-reader name of a 'Heading' chip in the plan inspector's chapter card for a heading at the end of a chapter with no verse below it: the heading printed just after that verse.",
+        placeholders: { verse: "The verse above the heading, as its chip prints it, e.g. '3:24'." },
+      },
+      "org.projectOverview.plan.unnumberedBefore": {
+        description:
+          "Tooltip and screen-reader name of an 'Unnumbered line' chip in the plan inspector's chapter card (a line with no verse reference), saying which line it opens: the one just before that verse.",
+        placeholders: { verse: "The verse below the line, as its chip prints it, e.g. '2:1'." },
+      },
+      "org.projectOverview.plan.unnumberedAfter": {
+        description:
+          "Tooltip and screen-reader name of an 'Unnumbered line' chip in the plan inspector's chapter card (a line with no verse reference), saying which line it opens: the one just after that verse.",
+        placeholders: { verse: "The verse above the line, as its chip prints it, e.g. '2:5'." },
+      },
+      "org.projectOverview.plan.wordChipOrdinal": {
+        description:
+          "Tooltip and screen-reader name of a chip that prints a word instead of a verse number, when several such chips on the card would otherwise have the same name (two headings stacked before one verse, or several title lines on a book's front matter). Says which of them this is, in file order, e.g. 'Heading before 3:1 (2 of 2)'.",
+        placeholders: {
+          line: "The chip's name without the count, already translated: e.g. 'Heading before 3:1' or 'Title or intro'.",
+          index: "Its position among the chips with that word — a number.",
+          count: "How many chips on the card print that word — a number.",
+        },
+      },
+      "org.projectOverview.plan.unnumberedInChapter": {
+        description:
+          "Note in the plan inspector's chapter card, shown only when the selected chapter holds lines with no verse reference. Explains that they count toward this chapter's progress because the line above them is in it.",
+        placeholders: { count: "Lines with no verse reference in this chapter — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.unnumberedInFrontMatter": {
+        description:
+          "The same note as unnumberedInChapter, on the card for a book's front matter (the part before chapter 1: its title, introduction, and any line someone added above the first verse). Front matter is not a chapter, so it names the book's front matter instead. Use the same words for 'front matter' as the tile label frontMatter.",
+        placeholders: { count: "Lines with no verse reference in the front matter — a number; it also selects the plural form." },
+      },
       "org.projectOverview.plan.chaptersShort": {
         description:
           "Summary line above the inspector's chapter grid: how many of this unit's chapters still have outstanding cells in them. Counts chapters, not cells — the cell figure is the shortfall line above.",
         placeholders: { count: "Chapters with outstanding cells — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.frontMatterShort": {
+        description:
+          "Summary line above the inspector's chapter grid when the only outstanding cells sit in the book's front matter (its title, introduction, or a line added above the first verse), which is not a chapter. Same position and tone as chaptersShort. Use the same words for 'front matter' as the tile label frontMatter.",
+      },
+      "org.projectOverview.plan.frontMatterAndChaptersShort": {
+        description:
+          "Summary line above the inspector's chapter grid when the book's front matter AND some chapters still have outstanding cells: \"Front matter and 2 chapters short\". Same position and tone as chaptersShort. Use the same words for 'front matter' as the tile label frontMatter.",
+        placeholders: { count: "Chapters with outstanding cells, not counting the front matter — a number; it also selects the plural form." },
       },
       "org.projectOverview.plan.chaptersComplete": {
         description:
@@ -3271,31 +3705,30 @@ export const org = defineNamespace({
         placeholders: { chapter: "The chapter number — a number, not translated." },
         maxLength: 18,
       },
-      "org.projectOverview.plan.chapterCellsUntranslated": {
+      "org.projectOverview.plan.queueTranslateValidate": {
         description:
-          "Beside the chapter card's heading: how many cells in this chapter still have no target text. Shown when translation is the outstanding work; its two siblings cover validation and recording. Reads as a fact about the chapter, not as an instruction.",
-        placeholders: { count: "Cells with no target text — a number; it also selects the plural form." },
+          "Label above a row of verse buttons on the plan board's chapter card: the lines nobody has " +
+          "translated yet, which then also need validating. {count} is how many lines are in the row.",
+        placeholders: { count: "How many lines (a number)." },
       },
-      "org.projectOverview.plan.chapterTakesUnvalidated": {
+      "org.projectOverview.plan.queueValidate": {
         description:
-          "Beside the chapter card's heading (see chapterCellsUntranslated): how many recorded takes nobody has validated yet. Distinct from chapterTakesUnrecorded — these ARE recorded.",
-        placeholders: {
-          count: "How many takes await validation — a number; the plural form is selected by it.",
-        },
+          "Label above the chapter card's row of lines that are translated but not validated yet.",
+        placeholders: { count: "How many lines (a number)." },
       },
-      "org.projectOverview.plan.chapterCellsUnvalidated": {
+      "org.projectOverview.plan.queueRecordValidate": {
         description:
-          "Beside the chapter card's heading (see chapterCellsUntranslated): how many translated cells nobody has validated yet.",
-        placeholders: { count: "Translated cells awaiting validation — a number; it also selects the plural form." },
+          "Label above the chapter card's row of lines with no recording yet (which then also need " +
+          "the recording validated).",
+        placeholders: { count: "How many lines (a number)." },
       },
-      "org.projectOverview.plan.chapterTakesUnrecorded": {
-        description:
-          "Beside the chapter card's heading (see chapterCellsUntranslated), for a file that carries recordings: how many cells have no take against them. A 'take' is one recorded clip for one cell.",
-        placeholders: { count: "Cells with no recording — a number; it also selects the plural form." },
+      "org.projectOverview.plan.queueValidateRecording": {
+        description: "Label above the chapter card's row of lines whose recording nobody has validated yet.",
+        placeholders: { count: "How many lines (a number)." },
       },
       "org.projectOverview.plan.frontMatter": {
         description:
-          "Label on the tile beneath the inspector's chapter grid for a Bible book's USFM front matter — a book title, running headers, an introduction: cells that belong to the book but to no chapter. Lower case, because it sits in a row of small tiles among chapter numbers.",
+          "A Bible book's USFM front matter — a book title, running headers, an introduction: cells that belong to the book but to no chapter. Written in lower case, because on a plan row it is read as a fragment in the slot where 'chapters 2 and 3' would sit: where the outstanding cells are when only the front matter is short. The tile beneath the inspector's chapter grid and the title of that tile's card show it with its first letter capitalised, as labels standing alone.",
         maxLength: 14,
       },
       "org.projectOverview.plan.tileAria": {
@@ -3313,10 +3746,6 @@ export const org = defineNamespace({
           section: "The section's own key, e.g. a book code or a scene name. Not translated.",
           count: "Outstanding cells in that section — a number, and the one the plural agrees with.",
         },
-      },
-      "org.projectOverview.plan.audioSharedAcrossLanes": {
-        description:
-          "Note beside the inspector's audio bars: recordings hang off the file rather than off one target language, so every lane reads the same audio figures. Lower case because it is read as a parenthetical beside the bars, not as a sentence of its own.",
       },
       "org.projectOverview.plan.assignedTo": {
         description:
@@ -3402,6 +3831,24 @@ export const org = defineNamespace({
           done: "Files downloaded so far — a number.",
           total: "Total files in the project being downloaded — a number.",
         },
+      },
+      "org.projectOverview.saveMediaOffline": {
+        description: "Overflow-menu item on ProjectOverview (Tauri desktop) for a project already available offline: copies its recorded and generated audio onto this device so it plays without a connection.",
+      },
+      "org.projectOverview.offlineMediaSaving": {
+        description: "Badge next to the project title while 'Save audio for offline' runs.",
+        placeholders: { done: "Audio clips processed so far — a number.", total: "Total audio clips in the project — a number." },
+      },
+      "org.projectOverview.offlineMediaSaved": {
+        description: "Badge after 'Save audio for offline' finishes.",
+        placeholders: { count: "Audio clips now on this device — a number.", failed: "Clips that could not be downloaded (deleted or failed) — a number." },
+      },
+      "org.projectOverview.offlineMediaBudget": {
+        description: "Badge when 'Save audio for offline' stopped because the on-device audio storage limit was reached.",
+        placeholders: { count: "Audio clips on this device — a number.", total: "Total audio clips in the project — a number." },
+      },
+      "org.projectOverview.offlineMediaUnavailable": {
+        description: "Badge when this device has no persistent storage for audio, so 'Save audio for offline' could not run.",
       },
       "org.projectOverview.offlineRemoveBlocked": {
         description:

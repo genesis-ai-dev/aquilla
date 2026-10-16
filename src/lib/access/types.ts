@@ -40,8 +40,10 @@ export interface AccessChainEntry {
    *  at this scope (e.g. an org Member below the org-wide access floor). */
   roleLevel: number | null
   origin: GrantOrigin
-  /** Display name of whoever made the grant. */
+  /** Username of whoever made the grant. */
   grantedBy?: string
+  /** Account id of whoever granted this row, when `grantedBy` is their username. */
+  grantedByUserId?: string
   /** ISO-8601 timestamp. */
   grantedAt?: string
   /** Org/team containers only: how many projects under this scope hold a grant

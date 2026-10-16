@@ -231,8 +231,19 @@ async function main() {
     console.log(`Skipping ${target} migrations because SKIP_${defaults.envPrefix}_MIGRATIONS=1 or SKIP_MIGRATIONS=1`)
   } else {
     console.log(`Applying pending migrations to '${branch}'`)
-    await run("pnpm", ["neon:apply"], { env: migrationEnv })
+    // This branch was just recreated from upstream, so there is nothing a
+    // pre-migration snapshot would protect (AQU-1877's gate).
+    await run("pnpm", ["neon:apply", "--no-snapshot"], { env: migrationEnv })
   }
+
+  // AQU-1775: the restore copied every org's encrypted integration tokens
+  // (Monday) from production. Delete them before the dev workers — same signing
+  // key as production — can decrypt, refresh or push with them. The script
+  // refuses a production target itself; this is the restored branch only.
+  console.log(`Scrubbing integration connections copied from '${sourceBranch}'`)
+  await run("pnpm", ["exec", "tsx", "scripts/neon-scrub-integrations.ts"], {
+    env: { ...migrationEnv, AQUILLA_NEON_TARGET: target },
+  })
 
   await checkHttp(healthUrl, `${target} API health check`)
   await checkProjectRead(target, projectReadUrl, projectReadToken)

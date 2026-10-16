@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
 import { PostgresDb, type PgExecutor } from "../../../../db/shim/postgres"
-import { installTestLaneFill } from "../../../../db/shared/test-lane-fill"
+import { installTestLaneFill, rewriteTestLaneResolve } from "../../../../db/shared/test-lane-fill"
 import { resetChainCacheForTests } from "../../events/cells-read-route"
 
 const SCHEMA = readFileSync(
@@ -29,6 +29,18 @@ const SCHEMA = readFileSync(
  */
 export const DRIVER_MAX_BIND_PARAMS = 65_533
 
+/** Projection tables whose wire tag is lanes.legacy_tag, not a column. */
+const WIRE_TAG_TABLES = new Set([
+  "cells",
+  "cell_validators",
+  "file_section_progress",
+  "assignments",
+  "artifact_bindings",
+  "scene_briefs",
+  "contextual_runs",
+  "contextual_drafts",
+])
+
 export interface TestDbOptions {
   /** Called with every statement the shim sends, inside and outside
    *  transactions, before it runs. For tests that pin how a code path SHAPES
@@ -37,10 +49,39 @@ export interface TestDbOptions {
   onStatement?: (sql: string, params: readonly unknown[]) => void
 }
 
+/**
+ * AQU-1982: "unnamed prepared statement does not exist" out of PGlite is almost
+ * never what it says. PGlite's query path sends Parse, Describe, Bind, Execute
+ * and Sync as separate protocol messages, and its WASM dispatch loop swallows
+ * every exception that is not a Postgres longjmp. When the Parse itself blows
+ * the WASM's native stack (Node's ~1 MB, shared with the engine), the statement
+ * is silently never registered and the Describe that follows is what reports
+ * it missing. The usual trigger is an expression that nests once per element:
+ * a row-constructor `(a, b) IN ((…), …)` list, which Postgres rewrites into a
+ * left-deep OR tree, fails between 1,700 and 1,800 rows. Native Postgres has no
+ * such ceiling, so this is a harness limit, not a production bug — the fix is
+ * to page the statement smaller (see CELL_KEY_LOOKUP_ROWS in lib/cell-key-lookup.ts).
+ */
+function explainLostParse(e: unknown, sql: string, params: readonly unknown[]): unknown {
+  const message = (e as { message?: unknown } | null)?.message
+  if (typeof message !== "string" || !message.includes("unnamed prepared statement does not exist")) return e
+  return new Error(
+    `PGlite lost this statement's Parse (${params.length} binds, ${sql.length} chars of SQL). ` +
+      "The WASM most likely overflowed Node's native stack on an expression that nests once per " +
+      "element — a row-constructor IN list fails past ~1,700 rows — and PGlite swallowed it. " +
+      "Native Postgres has no such ceiling: page the statement smaller (AQU-1982). " +
+      `Original: ${message}`,
+    { cause: e },
+  )
+}
+
 function pgliteExecutor(db: PGlite, opts: TestDbOptions): PgExecutor {
   const wrap = (q: { query: PGlite["query"]; exec: PGlite["exec"]; transaction?: PGlite["transaction"] }): PgExecutor => ({
     async run(sql, params) {
       opts.onStatement?.(sql, params)
+      // Shape tests see the production subquery. Execution mints the lane
+      // from the tag that subquery binds, because writers no longer store it.
+      sql = rewriteTestLaneResolve(sql)
       if (params.length > DRIVER_MAX_BIND_PARAMS) {
         // Same code and message as postgres.js, so a failure here reads exactly
         // like the production one it stands in for.
@@ -55,7 +96,9 @@ function pgliteExecutor(db: PGlite, opts: TestDbOptions): PgExecutor {
         const last = (await q.exec(sql)).at(-1)
         return { rows: (last?.rows ?? []) as Record<string, unknown>[], rowCount: last?.affectedRows ?? last?.rows.length ?? 0 }
       }
-      const r = await q.query<Record<string, unknown>>(sql, params as unknown[])
+      const r = await q.query<Record<string, unknown>>(sql, params as unknown[]).catch((e: unknown) => {
+        throw explainLostParse(e, sql, params)
+      })
       return { rows: r.rows, rowCount: (r as { affectedRows?: number }).affectedRows ?? r.rows.length }
     },
     begin: (fn) => db.transaction((tx) => fn(wrap(tx as unknown as PGlite))) as Promise<never>,
@@ -120,13 +163,41 @@ function typeDefault(type: string): unknown {
   return "" // text / varchar / etc.
 }
 
+// A seed object may still carry `target_lang` as the tag the old column
+// stored. That is not a column write (0155 dropped it). When the seed names
+// the tag and omits lane_id, resolve the lane the test functions mint, the
+// same ones writer SQL is rewritten to. A seed that already has lane_id
+// keeps it.
+async function withSeedLane(
+  pg: PGlite,
+  table: string,
+  row: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  if (!WIRE_TAG_TABLES.has(table)) return row
+  const existing = row.lane_id
+  if (typeof existing === "string" && existing.trim() !== "") return row
+  if (!("target_lang" in row) || typeof row.project_id !== "string") return row
+  const source =
+    (table === "cells" && row.side === "source") ||
+    (table === "artifact_bindings" && row.binding_role === "source")
+  const tag = row.target_lang == null ? "" : String(row.target_lang)
+  const resolved = await pg.query<{ id: string | null }>(
+    source
+      ? `SELECT aquilla_test_resolve_source_lane($1) AS id`
+      : `SELECT aquilla_test_resolve_target_lane($1, $2) AS id`,
+    source ? [row.project_id] : [row.project_id, tag],
+  )
+  return { ...row, lane_id: resolved.rows[0]?.id }
+}
+
 // Seed rows tolerantly (the legacy fake had no constraints): drop unknown +
 // generated columns, and auto-fill required (NOT NULL, no default) columns the
 // seed omits with a type-appropriate placeholder so real-PG constraints pass.
 async function seedRows(pg: PGlite, table: string, rows: ReadonlyArray<object>) {
   if (rows.length === 0) return
   const meta = await tableMeta(pg, table)
-  for (const row of rows as ReadonlyArray<Record<string, unknown>>) {
+  for (const raw of rows as ReadonlyArray<Record<string, unknown>>) {
+    const row = await withSeedLane(pg, table, raw)
     const cols: string[] = []
     const vals: unknown[] = []
     for (const m of meta) {
@@ -168,8 +239,23 @@ export async function makeTestDb(seed: Seed = {}, opts: TestDbOptions = {}): Pro
   return {
     db,
     pg,
-    rows: async <T = Record<string, unknown>>(table: string) =>
-      (await pg.query<T>(`SELECT * FROM ${table}`)).rows,
+    rows: async <T = Record<string, unknown>>(table: string) => {
+      // Tests that ask rows() "which lane?" get the wire tag,
+      // lanes.legacy_tag. snapshot() and a direct query return the columns
+      // that still exist; the projection column does not.
+      const result = await pg.query<T & { lane_id?: string | null; project_id?: string; target_lang?: string }>(
+        `SELECT * FROM ${table}`,
+      )
+      if (!WIRE_TAG_TABLES.has(table) || result.rows.length === 0) return result.rows
+      const lanes = await pg.query<{ project_id: string; id: string; legacy_tag: string | null }>(
+        `SELECT project_id, id, legacy_tag FROM lanes`,
+      )
+      const tag = new Map(lanes.rows.map((l) => [`${l.project_id}\0${l.id}`, l.legacy_tag ?? ""]))
+      return result.rows.map((row) => {
+        const wire = tag.get(`${row.project_id}\0${row.lane_id}`)
+        return wire === undefined ? row : { ...row, target_lang: wire }
+      }) as T[]
+    },
     snapshot: async () => {
       const tbls = await pg.query<{ tablename: string }>(
         "SELECT tablename FROM pg_tables WHERE schemaname='public'",

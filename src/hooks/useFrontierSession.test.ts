@@ -15,11 +15,17 @@ vi.mock("@/lib/posthog", () => ({
     identify: vi.fn(),
     capture: vi.fn(),
     reset: vi.fn(),
+    register: vi.fn(),
   },
 }))
 
 vi.mock("@/hooks/useAccounts", () => ({
-  useAccounts: () => ({ active: null, loading: false, adopt: vi.fn(async () => {}) }),
+  useAccounts: () => ({
+    active: null,
+    loading: false,
+    adopt: vi.fn(async () => {}),
+    removeAll: vi.fn(async () => {}),
+  }),
 }))
 
 vi.mock("@/lib/frontier/session-store", () => ({
@@ -40,6 +46,7 @@ vi.mock("@/lib/audio/cache-cleanup", () => ({
 import { useFrontierSession } from "./useFrontierSession"
 import posthog from "@/lib/posthog"
 import { login as mockLogin, register as mockRegister } from "@/lib/frontier/auth"
+import { resolveAppEnv } from "@/lib/analytics-env"
 
 const HEX_RE = /^[0-9a-f]{64}$/
 
@@ -133,5 +140,20 @@ describe("useFrontierSession — distinct id hashing", () => {
 
     const identifyMock = posthog.identify as ReturnType<typeof vi.fn>
     expect(identifyMock.mock.calls[0][1]).toEqual({ email })
+  })
+})
+
+describe("useFrontierSession — logout keeps the app_env super-property (AQU-1572)", () => {
+  it("registers app_env again after posthog.reset() clears it", async () => {
+    const { result } = renderHook(() => useFrontierSession(), { wrapper: makeWrapper() })
+    await act(async () => {
+      await result.current.logout()
+    })
+
+    const reset = posthog.reset as ReturnType<typeof vi.fn>
+    const register = posthog.register as ReturnType<typeof vi.fn>
+    expect(register).toHaveBeenCalledWith({ app_env: resolveAppEnv(window.location) })
+    // Order matters: registered before the reset, it would be wiped again.
+    expect(register.mock.invocationCallOrder[0]).toBeGreaterThan(reset.mock.invocationCallOrder[0]!)
   })
 })

@@ -55,13 +55,18 @@ describe("handleCorsPreflight", () => {
     const res = handleCorsPreflight(
       req("OPTIONS", "/api/v1/projects/p1/files/f1/source", {
         "Access-Control-Request-Method": "PUT",
-        "Access-Control-Request-Headers": "authorization,x-source-format,x-source-size,x-source-sha256,x-artifact-id,x-artifact-name,x-artifact-binding-role,x-artifact-member-path,x-artifact-profile-id,x-artifact-profile-version,x-artifact-fidelity,x-update-source-sidecar",
+        "Access-Control-Request-Headers": "authorization,x-source-format,x-source-size,x-source-sha256,x-artifact-id,x-artifact-name,x-artifact-binding-role,x-artifact-target-lang,x-artifact-member-path,x-artifact-profile-id,x-artifact-profile-version,x-artifact-fidelity,x-update-source-sidecar",
       }),
     )
     expect(res?.status).toBe(204)
     const allowed = res!.headers.get("Access-Control-Allow-Headers")!.toLowerCase()
     for (const header of [
       "x-source-format", "x-source-size", "x-source-sha256", "x-artifact-id", "x-artifact-name", "x-artifact-binding-role",
+      // AQU-1631: this one was missing from both the allowlist and this list,
+      // which is how the gap survived — the test claimed "every" header while
+      // enumerating all but one. A target import into any non-default lane
+      // sends it and died at the preflight.
+      "x-artifact-target-lang",
       "x-artifact-member-path", "x-artifact-profile-id", "x-artifact-profile-version",
       "x-artifact-fidelity", "x-update-source-sidecar",
     ]) expect(allowed).toContain(header)

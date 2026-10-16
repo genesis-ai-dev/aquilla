@@ -1,3 +1,4 @@
+import { CheckingPage } from "@/components/checking/CheckingPage"
 import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Navigate, Routes, Route, useParams, useLocation, type Location } from "react-router-dom"
 import { OrgHome } from "@/components/org/OrgHome"
@@ -35,6 +36,10 @@ import { OfflineShutdownGuard } from "@/components/OfflineShutdownGuard"
 import { LocalLlmConfigMount } from "@/components/LocalLlmConfigMount"
 import { ConflictToast } from "@/components/ConflictToast"
 import { OfflineLeaderWatchdog } from "@/components/OfflineLeaderWatchdog"
+import { DesktopUpdatePrompt } from "@/components/DesktopUpdatePrompt"
+import { NewerOfflineDataNotice } from "@/components/NewerOfflineDataNotice"
+import { OfflineProjectAccessWatch } from "@/components/OfflineProjectAccessWatch"
+import { OfflineRefusedWritesNotice } from "@/components/OfflineRefusedWritesNotice"
 import { NavHistoryProvider } from "@/context/NavHistoryContext"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
@@ -43,6 +48,7 @@ import { AiModelConsentDialog } from "@/components/AiModelConsentDialog"
 import { AiModelDownloadChip } from "@/components/AiModelDownloadChip"
 import { AudioBulkProgressBanner } from "@/components/AudioBulkProgressBanner"
 import { PrivateModeBanner } from "@/components/PrivateModeBanner"
+import { StorageFullBanner } from "@/components/StorageFullBanner"
 import { SessionExpiredBanner } from "@/components/SessionExpiredBanner"
 import { AdminElevationPrompt } from "@/components/admin/AdminElevationPrompt"
 import { ExpiredSessionGate } from "@/components/ExpiredSessionGate"
@@ -64,6 +70,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { useGlobalAudioShortcuts } from "@/hooks/useGlobalAudioShortcuts"
 import { useSessionRefresh } from "@/hooks/useSessionRefresh"
 import { ProjectWorkspaceRoute } from "@/components/ProjectWorkspaceRoute"
+import { ProjectElevationBoundary } from "@/components/ProjectElevationBoundary"
 import { RedirectToProjectOverview } from "@/components/RedirectToProjectOverview"
 
 // Heavy workspace / admin routes — loaded only when navigated to
@@ -85,6 +92,14 @@ const ProjectSettingsDialog = lazy(() =>
 // the main content area. These top-level lazy imports are intentionally removed.
 const OrgAccessPage = lazy(() =>
   import("@/pages/OrgAccessPage").then((m) => ({ default: m.OrgAccessPage })),
+)
+const OrgAccessAuditPage = lazy(() =>
+  import("@/pages/OrgAccessAuditPage").then((m) => ({ default: m.OrgAccessAuditPage })),
+)
+// AQU-1958: org-wide comments view — the project Comments page's list across
+// every project in the org the caller can see.
+const OrgCommentsPage = lazy(() =>
+  import("@/pages/OrgCommentsPage").then((m) => ({ default: m.OrgCommentsPage })),
 )
 const MembersPage = lazy(() =>
   import("@/pages/MembersPage").then((m) => ({ default: m.MembersPage })),
@@ -308,8 +323,15 @@ export default function App() {
       <TooltipProvider delay={600}>
         <SyncingProvider>
           <PrivateModeBanner />
+          {/* AQU-1865: nearly-full origin storage — the caches shed themselves,
+              but only the user can free the disk. */}
+          <StorageFullBanner />
           <ConflictToast />
           <OfflineLeaderWatchdog />
+          <DesktopUpdatePrompt />
+          <NewerOfflineDataNotice />
+          <OfflineProjectAccessWatch />
+          <OfflineRefusedWritesNotice />
           {/* AQU-293: session-expiry banner — must be inside Router (uses useLocation) */}
           <SessionExpiredBanner />
           {/* AQU-1322: admin step-up dialog; renders nothing until a 403 "elevation required" lands. */}
@@ -363,11 +385,12 @@ function AppRoutes() {
         <Route path="/oauth/consent" element={<LazyRoute><OAuthConsent /></LazyRoute>} />
         <Route path="/app" element={<AppEntry />} />
         <Route path="/projects" element={<Navigate to={resumeOrgPath()} replace />} />
-        <Route path="/projects/:id" element={<ProjectOverview />} />
+        <Route path="/projects/:id" element={<ProjectElevationBoundary><ProjectOverview /></ProjectElevationBoundary>} />
         <Route path="/shared" element={<SharedProjectsPage />} />
         <Route path="/join/:token" element={<JoinPage />} />
         {/* AQU-626: per-user deep link + PIN — public, eager (fresh-browser
             diode-zone flow lands here with no session and no onboarding). */}
+        <Route path="/check/:token" element={<CheckingPage />} />
         <Route path="/link/:token" element={<AccessLinkPage />} />
         {/* Agent API (AQU-533 §3) — one-time human approval for ask-mode changesets. */}
         <Route path="/approve/:changesetId" element={<LazyRoute><ApproveChangeset /></LazyRoute>} />
@@ -409,7 +432,9 @@ function AppRoutes() {
           />
           <Route path="members" element={<OrgLazyRoute><MembersPage /></OrgLazyRoute>} />
           <Route path="members/matrix" element={<OrgLazyRoute><MembersPage /></OrgLazyRoute>} />
+          <Route path="comments" element={<OrgLazyRoute><OrgCommentsPage /></OrgLazyRoute>} />
           <Route path="access" element={<OrgLazyRoute><OrgAccessPage /></OrgLazyRoute>} />
+          <Route path="access-audit" element={<OrgLazyRoute><OrgAccessAuditPage /></OrgLazyRoute>} />
           <Route path="settings" element={<OrgLazyRoute><Settings /></OrgLazyRoute>} />
           <Route path="settings/identity" element={<OrgLazyRoute><OrgSettingsIdentity /></OrgLazyRoute>} />
           <Route path="settings/security" element={<OrgLazyRoute><OrgSettingsSecurity /></OrgLazyRoute>} />
@@ -434,12 +459,12 @@ function AppRoutes() {
         <Route path="/project/:id" element={<RedirectToProjectOverview />} />
         <Route path="/project/:id/editor" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
         <Route path="/project/:id/editor/file/:fileId" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
-        <Route path="/project/:id/settings" element={<LazyRoute><ProjectSettings /></LazyRoute>} />
-        <Route path="/project/:id/settings/:section" element={<LazyRoute><ProjectSettings /></LazyRoute>} />
+        <Route path="/project/:id/settings" element={<ProjectElevationBoundary><LazyRoute><ProjectSettings /></LazyRoute></ProjectElevationBoundary>} />
+        <Route path="/project/:id/settings/:section" element={<ProjectElevationBoundary><LazyRoute><ProjectSettings /></LazyRoute></ProjectElevationBoundary>} />
         {/* Rules now live on Living Memory's "Translation quality" pane. */}
         <Route path="/project/:id/rules" element={<RedirectToProjectMemory section="quality" />} />
         {/* AQU-841 — in-app approvals queue for agent-staged changesets. */}
-        <Route path="/project/:id/approvals" element={<LazyRoute><ProjectApprovals /></LazyRoute>} />
+        <Route path="/project/:id/approvals" element={<ProjectElevationBoundary><LazyRoute><ProjectApprovals /></LazyRoute></ProjectElevationBoundary>} />
         <Route path="/project/:id/agent" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
         <Route path="/project/:id/voice" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
         <Route path="/project/:id/terminology" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
@@ -470,8 +495,8 @@ function AppRoutes() {
         <Routes>
           <Route path="/preferences" element={<PreferencesDialog />} />
           <Route path="/preferences/:section" element={<PreferencesDialog />} />
-          <Route path="/project/:id/settings" element={<LazyRoute><ProjectSettingsDialog /></LazyRoute>} />
-          <Route path="/project/:id/settings/:section" element={<LazyRoute><ProjectSettingsDialog /></LazyRoute>} />
+          <Route path="/project/:id/settings" element={<ProjectElevationBoundary><LazyRoute><ProjectSettingsDialog /></LazyRoute></ProjectElevationBoundary>} />
+          <Route path="/project/:id/settings/:section" element={<ProjectElevationBoundary><LazyRoute><ProjectSettingsDialog /></LazyRoute></ProjectElevationBoundary>} />
         </Routes>
       ) : null}
     </>

@@ -19,6 +19,7 @@ import {
   getContextualDraftsSummary,
   resetContextualDraftsStore,
 } from "@/lib/contextual/drafts-store"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const reviewMock = vi.fn(async () => {})
 vi.mock("@/lib/contextual/transport", () => ({
@@ -102,7 +103,7 @@ describe("ContextualDraftCard", () => {
     const { onAccept } = renderCard()
     fireEvent.click(screen.getByLabelText("Use this translation"))
 
-    await vi.waitFor(() => expect(onAccept).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(onAccept).toHaveBeenCalledOnce(), { timeout: STALL_WATCHDOG_MS })
     expect(reviewMock).not.toHaveBeenCalled()
     expect(screen.getByTestId("contextual-draft-card")).toBeInTheDocument()
     expect(getContextualDraftsSummary()).toMatchObject({
@@ -122,7 +123,7 @@ describe("ContextualDraftCard", () => {
     const { onAccept } = renderCard()
     fireEvent.click(screen.getByLabelText("Dismiss this suggestion"))
     expect(onAccept).not.toHaveBeenCalled()
-    await vi.waitFor(() => expect(screen.queryByTestId("contextual-draft-card")).toBeNull())
+    await vi.waitFor(() => expect(screen.queryByTestId("contextual-draft-card")).toBeNull(), { timeout: STALL_WATCHDOG_MS })
     expect(getContextualDraftsSummary()).toMatchObject({
       pending: 0,
       rejectedThisSession: 1,
@@ -133,14 +134,14 @@ describe("ContextualDraftCard", () => {
     seed()
     const { onAccept } = renderCard()
     fireEvent.click(screen.getByLabelText("Use this translation"))
-    await vi.waitFor(() => expect(onAccept).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(onAccept).toHaveBeenCalledOnce(), { timeout: STALL_WATCHDOG_MS })
     expect(reviewMock).not.toHaveBeenCalled()
 
     cleanup()
     seed()
     renderCard()
     fireEvent.click(screen.getByLabelText("Dismiss this suggestion"))
-    await vi.waitFor(() => expect(reviewMock).toHaveBeenCalledWith("p1", "d1", "rejected"))
+    await vi.waitFor(() => expect(reviewMock).toHaveBeenCalledWith("p1", "d1", "rejected"), { timeout: STALL_WATCHDOG_MS })
   })
 
   it("does not make acceptance depend on the review endpoint", async () => {
@@ -149,7 +150,7 @@ describe("ContextualDraftCard", () => {
     const { onAccept } = renderCard()
     fireEvent.click(screen.getByLabelText("Use this translation"))
 
-    await vi.waitFor(() => expect(onAccept).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(onAccept).toHaveBeenCalledOnce(), { timeout: STALL_WATCHDOG_MS })
     expect(reviewMock).not.toHaveBeenCalled()
     expect(screen.queryByRole("alert")).toBeNull()
     expect(screen.getByTestId("contextual-draft-card")).toBeInTheDocument()
@@ -169,7 +170,7 @@ describe("ContextualDraftCard", () => {
 
     reviewMock.mockResolvedValue(undefined)
     fireEvent.click(screen.getByLabelText("Dismiss this suggestion"))
-    await vi.waitFor(() => expect(screen.queryByTestId("contextual-draft-card")).toBeNull())
+    await vi.waitFor(() => expect(screen.queryByTestId("contextual-draft-card")).toBeNull(), { timeout: STALL_WATCHDOG_MS })
     expect(getContextualDraftsSummary()).toMatchObject({ pending: 0, rejectedThisSession: 1 })
   })
 
@@ -200,7 +201,7 @@ describe("ContextualDraftCard", () => {
 
     fireEvent.click(screen.getByLabelText("Use this translation"))
 
-    await vi.waitFor(() => expect(screen.getByLabelText("Use this translation")).not.toBeDisabled())
+    await vi.waitFor(() => expect(screen.getByLabelText("Use this translation")).not.toBeDisabled(), { timeout: STALL_WATCHDOG_MS })
     expect(screen.getByText("must remain reviewable")).toBeInTheDocument()
     expect(getContextualDraftsSummary()).toMatchObject({ pending: 1, acceptedThisSession: 0 })
     expect(reviewMock).not.toHaveBeenCalled()

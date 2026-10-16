@@ -7,6 +7,7 @@
 import { useMemo } from "react"
 import type { FileType, FileReference } from "@/lib/parsers/types"
 import { AssignModal } from "@/components/AssignModal"
+import type { AssignLaneOption } from "@/lib/sync/assignment-lane"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 
 const EMPTY_SELECTION: ReadonlySet<string> = new Set()
@@ -17,6 +18,8 @@ export interface OrgLaneAssignModalProps {
   lane: string
   /** Extra (non-default) lane tags on the project — enables the lane select. */
   targetLanes: string[]
+  /** AQU-1977: the project's own live languages, in order. See AssignModal's `lanes`. */
+  lanes?: readonly AssignLaneOption[]
   /**
    * AQU-728: display name of the default ('') lane — the project's own default
    * target language. Threaded to AssignModal so the lane select labels the
@@ -40,6 +43,7 @@ export function OrgLaneAssignModal({
   projectId,
   lane,
   targetLanes,
+  lanes,
   defaultLaneLabel,
   files,
   roleLevel,
@@ -75,6 +79,7 @@ export function OrgLaneAssignModal({
       activeFileId={null}
       projectFiles={projectFiles}
       targetLanes={targetLanes}
+      lanes={lanes}
       defaultLane={lane}
       defaultLaneLabel={defaultLaneLabel}
       members={members}

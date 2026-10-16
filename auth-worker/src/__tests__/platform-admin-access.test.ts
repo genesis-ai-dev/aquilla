@@ -1,8 +1,9 @@
 /**
  * Platform-operator cross-tenant access — the "platform" grant path.
  *
- * WHY: ADMIN_EMAILS (deploy-config allowlist, pinned to "root@example.com" in
- * pg-test-env.ts) is the support/oversight axis. An allowlisted operator must
+ * WHY: platform admin (the `platform_admins` table, plus the ADMIN_EMAILS
+ * bootstrap pinned to "root@example.com" in pg-test-env.ts) is the
+ * support/oversight axis. A platform admin must
  * be able to open ANY org/project without holding a membership row — and that
  * access must come from the central resolvers (resolveProjectRole's
  * "platform" path, getEffectiveOrgRole), not per-route special cases, so no
@@ -11,7 +12,7 @@
  */
 
 import { env } from "cloudflare:test"
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, afterEach } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
@@ -261,7 +262,7 @@ describe("platform-admin cross-tenant access", () => {
 })
 
 describe("GET /api/v2/admin/admins", () => {
-  it("returns the email allowlist joined to accounts; unmatched emails flagged hasAccount:false", async () => {
+  it("returns the env bootstrap joined to accounts; unmatched emails flagged hasAccount:false", async () => {
     // Test env allowlist is exactly "root@example.com". Seed root so it matches.
     await seedUser(7, "root")
 
@@ -281,5 +282,96 @@ describe("GET /api/v2/admin/admins", () => {
     await seedUser(1, "wendi")
     const res = await app.request("/api/v2/admin/admins", { headers: authHeader(await jwtFor("wendi")) }, env)
     expect(res.status).toBe(403)
+  })
+})
+
+// AQU-1239: the table is the source of truth in deployed environments; the
+// ADMIN_EMAILS env var is only a bootstrap. These tests turn the bootstrap off
+// so that only the table can grant access.
+describe("platform_admins table (AQU-1239)", () => {
+  const bootstrap = env.ADMIN_EMAILS
+  afterEach(() => {
+    env.ADMIN_EMAILS = bootstrap
+  })
+
+  const addAdmin = (email: string, extra = "") =>
+    env.AQUILLA_PG.prepare(`INSERT INTO platform_admins (email${extra ? ", note" : ""}) VALUES (?${extra ? ", ?" : ""})`)
+      .bind(...(extra ? [email, extra] : [email]))
+      .run()
+
+  it("admits an account listed only in the table, matched case-insensitively, with the platform source", async () => {
+    env.ADMIN_EMAILS = undefined
+    await seedForeignOrg()
+    await seedUser(9, "tablet")
+    await env.AQUILLA_PG.prepare("UPDATE users SET email = 'Tablet@Example.COM' WHERE id = 9").run()
+    await addAdmin("tablet@example.com")
+
+    const gate = await app.request("/api/v2/admin/me", { headers: authHeader(await jwtFor("tablet")) }, env)
+    expect(gate.status).toBe(200)
+
+    const res = await app.request("/api/v2/projects/pa", { headers: authHeader(await jwtFor("tablet")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { role: { level: number; source: string } }
+    expect(body.role).toMatchObject({ level: 700, source: "platform" })
+  })
+
+  it("revokes on the next request once the row is deleted", async () => {
+    env.ADMIN_EMAILS = undefined
+    await seedUser(9, "tablet")
+    await addAdmin("tablet@example.com")
+    const headers = authHeader(await jwtFor("tablet"))
+    expect((await app.request("/api/v2/admin/me", { headers }, env)).status).toBe(200)
+
+    await env.AQUILLA_PG.prepare("DELETE FROM platform_admins WHERE email = 'tablet@example.com'").run()
+    expect((await app.request("/api/v2/admin/me", { headers }, env)).status).toBe(403)
+  })
+
+  it("403s an account that is in neither the table nor ADMIN_EMAILS", async () => {
+    env.ADMIN_EMAILS = undefined
+    await seedUser(9, "tablet")
+    await seedUser(10, "other")
+    await addAdmin("tablet@example.com")
+
+    const res = await app.request("/api/v2/admin/me", { headers: authHeader(await jwtFor("other")) }, env)
+    expect(res.status).toBe(403)
+  })
+
+  it("refuses rows that are not lowercase and trimmed", async () => {
+    await expect(addAdmin("Mixed@Example.com")).rejects.toThrow()
+    await expect(addAdmin(" padded@example.com ")).rejects.toThrow()
+    await expect(addAdmin("")).rejects.toThrow()
+  })
+
+  it("GET /admins lists table rows, with and without accounts, merged with the bootstrap", async () => {
+    await seedUser(7, "root") // root@example.com via ADMIN_EMAILS
+    await seedUser(9, "tablet")
+    await addAdmin("tablet@example.com", "support lead")
+    await addAdmin("future@example.com")
+
+    const res = await app.request("/api/v2/admin/admins", { headers: authHeader(await jwtFor("root")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { admins: Array<Record<string, unknown>> }
+    expect(body.admins.map((a) => a.email)).toEqual([
+      "future@example.com",
+      "root@example.com",
+      "tablet@example.com",
+    ])
+    expect(body.admins[0]).toEqual({ email: "future@example.com", hasAccount: false })
+    expect(body.admins[2]).toMatchObject({ hasAccount: true, userId: 9, username: "tablet" })
+  })
+
+  it("fails closed when the table cannot be read: table admins lose access, the env bootstrap still works, no 500", async () => {
+    await seedUser(7, "root")
+    await seedUser(9, "tablet")
+    await addAdmin("tablet@example.com")
+    await env.AQUILLA_PG.prepare("ALTER TABLE platform_admins RENAME TO platform_admins_gone").run()
+    try {
+      const table = await app.request("/api/v2/admin/me", { headers: authHeader(await jwtFor("tablet")) }, env)
+      expect(table.status).toBe(403)
+      const boot = await app.request("/api/v2/admin/me", { headers: authHeader(await jwtFor("root")) }, env)
+      expect(boot.status).toBe(200)
+    } finally {
+      await env.AQUILLA_PG.prepare("ALTER TABLE platform_admins_gone RENAME TO platform_admins").run()
+    }
   })
 })

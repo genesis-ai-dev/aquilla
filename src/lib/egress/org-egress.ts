@@ -31,7 +31,12 @@ import {
 } from "./freshness"
 import { computeOptionsHash } from "./options-hash"
 import { readEgressCache, writeEgressCache } from "./export-cache"
-import { buildProjectExport, egressSlug, type EgressZipEntry } from "./build-project-export"
+import {
+  audioListingKey,
+  buildProjectExport,
+  egressSlug,
+  type EgressZipEntry,
+} from "./build-project-export"
 import {
   createEgressZipPacker,
   type EgressZipPacker,
@@ -121,7 +126,17 @@ async function runWithPacker(
 
   // Entries accumulate uncompressed and are DEFLATEd once at the end, in the
   // worker — JSZip's .file() never compressed, so this costs no extra memory.
+  //
+  // AQU-1862: they accumulate as Blobs, never as strings or typed arrays. The
+  // org zip holds every selected project's output, and a few projects' worth
+  // of bytes on the JS heap is what used to crash the tab before the download
+  // started; as blobs the browser owns them (and spills them to disk), so the
+  // run's heap stays at about one project. It also makes the hand-off to the
+  // packaging worker a reference pass instead of a copy.
   const orgEntries: EgressZipEntry[] = []
+  const pushOrgEntry = (path: string, data: EgressZipEntry["data"]): void => {
+    orgEntries.push({ path, data: data instanceof Blob ? data : new Blob([data as BlobPart]) })
+  }
   const reports: EgressProjectReport[] = []
   // Project folder names dedupe with _2/_3 like every other egress slug.
   const usedSlugs = new Map<string, number>()
@@ -186,13 +201,29 @@ async function runWithPacker(
       // this project (no read, no write) and say so in the manifest.
       const audioListings =
         args.options.audioMode !== "none" ? new Map<string, FileAudioAttachmentsResponse>() : null
+      // AQU-1591: the lanes this run writes audio for. Empty would mean no
+      // listing and therefore no audio freshness at all, so the default lane
+      // stands in — the same lane buildProjectExport falls back to.
+      const exportLanes = args.options.lanes.length > 0 ? args.options.lanes : [""]
       const projectErrors: string[] = []
       let cacheBypassed = false
       if (audioListings) {
         for (const f of exportable) {
           throwIfAborted()
           try {
-            audioListings.set(f.id, await fetchAudioAttachments(selection.projectId, f.id, await mintToken(f.id)))
+            // AQU-1591: one listing per (file, LANE) being exported, under the
+            // key buildProjectExport memoizes on, so the pre-fetch is still a
+            // hit rather than a second request. This is also what keeps the
+            // freshness digest honest: it now covers exactly the takes this
+            // run will write, so a recording in a lane nobody asked for stops
+            // busting a cache entry whose bytes it cannot change.
+            const token = await mintToken(f.id)
+            for (const lane of exportLanes) {
+              audioListings.set(
+                audioListingKey(f.id, lane),
+                await fetchAudioAttachments(selection.projectId, f.id, token, lane),
+              )
+            }
           } catch (err) {
             rethrowIfAborted(err)
             cacheBypassed = true
@@ -228,7 +259,7 @@ async function runWithPacker(
           // Replay the cached per-project zip into the org zip verbatim.
           const cachedEntries = await packer.unpack(await cached.zipBlob.arrayBuffer())
           for (const entry of cachedEntries) {
-            orgEntries.push({ path: `${projectSlug}/${entry.path}`, data: entry.data })
+            pushOrgEntry(`${projectSlug}/${entry.path}`, entry.data)
           }
           reports.push({ ...cached.report, fromCache: true, folder: projectSlug })
           progress({
@@ -277,7 +308,7 @@ async function runWithPacker(
         total: 1,
       })
       for (const entry of entries) {
-        orgEntries.push({ path: `${projectSlug}/${entry.path}`, data: entry.data })
+        pushOrgEntry(`${projectSlug}/${entry.path}`, entry.data)
       }
       // Cache only complete builds: transient holes (network/5xx/decode) could
       // fill on retry, so caching them would replay the gaps until the project
@@ -323,7 +354,7 @@ async function runWithPacker(
     options: args.options,
     projects: reports,
   }
-  orgEntries.push({ path: "manifest.json", data: JSON.stringify(manifest, null, 2) })
+  pushOrgEntry("manifest.json", JSON.stringify(manifest, null, 2))
 
   progress({ phase: "zipping", projectName: "", projectIndex: projectCount, done: 0, total: 0 })
   const blob = await packer.pack(orgEntries)

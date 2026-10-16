@@ -18,6 +18,7 @@ import {
   virtualClockPause,
   virtualClockPlay,
   virtualClockSeek,
+  virtualClockSeekFromTimeline,
 } from "./virtual-clock"
 
 let now = 0
@@ -281,5 +282,43 @@ describe("one sound at a time", () => {
     virtualClockPlay()
     stopVirtualClock()
     expect(getActiveAudio()).toBeNull()
+  })
+})
+
+// AQU-1118: "Play from this cue" on a file the clock owns.
+describe("a timeline seek", () => {
+  it("only moves the head when it is a plain seek (chip or row click)", () => {
+    startVirtualClock(30)
+    virtualClockSeekFromTimeline(9, { recorderOpen: false })
+    expect(getVirtualClockSec()).toBe(9)
+    expect(getVirtualClockPlaying()).toBe(false)
+  })
+
+  it("moves the head and starts the clock when the press asked to play", () => {
+    startVirtualClock(30)
+    virtualClockSeekFromTimeline(9, { play: true, recorderOpen: false })
+    expect(getVirtualClockPlaying()).toBe(true)
+    advance(1000)
+    expect(getVirtualClockSec()).toBeCloseTo(10, 5)
+  })
+
+  it("jumps and keeps playing when pressed on another line while playing", () => {
+    startVirtualClock(30)
+    virtualClockSeekFromTimeline(9, { play: true, recorderOpen: false })
+    advance(500)
+    virtualClockSeekFromTimeline(20, { play: true, recorderOpen: false })
+    expect(getVirtualClockPlaying()).toBe(true)
+    advance(1000)
+    expect(getVirtualClockSec()).toBeCloseTo(21, 5)
+  })
+
+  it("never starts while the recorder is open, and nothing resumes later", () => {
+    startVirtualClock(30)
+    virtualClockSeekFromTimeline(9, { play: true, recorderOpen: true })
+    expect(getVirtualClockSec()).toBe(9)
+    expect(getVirtualClockPlaying()).toBe(false)
+    advance(2000)
+    expect(getVirtualClockPlaying()).toBe(false)
+    expect(getVirtualClockSec()).toBe(9)
   })
 })

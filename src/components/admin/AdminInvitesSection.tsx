@@ -28,6 +28,7 @@ import {
   type CreateAccessLinkResponse,
 } from "@/lib/frontier/invites"
 import { isElevationRequiredError } from "@/lib/frontier/elevation"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { ADMIN_TABLE_CLASS } from "@/components/admin/shared"
 import { AdminSectionSkeleton } from "./shared"
 
@@ -442,9 +443,11 @@ function AccessLinksSection({
 }
 
 function MultiProjectInviteSection({ jwt, projects }: { jwt: string; projects: AdminProject[] }) {
+  const t = useT()
   const [isOpen, setIsOpen] = useState(false)
   const [inviting, setInviting] = useState(false)
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([])
+  const [everyCurrentLane, setEveryCurrentLane] = useState(false)
   const [projectSearch, setProjectSearch] = useState("")
   const [createdToken, setCreatedToken] = useState<string | null>(null)
   const aliveRef = useRef(true)
@@ -467,11 +470,12 @@ function MultiProjectInviteSection({ jwt, projects }: { jwt: string; projects: A
   }
 
   const handleInvite = useCallback(async () => {
-    if (selectedProjectIds.length === 0) return
+    if (selectedProjectIds.length === 0 || !everyCurrentLane) return
     setInviting(true)
     try {
       const result = await createMultiProjectInvite(jwt, {
         projectIds: selectedProjectIds,
+        allCurrentLanes: true,
       })
       if (aliveRef.current) {
         setCreatedToken(result.token)
@@ -488,7 +492,7 @@ function MultiProjectInviteSection({ jwt, projects }: { jwt: string; projects: A
     } finally {
       if (aliveRef.current) setInviting(false)
     }
-  }, [jwt, selectedProjectIds])
+  }, [everyCurrentLane, jwt, selectedProjectIds])
 
   const handleCopyToken = useCallback(() => {
     if (createdToken) {
@@ -501,6 +505,7 @@ function MultiProjectInviteSection({ jwt, projects }: { jwt: string; projects: A
   const handleClose = () => {
     setCreatedToken(null)
     setSelectedProjectIds([])
+    setEveryCurrentLane(false)
     setProjectSearch("")
     setIsOpen(false)
   }
@@ -563,7 +568,24 @@ function MultiProjectInviteSection({ jwt, projects }: { jwt: string; projects: A
                 )}
               </div>
 
-              <Button onClick={handleInvite} disabled={selectedProjectIds.length === 0 || inviting} className="w-full">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <Checkbox
+                  checked={everyCurrentLane}
+                  onCheckedChange={(checked) => setEveryCurrentLane(checked === true)}
+                />
+                <span className="text-sm">
+                  {t("projectSettings.share.laneChoiceAll")}
+                  <span className="block text-xs text-muted-foreground">
+                    {t("projectSettings.share.laneChoiceAdminHint")}
+                  </span>
+                </span>
+              </label>
+
+              <Button
+                onClick={handleInvite}
+                disabled={selectedProjectIds.length === 0 || !everyCurrentLane || inviting}
+                className="w-full"
+              >
                 {inviting ? "Creating..." : "Create invite"}
               </Button>
             </div>

@@ -38,6 +38,11 @@ export interface BtFewShotExample {
 
 const LS_PREFIX = "bt:"
 
+/** Query string for the back-translations read. Absent lane is the default lane. */
+export function backtranslationsReadQuery(lane: string): string {
+  return lane ? `?lane=${encodeURIComponent(lane)}` : ""
+}
+
 function collapseWs(s: string): string {
   return s.trim().replace(/\s+/g, " ")
 }
@@ -94,6 +99,7 @@ export function overlayBacktranslation<T extends {
   cell: T,
   record: BacktranslationRecord | undefined,
   projectId?: string | null,
+  lane = "",
 ): T & {
   backtranslation?: string
   backtranslationForText?: string
@@ -101,7 +107,7 @@ export function overlayBacktranslation<T extends {
   backtranslationPolished?: boolean
   backtranslationAuthor?: string
 } {
-  const resolved = record ?? (projectId ? readLocalBacktranslation(projectId, cell.id) : undefined)
+  const resolved = record ?? (projectId ? readLocalBacktranslation(projectId, cell.id, lane) : undefined)
   if (!resolved?.btText) return cell
 
   const forText = resolved.forText
@@ -119,14 +125,21 @@ export function overlayBacktranslation<T extends {
   }
 }
 
-export function localStorageKey(projectId: string, cellId: string): string {
-  return ownerScopedLocalStorageKey(`${LS_PREFIX}${projectId}:${cellId}`)
+export function localStorageKey(projectId: string, cellId: string, lane = ""): string {
+  // The default lane keeps the original key so readings saved before lanes
+  // still load. A named lane must not read or write that key.
+  const lanePart = lane ? `${encodeURIComponent(lane)}:` : ""
+  return ownerScopedLocalStorageKey(`${LS_PREFIX}${projectId}:${lanePart}${cellId}`)
 }
 
-export function readLocalBacktranslation(projectId: string, cellId: string): BacktranslationRecord | undefined {
+export function readLocalBacktranslation(
+  projectId: string,
+  cellId: string,
+  lane = "",
+): BacktranslationRecord | undefined {
   if (typeof localStorage === "undefined") return undefined
   try {
-    const raw = localStorage.getItem(localStorageKey(projectId, cellId))
+    const raw = localStorage.getItem(localStorageKey(projectId, cellId, lane))
     if (!raw) return undefined
     const parsed = JSON.parse(raw) as Partial<BacktranslationRecord> & { btText?: string }
     if (!parsed.btText) return undefined
@@ -144,10 +157,14 @@ export function readLocalBacktranslation(projectId: string, cellId: string): Bac
   }
 }
 
-export function writeLocalBacktranslation(projectId: string, record: BacktranslationRecord): void {
+export function writeLocalBacktranslation(
+  projectId: string,
+  record: BacktranslationRecord,
+  lane = "",
+): void {
   if (typeof localStorage === "undefined") return
   try {
-    localStorage.setItem(localStorageKey(projectId, record.cellId), JSON.stringify(record))
+    localStorage.setItem(localStorageKey(projectId, record.cellId, lane), JSON.stringify(record))
   } catch {
     // quota / private browsing — the in-memory cache still holds the reading
   }

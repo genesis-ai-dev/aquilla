@@ -119,6 +119,102 @@ describe("AgentSessionStore", () => {
     expect(calls[1].request.sessionId).toBe(after.sessionId)
   })
 
+  // ── AQU-1653: switching between saved chats ───────────────────────────────
+  // The store is what two mounts share, so adopting another chat has to be
+  // total: the session id the next turn is sent under, the visible timeline,
+  // and the per-row review decisions must all move together. A half-switch is
+  // the dangerous state — one chat's timeline sending turns under another
+  // chat's id, or a stale decision suppressing a proposal in the new chat.
+
+  it("switchTo adopts a saved chat's id and timeline together", async () => {
+    const { impl, calls, finish } = deferredRunAgent()
+    const store = new AgentSessionStore(impl)
+    store.send(sendOptions("hello"))
+    await flush()
+    finish(0)
+    await flush()
+    const before = store.getState().sessionId
+
+    const restored = [{ ...createRun("Draft GEN 1"), status: "ok" as const, restored: true }]
+    store.switchTo("saved-session", restored)
+
+    const after = store.getState()
+    expect(after.sessionId).toBe("saved-session")
+    expect(after.runs).toEqual(restored)
+    expect(after.sessionId).not.toBe(before)
+
+    // The next turn continues the ADOPTED chat — this is what lets the server
+    // resume with the tool results the earlier runs discovered.
+    store.send(sendOptions("and now MRK 5"))
+    await flush()
+    expect(calls[1].request.sessionId).toBe("saved-session")
+  })
+
+  it("switchTo drops review decisions and queued activity from the chat being left", () => {
+    const store = new AgentSessionStore(vi.fn())
+    store.decide([["row-1", { outcome: "accepted", value: "text", appliedEventId: "e1" }]])
+    store.noteActivity("card-1", "the user navigated to MRK 5")
+    expect(store.getState().decided.size).toBe(1)
+
+    store.switchTo("saved-session", [])
+
+    // Both key on the chat that is gone: a decision names a proposal the
+    // restored timeline does not contain, and an activity note describes what
+    // the user did during the other conversation.
+    expect(store.getState().decided.size).toBe(0)
+    expect(store.getState().activity).toEqual([])
+  })
+
+  it("switchTo aborts a run in flight so its frames cannot land on the adopted chat", async () => {
+    const { impl, calls, finish } = deferredRunAgent()
+    const store = new AgentSessionStore(impl)
+    store.send(sendOptions("hello"))
+    await flush()
+    expect(store.getState().isStreaming).toBe(true)
+
+    store.switchTo("saved-session", [])
+    expect(calls[0].signal?.aborted).toBe(true)
+    expect(store.getState().isStreaming).toBe(false)
+
+    // The aborted run settles against a timeline it no longer belongs to; the
+    // adopted chat must not grow a run out of it.
+    finish(0)
+    await flush()
+    expect(store.getState().runs).toEqual([])
+    expect(store.getState().sessionId).toBe("saved-session")
+  })
+
+  it("switchTo drops prompts queued behind the chat being left", async () => {
+    const { impl, finish } = deferredRunAgent()
+    const store = new AgentSessionStore(impl)
+    store.send(sendOptions("first"))
+    await flush()
+    store.send(sendOptions("queued behind it"))
+    expect(store.getState().queued).toEqual(["queued behind it"])
+
+    store.switchTo("saved-session", [])
+    expect(store.getState().queued).toEqual([])
+    finish(0)
+    await flush()
+    // The queued prompt was written for the other conversation; it must not be
+    // dispatched into this one.
+    expect(impl).toHaveBeenCalledTimes(1)
+  })
+
+  it("startNewChat is reset under the name the UI uses", async () => {
+    const { impl, finish } = deferredRunAgent()
+    const store = new AgentSessionStore(impl)
+    store.send(sendOptions("hello"))
+    await flush()
+    finish(0)
+    await flush()
+    const before = store.getState().sessionId
+
+    store.startNewChat()
+    expect(store.getState().sessionId).not.toBe(before)
+    expect(store.getState().runs).toEqual([])
+  })
+
   it("a failed run surfaces its error and still releases the stream lock", async () => {
     const impl = vi.fn(() => Promise.reject(new Error("AI limit reached: Out of credits.")))
     const store = new AgentSessionStore(impl)

@@ -11,7 +11,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 const audioCalls: Array<{ fileId: string; selectedAudioId: unknown; attachments: unknown }> = []
-const transcribeCalls: Array<{ cellId: string; fileId: string; language?: string; selectedAudioId?: string; slot?: string; askAgain?: boolean }> = []
+const transcribeCalls: Array<{ cellId: string; fileId: string; language?: string; selectedAudioId?: string; slot?: string; targetLang?: string; askAgain?: boolean }> = []
 const trimCalls: Array<[number | null, number | null]> = []
 const setTrimSpy = (start: number | null, end: number | null) => { trimCalls.push([start, end]) }
 
@@ -32,8 +32,8 @@ vi.mock("@/hooks/useCellAudio", () => ({
 }))
 
 vi.mock("@/lib/audio/transcribe", () => ({
-  transcribeCell: vi.fn(async ({ cell, language, slot, askAgain }: { cell: { id: string; fileId: string; selectedAudioId?: string }; language?: string; slot?: string; askAgain?: boolean }) => {
-    transcribeCalls.push({ cellId: cell.id, fileId: cell.fileId, language, selectedAudioId: cell.selectedAudioId, slot, askAgain })
+  transcribeCell: vi.fn(async ({ cell, language, slot, targetLang, askAgain }: { cell: { id: string; fileId: string; selectedAudioId?: string }; language?: string; slot?: string; targetLang?: string; askAgain?: boolean }) => {
+    transcribeCalls.push({ cellId: cell.id, fileId: cell.fileId, language, selectedAudioId: cell.selectedAudioId, slot, targetLang, askAgain })
     return 1
   }),
 }))
@@ -63,8 +63,12 @@ import type { WordTiming } from "@/lib/codex-editor/types"
 const project = {
   id: "p1",
   sourceLanguage: "en",
-  targetLanguage: "hy",
+  targetLanguage: "en",
   audioMediaStrategy: "lazy",
+  // A take voices the lane's language. Settings keys are not consulted.
+  lanes: [
+    { id: "lanehy01", role: "target", language: "hy", name: null, langCode: null, legacyTag: "" },
+  ],
 } as unknown as ProjectRecord
 
 /** A cue holding one take, as `mergeCellsWithAudio` leaves it. */
@@ -292,6 +296,15 @@ describe("whose recording it acts on", () => {
     expect(transcribeCalls[0]).toMatchObject({ cellId: "cue-1", fileId: "cue-sibling", askAgain: true })
     // A take voices the TARGET text; only an imported source clip is source speech.
     expect(transcribeCalls[0].language).toBe("hy")
+  })
+
+  it("transcribes in the lane it is drawn in (AQU-1978)", async () => {
+    // The timings re-attach deselects within the lane it names. Naming none
+    // meant the `''` lane, whichever language the take was recorded in.
+    draw({ targetLang: "fr" })
+    fireEvent.click(screen.getByRole("button", { name: /transcribe/i }))
+    await waitFor(() => expect(transcribeCalls).toHaveLength(1))
+    expect(transcribeCalls[0].targetLang).toBe("fr")
   })
 
   it("opens the recorder on the OWNER's cell from New take", () => {

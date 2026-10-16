@@ -1,0 +1,34 @@
+-- Migration 0138 (AQU-1605): which UPSTREAM LANE a source link consumes.
+--
+-- Numbered 0138 because 0129 is contextual_run_traces on dev. The column is
+-- unchanged from the review draft that used 0129.
+--
+-- A `consumes = 'target'` link used to read the upstream's DEFAULT target lane
+-- and nothing else: the fold skipped every `target.cell.commit` whose
+-- `payload.targetLang` was not `''`, and the current-state read was pinned to
+-- `target_lang = ''` (sync-worker events/link-sync.ts, AQU-538). An upstream
+-- that translates into three languages could therefore only ever be chained
+-- from on one of them, and which one was an accident of which lane happened to
+-- carry the empty legacy tag.
+--
+-- This column names the lane the link consumes, by `lanes.id` — globally unique
+-- since AQU-1606, so the id alone identifies both the project and the lane, and
+-- it survives the lane being renamed or given a different language (its
+-- `legacy_tag`, which the events still name it by, is immutable).
+--
+-- NULL keeps exactly today's behaviour — the upstream's `legacy_tag = ''` lane —
+-- so every existing row works unchanged both before and after AQU-1616's batch
+-- backfill fills this in. For `source_link_consumes = 'source'` links the
+-- column records the upstream's SOURCE lane and changes no query: source rows
+-- are stored under `side = 'source' AND target_lang = ''` whatever lane they
+-- belong to.
+--
+-- TEXT, matching `lanes.id` and the rest of this column family. Deliberately NOT
+-- a foreign key to `lanes(id)`: the lane lives in the UPSTREAM project, a lane
+-- row is archived rather than deleted (AQU-1419), and a link whose configured
+-- lane cannot be resolved must fail closed in the fold — mirroring the wrong
+-- lane's text downstream is worse than mirroring nothing — rather than block
+-- the write that recorded it.
+
+ALTER TABLE projects
+  ADD COLUMN IF NOT EXISTS source_link_lane_id TEXT;

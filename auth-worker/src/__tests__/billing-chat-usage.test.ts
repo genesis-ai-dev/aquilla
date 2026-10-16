@@ -8,6 +8,7 @@ import { readUsageTotals } from '../lib/billing/workspace-usage'
 import { readBillingWorkspace } from '../lib/billing/workspace'
 import { resetRateCardCache } from '../lib/billing/rate-card'
 import { rateCard, withRateCard } from './helpers/rate-card'
+import { METERED_MAX_OUTPUT_TOKENS } from '../lib/billing/chat-usage'
 
 afterEach(() => { vi.unstubAllGlobals(); resetRateCardCache() })
 async function setup() {
@@ -193,4 +194,21 @@ it('enforce mode meters a live provider URL and retires the legacy ledgers for t
   expect((await f.send({}, { BILLING_CHAT_USAGE_REHEARSAL: undefined }, crypto.randomUUID())).status).toBe(200)
   expect((await f.totals()).settled).toBe(400_000)
   expect((await env.AQUILLA_PG.prepare('SELECT count(*) AS n FROM org_credit_usage_daily').first<{ n: number }>())?.n).toBe(1)
+})
+
+// AQU-1870: the metered path's output ceiling is the bound the reservation is
+// computed from, so a client-chosen max_tokens must never reach the provider
+// above it — not even now that the legacy path clamps at its own, looser
+// ceiling first.
+it('clamps a client-chosen max_tokens to the metered output ceiling', async () => {
+  const f = await setup()
+  // Declared params (unlike the shared `upstream` helper's bare thunk) so the
+  // forwarded RequestInit is readable off the mock without an unsound cast.
+  const body = JSON.stringify({ choices: [{ message: { content: 'Hi' } }], usage: { cost: 0.0001 } })
+  const fetch = withRateCard(vi.fn(async (_input: string | URL | Request, _init?: RequestInit) =>
+    new Response(body, { headers: { 'Content-Type': 'application/json' } })))
+  vi.stubGlobal('fetch', fetch)
+  expect((await f.send({ max_tokens: 100_000 })).status).toBe(200)
+  const sent = JSON.parse(String(fetch.mock.calls[0][1]?.body)) as { max_tokens: number }
+  expect(sent.max_tokens).toBe(METERED_MAX_OUTPUT_TOKENS)
 })

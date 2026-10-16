@@ -28,7 +28,7 @@
 // AND IF NOTHING IS OFFERED, THE MENU DOES NOT OPEN. See `trackMenuIsEmpty`.
 
 import type { ReactNode } from "react"
-import { FolderPlus, FolderMinus, Palette, Pencil, Trash2 } from "lucide-react"
+import { FolderPlus, FolderMinus, Palette, Pencil, Rows3, Trash2 } from "lucide-react"
 import {
   ContextMenuItem,
   ContextMenuRadioGroup,
@@ -91,13 +91,24 @@ export function trackMenuScopes({
   canRename,
   canColour,
   canEdit,
+  canPromote = false,
 }: {
   targets: readonly TimelineTrack[]
   canRename: boolean
   canColour: boolean
   canEdit: boolean
+  /** AQU-1566: the file is a linked video with no rows and the person is a
+   *  maintainer, so a caption track may become its rows. */
+  canPromote?: boolean
 }) {
   const only = targets.length === 1 ? targets[0] : null
+
+  // AQU-1566: one SOURCE caption track that has its own content, and only that.
+  // The server copies exactly one source caption file into the rows, so a
+  // selection of several, a target-text track, or a derived row with nothing
+  // behind it gets no item rather than one that would be refused.
+  const promotable = canPromote && only && only.kind === "source-subtitles" && only.contentFileId
+    ? only : null
 
   // ALL OF THEM OR NONE (Sam, 2026-08-24, revising the first rule). Colouring
   // "the two of these five that can take one" is the kind of partial success
@@ -131,6 +142,7 @@ export function trackMenuScopes({
 
   return {
     only,
+    promotable,
     rename: canRename ? only : null,
     colourable: canColour ? colourable : [],
     foldable: canEdit ? foldable : [],
@@ -142,6 +154,7 @@ export function trackMenuScopes({
 /** Would this menu render nothing at all? Then it must not open. */
 export function trackMenuIsEmpty(scopes: ReturnType<typeof trackMenuScopes>): boolean {
   return (
+    scopes.promotable == null &&
     scopes.rename == null &&
     scopes.colourable.length === 0 &&
     scopes.foldable.length === 0 &&
@@ -156,6 +169,7 @@ export function trackMenuItems({
   onRename,
   onSetColor,
   editing,
+  onPromote,
 }: {
   /**
    * The tracks this menu acts on — the selection when the right-clicked row is
@@ -171,19 +185,36 @@ export function trackMenuItems({
   /** Maintainer clearance AND the setting. Absent withholds every item below
    *  the separator — which is the whole affordance, not a disabled one. */
   editing?: TrackEditingActions
+  /** AQU-1566: "Use as this file's rows". Maintainer clearance on a linked
+   *  video with no rows; NOT gated on the track-editing setting (Sam). The
+   *  caller asks for confirmation before anything is written. */
+  onPromote?: (trackId: string) => void
 }): ReactNode {
   // ONE AUTHORITY, read here and by the trigger that decided to open at all.
-  const { rename, colourable, foldable, inAFolder, deletable } = trackMenuScopes({
+  const { promotable, rename, colourable, foldable, inAFolder, deletable } = trackMenuScopes({
     targets,
     canRename: Boolean(onRename),
     canColour: Boolean(onSetColor),
     canEdit: Boolean(editing),
+    canPromote: Boolean(onPromote),
   })
+  const anythingBelowPromote = rename != null || colourable.length > 0 || foldable.length > 0
+    || inAFolder.length > 0 || deletable.length > 0
 
   const ids = (list: readonly TimelineTrack[]) => list.map((tr) => tr.id)
 
   return (
     <>
+      {/* AQU-1566: first, because on an empty linked video it is the one
+          thing this track is waiting for. */}
+      {onPromote && promotable && (
+        <ContextMenuItem onClick={() => onPromote(promotable.id)}>
+          <Rows3 className="h-3.5 w-3.5" />
+          {t("editor.timeline.trackUseAsRows")}
+        </ContextMenuItem>
+      )}
+      {onPromote && promotable && anythingBelowPromote && <ContextMenuSeparator />}
+
       {/* Renaming is a single-track verb: there is one field and one name.
           With several selected it is simply absent rather than renaming an
           arbitrary one of them. */}

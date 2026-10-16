@@ -12,11 +12,15 @@ import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
 /** A second, DIFFERENT credential for the same account. `jwtFor` is keyed by
- *  (sub, iat), so backdating `iat` by a second is enough to get a distinct
- *  token — and, like `jwtFor`, it carries no `jti`, which exercises
- *  `sessionCacheKey`'s `tok:<sha256>` fallback arm. */
+ *  (sub, iat), so a backdated `iat` is enough to get a distinct token — and,
+ *  like `jwtFor`, it carries no `jti`, which exercises `sessionCacheKey`'s
+ *  `tok:<sha256>` fallback arm. Backdated by ten minutes, not one second: a
+ *  one-second backdate is the SAME token as the first whenever a second
+ *  boundary falls between the two mints, which full-suite load made happen
+ *  (AQU-1881), and no test here runs long enough for the two mints to be ten
+ *  minutes apart. The token is still an hour from expiry. */
 const secondJwtFor = (username: string) =>
-  jwtFor(username, Math.floor(Date.now() / 1000) - 1)
+  jwtFor(username, Math.floor(Date.now() / 1000) - 600)
 
 /** A token carrying an explicit `jti`, exercising the `jti:` arm instead. */
 const jwtWithJti = async (username: string, jti: string) => {

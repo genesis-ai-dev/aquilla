@@ -9,6 +9,7 @@ import { assertSafeDeploymentArtifacts } from "./verify-deployment-artifacts.mjs
 
 import { cleanupStalePreviews } from "./cloudflare-preview-cleanup.mjs"
 import { commentOnPreview } from "./cloudflare-preview-comment.mjs"
+import { hostedPosthog, hostedPosthogEnv } from "./hosted-posthog.mjs"
 
 export const PREVIEW_WORKERS = {
   web: "aquilla-web-preview",
@@ -16,6 +17,34 @@ export const PREVIEW_WORKERS = {
   sync: "aquilla-sync-preview",
 }
 const UNREADY = "https://preview-not-ready.invalid"
+
+// AQU-1353: the one platform-admin identity a branch preview recognises, so the
+// QA bots can walk /admin instead of reporting NOT CHECKED for want of a fixture.
+//
+// Why this cannot grant admin anywhere but a preview:
+//   - This config is generated here and is deliberately independent of the
+//     production Wrangler profiles. It is uploaded under PREVIEW_WORKERS.auth
+//     (aquilla-auth-preview) and nowhere else; auth-worker/wrangler.toml's own
+//     ADMIN_EMAILS — the live operator allowlist on aquilla-identity and
+//     aquilla-dev-identity — is neither read nor written by this file.
+//   - The allowlist here holds exactly ONE address, and it is a QA fixture
+//     account on development storage (the same Neon dev branch and dev R2
+//     bucket the preview is already bound to). No operator address appears, so
+//     no human identity gains anything from a preview, and the fixture can see
+//     only data the preview could already reach.
+//   - Identity is still enforced on every /api/v2/admin/* call: the account has
+//     to exist and the caller has to hold its password, which lives with the
+//     bot runner and not in this repo. The address on its own grants nothing —
+//     see auth-worker/src/middleware/platform-admin.ts.
+//   - Step-up elevation stays ON below (ADMIN_REQUIRE_ELEVATION="true"), so a
+//     walk exercises the real gate rather than a relaxed one. Previews declare
+//     no send_email binding, so POST /admin/elevation/request answers with
+//     `devCode` (non-production AND no EMAIL — routes/admin.ts) and the bot can
+//     finish the flow without mail. Nothing about that path is preview-specific
+//     config: production has an EMAIL binding and ENVIRONMENT="production", so
+//     it fails both halves of that condition.
+// Rebuilding the account: e2e/journeys/README.md § "Fixtures on development storage".
+const PREVIEW_ADMIN_EMAIL = "qa-admin@local.test"
 
 // Deliberately independent of production Wrangler profiles. Runtime secrets
 // come from each parent's Previews Base, never from local .dev.vars files.
@@ -41,8 +70,15 @@ export function previewConfig(surface, { cwd, urls = {} }) {
   config.previews.version_metadata = { binding: "CF_VERSION_METADATA" }
   config.previews.vars = {
     ENVIRONMENT: "development",
+    POSTHOG_HOST: hostedPosthog.ingestHost,
+    POSTHOG_KEY: hostedPosthog.projectToken,
     DEPLOYMENT_WORKER_NAME: name,
     BASE_URL: urls.web ?? UNREADY,
+    // AQU-730 lane wall, on as it is for the development Workers whose rows
+    // previews read (the lane-grant backfill has run there). Unset, both
+    // backends serve every lane to every member, so a lane-scoped change
+    // cannot be walked on its own preview.
+    LANE_READ_WALL: "1",
   }
   if (surface === "auth") {
     Object.assign(config.previews.vars, {
@@ -50,9 +86,24 @@ export function previewConfig(surface, { cwd, urls = {} }) {
       ACCESS_TOKEN_EXPIRE_MINUTES: "43200",
       SYNC_WORKER_URL: urls.sync ? `${urls.sync}/sync` : UNREADY,
       LEGACY_USER_MIGRATION_ENABLED: "false",
+      // See PREVIEW_ADMIN_EMAIL above for why a preview carries an allowlist at
+      // all, and why it names one fixture rather than the operator list.
+      ADMIN_EMAILS: PREVIEW_ADMIN_EMAIL,
       ADMIN_REQUIRE_ELEVATION: "true",
       DEFAULT_LLM_MODEL: "openai/gpt-5.6-luna",
     })
+    // AQU-1845 — auth previews deliberately get NO ContextualRunDriver binding,
+    // even though auth-worker/wrangler.toml declares one for every real
+    // environment. Cloudflare does not generate preview URLs for a Worker that
+    // implements a Durable Object (see "Preview limitations" in
+    // docs/DEPLOYMENT-ENVIRONMENTS.md), and `previewOrigin` treats a missing
+    // URL as a hard failure — declaring the class here would risk taking the
+    // whole PR preview stack down, since the web preview is built from the auth
+    // preview's origin.
+    //
+    // The cost is that routes/contextual.ts falls back to the in-request loop
+    // on a preview, so a preview CANNOT be used to verify that a run outlives
+    // the request that started it. Walk that on development or production.
   } else {
     // KNOWN BROKEN AT RUNTIME, and not for want of a correct value here: sync's
     // subrequest to this origin 404s (Cloudflare's HTML edge page) even though the
@@ -137,7 +188,7 @@ export async function deployStackPreview({ cwd = process.cwd(), env = process.en
     await deploy("auth")
     await deploy("sync")
     const buildEnv = {
-      ...env,
+      ...hostedPosthogEnv(env),
       VITE_AUTH_BASE: `${urls.auth}/identity`,
       VITE_CHAT_BASE: `${urls.auth}/chat`,
       VITE_SYNC_WORKER_HOST: `${new URL(urls.sync).host}/sync`,

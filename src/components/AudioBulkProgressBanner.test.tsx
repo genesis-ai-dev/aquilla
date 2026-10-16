@@ -8,7 +8,7 @@ vi.mock("@/lib/audio/change-voice-batch", async (importOriginal) => ({
   cancelBatchChangeVoice: vi.fn(),
 }))
 
-import { runBatch } from "@/lib/audio/batch-audio"
+import { runBatchJobs } from "@/lib/audio/batch-audio"
 import { cancelBatchChangeVoice } from "@/lib/audio/change-voice-batch"
 import { AudioBulkProgressBanner } from "./AudioBulkProgressBanner"
 
@@ -21,7 +21,7 @@ describe("AudioBulkProgressBanner — Change voice (AQU-1109)", () => {
 
     let run!: Promise<void>
     act(() => {
-      run = runBatch([1, 2, 3, 4], () => gate, {
+      run = runBatchJobs([1, 2, 3, 4], () => gate, {
         kind: "changeVoice",
         isCancelled: () => false,
         onItemDone: () => {},

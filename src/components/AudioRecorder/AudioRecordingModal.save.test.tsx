@@ -145,6 +145,9 @@ describe("Save, untouched", () => {
     expect(emitAttach.mock.calls[0][0]).toMatchObject({ durationMs: 3600, trimStartMs: 200, trimEndMs: 3360 })
     await waitFor(() => expect(emitRetime).toHaveBeenCalledTimes(1))
     expect(emitRetime.mock.calls[0][0]).toMatchObject({ cellId: "c1", targetOffsetMs: -200 })
+    // AQU-1572: the save is ONE attach carrying the recorder's origin, which
+    // is what the emit seam counts as one `audio recorded`.
+    expect(emitAttach.mock.calls[0][0]).toMatchObject({ audioOrigin: "record", surface: "recorder" })
   })
 
   it("a compressed take carries no window and no retime", async () => {

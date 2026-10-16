@@ -1,9 +1,4 @@
 {
-  "src/components/AiModelConsentDialog.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 1
-    }
-  },
   "src/components/AiModelDownloadChip.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 5
@@ -96,7 +91,7 @@
   },
   "src/components/ProjectSettings/MondayIntegrationSection.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 4
+      "count": 2
     }
   },
   "src/components/ProjectSettings/MondayMappingEditor.tsx": {
@@ -106,12 +101,7 @@
   },
   "src/components/ProjectSettings/MondaySetupWizard.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 7
-    }
-  },
-  "src/components/StaffLanePopover.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 2
+      "count": 5
     }
   },
   "src/components/agent/AgentContextPane.tsx": {
@@ -171,7 +161,7 @@
   },
   "src/components/cell/TargetValidationControl.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 4
+      "count": 1
     }
   },
   "src/components/changesets/ChangeList.tsx": {
@@ -262,11 +252,6 @@
   "src/components/ui/revealable-input.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 2
-    }
-  },
-  "src/pages/settings/OrgSettingsBilling.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 16
     }
   },
   "src/pages/settings/OrgSettingsMonday.tsx": {

@@ -68,7 +68,7 @@ esac
 pillClass=$(ab eval --stdin <<JS
 (() => {
   const row = document.querySelector("[data-cell-id='$cellId']")
-  const pill = row.querySelector('[aria-label="Line 1"] span')
+  const pill = row.querySelector('[data-testid="cell-issue-flag"] span')
   return pill ? pill.className : ''
 })()
 JS

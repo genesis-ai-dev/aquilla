@@ -2,6 +2,7 @@
 
 import { verifyTokenForFile } from '../auth'
 import { grantedLaneIds, targetVisibilityClause, visibleLanesForRead } from './lane-read-wall'
+import { wireLegacyTagSql } from '../../../db/shared/lane-sql'
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from './lane-id-sql'
 
 export interface ValidatorsReadEnv {
@@ -58,13 +59,13 @@ export async function handleValidatorsReadRequest(
   // DELETE-on-unvalidate: a row's presence IS "active". No is_active column.
   const sql = lane === null
     ? `
-    SELECT event_id, username, decided_ts, target_lang, lane_id
+    SELECT event_id, username, decided_ts, ${wireLegacyTagSql('cell_validators')} AS target_lang, lane_id
     FROM cell_validators
     WHERE project_id = ? AND file_id = ? AND cell_id = ?${wallSql}
     ORDER BY decided_ts DESC
   `
     : `
-    SELECT event_id, username, decided_ts, target_lang, lane_id
+    SELECT event_id, username, decided_ts, ${wireLegacyTagSql('cell_validators')} AS target_lang, lane_id
     FROM cell_validators
     WHERE project_id = ? AND file_id = ? AND cell_id = ? AND ${targetLaneDualReadSql()}${wallSql}
     ORDER BY decided_ts DESC

@@ -33,6 +33,7 @@ import { handleExportSourceRequest } from '../events/export-route'
 import { mintApiToken } from '../../../db/shared/api-credentials'
 import { ensureProjectLanes } from '../../../db/shared/lanes'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
+import { bumpRateLimit, userRateLimitIdentifier } from '../../../db/shared/rate-limit'
 import { makeTestToken } from './helpers/auth'
 import type { RawEvent } from '../events/types'
 
@@ -248,11 +249,8 @@ describe('artifacts — upload + retrieval', () => {
     const uploadRes = (await handleExternalArtifactsRequest(uploadReq(token, 'a.txt', bytes), env))!
     const { artifactId } = (await uploadRes.json()) as { artifactId: string }
 
-    await tdb.pg.query(
-      `INSERT INTO auth_rate_limit_events (kind, identifier, success)
-       SELECT 'external_artifact_content', $1, 1 FROM generate_series(1, 120)`,
-      [`credential:${CRED_LEAD}`],
-    )
+    // AQU-1843: the artifact budgets belong to the credential's OWNER now.
+    await bumpRateLimit(tdb.db, 'external_artifact_content', userRateLimitIdentifier(1), 120)
     const res = (await handleExternalArtifactsRequest(getReq(token, `/${artifactId}/content`), env))!
     expect(res.status).toBe(429)
     const body = (await res.json()) as { error: { code: string } }
@@ -265,11 +263,7 @@ describe('artifacts — upload + retrieval', () => {
     const uploadRes = (await handleExternalArtifactsRequest(uploadReq(token, 'a.txt', bytes), env))!
     const { artifactId } = (await uploadRes.json()) as { artifactId: string }
 
-    await tdb.pg.query(
-      `INSERT INTO auth_rate_limit_events (kind, identifier, success)
-       SELECT 'external_artifact_meta', $1, 1 FROM generate_series(1, 300)`,
-      [`credential:${CRED_LEAD}`],
-    )
+    await bumpRateLimit(tdb.db, 'external_artifact_meta', userRateLimitIdentifier(1), 300)
     const metaRes = (await handleExternalArtifactsRequest(getReq(token, `/${artifactId}`), env))!
     expect(metaRes.status).toBe(429)
     const inspectRes = (await handleExternalArtifactsRequest(getReq(token, `/${artifactId}/inspect`), env))!
@@ -603,6 +597,15 @@ describe('PlanImport — commit', () => {
     )
     // A settings write creates the lane rows in production (AQU-1532).
     await ensureProjectLanes(tdb.db, PROJECT, { settings: { targetLanes: ['fr', 'arq'] } })
+    const laneRows = await tdb.pg.query<{ id: string; legacy_tag: string }>(
+      `SELECT id, legacy_tag FROM lanes WHERE project_id = $1 AND role = 'target'`,
+      [PROJECT],
+    )
+    const laneIdFor = (tag: string) => {
+      const row = laneRows.rows.find((lane) => lane.legacy_tag === tag)
+      if (!row) throw new Error(`missing lane ${tag}`)
+      return row.id
+    }
 
     const prepRes = (await handleExternalChangesetsRequest(
       prepareReq(token, {
@@ -637,8 +640,8 @@ describe('PlanImport — commit', () => {
           address: { scheme: 'scripture', book: 'GEN', chapter: 1, verse: '1' },
           sourceLocator: { kind: 'recipe', recipeId: 'ai-verse-prefix', record: 3 },
           variants: [
-            { laneId: 'fr', languageTag: 'fr', content: 'Au commencement' },
-            { laneId: 'arq', languageTag: 'arq', content: 'فالبداية' },
+            { laneId: laneIdFor('fr'), languageTag: 'fr', content: 'Au commencement' },
+            { laneId: laneIdFor('arq'), languageTag: 'arq', content: 'فالبداية' },
           ],
         }],
       }),
@@ -711,7 +714,35 @@ describe('PlanImport — commit', () => {
       env,
     ))!
     expect(response.status).toBe(400)
-    expect(JSON.stringify(await response.json())).toMatch(/unregistered lane/)
+    expect(JSON.stringify(await response.json())).toMatch(/lane does not exist/)
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+
+  it('treats an omitted or blank variant laneId as a missing id, not a language', async () => {
+    const token = await credToken(tdb, { credentialId: CRED_LEAD, userId: 1, username: 'lead' })
+    await tdb.pg.query(
+      `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position)
+       VALUES ('lane-fr', $1, 'target', 'fr', 'fr', 1)`,
+      [PROJECT],
+    )
+    for (const laneId of ['', undefined] as const) {
+      const response = (await handleExternalChangesetsRequest(
+        prepareReq(token, {
+          kind: 'PlanImport',
+          fileName: 'pairs.csv',
+          fileType: 'csv',
+          cells: [{
+            content: 'Hello world',
+            variants: [{ ...(laneId !== undefined ? { laneId } : {}), content: 'Bonjour monde' }],
+          }],
+        }),
+        env,
+      ))!
+      expect(response.status).toBe(400)
+      const body = (await response.json()) as { error: { message: string } }
+      expect(body.error.message).toContain('GET /api/v1/external')
+      expect(body.error.message).not.toContain('lane does not exist')
+    }
     expect(await tdb.rows('changesets')).toHaveLength(0)
   })
 

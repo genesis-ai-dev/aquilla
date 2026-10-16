@@ -67,9 +67,13 @@ interface CellRow {
 
 async function cellsFor(t: TestDb, projectId: string): Promise<CellRow[]> {
   const rows = await t.pg.query<CellRow>(
-    `SELECT project_id, file_id, cell_id, side, target_lang, value, event_id, source_event_id
-       FROM cells WHERE project_id = $1
-      ORDER BY cell_id, side, target_lang`,
+    `SELECT c.project_id, c.file_id, c.cell_id, c.side,
+            COALESCE(l.legacy_tag, '') AS target_lang,
+            c.value, c.event_id, c.source_event_id
+       FROM cells c
+       LEFT JOIN lanes l ON l.project_id = c.project_id AND l.id = c.lane_id
+      WHERE c.project_id = $1
+      ORDER BY c.cell_id, c.side, target_lang`,
     [projectId],
   )
   return rows.rows

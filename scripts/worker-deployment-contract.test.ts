@@ -4,6 +4,7 @@ import path from "node:path"
 import { spawnSync } from "node:child_process"
 import { describe, expect, it } from "vitest"
 import { isReleaseBranch } from "./release-plan.mjs"
+import { hostedPosthog } from "./hosted-posthog.mjs"
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..")
 const deploymentManifest = JSON.parse(
@@ -191,7 +192,7 @@ describe("worker deployment environment contract", () => {
     },
   )
 
-  // The release bot cuts release/YYYY/MM/DD-NN for the Nth slice cut on a given
+  // The Release cut workflow cuts release/YYYY/MM/DD-NN for the Nth slice cut on a given
   // day. Four checkers each decide whether a branch name counts as a release
   // branch: the three shell scripts here, plus isReleaseBranch in
   // release-plan.mjs. One shared table is what keeps their four regexes in
@@ -291,6 +292,20 @@ describe("worker deployment environment contract", () => {
 
     expect(observability).toContain("enabled = true")
   })
+
+  // AQU-1166: the two DB-heavy Workers run near Hyperdrive→Neon rather than at the
+  // requester's edge PoP. [placement] is not inherited by env blocks either, so a
+  // deployed profile that omits its own copy silently loses co-location.
+  it.each(["sync-worker/wrangler.toml", "auth-worker/wrangler.toml"])(
+    "co-locates %s with Postgres via Smart Placement in every deployed profile",
+    (file) => {
+      const config = readRepoFile(...file.split("/"))
+
+      for (const marker of ["[placement]", "[env.production.placement]", "[env.development.placement]"]) {
+        expect(tomlBlock(config, marker)).toContain('mode = "smart"')
+      }
+    },
+  )
 
   it.each([
     ["production", "production", "https://api.aquilla.app/identity"],
@@ -706,21 +721,25 @@ describe("worker deployment environment contract", () => {
 
     expect(ciWorkflow).not.toContain("cloudflare-version-deploy.mjs")
     expect(ciTriggers).not.toContain("push:")
-    expect(ciTriggers).not.toContain("pull_request:")
+    expect(ciTriggers).toContain("pull_request:")
     expect(ciTriggers).toContain("workflow_dispatch:")
     expect(workerTriggers).not.toContain("push:")
     expect(workerTriggers).toContain("workflow_dispatch:")
   })
 
-  it("keeps GitHub CI available only by explicit dispatch", () => {
+  it("runs the test gate on pull requests into dev and keeps dispatch", () => {
     const workflow = readRepoFile(".github", "workflows", "ci.yml")
     const triggers = workflow.slice(workflow.indexOf("\non:"), workflow.indexOf("\nconcurrency:"))
 
+    expect(triggers).toContain("pull_request:")
+    expect(triggers).toContain("branches: [dev]")
     expect(triggers).not.toContain("paths-ignore")
     expect(triggers).not.toContain("paths:")
-    expect(triggers).not.toContain("pull_request:")
     expect(triggers).not.toContain("push:")
     expect(triggers).toContain("workflow_dispatch:")
+    expect(workflow).toContain("Reporting success so a path-filter skip cannot block branch protection.")
+    expect(workflow).toContain("if: github.event_name == 'workflow_dispatch'")
+    expect(workflow).toContain("pnpm test:idml")
   })
 
   it("fails worker-suite change detection open for shared deployment inputs", () => {
@@ -887,6 +906,8 @@ describe("PostHog EU region contract (AQU-854)", () => {
     ["sync-worker", "wrangler.toml"],
     ["agent-worker", "wrangler.toml"],
     ["config", "cloudflare-deployments.json"],
+    ["config", "posthog.json"],
+    ["scripts", "hosted-posthog.mjs"],
     [".env.example"],
     ["auth-worker", ".dev.vars.example"],
     ["sync-worker", ".dev.vars.example"],
@@ -949,11 +970,11 @@ describe("PostHog EU region contract (AQU-854)", () => {
     }
   })
 
-  it("retires the US project token in the deployment manifest without pinning the host", () => {
-    // Blank until the EU project token exists (account-side dependency); a
-    // blank key makes `shipLog` a no-op instead of posting a retired token.
-    // The plainText check above asserts this against the real wrangler section.
-    expect(deploymentManifest.surfaces.sync.environments.production.plainText.POSTHOG_KEY).toBe("")
+  it("pins the verified EU token in the deployment manifest without pinning the host", () => {
+    // The manifest must not restore the old blank key on the next deploy.
+    // The plainText check above also compares it with the real wrangler section.
+    expect(deploymentManifest.surfaces.sync.environments.production.plainText.POSTHOG_KEY)
+      .toBe(hostedPosthog.projectToken)
 
     // POSTHOG_HOST is deliberately NOT manifest-pinned. auth-worker's
     // environment-guard turns every identity plainText key into a hard runtime

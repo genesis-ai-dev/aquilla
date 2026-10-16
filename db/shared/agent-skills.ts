@@ -39,8 +39,10 @@ the new projectId.
    warnings, nextStep }. \`setup\` is the ProjectSetup body minus kind /
    projectId; \`warnings\` names every blank.
 
-2. Never guess these four. If settings.sourceLanguage, settings.targetLanguage,
-   brief.parameters.sourceTexts or brief.parameters.keyTerms is blank
+2. Never guess the languages or these brief fields. Lanes are created with
+   \`lanes: [{ role, language, name?, code? }]\` — not settings.sourceLanguage or
+   settings.targetLanguage. If a lane language, brief.parameters.sourceTexts or
+   brief.parameters.keyTerms is blank
    (warnings with required: true), STOP and return the blanks to the operator
    as questions for the partner. Do not stage anything. Everything else may be
    defaulted — but every defaulted value must be marked "(defaulted)" in the

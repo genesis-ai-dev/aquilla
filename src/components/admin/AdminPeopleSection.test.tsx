@@ -41,7 +41,7 @@ describe("AdminPeopleSection", () => {
   it("shows Platform admin in the Role column for allowlisted users", () => {
     render(<AdminPeopleSection users={users} admins={admins} />)
     expect(screen.getByRole("columnheader", { name: /^Role$/i })).toBeInTheDocument()
-    const ryderRow = screen.getByText(/Ryder \(ryder\)/).closest("tr")!
+    const ryderRow = screen.getByText("ryder").closest("tr")!
     expect(within(ryderRow).getByText("Platform admin")).toBeInTheDocument()
     const caseyRow = screen.getByText("casey").closest("tr")!
     expect(within(caseyRow).queryByText("Platform admin")).not.toBeInTheDocument()
@@ -106,20 +106,20 @@ describe("AdminPeopleSection", () => {
     // orgCount is numeric → first click descends (highest first).
     fireEvent.click(orgsHeader) // desc by orgCount
     expect(bodyFirstCells()).toEqual([
-      "Alpha (alpha)",
-      "Ryder (ryder)",
+      "alpha",
+      "ryder",
       "casey",
     ])
     fireEvent.click(orgsHeader) // asc
     expect(bodyFirstCells()).toEqual([
       "casey",
-      "Ryder (ryder)",
-      "Alpha (alpha)",
+      "ryder",
+      "alpha",
     ])
     fireEvent.click(orgsHeader) // desc again — sorting never clears
     expect(bodyFirstCells()).toEqual([
-      "Alpha (alpha)",
-      "Ryder (ryder)",
+      "alpha",
+      "ryder",
       "casey",
     ])
   })

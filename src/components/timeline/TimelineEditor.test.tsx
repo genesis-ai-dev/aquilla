@@ -21,7 +21,7 @@ let mockOutputLatencySec = 0
 vi.mock("./useOutputLatency", () => ({ useOutputLatency: () => mockOutputLatencySec }))
 
 let mockQueueState: QueueState = { kind: "idle" }
-let mockProgress: QueueProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
+let mockProgress: QueueProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false }
 // Round 5: the speaker buttons push audibility straight into the queue.
 let lastAudibility: { source: boolean; target: boolean; bySlot?: Record<string, boolean> } | null = null
 // Stage 2: audibility is a STORE now — lib/audio/audibility merges every toggle
@@ -331,18 +331,18 @@ describe("TimelineEditor", () => {
 
     function playing(at: number) {
       mockQueueState = { kind: "playing", cellIndex: 1, cellId: "m2" }
-      mockProgress = { currentTime: at, duration: 20, rate: 1, volume: 1 }
+      mockProgress = { currentTime: at, duration: 20, rate: 1, volume: 1, programmeClock: false }
     }
     function coldGate(at: number) {
       // A verse whose audio has not arrived yet. `transportPlaying` goes FALSE
       // here even though the transport has not stopped — which is exactly the
       // trap: gating compensation on that flag would switch it off mid-run.
       mockQueueState = { kind: "loading", cellIndex: 1, cellId: "m2" }
-      mockProgress = { currentTime: at, duration: 20, rate: 1, volume: 1 }
+      mockProgress = { currentTime: at, duration: 20, rate: 1, volume: 1, programmeClock: false }
     }
     const reset = () => {
       mockQueueState = { kind: "idle" }
-      mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
+      mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false }
       mockOutputLatencySec = 0
     }
 
@@ -400,7 +400,7 @@ describe("TimelineEditor", () => {
 
   it("the playhead tracks queue progress for THIS file's cells", () => {
     mockQueueState = { kind: "playing", cellIndex: 1, cellId: "m2" }
-    mockProgress = { currentTime: 12, duration: 20, rate: 1, volume: 1 }
+    mockProgress = { currentTime: 12, duration: 20, rate: 1, volume: 1, programmeClock: false }
     try {
       render(
         <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
@@ -410,7 +410,7 @@ describe("TimelineEditor", () => {
       expect(parseFloat(playhead.style.left)).toBeCloseTo(12 * 38, 0)
     } finally {
       mockQueueState = { kind: "idle" }
-      mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
+      mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false }
     }
   })
 
@@ -429,7 +429,7 @@ describe("TimelineEditor", () => {
     ]
     mockQueueState = { kind: "playing", cellIndex: 0, cellId: "t1" }
     // 3s INTO THE TAKE — not 3s into the file.
-    mockProgress = { currentTime: 3, duration: 8, rate: 1, volume: 1 }
+    mockProgress = { currentTime: 3, duration: 8, rate: 1, volume: 1, programmeClock: false }
     try {
       render(
         <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={takeOnly} onRetimeSubtitle={() => {}} />,
@@ -437,13 +437,13 @@ describe("TimelineEditor", () => {
       expect(parseFloat(screen.getByTestId("tl-playhead").style.left)).toBe(0)
     } finally {
       mockQueueState = { kind: "idle" }
-      mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
+      mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false }
     }
   })
 
   it("a queue playing ANOTHER file's cells does not move this playhead", () => {
     mockQueueState = { kind: "playing", cellIndex: 0, cellId: "other-file-cell" }
-    mockProgress = { currentTime: 12, duration: 20, rate: 1, volume: 1 }
+    mockProgress = { currentTime: 12, duration: 20, rate: 1, volume: 1, programmeClock: false }
     try {
       render(
         <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
@@ -453,7 +453,7 @@ describe("TimelineEditor", () => {
       expect(screen.getByTestId("tl-detail-empty")).toBeInTheDocument()
     } finally {
       mockQueueState = { kind: "idle" }
-      mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
+      mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false }
     }
   })
 
@@ -686,8 +686,20 @@ describe("TimelineEditor", () => {
   it("speaker buttons start audible, push audibility into the queue, toggle, and persist per file", () => {
     localStorage.removeItem("aquilla:timelineAudibility:spkfile")
     lastAudibility = null
+    // AQU-1682: the Target audio row only has a speaker once it holds a take.
+    const TAKE = "audio-m1-1700000000-take.webm"
+    const withTake = [
+      cell({
+        id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10, selectedAudioId: TAKE,
+        attachments: {
+          [SOURCE_CLIP]: { type: "audio", url: "frontier-audio://src" },
+          [TAKE]: { type: "audio", url: "frontier-audio://take" },
+        },
+      } as Partial<CellData>),
+      mediaCells[1],
+    ]
     render(
-      <TimelineEditor fileId="spkfile" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+      <TimelineEditor fileId="spkfile" coreMediaUrl={null} editable cells={withTake} onRetimeSubtitle={() => {}} />,
     )
     // Mount pushes the default (both audible).
     expect(lastAudibility).toEqual({ source: true, target: true })
@@ -713,6 +725,53 @@ describe("TimelineEditor", () => {
     fireEvent.click(tgt)
     expect(tgt).toHaveAttribute("aria-pressed", "true")
     expect(lastAudibility).toEqual({ source: false, target: true })
+  })
+
+  // Sam, Oct 5: the playback-sound menu sits on the Source audio lane too, on
+  // the sublabel's line so the lane's name keeps its full width.
+  it("puts the playback-sound pill on the Source audio lane when offered", async () => {
+    const onChange = vi.fn()
+    const { rerender } = render(
+      <TimelineEditor fileId="sndfile" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+    )
+    expect(screen.queryByTestId("tl-sound-source-picker")).toBeNull()
+    rerender(
+      <TimelineEditor
+        fileId="sndfile" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}}
+        soundSource={{ value: "video", recordingName: "episode.wav", onChange }}
+      />,
+    )
+    const pill = screen.getByTestId("tl-sound-source-picker")
+    expect(pill).toHaveTextContent(/^Sound: Video$/)
+    // In the SOURCE row, with its speaker, not the target's...
+    let row: HTMLElement | null = pill.parentElement
+    while (row && !row.contains(screen.getByTestId("tl-speaker-source"))) row = row.parentElement
+    expect(row).not.toBeNull()
+    // (Target audio has no takes here, so since AQU-1682 it shows no speaker;
+    // tell the rows apart by name.)
+    expect(row).not.toHaveTextContent("Target audio")
+    // ...in place of the sublabel, so the name is untouched.
+    expect(row).toHaveTextContent("Source audio")
+    expect(row).not.toHaveTextContent("original speech")
+    fireEvent.click(pill)
+    fireEvent.click(await screen.findByTestId("video-sound-source-recording"))
+    expect(onChange).toHaveBeenCalledExactlyOnceWith("recording")
+  })
+
+  it("keeps the playback-sound pill out of the collapsed gutter strip", () => {
+    localStorage.setItem("aquilla:tlGutterCollapsed:sndstrip", "1")
+    try {
+      render(
+        <TimelineEditor
+          fileId="sndstrip" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}}
+          soundSource={{ value: "video", recordingName: null, onChange: () => {} }}
+        />,
+      )
+      expect(screen.getByTestId("tl-speaker-source")).toBeInTheDocument()
+      expect(screen.queryByTestId("tl-sound-source-picker")).toBeNull()
+    } finally {
+      localStorage.removeItem("aquilla:tlGutterCollapsed:sndstrip")
+    }
   })
 
   it("a muted-source preference persists across mounts", () => {
@@ -1031,6 +1090,99 @@ describe("TimelineEditor", () => {
       />,
     )
     expect(onSeekToTime).toHaveBeenCalledWith(10)
+  })
+})
+
+// ── AQU-1747: the playhead in FREE TIMING ───────────────────────────
+//
+// Free timing draws the PROGRAMME — the verses laid end to end — so the only
+// position the playhead may paint there is a programme second. A video-less
+// subtitle file has no imported recording, so the file-clock test the dubbing
+// path uses is false for it and the playhead sat on 0:00 through a whole run of
+// Play all while the bar's clock ran correctly.
+
+describe("TimelineEditor — playhead clock in Free timing", () => {
+  beforeEach(() => { topOwner.value = 1 })
+
+  /** A text cue (SRT/VTT line) with a take of its own and NO source clip — what
+   *  a subtitle import with no video linked actually looks like. */
+  const cue = (id: string, startTime: number, endTime: number, takeMs: number): CellData => {
+    const takeId = `audio-${id}-1700000000-take.webm`
+    return cell({
+      id, original: id, medium: "text", startTime, endTime,
+      selectedAudioId: takeId,
+      attachments: { [takeId]: { type: "audio", url: "frontier-audio://take", durationMs: takeMs } },
+    } as unknown as Partial<CellData>)
+  }
+  // Cues 0-3, 3-6, 6-9 s; takes 1 s, 5 s, 2 s — so the programme runs
+  // 0-1 (c1), 1-6 (c2), 6-8 (c3), as the reported walk did.
+  const cues = [cue("c1", 0, 3, 1_000), cue("c2", 3, 6, 5_000), cue("c3", 6, 9, 2_000)]
+
+  const renderFree = () =>
+    renderWithTooltips(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={cues}
+        timingMode="audioFirst" onRetimeSubtitle={() => {}}
+        onRetimeTarget={() => {}} onTrimTarget={() => {}}
+      />,
+    )
+  const playheadPx = () => parseFloat(screen.getByTestId("tl-playhead").style.left)
+  const reset = () => {
+    mockQueueState = { kind: "idle" }
+    mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false }
+  }
+
+  it("follows the programme clock while Play all runs", () => {
+    // 6 s on the programme == the start of c3's take, the third chip.
+    mockQueueState = { kind: "playing", cellIndex: 2, cellId: "c3" }
+    mockProgress = { currentTime: 6, duration: 8, rate: 1, volume: 1, programmeClock: true }
+    try {
+      renderFree()
+      // 38 px/s at the default zoom. Before the fix this was 0 for the whole run.
+      expect(playheadPx()).toBeCloseTo(6 * 38, 0)
+    } finally {
+      reset()
+    }
+  })
+
+  it("a take played from a row's rail still does NOT move the playhead", () => {
+    // THE GUARD THE GATE EXISTS FOR (2026-08-11, carried forward): the same
+    // cells, the same mode, a take sounding on its own clock — 3 s into the
+    // TAKE, which is not 3 s into anything the timeline draws. The transport
+    // says so by publishing `programmeClock: false`, and the head must not move.
+    mockQueueState = { kind: "playing", cellIndex: 2, cellId: "c3" }
+    mockProgress = { currentTime: 3, duration: 8, rate: 1, volume: 1, programmeClock: false }
+    try {
+      renderFree()
+      expect(playheadPx()).toBe(0)
+    } finally {
+      reset()
+    }
+  })
+
+  it("in dubbing mode the FILE clock still drives it, programme flag or not", () => {
+    // The other half of the mode split: dubbing draws file seconds, so it reads
+    // `queueClockIsFileTime` exactly as before and ignores the new flag.
+    const SOURCE_CLIP = "audio-f1-1690000000-shared.mp3"
+    const media = [
+      cell({
+        id: "m1", original: "One", medium: "media", startTime: 0, endTime: 20,
+        attachments: { [SOURCE_CLIP]: { type: "audio", url: "frontier-audio://src" } },
+      } as unknown as Partial<CellData>),
+    ]
+    mockQueueState = { kind: "playing", cellIndex: 0, cellId: "m1" }
+    mockProgress = { currentTime: 12, duration: 20, rate: 1, volume: 1, programmeClock: false }
+    try {
+      renderWithTooltips(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={media}
+          timingMode="dubbing" onRetimeSubtitle={() => {}}
+        />,
+      )
+      expect(playheadPx()).toBeCloseTo(12 * 38, 0)
+    } finally {
+      reset()
+    }
   })
 })
 
@@ -1444,13 +1596,86 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
 
   it("leaves the target row's speaker button alone", () => {
     setVideoDurationSec(VIDEO, 120)
+    // AQU-1682: the Target audio row has a speaker once it holds a take.
+    const TAKE = "audio-s1-1700000000-take.webm"
+    const withTake = [
+      cell({
+        ...subtitleCells[0], selectedAudioId: TAKE,
+        attachments: { [TAKE]: { type: "audio", url: "frontier-audio://take" } },
+      } as Partial<CellData>),
+      subtitleCells[1],
+    ]
     render(
       <TimelineEditor
-        fileId="f1" coreMediaUrl={VIDEO} editable cells={subtitleCells}
+        fileId="f1" coreMediaUrl={VIDEO} editable cells={withTake}
         tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
       />,
     )
     expect(screen.getByTestId("tl-speaker-target")).toHaveAttribute("aria-pressed", "true")
+  })
+
+  // AQU-1682: a lane's mute button only where the lane has something to play.
+  describe("a mute button only on a lane with something to play (AQU-1682)", () => {
+    beforeEach(() => {
+      localStorage.removeItem("aquilla:timelineAudibility:f1682")
+    })
+
+    it("gives an empty Target audio row no speaker", () => {
+      setVideoDurationSec(VIDEO, 120)
+      render(
+        <TimelineEditor
+          fileId="f1682" coreMediaUrl={VIDEO} editable cells={subtitleCells}
+          tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
+        />,
+      )
+      expect(screen.queryByTestId("tl-speaker-target")).toBeNull()
+      // The film still sounds, so the Source audio row keeps its speaker.
+      expect(screen.getByTestId("tl-speaker-source")).toBeInTheDocument()
+    })
+
+    it("gives the Source audio row no speaker when nothing on it plays (cues, no video, no recording)", () => {
+      render(
+        <TimelineEditor
+          fileId="f1682" coreMediaUrl={null} editable cells={subtitleCells}
+          tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
+        />,
+      )
+      expect(screen.queryByTestId("tl-speaker-source")).toBeNull()
+    })
+
+    it("gives the Source audio row no speaker in Free timing, where the video is hidden and silent", () => {
+      setVideoDurationSec(VIDEO, 120)
+      render(
+        <TimelineEditor
+          fileId="f1682" coreMediaUrl={VIDEO} editable cells={subtitleCells} timingMode="audioFirst"
+          tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
+        />,
+      )
+      expect(screen.queryByTestId("tl-speaker-source")).toBeNull()
+    })
+
+    it("keeps the Source audio row's speaker for an imported recording", () => {
+      render(
+        <TimelineEditor fileId="f1682" coreMediaUrl={null} editable cells={importedMedia} onRetimeSubtitle={() => {}} />,
+      )
+      expect(screen.getByTestId("tl-speaker-source")).toBeInTheDocument()
+    })
+
+    it("keeps the button on a muted lane even when it has nothing to play, so it can be unmuted", () => {
+      localStorage.setItem("aquilla:timelineAudibility:f1682", JSON.stringify({ source: true, target: false }))
+      setVideoDurationSec(VIDEO, 120)
+      render(
+        <TimelineEditor
+          fileId="f1682" coreMediaUrl={VIDEO} editable cells={subtitleCells}
+          tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
+        />,
+      )
+      const target = screen.getByTestId("tl-speaker-target")
+      expect(target).toHaveAttribute("aria-pressed", "false")
+      fireEvent.click(target)
+      // Unmuted and still empty: now it goes.
+      expect(screen.queryByTestId("tl-speaker-target")).toBeNull()
+    })
   })
 
   it("an imported recording keeps its gutter source speaker, and it still publishes", () => {
@@ -4278,7 +4503,7 @@ describe("TimelineEditor — dragging the playhead (stage 5)", () => {
   // leaves the other covering it. Removing both fails this.
   it("keeps the head on the hand when a transport publishes an older position", () => {
     mockQueueState = { kind: "playing", cellIndex: 0, cellId: "m1" }
-    mockProgress = { currentTime: 2, duration: 20, rate: 1, volume: 1 }
+    mockProgress = { currentTime: 2, duration: 20, rate: 1, volume: 1, programmeClock: false }
     const clipped = [
       cell({
         id: "m1", original: "One", medium: "media", startTime: 0, endTime: 20,
@@ -4302,7 +4527,7 @@ describe("TimelineEditor — dragging the playhead (stage 5)", () => {
     expect(head()).toBeCloseTo(38 * 12, 0)
 
     // The transport now reports where it got to. Mid-scrub, that is stale news.
-    mockProgress = { currentTime: 4, duration: 20, rate: 1, volume: 1 }
+    mockProgress = { currentTime: 4, duration: 20, rate: 1, volume: 1, programmeClock: false }
     rerender(
       <TimelineEditor
         fileId="f1" coreMediaUrl={null} editable cells={clipped}
@@ -4313,7 +4538,7 @@ describe("TimelineEditor — dragging the playhead (stage 5)", () => {
     expect(head()).toBeCloseTo(38 * 12, 0)
     fireEvent.pointerUp(window, { pointerId: 1, clientX: 38 * 12 })
     mockQueueState = { kind: "idle" }
-    mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
+    mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false }
   })
 
   // A drag's trailing `click` must not seek a second time and fight the
@@ -4344,5 +4569,365 @@ describe("TimelineEditor — dragging the playhead (stage 5)", () => {
     expect(onSeekToTime.mock.calls.length).toBeGreaterThan(0)
     expect(onSeekToTime.mock.calls.length).toBeLessThan(10)
     fireEvent.pointerUp(window, { pointerId: 1, clientX: 240 })
+  })
+})
+
+// ── AQU-1632: the gutter is a scrollport the browser can move on its own ────
+//
+// The header column clips with `overflow-hidden`, which still makes it a
+// scrollport — so tabbing onto a track's ⋯ button below the fold made the
+// browser scroll the HEADERS and nothing else, and the names stopped lining up
+// with their lanes for the rest of the session. The fix refuses to hold an
+// offset of its own: whatever the browser does here is handed to the track
+// column, which is the one thing that owns the vertical position.
+//
+// happy-dom supplies no layout, so it never scrolls anything to reveal a
+// focused element. The test therefore does what the browser would have done —
+// set the gutter's scrollTop and fire the scroll — and asserts on where that
+// offset ends up, which is the whole of the fix.
+describe("TimelineEditor — a focus-driven gutter scroll keeps the columns in step", () => {
+  beforeEach(() => {
+    topOwner.value = 1
+    localStorage.clear()
+  })
+
+  const rowCells = [cell({ id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10 })]
+
+  it("hands the browser's gutter scroll to the track column and re-zeroes itself", () => {
+    render(
+      <TimelineEditor
+        fileId="gutterfocus" coreMediaUrl={null} editable cells={rowCells}
+        onRetimeSubtitle={() => {}} onReorderTrack={() => {}}
+      />,
+    )
+    const scroll = screen.getByTestId("tl-scroll") as HTMLElement
+    const gutter = scroll.previousElementSibling as HTMLElement
+    // `role="list"` is on the inner div that carries the offset — the one
+    // `handleTrackScroll` transforms.
+    const inner = gutter.querySelector('[role="list"]') as HTMLElement
+
+    // Baseline: the track column owns y, and the headers follow it.
+    scroll.scrollTop = 60
+    fireEvent.scroll(scroll)
+    expect(inner.style.transform).toBe("translateY(-60px)")
+
+    // Now the browser reveals a focused ⋯ button by scrolling the GUTTER.
+    gutter.scrollTop = 45
+    fireEvent.scroll(gutter)
+
+    // The gutter holds no offset of its own…
+    expect(gutter.scrollTop).toBe(0)
+    // …the track column absorbed it…
+    expect(scroll.scrollTop).toBe(105)
+    // …and once that scroll lands, the headers are back beside their lanes.
+    fireEvent.scroll(scroll)
+    expect(inner.style.transform).toBe("translateY(-105px)")
+  })
+
+  it("leaves everything alone when the gutter is already at the origin", () => {
+    render(
+      <TimelineEditor
+        fileId="gutterfocus2" coreMediaUrl={null} editable cells={rowCells}
+        onRetimeSubtitle={() => {}} onReorderTrack={() => {}}
+      />,
+    )
+    const scroll = screen.getByTestId("tl-scroll") as HTMLElement
+    const gutter = scroll.previousElementSibling as HTMLElement
+
+    scroll.scrollTop = 30
+    fireEvent.scroll(scroll)
+    // A scroll event on a gutter sitting at 0 — the echo of our own re-zeroing
+    // — must not nudge the track column a second time.
+    fireEvent.scroll(gutter)
+    expect(scroll.scrollTop).toBe(30)
+  })
+})
+
+// ── AQU-1566 (Sam's option b): a linked video with no rows ──────────────────
+//
+// The workspace decides WHEN these are on offer (a maintainer, a linked video,
+// rows loaded and none there); these pin what the timeline does with that
+// answer: the caption track's menu, Attach captions without the track-editing
+// switch, and a viewer seeing nothing that writes.
+describe("TimelineEditor — captions becoming a linked video's rows (AQU-1566)", () => {
+  beforeEach(() => { topOwner.value = 1 })
+
+  const tracks = deriveTracksForFile({ trackOverrides: {
+    "ep-captions": { kind: "source-subtitles", name: "Episode captions", contentFileId: "cue-file" },
+    "fr-captions": { kind: "target-subtitles", name: "French captions", contentFileId: "fr-file" },
+  } })
+  const base = {
+    fileId: "f1", coreMediaUrl: null, editable: true, cells: [] as CellData[],
+    onRetimeSubtitle: () => {}, tracks, textTrackCells: {},
+  }
+  // A maintainer always has the reorder grip, which is what marks the rows.
+  const menuBase = { ...base, onReorderTrack: vi.fn() }
+  const gutterRow = (name: string) => [...screen.getByTestId("tl-scroll").previousElementSibling!
+    .querySelectorAll<HTMLElement>("[data-tl-track-row]")]
+    .find(row => row.textContent?.includes(name))!
+
+  it("offers Use as this file's rows on a source caption track with content, and nothing writes until confirmed upstream", () => {
+    const onPromote = vi.fn()
+    render(<TimelineEditor {...menuBase} onRenameTrack={vi.fn()} onPromoteTrackToRows={onPromote} />)
+    fireEvent.contextMenu(gutterRow("Episode captions"))
+    // First item, above Rename.
+    const items = screen.getAllByRole("menuitem")
+    expect(items[0]).toHaveTextContent("Use as this file's rows")
+    expect(screen.getByText("Rename")).toBeTruthy()
+    fireEvent.click(items[0])
+    expect(onPromote).toHaveBeenCalledWith("ep-captions")
+  })
+
+  it("never offers it on a target-text track or on a row with no captions of its own", () => {
+    render(<TimelineEditor {...menuBase} onRenameTrack={vi.fn()} onPromoteTrackToRows={vi.fn()} />)
+    fireEvent.contextMenu(gutterRow("French captions"))
+    expect(screen.getByText("Rename")).toBeTruthy()
+    expect(screen.queryByText("Use as this file's rows")).toBeNull()
+  })
+
+  it("is absent without the callback (a file with rows, or below maintainer)", () => {
+    render(<TimelineEditor {...menuBase} onRenameTrack={vi.fn()} />)
+    fireEvent.contextMenu(gutterRow("Episode captions"))
+    expect(screen.getByText("Rename")).toBeTruthy()
+    expect(screen.queryByText("Use as this file's rows")).toBeNull()
+  })
+
+  it("is enough on its own to give the caption track a menu, and only that track", () => {
+    const onPromote = vi.fn()
+    render(<TimelineEditor {...menuBase} onPromoteTrackToRows={onPromote} />)
+    fireEvent.contextMenu(gutterRow("Episode captions"))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Use as this file's rows" }))
+    expect(onPromote).toHaveBeenCalledWith("ep-captions")
+  })
+
+  it("enables Attach captions without the track-editing switch when the workspace says so", () => {
+    const attach = vi.fn()
+    render(<TimelineEditor {...base} onRequestImportCaptions={attach} canImportCaptions />)
+    fireEvent.click(screen.getByTestId("tl-sources-menu"))
+    const item = screen.getByRole("menuitem", { name: "Attach captions" })
+    expect(item).not.toHaveAttribute("data-disabled")
+    expect(screen.queryByText("Enable track editing in Project Settings")).toBeNull()
+    fireEvent.click(item)
+    expect(attach).toHaveBeenCalledOnce()
+  })
+
+  it("still asks for the switch for a timeline-only track (a file with rows)", () => {
+    render(<TimelineEditor {...base} onRequestImportCaptions={vi.fn()} canImportCaptions={false}
+      onRequestImportCharacters={() => {}} canImportCharacters />)
+    fireEvent.click(screen.getByTestId("tl-sources-menu"))
+    const item = screen.getByRole("menuitem", { name: "Attach captions" })
+    expect(item).toHaveAttribute("data-disabled")
+    // Just greyed out, with nothing beside the label (Sam, Oct 5); the reason
+    // is the row's hover text and its accessible description.
+    expect(within(item).queryByText("track editing off")).toBeNull()
+    expect(item).toHaveAccessibleDescription("Track editing is off. Turn it on in Project Settings.")
+    // The row is disabled, so its content has to take the pointer itself for
+    // the hover text to open.
+    expect(within(item).getByText("Attach captions").parentElement!.className).toMatch(/pointer-events-auto/)
+  })
+
+  // The viewer decision: a Viewer keeps "Open Media view" and may watch. What
+  // the workspace hands a viewer is exactly this (every setup row present but
+  // not theirs, no track callbacks), and none of it may surface.
+  it("gives a viewer no Sources menu, no Add track and no track menu", () => {
+    render(<TimelineEditor {...base}
+      onRequestLinkVideo={() => {}} canLinkVideo={false}
+      onRequestImportAudioVtt={() => {}} canImportAudioVtt={false}
+      onRequestImportCharacters={() => {}} canImportCharacters={false} />)
+    expect(screen.queryByTestId("tl-sources-menu")).toBeNull()
+    expect(screen.queryByTestId("tl-add-track")).toBeNull()
+    expect(document.querySelector('[data-testid^="tl-track-menu-"]')).toBeNull()
+    expect(screen.queryByText("Use as this file's rows")).toBeNull()
+  })
+})
+
+// Sam's D3 (2026-10-05): on a linked video with no rows each prompt is said
+// once, where it belongs — on the timeline, not repeated in the Text pane.
+describe("TimelineEditor — an empty linked video (Sam's D3)", () => {
+  const LINKED = "https://www.youtube.com/watch?v=aqbHRKZ1bVs"
+  const linkedTracks = () =>
+    deriveTracksForFile(null, { isSubtitleImport: false, hasMediaCells: false, hasAudioCues: false })
+  beforeEach(() => resetVideoDurationsForTests())
+
+  it("the Source text lane says there are no captions, with Attach captions inline", () => {
+    setVideoDurationSec(LINKED, 635)
+    const attach = vi.fn()
+    render(
+      <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}}
+        onRequestImportCaptions={attach} canImportCaptions linkedVideoEmpty={{ captionTrackCount: 0 }} />,
+    )
+    const prompt = screen.getByTestId("tl-linked-video-lane-prompt")
+    expect(prompt.closest('[data-variant="subtitle"]')).toBeTruthy()
+    expect(prompt).toHaveTextContent(/^No captions yet\s*·\s*Attach captions$/)
+    fireEvent.click(within(prompt).getByRole("button", { name: "Attach captions" }))
+    expect(attach).toHaveBeenCalledOnce()
+  })
+
+  // ── Walk r3 (2026-10-05): the prompt on a short Free timing lane, and zoom ──
+  //
+  // happy-dom has no layout: every width is 0 and scrollLeft keeps whatever is
+  // written to it. These give the timeline's scroll column what a browser
+  // gives it — a view of `viewPx`, a scroll range set by the track inside it,
+  // and the browser's clamp on scrollLeft, which fires no scroll event when it
+  // leaves the column where it already was. Every other element is untouched.
+  function withScrollColumn(viewPx: number, run: () => void) {
+    const isColumn = (el: Element) => el.getAttribute("data-testid") === "tl-scroll"
+    const trackPx = (el: Element) => parseFloat((el.firstElementChild as HTMLElement | null)?.style.width ?? "") || 0
+    const rangeOf = (el: Element) => Math.max(viewPx, trackPx(el)) - viewPx
+    const left = new WeakMap<Element, number>()
+    const patches: Array<[object, string, PropertyDescriptor]> = []
+    const patch = (proto: object, key: string, make: (orig: PropertyDescriptor) => PropertyDescriptor) => {
+      const orig = Object.getOwnPropertyDescriptor(proto, key)!
+      patches.push([proto, key, orig])
+      Object.defineProperty(proto, key, { configurable: true, enumerable: orig.enumerable, ...make(orig) })
+    }
+    patch(HTMLElement.prototype, "clientWidth", (orig) => ({
+      get(this: HTMLElement) { return isColumn(this) ? viewPx : orig.get!.call(this) },
+    }))
+    patch(Element.prototype, "scrollWidth", (orig) => ({
+      get(this: Element) { return isColumn(this) ? viewPx + rangeOf(this) : orig.get!.call(this) },
+    }))
+    patch(Element.prototype, "scrollLeft", (orig) => ({
+      get(this: Element) { return isColumn(this) ? (left.get(this) ?? 0) : orig.get!.call(this) },
+      set(this: Element, v: number) {
+        if (isColumn(this)) left.set(this, Math.max(0, Math.min(v, rangeOf(this))))
+        else orig.set!.call(this, v)
+      },
+    }))
+    try { run() } finally {
+      for (const [proto, key, orig] of patches.reverse()) Object.defineProperty(proto, key, orig)
+    }
+  }
+
+  // The zoom buttons land their re-anchoring scroll in a rAF; queue and flush.
+  function withQueuedFrames(run: (flush: () => void) => void) {
+    const queued: FrameRequestCallback[] = []
+    const raf = vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((cb) => {
+      queued.push(cb as FrameRequestCallback)
+      return queued.length
+    })
+    const flush = () => { act(() => { for (const cb of queued.splice(0)) cb(0) }) }
+    try { run(flush) } finally { raf.mockRestore() }
+  }
+
+  it("on a short Free timing lane, is one readable line at the view's left edge, at every zoom, and the ruler keeps its labels", () => {
+    setVideoDurationSec(LINKED, 635)
+    localStorage.removeItem("aquilla:timelineZoom:lv-ft-zoom")
+    const attach = vi.fn()
+    withScrollColumn(900, () => withQueuedFrames((flush) => {
+      render(
+        <TimelineEditor fileId="lv-ft-zoom" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}}
+          timingMode="audioFirst" onRequestImportCaptions={attach} canImportCaptions
+          linkedVideoEmpty={{ captionTrackCount: 0 }} />,
+      )
+      const column = screen.getByTestId("tl-scroll")
+      const laneWidthPx = () => parseFloat((column.firstElementChild as HTMLElement).style.width)
+      // The walk's file: an empty Free timing timeline is about two seconds,
+      // far shorter than the view, so the column cannot scroll at all.
+      expect(laneWidthPx()).toBeLessThan(200)
+
+      const check = (zoomStep: number) => {
+        const where = `after ${zoomStep} zoom-in(s)`
+        const prompt = screen.getByTestId("tl-linked-video-lane-prompt")
+        const css = getComputedStyle(prompt)
+        // Placed against the view's left edge by the browser, not from a
+        // remembered scroll offset: the same 10 px inset at every zoom.
+        expect(css.position, where).toBe("sticky")
+        expect(css.left, where).toBe("10px")
+        // As wide as its words on one line — never clipped to the short lane.
+        expect(css.width, where).toBe("max-content")
+        expect(css.overflow, where).not.toBe("hidden")
+        expect(prompt, where).toHaveTextContent(/^No captions yet\s*·\s*Attach captions$/)
+        // The column never scrolled, and neither did the ruler's window: its
+        // labels start at 0:00 (they windowed out past the timeline's end).
+        expect(column.scrollLeft, where).toBe(0)
+        expect(screen.getByTestId("tl-ruler").textContent, where).toContain("0:00")
+      }
+
+      check(0)
+      for (let i = 1; i <= 3; i++) {
+        const before = laneWidthPx()
+        fireEvent.click(screen.getByLabelText("Zoom in"))
+        flush()
+        expect(laneWidthPx()).toBeGreaterThan(before)
+        check(i)
+      }
+      fireEvent.click(within(screen.getByTestId("tl-linked-video-lane-prompt")).getByRole("button", { name: "Attach captions" }))
+      expect(attach).toHaveBeenCalledOnce()
+    }))
+  })
+
+  it("in a long lane, sits in the lane itself with a margin at each end, so scrolling never carries it past the lane's end", () => {
+    setVideoDurationSec(LINKED, 635)
+    render(
+      <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}}
+        onRequestImportCaptions={() => {}} canImportCaptions linkedVideoEmpty={{ captionTrackCount: 0 }} />,
+    )
+    const prompt = screen.getByTestId("tl-linked-video-lane-prompt")
+    // A sticky box stays within its containing block: the lane it is a direct
+    // child of, which in Original's timing is the whole film.
+    expect(prompt.parentElement).toHaveAttribute("data-testid", "tl-lane")
+    const css = getComputedStyle(prompt)
+    expect(css.position).toBe("sticky")
+    expect(css.marginLeft).toBe("10px")
+    expect(css.marginRight).toBe("10px")
+  })
+
+  it("is the statement alone for someone who cannot attach, and absent once captions are on the timeline", () => {
+    setVideoDurationSec(LINKED, 635)
+    const { rerender } = render(
+      <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}}
+        canImportCaptions={false} linkedVideoEmpty={{ captionTrackCount: 0 }} />,
+    )
+    expect(screen.getByTestId("tl-linked-video-lane-prompt")).toHaveTextContent("No captions yet")
+    expect(within(screen.getByTestId("tl-linked-video-lane-prompt")).queryByRole("button")).toBeNull()
+    rerender(
+      <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}}
+        canImportCaptions={false} linkedVideoEmpty={{ captionTrackCount: 1 }} />,
+    )
+    expect(screen.queryByTestId("tl-linked-video-lane-prompt")).toBeNull()
+  })
+
+  it("the dashed Source audio placeholder is the video's own sound, with no raw time range", () => {
+    setVideoDurationSec(LINKED, 635)
+    render(
+      <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}}
+        linkedVideoEmpty={{ captionTrackCount: 0 }} />,
+    )
+    const lane = screen.getByTestId("tl-source-regions")
+    expect(within(lane).getByTestId("tl-source-gap-label")).toHaveTextContent("The video's own sound")
+    expect(lane.textContent).not.toContain("10:35.0")
+  })
+
+  it("draws no placeholder in Free timing, where the video is hidden and silent", () => {
+    setVideoDurationSec(LINKED, 635)
+    render(
+      <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}}
+        timingMode="audioFirst" linkedVideoEmpty={{ captionTrackCount: 0 }} />,
+    )
+    expect(screen.queryByTestId("tl-source-gap")).toBeNull()
+    expect(screen.queryByText("The video's own sound")).toBeNull()
+  })
+
+  // Sam, Oct 5: once a linked video's captions are its rows, its Source audio
+  // row stays (tracks.ts), and with no audio cues on it the band is still the
+  // video's own sound. Only an empty linked video gets the lane prompt.
+  it("labels the band the video's own sound on any linked video with no audio cues", () => {
+    setVideoDurationSec(LINKED, 635)
+    render(
+      <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}} />,
+    )
+    expect(screen.queryByTestId("tl-linked-video-lane-prompt")).toBeNull()
+    expect(screen.getByTestId("tl-source-gap-label")).toHaveTextContent("The video's own sound")
+    expect(screen.getByTestId("tl-source-regions").textContent).not.toContain("0:00.0–10:35.0")
+  })
+
+  it("leaves the gaps between audio cues unlabelled", () => {
+    setVideoDurationSec(LINKED, 635)
+    render(
+      <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}}
+        audioCues={[cell({ id: "c1", original: "Whoa there", startTime: 1, endTime: 2 })]} />,
+    )
+    expect(screen.queryByTestId("tl-source-gap-label")).toBeNull()
   })
 })

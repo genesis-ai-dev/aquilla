@@ -127,7 +127,7 @@ describe("downloadProjectOffline", () => {
     expect(seenDuringStream).toEqual({ projectId: "proj1", filesTotal: 1, filesDone: 0, cellsDone: 1 })
   })
 
-  it("is a no-op when the project is already downloading or ready", async () => {
+  it("is a no-op when the project is already ready", async () => {
     store.commit(
       events.offlineProjectStatusSet({ projectId: "proj1", status: "ready", syncedAt: new Date(), queueDepth: 0 }),
     )
@@ -139,6 +139,35 @@ describe("downloadProjectOffline", () => {
       },
     }))
     expect(called).toBe(false)
+  })
+
+  it("is a no-op while the same project is downloading in this session", async () => {
+    const never = () => new Promise<never>(() => {})
+    void downloadProjectOffline(store, "proj1", "jwt", fakeDeps({ resolveCloudProjectResult: never }))
+    let called = false
+    await downloadProjectOffline(store, "proj1", "jwt", fakeDeps({
+      resolveCloudProjectResult: async () => {
+        called = true
+        return never()
+      },
+    }))
+    expect(called).toBe(false)
+  })
+
+  // Recovery only runs on a verified store, so without this a project an
+  // earlier session left at `downloading` could stay stuck there.
+  it("starts over on a download an earlier session left half-done", async () => {
+    store.commit(
+      events.offlineProjectStatusSet({ projectId: "proj1", status: "downloading", syncedAt: null, queueDepth: 0 }),
+    )
+    store.commit(events.fileSynced({ id: "gone", projectId: "proj1", name: "Exodus", type: "usfm", sequenceIndex: 0 }))
+
+    await downloadProjectOffline(store, "proj1", "jwt", fakeDeps())
+
+    const files = store.query(tables.files.select().where({ projectId: "proj1" }))
+    expect(files.map((f) => f.id)).toEqual(["file1"])
+    const offlineRow = store.query(tables.offlineProjects.select().where({ projectId: "proj1" }).first())
+    expect(offlineRow?.status).toBe("ready")
   })
 
   it("rolls back all rows and clears progress on failure", async () => {

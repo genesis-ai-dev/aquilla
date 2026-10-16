@@ -122,7 +122,11 @@ function deleteProjectRows(store: Store<typeof schema>, projectId: string): void
 /**
  * Downloads `projectId` into the local LiveStore offline store: project row,
  * every file, and every cell (both sides) in anchor-chain order. Idempotent —
- * a no-op if the project is already `downloading` or `ready`. Throws (after
+ * a no-op if the project is `ready` or already downloading in this session.
+ * A `downloading` row with no download behind it is one an earlier session
+ * left half-done: its partial copy is cleared and the download starts over,
+ * so the user can retry without waiting on recoverInterruptedDownloads (which
+ * holds off until the store is verified, and never runs if it isn't). Throws (after
  * rolling back any partial rows) on failure, so the caller can surface the
  * error; the offline_projects row never lingers at `downloading` past the
  * call.
@@ -134,7 +138,11 @@ export async function downloadProjectOffline(
   deps: DownloadProjectDeps = defaultDeps,
 ): Promise<void> {
   const existing = store.query(tables.offlineProjects.select().where({ projectId }).first())
-  if (existing && existing.status !== "removing") return
+  if (existing?.status === "ready") return
+  if (existing?.status === "downloading") {
+    if (getDownloadProgress(projectId) !== null) return
+    deleteProjectRows(store, projectId)
+  }
 
   store.commit(
     events.offlineProjectStatusSet({ projectId, status: "downloading", syncedAt: null, queueDepth: 0 }),

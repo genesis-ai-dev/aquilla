@@ -47,7 +47,8 @@ const defaultCreateAdapter: CreateOfflineAdapter = async () => {
     // session booted from the half-built file saw a ready project as
     // `downloading` — recoverInterruptedDownloads then deleted it (found
     // 2026-10-15). Taking the snapshot from the leader waits for its boot,
-    // rebuild included.
+    // rebuild included. A leader that never boots now never hands out a
+    // store either; OfflineLeaderWatchdog prompts a restart if boot drags on.
     experimental: { disableFastPath: true },
   })
 }

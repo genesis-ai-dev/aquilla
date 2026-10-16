@@ -5,7 +5,7 @@
 
 import { describe, it, expect } from "vitest"
 import type { CellRow } from "@/lib/sync/cells-read-types"
-import { planQuoteSplits, quoteSplitForRow, voiceAssignmentsForSplits } from "./quote-split-plan"
+import { planQuoteSplits, quoteSplitCandidates, quoteSplitForRow, voiceAssignmentsForSplits } from "./quote-split-plan"
 
 function row(over: Partial<CellRow> & Pick<CellRow, "cellId" | "side" | "value">): CellRow {
   return {
@@ -171,5 +171,16 @@ describe("voiceAssignmentsForSplits", () => {
     ]
     expect(voiceAssignmentsForSplits(splits, { v5: "narrator", other: "jesus" })).toEqual({ "v5-c": "narrator" })
     expect(voiceAssignmentsForSplits(splits, {})).toBeNull()
+  })
+})
+
+describe("quoteSplitCandidates", () => {
+  it("lists the rows a file-wide split would cut, and how many lines they become", () => {
+    expect(quoteSplitCandidates([
+      { id: "v4", original: "Now the Passover was at hand." },
+      { id: "v5", original: JHN_6_5 },
+      { id: "v9", original: "“There is a boy here.”" },
+      { id: "v10", original: "Jesus said, “Sit down.”", originalHtml: "<p>Jesus <b>said</b>, “Sit down.”</p>" },
+    ])).toEqual({ cellIds: ["v5"], lines: 3 })
   })
 })

@@ -281,3 +281,23 @@ export function voiceAssignmentsForSplits(
   }
   return Object.keys(added).length > 0 ? added : null
 }
+
+/**
+ * The rows of a file that "Split all lines at quotes" would split, and how many
+ * lines they would become — the count its confirmation promises. The caller
+ * leaves out rows the row action refuses for reasons other than their text
+ * (audio, IDML, parked rows); this asks only what the text says.
+ */
+export function quoteSplitCandidates(
+  cells: Iterable<{ id: string; original?: string | null; originalHtml?: string | null }>,
+): { cellIds: string[]; lines: number } {
+  const cellIds: string[] = []
+  let lines = 0
+  for (const cell of cells) {
+    const { pieces, refusal } = quoteSplitForRow({ value: cell.original ?? "", valueHtml: cell.originalHtml })
+    if (refusal) continue
+    cellIds.push(cell.id)
+    lines += pieces.length
+  }
+  return { cellIds, lines }
+}

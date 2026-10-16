@@ -301,8 +301,9 @@ import { v7 as uuidv7 } from "uuid"
 import { sequenceBetween } from "@/lib/timeline/derive"
 import { isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
 import { buildCellRemovalInventory, type CellRemovalInventory } from "@/lib/cell-removal-inventory"
-import { planQuoteSplits, quoteSplitForRow, voiceAssignmentsForSplits } from "@/lib/cells/quote-split-plan"
+import { planQuoteSplits, quoteSplitCandidates, quoteSplitForRow, voiceAssignmentsForSplits } from "@/lib/cells/quote-split-plan"
 import type { QuoteSplitPiece } from "@/lib/cells/quote-split"
+import { isHiddenCell } from "@/lib/cells/hidden"
 import { SplitAtQuotesDialog } from "@/components/SplitAtQuotesDialog"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
@@ -10670,6 +10671,25 @@ export function ProjectWorkspace() {
     },
   ), [project, activeFileId, cellSummaries, currentUsername, myScopes, activeLane])
 
+  // AQU-1759: whether this person may split this file's lines at their quotes.
+  // Settled further down (it needs the add/remove-rows tier and the file's
+  // placement), so the action menu reads it through this ref at click time.
+  const canSplitAtQuotesRef = useRef(false)
+  const canSplitAtQuotes = useCallback(() => canSplitAtQuotesRef.current, [])
+  /** AQU-1759: the rows "Split lines at quotes" would split — the row action's
+   *  own refusals (audio, IDML, parked rows) first, then what the text says. */
+  const quoteSplitFileCandidates = useCallback(() => quoteSplitCandidates(
+    cellStore.getAllCellViews().filter((cell) =>
+      (cell.medium ?? "text") !== "media"
+      && !isHiddenCell(cell)
+      && resolveIdmlEditorConfiguration(cell.metadata, cell.originalHtml) == null,
+    ),
+  ), [cellStore])
+  const quoteSplitSummary = useCallback(() => {
+    const { cellIds, lines } = quoteSplitFileCandidates()
+    return { rows: cellIds.length, lines }
+  }, [quoteSplitFileCandidates])
+
   const actionCtx = useMemo(() => ({
     project: project!,
     activeFileId,
@@ -10679,7 +10699,9 @@ export function ProjectWorkspace() {
     // because they read different maps (see validatableTakes above).
     audioCounts: { ...audioCounts, validatableTakes },
     batchValidateSummary,
-  }), [project, activeFileId, fileProgress, canExportByOrgPolicy, audioCounts, validatableTakes, batchValidateSummary])
+    canSplitAtQuotes,
+    quoteSplitSummary,
+  }), [project, activeFileId, fileProgress, canExportByOrgPolicy, audioCounts, validatableTakes, batchValidateSummary, canSplitAtQuotes, quoteSplitSummary])
 
   // AQU-481: source import emits `file.create` (+ N `source.cell.create`), and
   // `file.create` sits at PROJECT_LEAD (500) server-side. Read the role from
@@ -11120,8 +11142,11 @@ export function ProjectWorkspace() {
         revalidateCells?.()
       })
     },
+    // AQU-1759: every line the confirmation counted, through the row action's
+    // own path — one read, one optimistic apply, one batch.
+    runSplitAtQuotes: () => { void handleSplitAtQuotes(quoteSplitFileCandidates().cellIds) },
     navigate,
-  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId, audioValidationByCellId, audioCueCells, myScopes, t, reportBatchValidate, batchValidateSummary, tts.settings, activeSourceLanguage, activeLaneTargetLanguage])
+  }), [handleSplitAtQuotes, quoteSplitFileCandidates, activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId, audioValidationByCellId, audioCueCells, myScopes, t, reportBatchValidate, batchValidateSummary, tts.settings, activeSourceLanguage, activeLaneTargetLanguage])
 
   // AQU-661: the dynamic primary-action button was removed; its actions now live
   // in the ⋯ overflow menu. This preserves the button's confirmation flow —
@@ -11955,6 +11980,11 @@ export function ProjectWorkspace() {
   const placement = cellPlacement({
     orderedBy: activeFile ? fileOrderedBy(activeFile) : "sequence",
   })
+  // AQU-1759: the row menu's split gate, for the file-wide action — rows may
+  // be added here, source text may be edited, and the file has no clock.
+  canSplitAtQuotesRef.current = canEditLines
+    && canPerform("source.cell.commit", project?.syncRole?.level ?? null)
+    && placement === "anywhere"
 
   const videoDurationForTable = useVideoDurationSec(activeFile?.coreMediaUrl ?? null)
   /**

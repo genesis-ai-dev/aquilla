@@ -33,6 +33,8 @@ export interface ExternalReadsEnv {
   SYNC_SECRET_KEY?: string
   /** AQU-730. Unset locally and in e2e. Deployed dev and prod set "1". */
   LANE_READ_WALL?: string
+  /** Base URL for the ask-mode approval deep link (changesets/pending). */
+  BASE_URL?: string
 }
 
 /** Credential-only gate (no project in play yet) — used by /me, /projects and

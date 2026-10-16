@@ -12,6 +12,8 @@
 //   GET /api/v1/external/projects/:projectId/files/:fileId/cells?since=&limit=&cursor=
 //   GET /api/v1/external/projects/:projectId/cells/:cellId/history?limit=&cursor=
 //   GET /api/v1/external/projects/:projectId/settings          — settings + live version
+//   GET /api/v1/external/projects/:projectId/activity?kinds=&fileId=&limit=&cursor=  (activity-route.ts)
+//   GET /api/v1/external/projects/:projectId/changesets/pending  (pending-changesets-route.ts)
 //   GET /api/v1/external/projects/:projectId/cells/:cellId/prompt-preview?targetLang=&fileId=
 //
 // /me, /orgs and /projects are the REST cold-start set (mirrors of the MCP
@@ -71,6 +73,8 @@ import { filterSettingsBlobForMember } from "../../../db/shared/lane-visibility"
 import { paginate, parsePageParams } from "./pagination"
 import { recordAgentRead, resolveAuthorshipPolicy, scrubAuthorField } from "./pii"
 import { handleExternalSimilarRequest } from "./similar-route"
+import { handleExternalActivityRequest } from "./activity-route"
+import { handleExternalPendingChangesetsRequest } from "./pending-changesets-route"
 import { handlePromptPreview } from "./prompt-preview"
 import { loadProjectDetail } from "./project-detail"
 import {
@@ -140,6 +144,16 @@ async function handleExternalMe(request: Request, env: ExternalReadsEnv): Promis
   })
 }
 
+/** `?sort=created` (newest first) on the list reads a "new X" poller walks.
+ *  Absent = each route's existing order; anything else is a 400, so a typo
+ *  cannot silently fall back to an order the poller would misread. */
+function parseSortParam(params: URLSearchParams): "created" | null | Response {
+  const sort = params.get("sort")
+  if (sort === null || sort === "") return null
+  if (sort === "created") return "created"
+  return externalError("validation_failed", `unknown sort "${sort}" (supported: created)`, 400)
+}
+
 // ---------------------------------------------------------------------------
 // GET /api/v1/external/projects — cold-start step 2: find a projectId.
 // (REST mirror of the MCP list_projects tool; same shared query.)
@@ -154,7 +168,10 @@ async function handleExternalProjects(request: Request, env: ExternalReadsEnv): 
   const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.credential)
   if (limited) return limited
 
-  const orgId = new URL(request.url).searchParams.get("orgId")
+  const params = new URL(request.url).searchParams
+  const orgId = params.get("orgId")
+  const sort = parseSortParam(params)
+  if (sort instanceof Response) return sort
   const cred = authed.credential
   if (orgId !== null) {
     // Same gate as /orgs/:orgId/projects, deliberately shared: the two spellings
@@ -168,7 +185,7 @@ async function handleExternalProjects(request: Request, env: ExternalReadsEnv): 
   const projects = await listProjectsForCredential(
     env.AQUILLA_PG,
     cred,
-    orgId !== null ? { orgId } : {},
+    { ...(orgId !== null ? { orgId } : {}), ...(sort ? { sort } : {}) },
   )
   return Response.json({ data: projects, nextCursor: null })
 }
@@ -223,6 +240,8 @@ async function handleExternalFiles(
 
   const url = new URL(request.url)
   const { limit, offset } = parsePageParams(url)
+  const sort = parseSortParam(url.searchParams)
+  if (sort instanceof Response) return sort
 
   const token = await mintInternalToken(env, authed.ctx, projectId, "")
   const internalUrl = new URL(request.url)
@@ -237,8 +256,26 @@ async function handleExternalFiles(
     return externalError("validation_failed", await internalRes.text(), internalRes.status)
   }
 
-  const body = (await internalRes.json()) as { files: unknown[] }
-  return Response.json(paginate(body.files, offset, limit))
+  const body = (await internalRes.json()) as { files: Array<{ fileId?: unknown }> }
+  const files = sort === "created" ? await sortFilesNewestFirst(env.AQUILLA_PG as AquillaDb, projectId, body.files) : body.files
+  return Response.json(paginate(files, offset, limit))
+}
+
+/** The internal files route orders by last edit and does not serialize
+ *  `created_at`, so the newest-first order is read separately and applied to
+ *  the rows that route already filtered (deleted files, lane wall). */
+async function sortFilesNewestFirst<T extends { fileId?: unknown }>(
+  db: AquillaDb,
+  projectId: string,
+  files: T[],
+): Promise<T[]> {
+  const { results } = await db
+    .prepare("SELECT id FROM files WHERE project_id = ? ORDER BY created_at DESC NULLS LAST, id DESC")
+    .bind(projectId)
+    .all<{ id: string }>()
+  const rank = new Map(results.map((r, i) => [r.id, i]))
+  const at = (f: T) => (typeof f.fileId === "string" ? rank.get(f.fileId) : undefined) ?? Number.MAX_SAFE_INTEGER
+  return [...files].sort((a, b) => at(a) - at(b))
 }
 
 /**
@@ -372,7 +409,7 @@ async function handleExternalFileCells(
 // GET /api/v1/external/projects/:projectId/cells/:cellId/history
 // ---------------------------------------------------------------------------
 
-interface EventRowRaw {
+export interface EventRowRaw {
   id: string
   parent_id: string | null
   kind: string
@@ -394,7 +431,7 @@ interface CellHistoryEvent {
   payload: unknown
 }
 
-function mapHistoryRow(row: EventRowRaw): CellHistoryEvent {
+export function mapHistoryRow(row: EventRowRaw): CellHistoryEvent {
   return {
     id: row.id,
     parentId: row.parent_id,
@@ -578,6 +615,14 @@ export async function handleExternalReadRequest(
   // only knows handleExternalReadRequest — reaches it like any other read.
   const similar = await handleExternalSimilarRequest(request, env)
   if (similar) return similar
+
+  // Trigger feeds (Zapier plan, workstream B) — own modules, same reason.
+  // /changesets/pending must be answered here: changesets-route.ts runs later
+  // in index.ts and would read "pending" as a changeset id.
+  const activity = await handleExternalActivityRequest(request, env)
+  if (activity) return activity
+  const pending = await handleExternalPendingChangesetsRequest(request, env)
+  if (pending) return pending
 
   // Must be checked before FILES_RE — FILES_RE is anchored with $ so it
   // won't accidentally match /files/:fileId/cells, but ordering here makes

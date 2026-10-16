@@ -1017,7 +1017,9 @@ export const editor = defineNamespace({
       other: "Redid “{step}” — {count} parts were changed since and were left alone",
     }),
     "editor.history.panelTitle": "History",
-    "editor.history.panelAria": "Edit history",
+    // Not "Edit history": that is the name of each line's own history drawer
+    // (editor.history.title), and two buttons may not share one name.
+    "editor.history.panelAria": "Undo history",
     "editor.history.panelTooltip": "History: undo any of your recent steps",
     "editor.history.undoSection": "Can undo",
     "editor.history.redoSection": "Can redo",

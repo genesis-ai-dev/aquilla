@@ -76,4 +76,10 @@ describe("HistoryPanel", () => {
     await userEvent.click(screen.getByTestId("history-panel-trigger"))
     expect(await screen.findByText(/Nothing to undo yet/)).toBeInTheDocument()
   })
+
+  it("names its button apart from each line's Edit history (AQU-1767)", () => {
+    render(<HistoryPanel onResult={vi.fn()} />)
+    expect(screen.getByRole("button", { name: "Undo history" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Edit history" })).toBeNull()
+  })
 })

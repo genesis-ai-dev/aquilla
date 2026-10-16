@@ -29,6 +29,7 @@
 // safeguard against accidents that has to be switched on protects nothing until
 // somebody remembers to switch it on.
 
+import { effectiveMediaSettings } from './media-settings'
 import { makeRequestCache, type RequestCache } from './request-cache'
 
 /**
@@ -36,7 +37,8 @@ import { makeRequestCache, type RequestCache } from './request-cache'
  *
  * Returns `true` (locked — the safe answer) when the project has no settings
  * row, the blob will not parse, or `timingLocked` is anything other than
- * exactly `false`. Keep in lock-step with `resolveTimingLocked` in
+ * exactly `false` — after AQU-1768's org default fills a project that sets
+ * none. Keep in lock-step with `resolveTimingLocked` in
  * src/lib/sync/project-settings.ts, which the client reads from the same blob.
  */
 export async function resolveTimingLocked(
@@ -53,7 +55,8 @@ export async function resolveTimingLocked(
   // the role mirror exists to prevent. An unreachable settings row must read as
   // LOCKED (nothing moves) rather than as an outage.
   try {
-    const parsed = await cache.writePathSettings(projectId)
+    // AQU-1768: a project with no lock setting of its own follows its org's.
+    const parsed = await effectiveMediaSettings(cache, projectId)
     if (!parsed) return true
     return parsed.timingLocked !== false
   } catch {

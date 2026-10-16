@@ -90,6 +90,12 @@ import {
 } from "../../../db/shared/validation-threshold"
 import { markOrgMondayLinksDirty, markProjectMondayLinksDirty } from "../../../db/shared/monday-dirty"
 import { pushDirtyLinksAfterResponse } from "../lib/monday/push"
+import {
+  MEDIA_DEFAULT_COLUMNS,
+  MEDIA_DEFAULT_KEYS,
+  MEDIA_DEFAULT_SLUGS,
+  isValidMediaDefault,
+} from "../../../db/shared/media-setting-defaults"
 
 const orgSettings = new Hono<AuthHonoEnv>()
 
@@ -191,6 +197,12 @@ const INHERITED_KEY_COLUMNS: Record<string, string> = {
   [COUNT_STRUCTURAL_KEY]: "count_structural",
   validationCount: VALIDATION_THRESHOLD_COLUMNS.validationCount,
   validationCountAudio: VALIDATION_THRESHOLD_COLUMNS.validationCountAudio,
+  // AQU-1768: the media defaults (timing lock, track editing, who may add or
+  // remove lines, audio self-validation, the audio validation floor). Like the
+  // rest of this table they are project defaults an org maintainer sets; a
+  // project's own value still wins, and the enforcement helpers read the org's
+  // only for a project that sets none.
+  ...MEDIA_DEFAULT_COLUMNS,
 }
 
 /** URL slug → settings key for the per-key "reset project overrides" endpoint. */
@@ -198,6 +210,7 @@ const RESET_SLUGS: Record<string, string> = {
   "count-structural": COUNT_STRUCTURAL_KEY,
   "validation-count": "validationCount",
   "validation-count-audio": "validationCountAudio",
+  ...MEDIA_DEFAULT_SLUGS,
 }
 
 /**
@@ -404,7 +417,7 @@ async function nameViewer(
  * would silently miss anyone — a project with its own answer is deliberately
  * deaf to the org's switch, and saying nothing about that is how the switch
  * becomes a no-op nobody can see. AQU-1771: the same count for the two
- * validation thresholds.
+ * validation thresholds. AQU-1768: one per media default.
  *
  * Every response that carries the settings carries these too (GET, PATCH and
  * its 409s): the client replaces its whole copy with each response, so a
@@ -419,17 +432,21 @@ async function loadOverrideCounts(
   orgId: number,
   viewer: ProjectNameViewer,
 ) {
-  const [countStructuralCells, validationCount, validationCountAudio] = await Promise.all([
+  const [countStructuralCells, validationCount, validationCountAudio, ...media] = await Promise.all([
     listOverrideProjects(env, orgId, INHERITED_KEY_COLUMNS[COUNT_STRUCTURAL_KEY], viewer),
     listOverrideProjects(env, orgId, VALIDATION_THRESHOLD_COLUMNS.validationCount, viewer),
     listOverrideProjects(env, orgId, VALIDATION_THRESHOLD_COLUMNS.validationCountAudio, viewer),
+    // AQU-1768: and one per media default.
+    ...MEDIA_DEFAULT_KEYS.map((key) => listOverrideProjects(env, orgId, MEDIA_DEFAULT_COLUMNS[key], viewer)),
   ])
+  const mediaLists = Object.fromEntries(MEDIA_DEFAULT_KEYS.map((key, i) => [key, media[i]]))
   return {
     countStructuralOverrides: countStructuralCells.total,
     validationCountOverrides: validationCount.total,
     validationCountAudioOverrides: validationCountAudio.total,
+    mediaDefaultOverrides: Object.fromEntries(MEDIA_DEFAULT_KEYS.map((key, i) => [key, media[i].total])),
     // AQU-1938: which projects those are, keyed by the setting they override.
-    overrideProjects: { countStructuralCells, validationCount, validationCountAudio },
+    overrideProjects: { countStructuralCells, validationCount, validationCountAudio, ...mediaLists },
   }
 }
 
@@ -622,6 +639,16 @@ orgSettings.on(
         return c.json({ error: `${key} must be a whole number from 1 to ${MAX_VALIDATION_THRESHOLD}` }, 400)
       }
     }
+    // AQU-1768: the media defaults, each its reader's own vocabulary (a
+    // boolean, or one of the stored tiers/floors). A typo would silently read
+    // as "no org default" and the page would claim one.
+    for (const key of MEDIA_DEFAULT_KEYS) {
+      const raw = body.settings[key]
+      if (raw === undefined) continue
+      if (!isValidMediaDefault(key, raw)) {
+        return c.json({ error: `${key} has an invalid value` }, 400)
+      }
+    }
     // Same reason: a string "true" would read as off and nobody would know why.
     const rawAllowBulkAiDrafts = body.settings[ALLOW_BULK_AI_DRAFTS_KEY]
     if (rawAllowBulkAiDrafts !== undefined && typeof rawAllowBulkAiDrafts !== "boolean") {
@@ -737,6 +764,22 @@ orgSettings.on(
     if (headingsRuleChanged || thresholdChanged) {
       await markOrgMondayLinksDirty(c.env.AQUILLA_PG, orgId)
       pushDirtyLinksAfterResponse(c, { orgId })
+    }
+    // AQU-1768: a media default moved, so the projects that set none of their
+    // own now resolve a different lock / floor / switch. Nothing is projected
+    // from these (every gate reads them at decision time), so the rooms only
+    // need telling to re-read. Changed values only, as above.
+    for (const key of MEDIA_DEFAULT_KEYS) {
+      if (current.settings[key] === body.settings[key]) continue
+      const column = MEDIA_DEFAULT_COLUMNS[key]
+      const { results: inheriting } = await c.env.AQUILLA_PG.prepare(
+        `SELECT p.id AS project_id, COALESCE(ps.version, 0) AS version
+           FROM projects p
+           LEFT JOIN project_settings ps ON ps.project_id = p.id
+          WHERE p.org_id = ? AND p.archived_at IS NULL
+            AND ps.${column} IS NULL`,
+      ).bind(orgId).all<{ project_id: string; version: number }>()
+      for (const row of inheriting ?? []) toNotify.set(row.project_id, Number(row.version))
     }
     notifyProjectRoomsBestEffort(
       c,

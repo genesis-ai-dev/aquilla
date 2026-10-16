@@ -66,6 +66,11 @@ export type EventKind =
   // comments and validations survive and come back on show. Hiding is per CELL,
   // not per lane, which is why one source-side kind covers every language.
   | 'source.cell.visibility.set'
+  // AQU-1767 phase 2: put back a cell a `source.cell.delete` removed — its
+  // rows, translations, validations, takes, links and comments — from the
+  // archive that delete's projection wrote. Non-chain-mutating (the row does
+  // not exist, so there is no head to extend); the undo of "Remove row".
+  | 'source.cell.restore'
   // Target-side cell events (translator).
   | 'target.cell.create'
   | 'target.cell.commit'
@@ -90,6 +95,9 @@ export type EventKind =
   // expressed as an absent field. See the payload doc below.
   | 'cell.audio.trim'
   | 'cell.audio.place'
+  // AQU-1767: cut one dub piece in two at a point in its own audio. Both
+  // pieces share the bytes, stay on the same row, and start unvalidated.
+  | 'cell.audio.cut'
   // Backfill a measured duration onto a take that predates duration capture.
   // Fills only a NULL duration_ms — never selects, never touches url/slot/
   // trims (a re-attach would re-select the clip and plain-assign trims).
@@ -317,6 +325,20 @@ export interface EventPayloads {
   'source.cell.visibility.set': {
     /** true parks the cell (stamps hidden_at), false brings it back (NULL). */
     hidden: boolean
+  }
+  /**
+   * AQU-1767 phase 2: undo a removal. Restores the cell from
+   * `removed_cell_archive` — the state the removal took, as it was — and only
+   * while no live source row exists for it. `deleteEventId` names the removal
+   * to undo; absent, the cell's newest unrestored removal is used (a removal
+   * the outbox had to re-send under a new id is still found).
+   *
+   * Takes, links and comments come back only where the removal itself took
+   * them and nobody has changed them since. The removal's chain claim is
+   * released, so the restored cell's head can move again.
+   */
+  'source.cell.restore': {
+    deleteEventId?: string
   }
 
   // ── Target-side ────────────────────────────────────────────────────────
@@ -568,6 +590,16 @@ export interface EventPayloads {
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
     laneId?: string
+    /**
+     * AQU-1767 (Sam, 2026-10-14): this clip is born a PIECE of the take
+     * `pieceOf` (the group's root) — how "Remove noise" on a split take keeps
+     * its cuts: the cleaned root is attached first, then each other piece
+     * naming it. Fill-only, like `created_by`: a routine re-attach never names
+     * a group, and cannot move a take into or out of one. The attach's
+     * deselect spares this group, so attaching a piece never unselects its
+     * siblings.
+     */
+    pieceOf?: string
   }
   'cell.audio.select': {
     /** The take to select — or null to leave the slot with NOTHING selected
@@ -630,6 +662,35 @@ export interface EventPayloads {
   'cell.audio.place': {
     audioId: string
     targetOffsetMs: number | null
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
+  }
+  /**
+   * AQU-1767 phase 1: CUT a dub piece in two, at `atMs` — a position in the
+   * clip's OWN audio (the same domain as the trim window), not in the file.
+   *
+   * The projection copies the piece into a new row `newAudioId` over the SAME
+   * bytes (same url), windowed `[atMs, old end]`, and shortens the original to
+   * `[old start, atMs]`. Both stay on this row and in this slot, both stay
+   * selected exactly as the original was, and BOTH START UNVALIDATED (Sam,
+   * 2026-10-12: cutting changes what a reviewer heard). The new row's
+   * `piece_of` names the group's root, so selection treats the pieces as one.
+   *
+   * Refused (a no-op) unless the piece is live, a dub (`role = 'dub'`), has a
+   * known end, and `atMs` lies at least CUT_MIN_PIECE_MS inside its window.
+   * `newAudioId` is minted by the client so the step can be undone (remove it)
+   * and a replay lands on the same row (ON CONFLICT DO NOTHING).
+   */
+  'cell.audio.cut': {
+    audioId: string
+    atMs: number
+    newAudioId: string
+    /** The new (second) piece's permanent name. Absent = the original's. */
+    newLabel?: string
+    /** Optional rename of the first piece in the same step ("Take 3 · 1"). */
+    firstLabel?: string
     /** AQU-1462: see `cell.audio.attach`. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */

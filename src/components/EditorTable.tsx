@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useCallback, useMemo, useState, forwardRef, useImperativeHandle } from "react"
+import { recordStep } from "@/lib/history/history"
 import { createPortal } from "react-dom"
 import {
   LegendList,
@@ -189,6 +190,7 @@ import { TargetValidationControl } from "./cell/TargetValidationControl"
 import { AudioValidationControl } from "./cell/AudioValidationControl"
 import { audioBlockedReason, lineValidationTakes } from "@/lib/audio/audio-validation-permissions"
 import { slotSelections } from "@/lib/sync/cell-audio-read-types"
+import { takePlayWindow } from "@/lib/audio/kept-window"
 import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
 import { PericopeSuggestions } from "./PericopeSuggestions"
 import type { PericopeSuggestion } from "@/lib/pericope/suggest"
@@ -499,6 +501,8 @@ export function applyRowOverlays(
         ...(attachment.validators ? { validators: attachment.validators } : {}),
         ...(attachment.role ? { role: attachment.role } : {}),
         ...(attachment.recordedBy != null ? { recordedBy: attachment.recordedBy } : {}),
+        // AQU-1767: see mergeCellsWithAudio — the same list, the same rule.
+        ...(attachment.pieceOf ? { pieceOf: attachment.pieceOf } : {}),
       }
     }
     next = {
@@ -6202,13 +6206,31 @@ function EditorRow({
   // dependency there would re-run that effect (releasing the focus lock).
   const onValidatedRef = useRef(onValidated)
   useEffect(() => { onValidatedRef.current = onValidated }, [onValidated])
+  // AQU-1767 phase 2: one editing session — however many idle saves it made —
+  // is ONE history step, recorded when the edit settles: the text before the
+  // first save and the text after the last. Typing inside the open cell keeps
+  // the editor's own undo; this is the step Undo takes back afterwards.
+  const textStepRef = useRef<{ before: { value: string; valueHtml?: string }; after: { value: string; valueHtml?: string } } | null>(null)
+  const settleTextStep = useCallback(() => {
+    const step = textStepRef.current
+    if (!step || editorFocusedRef.current) return
+    textStepRef.current = null
+    if (step.before.value === step.after.value) return
+    recordStep({
+      kind: "text.commit",
+      data: { cellId: cell.id, lane: activeLane, side: "target", before: step.before, after: step.after },
+      labelKey: "editor.history.stepEditText",
+      fileId: cell.fileId,
+    })
+  }, [cell.id, cell.fileId, activeLane])
   const settleOwedRepetitions = useCallback(() => {
+    settleTextStep()
     if (!repetitionOwedRef.current || editorFocusedRef.current) return
     repetitionOwedRef.current = false
     void Promise.resolve(onValidatedRef.current?.(cell.id, "typed")).catch((err) => {
       console.warn("[repetition-propagation] failed:", err)
     })
-  }, [cell.id])
+  }, [cell.id, settleTextStep])
 
   // Editor commit path. The plain TipTap editor (TranslatedEditor) calls
   // this on idle/blur/release with the current `{value, valueHtml}` snapshot.
@@ -6245,6 +6267,7 @@ function EditorRow({
     // `checkRulesForCell` for this one cell on the next render — no other
     // cell's cached infractions are invalidated. The server projection
     // arrives via `onCellCommitted` -> revalidate and overwrites this.
+    const committedBefore = { value: cell.translated ?? "", ...(cell.translatedHtml !== undefined ? { valueHtml: cell.translatedHtml } : {}) }
     setLocalTargetDraft({ value, valueHtml })
     onOptimisticEdit?.(cell.id, { value, valueHtml })
     if (idmlConfiguration) {
@@ -6302,6 +6325,12 @@ function EditorRow({
         targetLang: activeLane,
       })
       lastCommittedEventIdRef.current = eventId
+      // AQU-1767 phase 2: the session's step — first "before", latest "after".
+      textStepRef.current = {
+        before: textStepRef.current?.before ?? committedBefore,
+        after: { value, valueHtml },
+      }
+      if (!editorFocusedRef.current) settleTextStep()
       // Restore codex behaviour: a direct human edit auto-validates the cell
       // ("a human has touched it"). The target.cell.commit above cleared any
       // prior validators (audit-stats-overlay resets activeValidators on every
@@ -6386,7 +6415,7 @@ function EditorRow({
       })
       return false
     }
-  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, project.validationRoleFloor, project.validationNamedUsers, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.originalHtml, cell.metadata, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, idmlConfiguration, t, settleOwedRepetitions])
+  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, project.validationRoleFloor, project.validationNamedUsers, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.originalHtml, cell.metadata, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, idmlConfiguration, t, settleOwedRepetitions, settleTextStep])
 
   // AQU-618: run a single-cell AI generate/Replace, then return the translator
   // to the edited cell and confirm the save. Both entry points — the Replace
@@ -6777,6 +6806,13 @@ function EditorRow({
         targetLang: activeLane,
         surface: "cell", // AQU-1572
       })
+      // AQU-1767 phase 2: your own vote, as a step Undo can take back.
+      recordStep({
+        kind: "vote.text",
+        data: { cellId: cell.id, lane: activeLane, voted: validated, editEventId },
+        labelKey: validated ? "editor.history.stepValidate" : "editor.history.stepUnvalidate",
+        fileId: cell.fileId,
+      })
       await onCellCommitted?.(cell.id)
       // AQU-1391: only on the way IN. Un-validating a cell must not push its
       // text anywhere, and the propagation runs after the commit has flushed
@@ -7021,12 +7057,23 @@ function EditorRow({
     cell.endTime > cell.startTime
       ? { start: cell.startTime, end: cell.endTime }
       : null
+  // AQU-1767 (Sam's walk, 2026-10-15): a take plays here as it plays
+  // everywhere else — its trimmed part, and a split take its pieces with the
+  // space between them skipped. This player played the raw recording, gaps
+  // and all, and being a copy of the take the Recording tab shows, it took
+  // over the tab's waveform once it had played.
+  const takeWindow = railSectionWindow ? null : takePlayWindow(cell.attachments, cell.selectedAudioId)
+  const railWindowKey = railSectionWindow
+    ? `s${railSectionWindow.start}-${railSectionWindow.end}`
+    : takeWindow
+      ? `t${takeWindow.start}-${takeWindow.end}~${takeWindow.gaps?.map((g) => `${g.start}-${g.end}`).join(",") ?? ""}`
+      : ""
   const { setTrim: setRailTrim } = audioController
   useEffect(() => {
-    if (cell.medium !== "media") return
     if (railSectionWindow) setRailTrim(railSectionWindow.start, railSectionWindow.end)
+    else if (takeWindow) setRailTrim(takeWindow.start, takeWindow.end, takeWindow.gaps)
     else setRailTrim(null, null)
-  }, [cell.medium, railSectionWindow?.start, railSectionWindow?.end, setRailTrim]) // eslint-disable-line react-hooks/exhaustive-deps -- window identity varies per render; primitives cover it
+  }, [railWindowKey, setRailTrim]) // eslint-disable-line react-hooks/exhaustive-deps -- railWindowKey stands for both windows
   const cellForGeneratedVoice = useMemo(() => ({
     metadata: {
       attachments: cell.attachments,
@@ -7625,6 +7672,20 @@ function EditorRow({
     // performs it (dubbing). The scope asked above stays THIS row's — an
     // assignment is to the subtitle file, never to its hidden cue sibling.
     const owner = audioValidationLine.ownerOf.get(audioId) ?? { fileId: cell.fileId, cellId: cell.id }
+    // Recorded as the vote starts (AQU-1767 slow-network pass): an Undo
+    // pressed while it saves undoes this vote, not the step before it. The
+    // step waits for the vote to land, and is dropped if it fails.
+    let settle: (ok: boolean) => void = () => {}
+    recordStep(
+      {
+        kind: "vote.audio",
+        data: { cellId: owner.cellId, audioId, voted: validated },
+        labelKey: validated ? "editor.history.stepValidateAudio" : "editor.history.stepUnvalidateAudio",
+        fileId: cell.fileId,
+      },
+      undefined,
+      { pending: new Promise<boolean>((resolve) => { settle = resolve }) },
+    )
     try {
       const emit = validated ? emitCellAudioValidate : emitCellAudioUnvalidate
       await emit({
@@ -7642,9 +7703,11 @@ function EditorRow({
       // until the row recycled. Now the vote is flushed and every reader of
       // this file refetches, including a timeline open beside the text view.
       await commitAudioValidation([owner.fileId])
+      settle(true)
       return true
     } catch (error) {
       console.error("[audio-validate] emit failed", error)
+      settle(false)
       return false
     }
   }

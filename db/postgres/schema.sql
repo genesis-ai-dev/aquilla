@@ -367,7 +367,15 @@ CREATE TABLE project_settings (
     roster_view_min_role TEXT
       GENERATED ALWAYS AS (CASE WHEN jsonb_typeof((settings::jsonb) -> 'rosterViewMinRole') = 'number' THEN (settings::jsonb) ->> 'rosterViewMinRole' END) STORED,
     member_progress_view_min_role TEXT
-      GENERATED ALWAYS AS (CASE WHEN jsonb_typeof((settings::jsonb) -> 'memberProgressViewMinRole') = 'number' THEN (settings::jsonb) ->> 'memberProgressViewMinRole' END) STORED
+      GENERATED ALWAYS AS (CASE WHEN jsonb_typeof((settings::jsonb) -> 'memberProgressViewMinRole') = 'number' THEN (settings::jsonb) ->> 'memberProgressViewMinRole' END) STORED,
+    -- 0176 (AQU-1768): whether the project sets its own media settings, so
+    -- org-default overrides can be counted and cleared without the blob. NULL
+    -- = inherits the org's default. One line each (dev-stack reconciler).
+    timing_locked TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'timingLocked') STORED,
+    allow_track_editing TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'allowTrackEditing') STORED,
+    cell_editing_floor TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'cellEditingFloor') STORED,
+    allow_self_validation_audio TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'allowSelfValidationAudio') STORED,
+    validation_role_floor_audio TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationRoleFloorAudio') STORED
 );
 CREATE INDEX project_settings_agent_react ON project_settings(project_id) WHERE agent_react;
 
@@ -650,6 +658,31 @@ CREATE TABLE IF NOT EXISTS chain_claims (
     event_id   TEXT NOT NULL,
     PRIMARY KEY (project_id, file_id, cell_id, parent_key)
 );
+
+-- AQU-1767 phase 2 (migration 0178): what a `source.cell.delete` took, so
+-- `source.cell.restore` can put it back. Written once by the delete's
+-- projection (same batch, same gate), keyed by the delete event; `restored_by`
+-- makes each archive single-use. See the migration for the full rules.
+CREATE TABLE IF NOT EXISTS removed_cell_archive (
+    delete_event_id   TEXT PRIMARY KEY,
+    project_id        TEXT NOT NULL,
+    file_id           TEXT NOT NULL,
+    cell_id           TEXT NOT NULL,
+    deleted_by        TEXT NOT NULL,
+    deleted_ts        BIGINT NOT NULL,
+    cells_rows        JSONB NOT NULL DEFAULT '[]'::jsonb,
+    validators        JSONB NOT NULL DEFAULT '[]'::jsonb,
+    waivers           JSONB NOT NULL DEFAULT '[]'::jsonb,
+    backtranslations  JSONB NOT NULL DEFAULT '[]'::jsonb,
+    morph             JSONB NOT NULL DEFAULT '[]'::jsonb,
+    audio             JSONB NOT NULL DEFAULT '[]'::jsonb,
+    links             JSONB NOT NULL DEFAULT '[]'::jsonb,
+    comments          JSONB NOT NULL DEFAULT '[]'::jsonb,
+    restored_by       TEXT,
+    restored_ts       BIGINT
+);
+CREATE INDEX IF NOT EXISTS idx_removed_cell_archive_cell
+    ON removed_cell_archive (project_id, file_id, cell_id, deleted_ts DESC);
 
 CREATE TABLE files (
     id             TEXT PRIMARY KEY,
@@ -1023,6 +1056,12 @@ CREATE TABLE cell_audio (
     -- permanent home for every take that predates this column (rebuild replays
     -- historical cell.lane.retime events into it forever).
     target_offset_ms   BIGINT,
+    -- AQU-1767 (0177): the take this row was CUT from, when it is a piece of
+    -- one. NULL for every whole take and for a cut's first piece (the root).
+    -- Group key = COALESCE(piece_of, audio_id); selection is per group — every
+    -- live piece of a selected group is selected, so a row needs every piece
+    -- validated (the progress MIN over selected dubs already says so).
+    piece_of           TEXT,
     PRIMARY KEY (project_id, file_id, cell_id, audio_id)
 );
 

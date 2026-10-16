@@ -551,6 +551,23 @@ describe('PatchSettings — policy keys, restrictive direction only (AQU-1282 §
 
   // AQU-1771: a project following the org's default of 3 approvals has
   // nothing stored; lowering it to 2 is a loosening all the same.
+  // AQU-1768: the same for the media settings that are policy keys.
+  it('judges an unset media policy key against the org default too', async () => {
+    const env = makeEnv(tdb.db)
+    await seedPolicy({})
+    await tdb.pg.query(
+      `INSERT INTO org_settings (org_id, settings, version) VALUES ($1, $2, 1)`,
+      [ORG_ID, JSON.stringify({ cellEditingFloor: 'maintainer', validationRoleFloorAudio: 'project_lead' })],
+    )
+    const owner = await memberToken(tdb, 700)
+    const { res, body } = await prepare(env, owner.token, patchCmd([
+      { key: 'cellEditingFloor', value: 'contributor' },
+      { key: 'validationRoleFloorAudio', value: 'reviewer' },
+    ]))
+    expect(res.status).toBe(403)
+    expect(body.error.details.loosening.map((v: { key: string }) => v.key).sort()).toEqual(['cellEditingFloor', 'validationRoleFloorAudio'])
+  })
+
   it('judges an unset key against the org default it follows, not the built-in one', async () => {
     const env = makeEnv(tdb.db)
     await seedPolicy({})

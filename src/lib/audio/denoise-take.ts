@@ -18,7 +18,9 @@ import {
 import { audioCachePutBlob } from "./bytes-cache"
 import { decodeToMono48k } from "./decode-mono"
 import { denoiseMono48k } from "./denoise"
-import { emitCellAudioAttach } from "@/lib/sync/events-emit"
+import { emitCellAudioAttach, emitCellAudioPlace } from "@/lib/sync/events-emit"
+import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
+import { newPieceAudioId } from "./cut-take"
 import {
   injectOptimisticAudioAttachment,
   notifyAudioAttachmentsChanged,
@@ -54,8 +56,15 @@ export interface DenoiseTakeResult {
   durationMs: number
 }
 
-export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeResult> {
-  const { projectId, fileId, cellId, sourceAudioId, sourceUrl, author, session } = args
+/** Steps 1-3: clean a take's recording and upload it as a new (dn-) clip. */
+async function cleanAndUpload(args: {
+  projectId: string
+  fileId: string
+  cellId: string
+  sourceUrl: string
+  session: FrontierSession | null
+}) {
+  const { projectId, fileId, cellId, sourceUrl, session } = args
   if (!session?.jwt) throw new Error("Sign in to remove noise")
 
   const source = parseFrontierAudioUrl(sourceUrl)
@@ -85,6 +94,15 @@ export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeRes
 
   setTranscribeStatus(result.audioId, { kind: "idle" })
   markProjectHasAudioDataSoon(projectId)
+  const dropUpload = () => {
+    void deleteCellAudio({ projectId, fileId, audioId: result.audioId, ext: result.ext, getSyncToken })
+  }
+  return { blob, durationMs, result, fullAudioId, dropUpload }
+}
+
+export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeResult> {
+  const { projectId, fileId, cellId, sourceAudioId, author } = args
+  const { blob, durationMs, result, fullAudioId, dropUpload } = await cleanAndUpload({ ...args })
 
   // 4. Attach (records + selects the clip in its slot). Link back to the source
   //    take so the UI can revert. On emit failure, clean up the orphaned R2
@@ -105,7 +123,7 @@ export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeRes
       author,
     })
   } catch (emitErr) {
-    void deleteCellAudio({ projectId, fileId, audioId: result.audioId, ext: result.ext, getSyncToken })
+    dropUpload()
     throw emitErr
   }
 
@@ -125,4 +143,85 @@ export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeRes
   notifyAudioAttachmentsChanged(fileId)
 
   return { audioId: fullAudioId, url: result.url, durationMs }
+}
+
+export interface DenoiseSplitTakeArgs {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** The split take's live pieces, in clip order. They share one recording. */
+  pieces: readonly AudioAttachmentOut[]
+  author: string
+  session: FrontierSession | null
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
+}
+
+/**
+ * AQU-1767 (Sam, 2026-10-14): "Remove noise" on a SPLIT take — clean it and
+ * keep the cuts. The recording all its pieces share is cleaned once, and the
+ * cleaned take is made of the same pieces: each keeps its window, its name and
+ * where it sits on the timeline, on the take's own track. The first is the
+ * cleaned take itself (a dn- id, so it reads as cleaned); every other piece is
+ * born naming it (`pieceOf`). Each cleaned piece remembers the piece it was
+ * cleaned from, so Revert goes back to the original take. Attaching chooses
+ * the cleaned take; the original stays among the line's other takes.
+ */
+export async function denoiseSplitTake(args: DenoiseSplitTakeArgs): Promise<DenoiseTakeResult> {
+  const { projectId, fileId, cellId, pieces, author, targetLang } = args
+  const [first] = pieces
+  if (!first) throw new Error("Nothing to clean")
+  const { blob, durationMs, result, fullAudioId, dropUpload } = await cleanAndUpload({
+    projectId, fileId, cellId, sourceUrl: first.url, session: args.session,
+  })
+  const lane = targetLang ? { targetLang } : {}
+  const born = pieces.map((piece, i) => ({
+    piece,
+    audioId: i === 0 ? fullAudioId : newPieceAudioId(cellId, fullAudioId),
+  }))
+  const rootId = born[0].audioId
+  let attached = 0
+  try {
+    for (const { piece, audioId } of born) {
+      const eventId = await emitCellAudioAttach({
+        projectId, fileId, cellId, audioId,
+        url: result.url,
+        slot: piece.slot,
+        mimeType: blob.type || undefined,
+        referenceAudioId: piece.audioId,
+        durationMs: Math.round(durationMs),
+        ...(piece.label ? { label: piece.label } : {}),
+        ...(piece.trimStartMs != null ? { trimStartMs: piece.trimStartMs } : {}),
+        ...(piece.trimEndMs != null ? { trimEndMs: piece.trimEndMs } : {}),
+        ...(audioId !== rootId ? { pieceOf: rootId } : {}),
+        ...lane,
+        author,
+      })
+      attached += 1
+      const placeP = piece.targetOffsetMs != null
+        ? emitCellAudioPlace({ projectId, fileId, cellId, audioId, targetOffsetMs: piece.targetOffsetMs, ...lane, author })
+        : null
+      injectOptimisticAudioAttachment(fileId, cellId, {
+        audioId,
+        url: result.url,
+        slot: piece.slot,
+        mimeType: blob.type || null,
+        voiceId: null,
+        referenceAudioId: piece.audioId,
+        durationMs: Math.round(durationMs),
+        trimStartMs: piece.trimStartMs ?? null,
+        trimEndMs: piece.trimEndMs ?? null,
+        targetOffsetMs: piece.targetOffsetMs ?? null,
+        ...(piece.label ? { label: piece.label } : {}),
+        ...(audioId !== rootId ? { pieceOf: rootId } : {}),
+      }, placeP ?? eventId)
+    }
+  } catch (emitErr) {
+    // Nothing of the cleaned take reached the outbox: drop the upload. Once a
+    // piece has, the clip is in use and stays.
+    if (attached === 0) dropUpload()
+    throw emitErr
+  }
+  notifyAudioAttachmentsChanged(fileId)
+  return { audioId: rootId, url: result.url, durationMs }
 }

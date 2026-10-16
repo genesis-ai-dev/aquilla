@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type Dispatch, type ReactNode, type SetStateAction } from "react"
+import { recordStep } from "@/lib/history/history"
 import { Navigate, useLocation, useParams, useNavigate, useSearchParams, type Location } from "react-router-dom"
 import {
   isProjectEditorPath,
@@ -95,6 +96,7 @@ import {
 import { isAutopilotVisible } from "@/lib/features/flags"
 import { isBibleDataExperimentOn } from "@/lib/bible-data/experiment"
 import type { BibleEnrichmentSettings } from "../../db/shared/bible-enrichments"
+import type { MediaDefaults } from "../../db/shared/media-setting-defaults"
 import { BibleDataSection } from "./ProjectSettings/BibleDataSection"
 import { LanguageProfileSection } from "./ProjectSettings/LanguageProfileSection"
 import { ProjectDecisionsSection } from "./ProjectSettings/ProjectDecisionsSection"
@@ -140,6 +142,8 @@ import { readValidationCount, readValidationCountAudio } from "@/lib/progress/re
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
 import type { CellEditingTier, ProjectWideSettings } from "@/lib/sync/project-settings"
 import { FLOOR_LABEL } from "@/pages/settings/constants"
+import { CELL_EDITING_FLOOR_OPTIONS, cellEditingTierLabel } from "@/components/ProjectSettings/cell-editing-floor-options"
+import { OrgDefaultSource, orgBooleanOptionLabel } from "@/components/ProjectSettings/OrgDefaultSource"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { PERMISSION_DOCS_URL } from "@/components/PermissionDeniedAlert"
 import { resolveRoleName, ROLE } from "@/lib/frontier/roles"
@@ -170,40 +174,9 @@ import { PostEditMetricsSection } from "@/components/metrics/PostEditMetricsSect
  */
 const SHOW_TERMBASE_SHARING_IN_SETTINGS = false
 
-/**
- * AQU-1068: the cell-editing tiers, in the order they are offered.
- *
- * The reset default leads, matching every other floor control on this page;
- * the rest climb the ladder, matching RosterProgressSection and
- * TermbaseEditSection.
- *
- * The labels used to be DESCRIPTIVE — "Maintainers and project leads", "Anyone
- * who can edit" — on the theory that they said who is admitted more plainly
- * than a bare rank. Matthew's review overruled that (Sam approved, 2026-09-08):
- * an admin who has just set someone's role on the Members panel should not have
- * to work out which bespoke phrase covers that rank, so this is the standard
- * ladder, spelled the standard way, and only "No one" — which is not a role —
- * keeps a phrase of its own.
- *
- * `level` is what makes the two-tier labelling work, exactly as in
- * RosterProgressSection: FLOOR_LABEL supplies the short word for the closed
- * trigger and the message key the fuller row in the open list. "No one" has no
- * level and therefore no FLOOR_LABEL entry, so it shows its row text in both.
- */
-const CELL_EDITING_FLOOR_OPTIONS: readonly {
-  value: CellEditingTier
-  /** Ladder level this tier admits, or null for "none" — which is a refusal,
-   *  not a rank, and so has no place on the ladder. */
-  level: number | null
-  labelKey: MessageKey
-}[] = [
-  { value: "none", level: null, labelKey: "projectSettings.cellEditing.optionNone" },
-  { value: "commenter", level: ROLE.COMMENTER, labelKey: "projectSettings.cellEditing.optionCommenter" },
-  { value: "reviewer", level: ROLE.REVIEWER, labelKey: "projectSettings.cellEditing.optionReviewer" },
-  { value: "contributor", level: ROLE.CONTRIBUTOR, labelKey: "projectSettings.cellEditing.optionContributor" },
-  { value: "project_lead", level: ROLE.PROJECT_LEAD, labelKey: "projectSettings.cellEditing.optionProjectLead" },
-  { value: "maintainer", level: ROLE.MAINTAINER, labelKey: "projectSettings.cellEditing.optionMaintainer" },
-]
+/** AQU-1768: an org with no media defaults, as one stable value. */
+const NO_ORG_MEDIA_DEFAULTS: MediaDefaults = Object.freeze({})
+
 
 /**
  * AQU-1720: what one cell is when a docx/txt/md file is imported. A dubbing
@@ -277,14 +250,16 @@ interface Baseline {
   allowSelfValidation: boolean
   // AQU-490: the audio policy. Separate keys, never fallbacks for the text
   // ones.
-  validationRoleFloorAudio: "reviewer" | "project_lead" | "maintainer"
+  // AQU-1768: these five are the project's OWN values; null = it follows the
+  // organization's default (then each setting's built-in default).
+  validationRoleFloorAudio: "reviewer" | "project_lead" | "maintainer" | null
   validationNamedUsersAudio: string[]
-  allowSelfValidationAudio: boolean
+  allowSelfValidationAudio: boolean | null
   /** AQU-646: may people add lines into the timeline's silences? */
-  cellEditingFloor: CellEditingTier
+  cellEditingFloor: CellEditingTier | null
   /** AQU-646 stage 2: may this project's timelines be restructured? */
-  allowTrackEditing: boolean
-  timingLocked: boolean
+  allowTrackEditing: boolean | null
+  timingLocked: boolean | null
   harmonize_min_role: "project_lead" | "maintainer"
   /** AQU-460: EXPLICIT persisted value only. `undefined` = no explicit choice
    *  yet — the effective (displayed) state is derived via
@@ -337,19 +312,16 @@ function buildBaseline(project: ProjectRecord): Baseline {
     validationRoleFloor: project.validationRoleFloor ?? "reviewer",
     validationNamedUsers: project.validationNamedUsers ?? [],
     allowSelfValidation: project.allowSelfValidation ?? true,
-    validationRoleFloorAudio: project.validationRoleFloorAudio ?? "reviewer",
+    // AQU-1768: absent = "Organization default", not the built-in value. The
+    // built-ins (reviewer, self-validation on, cell editing nobody, track
+    // editing off, timing LOCKED) now apply only when the organization sets
+    // none either; the controls below resolve them for display.
+    validationRoleFloorAudio: project.validationRoleFloorAudio ?? null,
     validationNamedUsersAudio: project.validationNamedUsersAudio ?? [],
-    allowSelfValidationAudio: project.allowSelfValidationAudio ?? true,
-    // Off unless a project has said otherwise: the affordance is speculative
-    // and underdeveloped, so absent must read as off, not as unset.
-    cellEditingFloor: project.cellEditingFloor ?? "none",
-    // Off unless a project has said otherwise. Multi-track is capability for
-    // clients who want it, and a project that never turns it on should not be
-    // able to tell it was built.
-    allowTrackEditing: project.allowTrackEditing ?? false,
-    // AQU-646: absent means LOCKED, so the box starts ticked on every project
-    // that predates the setting. See resolveTimingLocked.
-    timingLocked: resolveTimingLocked(project),
+    allowSelfValidationAudio: typeof project.allowSelfValidationAudio === "boolean" ? project.allowSelfValidationAudio : null,
+    cellEditingFloor: project.cellEditingFloor ?? null,
+    allowTrackEditing: typeof project.allowTrackEditing === "boolean" ? project.allowTrackEditing : null,
+    timingLocked: typeof project.timingLocked === "boolean" ? project.timingLocked : null,
     harmonize_min_role: project.harmonize_min_role ?? "project_lead",
     // AQU-460: preserve "unset" — do NOT default to false here, that would
     // make an unset scripture project look explicitly off in the diff/baseline.
@@ -493,6 +465,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // AQU-1771: the rest of the org policy, carried for this project.
     orgPolicy: carriedOrgPolicy,
     visibilityFloors: carriedVisibilityFloors,
+    // AQU-1768: what "Organization default" means for the media settings.
+    // Defaulted for callers (and test doubles) that predate the field.
+    orgMediaDefaults = NO_ORG_MEDIA_DEFAULTS,
   } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null, {
     // AQU-1086: the org's language-edit floor rides on the project record, so
     // the language fields below can be enabled for a project lead when the org
@@ -755,12 +730,20 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [validationRoleFloor, setValidationRoleFloor] = useState<"reviewer" | "project_lead" | "maintainer">("reviewer")
   const [validationNamedUsers, setValidationNamedUsers] = useState<string[]>([])
   const [allowSelfValidation, setAllowSelfValidation] = useState(true)
-  const [validationRoleFloorAudio, setValidationRoleFloorAudio] = useState<"reviewer" | "project_lead" | "maintainer">("reviewer")
+  const [validationRoleFloorAudio, setValidationRoleFloorAudio] = useState<"reviewer" | "project_lead" | "maintainer" | null>(null)
   const [validationNamedUsersAudio, setValidationNamedUsersAudio] = useState<string[]>([])
-  const [allowSelfValidationAudio, setAllowSelfValidationAudio] = useState(true)
-  const [cellEditingFloor, setCellEditingFloor] = useState<CellEditingTier>("none")
-  const [allowTrackEditing, setAllowTrackEditing] = useState(false)
-  const [timingLocked, setTimingLocked] = useState(true)
+  // AQU-1768: null = follow the organization's default.
+  const [allowSelfValidationAudio, setAllowSelfValidationAudio] = useState<boolean | null>(null)
+  const [cellEditingFloor, setCellEditingFloor] = useState<CellEditingTier | null>(null)
+  const [allowTrackEditing, setAllowTrackEditing] = useState<boolean | null>(null)
+  const [timingLocked, setTimingLocked] = useState<boolean | null>(null)
+  // AQU-1768: the value in force for each — the project's own, else the
+  // organization's default, else the built-in one. What the disabled control
+  // shows while the project follows the organization, and where "Set for this
+  // project" starts from.
+  const effectiveTimingLocked = resolveTimingLocked({ timingLocked: timingLocked ?? orgMediaDefaults.timingLocked })
+  const effectiveAllowTrackEditing = allowTrackEditing ?? orgMediaDefaults.allowTrackEditing ?? false
+  const effectiveCellEditingFloor: CellEditingTier = cellEditingFloor ?? orgMediaDefaults.cellEditingFloor ?? "none"
   // AQU-186: harmonize_min_role — project_lead floor, configurable up to maintainer.
   const [harmonizeMinRole, setHarmonizeMinRole] = useState<"project_lead" | "maintainer">("project_lead")
   // AQU-460: EXPLICIT persisted value only — `undefined` means no explicit
@@ -1263,12 +1246,14 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         changedFieldLabels.push("named validators")
       }
       if (allowSelfValidation !== baseline.allowSelfValidation) { sharedUpdates.allowSelfValidation = allowSelfValidation; changedFieldLabels.push("self-validation") }
-      if (validationRoleFloorAudio !== baseline.validationRoleFloorAudio) { sharedUpdates.validationRoleFloorAudio = validationRoleFloorAudio; changedFieldLabels.push("minimum role to validate recordings") }
+      // AQU-1768: null → undefined, which the merged blob drops: the project
+      // goes back to the organization's default, as the counts above do.
+      if (validationRoleFloorAudio !== baseline.validationRoleFloorAudio) { sharedUpdates.validationRoleFloorAudio = validationRoleFloorAudio ?? undefined; changedFieldLabels.push("minimum role to validate recordings") }
       if (JSON.stringify(validationNamedUsersAudio) !== JSON.stringify(baseline.validationNamedUsersAudio)) { sharedUpdates.validationNamedUsersAudio = validationNamedUsersAudio; changedFieldLabels.push("named recording validators") }
-      if (allowSelfValidationAudio !== baseline.allowSelfValidationAudio) { sharedUpdates.allowSelfValidationAudio = allowSelfValidationAudio; changedFieldLabels.push("validating your own recordings") }
-      if (cellEditingFloor !== baseline.cellEditingFloor) { sharedUpdates.cellEditingFloor = cellEditingFloor; changedFieldLabels.push("who can add and remove cells") }
-      if (allowTrackEditing !== baseline.allowTrackEditing) { sharedUpdates.allowTrackEditing = allowTrackEditing; changedFieldLabels.push("timeline track editing") }
-      if (timingLocked !== baseline.timingLocked) { sharedUpdates.timingLocked = timingLocked; changedFieldLabels.push("the timing lock") }
+      if (allowSelfValidationAudio !== baseline.allowSelfValidationAudio) { sharedUpdates.allowSelfValidationAudio = allowSelfValidationAudio ?? undefined; changedFieldLabels.push("validating your own recordings") }
+      if (cellEditingFloor !== baseline.cellEditingFloor) { sharedUpdates.cellEditingFloor = cellEditingFloor ?? undefined; changedFieldLabels.push("who can add and remove cells") }
+      if (allowTrackEditing !== baseline.allowTrackEditing) { sharedUpdates.allowTrackEditing = allowTrackEditing ?? undefined; changedFieldLabels.push("timeline track editing") }
+      if (timingLocked !== baseline.timingLocked) { sharedUpdates.timingLocked = timingLocked ?? undefined; changedFieldLabels.push("the timing lock") }
       if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push("harmonize min role") }
       if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push(isBibleDataExperimentOn(project) ? "Bible data" : "Bible resources") }
       if (!sameSetting(bibleEnrichments, baseline.bibleEnrichments)) { sharedUpdates.bibleEnrichments = bibleEnrichments; changedFieldLabels.push("Bible data enrichments") }
@@ -1285,7 +1270,20 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       }
 
       if (Object.keys(sharedUpdates).length > 0) {
+        // AQU-1767 phase 2: the save is one history step. What each setting held
+        // before is the server's blob as this page last read it.
+        const beforeBlob = (sharedSettingsBlob ?? {}) as Record<string, unknown>
         const out = await patchShared(sharedUpdates)
+        if (out.kind === "ok") {
+          recordStep({
+            kind: "settings.project",
+            data: {
+              changes: Object.entries(sharedUpdates).map(([key, after]) => ({ key, before: beforeBlob[key] ?? null, after })),
+            },
+            labelKey: "editor.history.stepSettings",
+            labelParams: { count: Object.keys(sharedUpdates).length },
+          }, id ? { projectId: id, username: session?.username || project?.username || "local" } : undefined)
+        }
         if (out.kind === "conflict") {
           toast.add({
             type: "warning",
@@ -2189,15 +2187,27 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 description={t("projectSettings.cellEditing.description")}
                 control={
                   <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                    {/* AQU-1768: follow the organization's tier, or set one here. */}
+                    <OrgDefaultSource
+                      id="cell-editing-floor-source"
+                      settingLabel={t("projectSettings.cellEditing.label")}
+                      inherited={cellEditingFloor == null}
+                      orgOptionLabel={t("projectSettings.mediaDefaults.orgValue", {
+                        value: cellEditingTierLabel(t, orgMediaDefaults.cellEditingFloor ?? "none"),
+                      })}
+                      disabled={!canEditShared}
+                      onChange={(inherit) => setCellEditingFloor(inherit ? null : effectiveCellEditingFloor)}
+                    />
                     <Select
                       items={CELL_EDITING_FLOOR_OPTIONS.map((o) => ({
                         value: o.value,
                         label: (o.level != null ? FLOOR_LABEL[o.level] : undefined) ?? t(o.labelKey),
                       }))}
-                      disabled={!canEditShared}
-                      value={cellEditingFloor}
+                      disabled={!canEditShared || cellEditingFloor == null}
+                      value={effectiveCellEditingFloor}
                       onValueChange={(value) =>
-                        setCellEditingFloor((value ?? cellEditingFloor) as typeof cellEditingFloor)
+                        setCellEditingFloor((value ?? effectiveCellEditingFloor) as CellEditingTier)
                       }
                     >
                       <SelectTrigger
@@ -2216,6 +2226,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                         </SelectGroup>
                       </SelectContent>
                     </Select>
+                    </div>
                   </DisabledFieldTooltip>
                 }
               />
@@ -2876,6 +2887,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               validationRoleFloorAudio={validationRoleFloorAudio}
               validationNamedUsersAudio={validationNamedUsersAudio}
               allowSelfValidationAudio={allowSelfValidationAudio}
+              orgValidationRoleFloorAudio={orgMediaDefaults.validationRoleFloorAudio ?? null}
+              orgAllowSelfValidationAudio={orgMediaDefaults.allowSelfValidationAudio ?? null}
               disabled={!canEditShared}
               disabledTooltip={sharedDisabledTooltip ?? undefined}
               // AQU-1083: the last row of the validation card. Passed as a
@@ -2979,20 +2992,30 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             <CardContent className="space-y-3">
               {/* AQU-646. FIRST in the card because it constrains everything
                   below it — the pencil under it is moot while nothing moves. */}
-              <div className="flex items-start gap-2">
+              <div className="flex flex-wrap items-start gap-2">
+                {/* AQU-1768: while the project follows the organization the
+                    box shows the organization's choice and cannot be ticked. */}
                 <Checkbox
                   id="timing-locked"
                   data-testid="settings-timing-locked"
-                  checked={timingLocked}
-                  disabled={!canEditShared}
+                  checked={effectiveTimingLocked}
+                  disabled={!canEditShared || timingLocked == null}
                   onCheckedChange={(checked) => setTimingLocked(checked)}
                 />
-                <label htmlFor="timing-locked" className="text-sm">
+                <label htmlFor="timing-locked" className="min-w-0 flex-1 text-sm">
                   {t("projectSettings.timeline.lockLabel")}
                   <p className="mt-1 text-xs text-muted-foreground">
                     {t("projectSettings.timeline.lockHint")}
                   </p>
                 </label>
+                <OrgDefaultSource
+                  id="timing-locked-source"
+                  settingLabel={t("projectSettings.timeline.lockLabel")}
+                  inherited={timingLocked == null}
+                  orgOptionLabel={orgBooleanOptionLabel(t, orgMediaDefaults.timingLocked ?? true)}
+                  disabled={!canEditShared}
+                  onChange={(inherit) => setTimingLocked(inherit ? null : effectiveTimingLocked)}
+                />
               </div>
               {/* AQU-646 stage 2. LAST in the card, because it is the wider
                   claim of the two: the lock above constrains what may move on
@@ -3000,20 +3023,28 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   may be added to, grouped and recoloured at all. Off by
                   default, and enforced on the server as well — the UI
                   withholding a button is not a permission. */}
-              <div className="flex items-start gap-2">
+              <div className="flex flex-wrap items-start gap-2">
                 <Checkbox
                   id="allow-track-editing"
                   data-testid="settings-allow-track-editing"
-                  checked={allowTrackEditing}
-                  disabled={!canEditShared}
+                  checked={effectiveAllowTrackEditing}
+                  disabled={!canEditShared || allowTrackEditing == null}
                   onCheckedChange={(checked) => setAllowTrackEditing(checked)}
                 />
-                <label htmlFor="allow-track-editing" className="text-sm">
+                <label htmlFor="allow-track-editing" className="min-w-0 flex-1 text-sm">
                   {t("projectSettings.timeline.trackEditingLabel")}
                   <p className="mt-1 text-xs text-muted-foreground">
                     {t("projectSettings.timeline.trackEditingHint")}
                   </p>
                 </label>
+                <OrgDefaultSource
+                  id="allow-track-editing-source"
+                  settingLabel={t("projectSettings.timeline.trackEditingLabel")}
+                  inherited={allowTrackEditing == null}
+                  orgOptionLabel={orgBooleanOptionLabel(t, orgMediaDefaults.allowTrackEditing ?? false)}
+                  disabled={!canEditShared}
+                  onChange={(inherit) => setAllowTrackEditing(inherit ? null : effectiveAllowTrackEditing)}
+                />
               </div>
             </CardContent>
           </Card>

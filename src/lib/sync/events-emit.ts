@@ -653,6 +653,9 @@ export interface CellAudioAttachInput {
   targetLang?: string
   /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
   laneId?: string
+  /** AQU-1767: born a PIECE of this take (the group's root). Fill-only on the
+   *  server — a re-attach can never move a take into or out of a group. */
+  pieceOf?: string
   /**
    * AQU-1572: which gesture produced this clip — telemetry only, never on the
    * wire. ONLY the originating gesture passes one (an upload or LinkMedia
@@ -722,6 +725,7 @@ export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<
       ...(input.timings !== undefined ? { timings: input.timings } : {}),
       ...(input.transcription !== undefined ? { transcription: input.transcription } : {}),
       ...(input.role !== undefined ? { role: input.role } : {}),
+      ...(input.pieceOf !== undefined ? { pieceOf: input.pieceOf } : {}),
       ...targetLaneFields(input),
     },
     clientTs: input.clientTs,
@@ -865,6 +869,56 @@ export async function emitCellAudioPlace(input: CellAudioPlaceInput): Promise<st
     parentId: null,
     author: input.author,
     payload: { audioId: input.audioId, targetOffsetMs: input.targetOffsetMs, ...targetLaneFields(input) },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface CellAudioCutInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** The piece being cut. */
+  audioId: string
+  /** Where, in the clip's OWN audio (ms) — the trim window's domain. */
+  atMs: number
+  /** The second piece's id, minted by the caller so the step can be undone. */
+  newAudioId: string
+  newLabel?: string
+  firstLabel?: string
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `cell.audio.cut` — one dub piece becomes two over the same bytes.
+ * (AQU-1767 phase 1)
+ *
+ * Not a pair of trims plus an attach: the server makes the new row from the
+ * stored one in a single projection, so it can never disagree with itself
+ * about the url, slot, lane, role or placement the two pieces share, and a
+ * cut it refuses changes nothing at all.
+ */
+export async function emitCellAudioCut(input: CellAudioCutInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.audio.cut",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: {
+      audioId: input.audioId,
+      atMs: Math.round(input.atMs),
+      newAudioId: input.newAudioId,
+      ...(input.newLabel ? { newLabel: input.newLabel } : {}),
+      ...(input.firstLabel ? { firstLabel: input.firstLabel } : {}),
+      ...targetLaneFields(input),
+    },
     clientTs: input.clientTs,
   })
   return eventId
@@ -1208,6 +1262,52 @@ export async function emitCellAudioRemove(input: CellAudioRemoveInput): Promise<
     clientTs: input.clientTs,
   })
   return eventId
+}
+
+/**
+ * AQU-1767: undo a cut — remove the new piece, give the first piece its old
+ * end back, and (when the cut renamed it) its old name — as ONE outbox write.
+ * Queued one at a time, a tab closed in between kept the removal and lost the
+ * trim, leaving the take's tail missing. Returns the three event ids in order
+ * (the rename's only when there is one).
+ */
+export async function emitCellAudioUncut(input: {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** The piece the cut made. */
+  removeAudioId: string
+  /** The piece that was cut, and its whole window back. */
+  audioId: string
+  trimStartMs: number | null
+  trimEndMs: number | null
+  /** Set when the cut renamed the first piece ("Take 1" → "Take 1 · 1"). */
+  rename?: { label: string | null }
+  targetLang?: string
+  laneId?: string
+  author: string
+}): Promise<string[]> {
+  const base = {
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+  }
+  const lane = targetLaneFields(input)
+  const inputs: BuildEventInput<OutboxEventKind>[] = [
+    { ...base, kind: "cell.audio.remove", payload: { audioId: input.removeAudioId, ...lane } },
+    {
+      ...base,
+      kind: "cell.audio.trim",
+      payload: { audioId: input.audioId, trimStartMs: input.trimStartMs, trimEndMs: input.trimEndMs, ...lane },
+    },
+    ...(input.rename
+      ? [{ ...base, kind: "cell.audio.rename" as const, payload: { audioId: input.audioId, label: input.rename.label, ...lane } }]
+      : []),
+  ] as BuildEventInput<OutboxEventKind>[]
+  const queued = await enqueueEvents(inputs)
+  return queued.map((q) => q.eventId)
 }
 
 // ── Audio validation (AQU-490) ────────────────────────────────────────────
@@ -1580,6 +1680,38 @@ export async function emitSourceCellDelete(input: SourceCellDeleteInput): Promis
     parentId: input.parentId ?? null,
     author: input.author,
     payload: {},
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface SourceCellRestoreInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** The removal to undo. Omit to undo the cell's newest removal — the outbox
+   *  may have re-sent a stale removal under a new id. */
+  deleteEventId?: string
+  author: string
+  clientTs?: number
+}
+
+/**
+ * AQU-1767 phase 2: undo a removal — `source.cell.restore` puts the cell back
+ * as the removal found it (rows, translations, votes, takes, links, comments),
+ * from the archive the removal's projection wrote. Not chain-mutating: the row
+ * is gone, so there is no head to name. The server refuses it unless the
+ * sender removed the cell themselves or is a maintainer.
+ */
+export async function emitSourceCellRestore(input: SourceCellRestoreInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "source.cell.restore",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: input.deleteEventId ? { deleteEventId: input.deleteEventId } : {},
     clientTs: input.clientTs,
   })
   return eventId

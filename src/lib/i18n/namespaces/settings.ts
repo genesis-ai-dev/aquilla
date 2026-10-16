@@ -113,6 +113,23 @@ export const settings = defineNamespace({
       other: "and {count} more",
     }, "count"),
 
+    // ── MediaDefaultsSection ── AQU-1768
+    "settings.mediaDefaults.groupLabel": "Timeline and recordings",
+    "settings.mediaDefaults.timingLockedDescription":
+      "Whether imported timings are locked against dragging. Projects use this unless they set their own.",
+    "settings.mediaDefaults.allowTrackEditingDescription":
+      "Whether maintainers may add, group and recolour timeline tracks. Projects use this unless they set their own.",
+    "settings.mediaDefaults.cellEditingFloorDescription":
+      "Who may add and remove lines. Projects use this unless they set their own.",
+    "settings.mediaDefaults.allowSelfValidationAudioDescription":
+      "Whether people may validate their own recordings. Projects use this unless they set their own.",
+    "settings.mediaDefaults.validationRoleFloorAudioDescription":
+      "The lowest role that may validate recordings. Projects use this unless they set their own.",
+    "settings.mediaDefaults.resetDescription": plural({
+      one: "It will keep its own setting and ignore this default. Reset it to follow the organization instead?",
+      other: "They will keep their own setting and ignore this default. Reset them to follow the organization instead?",
+    }, "count"),
+
     // ── RepetitionPropagationSection (AQU-1391) ──
     "settings.autoPropagateRepetitions.label": "Auto-propagate repetitions",
     "settings.autoPropagateRepetitions.description":
@@ -514,6 +531,32 @@ export const settings = defineNamespace({
         placeholders: {
           count: "Whole number of projects not named in the list, 1 or more.",
         },
+      },
+      "settings.mediaDefaults.groupLabel": {
+        description:
+          "Heading of a group on the organization's Project defaults page holding the timeline and recording defaults " +
+          "(timing lock, track editing, who may add and remove lines, recording validation).",
+      },
+      "settings.mediaDefaults.timingLockedDescription": {
+        description: "Help text under the timing-lock row in that group. An on/off switch sits beside it.",
+      },
+      "settings.mediaDefaults.allowTrackEditingDescription": {
+        description: "Help text under the timeline-track-editing row in that group. An on/off switch sits beside it.",
+      },
+      "settings.mediaDefaults.cellEditingFloorDescription": {
+        description: "Help text under the 'Who can add and remove cells' row in that group. A role picker sits beside it.",
+      },
+      "settings.mediaDefaults.allowSelfValidationAudioDescription": {
+        description: "Help text under the 'Allow validating your own recordings' row in that group. An on/off switch sits beside it.",
+      },
+      "settings.mediaDefaults.validationRoleFloorAudioDescription": {
+        description: "Help text under the 'Minimum role to validate recordings' row in that group. A role picker sits beside it.",
+      },
+      "settings.mediaDefaults.resetDescription": {
+        description:
+          "Body of the dialog shown after an org maintainer changes one of these defaults, when some projects set their " +
+          "own value and will ignore it. The confirm button clears those projects' own value so they follow the " +
+          "organization; the cancel button leaves them alone. Pluralized on how many projects.",
       },
       "settings.personalProvider.trailingPathHint": {
         description:

@@ -7,7 +7,7 @@ import { runJev, JEV_REVISION, type AgentAction, type AgentRun } from "../driver
 import type { Attack, GoalContext, Ids } from "./attacks"
 import { fingerprint } from "./fingerprint"
 import { seedFor } from "./fuzz"
-import { verifyInvariants, type AdversarialOutcome, type Contract, type Snapshot } from "./invariants"
+import { verifyInvariants, withoutLockedOut, type AdversarialOutcome, type Contract, type Snapshot } from "./invariants"
 import { createMutator } from "./mutators"
 import { readRunContext, readSnapshot, seedFixture } from "./state"
 
@@ -57,6 +57,19 @@ async function newlySeen(page: Page, attack: Attack, contract: Contract, action:
     ? [req.value] : req.kind === "comment-once" ? [req.body] : [])
   if (await page.locator("input, textarea").evaluateAll((elements, values) => elements.some((element) =>
     values.includes((element as HTMLInputElement).value)), wanted)) seen.add(0)
+}
+
+/**
+ * Two writers on one cell (AD-1): the focus lock admits one, and the other
+ * sees the cell read-only. Each agent is judged on its own value: "typed"
+ * once its text shows in the cell, "locked" once the cell shows the other
+ * writer's lock. The winner's text arriving by live sync is not the loser's.
+ */
+async function writerSeen(page: Page, cellId: string, value: string, action: AgentAction) {
+  const cell = page.locator(`[data-cell-id="${cellId}"]`).first()
+  if (action.kind === "fill" && (await cell.innerText().catch(() => "")).includes(value)) return "typed"
+  if (await cell.locator("[data-target-locked-by]").count().catch(() => 0) > 0) return "locked"
+  return null
 }
 
 const groupCount = (attack: Attack, contract: Contract) =>
@@ -113,6 +126,9 @@ export async function runAttack(browser: Browser, attack: Attack, repeat: number
   const seen = [new Set<number>(), new Set<number>()]
   // Two agents share one contract; each needs only its own input seen.
   const needed = secondGoal ? 1 : groupCount(attack, contract)
+  const writers = secondGoal && attack.observe === "target-text" ? [ctx.expected, ctx.expected2] : null
+  const writerCell = contract.required.find((req) => req.kind === "target-value")?.cellId
+  const lockedOut: string[] = []
   let mutated = false
   let after: Snapshot
   let outcome: AdversarialOutcome
@@ -135,8 +151,14 @@ export async function runAttack(browser: Browser, attack: Attack, repeat: number
       onEvidence: (value) => { agents[index] = value },
       onAction: async (action) => {
         if (observed[index]) return false
-        await newlySeen(page, attack, contract, action, seen[index])
-        observed[index] = seen[index].size >= needed
+        if (writers && writerCell) {
+          const how = await writerSeen(page, writerCell, writers[index], action)
+          if (how === "locked") lockedOut.push(writers[index])
+          observed[index] = how !== null
+        } else {
+          await newlySeen(page, attack, contract, action, seen[index])
+          observed[index] = seen[index].size >= needed
+        }
         // The condition fires at the first intended input, mid-goal.
         if (index !== 0 || mutated || seen[index].size === 0) return false
         mutated = true
@@ -154,7 +176,7 @@ export async function runAttack(browser: Browser, attack: Attack, repeat: number
       serverErrors: counters.server, pageErrors: counters.page })
     do {
       after = await readSnapshot(readers)
-      outcome = verifyInvariants(before, after, contract, observedNow())
+      outcome = verifyInvariants(before, after, withoutLockedOut(contract, lockedOut), observedNow())
       if (outcome.verdict === "passed") break
       await settle(1_000)
     } while (observedNow().inputObserved && Date.now() < deadline)

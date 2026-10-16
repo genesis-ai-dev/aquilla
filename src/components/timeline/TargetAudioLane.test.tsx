@@ -588,13 +588,38 @@ describe("TargetAudioLane — resize-as-trim (round 7)", () => {
 })
 
 describe("TargetAudioLane — interaction", () => {
-  it("clean click selects and seeks", () => {
+  // AQU-1767 (Sam, 2026-10-14): a click selects the take and leaves the
+  // playhead alone, so S can split it there; a double-click jumps to the line.
+  it("clean click selects the line and the take, and does not seek", () => {
     const onSelect = vi.fn()
+    const onSelectTake = vi.fn()
     const onSeek = vi.fn()
-    render(<TargetAudioLane {...base} items={[item({}, 4000)]} onSelect={onSelect} onSeek={onSeek} />)
+    render(
+      <TargetAudioLane {...base} items={[item({}, 4000)]} onSelect={onSelect} onSelectTake={onSelectTake} onSeek={onSeek} />,
+    )
     fireEvent.click(screen.getByTestId("tl-target-c1"))
     expect(onSelect).toHaveBeenCalledWith("c1")
+    expect(onSelectTake).toHaveBeenCalledWith("c1")
+    expect(onSeek).not.toHaveBeenCalled()
+  })
+
+  it("double-click jumps to the line", () => {
+    const onSeek = vi.fn()
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} onSeek={onSeek} />)
+    fireEvent.doubleClick(screen.getByTestId("tl-target-c1"))
     expect(onSeek).toHaveBeenCalledWith("c1")
+  })
+
+  it("rings the selected take strongly, and a merely selected line's take quietly", () => {
+    const { unmount } = render(
+      <TargetAudioLane {...base} selectedId="c1" selectedTakeCellId="c1" items={[item({}, 4000)]} />,
+    )
+    expect(screen.getByTestId("tl-target-c1").className).toContain("ring-2 ring-sky-500")
+    unmount()
+    render(<TargetAudioLane {...base} selectedId="c1" items={[item({}, 4000)]} />)
+    const cls = screen.getByTestId("tl-target-c1").className
+    expect(cls).toContain("ring-1 ring-sky-500/50")
+    expect(cls).not.toContain("ring-2")
   })
 
   it("dragging commits the new start (clamped into the section) and suppresses the seek", () => {

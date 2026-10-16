@@ -11,17 +11,20 @@
 // somewhere honest for that default to live.
 
 import { RepetitionPropagationSection } from "@/components/settings/RepetitionPropagationSection"
+import { MediaDefaultsSection } from "@/components/settings/MediaDefaultsSection"
 import { StructuralCellsSection } from "@/components/settings/StructuralCellsSection"
 import { ValidationDefaultsSection } from "@/components/settings/ValidationDefaultsSection"
 import { SettingsGroup } from "@/components/ui/page"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 import { ORG_SETTINGS_SECTION_DESCRIPTIONS, ORG_SETTINGS_SECTION_TITLES } from "./constants"
 import { OrgSettingsDetailPage } from "./OrgSettingsDetailPage"
 
 export function OrgSettingsProjectDefaults() {
   const { activeOrg, activeOrgId } = useActiveOrg()
   const orgSettings = useOrgSettings(activeOrgId, activeOrg?.role?.level)
+  const { t } = useI18n()
 
   return (
     <OrgSettingsDetailPage
@@ -46,6 +49,13 @@ export function OrgSettingsProjectDefaults() {
         {/* Sam, 2026-10-01 — same card and gate: it changes what a bulk
             validate covers in every project, not who may validate. Unlike the
             two above it has no project override. */}
+      </SettingsGroup>
+      {/* AQU-1768 — the timeline and recording defaults. Their own group:
+          the card above shapes how progress is counted; these shape what
+          people may do on a project's timeline and with its recordings. Same
+          MAINTAINER gate, and projects may override each. */}
+      <SettingsGroup label={t("settings.mediaDefaults.groupLabel")}>
+        <MediaDefaultsSection orgSettings={orgSettings} canEdit={orgSettings.canEdit} />
       </SettingsGroup>
     </OrgSettingsDetailPage>
   )

@@ -18,6 +18,7 @@ import type { CellData } from "@/hooks/useCells"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { audioIdSeededWith } from "./upload"
 import { isDefaultTrackSlot } from "@/lib/timeline/track-slots"
+import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 
 export interface TrackAudioRef {
   audioId: string
@@ -105,4 +106,29 @@ export function resolveTargetAudio(cell: CellData, slot?: string): TargetAudioRe
     if (att) return { audioId: gen, url: att.url, kind: "generated" }
   }
   return null
+}
+
+/**
+ * AQU-1767: EVERY piece of the take `resolveTargetAudio` picks, in clip order.
+ *
+ * A take cut in two is a group of selected pieces over the same bytes; the
+ * timeline draws a chip for each and playback sounds each. A take that was
+ * never cut answers with itself alone, so callers can loop over this in place
+ * of the single resolver without a special case.
+ *
+ * Grouped by `pieceOf`, never by the audioId seed: a piece is minted with the
+ * cell's seed so the seed readers keep working, but the GROUP is a fact the
+ * server states, not something to guess from a name.
+ */
+export function resolveTargetPieces(cell: CellData, slot?: string): TargetAudioRef[] {
+  const first = resolveTargetAudio(cell, slot)
+  if (!first) return []
+  const ids = selectedPieceIds(cell.attachments, first.audioId)
+  const out: TargetAudioRef[] = []
+  for (const id of ids) {
+    const att = liveAttachment(cell, id)
+    if (!att) continue
+    out.push({ audioId: id, url: att.url, kind: att.voiceId ? "generated" : first.kind })
+  }
+  return out.length > 0 ? out : [first]
 }

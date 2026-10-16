@@ -79,6 +79,7 @@ export function dispatchEvent(
     case 'source.cell.metadata.patch':
     case 'source.cell.reanchor':
     case 'source.cell.visibility.set':
+    case 'source.cell.restore':
     case 'target.cell.create':
     case 'target.cell.commit':
     case 'target.cell.delete':
@@ -93,6 +94,7 @@ export function dispatchEvent(
     case 'cell.audio.rename':
     case 'cell.audio.trim':
     case 'cell.audio.place':
+    case 'cell.audio.cut':
     case 'cell.audio.measure':
     case 'cell.audio.validate':
     case 'cell.audio.unvalidate':

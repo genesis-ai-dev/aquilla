@@ -13,7 +13,12 @@ vi.mock("@/lib/sync/events-emit", async (importOriginal) => ({
   }),
 }))
 
-import { enqueueTakeRemovals } from "./take-actions"
+const recorded = vi.hoisted(() => ({ steps: [] as Array<Record<string, unknown>> }))
+vi.mock("@/lib/history/history", () => ({
+  recordStep: vi.fn((step: Record<string, unknown>) => { recorded.steps.push(step) }),
+}))
+
+import { enqueueTakeRemovals, removeWholeTake } from "./take-actions"
 import { getOptimisticShadows, subscribeOptimisticAudioAttachment } from "./audio-attachments-bus"
 
 describe("enqueueTakeRemovals", () => {
@@ -50,5 +55,23 @@ describe("enqueueTakeRemovals", () => {
     expect(getOptimisticShadows("file-a").get("c2")?.[0]?.eventId).toBe("ev-1")
     // Each file is poked once, after the batch is sent.
     expect(touched).toEqual(["file-a", "file-b"])
+  })
+})
+
+// AQU-1767 (Sam, 2026-10-14): the delete on a split take's top row removes the
+// whole take, as one step.
+describe("removeWholeTake", () => {
+  it("removes every piece in one go and records one step naming them all", async () => {
+    recorded.steps = []
+    await removeWholeTake({
+      projectId: "p", fileId: "f", cellId: "c1", author: "tester", history: { wasSelected: true },
+      pieces: [{ audioId: "t1", slot: "recording" }, { audioId: "p2", slot: "recording" }],
+    })
+    expect(enqueued.inputs.map((e) => (e.payload as { audioId: string }).audioId)).toEqual(["t1", "p2"])
+    expect(recorded.steps).toHaveLength(1)
+    expect(recorded.steps[0]).toMatchObject({
+      kind: "take.remove",
+      data: { cellId: "c1", audioId: "t1", slot: "recording", wasSelected: true, pieces: ["p2"] },
+    })
   })
 })

@@ -20,6 +20,11 @@ import type { ProjectOrgPolicy, ProjectVisibilityFloors } from "@/lib/sync/proje
 import posthog from "@/lib/posthog"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
 import { claimHydrationReport, retainProjectOpen } from "./project-settings-open"
+import { registerSettingsAccessor } from "@/lib/history/settings-access"
+import type { MediaDefaults } from "../../db/shared/media-setting-defaults"
+
+/** AQU-1768: one stable empty value, so an org with no media defaults never re-renders. */
+const EMPTY_MEDIA_DEFAULTS: MediaDefaults = Object.freeze({})
 
 // Floor aligned with the server's SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER (600).
 // Spec (01-personas-and-roles.md §Role ladder): "Invite / remove members; change
@@ -283,6 +288,12 @@ export interface UseProjectSettings {
    */
   orgValidationCount: number | null
   orgValidationCountAudio: number | null
+  /**
+   * AQU-1768: the org's media defaults this project follows for any of those
+   * keys it does not set itself. Empty when the org set none, or before the
+   * first response that carries them.
+   */
+  orgMediaDefaults: MediaDefaults
   /** The org's "Allow bulk validation of AI drafts", carried on the project's
    *  own settings response so a member outside the org sees it too. Null when
    *  the project has no org, or before the first response that carries it. */
@@ -521,6 +532,7 @@ export function useProjectSettings(
   const [orgValidationCountAudio, setOrgValidationCountAudio] = useState<number | null>(null)
   const [orgPolicy, setOrgPolicy] = useState<ProjectOrgPolicy | null>(null)
   const [visibilityFloors, setVisibilityFloors] = useState<ProjectVisibilityFloors | null>(null)
+  const [orgMediaDefaults, setOrgMediaDefaults] = useState<MediaDefaults>(EMPTY_MEDIA_DEFAULTS)
   const [lanes, setLanes] = useState<ProjectLaneView[] | null>(null)
   const writeServer = useCallback((next: ProjectSettingsResponse | null) => {
     serverRef.current = next
@@ -535,6 +547,7 @@ export function useProjectSettings(
     if (next?.orgValidationCountAudio !== undefined) setOrgValidationCountAudio(next.orgValidationCountAudio)
     if (next?.orgPolicy !== undefined) setOrgPolicy(next.orgPolicy)
     if (next?.visibilityFloors !== undefined) setVisibilityFloors(next.visibilityFloors)
+    if (next?.orgMediaDefaults !== undefined) setOrgMediaDefaults(next.orgMediaDefaults)
     if (next?.lanes !== undefined) setLanes(next.lanes)
   }, [])
 
@@ -1007,6 +1020,25 @@ export function useProjectSettings(
     return { kind: "error", message: result.message, status: result.status }
   }, [projectId, jwt, roleLevel, termbaseEditMinRole, languageEditFloor, refresh, runSerialized, t])
 
+  // AQU-1767 phase 2: let a history step read and write this project's
+  // settings through this hook, wherever the person presses Undo.
+  const settingsForHistoryRef = useRef(settings)
+  const patchForHistoryRef = useRef(patch)
+  useEffect(() => {
+    settingsForHistoryRef.current = settings
+    patchForHistoryRef.current = patch
+  }, [settings, patch])
+  useEffect(() => {
+    if (!projectId) return
+    return registerSettingsAccessor(projectId, {
+      read: () => settingsForHistoryRef.current as Record<string, unknown>,
+      write: async (next) => {
+        const out = await patchForHistoryRef.current(next as ProjectWideSettings)
+        if (out.kind !== "ok") throw new Error(`settings write ${out.kind}`)
+      },
+    })
+  }, [projectId])
+
   return {
     settings,
     version: server ? server.version : null,
@@ -1019,6 +1051,7 @@ export function useProjectSettings(
     orgValidationCountAudio,
     orgPolicy,
     visibilityFloors,
+    orgMediaDefaults,
     lanes,
     isOnline,
     canEdit,

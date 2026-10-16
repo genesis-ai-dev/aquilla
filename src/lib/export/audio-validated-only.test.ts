@@ -17,7 +17,7 @@ import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import { TARGET_RATE } from "@/lib/audio/decode-mono"
 import { quantisePcm16 } from "@/lib/audio/wav-encode"
 import { scopeAudioCellsForExport } from "./audio-validation-scope"
-import { exportAudioPerLine } from "./audio-per-line"
+import { collectPerLineClips, exportAudioPerLine } from "./audio-per-line"
 import { exportAudioByCharacter, groupAudioByCharacter } from "./audio-by-character"
 import { exportAudioByChapter, silencedGapSamples } from "./audio-chapter"
 import { assembleAudioEntries } from "./audio-assembly"
@@ -110,6 +110,28 @@ describe("by line — a withdrawn take writes no file", () => {
     })
     const names = Object.keys(await JSZip.loadAsync(result.blob).then((z) => z.files))
     expect(names.filter((n) => n.endsWith(".wav")).length).toBe(2)
+  })
+
+  // AQU-1767 × AQU-965: a cut take's pieces are each validated on their own,
+  // and each is its own file, so withdrawing one drops only its file and the
+  // piece that ships keeps the number it would have had.
+  it("withdraws only the unvalidated piece of a cut take", () => {
+    const cut = line("v1", 1, { startTime: 0, endTime: 2 }, { trimStartMs: 0, trimEndMs: 1000 })
+    cut.attachments = {
+      ...cut.attachments,
+      "a-v1-p2": {
+        url: "frontier-audio://a-v1-p2.wav",
+        type: "audio/wav",
+        slot: "recording",
+        pieceOf: "a-v1",
+        trimStartMs: 1000,
+        validatorCount: 0,
+      },
+    }
+    const clips = (cells: CellData[]) =>
+      collectPerLineClips(cells, SETTINGS).map((c) => [c.audioId, c.piece])
+    expect(clips([cut])).toEqual([["a-v1", 1], ["a-v1-p2", 2]])
+    expect(clips(validatedOnly([cut]))).toEqual([["a-v1", 1]])
   })
 })
 

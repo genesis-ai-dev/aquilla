@@ -63,6 +63,8 @@ const REQUIRED_ROLE: Record<string, number> = {
   // the server then 403s — the row would vanish optimistically and come back on
   // reload, which reads as data loss rather than as a refusal.
   "source.cell.visibility.set": ROLE.PROJECT_LEAD,
+  // AQU-1767 phase 2: undo of a removal; the server adds "only who removed it, or a maintainer".
+  "source.cell.restore": ROLE.COMMENTER,
 
   "target.cell.create": ROLE.CONTRIBUTOR,
   "target.cell.commit": ROLE.CONTRIBUTOR,
@@ -81,6 +83,8 @@ const REQUIRED_ROLE: Record<string, number> = {
   "cell.audio.rename": ROLE.CONTRIBUTOR,
   "cell.audio.trim": ROLE.CONTRIBUTOR,
   "cell.audio.place": ROLE.CONTRIBUTOR,
+  // AQU-1767: cutting a take needs exactly what trimming it needs (Sam, 2026-10-12).
+  "cell.audio.cut": ROLE.CONTRIBUTOR,
   // AQU-646: project lead, not contributor. The pairings are settled during
   // setup and handed off; a contributor re-cutting one silently moves which
   // line a recording belongs to, for everyone.

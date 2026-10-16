@@ -32,6 +32,7 @@ import {
   isChainArbitrated,
   isChainMutatingKind,
   laneOfEvent,
+  RESTORED_REMOVAL_SQL,
   type PersistedEvent,
 } from './event-projection'
 import {
@@ -62,6 +63,7 @@ import {
   fullProgressRecomputeStmts,
   sectionsProgressRecomputeStmt,
 } from './progress-projection'
+import { effectiveMediaSettings } from './media-settings'
 import { makeRequestCache } from './request-cache'
 import type { WritePathSettings } from './write-path-settings'
 import { dbFailureInfo, reportServerRejections } from './rejection-telemetry'
@@ -96,7 +98,10 @@ function isEventAppliedRowsKind(kind: string): boolean {
     // `rows` and every collaborator's client falls back to a by-ids refetch to
     // learn a row left the file — correct, but a round trip for a one-column
     // change we already have in hand.
-    kind === 'source.cell.visibility.set'
+    kind === 'source.cell.visibility.set' ||
+    // AQU-1767 phase 2: a restore brings a cell's rows back, so collaborators
+    // get them in the frame rather than a refetch.
+    kind === 'source.cell.restore'
   )
 }
 
@@ -369,6 +374,7 @@ async function prefetchChainWinners(
          FROM events
          WHERE kind IN (${kindList})
            AND (project_id, file_id, cell_id) IN (${placeholders})
+           AND NOT ${RESTORED_REMOVAL_SQL}
        ) ranked
        WHERE rn <= 100`,
     )
@@ -972,6 +978,19 @@ export async function handleEventsWriteRequest(
     return pending
   }
 
+  // AQU-1768: the audio validation gates read the project's settings with the
+  // org's media defaults filled in. An org read failure falls back to the
+  // project's own settings — the same non-fatal stance as the read above.
+  const readMediaSettings = async (
+    projectId: string,
+  ): Promise<WritePathSettings | null> => {
+    try {
+      return await effectiveMediaSettings(requestCache, projectId)
+    } catch {
+      return readProjectSettings(projectId)
+    }
+  }
+
   // FRO-346: live membership re-check, once per (project, user) per request.
   // authorize() proves the token was valid at MINT time; this proves the
   // author still has a grant path NOW, so removing a member terminates their
@@ -1496,7 +1515,7 @@ export async function handleEventsWriteRequest(
     // Settings failure stays non-fatal here exactly as it is above: skip
     // enforcement rather than block every validate in the project.
     if (rawEvent.kind === 'cell.audio.validate' || rawEvent.kind === 'cell.audio.unvalidate') {
-      const parsed = await readProjectSettings(rawEvent.projectId)
+      const parsed = await readMediaSettings(rawEvent.projectId)
 
       // Stripping SOMEBODY ELSE'S vote is a maintainer act, and the only place
       // it can be gated: by the time the event reaches the projection the

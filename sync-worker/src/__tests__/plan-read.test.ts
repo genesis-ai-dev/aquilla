@@ -169,6 +169,64 @@ describe("GET .../plan — lane behaviour", () => {
     expect(untouched.units[0]).toMatchObject({ filledCount: 0, audioCount: 4, totalCount: 10 })
   })
 
+  // AQU-1977: since AQU-1594 a new project's first language is tagged with its
+  // own name and there is no '' lane. A request naming no lane asked for '',
+  // found nothing, and read 0% text and no audio on every row.
+  it("reads a new project's first language when the request names none", async () => {
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: "srclane1", project_id: P, role: "source", name: "English", legacy_tag: null, position: 0 },
+        { id: "frlane01", project_id: P, role: "target", name: "French", legacy_tag: "French", position: 2 },
+        { id: "eslane01", project_id: P, role: "target", name: "Spanish", legacy_tag: "Spanish", position: 1 },
+      ],
+      files: [file("f1", { cell_count: 5 })],
+      file_section_progress: [
+        progress("f1", "file", "", { lane_id: "srclane1", total_count: 5 }),
+        progress("f1", "file", "", { lane_id: "eslane01", total_count: 5, filled_count: 3, audio_count: 2 }),
+        progress("f1", "file", "", { lane_id: "frlane01", total_count: 5, filled_count: 1, audio_count: 3 }),
+      ],
+    })
+    const body = (await (await get(db)).json()) as PlanResponse
+    expect(body.lane).toBe("Spanish")
+    expect(body.units[0]).toMatchObject({ totalCount: 5, filledCount: 3, audioCount: 2 })
+  })
+
+  it("passes over an archived first language for the next live one", async () => {
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: "eslane01", project_id: P, role: "target", name: "Spanish", legacy_tag: "Spanish", position: 1, archived_at: "2026-10-01T00:00:00Z" },
+        { id: "frlane01", project_id: P, role: "target", name: "French", legacy_tag: "French", position: 2 },
+      ],
+      files: [file("f1", { cell_count: 5 })],
+      file_section_progress: [
+        progress("f1", "file", "", { lane_id: "eslane01", total_count: 5, filled_count: 3 }),
+        progress("f1", "file", "", { lane_id: "frlane01", total_count: 5, filled_count: 1 }),
+      ],
+    })
+    const body = (await (await get(db)).json()) as PlanResponse
+    expect(body.lane).toBe("French")
+    expect(body.units[0].filledCount).toBe(1)
+  })
+
+  it("keeps an old project on its '' lane, archived and moved down or not", async () => {
+    // Nothing an old project read before may move: '' stays what an empty
+    // request means wherever the project still has that lane.
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: "eslane01", project_id: P, role: "target", name: "Spanish", legacy_tag: "es", position: 0 },
+        { id: "deflane1", project_id: P, role: "target", name: "Bambara", legacy_tag: "", position: 1, archived_at: "2026-10-01T00:00:00Z" },
+      ],
+      files: [file("f1", { cell_count: 10 })],
+      file_section_progress: [
+        progress("f1", "file", "", { lane_id: "deflane1", total_count: 10, filled_count: 8 }),
+        progress("f1", "file", "", { lane_id: "eslane01", target_lang: "es", total_count: 10, filled_count: 2 }),
+      ],
+    })
+    const body = (await (await get(db)).json()) as PlanResponse
+    expect(body.lane).toBe("")
+    expect(body.units[0].filledCount).toBe(8)
+  })
+
   it("falls back to the file's cell_count when no projection row exists yet", async () => {
     // Mid-backfill, or a file imported before the projection existed.
     const { db } = await makeTestDb({ files: [file("f1", { cell_count: 33 })] })
@@ -512,6 +570,36 @@ describe("audio comes from the linked cue sheet", () => {
       audioValidatedCount: 12,
       audioTotalCount: 548,
     })
+  })
+
+  it("reads the sheet's takes in the language being viewed", async () => {
+    // AQU-1977: since AQU-1591 a take belongs to a target lane, and the sheet's
+    // lane-independent row is the SOURCE lane's, which never holds one. Read
+    // from there, every dubbed episode showed 0 recorded in every language.
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: "srclane1", project_id: P, role: "source", name: "English", legacy_tag: null, position: 0 },
+        { id: "eslane01", project_id: P, role: "target", name: "Spanish", legacy_tag: "Spanish", position: 1 },
+        { id: "frlane01", project_id: P, role: "target", name: "French", legacy_tag: "French", position: 2 },
+      ],
+      ...dubbed([{ id: "cues1", cell_count: 548 }]),
+      file_section_progress: [
+        progress("ep1", "file", "", { lane_id: "srclane1", total_count: 646 }),
+        progress("ep1", "file", "", { lane_id: "eslane01", total_count: 646, filled_count: 600 }),
+        progress("cues1", "file", "", { lane_id: "srclane1", total_count: 548 }),
+        progress("cues1", "file", "", {
+          lane_id: "eslane01", total_count: 548, audio_count: 300,
+          audio_validator_histogram: JSON.stringify({ "0": 290, "1": 10 }),
+        }),
+        progress("cues1", "file", "", { lane_id: "frlane01", total_count: 548, audio_count: 12 }),
+      ],
+    })
+    const es = (await (await get(db, { lane: "Spanish" })).json()) as PlanResponse
+    expect(es.units[0]).toMatchObject({ audioCount: 300, audioValidatedCount: 10, audioTotalCount: 548 })
+    const fr = (await (await get(db, { lane: "French" })).json()) as PlanResponse
+    expect(fr.units[0]).toMatchObject({ audioCount: 12, audioTotalCount: 548 })
+    const none = (await (await get(db)).json()) as PlanResponse
+    expect(none.units[0]).toMatchObject({ audioCount: 300, audioTotalCount: 548 })
   })
 
   it("says null, not zero, for a unit with no cue sheet", async () => {

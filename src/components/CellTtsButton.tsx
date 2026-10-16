@@ -22,12 +22,15 @@ import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioMimeForExt } from "@/lib/audio/mime"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useOnline } from "@/hooks/useOnline"
+import { useConnectivity } from "@/lib/offline/connectivity"
+import { ttsOfflineGate } from "@/lib/audio/tts-offline"
 import type {
   CellTtsSettings, ProjectTtsSettings,
 } from "@/lib/parsers/types"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { resolveVoice, resolveCastVoice } from "@/lib/audio/voices"
-import { normalizeVoiceForProvider, resolveTtsProvider, providerInfo, isServerTtsProvider } from "@/lib/audio/tts-providers"
+import { normalizeVoiceForProvider, resolveTtsProvider, providerInfo, isServerTtsProvider, ttsProviderModel } from "@/lib/audio/tts-providers"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 
 interface Props {
@@ -75,6 +78,15 @@ interface Props {
   projectId?: string
   /** Required for the sync-worker R2 audio key. */
   fileId?: string
+  /**
+   * AQU-1462: lane the member is working in. Omitted for the default lane.
+   *
+   * AQU-1978: the voice is a take IN THIS LANE. Without the tag the server
+   * reads the take as the `''` lane's, which a project made since AQU-1594
+   * does not have — the clip was stored with no lane, showed in none, and
+   * every press paid for another one.
+   */
+  targetLang?: string
   disabled?: boolean
   /** Play-only surfaces (e.g. the translate page) preview audio transiently
    *  and never durably attach — voice *production* lives in the Voice Studio.
@@ -83,16 +95,20 @@ interface Props {
 }
 
 const MAX_CACHE_ENTRIES = 64
-const cache = new Map<string, string>() // key = cellId+text+voice+attachId -> blob URL
+const cache = new Map<string, string>() // key = cellId+lane+text+voice+attachId -> blob URL
 
 function cacheKey(
   cellId: string,
+  lane: string,
   text: string,
   voiceSignature: string,
   provider: string,
   generatedAttachId: string | undefined,
 ): string {
-  return `${cellId}::${provider}::${voiceSignature}::${generatedAttachId ?? ""}::${text}`
+  // AQU-1978: the lane too. Two lanes may hold the same words (two lanes of
+  // one language), and a clip generated in one must not be replayed in the
+  // other in place of generating that lane's own take.
+  return `${cellId}::${lane}::${provider}::${voiceSignature}::${generatedAttachId ?? ""}::${text}`
 }
 
 function voiceSignature(voice: ReturnType<typeof resolveVoice>): string {
@@ -136,6 +152,7 @@ export function CellTtsButton({
   alsoAttachTo,
   projectId,
   fileId,
+  targetLang,
   disabled,
   playOnly,
 }: Props) {
@@ -153,6 +170,16 @@ export function CellTtsButton({
   const provider = baseVoice.provider ?? resolveTtsProvider(projectTtsSettings)
   const voice = normalizeVoiceForProvider(baseVoice, provider, { targetLanguage })
   const modelStatus = useModelStatus("mms")
+  // Desktop/web offline: refuse hosted engines up front, preview-only for
+  // the on-device voice (src/lib/audio/tts-offline.ts).
+  const browserOnline = useOnline()
+  const backendReachable = useConnectivity()
+  const offlineGate = ttsOfflineGate({
+    offline: !browserOnline || backendReachable === false,
+    usesLocalModel: ttsProviderModel(provider) === "mms",
+    localModelReady: modelStatus.kind === "ready",
+  })
+  const previewOnly = playOnly || offlineGate.kind === "previewOnly"
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const { session } = useFrontierSession()
   const [isPlaying, setIsPlaying] = useState(false)
@@ -197,7 +224,7 @@ export function CellTtsButton({
       }
       return
     }
-    const key = cacheKey(cellId, trimmed, voiceSignature(voice), provider, playableAttachId)
+    const key = cacheKey(cellId, targetLang ?? "", trimmed, voiceSignature(voice), provider, playableAttachId)
     let url = cache.get(key)
     if (!url) {
       try {
@@ -227,7 +254,7 @@ export function CellTtsButton({
             }
           }
           let blob: Blob
-          if (!playOnly && projectId && fileId && session?.jwt) {
+          if (!previewOnly && projectId && fileId && session?.jwt) {
             const gen = await generateAndAttachCellVoice({
               projectId,
               fileId,
@@ -239,6 +266,7 @@ export function CellTtsButton({
               session,
               username: session.username,
               onProgress,
+              ...(targetLang ? { targetLang } : {}),
               surface: "cell", // AQU-1572
             })
             blob = gen.blob
@@ -262,6 +290,9 @@ export function CellTtsButton({
                   geminiContext,
                   session,
                   username: session.username,
+                  // The same lane as the clip above: every heard line voices
+                  // the one translation, in the one language.
+                  ...(targetLang ? { targetLang } : {}),
                   surface: "cell", // AQU-1572: one event per line it voiced
                 })
                 alsoWritten += 1
@@ -368,6 +399,7 @@ export function CellTtsButton({
     generatedAttachmentUrl,
     projectId,
     fileId,
+    targetLang,
     session,
     projectTtsSettings,
     cellTtsSettings?.voiceId,
@@ -376,7 +408,7 @@ export function CellTtsButton({
     original,
     context,
     cellLabel,
-    playOnly,
+    previewOnly,
     alsoAttachTo,
     t,
   ])
@@ -403,8 +435,16 @@ export function CellTtsButton({
   // resolution generateAndAttachCellVoice/synthesizeForCell use, so the label
   // can't drift from the real synthesis path.
   const engineName = providerInfo(provider).shortTitle
+  // Playing an attached clip may still work offline (on-device cache).
+  const offlineBlocked = offlineGate.kind === "blocked" && !playableAttachId
   const tooltip = noText
     ? "Translate this line first to generate voice"
+    : offlineBlocked
+      ? offlineGate.suggestLocal
+        ? t("audio.tts.offlineSuggestLocal", { engine: engineName })
+        : t("audio.tts.offlineBlocked", { engine: engineName })
+    : offlineGate.kind === "previewOnly" && !playableAttachId && !isError && !isLoadingModel && !isSynthesizing && !isPlaying
+      ? t("audio.tts.offlinePreviewOnly")
     : isError
       ? t("audio.tts.failedTooltip", { reason: status.message })
       : isLoadingModel
@@ -423,7 +463,7 @@ export function CellTtsButton({
       variant="ghost"
       size={isLoadingModel ? "xs" : "icon-xs"}
       onClick={onClick}
-      disabled={disabled || noText || isLoadingModel || isSynthesizing}
+      disabled={disabled || noText || offlineBlocked || isLoadingModel || isSynthesizing}
       aria-label={tooltip}
       className={cn(
         isError
@@ -432,7 +472,7 @@ export function CellTtsButton({
             ? "text-primary"
             : isLoadingModel
               ? "text-amber-600 dark:text-amber-400"
-              : noText || disabled
+              : noText || disabled || offlineBlocked
                 // SUB-35: can't-run state stays washed out…
                 ? "text-muted-foreground/40"
                 // …but READY must look ready — the old muted/50 idle tint made a

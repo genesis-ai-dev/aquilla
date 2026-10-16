@@ -45,6 +45,9 @@ importers:
       '@livestore/adapter-web':
         specifier: ^0.4.0
         version: 0.4.0(d224d647e2a9f73adee8d2b271b14d59)
+      '@livestore/common':
+        specifier: 0.4.0
+        version: 0.4.0(patch_hash=1bfa14648170e1d85757a19adf7a5457facbe74067da37c3094403843142f103)(d224d647e2a9f73adee8d2b271b14d59)
       '@livestore/livestore':
         specifier: ^0.4.0
         version: 0.4.0(d224d647e2a9f73adee8d2b271b14d59)
@@ -56,6 +59,9 @@ importers:
         version: 0.4.0(c091e714b13ba5ae60058c2d869ea98d)
       '@livestore/sync-cf':
         specifier: ^0.4.0
+        version: 0.4.0(d224d647e2a9f73adee8d2b271b14d59)
+      '@livestore/utils':
+        specifier: 0.4.0
         version: 0.4.0(d224d647e2a9f73adee8d2b271b14d59)
       '@livestore/wa-sqlite':
         specifier: ^0.4.0

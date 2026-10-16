@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const regimen = readFileSync(path.join(root, "e2e/journeys/QA-BOT-REGIMEN.md"), "utf8")
-const deploy = readFileSync(path.join(root, "e2e/journeys/DEPLOY-BOT.md"), "utf8")
+const deploy = readFileSync(path.join(root, "e2e/journeys/RELEASE-CUT.md"), "utf8")
 const agents = readFileSync(path.join(root, "AGENTS.md"), "utf8")
 
 describe("the merge rule the bots follow", () => {
@@ -34,7 +34,7 @@ describe("the merge rule the bots follow", () => {
       expect(text).toContain("`INCONCLUSIVE` and `HARNESS UNAVAILABLE` do not hold")
       expect(text).toContain("does not affect the cut or the deploy")
     }
-    expect(deploy).toContain("This bot does not start Jev and does not read its result")
+    expect(deploy).toContain("The workflow does not start Jev and does not read its result")
     expect(deploy).toContain("refs/heads/release/YYYY/MM/DD-NN")
   })
 })

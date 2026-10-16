@@ -145,9 +145,59 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     const byLane = Object.fromEntries(pa.lanes.map((l) => [l.lane, l]))
     expect(byLane[""]).toMatchObject({ totalCells: 45, filledCells: 15, validatedCells: 5, lastEditAt: 1500 })
     expect(byLane.es).toMatchObject({ totalCells: 45, filledCells: 2, validatedCells: 2, lastEditAt: 2600 })
-    // Scalar fields remain cross-lane (from files), untouched by the lane rollup.
-    const paScalar = body.projects.find((p) => p.id === "pa") as unknown as { totalCells: number; validatedCells: number }
-    expect(paScalar).toMatchObject({ totalCells: 45, validatedCells: 5 })
+    // AQU-1952: with two languages the project's own numbers are the lanes'
+    // summed, totals included — all the languages' work done over all their
+    // work. They used to be the file counters, whose fill counts one row per
+    // lane over a once-per-cell total, so "All" added the languages together.
+    const paScalar = body.projects.find((p) => p.id === "pa") as unknown as { totalCells: number; filledCells: number; validatedCells: number }
+    expect(paScalar).toMatchObject({ totalCells: 90, filledCells: 17, validatedCells: 7 })
+  })
+
+  // AQU-1951: audio has been per language since AQU-1591, and the Progress
+  // card's language tabs need each lane's own recordings rather than greying
+  // the audio tiles as "cross-language".
+  it("AQU-1951: each lane carries its own recordings, the cue sheet's included, against the project's audio threshold", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e1', 1, 'pa', 'file.create', 'wendi', '{}', 1000, 1000, 1), ('e2', 1, 'pa', 'file.create', 'wendi', '{}', 1000, 1000, 2)",
+    ).run()
+    // A subtitle file and the hidden cue sheet a dubbing workflow records against.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO files (id, project_id, name, role, kind, anchor_file_id, event_id, cell_count) VALUES
+        ('f1',   'pa', 'Episode 1',  NULL,         'vtt', NULL, 'e1', 45),
+        ('cue1', 'pa', 'Cue sheet',  'audio-cues', 'vtt', 'f1', 'e2', 40)`,
+    ).run()
+    // Two validators per take, so the histograms' 1-buckets do not count.
+    await env.AQUILLA_PG.prepare("INSERT INTO project_settings (project_id, settings) VALUES ('pa', ?)")
+      .bind(JSON.stringify({ validationCountAudio: 2 })).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, legacy_tag, position) VALUES
+        ('deflane1', 'pa', 'target', 'Default', '', 0),
+        ('eslane01', 'pa', 'target', 'es', 'es', 1)`,
+    ).run()
+    // '' lane: 10 recorded on the subtitles, 3 of them at two validators.
+    // es lane: nothing on the subtitles; 6 on the cue sheet, 5 at two.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, lane_id, total_count, filled_count, validator_histogram, audio_count, audio_validator_histogram, revision, updated_at) VALUES
+        ('pa','f1',  'file','', 'deflane1', 45, 15, '{}', 10, ?, 1, 1500),
+        ('pa','f1',  'file','', 'eslane01', 45, 2,  '{}', 0,  '{}', 1, 2600),
+        ('pa','cue1','file','', 'deflane1', 40, 0,  '{}', 0,  '{}', 1, 9000),
+        ('pa','cue1','file','', 'eslane01', 40, 0,  '{}', 6,  ?, 1, 9000)`,
+    ).bind(JSON.stringify({ "0": 4, "1": 3, "2": 3 }), JSON.stringify({ "1": 1, "2": 5 })).run()
+
+    const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { projects: Array<{ id: string; lanes: Array<{ lane: string; totalCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; validatedAudioCells: number }> }> }
+    const byLane = Object.fromEntries(body.projects.find((p) => p.id === "pa")!.lanes.map((l) => [l.lane, l]))
+    expect(byLane[""]).toMatchObject({ audioCells: 10, validatedAudioCells: 3 })
+    expect(byLane.es).toMatchObject({ audioCells: 6, validatedAudioCells: 5 })
+    // The cue sheet's rows carry recordings only: its 40 cells and its later
+    // updated_at stay out of the text numbers, as before.
+    expect(byLane[""]).toMatchObject({ totalCells: 45, filledCells: 15, lastEditAt: 1500 })
+    expect(byLane.es).toMatchObject({ totalCells: 45, filledCells: 2, lastEditAt: 2600 })
   })
 
   it("AQU-538: a REGISTERED lane with no progress rows yet appears as a 0% row (PM sees the chip immediately)", async () => {
@@ -300,6 +350,8 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     expect(pa.lanes).toHaveLength(1)
     // Default validationCount = 1 (no settings row) → validated = buckets >= 1 = 4.
     expect(pa.lanes[0]).toMatchObject({ lane: "", totalCells: 10, filledCells: 4, validatedCells: 4 })
+    // AQU-1952: one language keeps the file counters as the project's numbers.
+    expect(pa).toMatchObject({ totalCells: 10, validatedCells: 3 })
   })
 
   it("AQU-1458: an archived lane row is flagged, and a settings-only archive is too", async () => {
@@ -676,8 +728,10 @@ describe("POST /api/v2/orgs/portfolio", () => {
     expect(aggregateOrgBinds).toEqual([[2, 1, 2, 1, "2026-09-01", 2, 1, 2, 1, 0, 99, 99, 99, 99]])
     // Driven FROM projects and left-joined to its settings, so a project with
     // no settings row still inherits the org's structural-cell answer.
-    const settingsQuery = preparedQueries.find((query) => query.includes("ps.validation_count AS validation_count"))
+    const settingsQuery = preparedQueries.find((query) => query.includes("AS validation_count,"))
     expect(settingsQuery).toContain("ps.validation_count")
+    // AQU-1771: the threshold falls back to the org's default.
+    expect(settingsQuery).toContain("os.validation_count")
     expect(settingsQuery).not.toContain("ps.target_lanes")
     expect(settingsQuery).toContain("COALESCE(ps.count_structural, os.count_structural, 'true')")
     expect(settingsQuery).not.toContain("ps.settings AS settings")
@@ -1198,7 +1252,9 @@ describe("AQU-1421 portfolio lane visibility", () => {
     await sql("INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e1', 1, 'pa', 'file.create', 'owner', '{}', 1, 1, 1)")
     await sql("INSERT INTO files (id, project_id, name, event_id, cell_count, filled_count, ai_drafted_count, last_edit_at) VALUES ('f1', 'pa', 'Episode 1', 'e1', 80, 20, 5, 9000)")
     await sql(
-      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, total_count, filled_count, validator_histogram, updated_at, lane_id) VALUES ('pa', 'f1', 'file', '', 70, 20, '{}', 8000, (SELECT aquilla_test_resolve_target_lane('pa', ''))), ('pa', 'f1', 'file', '', 10, 3, '{}', 1000, (SELECT aquilla_test_resolve_target_lane('pa', 'es')))`,
+      // The take below has no lane of its own, so it reads into the default
+      // lane (AQU-1200), and that lane's progress row carries it.
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, total_count, filled_count, validator_histogram, updated_at, lane_id, audio_count) VALUES ('pa', 'f1', 'file', '', 70, 20, '{}', 8000, (SELECT aquilla_test_resolve_target_lane('pa', '')), 1), ('pa', 'f1', 'file', '', 10, 3, '{}', 1000, (SELECT aquilla_test_resolve_target_lane('pa', 'es')), 0)`,
     )
     await sql(
       `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, ai_drafted, lane_id) VALUES ('pa', 'f1', 'c-hidden', 'target', 'draft', 'e1', 1, 1, (SELECT aquilla_test_resolve_target_lane('pa', ''))), ('pa', 'f1', 'c-mine', 'target', 'draft', 'e1', 1, 1, (SELECT aquilla_test_resolve_target_lane('pa', 'es')))`,
@@ -1487,15 +1543,18 @@ describe("AQU-1566 portfolio counts only the files that count", () => {
         ('f-track', 'pa', 'Episode captions', 'timeline-content', 'vtt', 'f-ep', 'e4', 500, 0,  0,  0,  99999, NULL)`,
     )
     await sql(
-      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, lane_id, total_count, filled_count, validator_histogram, updated_at) VALUES
-        ('pa', 'f-ep',    'file', '', 'deflane1', 6,   3,  '{}', 8000),
-        ('pa', 'f-ep',    'file', '', 'eslane01', 6,   1,  '{}', 1000),
-        ('pa', 'f-del',   'file', '', 'deflane1', 50,  50, '{}', 1),
-        ('pa', 'f-del',   'file', '', 'eslane01', 50,  50, '{}', 1),
-        ('pa', 'f-cue',   'file', '', 'deflane1', 40,  40, '{}', 1),
-        ('pa', 'f-cue',   'file', '', 'eslane01', 40,  40, '{}', 1),
-        ('pa', 'f-track', 'file', '', 'deflane1', 500, 0,  '{}', 1),
-        ('pa', 'f-track', 'file', '', 'eslane01', 500, 0,  '{}', 1)`,
+      // The takes below have no lane of their own, so they read into the
+      // default lane (AQU-1200), whose rows carry them; the deleted file's and
+      // the caption track's are left out of the counted files anyway.
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, lane_id, total_count, filled_count, validator_histogram, updated_at, audio_count) VALUES
+        ('pa', 'f-ep',    'file', '', 'deflane1', 6,   3,  '{"1":2}', 8000, 1),
+        ('pa', 'f-ep',    'file', '', 'eslane01', 6,   1,  '{}', 1000, 0),
+        ('pa', 'f-del',   'file', '', 'deflane1', 50,  50, '{}', 1, 1),
+        ('pa', 'f-del',   'file', '', 'eslane01', 50,  50, '{}', 1, 0),
+        ('pa', 'f-cue',   'file', '', 'deflane1', 40,  40, '{}', 1, 1),
+        ('pa', 'f-cue',   'file', '', 'eslane01', 40,  40, '{}', 1, 0),
+        ('pa', 'f-track', 'file', '', 'deflane1', 500, 0,  '{}', 1, 1),
+        ('pa', 'f-track', 'file', '', 'eslane01', 500, 0,  '{}', 1, 0)`,
     )
     await sql(
       `INSERT INTO cells (project_id, file_id, cell_id, side, lane_id, value, event_id, last_edit_at, ai_drafted) VALUES
@@ -1525,9 +1584,11 @@ describe("AQU-1566 portfolio counts only the files that count", () => {
   it("leaves deleted files, cue sheets and caption tracks out of the text totals and lanes", async () => {
     await seedEpisodeWithHiddenFiles()
     const owner = await rowFor(1)
+    // Two languages, so the project's text is its lanes' summed (AQU-1952):
+    // the episode's 6 cells in each, none of the hidden files' hundreds.
     expect(owner).toMatchObject({
-      totalCells: 6,
-      filledCells: 3,
+      totalCells: 12,
+      filledCells: 4,
       validatedCells: 2,
       aiDraftedCells: 2,
       lastEditAt: 9000,
@@ -1557,15 +1618,83 @@ describe("AQU-1566 portfolio counts only the files that count", () => {
         ('f-cue-old', 'pa', 'Old cue sheet',    'audio-cues', 'vtt',   'f-ep', 'e6', 999, 1700000000000)`,
     )
     const owner = await rowFor(1)
-    expect(owner).toMatchObject({ totalCells: 16, audioTotalCells: 50, audioCells: 2 })
+    // The text is the two lanes' 6 each (AQU-1952); the new document has no
+    // progress rows yet, so it is in no language's numbers. AQU-1954: audio is
+    // each language's too. The cue sheet says the episode's dubbing is planned,
+    // so each language owes its 40 cues (the plan board's rule); the notes file
+    // has no recording and no sheet, so nobody owes it.
+    const byLane = Object.fromEntries(owner.lanes.map((lane) => [lane.lane, lane]))
+    expect(byLane[""]).toMatchObject({ audioTotalCells: 40, audioCells: 2 })
+    expect(byLane.es).toMatchObject({ audioTotalCells: 40, audioCells: 0 })
+    expect(owner).toMatchObject({ totalCells: 12, audioTotalCells: 80, audioCells: 2, recordsAudio: false })
     // Behind the read wall the text total shrinks to the granted lanes; the
-    // audio total does not (a take is shared by every language).
+    // audio total does not (a take is not a lane's text).
     env.LANE_READ_WALL = "1"
     try {
-      expect(await rowFor(2)).toMatchObject({ audioTotalCells: 50 })
+      expect(await rowFor(2)).toMatchObject({ audioTotalCells: 80 })
     } finally {
       env.LANE_READ_WALL = undefined
     }
+  })
+
+  describe("AQU-1954: each language's audio, and All", () => {
+    // The episode (6 lines, dubbed against a 40-cue sheet) plus a 10-line notes
+    // file nobody has recorded. Two languages: French (the default lane, which
+    // holds the takes) and Spanish (none).
+    async function seedNotesFile() {
+      await seedEpisodeWithHiddenFiles()
+      await sql("INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e5', 1, 'pa', 'file.create', 'owner', '{}', 5, 5, 5)")
+      await sql(
+        `INSERT INTO files (id, project_id, name, role, kind, anchor_file_id, event_id, cell_count, deleted_at) VALUES
+          ('f-doc', 'pa', 'Notes', NULL, 'codex', NULL, 'e5', 10, NULL)`,
+      )
+      await sql(
+        `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, lane_id, total_count, filled_count, validator_histogram, updated_at, audio_count) VALUES
+          ('pa', 'f-doc', 'file', '', 'deflane1', 10, 0, '{}', 1, 0),
+          ('pa', 'f-doc', 'file', '', 'eslane01', 10, 0, '{}', 1, 0)`,
+      )
+    }
+    const lanesOf = (row: { lanes: { lane: string }[] }) =>
+      Object.fromEntries(row.lanes.map((lane) => [lane.lane, lane])) as Record<string, Record<string, unknown>>
+
+    it("off: a language owes only the files it has recorded in, or that have a cue sheet", async () => {
+      await seedNotesFile()
+      const owner = await rowFor(1)
+      expect(lanesOf(owner)[""]).toMatchObject({ audioTotalCells: 40, recordsAudio: false })
+      expect(lanesOf(owner).es).toMatchObject({ audioTotalCells: 40, recordsAudio: false })
+      // All is both languages' recordings over both languages' work: 2 of 80.
+      expect(owner).toMatchObject({ audioTotalCells: 80, audioCells: 2, recordsAudio: false })
+    })
+
+    it("on: a language owes every file, recorded or not", async () => {
+      await seedNotesFile()
+      await sql("UPDATE lanes SET records_audio = true WHERE project_id = 'pa' AND id = 'eslane01'")
+      const owner = await rowFor(1)
+      expect(lanesOf(owner).es).toMatchObject({ audioTotalCells: 50, audioCells: 0, recordsAudio: true })
+      expect(lanesOf(owner)[""]).toMatchObject({ audioTotalCells: 40 })
+      expect(owner).toMatchObject({ audioTotalCells: 90, audioCells: 2, recordsAudio: true })
+    })
+
+    it("off: a file counts for a language once that language records in it", async () => {
+      await seedNotesFile()
+      await sql("UPDATE file_section_progress SET audio_count = 1 WHERE project_id = 'pa' AND file_id = 'f-doc' AND lane_id = 'deflane1'")
+      const owner = await rowFor(1)
+      expect(lanesOf(owner)[""]).toMatchObject({ audioTotalCells: 50, audioCells: 3 })
+      // Spanish has not recorded in it, so Spanish still does not owe it.
+      expect(lanesOf(owner).es).toMatchObject({ audioTotalCells: 40 })
+      expect(owner).toMatchObject({ audioTotalCells: 90, audioCells: 3 })
+    })
+
+    it("a one-language project reads the switch from its language's row", async () => {
+      await seedNotesFile()
+      await sql("DELETE FROM cells WHERE project_id = 'pa' AND lane_id = 'eslane01'")
+      await sql("DELETE FROM file_section_progress WHERE project_id = 'pa' AND lane_id = 'eslane01'")
+      await sql("DELETE FROM project_member_lane_roles WHERE project_id = 'pa' AND lane = 'eslane01'")
+      await sql("DELETE FROM lanes WHERE project_id = 'pa' AND id = 'eslane01'")
+      expect(await rowFor(1)).toMatchObject({ audioTotalCells: 40, audioCells: 2, recordsAudio: false })
+      await sql("UPDATE lanes SET records_audio = true WHERE project_id = 'pa' AND id = 'deflane1'")
+      expect(await rowFor(1)).toMatchObject({ audioTotalCells: 50, audioCells: 2, recordsAudio: true })
+    })
   })
 
   it("counts machine drafts per lane on the same files behind the read wall", async () => {
@@ -1585,6 +1714,6 @@ describe("AQU-1566 portfolio counts only the files that count", () => {
     const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("owner")) }, env)
     expect(res.status).toBe(200)
     const body = (await res.json()) as { projects: Array<{ id: string; totalCells: number; audioCells: number }> }
-    expect(body.projects.find((p) => p.id === "pa")).toMatchObject({ totalCells: 6, audioCells: 2 })
+    expect(body.projects.find((p) => p.id === "pa")).toMatchObject({ totalCells: 12, audioCells: 2 })
   })
 })

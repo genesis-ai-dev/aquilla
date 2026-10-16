@@ -49,6 +49,32 @@ export interface TestDbOptions {
   onStatement?: (sql: string, params: readonly unknown[]) => void
 }
 
+/**
+ * AQU-1982: "unnamed prepared statement does not exist" out of PGlite is almost
+ * never what it says. PGlite's query path sends Parse, Describe, Bind, Execute
+ * and Sync as separate protocol messages, and its WASM dispatch loop swallows
+ * every exception that is not a Postgres longjmp. When the Parse itself blows
+ * the WASM's native stack (Node's ~1 MB, shared with the engine), the statement
+ * is silently never registered and the Describe that follows is what reports
+ * it missing. The usual trigger is an expression that nests once per element:
+ * a row-constructor `(a, b) IN ((…), …)` list, which Postgres rewrites into a
+ * left-deep OR tree, fails between 1,700 and 1,800 rows. Native Postgres has no
+ * such ceiling, so this is a harness limit, not a production bug — the fix is
+ * to page the statement smaller (see CELL_KEY_LOOKUP_ROWS in lib/cell-key-lookup.ts).
+ */
+function explainLostParse(e: unknown, sql: string, params: readonly unknown[]): unknown {
+  const message = (e as { message?: unknown } | null)?.message
+  if (typeof message !== "string" || !message.includes("unnamed prepared statement does not exist")) return e
+  return new Error(
+    `PGlite lost this statement's Parse (${params.length} binds, ${sql.length} chars of SQL). ` +
+      "The WASM most likely overflowed Node's native stack on an expression that nests once per " +
+      "element — a row-constructor IN list fails past ~1,700 rows — and PGlite swallowed it. " +
+      "Native Postgres has no such ceiling: page the statement smaller (AQU-1982). " +
+      `Original: ${message}`,
+    { cause: e },
+  )
+}
+
 function pgliteExecutor(db: PGlite, opts: TestDbOptions): PgExecutor {
   const wrap = (q: { query: PGlite["query"]; exec: PGlite["exec"]; transaction?: PGlite["transaction"] }): PgExecutor => ({
     async run(sql, params) {
@@ -70,7 +96,9 @@ function pgliteExecutor(db: PGlite, opts: TestDbOptions): PgExecutor {
         const last = (await q.exec(sql)).at(-1)
         return { rows: (last?.rows ?? []) as Record<string, unknown>[], rowCount: last?.affectedRows ?? last?.rows.length ?? 0 }
       }
-      const r = await q.query<Record<string, unknown>>(sql, params as unknown[])
+      const r = await q.query<Record<string, unknown>>(sql, params as unknown[]).catch((e: unknown) => {
+        throw explainLostParse(e, sql, params)
+      })
       return { rows: r.rows, rowCount: (r as { affectedRows?: number }).affectedRows ?? r.rows.length }
     },
     begin: (fn) => db.transaction((tx) => fn(wrap(tx as unknown as PGlite))) as Promise<never>,

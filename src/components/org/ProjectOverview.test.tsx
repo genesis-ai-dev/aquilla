@@ -6,6 +6,7 @@ import { ProjectOverview, deriveProjectStatus } from "./ProjectOverview"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { ROLE } from "@/lib/frontier/roles"
 import { fmtDeadlineDate } from "@/lib/format-date"
+import { PROGRESS_BG } from "@/lib/progress/progress-palette"
 
 // Keep the overview suite's project-member reads local.
 vi.mock("@/lib/frontier/members", async (importActual) => ({
@@ -39,9 +40,33 @@ vi.mock("./ProjectAutopilotPanel", () => ({
   ),
 }))
 
+const toastAdd = vi.fn()
+vi.mock("@/components/ui/toast", async (importActual) => ({
+  ...await importActual<typeof import("@/components/ui/toast")>(),
+  toast: { add: (...a: unknown[]) => toastAdd(...a), close: vi.fn(), update: vi.fn(), promise: vi.fn() },
+}))
+
 const useProject = vi.fn()
 const refresh = vi.fn()
-vi.mock("@/hooks/useProject", () => ({ useProject: (...a: unknown[]) => useProject(...a) }))
+// AQU-1771: the overview waits for the project's settings before it trusts the
+// visibility floors. A test that does not hand one in gets a loaded response
+// that carries no org policy (the org-settings mock decides), read-only.
+const LOADED_PROJECT_SETTINGS = {
+  hasFetched: true,
+  canEdit: false,
+  settings: {},
+  orgPolicy: null,
+  visibilityFloors: null,
+  patch: vi.fn(async () => ({ kind: "ok" as const })),
+}
+vi.mock("@/hooks/useProject", () => ({
+  useProject: (...a: unknown[]) => {
+    const result = useProject(...a) as Record<string, unknown> | undefined
+    return result && !("projectSettings" in result)
+      ? { ...result, projectSettings: LOADED_PROJECT_SETTINGS }
+      : result
+  },
+}))
 
 // AQU-1277: the PM picker calls useProjectMembers, which fetches
 // /api/v2/projects/:id/members. Unmocked that reached production identity for
@@ -270,6 +295,12 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   allowBulkValidateAiDrafts: false,
   countStructuralOverrides: 0,
   resetCountStructuralOverrides: vi.fn(),
+  validationCountDefault: null,
+  validationCountAudioDefault: null,
+  validationCountOverrides: 0,
+  validationCountAudioOverrides: 0,
+  overrideProjects: { countStructuralCells: null, validationCount: null, validationCountAudio: null },
+  resetValidationCountOverrides: vi.fn(),
   // AQU-1037: assignment authority defaults to project_lead.
   assignmentMinRole: 500,
   // AQU-822: default termbase-edit floor (project_lead), as the server resolves it.
@@ -284,7 +315,7 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
 const useOrgSettingsMock = vi.fn<() => OrgSettingsMock>(defaultOrgSettingsMock)
 const canEditRosterProgressFloorMock = vi.fn((level: number | null | undefined) => (level ?? 0) >= 700)
 vi.mock("@/hooks/useOrgSettings", () => ({
-  useOrgSettings: () => useOrgSettingsMock(),
+  useOrgSettings: (...args: unknown[]) => (useOrgSettingsMock as (...a: unknown[]) => OrgSettingsMock)(...args),
   canEditRosterProgressFloor: (level: number | null | undefined) => canEditRosterProgressFloorMock(level),
 }))
 
@@ -304,6 +335,52 @@ function projectRecord(over: Partial<ProjectRecord> & { level: number; deletedAt
   } as ProjectRecord
 }
 
+/**
+ * AQU-1771: the project-settings instance useProject hands the overview —
+ * the org policy carried for this project and the floors it enforces. The
+ * Team / Members badges write THIS project's own values through its `patch`.
+ */
+function projectSettingsMock({
+  rosterOrg = ROLE.MAINTAINER,
+  rosterOwn = null,
+  progressOrg = ROLE.MAINTAINER,
+  progressOwn = null,
+  canEdit = true,
+}: {
+  rosterOrg?: number
+  rosterOwn?: number | null
+  progressOrg?: number
+  progressOwn?: number | null
+  canEdit?: boolean
+} = {}) {
+  const view = (org: number, own: number | null) => {
+    const project = own != null && own > org ? own : null
+    return { org, project, effective: project ?? org }
+  }
+  return {
+    hasFetched: true,
+    canEdit,
+    settings: {
+      ...(rosterOwn != null ? { rosterViewMinRole: rosterOwn } : {}),
+      ...(progressOwn != null ? { memberProgressViewMinRole: progressOwn } : {}),
+    },
+    patch: vi.fn(async () => ({ kind: "ok" as const })),
+    orgPolicy: {
+      rosterViewMinRole: rosterOrg,
+      memberProgressViewMinRole: progressOrg,
+      allowSelfAssignment: false,
+      allowScopedLaneAssignment: false,
+      assignmentMinRole: ROLE.PROJECT_LEAD,
+      autoPropagateRepetitions: true,
+      exportMinRole: null,
+    },
+    visibilityFloors: {
+      rosterViewMinRole: view(rosterOrg, rosterOwn),
+      memberProgressViewMinRole: view(progressOrg, progressOwn),
+    },
+  }
+}
+
 function SettingsLocationProbe() {
   const location = useLocation()
   const state = location.state as {
@@ -319,8 +396,8 @@ function SettingsLocationProbe() {
   )
 }
 
-function renderOverview() {
-  return render(
+function overviewTree() {
+  return (
     <MemoryRouter initialEntries={["/projects/p1"]}>
       <OrgProvider>
         <Routes>
@@ -328,8 +405,12 @@ function renderOverview() {
           <Route path="/project/:id/settings" element={<SettingsLocationProbe />} />
         </Routes>
       </OrgProvider>
-    </MemoryRouter>,
+    </MemoryRouter>
   )
+}
+
+function renderOverview() {
+  return render(overviewTree())
 }
 
 beforeEach(async () => {
@@ -631,6 +712,27 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     expect(screen.queryByText("Audio Validated")).not.toBeInTheDocument()
   })
 
+  it("AQU-1954: a project that records audio shows its audio at 0% before the first take", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "John", totalCells: 100, filledCells: 80, validatedCells: 50,
+      aiDraftedCells: 0,
+      audioTotalCells: 100, recordsAudio: true,
+      audioCells: 0,
+      validatedAudioCells: 0,
+      recordedMs: 0, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null,
+    }])
+    renderOverview()
+
+    await waitFor(() => expect(screen.getAllByText("Has audio").length).toBeGreaterThan(0))
+  })
+
   it("audio-only project: shows Has Audio + a real Audio Validated percentage", async () => {
     fetchSyncToken.mockResolvedValue({ token: "tok" })
     fetchProjectFiles.mockResolvedValue([])
@@ -666,8 +768,10 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     // portfolio), so the tile shows a real number.
     // AQU-1093: that number is 15 of 100 CELLS = 15%, not 15 of 60 takes = 25%
     // — the tile and the plan board's audio bar must report the same share.
-    expect(screen.getByText("Audio Validated")).toBeInTheDocument()
-    expect(screen.getByText("15%")).toBeInTheDocument()
+    // AQU-1764 gave the measure a bar of its own, so the tile and its bar
+    // both say it.
+    expect(screen.getAllByText("Audio Validated")).toHaveLength(2)
+    expect(screen.getAllByText("15%")).toHaveLength(2)
     expect(screen.queryByText("N/A")).not.toBeInTheDocument()
   })
 
@@ -948,6 +1052,15 @@ describe("ProjectOverview PM assignment", () => {
     expect(within(meta).queryByRole("button", { name: "Change" })).not.toBeInTheDocument()
     expect(within(meta).queryByRole("button", { name: "Clear" })).not.toBeInTheDocument()
 
+    // AQU-1950: the note sits behind a circled-i beside the heading, shut
+    // until it is clicked.
+    const pmInfo = screen.getByRole("button", { name: "What naming a project manager does" })
+    expect(pmInfo).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getByTestId("overview-pm-lead-note")).toHaveAttribute("data-state", "closed")
+    expect(screen.getByTestId("overview-pm-lead-note")).toHaveAttribute("aria-hidden", "true")
+    fireEvent.click(pmInfo)
+    expect(pmInfo).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByTestId("overview-pm-lead-note")).toHaveAttribute("data-state", "open")
     expect(screen.getByTestId("overview-pm-lead-note")).toHaveTextContent(
       /adds them as a Project lead/,
     )
@@ -1147,6 +1260,31 @@ describe("ProjectOverview project-only invitee access (AQU-474)", () => {
     expect(navigate).not.toHaveBeenCalled()
   })
 
+  // AQU-1771: the project's org, not the switcher's. Org 1 is active (default
+  // mock), the project lives in org 99: its portfolio and its settings are 99's.
+  it("reads the PROJECT's org even when another org is active", async () => {
+    const orgIds: Array<number | null | undefined> = []
+    useOrgSettingsMock.mockImplementation((...args: unknown[]) => {
+      orgIds.push(args[0] as number | null | undefined)
+      return defaultOrgSettingsMock()
+    })
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, orgId: 99, files: [] }),
+      status: "ready",
+      refresh,
+    })
+    getPortfolio.mockResolvedValue([])
+
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    await waitFor(() => expect(getPortfolio).toHaveBeenCalledWith("jwt", 99))
+    expect(getPortfolio).not.toHaveBeenCalledWith("jwt", 1)
+    // (The sidebar reads the ACTIVE org's settings for its own nav, so org 1
+    // may appear among all calls; the overview's own read is org 99's.)
+    expect(orgIds).toContain(99)
+  })
+
   it("still redirects to / when the user genuinely has no access (status = not-found)", async () => {
     useProject.mockReturnValue({ project: null, status: "not-found", refresh })
 
@@ -1257,6 +1395,58 @@ describe("ProjectOverview AI-drafted segment (AQU-292)", () => {
     await waitFor(() => expect(screen.getAllByText("Translated").length).toBeGreaterThan(0))
     // "AI Drafted" must NOT appear when count is 0 (forward-only honest rendering)
     expect(screen.queryByText("AI Drafted")).not.toBeInTheDocument()
+  })
+})
+
+// ── AQU-1764: the shared progress palette on the Progress card ─────────────
+
+describe("ProjectOverview Progress card colours (AQU-1764)", () => {
+  // Sam, 2026-10-13 ("Layout A, softest"): one single-colour bar per measure,
+  // each in its measure's tone from the shared palette, and Audio validated
+  // gets the bar it never had. The tiles' numbers lose their four colours;
+  // the colour moves to a swatch before each label.
+  it("draws one bar per measure in its own tone, Audio validated included, and a matching swatch on each tile", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "John", totalCells: 100, filledCells: 80, validatedCells: 50,
+      aiDraftedCells: 10, audioCells: 60, validatedAudioCells: 15,
+      recordedMs: 90000, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null,
+    }])
+    renderOverview()
+
+    const card = await screen.findByTestId("progress-card")
+    await waitFor(() => expect(within(card).getAllByTestId(/^stat-bar-/)).toHaveLength(5))
+    const bars = within(card).getAllByTestId(/^stat-bar-/).map((row) => {
+      const fill = row.querySelector<HTMLElement>("[style]")!
+      return [row.getAttribute("data-testid"), fill.style.width, fill.className.includes(
+        PROGRESS_BG[row.getAttribute("data-testid")!.slice("stat-bar-".length) as keyof typeof PROGRESS_BG],
+      )]
+    })
+    expect(bars).toEqual([
+      ["stat-bar-textTranslated", "80%", true],
+      ["stat-bar-textAi", "10%", true],
+      ["stat-bar-textValidated", "50%", true],
+      ["stat-bar-audioRecorded", "60%", true],
+      ["stat-bar-audioValidated", "15%", true],
+    ])
+    expect(within(card).getByTestId("stat-bar-audioValidated")).toHaveTextContent("Audio Validated15%15/100 cells")
+
+    const swatches = [...card.querySelectorAll<HTMLElement>("[data-progress-swatch]")]
+    expect(swatches.map((s) => s.dataset.progressSwatch)).toEqual([
+      "textTranslated", "textAi", "textValidated", "audioRecorded", "audioValidated",
+    ])
+    // Each tile's number is in the text colour, not a colour of its own.
+    for (const swatch of swatches) {
+      const number = swatch.closest("p")!.previousElementSibling!
+      expect(number.className).toContain("text-foreground")
+      expect(number.className).not.toMatch(/amber|violet|emerald|sky/)
+    }
   })
 })
 
@@ -1376,71 +1566,231 @@ describe("ProjectOverview Members card (AQU-1171)", () => {
     expect(screen.queryByTestId("overview-members-card")).not.toBeInTheDocument()
   })
 
-  it("lets an org manager change the roster floor from the collapsed header", async () => {
-    const patch = vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } }))
-    useOrgSettingsMock.mockReturnValue({
-      ...defaultOrgSettingsMock(),
-      rosterViewMinRole: 600,
-      canViewRoster: true,
-      patch,
-    })
-    canEditRosterProgressFloorMock.mockReturnValue(true)
-    useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
-    renderOverview()
-
-    const card = await screen.findByTestId("overview-members-card")
-    expect(card).toHaveAttribute("data-expanded", "false")
-    fireEvent.click(within(card).getByTestId("section-visibility-badge"))
-    expect(screen.queryByTestId("settings-members-section")).not.toBeInTheDocument()
-
-    const trigger = await screen.findByRole("combobox", { name: /who can see this section/i })
-    fireEvent.click(trigger)
-    const option = await screen.findByRole("option", { name: /everyone with access/i })
+  // AQU-1771: the badge writes THIS project's own member-list floor, which can
+  // only be stricter than the org's. Choosing the org's setting follows the org.
+  function choose(option: HTMLElement) {
     fireEvent.pointerMove(option)
     fireEvent.mouseMove(option)
     fireEvent.keyDown(option, { key: "Enter" })
+  }
 
-    await waitFor(() => expect(patch).toHaveBeenCalledWith({ rosterViewMinRole: ROLE.VIEWER }))
+  async function openMembersPicker(settings: ReturnType<typeof projectSettingsMock>) {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: ROLE.MAINTAINER }),
+      status: "ready",
+      refresh,
+      projectSettings: settings,
+    })
+    renderOverview()
+    const card = await screen.findByTestId("overview-members-card")
+    fireEvent.click(within(card).getByTestId("section-visibility-badge"))
+    fireEvent.click(await screen.findByRole("combobox", { name: /who can see this section/i }))
+    return card
+  }
+
+  it("lets a project maintainer make the member list stricter, from the collapsed header", async () => {
+    const settings = projectSettingsMock({ rosterOrg: ROLE.MAINTAINER })
+    const card = await openMembersPicker(settings)
+    expect(card).toHaveAttribute("data-expanded", "false")
+    expect(screen.queryByTestId("settings-members-section")).not.toBeInTheDocument()
+
+    choose(await screen.findByRole("option", { name: /owners only/i }))
+    await waitFor(() => expect(settings.patch).toHaveBeenCalledWith({ rosterViewMinRole: ROLE.OWNER }))
     expect(card).toHaveAttribute("data-expanded", "false")
   })
 
-  it("lets an org owner change the roster floor from the all-organizations view", async () => {
-    const { listMyOrgs } = await import("@/lib/frontier/orgs")
-    vi.mocked(listMyOrgs).mockResolvedValue([
-      { id: 1, name: "Come and See", role: { level: ROLE.OWNER, name: "owner" } },
-      { id: 2, name: "Other", role: { level: ROLE.MAINTAINER, name: "maintainer" } },
-    ])
+  it("offers nothing looser than the org's setting, labels the org's own, and says why", async () => {
+    const settings = projectSettingsMock({ rosterOrg: ROLE.MAINTAINER })
+    await openMembersPicker(settings)
+
+    for (const name of [/everyone with access/i, /contributors and up/i, /project leads and up/i]) {
+      expect(await screen.findByRole("option", { name })).toHaveAttribute("aria-disabled", "true")
+    }
+    expect(screen.getByRole("option", { name: "Maintainers and owners (org default)" })).not.toHaveAttribute("aria-disabled", "true")
+    choose(screen.getByRole("option", { name: /everyone with access/i }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(settings.patch).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole("button", { name: /why some options are unavailable/i }))
+    expect(screen.getByTestId("section-visibility-min-hint")).toHaveTextContent(
+      "A project can only be stricter than its organization, which is set to “Maintainers and owners”.",
+    )
+  })
+
+  it("says in the badge's popover whether the project follows the org or set its own", async () => {
     useProject.mockReturnValue({
-      project: projectRecord({ level: ROLE.OWNER, orgId: 1 }),
+      project: projectRecord({ level: ROLE.OWNER }),
       status: "ready",
       refresh,
+      projectSettings: projectSettingsMock({ rosterOrg: ROLE.MAINTAINER }),
+    })
+    const view = renderOverview()
+    const following = within(await screen.findByTestId("overview-members-card")).getByTestId("section-visibility-badge")
+    expect(following).toHaveTextContent(/^Only maintainers & owners can see this$/)
+    fireEvent.click(following)
+    expect(await screen.findByTestId("section-visibility-origin")).toHaveTextContent("Follows your org's setting.")
+    view.unmount()
+
+    useProject.mockReturnValue({
+      project: projectRecord({ level: ROLE.OWNER }),
+      status: "ready",
+      refresh,
+      projectSettings: projectSettingsMock({ rosterOrg: ROLE.MAINTAINER, rosterOwn: ROLE.OWNER }),
+    })
+    renderOverview()
+    const own = within(await screen.findByTestId("overview-members-card")).getByTestId("section-visibility-badge")
+    expect(own).toHaveTextContent(/^Only owners can see this$/)
+    fireEvent.click(own)
+    expect(await screen.findByTestId("section-visibility-origin")).toHaveTextContent(
+      "Stricter than your org (Maintainers and owners). Pick “Maintainers and owners (org default)” to undo.",
+    )
+  })
+
+  // Sam, 2026-10-13: a Members change that moves the Team card's level is
+  // called out in amber under the Team badge; a Team change of its own is not.
+  it("says in amber under the Team badge when a Members change moved it", async () => {
+    const owner = (settings: ReturnType<typeof projectSettingsMock>) => ({
+      project: projectRecord({ level: ROLE.OWNER }),
+      status: "ready",
+      refresh,
+      projectSettings: settings,
+    })
+    useProject.mockReturnValue(owner(projectSettingsMock({ rosterOrg: ROLE.CONTRIBUTOR, progressOrg: ROLE.MAINTAINER })))
+    const view = renderOverview()
+    await screen.findByTestId("overview-team-card")
+    expect(screen.queryByTestId("overview-team-visibility-moved")).toBeNull()
+
+    // Members raised to owners only: the Team card follows it up.
+    useProject.mockReturnValue(owner(projectSettingsMock({ rosterOrg: ROLE.CONTRIBUTOR, rosterOwn: ROLE.OWNER, progressOrg: ROLE.MAINTAINER })))
+    view.rerender(overviewTree())
+    await screen.findByTestId("overview-team-visibility-moved")
+    const why = () => screen.getByTestId("overview-team-visibility-moved-why")
+    expect(why()).toHaveAttribute("data-state", "closed")
+    expect(why()).toHaveAttribute("aria-hidden", "true")
+    fireEvent.click(screen.getByTestId("overview-team-visibility-moved-info"))
+    expect(why()).toHaveAttribute("data-state", "open")
+    expect(why()).toHaveTextContent("Changed to “Owners only” because Members changed.")
+    // The (i) closes it again.
+    fireEvent.click(screen.getByTestId("overview-team-visibility-moved-info"))
+    expect(why()).toHaveAttribute("data-state", "closed")
+    fireEvent.click(screen.getByTestId("overview-team-visibility-moved-info"))
+
+    // Members back to the org's: the Team card drops back to its own setting.
+    useProject.mockReturnValue(owner(projectSettingsMock({ rosterOrg: ROLE.CONTRIBUTOR, progressOrg: ROLE.MAINTAINER })))
+    view.rerender(overviewTree())
+    // A new move starts with the why tucked away again.
+    await waitFor(() => expect(why()).toHaveAttribute("data-state", "closed"))
+    fireEvent.click(screen.getByTestId("overview-team-visibility-moved-info"))
+    expect(why()).toHaveTextContent("Changed to “Maintainers and owners” because Members changed.")
+
+    // A Team change of its own clears the note.
+    useProject.mockReturnValue(owner(projectSettingsMock({ rosterOrg: ROLE.CONTRIBUTOR, progressOrg: ROLE.MAINTAINER, progressOwn: ROLE.OWNER })))
+    view.rerender(overviewTree())
+    await waitFor(() => expect(screen.queryByTestId("overview-team-visibility-moved")).toBeNull())
+  })
+
+  it("choosing the org's setting clears the project's own value, so the project follows the org again", async () => {
+    // An owner (who still meets the project's owners-only member list).
+    const settings = projectSettingsMock({ rosterOrg: ROLE.MAINTAINER, rosterOwn: ROLE.OWNER })
+    useProject.mockReturnValue({
+      project: projectRecord({ level: ROLE.OWNER }),
+      status: "ready",
+      refresh,
+      projectSettings: settings,
+    })
+    renderOverview()
+    const card = await screen.findByTestId("overview-members-card")
+    fireEvent.click(within(card).getByTestId("section-visibility-badge"))
+    fireEvent.click(await screen.findByRole("combobox", { name: /who can see this section/i }))
+
+    choose(await screen.findByRole("option", { name: "Maintainers and owners (org default)" }))
+    await waitFor(() => expect(settings.patch).toHaveBeenCalledWith({ rosterViewMinRole: undefined }))
+  })
+
+  it("shows neither card until the project's own settings arrive, so nothing flashes open", async () => {
+    // The org's floor (Maintainer) would admit this maintainer; the project's
+    // settings, still loading, may close the list to owners.
+    useProject.mockReturnValue({
+      project: projectRecord({ level: ROLE.MAINTAINER }),
+      status: "ready",
+      refresh,
+      projectSettings: { ...projectSettingsMock(), hasFetched: false, orgPolicy: null, visibilityFloors: null },
+    })
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    expect(screen.queryByTestId("overview-members-card")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("overview-team-card")).not.toBeInTheDocument()
+  })
+
+  it("says why when the server refuses the change, instead of letting it vanish", async () => {
+    toastAdd.mockClear()
+    const settings = projectSettingsMock({ rosterOrg: ROLE.MAINTAINER })
+    settings.patch.mockResolvedValue({
+      kind: "error",
+      // patchProjectSettings hands over the body's `error`, not the raw JSON.
+      message: "rosterViewMinRole 400 is below the organization's setting (600).",
+    } as never)
+    await openMembersPicker(settings)
+
+    choose(await screen.findByRole("option", { name: /owners only/i }))
+    await waitFor(() => expect(toastAdd).toHaveBeenCalledWith({
+      type: "error",
+      title: "Couldn't change who can see this section",
+      description: "rosterViewMinRole 400 is below the organization's setting (600).",
+    }))
+  })
+
+  it("says nothing when the change saves", async () => {
+    toastAdd.mockClear()
+    const settings = projectSettingsMock({ rosterOrg: ROLE.MAINTAINER })
+    await openMembersPicker(settings)
+    choose(await screen.findByRole("option", { name: /owners only/i }))
+    await waitFor(() => expect(settings.patch).toHaveBeenCalled())
+    expect(toastAdd).not.toHaveBeenCalled()
+  })
+
+  it("hides the card from a maintainer once this project raised its member list to owners", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: ROLE.MAINTAINER }),
+      status: "ready",
+      refresh,
+      projectSettings: projectSettingsMock({ rosterOrg: ROLE.MAINTAINER, rosterOwn: ROLE.OWNER }),
+    })
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    expect(screen.queryByTestId("overview-members-card")).not.toBeInTheDocument()
+    // The Team card lists the same people, so it closes with it.
+    expect(screen.queryByTestId("overview-team-card")).not.toBeInTheDocument()
+  })
+
+  it("offers the picker to a project owner who is not an org owner — it changes only this project", async () => {
+    const { listMyOrgs } = await import("@/lib/frontier/orgs")
+    vi.mocked(listMyOrgs).mockResolvedValue([
+      { id: 1, name: "Come and See", role: { level: ROLE.MAINTAINER, name: "maintainer" } },
+    ])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: ROLE.OWNER }),
+      status: "ready",
+      refresh,
+      projectSettings: projectSettingsMock(),
     })
     renderOverview()
 
     const card = await screen.findByTestId("overview-members-card")
-    await waitFor(() => expect(canEditRosterProgressFloorMock).toHaveBeenCalledWith(ROLE.OWNER))
     const badge = within(card).getByTestId("section-visibility-badge")
     expect(badge.tagName).toBe("BUTTON")
     expect(badge.querySelector("svg.lucide-chevron-down")).toBeInTheDocument()
   })
 
-  it("does not offer the floor picker to a project owner who is not an org owner", async () => {
-    const { listMyOrgs } = await import("@/lib/frontier/orgs")
-    vi.mocked(listMyOrgs).mockResolvedValue([
-      { id: 1, name: "Come and See", role: { level: ROLE.MAINTAINER, name: "maintainer" } },
-    ])
-    useProject.mockReturnValue({ project: projectRecord({ level: ROLE.OWNER }), status: "ready", refresh })
-    renderOverview()
-
-    const card = await screen.findByTestId("overview-members-card")
-    await waitFor(() => expect(canEditRosterProgressFloorMock).toHaveBeenCalledWith(ROLE.MAINTAINER))
-    const badge = within(card).getByTestId("section-visibility-badge")
-    expect(badge.querySelector("svg.lucide-chevron-down")).not.toBeInTheDocument()
-  })
-
-  it("does not offer the floor picker to a caller who cannot edit it", async () => {
-    canEditRosterProgressFloorMock.mockReturnValue(false)
-    useProject.mockReturnValue({ project: projectRecord({ level: 600 }), status: "ready", refresh })
+  it("does not offer the floor picker to a caller who cannot edit the project's settings", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 600 }),
+      status: "ready",
+      refresh,
+      projectSettings: projectSettingsMock({ canEdit: false }),
+    })
     renderOverview()
 
     const card = await screen.findByTestId("overview-members-card")
@@ -1526,6 +1876,43 @@ describe("ProjectOverview member activity detail (AQU-498)", () => {
     expect(screen.queryByTestId("overview-team-card")).not.toBeInTheDocument()
     expect(screen.queryByTestId("overview-team-toggle")).not.toBeInTheDocument()
     expect(screen.queryByRole("heading", { name: "Team" })).not.toBeInTheDocument()
+  })
+})
+
+// AQU-1771: a refused read is not an empty one. The card used to catch the
+// 403 into an empty list and say "No open assignments in this project yet."
+describe("ProjectOverview Team card when the server refuses the read (AQU-1771)", () => {
+  afterEach(async () => {
+    const { getProjectAssignments } = await import("@/lib/sync/assignments")
+    vi.mocked(getProjectAssignments).mockResolvedValue([])
+  })
+
+  it("hides the card instead of claiming there are no open assignments", async () => {
+    const { getProjectAssignments } = await import("@/lib/sync/assignments")
+    const { UserError } = await import("@/lib/errors/user-error")
+    vi.mocked(getProjectAssignments).mockRejectedValue(new UserError(403, "", "project"))
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    await waitFor(() => expect(vi.mocked(getProjectAssignments)).toHaveBeenCalled())
+    await waitFor(() => expect(screen.queryByTestId("overview-team-card")).not.toBeInTheDocument())
+    expect(screen.queryByText("No open assignments in this project yet.")).not.toBeInTheDocument()
+  })
+
+  it("still says there are no open assignments when the read succeeds empty", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    expect(await screen.findByText("No open assignments in this project yet.")).toBeInTheDocument()
   })
 })
 
@@ -1633,75 +2020,23 @@ describe("ProjectOverview Team card collapse (AQU-1172)", () => {
     expect(within(card).getByTestId("section-visibility-badge")).not.toHaveTextContent(/maintainers & owners/i)
   })
 
-  it("lets an org owner change the Team floor and withholds the picker from a project owner who is not an org owner", async () => {
-    const { listMyOrgs } = await import("@/lib/frontier/orgs")
-    vi.mocked(listMyOrgs).mockResolvedValue([
-      { id: 1, name: "Come and See", role: { level: ROLE.OWNER, name: "owner" } },
-      { id: 2, name: "Other", role: { level: ROLE.MAINTAINER, name: "maintainer" } },
-    ])
+  // AQU-1771: the Team badge shows the higher of the progress and member-list
+  // floors THIS project enforces, and writes this project's own progress
+  // floor — never below the org's, and never below the member list (AQU-1779:
+  // such a value would save and not show).
+  async function openTeamPicker(floors: Parameters<typeof projectSettingsMock>[0] = {}) {
+    const settings = projectSettingsMock(floors)
     useProject.mockReturnValue({
       project: projectRecord({ level: ROLE.OWNER, orgId: 1 }),
       status: "ready",
       refresh,
+      projectSettings: settings,
     })
-    const ownerView = renderOverview()
-
-    const ownerCard = await screen.findByTestId("overview-team-card")
-    await waitFor(() => expect(canEditRosterProgressFloorMock).toHaveBeenCalledWith(ROLE.OWNER))
-    const ownerBadge = within(ownerCard).getByTestId("section-visibility-badge")
-    expect(ownerBadge.tagName).toBe("BUTTON")
-    expect(ownerBadge.querySelector("svg.lucide-chevron-down")).toBeInTheDocument()
-    ownerView.unmount()
-
-    vi.mocked(listMyOrgs).mockResolvedValue([
-      { id: 1, name: "Come and See", role: { level: ROLE.MAINTAINER, name: "maintainer" } },
-    ])
-    useProject.mockReturnValue({ project: projectRecord({ level: ROLE.OWNER, orgId: 1 }), status: "ready", refresh })
-    renderOverview()
-
-    const card = await screen.findByTestId("overview-team-card")
-    await waitFor(() => expect(canEditRosterProgressFloorMock).toHaveBeenCalledWith(ROLE.MAINTAINER))
-    const badge = within(card).getByTestId("section-visibility-badge")
-    expect(badge.querySelector("svg.lucide-chevron-down")).not.toBeInTheDocument()
-  })
-
-  it("persists an owner-only Team floor from the header", async () => {
-    const patch = vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } }))
-    useOrgSettingsMock.mockReturnValue({
-      ...defaultOrgSettingsMock(),
-      memberProgressViewMinRole: ROLE.MAINTAINER,
-      rosterViewMinRole: ROLE.MAINTAINER,
-      patch,
-    })
-    canEditRosterProgressFloorMock.mockReturnValue(true)
-    useProject.mockReturnValue({ project: projectRecord({ level: ROLE.OWNER, orgId: 1 }), status: "ready", refresh })
-    renderOverview()
-
-    const card = await screen.findByTestId("overview-team-card")
-    fireEvent.click(within(card).getByTestId("section-visibility-badge"))
-    const trigger = await screen.findByRole("combobox", { name: /who can see this section/i })
-    fireEvent.click(trigger)
-    const option = await screen.findByRole("option", { name: /owners only/i })
-    fireEvent.pointerMove(option)
-    fireEvent.mouseMove(option)
-    fireEvent.keyDown(option, { key: "Enter" })
-
-    await waitFor(() => expect(patch).toHaveBeenCalledWith({ memberProgressViewMinRole: ROLE.OWNER }))
-  })
-
-  // AQU-1779: the badge shows the higher of the progress and roster floors
-  // but writes only the progress floor. A value below the roster floor used
-  // to save, snap straight back, and loosen per-member progress org-wide.
-  async function openTeamPicker(settings: Record<string, unknown>) {
-    const patch = vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } }))
-    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), ...settings, patch })
-    canEditRosterProgressFloorMock.mockReturnValue(true)
-    useProject.mockReturnValue({ project: projectRecord({ level: ROLE.OWNER, orgId: 1 }), status: "ready", refresh })
     renderOverview()
     const card = await screen.findByTestId("overview-team-card")
     fireEvent.click(within(card).getByTestId("section-visibility-badge"))
     fireEvent.click(await screen.findByRole("combobox", { name: /who can see this section/i }))
-    return patch
+    return settings.patch
   }
 
   function choose(option: HTMLElement) {
@@ -1710,13 +2045,48 @@ describe("ProjectOverview Team card collapse (AQU-1172)", () => {
     fireEvent.keyDown(option, { key: "Enter" })
   }
 
-  it("disables Team floors below the member-list floor and says why", async () => {
-    const patch = await openTeamPicker({ memberProgressViewMinRole: ROLE.MAINTAINER, rosterViewMinRole: ROLE.MAINTAINER })
+  it("offers the Team picker to whoever may edit the project's settings, and not to anyone else", async () => {
+    const { listMyOrgs } = await import("@/lib/frontier/orgs")
+    vi.mocked(listMyOrgs).mockResolvedValue([
+      { id: 1, name: "Come and See", role: { level: ROLE.MAINTAINER, name: "maintainer" } },
+    ])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: ROLE.OWNER, orgId: 1 }),
+      status: "ready",
+      refresh,
+      projectSettings: projectSettingsMock(),
+    })
+    const view = renderOverview()
+    const badge = within(await screen.findByTestId("overview-team-card")).getByTestId("section-visibility-badge")
+    expect(badge.tagName).toBe("BUTTON")
+    view.unmount()
+
+    useProject.mockReturnValue({
+      project: projectRecord({ level: ROLE.OWNER, orgId: 1 }),
+      status: "ready",
+      refresh,
+      projectSettings: projectSettingsMock({ canEdit: false }),
+    })
+    renderOverview()
+    const readOnly = within(await screen.findByTestId("overview-team-card")).getByTestId("section-visibility-badge")
+    expect(readOnly.querySelector("svg.lucide-chevron-down")).not.toBeInTheDocument()
+  })
+
+  it("persists an owner-only Team floor on the project from the header", async () => {
+    const patch = await openTeamPicker()
+    choose(await screen.findByRole("option", { name: /owners only/i }))
+    await waitFor(() => expect(patch).toHaveBeenCalledWith({ memberProgressViewMinRole: ROLE.OWNER }))
+    expect(patch).toHaveBeenCalledTimes(1)
+    expect(patch).not.toHaveBeenCalledWith(expect.objectContaining({ rosterViewMinRole: expect.anything() }))
+  })
+
+  it("disables Team floors below the org's and says why", async () => {
+    const patch = await openTeamPicker({ progressOrg: ROLE.MAINTAINER, rosterOrg: ROLE.MAINTAINER })
 
     for (const name of [/everyone with access/i, /contributors and up/i, /project leads and up/i]) {
       expect(await screen.findByRole("option", { name })).toHaveAttribute("aria-disabled", "true")
     }
-    expect(screen.getByRole("option", { name: /maintainers and owners/i })).not.toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByRole("option", { name: "Maintainers and owners (org default)" })).not.toHaveAttribute("aria-disabled", "true")
     expect(screen.getByRole("option", { name: /owners only/i })).not.toHaveAttribute("aria-disabled", "true")
 
     choose(screen.getByRole("option", { name: /everyone with access/i }))
@@ -1728,58 +2098,96 @@ describe("ProjectOverview Team card collapse (AQU-1172)", () => {
     fireEvent.click(screen.getByRole("button", { name: /why some options are unavailable/i }))
     expect(screen.getByTestId("section-visibility-min-hint")).toHaveAttribute("data-state", "open")
     expect(screen.getByTestId("section-visibility-min-hint")).toHaveTextContent(
+      "A project can only be stricter than its organization, which is set to “Maintainers and owners”. To go lower, an org owner lowers it in Settings → Security first.",
+    )
+  })
+
+  it("names the member list in the hint when it, not the org's progress setting, is what blocks going lower", async () => {
+    await openTeamPicker({ progressOrg: ROLE.CONTRIBUTOR, rosterOrg: ROLE.MAINTAINER })
+
+    expect(await screen.findByRole("option", { name: /project leads and up/i })).toHaveAttribute("aria-disabled", "true")
+    fireEvent.click(screen.getByRole("button", { name: /why some options are unavailable/i }))
+    expect(screen.getByTestId("section-visibility-min-hint")).toHaveTextContent(
       "This card lists members, and the member list is set to “Maintainers and owners”. To go lower, lower it on the Members card or in Settings → Security first.",
     )
   })
 
-  it("repairs a progress floor the old bug left below the member list when the shown value is picked again", async () => {
-    // What production holds after the bug: progress loosened to Everyone
-    // while the member list stayed at Maintainers, so the badge shows
-    // Maintainers and the loosening is invisible here.
-    const patch = await openTeamPicker({ memberProgressViewMinRole: ROLE.VIEWER, rosterViewMinRole: ROLE.MAINTAINER })
-
-    choose(await screen.findByRole("option", { name: /maintainers and owners/i }))
-    await waitFor(() => expect(patch).toHaveBeenCalledWith({ memberProgressViewMinRole: ROLE.MAINTAINER }))
-    expect(patch).toHaveBeenCalledTimes(1)
-  })
-
-  it("writes nothing when the shown value is picked again and progress already matches it", async () => {
-    const patch = await openTeamPicker({ memberProgressViewMinRole: ROLE.MAINTAINER, rosterViewMinRole: ROLE.MAINTAINER })
+  it("writes nothing when the org's shown value is picked again and the project follows the org", async () => {
+    const patch = await openTeamPicker({ progressOrg: ROLE.MAINTAINER, rosterOrg: ROLE.MAINTAINER })
 
     choose(await screen.findByRole("option", { name: /maintainers and owners/i }))
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(patch).not.toHaveBeenCalled()
   })
 
-  it("names an owner-only member list in the hint and leaves only Owners only open", async () => {
-    await openTeamPicker({ memberProgressViewMinRole: ROLE.MAINTAINER, rosterViewMinRole: ROLE.OWNER })
+  it("offers 'Follow the org' while the project has its own progress value, and it clears it", async () => {
+    const patch = await openTeamPicker({ progressOrg: ROLE.MAINTAINER, progressOwn: ROLE.OWNER })
+
+    choose(await screen.findByRole("option", { name: "Follow the org (Maintainers and owners)" }))
+    await waitFor(() => expect(patch).toHaveBeenCalledWith({ memberProgressViewMinRole: undefined }))
+  })
+
+  it("can always clear the project's own progress value, even when the member list is what the card then shows", async () => {
+    // Org progress is Contributors, the member list Maintainers: no level
+    // option can mean "follow the org" here, so the follow option is the way.
+    const patch = await openTeamPicker({ progressOrg: ROLE.CONTRIBUTOR, rosterOrg: ROLE.MAINTAINER, progressOwn: ROLE.OWNER })
+
+    choose(await screen.findByRole("option", { name: "Follow the org (Maintainers and owners)" }))
+    await waitFor(() => expect(patch).toHaveBeenCalledWith({ memberProgressViewMinRole: undefined }))
+  })
+
+  it("offers no 'Follow the org' while the project already follows it", async () => {
+    await openTeamPicker({ progressOrg: ROLE.MAINTAINER, rosterOrg: ROLE.MAINTAINER })
+    expect(await screen.findByRole("option", { name: "Maintainers and owners (org default)" })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: /follow the org/i })).not.toBeInTheDocument()
+  })
+
+  // Sam, 2026-10-13: "Owners only" binds maintainers — only an owner may
+  // loosen it. A maintainer never even gets the picker for it: the Team card
+  // is closed to them under an Owners-only progress value.
+  it("gives a maintainer no Team picker under the project's own Owners-only progress value", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: ROLE.MAINTAINER, orgId: 1 }),
+      status: "ready",
+      refresh,
+      projectSettings: projectSettingsMock({ progressOrg: ROLE.MAINTAINER, progressOwn: ROLE.OWNER }),
+    })
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    expect(screen.queryByTestId("overview-team-card")).not.toBeInTheDocument()
+  })
+
+  it("stores a Team value that only matches the member list, rather than following the org", async () => {
+    // Org progress is Contributors, the member list Maintainers: the card shows
+    // Maintainers. Choosing Maintainers is this project's own choice for the
+    // Team card — if the member list is lowered later, the card stays put.
+    const patch = await openTeamPicker({ progressOrg: ROLE.CONTRIBUTOR, rosterOrg: ROLE.MAINTAINER, progressOwn: ROLE.OWNER })
+
+    const maintainers = await screen.findByRole("option", { name: "Maintainers and owners" })
+    choose(maintainers)
+    await waitFor(() => expect(patch).toHaveBeenCalledWith({ memberProgressViewMinRole: ROLE.MAINTAINER }))
+  })
+
+  it("leaves only Owners only open under an owner-only member list", async () => {
+    await openTeamPicker({ progressOrg: ROLE.MAINTAINER, rosterOrg: ROLE.OWNER })
 
     expect(await screen.findByRole("option", { name: /maintainers and owners/i })).toHaveAttribute("aria-disabled", "true")
     expect(screen.getByRole("option", { name: /owners only/i })).not.toHaveAttribute("aria-disabled", "true")
     fireEvent.click(screen.getByRole("button", { name: /why some options are unavailable/i }))
-    expect(screen.getByTestId("section-visibility-min-hint")).toHaveAttribute("data-state", "open")
     expect(screen.getByTestId("section-visibility-min-hint")).toHaveTextContent("“Owners only”")
   })
 
-  it("offers every Team floor once the member list is open to everyone, and writes only the progress floor", async () => {
-    const patch = await openTeamPicker({ memberProgressViewMinRole: ROLE.MAINTAINER, rosterViewMinRole: ROLE.VIEWER })
+  it("offers every Team floor when the org opens both to everyone, and writes only the progress floor", async () => {
+    const patch = await openTeamPicker({ progressOrg: ROLE.VIEWER, rosterOrg: ROLE.VIEWER, progressOwn: ROLE.MAINTAINER })
 
-    const everyone = await screen.findByRole("option", { name: /everyone with access/i })
-    expect(everyone).not.toHaveAttribute("aria-disabled", "true")
+    const contributors = await screen.findByRole("option", { name: /contributors and up/i })
+    expect(contributors).not.toHaveAttribute("aria-disabled", "true")
     expect(screen.queryByRole("button", { name: /why some options are unavailable/i })).not.toBeInTheDocument()
 
-    choose(everyone)
-    await waitFor(() => expect(patch).toHaveBeenCalledWith({ memberProgressViewMinRole: ROLE.VIEWER }))
+    choose(contributors)
+    await waitFor(() => expect(patch).toHaveBeenCalledWith({ memberProgressViewMinRole: ROLE.CONTRIBUTOR }))
     expect(patch).toHaveBeenCalledTimes(1)
-  })
-
-  it("raises the Team floor to Owners only without touching the member-list floor", async () => {
-    const patch = await openTeamPicker({ memberProgressViewMinRole: ROLE.MAINTAINER, rosterViewMinRole: ROLE.MAINTAINER })
-
-    choose(await screen.findByRole("option", { name: /owners only/i }))
-    await waitFor(() => expect(patch).toHaveBeenCalledWith({ memberProgressViewMinRole: ROLE.OWNER }))
-    expect(patch).toHaveBeenCalledTimes(1)
-    expect(patch).not.toHaveBeenCalledWith(expect.objectContaining({ rosterViewMinRole: expect.anything() }))
   })
 
   it("starts expanded again after a fresh mount, with no saved collapsed state", async () => {
@@ -1936,6 +2344,13 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     expect(defaultRow).toHaveTextContent("50%")
     expect(esRow).toHaveTextContent("20%")
     expect(esRow).toHaveTextContent("8%")
+    // AQU-1764: ONE two-part bar per lane (it was an amber bar and an emerald
+    // one): validated, then translated but not validated.
+    const parts = (row: HTMLElement) => [...row.querySelectorAll<HTMLElement>("[data-progress-tone]")]
+      .map((part) => `${part.dataset.progressTone} ${part.style.width}`)
+    expect(defaultRow.querySelectorAll('[data-slot="progress-split-bar"]')).toHaveLength(1)
+    expect(parts(defaultRow)).toEqual(["textValidated 50%", "textTranslated 30%"])
+    expect(parts(esRow)).toEqual(["textValidated 8%", "textTranslated 12%"])
   })
 
   it("AQU-1458: tucks archived lanes into a collapsed group and keeps a one-active-lane project visible", async () => {
@@ -1965,6 +2380,12 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     expect(sw).toHaveTextContent("Swahili")
     expect(sw).toHaveTextContent("Archived")
     expect(sw).toHaveTextContent("20%")
+    // AQU-1764: one dimmed two-part bar, and the validated figure names itself
+    // since an archived row has no column headings.
+    expect(sw).toHaveTextContent("8% validated")
+    const archivedBars = sw.querySelectorAll('[data-slot="progress-split-bar"]')
+    expect(archivedBars).toHaveLength(1)
+    expect(archivedBars[0].className).toContain("opacity-70")
     expect(sw.compareDocumentPosition(fr) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(within(sw).queryByTestId("overview-lane-actions-sw")).not.toBeInTheDocument()
 
@@ -2012,6 +2433,106 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     // Back to All restores the cross-lane figures.
     fireEvent.click(screen.getByRole("tab", { name: "All" }))
     await waitFor(() => expect(statTile("Translated")).toHaveTextContent("50%"))
+  })
+
+  it("AQU-1951: a language tab shows that language's recordings, over the project's audio cells", async () => {
+    // Each take belongs to a language (AQU-1591), so audio follows the tab the
+    // way text does. AI drafts still have no per-language count and grey out.
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject({
+      aiDraftedCells: 20, audioCells: 60, validatedAudioCells: 16,
+      lanes: [
+        { ...TWO_LANES[0], audioCells: 50, validatedAudioCells: 12 },
+        { ...TWO_LANES[1], audioCells: 10, validatedAudioCells: 4 },
+      ],
+    })])
+    renderOverview()
+    await screen.findByTestId("lane-filter-tabs")
+    const card = screen.getByTestId("progress-card")
+    const bars = () => within(card).getAllByTestId(/^stat-bar-/).map((b) => b.getAttribute("data-testid"))
+
+    // All: the project's 60 and 16 of 200 cells.
+    expect(statTile("Has audio")).toHaveTextContent("30%")
+    expect(statTile("Audio Validated")).toHaveTextContent("8%")
+
+    // es: its own 10 and 4, still of the project's 200 cells.
+    fireEvent.click(screen.getByRole("tab", { name: "es" }))
+    await waitFor(() => expect(statTile("Has audio")).toHaveTextContent("5%"))
+    expect(statTile("Audio Validated")).toHaveTextContent("2%")
+    for (const label of ["Has audio", "Audio Validated"]) {
+      expect(statTile(label).firstElementChild!.className, label).not.toContain("text-muted-foreground/60")
+    }
+    expect(statTile("AI Drafted").firstElementChild!.className).toContain("text-muted-foreground/60")
+    expect(bars()).toEqual([
+      "stat-bar-textTranslated", "stat-bar-textValidated", "stat-bar-audioRecorded", "stat-bar-audioValidated",
+    ])
+    expect(within(card).getByTestId("stat-bar-audioRecorded")).toHaveTextContent("10/200")
+    expect(within(card).getByTestId("stat-bar-audioValidated")).toHaveTextContent("4/200")
+  })
+
+  it("AQU-1954: a language tab measures audio against that language's own audio total", async () => {
+    // The server sends each language what it owes: every file when its
+    // "Records audio" switch is on, else the files it has recorded in.
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject({
+      audioCells: 60, validatedAudioCells: 16, audioTotalCells: 300,
+      lanes: [
+        { ...TWO_LANES[0], audioCells: 50, validatedAudioCells: 12, audioTotalCells: 100 },
+        { ...TWO_LANES[1], audioCells: 10, validatedAudioCells: 4, audioTotalCells: 200, recordsAudio: true },
+      ],
+    })])
+    renderOverview()
+    await screen.findByTestId("lane-filter-tabs")
+    const card = screen.getByTestId("progress-card")
+    // All: both languages' 60 over both languages' 300.
+    expect(statTile("Has audio")).toHaveTextContent("20%")
+    fireEvent.click(screen.getByRole("tab", { name: "es" }))
+    await waitFor(() => expect(statTile("Has audio")).toHaveTextContent("5%"))
+    expect(within(card).getByTestId("stat-bar-audioRecorded")).toHaveTextContent("10/200")
+    expect(within(card).getByTestId("stat-bar-audioValidated")).toHaveTextContent("4/200")
+  })
+
+  it("AQU-1954: a language that is off and has recorded nothing greys its audio and says how to turn it on", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject({
+      audioCells: 50, validatedAudioCells: 12, audioTotalCells: 100,
+      lanes: [
+        { ...TWO_LANES[0], audioCells: 50, validatedAudioCells: 12, audioTotalCells: 100 },
+        { ...TWO_LANES[1], audioCells: 0, validatedAudioCells: 0, audioTotalCells: 0 },
+      ],
+    })])
+    renderOverview()
+    await screen.findByTestId("lane-filter-tabs")
+    const card = screen.getByTestId("progress-card")
+    const bars = () => within(card).getAllByTestId(/^stat-bar-/).map((b) => b.getAttribute("data-testid"))
+    fireEvent.click(screen.getByRole("tab", { name: "es" }))
+    await waitFor(() => expect(bars()).not.toContain("stat-bar-audioRecorded"))
+    expect(bars()).not.toContain("stat-bar-audioValidated")
+    for (const label of ["Has audio", "Audio Validated"]) {
+      expect(statTile(label).firstElementChild!.className, label).toContain("text-muted-foreground/60")
+    }
+  })
+
+  it("greys the cross-language tiles and drops their bars on a language tab when the server sends no lane audio (AQU-1764)", async () => {
+    // AI drafts have no per-language breakdown, and an older server sends no
+    // lane audio, so with a language tab chosen those tiles grey out (swatch
+    // faded with the number) and their bars are not drawn at all.
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject({ aiDraftedCells: 20, audioCells: 60, validatedAudioCells: 15 })])
+    renderOverview()
+    await screen.findByTestId("lane-filter-tabs")
+    const card = screen.getByTestId("progress-card")
+    const bars = () => within(card).getAllByTestId(/^stat-bar-/).map((b) => b.getAttribute("data-testid"))
+    expect(bars()).toHaveLength(5)
+
+    fireEvent.click(screen.getByRole("tab", { name: "es" }))
+    await waitFor(() => expect(bars()).toEqual(["stat-bar-textTranslated", "stat-bar-textValidated"]))
+    for (const label of ["AI Drafted", "Has audio", "Audio Validated"]) {
+      const tile = statTile(label)
+      expect(tile.firstElementChild!.className, label).toContain("text-muted-foreground/60")
+      expect(tile.querySelector("[data-progress-swatch]")!.className, label).toContain("opacity-40")
+    }
+    expect(statTile("Translated").firstElementChild!.className).toContain("text-foreground")
   })
 
   it("AQU-1566: hidden timeline files are neither counted nor offered for assignment", async () => {
@@ -2133,6 +2654,68 @@ describe("plan board on the overview", () => {
     // The card it replaced is gone for good.
     expect(screen.queryByTestId("file-row")).toBeNull()
     expect(screen.queryByTestId("file-breakdown-header")).toBeNull()
+  })
+
+  it("reads the plan in the language the editor opens when the project has no unnamed one", async () => {
+    // AQU-1594: a new project's first language is tagged with its own name and
+    // there is no '' lane. Reading '' found no lane at all, so a file with four
+    // takes in Spanish showed 0% and no audio bar. An archived lane in first
+    // position is passed over, as the editor passes over it.
+    const lane = (over: Record<string, unknown>) => ({
+      language: null, name: null, langCode: null, archivedAt: null, ...over,
+    })
+    useProject.mockReturnValue({
+      project: projectRecord({
+        level: 600,
+        lanes: [
+          lane({ id: "aaaa0001", role: "source", legacyTag: null, position: 0 }),
+          lane({ id: "aaaa0002", role: "target", language: "French", legacyTag: "French", position: 0, archivedAt: "2026-10-01" }),
+          lane({ id: "aaaa0003", role: "target", language: "Spanish", legacyTag: "Spanish", position: 1 }),
+        ],
+      } as Partial<ProjectRecord> & { level: number }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "John", totalCells: 5, filledCells: 0, validatedCells: 0,
+      aiDraftedCells: 0, audioCells: 4, validatedAudioCells: 0, recordedMs: 16000,
+      lastEditAt: null, deadlineAt: null, sourceLanguage: null, targetLanguage: null,
+    }])
+    fetchProjectPlan.mockImplementation((_id: string, _tok: string, laneTag: string) => Promise.resolve({
+      projectId: "p1", lane: laneTag, validationCount: 1, revision: 1,
+      units: [planUnit({ fileName: "Market scene.vtt", totalCount: 5, filledCount: 0, audioCount: laneTag === "Spanish" ? 4 : 0 })],
+    }))
+    renderOverview()
+
+    const row = await screen.findByTestId("plan-row-f1-")
+    await waitFor(() => expect(within(row).getByText("AUD")).toBeInTheDocument())
+    expect(fetchProjectPlan.mock.calls.map((c) => c[2])).not.toContain("")
+    expect(fetchProjectPlan.mock.calls.map((c) => c[2])).toContain("Spanish")
+  })
+
+  it("names the language pair from the lane rows, the project-level languages being retired", async () => {
+    // AQU-1977: a project made since AQU-1594 carries no sourceLanguage or
+    // targetLanguage, so the header line read nothing at all.
+    const lane = (over: Record<string, unknown>) => ({
+      language: null, name: null, langCode: null, archivedAt: null, ...over,
+    })
+    useProject.mockReturnValue({
+      project: projectRecord({
+        level: 600,
+        lanes: [
+          lane({ id: "aaaa0001", role: "source", language: "English", legacyTag: null, position: 0 }),
+          lane({ id: "aaaa0003", role: "target", language: "Spanish", legacyTag: "Spanish", position: 1 }),
+          lane({ id: "aaaa0004", role: "target", language: "French", legacyTag: "French", position: 2 }),
+        ],
+      } as Partial<ProjectRecord> & { level: number }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([])
+    fetchProjectPlan.mockResolvedValue({ projectId: "p1", lane: "Spanish", validationCount: 1, revision: 1, units: [] })
+    renderOverview()
+    // The arrow is its own span (it mirrors under RTL), so match the whole line.
+    expect(await screen.findByText((_, el) =>
+      el?.tagName === "P" && /^English\s*→\s*Spanish$/.test(el.textContent?.trim() ?? ""),
+    )).toBeInTheDocument()
   })
 
   it("summarises how many units are done without naming the unit", async () => {

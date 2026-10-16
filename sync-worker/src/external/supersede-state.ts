@@ -6,35 +6,34 @@
 // The readers mirror the ones the changeset engine already uses for
 // preconditions (preconditions.ts) and existence (emit-events-engine.ts): same
 // `(file_id, cell_id) IN (…)` tuple form, same key helpers, so a lane means
-// the same thing here as it does at prepare.
+// the same thing here as it does at prepare — and the same bounded paging
+// (lib/cell-key-lookup.ts, AQU-1983): commit reaches resolveSupersedeState on
+// the drift branch with EVERY target cell of the changeset, 5,000 at the
+// SetTranslation cap, which no single statement may carry.
 
 import { cellKey, laneCellKey } from './cell-keys'
 import type { Command } from './commands'
 import type { LiveTargetValue, SupersedeLiveState } from './supersede'
 import { loadProjectSettings } from '../../../db/shared/projects'
 import { wireLegacyTagSql } from '../../../db/shared/lane-sql'
-
-interface CellPair {
-  fileId: string
-  cellId: string
-}
+import { selectByCellKeys, type CellKey } from '../lib/cell-key-lookup'
 
 /** Exactly the rows a plan's checkable rules need — nothing speculative. */
 interface PlanRefs {
   /** Cells a target VALUE is wanted for (SetTranslation). */
-  targetCells: CellPair[]
+  targetCells: CellKey[]
   /** Cells a VALIDATOR set is wanted for (EmitEvents cell.validate). */
-  validatorCells: CellPair[]
+  validatorCells: CellKey[]
   /** Cells a WAIVER set is wanted for (EmitEvents cell.waive). */
-  waiverCells: CellPair[]
+  waiverCells: CellKey[]
   commentIds: string[]
   needsSettings: boolean
 }
 
 function collectRefs(commands: readonly Command[]): PlanRefs {
-  const target = new Map<string, CellPair>()
-  const validator = new Map<string, CellPair>()
-  const waiver = new Map<string, CellPair>()
+  const target = new Map<string, CellKey>()
+  const validator = new Map<string, CellKey>()
+  const waiver = new Map<string, CellKey>()
   const comments = new Set<string>()
   let needsSettings = false
 
@@ -70,39 +69,29 @@ function collectRefs(commands: readonly Command[]): PlanRefs {
   }
 }
 
-/** `(file_id, cell_id) IN ((?,?), …)` placeholder + bind list. */
-function pairBinds(pairs: readonly { fileId: string; cellId: string }[]): {
-  placeholders: string
-  binds: unknown[]
-} {
-  const binds: unknown[] = []
-  for (const p of pairs) binds.push(p.fileId, p.cellId)
-  return { placeholders: pairs.map(() => '(?, ?)').join(', '), binds }
-}
-
 async function readTargetValues(
   db: AquillaDb,
   projectId: string,
-  pairs: readonly { fileId: string; cellId: string }[],
+  pairs: readonly CellKey[],
 ): Promise<Map<string, LiveTargetValue>> {
   const map = new Map<string, LiveTargetValue>()
   if (pairs.length === 0) return map
-  const { placeholders, binds } = pairBinds(pairs)
-  const { results } = await db
-    .prepare(
+  const results = await selectByCellKeys<{
+    file_id: string
+    cell_id: string
+    target_lang: string | null
+    lane_id: string | null
+    value: string
+    value_html: string | null
+  }>(
+    db,
+    pairs,
+    [projectId],
+    (placeholders) =>
       `SELECT file_id, cell_id, ${wireLegacyTagSql("cells")} AS target_lang, lane_id, value, value_html FROM cells
         WHERE project_id = ? AND side = 'target'
           AND (file_id, cell_id) IN (${placeholders})`,
-    )
-    .bind(projectId, ...binds)
-    .all<{
-      file_id: string
-      cell_id: string
-      target_lang: string | null
-      lane_id: string | null
-      value: string
-      value_html: string | null
-    }>()
+  )
   for (const r of results) {
     // New plans ask by lanes.id. A plan staged before AQU-1615 still asks by
     // target_lang. Index both so either key finds this row.
@@ -119,18 +108,18 @@ async function readTargetValues(
 async function readWaivedRules(
   db: AquillaDb,
   projectId: string,
-  pairs: readonly { fileId: string; cellId: string }[],
+  pairs: readonly CellKey[],
 ): Promise<Map<string, Set<string>>> {
   const map = new Map<string, Set<string>>()
   if (pairs.length === 0) return map
-  const { placeholders, binds } = pairBinds(pairs)
-  const { results } = await db
-    .prepare(
+  const results = await selectByCellKeys<{ file_id: string; cell_id: string; rule_id: string }>(
+    db,
+    pairs,
+    [projectId],
+    (placeholders) =>
       `SELECT file_id, cell_id, rule_id FROM cell_waivers
         WHERE project_id = ? AND (file_id, cell_id) IN (${placeholders})`,
-    )
-    .bind(projectId, ...binds)
-    .all<{ file_id: string; cell_id: string; rule_id: string }>()
+  )
   for (const r of results) {
     const key = cellKey(r.file_id, r.cell_id)
     const set = map.get(key) ?? new Set<string>()
@@ -143,24 +132,24 @@ async function readWaivedRules(
 async function readValidators(
   db: AquillaDb,
   projectId: string,
-  pairs: readonly { fileId: string; cellId: string }[],
+  pairs: readonly CellKey[],
 ): Promise<Map<string, Set<string>>> {
   const map = new Map<string, Set<string>>()
   if (pairs.length === 0) return map
-  const { placeholders, binds } = pairBinds(pairs)
-  const { results } = await db
-    .prepare(
+  const results = await selectByCellKeys<{
+    file_id: string
+    cell_id: string
+    target_lang: string | null
+    lane_id: string | null
+    username: string
+  }>(
+    db,
+    pairs,
+    [projectId],
+    (placeholders) =>
       `SELECT file_id, cell_id, ${wireLegacyTagSql("cell_validators")} AS target_lang, lane_id, username FROM cell_validators
         WHERE project_id = ? AND (file_id, cell_id) IN (${placeholders})`,
-    )
-    .bind(projectId, ...binds)
-    .all<{
-      file_id: string
-      cell_id: string
-      target_lang: string | null
-      lane_id: string | null
-      username: string
-    }>()
+  )
   for (const r of results) {
     const tag = r.target_lang ?? ''
     const tagKey = laneCellKey(r.file_id, r.cell_id, tag)

@@ -219,3 +219,79 @@ describe('loosensPolicy — batch filter', () => {
     ).toEqual([])
   })
 })
+
+// AQU-1771: an unset key follows the ORG default before the built-in one, so
+// the direction is judged against what the project actually enforces.
+describe('policyWriteDirection — org defaults (AQU-1771)', () => {
+  it('a project following an org default of 3 approvals: 2 loosens, 4 tightens', () => {
+    expect(policyWriteDirection('validationCount', undefined, 2, 3).direction).toBe('loosen')
+    expect(policyWriteDirection('validationCount', undefined, 4, 3).direction).toBe('tighten')
+    expect(policyWriteDirection('validationCountAudio', null, 1, 2).direction).toBe('loosen')
+  })
+
+  it("clearing a project's own value means following the org: compared as the org value", () => {
+    // Own 4, org 2: clearing drops to 2 — a loosening.
+    expect(policyWriteDirection('validationCount', 4, null, 2).direction).toBe('loosen')
+    // Own 2, org 3: clearing raises to 3 — a tightening.
+    expect(policyWriteDirection('validationCount', 2, null, 3).direction).toBe('tighten')
+  })
+
+  it("a project's own value still wins over the org's", () => {
+    expect(policyWriteDirection('validationCount', 5, 4, 1).direction).toBe('loosen')
+  })
+
+  it('an org value the key does not accept is ignored (built-in default applies)', () => {
+    expect(policyWriteDirection('validationCount', undefined, 2, 'lots').direction).toBe('tighten')
+  })
+
+  it('loosensPolicy passes each key its own org default', () => {
+    const verdicts = loosensPolicy(
+      [{ key: 'validationCount', value: 2 }, { key: 'validationCountAudio', value: 2 }],
+      {},
+      { validationCount: 3, validationCountAudio: 1 },
+    )
+    expect(verdicts.map((v) => v.key)).toEqual(['validationCount'])
+  })
+})
+
+// AQU-1771: a project's own visibility floors. The org's floor is both the
+// value an unset key reads as and a minimum: the project enforces the higher
+// of the two, so a write is judged against what it actually enforces.
+describe('policyWriteDirection — visibility floors (AQU-1771)', () => {
+  for (const key of ['rosterViewMinRole', 'memberProgressViewMinRole']) {
+    describe(key, () => {
+      it('raising tightens, lowering loosens', () => {
+        expect(policyWriteDirection(key, 600, 700, 600).direction).toBe('tighten')
+        expect(policyWriteDirection(key, 700, 600, 600).direction).toBe('loosen')
+      })
+
+      it("unset reads as the org's floor", () => {
+        expect(policyWriteDirection(key, undefined, 500, 400).direction).toBe('tighten')
+        expect(policyWriteDirection(key, undefined, 500, 600).direction).toBe('loosen')
+      })
+
+      it("clearing means following the org: compared as the org's floor", () => {
+        expect(policyWriteDirection(key, 700, null, 600).direction).toBe('loosen')
+        expect(policyWriteDirection(key, 500, null, 600).direction).toBe('tighten')
+      })
+
+      it("a stored value below the org's floor reads as the org's floor", () => {
+        // Stored 400 before the org raised to 600: the project enforces 600,
+        // so writing 500 would loosen nothing it enforces — and is refused as
+        // below the org, not admitted as 400 → 500.
+        expect(policyWriteDirection(key, 400, 500, 600).direction).toBe('loosen')
+        expect(policyWriteDirection(key, 400, 700, 600).direction).toBe('tighten')
+      })
+
+      it('a value that is not a role level is invalid', () => {
+        expect(policyWriteDirection(key, undefined, 650, 600).direction).toBe('invalid')
+        expect(policyWriteDirection(key, undefined, 'owner', 600).direction).toBe('invalid')
+      })
+
+      it('with no org to inherit from, unset reads as Maintainer', () => {
+        expect(policyWriteDirection(key, undefined, 500).direction).toBe('loosen')
+        expect(policyWriteDirection(key, undefined, 700).direction).toBe('tighten')
+      })
+    })
+  }
+})

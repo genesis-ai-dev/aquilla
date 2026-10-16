@@ -726,6 +726,63 @@ describe("conditional reads + ?since= delta", () => {
     expect(body.maxServerSeq).toBe(501)
   })
 
+  // AQU-1842: the resync gate only asks "more than the cap?", so the probe
+  // that feeds it must stop one row past the cap. Unbounded, a client back
+  // from days offline (or one whose cursor predates a bulk import / agent
+  // apply) dragged every changed cell id in the range into the Worker to be
+  // told to resync anyway. Asserted on the STATEMENT, not the response: an
+  // unbounded probe answers the over-cap case identically, so only the SQL
+  // the route sends can catch the regression.
+  it("AQU-1842: the changed-cell probe is bounded at the resync cap + 1, over the cap and under it", async () => {
+    const probes: Array<readonly unknown[]> = []
+    const onStatement = (sql: string, params: readonly unknown[]) => {
+      if (sql.includes("DISTINCT cell_id") && sql.includes("FROM events")) {
+        expect(sql).toContain("LIMIT")
+        probes.push(params)
+      }
+    }
+    // 600 distinct changed cells: well past the 500 cap, so the probe comes
+    // back full and the gate must answer resync off 501 rows.
+    const events: EventSeed[] = []
+    for (let i = 0; i < 600; i++) {
+      events.push(makeEvent({ id: `e${i}`, server_seq: i + 1, cell_id: `c${i}` }))
+    }
+    const { db } = await makeTestDb({ cells: [], events }, { onStatement })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const read = async (since: number) => {
+      const res = (await handleCellsReadRequest(
+        new Request(
+          `https://w/api/v1/projects/proj-a/files/file-x/cells?since=${since}`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        ),
+        envWith(db),
+      ))!
+      expect(res.status).toBe(200)
+      return (await res.json()) as {
+        resync?: boolean
+        delta?: boolean
+        changedCellIds?: string[]
+      }
+    }
+
+    const wide = await read(0)
+    expect(wide.resync).toBe(true)
+    expect(wide.delta).toBeUndefined()
+    expect(probes).toHaveLength(1)
+    // cap + 1 — one row past what the gate compares against, never the cap
+    // itself (501 rows is what proves ">500"; 500 cannot).
+    expect(probes[0]?.[probes[0].length - 1]).toBe(501)
+
+    // The bound must not clip a delta a client is entitled to: a cursor with
+    // 3 changed cells behind it still gets all 3, not a resync.
+    const narrow = await read(597)
+    expect(narrow.resync).toBeUndefined()
+    expect(narrow.delta).toBe(true)
+    expect(narrow.changedCellIds?.sort()).toEqual(["c597", "c598", "c599"])
+    expect(probes).toHaveLength(2)
+    expect(probes[1]?.[probes[1].length - 1]).toBe(501)
+  })
+
   it("rejects a malformed since with 400", async () => {
     const { db } = await makeTestDb({ cells: [] })
     const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })

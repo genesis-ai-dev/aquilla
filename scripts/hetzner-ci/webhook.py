@@ -12,7 +12,7 @@ from pathlib import Path
 REPO = "genesis-ai-dev/aquilla"
 REPO_ID = 1210631685
 STATE = Path(os.environ.get("QA_STATE", "/var/lib/aquilla-qa"))
-# release/YYYY/MM/DD-NN — the branch the deploy bot pushes, and the branch a
+# release/YYYY/MM/DD-NN — the branch the Release cut workflow pushes, and the branch a
 # person piles ready pull requests onto. Nothing else starts a run.
 RELEASE_REF = re.compile(r"release/\d{4}/\d{2}/\d{2}-\d{2}\Z")
 

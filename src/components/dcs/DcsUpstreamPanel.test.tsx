@@ -6,9 +6,10 @@
 //   1. "Check for updates" resolves a newer release and renders
 //      "vOLD → vNEW, N files changed".
 //   2. "Import changes" runs applyDelta with REAL source emitters — i.e. the
-//      emitters passed to applyDelta actually invoke emitSourceCellCommit /
-//      emitSourceCellDelete / the source.cell.create enqueue path, and the
-//      advanced cursor is persisted via patch().
+//      emitters passed to applyDelta build genuine source.cell.create /
+//      .commit / .delete envelopes, those go out through the BULK commit path
+//      (AQU-1860, not one outbox row per cell), and the advanced cursor is
+//      persisted via patch().
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
@@ -46,6 +47,9 @@ vi.mock("@/hooks/useFrontierSession", () => ({
 // Token fetcher — always resolves a token.
 vi.mock("@/lib/sync/cqrs-bridge", () => ({
   buildFileScopedTokenFetcher: () => async () => "jwt-token",
+  // events-emit reads this for its client-side role mirror. null = unknown
+  // role, which fails open (the server stays authoritative).
+  getCqrsOutboxBridge: () => null,
 }))
 
 // ── Reads ───────────────────────────────────────────────────────────────────
@@ -57,16 +61,47 @@ vi.mock("@/lib/sync/cells-read", () => ({
   ]),
 }))
 
-// ── Emitters (the "real emitters" applyDelta must call) ─────────────────────
+// ── Bulk commit (AQU-1860) ─────────────────────────────────────────────────
+//
+// applyDelta's emitters no longer write one outbox row per cell; they build
+// real envelopes with `buildRawEvent` (left unmocked — it is pure) and the
+// whole delta is handed to `bulkPostEvents` in one call. Capturing that call is
+// what proves the wiring, so the per-kind assertions below read the envelopes.
 
-const mockEmitCommit = vi.fn().mockResolvedValue("commit-evt")
-const mockEmitDelete = vi.fn().mockResolvedValue("delete-evt")
-const mockEnqueue = vi.fn().mockResolvedValue({ event: {}, eventId: "create-evt" })
-vi.mock("@/lib/sync/events-emit", () => ({
-  emitSourceCellCommit: (...a: unknown[]) => mockEmitCommit(...a),
-  emitSourceCellDelete: (...a: unknown[]) => mockEmitDelete(...a),
-  enqueueEvent: (...a: unknown[]) => mockEnqueue(...a),
+type BulkOutcome = {
+  posted: number
+  rejected: Array<{ id: string; status: number; reason: string }>
+  stale: Array<{ id: string; fileId: string | null; cellId: string | null }>
+}
+
+const mockBulkPostEvents = vi.fn(
+  async (_arg: { events: PostedEvent[] }): Promise<BulkOutcome> => ({
+    posted: 0,
+    rejected: [],
+    stale: [],
+  }),
+)
+vi.mock("@/lib/sync/bulk-events", () => ({
+  bulkPostEvents: (arg: unknown) => mockBulkPostEvents(arg as { events: PostedEvent[] }),
 }))
+
+type PostedEvent = {
+  kind: string
+  cellId?: string
+  fileId?: string
+  parentId: string | null
+  payload: Record<string, unknown>
+}
+
+/** The envelopes handed to the single bulkPostEvents call, by kind. */
+function postedEvents(): PostedEvent[] {
+  expect(mockBulkPostEvents).toHaveBeenCalledTimes(1)
+  return mockBulkPostEvents.mock.calls[0][0].events
+}
+
+function postedOfKind(kind: string): PostedEvent[] {
+  return postedEvents().filter((event) => event.kind === kind)
+}
 
 // ── Delta engine — computeDelta returns a canned result; applyDelta is a spy
 //    that ACTUALLY invokes the passed emitters so we prove the wiring. ────────
@@ -155,9 +190,7 @@ describe("DcsUpstreamPanel", () => {
       updatedBy: null,
       settings: settingsBag,
     }))
-    mockEmitCommit.mockClear().mockResolvedValue("commit-evt")
-    mockEmitDelete.mockClear().mockResolvedValue("delete-evt")
-    mockEnqueue.mockClear().mockResolvedValue({ event: {}, eventId: "create-evt" })
+    mockBulkPostEvents.mockClear().mockResolvedValue({ posted: 0, rejected: [], stale: [] })
     mockComputeDelta.mockClear().mockResolvedValue(cannedDelta)
     mockComputeRepairDelta.mockClear().mockResolvedValue(cannedDelta)
     mockApplyDelta.mockClear()
@@ -218,27 +251,33 @@ describe("DcsUpstreamPanel", () => {
       expect(mockApplyDelta).toHaveBeenCalledTimes(1)
     })
 
-    // applyDelta was handed REAL emitters — invoking them fired the real
-    // typed source emit helpers (commit chained on the head, delete, create).
-    expect(mockEmitCommit).toHaveBeenCalledTimes(1)
-    expect(mockEmitCommit.mock.calls[0][0]).toMatchObject({
+    // applyDelta was handed REAL emitters — invoking them built genuine source
+    // envelopes (commit chained on the head, delete, create), and the whole
+    // delta went out in ONE bulk commit rather than one outbox row per cell
+    // (AQU-1860).
+    const commits = postedOfKind("source.cell.commit")
+    expect(commits).toHaveLength(1)
+    expect(commits[0]).toMatchObject({
       cellId: "TIT-1-1",
       parentId: "src-head-1",
-      value: "new verse 1",
+      payload: { value: "new verse 1" },
     })
-    expect(mockEmitDelete).toHaveBeenCalledTimes(1)
-    expect(mockEmitDelete.mock.calls[0][0]).toMatchObject({ cellId: "TIT-1-9" })
-    // create goes through enqueueEvent with kind source.cell.create.
-    expect(mockEnqueue).toHaveBeenCalledTimes(1)
+    const deletes = postedOfKind("source.cell.delete")
+    expect(deletes).toHaveLength(1)
+    expect(deletes[0]).toMatchObject({ cellId: "TIT-1-9" })
+    const creates = postedOfKind("source.cell.create")
+    expect(creates).toHaveLength(1)
     // fileId MUST be the parsed file's id, not the cell id — a create is absent
     // from currentCells, so the old `fileIdByCellId.get() ?? cell.cellId` fallback
     // orphaned new cells into a phantom file. Guard that regression here.
-    expect(mockEnqueue.mock.calls[0][0]).toMatchObject({
+    expect(creates[0]).toMatchObject({
       kind: "source.cell.create",
       cellId: "TIT-1-3",
       fileId: "file-57-TIT",
     })
-    expect(mockEnqueue.mock.calls[0][0].fileId).not.toBe("TIT-1-3")
+    expect(creates[0].fileId).not.toBe("TIT-1-3")
+    // A genesis kind must carry a null parent; the commit's parent is the head.
+    expect(creates[0].parentId).toBeNull()
 
     // applyDelta's ctx uses the destination projectId + the new release's
     // fullName + sha — projectId scopes the deterministic event ids so the same
@@ -261,6 +300,34 @@ describe("DcsUpstreamPanel", () => {
     await waitFor(() => {
       expect(screen.getByText(/1 created, 1 updated, 1 removed/i)).toBeInTheDocument()
     })
+  })
+
+  it("does NOT advance the cursor when the server refused part of the delta", async () => {
+    // AQU-1860: the bulk path has no outbox behind it, so a partial commit is
+    // the panel's to report. Advancing the pin here would be the damaging
+    // outcome: the next "Check for updates" would compare against a release
+    // this project never fully received, and the missing cells would never be
+    // offered again.
+    mockBulkPostEvents.mockResolvedValue({
+      posted: 3,
+      rejected: [],
+      stale: [{ id: "ev-TIT-1-1", fileId: "file-tit", cellId: "TIT-1-1" }],
+    })
+    const client = makeClient(V89, ["57-TIT.usfm"])
+    render(<DcsUpstreamPanel projectId="adapter-1" roleLevel={600} client={client} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /check for updates/i }))
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /import changes/i })).toBeInTheDocument(),
+    )
+    fireEvent.click(screen.getByRole("button", { name: /import changes/i }))
+
+    await waitFor(() => expect(mockBulkPostEvents).toHaveBeenCalledTimes(1))
+    await waitFor(() => {
+      expect(screen.getByText(/could not be applied/i)).toBeInTheDocument()
+    })
+    expect(mockPatch).not.toHaveBeenCalled()
+    expect(screen.queryByText(/1 created, 1 updated, 1 removed/i)).not.toBeInTheDocument()
   })
 
   it("Re-sync content SCANS first: shows counts and emits NOTHING until confirmed", async () => {
@@ -289,9 +356,7 @@ describe("DcsUpstreamPanel", () => {
     ).toBeGreaterThan(0)
     // …and NOTHING has been emitted or applied yet.
     expect(mockApplyDelta).not.toHaveBeenCalled()
-    expect(mockEmitCommit).not.toHaveBeenCalled()
-    expect(mockEmitDelete).not.toHaveBeenCalled()
-    expect(mockEnqueue).not.toHaveBeenCalled()
+    expect(mockBulkPostEvents).not.toHaveBeenCalled()
 
     // Cancelling the confirm dialog also applies nothing.
     fireEvent.click(screen.getByRole("button", { name: /cancel/i }))
@@ -317,15 +382,17 @@ describe("DcsUpstreamPanel", () => {
     await waitFor(() => expect(mockApplyDelta).toHaveBeenCalledTimes(1))
     // The apply step re-read the settings cursor before emitting.
     expect(mockRefresh).toHaveBeenCalled()
-    expect(mockEmitCommit).toHaveBeenCalledTimes(1)
-    expect(mockEmitCommit.mock.calls[0][0]).toMatchObject({
+    const repairCommits = postedOfKind("source.cell.commit")
+    expect(repairCommits).toHaveLength(1)
+    expect(repairCommits[0]).toMatchObject({
       cellId: "TIT-1-1",
       parentId: "src-head-1",
-      value: "new verse 1",
+      payload: { value: "new verse 1" },
     })
-    expect(mockEmitDelete).toHaveBeenCalledTimes(1)
-    expect(mockEnqueue).toHaveBeenCalledTimes(1)
-    expect(mockEnqueue.mock.calls[0][0]).toMatchObject({
+    expect(postedOfKind("source.cell.delete")).toHaveLength(1)
+    const repairCreates = postedOfKind("source.cell.create")
+    expect(repairCreates).toHaveLength(1)
+    expect(repairCreates[0]).toMatchObject({
       kind: "source.cell.create",
       fileId: "file-57-TIT",
     })
@@ -353,8 +420,7 @@ describe("DcsUpstreamPanel", () => {
     await waitFor(() => {
       expect(screen.getByText(/everything already matches/i)).toBeInTheDocument()
     })
-    expect(mockEmitCommit).not.toHaveBeenCalled()
-    expect(mockEnqueue).not.toHaveBeenCalled()
+    expect(mockBulkPostEvents).not.toHaveBeenCalled()
   })
 
   it("Re-sync apply ABORTS without events when the cursor vanished between confirm and apply (detach race)", async () => {
@@ -381,9 +447,7 @@ describe("DcsUpstreamPanel", () => {
       expect(screen.getByText(/upstream link changed .* nothing was applied/i)).toBeInTheDocument()
     })
     expect(mockApplyDelta).not.toHaveBeenCalled()
-    expect(mockEmitCommit).not.toHaveBeenCalled()
-    expect(mockEmitDelete).not.toHaveBeenCalled()
-    expect(mockEnqueue).not.toHaveBeenCalled()
+    expect(mockBulkPostEvents).not.toHaveBeenCalled()
   })
 
   it("Re-sync apply ABORTS when the cursor's commitSha changed between confirm and apply (import race)", async () => {
@@ -407,7 +471,7 @@ describe("DcsUpstreamPanel", () => {
       expect(screen.getByText(/upstream link changed .* nothing was applied/i)).toBeInTheDocument()
     })
     expect(mockApplyDelta).not.toHaveBeenCalled()
-    expect(mockEnqueue).not.toHaveBeenCalled()
+    expect(mockBulkPostEvents).not.toHaveBeenCalled()
   })
 
   it("hides Re-sync content below maintainer (600)", () => {
@@ -457,9 +521,7 @@ describe("DcsUpstreamPanel", () => {
     expect(mockPatch.mock.calls[0][0]).toEqual({ dcsUpstream: null })
 
     // No source events were emitted — detach only rewrites settings.
-    expect(mockEmitCommit).not.toHaveBeenCalled()
-    expect(mockEmitDelete).not.toHaveBeenCalled()
-    expect(mockEnqueue).not.toHaveBeenCalled()
+    expect(mockBulkPostEvents).not.toHaveBeenCalled()
 
     // The settings hook now serves the nulled bag → no-cursor state (nothing).
     rerender(<DcsUpstreamPanel projectId="adapter-1" roleLevel={600} client={client} />)

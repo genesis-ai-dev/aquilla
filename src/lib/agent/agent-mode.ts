@@ -19,6 +19,11 @@
  * synced setting uses (`lib/sync/project-settings.ts`). That is what makes it
  * project-wide rather than per-device: autonomy that only one collaborator
  * could see would be autonomy nobody had agreed to.
+ *
+ * That PATCH replaces the WHOLE settings blob; it does not merge keys. So a
+ * mode write sends every other project setting too, exactly as the server
+ * last returned them, with only `agentMode` swapped in. A write of
+ * `{ agentMode }` alone would erase every other setting the project has.
  */
 
 import type { MessageKey } from "@/lib/i18n/messages/en"
@@ -26,6 +31,8 @@ import {
   PROJECT_SETTINGS_VERSION_INITIAL,
   fetchProjectSettingsResult,
   patchProjectSettings,
+  type ProjectSettingsResponse,
+  type ProjectWideSettings,
 } from "@/lib/sync/project-settings"
 
 /** What autonomous work the team may do. */
@@ -151,10 +158,29 @@ export function normalizeAgentMode(value: unknown): AgentMode {
 
 // ── Read / patch over the shared project-settings row ────────────────────────
 
-export interface AgentModeState {
-  mode: AgentMode
+/**
+ * The settings row as the server last returned it — what a mode write is
+ * built on. The two fields always come from the same response, so when the
+ * server accepts `version` it is holding exactly `settings`.
+ */
+export interface AgentModeBase {
   /** Settings-row version, required by the PATCH's optimistic-concurrency check. */
   version: number
+  /** Every project setting at `version`. The PATCH replaces the whole blob,
+   *  so a mode write is this object with `agentMode` swapped in. */
+  settings: ProjectWideSettings
+}
+
+export interface AgentModeState extends AgentModeBase {
+  mode: AgentMode
+}
+
+function stateFrom(response: ProjectSettingsResponse): AgentModeState {
+  return {
+    mode: normalizeAgentMode(response.settings.agentMode),
+    version: response.version,
+    settings: response.settings,
+  }
 }
 
 export type AgentModePatchOutcome =
@@ -175,42 +201,46 @@ export async function fetchAgentMode(
   const result = await fetchProjectSettingsResult(jwt, projectId)
   if (!result.ok) return null
   if (!result.value) {
-    // The server answered "no settings row" — that IS the default mode.
-    return { mode: DEFAULT_AGENT_MODE, version: PROJECT_SETTINGS_VERSION_INITIAL }
+    // The server answered "no settings row" — that IS the default mode, and
+    // there are no other settings to keep.
+    return {
+      mode: DEFAULT_AGENT_MODE,
+      version: PROJECT_SETTINGS_VERSION_INITIAL,
+      settings: {},
+    }
   }
-  return {
-    mode: normalizeAgentMode(result.value.settings.agentMode),
-    version: result.value.version,
-  }
+  return stateFrom(result.value)
 }
 
 /**
- * Write a new mode. The settings row is shared, so a collaborator saving an
- * unrelated key between our read and our write is ordinary rather than
- * exceptional: one conflict is retried against the version the server just
- * handed back, and only a second failure is reported.
+ * Write a new mode on top of `base`, the settings the server last returned.
+ * The PATCH replaces the whole blob, so the body is every setting in `base`
+ * with `agentMode` swapped in — never `{ agentMode }` alone.
+ *
+ * The settings row is shared, so a collaborator saving an unrelated key
+ * between our read and our write is ordinary rather than exceptional: one
+ * conflict is retried on the row the server just handed back — its version
+ * AND its settings, so the retry keeps the collaborator's save instead of
+ * writing our older copy over it — and only a second failure is reported.
  */
 export async function patchAgentMode(
   jwt: string,
   projectId: string,
   mode: AgentMode,
-  ifMatchVersion: number,
+  base: AgentModeBase,
 ): Promise<AgentModePatchOutcome> {
-  let version = ifMatchVersion
+  let current: AgentModeBase = base
   for (let attempt = 0; attempt < 2; attempt++) {
-    const result = await patchProjectSettings(jwt, projectId, { agentMode: mode }, version)
-    if (result.kind === "ok") {
-      return {
-        kind: "ok",
-        state: {
-          mode: normalizeAgentMode(result.value.settings.agentMode),
-          version: result.value.version,
-        },
-      }
-    }
+    const result = await patchProjectSettings(
+      jwt,
+      projectId,
+      { ...current.settings, agentMode: mode },
+      current.version,
+    )
+    if (result.kind === "ok") return { kind: "ok", state: stateFrom(result.value) }
     if (result.kind === "forbidden") return { kind: "forbidden" }
     if (result.kind === "conflict") {
-      version = result.latest.version
+      current = result.latest
       continue
     }
     return { kind: "error", message: result.message }

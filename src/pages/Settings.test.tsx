@@ -14,6 +14,12 @@ vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
   fetchAccessibleProjectsResult: vi.fn(async () => ({ ok: true as const, projects: [] })),
 }))
 
+// AQU-1771: the Security page's "N projects are stricter" counts.
+vi.mock("@/lib/sync/org-settings", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/org-settings")>()),
+  fetchVisibilityOverrideCounts: vi.fn(async () => ({ rosterViewMinRole: 0, memberProgressViewMinRole: 0 })),
+}))
+
 vi.mock("@/components/ui/toast", () => ({
   toast: { add: vi.fn(), close: vi.fn(), update: vi.fn(), promise: vi.fn() },
 }))

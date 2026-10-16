@@ -342,7 +342,17 @@ CREATE TABLE project_settings (
     wp_validation_role_floor_audio JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'validationRoleFloorAudio') STORED,
     wp_validation_named_users_audio JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'validationNamedUsersAudio') STORED,
     wp_allow_self_validation_audio JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'allowSelfValidationAudio') STORED,
-    wp_harmonize_min_role JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'harmonize_min_role') STORED
+    wp_harmonize_min_role JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'harmonize_min_role') STORED,
+    -- AQU-1771 (0174): this project's own, stricter-only floors for who sees
+    -- its member list and each member's progress — read on every roster and
+    -- named-progress check (members, mentions, assignments, activity), so they
+    -- must never open the blob. NULL unless the key holds a JSON number; the
+    -- readers keep only role-ladder values (db/shared/visibility-floors.ts).
+    -- One line each, for the dev-stack reconciler (see bible_resources_enabled).
+    roster_view_min_role TEXT
+      GENERATED ALWAYS AS (CASE WHEN jsonb_typeof((settings::jsonb) -> 'rosterViewMinRole') = 'number' THEN (settings::jsonb) ->> 'rosterViewMinRole' END) STORED,
+    member_progress_view_min_role TEXT
+      GENERATED ALWAYS AS (CASE WHEN jsonb_typeof((settings::jsonb) -> 'memberProgressViewMinRole') = 'number' THEN (settings::jsonb) ->> 'memberProgressViewMinRole' END) STORED
 );
 CREATE INDEX project_settings_agent_react ON project_settings(project_id) WHERE agent_react;
 
@@ -373,7 +383,12 @@ CREATE TABLE org_settings (
     -- AQU-1083: the org-wide default for whether structural cells count toward
     -- progress. Generated so the org dashboard can resolve the policy in SQL
     -- without parsing the settings blob per project (0090).
-    count_structural TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'countStructuralCells') STORED
+    count_structural TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'countStructuralCells') STORED,
+    -- AQU-1771: the org-wide defaults for how many validations a cell / a take
+    -- needs. NULL = unset; a project's own value wins, and absent on both reads
+    -- as 1 (0174).
+    validation_count TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationCount') STORED,
+    validation_count_audio TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationCountAudio') STORED
 );
 
 -- Global, runtime-editable platform config (migration 0047). Single row
@@ -1514,6 +1529,9 @@ CREATE TABLE IF NOT EXISTS lanes (
     archived_at TIMESTAMPTZ,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- 0173 (AQU-1954): does every file owe audio in this language? Off, a file
+    -- counts this language's audio only once it has a recording in it.
+    records_audio BOOLEAN NOT NULL DEFAULT false,
     PRIMARY KEY (project_id, id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_lanes_id
@@ -1798,6 +1816,7 @@ CREATE TABLE IF NOT EXISTS integration_connections (
   access_token_expires_at TIMESTAMPTZ,-- from the access-token JWT exp claim; NULL = non-expiring (legacy flow)
   needs_reauth BOOLEAN NOT NULL DEFAULT FALSE, -- set when refresh fails (revoked/max lifetime); cleared on successful OAuth callback
   scopes TEXT,
+  environment TEXT,                   -- deployment that made the row (ENVIRONMENT at OAuth time); NULL = pre-0175 row, usable by production only (AQU-1775)
   created_by TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),

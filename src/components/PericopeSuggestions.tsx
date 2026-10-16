@@ -40,9 +40,18 @@ export function PericopeSuggestions({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         render={
-          <Button variant="ghost" size="sm" className="gap-1.5 text-xs">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="shrink-0 gap-1.5 text-xs"
+            title={t("editor.pericope.trigger")}
+          >
             <Sparkles aria-hidden="true" className="size-3.5" />
-            {t("editor.pericope.trigger")}
+            {/* Icon-only when the chapter row is tight, so the label never
+                spills over the neighbouring toolbar buttons. */}
+            <span className="sr-only xl:not-sr-only">
+              {t("editor.pericope.trigger")}
+            </span>
           </Button>
         }
       />

@@ -8,6 +8,7 @@ import {
   patchOrgSettings,
   postPromotionRequest,
   resetCountStructuralOverrides,
+  resetProjectOverrides,
   type OrgSettingsResponse,
   type OrgWideSettings,
   type OrgPatchResult,
@@ -15,6 +16,11 @@ import {
 } from "@/lib/sync/org-settings"
 import type { TranslationRule, PromotionRequest } from "@/lib/parsers/types"
 import type { OrgProviderKeys } from "@/lib/sync/org-settings"
+import {
+  parseOverrideProjectList,
+  type InheritedOverrideKey,
+  type OverrideProjectList,
+} from "@/lib/sync/override-projects"
 
 // ─── Cross-instance sync ───────────────────────────────────────────────────
 // Several surfaces mount their own useOrgSettings for the SAME org at the same
@@ -268,6 +274,25 @@ export interface UseOrgSettings {
   /** Put those projects back on the org default. Clears their own key. */
   resetCountStructuralOverrides: () => Promise<{ ok: boolean; cleared: number; message?: string }>
   /**
+   * AQU-1771: the org defaults for how many validations a cell / a take need.
+   * Null when the org set none, which reads as 1. A project may override.
+   */
+  validationCountDefault: number | null
+  validationCountAudioDefault: number | null
+  /** How many projects set their own count and so ignore the default above. */
+  validationCountOverrides: number
+  validationCountAudioOverrides: number
+  /**
+   * AQU-1938: which projects the three counts above are — by name, only those
+   * the caller may see, at most 50. Null where the server did not say (an
+   * older server), and the line then shows its bare count.
+   */
+  overrideProjects: Record<InheritedOverrideKey, OverrideProjectList | null>
+  /** Put the projects that set their own count back on the org default. */
+  resetValidationCountOverrides: (
+    key: "validationCount" | "validationCountAudio",
+  ) => Promise<{ ok: boolean; cleared: number; message?: string }>
+  /**
    * AQU-1037: effective floor for assigning work to anyone, including
    * file/chapter/target-lane assignments and AI changeset routing.
    */
@@ -330,6 +355,28 @@ export interface UseOrgSettings {
  *   Falls back to orgRoleLevel when not provided (personal projects / no-org contexts).
  */
 /** How often returning to the tab may re-read org settings (see the effect). */
+/**
+ * The per-default "how many projects set their own" counts a settings
+ * response carries (GET, PATCH, 409). writeServer keeps the last known counts
+ * when a response arrives without them.
+ */
+const OVERRIDE_COUNT_KEYS = [
+  "countStructuralOverrides",
+  "validationCountOverrides",
+  "validationCountAudioOverrides",
+  // AQU-1938: the projects behind those counts, kept for the same reason.
+  "overrideProjects",
+] as const satisfies ReadonlyArray<keyof OrgSettingsResponse>
+
+/** Keep `from`'s value for `key` when `to` arrived without one. */
+function carryOver<K extends keyof OrgSettingsResponse>(
+  to: OrgSettingsResponse,
+  from: OrgSettingsResponse,
+  key: K,
+): void {
+  if (to[key] === undefined && from[key] !== undefined) to[key] = from[key]
+}
+
 const REFETCH_ON_RETURN_MS = 10_000
 
 export function useOrgSettings(
@@ -346,6 +393,16 @@ export function useOrgSettings(
 
   const serverRef = useRef<OrgSettingsResponse | null>(null)
   const writeServer = useCallback((next: OrgSettingsResponse | null) => {
+    // The override counts come with the GET; an optimistic write, a sibling's
+    // broadcast or an older server's PATCH reply may not carry them. Keep the
+    // last known counts rather than reading their absence as "no project
+    // overrides", which silently stopped the reset prompt after one save.
+    const prev = serverRef.current
+    if (next && prev && prev.orgId === next.orgId) {
+      const filled = { ...next }
+      for (const key of OVERRIDE_COUNT_KEYS) carryOver(filled, prev, key)
+      next = filled
+    }
     serverRef.current = next
     setServer(next)
   }, [])
@@ -397,6 +454,17 @@ export function useOrgSettings(
   const resetOverrides = useCallback(async () => {
     if (!orgId || !jwt) return { ok: false, cleared: 0, message: "no session" }
     const result = await resetCountStructuralOverrides(jwt, orgId)
+    if (result.kind === "error") return { ok: false, cleared: 0, message: result.message }
+    await refresh()
+    return { ok: true, cleared: result.cleared }
+  }, [orgId, jwt, refresh])
+
+  /** AQU-1771: the same reset for the two validation defaults. */
+  const resetValidationOverrides = useCallback(async (key: "validationCount" | "validationCountAudio") => {
+    if (!orgId || !jwt) return { ok: false, cleared: 0, message: "no session" }
+    const result = await resetProjectOverrides(
+      jwt, orgId, key === "validationCount" ? "validation-count" : "validation-count-audio",
+    )
     if (result.kind === "error") return { ok: false, cleared: 0, message: result.message }
     await refresh()
     return { ok: true, cleared: result.cleared }
@@ -507,6 +575,19 @@ export function useOrgSettings(
   // counting headings is what every org does today.
   const countStructuralCells = server?.settings?.countStructuralCells !== false
   const countStructuralOverrides = server?.countStructuralOverrides ?? 0
+  // AQU-1771: null when unset (reads as 1); only a whole number 1..15 counts.
+  const thresholdOrNull = (raw: unknown): number | null =>
+    typeof raw === "number" && Number.isInteger(raw) && raw >= 1 && raw <= 15 ? raw : null
+  const validationCountDefault = thresholdOrNull(server?.settings?.validationCount)
+  const validationCountAudioDefault = thresholdOrNull(server?.settings?.validationCountAudio)
+  const validationCountOverrides = server?.validationCountOverrides ?? 0
+  const validationCountAudioOverrides = server?.validationCountAudioOverrides ?? 0
+  // AQU-1938: the projects behind each count, read defensively.
+  const overrideProjects: Record<InheritedOverrideKey, OverrideProjectList | null> = {
+    countStructuralCells: parseOverrideProjectList(server?.overrideProjects?.countStructuralCells),
+    validationCount: parseOverrideProjectList(server?.overrideProjects?.validationCount),
+    validationCountAudio: parseOverrideProjectList(server?.overrideProjects?.validationCountAudio),
+  }
   // AQU-1391: same `!== false` shape and for the same reason — unset is ON,
   // and only an explicit opt-out turns repetition propagation off org-wide.
   const autoPropagateRepetitions = server?.settings?.autoPropagateRepetitions !== false
@@ -662,6 +743,12 @@ export function useOrgSettings(
     autoPropagateRepetitions,
     allowBulkValidateAiDrafts,
     resetCountStructuralOverrides: resetOverrides,
+    validationCountDefault,
+    validationCountAudioDefault,
+    validationCountOverrides,
+    validationCountAudioOverrides,
+    overrideProjects,
+    resetValidationCountOverrides: resetValidationOverrides,
     assignmentMinRole,
     termbaseEditMinRole,
     languageEditMinRole,

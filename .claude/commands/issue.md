@@ -180,7 +180,7 @@ the walk is PASS, the review agent has no proven unresolved finding, and require
 - Optional: a person can `pnpm run deploy:aquilla:dev` from a clean `dev` checkout to put it
   on `https://dev.aquilla.app`. Live deploys are never automatic — don't run it unasked.
 
-**Stop at `Awaiting Deployment`.** The deploy bot cuts `release/YYYY/MM/DD[-NN]` from `dev`
+**Stop at `Awaiting Deployment`.** The Release cut workflow cuts `release/YYYY/MM/DD[-NN]` from `dev`
 (`node scripts/release-plan.mjs`), a person deploys it, and `scripts/tag-release.sh` tags it
 `YYYY.MM.DD.NN`. The issue becomes `Deployed` once its commit is in that tag. Hotfixes are
 cherry-picked onto the deployed release branch — see `docs/DEPLOYMENT-ENVIRONMENTS.md`.

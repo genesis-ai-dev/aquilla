@@ -145,4 +145,99 @@ describe("generateCombinedVoice routing", () => {
       expect.objectContaining({ audioId: "base-id.webm", mimeType: "audio/webm" }),
     )
   })
+
+  // AQU-1978: the clip is asked for in the languages of the LANES it performs.
+  // It read the retired project-level pair, empty on every new project.
+  const laneProject = {
+    id: "p",
+    sourceLanguage: "",
+    targetLanguage: "",
+    lanes: [
+      { id: "src00001", role: "source", language: "English", name: null, langCode: null, legacyTag: null, position: 0, archivedAt: null },
+      { id: "spa00001", role: "target", language: "Spanish", name: null, langCode: null, legacyTag: "Spanish", position: 0, archivedAt: null },
+      // An un-backfilled lane whose tag is its language code.
+      { id: "frc00001", role: "target", language: null, name: null, langCode: null, legacyTag: "fr", position: 1, archivedAt: null },
+    ],
+  }
+  const laneCell = (id: string) => ({
+    id, fileId: "f", type: "text", translated: "hola", original: "", context: "",
+    cellLabel: "", group: "", status: "unvalidated" as const,
+    validationStatus: "none" as const, activeValidators: [],
+    validationHistory: [], history: [], threads: [],
+  })
+  function mockCommon(emitAttach = vi.fn(async () => {})) {
+    vi.doMock("./upload", () => ({
+      buildAudioId: () => "base-id",
+      uploadCellAudio: vi.fn(async () => ({ audioId: "base-id", ext: "wav", url: "frontier-audio://base-id.wav" })),
+      fetchCellAudio: vi.fn(async () => new ArrayBuffer(4)),
+    }))
+    vi.doMock("./opus-encode", () => ({ canEncodeOpus: () => false, encodeMonoToWebmOpus: vi.fn() }))
+    vi.doMock("./bytes-cache", () => ({ audioCachePutBlob: vi.fn(async () => {}) }))
+    vi.doMock("./sync-token-fetcher", () => ({
+      audioSyncTokenFetcherForSession: () => async () => "tok",
+    }))
+    vi.doMock("./voice-clone", () => ({ convertToCloneVoice: vi.fn() }))
+    vi.doMock("@/lib/sync/events-emit", () => ({ emitCellAudioAttach: emitAttach }))
+    vi.doMock("./audio-attachments-bus", () => ({ notifyAudioAttachmentsChanged: vi.fn() }))
+  }
+
+  it("a client-synth clip is told the lanes' languages (AQU-1978)", async () => {
+    vi.resetModules()
+    const synthForCell = vi.fn(async (..._a: unknown[]) => new Blob(["x"], { type: "audio/wav" }))
+    vi.doMock("@/lib/sync/tts", () => ({ synthesizeCellTts: vi.fn() }))
+    vi.doMock("./tts", () => ({
+      synthesizeForCell: synthForCell, setTtsStatus: vi.fn(), ttsStatusKey: (s: string) => s,
+    }))
+    vi.doMock("./voices", () => ({
+      resolveCastVoice: () => ({ id: "v", name: "N", provider: "gemini" }),
+    }))
+    vi.doMock("./tts-providers", () => ({
+      resolveTtsProvider: () => "gemini",
+      isServerTtsProvider: () => false,
+    }))
+    mockCommon()
+    const { generateCombinedVoice } = await import("./combined-voice")
+    await generateCombinedVoice({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      project: laneProject as any,
+      fileId: "f",
+      cells: [laneCell("c1"), laneCell("c2")],
+      settings: {},
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      session: { jwt: "j", username: "u" } as any,
+      username: "u",
+      targetLang: "Spanish",
+    })
+    const opts = synthForCell.mock.calls[0][1] as { geminiContext: Record<string, unknown> }
+    expect(opts.geminiContext).toMatchObject({ sourceLanguage: "English", targetLanguage: "Spanish" })
+  })
+
+  it("an Inworld clip is asked for in the open lane's language (AQU-1978)", async () => {
+    vi.resetModules()
+    const synthCellTts = vi.fn(async (..._a: unknown[]) => ({
+      audioId: "a", durationSeconds: 1, objectName: "a.wav", url: "frontier-audio://a.wav",
+    }))
+    vi.doMock("@/lib/sync/tts", () => ({ synthesizeCellTts: synthCellTts }))
+    vi.doMock("./tts", () => ({
+      synthesizeForCell: vi.fn(), setTtsStatus: vi.fn(), ttsStatusKey: (s: string) => s,
+    }))
+    vi.doMock("./voices", () => ({
+      resolveCastVoice: () => ({ id: "v", name: "N", provider: "inworld", voiceName: "Dennis" }),
+    }))
+    vi.doUnmock("./tts-providers")
+    mockCommon()
+    const { generateCombinedVoice } = await import("./combined-voice")
+    await generateCombinedVoice({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      project: laneProject as any,
+      fileId: "f",
+      cells: [laneCell("c1"), laneCell("c2")],
+      settings: {},
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      session: { jwt: "j", username: "u" } as any,
+      username: "u",
+      targetLang: "fr",
+    })
+    expect(synthCellTts.mock.calls[0][0]).toMatchObject({ language: "fr" })
+  })
 })

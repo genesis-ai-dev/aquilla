@@ -2,11 +2,13 @@ import { verifyTokenForProject } from '../auth'
 import { canReadRequestedLane, visibleLanesForRead } from './lane-read-wall'
 import { takeSoundsOnItsTrackSql } from '../../../db/shared/audio-progress'
 import { planKeysJoinSql } from '../../../db/shared/plan-keys'
+import { readLaneTag } from '../../../db/shared/lane-ref'
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from './lane-id-sql'
 import { readCountStructuralCells, structuralPredicateSql } from './structural-cells'
 import { visibleSourceSql } from './hidden-cells-scope'
 import { liveSourceSql } from './tombstoned-cells-scope'
 import { walkAnchorChain } from './cells-read-route'
+import { loadEffectiveThreshold } from '../../../db/shared/validation-threshold'
 
 export interface ProgressReadEnv {
   AQUILLA_PG?: AquillaDb
@@ -331,19 +333,17 @@ function compareCanonicalRefs(a: string, b: string): number {
     || a.localeCompare(b)
 }
 
+/**
+ * AQU-1771: project → org → 1, clamped to 1..15. Read through the STORED
+ * generated columns on both settings tables, never the multi-MB blob.
+ */
 async function readSettingsCount(
   db: AquillaDb,
   projectId: string,
   key: 'validationCount' | 'validationCountAudio',
 ): Promise<number> {
-  const row = await db
-    .prepare('SELECT settings FROM project_settings WHERE project_id = ?')
-    .bind(projectId)
-    .first<{ settings: string | null }>()
   try {
-    const parsed = row?.settings ? JSON.parse(row.settings) as Record<string, unknown> : null
-    const value = Math.floor(Number(parsed?.[key]))
-    return Number.isFinite(value) ? Math.min(MAX_VALIDATION_LEVELS, Math.max(1, value)) : 1
+    return Math.min(MAX_VALIDATION_LEVELS, await loadEffectiveThreshold(db, projectId, key))
   } catch {
     return 1
   }
@@ -444,6 +444,11 @@ function liveTakeSql(
  *
  * No lanes row: the project was never laned, so it has exactly one lane and
  * there is nothing to filter — the empty fragment, i.e. pre-1591 behavior.
+ *
+ * AQU-1977: a laned project asked for a tag none of its lanes carries reads NO
+ * takes. Dropping the filter there counted every other language's takes as
+ * this one's — the shape a request for '' had on every project made since
+ * AQU-1594, which has no '' lane.
  */
 async function takeLaneFilterSql(
   db: AquillaDb,
@@ -451,10 +456,15 @@ async function takeLaneFilterSql(
   lane: string,
 ): Promise<string> {
   const row = await db
-    .prepare(`SELECT id FROM lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ?`)
-    .bind(projectId, lane)
-    .first<{ id: string }>()
+    .prepare(
+      `SELECT (SELECT id FROM lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ?) AS id,
+              EXISTS (SELECT 1 FROM lanes WHERE project_id = ? AND role = 'target') AS laned`,
+    )
+    .bind(projectId, lane, projectId)
+    .first<{ id: string | null; laned: boolean }>()
   const id = row?.id ?? ''
+  if (!id) return row?.laned ? `
+                     AND FALSE` : ''
   if (!/^[0-9a-f]{1,32}$/.test(id)) return ''
   return `
                      AND (a.lane_id = '${id}'${lane === '' ? ' OR a.lane_id IS NULL' : ''})`
@@ -695,11 +705,6 @@ export async function handleProgressReadRequest(
   if (!env.SYNC_SECRET_KEY) return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
   if (!env.AQUILLA_PG) return new Response('AQUILLA_PG binding not configured', { status: 500 })
 
-  // AQU-538: progress is materialized per target-language lane. Default to the
-  // legacy/default lane ('') so N=1 projects are byte-identical; an explicit
-  // ?lane=<tag> selects a non-default lane's rows.
-  const lane = url.searchParams.get('lane') ?? ''
-
   const routeMatch = firstOpenMatch ?? sectionMatch ?? match!
   const projectId = decodeURIComponent(routeMatch[1])
   const fileId = decodeURIComponent(routeMatch[2])
@@ -708,6 +713,12 @@ export async function handleProgressReadRequest(
   if (!token) return new Response('missing Authorization header', { status: 401 })
   const auth = await verifyTokenForProject(token, projectId, env.SYNC_SECRET_KEY)
   if (!auth.ok) return new Response(auth.reason, { status: auth.status })
+
+  // AQU-538: progress is materialized per target-language lane; an explicit
+  // ?lane=<tag> selects that lane's rows. AQU-1977: with none named, the
+  // project's own default — its '' lane on an old project (byte-identical to
+  // before), its first language on one made since AQU-1594, which has no ''.
+  const lane = await readLaneTag(env.AQUILLA_PG, projectId, url.searchParams.get('lane'))
 
   // AQU-730: a restricted caller may read only a lane they were granted.
   // The file-counter fallback below answers a granted lane that has no

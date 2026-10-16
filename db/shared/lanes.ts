@@ -559,6 +559,12 @@ export interface ProjectLaneRecord {
   legacyTag: string | null
   position: number
   archivedAt: string | null
+  /**
+   * AQU-1954: does every file owe audio in this language? Off (the default),
+   * a file counts this language's audio only once it has a recording in it.
+   * Optional so a record built before migration 0173 still type-checks.
+   */
+  recordsAudio?: boolean
 }
 
 interface LaneSqlRow {
@@ -570,6 +576,7 @@ interface LaneSqlRow {
   legacy_tag: string | null
   position: number
   archived_at: string | null
+  records_audio: boolean | null
 }
 
 function toLaneRecord(row: LaneSqlRow): ProjectLaneRecord {
@@ -582,6 +589,7 @@ function toLaneRecord(row: LaneSqlRow): ProjectLaneRecord {
     legacyTag: row.legacy_tag,
     position: row.position,
     archivedAt: row.archived_at,
+    recordsAudio: row.records_audio === true,
   }
 }
 
@@ -592,7 +600,7 @@ export async function listProjectLanes(
 ): Promise<ProjectLaneRecord[]> {
   const { results } = await db
     .prepare(
-      `SELECT id, role, language, name, lang_code, legacy_tag, position, archived_at
+      `SELECT id, role, language, name, lang_code, legacy_tag, position, archived_at, records_audio
          FROM lanes
         WHERE project_id = ?
         ORDER BY position, id`,
@@ -858,6 +866,31 @@ export function ensureBlankTargetBridgeStmt(
        ON CONFLICT (project_id, legacy_tag) WHERE role = 'target' DO NOTHING`,
     )
     .bind(newLaneId(), projectId, projectId, projectId)
+}
+
+/**
+ * AQU-1954: whether every file owes audio in this language — the switch on
+ * each row of Project settings → Languages. A target lane only; any number of
+ * a project's languages may have it on or off.
+ */
+export async function setTargetLaneRecordsAudio(
+  db: AquillaDb,
+  projectId: string,
+  laneId: string,
+  recordsAudio: boolean,
+): Promise<{ status: "ok"; lane: ProjectLaneRecord } | { status: "not_found" }> {
+  const lanes = await listProjectLanes(db, projectId)
+  const current = lanes.find((lane) => lane.id === laneId && lane.role === "target")
+  if (!current) return { status: "not_found" }
+  await db
+    .prepare(
+      `UPDATE lanes
+          SET records_audio = ?, updated_at = now()
+        WHERE project_id = ? AND id = ? AND role = 'target'`,
+    )
+    .bind(recordsAudio, projectId, laneId)
+    .run()
+  return { status: "ok", lane: { ...current, recordsAudio } }
 }
 
 export type ArchiveLaneResult =

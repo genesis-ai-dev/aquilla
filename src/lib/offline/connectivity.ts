@@ -103,6 +103,55 @@ export function useConnectivity(): boolean | null {
   return online
 }
 
+/** Connectivity for non-React code. `null` = unknown (web, or no probe yet). */
+export interface ConnectivitySource {
+  current(): boolean | null
+  /** Called on every change reported by the Rust loop; returns an unsubscribe. */
+  subscribe(listener: (online: boolean | null) => void): () => void
+}
+
+let latestOnline: boolean | null = null
+let watching = false
+const connectivityListeners = new Set<(online: boolean | null) => void>()
+
+function publishConnectivity(online: boolean | null): void {
+  if (online === latestOnline) return
+  latestOnline = online
+  for (const listener of connectivityListeners) listener(online)
+}
+
+/** Starts (once) mirroring the Rust loop into `latestOnline`. */
+function watchConnectivity(): void {
+  if (watching || !isTauriRuntime()) return
+  watching = true
+  void (async () => {
+    const [{ invoke }, { listen }] = await Promise.all([
+      import("@tauri-apps/api/core"),
+      import("@tauri-apps/api/event"),
+    ])
+    await ensureProbeUrl()
+    await listen<ConnectivityChangedPayload>("connectivity://changed", (event) => publishConnectivity(event.payload.online))
+    publishConnectivity((await invoke<boolean | null>("get_connectivity")) ?? null)
+  })().catch(() => {
+    // Same degradation as useConnectivity: unknown, and a later call retries.
+    watching = false
+  })
+}
+
+export const desktopConnectivity: ConnectivitySource = {
+  current() {
+    watchConnectivity()
+    return latestOnline
+  },
+  subscribe(listener) {
+    watchConnectivity()
+    connectivityListeners.add(listener)
+    return () => {
+      connectivityListeners.delete(listener)
+    }
+  },
+}
+
 /** Desktop-only: begin probing the backend this build talks to. No-op on web. */
 export function startConnectivityProbe(): void {
   if (!isTauriRuntime()) return

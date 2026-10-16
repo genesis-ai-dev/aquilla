@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   DEFAULT_BKP_BASE,
   __bkpMemoryBooks,
+  __bkpSettled,
   __resetBkpMemoryCache,
   loadEnabledLayers,
   loadLayer,
@@ -194,6 +195,20 @@ describe("loadEnabledLayers", () => {
       await loadEnabledLayers({ experimentalFlags: { bibleData: false }, files: SCRIPTURE, bibleResourcesEnabled: true }, "JHN"),
     ).toEqual({})
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+// AQU-1955: a read outlives the component that asked for it, so a test that
+// resets the fetch mock or the store between tests waits for the reads in
+// flight first, or an earlier test's fetches and writes land in the next one.
+describe("reads in flight", () => {
+  it("__bkpSettled resolves once a read nobody awaited has finished, its IndexedDB write included", async () => {
+    // Only the manifest read exists when the wait starts; the layer read
+    // begins after it, and the wait covers that too.
+    void loadLayer("voices", "JHN")
+    await __bkpSettled()
+    expect(layerFetches()).toEqual(["/bkp/v1/voices/JHN.json"])
+    expect(await __packRecordKeys()).toContain("1.0.0/voices/JHN")
   })
 })
 

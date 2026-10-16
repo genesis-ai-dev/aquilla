@@ -98,6 +98,7 @@ beforeEach(() => {
     chapters: 1,
     clips: 2,
     skipped: 0,
+    silenced: 0,
   })
   mockByCharacter.mockResolvedValue({
     blob: new Blob([new Uint8Array([1])], { type: "application/zip" }),

@@ -33,6 +33,8 @@ import {
   audioLaneDualReadSql,
   audioLaneResolveBinds,
   audioLaneResolveSql,
+  audioSelectScopeBinds,
+  audioSelectScopeSql,
   backtranslationLaneMatchBinds,
   backtranslationLaneMatchSql,
   laneIdResolveBinds,
@@ -1735,9 +1737,15 @@ case 'cell.audio.attach': {
       // decided what sounds. A SOURCE attach keeps the unscoped form: the clip
       // it declares is shared, so it genuinely does claim the slot in every
       // lane.
-      const attachDeselectLaneSql = audioRole === 'source' ? '' : ` AND ${audioLaneDualReadSql()}`
+      //
+      // AQU-1978: a RE-attach of a dub already on file deselects within that
+      // dub's own stored lane, not the event's tag. Re-attaches are routine and
+      // many name no lane (the word-timings write did not), and an absent tag
+      // reads as the `''` lane — another language's chosen take on this line.
+      // A brand-new take still has only the event's tag to go on, as before.
+      const attachDeselectLaneSql = audioRole === 'source' ? '' : ` AND ${audioSelectScopeSql()}`
       const attachDeselectLaneBinds =
-        audioRole === 'source' ? [] : audioLaneDualReadBinds(event.projectId, audioLane)
+        audioRole === 'source' ? [] : audioSelectScopeBinds(event.projectId, p.audioId, audioLane)
       stmts.push(
         db
           .prepare(
@@ -1923,13 +1931,24 @@ case 'cell.audio.attach': {
         )
         return ['cell_audio']
       }
+      // AQU-1978: selecting a dub already on file clears its siblings in THAT
+      // dub's stored lane, whatever tag the event carries — the same rule as a
+      // re-attach above. Handing the slot back to the shared source clip is a
+      // choice made in one lane, so that keeps the event's tag.
       stmts.push(
         db
           .prepare(
             `UPDATE cell_audio SET selected = 0
-              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND slot = ? AND audio_id != ?${selectLaneSql}`,
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND slot = ? AND audio_id != ? AND ${audioSelectScopeSql()}`,
           )
-          .bind(event.projectId, event.fileId, event.cellId, p.slot, p.audioId, ...selectLaneBinds),
+          .bind(
+            event.projectId,
+            event.fileId,
+            event.cellId,
+            p.slot,
+            p.audioId,
+            ...audioSelectScopeBinds(event.projectId, p.audioId, laneOfAudioEvent(event.payload)),
+          ),
       )
       stmts.push(
         db

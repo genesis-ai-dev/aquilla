@@ -25,6 +25,7 @@ import { mapComments } from "../src/lib/migrate/comments"
 import { collectCellAudio, audioAttachEvent } from "../src/lib/migrate/audio"
 import { buildCastAdditions, castLikeSpeakers } from "../src/lib/import/cast-from-speakers"
 import type { ProjectTtsSettings } from "../src/lib/parsers/types"
+import { RETIRED_LANE_SETTINGS_KEYS } from "../db/shared/retired-lane-settings"
 import type { IngestEvent } from "../src/lib/migrate/types"
 import { randomUUID } from "node:crypto"
 import type { CodexNotebookFile } from "../src/lib/codex-editor/types"
@@ -254,7 +255,10 @@ async function importCast(projectId: string, pairs: FilePairInput[], jwt: string
     headers: { Authorization: `Bearer ${jwt}` },
   })
   const current = getRes.ok
-    ? ((await getRes.json()) as { version?: number; settings?: { ttsSettings?: ProjectTtsSettings } })
+    ? ((await getRes.json()) as {
+        version?: number
+        settings?: Record<string, unknown> & { ttsSettings?: ProjectTtsSettings }
+      })
     : { version: 0, settings: undefined }
   const tts = current.settings?.ttsSettings
   const additions = buildCastAdditions(speakers, tts, () => randomUUID())
@@ -263,10 +267,16 @@ async function importCast(projectId: string, pairs: FilePairInput[], jwt: string
     voices: additions.voices,
     castAssignments: { ...(tts?.castAssignments ?? {}), ...additions.castAssignments },
   }
+  // The PATCH replaces the WHOLE settings blob, so send every stored setting
+  // with ttsSettings swapped in; `{ ttsSettings }` alone would erase the rest
+  // on a re-run. The retired lane keys are left out because the route refuses
+  // a body that names them (it keeps the stored copies itself).
+  const settings: Record<string, unknown> = { ...(current.settings ?? {}), ttsSettings: mergedTts }
+  for (const key of RETIRED_LANE_SETTINGS_KEYS) delete settings[key]
   const patchRes = await fetch(`${AUTH}/api/v2/projects/${projectId}/settings`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
-    body: JSON.stringify({ settings: { ttsSettings: mergedTts }, ifMatchVersion: current.version ?? 0 }),
+    body: JSON.stringify({ settings, ifMatchVersion: current.version ?? 0 }),
   })
   if (patchRes.ok) {
     console.log(

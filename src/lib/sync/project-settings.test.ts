@@ -134,6 +134,25 @@ describe("patchProjectSettings", () => {
       expect(got.role).toBe(400)
     }
   })
+
+  it("hands over a refusal's `error` text, not the raw JSON body", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(
+      JSON.stringify({ error: "rosterViewMinRole 400 is below the organization's setting (600)." }),
+      { status: 400, headers: { "content-type": "application/json" } }
+    ))
+    const got = await patchProjectSettings("jwt", "p1", { rosterViewMinRole: 400 }, 3, API)
+    expect(got).toEqual({
+      kind: "error",
+      status: 400,
+      message: "rosterViewMinRole 400 is below the organization's setting (600).",
+    })
+  })
+
+  it("keeps a non-JSON error body as the message", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("upstream down", { status: 502 }))
+    const got = await patchProjectSettings("jwt", "p1", { sourceLanguage: "en" }, 3, API)
+    expect(got).toEqual({ kind: "error", status: 502, message: "upstream down" })
+  })
 })
 
 it("PROJECT_SETTINGS_VERSION_INITIAL is 0", () => {

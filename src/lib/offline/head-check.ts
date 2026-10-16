@@ -53,6 +53,8 @@ export interface HeadCheckOptions {
   reload?: () => void
   storage?: Storage
   timeoutMs?: number
+  /** Called once with the leader's real verdict, even when it lands after the timeout. */
+  onVerdict?: (result: Exclude<HeadCheckResult, "timeout">) => void
 }
 
 /**
@@ -62,13 +64,19 @@ export interface HeadCheckOptions {
  * Resolves with "timeout" if the leader hasn't answered within `timeoutMs`
  * — a dead leader never does, and the caller must still get its store so the
  * leader watchdog can surface that — but keeps waiting in the background and
- * still reloads if a late answer shows a mismatch.
+ * still reloads if a late answer shows a mismatch. A "timeout" says nothing
+ * about the store's consistency: anything that would delete local data must
+ * wait for `onVerdict` to report "ok" (see whenOfflineStoreVerified in store.ts).
  */
 export async function checkClientSessionHead(
   store: SyncStatesStore,
-  { reload = () => window.location.reload(), storage = sessionStorage, timeoutMs = DEFAULT_TIMEOUT_MS }: HeadCheckOptions = {},
+  { reload = () => window.location.reload(), storage = sessionStorage, timeoutMs = DEFAULT_TIMEOUT_MS, onVerdict }: HeadCheckOptions = {},
 ): Promise<HeadCheckResult> {
-  const verdict = store._dev.syncStates().then((states) => judge(states, reload, storage))
+  const verdict = store._dev.syncStates().then((states) => {
+    const result = judge(states, reload, storage)
+    onVerdict?.(result)
+    return result
+  })
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<"timeout">((resolve) => {
     timer = setTimeout(() => resolve("timeout"), timeoutMs)
@@ -80,7 +88,7 @@ const judge = (
   states: Awaited<ReturnType<SyncStatesStore["_dev"]["syncStates"]>>,
   reload: () => void,
   storage: Storage,
-): HeadCheckResult => {
+): Exclude<HeadCheckResult, "timeout"> => {
   const sessionUpstream = states.session.upstreamHead
   const sessionLocal = states.session.localHead
   const leaderHead = states.leader.localHead

@@ -63,6 +63,18 @@ vi.mock("@/lib/sync/cells-read", () => ({
   fetchCellsByIds,
 }))
 
+const downloadBlob = vi.fn()
+vi.mock("@/lib/export/export-service", () => ({
+  downloadBlob: (...args: unknown[]) => downloadBlob(...args),
+}))
+
+/** The CSV text handed to the download, for asserting on the exported rows. */
+async function exportedCsv(): Promise<string> {
+  expect(downloadBlob).toHaveBeenCalledTimes(1)
+  const [blob] = downloadBlob.mock.calls[0] as [Blob, string]
+  return await blob.text()
+}
+
 function makeComment(overrides: Partial<CommentRecord> = {}): CommentRecord {
   return {
     commentId: "c1",
@@ -363,5 +375,64 @@ describe("CommentsPage — jump to a comment", () => {
     expect(jumpedTo()).toBe(
       "/project/proj-1/editor/file/file-1?cellId=cell-1&comments=1&commentId=reply-9",
     )
+  })
+})
+
+// ── AQU-1958: CSV export of the visible list ─────────────────────────────
+
+describe("CommentsPage export", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockComments.mockReturnValue([])
+  })
+
+  it("exports the threads on screen, with file names and the thread's replies", async () => {
+    mockComments.mockReturnValue([
+      makeComment({ body: "the question" }),
+      makeComment({
+        commentId: "reply-1",
+        parentCommentId: "c1",
+        body: "the answer",
+        authorId: "bob",
+        authorLabel: "Bob",
+      }),
+    ])
+    renderPage()
+
+    fireEvent.click(screen.getByRole("button", { name: /Export as CSV/i }))
+
+    const csv = await exportedCsv()
+    const lines = csv.split("\r\n")
+    expect(lines[0]).toContain("Project,File,Reference")
+    // Root then reply — two message rows for one thread.
+    expect(lines).toHaveLength(3)
+    expect(lines[1]).toContain("Test Project")
+    expect(lines[1]).toContain("GEN.usfm")
+    expect(lines[1]).toContain("the question")
+    expect(lines[2]).toContain("the answer")
+    expect(downloadBlob.mock.calls[0][1]).toBe("Test-Project-comments.csv")
+  })
+
+  it("exports only what the filters leave on screen", async () => {
+    mockComments.mockReturnValue([
+      makeComment({ commentId: "keep", body: "unique-search-token" }),
+      makeComment({ commentId: "drop", body: "another thread entirely" }),
+    ])
+    renderPage()
+
+    fireEvent.change(screen.getByPlaceholderText("Search comments…"), {
+      target: { value: "unique-search-token" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /Export as CSV/i }))
+
+    const csv = await exportedCsv()
+    expect(csv).toContain("unique-search-token")
+    expect(csv).not.toContain("another thread entirely")
+  })
+
+  it("has nothing to export while the list is empty", () => {
+    renderPage()
+    expect(screen.getByRole("button", { name: /Export as CSV/i })).toBeDisabled()
+    expect(downloadBlob).not.toHaveBeenCalled()
   })
 })

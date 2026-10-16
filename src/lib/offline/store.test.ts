@@ -1,6 +1,6 @@
 import { makeInMemoryAdapter } from "@livestore/adapter-web"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { __resetOfflineStoreForTests, getOfflineStore } from "./store"
+import { __resetOfflineStoreForTests, getOfflineStore, whenOfflineStoreVerified } from "./store"
 import { events, OFFLINE_DATA_GENERATION, tables } from "./schema"
 import { NewerOfflineDataError, type GenerationMarker } from "./generation-guard"
 
@@ -76,5 +76,11 @@ describe("getOfflineStore", () => {
       NewerOfflineDataError,
     )
     expect(calls).toBe(0)
+  })
+
+  it("reports the store verified once the leader confirms the session's head", async () => {
+    withTauriGlobal()
+    await getOfflineStore(() => makeInMemoryAdapter(), freshDevice)
+    await expect(whenOfflineStoreVerified()).resolves.toBeUndefined()
   })
 })

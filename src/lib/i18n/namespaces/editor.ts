@@ -581,9 +581,17 @@ export const editor = defineNamespace({
     "editor.history.close": "Close history",
     "editor.history.loading": "Loading history…",
     "editor.history.loadFailed": "Couldn't load edit history.",
+    "editor.history.loadFailedNetwork":
+      "Couldn't load edit history — network error. Check your connection.",
+    "editor.history.loadFailedServer":
+      "Couldn't load edit history — the server returned an error ({status}).",
     "editor.history.noEdits": "No edits yet.",
     "editor.history.refreshFailed":
       "Couldn't refresh from the server — showing local edits.",
+    "editor.history.refreshFailedNetwork":
+      "Couldn't refresh from the server (network error) — showing local edits.",
+    "editor.history.refreshFailedServer":
+      "Couldn't refresh from the server (error {status}) — showing local edits.",
     "editor.history.revisions": plural({
       one: "{count} significant revision",
       other: "{count} significant revisions",
@@ -1706,6 +1714,9 @@ export const editor = defineNamespace({
       "This edit would change the protected IDML document structure.",
     "editor.idml.editWouldChangeFormattingError":
       "This edit would change protected IDML formatting.",
+    "editor.idml.noEditableSlotError":
+      "Every text run in this IDML cell is protected, so there is nowhere for " +
+      "your typing to go. Re-import the IDML to make the text editable.",
     "editor.idml.alignStylesChangedWording":
       "Align styles would have changed the wording, so nothing was saved.",
     "editor.idml.alignStylesUnchanged":
@@ -4876,6 +4887,22 @@ export const editor = defineNamespace({
           "read like 'this cell has no history' — the distinction matters, because " +
           "the cell probably does. A Retry control follows.",
       },
+      "editor.history.loadFailedNetwork": {
+        description:
+          "Variant of 'Couldn't load edit history.' shown after several automatic " +
+          "attempts all failed without reaching the server (slow, dropped or " +
+          "offline connection). It must say the network failed, not the server, " +
+          "so the user checks their connection. A Retry control follows.",
+      },
+      "editor.history.loadFailedServer": {
+        description:
+          "Variant of 'Couldn't load edit history.' shown when the server was " +
+          "reached but answered with an error, so the user's connection is not " +
+          "the problem. A Retry control follows.",
+        placeholders: {
+          status: "The HTTP status code the server answered with, such as 503. Keep it as digits.",
+        },
+      },
       "editor.history.noEdits": {
         description:
           "Genuine empty state: the cell has never been edited. Full sentence with " +
@@ -4887,6 +4914,22 @@ export const editor = defineNamespace({
           "Quiet 10px warning above the list when the server could not be reached " +
           "but locally-known edits are being shown. The clause after the dash is " +
           "what the user is looking at. A Retry control follows.",
+      },
+      "editor.history.refreshFailedNetwork": {
+        description:
+          "Variant of the refresh warning above the list when every automatic " +
+          "attempt failed without reaching the server. The parenthesis names the " +
+          "network as the cause; the clause after the dash is what the user is " +
+          "looking at. A Retry control follows.",
+      },
+      "editor.history.refreshFailedServer": {
+        description:
+          "Variant of the refresh warning above the list when the server answered " +
+          "with an error. The clause after the dash is what the user is looking " +
+          "at. A Retry control follows.",
+        placeholders: {
+          status: "The HTTP status code the server answered with, such as 503. Keep it as digits.",
+        },
       },
       "editor.history.revisions": {
         description:
@@ -6512,6 +6555,13 @@ export const editor = defineNamespace({
           "Rejection message (role=alert, via reportIdmlError) for an in-progress " +
           "edit that would alter protected IDML formatting anchors — the edit is " +
           "refused before it lands. 'IDML' is the file-format name and stays as-is.",
+      },
+      "editor.idml.noEditableSlotError": {
+        description:
+          "Rejection message (role=alert, via reportIdmlError) shown when a typed " +
+          "or pasted character has no editable slot to land in because every run " +
+          "in the cell is protected (AQU-1962) — the keystroke used to vanish with " +
+          "no message. 'IDML' is the file-format name and stays as-is.",
       },
       "editor.tts.translatingBeforeVoicing": {
         description:

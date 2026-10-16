@@ -192,7 +192,7 @@ describe("worker deployment environment contract", () => {
     },
   )
 
-  // The release bot cuts release/YYYY/MM/DD-NN for the Nth slice cut on a given
+  // The Release cut workflow cuts release/YYYY/MM/DD-NN for the Nth slice cut on a given
   // day. Four checkers each decide whether a branch name counts as a release
   // branch: the three shell scripts here, plus isReleaseBranch in
   // release-plan.mjs. One shared table is what keeps their four regexes in

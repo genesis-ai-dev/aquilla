@@ -83,54 +83,11 @@ import {
 } from '../../../db/shared/source-link-backfill'
 import { parseSourceLinkAdoption } from '../../../db/shared/source-link-adopt'
 import { loadAdoptedCellIds, runAdoption } from './link-adopt'
+import { selectByCellKeys, type CellKey } from '../lib/cell-key-lookup'
 
 const BATCH_LIMIT = 100
 const MIRROR_AUTHOR = 'link-sync'
 const MIRROR_SCHEMA_VERSION = 1
-
-/**
- * AQU-1543: cell keys per `(file_id, cell_id) IN (…)` lookup — 2 bound values
- * each. Every such read in this module is keyed by the cells one sync window
- * touched, and the first sync of a new link touches the upstream's every cell,
- * so a single list grows with the upstream until postgres.js refuses the
- * statement (65,534 bound values). Bounded chunks make the number of
- * statements grow instead; 1,000 keys keeps each one small and its SQL text
- * short, the same reasoning as the import route's rows-per-INSERT.
- */
-const CELL_KEY_LOOKUP_ROWS = 1000
-
-interface CellKey {
-  fileId: string
-  cellId: string
-}
-
-/**
- * Run one `(file_id, cell_id) IN (…)` read over ANY number of cell keys, as a
- * series of bounded statements whose rows are concatenated.
- *
- * `sqlFor` receives the placeholder list for one chunk and returns the full
- * statement; `leadingBinds` are the values bound before the keys (the project
- * id, in every caller). Chunks cannot overlap, so no row is returned twice.
- */
-async function selectByCellKeys<Row>(
-  db: AquillaDb,
-  cellKeys: readonly CellKey[],
-  leadingBinds: readonly unknown[],
-  sqlFor: (placeholders: string) => string,
-): Promise<Row[]> {
-  const rows: Row[] = []
-  for (let i = 0; i < cellKeys.length; i += CELL_KEY_LOOKUP_ROWS) {
-    const chunk = cellKeys.slice(i, i + CELL_KEY_LOOKUP_ROWS)
-    const binds: unknown[] = [...leadingBinds]
-    for (const k of chunk) binds.push(k.fileId, k.cellId)
-    const { results } = await db
-      .prepare(sqlFor(chunk.map(() => '(?, ?)').join(', ')))
-      .bind(...binds)
-      .all<Row>()
-    for (const r of results) rows.push(r)
-  }
-  return rows
-}
 
 /**
  * AQU-1560: an optional `AND file_id IN (…)` restriction for the delta reads.

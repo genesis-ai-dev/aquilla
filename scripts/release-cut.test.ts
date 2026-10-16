@@ -17,7 +17,7 @@ const plan = {
 }
 
 describe("releaseNotes", () => {
-  it("follows DEPLOY-BOT.md's template", () => {
+  it("follows RELEASE-CUT.md's template", () => {
     const titles = { 771: "Remove Inworld companion preset", 772: "Comment thread polish", 773: "Export raw mode fix", 774: "Retention tab copy" }
     expect(releaseNotes(plan, titles)).toBe([
       "## Release release/2026/09/24-02 · 4 PRs · areas: sync",

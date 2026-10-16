@@ -317,7 +317,7 @@ export function MemberMultiAddRow({
           disabled={adding || disabled}
         />
       )}
-      {role >= ROLE.PROJECT_LEAD && targetLanes.length > 0 && (
+      {role >= ROLE.MAINTAINER && targetLanes.length > 0 && (
         <p className="text-[10px] text-muted-foreground">{t("projectSettings.share.laneChoiceLeadNote")}</p>
       )}
       {addError && <p className="text-xs text-destructive">{addError}</p>}

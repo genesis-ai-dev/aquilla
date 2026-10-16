@@ -271,15 +271,16 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
       clearProjectTargetLanes(projectId)
     }
   }, [settingsEnabled, projectId, settingsLanes, settingsFetched])
-  const { orgValidationCount, orgValidationCountAudio } = projectSettings
+  const { orgValidationCount, orgValidationCountAudio, orgMediaDefaults } = projectSettings
   const overlaid = useMemo(
     () => project
       ? overlaySettings(project, syncedSettings, projectSettings.lanes, {
           validationCount: orgValidationCount,
           validationCountAudio: orgValidationCountAudio,
+          media: orgMediaDefaults,
         })
       : null,
-    [project, syncedSettings, projectSettings.lanes, orgValidationCount, orgValidationCountAudio],
+    [project, syncedSettings, projectSettings.lanes, orgValidationCount, orgValidationCountAudio, orgMediaDefaults],
   )
 
   return {

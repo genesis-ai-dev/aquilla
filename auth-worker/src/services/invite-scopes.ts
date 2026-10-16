@@ -20,6 +20,7 @@ import type { Env } from "../types"
 import { planLaneGrants } from "../../../src/lib/lanes/grant-backfill"
 import { laneScopeIdsForStorage, resolveLaneScopeValue } from "../../../src/lib/lanes/scope-ids"
 import {
+  loadCurrentTargetLanes,
   loadTargetLaneIdentities,
   loadTargetLaneIdentitiesForProjects,
 } from "../../../db/shared/lane-visibility"
@@ -82,9 +83,9 @@ export function parseScopeLanes(raw: string | null | undefined): string[] {
  * Callers must only invoke this for a *newly inserted* membership: applying a
  * lane scope to an existing unscoped member would silently narrow their access
  * from all-lanes to one lane, which the "new user signs up via link" flow never
- * intends. `finalRole` is guarded here too — a joiner resolving to
- * project_lead+ must stay unscoped per the AD-12 invariant (member-scopes CRUD
- * rejects scoping leads), so lanes are skipped in that case.
+ * intends. A joiner who resolves to project lead is snapshotted onto the
+ * lanes that exist then, or onto the lanes the link named. Maintainer and
+ * above stay unscoped.
  */
 export async function applyInviteLaneScopes(
   env: Env,
@@ -106,11 +107,6 @@ export async function applyInviteLaneScopes(
     .run()
   if (finalRole >= ROLE.MAINTAINER || finalRole < ROLE.VIEWER) return
 
-  // Project lead+ stays unscoped on the old scopes table (AD-12). An empty
-  // lane list is an unscoped invite. Both still need a grant per current
-  // target lane, or the write wall treats "no rows" as "no access".
-  const restrictive = finalRole < ROLE.PROJECT_LEAD && lanes.length > 0
-
   // AQU-1607: both tables key the lane by id. One resolution for both, so a
   // scope row and its grant can never disagree about which lane was meant.
   //
@@ -122,10 +118,20 @@ export async function applyInviteLaneScopes(
   // scope did before this ticket. Storing no rows would instead read as
   // "unscoped" and hand them every lane.
   const identities = await loadTargetLaneIdentities(env.AQUILLA_PG, projectId)
-  const resolved = restrictive ? laneScopeIdsForStorage(lanes, identities).laneIds : []
-  const laneIds = restrictive && resolved.length === 0 ? [...lanes] : resolved
+  const named = lanes.length > 0
+  const leadSnapshot = finalRole >= ROLE.PROJECT_LEAD && finalRole < ROLE.MAINTAINER
+  let laneIds: string[] = []
+  if (named) {
+    const resolved = laneScopeIdsForStorage(lanes, identities).laneIds
+    laneIds = resolved.length === 0 ? [...lanes] : resolved
+  } else if (leadSnapshot) {
+    laneIds = (await loadCurrentTargetLanes(env.AQUILLA_PG, projectId)).map((lane) => lane.id)
+  }
+  // Below project lead, an empty list stays unscoped: grants on every current
+  // lane, and a lane created later. A project lead stores the snapshot.
+  const writeScopes = named || leadSnapshot
 
-  if (restrictive) {
+  if (writeScopes) {
     const now = Date.now()
     for (const laneId of laneIds) {
       await env.AQUILLA_PG.prepare(

@@ -17,6 +17,7 @@ import type { TranslationBrief } from "@/lib/brief/types"
 import type { InheritedFromLink } from "@/lib/sync/inherited-settings"
 import type { DraftContextSettings } from "@/lib/completion/draft-context"
 import type { DirectionMode } from "@/lib/text-direction"
+import type { MediaDefaults } from "../../../db/shared/media-setting-defaults"
 
 /** Initial server version for projects with no settings row. */
 export const PROJECT_SETTINGS_VERSION_INITIAL = 0
@@ -498,6 +499,12 @@ export interface ProjectSettingsResponse {
    */
   orgValidationCount?: number | null
   orgValidationCountAudio?: number | null
+  /**
+   * AQU-1768: the org's media defaults (valid values only; empty when it set
+   * none). A project with no value of its own for one of these keys follows
+   * the org's; the server gates resolve the same way.
+   */
+  orgMediaDefaults?: MediaDefaults
   /**
    * Whether the org lets bulk text validation take untouched AI drafts. On
    * this response for the same reason as the line above, and because a project

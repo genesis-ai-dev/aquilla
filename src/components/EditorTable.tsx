@@ -2811,11 +2811,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           cuePlayingRow && "bg-primary/[0.07] before:pointer-events-none before:absolute before:inset-y-0 before:start-0 before:z-10 before:w-[3px] before:bg-primary",
         )}
       >
-        {isScriptureRow && (
-          <span className="pointer-events-none absolute end-1 top-1 z-10 rounded bg-sky-400/15 px-1 text-[9px] font-medium text-sky-600 dark:text-sky-400">
-            {t("editor.row.scriptureBadge")}
-          </span>
-        )}
         {untimedInTimeLens && (
           <span className="pointer-events-none absolute start-1 top-1 z-10 rounded bg-amber-400/15 px-1 text-[9px] font-medium text-amber-600 dark:text-amber-400">
             {t("editor.row.noTimingBadge")}
@@ -2960,6 +2955,30 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           sourceFootnoteNumberOffset={footnoteOffsets.source}
           targetFootnoteNumberOffset={footnoteOffsets.target}
         />
+        {/* AQU-1716: the verse badge sits at the row's FOOT, not its top-right
+            corner — that corner belongs to the row's "…" menu, and the two
+            crowded each other badly enough on a translated Biblica file that
+            another control painted over the badge's text ("ve●se").
+            Deliberately a flow element rather than an `absolute` corner pin:
+            the row's foot already carries the AI-draft progress bar
+            (`FillsTwiceIndicator`, pinned to the target well's bottom) and the
+            last line of translation text, and an overlay at `bottom-1` lands
+            on top of both the moment a verse's last line runs the cell's full
+            width. Taking its own ~16px of height instead means "clear of the
+            text and the loading bar" holds by construction at every row
+            height and viewport, with nothing to re-tune. `justify-end` +
+            `pe-1` are logical, so the badge mirrors to the bottom-LEFT under
+            an RTL UI language like the rest of the editor chrome. */}
+        {isScriptureRow && (
+          <div
+            data-testid="scripture-badge-row"
+            className="pointer-events-none flex justify-end pe-1 pb-0.5"
+          >
+            <span className="rounded bg-sky-400/15 px-1 text-[9px] font-medium text-sky-600 dark:text-sky-400">
+              {t("editor.row.scriptureBadge")}
+            </span>
+          </div>
+        )}
       </div>
           )
         }}

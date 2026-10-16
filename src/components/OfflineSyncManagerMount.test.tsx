@@ -30,6 +30,11 @@ vi.mock("@/lib/offline/download", () => ({
   recoverInterruptedDownloads: (store: unknown) => recoverInterruptedDownloads(store),
 }))
 
+let verify: () => void = () => {}
+vi.mock("@/lib/offline/store", () => ({
+  whenOfflineStoreVerified: () => new Promise<void>((resolve) => (verify = resolve)),
+}))
+
 const buildProjectAwareMinter = vi.fn((_getJwt: () => string | null) => vi.fn())
 vi.mock("@/lib/sync/cqrs-bridge", () => ({
   buildProjectAwareMinter: (getJwt: () => string | null) => buildProjectAwareMinter(getJwt),
@@ -52,11 +57,28 @@ describe("OfflineSyncManagerMount", () => {
     expect(recoverInterruptedDownloads).not.toHaveBeenCalled()
   })
 
-  it("rolls back interrupted downloads before the manager starts", () => {
+  // A store handed out after a head-check timeout may still be catching up:
+  // read mid-rebuild, a ready project once looked like an interrupted download
+  // and lost its whole offline copy. Rolling back deletes rows, so it waits.
+  it("rolls back interrupted downloads only once the leader confirms the store", async () => {
     mockStore = { id: "fake-store" }
     render(<OfflineSyncManagerMount />)
-    expect(recoverInterruptedDownloads).toHaveBeenCalledWith(mockStore)
-    expect(order).toEqual(["recover", "manager"])
+    expect(createOfflineSyncManager).toHaveBeenCalledTimes(1)
+    await Promise.resolve()
+    expect(recoverInterruptedDownloads).not.toHaveBeenCalled()
+
+    verify()
+    await vi.waitFor(() => expect(recoverInterruptedDownloads).toHaveBeenCalledWith(mockStore))
+    expect(order).toEqual(["manager", "recover"])
+  })
+
+  it("never rolls back if it unmounts before the store is confirmed", async () => {
+    mockStore = { id: "fake-store" }
+    const { unmount } = render(<OfflineSyncManagerMount />)
+    unmount()
+    verify()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(recoverInterruptedDownloads).not.toHaveBeenCalled()
   })
 
   it("starts the manager once a store is available, and tears it down on unmount", () => {

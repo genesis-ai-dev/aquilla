@@ -90,6 +90,7 @@ import { setTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeCell } from "@/lib/audio/transcribe"
 import { laneLanguageForTag } from "@/lib/lanes/lane-language"
 import { probeMicPermission } from "./probeMicPermission"
+import { isHiddenCell } from "@/lib/cells/hidden"
 
 interface Props {
   open: boolean
@@ -368,10 +369,17 @@ function GroupedTakes({
 
 
 export function AudioRecordingModal({
-  open, project, cells, activeCellId, targetSlot = RECORDING_SLOT, laneTag, timelineTracks, username,
+  open, project, cells: allCells, activeCellId, targetSlot = RECORDING_SLOT, laneTag, timelineTracks, username,
   onActiveCellChange, onTakeSaved, onLastTakeRemoved, readAloudFor, filmFileId, onClose,
 }: Props) {
   const t = useT()
+  // Sam's decision (hidden lines on the timeline): Next, Previous, the
+  // line count and the step on after a take all walk past a hidden line. The
+  // line the recorder is open on stays, hidden or not, so it can still show.
+  const cells = useMemo(
+    () => allCells.filter((c) => !isHiddenCell(c) || c.id === activeCellId),
+    [allCells, activeCellId],
+  )
   // ONE mic stream and ONE capture graph for as long as this dialog is open
   // (round 4 of the take-head hunt). Opening and closing them around takes is
   // what made the OS reconfigure the input device — measured as the first

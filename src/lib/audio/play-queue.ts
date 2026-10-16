@@ -12,7 +12,7 @@ import { isDefaultTrackSlot, RECORDING_SLOT, slotAudible } from "@/lib/timeline/
 import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 import { effectiveAttachmentDurationMs, targetChipGeom, targetDueSec } from "@/lib/timeline/lane-timing"
 import { hasTiming, sortByLens } from "@/lib/timeline/derive"
-import { buildProgramme, slotAtProgrammeSec, type Programme, type ProgrammeSlot } from "@/lib/timeline/programme"
+import { buildProgramme, slotAtProgrammeSec, withoutHiddenTakes, type Programme, type ProgrammeSlot } from "@/lib/timeline/programme"
 import type { AudioTimingMode } from "@/lib/parsers/types"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
@@ -24,6 +24,7 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { claimActiveAudio, clearActiveAudioIf, getActiveAudio, type ActiveAudioController } from "./audio-coordinator"
 import { t } from "@/lib/i18n/standalone"
 import { selectQueueForFile, type QueueForFile } from "./queue-scope"
+import { isHiddenCell } from "@/lib/cells/hidden"
 
 export type { QueueForFile }
 
@@ -561,6 +562,10 @@ export function setQueueVolume(vol: number): void {
  * over a generated voice. Returns the attachment URL if one is playable.
  */
 function pickPlayableAudio(cell: CellData): { audioId: string; url: string } | undefined {
+  // Sam's decision (hidden lines): a hidden line's take is never played. Its
+  // section of an imported recording still is — masterAudioForCell asks for
+  // the source clip before it gets here.
+  if (isHiddenCell(cell)) return undefined
   const ids = [cell.selectedAudioId, cell.selectedGeneratedVoiceAudioId]
   for (const id of ids) {
     if (!id) continue
@@ -862,7 +867,10 @@ function progRebuild(): void {
           ctx.cells.filter((c) => hasTiming(c)),
           "time",
         )
-  programme = buildProgramme(dialogue)
+  // Hidden lines keep their place (the timeline draws them there, faded) but
+  // their takes are taken out of what plays: a hidden verse sounds only its
+  // original, and one with no original is skipped.
+  programme = withoutHiddenTakes(buildProgramme(dialogue), new Set(dialogue.filter(isHiddenCell).map((c) => c.id)))
   setProgress({ duration: programme.totalSec })
 }
 
@@ -1882,6 +1890,10 @@ export function planTargetOverlay(
   const cell = cells[index]
   const slot = opts?.slot ?? RECORDING_SLOT
   const isDefaultSlot = isDefaultTrackSlot(slot)
+  // Sam's decision (hidden lines on the timeline): a hidden line's takes never
+  // sound — under a recording, a film or the built-in clock, on any track.
+  // The recording under it plays on; only the dub is held back.
+  if (cell && isHiddenCell(cell)) return reason === "seek" ? { kind: "silence" } : { kind: "keep" }
   // `activeTargetForCell` gates on medium:"media"; `resolveTargetAudio` is the
   // same resolution without that gate, and is already what the video-first
   // timeline draws its dub chips from.
@@ -1976,6 +1988,7 @@ export function planEarlyDub(
   const isDefaultSlot = isDefaultTrackSlot(slot)
   for (let i = index + 1; i < cells.length; i++) {
     const next = cells[i]
+    if (isHiddenCell(next)) continue // its take never sounds (hidden lines)
     const target = isDefaultSlot ? activeTargetForCell(next) : resolveTargetAudio(next, slot)
     // Dub-less / take-only sections can't fire an overlay — keep scanning.
     // The source-clip requirement is the DEFAULT track's rule; an added

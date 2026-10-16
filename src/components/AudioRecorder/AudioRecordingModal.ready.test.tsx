@@ -497,3 +497,34 @@ describe("the takes drawer, resting closed", () => {
     expect(screen.getByTestId("rec-takes-drawer-open")).toHaveAttribute("aria-checked", "false")
   })
 })
+
+// Sam's decision (hidden lines on the timeline): Next and Previous walk past a
+// hidden line, and the line count leaves it out.
+describe("AudioRecordingModal — hidden lines", () => {
+  const line = (id: string, over: Record<string, unknown> = {}) => ({ ...cell, id, ...over }) as unknown as CellData
+
+  it("steps over a hidden line both ways", () => {
+    const onActiveCellChange = vi.fn()
+    const cells = [line("c1"), line("c2", { hidden: true }), line("c3")]
+    const { rerender } = render(
+      <AudioRecordingModal open project={project} cells={cells} activeCellId="c1" username="sam"
+        onActiveCellChange={onActiveCellChange} onTakeSaved={() => {}} onClose={() => {}} />,
+    )
+    fireEvent.click(screen.getByTestId("rec-next"))
+    expect(onActiveCellChange).toHaveBeenLastCalledWith("c3")
+    rerender(
+      <AudioRecordingModal open project={project} cells={cells} activeCellId="c3" username="sam"
+        onActiveCellChange={onActiveCellChange} onTakeSaved={() => {}} onClose={() => {}} />,
+    )
+    fireEvent.click(screen.getByTestId("rec-prev"))
+    expect(onActiveCellChange).toHaveBeenLastCalledWith("c1")
+  })
+
+  it("still shows a hidden line it was opened on", () => {
+    render(
+      <AudioRecordingModal open project={project} cells={[line("c1"), line("c2", { hidden: true })]} activeCellId="c2" username="sam"
+        onActiveCellChange={() => {}} onTakeSaved={() => {}} onClose={() => {}} />,
+    )
+    expect(screen.getByTestId("rec-prev")).not.toBeDisabled()
+  })
+})

@@ -86,6 +86,8 @@ export interface DownloadProjectDeps {
   fetchSyncToken: typeof fetchSyncTokenDefault
   fetchProjectFiles: typeof fetchProjectFilesDefault
   streamFileCells: typeof streamFileCellsDefault
+  /** Resolves once the store's reads can be trusted — see whenOfflineStoreVerified. */
+  whenStoreVerified: () => Promise<void>
 }
 
 const defaultDeps: DownloadProjectDeps = {
@@ -93,6 +95,8 @@ const defaultDeps: DownloadProjectDeps = {
   fetchSyncToken: fetchSyncTokenDefault,
   fetchProjectFiles: fetchProjectFilesDefault,
   streamFileCells: streamFileCellsDefault,
+  // Dynamic, as in outbox.ts: keeps the LiveStore adapter out of this module's static graph.
+  whenStoreVerified: () => import("./store").then((m) => m.whenOfflineStoreVerified()),
 }
 
 /** Deletes every locally held row for a project (cells, files, the project
@@ -125,8 +129,9 @@ function deleteProjectRows(store: Store<typeof schema>, projectId: string): void
  * a no-op if the project is `ready` or already downloading in this session.
  * A `downloading` row with no download behind it is one an earlier session
  * left half-done: its partial copy is cleared and the download starts over,
- * so the user can retry without waiting on recoverInterruptedDownloads (which
- * holds off until the store is verified, and never runs if it isn't). Throws (after
+ * so the user can retry without waiting on recoverInterruptedDownloads. Like
+ * recovery, that clear waits for the store to be verified — an unverified
+ * store can show a ready project as `downloading`. Throws (after
  * rolling back any partial rows) on failure, so the caller can surface the
  * error; the offline_projects row never lingers at `downloading` past the
  * call.
@@ -137,7 +142,11 @@ export async function downloadProjectOffline(
   jwt: string,
   deps: DownloadProjectDeps = defaultDeps,
 ): Promise<void> {
-  const existing = store.query(tables.offlineProjects.select().where({ projectId }).first())
+  let existing = store.query(tables.offlineProjects.select().where({ projectId }).first())
+  if (existing?.status === "downloading" && getDownloadProgress(projectId) === null) {
+    await deps.whenStoreVerified()
+    existing = store.query(tables.offlineProjects.select().where({ projectId }).first())
+  }
   if (existing?.status === "ready") return
   if (existing?.status === "downloading") {
     if (getDownloadProgress(projectId) !== null) return

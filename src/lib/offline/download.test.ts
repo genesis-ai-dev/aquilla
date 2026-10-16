@@ -87,6 +87,7 @@ function fakeDeps(overrides: Partial<DownloadProjectDeps> = {}): DownloadProject
         true,
       )
     },
+    whenStoreVerified: async () => {},
     ...overrides,
   }
 }
@@ -156,6 +157,36 @@ describe("downloadProjectOffline", () => {
 
   // Recovery only runs on a verified store, so without this a project an
   // earlier session left at `downloading` could stay stuck there.
+  // An unverified store can show a ready project as `downloading` while it
+  // catches up; clearing on that read would wipe a good copy.
+  it("waits for the store to be verified before clearing a half-done download", async () => {
+    store.commit(
+      events.offlineProjectStatusSet({ projectId: "proj1", status: "downloading", syncedAt: null, queueDepth: 0 }),
+    )
+    store.commit(events.fileSynced({ id: "kept", projectId: "proj1", name: "Exodus", type: "usfm", sequenceIndex: 0 }))
+    let verify = () => {}
+    let resolved = false
+    const download = downloadProjectOffline(store, "proj1", "jwt", fakeDeps({
+      whenStoreVerified: () => new Promise<void>((resolve) => (verify = resolve)),
+      resolveCloudProjectResult: async () => {
+        resolved = true
+        throw new Error("should not download")
+      },
+    }))
+    await Promise.resolve()
+    expect(store.query(tables.files.select().where({ projectId: "proj1" })).map((f) => f.id)).toEqual(["kept"])
+
+    // Caught up: the project was ready all along.
+    store.commit(
+      events.offlineProjectStatusSet({ projectId: "proj1", status: "ready", syncedAt: new Date(), queueDepth: 0 }),
+    )
+    verify()
+    await download
+
+    expect(resolved).toBe(false)
+    expect(store.query(tables.files.select().where({ projectId: "proj1" })).map((f) => f.id)).toEqual(["kept"])
+  })
+
   it("starts over on a download an earlier session left half-done", async () => {
     store.commit(
       events.offlineProjectStatusSet({ projectId: "proj1", status: "downloading", syncedAt: null, queueDepth: 0 }),
@@ -347,6 +378,7 @@ describe("recoverInterruptedDownloads", () => {
       fetchSyncToken: never,
       fetchProjectFiles: never,
       streamFileCells: never,
+      whenStoreVerified: async () => {},
     }
     void downloadProjectOffline(store, "live", "jwt", stalled)
     expect(getDownloadProgress("live")).not.toBeNull()

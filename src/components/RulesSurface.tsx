@@ -27,7 +27,7 @@ import { SeverityBadge, SeverityIcon } from "@/components/rules/RuleSeverity"
 import { LaneCombobox } from "@/components/LaneCombobox"
 import { rulesForLane, ruleLaneScope, type RuleLaneScope } from "@/lib/rules/rule-engine"
 import { withBuiltinOverrides } from "@/lib/lqa/builtin-resolver"
-import { laneCheckOverrides, laneLanguageLabel, lanePunctuation } from "@/lib/lqa/lane-builtin-checks"
+import { laneCheckOverrides, laneLanguageForChecks, laneLanguageLabel, lanePunctuation } from "@/lib/lqa/lane-builtin-checks"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { switcherLaneTags } from "@/lib/lanes/switcher-lanes"
 import { RuleImportDialog } from "./RuleImportDialog"
@@ -176,6 +176,10 @@ export function RulesSurface({
     lanePunctuationResolved.conventions,
   )
   const punctuationOrigin = lanePunctuationResolved.origin
+  // AQU-2000: a source-relative origin means either the lane records no
+  // language, or it records one the conventions table has no entry for
+  // (Spanish, English, …). Only the first may say "records no language".
+  const viewLaneHasLanguage = laneLanguageForChecks(project, viewLane).trim() !== ""
   const punctuationNote =
     punctuationOrigin.kind === "profile"
       ? t("rules.builtinChecks.punctuation.fromProfile")
@@ -183,7 +187,11 @@ export function RulesSurface({
         ? t("rules.builtinChecks.punctuation.fromLanguage", {
             language: laneLanguageLabel(project, viewLane),
           })
-        : t("rules.builtinChecks.punctuation.sourceRelative")
+        : viewLaneHasLanguage
+          ? t("rules.builtinChecks.punctuation.noSpecialConventions", {
+              language: laneLanguageLabel(project, viewLane),
+            })
+          : t("rules.builtinChecks.punctuation.sourceRelative")
 
   // Default: only rules enforced in the viewed lane. Other lanes' rules are
   // one click away and sort last, marked as not applied here.

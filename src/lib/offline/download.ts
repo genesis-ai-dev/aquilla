@@ -88,6 +88,29 @@ export interface DownloadProjectDeps {
   streamFileCells: typeof streamFileCellsDefault
   /** Resolves once the store's reads can be trusted — see whenOfflineStoreVerified. */
   whenStoreVerified: () => Promise<void>
+  /** How long to wait for that before giving up on this attempt. */
+  verifyTimeoutMs?: number
+}
+
+// The store a download is handed has a booted leader, so a healthy one is
+// verified within moments. One that never is (a leader that died, or heads
+// still apart after the reload) won't be this session — fail the attempt
+// rather than hang it.
+const STORE_VERIFY_TIMEOUT_MS = 15_000
+
+async function waitForVerifiedStore(deps: DownloadProjectDeps): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timedOut = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error("The offline store isn't ready yet. Try again shortly, or restart the app if this keeps happening.")),
+      deps.verifyTimeoutMs ?? STORE_VERIFY_TIMEOUT_MS,
+    )
+  })
+  try {
+    await Promise.race([deps.whenStoreVerified(), timedOut])
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 const defaultDeps: DownloadProjectDeps = {
@@ -130,8 +153,10 @@ function deleteProjectRows(store: Store<typeof schema>, projectId: string): void
  * A `downloading` row with no download behind it is one an earlier session
  * left half-done: its partial copy is cleared and the download starts over,
  * so the user can retry without waiting on recoverInterruptedDownloads. Like
- * recovery, that clear waits for the store to be verified — an unverified
- * store can show a ready project as `downloading`. Throws (after
+ * recovery, anything short of `ready` waits for the store to be verified
+ * first — an unverified store can show a ready project as `downloading`, or
+ * not at all, and a failed download's rollback would then wipe a good copy.
+ * Throws, touching nothing, if the store isn't verified in time. Throws (after
  * rolling back any partial rows) on failure, so the caller can surface the
  * error; the offline_projects row never lingers at `downloading` past the
  * call.
@@ -142,16 +167,15 @@ export async function downloadProjectOffline(
   jwt: string,
   deps: DownloadProjectDeps = defaultDeps,
 ): Promise<void> {
+  if (getDownloadProgress(projectId) !== null) return
   let existing = store.query(tables.offlineProjects.select().where({ projectId }).first())
-  if (existing?.status === "downloading" && getDownloadProgress(projectId) === null) {
-    await deps.whenStoreVerified()
-    existing = store.query(tables.offlineProjects.select().where({ projectId }).first())
-  }
   if (existing?.status === "ready") return
-  if (existing?.status === "downloading") {
-    if (getDownloadProgress(projectId) !== null) return
-    deleteProjectRows(store, projectId)
-  }
+  await waitForVerifiedStore(deps)
+  // Another click may have started this download while we waited.
+  if (getDownloadProgress(projectId) !== null) return
+  existing = store.query(tables.offlineProjects.select().where({ projectId }).first())
+  if (existing?.status === "ready") return
+  if (existing?.status === "downloading") deleteProjectRows(store, projectId)
 
   store.commit(
     events.offlineProjectStatusSet({ projectId, status: "downloading", syncedAt: null, queueDepth: 0 }),

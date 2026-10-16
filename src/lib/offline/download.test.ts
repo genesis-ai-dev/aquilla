@@ -187,6 +187,68 @@ describe("downloadProjectOffline", () => {
     expect(store.query(tables.files.select().where({ projectId: "proj1" })).map((f) => f.id)).toEqual(["kept"])
   })
 
+  // The same stale read can hide a ready project entirely; if the download
+  // then failed, its rollback would delete the real copy.
+  it("waits for the store to be verified before downloading a project it doesn't show", async () => {
+    let verify = () => {}
+    let resolved = false
+    const download = downloadProjectOffline(store, "proj1", "jwt", fakeDeps({
+      whenStoreVerified: () => new Promise<void>((resolve) => (verify = resolve)),
+      resolveCloudProjectResult: async () => {
+        resolved = true
+        throw new Error("should not download")
+      },
+    }))
+    await Promise.resolve()
+    expect(store.query(tables.offlineProjects.select().where({ projectId: "proj1" }).first())).toBeUndefined()
+
+    store.commit(
+      events.offlineProjectStatusSet({ projectId: "proj1", status: "ready", syncedAt: new Date(), queueDepth: 0 }),
+    )
+    store.commit(events.fileSynced({ id: "kept", projectId: "proj1", name: "Exodus", type: "usfm", sequenceIndex: 0 }))
+    verify()
+    await download
+
+    expect(resolved).toBe(false)
+    expect(store.query(tables.files.select().where({ projectId: "proj1" })).map((f) => f.id)).toEqual(["kept"])
+  })
+
+  it("fails, touching nothing, when the store is never verified", async () => {
+    store.commit(
+      events.offlineProjectStatusSet({ projectId: "proj1", status: "downloading", syncedAt: null, queueDepth: 0 }),
+    )
+    store.commit(events.fileSynced({ id: "kept", projectId: "proj1", name: "Exodus", type: "usfm", sequenceIndex: 0 }))
+
+    await expect(downloadProjectOffline(store, "proj1", "jwt", fakeDeps({
+      whenStoreVerified: () => new Promise<never>(() => {}),
+      verifyTimeoutMs: 10,
+    }))).rejects.toThrow(/isn't ready yet/)
+
+    expect(store.query(tables.files.select().where({ projectId: "proj1" })).map((f) => f.id)).toEqual(["kept"])
+    expect(store.query(tables.offlineProjects.select().where({ projectId: "proj1" }).first())?.status).toBe("downloading")
+    expect(getDownloadProgress("proj1")).toBeNull()
+  })
+
+  it("starts one download when clicked twice while waiting on verification", async () => {
+    let verify = () => {}
+    const verified = new Promise<void>((resolve) => (verify = resolve))
+    let resolves = 0
+    const deps = fakeDeps({
+      whenStoreVerified: () => verified,
+      resolveCloudProjectResult: async (...args) => {
+        resolves += 1
+        return fakeDeps().resolveCloudProjectResult(...args)
+      },
+    })
+    const first = downloadProjectOffline(store, "proj1", "jwt", deps)
+    const second = downloadProjectOffline(store, "proj1", "jwt", deps)
+    verify()
+    await Promise.all([first, second])
+
+    expect(resolves).toBe(1)
+    expect(store.query(tables.offlineProjects.select().where({ projectId: "proj1" }).first())?.status).toBe("ready")
+  })
+
   it("starts over on a download an earlier session left half-done", async () => {
     store.commit(
       events.offlineProjectStatusSet({ projectId: "proj1", status: "downloading", syncedAt: null, queueDepth: 0 }),
@@ -371,7 +433,7 @@ describe("recoverInterruptedDownloads", () => {
 
   // Recovery waits for the store to be verified, so a download the user
   // started this session can already be under way when it runs.
-  it("leaves a download that's in progress this session alone", () => {
+  it("leaves a download that's in progress this session alone", async () => {
     const never = () => new Promise<never>(() => {})
     const stalled: DownloadProjectDeps = {
       resolveCloudProjectResult: never,
@@ -381,6 +443,7 @@ describe("recoverInterruptedDownloads", () => {
       whenStoreVerified: async () => {},
     }
     void downloadProjectOffline(store, "live", "jwt", stalled)
+    await new Promise((resolve) => setTimeout(resolve, 0))
     expect(getDownloadProgress("live")).not.toBeNull()
 
     expect(recoverInterruptedDownloads(store)).toEqual([])

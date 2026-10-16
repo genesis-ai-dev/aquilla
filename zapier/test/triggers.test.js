@@ -151,10 +151,36 @@ describe('dropdowns', () => {
     expect(await perform('project', { orgId: 'org_1' })).toEqual([{ id: 'p1', name: 'Mark' }]);
   });
 
-  it('lists files of the chosen project', async () => {
-    api().get(`${API}/projects/p1/files`).query({ limit: '500' }).reply(200, { data: [{ id: 'f1', name: 'MRK.usfm' }] });
+  it('lists files of the chosen project, reading the id from `fileId`', async () => {
+    api()
+      .get(`${API}/projects/p1/files`)
+      .query({ limit: '500' })
+      .reply(200, {
+        data: [{ fileId: 'f1', projectId: 'p1', name: 'MRK.usfm', fileType: 'usfm', cellCount: 678 }],
+        nextCursor: null,
+      });
 
     expect(await perform('file', { projectId: 'p1' })).toEqual([{ id: 'f1', name: 'MRK.usfm' }]);
+  });
+
+  // Zapier stores the chosen entry's `id` as the field value. An entry with no
+  // id looks fine in the editor but sends nothing, so every action that takes
+  // that field fails. Each dropdown is fed the real row shape of its route.
+  it.each([
+    ['org', {}, '/orgs', { data: [{ id: 'org_1', name: 'A', role: 700, role_source: 'owner' }], nextCursor: null }],
+    ['project', {}, '/projects', { data: [{ id: 'p1', name: 'Mark', org_id: 'org_1', role_source: 'member' }], nextCursor: null }],
+    ['file', { projectId: 'p1' }, '/projects/p1/files', { data: [{ fileId: 'f1', projectId: 'p1', name: 'greek-article.md', fileType: 'md', cellCount: 4 }], nextCursor: null }],
+    ['lane', { projectId: 'p1' }, '/projects/p1', { id: 'p1', name: 'Mark', lanes: [{ id: 'l1', name: 'Tok Pisin', language: 'tpi', role: 'target' }] }],
+  ])('every %s dropdown entry has a non-empty id', async (key, inputData, path, body) => {
+    api().get(`${API}${path}`).query(true).reply(200, body);
+
+    const results = await perform(key, inputData);
+
+    expect(results.length).toBeGreaterThan(0);
+    for (const item of results) {
+      expect(typeof item.id).toBe('string');
+      expect(item.id).not.toBe('');
+    }
   });
 
   it('offers only target lanes, because translations and drafts cannot be written to the source', async () => {

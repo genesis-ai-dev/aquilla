@@ -313,11 +313,10 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
   // (transcribe-chunked.ts), so an episode's ~900 rows are ~55 hosted
   // requests rather than ~900 against a limit of 60 per 15 minutes. Hosted
   // only: on-device Whisper has no limit, and keeps its row-at-a-time run. A
-  // forced run (the sections the user selected) also stays row by row — it
-  // is given only the selection, so it cannot know which rows lie between.
-  const targetIds = new Set(targets.map((c) => c.id))
+  // forced run (the sections the user selected) also stays row by row: the
+  // person asked for those rows again, one Transcribe press each.
   const plan = !args.force && session && usesHostedTranscription(session, projectId)
-    ? planTranscriptionChunks(cells, (c) => targetIds.has(c.id))
+    ? planTranscriptionChunks(targets)
     : { chunks: [] as TranscriptionChunk[], single: targets }
   type Job = { chunk: TranscriptionChunk } | { cell: CellData }
   const jobs: Job[] = [...plan.chunks.map((chunk) => ({ chunk })), ...plan.single.map((cell) => ({ cell }))]

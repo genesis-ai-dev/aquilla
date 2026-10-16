@@ -452,10 +452,11 @@ export function mockTranscription(audioSeconds?: number) {
   }
   // AQU-1681: a minute of a recording is sent at once and each word is handed
   // back to the row it was spoken in, so the stand-in "speaks" all the way
-  // through what it was sent: one word every half second, named for when it
-  // was said, so a local run shows every row getting words from its own stretch.
-  const words = Array.from({ length: Math.floor(audioSeconds / 0.5) }, (_, i) => ({
-    word: `mock@${(i * 0.5).toFixed(1)}`, start: i * 0.5, end: i * 0.5 + 0.4,
+  // through what it was sent: a word every fifth of a second — often enough
+  // that even the shortest row the splitter makes (200 ms) holds one — named
+  // for when it was said, so a local run shows each row's words are its own.
+  const words = Array.from({ length: Math.floor(audioSeconds / 0.2) }, (_, i) => ({
+    word: `mock@${(i * 0.2).toFixed(1)}`, start: i * 0.2, end: i * 0.2 + 0.15,
   }))
   return {
     text: words.map((w) => w.word).join(" "), words,

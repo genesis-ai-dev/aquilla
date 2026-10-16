@@ -25,8 +25,9 @@ describe("scripted local agent", () => {
     const seconds = wavSecondsOfRequest(JSON.stringify({ input_audio: { data: wav.toString("base64") } }))
     expect(seconds).toBe(3)
     const reply = mockTranscription(seconds)
-    expect(reply.words.map((w) => w.start)).toEqual([0, 0.5, 1, 1.5, 2, 2.5])
-    expect(reply.text).toBe("mock@0.0 mock@0.5 mock@1.0 mock@1.5 mock@2.0 mock@2.5")
+    expect(reply.words).toHaveLength(15)
+    expect(reply.words.slice(0, 3).map((w) => w.start)).toEqual([0, 0.2, 0.4])
+    expect(reply.text.startsWith("mock@0.0 mock@0.2 mock@0.4 ")).toBe(true)
   })
   it("returns a declarative JSON recipe for the owned importer contract", () => {
     const reply = message(scriptMockResponse([

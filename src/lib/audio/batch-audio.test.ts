@@ -407,11 +407,11 @@ describe("runTranscribeAll — a minute at a time (AQU-1681)", () => {
     expect(seen).toEqual([[0, 3], [3, 3]])
   })
 
-  it("leaves rows that already have their text alone", async () => {
+  it("leaves rows that already have their text alone, and out of the audio sent", async () => {
     const { transcribeChunk } = await import("./transcribe-chunked")
     const cells = [shared("r1", 0, 3000), shared("r2", 4000, 7000, { transcription: "done" }), shared("r3", 8000, 11000), shared("r4", 12000, 15000)]
     await runTranscribeAll({ cells, projectId: "p1", session: mockSession })
-    expect(vi.mocked(transcribeChunk).mock.calls.flatMap(([c]) => c.rows.map((r) => r.cell.id))).toEqual(["r3", "r4"])
+    expect(vi.mocked(transcribeChunk).mock.calls.flatMap(([c]) => c.rows.map((r) => r.cell.id))).toEqual(["r1", "r3", "r4"])
   })
 
   it("stays row by row for a chosen selection and for on-device Whisper", async () => {

@@ -4,7 +4,7 @@ vi.mock("./transcribe-status", () => ({ setTranscribeStatus: vi.fn() }))
 
 import {
   assignWordsToRows,
-  CHUNK_MAX_GAP_MS,
+  chunkPcm,
   planTranscriptionChunks,
   transcribeChunk,
   type TranscriptionChunk,
@@ -32,56 +32,50 @@ function row(id: string, startMs: number, endMs: number, over: Partial<CellData>
   } as unknown as CellData
 }
 
-const all = () => true
-
 describe("planTranscriptionChunks", () => {
-  it("packs consecutive rows into minutes, never splitting a row", () => {
-    // Twelve 8-second rows, 2 s apart: six fit in a minute (a seventh would end at 68 s).
-    const rows = Array.from({ length: 12 }, (_, i) => row(`r${i}`, i * 10_000, i * 10_000 + 8_000))
-    const { chunks, single } = planTranscriptionChunks(rows, all)
+  it("packs consecutive rows into minutes, never splitting a row, half a second apart", () => {
+    // 8-second rows: seven fit in a minute (7 × 8 s + 6 × 0.5 s = 59 s); an
+    // eighth would make 67.5 s.
+    const rows = Array.from({ length: 14 }, (_, i) => row(`r${i}`, i * 20_000, i * 20_000 + 8_000))
+    const { chunks, single } = planTranscriptionChunks(rows)
     expect(single).toEqual([])
-    expect(chunks.map((c) => [c.startMs, c.endMs, c.rows.length])).toEqual([[0, 58_000, 6], [60_000, 118_000, 6]])
-    expect(chunks.every((c) => c.endMs - c.startMs <= 60_000)).toBe(true)
+    expect(chunks.map((c) => [c.rows.length, c.durationMs])).toEqual([[7, 59_000], [7, 59_000]])
+    expect(chunks[0]!.rows.map((r) => r.offsetMs)).toEqual([0, 8_500, 17_000, 25_500, 34_000, 42_500, 51_000])
     expect(chunks[0]!.clipKey).toBe(`${CLIP}.m4a`)
   })
 
+  it("sends only the rows' own stretches, so long silences between them cost nothing", () => {
+    // Three 5-second lines a minute apart: one request, not three.
+    const rows = [row("a", 0, 5_000), row("b", 65_000, 70_000), row("c", 130_000, 135_000)]
+    const { chunks } = planTranscriptionChunks(rows)
+    expect(chunks.map((c) => [c.rows.map((r) => r.cell.id), c.durationMs])).toEqual([[["a", "b", "c"], 16_000]])
+  })
+
   it("sends a row longer than a minute on its own", () => {
-    const rows = [row("a", 0, 3_000), row("long", 4_000, 70_000), row("b", 71_000, 74_000), row("c", 75_000, 78_000)]
-    const { chunks, single } = planTranscriptionChunks(rows, all)
-    expect(single.map((c) => c.id)).toEqual(["a", "long"])
-    expect(chunks.map((c) => c.rows.map((r) => r.cell.id))).toEqual([["b", "c"]])
+    const rows = [row("a", 0, 3_000), row("long", 4_000, 70_000), row("b", 71_000, 74_000)]
+    const { chunks, single } = planTranscriptionChunks(rows)
+    expect(single.map((c) => c.id)).toEqual(["long"])
+    expect(chunks.map((c) => c.rows.map((r) => r.cell.id))).toEqual([["a", "b"]])
   })
 
-  it("never stretches a minute across a row that already has its text", () => {
-    const rows = [row("a", 0, 3_000), row("done", 4_000, 7_000), row("b", 8_000, 11_000), row("c", 12_000, 15_000)]
-    const { chunks, single } = planTranscriptionChunks(rows, (c) => c.id !== "done")
-    expect(chunks.map((c) => c.rows.map((r) => r.cell.id))).toEqual([["b", "c"]])
-    expect(single.map((c) => c.id)).toEqual(["a"])
-  })
-
-  it("ends a minute at a long stretch nobody needs transcribed", () => {
-    const rows = [row("a", 0, 3_000), row("b", 4_000, 7_000), row("c", 7_000 + CHUNK_MAX_GAP_MS + 1, 20_000), row("d", 21_000, 24_000)]
-    const { chunks } = planTranscriptionChunks(rows, all)
-    expect(chunks.map((c) => c.rows.map((r) => r.cell.id))).toEqual([["a", "b"], ["c", "d"]])
-  })
-
-  it("leaves takes and rows with no stretch to the row-by-row path", () => {
+  it("leaves takes, rows with no stretch and a row with nobody to share with to the row-by-row path", () => {
     const take = row("take", 0, 3_000, { selectedAudioId: "audio-take-123-abc" } as Partial<CellData>)
     ;(take as unknown as { attachments: Record<string, unknown> }).attachments["audio-take-123-abc"] = { url: "frontier-audio://audio-take-123-abc.webm" }
     const untimed = row("untimed", 0, 0)
-    const { chunks, single } = planTranscriptionChunks([take, untimed], all)
+    const { chunks, single } = planTranscriptionChunks([take, untimed, row("alone", 5_000, 8_000)])
     expect(chunks).toEqual([])
-    expect(single.map((c) => c.id)).toEqual(["take", "untimed"])
+    expect(single.map((c) => c.id)).toEqual(["take", "untimed", "alone"])
   })
 })
 
-/** A minute at 100 s holding rows 100–103 s and 104–107.5 s. */
+/** A minute holding rows 100–103 s and 104–107.5 s of the recording, sent as
+ *  0–3 s and (after half a second of silence) 3.5–7 s. */
 function chunkOf(): TranscriptionChunk {
   const a = row("a", 100_000, 103_000)
   const b = row("b", 104_000, 107_500)
-  return { clipKey: `${CLIP}.m4a`, startMs: 100_000, endMs: 107_500, rows: [
-    { cell: a, startMs: 100_000, endMs: 103_000 },
-    { cell: b, startMs: 104_000, endMs: 107_500 },
+  return { clipKey: `${CLIP}.m4a`, durationMs: 7_000, rows: [
+    { cell: a, startMs: 100_000, endMs: 103_000, offsetMs: 0 },
+    { cell: b, startMs: 104_000, endMs: 107_500, offsetMs: 3_500 },
   ] }
 }
 
@@ -94,18 +88,18 @@ describe("assignWordsToRows", () => {
         { text: "Hello", start: 0.1, end: 0.5 },
         { text: "there,", start: 0.6, end: 1.0 },
         { text: "friend.", start: 1.1, end: 1.6 },
-        // In the silence between the rows, nearer the second.
-        { text: "Where", start: 3.8, end: 4.1 },
-        { text: "are", start: 4.2, end: 4.4 },
-        { text: "you", start: 4.5, end: 4.7 },
-        { text: "going?", start: 4.8, end: 5.3 },
+        // In the half second put between the rows, nearer the second.
+        { text: "Where", start: 3.3, end: 3.6 },
+        { text: "are", start: 3.7, end: 3.9 },
+        { text: "you", start: 4.0, end: 4.2 },
+        { text: "going?", start: 4.3, end: 4.8 },
       ],
     }
     const rows = assignWordsToRows(result, chunkOf())!
     expect(rows.get("a")?.text).toBe("Hello there, friend.")
     expect(rows.get("b")?.text).toBe("Where are you going?")
     expect(rows.get("a")?.chunks[0]).toEqual({ text: "Hello", start: 0.1, end: 0.5 })
-    // 100 s + 4.2 s is 0.2 s into row b, which starts at 104 s.
+    // 3.7 s into the audio sent is 0.2 s into row b, which was sent from 3.5 s.
     expect(rows.get("b")?.chunks[1]!.start).toBeCloseTo(0.2, 6)
   })
 
@@ -114,7 +108,7 @@ describe("assignWordsToRows", () => {
       text: "你好世界。我们走吧。",
       chunks: [
         { text: "你好", start: 0.2, end: 0.6 }, { text: "世界。", start: 0.7, end: 1.2 },
-        { text: "我们", start: 4.2, end: 4.6 }, { text: "走吧。", start: 4.7, end: 5.2 },
+        { text: "我们", start: 3.7, end: 4.1 }, { text: "走吧。", start: 4.2, end: 4.7 },
       ],
     }
     const rows = assignWordsToRows(result, chunkOf())!
@@ -124,7 +118,7 @@ describe("assignWordsToRows", () => {
   it("joins a row's words when they cannot be found in the transcript", () => {
     const result: TranscriptionResult = {
       text: "something else entirely",
-      chunks: [{ text: "one", start: 0.2, end: 0.5 }, { text: "two", start: 4.2, end: 4.5 }, { text: "three", start: 4.6, end: 4.9 }],
+      chunks: [{ text: "one", start: 0.2, end: 0.5 }, { text: "two", start: 3.7, end: 4.0 }, { text: "three", start: 4.1, end: 4.4 }],
     }
     const rows = assignWordsToRows(result, chunkOf())!
     expect([rows.get("a")?.text, rows.get("b")?.text]).toEqual(["one", "two three"])
@@ -148,7 +142,7 @@ describe("transcribeChunk", () => {
   it("recognises the minute once and hands each row its share", async () => {
     const recognise = vi.fn(async () => ({
       text: "Hello. Bye.", granularity: "word" as const,
-      chunks: [{ text: "Hello.", start: 0.5, end: 1 }, { text: "Bye.", start: 5, end: 5.5 }],
+      chunks: [{ text: "Hello.", start: 0.5, end: 1 }, { text: "Bye.", start: 4, end: 4.5 }],
     }))
     const transcribeRow = vi.fn(async (_cell: CellData, _words?: TranscriptionResult) => 1)
     await transcribeChunk(chunkOf(), { session, projectId: "p1", recognise, transcribeRow })
@@ -177,5 +171,13 @@ describe("transcribeChunk", () => {
     })
     expect(transcribeRow).not.toHaveBeenCalled()
     expect(vi.mocked(setTranscribeStatus).mock.calls.filter(([, s]) => s.kind === "error")).toHaveLength(2)
+  })
+})
+
+describe("chunkPcm", () => {
+  it("lays each row's stretch at its offset with silence between", async () => {
+    const pcm = await chunkPcm(chunkOf(), async (r) => new Float32Array((r.endMs - r.startMs) * 16).fill(r.cell.id === "a" ? 0.5 : -0.5))
+    expect(pcm.length).toBe(7 * 16_000)
+    expect([pcm[0], pcm[3.2 * 16_000], pcm[3.6 * 16_000], pcm[pcm.length - 1]]).toEqual([0.5, 0, -0.5, -0.5])
   })
 })

@@ -8,16 +8,24 @@
 // most one request carries — cut at row boundaries so no row is split across
 // two requests, then hand each returned word back to the row it was spoken
 // in. A row longer than a minute goes on its own (and is sent in one-minute
-// windows, as before). An episode then takes ~55 requests instead of ~900.
+// windows, as before).
+//
+// Only the rows' own stretches are sent, back to back with half a second of
+// silence between them, not the recording end to end. Episode 101's 901 rows
+// hold 31 of its 55 minutes; the rest is music and silence between lines.
+// Sending only the speech is 46 requests and 38 billed minutes for that
+// episode, where sending the recording through was 64 requests (over the
+// limit, so a quarter-hour wait) and all 55 minutes. The half second keeps
+// lines apart for the recogniser the way the pause between them did, and it
+// is where a word that lands between two rows is decided.
 //
 // The hosted route returns per-word timings (`timestamp_granularities:
 // ["word", "segment"]`) and says so (`granularity`). If a response only has
 // segment timings — a sentence can span two rows — or has text with no
 // timings at all, that minute's rows are transcribed one by one instead.
 //
-// Rows that already have their text are never sent: they are not targets, and
-// a minute is never stretched across one, so none of their words can land on
-// a neighbour.
+// Rows that already have their text are never sent, and since only the rows
+// being transcribed are in the audio, none of their words can land anywhere.
 
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -31,23 +39,25 @@ import { audioBytesToWhisperPcm, readClipBytes, type TranscriptionResult } from 
  *  at exactly this), so a minute is one request. */
 export const CHUNK_MAX_MS = 60_000
 
-/** Silence between two rows that a minute will bridge. A longer gap is audio
- *  nobody asked for (music, a scene with no lines), so the minute ends there
- *  rather than paying to transcribe it. */
-export const CHUNK_MAX_GAP_MS = 10_000
+/** Silence put between two rows' stretches in a minute. */
+export const JOIN_SILENCE_MS = 500
+
+const SAMPLE_RATE = 16_000
 
 export interface ChunkRow {
   cell: CellData
   /** The row's stretch of the shared recording (its trim window), ms. */
   startMs: number
   endMs: number
+  /** Where the stretch starts in the audio sent, ms. */
+  offsetMs: number
 }
 
 export interface TranscriptionChunk {
   /** The shared recording, as transcription names it: `<audioId>.<ext>`. */
   clipKey: string
-  startMs: number
-  endMs: number
+  /** Length of the audio sent: the stretches and the silences between. */
+  durationMs: number
   rows: ChunkRow[]
 }
 
@@ -65,30 +75,25 @@ function sharedRecordingRow(cell: CellData): { clipKey: string; startMs: number;
 }
 
 /**
- * Group the target rows of each shared recording into minutes.
- *
- * `cells` is everything the caller knows about (so a row that is NOT a target
- * can end a minute); `isTarget` picks the rows to transcribe. Rows that cannot
- * be grouped — takes, rows with no stretch, a row over a minute long, a row
- * with no neighbour to share a request with — come back in `single`, for the
- * row-by-row path.
+ * Pack the rows to transcribe into minutes, in the recording's order. Rows
+ * that cannot be packed — takes, rows with no stretch, a row over a minute
+ * long, a row with no neighbour to share a request with — come back in
+ * `single`, for the row-by-row path.
  */
 export function planTranscriptionChunks(
-  cells: readonly CellData[],
-  isTarget: (cell: CellData) => boolean,
+  targets: readonly CellData[],
 ): { chunks: TranscriptionChunk[]; single: CellData[] } {
   const chunks: TranscriptionChunk[] = []
   const single: CellData[] = []
-  const byClip = new Map<string, Array<ChunkRow & { target: boolean }>>()
-  for (const cell of cells) {
-    const target = isTarget(cell)
+  const byClip = new Map<string, Array<{ cell: CellData; startMs: number; endMs: number }>>()
+  for (const cell of targets) {
     const row = sharedRecordingRow(cell)
     if (!row) {
-      if (target) single.push(cell)
+      single.push(cell)
       continue
     }
     const list = byClip.get(row.clipKey) ?? []
-    list.push({ cell, startMs: row.startMs, endMs: row.endMs, target })
+    list.push({ cell, startMs: row.startMs, endMs: row.endMs })
     byClip.set(row.clipKey, list)
   }
 
@@ -100,18 +105,19 @@ export function planTranscriptionChunks(
       else if (current) single.push(current.rows[0]!.cell)
       current = null
     }
-    for (const { cell, startMs, endMs, target } of rows) {
-      if (!target || endMs - startMs > CHUNK_MAX_MS) {
-        close()
-        if (target) single.push(cell)
+    for (const { cell, startMs, endMs } of rows) {
+      const length = endMs - startMs
+      if (length > CHUNK_MAX_MS) {
+        single.push(cell)
         continue
       }
-      if (current && endMs - current.startMs <= CHUNK_MAX_MS && startMs - current.endMs <= CHUNK_MAX_GAP_MS) {
-        current.rows.push({ cell, startMs, endMs })
-        current.endMs = Math.max(current.endMs, endMs)
+      if (current && current.durationMs + JOIN_SILENCE_MS + length <= CHUNK_MAX_MS) {
+        const offsetMs: number = current.durationMs + JOIN_SILENCE_MS
+        current.rows.push({ cell, startMs, endMs, offsetMs })
+        current.durationMs = offsetMs + length
       } else {
         close()
-        current = { clipKey, startMs, endMs, rows: [{ cell, startMs, endMs }] }
+        current = { clipKey, durationMs: length, rows: [{ cell, startMs, endMs, offsetMs: 0 }] }
       }
     }
     close()
@@ -121,12 +127,12 @@ export function planTranscriptionChunks(
 
 /**
  * Hand a minute's words back to its rows. `result` is timed from the start of
- * the minute; each row's share comes back timed from the start of the row,
- * exactly as if the row had been transcribed alone.
+ * the audio sent; each row's share comes back timed from the start of the
+ * row, exactly as if the row had been transcribed alone.
  *
  * A word belongs to the row whose stretch holds its middle, else (a word in
- * the silence between two rows) to the nearer row. Each row's text is cut out
- * of the full transcript between its first word and the next row's, so
+ * the silence between two stretches) to the nearer one. Each row's text is cut
+ * out of the full transcript between its first word and the next row's, so
  * punctuation and languages written without spaces survive; if a word cannot
  * be found in the transcript the row's words are joined with spaces instead.
  *
@@ -146,18 +152,15 @@ export function assignWordsToRows(
   }
 
   const rows = chunk.rows
-  const words = result.chunks.map((w) => ({
-    text: w.text,
-    startMs: chunk.startMs + w.start * 1000,
-    endMs: chunk.startMs + w.end * 1000,
-  }))
+  const words = result.chunks.map((w) => ({ text: w.text, startMs: w.start * 1000, endMs: w.end * 1000 }))
   const rowOf = words.map((w) => {
     const mid = (w.startMs + w.endMs) / 2
     let best = 0
     let bestDistance = Number.POSITIVE_INFINITY
     for (let r = 0; r < rows.length; r += 1) {
-      const row = rows[r]!
-      const distance = mid < row.startMs ? row.startMs - mid : mid >= row.endMs ? mid - row.endMs : 0
+      const from = rows[r]!.offsetMs
+      const to = from + (rows[r]!.endMs - rows[r]!.startMs)
+      const distance = mid < from ? from - mid : mid >= to ? mid - to : 0
       if (distance < bestDistance) {
         best = r
         bestDistance = distance
@@ -204,8 +207,8 @@ export function assignWordsToRows(
       text: rowText,
       chunks: mine.map(({ w }) => ({
         text: w.text,
-        start: Math.max(0, (w.startMs - row.startMs) / 1000),
-        end: Math.max(0, (w.endMs - row.startMs) / 1000),
+        start: Math.max(0, (w.startMs - row.offsetMs) / 1000),
+        end: Math.max(0, (w.endMs - row.offsetMs) / 1000),
       })),
       ...(result.granularity ? { granularity: result.granularity } : {}),
     })
@@ -229,18 +232,36 @@ export interface ChunkRunContext {
   isCancelled?: () => boolean
 }
 
+/**
+ * The audio a minute sends: each row's stretch at its offset, silence between.
+ * The recording is decoded once (or was handed over already decoded) and held
+ * by shared-clip-pcm.ts; each stretch is a copy cut from it.
+ */
+export async function chunkPcm(
+  chunk: TranscriptionChunk,
+  windowOf: (row: ChunkRow) => Promise<Float32Array>,
+): Promise<Float32Array> {
+  const out = new Float32Array(Math.ceil((chunk.durationMs / 1000) * SAMPLE_RATE))
+  for (const row of chunk.rows) {
+    const stretch = await windowOf(row)
+    const at = Math.round((row.offsetMs / 1000) * SAMPLE_RATE)
+    out.set(stretch.subarray(0, Math.max(0, out.length - at)), at)
+  }
+  return out
+}
+
 async function recogniseChunk(chunk: TranscriptionChunk, ctx: ChunkRunContext): Promise<TranscriptionResult> {
   const first = chunk.rows[0]!.cell
   const url = first.attachments?.[first.selectedAudioId!]?.url ?? ""
   const frontier = parseFrontierAudioUrl(url)!
-  const pcm = await sharedClipWindow(
+  const pcm = await chunkPcm(chunk, (row) => sharedClipWindow(
     chunk.clipKey,
-    { trimStartMs: chunk.startMs, trimEndMs: chunk.endMs },
+    { trimStartMs: row.startMs, trimEndMs: row.endMs },
     () => readClipBytes({
       projectId: ctx.projectId, fileId: first.fileId, audioId: frontier.audioId, ext: frontier.ext, session: ctx.session,
     }),
     (bytes) => audioBytesToWhisperPcm(bytes),
-  )
+  ))
   // The account's model choice applies as for a row of the source clip
   // transcribed alone: never zero-shot (no lane's speech to learn from), and
   // the raw language tag, so the server can route by it.

@@ -330,7 +330,8 @@ export const PLAN_IMPORT_MAX_CELLS = 5000
  *  plan the engine cannot land. Matched to PLAN_IMPORT_MAX_CELLS: a whole book
  *  of target commits is the largest batch the apply path pages through, and the
  *  prepare-time precondition lookup is paged to match
- *  (PRECONDITION_LOOKUP_CHUNK). Larger batches split into several changesets. */
+ *  (CELL_KEY_LOOKUP_ROWS, lib/cell-key-lookup.ts). Larger batches split into
+ *  several changesets. */
 export const SET_TRANSLATION_MAX_COMMANDS = 5000
 
 /** Longest org name CreateOrg will stage (AQU-1221). The column is TEXT; this

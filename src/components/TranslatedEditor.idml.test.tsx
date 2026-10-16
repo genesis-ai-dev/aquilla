@@ -10,6 +10,7 @@ import {
 } from "@/lib/store/visible-style-segments-pref"
 import { TranslatedEditor } from "./TranslatedEditor"
 import {
+  IDML_SLOT_NODE_NAME,
   serializeIdmlEditorDocument,
   type IdmlEditorConfiguration,
 } from "@/lib/richtext/idml-editor"
@@ -61,6 +62,85 @@ function positionOf(editor: Editor, name: string): number {
   })
   if (position < 0) throw new Error(`Missing ${name}`)
   return position
+}
+
+/**
+ * AQU-1962: two adjacent character runs with no token between them — the shape
+ * Anastasia's Russian BSB cells have, where InDesign split a word pair across
+ * runs and the translator has to put the space back at the run boundary.
+ */
+const ADJACENT_SOURCE =
+  `<p data-idml-version="2">`
+  + `<span data-idml-slot="0" data-idml-character-style="CharacterStyle/Body" data-idml-protected="slot">of the book</span>`
+  + `<span data-idml-slot="1" data-idml-character-style="CharacterStyle/Bold" data-idml-protected="slot">Genesis</span>`
+  + `</p>`
+
+const ADJACENT_METADATA: IdmlFormatMetadataV2 = {
+  version: 2,
+  slotCount: 2,
+  editableSlotIndexes: [0, 1],
+  protectedTokenCount: 0,
+  anchorSequenceHash: createHash("sha256").update([
+    "slot:0:editable:CharacterStyle/Body",
+    "slot:1:editable:CharacterStyle/Bold",
+  ].join("\u0000")).digest("hex"),
+}
+
+const ADJACENT_CONFIGURATION: IdmlEditorConfiguration = {
+  kind: "ready",
+  context: { sourceHtml: ADJACENT_SOURCE, metadata: ADJACENT_METADATA },
+}
+
+const adjacentTarget = (first: string, second: string) =>
+  `<p data-idml-version="2">`
+  + `<span data-idml-slot="0" data-idml-character-style="CharacterStyle/Body" data-idml-protected="slot">${first}</span>`
+  + `<span data-idml-slot="1" data-idml-character-style="CharacterStyle/Bold" data-idml-protected="slot">${second}</span>`
+  + `</p>`
+
+/** Content end of the nth editable slot — the caret position at its boundary. */
+function slotContentEnd(editor: Editor, ordinal: number): number {
+  let seen = 0
+  let found = -1
+  editor.state.doc.descendants((node, position) => {
+    if (found >= 0) return false
+    if (node.type.name !== IDML_SLOT_NODE_NAME) return true
+    if (seen === ordinal) found = position + 1 + node.content.size
+    seen += 1
+    return false
+  })
+  if (found < 0) throw new Error(`Missing slot ${ordinal}`)
+  return found
+}
+
+/** Content start of the nth editable slot. */
+function slotContentStart(editor: Editor, ordinal: number): number {
+  let seen = 0
+  let found = -1
+  editor.state.doc.descendants((node, position) => {
+    if (found >= 0) return false
+    if (node.type.name !== IDML_SLOT_NODE_NAME) return true
+    if (seen === ordinal) found = position + 1
+    seen += 1
+    return false
+  })
+  if (found < 0) throw new Error(`Missing slot ${ordinal}`)
+  return found
+}
+
+
+/** Paragraph-level position between slot `ordinal` and the next run. */
+function runBoundaryPosition(editor: Editor, ordinal: number): number {
+  let seen = 0
+  let found = -1
+  editor.state.doc.descendants((node, position) => {
+    if (found >= 0) return false
+    if (node.type.name !== IDML_SLOT_NODE_NAME) return true
+    if (seen === ordinal) found = position + node.nodeSize
+    seen += 1
+    return false
+  })
+  if (found < 0) throw new Error(`Missing slot ${ordinal}`)
+  return found
 }
 
 afterEach(() => {
@@ -734,6 +814,159 @@ describe("TranslatedEditor — protected IDML mode", () => {
     expect(slotElement?.textContent).toBe(" a b")
     const committed = onCommit.mock.calls.at(-1)?.[0] as { valueHtml: string } | undefined
     expect(validateIdmlTranslation(SOURCE_HTML, committed!.valueHtml, METADATA).valid).toBe(true)
+  })
+
+  /**
+   * AQU-1962: the Russian BSB regression. A space typed at a protected-run
+   * boundary used to save and then merge back — the editor's parse normalized
+   * whitespace at the edge of a slot's inline content away on the next
+   * hydrate, and the commit after that wrote the merged words back.
+   */
+  it("keeps a space typed at a protected-run boundary through commit and re-hydrate (AQU-1962)", async () => {
+    const onCommit = vi.fn()
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-boundary-space"
+        initialPlain="книгиБытие"
+        initialHtml={adjacentTarget("книги", "Бытие")}
+        idmlConfiguration={ADJACENT_CONFIGURATION}
+        onCommit={onCommit}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    const editor = surface.editor!
+
+    act(() => {
+      fireEvent.focus(surface)
+      editor.view.dispatch(editor.state.tr.setSelection(
+        TextSelection.create(editor.state.doc, slotContentEnd(editor, 0)),
+      ))
+      fireEvent.keyDown(surface, { key: " " })
+      fireEvent.blur(surface)
+    })
+
+    expect(slotVisibleText(surface, 0)).toBe("книги ")
+    const committed = onCommit.mock.calls.at(-1)?.[0] as
+      { value: string; valueHtml: string } | undefined
+    expect(committed?.value).toBe("книги Бытие")
+    expect(committed?.valueHtml).toBe(adjacentTarget("книги ", "Бытие"))
+    expect(validateIdmlTranslation(ADJACENT_SOURCE, committed!.valueHtml, ADJACENT_METADATA).valid)
+      .toBe(true)
+
+    // The revert happened on the NEXT hydrate from the stored HTML, so the
+    // guard is that the committed form comes back whole.
+    cleanup()
+    const reopened = render(
+      <TranslatedEditor
+        cellId="idml-boundary-space"
+        initialPlain={committed!.value}
+        initialHtml={committed!.valueHtml}
+        idmlConfiguration={ADJACENT_CONFIGURATION}
+        onCommit={vi.fn()}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const reopenedSurface = reopened.container.querySelector(".ProseMirror") as EditorSurface
+    expect(slotVisibleText(reopenedSurface, 0)).toBe("книги ")
+    expect(serializeIdmlEditorDocument(reopenedSurface.editor!.state.doc))
+      .toBe(adjacentTarget("книги ", "Бытие"))
+  })
+
+  it("drops a second space typed across the run boundary (AQU-1962 / AQU-758)", async () => {
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-boundary-double-space"
+        initialPlain="книги Бытие"
+        initialHtml={adjacentTarget("книги ", "Бытие")}
+        idmlConfiguration={ADJACENT_CONFIGURATION}
+        onCommit={vi.fn()}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    const editor = surface.editor!
+
+    act(() => {
+      fireEvent.focus(surface)
+      // Caret at the start of the following run, against the space that
+      // already ends the preceding one.
+      editor.view.dispatch(editor.state.tr.setSelection(
+        TextSelection.create(editor.state.doc, slotContentStart(editor, 1)),
+      ))
+      fireEvent.keyDown(surface, { key: " " })
+    })
+
+    expect(slotVisibleText(surface, 1)).toBe("Бытие")
+    expect(serializeIdmlEditorDocument(editor.state.doc))
+      .toBe(adjacentTarget("книги ", "Бытие"))
+  })
+
+  /**
+   * AQU-1962: Genesis 4–5 — the cell "refuses to accept" a space between
+   * "Иафета" and "и". Those words are two adjacent runs, so the caret between
+   * them sits in the paragraph, outside every slot; the typed space was
+   * re-aimed at the cell's first editable run and appeared at the start of the
+   * cell instead of where the translator put the caret.
+   */
+  it("types at a run boundary into the run it abuts, not the start of the cell (AQU-1962)", async () => {
+    const onCommit = vi.fn()
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-run-boundary-type"
+        initialPlain="Иафетаи"
+        initialHtml={adjacentTarget("Иафета", "и")}
+        idmlConfiguration={ADJACENT_CONFIGURATION}
+        onCommit={onCommit}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    const editor = surface.editor!
+
+    act(() => {
+      fireEvent.focus(surface)
+      editor.view.dispatch(editor.state.tr.setSelection(
+        TextSelection.create(editor.state.doc, runBoundaryPosition(editor, 0)),
+      ))
+      fireEvent.keyDown(surface, { key: " " })
+      fireEvent.blur(surface)
+    })
+
+    expect(slotVisibleText(surface, 0)).toBe("Иафета ")
+    expect(slotVisibleText(surface, 1)).toBe("и")
+    const committed = onCommit.mock.calls.at(-1)?.[0] as
+      { value: string; valueHtml: string } | undefined
+    expect(committed?.value).toBe("Иафета и")
+    expect(committed?.valueHtml).toBe(adjacentTarget("Иафета ", "и"))
+    expect(validateIdmlTranslation(ADJACENT_SOURCE, committed!.valueHtml, ADJACENT_METADATA).valid)
+      .toBe(true)
+  })
+
+  it("backspaces the boundary space from the run boundary (AQU-1962)", async () => {
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-run-boundary-delete"
+        initialPlain="Иафета и"
+        initialHtml={adjacentTarget("Иафета ", "и")}
+        idmlConfiguration={ADJACENT_CONFIGURATION}
+        onCommit={vi.fn()}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    const editor = surface.editor!
+
+    act(() => {
+      fireEvent.focus(surface)
+      editor.view.dispatch(editor.state.tr.setSelection(
+        TextSelection.create(editor.state.doc, runBoundaryPosition(editor, 0)),
+      ))
+      fireEvent.keyDown(surface, { key: "Backspace" })
+    })
+
+    expect(slotVisibleText(surface, 0)).toBe("Иафета")
+    expect(serializeIdmlEditorDocument(editor.state.doc)).toBe(adjacentTarget("Иафета", "и"))
   })
 
   // AQU-810: in a real browser, `insertCompositionText` beforeinput events are

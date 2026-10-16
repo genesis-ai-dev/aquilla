@@ -1,5 +1,5 @@
 // Acts on one release-plan.mjs result: pushes the planned release branch and
-// posts the release notes as a commit comment, exactly as DEPLOY-BOT.md says.
+// posts the release notes as a commit comment, exactly as RELEASE-CUT.md says.
 // It decides nothing; the plan already did. The Release cut workflow
 // (.github/workflows/release-cut.yml) runs it when a person presses the button.
 // Usage: node scripts/release-cut.mjs <plan.json> [--plan-only]
@@ -11,7 +11,7 @@ import { pathToFileURL } from "node:url"
 
 const REPO = "genesis-ai-dev/aquilla"
 
-// DEPLOY-BOT.md "Release notes template". titles maps PR number to title; a
+// RELEASE-CUT.md "Release notes template". titles maps PR number to title; a
 // missing title prints as "(title unavailable)" rather than failing the cut.
 export function releaseNotes(plan, titles = {}) {
   const areas = plan.areas?.length ? ` · areas: ${plan.areas.join(", ")}` : ""

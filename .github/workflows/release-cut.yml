@@ -1,14 +1,25 @@
 name: Release cut
 
-# Cuts the next production release branch when a person presses "Run
-# workflow". It replaces the Deploy bot's polling routine: the same steps as
-# e2e/journeys/DEPLOY-BOT.md, run on demand instead of on a timer.
+# Cuts the next production release branch. Steps and hard stops are in
+# e2e/journeys/RELEASE-CUT.md.
+#
+# Two triggers:
+# - A calver tag push. scripts/tag-release.sh pushes it at the end of
+#   `pnpm run deploy:aquilla`, once production serves the release, so the
+#   next slice is cut the moment the in-flight release closes. GitHub reads
+#   this file from the tagged commit, so it fires for releases cut after
+#   this trigger reached dev.
+# - "Run workflow", for a release branch deleted instead of deployed, or to
+#   see the plan without pushing.
 #
 # scripts/release-plan.mjs decides whether to cut and what; this workflow
 # only acts on its JSON. It never deploys and never tags. The branch push is
 # what starts smart Jev (docs/runbooks/smart-testing-webhook.md).
 
 on:
+  push:
+    # Calver only: YYYY.MM.DD.NN, as tag-release.sh writes it.
+    tags: ['20[0-9][0-9].[0-9][0-9].[0-9][0-9].[0-9][0-9]']
   workflow_dispatch:
     inputs:
       plan_only:
@@ -17,7 +28,7 @@ on:
         type: boolean
         default: false
 
-# Two presses at once would plan the same branch name. Queue the second run;
+# Two runs at once would plan the same branch name. Queue the second run;
 # it then sees the first release in flight and stops.
 concurrency:
   group: release-cut

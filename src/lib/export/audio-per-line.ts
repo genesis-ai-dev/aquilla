@@ -39,6 +39,7 @@ import { trimWav, withBwfTimestamp } from "./audio-bwf"
 import { targetChipGeom } from "@/lib/timeline/lane-timing"
 import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 import { stripInternalIds } from "./internal-id-names"
+import { isSilencedForExport } from "./audio-validation-scope"
 import {
   characterFileKey,
   characterIdentity,
@@ -143,8 +144,18 @@ export function collectPerLineClips(
       if (!audioId) continue
       const pieces = piecesOfTake(cell, audioId)
       pieces.forEach((pieceId, i) => {
-        const url = cell.attachments?.[pieceId]?.url
+        const attachment = cell.attachments?.[pieceId]
+        const url = attachment?.url
         if (!url) return
+        // AQU-965: validated-only withdrew this take. In THIS deliverable the
+        // omission is the absence of the file — the same shape an unrecorded
+        // line's absence already has — so there is nothing to write and the
+        // line numbering is untouched (it counts every timed line, recorded or
+        // not, so the remaining files keep the numbers they would have had).
+        // AQU-1767: the scope marks each piece of a cut take on its own, so a
+        // withdrawn piece drops only its own file and the others keep their
+        // piece numbers.
+        if (isSilencedForExport(attachment)) return
         clips.push({
           ...base,
           audioId: pieceId,
@@ -166,6 +177,8 @@ export function collectPerLineClips(
       pieces.forEach((pieceId, i) => {
         const attachment = cell.attachments?.[pieceId]
         if (!attachment?.url) return
+        // AQU-965, as above: a withdrawn take writes no file, on any track.
+        if (isSilencedForExport(attachment)) return
         clips.push({
           ...base,
           audioId: pieceId,

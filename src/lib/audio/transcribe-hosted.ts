@@ -88,7 +88,9 @@ async function postWindow(
       // "auto" is the server default: its requests carry no model field.
       model === "auto" ? {} : { model, ...(model === "omni-zs" ? { examples: opts.examples } : {}) },
     )),
-    signal: AbortSignal.timeout(90000),
+    // Above the server's 140 s Omnilingual timeout: a cold CTC container
+    // takes 60–90 s to answer the first request.
+    signal: AbortSignal.timeout(150000),
   })
   if (response.ok) return await response.json() as HostedPart
   const failure = await response.json().catch(() => null) as { error?: string } | null

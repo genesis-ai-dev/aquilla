@@ -38,8 +38,13 @@ function omniUrl(env: Env & { OMNI_ASR_MODAL_URL: string }, path: string) {
   return `${env.OMNI_ASR_MODAL_URL.replace(/\/+$/, "")}${path}`
 }
 
-/** ZS can include a cold model load when the client skipped the warm-up. */
-const TRANSCRIBE_TIMEOUT_MS: Record<OmniModel, number> = { ctc: 65000, zs: 300000 }
+/**
+ * A cold CTC container (boot + ~25 s model load) answers in 60–90 s, so CTC
+ * needs more than the Whisper path's 65 s. ZS never cold-loads here: the
+ * service answers `{warming:true}` instead. Both stay under Modal's 150 s
+ * web-request limit.
+ */
+const TRANSCRIBE_TIMEOUT_MS: Record<OmniModel, number> = { ctc: 140000, zs: 140000 }
 
 export function omniFetch(
   env: Env & { OMNI_ASR_MODAL_URL: string; OMNI_SHARED_SECRET: string },

@@ -210,6 +210,12 @@ export interface OrgWideSettings {
    * Precedence: project key > user (localStorage) key > org key.
    */
   orgProviderKeys?: OrgProviderKeys
+  /**
+   * Omnilingual ASR. `zeroShotEnabled: false` hides the zero-shot model from
+   * every member and the server refuses it (403 zero_shot_disabled). Absent
+   * means allowed; each user must still opt in. Owners and maintainers write it.
+   */
+  transcription?: { zeroShotEnabled?: boolean }
 }
 
 export interface OrgSettingsResponse {

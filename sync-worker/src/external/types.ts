@@ -12,6 +12,10 @@ export type ExternalEnv = EventsRouteEnv & {
   /** AQU-730 read wall. Unset locally and in e2e. */
   /** Request-local trusted MCP delegation factory, never a network header. */
   mcpRequest?: (input: RequestInfo | URL, init?: RequestInit) => Request
+  /** Public base of this worker (origin + mount prefix), set by the MCP route
+   *  for in-process delegation whose synthetic URL has no real origin. Used to
+   *  mint URLs a third party fetches (transcription example audio). */
+  externalPublicBase?: string
   LANE_READ_WALL?: string
   /** Base URL for the ask-mode approval deep link. */
   BASE_URL?: string

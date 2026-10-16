@@ -75,6 +75,27 @@ export const comments = defineNamespace({
     "comments.filter.authorLabel": "Author",
     "comments.filter.participantLabel": "Participant",
     "comments.filter.anyone": "Anyone",
+    // AQU-1958: org-wide list only — the project page filters one project.
+    "comments.filter.allProjects": "All projects",
+    "comments.filter.fromLabel": "Started on or after",
+    "comments.filter.toLabel": "Started on or before",
+
+    // Export (AQU-1958)
+    "comments.export.csv": "Export as CSV",
+
+    // Org-wide comments page (AQU-1958)
+    "comments.org.title": "Comments across projects",
+    "comments.org.description":
+      "Every comment thread from the projects you can see in this organization, " +
+      "in one list.",
+    "comments.org.selectOrgDescription":
+      "Choose an organization to review the comments from its projects.",
+    "comments.org.roleRequired":
+      "Only maintainers and owners can review comments across an organization's projects.",
+    "comments.org.empty.body":
+      "Comments from every project you can see here will appear in this list.",
+    "comments.org.partialError":
+      "Comments could not be loaded from: {projects}. The list below is incomplete — try refreshing.",
 
     // Page chrome
     "comments.page.titleWithProject": "{projectName} — Comments",
@@ -424,6 +445,64 @@ export const comments = defineNamespace({
           "Option shared by both the author and participant pickers meaning no " +
           "person filter is applied.",
       },
+      "comments.filter.allProjects": {
+        description:
+          "Option in the project picker on the organization-wide comments page " +
+          "meaning no project filter is applied.",
+      },
+      "comments.filter.fromLabel": {
+        description:
+          "Form label beside the start-date picker in the filter menu. Bounds the " +
+          "list to threads STARTED on that date or later; it does not filter on " +
+          "when a reply was written.",
+      },
+      "comments.filter.toLabel": {
+        description:
+          "Form label beside the end-date picker in the filter menu — the other " +
+          "end of the thread-start date range. Inclusive of the date picked.",
+      },
+      "comments.export.csv": {
+        description:
+          "Tooltip and accessible name of the download icon button that saves the " +
+          "threads currently visible (filters and sort included) as a CSV file.",
+      },
+      "comments.org.title": {
+        description:
+          "Heading, breadcrumb and sidebar entry of the organization-wide comments " +
+          "page, which lists threads from every project the viewer can see. Shown " +
+          "in a narrow nav column, so keep it short.",
+        maxLength: 32,
+      },
+      "comments.org.description": {
+        description:
+          "Sub-heading under the organization-wide comments title, shown while the " +
+          "list itself is not available (no organization chosen, or the viewer is " +
+          "below the maintainer floor).",
+      },
+      "comments.org.selectOrgDescription": {
+        description:
+          "Empty-state body on the organization-wide comments page when no single " +
+          "organization is in scope (the viewer is on 'All organizations').",
+      },
+      "comments.org.roleRequired": {
+        description:
+          "Empty-state heading shown instead of the organization-wide comment list " +
+          "to a viewer below maintainer. States who may use the surface.",
+      },
+      "comments.org.empty.body": {
+        description:
+          "Empty-state body on the organization-wide comments page when none of the " +
+          "viewer's projects has a comment yet.",
+      },
+      "comments.org.partialError": {
+        description:
+          "Error banner above the organization-wide comment list when some projects' " +
+          "comments failed to load — the list is incomplete, which matters because a " +
+          "short list otherwise reads as 'no feedback'.",
+        placeholders: {
+          projects: "Comma-separated display names of the projects that failed to load.",
+        },
+      },
       "comments.page.titleWithProject": {
         description:
           "Heading of the full-page thread list once the project name has loaded — " +
@@ -688,10 +767,12 @@ export const comments = defineNamespace({
       route: "/project/:projectId/comments",
       notes:
         "Full-page thread list: header with title/count/back/refresh, the filter bar " +
-        "(search, sort, show-resolved, file/author/participant pickers), and either " +
-        "thread cards or an empty state below. The seeded dev project has no comments, " +
-        "so this shot shows the empty state — the chrome above it (header + filters) is " +
-        "what most of these keys describe.",
+        "(search, sort, show-resolved, file/author/participant pickers, Export), and " +
+        "either thread cards or an empty state below. The seeded dev project has no " +
+        "comments, so this shot shows the empty state — the chrome above it (header + " +
+        "filters) is what most of these keys describe. The organization-wide list " +
+        "(/orgs/:orgId/comments, AQU-1958) is the same chrome plus a project picker and " +
+        "a thread-start date range.",
     },
   ],
 })

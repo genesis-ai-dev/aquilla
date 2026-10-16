@@ -20,6 +20,7 @@ import type { ProjectOrgPolicy, ProjectVisibilityFloors } from "@/lib/sync/proje
 import posthog from "@/lib/posthog"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
 import { claimHydrationReport, retainProjectOpen } from "./project-settings-open"
+import { registerSettingsAccessor } from "@/lib/history/settings-access"
 import type { MediaDefaults } from "../../db/shared/media-setting-defaults"
 
 /** AQU-1768: one stable empty value, so an org with no media defaults never re-renders. */
@@ -1018,6 +1019,25 @@ export function useProjectSettings(
     })
     return { kind: "error", message: result.message, status: result.status }
   }, [projectId, jwt, roleLevel, termbaseEditMinRole, languageEditFloor, refresh, runSerialized, t])
+
+  // AQU-1767 phase 2: let a history step read and write this project's
+  // settings through this hook, wherever the person presses Undo.
+  const settingsForHistoryRef = useRef(settings)
+  const patchForHistoryRef = useRef(patch)
+  useEffect(() => {
+    settingsForHistoryRef.current = settings
+    patchForHistoryRef.current = patch
+  }, [settings, patch])
+  useEffect(() => {
+    if (!projectId) return
+    return registerSettingsAccessor(projectId, {
+      read: () => settingsForHistoryRef.current as Record<string, unknown>,
+      write: async (next) => {
+        const out = await patchForHistoryRef.current(next as ProjectWideSettings)
+        if (out.kind !== "ok") throw new Error(`settings write ${out.kind}`)
+      },
+    })
+  }, [projectId])
 
   return {
     settings,

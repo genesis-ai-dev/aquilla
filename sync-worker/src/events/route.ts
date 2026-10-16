@@ -32,6 +32,7 @@ import {
   isChainArbitrated,
   isChainMutatingKind,
   laneOfEvent,
+  RESTORED_REMOVAL_SQL,
   type PersistedEvent,
 } from './event-projection'
 import {
@@ -97,7 +98,10 @@ function isEventAppliedRowsKind(kind: string): boolean {
     // `rows` and every collaborator's client falls back to a by-ids refetch to
     // learn a row left the file — correct, but a round trip for a one-column
     // change we already have in hand.
-    kind === 'source.cell.visibility.set'
+    kind === 'source.cell.visibility.set' ||
+    // AQU-1767 phase 2: a restore brings a cell's rows back, so collaborators
+    // get them in the frame rather than a refetch.
+    kind === 'source.cell.restore'
   )
 }
 
@@ -370,6 +374,7 @@ async function prefetchChainWinners(
          FROM events
          WHERE kind IN (${kindList})
            AND (project_id, file_id, cell_id) IN (${placeholders})
+           AND NOT ${RESTORED_REMOVAL_SQL}
        ) ranked
        WHERE rn <= 100`,
     )

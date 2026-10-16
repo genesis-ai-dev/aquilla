@@ -89,6 +89,6 @@ test("alice edits cell 0; bob sees the new text in his open editor within 15s", 
   //    checking a fixed row index — the virtualized list can render cells in varying
   //    DOM order depending on scroll position.
   await expect(
-    bob.locator("[data-cell-id]").filter({ hasText: editText }).first(),
+    bobWs.cellRows().filter({ hasText: editText }).first(),
   ).toBeVisible({ timeout: 15_000 })
 })

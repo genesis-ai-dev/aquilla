@@ -45,6 +45,7 @@ import { segmentation } from "./segmentation"
 import { smartEdits } from "./smartEdits"
 import { harmonizer } from "./harmonizer"
 import { bibleData } from "./bibleData"
+import { extensions } from "./extensions"
 import { languageProfile } from "./languageProfile"
 import { projectDecisions } from "./projectDecisions"
 import { bibleAlignment } from "./bibleAlignment"
@@ -83,6 +84,7 @@ export const NAMESPACES = [
   smartEdits,
   harmonizer,
   bibleData,
+  extensions,
   languageProfile,
   projectDecisions,
   bibleAlignment,

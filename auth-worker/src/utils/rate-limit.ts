@@ -114,6 +114,7 @@ export type RateLimitKind =
   | "mcp_oauth_decision"
   | "access_link_redeem"
   | "feedback"
+  | "tool_web_fetch"
 
 /**
  * Keep `auth_rate_limit_events` bounded.

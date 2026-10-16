@@ -1,0 +1,110 @@
+/**
+ * Smart Extensions bridge API revisions.
+ *
+ * TOOLS_API_REV (manifest.ts) is the revision the host speaks today; a tool
+ * records the revision it was built against. When a bridge call is removed,
+ * bump TOOLS_API_REV, add a marker here, and raise TOOLS_MIN_API_REV if old
+ * tools can no longer work. The in-frame runtime keeps a stub for every
+ * removed call, and the host answers it with `api_removed` naming the
+ * replacement — so an old extension fails loudly with a fix, and the host
+ * offers "this extension is old → rebuild" (an edit_tool run carrying the
+ * migration notes below).
+ */
+
+import { TOOLS_API_REV } from "./manifest"
+
+/** Oldest revision the host still runs without the "rebuild" banner. */
+export const TOOLS_MIN_API_REV = 1
+
+export interface RemovedApi {
+  /** Bridge method, e.g. "cells.save". */
+  method: string
+  /** First apiRev without it. */
+  removedIn: number
+  replacement: string
+}
+
+/** Removed-API markers. `cells.save` was the pre-release name of
+ *  `cells.commit` (single edit, not batched); it is kept as the first marker
+ *  so the mechanism is exercised end to end. */
+export const REMOVED_APIS: readonly RemovedApi[] = [
+  { method: "cells.save", removedIn: 1, replacement: "aquilla.cells.commit([{ fileId, cellId, value }])" },
+]
+
+/** Additive surfaces per revision (nothing here is removed or reshaped, so an
+ *  older extension keeps working unchanged; it simply does not call them). */
+export const API_REV_ADDITIONS: Readonly<Record<number, readonly string[]>> = {
+  2: [
+    "cells.page",
+    "cells.get",
+    "cells.unvalidate",
+    "cells.list/page/get: sourceHtml, targetHtml, type, lastEditor, lastEditAt, aiDrafted",
+    "cells.commit: optional html per edit (sanitized by the host)",
+    "presence.list / presence.claim / presence.release + presence.changed event",
+    "comments.counts / comments.open + comments.changed event (scope read:comments)",
+    "audio.list / audio.play / audio.stop",
+    "ui.hostKey (+ automatic forwarding of host shortcuts) and the editor.reveal event",
+  ],
+  3: [
+    "editor.config / editor.setLane / editor.setLens (+ config.changed, editor.chrome events)",
+    "cells.sections / cells.signals / cells.settle (+ signals.changed, cells.structure, cells.loaded events)",
+    "editor-mount cell fields: validators, validationStatus, paragraphStart, label, context, footnotes, hasAudio, attachmentCount, hidden, waivedRuleIds, ribbon, numberLabel, paragraph",
+    "terms.matches / terms.open",
+    "ai.draft / ai.draftParagraph (scope ai:draft)",
+    "backtranslation.list / backtranslation.run / backtranslation.save (+ backtranslation.changed)",
+    "history.open / attachments.open / rules.open (host panels)",
+    "presence.peers / presence.typing / presence.view (+ presence.peers event)",
+    "audio.record / audio.generate (scope write:audio)",
+    "selection.set (+ selection.changed): the host's bulk selection bar",
+    "suggestions.get / suggestions.feedback: ghost text from host providers",
+    "ui.strings: the app's UI strings in the user's language; theme adds color scheme + viewport; fonts event carries the app font bytes",
+  ],
+  4: [
+    "audio.takes / audio.validate / audio.unvalidate: per-take audio validation (the audio column)",
+    "audio.take / audio.trim / audio.voices / audio.assignVoice / audio.clone: the Audio lens's take, waveform peaks, trim, voice and cloning (+ audio.changed event)",
+    "source.actions / source.commit / source.setHidden / source.insert / source.remove / source.retime: source editing and the cell menu (scope write:source)",
+    "ai.examples / ai.contextual / ai.reviewContextual / ai.smartEdits / ai.smartEditFeedback: the AI surfaces beside a cell (+ contextual.changed event)",
+    "terms.selection / terms.view / terms.add / agent.ask: the source selection toolbar",
+    "manifest.sdk (1): the host injects the extension SDK as window.aq — live data hooks (useFile, useCells, useCell, useSelection, usePresence), Aquilla components (CellList, CellRow, SourceText, TargetEditor, ValidateButton, ChapterPicker, …), a UI kit (aq.ui) and actions (aq.actions); see AQ_SDK_EXPORTS",
+  ],
+  5: [
+    "ai.alignStyles: Align styles for IDML multi-run cells (scope ai:draft); signals ai phase \"aligning\"",
+    "ai.healthSpans: the AI-draft provenance wash for a live draft (scope read:cells)",
+    "editor-mount cell fields: canAlignStyles, healthSpans, ribbon.needsAttention; cells.signals issue ruleName is the localized check name",
+    "editor.config: readOnlyLabel, readOnlyKind (the built-in's read-only / archived-lane banner), languagesLoading (AQU-1902: read-only until the lane row is known)",
+  ],
+  6: [
+    "web.fetch(url, { as }): read from a site in manifest.web through the host's proxy (scope read:web, approved per user; https GET only, 12 MB, text/JSON)",
+  ],
+  7: [
+    "files.upsert / files.setMeta (scope write:files): create and refresh project files from an extension's own parse (delta-applied, stable ids, kinds normal/reference, tags, group, meta, raw original)",
+    "files.list({ tags, kind, group }) and each file's kind/tags/group/owner/meta; files.source; files.group",
+    "cells.byRef({ refs | prefix, fileIds | tags, lane }): cells by canonical ref across files in one call",
+    "data.get / data.put / data.query / data.delete (scope write:data): records in hidden extension data files, anchored to cells with drift current/changed/orphaned",
+    "manifest.actions (headless runs from the bar/menu/settings, onOpen) with action.progress / action.done; manifest.exports with export.deliver",
+    "web.fetch(url, { as: 'bytes' }) answers an ArrayBuffer (≤20 MB); importers (write:files) get a 1,200-per-15-min window",
+    "tool sessions: the sync-worker verifies every claimed extension identity and requires it for file and data writes",
+    "SDK 1.1: aq.zip.read, aq.parse.tsv / usfm / mdBlocks",
+  ],
+}
+
+export function removedApi(method: string): RemovedApi | null {
+  return REMOVED_APIS.find((r) => r.method === method) ?? null
+}
+
+export function isToolStale(apiRev: number): boolean {
+  return apiRev < TOOLS_MIN_API_REV || apiRev > TOOLS_API_REV
+}
+
+/** The instruction a "rebuild" sends to the builder (edit_tool). */
+export function rebuildRequest(apiRev: number, extraFailure?: string): string {
+  const removed = REMOVED_APIS.filter((r) => r.removedIn > apiRev || extraFailure?.includes(r.method))
+  return [
+    `Update this extension to the current aquilla bridge API (apiRev ${TOOLS_API_REV}); it was built for apiRev ${apiRev}.`,
+    ...removed.map((r) => `- aquilla.${r.method} was removed in apiRev ${r.removedIn}; use ${r.replacement}.`),
+    extraFailure ? `It failed at runtime with: ${extraFailure}` : "",
+    "Keep its behaviour and UI otherwise unchanged.",
+  ]
+    .filter(Boolean)
+    .join("\n")
+}

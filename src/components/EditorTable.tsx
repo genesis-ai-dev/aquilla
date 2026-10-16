@@ -9,7 +9,7 @@ import {
 import {
   Check, AlertTriangle,
   MessageCircle, Play, Pause, Mic, MicOff, FileText,
-  Activity, NotebookPen, Pencil, ChevronDown, Music, Braces,
+  Activity, NotebookPen, Pencil, ChevronDown, Braces,
   Languages,
   Plus,
   Pilcrow,
@@ -23,9 +23,11 @@ import {
   VolumeX,
   Eye,
   EyeOff,
+  Blocks,
   BookOpenText,
   CloudOff,
 } from "lucide-react"
+import { InlineToolsTab, useHasInlineTools } from "@/components/tools/ToolMounts"
 import { FillsTwiceIndicator } from "@/components/ui/fills-twice-indicator"
 import { Spinner } from "@/components/ui/spinner"
 import type { RepetitionGesture } from "@/lib/workflow/repetition-validation"
@@ -35,7 +37,6 @@ import { LaneCombobox } from "@/components/LaneCombobox"
 import { laneOptionLabels, toLaneComboboxOptions } from "@/components/lane-options"
 import { laneLanguageCodeForTag } from "@/lib/lanes/lane-language"
 import { withLaneLabelSuffix } from "@/lib/lanes/lane-label-suffix"
-import { EmptyState } from "@/components/ui/page"
 import type { CellData } from "@/hooks/useCells"
 import { lockHolderForCell } from "@/hooks/useFocusLock"
 import {
@@ -87,8 +88,7 @@ import { createScopedRibbonCache } from "@/lib/health/scoped-ribbon"
 import { useHealthCalculationsEnabled } from "@/lib/health/kill-switch"
 import { useLowMemoryActive } from "@/lib/perf/low-memory"
 import { TranslatedEditor, type FootnoteInsertionAnchor, type TranslatedEditorHandle } from "./TranslatedEditor"
-import { TimelineAddMedia } from "./TimelineAddMedia"
-import { TimelineLinkedVideoEmpty } from "./TimelineLinkedVideoEmpty"
+import { TimeOrderedEmptyState } from "./TimeOrderedEmptyState"
 import type { LinkedVideoEmptyState } from "@/lib/editor/linked-video-empty-state"
 import { CellTtsButton } from "./CellTtsButton"
 import { CellIssuesTab } from "./CellIssuesTab"
@@ -225,7 +225,6 @@ import { useLocation, useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { namedCellRef } from "@/lib/cell-named-ref"
 import { isStructuralCell } from "@/lib/cells/structural"
-import { looksLikeUuid } from "@/lib/uuid"
 import {
   cellNumberLabel,
   importDisplayLabel,
@@ -301,6 +300,7 @@ import { defaultFootnoteRef } from "@/lib/footnotes/refs"
 import { displayedSourceText, effectiveSourceText, projectedSourceValue, sourceCommitFields, sourceEditorSeed } from "@/lib/cell-text"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
+import { visibleFootnoteEntriesFor } from "@/lib/footnotes/visible-entries"
 import type { TargetKeyTermHighlightMode } from "@/hooks/useTargetKeyTermHighlightPreference"
 import { hasMeaningfulRichText } from "@/lib/richtext/editor-content"
 import {
@@ -2584,27 +2584,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (!onVisibleFootnotesChange || displayCellIds.length === 0) return []
 
     const indexes = viewableIndexes.length > 0 ? viewableIndexes : [firstVisibleIndex]
-    return readAtVersion(cellStoreVersion, () => indexes
-      .map((index) => {
-        const cellId = displayCellIds[index]
-        const cell = cellId ? cellStore.getCellView(cellId) : null
-        if (!cell) return null
-        const offsets = cellStore.getFootnoteOffsets(cell.id)
-        const footnotes = cellStore.getCellFootnotes(cell.id)
-        if (!footnotes.hasFootnotes) return null
-        return {
-          cellId: cell.id,
-          cellLabel: cell.cellLabel || String(index + 1),
-          cellRef: humanFootnoteCellRef(cell),
-          rowIndex: index,
-          sourceFootnotes: footnotes.sourceFootnotes,
-          targetFootnotes: footnotes.targetFootnotes,
-          activeFootnoteIndex: hoveredFootnote?.cellId === cell.id ? hoveredFootnote.index : null,
-          isDocx: (cell.fileId ?? "").endsWith(".docx"),
-          numberOffset: offsets.target,
-        }
-      })
-      .filter((entry): entry is VisibleFootnoteEntry => entry !== null))
+    const ids = indexes.map((index) => displayCellIds[index]).filter((id): id is string => !!id)
+    const rowOf = new Map(indexes.map((index) => [displayCellIds[index], index]))
+    return readAtVersion(cellStoreVersion, () => visibleFootnoteEntriesFor(cellStore, ids, (id) => rowOf.get(id) ?? 0, hoveredFootnote))
   }, [cellStore, cellStoreVersion, displayCellIds, firstVisibleIndex, hoveredFootnote, onVisibleFootnotesChange, viewableIndexes])
 
   useEffect(() => {
@@ -3432,42 +3414,17 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           </BibleDataProvider>
         </div>
       ) : isTimeOrdered ? (
-        // 2026-08-07: keyed on isTimeOrdered, not audioLens — the media lens
-        // renders this table in text mode under the timeline now, and an empty
-        // time-ordered file must still offer "attach a clip" there.
-        // AQU-1565: a linked video IS media, so the attach-media prompt below
-        // would be lying. This file wants captions, not a clip.
-        linkedVideoEmptyState ? (
-          <div className="flex-1">
-            <TimelineLinkedVideoEmpty
-              isYouTube={linkedVideoEmptyState.isYouTube}
-              captionTracks={linkedVideoEmptyState.captionTracks}
-              placement={linkedVideoEmptyPlacement}
-              onAttachFile={canEdit ? onAttachMediaFile : undefined}
-              onOpenMediaView={onOpenMediaView}
-              onAttachCaptions={canEdit ? onAttachCaptions : undefined}
-              onUseCaptionTrackAsRows={canEdit ? onUseCaptionTrackAsRows : undefined}
-            />
-          </div>
-        ) : canEdit && onAttachMediaFile && onAttachMediaUrl ? (
-          <div className="flex-1">
-            <TimelineAddMedia onAttachFile={onAttachMediaFile} onAttachUrl={onAttachMediaUrl} />
-          </div>
-        ) : (
-          <div className="flex-1">
-            <EmptyState
-              variant="inline"
-              className="h-full py-10"
-              icon={Music}
-              title={t("editor.empty.noMediaSegments")}
-              // AQU-1565 follow-up: this branch is reached only by someone
-              // with no upload (below Project Lead, or read-only), and a file
-              // with no rows has nothing to record a take on, so "import or
-              // record" would send them nowhere.
-              description={t("editor.empty.mediaLayerWaiting")}
-            />
-          </div>
-        )
+        // Shared with the Smart Extensions editor surface (AQU-1565/1566).
+        <TimeOrderedEmptyState
+          linkedVideoEmptyState={linkedVideoEmptyState}
+          placement={linkedVideoEmptyPlacement}
+          canEdit={canEdit}
+          onAttachMediaFile={onAttachMediaFile}
+          onAttachMediaUrl={onAttachMediaUrl}
+          onOpenMediaView={onOpenMediaView}
+          onAttachCaptions={onAttachCaptions}
+          onUseCaptionTrackAsRows={onUseCaptionTrackAsRows}
+        />
       ) : (
         <div className="flex-1" />
       )}
@@ -4784,11 +4741,6 @@ export function SourceWithTermLookup({
 // raw-text offsets into each segment via clipRangesToSegment.
 
 
-function humanFootnoteCellRef(cell: CellData): string {
-  const value = (cell.group || cell.context || "").trim()
-  if (!value || looksLikeUuid(value)) return ""
-  return value
-}
 
 function footnoteMarkerOptions(
   targetText: string,
@@ -5525,6 +5477,8 @@ function EditorRow({
   targetFootnoteNumberOffset,
 }: EditorRowProps) {
   const t = useT()
+  // Aquilla Tools (prototype): inline tool mounts under this cell.
+  const hasInlineTools = useHasInlineTools()
   const healthCalculationsEnabled = useHealthCalculationsEnabled()
   // AQU-1259: the reviewer's opt-in scanning view. AQU-599's inset ring and
   // speech-bubble badge below already say "this row has an open comment" once
@@ -9372,6 +9326,12 @@ function EditorRow({
                   },
                 ]
               : []),
+            ...(hasInlineTools ? [{
+              value: "tools",
+              icon: <Blocks className="h-3 w-3" />,
+              label: t("extensions.inline.tab"),
+              renderContent: () => <InlineToolsTab fileId={cell.fileId} cellId={cell.id} />,
+            }] : []),
           ]}
         />
       </div>

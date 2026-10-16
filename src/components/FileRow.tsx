@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
+import { fileDisplayName } from "@/lib/file-display-name"
 import { ChevronRight, MoreHorizontal, Sparkles, AudioWaveform } from "lucide-react"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections, fileOrderedBy } from "@/lib/parsers/types"
@@ -95,9 +96,14 @@ export function FileRow(props: FileRowProps) {
   // exceptional timeline files carry a marker — repeating an icon on every
   // row says nothing.
   const isTimeOrdered = fileOrderedBy(file) === "time"
-  const baseNameTooltip = file.originalName && file.originalName !== file.name
-    ? t("nav.fileRow.importedAsTooltip", { name: file.name, originalName: file.originalName })
-    : file.name
+  // AQU-1937: an extension's display label is what the row shows; the hover
+  // keeps the stored (imported) name reachable.
+  const shownName = fileDisplayName(file)
+  const baseNameTooltip = shownName !== file.name
+    ? t("nav.fileRow.importedAsTooltip", { name: shownName, originalName: file.name })
+    : file.originalName && file.originalName !== file.name
+      ? t("nav.fileRow.importedAsTooltip", { name: file.name, originalName: file.originalName })
+      : file.name
   // The dimming has to say why, or it reads as "broken" / "still loading".
   // It rides the name tooltip the row already has rather than adding a second
   // hover target to a 28px row.
@@ -135,7 +141,7 @@ export function FileRow(props: FileRowProps) {
               // (see docs/distribution/SHOWCASE-LABELS.md). The whole row is the click
               // target that opens the file — what "click the sidebar file" should hit.
               data-showcase="sidebar.file"
-              data-showcase-name={file.name}
+              data-showcase-name={shownName}
               data-unassigned={unassigned ? "true" : undefined}
               className={cn(
                 "group relative flex h-7 items-center gap-1 rounded-lg px-2 text-[13px] transition-colors",
@@ -217,7 +223,7 @@ export function FileRow(props: FileRowProps) {
                     onSelect()
                   }}
                 >
-                  {file.name}
+                  {shownName}
                 </button>
               </AppTooltip>
             )}

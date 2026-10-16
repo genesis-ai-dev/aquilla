@@ -11,6 +11,7 @@
 // The outbox remains the path for incremental edits (target commits,
 // validations); only the initial bulk source load uses this.
 
+import { EXTENSION_DATA_ROLE } from "../../../shared/tools/file-extension"
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import { enqueueOutboxEvents } from "./outbox"
 import { assertSourceUploadSize, uploadSourceOriginal } from "./source-upload"
@@ -117,6 +118,8 @@ export interface BulkImportFileMeta {
   corpusMarker?: string
   /** Versioned normalized-import summary. Per-unit locators live on cells. */
   importManifest?: object
+  /** Smart Extensions apiRev 7: files.meta.extension (shared/tools/file-extension.ts). */
+  extension?: Record<string, unknown>
 }
 
 export interface BulkUploadArgs {
@@ -157,6 +160,10 @@ export interface BulkUploadArgs {
   session?: ImportSessionRecord
   /** Mints a sync-token scoped to (projectId, fileId). */
   getToken: (fileId: string) => Promise<string | null>
+  /** Smart Extensions apiRev 7: the extension running this import (with its
+   *  tool session). The server verifies it and stamps provenance on the file
+   *  and every cell; it is also what lets a contributor create a data file. */
+  toolOrigin?: { origin: "tool"; toolId: string; version: number; codeHash: string; session?: string }
   /** Fired after each chunk lands — drives the progress UI. */
   onProgress?: (uploaded: number, total: number) => void
   signal?: AbortSignal
@@ -424,6 +431,16 @@ export async function publishStagedImport(args: PublishStagedImportArgs): Promis
  * cell has landed; throws (with a human-readable message) on the first failure
  * so the dialog can surface it instead of silently parking work.
  */
+/** apiRev 7: an extension's data-file import says so before its body is read
+ *  (the sync-worker lets a contributor through only with that claim). */
+function importHeaders(args: Pick<BulkUploadArgs, "toolOrigin" | "file">, token: string | null): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${token ?? ""}`,
+    ...(args.toolOrigin && args.file.role === EXTENSION_DATA_ROLE ? { "X-Aquilla-Extension-Data": "1" } : {}),
+  }
+}
+
 export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
   try {
     await uploadSourceChunks(args)
@@ -482,6 +499,7 @@ async function uploadSourceChunks(args: BulkUploadArgs): Promise<void> {
       fileId: args.fileId,
       cells: chunk,
       clientTs: Date.now(),
+      ...(args.toolOrigin ? { toolOrigin: args.toolOrigin } : {}),
     }
     const sourceEventIds = new Set(chunk.map((cell) => cell.id))
     const targets = (args.targets ?? [])
@@ -503,7 +521,7 @@ async function uploadSourceChunks(args: BulkUploadArgs): Promise<void> {
       try {
         response = await fetchFn(url, {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          headers: importHeaders(args, token),
           body: JSON.stringify(payload),
           signal: args.signal,
         })
@@ -557,12 +575,13 @@ async function uploadSourceChunks(args: BulkUploadArgs): Promise<void> {
       try {
         response = await fetchFn(url, {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          headers: importHeaders(args, token),
           body: JSON.stringify({
             projectId: args.projectId,
             fileId: args.fileId,
             cells: [],
             complete: true,
+            ...(args.toolOrigin ? { toolOrigin: args.toolOrigin } : {}),
             ...(publish ? { publishEventId } : {}),
             clientTs: Date.now(),
           }),

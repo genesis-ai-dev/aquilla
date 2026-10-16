@@ -25,6 +25,62 @@ import { loadLaneGrants } from '../../../db/shared/lane-visibility'
 import { refusalForArchivedLane, targetLaneRowExists, targetLaneRowsFor } from './archived-lane'
 import { eventLaneIdOf, resolveEventLane } from '../../../src/lib/lanes/event-lane'
 import { isEligibleLaneAssignee, isOwnLaneAssignment } from './lane-delegate-authority'
+import { toolClaimVerified } from './tool-provenance'
+import { EXTENSION_DATA_ROLE } from '../../../shared/tools/file-extension'
+
+/** Smart Extensions apiRev 7: file-content writes an extension's identity must be verified for. */
+const EXTENSION_GATED_KINDS = new Set<string>([
+  'source.cell.create',
+  'source.cell.commit',
+  'source.cell.delete',
+  'source.cell.reorder',
+  'source.cell.metadata.patch',
+  'file.extension.set',
+])
+/** The cell writes an extension makes in its own data file (floor CONTRIBUTOR there). */
+const DATA_FILE_CELL_KINDS = new Set<string>(['source.cell.create', 'source.cell.commit', 'source.cell.delete'])
+
+type ExtensionGate = { ok: true; dataFile: boolean } | { ok: false; reason: string }
+
+/**
+ * apiRev 7: (1) a write that CLAIMS an extension (`payload.tool_origin`) must
+ * carry a valid tool session for that tool, version, hash, project and author,
+ * or it is refused — provenance cannot be borrowed; (2) a write into an
+ * extension DATA file must come from a verified extension, or be the user's own
+ * "revert since T" compensation (`revert_of_tool`), which an extension they
+ * run could have made anyway.
+ */
+async function extensionWriteGate(
+  db: AquillaDb,
+  raw: RawEvent<EventKind>,
+  author: string,
+  secret: string | undefined,
+  cache: RequestCache | undefined,
+): Promise<ExtensionGate> {
+  const claim = await toolClaimVerified(raw.payload, { projectId: raw.projectId, author }, secret)
+  if (claim && !claim.ok) {
+    return { ok: false, reason: `the extension identity on ${raw.kind} could not be verified (missing or invalid tool session)` }
+  }
+  if (!raw.fileId) return { ok: true, dataFile: false }
+  // Memoized per request (one read per file however many events). A read
+  // failure means "not a data file": the write then meets its normal floor
+  // (the batch is not 500ed, like the other settings-gated carve-outs).
+  let role: string | null = null
+  try {
+    role = cache?.fileRole
+      ? await cache.fileRole(raw.projectId, raw.fileId)
+      : (await db.prepare(`SELECT role FROM files WHERE id = ? AND project_id = ?`).bind(raw.fileId, raw.projectId).first<{ role: string | null }>())?.role ?? null
+  } catch {
+    role = null
+  }
+  const dataFile = role === EXTENSION_DATA_ROLE
+  if (!dataFile) return { ok: true, dataFile: false }
+  const revert = (raw.payload as { revert_of_tool?: unknown } | null)?.revert_of_tool
+  if (!claim && !(revert && typeof revert === 'object')) {
+    return { ok: false, reason: 'extension data files can only be written by an extension' }
+  }
+  return { ok: true, dataFile: true }
+}
 
 /** Sentinel fileId used by project-scoped comment.* events in the outbox. */
 export const PROJECT_SENTINEL_FILE_ID = '__project__'
@@ -501,7 +557,20 @@ export async function authorize<K extends EventKind>(
     db != null && isAssignmentKind(raw.kind)
       ? await resolveAssignmentAuthority(db, raw.projectId, settings)
       : null
-  const requiredRole = assignmentAuthority?.minRole ?? requiredRoleFor(raw.kind)
+  // Smart Extensions apiRev 7: a claimed extension identity on a file write
+  // must be vouched for by a server-minted tool session, and an extension data
+  // file is written only by a verified extension (floor CONTRIBUTOR, so the
+  // translators who use an alignment editor can save their alignments).
+  const extensionGate = db != null && EXTENSION_GATED_KINDS.has(raw.kind)
+    ? await extensionWriteGate(db, raw as RawEvent<EventKind>, tokenUsername, secret, settings)
+    : null
+  if (extensionGate && !extensionGate.ok) {
+    return { ok: false, status: 403, reason: extensionGate.reason }
+  }
+  const baseRequiredRole = assignmentAuthority?.minRole ?? requiredRoleFor(raw.kind)
+  const requiredRole = extensionGate?.ok && extensionGate.dataFile && DATA_FILE_CELL_KINDS.has(raw.kind)
+    ? ROLE.CONTRIBUTOR
+    : baseRequiredRole
 
   // AQU-1415: when the write wall is on, a grant can elevate the caller
   // inside one lane, and the absence of a grant denies the write even when

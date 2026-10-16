@@ -12,22 +12,22 @@ import {
   uncountedAudioFilesCteSql,
 } from "./counted-files"
 import { PLAN_UNIT_FILE_PREDICATE } from "./plan-units"
-import { AUDIO_CUES_ROLE, TIMELINE_CONTENT_ROLE } from "../../src/lib/parsers/types"
+import { AUDIO_CUES_ROLE, EXTENSION_DATA_ROLE, TIMELINE_CONTENT_ROLE } from "../../src/lib/parsers/types"
 
 describe("counted files", () => {
   it("hides exactly the editor's hidden timeline roles", () => {
-    expect([...HIDDEN_FILE_ROLES]).toEqual([AUDIO_CUES_ROLE, TIMELINE_CONTENT_ROLE])
+    expect([...HIDDEN_FILE_ROLES]).toEqual([AUDIO_CUES_ROLE, TIMELINE_CONTENT_ROLE, EXTENSION_DATA_ROLE])
   })
 
   it("is the plan board's rule, unchanged", () => {
     expect(PLAN_UNIT_FILE_PREDICATE).toBe(countedFileSql("f"))
     expect(PLAN_UNIT_FILE_PREDICATE).toBe(
-      "f.deleted_at IS NULL AND COALESCE(f.role, '') NOT IN ('audio-cues', 'timeline-content')",
+      "f.deleted_at IS NULL AND COALESCE(f.role, '') NOT IN ('audio-cues', 'timeline-content', 'extension-data')",
     )
   })
 
   it("applies to the alias it is given", () => {
-    expect(notHiddenFileSql("af")).toBe("COALESCE(af.role, '') NOT IN ('audio-cues', 'timeline-content')")
+    expect(notHiddenFileSql("af")).toBe("COALESCE(af.role, '') NOT IN ('audio-cues', 'timeline-content', 'extension-data')")
     expect(countedFileSql("x")).toContain("x.deleted_at IS NULL")
     expect(inCountedFileSql("c")).toContain("uncounted_file.id = c.file_id")
   })

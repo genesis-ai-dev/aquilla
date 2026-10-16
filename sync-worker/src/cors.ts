@@ -58,6 +58,9 @@ const CORS_HEADERS: Record<string, string> = {
     // (AQU-1631).
     "X-Artifact-Target-Lang",
     "X-Artifact-Member-Path",
+    // Smart Extensions apiRev 7: a contributor's extension data-file import
+    // (POST /import) declares itself so it passes the pre-body role gate.
+    "X-Aquilla-Extension-Data",
     // X-Doc-Name: the knowledge-base (reference document) upload's filename
     // header, percent-encoded (AQU-1762). Same header the identity host already
     // allows for the in-app upload, so a browser-based agent console can reach

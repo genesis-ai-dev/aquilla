@@ -27,7 +27,7 @@ import { SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { DisabledFieldTooltip } from "./DisabledFieldTooltip"
 import { FLAGS } from "@/lib/features/flags"
 import { CheckingLinkCreator } from "@/components/checking/CheckingLinkCreator"
-import { AUTOPILOT_EDIT_ROLE_FLOOR } from "@/hooks/useProjectSettings"
+import { AUTOPILOT_EDIT_ROLE_FLOOR, SETTINGS_EDIT_ROLE_FLOOR } from "@/hooks/useProjectSettings"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { getProject, patchProject, updateProject } from "@/lib/store/project-index"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -38,6 +38,8 @@ export function ExperimentalFlagsSection({
   autopilotEnabled,
   roleLevel,
   onSetAutopilotEnabled,
+  smartExtensionsEnabled,
+  onSetSmartExtensionsEnabled,
 }: {
   projectId: string
   /** Server-hydrated record from the parent's read hook. Used only to upsert
@@ -54,6 +56,9 @@ export function ExperimentalFlagsSection({
   /** Write the project-wide opt-in through the shared settings PATCH. Omit on
    *  surfaces that have no settings hook — the row then renders read-only. */
   onSetAutopilotEnabled?: (enabled: boolean) => void
+  /** AQU-1937: the project-wide Smart Extensions switch (Maintainer+). */
+  smartExtensionsEnabled?: boolean
+  onSetSmartExtensionsEnabled?: (enabled: boolean) => void
 }) {
   const { t } = useI18n()
   const [flags, setFlags] = useState<Record<string, boolean> | undefined>(undefined)
@@ -91,6 +96,9 @@ export function ExperimentalFlagsSection({
   const canOptIn = Boolean(onSetAutopilotEnabled)
     && (roleLevel == null || roleLevel >= AUTOPILOT_EDIT_ROLE_FLOOR)
 
+  const canToggleExtensions = Boolean(onSetSmartExtensionsEnabled)
+    && (roleLevel == null || roleLevel >= SETTINGS_EDIT_ROLE_FLOOR)
+
   // Legacy registry entries are read-only grandfathers — never offered as a
   // toggle (see the module header).
   const deviceFlags = Object.entries(FLAGS).filter(([, def]) => !def.legacy)
@@ -112,6 +120,22 @@ export function ExperimentalFlagsSection({
                 disabled={!canOptIn}
                 onCheckedChange={(checked) => onSetAutopilotEnabled?.(checked)}
                 aria-label={t("autopilot.settings.autopilotLabel")}
+              />
+            </DisabledFieldTooltip>
+          }
+        />
+        <SettingsRow
+          label={<label htmlFor="experimental-smart-extensions">{t("extensions.flag.label")}</label>}
+          description={t("extensions.flag.description")}
+          control={
+            <DisabledFieldTooltip disabled={!canToggleExtensions} tooltip={t("extensions.flag.roleHint")}>
+              <Switch
+                id="experimental-smart-extensions"
+                checked={smartExtensionsEnabled ?? false}
+                disabled={!canToggleExtensions}
+                onCheckedChange={(checked) => onSetSmartExtensionsEnabled?.(checked)}
+                aria-label={t("extensions.flag.label")}
+                data-testid="smart-extensions-switch"
               />
             </DisabledFieldTooltip>
           }

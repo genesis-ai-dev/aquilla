@@ -21,6 +21,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { ProjectSettings } from "./ProjectSettings"
 
@@ -48,6 +49,8 @@ function makeProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
 }
 
 let currentProject: ProjectRecord = makeProject()
+/** AQU-1768: the org's media defaults the settings response carries. */
+let orgMedia: Record<string, unknown> = {}
 const patch = vi.fn().mockResolvedValue({ kind: "ok" })
 
 vi.mock("@/hooks/useProject", () => ({
@@ -68,6 +71,7 @@ vi.mock("@/hooks/useProjectSettings", () => ({
     hasFetched: true,
     isOnline: true,
     refresh: vi.fn(),
+    orgMediaDefaults: orgMedia,
   }),
 }))
 
@@ -132,7 +136,14 @@ const saveButton = () => screen.queryByRole("button", { name: /save changes/i })
 beforeEach(() => {
   vi.clearAllMocks()
   currentProject = makeProject()
+  orgMedia = {}
 })
+
+/** AQU-1768: a box follows the organization until "Set for this project". */
+async function setForThisProject(sourceTestId: string) {
+  await userEvent.click(screen.getByTestId(sourceTestId))
+  await userEvent.click(await screen.findByRole("option", { name: "Set for this project" }))
+}
 
 // AQU-1068 retired the third box (add lines into the timeline's silences).
 // Its successor is the "who can add and remove cells" tier, covered in
@@ -167,8 +178,9 @@ describe("ProjectSettings — allowTrackEditing (AQU-646 stage 2)", () => {
   // dependency array — in the second case the memo holds a stale closure and
   // the box ticks with no Save button, which is the exact shape of an inert
   // setting.
-  it("offers to save once it is toggled", () => {
+  it("offers to save once it is toggled", async () => {
     renderSettings()
+    await setForThisProject("allow-track-editing-source")
     fireEvent.click(box("settings-allow-track-editing"))
     expect(isChecked(box("settings-allow-track-editing"))).toBe(true)
     expect(saveButton()).toBeTruthy()
@@ -178,6 +190,7 @@ describe("ProjectSettings — allowTrackEditing (AQU-646 stage 2)", () => {
   // Save button would appear, the save would succeed, and nothing would change.
   it("sends the field to the server when saved", async () => {
     renderSettings()
+    await setForThisProject("allow-track-editing-source")
     fireEvent.click(box("settings-allow-track-editing"))
     fireEvent.click(saveButton() as HTMLElement)
     await waitFor(() => expect(patch).toHaveBeenCalled())
@@ -192,6 +205,7 @@ describe("ProjectSettings — allowTrackEditing (AQU-646 stage 2)", () => {
   it("does not disturb its neighbours", async () => {
     currentProject = makeProject({ timingLocked: true, cellEditingFloor: "none" })
     renderSettings()
+    await setForThisProject("allow-track-editing-source")
     fireEvent.click(box("settings-allow-track-editing"))
     fireEvent.click(saveButton() as HTMLElement)
     await waitFor(() => expect(patch).toHaveBeenCalled())
@@ -215,9 +229,47 @@ describe("ProjectSettings — the timing lock, which shipped uncovered", () => {
   it("the timing lock saves an explicit unlock", async () => {
     currentProject = makeProject({ timingLocked: undefined })
     renderSettings()
+    await setForThisProject("timing-locked-source")
     fireEvent.click(box("settings-timing-locked"))
     fireEvent.click(saveButton() as HTMLElement)
     await waitFor(() => expect(patch).toHaveBeenCalled())
     expect((patch.mock.calls[0]?.[0] as Record<string, unknown>).timingLocked).toBe(false)
+  })
+})
+
+describe("ProjectSettings — media settings follow the organization (AQU-1768)", () => {
+  it("shows the organization's choice, disabled, while the project sets none", () => {
+    orgMedia = { timingLocked: false, allowTrackEditing: true }
+    currentProject = makeProject({ timingLocked: undefined, allowTrackEditing: undefined })
+    renderSettings()
+    expect(isChecked(box("settings-timing-locked"))).toBe(false)
+    expect(isChecked(box("settings-allow-track-editing"))).toBe(true)
+    const lock = box("settings-timing-locked")
+    expect(lock.hasAttribute("disabled") || lock.getAttribute("aria-disabled") === "true" || lock.hasAttribute("data-disabled")).toBe(true)
+    expect(box("timing-locked-source").textContent).toContain("Organization default (off)")
+    expect(box("allow-track-editing-source").textContent).toContain("Organization default (on)")
+    expect(saveButton()).toBeNull()
+  })
+
+  it("'Set for this project' starts from the organization's value and saves only once edited", async () => {
+    orgMedia = { allowTrackEditing: true }
+    renderSettings()
+    await setForThisProject("allow-track-editing-source")
+    expect(isChecked(box("settings-allow-track-editing"))).toBe(true)
+    fireEvent.click(box("settings-allow-track-editing"))
+    fireEvent.click(saveButton() as HTMLElement)
+    await waitFor(() => expect(patch).toHaveBeenCalled())
+    expect((patch.mock.calls[0]?.[0] as Record<string, unknown>).allowTrackEditing).toBe(false)
+  })
+
+  it("going back to the organization's default clears the project's own value", async () => {
+    currentProject = makeProject({ timingLocked: false })
+    renderSettings()
+    await userEvent.click(box("timing-locked-source"))
+    await userEvent.click(await screen.findByRole("option", { name: "Organization default (on)" }))
+    fireEvent.click(saveButton() as HTMLElement)
+    await waitFor(() => expect(patch).toHaveBeenCalled())
+    const sent = patch.mock.calls[0]?.[0] as Record<string, unknown>
+    expect("timingLocked" in sent && sent.timingLocked === undefined).toBe(true)
   })
 })

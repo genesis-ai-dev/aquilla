@@ -14,6 +14,7 @@ import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
+import type { MediaDefaultKey } from "../../../db/shared/media-setting-defaults"
 
 interface ProjectList { total: number; projects: Array<{ id: string; name: string }> }
 
@@ -22,7 +23,10 @@ interface SettingsBody {
   countStructuralOverrides: number
   validationCountOverrides: number
   validationCountAudioOverrides: number
-  overrideProjects: Record<"countStructuralCells" | "validationCount" | "validationCountAudio", ProjectList>
+  overrideProjects: Record<
+    "countStructuralCells" | "validationCount" | "validationCountAudio" | MediaDefaultKey,
+    ProjectList
+  >
 }
 
 interface VisibilityBody {
@@ -66,7 +70,12 @@ async function seed() {
 
   await project("p-b", "Bravo", { validationCount: 2, countStructuralCells: false, rosterViewMinRole: 700 })
   // Lower-case on purpose: the list is in name order, not code-point order.
-  await project("p-a", "alpha", { validationCount: 3, validationCountAudio: 2, memberProgressViewMinRole: 700 })
+  await project("p-a", "alpha", {
+    validationCount: 3,
+    validationCountAudio: 2,
+    memberProgressViewMinRole: 700,
+    timingLocked: false,
+  })
   await project("p-tom", "Charlie", { validationCount: 2, rosterViewMinRole: 700 })
   await project("p-follow", "Delta", { sourceLanguage: "en" })
   // At the org's own floor: inert, so not "stricter".
@@ -114,6 +123,12 @@ describe("AQU-1938: the projects behind the Project defaults counts", () => {
       validationCount: { total: 3, projects: [alpha, bravo, charlie] },
       validationCountAudio: { total: 1, projects: [alpha] },
       countStructuralCells: { total: 1, projects: [bravo] },
+      // AQU-1768: and one list per media default.
+      timingLocked: { total: 1, projects: [alpha] },
+      allowTrackEditing: { total: 0, projects: [] },
+      cellEditingFloor: { total: 0, projects: [] },
+      allowSelfValidationAudio: { total: 0, projects: [] },
+      validationRoleFloorAudio: { total: 0, projects: [] },
     })
   })
 
@@ -126,6 +141,7 @@ describe("AQU-1938: the projects behind the Project defaults counts", () => {
     expect(body.overrideProjects.validationCount).toEqual({ total: 3, projects: [charlie] })
     expect(body.overrideProjects.validationCountAudio).toEqual({ total: 1, projects: [] })
     expect(body.overrideProjects.countStructuralCells).toEqual({ total: 1, projects: [] })
+    expect(body.overrideProjects.timingLocked).toEqual({ total: 1, projects: [] })
   })
 
   it("is still refused to someone outside the org", async () => {

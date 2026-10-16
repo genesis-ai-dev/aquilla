@@ -272,7 +272,7 @@ describe("ProjectSettings — blob-only settings read back after a reload", () =
   it("allowSelfValidation (absent means allowed, so a stored false must show off)", () => {
     currentSettings = { allowSelfValidation: false }
     renderSettings("validation")
-    expect(screen.getByRole("switch", { name: "Allow self-validation" })).not.toBeChecked()
+    expect(screen.getByRole("switch", { name: "Allow self-validation (text)" })).not.toBeChecked()
   })
 
   it("allowSelfValidationAudio", () => {
@@ -329,7 +329,7 @@ describe("ProjectSettings — the re-sync does not stomp an in-progress edit", (
 
     // The user's edit survives; the untouched field adopts the server value.
     expect(count()).toHaveValue(2)
-    expect(screen.getByRole("switch", { name: "Allow self-validation" })).not.toBeChecked()
+    expect(screen.getByRole("switch", { name: "Allow self-validation (text)" })).not.toBeChecked()
 
     // Settling to the server value is not an edit: only the user's change is sent.
     await user.click(screen.getByRole("button", { name: /save changes/i }))

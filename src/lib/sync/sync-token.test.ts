@@ -417,6 +417,19 @@ describe("makeSyncTokenMinter — OPS-44 elevation required", () => {
     expect(isElevationRequired()).toBe(false)
   })
 
+  it("hands back the role of a read-only platform view, on a fresh mint and from cache (AQU-2003)", async () => {
+    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      token: "tok-view",
+      expiresIn: 900,
+      role: { level: 100, name: "viewer", source: "platform" },
+    }), { status: 200 })) as unknown as typeof fetch
+    const mint = makeSyncTokenMinter(() => "jwt-admin", "p", "f", {}, API)
+    const role = { level: 100, name: "viewer", source: "platform" }
+    expect(await mint()).toEqual({ token: "tok-view", status: 200, role })
+    expect(await mint()).toEqual({ token: "tok-view", status: 200, role })
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+  })
+
   it("mints normally once the admin has stepped up (nothing cached from the refusal)", async () => {
     global.fetch = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify(ELEVATION_BODY), { status: 403 }))

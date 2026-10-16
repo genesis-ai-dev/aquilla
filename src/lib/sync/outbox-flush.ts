@@ -22,6 +22,8 @@ import type { AppliedEventFrame } from "./live-apply"
 import { timeoutSignal } from "./fetch-timeout"
 import { observedSyncFetch, readSyncJson } from "./connection-activity"
 import posthog from "@/lib/posthog"
+import { ROLE } from "@/lib/frontier/roles"
+import { notifyElevationRequired } from "@/lib/errors/elevation-required-signal"
 import { OUTBOX_QUARANTINED } from "@/lib/event-names"
 
 const MAX_BATCH = 100
@@ -47,6 +49,8 @@ export interface TokenMintResult {
   /** OPS-44: the 403 only asks a platform admin to step up (see
    *  SyncTokenError.elevationRequired). */
   elevationRequired?: boolean
+  /** AQU-2003: the role the token carries (server `role` field), when known. */
+  role?: { level: number; source: string }
 }
 
 interface PostBody {
@@ -230,6 +234,12 @@ function isElevationHeld(record: OutboxRecord): boolean {
  */
 export function releaseElevationHolds(): void {
   elevationHolds.clear()
+}
+
+/** AQU-2003: a platform-source token below Contributor is the read-only view
+ *  an un-elevated admin is minted. It cannot write anything. */
+function isPlatformViewToken(mint: TokenMintResult): boolean {
+  return mint.role?.source === "platform" && mint.role.level < ROLE.CONTRIBUTOR
 }
 
 function groupOldestFileFirst(records: OutboxRecord[]): OutboxRecord[] {
@@ -523,7 +533,7 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
     return { posted: 0, accepted: 0, networkError: false, authError: true, authStatus: mint.status, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
   }
 
-  const mint = await deps.getTokenForFile(projectId, tokenFileId)
+  let mint = await deps.getTokenForFile(projectId, tokenFileId)
   // Foreground mode fences account switches. Background mode instead fences
   // the exact owner/JWT pair, allowing an inactive account to drain while
   // still cancelling immediately when that stored credential is replaced or
@@ -532,6 +542,24 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
     return { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
   }
   if (!mint.token) return handleMintFailure(mint)
+
+  // AQU-2003: the auth-worker now answers an un-elevated platform admin with a
+  // read-only Viewer token (source "platform") instead of OPS-44's 403. No
+  // queued event can pass a Viewer token, and posting it would quarantine the
+  // admin's edits as forbidden. Treat it as the same step-up hold the 403 was:
+  // keep the events pending and raise the prompt. A cached token may predate
+  // the grant, so mint once more past the cache before holding.
+  if (isPlatformViewToken(mint)) {
+    mint = await deps.getTokenForFile(projectId, tokenFileId, { forceRefresh: true })
+    if (!(await isCredentialCurrent())) {
+      return { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
+    }
+    if (!mint.token) return handleMintFailure(mint)
+    if (isPlatformViewToken(mint)) {
+      notifyElevationRequired({ kind: "sync-token", projectId })
+      return handleMintFailure({ token: null, status: 403, elevationRequired: true })
+    }
+  }
 
   // AQU-1788: discard the stale-role token, mint one carrying the member's
   // LIVE role, and post the same batch once more. The server then either

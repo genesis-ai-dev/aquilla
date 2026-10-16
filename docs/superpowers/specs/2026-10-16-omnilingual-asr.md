@@ -74,7 +74,7 @@ module that the client and the auth-worker both import, or that is duplicated wi
 - It then takes the script from the tag's script subtag.
 - Without a script subtag, it uses the first upstream code for that language.
 
-## 3. Modal service `infra/modal/omnilingual_asr.py`
+## 3. Modal service `infra/modal/omni_asr.py`
 
 The service follows the `diarization.py` conventions: a shared secret, and a URL allow-list for every fetched URL.
 
@@ -83,7 +83,7 @@ The service follows the `diarization.py` conventions: a shared secret, and a URL
 - **`OmniCTC`** runs on an L4 with CTC 1B. `scaledown_window` is 300 s.
 - **`OmniZS`** runs on an L40S 48 GB, or an A100-80GB if the spike shows that is needed. It loads ZS 7B. `scaledown_window` is 600 s.
 - **Weights** for both classes live in the `aquilla-omni-asr-weights` Volume. The 30 GB ZS checkpoint is too big for an image layer.
-- **Word timings.** Both classes also load **CTC 300M as the aligner**. It runs `torchaudio.functional.forced_align` of the hypothesis text against the CTC emissions to produce word timings. If alignment fails, the service spreads the timings proportionally and returns `timingsApproximate: true`.
+- **Word timings.** Both classes also load **CTC 300M as the aligner**. It runs a self-contained CTC Viterbi alignment (`_ctc_viterbi`) of the hypothesis text against the CTC emissions to produce word timings. We do not use `torchaudio.functional.forced_align`, which newer torchaudio drops. If alignment fails, the service spreads the timings proportionally and returns `timingsApproximate: true`.
 
 **Endpoints.** Every endpoint is FastAPI and authenticated with `X-Omni-Secret`.
 
@@ -94,7 +94,7 @@ The service follows the `diarization.py` conventions: a shared secret, and a URL
 - **`POST /warm {model}`** `.spawn()`s a no-op so that a container starts, and returns immediately.
 - **`GET /status?model=`** returns `{ state: "cold"|"starting"|"ready", estGpuSecPerAudioSec }`.
   - The state comes from a `modal.Dict` heartbeat. `@modal.enter` sets `starting` and then `ready`, every call refreshes the heartbeat, and `@modal.exit` clears it.
-  - A heartbeat older than 90 s counts as `cold`.
+  - A heartbeat older than the ZS scaledown window plus 60 s (660 s) counts as `cold`. A shorter window would report an idle but still-warm container as cold.
 
 **Secrets and deploy**
 
@@ -175,13 +175,28 @@ docs/AGENT-API.md gets a worked ZS example for a low-resource language.
 
 **Preview caveat.** A preview sync-worker cannot call a preview auth-worker. If the agent tool calls across that seam, the Modal call and the billing move into a shared module that both workers use.
 
-## 8. Risks to retire first (Modal spike)
+## 8. Modal spike results (2026-10-16)
 
-1. **Forced alignment over the Omnilingual char vocabulary.** We need to confirm the blank index, the word-boundary token, and the BOS/EOS stripping.
-2. **ZS memory** with 10 × 30 s context. This decides between the L40S and the A100-80GB.
-3. **Cold start** for 30 GB of weights from a Volume. The measured time replaces the "1–3 min" copy.
-4. **fairseq2/torch pins.** The upstream package does not pin versions.
-5. **Real GPU-seconds per audio-second** for CTC and ZS. These measurements set `estGpuSecPerAudioSec` and `MAX_RTF`.
+All four risks are retired. Test audio: FLEURS Dholuo (`luo_Latn`) test clips, with 10 other Dholuo utterances as ZS examples. Plus one English `say` clip.
+
+| | CTC 1B (L4) | ZS 7B (L40S 48 GB) |
+|---|---|---|
+| Peak GPU memory | 2.7 GiB | 16.4 GiB with 10 examples (fits; no A100 needed) |
+| GPU-seconds, 10.6 s clip | 0.92 | 4.7 |
+| GPU-seconds, 20 s clip | — | 6.1 |
+| `estGpuSecPerAudioSec` (conservative) | 0.1 | 0.5 |
+| Model load, weights cached on the Volume | 23 s | 62 s (~113 s end-to-end cold start) |
+| First-ever load (downloads weights) | 165 s | 678 s (29 GB) |
+
+- **Quality (one clip).** Reference: "…malo 20 te mar pi ma pukore oko e-aoche…". CTC heard "maloe mar pima pukore". ZS heard "malo te mar pi mapukore". ZS was closer on every clip we checked.
+- **Alignment.** The char vocabulary works. `bos_idx = 0` is the CTC blank, and `pad = 1`, `eos = 2`. Real word timings come back with `timingsApproximate: false` for both models.
+- **Pins.** fairseq2n 0.6 pins torch 2.8.0, so torchaudio must also be 2.8.0 (an unpinned install pulls a CUDA 13 build). Use `pyarrow==21.0.0`, because 22+ needs numpy 2. `XDG_CACHE_HOME` must not point at the Volume: the Modal runtime writes there before the Volume mounts.
+- **The service file must not be called `omnilingual_asr.py`.** That name shadows the package, so it is `omni_asr.py`.
+- **HTTP path checked with `modal serve`:**
+  - A bad secret gets 401.
+  - A cold ZS container returns `{warming:true}` and spawns a warm-up, and `/status` moves to `ready`.
+  - ZS fetches 10 https example URLs and returns a transcript and timings in about 8 s while warm.
+- **ZS cold-start copy.** "about 1–3 minutes" holds, at about 2 min.
 
 ## 9. Tests (intent)
 
@@ -202,6 +217,6 @@ docs/AGENT-API.md gets a worked ZS example for a low-resource language.
 
 ## 11. Ryder-only steps
 
-- Run `modal deploy infra/modal/omnilingual_asr.py` in the genesis-ai-dev workspace, and `modal secret create aquilla-omni-asr OMNI_SHARED_SECRET=…`.
+- Run `modal deploy infra/modal/omni_asr.py` in the genesis-ai-dev workspace, and `modal secret create aquilla-omni-asr OMNI_SHARED_SECRET=…`.
 - Run `wrangler secret put OMNI_SHARED_SECRET` and set `OMNI_ASR_MODAL_URL` on the auth-worker environments.
 - Give launch timing for the announcement page and the LinkedIn post (drafts are on the aquilla-marketing branch `omnilingual-asr-announce`).

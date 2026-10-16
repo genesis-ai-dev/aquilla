@@ -147,7 +147,7 @@ function LanePeople({
       type="button"
       data-testid={testId}
       className="-mx-1 flex items-center rounded px-1 py-0.5 hover:bg-muted"
-      aria-label={t("org.staffLanePopover.staffLaneHeading", { lane: laneLabel })}
+      aria-label={t("org.overviewLaneTable.peopleCellAriaLabel", { lane: laneLabel })}
       onClick={(event) => {
         event.stopPropagation()
         onOpenStaff()

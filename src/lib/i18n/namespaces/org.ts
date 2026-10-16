@@ -1404,6 +1404,11 @@ export const org = defineNamespace({
     // -- OverviewLaneTable: per-project lane table (AQU-538 §3.3) --
     // "Actions" sr-only header → org.overviewLaneTable.actionsColumn (identical text)
     // "Staff {label}" sr-only trigger text → org.staffLanePopover.staffLaneHeading (identical text)
+    // AQU-1998: the People cell is a button that opens the lane's Staff
+    // popover. Named for what it shows rather than reusing the Staff heading —
+    // the row's hidden popover anchor already carries that, and two buttons
+    // with one name in a row tell a screen-reader user nothing apart.
+    "org.overviewLaneTable.peopleCellAriaLabel": "People on {lane}",
     "org.overviewLaneTable.sectionDescription":
       "Progress, people, and actions for each target language on this project.",
 
@@ -3055,6 +3060,11 @@ export const org = defineNamespace({
       "org.staffLanePopover.rosterEmpty": {
         description:
           "Shown when the roster loaded successfully and the organization genuinely has no other members. Reserved for that one case — the unavailable-roster cases have their own keys.",
+      },
+      "org.overviewLaneTable.peopleCellAriaLabel": {
+        description:
+          "Accessible name for the People cell of a lane row on the project overview's Languages table, which is a button opening that lane's Staff popover (where people are added to and removed from the lane). Only rendered for an operator who can staff the lane; for everyone else the cell is plain avatars with no name of its own.",
+        placeholders: { lane: "The target language lane's display label — not translated." },
       },
       "org.staffLanePopover.removeFromLaneAriaLabel": {
         description:

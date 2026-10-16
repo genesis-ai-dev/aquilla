@@ -3,6 +3,7 @@ import { useAccounts } from "@/hooks/useAccounts"
 import { useOfflineStore } from "@/context/OfflineStoreContext"
 import { createOfflineSyncManager, type OfflineSyncManager } from "@/lib/offline/sync-manager"
 import { recoverInterruptedDownloads } from "@/lib/offline/download"
+import { whenOfflineStoreVerified } from "@/lib/offline/store"
 import { buildProjectAwareMinter } from "@/lib/sync/cqrs-bridge"
 
 /**
@@ -30,12 +31,21 @@ export function OfflineSyncManagerMount(): null {
 
   useEffect(() => {
     if (!store) return
-    // Before anything can start a download this session.
-    const recovered = recoverInterruptedDownloads(store)
-    if (recovered.length > 0) console.warn("[offline] rolled back interrupted downloads", recovered)
+    let cancelled = false
+    // Deletes local rows, so it only runs once the leader has confirmed what
+    // this session reads: a store handed out after a head-check timeout may
+    // still be catching up, and an older status (`downloading`) read from it
+    // once cost a healthy project its whole local copy. A download the user
+    // starts before then is skipped as live (see recoverInterruptedDownloads).
+    void whenOfflineStoreVerified().then(() => {
+      if (cancelled) return
+      const recovered = recoverInterruptedDownloads(store)
+      if (recovered.length > 0) console.warn("[offline] rolled back interrupted downloads", recovered)
+    })
     const mintToken = buildProjectAwareMinter(() => jwtRef.current)
     const manager: OfflineSyncManager = createOfflineSyncManager({ store, mintToken })
     return () => {
+      cancelled = true
       manager.close()
     }
   }, [store])

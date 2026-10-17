@@ -13,6 +13,7 @@
 import { describe, it, expect, beforeEach } from "vitest"
 import { handleExternalReadRequest } from "../external/read-routes"
 import { ACTIVITY_SCAN_WINDOW } from "../external/activity-route"
+import { slimSummary } from "../external/pending-changesets-route"
 import { mintApiToken } from "../../../db/shared/api-credentials"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
 
@@ -274,6 +275,18 @@ describe("GET /projects/:pid/changesets/pending", () => {
     for (const leak of [HUMAN, "secret-invitee", "cred-secret-id", "another-cred"]) {
       expect(res.raw).not.toContain(leak)
     }
+  })
+})
+
+// A staged comment or other EmitEvents plan keeps its counts under `events`.
+// Without them the Zapier "needs approval" trigger shows an empty summary;
+// with them, only the event kind and count may pass, never the label text.
+describe("pending summary for event plans", () => {
+  it("keeps each event kind and count, and nothing else from the entry", () => {
+    expect(slimSummary({
+      command: "EmitEvents",
+      events: [{ kind: "comment.create", count: 2, testimony: false, label: "Adds 2 comments by someone-named" }, "junk", { kind: 5 }],
+    })).toEqual({ command: "EmitEvents", events: [{ kind: "comment.create", count: 2 }] })
   })
 })
 

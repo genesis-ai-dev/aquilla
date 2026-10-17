@@ -9,9 +9,11 @@
 // enough to say what is waiting and link to it, never the commands (raw
 // payloads), the credential id, or the receipt.
 //
-// `summary` is cut to its numeric counts plus `command`: several summary fields
-// are names (`orgMemberUsername`, project/org names), and an allowlist keeps a
-// future string field from leaking by default.
+// `summary` is cut to its numeric counts plus `command`, and an EmitEvents plan's
+// `events` keep only `{kind, count}` per entry (a staged comment otherwise shows
+// an empty summary): several summary fields are names (`orgMemberUsername`,
+// project/org names), and an allowlist keeps a future string field from
+// leaking by default.
 //
 // Mounted from the read router (read-routes.ts), ahead of changesets-route.ts,
 // whose `/changesets/:id` pattern would otherwise read "pending" as an id.
@@ -62,6 +64,13 @@ export function slimSummary(raw: unknown): Record<string, unknown> {
   for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
     if (key === "command" && typeof value === "string") out.command = value
     else if (typeof value === "number") out[key] = value
+    else if (key === "events" && Array.isArray(value)) {
+      out.events = value.flatMap((e: unknown) => {
+        if (e === null || typeof e !== "object") return []
+        const { kind, count } = e as { kind?: unknown; count?: unknown }
+        return typeof kind === "string" && typeof count === "number" ? [{ kind, count }] : []
+      })
+    }
   }
   return out
 }

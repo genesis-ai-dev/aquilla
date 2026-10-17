@@ -79,7 +79,17 @@ field-level detail.
    - On auth-worker, for each environment: set `ZAPIER_CLIENT_ID` and
      `ZAPIER_REDIRECT_URI` as vars, and run
      `wrangler secret put ZAPIER_CLIENT_SECRET --env <env>`.
-4. Apply migration `0179_mcp_oauth_codes_access.sql`.
+4. Apply migration `0180_mcp_oauth_codes_access.sql`.
+
+**Deploy order: migrate first.** The identity worker's consent decision and
+token endpoint read and write `mcp_oauth_codes.access`, which only `0180`
+adds. That holds for every OAuth client, ChatGPT and Claude included, not
+only Zapier. Apply `0180` to an environment's database before deploying this
+auth-worker there, or MCP-host connections fail too. The migration is
+additive (a defaulted column), so applying it early is safe for the old code.
+The `schema-guard` job in `deploy-workers.yml` already refuses to publish while
+a migration is unapplied, so the failure mode is a blocked deploy, not a live
+outage — apply it with `npm run neon:apply` and re-run.
 
 ## Public listing checklist
 

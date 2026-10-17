@@ -2628,6 +2628,8 @@ CREATE TABLE IF NOT EXISTS mcp_oauth_codes (
   credential_id UUID,
   expires_at TIMESTAMPTZ NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  access TEXT NOT NULL DEFAULT 'write',
+  CONSTRAINT mcp_oauth_codes_access_check CHECK (access IN ('read', 'write')),
   CONSTRAINT mcp_oauth_codes_scope_check CHECK (
     (org_ids IS NOT NULL AND jsonb_typeof(org_ids) = 'array'
       AND jsonb_array_length(org_ids) > 0 AND org_id IS NULL AND project_id IS NULL)

@@ -1772,6 +1772,9 @@ export const editor = defineNamespace({
     "editor.validation.validatedBy": "Text validated by",
     "editor.readOnly.reviewerNoTextValidation":
       "Viewing as reviewer. You can comment, but this project does not let you validate text.",
+    "editor.readOnly.platformView":
+      "You're viewing this project as a platform admin. Changes need the admin code.",
+    "editor.readOnly.platformViewEnterCode": "Enter code to edit",
 
     // — Archived lane (AQU-1463): the lane you are in has been frozen ———————
     "editor.laneArchived.title": "{lane} has been archived",
@@ -6756,6 +6759,18 @@ export const editor = defineNamespace({
           "project's minimum role to validate or its list of named validators " +
           "leaves them out, so they cannot validate text here either. Replaces " +
           "the usual 'Viewing as reviewer, you can validate and comment' banner.",
+      },
+      "editor.readOnly.platformView": {
+        description:
+          "Banner above the editor for a platform administrator who opened a " +
+          "project they do not belong to without entering their emailed admin " +
+          "code. The project is read-only until they enter it. Replaces the " +
+          "generic 'Viewing as viewer' banner.",
+      },
+      "editor.readOnly.platformViewEnterCode": {
+        description:
+          "Button in the platform-admin read-only banner. Opens the dialog " +
+          "where the admin enters the emailed code that unlocks editing.",
       },
       "editor.laneArchived.title": {
         description:

@@ -65,6 +65,7 @@ import { timestampNeighbours } from "@/lib/timeline/timestamp-neighbours"
 import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
 import { canPerform, canSwitchLanes } from "@/lib/sync/role-policy"
 import { ROLE } from "@/lib/frontier/roles"
+import { notifyElevationRequired } from "@/lib/errors/elevation-required-signal"
 import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
 import { useDcsUpstreamCursor } from "@/hooks/useDcsUpstreamCursor"
 import { v7 as uuidv7 } from "uuid"
@@ -1296,6 +1297,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     && !textValidationScope(project, { roleLevel: project.syncRole?.level ?? null, username }).canValidate
       ? t("editor.readOnly.reviewerNoTextValidation")
       : roleReadOnlyLabel
+  // AQU-2003: a platform admin who has not entered the step-up code opens a
+  // foreign project at Viewer (the sync-token mint reopened reads only). Say
+  // so, and offer the code prompt, instead of the generic viewer banner. An
+  // archived lane keeps its own banner, and an elevated admin (level 700)
+  // never lands here.
+  const platformViewOnly =
+    archivedLaneLabel === null &&
+    project.syncRole?.source === "platform" &&
+    (project.syncRole.level ?? 0) < ROLE.CONTRIBUTOR
   // Probe mic permission once (shared across all rows) so the help affordance
   // on CellAudioRecordButton activates when the user has blocked the mic.
   const { micDenied } = useMicPermission(audioLens !== null)
@@ -3195,13 +3205,29 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             AQU-1463: and for an archived lane, which freezes the lane for every
             role. The testid carries which of the two it is, so a test can tell a
             lane that went read-only from a reader who always was. */}
-        {readOnlyLabel && (
+        {(platformViewOnly || readOnlyLabel) && (
           <div
             data-testid={archivedLaneLabel !== null ? "lane-archived-banner" : "role-read-only-banner"}
             className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-300"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 flex-shrink-0"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-            {readOnlyLabel}
+            {platformViewOnly ? t("editor.readOnly.platformView") : readOnlyLabel}
+            {platformViewOnly && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="ms-auto h-6 px-2 text-xs"
+                data-testid="platform-view-enter-code"
+                // Reuses the OPS-44 sync-token signal: it opens the step-up
+                // prompt, and on a grant ProjectElevationBoundary remounts the
+                // page (the project id is in the refused set) so a fresh,
+                // elevated token is minted.
+                onClick={() => notifyElevationRequired({ kind: "sync-token", projectId: project.id })}
+              >
+                {t("editor.readOnly.platformViewEnterCode")}
+              </Button>
+            )}
           </div>
         )}
         {renderChapterNavigation()}

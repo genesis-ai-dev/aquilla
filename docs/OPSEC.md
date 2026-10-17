@@ -707,6 +707,20 @@ Reviewed against what the June audit and the 2026-08-03 pen test put in place.
   non-constant-time compare. Not re-examined in depth here; still valid.
 - **SEC-9, SEC-10, SEC-11** — not re-examined; assume open.
 
+### Update 2026-10-16 (AQU-2003)
+
+Cross-tenant *read* through the sync token was deliberately reopened at Viewer
+level by agreement of Ryder and Matthew: a step-up code on every foreign project
+made platform QA impractical. An un-elevated platform admin now mints a level 100
+token (still `src: "platform"`); user-content writes are refused by the
+sync-worker's role floors plus an explicit platform-view rule in
+`events/authorize.ts`, and the step-up code re-mints at full level. The one
+exception is the link-sync trigger, which any genuine Viewer can also fire and
+which writes only server-authored mirror data. PAT minting, vendor keys and the sibling
+fold keep their OPS-44 gate. Residual risk: a stolen non-elevated admin JWT can
+read any tenant's project content. Detail: `docs/OPSEC-REVIEW-2026-10-12.md`,
+"Update 2026-10-16".
+
 ---
 
 _Re-run the mechanical parts of this review with: `pnpm run scan:secrets`,

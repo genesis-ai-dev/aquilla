@@ -21,6 +21,15 @@
 //   * the sync-worker sites that exempt `src: "platform"` match EXEMPTIONS, so
 //     a new exemption widens the radius visibly rather than silently.
 //
+// AQU-2003 NARROWED the sync-token mint (Ryder + Matthew, 2026-10-16): the
+// browser route now mints an UN-elevated, platform-only caller a Viewer (100)
+// token that keeps `src: "platform"`, so a platform admin can open another
+// tenant's project read-only. User-content writes are refused by the
+// sync-worker's role floors plus the explicit platform-view rule in
+// events/authorize.ts (the link-sync trigger is the one exception, and writes
+// only server-authored mirror data). Elevation re-mints at the full level. The server-side agent harness does not
+// opt in and still fails closed. MINT_CALLERS below records which is which.
+//
 // This is a coverage ledger over source text, not a runtime assertion. The
 // behavioural tests are auth-worker/src/__tests__/admin-membership-elevation.test.ts
 // ("sync-token mint (OPS-44)") and .../merge-sibling.test.ts ("admin power
@@ -62,11 +71,15 @@ const read = (p: string) => readFileSync(path.join(REPO, p), "utf8")
  */
 const MINTERS: Record<string, { gate: string; assert: (src: string) => void }> = {
   "auth-worker/src/services/sync-token-mint.ts": {
-    gate: "refuses a platform-only grant path unless opts.platformElevated",
+    gate: "refuses a platform-only grant path unless opts.platformElevated, or signs Viewer only (AQU-2003)",
     assert: (src) => {
       expect(src).toContain('resolved.source === "platform"')
       expect(src).toContain("platformElevated")
       expect(src).toContain("elevation_required")
+      // AQU-2003: the only un-elevated platform token is Viewer (100), and it
+      // is opt-in. A change that signs a higher level here breaks this pin.
+      expect(src).toContain("platformViewWithoutElevation")
+      expect(src).toMatch(/level:\s*100,\s*name:\s*roleNameFor\(100\)/)
     },
   },
   "auth-worker/src/services/merge-sibling.ts": {
@@ -82,16 +95,21 @@ const MINTERS: Record<string, { gate: string; assert: (src: string) => void }> =
 /** Callers of the mint core, and the decision each has made about admin power. */
 const MINT_CALLERS: Record<string, "gated" | "closed"> = {
   // Passes the request's live elevation through, so an elevated operator keeps
-  // the cross-tenant path and an un-elevated one is demoted to their genuine role.
+  // the cross-tenant path and an un-elevated one is demoted to their genuine
+  // role. AQU-2003: with no genuine role, it gets a Viewer-only platform token
+  // (opts.platformViewWithoutElevation), never the 700 one.
   "auth-worker/src/routes/sync-token.ts": "gated",
   // A server-side agent harness has no session to elevate, so it never asserts
-  // elevation and the platform path simply fails closed.
+  // elevation, never opts into the Viewer view (it can write), and the
+  // platform path simply fails closed.
   "auth-worker/src/lib/agent/command-tools.ts": "closed",
 }
 
 /** sync-worker checks that treat `src: "platform"` as exempt. This is the reach. */
 const EXEMPTIONS: Record<string, number> = {
-  "sync-worker/src/events/authorize.ts": 2,
+  // 2 exemptions + 1 AQU-2003 restriction (refusePlatformView: a platform
+  // token below Contributor writes nothing). The count is the grep, not the reach.
+  "sync-worker/src/events/authorize.ts": 3,
   "sync-worker/src/events/route.ts": 1,
   "sync-worker/src/events/merge-sibling-route.ts": 1,
   "sync-worker/src/events/plan-route.ts": 1,
@@ -134,9 +152,13 @@ describe("platform-source sync tokens are minted only behind elevation", () => {
     if (decision === "gated") {
       expect(src).toContain("platformElevated")
       expect(src).toContain("hasActiveElevation")
+      // AQU-2003: the route is the ONE caller that opts into the Viewer view.
+      expect(src).toContain("platformViewWithoutElevation: true")
     } else {
       // Must NOT quietly start asserting elevation it cannot observe.
       expect(src).not.toContain("platformElevated")
+      // ... nor hand a write-capable harness a platform token of any level.
+      expect(src).not.toContain("platformViewWithoutElevation")
     }
   })
 })
@@ -177,6 +199,13 @@ describe("admin authority is de-escalated on the paths that escape the session",
 })
 
 describe("the reach of a platform-source token stays measured", () => {
+  it("authorize() keeps the explicit read-only rule for the platform view token (AQU-2003)", () => {
+    const src = stripComments(read("sync-worker/src/events/authorize.ts"))
+    // Once for the project-scoped branch, once for the file-scoped branch.
+    expect(src.match(/refusePlatformView\(tokenClaims\)/g) ?? []).toHaveLength(2)
+    expect(src).toMatch(/claims\.src === 'platform' && claims\.role < ROLE\.CONTRIBUTOR/)
+  })
+
   it("the sync-worker's platform exemptions match the ledger", () => {
     const counts: Record<string, number> = {}
     for (const f of walk(path.join(REPO, "sync-worker/src"))) {

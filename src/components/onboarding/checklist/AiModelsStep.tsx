@@ -507,11 +507,8 @@ function DownloadBar({
     <div className="mt-1 space-y-0.5">
       <div className="h-1 overflow-hidden rounded-full bg-muted">
         <div
-          className={cn(
-            "h-full bg-primary transition-[width] duration-150",
-            pct === null && "animate-pulse",
-          )}
-          style={{ width: `${pct ?? 12}%` }}
+          className="h-full w-0 bg-primary transition-[width] duration-150"
+          style={{ width: `${pct ?? 0}%` }}
         />
       </div>
       <p className="text-[10px] text-muted-foreground tabular-nums">{label}</p>

@@ -10,10 +10,19 @@
 // narrowing it — the trap the matrix still falls into when you untick the last
 // chip and save. That case keeps Remove disabled and points at Project
 // Settings → Team members, where the person can be taken off the project
-// outright. What a last-lane removal should actually do is a separate call.
+// outright.
 //
-// Presentational on purpose: the popover owns the scope reads and the PUT, so
-// this file stays about rendering one list and its one guard.
+// AQU-1999 settled both cases AQU-1998 left open. The last lane STAYS blocked
+// (the note is only worded more plainly: "no limit at all" reads as every
+// language, not none). And a removal from a lane the person holds open
+// assignments in closes that work, so nothing is left assigned in a language
+// its holder can no longer reach — but never silently: the row first asks,
+// naming how many assignments will close, and only a confirm saves anything.
+// A lane with no open assignments is still one press.
+//
+// Presentational on purpose: the popover owns the scope reads, the assignment
+// reads, the unassign events and the PUT, so this file stays about rendering
+// one list, its one guard, and that confirmation.
 
 import { Link, useLocation } from "react-router-dom"
 import { Button } from "@/components/ui/button"
@@ -42,8 +51,17 @@ export interface StaffedLaneMembersProps {
   busyUserId: number | null
   /** A failed removal: the message shows on that person's row, who stays listed. */
   error: { userId: number; message: string } | null
-  /** Called when the operator confirms a removal. */
+  /**
+   * AQU-1999: the removal waiting on a confirmation, because the person holds
+   * open assignments in this lane. Nothing has been saved for them yet.
+   */
+  pending: { userId: number; assignmentCount: number } | null
+  /** Called when Remove is pressed — the popover then counts the open work. */
   onRemove: (person: StaffedLanePerson) => void
+  /** Called when the operator confirms a removal that will close assignments. */
+  onConfirmRemove: (person: StaffedLanePerson) => void
+  /** Called when the operator backs out of that confirmation. */
+  onCancelRemove: () => void
   /** Closes the popover when the guard's settings link navigates away. */
   onNavigate?: () => void
 }
@@ -54,7 +72,10 @@ export function StaffedLaneMembers({
   people,
   busyUserId,
   error,
+  pending,
   onRemove,
+  onConfirmRemove,
+  onCancelRemove,
   onNavigate,
 }: StaffedLaneMembersProps) {
   const { t } = useI18n()
@@ -82,6 +103,7 @@ export function StaffedLaneMembers({
           {people.map((person) => {
             const lastLane = person.laneCount <= 1
             const busy = busyUserId === person.userId
+            const confirming = pending?.userId === person.userId
             return (
               <li
                 key={person.userId}
@@ -103,7 +125,7 @@ export function StaffedLaneMembers({
                       name: person.username,
                       lane: laneLabel,
                     })}
-                    disabled={lastLane || busy}
+                    disabled={lastLane || busy || confirming}
                     onClick={() => onRemove(person)}
                   >
                     {busy && <Spinner className="me-1 size-3" />}
@@ -125,6 +147,41 @@ export function StaffedLaneMembers({
                       {t("org.staffLanePopover.teamMembersLink")}
                     </Link>
                   </p>
+                )}
+                {confirming && (
+                  <div
+                    data-testid={`staff-lane-remove-confirm-${person.userId}`}
+                    className="mt-1 space-y-1.5"
+                  >
+                    <p className="text-[11px] text-muted-foreground">
+                      {t("org.staffLanePopover.removeClosesAssignments", {
+                        count: pending.assignmentCount,
+                        name: person.username,
+                        lane: laneLabel,
+                      })}
+                    </p>
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        variant="destructive"
+                        className="h-6 px-1.5 text-[11px]"
+                        data-testid={`staff-lane-remove-confirm-button-${person.userId}`}
+                        disabled={busy}
+                        onClick={() => onConfirmRemove(person)}
+                      >
+                        {busy && <Spinner className="me-1 size-3" />}
+                        {t("org.staffLanePopover.removeClosesAssignmentsConfirm")}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        className="h-6 px-1.5 text-[11px]"
+                        data-testid={`staff-lane-remove-cancel-${person.userId}`}
+                        disabled={busy}
+                        onClick={onCancelRemove}
+                      >
+                        {t("common.cancel")}
+                      </Button>
+                    </div>
+                  </div>
                 )}
                 {error?.userId === person.userId && (
                   <p

@@ -99,7 +99,7 @@ describe("hosted transcription", () => {
     expect(upstreamBodies).toHaveLength(1)
     expect(result).toEqual({ text: "bonjour", chunks: [
       { text: "bonjour", start: 0, end: 0.5 },
-    ] })
+    ], model: "whisper", timingsApproximate: false })
   })
 
   it("meters fractional-second clips as whole billed seconds on the legacy credit rail", async () => {

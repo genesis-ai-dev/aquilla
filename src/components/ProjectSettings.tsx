@@ -2853,7 +2853,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 control={
                   <Button
                     variant="outline"
-                    onClick={() => requestNavigate("/preferences")}
+                    // The hosted model picker says which models know this
+                    // project's language, so it needs to know the project.
+                    onClick={() => requestNavigate(project ? `/preferences/local-models?project=${encodeURIComponent(project.id)}` : "/preferences")}
                   >
                     {t("projectSettings.localModels.manageButton")}
                   </Button>

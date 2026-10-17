@@ -176,3 +176,12 @@ MONDAY_REDIRECT_URI="http://localhost:5173/oauth/callback"
 # Stripe keys
 #STRIPE_SECRET_KEY=sk_live_1234.... (Or sk_test_ for sandbox key)
 #STRIPE_PUBLISHABLE_KEY=pk_live_1234....
+
+# Omnilingual ASR (infra/modal/omni_asr.py). Leave unset to keep hosted
+# transcription on OpenRouter only. For a local live test: `modal serve
+# infra/modal/omni_asr.py`, put its URL here, and use the value of the Modal
+# secret `aquilla-omni-asr`. Zero-shot example audio is fetched by Modal, so
+# the sync-worker must be publicly reachable: run a tunnel to :8789 and set
+# both SYNC_WORKER_URL (here) and DIARIZATION_PUBLIC_BASE (sync-worker) to it.
+# OMNI_ASR_MODAL_URL=""
+# OMNI_SHARED_SECRET=""

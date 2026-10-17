@@ -5679,7 +5679,7 @@ export const th: Catalog = {
   "settings.notifications.section.description": "เลือกว่าจะให้ Aquilla ส่งอีเมลหาคุณเรื่องความคิดเห็นเมื่อใด",
   "settings.transcription.title": "การถอดเสียง",
   "settings.transcription.scope": "ตัวเลือกนี้ใช้กับบัญชีของคุณในเบราว์เซอร์นี้",
-  "settings.transcription.hosted": "Whisper ที่ Aquilla โฮสต์ (แนะนำ)",
+  "settings.transcription.hosted": "โมเดลที่ Aquilla โฮสต์ (แนะนำ)",
   "settings.transcription.hostedDescription": "พร้อมใช้ทันที ใช้ขีดความสามารถ AI ของพื้นที่ทำงานของคุณ ไม่ต้องใช้คีย์หรือดาวน์โหลด",
   "settings.transcription.local": "Whisper ในเครื่องในเบราว์เซอร์นี้",
   "settings.transcription.localDescription": "ดาวน์โหลด Whisper ด้านล่าง ทำงานบนอุปกรณ์ของคุณโดยไม่ใช้ขีดความสามารถ AI ที่โฮสต์ไว้ ความเร็วขึ้นอยู่กับอุปกรณ์ของคุณ",

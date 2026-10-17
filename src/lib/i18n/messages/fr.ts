@@ -5728,7 +5728,7 @@ export const fr: Catalog = {
   "settings.notifications.saveFailed": "Impossible d'enregistrer ce réglage",
   "settings.notifications.section.description": "Choisissez quand Aquilla vous envoie un e-mail à propos des commentaires.",
   "settings.transcription.scope": "Ce choix s'applique à votre compte dans ce navigateur.",
-  "settings.transcription.hosted": "Whisper hébergé par Aquilla (recommandé)",
+  "settings.transcription.hosted": "Hébergé par Aquilla (recommandé)",
   "settings.transcription.hostedDescription": "Prêt immédiatement. Utilise la capacité d'IA de votre espace de travail. Aucune clé ni téléchargement nécessaire.",
   "settings.transcription.local": "Whisper local dans ce navigateur",
   "settings.transcription.localDescription": "Téléchargez Whisper ci-dessous. Fonctionne sur votre appareil sans utiliser la capacité d'IA hébergée. La vitesse dépend de votre appareil.",

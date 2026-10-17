@@ -5694,7 +5694,7 @@ export const zh_Hans: Catalog = {
   "settings.notifications.section.description": "选择 Aquilla 何时通过邮件通知您评论。",
   "settings.transcription.title": "转录",
   "settings.transcription.scope": "此选择适用于您在此浏览器中的账户。",
-  "settings.transcription.hosted": "Aquilla 托管的 Whisper（推荐）",
+  "settings.transcription.hosted": "Aquilla 托管（推荐）",
   "settings.transcription.hostedDescription": "立即可用。使用您工作区的 AI 额度。无需密钥或下载。",
   "settings.transcription.local": "此浏览器中的本地 Whisper",
   "settings.transcription.localDescription": "请在下方下载 Whisper。它在您的设备上运行，不占用托管 AI 额度。速度取决于您的设备。",

@@ -5677,7 +5677,7 @@ export const my: Catalog = {
   "settings.notifications.section.description": "မှတ်ချက်များအကြောင်း Aquilla က သင့်ကို အီးမေးလ်ပို့မည့်အချိန်ကို ရွေးပါ။",
   "settings.transcription.title": "စာသားပြောင်းလဲမှု",
   "settings.transcription.scope": "ဤရွေးချယ်မှုသည် ဤဘရောက်ဇာရှိ သင့်အကောင့်ကိုသာ သက်ရောက်သည်။",
-  "settings.transcription.hosted": "Aquilla ကိုယ်တိုင်လက်ခံသော Whisper (အကြံပြု)",
+  "settings.transcription.hosted": "Aquilla ကိုယ်တိုင်လက်ခံသော မော်ဒယ် (အကြံပြု)",
   "settings.transcription.hostedDescription": "ချက်ချင်းအသင့်သုံးနိုင်သည်။ သင့်လုပ်ငန်းခွင်၏ AI စွမ်းရည်ကို သုံးသည်။ ကီး သို့မဟုတ် ဒေါင်းလုဒ် မလိုပါ။",
   "settings.transcription.local": "ဤဘရောက်ဇာရှိ ဒေသတွင်း Whisper",
   "settings.transcription.localDescription": "အောက်တွင် Whisper ကို ဒေါင်းလုဒ်လုပ်ပါ။ လက်ခံ AI စွမ်းရည်မသုံးဘဲ သင့်စက်ပေါ်တွင် လည်ပတ်သည်။ အမြန်နှုန်းသည် သင့်စက်အပေါ် မူတည်သည်။",

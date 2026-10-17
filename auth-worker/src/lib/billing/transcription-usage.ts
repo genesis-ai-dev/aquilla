@@ -2,6 +2,9 @@ import type { Env } from '../../types'
 import { providerCostToMicroCents } from '../../../../db/shared/billing-cost'
 
 export const WHISPER_MODEL = 'openai/whisper-1'
+/** Chinese varieties only (db/shared/asr-models.ts pickAsrModel). */
+export const QWEN_ASR_MODEL = 'qwen/qwen3-asr-1.7b'
+export type OpenRouterAsrModel = typeof WHISPER_MODEL | typeof QWEN_ASR_MODEL
 const rates = new Map<string, { centsPerSecond: number; fetchedAt: number }>()
 
 /** Only accept the canonical mono 16 kHz PCM16 WAV produced by the SPA.
@@ -29,10 +32,11 @@ export function transcriptionSeconds(base64: string): number {
 /** The transcription catalog's prompt price is USD per audio second.
  * Missing prices fail closed; actual provider usage settles the reservation.
  */
-export async function transcriptionCostBound(env: Env, seconds: number) {
+export async function transcriptionCostBound(env: Env, seconds: number, model: OpenRouterAsrModel = WHISPER_MODEL) {
   const base = env.OPENROUTER_BASE_URL?.replace(/\/+$/, '')
     ?? 'https://openrouter.ai/api/v1'
-  let rate = rates.get(base)
+  const cacheKey = `${base} ${model}`
+  let rate = rates.get(cacheKey)
   if (!rate || Date.now() - rate.fetchedAt >= 600000) {
     const response = await fetch(`${base}/models?output_modalities=transcription`, {
       headers: { Authorization: `Bearer ${env.OPENROUTER_API_KEY}` },
@@ -42,14 +46,14 @@ export async function transcriptionCostBound(env: Env, seconds: number) {
     const body = await response.json() as {
       data?: Array<{ id?: string; pricing?: { prompt?: unknown } }>
     }
-    const price = body.data?.find(model => model.id === WHISPER_MODEL)?.pricing?.prompt
+    const price = body.data?.find(entry => entry.id === model)?.pricing?.prompt
     const dollars = (typeof price === 'string' && price.trim().length > 0)
       || typeof price === 'number' ? Number(price) : NaN
     if (!Number.isFinite(dollars) || dollars < 0) {
       throw new Error('Transcription price unavailable')
     }
     rate = { centsPerSecond: dollars * 100, fetchedAt: Date.now() }
-    rates.set(base, rate)
+    rates.set(cacheKey, rate)
   }
   // Whisper rounds audio duration to seconds; round upward for admission.
   const cents = Math.max(Math.ceil(seconds) * rate.centsPerSecond, 0.0001)

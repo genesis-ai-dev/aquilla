@@ -5770,7 +5770,7 @@ export const id: Catalog = {
   "settings.notifications.section.description": "Pilih kapan Aquilla mengirim email kepada Anda tentang komentar.",
   "settings.transcription.title": "Transkripsi",
   "settings.transcription.scope": "Pilihan ini berlaku untuk akun Anda di browser ini.",
-  "settings.transcription.hosted": "Whisper yang di-host Aquilla (disarankan)",
+  "settings.transcription.hosted": "Di-host Aquilla (disarankan)",
   "settings.transcription.hostedDescription": "Siap digunakan langsung. Memakai kapasitas AI ruang kerja Anda. Tidak perlu kunci atau unduhan.",
   "settings.transcription.local": "Whisper lokal di browser ini",
   "settings.transcription.localDescription": "Unduh Whisper di bawah. Berjalan di perangkat Anda tanpa memakai kapasitas AI yang di-host. Kecepatan bergantung pada perangkat Anda.",

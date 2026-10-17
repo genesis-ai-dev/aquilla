@@ -5655,7 +5655,7 @@ export const ms: Catalog = {
   "settings.notifications.section.description": "Pilih bila Aquilla menghantar e-mel kepada anda tentang komen.",
   "settings.transcription.title": "Transkripsi",
   "settings.transcription.scope": "Pilihan ini terpakai pada akaun anda dalam pelayar ini.",
-  "settings.transcription.hosted": "Whisper dihoskan Aquilla (disyorkan)",
+  "settings.transcription.hosted": "Dihoskan Aquilla (disyorkan)",
   "settings.transcription.hostedDescription": "Sedia serta-merta. Menggunakan kapasiti AI ruang kerja anda. Tiada kunci atau muat turun diperlukan.",
   "settings.transcription.local": "Whisper setempat dalam pelayar ini",
   "settings.transcription.localDescription": "Muat turun Whisper di bawah. Berjalan pada peranti anda tanpa menggunakan kapasiti AI yang dihoskan. Kelajuan bergantung pada peranti anda.",

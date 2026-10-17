@@ -5813,7 +5813,7 @@ export const ru: Catalog = {
   "settings.notifications.section.description": "Выберите, когда Aquilla будет присылать вам письма о комментариях.",
   "settings.transcription.title": "Транскрипция",
   "settings.transcription.scope": "Этот выбор действует для вашей учётной записи в этом браузере.",
-  "settings.transcription.hosted": "Whisper на серверах Aquilla (рекомендуется)",
+  "settings.transcription.hosted": "На серверах Aquilla (рекомендуется)",
   "settings.transcription.hostedDescription": "Готов к работе сразу. Использует ИИ-ресурсы вашего рабочего пространства. Ключ и загрузка не нужны.",
   "settings.transcription.local": "Локальный Whisper в этом браузере",
   "settings.transcription.localDescription": "Загрузите Whisper ниже. Работает на вашем устройстве, не расходуя ИИ-ресурсы сервера. Скорость зависит от устройства.",

@@ -28,6 +28,7 @@ import { handleExternalMemoryReadRequest } from './memory-read-routes'
 import { handleExternalExportRequest } from './export-route'
 import { handleExternalQualityRequest } from './quality-routes'
 import { handleExternalChangesetsRequest } from './changesets-route'
+import { handleExternalTranscriptionRequest } from './transcription-route'
 import { listProjectsForCredential } from './projects-list'
 import { loadProjectDetail } from './project-detail'
 import { listOrgsForCredential } from './orgs-list'
@@ -631,6 +632,27 @@ async function searchProject(
   if (side) params.set('side', side)
   if (typeof args.limit === 'number') params.set('limit', String(args.limit))
   return runRead(env, token, `${encodeURIComponent(projectId)}/search?${params.toString()}`)
+}
+
+// Omnilingual ASR spec §7. Argument marshalling only: the REST route owns the
+// gate, windowing and the hop to auth-worker's shared billing path.
+async function runTranscription(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+  status: boolean,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  const { projectId: _omit, ...body } = args
+  const req = (env.mcpRequest ?? makeRequest)(
+    `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/transcriptions${status ? '/status' : ''}`,
+    { method: 'POST', headers: { ...bearer(token), 'Content-Type': 'application/json', ...MCP_CHANNEL_HEADER }, body: JSON.stringify(body) },
+  )
+  const res = await handleExternalTranscriptionRequest(req, env)
+  if (!res) return fail('not_found', 'transcription route did not match')
+  if (!res.ok) return delegatedError(res)
+  return ok(await res.json())
 }
 
 // AQU-1232: translation-memory retrieval. Same delegation shape as
@@ -1376,6 +1398,10 @@ export async function callTool(
       return getSkillTool(args)
     case 'search_project':
       return searchProject(env, token, args)
+    case 'transcribe_audio':
+      return runTranscription(env, token, args, false)
+    case 'transcription_status':
+      return runTranscription(env, token, args, true)
     case 'find_similar_cells':
       return findSimilarCells(env, token, args)
     case 'search_projects':

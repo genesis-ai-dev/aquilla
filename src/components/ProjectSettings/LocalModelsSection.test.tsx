@@ -44,6 +44,12 @@ it("persists the local choice for this account and lets the user load Whisper", 
   await user.click(screen.getByRole("radio", { name: /Aquilla hosted/ }))
   expect(getTranscriptionProvider("alice")).toBe("hosted")
 })
+it("shows a single loading spinner, on the action button", () => {
+  statuses.set("whisper", { kind: "loading" })
+  render(content())
+  expect(screen.getAllByRole("status", { name: "Loading" })).toHaveLength(1)
+  expect(screen.getByRole("button", { name: /Loading…/ })).toBeDisabled()
+})
 it("describes Whisper with the shared consent copy", () => {
   render(content())
   expect(screen.getByText(/after you save a recording/i)).toBeInTheDocument()

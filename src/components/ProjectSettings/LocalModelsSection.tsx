@@ -214,14 +214,10 @@ function StatusBadge({
       </Badge>
     )
   }
-  if (status.kind === "downloading") {
-    return (
-      <Badge variant="secondary">
-        <Spinner data-icon="inline-start" />
-        {t("onboarding.checklist.aiModels.statusDownloading")}
-      </Badge>
-    )
-  }
+  // Download and memory-load already show a spinner on the action button
+  // (and a progress bar while bytes are moving). A second badge spinner
+  // beside the model name just duplicates that.
+  if (status.kind === "loading" || status.kind === "downloading") return null
   return (
     <Badge variant="outline">{t("projectSettings.localModels.notDownloadedBadge", { size: sizeMb })}</Badge>
   )

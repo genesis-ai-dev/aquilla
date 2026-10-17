@@ -751,9 +751,14 @@ export interface EditorTableHandle {
  *  In Audio mode each cell's SOURCE column is replaced with CellVoicePanel —
  *  the full per-line voice controls (character picker, generate, play, make-a-
  *  character) — so this context carries everything that panel needs. */
-/** AQU-1642 follow-up: a press that selects a verse — not one of its play controls. */
-function selectsAudioPlace(target: EventTarget | null): boolean {
-  return !(target instanceof Element && target.closest("[data-place-control]"))
+/**
+ * AQU-1642 follow-up: a press that selects a verse — inside its row, and not on
+ * one of its play controls. A menu the row opens is drawn outside it (⋯ Play
+ * audio's among them), and pressing in one is no choice of verse either.
+ */
+function selectsAudioPlace(row: HTMLElement | null, target: EventTarget | null): boolean {
+  if (!row || !(target instanceof Element) || !row.contains(target)) return false
+  return !target.closest("[data-place-control]")
 }
 
 /** Whether focus arrived by keyboard. Old engines that lack the selector say no. */
@@ -7507,7 +7512,7 @@ function EditorRow({
     // click has already selected it, and focus put back by a closing dialog
     // is no choice of the person's.
     const from = e.relatedTarget as Node | null
-    if (audioPlace && !(from && rowRef.current?.contains(from)) && selectsAudioPlace(e.target) && isFocusVisible(e.target)) {
+    if (audioPlace && !(from && rowRef.current?.contains(from)) && selectsAudioPlace(rowRef.current, e.target) && isFocusVisible(e.target)) {
       audioPlace.select(cell.id)
     }
   }
@@ -7517,7 +7522,7 @@ function EditorRow({
   // starts it from the top. A Cmd/Ctrl-click is multi-select, not this.
   const handleRowPointerDownCapture = (e: React.PointerEvent) => {
     if (!audioPlace || e.button !== 0 || e.metaKey || e.ctrlKey) return
-    if (selectsAudioPlace(e.target)) audioPlace.select(cell.id)
+    if (selectsAudioPlace(rowRef.current, e.target)) audioPlace.select(cell.id)
   }
   const handleRowBlurCapture = (e: React.FocusEvent) => {
     const next = e.relatedTarget as Node | null

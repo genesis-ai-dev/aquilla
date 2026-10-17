@@ -593,53 +593,59 @@ export function CellVoicePanel({
     )
     return (
       <div className="min-w-0" dir="ltr" data-voice-card="">
-        <TakeWaveform
-          controller={audio}
-          audioId={playableId}
-          kept={kept}
-          height={56}
-          missingAction={missingGenerate}
-          // A source section wears the lighter rung, as the source row's own
-          // chips do; a take the dub track's (or its own track's) colour.
-          kind={isSourceClip || isGenerated ? "generated" : "take"}
-          trackVars={trackVars}
-          strategy={project.audioMediaStrategy ?? "lazy"}
-          trimEditable={!isSourceClip && canEdit}
-          {...(pieceLimits ? { trimLimits: pieceLimits } : {})}
-          onCommitTrim={commitTrim}
-          run={run}
-          className="voice-card-wave"
-          testId="voice-card-waveform"
-        >
-          <span className="pointer-events-none absolute bottom-1 left-2 z-10 flex items-center gap-1">
-            <TakeTimeReadout
-              currentTime={run?.sec != null && !audio.isPlaying ? run.sec : currentTime}
-              duration={duration}
-              kept={kept}
-              testId="voice-card-time"
-            />
-            {voiceDiffers && (
-              <AppTooltip content={takeVoiceTip}>
-                <span
-                  data-wave-overlay=""
-                  data-testid="voice-card-take-voice"
-                  data-tone={pillOnAmber ? "blue" : "amber"}
-                  className={cn(
-                    "pointer-events-auto flex h-4 items-center rounded px-1.5 text-[10px] font-semibold ring-1 ring-inset",
-                    // A see-through fill, so the take shows through it (Sam).
-                    pillOnAmber
-                      ? "bg-blue-500/30 text-blue-800 ring-blue-600/60 dark:bg-blue-400/30 dark:text-blue-100 dark:ring-blue-400/60"
-                      : "bg-amber-400/45 text-amber-800 ring-amber-600/60 dark:bg-amber-400/30 dark:text-amber-100 dark:ring-amber-400/60",
-                    WAVE_OVERLAY_CLASS,
-                  )}
-                >
-                  <span aria-hidden>{takeVoiceName ?? t("editor.voice.removedVoice")}</span>
-                  <span className="sr-only">{takeVoiceTip}</span>
-                </span>
-              </AppTooltip>
-            )}
-          </span>
-        </TakeWaveform>
+        {/* AQU-1642 follow-up: the waveform is a play control — its button
+            and a click along it set the place to play from, so pressing it
+            never counts as selecting the verse (which sends the place to the
+            verse's start). */}
+        <div data-place-control="">
+          <TakeWaveform
+            controller={audio}
+            audioId={playableId}
+            kept={kept}
+            height={56}
+            missingAction={missingGenerate}
+            // A source section wears the lighter rung, as the source row's own
+            // chips do; a take the dub track's (or its own track's) colour.
+            kind={isSourceClip || isGenerated ? "generated" : "take"}
+            trackVars={trackVars}
+            strategy={project.audioMediaStrategy ?? "lazy"}
+            trimEditable={!isSourceClip && canEdit}
+            {...(pieceLimits ? { trimLimits: pieceLimits } : {})}
+            onCommitTrim={commitTrim}
+            run={run}
+            className="voice-card-wave"
+            testId="voice-card-waveform"
+          >
+            <span className="pointer-events-none absolute bottom-1 left-2 z-10 flex items-center gap-1">
+              <TakeTimeReadout
+                currentTime={run?.sec != null && !audio.isPlaying ? run.sec : currentTime}
+                duration={duration}
+                kept={kept}
+                testId="voice-card-time"
+              />
+              {voiceDiffers && (
+                <AppTooltip content={takeVoiceTip}>
+                  <span
+                    data-wave-overlay=""
+                    data-testid="voice-card-take-voice"
+                    data-tone={pillOnAmber ? "blue" : "amber"}
+                    className={cn(
+                      "pointer-events-auto flex h-4 items-center rounded px-1.5 text-[10px] font-semibold ring-1 ring-inset",
+                      // A see-through fill, so the take shows through it (Sam).
+                      pillOnAmber
+                        ? "bg-blue-500/30 text-blue-800 ring-blue-600/60 dark:bg-blue-400/30 dark:text-blue-100 dark:ring-blue-400/60"
+                        : "bg-amber-400/45 text-amber-800 ring-amber-600/60 dark:bg-amber-400/30 dark:text-amber-100 dark:ring-amber-400/60",
+                      WAVE_OVERLAY_CLASS,
+                    )}
+                  >
+                    <span aria-hidden>{takeVoiceName ?? t("editor.voice.removedVoice")}</span>
+                    <span className="sr-only">{takeVoiceTip}</span>
+                  </span>
+                </AppTooltip>
+              )}
+            </span>
+          </TakeWaveform>
+        </div>
         {row(
           <>
             {canEdit && changeBlocker !== "no-take" && (

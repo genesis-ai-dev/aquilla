@@ -174,7 +174,7 @@ enabled = true
 [env.production]
 name = "aquilla-sync-worker"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
-routes = ["api.aquilla.app/sync/*"]
+routes = ["api.aquilla.app/sync/*", "api.aquilla.app/robots.txt"]
 
 [env.production.build]
 command = "bash ../scripts/verify-deploy-branch.sh release"
@@ -297,7 +297,7 @@ dead_letter_queue = "aquilla-side-effects-dlq"
 [env.development]
 name = "aquilla-sync-worker-dev"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
-routes = ["api.dev.aquilla.app/sync/*"]
+routes = ["api.dev.aquilla.app/sync/*", "api.dev.aquilla.app/robots.txt"]
 
 # See top-level [placement] — keep env blocks in sync (they don't inherit it).
 [env.development.placement]

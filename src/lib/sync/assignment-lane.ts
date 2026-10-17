@@ -60,6 +60,12 @@ export interface AssignmentLaneItem {
 export interface AssignLaneOption {
   legacyTag: string
   label: string
+  /**
+   * AQU-1994: the lane row's id, which is what a lane GRANT names. Optional
+   * because the portfolio's lane rows predate it on an older server — an
+   * option without one cannot be judged against a staffing set and is kept.
+   */
+  laneId?: string
 }
 
 /**
@@ -77,7 +83,35 @@ export function assignLaneOptions(
   return (rows ?? [])
     .filter((row) => row.role !== "source" && row.legacyTag !== null && !row.archivedAt)
     .sort((a, b) => (a.position ?? 0) - (b.position ?? 0) || a.id.localeCompare(b.id))
-    .map((row) => ({ legacyTag: row.legacyTag ?? "", label: laneOptionLabel(row, fallback) }))
+    .map((row) => ({
+      legacyTag: row.legacyTag ?? "",
+      label: laneOptionLabel(row, fallback),
+      laneId: row.id,
+    }))
+}
+
+/**
+ * AQU-1994: the lane options at least one person on the project is on.
+ *
+ * `staffedLaneIds` is `null`/`undefined` when the server did not say — an
+ * older server, a caller below project lead, a project with no lane rows, or
+ * a failed read. Unknown is NOT "nobody is staffed", so the list is returned
+ * untouched. A known set narrows to the lanes it names; an option with no
+ * `laneId` is kept, since staffing cannot speak to a lane it cannot identify.
+ *
+ * Narrowing is by lane id, not by tag: two lanes can share a legacy tag, and
+ * only one of them may be staffed.
+ */
+export function lanesStaffedBy(
+  lanes: readonly AssignLaneOption[],
+  staffedLaneIds: readonly string[] | ReadonlySet<string> | null | undefined,
+): readonly AssignLaneOption[] {
+  if (staffedLaneIds == null) return lanes
+  const staffed =
+    staffedLaneIds instanceof Set
+      ? (staffedLaneIds as ReadonlySet<string>)
+      : new Set(staffedLaneIds as readonly string[])
+  return lanes.filter((lane) => lane.laneId == null || staffed.has(lane.laneId))
 }
 
 /**
@@ -93,6 +127,15 @@ export function assignLaneOptions(
  * first, then each of `targetLanes` — which on a project made since AQU-1594
  * offered a "Default language" the project does not have: chosen, it saved an
  * assignment that belongs to no lane, whose progress always reads 0.
+ *
+ * AQU-1994: `staffedLaneIds` narrows the project's own lanes to the ones at
+ * least one person on the project is on, so a manager cannot route work to a
+ * language nobody has access to. It applies only to the `lanes` branch, where
+ * every option knows its lane id — the legacy `targetLanes` shape has no ids
+ * to match a grant against. `null`/`undefined` means the server did not say,
+ * which is NOT "nobody": the full list stands. A known set that matches
+ * nothing narrows to zero options, and an assign surface must refuse rather
+ * than offer lanes no one can work in.
  */
 export function buildLaneItems(input: {
   lanes?: readonly AssignLaneOption[] | null
@@ -101,14 +144,16 @@ export function buildLaneItems(input: {
   defaultLaneLabel?: string | null
   defaultLaneFallback: string
   allowedTags?: readonly string[] | null
+  staffedLaneIds?: readonly string[] | ReadonlySet<string> | null
 }): AssignmentLaneItem[] {
   const extra = (input.targetLanes ?? []).filter((lane) => !isDefaultLaneValue(lane))
   const defaultLabel =
     input.laneLabels?.[""]?.trim() ||
     input.defaultLaneLabel?.trim() ||
     input.defaultLaneFallback
-  const all: AssignmentLaneItem[] = input.lanes?.length
-    ? input.lanes.map((lane) => ({ value: selectValueForLane(lane.legacyTag), label: lane.label }))
+  const laneRows = input.lanes?.length ? lanesStaffedBy(input.lanes, input.staffedLaneIds) : null
+  const all: AssignmentLaneItem[] = laneRows
+    ? laneRows.map((lane) => ({ value: selectValueForLane(lane.legacyTag), label: lane.label }))
     : [
         { value: DEFAULT_LANE_SELECT_VALUE, label: defaultLabel },
         ...extra.map((lane) => ({

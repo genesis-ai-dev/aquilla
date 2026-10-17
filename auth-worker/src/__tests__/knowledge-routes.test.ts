@@ -541,4 +541,78 @@ describe("knowledge routes — reindex", () => {
       expect(row?.index_status).toBe("ready")
     })
   })
+
+  // AQU-2002: "re-index is idempotent". The claim is the UPDATE itself, so a
+  // second request for a job already in flight starts no duplicate and — this
+  // is the part that bit — does not reset the staleness clock out from under
+  // the running job.
+  it("a reindex while a job is already in flight is a no-op, not a second job", async () => {
+    await seedUser(1, "owner")
+    await seedProject(PROJECT, 1)
+    const jwt = await jwtFor("owner")
+    stubIndexingFetch()
+    const bucket = new FakeBucket()
+
+    const uploadRes = await uploadDoc(
+      PROJECT, jwt, new TextEncoder().encode("# x\ny"), "a.md", bucket, { OPENROUTER_API_KEY: "k" },
+    )
+    const { doc } = (await uploadRes.json()) as { doc: { id: string } }
+
+    // Where a live job leaves the row: pending, written just now.
+    await env.AQUILLA_PG.prepare(
+      `UPDATE knowledge_docs SET index_status = 'pending', updated_at = now() WHERE id = ?`,
+    ).bind(doc.id).run()
+    const before = await env.AQUILLA_PG.prepare(
+      "SELECT updated_at FROM knowledge_docs WHERE id = ?",
+    ).bind(doc.id).first<{ updated_at: string }>()
+
+    const res = await app.request(
+      `/api/v2/projects/${PROJECT}/knowledge/${doc.id}/reindex`,
+      { method: "POST", headers: authHeader(jwt) },
+      testEnvWith(bucket, { OPENROUTER_API_KEY: "k" }),
+    )
+
+    expect(res.status).toBe(202)
+    expect(await res.json()).toEqual({ ok: true, alreadyIndexing: true })
+    const after = await env.AQUILLA_PG.prepare(
+      "SELECT index_status, updated_at FROM knowledge_docs WHERE id = ?",
+    ).bind(doc.id).first<{ index_status: string; updated_at: string }>()
+    expect(after?.index_status).toBe("pending")
+    // (PGlite hands back a Date where the live shim hands back a string.)
+    expect(String(after?.updated_at)).toBe(String(before?.updated_at))
+  })
+
+  it("retrying a doc clears the reason the last run left behind (AQU-2002)", async () => {
+    await seedUser(1, "owner")
+    await seedProject(PROJECT, 1)
+    const jwt = await jwtFor("owner")
+    stubIndexingFetch()
+    const bucket = new FakeBucket()
+
+    const uploadRes = await uploadDoc(
+      PROJECT, jwt, new TextEncoder().encode("# x\ny"), "a.md", bucket, { OPENROUTER_API_KEY: "k" },
+    )
+    const { doc } = (await uploadRes.json()) as { doc: { id: string } }
+    await env.AQUILLA_PG.prepare(
+      `UPDATE knowledge_docs
+          SET index_status = 'ready', index_error = 'The summarizing model returned HTTP 402.'
+        WHERE id = ?`,
+    ).bind(doc.id).run()
+
+    const res = await app.request(
+      `/api/v2/projects/${PROJECT}/knowledge/${doc.id}/reindex`,
+      { method: "POST", headers: authHeader(jwt) },
+      testEnvWith(bucket, { OPENROUTER_API_KEY: "k" }),
+    )
+    expect(res.status).toBe(202)
+    expect(await res.json()).toEqual({ ok: true })
+
+    await vi.waitFor(async () => {
+      const row = await env.AQUILLA_PG.prepare(
+        "SELECT index_status, index_error FROM knowledge_docs WHERE id = ?",
+      ).bind(doc.id).first<{ index_status: string; index_error: string | null }>()
+      expect(row?.index_status).toBe("ready")
+      expect(row?.index_error).toBeNull()
+    })
+  })
 })

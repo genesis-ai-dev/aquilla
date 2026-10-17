@@ -21,7 +21,7 @@
 // unchanged (the design pass parked restyling them). Loading is a placeholder
 // shape pulsing where the take will be drawn (2026-10-01).
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { AlertCircle, CloudDownload, CloudOff, Download, RotateCw } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -71,6 +71,11 @@ export interface TakeWaveformProps {
   onRecord?: () => void
   recordLabel?: string
   recordGlyph?: React.ReactNode
+  /**
+   * Replaces the missing-audio sentence. The voice card uses it to offer
+   * Generate on a take whose bytes are gone.
+   */
+  missingAction?: ReactNode
   validation?: "self" | "full" | null
   className?: string
   testId?: string
@@ -92,6 +97,7 @@ export function TakeWaveform({
   onRecord,
   recordLabel,
   recordGlyph,
+  missingAction,
   validation = null,
   className,
   testId,
@@ -221,7 +227,9 @@ export function TakeWaveform({
       {t("audio.error.notAvailableOffline")}
     </span>
   ) : peaksState === "missing" ? (
-    <span role="status" className="text-[10px] font-medium text-muted-foreground">{MISSING_AUDIO_MESSAGE}</span>
+    missingAction ?? (
+      <span role="status" className="text-[10px] font-medium text-muted-foreground">{MISSING_AUDIO_MESSAGE}</span>
+    )
   ) : peaksState === "error" ? (
     <button
       type="button"

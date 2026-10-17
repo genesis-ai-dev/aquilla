@@ -46,6 +46,17 @@ export interface Observed {
 
 export type AdversarialOutcome = Outcome & { diffs: string[]; unmet: string[] }
 
+/**
+ * Two writers on one cell: the focus lock (AD-1) refuses one of them, and a
+ * refused writer made no edit. Only values a writer actually typed must
+ * survive in the cell's history.
+ */
+export const withoutLockedOut = (contract: Contract, lockedOut: string[]): Contract => ({
+  ...contract,
+  required: contract.required.map((req) => req.kind === "history-contains"
+    ? { ...req, values: req.values.filter((value) => !lockedOut.includes(value)) } : req),
+})
+
 const allows = (contract: Contract, change: AllowedChange) =>
   contract.allowed.some((entry) => JSON.stringify(entry) === JSON.stringify(change))
 

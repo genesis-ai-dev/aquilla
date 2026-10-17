@@ -187,6 +187,12 @@ reopen without a *new* `rules.*` orphan.
 
 ## `terminology.*` i18n keys — orphaned by the `TerminologyPage.tsx` deletion (2026-09-21)
 
+> **Status: `terminology.page.*` (16 keys) swept on 2026-10-16** — see that run's entry at
+> the bottom of this file for the proof and the per-slice recipe. **35 of the 51 remain**:
+> `candidates.*` (11), `libraryStats.*` (7), `reviewQueue.*` (6), `importDialog.*` (6),
+> `common.*` (3), `conceptDialog.*` (2), plus the 6 already-orphaned keys listed below.
+> The `page.*` list below is kept as the record of what went; do not re-derive it.
+
 - **Found**: deleting `TerminologyPage.tsx` and the modules only it reached (see the
   component-cleanup entry above) left 65 of the 239 keys in
   `src/lib/i18n/namespaces/terminology.ts` with no reader — **51 since AQU-1337 re-surfaced
@@ -315,8 +321,9 @@ and each needs its own zero-importer re-verification before deletion, since file
   (`scripts/vite-phonemizer-browser.ts`) delegating to
   `src/lib/audio/phonemizer-browser-env.ts`; `vite.config.ts` has no stub alias, and the
   module was debris from the superseded alias-based approach. `pnpm build` stayed green.
-- `src/components/ui/{attachment,item,toggle-group,bar-spinner}.tsx` (537 lines total) —
-  unused shadcn/ui primitives. Deliberately NOT logged as dead code: `src/components/ui/` is
+- `src/components/ui/{attachment,item,bar-spinner}.tsx` — unused shadcn/ui primitives
+  (`toggle-group.tsx` was on this list and is off it: `MediaImportPreviewDialog.tsx`
+  imports it, confirmed by the 2026-10-14 sweep). Deliberately NOT logged as dead code: `src/components/ui/` is
   a vendored primitive library where "added ahead of first use" is normal, and `shadcn add`
   would just re-create them. Only worth touching if a human says the repo prefers a
   strictly-used-only `ui/` directory.
@@ -1977,3 +1984,117 @@ the real rev-1243 Chromium") is now more than advice — step 1 above *measures*
 container has rev 1194/Chromium 141 and the shim is what makes the suite runnable at all, so
 those six failing against a deliberately mismatched browser is the expected outcome, not a
 finding.
+
+## 2026-10-16 — dead-key run: the `terminology.page.*` slice (16 of the queued 51)
+
+**Done this run** (theme 1, dead-code deletion applied to the message catalog; 11 files,
+390 deletions / 5 insertions, no test file touched): the 16 orphaned keys under
+`terminology.page.*`, orphaned by the 2026-09-21 `TerminologyPage.tsx` deletion. This is the
+first of the three slices the 2026-10-07 entry's budget arithmetic prescribed
+(`page.*` / `candidates.*` / the five small prefixes together); the other two are untouched.
+
+- `src/lib/i18n/namespaces/terminology.ts` — 16 entries out of `messages` (22 lines) and 14
+  out of `context.keys` (70 lines). **Two of the 16 — `editConceptTitle` and `deleteConcept`
+  — carry no per-key context entry at all**, which is legitimate (`requiresOwnContextEntry()`
+  exempts a plain label with no placeholder, no `maxLength` and no a11y-name naming pattern),
+  so expect 1 hit for those two and 2 for the rest; a strip script that asserts two hits per
+  key will trip on them.
+  - Two section headers lost every key under them and went with them: `── TerminologyPage.tsx:
+    ConceptRow (main concepts table row) ──` and the 5-line `── TerminologyPage.tsx: tab strip
+    (counted variants …) ──` (whose own text cited three of the deleted keys).
+  - `── TerminologyPage.tsx: main page chrome ──` became `── GlossaryEditor.tsx inside the
+    workspace shell — what is left of the retired TerminologyPage.tsx's own chrome ──`,
+    following the `rules.ts` precedent of re-pointing a header at the live container rather
+    than deleting the provenance. Its two survivors are both live and both that surface:
+    `terminology.page.mergeDuplicatesButton` (`GlossaryEditor.tsx:789`) and
+    `terminology.loadingLabel` (`ProjectWorkspace.tsx:14258`, the Suspense fallback for the
+    lazily-imported `GlossaryEditorContent`).
+  - `terminology.loadingLabel`'s context note claimed it was "Rendered from two places for the
+    same surface — the Terminology page itself and the workspace shell's Suspense fallback".
+    One of those two is the page that was deleted, so the note was reworded to the one
+    remaining caller, keeping the "worded without naming its container" instruction. Exactly
+    the `rules.loadingLabel` edit the 2026-10-07 run made, for the same reason.
+- The nine generated catalogs `src/lib/i18n/messages/{ar,fr,id,ms,my,ru,th,zh-Hans,zh-Hant}.ts`
+  (16 lines each, 15 in `fr` — it never carried `page.conceptsHeading`) and
+  `src/lib/i18n/source-hashes.json` (143 hash entries across the nine locales). Mandatory, not
+  optional: `Catalog` is `Partial<Record<MessageKey, …>>`, so a key dropped from the base
+  namespace is an excess-property `tsc` error in every catalog still carrying it.
+- **`duplicate-exceptions.ts` was NOT touched, and that is a finding, not an omission** — see
+  the simulation below. The four exception-carrying orphans the old entry names
+  (`libraryStats.enforcedLabel`, `libraryStats.infringedLabel`,
+  `conceptDialog.renderingPlaceholder`, `common.statusLabel`) are all in the *third* slice, so
+  the file is this run's problem only if a deleted key was the other half of some pair. None was.
+
+**Proof** (all of it run, none argued):
+
+- Orphan status re-verified per key, not per prefix: for each of the 17 `terminology.page.*`
+  keys, a literal grep across `src e2e scripts worker auth-worker/src sync-worker/src
+  agent-worker/src tools parity packages` outside `src/lib/i18n/` — 16 miss, and
+  `page.mergeDuplicatesButton` hits `GlossaryEditor.tsx`, which is why it stayed. No dynamic
+  `` `terminology.…${ `` construction exists anywhere in the repo, so a literal search is
+  sufficient (unchanged from the old entry's finding).
+- **The no-duplicates guards were simulated before the edit**, reusing the 2026-10-07 recipe
+  (a throwaway script re-implementing the three hard assertions against the catalog with the
+  16 keys removed in memory). Result: **none of the 16 strings is in a collision group at
+  all** — the unexcused-duplicate group count is 241 before and 241 after, no exception loses
+  its key, and no exception is left excusing a group that drops below two keys. Re-run against
+  the edited tree afterwards: same 241, 8175 keys. The cheap pre-check is worth keeping for
+  the remaining two slices, where the four real exceptions live.
+- One guard this slice had to check that the `rules.*` run did not: `context.test.ts:78-85`
+  requires every declared screenshot surface to be linked by at least one key's context. None
+  of the 16 entries declares a `screenshot` and the `terminology` namespace's `_context` has
+  none either, so no surface lost its last linker (verified in the same simulation).
+- `source-hashes.json` was rewritten with Python's `json.dumps(…, indent=2,
+  ensure_ascii=False) + "\n"`, proven byte-identical to the sidecar's own writer
+  (`scripts/i18n-catalog.ts:117`, `JSON.stringify(all, null, 2) + "\n"`) by a no-op round-trip
+  on the untouched 3,344,352-byte file before any key was dropped. The diff is 143 deleted
+  lines and zero added (`git diff --numstat` → `0 143`).
+- `npx tsc -b` green, `pnpm i18n:check` green (**8175 keys covered, was 8191** — exactly 16
+  fewer), the 15-file `src/lib/i18n` suite 193/193 green, then the full gate below.
+
+### Budget: 11 files / 390 lines, and the per-key arithmetic is now measured twice
+
+Against the stated ≤8 files / ≤300 lines. Same structural overage the 2026-10-07 entry
+predicted and for the same reason — a single i18n key costs a line in 11 files — but the slice
+worked: 390 lines against that run's 617, and the three-way split it prescribed is vindicated,
+so the two remaining slices should go the same way. Measured cost per key in this namespace is
+**~24 lines** (the context entries are multi-line prose), not the 11 the `rules.*` run saw, so
+`candidates.*` (11 keys) should land near ~270 lines and the five-prefix slice (24 keys) will
+likely exceed this one.
+
+### Smoke 2026-10-16: 93/101 — the documented six, plus a NEW pre-existing flake, A/B'd
+
+`E2E_PG_ADMIN_URL=… npx tsx scripts/e2e-shard.ts 1 -- smoke.spec`: **93 passed, 8 failed,
+21.2m.** Six are the standing Chromium-revision-gap media set, at their current line numbers:
+`import-and-edit.smoke.spec.ts:177`, `import-and-edit.smoke.spec.ts:338` × 3 (the YouTube
+srt/vtt/sbv caption exports — was `:333`), and `import-media-captions.smoke.spec.ts:132` × 2.
+The 2026-10-14 container recipe (the rev-1243 shim, Postgres + the `aquilla` role, the three
+workers' `npm ci --legacy-peer-deps`) worked verbatim and nothing else was needed.
+
+**The other two are new to this ledger and are NOT this diff** —
+`collab/commit-chain-linear.smoke.spec.ts:155` ("quick re-edit after Tab / Shift+Tab chains on
+the first save (already translated verse)", `readTargetText` polls `""` instead of
+`"QUICK-A, corrected"` for 10s) and `:321` ("a second tab of the same user sees the first tab's
+commit and chains on it"). A/B'd as a single-spec shard in the same container rather than
+assumed:
+
+| arm | result |
+| --- | --- |
+| the diff `git stash`ed (pristine `dev`) | **2 failed / 8 passed**, 3.6m — `:66` and `:155` |
+| the diff in place | **10 passed**, 2.8m |
+
+So the pristine arm failed *harder* than the changed one, and the second failing test moved
+(`:66` pristine vs `:321` in the full run) while `:155` is common to both — an order/timing
+instability in that spec on trunk, not a regression. It cannot be this diff in any case: the
+16 keys had no reader, and removing an unused catalog key cannot reach the commit chain.
+**Worth a ticket** as a pre-existing flake, same family as issue
+[#410](https://github.com/genesis-ai-dev/aquilla/issues/410) but on the Playwright side.
+**Expected figure in this container is therefore 93-95/101**: the six media failures always,
+plus whatever `commit-chain-linear` does that run.
+
+**One trap this run paid for, worth the line**: `pkill -9 -f wrangler` matches the agent's own
+shell, whose command line contains the word, and kills it mid-chain — the `git stash pop` after
+it silently never ran. Match on `workerd` (or `pgrep`-then-`kill` by pid) and never put
+`wrangler` in a `pkill -f` pattern from a shell whose own argv mentions it. Note also that `ss`
+is still absent in this container (2026-10-14 finding); a 5-line Python `connect_ex` loop over
+`9787/9788/6173/10456/10460` is the portable replacement for the stale-port poll.

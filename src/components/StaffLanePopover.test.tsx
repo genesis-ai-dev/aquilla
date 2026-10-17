@@ -7,19 +7,26 @@
 //   - Existing-member: if the picked person already holds >= the picked
 //     role, the POST membership call is skipped (never a downgrade) but the
 //     scope PUT still runs.
-//   - Lead path: "Add as lead (unscoped)" issues membership at project_lead
-//     and never calls the scopes PUT at all (leads can't be scoped).
+//   - AQU-2004: there is no lead path here at all — no "Leads see all
+//     languages" note, no "Add as lead" button, and no catalog in any locale
+//     still carrying those retired messages.
 //   - Graceful handling of the server's "leads unscopable" 400: if the scope
 //     PUT is rejected because the target's effective role is already lead+,
 //     the popover reports success ("already leads … no lane scope needed"),
 //     not an error.
+//   - AQU-1998 Remove: the popover lists who is already scoped to the lane and
+//     takes one of them off it — their other lanes and file limits written
+//     through untouched, leads never listed, and the person's LAST lane
+//     guarded (an empty lane list means every lane, so that removal would
+//     widen their access).
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import type { ColumnDef } from "@tanstack/react-table"
 import { DataTable } from "@/components/ui/data-table"
 import { StaffLanePopover } from "./StaffLanePopover"
+import { CATALOGS } from "@/lib/i18n/messages"
 
 // The popover links out to the project's invite page (AQU-607), so every
 // render needs a Router in context.
@@ -270,22 +277,39 @@ describe("StaffLanePopover", () => {
     expect(mockAddProjectMember).not.toHaveBeenCalled()
   })
 
-  it("lead path: 'Add as lead (unscoped)' POSTs project_lead membership and never PUTs scopes", async () => {
+  // AQU-2004 — the popover used to end in a dashed box promising "Leads see
+  // all languages" beside an "Add as lead — every lane" link. Both claims died
+  // with AQU-1813 (a lead sees only the lanes they are granted), and the link
+  // never granted every lane. The lane control must stay lane-scoped: no lead
+  // note, no lead button, and no path from here to a project_lead membership.
+  it("offers no lead path once a person is picked (AQU-2004)", async () => {
     renderPopover()
     openPopover()
     pickMaria()
 
-    fireEvent.click(screen.getByRole("button", { name: /add as lead — every lane/i }))
-
+    const popover = screen.getByTestId("staff-lane-popover")
+    expect(popover).not.toHaveTextContent(/broader access|see all languages/i)
+    expect(screen.queryByRole("button", { name: /as lead/i })).not.toBeInTheDocument()
+    // The lane-scoped add is the only submit left, and it still works.
+    fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
     await waitFor(() => expect(mockAddProjectMember).toHaveBeenCalledTimes(1))
-    expect(mockAddProjectMember).toHaveBeenCalledWith("jwt-pm", "proj-1", "maria", 500)
-    expect(mockPutMemberScopes).not.toHaveBeenCalled()
+    expect(mockAddProjectMember).toHaveBeenCalledWith("jwt-pm", "proj-1", "maria", 300, {
+      scopeLanes: ["es"],
+    })
+  })
 
-    await waitFor(() =>
-      expect(screen.getByTestId("grant-scope-result")).toHaveTextContent(
-        /maria will join as a project lead on mark — every lane/i,
-      ),
+  // Same guard one layer down: a translated note or lead link would reappear
+  // in a non-English UI if any catalog still carried the retired keys.
+  it("carries no lead-note or lead-button message in any locale (AQU-2004)", () => {
+    const retired = [
+      "org.staffLanePopover.broaderAccessNote",
+      "org.staffLanePopover.addAsLeadButton",
+      "org.grantScope.action.addAsLead",
+    ]
+    const survivors = Object.entries(CATALOGS).flatMap(([locale, catalog]) =>
+      retired.filter((key) => key in catalog).map((key) => `${locale}: ${key}`),
     )
+    expect(survivors).toEqual([])
   })
 
   it("handles the server's 'leads unscopable' 400 gracefully as a success outcome", async () => {
@@ -431,6 +455,228 @@ describe("StaffLanePopover", () => {
 
       expect(screen.queryByTestId("staff-lane-roster-blocked")).not.toBeInTheDocument()
       expect(screen.getByText(/no one in your organization yet/i)).toBeInTheDocument()
+    })
+  })
+
+  // AQU-1998 — the undo half of the control. Staffing someone onto a lane was
+  // one gesture; taking them off meant the org Members → Matrix tab, which is
+  // nowhere near the lane and has a trap of its own (unticking the last chip
+  // widens the person to every lane). Both halves now live in this popover.
+  describe("removing a person from the lane (AQU-1998)", () => {
+    const LEAD = { level: 500, name: "project_lead", source: "override" as const }
+    const CONTRIB = { level: 400, name: "contributor", source: "override" as const }
+
+    /** Scope rows keyed by user id, for the per-member reads the list makes. */
+    function scopesByUser(map: Record<number, Scope[]>) {
+      mockFetchMemberScopes.mockImplementation(async (_jwt, _projectId, userId) =>
+        map[userId as number] ?? [],
+      )
+    }
+
+    function staffRoster() {
+      mockProjectMembers = [
+        { userId: 10, username: "maria", role: CONTRIB, secondarySources: [] },
+        { userId: 11, username: "mark", role: CONTRIB, secondarySources: [] },
+        { userId: 12, username: "wendi", role: LEAD, secondarySources: [] },
+      ]
+    }
+
+    it("lists only the people scoped to this lane, and never a lead", async () => {
+      staffRoster()
+      scopesByUser({
+        10: [{ kind: "lane", value: "es" }, { kind: "lane", value: "fr" }],
+        11: [{ kind: "lane", value: "fr" }],
+        12: [],
+      })
+
+      renderPopover()
+      openPopover()
+
+      await waitFor(() => expect(screen.getByTestId("staff-lane-staffed-row-10")).toBeInTheDocument())
+      // mark is on French only, wendi leads the project — neither is on this lane.
+      expect(screen.queryByTestId("staff-lane-staffed-row-11")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("staff-lane-staffed-row-12")).not.toBeInTheDocument()
+      // A lead is never even asked about: they cannot hold a lane scope.
+      expect(mockFetchMemberScopes).not.toHaveBeenCalledWith("jwt-pm", "proj-1", 12)
+    })
+
+    it("says so when nobody is staffed on the lane yet", async () => {
+      staffRoster()
+      scopesByUser({ 10: [{ kind: "lane", value: "fr" }], 11: [] })
+
+      renderPopover()
+      openPopover()
+
+      await waitFor(() =>
+        expect(screen.getByTestId("staff-lane-staffed-empty")).toBeInTheDocument(),
+      )
+    })
+
+    it("Remove takes only this lane off, leaving other lanes and file limits intact", async () => {
+      staffRoster()
+      scopesByUser({
+        10: [
+          { kind: "lane", value: "es" },
+          { kind: "lane", value: "fr" },
+          { kind: "file", value: "GEN" },
+        ],
+        11: [],
+      })
+
+      renderPopover()
+      openPopover()
+      await waitFor(() => expect(screen.getByTestId("staff-lane-remove-10")).toBeEnabled())
+      fireEvent.click(screen.getByTestId("staff-lane-remove-10"))
+
+      await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
+      expect(mockPutMemberScopes).toHaveBeenCalledWith("jwt-pm", "proj-1", 10, [
+        { kind: "lane", value: "fr" },
+        { kind: "file", value: "GEN" },
+      ])
+      // The row goes once the save lands, with no reload.
+      await waitFor(() =>
+        expect(screen.queryByTestId("staff-lane-staffed-row-10")).not.toBeInTheDocument(),
+      )
+      expect(mockRefreshProjectMembers).toHaveBeenCalled()
+    })
+
+    // AQU-1607: a scope row written before lane ids holds the language tag, so
+    // a lane staffed under the old spelling must still be removable by a
+    // caller that knows the lane's id.
+    it("removes a legacy tag row for this lane when the caller passes a lane id", async () => {
+      staffRoster()
+      scopesByUser({
+        10: [{ kind: "lane", value: "es" }, { kind: "lane", value: "ln-fr" }],
+        11: [],
+      })
+
+      renderPopover(1, "ln-es")
+      openPopover()
+      await waitFor(() => expect(screen.getByTestId("staff-lane-remove-10")).toBeEnabled())
+      fireEvent.click(screen.getByTestId("staff-lane-remove-10"))
+
+      await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
+      expect(mockPutMemberScopes).toHaveBeenCalledWith("jwt-pm", "proj-1", 10, [
+        { kind: "lane", value: "ln-fr" },
+      ])
+    })
+
+    // The trap the members matrix still falls into: an empty lane list means
+    // EVERY lane, so removing someone's only lane grants access instead of
+    // revoking it. Nothing is saved, and the note names where to go instead.
+    it("refuses the person's last lane, pointing at Project Settings → Team members", async () => {
+      staffRoster()
+      scopesByUser({ 10: [{ kind: "lane", value: "es" }], 11: [] })
+
+      renderPopover()
+      openPopover()
+
+      await waitFor(() => expect(screen.getByTestId("staff-lane-remove-10")).toBeDisabled())
+      const note = screen.getByTestId("staff-lane-last-lane-note-10")
+      expect(note).toHaveTextContent(/only language/i)
+      expect(within(note).getByRole("link", { name: /team members/i })).toHaveAttribute(
+        "href",
+        "/project/proj-1/settings/members",
+      )
+      fireEvent.click(screen.getByTestId("staff-lane-remove-10"))
+      expect(mockPutMemberScopes).not.toHaveBeenCalled()
+    })
+
+    // A replace-set PUT built from the rows loaded when the popover opened
+    // would silently restore a lane or file limit changed since, so the
+    // member's scopes are re-read at the moment of the removal.
+    it("re-reads the member's scopes before the PUT instead of trusting the open-time read", async () => {
+      staffRoster()
+      scopesByUser({
+        10: [{ kind: "lane", value: "es" }, { kind: "lane", value: "fr" }],
+        11: [],
+      })
+
+      renderPopover()
+      openPopover()
+      await waitFor(() => expect(screen.getByTestId("staff-lane-remove-10")).toBeEnabled())
+
+      // Someone granted maria a third lane while the popover sat open.
+      scopesByUser({
+        10: [
+          { kind: "lane", value: "es" },
+          { kind: "lane", value: "fr" },
+          { kind: "lane", value: "sw" },
+        ],
+      })
+      fireEvent.click(screen.getByTestId("staff-lane-remove-10"))
+
+      await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
+      expect(mockPutMemberScopes).toHaveBeenCalledWith("jwt-pm", "proj-1", 10, [
+        { kind: "lane", value: "fr" },
+        { kind: "lane", value: "sw" },
+      ])
+    })
+
+    it("refuses the removal when the re-read shows this is now their only lane", async () => {
+      staffRoster()
+      scopesByUser({
+        10: [{ kind: "lane", value: "es" }, { kind: "lane", value: "fr" }],
+        11: [],
+      })
+
+      renderPopover()
+      openPopover()
+      await waitFor(() => expect(screen.getByTestId("staff-lane-remove-10")).toBeEnabled())
+
+      // French was taken off her elsewhere; this lane is now the only one.
+      scopesByUser({ 10: [{ kind: "lane", value: "es" }] })
+      fireEvent.click(screen.getByTestId("staff-lane-remove-10"))
+
+      await waitFor(() =>
+        expect(screen.getByTestId("staff-lane-remove-error-10")).toHaveTextContent(
+          /nothing was saved/i,
+        ),
+      )
+      expect(mockPutMemberScopes).not.toHaveBeenCalled()
+      expect(screen.getByTestId("staff-lane-staffed-row-10")).toBeInTheDocument()
+      // And the guard now holds the button, so a second press can't retry it.
+      expect(screen.getByTestId("staff-lane-remove-10")).toBeDisabled()
+    })
+
+    it("a failed save shows the error and leaves the person listed", async () => {
+      staffRoster()
+      scopesByUser({
+        10: [{ kind: "lane", value: "es" }, { kind: "lane", value: "fr" }],
+        11: [],
+      })
+      mockPutMemberScopes.mockRejectedValue(new Error("Failed to fetch"))
+
+      renderPopover()
+      openPopover()
+      await waitFor(() => expect(screen.getByTestId("staff-lane-remove-10")).toBeEnabled())
+      fireEvent.click(screen.getByTestId("staff-lane-remove-10"))
+
+      await waitFor(() =>
+        expect(screen.getByTestId("staff-lane-remove-error-10")).toHaveTextContent(
+          /failed to fetch/i,
+        ),
+      )
+      // Nothing half-applied: she is still on the lane and still removable.
+      expect(screen.getByTestId("staff-lane-staffed-row-10")).toBeInTheDocument()
+      expect(screen.getByTestId("staff-lane-remove-10")).toBeEnabled()
+    })
+
+    it("the add half still works alongside the list", async () => {
+      staffRoster()
+      scopesByUser({ 10: [{ kind: "lane", value: "es" }], 11: [] })
+
+      renderPopover()
+      openPopover()
+      await waitFor(() => expect(screen.getByTestId("staff-lane-staffed-row-10")).toBeInTheDocument())
+
+      fireEvent.click(screen.getByText("mark"))
+      fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
+
+      await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
+      expect(mockPutMemberScopes).toHaveBeenCalledWith("jwt-pm", "proj-1", 11, [
+        { kind: "lane", value: "es" },
+      ])
     })
   })
 

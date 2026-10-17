@@ -6,6 +6,7 @@ import {
   initialAssignmentLane,
   isDefaultLaneValue,
   laneIdForTag,
+  lanesStaffedBy,
   laneTagForAssignment,
   selectValueForLane,
 } from "./assignment-lane"
@@ -106,8 +107,8 @@ describe("the project's own lanes (AQU-1977)", () => {
       row({ id: "de000001", language: "German", legacyTag: "German", position: 3, archivedAt: "2026-10-01" }),
     ], "Default language")
     expect(options).toEqual([
-      { legacyTag: "Spanish", label: "Spanish" },
-      { legacyTag: "French", label: "French" },
+      { legacyTag: "Spanish", label: "Spanish", laneId: "es000001" },
+      { legacyTag: "French", label: "French", laneId: "fr000001" },
     ])
   })
 
@@ -117,8 +118,8 @@ describe("the project's own lanes (AQU-1977)", () => {
       row({ id: "es000001", language: "Spanish", legacyTag: "es", position: 1 }),
     ], "Default language")
     expect(options).toEqual([
-      { legacyTag: "", label: "Bambara" },
-      { legacyTag: "es", label: "Spanish" },
+      { legacyTag: "", label: "Bambara", laneId: "def00001" },
+      { legacyTag: "es", label: "Spanish", laneId: "es000001" },
     ])
   })
 
@@ -142,5 +143,93 @@ describe("the project's own lanes (AQU-1977)", () => {
       lanes: [{ legacyTag: "", label: "Bambara" }],
       defaultLaneFallback: "Default language",
     })).toEqual([{ value: DEFAULT_LANE_SELECT_VALUE, label: "Bambara" }])
+  })
+})
+
+/**
+ * AQU-1994 — an assign field offers only the lanes someone on the project is
+ * on. The reported case: a project on French, Mandarin Chinese and Swedish
+ * whose people are only on Mandarin Chinese offered all three, so a manager
+ * could route French work to a team with no access to French.
+ *
+ * Pins the three answers that matter: a known staffing set narrows (by lane
+ * ID, because two lanes can share a legacy tag), an unknown one — an older
+ * server, or a caller who may not read staffing — narrows NOTHING, and a
+ * known set matching no lane narrows to zero options rather than falling back
+ * to the legacy "default + targetLanes" shape, which would have re-offered
+ * every lane.
+ */
+describe("lanes someone on the project is on (AQU-1994)", () => {
+  const fr = { legacyTag: "French", label: "French", laneId: "lane-fr" }
+  const zh = { legacyTag: "Mandarin Chinese", label: "Mandarin Chinese", laneId: "lane-zh" }
+  const sv = { legacyTag: "Swedish", label: "Swedish", laneId: "lane-sv" }
+
+  it("keeps only the staffed lanes", () => {
+    expect(lanesStaffedBy([fr, zh, sv], new Set(["lane-zh"]))).toEqual([zh])
+    expect(lanesStaffedBy([fr, zh, sv], ["lane-zh", "lane-fr"])).toEqual([fr, zh])
+  })
+
+  it("treats unknown staffing as 'say nothing', not as 'nobody'", () => {
+    expect(lanesStaffedBy([fr, zh, sv], null)).toEqual([fr, zh, sv])
+    expect(lanesStaffedBy([fr, zh, sv], undefined)).toEqual([fr, zh, sv])
+  })
+
+  it("keeps a lane whose id the server never sent — staffing cannot judge it", () => {
+    const old = { legacyTag: "Swedish", label: "Swedish" }
+    expect(lanesStaffedBy([zh, old], new Set(["lane-zh"]))).toEqual([zh, old])
+  })
+
+  it("narrows by lane id, so one of two lanes sharing a tag can be unstaffed", () => {
+    const zhA = { legacyTag: "Mandarin Chinese", label: "Mandarin (simplified)", laneId: "lane-zh-a" }
+    const zhB = { legacyTag: "Mandarin Chinese", label: "Mandarin (traditional)", laneId: "lane-zh-b" }
+    expect(lanesStaffedBy([zhA, zhB], new Set(["lane-zh-b"]))).toEqual([zhB])
+  })
+
+  it("offers only the staffed lane, and names it rather than listing a dropdown", () => {
+    const items = buildLaneItems({
+      lanes: [fr, zh, sv],
+      defaultLaneFallback: "Default language",
+      staffedLaneIds: new Set(["lane-zh"]),
+    })
+    expect(items).toEqual([{ value: "Mandarin Chinese", label: "Mandarin Chinese" }])
+    // One option is the option: the field names the lane instead of asking.
+    expect(initialAssignmentLane(items, null)).toBe("Mandarin Chinese")
+  })
+
+  it("does not preselect the lane tab the manager arrived from when nobody is on it", () => {
+    const items = buildLaneItems({
+      lanes: [fr, zh, sv],
+      defaultLaneFallback: "Default language",
+      staffedLaneIds: new Set(["lane-zh", "lane-sv"]),
+    })
+    expect(items.map((item) => item.value)).toEqual(["Mandarin Chinese", "Swedish"])
+    expect(initialAssignmentLane(items, "French")).toBeNull()
+    expect(initialAssignmentLane(items, "Swedish")).toBe("Swedish")
+  })
+
+  it("narrows to nothing rather than falling back to every target lane", () => {
+    const items = buildLaneItems({
+      lanes: [fr, zh, sv],
+      // The legacy shape is still on the props; an empty narrowing must not
+      // make buildLaneItems reach for it and re-offer all three lanes.
+      targetLanes: ["French", "Mandarin Chinese", "Swedish"],
+      defaultLaneLabel: "French",
+      defaultLaneFallback: "Default language",
+      staffedLaneIds: new Set<string>(),
+    })
+    expect(items).toEqual([])
+  })
+
+  it("leaves a project with no lane rows alone — there is no grant to read", () => {
+    const items = buildLaneItems({
+      targetLanes: ["Swahili"],
+      defaultLaneLabel: "Bambara",
+      defaultLaneFallback: "Default language",
+      staffedLaneIds: new Set<string>(),
+    })
+    expect(items).toEqual([
+      { value: DEFAULT_LANE_SELECT_VALUE, label: "Bambara" },
+      { value: "Swahili", label: "Swahili" },
+    ])
   })
 })

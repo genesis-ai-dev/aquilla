@@ -9,6 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { fmtShortCalendarDate } from "@/lib/format-date"
 
 const audioCalls: Array<{ fileId: string; selectedAudioId: unknown; attachments: unknown }> = []
 const transcribeCalls: Array<{ cellId: string; fileId: string; language?: string; selectedAudioId?: string; slot?: string; targetLang?: string; askAgain?: boolean }> = []
@@ -457,7 +458,10 @@ describe("the take that plays", () => {
         textAtRecording: "old", textAtRecordingEventId: "e1", latestText: "new", latestTextEventId: "e2", drifted: true,
       },
     })
-    expect(screen.getByTestId("cell-take-recorded")).toHaveTextContent("sam")
+    const stamp = screen.getByTestId("cell-take-recorded")
+    expect(stamp).toHaveTextContent("sam")
+    expect(stamp).toHaveTextContent(fmtShortCalendarDate(Date.parse("2026-09-28T10:00:00Z")))
+    expect(stamp.querySelector("[title]")).toBeNull()
     expect(screen.getByText("Text changed")).toBeInTheDocument()
   })
 

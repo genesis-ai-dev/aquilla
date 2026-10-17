@@ -37,6 +37,11 @@ export const knowledgeBase = defineNamespace({
     "knowledgeBase.status.ready": "Indexed",
     "knowledgeBase.status.failed": "Indexing failed",
     "knowledgeBase.status.stalled": "Indexing stalled",
+    // AQU-2002: a document whose structure was indexed but whose summaries the
+    // model leg could not produce. It is searchable and navigable — "failed"
+    // claimed otherwise, and sent the uploader to a retry button that could
+    // only fail again. The row carries the reason, shown verbatim beneath it.
+    "knowledgeBase.status.partial": "Indexed without summaries",
     "knowledgeBase.open": "View document",
     "knowledgeBase.openOriginal": "Open original",
     "knowledgeBase.reindex": "Try indexing again",

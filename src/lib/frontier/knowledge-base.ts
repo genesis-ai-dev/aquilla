@@ -15,6 +15,17 @@ export interface KnowledgeDocument {
   r2Key: string
   docSummary: string | null
   indexStatus: KnowledgeIndexStatus
+  /**
+   * AQU-2002: why the last indexing run ended where it did, or null when it
+   * had nothing to report.
+   *
+   * Server-authored and shown verbatim (auth-worker's `describeIndexFailure`),
+   * for the same reason `KnowledgeBaseApiError.serverMessage` is: the reason
+   * names the fix, and a status badge on its own does not. A `ready` doc can
+   * carry one too — structure indexed, summaries missing — so this is not
+   * "the error" but "what this run has to say".
+   */
+  indexError: string | null
   createdBy: string
   createdAt: string
   updatedAt: string

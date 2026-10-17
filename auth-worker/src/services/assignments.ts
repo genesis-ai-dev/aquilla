@@ -1125,3 +1125,63 @@ export async function getProjectUnitAssignees(env: Env, projectId: string): Prom
     username: r.username,
   }))
 }
+
+/**
+ * One open assignment held by one member in one lane — what closing that
+ * person's work in the lane will touch (AQU-1999).
+ *
+ * `fileId` routes the `assignment.unassign` event's sync token, exactly as it
+ * does on the org workload row. Rows whose scope resolved to zero cells carry
+ * no file and are left out by `getMemberLaneAssignments`, so every row here is
+ * one the caller can actually close.
+ */
+export interface MemberLaneAssignment {
+  assignmentId: string
+  fileId: string
+  scopeLabel: string
+}
+
+/**
+ * The open assignments one member holds in ONE lane of one project — the
+ * answer the Staff popover needs before it takes someone off a lane
+ * (AQU-1999: removing the lane closes that work, and the confirmation says
+ * how much of it there is).
+ *
+ * `laneId` is a resolved `lanes.id`; the route converts a caller that still
+ * speaks tags (`resolveLaneScopeValue`) so this compares `lane_id` to
+ * `lane_id` like everything else in this service. Open means the same thing
+ * it means in the workload views: neither unassigned nor completed.
+ *
+ * Newest first, matching the org workload view's order.
+ */
+export async function getMemberLaneAssignments(
+  env: Env,
+  projectId: string,
+  userId: number,
+  laneId: string,
+): Promise<MemberLaneAssignment[]> {
+  const rows = await env.AQUILLA_PG.prepare(
+    `SELECT a.assignment_id AS assignment_id,
+            a.scope_label   AS scope_label,
+            (SELECT ac.file_id FROM assignment_member_cells ac
+              WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id
+       FROM assignments a
+      WHERE a.project_id = ? AND a.assignee_user_id = ? AND a.lane_id = ?
+        AND a.unassigned_at IS NULL AND a.completed_at IS NULL
+      ORDER BY a.created_at DESC`,
+  )
+    .bind(projectId, userId, laneId)
+    .all<{ assignment_id: string; scope_label: string; file_id: string | null }>()
+
+  // A scope that resolved to no cells holds no work to stall and offers no
+  // file to route an unassign through, so it is not reported as closable.
+  return (rows.results ?? [])
+    .filter((r): r is { assignment_id: string; scope_label: string; file_id: string } =>
+      r.file_id !== null,
+    )
+    .map((r) => ({
+      assignmentId: r.assignment_id,
+      fileId: r.file_id,
+      scopeLabel: r.scope_label,
+    }))
+}

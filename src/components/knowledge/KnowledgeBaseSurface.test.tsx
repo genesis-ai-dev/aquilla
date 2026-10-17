@@ -52,6 +52,7 @@ function doc(overrides: Partial<KnowledgeDocument> = {}): KnowledgeDocument {
     r2Key: "kb/project/project-1/project-doc",
     docSummary: "A concise style guide.",
     indexStatus: "ready",
+    indexError: null,
     createdBy: "alice",
     createdAt: "2026-08-16T00:00:00.000Z",
     updatedAt: "2026-08-16T00:00:00.000Z",
@@ -218,6 +219,59 @@ describe("KnowledgeBaseSurface", () => {
     await waitFor(() => expect(within(card).getByText("Indexing…")).toBeInTheDocument())
     expect(within(card).queryByRole("button", { name: "Try indexing again" }))
       .not.toBeInTheDocument()
+  })
+
+  // AQU-2002: a doc whose summaries the model leg could not write is indexed —
+  // searchable, navigable — so it must not wear the failure badge. What the
+  // uploader was missing was the reason, which is the only thing that tells
+  // them whether pressing retry can achieve anything.
+  it("reads a doc indexed without summaries as indexed, with the server's reason and a retry", async () => {
+    api.list.mockResolvedValue([
+      doc({
+        id: "degraded-doc",
+        name: "commentary.pdf",
+        docSummary: null,
+        indexStatus: "ready",
+        indexError:
+          "The summarizing model refused the request for billing reasons — " +
+          "the OpenRouter account is out of credit.",
+      }),
+    ])
+
+    render(<KnowledgeBaseSurface scope={{ kind: "project", id: "project-1" }} jwt="jwt" canManage />)
+
+    const card = (await screen.findByText("commentary.pdf")).closest('[data-slot="card"]') as HTMLElement
+    expect(within(card).getByText("Indexed without summaries")).toBeInTheDocument()
+    expect(within(card).queryByText("Indexing failed")).not.toBeInTheDocument()
+    expect(within(card).getByText(/out of credit/)).toBeInTheDocument()
+
+    // The retry is offered, and taking it drops the stale reason with the status.
+    fireEvent.click(within(card).getByRole("button", { name: "Try indexing again" }))
+    await waitFor(() => expect(api.reindex).toHaveBeenCalledWith(
+      { kind: "project", id: "project-1" },
+      "jwt",
+      "degraded-doc",
+    ))
+    await waitFor(() => expect(within(card).getByText("Indexing…")).toBeInTheDocument())
+    expect(within(card).queryByText(/out of credit/)).not.toBeInTheDocument()
+  })
+
+  it("still reads a failed index as a failure, with the reason it reported", async () => {
+    api.list.mockResolvedValue([
+      doc({
+        id: "failed-doc",
+        name: "scan.pdf",
+        docSummary: null,
+        indexStatus: "failed",
+        indexError: "This document has no extractable text, so there is nothing to index.",
+      }),
+    ])
+
+    render(<KnowledgeBaseSurface scope={{ kind: "project", id: "project-1" }} jwt="jwt" canManage />)
+
+    const card = (await screen.findByText("scan.pdf")).closest('[data-slot="card"]') as HTMLElement
+    expect(within(card).getByText("Indexing failed")).toBeInTheDocument()
+    expect(within(card).getByText(/no extractable text/)).toBeInTheDocument()
   })
 
   it("leaves a doc that is still genuinely indexing as pending, with no retry", async () => {

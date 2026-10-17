@@ -41,7 +41,7 @@ export const settings = defineNamespace({
     "settings.transcription.title": "Transcription",
     "settings.transcription.scope":
       "This choice applies to your account in this browser.",
-    "settings.transcription.hosted": "Aquilla hosted Whisper (recommended)",
+    "settings.transcription.hosted": "Aquilla hosted (recommended)",
     "settings.transcription.hostedDescription":
       "Ready immediately. Uses your workspace's AI capacity. No key or download needed.",
     "settings.transcription.local": "Local Whisper in this browser",
@@ -49,6 +49,56 @@ export const settings = defineNamespace({
       "Download Whisper below. Runs on your device without using hosted AI capacity. Speed depends on your device.",
     "settings.transcription.capacityExceeded":
       "Your workspace has reached its AI capacity. Try after the reset, update your plan, or select local Whisper in Preferences → Local models.",
+    // ── Omnilingual ASR: hosted model choice, zero-shot warm-up and batches ──
+    "settings.transcription.model.legend": "Hosted model",
+    "settings.transcription.model.auto": "Automatic",
+    "settings.transcription.model.autoDescription":
+      "Picks the model that knows the project's language: Qwen3-ASR for Chinese, Whisper, then Omnilingual.",
+    "settings.transcription.model.whisper": "Whisper",
+    "settings.transcription.model.whisperDescription": "OpenAI's model. Strong in widely spoken languages.",
+    "settings.transcription.model.qwen": "Qwen3-ASR",
+    "settings.transcription.model.qwenDescription":
+      "Strong in Chinese and its dialects, and lower cost than Whisper.",
+    "settings.transcription.model.omni": "Omnilingual",
+    "settings.transcription.model.omniDescription":
+      "Meta's model for more than 1,600 languages, including many that no other model knows.",
+    "settings.transcription.model.zeroShot": "Omnilingual Zero-Shot",
+    "settings.transcription.model.zeroShotDescription":
+      "Any language — learns from your project's recorded takes. Slower, and uses more credits.",
+    "settings.transcription.model.supports": "Supports {language}",
+    "settings.transcription.model.doesNotSupport": "Does not support {language}",
+    "settings.transcription.model.seeAll": "See all {count} languages",
+    "settings.transcription.model.search": "Search languages",
+    "settings.transcription.model.dialects": "Chinese dialects",
+    "settings.transcription.model.examples": plural({
+      one: "{count} usable example in this project",
+      other: "{count} usable examples in this project",
+    }, "count"),
+    "settings.transcription.zeroShot.warmupTitle": "Starting the zero-shot model — about 1–3 minutes",
+    "settings.transcription.zeroShot.warmupTimeout": "The zero-shot model did not start in time.",
+    "settings.transcription.zeroShot.warmupFailed":
+      "The zero-shot model did not start. Try again, or choose Automatic in Preferences.",
+    "settings.transcription.zeroShot.useAutomatic": "Use automatic",
+    "settings.transcription.zeroShot.noExamples":
+      "Zero-shot needs at least one recorded and transcribed line in this language.",
+    "settings.transcription.zeroShot.useOmniStandard": "Use Omnilingual standard instead",
+    "settings.transcription.zeroShot.disabledByOrg":
+      "Your organization has turned off zero-shot transcription. Aquilla used the automatic model instead.",
+    "settings.transcription.zeroShot.examplesFailed":
+      "Could not load this project's zero-shot examples ({status}). Try again.",
+    "settings.transcription.zeroShot.batchTitle": plural({
+      one: "Transcribe {count} recording with zero-shot?",
+      other: "Transcribe {count} recordings with zero-shot?",
+    }, "count"),
+    "settings.transcription.zeroShot.batchShare": "≈ {percent}% of this week's remaining credits",
+    "settings.transcription.zeroShot.batchCredits": "≈ {credits} for this batch",
+    "settings.transcription.zeroShot.batchConfirm": "Transcribe",
+    "settings.transcription.zeroShot.orgLabel": "Allow zero-shot transcription",
+    "settings.transcription.zeroShot.orgDescription":
+      "Members can choose the Omnilingual Zero-Shot model in their Preferences. It learns a " +
+      "language from the project's own recordings, and uses more credits than the automatic model.",
+    "settings.transcription.zeroShot.orgSaveFailed": "Could not save that setting",
+    "settings.transcription.zeroShot.orgBlocked": "Only organization admins can change this.",
 
     // ── StructuralCellsSection (org settings → security) ── AQU-1083
     "settings.structuralCells.label": "Count headings as translatable content",
@@ -439,6 +489,48 @@ export const settings = defineNamespace({
       screenshot: "project-settings",
     },
     keys: {
+      "settings.transcription.model.supports": {
+        description: "Tick line on a transcription model's row: the model knows the project's language.",
+        placeholders: { language: "The project's language name, e.g. 'Tok Pisin'." },
+      },
+      "settings.transcription.model.doesNotSupport": {
+        description: "Cross line on a transcription model's row: the model does not know the project's language.",
+        placeholders: { language: "The project's language name, e.g. 'Tok Pisin'." },
+      },
+      "settings.transcription.model.seeAll": {
+        description: "Disclosure that opens a searchable list of every language a transcription model knows.",
+        placeholders: { count: "How many languages, a plain number, e.g. '99'." },
+      },
+      "settings.transcription.model.examples": {
+        description:
+          "Under the zero-shot model: how many recorded and transcribed takes in this project it can learn from (at most 10).",
+        placeholders: { count: "A plain number from 0 to 10." },
+      },
+      "settings.transcription.zeroShot.warmupTitle": {
+        description:
+          "Persistent toast title while the zero-shot speech-recognition model starts on the " +
+          "server, shown above a progress bar. The time is an estimate.",
+      },
+      "settings.transcription.zeroShot.examplesFailed": {
+        description: "Error when the project's example recordings for zero-shot transcription fail to load.",
+        placeholders: { status: "The HTTP status code, a plain number (data), e.g. '503'." },
+      },
+      "settings.transcription.zeroShot.batchTitle": {
+        description: "Confirmation toast title before transcribing several recordings with the zero-shot model.",
+        placeholders: { count: "How many recordings the batch will transcribe, a plain number." },
+      },
+      "settings.transcription.zeroShot.batchShare": {
+        description:
+          "Estimated cost of a zero-shot transcription batch, as a share of the organization's " +
+          "credits left this week. '≈' means approximately.",
+        placeholders: { percent: "A whole-number percentage without the % sign, e.g. '12'." },
+      },
+      "settings.transcription.zeroShot.batchCredits": {
+        description:
+          "Estimated cost of a zero-shot transcription batch when the remaining balance is not visible. " +
+          "'≈' means approximately.",
+        placeholders: { credits: "An already-formatted credit amount, e.g. '40 cr'. Not translated." },
+      },
       "settings.localLlm.detectedOne": {
         description:
           "Confirmation shown under the Model field after \"Detect models\" finds exactly " +

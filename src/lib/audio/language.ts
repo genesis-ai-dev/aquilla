@@ -10,7 +10,7 @@
 // Whisper's full supported language set (transformers.js whisper-base).
 // Source: tokenizer.add_prefix_tokens — kept inline here so we don't need
 // a build-time scrape from the model.
-const WHISPER_TWO_LETTER = new Set<string>([
+export const WHISPER_TWO_LETTER = new Set<string>([
   "en", "zh", "de", "es", "ru", "ko", "fr", "ja", "pt", "tr", "pl", "ca",
   "nl", "ar", "sv", "it", "id", "hi", "fi", "vi", "he", "uk", "el", "ms",
   "cs", "ro", "da", "hu", "ta", "no", "th", "ur", "hr", "bg", "lt", "la",

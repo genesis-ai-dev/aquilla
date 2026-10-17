@@ -139,6 +139,60 @@ export async function fetchProjectLaneStaffing(
   }
 }
 
+/**
+ * AQU-1999: one member's OPEN assignments in ONE lane — the work a removal
+ * from that lane is about to close.
+ *
+ * `lane` is the value the removing surface knows the lane by: its id where it
+ * has one, otherwise the legacy tag. The server resolves either and refuses a
+ * value that names two lanes, so this never reports a sibling lane's work.
+ *
+ * `null` means the server did not say (below project lead, an older server, a
+ * failed call) and must NOT be read as "no open assignments": a caller that
+ * closes assignments as part of a removal has to refuse the removal instead,
+ * or it strands exactly the work this read exists to catch.
+ */
+export interface MemberLaneAssignment {
+  assignmentId: string
+  /** Routes the unassign event's sync token. The server omits file-less rows. */
+  fileId: string
+  scopeLabel: string
+}
+
+export async function fetchMemberLaneAssignments(
+  jwt: string,
+  projectId: string,
+  userId: number,
+  lane: string,
+  apiUrl: string = AUTH_API_URL,
+): Promise<MemberLaneAssignment[] | null> {
+  try {
+    const res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/members/${userId}` +
+        `/lane-assignments?lane=${encodeURIComponent(lane)}`,
+      { headers: authHeaders(jwt) },
+    )
+    if (!res.ok) {
+      console.warn(
+        `[member-scopes] fetchMemberLaneAssignments ${projectId}/${userId} → HTTP ${res.status}`,
+      )
+      return null
+    }
+    const body = (await res.json()) as { assignments?: unknown }
+    if (!Array.isArray(body.assignments)) return null
+    return body.assignments.filter(
+      (row): row is MemberLaneAssignment =>
+        !!row &&
+        typeof row === "object" &&
+        typeof (row as MemberLaneAssignment).assignmentId === "string" &&
+        typeof (row as MemberLaneAssignment).fileId === "string",
+    )
+  } catch (err) {
+    console.warn("[member-scopes] fetchMemberLaneAssignments failed:", err)
+    return null
+  }
+}
+
 export async function fetchMemberScopes(
   jwt: string,
   projectId: string,

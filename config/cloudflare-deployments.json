@@ -123,7 +123,8 @@
           "worker": "aquilla-sync-worker",
           "apiHost": "api.aquilla.app",
           "routes": [
-            "api.aquilla.app/sync/*"
+            "api.aquilla.app/sync/*",
+            "api.aquilla.app/robots.txt"
           ],
           "requiredSecrets": [
             "DIARIZATION_MODAL_URL",
@@ -151,7 +152,8 @@
           "worker": "aquilla-sync-worker-dev",
           "apiHost": "api.dev.aquilla.app",
           "routes": [
-            "api.dev.aquilla.app/sync/*"
+            "api.dev.aquilla.app/sync/*",
+            "api.dev.aquilla.app/robots.txt"
           ],
           "requiredSecrets": [],
           "plainText": {

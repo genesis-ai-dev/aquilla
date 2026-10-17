@@ -16,6 +16,7 @@ const deploymentManifest = JSON.parse(
     requiredBindings: Record<string, string>
     environments: Record<string, {
       worker: string
+      apiHost?: string
       routes: string[]
       requiredSecrets?: string[]
       plainText: Record<string, string>
@@ -322,27 +323,27 @@ describe("worker deployment environment contract", () => {
     [
       "production",
       "aquilla-sync-worker",
-      "api.aquilla.app/sync/*",
+      "api.aquilla.app",
       "aquilla-snapshots",
       "69bcc10e67464f2eaf4fe91a9141e7cd",
     ],
     [
       "development",
       "aquilla-sync-worker-dev",
-      "api.dev.aquilla.app/sync/*",
+      "api.dev.aquilla.app",
       "aquilla-snapshots-dev",
       "53581197ff7a4202a5ed0ef08537d4a6",
     ],
   ])(
     "keeps %s sync routing and storage isolated",
-    (profile, workerName, route, bucket, hyperdriveId) => {
+    (profile, workerName, apiHost, bucket, hyperdriveId) => {
       const config = readRepoFile("sync-worker", "wrangler.toml")
       const environment = tomlBlock(config, `[env.${profile}]`)
       const snapshots = tomlBlock(config, `[[env.${profile}.r2_buckets]]`)
       const hyperdrive = tomlBlock(config, `[[env.${profile}.hyperdrive]]`)
 
       expect(environment).toContain(`name = "${workerName}"`)
-      expect(environment).toContain(`routes = ["${route}"]`)
+      expect(environment).toContain(`routes = ["${apiHost}/sync/*", "${apiHost}/robots.txt"]`)
       expect(snapshots).toContain(`bucket_name = "${bucket}"`)
       expect(hyperdrive).toContain(`id = "${hyperdriveId}"`)
     },
@@ -469,6 +470,21 @@ describe("worker deployment environment contract", () => {
     expect(agentPackage.scripts?.["deploy:staging"]).toBeUndefined()
     expect(agentPackage.scripts?.["deploy:development"]).toContain("--env=development")
   })
+
+  // Agent fetch tools check robots.txt on the API host before calling the
+  // Agent API. With no Worker on `<apiHost>/robots.txt` the host answered 522,
+  // which RFC 9309 says to read as "disallow everything", so agents refused to
+  // connect. Every API host must route robots.txt to sync-worker.
+  it.each(Object.entries(deploymentManifest.surfaces.sync.environments))(
+    "routes %s API-host robots.txt to sync-worker so agents are not blocked",
+    (environment, expected) => {
+      expect(expected.apiHost).toBeTruthy()
+      const robotsRoute = `${expected.apiHost}/robots.txt`
+      expect(expected.routes).toContain(robotsRoute)
+      const config = readRepoFile("sync-worker", "wrangler.toml")
+      expect(environmentSection(config, environment)).toContain(`"${robotsRoute}"`)
+    },
+  )
 
   it("keeps every Wrangler environment synchronized with the canonical manifest", () => {
     const configFiles = {

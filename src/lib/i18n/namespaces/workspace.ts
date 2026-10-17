@@ -282,6 +282,9 @@ export const workspace = defineNamespace({
     "workspace.transcribeBadge.loadShort": "load",
     "workspace.transcribeBadge.transcribingTooltip": "Transcribing audio…",
     "workspace.transcribeBadge.transcribingPill": "transcribing",
+    "workspace.transcribeBadge.waitingForModelPill": "waiting for model",
+    "workspace.transcribeBadge.waitingForModelTooltip":
+      "Waiting for the zero-shot model to start. This take is transcribed as soon as it is ready.",
     "workspace.transcribeBadge.failed": "Transcription failed",
     // {words} is a pre-pluralized fragment (reuses the identical
     // terminology.candidates.ngramLength "{count} word(s)" plural form) —

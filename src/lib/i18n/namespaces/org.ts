@@ -1211,13 +1211,23 @@ export const org = defineNamespace({
     "org.staffLanePopover.staffedEmpty": "No one is staffed on this lane yet.",
     "org.staffLanePopover.removeFromLaneAriaLabel": "Remove {name} from {lane}",
     "org.staffLanePopover.lastLaneNote":
-      "This is {name}’s only language, and an empty lane list means every language — so removing it would widen their access, not narrow it. Take them off the project instead:",
+      "This is {name}’s only language. Taking it away here would leave them with no language limit at all — which the project reads as every language, not none — so it would widen their access instead of narrowing it. To take {name} off the project, go to:",
     "org.staffLanePopover.teamMembersLink": "Project Settings → Team members",
     "org.staffLanePopover.lastLaneRefused":
-      "This is now their only language. Removing it would open every language to them, so nothing was saved.",
+      "This is now their only language. Removing it would leave them with no language limit at all — which means every language, not none — so nothing was saved.",
+    // AQU-1999: the decided answer for the two cases AQU-1998 left open — the
+    // last lane stays blocked (the note above), and open assignments in the
+    // lane are closed with the removal, after a confirmation that says how
+    // many. A lane the person holds no open assignment in is removed in one
+    // press, with no extra step.
+    "org.staffLanePopover.removeClosesAssignments": plural({
+      one: "{name} has {count} open assignment in {lane}. Removing them from this language closes it. Work they have already finished stays as it is.",
+      other: "{name} has {count} open assignments in {lane}. Removing them from this language closes them. Work they have already finished stays as it is.",
+    }),
+    "org.staffLanePopover.removeClosesAssignmentsConfirm": "Remove and close",
+    "org.staffLanePopover.assignmentCheckFailed":
+      "Couldn’t check what {name} has open in this language, so nothing was removed. Try again.",
     "org.staffLanePopover.addToLaneButton": "Add to {lane}",
-    "org.staffLanePopover.broaderAccessNote": "Need broader access? Leads see all languages.",
-    "org.staffLanePopover.addAsLeadButton": "Add as lead (unscoped)",
 
     // AQU-1030: one sentence for the grant the form will make, shared by every
     // add/invite submit. {scope} is one of the scope.* phrases below.
@@ -1236,7 +1246,6 @@ export const org = defineNamespace({
     "org.grantScope.echo.lanesOnly": "{lanes} lanes only",
     "org.grantScope.button": "{action} — {scope}",
     "org.grantScope.thisProject": "this project",
-    "org.grantScope.action.addAsLead": "Add as lead",
 
     // -- ArchivedProjects: org-level archived-projects / recently-deleted-files admin page --
     // "Project" header → common.project (identical text)
@@ -3085,6 +3094,24 @@ export const org = defineNamespace({
       "org.staffLanePopover.lastLaneNote": {
         description:
           "Note under a disabled Remove button explaining why this person cannot be taken off the lane: it is their only one, and a member with no lane limits can write in every language, so the removal would grant access rather than revoke it. The sentence runs on into a link labelled org.staffLanePopover.teamMembersLink, so keep the trailing colon and do not end it as a standalone sentence.",
+        placeholders: { name: "The person's username — not translated." },
+      },
+      "org.staffLanePopover.removeClosesAssignments": {
+        description:
+          "Confirmation shown on the person's row in the Staff popover's “On this lane” list after Remove is pressed, when they still hold open assignments in that lane. Nothing has been saved yet: it states how much work the removal will close so the lead can decide, and is followed by a confirm button (org.staffLanePopover.removeClosesAssignmentsConfirm) and Cancel. Completed and validated work is never touched, which the last sentence promises.",
+        placeholders: {
+          count: "How many open assignments the person holds in this lane — always one or more.",
+          name: "The person's username — not translated.",
+          lane: "The target language lane's display label — not translated.",
+        },
+      },
+      "org.staffLanePopover.removeClosesAssignmentsConfirm": {
+        description:
+          "Button that confirms the removal described by org.staffLanePopover.removeClosesAssignments: it closes the person's open assignments in the lane and then takes them off it. Short enough to sit beside Cancel on a narrow popover row.",
+      },
+      "org.staffLanePopover.assignmentCheckFailed": {
+        description:
+          "Error on the person's row when the Staff popover could not read their open assignments for the lane, so it refused the removal rather than risk leaving assigned work in a language the person can no longer reach. Nothing was saved and the operator can press Remove again.",
         placeholders: { name: "The person's username — not translated." },
       },
       "org.staffLanePopover.addToLaneButton": {

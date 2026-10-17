@@ -28,6 +28,26 @@
 // limits are read back first and written through untouched. Someone whose
 // ONLY lane is this one is guarded, not removed — see StaffedLaneMembers.
 //
+// AQU-1999 — the two cases AQU-1998 left open are decided here:
+//
+//   1. The LAST lane stays blocked. An empty lane list is the
+//      backward-compatible "every lane" state, so a real "no lanes" would be a
+//      server change; taking the person off the project is a different
+//      gesture, and it lives where project membership does. The guard is kept
+//      and its note worded more plainly.
+//   2. Open assignments in the lane are CLOSED with the removal. A person who
+//      can no longer see a lane cannot work its assignments either, so leaving
+//      them open strands work nobody is told about. So Remove first reads what
+//      the person holds open in this lane: none and it removes in one press,
+//      as before; otherwise it asks, naming the count, and only a confirm
+//      emits the `assignment.unassign` events and then saves the scopes.
+//      Completed/validated work is untouched — unassign is a soft close.
+//
+// Order matters in that confirm: the last-lane guard is re-checked (a read)
+// BEFORE anything is closed, so a refused removal never leaves assignments
+// closed behind it; and the closes land before the scope PUT, so a failure
+// there leaves the person still holding the lane their work sits in.
+//
 // Leads/maintainers (effective role >= project_lead) can't be lane-scoped —
 // the server rejects PUT scopes for them with 400 ("scopes are for
 // contributor/reviewer roles"), since maintainers see every language by
@@ -62,7 +82,14 @@ import { useOrgMembers } from "@/hooks/useOrg"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { addProjectMember } from "@/lib/frontier/members"
-import { fetchMemberScopes, putMemberScopes, type MemberScope } from "@/lib/sync/member-scopes"
+import {
+  fetchMemberLaneAssignments,
+  fetchMemberScopes,
+  putMemberScopes,
+  type MemberLaneAssignment,
+  type MemberScope,
+} from "@/lib/sync/member-scopes"
+import { unassignAssignment } from "@/lib/sync/assignments"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
@@ -173,6 +200,15 @@ export function StaffLanePopover({
   const [staffed, setStaffed] = useState<StaffedLanePerson[] | null>(null)
   const [removingUserId, setRemovingUserId] = useState<number | null>(null)
   const [removeError, setRemoveError] = useState<{ userId: number; message: string } | null>(null)
+  /**
+   * AQU-1999: a removal held at the confirmation, with the open assignments it
+   * will close. `null` whenever nothing is awaiting a confirm — including
+   * right after one, so the question is never asked twice for one removal.
+   */
+  const [pendingRemoval, setPendingRemoval] = useState<{
+    userId: number
+    assignments: MemberLaneAssignment[]
+  } | null>(null)
   /** Bumped after a staffing change so the list re-reads the scopes. */
   const [staffedNonce, setStaffedNonce] = useState(0)
 
@@ -278,6 +314,7 @@ export function StaffLanePopover({
     setStaffed(null)
     setRemovingUserId(null)
     setRemoveError(null)
+    setPendingRemoval(null)
   }
 
   function handleOpenChange(next: boolean) {
@@ -312,7 +349,8 @@ export function StaffLanePopover({
   }
 
   /**
-   * Take this lane off one member's scopes, leaving everything else as it was.
+   * Take this lane off one member's scopes, leaving everything else as it was,
+   * after closing the assignments this removal was confirmed to close.
    *
    * Their scopes are re-read first: the PUT is a replace-set, and one built
    * from the rows this popover loaded when it opened would quietly restore a
@@ -320,25 +358,40 @@ export function StaffLanePopover({
    * removal is refused rather than saved — an empty lane list means every
    * lane, so it would widen the person's access (the guard normally keeps the
    * button disabled; this catches the member's other lanes going away while
-   * the popover sat open).
+   * the popover sat open). That refusal is checked BEFORE any assignment is
+   * closed, so nothing is closed for a removal that does not happen.
+   *
+   * AQU-1999: the assignments then close (a soft `assignment.unassign`, which
+   * leaves finished work and its validations alone) ahead of the scope PUT. A
+   * failure part-way leaves the person on the lane, where they can still
+   * reach whatever is still assigned to them, and the row shows the error.
    */
-  async function handleRemove(person: StaffedLanePerson) {
+  async function applyRemoval(person: StaffedLanePerson, assignments: MemberLaneAssignment[]) {
     if (!jwt) return
-    setRemovingUserId(person.userId)
-    setRemoveError(null)
     try {
       const existing = (await fetchMemberScopes(jwt, projectId, person.userId)) ?? []
       const remaining = existing.filter((s) => !scopeNamesLane(s, laneValue, lane))
       if (!remaining.some((s) => s.kind === "lane")) {
         setRemoveError({ userId: person.userId, message: t("org.staffLanePopover.lastLaneRefused") })
+        setPendingRemoval(null)
         setStaffed(
           (prev) =>
             prev?.map((p) => (p.userId === person.userId ? { ...p, laneCount: 1 } : p)) ?? prev,
         )
         return
       }
+      for (const assignment of assignments) {
+        await unassignAssignment({
+          jwt,
+          projectId,
+          fileId: assignment.fileId,
+          author: session?.username ?? "",
+          assignmentId: assignment.assignmentId,
+        })
+      }
       await putMemberScopes(jwt, projectId, person.userId, remaining)
       // Only now does the row go: a failed save leaves the person listed.
+      setPendingRemoval(null)
       setStaffed((prev) => (prev ?? []).filter((p) => p.userId !== person.userId))
       await refreshProjectMembers()
       onDone?.()
@@ -347,6 +400,50 @@ export function StaffLanePopover({
         userId: person.userId,
         message: err instanceof Error ? err.message : String(err),
       })
+    }
+  }
+
+  /**
+   * Remove pressed. What the person holds open in this lane decides whether
+   * anything is saved now: nothing open and the removal goes through in this
+   * one press (AQU-1999 — no extra step for the common case); otherwise the
+   * row asks first, naming the work the removal will close.
+   *
+   * A read that FAILS refuses the removal instead of assuming zero. Treating
+   * "couldn't tell" as "nothing open" is how an assignment ends up in a lane
+   * its holder can no longer open, which is the whole point of this check.
+   */
+  async function handleRemove(person: StaffedLanePerson) {
+    if (!jwt) return
+    setRemovingUserId(person.userId)
+    setRemoveError(null)
+    try {
+      const open = await fetchMemberLaneAssignments(jwt, projectId, person.userId, laneValue)
+      if (open === null) {
+        setRemoveError({
+          userId: person.userId,
+          message: t("org.staffLanePopover.assignmentCheckFailed", { name: person.username }),
+        })
+        return
+      }
+      if (open.length > 0) {
+        setPendingRemoval({ userId: person.userId, assignments: open })
+        return
+      }
+      await applyRemoval(person, [])
+    } finally {
+      setRemovingUserId(null)
+    }
+  }
+
+  /** The confirm on a removal that closes assignments — see applyRemoval. */
+  async function handleConfirmRemove(person: StaffedLanePerson) {
+    if (!pendingRemoval || pendingRemoval.userId !== person.userId) return
+    const assignments = pendingRemoval.assignments
+    setRemovingUserId(person.userId)
+    setRemoveError(null)
+    try {
+      await applyRemoval(person, assignments)
     } finally {
       setRemovingUserId(null)
     }
@@ -471,7 +568,17 @@ export function StaffLanePopover({
               people={jwt ? staffed : []}
               busyUserId={removingUserId}
               error={removeError}
+              pending={
+                pendingRemoval
+                  ? {
+                      userId: pendingRemoval.userId,
+                      assignmentCount: pendingRemoval.assignments.length,
+                    }
+                  : null
+              }
               onRemove={handleRemove}
+              onConfirmRemove={handleConfirmRemove}
+              onCancelRemove={() => setPendingRemoval(null)}
               onNavigate={() => handleOpenChange(false)}
             />
             <div className="relative">

@@ -19,6 +19,12 @@
 //     through untouched, leads never listed, and the person's LAST lane
 //     guarded (an empty lane list means every lane, so that removal would
 //     widen their access).
+//   - AQU-1999 Remove, decided: the last lane stays guarded, and a removal
+//     from a lane the person holds open assignments in closes that work —
+//     after a confirmation naming the count, never silently, and never before
+//     the last-lane guard has had its say. A lane with nothing open is still
+//     one press, and a failed assignment read refuses the removal rather than
+//     reading "couldn't tell" as "nothing open".
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
@@ -144,7 +150,16 @@ type Scope = { kind: "lane" | "file"; value: string }
 // vi.mock factories are hoisted above every top-level statement, so the mock
 // fns they reference must be created via vi.hoisted (a plain `const` here
 // would still be in the temporal dead zone when the factory runs).
-const { mockAddProjectMember, mockFetchMemberScopes, mockPutMemberScopes } = vi.hoisted(() => ({
+/** AQU-1999: one open assignment row, as the lane-assignments read returns it. */
+type LaneAssignment = { assignmentId: string; fileId: string; scopeLabel: string }
+
+const {
+  mockAddProjectMember,
+  mockFetchMemberScopes,
+  mockPutMemberScopes,
+  mockFetchMemberLaneAssignments,
+  mockUnassignAssignment,
+} = vi.hoisted(() => ({
   mockAddProjectMember: vi.fn(
     async (_jwt: string, _projectId: string, _username: string, _role: number) => ({}),
   ),
@@ -154,6 +169,17 @@ const { mockAddProjectMember, mockFetchMemberScopes, mockPutMemberScopes } = vi.
   mockPutMemberScopes: vi.fn(
     async (_jwt: string, _projectId: string, _userId: number, scopes: Scope[]) => scopes,
   ),
+  mockFetchMemberLaneAssignments: vi.fn(
+    async (_jwt: string, _projectId: string, _userId: number, _lane: string) =>
+      [] as LaneAssignment[] | null,
+  ),
+  mockUnassignAssignment: vi.fn(async (_args: {
+    jwt: string
+    projectId: string
+    fileId: string
+    author: string
+    assignmentId: string
+  }) => {}),
 }))
 
 vi.mock("@/lib/frontier/members", async (importOriginal) => {
@@ -167,6 +193,11 @@ vi.mock("@/lib/frontier/members", async (importOriginal) => {
 vi.mock("@/lib/sync/member-scopes", () => ({
   fetchMemberScopes: mockFetchMemberScopes,
   putMemberScopes: mockPutMemberScopes,
+  fetchMemberLaneAssignments: mockFetchMemberLaneAssignments,
+}))
+
+vi.mock("@/lib/sync/assignments", () => ({
+  unassignAssignment: mockUnassignAssignment,
 }))
 
 function openPopover() {
@@ -185,6 +216,10 @@ beforeEach(() => {
   mockFetchMemberScopes.mockResolvedValue([])
   mockPutMemberScopes.mockClear()
   mockPutMemberScopes.mockImplementation(async (_jwt, _projectId, _userId, scopes) => scopes)
+  mockFetchMemberLaneAssignments.mockClear()
+  mockFetchMemberLaneAssignments.mockResolvedValue([])
+  mockUnassignAssignment.mockClear()
+  mockUnassignAssignment.mockImplementation(async () => {})
   mockRefreshProjectMembers.mockClear()
 })
 
@@ -660,6 +695,167 @@ describe("StaffLanePopover", () => {
       // Nothing half-applied: she is still on the lane and still removable.
       expect(screen.getByTestId("staff-lane-staffed-row-10")).toBeInTheDocument()
       expect(screen.getByTestId("staff-lane-remove-10")).toBeEnabled()
+    })
+
+    // AQU-1999 — the two cases AQU-1998 left open, as decided: the last lane
+    // stays blocked (above), and open assignments in the lane close WITH the
+    // removal, after a confirmation that names them. An assignment left open
+    // in a lane its holder can no longer reach is work nobody is told about;
+    // closing it silently is the other way to get that wrong.
+    describe("open assignments in the lane (AQU-1999)", () => {
+      const OPEN_FR: LaneAssignment[] = [
+        { assignmentId: "as-1", fileId: "file-1", scopeLabel: "Mark 1" },
+        { assignmentId: "as-2", fileId: "file-2", scopeLabel: "Mark 2" },
+      ]
+
+      async function openWithMaria(laneId?: string) {
+        staffRoster()
+        scopesByUser({
+          10: [{ kind: "lane", value: laneId ?? "es" }, { kind: "lane", value: "fr" }],
+          11: [],
+        })
+        renderPopover(1, laneId)
+        openPopover()
+        await waitFor(() => expect(screen.getByTestId("staff-lane-remove-10")).toBeEnabled())
+      }
+
+      it("removes in one press when the person holds nothing open in the lane", async () => {
+        await openWithMaria()
+        fireEvent.click(screen.getByTestId("staff-lane-remove-10"))
+
+        await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
+        expect(mockFetchMemberLaneAssignments).toHaveBeenCalledWith("jwt-pm", "proj-1", 10, "es")
+        // No question asked, and nothing closed — there was nothing to close.
+        expect(screen.queryByTestId("staff-lane-remove-confirm-10")).not.toBeInTheDocument()
+        expect(mockUnassignAssignment).not.toHaveBeenCalled()
+      })
+
+      it("asks first when there is open work, naming the count, and saves nothing yet", async () => {
+        mockFetchMemberLaneAssignments.mockResolvedValue(OPEN_FR)
+        await openWithMaria()
+        fireEvent.click(screen.getByTestId("staff-lane-remove-10"))
+
+        const confirm = await screen.findByTestId("staff-lane-remove-confirm-10")
+        expect(confirm).toHaveTextContent(/2 open assignments in spanish/i)
+        expect(confirm).toHaveTextContent(/already finished stays as it is/i)
+        // Nothing is saved by the question itself.
+        expect(mockUnassignAssignment).not.toHaveBeenCalled()
+        expect(mockPutMemberScopes).not.toHaveBeenCalled()
+        expect(screen.getByTestId("staff-lane-staffed-row-10")).toBeInTheDocument()
+      })
+
+      it("the confirm closes every open assignment, then takes the lane off", async () => {
+        mockFetchMemberLaneAssignments.mockResolvedValue(OPEN_FR)
+        await openWithMaria()
+        fireEvent.click(screen.getByTestId("staff-lane-remove-10"))
+        fireEvent.click(await screen.findByTestId("staff-lane-remove-confirm-button-10"))
+
+        await waitFor(() => expect(mockUnassignAssignment).toHaveBeenCalledTimes(2))
+        expect(mockUnassignAssignment).toHaveBeenCalledWith({
+          jwt: "jwt-pm",
+          projectId: "proj-1",
+          fileId: "file-1",
+          author: "pm",
+          assignmentId: "as-1",
+        })
+        expect(mockUnassignAssignment).toHaveBeenCalledWith({
+          jwt: "jwt-pm",
+          projectId: "proj-1",
+          fileId: "file-2",
+          author: "pm",
+          assignmentId: "as-2",
+        })
+        await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
+        expect(mockPutMemberScopes).toHaveBeenCalledWith("jwt-pm", "proj-1", 10, [
+          { kind: "lane", value: "fr" },
+        ])
+        await waitFor(() =>
+          expect(screen.queryByTestId("staff-lane-staffed-row-10")).not.toBeInTheDocument(),
+        )
+      })
+
+      it("Cancel leaves both the lane and the work as they were", async () => {
+        mockFetchMemberLaneAssignments.mockResolvedValue(OPEN_FR)
+        await openWithMaria()
+        fireEvent.click(screen.getByTestId("staff-lane-remove-10"))
+        fireEvent.click(await screen.findByTestId("staff-lane-remove-cancel-10"))
+
+        expect(screen.queryByTestId("staff-lane-remove-confirm-10")).not.toBeInTheDocument()
+        expect(mockUnassignAssignment).not.toHaveBeenCalled()
+        expect(mockPutMemberScopes).not.toHaveBeenCalled()
+        // And the removal can be started again.
+        expect(screen.getByTestId("staff-lane-remove-10")).toBeEnabled()
+      })
+
+      // "Couldn't tell" is not "nothing open": reading it as zero is exactly
+      // how an assignment ends up stranded in a lane nobody can open.
+      it("refuses the removal when the open-assignment read fails", async () => {
+        mockFetchMemberLaneAssignments.mockResolvedValue(null)
+        await openWithMaria()
+        fireEvent.click(screen.getByTestId("staff-lane-remove-10"))
+
+        await waitFor(() =>
+          expect(screen.getByTestId("staff-lane-remove-error-10")).toHaveTextContent(
+            /nothing was removed/i,
+          ),
+        )
+        expect(mockUnassignAssignment).not.toHaveBeenCalled()
+        expect(mockPutMemberScopes).not.toHaveBeenCalled()
+        expect(screen.getByTestId("staff-lane-staffed-row-10")).toBeInTheDocument()
+      })
+
+      // The last-lane guard is re-checked before anything closes, so a
+      // refused removal never leaves closed assignments behind it.
+      it("closes nothing when the re-read shows this is now their only lane", async () => {
+        mockFetchMemberLaneAssignments.mockResolvedValue(OPEN_FR)
+        await openWithMaria()
+        fireEvent.click(screen.getByTestId("staff-lane-remove-10"))
+        await screen.findByTestId("staff-lane-remove-confirm-10")
+
+        // French was taken off her elsewhere while the question sat open.
+        scopesByUser({ 10: [{ kind: "lane", value: "es" }] })
+        fireEvent.click(screen.getByTestId("staff-lane-remove-confirm-button-10"))
+
+        await waitFor(() =>
+          expect(screen.getByTestId("staff-lane-remove-error-10")).toHaveTextContent(
+            /nothing was saved/i,
+          ),
+        )
+        expect(mockUnassignAssignment).not.toHaveBeenCalled()
+        expect(mockPutMemberScopes).not.toHaveBeenCalled()
+      })
+
+      // The closes land before the scope PUT, so a failure here leaves the
+      // person holding the lane whatever is still assigned to them sits in.
+      it("a failed close leaves the person on the lane and saves no scopes", async () => {
+        mockFetchMemberLaneAssignments.mockResolvedValue(OPEN_FR)
+        mockUnassignAssignment.mockRejectedValue(new Error("Request failed (HTTP 403)"))
+        await openWithMaria()
+        fireEvent.click(screen.getByTestId("staff-lane-remove-10"))
+        fireEvent.click(await screen.findByTestId("staff-lane-remove-confirm-button-10"))
+
+        await waitFor(() =>
+          expect(screen.getByTestId("staff-lane-remove-error-10")).toHaveTextContent(/403/),
+        )
+        expect(mockPutMemberScopes).not.toHaveBeenCalled()
+        expect(screen.getByTestId("staff-lane-staffed-row-10")).toBeInTheDocument()
+      })
+
+      // AQU-1607: the lane a removal counts work in is the one the caller
+      // names, by id where it has one — never a sibling lane's tag.
+      it("counts the open work by lane id when the caller passes one", async () => {
+        await openWithMaria("ln-es")
+        fireEvent.click(screen.getByTestId("staff-lane-remove-10"))
+
+        await waitFor(() =>
+          expect(mockFetchMemberLaneAssignments).toHaveBeenCalledWith(
+            "jwt-pm",
+            "proj-1",
+            10,
+            "ln-es",
+          ),
+        )
+      })
     })
 
     it("the add half still works alongside the list", async () => {

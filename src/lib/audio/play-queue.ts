@@ -17,6 +17,7 @@ import type { AudioTimingMode } from "@/lib/parsers/types"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
 import { joinedClip, seekableClip, tailCutNow } from "./tail-cut"
+import { takePlayWindow } from "./kept-window"
 import { preferredPlaybackExt } from "./lossless-sibling"
 import { getAudioQualityPref, type AudioQuality } from "@/lib/store/audio-quality-pref"
 import { audioMimeForExt } from "./mime"
@@ -113,6 +114,35 @@ export function useQueueCellPlayhead(cellId: string | undefined): number | null 
     () => {
       if (!cellId || state.kind !== "playing" || state.cellId !== cellId) return null
       return progress.currentTime
+    },
+    () => null,
+  )
+}
+
+/** What the transport is doing on this cell, or null when it is on another
+ *  cell or idle. Every other row keeps a stable null. (AQU-1642 follow-up) */
+export function useQueueCellKind(cellId: string | undefined): "playing" | "loading" | "paused" | null {
+  return useSyncExternalStore(
+    subscribe,
+    () => {
+      if (!cellId) return null
+      if (state.kind !== "playing" && state.kind !== "loading" && state.kind !== "paused") return null
+      return state.cellId === cellId ? state.kind : null
+    },
+    () => null,
+  )
+}
+
+/** Clip seconds where the transport is on this cell — playing, opening it, or
+ *  paused there — otherwise null. Unlike useQueueCellPlayhead it holds the
+ *  place while paused, which is what the Audio view's card draws. */
+export function useQueueCellPosition(cellId: string | undefined): number | null {
+  return useSyncExternalStore(
+    subscribeClock,
+    () => {
+      if (!cellId) return null
+      if (state.kind !== "playing" && state.kind !== "loading" && state.kind !== "paused") return null
+      return state.cellId === cellId ? progress.currentTime : null
     },
     () => null,
   )
@@ -420,7 +450,10 @@ let pendingEarlyDubs: Array<{ cellId: string; slot: string; dueSec: number }> = 
 // With seamless same-clip advance the element OUTLIVES the cell it was opened
 // for — handlers must not close over a stale index/trim, they read these.
 let currentIndex = -1
-let currentTrim: { start: number; end: number } | null = null
+let currentTrim: MasterWindow | null = null
+/** Fires at the next edge of a line's own take — a split's gap or the trim's
+ *  end — so the take stops there and not up to a timeupdate (~250ms) later. */
+let takeEdgeTimer: ReturnType<typeof setTimeout> | null = null
 /** The cell ATTACHMENT url (e.g. frontier-audio://…) — NOT the resolved src,
  *  so the streaming→blob fallback swap doesn't break same-clip matching. */
 let currentAttachmentUrl: string | null = null
@@ -524,6 +557,7 @@ function disposeCurrent(): void {
   }
   currentIndex = -1
   currentTrim = null
+  clearTakeEdge()
   currentAttachmentUrl = null
   pendingStartSeconds = null
   queueTickAt = null
@@ -538,6 +572,36 @@ function seekQueue(seconds: number): void {
   const d = currentAudio.duration
   currentAudio.currentTime = Number.isFinite(d) ? Math.max(0, Math.min(seconds, d)) : Math.max(0, seconds)
   setProgress({ currentTime: currentAudio.currentTime })
+  aimTakeEdge()
+}
+
+function clearTakeEdge(): void {
+  if (takeEdgeTimer != null) {
+    clearTimeout(takeEdgeTimer)
+    takeEdgeTimer = null
+  }
+}
+
+/**
+ * Aim the take-edge timer at the next place a line's own take stops sounding:
+ * the start of a split's gap, or the end of its trim. The tick it fires steps
+ * over the gap or ends the line, the same as a timeupdate there would — only
+ * on time.
+ */
+function aimTakeEdge(): void {
+  clearTakeEdge()
+  const audio = currentAudio
+  const w = currentTrim
+  if (!audio || audio.paused || !w?.take) return
+  const now = audio.currentTime
+  let edge = w.end
+  for (const g of w.gaps ?? []) if (g.start > now && g.start < edge) edge = g.start
+  if (!Number.isFinite(edge) || edge <= now) return
+  const rate = audio.playbackRate || 1
+  takeEdgeTimer = setTimeout(() => {
+    takeEdgeTimer = null
+    queueTickAt?.(Math.max(currentAudio?.currentTime ?? edge, edge))
+  }, ((edge - now) / rate) * 1000)
 }
 
 /** Set playback speed for the queue (applies live + to subsequent tracks). */
@@ -545,6 +609,7 @@ export function setQueueRate(rate: number): void {
   if (currentAudio) currentAudio.playbackRate = rate
   for (const e of overlayPool) if (e.element) e.element.playbackRate = rate
   setProgress({ rate })
+  aimTakeEdge()
 }
 
 /** Set queue volume 0..1 (applies live + to subsequent tracks). */
@@ -1652,6 +1717,48 @@ function findPrevPlayable(cells: CellData[], startIndex: number): number {
  * once per cell. Text cells' startTime/endTime are subtitle timings on the
  * video timeline, NOT offsets into their own recording, so they get no window.
  */
+/**
+ * What the master plays of the clip it opens for a cell, on that clip's clock.
+ * `take` marks a line's own take rather than a section of a shared recording.
+ */
+export interface MasterWindow {
+  start: number
+  end: number
+  /** Stretches inside the window that do not play: a split take's gaps. */
+  gaps?: readonly { start: number; end: number }[]
+  take?: true
+}
+
+/**
+ * The part of its clip the master plays for a cell. A media section's window
+ * when it has one (trimWindowForCell); otherwise, when the master is the line's
+ * own take, that take's kept part — its trim, or a split take's pieces — the
+ * same part the line's card, the Recording tab and the recorder play
+ * (takePlayWindow). Without this the bottom bar played a trimmed take whole.
+ * Null = the whole clip.
+ */
+export function masterWindowForCell(cell: CellData): MasterWindow | null {
+  const section = trimWindowForCell(cell)
+  if (section) return section
+  if (queueClockIsFileTime(cell)) return null
+  const take = masterAudioForCell(cell)
+  if (!take) return null
+  const kept = takePlayWindow(cell.attachments, take.audioId)
+  if (!kept) return null
+  return {
+    start: kept.start ?? 0,
+    end: kept.end ?? Number.POSITIVE_INFINITY,
+    ...(kept.gaps && kept.gaps.length > 0 ? { gaps: kept.gaps } : {}),
+    take: true,
+  }
+}
+
+/** Where a second inside a gap resumes: the gap's end. Null outside every gap. */
+function pastTakeGap(gaps: MasterWindow["gaps"], sec: number): number | null {
+  for (const g of gaps ?? []) if (sec >= g.start && sec < g.end - 0.005) return g.end
+  return null
+}
+
 export function trimWindowForCell(cell: CellData): { start: number; end: number } | null {
   if (cell.medium !== "media") return null
   // SUB-29/round 5: the window addresses the SHARED IMPORTED CLIP. A take
@@ -1719,7 +1826,9 @@ export function planSeek(
     // seek its own element (today's seekQueue semantics).
     const cur = cells[currentIdx]
     if (cur && masterAudioForCell(cur) && !trimWindowForCell(cur)) {
-      return { kind: "element", index: currentIdx, seconds }
+      // …inside the part of its take that plays.
+      const kept = masterWindowForCell(cur)
+      return { kind: "element", index: currentIdx, seconds: kept ? Math.min(Math.max(seconds, kept.start), kept.end) : seconds }
     }
     return { kind: "none" }
   }
@@ -2973,7 +3082,7 @@ function adoptCell(
   const cell = ctx.cells[index]
   if (!cell) return
   currentIndex = index
-  currentTrim = trimWindowForCell(cell)
+  currentTrim = masterWindowForCell(cell)
   setState({ kind: audio.paused ? "paused" : "playing", cellIndex: index, cellId: cell.id })
   ctx.onCellChange?.(index, cell.id)
   if (seekTo != null) {
@@ -3017,7 +3126,7 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
   if (currentAudio && currentAttachmentUrl === playable.url) {
     // The element seek happens AFTER adoption — hand the overlay the intended
     // position so it doesn't plan off the pre-seek clock.
-    adoptCell(index, undefined, "seek", opts.atSeconds ?? trimWindowForCell(cell)?.start)
+    adoptCell(index, undefined, "seek", opts.atSeconds ?? masterWindowForCell(cell)?.start)
     const at = opts.atSeconds ?? currentTrim?.start
     if (at != null && currentAudio) {
       currentAudio.currentTime = at
@@ -3038,7 +3147,7 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
   // on a cross-clip mid-play jump that 0 painted the playhead at x=0 for the
   // whole network resolve. Re-seed the intended start synchronously (the same
   // value the post-resolve code sets) so the readout never sees the reset.
-  setProgress({ currentTime: opts.atSeconds ?? trimWindowForCell(cell)?.start ?? 0, duration: 0 })
+  setProgress({ currentTime: opts.atSeconds ?? masterWindowForCell(cell)?.start ?? 0, duration: 0 })
   ctx.onCellChange?.(index, cell.id)
 
   const surfaceMissing = (missingCellId: string): void => {
@@ -3078,7 +3187,7 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
   currentUrl = resolved.objectUrl
   currentAttachmentUrl = playable.url
   currentIndex = index
-  currentTrim = trimWindowForCell(cell)
+  currentTrim = masterWindowForCell(cell)
   pendingStartSeconds = opts.atSeconds ?? null
   audio.playbackRate = progress.rate
   audio.volume = progress.volume
@@ -3127,8 +3236,17 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
     // Checked BEFORE the window-end advance — a due within one ~250ms tick of
     // the section end would otherwise be dropped by the advance's replan.
     fireDueQueueDubs(atSec)
+    // A split take's gap does not play: carry on from its end.
+    const pastGap = currentTrim?.take ? pastTakeGap(currentTrim.gaps, atSec) : null
+    if (pastGap != null) {
+      audio.currentTime = pastGap
+      setProgress({ currentTime: pastGap })
+      aimTakeEdge()
+      return
+    }
     // A media segment's window ends before the shared clip does — treat
-    // reaching the window end as this cell's "ended" and advance.
+    // reaching the window end as this cell's "ended" and advance. A line's own
+    // take ends at its trim the same way.
     if (currentTrim && atSec >= currentTrim.end) {
       applyAdvance(planAdvance(activeContext?.cells ?? [], currentIndex, currentAttachmentUrl, atSec), atSec)
       aimDueTimer()
@@ -3137,6 +3255,7 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
     // …and the next made-ready dub is fired by a timer at its start, not by
     // the tick after it. (AQU-1767)
     aimDueTimer()
+    aimTakeEdge()
     setProgress({ currentTime: audio.currentTime })
   }
   queueTickAt = tickAt
@@ -3158,11 +3277,13 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
     }
     setState({ kind: "playing", ...stateCell() })
     aimDueTimer()
+    aimTakeEdge()
   }
   audio.onpause = () => {
     if (seq !== currentSeq) return
     for (const e of overlayPool) e.element?.pause()
     clearDueTimer()
+    clearTakeEdge()
     if (audio.ended) return
     setState({ kind: "paused", ...stateCell() })
   }
@@ -3301,6 +3422,58 @@ export function startQueue(ctx: PlayContext, fromIndex: number, explicit = false
     return
   }
   void playAt(start, { explicit })
+}
+
+/**
+ * AQU-1642 follow-up: open the run at one line, at a second of its own clip —
+ * the Audio view's card and the ⋯ menu's Play. `play: false` opens it paused
+ * there, which is how a click on a card's waveform marks the place to start
+ * from. Without `atSeconds` it starts where the line's kept audio starts. The
+ * line was chosen, so a missing clip there says so rather than skipping on.
+ */
+export function startQueueAtCell(
+  ctx: PlayContext,
+  index: number,
+  opts: { atSeconds?: number; play?: boolean } = {},
+): void {
+  activeContext = ctx
+  if (timingMode === "audioFirst" && progEngageForContext()) {
+    // A file laid out as a programme has no per-clip second to aim at: start
+    // the line, as the bar would.
+    if (opts.play !== false) startQueue(ctx, index, true)
+    return
+  }
+  void playAt(index, {
+    ...(opts.atSeconds != null ? { atSeconds: opts.atSeconds } : {}),
+    autoplay: opts.play ?? true,
+    explicit: true,
+  })
+}
+
+/**
+ * AQU-1642 follow-up: move within the line the run is on, to a second of its
+ * clip (kept inside the part that plays). Playing or paused stays as it was.
+ * False — and nothing moves — when the run is not on this line.
+ */
+export function seekQueueInCell(cellId: string, seconds: number): boolean {
+  const ctx = activeContext
+  if (!ctx || !currentAudio) return false
+  if (state.kind !== "playing" && state.kind !== "paused" && state.kind !== "loading") return false
+  if (state.cellId !== cellId) return false
+  const w = currentTrim
+  const kept = w ? Math.min(Math.max(seconds, w.start), w.end) : seconds
+  const at = pastTakeGap(w?.take ? w.gaps : undefined, kept) ?? kept
+  if (currentAudio.readyState < 1) {
+    // Still opening: Safari refuses a seek before the metadata, so it lands
+    // where the open would have.
+    pendingStartSeconds = at
+    setProgress({ currentTime: at })
+    return true
+  }
+  seekQueue(at)
+  applyTargetOverlays(ctx.cells, currentIndex, "seek", currentAudio.currentTime)
+  armEarlyDub()
+  return true
 }
 
 /**
@@ -3645,7 +3818,7 @@ export function updateQueueCells(cells: CellData[]): void {
     const idx = cells.findIndex((c) => c.id === anchorCellId)
     if (idx >= 0) {
       currentIndex = idx
-      currentTrim = trimWindowForCell(cells[idx])
+      currentTrim = masterWindowForCell(cells[idx])
     }
   }
   // Round 6/7: an armed dub's due time is a snapshot — refresh it (trim-aware)

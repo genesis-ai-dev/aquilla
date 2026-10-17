@@ -1,0 +1,23 @@
+-- 0179_knowledge_docs_index_error.sql — AQU-2002
+--
+-- Why an indexing run ended where it did, in the row itself.
+--
+-- Indexing a knowledge doc has two legs: deterministic segmentation (headings
+-- or paragraph blocks) and one LLM call that writes nothing but summaries. The
+-- second leg is the only one with an upstream to lose, and when it failed the
+-- job used to throw the segmentation away and park the row at
+-- index_status='failed' with nothing recorded — so the uploader saw "Indexing
+-- failed", pressed "Try indexing again", and got the same dead end with no
+-- reason either of us could read (LOTE, 2026-10).
+--
+-- The job now keeps the structure it already built and says what is missing:
+-- index_status='ready' with index_error naming the summary failure, or
+-- 'failed' with index_error naming why there was nothing to index at all. NULL
+-- means the run had nothing to report, which is every healthy row and every
+-- row written before this column existed.
+--
+-- The text is authored to be shown to the person who uploaded the file (see
+-- describeIndexFailure in auth-worker/src/lib/knowledge/index-doc.ts): no
+-- stack traces, no table or column names.
+ALTER TABLE knowledge_docs
+  ADD COLUMN IF NOT EXISTS index_error TEXT;

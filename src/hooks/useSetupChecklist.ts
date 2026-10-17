@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react"
 import type { ProjectRecord, CompletionSettings, ProjectTtsSettings } from "@/lib/parsers/types"
 import { patchProject } from "@/lib/store/project-index"
 import { listProjectMembers } from "@/lib/frontier/members"
-import { useModelStatus, type ModelPrefetchStatus } from "@/lib/audio/prefetch"
+import { modelWeightsOnDevice, useModelStatus, type ModelPrefetchStatus } from "@/lib/audio/prefetch"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 
 // AQU-694: per-project localStorage key recording that the user is currently
@@ -102,7 +102,7 @@ export function deriveAiModelsReady(
   const provider = ttsSettings?.provider
   if (!provider) return false
   if (provider === "gemini") return Boolean(ttsSettings.apiKey?.trim())
-  if (provider === "mms") return models.mms.kind === "ready"
+  if (provider === "mms") return modelWeightsOnDevice(models.mms)
   // Hosted providers (Inworld) and leftover OmniVoice / Kokoro ids need no
   // download or key — the explicit choice (or its remap) completes the step.
   return true

@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input"
 import { FieldLabel } from "@/components/ui/field"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Spinner } from "@/components/ui/spinner"
-import { prefetchAiModels, useModelStatus } from "@/lib/audio/prefetch"
+import { modelWeightsOnDevice, prefetchAiModels, useModelStatus } from "@/lib/audio/prefetch"
 import { storeAllFeaturesConsent } from "@/lib/audio/ai-consent"
 import { patchProject, updateProject } from "@/lib/store/project-index"
 import type { ProjectRecord, ProjectTtsSettings, TtsProvider } from "@/lib/parsers/types"
@@ -62,11 +62,11 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
   // Selection lives locally — nothing is fetched until the user clicks the
   // explicit Download button. Pre-tick a model that's already downloaded so
   // the UI matches reality on revisit.
-  const [wantWhisper, setWantWhisper] = useState(whisper.kind === "ready")
+  const [wantWhisper, setWantWhisper] = useState(() => modelWeightsOnDevice(whisper))
   const [voiceChoice, setVoiceChoice] = useState<VoiceChoice>(() => {
     const provider = project.ttsSettings?.provider
     if (provider === "gemini") return "gemini"
-    if (provider === "mms" && mms.kind === "ready") return "mms"
+    if (provider === "mms" && modelWeightsOnDevice(mms)) return "mms"
     return "none"
   })
   const [geminiKey, setGeminiKey] = useState(project.ttsSettings?.apiKey ?? "")
@@ -92,8 +92,8 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
 
   const totalSizeMb = useMemo(() => {
     let mb = 0
-    if (wantWhisper && whisper.kind !== "ready") mb += TRANSCRIBE_MODEL.sizeMb
-    if (voiceChoice === "mms" && mms.kind !== "ready") mb += MMS_MODEL.sizeMb
+    if (wantWhisper && !modelWeightsOnDevice(whisper)) mb += TRANSCRIBE_MODEL.sizeMb
+    if (voiceChoice === "mms" && !modelWeightsOnDevice(mms)) mb += MMS_MODEL.sizeMb
     return mb
   }, [wantWhisper, voiceChoice, whisper.kind, mms.kind])
 
@@ -103,8 +103,8 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
 
   const nothingSelected = !wantWhisper && voiceChoice === "none"
   const allReady =
-    (!wantWhisper || whisper.kind === "ready") &&
-    (voiceChoice !== "mms" || mms.kind === "ready") &&
+    (!wantWhisper || modelWeightsOnDevice(whisper)) &&
+    (voiceChoice !== "mms" || modelWeightsOnDevice(mms)) &&
     (voiceChoice !== "gemini" || isValidGeminiKey(geminiKey))
 
   async function saveTtsSettings(overrides: Partial<ProjectTtsSettings>) {
@@ -466,6 +466,14 @@ function SizeOrStatus({
       <span className="inline-flex items-center gap-0.5 text-[10px] text-destructive">
         <AlertCircle className="h-3 w-3" />
         {t("onboarding.checklist.aiModels.statusFailed")}
+      </span>
+    )
+  }
+  if (status.kind === "loading") {
+    return (
+      <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
+        <Spinner className="h-3 w-3" />
+        {t("common.loading")}
       </span>
     )
   }

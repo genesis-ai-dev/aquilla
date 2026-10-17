@@ -18,6 +18,7 @@ import {
   hydratePrefetchStatus,
   prefetchAiModels,
   useModelStatus,
+  modelWeightsOnDevice,
   type ModelId,
 } from "@/lib/audio/prefetch"
 import { clearStoredConsent, storeAiModelConsent } from "@/lib/audio/ai-consent"
@@ -115,8 +116,9 @@ function ModelRow({ meta }: { meta: ModelMeta }) {
   const status = useModelStatus(meta.id)
   const [busy, setBusy] = useState(false)
 
-  const isReady = status.kind === "ready"
-  const isDownloading = status.kind === "downloading" || busy
+  const onDisk = modelWeightsOnDevice(status)
+  const isLoadingMemory = status.kind === "loading"
+  const isDownloading = status.kind === "downloading" || isLoadingMemory || busy
   const isError = status.kind === "error"
 
   const download = async () => {
@@ -158,7 +160,12 @@ function ModelRow({ meta }: { meta: ModelMeta }) {
           <Button variant="outline" onClick={download} disabled={isDownloading}>
             <RotateCw /> {t("common.retry")}
           </Button>
-        ) : isReady ? (
+        ) : isLoadingMemory ? (
+          <Button variant="outline" disabled>
+            <Spinner />
+            {t("common.loading")}
+          </Button>
+        ) : onDisk ? (
           <>
             <Button variant="ghost" onClick={download} disabled={isDownloading}>
               <Download /> Re-download

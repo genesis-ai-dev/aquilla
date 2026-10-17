@@ -235,9 +235,18 @@ export const workspace = defineNamespace({
     "workspace.aiConsent.learnMore": "Learn more",
     "workspace.aiConsent.genericModelName": "AI model",
 
-    // -- AiModelDownloadChip --
+    // -- AiModelDownloadChip (toasts) --
     "workspace.aiDownloadChip.readyToUse": "ready to use",
     "workspace.aiDownloadChip.runsInBackground": "Runs in the background — keep working as normal.",
+    "workspace.aiModelToast.downloading": "Downloading AI models",
+    "workspace.aiModelToast.loading": "Loading AI model",
+    "workspace.aiModelToast.loadingNamed": "Loading {model} model",
+    "workspace.aiModelToast.loadingMany": "Loading AI models",
+    "workspace.aiModelToast.starting": "starting…",
+    "workspace.aiModelToast.downloadFailed": "AI model download failed",
+    "workspace.aiModelToast.downloadFailedNamed": "{model} download failed",
+    "workspace.aiModelToast.modelProgress": "{model} {progress}",
+    "workspace.aiModelToast.downloadDetail": "{progress}. Runs in the background — keep working as normal.",
 
     // -- AiSetupDialog --
     "workspace.aiSetup.teamProviderLocked":
@@ -1272,9 +1281,45 @@ export const workspace = defineNamespace({
       },
       "workspace.aiDownloadChip.runsInBackground": {
         description:
-          "Small reassurance footer at the bottom of the floating AI-model-" +
-          "download status chip while downloads are in progress, noting the " +
-          "user doesn't need to wait around.",
+          "Reassurance that an AI-model download keeps running while the " +
+          "person continues working. Same sentence as workspace.aiModelToast." +
+          "downloadDetail; kept for translators who already have this key.",
+      },
+      "workspace.aiModelToast.loadingNamed": {
+        description:
+          "Title of the toast while one local AI model is loading into memory " +
+          "after its download finished. No progress bar — spinner and close only.",
+        placeholders: {
+          model: "Model name, Whisper or MMS. Not translated.",
+        },
+      },
+      "workspace.aiModelToast.downloadFailedNamed": {
+        description:
+          "Title of the error toast when one local AI model (Whisper or MMS) " +
+          "fails to download. The description under it is the raw error.",
+        placeholders: {
+          model: "Model name, Whisper or MMS. Not translated.",
+        },
+      },
+      "workspace.aiModelToast.modelProgress": {
+        description:
+          "One model's line inside the download toast: the model name and " +
+          "either a percent (58%) or the word from workspace.aiModelToast.starting.",
+        placeholders: {
+          model: "Model name, Whisper or MMS. Not translated.",
+          progress: "Either a percent such as 58%, or the translated 'starting…' word.",
+        },
+      },
+      "workspace.aiModelToast.downloadDetail": {
+        description:
+          "Body of the toast shown while local AI model weights are still " +
+          "downloading. Closes once the download finishes. Tells the person " +
+          "they can keep working.",
+        placeholders: {
+          progress:
+            "One or more model lines (name plus percent or 'starting…'), " +
+            "joined with a middot when two models download together.",
+        },
       },
 
       "workspace.aiSetup.title": {

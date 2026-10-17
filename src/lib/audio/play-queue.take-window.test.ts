@@ -204,6 +204,14 @@ describe("the Audio view's controls on the run", () => {
     expect(getQueueState()).toMatchObject({ kind: "paused", cellId: "a" })
   })
 
+  it("a move asked for while the line is still opening lands where the open does", async () => {
+    startQueueAtCell(ctxFor([verse("a"), verse("b")]), 1, { play: false })
+    expect(getQueueState()).toMatchObject({ kind: "loading", cellId: "b" })
+    expect(seekQueueInCell("b", 3)).toBe(true)
+    const b = await opened("b")
+    expect(b.currentTime).toBe(3)
+  })
+
   it("tells each line whether the run is on it, and where — paused too", async () => {
     const kindB = renderHook(() => useQueueCellKind("b"))
     const atB = renderHook(() => useQueueCellPosition("b"))

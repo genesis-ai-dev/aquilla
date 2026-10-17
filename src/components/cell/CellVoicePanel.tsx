@@ -66,6 +66,7 @@ import { assignedCastVoiceId, findVoice, resolveCastVoice } from "@/lib/audio/vo
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { useCellAudio, type UseCellAudioResult } from "@/hooks/useCellAudio"
+import { queueClockIsFileTime, useQueueCellKind, useQueueCellPosition } from "@/lib/audio/play-queue"
 import { setCellPref, useCellPref } from "@/lib/store/audio-cell-prefs"
 import { persistTakeTrim, trimMs } from "@/lib/audio/persist-trim"
 import { keptWindowSec } from "@/lib/audio/kept-window"
@@ -107,12 +108,12 @@ interface CellVoicePanelProps {
   /** Retained for host compatibility; per-cell playback now runs locally. */
   onPlay?: () => void
   /**
-   * AQU-1642: the bottom play bar is playing this line, one line after
-   * another. The card's play button shows Pause and pauses the whole run (the
-   * bar's own pause); the waveform stays still — the bar shows the progress.
+   * AQU-1642 follow-up (Sam, 2026-10-17): the Audio view's one place to play
+   * from. The card's corner button presses it (Play, and Stop while the bottom
+   * bar's run is on this line), a click along the waveform puts the place
+   * there, and the card draws where the run is on this line, paused included.
    */
-  playingInBar?: boolean
-  onPauseBar?: () => void
+  place?: { onPress: () => void; onPick: (atSeconds: number) => void } | null
   /**
    * The row's player for this line's recording (or generated voice). Play,
    * pause, and seek go through it so the cell highlight tracks this button.
@@ -282,8 +283,7 @@ export function CellVoicePanel({
   controller,
   targetLang,
   voicePicker,
-  playingInBar = false,
-  onPauseBar,
+  place = null,
 }: CellVoicePanelProps) {
   const t = useT()
   const sess = session as FrontierSession | null
@@ -356,6 +356,19 @@ export function CellVoicePanel({
   const playableAtt = playableId ? cell.attachments?.[playableId] : undefined
   const kept = keptWindowSec(cell, playableId, playableAtt)
   const isSourceClip = kept.kind === "section"
+  // AQU-1642 follow-up: where the bottom bar's run is on this line. Its clock
+  // is this card's only when the run plays what the card shows — the line's
+  // take, or an imported section's recording; otherwise no place is drawn.
+  const runKind = useQueueCellKind(place ? cell.id : undefined)
+  const runAt = useQueueCellPosition(place ? cell.id : undefined)
+  const run = place
+    ? {
+        kind: runKind,
+        sec: queueClockIsFileTime(cell) === isSourceClip ? runAt : null,
+        onPress: place.onPress,
+        onPick: place.onPick,
+      }
+    : null
   // AQU-1767: a piece of a split take trims back out only as far as its
   // neighbouring piece (Sam, 2026-10-15).
   const pieceLimits = useMemo(() => {
@@ -594,12 +607,17 @@ export function CellVoicePanel({
           trimEditable={!isSourceClip && canEdit}
           {...(pieceLimits ? { trimLimits: pieceLimits } : {})}
           onCommitTrim={commitTrim}
-          barPlayback={playingInBar && onPauseBar ? { onPause: onPauseBar } : null}
+          run={run}
           className="voice-card-wave"
           testId="voice-card-waveform"
         >
           <span className="pointer-events-none absolute bottom-1 left-2 z-10 flex items-center gap-1">
-            <TakeTimeReadout currentTime={currentTime} duration={duration} kept={kept} testId="voice-card-time" />
+            <TakeTimeReadout
+              currentTime={run?.sec != null && !audio.isPlaying ? run.sec : currentTime}
+              duration={duration}
+              kept={kept}
+              testId="voice-card-time"
+            />
             {voiceDiffers && (
               <AppTooltip content={takeVoiceTip}>
                 <span

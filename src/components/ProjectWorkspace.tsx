@@ -208,6 +208,7 @@ import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
   setQueueTargetSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying } from "@/lib/audio/play-queue"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
 import { useTransportForFile } from "@/hooks/useTransportForFile"
+import { useAudioViewPlace } from "@/hooks/useAudioViewPlace"
 import { videoOwnsFile, virtualOwnsFile } from "@/lib/audio/transport"
 import { recordingDrivesPlayback, switchPlaybackSource, usePlaybackSource, type PlaybackSource } from "@/lib/audio/playback-source"
 import { youTubeVideoId } from "@/lib/video/youtube"
@@ -2343,6 +2344,9 @@ export function ProjectWorkspace() {
     // table's playback follow even if an earlier scroll had released it.
     editorRef.current?.setMediaFollow?.("engage")
   }, [])
+  // AQU-1642 follow-up: the Audio view's one place to play from. Its context —
+  // the file's cells with their takes — is filled in below, once they exist.
+  const audioViewPlace = useAudioViewPlace(activeFileId ?? null)
   const audioLens = useMemo<AudioLensContext | null>(
     () =>
       lens === "audio" && audioProject && !activeFileTimeOrdered
@@ -2378,11 +2382,12 @@ export function ProjectWorkspace() {
               setMakeCharacterSeedCellId(cellId)
               setMakeCharacterOpen(true)
             },
+            place: audioViewPlace.place,
           }
         : null,
     [
       lens, audioProject, activeFileTimeOrdered, tts.voices, tts.settings, tts.defaultVoiceId,
-      tts.assignCells, frontierSession, currentUsername, cellStore, refresh,
+      tts.assignCells, frontierSession, currentUsername, cellStore, refresh, audioViewPlace.place,
     ],
   )
 
@@ -11594,6 +11599,11 @@ export function ProjectWorkspace() {
     () => mergeCellsWithAudio(legacyCells, workspaceAudioByCellId),
     [legacyCells, workspaceAudioByCellId],
   )
+  // AQU-1642 follow-up: what the Audio view's cards and ⋯ Play open the run
+  // with — the same lines, takes and "moved to this line" as the bar's Play.
+  audioViewPlace.contextRef.current = project
+    ? { cells: audioMergedCells, projectId: project.id, session: frontierSession ?? null, onActiveCell: handleBarActiveCell }
+    : null
 
   // AQU-928: transcribe EXACTLY the sections selected on the timeline. Same
   // per-cell path (and same post-run flush/revalidate) as transcribe-all, only
@@ -16549,7 +16559,9 @@ export function ProjectWorkspace() {
                   session={frontierSession ?? null}
                   settings={tts.settings}
                   onActiveCell={handleBarActiveCell}
-                  startCellId={timelineSelectedCellId}
+                  // AQU-1642 follow-up: in the Audio view, Play starts from the
+                  // verse last selected or stopped.
+                  startCellId={audioLens ? audioViewPlace.place.startCellId : timelineSelectedCellId}
                   coreMediaUrl={activeFile?.coreMediaUrl ?? null}
                   videoPaneOnScreen={showVideoPane}
                   // AQU-646 stage 3h: what the bar reads on a file with timings

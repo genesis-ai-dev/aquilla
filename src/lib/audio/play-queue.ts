@@ -459,6 +459,8 @@ let takeEdgeTimer: ReturnType<typeof setTimeout> | null = null
 let currentAttachmentUrl: string | null = null
 /** Seek target applied on loadedmetadata (Safari rejects pre-metadata seeks). */
 let pendingStartSeconds: number | null = null
+/** A move within a line asked for while its clip was still being fetched. */
+let openingSeek: { cellId: string; sec: number } | null = null
 /** AQU-1767: the dubbing master's tick, at a given second — for the timer that
  *  fires a made-ready dub at its start. Null with no master open. */
 let queueTickAt: ((atSec: number) => void) | null = null
@@ -560,6 +562,7 @@ function disposeCurrent(): void {
   clearTakeEdge()
   currentAttachmentUrl = null
   pendingStartSeconds = null
+  openingSeek = null
   queueTickAt = null
   clearActiveAudioIf(coordinatorController)
   setProgress({ currentTime: 0, duration: 0 })
@@ -3188,7 +3191,8 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
   currentAttachmentUrl = playable.url
   currentIndex = index
   currentTrim = masterWindowForCell(cell)
-  pendingStartSeconds = opts.atSeconds ?? null
+  pendingStartSeconds = openingSeek?.cellId === cell.id ? openingSeek.sec : (opts.atSeconds ?? null)
+  openingSeek = null
   audio.playbackRate = progress.rate
   audio.volume = progress.volume
   audio.muted = !audibility.source
@@ -3457,9 +3461,19 @@ export function startQueueAtCell(
  */
 export function seekQueueInCell(cellId: string, seconds: number): boolean {
   const ctx = activeContext
-  if (!ctx || !currentAudio) return false
+  if (!ctx) return false
   if (state.kind !== "playing" && state.kind !== "paused" && state.kind !== "loading") return false
   if (state.cellId !== cellId) return false
+  if (!currentAudio) {
+    // Still fetching the line (a drag along a card that has just opened it):
+    // the open lands at the latest second instead of starting over.
+    const cell = ctx.cells.find((c) => c.id === cellId)
+    const w = cell ? masterWindowForCell(cell) : null
+    const at = w ? Math.min(Math.max(seconds, w.start), w.end) : seconds
+    openingSeek = { cellId, sec: at }
+    setProgress({ currentTime: at })
+    return true
+  }
   const w = currentTrim
   const kept = w ? Math.min(Math.max(seconds, w.start), w.end) : seconds
   const at = pastTakeGap(w?.take ? w.gaps : undefined, kept) ?? kept

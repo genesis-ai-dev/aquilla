@@ -69,11 +69,18 @@ export interface TakeWaveformProps {
   /** Persist a finished drag or nudge. Null = back to the clip's edge. */
   onCommitTrim?: (start: number | null, end: number | null) => void
   /**
-   * AQU-1642: a transport elsewhere — the bottom play bar — is playing this
-   * take. The corner button is Pause and pauses that transport; the waveform
-   * does not follow it (the bar shows its progress). Null when it is not.
+   * AQU-1642 follow-up (Sam, 2026-10-17): the Audio view, where the bottom
+   * bar's player is this take's player. `kind` is what it is doing on this
+   * take (null: elsewhere, or stopped) and `sec` where, on the clip's clock —
+   * drawn while it waits as well as while it plays. The corner button is Play,
+   * and Stop while it plays here; a click along the body puts the place there.
    */
-  barPlayback?: { onPause: () => void } | null
+  run?: {
+    kind: "playing" | "loading" | "paused" | null
+    sec: number | null
+    onPress: () => void
+    onPick: (atSeconds: number) => void
+  } | null
   onRecord?: () => void
   recordLabel?: string
   recordGlyph?: React.ReactNode
@@ -100,7 +107,7 @@ export function TakeWaveform({
   trimEditable = false,
   trimLimits,
   onCommitTrim,
-  barPlayback = null,
+  run = null,
   onRecord,
   recordLabel,
   recordGlyph,
@@ -250,10 +257,12 @@ export function TakeWaveform({
     </button>
   ) : null
 
-  // AQU-1642: playing in the bar, and not in this take's own player.
-  const inBar = barPlayback != null && !isPlaying
-  const playGlyph = inBar
-    ? undefined
+  // AQU-1642 follow-up: the bar's player is this take's — unless the take's own
+  // player is the one sounding (a fresh take playing itself after Generate).
+  const viaRun = run != null && !isPlaying
+  const runSounding = viaRun && (run.kind === "playing" || run.kind === "loading")
+  const playGlyph = viaRun
+    ? (run.kind === "loading" ? <Spinner className="size-2.5" /> : undefined)
     : state === "loading"
     ? <Spinner className="size-2.5" />
     : state === "error" && error?.kind === "offline-unavailable"
@@ -272,18 +281,24 @@ export function TakeWaveform({
       trackVars={trackVars}
       keep={keep}
       gaps={gaps}
-      playing={isPlaying || inBar}
-      // In the bar, no progress: WaveformRect draws it only with one.
-      progress={!inBar && viewLen > 0 ? toFrac(currentTime) : null}
+      playing={viaRun ? runSounding : isPlaying}
+      progress={viaRun
+        ? (run.sec != null && viewLen > 0 ? toFrac(run.sec) : null)
+        : (viewLen > 0 ? toFrac(currentTime) : null)}
+      holdProgress={viaRun}
       onTogglePlay={() => {
-        if (inBar) barPlayback.onPause()
-        else if (isPlaying) pause()
-        else void play()
+        if (viaRun) run.onPress()
+        else if (isPlaying) {
+          pause()
+          // In the Audio view the corner button stops: back to the start.
+          if (run) seek(trim.start ?? 0)
+        } else void play()
       }}
       playLabel={t("editor.audio.play")}
-      stopLabel={t("common.pause")}
+      // A pause wherever the button pauses; in the Audio view it stops (Sam).
+      stopLabel={run ? t("common.stop") : t("common.pause")}
       playGlyph={playGlyph}
-      playDisabled={!inBar && state === "loading"}
+      playDisabled={!viaRun && state === "loading"}
       onRecord={onRecord}
       recordLabel={recordLabel}
       recordGlyph={recordGlyph}
@@ -291,7 +306,9 @@ export function TakeWaveform({
       validationLabel={validation === "full"
         ? t("workspace.targetAudioLane.takeValidated")
         : t("workspace.targetAudioLane.takeValidatedByYou")}
-      onSeek={viewLen > 0 ? (f) => seek(viewStart + f * viewLen) : undefined}
+      onSeek={viewLen > 0
+        ? (f) => (viaRun ? run.onPick(viewStart + f * viewLen) : seek(viewStart + f * viewLen))
+        : undefined}
       seekLabel={t("common.seek")}
       edges={edges}
       status={status}

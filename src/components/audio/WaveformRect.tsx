@@ -83,6 +83,11 @@ export interface WaveformRectProps {
   /** Playback position as a fraction of the whole clip; drawn only while `playing`. */
   progress?: number | null
   playing?: boolean
+  /**
+   * AQU-1642 follow-up: draw `progress` while stopped too — the Audio view's
+   * card holds the place it will play from (Sam, 2026-10-17).
+   */
+  holdProgress?: boolean
   /** Top-left play/stop. Omit to hide the button. */
   onTogglePlay?: () => void
   playLabel?: string
@@ -136,6 +141,7 @@ export function WaveformRect({
   gaps,
   progress = null,
   playing = false,
+  holdProgress = false,
   onTogglePlay,
   playLabel = "",
   stopLabel = "",
@@ -213,7 +219,7 @@ export function WaveformRect({
     }
   }
 
-  const showProgress = playing && progress != null && Number.isFinite(progress)
+  const showProgress = (playing || holdProgress) && progress != null && Number.isFinite(progress)
   const fracFromX = (clientX: number): number => {
     const el = boxRef.current
     if (!el) return 0

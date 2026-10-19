@@ -236,8 +236,18 @@ standard decisive check:
   remaining output is the `partyserver` `TS2307`s from `sync-worker`, whose
   package is not installed in this environment — same as 09-28, 10-05 and 10-12).
 * `npx eslint` clean on all three changed files.
-* The full `auth-worker` suite was run as well; see the note below on
-  pre-existing reds in this package.
+* Full `auth-worker` suite (`npx vitest run`): **351 files, 4102 passing, 2
+  expected-fail, 0 failures** (955 s).
+
+  **That closes a flag 10-12 raised.** That pass found *"7 failures in 3 files —
+  all pre-existing"* and recorded them as a regression `dev` had acquired since
+  10-05 (`rls-backstop.test.ts` ×5 from AQU-1611's dropped `target_lang` column,
+  `changeset-floor.test.ts` ×1, `source-linking-cycle.test.ts` ×1), reported
+  rather than fixed because none of it was auth/session work. All three are
+  green at this commit, so `dev` has repaired them in the week since, and this
+  package is clean again as it was on 10-05. Nothing red remains here to
+  distinguish from the change under review — which is the condition that makes
+  a suite run worth anything as evidence.
 
 Environment note, for whoever re-runs this: **no dependencies were installed in
 this container at session start**, and `npm ci`/`npm install` in `auth-worker`

@@ -357,6 +357,12 @@ a metallic-tinted "Enterprise" chip on the org switcher and billing page, and th
 by an "Unlimited" pill in the same slot. No progress bar. Design detail is a ticket (§9),
 not this spec.
 
+**Agent mode drains faster.** Agent runs use 46–100× more input tokens per translation than
+a one-shot draft (§2.3). On Free, a few agent runs on a smart model can use the whole week. The
+agent dock shows the meter before a run starts. At ≥ 80% it adds one line: "Agent runs use
+much more of your allowance than drafting." The per-run cost cap the agent already has is shown
+as % of the weekly allowance, never in dollars.
+
 BYOK covers only OpenRouter and Gemini (✅ Q9), so a BYOK org still has a live meter for GPU
 and sandbox work. In that case the meter shows only the metered share, with a tooltip: "Your
 own keys cover text AI and Gemini voices. Transcription GPUs and import sandboxes still count

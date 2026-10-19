@@ -24,11 +24,14 @@ interface VoiceSidebarProps {
   username: string
   targetLanguage?: string
   fileId?: string | null
+  /** AQU-2037: the open target lane's row id — the roster lists this lane's
+   *  voices, and a voice made here is stamped with it. */
+  laneId?: string | null
 }
 
 export function VoiceSidebar({
   project, projectId, tts, session, username,
-  targetLanguage, fileId, cells,
+  targetLanguage, fileId, cells, laneId,
 }: VoiceSidebarProps) {
   // `username` is part of the rail's contract (the studio is project-scoped)
   // but the cast roster reads everything else it needs off `tts`.
@@ -47,6 +50,7 @@ export function VoiceSidebar({
         <div className="h-full w-full overflow-x-hidden">
           <VoiceLibraryPanel
             settings={tts.settings}
+            laneId={laneId}
             onSettingsChange={tts.saveTts}
             targetLanguage={targetLanguage}
             targetLanes={laneLanguages}

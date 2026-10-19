@@ -36,7 +36,8 @@ beforeAll(async () => {
     projects: [{ id: "p", name: "Pattani", created_by: 1 }],
     files: [{ id: "f", project_id: "p", name: "Mark", event_id: "f-event" }],
     cells: ["c1", "c2"].map((cellId, index) => ({ project_id: "p", file_id: "f", cell_id: cellId,
-      side: "source", target_lang: "", value: `Passage ${index + 1}`, canonical_ref: `MRK 1:${index + 1}`, event_id: `${cellId}-event`, last_edit_at: 1 })),
+      side: "source", target_lang: "", value: `Passage ${index + 1}`, canonical_ref: `MRK 1:${index + 1}`, event_id: `${cellId}-event`, last_edit_at: 1,
+      metadata: JSON.stringify(index === 0 ? { paragraphStart: true } : {}) })),
   })
   env = { AQUILLA_PG: data.db, SYNC_SECRET_KEY: SECRET, SNAPSHOTS: {} as R2Bucket }
   ownerToken = await makeTestToken(SECRET, { projectId: "p", userId: 1, username: "owner", role: 700 })
@@ -61,8 +62,10 @@ describe("checking capabilities", () => {
     const session = await join(link)
     expect((await verifyTokenForProject(session, "p", SECRET)).ok).toBe(false)
     const content = await request(`/${link}/content`, session)
-    const body = await content.json() as { rows: Array<{ cellId: string }> }
+    const body = await content.json() as { rows: Array<{ cellId: string; paragraphStart: unknown }> }
     expect(body.rows.map(row => row.cellId)).toEqual(["c1"])
+    // The guest page lays passages out as a document, so it needs the file's paragraph breaks.
+    expect(body.rows[0].paragraphStart).toBe(true)
     expect((await request(`/${link}/events`, session, event("c2"))).status).toBe(401)
     expect((await request(`/${link}/audio?fileId=f&cellId=c2&audioId=foreign`, session)).status).toBe(401)
     const feedback = event()

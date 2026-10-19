@@ -1,13 +1,14 @@
 # Unified billing — one meter, one entitlement check, three plans
 
-**Status:** Proposal for Ryder's review · 2026-10-19 · Ryder (drafted with Claude)
+**Status:** Proposal · 2026-10-19 · Ryder (drafted with Claude). Ryder answered Q2–Q12 on
+2026-10-19 (recorded inline as **✅ Decided**); **Q1 is still open**.
 **Inputs:** billing audit 2026-10-16; code audit of `origin/dev` at `1fefb63e3` (this doc cites
 it throughout); `docs/pricing/pricing-model.md`; the superseded Field Plan spec
 `2026-08-13-stripe-field-plan-billing.md`; `docs/runbooks/billing-spec-proposed.md` (superseded).
 **Linear:** none filed yet — the ticket split in §9 waits for approval. Related and already open:
 AQU-2014 (Team onboarding), AQU-2015 (BYOK for server features).
 
-Open questions for Ryder are marked **❓Q1…Q12** inline and collected in §8.
+Questions are numbered Q1…Q12 inline and collected in §8. Only **❓Q1** is still open.
 
 ---
 
@@ -83,17 +84,26 @@ model or an audio job burns more credits per word, a cheap one fewer.
 
 Today's internal unit is "one marked-up cent at 4× raw" (`pricing-model.md:45`, `billing-cost.ts`),
 so Free's 25 units are only 6.25 raw cents a week. The new definition is a different size.
-Calibration is mechanical (Rule 5: code answers): take the median `raw_micro_cents` per 100
-target words over the last 30 days of `target.cell.commit` drafts produced by chat/agent on the
-default model, and freeze the result as `CREDIT_RAW_MICRO_CENTS` with a new
+Whatever the calibration, the result is frozen as `CREDIT_RAW_MICRO_CENTS` with a new
 `rate_version = '2026-11-credit-v1'`. Old rows keep their version.
 
-**❓Q1 — calibration point.** Which model counts as "the default model" for the 100-word
-reference, and is median the right statistic (vs. p75, which leaves more margin)?
+**❓Q1 — calibration (OPEN; the parent session is researching it).** Two options are on the
+table:
 
-**❓Q2 — markup.** The agent rail is marked up 5× today (`credits.ts:35-44`); everything else
-4×. Recommendation: **one 4× markup for every rail**, folded into the credit definition, so
-the meter has a single conversion. Agree?
+- **Option A: calibrate from benchmarks.** Take typical per-100-word raw costs from the repo's
+  agent/autopilot translation benchmarking notes for one "smart" model and one "fast" model. The
+  credit is 4× a reference cost chosen from those two figures (for example, the smart model's
+  cost, so a fast-model draft burns less than one credit per 100 words). The live ledger can
+  check the figure later (median `raw_micro_cents` per 100 committed target words over 30 days).
+- **Option B: peg Free to a dollar value.** Set the Free allowance directly as raw cost per
+  week, for example **$1/week of raw provider cost**, admin-configurable. The credit is then only
+  a display convenience for operators. Customers never see either one (R7).
+
+Either option feeds the Team multiple in §4.3, which is defined relative to Free.
+
+**✅ Q2 — markup (decided).** **One 4× markup for every rail.** The agent's 5× markup
+(`credits.ts:35-44`) is dropped. The markup is folded into the credit definition, so the
+meter has one conversion.
 
 ## 3. ONE entitlement check
 
@@ -171,9 +181,8 @@ OpenRouter `/models` and `/generation` lookups, browser-direct BYOK calls
 price them from the OpenRouter rate card (`rate-card.ts`). #23 and #24 must request and keep
 `usage.cost`. #25 must take `attempt` from the server.
 
-**❓Q3 — Omni warm (#27) and container time (#12, #26).** These are real spend but small and
-hard to attribute. Recommendation: **meter them** (gpu/sandbox rails, measured seconds) rather
-than leave a hole a user can loop on. Or accept them as platform overhead under the ceiling?
+**✅ Q3 — Omni warm (#27) and container time (#12, #26) (decided).** **Meter them** on the gpu
+and sandbox rails, using measured seconds, so there is no unmetered path a user can loop on.
 
 ### 3.3 Background work attribution
 
@@ -188,10 +197,13 @@ an org hits 100%, background runs **pause** (resume on reset or upgrade) rather 
 | | Free | Team | Enterprise |
 |---|---|---|---|
 | Who | every org, by default | orgs that pay via Stripe | orgs an admin flags |
-| AI | weekly allowance (global default, admin can override per org) | larger weekly allowance, multimodal included | unmetered, still recorded |
-| Price | $0 | **$500/mo** (❓Q4 annual) | invoiced outside Stripe |
+| AI | weekly allowance (global default, admin can override per org) | a fixed multiple of Free (§4.3), multimodal included | unmetered, still recorded |
+| Price | $0 | **$500/mo or $5,000/yr**, flat per org, no seats | invoiced outside Stripe |
 | Support | docs | basic support | contract |
-| BYOK | yes — meter off | yes — meter off | yes (rarely needed) |
+| BYOK | OpenRouter + Gemini: meter off for those | same | same (rarely needed) |
+
+BYOK (✅ Q9) covers **OpenRouter and Gemini** keys. GPU (Modal) and sandbox (Cloudflare
+containers) cannot use a customer key, so they **stay metered even for BYOK orgs**.
 
 ### 4.2 One plan resolver
 
@@ -212,12 +224,12 @@ resolveOrgPlan(db, orgId) → { tier: 'free' | 'team' | 'enterprise',
   `allowance.ts:17-28`) is the global cap, renamed to `freeWeeklyCredits`.
 - **Team:** set by the Stripe webhook from `workspace_plan_entitlements` (existing tables and
   idempotent `applyBillingEvent` stay).
-- **Enterprise:** set only by a platform admin. After `contract_ends_at`, the org falls to
-  **Team-sized allowance for a 14-day grace**, then Free (❓Q5).
+- **Enterprise:** set only by a platform admin. After `contract_ends_at`, the org gets a
+  **Team-sized allowance for a 14-day grace**, then Free (✅ Q5).
 - The client gets the same answer from one endpoint (`GET /api/v2/orgs/:id/plan`), so there is
   no client copy of the rules. Delete `src/lib/entitlements/*`; nothing calls it.
 - **`billing_scope`** (`personal | team`) stops gating AI. Personal workspaces are Free orgs like
-  any other (❓Q6 can a personal workspace buy Team?).
+  any other. **Any org, including a personal workspace, can buy Team** (✅ Q6).
 
 ### 4.3 Reconciling the catalog
 
@@ -231,12 +243,41 @@ pro/max_5x/max_20x/team_20x in Stripe (no live subscribers: live checkout has ne
 enabled). Relax the "exactly 10 bindings" schema to "exactly the Team bindings". The old
 "Field Plan" name dies; "Team" is the only paid self-serve name.
 
-**❓Q4 — Team annual price.** $5,000/yr (two months free) or $6,000/yr (no discount)?
-**❓Q7 — Team allowance size.** At a 4× markup, Team fully used costs us at most a quarter of
-revenue: $500/mo → ≤ $125/mo raw ≈ **$29/week raw**. In credits that is `29 / raw(100 words)`.
-Recommendation: set Team's weekly credits so that full use is ≤ 25% of revenue, and Free at
-~2% of Team. Ryder to confirm the ratio; the numbers fall out of Q1's calibration.
-**❓Q8 — Seats.** Is Team $500 flat per org regardless of members? (Recommendation: yes, flat.)
+**✅ Q4 — Team annual price:** **$5,000/yr** (two months free).
+**✅ Q8 — Seats:** Team is **flat per org**, with no per-seat pricing.
+
+**✅ Q7 — Team allowance (decided, changed from the draft).** Team's allowance is defined as
+**a multiple of Free**. Ryder: "let's base team on free … like 500x free usage (or whatever it
+works out to). Let's make sure we can absorb the cost no problem. People can always bring their
+own keys." 500× is his placeholder. The real multiple comes from this rule:
+
+> Team at 100% use every week must cost us **at most 25% of Team revenue** in raw provider
+> cost.
+
+At a 4× markup, 100% use costs exactly a quarter of the credit value, so the 25% target leaves
+the markup as the margin. In numbers:
+
+- Team revenue per week: monthly is $500 × 12 ÷ 52 ≈ $115.38; annual is $5,000 ÷ 52 ≈
+  **$96.15**. Size against the lower figure, annual.
+- Team raw-cost budget = 25% × $96.15 ≈ **$24/week raw**.
+- **Team multiple = $24 ÷ Free's weekly raw cost**, rounded *down* to a round number.
+
+| Free's weekly raw cost | Team multiple | Matches |
+|---|---|---|
+| $0.0625 (today's 25 units at "1 unit = 1 marked-up cent") | ≈ 384 → **350×** | close to Ryder's 500× placeholder |
+| $0.25 | ≈ 96 → **90×** | |
+| $1.00 (Q1 option B) | **24×** | |
+
+So 500× only works if Free stays around today's size (6¢ of raw cost a week). If Free grows to
+$1/week, Team is about 24× Free. Q1 decides which row applies.
+
+Two rules keep this absorbable:
+
+1. **The multiple is frozen at calibration**, stored as `platform_settings.teamMultipleOfFree`.
+   Free stays admin-adjustable (R3), and Team scales with it.
+2. **The admin portal shows Team's implied raw cost** next to the Free cap ("Team at 100% =
+   $X/week raw, Y% of revenue") and warns when a Free change pushes Team past 25%. The platform
+   spend ceiling (§5.2) remains the backstop. Heavy users can bring their own keys.
 
 ## 5. Rollout safety
 
@@ -304,7 +345,7 @@ BILLING_METER_MODE = off | shadow | enforce     (default: shadow once shipped)
   their tier, % used, and the paths that drove it. This is the evidence for the enforce flip.
 - **enforce** rolls out by per-org allowlist first (`platform_settings.meterEnforceOrgs`), then
   global.
-- Exit criteria for global enforce: two full weekly periods in shadow; every would-block org
+- Exit criteria for global enforce: **two full weekly periods in shadow** (✅ Q12); every would-block org
   reviewed; zero `usage_accounting_unavailable`; ceiling sum within 5% of the OpenRouter
   dashboard for the same days.
 
@@ -328,8 +369,10 @@ a metallic-tinted "Enterprise" chip on the org switcher and billing page, and th
 by an "Unlimited" pill in the same slot. No progress bar. Design detail is a ticket (§9),
 not this spec.
 
-Where BYOK covers only some providers (❓Q9), the meter shows only the metered share, with a
-tooltip naming what still counts.
+BYOK covers only OpenRouter and Gemini (✅ Q9), so a BYOK org still has a live meter for GPU
+and sandbox work. In that case the meter shows only the metered share, with a tooltip: "Your
+own keys cover text AI and Gemini voices. Transcription GPUs and import sandboxes still count
+here." The fully greyed meter appears only when the org has used no metered rail this period.
 
 ## 7. Platform-feature entitlements and Stripe
 
@@ -340,12 +383,10 @@ The only gate today is `grantAllBillingStub.hasPaidFeature: () => true`
 itself **does not exist**: nothing ingests into or reads from it (`src/lib/global-tm/index.ts:5`
 says "INERT"); `contributeToGlobalTm` is a settings key with no consumer.
 
-Recommendation: **no paid platform features at launch.** Free is the whole app (R3); plans differ
-only by AI. Delete the stub and `global-tm`. If global TM is ever built, its opt-out is a privacy
+**✅ Q10 (decided): no paid platform features at launch.** Free is the whole app (R3); plans
+differ only by AI. Delete the stub and `global-tm`. If global TM is ever built, its opt-out is a privacy
 control and should be free for everyone, not an Enterprise upsell. Plan-only extras that *could*
 come later (SSO, audit export, priority support) are listed as non-goals.
-
-**❓Q10 — any paid platform feature at launch?** (Recommendation: none.)
 
 ### 7.2 Stripe go-live for Team
 
@@ -353,9 +394,11 @@ Existing pieces to keep: workspace checkout, `reconcileWorkspaceLifecycle`/`Paym
 idempotent `org_billing_events`, workspace portal configs. To add or decide:
 
 - **Tax (Canada GST/HST).** Checkout has no `automatic_tax` or `tax_id_collection`
-  (`workspace-checkout.ts:87-101`). Add both; register for GST/HST in Stripe Tax (HITL: Ryder's
-  business number). Prices are tax-exclusive. ❓Q11 register only Canada, or also US states
-  as thresholds are reached?
+  (`workspace-checkout.ts:87-101`). Add both. Prices are tax-exclusive. (✅ Q11) Stripe Tax
+  **calculates and collects** tax and **monitors registration thresholds**, but it **does not
+  register us** with any tax authority. So: register for **Canada GST/HST now** (HITL: Ryder's
+  business number, then add the registration in Stripe Tax), and add a US state only when
+  Stripe's threshold monitoring flags it.
 - **Dunning and grace.** Today a failed payment "immediately applies the Free cap"
   (`pricing-model.md:159`). Recommendation: Stripe Smart Retries over **7 days**, Team allowance
   kept during retries, Free cap after the final failure, email at each step.
@@ -363,7 +406,7 @@ idempotent `org_billing_events`, workspace portal configs. To add or decide:
   allowance until `paid_through`, then Free. Usage already consumed this week is kept.
 - **Customer portal.** One portal config for Team: update card, invoices, switch monthly↔annual,
   cancel. No plan picker beyond Team.
-- **Annual billing.** Second Team price (Q4). Switching mid-term prorates via the portal.
+- **Annual billing.** Second Team price, $5,000/yr (✅ Q4). Switching mid-term prorates via the portal.
 - **Live switch.** `BILLING_WORKSPACE_CHECKOUT_ENABLED=true` in production requires
   `BILLING_METER_MODE=enforce` (replaces the dual gate in `billing/environment.ts:40-44`).
 - **Marketing.** `aquilla-marketing/src/views/Pricing/PricingPage.tsx` and `catalog.ts` show
@@ -372,22 +415,24 @@ idempotent `org_billing_events`, workspace portal configs. To add or decide:
   Team audience toggle, keep the % framing in the FAQ ("words are never metered" stays true),
   delete `public/mkt/pricing-v3/v4/v5.html`.
 
-## 8. Open questions for Ryder
+## 8. Questions and decisions
 
-| # | Question | Recommendation |
-|---|---|---|
-| ❓Q1 | Default model and statistic for the 100-word credit calibration | the editor's default draft model, median |
-| ❓Q2 | One 4× markup for every rail (drop the agent's 5×)? | yes |
-| ❓Q3 | Meter Omni warm and container seconds, or absorb as overhead? | meter |
-| ❓Q4 | Team annual price | $5,000/yr |
-| ❓Q5 | Enterprise after contract end | 14-day Team-sized grace, then Free |
-| ❓Q6 | Can a personal workspace buy Team? | yes — any org can |
-| ❓Q7 | Team and Free weekly allowance sizes (as % of Team revenue) | Team full use ≤ 25% of revenue; Free ≈ 2% of Team |
-| ❓Q8 | Team flat per org, no seats? | yes |
-| ❓Q9 | BYOK scope: which providers (OpenRouter only, or also Inworld/Gemini)? Modal GPU and containers cannot be BYOK — metered even for BYOK orgs? | OpenRouter + Gemini TTS keys; GPU/sandbox stay metered |
-| ❓Q10 | Any paid platform feature at launch? | none |
-| ❓Q11 | Tax registration scope | Canada GST/HST now |
-| ❓Q12 | Shadow length before enforce | two full weekly periods |
+Ryder answered Q2–Q12 on 2026-10-19. Q1 is the only open question.
+
+| # | Question | Status | Answer |
+|---|---|---|---|
+| Q1 | How is a credit calibrated? | **❓ OPEN** (being researched) | Option A: per-100-word costs from the agent/autopilot benchmarking notes, for a "smart" and a "fast" model. Option B: peg Free to a dollar value, e.g. $1/week raw, admin-configurable. See §2.3. |
+| Q2 | One markup for every rail? | ✅ | one 4× markup; the agent's 5× is dropped |
+| Q3 | Meter Omni warm and container seconds? | ✅ | meter them |
+| Q4 | Team annual price | ✅ | $5,000/yr |
+| Q5 | Enterprise after contract end | ✅ | 14-day Team-sized grace, then Free |
+| Q6 | Can a personal workspace buy Team? | ✅ | yes, any org can |
+| Q7 | Team allowance size | ✅ (changed) | a multiple of Free, sized so Team at full use costs ≤ 25% of revenue (§4.3); 500× was a placeholder |
+| Q8 | Team seats | ✅ | flat per org, no seats |
+| Q9 | BYOK scope | ✅ | OpenRouter + Gemini; GPU and sandbox stay metered for BYOK orgs |
+| Q10 | Paid platform features at launch | ✅ | none |
+| Q11 | Tax registration | ✅ | Stripe Tax calculates, collects and monitors thresholds but does not register us; register Canada GST/HST now, add US states when flagged |
+| Q12 | Shadow length | ✅ | two full weekly periods |
 
 ## 9. Proposed tickets (not filed — awaiting approval)
 
@@ -396,8 +441,8 @@ secret, a dashboard, or a production flip). Order is the dependency order.
 
 | # | Ticket | Type | Depends on |
 |---|---|---|---|
-| T0 | Ryder answers Q1–Q12; spec marked approved | HITL | — |
-| T1 | Calibrate the credit: query median raw cost per 100 words; write `CREDIT_RAW_MICRO_CENTS` + `rate_version` | AFK (query) → HITL (pick value) | T0 |
+| T0 | Ryder closes Q1; spec marked approved (Q2–Q12 answered 2026-10-19) | HITL | — |
+| T1 | Calibrate the credit (Q1 option A or B); write `CREDIT_RAW_MICRO_CENTS`, `rate_version`, the Free weekly cap and `teamMultipleOfFree` (§4.3) | AFK (figures) → HITL (pick values) | T0 |
 | T2 | Ledger migration: widen `rail`, add `mode`/`decision`, system user, nullable project; spend ceiling reads it | AFK | T0 |
 | T3 | `resolveOrgPlan` + `org_billing.plan` free/team/enterprise + `contract_ends_at`; backfill legacy Field→Team, Enterprise/partner→Enterprise, rest Free; delete `billing_scope` gating | AFK | T2 |
 | T4 | `checkAiEntitlement` + `paidFetch` in `db/shared`, `BILLING_METER_MODE` off/shadow/enforce, 402 contract | AFK | T2, T3 |
@@ -405,12 +450,12 @@ secret, a dashboard, or a production flip). Order is the dependency order.
 | T6 | Bring auth-worker LLM paths under the check: #10, 11, 12, 23, 24, 25 | AFK | T4 |
 | T7 | Bring Jev paths under the check (#17-22); route passage-tags through `callJev`; token→cost via rate card | AFK | T4 |
 | T8 | Bring sync-worker audio/TTS/GPU paths under the check (#13-16, 27) with price-card reserve + measured settle | AFK | T4 |
-| T9 | Container-seconds metering for #12 and #26 (if Q3 = meter) | AFK | T4 |
-| T10 | Admin portal: global Free cap, per-org override, Enterprise toggle + contract end, would-block report | AFK | T3, T4 |
+| T9 | Container-seconds metering for #12 and #26, and GPU-seconds for Omni warm #27 | AFK | T4 |
+| T10 | Admin portal: global Free cap, per-org override, Team's implied raw cost + 25% warning, Enterprise toggle + contract end, would-block report | AFK | T3, T4 |
 | T11 | Client: one 402 helper, one % meter, 80/100% states, CTAs, BYOK disabled meter, Enterprise premium badge | AFK (design review HITL) | T4 |
 | T12 | Server BYOK (org key storage, per-rail provider keys) | **AQU-2015** (existing) | T4 |
 | T13 | Ship in shadow on prod; review would-block report after two weeks | HITL | T5–T8, T10 |
-| T14 | Stripe Team: collapse catalog to 2 prices, `automatic_tax` + `tax_id_collection`, dunning/grace, portal config | AFK (code) + HITL (live prices, GST/HST registration, dashboard dunning settings) | T0 |
+| T14 | Stripe Team: collapse catalog to 2 prices ($500/mo, $5,000/yr), `automatic_tax` + `tax_id_collection`, dunning/grace, portal config | AFK (code) + HITL (live prices, GST/HST registration, dashboard dunning settings) | T0 |
 | T15 | Team onboarding flow | **AQU-2014** (existing) | T14 |
 | T16 | Marketing pricing page: three cards, delete old drafts | AFK draft → HITL approve + deploy | T0, T14 |
 | T17 | Enforce flip: allowlist, then global; enable live checkout | HITL | T13, T14 |
@@ -463,4 +508,4 @@ Each item was checked for callers on `1fefb63e3`.
 
 Per-seat pricing; usage-based overage billing; add-on packs; SSO, audit export, and priority
 support as plan features; a self-serve Enterprise checkout; showing credits or dollars to
-customers; BYOK for Modal GPU or Cloudflare containers.
+customers; BYOK for Modal GPU, Cloudflare containers, or Inworld.

@@ -863,6 +863,47 @@ describe("TimelineEditor", () => {
     expect(screen.queryByTestId("tl-detail-overlap")).toBeNull()
   })
 
+  // AQU-1767 (Sam, 2026-10-19): a split take's pills read the whole take.
+  it("a take cut into three pieces reads from its first piece to its last, with the sound it keeps", () => {
+    // Verse 10–20. A 4s take cut into 0–1.5s, 2.5–3.7s and 3.8–4.0s of the
+    // recording, so on the timeline 10.0–11.5, 12.5–13.7 and 13.8–14.0.
+    const TAKE = "audio-v2-1700000000-take.webm"
+    const piece = (n: number) => `audio-v2-170000000${n}-piece.webm`
+    const recording = { type: "audio", url: "frontier-audio://take", slot: "recording", durationMs: 4000 }
+    const plain = (id: string, start: number, end: number): CellData => {
+      const takeId = `audio-${id}-1700000000-take.webm`
+      return cell({
+        id, medium: "media", startTime: start, endTime: end, original: id, selectedAudioId: takeId,
+        attachments: { [takeId]: { ...recording, durationMs: 3000 }, [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" } },
+      } as unknown as Partial<CellData>)
+    }
+    const split = cell({
+      id: "v2", medium: "media", startTime: 10, endTime: 20, original: "v2", selectedAudioId: TAKE,
+      attachments: {
+        [TAKE]: { ...recording, trimEndMs: 1500 },
+        [piece(1)]: { ...recording, trimStartMs: 2500, trimEndMs: 3700, pieceOf: TAKE },
+        [piece(2)]: { ...recording, trimStartMs: 3800, pieceOf: TAKE },
+        [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+      },
+    } as unknown as Partial<CellData>)
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable
+        cells={[plain("v1", 0, 10), split, plain("v3", 20, 30)]}
+        onRetimeSubtitle={() => {}} initialSelectedCellId="v2"
+      />,
+    )
+    expect(screen.getByTestId("tl-detail-dub-range")).toHaveTextContent("Target: 0:10.0–0:14.0")
+    expect(screen.getByTestId("tl-detail-pieces")).toHaveTextContent("3 pieces")
+    // 1.5 + 1.2 + 0.2 seconds of sound.
+    expect(screen.getByTestId("tl-detail-duration")).toHaveTextContent("2.9s")
+    // Source 10.0s − the take's 4.0s span.
+    expect(screen.getByTestId("tl-detail-diff")).toHaveTextContent("Diff: +6.0s")
+    // Its own pieces never count as overlapping each other.
+    expect(screen.queryByTestId("tl-detail-overlap")).toBeNull()
+    expect(screen.queryByTestId("tl-detail-overlap-start")).toBeNull()
+  })
+
   // ── 2026-08-08: an automatic playback advance clears the selection ──
 
   const editorAt = (onSelectCell: (id: string | null) => void) => (

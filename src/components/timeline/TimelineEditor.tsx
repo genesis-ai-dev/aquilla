@@ -2801,17 +2801,30 @@ export function TimelineEditor({
       if (srcDurationSec == null && tgtDurationSec == null) return null
       return { kind: "free" as const, srcDurationSec, tgtDurationSec }
     }
-    const i = targetItems.findIndex((t) => t.cell.id === currentCell.id)
-    if (i < 0) return null
+    // AQU-1767: a split take's pieces are consecutive items, and the pills read
+    // them as the one take they are (Sam, 2026-10-19): from the first piece's
+    // start to the last piece's end, the sound they keep added up, and how many
+    // pieces. Diff and overlap measure that span against the line and its
+    // neighbours — the silences between pieces are inside the take.
+    const first = targetItems.findIndex((t) => t.cell.id === currentCell.id)
+    if (first < 0) return null
+    let last = first
+    while (targetItems[last + 1]?.cell.id === currentCell.id) last += 1
     const geomOf = (t: (typeof targetItems)[number] | undefined) =>
       t ? layout.targetGeom(t.cell, t.cell.attachments?.[t.audioId]) : null
-    const geom = geomOf(targetItems[i])
-    if (!geom || geom.usingFallback) return null
+    const pieceGeoms = targetItems.slice(first, last + 1).map(geomOf)
+    if (pieceGeoms.some((g) => !g || g.usingFallback)) return null
+    const spans = pieceGeoms.map((g) => ({ start: g!.start, end: g!.end }))
+    const geom = {
+      start: Math.min(...spans.map((s) => s.start)),
+      end: Math.max(...spans.map((s) => s.end)),
+    }
+    const soundSec = spans.reduce((sum, s) => sum + (s.end - s.start), 0)
     const { startTime, endTime } = currentCell
-    const prev = geomOf(targetItems[i - 1])
-    const next = geomOf(targetItems[i + 1])
+    const prev = geomOf(targetItems[first - 1])
+    const next = geomOf(targetItems[last + 1])
     const { headSec, tailSec } = chipOverlaps(
-      { start: geom.start, end: geom.end },
+      geom,
       prev ? { start: prev.start, end: prev.end } : null,
       next?.start ?? null,
     )
@@ -2836,7 +2849,8 @@ export function TimelineEditor({
       kind: "dubbing" as const,
       startSec: geom.start,
       endSec: geom.end,
-      durationSec: geom.end - geom.start,
+      durationSec: soundSec,
+      ...(spans.length > 1 ? { pieces: spans.length } : {}),
       startDiffSec,
       endDiffSec,
       durationDiffSec: startDiffSec != null && endDiffSec != null ? startDiffSec + endDiffSec : null,

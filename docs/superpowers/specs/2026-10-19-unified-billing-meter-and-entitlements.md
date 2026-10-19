@@ -5,7 +5,7 @@ questions on 2026-10-19; they are recorded inline as **✅ Decided**. Tickets no
 **Inputs:** billing audit 2026-10-16; code audit of `origin/dev` at `1fefb63e3` (this doc cites
 it throughout); `docs/pricing/pricing-model.md`; the superseded Field Plan spec
 `2026-08-13-stripe-field-plan-billing.md`; `docs/runbooks/billing-spec-proposed.md` (superseded).
-**Linear:** none filed yet — the ticket split in §9 waits for approval. Related and already open:
+**Linear:** AQU-2055 (approval) and the T1–T18 tickets in §9, filed 2026-10-19. Related and already open:
 AQU-2014 (Team onboarding), AQU-2015 (BYOK for server features).
 
 Questions are numbered Q1…Q12 inline and collected in §8. All are resolved.
@@ -428,32 +428,33 @@ Ryder answered all twelve on 2026-10-19.
 | Q11 | Tax registration | ✅ | Stripe Tax calculates, collects and monitors thresholds but does not register us; register Canada GST/HST now, add US states when flagged |
 | Q12 | Shadow length | ✅ | two full weekly periods |
 
-## 9. Proposed tickets (not filed — awaiting approval)
+## 9. Tickets (filed 2026-10-19)
 
 **AFK** = an agent can do it end to end with tests. **HITL** = needs Ryder (a decision, a
-secret, a dashboard, or a production flip). Order is the dependency order.
+secret, a dashboard, or a production flip). Order is the dependency order. All are in Linear Triage, assigned to Ryder; Linear blockers
+follow the "Depends on" column.
 
-| # | Ticket | Type | Depends on |
-|---|---|---|---|
-| T0 | Ryder approves the spec (all questions answered 2026-10-19) | HITL | — |
-| T1 | Raw-dollar allowances: `freeWeeklyRawUsd` = 1.00, `teamMultipleOfFree` = 24, derived display unit for admin screens; drop the 25-unit Free and offer table in `pricing-model.ts` | AFK | T0 |
-| T2 | Ledger migration: widen `rail`, add `mode`/`decision`, system user, nullable project; spend ceiling reads it | AFK | T0 |
-| T3 | `resolveOrgPlan` + `org_billing.plan` free/team/enterprise + `contract_ends_at`; backfill legacy Field→Team, Enterprise/partner→Enterprise, rest Free; delete `billing_scope` gating | AFK | T2 |
-| T4 | `checkAiEntitlement` + `paidFetch` in `db/shared`, `BILLING_METER_MODE` off/shadow/enforce, 402 contract | AFK | T2, T3 |
-| T5 | Move already-metered paths (#1-8) onto `paidFetch`; fix reaction-run `roleSnapshot` (#9) | AFK | T4 |
-| T6 | Bring auth-worker LLM paths under the check: #10, 11, 12, 23, 24, 25 | AFK | T4 |
-| T7 | Bring Jev paths under the check (#17-22); route passage-tags through `callJev`; token→cost via rate card | AFK | T4 |
-| T8 | Bring sync-worker audio/TTS/GPU paths under the check (#13-16, 27) with price-card reserve + measured settle | AFK | T4 |
-| T9 | Container-seconds metering for #12 and #26, and GPU-seconds for Omni warm #27 | AFK | T4 |
-| T10 | Admin portal: global Free cap, per-org override, Team's implied raw cost + 25% warning, Enterprise toggle + contract end, would-block report | AFK | T3, T4 |
-| T11 | Client: one 402 helper, one % meter, 80/100% states, CTAs, BYOK disabled meter, Enterprise premium badge | AFK (design review HITL) | T4 |
-| T12 | Server BYOK (org key storage, per-rail provider keys) | **AQU-2015** (existing) | T4 |
-| T13 | Ship in shadow on prod; review would-block report after two weeks | HITL | T5–T8, T10 |
-| T14 | Stripe Team: collapse catalog to 2 prices ($500/mo, $5,000/yr), `automatic_tax` + `tax_id_collection`, dunning/grace, portal config | AFK (code) + HITL (live prices, GST/HST registration, dashboard dunning settings) | T0 |
-| T15 | Team onboarding flow | **AQU-2014** (existing) | T14 |
-| T16 | Marketing pricing page: three cards, delete old drafts | AFK draft → HITL approve + deploy | T0, T14 |
-| T17 | Enforce flip: allowlist, then global; enable live checkout | HITL | T13, T14 |
-| T18 | Dead-code removal (§10) | AFK | T17 + one clean week |
+| # | Linear | Ticket | Type | Depends on |
+|---|---|---|---|---|
+| T0 | AQU-2055 | Ryder approves the spec (all questions answered 2026-10-19) | HITL | — |
+| T1 | AQU-2056 | Raw-dollar allowances: `freeWeeklyRawUsd` = 1.00, `teamMultipleOfFree` = 24, derived display unit for admin screens; drop the 25-unit Free and offer table in `pricing-model.ts` | AFK | T0 |
+| T2 | AQU-2057 | Ledger migration: widen `rail`, add `mode`/`decision`, system user, nullable project; spend ceiling reads it | AFK | T0 |
+| T3 | AQU-2059 | `resolveOrgPlan` + `org_billing.plan` free/team/enterprise + `contract_ends_at`; backfill legacy Field→Team, Enterprise/partner→Enterprise, rest Free; delete `billing_scope` gating | AFK | T2 |
+| T4 | AQU-2061 | `checkAiEntitlement` + `paidFetch` in `db/shared`, `BILLING_METER_MODE` off/shadow/enforce, 402 contract | AFK | T2, T3 |
+| T5 | AQU-2062 | Move already-metered paths (#1-8) onto `paidFetch`; fix reaction-run `roleSnapshot` (#9) | AFK | T4 |
+| T6 | AQU-2063 | Bring auth-worker LLM paths under the check: #10, 11, 12, 23, 24, 25 | AFK | T4 |
+| T7 | AQU-2064 | Bring Jev paths under the check (#17-22); route passage-tags through `callJev`; token→cost via rate card | AFK | T4 |
+| T8 | AQU-2065 | Bring sync-worker audio/TTS/GPU paths under the check (#13-16, 27) with price-card reserve + measured settle | AFK | T4 |
+| T9 | AQU-2066 | Container-seconds metering for #12 and #26, and GPU-seconds for Omni warm #27 | AFK | T4 |
+| T10 | AQU-2067 | Admin portal: global Free cap, per-org override, Team's implied raw cost + 25% warning, Enterprise toggle + contract end, would-block report | AFK | T3, T4 |
+| T11 | AQU-2068 | Client: one 402 helper, one % meter, 80/100% states, CTAs, BYOK disabled meter, Enterprise premium badge | AFK (design review HITL) | T4 |
+| T12 | AQU-2015 | Server BYOK (org key storage, per-rail provider keys) | existing | T4 |
+| T13 | AQU-2069 | Ship in shadow on prod; review would-block report after two weeks | HITL | T5–T8, T10 |
+| T14 | AQU-2058 | Stripe Team: collapse catalog to 2 prices ($500/mo, $5,000/yr), `automatic_tax` + `tax_id_collection`, dunning/grace, portal config | AFK (code) + HITL (live prices, GST/HST registration, dashboard dunning settings) | T0 |
+| T15 | AQU-2014 | Team onboarding flow | existing | T14 |
+| T16 | AQU-2060 | Marketing pricing page: three cards, delete old drafts | AFK draft → HITL approve + deploy | T0, T14 |
+| T17 | AQU-2070 | Enforce flip: allowlist, then global; enable live checkout | HITL | T13, T14 |
+| T18 | AQU-2071 | Dead-code removal (§10) | AFK | T17 + one clean week |
 
 ## 10. Dead code to remove after T17
 

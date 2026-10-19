@@ -1,14 +1,14 @@
 # Unified billing — one meter, one entitlement check, three plans
 
-**Status:** Proposal · 2026-10-19 · Ryder (drafted with Claude). Ryder answered Q2–Q12 on
-2026-10-19 (recorded inline as **✅ Decided**); **Q1 is still open**.
+**Status:** Proposal · 2026-10-19 · Ryder (drafted with Claude). Ryder answered all twelve
+questions on 2026-10-19; they are recorded inline as **✅ Decided**. Tickets not yet filed.
 **Inputs:** billing audit 2026-10-16; code audit of `origin/dev` at `1fefb63e3` (this doc cites
 it throughout); `docs/pricing/pricing-model.md`; the superseded Field Plan spec
 `2026-08-13-stripe-field-plan-billing.md`; `docs/runbooks/billing-spec-proposed.md` (superseded).
 **Linear:** none filed yet — the ticket split in §9 waits for approval. Related and already open:
 AQU-2014 (Team onboarding), AQU-2015 (BYOK for server features).
 
-Questions are numbered Q1…Q12 inline and collected in §8. Only **❓Q1** is still open.
+Questions are numbered Q1…Q12 inline and collected in §8. All are resolved.
 
 ---
 
@@ -58,8 +58,9 @@ cost per request, and (c) already has the 100%-admit / 105%-finish rule Ryder ap
 
 ### 2.2 Changes to the kept ledger
 
-1. **Store raw cost as the truth.** `raw_micro_cents` is the fact. Credits become a *derived*
-   view (§2.3), so re-calibrating a credit never rewrites history.
+1. **The meter runs on raw cost.** `raw_micro_cents` is the fact, and allowances are stated
+   in raw dollars (§2.3). Credits are only a derived display unit for operators, so changing
+   them never rewrites history or moves a cap.
 2. **Widen `rail`** from `llm|agent|tts` to `llm | agent | jev | tts | audio | gpu | sandbox`
    (CHECK constraint + `CostRail`). Every path in §3 maps to one rail.
 3. **Add `mode`** (`metered | unmetered | byok`) and **`decision`** (`allow | would_block |
@@ -73,37 +74,37 @@ cost per request, and (c) already has the 100%-admit / 105%-finish rule Ryder ap
    pattern `transcribe-core.ts:173-273` already uses.
 6. **The spend ceiling reads this ledger** (§5.2).
 
-### 2.3 What a credit is
+### 2.3 Raw cost is the meter (✅ Q1)
 
-A credit is an internal unit only (R7). Definition:
+The meter compares **raw provider cost** with a **raw-dollar weekly allowance**. There is no
+calibration step and no "credit = N words" definition.
 
-> **1 credit = 4 × the raw provider cost of translating 100 words on the default model.**
+- **Free = $1/week of raw provider cost**, editable in the admin portal (R3).
+- **Team = 24 × Free** = $24/week raw (§4.3).
+- **Enterprise** = unmetered, still recorded.
 
-It is *not* 100 words. A credit is a dollar amount fixed at a calibration point; a costly
-model or an audio job burns more credits per word, a cheap one fewer.
+Users see only a % meter (R7). If operators need a quotable number, the **credit is a derived
+display unit**: 1 credit = one marked-up cent = 0.25¢ of raw cost (today's convention,
+`pricing-model.md:45`). Under it Free is 400 credits a week and Team 9,600. That number is
+calculated from raw cost for admin screens only; the meter never reads it.
 
-Today's internal unit is "one marked-up cent at 4× raw" (`pricing-model.md:45`, `billing-cost.ts`),
-so Free's 25 units are only 6.25 raw cents a week. The new definition is a different size.
-Whatever the calibration, the result is frozen as `CREDIT_RAW_MICRO_CENTS` with a new
-`rate_version = '2026-11-credit-v1'`. Old rows keep their version.
+**What $1/week buys.** No "smart vs fast" benchmark note exists in this repo. The measured data
+is in `genesis-ai-dev/ebible-benchmark-factory`,
+`benchmark_results/low-resource-panel-luna/20260721T030758Z-d4408a86/seven-model-report.md:9-15`:
+24 verses, one call each with 10 examples. At about 25 words a verse (≈600 words):
 
-**❓Q1 — calibration (OPEN; the parent session is researching it).** Two options are on the
-table:
+| Model (role) | Raw cost, 24 verses | ≈ raw cost / 100 words | Free's $1/week buys |
+|---|---|---|---|
+| GPT-5.6 Luna (fast) | $0.0519 | $0.009 | ≈ 11,000 words |
+| Claude Sonnet 4.6 (mid) | $0.2146 | $0.036 | ≈ 2,800 words |
+| Claude Fable 5 (smart) | $0.7426 | $0.12 | ≈ 800 words |
 
-- **Option A: calibrate from benchmarks.** Take typical per-100-word raw costs from the repo's
-  agent/autopilot translation benchmarking notes for one "smart" model and one "fast" model. The
-  credit is 4× a reference cost chosen from those two figures (for example, the smart model's
-  cost, so a fast-model draft burns less than one credit per 100 words). The live ledger can
-  check the figure later (median `raw_micro_cents` per 100 committed target words over 30 days).
-- **Option B: peg Free to a dollar value.** Set the Free allowance directly as raw cost per
-  week, for example **$1/week of raw provider cost**, admin-configurable. The credit is then only
-  a display convenience for operators. Customers never see either one (R7).
-
-Either option feeds the Team multiple in §4.3, which is defined relative to Free.
+These are one-shot prompted calls. Agent runs use **46–100× more input tokens** per translation
+(same repo, `README.md:690`), so agent mode drains the allowance far faster (§6).
 
 **✅ Q2 — markup (decided).** **One 4× markup for every rail.** The agent's 5× markup
-(`credits.ts:35-44`) is dropped. The markup is folded into the credit definition, so the
-meter has one conversion.
+(`credits.ts:35-44`) is dropped. Because the meter runs on raw cost, the markup appears only in
+the derived display unit and in margin sizing (§4.3), never in the meter.
 
 ## 3. ONE entitlement check
 
@@ -213,7 +214,7 @@ zero production callers) with one server function:
 
 ```ts
 resolveOrgPlan(db, orgId) → { tier: 'free' | 'team' | 'enterprise',
-                              weeklyCredits: number | null,   // null = unmetered
+                              weeklyRawMicroCents: number | null,   // null = unmetered
                               periodStart, periodEnd, source }
 ```
 
@@ -221,9 +222,9 @@ resolveOrgPlan(db, orgId) → { tier: 'free' | 'team' | 'enterprise',
   enterprise`). Add `contract_ends_at TIMESTAMPTZ NULL`. Keep `weekly_allowance` as the per-org
   admin override (already exists, `allowance.ts:9`).
 - **Free:** no row needed; `platform_settings.fieldPlan.freeWeeklyAllowance` (already exists,
-  `allowance.ts:17-28`) is the global cap, renamed to `freeWeeklyCredits`.
+  `allowance.ts:17-28`) becomes `freeWeeklyRawUsd` (default **1.00**), the global cap.
 - **Team:** set by the Stripe webhook from `workspace_plan_entitlements` (existing tables and
-  idempotent `applyBillingEvent` stay).
+  idempotent `applyBillingEvent` stay). Allowance = `teamMultipleOfFree` (24) × the Free cap.
 - **Enterprise:** set only by a platform admin. After `contract_ends_at`, the org gets a
   **Team-sized allowance for a 14-day grace**, then Free (✅ Q5).
 - The client gets the same answer from one endpoint (`GET /api/v2/orgs/:id/plan`), so there is
@@ -246,38 +247,25 @@ enabled). Relax the "exactly 10 bindings" schema to "exactly the Team bindings".
 **✅ Q4 — Team annual price:** **$5,000/yr** (two months free).
 **✅ Q8 — Seats:** Team is **flat per org**, with no per-seat pricing.
 
-**✅ Q7 — Team allowance (decided, changed from the draft).** Team's allowance is defined as
-**a multiple of Free**. Ryder: "let's base team on free … like 500x free usage (or whatever it
-works out to). Let's make sure we can absorb the cost no problem. People can always bring their
-own keys." 500× is his placeholder. The real multiple comes from this rule:
+**✅ Q7 — Team allowance (decided).** **Team = 24 × Free = $24/week of raw cost.** The rule
+behind it is Ryder's "make sure we can absorb the cost no problem":
 
 > Team at 100% use every week must cost us **at most 25% of Team revenue** in raw provider
 > cost.
 
-At a 4× markup, 100% use costs exactly a quarter of the credit value, so the 25% target leaves
-the markup as the margin. In numbers:
-
 - Team revenue per week: monthly is $500 × 12 ÷ 52 ≈ $115.38; annual is $5,000 ÷ 52 ≈
   **$96.15**. Size against the lower figure, annual.
-- Team raw-cost budget = 25% × $96.15 ≈ **$24/week raw**.
-- **Team multiple = $24 ÷ Free's weekly raw cost**, rounded *down* to a round number.
+- 25% × $96.15 ≈ **$24/week raw**, which is 24 × Free's $1. (Ryder's earlier "500×" was a
+  placeholder; it would only fit a Free cap of about 5¢ a week.)
+- On a fast model that is roughly 270,000 words a week; on a smart model about 20,000.
 
-| Free's weekly raw cost | Team multiple | Matches |
-|---|---|---|
-| $0.0625 (today's 25 units at "1 unit = 1 marked-up cent") | ≈ 384 → **350×** | close to Ryder's 500× placeholder |
-| $0.25 | ≈ 96 → **90×** | |
-| $1.00 (Q1 option B) | **24×** | |
+Two rules keep it absorbable:
 
-So 500× only works if Free stays around today's size (6¢ of raw cost a week). If Free grows to
-$1/week, Team is about 24× Free. Q1 decides which row applies.
-
-Two rules keep this absorbable:
-
-1. **The multiple is frozen at calibration**, stored as `platform_settings.teamMultipleOfFree`.
-   Free stays admin-adjustable (R3), and Team scales with it.
+1. **Team scales with Free.** `platform_settings.teamMultipleOfFree = 24`. When an admin changes
+   Free, Team changes with it.
 2. **The admin portal shows Team's implied raw cost** next to the Free cap ("Team at 100% =
-   $X/week raw, Y% of revenue") and warns when a Free change pushes Team past 25%. The platform
-   spend ceiling (§5.2) remains the backstop. Heavy users can bring their own keys.
+   $24/week raw, 25% of annual revenue") and warns when a Free change pushes Team past 25%.
+   The platform spend ceiling (§5.2) remains the backstop. Heavy users can bring their own keys.
 
 ## 5. Rollout safety
 
@@ -417,17 +405,17 @@ idempotent `org_billing_events`, workspace portal configs. To add or decide:
 
 ## 8. Questions and decisions
 
-Ryder answered Q2–Q12 on 2026-10-19. Q1 is the only open question.
+Ryder answered all twelve on 2026-10-19.
 
 | # | Question | Status | Answer |
 |---|---|---|---|
-| Q1 | How is a credit calibrated? | **❓ OPEN** (being researched) | Option A: per-100-word costs from the agent/autopilot benchmarking notes, for a "smart" and a "fast" model. Option B: peg Free to a dollar value, e.g. $1/week raw, admin-configurable. See §2.3. |
+| Q1 | How is the allowance set? | ✅ | the meter runs on raw cost; Free = $1/week raw, admin-editable; credits are a derived display unit only (§2.3) |
 | Q2 | One markup for every rail? | ✅ | one 4× markup; the agent's 5× is dropped |
 | Q3 | Meter Omni warm and container seconds? | ✅ | meter them |
 | Q4 | Team annual price | ✅ | $5,000/yr |
 | Q5 | Enterprise after contract end | ✅ | 14-day Team-sized grace, then Free |
 | Q6 | Can a personal workspace buy Team? | ✅ | yes, any org can |
-| Q7 | Team allowance size | ✅ (changed) | a multiple of Free, sized so Team at full use costs ≤ 25% of revenue (§4.3); 500× was a placeholder |
+| Q7 | Team allowance size | ✅ | 24 × Free = $24/week raw, ≤ 25% of annual Team revenue; scales with Free (§4.3) |
 | Q8 | Team seats | ✅ | flat per org, no seats |
 | Q9 | BYOK scope | ✅ | OpenRouter + Gemini; GPU and sandbox stay metered for BYOK orgs |
 | Q10 | Paid platform features at launch | ✅ | none |
@@ -441,8 +429,8 @@ secret, a dashboard, or a production flip). Order is the dependency order.
 
 | # | Ticket | Type | Depends on |
 |---|---|---|---|
-| T0 | Ryder closes Q1; spec marked approved (Q2–Q12 answered 2026-10-19) | HITL | — |
-| T1 | Calibrate the credit (Q1 option A or B); write `CREDIT_RAW_MICRO_CENTS`, `rate_version`, the Free weekly cap and `teamMultipleOfFree` (§4.3) | AFK (figures) → HITL (pick values) | T0 |
+| T0 | Ryder approves the spec (all questions answered 2026-10-19) | HITL | — |
+| T1 | Raw-dollar allowances: `freeWeeklyRawUsd` = 1.00, `teamMultipleOfFree` = 24, derived display unit for admin screens; drop the 25-unit Free and offer table in `pricing-model.ts` | AFK | T0 |
 | T2 | Ledger migration: widen `rail`, add `mode`/`decision`, system user, nullable project; spend ceiling reads it | AFK | T0 |
 | T3 | `resolveOrgPlan` + `org_billing.plan` free/team/enterprise + `contract_ends_at`; backfill legacy Field→Team, Enterprise/partner→Enterprise, rest Free; delete `billing_scope` gating | AFK | T2 |
 | T4 | `checkAiEntitlement` + `paidFetch` in `db/shared`, `BILLING_METER_MODE` off/shadow/enforce, 402 contract | AFK | T2, T3 |

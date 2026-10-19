@@ -209,6 +209,7 @@ import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
 import { useTransportForFile } from "@/hooks/useTransportForFile"
 import { useAudioViewPlace } from "@/hooks/useAudioViewPlace"
+import { usePauseAudioWhenHidden } from "@/hooks/usePauseAudioWhenHidden"
 import { videoOwnsFile, virtualOwnsFile } from "@/lib/audio/transport"
 import { recordingDrivesPlayback, switchPlaybackSource, usePlaybackSource, type PlaybackSource } from "@/lib/audio/playback-source"
 import { youTubeVideoId } from "@/lib/video/youtube"
@@ -702,6 +703,8 @@ export function ProjectWorkspace() {
   const { list: formatLocaleList } = useFormat()
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
   const navigate = useNavigate()
+  // Leaving the tab pauses playback — a hidden tab can't keep the timeline in time.
+  usePauseAudioWhenHidden()
   // Declared up here because effects further down set and read them long before
   // the values they mirror are computed. Keeping the declarations ahead of every
   // use is what makes the mirroring legal (react-hooks/immutability).

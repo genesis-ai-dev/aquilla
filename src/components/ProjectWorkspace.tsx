@@ -101,6 +101,7 @@ import {
   editorReturnFromLocation,
   orgHomePath,
   projectSettingsPath,
+  projectLanguageSettingsPath,
   withEditorReturn,
 } from "@/lib/navigation/org-paths"
 import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCache } from "@/lib/store/project-index"
@@ -16043,22 +16044,29 @@ export function ProjectWorkspace() {
             laneLabels={laneLabels}
             laneCodes={laneCodes}
             // AQU-583: the TARGET tag is the discoverable entry point to change
-            // the target language — deep-link to settings filtered to the
-            // Project Info + Languages sections (both carry the "target language"
-            // keyword), where the field is edited (server enforces the role floor).
-            onEditTargetLanguage={() =>
-              navigate(`/project/${projectId}/settings?q=${encodeURIComponent("target language")}`, {
+            // the target language (the lane dropdown's "Change target language…",
+            // the single-lane pill, and the "Set target language" prompt all land
+            // here), where the field is edited (server enforces the role floor).
+            // AQU-2031: it opens the General PANE with the Languages card in
+            // view, not a `?q=target language` search — the search pre-fill
+            // always showed the search box and mixed in Project Info, which has
+            // no target-language field, so the person landed on what looked like
+            // a search they never ran.
+            onEditTargetLanguage={() => {
+              if (!projectId) return
+              navigate(projectLanguageSettingsPath(projectId, "languages"), {
                 state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
               })
-            }
-            // AQU-1601: "Add lane…" opens Languages. The keyword "target lanes"
-            // matches that section only ("target language" also matches Project
-            // Info). EditorTable withholds the item from anyone below maintainer.
-            onAddLane={() =>
-              navigate(`/project/${projectId}/settings?q=${encodeURIComponent("target lanes")}`, {
+            }}
+            // AQU-1601: "Add lane…" opens Languages too, scrolled to its "Add a
+            // target lane" field (AQU-2031). EditorTable withholds the item from
+            // anyone below maintainer.
+            onAddLane={() => {
+              if (!projectId) return
+              navigate(projectLanguageSettingsPath(projectId, "add-lane"), {
                 state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
               })
-            }
+            }}
             // AQU-1271: the add-to-terminology popover offers this when the
             // project has no prefix/suffix inventory for its matcher yet.
             onSetUpAffixes={() =>

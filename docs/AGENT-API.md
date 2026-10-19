@@ -1219,6 +1219,43 @@ Cyrillic, verified to work in both modes), `\uXXXX` escapes rather than `\u{...}
 literal characters where you can. Then **confirm the rule fires** against a cell you know
 violates it — `read_quality` after the commit — rather than trusting the changeset receipt.
 
+## Status addendum (2026-10-16, Zapier plan workstream B — trigger feeds)
+
+Polling integrations (Zapier first) need newest-first feeds with stable ids. Three
+reads were added; there are still no webhooks.
+
+- **`GET /projects/:projectId/activity?kinds=&fileId=&limit=&cursor=`**
+  (`sync-worker/src/external/activity-route.ts`). Newest first:
+  `{ items: [{ id, kind, fileId, cellId, serverSeq, serverTs, author?, data }], nextCursor }`.
+  - The cursor is a keyset on `server_seq` (`server_seq < cursor`, served by
+    `idx_events_project_seq_id`), not the offset cursor in `pagination.ts`. Events that
+    land between two calls sort above every cursor already issued, so a walk never
+    repeats or skips. Pollers re-read page 1 and dedupe on `id`. An unreadable cursor
+    is a 400, never a silent restart.
+  - Each call scans at most the 5,000 newest events below the cursor. There is no
+    `kind` index on purpose (it would slow writes on `events`), so a rare-kind filter
+    may return a short or empty page plus a `nextCursor` pointing below the window.
+  - `*.mirror` and `link.cursor.advance` never appear.
+  - `data` is a per-kind allowlist (`projectActivityData`): comment `commentId/body/
+    parentCommentId/viaAgent/scope`, target/source cell `value` (+ `laneId/targetLang`,
+    `aiDrafted`), validate `editEventId` + lane, file `name/fileType/bookCode`. Every
+    other kind returns `{}`. Raw payloads would leak validator and assignee identities
+    (e.g. `cell.unvalidate.targetUsername`).
+  - `author` goes through `pii.ts` like every read; `@[username]` mentions inside a
+    comment body get the same treatment (pseudonym, or `@[someone]` under `none`).
+  - The lane read wall applies: lane-scoped kinds on lanes the caller cannot read are
+    dropped after the cursor is fixed, so filtering can shorten a page but never skip.
+- **`GET /projects/:projectId/changesets/pending?limit=`**
+  (`pending-changesets-route.ts`). Staged, unexpired changesets from any credential,
+  newest first, Maintainer+ only: `{ data: [{ id, createdAt, summary, author?,
+  approvalUrl }], nextCursor: null }`. `summary` keeps only numeric counts, `command`,
+  and `{ kind, count }` per entry of an EmitEvents plan's `events` (so a staged comment
+  is not an empty summary), because several summary fields are names. No `credentialId`, `commands` or `receipt`.
+  Mounted from the read router, because `changesets-route.ts` would treat `pending` as
+  a changeset id.
+- **`?sort=created`** on `GET /projects` and `GET /projects/:projectId/files` lists
+  newest first. Any other `sort` value is a 400.
+
 ## Status addendum (2026-10-16, Omnilingual ASR — agent transcription)
 
 Spec: `docs/superpowers/specs/2026-10-16-omnilingual-asr.md` §7.

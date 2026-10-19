@@ -17,20 +17,26 @@
 //
 // Clients register by URL (Client ID Metadata Documents, see
 // lib/mcp-oauth/client-metadata.ts); there is no dynamic registration
-// endpoint. All clients are treated as public: PKCE S256 is mandatory.
+// endpoint. Those clients are public. The one exception is Zapier, a
+// pre-registered confidential client (lib/mcp-oauth/static-clients.ts): it
+// authenticates with a secret, its token is bound to the external REST API
+// instead of MCP, and its consent page offers ask/act and read/write.
+// PKCE S256 is mandatory for every client.
 
 import { Hono, type MiddlewareHandler } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE, type AuthUser } from "../types"
-import { mintApiToken, sha256Hex } from "../../../db/shared/api-credentials"
+import { mintApiToken, REST_OAUTH_RESOURCE_SUFFIX, sha256Hex } from "../../../db/shared/api-credentials"
 import { countRecentEvents, recordAuthEvent, userIdentifier } from "../utils/rate-limit"
 import { scopeLevel } from "./agent-connect"
 import { pinnedClientFetcher, resolveClient, type Fetcher, type ResolvedClient } from "../lib/mcp-oauth/client-metadata"
+import { secretMatches, staticClientFor } from "../lib/mcp-oauth/static-clients"
 
 type Bindings = AuthHonoEnv["Bindings"]
 type Mode = "ask" | "act"
+type Access = "read" | "write"
 
 const MCP_RESOURCE_SUFFIX = "/api/v1/external/mcp"
 const CODE_TTL = "5 minutes"
@@ -51,7 +57,7 @@ export function authorizationServerMetadata(issuer: string) {
     response_modes_supported: ["query"],
     grant_types_supported: ["authorization_code"],
     code_challenge_methods_supported: ["S256"],
-    token_endpoint_auth_methods_supported: ["none"],
+    token_endpoint_auth_methods_supported: ["none", "client_secret_post", "client_secret_basic"],
     scopes_supported: ["act"],
     client_id_metadata_document_supported: true,
     authorization_response_iss_parameter_supported: true,
@@ -75,6 +81,11 @@ type AuthorizeParams = z.infer<typeof authorizeSchema>
 export function oauthResourceFor(env: Pick<Bindings, "SYNC_WORKER_URL">, issuer: string): string {
   const base = env.SYNC_WORKER_URL ?? issuer.replace(/\/identity$/, "/sync")
   return `${base.replace(/\/+$/, "")}${MCP_RESOURCE_SUFFIX}`
+}
+
+/** The external REST API as the OAuth audience: pre-registered clients only. */
+export function restResourceFor(env: Pick<Bindings, "SYNC_WORKER_URL">, issuer: string): string {
+  return oauthResourceFor(env, issuer).slice(0, -MCP_RESOURCE_SUFFIX.length) + REST_OAUTH_RESOURCE_SUFFIX
 }
 
 export function isAcceptableResource(resource: string, issuer: string, expected?: string): boolean {
@@ -104,7 +115,12 @@ type Validated =
   | { kind: "fatal"; error: string; error_description: string }
   /** Trusted redirect, bad request: send the error back to the client. */
   | { kind: "redirect_error"; error: string; error_description: string; redirect: string }
-  | { kind: "ok"; client: ResolvedClient; params: AuthorizeParams; mode: Mode; resource: string | null }
+  | { kind: "ok"; client: ResolvedClient; params: AuthorizeParams; resource: string | null
+      /** Pre-registered client: REST audience, human-chosen mode and access. */
+      preRegistered: boolean }
+
+type ClientEnv = Pick<Bindings, "WRANGLER_LOCAL" | "MCP_OAUTH_PINNED_CLIENTS" | "SYNC_WORKER_URL"
+  | "ZAPIER_CLIENT_ID" | "ZAPIER_CLIENT_SECRET" | "ZAPIER_REDIRECT_URI">
 
 function clientFetcher(env: Pick<Bindings, "WRANGLER_LOCAL" | "MCP_OAUTH_PINNED_CLIENTS">): Fetcher {
   return env.WRANGLER_LOCAL === "1" && env.MCP_OAUTH_PINNED_CLIENTS
@@ -112,8 +128,12 @@ function clientFetcher(env: Pick<Bindings, "WRANGLER_LOCAL" | "MCP_OAUTH_PINNED_
     : fetch
 }
 
-async function validateAuthorize(params: AuthorizeParams, issuer: string, resource: string, fetcher: Fetcher): Promise<Validated> {
-  const resolved = await resolveClient(params.client_id, fetcher)
+async function validateAuthorize(params: AuthorizeParams, issuer: string, env: ClientEnv): Promise<Validated> {
+  const preRegistered = staticClientFor(env, params.client_id)
+  const resource = preRegistered ? restResourceFor(env, issuer) : oauthResourceFor(env, issuer)
+  const resolved = preRegistered
+    ? { ok: true as const, client: preRegistered }
+    : await resolveClient(params.client_id, clientFetcher(env))
   if (!resolved.ok) return { kind: "fatal", error: resolved.error, error_description: resolved.description }
   if (!resolved.client.redirectUris.includes(params.redirect_uri)) {
     return { kind: "fatal", error: "invalid_request", error_description: "redirect_uri is not registered for this client" }
@@ -127,9 +147,15 @@ async function validateAuthorize(params: AuthorizeParams, issuer: string, resour
     return back("invalid_request", "PKCE with code_challenge_method=S256 is required")
   }
   if (params.resource !== undefined && !isAcceptableResource(params.resource, issuer, resource)) {
-    return back("invalid_target", "resource is not an Aquilla MCP endpoint")
+    return back("invalid_target", preRegistered
+      ? "resource is not the Aquilla external API"
+      : "resource is not an Aquilla MCP endpoint")
   }
-  return { kind: "ok", client: resolved.client, params, mode: "act", resource: params.resource ?? resource }
+  const client: ResolvedClient = {
+    clientId: resolved.client.clientId, clientName: resolved.client.clientName,
+    host: resolved.client.host, redirectUris: resolved.client.redirectUris,
+  }
+  return { kind: "ok", client, params, resource: params.resource ?? resource, preRegistered: preRegistered !== null }
 }
 
 async function readBody(req: Request): Promise<unknown> {
@@ -197,7 +223,21 @@ const tokenSchema = z.object({
   client_id: z.string().min(1).max(2000),
   code_verifier: z.string().regex(/^[A-Za-z0-9\-._~]{43,128}$/),
   resource: z.string().max(2000).optional(),
+  client_secret: z.string().max(500).optional(),
 })
+
+/** RFC 6749 §2.3.1: client_secret_basic is form-urlencoded id:secret. */
+function basicClientSecret(header: string | null | undefined, clientId: string): string | undefined {
+  if (!header?.startsWith("Basic ")) return undefined
+  let decoded: string
+  try { decoded = atob(header.slice(6).trim()) } catch { return undefined }
+  const sep = decoded.indexOf(":")
+  if (sep < 0) return undefined
+  const decode = (v: string) => { try { return decodeURIComponent(v.replace(/\+/g, " ")) } catch { return null } }
+  const id = decode(decoded.slice(0, sep))
+  const secret = decode(decoded.slice(sep + 1))
+  return id === clientId && secret !== null ? secret : undefined
+}
 
 interface CodeRow {
   client_id: string
@@ -206,6 +246,7 @@ interface CodeRow {
   resource: string | null
   user_id: string
   mode: Mode
+  access: Access
   project_id: string | null
   org_id: string | null
   org_ids: string[] | null
@@ -227,7 +268,7 @@ mcpOAuthPublicRoutes.post("/oauth/token", bodyLimit({ maxSize: 8192 }), noStore,
   const codeHash = await sha256Hex(input.code)
   const db = c.env.AQUILLA_PG
   const row = await db.prepare(
-    `SELECT client_id, redirect_uri, code_challenge, resource, user_id, mode, project_id, org_id,
+    `SELECT client_id, redirect_uri, code_challenge, resource, user_id, mode, access, project_id, org_id,
             status, credential_id, org_ids, expires_at <= now() AS expired
      FROM mcp_oauth_codes WHERE code_hash = ?`,
   ).bind(codeHash).first<CodeRow>()
@@ -244,6 +285,15 @@ mcpOAuthPublicRoutes.post("/oauth/token", bodyLimit({ maxSize: 8192 }), noStore,
   }
   if (row.expired) return invalidGrant()
   if (row.client_id !== input.client_id || row.redirect_uri !== input.redirect_uri) return invalidGrant()
+  // A REST-audience code only ever goes to a pre-registered client, which must
+  // prove its secret. The code stays unconsumed on failure (no replay revoke).
+  const preRegistered = staticClientFor(c.env, row.client_id)
+  if (preRegistered || row.resource?.endsWith(REST_OAUTH_RESOURCE_SUFFIX)) {
+    const secret = input.client_secret ?? basicClientSecret(c.req.header("Authorization"), input.client_id)
+    if (!preRegistered || secret === undefined || !(await secretMatches(secret, preRegistered.secret))) {
+      return c.json({ error: "invalid_client" }, 401)
+    }
+  }
   if ((await pkceS256(input.code_verifier)) !== row.code_challenge) return invalidGrant()
   if (input.resource !== undefined) {
     const matches = input.resource === (row.resource ?? oauthResourceFor(c.env, issuer))
@@ -269,10 +319,10 @@ mcpOAuthPublicRoutes.post("/oauth/token", bodyLimit({ maxSize: 8192 }), noStore,
     `WITH claimed AS (
        UPDATE mcp_oauth_codes SET status = 'consumed', credential_id = ?
        WHERE code_hash = ? AND status = 'issued' AND expires_at > now()
-       RETURNING user_id, client_name, mode, org_id, project_id, org_ids, resource
+       RETURNING user_id, client_name, mode, access, org_id, project_id, org_ids, resource
      ) INSERT INTO api_credentials
-       (id, user_id, name, token_prefix, token_hash, mode, org_id, project_id, expires_at, org_ids, oauth_resource)
-       SELECT ?, user_id, client_name, ?, ?, mode, org_id, project_id, NULL, org_ids, COALESCE(resource, ?)
+       (id, user_id, name, token_prefix, token_hash, mode, access, org_id, project_id, expires_at, org_ids, oauth_resource)
+       SELECT ?, user_id, client_name, ?, ?, mode, access, org_id, project_id, NULL, org_ids, COALESCE(resource, ?)
        FROM claimed RETURNING id`,
   ).bind(credentialId, codeHash, credentialId, minted.tokenPrefix, minted.tokenHash, oauthResourceFor(c.env, issuer)).first()
   if (!credential) return invalidGrant()
@@ -297,7 +347,7 @@ mcpOAuthConsentRoutes.post("/request", async (c) => {
   }
   await recordAuthEvent(c.env.AQUILLA_PG, "mcp_oauth_request", ident, true)
   const issuer = issuerFor(c.env, c.req.url)
-  const v = await validateAuthorize(parsed.data, issuer, oauthResourceFor(c.env, issuer), clientFetcher(c.env))
+  const v = await validateAuthorize(parsed.data, issuer, c.env)
   if (v.kind === "fatal") return c.json({ error: v.error, error_description: v.error_description }, 400)
   if (v.kind === "redirect_error") {
     return c.json({ error: v.error, error_description: v.error_description, redirect: v.redirect }, 400)
@@ -306,7 +356,9 @@ mcpOAuthConsentRoutes.post("/request", async (c) => {
     clientName: v.client.clientName,
     clientHost: v.client.host,
     redirectHost: new URL(v.params.redirect_uri).host,
-    mode: "act",
+    mode: v.preRegistered ? "ask" : "act",
+    /** The page shows ask/act and read/write choices only for these. */
+    scopeChoices: v.preRegistered,
     organizations: await eligibleOrganizations(c.env, String(c.get("user").id)),
   })
 })
@@ -314,6 +366,8 @@ mcpOAuthConsentRoutes.post("/request", async (c) => {
 const decisionSchema = authorizeSchema.extend({
   approve: z.boolean(),
   org_ids: z.array(z.string().regex(/^[1-9][0-9]*$/)).min(1).max(1000).optional(),
+  mode: z.enum(["ask", "act"]).optional(),
+  access: z.enum(["read", "write"]).optional(),
 })
 
 /** Approve or deny. Returns the URL the browser must navigate to; the code is
@@ -330,7 +384,7 @@ mcpOAuthConsentRoutes.post("/decision", async (c) => {
   await recordAuthEvent(c.env.AQUILLA_PG, "mcp_oauth_decision", ident, true)
   const issuer = issuerFor(c.env, c.req.url)
   // Re-validate from scratch: the browser is not trusted to carry a verdict.
-  const v = await validateAuthorize(input, issuer, oauthResourceFor(c.env, issuer), clientFetcher(c.env))
+  const v = await validateAuthorize(input, issuer, c.env)
   if (v.kind === "fatal") return c.json({ error: v.error, error_description: v.error_description }, 400)
   if (v.kind === "redirect_error") {
     return c.json({ error: v.error, error_description: v.error_description, redirect: v.redirect }, 400)
@@ -338,6 +392,10 @@ mcpOAuthConsentRoutes.post("/decision", async (c) => {
   if (!input.approve) {
     return c.json({ redirect: buildRedirect(input.redirect_uri, { error: "access_denied", state: input.state, iss: issuer }) })
   }
+  // MCP hosts always get act + read-write (any mode/access sent is ignored);
+  // only a pre-registered client's consent page offers the choices.
+  const mode: Mode = v.preRegistered ? input.mode ?? "ask" : "act"
+  const access: Access = v.preRegistered ? input.access ?? "write" : "write"
   const orgIds = [...new Set(input.org_ids ?? [])]
   if (!orgIds.length) {
     return c.json({ error: "invalid_request", error_description: "choose at least one organization" }, 400)
@@ -348,10 +406,10 @@ mcpOAuthConsentRoutes.post("/decision", async (c) => {
   await c.env.AQUILLA_PG.prepare(
     `INSERT INTO mcp_oauth_codes
        (code_hash, client_id, client_name, redirect_uri, code_challenge, resource,
-        user_id, mode, org_ids, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'act', ?::text::jsonb, now() + interval '${CODE_TTL}')`,
+        user_id, mode, access, org_ids, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb, now() + interval '${CODE_TTL}')`,
   ).bind(await sha256Hex(code), v.client.clientId, v.client.clientName, input.redirect_uri,
-    input.code_challenge ?? "", v.resource, String(user.id), JSON.stringify(orgIds)).run()
+    input.code_challenge ?? "", v.resource, String(user.id), mode, access, JSON.stringify(orgIds)).run()
   // Bounded retention; codes are useless minutes after issue.
   await c.env.AQUILLA_PG.prepare("DELETE FROM mcp_oauth_codes WHERE expires_at < now() - interval '1 day'").run()
   return c.json({ redirect: buildRedirect(input.redirect_uri, { code, state: input.state, iss: issuer }) })

@@ -69,6 +69,11 @@ export const onboarding = defineNamespace({
     "onboarding.oauth.approve": "Allow access",
     "onboarding.oauth.redirecting": "Returning you to {host}…",
     "onboarding.oauth.invalid": "This connection request is not valid. Start the connection again from the app you came from.",
+    "onboarding.oauth.verifiedRegistered": "{client} is registered with Aquilla. Only {client} can complete this connection.",
+    "onboarding.oauth.accessRead": "{client} can watch for activity and read content, but cannot change anything.",
+    "onboarding.oauth.accessWrite": "{client} can also add comments, translations, drafts and imports, subject to the mode below.",
+    "onboarding.oauth.modeAsk": "each change {client} makes waits for a person to approve it.",
+    "onboarding.oauth.modeAct": "changes apply immediately, within your current permissions.",
 
     // — Shared small words reused across this namespace's own surfaces ———————
     "onboarding.common.continue": "Continue",
@@ -545,6 +550,7 @@ export const onboarding = defineNamespace({
     "onboarding.apiTokens.accessWriteDescription":
       "the agent can also propose and apply changes, subject to the mode below.",
     "onboarding.apiTokens.accessReadBadge": "read-only",
+    "onboarding.apiTokens.connectedAppBadge": "connected app",
     "onboarding.apiTokens.modeNotApplicable":
       "Mode only applies to a token that can write. A read-only token has nothing to approve.",
     // "Mode" field label reuses `common.modeLabel` (identical text)
@@ -830,6 +836,25 @@ export const onboarding = defineNamespace({
       "onboarding.oauth.return": {
         description: "Line on the app-consent page saying which website the browser goes back to after the person allows or denies access.",
         placeholders: { host: "The web domain the browser returns to, for example 'chatgpt.com'. Not translated." },
+      },
+      "onboarding.oauth.verifiedRegistered": {
+        description: "Security note on the app-consent page for an app Aquilla registered in advance (for example Zapier), replacing the self-declared-name warning.",
+        placeholders: { client: "The registered app's name, for example 'Zapier'. Not translated." },
+      },
+      "onboarding.oauth.accessRead": {
+        description: "Explains the read-only choice on the app-consent page: the connected app can see activity but not change anything.",
+        placeholders: { client: "The registered app's name, for example 'Zapier'. Not translated." },
+      },
+      "onboarding.oauth.accessWrite": {
+        description: "Explains the read-and-write choice on the app-consent page. 'Mode' is the next choice on the page.",
+        placeholders: { client: "The registered app's name, for example 'Zapier'. Not translated." },
+      },
+      "onboarding.oauth.modeAsk": {
+        description: "Follows the label 'Ask' on the app-consent page: every change the app makes is held until a person approves it.",
+        placeholders: { client: "The registered app's name, for example 'Zapier'. Not translated." },
+      },
+      "onboarding.oauth.modeAct": {
+        description: "Follows the label 'Act' on the app-consent page: the app's changes apply straight away.",
       },
       "onboarding.oauth.redirecting": {
         description: "Status shown on the app-consent page while the browser leaves Aquilla and goes back to the app.",

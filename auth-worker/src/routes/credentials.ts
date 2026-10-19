@@ -75,6 +75,8 @@ interface CredentialRow {
   last_used_at: string | null
   revoked_at: string | null
   pii: boolean | null
+  /** Set for OAuth grants (ChatGPT, Zapier); only the list query reads it. */
+  oauth_resource?: string | null
 }
 
 /** Public JSON shape — never includes token_hash. */
@@ -97,6 +99,9 @@ function toDto(r: CredentialRow) {
     // AQU-1180: surfaced so the token list can mark which tokens see real
     // names — a human auditing their tokens has to be able to tell.
     pii: r.pii === true,
+    // A connected app (OAuth), not a token the user pasted somewhere: the list
+    // labels it and offers no agent-setup instructions for it.
+    oauth: r.oauth_resource != null,
   }
 }
 
@@ -255,7 +260,7 @@ credentials.get("/", authMiddleware, async (c) => {
   const user = c.get("user")
   const result = await c.env.AQUILLA_PG.prepare(
     `SELECT id, name, mode, access, org_id, org_ids, project_id, token_prefix,
-            created_at, expires_at, last_used_at, revoked_at, pii
+            created_at, expires_at, last_used_at, revoked_at, pii, oauth_resource
        FROM api_credentials
       WHERE user_id = ?
       ORDER BY created_at DESC`,

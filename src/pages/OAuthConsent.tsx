@@ -9,8 +9,9 @@ import { Spinner } from "@/components/ui/spinner"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { leaveForClient, mcpOAuthCall, type McpOAuthClient } from "@/lib/sync/agent-connect"
 
-// Consent for MCP hosts (ChatGPT plugin, Claude, Codex) using OAuth 2.1 +
-// PKCE. The identity worker's /oauth/authorize sends the browser here with the
+// Consent for MCP hosts (ChatGPT plugin, Claude, Codex) and the
+// pre-registered Zapier client, using OAuth 2.1 + PKCE. Only pre-registered
+// clients get the mode and access choices (`scopeChoices`); MCP hosts are act. The identity worker's /oauth/authorize sends the browser here with the
 // client's request in the query string; every decision is re-validated by the
 // server, so this page only describes the request and collects the choice.
 // The authorization code travels in the redirect URL and is never stored.
@@ -40,6 +41,8 @@ function OAuthConsentContent() {
   const [client, setClient] = useState<McpOAuthClient | null>(null)
   const [invalid, setInvalid] = useState(false)
   const [selectedOrgs, setSelectedOrgs] = useState<string[]>([])
+  const [mode, setMode] = useState<"ask" | "act">("ask")
+  const [access, setAccess] = useState<"read" | "write">("write")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(false)
   const [leaving, setLeaving] = useState(false)
@@ -73,6 +76,7 @@ function OAuthConsentContent() {
     try {
       const result = await mcpOAuthCall<{ redirect: string }>(jwt, "decision", {
         ...params, approve, ...(approve ? { org_ids: selectedOrgs } : {}),
+        ...(approve && client.scopeChoices ? { mode, access } : {}),
       })
       const redirect = result.ok ? result.data.redirect : result.redirect
       if (redirect) { setLeaving(true); leaveForClient(redirect); return }
@@ -94,9 +98,36 @@ function OAuthConsentContent() {
           <p role="status">{t("onboarding.oauth.redirecting", { host: client?.redirectHost ?? "" })}</p>
         ) : !client ? (error ? null : <Spinner />) : <>
           <p>{t("onboarding.connect.account", { username: session.username })}</p>
-          <p className="text-sm text-muted-foreground">{t("onboarding.oauth.verified", { host: client.clientHost })}</p>
+          <p className="text-sm text-muted-foreground">{client.scopeChoices
+            ? t("onboarding.oauth.verifiedRegistered", { client: client.clientName })
+            : t("onboarding.oauth.verified", { host: client.clientHost })}</p>
           <FieldGroup>
-            <p>{t("onboarding.oauth.act")}</p>
+            {client.scopeChoices ? <>
+              <fieldset disabled={busy} className="flex flex-col gap-2">
+                <legend className="mb-2 font-medium">{t("onboarding.apiTokens.accessLabel")}</legend>
+                <label className="flex items-start gap-2">
+                  <input type="radio" name="oauth-access" className="mt-1" checked={access === "read"} onChange={() => setAccess("read")} />
+                  <span><strong>{t("onboarding.apiTokens.accessReadLabel")}</strong>: {t("onboarding.oauth.accessRead", { client: client.clientName })}</span>
+                </label>
+                <label className="flex items-start gap-2">
+                  <input type="radio" name="oauth-access" className="mt-1" checked={access === "write"} onChange={() => setAccess("write")} />
+                  <span><strong>{t("onboarding.apiTokens.accessWriteLabel")}</strong>: {t("onboarding.oauth.accessWrite", { client: client.clientName })}</span>
+                </label>
+              </fieldset>
+              <fieldset disabled={busy || access === "read"} className="flex flex-col gap-2">
+                <legend className="mb-2 font-medium">{t("common.modeLabel")}</legend>
+                {access === "read" ? <p className="text-sm text-muted-foreground">{t("onboarding.apiTokens.modeNotApplicable")}</p> : <>
+                  <label className="flex items-start gap-2">
+                    <input type="radio" name="oauth-mode" className="mt-1" checked={mode === "ask"} onChange={() => setMode("ask")} />
+                    <span><strong>{t("onboarding.apiTokens.modeAskLabel")}</strong>: {t("onboarding.oauth.modeAsk", { client: client.clientName })}</span>
+                  </label>
+                  <label className="flex items-start gap-2">
+                    <input type="radio" name="oauth-mode" className="mt-1" checked={mode === "act"} onChange={() => setMode("act")} />
+                    <span><strong>{t("onboarding.apiTokens.modeActLabel")}</strong>: {t("onboarding.oauth.modeAct")}</span>
+                  </label>
+                </>}
+              </fieldset>
+            </> : <p>{t("onboarding.oauth.act")}</p>}
             <fieldset disabled={busy} className="flex flex-col gap-3">
               <legend className="mb-2 font-medium">{t("onboarding.oauth.organizations")}</legend>
               {client.organizations.length === 0 ? (

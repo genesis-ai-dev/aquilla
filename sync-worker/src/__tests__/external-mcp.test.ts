@@ -1155,3 +1155,30 @@ describe('resource-bound OAuth uses the same engine through reviewable tools', (
     expect((await tdb.rows<{ status: string }>('changesets'))[0].status).toBe('staged')
   })
 })
+
+// Zapier (docs/ZAPIER.md) holds a REST-audience OAuth token. It must reach the
+// REST API it was granted for, and must not be usable as an MCP credential:
+// the MCP tool profile assumes an MCP host, not a third-party automation.
+describe('REST-audience OAuth (Zapier)', () => {
+  const restResource = 'https://api.aquilla.app/sync/api/v1/external'
+  async function restToken() {
+    const token = await credToken(tdb)
+    await tdb.pg.query('UPDATE api_credentials SET oauth_resource = $1 WHERE id = $2', [restResource, CRED_1])
+    return token
+  }
+
+  it('is accepted by the REST API', async () => {
+    const token = await restToken()
+    const rest = await handleExternalReadRequest(new Request('https://w/api/v1/external/me', {
+      headers: { Authorization: `Bearer ${token}` },
+    }), makeEnv(tdb.db))
+    expect(rest?.status).toBe(200)
+    expect(await rest!.json()).toMatchObject({ credentialId: CRED_1 })
+  })
+
+  it('is refused by the MCP endpoint', async () => {
+    const token = await restToken()
+    const response = await rpc(makeEnv(tdb.db), token, { jsonrpc: '2.0', id: 1, method: 'tools/list' })
+    expect(response.status).toBe(401)
+  })
+})

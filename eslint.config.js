@@ -26,7 +26,7 @@ export default defineConfig([
   // nearest eslint.config.js, so without this ignore it loads those copies' configs.
   // Browser smoke builds and Wrangler bundles are generated, and Wrangler
   // removes its temporary files while the local test stack runs.
-  globalIgnores(['dist', 'dist-e2e-*', '**/.wrangler/**', '.claude', '.worktrees']),
+  globalIgnores(['dist', 'dist-e2e-*', '**/.wrangler/**', '.claude', '.worktrees', 'zapier']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [

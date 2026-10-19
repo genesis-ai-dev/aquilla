@@ -2,7 +2,7 @@
 
 Guidance for Claude Code working in this repo. See also **`AGENTS.md`** (testing/E2E rules,
 shared by all AI assistants) and `docs/` (SYNC, AGENT-API, AGENT-SANDBOX, SEO, OPSEC,
-FEATURE-STORIES, PARTNER-INTEGRATIONS;
+FEATURE-STORIES, PARTNER-INTEGRATIONS, ZAPIER;
 SPEC.md covers the separate VS Code Codex extension that uses Aquilla as a backend).
 
 ## Layout — flat single-SPA trunk

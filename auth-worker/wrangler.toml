@@ -369,6 +369,14 @@ BILLING_WORKSPACE_CHECKOUT_ENABLED = "false"
 # Same SECRET_KEY + SYNC_SECRET_KEY as prod so tokens minted against dev still
 # verify against prod workers during cross-env testing.
 # ---------------------------------------------------------------------------
+# Secrets Store (docs/DEPLOYMENT-ENVIRONMENTS.md, "Changing a secret without a
+# redeploy"): SS_<NAME> supplies env.<NAME> at runtime, so the value can change
+# in the store without a new Worker version.
+[[env.production.secrets_store_secrets]]
+binding = "SS_OMNI_SHARED_SECRET"
+store_id = "74633238cfb84b6a8197a6bd21b2fa21"
+secret_name = "aquilla-production-OMNI_SHARED_SECRET"
+
 [env.development]
 name = "aquilla-dev-identity"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
@@ -496,6 +504,14 @@ MONDAY_REDIRECT_URI = "https://dev.aquilla.app/oauth/callback"
 # are provisioned on this Worker. Local/e2e use the top-level test catalog.
 # AQU-1352 P1: shadow-compare the access_grants resolver (logs parity mismatches; answers unchanged).
 ACCESS_GRANTS_RESOLVER = "shadow"
+
+# Secrets Store (docs/DEPLOYMENT-ENVIRONMENTS.md, "Changing a secret without a
+# redeploy"): SS_<NAME> supplies env.<NAME> at runtime, so the value can change
+# in the store without a new Worker version.
+[[env.development.secrets_store_secrets]]
+binding = "SS_OMNI_SHARED_SECRET"
+store_id = "74633238cfb84b6a8197a6bd21b2fa21"
+secret_name = "aquilla-development-OMNI_SHARED_SECRET"
 
 [env.e2e]
 name = "aquilla-identity-e2e"

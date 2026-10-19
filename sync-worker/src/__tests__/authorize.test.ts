@@ -1179,3 +1179,68 @@ describe("authorize() — source audio needs Project Lead (AQU-1565 follow-up)",
     expect((await authorize(token, attach("dub"), SECRET)).ok).toBe(true)
   })
 })
+
+describe("authorize() — read-only platform view token (AQU-2003)", () => {
+  const REASON = "platform view is read-only; enter the admin code to edit"
+  const assignment = (): RawEvent<"assignment.create"> => ({
+    id: "asg-view-001",
+    schemaVersion: 1,
+    kind: "assignment.create",
+    projectId: "proj-a",
+    fileId: "file-x",
+    cellId: undefined,
+    parentId: null,
+    author: "alice",
+    payload: {
+      assignmentId: "asg-view",
+      scopeKind: "books",
+      scope: [{ fileId: "file-x" }],
+      scopeLabel: "Genesis",
+      assigneeUserId: 2,
+    },
+    clientTs: Date.now(),
+  })
+  const comment = (): RawEvent<"comment.create"> => ({
+    id: "cmt-view-001",
+    schemaVersion: 1,
+    kind: "comment.create",
+    projectId: "proj-a",
+    fileId: PROJECT_SENTINEL_FILE_ID,
+    cellId: undefined,
+    parentId: null,
+    author: "alice",
+    payload: {
+      commentId: "cmt-view",
+      scope: { kind: "project" },
+      body: "Hello",
+      parentCommentId: null,
+    },
+    clientTs: Date.now(),
+  })
+  const sentinelToken = (partial: Partial<SyncTokenClaims>) =>
+    makeTestToken(SECRET, { projectId: "proj-a", fileId: PROJECT_SENTINEL_FILE_ID, ...partial })
+
+  it("refuses an assignment even when the org floor is lowered to Viewer", async () => {
+    const token = await makeToken({ role: 100, src: "platform" })
+    const result = await authorize(token, assignment(), SECRET, makeDb({ assignmentMinRole: 100 }))
+    expect(result).toMatchObject({ ok: false, status: 403, reason: REASON })
+  })
+
+  it("refuses a project-scoped comment from the view token", async () => {
+    const token = await sentinelToken({ role: 100, src: "platform" })
+    const result = await authorize(token, comment(), SECRET)
+    expect(result).toMatchObject({ ok: false, status: 403, reason: REASON })
+  })
+
+  it("leaves a genuine viewer on the ordinary floors, same lowered org floor", async () => {
+    const token = await makeToken({ role: 100, src: "override" })
+    const result = await authorize(token, assignment(), SECRET, makeDb({ assignmentMinRole: 100 }))
+    expect(result.ok).toBe(true)
+  })
+
+  it("leaves an elevated platform token (700) unchanged", async () => {
+    const token = await makeToken({ role: 700, src: "platform" })
+    const result = await authorize(token, assignment(), SECRET, makeDb({}))
+    expect(result.ok).toBe(true)
+  })
+})

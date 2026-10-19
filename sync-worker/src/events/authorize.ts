@@ -277,6 +277,14 @@ async function laneGrantsForExternalToken(
   return pending
 }
 
+/** AQU-2003: refusal for the read-only platform view token (see call sites). */
+function refusePlatformView(claims: SyncTokenClaims): { ok: false; status: 403; reason: string } | null {
+  if (claims.src === 'platform' && claims.role < ROLE.CONTRIBUTOR) {
+    return { ok: false, status: 403, reason: 'platform view is read-only; enter the admin code to edit' }
+  }
+  return null
+}
+
 /**
  * The ONLY function that mints AuthorizedEvent instances. Every event handler
  * accepts AuthorizedEvent and TypeScript prevents bypass (the symbol-branded
@@ -354,6 +362,15 @@ export async function authorize<K extends EventKind>(
         ? tokenClaims.username
         : `user:${tokenClaims.userId}`
 
+    // AQU-2003: the read-only platform view. An un-elevated platform admin is
+    // minted a Viewer (100) token that keeps `src: "platform"`. That token must
+    // write nothing, whatever an org's floors say: `assignmentMinRole` can be
+    // set to Viewer and replaces the static floor, and the lane checks below
+    // skip `src === 'platform'`. One explicit rule here closes both, ahead of
+    // every floor.
+    const platformViewRefusal = refusePlatformView(tokenClaims)
+    if (platformViewRefusal) return platformViewRefusal
+
     if (tokenClaims.role < requiredRoleFor(raw.kind)) {
       return { ok: false, status: 403, reason: `role too low for ${raw.kind}` }
     }
@@ -412,6 +429,15 @@ export async function authorize<K extends EventKind>(
     typeof tokenClaims.username === 'string' && tokenClaims.username.trim() !== ''
       ? tokenClaims.username
       : `user:${tokenClaims.userId}`
+
+  // AQU-2003: the read-only platform view. An un-elevated platform admin is
+  // minted a Viewer (100) token that keeps `src: "platform"`. That token must
+  // write nothing, whatever an org's floors say: `assignmentMinRole` can be
+  // set to Viewer and replaces the static floor, and the lane checks below
+  // skip `src === 'platform'`. One explicit rule here closes both, ahead of
+  // every floor.
+  const platformViewRefusal = refusePlatformView(tokenClaims)
+  if (platformViewRefusal) return platformViewRefusal
 
   // AQU-1462: an archived lane refuses writes that name it. Every role,
   // including Maintainer and platform, and whether or not the write wall is

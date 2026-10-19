@@ -20,6 +20,7 @@ export function VoicePickerContent({
   activeId,
   busy,
   onPick,
+  beforeList,
   footer,
   showLanguageBadge = false,
 }: {
@@ -27,6 +28,8 @@ export function VoicePickerContent({
   activeId: string | undefined
   busy?: boolean
   onPick: (voiceId: string) => void
+  /** Optional first row inside the cast list (e.g. "No character"). */
+  beforeList?: ReactNode
   /** Optional extra row under the list (e.g. "apply to all speaker lines"). */
   footer?: ReactNode
   showLanguageBadge?: boolean
@@ -52,6 +55,7 @@ export function VoicePickerContent({
         />
       </InputGroup>
       <div className="max-h-56 space-y-0.5 overflow-y-auto">
+        {beforeList}
         {filtered.length === 0 ? (
           <p className="px-2 py-3 text-center text-xs italic text-muted-foreground">{t("common.noMatches")}</p>
         ) : (

@@ -124,7 +124,11 @@ export async function handleExternalMcpRequest(
   }
 
   const chatGpt = cred.oauthResource !== undefined
-  env = { ...env, mcpRequest: (input, init) => new McpDelegatedRequest(mcpResourceUrl(publicBase), input, init) }
+  env = {
+    ...env,
+    mcpRequest: (input, init) => new McpDelegatedRequest(mcpResourceUrl(publicBase), input, init),
+    externalPublicBase: publicBase,
+  }
 
   let message: JsonRpcRequest
   try {

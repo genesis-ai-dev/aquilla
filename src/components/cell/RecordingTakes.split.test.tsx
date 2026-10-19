@@ -29,6 +29,7 @@ vi.mock("@/lib/sync/events-emit", () => ({
     return inputs.map((_, i) => ({ event: {}, eventId: `ev-${i}` }))
   }),
 }))
+vi.mock("@/lib/history/history", () => ({ recordStep: vi.fn(), withGroup: async (_l: unknown, fn: () => Promise<unknown>) => fn() }))
 
 import { RecordingTakes } from "./RecordingTakes"
 import { getOptimisticShadows } from "@/lib/audio/audio-attachments-bus"

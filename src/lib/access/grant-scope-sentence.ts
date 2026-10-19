@@ -40,6 +40,12 @@ export interface DescribeGrantInput {
   scope: GrantScope
   /** Locale for "A and B" lists. Defaults to English. */
   locale?: string
+  /**
+   * AQU-2027: the one named person is already on the project at `roleLevel`
+   * and keeps it — "{name} stays a Project lead …", not "will join as". Only
+   * read for a single name.
+   */
+  stays?: boolean
 }
 
 function formatList(items: readonly string[], locale: string): string {
@@ -127,7 +133,11 @@ export function describeGrant(t: GrantTranslator, input: DescribeGrantInput): Gr
   } else if (names.length === 0) {
     sentence = t("org.grantScope.sentence.unset", { role, scope: parts.scope })
   } else if (names.length === 1) {
-    sentence = t("org.grantScope.sentence.person", { name: names[0], role, scope: parts.scope })
+    sentence = t(input.stays ? "org.grantScope.sentence.personStays" : "org.grantScope.sentence.person", {
+      name: names[0],
+      role,
+      scope: parts.scope,
+    })
   } else {
     sentence = t("org.grantScope.sentence.people", {
       names: formatList(names, locale),

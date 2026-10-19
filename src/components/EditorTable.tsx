@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useCallback, useMemo, useState, forwardRef, useImperativeHandle } from "react"
+import { recordStep } from "@/lib/history/history"
 import { createPortal } from "react-dom"
 import {
   LegendList,
@@ -65,6 +66,7 @@ import { timestampNeighbours } from "@/lib/timeline/timestamp-neighbours"
 import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
 import { canPerform, canSwitchLanes } from "@/lib/sync/role-policy"
 import { ROLE } from "@/lib/frontier/roles"
+import { notifyElevationRequired } from "@/lib/errors/elevation-required-signal"
 import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
 import { useDcsUpstreamCursor } from "@/hooks/useDcsUpstreamCursor"
 import { v7 as uuidv7 } from "uuid"
@@ -186,10 +188,10 @@ import {
 } from "./cell/EditorCellContent"
 import { TargetDraftActions, TargetReferenceActions } from "./cell/TargetCellActions"
 import { TargetValidationControl } from "./cell/TargetValidationControl"
-import { takePlayWindow } from "@/lib/audio/kept-window"
 import { AudioValidationControl } from "./cell/AudioValidationControl"
 import { audioBlockedReason, lineValidationTakes } from "@/lib/audio/audio-validation-permissions"
 import { slotSelections } from "@/lib/sync/cell-audio-read-types"
+import { takePlayWindow } from "@/lib/audio/kept-window"
 import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
 import { PericopeSuggestions } from "./PericopeSuggestions"
 import type { PericopeSuggestion } from "@/lib/pericope/suggest"
@@ -1295,6 +1297,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     && !textValidationScope(project, { roleLevel: project.syncRole?.level ?? null, username }).canValidate
       ? t("editor.readOnly.reviewerNoTextValidation")
       : roleReadOnlyLabel
+  // AQU-2003: a platform admin who has not entered the step-up code opens a
+  // foreign project at Viewer (the sync-token mint reopened reads only). Say
+  // so, and offer the code prompt, instead of the generic viewer banner. An
+  // archived lane keeps its own banner, and an elevated admin (level 700)
+  // never lands here.
+  const platformViewOnly =
+    archivedLaneLabel === null &&
+    project.syncRole?.source === "platform" &&
+    (project.syncRole.level ?? 0) < ROLE.CONTRIBUTOR
   // Probe mic permission once (shared across all rows) so the help affordance
   // on CellAudioRecordButton activates when the user has blocked the mic.
   const { micDenied } = useMicPermission(audioLens !== null)
@@ -3176,13 +3187,29 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             AQU-1463: and for an archived lane, which freezes the lane for every
             role. The testid carries which of the two it is, so a test can tell a
             lane that went read-only from a reader who always was. */}
-        {readOnlyLabel && (
+        {(platformViewOnly || readOnlyLabel) && (
           <div
             data-testid={archivedLaneLabel !== null ? "lane-archived-banner" : "role-read-only-banner"}
             className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-300"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 flex-shrink-0"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-            {readOnlyLabel}
+            {platformViewOnly ? t("editor.readOnly.platformView") : readOnlyLabel}
+            {platformViewOnly && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="ms-auto h-6 px-2 text-xs"
+                data-testid="platform-view-enter-code"
+                // Reuses the OPS-44 sync-token signal: it opens the step-up
+                // prompt, and on a grant ProjectElevationBoundary remounts the
+                // page (the project id is in the refused set) so a fresh,
+                // elevated token is minted.
+                onClick={() => notifyElevationRequired({ kind: "sync-token", projectId: project.id })}
+              >
+                {t("editor.readOnly.platformViewEnterCode")}
+              </Button>
+            )}
           </div>
         )}
         {renderChapterNavigation()}
@@ -6159,13 +6186,31 @@ function EditorRow({
   // dependency there would re-run that effect (releasing the focus lock).
   const onValidatedRef = useRef(onValidated)
   useEffect(() => { onValidatedRef.current = onValidated }, [onValidated])
+  // AQU-1767 phase 2: one editing session — however many idle saves it made —
+  // is ONE history step, recorded when the edit settles: the text before the
+  // first save and the text after the last. Typing inside the open cell keeps
+  // the editor's own undo; this is the step Undo takes back afterwards.
+  const textStepRef = useRef<{ before: { value: string; valueHtml?: string }; after: { value: string; valueHtml?: string } } | null>(null)
+  const settleTextStep = useCallback(() => {
+    const step = textStepRef.current
+    if (!step || editorFocusedRef.current) return
+    textStepRef.current = null
+    if (step.before.value === step.after.value) return
+    recordStep({
+      kind: "text.commit",
+      data: { cellId: cell.id, lane: activeLane, side: "target", before: step.before, after: step.after },
+      labelKey: "editor.history.stepEditText",
+      fileId: cell.fileId,
+    })
+  }, [cell.id, cell.fileId, activeLane])
   const settleOwedRepetitions = useCallback(() => {
+    settleTextStep()
     if (!repetitionOwedRef.current || editorFocusedRef.current) return
     repetitionOwedRef.current = false
     void Promise.resolve(onValidatedRef.current?.(cell.id, "typed")).catch((err) => {
       console.warn("[repetition-propagation] failed:", err)
     })
-  }, [cell.id])
+  }, [cell.id, settleTextStep])
 
   // Editor commit path. The plain TipTap editor (TranslatedEditor) calls
   // this on idle/blur/release with the current `{value, valueHtml}` snapshot.
@@ -6202,6 +6247,7 @@ function EditorRow({
     // `checkRulesForCell` for this one cell on the next render — no other
     // cell's cached infractions are invalidated. The server projection
     // arrives via `onCellCommitted` -> revalidate and overwrites this.
+    const committedBefore = { value: cell.translated ?? "", ...(cell.translatedHtml !== undefined ? { valueHtml: cell.translatedHtml } : {}) }
     setLocalTargetDraft({ value, valueHtml })
     onOptimisticEdit?.(cell.id, { value, valueHtml })
     if (idmlConfiguration) {
@@ -6259,6 +6305,12 @@ function EditorRow({
         targetLang: activeLane,
       })
       lastCommittedEventIdRef.current = eventId
+      // AQU-1767 phase 2: the session's step — first "before", latest "after".
+      textStepRef.current = {
+        before: textStepRef.current?.before ?? committedBefore,
+        after: { value, valueHtml },
+      }
+      if (!editorFocusedRef.current) settleTextStep()
       // Restore codex behaviour: a direct human edit auto-validates the cell
       // ("a human has touched it"). The target.cell.commit above cleared any
       // prior validators (audit-stats-overlay resets activeValidators on every
@@ -6343,7 +6395,7 @@ function EditorRow({
       })
       return false
     }
-  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, project.validationRoleFloor, project.validationNamedUsers, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.originalHtml, cell.metadata, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, idmlConfiguration, t, settleOwedRepetitions])
+  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, project.validationRoleFloor, project.validationNamedUsers, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.originalHtml, cell.metadata, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, idmlConfiguration, t, settleOwedRepetitions, settleTextStep])
 
   // AQU-618: run a single-cell AI generate/Replace, then return the translator
   // to the edited cell and confirm the save. Both entry points — the Replace
@@ -6733,6 +6785,13 @@ function EditorRow({
         author: username,
         targetLang: activeLane,
         surface: "cell", // AQU-1572
+      })
+      // AQU-1767 phase 2: your own vote, as a step Undo can take back.
+      recordStep({
+        kind: "vote.text",
+        data: { cellId: cell.id, lane: activeLane, voted: validated, editEventId },
+        labelKey: validated ? "editor.history.stepValidate" : "editor.history.stepUnvalidate",
+        fileId: cell.fileId,
       })
       await onCellCommitted?.(cell.id)
       // AQU-1391: only on the way IN. Un-validating a cell must not push its
@@ -7171,12 +7230,12 @@ function EditorRow({
     displayLabel: importDisplayLabel(cell.metadata),
   })
   // ── Character gutter (2026-08-07, stacked media lens only) ──────────────
-  // A row "speaks" unless it's STRUCTURE (paratext/heading) — the same set
-  // whose number pill is suppressed, so the two left-edge columns read
-  // consistently. The voice resolves through the LIVE tts settings
-  // (castAssignments → per-cell pin → default); "explicit" is gated through
-  // findVoice so an assignment pointing at a DELETED voice truthfully renders
-  // as the faded fallback rather than solid-but-narrator.
+  // A media-gutter row "speaks" unless it's STRUCTURE (paratext/heading) —
+  // the same set whose number pill is suppressed, so the two left-edge
+  // columns read consistently. The voice resolves through the LIVE tts
+  // settings (castAssignments → per-cell pin → default); "explicit" is gated
+  // through findVoice so an assignment pointing at a DELETED voice truthfully
+  // renders as the faded fallback rather than solid-but-narrator.
   //
   // AQU-646 round 8: the rule used to ALSO require source text, which is what
   // the comment above has always claimed the number pill does — and it does
@@ -7189,14 +7248,22 @@ function EditorRow({
   // missing circle read as a missing CONTROL rather than a missing column.
   //
   // The Audio view uses the same picker, opened from a field under each line's
-  // waveform rather than from a gutter (Sam, 2026-09-28).
-  const gutterSpeaking = (castGutter || Boolean(audioLens)) && !isStructuralCell(cell.type)
-  const gutterVoice = gutterSpeaking
+  // waveform rather than from a gutter (Sam, 2026-09-28). Headings get that
+  // field too: Generate and Record already sit on a heading, and the dropdown
+  // is how you choose who reads it. Section breaks (paratext) stay silent —
+  // the card itself renders nothing for them.
+  const speaksInGutter = castGutter && !isStructuralCell(cell.type)
+  const speaksInAudio = Boolean(audioLens) && cell.type !== "paratext"
+  const resolvedVoice = (speaksInGutter || speaksInAudio)
     ? resolveCastVoice(ttsSettings, cell.id, cell.ttsSettings?.voiceId)
     : null
-  const gutterExplicit =
-    gutterSpeaking &&
-    Boolean(findVoice(ttsSettings, assignedCastVoiceId(ttsSettings, cell.id) ?? cell.ttsSettings?.voiceId))
+  const gutterVoice = speaksInGutter ? resolvedVoice : null
+  const audioVoice = speaksInAudio ? resolvedVoice : null
+  const assignmentResolves = Boolean(
+    findVoice(ttsSettings, assignedCastVoiceId(ttsSettings, cell.id) ?? cell.ttsSettings?.voiceId),
+  )
+  const gutterExplicit = speaksInGutter && assignmentResolves
+  const audioExplicit = speaksInAudio && assignmentResolves
   const gutterCastName =
     cell.metadata && typeof cell.metadata.cast_name === "string" ? (cell.metadata.cast_name as string) : null
   const gutterVoices = useMemo(() => getVoiceLibrary(ttsSettings), [ttsSettings])
@@ -7585,6 +7652,20 @@ function EditorRow({
     // performs it (dubbing). The scope asked above stays THIS row's — an
     // assignment is to the subtitle file, never to its hidden cue sibling.
     const owner = audioValidationLine.ownerOf.get(audioId) ?? { fileId: cell.fileId, cellId: cell.id }
+    // Recorded as the vote starts (AQU-1767 slow-network pass): an Undo
+    // pressed while it saves undoes this vote, not the step before it. The
+    // step waits for the vote to land, and is dropped if it fails.
+    let settle: (ok: boolean) => void = () => {}
+    recordStep(
+      {
+        kind: "vote.audio",
+        data: { cellId: owner.cellId, audioId, voted: validated },
+        labelKey: validated ? "editor.history.stepValidateAudio" : "editor.history.stepUnvalidateAudio",
+        fileId: cell.fileId,
+      },
+      undefined,
+      { pending: new Promise<boolean>((resolve) => { settle = resolve }) },
+    )
     try {
       const emit = validated ? emitCellAudioValidate : emitCellAudioUnvalidate
       await emit({
@@ -7602,9 +7683,11 @@ function EditorRow({
       // until the row recycled. Now the vote is flushed and every reader of
       // this file refetches, including a timeline open beside the text view.
       await commitAudioValidation([owner.fileId])
+      settle(true)
       return true
     } catch (error) {
       console.error("[audio-validate] emit failed", error)
+      settle(false)
       return false
     }
   }
@@ -8000,11 +8083,11 @@ function EditorRow({
               onAfterGenerate={audioLens.onAfterGenerate}
               onPlay={() => audioLens.onPlayCell(cell.id, cell)}
               onMakeCharacter={() => audioLens.onMakeCharacterFromCell(cell.id)}
-              voicePicker={gutterVoice && (
+              voicePicker={audioVoice && (
                 <CastGutterVoice
                   variant="field"
-                  voice={gutterVoice}
-                  explicit={gutterExplicit}
+                  voice={audioVoice}
+                  explicit={audioExplicit}
                   castName={gutterCastName}
                   editable={editable && Boolean(onAssignCastVoice)}
                   voices={gutterVoices}

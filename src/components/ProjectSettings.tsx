@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type Dispatch, type ReactNode, type SetStateAction } from "react"
 import { notifySmartExtensionsChanged } from "@/lib/tools/smart-extensions-enabled"
+import { recordStep } from "@/lib/history/history"
 import { Navigate, useLocation, useParams, useNavigate, useSearchParams, type Location } from "react-router-dom"
 import {
   isProjectEditorPath,
@@ -1270,7 +1271,20 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       }
 
       if (Object.keys(sharedUpdates).length > 0) {
+        // AQU-1767 phase 2: the save is one history step. What each setting held
+        // before is the server's blob as this page last read it.
+        const beforeBlob = (sharedSettingsBlob ?? {}) as Record<string, unknown>
         const out = await patchShared(sharedUpdates)
+        if (out.kind === "ok") {
+          recordStep({
+            kind: "settings.project",
+            data: {
+              changes: Object.entries(sharedUpdates).map(([key, after]) => ({ key, before: beforeBlob[key] ?? null, after })),
+            },
+            labelKey: "editor.history.stepSettings",
+            labelParams: { count: Object.keys(sharedUpdates).length },
+          }, id ? { projectId: id, username: session?.username || project?.username || "local" } : undefined)
+        }
         if (out.kind === "conflict") {
           toast.add({
             type: "warning",
@@ -2840,7 +2854,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 control={
                   <Button
                     variant="outline"
-                    onClick={() => requestNavigate("/preferences")}
+                    // The hosted model picker says which models know this
+                    // project's language, so it needs to know the project.
+                    onClick={() => requestNavigate(project ? `/preferences/local-models?project=${encodeURIComponent(project.id)}` : "/preferences")}
                   >
                     {t("projectSettings.localModels.manageButton")}
                   </Button>

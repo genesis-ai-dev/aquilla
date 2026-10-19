@@ -47,8 +47,10 @@ INWORLD_API_KEY=""
 # INWORLD_TTS_MODEL="inworld-tts-2-flash"
 # INWORLD_DEFAULT_VOICE="Dennis"
 
-# Modal-hosted voice-conversion (Seed-VC; still used for Gemini/local clones).
-# SEED_VC_URL=""
+# Seed-VC voice conversion (Gemini/local clones, and "Change voice" on existing
+# takes). Either the Modal deploy's /convert URL, or the local server started by
+# `pnpm seed-vc:local`, which reads SEED_VC_TOKEN from this file:
+# SEED_VC_URL="http://127.0.0.1:8791/convert"
 # SEED_VC_TOKEN=""
 
 # TTS usage/cost guardrails. Leave unset to disable enforcement.

@@ -80,6 +80,7 @@ import {
 import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
 import {
   buildLaneItems,
+  lanesStaffedBy,
   laneTagForAssignment,
   selectValueForLane,
   type AssignLaneOption,
@@ -110,6 +111,13 @@ interface AssignModalProps {
    * `defaultLane` that names none of them opens on the first.
    */
   lanes?: readonly AssignLaneOption[]
+  /**
+   * AQU-1994: the project's lanes at least one of its people is on. `lanes` is
+   * narrowed to these, so this modal offers exactly what the Team card's
+   * Assign work panel offers. `null`/omitted means the server did not say and
+   * leaves the list as it was.
+   */
+  staffedLaneIds?: ReadonlySet<string> | readonly string[] | null
   /** Display names keyed by lane tag, including '' for the default lane. */
   laneLabels?: Readonly<Record<string, string>>
   /**
@@ -206,6 +214,7 @@ export function AssignModal({
   projectFiles,
   targetLanes,
   lanes,
+  staffedLaneIds,
   laneLabels,
   defaultLane = "",
   defaultLaneLabel,
@@ -369,9 +378,17 @@ export function AssignModal({
         defaultLaneLabel,
         defaultLaneFallback: t("dialog.assign.defaultLaneFallback"),
         allowedTags: laneDelegateLanes(effectiveDelegate),
+        staffedLaneIds,
       }),
-    [lanes, targetLanes, laneLabels, defaultLaneLabel, effectiveDelegate, t],
+    [lanes, targetLanes, laneLabels, defaultLaneLabel, effectiveDelegate, staffedLaneIds, t],
   )
+  // AQU-1994: the project has lanes but nobody on it is on any of them. The
+  // modal names that instead of offering a language no one can work in, and
+  // refuses the submit — the same answer the Team card's panel gives. Asked of
+  // staffing alone: a lane delegate whose own lanes no longer exist also ends
+  // up with nothing to choose, and that is a different sentence.
+  const noStaffedLanes =
+    Boolean(lanes?.length) && lanesStaffedBy(lanes ?? [], staffedLaneIds).length === 0
   // AQU-1977: given the project's own lanes, a pick that names none of them —
   // an empty default on a project that has no '' lane — reads as the first.
   const laneValue =
@@ -449,6 +466,10 @@ export function AssignModal({
 
   const handleSubmit = useCallback(async () => {
     setError(null)
+    if (noStaffedLanes) {
+      setError(t("org.assignWork.noStaffedLanes"))
+      return
+    }
     const member = members.find((m) => String(m.userId) === selectedMemberId)
     if (!member) { setError(t("dialog.assign.error.selectMember")); return }
 
@@ -614,7 +635,7 @@ export function AssignModal({
     jwt, projectId, author, note, onAssigned, onOpenChange,
     roleLevel, allowSelfAssignment, assignmentMinRole, effectiveDelegate, isLaneDelegate,
     effectiveCallerUserId, deadlineDate, groupLabelByFileId,
-    laneValue, isScripture, segmentNoun, selectUnitErrorKey, assigneeRefusal, t,
+    laneValue, noStaffedLanes, isScripture, segmentNoun, selectUnitErrorKey, assigneeRefusal, t,
   ])
 
   // Role gate (AQU-496 / AQU-581): a caller at the org's assignment floor
@@ -728,6 +749,16 @@ export function AssignModal({
                   values={{ can: <em>{t("workspace.assignModal.canModalVerb")}</em> }}
                 />
               </FieldDescription>
+            </Field>
+          )}
+          {/* AQU-1994: no one on the project is on any of its lanes. Say so
+              where the picker would have been; Assign is refused. */}
+          {noStaffedLanes && (
+            <Field>
+              <FieldLabel>{t("dialog.assign.laneLabel")}</FieldLabel>
+              <FieldError data-testid="assign-modal-no-staffed-lanes">
+                {t("org.assignWork.noStaffedLanes")}
+              </FieldError>
             </Field>
           )}
           {/* AQU-581: a lane delegate scoped to one language of a multi-language
@@ -895,7 +926,7 @@ export function AssignModal({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
             {t("common.cancel")}
           </Button>
-          <Button onClick={handleSubmit} disabled={submitting}>
+          <Button onClick={handleSubmit} disabled={submitting || noStaffedLanes}>
             {submitting ? <Spinner className="me-1" /> : null}
             {t("dialog.assign.submit")}
           </Button>

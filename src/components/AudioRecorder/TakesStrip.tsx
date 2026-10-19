@@ -6,8 +6,11 @@
 // playable blobs and emits cell.audio.select / .remove / .rename.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { recordStep } from "@/lib/history/history"
 import { Bird, Check, CloudAlert, CloudUpload, FileClock, Pause, Pencil, Play, RotateCcw, Sparkles, Trash2 } from "lucide-react"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { fmtShortCalendarDate } from "@/lib/format-date"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -164,7 +167,7 @@ export function TakesStrip({
 }: Props) {
   const tab = variant === "tab"
   const piecesList = variant === "pieces"
-  const t = useT()
+  const { t, locale } = useI18n()
   const audioValidation = useAudioValidation({
     project, fileId, cellId, username: author, jwt: session?.jwt ?? null,
     ...(targetLang ? { targetLang } : {}),
@@ -361,6 +364,18 @@ export function TakesStrip({
       })
       if (take) injectOptimisticAudioAttachment(fileId, cellId, take, selectP)
       await selectP
+      // AQU-1767 phase 2: choosing a take is a step — unless it also handed the
+      // recording slot back (the default track's generated-voice juggle),
+      // which a one-slot undo could not put back honestly.
+      if (!displaceRecording) {
+        const groupOf = (id: string | null | undefined) => (id ? takes.find((t) => t.audioId === id)?.pieceOf ?? id : null)
+        recordStep({
+          kind: "take.select",
+          data: { cellId, slot, before: groupOf(effectiveSelected), after: groupOf(audioId)! },
+          labelKey: "editor.history.stepChooseTake",
+          fileId,
+        })
+      }
       if (displaceRecording) {
         const where = { projectId, fileId, cellId, slot: RECORDING_SLOT, author, ...(targetLang ? { targetLang } : {}) }
         const displaceP = sourceClip
@@ -389,7 +404,12 @@ export function TakesStrip({
       // the old binary coercion became a data-mover once a take could belong
       // to an added track.
       const slot = takes.find((t) => t.audioId === audioId)?.slot ?? RECORDING_SLOT
-      await removeTake({ projectId, fileId, cellId, audioId, slot, author, ...(targetLang ? { targetLang } : {}) })
+      const playingNow = optimisticSelectedId ?? activeTakeId
+      const groupOf = (id: string | null | undefined) => (id ? takes.find((t) => t.audioId === id)?.pieceOf ?? id : null)
+      await removeTake({
+        projectId, fileId, cellId, audioId, slot, author, ...(targetLang ? { targetLang } : {}),
+        history: { wasSelected: groupOf(playingNow) === groupOf(audioId) },
+      })
       // Was that the cell's last recording? `takes` still holds the pre-removal
       // list, so the survivors are everything else that is a take OF THIS CELL.
       if (!hasOwnRecordingLeft(takes, audioId, cellId)) onLastTakeRemoved?.(cellId)
@@ -402,16 +422,21 @@ export function TakesStrip({
   }, [playingId, stopPlayback, takes, projectId, fileId, cellId, author, onLastTakeRemoved, targetLang])
 
   // AQU-1767 (Sam, 2026-10-14): a split take's row deletes the whole take, every
-  // piece.
+  // piece, in one step.
   const removeWhole = useCallback(async (pieces: readonly AudioAttachmentOut[]) => {
     const [first] = pieces
     if (!first) return
     setBusyId(first.audioId)
     try {
       if (playingId === first.audioId) stopPlayback()
+      const playingNow = optimisticSelectedId ?? activeTakeId
+      const group = pieceGroupOf(first, first.audioId)
+      const wasSelected = pieces.some((p) => p.audioId === playingNow) ||
+        takes.some((t) => t.audioId === playingNow && pieceGroupOf(t, t.audioId) === group)
       await removeWholeTake({
         projectId, fileId, cellId, author, ...(targetLang ? { targetLang } : {}),
         pieces: pieces.map((p) => ({ audioId: p.audioId, slot: p.slot ?? RECORDING_SLOT })),
+        history: { wasSelected },
       })
       const gone = new Set(pieces.map((p) => p.audioId))
       const left = takes.map((t) => (gone.has(t.audioId) && t.audioId !== first.audioId ? { ...t, isDeleted: true } : t))
@@ -421,7 +446,7 @@ export function TakesStrip({
     } finally {
       setBusyId((cur) => (cur === first.audioId ? null : cur))
     }
-  }, [playingId, stopPlayback, takes, projectId, fileId, cellId, author, onLastTakeRemoved, targetLang])
+  }, [playingId, stopPlayback, optimisticSelectedId, activeTakeId, takes, projectId, fileId, cellId, author, onLastTakeRemoved, targetLang])
 
   // On-device noise removal: clean THIS take into a new (denoised) take. The
   // heavy RNNoise/wasm path is dynamically imported so it's only loaded when a
@@ -499,7 +524,7 @@ export function TakesStrip({
       if (!label || label === displayLabel(att)) return
       setLabelOverrides((prev) => new Map(prev).set(att.audioId, label))
       try {
-        await renameTake({ projectId, fileId, cellId, audioId: att.audioId, label, author, ...(targetLang ? { targetLang } : {}) })
+        await renameTake({ projectId, fileId, cellId, audioId: att.audioId, label, author, ...(targetLang ? { targetLang } : {}), labelBefore: att.label ?? null })
       } catch {
         setLabelOverrides((prev) => {
           const next = new Map(prev)
@@ -770,26 +795,25 @@ export function TakesStrip({
                     )}
                     {/* AQU-1372: "recorded when, by whom" — the answer the
                         event log already holds, on the row that asks it.
-                        Compact by necessity (this row is dense): the date and
-                        the person inline, the exact time in the tooltip. */}
+                        Compact by necessity (this row is dense): the short
+                        calendar date and the person inline; the exact time
+                        opens in DateTooltip, the same hover every other date
+                        uses. */}
                     {provenance && (
                       <span
                         data-testid={`take-recorded-${att.audioId}`}
-                        title={t(
-                          isGenerated
-                            ? "audio.takesStrip.generatedByTooltip"
-                            : "audio.takesStrip.recordedByTooltip",
-                          {
-                            datetime: new Date(provenance.recordedAt).toLocaleString(),
-                            author: provenance.recordedBy,
-                          },
-                        )}
-                        className="min-w-0 shrink truncate text-[10px] text-muted-foreground/60"
+                        className="inline-flex min-w-0 max-w-full shrink items-center text-[10px] text-muted-foreground/60"
                       >
-                        {t("audio.takesStrip.recordedByBadge", {
-                          date: new Date(provenance.recordedAt).toLocaleDateString(),
-                          author: provenance.recordedBy,
-                        })}
+                        <DateTooltip
+                          value={provenance.recordedAt}
+                          label={t(isGenerated ? "audio.takesStrip.generatedLabel" : "audio.takesStrip.recordedLabel")}
+                          className="min-w-0 truncate"
+                        >
+                          {t("audio.takesStrip.recordedByBadge", {
+                            date: fmtShortCalendarDate(provenance.recordedAt, undefined, locale),
+                            author: provenance.recordedBy,
+                          })}
+                        </DateTooltip>
                       </span>
                     )}
                     {/* AQU-464: this take speaks wording the line no longer

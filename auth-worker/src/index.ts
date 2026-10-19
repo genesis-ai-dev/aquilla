@@ -264,6 +264,8 @@ app.get("/", (c) =>
       "/api/v2/health",
       "/api/v1/chat/completions",
       "/api/v1/audio/transcriptions",
+      "/api/v1/audio/transcriptions/warm",
+      "/api/v1/audio/transcriptions/status",
       "/api/v1/chat/ab-feedback",
       "/api/v1/import/classify",
       "/api/v1/import/parse/:projectId",

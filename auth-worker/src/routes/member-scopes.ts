@@ -32,10 +32,16 @@ import {
   loadLaneGrants,
   loadTargetLaneIdentities,
 } from "../../../db/shared/lane-visibility"
-import { laneScopeIdsForStorage, type LaneScopeConversion } from "../../../src/lib/lanes/scope-ids"
+import {
+  LANE_SCOPE_ABOVE_CEILING_ERROR,
+  laneScopeIdsForStorage,
+  resolveLaneScopeValue,
+  type LaneScopeConversion,
+} from "../../../src/lib/lanes/scope-ids"
 import { laneReadWallEnabled } from "../../../src/lib/lanes/read-wall"
 import type { MemberLaneGrant } from "../../../src/lib/lanes/grant-gap"
 import { syncMemberLaneGrants } from "../services/lane-grants"
+import { getMemberLaneAssignments } from "../services/assignments"
 
 const memberScopes = new Hono<AuthHonoEnv>()
 
@@ -307,10 +313,7 @@ memberScopes.put(
       )
       const target = effectiveMembers.find((m) => m.userId === targetUserId)
       if (target && target.roleLevel >= ROLE.MAINTAINER) {
-        return c.json(
-          { error: "scopes are for roles below maintainer" },
-          400,
-        )
+        return c.json({ error: LANE_SCOPE_ABOVE_CEILING_ERROR }, 400)
       }
     }
 
@@ -392,5 +395,154 @@ memberScopes.put(
     })
   },
 )
+
+/**
+ * AQU-1994 — the lanes someone on this project is actually on.
+ *
+ *   GET /api/v2/projects/:projectId/lane-staffing  →  { laneIds: string[] }
+ *
+ * Every Assign surface on the project overview offers the project's own
+ * target lanes (AQU-1977). That list includes lanes nobody on the project can
+ * work in, so a manager could route French work to a team staffed only on
+ * Mandarin Chinese. This answers which of the project's current target lanes
+ * at least one of its people holds a grant on at Contributor (400) or above.
+ *
+ * Grants, not scopes, and not roles: `project_member_lane_roles` is the table
+ * the read wall enforces, and the same table the team paths write
+ * (services/lane-grants.ts), so a lane reached only through an attached org
+ * Team counts exactly as a directly chosen one does. A Maintainer who reads
+ * every lane through their ROLE holds no grant row and adds no lane — being
+ * able to read a language is not being staffed on it.
+ *
+ * A grant row for someone who has since been removed from the project is
+ * ignored: `project_members` deletes leave the grant rows behind, and the
+ * roster is what says who is still here.
+ *
+ * `undefined` (an empty body) when the project has no current target lanes —
+ * there is then nothing to narrow, and the client must keep offering what it
+ * offers today rather than read "no lanes" as "nobody is staffed".
+ */
+async function loadStaffedLaneIds(
+  env: AuthHonoEnv["Bindings"],
+  projectId: string,
+): Promise<string[] | undefined> {
+  const current = await loadCurrentTargetLanes(env.AQUILLA_PG, projectId)
+  if (current.length === 0) return undefined
+  const projectRow = await env.AQUILLA_PG.prepare(
+    "SELECT created_by, org_id FROM projects WHERE id = ?",
+  )
+    .bind(projectId)
+    .first<{ created_by: number; org_id: number | null }>()
+  if (!projectRow) return undefined
+  const effectiveMembers = await listEffectiveProjectMembers(
+    env,
+    projectId,
+    projectRow.org_id,
+    projectRow.created_by,
+  )
+  const onProject = new Set(effectiveMembers.map((m) => m.userId))
+  const { results } = await env.AQUILLA_PG.prepare(
+    `SELECT DISTINCT lane, user_id FROM project_member_lane_roles
+      WHERE project_id = ? AND role_level >= ?`,
+  )
+    .bind(projectId, ROLE.CONTRIBUTOR)
+    .all<{ lane: string; user_id: number }>()
+  const staffed = new Set<string>()
+  for (const row of results ?? []) {
+    if (!onProject.has(Number(row.user_id))) continue
+    staffed.add(row.lane)
+  }
+  // Reported in the project's own lane order, and never naming an archived
+  // lane: an assign surface offers the current lanes and nothing else.
+  return current.filter((lane) => staffed.has(lane.id)).map((lane) => lane.id)
+}
+
+/**
+ * GET /api/v2/projects/:projectId/lane-staffing
+ *
+ * Project lead (500+), the same floor that governs reading someone else's
+ * scopes: who is staffed where is roster information. Below that floor the
+ * client gets no answer and keeps today's full lane list, which AQU-581
+ * already narrows to a delegate's own lanes.
+ */
+memberScopes.get("/:projectId/lane-staffing", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const projectId = c.req.param("projectId") as string
+  if (!projectId) return c.json({ error: "invalid params" }, 400)
+
+  const callerRole = await resolveProjectRole(c.env, user, projectId)
+  if (!callerRole || callerRole.level < ROLE.VIEWER) {
+    return c.json({ error: "no access to project" }, 403)
+  }
+  if (callerRole.level < ROLE.PROJECT_LEAD) {
+    return c.json({ error: "project_lead required to view lane staffing" }, 403)
+  }
+
+  const laneIds = await loadStaffedLaneIds(c.env, projectId)
+  return c.json(laneIds ? { laneIds } : {})
+})
+
+/**
+ * AQU-1999 — what a lane removal is about to close.
+ *
+ *   GET /api/v2/projects/:projectId/members/:userId/lane-assignments?lane=…
+ *     → { assignments: [{ assignmentId, fileId, scopeLabel }] }
+ *
+ * Taking someone off a lane closes their open assignments in it, and the
+ * confirmation in the Staff popover says how many before anything is saved
+ * (AQU-1999's product call: close automatically, never leave an open
+ * assignment in a lane its holder can no longer reach). The client needs the
+ * assignment ids to emit the `assignment.unassign` events, and a file id per
+ * assignment to route each event's sync token — neither of which any existing
+ * project-scoped read returns: `/assignments/all` aggregates by assignee and
+ * names no lane, and the org workload view that does carry both is gated on
+ * ORG membership, which a project admin staffing a lane need not have.
+ *
+ * `lane` may be a lane id or a legacy tag, resolved the same way a lane scope
+ * is on the way in (`resolveLaneScopeValue`): a value naming zero or two lanes
+ * is refused rather than guessed, so a removal can never close the work of a
+ * sibling lane that shares a language.
+ *
+ * Project lead (500+) — the floor that already governs both reading and
+ * writing someone else's scopes. Below it the removal itself is refused, so
+ * there is nothing to preview.
+ */
+memberScopes.get("/:projectId/members/:userId/lane-assignments", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const projectId = c.req.param("projectId") as string
+  const rawUserId = c.req.param("userId") as string
+
+  const parsed = paramsSchema.safeParse({ projectId, userId: rawUserId })
+  if (!parsed.success) return c.json({ error: "invalid params" }, 400)
+  const targetUserId = parseInt(rawUserId, 10)
+
+  const lane = c.req.query("lane")
+  if (lane === undefined) return c.json({ error: "lane is required" }, 400)
+
+  const callerRole = await resolveProjectRole(c.env, user, projectId)
+  if (!callerRole) return c.json({ error: "no access to project" }, 403)
+  if (callerRole.level < ROLE.PROJECT_LEAD) {
+    return c.json({ error: "project_lead required to view lane assignments" }, 403)
+  }
+
+  // A project whose lane rows the backfill has not reached has nothing to
+  // resolve against, so the value is compared to `assignments.lane_id` as
+  // sent — the same tolerance the scope PUT applies when it stores one.
+  const lanes = await loadTargetLaneIdentities(c.env.AQUILLA_PG, projectId)
+  let laneId = lane
+  if (lanes.length > 0) {
+    const resolved = resolveLaneScopeValue(lane, lanes)
+    if (!resolved.ok) {
+      return c.json(
+        { error: "lane must name one lane of this project", reason: resolved.reason },
+        400,
+      )
+    }
+    laneId = resolved.laneId
+  }
+
+  const assignments = await getMemberLaneAssignments(c.env, projectId, targetUserId, laneId)
+  return c.json({ assignments })
+})
 
 export default memberScopes

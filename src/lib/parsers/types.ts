@@ -113,6 +113,10 @@ export type BuiltinCheckId =
   | "usfm-structure"
   | "capitalization"
   | "footnote-quote-mismatch"
+  | "corrupted-characters"
+  | "unpaired-quotes"
+  | "untranslated-fragment"
+  | "length-ratio"
 
 export interface AlgorithmicCheckOverride {
   enabled: boolean

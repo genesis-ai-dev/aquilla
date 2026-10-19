@@ -27,6 +27,7 @@ import { eventLaneIdOf, resolveEventLane } from '../../../src/lib/lanes/event-la
 import { isEligibleLaneAssignee, isOwnLaneAssignment } from './lane-delegate-authority'
 import { toolClaimVerified } from './tool-provenance'
 import { EXTENSION_DATA_ROLE } from '../../../shared/tools/file-extension'
+import { findRestorableRemoval } from './removed-cell-archive'
 
 /** Smart Extensions apiRev 7: file-content writes an extension's identity must be verified for. */
 const EXTENSION_GATED_KINDS = new Set<string>([
@@ -332,6 +333,14 @@ async function laneGrantsForExternalToken(
   return pending
 }
 
+/** AQU-2003: refusal for the read-only platform view token (see call sites). */
+function refusePlatformView(claims: SyncTokenClaims): { ok: false; status: 403; reason: string } | null {
+  if (claims.src === 'platform' && claims.role < ROLE.CONTRIBUTOR) {
+    return { ok: false, status: 403, reason: 'platform view is read-only; enter the admin code to edit' }
+  }
+  return null
+}
+
 /**
  * The ONLY function that mints AuthorizedEvent instances. Every event handler
  * accepts AuthorizedEvent and TypeScript prevents bypass (the symbol-branded
@@ -409,6 +418,15 @@ export async function authorize<K extends EventKind>(
         ? tokenClaims.username
         : `user:${tokenClaims.userId}`
 
+    // AQU-2003: the read-only platform view. An un-elevated platform admin is
+    // minted a Viewer (100) token that keeps `src: "platform"`. That token must
+    // write nothing, whatever an org's floors say: `assignmentMinRole` can be
+    // set to Viewer and replaces the static floor, and the lane checks below
+    // skip `src === 'platform'`. One explicit rule here closes both, ahead of
+    // every floor.
+    const platformViewRefusal = refusePlatformView(tokenClaims)
+    if (platformViewRefusal) return platformViewRefusal
+
     if (tokenClaims.role < requiredRoleFor(raw.kind)) {
       return { ok: false, status: 403, reason: `role too low for ${raw.kind}` }
     }
@@ -467,6 +485,15 @@ export async function authorize<K extends EventKind>(
     typeof tokenClaims.username === 'string' && tokenClaims.username.trim() !== ''
       ? tokenClaims.username
       : `user:${tokenClaims.userId}`
+
+  // AQU-2003: the read-only platform view. An un-elevated platform admin is
+  // minted a Viewer (100) token that keeps `src: "platform"`. That token must
+  // write nothing, whatever an org's floors say: `assignmentMinRole` can be
+  // set to Viewer and replaces the static floor, and the lane checks below
+  // skip `src === 'platform'`. One explicit rule here closes both, ahead of
+  // every floor.
+  const platformViewRefusal = refusePlatformView(tokenClaims)
+  if (platformViewRefusal) return platformViewRefusal
 
   // AQU-1462: an archived lane refuses writes that name it. Every role,
   // including Maintainer and platform, and whether or not the write wall is
@@ -786,6 +813,42 @@ export async function authorize<K extends EventKind>(
         ok: false,
         status: 403,
         reason: 'removing an imported cell requires maintainer',
+      }
+    }
+  }
+
+  // AQU-1767 phase 2: UNDOING A REMOVAL is the remover's own act. Only the
+  // person who removed the cell may put it back — or a maintainer, who could
+  // have removed it themselves. Never through the external API: the agent
+  // surface has its own undo (compensating commits) and no archive to read.
+  // A restore with nothing to restore (no archive, or the cell is live again)
+  // is refused here rather than accepted as a silent no-op, so the undo that
+  // sent it can say so.
+  if (raw.kind === 'source.cell.restore') {
+    if (tokenClaims.src === 'external') {
+      return { ok: false, status: 403, reason: 'restoring a removed cell is not available through the API' }
+    }
+    if (db != null) {
+      if (raw.cellId == null || raw.fileId == null) {
+        return { ok: false, status: 400, reason: 'source.cell.restore needs a fileId and a cellId' }
+      }
+      const named = (raw.payload as { deleteEventId?: unknown } | null)?.deleteEventId
+      const removal = await findRestorableRemoval(
+        db,
+        raw.projectId,
+        raw.fileId,
+        raw.cellId,
+        typeof named === 'string' && named !== '' ? named : null,
+      )
+      if (!removal) {
+        return { ok: false, status: 422, reason: 'there is no removal of this cell to undo' }
+      }
+      if (removal.deletedBy !== tokenUsername && tokenClaims.role < ROLE.MAINTAINER) {
+        return {
+          ok: false,
+          status: 403,
+          reason: 'only the person who removed this cell, or a maintainer, can put it back',
+        }
       }
     }
   }

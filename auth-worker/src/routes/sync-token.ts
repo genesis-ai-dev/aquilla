@@ -73,8 +73,20 @@ syncToken.post(
     // exempts from its live membership re-check (events/route.ts) and from
     // the lane read wall (events/lane-read-wall.ts) — so this one mint reaches
     // further than anything the admin console's own gate protects.
+    //
+    // AQU-2003: reads are reopened. An un-elevated platform-only caller now
+    // gets a Viewer (100) token instead of a 403, so a platform admin can open
+    // another tenant's project read-only (Ryder + Matthew, 2026-10-16).
+    // User-content writes are refused by the sync-worker's role floors plus an
+    // explicit rule in events/authorize.ts (a platform token below Contributor
+    // writes nothing, whatever an org's floors say). The one exception is the
+    // link-sync trigger, which any genuine Viewer can also fire and which
+    // writes only server-authored mirror data. The step-up code re-mints at
+    // the full platform level. The elevation_required arm below remains for a
+    // failed genuine-role lookup.
     const minted = await mintSyncTokenForUser(c.env, user, projectId, fileId, {
       platformElevated: await hasActiveElevation(c),
+      platformViewWithoutElevation: true,
     })
     if (minted.ok) {
       const response: SyncTokenResponse = {

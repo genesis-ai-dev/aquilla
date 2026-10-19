@@ -5,6 +5,7 @@ import type { ToastManagerAddOptions } from "@base-ui/react/toast"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { setToastUndoAt, undoShortcutOwner } from "@/lib/history/arbiter"
 import { XIcon, CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react"
 
 const toastManager = ToastPrimitive.createToastManager()
@@ -224,12 +225,28 @@ function isTextEntry(target: EventTarget | null): boolean {
 function ToastList() {
   const { toasts } = ToastPrimitive.useToastManager()
 
+  // AQU-1767: when each Undo toast first appeared, so the shortcut arbiter can
+  // tell whether it is newer than the edit history's newest step.
+  const firstSeenRef = React.useRef(new Map<string, number>())
+  React.useEffect(() => {
+    const seen = firstSeenRef.current
+    const live = new Set(toasts.map((item) => item.id))
+    for (const id of [...seen.keys()]) if (!live.has(id)) seen.delete(id)
+    const pending = toasts.find((item) => item.actionProps != null && undoFromToast(item.data) != null)
+    if (pending && !seen.has(pending.id)) seen.set(pending.id, Date.now())
+    setToastUndoAt(pending ? (seen.get(pending.id) ?? null) : null)
+  }, [toasts])
+  React.useEffect(() => () => setToastUndoAt(null), [])
+
   React.useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.repeat || event.altKey || event.shiftKey) return
       if (event.key !== "z" && event.key !== "Z") return
       if (!event.ctrlKey && !event.metaKey) return
       if (isTextEntry(event.target)) return
+      // AQU-1767: the edit history answers the shortcut when its step is the
+      // newer of the two; only one of them may fire.
+      if (undoShortcutOwner() !== "toast") return
       const pending = toasts.find(
         (item) => item.actionProps != null && undoFromToast(item.data) != null,
       )

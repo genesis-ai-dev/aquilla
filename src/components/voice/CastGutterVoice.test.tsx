@@ -83,6 +83,11 @@ describe("CastGutterVoice", () => {
       )
       fireEvent.click(screen.getByTestId("gutter-voice"))
       const clear = screen.getByTestId("gutter-voice-clear")
+      const search = screen.getByPlaceholderText("Search voices…")
+      const maryRow = screen.getByRole("button", { name: /^Mary$/ })
+      // Search stays above the list. "No character" is the first item in it.
+      expect(search.compareDocumentPosition(clear) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(clear.parentElement).toBe(maryRow.parentElement)
       // The row shows what the line becomes: the NC mark, not an icon-of-delete.
       expect(clear.textContent).toContain("NC")
       fireEvent.click(clear)

@@ -50,6 +50,7 @@ import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { isLaneArchived } from "@/components/project-lane-archive"
 import { laneLabelForTag, laneLabelsByTag, laneRowLabel } from "@/lib/lanes/lane-language"
 import { assignLaneOptions } from "@/lib/sync/assignment-lane"
+import { useProjectLaneStaffing } from "@/hooks/useProjectLaneStaffing"
 import { firstPositionLaneId, laneTagForId } from "@/lib/lanes/active-lane-choice"
 import { laneChipLabel } from "./project-lanes"
 import { isHiddenTimelineFile } from "@/lib/parsers/types"
@@ -468,6 +469,18 @@ export function ProjectOverview() {
   )
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
+  // AQU-1994: which of those lanes anyone on the project is actually on. Every
+  // Assign surface below narrows to these, so a manager cannot route work to a
+  // language nobody on the project can work in. Only a project lead (500+) may
+  // read who is staffed where, so below that the read is skipped rather than
+  // fired for a certain 403 — the answer is then `null`, "the server did not
+  // say", which narrows nothing and leaves the list AQU-581 already narrows
+  // for a lane delegate.
+  const { staffedLaneIds, refresh: refreshLaneStaffing } = useProjectLaneStaffing(
+    id,
+    jwt,
+    (project?.syncRole?.level ?? 0) >= ROLE.PROJECT_LEAD,
+  )
   // AQU-507: candidate PMs = the project's effective members. Only fetched for
   // maintainer+ (the only role that can assign a PM); viewers never trigger the
   // roster read.
@@ -790,8 +803,11 @@ export function ProjectOverview() {
   // AQU-495: after a successful assign, refresh BOTH the portfolio row and the
   // open-assignments workload list so the Team card updates without a reload.
   const handleAssigned = useCallback(async () => {
+    // AQU-1994: staffing a lane (the lane table's Staff… popover) comes back
+    // through here, and it changes which lanes an Assign field may offer.
+    refreshLaneStaffing()
     await Promise.all([loadRow(), loadWorkload()])
-  }, [loadRow, loadWorkload])
+  }, [loadRow, loadWorkload, refreshLaneStaffing])
 
   // Per-file rollups
   const firstFileId = project?.files[0]?.id ?? null
@@ -1385,6 +1401,7 @@ export function ProjectOverview() {
       files: documentFiles.map((f) => ({ id: f.id, name: f.name })),
       targetLanes: extraRegistryLanes(project?.targetLanes, project?.targetLanguage),
       lanes: assignLanes,
+      staffedLaneIds,
       jwt,
       author: session?.username ?? "",
       roleLevel: project?.syncRole?.level ?? 0,
@@ -1401,8 +1418,8 @@ export function ProjectOverview() {
     }
   }, [
     canAssign, isArchived, jwt, id, selectedUnitFileId, documentFiles, project?.targetLanes,
-    project?.targetLanguage, assignLanes, project?.syncRole?.level, session?.username, policyAllowSelfAssignment,
-    policyAssignmentMinRole, handleAssigned,
+    project?.targetLanguage, assignLanes, staffedLaneIds, project?.syncRole?.level, session?.username,
+    policyAllowSelfAssignment, policyAssignmentMinRole, handleAssigned,
   ])
 
   const planInspector = selectedPlanUnit ? (
@@ -2479,6 +2496,7 @@ export function ProjectOverview() {
                   defaultLanguageLabel={project?.targetLanguage || t("org.projectOverview.laneDefaultFallback")}
                   extraLanes={extraRegistryLanes(project?.targetLanes, project?.targetLanguage)}
                   assignLanes={assignLanes}
+                  staffedLaneIds={staffedLaneIds}
                   files={documentFiles}
                   roleLevel={project?.syncRole?.level ?? 0}
                   author={session?.username ?? ""}
@@ -2936,6 +2954,8 @@ export function ProjectOverview() {
                               laneLabels={autopilotLaneLabels}
                               defaultLaneLabel={project?.targetLanguage ?? ""}
                               lanes={assignLanes}
+                              staffedLaneIds={staffedLaneIds}
+                              onOpen={refreshLaneStaffing}
                               laneRows={targetLaneRows}
                               roleLevel={project?.syncRole?.level ?? 0}
                               allowSelfAssignment={policyAllowSelfAssignment}

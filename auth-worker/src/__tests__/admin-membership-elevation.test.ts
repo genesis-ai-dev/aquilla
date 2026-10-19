@@ -8,6 +8,7 @@
 
 import { env } from "cloudflare:test"
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
+import { decode } from "hono/jwt"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
@@ -368,12 +369,14 @@ describe("sync-token mint (OPS-44)", () => {
   const mint = (as: string, projectId: string, jwt?: string) =>
     call(as, "POST", "/api/v2/sync-token", { projectId, fileId: "f1" }, jwt)
 
-  it("un-elevated admin is denied on a project they reach only as platform admin", async () => {
+  it("un-elevated admin gets a read-only Viewer token on a project they reach only as platform admin (AQU-2003)", async () => {
     const res = await mint("root", "proj-a")
-    expect(res.status).toBe(403)
-    expect(await res.json()).toEqual({
-      error: "elevation required to mint a project sync token with platform-admin access",
-    })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { token: string; role: { source: string; level: number } }
+    expect(body.role).toMatchObject({ source: "platform", level: 100 })
+    // The signed claims, not just the response echo, are what the sync-worker trusts.
+    const claims = decode(body.token).payload as { role: number; src: string }
+    expect(claims).toMatchObject({ role: 100, src: "platform" })
   })
 
   it("elevated admin mints, and the token carries the platform source", async () => {
@@ -384,6 +387,7 @@ describe("sync-token mint (OPS-44)", () => {
     const body = (await res.json()) as { token: string; role: { source: string; level: number } }
     expect(body.role).toMatchObject({ source: "platform", level: 700 })
     expect(typeof body.token).toBe("string")
+    expect((decode(body.token).payload as { role: number }).role).toBe(700)
   })
 
   it("admin with a GENUINE org role is unaffected while un-elevated", async () => {
@@ -415,13 +419,14 @@ describe("sync-token mint (OPS-44)", () => {
     expect(await res.json()).toEqual({ error: "No access to project" })
   })
 
-  it("the denial does not depend on the project being readable another way", async () => {
+  it("elevation turned off entirely mints the full platform token", async () => {
     // Same request with elevation turned off entirely (local/e2e shape):
     // adminElevationRequired() is false, so every admin counts as elevated and
     // the pre-OPS-44 behaviour is preserved for the local dev stack.
     env.ADMIN_REQUIRE_ELEVATION = undefined
     const res = await mint("root", "proj-a")
     expect(res.status).toBe(200)
+    expect(((await res.json()) as { role: { level: number } }).role.level).toBe(700)
     env.ADMIN_REQUIRE_ELEVATION = "true"
   })
 })

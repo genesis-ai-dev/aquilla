@@ -186,6 +186,15 @@ export interface Env {
    *  allowlist of domains (comma-separated, manifest.web syntax). Unset = any
    *  domain a user approves for an extension. */
   TOOLS_WEB_ALLOWED_DOMAINS?: string
+  /** Omnilingual ASR Modal app base URL (infra/modal/omnilingual_asr.py),
+   *  e.g. https://<workspace>--omnilingual-asr-web.modal.run. Unset = hosted
+   *  transcription for non-Whisper languages answers 503. */
+  OMNI_ASR_MODAL_URL?: string
+  /** Secret: shared with the Modal app's `aquilla-omni-asr` secret, sent as
+   *  X-Omni-Secret. `wrangler secret put OMNI_SHARED_SECRET`. */
+  OMNI_SHARED_SECRET?: string
+  /** Multiplier on metered GPU cost for idle/cold-start time. Default 1.5. */
+  OMNI_ASR_AMORTIZATION?: string
   /** Kill switch for Jev react decisions (lib/jev/decide.ts): "off" makes the
    *  react loop use its fixed rules without calling Jev. Unset = on. */
   JEV_REACT?: string
@@ -464,6 +473,10 @@ export interface JWTPayload {
    *  tracks the current token. Optional — tokens minted before this field
    *  existed have none, and refresh falls back to their `iat`. */
   sst?: number
+  /** Session family id: minted at login and carried across every sliding
+   *  refresh, so logout can revoke the whole refresh chain (not just the one
+   *  `jti` presented). Optional — older tokens have none. */
+  sid?: string
   [k: string]: unknown
 }
 

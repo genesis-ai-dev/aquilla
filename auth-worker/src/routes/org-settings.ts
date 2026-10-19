@@ -179,6 +179,16 @@ const COUNT_STRUCTURAL_KEY = "countStructuralCells"
 const ALLOW_BULK_AI_DRAFTS_KEY = "allowBulkValidateAiDrafts"
 
 /**
+ * Omnilingual ASR: `{ zeroShotEnabled?: boolean }`. Lets an org turn off the
+ * zero-shot transcription model (each user still opts in; absent = allowed —
+ * auth-worker lib/omni-asr.ts zeroShotEnabledForOrg). It decides which model
+ * members may pick, not who may see or do anything, so like
+ * allowBulkValidateAiDrafts it rides the general MAINTAINER gate (owners and
+ * maintainers) and needs only validation.
+ */
+const TRANSCRIPTION_KEY = "transcription"
+
+/**
  * AQU-1771: the org defaults for how many validations a cell
  * (validationCount) and a recorded take (validationCountAudio) need. Like
  * countStructuralCells they decide how a number is calculated, not who may
@@ -647,6 +657,14 @@ orgSettings.on(
       if (raw === undefined) continue
       if (!isValidMediaDefault(key, raw)) {
         return c.json({ error: `${key} has an invalid value` }, 400)
+      }
+    }
+    const rawTranscription = body.settings[TRANSCRIPTION_KEY]
+    if (rawTranscription !== undefined) {
+      const zeroShot = (rawTranscription as { zeroShotEnabled?: unknown } | null)?.zeroShotEnabled
+      if (typeof rawTranscription !== "object" || rawTranscription === null || Array.isArray(rawTranscription)
+        || (zeroShot !== undefined && typeof zeroShot !== "boolean")) {
+        return c.json({ error: `${TRANSCRIPTION_KEY}.zeroShotEnabled must be a boolean` }, 400)
       }
     }
     // Same reason: a string "true" would read as off and nobody would know why.

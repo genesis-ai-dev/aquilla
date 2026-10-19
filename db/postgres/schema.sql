@@ -659,6 +659,31 @@ CREATE TABLE IF NOT EXISTS chain_claims (
     PRIMARY KEY (project_id, file_id, cell_id, parent_key)
 );
 
+-- AQU-1767 phase 2 (migration 0178): what a `source.cell.delete` took, so
+-- `source.cell.restore` can put it back. Written once by the delete's
+-- projection (same batch, same gate), keyed by the delete event; `restored_by`
+-- makes each archive single-use. See the migration for the full rules.
+CREATE TABLE IF NOT EXISTS removed_cell_archive (
+    delete_event_id   TEXT PRIMARY KEY,
+    project_id        TEXT NOT NULL,
+    file_id           TEXT NOT NULL,
+    cell_id           TEXT NOT NULL,
+    deleted_by        TEXT NOT NULL,
+    deleted_ts        BIGINT NOT NULL,
+    cells_rows        JSONB NOT NULL DEFAULT '[]'::jsonb,
+    validators        JSONB NOT NULL DEFAULT '[]'::jsonb,
+    waivers           JSONB NOT NULL DEFAULT '[]'::jsonb,
+    backtranslations  JSONB NOT NULL DEFAULT '[]'::jsonb,
+    morph             JSONB NOT NULL DEFAULT '[]'::jsonb,
+    audio             JSONB NOT NULL DEFAULT '[]'::jsonb,
+    links             JSONB NOT NULL DEFAULT '[]'::jsonb,
+    comments          JSONB NOT NULL DEFAULT '[]'::jsonb,
+    restored_by       TEXT,
+    restored_ts       BIGINT
+);
+CREATE INDEX IF NOT EXISTS idx_removed_cell_archive_cell
+    ON removed_cell_archive (project_id, file_id, cell_id, deleted_ts DESC);
+
 CREATE TABLE files (
     id             TEXT PRIMARY KEY,
     project_id     TEXT NOT NULL,
@@ -1760,6 +1785,11 @@ CREATE TABLE IF NOT EXISTS knowledge_docs (
     index_status TEXT NOT NULL DEFAULT 'pending'
       CHECK (index_status IN ('pending','ready','failed')),
     index_tree JSONB,
+    -- Why the last indexing run ended where it did, in words the uploader can
+    -- act on (0179; AQU-2002). Set with index_status='ready' when the structure
+    -- landed but its summaries did not, and with 'failed' when there was
+    -- nothing to index. NULL = nothing to report.
+    index_error TEXT,
     created_by TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),

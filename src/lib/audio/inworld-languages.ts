@@ -193,15 +193,13 @@ export function formatVoiceLanguageName(code: string, locale: string): string {
 }
 
 /**
- * Language shown under a voice name. Prefer the voice's own tag; otherwise
- * the active target-language lane so Narrator still shows English / French / …
+ * Language shown under a voice name: the voice's own tag. A project lane is
+ * not a voice language — a Gemini or clone voice with none of its own stays
+ * unlabeled rather than borrowing whichever lane is open.
  */
 export function languageForVoiceDescription(
   voiceLanguage: string | undefined,
-  fallbackLanguage: string | undefined,
 ): string | undefined {
   const own = voiceLanguage?.trim()
-  if (own) return own
-  const fallback = fallbackLanguage?.trim()
-  return fallback || undefined
+  return own || undefined
 }

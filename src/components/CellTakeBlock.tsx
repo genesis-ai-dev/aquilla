@@ -49,7 +49,9 @@ import { learnFromTranscriptCorrection } from "@/lib/store/transcript-correction
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { tokenizeWords } from "@/lib/audio/timings"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { fmtShortCalendarDate } from "@/lib/format-date"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CodexCell } from "@/lib/codex-editor/types"
@@ -182,7 +184,7 @@ function CellTakeBlockView({
   pieces,
   takesHistory,
 }: CellTakeBlockProps & { controller: UseCellAudioResult }) {
-  const t = useT()
+  const { t, locale } = useI18n()
   const transcriptPreviewRef = useRef<HTMLDivElement | null>(null)
 
   const selectedAudioId = audioId ?? owner.selectedAudioId ?? undefined
@@ -289,8 +291,8 @@ function CellTakeBlockView({
     setDeleting(true)
     const slot = attachment.slot ?? (selectedAudioId === owner.selectedGeneratedVoiceAudioId ? GENERATED_VOICE_SLOT : RECORDING_SLOT)
     const lane = targetLang ? { targetLang } : {}
-    const removal = { projectId: project.id, fileId: owner.fileId, cellId: owner.id, audioId: selectedAudioId, slot, ...lane, author: username }
-    // A split take goes whole, every piece (Sam, 2026-10-14).
+    const removal = { projectId: project.id, fileId: owner.fileId, cellId: owner.id, audioId: selectedAudioId, slot, ...lane, author: username, history: { wasSelected: true } }
+    // A split take goes whole, every piece in one step (Sam, 2026-10-14).
     const removing = split ? split.map((piece) => ({ audioId: piece.audioId, slot: piece.slot ?? slot })) : null
     const remove = removing
       ? () => removeWholeTake({ ...removal, pieces: removing })
@@ -346,7 +348,7 @@ function CellTakeBlockView({
     const where = { projectId: project.id, fileId: owner.fileId, cellId: owner.id, author: username, ...lane }
     const save = split
       ? () => renameWholeTake({ ...where, pieces: split, name: label })
-      : () => renameTake({ ...where, audioId: selectedAudioId, label })
+      : () => renameTake({ ...where, audioId: selectedAudioId, label, labelBefore: storedLabel })
     try {
       await save()
     } catch {
@@ -462,16 +464,17 @@ function CellTakeBlockView({
         {provenance && (
           <span
             data-testid="cell-take-recorded"
-            title={t(isGenerated ? "audio.takesStrip.generatedByTooltip" : "audio.takesStrip.recordedByTooltip", {
-              datetime: new Date(provenance.recordedAt).toLocaleString(),
-              author: provenance.recordedBy,
-            })}
-            className="text-[11px] text-muted-foreground"
+            className="inline-flex min-w-0 items-center text-[11px] text-muted-foreground"
           >
-            {t("audio.takesStrip.recordedByBadge", {
-              date: new Date(provenance.recordedAt).toLocaleDateString(),
-              author: provenance.recordedBy,
-            })}
+            <DateTooltip
+              value={provenance.recordedAt}
+              label={t(isGenerated ? "audio.takesStrip.generatedLabel" : "audio.takesStrip.recordedLabel")}
+            >
+              {t("audio.takesStrip.recordedByBadge", {
+                date: fmtShortCalendarDate(provenance.recordedAt, undefined, locale),
+                author: provenance.recordedBy,
+              })}
+            </DateTooltip>
           </span>
         )}
         {/* Not when its transcript matches the line as it reads now: the

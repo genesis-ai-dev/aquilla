@@ -180,12 +180,30 @@ const DE_ESCALATED: Record<string, readonly string[]> = {
   "auth-worker/src/routes/org-settings.ts": ["hasActiveElevation", "getOrgMemberRole"],
   // Irreversible cross-tenant fold, both sides.
   "auth-worker/src/routes/merge-sibling.ts": ["roleWithoutUnelevatedAdmin"],
+  // OPS-47: approving mints a changeset_confirmations row that the AGENT's
+  // credential consumes later (sync-worker external/commit-gates.ts), so the
+  // write lands on a principal no elevation check can reach — and it is the
+  // ONE human gate in front of it. Rejecting and assigning write to another
+  // tenant's staged plan directly. The read stays open, per AQU-2003.
+  "auth-worker/src/routes/changeset-approvals.ts": ["roleWithoutUnelevatedAdmin"],
 }
 
 describe("admin authority is de-escalated on the paths that escape the session", () => {
   it.each(Object.entries(DE_ESCALATED))("%s still de-escalates", (file, symbols) => {
     const src = stripComments(read(file))
     for (const symbol of symbols) expect(src).toContain(symbol)
+  })
+
+  it("the changeset approval surface narrows its three WRITES and not its read (OPS-47)", () => {
+    const src = stripComments(read("auth-worker/src/routes/changeset-approvals.ts"))
+    // approve / reject pass narrowAdmin=true through the shared authority check;
+    // the approval read passes false.
+    expect(src).toContain('authorityDenied(c, user, cs, "approve", true)')
+    expect(src).toContain('authorityDenied(c, user, cs, "reject", true)')
+    expect(src).toContain('authorityDenied(c, user, cs, "view", false)')
+    // assign resolves its own floor (the org's assignment policy), so it
+    // narrows at its own call site rather than through authorityDenied.
+    expect(src.match(/roleWithoutUnelevatedAdmin\(/g) ?? []).toHaveLength(2)
   })
 
   it("the de-escalation helpers only ever NARROW, never widen", () => {

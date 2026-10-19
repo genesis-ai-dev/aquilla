@@ -19,17 +19,29 @@
 // excluded from approving: the shipped in-app flow is one person running the
 // agent and applying its output.
 //
+// OPS-47 (2026-10-19): the three WRITES here de-escalate platform-admin power
+// unless the session is elevated. The floor is authority-based, and
+// resolveProjectRole hands every platform operator level 700 — ROLE.OWNER, the
+// highest floor any plan can carry — on every project in every org, so an
+// un-elevated admin cleared every floor on every tenant. Approving is the one
+// human gate in front of an agent's cross-tenant write, and it escapes the
+// AQU-2003 read-only posture entirely, because the write that follows is made
+// by the AGENT's credential, not by a platform-sourced sync token: none of the
+// sync-worker's `src: "platform"` rules ever see it. The READ is deliberately
+// left open, which is the AQU-2003 decision applied here.
+//
 // Error envelope mirrors sync-worker's external error contract
 // (sync-worker/src/external/errors.ts): `{ error: { code, message, details? } }`
 // with the same stable codes so an agent/UI can branch consistently across
 // both workers.
 
-import { Hono } from "hono"
+import { Hono, type Context } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { planIsCreatorScoped, requiredRoleForChangeset } from "../lib/changeset-floor"
 import { resolveProjectRole } from "../services/project-permissions"
+import { roleWithoutUnelevatedAdmin } from "../services/elevation-gate"
 import { getAssignmentMinRoleForProject } from "../services/org-permissions"
 import { type AuthUser, type Env } from "../types"
 import { buildChangeDetails } from "../lib/changeset-approval-changes"
@@ -103,6 +115,16 @@ function floorDenied(required: number, verb: string) {
   )
 }
 
+/** OPS-47: the caller cleared the floor only on platform-admin power, and this
+ *  session is not elevated. Kept in this route's own error envelope so an
+ *  agent/UI still branches on `permission_denied`. */
+function elevationDenied(verb: string) {
+  return errorJson(
+    "permission_denied",
+    `elevation required to ${verb} a changeset with platform-admin access`,
+  )
+}
+
 /**
  * Approval authority (P1 §2.1). The caller's LIVE project role must be at or
  * above the floor the plan was staged against. A caller with no role on the
@@ -116,11 +138,24 @@ function floorDenied(required: number, verb: string) {
  * Returns the denial envelope, or null when the caller may act.
  */
 async function authorityDenied(
-  env: Env,
+  c: Context<AuthHonoEnv>,
   user: AuthUser,
   cs: ChangesetRow,
   verb: string,
+  /**
+   * OPS-47: strip cross-tenant platform-admin power unless the session is
+   * elevated. True on every write (approve / reject / assign); false on the
+   * approval read, which stays open to an operator per AQU-2003.
+   *
+   * De-escalated rather than refused outright, for the reason
+   * elevation-gate.ts gives: platform's 700 outranks every genuine grant below
+   * owner, so `source === "platform"` also describes an operator who really is
+   * a Maintainer of this project's own org. Refusing on the source alone would
+   * lock them out of their own projects.
+   */
+  narrowAdmin: boolean,
 ): Promise<ReturnType<typeof errorJson> | null> {
+  const env = c.env
   // Org-level plans keep the creator rule: a tenant-creation plan (CreateProject
   // / CreateOrg) names a project/org that does not exist until commit — for
   // CreateOrg it never exists at all — and an org-membership plan (AQU-1235)
@@ -137,6 +172,10 @@ async function authorityDenied(
   const required = await requiredRoleForChangeset(env, cs.project_id, cs.commands)
   const role = await resolveProjectRole(env, user, cs.project_id)
   if (!role || role.level < required) return floorDenied(required, verb)
+  if (narrowAdmin) {
+    const effective = await roleWithoutUnelevatedAdmin(c, user, cs.project_id, role)
+    if (!effective || effective.level < required) return elevationDenied(verb)
+  }
   return null
 }
 
@@ -153,7 +192,7 @@ changesetApprovals.get("/:id/approval", authMiddleware, async (c) => {
     const { body, status } = errorJson("not_found", `changeset ${id} not found`)
     return c.json(body, status)
   }
-  const denied = await authorityDenied(c.env, user, cs, "view")
+  const denied = await authorityDenied(c, user, cs, "view", false)
   if (denied) return c.json(denied.body, denied.status)
 
   const details = await buildChangeDetails(c.env.AQUILLA_PG, cs.project_id, cs.commands)
@@ -201,7 +240,7 @@ changesetApprovals.post(
       const { body, status } = errorJson("not_found", `changeset ${id} not found`)
       return c.json(body, status)
     }
-    const denied = await authorityDenied(c.env, user, cs, "approve")
+    const denied = await authorityDenied(c, user, cs, "approve", true)
     if (denied) return c.json(denied.body, denied.status)
     if (cs.status !== "staged") {
       const { body, status } = errorJson(
@@ -274,7 +313,7 @@ changesetApprovals.post("/:id/reject", authMiddleware, async (c) => {
     const { body, status } = errorJson("not_found", `changeset ${id} not found`)
     return c.json(body, status)
   }
-  const denied = await authorityDenied(c.env, user, cs, "reject")
+  const denied = await authorityDenied(c, user, cs, "reject", true)
   if (denied) return c.json(denied.body, denied.status)
   if (cs.status === "discarded") {
     return c.json({ changesetId: cs.id, status: "discarded" })
@@ -338,6 +377,12 @@ changesetApprovals.post(
     const role = await resolveProjectRole(c.env, user, cs.project_id)
     if (!role || role.level < assignmentMinRole) {
       const { body, status } = floorDenied(assignmentMinRole, "assign")
+      return c.json(body, status)
+    }
+    // OPS-47: routing another tenant's plan is a write like the other two.
+    const effective = await roleWithoutUnelevatedAdmin(c, user, cs.project_id, role)
+    if (!effective || effective.level < assignmentMinRole) {
+      const { body, status } = elevationDenied("assign")
       return c.json(body, status)
     }
 

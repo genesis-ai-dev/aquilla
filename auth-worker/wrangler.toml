@@ -159,10 +159,10 @@ mode = "smart"
 crons = ["*/5 * * * *", "0 14 * * 1", "0 14 1 * *"]
 
 [vars]
-# Omnilingual ASR on Modal (infra/modal/omnilingual_asr.py). Hosted
-# transcription for languages Whisper lacks, plus the zero-shot opt-in. Empty =
-# those requests answer 503 (Whisper languages are unaffected). Set the deployed
-# Modal web URL, then `wrangler secret put OMNI_SHARED_SECRET --env=<env>` with
+# Omnilingual ASR on Modal (infra/modal/omni_asr.py). Hosted transcription for
+# languages Whisper lacks, plus the zero-shot opt-in. Empty = Automatic keeps
+# Whisper auto-detect for those languages and an explicit Omnilingual choice
+# answers 503. Needs `wrangler secret put OMNI_SHARED_SECRET --env=<env>` with
 # the value of the Modal secret `aquilla-omni-asr`. OMNI_ASR_AMORTIZATION
 # (default 1.5) multiplies metered GPU cost to cover idle and cold-start time.
 OMNI_ASR_MODAL_URL = ""
@@ -297,13 +297,13 @@ tag = "v1"
 new_sqlite_classes = ["ContextualRunDriver"]
 
 [env.production.vars]
-# Omnilingual ASR on Modal (infra/modal/omnilingual_asr.py). Hosted
-# transcription for languages Whisper lacks, plus the zero-shot opt-in. Empty =
-# those requests answer 503 (Whisper languages are unaffected). Set the deployed
-# Modal web URL, then `wrangler secret put OMNI_SHARED_SECRET --env=<env>` with
+# Omnilingual ASR on Modal (infra/modal/omni_asr.py). Hosted transcription for
+# languages Whisper lacks, plus the zero-shot opt-in. Empty = Automatic keeps
+# Whisper auto-detect for those languages and an explicit Omnilingual choice
+# answers 503. Needs `wrangler secret put OMNI_SHARED_SECRET --env=<env>` with
 # the value of the Modal secret `aquilla-omni-asr`. OMNI_ASR_AMORTIZATION
 # (default 1.5) multiplies metered GPU cost to cover idle and cold-start time.
-OMNI_ASR_MODAL_URL = ""
+OMNI_ASR_MODAL_URL = "https://genesis-ai-dev--aquilla-omnilingual-asr-api.us-east.modal.run"
 OMNI_ASR_AMORTIZATION = "1.5"
 ALGORITHM = "HS256"
 # [Pen test] Auth & session mgmt (2026-09-28): see [vars] above for why this
@@ -429,13 +429,13 @@ new_sqlite_classes = ["ContextualRunDriver"]
 binding = "CF_VERSION_METADATA"
 
 [env.development.vars]
-# Omnilingual ASR on Modal (infra/modal/omnilingual_asr.py). Hosted
-# transcription for languages Whisper lacks, plus the zero-shot opt-in. Empty =
-# those requests answer 503 (Whisper languages are unaffected). Set the deployed
-# Modal web URL, then `wrangler secret put OMNI_SHARED_SECRET --env=<env>` with
+# Omnilingual ASR on Modal (infra/modal/omni_asr.py). Hosted transcription for
+# languages Whisper lacks, plus the zero-shot opt-in. Empty = Automatic keeps
+# Whisper auto-detect for those languages and an explicit Omnilingual choice
+# answers 503. Needs `wrangler secret put OMNI_SHARED_SECRET --env=<env>` with
 # the value of the Modal secret `aquilla-omni-asr`. OMNI_ASR_AMORTIZATION
 # (default 1.5) multiplies metered GPU cost to cover idle and cold-start time.
-OMNI_ASR_MODAL_URL = ""
+OMNI_ASR_MODAL_URL = "https://genesis-ai-dev--aquilla-omnilingual-asr-api.us-east.modal.run"
 OMNI_ASR_AMORTIZATION = "1.5"
 POSTHOG_HOST = "https://eu.i.posthog.com"
 POSTHOG_KEY = "phc_qy5gb7wTaW5RbmMW8SEyQPSLKtYFtUobaqKZWiUs7cBt"

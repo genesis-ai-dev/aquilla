@@ -24,9 +24,15 @@ export function ExtensionsBar({ choice }: { choice: ExtensionEditorChoice }) {
   const ctx = useToolsMount()
   const navigate = useNavigate()
   const setPaletteOpen = ctx?.setPaletteOpen
+  // AQU-1937: the palette (and its Ctrl/Cmd+Shift+E shortcut) exists only
+  // while the project has extensions — the switch on and something installed.
+  // Off, the bar draws nothing, so the key must not be claimed either: a
+  // swallowed shortcut with no palette behind it would be the one trace of
+  // Smart Extensions left in a project that never turned them on.
+  const hasTools = (ctx?.tools.length ?? 0) > 0
 
   useEffect(() => {
-    if (!setPaletteOpen) return
+    if (!setPaletteOpen || !hasTools) return
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "e") {
         e.preventDefault()
@@ -35,7 +41,7 @@ export function ExtensionsBar({ choice }: { choice: ExtensionEditorChoice }) {
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [setPaletteOpen])
+  }, [setPaletteOpen, hasTools])
 
   if (!ctx || ctx.tools.length === 0) return null
   const pinned = ctx.tools.filter((tool) => ctx.pinned.includes(tool.id) && tool.manifest.mounts.includes("panel"))

@@ -40,7 +40,7 @@ import {
 } from "../../../src/lib/lanes/scope-ids"
 import { laneReadWallEnabled } from "../../../src/lib/lanes/read-wall"
 import type { MemberLaneGrant } from "../../../src/lib/lanes/grant-gap"
-import { syncMemberLaneGrants } from "../services/lane-grants"
+import { loadProjectTeamLaneAttachments, syncMemberLaneGrants } from "../services/lane-grants"
 import { getMemberLaneAssignments } from "../services/assignments"
 
 const memberScopes = new Hono<AuthHonoEnv>()
@@ -418,9 +418,15 @@ memberScopes.put(
  * ignored: `project_members` deletes leave the grant rows behind, and the
  * roster is what says who is still here.
  *
- * `undefined` (an empty body) when the project has no current target lanes —
+ * `undefined` (no `laneIds` key) when the project has no current target lanes —
  * there is then nothing to narrow, and the client must keep offering what it
  * offers today rather than read "no lanes" as "nobody is staffed".
+ *
+ * AQU-2047: the same response carries `teamLanes`, one entry per team attached
+ * to the project. `lanesExplicit: false` is a living attachment (every current
+ * target lane). `true` includes `laneIds`, the rows in `group_project_lanes`.
+ * The assign menu unions those sets itself. An empty `teamLanes` is no
+ * attached team, which is not "no lanes".
  */
 async function loadStaffedLaneIds(
   env: AuthHonoEnv["Bindings"],
@@ -464,6 +470,10 @@ async function loadStaffedLaneIds(
  * scopes: who is staffed where is roster information. Below that floor the
  * client gets no answer and keeps today's full lane list, which AQU-581
  * already narrows to a delegate's own lanes.
+ *
+ * The body is `{ laneIds?, teamLanes }`. `teamLanes` is AQU-2047: each
+ * attached team's `{ lanesExplicit, laneIds? }`. Missing `laneIds` is still
+ * "staffing unknown", not "nobody".
  */
 memberScopes.get("/:projectId/lane-staffing", authMiddleware, async (c) => {
   const user = c.get("user")
@@ -479,7 +489,15 @@ memberScopes.get("/:projectId/lane-staffing", authMiddleware, async (c) => {
   }
 
   const laneIds = await loadStaffedLaneIds(c.env, projectId)
-  return c.json(laneIds ? { laneIds } : {})
+  // AQU-2047: which lanes each attached team is tied to. Read beside staffing,
+  // not instead of it — a lane can be staffed and still be outside a team's
+  // checked set. Always present, including `[]`, so a missing field stays
+  // "the server did not say" for an older client.
+  const teamLanes = await loadProjectTeamLaneAttachments(c.env.AQUILLA_PG, projectId)
+  return c.json({
+    ...(laneIds ? { laneIds } : {}),
+    teamLanes,
+  })
 })
 
 /**

@@ -11,6 +11,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import { useProject } from "@/hooks/useProject"
+import { useProjectLaneStaffing } from "@/hooks/useProjectLaneStaffing"
 import {
   broadcastProjectSettingsUpdated,
   describePatchFailure,
@@ -6992,6 +6993,14 @@ export function ProjectWorkspace() {
   // in that case (no eligible assignee shown), not open.
   const currentUserId = projectMembers.find((m) => m.username === currentUsername)?.userId ?? null
   const jwt = frontierSession?.jwt ?? null
+  // AQU-2047: the editor's Assign dialog offers the lanes the attached teams
+  // are tied to. The same read as the project overview. Below project lead
+  // the route refuses, and a missing answer leaves the menu as it was.
+  const { teamLanes } = useProjectLaneStaffing(
+    project?.id ?? null,
+    jwt,
+    currentRoleLevel >= ROLE.PROJECT_LEAD,
+  )
 
   // AQU-559: presence frames stamped by the sync DO carry `auth.claims.username`,
   // but legacy tokens without a username claim fall back to a `user:<numericId>`
@@ -16637,6 +16646,7 @@ export function ProjectWorkspace() {
           projectFiles={projectFiles}
           targetLanes={extraRegistryLanes(project.targetLanes, activeTargetLanguage)}
           lanes={assignLanes}
+          teamLanes={teamLanes}
           laneLabels={laneLabels}
           defaultLane={activeLane}
           defaultLaneLabel={activeTargetLanguage ?? ""}

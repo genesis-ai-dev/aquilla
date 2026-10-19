@@ -820,3 +820,115 @@ describe("only the lanes the project's people are on (AQU-1994)", () => {
     await waitFor(() => expect(mockCreate).not.toHaveBeenCalled())
   })
 })
+
+/**
+ * AQU-2047 — this dialog is the other menu that builds lane options (lane
+ * row, plan, org, editor). It must drop the lanes an attached team is not
+ * tied to, the same way the Team card's Assign work panel does.
+ */
+describe("lanes the attached teams are tied to (AQU-2047)", () => {
+  const LANES = [
+    { legacyTag: "French", label: "French", laneId: "lane-fr" },
+    { legacyTag: "Mandarin Chinese", label: "Mandarin Chinese", laneId: "lane-zh" },
+    { legacyTag: "Swedish", label: "Swedish", laneId: "lane-sv" },
+  ]
+  const staffed = new Set(["lane-fr", "lane-zh", "lane-sv"])
+
+  it("names French only when the team checked French", () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        lanes={LANES}
+        staffedLaneIds={staffed}
+        teamLanes={[{ lanesExplicit: true, laneIds: ["lane-fr"] }]}
+      />,
+    )
+
+    expect(screen.getByTestId("assign-modal-lane-fixed")).toHaveTextContent("French")
+    expect(screen.queryByRole("combobox", { name: /language lane/i })).not.toBeInTheDocument()
+    expect(screen.queryByText("Mandarin Chinese")).not.toBeInTheDocument()
+    expect(screen.queryByText("Swedish")).not.toBeInTheDocument()
+  })
+
+  it("keeps the current lanes when the team has not saved a lane list", () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        lanes={LANES}
+        staffedLaneIds={staffed}
+        teamLanes={[{ lanesExplicit: false }]}
+      />,
+    )
+    fireEvent.click(screen.getByRole("combobox", { name: /language lane/i }))
+    for (const lane of ["French", "Mandarin Chinese", "Swedish"]) {
+      expect(screen.getByRole("option", { name: lane })).toBeTruthy()
+    }
+  })
+
+  it("leaves every lane on offer when team data is omitted or there is no team", () => {
+    const { unmount } = render(
+      <AssignModal {...BASE_PROPS} lanes={LANES} staffedLaneIds={staffed} teamLanes={null} />,
+    )
+    fireEvent.click(screen.getByRole("combobox", { name: /language lane/i }))
+    for (const lane of ["French", "Mandarin Chinese", "Swedish"]) {
+      expect(screen.getByRole("option", { name: lane })).toBeTruthy()
+    }
+    unmount()
+
+    render(
+      <AssignModal {...BASE_PROPS} lanes={LANES} staffedLaneIds={staffed} teamLanes={[]} />,
+    )
+    fireEvent.click(screen.getByRole("combobox", { name: /language lane/i }))
+    for (const lane of ["French", "Mandarin Chinese", "Swedish"]) {
+      expect(screen.getByRole("option", { name: lane })).toBeTruthy()
+    }
+  })
+
+  it("offers the union when two teams checked different lanes", () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        lanes={LANES}
+        staffedLaneIds={staffed}
+        teamLanes={[
+          { lanesExplicit: true, laneIds: ["lane-fr"] },
+          { lanesExplicit: true, laneIds: ["lane-sv"] },
+        ]}
+      />,
+    )
+    fireEvent.click(screen.getByRole("combobox", { name: /language lane/i }))
+    expect(screen.getByRole("option", { name: "French" })).toBeTruthy()
+    expect(screen.getByRole("option", { name: "Swedish" })).toBeTruthy()
+    expect(screen.queryByRole("option", { name: "Mandarin Chinese" })).toBeNull()
+  })
+
+  it("still hides a lane nobody is on, even when a team checked it", () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        lanes={LANES}
+        staffedLaneIds={new Set(["lane-zh"])}
+        teamLanes={[{ lanesExplicit: true, laneIds: ["lane-fr", "lane-zh"] }]}
+      />,
+    )
+
+    expect(screen.getByTestId("assign-modal-lane-fixed")).toHaveTextContent("Mandarin Chinese")
+    expect(screen.queryByText("French")).not.toBeInTheDocument()
+  })
+
+  it("assigns the lane the menu still offers", async () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        lanes={LANES}
+        defaultLane="Swedish"
+        staffedLaneIds={staffed}
+        teamLanes={[{ lanesExplicit: true, laneIds: ["lane-fr"] }]}
+      />,
+    )
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+    expect(mockCreate.mock.calls[0][0].targetLang).toBe("French")
+  })
+})

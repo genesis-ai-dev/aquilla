@@ -55,7 +55,7 @@ import { ROLE } from "@/lib/frontier/roles"
 import { laneTranslatedPct, laneValidatedPct, type PortfolioLane } from "@/lib/frontier/portfolio"
 import type { FileReference } from "@/lib/parsers/types"
 import type { ProjectMember } from "@/lib/frontier/members"
-import type { AssignLaneOption } from "@/lib/sync/assignment-lane"
+import type { AssignLaneOption, TeamLaneAttachment } from "@/lib/sync/assignment-lane"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { progressPercentOfFraction } from "@/lib/progress/progress-percent"
 import { textProgressSegments } from "@/lib/progress/progress-palette"
@@ -83,6 +83,8 @@ export interface OverviewLaneTableProps {
    * dialog offers the same narrowed list the Team card's panel does.
    */
   staffedLaneIds?: ReadonlySet<string> | readonly string[] | null
+  /** AQU-2047: attached teams' lane checks. See AssignModal's `teamLanes`. */
+  teamLanes?: readonly TeamLaneAttachment[] | null
   /** All project files — AssignModal's book/file scope picker. */
   files: FileReference[]
   /** Caller's project role level — gates + passed to AssignModal. */
@@ -205,6 +207,7 @@ export function OverviewLaneTable({
   extraLanes,
   assignLanes,
   staffedLaneIds,
+  teamLanes,
   files,
   roleLevel,
   author,
@@ -531,6 +534,7 @@ export function OverviewLaneTable({
         targetLanes={extraLanes}
         lanes={assignLanes}
         staffedLaneIds={staffedLaneIds}
+        teamLanes={teamLanes}
         defaultLane={assignLane ?? ""}
         members={members}
         roleLevel={roleLevel}

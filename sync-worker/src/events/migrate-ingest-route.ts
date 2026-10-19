@@ -16,8 +16,14 @@
 // Idempotency: events.id is the deterministic key; `INSERT OR IGNORE` drops
 // replays and the projection is UPSERT-based (+ self-healing counters), so a
 // re-run inserts 0 new events and converges the projection to the same state.
-// Event-insert + projection ride in the same d1.batch, so an interrupted run
-// leaves a clean prefix and the re-run completes the rest.
+// That idempotency rests on an ATOMICITY INVARIANT (AQU-2025): an event's
+// INSERT and every one of its projection statements ride in the SAME
+// transaction, so a committed event id always implies a complete projection.
+// The replay pre-filter below skips ids already in `events`, which is only
+// sound while that holds — otherwise a half-projected event is committed,
+// filtered out of every retry, and its missing rows can never be written.
+// An interrupted run therefore leaves a clean prefix of whole events and the
+// re-run completes the rest.
 //
 // SECURITY: this route trusts the body's author/id/timestamp. It must NEVER be
 // reachable by browser clients — only holders of SYNC_SECRET_KEY may call it.
@@ -37,6 +43,10 @@ import { dataTargetTagsFromEvents, ensureProjectLanes } from '../../../db/shared
 // quickly — large batches hold a write transaction open longer and serialise
 // concurrent ingesters behind it. 100 is the proven sweet spot. Tune CLIENT
 // concurrency (migrate-all --concurrency) to saturate throughput, NOT batch size.
+//
+// This is a bound on a transaction, not a cut point: statements are packed into
+// it whole-group-at-a-time (AQU-2025), so a transaction may land a little under
+// the limit, and a single event whose group exceeds it rides alone.
 const BATCH_LIMIT = 100
 
 export interface MigrateIngestEnv {
@@ -83,6 +93,17 @@ function isMigrateIngestBody(x: unknown): x is MigrateIngestBody {
 
 const INGEST_PATH = '/migrate/ingest'
 
+/** Error text safe to log: name + message, truncated. Postgres driver errors
+ *  carry the failing statement and its bound values on `query` / `parameters`,
+ *  so logging the error object whole would put event payloads, cell text and
+ *  credentials into the logs — which the AQU-2025 diagnostics must never do. */
+function errSummary(err: unknown): string {
+  const e = err as { name?: unknown; message?: unknown } | null
+  const name = typeof e?.name === 'string' ? e.name : 'Error'
+  const message = typeof e?.message === 'string' ? e.message : String(err)
+  return `${name}: ${message}`.slice(0, 500)
+}
+
 /**
  * POST /migrate/ingest
  *
@@ -110,6 +131,7 @@ export async function handleMigrateIngestRequest(
     return new Response('AQUILLA_PG binding not configured', { status: 500 })
   }
   const db = env.AQUILLA_PG
+  const pipelined = typeof db.batchPipelined === 'function'
 
   let body: unknown
   try {
@@ -132,8 +154,50 @@ export async function handleMigrateIngestRequest(
   let serverTs = Date.now()
   const eventsOnly = body.eventsOnly === true
   const deferFileCounters = body.deferFileCounters === true
-  const stmts: AquillaStatement[] = []
+  // Each entry is ONE event's indivisible statement group: its `events` INSERT
+  // followed by that event's projection statements, in order (AQU-2025).
+  const groups: AquillaStatement[][] = []
   const eventsOnlyRows: SeqEventInsertRow[] = []
+
+  // AQU-2025: ingestion phase timings + counts. Production ingest has been
+  // sitting at 10-13s per request with no way to tell whether the time goes to
+  // validation, the replay pre-filter, lane upserts, seq allocation or the
+  // write transactions, so every diagnosis blamed Cloudflare or Neon by
+  // default. DURATIONS AND COUNTS ONLY: no event payloads, no cell text, no
+  // credentials and no SQL parameters ever enter these lines.
+  const projectId = body.projectId
+  const counts = {
+    events: body.events.length,
+    fresh: 0,
+    replayed: 0,
+    groups: 0,
+    statements: 0,
+    transactions: 0,
+    oversizedGroups: 0,
+  }
+  const phases: Record<string, number> = {}
+  const startedAt = Date.now()
+  let phaseMark = startedAt
+  const endPhase = (name: string): void => {
+    const now = Date.now()
+    phases[name] = now - phaseMark
+    phaseMark = now
+  }
+  const emitDiagnostics = (outcome: string, error?: string): void => {
+    const line = {
+      projectId,
+      outcome,
+      eventsOnly,
+      deferFileCounters,
+      pipelined,
+      ...counts,
+      phases,
+      totalMs: Date.now() - startedAt,
+      ...(error ? { error } : {}),
+    }
+    if (outcome === 'ok') console.log('[migrate-ingest] phases', line)
+    else console.error('[migrate-ingest] phases', line)
+  }
 
   // AQU-1005 pass 1: validate + build every projection statement BEFORE taking
   // an allocation. Projection statements don't depend on server_seq, so all of
@@ -196,6 +260,8 @@ export async function handleMigrateIngestRequest(
     })
   }
 
+  endPhase('prepare')
+
   // AQU-1005: allocate the whole batch's server_seqs in ONE autocommit counter
   // bump BEFORE the write transactions. The old shape ran the bump CTE inside
   // every event INSERT, so the first statement of each pipelined transaction
@@ -219,7 +285,13 @@ export async function handleMigrateIngestRequest(
     for (const r of found.results ?? []) replayed.add(r.id)
   }
   const fresh = replayed.size ? prepared.filter((p) => !replayed.has(p.row.id)) : prepared
-  if (fresh.length === 0) return Response.json({ accepted: 0, replayed: replayed.size })
+  counts.replayed = replayed.size
+  counts.fresh = fresh.length
+  endPhase('replayFilter')
+  if (fresh.length === 0) {
+    emitDiagnostics('ok')
+    return Response.json({ accepted: 0, replayed: replayed.size })
+  }
 
   // AQU-1240 slice 6: lanes must exist before projection (slice 5) resolves
   // lane_id. Codex upserts the project first (placeholders) then ingests;
@@ -230,18 +302,22 @@ export async function handleMigrateIngestRequest(
       dataTargetTags: dataTargetTagsFromEvents(body.events),
     })
   } catch (err) {
-    console.error("[migrate-ingest] ensure lanes failed:", err)
+    endPhase('lanes')
+    emitDiagnostics('ensure-lanes-failed', errSummary(err))
     return Response.json({ error: "ensure lanes failed" }, { status: 500 })
   }
+  endPhase('lanes')
 
   let nextSeq: number
   let seqBase: number
   try {
     seqBase = nextSeq = await allocateSeqRange(db, body.projectId, fresh.length)
   } catch (err) {
-    console.error("[migrate-ingest] seq allocation failed:", err)
+    endPhase('seqAlloc')
+    emitDiagnostics('seq-allocation-failed', errSummary(err))
     return Response.json({ error: "seq allocation failed" }, { status: 500 })
   }
+  endPhase('seqAlloc')
 
   // Pass 2: stamp seqs from the pre-allocated block, in body order, and emit
   // each event's insert ahead of its own projection statements (the ordering
@@ -252,8 +328,7 @@ export async function handleMigrateIngestRequest(
       // Firehose path: collapse into multi-row INSERTs below.
       eventsOnlyRows.push(insertRow)
     } else {
-      stmts.push(buildBulkEventInsertStmt(db, [insertRow]))
-      stmts.push(...projStmts)
+      groups.push([buildBulkEventInsertStmt(db, [insertRow]), ...projStmts])
     }
   }
 
@@ -263,14 +338,16 @@ export async function handleMigrateIngestRequest(
   if (eventsOnly) {
     const ROWS_PER_STMT = 200
     for (let i = 0; i < eventsOnlyRows.length; i += ROWS_PER_STMT) {
-      stmts.push(buildBulkEventInsertStmt(db, eventsOnlyRows.slice(i, i + ROWS_PER_STMT)))
+      groups.push([buildBulkEventInsertStmt(db, eventsOnlyRows.slice(i, i + ROWS_PER_STMT))])
     }
   }
 
-  // Settle the allocation in the LAST batch chunk (stmts is split across
-  // multiple runBatch calls below) so the ledger row only clears once every
-  // event row has actually committed.
-  stmts.push(buildSettleSeqRangeStmt(db, body.projectId, seqBase))
+  // Settle the allocation LAST (the groups below are split across multiple
+  // runBatch calls) so the ledger row only clears once every event row has
+  // actually committed. Its own single-statement group: it depends on nothing
+  // in the chunk it rides in, and packing keeps it in the final transaction.
+  groups.push([buildSettleSeqRangeStmt(db, body.projectId, seqBase)])
+  counts.groups = groups.length
 
   // Pipelined batch (postgres.js) collapses the per-statement Hyperdrive↔Neon
   // round-trips that dominated ingest (2 RTTs × thousands of stmts ≈ 21 stmts/s
@@ -281,17 +358,44 @@ export async function handleMigrateIngestRequest(
   // statement cache is per connection, and a batch can land on any pooled
   // connection), so fewer, bigger transactions amortize the warm-up; at
   // pipelined speed a 1000-stmt transaction still commits in ~1s.
-  const pipelined = typeof db.batchPipelined === "function"
   const runBatch = pipelined ? db.batchPipelined!.bind(db) : db.batch.bind(db)
   const limit = pipelined ? 1000 : BATCH_LIMIT
+
+  // AQU-2025: pack WHOLE GROUPS into each transaction, never cutting mid-group.
+  // This loop used to be `stmts.slice(i, i + limit)` over the flat statement
+  // list, which cut wherever the index landed — so an event's INSERT committed
+  // in one transaction while the tail of its projection went to the next. A
+  // failure in that next transaction left the event id committed with an
+  // incomplete projection, and the replay pre-filter above then skipped that id
+  // on every retry, so the missing rows could never be written. That is the
+  // canary's 249 audio event rows against 248 audio projection rows.
+  //
+  // Oversized single event: a group that alone exceeds `limit` rides as its own
+  // transaction rather than being split. Atomicity wins over the size bound —
+  // splitting it is precisely the bug above — and the bound still holds for
+  // every other transaction.
   try {
-    for (let i = 0; i < stmts.length; i += limit) {
-      await runBatch(stmts.slice(i, i + limit))
+    let chunk: AquillaStatement[] = []
+    const flush = async (): Promise<void> => {
+      if (chunk.length === 0) return
+      await runBatch(chunk)
+      counts.transactions++
+      counts.statements += chunk.length
+      chunk = []
     }
+    for (const group of groups) {
+      if (chunk.length > 0 && chunk.length + group.length > limit) await flush()
+      if (group.length > limit) counts.oversizedGroups++
+      chunk.push(...group)
+    }
+    await flush()
   } catch (err) {
-    console.error("[migrate-ingest] DB batch failed:", err)
+    endPhase('write')
+    emitDiagnostics('db-batch-failed', errSummary(err))
     return Response.json({ error: "DB batch failed" }, { status: 500 })
   }
+  endPhase('write')
+  emitDiagnostics('ok')
 
   return Response.json({ accepted: fresh.length, replayed: replayed.size })
 }

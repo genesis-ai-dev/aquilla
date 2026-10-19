@@ -1,0 +1,316 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Word Count</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--background); color: var(--foreground);
+    font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { display: flex; flex-direction: column; height: 100vh; }
+  header { padding: 10px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+  select, button { font: inherit; color: var(--foreground); background: var(--card);
+    border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; }
+  select { width: 100%; }
+  select:focus, button:focus { outline: 2px solid var(--ring); outline-offset: 1px; }
+  button { cursor: pointer; }
+  button[aria-pressed="true"] { background: var(--primary); color: var(--primary-foreground); border-color: var(--primary); }
+  .summary { background: var(--card); color: var(--card-foreground); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 10px; }
+  .total { font-size: 26px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .total small { font-size: 12px; font-weight: 500; color: var(--muted-foreground); }
+  .meta { color: var(--muted-foreground); font-size: 12px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .progress { height: 4px; background: var(--muted); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+  .progress > div { height: 100%; background: var(--primary); width: 0; transition: width .3s; }
+  .tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .tools .live { margin-left: auto; font-size: 11px; color: var(--muted-foreground); display: flex; align-items: center; gap: 4px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted-foreground); }
+  .dot.on { background: var(--primary); }
+  main { flex: 1; overflow-y: auto; padding: 4px 0 12px; }
+  .ch { position: sticky; top: 0; background: var(--muted); color: var(--muted-foreground);
+    font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .03em;
+    padding: 4px 10px; display: flex; justify-content: space-between; border-bottom: 1px solid var(--border); z-index: 1; }
+  .row { display: grid; grid-template-columns: minmax(64px, auto) 1fr 40px; gap: 8px; align-items: center;
+    padding: 3px 10px; border-bottom: 1px solid color-mix(in oklab, var(--border) 50%, transparent); }
+  .row .ref { font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row.heading .ref { font-style: italic; color: var(--muted-foreground); }
+  .row .bar { height: 6px; background: var(--muted); border-radius: 3px; overflow: hidden; }
+  .row .bar > div { height: 100%; background: var(--primary); border-radius: 3px; transition: width .25s; }
+  .row .n { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .row.empty .n { color: var(--muted-foreground); font-weight: 400; }
+  .row.flash { animation: flash 1.6s ease-out; }
+  @keyframes flash { 0% { background: var(--accent); color: var(--accent-foreground); } 100% { background: transparent; } }
+  .state { padding: 24px 14px; text-align: center; color: var(--muted-foreground); }
+  .error { margin: 10px; padding: 8px 10px; border: 1px solid var(--destructive); color: var(--destructive);
+    border-radius: 6px; background: var(--card); }
+  .spinner { width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--primary);
+    border-radius: 50%; animation: spin .8s linear infinite; margin: 0 auto 8px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <select id="file" aria-label="File" disabled><option>Loading files…</option></select>
+    <div class="summary">
+      <div class="total" id="total">–<small> words</small></div>
+      <div class="meta" id="meta">&nbsp;</div>
+      <div class="progress"><div id="prog"></div></div>
+    </div>
+    <div class="tools">
+      <button id="hideEmpty" aria-pressed="false" title="Hide verses with no translation">Hide empty</button>
+      <span class="live"><span class="dot" id="dot"></span><span id="liveTxt">Live</span></span>
+    </div>
+  </header>
+  <div id="err"></div>
+  <main id="list"><div class="state"><div class="spinner"></div>Loading…</div></main>
+</div>
+<script>
+(async () => {
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const fmt = (n) => { try { return Number(n).toLocaleString(); } catch (_) { return String(n); } };
+
+  let segmenter = null;
+  try { if (typeof Intl !== "undefined" && Intl.Segmenter) segmenter = new Intl.Segmenter(undefined, { granularity: "word" }); } catch (_) { segmenter = null; }
+  function countWords(text) {
+    if (!text) return 0;
+    const t = String(text);
+    if (!t.trim()) return 0;
+    if (segmenter) {
+      let n = 0;
+      for (const s of segmenter.segment(t)) if (s.isWordLike) n++;
+      return n;
+    }
+    const m = t.match(/[\p{L}\p{N}]+(?:['’\-][\p{L}\p{N}]+)*/gu);
+    return m ? m.length : 0;
+  }
+
+  const state = { files: [], fileId: null, cells: [], index: new Map(), loading: false, seq: 0, hideEmpty: false };
+
+  function showError(msg) {
+    $("err").innerHTML = msg ? '<div class="error">' + esc(msg) + "</div>" : "";
+  }
+  function errMsg(e, what) {
+    if (e && e.code === "permission_denied") return "Permission to read cells was denied. Grant “read:cells” to use this tool.";
+    return what + ": " + ((e && e.message) || String(e));
+  }
+  function setLive(on, txt) {
+    $("dot").classList.toggle("on", !!on);
+    $("liveTxt").textContent = txt || (on ? "Live" : "Offline");
+  }
+
+  function makeEntry(c) {
+    return {
+      cellId: c.cellId,
+      ref: c.ref || c.label || null,
+      chapter: c.chapter == null ? null : String(c.chapter),
+      type: c.type || null,
+      words: countWords(c.target),
+      srcWords: countWords(c.source),
+    };
+  }
+
+  function chapterKey(e) { return e.chapter == null ? "" : e.chapter; }
+
+  function totals() {
+    let words = 0, src = 0, translated = 0, verses = 0, max = 0;
+    const chapters = new Map();
+    for (const e of state.cells) {
+      words += e.words; src += e.srcWords;
+      if (e.type !== "heading") { verses++; if (e.words > 0) translated++; }
+      if (e.words > max) max = e.words;
+      const k = chapterKey(e);
+      chapters.set(k, (chapters.get(k) || 0) + e.words);
+    }
+    return { words, src, translated, verses, max, chapters };
+  }
+
+  function renderSummary(t) {
+    $("total").innerHTML = esc(fmt(t.words)) + "<small> word" + (t.words === 1 ? "" : "s") + "</small>";
+    if (!state.cells.length) { $("meta").innerHTML = "&nbsp;"; $("prog").style.width = "0"; return; }
+    const pct = t.verses ? Math.round((t.translated / t.verses) * 100) : 0;
+    let meta = fmt(t.translated) + " of " + fmt(t.verses) + " verses translated";
+    if (t.src > 0) meta += " · source " + fmt(t.src) + " (" + Math.round((t.words / t.src) * 100) + "%)";
+    $("meta").textContent = meta;
+    $("prog").style.width = pct + "%";
+  }
+
+  function rowHtml(e, max) {
+    const w = max > 0 ? Math.round((e.words / max) * 100) : 0;
+    const label = e.ref || (e.type === "heading" ? "Heading" : "Cell");
+    const cls = "row" + (e.words === 0 ? " empty" : "") + (e.type === "heading" ? " heading" : "");
+    const hidden = state.hideEmpty && e.words === 0 ? ' hidden' : "";
+    return '<div class="' + cls + '" data-id="' + esc(e.cellId) + '"' + hidden + ' title="' + esc(label) + " — " + e.words + " word" + (e.words === 1 ? "" : "s") + (e.srcWords ? " (source " + e.srcWords + ")" : "") + '">' +
+      '<span class="ref">' + esc(label) + "</span>" +
+      '<span class="bar"><div style="width:' + w + '%"></div></span>' +
+      '<span class="n">' + (e.words === 0 ? "—" : esc(fmt(e.words))) + "</span></div>";
+  }
+
+  function render() {
+    const list = $("list");
+    const t = totals();
+    renderSummary(t);
+    if (!state.fileId) {
+      list.innerHTML = '<div class="state">' + (state.files.length ? "Choose a file above." : "No files in this project yet.") + "</div>";
+      return;
+    }
+    if (!state.cells.length) {
+      list.innerHTML = '<div class="state">' + (state.loading ? '<div class="spinner"></div>Loading cells…' : "This file has no cells.") + "</div>";
+      return;
+    }
+    const scroll = list.scrollTop;
+    const parts = [];
+    let cur = undefined;
+    const hasChapters = state.cells.some((e) => e.chapter != null);
+    for (const e of state.cells) {
+      const k = chapterKey(e);
+      if (hasChapters && k !== cur) {
+        cur = k;
+        parts.push('<div class="ch" data-ch="' + esc(k) + '"><span>' + (k === "" ? "Other" : "Chapter " + esc(k)) + '</span><span class="cht">' + esc(fmt(t.chapters.get(k) || 0)) + "</span></div>");
+      }
+      parts.push(rowHtml(e, t.max));
+    }
+    if (state.hideEmpty && t.translated === 0 && t.words === 0) parts.push('<div class="state">No translated verses yet.</div>');
+    if (state.loading) parts.push('<div class="state"><div class="spinner"></div>Loading more…</div>');
+    list.innerHTML = parts.join("");
+    list.scrollTop = scroll;
+  }
+
+  function flash(ids) {
+    for (const id of ids) {
+      const el = $("list").querySelector('.row[data-id="' + CSS.escape(id) + '"]');
+      if (el) { el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash"); }
+    }
+  }
+
+  async function loadFile(fileId) {
+    const seq = ++state.seq;
+    state.fileId = fileId;
+    state.cells = []; state.index = new Map();
+    showError("");
+    if (!fileId) { state.loading = false; render(); return; }
+    state.loading = true;
+    render();
+    try {
+      let cursor = undefined;
+      do {
+        const page = await aquilla.cells.page(fileId, { cursor, limit: 2000 });
+        if (seq !== state.seq) return;
+        const cells = (page && page.cells) || [];
+        for (const c of cells) {
+          if (!c || c.cellId == null) continue;
+          state.index.set(c.cellId, state.cells.length);
+          state.cells.push(makeEntry(c));
+        }
+        cursor = page && page.nextCursor;
+        if (cursor) render();
+      } while (cursor);
+    } catch (e) {
+      if (seq !== state.seq) return;
+      showError(errMsg(e, "Could not load cells"));
+    }
+    if (seq !== state.seq) return;
+    state.loading = false;
+    render();
+  }
+
+  async function refreshCells(ids) {
+    if (!state.fileId || state.loading) return;
+    const fileId = state.fileId, seq = state.seq;
+    const known = ids.filter((id) => state.index.has(id));
+    if (known.length !== ids.length) { await loadFile(fileId); return; }
+    try {
+      for (let i = 0; i < known.length; i += 500) {
+        const cells = await aquilla.cells.get(fileId, known.slice(i, i + 500));
+        if (seq !== state.seq) return;
+        for (const c of cells || []) {
+          const idx = state.index.get(c.cellId);
+          if (idx != null) state.cells[idx] = makeEntry(c);
+        }
+      }
+      render();
+      flash(known);
+    } catch (e) {
+      showError(errMsg(e, "Could not refresh changed cells"));
+    }
+  }
+
+  // Coalesce bursts of change events (e.g. rapid saves while typing).
+  let pending = new Set(), timer = null, needFull = false;
+  function queue(ids, full) {
+    if (full) needFull = true;
+    for (const id of ids || []) pending.add(id);
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const ids2 = Array.from(pending); pending = new Set();
+      const f = needFull; needFull = false;
+      if (f || !ids2.length) await loadFile(state.fileId);
+      else await refreshCells(ids2);
+    }, 150);
+  }
+
+  $("hideEmpty").addEventListener("click", () => {
+    state.hideEmpty = !state.hideEmpty;
+    $("hideEmpty").setAttribute("aria-pressed", String(state.hideEmpty));
+    try { aquilla.storage.set("hideEmpty", state.hideEmpty); } catch (_) {}
+    render();
+  });
+
+  $("file").addEventListener("change", (ev) => {
+    const id = ev.target.value || null;
+    try { aquilla.storage.set("lastFile", id); } catch (_) {}
+    loadFile(id);
+  });
+
+  try {
+    aquilla.on("cells.changed", (e) => {
+      if (!e || e.fileId !== state.fileId) return;
+      queue(Array.isArray(e.cellIds) ? e.cellIds : [], !Array.isArray(e.cellIds) || !e.cellIds.length);
+    });
+    aquilla.on("cells.structure", (e) => {
+      if (!e || !e.fileId || e.fileId === state.fileId) queue([], true);
+    });
+    setLive(true);
+  } catch (_) { setLive(false, "Not live"); }
+
+  // Initial load
+  const ctx = (aquilla && aquilla.context) || {};
+  try {
+    const hide = await aquilla.storage.get("hideEmpty");
+    state.hideEmpty = hide === true;
+    $("hideEmpty").setAttribute("aria-pressed", String(state.hideEmpty));
+  } catch (_) {}
+
+  try {
+    state.files = (await aquilla.files.list()) || [];
+  } catch (e) {
+    state.files = [];
+    showError(errMsg(e, "Could not list files"));
+  }
+
+  const sel = $("file");
+  if (!state.files.length) {
+    sel.innerHTML = "<option>No files</option>";
+    sel.disabled = true;
+    state.fileId = null;
+    render();
+    return;
+  }
+  sel.innerHTML = state.files.map((f) =>
+    '<option value="' + esc(f.fileId) + '">' + esc(f.name || f.fileId) + (typeof f.cellCount === "number" ? " (" + f.cellCount + ")" : "") + "</option>").join("");
+  sel.disabled = false;
+
+  let initial = (ctx.file && ctx.file.fileId) || (ctx.cell && ctx.cell.fileId) || null;
+  if (!initial) { try { initial = await aquilla.storage.get("lastFile"); } catch (_) {} }
+  if (!initial || !state.files.some((f) => f.fileId === initial)) initial = state.files[0].fileId;
+  sel.value = initial;
+  await loadFile(initial);
+})().catch((e) => {
+  const el = document.getElementById("list");
+  if (el) el.innerHTML = '<div class="error">Something went wrong: ' + String((e && e.message) || e).replace(/[&<>]/g, "") + "</div>";
+});
+</script>
+</body>
+</html>

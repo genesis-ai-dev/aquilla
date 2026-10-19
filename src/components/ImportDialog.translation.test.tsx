@@ -696,7 +696,9 @@ describe("AQU-1673: a translation staged as proposals for review", () => {
     await chooseTranslation()
     await dropFiles([usfm(JON_USFM, "JON-tatar.usfm")])
     expect(await screen.findByRole("heading", { name: "Import a translation into Jonah" })).toBeInTheDocument()
-    expect(screen.getByText(/written straight into the file/i)).toBeInTheDocument()
+    // The mode line sits below the review list and can paint after the
+    // heading under a loaded runner, so wait for it rather than read it.
+    expect(await screen.findByText(/written straight into the file/i)).toBeInTheDocument()
     await act(async () => {
       fireEvent.click(await screen.findByRole("button", { name: /import 2 cells/i }))
     })

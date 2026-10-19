@@ -110,6 +110,7 @@ import contextualBibleCheckRoutes from "./routes/contextual-bible-check"
 import teamRoutes from "./routes/team"
 import teamHandoffRoutes from "./routes/team-handoffs"
 import agentArtifactsRoutes from "./routes/agent-artifacts"
+import toolsRoutes from "./routes/tools"
 import agentSessionRoutes from "./routes/agent-sessions"
 import { projectKnowledge, orgKnowledge } from "./routes/knowledge"
 import knowledgeInternalRoutes from "./routes/knowledge-internal"
@@ -140,6 +141,7 @@ import { setAccessGrantsMode } from "../../db/shared/project-roles"
 import { sendScheduledRetentionReport } from "./lib/retention-cron"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
 import { redactLogPath } from "../../shared/log-path-redaction"
+import { withStoreSecrets } from "../../db/shared/secrets-store-overlay"
 
 const app = new Hono<HonoEnv>()
 
@@ -156,6 +158,15 @@ const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Max-Age": "86400",
   Vary: "Origin",
 }
+
+// Secrets Store overlay (db/shared/secrets-store-overlay.ts): a binding named
+// SS_<NAME> supplies env.<NAME>, so a secret can change in the store without a
+// new Worker version. Registered first so every route, and every middleware
+// below, reads the resolved values. The per-Worker secret stays the fallback.
+app.use("*", async (c, next) => {
+  c.env = await withStoreSecrets(c.env)
+  await next()
+})
 
 // Workers Routes mount: this worker is routed under two prefixes on the
 // api.aquilla.app subdomain — `/identity/*` for the identity surface
@@ -343,6 +354,8 @@ app.route("/api/v2/projects", teamHandoffRoutes)
 // composer; proxies bytes into the shared artifacts table + SNAPSHOTS R2 so
 // the harness load_artifact tool can read them (routes/agent-artifacts.ts).
 app.route("/api/v2/projects", agentArtifactsRoutes)
+// Aquilla Tools (prototype): sandboxed, agent-built mini-apps (routes/tools.ts).
+app.route("/api/v2/projects", toolsRoutes)
 // Team chat history — the caller's own past agent conversations, listed and
 // reopened (AQU-1653, routes/agent-sessions.ts). Sibling router, same base;
 // read-only, and scoped to (project, user) so it never surfaces another
@@ -533,6 +546,7 @@ const scheduled = async (
   env: Env,
   ctx: ExecutionContext,
 ): Promise<void> => {
+  env = await withStoreSecrets(env)
   const environmentError = scheduledDeploymentEnvironmentError(env)
   if (environmentError) {
     console.error("Refusing scheduled work with cross-environment identity bindings", {

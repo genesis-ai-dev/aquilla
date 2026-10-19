@@ -61,7 +61,8 @@
             "FRONTIER_D1_DATABASE_ID",
             "GITLAB_ADMIN_TOKEN",
             "MONDAY_CLIENT_SECRET",
-            "MONDAY_SIGNING_SECRET"
+            "MONDAY_SIGNING_SECRET",
+            "OMNI_SHARED_SECRET"
           ],
           "plainText": {
             "ENVIRONMENT": "production",
@@ -91,7 +92,8 @@
             "GITLAB_ADMIN_TOKEN",
             "MONDAY_CLIENT_SECRET",
             "MONDAY_SIGNING_SECRET",
-            "MONDAY_TOKEN_KEY"
+            "MONDAY_TOKEN_KEY",
+            "OMNI_SHARED_SECRET"
           ],
           "plainText": {
             "ENVIRONMENT": "development",

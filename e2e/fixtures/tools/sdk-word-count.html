@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+<body>
+<script>
+// Word count, on the Aquilla SDK: the open file's translated words, live.
+(() => {
+  const cells = aq.useCells();
+  const total = aq.ui.Stat({ label: "words translated", value: "…" });
+  const list = aq.ui.Stack({ gap: 6 });
+  aq.mount(aq.ui.Panel({ title: "Word count", children: [total, list] }));
+  function render() {
+    const rows = cells.value.filter((c) => !aq.cell.isStructural(c.cellId));
+    let sum = 0;
+    list.textContent = "";
+    rows.forEach((c) => {
+      const n = aq.cell.words(c.target);
+      sum += n;
+      list.append(aq.ui.Stack({ row: true, justify: "space-between", children: [c.ref || aq.cell.number(c.cellId), aq.ui.Badge({ text: String(n) })] }));
+    });
+    total.set(sum);
+    if (!rows.length) list.append(aq.ui.Empty({ icon: "list", text: cells.loading ? "Loading…" : "No cells yet" }));
+  }
+  cells.subscribe(render);
+  render();
+})();
+</script>
+</body>
+</html>

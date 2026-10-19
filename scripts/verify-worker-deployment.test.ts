@@ -90,6 +90,26 @@ describe("Worker deployment verifier", () => {
     ).toThrow("missing required secret binding SECRET_KEY")
   })
 
+  // Moving a secret into Secrets Store must not make the deploy gate refuse
+  // the Worker: the SS_<NAME> binding supplies env.<NAME> at runtime.
+  it("accepts a required secret supplied only by a Secrets Store binding", () => {
+    const version = identityVersion("production", [
+      { name: "SS_SECRET_KEY", type: "secrets_store_secret", store_id: "s", secret_name: "aquilla-production-SECRET_KEY" },
+    ])
+    version.resources.bindings = version.resources.bindings.filter(
+      (binding) => binding.name !== "SECRET_KEY",
+    )
+    expect(validateWorkerVersion(version, deploymentExpectation("identity", "production"), PRODUCTION_VERSION_ID))
+      .toBe(PRODUCTION_VERSION_ID)
+  })
+
+  it("rejects an SS_ binding of the wrong type for a required secret", () => {
+    const version = identityVersion("production", [{ name: "SS_SECRET_KEY", type: "plain_text", text: "x" }])
+    expect(() =>
+      validateWorkerVersion(version, deploymentExpectation("identity", "production"), PRODUCTION_VERSION_ID),
+    ).toThrow("SS_SECRET_KEY must be secrets_store_secret, received plain_text")
+  })
+
   it("rejects production traffic splits", () => {
     expect(() =>
       validateActiveDeployment(

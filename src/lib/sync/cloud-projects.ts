@@ -14,6 +14,8 @@ import { throwIfElevationRequired } from "@/lib/frontier/elevation"
 export interface CloudFileSummary {
   id: string
   name: string
+  /** AQU-1937: an extension's display label for the file (files.meta.extension.label). */
+  displayLabel?: string
   type: string
   cellCount: number
   /** The files-table `role`, unfolded. `type` above collapses kind ?? role, so
@@ -445,6 +447,7 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
     files: (summary.files ?? []).map((f) => ({
       id: f.id,
       name: f.name,
+      ...(f.displayLabel ? { displayLabel: f.displayLabel } : {}),
       // Server sends the raw string; FileType is a union we widen back here
       // and accept "unknown" as an unexpected value rather than crashing.
       type: f.type as FileType,

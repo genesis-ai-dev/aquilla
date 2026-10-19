@@ -84,6 +84,7 @@ export function CredentialRow({
               {credential.mode}
             </Badge>
           )}
+          {credential.oauth && <Badge variant="outline">{t("onboarding.apiTokens.connectedAppBadge")}</Badge>}
           {revoked && <Badge variant="destructive">{t("onboarding.apiTokens.revokedBadge")}</Badge>}
           {expired && <Badge variant="outline">{t("onboarding.apiTokens.expiredBadge")}</Badge>}
         </div>
@@ -119,9 +120,11 @@ export function CredentialRow({
       </div>
       {!revoked && (
         <div className="flex shrink-0 items-center gap-1">
-          <Button size="sm" variant="ghost" onClick={onShowInstructions}>
-            {t("onboarding.apiTokens.agentSetupButton")}
-          </Button>
+          {!credential.oauth && (
+            <Button size="sm" variant="ghost" onClick={onShowInstructions}>
+              {t("onboarding.apiTokens.agentSetupButton")}
+            </Button>
+          )}
           <Button
             size="sm"
             variant="ghost"

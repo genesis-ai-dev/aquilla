@@ -144,6 +144,16 @@ describe("ApiTokensSection", () => {
     expect(screen.getAllByRole("button", { name: "Revoke" })).toHaveLength(1)
   })
 
+  // An OAuth grant (Zapier, ChatGPT) was never pasted anywhere by the user, so
+  // "Agent setup" instructions would be wrong for it; revoking is what matters.
+  it("labels an OAuth grant as a connected app, revocable but with no agent setup", async () => {
+    mockListCredentials.mockResolvedValue([{ ...ASK_CREDENTIAL, name: "Zapier", oauth: true }])
+    render(<ApiTokensSection />)
+    expect(await screen.findByText("connected app")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Revoke" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Agent setup" })).not.toBeInTheDocument()
+  })
+
   it("shows each token's creation date and labels its reach by kind", async () => {
     // A reader scanning this list needs to see blast radius without opening
     // anything: whole-org tokens read differently from single-project ones,

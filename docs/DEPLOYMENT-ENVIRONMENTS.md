@@ -150,8 +150,8 @@ its job. Keep this section in step with that manifest — a contract test assert
 | --- | --- | --- | --- |
 | Web (production) | `.` (repo root) | `aquilla-web` | `DIARIZATION_MODAL_URL`, `DIARIZATION_PUBLIC_BASE` |
 | Web (development) | `.` (repo root) | `aquilla-web-development` | none |
-| Identity (production) | `auth-worker` | `aquilla-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET` |
-| Identity (development) | `auth-worker` | `aquilla-dev-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET`, `MONDAY_TOKEN_KEY` |
+| Identity (production) | `auth-worker` | `aquilla-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET`, `OMNI_SHARED_SECRET` |
+| Identity (development) | `auth-worker` | `aquilla-dev-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET`, `MONDAY_TOKEN_KEY`, `OMNI_SHARED_SECRET` |
 | Sync (production) | `sync-worker` | `aquilla-sync-worker` | `SYNC_SECRET_KEY`, `DIARIZATION_MODAL_URL`, `DIARIZATION_PUBLIC_BASE`, `DIARIZATION_SHARED_SECRET`, `INWORLD_API_KEY`, `SEED_VC_TOKEN`, `SEED_VC_URL` |
 | Sync (development) | `sync-worker` | `aquilla-sync-worker-dev` | `SYNC_SECRET_KEY` |
 
@@ -169,6 +169,58 @@ reconnect the orgs afterwards. Set it with the rotation script, never bare
 ```bash
 printf %s "$(openssl rand -base64 48 | tr -d '\n')" | pnpm run secrets:rotate identity development MONDAY_TOKEN_KEY
 ```
+
+### Changing a secret without a redeploy: Secrets Store
+
+The identity and sync Workers can also read a secret from the account's
+Cloudflare Secrets Store (`default_secrets_store`,
+`74633238cfb84b6a8197a6bd21b2fa21`). A store secret is read at runtime, so
+changing its value needs no new Worker version and never trips the
+environment guard.
+
+- **Convention.** A Secrets Store binding named `SS_<NAME>` supplies
+  `env.<NAME>`. `db/shared/secrets-store-overlay.ts` resolves it at every entry
+  point: the identity Hono app, crons, the sync `fetch`/`scheduled`/`queue`
+  handlers, and the `ProjectSync` and `ContextualRunDriver` Durable Objects.
+  Code keeps reading `env.<NAME>` unchanged.
+- **The store value wins, and the Worker secret is the fallback.** If the binding
+  is absent, the store read fails, or the store returns an empty value, the
+  Worker secret of the same name is used. A failed refresh keeps serving the
+  last good store value.
+- **Live within about a minute.** Values are cached per isolate for 60 s.
+- **Store names are per environment:** `aquilla-<environment>-<NAME>`, for
+  example `aquilla-production-OMNI_SHARED_SECRET`. The store is account-wide,
+  so production and development must not share a name.
+- **The deploy gate accepts either.** `verify-worker-deployment.mjs` treats a
+  required secret as present when the Worker has `<NAME>` (`secret_text`) or
+  `SS_<NAME>` (`secrets_store_secret`).
+
+To move a secret into the store:
+
+1. Create it with `npx wrangler secrets-store secret create
+   74633238cfb84b6a8197a6bd21b2fa21 --name aquilla-<env>-<NAME> --scopes workers
+   --remote`. Wrangler prompts for the value; pipe it on stdin rather than
+   using `--value`.
+2. Add the binding to that environment in `<worker>/wrangler.toml`:
+
+   ```toml
+   [[env.production.secrets_store_secrets]]
+   binding = "SS_<NAME>"
+   store_id = "74633238cfb84b6a8197a6bd21b2fa21"
+   secret_name = "aquilla-production-<NAME>"
+   ```
+
+   The bound secret must already exist, or the deploy fails. The deploy
+   credential, whether that is the `CLOUDFLARE_API_TOKEN` used by
+   `deploy-workers.yml` or a local `wrangler login`, needs **Account Secrets
+   Store Edit**.
+3. Ship it with the normal release. After that, change the value in the
+   dashboard (Secrets Store → the secret → Edit) or with `wrangler
+   secrets-store secret update`. No deploy is needed.
+
+Keep the Worker secret as a fallback while Secrets Store is in beta. Rotating
+only the Worker secret has no effect while a store value is bound, so rotate
+the store copy.
 
 ### The AI provider key (`OPENROUTER_API_KEY`)
 

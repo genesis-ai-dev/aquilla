@@ -175,6 +175,17 @@ export interface Env {
   /** Dev/e2e only: override the OpenRouter API base (e.g. the scripted mock
    *  in scripts/mock-openrouter.ts). Never set in prod. */
   OPENROUTER_BASE_URL?: string
+  /** Aquilla Tools builder (prototype). A dedicated OpenRouter key/base for
+   *  build_tool calls, so builder spend is separable from chat/agent spend.
+   *  When the key is unset the builder falls back to OPENROUTER_API_KEY /
+   *  OPENROUTER_BASE_URL. TOOLS_BUILDER_MODEL overrides the builder model. */
+  TOOLS_BUILDER_API_KEY?: string
+  TOOLS_BUILDER_BASE_URL?: string
+  TOOLS_BUILDER_MODEL?: string
+  /** Smart Extensions read:web (aquilla.web.fetch): optional deployment-wide
+   *  allowlist of domains (comma-separated, manifest.web syntax). Unset = any
+   *  domain a user approves for an extension. */
+  TOOLS_WEB_ALLOWED_DOMAINS?: string
   /** Omnilingual ASR Modal app base URL (infra/modal/omnilingual_asr.py),
    *  e.g. https://<workspace>--omnilingual-asr-web.modal.run. Unset = hosted
    *  transcription for non-Whisper languages answers 503. */
@@ -245,6 +256,12 @@ export interface Env {
   /** Local stacks only (honoured with WRANGLER_LOCAL=1): a JSON array of
    *  client metadata documents served instead of fetching their client_id. */
   MCP_OAUTH_PINNED_CLIENTS?: string
+  /** Zapier's pre-registered OAuth client (docs/ZAPIER.md). All three unset →
+   *  no Zapier client in this environment. The secret is a wrangler secret. */
+  ZAPIER_CLIENT_ID?: string
+  ZAPIER_CLIENT_SECRET?: string
+  /** https://zapier.com/dashboard/auth/oauth/return/App<ID>CLIAPI/ */
+  ZAPIER_REDIRECT_URI?: string
 
   // ── AQU-AGENT harness (routes/agent.ts new tools) ────────────────────────
   /** Base URL of the sandbox worker (aquilla-agent-sandbox). Local dev may

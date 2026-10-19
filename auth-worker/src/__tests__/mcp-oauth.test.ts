@@ -109,7 +109,7 @@ describe("discovery", () => {
         authorization_endpoint: `${ISSUER}/oauth/authorize`,
         token_endpoint: `${ISSUER}/oauth/token`,
         code_challenge_methods_supported: ["S256"],
-        token_endpoint_auth_methods_supported: ["none"],
+        token_endpoint_auth_methods_supported: ["none", "client_secret_post", "client_secret_basic"],
         client_id_metadata_document_supported: true,
         authorization_response_iss_parameter_supported: true,
       })
@@ -139,7 +139,7 @@ describe("consent → token → Agent API credential", () => {
     const jwt = await seed()
     const described = await consent("request", await authorizeParams(), jwt)
     expect(await described.json()).toEqual({
-      clientName: "ChatGPT", clientHost: "chatgpt.com", redirectHost: "chatgpt.com", mode: "act", organizations: [{ id: "10", name: "Alpha" }],
+      clientName: "ChatGPT", clientHost: "chatgpt.com", redirectHost: "chatgpt.com", mode: "act", scopeChoices: false, organizations: [{ id: "10", name: "Alpha" }],
     })
     const { redirect, code } = await approveFor(jwt)
     expect(`${redirect.origin}${redirect.pathname}`).toBe(REDIRECT)
@@ -435,5 +435,99 @@ describe("OAuth audience", () => {
     expect(await validateApiCredential(env.AQUILLA_PG, access_token, undefined, RESOURCE + "/other")).toBeNull()
     expect(await validateApiCredential(env.AQUILLA_PG, access_token, undefined, RESOURCE))
       .toMatchObject({ oauthResource: RESOURCE, mode: "act" })
+  })
+})
+
+// Zapier is a pre-registered confidential client (docs/ZAPIER.md). Its token
+// drives the external REST API from someone else's servers, so: the secret is
+// the only thing standing between a leaked code and a token, the human picks
+// how much it may do, and the token must never double as an MCP credential.
+describe("pre-registered Zapier client", () => {
+  const ZAPIER_ID = "aquilla-zapier"
+  const ZAPIER_SECRET = "s3cret-zapier-value"
+  const ZAPIER_REDIRECT = "https://zapier.com/dashboard/auth/oauth/return/App123CLIAPI/"
+  const REST = "https://api.aquilla.app/sync/api/v1/external"
+  const zapierEnv = Object.assign(Object.create(oauthEnv) as typeof oauthEnv, {
+    ZAPIER_CLIENT_ID: ZAPIER_ID, ZAPIER_CLIENT_SECRET: ZAPIER_SECRET, ZAPIER_REDIRECT_URI: ZAPIER_REDIRECT,
+    SYNC_WORKER_URL: "https://api.aquilla.app/sync",
+  })
+  const zapierParams = async (overrides: Record<string, string | undefined> = {}) =>
+    authorizeParams({ client_id: ZAPIER_ID, redirect_uri: ZAPIER_REDIRECT, resource: undefined, scope: undefined, ...overrides })
+  const zConsent = (path: "request" | "decision", body: object, jwt: string) =>
+    app.request(`/api/v2/mcp-oauth/${path}`, { method: "POST", headers: authHeader(jwt), body: JSON.stringify(body) }, zapierEnv)
+  const zRedeem = (fields: Record<string, string>, headers: Record<string, string> = {}) =>
+    app.request("/oauth/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", ...headers },
+      body: new URLSearchParams(fields).toString(),
+    }, zapierEnv)
+  const zFields = (code: string, overrides: Record<string, string> = {}) => ({
+    grant_type: "authorization_code", code, redirect_uri: ZAPIER_REDIRECT, client_id: ZAPIER_ID,
+    code_verifier: VERIFIER, client_secret: ZAPIER_SECRET, ...overrides,
+  })
+  async function zApprove(jwt: string, extra: Record<string, unknown> = {}) {
+    const response = await zConsent("decision", { ...(await zapierParams()), approve: true, org_ids: ["10"], ...extra }, jwt)
+    expect(response.status).toBe(200)
+    return new URL(((await response.json()) as { redirect: string }).redirect).searchParams.get("code") ?? ""
+  }
+
+  it("is described as Zapier without fetching any client document, defaulting to ask", async () => {
+    const jwt = await seed()
+    const described = await zConsent("request", await zapierParams(), jwt)
+    expect(await described.json()).toEqual({
+      clientName: "Zapier", clientHost: "zapier.com", redirectHost: "zapier.com",
+      mode: "ask", scopeChoices: true, organizations: [{ id: "10", name: "Alpha" }],
+    })
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("mints an ask/write REST credential by default that MCP refuses", async () => {
+    const jwt = await seed()
+    const response = await zRedeem(zFields(await zApprove(jwt)))
+    expect(response.status).toBe(200)
+    const token = (await response.json()) as { access_token: string; scope: string }
+    expect(token.scope).toBe("ask")
+    // REST passes no expected resource; that is where Zapier's token must work.
+    expect(await validateApiCredential(env.AQUILLA_PG, token.access_token))
+      .toMatchObject({ mode: "ask", access: "write", orgIds: ["10"], oauthResource: REST })
+    expect(await validateApiCredential(env.AQUILLA_PG, token.access_token, undefined, RESOURCE)).toBeNull()
+    expect((await env.AQUILLA_PG.prepare("SELECT name FROM api_credentials").first<{ name: string }>())?.name).toBe("Zapier")
+  })
+
+  it("carries the human's act and read-only choices onto the credential", async () => {
+    const jwt = await seed()
+    const response = await zRedeem(zFields(await zApprove(jwt, { mode: "act", access: "read" })))
+    const { access_token } = (await response.json()) as { access_token: string }
+    expect(await validateApiCredential(env.AQUILLA_PG, access_token)).toMatchObject({ mode: "act", access: "read" })
+  })
+
+  it("refuses a missing or wrong secret without burning the code, and accepts client_secret_basic", async () => {
+    const jwt = await seed()
+    const code = await zApprove(jwt)
+    const { client_secret: _omit, ...noSecret } = zFields(code)
+    expect((await zRedeem(noSecret)).status).toBe(401)
+    expect((await zRedeem(zFields(code, { client_secret: "wrong" }))).status).toBe(401)
+    expect(await env.AQUILLA_PG.prepare("SELECT COUNT(*)::int AS n FROM api_credentials").first<{ n: number }>()).toEqual({ n: 0 })
+    const basic = `Basic ${btoa(`${ZAPIER_ID}:${ZAPIER_SECRET}`)}`
+    expect((await zRedeem(noSecret, { Authorization: basic })).status).toBe(200)
+  })
+
+  it("never redirects anywhere but the registered Zapier URI", async () => {
+    const jwt = await seed()
+    const response = await zConsent("decision", { ...(await zapierParams({ redirect_uri: "https://evil.example/cb" })), approve: true, org_ids: ["10"] }, jwt)
+    expect(response.status).toBe(400)
+    expect(await response.json()).not.toHaveProperty("redirect")
+  })
+
+  it("keeps the REST audience away from URL-registered clients", async () => {
+    const jwt = await seed()
+    const response = await consent("request", await authorizeParams({ resource: REST }), jwt)
+    expect(((await response.json()) as { error: string }).error).toBe("invalid_target")
+  })
+
+  it("does not exist in an environment without the Zapier secret", async () => {
+    const jwt = await seed()
+    const response = await consent("request", await zapierParams(), jwt)
+    expect(((await response.json()) as { error: string }).error).toBe("invalid_client")
   })
 })

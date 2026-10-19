@@ -22,6 +22,7 @@
 // All non-public routes apply `authMiddleware`. Routes that touch
 // `c.env.AQUILLA_PG` no-op gracefully if the binding is absent (test envs).
 
+import { parseFileLabel } from "../../../shared/tools/file-extension"
 import { Hono } from "hono"
 import { roleRequiredBody } from "../lib/role-denial"
 import { zValidator } from "@hono/zod-validator"
@@ -121,6 +122,9 @@ function roleNameFor(level: number): string {
 interface FileProjection {
   id: string
   name: string
+  /** AQU-1937: files.meta.extension.label — the name an extension asked the
+   *  app to SHOW ("Titus · ULT"). `name` stays the stored, imported name. */
+  displayLabel?: string
   type: string
   cellCount: number
   /** The files-table `role` column, forwarded raw. `type` above already folds
@@ -236,6 +240,7 @@ export async function loadFilesByProject(
     let timingMode: "dubbing" | "audioFirst" | undefined
     let audioVttTimebase: FileProjection["audioVttTimebase"]
     let trackOverrides: FileProjection["trackOverrides"]
+    let displayLabel: string | undefined
     if (f.meta) {
       try {
         const m = JSON.parse(f.meta) as {
@@ -254,7 +259,9 @@ export async function loadFilesByProject(
           corpusMarker?: unknown
           parserVersion?: unknown
           sortIndex?: unknown
+          extension?: { label?: unknown }
         }
+        displayLabel = parseFileLabel(m.extension?.label) ?? undefined
         if (m.orderedBy) orderedBy = m.orderedBy
         // AQU-1596: read through the declared-languages contract, which
         // prefers the canonical keys and still accepts the legacy spellings
@@ -326,6 +333,7 @@ export async function loadFilesByProject(
       ...(timingMode ? { timingMode } : {}),
       ...(audioVttTimebase ? { audioVttTimebase } : {}),
       ...(trackOverrides ? { trackOverrides } : {}),
+      ...(displayLabel ? { displayLabel } : {}),
     })
     byProject.set(f.project_id, list)
   }

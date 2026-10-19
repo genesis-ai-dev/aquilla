@@ -30,6 +30,8 @@ export interface ExternalProjectListItem {
 export interface ListProjectsOptions {
   /** Restrict to this org id, on top of the credential's own scope. */
   orgId?: string
+  /** 'created' = newest first, for "new project" pollers. Default: by name. */
+  sort?: 'name' | 'created'
 }
 
 interface ProjectListRow {
@@ -80,7 +82,9 @@ export async function listProjectsForCredential(
     sql += ` AND p.org_id::text = ?`
     binds.push(opts.orgId)
   }
-  sql += ` ORDER BY p.name LIMIT 100`
+  sql += opts.sort === 'created'
+    ? ` ORDER BY p.created_at DESC NULLS LAST, p.id DESC LIMIT 100`
+    : ` ORDER BY p.name LIMIT 100`
 
   const result = await db.prepare(sql).bind(...binds).all<ProjectListRow>()
   return result.results.map((r) => ({

@@ -927,6 +927,12 @@ export const editor = defineNamespace({
     "editor.timeline.takeMenuSplit": "Split here",
     "editor.timeline.takeMenuReRecord": "Re-record this line",
     "editor.timeline.takeMenuRegenerate": "Regenerate voice",
+    // AQU-2026: Change voice per line, from the Media timeline's take menu.
+    // The action and its quality names are the Audio tab's own
+    // (`editor.voice.changeVoice*`) — the two surfaces must not name the same
+    // thing differently. Only the reason the Audio tab has no equivalent of
+    // is keyed here.
+    "editor.timeline.takeMenuChangeVoiceIsReference": "A voice is cloned from this take",
     "editor.timeline.takeMenuApprove": "Approve this take",
     "editor.timeline.takeMenuApprovePiece": "Approve this piece",
     "editor.timeline.takeMenuUnapprove": "Remove my approval",
@@ -942,6 +948,13 @@ export const editor = defineNamespace({
     "editor.timeline.regenerateDone": "New voice ready",
     "editor.timeline.regenerateFailed": "Couldn't generate a voice for this line",
     "editor.timeline.regenerateNoText": "This line has no translation to speak yet",
+    // AQU-2026: per-line Change voice from the take menu. The conversion runs
+    // through the cell's tts badge like the Audio tab's, but the timeline draws
+    // no voice card to watch, so it reports itself in toasts the way Regenerate
+    // above does.
+    "editor.timeline.changeVoiceStarted": "Changing this line to {name}…",
+    "editor.timeline.changeVoiceDone": "This line is now in {name}'s voice",
+    "editor.timeline.changeVoiceFailed": "Couldn't change this line's voice",
     // AQU-1767: the edit history (Undo / Redo), the first slice of app-wide undo.
     "editor.history.undoAria": "Undo",
     "editor.history.redoAria": "Redo",
@@ -6007,6 +6020,23 @@ export const editor = defineNamespace({
           "Item in a take's right-click menu: generates a new AI voice for the line at once, " +
           "with the line's cast voice, and makes it the one that plays.",
         maxLength: 30,
+      },
+      "editor.timeline.changeVoiceStarted": {
+        description:
+          "Toast shown when the per-line 'Change voice' starts: the line's existing recording " +
+          "is being converted into the named cloned voice. Nothing is spoken afresh from text.",
+        placeholders: { name: "The voice's name, e.g. 'Narrator'." },
+      },
+      "editor.timeline.changeVoiceDone": {
+        description: "Toast shown when the per-line 'Change voice' has finished.",
+        placeholders: { name: "The voice's name, e.g. 'Narrator'." },
+      },
+      "editor.timeline.takeMenuChangeVoiceIsReference": {
+        description:
+          "Shown in place of the 'Change voice' item in a take's right-click menu, greyed out: " +
+          "this take is the reference clip some cloned voice was made from, so converting it " +
+          "would change what that voice sounds like. It is left as it is.",
+        maxLength: 40,
       },
       "editor.timeline.takeMenuDeletePiece": {
         description:

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type Dispatch, type ReactNode, type SetStateAction } from "react"
+import { notifySmartExtensionsChanged } from "@/lib/tools/smart-extensions-enabled"
 import { recordStep } from "@/lib/history/history"
 import { Navigate, useLocation, useParams, useNavigate, useSearchParams, type Location } from "react-router-dom"
 import {
@@ -1692,6 +1693,25 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   // deep-linkable but is opened from a parent pane NavRow.
   const indexGroups = visibleGroups.filter((g) => !g.hideFromIndex)
 
+  // AQU-2030: the back link, title, and save controls stay pinned at the top of
+  // the pane while the form scrolls under them. Measuring the pinned block lets
+  // the scroll port reserve that much `scroll-padding-top`, so tabbing to a
+  // field below the fold scrolls it clear of the header instead of under it.
+  const pinnedHeaderRef = useRef<HTMLDivElement | null>(null)
+  const [pinnedHeaderHeight, setPinnedHeaderHeight] = useState(0)
+  useEffect(() => {
+    const el = pinnedHeaderRef.current
+    if (!el) return
+    const measure = () => setPinnedHeaderHeight(el.getBoundingClientRect().height)
+    measure()
+    if (typeof ResizeObserver === "undefined") return
+    // The block grows and shrinks as the save controls appear with the dirty
+    // state, so re-measure rather than reading it once on mount.
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [loading])
+
   // Living Memory extraction: `memory`, `rules`, and `system-prompt` moved out
   // of settings onto the standalone /project/:id/memory surface. Old section
   // ids redirect (replace) instead of falling back to the index so deep links
@@ -1946,15 +1966,32 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   })()
 
   const settingsContent = (
-    <Page size={pageSize}>
-          {modal && onSettingsPane ? (
-            <BackLink
-              className="mb-6"
-              label={breadcrumbParent?.label ?? t("editor.navTitle.projectSettings")}
-              onClick={() => requestHistoryNavigation(-1)}
-            />
-          ) : null}
-          <div className="flex flex-col gap-12">
+    <Page
+      size={pageSize}
+      style={pinnedHeaderHeight ? { scrollPaddingTop: `${pinnedHeaderHeight}px` } : undefined}
+    >
+          {/*
+            AQU-2030: the pinned block. `-mt-6 pt-6` and `pb-4` are an opaque
+            bleed above and below the header — they keep an unscrolled pane
+            laid out exactly as before (the content stack's `mt-8` + this
+            `pb-4` restore the `gap-12` rhythm) while giving the pinned band
+            breathing room once form content slides underneath it. The
+            background is opaque, not translucent, so nothing shows through:
+            `bg-popover` matches DialogContent in the modal, `bg-background`
+            the AppShell card on the full-page route.
+          */}
+          <div
+            ref={pinnedHeaderRef}
+            data-slot="project-settings-pinned-header"
+            className={`sticky top-0 z-20 -mt-6 pt-6 pb-4 ${modal ? "bg-popover" : "bg-background"}`}
+          >
+            {modal && onSettingsPane ? (
+              <BackLink
+                className="mb-6"
+                label={breadcrumbParent?.label ?? t("editor.navTitle.projectSettings")}
+                onClick={() => requestHistoryNavigation(-1)}
+              />
+            ) : null}
             <PageHeader
               title={pageTitle}
               description={pageDescription}
@@ -1962,6 +1999,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               inset={pageSize !== "wide"}
               className="mb-0"
             />
+          </div>
+          <div className="mt-8 flex flex-col gap-12">
 
             {/* Search lives on the index only (detail panes match org settings). */}
             {showSearch && (
@@ -3156,6 +3195,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             autopilotEnabled={sharedSettingsBlob.autopilotEnabled}
             roleLevel={project?.syncRole?.level ?? null}
             onSetAutopilotEnabled={(enabled) => { void patchShared({ autopilotEnabled: enabled }) }}
+            // AQU-1937: the per-project Smart Extensions switch (Maintainer+,
+            // the ordinary settings floor; the server refuses lower roles).
+            smartExtensionsEnabled={sharedSettingsBlob.smartExtensionsEnabled}
+            onSetSmartExtensionsEnabled={(enabled) => {
+              void Promise.resolve(patchShared({ smartExtensionsEnabled: enabled })).then(() => notifySmartExtensionsChanged(id))
+            }}
           />
         )}
           </div>

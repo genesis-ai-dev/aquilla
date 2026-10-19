@@ -2,6 +2,7 @@ import { test as base, expect, type Browser, type Page } from "@playwright/test"
 import { resetBackend } from "./seed"
 import { ensureAuthState, injectSession, type PersistedSession } from "./auth"
 import { getMyOrg } from "./frontier-api"
+import { editorOptInScript, editorUnderTest } from "./editor-mode"
 
 export interface AuthedPage extends Page {
   username: "alice" | "bob" | "carol"
@@ -31,6 +32,10 @@ export async function openAuthedPage(
   opts: { baseURL?: string; pinOrgId?: number } = {},
 ): Promise<Page> {
   const ctx = await browser.newContext()
+  // AQU-1793: E2E_EDITOR=extension runs the journeys against the first-party
+  // extension editor (editor-mode.ts). Only when asked: the default leaves
+  // the build's choice alone, so specs that opt in themselves still work.
+  if (editorUnderTest() === "extension") await ctx.addInitScript(editorOptInScript())
   // alice is a platform admin in the e2e stack (PLATFORM_ADMINS:alice in
   // scripts/e2e-up.ts). GET /api/v2/orgs without query params is memberships
   // only — the switcher loads the rest of the tenancy a page at a time. Seed
@@ -46,7 +51,13 @@ export async function openAuthedPage(
       // via localStorage must not retain a stale id from a prior document in
       // this context (or "all"), or RootRedirect / Dashboard.goto land on
       // OrgRouteGate's not-found shell (no "+ New Project", no account menu).
-      localStorage.setItem("org:active", String(orgId))
+      // Init scripts run in every frame, including sandboxed (opaque-origin)
+      // extension frames where storage throws: skip those.
+      try {
+        localStorage.setItem("org:active", String(orgId))
+      } catch {
+        /* sandboxed frame */
+      }
     }, opts.pinOrgId)
   }
   // AppEntry redirects a fresh unsigned context away from "/" before session

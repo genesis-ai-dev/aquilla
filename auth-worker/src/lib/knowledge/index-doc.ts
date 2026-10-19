@@ -1,7 +1,8 @@
 // PageIndex-style indexing (spec §"Data model"): structure comes from
-// heuristics (markdown headings, else paragraph blocks), the LLM only writes
-// summaries — one Haiku call per document, made async from the upload route
-// via ctx.waitUntil. Failure is non-fatal: docs stay string-searchable.
+// heuristics in segment.ts (markdown headings, else paragraph blocks), the LLM
+// only writes summaries — one Haiku call per document (per batch of sections
+// for a large one, AQU-2029), made async from the upload route via
+// ctx.waitUntil. Failure is non-fatal: docs stay string-searchable.
 //
 // AQU-1376: this job is the only thing that moves a row off `pending`, and
 // nothing revisits it afterwards — no cron, no retry. So every exit has to be
@@ -26,6 +27,9 @@ import {
 } from "../../../../db/shared/knowledge"
 import { propagateKnowledgeDocs } from "../../../../db/shared/inherited-settings"
 import { shipLog, type PosthogLogEnv } from "../../posthog-logs"
+import { segmentText } from "./segment"
+
+export { segmentText }
 
 export interface KbIndexEnv extends PosthogLogEnv {
   OPENROUTER_API_KEY?: string
@@ -33,123 +37,147 @@ export interface KbIndexEnv extends PosthogLogEnv {
   KB_INDEX_MODEL?: string
 }
 
-/** AQU-1376: hard ceiling on the enrichment round-trip. Without it a hung
- *  upstream response has nothing to abort it, the waitUntil task never settles,
- *  and the row stays `pending` for good. Must stay comfortably *below* the
- *  read-side staleness window (`KB_INDEX_STALE_MS` in
- *  src/lib/frontier/knowledge-base.ts) so a job still inside its own budget is
- *  never shown as stalled. */
+/** AQU-1376: hard ceiling on the enrichment leg — all of its requests together,
+ *  however many it takes (AQU-2029). Without it a hung upstream response has
+ *  nothing to abort it, the waitUntil task never settles, and the row stays
+ *  `pending` for good. Must stay comfortably *below* the read-side staleness
+ *  window (`KB_INDEX_STALE_MS` in src/lib/frontier/knowledge-base.ts) so a job
+ *  still inside its own budget is never shown as stalled. */
 export const KB_INDEX_FETCH_TIMEOUT_MS = 60_000
 
-const MAX_NODES = 200
-const MAX_DEPTH = 3
-const BLOCK_TARGET = 2000
+/** AQU-2029: how much one enrichment request may carry. The model leg used to
+ *  send every section in a single prompt, and the 200 sections of a
+ *  fully-vowelled Arabic Bible (VanDyck_OT_1_Law_History.txt, 1.9M chars) came
+ *  to 217,696 tokens against Haiku's 200,000. The provider refused it with a
+ *  400, so every large reference document indexed without summaries, and no
+ *  retry could change that. The budget is in characters, which are a poor proxy
+ *  for tokens: English runs ~4 chars a token, that Arabic ~1, and some scripts
+ *  several tokens a char. So it is sized for the worst case (even 4 tokens a
+ *  char stays near 130k), not the average. The node cap bounds each response,
+ *  so a batch finishes well inside the shared deadline too. */
+export const KB_ENRICH_BATCH_CHARS = 32_000
+export const KB_ENRICH_BATCH_NODES = 25
+/** Per-section share of a prompt. Titles are capped as well as excerpts, so
+ *  one section's entry is bounded and always fits a batch on its own. */
+const SECTION_EXCERPT_CHARS = 1200
+const SECTION_TITLE_CHARS = 200
+const SECTION_SEPARATOR = "\n---\n"
+
 export const DEFAULT_KB_INDEX_MODEL = "anthropic/claude-haiku-4-5"
 
-const HEADING_RE = /^(#{1,3})\s+(.+)$/gm
-
-export function segmentText(text: string): KnowledgeNode[] {
-  const headings: { level: number; title: string; start: number }[] = []
-  for (const m of text.matchAll(HEADING_RE)) {
-    headings.push({ level: m[1].length, title: m[2].trim(), start: m.index ?? 0 })
-  }
-  let flat: { level: number; title: string; charStart: number; charEnd: number }[]
-  if (headings.length >= 2) {
-    flat = headings.slice(0, MAX_NODES).map((h, i, arr) => ({
-      level: Math.min(h.level, MAX_DEPTH),
-      title: h.title,
-      charStart: h.start,
-      charEnd: i + 1 < arr.length ? arr[i + 1].start : text.length,
-    }))
-    // Preamble before the first heading becomes its own node.
-    if (headings[0].start > 0) {
-      flat.unshift({ level: 1, title: "Introduction", charStart: 0, charEnd: headings[0].start })
-    }
-  } else {
-    // Headingless: greedy paragraph blocks of ~BLOCK_TARGET chars, tiling
-    // the full text with no gaps (each block's charEnd == next block's
-    // charStart, and the very first/last ranges touch the text bounds).
-    flat = []
-    let start = 0
-    while (start < text.length) {
-      const isLast = flat.length === MAX_NODES - 1
-      let end = Math.min(start + BLOCK_TARGET, text.length)
-      if (!isLast && end < text.length) {
-        const brk = text.indexOf("\n\n", start)
-        if (brk >= 0 && brk < end) {
-          // Prefer breaking at the *last* paragraph boundary before `end`.
-          let lastBrk = brk
-          let next = text.indexOf("\n\n", brk + 2)
-          while (next >= 0 && next < end) {
-            lastBrk = next
-            next = text.indexOf("\n\n", next + 2)
-          }
-          end = lastBrk + 2
-        }
-      }
-      if (isLast) end = text.length
-      const firstLine = text.slice(start, end).trimStart().split("\n", 1)[0]
-      flat.push({ level: 1, title: firstLine.slice(0, 80) || `Part ${flat.length + 1}`, charStart: start, charEnd: end })
-      start = end
-    }
-    if (flat.length) flat[flat.length - 1].charEnd = text.length
-  }
-  // Nest by heading level (stack-based), assign hierarchical ids n1, n1.1, …
-  const roots: KnowledgeNode[] = []
-  const stack: { node: KnowledgeNode; level: number }[] = []
-  for (const f of flat) {
-    const node: KnowledgeNode = { id: "", title: f.title, charStart: f.charStart, charEnd: f.charEnd }
-    while (stack.length && stack[stack.length - 1].level >= f.level) stack.pop()
-    if (!stack.length) {
-      node.id = `n${roots.length + 1}`
-      roots.push(node)
-    } else {
-      const parent = stack[stack.length - 1].node
-      parent.children = parent.children ?? []
-      node.id = `${parent.id}.${parent.children.length + 1}`
-      parent.children.push(node)
-      // A parent's range must cover its children.
-      parent.charEnd = Math.max(parent.charEnd, node.charEnd)
-    }
-    stack.push({ node, level: f.level })
-  }
-  return roots
-}
-
-export function buildEnrichmentPrompt(docName: string, text: string, nodes: KnowledgeNode[]): string {
-  const flat: string[] = []
+/** Every section of the tree, parents before their children — document order. */
+function flattenNodes(nodes: KnowledgeNode[]): KnowledgeNode[] {
+  const flat: KnowledgeNode[] = []
   const walk = (ns: KnowledgeNode[]) => {
     for (const n of ns) {
-      flat.push(`${n.id}: "${n.title}"\n${text.slice(n.charStart, Math.min(n.charEnd, n.charStart + 1200))}`)
+      flat.push(n)
       if (n.children) walk(n.children)
     }
   }
   walk(nodes)
+  return flat
+}
+
+function sectionEntry(text: string, n: KnowledgeNode): string {
+  const excerpt = text.slice(n.charStart, Math.min(n.charEnd, n.charStart + SECTION_EXCERPT_CHARS))
+  return `${n.id}: "${n.title.slice(0, SECTION_TITLE_CHARS)}"\n${excerpt}`
+}
+
+/** Splits the tree's sections, in document order, into the requests the model
+ *  leg sends: each stays under KB_ENRICH_BATCH_CHARS of section text and
+ *  KB_ENRICH_BATCH_NODES sections, and every section lands in exactly one
+ *  (AQU-2029). */
+export function batchSections(text: string, nodes: KnowledgeNode[]): KnowledgeNode[][] {
+  const batches: KnowledgeNode[][] = []
+  let batch: KnowledgeNode[] = []
+  let chars = 0
+  for (const n of flattenNodes(nodes)) {
+    const size = sectionEntry(text, n).length + SECTION_SEPARATOR.length
+    if (batch.length && (batch.length >= KB_ENRICH_BATCH_NODES || chars + size > KB_ENRICH_BATCH_CHARS)) {
+      batches.push(batch)
+      batch = []
+      chars = 0
+    }
+    batch.push(n)
+    chars += size
+  }
+  if (batch.length) batches.push(batch)
+  return batches
+}
+
+/** The section-summary prompt for one batch. A document that fits one batch
+ *  gets its whole-document summary from the same call; for a larger one the
+ *  batch sees only part of the document, so that summary comes from
+ *  `buildDocSummaryPrompt` once every batch is back. */
+export function buildEnrichmentPrompt(
+  docName: string,
+  text: string,
+  sections: KnowledgeNode[],
+  { wholeDocument = true }: { wholeDocument?: boolean } = {},
+): string {
   return [
-    `Document: ${docName}. Below are its sections (id, title, opening text).`,
-    `Return ONLY JSON: {"docSummary": "<2-3 sentence summary of the whole document>",`,
+    wholeDocument
+      ? `Document: ${docName}. Below are its sections (id, title, opening text).`
+      : `Document: ${docName}. Below are some of its sections (id, title, opening text).`,
+    wholeDocument
+      ? `Return ONLY JSON: {"docSummary": "<2-3 sentence summary of the whole document>",`
+      : `Return ONLY JSON: {`,
     ` "nodes": [{"id": "<section id>", "summary": "<1-2 sentence section summary>"}]}.`,
     `Cover every section id exactly once.`,
     "",
-    flat.join("\n---\n"),
+    sections.map((n) => sectionEntry(text, n)).join(SECTION_SEPARATOR),
   ].join("\n")
+}
+
+/** The whole-document summary of a multi-batch document, written from the
+ *  section summaries the batches returned rather than from the text, which no
+ *  single prompt can hold (AQU-2029). */
+export function buildDocSummaryPrompt(
+  docName: string, sections: KnowledgeNode[], summaries: ReadonlyMap<string, string>,
+): string {
+  // Capped per line so even a 200-section outline stays near 80k chars.
+  const outline = sections.map((n) => {
+    const summary = summaries.get(n.id)
+    return `${n.id}: "${n.title.slice(0, 80)}"${summary ? ` — ${summary.slice(0, 300)}` : ""}`
+  })
+  return [
+    `Document: ${docName}. Below is an outline of its sections in order (id, title, summary).`,
+    `Return ONLY JSON: {"docSummary": "<2-3 sentence summary of the whole document>"}.`,
+    "",
+    outline.join("\n"),
+  ].join("\n")
+}
+
+interface EnrichmentReply {
+  docSummary?: string
+  nodes?: { id: string; summary?: string }[]
+}
+
+function parseReply(raw: string): EnrichmentReply {
+  // Models sometimes wrap JSON in a code fence — strip it before parsing.
+  const cleaned = raw.trim().replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "")
+  return JSON.parse(cleaned) as EnrichmentReply
+}
+
+function collectSummaries(reply: EnrichmentReply, into = new Map<string, string>()): Map<string, string> {
+  for (const n of reply.nodes ?? []) {
+    if (typeof n.summary === "string" && n.summary) into.set(n.id, n.summary)
+  }
+  return into
+}
+
+function mergeSummaries(nodes: KnowledgeNode[], summaries: ReadonlyMap<string, string>): void {
+  for (const n of flattenNodes(nodes)) {
+    const s = summaries.get(n.id)
+    if (s) n.summary = s
+  }
 }
 
 export function applyEnrichment(
   nodes: KnowledgeNode[], raw: string,
 ): { tree: KnowledgeNode[]; docSummary: string | null } {
-  // Models sometimes wrap JSON in a code fence — strip it before parsing.
-  const cleaned = raw.trim().replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "")
-  const parsed = JSON.parse(cleaned) as { docSummary?: string; nodes?: { id: string; summary?: string }[] }
-  const byId = new Map((parsed.nodes ?? []).map((n) => [n.id, n.summary]))
-  const walk = (ns: KnowledgeNode[]) => {
-    for (const n of ns) {
-      const s = byId.get(n.id)
-      if (s) n.summary = s
-      if (n.children) walk(n.children)
-    }
-  }
-  walk(nodes)
+  const parsed = parseReply(raw)
+  mergeSummaries(nodes, collectSummaries(parsed))
   return { tree: nodes, docSummary: parsed.docSummary?.trim() || null }
 }
 
@@ -168,6 +196,28 @@ export const KB_INDEX_EVENT = {
   failed: "kb-index-failed",
 } as const
 
+/** How providers word a prompt that does not fit the model's context:
+ *  Anthropic/Bedrock "prompt is too long: N tokens > M maximum", OpenRouter and
+ *  OpenAI-style "maximum context length is N tokens" / `context_length_exceeded`. */
+const CONTEXT_OVERFLOW_RE = /prompt is too long|maximum context length|context[_ ]length|too many tokens/i
+
+/** The provider's own words from an OpenRouter error body, for the logs only:
+ *  `describeIndexFailure` never shows them to the uploader. OpenRouter wraps a
+ *  provider's rejection as `{"error": {"message": "Provider returned error",
+ *  "metadata": {"raw": "<provider body>"}}}`, and the useful sentence is in
+ *  `raw` (AQU-2029: "prompt is too long: 217696 tokens > 200000 maximum"). */
+function upstreamDetail(body: string): string {
+  let detail = body
+  try {
+    const { error } = JSON.parse(body) as { error?: { message?: unknown; metadata?: { raw?: unknown } } }
+    const said = error?.metadata?.raw ?? error?.message
+    if (typeof said === "string") detail = said
+  } catch {
+    // Not JSON (a gateway's HTML error page, say): keep the text as it came.
+  }
+  return detail.replace(/\s+/g, " ").trim().slice(0, 300)
+}
+
 /** Why a run could not produce summaries, in one sentence the uploader can act
  *  on. These land in `knowledge_docs.index_error` and are rendered verbatim in
  *  the knowledge-base list, so they name no internals — no stack, no table or
@@ -183,9 +233,15 @@ export function describeIndexFailure(err: unknown): string {
   if (message === "no OPENROUTER_API_KEY") {
     return "No summarizing model is configured in this environment."
   }
-  const upstream = /^openrouter (\d{3})$/.exec(message)
+  const upstream = /^openrouter (\d{3})(?::\s*([\s\S]*))?$/.exec(message)
   if (upstream) {
     const status = Number(upstream[1])
+    // AQU-2029: batching keeps prompts far under the model's context, but a
+    // script that tokenizes worse than the budget assumes can still overflow
+    // one. "Returned HTTP 400" told the uploader nothing about that.
+    if (status === 413 || (status === 400 && CONTEXT_OVERFLOW_RE.test(upstream[2] ?? ""))) {
+      return "This document is too large for the summarizing model to read in one pass."
+    }
     if (status === 401 || status === 403) {
       return "The summarizing model refused our credentials — the OpenRouter key needs attention."
     }
@@ -262,12 +318,17 @@ export async function indexKnowledgeDoc(
 
     let enriched: { tree: KnowledgeNode[]; docSummary: string | null } | null = null
     let degraded: string | undefined
+    let cause: string | undefined
     try {
       enriched = await enrichNodes(env, doc.meta.name, doc.text, nodes, timeoutMs)
     } catch (err) {
       // The structure in `nodes` is unaffected by this — keep it.
       console.error(`[knowledge] summarizing doc ${docId} failed:`, err)
       degraded = describeIndexFailure(err)
+      // The reason is written for the uploader and drops the provider's own
+      // words; telemetry keeps them, so one 400 can be told from the next
+      // (AQU-2029).
+      cause = (err instanceof Error ? err.message : String(err)).slice(0, 500)
     }
 
     await setIndexResult(
@@ -286,6 +347,7 @@ export async function indexKnowledgeDoc(
         "kb.doc_id": docId,
         "kb.nodes": nodes.length,
         "kb.reason": degraded,
+        "kb.error": cause,
         "kb.duration_ms": Date.now() - startedAt,
       },
     )
@@ -318,9 +380,12 @@ export async function indexKnowledgeDoc(
   }
 }
 
-/** The model leg: one call that returns summaries for the sections already
- *  segmented. Throws on anything that stops it; the caller decides what that
- *  means for the row. */
+/** The model leg: summaries for the sections already segmented. A document
+ *  that fits one batch takes one call, as it always has. A larger one is
+ *  summarized in parallel batches, then a final call writes the document
+ *  summary from theirs (AQU-2029). Throws on anything that stops it (one
+ *  failed batch costs the whole leg); the caller decides what that means for
+ *  the row. */
 async function enrichNodes(
   env: KbIndexEnv,
   docName: string,
@@ -329,27 +394,61 @@ async function enrichNodes(
   timeoutMs: number,
 ): Promise<{ tree: KnowledgeNode[]; docSummary: string | null }> {
   if (!env.OPENROUTER_API_KEY) throw new Error("no OPENROUTER_API_KEY")
-  // The signal has to outlive the fetch itself: reading the body can hang
-  // just as easily as opening the connection, so it stays armed until the
-  // JSON is in hand (AQU-1376).
+  // One deadline for the whole leg, however many requests it makes: the job's
+  // budget is what the staleness window and the re-index debounce are sized
+  // against. The signal stays armed until every body is in hand, because
+  // reading a body can hang just as easily as opening the connection
+  // (AQU-1376).
   const abort = new AbortController()
   const timer = setTimeout(() => abort.abort(), timeoutMs)
-  let body: { choices?: { message?: { content?: string } }[] }
   try {
-    const res = await fetch(openRouterUrl(env), {
-      method: "POST",
-      headers: { Authorization: `Bearer ${env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: env.KB_INDEX_MODEL || DEFAULT_KB_INDEX_MODEL,
-        messages: [{ role: "user", content: buildEnrichmentPrompt(docName, text, nodes) }],
-        response_format: { type: "json_object" },
-      }),
-      signal: abort.signal,
-    })
-    if (!res.ok) throw new Error(`openrouter ${res.status}`)
-    body = (await res.json()) as { choices?: { message?: { content?: string } }[] }
+    const batches = batchSections(text, nodes)
+    if (batches.length === 1) {
+      const reply = await complete(env, buildEnrichmentPrompt(docName, text, batches[0]), abort.signal)
+      return applyEnrichment(nodes, reply)
+    }
+    // At most ceil(MAX_NODES / KB_ENRICH_BATCH_NODES) requests, all at once:
+    // in sequence they could not be counted on to fit the shared deadline.
+    const replies = await Promise.all(batches.map((batch) => complete(
+      env, buildEnrichmentPrompt(docName, text, batch, { wholeDocument: false }), abort.signal,
+    )))
+    // Parse every reply before the tree is touched, so a bad one leaves no
+    // half-summarized tree behind for the degrade path to save.
+    const summaries = new Map<string, string>()
+    for (const reply of replies) collectSummaries(parseReply(reply), summaries)
+    const docReply = await complete(
+      env, buildDocSummaryPrompt(docName, flattenNodes(nodes), summaries), abort.signal,
+    )
+    const docSummary = parseReply(docReply).docSummary?.trim() || null
+    mergeSummaries(nodes, summaries)
+    return { tree: nodes, docSummary }
   } finally {
     clearTimeout(timer)
+    // Done or failed, nothing of this leg may outlive it: when one batch
+    // throws, its siblings are still in flight.
+    abort.abort()
   }
-  return applyEnrichment(nodes, body.choices?.[0]?.message?.content ?? "")
+}
+
+/** One chat completion; resolves to the reply text. A non-2xx throws
+ *  `openrouter <status>: <provider's words>` so the cause reaches the logs,
+ *  and describeIndexFailure can tell a context overflow from any other 400
+ *  (AQU-2029). */
+async function complete(env: KbIndexEnv, prompt: string, signal: AbortSignal): Promise<string> {
+  const res = await fetch(openRouterUrl(env), {
+    method: "POST",
+    headers: { Authorization: `Bearer ${env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: env.KB_INDEX_MODEL || DEFAULT_KB_INDEX_MODEL,
+      messages: [{ role: "user", content: prompt }],
+      response_format: { type: "json_object" },
+    }),
+    signal,
+  })
+  if (!res.ok) {
+    const detail = upstreamDetail(await res.text().catch(() => ""))
+    throw new Error(`openrouter ${res.status}${detail ? `: ${detail}` : ""}`)
+  }
+  const body = (await res.json()) as { choices?: { message?: { content?: string } }[] }
+  return body.choices?.[0]?.message?.content ?? ""
 }

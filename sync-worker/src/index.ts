@@ -117,6 +117,7 @@ import { redactLogPath } from "../../shared/log-path-redaction"
 import { deploymentEnvironmentError, unauthenticatedBypassError } from "./environment-guard"
 import { asReadonlyR2, type ReadonlyR2Bucket } from "./lib/readonly-r2"
 import { runR2GcSweep, R2_GC_CRON } from "./r2-gc-cron"
+import { withStoreSecrets } from "../../db/shared/secrets-store-overlay"
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace -- Cloudflare namespace augmentation requires this syntax
@@ -677,6 +678,9 @@ export default {
   // saturation — are queryable without a repro.
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const startedAt = Date.now()
+    // Secrets Store overlay: SS_<NAME> bindings supply env.<NAME> (db/shared/
+    // secrets-store-overlay.ts); the Worker secret stays the fallback.
+    env = await withStoreSecrets(env)
     let response: Response
     try {
       response = await worker.fetch(request, env, ctx)
@@ -729,6 +733,7 @@ export default {
     env: Env,
     _ctx: ExecutionContext,
   ): Promise<void> {
+    env = await withStoreSecrets(env)
     if (controller.cron === R2_GC_CRON) {
       try {
         await runR2GcSweep(env)
@@ -762,6 +767,7 @@ export default {
     env: Env,
     ctx: ExecutionContext,
   ): Promise<void> {
+    env = await withStoreSecrets(env)
     if (!env.HYPERDRIVE) {
       throw new Error(
         "HYPERDRIVE not bound — the side-effect queue consumer needs Postgres",

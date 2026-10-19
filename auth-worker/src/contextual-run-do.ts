@@ -41,6 +41,7 @@ import {
   type ContextualDriverJob,
 } from "./lib/contextual/run-driver"
 import type { Env } from "./types"
+import { withStoreSecrets } from "../../db/shared/secrets-store-overlay"
 
 const JOB_KEY = "job"
 
@@ -88,7 +89,8 @@ export class ContextualRunDriver extends DurableObject<Env> {
     // this handler owns closing it.
     const shim = makePostgres(connectionString)
     const driverEnv: Env = {
-      ...this.env,
+      // Secrets Store values (SS_<NAME> bindings) win over Worker secrets.
+      ...(await withStoreSecrets(this.env)),
       AQUILLA_PG: shim as unknown as AquillaDb,
       HYPERDRIVE: undefined,
     }

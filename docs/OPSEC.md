@@ -305,6 +305,46 @@
 > runs lint, `i18n:check`, the secret scan, unit tests, the worker suites and
 > `pnpm neon:check` on every pull request into `dev`; which of those contexts
 > branch protection requires is still that call.
+>
+> `docs/OPSEC-REVIEW-2026-10-19.md` holds the **auth & session** Monday slot and
+> spends it on the one route 10-12 predicted would be wrong next. It avoids
+> `routes/auth.ts`, `middleware/auth.ts`, `auth/jwt.ts`,
+> `utils/token-revocation.ts` and `types.ts`, which a parallel pen-test pass
+> (`7455641c5`, no review document, so no OPS-n) rewrote at 09:09 the same
+> morning — the **sixth** concurrent-pass collision, and the third on
+> `routes/auth.ts` in fifteen days. **OPS-47**: the one-time human approval
+> surface for ask-mode changesets (`routes/changeset-approvals.ts`, the gate
+> whose whole purpose is that *an agent proposes, a human approves*) gates on
+> authority rather than identity since AQU-CMDREG-P1 §2.1 — and
+> `resolveProjectRole` hands every platform operator level **700**, which is
+> `ROLE.OWNER`, the highest floor any plan can carry. So an un-elevated admin
+> JWT cleared every floor on every tenant's changeset, `UNREADABLE_PLAN_FLOOR`
+> (the deliberate owner-only fail-closed for a corrupt plan) included, on all
+> three writes: approve, reject and assign. What makes it categorically worse
+> than another un-gated route is where the write lands: the confirmation is
+> consumed by the **agent's** credential on
+> `(changeset_id, credential_id, digest)` with no reference to who approved
+> (`sync-worker/src/external/commit-gates.ts:128-141`), so the resulting
+> cross-tenant write is made by the one principal none of the sync-worker's
+> `src: "platform"` rules can see — which is exactly how it escaped AQU-2003's
+> 10-16 decision that un-elevated platform access is **read-only**. The
+> asymmetry that settles it as a mistake rather than a policy: the sync-worker
+> half of the same gate already ignores platform power, because
+> `changesetAuthorityDenied` re-resolves the caller by user id with no admin
+> lookup. Fixed by OPS-44's de-escalation idiom (`roleWithoutUnelevatedAdmin`)
+> on the three writes, re-applying the same floor to the genuine grant that
+> survives; the **read** is left open, which is AQU-2003's call applied here
+> rather than a new one. **OPS-48** sharpens OPS-45's open ledger: of the 36
+> route modules that make no elevation decision, OPS-45 did not separate reads
+> (whose openness AQU-2003 has since made deliberate) from writes (which it did
+> not license) — **ten** of them write, led by `source-linking.ts` (14) and
+> `monday.ts` (11), the latter acting on a tenant's own stored third-party
+> credential against an external system. Reported, not fixed: each one's
+> posture is the kind of call AQU-2003 showed goes to humans, and gating ten
+> modules blind is what "one recorded decision per route" was meant to replace.
+> This pass also records that **OPS-46 is closed** — AQU-1551 wired `ci.yml` to
+> pull requests the day after 10-12 reported it — with two caveats: `typecheck`
+> deliberately stays `workflow_dispatch`, and `enforce_admins` is false.
 
 _Standing OPSEC review of Aquilla's handling of sensitive data. Complements
 `docs/SECURITY-NOTES-2026-06-10.md` (application-security findings, June audit)

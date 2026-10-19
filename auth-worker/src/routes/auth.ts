@@ -37,7 +37,7 @@ import {
   REGISTER_MAX_PER_IP,
   RESET_REQUEST_MAX_PER_IDENTIFIER,
 } from "../utils/rate-limit"
-import { revokeToken } from "../utils/token-revocation"
+import { revokeSessionFamily, revokeToken } from "../utils/token-revocation"
 import { parseAdminEmails } from "../middleware/platform-admin"
 import { evictUserSessions } from "../lib/session-cache"
 import {
@@ -632,6 +632,7 @@ auth.post("/refresh", authMiddleware, async (c) => {
   const { token, payload: minted } = await jwtService.createAccessTokenWithPayload(
     user.username,
     typeof payload.sst === "number" ? payload.sst : payload.iat,
+    typeof payload.sid === "string" ? payload.sid : undefined,
   )
   return c.json({
     access_token: token,
@@ -656,6 +657,15 @@ auth.post("/logout", authMiddleware, async (c) => {
   if (payload.jti) {
     try {
       await revokeToken(c.env.AQUILLA_PG, payload.jti, user.id, payload.exp)
+      // Also kill earlier tokens in the same refresh chain: refresh leaves the
+      // previous token valid, so a copy of it would otherwise outlive logout.
+      if (typeof payload.sid === "string") {
+        const sessionStart = typeof payload.sst === "number" ? payload.sst : payload.iat
+        const maxAgeDays = parseInt(c.env.MAX_SESSION_AGE_DAYS || "90", 10)
+        await revokeSessionFamily(
+          c.env.AQUILLA_PG, payload.sid, user.id, sessionStart + maxAgeDays * 86400,
+        )
+      }
     } catch (err) {
       console.error("[auth] logout revoke failed:", err)
       return c.json({ error: "Failed to log out" }, 500)

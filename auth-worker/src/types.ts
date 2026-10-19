@@ -462,6 +462,10 @@ export interface JWTPayload {
    *  tracks the current token. Optional — tokens minted before this field
    *  existed have none, and refresh falls back to their `iat`. */
   sst?: number
+  /** Session family id: minted at login and carried across every sliding
+   *  refresh, so logout can revoke the whole refresh chain (not just the one
+   *  `jti` presented). Optional — older tokens have none. */
+  sid?: string
   [k: string]: unknown
 }
 

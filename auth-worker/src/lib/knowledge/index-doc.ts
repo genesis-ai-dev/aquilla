@@ -1,8 +1,8 @@
 // PageIndex-style indexing (spec §"Data model"): structure comes from
-// heuristics (markdown headings, else paragraph blocks), the LLM only writes
-// summaries — one Haiku call per document (per batch of sections for a large
-// one, AQU-2029), made async from the upload route via ctx.waitUntil. Failure
-// is non-fatal: docs stay string-searchable.
+// heuristics in segment.ts (markdown headings, else paragraph blocks), the LLM
+// only writes summaries — one Haiku call per document (per batch of sections
+// for a large one, AQU-2029), made async from the upload route via
+// ctx.waitUntil. Failure is non-fatal: docs stay string-searchable.
 //
 // AQU-1376: this job is the only thing that moves a row off `pending`, and
 // nothing revisits it afterwards — no cron, no retry. So every exit has to be
@@ -27,6 +27,9 @@ import {
 } from "../../../../db/shared/knowledge"
 import { propagateKnowledgeDocs } from "../../../../db/shared/inherited-settings"
 import { shipLog, type PosthogLogEnv } from "../../posthog-logs"
+import { segmentText } from "./segment"
+
+export { segmentText }
 
 export interface KbIndexEnv extends PosthogLogEnv {
   OPENROUTER_API_KEY?: string
@@ -60,80 +63,7 @@ const SECTION_EXCERPT_CHARS = 1200
 const SECTION_TITLE_CHARS = 200
 const SECTION_SEPARATOR = "\n---\n"
 
-const MAX_NODES = 200
-const MAX_DEPTH = 3
-const BLOCK_TARGET = 2000
 export const DEFAULT_KB_INDEX_MODEL = "anthropic/claude-haiku-4-5"
-
-const HEADING_RE = /^(#{1,3})\s+(.+)$/gm
-
-export function segmentText(text: string): KnowledgeNode[] {
-  const headings: { level: number; title: string; start: number }[] = []
-  for (const m of text.matchAll(HEADING_RE)) {
-    headings.push({ level: m[1].length, title: m[2].trim(), start: m.index ?? 0 })
-  }
-  let flat: { level: number; title: string; charStart: number; charEnd: number }[]
-  if (headings.length >= 2) {
-    flat = headings.slice(0, MAX_NODES).map((h, i, arr) => ({
-      level: Math.min(h.level, MAX_DEPTH),
-      title: h.title,
-      charStart: h.start,
-      charEnd: i + 1 < arr.length ? arr[i + 1].start : text.length,
-    }))
-    // Preamble before the first heading becomes its own node.
-    if (headings[0].start > 0) {
-      flat.unshift({ level: 1, title: "Introduction", charStart: 0, charEnd: headings[0].start })
-    }
-  } else {
-    // Headingless: greedy paragraph blocks of ~BLOCK_TARGET chars, tiling
-    // the full text with no gaps (each block's charEnd == next block's
-    // charStart, and the very first/last ranges touch the text bounds).
-    flat = []
-    let start = 0
-    while (start < text.length) {
-      const isLast = flat.length === MAX_NODES - 1
-      let end = Math.min(start + BLOCK_TARGET, text.length)
-      if (!isLast && end < text.length) {
-        const brk = text.indexOf("\n\n", start)
-        if (brk >= 0 && brk < end) {
-          // Prefer breaking at the *last* paragraph boundary before `end`.
-          let lastBrk = brk
-          let next = text.indexOf("\n\n", brk + 2)
-          while (next >= 0 && next < end) {
-            lastBrk = next
-            next = text.indexOf("\n\n", next + 2)
-          }
-          end = lastBrk + 2
-        }
-      }
-      if (isLast) end = text.length
-      const firstLine = text.slice(start, end).trimStart().split("\n", 1)[0]
-      flat.push({ level: 1, title: firstLine.slice(0, 80) || `Part ${flat.length + 1}`, charStart: start, charEnd: end })
-      start = end
-    }
-    if (flat.length) flat[flat.length - 1].charEnd = text.length
-  }
-  // Nest by heading level (stack-based), assign hierarchical ids n1, n1.1, …
-  const roots: KnowledgeNode[] = []
-  const stack: { node: KnowledgeNode; level: number }[] = []
-  for (const f of flat) {
-    const node: KnowledgeNode = { id: "", title: f.title, charStart: f.charStart, charEnd: f.charEnd }
-    while (stack.length && stack[stack.length - 1].level >= f.level) stack.pop()
-    if (!stack.length) {
-      node.id = `n${roots.length + 1}`
-      roots.push(node)
-    } else {
-      const parent = stack[stack.length - 1].node
-      parent.children = parent.children ?? []
-      node.id = `${parent.id}.${parent.children.length + 1}`
-      parent.children.push(node)
-      // A parent's range must cover its children.
-      parent.charEnd = Math.max(parent.charEnd, node.charEnd)
-    }
-    stack.push({ node, level: f.level })
-  }
-  return roots
-}
 
 /** Every section of the tree, parents before their children — document order. */
 function flattenNodes(nodes: KnowledgeNode[]): KnowledgeNode[] {

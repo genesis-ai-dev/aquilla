@@ -22,19 +22,26 @@
 // a product call, keeping the shared key solvent is not. Operators move the
 // ceiling (or switch it off explicitly); they do not choose whether it runs.
 //
-// Spend source: `org_credit_usage_daily.raw_cost_cents` — RAW provider cost,
-// not customer-facing credits, because the thing being protected is the real
-// vendor bill. Negative rows (complimentary grants written by
-// credits.ts::grantCredits) are floored at zero per row: a goodwill grant is
-// not money the platform got back from the vendor.
+// Spend source: RAW provider cost, not customer-facing credits, because the
+// thing being protected is the real vendor bill. Two ledgers, summed:
 //
-// Accuracy caveat: the ceiling is exactly as accurate as that ledger. The
-// legacy streamed-chat path records a flat 1¢ per call regardless of real cost
-// (AQU-1871), so until that is fixed the measured total under-reports and the
-// ceiling trips later than the true dollar figure. The ceiling is still the
-// only control that reads dollars at all.
+//   - `workspace_usage_requests` (AQU-2057, the one meter): today's metered and
+//     unmetered rows. A reserved row counts at its reservation, so a burst of
+//     admitted calls cannot overshoot while they run; a settled row counts at
+//     its settled cost; a released row never cost anything. BYOK rows are
+//     excluded: they ran on the customer's key, not ours.
+//   - `org_credit_usage_daily`, during the transition: the paths not yet on the
+//     meter (brief, draft, smart edits, import, TTS, and every path while
+//     weekly metering is off) still write only here. Each call writes exactly
+//     one of the two ledgers — the metered paths call recordCredit only when
+//     they hold no usage reservation — so the sum does not double count.
+//     Negative rows (complimentary grants written by credits.ts::grantCredits)
+//     are floored at zero per row: a goodwill grant is not money the platform
+//     got back from the vendor. Drop this half when the last path moves to the
+//     meter (unified billing T18).
 
 import type { AquillaDb } from "../shim/postgres"
+import { MICRO_UNITS_PER_UNIT } from "./billing-cost"
 
 /** Error code returned to the client when the ceiling has been reached. */
 export const AI_SPEND_CEILING_ERROR = "ai_spend_ceiling_reached"
@@ -134,14 +141,26 @@ async function readSnapshot(db: AquillaDb, env: AiSpendCeilingEnv): Promise<AiSp
       `SELECT
          (SELECT COALESCE(SUM(GREATEST(raw_cost_cents, 0)), 0)::float8
             FROM org_credit_usage_daily
-           WHERE date_utc = ?) AS spend_cents,
+           WHERE date_utc = ?) AS credit_cents,
+         (SELECT COALESCE(SUM(CASE WHEN state = 'settled' THEN raw_micro_cents
+                                   ELSE reserved_micro_units / multiplier END), 0)::float8
+                 / ${MICRO_UNITS_PER_UNIT}
+            FROM workspace_usage_requests
+           WHERE created_at >= (?::date)::timestamp AT TIME ZONE 'UTC'
+             AND created_at < (?::date + 1)::timestamp AT TIME ZONE 'UTC'
+             AND state IN ('reserved', 'settled')
+             AND mode <> 'byok') AS meter_cents,
          (SELECT settings FROM platform_settings WHERE id = 1) AS platform_settings`,
     )
-    .bind(day)
-    .first<{ spend_cents: number | string | null; platform_settings: string | null }>()
+    .bind(day, day, day)
+    .first<{
+      credit_cents: number | string | null
+      meter_cents: number | string | null
+      platform_settings: string | null
+    }>()
 
   return {
-    spendCents: Number(row?.spend_cents ?? 0) || 0,
+    spendCents: (Number(row?.credit_cents ?? 0) || 0) + (Number(row?.meter_cents ?? 0) || 0),
     ceilingUsd: resolveAiSpendCeilingUsd(
       env.AI_DAILY_SPEND_CEILING_USD,
       parseCeilingFromSettings(row?.platform_settings),

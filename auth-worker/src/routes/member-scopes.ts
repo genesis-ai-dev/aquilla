@@ -33,6 +33,7 @@ import {
   loadTargetLaneIdentities,
 } from "../../../db/shared/lane-visibility"
 import {
+  LANE_SCOPE_ABOVE_CEILING_ERROR,
   laneScopeIdsForStorage,
   resolveLaneScopeValue,
   type LaneScopeConversion,
@@ -312,10 +313,7 @@ memberScopes.put(
       )
       const target = effectiveMembers.find((m) => m.userId === targetUserId)
       if (target && target.roleLevel >= ROLE.MAINTAINER) {
-        return c.json(
-          { error: "scopes are for roles below maintainer" },
-          400,
-        )
+        return c.json({ error: LANE_SCOPE_ABOVE_CEILING_ERROR }, 400)
       }
     }
 

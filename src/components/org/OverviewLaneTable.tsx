@@ -7,11 +7,13 @@
 //
 // - Translated/Validated come from the project's PortfolioProject.lanes[]
 //   (laneTranslatedPct / laneValidatedPct — §3.1 foundation, already in base).
-// - People = lane-scoped members: sub-project_lead members whose
-//   project_member_scopes carry a { kind:'lane', value:<tag> } row. Loaded the
-//   same way SharePanel loads them (GET scopes per sub-500 member, tolerating
-//   individual failures as "unscoped"). Leads (500+) are unscoped by design —
-//   they see every lane and so are not attributed to any single row.
+// - People = lane-scoped members: members below maintainer whose
+//   project_member_scopes carry a { kind:'lane', value:<tag> } row. Loaded
+//   with one GET scopes per member below 600, tolerating individual failures
+//   as "unscoped". Maintainers (600+) see every lane and can't be scoped, so
+//   they are not attributed to any single row. A project lead (500) can be
+//   limited to lanes since AQU-1813, so a lane-limited lead is listed here
+//   too (AQU-2027).
 // - Clicking a row opens the workspace at that lane (§3.1). Actions live in
 //   the row ⋯ menu (and right-click): Assign… (AssignModal pinned via
 //   defaultLane, §3.5), Staff… (StaffLanePopover, §3.4).
@@ -229,9 +231,11 @@ export function OverviewLaneTable({
    */
   const [scopesNonce, setScopesNonce] = useState(0)
 
-  // Scopable members = below project_lead (leads are unscoped, see every lane).
+  // Scopable members = below maintainer. Maintainers see every lane and the
+  // server refuses to scope them; a project lead can be lane-limited
+  // (AQU-1813), so leads are read too (AQU-2027).
   const scopableUserIds = useMemo(
-    () => members.filter((m) => m.role.level < ROLE.PROJECT_LEAD).map((m) => m.userId),
+    () => members.filter((m) => m.role.level < ROLE.MAINTAINER).map((m) => m.userId),
     [members],
   )
 

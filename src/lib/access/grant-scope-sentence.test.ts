@@ -15,6 +15,19 @@ describe("describeGrant", () => {
     expect(grantButtonLabel(t, "Add", copy.scopeEcho)).toBe("Add — French lane only")
   })
 
+  // AQU-2027: someone already on the project at or above the picked role keeps
+  // it — the Staff popover only limits them to the lane.
+  it("says a person already on the project stays at their role", () => {
+    const copy = describeGrant(t, {
+      names: ["Maria"],
+      roleLevel: ROLE.PROJECT_LEAD,
+      stays: true,
+      scope: { kind: "project", projectName: "Mark", lanes: ["French"] },
+    })
+    expect(copy.sentence).toBe("Maria stays a Project lead on Mark, French lane only")
+    expect(copy.scopeEcho).toBe("French lane only")
+  })
+
   it("names a maintainer of the whole organization", () => {
     const copy = describeGrant(t, {
       names: ["Maria"],

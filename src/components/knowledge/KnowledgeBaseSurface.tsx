@@ -110,10 +110,12 @@ function statusKey(doc: KnowledgeDocument, stalled: boolean) {
   return `knowledgeBase.status.${doc.indexStatus}` as const
 }
 
-/** How often the open list re-checks whether a pending doc has gone stale. The
- *  badge has to be able to flip without a reload — the stall itself produces no
- *  event to listen for. */
-const STALE_RECHECK_MS = 30_000
+/** How often the open list re-reads itself while a doc is pending (AQU-2028).
+ *  Indexing runs server-side and sends no event when it settles, so without
+ *  this a row stayed on "Indexing…" until a reload — and then flipped to a
+ *  false "stalled" once the AQU-1376 window passed. The same tick re-checks
+ *  the stall, which also produces no event. */
+const PENDING_POLL_MS = 5_000
 
 export function KnowledgeBaseSurface({
   scope,
@@ -143,7 +145,18 @@ export function KnowledgeBaseSurface({
   const [pendingDelete, setPendingDelete] = useState<KnowledgeDocument | null>(null)
   const [viewer, setViewer] = useState<ViewerState | null>(null)
 
+  /**
+   * AQU-2028: bumped by every list read and by every local change (upload,
+   * re-index, delete). A read only lands if nothing has bumped it since it
+   * started, so a re-read that left before an upload can't drop the new row,
+   * and one that left before a re-index can't put the old status back.
+   */
+  const listGenRef = useRef(0)
+  /** A pending-doc re-read still in flight; the next tick skips rather than stacks. */
+  const pollInFlightRef = useRef(false)
+
   const load = useCallback(async () => {
+    const gen = ++listGenRef.current
     if (!jwt) {
       setDocs([])
       setLoading(false)
@@ -152,7 +165,8 @@ export function KnowledgeBaseSurface({
     setLoading(true)
     setLoadFailed(false)
     try {
-      setDocs(await listKnowledgeDocuments(stableScope, jwt))
+      const next = await listKnowledgeDocuments(stableScope, jwt)
+      if (gen === listGenRef.current) setDocs(next)
     } catch {
       setLoadFailed(true)
     } finally {
@@ -164,8 +178,25 @@ export function KnowledgeBaseSurface({
     void load()
   }, [load])
 
+  /** The quiet re-read behind the pending poll: no spinner, and a failure keeps
+   *  the rows already on screen — the next tick simply tries again. */
+  const refreshPending = useCallback(async () => {
+    if (!jwt || pollInFlightRef.current) return
+    pollInFlightRef.current = true
+    const gen = ++listGenRef.current
+    try {
+      const next = await listKnowledgeDocuments(stableScope, jwt)
+      if (gen === listGenRef.current) setDocs(next)
+    } catch {
+      // Keep what is shown; this is a background check, not a load.
+    } finally {
+      pollInFlightRef.current = false
+    }
+  }, [jwt, stableScope])
+
   // Only tick while something is actually pending; an all-settled list has
-  // nothing to re-evaluate.
+  // nothing to re-read or re-evaluate, so the poll stops with the last pending
+  // row (AQU-2028).
   const hasPendingDoc = useMemo(() => docs.some((doc) => doc.indexStatus === "pending"), [docs])
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
@@ -173,9 +204,14 @@ export function KnowledgeBaseSurface({
     // No synchronous first tick: a `now` left over from an earlier render is only
     // ever too *old*, which can delay the stalled badge by one interval but can
     // never flag a live job early — the direction to err in.
-    const timer = window.setInterval(() => setNow(Date.now()), STALE_RECHECK_MS)
+    const timer = window.setInterval(() => {
+      setNow(Date.now())
+      // A hidden tab has no one to show the badge to; it catches up on the
+      // first tick after it is shown again.
+      if (document.visibilityState !== "hidden") void refreshPending()
+    }, PENDING_POLL_MS)
     return () => window.clearInterval(timer)
-  }, [hasPendingDoc])
+  }, [hasPendingDoc, refreshPending])
 
   const visibleDocs = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase(locale)
@@ -188,6 +224,7 @@ export function KnowledgeBaseSurface({
     setUploading(true)
     try {
       const doc = await uploadKnowledgeDocument(stableScope, jwt, file)
+      listGenRef.current++
       setDocs((current) => [doc, ...current.filter((item) => item.id !== doc.id)])
       toast.add({ type: "success", title: t("knowledgeBase.uploadSuccess", { name: file.name }) })
     } catch (err) {
@@ -243,6 +280,7 @@ export function KnowledgeBaseSurface({
     setReindexingId(doc.id)
     try {
       await reindexKnowledgeDocument(stableScope, jwt, doc.id)
+      listGenRef.current++
       // The server restarts updated_at along with the status (AQU-1376); mirror
       // that here or a retried doc would still read as stalled and keep
       // offering the button that just fired.
@@ -268,6 +306,7 @@ export function KnowledgeBaseSurface({
     setDeletingId(doc.id)
     try {
       await deleteKnowledgeDocument(stableScope, jwt, doc.id)
+      listGenRef.current++
       setDocs((current) => current.filter((item) => item.id !== doc.id))
       setPendingDelete(null)
       toast.add({ type: "success", title: t("knowledgeBase.deleteSuccess", { name: doc.name }) })

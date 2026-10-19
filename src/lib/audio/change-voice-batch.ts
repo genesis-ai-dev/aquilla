@@ -38,8 +38,10 @@ function cloneTakeKey(cell: CellData, audioId: string): string {
   return `${cell.id}:${slot}`
 }
 
-/** Some voice in the library is using this cell's selected take as its reference clip. */
-function takeUsedByVoice(cell: CellData, settings: ProjectTtsSettings | undefined): boolean {
+/** Some voice in the library is using this cell's selected take as its reference clip.
+ *  AQU-2026: exported so the per-line Change voice on the Media timeline leaves
+ *  the same takes alone as the whole-file run — one rule, not two. */
+export function takeUsedByVoice(cell: CellData, settings: ProjectTtsSettings | undefined): boolean {
   const take = changeVoiceSourceTake(cell)
   if (!take) return false
   const key = cloneTakeKey(cell, take.audioId)

@@ -231,8 +231,18 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
 import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, takesNeedingMeasure, runMeasureAll, type SynthTarget } from "@/lib/audio/batch-audio"
-import { CHANGE_VOICE_QUALITIES, CHANGE_VOICE_QUALITY_STEPS, type ChangeVoiceQuality } from "@/lib/audio/change-voice"
-import { planChangeVoiceAll, runChangeVoiceAll } from "@/lib/audio/change-voice-batch"
+import {
+  CHANGE_VOICE_QUALITIES,
+  CHANGE_VOICE_QUALITY_STEPS,
+  changeCellVoice,
+  changeVoiceBlocker,
+  changeVoiceQualityForSteps,
+  changeVoiceSourceTake,
+  voiceChangedSteps,
+  type ChangeVoiceQuality,
+} from "@/lib/audio/change-voice"
+import { planChangeVoiceAll, runChangeVoiceAll, takeUsedByVoice } from "@/lib/audio/change-voice-batch"
+import { getTtsStatus, ttsStatusKey } from "@/lib/audio/tts"
 import { CHANGE_VOICE_QUALITY_LABEL, getChangeVoiceQuality, setChangeVoiceQuality } from "@/lib/store/change-voice-quality"
 import { injectOptimisticAudioTrim,
   injectOptimisticAudioPlace, injectOptimisticAudioAttachment, injectOptimisticAudioRemove, injectOptimisticAudioDeselect,
@@ -307,6 +317,7 @@ import { DEFAULT_TARGET_TRACK_ID, RECORDING_SLOT, slotForTrack } from "@/lib/tim
 import { fileTrackColor } from "@/lib/timeline/take-colors"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
+import type { ChangeVoiceMenuBlocker, ChangeVoiceMenuState } from "@/components/timeline/TargetAudioLane"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
 import { canPerform, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor } from "@/lib/sync/role-policy"
 import { laneComboboxOptions } from "@/components/lane-options"
@@ -331,7 +342,7 @@ import { useRefusedFileEvents } from "@/hooks/useRefusedFileEvents"
 import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
 import { runDiarization, findFileClip, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { extractVoiceReference } from "@/lib/audio/reference-extract"
-import { assignedCastVoiceId, getVoiceLibrary, newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
+import { assignedCastVoiceId, getVoiceLibrary, newVoiceId, resolveCastVoice, VOICE_PALETTE } from "@/lib/audio/voices"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
@@ -11389,6 +11400,91 @@ export function ProjectWorkspace() {
     },
     [project, frontierSession, audioCueCells, resolveCueReadAloud, timelineAudioByCellId, currentUsername, activeLane, t],
   )
+
+  /**
+   * AQU-2026: Change voice for ONE line, from the Media timeline's take menu.
+   *
+   * The per-line control shipped on the Audio tab's voice card, and a
+   * time-ordered file has no voice cards — `audioLens` is null there and the
+   * lens draws the timeline instead — so on video and subtitle files the only
+   * Change voice was the whole-file one. Dubbing is where cloned voices are
+   * used most, so that is exactly backwards.
+   *
+   * Both halves read the line the same way the Audio tab does: its cast voice
+   * (`resolveCastVoice`, the picker's own three-part rule) and the take
+   * `changeVoiceSourceTake` picks, which is the line's own recording or
+   * generated voice and never the film's programme audio.
+   */
+  const timelineChangeVoiceState = useCallback(
+    (cellId: string): ChangeVoiceMenuState | null => {
+      const owner = resolveTakeCellRef.current(cellId)
+      if (!owner) return null
+      const { cell } = owner
+      // Nothing of this line's own to convert — the menu says nothing at all,
+      // as the voice card renders no button on `no-take`.
+      const take = changeVoiceSourceTake(cell)
+      if (!take) return null
+      const voice = resolveCastVoice(tts.settings, cell.id, cell.ttsSettings?.voiceId)
+      // A take some voice is cloned FROM is left alone: converting it would
+      // change what that voice sounds like. Same rule as the whole-file run.
+      const isReference = takeUsedByVoice(cell, tts.settings)
+      const status = getTtsStatus(ttsStatusKey(cell.id))
+      const busy = status.kind === "loading" || status.kind === "synthesizing"
+      const blockers = {} as Record<ChangeVoiceQuality, ChangeVoiceMenuBlocker | null>
+      for (const quality of CHANGE_VOICE_QUALITIES) {
+        blockers[quality] = isReference
+          ? "voice-reference"
+          : busy
+            ? "busy"
+            : changeVoiceBlocker(cell, voice, CHANGE_VOICE_QUALITY_STEPS[quality])
+      }
+      return {
+        voiceName: voice.name,
+        quality: changeVoiceQualityForSteps(voiceChangedSteps(take.audioId)),
+        blockers,
+      }
+    },
+    [tts.settings],
+  )
+
+  const handleChangeTimelineVoice = useCallback(
+    async (cellId: string, quality: ChangeVoiceQuality) => {
+      if (!project || !frontierSession) return
+      const owner = resolveTakeCellRef.current(cellId)
+      if (!owner) return
+      const { cell } = owner
+      const voice = resolveCastVoice(tts.settings, cell.id, cell.ttsSettings?.voiceId)
+      const diffusionSteps = CHANGE_VOICE_QUALITY_STEPS[quality]
+      // The menu disables what cannot run, but it was drawn from an earlier
+      // render: re-check before spending a conversion.
+      if (takeUsedByVoice(cell, tts.settings) || changeVoiceBlocker(cell, voice, diffusionSteps) != null) return
+      toast.add({ type: "info", title: t("editor.timeline.changeVoiceStarted", { name: voice.name }) })
+      const ok = await changeCellVoice({
+        projectId: project.id,
+        cell,
+        voice,
+        session: frontierSession,
+        author: currentUsername,
+        diffusionSteps,
+        ...(activeLane ? { targetLang: activeLane } : {}),
+      })
+      if (ok) {
+        toast.add({ type: "success", title: t("editor.timeline.changeVoiceDone", { name: voice.name }) })
+        revalidateCells?.()
+        return
+      }
+      // `changeCellVoice` swallows the throw into the cell's tts badge, which
+      // is where the Audio tab reads it; say what it said rather than a bare
+      // "it failed", since the timeline shows no voice card to open.
+      const failure = getTtsStatus(ttsStatusKey(cell.id))
+      toast.add({
+        type: "error",
+        title: t("editor.timeline.changeVoiceFailed"),
+        ...(failure.kind === "error" && failure.message ? { description: failure.message } : {}),
+      })
+    },
+    [project, frontierSession, tts.settings, currentUsername, activeLane, revalidateCells, t],
+  )
   // Publish the resolver declared near the top of the component. Assigned on
   // every render, deliberately: it closes over this render's cue cells, and a
   // memoised version would hand the handlers a stale set after every import.
@@ -15246,6 +15342,8 @@ export function ProjectWorkspace() {
                     onTrimTarget={handleTrimTarget}
                     onCutTargets={handleCutTargets}
                     onRegenerateVoice={handleRegenerateTimelineVoice}
+                    onChangeVoice={handleChangeTimelineVoice}
+                    changeVoiceStateFor={timelineChangeVoiceState}
                     onRenameTake={handleRenameTimelineTake}
                     onRemoveTake={handleRemoveTimelineTake}
                     onVoteTake={handleVoteTimelineTake}

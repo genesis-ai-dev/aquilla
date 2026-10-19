@@ -411,6 +411,24 @@ export interface ProjectTtsSettings {
    */
   castAssignments?: Record<string, string>
   /**
+   * AQU-2038: the per-lane cast, keyed by lane legacy tag (`''` is the default
+   * lane — the same convention as `cells`/`lanes` since AQU-538), then by
+   * cellId. A lane with no entry for a cell falls back to the project-wide
+   * `castAssignments` above, so every project that predates this field keeps
+   * generating exactly as it did. The empty string is a SENTINEL meaning "this
+   * lane uses its own default voice" — it has to be storable, because a lane
+   * that is sent back to its default must outrank a project-wide assignment
+   * naming a voice.
+   */
+  laneCastAssignments?: Record<string, Record<string, string>>
+  /**
+   * AQU-2038: the starred/default voice per lane, keyed by lane legacy tag.
+   * Absent for a lane that never starred one — it then falls back to
+   * `defaultVoiceId`. The empty-string sentinel means "this lane has no
+   * default of its own", which outranks the project-wide default.
+   */
+  laneDefaultVoiceId?: Record<string, string>
+  /**
    * Character disagreements a person has settled. (AQU-646, 2026-08-18)
    *
    * Keyed `"<textCellId> <cueCellId>"` — the link the decision is about.

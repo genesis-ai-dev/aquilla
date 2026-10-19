@@ -37,6 +37,25 @@ describe('ttsSettingsCapProblem', () => {
     expect(ttsSettingsCapProblem({ castAssignments: assignments(10) })).toBeNull()
   })
 
+  it('counts the per-lane casts toward the same assignment cap', () => {
+    // AQU-2038 added a cast per target lane. Counting only the project-wide map
+    // would leave one lane per language free to carry a full cast each — the
+    // multi-megabyte blob this cap exists to refuse.
+    const half = Math.ceil(MAX_TTS_CAST_ASSIGNMENTS / 2)
+    const split = {
+      castAssignments: assignments(half),
+      laneCastAssignments: { sm: assignments(half), ar: assignments(2) },
+    }
+    const over = ttsSettingsCapProblem(split)
+    expect(over?.size.assignments).toBe(half * 2 + 2)
+    expect(over?.message).toContain(String(MAX_TTS_CAST_ASSIGNMENTS))
+    // A real cast, spread over lanes, still fits.
+    expect(measureTtsSettings({
+      castAssignments: assignments(3),
+      laneCastAssignments: { sm: assignments(4), ar: assignments(5) },
+    }).assignments).toBe(12)
+  })
+
   it('refuses one byte over the serialized-size cap', () => {
     const padded = { voices: [{ id: 'v0', name: 'x'.repeat(MAX_TTS_SETTINGS_BYTES) }] }
     const over = ttsSettingsCapProblem(padded)

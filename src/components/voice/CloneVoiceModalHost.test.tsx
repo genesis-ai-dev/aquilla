@@ -55,6 +55,9 @@ function makeTts(over: Partial<ProjectTtsApi> = {}): ProjectTtsApi {
   const settings: ProjectTtsSettings = { provider: "gemini", voices: [narrator], defaultVoiceId: narrator.id }
   return {
     settings,
+    // AQU-2038: no lane cast in this fixture, so the lane projection and the
+    // project-wide blob are the same object.
+    projectSettings: settings,
     voices: [narrator],
     defaultVoiceId: narrator.id,
     castStats: new Map(),

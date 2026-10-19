@@ -14,6 +14,7 @@ import { clearProjectTts, loadProjectTts, saveProjectTts } from "@/lib/store/pro
 import {
   assignedCastVoiceId, getVoiceLibrary, resolveVoice,
 } from "@/lib/audio/voices"
+import { laneTtsSettings, setLaneCast, setLaneDefaultVoice } from "@/lib/audio/lane-cast"
 import {
   migrateOmnivoiceTtsSettings,
   omnivoiceMigrationProperties,
@@ -35,17 +36,36 @@ export interface TtsSyncOutcome {
 }
 
 export interface ProjectTtsApi {
-  /** Effective settings: the localStorage overlay if present, else the server copy. */
+  /**
+   * Effective settings for the ACTIVE LANE: the localStorage overlay if
+   * present, else the server copy, with `castAssignments` and `defaultVoiceId`
+   * resolved for the lane (AQU-2038). This is what every voice read should
+   * use — the gutter, Generate, the timeline, the playback bar.
+   */
   settings: ProjectTtsSettings | undefined
+  /**
+   * The same settings UNPROJECTED — the project-wide cast and default as
+   * stored. Only the paths that legitimately write the project-wide cast want
+   * this: importing a character sheet, and diarization adopting a speaker.
+   */
+  projectSettings: ProjectTtsSettings | undefined
   voices: Voice[]
-  /** The project's resolved default/narrator voice id. */
+  /** The active lane's resolved default/narrator voice id. */
   defaultVoiceId: string
   /** Per-cast line counts for the current cells (voiceId → assigned/voiced). */
   castStats: Map<string, CastMemberStats>
-  /** Merge a partial settings patch into IDB + local state. */
+  /**
+   * Merge a partial settings patch into IDB + local state. AQU-2038: a
+   * `defaultVoiceId` in the patch stars the voice for the ACTIVE LANE — that
+   * is what the Voices panel's star means — and never touches the
+   * project-wide default.
+   */
   saveTts: (overrides: Partial<ProjectTtsSettings>) => Promise<void>
-  /** Assign one or more cells to a cast member (voice). */
-  assignCells: (cellIds: Iterable<string>, voiceId: string) => void
+  /**
+   * Cast one or more cells on the active lane. `null` sends them back to the
+   * lane's default voice. Other lanes are untouched (AQU-2038).
+   */
+  assignCells: (cellIds: Iterable<string>, voiceId: string | null) => void
 }
 
 export function useProjectTts(
@@ -60,6 +80,12 @@ export function useProjectTts(
   ) => void | Promise<TtsSyncOutcome | void>,
   /** Project target-language lane — fills OmniVoice voices that stored no tag. */
   targetLanguage?: string,
+  /**
+   * AQU-2038: the lane being worked in (`''` is the default lane). The cast and
+   * the default voice are read and written per lane; everything else in the
+   * blob — the engine, the key, the voice library — stays project-wide.
+   */
+  lane: string = "",
 ): ProjectTtsApi {
   // Read durable settings synchronously from localStorage on first render (lazy
   // init), so a reload sees the saved voice library immediately. Falls back to
@@ -82,18 +108,25 @@ export function useProjectTts(
   }, [projectId])
 
   const rawSettings = localTts ?? serverSettings
-  const settings = useMemo(
+  const projectSettings = useMemo(
     () => migrateOmnivoiceTtsSettings(rawSettings, { targetLanguage }),
     [rawSettings, targetLanguage],
   )
+  // AQU-2038: everything downstream reads the lane's answers, so the lane is
+  // resolved exactly once, here.
+  const settings = useMemo(
+    () => laneTtsSettings(projectSettings, lane),
+    [projectSettings, lane],
+  )
 
-  const saveTts = useCallback(
-    async (overrides: Partial<ProjectTtsSettings>) => {
+  // The durable write. Takes the WHOLE project-wide blob, already migrated —
+  // `saveTts` builds that from a patch, and the OmniVoice migration below hands
+  // over its rewritten copy without going through the patch rules.
+  const writeSettings = useCallback(
+    async (next: ProjectTtsSettings) => {
       if (!projectId) return
       const previous = localTts ?? serverSettings
       const seq = ++writeSeqRef.current
-      const merged = { ...(previous ?? {}), ...overrides } as ProjectTtsSettings
-      const next = migrateOmnivoiceTtsSettings(merged, { targetLanguage }) ?? merged
       setLocalTts(next)
       // Source of truth: durable, client-owned, survives reload + pulls.
       saveProjectTts(projectId, next)
@@ -130,14 +163,33 @@ export function useProjectTts(
           })
       }
     },
-    [projectId, localTts, serverSettings, onSyncTts, targetLanguage],
+    [projectId, localTts, serverSettings, onSyncTts],
+  )
+
+  const saveTts = useCallback(
+    async (overrides: Partial<ProjectTtsSettings>) => {
+      if (!projectId) return
+      const previous = localTts ?? serverSettings
+      // AQU-2038: starring a voice is a per-lane act. The Voices panel (and the
+      // clone host, and `upsertVoice` pinning the first voice) all say it with
+      // a `defaultVoiceId` patch, so route that one key to this lane's default
+      // and leave the project-wide one — the pre-lane fallback — alone.
+      let patch: Partial<ProjectTtsSettings> = overrides
+      if ("defaultVoiceId" in overrides) {
+        const { defaultVoiceId: starred, ...rest } = overrides
+        patch = { ...rest, ...setLaneDefaultVoice(previous, lane, starred) }
+      }
+      const merged = { ...(previous ?? {}), ...patch } as ProjectTtsSettings
+      await writeSettings(migrateOmnivoiceTtsSettings(merged, { targetLanguage }) ?? merged)
+    },
+    [projectId, localTts, serverSettings, targetLanguage, lane, writeSettings],
   )
 
   // AQU-1189: persist OmniVoice → Inworld once per project open so stored JSON
   // matches the runtime remap (including language tags). Runtime remap still
   // covers a blocked/offline save.
   useEffect(() => {
-    if (!projectId || !settings) return
+    if (!projectId || !projectSettings) return
     const rawNeedsWrite = migrateOmnivoiceTtsSettings(rawSettings, { targetLanguage }) !== rawSettings
     const serverNeedsWrite = migrateOmnivoiceTtsSettings(serverSettings, { targetLanguage }) !== serverSettings
     if (!rawNeedsWrite && !serverNeedsWrite) return
@@ -154,16 +206,17 @@ export function useProjectTts(
       source,
       ...omnivoiceMigrationProperties(before, { targetLanguage }),
     })
-    void saveTts(settings)
-  }, [projectId, rawSettings, serverSettings, settings, targetLanguage, saveTts])
+    // The project-wide blob, NOT the lane projection: this rewrites stored
+    // provider tags, and writing a projection back would stamp one lane's cast
+    // over the project-wide fallback every other lane reads (AQU-2038).
+    void writeSettings(projectSettings)
+  }, [projectId, rawSettings, serverSettings, projectSettings, targetLanguage, writeSettings])
 
   const assignCells = useCallback(
-    (cellIds: Iterable<string>, voiceId: string) => {
-      const next = { ...(settings?.castAssignments ?? {}) }
-      for (const cid of cellIds) next[cid] = voiceId
-      void saveTts({ castAssignments: next })
+    (cellIds: Iterable<string>, voiceId: string | null) => {
+      void saveTts(setLaneCast(localTts ?? serverSettings, lane, cellIds, voiceId))
     },
-    [settings, saveTts],
+    [localTts, serverSettings, lane, saveTts],
   )
 
   const voices = useMemo(() => getVoiceLibrary(settings), [settings])
@@ -188,5 +241,5 @@ export function useProjectTts(
     return m
   }, [cells, settings, defaultVoiceId])
 
-  return { settings, voices, defaultVoiceId, castStats, saveTts, assignCells }
+  return { settings, projectSettings, voices, defaultVoiceId, castStats, saveTts, assignCells }
 }

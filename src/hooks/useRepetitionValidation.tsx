@@ -28,7 +28,7 @@ import { namedCellRef } from "@/lib/cell-named-ref"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { getRepetitionChoice, setRepetitionChoice } from "@/lib/store/repetition-choice-pref"
 import { emitCellUnvalidate, emitCellValidate, emitTargetCellCommits } from "@/lib/sync/events-emit"
-import type { RepetitionCommit } from "@/lib/workflow/repetition-propagation"
+import { repetitionSourceOf, type RepetitionCommit } from "@/lib/workflow/repetition-propagation"
 import {
   candidateForRule,
   planBulkRepetitionGroups,
@@ -496,9 +496,10 @@ export function useRepetitionValidation(args: UseRepetitionValidationArgs): UseR
         continue
       }
       asked += 1
+      const firstRow = byId.get(group.candidates[0].cellIds[0])
       const answer = await ask({
         kind: "conflict",
-        source: byId.get(group.candidates[0].cellIds[0])?.original ?? "",
+        source: firstRow ? repetitionSourceOf(firstRow) : "",
         candidates: group.candidates.map((c) => ({
           text: c.value,
           rows: c.cellIds.map(rowName).filter((name) => name !== ""),

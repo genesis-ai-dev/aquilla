@@ -55,6 +55,22 @@ describe("planRepetitionValidation", () => {
     expect(planRepetitionValidation({ seedId: "seed", cells, username: "me", isWritable: everyone }))
       .toEqual({ fills: [], validateIds: [] })
   })
+
+  // AQU-2045: every row made from a recording stores the same file name.
+  it("on rows made from a recording, offers only the rows whose transcript repeats", () => {
+    const fromRecording = (over: Partial<RepetitionValidationCell> & { id: string }) =>
+      cell({ original: "speech.webm", medium: "media", ...over })
+    const cells = [
+      fromRecording({ id: "seed", transcription: "Amen.", translated: "Amina.", status: "validated", activeValidators: ["me"] }),
+      fromRecording({ id: "sameWords", transcription: "Amen." }),
+      fromRecording({ id: "sameWordsDone", transcription: "Amen.", translated: "Amina.", status: "unvalidated" }),
+      fromRecording({ id: "otherWords", transcription: "Grace and peace." }),
+      fromRecording({ id: "noTranscript" }),
+    ]
+    const plan = planRepetitionValidation({ seedId: "seed", cells, username: "me", isWritable: everyone })
+    expect(plan.fills.map((c) => c.cellId)).toEqual(["sameWords"])
+    expect(plan.validateIds).toEqual(["sameWords", "sameWordsDone"])
+  })
 })
 
 describe("planBulkRepetitionGroups", () => {
@@ -84,6 +100,22 @@ describe("planBulkRepetitionGroups", () => {
       ["Amani.", ["a2"]],
     ])
     expect(group.targets.map((c) => c.id)).toEqual(["a3"])
+  })
+
+  it("groups rows made from a recording by transcript (AQU-2045)", () => {
+    const fromRecording = (over: Partial<RepetitionValidationCell> & { id: string }) =>
+      cell({ original: "speech.webm", medium: "media", ...over })
+    const groups = planBulkRepetitionGroups({
+      seedIds: ["m1", "m2"],
+      cells: [
+        fromRecording({ id: "m1", transcription: "Amen.", translated: "Amina.", status: "unvalidated" }),
+        fromRecording({ id: "m2", transcription: "Grace and peace.", translated: "Neema.", status: "unvalidated" }),
+        fromRecording({ id: "m3", transcription: "Amen." }),
+        fromRecording({ id: "m4" }),
+      ],
+      isWritable: everyone,
+    })
+    expect(groups.map((g) => g.targets.map((c) => c.id))).toEqual([["m3"]])
   })
 
   it("maps a pick to a reusable rule and back", () => {

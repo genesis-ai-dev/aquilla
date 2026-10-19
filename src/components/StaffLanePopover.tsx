@@ -48,13 +48,15 @@
 // closed behind it; and the closes land before the scope PUT, so a failure
 // there leaves the person still holding the lane their work sits in.
 //
-// Leads/maintainers (effective role >= project_lead) can't be lane-scoped —
-// the server rejects PUT scopes for them with 400 ("scopes are for
-// contributor/reviewer roles"), since maintainers see every language by
-// design. The role select here only ever offers reviewer/contributor, so that
-// 400 can only happen when the picked person's EXISTING effective role is
-// already lead+ (e.g. an org-wide maintainer) — handled gracefully as a
-// non-error "already unscoped" outcome.
+// Maintainers and above (effective role >= 600) can't be lane-scoped — the
+// server rejects PUT scopes for them with 400 (LANE_SCOPE_ABOVE_CEILING_ERROR),
+// since they see every language by design. A project lead (500) CAN be
+// limited to lanes since AQU-1813. The role select here only ever offers
+// reviewer/contributor, and the add never lowers anyone, so the person keeps
+// the higher of their current role and the picked one — that is the role the
+// sentence names (AQU-2027). Someone the roster already shows at 600+ gets a
+// note instead of an Add; if the server refuses anyway (a stale roster), the
+// same note is shown rather than the raw error.
 //
 // AQU-2004 — this popover offers NO lead path. It used to end in a dashed box
 // reading "Need broader access? Leads see all languages." beside an "Add as
@@ -78,6 +80,7 @@ import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { RoleSelect } from "@/components/RoleSelect"
 import { StaffedLaneMembers, type StaffedLanePerson } from "@/components/StaffedLaneMembers"
 import { ROLE, roleName, roleDescription } from "@/lib/frontier/roles"
+import { LANE_SCOPE_ABOVE_CEILING_ERROR } from "@/lib/lanes/scope-ids"
 import { useOrgMembers } from "@/hooks/useOrg"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -238,13 +241,14 @@ export function StaffLanePopover({
               : null
 
   /**
-   * Leads and above are never lane-scoped — they see every language by design,
-   * so they belong to no lane row and can't be removed from one (the server
-   * refuses to scope them at all). The list below is drawn from the members
-   * BELOW project lead, exactly like the lane's People column.
+   * Maintainers and above are never lane-scoped — they see every language by
+   * design, so they belong to no lane row and can't be removed from one (the
+   * server refuses to scope them at all). A project lead can be limited to
+   * lanes (AQU-1813), so the list below is drawn from the members BELOW
+   * maintainer, exactly like the lane's People column (AQU-2027).
    */
   const scopableMembers = useMemo(
-    () => projectMembers.filter((m) => m.role.level < ROLE.PROJECT_LEAD),
+    () => projectMembers.filter((m) => m.role.level < ROLE.MAINTAINER),
     [projectMembers],
   )
   // Joined ids rather than the array: the roster hook hands back a new array
@@ -301,6 +305,16 @@ export function StaffLanePopover({
   }, [searchPool, query])
 
   const blockSearch = rosterBlocked !== null && searchPool.length === 0
+
+  // AQU-2027: the picked person's current role on the project, when the roster
+  // has them. The add never lowers anyone, so they end up holding the higher
+  // of that and the picked role; at maintainer or above no lane limit applies.
+  const selectedLevel = selected
+    ? (projectMembers.find((m) => m.userId === selected.userId)?.role.level ?? null)
+    : null
+  const seesEveryLane = selectedLevel !== null && selectedLevel >= ROLE.MAINTAINER
+  const keepsRole = selectedLevel !== null && selectedLevel >= role
+  const heldRole = keepsRole && selectedLevel !== null ? selectedLevel : role
 
   function reset() {
     setQuery("")
@@ -450,7 +464,7 @@ export function StaffLanePopover({
   }
 
   async function handleConfirm() {
-    if (!selected || !jwt) return
+    if (!selected || !jwt || seesEveryLane) return
     setPhase("submitting")
     setErrorMsg(null)
     try {
@@ -460,15 +474,13 @@ export function StaffLanePopover({
         await putMemberScopes(jwt, projectId, selected.userId, mergeLaneScope(existingScopes))
       } catch (scopeErr) {
         const text = scopeErr instanceof Error ? scopeErr.message : String(scopeErr)
-        if (text.toLowerCase().includes("contributor/reviewer")) {
-          // The person's effective role is already lead+ — the server is
-          // correctly refusing to scope them. From the operator's point of
-          // view that's not a failure: they already see every language.
+        if (text.startsWith(LANE_SCOPE_ABOVE_CEILING_ERROR)) {
+          // The person's effective role is already maintainer+ (the roster
+          // we checked was stale) — the server is correctly refusing to scope
+          // them. That's not a failure: they already see every language.
           await refreshProjectMembers()
           setPhase("done")
-          setMessage(
-            `${selected.username} already leads this project and sees every language — no lane scope needed.`,
-          )
+          setMessage(t("org.staffLanePopover.alreadySeesEveryLanguage", { name: selected.username }))
           onDone?.()
           return
         }
@@ -481,7 +493,8 @@ export function StaffLanePopover({
       setPhase("done")
       const sentence = describeGrant(t, {
         names: [selected.username],
-        roleLevel: role,
+        roleLevel: heldRole,
+        stays: keepsRole,
         scope: {
           kind: "project",
           projectName: grantProjectName(t, projectName),
@@ -682,26 +695,33 @@ export function StaffLanePopover({
               aria-label={t("common.roleLabel")}
             />
 
-            <GrantScopeNotice
-              sentence={describeGrant(t, {
-                names: [selected.username],
-                roleLevel: role,
-                scope: {
-                  kind: "project",
-                  projectName: grantProjectName(t, projectName),
-                  lanes: [laneLabel],
-                },
-                locale,
-              }).sentence}
-            />
-            <Button className="w-full" size="sm" onClick={handleConfirm} disabled={busy || !jwt}>
+            {seesEveryLane ? (
+              <p data-testid="staff-lane-sees-every-lane" className="text-[11px] text-muted-foreground">
+                {t("org.staffLanePopover.alreadySeesEveryLanguage", { name: selected.username })}
+              </p>
+            ) : (
+              <GrantScopeNotice
+                sentence={describeGrant(t, {
+                  names: [selected.username],
+                  roleLevel: heldRole,
+                  stays: keepsRole,
+                  scope: {
+                    kind: "project",
+                    projectName: grantProjectName(t, projectName),
+                    lanes: [laneLabel],
+                  },
+                  locale,
+                }).sentence}
+              />
+            )}
+            <Button className="w-full" size="sm" onClick={handleConfirm} disabled={busy || !jwt || seesEveryLane}>
               {busy && <Spinner className="me-1.5 size-3.5" />}
               {grantButtonLabel(
                 t,
                 t("common.add"),
                 describeGrant(t, {
                   names: [selected.username],
-                  roleLevel: role,
+                  roleLevel: heldRole,
                   scope: {
                     kind: "project",
                     projectName: grantProjectName(t, projectName),

@@ -140,6 +140,7 @@ import { setAccessGrantsMode } from "../../db/shared/project-roles"
 import { sendScheduledRetentionReport } from "./lib/retention-cron"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
 import { redactLogPath } from "../../shared/log-path-redaction"
+import { withStoreSecrets } from "../../db/shared/secrets-store-overlay"
 
 const app = new Hono<HonoEnv>()
 
@@ -156,6 +157,15 @@ const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Max-Age": "86400",
   Vary: "Origin",
 }
+
+// Secrets Store overlay (db/shared/secrets-store-overlay.ts): a binding named
+// SS_<NAME> supplies env.<NAME>, so a secret can change in the store without a
+// new Worker version. Registered first so every route, and every middleware
+// below, reads the resolved values. The per-Worker secret stays the fallback.
+app.use("*", async (c, next) => {
+  c.env = await withStoreSecrets(c.env)
+  await next()
+})
 
 // Workers Routes mount: this worker is routed under two prefixes on the
 // api.aquilla.app subdomain — `/identity/*` for the identity surface
@@ -533,6 +543,7 @@ const scheduled = async (
   env: Env,
   ctx: ExecutionContext,
 ): Promise<void> => {
+  env = await withStoreSecrets(env)
   const environmentError = scheduledDeploymentEnvironmentError(env)
   if (environmentError) {
     console.error("Refusing scheduled work with cross-environment identity bindings", {

@@ -50,10 +50,20 @@ function versionBindingErrors(version, expectation, expectedVersionId) {
     else if (binding.bucket_name !== expectedBucket) errors.push(`${name} expected R2 bucket ${expectedBucket}, received ${binding.bucket_name}`)
   }
 
+  // A required secret is present either as a Worker secret, or as a Secrets
+  // Store binding named SS_<NAME> that the runtime overlays onto env.<NAME>
+  // (db/shared/secrets-store-overlay.ts). The store copy can change without a
+  // new Worker version; the Worker secret, when also present, is the fallback.
   for (const name of expectation.requiredSecrets) {
     const binding = bindings.get(name)
-    if (!binding) errors.push(`missing required secret binding ${name}`)
-    else if (binding.type !== "secret_text") errors.push(`${name} must be secret_text, received ${binding.type}`)
+    const stored = bindings.get(`SS_${name}`)
+    if (binding) {
+      if (binding.type !== "secret_text") errors.push(`${name} must be secret_text, received ${binding.type}`)
+    }
+    if (stored && stored.type !== "secrets_store_secret") {
+      errors.push(`SS_${name} must be secrets_store_secret, received ${stored.type}`)
+    }
+    if (!binding && !stored) errors.push(`missing required secret binding ${name} (or Secrets Store binding SS_${name})`)
   }
 
   for (const [name, expectedType] of Object.entries(expectation.requiredBindings)) {

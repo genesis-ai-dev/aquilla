@@ -611,7 +611,11 @@ export function LanguagesSection({
         )}
 
         <DisabledFieldTooltip disabled={!canEdit} tooltip={disabledTooltip}>
-          <div className="flex items-end gap-2">
+          {/* AQU-2031: "Add lane…" in the editor's TARGET header deep-links to
+              `…/settings/general?focus=add-lane`, which scrolls this field into
+              view — it sits below the lane list, so on a project with enough
+              lanes it would otherwise open below the fold. */}
+          <div id="add-lane-field" className="flex items-end gap-2">
             <div className="flex-1">
               <FieldLabel htmlFor="add-target-lang">{t("projectSettings.languages.addLaneLabel")}</FieldLabel>
               <LanguageComboboxInput

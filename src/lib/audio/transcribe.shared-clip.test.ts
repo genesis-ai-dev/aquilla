@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const hostedWindows = vi.hoisted(() => [] as number[][])
 vi.mock("./transcribe-hosted", () => ({
-  transcribeHostedPcm: vi.fn(async (pcm: Float32Array) => {
+  transcribeHosted: vi.fn(async (pcm: Float32Array) => {
     hostedWindows.push([pcm.length, pcm[0] ?? -1])
     return { text: "ok", chunks: [] }
   }),

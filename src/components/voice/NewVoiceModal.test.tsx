@@ -19,8 +19,16 @@ import type { CellData } from "@/hooks/useCells"
 import { GEMINI_TTS_VOICES } from "@/lib/audio/tts-providers"
 import { buildVoiceReferenceId, uploadVoiceReference } from "@/lib/audio/voice-clone"
 import { parseFrontierAudioUrl, fetchCellAudio } from "@/lib/audio/upload"
-import { designInworldVoice, publishInworldVoice, listInworldSupportedLanguages } from "@/lib/sync/tts"
-import { __resetInworldSupportedLanguagesCacheForTests } from "@/lib/audio/inworld-voices"
+import {
+  designInworldVoice,
+  publishInworldVoice,
+  listInworldSupportedLanguages,
+  listInworldVoices,
+} from "@/lib/sync/tts"
+import {
+  __resetInworldCatalogCacheForTests,
+  __resetInworldSupportedLanguagesCacheForTests,
+} from "@/lib/audio/inworld-voices"
 import type { InworldSupportedLanguage } from "@/lib/audio/inworld-supported-languages"
 import type { FrontierSession } from "@/lib/frontier/types"
 
@@ -121,6 +129,9 @@ function create(name = "Hero") {
 describe("NewVoiceModal engine selection", () => {
   afterEach(() => {
     vi.unstubAllGlobals()
+    __resetInworldCatalogCacheForTests()
+    vi.mocked(listInworldVoices).mockReset()
+    vi.mocked(listInworldVoices).mockResolvedValue([])
     __resetInworldSupportedLanguagesCacheForTests()
     vi.mocked(listInworldSupportedLanguages).mockReset()
     vi.mocked(listInworldSupportedLanguages).mockResolvedValue([])
@@ -271,6 +282,41 @@ describe("NewVoiceModal engine selection", () => {
     await user.click(screen.getByRole("combobox", { name: "Language" }))
     expect(screen.queryByRole("option", { name: "Other" })).toBeNull()
     expect(await screen.findByRole("option", { name: /^Swahili$/i })).toBeTruthy()
+  })
+
+  it("keeps the chosen accent when a speaker is picked afterwards (AQU-2032)", async () => {
+    vi.mocked(listInworldVoices).mockResolvedValue([
+      { voiceId: "Dennis", displayName: "Dennis", language: "en-US" },
+      { voiceId: "Sarah", displayName: "Sarah", language: "en-US" },
+    ])
+    const user = userEvent.setup()
+    const { onSave } = renderCreate({ provider: "inworld", targetLanguage: "en" })
+    await user.click(screen.getByRole("combobox", { name: "Accent" }))
+    await user.click(await screen.findByRole("option", { name: /^British$/ }))
+    await user.click(screen.getByRole("combobox", { name: "Voice" }))
+    await user.click(await screen.findByRole("option", { name: /Sarah/ }))
+    expect(screen.getByRole("combobox", { name: "Accent" })).toHaveTextContent("British")
+    create()
+    const saved = (onSave as ReturnType<typeof vi.fn>).mock.calls[0][0] as Voice
+    expect(saved.voiceName).toBe("Sarah")
+    expect(saved.language).toBe("en-GB")
+  })
+
+  it("keeps the accent when the Voice list is the built-in English fallback (AQU-2032)", async () => {
+    // No Inworld key: the Voice list falls back to the built-in speakers, every
+    // one of them tagged en-US. That tag must not land on an Arabic voice.
+    vi.mocked(listInworldVoices).mockResolvedValue([])
+    const user = userEvent.setup()
+    const { onSave } = renderCreate({ provider: "inworld", targetLanguage: "ar" })
+    await user.click(screen.getByRole("combobox", { name: "Accent" }))
+    await user.click(await screen.findByRole("option", { name: /Saudi Arabia/ }))
+    await user.click(screen.getByRole("combobox", { name: "Voice" }))
+    await user.click(await screen.findByRole("option", { name: /Sarah/ }))
+    expect(screen.getByRole("combobox", { name: "Accent" })).toHaveTextContent("Saudi Arabia")
+    create()
+    const saved = (onSave as ReturnType<typeof vi.fn>).mock.calls[0][0] as Voice
+    expect(saved.voiceName).toBe("Sarah")
+    expect(saved.language).toBe("ar-SA")
   })
 
   it("lets the user pick a catalog language when an extra lane is unrecognized", async () => {
@@ -522,6 +568,35 @@ describe("NewVoiceModal Inworld Voice Design", () => {
     expect(screen.getByText("Edit voice")).toBeTruthy()
     expect(screen.getByRole("tab", { name: "Prebuilt voice" })).toBeTruthy()
     expect(screen.getByRole("tab", { name: "Voice design" })).toBeTruthy()
+  })
+
+  it("saves an unchanged voice without rewriting an unlisted accent (AQU-2032)", async () => {
+    const onSave = vi.fn()
+    render(
+      <NewVoiceModal
+        open
+        onClose={vi.fn()}
+        voice={{
+          id: "voice-1",
+          name: "Narrator",
+          color: "#e2e8f0",
+          provider: "inworld",
+          voiceName: "Dennis",
+          language: "ar-EG",
+          builtIn: false,
+        }}
+        isDefault={false}
+        paletteIndex={0}
+        cells={[]}
+        onSave={onSave}
+      />,
+    )
+    expect(await screen.findByRole("combobox", { name: "Language" })).toHaveTextContent("Arabic")
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    expect(onSave).toHaveBeenCalledTimes(1)
+    const saved = onSave.mock.calls[0][0] as Voice
+    expect(saved.language).toBe("ar-EG")
+    expect(saved.voiceName).toBe("Dennis")
   })
 
   it("opens Edit for a saved Voice Design voice on that tab with playback", () => {

@@ -303,10 +303,9 @@ describe("ProjectSettings — org-configurable language floor (AQU-1086 / AQU-98
 describe("ProjectSettings — Count headings follows its own project-lead floor (AQU-1912)", () => {
   const headingsControl = () =>
     screen.getByRole("combobox", { name: /count headings as translatable content/i })
-  // The control carries its own "what the organization does" tooltip, so the
-  // lock hint is read off DisabledFieldTooltip's wrapper, the outer span.
-  const lockHintTrigger = (control: HTMLElement) =>
-    control.parentElement!.parentElement!.closest("span.block")!
+  // Locked, the control has ONE hover (AQU-1912): DisabledFieldTooltip's
+  // wrapper, which also says what the organization does.
+  const lockHintTrigger = (control: HTMLElement) => control.closest("span.block")!
 
   it("a project lead can change it while the rest of the validation card stays locked", () => {
     currentProject = makeProject({ syncRole: { level: 500, source: "member" } } as Partial<ProjectRecord>)
@@ -323,5 +322,6 @@ describe("ProjectSettings — Count headings follows its own project-lead floor 
     renderSettings(`/project/${PROJECT_ID}/settings/validation`)
     expect(headingsControl()).toBeDisabled()
     await expectTooltip(lockHintTrigger(headingsControl()), /Only Project leads can modify/)
+    await expectTooltip(lockHintTrigger(headingsControl()), /The organization currently/)
   })
 })

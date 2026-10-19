@@ -6,9 +6,12 @@ import {
   assignWordsToRows,
   chunkPcm,
   planTranscriptionChunks,
+  sendWaitingOutWarmup,
   transcribeChunk,
+  WARMING_RETRY_SECONDS,
   type TranscriptionChunk,
 } from "./transcribe-chunked"
+import { AsrWarmingError } from "./transcribe-hosted"
 import type { TranscriptionResult } from "./transcribe"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -199,5 +202,38 @@ describe("chunkPcm", () => {
     const pcm = await chunkPcm(chunkOf(), async (r) => new Float32Array((r.endMs - r.startMs) * 16).fill(r.cell.id === "a" ? 0.5 : -0.5))
     expect(pcm.length).toBe(7 * 16_000)
     expect([pcm[0], pcm[3.2 * 16_000], pcm[3.6 * 16_000], pcm[pcm.length - 1]]).toEqual([0.5, 0, -0.5, -0.5])
+  })
+})
+
+// A cold Omnilingual service answers "warming" until it is up. Waiting it out
+// is what keeps a batch on a language only Omnilingual has from failing rows.
+describe("sendWaitingOutWarmup", () => {
+  it("waits and sends the same audio again while the service is starting", async () => {
+    let tries = 0
+    const send = vi.fn(async () => {
+      tries += 1
+      if (tries < 3) throw new AsrWarmingError()
+      return "words"
+    })
+    const onWarming = vi.fn(async () => {})
+    await expect(sendWaitingOutWarmup(send, onWarming)).resolves.toBe("words")
+    expect(send).toHaveBeenCalledTimes(3)
+    expect(onWarming.mock.calls).toEqual([[WARMING_RETRY_SECONDS], [WARMING_RETRY_SECONDS]])
+  })
+
+  it("is an error without someone to wait, past the cap, or for any other refusal", async () => {
+    const warming = async () => { throw new AsrWarmingError() }
+    await expect(sendWaitingOutWarmup(warming, undefined)).rejects.toBeInstanceOf(AsrWarmingError)
+    await expect(sendWaitingOutWarmup(warming, async () => {}, 0)).rejects.toBeInstanceOf(AsrWarmingError)
+    const onWarming = vi.fn(async () => {})
+    await expect(sendWaitingOutWarmup(async () => { throw new Error("503") }, onWarming)).rejects.toThrow("503")
+    expect(onWarming).not.toHaveBeenCalled()
+  })
+
+  it("gives up when the wait does (a cancelled batch)", async () => {
+    const send = vi.fn(async () => { throw new AsrWarmingError() })
+    await expect(sendWaitingOutWarmup(send, async () => { throw new Error("transcription cancelled") }))
+      .rejects.toThrow("transcription cancelled")
+    expect(send).toHaveBeenCalledTimes(1)
   })
 })

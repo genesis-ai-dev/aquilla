@@ -32,7 +32,8 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { audioIdSeededWith, parseFrontierAudioUrl } from "./upload"
 import { setTranscribeStatus } from "./transcribe-status"
 import { sharedClipWindow } from "./shared-clip-pcm"
-import { transcribeHosted } from "./transcribe-hosted"
+import { AsrWarmingError, transcribeHosted } from "./transcribe-hosted"
+import { WARMUP_CAP_MS } from "./omni-warmup"
 import { audioBytesToWhisperPcm, readClipBytes, type TranscriptionResult } from "./transcribe"
 
 /** The most audio one hosted request carries for Whisper and Qwen
@@ -40,6 +41,31 @@ import { audioBytesToWhisperPcm, readClipBytes, type TranscriptionResult } from 
  *  request. Omnilingual takes 30 s: the batch passes the model's window as
  *  `maxMs` (`sourceClipWindowSeconds`). */
 export const CHUNK_MAX_MS = 60_000
+
+/** The server's "the model is still starting" (503 `asr_warming`) asks for
+ *  another try in 10 seconds; the error the client throws does not carry it. */
+export const WARMING_RETRY_SECONDS = 10
+
+/**
+ * Send, and while a cold Omnilingual service answers "warming", wait and send
+ * the same audio again — for up to the 6 minutes the zero-shot warm-up allows.
+ * Without `onWarming` (or past the cap) the refusal is an error, as before.
+ */
+export async function sendWaitingOutWarmup<T>(
+  send: () => Promise<T>,
+  onWarming: ((retryAfterSeconds: number) => Promise<void>) | undefined,
+  capMs = WARMUP_CAP_MS,
+): Promise<T> {
+  const startedAt = Date.now()
+  for (;;) {
+    try {
+      return await send()
+    } catch (error) {
+      if (!(error instanceof AsrWarmingError) || !onWarming || Date.now() - startedAt >= capMs) throw error
+      await onWarming(WARMING_RETRY_SECONDS)
+    }
+  }
+}
 
 /** Silence put between two rows' stretches in a minute. */
 export const JOIN_SILENCE_MS = 500
@@ -227,6 +253,9 @@ export interface ChunkRunContext {
   /** The rows' language tag as the project names it; the server routes by it. */
   language?: string
   onRateLimited?: (retryAfterSeconds: number) => Promise<void>
+  /** The Omnilingual service is still starting: wait this long, then the same
+   *  minute is sent again (see `sendWaitingOutWarmup`). May throw to give up. */
+  onWarming?: (retryAfterSeconds: number) => Promise<void>
   /** Finish one row: with its words, or (no words given) transcribe it on its
    *  own. The batch passes `transcribeCell`. */
   transcribeRow: (cell: CellData, recognised?: TranscriptionResult) => Promise<unknown>
@@ -270,13 +299,16 @@ async function recogniseChunk(chunk: TranscriptionChunk, ctx: ChunkRunContext): 
   // The account's model choice applies as for a row of the source clip
   // transcribed alone: never zero-shot (no lane's speech to learn from), and
   // the raw language tag, so the server can route by it.
-  return transcribeHosted(pcm, {
+  // The automatic model sends a language Whisper lacks to Omnilingual, which
+  // answers "warming" while it starts; the batch waits that out rather than
+  // failing the minute's rows.
+  return sendWaitingOutWarmup(() => transcribeHosted(pcm, {
     jwt: ctx.session.jwt,
     projectId: ctx.projectId,
     username: ctx.session.username,
     language: ctx.language,
     ...(ctx.onRateLimited ? { onRateLimited: ctx.onRateLimited } : {}),
-  })
+  }), ctx.onWarming)
 }
 
 /** Transcribe one minute's rows with one request (more only for a refusal

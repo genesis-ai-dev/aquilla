@@ -350,6 +350,7 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
               projectId,
               language: languageFor(job.chunk.rows[0]!.cell),
               onRateLimited: waitForLimit,
+              onWarming: waitForLimit,
               transcribeRow,
               isCancelled: () => _transcribeCancelFlag,
             })

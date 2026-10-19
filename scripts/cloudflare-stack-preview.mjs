@@ -85,6 +85,9 @@ export function previewConfig(surface, { cwd, urls = {} }) {
       ALGORITHM: "HS256",
       ACCESS_TOKEN_EXPIRE_MINUTES: "43200",
       SYNC_WORKER_URL: urls.sync ? `${urls.sync}/sync` : UNREADY,
+      // Omnilingual ASR (infra/modal/omni_asr.py); the shared secret
+      // OMNI_SHARED_SECRET lives in the auth Previews Base.
+      OMNI_ASR_MODAL_URL: "https://genesis-ai-dev--aquilla-omnilingual-asr-api.us-east.modal.run",
       LEGACY_USER_MIGRATION_ENABLED: "false",
       // See PREVIEW_ADMIN_EMAIL above for why a preview carries an allowlist at
       // all, and why it names one fixture rather than the operator list.

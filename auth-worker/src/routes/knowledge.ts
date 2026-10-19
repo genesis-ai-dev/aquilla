@@ -11,7 +11,7 @@ import { resolveProjectRole } from "../services/project-permissions"
 import { getEffectiveOrgRole } from "../services/org-permissions"
 import { DocumentExtractionError, extractTextFromDocx, extractTextFromPdf } from "./parse-document"
 import { shipLog } from "../posthog-logs"
-import { indexKnowledgeDoc, KB_INDEX_FETCH_TIMEOUT_MS } from "../lib/knowledge/index-doc"
+import { indexKnowledgeDoc, KB_INDEX_BUDGET_MS } from "../lib/knowledge/index-doc"
 import { propagateKnowledgeDocs } from "../../../db/shared/inherited-settings"
 import { makePostgres, type AquillaDb } from "../../../db/shim/postgres"
 import {
@@ -175,8 +175,8 @@ export function openIndexingConnection(
  *  AQU-1763: this job must NOT run on the request-scoped `AQUILLA_PG` shim.
  *  index.ts closes that shim in its `finally` the moment the Response returns,
  *  and postgres.js `end({ timeout: 5 })` destroys the pool 5s later — while
- *  indexing is still awaiting a model round-trip of up to
- *  `KB_INDEX_FETCH_TIMEOUT_MS` (60s). Both the terminal `index_status='ready'`
+ *  indexing is still awaiting a model round-trip, for as long as
+ *  `KB_INDEX_BUDGET_MS` allows. Both the terminal `index_status='ready'`
  *  write and the compensating `'failed'` write in its catch then landed on a
  *  dead connection, so the row never left `pending`: every upload showed
  *  "Indexing…" and then "Indexing stalled" (AQU-1376's read-side window) for a
@@ -218,9 +218,9 @@ function runIndexing(c: Context<AuthHonoEnv>, docId: string): void {
 }
 
 /** AQU-2002: how long after its last write an indexing job may still be
- *  running. A job's own ceiling is one model round-trip
- *  (`KB_INDEX_FETCH_TIMEOUT_MS`) plus the writes around it, so past this window
- *  nothing is in flight any more.
+ *  running. A job settles inside its whole-job budget (`KB_INDEX_BUDGET_MS`),
+ *  itself inside the platform's waitUntil window, so past this window nothing
+ *  is in flight any more.
  *
  *  This is the *server's* debounce, deliberately much shorter than the read
  *  side's `KB_INDEX_STALE_MS` (5 min, src/lib/frontier/knowledge-base.ts): the
@@ -229,7 +229,7 @@ function runIndexing(c: Context<AuthHonoEnv>, docId: string): void {
  *  already in flight — a double-clicked button, a replayed request, two agents
  *  reindexing the same doc — which would otherwise start a duplicate job and
  *  reset the staleness clock out from under the first one. */
-export const KB_REINDEX_DEBOUNCE_MS = KB_INDEX_FETCH_TIMEOUT_MS + 30_000
+export const KB_REINDEX_DEBOUNCE_MS = KB_INDEX_BUDGET_MS + 30_000
 
 /** Restart indexing for one doc, unless a job is already running for it.
  *

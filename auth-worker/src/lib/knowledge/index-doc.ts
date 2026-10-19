@@ -9,6 +9,14 @@
 // terminal (`ready` or `failed`) and every failure has to be *loggable*:
 // a silent exit strands the doc at "Indexing…" forever with no recovery UI.
 //
+// AQU-2050: and every exit has to be terminal *inside the 30 seconds the
+// platform grants a waitUntil task*, which the job's old 60s ceiling did not
+// respect — a run needing 30–60s was cancelled with nothing written, which is
+// the one way a row can still be stranded. So the budget is derived from that
+// window and counted from the job's start, a request lost to it no longer
+// discards the summaries its siblings returned, and the next run continues
+// from what is on the row instead of starting the document over.
+//
 // AQU-2002: the two legs are failable independently, and only one of them is
 // the index. Segmentation is deterministic and local; the model call adds
 // summaries and is the only leg with an upstream to lose. Treating a lost
@@ -37,13 +45,32 @@ export interface KbIndexEnv extends PosthogLogEnv {
   KB_INDEX_MODEL?: string
 }
 
-/** AQU-1376: hard ceiling on the enrichment leg — all of its requests together,
- *  however many it takes (AQU-2029). Without it a hung upstream response has
- *  nothing to abort it, the waitUntil task never settles, and the row stays
- *  `pending` for good. Must stay comfortably *below* the read-side staleness
- *  window (`KB_INDEX_STALE_MS` in src/lib/frontier/knowledge-base.ts) so a job
- *  still inside its own budget is never shown as stalled. */
-export const KB_INDEX_FETCH_TIMEOUT_MS = 60_000
+/** What the platform grants a `ctx.waitUntil` task after the response is sent:
+ *  "If any Promises have not settled after 30 seconds, they are canceled."
+ *  A cancelled task writes nothing. */
+export const KB_WAITUNTIL_WINDOW_MS = 30_000
+
+/** What the terminal write, its log line and the downstream propagation need
+ *  after the model leg hands back, still inside that window. */
+const KB_TERMINAL_WRITE_MARGIN_MS = 6_000
+
+/** AQU-1376: hard ceiling on the enrichment leg — all of its requests
+ *  together, however many it takes (AQU-2029). Without it a hung upstream
+ *  response has nothing to abort it, the waitUntil task never settles, and the
+ *  row stays `pending` for good.
+ *
+ *  AQU-2050: it is a budget for the whole job, *measured from its start* and
+ *  derived from the platform window rather than picked. It used to be a flat
+ *  60s, set before that window was accounted for, so a run that needed between
+ *  30 and 60 seconds was cancelled mid-flight: no `ready`, no `failed`, no
+ *  reason, the row left at `pending` forever, and "Try indexing again" walking
+ *  into the same cliff (Art of Survival_Arabic_clean.docx on dev, 2026-10-19 —
+ *  30,940 ms, then "waitUntil() tasks did not complete… and have been
+ *  cancelled"). The margin is what the terminal write needs once the budget is
+ *  spent. Still far below the read-side staleness window (`KB_INDEX_STALE_MS`
+ *  in src/lib/frontier/knowledge-base.ts), so a job inside its budget is never
+ *  shown as stalled. */
+export const KB_INDEX_BUDGET_MS = KB_WAITUNTIL_WINDOW_MS - KB_TERMINAL_WRITE_MARGIN_MS
 
 /** AQU-2029: how much one enrichment request may carry. The model leg used to
  *  send every section in a single prompt, and the 200 sections of a
@@ -88,10 +115,17 @@ function sectionEntry(text: string, n: KnowledgeNode): string {
  *  KB_ENRICH_BATCH_NODES sections, and every section lands in exactly one
  *  (AQU-2029). */
 export function batchSections(text: string, nodes: KnowledgeNode[]): KnowledgeNode[][] {
+  return batchSectionList(text, flattenNodes(nodes))
+}
+
+/** The same split over an explicit list of sections in document order: a
+ *  re-index batches only the sections still owed a summary, never the whole
+ *  tree again (AQU-2050). */
+export function batchSectionList(text: string, sections: KnowledgeNode[]): KnowledgeNode[][] {
   const batches: KnowledgeNode[][] = []
   let batch: KnowledgeNode[] = []
   let chars = 0
-  for (const n of flattenNodes(nodes)) {
+  for (const n of sections) {
     const size = sectionEntry(text, n).length + SECTION_SEPARATOR.length
     if (batch.length && (batch.length >= KB_ENRICH_BATCH_NODES || chars + size > KB_ENRICH_BATCH_CHARS)) {
       batches.push(batch)
@@ -173,6 +207,40 @@ function mergeSummaries(nodes: KnowledgeNode[], summaries: ReadonlyMap<string, s
   }
 }
 
+/** Summaries already on the row that still describe the same section of the
+ *  freshly segmented tree. A re-index starts from these and pays only for the
+ *  sections still owed one (AQU-2050) — before this every run re-summarized
+ *  the whole document, so a document that could not finish in one run could
+ *  never finish at all. A stored node counts only when its id, title and
+ *  char range all still match, so a tree built by an older segmentation never
+ *  grafts a summary onto the wrong section. */
+export function carryOverSummaries(
+  nodes: KnowledgeNode[], stored: KnowledgeNode[] | null,
+): Map<string, string> {
+  const kept = new Map<string, string>()
+  if (!stored) return kept
+  const priorById = new Map(flattenNodes(stored).map((n) => [n.id, n]))
+  for (const n of flattenNodes(nodes)) {
+    const prior = priorById.get(n.id)
+    if (prior?.summary && prior.title === n.title
+      && prior.charStart === n.charStart && prior.charEnd === n.charEnd) {
+      kept.set(n.id, prior.summary)
+    }
+  }
+  return kept
+}
+
+/** The sections of the tree still without a summary, in document order. */
+function unsummarized(nodes: KnowledgeNode[]): KnowledgeNode[] {
+  return flattenNodes(nodes).filter((n) => !n.summary)
+}
+
+function summariesOf(nodes: KnowledgeNode[]): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const n of flattenNodes(nodes)) if (n.summary) out.set(n.id, n.summary)
+  return out
+}
+
 export function applyEnrichment(
   nodes: KnowledgeNode[], raw: string,
 ): { tree: KnowledgeNode[]; docSummary: string | null } {
@@ -228,7 +296,7 @@ export function describeIndexFailure(err: unknown): string {
   // Workers raise an AbortError; a thrown-through rejection from a stubbed or
   // polyfilled fetch may only say so in its message.
   if (err instanceof Error && (err.name === "AbortError" || /\babort(ed)?\b/i.test(message))) {
-    return `The summarizing model did not answer within ${Math.round(KB_INDEX_FETCH_TIMEOUT_MS / 1000)}s.`
+    return "The summarizing model did not answer within the time this run had."
   }
   if (message === "no OPENROUTER_API_KEY") {
     return "No summarizing model is configured in this environment."
@@ -259,6 +327,28 @@ export function describeIndexFailure(err: unknown): string {
   return "The summarizing step failed for an unexpected reason."
 }
 
+/** The reason on a run that lost part of the model leg: the cause, then where
+ *  the work now stands, so "Try indexing again" reads as the next step rather
+ *  than a repeat of the same dead end (AQU-2050 / the AQU-2002 rule). Rendered
+ *  verbatim in the knowledge-base list, like every other reason here, so it
+ *  names no internals. */
+export function describeIncomplete(
+  err: unknown, sectionsDone: number, sectionsTotal: number, hasDocSummary: boolean,
+): string {
+  const cause = describeIndexFailure(err)
+  const missing = sectionsTotal - sectionsDone
+  // Nothing landed at all: the cause is the whole story, and there is no
+  // progress for the retry to continue from.
+  if (!sectionsDone) return cause
+  if (missing > 0) {
+    return `${cause} Summaries are missing for ${missing} of ${sectionsTotal} sections — “Try indexing again” continues from there.`
+  }
+  if (!hasDocSummary) {
+    return `${cause} Every section is summarized — “Try indexing again” adds the document summary.`
+  }
+  return cause
+}
+
 /** Ship one indexing-pipeline log line. Telemetry never decides the job's
  *  outcome, and `shipLog` is already a no-op without POSTHOG_KEY. */
 function logIndexEvent(
@@ -281,13 +371,17 @@ function logIndexEvent(
  *    something it could not classify. The doc remains string-searchable
  *    (spec §Error handling).
  *
- *  `timeoutMs` overrides KB_INDEX_FETCH_TIMEOUT_MS; tests use it to exercise the
- *  abort path without waiting a minute. */
+ *  A run that could not produce every summary lands in the second of those
+ *  outcomes and says how far it got, and the next run continues from there
+ *  rather than starting the document over (AQU-2050).
+ *
+ *  `timeoutMs` overrides KB_INDEX_BUDGET_MS; tests use it to exercise the
+ *  deadline without waiting out the real budget. */
 export async function indexKnowledgeDoc(
   env: KbIndexEnv,
   db: AquillaDb,
   docId: string,
-  { timeoutMs = KB_INDEX_FETCH_TIMEOUT_MS }: { timeoutMs?: number } = {},
+  { timeoutMs = KB_INDEX_BUDGET_MS }: { timeoutMs?: number } = {},
 ): Promise<void> {
   const startedAt = Date.now()
   try {
@@ -316,29 +410,38 @@ export async function indexKnowledgeDoc(
       return
     }
 
-    let enriched: { tree: KnowledgeNode[]; docSummary: string | null } | null = null
+    // Whatever an earlier run already paid for stays on the tree, so the model
+    // leg only asks for the sections still owed a summary (AQU-2050).
+    mergeSummaries(nodes, carryOverSummaries(nodes, doc.tree))
+    const sectionsTotal = flattenNodes(nodes).length
+
+    let docSummary = doc.meta.docSummary
+    let lost: { err: unknown } | null = null
+    try {
+      const outcome = await enrichNodes(
+        env, doc.meta.name, doc.text, nodes, docSummary, startedAt + timeoutMs,
+      )
+      docSummary = outcome.docSummary
+      if ("error" in outcome) lost = { err: outcome.error }
+    } catch (err) {
+      // A leg that could not start at all. The structure in `nodes`, and
+      // anything carried onto it, is unaffected — keep it.
+      lost = { err }
+    }
+
+    const sectionsDone = sectionsTotal - unsummarized(nodes).length
     let degraded: string | undefined
     let cause: string | undefined
-    try {
-      enriched = await enrichNodes(env, doc.meta.name, doc.text, nodes, timeoutMs)
-    } catch (err) {
-      // The structure in `nodes` is unaffected by this — keep it.
-      console.error(`[knowledge] summarizing doc ${docId} failed:`, err)
-      degraded = describeIndexFailure(err)
+    if (lost) {
+      console.error(`[knowledge] summarizing doc ${docId} failed:`, lost.err)
+      degraded = describeIncomplete(lost.err, sectionsDone, sectionsTotal, !!docSummary)
       // The reason is written for the uploader and drops the provider's own
       // words; telemetry keeps them, so one 400 can be told from the next
       // (AQU-2029).
-      cause = (err instanceof Error ? err.message : String(err)).slice(0, 500)
+      cause = (lost.err instanceof Error ? lost.err.message : String(lost.err)).slice(0, 500)
     }
 
-    await setIndexResult(
-      db,
-      docId,
-      "ready",
-      enriched?.tree ?? nodes,
-      enriched?.docSummary ?? null,
-      degraded ?? null,
-    )
+    await setIndexResult(db, docId, "ready", nodes, docSummary, degraded ?? null)
     await logIndexEvent(
       env,
       degraded ? "warn" : "info",
@@ -346,6 +449,10 @@ export async function indexKnowledgeDoc(
       {
         "kb.doc_id": docId,
         "kb.nodes": nodes.length,
+        // How far the leg got, so a deadline can be told from a provider
+        // error without reading the reason (AQU-2002, AQU-2050).
+        "kb.sections_total": sectionsTotal,
+        "kb.sections_done": sectionsDone,
         "kb.reason": degraded,
         "kb.error": cause,
         "kb.duration_ms": Date.now() - startedAt,
@@ -380,48 +487,86 @@ export async function indexKnowledgeDoc(
   }
 }
 
-/** The model leg: summaries for the sections already segmented. A document
- *  that fits one batch takes one call, as it always has. A larger one is
- *  summarized in parallel batches, then a final call writes the document
- *  summary from theirs (AQU-2029). Throws on anything that stops it (one
- *  failed batch costs the whole leg); the caller decides what that means for
- *  the row. */
+/** The model leg: summaries for the sections still owed one, then the document
+ *  summary. A document that fits one batch takes one call, as it always has.
+ *  A larger one is summarized in parallel batches, then a final call writes the
+ *  document summary from theirs (AQU-2029). `nodes` is enriched in place.
+ *
+ *  It throws only for a leg that cannot start at all. A request lost to the
+ *  deadline or to the provider is reported as `error` instead, with whatever
+ *  the other requests returned already merged: discarding those was what made
+ *  the retry a deterministic dead end, because every run then had to summarize
+ *  the whole document again inside one budget (AQU-2050). */
 async function enrichNodes(
   env: KbIndexEnv,
   docName: string,
   text: string,
   nodes: KnowledgeNode[],
-  timeoutMs: number,
-): Promise<{ tree: KnowledgeNode[]; docSummary: string | null }> {
+  priorDocSummary: string | null,
+  deadlineAt: number,
+): Promise<{ docSummary: string | null; error?: unknown }> {
   if (!env.OPENROUTER_API_KEY) throw new Error("no OPENROUTER_API_KEY")
-  // One deadline for the whole leg, however many requests it makes: the job's
-  // budget is what the staleness window and the re-index debounce are sized
-  // against. The signal stays armed until every body is in hand, because
-  // reading a body can hang just as easily as opening the connection
-  // (AQU-1376).
+  const all = flattenNodes(nodes)
+  const pending = unsummarized(nodes)
+  // Nothing owed and the document summary already written: re-indexing a
+  // complete row costs no requests and changes nothing.
+  if (!pending.length && priorDocSummary) return { docSummary: priorDocSummary }
+
+  // One deadline for the whole leg, however many requests it makes, counted
+  // from the job's start: the budget is what the platform's waitUntil window,
+  // the staleness window and the re-index debounce are all sized against. The
+  // signal stays armed until every body is in hand, because reading a body can
+  // hang just as easily as opening the connection (AQU-1376).
   const abort = new AbortController()
-  const timer = setTimeout(() => abort.abort(), timeoutMs)
+  const timer = setTimeout(() => abort.abort(), Math.max(0, deadlineAt - Date.now()))
   try {
-    const batches = batchSections(text, nodes)
-    if (batches.length === 1) {
-      const reply = await complete(env, buildEnrichmentPrompt(docName, text, batches[0]), abort.signal)
-      return applyEnrichment(nodes, reply)
+    const batches = batchSectionList(text, pending)
+    // The one request that sees every section of the document writes its
+    // summary too; anything less has to wait for the outline call below.
+    if (batches.length === 1 && pending.length === all.length) {
+      try {
+        return { docSummary: applyEnrichment(nodes, await complete(
+          env, buildEnrichmentPrompt(docName, text, batches[0]), abort.signal,
+        )).docSummary }
+      } catch (err) {
+        return { docSummary: null, error: err }
+      }
     }
     // At most ceil(MAX_NODES / KB_ENRICH_BATCH_NODES) requests, all at once:
     // in sequence they could not be counted on to fit the shared deadline.
-    const replies = await Promise.all(batches.map((batch) => complete(
+    // `allSettled`, not `all` — a batch already back has paid for its
+    // summaries, and the deadline cancelling its siblings is no reason to
+    // throw them away.
+    const settled = await Promise.allSettled(batches.map((batch) => complete(
       env, buildEnrichmentPrompt(docName, text, batch, { wholeDocument: false }), abort.signal,
     )))
-    // Parse every reply before the tree is touched, so a bad one leaves no
-    // half-summarized tree behind for the degrade path to save.
+    let error: unknown
     const summaries = new Map<string, string>()
-    for (const reply of replies) collectSummaries(parseReply(reply), summaries)
-    const docReply = await complete(
-      env, buildDocSummaryPrompt(docName, flattenNodes(nodes), summaries), abort.signal,
-    )
-    const docSummary = parseReply(docReply).docSummary?.trim() || null
+    for (const outcome of settled) {
+      if (outcome.status === "rejected") {
+        error ??= outcome.reason
+        continue
+      }
+      // Each reply is parsed on its own, so one unreadable batch costs only
+      // its own sections.
+      try {
+        collectSummaries(parseReply(outcome.value), summaries)
+      } catch (err) {
+        error ??= err
+      }
+    }
     mergeSummaries(nodes, summaries)
-    return { tree: nodes, docSummary }
+    // A lost request leaves sections owed, so the document summary — written
+    // from the section summaries — waits for the run that completes them.
+    if (error !== undefined) return { docSummary: priorDocSummary, error }
+    try {
+      const docReply = await complete(
+        env, buildDocSummaryPrompt(docName, all, summariesOf(nodes)), abort.signal,
+      )
+      return { docSummary: parseReply(docReply).docSummary?.trim() || priorDocSummary }
+    } catch (err) {
+      return { docSummary: priorDocSummary, error: err }
+    }
   } finally {
     clearTimeout(timer)
     // Done or failed, nothing of this leg may outlive it: when one batch

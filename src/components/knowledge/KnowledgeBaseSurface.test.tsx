@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { act } from "react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 
 import { KnowledgeBaseSurface } from "./KnowledgeBaseSurface"
@@ -292,5 +293,123 @@ describe("KnowledgeBaseSurface", () => {
     // A premature retry would cancel a run that was about to land.
     expect(within(card).queryByRole("button", { name: "Try indexing again" }))
       .not.toBeInTheDocument()
+  })
+})
+
+// AQU-2028: indexing settles server-side and sends no event, so the open list
+// has to re-read itself while anything is pending. Without it a row stayed on
+// "Indexing…" until a reload, then turned into a false "Indexing stalled".
+describe("KnowledgeBaseSurface while a document is indexing", () => {
+  const POLL_MS = 5_000
+  const scope = { kind: "project", id: "project-1" } as const
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  async function tick(ms = POLL_MS) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms)
+    })
+  }
+
+  function pending(overrides: Partial<KnowledgeDocument> = {}) {
+    return doc({
+      id: "fresh-doc",
+      name: "fresh.md",
+      indexStatus: "pending",
+      docSummary: null,
+      updatedAt: new Date().toISOString(),
+      ...overrides,
+    })
+  }
+
+  it("settles a pending row without a reload, then stops re-reading", async () => {
+    api.list
+      .mockResolvedValueOnce([pending()])
+      .mockResolvedValue([pending({ indexStatus: "ready", docSummary: "Done." })])
+
+    render(<KnowledgeBaseSurface scope={scope} jwt="jwt" canManage />)
+    const card = (await screen.findByText("fresh.md")).closest('[data-slot="card"]') as HTMLElement
+    expect(within(card).getByText("Indexing…")).toBeInTheDocument()
+
+    await tick()
+    await waitFor(() => expect(within(card).getByText("Indexed")).toBeInTheDocument())
+    expect(api.list).toHaveBeenCalledTimes(2)
+
+    // Nothing pending any more: the list is not read again.
+    await tick(POLL_MS * 4)
+    expect(api.list).toHaveBeenCalledTimes(2)
+  })
+
+  it("never re-reads a list with nothing pending", async () => {
+    api.list.mockResolvedValue([doc()])
+
+    render(<KnowledgeBaseSurface scope={scope} jwt="jwt" canManage />)
+    await screen.findByText("style-guide.md")
+
+    await tick(POLL_MS * 4)
+    expect(api.list).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps the rows on screen when a re-read fails, and settles on the next one", async () => {
+    api.list
+      .mockResolvedValueOnce([pending()])
+      .mockRejectedValueOnce(new Error("network"))
+      .mockResolvedValue([pending({ indexStatus: "ready" })])
+
+    render(<KnowledgeBaseSurface scope={scope} jwt="jwt" canManage />)
+    const card = (await screen.findByText("fresh.md")).closest('[data-slot="card"]') as HTMLElement
+
+    await tick()
+    await waitFor(() => expect(api.list).toHaveBeenCalledTimes(2))
+    expect(within(card).getByText("Indexing…")).toBeInTheDocument()
+    expect(screen.queryByText("Could not load the knowledge base.")).not.toBeInTheDocument()
+
+    await tick()
+    await waitFor(() => expect(within(card).getByText("Indexed")).toBeInTheDocument())
+  })
+
+  it("does not let a re-read that left before an upload drop the uploaded row", async () => {
+    let answerStaleRead: (docs: KnowledgeDocument[]) => void = () => {}
+    api.list
+      .mockResolvedValueOnce([pending()])
+      .mockImplementationOnce(() => new Promise<KnowledgeDocument[]>((resolve) => {
+        answerStaleRead = resolve
+      }))
+      .mockResolvedValue([pending()])
+
+    const { container } = render(<KnowledgeBaseSurface scope={scope} jwt="jwt" canManage />)
+    await screen.findByText("fresh.md")
+
+    // The re-read leaves, and is still out when the upload lands.
+    await tick()
+    await waitFor(() => expect(api.list).toHaveBeenCalledTimes(2))
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(input, { target: { files: [new File(["Reference"], "new.md", { type: "text/markdown" })] } })
+    expect(await screen.findByText("new.md")).toBeInTheDocument()
+
+    // It answers with the list as it was before the upload.
+    await act(async () => {
+      answerStaleRead([pending()])
+    })
+    expect(screen.getByText("new.md")).toBeInTheDocument()
+  })
+
+  it("still flags a document whose job never came back as stalled", async () => {
+    // Pending on the server and stays that way, a little short of the window.
+    const almostStale = new Date(Date.now() - (KB_INDEX_STALE_MS - POLL_MS / 2)).toISOString()
+    api.list.mockResolvedValue([pending({ updatedAt: almostStale })])
+
+    render(<KnowledgeBaseSurface scope={scope} jwt="jwt" canManage />)
+    const card = (await screen.findByText("fresh.md")).closest('[data-slot="card"]') as HTMLElement
+    expect(within(card).getByText("Indexing…")).toBeInTheDocument()
+
+    await tick()
+    await waitFor(() => expect(within(card).getByText("Indexing stalled")).toBeInTheDocument())
   })
 })

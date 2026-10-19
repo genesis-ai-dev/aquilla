@@ -868,6 +868,9 @@ export interface FileReference {
    * numeric sort on an `undefined` cannot express.
    */
   sortIndex?: number
+  /** AQU-1937: what to SHOW for this file when an extension labelled it
+   *  ("Titus · ULT"); `name` stays the stored name. Read through fileDisplayName. */
+  displayLabel?: string
   originalName?: string  // Set the first time `name` is auto-rewritten by a suggestion or user rename. Enables hover-to-see-original. Never overwritten after set.
   /** Stable USFM/Scripture book identity used for re-import collision matching. */
   bookCode?: string
@@ -999,6 +1002,8 @@ export function isSubtitleImportFile(
  */
 export const AUDIO_CUES_ROLE = "audio-cues"
 export const TIMELINE_CONTENT_ROLE = "timeline-content"
+/** Smart Extensions apiRev 7: an extension's data file (shared/tools/file-extension.ts). */
+export { EXTENSION_DATA_ROLE } from "../../../shared/tools/file-extension"
 
 /**
  * True for that sibling. The canonical predicate — every surface that lists,
@@ -1011,7 +1016,13 @@ export function isAudioCueFile(file: Pick<FileReference, "role"> | null | undefi
 
 /** Internal cue files appear as tracks in their parent media timeline. */
 export function isHiddenTimelineFile(file: Pick<FileReference, "role"> | null | undefined): boolean {
-  return isAudioCueFile(file) || file?.role === TIMELINE_CONTENT_ROLE
+  return isAudioCueFile(file) || file?.role === TIMELINE_CONTENT_ROLE || isExtensionDataFile(file)
+}
+
+/** Smart Extensions apiRev 7: an extension's own data file — hidden like the
+ *  timeline companions unless the user turns on "Show extension data files". */
+export function isExtensionDataFile(file: Pick<FileReference, "role"> | null | undefined): boolean {
+  return file?.role === "extension-data"
 }
 
 /**

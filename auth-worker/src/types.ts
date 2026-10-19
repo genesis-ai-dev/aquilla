@@ -175,6 +175,17 @@ export interface Env {
   /** Dev/e2e only: override the OpenRouter API base (e.g. the scripted mock
    *  in scripts/mock-openrouter.ts). Never set in prod. */
   OPENROUTER_BASE_URL?: string
+  /** Aquilla Tools builder (prototype). A dedicated OpenRouter key/base for
+   *  build_tool calls, so builder spend is separable from chat/agent spend.
+   *  When the key is unset the builder falls back to OPENROUTER_API_KEY /
+   *  OPENROUTER_BASE_URL. TOOLS_BUILDER_MODEL overrides the builder model. */
+  TOOLS_BUILDER_API_KEY?: string
+  TOOLS_BUILDER_BASE_URL?: string
+  TOOLS_BUILDER_MODEL?: string
+  /** Smart Extensions read:web (aquilla.web.fetch): optional deployment-wide
+   *  allowlist of domains (comma-separated, manifest.web syntax). Unset = any
+   *  domain a user approves for an extension. */
+  TOOLS_WEB_ALLOWED_DOMAINS?: string
   /** Omnilingual ASR Modal app base URL (infra/modal/omnilingual_asr.py),
    *  e.g. https://<workspace>--omnilingual-asr-web.modal.run. Unset = hosted
    *  transcription for non-Whisper languages answers 503. */

@@ -9,13 +9,12 @@
 // be imported into any number of projects without one landing on another's rows.
 
 import type { FileReference } from "@/lib/parsers/types"
-import type { SourceArtifactFormat } from "../../../shared/import-contract"
+
 import type { DcsCatalogEntry, DcsCursor, DcsTrackMode, DcsFile } from "./types"
-import type { DcsClient, RefKind } from "./catalog"
+import type { DcsClient } from "./catalog"
 import type { BulkUploadArgs, BulkImportCell, BulkImportFileMeta } from "@/lib/sync/bulk-import"
 import { bulkUploadSource } from "@/lib/sync/bulk-import"
-import { parseManifest } from "./manifest"
-import { routeFor } from "./resource-map"
+import { fetchDcsSources, planDcsFiles } from "./import-plan"
 import { dcsEventId } from "./cell-id"
 import { buildCursor } from "./cursor"
 
@@ -46,29 +45,6 @@ export interface ImportDcsSummary {
   refs: FileReference[]
   skipped: { book: string; reason: string }[]
   cursor: DcsCursor
-}
-
-/** Standard RC manifest filename at the repo root. */
-const MANIFEST_PATH = "manifest.yaml"
-const MAX_DCS_SOURCE_FILES = 2_000
-const MAX_DCS_SOURCE_CHARS = 20 * 1024 * 1024
-
-function routeOwnsPath(routeId: string, path: string): boolean {
-  const lower = path.toLowerCase()
-  if (routeId === "usfm") return lower.endsWith(".usfm")
-  if (routeId === "obs") return /(?:^|\/)\d+\.md$/.test(lower)
-  if (routeId === "tsv-notes" || routeId === "tsv-questions") return lower.endsWith(".tsv")
-  return false
-}
-
-/** Map a route id to the FileType the server projection groups by. */
-type DcsFileType = Extract<SourceArtifactFormat, "usfm" | "obs" | "tsv">
-
-function fileTypeForRoute(routeId: string): DcsFileType {
-  if (routeId === "usfm") return "usfm"
-  if (routeId === "obs") return "obs"
-  if (routeId === "tsv-notes" || routeId === "tsv-questions") return "tsv"
-  throw new Error(`Door43 route ${routeId} has no Aquilla file type mapping.`)
 }
 
 /** Turn a parsed DcsFile's cells into anchor-chained BulkImportCells whose ids
@@ -110,73 +86,32 @@ function toBulkCells(
 export async function importDcsResource(args: ImportDcsArgs): Promise<ImportDcsSummary> {
   const emit = args.emit ?? bulkUploadSource
   const { entry, client } = args
-  const owner = entry.owner
-  const repoName = entry.name
   const repo = entry.fullName
-  const ref = entry.ref
-  const refKind: RefKind = entry.refType === "branch" ? "branch" : "tag"
 
-  // 1. Manifest → route.
-  const manifestYaml = await client.fetchRaw(owner, repoName, ref, MANIFEST_PATH, refKind, args.signal)
-  const manifest = parseManifest(manifestYaml)
-  const route = routeFor(entry, manifest)
-  if (!route) {
-    throw new Error(
-      `No import route for "${entry.subject}" (${entry.contentFormat}); resource type not supported in v1.`,
-    )
-  }
-
-  // 2. Fetch the repo tree, pull the raw bytes of every blob (the route filters
-  //    which paths it actually parses). We skip the manifest itself.
-  const tree = await client.getTree(owner, repoName, ref)
-  const sourcePaths = tree.filter((path) => path !== MANIFEST_PATH && routeOwnsPath(route.id, path))
-  if (sourcePaths.length > MAX_DCS_SOURCE_FILES) {
-    throw new Error(`Door43 resource contains too many importable files (maximum ${MAX_DCS_SOURCE_FILES.toLocaleString()}).`)
-  }
-  const files = new Map<string, string>()
-  for (const path of sourcePaths) {
-    if (args.signal?.aborted) throw new Error("Import cancelled")
-    const text = await client.fetchRaw(owner, repoName, ref, path, refKind, args.signal)
-    if (text.length > MAX_DCS_SOURCE_CHARS) {
-      throw new Error(`Door43 source member ${path} exceeds the 20 MB safety limit.`)
-    }
-    files.set(path, text)
-  }
-
-  // 3. Parse → deterministic-id cells.
-  const parsedFiles = route.parse({
+  // 1–3. Manifest → route → tree → routed members → parse (import-plan.ts,
+  // shared with the first-party Door43 importer extension: AQU-1937 parity).
+  const fetched = await fetchDcsSources(client, entry, { signal: args.signal })
+  const { planned, skipped } = planDcsFiles({
     entry,
-    manifest,
+    fetched,
     projectId: args.projectId,
-    files,
-    options: { excludeFrontMatter: args.excludeFrontMatter },
+    excludeFrontMatter: args.excludeFrontMatter,
   })
 
   // 4. Emit one bulk upload per parsed file.
   let totalCells = 0
   const refs: FileReference[] = []
-  const skipped: { book: string; reason: string }[] = []
-  for (const file of parsedFiles) {
+  for (const { file, fileType, routeId, rawSource } of planned) {
     try {
       const cells = toBulkCells(file, args.projectId, repo, entry.commitSha)
-      if (cells.length === 0) throw new Error(`${file.name} did not contain any importable content.`)
-      const fileType = fileTypeForRoute(route.id)
       const meta: BulkImportFileMeta = {
         id: file.fileId,
         name: file.name,
         fileType,
-        importFormat: route.id,
-        parserVersion: `builtin:dcs-${route.id}@1`,
+        importFormat: routeId,
+        parserVersion: `builtin:dcs-${routeId}@1`,
         ...(file.bookCode !== undefined ? { bookCode: file.bookCode } : {}),
       }
-      // The exact source member is mandatory: reconstructed parser output is
-      // not a safe substitute for round-trip/export provenance.
-      const sourcePath = file.sourcePath ?? rawPathForFile(file, tree)
-      const rawSource = files.get(sourcePath)
-      if (rawSource === undefined) {
-        throw new Error(`Import route ${route.id} did not retain the source member for ${file.name}.`)
-      }
-
       await emit({
         projectId: args.projectId,
         fileId: file.fileId,
@@ -212,14 +147,4 @@ export async function importDcsResource(args: ImportDcsArgs): Promise<ImportDcsS
     skipped,
     cursor: buildCursor(entry, args.trackMode ?? "release"),
   }
-}
-
-/** Recover the repo path a parsed DcsFile came from so we can attach its raw
- *  bytes. The USFM route names files `BOOK (path)`; fall back to matching the
- *  path suffix in the file name, else the fileId-derived name. */
-function rawPathForFile(file: DcsFile, tree: string[]): string {
-  const m = file.name.match(/\(([^)]+)\)\s*$/)
-  if (m && tree.includes(m[1])) return m[1]
-  // Fall back: a tree path that the file name ends with (or equals).
-  return tree.find((p) => file.name === p || file.name.endsWith(p)) ?? file.name
 }

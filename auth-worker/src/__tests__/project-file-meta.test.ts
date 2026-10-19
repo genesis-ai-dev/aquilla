@@ -52,6 +52,17 @@ describe("what files.meta projects into a file summary", () => {
     expect(files.find((f) => f.id === "meta-tb-junk")!.audioVttTimebase).toBeUndefined()
   })
 
+  it("forwards an extension's display label (AQU-1937), and drops an invalid one", async () => {
+    await seed("meta-ext-label", { extension: { kind: "normal", tags: ["door43"], label: "Titus · ULT" } })
+    await seed("meta-ext-bad", { extension: { kind: "normal", tags: [], label: "x\ny" } })
+    const files = (await loadFilesByProject(env, ["proj-meta-test"])).get("proj-meta-test")!
+    const labelled = files.find((f) => f.id === "meta-ext-label")!
+    expect(labelled.displayLabel).toBe("Titus · ULT")
+    // The stored name is untouched.
+    expect(labelled.name).toBe("meta-ext-label")
+    expect(files.find((f) => f.id === "meta-ext-bad")!.displayLabel).toBeUndefined()
+  })
+
   it("still forwards the rest of the meta-derived fields beside it", async () => {
     // The regression this file exists to prevent is a NEW field silently
     // starving an old one — so pin the neighbours too.

@@ -86,6 +86,9 @@ export interface CatalogSearchParams {
   contentFormat?: string
   q?: string
   limit?: number
+  /** false drops each entry's per-book `ingredients` (a listing that only
+   *  names resources does not need them). Default: DCS's own (included). */
+  showIngredients?: boolean
 }
 
 // ── Raw DCS response shapes (snake_case) we normalize from ──────────────────
@@ -93,6 +96,8 @@ export interface CatalogSearchParams {
 interface RawCatalogEntry {
   name?: string
   owner?: string
+  title?: string
+  abbreviation?: string
   full_name?: string
   subject?: string
   content_format?: string
@@ -127,6 +132,8 @@ function normalizeEntry(r: RawCatalogEntry): DcsCatalogEntry {
     owner: r.owner ?? "",
     fullName: r.full_name ?? `${r.owner ?? ""}/${r.name ?? ""}`,
     subject: r.subject ?? "",
+    ...(r.title ? { title: r.title } : {}),
+    ...(r.abbreviation ? { abbreviation: r.abbreviation } : {}),
     contentFormat: r.content_format ?? "",
     ...(r.flavor_type !== undefined ? { flavorType: r.flavor_type } : {}),
     ref: r.branch_or_tag_name ?? "",
@@ -189,6 +196,7 @@ export class DcsClient {
     if (params.contentFormat) qs.set("metadataType", params.contentFormat)
     if (params.q) qs.set("q", params.q)
     if (params.limit !== undefined) qs.set("limit", String(params.limit))
+    if (params.showIngredients === false) qs.set("showIngredients", "false")
 
     const data = await this.getJson<{ data?: RawCatalogEntry[] }>(
       `${this.baseUrl}/catalog/search?${qs.toString()}`,

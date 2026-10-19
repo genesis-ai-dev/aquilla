@@ -132,6 +132,27 @@ export default defineConfig([
       ],
     },
   },
+  // AQU-1937: Smart Extensions' reserved identity color. Only the host-drawn
+  // ExtensionFrame / ExtensionMarker may use the --extension-accent token, so
+  // nothing else (app UI, themes, anything forwarded into extension frames)
+  // can look like — or restyle — the extension identity. Tests check it too.
+  {
+    files: ['src/**/*.{ts,tsx}', 'shared/**/*.ts'],
+    ignores: ['src/components/tools/ExtensionFrame.tsx', 'src/components/tools/ExtensionMarker.tsx', '**/*.test.{ts,tsx}'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'Literal[value=/extension-accent/]',
+          message: 'The --extension-accent color is reserved for ExtensionFrame / ExtensionMarker (AQU-1937). Use those components.',
+        },
+        {
+          selector: 'TemplateElement[value.raw=/extension-accent/]',
+          message: 'The --extension-accent color is reserved for ExtensionFrame / ExtensionMarker (AQU-1937). Use those components.',
+        },
+      ],
+    },
+  },
   // i18n regrowth guard (AQU-832 follow-up): user-visible strings in .tsx must
   // come from the i18n catalog. Scoped to src/**/*.tsx only — the rule itself
   // also excludes tests, marketing/admin/legal surfaces (tools/eslint-rules/

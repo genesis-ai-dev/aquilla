@@ -6,6 +6,7 @@
 // search UI compiles unchanged; new server-only fields (rank, snippet) are
 // exposed alongside.
 
+import { fileDisplayName } from "@/lib/file-display-name"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { fetchProjectSearch, fetchParallelPassages } from "@/lib/sync/search-read"
 import type { ParallelPassageResult, SearchResult } from "@/lib/sync/search-read-types"
@@ -50,7 +51,7 @@ function makeResult(row: SearchResult, files: FileReference[] | undefined): Work
   return {
     cellId: row.cellId,
     fileId: row.fileId,
-    fileName: f?.name ?? "",
+    fileName: f ? fileDisplayName(f) : "",
     original: row.side === "source" ? row.value : "",
     translated: row.side === "target" ? row.value : "",
     context: "",

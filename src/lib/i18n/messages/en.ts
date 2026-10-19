@@ -48,6 +48,7 @@ import { segmentation } from "../namespaces/segmentation"
 import { smartEdits } from "../namespaces/smartEdits"
 import { harmonizer } from "../namespaces/harmonizer"
 import { bibleData } from "../namespaces/bibleData"
+import { extensions } from "../namespaces/extensions"
 import { languageProfile } from "../namespaces/languageProfile"
 import { projectDecisions } from "../namespaces/projectDecisions"
 import { bibleAlignment } from "../namespaces/bibleAlignment"
@@ -87,6 +88,7 @@ export const en = {
   ...smartEdits.keys,
   ...harmonizer.keys,
   ...bibleData.keys,
+  ...extensions.keys,
   ...languageProfile.keys,
   ...projectDecisions.keys,
   ...bibleAlignment.keys,

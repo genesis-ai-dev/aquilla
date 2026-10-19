@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type Dispatch, type ReactNode, type SetStateAction } from "react"
+import { notifySmartExtensionsChanged } from "@/lib/tools/smart-extensions-enabled"
 import { recordStep } from "@/lib/history/history"
 import { Navigate, useLocation, useParams, useNavigate, useSearchParams, type Location } from "react-router-dom"
 import {
@@ -3194,6 +3195,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             autopilotEnabled={sharedSettingsBlob.autopilotEnabled}
             roleLevel={project?.syncRole?.level ?? null}
             onSetAutopilotEnabled={(enabled) => { void patchShared({ autopilotEnabled: enabled }) }}
+            // AQU-1937: the per-project Smart Extensions switch (Maintainer+,
+            // the ordinary settings floor; the server refuses lower roles).
+            smartExtensionsEnabled={sharedSettingsBlob.smartExtensionsEnabled}
+            onSetSmartExtensionsEnabled={(enabled) => {
+              void Promise.resolve(patchShared({ smartExtensionsEnabled: enabled })).then(() => notifySmartExtensionsChanged(id))
+            }}
           />
         )}
           </div>

@@ -15,6 +15,8 @@ export interface DcsCatalogEntry {
   owner: string // e.g. "unfoldingWord"
   fullName: string // "unfoldingWord/en_ult"
   subject: string // e.g. "Aligned Bible", "Translation Notes", "Open Bible Stories"
+  title?: string // e.g. "unfoldingWord® Literal Text"
+  abbreviation?: string // e.g. "ult"
   contentFormat: string // "usfm" | "markdown" | "tsv" | ...
   flavorType?: string // "scripture" | "gloss"
   ref: string // branch_or_tag_name, e.g. "v89"

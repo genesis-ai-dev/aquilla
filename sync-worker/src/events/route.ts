@@ -23,6 +23,7 @@
 import type { RawEvent } from './types'
 import type { RealtimeMessage, ProjectionTable } from './realtime'
 import { authorize } from './authorize'
+import { stampToolProvenance } from './tool-provenance'
 import { dispatchEvent, type DispatchOutcome } from './dispatch'
 import { allocateSeqRange, buildSettleSeqRangeStmt } from './event-insert'
 import { CELL_ROW_COLUMNS, mapCellRow, type CellRowOut, type CellRowRaw } from './cell-row-serialize'
@@ -2033,6 +2034,23 @@ export async function handleEventsWriteRequest(
     const newEntries = committedEntries.filter(
       (entry) => !replayedCellEventIds.has(entry.id),
     )
+
+    // Aquilla Tools (prototype): verify `payload.tool_origin` claims against
+    // project_tool_versions and stamp events.provenance. Best-effort — a
+    // failure leaves provenance NULL like any in-app edit, never fails the write.
+    try {
+      const rawById = new Map(rawEvents.map((e) => [e.id, e]))
+      await stampToolProvenance(
+        db,
+        newEntries.flatMap((entry) => {
+          const raw = rawById.get(entry.id)
+          return raw ? [{ id: entry.id, projectId: raw.projectId, author: entry.author, payload: raw.payload }] : []
+        }),
+        env.SYNC_SECRET_KEY,
+      )
+    } catch (err) {
+      console.warn('[events/route] tool provenance stamp failed:', err)
+    }
 
     // Comment notifications — handed to the side-effect queue (AQU-1824) via
     // ctx.waitUntil so they never delay the response. The waitUntil now covers

@@ -6,7 +6,7 @@
  * actual tab so reload and expand reopen that surface.
  */
 
-export const DOCK_TABS = ["files", "voices", "agent", "search"] as const
+export const DOCK_TABS = ["files", "voices", "agent", "search", "tools"] as const
 export type DockTab = (typeof DOCK_TABS)[number]
 
 const STORAGE_PREFIX = "aquilla:dockTab:"
@@ -17,7 +17,7 @@ function storageKey(projectId: string): string {
 }
 
 export function isDockTab(value: string | null): value is DockTab {
-  return value === "files" || value === "voices" || value === "agent" || value === "search"
+  return value === "files" || value === "voices" || value === "agent" || value === "search" || value === "tools"
 }
 
 export function readLastDockTab(projectId: string): DockTab {

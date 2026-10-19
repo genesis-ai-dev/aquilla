@@ -185,3 +185,13 @@ export function lanesForScopeVisibility(
   }
   return { visible: laneScopeIds(values, lanes).ids, lanes }
 }
+
+/**
+ * AQU-2027: what `PUT …/members/:userId/scopes` answers (400) for a member
+ * whose effective role is maintainer (600) or above. They see every lane
+ * through the wall, so a lane list would change nothing. The route and the
+ * Staff popover that recognizes the refusal share this one string: AQU-1813
+ * reworded the route, the popover kept matching the old wording, and the
+ * refusal reached the operator as a raw error.
+ */
+export const LANE_SCOPE_ABOVE_CEILING_ERROR = "scopes are for roles below maintainer"

@@ -1228,10 +1228,16 @@ export const org = defineNamespace({
     "org.staffLanePopover.assignmentCheckFailed":
       "Couldn’t check what {name} has open in this language, so nothing was removed. Try again.",
     "org.staffLanePopover.addToLaneButton": "Add to {lane}",
+    // AQU-2027: picking someone who is maintainer or above. The server refuses
+    // to lane-limit them, because they see every language already.
+    "org.staffLanePopover.alreadySeesEveryLanguage":
+      "{name} is a Maintainer or above on this project, so they already see every language. No lane limit is needed.",
 
     // AQU-1030: one sentence for the grant the form will make, shared by every
     // add/invite submit. {scope} is one of the scope.* phrases below.
     "org.grantScope.sentence.person": "{name} will join as a {role} {scope}",
+    // AQU-2027: the person is already on the project at this role and keeps it.
+    "org.grantScope.sentence.personStays": "{name} stays a {role} {scope}",
     "org.grantScope.sentence.people": "{names} will join as {role} {scope}",
     "org.grantScope.sentence.link": "Anyone with this link will join as a {role} {scope}",
     "org.grantScope.sentence.unset": "They will join as a {role} {scope}",
@@ -3118,12 +3124,26 @@ export const org = defineNamespace({
         description: "Primary confirm button that grants the selected role scoped to the named lane.",
         placeholders: { lane: "The target language lane's display label — not translated." },
       },
+      "org.staffLanePopover.alreadySeesEveryLanguage": {
+        description:
+          "Shown in the Staff popover in place of the grant sentence when the picked person is a Maintainer, Owner or above on the project. Those roles see every target language, so they cannot be limited to one; the Add button is disabled. Also shown if the server refuses the add for that reason. Nothing was saved.",
+        placeholders: { name: "The person's username — not translated." },
+      },
       "org.grantScope.sentence.person": {
         description:
           "Live sentence above an add/invite submit button, and the success toast, when one person is named. States the role and the scope the click will grant.",
         placeholders: {
           name: "The person's username or email — not translated.",
           role: "The role label already translated (singular), e.g. Contributor.",
+          scope: "The scope phrase from org.grantScope.scope.*, already translated, including its leading 'on' or 'of'.",
+        },
+      },
+      "org.grantScope.sentence.personStays": {
+        description:
+          "Variant of org.grantScope.sentence.person for someone who is already on the project at this role or higher and keeps it: the add only limits them to the lane in {scope}. Live sentence above the Staff popover's submit button, and its success message.",
+        placeholders: {
+          name: "The person's username or email — not translated.",
+          role: "The role label already translated (singular) — the role they already hold, e.g. Project lead.",
           scope: "The scope phrase from org.grantScope.scope.*, already translated, including its leading 'on' or 'of'.",
         },
       },

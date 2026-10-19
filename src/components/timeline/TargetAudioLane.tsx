@@ -13,8 +13,26 @@
 
 import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
-import { Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Mic, Pencil, Play, Scissors, Sparkles, Square, Trash2, VolumeX, X } from "lucide-react"
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
+import { AudioLines, Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Mic, Pencil, Play, Scissors, Sparkles, Square, Trash2, VolumeX, X } from "lucide-react"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuRadioGroup,
+  ContextMenuRadioItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
+import {
+  CHANGE_VOICE_QUALITIES,
+  type ChangeVoiceBlocker,
+  type ChangeVoiceQuality,
+} from "@/lib/audio/change-voice"
+import { CHANGE_VOICE_QUALITY_LABEL } from "@/lib/store/change-voice-quality"
 import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { toast } from "@/components/ui/toast"
@@ -219,6 +237,17 @@ export interface TakeMenuActions {
   reRecord?(cellId: string): void
   /** Generate a new voice for this line straight away, on this take's track. */
   regenerate?(cellId: string): void
+  /**
+   * AQU-2026: re-voice this line's own take into its cast voice at `quality`.
+   * Nothing is synthesized from text — the words and timing are kept.
+   */
+  changeVoice?(cellId: string, quality: ChangeVoiceQuality): void
+  /**
+   * AQU-2026: what Change voice can do on this line, or `null` to leave the
+   * item out of the menu entirely (a line whose only sound is the film's own
+   * programme audio has nothing of its own to convert).
+   */
+  changeVoiceState?(cellId: string): ChangeVoiceMenuState | null
   /** Ask for a new name; `current` is the take's own name, if it has one. */
   rename?(cellId: string, audioId: string, current: string | null): void
   /** Delete this take, or this piece of a cut take. */
@@ -227,6 +256,23 @@ export interface TakeMenuActions {
   vote?(cellId: string, audioId: string, validated: boolean): void
   /** Whether you may vote on this take, and whether you already have. */
   voteState?(cellId: string, audioId: string): { canVote: boolean; voted: boolean }
+}
+
+/**
+ * AQU-2026: why the per-line Change voice can't run. `no-take` never reaches
+ * the menu — the item is left out instead.
+ */
+export type ChangeVoiceMenuBlocker = ChangeVoiceBlocker | "voice-reference" | "busy"
+
+/** AQU-2026: what a take's Change voice submenu offers for one line. */
+export interface ChangeVoiceMenuState {
+  /** The voice the line is cast to — named in the reason the menu gives. */
+  voiceName: string
+  /** The quality this take was converted at, ticked in the submenu. Null when
+   *  the take is not a conversion, so nothing shows as current. */
+  quality: ChangeVoiceQuality | null
+  /** Why Change voice can't run at each quality; null where it can. */
+  blockers: Record<ChangeVoiceQuality, ChangeVoiceMenuBlocker | null>
 }
 
 function TargetAudioChip({
@@ -1301,6 +1347,25 @@ function TargetAudioChip({
   // renders the chip itself, so the tooltip and the menu share one element.
   const audioId = chip.item.audioId
   const vote = takeMenu?.vote && takeMenu.voteState ? takeMenu.voteState(cell.id, audioId) : null
+  // AQU-2026: the per-line Change voice. The state is read off the line, not
+  // this chip: it converts the take the Audio tab's voice card would, which on
+  // a cut take is the whole take whichever piece was right-clicked.
+  const changeVoice = takeMenu?.changeVoice && takeMenu.changeVoiceState
+    ? takeMenu.changeVoiceState(cell.id)
+    : null
+  // A reason that holds at EVERY quality is the item's own reason — a stock
+  // voice, a take a voice is cloned from, or a conversion already running on
+  // this line. `up-to-date` is never one of those: it can only match the one
+  // quality the take already carries, which leaves the others to pick.
+  const changeVoiceBlocked = changeVoice != null
+    && CHANGE_VOICE_QUALITIES.every((q) => changeVoice.blockers[q] != null)
+    ? changeVoice.blockers.standard
+    : null
+  const changeVoiceReason = changeVoiceBlocked === "not-cloned"
+    ? t("editor.voice.changeVoiceNeedsClone", { name: changeVoice?.voiceName ?? "" })
+    : changeVoiceBlocked === "voice-reference"
+      ? t("editor.timeline.takeMenuChangeVoiceIsReference")
+      : null
   const isPiece = (chip.item.pieceCount ?? 1) > 1
   const canSplit = Boolean(onCutTarget) && editable
   return (
@@ -1341,6 +1406,57 @@ function TargetAudioChip({
             {t("editor.timeline.takeMenuRegenerate")}
           </ContextMenuItem>
         )}
+        {/* AQU-2026: Change voice for THIS line, beside Regenerate. The Audio
+            tab keeps it on the voice card, and a time-ordered file has no voice
+            cards (the lens is the timeline), so this menu is the only place a
+            dubbing team can re-voice one line instead of the whole file.
+
+            A blocked item carries the reason as its LABEL rather than a
+            tooltip: a disabled menu item fires no pointer events, so a tooltip
+            on it would never open — the same trap `ChangeVoiceButton` works
+            around with a stand-in trigger, which a menu item cannot have. */}
+        {changeVoice && takeMenu?.changeVoice && (changeVoiceBlocked != null ? (
+          <ContextMenuItem data-testid="tl-take-menu-change-voice" disabled>
+            <AudioLines className="h-3.5 w-3.5" />
+            {changeVoiceReason ?? t("editor.voice.changeVoice")}
+          </ContextMenuItem>
+        ) : (
+          <ContextMenuSub>
+            <ContextMenuSubTrigger data-testid="tl-take-menu-change-voice">
+              <AudioLines className="h-3.5 w-3.5" />
+              {t("editor.voice.changeVoice")}
+            </ContextMenuSubTrigger>
+            {/* The quality the Audio tab's popover offers, as the pick-one
+                shape a menu has: radio items, so the quality this take already
+                carries announces as checked (the same reason TrackMenuItems'
+                colour submenu uses them). Picking one converts at it; the one
+                it already is, is spent, and the header says so. */}
+            <ContextMenuSubContent className="w-52">
+              <ContextMenuRadioGroup value={changeVoice.quality ?? ""}>
+                {/* Inside the group, not above it: a menu label names the group
+                    it belongs to, and Base UI throws without one. */}
+                <ContextMenuLabel data-testid="tl-take-menu-change-voice-note">
+                  {CHANGE_VOICE_QUALITIES.some((q) => changeVoice.blockers[q] === "up-to-date")
+                    ? t("editor.voice.changeVoiceUpToDate", { name: changeVoice.voiceName })
+                    : t("editor.voice.changeVoiceQuality")}
+                </ContextMenuLabel>
+                {CHANGE_VOICE_QUALITIES.map((q) => (
+                  <ContextMenuRadioItem
+                    key={q}
+                    value={q}
+                    data-testid={`tl-take-menu-change-voice-${q}`}
+                    disabled={changeVoice.blockers[q] != null}
+                    onClick={() => {
+                      if (changeVoice.blockers[q] == null) takeMenu.changeVoice?.(cell.id, q)
+                    }}
+                  >
+                    {t(CHANGE_VOICE_QUALITY_LABEL[q])}
+                  </ContextMenuRadioItem>
+                ))}
+              </ContextMenuRadioGroup>
+            </ContextMenuSubContent>
+          </ContextMenuSub>
+        ))}
         {vote?.canVote && (
           <>
             <ContextMenuSeparator />

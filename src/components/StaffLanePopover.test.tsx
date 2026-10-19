@@ -10,15 +10,18 @@
 //   - AQU-2004: there is no lead path here at all — no "Leads see all
 //     languages" note, no "Add as lead" button, and no catalog in any locale
 //     still carrying those retired messages.
-//   - Graceful handling of the server's "leads unscopable" 400: if the scope
-//     PUT is rejected because the target's effective role is already lead+,
-//     the popover reports success ("already leads … no lane scope needed"),
-//     not an error.
+//   - AQU-2027: maintainers and above can't be lane-limited. Someone the
+//     roster shows at 600+ gets a note and no Add; if the scope PUT is still
+//     refused for that reason (the route's real LANE_SCOPE_ABOVE_CEILING_ERROR),
+//     the popover shows the same note, not the raw server error. Someone
+//     already on the project at or above the picked role keeps their role,
+//     and the sentence says so ("stays a Project lead").
 //   - AQU-1998 Remove: the popover lists who is already scoped to the lane and
 //     takes one of them off it — their other lanes and file limits written
-//     through untouched, leads never listed, and the person's LAST lane
-//     guarded (an empty lane list means every lane, so that removal would
-//     widen their access).
+//     through untouched, a lane-limited project lead listed like anyone else
+//     (AQU-2027), maintainers never, and the person's LAST lane guarded (an
+//     empty lane list means every lane, so that removal would widen their
+//     access).
 //   - AQU-1999 Remove, decided: the last lane stays guarded, and a removal
 //     from a lane the person holds open assignments in closes that work —
 //     after a confirmation naming the count, never silently, and never before
@@ -33,6 +36,7 @@ import type { ColumnDef } from "@tanstack/react-table"
 import { DataTable } from "@/components/ui/data-table"
 import { StaffLanePopover } from "./StaffLanePopover"
 import { CATALOGS } from "@/lib/i18n/messages"
+import { LANE_SCOPE_ABOVE_CEILING_ERROR } from "@/lib/lanes/scope-ids"
 
 // The popover links out to the project's invite page (AQU-607), so every
 // render needs a Router in context.
@@ -347,8 +351,11 @@ describe("StaffLanePopover", () => {
     expect(survivors).toEqual([])
   })
 
-  it("handles the server's 'leads unscopable' 400 gracefully as a success outcome", async () => {
-    mockPutMemberScopes.mockRejectedValue(new Error("scopes are for contributor/reviewer roles"))
+  // AQU-2027: the route's refusal text is the shared constant, so this is the
+  // exact string the server sends — the old test faked a wording the route had
+  // stopped sending, which is how the raw error reached operators unnoticed.
+  it("shows the 'already sees every language' note when the server refuses a maintainer+", async () => {
+    mockPutMemberScopes.mockRejectedValue(new Error(LANE_SCOPE_ABOVE_CEILING_ERROR))
 
     renderPopover()
     openPopover()
@@ -356,10 +363,62 @@ describe("StaffLanePopover", () => {
     fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
 
     await waitFor(() =>
-      expect(screen.getByText(/already leads this project/i)).toBeInTheDocument(),
+      expect(screen.getByTestId("grant-scope-result")).toHaveTextContent(
+        /maria is a maintainer or above on this project, so they already see every language/i,
+      ),
     )
     // Not treated as an error state.
-    expect(screen.queryByText(/scopes are for contributor\/reviewer roles/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(LANE_SCOPE_ABOVE_CEILING_ERROR)).not.toBeInTheDocument()
+  })
+
+  it("offers no Add for someone the roster shows at maintainer or above", async () => {
+    mockProjectMembers = [
+      {
+        userId: 10,
+        username: "maria",
+        role: { level: 700, name: "owner", source: "override" },
+        secondarySources: [],
+      },
+    ]
+
+    renderPopover()
+    openPopover()
+    pickMaria()
+
+    expect(screen.getByTestId("staff-lane-sees-every-lane")).toHaveTextContent(
+      /maria is a maintainer or above on this project, so they already see every language/i,
+    )
+    const add = screen.getByRole("button", { name: /spanish lane only/i })
+    expect(add).toBeDisabled()
+    fireEvent.click(add)
+    expect(mockAddProjectMember).not.toHaveBeenCalled()
+    expect(mockPutMemberScopes).not.toHaveBeenCalled()
+  })
+
+  it("names the role an existing project lead keeps, not the picked one", async () => {
+    mockProjectMembers = [
+      {
+        userId: 10,
+        username: "maria",
+        role: { level: 500, name: "project_lead", source: "override" },
+        secondarySources: [],
+      },
+    ]
+
+    renderPopover()
+    openPopover()
+    pickMaria()
+
+    const preview = /maria stays a project lead on mark, spanish lane only/i
+    expect(screen.getByTestId("staff-lane-popover")).toHaveTextContent(preview)
+    expect(screen.getByTestId("staff-lane-popover")).not.toHaveTextContent(/will join as a reviewer/i)
+
+    fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
+
+    await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
+    // Never a downgrade: no membership write for someone already above the pick.
+    expect(mockAddProjectMember).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.getByTestId("grant-scope-result")).toHaveTextContent(preview))
   })
 
   it("filters the org roster by the search query", async () => {
@@ -508,15 +567,18 @@ describe("StaffLanePopover", () => {
       )
     }
 
+    const MAINTAINER = { level: 600, name: "maintainer", source: "override" as const }
+
     function staffRoster() {
       mockProjectMembers = [
         { userId: 10, username: "maria", role: CONTRIB, secondarySources: [] },
         { userId: 11, username: "mark", role: CONTRIB, secondarySources: [] },
         { userId: 12, username: "wendi", role: LEAD, secondarySources: [] },
+        { userId: 13, username: "jade", role: MAINTAINER, secondarySources: [] },
       ]
     }
 
-    it("lists only the people scoped to this lane, and never a lead", async () => {
+    it("lists only the people scoped to this lane, and never a maintainer", async () => {
       staffRoster()
       scopesByUser({
         10: [{ kind: "lane", value: "es" }, { kind: "lane", value: "fr" }],
@@ -528,11 +590,34 @@ describe("StaffLanePopover", () => {
       openPopover()
 
       await waitFor(() => expect(screen.getByTestId("staff-lane-staffed-row-10")).toBeInTheDocument())
-      // mark is on French only, wendi leads the project — neither is on this lane.
+      // mark is on French only, wendi leads with no lane limit — neither is on this lane.
       expect(screen.queryByTestId("staff-lane-staffed-row-11")).not.toBeInTheDocument()
       expect(screen.queryByTestId("staff-lane-staffed-row-12")).not.toBeInTheDocument()
-      // A lead is never even asked about: they cannot hold a lane scope.
-      expect(mockFetchMemberScopes).not.toHaveBeenCalledWith("jwt-pm", "proj-1", 12)
+      // A maintainer is never even asked about: they cannot hold a lane scope.
+      expect(mockFetchMemberScopes).not.toHaveBeenCalledWith("jwt-pm", "proj-1", 13)
+    })
+
+    // AQU-2027: since AQU-1813 a project lead can be limited to lanes. One who
+    // is limited to this lane was invisible here, so nobody could take them off it.
+    it("lists a project lead limited to this lane, and Remove takes only this lane off", async () => {
+      staffRoster()
+      scopesByUser({
+        12: [{ kind: "lane", value: "es" }, { kind: "lane", value: "fr" }],
+      })
+
+      renderPopover()
+      openPopover()
+
+      await waitFor(() => expect(screen.getByTestId("staff-lane-remove-12")).toBeEnabled())
+      fireEvent.click(screen.getByTestId("staff-lane-remove-12"))
+
+      await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
+      expect(mockPutMemberScopes).toHaveBeenCalledWith("jwt-pm", "proj-1", 12, [
+        { kind: "lane", value: "fr" },
+      ])
+      await waitFor(() =>
+        expect(screen.queryByTestId("staff-lane-staffed-row-12")).not.toBeInTheDocument(),
+      )
     })
 
     it("says so when nobody is staffed on the lane yet", async () => {

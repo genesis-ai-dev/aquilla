@@ -2,7 +2,7 @@ import { env } from 'cloudflare:test'
 import { afterEach, expect, it, vi } from 'vitest'
 import app from '../index'
 import type { Env } from '../types'
-import { completedPayment, config } from './helpers/workspace-billing'
+import { completedPayment, config, pinSmallAllowancePolicy } from './helpers/workspace-billing'
 import { authHeader, jwtFor } from './helpers/db'
 import { listHeldUsage, readUsageTotals } from '../lib/billing/workspace-usage'
 import { readBillingWorkspace } from '../lib/billing/workspace'
@@ -22,6 +22,7 @@ const prose = (text: string, extra?: Record<string, unknown>) => turn({ role: 'a
 async function setup() {
   const paid = await completedPayment('team', 'month', undefined, 'personal')
   expect((await paid.send()).status).toBe(200)
+  await pinSmallAllowancePolicy()
   await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES (?, 'Agent', 1, 1)").bind(PROJECT).run()
   await env.AQUILLA_PG.prepare(`INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at)
     VALUES (?, ?, '33333333-3333-4333-8333-333333333333', 'source', 'In the beginning', 'GEN 1:1', '44444444-4444-4444-8444-444444444444', 0),

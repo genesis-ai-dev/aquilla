@@ -5,7 +5,7 @@ import { URL } from 'node:url'
 import { env } from 'cloudflare:test'
 import { afterEach, expect, it, vi } from 'vitest'
 import { MICRO_UNITS_PER_UNIT, quoteProviderCost, readProviderCostCents } from '../../../db/shared/billing-cost'
-import { completedPayment } from './helpers/workspace-billing'
+import { completedPayment, pinSmallAllowancePolicy } from './helpers/workspace-billing'
 import { reserveWorkspaceUsage, settleWorkspaceUsage, releaseWorkspaceUsage, readUsageTotals, readWorkspaceUsageSummary } from '../lib/billing/workspace-usage'
 import { readWorkspaceEntitlement } from '../lib/billing/workspace'
 import { weeklyUsagePeriod } from '../lib/billing/pricing-model'
@@ -15,6 +15,7 @@ afterEach(() => vi.unstubAllGlobals())
 async function setup() {
   const paid = await completedPayment('team', 'month', undefined, 'personal')
   expect((await paid.send()).status).toBe(200)
+  await pinSmallAllowancePolicy()
   await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('usage-project', 'Usage', 1, 1)").run()
   const stored = (await readWorkspaceEntitlement(env.AQUILLA_PG, 1))!
   const now = new Date(Date.parse(stored.usage_anchor) + 1000)
@@ -232,9 +233,41 @@ it('uses an admin Free allowance change in both admission and displayed percenta
   await seedUser(7, 'root')
   const response = await app.request('/api/v2/admin/billing/plans', {
     method: 'PATCH', headers: authHeader(await jwtFor('root')),
-    body: JSON.stringify({ freeWeeklyAllowance: 100, ifMatchVersion: 0 }),
+    // $0.25 raw = 100 units; a 10-cent raw request reserves 40 units.
+    body: JSON.stringify({ freeWeeklyRawUsd: 0.25, ifMatchVersion: 1 }),
   }, env)
   expect(response.status).toBe(200)
   await reserveWorkspaceUsage(env.AQUILLA_PG, input, now)
   expect(await readWorkspaceUsageSummary(env.AQUILLA_PG, 1, now)).toMatchObject({ percent: 40 })
+})
+
+// AQU-2056: Team is 24× Free in raw dollars. A Free change must move Team too,
+// otherwise Team drifts from its "at most 25% of revenue" sizing; a per-org admin
+// grant still wins over both so negotiated partners keep their number.
+it('derives Team from the Free raw-dollar cap and lets a per-org grant override it', async () => {
+  const paid = await completedPayment('team', 'month')
+  expect((await paid.send()).status).toBe(200)
+  await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('usage-project', 'Usage', 1, 1)").run()
+  const stored = (await readWorkspaceEntitlement(env.AQUILLA_PG, 1))!
+  const now = new Date(Date.parse(stored.usage_anchor) + 1000)
+  const input = { orgId: 1, projectId: 'usage-project', userId: 1,
+    requestId: 'team-one', rail: 'llm' as const, maxRawCostCents: 24 }
+  await seedUser(7, 'root')
+  const root = authHeader(await jwtFor('root'))
+  // Default: Team = 24 × $1 = $24 raw. 24 raw cents is 1%.
+  await reserveWorkspaceUsage(env.AQUILLA_PG, input, now)
+  expect(await readWorkspaceUsageSummary(env.AQUILLA_PG, 1, now)).toMatchObject({ percent: 1 })
+  // Halving Free halves Team ($12 raw): the same spend is now 2%.
+  expect((await app.request('/api/v2/admin/billing/plans', {
+    method: 'PATCH', headers: root, body: JSON.stringify({ freeWeeklyRawUsd: 0.5, ifMatchVersion: 0 }),
+  }, env)).status).toBe(200)
+  expect(await readWorkspaceUsageSummary(env.AQUILLA_PG, 1, now)).toMatchObject({ percent: 2 })
+  // A per-org grant (units) beats the derived Team cap: 96 units used of 192 = 50%.
+  expect((await app.request('/api/v2/admin/billing/org/1/weekly-allowance', {
+    method: 'PATCH', headers: root, body: JSON.stringify({ allowance: 192, reason: 'Partner allocation' }),
+  }, env)).status).toBe(200)
+  expect(await readWorkspaceUsageSummary(env.AQUILLA_PG, 1, now)).toMatchObject({ percent: 50 })
+  const plans = await (await app.request('/api/v2/admin/billing/plans', { headers: root }, env)).json()
+  expect(plans).toMatchObject({ plan: { freeWeeklyRawUsd: 0.5, teamMultipleOfFree: 24, teamWeeklyRawUsd: 12,
+    freeWeeklyUnits: 200, teamWeeklyUnits: 4800 } })
 })

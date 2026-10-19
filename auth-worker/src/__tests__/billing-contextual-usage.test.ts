@@ -2,7 +2,7 @@ import { env } from 'cloudflare:test'
 import { afterEach, expect, it, vi } from 'vitest'
 import app from '../index'
 import type { Env } from '../types'
-import { completedPayment, config } from './helpers/workspace-billing'
+import { completedPayment, config, pinSmallAllowancePolicy } from './helpers/workspace-billing'
 import { authHeader, jwtFor } from './helpers/db'
 import { readUsageTotals, reserveWorkspaceUsage, settleWorkspaceUsage } from '../lib/billing/workspace-usage'
 import { readBillingWorkspace } from '../lib/billing/workspace'
@@ -19,6 +19,7 @@ afterEach(async () => { if (_test.lastLoop) await _test.lastLoop; _test.lastLoop
 async function setup() {
   const paid = await completedPayment('team', 'month', undefined, 'personal')
   expect((await paid.send()).status).toBe(200)
+  await pinSmallAllowancePolicy()
   await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES (?, 'Autopilot', 1, 1)").bind(PROJECT).run()
   // The start gate (AQU-827) needs both languages and an answered brief
   // question; AQU-1050's release gate needs the project to have opted in.

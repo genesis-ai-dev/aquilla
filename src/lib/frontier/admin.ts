@@ -343,6 +343,11 @@ export async function getAdminProjects(jwt: string): Promise<AdminProject[]> {
 
 export interface AdminFieldPlan {
   freeWeeklyAllowance?: number
+  freeWeeklyRawUsd?: number
+  teamMultipleOfFree?: number
+  teamWeeklyRawUsd?: number
+  freeWeeklyUnits?: number
+  teamWeeklyUnits?: number
   name: string
   intervalDays: number
   priceCents: number
@@ -395,6 +400,8 @@ export interface AdminBillingOrg {
 
 export interface FieldPlanPatch {
   freeWeeklyAllowance?: number
+  freeWeeklyRawUsd?: number
+  teamMultipleOfFree?: number
   priceCents?: number
   addonPriceCents?: number
   includedWords?: number

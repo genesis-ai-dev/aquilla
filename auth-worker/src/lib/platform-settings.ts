@@ -138,6 +138,8 @@ function parseSettings(raw: string): PlatformSettings {
     const f = fp as Record<string, unknown>
     const fieldPlan: FieldPlanSettings = {}
     if (typeof f.freeWeeklyAllowance === "number") fieldPlan.freeWeeklyAllowance = f.freeWeeklyAllowance
+    if (typeof f.freeWeeklyRawUsd === "number") fieldPlan.freeWeeklyRawUsd = f.freeWeeklyRawUsd
+    if (typeof f.teamMultipleOfFree === "number") fieldPlan.teamMultipleOfFree = f.teamMultipleOfFree
     if (typeof f.priceCents === "number") fieldPlan.priceCents = f.priceCents
     if (typeof f.includedWords === "number") fieldPlan.includedWords = f.includedWords
     if (typeof f.addonWords === "number") fieldPlan.addonWords = f.addonWords

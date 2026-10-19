@@ -2,7 +2,7 @@ import { env } from 'cloudflare:test'
 import { afterEach, expect, it, vi } from 'vitest'
 import app from '../index'
 import type { Env } from '../types'
-import { completedPayment, config } from './helpers/workspace-billing'
+import { completedPayment, config, pinSmallAllowancePolicy } from './helpers/workspace-billing'
 import { authHeader, jwtFor, seedUser } from './helpers/db'
 import { readUsageTotals } from '../lib/billing/workspace-usage'
 import { readBillingWorkspace } from '../lib/billing/workspace'
@@ -15,6 +15,7 @@ const recipe = { category: 'scripture', confidence: 0.9, explanation: 'Pipe rows
 async function setup() {
   const paid = await completedPayment('team', 'month', undefined, 'personal')
   expect((await paid.send()).status).toBe(200)
+  await pinSmallAllowancePolicy()
   await env.AQUILLA_PG.exec("INSERT INTO projects (id, name, org_id, created_by) VALUES ('import-project', 'Import', 1, 1)")
   const settings: Env = { ...config(), OPENROUTER_API_KEY: 'local-fixture', AI_BUDGET_ENFORCE: 'false', DEFAULT_LLM_MODEL: 'local-test', AI_ALLOWED_MODELS: 'local-test',
     OPENROUTER_BASE_URL: 'http://127.0.0.1:9999/v1', BILLING_CHAT_USAGE_REHEARSAL: 'true' }

@@ -8,6 +8,15 @@ import { seedUser, jwtFor, authHeader } from './db'
 import { stripeCatalogResponse } from './stripe-catalog'
 import { testStripeCatalog as manifest } from './stripe-catalog'
 import type { BillingPlanReview } from '../../../../db/shared/billing-review'
+import { savePlatformSettings } from '../../lib/platform-settings'
+
+/** Small-number fixture for metering tests: Free $0.0625 (25 units) and Team 10×
+ * (250 units), so exhaustion takes cents. Real defaults ($1, 24×) are tested in
+ * pricing-model.test.ts and billing-workspace-usage.test.ts (AQU-2056).
+ */
+export async function pinSmallAllowancePolicy() {
+  expect((await savePlatformSettings(env, { fieldPlan: { freeWeeklyRawUsd: 0.0625, teamMultipleOfFree: 10 } }, 0, 1)).ok).toBe(true)
+}
 
 export function config(catalog = manifest): Env {
   if (catalog.bindings.every(b => b.live)) return { ...env, ENVIRONMENT: 'production',

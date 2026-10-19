@@ -50,6 +50,10 @@ export const projectSettings = defineNamespace({
     "projectSettings.checking.play": "Play continuously",
     "projectSettings.checking.noRecording": "No selected recording for this passage.",
     "projectSettings.checking.playbackHelp": "Playback continues through available recordings in passage order.",
+    "projectSettings.checking.previous": "Previous passage",
+    "projectSettings.checking.next": "Next passage",
+    "projectSettings.checking.playPassage": "Play {label}",
+    "projectSettings.checking.yourFeedback": "Your feedback on this passage",
     "projectSettings.checking.feedbackPlaceholder": "What is clear? What could be improved?",
     "projectSettings.checking.sendFeedback": "Send feedback",
     "projectSettings.checking.retry": "Retry pending feedback",
@@ -2796,6 +2800,10 @@ export const projectSettings = defineNamespace({
       "projectSettings.checking.urlLabel": {
         description: "Accessible name of the read-only field holding a checking link's URL.",
         placeholders: { title: "The link title the project lead typed (data, not translated)." },
+      },
+      "projectSettings.checking.playPassage": {
+        description: "Accessible name of the small play button beside one passage in the guest page's running text.",
+        placeholders: { label: "The passage reference, e.g. 'MRK 1:2', or 'Unit 3' when it has none." },
       },
       "projectSettings.checking.feedbackOn": {
         description: "Label of the feedback box on the guest page, naming the passage the feedback is about.",

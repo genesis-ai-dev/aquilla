@@ -504,23 +504,12 @@ export const terminology = defineNamespace({
       other: "{count} forbidden",
     }),
 
-    // ── CandidateTermsPanel.tsx ──────────────────────────────────────────────
-    "terminology.candidates.emptyTitle": "No candidate terms",
-    "terminology.candidates.emptyDescription": "No candidate terms found in the loaded cells.",
-    "terminology.candidates.countRankedByNc": plural({
-      one: "{count} candidate term, ranked by NC-value",
-      other: "{count} candidate terms, ranked by NC-value",
-    }),
+    // ── CellTranscribeBadge.tsx — the one survivor of the retired
+    // CandidateTermsPanel.tsx's own keys ─────────────────────────────────────
     "terminology.candidates.ngramLength": plural({
       one: "{count} word",
       other: "{count} words",
     }),
-    "terminology.candidates.ncTooltip":
-      "NC-value — termhood with context weighting (default rank)",
-    "terminology.candidates.cTooltip": "C-value — nestedness-adjusted termhood",
-    "terminology.candidates.g2Tooltip":
-      "G² keyness — how unexpectedly frequent vs the reference corpus",
-    "terminology.candidates.promoteButton": "Promote to managed",
 
     // ── ProjectSettings/TermbaseSharingSection.tsx ───────────────────────────
     "terminology.sharing.title": "Termbase Sharing",
@@ -635,22 +624,6 @@ export const terminology = defineNamespace({
     "terminology.libraryStats.infringedLabel": "Infringed",
     "terminology.libraryStats.cellsAnalyzedLabel": "Cells analyzed",
     "terminology.libraryStats.mostInfringedLabel": "Most infringed",
-
-    // ── TerminologyPage.tsx: candidate-terms tab intro paragraph ────────────
-    "terminology.candidates.minedFromSummary": plural({
-      one:
-        "Mined from {count} source/WIP cell text{note}. Mining runs off the main " +
-        "thread. Keyness (G²) uses a derived rest-of-corpus baseline. Promoting " +
-        "adds a suggested concept you can then give renderings.",
-      other:
-        "Mined from {count} source/WIP cell texts{note}. Mining runs off the main " +
-        "thread. Keyness (G²) uses a derived rest-of-corpus baseline. Promoting " +
-        "adds a suggested concept you can then give renderings.",
-    }),
-    "terminology.candidates.corpusScopeFull": " — the full loaded project",
-    "terminology.candidates.corpusScopeCapped":
-      " (capped at the first {ceiling} of {total} loaded cells — corpus exceeds the safety ceiling)",
-    "terminology.candidates.miningLabel": "Mining candidate terms…",
 
     // ── GlossaryEditor.tsx inside the workspace shell — what is left of the
     // retired TerminologyPage.tsx's own chrome ──────────────────────────────
@@ -997,9 +970,9 @@ export const terminology = defineNamespace({
       },
       "terminology.common.occurrenceCount": {
         description:
-          "Generic occurrence-count stat, reused for both the term detail header " +
-          "(cells containing a concept's source term) and a candidate-term row (times " +
-          "it occurs in the loaded corpus); {count} is that count.",
+          "Generic occurrence-count stat, rendered on the term detail header (cells " +
+          "containing a concept's source term); {count} is that count. The candidate-term " +
+          "row that was its other caller is gone, so it stays worded for reuse.",
         placeholders: { count: "The occurrence count." },
       },
       "terminology.termDetail.enforcedCount": {
@@ -1095,17 +1068,12 @@ export const terminology = defineNamespace({
           "infractions it has; {count} is that count.",
         placeholders: { count: "Number of forbidden-rendering-present infractions." },
       },
-      "terminology.candidates.countRankedByNc": {
-        description:
-          "Header line above the ranked candidate-term list; {count} is the number of " +
-          "candidates found.",
-        placeholders: { count: "Number of candidate terms found." },
-      },
       "terminology.candidates.ngramLength": {
         description:
-          "Badge on a candidate-term row showing how many words the candidate spans; " +
-          "{count} is that word count.",
-        placeholders: { count: "Number of words the candidate term spans." },
+          "Word-count badge over a short span of text; {count} is that word count. " +
+          "Rendered on a finished transcription take — the candidate-term row that was " +
+          "its other caller is gone — so it stays worded without naming its container.",
+        placeholders: { count: "Number of words the span holds." },
       },
       "terminology.sharing.unsubscribeAria": {
         description:
@@ -1392,43 +1360,6 @@ export const terminology = defineNamespace({
       },
       "terminology.libraryStats.mostInfringedLabel": {
         description: "Small heading over the list of the concepts with the most violations, shown when any exist.",
-      },
-      "terminology.candidates.minedFromSummary": {
-        description:
-          "Intro paragraph above the candidate-terms tab's ranked list, stating how " +
-          "many cells the term-mining pass covered and how it works. {note} is a whole " +
-          "already-localized trailing clause (see terminology.candidates.corpusScopeFull " +
-          "/ corpusScopeCapped) — insert it exactly where the placeholder sits, it " +
-          "already carries its own leading space/punctuation. Plural category is chosen " +
-          "by {count}.",
-        placeholders: {
-          count: "Number of cells the mining pass covered; also selects the plural form.",
-          note:
-            "Already-localized trailing clause naming the scan's scope — either " +
-            "terminology.candidates.corpusScopeFull or ...corpusScopeCapped, verbatim " +
-            "including its own leading space.",
-        },
-      },
-      "terminology.candidates.corpusScopeFull": {
-        description:
-          "Trailing clause appended into terminology.candidates.minedFromSummary when " +
-          "the mining pass covered the whole loaded project (not capped). Keep the " +
-          "leading space — it is the only separator between this clause and the word " +
-          "it follows.",
-      },
-      "terminology.candidates.corpusScopeCapped": {
-        description:
-          "Trailing clause appended into terminology.candidates.minedFromSummary when " +
-          "the loaded corpus exceeded the mining safety ceiling and was truncated. Keep " +
-          "the leading space — it is the only separator between this clause and the " +
-          "word it follows.",
-        placeholders: {
-          ceiling: "The fixed safety-ceiling cell count the scan capped at.",
-          total: "The total number of loaded cells before capping.",
-        },
-      },
-      "terminology.candidates.miningLabel": {
-        description: "Transient status shown while the candidate-term mining pass is running off the main thread.",
       },
       "terminology.loadingLabel": {
         description:

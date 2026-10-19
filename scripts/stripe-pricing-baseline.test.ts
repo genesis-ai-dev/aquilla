@@ -46,63 +46,51 @@ it('provisions reusable baseline prices and feeds the real quote/analytics consu
   })
   const manifest = await provisionBaseline('sk_test_fake')
   expect(await provisionBaseline('sk_test_fake')).toEqual(manifest)
-  expect(writes.filter(p => p.endsWith('/products'))).toHaveLength(3)
-  expect(writes.filter(p => p.endsWith('/prices'))).toHaveLength(10)
+  expect(writes.filter(p => p.endsWith('/products'))).toHaveLength(1)
+  expect(writes.filter(p => p.endsWith('/prices'))).toHaveLength(2)
   expect(baseline.selfServeMaxBlocks).toBeNull()
-  for (const [offer, month, year] of [
-    ['pro', 2000, 20000], ['max_5x', 6000, 60000],
-    ['max_20x', 12000, 120000], ['team', 60000, 600000],
-    ['team_20x', 72000, 720000],
-  ] as const) {
-    expect(quoteOffer(manifest, prices, offer, 'month').totalAmount).toBe(month)
-    expect(quoteOffer(manifest, prices, offer, 'year').totalAmount).toBe(year)
-  }
-  // A future approved block limit enables quantity without multiplying platform fees.
-  const expanded = { ...manifest, bindings: manifest.bindings.map(b => ({
-    ...b, maxQuantity: b.offer.endsWith('20x') ? 3 : 1,
-  })) }
-  const team = quoteOffer(expanded, prices, 'team_20x', 'month', 3)
-  expect(team).toMatchObject({ totalAmount: 96000, allowanceCredits: 3000 })
-  expect(team.lineItems.map(i => i.quantity)).toEqual([1, 3])
-  expect(quoteOffer(expanded, prices, 'max_20x', 'year', 2))
-    .toMatchObject({ totalAmount: 240000, allowanceCredits: 2000 })
-  expect(() => quoteOffer(manifest, prices, 'team_20x', 'month', 2)).toThrow()
-  expect(() => quoteOffer(manifest, [], 'pro', 'month')).toThrow('unavailable')
+  // AQU-2058: Team only, $500/month or $5,000/year (two months free).
+  expect(quoteOffer(manifest, prices, 'team', 'month').totalAmount).toBe(50000)
+  expect(quoteOffer(manifest, prices, 'team', 'year').totalAmount).toBe(500000)
+  const team = quoteOffer(manifest, prices, 'team', 'month')
+  expect(() => quoteOffer(manifest, prices, 'team', 'month', 2)).toThrow()
+  expect(() => quoteOffer(manifest, [], 'team', 'month')).toThrow('unavailable')
   expect(pricingEventProperties(team, {
-    experiment: null, variant: 'baseline', acquisitionPriceVersion: '2026-09-baseline',
-  })).toMatchObject({ billing_plan: 'team', billing_quantity: 3,
-    billing_price_version: '2026-09-baseline', billing_scope: 'team' })
+    experiment: null, variant: 'baseline', acquisitionPriceVersion: '2026-10-team',
+  })).toMatchObject({ billing_plan: 'team', billing_quantity: 1,
+    billing_price_version: '2026-10-team', billing_scope: 'team' })
   prices[0]!.unit_amount = 999
   await expect(provisionBaseline('sk_test_fake')).rejects.toThrow('Price mismatch')
-  expect(writes).toHaveLength(13)
+  expect(writes).toHaveLength(3)
 })
 
 it('changes experiment prices without changing plan entitlements or acquisition cohorts', () => {
   const make = (version: string, id: string, amount: number) => {
     const catalog = {
       version, entitlementVersion: '2026-09',
-      bindings: [{ priceId: id, productId: 'prod_max', offer: 'max_20x' as const,
-        interval: 'month' as const, currency: 'usd', live: false, maxQuantity: 3 }],
+      bindings: [{ priceId: id, productId: 'prod_team', offer: 'team' as const,
+        interval: 'month' as const, currency: 'usd', live: false, maxQuantity: 1 }],
     }
     const prices: StripePriceInput[] = [{
-      id, product: 'prod_max', active: true, livemode: false,
+      id, product: 'prod_team', active: true, livemode: false,
       type: 'recurring', billing_scheme: 'per_unit', currency: 'usd', unit_amount: amount,
       recurring: { interval: 'month', interval_count: 1, usage_type: 'licensed' },
     }]
-    return quoteOffer(catalog, prices, 'max_20x', 'month')
+    return quoteOffer(catalog, prices, 'team', 'month')
   }
-  const base = make('baseline-v1', 'price_baseline', 12000)
-  const higher = make('higher-v1', 'price_higher', 16000)
-  expect([base.allowanceCredits, higher.allowanceCredits]).toEqual([1000, 1000])
-  expect([base.plan, higher.plan]).toEqual(['max', 'max'])
-  expect([base.totalAmount, higher.totalAmount]).toEqual([12000, 16000])
+  const base = make('baseline-v1', 'price_baseline', 50000)
+  const higher = make('higher-v1', 'price_higher', 60000)
+  expect([base.allowanceCredits, higher.allowanceCredits]).toEqual([250, 250])
+  expect([base.plan, higher.plan]).toEqual(['team', 'team'])
+  expect([base.totalAmount, higher.totalAmount]).toEqual([50000, 60000])
   expect(pricingEventProperties(higher, {
     experiment: 'test-v1', variant: 'higher', acquisitionPriceVersion: 'baseline-v1',
   })).toMatchObject({ billing_price_version: 'higher-v1',
-    billing_acquisition_price_version: 'baseline-v1', billing_plan: 'max' })
+    billing_acquisition_price_version: 'baseline-v1', billing_plan: 'team' })
 })
 
-// Captured from the real Stripe sandbox preparation on 2026-10-04.
+// Shaped from the 2026-10-04 sandbox capture, cut down to the AQU-2058 Team-only
+// launch ($500/$5,000). The Team price IDs are placeholders until the sandbox run.
 function nativeStripeFixture(live: boolean, present = true) {
   const fixture = structuredClone(launchFixture)
   for (const item of [...fixture.products, ...fixture.prices, ...fixture.configurations]) item.livemode = live
@@ -155,10 +143,11 @@ it.each([false, true])('verifies native launch objects and sends their output th
   const { fixture, writes } = nativeStripeFixture(live)
   const result = await prepareWorkspaceLaunch({ secret: live ? 'sk_live_fixture' : 'sk_test_fixture',
     accountId: fixture.accountId, live, apply: false })
-  expect(result.catalog.bindings).toHaveLength(10)
-  expect(Object.keys(result.configurations)).toEqual(['personal', 'team'])
-  expect(quoteOffer(result.catalog, fixture.prices, 'team_20x', 'month')).toMatchObject({
-    totalAmount: 72000, allowanceCredits: 1000, lineItems: [expect.objectContaining({ quantity: 1 })] })
+  expect(result.catalog.bindings).toHaveLength(2)
+  expect(Object.keys(result.configurations)).toEqual(['team'])
+  expect(quoteOffer(result.catalog, fixture.prices, 'team', 'month')).toMatchObject({
+    totalAmount: 50000, allowanceCredits: 250, lineItems: [expect.objectContaining({ quantity: 1 })] })
+  expect(quoteOffer(result.catalog, fixture.prices, 'team', 'year').totalAmount).toBe(500000)
   expect(writes).toEqual([])
 })
 it('creates missing launch objects only with explicit apply and reuses them on a second run', async () => {
@@ -167,10 +156,11 @@ it('creates missing launch objects only with explicit apply and reuses them on a
   await expect(prepareWorkspaceLaunch(options)).rejects.toThrow('--apply')
   expect(writes).toHaveLength(0)
   const first = await prepareWorkspaceLaunch({ ...options, apply: true })
-  expect(writes).toHaveLength(17)
+  // One product, two prices, one Team portal configuration.
+  expect(writes).toHaveLength(4)
   const second = await prepareWorkspaceLaunch({ ...options, apply: true })
   expect(second).toEqual(first)
-  expect(writes).toHaveLength(17)
+  expect(writes).toHaveLength(4)
 })
 it('refuses wrong modes, accounts, prices, and portal policies without modifying existing objects', async () => {
   const { fixture, writes, fetch } = nativeStripeFixture(false)
@@ -180,7 +170,7 @@ it('refuses wrong modes, accounts, prices, and portal policies without modifying
   await expect(prepareWorkspaceLaunch({ ...options, accountId: 'acct_other' })).rejects.toThrow('account mismatch')
   fixture.prices[0].unit_amount = 1
   await expect(prepareWorkspaceLaunch(options)).rejects.toThrow('price mismatch')
-  fixture.prices[0].unit_amount = 2000
+  fixture.prices[0].unit_amount = 50000
   fixture.configurations[0].features.subscription_cancel.mode = 'immediately'
   await expect(prepareWorkspaceLaunch(options)).rejects.toThrow('Portal policy mismatch')
   expect(writes).toEqual([])

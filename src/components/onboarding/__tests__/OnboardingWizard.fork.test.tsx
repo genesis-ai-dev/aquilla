@@ -103,7 +103,7 @@ describe("OnboardingWizard — Personal vs Team fork", () => {
 })
 
 it.each(["create", "skip"])("keeps the paid selection after new-account %s completion", async action => {
-  renderWizard("/onboarding?offer=pro&interval=monthly&quantity=1&audience=individual")
+  renderWizard("/onboarding?offer=team&interval=monthly&quantity=1&audience=team")
   await advanceToIntent()
   fireEvent.click(screen.getByRole("button", { name: "Just me" }))
   if (action === "create") {
@@ -112,7 +112,7 @@ it.each(["create", "skip"])("keeps the paid selection after new-account %s compl
   } else {
     fireEvent.click(screen.getByRole("button", { name: "Skip project" }))
   }
-  expect(navigate).toHaveBeenCalledWith("/billing/select?offer=pro&interval=month&quantity=1")
+  expect(navigate).toHaveBeenCalledWith("/billing/select?offer=team&interval=month&quantity=1")
 })
 it("preserves the ordinary created-project destination without a paid selection", async () => {
   renderWizard()

@@ -1,11 +1,10 @@
 /** New-offer contract. Existing Field subscriptions retain their legacy rules. */
-export type Offer = 'free' | 'pro' | 'max_5x' | 'max_20x' | 'team' | 'team_20x'
+export type Offer = 'free' | 'team'
 const credits: Record<Offer, number> = {
-  free: 25, pro: 50, max_5x: 250, max_20x: 1000, team: 250, team_20x: 1000,
+  free: 25, team: 250,
 }
 export function weeklyAllowance(offer: Offer, quantity = 1): number {
-  if (!Number.isSafeInteger(quantity) || quantity < 1
-    || (quantity !== 1 && offer !== 'max_20x' && offer !== 'team_20x')) {
+  if (!Number.isSafeInteger(quantity) || quantity !== 1 || !Object.hasOwn(credits, offer)) {
     throw new Error('Invalid capacity quantity')
   }
   const allowance = credits[offer] * quantity
@@ -74,16 +73,13 @@ export function resolveApprovedPrice(
     || price.recurring.usage_type !== 'licensed'
     || price.unit_amount === null || !Number.isSafeInteger(price.unit_amount)
     || price.unit_amount < 0) throw new Error('Stripe price does not match approved offer')
-  if (!Number.isSafeInteger(binding.maxQuantity) || binding.maxQuantity < 1
-    || (binding.offer !== 'max_20x' && binding.offer !== 'team_20x'
-      && binding.maxQuantity !== 1)
-    || quantity > binding.maxQuantity) throw new Error('Capacity quantity is not approved')
+  if (binding.maxQuantity !== 1 || quantity !== 1) throw new Error('Capacity quantity is not approved')
   const allowanceCredits = weeklyAllowance(binding.offer, quantity)
   const totalAmount = price.unit_amount * quantity
   if (!Number.isSafeInteger(totalAmount)) throw new Error('Invalid price total')
   return {
     usageInterval: 'week' as const, priceId: price.id, offer: binding.offer, quantity, allowanceCredits,
-    scope: binding.offer.startsWith('team') ? 'team' as const : 'personal' as const,
+    scope: 'team' as const,
     currency: price.currency, interval: binding.interval,
     unitAmount: price.unit_amount, totalAmount,
     monthlyEquivalent: binding.interval === 'year' ? totalAmount / 12 : totalAmount,
@@ -110,10 +106,7 @@ export function quoteOffer(
   if (catalog.checkoutLayout === 'single_item' && quantity !== 1) {
     throw new Error('Single-item launch plans require quantity one')
   }
-  const components: Array<{ offer: Exclude<Offer, 'free'>; quantity: number }> =
-    offer === 'team_20x' && catalog.checkoutLayout !== 'single_item'
-      ? [{ offer: 'team', quantity: 1 }, { offer: 'team_20x', quantity }]
-      : [{ offer, quantity }]
+  const components = [{ offer, quantity }]
   const lines = components.map(component => {
     const matches = catalog.bindings.filter(binding =>
       binding.offer === component.offer && binding.interval === interval)
@@ -130,9 +123,7 @@ export function quoteOffer(
     offer, quantity, interval, currency, totalAmount, usageInterval: 'week' as const,
     monthlyEquivalent: interval === 'year' ? totalAmount / 12 : totalAmount,
     allowanceCredits: weeklyAllowance(offer, quantity),
-    plan: offer.startsWith('team') ? 'team' : offer.startsWith('max') ? 'max' : 'pro',
-    scope: offer.startsWith('team') ? 'team' : 'personal',
-    capacity: offer.endsWith('20x') ? '20x_pro' : offer === 'max_5x' || offer === 'team' ? '5x_pro' : '2x_free',
+    plan: offer, scope: 'team' as const, capacity: offer,
     priceVersion: catalog.version,
     entitlementVersion: catalog.entitlementVersion,
     lineItems: lines.map(line => ({ price: line.priceId, quantity: line.quantity })),

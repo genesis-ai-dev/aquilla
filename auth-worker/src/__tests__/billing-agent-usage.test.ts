@@ -20,7 +20,7 @@ const turn = (message: Record<string, unknown>, extra: Record<string, unknown> =
 const prose = (text: string, extra?: Record<string, unknown>) => turn({ role: 'assistant', content: text }, extra)
 
 async function setup() {
-  const paid = await completedPayment('pro', 'month')
+  const paid = await completedPayment('team', 'month', undefined, 'personal')
   expect((await paid.send()).status).toBe(200)
   await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES (?, 'Agent', 1, 1)").bind(PROJECT).run()
   await env.AQUILLA_PG.prepare(`INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at)
@@ -83,20 +83,20 @@ it('meters nested drafting passes as their own steps', async () => {
 })
 it('stops the next step once the week is spent and never calls the provider for it', async () => {
   const f = await setup()
-  // 13 raw cents = 52 units on a 50-unit week: the run completes, the week is over.
-  provider([prose('Expensive answer', { id: 'big', usage: { cost: 0.13 } })])
+  // 65 raw cents = 260 units on Team's 250-unit week: the run completes, the week is over.
+  provider([prose('Expensive answer', { id: 'big', usage: { cost: 0.65 } })])
   expect((await f.run()).frames.at(-1)).toMatchObject({ type: 'done', status: 'ok' })
   const completions = provider([prose('never')])
   const { frames } = await f.run()
   expect(frames).toContainEqual(expect.objectContaining({ type: 'budget.exhausted', reason: 'weekly_allowance' }))
   expect(frames.at(-1)).toMatchObject({ type: 'done', status: 'capped' })
   expect(completions).toHaveLength(0)
-  expect((await f.totals()).committed).toBe(52_000_000)
+  expect((await f.totals()).committed).toBe(260_000_000)
 })
 it('refuses a drafting pass mid-run without losing the orchestrator turn already settled', async () => {
   const f = await setup()
   const completions = provider([
-    turn({ role: 'assistant', content: null, tool_calls: [{ id: 'd1', type: 'function', function: { name: 'draft', arguments: JSON.stringify({ fileId: FILE }) } }] }, { id: 'o1', usage: { cost: 0.125 } }),
+    turn({ role: 'assistant', content: null, tool_calls: [{ id: 'd1', type: 'function', function: { name: 'draft', arguments: JSON.stringify({ fileId: FILE }) } }] }, { id: 'o1', usage: { cost: 0.625 } }),
     prose('after refusal', { id: 'o2', usage: { cost: 0.001 } }),
   ])
   const { frames } = await f.run()
@@ -104,7 +104,7 @@ it('refuses a drafting pass mid-run without losing the orchestrator turn already
   expect(frames).toContainEqual(expect.objectContaining({ type: 'budget.exhausted', reason: 'weekly_allowance' }))
   expect(frames.at(-1)).toMatchObject({ type: 'done', status: 'capped' })
   expect(completions).toHaveLength(1)
-  expect(await f.totals()).toEqual({ reserved: 0, settled: 50_000_000, committed: 50_000_000 })
+  expect(await f.totals()).toEqual({ reserved: 0, settled: 250_000_000, committed: 250_000_000 })
 })
 it('holds uncertain steps for reconciliation and fails closed on unpriced models and unowned projects', async () => {
   const f = await setup()

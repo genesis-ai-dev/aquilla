@@ -10,7 +10,7 @@ import { resetTranscriptionRateCache } from '../lib/billing/transcription-usage'
 const projectId = 'transcription-usage-project'
 afterEach(() => { vi.unstubAllGlobals(); resetTranscriptionRateCache() })
 async function fixture() {
-  const paid = await completedPayment('pro', 'month')
+  const paid = await completedPayment('team', 'month', undefined, 'personal')
   expect((await paid.send()).status).toBe(200)
   await env.AQUILLA_PG.prepare(
     "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, 'Audio', 1, 1)",
@@ -61,8 +61,8 @@ it('meters real client WAV output through auth and settles provider cost to capa
 it('refuses exhausted weekly capacity before invoking Whisper', async () => {
   const f = await fixture()
   await reserveWorkspaceUsage(env.AQUILLA_PG, { orgId: 1, projectId, userId: 1,
-    requestId: 'spent', rail: 'llm', maxRawCostCents: 12.5 })
-  await settleWorkspaceUsage(env.AQUILLA_PG, 1, 'spent', 12.5)
+    requestId: 'spent', rail: 'llm', maxRawCostCents: 62.5 })
+  await settleWorkspaceUsage(env.AQUILLA_PG, 1, 'spent', 62.5)
   const response = await f.send()
   expect(response.status).toBe(429)
   expect(await response.json()).toEqual({ error: 'weekly_ai_allowance_exhausted' })

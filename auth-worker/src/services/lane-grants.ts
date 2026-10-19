@@ -455,6 +455,60 @@ function laneFlag(value: unknown): boolean {
   return value === true || value === 1 || value === "t" || value === "true"
 }
 
+/**
+ * AQU-2047: every team attached to this project, and the lanes that attachment
+ * is tied to. A team that has not saved checkboxes (`lanesExplicit` false) is
+ * tied to every current target lane — the stored rows, if any are left behind,
+ * are not its set. An explicit team is tied only to its `group_project_lanes`
+ * rows. An empty list is a project with no attached team.
+ */
+export interface ProjectTeamLaneAttachment {
+  lanesExplicit: boolean
+  laneIds?: string[]
+}
+
+export async function loadProjectTeamLaneAttachments(
+  db: AquillaDb,
+  projectId: string,
+): Promise<ProjectTeamLaneAttachment[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT group_id, lanes_explicit
+         FROM group_project_grants
+        WHERE project_id = ?
+        ORDER BY group_id`,
+    )
+    .bind(projectId)
+    .all<{ group_id: number | string; lanes_explicit: boolean | number | string }>()
+  const teams = results ?? []
+  if (teams.length === 0) return []
+
+  const { results: laneRows } = await db
+    .prepare(
+      `SELECT group_id, lane_id
+         FROM group_project_lanes
+        WHERE project_id = ?
+        ORDER BY group_id, lane_id`,
+    )
+    .bind(projectId)
+    .all<{ group_id: number | string; lane_id: string }>()
+  const lanesByGroup = new Map<number, string[]>()
+  for (const row of laneRows ?? []) {
+    const groupId = Number(row.group_id)
+    const list = lanesByGroup.get(groupId) ?? []
+    list.push(row.lane_id)
+    lanesByGroup.set(groupId, list)
+  }
+
+  return teams.map((team) => {
+    if (!laneFlag(team.lanes_explicit)) return { lanesExplicit: false }
+    return {
+      lanesExplicit: true,
+      laneIds: lanesByGroup.get(Number(team.group_id)) ?? [],
+    }
+  })
+}
+
 async function teamLaneAccess(
   db: AquillaDb,
   userId: number,

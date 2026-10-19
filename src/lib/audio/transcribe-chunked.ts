@@ -35,8 +35,10 @@ import { sharedClipWindow } from "./shared-clip-pcm"
 import { transcribeHosted } from "./transcribe-hosted"
 import { audioBytesToWhisperPcm, readClipBytes, type TranscriptionResult } from "./transcribe"
 
-/** The most audio one hosted request carries (transcribe-hosted.ts windows
- *  at exactly this), so a minute is one request. */
+/** The most audio one hosted request carries for Whisper and Qwen
+ *  (transcribe-hosted.ts windows at exactly this), so a minute is one
+ *  request. Omnilingual takes 30 s: the batch passes the model's window as
+ *  `maxMs` (`sourceClipWindowSeconds`). */
 export const CHUNK_MAX_MS = 60_000
 
 /** Silence put between two rows' stretches in a minute. */
@@ -82,6 +84,7 @@ function sharedRecordingRow(cell: CellData): { clipKey: string; startMs: number;
  */
 export function planTranscriptionChunks(
   targets: readonly CellData[],
+  maxMs: number = CHUNK_MAX_MS,
 ): { chunks: TranscriptionChunk[]; single: CellData[] } {
   const chunks: TranscriptionChunk[] = []
   const single: CellData[] = []
@@ -107,11 +110,11 @@ export function planTranscriptionChunks(
     }
     for (const { cell, startMs, endMs } of rows) {
       const length = endMs - startMs
-      if (length > CHUNK_MAX_MS) {
+      if (length > maxMs) {
         single.push(cell)
         continue
       }
-      if (current && current.durationMs + JOIN_SILENCE_MS + length <= CHUNK_MAX_MS) {
+      if (current && current.durationMs + JOIN_SILENCE_MS + length <= maxMs) {
         const offsetMs: number = current.durationMs + JOIN_SILENCE_MS
         current.rows.push({ cell, startMs, endMs, offsetMs })
         current.durationMs = offsetMs + length
@@ -136,15 +139,17 @@ export function planTranscriptionChunks(
  * punctuation and languages written without spaces survive; if a word cannot
  * be found in the transcript the row's words are joined with spaces instead.
  *
- * Null when the words cannot be placed: segment-level timings, or text with
- * no timings at all. The caller then transcribes those rows one by one.
+ * Null when the words cannot be placed: segment-level timings, word times
+ * the model spread over its window rather than heard (Omnilingual's
+ * `timingsApproximate`), or text with no timings at all. The caller then
+ * transcribes those rows one by one.
  */
 export function assignWordsToRows(
   result: TranscriptionResult,
   chunk: TranscriptionChunk,
 ): Map<string, TranscriptionResult> | null {
   const out = new Map<string, TranscriptionResult>()
-  if (result.granularity === "segment") return null
+  if (result.granularity === "segment" || result.timingsApproximate) return null
   if (result.chunks.length === 0) {
     if (result.text.trim()) return null
     for (const row of chunk.rows) out.set(row.cell.id, { text: "", chunks: [] })
@@ -293,7 +298,7 @@ export async function transcribeChunk(chunk: TranscriptionChunk, ctx: ChunkRunCo
   if (!perRow) {
     console.warn(
       `[transcribe] AQU-1681: the transcription of ${chunk.rows.length} rows came back without word timings ` +
-      `(${result.granularity ?? "none"}); transcribing those rows one by one`,
+      `(${result.timingsApproximate ? "approximate" : result.granularity ?? "none"}); transcribing those rows one by one`,
     )
     for (const { cell } of chunk.rows) await ctx.transcribeRow(cell)
     return

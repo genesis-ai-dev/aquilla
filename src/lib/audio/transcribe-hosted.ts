@@ -104,6 +104,17 @@ export class TranscriptionRateLimitedError extends Error {
   }
 }
 
+/**
+ * AQU-1681: the window a row of a shared source recording is sent in — the
+ * account's model, except zero-shot, which a source clip never uses (it is no
+ * lane's speech; see `transcribeHosted`). A batch packs that many seconds of
+ * rows into one request.
+ */
+export function sourceClipWindowSeconds(username: string | undefined, language?: string): number {
+  const chosen = getTranscriptionModel(username)
+  return hostedWindowSeconds(chosen === "omni-zs" ? "auto" : chosen, hostedLanguageTag(language))
+}
+
 type HostedPart = TranscriptionResult
 
 async function postWindow(

@@ -153,6 +153,7 @@ import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { transcribeCell, type TranscriptionResult } from "./transcribe"
 import { planTranscriptionChunks, transcribeChunk, type TranscriptionChunk } from "./transcribe-chunked"
+import { sourceClipWindowSeconds } from "./transcribe-hosted"
 import { pinSharedClipPcm } from "./shared-clip-pcm"
 import { usesHostedTranscription } from "./transcription-preference"
 import { getTranscriptionModel } from "./transcription-model"
@@ -324,9 +325,14 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
   // requests rather than ~900 against a limit of 60 per 15 minutes. Hosted
   // only: on-device Whisper has no limit, and keeps its row-at-a-time run. A
   // forced run (the sections the user selected) also stays row by row: the
-  // person asked for those rows again, one Transcribe press each.
+  // person asked for those rows again, one Transcribe press each. A "minute"
+  // is as long as the account's model takes in one request — 30 s when the
+  // audio goes to Omnilingual.
   const plan = !args.force && session && usesHostedTranscription(session, projectId)
-    ? planTranscriptionChunks(targets)
+    ? planTranscriptionChunks(
+        targets,
+        sourceClipWindowSeconds(session.username, args.sourceLanguage ?? targetLanguage) * 1000,
+      )
     : { chunks: [] as TranscriptionChunk[], single: targets }
   type Job = { chunk: TranscriptionChunk } | { cell: CellData }
   const jobs: Job[] = [...plan.chunks.map((chunk) => ({ chunk })), ...plan.single.map((cell) => ({ cell }))]

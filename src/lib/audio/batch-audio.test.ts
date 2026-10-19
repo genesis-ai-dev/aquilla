@@ -414,6 +414,22 @@ describe("runTranscribeAll — a minute at a time (AQU-1681)", () => {
     expect(vi.mocked(transcribeChunk).mock.calls.flatMap(([c]) => c.rows.map((r) => r.cell.id))).toEqual(["r1", "r3", "r4"])
   })
 
+  it("packs only as much as the account's model takes in one request", async () => {
+    const { transcribeCell } = await import("./transcribe")
+    const { transcribeChunk } = await import("./transcribe-chunked")
+    const { setTranscriptionModel } = await import("./transcription-model")
+    const twelve = () => [shared("r1", 0, 12_000), shared("r2", 13_000, 25_000), shared("r3", 26_000, 38_000)]
+    setTranscriptionModel(mockSession.username, "omni-ctc")
+    try {
+      await runTranscribeAll({ cells: twelve(), projectId: "p1", session: mockSession })
+    } finally {
+      setTranscriptionModel(mockSession.username, "auto")
+    }
+    // 12 + 0.5 + 12 s fits Omnilingual's 30 s; the third row would not.
+    expect(vi.mocked(transcribeChunk).mock.calls.map(([c]) => c.rows.map((r) => r.cell.id))).toEqual([["r1", "r2"]])
+    expect(vi.mocked(transcribeCell).mock.calls.map(([a]) => a.cell.id)).toEqual(["r3"])
+  })
+
   it("stays row by row for a chosen selection and for on-device Whisper", async () => {
     const { transcribeCell } = await import("./transcribe")
     const { transcribeChunk } = await import("./transcribe-chunked")

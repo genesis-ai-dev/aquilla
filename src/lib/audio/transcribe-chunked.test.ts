@@ -66,6 +66,19 @@ describe("planTranscriptionChunks", () => {
     expect(chunks).toEqual([])
     expect(single.map((c) => c.id)).toEqual(["take", "untimed", "alone"])
   })
+
+  // Omnilingual takes under 40 s per request (30 s windows); a longer "minute"
+  // would be cut in two by the client, two requests instead of one.
+  it("packs to the model's window when it is shorter than a minute", () => {
+    const rows = Array.from({ length: 14 }, (_, i) => row(`r${i}`, i * 20_000, i * 20_000 + 8_000))
+    const { chunks, single } = planTranscriptionChunks(rows, 30_000)
+    expect(single).toEqual([])
+    expect(chunks.map((c) => [c.rows.length, c.durationMs])).toEqual([
+      [3, 25_000], [3, 25_000], [3, 25_000], [3, 25_000], [2, 16_500],
+    ])
+    expect(planTranscriptionChunks([row("a", 0, 3_000), row("long", 4_000, 35_000), row("b", 36_000, 39_000)], 30_000)
+      .single.map((c) => c.id)).toEqual(["long"])
+  })
 })
 
 /** A minute holding rows 100–103 s and 104–107.5 s of the recording, sent as
@@ -133,6 +146,13 @@ describe("assignWordsToRows", () => {
   it("refuses to guess from sentence-long segments or from text with no timings", () => {
     expect(assignWordsToRows({ text: "Hello there.", granularity: "segment", chunks: [{ text: "Hello there.", start: 0, end: 5 }] }, chunkOf())).toBeNull()
     expect(assignWordsToRows({ text: "Hello there.", chunks: [] }, chunkOf())).toBeNull()
+  })
+
+  it("refuses word times the model spread over the audio rather than heard (Omnilingual)", () => {
+    expect(assignWordsToRows({
+      text: "Hello. Bye.", granularity: "word", timingsApproximate: true,
+      chunks: [{ text: "Hello.", start: 0, end: 3 }, { text: "Bye.", start: 3, end: 6 }],
+    }, chunkOf())).toBeNull()
   })
 })
 

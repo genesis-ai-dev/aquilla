@@ -15,14 +15,16 @@
  * an entry stores its `name`, i.e. exactly the string a user would have typed
  * by hand, so nothing downstream (agent prompts, export, lane counting,
  * editor badges) changes shape. Codes are searchable so a typed tag still
- * finds the name, and they are never stored and never shown in the list
- * (AQU-1792). The code is derived from the stored name and can be overridden.
+ * finds the name. Picking stores the name, never a code (AQU-1792). The list
+ * shows the derived code beside that name (AQU-2049); a later edit of the
+ * lane code is an override.
  */
 
 export type LanguageEntry = {
   /**
    * Primary code — ISO 639-1 in `LANGUAGES`, ISO 639-3 in the full catalog.
-   * Shown next to the name as a hint, searchable, never the stored value.
+   * Searchable, never stored. Not the suggestion hint: French's id here is
+   * "fra", and the hint is the derived code "fr".
    */
   code: string
   /** English display name — this is what gets stored when picked. */
@@ -30,7 +32,7 @@ export type LanguageEntry = {
   /**
    * AQU-1456 — a second searchable code for the same language, so a 639-3
    * entry still answers to its two-letter form ("fr" and "fra" both find
-   * French). Not displayed.
+   * French). `codeFromLanguageCatalog` prefers this over `code` for that name.
    */
   altCode?: string
 }

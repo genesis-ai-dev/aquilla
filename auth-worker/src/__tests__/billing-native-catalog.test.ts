@@ -20,7 +20,8 @@ it.each(['month', 'year'] as const)('quotes Team as one native line for %s', int
   expect(quote.totalAmount).toBe(interval === 'month' ? 50000 : 500000)
   expect(quote.lineItems).toEqual([{ price: catalog.bindings.find(b =>
     b.offer === 'team' && b.interval === interval)!.priceId, quantity: 1 }])
-  expect(quote.allowanceCredits).toBe(250)
+  // Team = 24 × Free $1 raw = $24 raw = 9,600 units (AQU-2056).
+  expect(quote.allowanceCredits).toBe(9600)
 })
 it('rejects unapproved quantity and layout values', () => {
   expect(() => quoteOffer(catalog, prices, 'team', 'month', 2)).toThrow('quantity one')

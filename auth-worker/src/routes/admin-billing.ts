@@ -11,6 +11,7 @@ import {
   type FieldPlanSettings,
   resolveFieldPlan,
 } from "../lib/billing/plans"
+import { rawUsdToAllowanceUnits, resolveAllowancePolicy, teamWeeklyRawUsd } from "../lib/billing/pricing-model"
 import {
   createCatalogPrice,
   retrievePrice,
@@ -38,9 +39,16 @@ async function orgExists(db: AquillaDb, orgId: number): Promise<boolean> {
   return row != null
 }
 
-function publicPlan(plan: ReturnType<typeof resolveFieldPlan>) {
+function publicPlan(plan: ReturnType<typeof resolveFieldPlan>, stored: FieldPlanSettings | undefined) {
+  const policy = resolveAllowancePolicy(stored)
   return {
     freeWeeklyAllowance: plan.freeWeeklyAllowance,
+    freeWeeklyRawUsd: policy.freeWeeklyRawUsd,
+    teamMultipleOfFree: policy.teamMultipleOfFree,
+    teamWeeklyRawUsd: teamWeeklyRawUsd(policy),
+    // Internal display units for admin screens only; users see a percentage.
+    freeWeeklyUnits: rawUsdToAllowanceUnits(policy.freeWeeklyRawUsd),
+    teamWeeklyUnits: rawUsdToAllowanceUnits(teamWeeklyRawUsd(policy)),
     name: plan.name,
     intervalDays: plan.intervalDays,
     priceCents: plan.priceCents,
@@ -62,7 +70,7 @@ adminBilling.get("/billing/plans", async (c) => {
   const rec = await loadPlatformSettings(c.env)
   const plan = resolveFieldPlan(rec.settings.fieldPlan, c.env)
   return c.json({
-    plan: publicPlan(plan),
+    plan: publicPlan(plan, rec.settings.fieldPlan),
     version: rec.version,
     weeklyUsageEnforced: c.env.BILLING_WEEKLY_USAGE_ENFORCE === "true",
     stripeConfigured: stripeConfigured(c.env),
@@ -74,6 +82,8 @@ adminBilling.get("/billing/plans", async (c) => {
 
 const fieldPlanPatchSchema = z.object({
   freeWeeklyAllowance: z.number().int().min(0).max(10_000_000).optional(),
+  freeWeeklyRawUsd: z.number().min(0).max(10_000).optional(),
+  teamMultipleOfFree: z.number().min(1).max(1_000).optional(),
   priceCents: z.number().int().min(100).max(10_000_000).optional(),
   addonPriceCents: z.number().int().min(100).max(10_000_000).optional(),
   includedWords: z.number().int().min(0).max(100_000_000).optional(),
@@ -136,7 +146,7 @@ adminBilling.patch("/billing/plans", zValidator("json", fieldPlanPatchSchema), a
 
   await audit(c.env.AQUILLA_PG, user.id, "billing.plans.update", { amounts, warnings })
   const plan = resolveFieldPlan(saved.record.settings.fieldPlan, c.env)
-  return c.json({ plan: publicPlan(plan), version: saved.record.version, warnings })
+  return c.json({ plan: publicPlan(plan, saved.record.settings.fieldPlan), version: saved.record.version, warnings })
 })
 
 adminBilling.get("/billing/orgs", async (c) => {
@@ -177,7 +187,7 @@ adminBilling.get("/billing/orgs", async (c) => {
       wordsPerCredit: snap.wordsPerCredit,
     })
   }
-  return c.json({ orgs, plan: publicPlan(catalog) })
+  return c.json({ orgs, plan: publicPlan(catalog, rec.settings.fieldPlan) })
 })
 
 const orgPatchSchema = z.object({

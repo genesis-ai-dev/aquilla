@@ -1,15 +1,51 @@
+import { costMultiplier } from '../../../../db/shared/billing-cost'
+
 /** New-offer contract. Existing Field subscriptions retain their legacy rules. */
 export type Offer = 'free' | 'team'
-const credits: Record<Offer, number> = {
-  free: 25, team: 250,
+
+/** AQU-2056: allowances are raw provider dollars per week. Team is a multiple
+ * of Free so an admin change to Free moves Team with it (spec §4.3: Team at
+ * 100% must stay within 25% of annual Team revenue).
+ */
+export interface AllowancePolicy { freeWeeklyRawUsd: number; teamMultipleOfFree: number }
+export const DEFAULT_ALLOWANCE_POLICY: AllowancePolicy = { freeWeeklyRawUsd: 1, teamMultipleOfFree: 24 }
+
+/** Missing fields take the default; a present but invalid value throws so a
+ * bad admin save cannot silently become an unlimited or zero allowance.
+ */
+export function resolveAllowancePolicy(
+  stored: { freeWeeklyRawUsd?: unknown; teamMultipleOfFree?: unknown } | undefined,
+): AllowancePolicy {
+  const free = stored?.freeWeeklyRawUsd ?? DEFAULT_ALLOWANCE_POLICY.freeWeeklyRawUsd
+  const multiple = stored?.teamMultipleOfFree ?? DEFAULT_ALLOWANCE_POLICY.teamMultipleOfFree
+  if (typeof free !== 'number' || !Number.isFinite(free) || free < 0 || free > 10_000) {
+    throw new Error('Invalid Free weekly allowance')
+  }
+  if (typeof multiple !== 'number' || !Number.isFinite(multiple) || multiple < 1 || multiple > 1_000) {
+    throw new Error('Invalid Team multiple of Free')
+  }
+  return { freeWeeklyRawUsd: free, teamMultipleOfFree: multiple }
 }
-export function weeklyAllowance(offer: Offer, quantity = 1): number {
-  if (!Number.isSafeInteger(quantity) || quantity !== 1 || !Object.hasOwn(credits, offer)) {
+
+export function teamWeeklyRawUsd(policy: AllowancePolicy): number {
+  return policy.freeWeeklyRawUsd * policy.teamMultipleOfFree
+}
+
+/** The one raw-dollar → meter conversion. The meter counts units of one
+ * marked-up cent (db/shared/billing-cost.ts); every rail shares one markup.
+ * Units are internal: only admin screens may show them.
+ */
+export function rawUsdToAllowanceUnits(rawUsd: number): number {
+  const units = Math.round(rawUsd * 100 * costMultiplier('llm'))
+  if (!Number.isSafeInteger(units) || units < 0) throw new Error('Invalid allowance')
+  return units
+}
+
+export function weeklyAllowance(offer: Offer, quantity = 1, policy = DEFAULT_ALLOWANCE_POLICY): number {
+  if (!Number.isSafeInteger(quantity) || quantity !== 1 || (offer !== 'free' && offer !== 'team')) {
     throw new Error('Invalid capacity quantity')
   }
-  const allowance = credits[offer] * quantity
-  if (!Number.isSafeInteger(allowance)) throw new Error('Invalid allowance')
-  return allowance
+  return rawUsdToAllowanceUnits(offer === 'free' ? policy.freeWeeklyRawUsd : teamWeeklyRawUsd(policy))
 }
 
 /** Plan changes replace the cap without forgiving this week's consumption. */

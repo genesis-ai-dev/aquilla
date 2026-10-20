@@ -80,7 +80,7 @@ it('changes experiment prices without changing plan entitlements or acquisition 
   }
   const base = make('baseline-v1', 'price_baseline', 50000)
   const higher = make('higher-v1', 'price_higher', 60000)
-  expect([base.allowanceCredits, higher.allowanceCredits]).toEqual([250, 250])
+  expect([base.allowanceCredits, higher.allowanceCredits]).toEqual([9600, 9600])
   expect([base.plan, higher.plan]).toEqual(['team', 'team'])
   expect([base.totalAmount, higher.totalAmount]).toEqual([50000, 60000])
   expect(pricingEventProperties(higher, {
@@ -146,7 +146,7 @@ it.each([false, true])('verifies native launch objects and sends their output th
   expect(result.catalog.bindings).toHaveLength(2)
   expect(Object.keys(result.configurations)).toEqual(['team'])
   expect(quoteOffer(result.catalog, fixture.prices, 'team', 'month')).toMatchObject({
-    totalAmount: 50000, allowanceCredits: 250, lineItems: [expect.objectContaining({ quantity: 1 })] })
+    totalAmount: 50000, allowanceCredits: 9600, lineItems: [expect.objectContaining({ quantity: 1 })] })
   expect(quoteOffer(result.catalog, fixture.prices, 'team', 'year').totalAmount).toBe(500000)
   expect(writes).toEqual([])
 })

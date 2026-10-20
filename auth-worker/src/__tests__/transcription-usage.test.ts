@@ -2,7 +2,7 @@ import { env } from 'cloudflare:test'
 import { afterEach, expect, it, vi } from 'vitest'
 import app from '../index'
 import { authHeader, jwtFor } from './helpers/db'
-import { completedPayment, config } from './helpers/workspace-billing'
+import { completedPayment, config, pinSmallAllowancePolicy } from './helpers/workspace-billing'
 import { readBillingWorkspace } from '../lib/billing/workspace'
 import { readUsageTotals, reserveWorkspaceUsage, settleWorkspaceUsage } from '../lib/billing/workspace-usage'
 import { resetTranscriptionRateCache } from '../lib/billing/transcription-usage'
@@ -12,6 +12,7 @@ afterEach(() => { vi.unstubAllGlobals(); resetTranscriptionRateCache() })
 async function fixture() {
   const paid = await completedPayment('team', 'month', undefined, 'personal')
   expect((await paid.send()).status).toBe(200)
+  await pinSmallAllowancePolicy()
   await env.AQUILLA_PG.prepare(
     "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, 'Audio', 1, 1)",
   ).bind(projectId).run()

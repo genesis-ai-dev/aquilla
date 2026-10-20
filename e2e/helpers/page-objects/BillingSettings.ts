@@ -35,10 +35,11 @@ export class BillingSettingsPage {
     await this.page.getByRole('button', { name: `Review for ${workspaceName}`, exact: true }).click()
   }
 
-  async expectIncompatibleWorkspace() {
-    await expect(this.page.getByRole('region', { name: 'Review selected plan' }))
-      .toContainText('This plan does not match the workspace type')
-    await expect(this.page.getByRole('button', { name: 'Checkout coming soon' })).toHaveCount(0)
+  async expectWorkspaceTypeAccepted() {
+    const region = this.page.getByRole('region', { name: 'Review selected plan' })
+    await expect(region).toBeVisible()
+    await expect(region).not.toContainText('Checking workspace and current prices')
+    await expect(region).not.toContainText('This plan does not match the workspace type')
   }
 
   async openWorkspace(orgId: number) {

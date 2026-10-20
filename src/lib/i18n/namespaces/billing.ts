@@ -89,6 +89,7 @@ export const billing = defineNamespace({
     "billing.workspace.eligibility.already_subscribed": "This workspace already has a paid plan. Changes will be available when billing management is ready.",
     "billing.workspace.eligibility.personal_collaboration_review": "This personal workspace has collaborators. Contact us to confirm the right plan before purchasing.",
     "billing.workspace.manageInStripe": "Use Manage billing to update this workspace’s subscription in Stripe.",
+    "billing.workspace.paymentGrace": "Payment failed. Stripe will retry your card, and your Team plan stays active until {date}. Update your payment method in Manage billing to keep it.",
     "billing.workspace.paymentFailed": "Payment failed. Your AI allowance falls back to Free. This week’s usage still counts; if it exceeds Free’s allowance, AI pauses until the weekly reset or payment recovery.",
     "billing.workspace.paidPeriodEnded": "Your paid period has ended. Your AI allowance follows Free, with this week’s usage still counted.",
     "billing.workspace.canceled": "Your subscription is canceled. Paid access continues through {date}.",
@@ -452,6 +453,12 @@ export const billing = defineNamespace({
   },
   "billing.workspace.manageInStripe": {
     "description": "Help text for a workspace that already has a paid plan. \"Manage billing\" is the label of the button on this page (billing.portal.manage); use the same translation. Stripe is the payment provider's name; do not translate it."
+  },
+  "billing.workspace.paymentGrace": {
+    "description": "Status after a renewal payment failed but the grace period is still running: Stripe retries the card and the Team plan stays active until the date. \"Team\" is the plan name. \"Manage billing\" is the label of the button on this page (billing.portal.manage); use the same translation. Stripe is the payment provider's name; do not translate it.",
+    "placeholders": {
+      "date": "Date and time the grace period ends, already formatted for the user's locale."
+    }
   },
   "billing.workspace.paymentFailed": {
     "description": "Status after a payment failed: the workspace gets the AI allowance of the Free plan, and AI can pause if this week's usage is already over that allowance. \"Free\" is the plan name (billing.plan.free)."

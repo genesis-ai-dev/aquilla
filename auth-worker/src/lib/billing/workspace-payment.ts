@@ -21,6 +21,8 @@ const sessionSchema = z.object({
   subscription: z.string().regex(/^sub_[a-zA-Z0-9_]+$/),
   currency: z.literal('usd'), amount_subtotal: z.number().int(),
   amount_total: z.number().int(), metadata: z.record(z.string(), z.string()),
+  total_details: z.object({ amount_tax: z.number().int().nonnegative(),
+    amount_discount: z.literal(0) }).nullable().optional(),
 })
 const subscriptionSchema = z.object({
   id: z.string(), customer: z.string(), livemode: z.boolean(),
@@ -79,7 +81,9 @@ export async function reconcileWorkspacePayment(
   const prices = z.array(priceSchema).parse(attempt.prices_json)
   const quote = quoteOffer(catalog, prices, selection.offer, selection.interval, selection.quantity)
   if (session.client_reference_id !== String(attempt.org_id)
-    || session.amount_subtotal !== quote.totalAmount || session.amount_total !== quote.totalAmount
+    // Prices are tax-exclusive: the total may add Stripe Tax, never anything else.
+    || session.amount_subtotal !== quote.totalAmount
+    || session.amount_total !== quote.totalAmount + (session.total_details?.amount_tax ?? 0)
     || session.currency !== quote.currency) throw new Error('Checkout quote mismatch')
   const subscription = subscriptionSchema.parse(await stripeForm(env, 'GET',
     `/subscriptions/${encodeURIComponent(session.subscription)}`))

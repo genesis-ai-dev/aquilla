@@ -7,8 +7,9 @@ export const testStripeCatalog = catalogSchema.parse(JSON.parse(readFileSync(
   resolve(dirname(fileURLToPath(import.meta.url)), '../../../../config/pricing/stripe-sandbox.json'), 'utf8',
 )))
 const manifest = testStripeCatalog
-const amounts: Record<string, number> = {
-  pro: 2000, max_5x: 6000, max_20x: 12000, team: 60000, team_20x: 12000,
+// AQU-2058: Team is $500/month or $5,000/year (two months free).
+const amounts: Record<string, { month: number; year: number }> = {
+  team: { month: 50000, year: 500000 },
 }
 export function stripeCatalogResponse(path: string, catalog = manifest) {
   if (path === '/v1/account') return { id: catalog.accountId }
@@ -16,8 +17,7 @@ export function stripeCatalogResponse(path: string, catalog = manifest) {
   return {
     id: binding.priceId, product: binding.productId, active: true,
     livemode: binding.live, type: 'recurring', billing_scheme: 'per_unit',
-    currency: 'usd', unit_amount: (binding.offer === 'team_20x' && catalog.checkoutLayout === 'single_item'
-      ? 72000 : amounts[binding.offer]!) * (binding.interval === 'year' ? 10 : 1),
+    currency: 'usd', unit_amount: amounts[binding.offer]![binding.interval],
     recurring: { interval: binding.interval, interval_count: 1, usage_type: 'licensed' },
   }
 }

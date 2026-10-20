@@ -346,6 +346,6 @@ describe("Login page — next param", () => {
 })
 
 it("keeps a paid selection when switching from sign-in to account creation", () => {
-  render(<MemoryRouter initialEntries={["/login?next=" + encodeURIComponent("/billing/select?offer=pro&interval=year&quantity=1")]}><Login /></MemoryRouter>)
-  expect(screen.getByRole("link", { name: /create an account/i })).toHaveAttribute("href", "/onboarding?offer=pro&interval=year&quantity=1")
+  render(<MemoryRouter initialEntries={["/login?next=" + encodeURIComponent("/billing/select?offer=team&interval=year&quantity=1")]}><Login /></MemoryRouter>)
+  expect(screen.getByRole("link", { name: /create an account/i })).toHaveAttribute("href", "/onboarding?offer=team&interval=year&quantity=1")
 })

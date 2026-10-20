@@ -61,10 +61,9 @@ export async function reviewWorkspaceChange(env: Env, orgId: number, raw: unknow
     return conflict('An active paid workspace is required. Resolve billing before changing plans')
   }
   if (input.interval !== stored.billing_interval) return conflict('Billing-period changes require a separate review')
+  // AQU-2058: Team is the only offer, so every request stops here. Monthly ↔ annual
+  // switches go through the Stripe portal. The rest is removed with T18 (AQU-2071).
   if (input.offer === stored.offer) return conflict('This workspace already has that plan')
-  if ((input.offer.startsWith('team') ? 'team' : 'personal') !== stored.scope) {
-    return conflict('A plan change cannot change the workspace type')
-  }
   const { catalog, prices, offers } = await readValidatedBillingCatalog(env)
   const attempt = await db.prepare(`SELECT account_id FROM workspace_checkout_attempts
     WHERE org_id = ? AND resolved_at IS NULL AND session_id IS NOT NULL`)

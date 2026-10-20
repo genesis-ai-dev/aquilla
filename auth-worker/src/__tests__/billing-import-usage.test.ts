@@ -13,7 +13,7 @@ afterEach(() => { vi.unstubAllGlobals(); resetRateCardCache() })
 const recipe = { category: 'scripture', confidence: 0.9, explanation: 'Pipe rows',
   recipe: { name: 'Rows', inputFormat: 'pipe', config: { recordMode: 'delimited', delimiter: 'pipe', sourceField: 'source' } } }
 async function setup() {
-  const paid = await completedPayment('pro', 'month')
+  const paid = await completedPayment('team', 'month', undefined, 'personal')
   expect((await paid.send()).status).toBe(200)
   await env.AQUILLA_PG.exec("INSERT INTO projects (id, name, org_id, created_by) VALUES ('import-project', 'Import', 1, 1)")
   const settings: Env = { ...config(), OPENROUTER_API_KEY: 'local-fixture', AI_BUDGET_ENFORCE: 'false', DEFAULT_LLM_MODEL: 'local-test', AI_ALLOWED_MODELS: 'local-test',
@@ -63,7 +63,7 @@ it('keeps the reservation when the provider returns an error or omits cost', asy
 })
 it('blocks exhausted allowance before starting the provider', async () => {
   const f = await setup()
-  const fetch = upstream({ choices: [{ message: { content: JSON.stringify(recipe) } }], usage: { cost: 0.13 } })
+  const fetch = upstream({ choices: [{ message: { content: JSON.stringify(recipe) } }], usage: { cost: 0.65 } })
   vi.stubGlobal('fetch', fetch)
   expect((await f.send()).status).toBe(200)
   expect((await f.send({}, {}, crypto.randomUUID())).status).toBe(429)

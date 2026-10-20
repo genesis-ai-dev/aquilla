@@ -238,7 +238,7 @@ describe("Omnilingual billing", () => {
   })
 
   it("settles the weekly reservation at metered GPU cost with the ×4 markup", async () => {
-    const paid = await completedPayment("pro", "month")
+    const paid = await completedPayment("team", "month", undefined, "personal")
     expect((await paid.send()).status).toBe(200)
     await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES (?, 'Omni', 1, 1)")
       .bind(projectId).run()
@@ -260,7 +260,7 @@ describe("Omnilingual billing", () => {
 
 describe("Omnilingual billing — edge replies", () => {
   async function weekly(reply: Record<string, unknown>) {
-    const paid = await completedPayment("pro", "month")
+    const paid = await completedPayment("team", "month", undefined, "personal")
     expect((await paid.send()).status).toBe(200)
     await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES (?, 'Omni', 1, 1)")
       .bind(projectId).run()

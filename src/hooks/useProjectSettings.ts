@@ -320,6 +320,12 @@ export interface UseProjectSettings {
    *  while the rest of the form stays locked. */
   canEditLanguages: boolean
   reasonCannotEditLanguages: CannotEditReason
+  /** AQU-1912: whether the caller may change `countStructuralCells` — project
+   *  lead and up, the same floor `patch` and the server apply to a patch that
+   *  touches only that key (AQU-1083). The hook-wide {@link canEdit} is
+   *  maintainer, which left the control locked for the role it was built for. */
+  canEditCountStructural: boolean
+  reasonCannotEditCountStructural: CannotEditReason
   /** The effective language floor used by {@link canEditLanguages} — for the
    *  lock hint, which must name the role the user actually needs rather than
    *  a hardcoded "Maintainer" (AQU-427 convention). */
@@ -794,6 +800,17 @@ export function useProjectSettings(
       ? "offline"
       : "role"
 
+  // AQU-1912: the headings switch has its own project-lead floor (the
+  // countStructuralCells-only carve-out in patch() below and on the server),
+  // so it gates on this rather than the hook-wide maintainer `canEdit`.
+  const canEditCountStructural =
+    isOnline && roleLevel != null && roleLevel >= ROLE.PROJECT_LEAD
+  const reasonCannotEditCountStructural: CannotEditReason = canEditCountStructural
+    ? null
+    : !isOnline
+      ? "offline"
+      : "role"
+
   // One-shot migration: push local IDB values to the server when the server
   // row is empty (version 0) and the caller has PROJECT_LEAD+ authority.
   // This handles projects created locally before cloud settings existed.
@@ -1058,6 +1075,8 @@ export function useProjectSettings(
     reasonCannotEdit,
     canEditLanguages,
     reasonCannotEditLanguages,
+    canEditCountStructural,
+    reasonCannotEditCountStructural,
     languageEditFloor,
     conflict,
     dismissConflict,

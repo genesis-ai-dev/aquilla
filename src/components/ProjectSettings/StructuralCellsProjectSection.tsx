@@ -84,6 +84,23 @@ export function StructuralCellsProjectSection({
     setBusy(false)
   }
 
+  // AQU-1912 (Sam, 2026-10-19): ONE hover. A locked control carried two
+  // tooltips stacked on one trigger — the lock's and the organization's
+  // answer — and the inner one won, so a reader never learned why it was
+  // grey. Locked, the lock's explanation leads and the organization's answer
+  // sits under it; unlocked, the organization's answer stands alone.
+  const locked = Boolean(disabled) && disabledTooltip != null
+  const trigger = (
+    <SelectTrigger
+      id="count-structural-cells"
+      className="w-52 bg-background"
+      aria-label={t("projectSettings.structuralCells.label")}
+      aria-describedby="count-structural-cells-default"
+    >
+      <SelectValue />
+    </SelectTrigger>
+  )
+
   return (
     <SettingsRow
       label={
@@ -94,7 +111,10 @@ export function StructuralCellsProjectSection({
       description={t("projectSettings.structuralCells.description")}
       control={
         <div className="flex flex-col items-end gap-1">
-          <DisabledFieldTooltip disabled={Boolean(disabled)} tooltip={disabledTooltip ?? null}>
+          <DisabledFieldTooltip
+            disabled={locked}
+            tooltip={locked ? <>{disabledTooltip}<p className="text-muted-foreground">{currentDefault}</p></> : null}
+          >
             <Select
               items={options}
               disabled={disabled || busy}
@@ -105,25 +125,20 @@ export function StructuralCellsProjectSection({
                   a control its own tooltip trigger races that control's
                   pointer and focus handling — the same reason
                   DisabledFieldTooltip beside this wraps in a span. */}
-              <Tooltip>
-                <TooltipTrigger
-                  delay={200}
-                  closeOnClick={false}
-                  render={<span className="block" />}
-                >
-                  <SelectTrigger
-                    id="count-structural-cells"
-                    className="w-52 bg-background"
-                    aria-label={t("projectSettings.structuralCells.label")}
-                    aria-describedby="count-structural-cells-default"
+              {locked ? trigger : (
+                <Tooltip>
+                  <TooltipTrigger
+                    delay={200}
+                    closeOnClick={false}
+                    render={<span className="block" />}
                   >
-                    <SelectValue />
-                  </SelectTrigger>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" align="center">
-                  {currentDefault}
-                </TooltipContent>
-              </Tooltip>
+                    {trigger}
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" align="center">
+                    {currentDefault}
+                  </TooltipContent>
+                </Tooltip>
+              )}
               <SelectContent>
                 <SelectGroup>
                   {options.map((o) => (

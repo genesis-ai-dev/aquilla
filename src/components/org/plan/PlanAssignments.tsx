@@ -26,7 +26,7 @@
 // small language chip so nobody mistakes it for work in the language they are
 // looking at.
 
-import { useMemo, useState } from "react"
+import { useMemo, useState, type ReactNode } from "react"
 import { Plus } from "lucide-react"
 import { useT, useI18n } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
@@ -49,6 +49,7 @@ import type { AssignLaneOption, TeamLaneAttachment } from "@/lib/sync/assignment
 import type { FileReference, FileType } from "@/lib/parsers/types"
 import { SectionVisibilityGate } from "../SectionVisibilityBadge"
 import { laneChipLabel } from "../project-lanes"
+import { RemoveAssignmentButton, useAssignmentRemoval } from "../RemoveAssignmentButton"
 import { PlanBar } from "./PlanBar"
 import { usePlanShortfallRenderer, usePlanReadoutTips } from "./use-plan-note"
 import { useValidationProgressLines } from "../use-validation-progress"
@@ -198,6 +199,11 @@ export interface PlanAssignmentsProps {
   /** True once that floor is known; false renders nothing at all. */
   ready: boolean
   assign?: PlanAssignTarget
+  /**
+   * AQU-1969: unassign one row (each row then has its ×). Absent for whoever
+   * may not — the caller decides, by the same rule the server applies.
+   */
+  onRemove?: (assignmentId: string) => Promise<void>
 }
 
 /**
@@ -222,17 +228,32 @@ export function PlanAssignments({
   viewerRoleLevel,
   ready,
   assign,
+  onRemove,
 }: PlanAssignmentsProps) {
   const t = useT()
   const [assignOpen, setAssignOpen] = useState(false)
+  const removal = useAssignmentRemoval(onRemove ?? noRemove)
+  // A removed row goes at once, before the unit's list is read again.
+  const live = assignments.filter((a) => !removal.removedIds.has(a.assignmentId))
   // AQU-1969: translators first, in the order this panel has always listed
   // them; then each validator, furthest behind first.
-  const translateRows = assignments.filter((a) => !isValidationRow(a))
-  const validateRows = assignments.filter(isValidationRow).sort(compareValidationBehind)
+  const translateRows = live.filter((a) => !isValidationRow(a))
+  const validateRows = live.filter(isValidationRow).sort(compareValidationBehind)
+  const removeButton = (a: UnitAssignment) =>
+    onRemove ? (
+      <RemoveAssignmentButton
+        scope={a.scopeLabel}
+        username={a.username}
+        removing={removal.removingId === a.assignmentId}
+        onRemove={() => void removal.removeOne(a.assignmentId)}
+        size="icon-xs"
+        testId={`plan-assignment-remove-${a.assignmentId}`}
+      />
+    ) : undefined
 
   // Nothing to say and no way to act: render no heading rather than an empty
   // box under a label, which reads as a section that failed to load.
-  if (assignments.length === 0 && !assign && unassignedChapters == null) return null
+  if (live.length === 0 && !assign && unassignedChapters == null && !removal.error) return null
 
   return (
     <SectionVisibilityGate minRole={minRole} viewerRoleLevel={viewerRoleLevel} ready={ready}>
@@ -253,7 +274,7 @@ export function PlanAssignments({
           )}
         </div>
 
-        {assignments.length > 0 && (
+        {live.length > 0 && (
           <ul className="flex flex-col gap-2">
             {translateRows.map((a) => (
               <PlanAssignmentRow
@@ -264,6 +285,7 @@ export function PlanAssignments({
                 defaultLaneLabel={defaultLaneLabel}
                 showAudio={showAudio}
                 unitSectionKeys={unitSectionKeys}
+                remove={removeButton(a)}
               />
             ))}
             {validateRows.map((a) => (
@@ -275,10 +297,12 @@ export function PlanAssignments({
                 lane={lane}
                 defaultLaneLabel={defaultLaneLabel}
                 showAudio={showAudio}
+                remove={removeButton(a)}
               />
             ))}
           </ul>
         )}
+        {removal.error && <p className="text-xs text-destructive">{removal.error}</p>}
 
         {unassignedChapters != null && (
           <p className="text-[11.5px] text-muted-foreground" data-testid="plan-assignment-coverage">
@@ -311,6 +335,7 @@ function PlanAssignmentRow({
   defaultLaneLabel,
   showAudio,
   unitSectionKeys,
+  remove,
 }: {
   assignment: UnitAssignment
   now: number
@@ -318,6 +343,8 @@ function PlanAssignmentRow({
   defaultLaneLabel: string
   showAudio: boolean
   unitSectionKeys?: readonly string[]
+  /** The row's × (AQU-1969), for whoever may unassign. */
+  remove?: ReactNode
 }) {
   const t = useT()
   const readoutTips = usePlanReadoutTips()
@@ -418,13 +445,16 @@ function PlanAssignmentRow({
             that blue went to the progress bars (AQU-1764). Not underlined:
             it is not a link, and an underline would promise a click that
             goes nowhere. "Nothing left" stays grey: it asks for nothing. */}
-        <span
-          className={`shrink-0 text-[11px] tabular-nums ${
-            outstanding ? "font-medium text-foreground" : "text-muted-foreground"
-          }`}
-          data-testid={`plan-assignment-left-${a.assignmentId}`}
-        >
-          {left}
+        <span className="flex shrink-0 items-center gap-1">
+          <span
+            className={`text-[11px] tabular-nums ${
+              outstanding ? "font-medium text-foreground" : "text-muted-foreground"
+            }`}
+            data-testid={`plan-assignment-left-${a.assignmentId}`}
+          >
+            {left}
+          </span>
+          {remove}
         </span>
       </div>
 
@@ -485,6 +515,7 @@ function PlanValidationRow({
   lane,
   defaultLaneLabel,
   showAudio,
+  remove,
 }: {
   assignment: UnitAssignment
   validation: ValidationProgress
@@ -492,6 +523,8 @@ function PlanValidationRow({
   lane: string
   defaultLaneLabel: string
   showAudio: boolean
+  /** The row's × (AQU-1969), for whoever may unassign. */
+  remove?: ReactNode
 }) {
   const t = useT()
   const { locale } = useI18n()
@@ -530,15 +563,18 @@ function PlanValidationRow({
             </span>
           )}
         </span>
-        <span
-          className={`shrink-0 text-[11px] tabular-nums ${
-            left > 0 ? "font-medium text-foreground" : "text-muted-foreground"
-          }`}
-          data-testid={`plan-assignment-left-${a.assignmentId}`}
-        >
-          {left > 0
-            ? t("org.validationProgress.left", { count: left })
-            : t("org.projectOverview.plan.nothingLeft")}
+        <span className="flex shrink-0 items-center gap-1">
+          <span
+            className={`text-[11px] tabular-nums ${
+              left > 0 ? "font-medium text-foreground" : "text-muted-foreground"
+            }`}
+            data-testid={`plan-assignment-left-${a.assignmentId}`}
+          >
+            {left > 0
+              ? t("org.validationProgress.left", { count: left })
+              : t("org.projectOverview.plan.nothingLeft")}
+          </span>
+          {remove}
         </span>
       </div>
 
@@ -642,3 +678,5 @@ function PlanAssignHost({
     />
   )
 }
+
+const noRemove = async () => {}

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { PlanAssignments, type PlanAssignTarget } from "./PlanAssignments"
 import type { UnitAssignment } from "@/lib/sync/assignments"
 import { ROLE } from "@/lib/frontier/roles"
@@ -398,5 +398,50 @@ describe("validate assignments", () => {
     })
     expect(screen.getByTestId("plan-assignment-left-v1").textContent).toBe("Nothing left")
     expect(screen.getByTestId("plan-validation-text-v1").textContent).toBe("Validated 4 of 4")
+  })
+})
+
+// AQU-1969 (Sam, 2026-10-19): unassigning is one click wherever work is
+// assigned — the org workload's × on every row here too.
+describe("one-click unassign", () => {
+  const counts = (total: number, validated: number, waiting: number, changed: number) => ({ total, validated, waiting, changed })
+  const rows = () => [
+    assignment({ assignmentId: "t1", username: "tom", kind: "translate" }),
+    assignment({
+      assignmentId: "v1",
+      username: "carol",
+      kind: "validate",
+      validation: { text: counts(7, 2, 2, 0), audio: counts(7, 0, 7, 0) },
+    }),
+  ]
+
+  it("puts an × on translator and validator rows for whoever may unassign", () => {
+    renderSection({ assignments: rows(), onRemove: vi.fn(async () => {}) })
+    expect(screen.getByTestId("plan-assignment-remove-t1")).toHaveAccessibleName("Remove assignment: Genesis (tom)")
+    expect(screen.getByTestId("plan-assignment-remove-v1")).toHaveAccessibleName("Remove assignment: Genesis (carol)")
+  })
+
+  it("has no × for anyone else", () => {
+    renderSection({ assignments: rows() })
+    expect(screen.queryByTestId("plan-assignment-remove-t1")).toBeNull()
+    expect(screen.queryByTestId("plan-assignment-remove-v1")).toBeNull()
+  })
+
+  it("one click unassigns that row's assignment and the row goes at once", async () => {
+    const onRemove = vi.fn(async () => {})
+    renderSection({ assignments: rows(), onRemove })
+    fireEvent.click(screen.getByTestId("plan-assignment-remove-v1"))
+    expect(onRemove).toHaveBeenCalledWith("v1")
+    await screen.findByTestId("plan-assignment-t1")
+    await waitFor(() => expect(screen.queryByTestId("plan-assignment-v1")).toBeNull())
+    expect(screen.getByTestId("plan-assignment-t1")).toBeInTheDocument()
+  })
+
+  it("keeps the row and says why when the server refuses", async () => {
+    const onRemove = vi.fn(async () => { throw new Error("role too low for assignment.unassign") })
+    renderSection({ assignments: rows(), onRemove })
+    fireEvent.click(screen.getByTestId("plan-assignment-remove-t1"))
+    expect(await screen.findByText("role too low for assignment.unassign")).toBeInTheDocument()
+    expect(screen.getByTestId("plan-assignment-t1")).toBeInTheDocument()
   })
 })

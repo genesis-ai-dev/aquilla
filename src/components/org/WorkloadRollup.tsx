@@ -1,10 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
-import { X } from "lucide-react"
 import { getWorkload, unassignAssignment, type OrgWorkloadAssignment } from "@/lib/sync/assignments"
 import { Section } from "@/components/ui/page"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { AppTooltip } from "@/components/ui/tooltip"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { UserChip } from "@/components/UserChip"
@@ -18,6 +15,7 @@ import {
   validationLeftOverall,
 } from "@/lib/assignments/validation-progress"
 import { useValidationProgressLines } from "./use-validation-progress"
+import { RemoveAssignmentButton } from "./RemoveAssignmentButton"
 
 /**
  * Team-workload rollup for the org Overview (manager oversight). One row per
@@ -119,21 +117,12 @@ export function WorkloadRollup({
 
   const removeButton = (a: OrgWorkloadAssignment) =>
     canUnassignProject(a.projectId) && (
-      <AppTooltip content={t("org.workloadRollup.removeTooltip")}>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          aria-label={t("org.workloadRollup.removeAriaLabel", {
-            scope: a.scopeLabel,
-            user: a.username ?? t("common.userChip.anonymous"),
-          })}
-          disabled={removingId === a.assignmentId}
-          onClick={() => void handleRemove(a)}
-        >
-          <X />
-        </Button>
-      </AppTooltip>
+      <RemoveAssignmentButton
+        scope={a.scopeLabel}
+        username={a.username}
+        removing={removingId === a.assignmentId}
+        onRemove={() => void handleRemove(a)}
+      />
     )
 
   // Who, where, which language — the same head on both kinds of row.

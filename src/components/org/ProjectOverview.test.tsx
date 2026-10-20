@@ -267,6 +267,7 @@ vi.mock("@/lib/sync/assignments", () => ({
   // AQU-1969: the Team card's read — the translate roster plus validate assignments.
   getProjectTeamProgress: vi.fn(async () => ({ roster: [], validations: [] })),
   getMyAssignments: vi.fn(async () => []),
+  unassignAssignment: vi.fn(async () => {}),
 }))
 
 // AQU-498: member-activity fetch, consumed by useMemberActivity ->
@@ -3160,5 +3161,53 @@ describe("imported originals on the overview (AQU-656)", () => {
     expect(within(card).queryByTestId("imported-originals-show-more")).not.toBeInTheDocument()
     expect(within(card).queryByTestId("imported-originals-show-all")).not.toBeInTheDocument()
     expect(within(card).queryByTestId("imported-originals-show-fewer")).not.toBeInTheDocument()
+  })
+})
+
+// AQU-1969 (Sam, 2026-10-19: "It should be more easy to unassign work"): the
+// Team card's validation rows carry the org workload's one-click ×, offered by
+// the server's own rule — the org's assignment role in this project.
+describe("ProjectOverview one-click unassign (AQU-1969)", () => {
+  const counts = (total: number, validated: number, waiting: number, changed: number) => ({ total, validated, waiting, changed })
+  const files = [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }]
+
+  async function withValidation() {
+    fetchProjectFiles.mockResolvedValue([fileSummary(1)])
+    const mod = await import("@/lib/sync/assignments")
+    vi.mocked(mod.getProjectTeamProgress).mockResolvedValue({
+      roster: [],
+      validations: [{
+        assignmentId: "v1", assigneeUserId: 3, username: "carol", scopeLabel: "GEN 1", targetLang: "",
+        deadline: null, validation: { text: counts(7, 2, 2, 0), audio: counts(7, 0, 7, 0) },
+      }],
+    })
+    return mod
+  }
+
+  it("a lead removes a validation assignment from the Team card in one click", async () => {
+    const mod = await withValidation()
+    useProject.mockReturnValue({ project: projectRecord({ level: ROLE.MAINTAINER, files } as never), status: "ready", refresh })
+    renderOverview()
+    const remove = await screen.findByTestId("overview-team-validation-remove-v1")
+    const readsBefore = vi.mocked(mod.getProjectTeamProgress).mock.calls.length
+    fireEvent.click(remove)
+    await waitFor(() => expect(mod.unassignAssignment).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "p1", fileId: "f1", assignmentId: "v1" }),
+    ))
+    // The card is read again, as after an Assign.
+    await waitFor(() => expect(vi.mocked(mod.getProjectTeamProgress).mock.calls.length).toBeGreaterThan(readsBefore))
+  })
+
+  it("a Contributor who can see the card gets no ×", async () => {
+    await withValidation()
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      rosterViewMinRole: ROLE.CONTRIBUTOR,
+      memberProgressViewMinRole: ROLE.CONTRIBUTOR,
+    })
+    useProject.mockReturnValue({ project: projectRecord({ level: ROLE.CONTRIBUTOR, files } as never), status: "ready", refresh })
+    renderOverview()
+    await screen.findByTestId("overview-team-validation-v1")
+    expect(screen.queryByTestId("overview-team-validation-remove-v1")).toBeNull()
   })
 })

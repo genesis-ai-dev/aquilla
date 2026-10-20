@@ -20,21 +20,26 @@ import {
 } from "@/lib/assignments/validation-progress"
 import type { ValidationAssignment } from "@/lib/sync/assignments"
 import { useValidationProgressLines } from "./use-validation-progress"
+import { RemoveAssignmentButton, useAssignmentRemoval } from "./RemoveAssignmentButton"
 
 export function TeamValidationList({
   validations,
   showLane,
+  onRemove,
 }: {
   validations: readonly ValidationAssignment[]
   /** Name each row's language — only worth saying on a project with several. */
   showLane: boolean
+  /** Unassign one (each row then has its ×); absent for whoever may not. */
+  onRemove?: (assignmentId: string) => Promise<void>
 }) {
   const t = useT()
   const progressLines = useValidationProgressLines()
-  if (validations.length === 0) return null
+  const removal = useAssignmentRemoval(onRemove ?? noRemove)
   // The server sends them furthest behind first; sorted again here so the
-  // order never rests on a wire contract.
-  const rows = [...validations].sort(compareValidationBehind)
+  // order never rests on a wire contract. A removed row goes at once.
+  const rows = validations.filter((v) => !removal.removedIds.has(v.assignmentId)).sort(compareValidationBehind)
+  if (rows.length === 0 && !removal.error) return null
   return (
     <div className="mt-3" data-testid="overview-team-validations">
       <h3 className="mb-2 text-xs font-medium text-muted-foreground">{t("org.validationProgress.heading")}</h3>
@@ -63,6 +68,16 @@ export function TeamValidationList({
                     ? t("org.validationProgress.left", { count: left })
                     : t("org.projectOverview.plan.nothingLeft")}
                 </span>
+                {onRemove && (
+                  <RemoveAssignmentButton
+                    scope={v.scopeLabel}
+                    username={v.username}
+                    removing={removal.removingId === v.assignmentId}
+                    onRemove={() => void removal.removeOne(v.assignmentId)}
+                    size="icon-xs"
+                    testId={`overview-team-validation-remove-${v.assignmentId}`}
+                  />
+                )}
               </div>
               {/* Under the bar, not under the name: w-40 plus the row's gap. */}
               <div className="ms-[10.75rem] mt-0.5 text-xs tabular-nums text-muted-foreground">
@@ -77,6 +92,9 @@ export function TeamValidationList({
           )
         })}
       </ul>
+      {removal.error && <p className="mt-2 text-xs text-destructive">{removal.error}</p>}
     </div>
   )
 }
+
+const noRemove = async () => {}

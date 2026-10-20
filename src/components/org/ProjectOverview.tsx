@@ -97,6 +97,7 @@ import {
   getProjectTeamProgress,
   getProjectUnitAssignees,
   getUnitAssignments,
+  unassignAssignment,
   type UnitAssignee,
   type AssigneeWorkload,
   type UnitAssignment,
@@ -1430,6 +1431,31 @@ export function ProjectOverview() {
     policyAllowSelfAssignment, policyAssignmentMinRole, handleAssigned,
   ])
 
+  /**
+   * AQU-1969 (Sam, 2026-10-19: "It should be more easy to unassign work"): a
+   * one-click × on every row that is one assignment — here as on the org Team
+   * workload. Offered by the server's own rule for `assignment.unassign`: the
+   * org's assignment role in this project, which is also what the org
+   * workload asks. Self-assigning never extends to unassigning, and a language
+   * delegate taking back their own hand-outs keeps the Handed out page, which
+   * knows who gave what. The file only routes the request's token; the server
+   * closes the assignment by its id across the project.
+   */
+  const canUnassign = projectPolicy.ready && (project?.syncRole?.level ?? 0) >= policyAssignmentMinRole
+  const unassignVia = useCallback(
+    (fileId: string | null | undefined) =>
+      canUnassign && jwt && id && fileId
+        ? async (assignmentId: string) => {
+            await unassignAssignment({ jwt, projectId: id, fileId, author: session?.username ?? "", assignmentId })
+            // The same refresh an Assign gets: the unit's list, the board's
+            // chips and counts, and the Team card.
+            setPlanAssignmentsNonce((n) => n + 1)
+            void handleAssigned()
+          }
+        : undefined,
+    [canUnassign, jwt, id, session?.username, handleAssigned],
+  )
+
   const planInspector = selectedPlanUnit ? (
     <PlanInspector
       key={planUnitId(selectedPlanUnit)}
@@ -1475,6 +1501,7 @@ export function ProjectOverview() {
           viewerRoleLevel={projectRoleLevel}
           ready={projectPolicy.ready}
           assign={planAssignTarget}
+          onRemove={unassignVia(selectedUnitFileId)}
         />
       }
       onPatch={patchPlanUnit}
@@ -2940,7 +2967,11 @@ export function ProjectOverview() {
 
                         {/* AQU-1969: validators, furthest behind first, apart
                             from the translate rows above. */}
-                        <TeamValidationList validations={validations} showLane={showLaneTabs} />
+                        <TeamValidationList
+                          validations={validations}
+                          showLane={showLaneTabs}
+                          onRemove={unassignVia(documentFiles[0]?.id ?? firstFileId)}
+                        />
 
                         {selectedMemberUsername && (
                           <MemberActivityPanel

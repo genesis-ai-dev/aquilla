@@ -4,7 +4,7 @@
  * The set of locales the UI can switch to, plus their writing direction. English
  * is the base/source locale; every other catalog falls back to it per key (see
  * `translate.ts`). Directions follow the ticket: only Arabic is RTL for now;
- * Thai/Burmese/Malay/Chinese/French render LTR. Add a locale here + a catalog in
+ * Thai/Burmese/Malay/Chinese/French/Portuguese render LTR. Add a locale here + a catalog in
  * `messages/index.ts` to make it selectable.
  *
  * A locale's `code` and `nativeName` are load-bearing claims, not decoration:
@@ -53,6 +53,11 @@ export const LOCALES: readonly LocaleMeta[] = [
   { code: "zh-Hant", englishName: "Traditional Chinese", nativeName: "繁體中文", dir: "ltr" },
   { code: "ru", englishName: "Russian", nativeName: "Русский", dir: "ltr" },
   { code: "fr", englishName: "French", nativeName: "Français", dir: "ltr" },
+  // One Portuguese catalog, worded as Brazilian (você, arquivo, salvar, tela).
+  // `pt-BR` and `pt-PT` both fold onto `pt`. The endonym stays "Português" —
+  // the varieties are mutually readable, and the brief, not the menu label,
+  // fixes which one the strings are.
+  { code: "pt", englishName: "Portuguese", nativeName: "Português", dir: "ltr" },
 ] as const
 
 export const DEFAULT_LOCALE = "en"

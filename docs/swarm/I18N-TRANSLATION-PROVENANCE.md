@@ -2,6 +2,22 @@
 
 **Read this before treating any non-English catalog as reviewed.**
 
+> ## `pt` (Brazilian Portuguese) — 2026-10-20
+>
+> Machine-translated from the full `pnpm i18n:todo` packet (9,682 leaves) and merged
+> with `scripts/i18n-catalog.ts import`. **No Portuguese speaker has read it.** The
+> menu endonym stays Português; the wording is Brazilian (você, arquivo, salvar, tela,
+> usuário, baixar, infinitive buttons). Glossary: cell → célula, lane → faixa,
+> changeset → conjunto de alterações, termbase → base terminológica, back-translation
+> → retrotradução, source → origem, target → destino, draft → rascunho.
+>
+> Import report: 8,533/8,682 keys. The leaves the importer dropped were identical to
+> English (formats, product names, and placeholder-only templates). Mechanical check
+> before import: 0 missing leaves and 0 `{placeholder}` drift. `common.datePlaceholder`
+> stays `June 01, 2025` because the date parser only accepts that en-US shape. Strings
+> added on `dev` after the draft — the Monday "make a new board" step — were translated
+> in the same variety and merged on top.
+
 > ## All locales topped up from `pnpm i18n:todo` — 2026-10-03
 >
 > The 14,590 untranslated or stale leaves in `th`, `my`, `ms`, `id`, `ar`, `zh-Hans`,

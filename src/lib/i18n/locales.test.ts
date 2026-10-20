@@ -186,6 +186,35 @@ describe("French (AQU-1432)", () => {
   })
 })
 
+
+describe("Portuguese", () => {
+  it("is registered as a selectable LTR locale with its endonym", () => {
+    const pt = LOCALES.find((l) => l.code === "pt")
+    expect(pt?.dir).toBe("ltr")
+    expect(pt?.englishName).toBe("Portuguese")
+    // One catalog, worded as Brazilian. The menu stays the language endonym.
+    expect(pt?.nativeName).toBe("Português")
+  })
+  it("ships a populated catalog, not an empty stub", () => {
+    expect(Object.keys(CATALOGS.pt ?? {}).length).toBeGreaterThan(4000)
+  })
+  it("serves Portuguese to regional browser codes", () => {
+    expect(normalizeLocale("pt-BR")).toBe("pt")
+    expect(normalizeLocale("pt-PT")).toBe("pt")
+    expect(detectInitialLocale(null, "pt-BR")).toBe("pt")
+  })
+  it("supplies Portuguese's one/many/other forms for a count-governed key", () => {
+    const counted = CATALOGS.pt?.["common.cellCount"]
+    expect(isPluralMessage(counted)).toBe(true)
+    if (isPluralMessage(counted)) {
+      for (const category of ["one", "many", "other"] as const) {
+        expect(counted.forms[category], `common.cellCount#${category}`).toBeTruthy()
+      }
+      expect(counted.forms.one).not.toBe(counted.forms.other)
+    }
+  })
+})
+
 describe("Russian (AQU-1226)", () => {
   it("is registered as a selectable LTR locale with its endonym", () => {
     const ru = LOCALES.find((l) => l.code === "ru")

@@ -168,7 +168,7 @@ function makeStubDb(
             }
             // AQU-1869: the platform spend ceiling's single combined read.
             if (sql.includes("org_credit_usage_daily")) {
-              return { spend_cents: opts.platformSpendCents ?? 0, platform_settings: null } as unknown as T
+              return { credit_cents: opts.platformSpendCents ?? 0, platform_settings: null } as unknown as T
             }
             if (sql.includes("SUM(audio_seconds)")) {
               const [userId, dateUtc] = boundArgs as [number, string]

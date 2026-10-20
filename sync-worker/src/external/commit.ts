@@ -1434,10 +1434,26 @@ async function commitLinkMedia(
     ]),
   )
 
+  // AQU-2086: the lane each take belongs to. `laneId` on a current plan is
+  // lanes.id, resolved at prepare; stampStoredLaneId writes the lane's tag as
+  // targetLang alongside it, and stamps nothing for a plan staged before
+  // LinkMedia carried a lane (the '' bridge, exactly as before).
+  const laneRows = (await loadProjectSettings(db, projectId)).lanes ?? []
+
   const eventsByFile = new Map<string, RawEvent[]>()
   const allEventIds: string[] = []
-  // AQU-1572: which cell each attach event lands on, for the telemetry below.
-  const attaches: { eventId: string; fileId: string; cellId: string }[] = []
+  // AQU-1572: which cell each attach event lands on, for the telemetry below;
+  // AQU-2086: and what it attached there, for the receipt.
+  const attaches: {
+    eventId: string
+    fileId: string
+    cellId: string
+    artifactId: string
+    audioId: string
+    slot: string
+    lane: { targetLang?: string; laneId?: string }
+    durationMs?: number
+  }[] = []
 
   for (const cmd of cmds) {
     // Re-check the artifact: still present, still audio, same project.
@@ -1460,8 +1476,9 @@ async function commitLinkMedia(
     }
 
     // Re-check the target cell still exists (lane-independent — the
-    // default-lane entry reports source/any-lane-target existence).
-    const cellStates = await resolveCellStates(db, projectId, [cmd])
+    // default-lane entry reports source/any-lane-target existence, so the
+    // command's own laneId is deliberately left out of the lookup).
+    const cellStates = await resolveCellStates(db, projectId, [{ fileId: cmd.fileId, cellId: cmd.cellId }])
     const s = cellStates.get(laneCellKey(cmd.fileId, cmd.cellId))
     if (!s || (!s.sourceExists && !s.targetExists)) {
       await db
@@ -1484,15 +1501,21 @@ async function commitLinkMedia(
         .run()
       return errorResponse('plan_stale', `artifact ${cmd.artifactId} bytes missing from storage`)
     }
-    const destKey = audioObjectKey(env, projectId, cmd.fileId, artifact.audio_id)
-    await env.SNAPSHOTS.put(destKey, await src.arrayBuffer(), {
-      httpMetadata: artifact.content_type ? { contentType: artifact.content_type } : undefined,
-    })
-
     const planned = plannedByKey.get(`${cellKey(cmd.fileId, cmd.cellId)}${KEY_SEP}${cmd.artifactId}`)
     const attachId = planned?.attachEventId ?? uuidv7()
     const selectId = planned?.selectEventId ?? uuidv7()
-    const url = `frontier-audio://${artifact.audio_id}`
+    // AQU-2086: the take's native id is the prepare-minted, cell-seeded one
+    // (db/shared/audio-id.ts) — the SPA tells a dub from the programme clip by
+    // that seed, so the artifact's bare UUID never sounded on the Target track.
+    // A plan staged before the ledger carried it keeps the artifact's name.
+    const audioId = planned?.audioId ?? artifact.audio_id
+    const slot = cmd.slot ?? 'recording'
+    const lane = stampStoredLaneId(cmd.laneId, laneRows)
+    const destKey = audioObjectKey(env, projectId, cmd.fileId, audioId)
+    await env.SNAPSHOTS.put(destKey, await src.arrayBuffer(), {
+      httpMetadata: artifact.content_type ? { contentType: artifact.content_type } : undefined,
+    })
+    const url = `frontier-audio://${audioId}`
 
     const attachEvent: RawEvent<'cell.audio.attach'> = {
       id: attachId,
@@ -1504,10 +1527,14 @@ async function commitLinkMedia(
       parentId: null,
       author: cred.username,
       payload: {
-        audioId: artifact.audio_id,
+        audioId,
         url,
-        slot: 'recording',
+        slot,
         ...(artifact.content_type ? { mimeType: artifact.content_type } : {}),
+        ...(cmd.durationMs !== undefined ? { durationMs: cmd.durationMs } : {}),
+        // AQU-2086: the lane the take is read in. The projection resolves
+        // lane_id from targetLang, and the select below is scoped the same way.
+        ...lane,
       },
       clientTs,
     }
@@ -1520,13 +1547,22 @@ async function commitLinkMedia(
       cellId: cmd.cellId,
       parentId: null,
       author: cred.username,
-      payload: { audioId: artifact.audio_id, slot: 'recording' },
+      payload: { audioId, slot, ...lane },
       clientTs,
     }
     // attach must precede select in the batch so the projection sees the row
     // before the select re-affirms it.
     allEventIds.push(attachId, selectId)
-    attaches.push({ eventId: attachId, fileId: cmd.fileId, cellId: cmd.cellId })
+    attaches.push({
+      eventId: attachId,
+      fileId: cmd.fileId,
+      cellId: cmd.cellId,
+      artifactId: cmd.artifactId,
+      audioId,
+      slot,
+      lane,
+      ...(cmd.durationMs !== undefined ? { durationMs: cmd.durationMs } : {}),
+    })
     const list = eventsByFile.get(cmd.fileId)
     if (list) list.push(attachEvent, selectEvent)
     else eventsByFile.set(cmd.fileId, [attachEvent, selectEvent])
@@ -1580,12 +1616,24 @@ async function commitLinkMedia(
   const warnings: ChangesetWarning[] = [...cs.summary.warnings]
   warnings.push(...rejectedWarnings(rejected, where))
 
+  // AQU-2086: what landed, by take. The receipt is how a caller learns the
+  // native audio id — the one the app plays, lists and exports — which is not
+  // the upload's audioId.
+  const landed = attaches.filter((a) => acceptedIds.has(a.eventId))
   const receipt: ChangesetReceipt = {
     eventIds: appliedIds,
     appliedCount: appliedIds.length,
     staleCount: 0,
     warnings,
     committedAt: new Date().toISOString(),
+    media: landed.map((a) => ({
+      fileId: a.fileId,
+      cellId: a.cellId,
+      artifactId: a.artifactId,
+      audioId: a.audioId,
+      slot: a.slot,
+      ...(a.lane.laneId ? { laneId: a.lane.laneId } : {}),
+    })),
   }
 
   await db
@@ -1608,7 +1656,13 @@ async function commitLinkMedia(
       cred.username,
       linkMediaTelemetry(
         projectId,
-        attaches.filter((a) => acceptedIds.has(a.eventId)),
+        landed.map((a) => ({
+          fileId: a.fileId,
+          cellId: a.cellId,
+          slot: a.slot,
+          lane: a.lane.targetLang ?? '',
+          ...(a.durationMs !== undefined ? { durationMs: a.durationMs } : {}),
+        })),
         telemetrySourceFor(channel),
       ),
     )

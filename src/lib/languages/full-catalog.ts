@@ -11,10 +11,10 @@
  * table lives in its own module behind a dynamic `import()`. The parse happens
  * once per session and the result is memoized here, shared by every field.
  *
- * Entries keep the `./catalog` shape: `code` is the ISO 639-3 id (displayed as
- * the hint), `altCode` the ISO 639-1 code where SIL lists one, and `name` the
- * reference name — spaced as SIL publishes it ("Eastern Arrernte"), not
- * space-stripped the way Codex's generated array has it.
+ * Entries keep the `./catalog` shape: `code` is the ISO 639-3 id, `altCode`
+ * the ISO 639-1 code where SIL lists one, and `name` the reference name —
+ * spaced as SIL publishes it ("Eastern Arrernte"), not space-stripped the
+ * way Codex's generated array has it.
  */
 
 import type { LanguageEntry } from "./catalog"

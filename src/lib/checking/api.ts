@@ -8,6 +8,8 @@ export interface CheckingSession {
 }
 export interface CheckingRow {
   fileId: string; cellId: string; fileName: string; label: string | null; text: string; side: "source" | "target"
+  /** Cell type from the import ("heading", …) and whether the file starts a paragraph here. */
+  type?: string | null; paragraphStart?: boolean
 }
 export interface CheckingAudio {
   fileId: string; cellId: string; audioId: string; url: string

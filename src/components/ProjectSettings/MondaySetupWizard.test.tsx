@@ -195,6 +195,45 @@ describe("step 2: what the board shows", () => {
     )
   })
 
+  it("says who will see names only while Translators or Project manager is ticked (AQU-1989)", async () => {
+    renderWizard()
+    await toColumns()
+    expect(checked(/^Translators$/)).toBe(false)
+    expect(checked(/^Project manager$/)).toBe(false)
+    expect(screen.queryByTestId("monday-names-note")).toBeNull()
+
+    fireEvent.click(box(/^Translators$/))
+    const note = await screen.findByTestId("monday-names-note")
+    expect(note.getAttribute("role")).toBe("note")
+    expect(note.textContent).toBe("Everyone who can see Translation Tracker on Monday will see these names.")
+    // A security note: amber, so it stands out from the column descriptions (Sam, 2026-10-19).
+    expect(note.className).toMatch(/\bbg-amber-50\b/)
+    expect(note.className).toMatch(/\bborder-amber-300\b/)
+
+    fireEvent.click(box(/^Project manager$/))
+    fireEvent.click(box(/^Translators$/))
+    await waitFor(() => expect(checked(/^Translators$/)).toBe(false))
+    expect(screen.getByTestId("monday-names-note")).toBeTruthy() // Project manager is still ticked
+
+    fireEvent.click(box(/^Project manager$/))
+    await waitFor(() => expect(screen.queryByTestId("monday-names-note")).toBeNull())
+  })
+
+  it("shows the names note straight away when the board already has a Translators column (AQU-1989)", async () => {
+    mocked.fetchMondayBoardStructure.mockResolvedValue({
+      url: "https://actual-account.monday.com/boards/b1",
+      columns: [
+        { id: "numbers_1", title: "Progress", type: "numbers" },
+        { id: "text_1", title: "Translators", type: "text" },
+      ],
+      groups: [],
+    })
+    renderWizard()
+    await toColumns()
+    expect(checked(/^Translators$/)).toBe(true)
+    expect(screen.getByTestId("monday-names-note").textContent).toMatch(/everyone who can see translation tracker/i)
+  })
+
   it("won't go on with nothing but Aquilla ID ticked", async () => {
     mocked.analyzeMondayMapping.mockResolvedValue(
       analysis({ proposal: { ...PROPOSAL, columns: [] } }),

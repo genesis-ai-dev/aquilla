@@ -1,9 +1,7 @@
 import type { BillingPlanSelection } from '../../../db/shared/billing-review'
 
 const offers: Record<string, BillingPlanSelection['offer']> = {
-  pro: 'pro', max_5x: 'max_5x', 'max-5x': 'max_5x',
-  max_20x: 'max_20x', 'max-20x': 'max_20x',
-  team: 'team', team_20x: 'team_20x', 'team-20x': 'team_20x',
+  team: 'team',
 }
 export type BillingIntent = { kind: 'none' | 'invalid' }
   | { kind: 'paid'; selection: BillingPlanSelection }

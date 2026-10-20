@@ -7,14 +7,18 @@
 // user confirms. What a column shows is a short line under its name, always
 // visible. Aquilla ID is always included and can't be unticked. A live line
 // under the list says how many columns get added and how many are reused.
+// While a column with people's names is ticked, a note under those columns
+// says everyone who can see the board will see the names (AQU-1989).
 
-import { useId } from "react"
+import { Fragment, useId } from "react"
+import { ShieldAlert } from "lucide-react"
 import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
 import { MONDAY_COLUMN_CATALOG, metricOnBoard, type MondayColumnMapping, type MondayMetricKey } from "@/lib/monday/types"
 import type { MondayBoardStructure } from "@/lib/monday/api"
 import {
   MONDAY_COLUMN_GROUPS,
+  NAME_METRICS,
   REQUIRED_METRIC,
   columnSelectionCounts,
   type MondayColumnGroupKey,
@@ -46,6 +50,9 @@ interface Props {
 export function MondayColumnChooser({ rows, boardColumns, boardName, selected, onChange, disabled = false, hideIntro = false }: Props) {
   const t = useT()
   const { adds, uses } = columnSelectionCounts(selected, rows, boardColumns)
+  // AQU-1989: names stay opt-in; once one is ticked (or arrives ticked because
+  // the board already has the column), say plainly who will see them.
+  const namesTicked = NAME_METRICS.some((metric) => selected.has(metric))
 
   function toggle(metric: MondayMetricKey, on: boolean) {
     const next = new Set(selected)
@@ -64,14 +71,30 @@ export function MondayColumnChooser({ rows, boardColumns, boardName, selected, o
           </h4>
           <ul className="flex flex-col">
             {group.metrics.map((metric) => (
-              <ColumnRow
-                key={metric}
-                metric={metric}
-                onBoard={metricOnBoard(metric, rows, boardColumns)}
-                checked={selected.has(metric)}
-                disabled={disabled}
-                onToggle={(on) => toggle(metric, on)}
-              />
+              <Fragment key={metric}>
+                <ColumnRow
+                  metric={metric}
+                  onBoard={metricOnBoard(metric, rows, boardColumns)}
+                  checked={selected.has(metric)}
+                  disabled={disabled}
+                  onToggle={(on) => toggle(metric, on)}
+                />
+                {namesTicked && metric === group.metrics.findLast((m) => NAME_METRICS.includes(m)) && (
+                  <li className="py-1.5">
+                    {/* Amber, not muted (Sam, 2026-10-19): who can see people's
+                        names is a security question, and the note has to stand
+                        out from the column descriptions around it. */}
+                    <p
+                      role="note"
+                      data-testid="monday-names-note"
+                      className="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs font-medium text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+                    >
+                      <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+                      <span>{t("projectSettings.monday.chooser.namesVisible", { board: boardName })}</span>
+                    </p>
+                  </li>
+                )}
+              </Fragment>
             ))}
           </ul>
         </section>

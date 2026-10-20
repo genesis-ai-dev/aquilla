@@ -76,8 +76,8 @@ export async function readBillingWorkspace(
   const period = stored ? weeklyUsagePeriod(stored.usage_anchor, now.toISOString()) : null
   return {
     orgId: org.id, name: org.name, scope: org.billing_scope,
-    eligibility: { reason, offers: reason !== 'ready' ? [] : org.billing_scope === 'personal'
-      ? ['pro', 'max_5x', 'max_20x'] : ['team', 'team_20x'] },
+    // Any org, personal workspaces included, can buy Team (AQU-2058).
+    eligibility: { reason, offers: reason !== 'ready' ? [] : ['team'] },
     entitlement: stored && period ? {
       ...(state ? { access: resolveWorkspaceAccess({ offer: stored.offer,
         paymentFailed: state.payment_failed, paidThrough: state.paid_through,

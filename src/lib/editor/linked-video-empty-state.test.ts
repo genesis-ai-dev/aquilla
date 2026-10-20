@@ -90,13 +90,13 @@ describe("mediaEmptyGates", () => {
 
   it("offers captions as rows to maintainers only, with track editing off", () => {
     expect(gates(MAINTAINER, true)).toEqual({
-      offerCaptionRows: true, canImportCaptions: true, canUploadSourceMedia: true,
+      offerCaptionRows: true, canImportCaptions: true, canUploadSourceMedia: true, offerVideoSoundRows: false,
     })
     expect(gates(PROJECT_LEAD, true)).toEqual({
-      offerCaptionRows: false, canImportCaptions: false, canUploadSourceMedia: true,
+      offerCaptionRows: false, canImportCaptions: false, canUploadSourceMedia: true, offerVideoSoundRows: false,
     })
     expect(gates(CONTRIBUTOR, true)).toEqual({
-      offerCaptionRows: false, canImportCaptions: false, canUploadSourceMedia: false,
+      offerCaptionRows: false, canImportCaptions: false, canUploadSourceMedia: false, offerVideoSoundRows: false,
     })
   })
 
@@ -115,5 +115,32 @@ describe("mediaEmptyGates", () => {
 
   it("does not offer maintainer actions before the role is known", () => {
     expect(gates(null, true).offerCaptionRows).toBe(false)
+  })
+
+  // AQU-1681: rows from the linked video's own sound. Maintainer work, on the
+  // same empty file as caption rows, and never for YouTube, whose sound the
+  // page cannot read (and whose terms forbid downloading it).
+  describe("rows from the video's own sound", () => {
+    const sound = (roleLevel: number | null, captionRowsMode: boolean, linkedVideoUrl: string | null) =>
+      mediaEmptyGates({ roleLevel, captionRowsMode, canEditTracks: false, linkedVideoUrl }).offerVideoSoundRows
+    const FILM = "https://cdn.thechosen.media/videos/ep101/master.m3u8"
+
+    it("offers a streamed film or a direct file link to a maintainer on an empty file", () => {
+      expect(sound(MAINTAINER, true, FILM)).toBe(true)
+      expect(sound(MAINTAINER, true, "https://files.example.test/ep101.mp4")).toBe(true)
+    })
+
+    it("never offers it for a YouTube video", () => {
+      expect(sound(MAINTAINER, true, "https://www.youtube.com/watch?v=dQw4w9WgXcQ")).toBe(false)
+      expect(sound(MAINTAINER, true, "https://youtu.be/dQw4w9WgXcQ")).toBe(false)
+    })
+
+    it("needs a maintainer, a file whose rows loaded empty, and a fetchable link", () => {
+      expect(sound(PROJECT_LEAD, true, FILM)).toBe(false)
+      expect(sound(null, true, FILM)).toBe(false)
+      expect(sound(MAINTAINER, false, FILM)).toBe(false)
+      expect(sound(MAINTAINER, true, "frontier-audio://clip.mp4")).toBe(false)
+      expect(sound(MAINTAINER, true, null)).toBe(false)
+    })
   })
 })

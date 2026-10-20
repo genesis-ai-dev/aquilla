@@ -1,17 +1,39 @@
 #!/usr/bin/env tsx
 // Refresh a shared non-production Neon branch from Production, apply the repo's
 // current migrations to that branch, then run lightweight API health checks.
+//
+// Before anything destructive, a read-only preflight (`neon branches get` on the
+// target and on the source) proves the credentials. The Neon CLI hides a
+// rejected key behind a yargs retry artifact ("Not enough non-option
+// arguments: got 1, need at least 2"); the preflight turns that into a message
+// that names the fix. With NEON_REFRESH_PREFLIGHT_ONLY=1 the preflight is all
+// this script does, which is how a rotated NEON_API_KEY is verified without
+// restoring anything.
 
 import { spawn } from "node:child_process"
+import { mkdtempSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import process from "node:process"
+import {
+  classifyNeonCliFailure,
+  DEFAULT_NEON_CLI_VERSION,
+  isPreflightOnly,
+  neonCliArgs,
+  preflightFailureMessage,
+  PREFLIGHT_ONLY_ENV,
+  relevantCliStderr,
+  summarizeBranchJson,
+} from "./lib/neon-refresh-preflight"
 
 type Target = "dev"
 
 const DEFAULT_PROJECT_ID = "sweet-paper-88472094"
+/** Neon organization that owns DEFAULT_PROJECT_ID; named in credential errors. */
+const NEON_ORG_LABEL = "Frontier R&D (org-cold-butterfly-03397216)"
 const DEFAULT_SOURCE_BRANCH = "production"
 const DEFAULT_DATABASE = "neondb"
 const DEFAULT_ROLE = "neondb_owner"
-const DEFAULT_NEON_CLI_VERSION = "2.30.0"
 
 const TARGET_ALIASES: Record<string, Target> = {
   dev: "dev",
@@ -76,20 +98,39 @@ function ensureSafeTarget(branch: string, source: string): void {
   }
 }
 
+const neonCliVersion = env("NEON_CLI_VERSION", DEFAULT_NEON_CLI_VERSION)
+
 function neonArgs(args: string[]): string[] {
+  return neonCliArgs(args, neonCliVersion)
+}
+
+let scratchConfigHome: string | null = null
+
+/**
+ * Environment for one Neon CLI child. The key travels in NEON_API_KEY (the
+ * CLI's `--api-key` default), never on argv. When a key is in use the CLI's
+ * stored OAuth login is irrelevant, yet on a 401 the CLI still deletes
+ * `$XDG_CONFIG_HOME/neonctl/credentials.json`; a scratch config home keeps a
+ * rejected key from logging a developer out of `neon auth`.
+ */
+function neonEnv(): { env: NodeJS.ProcessEnv; usingApiKey: boolean } {
   const apiKey = process.env.NEON_API_KEY?.trim()
   if (process.env.GITHUB_ACTIONS === "true" && !apiKey) {
     throw new Error("NEON_API_KEY is required in GitHub Actions")
   }
-  return [
-    "--yes",
-    `neon@${env("NEON_CLI_VERSION", DEFAULT_NEON_CLI_VERSION)}`,
-    ...args,
-    ...(apiKey ? ["--api-key", apiKey] : []),
-    "--no-analytics",
-    "--color",
-    "false",
-  ]
+  if (!apiKey) return { env: {}, usingApiKey: false }
+  scratchConfigHome ??= mkdtempSync(join(tmpdir(), "neon-refresh-"))
+  return { env: { NEON_API_KEY: apiKey, XDG_CONFIG_HOME: scratchConfigHome }, usingApiKey: true }
+}
+
+class CommandError extends Error {
+  readonly stderr: string
+
+  constructor(message: string, stderr: string) {
+    super(message)
+    this.name = "CommandError"
+    this.stderr = stderr
+  }
 }
 
 async function run(
@@ -121,7 +162,12 @@ async function run(
         resolve(stdout.trim())
         return
       }
-      reject(new Error(`${command} ${args.join(" ")} exited ${code}${stderr ? `\n${stderr}` : ""}`))
+      reject(
+        new CommandError(
+          `${command} ${args.join(" ")} exited ${code}${stderr ? `\n${stderr}` : ""}`,
+          stderr,
+        ),
+      )
     })
   })
 }
@@ -147,6 +193,46 @@ function pgEnvFromConnectionString(connectionString: string): NodeJS.ProcessEnv 
     NEON_PG_DB: decodeURIComponent(url.pathname.slice(1)),
     NEON_PG_ROLE: decodeURIComponent(url.username),
     NEON_PG_PASSWORD: password,
+  }
+}
+
+/**
+ * Prove the credentials can read both branches before touching either. A
+ * rejected NEON_API_KEY fails here with an explanation instead of surfacing
+ * as the CLI's "Not enough non-option arguments" retry artifact.
+ */
+async function preflight(projectId: string, branches: string[]): Promise<void> {
+  const { env: cliEnv, usingApiKey } = neonEnv()
+  console.log(
+    `Preflight: reading ${branches.map((name) => `'${name}'`).join(" and ")} in project ${projectId} with ${usingApiKey ? "NEON_API_KEY" : "the local Neon CLI login"}`,
+  )
+  for (const name of branches) {
+    let stdout: string
+    try {
+      stdout = await run(
+        "npx",
+        neonArgs(["branches", "get", name, "--project-id", projectId, "--output", "json"]),
+        { capture: true, env: cliEnv },
+      )
+    } catch (error) {
+      const stderr = error instanceof CommandError ? error.stderr : String(error)
+      throw new Error(
+        preflightFailureMessage({
+          kind: classifyNeonCliFailure(stderr),
+          branch: name,
+          projectId,
+          orgLabel: NEON_ORG_LABEL,
+          usingApiKey,
+          stderr: relevantCliStderr(stderr),
+          cliVersion: neonCliVersion,
+        }),
+        { cause: error },
+      )
+    }
+    const summary = summarizeBranchJson(stdout)
+    console.log(
+      `✓ '${summary.name}' is ${summary.id} (last_reset_at ${summary.lastResetAt ?? "never"})`,
+    )
   }
 }
 
@@ -205,8 +291,18 @@ async function main() {
 
   ensureSafeTarget(branch, sourceBranch)
 
+  await preflight(projectId, [branch, sourceBranch])
+  if (isPreflightOnly(process.env)) {
+    console.log(`${PREFLIGHT_ONLY_ENV} is set: credentials verified, not restoring '${branch}'.`)
+    return
+  }
+
   console.log(`Restoring Neon branch '${branch}' from '${sourceBranch}' in project ${projectId}`)
-  await run("npx", neonArgs(["branches", "restore", branch, sourceBranch, "--project-id", projectId, "--output", "json"]))
+  await run(
+    "npx",
+    neonArgs(["branches", "restore", branch, sourceBranch, "--project-id", projectId, "--output", "json"]),
+    { env: neonEnv().env },
+  )
 
   console.log(`Fetching direct connection parameters for '${branch}'`)
   const connectionString = await run(
@@ -223,7 +319,7 @@ async function main() {
       "--ssl",
       "require",
     ]),
-    { capture: true },
+    { capture: true, env: neonEnv().env },
   )
   const migrationEnv = pgEnvFromConnectionString(connectionString)
 

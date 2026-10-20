@@ -440,6 +440,9 @@ export const audio = defineNamespace({
       one: "{count} cell is left out because its selected take is the reference clip for a voice.",
       other: "{count} cells are left out because their selected take is the reference clip for a voice.",
     }),
+    // AQU-1681: hosted transcription allows 60 requests per 15 minutes; a
+    // batch that reaches it waits and carries on by itself.
+    "audio.bulkProgress.waitingForLimit": "Transcription limit reached, continuing at {time}",
 
     // BatchVoiceDialog (AQU-1722) — "Generate voice" on the selection bar:
     // speak every selected line in one chosen voice.
@@ -2582,6 +2585,14 @@ export const audio = defineNamespace({
           "the toast afterwards. These cells are not converted because a voice in " +
           "the project is using the selected take as its reference clip.",
         placeholders: { count: "How many cells were left out for this reason." },
+      },
+      "audio.bulkProgress.waitingForLimit": {
+        description:
+          "Shown on the bulk-progress banner while a long transcription waits: the " +
+          "hosted transcription service accepts only so many requests in a quarter of " +
+          "an hour, so the batch pauses and carries on by itself at the time shown. " +
+          "Nothing is lost and the person does not need to do anything.",
+        placeholders: { time: "Clock time the batch carries on, e.g. 7:45 PM, in the reader's locale." },
       },
       "audio.batchVoice.title": {
         description:

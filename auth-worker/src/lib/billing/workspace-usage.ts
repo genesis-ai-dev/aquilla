@@ -6,9 +6,15 @@ import { weeklyUsagePeriod } from './pricing-model'
 
 export const OVERAGE_FACTOR = 1.05
 
+/** metered counts against the allowance; unmetered and byok are recorded only. */
+export type UsageMode = 'metered' | 'unmetered' | 'byok'
+export type UsageDecision = 'allow' | 'would_block' | 'block'
+
 interface UsageRequest {
-  org_id: number; request_id: string; user_id: number; project_id: string
+  /** null is the system: background work with no live user (AQU-2057). */
+  org_id: number; request_id: string; user_id: number | null; project_id: string | null
   rail: CostRail; rate_version: string; multiplier: number
+  mode: UsageMode; decision: UsageDecision
   period_start: string; period_end: string; reserved_micro_units: number
   state: 'reserved' | 'settled' | 'released'
   raw_micro_cents: number | null; settled_micro_units: number | null
@@ -16,7 +22,7 @@ interface UsageRequest {
 }
 const columns = `org_id, request_id, user_id, project_id, rail, rate_version,
   multiplier, period_start::text, period_end::text, reserved_micro_units,
-  state, raw_micro_cents, settled_micro_units, provider_ref, created_at::text`
+  state, raw_micro_cents, settled_micro_units, provider_ref, mode, decision, created_at::text`
 
 export function validProviderRef(ref: unknown): ref is string {
   return typeof ref === 'string' && ref.trim().length > 0 && ref.length <= 200 && ref.trim() === ref

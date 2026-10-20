@@ -144,8 +144,11 @@ function toDecodedPcm(audio: AudioBuffer): DecodedPcm {
  * OfflineAudioContext never reconfigures the shared audio device (AQU-1217)
  * and does not count against the page's context cap, which matters when the
  * chunked path opens one per minute of audio.
+ *
+ * AQU-1681: exported for the linked-video sound, which decodes a streamed
+ * film a minute at a time on this same path.
  */
-async function decodeWithWebAudio(bytes: ArrayBuffer, sampleRate?: number): Promise<DecodedPcm> {
+export async function decodeWithWebAudio(bytes: ArrayBuffer, sampleRate?: number): Promise<DecodedPcm> {
   if (sampleRate !== undefined) {
     const decoded = await decodeOffline(bytes, sampleRate)
     if (decoded) return decoded

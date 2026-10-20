@@ -1,8 +1,10 @@
 // Knowledge base HTTP surface (spec: docs/superpowers/specs/2026-08-07-knowledge-base-design.md).
 // projectKnowledge mounts at /api/v2/projects, orgKnowledge at /api/v2/orgs.
 // Originals live in R2 (SNAPSHOTS) under kb/…; extracted text + tree in
-// knowledge_docs via db/shared/knowledge.ts. Indexing runs async (waitUntil) on
-// a connection of its own — see indexDocOnOwnConnection (AQU-1763).
+// knowledge_docs via db/shared/knowledge.ts. Indexing runs on the per-document
+// Durable Object driver (AQU-2051, src/knowledge-index-do.ts), on a connection
+// of its own — see indexDocOnOwnConnection (AQU-1763) for the fallback path
+// used where that binding is absent.
 import { Hono, type Context } from "hono"
 import type { ContentfulStatusCode } from "hono/utils/http-status"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
@@ -11,7 +13,8 @@ import { resolveProjectRole } from "../services/project-permissions"
 import { getEffectiveOrgRole } from "../services/org-permissions"
 import { DocumentExtractionError, extractTextFromDocx, extractTextFromPdf } from "./parse-document"
 import { shipLog } from "../posthog-logs"
-import { indexKnowledgeDoc, KB_INDEX_FETCH_TIMEOUT_MS } from "../lib/knowledge/index-doc"
+import { indexKnowledgeDoc, KB_INDEX_BUDGET_MS } from "../lib/knowledge/index-doc"
+import { kickKnowledgeIndexDriver } from "../lib/knowledge/index-driver"
 import { propagateKnowledgeDocs } from "../../../db/shared/inherited-settings"
 import { makePostgres, type AquillaDb } from "../../../db/shim/postgres"
 import {
@@ -175,8 +178,8 @@ export function openIndexingConnection(
  *  AQU-1763: this job must NOT run on the request-scoped `AQUILLA_PG` shim.
  *  index.ts closes that shim in its `finally` the moment the Response returns,
  *  and postgres.js `end({ timeout: 5 })` destroys the pool 5s later — while
- *  indexing is still awaiting a model round-trip of up to
- *  `KB_INDEX_FETCH_TIMEOUT_MS` (60s). Both the terminal `index_status='ready'`
+ *  indexing is still awaiting a model round-trip, for as long as
+ *  `KB_INDEX_BUDGET_MS` allows. Both the terminal `index_status='ready'`
  *  write and the compensating `'failed'` write in its catch then landed on a
  *  dead connection, so the row never left `pending`: every upload showed
  *  "Indexing…" and then "Indexing stalled" (AQU-1376's read-side window) for a
@@ -204,11 +207,28 @@ export async function indexDocOnOwnConnection(
   }
 }
 
-/** Fire the indexing job off c.executionCtx.waitUntil when available; in the
- *  test harness there's no real ExecutionContext and the getter throws, so
- *  fall back to letting the promise settle on its own (matches the pattern
- *  used elsewhere in this worker, e.g. routes/project-members.ts). */
+/** Hand the indexing job to the per-document Durable Object driver (AQU-2051),
+ *  which runs it on its own alarm invocation and so is not cut off by this
+ *  request's ~30 s `waitUntil` budget. The handshake is deliberately tiny
+ *  (store the job, arm the alarm, 202), so the upload or retry response returns
+ *  as fast as it did before.
+ *
+ *  Where the binding is absent — the vitest route suites, and any environment
+ *  deployed before the DO migration — this keeps the old behaviour exactly:
+ *  the job runs off `c.executionCtx.waitUntil`, or, in the test harness where
+ *  there is no real ExecutionContext and the getter throws, by letting the
+ *  promise settle on its own (the pattern used elsewhere in this worker, e.g.
+ *  routes/project-members.ts).
+ *
+ *  A kick that fails is NOT retried in-request: see `kickKnowledgeIndexDriver`
+ *  for why a local fallback there would race the alarm it may already have
+ *  armed. */
 function runIndexing(c: Context<AuthHonoEnv>, docId: string): void {
+  const kick = kickKnowledgeIndexDriver(c.env, docId)
+  if (kick) {
+    runInBackground(c, kick)
+    return
+  }
   runInBackground(
     c,
     indexDocOnOwnConnection(c.env, docId).catch((err: unknown) => {
@@ -218,9 +238,9 @@ function runIndexing(c: Context<AuthHonoEnv>, docId: string): void {
 }
 
 /** AQU-2002: how long after its last write an indexing job may still be
- *  running. A job's own ceiling is one model round-trip
- *  (`KB_INDEX_FETCH_TIMEOUT_MS`) plus the writes around it, so past this window
- *  nothing is in flight any more.
+ *  running. A job settles inside its whole-job budget (`KB_INDEX_BUDGET_MS`),
+ *  itself inside the platform's waitUntil window, so past this window nothing
+ *  is in flight any more.
  *
  *  This is the *server's* debounce, deliberately much shorter than the read
  *  side's `KB_INDEX_STALE_MS` (5 min, src/lib/frontier/knowledge-base.ts): the
@@ -228,8 +248,20 @@ function runIndexing(c: Context<AuthHonoEnv>, docId: string): void {
  *  always clears this window. What it does catch is a second request for a job
  *  already in flight — a double-clicked button, a replayed request, two agents
  *  reindexing the same doc — which would otherwise start a duplicate job and
- *  reset the staleness clock out from under the first one. */
-export const KB_REINDEX_DEBOUNCE_MS = KB_INDEX_FETCH_TIMEOUT_MS + 30_000
+ *  reset the staleness clock out from under the first one.
+ *
+ *  AQU-2051 revisited this against the driver's ceiling, as that ticket asked,
+ *  and left it where it is — still derived from the *request-hosted* budget,
+ *  which is the only path this row-level claim now has to cover on its own. A
+ *  driver-hosted run legitimately outlasts this window (`KB_DRIVER_BUDGET_MS`),
+ *  but it can no longer be double-started by doing so: the per-document object
+ *  refuses a second job while it is driving, and its heartbeat keeps the row
+ *  off the read side's stalled list for as long as it works, so the retry
+ *  button is never offered over a live job at all. So this stays the cheap
+ *  first line — it stops a duplicate request before any object is reached —
+ *  and it still clears long before a dead job's row goes stale, so a human
+ *  retry is never blocked. */
+export const KB_REINDEX_DEBOUNCE_MS = KB_INDEX_BUDGET_MS + 30_000
 
 /** Restart indexing for one doc, unless a job is already running for it.
  *

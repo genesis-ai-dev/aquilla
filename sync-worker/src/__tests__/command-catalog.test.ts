@@ -56,7 +56,7 @@ describe('command catalog — invariants', () => {
   it('every catalog kind is accepted by validateCommands (vocabulary parity)', () => {
     const minimal: Record<string, unknown> = {
       SetTranslation: { kind: 'SetTranslation', fileId: 'f', cellId: 'c', laneId: 'lane0001', value: 'v' },
-      LinkMedia: { kind: 'LinkMedia', fileId: 'f', cellId: 'c', artifactId: 'a' },
+      LinkMedia: { kind: 'LinkMedia', fileId: 'f', cellId: 'c', artifactId: 'a', laneId: 'lane0001' },
       PlanImport: { kind: 'PlanImport', fileName: 'n', fileType: 'txt', cells: [{ content: 'x' }] },
       CreateOrg: { kind: 'CreateOrg', name: 'O' },
       CreateProject: { kind: 'CreateProject', name: 'P' },

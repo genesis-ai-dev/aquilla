@@ -74,8 +74,8 @@ Example: \`{ "kind": "SetTranslation", "fileId": "f1", "cellId": "c3", "laneId":
     tier: 'prepared',
     agentReachable: true,
     paramsDoc: `### LinkMedia
-Params: \`{ fileId, cellId, artifactId }\` — the artifact must be audio-kind, same project.
-Compiles to \`cell.audio.attach\` + \`cell.audio.select\`; bytes are copied into the app's native audio layout so playback works everywhere.
+Params: \`{ fileId, cellId, artifactId, laneId, slot?, durationMs? }\` — the artifact must be audio-kind, same project. \`laneId\` is the target lane's \`lanes.id\` (required — a take with no lane is filed under the legacy default lane and never shows in a tagged lane's Takes); \`slot\` is \`"recording"\` (default: a recorded take) or \`"generatedVoice"\` (externally synthesized voice, reviewed and exported like in-app TTS); \`durationMs\` is the clip length when known (the upload does no decoding).
+Compiles to \`cell.audio.attach\` + \`cell.audio.select\` in that lane. The take gets a cell-seeded native audio id — reported as \`receipt.media[].audioId\`, not the upload's audioId — and the bytes are copied into the app's native audio layout, so the Takes list, the Target track, playback and the dubbing export treat it like a recorded take.
 Gotcha: upload the artifact first (REST artifact endpoint with \`x-artifact-kind: audio\`); LinkMedia-only changesets cannot mix other commands.`,
   },
   {

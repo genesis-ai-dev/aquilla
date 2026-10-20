@@ -14,11 +14,17 @@
 // Getting these the wrong way round costs nothing visible and everything
 // practical: every lookup misses, the cache the Recording tab has been filling
 // for months is never read, and every chip re-decodes from the network.
+//
+// AQU-2095 added a third place to look, between the local bytes and the clip:
+// the PEAKS SIDECAR, a few hundred stored bytes beside the clip in R2
+// (peaks-sidecar.ts). Whoever decodes a clip publishes it, so a list of takes
+// draws from kilobytes and the recordings themselves are only fetched to play.
 
 import { fetchCellAudio, parseFrontierAudioUrl } from "./upload"
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
 import { decodePeaks } from "./peaks"
 import { peaksCacheGet, peaksCachePut } from "./peaks-cache"
+import { fetchPeaksSidecar, publishPeaksSidecarOnce } from "./peaks-sidecar"
 
 /**
  * The bin count everything decodes at.
@@ -85,43 +91,69 @@ export async function loadPeaksFor(args: LoadPeaksArgs): Promise<Float32Array | 
   // Legacy GitLab-LFS attachments parse to null and can never be fetched again.
   const frontier = parseFrontierAudioUrl(url)
   if (!frontier) return null
-
-  // 2. The bytes, if warmFileDubs or a playback already pulled them down.
-  let bytes = await audioCacheGet(frontier.audioId, frontier.ext).catch(() => null)
-
-  // 3. The network, writing through so the next reader skips it.
-  if (!bytes) {
-    let fetched: Uint8Array
-    try {
-      fetched = await fetchCellAudio({
-        projectId,
-        fileId,
-        audioId: frontier.audioId,
-        ext: frontier.ext,
-        getSyncToken,
-      })
-    } catch {
-      return null
-    }
-    try {
-      await audioCachePut(frontier.audioId, frontier.ext, fetched)
-    } catch {
-      // Out of quota / private mode — we still have the bytes in hand.
-    }
-    bytes = fetched
+  const sidecarArgs = {
+    projectId,
+    fileId,
+    audioId: frontier.audioId,
+    ext: frontier.ext,
+    getSyncToken,
   }
 
-  try {
-    const decoded = await decodePeaks(bytes, bins)
+  // 2. The bytes, if warmFileDubs or a playback already pulled them down.
+  //    Decoding what is already on disk beats any request.
+  const local = await audioCacheGet(frontier.audioId, frontier.ext).catch(() => null)
+  if (local) return decodeAndKeep(local, bins, attachmentKey, sidecarArgs)
+
+  // 3. AQU-2095: the peaks sidecar — a few hundred bytes of stored shape,
+  //    against the hundreds of KB the clip itself costs. This is the rung that
+  //    makes the Audio view's list cheap: a chapter of takes draws for ~7KB and
+  //    the recordings are fetched when somebody presses play.
+  const stored = await fetchPeaksSidecar(sidecarArgs)
+  if (stored && stored.length === bins) {
     try {
-      await peaksCachePut(attachmentKey, decoded.peaks)
+      await peaksCachePut(attachmentKey, stored)
     } catch {
-      // As above: failing to cache is not failing to draw.
+      // Failing to cache is not failing to draw.
     }
-    return decoded.peaks
+    return stored
+  }
+
+  // 4. The clip itself, writing through so the next reader skips it.
+  let fetched: Uint8Array
+  try {
+    fetched = await fetchCellAudio(sidecarArgs)
   } catch {
     return null
   }
+  try {
+    await audioCachePut(frontier.audioId, frontier.ext, fetched)
+  } catch {
+    // Out of quota / private mode — we still have the bytes in hand.
+  }
+  return decodeAndKeep(fetched, bins, attachmentKey, sidecarArgs)
+}
+
+/** Peaks from bytes in hand: cached locally, and published as the clip's
+ *  sidecar so nobody else has to download the clip to see its shape. */
+async function decodeAndKeep(
+  bytes: Uint8Array,
+  bins: number,
+  attachmentKey: string,
+  sidecarArgs: { projectId: string; fileId: string; audioId: string; ext: string; getSyncToken: SyncTokenFetcher },
+): Promise<Float32Array | null> {
+  let peaks: Float32Array
+  try {
+    peaks = (await decodePeaks(bytes, bins)).peaks
+  } catch {
+    return null
+  }
+  try {
+    await peaksCachePut(attachmentKey, peaks)
+  } catch {
+    // As above: failing to cache is not failing to draw.
+  }
+  publishPeaksSidecarOnce({ ...sidecarArgs, peaks })
+  return peaks
 }
 
 export interface PeaksTarget {

@@ -31,6 +31,13 @@ vi.mock("./upload", async (importOriginal) => {
 const decodePeaks = vi.fn<(bytes: Uint8Array, bins: number) => Promise<unknown>>()
 vi.mock("./peaks", () => ({ decodePeaks: (...a: [Uint8Array, number]) => decodePeaks(...a) }))
 
+const fetchPeaksSidecar = vi.fn<(args: Record<string, unknown>) => Promise<Float32Array | null>>()
+const publishPeaksSidecarOnce = vi.fn<(args: Record<string, unknown>) => void>()
+vi.mock("./peaks-sidecar", () => ({
+  fetchPeaksSidecar: (a: Record<string, unknown>) => fetchPeaksSidecar(a),
+  publishPeaksSidecarOnce: (a: Record<string, unknown>) => publishPeaksSidecarOnce(a),
+}))
+
 import { loadPeaksFor, loadPeaksBatch } from "./peaks-loader"
 
 const AUDIO_ID = "audio-cell1-1700000000-abcdefgh"
@@ -54,6 +61,7 @@ beforeEach(() => {
   audioCachePut.mockResolvedValue()
   fetchCellAudio.mockResolvedValue(new Uint8Array([1, 2, 3]))
   decodePeaks.mockResolvedValue(decoded())
+  fetchPeaksSidecar.mockResolvedValue(null)
 })
 
 describe("loadPeaksFor — the two cache keys", () => {
@@ -103,6 +111,56 @@ describe("loadPeaksFor — the ladder stops at the first rung that answers", () 
     expect(fetchCellAudio).toHaveBeenCalledWith(
       expect.objectContaining({ projectId: "p1", fileId: "cue-sibling", audioId: AUDIO_ID, ext: EXT }),
     )
+  })
+})
+
+// AQU-2095. The ticket's number: a chapter of takes cost ~400KB to DRAW,
+// because a 20px rectangle was paid for with the whole recording. The sidecar
+// is a few hundred stored bytes, so what matters is which rungs it sits
+// between — above the clip, below anything already on this device — and that a
+// clip we did pay for leaves its shape behind for the next reader.
+describe("loadPeaksFor — the peaks sidecar", () => {
+  it("draws from the stored shape instead of downloading the recording", async () => {
+    const stored = new Float32Array(BINS).fill(0.75)
+    fetchPeaksSidecar.mockResolvedValue(stored)
+
+    await expect(loadPeaksFor(base)).resolves.toBe(stored)
+    expect(fetchCellAudio).not.toHaveBeenCalled()
+    expect(decodePeaks).not.toHaveBeenCalled()
+    // And it is kept locally, so the next draw costs no request at all.
+    expect(peaksCachePut).toHaveBeenCalledWith(KEY, stored)
+  })
+
+  it("asks the clip's OWN file for it, as the clip's bytes are asked for", async () => {
+    await loadPeaksFor({ ...base, fileId: "cue-sibling" })
+    expect(fetchPeaksSidecar).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "p1", fileId: "cue-sibling", audioId: AUDIO_ID, ext: EXT }),
+    )
+  })
+
+  it("is not consulted when the bytes are already on this device", async () => {
+    audioCacheGet.mockResolvedValue(new Uint8Array([9, 9]))
+    await loadPeaksFor(base)
+    expect(fetchPeaksSidecar).not.toHaveBeenCalled()
+  })
+
+  it("ignores a sidecar stored at a different bin count", async () => {
+    fetchPeaksSidecar.mockResolvedValue(new Float32Array(64).fill(0.5))
+    await loadPeaksFor(base)
+    expect(fetchCellAudio).toHaveBeenCalledOnce()
+  })
+
+  it("publishes the shape of a clip it had to download, for everyone after", async () => {
+    await loadPeaksFor(base)
+    expect(publishPeaksSidecarOnce).toHaveBeenCalledWith(
+      expect.objectContaining({ audioId: AUDIO_ID, ext: EXT, peaks: expect.any(Float32Array) }),
+    )
+  })
+
+  it("publishes nothing when the bytes would not decode", async () => {
+    decodePeaks.mockRejectedValue(new Error("unsupported"))
+    await expect(loadPeaksFor(base)).resolves.toBeNull()
+    expect(publishPeaksSidecarOnce).not.toHaveBeenCalled()
   })
 })
 

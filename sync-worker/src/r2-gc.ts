@@ -74,6 +74,9 @@ const NAMESPACES: readonly GcNamespace[] = ["audio", "voice", "artifact"]
 
 /** Suffix of the Inworld clone-id cache that rides alongside a reference clip. */
 const CLONE_CACHE_SUFFIX = ".inworld.json"
+/** AQU-2095: suffix of the stored-waveform sidecar that rides alongside a clip.
+ *  Mirrors PEAKS_SIDECAR_SUFFIX in src/lib/audio/peaks-sidecar.ts. */
+const PEAKS_SIDECAR_SUFFIX = ".peaks"
 
 export interface R2GcCursors {
   /** Last `projects/{pid}/` prefix finished — audio + voice namespaces. */
@@ -145,7 +148,15 @@ export function classifyKey(rest: string): { namespace: GcNamespace; projectId: 
     if (parts.length === 6 && parts[2] === "files" && parts[4] === "audio") {
       const [, projectId, , fileId, , audioId] = parts
       if (!projectId || !fileId || !audioId) return null
-      return { namespace: "audio", projectId, ref: `${fileId}/${audioId}` }
+      // AQU-2095: a `.peaks` sidecar is the clip's waveform, not a clip of its
+      // own — no cell_audio row will ever name it. Map it back onto the clip it
+      // describes, as the voice namespace does for the clone cache, so it is
+      // kept while the clip is live and collected with it.
+      const ref = audioId.endsWith(PEAKS_SIDECAR_SUFFIX)
+        ? audioId.slice(0, -PEAKS_SIDECAR_SUFFIX.length)
+        : audioId
+      if (!ref) return null
+      return { namespace: "audio", projectId, ref: `${fileId}/${ref}` }
     }
     // projects/{pid}/voices/{refId} and the {refId}.inworld.json clone cache,
     // which lives or dies with the clip it was derived from.

@@ -14,6 +14,7 @@ import { makeAudioSyncTokenFetcher } from "@/lib/audio/sync-token-fetcher"
 import { decodePeaks } from "@/lib/audio/peaks"
 import { audioMimeForExt } from "@/lib/audio/mime"
 import { peaksCacheGet, peaksCachePut } from "@/lib/audio/peaks-cache"
+import { fetchPeaksSidecar, publishPeaksSidecarOnce } from "@/lib/audio/peaks-sidecar"
 import { audioCacheGet, audioCachePut, audioCacheEvict } from "@/lib/audio/bytes-cache"
 import { joinedClip } from "@/lib/audio/tail-cut"
 import {
@@ -841,6 +842,29 @@ export function useCellAudio(
         setPeaksState("ready")
         return
       }
+      // AQU-2095: the stored shape, a few hundred bytes, before the recording
+      // itself. A card in the Audio view used to download its whole take to
+      // draw a 20px rectangle — a chapter of them is ~400KB and most of a
+      // minute on 3G. The clip is now only fetched to play (ensureBytes), or
+      // when no sidecar has been published for it yet. Length comes from the
+      // attachment, as it already does on a peaks-cache hit.
+      const frontier = attachmentUrl ? parseFrontierAudioUrl(attachmentUrl) : null
+      if (frontier) {
+        const stored = await fetchPeaksSidecar({
+          projectId: project.id,
+          fileId,
+          audioId: frontier.audioId,
+          ext: frontier.ext,
+          getSyncToken,
+        })
+        if (stored && stored.length === bins) {
+          setPeaks(stored)
+          peaksReadyRef.current = true
+          setPeaksState("ready")
+          try { await peaksCachePut(selectedAudioId, stored) } catch { /* non-fatal */ }
+          return
+        }
+      }
       const bytes = await ensureBytes()
       const decoded = await decodePeaks(bytes, bins)
       setPeaks(decoded.peaks)
@@ -848,6 +872,17 @@ export function useCellAudio(
       peaksReadyRef.current = true
       setPeaksState("ready")
       try { await peaksCachePut(selectedAudioId, decoded.peaks) } catch { /* non-fatal */ }
+      // Having paid for the clip, leave its shape behind for everyone else.
+      if (frontier) {
+        publishPeaksSidecarOnce({
+          projectId: project.id,
+          fileId,
+          audioId: frontier.audioId,
+          ext: frontier.ext,
+          getSyncToken,
+          peaks: decoded.peaks,
+        })
+      }
     } catch (e) {
       const kind = (e && typeof e === "object" && "kind" in e) ? (e as AudioError).kind : null
       // pointer-missing / no-session are expected in many real-world states
@@ -865,7 +900,7 @@ export function useCellAudio(
         setPeaksState(kind === "audio-deleted" ? "missing" : kind === "offline-unavailable" ? "offline" : "error")
       }
     }
-  }, [attachmentUrl, selectedAudioId, ensureBytes])
+  }, [attachmentUrl, selectedAudioId, ensureBytes, project.id, fileId, getSyncToken])
 
   // Keep refs in sync so the coordinator-registered controller delegates to
   // the latest closures, not the ones captured at registration time.

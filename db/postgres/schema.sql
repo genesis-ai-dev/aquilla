@@ -2875,6 +2875,12 @@ CREATE OR REPLACE VIEW assignment_member_cells WITH (security_invoker = true) AS
 -- AQU-1491: runtime grants, distinct from legacy word/credit allowances.
 ALTER TABLE org_billing ADD COLUMN weekly_allowance BIGINT
   CHECK (weekly_allowance >= 0 AND weekly_allowance <= 10000000);
+-- AQU-2059 (0182): the one plan per org that db/shared/org-plan.ts resolves.
+-- NULL tier falls back to the legacy `plan` mapping; no row means Free.
+ALTER TABLE org_billing ADD COLUMN tier TEXT
+  CONSTRAINT org_billing_tier_check CHECK (tier IN ('free', 'team', 'enterprise'));
+-- Enterprise contract end; a 14-day Team-sized grace follows, then Free.
+ALTER TABLE org_billing ADD COLUMN contract_ends_at TIMESTAMPTZ;
 
 -- Aquilla Tools (prototype): agent-built, sandboxed mini-apps per project.
 -- `project_tools` is the tool; `project_tool_versions` its immutable version

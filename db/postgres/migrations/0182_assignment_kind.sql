@@ -1,4 +1,4 @@
--- 0181_assignment_kind.sql — AQU-1969 "Assign validation only"
+-- 0182_assignment_kind.sql — AQU-1969 "Assign validation only"
 --
 -- Each assignment says what kind of work it hands out. 'translate' is every
 -- assignment made before this column existed, and what the Assign dialogs

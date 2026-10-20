@@ -1212,7 +1212,7 @@ CREATE TABLE assignments (
     created_at       BIGINT NOT NULL,
     unassigned_at    BIGINT,
     completed_at     BIGINT,
-    -- AQU-1969 (0181): what the assignment hands out. 'translate' (the
+    -- AQU-1969 (0182): what the assignment hands out. 'translate' (the
     -- default, and every older row) measures lines validated by anyone in the
     -- scope; 'validate' measures the assignee's OWN approvals there.
     kind             TEXT NOT NULL DEFAULT 'translate'

@@ -20,7 +20,7 @@ import type { Concept, ConceptExternalIds, TermMatchOptions, TermRendering } fro
 import { renderingStatusLabelKey } from "@/lib/terminology/types"
 import type { TermMatchingSettings } from "@/lib/terminology/types"
 import type { CellData } from "@/hooks/useCells"
-import { shortCellId } from "@/lib/cells/short-cell-id"
+import { violationCellRef } from "@/lib/terminology/violations-inbox"
 import { TranslatedEditor } from "@/components/TranslatedEditor"
 import type { TranslatedEditorCommit } from "@/components/TranslatedEditor"
 import { emitTargetCellCommit } from "@/lib/sync/events-emit"
@@ -167,10 +167,13 @@ interface OccurrenceRowProps {
   onCellCommitted: () => void
   onJumpToCell?: (cell: { cellId: string; fileId: string }) => void
   termMatching?: TermMatchingSettings
+  /** AQU-2076: name of the file the cell lives in, when the caller knows it. */
+  fileName?: string
 }
 
 function OccurrenceRow({
   cell,
+  fileName,
   concept,
   translated,
   canEdit,
@@ -184,6 +187,7 @@ function OccurrenceRow({
 }: OccurrenceRowProps) {
   const t = useT()
   const verdict = deriveVerdict(concept, cell.original, translated, termMatching)
+  const refLabel = violationCellRef(cell) ?? t("terminology.violations.unnamedCell")
   const [editing, setEditing] = useState(false)
 
   const handleCommit = useCallback(
@@ -229,9 +233,19 @@ function OccurrenceRow({
         verdict === "infringed" && "bg-destructive/5 -mx-2 px-2 rounded",
       )}
     >
-      {/* Cell ref */}
-      <span className="w-24 shrink-0 font-mono text-[11px] text-muted-foreground pt-0.5">
-        {cell.context || cell.group || shortCellId(cell.id)}
+      {/* Cell ref. AQU-2076: same label as the violations list (AQU-663) —
+          a cell with no ref reads "Untitled cell" plus its file, never a
+          fragment of the internal id. */}
+      <span className="flex w-24 shrink-0 flex-col pt-0.5 text-[11px] text-muted-foreground">
+        <span className="font-mono">{refLabel}</span>
+        {fileName && (
+          <span
+            className="truncate"
+            title={t("terminology.violations.inFile", { file: fileName })}
+          >
+            {fileName}
+          </span>
+        )}
       </span>
 
       {/* Source snippet */}
@@ -280,7 +294,7 @@ function OccurrenceRow({
           size="icon-sm"
           className="shrink-0"
           aria-label={t("terminology.termDetail.goToCellAria", {
-            ref: cell.context || cell.group || shortCellId(cell.id),
+            ref: refLabel,
           })}
           onClick={() => onJumpToCell({ cellId: cell.id, fileId: cell.fileId })}
         >
@@ -345,6 +359,8 @@ export interface TerminologyTermDetailProps {
   loadError?: string | null
   /** Jump to this occurrence in the editor. */
   onJumpToCell?: (cell: { cellId: string; fileId: string }) => void
+  /** AQU-2076: project files, so each occurrence row can name its file. */
+  files?: Array<{ id: string; name: string }>
   /**
    * AQU-1006 follow-up: replace this concept's rendering list.
    *
@@ -398,6 +414,7 @@ export function TerminologyTermDetail({
   examplesLoading = false,
   loadError = null,
   onJumpToCell,
+  files,
   onRenderingsChange,
   termMatching,
   onMatchChange,
@@ -417,6 +434,11 @@ export function TerminologyTermDetail({
   suggestionsLoading = false,
 }: TerminologyTermDetailProps) {
   const t = useT()
+  const fileNameById = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const f of files ?? []) m.set(f.id, f.name)
+    return m
+  }, [files])
   // Per-cell translated values — optimistic updates are already reflected via
   // the parent's useCells applyOptimisticTargetEdit before this renders.
   const occurrences = useMemo(
@@ -684,6 +706,7 @@ export function TerminologyTermDetail({
                 <OccurrenceRow
                   key={cell.id}
                   cell={cell}
+                  fileName={fileNameById.get(cell.fileId)}
                   concept={concept}
                   translated={cell.translated}
                   canEdit={canEdit}

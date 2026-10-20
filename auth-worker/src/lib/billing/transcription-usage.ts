@@ -1,7 +1,15 @@
 import type { Env } from '../../types'
 import { providerCostToMicroCents } from '../../../../db/shared/billing-cost'
 
-export const WHISPER_MODEL = 'openai/whisper-1'
+/**
+ * Whisper large-v3, not `openai/whisper-1`. Our OpenRouter account enforces
+ * zero data retention, and OpenAI's whisper-1 endpoint is not ZDR: OpenRouter
+ * answers 404 "0 endpoints … available matching your guardrail restrictions
+ * and data policy", which reached users as a 502 on every hosted Whisper
+ * request (2026-10-20). large-v3 has a ZDR endpoint, returns the same word
+ * timestamps, covers the same languages, and costs ~13× less.
+ */
+export const WHISPER_MODEL = 'openai/whisper-large-v3'
 /** Chinese varieties only (db/shared/asr-models.ts pickAsrModel). */
 export const QWEN_ASR_MODEL = 'qwen/qwen3-asr-1.7b'
 export type OpenRouterAsrModel = typeof WHISPER_MODEL | typeof QWEN_ASR_MODEL

@@ -2,6 +2,23 @@
 
 **Read this before treating any non-English catalog as reviewed.**
 
+> ## `es` (Latin American Spanish) — 2026-10-20
+>
+> Machine-translated from the full `pnpm i18n:todo` packet (9,682 leaves) and merged
+> with `scripts/i18n-catalog.ts import`. **No Spanish speaker has read it.** The menu
+> endonym stays Español; the wording is neutral Latin American (tú, ustedes, no
+> vosotros, no voseo, archivo, computadora, infinitive buttons). Glossary: cell →
+> celda, lane → carril, changeset → conjunto de cambios, termbase → base
+> terminológica, back-translation → retrotraducción, source → origen, target →
+> destino, draft → borrador.
+>
+> Import report: 8,528/8,682 keys. The leaves the importer dropped were identical to
+> English (formats, product names, and placeholder-only templates). Mechanical check
+> before import: 0 missing leaves and 0 `{placeholder}` drift. `common.datePlaceholder`
+> stays `June 01, 2025` because the date parser only accepts that en-US shape. Strings
+> added on `dev` after the draft — the Monday "make a new board" step — were translated
+> in the same variety and merged on top.
+
 > ## All locales topped up from `pnpm i18n:todo` — 2026-10-03
 >
 > The 14,590 untranslated or stale leaves in `th`, `my`, `ms`, `id`, `ar`, `zh-Hans`,

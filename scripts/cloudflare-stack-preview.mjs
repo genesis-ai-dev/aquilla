@@ -104,9 +104,13 @@ export function previewConfig(surface, { cwd, urls = {} }) {
     // whole PR preview stack down, since the web preview is built from the auth
     // preview's origin.
     //
-    // The cost is that routes/contextual.ts falls back to the in-request loop
-    // on a preview, so a preview CANNOT be used to verify that a run outlives
-    // the request that started it. Walk that on development or production.
+    // AQU-2051 — the same goes for the per-document KnowledgeIndexDriver: no
+    // binding here either, for the same reason.
+    //
+    // The cost is that routes/contextual.ts falls back to the in-request loop,
+    // and routes/knowledge.ts `runIndexing` to the in-request waitUntil job, on
+    // a preview — so a preview CANNOT be used to verify that either outlives
+    // the request that started it. Walk those on development or production.
   } else {
     // KNOWN BROKEN AT RUNTIME, and not for want of a correct value here: sync's
     // subrequest to this origin 404s (Cloudflare's HTML edge page) even though the

@@ -637,6 +637,10 @@ const scheduled = async (
 // the binding and migration live in wrangler.toml.
 export { ContextualRunDriver } from "./contextual-run-do"
 
+// AQU-2051 — the per-document knowledge-base indexing driver. Same rule: a
+// Durable Object class must be a named export of the entrypoint module.
+export { KnowledgeIndexDriver } from "./knowledge-index-do"
+
 // Keep `export default app` semantics (tests call app.request) while giving
 // the Workers runtime a `scheduled` handler on the same default export.
 export default Object.assign(app, { scheduled })

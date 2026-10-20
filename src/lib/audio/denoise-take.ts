@@ -30,6 +30,7 @@ import { markProjectHasAudioDataSoon } from "./project-audio-state"
 import { setTranscribeStatus } from "./transcribe-status"
 
 function extForMime(mimeType: string): string {
+  if (mimeType.includes("wav")) return "wav"
   if (mimeType.includes("ogg")) return "ogg"
   if (mimeType.includes("webm")) return "webm"
   return "webm"
@@ -81,8 +82,11 @@ async function cleanAndUpload(args: {
   })
   const samples = await decodeToMono48k(bytes)
 
-  // 2. Run RNNoise → WebM/Opus blob.
-  const { blob, durationMs, mimeType } = await denoiseMono48k(samples)
+  // 2. Run RNNoise → WebM/Opus blob, or a WAV for a WAV take. AQU-1575: a WAV
+  //    original stays a WAV; removing noise must not quietly downgrade it to
+  //    compressed audio. Every other input is written as Opus, as before.
+  const output = source.ext.toLowerCase() === "wav" ? "wav" : "opus"
+  const { blob, durationMs, mimeType } = await denoiseMono48k(samples, { output })
 
   // 3. Upload as a new (denoised) take. Warm the byte cache first (FRO-355)
   //    so the new take is transcribable/playable locally straight away.

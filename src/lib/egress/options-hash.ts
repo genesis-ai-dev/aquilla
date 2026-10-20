@@ -41,10 +41,18 @@ export async function computeOptionsHash(
   options: EgressOptions,
   selectedFileIds: readonly string[],
 ): Promise<string> {
-  const { useCache: _useCache, ...rest } = options
+  const { useCache: _useCache, audioFormat, ...rest } = options
   const payload = {
     engineVersion: EGRESS_ENGINE_VERSION,
-    options: { ...rest, lanes: [...rest.lanes].sort() },
+    options: {
+      ...rest,
+      lanes: [...rest.lanes].sort(),
+      // AQU-1575: folded in only where it changes the bytes — WAV on separate
+      // clips. Left out otherwise, so options saved before it existed (no
+      // field), an explicit "original", and the modes that always write WAV
+      // all keep the cache keys they already have.
+      ...(audioFormat === "wav" && rest.audioMode === "separate-clips" ? { audioFormat } : {}),
+    },
     fileIds: [...selectedFileIds].sort(),
   }
   return sha256Hex(new TextEncoder().encode(canonicalJson(payload)))

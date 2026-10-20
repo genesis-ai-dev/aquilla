@@ -4,14 +4,14 @@
 // jumps to the first cell matching the assignment's scopeLabel (using the same
 // jumpToCell mechanism as DecayBreakdown / search results).
 //
-// Placement: rendered as a compact collapsible section in the workspace left
-// sidebar below the file list. It is a member-facing affordance (any role);
+// Placement: one of the workspace left sidebar's nav buttons (styled like a
+// SidebarProjectSection row); clicking it opens the list in a popover. It is a member-facing affordance (any role);
 // project_lead+ can additionally assign work via AssignModal.
 
 import { useEffect, useState, useCallback } from "react"
-import { ChevronDown, ChevronRight, ClipboardList } from "lucide-react"
+import { ClipboardList } from "lucide-react"
 import { AssignmentLaneBadge } from "@/components/AssignmentLaneBadge"
-import { Badge } from "@/components/ui/badge"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { DateTooltip } from "@/components/ui/date-tooltip"
@@ -48,7 +48,7 @@ export function ProjectAssignedToMe({
   const [assignments, setAssignments] = useState<MyAssignment[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [expanded, setExpanded] = useState(true)
+  const [open, setOpen] = useState(false)
 
   useEffect(() => {
     if (!jwt) return
@@ -65,6 +65,7 @@ export function ProjectAssignedToMe({
   const handleRowClick = useCallback(
     (a: MyAssignment) => {
       if (onJumpToAssignment) onJumpToAssignment(a)
+      setOpen(false)
     },
     [onJumpToAssignment],
   )
@@ -72,23 +73,33 @@ export function ProjectAssignedToMe({
   // Don't render if there are no assignments and we're not loading (clean state).
   if (!loading && !error && assignments.length === 0) return null
 
+  // Wrapped in a div so Base UI's focus-guard <span>s stay out of the
+  // sidebar section's flex list (see SidebarProjectSection).
   return (
-    <div className="border-t px-2 pt-2 pb-1">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-start text-xs font-medium text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-      >
-        {expanded ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
-        <ClipboardList className="h-3 w-3 shrink-0" />
-        <span className="truncate">{t("workspace.assignedToMe.heading")}</span>
-        {assignments.length > 0 && (
-          <Badge className="ms-auto shrink-0">{assignments.length}</Badge>
-        )}
-      </button>
-
-      {expanded && (
-        <div className="mt-1 space-y-0.5">
+    <div>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger
+          render={
+            <button
+              type="button"
+              className={cn(
+                "flex h-7 w-full items-center gap-2 rounded-lg px-2 text-[13px] transition-colors",
+                "hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:outline-none",
+                open ? "bg-accent text-foreground" : "text-muted-foreground",
+              )}
+            >
+              <ClipboardList className="h-3.5 w-3.5 shrink-0" />
+              <span className="flex-1 truncate text-start">{t("workspace.assignedToMe.heading")}</span>
+              {assignments.length > 0 && (
+                <span className="rounded-md px-1.5 text-[10px] tabular-nums text-primary">
+                  {assignments.length}
+                </span>
+              )}
+            </button>
+          }
+        />
+        <PopoverContent side="right" align="end" className="max-h-[60vh] w-72 gap-0 overflow-y-auto rounded-xl p-1">
+          <div className="space-y-0.5">
           {loading ? (
             <div className="flex items-center px-2 py-1 text-muted-foreground">
               <Spinner className="size-3" />
@@ -155,8 +166,9 @@ export function ProjectAssignedToMe({
               )
             })
           )}
-        </div>
-      )}
+          </div>
+        </PopoverContent>
+      </Popover>
     </div>
   )
 }

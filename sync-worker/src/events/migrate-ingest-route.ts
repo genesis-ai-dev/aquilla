@@ -28,7 +28,7 @@
 // SECURITY: this route trusts the body's author/id/timestamp. It must NEVER be
 // reachable by browser clients — only holders of SYNC_SECRET_KEY may call it.
 
-import { buildEventProjectionStmts, type PersistedEvent } from './event-projection'
+import { buildEventProjectionStmts, buildBulkSourceCellCreateStmt, coerceIntegerMsPayload, type PersistedEvent } from './event-projection'
 import {
   allocateSeqRange,
   buildBulkEventInsertStmt,
@@ -53,6 +53,8 @@ export interface MigrateIngestEnv {
   AQUILLA_PG?: AquillaDb
   ADMIN_SECRET?: string
   SYNC_SECRET_KEY?: string
+  /** Dedicated migration Worker only; ordinary application traffic stays unchanged. */
+  MIGRATION_BULK_SOURCE?: boolean
 }
 
 /** One fully-formed event envelope from the migration engine. Unlike RawEvent,
@@ -204,7 +206,7 @@ export async function handleMigrateIngestRequest(
   // this route's 400s can be raised while the seq ledger is still untouched —
   // a malformed body must not pin the project's advertised reader cursor on a
   // pending allocation for the full PENDING_ALLOC_TTL_MS.
-  const prepared: { row: Omit<SeqEventInsertRow, 'serverSeq'>; projStmts: AquillaStatement[] }[] = []
+  const prepared: { event: PersistedEvent; row: Omit<SeqEventInsertRow, 'serverSeq'>; projStmts: AquillaStatement[] }[] = []
 
   for (const e of body.events) {
     if (typeof e.id !== 'string' || typeof e.kind !== 'string' || typeof e.author !== 'string') {
@@ -243,6 +245,7 @@ export async function handleMigrateIngestRequest(
     }
 
     prepared.push({
+      event: coerceIntegerMsPayload(event),
       row: {
         id: event.id,
         schemaVersion,
@@ -322,14 +325,37 @@ export async function handleMigrateIngestRequest(
   // Pass 2: stamp seqs from the pre-allocated block, in body order, and emit
   // each event's insert ahead of its own projection statements (the ordering
   // pass 1 preserved). Replayed ids were already dropped above.
-  for (const { row, projStmts } of fresh) {
-    const insertRow: SeqEventInsertRow = { ...row, serverSeq: nextSeq++ }
-    if (eventsOnly) {
-      // Firehose path: collapse into multi-row INSERTs below.
-      eventsOnlyRows.push(insertRow)
-    } else {
-      groups.push([buildBulkEventInsertStmt(db, [insertRow]), ...projStmts])
+  for (let i = 0; i < fresh.length;) {
+    const first = fresh[i]
+    // Only adjacent, distinct source cells in one file with one projection
+    // statement may share a bulk upsert. Keep the event insert and projection
+    // indivisible under AQU-2025; duplicate cells retain sequential semantics.
+    if (env.MIGRATION_BULK_SOURCE && !eventsOnly && deferFileCounters
+      && first.event.kind === 'source.cell.create' && first.projStmts.length === 1) {
+      const unit: typeof fresh = []
+      const seen = new Set<string>()
+      while (i + unit.length < fresh.length && unit.length < 200) {
+        const item = fresh[i + unit.length]
+        const payload = item.event.payload as { cellId?: string }
+        const key = String(payload.cellId ?? item.event.cellId)
+        if (item.event.kind !== 'source.cell.create' || item.event.fileId !== first.event.fileId
+          || item.projStmts.length !== 1 || seen.has(key)) break
+        seen.add(key)
+        unit.push(item)
+      }
+      if (unit.length >= 2) {
+        groups.push([
+          buildBulkEventInsertStmt(db, unit.map(({ row }) => ({ ...row, serverSeq: nextSeq++ }))),
+          buildBulkSourceCellCreateStmt(db, unit.map(({ event }) => event)),
+        ])
+        i += unit.length
+        continue
+      }
     }
+    const { row, projStmts } = fresh[i++]
+    const insertRow: SeqEventInsertRow = { ...row, serverSeq: nextSeq++ }
+    if (eventsOnly) eventsOnlyRows.push(insertRow)
+    else groups.push([buildBulkEventInsertStmt(db, [insertRow]), ...projStmts])
   }
 
   // Firehose (eventsOnly) rows collapse into multi-row INSERTs — same rows,

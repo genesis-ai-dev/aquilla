@@ -518,7 +518,25 @@ export class PostgresDb implements AquillaDb {
   }
 }
 
-/** postgres.js → PgExecutor (prod path; over Hyperdrive's connection string). */
+/** Neon PgBouncer may ignore startup GUCs. The dedicated migration path
+ * establishes ceilings inside EVERY transaction, including single statements.
+ * Long-operation SET LOCALs run afterwards and may use the named registry.
+ * No session SET leaks across pooled borrowers. Ordinary workers are unchanged.
+ */
+export function withTransactionTimeouts(executor: PgExecutor): PgExecutor {
+  const begin: PgExecutor["begin"] = (fn) => executor.begin(async (tx) => {
+    await tx.run(`SELECT set_config('statement_timeout', '${DEFAULT_STATEMENT_TIMEOUT_MS}', true),
+      set_config('idle_in_transaction_session_timeout', '${DEFAULT_IDLE_IN_TRANSACTION_TIMEOUT_MS}', true)`, [])
+    return fn(tx)
+  })
+  return {
+    run: (query, params, opts) => begin(tx => tx.run(query, params, opts)),
+    begin,
+    close: async () => { await executor.close?.() },
+  }
+}
+
+/** postgres.js → PgExecutor (Hyperdrive or direct pooled connection). */
 function fromPostgresJs(sql: postgres.Sql): PgExecutor {
   const wrap = (s: postgres.Sql): PgExecutor => ({
     async run(query, params, opts) {
@@ -546,6 +564,9 @@ export const DEFAULT_POOL_MAX = 8
  *  the DEFAULT_* constants; `null` means "no ceiling" and is only for CLI
  *  maintenance (makeMaintenancePostgres), never a worker request path. */
 export interface PgTimeoutOptions {
+  /** Dedicated pooled migration path: set ceilings in each transaction. */
+  transactionLocalTimeouts?: boolean
+
   statementTimeoutMs?: number | null
   idleInTransactionTimeoutMs?: number | null
 }
@@ -592,7 +613,8 @@ export function makePostgres(
       timestamp: { to: 1114, from: [1114, 1184], parse: (x: string) => x, serialize: (x: string) => x },
     },
   })
-  return new PostgresDb(fromPostgresJs(sql))
+  const executor = fromPostgresJs(sql)
+  return new PostgresDb(timeouts.transactionLocalTimeouts ? withTransactionTimeouts(executor) : executor)
 }
 
 /**

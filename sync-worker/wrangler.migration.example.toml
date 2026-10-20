@@ -1,0 +1,28 @@
+# Copy to an operator-owned config; never put credentials in this file.
+# This is NOT part of the application deployment or the default sync-worker.
+name = "aquilla-migration-ingest"
+main = "src/migration-worker.ts"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+[placement]
+mode = "targeted"
+region = "aws:us-east-2"
+
+[observability]
+enabled = true
+
+[vars]
+# All three must match the separately provisioned pooled URL and actual role.
+MIGRATION_EXPECTED_HOST = "REPLACE_WITH_EXACT_NEON_POOLER_HOST"
+MIGRATION_EXPECTED_DATABASE = "REPLACE_WITH_DATABASE"
+MIGRATION_EXPECTED_ROLE = "REPLACE_WITH_VERIFIED_ROLE"
+MIGRATION_WRITES_ENABLED = "false"
+# Start with explicit numeric GitLab IDs. Do not widen while validating.
+MIGRATION_ALLOWED_GITLAB_IDS = ""
+
+# Secrets, provisioned separately: MIGRATION_DATABASE_URL and ADMIN_SECRET.
+# Do not provision the application token-signing key on this worker.
+# No Hyperdrive, R2, queue or Durable Object bindings belong on this worker.

@@ -5,7 +5,7 @@
  * prop threading. Tool sources are fetched lazily, per mount.
  */
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useParams } from "react-router-dom"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -16,11 +16,15 @@ import { FIRST_PARTY_DOOR43_IMPORTER } from "../../../shared/tools/first-party/d
 import type { ToolScope } from "../../../shared/tools/manifest"
 import { useProject } from "@/hooks/useProject"
 import { useSmartExtensionsEnabled } from "@/lib/tools/smart-extensions-enabled"
-import { HeadlessRuns, type HeadlessJob, type HeadlessJobHooks, type HeadlessOutcome } from "./HeadlessRuns"
+import type { HeadlessJob, HeadlessJobHooks, HeadlessOutcome } from "./HeadlessRuns"
 import { makeAudioSyncTokenFetcher } from "@/lib/audio/sync-token-fetcher"
 import { fetchProjectFiles } from "@/lib/sync/cells-read"
 import type { FileImportProvenance } from "../../../shared/tools/file-extension"
 import { dueOnOpenActions, markOnOpenRun } from "@/lib/tools/on-open-actions"
+
+// AQU-2093: the runner brings zip, the rich-text editor and the HTML sanitiser
+// with it, so it loads with the first headless job, not with every page.
+const HeadlessRuns = lazy(() => import("./HeadlessRuns").then((m) => ({ default: m.HeadlessRuns })))
 
 export interface ToolsMountValue {
   projectId: string
@@ -431,17 +435,25 @@ export function ToolsMountProvider({ children }: { children: ReactNode }) {
     }),
     [projectId, session, tools, refresh, loadTool, prefs, togglePin, setDockSelection, panelRequestSeq, openInPanel, paletteOpen, defaultEditorId, autoGranted, defaultEditorOn, toolsReady, runAction, runExport, jobs.length, extensionsEnabled, runImport, importChoices, cancelJob, fileImports, refreshFile],
   )
+  // Mounted from the first job on and kept, so tools it has loaded stay loaded.
+  const [runnerNeeded, setRunnerNeeded] = useState(false)
+  if (jobs.length > 0 && !runnerNeeded) setRunnerNeeded(true)
+
   return (
     <ToolsMountContext.Provider value={value}>
       {children}
-      <HeadlessRuns
-        jobs={jobs}
-        loadTool={loadTool}
-        project={projectRecord ? { id: projectRecord.id, name: projectRecord.name } : null}
-        session={session ?? null}
-        roleLevel={roleLevel ?? null}
-        onFinish={finishJob}
-      />
+      {runnerNeeded && (
+        <Suspense fallback={null}>
+          <HeadlessRuns
+            jobs={jobs}
+            loadTool={loadTool}
+            project={projectRecord ? { id: projectRecord.id, name: projectRecord.name } : null}
+            session={session ?? null}
+            roleLevel={roleLevel ?? null}
+            onFinish={finishJob}
+          />
+        </Suspense>
+      )}
     </ToolsMountContext.Provider>
   )
 }

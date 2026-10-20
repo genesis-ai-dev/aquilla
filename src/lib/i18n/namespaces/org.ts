@@ -490,6 +490,7 @@ export const org = defineNamespace({
     "org.memberActivityPanel.kindCommentEdit": "Edited a comment",
     "org.memberActivityPanel.kindCommentResolve": "Resolved a comment",
     "org.memberActivityPanel.kindCellBacktranslationSet": "Set a back-translation",
+    "org.memberActivityPanel.kindCellGlossSet": "Corrected a statistical gloss",
     "org.memberActivityPanel.kindCellAudioAttach": "Attached audio",
     "org.memberActivityPanel.kindCellAudioSelect": "Selected an audio take",
     "org.memberActivityPanel.kindCellRetime": "Retimed a cell",

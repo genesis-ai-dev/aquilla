@@ -2031,6 +2031,14 @@ export const editor = defineNamespace({
       "Built statistically from this project's translated pairs — no AI involved. " +
       "It's only as good as the corpus so far: expect rough, literal, sometimes " +
       "wrong word choices. Use it as a hint, not a reading.",
+    "editor.bt.glossEditTooltip": "Correct this gloss",
+    "editor.bt.glossEditAria": "Correct the statistical gloss",
+    "editor.bt.glossCorrected": "Corrected by a translator",
+    "editor.bt.glossEditHint":
+      "Your correction replaces the gloss for everyone on this project, and " +
+      "teaches these word choices to the glosses of other cells. Clear the box " +
+      "to go back to the computed gloss.",
+    "editor.bt.glossContributorRequired": "Contributor+ required to correct the gloss",
     "editor.bt.alignment": "Alignment",
     "editor.bt.alignmentSub": "— word-level source/target view",
     "editor.transcript.editTooltip": "Correct the transcript",
@@ -7901,6 +7909,39 @@ export const editor = defineNamespace({
           "is computed from the project's own pairs with no AI, its quality tracks " +
           "how much has been translated so far, and it should be treated as a hint. " +
           "The honesty here is the point — do not soften it.",
+      },
+      "editor.bt.glossEditTooltip": {
+        description:
+          "AQU-1408. Tooltip on the pencil that opens the statistical gloss for " +
+          "editing. 'Correct' rather than 'edit': the gloss is a computed guess " +
+          "and the user is fixing it, not authoring from scratch. Imperative.",
+        maxLength: 24,
+      },
+      "editor.bt.glossEditAria": {
+        description:
+          "AQU-1408. Accessible name of the same pencil button. Spells out what is " +
+          "being corrected, since a screen-reader user has no section heading " +
+          "adjacent to the control.",
+      },
+      "editor.bt.glossCorrected": {
+        description:
+          "AQU-1408. Small badge beside the statistical-gloss heading when the text " +
+          "shown is a human correction rather than the computed gloss. A reader " +
+          "who cannot tell the two apart cannot weigh either.",
+        maxLength: 26,
+      },
+      "editor.bt.glossEditHint": {
+        description:
+          "AQU-1408. Small print under the gloss edit box. Three points, in order: " +
+          "the correction is shared with the project, it also teaches other cells' " +
+          "glosses, and an empty box restores the computed gloss. The third point " +
+          "is the only discoverable path back, so keep it.",
+      },
+      "editor.bt.glossContributorRequired": {
+        description:
+          "AQU-1408. Tooltip on the disabled gloss pencil for a member below " +
+          "contributor. Says the required level outright rather than hiding the " +
+          "control, so the member knows what to ask for.",
       },
       "editor.bt.alignment": {
         description:

@@ -101,6 +101,7 @@ import {
   type BacktranslationActionSource,
   type BacktranslationRecord,
 } from "@/lib/completion/bt-record"
+import { EMPTY_GLOSS_READING, type GlossReading } from "@/lib/completion/gloss-record"
 import { ContextualDraftCard } from "./contextual/ContextualDraftCard"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
 import { AlignStylesButton } from "./cell/AlignStylesButton"
@@ -1007,9 +1008,13 @@ interface EditorTableProps {
   heardLinesLoading?: boolean
   /** Called when user saves a BT edit. Parent emits `cell.backtranslation.set`. */
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
-  /** On-demand statistical gloss (corpus-derived, never persisted) for the BT
-   *  tab's collapsed reference section. */
-  getStatisticalBt?: (translatedText: string, cellId: string) => string
+  /** AQU-1408 §1: called when the user saves a correction to the statistical
+   *  gloss. Parent emits `cell.gloss.set`. Empty text withdraws the correction. */
+  onSaveGloss?: (cell: CellData, glossText: string) => void
+  /** The statistical gloss to show for a cell: the contributor's saved
+   *  correction when one still describes this text, else the corpus-derived
+   *  gloss computed on demand (AQU-1408 §1). */
+  getStatisticalBt?: (translatedText: string, cellId: string) => GlossReading
   cellOpenCommentCount?: Map<string, number>
   // onOpenComments/onOpenHistory moved to EditorActionsContext (FRO perf
   // cleanup) — pure pass-through, never consumed above the row.
@@ -1162,7 +1167,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   backtranslationByCellId,
   linkedTakesByCell,
   heardLinesLoading = false,
-  onSaveBacktranslation, getStatisticalBt,
+  onSaveBacktranslation, onSaveGloss, getStatisticalBt,
   cellOpenCommentCount,
   onSeekToCue,
   playingCueCellId = null,
@@ -2897,6 +2902,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           backtranslationErrors={backtranslationErrors}
           onBacktranslate={onBacktranslate}
           onSaveBacktranslation={onSaveBacktranslation}
+          onSaveGloss={onSaveGloss}
           getStatisticalBt={getStatisticalBt}
           getFootnoteDetails={getFootnoteDetails}
           cellOpenCommentCount={cellOpenCommentCount}
@@ -3057,6 +3063,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     onProjectChanged,
     onReleaseCell,
     onSaveBacktranslation,
+    onSaveGloss,
     onSeekToCue,
     playingCueCellId,
     onPauseCue,
@@ -4099,7 +4106,8 @@ interface MemoizedRowProps {
   backtranslationErrors?: Map<string, string>
   onBacktranslate?: (cell: CellData, source: BacktranslationActionSource) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
-  getStatisticalBt?: (translatedText: string, cellId: string) => string
+  onSaveGloss?: (cell: CellData, glossText: string) => void
+  getStatisticalBt?: (translatedText: string, cellId: string) => GlossReading
   getFootnoteDetails: (cellId: string) => CellFootnoteDetails
   cellOpenCommentCount?: Map<string, number>
   onSeekToCue?: (cellId: string) => void
@@ -4204,7 +4212,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     structuralEditing, untimedInserts,
     insertAboveStartSec, insertAboveEndSec, insertBelowStartSec, insertBelowEndSec,
     prevStartSec, nextStartSec, timedFile,
-    isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, getStatisticalBt,
+    isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, onSaveGloss, getStatisticalBt,
     getFootnoteDetails,
     onSeekToCue, cuePlaying, onPauseCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
@@ -4352,6 +4360,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         backtranslationError={backtranslationError}
         onBacktranslate={onBacktranslate}
         onSaveBacktranslation={onSaveBacktranslation}
+        onSaveGloss={onSaveGloss}
         getStatisticalBt={getStatisticalBt}
         getFootnoteDetails={getFootnoteDetails}
         openCommentCount={openCommentCount}
@@ -4533,7 +4542,8 @@ interface EditorRowProps {
   backtranslationError?: string
   onBacktranslate?: (cell: CellData, source: BacktranslationActionSource) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
-  getStatisticalBt?: (translatedText: string, cellId: string) => string
+  onSaveGloss?: (cell: CellData, glossText: string) => void
+  getStatisticalBt?: (translatedText: string, cellId: string) => GlossReading
   getFootnoteDetails: (cellId: string) => CellFootnoteDetails
   /** FRO-207: Lazily returns the interlinear alignment model. */
   getAlignmentModel?: () => import("@/lib/completion/interlinear").AlignmentModel | null
@@ -5474,6 +5484,7 @@ function EditorRow({
   insertAboveStartSec, insertAboveEndSec, insertBelowStartSec, insertBelowEndSec,
   prevStartSec = null, nextStartSec = null, timedFile,
   isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate, onSaveBacktranslation,
+  onSaveGloss,
   getStatisticalBt,
   getFootnoteDetails,
   openCommentCount,
@@ -7438,9 +7449,11 @@ function EditorRow({
   // ── BT tab: statistical gloss is computed while the tab is open so the
   // live "as you translate" check and AI-vs-pairs disagreement can render
   // without waiting on a collapsed expander.
-  const statisticalGloss = useMemo(() => {
-    if (!expanded || expansionTab !== "backtranslation" || !visibleTranslated.trim()) return ""
-    return getStatisticalBt?.(visibleTranslated, cell.id) ?? ""
+  const glossReading = useMemo((): GlossReading => {
+    if (!expanded || expansionTab !== "backtranslation" || !visibleTranslated.trim()) {
+      return EMPTY_GLOSS_READING
+    }
+    return getStatisticalBt?.(visibleTranslated, cell.id) ?? EMPTY_GLOSS_READING
   }, [expanded, expansionTab, visibleTranslated, getStatisticalBt, cell.id])
 
   // Stable rail handlers
@@ -9263,7 +9276,8 @@ function EditorRow({
                   isBacktranslationConfigured={isBacktranslationConfigured}
                   isBacktranslating={isBacktranslating}
                   backtranslationError={backtranslationError}
-                  statisticalGloss={statisticalGloss}
+                  statisticalGloss={glossReading.text}
+                  glossCorrected={glossReading.corrected}
                   alignmentOpen={btAlignmentOpen}
                   onAlignmentOpenChange={setBtAlignmentOpen}
                   alignmentModel={alignmentModelForExpansion}
@@ -9271,6 +9285,7 @@ function EditorRow({
                   originalWords={originalWords}
                   onBacktranslate={onBacktranslate}
                   onSaveBacktranslation={onSaveBacktranslation}
+                  onSaveGloss={onSaveGloss}
                   onAlignmentSeedChange={onAlignmentSeedChange}
                   confirmedSeeds={project.alignmentSeeds ?? []}
                 />

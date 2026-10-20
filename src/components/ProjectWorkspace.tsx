@@ -1814,6 +1814,7 @@ export function ProjectWorkspace() {
   const auditStatsEnabled = Boolean(project?.id && activeFileId && frontierSession?.jwt) && editorFirstPaint
   const {
     byCellId: auditStatsByCellId,
+    complete: auditStatsComplete,
     revalidate: revalidateAuditStats,
     revalidateCellStats,
     applyCommittedCellStats,
@@ -1866,6 +1867,7 @@ export function ProjectWorkspace() {
     username: currentUsername,
     requiredValidations: validationCount,
     auditStats: auditStatsByCellId,
+    auditStatsComplete,
     getToken: getTokenForFile,
     enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
     lane: activeLane,

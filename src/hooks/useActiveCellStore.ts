@@ -29,6 +29,16 @@ import { readOfflineFileCells, resolveOfflineStore, subscribeToOfflineFileCells 
 import { subscribeToDiscardedOfflineCommits } from "@/lib/offline/refused-writes"
 
 const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
+/** AQU-2094: what a sparse audit read says about a cell it leaves out. */
+const NO_AUDIT: CellAuditStats = Object.freeze({
+  cellId: "",
+  editCount: 0,
+  contentHash: "",
+  lastEditAt: null,
+  lastEditEventId: null,
+  activeValidators: Object.freeze([]) as unknown as string[],
+  waivers: Object.freeze([]) as unknown as CellAuditStats["waivers"],
+})
 const EMPTY_TAKES: ReadonlySet<string> = new Set()
 const EMPTY_CELL_IDS: readonly string[] = Object.freeze([])
 const EMPTY_SUMMARIES: readonly CellSummary[] = Object.freeze([])
@@ -194,6 +204,12 @@ interface RuntimeContext {
   username: string
   requiredValidations: number
   auditStats: ReadonlyMap<string, CellAuditStats>
+  /**
+   * AQU-2094: `auditStats` came from a sparse read, so a cell missing from it
+   * has no validators and no waivers. That is an answer, not "not loaded yet":
+   * the row's denormalized `validated` column must not speak for the cell.
+   */
+  auditStatsComplete?: boolean
   /**
    * AQU-646: cells that carry a recording of their OWN (a clip seeded with the
    * cell's id, not the file-seeded imported source clip).
@@ -485,8 +501,17 @@ export class CellStore {
     this.emit(changed)
   }
 
+  /** The audit entry for a cell (see `RuntimeContext.auditStatsComplete`). */
+  private auditOf(cellId: string, stats: ReadonlyMap<string, CellAuditStats> = this.ctx.auditStats): CellAuditStats | undefined {
+    return stats.get(cellId) ?? (this.ctx.auditStatsComplete ? NO_AUDIT : undefined)
+  }
+
   setRuntime(next: RuntimeContext): void {
     const prevStats = this.ctx.auditStats
+    // AQU-2094: the first sparse read changes what every cell's MISSING entry
+    // means, which no diff of the two maps can see — so it refreshes every
+    // cell, as a threshold change does.
+    const completeChanged = Boolean(this.ctx.auditStatsComplete) !== Boolean(next.auditStatsComplete)
     const nextLane = next.lane ?? ""
     const statsChanged = prevStats !== next.auditStats
     // AQU-1083: a structural-policy flip changes which cells every derived
@@ -526,7 +551,7 @@ export class CellStore {
       this.replaceRows(this.toRows(), { full: true, maxServerSeq: this.maxServerSeq })
       return
     }
-    if (statsChanged || userChanged) {
+    if (statsChanged || userChanged || completeChanged) {
       // Invariant: a per-cell version bump is ALWAYS paired with a per-cell
       // emit of the same set. Editor rows read useSyncExternalStore over
       // getCellVersion; a bump without an emit lets a parent-driven render
@@ -535,7 +560,7 @@ export class CellStore {
       // row then stays stale until remount. The old bumpAllCells()-but-emit-
       // only-the-changed-cells shape here was exactly that: audit-stats churn
       // during a batch silently inflated every cell's version.
-      if (userChanged) {
+      if (userChanged || completeChanged) {
         this.bumpAllCells()
         this.rebuildDerivedIndexes()
         this.emit(this.order)
@@ -826,7 +851,7 @@ export class CellStore {
       this.ctx.fileId ?? "",
       this.ctx.username,
       this.ctx.requiredValidations,
-      this.ctx.auditStats.get(cellId),
+      this.auditOf(cellId),
     )
     this.applyContentOverlays(cell)
     this.applyOwnTake(cell)
@@ -1618,7 +1643,7 @@ export class CellStore {
 
     const target = this.targetById.get(cellId)
     const threshold = Math.min(15, Math.max(1, this.ctx.requiredValidations))
-    const audit = this.ctx.auditStats.get(cellId)
+    const audit = this.auditOf(cellId)
     const beforeValidation = validationContribution(audit, existing, threshold)
     const afterValidation = validationContribution(audit, target, threshold)
     const validationUnchanged = beforeValidation.endorsements === afterValidation.endorsements
@@ -2407,7 +2432,7 @@ export class CellStore {
     const snapshot = this.fileProgressSnapshot
     const source = this.sourceById.get(cellId)
     if (this.derivedIndexesDirty || !snapshot || !source) return false
-    const audit = this.ctx.auditStats.get(cellId)
+    const audit = this.auditOf(cellId)
     const before = validationContribution(audit, previous, snapshot.validationCount)
     const after = validationContribution(audit, next, snapshot.validationCount)
     const validatedDelta = Number(after.validated) - Number(before.validated)
@@ -2475,8 +2500,8 @@ export class CellStore {
       const source = this.sourceById.get(id)
       if (!source) continue
       const target = this.targetById.get(id)
-      const before = validationContribution(previous.get(id), target, threshold)
-      const after = validationContribution(next.get(id), target, threshold)
+      const before = validationContribution(this.auditOf(id, previous), target, threshold)
+      const after = validationContribution(this.auditOf(id, next), target, threshold)
       if (before.endorsements === after.endorsements && before.validated === after.validated) continue
       add("", before, after)
       const section = source.canonicalRef ? sectionLabelFromCanonical(source.canonicalRef) : ""
@@ -2557,7 +2582,7 @@ export class CellStore {
       // that counts headings also start counting parked ones.
       if (source && !isHiddenCell(source)
         && (this.ctx.countStructural !== false || !isStructuralCell(source.type))) {
-        const audit = this.ctx.auditStats.get(id)
+        const audit = this.auditOf(id)
         const endorsements = audit ? audit.activeValidators.length : Math.max(0, target?.endorsementCount ?? 0)
         const authoritative = audit !== undefined || target?.endorsementCount !== undefined
         const validated = authoritative ? endorsements >= progressThreshold : Boolean(target?.validated)
@@ -2785,6 +2810,8 @@ export interface UseActiveCellStoreOptions {
   username?: string
   requiredValidations?: number
   auditStats?: ReadonlyMap<string, CellAuditStats>
+  /** AQU-2094: see `RuntimeContext.auditStatsComplete`. */
+  auditStatsComplete?: boolean
   getToken?: (fileId: string) => Promise<string | null>
   enabled?: boolean
   /**
@@ -2832,6 +2859,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     username = "local",
     requiredValidations = 1,
     auditStats = EMPTY_STATS,
+    auditStatsComplete = false,
     getToken,
     enabled = true,
     lane = "",
@@ -2889,8 +2917,8 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     // rows against it on change (instant lane switch, no refetch). This effect
     // is defined before the (projectId, fileId, enabled) reload effect, so on a
     // lane change the store's active lane is updated before any fetch runs.
-    store.setRuntime({ projectId, fileId, username, requiredValidations, auditStats, lane, countStructural, showHidden })
-  }, [auditStats, countStructural, fileId, lane, projectId, requiredValidations, showHidden, store, username])
+    store.setRuntime({ projectId, fileId, username, requiredValidations, auditStats, auditStatsComplete, lane, countStructural, showHidden })
+  }, [auditStats, auditStatsComplete, countStructural, fileId, lane, projectId, requiredValidations, showHidden, store, username])
 
   // I4 cache hygiene: never persist optimistic values as server rows.
   // `applyOptimisticTargetEdit` mutates the target row in place (value under

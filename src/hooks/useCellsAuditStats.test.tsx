@@ -480,3 +480,34 @@ describe("useCellsAuditStats — lane-scoped merge (AQU-1506)", () => {
     expect(result.current.byCellId.get("cell-1")?.activeValidators).toEqual(["dev"])
   })
 })
+
+// AQU-2094. WHY: on a whole Bible the full answer was ~9 MB, almost all of it
+// repeating rows the editor already has. The hook asks for a sparse read and
+// says whether it got one, because a cell missing from a sparse map means
+// "no validators" while a cell missing from a full map means "not loaded".
+describe("useCellsAuditStats — sparse reads (AQU-2094)", () => {
+  it("asks for a sparse read and reports a sparse answer as complete", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ cells: [STATS_RESPONSE[0]], sparse: true }), { status: 200 }),
+    )
+    global.fetch = fetchMock as unknown as typeof fetch
+    const { result } = renderHook(() =>
+      useCellsAuditStats({ enabled: true, fileId: "file-abc", getTokenForFile: TOKEN_FN }),
+    )
+    await waitFor(() => expect(result.current.complete).toBe(true))
+    expect(String(fetchMock.mock.calls[0]![0])).toBe("https://sync.example.com/cells/audit-stats?fileId=file-abc&sparse=1")
+    expect([...result.current.byCellId.keys()]).toEqual(["cell-1"])
+  })
+
+  it("reports an older worker's full answer as not complete", async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ cells: STATS_RESPONSE }), { status: 200 }),
+    ) as unknown as typeof fetch
+    const { result } = renderHook(() =>
+      useCellsAuditStats({ enabled: true, fileId: "file-abc", getTokenForFile: TOKEN_FN }),
+    )
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.byCellId.size).toBe(2)
+    expect(result.current.complete).toBe(false)
+  })
+})

@@ -96,7 +96,7 @@ describe("WorkloadRollup", () => {
 
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
     fireEvent.click(screen.getByRole("button", { name: /^Remove assignment/ }))
-    fireEvent.click(screen.getByRole("button", { name: /^Are you sure\? Remove assignment/ }))
+    fireEvent.click(screen.getByRole("button", { name: /^Confirm removing assignment/ }))
 
     await waitFor(() => expect(mockUnassign).toHaveBeenCalledWith({
       jwt: "jwt",
@@ -119,7 +119,7 @@ describe("WorkloadRollup", () => {
 
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
     fireEvent.click(screen.getByRole("button", { name: /^Remove assignment/ }))
-    fireEvent.click(screen.getByRole("button", { name: /^Are you sure\? Remove assignment/ }))
+    fireEvent.click(screen.getByRole("button", { name: /^Confirm removing assignment/ }))
 
     await waitFor(() => expect(screen.getByText(/role too low/)).toBeInTheDocument())
     // Row stays — removal failed, nothing was cleared.

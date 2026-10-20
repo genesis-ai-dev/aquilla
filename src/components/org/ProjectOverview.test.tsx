@@ -3184,7 +3184,7 @@ describe("ProjectOverview one-click unassign (AQU-1969)", () => {
     return mod
   }
 
-  it("a lead removes a validation assignment from the Team card: ×, then Are you sure?", async () => {
+  it("a lead removes a validation assignment from the Team card: ×, then Confirm", async () => {
     const mod = await withValidation()
     useProject.mockReturnValue({ project: projectRecord({ level: ROLE.MAINTAINER, files } as never), status: "ready", refresh })
     renderOverview()

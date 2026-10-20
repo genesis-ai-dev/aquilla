@@ -1,17 +1,18 @@
 // AQU-1969 (Sam, 2026-10-19: "It should be more easy to unassign work"): the
 // org Team workload's × on every row that is one assignment — the project Team
 // card's validation list and the plan's "Assigned to" list too. Two clicks, no
-// dialog (Sam, 2026-10-20): the × turns into an "Are you sure?" button in
-// place, and that removes it. Leaving it (focus elsewhere, Escape, or a few
-// seconds untouched) turns it back into the ×. Removed, the row goes at once
-// and stays gone; a refusal says why under the list.
+// dialog (Sam, 2026-10-20): the × turns into a red Confirm with a Cancel beside
+// it, in place; Confirm removes it. Cancel sits where the × was, so a double
+// click on the × cancels rather than removes. Cancel, Escape, focus leaving the
+// pair, or a few seconds untouched turn it back into the ×. Removed, the row
+// goes at once and stays gone; a refusal says why under the list.
 import { useCallback, useEffect, useRef, useState } from "react"
 import { X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
 
-/** How long "Are you sure?" waits for its click before turning back into the ×. */
+/** How long Confirm / Cancel wait for a click before turning back into the ×. */
 export const CONFIRM_TIMEOUT_MS = 4000
 
 export function RemoveAssignmentButton({
@@ -43,27 +44,43 @@ export function RemoveAssignmentButton({
   }, [confirming])
 
   if (confirming) {
+    const back = () => setConfirming(false)
     return (
-      <Button
-        ref={confirmRef}
-        type="button"
-        variant="destructive"
-        size="xs"
-        className="shrink-0"
-        aria-label={t("org.workloadRollup.removeConfirmAriaLabel", who)}
-        disabled={removing}
-        onClick={() => {
-          setConfirming(false)
-          onRemove()
+      <span
+        className="flex shrink-0 items-center gap-1"
+        onBlur={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) back()
         }}
-        onBlur={() => setConfirming(false)}
         onKeyDown={(e) => {
-          if (e.key === "Escape") setConfirming(false)
+          if (e.key === "Escape") back()
         }}
-        data-testid={testId ? `${testId}-confirm` : undefined}
       >
-        {t("org.workloadRollup.removeConfirm")}
-      </Button>
+        <Button
+          ref={confirmRef}
+          type="button"
+          variant="destructive"
+          size="xs"
+          aria-label={t("org.workloadRollup.removeConfirmAriaLabel", who)}
+          disabled={removing}
+          onClick={() => {
+            back()
+            onRemove()
+          }}
+          data-testid={testId ? `${testId}-confirm` : undefined}
+        >
+          {t("common.confirm")}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          aria-label={t("org.workloadRollup.removeCancelAriaLabel", who)}
+          onClick={back}
+          data-testid={testId ? `${testId}-cancel` : undefined}
+        >
+          {t("common.cancel")}
+        </Button>
+      </span>
     )
   }
 

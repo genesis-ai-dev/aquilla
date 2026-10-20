@@ -427,7 +427,7 @@ describe("one-click unassign", () => {
     expect(screen.queryByTestId("plan-assignment-remove-v1")).toBeNull()
   })
 
-  it("× then Are you sure? unassigns that row's assignment and the row goes at once", async () => {
+  it("× then Confirm unassigns that row's assignment and the row goes at once", async () => {
     const onRemove = vi.fn(async () => {})
     renderSection({ assignments: rows(), onRemove })
     fireEvent.click(screen.getByTestId("plan-assignment-remove-v1"))

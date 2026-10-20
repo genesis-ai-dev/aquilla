@@ -1,5 +1,5 @@
 // AQU-1969 (Sam, 2026-10-19/20): the Team card's validation rows carry the org
-// workload's × for whoever may unassign; it asks "Are you sure?" in place.
+// workload's × for whoever may unassign; it asks in place: Confirm or Cancel.
 import { describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { TeamValidationList } from "./TeamValidationList"
@@ -27,7 +27,7 @@ describe("TeamValidationList", () => {
     expect(screen.queryByTestId("overview-team-validation-remove-v1")).toBeNull()
   })
 
-  it("× then Are you sure? unassigns that row and it goes at once", async () => {
+  it("× then Confirm unassigns that row and it goes at once", async () => {
     const onRemove = vi.fn(async () => {})
     render(<TeamValidationList validations={rows} showLane={false} onRemove={onRemove} />)
     fireEvent.click(screen.getByTestId("overview-team-validation-remove-v1"))
@@ -48,22 +48,51 @@ describe("TeamValidationList", () => {
   })
 })
 
-// Sam, 2026-10-20: the × asks before it removes — in place, no dialog.
+// Sam, 2026-10-20: the × asks before it removes — in place, no dialog: a red
+// Confirm with a Cancel beside it.
 describe("RemoveAssignmentButton", () => {
-  it("turns into Are you sure?, and back into the × on Escape, on leaving it, or after a few seconds", async () => {
+  const x = () => screen.queryByTestId("overview-team-validation-remove-v1")
+  const confirm = () => screen.queryByTestId("overview-team-validation-remove-v1-confirm")
+  const cancel = () => screen.queryByTestId("overview-team-validation-remove-v1-cancel")
+
+  it("turns into Confirm and Cancel; Cancel turns it back into the × and removes nothing", () => {
+    const onRemove = vi.fn(async () => {})
+    render(<TeamValidationList validations={rows} showLane={false} onRemove={onRemove} />)
+    fireEvent.click(x()!)
+    expect(x()).toBeNull()
+    expect(confirm()).toHaveTextContent("Confirm")
+    expect(confirm()).toHaveAccessibleName("Confirm removing assignment: GEN 1 (carol)")
+    expect(confirm()).toHaveFocus()
+    expect(cancel()).toHaveTextContent("Cancel")
+    expect(cancel()).toHaveAccessibleName("Cancel removing assignment: GEN 1 (carol)")
+    fireEvent.click(cancel()!)
+    expect(x()).toBeInTheDocument()
+    expect(confirm()).toBeNull()
+    expect(cancel()).toBeNull()
+    expect(onRemove).not.toHaveBeenCalled()
+  })
+
+  it("stays up while focus moves between Confirm and Cancel", () => {
+    render(<TeamValidationList validations={rows} showLane={false} onRemove={vi.fn(async () => {})} />)
+    fireEvent.click(x()!)
+    fireEvent.blur(confirm()!, { relatedTarget: cancel() })
+    expect(confirm()).toBeInTheDocument()
+    expect(cancel()).toBeInTheDocument()
+  })
+
+  it("turns back into the × on Escape, on leaving it, or after a few seconds", async () => {
     vi.useFakeTimers()
     try {
       const onRemove = vi.fn(async () => {})
       render(<TeamValidationList validations={rows} showLane={false} onRemove={onRemove} />)
-      const x = () => screen.queryByTestId("overview-team-validation-remove-v1")
-      const sure = () => screen.queryByTestId("overview-team-validation-remove-v1-confirm")
       fireEvent.click(x()!)
-      expect(sure()).toHaveTextContent("Are you sure?")
-      expect(sure()).toHaveFocus()
-      fireEvent.keyDown(sure()!, { key: "Escape" })
+      fireEvent.keyDown(confirm()!, { key: "Escape" })
       expect(x()).toBeInTheDocument()
       fireEvent.click(x()!)
-      fireEvent.blur(sure()!)
+      fireEvent.keyDown(cancel()!, { key: "Escape" })
+      expect(x()).toBeInTheDocument()
+      fireEvent.click(x()!)
+      fireEvent.blur(confirm()!)
       expect(x()).toBeInTheDocument()
       fireEvent.click(x()!)
       act(() => { vi.advanceTimersByTime(CONFIRM_TIMEOUT_MS) })

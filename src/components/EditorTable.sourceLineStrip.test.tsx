@@ -807,3 +807,69 @@ describe("EditorTable — timestamps while the project's timings are locked", ()
     expect(screen.queryByTestId("cell-times-unlock")).toBeNull()
   })
 })
+
+/**
+ * AQU-1759: splitting a passage at its quotation marks, so each speaker gets a
+ * line (and a voice) of their own. It sits with the inserts, for the same
+ * people on the same files, and — round 4's rule — a row that cannot take it
+ * says why instead of losing the entry.
+ */
+describe("EditorTable — split at quotes", () => {
+  function quotedStore(): CellStore {
+    const store = new CellStore()
+    store.setRuntime({ projectId: project.id, fileId: "file-1", username: "tester", requiredValidations: 1, auditStats: new Map() })
+    store.replaceRows(
+      [
+        row("v5", "source", "Jesus said to Philip, “Where are we to buy bread?”"),
+        row("v6", "source", "After this Jesus went away.", { anchorCellId: "v5" }),
+      ],
+      { full: true, maxServerSeq: 1 },
+    )
+    return store
+  }
+  const untimed = editing({
+    head: null,
+    afterCell: new Map(),
+    untimed: true,
+    rowActions: () => ({ above: null, below: null, remove: null }),
+  })
+  const splitEntry = () => screen.findByTestId("cell-menu-split-quotes")
+
+  it("offers it on a row with narration and a quotation, and passes that row's id", async () => {
+    const onSplitAtQuotes = vi.fn()
+    renderTable({ project: projectAt(500), cellStore: quotedStore(), sourceLineEditing: untimed }, { onSplitAtQuotes })
+    await screen.findByText(/Where are we to buy bread/)
+    openMenu("v5")
+    const item = await splitEntry()
+    expect(item).not.toHaveAttribute("data-disabled")
+    fireEvent.click(item)
+    expect(onSplitAtQuotes).toHaveBeenCalledWith("v5")
+  })
+
+  it("explains why a row with one speaker cannot be split", async () => {
+    renderTable({ project: projectAt(500), cellStore: quotedStore(), sourceLineEditing: untimed }, { onSplitAtQuotes: vi.fn() })
+    await screen.findByText("After this Jesus went away.")
+    openMenu("v6")
+    expect(await splitEntry()).toHaveAttribute("data-disabled")
+    expect(screen.getByTestId("cell-menu-split-quotes-reason")).toHaveTextContent("No quotation to split at")
+  })
+
+  it("tells someone who may add rows, but not edit source text, why not", async () => {
+    // A split rewrites the row's source text, which is Project Lead work even
+    // where the tier lets a contributor add rows.
+    renderTable({ project: projectAt(400), cellStore: quotedStore(), sourceLineEditing: untimed }, { onSplitAtQuotes: vi.fn() })
+    await screen.findByText(/Where are we to buy bread/)
+    openMenu("v5")
+    expect(await splitEntry()).toHaveAttribute("data-disabled")
+    expect(screen.getByTestId("cell-menu-split-quotes-reason")).toHaveTextContent("only a project lead can edit")
+  })
+
+  it("is not offered on a file with a clock", async () => {
+    // A timed row's pieces would need timings of their own.
+    renderTable({ project: projectAt(500), cellStore: quotedStore(), sourceLineEditing: editing() }, { onSplitAtQuotes: vi.fn() })
+    await screen.findByText(/Where are we to buy bread/)
+    openMenu("v5")
+    await entry("remove")
+    expect(screen.queryByTestId("cell-menu-split-quotes")).toBeNull()
+  })
+})

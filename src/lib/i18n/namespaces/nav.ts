@@ -209,6 +209,24 @@ export const nav = defineNamespace({
       "n",
     ),
     "nav.workspaceActions.changeVoiceAll.confirmLabel": "Change voice",
+    // AQU-1759: split every line that mixes narration and quoted speech.
+    "nav.workspaceActions.splitQuotes.label": "Split lines at quotes",
+    "nav.workspaceActions.splitQuotes.title": "Split lines at their quotation marks?",
+    "nav.workspaceActions.splitQuotes.description": plural({
+      one:
+        "{count} line in this file holds more than one speaker. Split at its quotation " +
+        "marks it becomes {lines} lines, so each speaker can have their own voice. Every " +
+        "language shares the new lines. A translation that splits the same way is " +
+        "divided; any other stays whole on the first line and is marked for review.",
+      other:
+        "{count} lines in this file hold more than one speaker. Split at their quotation " +
+        "marks they become {lines} lines, so each speaker can have their own voice. Every " +
+        "language shares the new lines. A translation that splits the same way is " +
+        "divided; any other stays whole on the first line and is marked for review.",
+    }),
+    "nav.workspaceActions.splitQuotes.none":
+      "No line in this file holds more than one speaker at its quotation marks, so there is nothing to split.",
+    "nav.workspaceActions.splitQuotes.confirmLabel": "Split lines",
     // AQU-365: the checkbox on the workspace-action confirmation dialog above
     // (distinct from ConfirmActionDialog's generic default, since this one
     // names WHY the checkbox matters — attribution). e2e asserts this exact
@@ -945,6 +963,35 @@ export const nav = defineNamespace({
       },
       "nav.workspaceActions.changeVoiceAll.confirmLabel": {
         description: "Confirm button of the dialog above.",
+        maxLength: 24,
+      },
+      "nav.workspaceActions.splitQuotes.label": {
+        description:
+          "Menu item in the file's \u22ef menu. It cuts every line that mixes narration and " +
+          "quoted speech at its quotation marks, so each speaker can be given a separate " +
+          "voice. \"Quotes\" means quotation marks.",
+        maxLength: 32,
+      },
+      "nav.workspaceActions.splitQuotes.title": {
+        description: "Heading of the confirmation dialog for the action above. A question.",
+        maxLength: 48,
+      },
+      "nav.workspaceActions.splitQuotes.description": {
+        description:
+          "Body of that dialog: how many lines will be split, what they become, and what " +
+          "happens to existing translations.",
+        placeholders: {
+          count: "How many lines of the file hold more than one speaker. One or more.",
+          lines: "How many lines those become in total. Always more than the first number.",
+        },
+      },
+      "nav.workspaceActions.splitQuotes.none": {
+        description:
+          "Body of that dialog when the file has no line to split. The dialog then offers " +
+          "only Close.",
+      },
+      "nav.workspaceActions.splitQuotes.confirmLabel": {
+        description: "Confirm button of that dialog. Imperative.",
         maxLength: 24,
       },
       "nav.workspaceActions.confirmAttribution": {

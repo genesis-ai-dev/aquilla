@@ -674,6 +674,8 @@ CREATE TABLE IF NOT EXISTS removed_cell_archive (
     validators        JSONB NOT NULL DEFAULT '[]'::jsonb,
     waivers           JSONB NOT NULL DEFAULT '[]'::jsonb,
     backtranslations  JSONB NOT NULL DEFAULT '[]'::jsonb,
+    -- AQU-1408 (0182): the cell's hand-corrected statistical glosses.
+    glosses           JSONB NOT NULL DEFAULT '[]'::jsonb,
     morph             JSONB NOT NULL DEFAULT '[]'::jsonb,
     audio             JSONB NOT NULL DEFAULT '[]'::jsonb,
     links             JSONB NOT NULL DEFAULT '[]'::jsonb,

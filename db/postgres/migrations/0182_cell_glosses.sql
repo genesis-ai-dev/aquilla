@@ -41,3 +41,10 @@ CREATE INDEX IF NOT EXISTS idx_cell_gloss_file
 -- Latest gloss per cell within one lane: the per-file read's exact shape.
 CREATE INDEX IF NOT EXISTS idx_cell_gloss_lane
     ON cell_glosses(project_id, file_id, cell_id, lane_id, created_at DESC);
+
+-- A `source.cell.delete` takes this table with the rest of the cell's rows, so
+-- AQU-1767's undo has to be able to put it back too. Without this column a
+-- remove-then-restore would silently drop every correction on the cell — the
+-- one failure mode that archive exists to prevent.
+ALTER TABLE removed_cell_archive
+    ADD COLUMN IF NOT EXISTS glosses JSONB NOT NULL DEFAULT '[]'::jsonb;

@@ -944,6 +944,50 @@ describe("ProjectOverview archive/restore", () => {
     await waitFor(() => expect(unarchiveProjectRemote).toHaveBeenCalledWith("p1", "jwt"))
   })
 
+  // AQU-2088: the server refuses every per-project read for an archived
+  // project, so the plan had nothing to draw and sat on "Loading the plan…"
+  // for ever. The overview says it is archived instead.
+  it("an archived project says so in the plan's place, and never draws the board", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700, deletedAt: "2026-05-01" }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    const notice = await screen.findByTestId("overview-archived-notice")
+    expect(notice).toHaveTextContent(/this project is archived/i)
+    expect(notice).toHaveTextContent(/choose Restore above/i)
+    expect(screen.queryByTestId("plan-loading")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("plan-error")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("plan-empty")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("overview-team-card")).not.toBeInTheDocument()
+    // The read is refused anyway; don't spend the round trip to be told.
+    expect(fetchProjectPlan).not.toHaveBeenCalled()
+  })
+
+  it("tells a reader who cannot restore who can, instead of pointing at a button they lack", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, deletedAt: "2026-05-01" }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    const notice = await screen.findByTestId("overview-archived-notice")
+    expect(notice).toHaveTextContent(/a maintainer can restore it/i)
+    expect(screen.queryByRole("button", { name: "Restore" })).not.toBeInTheDocument()
+  })
+
+  it("an active project still draws the plan and no archived notice", async () => {
+    useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    await waitFor(() => expect(fetchProjectPlan).toHaveBeenCalled())
+    expect(screen.queryByTestId("overview-archived-notice")).not.toBeInTheDocument()
+  })
+
   it("maintainer sees Download deliverable in overflow; clicking triggers the bundle download", async () => {
     useProject.mockReturnValue({
       project: projectRecord({ level: 600, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 0 }] }),

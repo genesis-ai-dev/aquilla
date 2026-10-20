@@ -63,6 +63,10 @@ pass `--snapshot` to have it cut a `premigrate-<timestamp>` Neon branch off
 production first (instant and copy-on-write, and what you restore from if the
 apply goes wrong), or `--no-snapshot` if one already exists. `dev` and `local`
 are ungated — they are refreshable by design (`pnpm neon:refresh:dev`). The
+refresh first reads `dev` and `production` with its credentials and stops with
+the rotation steps if the Neon API rejects them; `NEON_REFRESH_PREFLIGHT_ONLY=1`
+(the workflow's `preflight_only` input) runs only that check, which is how a
+rotated `NEON_API_KEY` is verified without restoring anything. The
 refresh deletes `integration_connections` (and by cascade the Monday board
 links) right after the restore, because the copy carries every production
 org's encrypted Monday tokens and the dev Worker could otherwise use them

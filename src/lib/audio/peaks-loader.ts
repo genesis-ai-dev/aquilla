@@ -152,7 +152,7 @@ async function decodeAndKeep(
   } catch {
     // As above: failing to cache is not failing to draw.
   }
-  publishPeaksSidecarOnce({ ...sidecarArgs, peaks })
+  void publishPeaksSidecarOnce({ ...sidecarArgs, peaks })
   return peaks
 }
 

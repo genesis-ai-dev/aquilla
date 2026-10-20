@@ -874,7 +874,7 @@ export function useCellAudio(
       try { await peaksCachePut(selectedAudioId, decoded.peaks) } catch { /* non-fatal */ }
       // Having paid for the clip, leave its shape behind for everyone else.
       if (frontier) {
-        publishPeaksSidecarOnce({
+        void publishPeaksSidecarOnce({
           projectId: project.id,
           fileId,
           audioId: frontier.audioId,

@@ -8,6 +8,11 @@
 // looks, which is invisible until the bandwidth bill says otherwise.
 
 import { describe, expect, it, vi, beforeEach } from "vitest"
+
+// Desktop backend-reachability probe; null = unknown (web), the default.
+let backendReachable: boolean | null = null
+vi.mock("@/lib/offline/connectivity", () => ({ isOnline: async () => backendReachable }))
+
 import { WAVEFORM_BINS } from "./peaks-loader"
 import {
   PEAKS_SIDECAR_SUFFIX,
@@ -36,6 +41,7 @@ function ramp(bins = WAVEFORM_BINS): Float32Array {
 
 beforeEach(() => {
   __resetPeaksSidecarPublishesForTests()
+  backendReachable = null
 })
 
 describe("the object name", () => {
@@ -84,8 +90,7 @@ describe("the stored body", () => {
 
 describe("fetchPeaksSidecar", () => {
   it("reads the sidecar object under the clip's file, with the sync token", async () => {
-    const body = encodePeaksSidecar(ramp())
-    const fetchFn = vi.fn(async () => new Response(body))
+    const fetchFn = vi.fn(async () => new Response(new Blob([encodePeaksSidecar(ramp())])))
     const peaks = await fetchPeaksSidecar({ ...base, fetchFn: fetchFn as unknown as typeof fetch })
     expect(peaks).toBeInstanceOf(Float32Array)
     const [url, init] = fetchFn.mock.calls[0] as unknown as [string, RequestInit]
@@ -108,9 +113,21 @@ describe("fetchPeaksSidecar", () => {
   })
 
   it("asks for nothing without a sync token", async () => {
-    const fetchFn = vi.fn(async () => new Response(encodePeaksSidecar(ramp())))
+    const fetchFn = vi.fn(async () => new Response(new Blob([encodePeaksSidecar(ramp())])))
     await expect(
       fetchPeaksSidecar({ ...base, getSyncToken: async () => null, fetchFn: fetchFn as unknown as typeof fetch }),
+    ).resolves.toBeNull()
+    expect(fetchFn).not.toHaveBeenCalled()
+  })
+
+  // Ryder's Wi-Fi-off report, carried over from useCellAudio: with no backend
+  // the waveform says "not available offline". Spending a request that cannot
+  // succeed to get there is the bug, not the fallback.
+  it("touches the network not at all when the backend is known unreachable", async () => {
+    backendReachable = false
+    const fetchFn = vi.fn(async () => new Response(new Blob([encodePeaksSidecar(ramp())])))
+    await expect(
+      fetchPeaksSidecar({ ...base, fetchFn: fetchFn as unknown as typeof fetch }),
     ).resolves.toBeNull()
     expect(fetchFn).not.toHaveBeenCalled()
   })
@@ -121,18 +138,27 @@ describe("putPeaksSidecar", () => {
     const fetchFn = vi.fn(async () => new Response(null, { status: 200 }))
     await expect(
       putPeaksSidecar({ ...base, peaks: ramp(), fetchFn: fetchFn as unknown as typeof fetch }),
-    ).resolves.toBe(true)
+    ).resolves.toBe("stored")
     const [url, init] = fetchFn.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toContain(`${AUDIO_ID}.${EXT}${PEAKS_SIDECAR_SUFFIX}`)
     expect(init.method).toBe("PUT")
-    expect(decodePeaksSidecar(init.body as Uint8Array)).toBeInstanceOf(Float32Array)
+    expect(decodePeaksSidecar(new Uint8Array(init.body as ArrayBuffer))).toBeInstanceOf(Float32Array)
   })
 
   it("reports a refusal instead of throwing — a viewer may not write one", async () => {
     const fetchFn = vi.fn(async () => new Response("insufficient role", { status: 403 }))
     await expect(
       putPeaksSidecar({ ...base, peaks: ramp(), fetchFn: fetchFn as unknown as typeof fetch }),
-    ).resolves.toBe(false)
+    ).resolves.toBe("refused")
+  })
+
+  it("skips rather than refuses when there is no backend to write to", async () => {
+    backendReachable = false
+    const fetchFn = vi.fn(async () => new Response(null, { status: 200 }))
+    await expect(
+      putPeaksSidecar({ ...base, peaks: ramp(), fetchFn: fetchFn as unknown as typeof fetch }),
+    ).resolves.toBe("skipped")
+    expect(fetchFn).not.toHaveBeenCalled()
   })
 })
 
@@ -140,17 +166,32 @@ describe("publishPeaksSidecarOnce", () => {
   it("tries one clip once a session, however often it is drawn", async () => {
     const fetchFn = vi.fn(async () => new Response("insufficient role", { status: 403 }))
     const args = { ...base, peaks: ramp(), fetchFn: fetchFn as unknown as typeof fetch }
-    publishPeaksSidecarOnce(args)
-    publishPeaksSidecarOnce(args)
-    publishPeaksSidecarOnce(args)
-    await vi.waitFor(() => expect(fetchFn).toHaveBeenCalledTimes(1))
+    await publishPeaksSidecarOnce(args)
+    await publishPeaksSidecarOnce(args)
+    await publishPeaksSidecarOnce(args)
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
+
+  it("tries again later for a clip it never got to publish", async () => {
+    // Offline is not a refusal: the shape is still worth storing once the tab
+    // is back, or the next person to look at the take pays for the whole
+    // recording again.
+    backendReachable = false
+    const fetchFn = vi.fn(async () => new Response(null, { status: 200 }))
+    const args = { ...base, peaks: ramp(), fetchFn: fetchFn as unknown as typeof fetch }
+    await publishPeaksSidecarOnce(args)
+    expect(fetchFn).not.toHaveBeenCalled()
+
+    backendReachable = null
+    await publishPeaksSidecarOnce(args)
+    expect(fetchFn).toHaveBeenCalledTimes(1)
   })
 
   it("still publishes a different clip", async () => {
     const fetchFn = vi.fn(async () => new Response(null, { status: 200 }))
     const f = fetchFn as unknown as typeof fetch
-    publishPeaksSidecarOnce({ ...base, peaks: ramp(), fetchFn: f })
-    publishPeaksSidecarOnce({ ...base, audioId: "audio-cell2-1700000000-abcdefgh", peaks: ramp(), fetchFn: f })
-    await vi.waitFor(() => expect(fetchFn).toHaveBeenCalledTimes(2))
+    await publishPeaksSidecarOnce({ ...base, peaks: ramp(), fetchFn: f })
+    await publishPeaksSidecarOnce({ ...base, audioId: "audio-cell2-1700000000-abcdefgh", peaks: ramp(), fetchFn: f })
+    expect(fetchFn).toHaveBeenCalledTimes(2)
   })
 })

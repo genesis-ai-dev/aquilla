@@ -22,6 +22,7 @@
 // write is refused by the route (PUT is contributor+) and that is fine — it is
 // best-effort, never a reason to fail a waveform.
 
+import { isOnline } from "@/lib/offline/connectivity"
 import { audioObjectEndpoint, type SyncTokenForFile } from "./upload"
 
 /** Appended to the clip's object name. Mirrored in sync-worker/src/r2-gc.ts. */
@@ -33,6 +34,20 @@ const HEADER_BYTES = 8
 /** Refuse an implausibly large body before allocating from it. 4096 bins is an
  *  order of magnitude past WAVEFORM_BINS and still only 4KB. */
 const MAX_BINS = 4096
+
+/**
+ * True only when we KNOW the backend cannot be reached — no network interface,
+ * or the desktop probe says it is down. Unknown is not unreachable, so a web
+ * tab still gets its chance.
+ *
+ * A waveform with no network says "not available offline" (useCellAudio's own
+ * guard, from Ryder's Wi-Fi-off report); the sidecar must not spend a request
+ * that cannot succeed just to get there.
+ */
+async function backendUnreachable(): Promise<boolean> {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return true
+  return (await isOnline()) === false
+}
 
 export function peaksSidecarObjectName(audioId: string, ext: string): string {
   return `${audioId}.${ext}${PEAKS_SIDECAR_SUFFIX}`
@@ -50,9 +65,9 @@ export function peaksSidecarObjectName(audioId: string, ext: string): string {
  * A byte a bin is 1/255 of full scale — below a pixel on any waveform the app
  * draws, and it keeps a chapter's worth of shapes inside one TCP window.
  */
-export function encodePeaksSidecar(peaks: Float32Array): Uint8Array {
+export function encodePeaksSidecar(peaks: Float32Array): Uint8Array<ArrayBuffer> {
   const bins = peaks.length
-  const out = new Uint8Array(HEADER_BYTES + bins)
+  const out = new Uint8Array(new ArrayBuffer(HEADER_BYTES + bins))
   out.set(MAGIC, 0)
   out[4] = FORMAT_VERSION
   out[5] = 0
@@ -102,6 +117,7 @@ export async function fetchPeaksSidecar(args: PeaksSidecarArgs): Promise<Float32
   const { projectId, fileId, audioId, ext, getSyncToken } = args
   const fetchFn = args.fetchFn ?? fetch
   try {
+    if (await backendUnreachable()) return null
     const token = await getSyncToken(projectId, fileId)
     if (!token) return null
     const res = await fetchFn(
@@ -117,21 +133,36 @@ export async function fetchPeaksSidecar(args: PeaksSidecarArgs): Promise<Float32
 }
 
 /**
- * Store one clip's peaks beside it. Returns whether the object landed — false
- * covers a viewer (the route's PUT floor is contributor), an offline tab, and
- * every other refusal. Best-effort by construction: the caller already has the
- * peaks it was asked for.
+ * What became of a write.
+ *
+ *   "stored"  — the object landed.
+ *   "refused" — the server said no, and will go on saying no: a viewer (the
+ *               route's PUT floor is contributor) is the ordinary case.
+ *   "skipped" — the request was never made, or died in flight: offline, no
+ *               token, a blip. Worth trying again later in the session.
+ */
+export type PeaksSidecarPutResult = "stored" | "refused" | "skipped"
+
+/**
+ * Store one clip's peaks beside it. Best-effort by construction: the caller
+ * already holds the peaks it was asked for, so nothing here is a failure it
+ * has to handle — only something `publishPeaksSidecarOnce` reads to decide
+ * whether asking again could ever help.
  */
 export async function putPeaksSidecar(
   args: PeaksSidecarArgs & { peaks: Float32Array },
-): Promise<boolean> {
+): Promise<PeaksSidecarPutResult> {
   const { projectId, fileId, audioId, ext, peaks, getSyncToken } = args
-  if (peaks.length === 0 || peaks.length > MAX_BINS) return false
+  if (peaks.length === 0 || peaks.length > MAX_BINS) return "refused"
   const fetchFn = args.fetchFn ?? fetch
   try {
+    if (await backendUnreachable()) return "skipped"
     const token = await getSyncToken(projectId, fileId)
-    if (!token) return false
+    if (!token) return "skipped"
     const body = encodePeaksSidecar(peaks)
+    // As a plain ArrayBuffer: the exact bytes, and the one body type every
+    // fetch implementation in this codebase's targets takes without a cast.
+    const bodyBuffer = body.buffer
     const res = await fetchFn(
       audioObjectEndpoint(projectId, fileId, peaksSidecarObjectName(audioId, ext)),
       {
@@ -140,12 +171,12 @@ export async function putPeaksSidecar(
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/octet-stream",
         },
-        body: body as BodyInit,
+        body: bodyBuffer,
       },
     )
-    return res.ok
+    return res.ok ? "stored" : "refused"
   } catch {
-    return false
+    return "skipped"
   }
 }
 
@@ -163,14 +194,24 @@ export function __resetPeaksSidecarPublishesForTests(): void {
 }
 
 /**
- * Publish one clip's peaks beside it, at most once per clip per session, and
- * do not wait for it: the caller already holds the peaks it needed. Called by
- * whoever decoded the clip, which is how takes recorded before this existed
- * get a sidecar — the first person to look at one writes it for everybody.
+ * Publish one clip's peaks beside it, at most once per clip per session.
+ * Called by whoever decoded the clip, which is how takes recorded before this
+ * existed get a sidecar — the first person to look at one writes it for
+ * everybody.
+ *
+ * The returned promise is there to be ignored: the caller already holds the
+ * peaks it needed, and nothing it does depends on this landing. It resolves
+ * when the attempt is over, which is what a test can wait on.
  */
-export function publishPeaksSidecarOnce(args: PeaksSidecarArgs & { peaks: Float32Array }): void {
+export async function publishPeaksSidecarOnce(
+  args: PeaksSidecarArgs & { peaks: Float32Array },
+): Promise<void> {
   const key = `${args.projectId}/${args.fileId}/${peaksSidecarObjectName(args.audioId, args.ext)}`
   if (publishAttempted.has(key)) return
   publishAttempted.add(key)
-  void putPeaksSidecar(args)
+  const result = await putPeaksSidecar(args)
+  // A refusal stands for the session — a viewer asking again on every
+  // scroll-back would spend a request each time to be told the same thing. A
+  // write we never got to make must not count as having been made.
+  if (result === "skipped") publishAttempted.delete(key)
 }

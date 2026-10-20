@@ -29,4 +29,15 @@ describe("audioLineLabels", () => {
     const labels = audioLineLabels([{ id: "u1" }, { id: "t", startTime: 2 }, { id: "u2" }])
     expect([...labels.entries()]).toEqual([["t", "L1"], ["u1", "L2"], ["u2", "L3"]])
   })
+
+  it("never names a subtitle cue by its stored timing", () => {
+    const labels = audioLineLabels([
+      { id: "c1", startTime: 2, context: "00:00:02.000 --> 00:00:06.500" },
+      { id: "c2", startTime: 7, context: "00:07.000" },
+      { id: "c3", startTime: 9, context: "00:00:09.000 --> 00:00:11.000", globalReferences: ["B4"] },
+    ])
+    expect(labels.get("c1")).toBe("L1")
+    expect(labels.get("c2")).toBe("L2")
+    expect(labels.get("c3")).toBe("B4")
+  })
 })

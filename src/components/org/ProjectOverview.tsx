@@ -916,6 +916,12 @@ export function ProjectOverview() {
       }
     }
   }, [id, jwt, firstFileId, project?.name])
+  /**
+   * Read off the project itself, which is the one per-project read the server
+   * still answers for an archived project (AQU-2088) — everything below it,
+   * the plan and the Team card included, is refused.
+   */
+  const isArchived = Boolean(project?.deletedAt)
   const {
     units: planUnits,
     patchUnit: patchPlanUnit,
@@ -927,6 +933,9 @@ export function ProjectOverview() {
     projectId: project ? id ?? null : null,
     lane: planLane,
     getToken: getPlanToken,
+    // AQU-2088: an archived project refuses the token this read needs, and the
+    // board is not drawn for one either. Don't spend the round trip to be told.
+    enabled: !isArchived,
   })
   /**
    * The rows the board is actually drawing, in drawn order. The board owns the
@@ -1385,7 +1394,6 @@ export function ProjectOverview() {
     policyAssignmentMinRole,
   )
   const canToggleLifecycle = (project?.syncRole?.level ?? 0) >= 500
-  const isArchived = Boolean(project?.deletedAt)
 
   /**
    * AQU-1278: the inspector's Assign affordance. Same authority the Team card's
@@ -2526,99 +2534,127 @@ export function ProjectOverview() {
                 />
               )}
 
-              {/* ── Per-file rows (always fully visible per user decision) ── */}
-              {/* AQU-1092…1098: the plan replaces the old file breakdown.
-                  That card listed files with progress bars and a nested
-                  book/chapter/verse drill-down; it answered "how far along is
-                  this file", never "are we finishing on time". The plan groups
-                  planning units by status, and the per-unit detail moved into
-                  the inspector beside it. */}
-              {planInspector && !planLgUp && (
-                <Sheet open onOpenChange={(open) => { if (!open) setSelectedPlanUnitId(null) }}>
-                  <SheetContent side="right" className="w-full p-0 sm:max-w-md!">
-                    <SheetHeader className="sr-only">
-                      <SheetTitle>
-                        {t("org.projectOverview.plan.inspectorAria", {
-                          unit: selectedPlanUnit ? planUnitLabel(selectedPlanUnit) : "",
-                        })}
-                      </SheetTitle>
-                    </SheetHeader>
-                    {planInspector}
-                  </SheetContent>
-                </Sheet>
-              )}
-              <PlanBoard
-                units={planUnits}
-                now={tableNow}
-                recordsAudio={recordsAudio}
-                projectId={id ?? null}
-                status={planStatus}
-                onRetry={refreshPlan}
-                orderRef={planOrderRef}
-                selectedId={selectedPlanUnitId}
-                onSelect={setSelectedPlanUnitId}
-                shortChaptersByUnit={planShortChaptersByUnit}
-                frontMatterShortUnits={planFrontMatterShortUnits}
-                assigneesByUnit={assigneesByUnit}
-                onOpenShortfall={handleOpenShortfall}
-                laneLabel={showLaneTabs ? planLanguageLabel : null}
-                lanes={planLaneOptions}
-                lane={planLane}
-                // Wrapped, not passed straight to the setter: the menu calls
-                // its handler with (value, eventDetails), and a setState that
-                // is handed a second argument today is one refactor away from
-                // being handed something it would read as an updater.
-                onLaneChange={(next) => setSelectedLaneTag(next)}
-                emptyAction={
-                  <Button
-                    size="sm"
-                    data-testid="plan-empty-import"
-                    disabled={openPending}
-                    onClick={() => openWorkspace(`/project/${id}/editor`)}
-                  >
-                    {t("org.projectOverview.plan.importSource")}
-                  </Button>
-                }
-                actions={
-                  <>
-                    {/* AQU-1392: the volume-analysis report over every file in
-                        the project — "how much new work is in here?", the
-                        question the plan board's status roll-up cannot answer. */}
-                    {analysisFiles.length > 0 && (
+              {/* ── Archived: no plan, no team (AQU-2088) ──
+                  The server refuses every per-project read for an archived
+                  project, so there is no plan to draw. Say what is true and
+                  offer the one action that changes it, rather than leaving
+                  the board on a spinner nothing can resolve. The Team card
+                  below is dropped for the same reason. */}
+              {isArchived ? (
+                <div className="rounded-lg border bg-card p-5" data-testid="overview-archived-notice">
+                  <div className="flex items-start gap-3">
+                    <Archive className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                    <div className="min-w-0 flex-1">
+                      <h2 className="text-sm font-semibold">{t("org.projectOverview.archived.title")}</h2>
+                      {/* Points at the header's Restore rather than drawing a
+                          second one: two identical controls on one screen is
+                          an ambiguity for a reader and for a screen reader. */}
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {canManage
+                          ? t("org.projectOverview.archived.bodyCanRestore")
+                          : t("org.projectOverview.archived.bodyAskManager")}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {/* ── Per-file rows (always fully visible per user decision) ── */}
+                  {/* AQU-1092…1098: the plan replaces the old file breakdown.
+                      That card listed files with progress bars and a nested
+                      book/chapter/verse drill-down; it answered "how far along is
+                      this file", never "are we finishing on time". The plan groups
+                      planning units by status, and the per-unit detail moved into
+                      the inspector beside it. */}
+                  {planInspector && !planLgUp && (
+                    <Sheet open onOpenChange={(open) => { if (!open) setSelectedPlanUnitId(null) }}>
+                      <SheetContent side="right" className="w-full p-0 sm:max-w-md!">
+                        <SheetHeader className="sr-only">
+                          <SheetTitle>
+                            {t("org.projectOverview.plan.inspectorAria", {
+                              unit: selectedPlanUnit ? planUnitLabel(selectedPlanUnit) : "",
+                            })}
+                          </SheetTitle>
+                        </SheetHeader>
+                        {planInspector}
+                      </SheetContent>
+                    </Sheet>
+                  )}
+                  <PlanBoard
+                    units={planUnits}
+                    now={tableNow}
+                    recordsAudio={recordsAudio}
+                    projectId={id ?? null}
+                    status={planStatus}
+                    onRetry={refreshPlan}
+                    orderRef={planOrderRef}
+                    selectedId={selectedPlanUnitId}
+                    onSelect={setSelectedPlanUnitId}
+                    shortChaptersByUnit={planShortChaptersByUnit}
+                    frontMatterShortUnits={planFrontMatterShortUnits}
+                    assigneesByUnit={assigneesByUnit}
+                    onOpenShortfall={handleOpenShortfall}
+                    laneLabel={showLaneTabs ? planLanguageLabel : null}
+                    lanes={planLaneOptions}
+                    lane={planLane}
+                    // Wrapped, not passed straight to the setter: the menu calls
+                    // its handler with (value, eventDetails), and a setState that
+                    // is handed a second argument today is one refactor away from
+                    // being handed something it would read as an updater.
+                    onLaneChange={(next) => setSelectedLaneTag(next)}
+                    emptyAction={
                       <Button
-                        variant="outline"
                         size="sm"
-                        data-testid="project-analyze"
-                        onClick={() => setAnalysisOpen(true)}
+                        data-testid="plan-empty-import"
+                        disabled={openPending}
+                        onClick={() => openWorkspace(`/project/${id}/editor`)}
                       >
-                        {t("workspace.analysis.action")}
+                        {t("org.projectOverview.plan.importSource")}
                       </Button>
-                    )}
-                    {orgSettings.canExport && planUnits.length > 0 ? (
-                      <ButtonGroup>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          data-testid="plan-csv-copy"
-                          onClick={handleCopyPlanCsv}
-                        >
-                          {planCsvCopied
-                            ? t("common.copied")
-                            : t("org.projectOverview.copyCsv")}
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          data-testid="plan-csv-download"
-                          onClick={handleDownloadPlanCsv}
-                        >
-                          {t("org.projectOverview.downloadCsv")}
-                        </Button>
-                      </ButtonGroup>
-                    ) : null}
-                  </>
-                }
-              />
+                    }
+                    actions={
+                      <>
+                        {/* AQU-1392: the volume-analysis report over every file in
+                            the project — "how much new work is in here?", the
+                            question the plan board's status roll-up cannot answer. */}
+                        {analysisFiles.length > 0 && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            data-testid="project-analyze"
+                            onClick={() => setAnalysisOpen(true)}
+                          >
+                            {t("workspace.analysis.action")}
+                          </Button>
+                        )}
+                        {orgSettings.canExport && planUnits.length > 0 ? (
+                          <ButtonGroup>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              data-testid="plan-csv-copy"
+                              onClick={handleCopyPlanCsv}
+                            >
+                              {planCsvCopied
+                                ? t("common.copied")
+                                : t("org.projectOverview.copyCsv")}
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              data-testid="plan-csv-download"
+                              onClick={handleDownloadPlanCsv}
+                            >
+                              {t("org.projectOverview.downloadCsv")}
+                            </Button>
+                          </ButtonGroup>
+                        ) : null}
+                      </>
+                    }
+                  />
+                </>
+              )}
+
               {project && (
                 <AnalysisReportDialog
                   open={analysisOpen}
@@ -2753,7 +2789,7 @@ export function ProjectOverview() {
                   this card exist at all, not an empty/placeholder version.
                   Names on the rows are also the roster, so an owner-only
                   roster floor raises this gate with them (AQU-1172). */}
-              {!workloadRefused && (
+              {!isArchived && !workloadRefused && (
                 <SectionVisibilityGate
                   minRole={teamNamesFloor}
                   viewerRoleLevel={projectRoleLevel}

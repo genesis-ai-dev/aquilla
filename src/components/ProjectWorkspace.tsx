@@ -2348,8 +2348,9 @@ export function ProjectWorkspace() {
     editorRef.current?.setMediaFollow?.("engage")
   }, [])
   // AQU-1642 follow-up: the Audio view's one place to play from. Its context —
-  // the file's cells with their takes — is filled in below, once they exist.
-  const audioViewPlace = useAudioViewPlace(activeFileId ?? null)
+  // the file's cells with their takes — is written by a layout effect below,
+  // once they exist; the place only reads it at press time.
+  const { place: audioViewPlace, contextRef: audioViewContextRef } = useAudioViewPlace(activeFileId ?? null)
   const audioLens = useMemo<AudioLensContext | null>(
     () =>
       lens === "audio" && audioProject && !activeFileTimeOrdered
@@ -2385,12 +2386,12 @@ export function ProjectWorkspace() {
               setMakeCharacterSeedCellId(cellId)
               setMakeCharacterOpen(true)
             },
-            place: audioViewPlace.place,
+            place: audioViewPlace,
           }
         : null,
     [
       lens, audioProject, activeFileTimeOrdered, tts.voices, tts.settings, tts.defaultVoiceId,
-      tts.assignCells, frontierSession, currentUsername, cellStore, refresh, audioViewPlace.place,
+      tts.assignCells, frontierSession, currentUsername, cellStore, refresh, audioViewPlace,
     ],
   )
 
@@ -11604,9 +11605,14 @@ export function ProjectWorkspace() {
   )
   // AQU-1642 follow-up: what the Audio view's cards and ⋯ Play open the run
   // with — the same lines, takes and "moved to this line" as the bar's Play.
-  audioViewPlace.contextRef.current = project
-    ? { cells: audioMergedCells, projectId: project.id, session: frontierSession ?? null, onActiveCell: handleBarActiveCell }
-    : null
+  // Written after every commit (no deps) so a press reads this render's cells;
+  // a layout effect, not a render-time write, because the hook's return value
+  // is frozen to react-hooks/immutability and the ref is never read in render.
+  useLayoutEffect(() => {
+    audioViewContextRef.current = project
+      ? { cells: audioMergedCells, projectId: project.id, session: frontierSession ?? null, onActiveCell: handleBarActiveCell }
+      : null
+  })
 
   // AQU-928: transcribe EXACTLY the sections selected on the timeline. Same
   // per-cell path (and same post-run flush/revalidate) as transcribe-all, only
@@ -16565,7 +16571,7 @@ export function ProjectWorkspace() {
                   onActiveCell={handleBarActiveCell}
                   // AQU-1642 follow-up: in the Audio view, Play starts from the
                   // verse last selected or stopped.
-                  startCellId={audioLens ? audioViewPlace.place.startCellId : timelineSelectedCellId}
+                  startCellId={audioLens ? audioViewPlace.startCellId : timelineSelectedCellId}
                   coreMediaUrl={activeFile?.coreMediaUrl ?? null}
                   videoPaneOnScreen={showVideoPane}
                   // AQU-646 stage 3h: what the bar reads on a file with timings

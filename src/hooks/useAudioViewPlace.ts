@@ -46,8 +46,10 @@ export interface AudioViewPlace {
 }
 
 /**
- * `contextRef` is read at press time, so the caller can fill it in after the
- * file's cells are known — later in its render than this hook is called.
+ * `contextRef` is read at press time only, so the caller fills it in from an
+ * effect once the file's cells are known — later than this hook is called. Bind
+ * it to a `…Ref`-named variable: react-hooks/immutability treats what a hook
+ * returns as frozen, and only recognises `<…Ref>.current` as a ref write.
  */
 export function useAudioViewPlace(fileId: string | null): {
   place: AudioViewPlace

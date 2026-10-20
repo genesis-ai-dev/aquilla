@@ -1441,7 +1441,10 @@ export function ProjectOverview() {
    * knows who gave what. The file only routes the request's token; the server
    * closes the assignment by its id across the project.
    */
-  const canUnassign = projectPolicy.ready && (project?.syncRole?.level ?? 0) >= policyAssignmentMinRole
+  // Never on an archived project (Sam, 2026-10-20): archiving takes its
+  // assignments off every workload and "Assigned to me" list already, and
+  // inside the project they read as it does — frozen, with no ×.
+  const canUnassign = !isArchived && projectPolicy.ready && (project?.syncRole?.level ?? 0) >= policyAssignmentMinRole
   const unassignVia = useCallback(
     (fileId: string | null | undefined) =>
       canUnassign && jwt && id && fileId

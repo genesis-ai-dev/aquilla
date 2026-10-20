@@ -3200,6 +3200,15 @@ describe("ProjectOverview one-click unassign (AQU-1969)", () => {
     await waitFor(() => expect(vi.mocked(mod.getProjectTeamProgress).mock.calls.length).toBeGreaterThan(readsBefore))
   })
 
+  // Sam, 2026-10-20: an archived project's assignments are frozen with it.
+  it("an archived project's validation rows show, with no ×", async () => {
+    await withValidation()
+    useProject.mockReturnValue({ project: projectRecord({ level: ROLE.MAINTAINER, files, deletedAt: "2026-10-01T00:00:00Z" } as never), status: "ready", refresh })
+    renderOverview()
+    await screen.findByTestId("overview-team-validation-v1")
+    expect(screen.queryByTestId("overview-team-validation-remove-v1")).toBeNull()
+  })
+
   it("a Contributor who can see the card gets no ×", async () => {
     await withValidation()
     useOrgSettingsMock.mockReturnValue({

@@ -92,6 +92,7 @@ import { useLowMemoryActive } from "@/lib/perf/low-memory"
 import { TranslatedEditor, type FootnoteInsertionAnchor, type TranslatedEditorHandle } from "./TranslatedEditor"
 import { TimeOrderedEmptyState } from "./TimeOrderedEmptyState"
 import type { LinkedVideoEmptyState } from "@/lib/editor/linked-video-empty-state"
+import type { LinkedVideoSoundActions } from "@/lib/timeline/video-sound"
 import { CellTtsButton } from "./CellTtsButton"
 import { CellIssuesTab } from "./CellIssuesTab"
 import { BacktranslationPanel } from "./BacktranslationPanel"
@@ -897,6 +898,9 @@ interface EditorTableProps {
   /** AQU-1566: on that empty state, turn a caption track already on the
    *  timeline into this file's rows (the workspace confirms first). Same gate. */
   onUseCaptionTrackAsRows?: (trackId: string) => void
+  /** AQU-1681: on that empty state, make this file's rows from the linked
+   *  video's own sound. Maintainers only, never for a YouTube video. */
+  linkedVideoSound?: LinkedVideoSoundActions
   /** Called after a successful `target.cell.commit` enqueue so the parent
    *  refetches the cells projection. `committedEventId` is the event id the
    *  commit was assigned (known only here, before the projection round-trip);
@@ -1173,7 +1177,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   audioLens, castGutter = false, ttsSettings, onOpenAudioSetup,
   audioTrackColor, onSetAudioTrackColor,
   onAttachMediaFile, onAttachMediaUrl, linkedVideoEmptyState, linkedVideoEmptyPlacement = "text", onOpenMediaView,
-  onAttachCaptions, onUseCaptionTrackAsRows,
+  onAttachCaptions, onUseCaptionTrackAsRows, linkedVideoSound,
   orderedBy,
   onProjectChanged, onAddConceptFromSelection, onLinkConceptToEntity, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
   onCellCommitted,
@@ -3451,6 +3455,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onOpenMediaView={onOpenMediaView}
           onAttachCaptions={onAttachCaptions}
           onUseCaptionTrackAsRows={onUseCaptionTrackAsRows}
+          videoSound={linkedVideoSound}
         />
       ) : (
         <div className="flex-1" />

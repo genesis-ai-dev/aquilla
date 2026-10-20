@@ -99,7 +99,24 @@ describe("hosted transcription", () => {
     expect(upstreamBodies).toHaveLength(1)
     expect(result).toEqual({ text: "bonjour", chunks: [
       { text: "bonjour", start: 0, end: 0.5 },
-    ], model: "whisper", timingsApproximate: false })
+    ], model: "whisper", timingsApproximate: false, granularity: "word" })
+  })
+
+  // AQU-1681: the client hands each word of a minute-long request back to the
+  // row it was spoken in. A sentence-long segment can span two rows, so the
+  // response says when that is all the provider gave.
+  it("says when the timings are per segment rather than per word", async () => {
+    const jwt = await owner()
+    vi.spyOn(globalThis, "fetch").mockImplementation(async input =>
+      String(input).includes("/models?") ? catalog() : Response.json({
+        text: "hello there", segments: [{ text: "hello there", start: 0, end: 1.2 }],
+        usage: { cost: 0.001 },
+      }))
+    const response = await app.request("/api/v1/audio/transcriptions", {
+      method: "POST", headers: authHeader(jwt), body: JSON.stringify(body),
+    }, settings())
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ granularity: "segment" })
   })
 
   it("meters fractional-second clips as whole billed seconds on the legacy credit rail", async () => {
@@ -162,5 +179,15 @@ describe("hosted transcription — browser preflight", () => {
 
     expect(response.status).toBe(204)
     expect(response.headers.get("Access-Control-Allow-Headers")?.toLowerCase()).toContain("idempotency-key")
+  })
+
+  // AQU-1681: a batch refused by the per-user limit waits for Retry-After. A
+  // cross-origin page can only read that header if it is exposed.
+  it("lets the browser read Retry-After", async () => {
+    const response = await app.request("/api/v1/audio/transcriptions", {
+      method: "POST", headers: { "Content-Type": "application/json", Origin: "http://127.0.0.1:5173" },
+      body: JSON.stringify(body),
+    }, env)
+    expect(response.headers.get("Access-Control-Expose-Headers")).toMatch(/(^|,\s*)Retry-After(,|$)/)
   })
 })

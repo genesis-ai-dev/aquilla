@@ -95,6 +95,10 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # `pnpm lint` runs ESLint with an 8 GiB heap (see the `lint` script in
+      # package.json). V8's default ~4 GiB ceiling ran out on 2026-10-20 (AQU-2084):
+      # the job died with "JavaScript heap out of memory", exit 134, on every PR.
+      # ubuntu-latest for this public repo has 16 GB, so 8 GiB leaves the runner room.
       - run: pnpm lint
       - run: pnpm run i18n:check
       - run: pnpm run scan:secrets

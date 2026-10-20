@@ -8,6 +8,15 @@ import { seedUser, jwtFor, authHeader } from './db'
 import { stripeCatalogResponse } from './stripe-catalog'
 import { testStripeCatalog as manifest } from './stripe-catalog'
 import type { BillingPlanReview } from '../../../../db/shared/billing-review'
+import { savePlatformSettings } from '../../lib/platform-settings'
+
+/** Small-number fixture for metering tests: Free $0.0625 (25 units) and Team 10×
+ * (250 units), so exhaustion takes cents. Real defaults ($1, 24×) are tested in
+ * pricing-model.test.ts and billing-workspace-usage.test.ts (AQU-2056).
+ */
+export async function pinSmallAllowancePolicy() {
+  expect((await savePlatformSettings(env, { fieldPlan: { freeWeeklyRawUsd: 0.0625, teamMultipleOfFree: 10 } }, 0, 1)).ok).toBe(true)
+}
 
 export function config(catalog = manifest): Env {
   if (catalog.bindings.every(b => b.live)) return { ...env, ENVIRONMENT: 'production',
@@ -53,7 +62,7 @@ export async function setup(scope: 'personal' | 'team' = 'personal', catalog = m
   return { fetch, sessions, requests, loseNextResponse: () => { loseResponse = true },
     useInvalidUrl: () => { invalidUrl = true } }
 }
-export async function reviewed(offer = 'pro', interval = 'year', catalog = manifest) {
+export async function reviewed(offer = 'team', interval = 'year', catalog = manifest) {
   const response = await app.request(`${catalog.bindings[0]!.live ? 'https://api.aquilla.app' : 'http://127.0.0.1'}/api/v2/orgs/1/billing/review`, {
     method: 'POST', headers: authHeader(await jwtFor('alice')),
     body: JSON.stringify({ offer, interval, quantity: 1 }),
@@ -70,8 +79,9 @@ export async function checkout(body: unknown, username = 'alice', settings = con
     method: 'POST', headers: authHeader(await jwtFor(username)), body: JSON.stringify(body),
   }, settings)
 }
-export async function completedPayment(offer = 'pro', interval = 'year', catalog = manifest) {
-  const stripe = await setup(offer.startsWith('team') ? 'team' : 'personal', catalog)
+export async function completedPayment(offer = 'team', interval = 'year', catalog = manifest,
+  scope: 'personal' | 'team' = 'team') {
+  const stripe = await setup(scope, catalog)
   expect((await checkout(await reviewed(offer, interval, catalog), 'alice', config(catalog))).status).toBe(200)
   const params = new URLSearchParams(stripe.requests[0]!.body)
   const metadata = Object.fromEntries([...params.entries()]

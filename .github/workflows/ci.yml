@@ -13,9 +13,10 @@ name: CI
 # block the pull request. The Cloudflare preview stays a separate required
 # check. enforce_admins is false, so an admin can still merge around a red run.
 #
-# This workflow does not apply migrations. The nightly Neon refresh is still
-# broken — NEON_API_KEY has been missing since early September — and repairing
-# that job is separate.
+# This workflow does not apply migrations. The nightly Neon refresh
+# (dev-neon-refresh.yml) has not restored dev since 2026-09-29 — NEON_API_KEY was
+# missing until 2026-10-15 and the stored value is rejected by the Neon API — and
+# repairing that secret is separate.
 
 on:
   pull_request:

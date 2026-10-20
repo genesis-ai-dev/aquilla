@@ -45,6 +45,8 @@ export interface ChooserCopy {
   alwaysIncluded: MessageKey
   summaryAdds: MessageKey
   summaryNoAdds: MessageKey
+  /** AQU-1989: the note under the names columns while one is ticked; none, no note. `{board}`. */
+  namesVisible?: MessageKey
 }
 
 export const MONDAY_CHOOSER_COPY: ChooserCopy = {
@@ -54,6 +56,7 @@ export const MONDAY_CHOOSER_COPY: ChooserCopy = {
   alwaysIncluded: "projectSettings.monday.chooser.alwaysIncluded",
   summaryAdds: "projectSettings.monday.chooser.summaryAdds",
   summaryNoAdds: "projectSettings.monday.chooser.summaryNoAdds",
+  namesVisible: "projectSettings.monday.chooser.namesVisible",
 }
 
 /** Words in the "Add columns" dialog on a linked board or table. */

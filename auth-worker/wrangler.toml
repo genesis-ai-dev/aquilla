@@ -92,6 +92,16 @@ class_name = "ContextualRunDriver"
 tag = "v1"
 new_sqlite_classes = ["ContextualRunDriver"]
 
+# AQU-2051 — the per-document knowledge-base indexing driver. A new DO class
+# needs its own migration tag; v1 above must stay as it is.
+[[durable_objects.bindings]]
+name = "KNOWLEDGE_INDEX_DRIVER"
+class_name = "KnowledgeIndexDriver"
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["KnowledgeIndexDriver"]
+
 # Keep the top-level email binding for default-profile compatibility. Every live
 # named environment also declares its own binding because Wrangler environments
 # do not inherit top-level bindings.
@@ -296,6 +306,16 @@ class_name = "ContextualRunDriver"
 tag = "v1"
 new_sqlite_classes = ["ContextualRunDriver"]
 
+# AQU-2051 — the per-document knowledge-base indexing driver. A new DO class
+# needs its own migration tag; v1 above must stay as it is.
+[[env.production.durable_objects.bindings]]
+name = "KNOWLEDGE_INDEX_DRIVER"
+class_name = "KnowledgeIndexDriver"
+
+[[env.production.migrations]]
+tag = "v2"
+new_sqlite_classes = ["KnowledgeIndexDriver"]
+
 [env.production.vars]
 # Omnilingual ASR on Modal (infra/modal/omni_asr.py). Hosted transcription for
 # languages Whisper lacks, plus the zero-shot opt-in. Empty = Automatic keeps
@@ -433,6 +453,16 @@ class_name = "ContextualRunDriver"
 tag = "v1"
 new_sqlite_classes = ["ContextualRunDriver"]
 
+# AQU-2051 — the per-document knowledge-base indexing driver. A new DO class
+# needs its own migration tag; v1 above must stay as it is.
+[[env.development.durable_objects.bindings]]
+name = "KNOWLEDGE_INDEX_DRIVER"
+class_name = "KnowledgeIndexDriver"
+
+[[env.development.migrations]]
+tag = "v2"
+new_sqlite_classes = ["KnowledgeIndexDriver"]
+
 [env.development.version_metadata]
 binding = "CF_VERSION_METADATA"
 
@@ -532,6 +562,16 @@ class_name = "ContextualRunDriver"
 [[env.e2e.migrations]]
 tag = "v1"
 new_sqlite_classes = ["ContextualRunDriver"]
+
+# AQU-2051 — the per-document knowledge-base indexing driver. A new DO class
+# needs its own migration tag; v1 above must stay as it is.
+[[env.e2e.durable_objects.bindings]]
+name = "KNOWLEDGE_INDEX_DRIVER"
+class_name = "KnowledgeIndexDriver"
+
+[[env.e2e.migrations]]
+tag = "v2"
+new_sqlite_classes = ["KnowledgeIndexDriver"]
 
 [env.e2e.vars]
 ALGORITHM = "HS256"

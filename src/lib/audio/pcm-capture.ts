@@ -317,3 +317,86 @@ export async function startPcmCapture(opts: PcmCaptureOptions): Promise<PcmCaptu
     throw e
   }
 }
+
+export interface PcmTap {
+  /** Flush the worklet's partial buffer, detach the tap, and resolve to every
+   *  chunk it captured, in order, ready for encodeWavPcm16Chunks. */
+  finish(): Promise<Pcm16Chunk[]>
+  /** Detach without collecting. Safe after finish(). */
+  dispose(): void
+}
+
+/**
+ * Capture the OUTPUT of `input` as mono PCM16, inside a context the caller
+ * already owns. (AQU-1575)
+ *
+ * The same worklet as a live take, pointed at a node instead of a mic: the
+ * noise remover renders a take through RNNoise in real time, and MediaRecorder
+ * — its only other way out of the graph — can write nothing but compressed
+ * audio. A WAV take cleaned of noise has to come back as a WAV, so this is
+ * that path. The caller keeps the context: this never closes it.
+ */
+export async function tapPcm(ctx: AudioContext, input: AudioNode): Promise<PcmTap> {
+  const url = await loadWorkletUrl()
+  await ctx.audioWorklet.addModule(url)
+  const node = new AudioWorkletNode(ctx, PROCESSOR_NAME, {
+    numberOfInputs: 1,
+    numberOfOutputs: 1,
+    channelCount: 1,
+    channelCountMode: "explicit",
+  })
+  // Pulled by a MediaStreamDestination nobody listens to, for the reason
+  // startPcmCapture gives: never by the speakers.
+  const sink = ctx.createMediaStreamDestination()
+  input.connect(node).connect(sink)
+
+  const chunks: Pcm16Chunk[] = []
+  let resolveDone: (() => void) | null = null
+  node.port.onmessage = (e: MessageEvent) => {
+    const msg = e.data as { pcm?: Pcm16Chunk; done?: boolean }
+    if (msg.pcm) chunks.push(msg.pcm)
+    if (msg.done) {
+      const done = resolveDone
+      resolveDone = null
+      done?.()
+    }
+  }
+
+  let detached = false
+  const detach = () => {
+    if (detached) return
+    detached = true
+    node.port.onmessage = null
+    try { input.disconnect(node) } catch {}
+    try { node.disconnect() } catch {}
+  }
+
+  let finishing: Promise<Pcm16Chunk[]> | null = null
+  return {
+    finish: () => {
+      finishing ??= (async () => {
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(() => {
+            resolveDone = null
+            resolve()
+          }, FLUSH_TIMEOUT_MS)
+          resolveDone = () => {
+            clearTimeout(timer)
+            resolve()
+          }
+          try {
+            node.port.postMessage({ type: "flush" })
+          } catch {
+            clearTimeout(timer)
+            resolveDone = null
+            resolve()
+          }
+        })
+        detach()
+        return chunks
+      })()
+      return finishing
+    },
+    dispose: detach,
+  }
+}

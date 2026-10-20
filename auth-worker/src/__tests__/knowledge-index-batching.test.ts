@@ -145,7 +145,10 @@ describe("indexKnowledgeDoc — large documents", () => {
     expect((await getDocMeta(env.AQUILLA_PG, DOC))?.docSummary).toBe("doc sum")
   })
 
-  it("one failed batch degrades the whole leg: structure kept, no partial summaries", async () => {
+  // AQU-2050 changed this: the batches that came back are kept. Discarding
+  // them meant every retry had to re-summarize the whole document inside one
+  // budget, so a document that could not finish in one run never could.
+  it("one failed batch keeps what the others returned and says what is still owed", async () => {
     await seed(largeDoc())
     const model = summarizingModel()
     let calls = 0
@@ -157,10 +160,14 @@ describe("indexKnowledgeDoc — large documents", () => {
 
     const res = await getDocTree(env.AQUILLA_PG, DOC)
     expect(res?.meta.indexStatus).toBe("ready")
-    expect(res?.meta.indexError).toBe("The summarizing model returned HTTP 500.")
+    expect(res?.meta.indexError).toContain("The summarizing model returned HTTP 500.")
+    expect(res?.meta.indexError).toContain("of 200 sections")
+    // The document summary is written from the section summaries, so it waits
+    // for the run that completes them.
     expect(res?.meta.docSummary).toBeNull()
     expect(res?.tree).toHaveLength(200)
-    expect(res?.tree?.some((n) => n.summary)).toBe(false)
+    const summarized = flatNodes(res?.tree ?? []).filter((n) => n.summary)
+    expect(summarized).toHaveLength(200 - KB_ENRICH_BATCH_NODES)
     logged.mockRestore()
   })
 

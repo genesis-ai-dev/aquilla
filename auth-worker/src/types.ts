@@ -291,6 +291,14 @@ export interface Env {
    *  where it is unbound (vitest route suites, an environment deployed before
    *  the DO migration) routes/contextual.ts falls back to the in-request loop. */
   CONTEXTUAL_RUN_DRIVER?: DurableObjectNamespace
+  /** Per-document knowledge-base indexing driver (src/knowledge-index-do.ts) —
+   *  AQU-2051. One object per document; its alarm runs the indexing job, so
+   *  summarizing a document of any size outlives the upload's ~30 s
+   *  `waitUntil` budget instead of being cut off mid-flight (AQU-2050).
+   *  Optional: where it is unbound (vitest route suites, an environment
+   *  deployed before the DO migration) routes/knowledge.ts falls back to the
+   *  in-request `waitUntil` job. */
+  KNOWLEDGE_INDEX_DRIVER?: DurableObjectNamespace
   /** Spans a project-wide autopilot start may drive at once. Lower it for a
    *  self-hosted upstream with few slots (see routes/contextual.ts). */
   CONTEXTUAL_MAX_CONCURRENCY?: string

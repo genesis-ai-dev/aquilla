@@ -39,7 +39,7 @@ import { formatList } from "@/lib/i18n/format"
 import { classifyPlanSection, isTimeBucketKey, numberedBookCodes, planSectionLabel } from "@/lib/plan/plan-section"
 import { planPct, planUnitShortfall, type PlanShortfall } from "@/lib/plan/plan-status"
 import type { UnitAssignment, UnitAssignmentChapter } from "@/lib/sync/assignments"
-import type { AssignLaneOption } from "@/lib/sync/assignment-lane"
+import type { AssignLaneOption, TeamLaneAttachment } from "@/lib/sync/assignment-lane"
 import type { FileReference, FileType } from "@/lib/parsers/types"
 import { SectionVisibilityGate } from "../SectionVisibilityBadge"
 import { laneChipLabel } from "../project-lanes"
@@ -132,6 +132,8 @@ export interface PlanAssignTarget {
   lanes?: readonly AssignLaneOption[]
   /** AQU-1994: the lanes someone on the project is on. See AssignModal's own prop. */
   staffedLaneIds?: ReadonlySet<string> | readonly string[] | null
+  /** AQU-2047: attached teams' lane checks. See AssignModal's `teamLanes`. */
+  teamLanes?: readonly TeamLaneAttachment[] | null
   jwt: string
   author: string
   roleLevel: number
@@ -486,6 +488,7 @@ function PlanAssignHost({
       targetLanes={target.targetLanes}
       lanes={target.lanes}
       staffedLaneIds={target.staffedLaneIds}
+      teamLanes={target.teamLanes}
       // The lane the inspector is showing, so work assigned from here lands in
       // the language whose numbers the manager was just reading.
       defaultLane={lane}

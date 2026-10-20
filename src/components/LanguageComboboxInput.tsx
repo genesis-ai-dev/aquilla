@@ -14,6 +14,7 @@ import {
   loadFullLanguageCatalog,
   peekFullLanguageCatalog,
 } from "@/lib/languages/full-catalog"
+import { derivedLanguageCode } from "@/lib/languages/use-derived-language-code"
 
 /**
  * AQU-988 — select-or-type language fields.
@@ -45,6 +46,10 @@ import {
  * Loading is purely additive — it widens `items`, and the two rules above are
  * what still decide whether Enter picks a row.
  *
+ * AQU-2049 — each row shows `derivedLanguageCode` for that language name (the
+ * same code the lane's Advanced field placeholders), beside the name. Picking
+ * still passes `entry.name` only. A name that derives nothing shows no code.
+ *
  * Opening is deliberately narrow: the list appears only when a real keystroke
  * produced the edit (or on ArrowDown), never on bare focus and never on a
  * value set programmatically. That keeps a popup from ever covering the
@@ -59,6 +64,8 @@ type PopupRect = { top: number; left: number; width: number; maxHeight: number }
 const POPUP_GAP = 4
 const POPUP_MAX_HEIGHT = 264
 const POPUP_MIN_WIDTH = 180
+/** Room for the derived code beside the name (AQU-2049). */
+const POPUP_CODE_GUTTER = 56
 
 function measure(anchor: HTMLElement): PopupRect {
   const rect = anchor.getBoundingClientRect()
@@ -70,7 +77,7 @@ function measure(anchor: HTMLElement): PopupRect {
   return {
     top: flip ? rect.top - POPUP_GAP - maxHeight : rect.bottom + POPUP_GAP,
     left: rect.left,
-    width: Math.max(POPUP_MIN_WIDTH, rect.width),
+    width: Math.max(POPUP_MIN_WIDTH, rect.width + POPUP_CODE_GUTTER),
     maxHeight,
   }
 }
@@ -351,27 +358,38 @@ export function useLanguageSuggestions({
               className="max-h-full overflow-y-auto overscroll-contain"
               style={{ maxHeight: rect.maxHeight - 8 }}
             >
-              {items.map((entry, index) => (
-                <li key={entry.code} role="presentation">
-                  <button
-                    type="button"
-                    id={`${listId}-${index}`}
-                    role="option"
-                    aria-selected={index === activeIndex}
-                    tabIndex={-1}
-                    data-testid={`language-option-${entry.code}`}
-                    data-highlighted={index === activeIndex ? "" : undefined}
-                    className={cn(
-                      "flex w-full items-center rounded-md px-2 py-1.5 text-start text-sm",
-                      index === activeIndex && "bg-accent/40 text-accent-foreground",
-                    )}
-                    onMouseEnter={() => setActiveIndex(index)}
-                    onClick={() => pick(entry, "click")}
-                  >
-                    <span className="truncate">{entry.name}</span>
-                  </button>
-                </li>
-              ))}
+              {items.map((entry, index) => {
+                const code = derivedLanguageCode(entry.name, catalog)
+                return (
+                  <li key={entry.code} role="presentation">
+                    <button
+                      type="button"
+                      id={`${listId}-${index}`}
+                      role="option"
+                      aria-selected={index === activeIndex}
+                      tabIndex={-1}
+                      data-testid={`language-option-${entry.code}`}
+                      data-highlighted={index === activeIndex ? "" : undefined}
+                      className={cn(
+                        "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm",
+                        index === activeIndex && "bg-accent/40 text-accent-foreground",
+                      )}
+                      onMouseEnter={() => setActiveIndex(index)}
+                      onClick={() => pick(entry, "click")}
+                    >
+                      <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+                      {code ? (
+                        <span
+                          data-language-code={code}
+                          className="shrink-0 whitespace-nowrap text-muted-foreground"
+                        >
+                          {code}
+                        </span>
+                      ) : null}
+                    </button>
+                  </li>
+                )
+              })}
             </ul>
           </div>,
           document.body,

@@ -1,16 +1,17 @@
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useParams } from "react-router-dom"
-import { Headphones, MessageSquare, Play, Pause } from "lucide-react"
+import { Headphones, Pause, Play, SkipBack, SkipForward } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
-import { Badge } from "@/components/ui/badge"
 import { checkingRequest, type CheckingAudio, type CheckingSession, type CheckingContent, type CheckingRow } from "@/lib/checking/api"
 import { checkingLabel, checkingUnitKey } from "@/lib/checking/scope"
 import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
 import { flushCheckingFeedback, queueCheckingFeedback } from "@/lib/checking/feedback"
+import { cn } from "@/lib/utils"
+import { CheckingDocument } from "./CheckingDocument"
 
 export function CheckingPage() {
   const { token = "" } = useParams()
@@ -35,7 +36,14 @@ function CheckingVisit({ token }: { token: string }) {
   const [playing, setPlaying] = useState(false)
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [notice, setNotice] = useState("")
+  const [pending, setPending] = useState(false)
   const [sending, setSending] = useState(false)
+  // Feedback this guest sent, per passage, so it stays visible under the passage
+  // like a comment thread. Device-local; the project's copy is the real record.
+  const sentKey = `${storageKey}:sent`
+  const [sent, setSent] = useState<Record<string, string[]>>(() => {
+    try { return JSON.parse(localStorage.getItem(sentKey) ?? "{}") as Record<string, string[]> } catch { return {} }
+  })
   const audioRef = useRef<HTMLAudioElement>(null)
   const playIntent = useRef(false)
   const rows = useMemo(() => {
@@ -56,8 +64,10 @@ function CheckingVisit({ token }: { token: string }) {
     if (!guest) return
     try {
       const count = await flushCheckingFeedback(token, guest)
+      setPending(false)
       if (count) setNotice(t("projectSettings.checking.saved"))
     } catch (error) {
+      setPending(true)
       setNotice(t("projectSettings.checking.pendingFeedback", { reason: error instanceof Error ? error.message : "" }))
     }
   }, [token, guest, t])
@@ -90,13 +100,21 @@ function CheckingVisit({ token }: { token: string }) {
     }
     return clip
   }, [token, guest, t])
+  const recorded = useMemo(() => {
+    const keys = new Set(content?.audio.map(checkingUnitKey))
+    return new Set(rows.flatMap((row, index) => keys.has(checkingUnitKey(row)) ? [index] : []))
+  }, [rows, content])
   const upcoming = useMemo(() => {
     const index = rows.findIndex((row, position) => position > active && content?.audio.some(audio => checkingUnitKey(audio) === checkingUnitKey(row)))
     return index < 0 ? undefined : content?.audio.find(audio => checkingUnitKey(audio) === checkingUnitKey(rows[index]))
   }, [rows, active, content])
+  // Follow along: while listening, keep the passage being heard in view.
+  useEffect(() => {
+    if (playIntent.current) document.querySelector(`[data-segment="${active}"]`)?.scrollIntoView?.({ block: "nearest", behavior: "smooth" })
+  }, [active])
   useEffect(() => {
     const element = audioRef.current
-    if (!element || !guest || !current || !attachment) { setPlaying(false); return }
+    if (!element || !guest || !current || !attachment) { playIntent.current = false; setPlaying(false); return }
     let cancelled = false
     let objectUrl: string | null = null
     element.pause(); element.removeAttribute("src"); element.load(); setPlaying(false)
@@ -116,6 +134,23 @@ function CheckingVisit({ token }: { token: string }) {
     }).catch(error => { if (!cancelled) { playIntent.current = false; setError(String(error.message ?? error)) } })
     return () => { cancelled = true; element.pause(); element.onloadedmetadata = null; element.removeAttribute("src"); element.load(); if (objectUrl) URL.revokeObjectURL(objectUrl) }
   }, [guest, current, attachment, upcoming, loadClip, t])
+  /** Opens a passage, like jumping to a chapter of a video: playback carries on
+   * from there if it was running. */
+  function select(index: number) {
+    setActive(Math.max(0, Math.min(rows.length - 1, index))); setError("")
+  }
+  function playFrom(index: number) {
+    playIntent.current = true
+    if (index !== active) { select(index); return }
+    void audioRef.current?.play().catch(() => setError(t("projectSettings.checking.playRetry")))
+  }
+  function togglePlay() {
+    const element = audioRef.current
+    if (playing) { playIntent.current = false; element?.pause(); return }
+    playIntent.current = true
+    if (!attachment) { nextRecording(); return }
+    if (element?.src) void element.play().catch(() => setError(t("projectSettings.checking.playRetry")))
+  }
   function nextRecording() {
     const next = rows.findIndex((row, index) => index > active && content?.audio.some(audio => checkingUnitKey(audio) === checkingUnitKey(row)))
     if (next < 0) { playIntent.current = false; audioRef.current?.pause(); setPlaying(false); setNotice(t("projectSettings.checking.end")) }
@@ -134,14 +169,19 @@ function CheckingVisit({ token }: { token: string }) {
     setSending(true); setError("")
     try {
       await queueCheckingFeedback(guest, current, feedback)
+      const next = { ...sent, [currentKey]: [...(sent[currentKey] ?? []), feedback.trim()] }
+      setSent(next)
+      try { localStorage.setItem(sentKey, JSON.stringify(next)) } catch { /* display-only copy */ }
       setFeedback(""); setNotice(t("projectSettings.checking.syncing"))
       await retry()
     } catch (error) { setError(error instanceof Error ? error.message : t("projectSettings.checking.saveFailed")) }
     finally { setSending(false) }
   }
-  return <main className="mx-auto flex min-h-dvh max-w-2xl flex-col gap-6 px-5 py-8 sm:py-12">
-    <header className="flex items-center gap-3"><Headphones className="size-7" /><div><p className="text-sm text-muted-foreground">{t("projectSettings.checking.brand")}</p><h1 className="text-2xl font-semibold">{guest?.title ?? t("projectSettings.checking.welcome")}</h1></div><Badge variant="secondary">WIP</Badge></header>
-    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+  const label = current ? checkingLabel(current.label, active) : ""
+  return <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-5">
+    <header className="flex items-center gap-3 py-6"><Headphones className="size-6 text-muted-foreground" /><div className="min-w-0 flex-1"><p className="text-xs text-muted-foreground">{t("projectSettings.checking.brand")}</p><h1 className="truncate text-xl font-semibold">{guest?.title ?? t("projectSettings.checking.welcome")}</h1></div>
+      {guest && <p className="text-sm text-muted-foreground">{guest.name} · {guest.role === "viewer" ? t("projectSettings.checking.listenOnly") : guest.role === "reviewer" ? t("projectSettings.checking.reviewFeedback") : t("projectSettings.checking.listenComment")}</p>}</header>
+    {error && <p role="alert" className="pb-4 text-sm text-destructive">{error}</p>}
     {!guest ? <form className="flex flex-col gap-5 rounded-xl border p-6" onSubmit={event => { event.preventDefault(); void join() }}>
       <p>{t("projectSettings.checking.joinHelp")}</p>
       <FieldGroup>
@@ -150,34 +190,45 @@ function CheckingVisit({ token }: { token: string }) {
       </FieldGroup>
       <Button type="submit" disabled={busy || !name.trim()}>{busy ? t("projectSettings.checking.opening") : t("projectSettings.checking.start")}</Button>
     </form> : <>
-      <p className="text-sm text-muted-foreground">{guest.name} · {guest.role === "viewer" ? t("projectSettings.checking.listenOnly") : guest.role === "reviewer" ? t("projectSettings.checking.reviewFeedback") : t("projectSettings.checking.listenComment")}</p>
       {!content && !error && <p role="status">{t("projectSettings.checking.loadingPassages")}</p>}
       {content && !rows.length && <p>{t("projectSettings.checking.unavailablePassages")}</p>}
       {current && <>
-        <section className="flex flex-col gap-4 rounded-xl border p-5" aria-label={t("projectSettings.checking.player")}>
-          <p className="text-sm text-muted-foreground">{current.fileName} · {t("projectSettings.checking.position", { current: active + 1, total: rows.length })}</p>
-          <h2 className="text-xl font-medium">{checkingLabel(current.label, active)}</h2>
-          <p className="whitespace-pre-wrap text-lg leading-relaxed" dir="auto">{current.text}</p>
-          <audio ref={audioRef} controls aria-label={t("projectSettings.checking.recording")} onPlay={() => { setPlaying(true); playIntent.current = true }} onPause={() => setPlaying(false)}
+        <section aria-label={t("projectSettings.checking.player")} className="sticky top-0 z-10 -mx-5 flex flex-col gap-3 border-b bg-background/95 px-5 py-3 backdrop-blur">
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="icon" aria-label={t("projectSettings.checking.previous")} disabled={active === 0} onClick={() => select(active - 1)}><SkipBack /></Button>
+            <Button size="icon" className="rounded-full" aria-label={playing ? t("projectSettings.checking.pause") : t("projectSettings.checking.play")} disabled={!content?.audio.length} onClick={togglePlay}>{playing ? <Pause /> : <Play />}</Button>
+            <Button variant="ghost" size="icon" aria-label={t("projectSettings.checking.next")} disabled={active === rows.length - 1} onClick={() => select(active + 1)}><SkipForward /></Button>
+            <div className="min-w-0 flex-1 ps-2">
+              <h2 className="truncate font-medium">{label}</h2>
+              <p className="truncate text-xs text-muted-foreground">{current.fileName} · {t("projectSettings.checking.position", { current: active + 1, total: rows.length })}{!attachment && ` · ${t("projectSettings.checking.noRecording")}`}</p>
+            </div>
+          </div>
+          {/* Chapter-style strip: one segment per passage, tappable to jump. */}
+          <div aria-hidden className={cn("flex h-1.5 overflow-hidden rounded-full", rows.length <= 200 && "gap-px")}>
+            {rows.map((row, index) => <div key={checkingUnitKey(row)} onClick={() => select(index)}
+              className={cn("flex-1 cursor-pointer", index === active ? "bg-primary" : index < active ? "bg-primary/40" : "bg-muted", !recorded.has(index) && index !== active && "opacity-50")} />)}
+          </div>
+          <audio ref={audioRef} aria-label={t("projectSettings.checking.recording")} onPlay={() => { setPlaying(true); playIntent.current = true }} onPause={() => setPlaying(false)}
             onError={() => { playIntent.current = false; setPlaying(false); setError(t("projectSettings.checking.playFailed")) }}
             onEnded={nextRecording} onTimeUpdate={() => { const element = audioRef.current; if (element && !element.paused && attachment?.trimEndMs != null && element.currentTime >= Number(attachment.trimEndMs) / 1000) nextRecording() }} />
-          <Button disabled={!content?.audio.length} onClick={() => {
-            const element = audioRef.current
-            if (playing) { playIntent.current = false; element?.pause() }
-            else { playIntent.current = true; if (!attachment) { nextRecording(); return }; if (element?.src) void element.play().catch(() => setError(t("projectSettings.checking.playRetry"))) }
-          }}>{playing ? <Pause data-icon="inline-start" /> : <Play data-icon="inline-start" />}{playing ? t("projectSettings.checking.pause") : t("projectSettings.checking.play")}</Button>
-          {!attachment && <p className="text-sm text-muted-foreground">{t("projectSettings.checking.noRecording")}</p>}
-          <p className="text-xs text-muted-foreground">{t("projectSettings.checking.playbackHelp")}</p>
+          {notice && <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><p className="flex-1">{notice}</p>{pending && <Button variant="ghost" size="sm" onClick={() => void retry()}>{t("projectSettings.checking.retry")}</Button>}</div>}
         </section>
-        {canComment && <form className="flex flex-col gap-3" onSubmit={event => { event.preventDefault(); void submitFeedback() }}>
-          <Field><FieldLabel htmlFor="checking-feedback"><MessageSquare className="size-4" />{t("projectSettings.checking.feedbackOn", { label: checkingLabel(current.label, active) })}</FieldLabel><Textarea id="checking-feedback" value={feedback} maxLength={10000} required placeholder={t("projectSettings.checking.feedbackPlaceholder")} onChange={event => setFeedback(event.target.value)} /></Field>
-          <Button type="submit" disabled={sending || !feedback.trim()}>{t("projectSettings.checking.sendFeedback")}</Button>
+        <div className="flex-1 py-6">
+          <CheckingDocument rows={rows} active={active} recorded={recorded} onSelect={select} onPlay={playFrom}
+            sentCount={index => sent[checkingUnitKey(rows[index])]?.length ?? 0} />
+        </div>
+        {canComment && <form className="sticky bottom-0 -mx-5 flex flex-col gap-2 border-t bg-background/95 px-5 py-3 backdrop-blur" onSubmit={event => { event.preventDefault(); void submitFeedback() }}>
+          {(sent[currentKey] ?? []).length > 0 && <ul aria-label={t("projectSettings.checking.yourFeedback")} className="flex max-h-24 flex-col gap-1 overflow-y-auto text-sm">
+            {sent[currentKey].map((body, index) => <li key={index} className="rounded-md bg-muted px-2 py-1"><span className="font-medium">{guest.name}</span> {body}</li>)}
+          </ul>}
+          <Field><FieldLabel htmlFor="checking-feedback" className="text-xs text-muted-foreground">{t("projectSettings.checking.feedbackOn", { label })}</FieldLabel>
+            <div className="flex items-end gap-2">
+              <Textarea id="checking-feedback" rows={2} className="min-h-16 flex-1 resize-none" value={feedback} maxLength={10000} required placeholder={t("projectSettings.checking.feedbackPlaceholder")} onChange={event => setFeedback(event.target.value)}
+                onKeyDown={event => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void submitFeedback() } }} />
+              <Button type="submit" className="shrink-0" disabled={sending || !feedback.trim()}>{t("projectSettings.checking.sendFeedback")}</Button>
+            </div>
+          </Field>
         </form>}
-        {notice && <div role="status" className="flex flex-col gap-2 text-sm"><p>{notice}</p><Button variant="ghost" onClick={() => void retry()}>{t("projectSettings.checking.retry")}</Button></div>}
-        <nav aria-label={t("projectSettings.checking.passages")} className="flex flex-col gap-1">
-          {rows.map((row, index) => <Button key={checkingUnitKey(row)} variant={index === active ? "secondary" : "ghost"} className="justify-start" aria-current={index === active ? "true" : undefined}
-            onClick={() => { playIntent.current = false; setActive(index); setError("") }}>{row.fileName} · {checkingLabel(row.label, index)}</Button>)}
-        </nav>
       </>}
     </>}
   </main>

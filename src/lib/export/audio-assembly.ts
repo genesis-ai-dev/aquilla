@@ -23,7 +23,7 @@
 import type { CellData } from "@/hooks/useCells"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
-import type { EgressAudioMode } from "@/lib/egress/types"
+import type { EgressAudioFormat, EgressAudioMode } from "@/lib/egress/types"
 import { resolveCastVoice } from "@/lib/audio/voices"
 import { parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { encodeWavPcm16Blobs, toPcm16, WAV_HEADER_BYTES } from "@/lib/audio/wav-encode"
@@ -42,6 +42,10 @@ export interface AudioAssemblyArgs {
   fileSlug: string
   langCode: string
   mode: AudioAssemblyMode
+  /** AQU-1575: "separate-clips" only. "wav" writes every clip as 16-bit /
+   *  48 kHz / mono WAV instead of passing stored bytes through. Absent ⇒
+   *  "original". */
+  audioFormat?: EgressAudioFormat
   /** Fetch raw bytes for one clip (cache-first in production). */
   fetchBytes: (args: {
     projectId: string
@@ -348,7 +352,12 @@ export async function assembleAudioEntries(args: AudioAssemblyArgs): Promise<Aud
         // decode/re-encode. Trimmed or shared clips are sliced per cell
         // (combined-voice clips attach untrimmed to many cells; a naive copy
         // would emit the full multi-minute clip N times).
-        if (!clip.trimmed && (shareCount.get(clip.clipKey) ?? 0) <= 1) {
+        // AQU-1575: asked for WAV, nothing passes through. A stored clip may be
+        // a 24 kHz or 22.05 kHz WAV or compressed webm, and the decode path is
+        // what makes every entry 16-bit / 48 kHz / mono.
+        const passThrough =
+          args.audioFormat !== "wav" && !clip.trimmed && (shareCount.get(clip.clipKey) ?? 0) <= 1
+        if (passThrough) {
           const { bytes, ext } = await fetchClipBytes(clip)
           if (bytes.length === 0) skipped.push({ cellId: clip.cell.id, reason: "empty audio clip" })
           else entries.push({ name: claimName(base, ext), data: new Blob([bytes as BlobPart], { type: audioMimeForExt(ext) }) })

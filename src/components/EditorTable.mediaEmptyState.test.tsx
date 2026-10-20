@@ -15,13 +15,14 @@
  */
 
 import { describe, it, expect, vi } from "vitest"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { EditorTable } from "./EditorTable"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { CellStore } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { LinkedVideoEmptyState } from "@/lib/editor/linked-video-empty-state"
+import type { LinkedVideoSoundActions, VideoSoundRunProgress } from "@/lib/timeline/video-sound"
 
 vi.mock("@/hooks/useMicPermission", () => ({
   useMicPermission: () => ({ micDenied: true }),
@@ -70,6 +71,8 @@ function renderTable(opts: {
   onUseCaptionTrackAsRows?: (trackId: string) => void
   /** Sam's D3: "media" = the Media view's Text pane, under the timeline. */
   placement?: "text" | "media"
+  /** AQU-1681: present = the workspace offers rows from the video's sound. */
+  linkedVideoSound?: LinkedVideoSoundActions
 } = {}) {
   const qc = new QueryClient()
   return render(
@@ -100,6 +103,7 @@ function renderTable(opts: {
           onOpenMediaView={opts.onOpenMediaView}
           onAttachCaptions={opts.onAttachCaptions}
           onUseCaptionTrackAsRows={opts.onUseCaptionTrackAsRows}
+          linkedVideoSound={opts.linkedVideoSound}
         />
       </EditorActionsProvider>
     </QueryClientProvider>,
@@ -420,5 +424,133 @@ describe("EditorTable — empty time-ordered file", () => {
     const card = await screen.findByTestId("linked-video-empty")
     expect(card).toHaveTextContent("When a maintainer attaches captions, they become this file's rows.")
     expect(screen.queryAllByRole("button")).toHaveLength(0)
+  })
+
+  // ── AQU-1681: rows from the video's own sound ──
+
+  describe("rows from the video's own sound", () => {
+    const EN = "https://cdn.example.test/ep/audio_en.m3u8"
+    const ES = "https://cdn.example.test/ep/audio_es.m3u8"
+
+    /** Actions whose run waits until the test settles it. */
+    function soundActions(defaultTrackId: string | null = ES) {
+      let progress: ((p: VideoSoundRunProgress) => void) | null = null
+      let finish: ((err?: Error) => void) | null = null
+      let signal: AbortSignal | null = null
+      const actions: LinkedVideoSoundActions = {
+        describe: vi.fn(async () => ({
+          tracks: [
+            { id: EN, name: "English", lang: "en" },
+            { id: ES, name: "Spanish (Latin America)", lang: "es-419" },
+          ],
+          defaultTrackId,
+        })),
+        run: vi.fn((_trackId, opts) => new Promise<void>((resolve, reject) => {
+          progress = opts.onProgress
+          signal = opts.signal
+          opts.signal.addEventListener("abort", () => reject(new Error("audio upload cancelled")))
+          finish = (err) => (err ? reject(err) : resolve())
+        })),
+      }
+      return {
+        actions,
+        progress: (p: VideoSoundRunProgress) => act(() => progress?.(p)),
+        finish: (err?: Error) => act(async () => finish?.(err)),
+        signal: () => signal,
+      }
+    }
+
+    const renderWithSound = (actions: LinkedVideoSoundActions) => renderTable({
+      linkedVideoEmptyState: { isYouTube: false, captionTracks: [] },
+      onAttachCaptions: () => {},
+      linkedVideoSound: actions,
+    })
+
+    it("is a third quiet link on a maintainer's card, joined by 'or'", async () => {
+      renderWithSound(soundActions().actions)
+      await screen.findByTestId("linked-video-empty")
+      expect(screen.getAllByRole("button").map(button => button.textContent)).toEqual([
+        "Attach captions", "make rows from an audio or video file", "make rows from the video's own sound",
+      ])
+      const link = screen.getByRole("button", { name: "make rows from the video's own sound" })
+      expect(link).toHaveAttribute("data-variant", "link")
+      expect(link.parentElement).toHaveTextContent(/^or make rows from the video's own sound$/)
+    })
+
+    it("is not offered when the workspace withholds it (YouTube, or below maintainer)", async () => {
+      renderTable({ linkedVideoEmptyState: { isYouTube: true, captionTracks: [] }, onAttachCaptions: () => {} })
+      await screen.findByTestId("linked-video-empty")
+      expect(screen.queryByRole("button", { name: /video's own sound/ })).toBeNull()
+    })
+
+    it("starts on the source language's track and makes the rows from it, with progress", async () => {
+      const sound = soundActions()
+      renderWithSound(sound.actions)
+      fireEvent.click(await screen.findByRole("button", { name: "make rows from the video's own sound" }))
+      expect(screen.getByText("Make rows from the video's own sound")).toBeInTheDocument()
+      expect(screen.getByText(/saves a copy of the video's sound/)).toBeInTheDocument()
+      expect(await screen.findByTestId("linked-video-sound-track")).toHaveTextContent("Spanish (Latin America)")
+      fireEvent.click(screen.getByRole("button", { name: "Make rows" }))
+      expect(sound.actions.run).toHaveBeenCalledWith(ES, expect.anything())
+      sound.progress({ phase: "download", fraction: 0.42 })
+      expect(screen.getByText("Downloading the video's sound… 42%")).toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: "Make rows" })).toBeNull()
+      sound.progress({ phase: "save" })
+      expect(screen.getByText("Saving a copy of the sound…")).toBeInTheDocument()
+      sound.progress({ phase: "rows" })
+      expect(screen.getByText("Making rows…")).toBeInTheDocument()
+      // Once the rows are going in there is nothing left to cancel.
+      expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull()
+      await sound.finish()
+      // Stays put until the rows arrive, so nobody can start a second run.
+      expect(screen.getByText("Making rows…")).toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: "Make rows" })).toBeNull()
+    })
+
+    it("runs the track the maintainer picks from the searchable list instead", async () => {
+      const sound = soundActions()
+      renderWithSound(sound.actions)
+      fireEvent.click(await screen.findByRole("button", { name: "make rows from the video's own sound" }))
+      fireEvent.click(await screen.findByTestId("linked-video-sound-track"))
+      const menu = await screen.findByTestId("linked-video-sound-track-menu")
+      fireEvent.click(within(menu).getByText("English"))
+      expect(screen.getByTestId("linked-video-sound-track")).toHaveTextContent("English")
+      fireEvent.click(screen.getByRole("button", { name: "Make rows" }))
+      expect(sound.actions.run).toHaveBeenCalledWith(EN, expect.anything())
+    })
+
+    it("cancels a download and says nothing was kept", async () => {
+      const sound = soundActions()
+      renderWithSound(sound.actions)
+      fireEvent.click(await screen.findByRole("button", { name: "make rows from the video's own sound" }))
+      fireEvent.click(await screen.findByRole("button", { name: "Make rows" }))
+      sound.progress({ phase: "download", fraction: 0.1 })
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Cancel" })))
+      expect(sound.signal()?.aborted).toBe(true)
+      expect(await screen.findByText("Stopped. Nothing was saved.")).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: "Make rows" })).toBeInTheDocument()
+    })
+
+    it("shows why a run failed and offers it again", async () => {
+      const sound = soundActions()
+      renderWithSound(sound.actions)
+      fireEvent.click(await screen.findByRole("button", { name: "make rows from the video's own sound" }))
+      fireEvent.click(await screen.findByRole("button", { name: "Make rows" }))
+      await sound.finish(new Error("This video's sound is encrypted, so Aquilla can't read it."))
+      expect(screen.getByRole("alert")).toHaveTextContent("This video's sound is encrypted")
+      expect(screen.getByRole("button", { name: "Make rows" })).toBeInTheDocument()
+    })
+
+    it("offers no track choice for a direct file link", async () => {
+      const actions: LinkedVideoSoundActions = {
+        describe: vi.fn(async () => ({ tracks: [], defaultTrackId: null })),
+        run: vi.fn(async () => {}),
+      }
+      renderWithSound(actions)
+      fireEvent.click(await screen.findByRole("button", { name: "make rows from the video's own sound" }))
+      fireEvent.click(await screen.findByRole("button", { name: "Make rows" }))
+      expect(screen.queryByTestId("linked-video-sound-track")).toBeNull()
+      expect(actions.run).toHaveBeenCalledWith(null, expect.anything())
+    })
   })
 })

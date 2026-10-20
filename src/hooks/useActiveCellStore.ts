@@ -17,6 +17,7 @@ import { isStructuralCell } from "@/lib/cells/structural"
 import { isHiddenCell } from "@/lib/cells/hidden"
 import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/extract"
 import { sortByLens } from "@/lib/timeline/derive"
+import { splitLineOrigin } from "@/lib/timeline/user-line-origin"
 import type { OrderedBy, RuleWaiver } from "@/lib/parsers/types"
 import type { FileProgressResponse, ProgressCounts } from "@/lib/progress/file-progress-resource"
 import { deriveMilestoneNavigation, type MilestoneNavigationCell } from "@/lib/milestone-navigation"
@@ -302,6 +303,14 @@ interface DerivedCache {
  * See `useActiveCellStore.largeFile.test.ts` for the regression guards built on
  * them, and `useActiveCellStore.largeFile.bench.test.ts` for the benchmark.
  */
+/** AQU-1759: what `applyOptimisticQuoteSplit` changed, so a refusal can put it back. */
+export interface QuoteSplitUndo {
+  /** Every source row the split touched, as it was before. */
+  rows: Map<string, CellRow>
+  /** The pieces it inserted. */
+  insertedIds: string[]
+}
+
 export interface CellStoreWorkStats {
   /**
    * Cells visited by a loop whose length is the FILE's, summed across every
@@ -1845,6 +1854,120 @@ export class CellStore {
     // carries its `hidden` flag, so re-deriving is what honours it.
     this.setHiddenCellIds(this.collectHiddenCellIds())
     this.rebuildDerivedIndexes()
+    this.fileVersion++
+    this.emitAll()
+  }
+
+  /**
+   * AQU-1759: rows split at their quotation marks, visible on the SAME TICK.
+   *
+   * The same reasoning as `applyOptimisticSourceInsert`, for the same reason:
+   * a split changes `order`, and waiting on the confirming read makes
+   * `replaceRows` rebuild every derived index of the file. Applying it here
+   * first means that read arrives with the order already right, so it only
+   * corrects the handful of rows it touched.
+   *
+   * Each split row keeps its id and shows its first piece; the later pieces
+   * are spliced in after it, chained on each other; and the row that followed
+   * it moves onto the last piece. One rebuild and one emit for the whole
+   * batch, so the per-file sweep costs the same as a single row.
+   *
+   * Returns what it changed, for `rollbackOptimisticQuoteSplit` — the floor
+   * stamped here would otherwise protect a refused split forever.
+   */
+  applyOptimisticQuoteSplit(splits: ReadonlyArray<{
+    cellId: string
+    firstText: string
+    pieces: ReadonlyArray<{ cellId: string; value: string; sequenceIndex?: number }>
+    successorCellId: string | null
+  }>): QuoteSplitUndo {
+    const undo: QuoteSplitUndo = { rows: new Map(), insertedIds: [] }
+    const changed: string[] = []
+    const now = Date.now()
+    // First sight of a row is its state before the split: a row that is both
+    // split AND the follower of another split row is touched twice.
+    const snapshot = (row: CellRow) => { if (!undo.rows.has(row.cellId)) undo.rows.set(row.cellId, row) }
+    for (const split of splits) {
+      const source = this.sourceById.get(split.cellId)
+      if (!source) continue
+      snapshot(source)
+      this.sourceById.set(split.cellId, { ...source, value: split.firstText, valueHtml: null })
+      this.freshnessFloors.set(split.cellId, ++this.writeSeq)
+      changed.push(split.cellId)
+
+      let previous = split.cellId
+      for (const piece of split.pieces) {
+        if (this.sourceById.has(piece.cellId)) continue
+        this.sourceById.set(piece.cellId, {
+          cellId: piece.cellId,
+          side: "source",
+          targetLang: "",
+          value: piece.value,
+          valueHtml: null,
+          type: source.type,
+          canonicalRef: null,
+          anchorCellId: previous,
+          // No event id until the flush lands — see applyOptimisticSourceInsert.
+          eventId: "",
+          sourceEventId: null,
+          lastEditor: this.ctx.username,
+          lastEditAt: now,
+          validated: false,
+          wordCount: 0,
+          endorsementCount: 0,
+          ...(piece.sequenceIndex != null ? { sequenceIndex: piece.sequenceIndex } : {}),
+          metadata: { aquillaOrigin: splitLineOrigin(split.cellId) },
+        } as CellRow)
+        this.freshnessFloors.set(piece.cellId, ++this.writeSeq)
+        const sourceAt = this.sourceOrder.indexOf(previous)
+        this.sourceOrder.splice(sourceAt >= 0 ? sourceAt + 1 : this.sourceOrder.length, 0, piece.cellId)
+        const orderAt = this.order.indexOf(previous)
+        this.order.splice(orderAt >= 0 ? orderAt + 1 : this.order.length, 0, piece.cellId)
+        undo.insertedIds.push(piece.cellId)
+        changed.push(piece.cellId)
+        previous = piece.cellId
+      }
+
+      const successor = split.successorCellId ? this.sourceById.get(split.successorCellId) : undefined
+      if (successor && previous !== split.cellId) {
+        snapshot(successor)
+        this.sourceById.set(successor.cellId, { ...successor, anchorCellId: previous })
+        this.freshnessFloors.set(successor.cellId, ++this.writeSeq)
+        changed.push(successor.cellId)
+      }
+    }
+    if (changed.length === 0) return undo
+    this.indexById = new Map(this.order.map((id, index) => [id, index]))
+    this.listVersion++
+    this.setHiddenCellIds(this.collectHiddenCellIds())
+    this.rebuildDerivedIndexes()
+    this.bumpCells(changed)
+    this.fileVersion++
+    this.emit(changed)
+    return undo
+  }
+
+  /** Undo `applyOptimisticQuoteSplit` for a split the server refused. */
+  rollbackOptimisticQuoteSplit(undo: QuoteSplitUndo): void {
+    const inserted = new Set(undo.insertedIds)
+    if (inserted.size === 0 && undo.rows.size === 0) return
+    for (const id of inserted) {
+      this.sourceById.delete(id)
+      this.targetById.delete(id)
+      this.freshnessFloors.delete(id)
+    }
+    this.sourceOrder = this.sourceOrder.filter((id) => !inserted.has(id))
+    this.targetOrder = this.targetOrder.filter((id) => !inserted.has(id))
+    this.order = this.order.filter((id) => !inserted.has(id))
+    for (const row of undo.rows.values()) {
+      this.sourceById.set(row.cellId, row)
+      this.freshnessFloors.delete(row.cellId)
+    }
+    this.indexById = new Map(this.order.map((id, index) => [id, index]))
+    this.listVersion++
+    this.setHiddenCellIds(this.collectHiddenCellIds())
+    this.rebuildDerivedIndexes()
+    this.bumpCells([...undo.rows.keys(), ...inserted])
     this.fileVersion++
     this.emitAll()
   }

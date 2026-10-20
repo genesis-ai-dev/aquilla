@@ -394,6 +394,17 @@ interface ProjectSettingsProps {
   modal?: boolean
 }
 
+/**
+ * AQU-2031: the `?focus=` vocabulary a caller may deep-link to on a settings
+ * pane, mapped to the element scrolled into view. `block` is per target: a card
+ * goes to the top of the pane, a single field inside a card only moves far
+ * enough to be on screen (so a short project does not scroll at all).
+ */
+const SETTINGS_FOCUS_TARGETS: Record<string, { elementId: string; block: ScrollLogicalPosition }> = {
+  languages: { elementId: "section-languages", block: "start" },
+  "add-lane": { elementId: "add-lane-field", block: "nearest" },
+}
+
 export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const t = useT()
   const { id, section: sectionParam } = useParams<{ id: string; section?: string }>()
@@ -1568,6 +1579,20 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   // mount; the box stays user-editable/clearable afterward.
   const [searchQuery, setSearchQuery] = useState(() => searchParams.get("q") ?? "")
   const lowerQuery = searchQuery.trim().toLowerCase()
+
+  // AQU-2031: `?focus=<target>` is the pane-mode counterpart of `?q=`. A caller
+  // that wants one card reachable in one click deep-links to the card's GROUP
+  // page (`…/settings/general?focus=languages`) and the card is scrolled into
+  // view here. Unlike `?q=`, the page stays a pane — no search box, the group's
+  // own title, only the group's cards — so the person does not land on what
+  // looks like a search they never ran.
+  const focusTarget = searchParams.get("focus")
+  useEffect(() => {
+    if (!focusTarget || loading) return
+    const target = SETTINGS_FOCUS_TARGETS[focusTarget]
+    if (!target) return
+    document.getElementById(target.elementId)?.scrollIntoView?.({ block: target.block })
+  }, [focusTarget, loading])
   const visibleSections = lowerQuery
     ? ALL_SECTIONS.filter(
         (s) =>

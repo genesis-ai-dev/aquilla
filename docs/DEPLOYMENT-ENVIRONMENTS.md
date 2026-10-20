@@ -63,6 +63,10 @@ pass `--snapshot` to have it cut a `premigrate-<timestamp>` Neon branch off
 production first (instant and copy-on-write, and what you restore from if the
 apply goes wrong), or `--no-snapshot` if one already exists. `dev` and `local`
 are ungated — they are refreshable by design (`pnpm neon:refresh:dev`). The
+refresh first reads `dev` and `production` with its credentials and stops with
+the rotation steps if the Neon API rejects them; `NEON_REFRESH_PREFLIGHT_ONLY=1`
+(the workflow's `preflight_only` input) runs only that check, which is how a
+rotated `NEON_API_KEY` is verified without restoring anything. The
 refresh deletes `integration_connections` (and by cascade the Monday board
 links) right after the restore, because the copy carries every production
 org's encrypted Monday tokens and the dev Worker could otherwise use them
@@ -181,7 +185,8 @@ environment guard.
 - **Convention.** A Secrets Store binding named `SS_<NAME>` supplies
   `env.<NAME>`. `db/shared/secrets-store-overlay.ts` resolves it at every entry
   point: the identity Hono app, crons, the sync `fetch`/`scheduled`/`queue`
-  handlers, and the `ProjectSync` and `ContextualRunDriver` Durable Objects.
+  handlers, and the `ProjectSync`, `ContextualRunDriver` and
+  `KnowledgeIndexDriver` Durable Objects.
   Code keeps reading `env.<NAME>` unchanged.
 - **The store value wins, and the Worker secret is the fallback.** If the binding
   is absent, the store read fails, or the store returns an empty value, the
@@ -377,6 +382,17 @@ absent, `routes/contextual.ts` falls back to the pre-AQU-1845 in-request
 reviewable work, but it CANNOT show that the run outlives the request that
 started it, or that an interrupted run resumes without re-paying for finished
 model calls. Walk those on development or production.
+
+**No knowledge-base indexing driver on a preview (AQU-2051).** The same applies
+to the per-document `KnowledgeIndexDriver` Durable Object auth-worker declares
+for every real environment: the auth preview config carries no binding for it
+either, for the reason above. With the binding absent,
+`routes/knowledge.ts` `runIndexing` falls back to the request-hosted
+`waitUntil` job on `KB_INDEX_BUDGET_MS` — the pre-AQU-2051 path. So a preview
+can show that an upload returns at once and that a small document reaches
+"Indexed", but it CANNOT show that a large document is summarized fully in one
+run, that a long run is never shown as stalled, or that a retry cannot start a
+second job over a live one. Walk those on development or production.
 
 **What to do instead.** Verify the two halves separately rather than end to end:
 

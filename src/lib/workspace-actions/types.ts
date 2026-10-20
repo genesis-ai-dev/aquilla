@@ -41,6 +41,17 @@ export interface WorkspaceActionContext {
    * no-target wording rather than inventing a count.
    */
   batchValidateSummary?: () => BatchValidateSummary
+  /**
+   * AQU-1759: may this person split this file's lines at their quotation
+   * marks — the same gate as the row menu's entry (adds rows under the
+   * project's setting, edits source text, file with no clock). A thunk because
+   * that answer is settled further down the workspace than this context.
+   */
+  canSplitAtQuotes?: () => boolean
+  /** AQU-1759: how many lines would split, and how many lines they would
+   *  become. A thunk for the reason `batchValidateSummary` is one: it walks the
+   *  whole file, and only the confirmation needs it. */
+  quoteSplitSummary?: () => { rows: number; lines: number }
 }
 
 export interface WorkspaceActionRunArgs {
@@ -55,6 +66,8 @@ export interface WorkspaceActionRunArgs {
   runTranscribeAll: () => void
   runSynthAll: () => void
   runChangeVoiceAll: () => void
+  /** AQU-1759: split every line of the file that holds more than one speaker. */
+  runSplitAtQuotes: () => void
   navigate: NavigateFunction
 }
 

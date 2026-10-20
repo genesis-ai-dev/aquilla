@@ -95,7 +95,7 @@ describe("auto routing", () => {
     expect(calls.whisper).toHaveLength(1)
     expect(calls.whisper[0]).toMatchObject({ model: "openai/whisper-1", language: "fr" })
     expect(await response.json()).toEqual({ text: "bonjour", chunks: [{ text: "bonjour", start: 0, end: 0.5 }],
-      model: "whisper", timingsApproximate: false })
+      model: "whisper", timingsApproximate: false, granularity: "word" })
   })
 
   it("keeps Whisper auto-detect when the client sends no language", async () => {
@@ -119,7 +119,7 @@ describe("auto routing", () => {
     expect(calls.modal[0].body).toEqual({ model: "ctc", audio: request.input_audio.data, lang: "tpi_Latn" })
     expect(await response.json()).toEqual({ text: "ami ya", chunks: [
       { text: "ami", start: 0, end: 0.4 }, { text: "ya", start: 0.5, end: 0.8 },
-    ], model: "omni-ctc", timingsApproximate: false })
+    ], model: "omni-ctc", timingsApproximate: false, granularity: "word" })
   })
 
   it("omits lang when the script cannot be known, and flags approximate timings", async () => {
@@ -238,7 +238,7 @@ describe("Omnilingual billing", () => {
   })
 
   it("settles the weekly reservation at metered GPU cost with the ×4 markup", async () => {
-    const paid = await completedPayment("pro", "month")
+    const paid = await completedPayment("team", "month", undefined, "personal")
     expect((await paid.send()).status).toBe(200)
     await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES (?, 'Omni', 1, 1)")
       .bind(projectId).run()
@@ -260,7 +260,7 @@ describe("Omnilingual billing", () => {
 
 describe("Omnilingual billing — edge replies", () => {
   async function weekly(reply: Record<string, unknown>) {
-    const paid = await completedPayment("pro", "month")
+    const paid = await completedPayment("team", "month", undefined, "personal")
     expect((await paid.send()).status).toBe(200)
     await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES (?, 'Omni', 1, 1)")
       .bind(projectId).run()
@@ -297,7 +297,7 @@ describe("Omnilingual billing — edge replies", () => {
       gpuSeconds: 1, gpu: "NVIDIA L4", peakMemGiB: 3.1, loadSec: 12 })
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ text: "ami", chunks: [{ text: "ami", start: 0, end: 1 }],
-      model: "omni-ctc", timingsApproximate: false })
+      model: "omni-ctc", timingsApproximate: false, granularity: "word" })
   })
 })
 

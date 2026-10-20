@@ -21,7 +21,7 @@ async function context(username: string, orgId: number) {
     headers: authHeader(await jwtFor(username)),
   }, env)
 }
-function payment(orgId: number, offer: 'pro' | 'team' | 'team_20x' = 'pro') {
+function payment(orgId: number, offer: 'team' = 'team') {
   return {
     orgId, catalog: manifest as PriceCatalog,
     prices: manifest.bindings.map(b => stripeCatalogResponse(`/v1/prices/${b.priceId}`) as StripePriceInput),
@@ -39,13 +39,13 @@ describe('workspace creation → persisted billing eligibility', () => {
     const personal = await create('alice')
     const team = await create('alice', "alice's workspace")
     expect(await readBillingWorkspace(env.AQUILLA_PG, personal)).toMatchObject({
-      scope: 'personal', eligibility: { reason: 'ready', offers: ['pro', 'max_5x', 'max_20x'] },
+      scope: 'personal', eligibility: { reason: 'ready', offers: ['team'] },
     })
     const response = await context('alice', team)
     expect(response.status).toBe(200)
     expect(response.headers.get('cache-control')).toBe('private, no-store')
     expect(await response.json()).toMatchObject({
-      scope: 'team', eligibility: { reason: 'ready', offers: ['team', 'team_20x'] },
+      scope: 'team', eligibility: { reason: 'ready', offers: ['team'] },
       // An explicit Free workspace is measured from creation: zero, not null.
       usagePercent: 0, checkoutEnabled: false,
     })
@@ -112,11 +112,11 @@ describe('approved offer → entitlement persistence → owning workspace', () =
   it('persists annual Team capacity without exposing ledger values', async () => {
     await seedUser(1, 'alice')
     const orgId = await create('alice', 'Team')
-    const saved = await recordInitialWorkspaceEntitlement(env.AQUILLA_PG, payment(orgId, 'team_20x'), now)
-    expect(saved).toMatchObject({ offer: 'team_20x', scope: 'team', quantity: 1, billing_interval: 'year' })
-    expect(saved.price_ids).toHaveLength(2)
+    const saved = await recordInitialWorkspaceEntitlement(env.AQUILLA_PG, payment(orgId), now)
+    expect(saved).toMatchObject({ offer: 'team', scope: 'team', quantity: 1, billing_interval: 'year' })
+    expect(saved.price_ids).toHaveLength(1)
     const body = await (await context('alice', orgId)).json()
-    expect(body).toMatchObject({ entitlement: { offer: 'team_20x', entitlementVersion: '2026-09-weekly' }, checkoutEnabled: false })
+    expect(body).toMatchObject({ entitlement: { offer: 'team', entitlementVersion: '2026-09-weekly' }, checkoutEnabled: false })
     expect(JSON.stringify(body)).not.toMatch(/credits|stripe_|sub_|cus_|price_1/)
   })
   it('deduplicates concurrent activation and preserves the original anchor on redelivery', async () => {
@@ -133,12 +133,12 @@ describe('approved offer → entitlement persistence → owning workspace', () =
     const workspace = await readBillingWorkspace(env.AQUILLA_PG, orgId, new Date('2026-09-16T10:00:00Z'))
     expect(workspace?.entitlement?.usagePeriodStart).toBe('2026-09-16T10:00:00.000Z')
   })
-  it('rejects wrong-scope purchases and unapproved entitlement changes', async () => {
+  it('rejects removed offers and unapproved entitlement changes', async () => {
     await seedUser(1, 'alice')
     const orgId = await create('alice', 'Team')
-    await expect(recordInitialWorkspaceEntitlement(env.AQUILLA_PG, payment(orgId), now)).rejects.toThrow('not eligible')
-    await recordInitialWorkspaceEntitlement(env.AQUILLA_PG, payment(orgId, 'team'), now)
-    await expect(recordInitialWorkspaceEntitlement(env.AQUILLA_PG, payment(orgId, 'team_20x'), now)).rejects.toThrow('change policy')
+    await expect(recordInitialWorkspaceEntitlement(env.AQUILLA_PG, { ...payment(orgId), offer: 'pro' as 'team' }, now)).rejects.toThrow()
+    await recordInitialWorkspaceEntitlement(env.AQUILLA_PG, payment(orgId), now)
+    await expect(recordInitialWorkspaceEntitlement(env.AQUILLA_PG, { ...payment(orgId), interval: 'month' }, now)).rejects.toThrow('change policy')
     expect((await readBillingWorkspace(env.AQUILLA_PG, orgId, now))?.entitlement?.offer).toBe('team')
   })
   it('rejects a subscription reused on another workspace without leaving a row', async () => {

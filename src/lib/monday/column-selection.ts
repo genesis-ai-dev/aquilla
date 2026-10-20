@@ -29,6 +29,13 @@ export const RECOMMENDED_METRICS: readonly MondayMetricKey[] = [
   "schedule_status",
 ]
 
+/**
+ * AQU-1989: the columns that put people's names on the board. Never in the
+ * recommended set, so a new board carries no names unless someone ticks one;
+ * while one is ticked the picker says who will see them.
+ */
+export const NAME_METRICS: readonly MondayMetricKey[] = ["project_manager", "translators"]
+
 export type MondayColumnGroupKey = "progress" | "schedule" | "team"
 
 /** The three groups the picker shows; every catalog column but Aquilla ID is in one. */

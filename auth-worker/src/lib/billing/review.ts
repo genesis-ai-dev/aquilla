@@ -16,7 +16,7 @@ export function reviewBillingPlan(
     return { ...base, ready: false, reason: 'wrong_scope' }
   }
   const offer = offers.offers.find(item => item.offer === selection.offer
-    && item.interval === selection.interval && item.scope === workspace.scope)
+    && item.interval === selection.interval)
   if (!offers.available || !offers.priceVersion || !offers.entitlementVersion || !offer) {
     throw new Error('Plan prices are unavailable')
   }

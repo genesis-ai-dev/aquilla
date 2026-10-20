@@ -447,6 +447,7 @@ export async function buildProjectExport(
           fileSlug: fileBase,
           langCode: laneLang,
           mode: audioMode,
+          audioFormat: options.audioFormat,
           fetchBytes: fetchAudioBytes,
           decode: decodeAudio,
           signal: deps.signal,

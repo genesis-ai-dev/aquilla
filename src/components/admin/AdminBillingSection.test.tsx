@@ -206,14 +206,17 @@ describe("AdminBillingSection — AQU-942: the resolved shell survives revalidat
   })
 })
 
-it('saves the runtime Free weekly allowance through the versioned catalog', async () => {
+// AQU-2056: the admin sets Free in raw provider dollars; the server derives Team
+// from it, so the old unit field would no longer change what the meter enforces.
+it('saves the runtime Free weekly allowance in raw dollars through the versioned catalog', async () => {
   render(<AdminBillingSection jwt="jwt" />)
-  fireEvent.change(await screen.findByLabelText('Free weekly AI allowance (internal units)'), {
-    target: { value: '100' },
+  fireEvent.change(await screen.findByLabelText('Free weekly AI allowance ($ raw provider cost; Team follows)'), {
+    target: { value: '1.5' },
   })
   fireEvent.click(screen.getByTestId('save-field-plan'))
   await waitFor(() => expect(mockSave).toHaveBeenCalledWith('jwt',
-    expect.objectContaining({ freeWeeklyAllowance: 100, ifMatchVersion: 1 })))
+    expect.objectContaining({ freeWeeklyRawUsd: 1.5, ifMatchVersion: 1 })))
+  expect(mockSave.mock.calls[0]![1]).not.toHaveProperty('freeWeeklyAllowance')
 })
 it('sets and clears a partner weekly grant without changing its Stripe plan', async () => {
   vi.mocked(patchAdminWeeklyAllowance).mockResolvedValue()

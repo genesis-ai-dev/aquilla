@@ -27,6 +27,7 @@ export function TimeOrderedEmptyState({
   onOpenMediaView,
   onAttachCaptions,
   onUseCaptionTrackAsRows,
+  videoSound,
 }: {
   linkedVideoEmptyState?: LinkedVideoEmptyState | null
   placement: LinkedProps["placement"]
@@ -36,6 +37,8 @@ export function TimeOrderedEmptyState({
   onOpenMediaView?: LinkedProps["onOpenMediaView"]
   onAttachCaptions?: LinkedProps["onAttachCaptions"]
   onUseCaptionTrackAsRows?: LinkedProps["onUseCaptionTrackAsRows"]
+  /** AQU-1681: make the rows from the linked video's own sound. */
+  videoSound?: LinkedProps["videoSound"]
 }) {
   const t = useT()
   if (linkedVideoEmptyState) {
@@ -49,6 +52,7 @@ export function TimeOrderedEmptyState({
           onOpenMediaView={onOpenMediaView}
           onAttachCaptions={canEdit ? onAttachCaptions : undefined}
           onUseCaptionTrackAsRows={canEdit ? onUseCaptionTrackAsRows : undefined}
+          videoSound={canEdit ? videoSound : undefined}
         />
       </div>
     )

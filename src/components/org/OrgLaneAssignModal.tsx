@@ -9,6 +9,8 @@ import type { FileType, FileReference } from "@/lib/parsers/types"
 import { AssignModal } from "@/components/AssignModal"
 import type { AssignLaneOption } from "@/lib/sync/assignment-lane"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
+import { useProjectLaneStaffing } from "@/hooks/useProjectLaneStaffing"
+import { ROLE } from "@/lib/frontier/roles"
 
 const EMPTY_SELECTION: ReadonlySet<string> = new Set()
 
@@ -56,6 +58,14 @@ export function OrgLaneAssignModal({
   onClose,
 }: OrgLaneAssignModalProps) {
   const { members } = useProjectMembers(projectId)
+  // AQU-2047: the same lane-staffing read the project overview uses. Below
+  // project lead the route refuses, and a missing answer leaves the menu as
+  // it was rather than emptying it.
+  const { teamLanes } = useProjectLaneStaffing(
+    projectId,
+    jwt,
+    roleLevel >= ROLE.PROJECT_LEAD,
+  )
 
   const projectFiles = useMemo<FileReference[]>(
     () =>
@@ -80,6 +90,7 @@ export function OrgLaneAssignModal({
       projectFiles={projectFiles}
       targetLanes={targetLanes}
       lanes={lanes}
+      teamLanes={teamLanes}
       defaultLane={lane}
       defaultLaneLabel={defaultLaneLabel}
       members={members}

@@ -292,6 +292,26 @@ describe("Add columns (linked board)", () => {
     await waitFor(() => expect(dialog.isConnected).toBe(false))
   })
 
+  it("Add columns says who will see names when the board already fills Project manager (AQU-1989)", async () => {
+    const config = {
+      version: 1 as const,
+      itemGranularity: "project" as const,
+      columns: [{ columnId: "text_pm", columnType: "text", metric: "project_manager" as const }],
+    }
+    mocked.fetchMondayLink.mockResolvedValue({ linked: true, link: makeLink({ config }) })
+    mocked.fetchMondayConnection.mockResolvedValue({ connected: true })
+
+    renderSection()
+    fireEvent.click(await screen.findByTestId("monday-add-columns"))
+    await screen.findByTestId("monday-add-columns-dialog")
+    expect(screen.getByRole("checkbox", { name: /^Project manager$/ }).getAttribute("aria-checked")).toBe("true")
+    expect(screen.getByTestId("monday-names-note").textContent).toBe(
+      "Everyone who can see Translation Tracker on Monday will see these names.",
+    )
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Project manager$/ }))
+    await waitFor(() => expect(screen.queryByTestId("monday-names-note")).toBeNull())
+  })
+
   it("below maintainer: no Add columns", async () => {
     mocked.fetchMondayLink.mockResolvedValue({ linked: true, link: makeLink() })
     mocked.fetchMondayConnection.mockResolvedValue({ connected: true })

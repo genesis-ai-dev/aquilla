@@ -117,6 +117,10 @@ export interface AutoTranscribeArgs {
    *  consent denial or a file with nothing to do, so no toast ever appears for
    *  a run that never happened. */
   onProgress?: (done: number, total: number) => void
+  /** AQU-1681: the hosted transcription limit paused the run until this time
+   *  (epoch ms), or null when it carries on — so a progress toast can say so
+   *  instead of looking stuck for up to a quarter of an hour. */
+  onWaiting?: (untilMs: number | null) => void
   /** The batch threw. Only matters to a caller that put something on screen in
    *  `onProgress` and now has to take it back down. */
   onFailed?: (message: string) => void
@@ -139,6 +143,7 @@ export async function autoTranscribeImportedMedia(args: AutoTranscribeArgs): Pro
       sourceLanguage: args.sourceLanguage,
       targetLanguage: args.targetLanguage,
       onProgress: args.onProgress,
+      ...(args.onWaiting ? { onWaiting: args.onWaiting } : {}),
     })
     await args.onDone?.()
   } catch (e) {

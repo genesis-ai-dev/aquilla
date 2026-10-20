@@ -3,10 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import manifest from '../../../../config/pricing/stripe-sandbox.json'
 import { readBillingOffers } from './catalog'
 import type { Env } from '../../types'
-import { seedUser } from '../../__tests__/helpers/db'
 import { stripeCatalogResponse } from '../../__tests__/helpers/stripe-catalog'
-import { savePlatformSettings } from '../platform-settings'
-// The catalog reads the admin's Free weekly allowance through AQUILLA_PG (PGlite here).
 const env: Env = {
   ...testEnv, STRIPE_SECRET_KEY: 'sk_test_fixture', STRIPE_PRICE_CATALOG: JSON.stringify(manifest),
 }
@@ -20,25 +17,25 @@ function mockStripe(patch: Record<string, unknown> = {}) {
 }
 afterEach(() => vi.unstubAllGlobals())
 describe('authenticated price catalog adapter', () => {
-  it('composes ten validated offers without exposing internal ledger or price IDs', async () => {
+  it('composes the two Team prices without exposing internal ledger or price IDs', async () => {
     const fetch = mockStripe()
     const catalog = await readBillingOffers(env)
-    expect(catalog.offers).toHaveLength(10)
     expect(catalog).toMatchObject({ available: true, usageInterval: 'week', checkoutEnabled: false })
-    expect(catalog.offers.find(o => o.offer === 'team_20x' && o.interval === 'year'))
-      .toMatchObject({ totalAmount: 720000, monthlyEquivalent: 60000, capacityLabel: '20× Pro', scope: 'team' })
-    expect(catalog.offers.filter(o => o.offer === 'pro'))
-      .toMatchObject([{ interval: 'month', capacityLabel: '2× Free' }, { interval: 'year', capacityLabel: '2× Free' }])
+    expect(catalog.offers).toEqual([
+      expect.objectContaining({ offer: 'team', interval: 'month', totalAmount: 50000, monthlyEquivalent: 50000, scope: 'team' }),
+      expect.objectContaining({ offer: 'team', interval: 'year', totalAmount: 500000, scope: 'team' }),
+    ])
     expect(JSON.stringify(catalog)).not.toMatch(/credits|price_1|sk_test/i)
-    expect(fetch).toHaveBeenCalledTimes(11)
+    expect(fetch).toHaveBeenCalledTimes(3)
   })
-  it('labels Pro capacity against the Free weekly allowance an admin saved', async () => {
-    await seedUser(1, 'root')
-    expect((await savePlatformSettings(env, { fieldPlan: { freeWeeklyAllowance: 10 } }, 0, 1)).ok).toBe(true)
-    mockStripe()
-    const catalog = await readBillingOffers(env)
-    expect(catalog.offers.filter(o => o.offer === 'pro'))
-      .toMatchObject([{ interval: 'month', capacityLabel: '5× Free' }, { interval: 'year', capacityLabel: '5× Free' }])
+  it('rejects the retired ten-price catalog and a Team catalog missing an interval (AQU-2058)', async () => {
+    const team = manifest.bindings[0]!
+    const retired = { ...manifest, bindings: Array.from({ length: 10 }, (_, i) => ({ ...team, priceId: `price_old_${i}` })) }
+    await expect(readBillingOffers({ ...env, STRIPE_PRICE_CATALOG: JSON.stringify(retired) })).rejects.toThrow()
+    const twoMonthly = { ...manifest, bindings: [team, { ...team, priceId: 'price_other' }] }
+    await expect(readBillingOffers({ ...env, STRIPE_PRICE_CATALOG: JSON.stringify(twoMonthly) })).rejects.toThrow()
+    const pro = { ...manifest, bindings: manifest.bindings.map(b => ({ ...b, offer: 'pro' })) }
+    await expect(readBillingOffers({ ...env, STRIPE_PRICE_CATALOG: JSON.stringify(pro) })).rejects.toThrow()
   })
   it.each([
     { active: false }, { livemode: true }, { currency: 'cad' },

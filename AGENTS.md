@@ -38,9 +38,12 @@ Branch protection requires the `ci.yml` jobs that always report a status
 (`enforce_admins` is false). The gate only works if that account does not merge
 around a red check.
 
-The nightly Neon refresh is still broken: `NEON_API_KEY` has been missing since
-early September, and the green run beside the failure is the other cron skipping.
-This gate does not apply migrations, and it does not repair that job.
+The nightly Neon refresh has not restored dev since 2026-09-29: `NEON_API_KEY`
+was missing until 2026-10-15 and the value stored since is rejected by the Neon
+API (HTTP 401), and the green run beside the failure is the other cron skipping.
+The job now proves the key read-only before restoring (`NEON_REFRESH_PREFLIGHT_ONLY=1
+pnpm neon:refresh:dev`, or the workflow's `preflight_only` input). This gate does
+not apply migrations, and it does not repair that job.
 
 `HARNESS UNAVAILABLE` on a release HEAD is a runner problem. It does not hold
 the deploy, and it is not a product finding.

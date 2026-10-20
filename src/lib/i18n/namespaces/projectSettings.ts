@@ -50,6 +50,10 @@ export const projectSettings = defineNamespace({
     "projectSettings.checking.play": "Play continuously",
     "projectSettings.checking.noRecording": "No selected recording for this passage.",
     "projectSettings.checking.playbackHelp": "Playback continues through available recordings in passage order.",
+    "projectSettings.checking.previous": "Previous passage",
+    "projectSettings.checking.next": "Next passage",
+    "projectSettings.checking.playPassage": "Play {label}",
+    "projectSettings.checking.yourFeedback": "Your feedback on this passage",
     "projectSettings.checking.feedbackPlaceholder": "What is clear? What could be improved?",
     "projectSettings.checking.sendFeedback": "Send feedback",
     "projectSettings.checking.retry": "Retry pending feedback",
@@ -1337,6 +1341,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.chooser.groupTeam": "Team and activity",
     "projectSettings.monday.chooser.newColumn": "New column",
     "projectSettings.monday.chooser.alwaysIncluded": "Always included, so Aquilla can find this project's row again.",
+    "projectSettings.monday.chooser.namesVisible": "Everyone who can see {board} on Monday will see these names.",
     "projectSettings.monday.chooser.summaryAdds": plural({
       one: "Adds {count} new column to {board} and uses {uses} already there.",
       other: "Adds {count} new columns to {board} and uses {uses} already there.",
@@ -2403,6 +2408,13 @@ export const projectSettings = defineNamespace({
       "projectSettings.monday.chooser.alwaysIncluded": {
         description: "Note under the locked 'Aquilla ID' column in the checklist, saying why it can't be unticked.",
       },
+      "projectSettings.monday.chooser.namesVisible": {
+        description:
+          "Security note under the 'Project manager' and 'Translators' columns in the checklist, shown in amber while " +
+          "either is ticked: those columns put people's names on the Monday board, and anyone with access to the " +
+          "board can read them. Plain and factual, so it reads as a clear caution without alarm.",
+        placeholders: { board: "The Monday board's name (Monday data, not translated)." },
+      },
       "projectSettings.monday.chooser.summaryAdds": {
         description: "Live summary under the column checklist when some ticked columns will be created.",
         placeholders: {
@@ -3004,6 +3016,10 @@ export const projectSettings = defineNamespace({
       "projectSettings.checking.urlLabel": {
         description: "Accessible name of the read-only field holding a checking link's URL.",
         placeholders: { title: "The link title the project lead typed (data, not translated)." },
+      },
+      "projectSettings.checking.playPassage": {
+        description: "Accessible name of the small play button beside one passage in the guest page's running text.",
+        placeholders: { label: "The passage reference, e.g. 'MRK 1:2', or 'Unit 3' when it has none." },
       },
       "projectSettings.checking.feedbackOn": {
         description: "Label of the feedback box on the guest page, naming the passage the feedback is about.",

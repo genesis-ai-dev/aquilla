@@ -31,6 +31,8 @@ export function buildSourceLoader(
     // than silently counting it as zero words.
     if (!token) throw new Error(`no access token for file ${file.fileId}`)
     const rows = await fetchAllFileCells(projectId, file.fileId, token, "source")
-    return rows.map((r) => r.value)
+    // AQU-2045: a row made from a recording stores the recording's file name as
+    // its value; its words are its transcript (none yet, no words).
+    return rows.map((r) => (r.medium === "media" ? r.transcription ?? "" : r.value))
   }
 }

@@ -17,6 +17,7 @@ import {
   type PropagationSegment,
 } from "./autopropagation"
 import { isVisibleCell } from "@/lib/cells/hidden"
+import type { SegmentMedium } from "@/lib/sync/cells-read-types"
 import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
 
 /**
@@ -39,6 +40,26 @@ export interface RepetitionCell {
    *  `getAllCellViews()` still returns parked cells, so the planner has to
    *  drop them itself — see `repetitionSet`. Absent on a visible cell. */
   hidden?: boolean
+  /** "media" on a row made from a recording — see `repetitionSourceOf`. */
+  medium?: SegmentMedium | null
+  /** A media row's transcript: the words the translator reads there. */
+  transcription?: string | null
+}
+
+/**
+ * AQU-2045: the text a row repeats by. A row made from a recording stores the
+ * recording's FILE NAME as its value, so by that every row of the file repeated
+ * every other ("Repetition ×N" on all of them, and a validation filled the
+ * whole file). What the translator reads there is the transcript — the editor
+ * reads such a row's text direction off it for the same reason — so that is
+ * what repeats; with no transcript yet there is nothing to repeat. Every
+ * repetition key (badge, fill, "Validate all") goes through here, so they
+ * cannot disagree.
+ */
+export function repetitionSourceOf(
+  cell: Pick<RepetitionCell, "original" | "medium" | "transcription">,
+): string {
+  return cell.medium === "media" ? cell.transcription ?? "" : cell.original
 }
 
 /**
@@ -129,13 +150,13 @@ export function planRepetitionPropagation({
 
   const segments: PropagationSegment[] = sameFile.map((c) => ({
     id: c.id,
-    source: c.original,
+    source: repetitionSourceOf(c),
     translated: c.translated,
     status: c.status,
   }))
 
   const updates = propagateTranslation(
-    { id: confirmed.id, source: confirmed.original, translated: confirmed.translated },
+    { id: confirmed.id, source: repetitionSourceOf(confirmed), translated: confirmed.translated },
     segments,
   )
 
@@ -186,7 +207,7 @@ export function repetitionCommitFor(
 export function buildRepetitionCounts(cells: RepetitionCell[]): Map<string, number> {
   const byKey = new Map<string, string[]>()
   for (const cell of repetitionSet(cells)) {
-    const key = normalizeRepetitionSource(cell.original)
+    const key = normalizeRepetitionSource(repetitionSourceOf(cell))
     if (!key) continue
     const bucket = byKey.get(key)
     if (bucket) bucket.push(cell.id)

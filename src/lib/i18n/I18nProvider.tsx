@@ -17,8 +17,8 @@ import {
   useState,
 } from "react"
 import type { ReactNode } from "react"
-import { CATALOGS } from "./messages"
-import type { MessageKey } from "./messages/en"
+import { catalogFor, loadCatalog, onCatalogLoaded } from "./messages"
+import { en, type MessageKey } from "./messages/en"
 import { translate, type TVars } from "./translate"
 import {
   DEFAULT_LOCALE,
@@ -59,6 +59,18 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
   const dir = directionFor(locale)
 
+  // AQU-2090: only English ships with the app. Another locale's catalog is
+  // fetched when it's first chosen (main.tsx fetches the starting one before
+  // the first paint); until it arrives the UI reads English, then re-renders.
+  const [, setCatalogsLoaded] = useState(0)
+  useEffect(() => onCatalogLoaded(() => setCatalogsLoaded((n) => n + 1)), [])
+  useEffect(() => {
+    void loadCatalog(locale).catch(() => {
+      // Offline or a failed fetch: stay in English; the next pick retries.
+    })
+  }, [locale])
+  const catalog = catalogFor(locale) ?? en
+
   useEffect(() => {
     applyDocumentLocale(locale, dir)
   }, [locale, dir])
@@ -72,8 +84,8 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const t = useCallback<TFunction>(
     // The locale is passed as well as the catalog: plural-category selection is
     // a property of the language, not of which strings happen to be translated.
-    (key, vars) => translate(CATALOGS[locale] ?? CATALOGS[DEFAULT_LOCALE], key, vars, locale),
-    [locale],
+    (key, vars) => translate(catalog, key, vars, locale),
+    [catalog, locale],
   )
 
   const value = useMemo<I18nContextValue>(
@@ -102,7 +114,7 @@ const FALLBACK_CONTEXT: I18nContextValue = Object.freeze<I18nContextValue>({
   dir: directionFor(DEFAULT_LOCALE),
   locales: LOCALES,
   setLocale: () => {},
-  t: (key, vars) => translate(CATALOGS[DEFAULT_LOCALE], key, vars, DEFAULT_LOCALE),
+  t: (key, vars) => translate(en, key, vars, DEFAULT_LOCALE),
 })
 
 export function useI18n(): I18nContextValue {

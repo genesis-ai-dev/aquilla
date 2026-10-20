@@ -160,7 +160,7 @@ describe("AQU-510: categorizeAiError bodies are localized", () => {
   })
 
   it("resolves a body from the active locale catalogue, English when it has none", async () => {
-    const { CATALOGS } = await import("@/lib/i18n/messages")
+    const { CATALOGS } = await import("@/lib/i18n/messages/all")
     const { translate } = await import("@/lib/i18n/translate")
     const { LOCALE_STORAGE_KEY } = await import("@/lib/i18n/store")
     const { categorizeAiError } = await import("@/lib/audio/ai-error")

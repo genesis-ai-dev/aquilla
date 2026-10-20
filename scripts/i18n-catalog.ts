@@ -53,7 +53,7 @@ import {
 } from "../src/lib/i18n/catalog-export"
 import { MESSAGE_KEYS, catalogContextIssues } from "../src/lib/i18n/context"
 import { DEFAULT_LOCALE, LOCALES, isSupportedLocale } from "../src/lib/i18n/locales"
-import { CATALOGS, unknownCatalogKeys } from "../src/lib/i18n/messages"
+import { CATALOGS, unknownCatalogKeys } from "../src/lib/i18n/messages/all"
 import type { MessageKey } from "../src/lib/i18n/messages/en"
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..")

@@ -6,7 +6,7 @@ import { JoinPage, InviteSummary } from "./JoinPage"
 import { acceptServerInvite, previewMultiInvite, acceptMultiInvite, previewServerInvite } from "@/lib/sync/invites"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { LanguageSwitcher } from "@/lib/i18n/LanguageSwitcher"
-import { CATALOGS } from "@/lib/i18n/messages"
+import { CATALOGS } from "@/lib/i18n/messages/all"
 import { LOCALE_STORAGE_KEY } from "@/lib/i18n/store"
 
 const navigate = vi.fn()

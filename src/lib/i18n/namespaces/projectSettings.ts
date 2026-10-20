@@ -1331,6 +1331,25 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.wizardConfirmNoAdds": "Aquilla will keep one row for this project up to date on {board}, in an “Aquilla projects” group.",
     "projectSettings.monday.wizardConfirmNoAddsPerFile": "Aquilla will keep one row per file up to date on {board}, in an “Aquilla projects” group.",
     "projectSettings.monday.wizardAddAndConnectButton": "Add columns and connect",
+    // AQU-2087: step 1's other choice, a clean board made by Aquilla.
+    "projectSettings.monday.newBoardOption": "Make a new board for me",
+    "projectSettings.monday.newBoardHelp":
+      "A clean board with only the columns you pick next, in one “Aquilla projects” group, and no sample rows.",
+    "projectSettings.monday.newBoardNameLabel": "Board name",
+    "projectSettings.monday.newBoardDefaultName": "Aquilla progress",
+    "projectSettings.monday.existingBoardOption": "A board you already have",
+    "projectSettings.monday.noBoardsYet": "This Monday account has no boards yet, so Aquilla will make one.",
+    "projectSettings.monday.wizardConfirmNewBoard": plural({
+      one: "Aquilla will make a board called “{board}” with {count} column, and keep one row for this project up to date in an “Aquilla projects” group.",
+      other: "Aquilla will make a board called “{board}” with {count} columns, and keep one row for this project up to date in an “Aquilla projects” group.",
+    }, "count"),
+    "projectSettings.monday.wizardConfirmNewBoardPerFile": plural({
+      one: "Aquilla will make a board called “{board}” with {count} column, and keep one row per file up to date in an “Aquilla projects” group.",
+      other: "Aquilla will make a board called “{board}” with {count} columns, and keep one row per file up to date in an “Aquilla projects” group.",
+    }, "count"),
+    "projectSettings.monday.wizardMakeBoardButton": "Make board and connect",
+    "projectSettings.monday.wizardMakingBoard": "Making your board in Monday…",
+    "projectSettings.monday.wizardNewBoardFailed": "Couldn't make the board: {reason}. Nothing was connected yet.",
     "projectSettings.monday.wizardAddingColumns": "Adding columns to your board…",
     "projectSettings.monday.wizardAddColumnsFailed": "Couldn't add the columns: {reason}. Nothing was connected yet.",
     "projectSettings.monday.wizardSomeColumnsNotAdded":
@@ -2215,6 +2234,57 @@ export const projectSettings = defineNamespace({
       },
       "projectSettings.monday.wizardAddAndConnectButton": {
         description: "Final button of the Monday.com setup when new columns must be created first; then the board is connected.",
+      },
+      "projectSettings.monday.newBoardOption": {
+        description:
+          "Choice in step 1 of the Monday.com setup (\"Which board?\"): instead of linking one of the user's Monday " +
+          "boards, Aquilla creates a new board for this project's progress.",
+      },
+      "projectSettings.monday.newBoardHelp": {
+        description:
+          "Explanation under \"Make a new board for me\": the new board holds only the columns the user ticks in the " +
+          "next step, inside one group named \"Aquilla projects\" (keep that name as written), with none of " +
+          "Monday's example rows.",
+      },
+      "projectSettings.monday.newBoardNameLabel": {
+        description: "Label of the text field for the new Monday board's name.",
+      },
+      "projectSettings.monday.newBoardDefaultName": {
+        description:
+          "The name the new Monday board gets unless the user types another. It becomes the board's real name in " +
+          "Monday, so keep it short.",
+      },
+      "projectSettings.monday.existingBoardOption": {
+        description: "Choice in step 1 of the Monday.com setup: link one of the user's existing Monday boards (picked below).",
+      },
+      "projectSettings.monday.noBoardsYet": {
+        description:
+          "Note in step 1 of the Monday.com setup when the user's Monday account has no boards at all; the only " +
+          "choice left is a new board made by Aquilla.",
+      },
+      "projectSettings.monday.wizardConfirmNewBoard": {
+        description: "Summary on the last setup step when Aquilla will create a new Monday board with the chosen columns.",
+        placeholders: {
+          board: "The new board's name, as the user typed it (not translated).",
+          count: "How many columns the new board gets.",
+        },
+      },
+      "projectSettings.monday.wizardConfirmNewBoardPerFile": {
+        description: "Same summary when the new board gets one row per file of the project instead of one for the whole project.",
+        placeholders: {
+          board: "The new board's name, as the user typed it (not translated).",
+          count: "How many columns the new board gets.",
+        },
+      },
+      "projectSettings.monday.wizardMakeBoardButton": {
+        description: "Final button of the Monday.com setup when Aquilla first creates a new board; then the board is connected.",
+      },
+      "projectSettings.monday.wizardMakingBoard": {
+        description: "Progress line while Aquilla creates the new board and its columns in the user's Monday account.",
+      },
+      "projectSettings.monday.wizardNewBoardFailed": {
+        description: "Error when Monday did not create the new board; nothing was connected.",
+        placeholders: { reason: "The error message, usually Monday's own, shown as received." },
       },
       "projectSettings.monday.wizardAddingColumns": {
         description: "Progress line while Aquilla creates the chosen columns on the user's Monday board.",

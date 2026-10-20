@@ -50,7 +50,7 @@ import {
 import { LaneArchivedDialog } from "./LaneArchivedDialog"
 // AQU-1613: a `?lane=` deep link is resolved by lane id (the stored choice and
 // the first-position fallback live in useActiveLane).
-import { laneTagForId, resolveDeepLinkLaneId } from "@/lib/lanes/active-lane-choice"
+import { laneIdForTag, laneTagForId, resolveDeepLinkLaneId } from "@/lib/lanes/active-lane-choice"
 import { readAtVersion, useActiveCellStore, useCellStoreVersion, type CellSummary } from "@/hooks/useActiveCellStore"
 import { useActiveLane } from "@/hooks/useActiveLane"
 import { useActiveTargetLane } from "@/hooks/useActiveTargetLane"
@@ -1791,6 +1791,13 @@ export function ProjectWorkspace() {
     laneRows: project?.lanes != null ? laneRows : null,
     availableLanes,
   })
+  // AQU-2037: the open lane's ROW id — what a voice is stamped with and what
+  // every voice list is scoped to. `null` on a project with no target lane
+  // rows, where there is no lane to scope to and voices stay project-wide.
+  const activeLaneId = useMemo(
+    () => (project?.lanes != null ? laneIdForTag(activeLane, laneRows) : null),
+    [project?.lanes, activeLane, laneRows],
+  )
   // AQU-1326: opening a file used to fan out every workspace data hook at
   // mount — audit stats, comments, per-file audio attachments, the project-wide
   // progress rollup — all racing the cell stream for the same connection pool.
@@ -2315,10 +2322,15 @@ export function ProjectWorkspace() {
       project,
       (project?.lanes ?? []).filter((lane) => lane.role === "target"),
     ),
+    activeLaneId,
   )
+  // AQU-2037: the audio surfaces read the ACTIVE LANE's voices — the per-cell
+  // picker, the batch dialog, the Media-timeline picker and Generate all go
+  // through `project.ttsSettings`. Writers use `tts.settings` / `tts.allVoices`
+  // instead; storing this view would delete the other lanes' voices.
   const audioProject = useMemo(
-    () => (project ? { ...project, ttsSettings: tts.settings } : null),
-    [project, tts.settings],
+    () => (project ? { ...project, ttsSettings: tts.laneSettings } : null),
+    [project, tts.laneSettings],
   )
   // AQU-1977: what the Assign dialog offers — the project's own languages, in
   // order, by name, with no invented "Default language" (a project made since
@@ -2361,7 +2373,7 @@ export function ProjectWorkspace() {
       lens === "audio" && audioProject && !activeFileTimeOrdered
         ? {
             voices: tts.voices,
-            settings: tts.settings,
+            settings: tts.laneSettings,
             defaultVoiceId: tts.defaultVoiceId,
             project: audioProject,
             projectId: audioProject.id,
@@ -2394,7 +2406,7 @@ export function ProjectWorkspace() {
           }
         : null,
     [
-      lens, audioProject, activeFileTimeOrdered, tts.voices, tts.settings, tts.defaultVoiceId,
+      lens, audioProject, activeFileTimeOrdered, tts.voices, tts.laneSettings, tts.defaultVoiceId,
       tts.assignCells, frontierSession, currentUsername, cellStore, refresh,
     ],
   )
@@ -2603,8 +2615,12 @@ export function ProjectWorkspace() {
       sourceLanguage: sourceLanguage ?? "",
       targetLanguage: targetLanguage ?? "",
       terminology: surfaceConcepts.editor,
+      // AQU-2037: the editor's record is already overlaid for the open lane, so
+      // its voices are too — the cast gutter, the cell voice chip and the batch
+      // dialog all read them off `project.ttsSettings`.
+      ttsSettings: tts.laneSettings,
     }
-  }, [activeSourceLanguage, activeLaneTargetLanguage, project, surfaceConcepts.editor])
+  }, [activeSourceLanguage, activeLaneTargetLanguage, project, surfaceConcepts.editor, tts.laneSettings])
   // AQU-1721: the same record for the glossary, carrying only this project's
   // own concepts. The glossary edits what it lists, and a concept from a
   // subscribed termbase is not this project's to edit.
@@ -10673,12 +10689,12 @@ export function ProjectWorkspace() {
     // Includes takes already in the current voice. The menu stays so a quality
     // change or a new reference clip can overwrite them. The dialog counts only
     // the cells the chosen quality will actually convert.
-    const plan = planChangeVoiceAll(holders, tts.settings)
+    const plan = planChangeVoiceAll(holders, tts.laneSettings, undefined, tts.settings)
     // Takes a voice is using as its reference clip are not converted, but the
     // menu stays so the confirmation can say how many were left out.
     const voiceChangeable = plan.targets.length + plan.skipped["up-to-date"] + plan.skipped["voice-reference"]
     return { untranscribed, unsynthesized: synthTargets.length, voiceChangeable }
-  }, [activeFileId, batchAudioCells, audioCueCells, synthTargets, tts.settings])
+  }, [activeFileId, batchAudioCells, audioCueCells, synthTargets, tts.settings, tts.laneSettings])
 
   /**
    * AQU-490: takes this viewer could still validate — the number the bulk
@@ -11178,7 +11194,10 @@ export function ProjectWorkspace() {
       const cells = mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellId)
       void runBatchSynthAll({
         cells,
-        project,
+        // AQU-2037: resolves each line's cast voice off `project.ttsSettings`,
+        // so it must be the OPEN LANE's library — a whole-file run is the same
+        // Generate, in bulk, and must not cross lanes either.
+        project: audioProject ?? project,
         session: frontierSession ?? null,
         username: currentUsername,
         resolveTargets: (c) => byFirstSource.get(c.id) ?? [],
@@ -11188,7 +11207,7 @@ export function ProjectWorkspace() {
         // characters is generated in the first one's voice — say which ones,
         // afterwards, rather than silently picking.
         const divergent = divergentVoiceTargets(targets, (id) =>
-          assignedCastVoiceId(project.ttsSettings, id),
+          assignedCastVoiceId(tts.laneSettings, id),
         )
         if (divergent.length === 0) return
         toast.add({
@@ -11204,7 +11223,8 @@ export function ProjectWorkspace() {
       void runChangeVoiceAll({
         projectId: project.id,
         cells: audioCueCells ?? fileCells,
-        settings: tts.settings,
+        settings: tts.laneSettings,
+        allSettings: tts.settings,
         session: frontierSession ?? null,
         author: currentUsername,
         diffusionSteps: CHANGE_VOICE_QUALITY_STEPS[batchVoiceQualityRef.current],
@@ -11227,7 +11247,7 @@ export function ProjectWorkspace() {
     // own path — one read, one optimistic apply, one batch.
     runSplitAtQuotes: () => { void handleSplitAtQuotes(quoteSplitFileCandidates().cellIds) },
     navigate,
-  }), [handleSplitAtQuotes, quoteSplitFileCandidates, activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId, audioValidationByCellId, audioCueCells, myScopes, t, reportBatchValidate, batchValidateSummary, tts.settings, activeSourceLanguage, activeLaneTargetLanguage])
+  }), [handleSplitAtQuotes, quoteSplitFileCandidates, activeFileId, completeBatch, getActiveCells, cellSummaries, project, audioProject, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId, audioValidationByCellId, audioCueCells, myScopes, t, reportBatchValidate, batchValidateSummary, tts.settings, tts.laneSettings, activeSourceLanguage, activeLaneTargetLanguage])
 
   // AQU-661: the dynamic primary-action button was removed; its actions now live
   // in the ⋯ overflow menu. This preserves the button's confirmation flow —
@@ -11239,10 +11259,11 @@ export function ProjectWorkspace() {
     if (pendingActionConfirm?.id !== "change-voice-all") return null
     return planChangeVoiceAll(
       audioCueCells ?? batchAudioCells,
-      tts.settings,
+      tts.laneSettings,
       CHANGE_VOICE_QUALITY_STEPS[batchVoiceQuality],
+      tts.settings,
     )
-  }, [pendingActionConfirm, audioCueCells, batchAudioCells, tts.settings, batchVoiceQuality])
+  }, [pendingActionConfirm, audioCueCells, batchAudioCells, tts.settings, tts.laneSettings, batchVoiceQuality])
   const [batchFileModal, setBatchFileModal] = useState<BatchFileModalRequest | null>(null)
   const handleWorkspaceAction = useCallback((action: WorkspaceAction) => {
     if (action.comingSoon) return
@@ -11739,9 +11760,11 @@ export function ProjectWorkspace() {
       // as the voice card renders no button on `no-take`.
       const take = changeVoiceSourceTake(cell)
       if (!take) return null
-      const voice = resolveCastVoice(tts.settings, cell.id, cell.ttsSettings?.voiceId)
+      const voice = resolveCastVoice(tts.laneSettings, cell.id, cell.ttsSettings?.voiceId)
       // A take some voice is cloned FROM is left alone: converting it would
       // change what that voice sounds like. Same rule as the whole-file run.
+      // Checked against the WHOLE library on purpose (AQU-2037): a voice on
+      // another lane cloned from this take would be changed just the same.
       const isReference = takeUsedByVoice(cell, tts.settings)
       const status = getTtsStatus(ttsStatusKey(cell.id))
       const busy = status.kind === "loading" || status.kind === "synthesizing"
@@ -11759,7 +11782,7 @@ export function ProjectWorkspace() {
         blockers,
       }
     },
-    [tts.settings],
+    [tts.settings, tts.laneSettings],
   )
 
   const handleChangeTimelineVoice = useCallback(
@@ -11768,7 +11791,7 @@ export function ProjectWorkspace() {
       const owner = resolveTakeCellRef.current(cellId)
       if (!owner) return
       const { cell } = owner
-      const voice = resolveCastVoice(tts.settings, cell.id, cell.ttsSettings?.voiceId)
+      const voice = resolveCastVoice(tts.laneSettings, cell.id, cell.ttsSettings?.voiceId)
       const diffusionSteps = CHANGE_VOICE_QUALITY_STEPS[quality]
       // The menu disables what cannot run, but it was drawn from an earlier
       // render: re-check before spending a conversion.
@@ -11798,7 +11821,7 @@ export function ProjectWorkspace() {
         ...(failure.kind === "error" && failure.message ? { description: failure.message } : {}),
       })
     },
-    [project, frontierSession, tts.settings, currentUsername, activeLane, revalidateCells, t],
+    [project, frontierSession, tts.settings, tts.laneSettings, currentUsername, activeLane, revalidateCells, t],
   )
   // Publish the resolver declared near the top of the component. Assigned on
   // every render, deliberately: it closes over this render's cue cells, and a
@@ -14274,7 +14297,7 @@ export function ProjectWorkspace() {
     const cell = getActiveCell(cellId)
     const text = (cell?.translated ?? "").trim()
     if (!cell || !text || !project?.id || !frontierSession) return false
-    const voice = resolveCastVoice(tts.settings, cell.id)
+    const voice = resolveCastVoice(tts.laneSettings, cell.id)
     // AQU-510: the extension shows the reason this throws, so give it the
     // same localized, actionable sentence the built-in voice button shows
     // (AQU-891's categoriser), never a raw provider payload.
@@ -14283,7 +14306,7 @@ export function ProjectWorkspace() {
       fileId: cell.fileId,
       cellId: cell.id,
       text,
-      projectTtsSettings: tts.settings,
+      projectTtsSettings: tts.laneSettings,
       cellVoiceId: voice.id,
       geminiContext: {
         sourceLanguage: activeSourceLanguage || undefined,
@@ -14301,7 +14324,7 @@ export function ProjectWorkspace() {
     })
     await handleCellCommitted(cell.id)
     return true
-  }, [getActiveCell, project?.id, frontierSession, tts.settings, activeSourceLanguage, activeTargetLanguage, currentUsername, activeLane, handleCellCommitted])
+  }, [getActiveCell, project?.id, frontierSession, tts.laneSettings, activeSourceLanguage, activeTargetLanguage, currentUsername, activeLane, handleCellCommitted])
 
   // Smart Extensions (apiRev 2 + 3): what an `editor` extension mounted for
   // the active file reaches through the bridge — the same live focus locks,
@@ -14375,9 +14398,9 @@ export function ProjectWorkspace() {
     [project],
   )
   const extensionVoiceFor = useCallback((cellId: string) => {
-    const voice = resolveCastVoice(tts.settings, cellId)
-    return voice ? { name: voice.name, explicit: Boolean(assignedCastVoiceId(tts.settings, cellId)) } : null
-  }, [tts.settings])
+    const voice = resolveCastVoice(tts.laneSettings, cellId)
+    return voice ? { name: voice.name, explicit: Boolean(assignedCastVoiceId(tts.laneSettings, cellId)) } : null
+  }, [tts.laneSettings])
   // apiRev 4: the last built-in surfaces for an extension editor (audio
   // validation, the Audio lens's take, source editing, AI surfaces beside a
   // cell, the source selection toolbar), over the same handlers.
@@ -14416,7 +14439,7 @@ export function ProjectWorkspace() {
     onCellCommitted: (cellId) => { void handleCellCommitted(cellId) },
     myScopes,
     linkedTakesByCell,
-    ttsSettings: tts.settings,
+    ttsSettings: tts.laneSettings,
     onAssignCastVoice: handleAssignCastVoice,
     onClearCastVoice: handleClearCastVoice,
     onCloneVoice: (cellId) => {
@@ -15244,6 +15267,7 @@ export function ProjectWorkspace() {
                     username={currentUsername}
                     targetLanguage={activeLaneTargetLanguage}
                     fileId={activeFileId}
+                    laneId={activeLaneId}
                   />
                 </div>
               ) : undefined
@@ -15474,7 +15498,10 @@ export function ProjectWorkspace() {
             {project && activeFileId && centerSurface === "editor" && (
               <>
                 <SelectionBar
-                  project={project}
+                  /* AQU-2037: `audioProject` is `project` with the OPEN LANE's
+                     voices — the batch voice dialog this bar opens reads them
+                     off `project.ttsSettings`. */
+                  project={audioProject ?? project}
                   cellStore={cellStore}
                   session={frontierSession}
                   username={currentUsername}
@@ -16430,7 +16457,7 @@ export function ProjectWorkspace() {
                 : undefined
             }
             castGutter={timelineStacked}
-            ttsSettings={tts.settings}
+            ttsSettings={tts.laneSettings}
             orderedBy={activeFile ? fileOrderedBy(activeFile) : undefined}
             onOpenAudioSetup={openAudioSetup}
             onProjectChanged={refresh}

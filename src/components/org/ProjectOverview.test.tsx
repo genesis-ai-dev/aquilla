@@ -7,6 +7,7 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import { ROLE } from "@/lib/frontier/roles"
 import { fmtDeadlineDate } from "@/lib/format-date"
 import { PROGRESS_BG } from "@/lib/progress/progress-palette"
+import { resetWindowFocusRevalidateForTests } from "@/lib/sync/window-focus-revalidate"
 
 // Keep the overview suite's project-member reads local.
 vi.mock("@/lib/frontier/members", async (importActual) => ({
@@ -191,12 +192,15 @@ vi.mock("@/components/StaffLanePopover", () => ({
     />
   ),
 }))
+// AQU-1914: the plan's Assign reads the caller's own lane-delegate grant.
+const fetchMyScopeGrant = vi.fn(async (..._a: unknown[]): Promise<unknown> => null)
 vi.mock("@/lib/sync/member-scopes", () => ({
   fetchMemberScopes: vi.fn(async () => []),
   putMemberScopes: vi.fn(async () => ({ scopes: [], laneNames: {} })),
   // AQU-1994: `null` is "the server did not say", which leaves every Assign
   // surface offering the project's own lanes exactly as it did before.
   fetchProjectLaneStaffing: vi.fn(async () => null),
+  fetchMyScopeGrant: (...a: unknown[]) => fetchMyScopeGrant(...a),
 }))
 const setProjectPm = vi.fn(async (_jwt: string, _projectId: string, _pmUserId: number | null): Promise<{ id: number; username: string } | null> => null)
 const setProjectDeadline = vi.fn(async (_jwt: string, _projectId: string, _deadline: string | null): Promise<void> => {})
@@ -446,6 +450,8 @@ beforeEach(async () => {
   // The plan mints a sync token like the file list does; without a default,
   // whether a test sees units depends on which test ran before it.
   fetchSyncToken.mockResolvedValue({ token: "tok" })
+  // No lane-delegate grant unless a test gives one (AQU-1914).
+  fetchMyScopeGrant.mockResolvedValue(null)
   canEditRosterProgressFloorMock.mockImplementation((level: number | null | undefined) => (level ?? 0) >= 700)
   tauriRuntime = false
   offlineStoreValue = { store: null, loading: false, error: null }
@@ -2832,6 +2838,60 @@ describe("plan board on the overview", () => {
     expect(screen.getByTestId("plan-target-readonly")).toHaveTextContent("November 1")
   })
 
+  // AQU-1914: Assign follows "who can assign work", not "who can see team
+  // progress" — the default org hides per-member progress below Maintainer
+  // but lets a Project lead assign.
+  it("offers Assign to a project lead though the org hides the assignee list from them", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: ROLE.PROJECT_LEAD }), status: "ready", refresh, roleLevel: ROLE.PROJECT_LEAD,
+    })
+    getPortfolio.mockResolvedValue([])
+    fetchProjectPlan.mockResolvedValue({
+      projectId: "p1", lane: "", validationCount: 1, revision: 1, units: [planUnit()],
+    })
+    renderOverview()
+
+    fireEvent.click(await screen.findByTestId("plan-row-f1-"))
+    const inspector = await screen.findByTestId("plan-inspector")
+    expect(within(inspector).getByTestId("plan-assign-open")).toBeInTheDocument()
+    expect(within(inspector).queryByTestId("plan-assignment-coverage")).toBeNull()
+  })
+
+  it("offers Assign to a lane delegate the org allows to assign (AQU-581)", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: ROLE.CONTRIBUTOR }), status: "ready", refresh, roleLevel: ROLE.CONTRIBUTOR,
+    })
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), allowScopedLaneAssignment: true })
+    fetchMyScopeGrant.mockResolvedValue({
+      scopes: [{ kind: "lane", value: "es" }], allowScopedLaneAssignment: true,
+    })
+    getPortfolio.mockResolvedValue([])
+    fetchProjectPlan.mockResolvedValue({
+      projectId: "p1", lane: "", validationCount: 1, revision: 1, units: [planUnit()],
+    })
+    renderOverview()
+
+    fireEvent.click(await screen.findByTestId("plan-row-f1-"))
+    const inspector = await screen.findByTestId("plan-inspector")
+    expect(await within(inspector).findByTestId("plan-assign-open")).toBeInTheDocument()
+  })
+
+  it("does not offer Assign to a contributor with no way to assign", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: ROLE.CONTRIBUTOR }), status: "ready", refresh, roleLevel: ROLE.CONTRIBUTOR,
+    })
+    getPortfolio.mockResolvedValue([])
+    fetchProjectPlan.mockResolvedValue({
+      projectId: "p1", lane: "", validationCount: 1, revision: 1, units: [planUnit()],
+    })
+    renderOverview()
+
+    fireEvent.click(await screen.findByTestId("plan-row-f1-"))
+    const inspector = await screen.findByTestId("plan-inspector")
+    await waitFor(() => expect(fetchMyScopeGrant).toHaveBeenCalled())
+    expect(within(inspector).queryByTestId("plan-assign-open")).toBeNull()
+  })
+
   it("shows an empty state when nothing is plannable yet", async () => {
     useProject.mockReturnValue({ project: projectRecord({ level: 600 }), status: "ready", refresh })
     getPortfolio.mockResolvedValue([{
@@ -2923,6 +2983,46 @@ describe("plan board on the overview", () => {
     })
     await new Promise((r) => setTimeout(r, 50))
     expect(fetchProjectPlan.mock.calls.length).toBe(planReads)
+  })
+
+  // AQU-1913: a change made by someone else, another tab or an agent sends
+  // this tab no settings-updated event, so the page re-reads on its own.
+  it("reads every count again when the tab comes back (AQU-1913)", async () => {
+    resetWindowFocusRevalidateForTests()
+    useProject.mockReturnValue({ project: projectRecord({ level: 600 }), status: "ready", refresh })
+    getPortfolio.mockResolvedValue([])
+    fetchProjectPlan.mockResolvedValue({
+      projectId: "p1", lane: "", validationCount: 1, revision: 1, units: [planUnit()],
+    })
+    renderOverview()
+    await screen.findByTestId("plan-row-f1-")
+    await waitFor(() => expect(getPortfolio).toHaveBeenCalled())
+    const planReads = fetchProjectPlan.mock.calls.length
+    const rowReads = getPortfolio.mock.calls.length
+
+    act(() => { window.dispatchEvent(new Event("focus")) })
+
+    await waitFor(() => expect(fetchProjectPlan.mock.calls.length).toBeGreaterThan(planReads))
+    await waitFor(() => expect(getPortfolio.mock.calls.length).toBeGreaterThan(rowReads))
+  })
+
+  it("reads every count again when the org's settings version moves (AQU-1913)", async () => {
+    useProject.mockReturnValue({ project: projectRecord({ level: 600 }), status: "ready", refresh })
+    getPortfolio.mockResolvedValue([])
+    fetchProjectPlan.mockResolvedValue({
+      projectId: "p1", lane: "", validationCount: 1, revision: 1, units: [planUnit()],
+    })
+    const { rerender } = renderOverview()
+    await screen.findByTestId("plan-row-f1-")
+    await waitFor(() => expect(getPortfolio).toHaveBeenCalled())
+    const planReads = fetchProjectPlan.mock.calls.length
+
+    // Another owner turned "count headings" off for the org; this tab's org
+    // settings read picked up the new version.
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), version: 2 })
+    rerender(overviewTree())
+
+    await waitFor(() => expect(fetchProjectPlan.mock.calls.length).toBeGreaterThan(planReads))
   })
 })
 

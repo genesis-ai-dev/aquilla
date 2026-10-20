@@ -22,6 +22,9 @@ export const AIRTABLE_CHOOSER_COPY: ChooserCopy = {
   alwaysIncluded: "projectSettings.airtable.chooser.alwaysIncluded",
   summaryAdds: "projectSettings.airtable.chooser.summaryAdds",
   summaryNoAdds: "projectSettings.airtable.chooser.summaryNoAdds",
+  // AQU-1989 (Sam, 2026-10-20): the amber security note Monday shows under the
+  // names fields, in Airtable's words — a shared base is read like a board.
+  namesVisible: "projectSettings.airtable.chooser.namesVisible",
 }
 
 export const AIRTABLE_ADD_COLUMNS_COPY: AddColumnsCopy = {

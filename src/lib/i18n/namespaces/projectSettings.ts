@@ -1464,6 +1464,7 @@ export const projectSettings = defineNamespace({
       one: "Uses {count} field already in {board}; nothing new is added.",
       other: "Uses {count} fields already in {board}; nothing new is added.",
     }, "count"),
+    "projectSettings.airtable.chooser.namesVisible": "Everyone who can see {board} in Airtable will see these names.",
     "projectSettings.airtable.orgNextLinkProjectsDescription":
       "Your organization is connected. Choose a project to review its recommended table and progress fields.",
     "projectSettings.airtable.orgProjectLinkedTo": "Linked to {table}",
@@ -2586,6 +2587,16 @@ export const projectSettings = defineNamespace({
         description: "Live line under the field list in Airtable setup when nothing new will be created.",
         placeholders: {
           count: "How many fields already in the table are used, a whole number.",
+          board: "The Airtable TABLE's name (data, not translated). Named 'board' because the list is shared with Monday.com setup.",
+        },
+      },
+      "projectSettings.airtable.chooser.namesVisible": {
+        description:
+          "Security note under the 'Project manager' and 'Translators' fields in the Airtable setup's field list, shown " +
+          "in amber while either is ticked: those fields put people's names in the Airtable table, and anyone with " +
+          "access to the table can read them. Plain and factual, so it reads as a clear caution without alarm. " +
+          "Sibling of projectSettings.monday.chooser.namesVisible.",
+        placeholders: {
           board: "The Airtable TABLE's name (data, not translated). Named 'board' because the list is shared with Monday.com setup.",
         },
       },

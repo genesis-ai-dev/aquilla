@@ -34,7 +34,7 @@
     "build:example-honeycomb": "pnpm idml:gate && BRAND=example-honeycomb tsc -b && BRAND=example-honeycomb vite build && tsx scripts/check-app-build.ts && tsx scripts/check-brand-build.ts example-honeycomb",
     "build:context": "pnpm idml:gate && BRAND=context tsc -b && BRAND=context vite build && tsx scripts/check-app-build.ts && tsx scripts/check-brand-build.ts context",
     "build:example-context": "pnpm idml:gate && BRAND=example-context tsc -b && BRAND=example-context vite build && tsx scripts/check-app-build.ts && tsx scripts/check-brand-build.ts example-context",
-    "lint": "eslint .",
+    "lint": "NODE_OPTIONS=--max-old-space-size=8192 eslint .",
     "audit:deps": "node scripts/audit-deps.mjs",
     "audit:deps:report": "node scripts/audit-deps.mjs --report",
     "ai-sections:eval": "tsx scripts/ai-sections-eval.ts",

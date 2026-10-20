@@ -1,13 +1,18 @@
 // AQU-1969 (Sam, 2026-10-19: "It should be more easy to unassign work"): the
-// org Team workload's one-click × on every row that is one assignment — the
-// project Team card's validation list and the plan's "Assigned to" list too.
-// One click, no confirm: the row goes at once and stays gone, as on the org
-// workload, and a refusal says why under the list.
-import { useCallback, useState } from "react"
+// org Team workload's × on every row that is one assignment — the project Team
+// card's validation list and the plan's "Assigned to" list too. Two clicks, no
+// dialog (Sam, 2026-10-20): the × turns into an "Are you sure?" button in
+// place, and that removes it. Leaving it (focus elsewhere, Escape, or a few
+// seconds untouched) turns it back into the ×. Removed, the row goes at once
+// and stays gone; a refusal says why under the list.
+import { useCallback, useEffect, useRef, useState } from "react"
 import { X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
+
+/** How long "Are you sure?" waits for its click before turning back into the ×. */
+export const CONFIRM_TIMEOUT_MS = 4000
 
 export function RemoveAssignmentButton({
   scope,
@@ -26,18 +31,51 @@ export function RemoveAssignmentButton({
   testId?: string
 }) {
   const t = useT()
+  const [confirming, setConfirming] = useState(false)
+  const confirmRef = useRef<HTMLButtonElement>(null)
+  const who = { scope, user: username ?? t("common.userChip.anonymous") }
+
+  useEffect(() => {
+    if (!confirming) return
+    confirmRef.current?.focus()
+    const timer = setTimeout(() => setConfirming(false), CONFIRM_TIMEOUT_MS)
+    return () => clearTimeout(timer)
+  }, [confirming])
+
+  if (confirming) {
+    return (
+      <Button
+        ref={confirmRef}
+        type="button"
+        variant="destructive"
+        size="xs"
+        className="shrink-0"
+        aria-label={t("org.workloadRollup.removeConfirmAriaLabel", who)}
+        disabled={removing}
+        onClick={() => {
+          setConfirming(false)
+          onRemove()
+        }}
+        onBlur={() => setConfirming(false)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") setConfirming(false)
+        }}
+        data-testid={testId ? `${testId}-confirm` : undefined}
+      >
+        {t("org.workloadRollup.removeConfirm")}
+      </Button>
+    )
+  }
+
   return (
     <AppTooltip content={t("org.workloadRollup.removeTooltip")}>
       <Button
         type="button"
         variant="ghost"
         size={size}
-        aria-label={t("org.workloadRollup.removeAriaLabel", {
-          scope,
-          user: username ?? t("common.userChip.anonymous"),
-        })}
+        aria-label={t("org.workloadRollup.removeAriaLabel", who)}
         disabled={removing}
-        onClick={onRemove}
+        onClick={() => setConfirming(true)}
         data-testid={testId}
       >
         <X />

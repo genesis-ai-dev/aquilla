@@ -1,8 +1,9 @@
-// AQU-1969 (Sam, 2026-10-19): the Team card's validation rows carry the org
-// workload's one-click × for whoever may unassign.
+// AQU-1969 (Sam, 2026-10-19/20): the Team card's validation rows carry the org
+// workload's × for whoever may unassign; it asks "Are you sure?" in place.
 import { describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { TeamValidationList } from "./TeamValidationList"
+import { CONFIRM_TIMEOUT_MS } from "./RemoveAssignmentButton"
 import type { ValidationAssignment } from "@/lib/sync/assignments"
 
 const counts = (total: number, validated: number, waiting: number, changed: number) => ({ total, validated, waiting, changed })
@@ -26,10 +27,12 @@ describe("TeamValidationList", () => {
     expect(screen.queryByTestId("overview-team-validation-remove-v1")).toBeNull()
   })
 
-  it("one click unassigns that row and it goes at once", async () => {
+  it("× then Are you sure? unassigns that row and it goes at once", async () => {
     const onRemove = vi.fn(async () => {})
     render(<TeamValidationList validations={rows} showLane={false} onRemove={onRemove} />)
     fireEvent.click(screen.getByTestId("overview-team-validation-remove-v1"))
+    expect(onRemove).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId("overview-team-validation-remove-v1-confirm"))
     expect(onRemove).toHaveBeenCalledWith("v1")
     await waitFor(() => expect(screen.queryByTestId("overview-team-validation-v1")).toBeNull())
     expect(screen.getByTestId("overview-team-validation-v2")).toBeInTheDocument()
@@ -39,7 +42,35 @@ describe("TeamValidationList", () => {
     const onRemove = vi.fn(async () => { throw new Error("role too low for assignment.unassign") })
     render(<TeamValidationList validations={rows} showLane={false} onRemove={onRemove} />)
     fireEvent.click(screen.getByTestId("overview-team-validation-remove-v2"))
+    fireEvent.click(screen.getByTestId("overview-team-validation-remove-v2-confirm"))
     expect(await screen.findByText("role too low for assignment.unassign")).toBeInTheDocument()
     expect(screen.getByTestId("overview-team-validation-v2")).toBeInTheDocument()
+  })
+})
+
+// Sam, 2026-10-20: the × asks before it removes — in place, no dialog.
+describe("RemoveAssignmentButton", () => {
+  it("turns into Are you sure?, and back into the × on Escape, on leaving it, or after a few seconds", async () => {
+    vi.useFakeTimers()
+    try {
+      const onRemove = vi.fn(async () => {})
+      render(<TeamValidationList validations={rows} showLane={false} onRemove={onRemove} />)
+      const x = () => screen.queryByTestId("overview-team-validation-remove-v1")
+      const sure = () => screen.queryByTestId("overview-team-validation-remove-v1-confirm")
+      fireEvent.click(x()!)
+      expect(sure()).toHaveTextContent("Are you sure?")
+      expect(sure()).toHaveFocus()
+      fireEvent.keyDown(sure()!, { key: "Escape" })
+      expect(x()).toBeInTheDocument()
+      fireEvent.click(x()!)
+      fireEvent.blur(sure()!)
+      expect(x()).toBeInTheDocument()
+      fireEvent.click(x()!)
+      act(() => { vi.advanceTimersByTime(CONFIRM_TIMEOUT_MS) })
+      expect(x()).toBeInTheDocument()
+      expect(onRemove).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

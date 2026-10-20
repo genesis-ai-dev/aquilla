@@ -3184,13 +3184,15 @@ describe("ProjectOverview one-click unassign (AQU-1969)", () => {
     return mod
   }
 
-  it("a lead removes a validation assignment from the Team card in one click", async () => {
+  it("a lead removes a validation assignment from the Team card: ×, then Are you sure?", async () => {
     const mod = await withValidation()
     useProject.mockReturnValue({ project: projectRecord({ level: ROLE.MAINTAINER, files } as never), status: "ready", refresh })
     renderOverview()
     const remove = await screen.findByTestId("overview-team-validation-remove-v1")
     const readsBefore = vi.mocked(mod.getProjectTeamProgress).mock.calls.length
     fireEvent.click(remove)
+    expect(mod.unassignAssignment).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByTestId("overview-team-validation-remove-v1-confirm"))
     await waitFor(() => expect(mod.unassignAssignment).toHaveBeenCalledWith(
       expect.objectContaining({ projectId: "p1", fileId: "f1", assignmentId: "v1" }),
     ))

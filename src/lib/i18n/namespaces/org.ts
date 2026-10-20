@@ -1010,6 +1010,8 @@ export const org = defineNamespace({
     "org.workloadRollup.title": "Team workload",
     "org.workloadRollup.removeTooltip": "Remove this assignment",
     "org.workloadRollup.removeAriaLabel": "Remove assignment: {scope} ({user})",
+    "org.workloadRollup.removeConfirm": "Are you sure?",
+    "org.workloadRollup.removeConfirmAriaLabel": "Are you sure? Remove assignment: {scope} ({user})",
     "org.workloadRollup.unknownUser": "User {id}",
     "org.workloadRollup.removeErrorGeneric":
       "Can't remove this assignment — it has no resolved cells to route through.",
@@ -2887,6 +2889,22 @@ export const org = defineNamespace({
         placeholders: {
           scope: "The assignment's scope label (e.g. a book or chapter range) — not translated.",
           user: "The assignee's username, or the localized org.workloadRollup.unknownUser fallback.",
+        },
+      },
+      "org.workloadRollup.removeConfirm": {
+        description:
+          "The second step of removing an assignment: the small × on an assignment row turns into this short red " +
+          "button in place, and clicking it removes the assignment. It turns back into the × after a few seconds, " +
+          "on Escape, or when focus moves away. Keep it a short question.",
+        maxLength: 20,
+      },
+      "org.workloadRollup.removeConfirmAriaLabel": {
+        description:
+          "Accessible name for the 'Are you sure?' button (org.workloadRollup.removeConfirm): the question, then " +
+          "which assignment it removes, so a screen reader says what the click will do.",
+        placeholders: {
+          scope: "The assignment's scope label (e.g. a book or chapter range) — not translated.",
+          user: "The assignee's username, or the localized fallback when it isn't known.",
         },
       },
       "org.workloadRollup.unknownUser": {

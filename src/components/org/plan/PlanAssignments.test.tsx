@@ -427,10 +427,12 @@ describe("one-click unassign", () => {
     expect(screen.queryByTestId("plan-assignment-remove-v1")).toBeNull()
   })
 
-  it("one click unassigns that row's assignment and the row goes at once", async () => {
+  it("× then Are you sure? unassigns that row's assignment and the row goes at once", async () => {
     const onRemove = vi.fn(async () => {})
     renderSection({ assignments: rows(), onRemove })
     fireEvent.click(screen.getByTestId("plan-assignment-remove-v1"))
+    expect(onRemove).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId("plan-assignment-remove-v1-confirm"))
     expect(onRemove).toHaveBeenCalledWith("v1")
     await screen.findByTestId("plan-assignment-t1")
     await waitFor(() => expect(screen.queryByTestId("plan-assignment-v1")).toBeNull())
@@ -441,6 +443,7 @@ describe("one-click unassign", () => {
     const onRemove = vi.fn(async () => { throw new Error("role too low for assignment.unassign") })
     renderSection({ assignments: rows(), onRemove })
     fireEvent.click(screen.getByTestId("plan-assignment-remove-t1"))
+    fireEvent.click(screen.getByTestId("plan-assignment-remove-t1-confirm"))
     expect(await screen.findByText("role too low for assignment.unassign")).toBeInTheDocument()
     expect(screen.getByTestId("plan-assignment-t1")).toBeInTheDocument()
   })

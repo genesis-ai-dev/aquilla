@@ -222,11 +222,13 @@ checks only the SPA graph. The post-promotion public check still proves that the
 separate marketing Worker owns `/case-studies/come-and-see` and
 `/case-studies/biblica` instead of falling through to the app shell.
 
-Identity and sync versions also carry a version-metadata binding. First-party
-requests require the version tag's actual Worker namespace to agree with the
-environment's `DEPLOYMENT_WORKER_NAME` before opening Hyperdrive. Identity's
+Identity and sync versions also carry a version-metadata binding. When a version
+tag is present, first-party requests require its Worker namespace to agree with
+the environment's `DEPLOYMENT_WORKER_NAME` before opening Hyperdrive. Identity's
 scheduled work enforces the same contract before its cron opens Neon. This
-prevents a version from another Worker namespace from reaching either database.
+prevents a tagged version from another Worker namespace from reaching either
+database. An untagged version (from `wrangler secret put` or a dashboard edit) is
+served with a warning; see "Rotating a secret" in `docs/DEPLOYMENT-ENVIRONMENTS.md`.
 
 ## Workers Builds without a Wrangler application
 

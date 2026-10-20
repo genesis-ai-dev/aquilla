@@ -202,33 +202,46 @@ describe("rotation tag satisfies the runtime environment guards (AQU-1361)", () 
     }
   })
 
-  it("reproduces the outage: Cloudflare's untagged derived version is refused", () => {
-    // What `wrangler secret put` actually promoted on 2026-09-22 — identical
-    // script etag, correct development bindings, no workers/tag at all. Both
-    // guards fail closed on it, which is why rotation has to stage a tagged
-    // version instead of patching the live one.
-    const untagged = {
-      ENVIRONMENT: "development",
-      AUTH_WORKER_URL: "https://api.dev.aquilla.app/identity",
-      DEPLOYMENT_WORKER_NAME: "aquilla-sync-worker-dev",
-      CF_VERSION_METADATA: {},
-    }
-    expect(syncDeploymentError("https://api.dev.aquilla.app/sync/events", untagged))
-      .toContain("expected a version tag beginning aquilla-sync-worker-dev-development-")
+  it("serves Cloudflare's untagged derived version, warning once per guard", () => {
+    // What `wrangler secret put` actually promotes — identical script etag,
+    // correct development bindings, no workers/tag at all. Refusing it took dev
+    // sync down on 2026-09-22 (AQU-1361) and prod identity on 2026-10-20, so
+    // both guards now serve it and warn once per isolate instead. Rotation
+    // still stages a tagged version so the live one keeps the deployers'
+    // binding verification and version-to-commit trail.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      const untagged = {
+        ENVIRONMENT: "development",
+        AUTH_WORKER_URL: "https://api.dev.aquilla.app/identity",
+        DEPLOYMENT_WORKER_NAME: "aquilla-sync-worker-dev",
+        CF_VERSION_METADATA: {},
+      }
+      expect(syncDeploymentError("https://api.dev.aquilla.app/sync/events", untagged)).toBeNull()
+      expect(syncDeploymentError("https://api.dev.aquilla.app/sync/events", untagged)).toBeNull()
 
-    const untaggedIdentity = {
-      ENVIRONMENT: "development",
-      BASE_URL: "https://dev.aquilla.app",
-      SYNC_WORKER_URL: "https://api.dev.aquilla.app/sync",
-      DEPLOYMENT_WORKER_NAME: "aquilla-dev-identity",
-      CF_VERSION_METADATA: {},
+      const untaggedIdentity = {
+        ENVIRONMENT: "development",
+        BASE_URL: "https://dev.aquilla.app",
+        SYNC_WORKER_URL: "https://api.dev.aquilla.app/sync",
+        DEPLOYMENT_WORKER_NAME: "aquilla-dev-identity",
+        CF_VERSION_METADATA: {},
+      }
+      expect(identityDeploymentError(
+        "https://api.dev.aquilla.app/identity/api/v2/health",
+        untaggedIdentity,
+      )).toBeNull()
+      expect(scheduledDeploymentEnvironmentError(untaggedIdentity)).toBeNull()
+
+      // One warning per Worker module, not per call: the sync guard, then the
+      // identity guard, whose request and scheduled paths share one flag.
+      expect(warn.mock.calls.map(([message]) => message)).toEqual([
+        expect.stringContaining("aquilla-sync-worker-dev development is serving an untagged version"),
+        expect.stringContaining("aquilla-dev-identity development is serving an untagged version"),
+      ])
+    } finally {
+      warn.mockRestore()
     }
-    expect(identityDeploymentError(
-      "https://api.dev.aquilla.app/identity/api/v2/health",
-      untaggedIdentity,
-    )).toContain("expected a version tag beginning aquilla-dev-identity-development-")
-    expect(scheduledDeploymentEnvironmentError(untaggedIdentity))
-      .toContain("expected a version tag beginning aquilla-dev-identity-development-")
   })
 
   it("still refuses a rotation tag built for the other environment", () => {

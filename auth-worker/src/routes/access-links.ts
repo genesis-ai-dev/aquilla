@@ -74,6 +74,47 @@ function clampLinkRole(level: number): number {
   return n
 }
 
+/**
+ * True when the bound account has gained access outside the link's own
+ * project/org since mint. Looser than the mint check on purpose: a translator
+ * added to a sibling project in the SAME org keeps a working link (no UX
+ * regression); membership in another org, or in a project of another org /
+ * no org, kills it.
+ */
+async function hasDivergedFootprint(
+  db: Env["AQUILLA_PG"],
+  userId: number,
+  projectId: string,
+): Promise<boolean> {
+  const proj = await db
+    .prepare("SELECT org_id FROM projects WHERE id = ?")
+    .bind(projectId)
+    .first<{ org_id: number | null }>()
+  const orgId = proj?.org_id ?? null
+  const row =
+    orgId === null
+      ? await db
+          .prepare(
+            `SELECT 1 FROM project_members WHERE user_id = ? AND project_id != ?
+             UNION ALL
+             SELECT 1 FROM org_members WHERE user_id = ?`,
+          )
+          .bind(userId, projectId, userId)
+          .first()
+      : await db
+          .prepare(
+            `SELECT 1 FROM project_members pm
+               JOIN projects p ON p.id = pm.project_id
+              WHERE pm.user_id = ? AND pm.project_id != ?
+                AND p.org_id IS DISTINCT FROM ?
+             UNION ALL
+             SELECT 1 FROM org_members WHERE user_id = ? AND org_id != ?`,
+          )
+          .bind(userId, projectId, orgId, userId, orgId)
+          .first()
+  return !!row
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // POST /api/v2/access-links — mint a per-user link + PIN.
 //
@@ -329,6 +370,18 @@ accessLinks.post("/:token/redeem", zValidator("json", redeemSchema), async (c) =
     .first<{ username: string }>()
   if (!boundUser) {
     // Bound account was deleted after mint — the link is dead.
+    await recordAuthEvent(c.env.AQUILLA_PG, "access_link_redeem", ipIdent, false)
+    return c.json(DEAD_LINK, 401)
+  }
+
+  // [Pen test] Authorization & access control (2026-10-20): the mint-time
+  // footprint check only holds while the account stays a pure translator
+  // account. Redemption mints a FULL login session, so a link outliving the
+  // account's "fresh" status (up to 90 days) let whoever holds the PIN —
+  // typically the minting project lead — sign in as a user who has since
+  // joined other orgs/projects. Re-check at redeem; a diverged account's link
+  // is dead (indistinguishable from any other dead link).
+  if (await hasDivergedFootprint(c.env.AQUILLA_PG, link.user_id, link.project_id)) {
     await recordAuthEvent(c.env.AQUILLA_PG, "access_link_redeem", ipIdent, false)
     return c.json(DEAD_LINK, 401)
   }

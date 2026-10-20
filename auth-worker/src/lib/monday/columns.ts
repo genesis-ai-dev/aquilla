@@ -6,7 +6,7 @@
 // with plain titles and the column type each metric writes best, and reuses
 // any column that is already there under that title.
 
-import { MondayApiError, gqlString, mondayGraphQL } from "./client"
+import { MondayApiError, fetchBoardStructure, gqlString, mondayGraphQL } from "./client"
 import {
   READ_ONLY_COLUMN_TYPES,
   type MondayBoardGroup,
@@ -192,4 +192,63 @@ export async function ensureProjectsGroup(
   const made = data.create_group
   if (!made?.id) throw new MondayApiError("create_group returned no id", 200)
   return { group: { id: String(made.id), title: made.title ?? PROJECTS_GROUP_TITLE }, created: true }
+}
+
+// ── "Make a new board for me" (AQU-2087) ────────────────────────────────────
+
+export interface NewBoardResult extends AddColumnsResult {
+  boardId: string
+}
+
+/**
+ * A clean board for Aquilla, for a setup that would rather not link one of the
+ * user's boards: no sample rows, none of Monday's starter columns or groups,
+ * only the columns for `metrics` in the order given (Aquilla ID always, last),
+ * and the "Aquilla projects" group on top.
+ *
+ * Public, not private: a private board made through our token was invisible
+ * to it afterwards (found on the Oct 13 walk). Anything already on the board
+ * when it comes back is Monday's starter kit, never the user's, so it goes.
+ */
+export async function createCleanBoard(
+  accessToken: string,
+  name: string,
+  metrics: MondayMetricKey[],
+): Promise<NewBoardResult> {
+  const made = await mondayGraphQL<{ create_board: { id: string } | null }>(
+    accessToken,
+    `mutation { create_board(board_name: ${gqlString(name)}, board_kind: public, empty: true) { id } }`,
+  )
+  if (!made.create_board?.id) throw new MondayApiError("create_board returned no id", 200)
+  const boardId = String(made.create_board.id)
+  const start = await fetchBoardStructure(accessToken, boardId)
+
+  const kept = start.columns.filter((col) => col.type === "name")
+  for (const col of start.columns) {
+    if (col.type === "name") continue
+    try {
+      await mondayGraphQL(
+        accessToken,
+        `mutation { delete_column(board_id: ${gqlString(boardId)}, column_id: ${gqlString(col.id)}) { id } }`,
+      )
+    } catch {
+      // A starter column Monday won't delete stays; ours are still added.
+      kept.push(col)
+    }
+  }
+
+  const wanted = [...new Set(metrics.filter((m) => m !== "external_id" && isCreatableMetric(m))), "external_id" as const]
+  const result = await addMissingColumns(accessToken, boardId, wanted, kept)
+
+  const { group } = await ensureProjectsGroup(accessToken, boardId, start.groups, [])
+  for (const starter of start.groups) {
+    if (starter.id === group.id) continue
+    await mondayGraphQL(
+      accessToken,
+      `mutation { delete_group(board_id: ${gqlString(boardId)}, group_id: ${gqlString(starter.id)}) { id } }`,
+    ).catch(() => {
+      // An empty starter group left behind is untidy, not wrong.
+    })
+  }
+  return { boardId, ...result }
 }

@@ -623,6 +623,10 @@ export const projectSettings = defineNamespace({
       "Sent directly to Google; never uploaded to Frontier.",
     "projectSettings.voice.libraryNote": "Voice library and cast assignments live in the Voice Studio.",
     "projectSettings.voice.openStudioButton": "Open Voice Studio",
+    "projectSettings.voice.leadsManageLabel": "Project leads can manage voices",
+    "projectSettings.voice.leadsManageDescription":
+      "When this is on, a project lead can create, edit, and assign voices on the lanes they can write. " +
+      "When it is off, only a maintainer can. Voices already created stay either way.",
 
     // ── Local AI models card (device-shared; downloads managed in Preferences) ──
     "projectSettings.localModels.description":
@@ -2933,6 +2937,14 @@ export const projectSettings = defineNamespace({
       "projectSettings.inherit.detach": {
         description:
           "Button beside a field that is still being copied. Stops future updates of that field and keeps the current copy.",
+      },
+      "projectSettings.voice.leadsManageLabel": {
+        description:
+          "Label for a switch on the project Voice card. It lets a project lead manage voices on lanes they can write. Off unless a maintainer turns it on.",
+      },
+      "projectSettings.voice.leadsManageDescription": {
+        description:
+          "Help text under that switch. Explains that project leads gain voice controls only while it is on, and that turning it off does not delete voices.",
       },
     },
   },

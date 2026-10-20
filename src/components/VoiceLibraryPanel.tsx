@@ -46,6 +46,7 @@ import { NewVoiceModal } from "@/components/voice/NewVoiceModal"
 import { VoiceNameWithLanguage } from "@/components/voice/VoiceLanguageBadge"
 import { projectTargetLaneLanguages, showVoiceLanguageBadge } from "@/lib/audio/inworld-voices"
 import type { FrontierSession } from "@/lib/frontier/types"
+import { canManageVoices } from "@/lib/audio/voice-permission"
 import { ROLE } from "@/lib/frontier/roles"
 import { denialMessage } from "@/lib/permissions/denial"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -91,6 +92,12 @@ interface Props {
    * (600) — since that's the actual route this panel's writes flow through.
    */
   roleLevel?: number | null
+  /**
+   * AQU-2041. When the project lets project leads manage voices, a lead's
+   * controls follow that instead of the maintainer floor. Contributors stay
+   * blocked either way.
+   */
+  leadsManageVoices?: boolean
 }
 
 /** What the focused modal is doing right now. */
@@ -101,7 +108,7 @@ type Editing =
 
 export function VoiceLibraryPanel({
   targetLanguage, targetLanes, archivedLanes, settings, onSettingsChange, projectId, fileId, session,
-  selectedVoiceId, onSelectVoice, castStats, cells, roleLevel,
+  selectedVoiceId, onSelectVoice, castStats, cells, roleLevel, leadsManageVoices = false,
 }: Props) {
   const t = useT()
   const [voices, setVoices] = useState<Voice[]>([])
@@ -120,7 +127,7 @@ export function VoiceLibraryPanel({
   // the server gates at maintainer (600). Fail-open (null roleLevel) for
   // local projects that never resolve a syncRole — same convention as
   // resolveEditorCapabilities / canPerform.
-  const canEditVoices = roleLevel == null || roleLevel >= ROLE.MAINTAINER
+  const canEditVoices = canManageVoices(roleLevel, leadsManageVoices)
   const voiceDenialReason = !canEditVoices ? denialMessage(t, ROLE.MAINTAINER, roleLevel) : null
 
   // Keep the roster in sync with persisted settings so a voice created from

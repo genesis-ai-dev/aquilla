@@ -526,6 +526,59 @@ describe("useProjectSettings — write path", () => {
   // mirrors auth-worker's carve-out, which stays authoritative; the client
   // copy exists to stop a guaranteed-403 and to keep AQU-255 intact (never
   // apply a below-floor patch locally).
+  describe("project leads managing voices (AQU-2041)", () => {
+    it("lets a project lead save voice settings only when the switch is on", async () => {
+      mockSettingsFetch({
+        version: 1, updatedAt: "x", updatedBy: null,
+        settings: { projectLeadsManageVoices: true },
+      })
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+        kind: "ok",
+        value: { version: 2, updatedAt: "y", updatedBy: null, settings: { projectLeadsManageVoices: true } },
+      })
+      const { result } = renderHook(() => useProjectSettings("p1", 500))
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      let got!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ ttsSettings: { voices: [] } })
+      })
+      expect(got.kind).toBe("ok")
+      expect(patchSpy).toHaveBeenCalled()
+    })
+
+    it("blocks a contributor even when the switch is on", async () => {
+      mockSettingsFetch({
+        version: 1, updatedAt: "x", updatedBy: null,
+        settings: { projectLeadsManageVoices: true },
+      })
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
+      const { result } = renderHook(() => useProjectSettings("p1", 400))
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      let got!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ ttsSettings: { voices: [] } })
+      })
+      expect(got.kind).toBe("blocked")
+      expect(patchSpy).not.toHaveBeenCalled()
+    })
+
+    it("blocks a project lead while the switch is off", async () => {
+      mockSettingsFetch({
+        version: 1, updatedAt: "x", updatedBy: null,
+        settings: {},
+      })
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
+      const { result } = renderHook(() => useProjectSettings("p1", 500))
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      let got!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ ttsSettings: { voices: [] } })
+      })
+      expect(got.kind).toBe("blocked")
+      expect(patchSpy).not.toHaveBeenCalled()
+    })
+  })
+
   describe("autopilotEnabled-only carve-out (AQU-1246)", () => {
     it("lets a project lead (500) opt the project in", async () => {
       mockSettingsFetch({

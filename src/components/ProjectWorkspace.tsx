@@ -338,6 +338,8 @@ import { canPerform, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedL
 import { laneComboboxOptions } from "@/components/lane-options"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import { denialMessage } from "@/lib/permissions/denial"
+import { canManageVoices } from "@/lib/audio/voice-permission"
+import { targetLaneRowId } from "@/lib/audio/stamp-voice-lane"
 import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
 import { lockHolderForCell, useFocusLock } from "@/hooks/useFocusLock"
 import type { ProjectWsServerMessage, WsReconciler } from "@/lib/sync/ws-reconciler"
@@ -2282,6 +2284,7 @@ export function ProjectWorkspace() {
 
   // Audio lens: TTS settings (engine, voice library, cast) hydrated from IDB
   // and overlaid onto the project so generation uses the real engine/key/cast.
+  const activeVoiceLaneId = targetLaneRowId(project?.lanes, activeLane)
   const tts = useProjectTts(
     project?.id ?? null,
     project?.ttsSettings,
@@ -2306,6 +2309,7 @@ export function ProjectWorkspace() {
     ),
     // AQU-2038: the cast and the default voice are this lane's, not the project's.
     activeLane,
+    activeVoiceLaneId,
   )
   const audioProject = useMemo(
     () => (project ? { ...project, ttsSettings: tts.settings } : null),
@@ -3522,6 +3526,11 @@ export function ProjectWorkspace() {
   // name. Ref-wrapped below so the context value stays identity-stable.
   const handleTimelineAssignVoice = useCallback(
     (cell: CellData, voiceId: string, opts?: { applyToSpeaker?: boolean }) => {
+      const level = project?.syncRole?.level ?? null
+      if (!canManageVoices(level, project?.projectLeadsManageVoices === true, activeVoiceLaneId != null)) {
+        toast.add({ type: "error", title: denialMessage(t, ROLE.MAINTAINER, level) })
+        return
+      }
       const castName =
         cell.metadata && typeof cell.metadata.cast_name === "string" ? (cell.metadata.cast_name as string) : null
       if (opts?.applyToSpeaker && castName) {
@@ -3533,7 +3542,7 @@ export function ProjectWorkspace() {
       }
       tts.assignCells([cell.id], voiceId)
     },
-    [tts, getActiveCells],
+    [tts, getActiveCells, project?.syncRole?.level, project?.projectLeadsManageVoices, activeVoiceLaneId, t],
   )
   const timelineAssignVoiceRef = useRef(handleTimelineAssignVoice)
   timelineAssignVoiceRef.current = handleTimelineAssignVoice
@@ -14960,6 +14969,7 @@ export function ProjectWorkspace() {
                     username={currentUsername}
                     targetLanguage={activeLaneTargetLanguage}
                     fileId={activeFileId}
+                    leadsManageVoices={project.projectLeadsManageVoices === true && activeVoiceLaneId != null}
                   />
                 </div>
               ) : undefined
@@ -16996,6 +17006,7 @@ export function ProjectWorkspace() {
           targetLanes={liveLaneLanguages}
           cells={audioMergedCells}
           roleLevel={project.syncRole?.level ?? null}
+          leadsManageVoices={project.projectLeadsManageVoices === true && activeVoiceLaneId != null}
         />
       )}
       <SharePanel

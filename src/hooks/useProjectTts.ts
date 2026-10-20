@@ -15,6 +15,7 @@ import {
   assignedCastVoiceId, getVoiceLibrary, resolveVoice,
 } from "@/lib/audio/voices"
 import { laneTtsSettings, setLaneCast, setLaneDefaultVoice } from "@/lib/audio/lane-cast"
+import { stampNewVoiceLanes } from "@/lib/audio/stamp-voice-lane"
 import {
   migrateOmnivoiceTtsSettings,
   omnivoiceMigrationProperties,
@@ -86,6 +87,11 @@ export function useProjectTts(
    * blob — the engine, the key, the voice library — stays project-wide.
    */
   lane: string = "",
+  /**
+   * Lane row id a voice is stamped with the first time it is saved. Null when
+   * the open lane has no row yet. Editing a voice never moves it.
+   */
+  activeLaneId: string | null = null,
 ): ProjectTtsApi {
   // Read durable settings synchronously from localStorage on first render (lazy
   // init), so a reload sees the saved voice library immediately. Falls back to
@@ -179,10 +185,13 @@ export function useProjectTts(
         const { defaultVoiceId: starred, ...rest } = overrides
         patch = { ...rest, ...setLaneDefaultVoice(previous, lane, starred) }
       }
+      if (patch.voices) {
+        patch = { ...patch, voices: stampNewVoiceLanes(patch.voices, previous?.voices, activeLaneId) }
+      }
       const merged = { ...(previous ?? {}), ...patch } as ProjectTtsSettings
       await writeSettings(migrateOmnivoiceTtsSettings(merged, { targetLanguage }) ?? merged)
     },
-    [projectId, localTts, serverSettings, targetLanguage, lane, writeSettings],
+    [projectId, localTts, serverSettings, targetLanguage, lane, activeLaneId, writeSettings],
   )
 
   // AQU-1189: persist OmniVoice → Inworld once per project open so stored JSON

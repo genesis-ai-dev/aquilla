@@ -24,11 +24,16 @@ interface VoiceSidebarProps {
   username: string
   targetLanguage?: string
   fileId?: string | null
+  /**
+   * AQU-2041. When omitted, the project's own switch is used. The workspace
+   * passes false when the open lane is not one this lead can write.
+   */
+  leadsManageVoices?: boolean
 }
 
 export function VoiceSidebar({
   project, projectId, tts, session, username,
-  targetLanguage, fileId, cells,
+  targetLanguage, fileId, cells, leadsManageVoices,
 }: VoiceSidebarProps) {
   // `username` is part of the rail's contract (the studio is project-scoped)
   // but the cast roster reads everything else it needs off `tts`.
@@ -56,6 +61,7 @@ export function VoiceSidebar({
             castStats={tts.castStats}
             cells={cells}
             roleLevel={project.syncRole?.level ?? null}
+            leadsManageVoices={leadsManageVoices ?? project.projectLeadsManageVoices === true}
           />
         </div>
       </div>

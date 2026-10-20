@@ -9,7 +9,7 @@
 import { NewVoiceModal } from "./NewVoiceModal"
 import { upsertVoice } from "@/lib/audio/voices"
 import { resolveTtsProvider } from "@/lib/audio/tts-providers"
-import { ROLE } from "@/lib/frontier/roles"
+import { canManageVoices } from "@/lib/audio/voice-permission"
 import type { ProjectTtsApi } from "@/hooks/useProjectTts"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -30,6 +30,8 @@ export interface CloneVoiceModalHostProps {
   cells: CellData[]
   /** Project role level; same maintainer floor as VoiceLibraryPanel. */
   roleLevel?: number | null
+  /** AQU-2041. Same switch as VoiceLibraryPanel. */
+  leadsManageVoices?: boolean
 }
 
 export function CloneVoiceModalHost({
@@ -45,8 +47,9 @@ export function CloneVoiceModalHost({
   archivedLanes,
   cells,
   roleLevel,
+  leadsManageVoices = false,
 }: CloneVoiceModalHostProps) {
-  const canEditVoices = roleLevel == null || roleLevel >= ROLE.MAINTAINER
+  const canEditVoices = canManageVoices(roleLevel, leadsManageVoices)
 
   const saveVoice = (voice: Voice) => {
     if (!canEditVoices) return

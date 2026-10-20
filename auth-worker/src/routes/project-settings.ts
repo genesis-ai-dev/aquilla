@@ -73,6 +73,7 @@ import { z } from "zod"
 import { pushDirtyLinksAfterResponse } from "../lib/monday/push"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { leadMaySaveTtsSettings, incomingRewritesHiddenVoices } from "../../../src/lib/lanes/voice-wall"
+import { firstLaneIdFromIdentities, homeTtsVoiceRecords } from "../../../src/lib/audio/stamp-voice-lane"
 import { ROLE, type AuthUser } from "../types"
 import { ROLE_NAMES, resolveProjectRole } from "../services/project-permissions"
 import { roleRequiredBody, type RoleRequiredBody } from "../lib/role-denial"
@@ -500,11 +501,29 @@ projectSettings.on(
       settings = restored.settings
     }
 
+    // A stored voice with no lane, other than the Narrator, belongs to the
+    // first lane. Stamp that on both sides of the diff so the assignment is
+    // saved without looking like the caller edited the voice. The hidden-lane
+    // check below still compares the body as it arrived.
+    const voiceLanes = lanes.some((lane) => typeof lane.position === "number")
+      ? lanes
+      : await loadTargetLaneIdentities(c.env.AQUILLA_PG, projectId)
+    const firstVoiceLaneId = firstLaneIdFromIdentities(voiceLanes)
+    let storedForDiff = stored.settings
+    if (firstVoiceLaneId) {
+      const storedTts = plainRecord(storedForDiff.ttsSettings)
+      const nextTts = plainRecord(settings.ttsSettings)
+      if (storedTts) {
+        storedForDiff = { ...storedForDiff, ttsSettings: homeTtsVoiceRecords(storedTts, firstVoiceLaneId) }
+      }
+      if (nextTts) settings = { ...settings, ttsSettings: homeTtsVoiceRecords(nextTts, firstVoiceLaneId) }
+    }
+
     // The diff against the stored blob, for EVERY role, taken after the
     // read-wall echo is put back so a hidden-lane echo cannot fake a change.
     // The retired `terminology` key is refused whoever writes it (AQU-1724),
     // and the sub-maintainer carve-outs below are judged on the same diff.
-    const changed = changedSettingsKeys(stored.settings, settings)
+    const changed = changedSettingsKeys(storedForDiff, settings)
     if (changed.includes(RETIRED_TERMINOLOGY_KEY)) {
       return c.json({ error: RETIRED_TERMINOLOGY_MESSAGE }, 400)
     }
@@ -541,7 +560,7 @@ projectSettings.on(
         && changed.every((key) => key === COUNT_STRUCTURAL_KEY)
       const alignmentSeedsOnly = changed.length > 0
         && changed.every((key) => key === ALIGNMENT_SEEDS_KEY)
-      const storedTts = plainRecord(stored.settings.ttsSettings) ?? {}
+      const storedTts = plainRecord(storedForDiff.ttsSettings) ?? {}
       const nextTts = plainRecord(settings.ttsSettings) ?? {}
       const voiceLeadWrite = changed.length > 0
         && changed.every((key) => key === "ttsSettings")

@@ -49,7 +49,7 @@ import {
 import { LaneArchivedDialog } from "./LaneArchivedDialog"
 // AQU-1613: a `?lane=` deep link is resolved by lane id (the stored choice and
 // the first-position fallback live in useActiveLane).
-import { laneTagForId, resolveDeepLinkLaneId } from "@/lib/lanes/active-lane-choice"
+import { firstPositionLaneId, laneTagForId, resolveDeepLinkLaneId } from "@/lib/lanes/active-lane-choice"
 import { readAtVersion, useActiveCellStore, useCellStoreVersion, type CellSummary } from "@/hooks/useActiveCellStore"
 import { useActiveLane } from "@/hooks/useActiveLane"
 import { useActiveTargetLane } from "@/hooks/useActiveTargetLane"
@@ -2285,6 +2285,9 @@ export function ProjectWorkspace() {
   // Audio lens: TTS settings (engine, voice library, cast) hydrated from IDB
   // and overlaid onto the project so generation uses the real engine/key/cast.
   const activeVoiceLaneId = targetLaneRowId(project?.lanes, activeLane)
+  const firstVoiceLaneId = firstPositionLaneId(
+    (project?.lanes ?? []).filter((lane) => lane.role === "target"),
+  )
   const tts = useProjectTts(
     project?.id ?? null,
     project?.ttsSettings,
@@ -2310,6 +2313,7 @@ export function ProjectWorkspace() {
     // AQU-2038: the cast and the default voice are this lane's, not the project's.
     activeLane,
     activeVoiceLaneId,
+    firstVoiceLaneId,
   )
   const audioProject = useMemo(
     () => (project ? { ...project, ttsSettings: tts.settings } : null),

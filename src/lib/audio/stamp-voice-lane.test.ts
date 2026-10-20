@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { stampNewVoiceLanes, stampVoiceLane, targetLaneRowId } from "./stamp-voice-lane"
+import {
+  firstLaneIdFromIdentities,
+  homeUnscopedVoices,
+  stampNewVoiceLanes,
+  stampVoiceLane,
+  targetLaneRowId,
+} from "./stamp-voice-lane"
 import type { Voice } from "@/lib/parsers/types"
 
 const voice = (over: Partial<Voice> & Pick<Voice, "id">): Voice => ({ name: over.id, ...over })
@@ -20,6 +26,25 @@ describe("stampVoiceLane", () => {
     const made = voice({ id: "made" })
     const next = stampNewVoiceLanes([narrator, made], [narrator], "ln-es")
     expect(next.map((entry) => entry.laneId)).toEqual([undefined, "ln-es"])
+  })
+
+  it("puts an unscoped voice on the first lane and leaves the Narrator", () => {
+    const narrator = voice({ id: "preset-narrator", builtIn: true })
+    const owned = voice({ id: "ar", laneId: "ln-ar" })
+    const old = voice({ id: "old" })
+    const homed = homeUnscopedVoices([narrator, owned, old], "ln-first")
+    expect(homed[0]).toBe(narrator)
+    expect(homed[1]).toBe(owned)
+    expect(homed[2]?.laneId).toBe("ln-first")
+    expect(homeUnscopedVoices([old], null)).toEqual([old])
+  })
+
+  it("picks the first non-archived lane", () => {
+    expect(firstLaneIdFromIdentities([
+      { id: "archived", position: 0, archivedAt: "2026-01-01" },
+      { id: "first", position: 1, archivedAt: null },
+      { id: "later", position: 2, archivedAt: null },
+    ])).toBe("first")
   })
 
   it("resolves one target lane row for a legacy tag", () => {

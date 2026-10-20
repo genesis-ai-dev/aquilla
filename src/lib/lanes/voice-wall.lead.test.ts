@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { homeTtsVoiceRecords } from "@/lib/audio/stamp-voice-lane"
 import { incomingRewritesHiddenVoices, leadMaySaveTtsSettings } from "./voice-wall"
 
 const lanes = [
@@ -61,5 +62,33 @@ describe("lead voice saves (AQU-2041)", () => {
     }
     expect(incomingRewritesHiddenVoices(stored, echo, spanish, lanes)).toBe(false)
     expect(incomingRewritesHiddenVoices(stored, crafted, null, lanes)).toBe(false)
+  })
+
+  it("counts an unscoped voice as the first lane after both sides are homed", () => {
+    const positioned = [
+      { id: "ln-de", name: "German", legacyTag: "de", position: 1, archivedAt: null },
+      { id: "ln-es", name: "Spanish", legacyTag: "es", position: 2, archivedAt: null },
+    ]
+    const before = {
+      voices: [
+        { id: "preset-narrator", name: "Narrator", builtIn: true },
+        { id: "old", name: "Old" },
+        { id: "es-1", name: "Spanish", laneId: "ln-es" },
+      ],
+    }
+    const homed = homeTtsVoiceRecords(before, "ln-de")
+    expect(leadMaySaveTtsSettings(homed, homed, spanish, positioned)).toBe(true)
+    const renamed = {
+      ...homed,
+      voices: (homed.voices as { id: string; name: string }[]).map((voice) =>
+        voice.id === "old" ? { ...voice, name: "New" } : voice),
+    }
+    expect(leadMaySaveTtsSettings(homed, renamed, spanish, positioned)).toBe(false)
+    const own = {
+      ...homed,
+      voices: (homed.voices as { id: string; name: string }[]).map((voice) =>
+        voice.id === "es-1" ? { ...voice, name: "Español" } : voice),
+    }
+    expect(leadMaySaveTtsSettings(homed, own, spanish, positioned)).toBe(true)
   })
 })

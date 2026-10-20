@@ -15,7 +15,7 @@ import {
   assignedCastVoiceId, getVoiceLibrary, resolveVoice,
 } from "@/lib/audio/voices"
 import { laneTtsSettings, setLaneCast, setLaneDefaultVoice } from "@/lib/audio/lane-cast"
-import { stampNewVoiceLanes } from "@/lib/audio/stamp-voice-lane"
+import { homeUnscopedVoices, stampNewVoiceLanes } from "@/lib/audio/stamp-voice-lane"
 import {
   migrateOmnivoiceTtsSettings,
   omnivoiceMigrationProperties,
@@ -92,6 +92,12 @@ export function useProjectTts(
    * the open lane has no row yet. Editing a voice never moves it.
    */
   activeLaneId: string | null = null,
+  /**
+   * First target lane in switcher order. A stored voice with no lane, other
+   * than the Narrator, is written onto this lane so it stays there when a
+   * second lane is added.
+   */
+  firstLaneId: string | null = null,
 ): ProjectTtsApi {
   // Read durable settings synchronously from localStorage on first render (lazy
   // init), so a reload sees the saved voice library immediately. Falls back to
@@ -131,6 +137,10 @@ export function useProjectTts(
   const writeSettings = useCallback(
     async (next: ProjectTtsSettings) => {
       if (!projectId) return
+      if (next.voices) {
+        const voices = homeUnscopedVoices(next.voices, firstLaneId)
+        if (voices !== next.voices) next = { ...next, voices: [...voices] }
+      }
       const previous = localTts ?? serverSettings
       const seq = ++writeSeqRef.current
       setLocalTts(next)
@@ -169,7 +179,7 @@ export function useProjectTts(
           })
       }
     },
-    [projectId, localTts, serverSettings, onSyncTts],
+    [projectId, localTts, serverSettings, onSyncTts, firstLaneId],
   )
 
   const saveTts = useCallback(

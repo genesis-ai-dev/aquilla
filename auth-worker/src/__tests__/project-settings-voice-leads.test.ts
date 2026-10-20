@@ -9,7 +9,8 @@ import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
 const TTS = {
   voices: [
-    { id: "narrator", name: "Narrator" },
+    { id: "preset-narrator", name: "Narrator", builtIn: true },
+    { id: "old", name: "Old hand" },
     { id: "es-1", name: "Spanish", laneId: "ln-es" },
     { id: "de-1", name: "German", laneId: "ln-de" },
   ],
@@ -128,8 +129,13 @@ describe("project leads managing voices (AQU-2041)", () => {
     const res = await patchSettings("dan", renameSpanish(seen.settings, "Español"), seen.version)
     expect(res.status).toBe(200)
     const saved = await storedSettings()
-    const tts = saved.ttsSettings as { voices: { id: string; name: string }[]; laneDefaultVoiceId: Record<string, string> }
+    const tts = saved.ttsSettings as {
+      voices: { id: string; name: string; laneId?: string }[]
+      laneDefaultVoiceId: Record<string, string>
+    }
     expect(tts.voices.find((voice) => voice.id === "es-1")?.name).toBe("Español")
+    expect(tts.voices.find((voice) => voice.id === "old")).toMatchObject({ name: "Old hand", laneId: "ln-de" })
+    expect(tts.voices.find((voice) => voice.id === "preset-narrator")?.laneId).toBeUndefined()
     expect(tts.voices.find((voice) => voice.id === "de-1")?.name).toBe("German")
     expect(tts.laneDefaultVoiceId.de).toBe("de-1")
     expect(saved.projectLeadsManageVoices).toBe(true)

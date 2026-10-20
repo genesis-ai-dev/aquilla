@@ -17,7 +17,7 @@ import {
   useState,
 } from "react"
 import type { ReactNode } from "react"
-import { catalogFor, loadCatalog, onCatalogLoaded } from "./messages"
+import { CATALOG_LOCALES, catalogFor, loadCatalog, onCatalogLoaded } from "./messages"
 import { en, type MessageKey } from "./messages/en"
 import { translate, type TVars } from "./translate"
 import {
@@ -49,6 +49,11 @@ function applyDocumentLocale(locale: string, dir: Direction): void {
   html.dir = dir
 }
 
+/** A locale can be drawn: its catalog is here, or it has none of its own (English). */
+function catalogReady(locale: string): boolean {
+  return catalogFor(locale) !== undefined || !CATALOG_LOCALES.includes(locale)
+}
+
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<string>(() =>
     detectInitialLocale(
@@ -57,40 +62,44 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     ),
   )
 
-  const dir = directionFor(locale)
-
   // AQU-2090: only English ships with the app. Another locale's catalog is
   // fetched when it's first chosen (main.tsx fetches the starting one before
-  // the first paint); until it arrives the UI reads English, then re-renders.
+  // the first paint). Until a chosen locale's catalog arrives the UI stays in
+  // the language it is already in, then switches all at once — never a moment
+  // of English between two other languages.
   const [, setCatalogsLoaded] = useState(0)
   useEffect(() => onCatalogLoaded(() => setCatalogsLoaded((n) => n + 1)), [])
   useEffect(() => {
     void loadCatalog(locale).catch(() => {
-      // Offline or a failed fetch: stay in English; the next pick retries.
+      // Offline or a failed fetch: stay in the shown language; picking again retries.
     })
   }, [locale])
-  const catalog = catalogFor(locale) ?? en
+  const [shown, setShown] = useState(() => (catalogReady(locale) ? locale : DEFAULT_LOCALE))
+  if (shown !== locale && catalogReady(locale)) setShown(locale)
+  const catalog = catalogFor(shown) ?? en
+  const dir = directionFor(shown)
 
   useEffect(() => {
-    applyDocumentLocale(locale, dir)
-  }, [locale, dir])
+    applyDocumentLocale(shown, dir)
+  }, [shown, dir])
 
   const setLocale = useCallback((code: string) => {
     const next = normalizeLocale(code)
     setLocaleState(next)
     writeStoredLocale(next)
+    void loadCatalog(next).catch(() => {})
   }, [])
 
   const t = useCallback<TFunction>(
     // The locale is passed as well as the catalog: plural-category selection is
     // a property of the language, not of which strings happen to be translated.
-    (key, vars) => translate(catalog, key, vars, locale),
-    [catalog, locale],
+    (key, vars) => translate(catalog, key, vars, shown),
+    [catalog, shown],
   )
 
   const value = useMemo<I18nContextValue>(
-    () => ({ locale, dir, locales: LOCALES, setLocale, t }),
-    [locale, dir, setLocale, t],
+    () => ({ locale: shown, dir, locales: LOCALES, setLocale, t }),
+    [shown, dir, setLocale, t],
   )
 
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>

@@ -92,6 +92,14 @@ so the production version needs no `IDENTITY_BASE`/`SYNC_BASE`.
 4. Apply migration `0180_mcp_oauth_codes_access.sql`. Production has had it
    since 2026-10-19.
 
+**Production state (2026-10-19).** Registered as integration **App248170**
+(`zapier/.zapierapprc`). Version 1.0.0 is pushed, private. Redirect URI:
+`https://zapier.com/dashboard/auth/oauth/return/App248170CLIAPI/` (from
+`describe`). Client id `aquilla-zapier`. The production auth-worker has
+`ZAPIER_CLIENT_ID`, `ZAPIER_REDIRECT_URI` and `ZAPIER_CLIENT_SECRET`, all as
+wrangler secrets. Read the secret back with `zapier-platform env:get 1.0.0`
+when a new version needs it. Dev has no Zapier client.
+
 **Deploy order: migrate first.** The identity worker's consent decision and
 token endpoint read and write `mcp_oauth_codes.access`, which only `0180`
 adds. That holds for every OAuth client, ChatGPT and Claude included, not

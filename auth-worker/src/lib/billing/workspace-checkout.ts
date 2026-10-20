@@ -89,6 +89,9 @@ export async function startWorkspaceCheckoutRehearsal(
       success_url: `${origin}/orgs/${orgId}/settings/billing?checkout=success`,
       cancel_url: `${origin}/orgs/${orgId}/settings/billing?checkout=cancel`,
       expires_at: expiresAt,
+      // Prices are tax-exclusive; Stripe Tax adds GST/HST and collects tax IDs.
+      'automatic_tax[enabled]': 'true',
+      'tax_id_collection[enabled]': 'true',
     }
     if (email) params.customer_email = email
     quote.lineItems.forEach((line, index) => {

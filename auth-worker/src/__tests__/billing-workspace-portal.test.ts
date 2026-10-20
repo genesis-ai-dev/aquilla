@@ -17,12 +17,12 @@ async function openPortal(user = 'alice', options = settings(), org = '1',
     ...(body ? { body: JSON.stringify(body) } : {}),
   }, options)
 }
-async function setup(offer = 'pro') {
-  const paid = await completedPayment(offer)
+async function setup(scope: 'personal' | 'team' = 'team') {
+  const paid = await completedPayment('team', 'year', undefined, scope)
   expect((await paid.send()).status).toBe(200)
   const upstream = globalThis.fetch
   const requests: URLSearchParams[] = []
-  const configuration = { id: offer.startsWith('team') ? 'bpc_team' : 'bpc_personal',
+  const configuration = { id: 'bpc_team',
     active: true, livemode: false, features: {
       invoice_history: { enabled: true }, payment_method_update: { enabled: true },
       subscription_update: { enabled: false }, subscription_cancel: { enabled: false },
@@ -43,8 +43,9 @@ async function setup(offer = 'pro') {
   return { paid, configuration, requests, fetch,
     transform: (fn: typeof transform) => { transform = fn } }
 }
-it.each(['pro', 'team_20x'])('opens the server-owned portal after signed %s activation', async offer => {
-  const f = await setup(offer)
+// A personal workspace that bought Team manages it through the Team portal.
+it.each(['personal', 'team'] as const)('opens the server-owned Team portal after signed activation in a %s workspace', async scope => {
+  const f = await setup(scope)
   const before = await env.AQUILLA_PG.prepare('SELECT * FROM workspace_plan_entitlements').first()
   const response = await openPortal('alice', settings(), '1', 'http://127.0.0.1', {
     customer: 'cus_someone_else', configuration: 'bpc_other', return_url: 'https://evil.test',
@@ -53,7 +54,7 @@ it.each(['pro', 'team_20x'])('opens the server-owned portal after signed %s acti
   expect(response.headers.get('cache-control')).toBe('private, no-store')
   expect(await response.json()).toEqual({ url: 'https://billing.stripe.com/p/session/test', sandbox: true })
   expect(Object.fromEntries(f.requests[0]!)).toEqual({ customer: 'cus_rehearsal',
-    configuration: offer === 'pro' ? 'bpc_personal' : 'bpc_team',
+    configuration: 'bpc_team',
     return_url: 'http://127.0.0.1:5173/orgs/1/settings/billing' })
   expect(await env.AQUILLA_PG.prepare('SELECT * FROM workspace_plan_entitlements').first()).toEqual(before)
 })
@@ -84,7 +85,7 @@ it('rejects deployed request origins', async () => {
   expect((await openPortal('alice', settings(), '1', 'https://api.aquilla.app')).status).toBe(503)
   expect(f.fetch).not.toHaveBeenCalled()
 })
-it.each(['STRIPE_PORTAL_PERSONAL_CONFIGURATION', 'BASE_URL'] as const)('rejects missing %s', async key => {
+it.each(['STRIPE_PORTAL_TEAM_CONFIGURATION', 'BASE_URL'] as const)('rejects missing %s', async key => {
   const f = await setup()
   expect((await openPortal('alice', { ...settings(), [key]: undefined })).status).toBe(503)
   expect(f.requests).toHaveLength(0)
@@ -146,13 +147,13 @@ it('opens the production workspace portal after sales are disabled', async () =>
   const { testStripeCatalog } = await import('./helpers/stripe-catalog')
   const catalog = { ...testStripeCatalog,
     bindings: testStripeCatalog.bindings.map(b => ({ ...b, live: true })) }
-  const f = await completedPayment('pro', 'month', catalog)
+  const f = await completedPayment('team', 'month', catalog)
   expect((await f.send()).status).toBe(200)
   const upstream = globalThis.fetch
   vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
     const path = new URL(url).pathname
     if (path.startsWith('/v1/billing_portal/configurations/')) return Response.json({
-      id: 'bpc_personal', active: true, livemode: true, features: {
+      id: 'bpc_team', active: true, livemode: true, features: {
         invoice_history: { enabled: true }, payment_method_update: { enabled: true },
         subscription_update: { enabled: false }, subscription_cancel: { enabled: false },
       },
@@ -165,7 +166,7 @@ it('opens the production workspace portal after sales are disabled', async () =>
     }
     return upstream(url, init)
   })
-  const stopped = { ...config(catalog), STRIPE_PORTAL_PERSONAL_CONFIGURATION: 'bpc_personal',
+  const stopped = { ...config(catalog), STRIPE_PORTAL_TEAM_CONFIGURATION: 'bpc_team',
     BILLING_WORKSPACE_CHECKOUT_ENABLED: 'false' }
   const response = await app.request('https://api.aquilla.app/api/v2/orgs/1/billing/workspace/portal', {
     method: 'POST', headers: authHeader(await jwtFor('alice')),

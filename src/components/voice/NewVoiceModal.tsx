@@ -215,9 +215,12 @@ function NewVoiceModalBody({
     }),
   )
   const update = useCallback((patch: Partial<Voice>) => setDraft((d) => ({ ...d, ...patch })), [])
+  // AQU-2032: the Language/Accent fields own `language`. A speaker pick may only
+  // seed it when the draft has none — it must never overwrite the accent the
+  // user chose, nor clear the language when the speaker carries none.
   const setInworldVoice = useCallback((voiceId: string, language?: string) => {
-    update({ voiceName: voiceId, language })
-  }, [update])
+    setDraft((d) => (d.language ? { ...d, voiceName: voiceId } : { ...d, voiceName: voiceId, language }))
+  }, [])
   const inworldLocaleLanguage = draft.language
     ?? catalogLanguages.find((lane) => toInworldLanguage(lane))
     ?? catalogLanguages[0]

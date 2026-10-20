@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   MONDAY_COLUMN_GROUPS,
+  NAME_METRICS,
   RECOMMENDED_METRICS,
   REQUIRED_METRIC,
   columnSelectionCounts,
@@ -32,6 +33,12 @@ describe("column selection", () => {
 
     const later = initialColumnSelection(mapped, board, { recommend: false })
     expect([...later].sort()).toEqual(["completion_pct", "external_id", "translators"])
+  })
+
+  it("ticks no column with people's names for a new board unless the board already has it (AQU-1989)", () => {
+    for (const m of NAME_METRICS) expect(RECOMMENDED_METRICS).not.toContain(m)
+    const fresh = initialColumnSelection(mapped, [board[0]], { recommend: true })
+    for (const m of NAME_METRICS) expect(fresh.has(m)).toBe(false)
   })
 
   it("counts new columns and ones already there", () => {

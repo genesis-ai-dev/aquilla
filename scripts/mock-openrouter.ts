@@ -443,11 +443,36 @@ export function scriptMockResponse(messages: ChatMessage[]) {
   )
 }
 
-export function mockTranscription() {
-  return { text: "Mock transcription", words: [
-    { word: "Mock", start: 0, end: 0.25 },
-    { word: "transcription", start: 0.25, end: 0.5 },
-  ], usage: { cost: 0.0001, seconds: 1 } }
+export function mockTranscription(audioSeconds?: number) {
+  if (audioSeconds === undefined || audioSeconds <= 0.5) {
+    return { text: "Mock transcription", words: [
+      { word: "Mock", start: 0, end: 0.25 },
+      { word: "transcription", start: 0.25, end: 0.5 },
+    ], usage: { cost: 0.0001, seconds: 1 } }
+  }
+  // AQU-1681: a minute of a recording is sent at once and each word is handed
+  // back to the row it was spoken in, so the stand-in "speaks" all the way
+  // through what it was sent: a word every fifth of a second — often enough
+  // that even the shortest row the splitter makes (200 ms) holds one — named
+  // for when it was said, so a local run shows each row's words are its own.
+  const words = Array.from({ length: Math.floor(audioSeconds / 0.2) }, (_, i) => ({
+    word: `mock@${(i * 0.2).toFixed(1)}`, start: i * 0.2, end: i * 0.2 + 0.15,
+  }))
+  return {
+    text: words.map((w) => w.word).join(" "), words,
+    usage: { cost: 0.0001, seconds: Math.ceil(audioSeconds) },
+  }
+}
+
+/** Seconds of 16 kHz mono 16-bit WAV in a transcription request's base64. */
+export function wavSecondsOfRequest(body: string): number | undefined {
+  try {
+    const data = (JSON.parse(body) as { input_audio?: { data?: string } }).input_audio?.data
+    if (!data) return undefined
+    return Math.max(0, Buffer.from(data, "base64").byteLength - 44) / 32_000
+  } catch {
+    return undefined
+  }
 }
 
 const server = http.createServer((req, res) => {
@@ -459,10 +484,11 @@ const server = http.createServer((req, res) => {
     return
   }
   if (req.method === "POST" && req.url?.endsWith("/audio/transcriptions")) {
-    req.resume()
+    const parts: Buffer[] = []
+    req.on("data", (part: Buffer) => parts.push(part))
     req.on("end", () => {
       res.writeHead(200, { "Content-Type": "application/json" })
-      res.end(JSON.stringify(mockTranscription()))
+      res.end(JSON.stringify(mockTranscription(wavSecondsOfRequest(Buffer.concat(parts).toString("utf8")))))
     })
     return
   }

@@ -1843,19 +1843,30 @@ export async function computeMediaSegmentSpecs(
   }).catch(() => null)
   const durationMs = analysis?.durationMs ?? (await probeMediaDurationMs(file).catch(() => undefined))
   const segments = analysis?.segments ?? []
+  return { durationMs, specs: mediaSegmentSpecsFromSpeech(segments, durationMs) }
+}
 
+/**
+ * Detected speech → segment specs: tiled cell timing, tight trims, and the
+ * single whole-clip spec when there is nothing to split. Split out of
+ * `computeMediaSegmentSpecs` (AQU-1681) for a caller that found the speech
+ * itself — a linked video's sound is analysed while it streams in, so
+ * decoding it again here would only repeat the work.
+ */
+export function mediaSegmentSpecsFromSpeech(
+  segments: readonly { startMs: number; endMs: number }[],
+  durationMs: number | undefined,
+): MediaSegmentSpec[] {
   const timings = tileSegments(segments, durationMs)
-  const specs: MediaSegmentSpec[] =
-    segments.length >= 2
-      ? segments.map((s, i) => ({
-          cellId: uuidv7(),
-          startMs: timings[i].startMs,
-          endMs: timings[i].endMs,
-          trimStartMs: s.startMs,
-          trimEndMs: s.endMs,
-        }))
-      : [{ cellId: uuidv7(), ...(durationMs !== undefined ? { startMs: 0, endMs: Math.round(durationMs) } : {}) }]
-  return { durationMs, specs }
+  return segments.length >= 2
+    ? segments.map((s, i) => ({
+        cellId: uuidv7(),
+        startMs: timings[i].startMs,
+        endMs: timings[i].endMs,
+        trimStartMs: s.startMs,
+        trimEndMs: s.endMs,
+      }))
+    : [{ cellId: uuidv7(), ...(durationMs !== undefined ? { startMs: 0, endMs: Math.round(durationMs) } : {}) }]
 }
 
 /** Import source media as timed segments, preserving the uploaded clip once. */

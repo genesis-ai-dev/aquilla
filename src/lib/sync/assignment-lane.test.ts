@@ -7,6 +7,7 @@ import {
   isDefaultLaneValue,
   laneIdForTag,
   lanesStaffedBy,
+  lanesTiedToTeams,
   laneTagForAssignment,
   selectValueForLane,
 } from "./assignment-lane"
@@ -228,6 +229,95 @@ describe("lanes someone on the project is on (AQU-1994)", () => {
       staffedLaneIds: new Set<string>(),
     })
     expect(items).toEqual([
+      { value: DEFAULT_LANE_SELECT_VALUE, label: "Bambara" },
+      { value: "Swahili", label: "Swahili" },
+    ])
+  })
+})
+
+/**
+ * AQU-2047 — an assign field offers only the lanes an attached team is tied
+ * to. Matthew's project listed French, Mandarin Chinese and Swedish after a
+ * team had saved a subset of those checks. Staffing (AQU-1994) is a different
+ * cut: a lane can have people on it and still be outside the team's set, and
+ * a lane the team checked still drops when nobody is on it.
+ *
+ * A team that has not saved checkboxes stays tied to every current lane. No
+ * team, or a read that never arrived, leaves the menu as it was. Several
+ * teams union. One team that is not explicit covers every current lane, so
+ * the others' checks cannot hide one.
+ */
+describe("lanes an attached team is tied to (AQU-2047)", () => {
+  const fr = { legacyTag: "French", label: "French", laneId: "lane-fr" }
+  const zh = { legacyTag: "Mandarin Chinese", label: "Mandarin Chinese", laneId: "lane-zh" }
+  const sv = { legacyTag: "Swedish", label: "Swedish", laneId: "lane-sv" }
+  const lanes = [fr, zh, sv]
+
+  it("offers only the lane one explicit team checked", () => {
+    const tied = lanesTiedToTeams(lanes, [{ lanesExplicit: true, laneIds: ["lane-fr"] }])
+    expect(tied).toEqual([fr])
+    expect(buildLaneItems({
+      lanes,
+      defaultLaneFallback: "Default language",
+      teamLanes: [{ lanesExplicit: true, laneIds: ["lane-fr"] }],
+    })).toEqual([{ value: "French", label: "French" }])
+  })
+
+  it("keeps the current lanes when the team has not saved a lane list", () => {
+    expect(lanesTiedToTeams(lanes, [{ lanesExplicit: false }])).toEqual(lanes)
+    expect(buildLaneItems({
+      lanes,
+      defaultLaneFallback: "Default language",
+      teamLanes: [{ lanesExplicit: false }],
+    }).map((item) => item.label)).toEqual(["French", "Mandarin Chinese", "Swedish"])
+  })
+
+  it("leaves the menu unchanged when there is no team, or the server said nothing", () => {
+    expect(lanesTiedToTeams(lanes, [])).toEqual(lanes)
+    expect(lanesTiedToTeams(lanes, null)).toEqual(lanes)
+    expect(lanesTiedToTeams(lanes, undefined)).toEqual(lanes)
+    expect(buildLaneItems({
+      lanes,
+      defaultLaneFallback: "Default language",
+    }).map((item) => item.label)).toEqual(["French", "Mandarin Chinese", "Swedish"])
+  })
+
+  it("unions the lanes two explicit teams checked", () => {
+    expect(lanesTiedToTeams(lanes, [
+      { lanesExplicit: true, laneIds: ["lane-fr"] },
+      { lanesExplicit: true, laneIds: ["lane-sv"] },
+    ])).toEqual([fr, sv])
+  })
+
+  it("keeps every current lane when any attached team is not explicit", () => {
+    expect(lanesTiedToTeams(lanes, [
+      { lanesExplicit: true, laneIds: ["lane-fr"] },
+      { lanesExplicit: false },
+    ])).toEqual(lanes)
+  })
+
+  it("still drops a lane nobody is on, even when a team checked it", () => {
+    const items = buildLaneItems({
+      lanes,
+      defaultLaneFallback: "Default language",
+      staffedLaneIds: new Set(["lane-zh"]),
+      teamLanes: [{ lanesExplicit: true, laneIds: ["lane-fr", "lane-zh"] }],
+    })
+    expect(items).toEqual([{ value: "Mandarin Chinese", label: "Mandarin Chinese" }])
+  })
+
+  it("keeps a lane whose id the server never sent — the team's checks cannot judge it", () => {
+    const old = { legacyTag: "Swedish", label: "Swedish" }
+    expect(lanesTiedToTeams([zh, old], [{ lanesExplicit: true, laneIds: ["lane-fr"] }])).toEqual([old])
+  })
+
+  it("does not apply the team's checks to a project that has no lane rows", () => {
+    expect(buildLaneItems({
+      targetLanes: ["Swahili"],
+      defaultLaneLabel: "Bambara",
+      defaultLaneFallback: "Default language",
+      teamLanes: [{ lanesExplicit: true, laneIds: ["lane-fr"] }],
+    })).toEqual([
       { value: DEFAULT_LANE_SELECT_VALUE, label: "Bambara" },
       { value: "Swahili", label: "Swahili" },
     ])

@@ -31,9 +31,11 @@ import {
   regionFlagEmoji,
   regionOf,
   localeRowsForPicker,
+  primaryLanguageOf,
   rowForDesignCode,
 } from "@/lib/audio/inworld-design-locales"
 import { useInworldSupportedLanguages } from "@/lib/audio/inworld-voices"
+import { toInworldLanguage } from "@/lib/audio/inworld-languages"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { cn } from "@/lib/utils"
 
@@ -166,14 +168,52 @@ export function InworldDesignLocaleFields({
     () => localeRowsForPicker(catalog, language, voicesOnly),
     [catalog, language, voicesOnly],
   )
-  const selected = canonicalizeDesignLocale(language, rows)
-  const selectedLanguage = familyCodeOf(selected, rows)
+  // AQU-2032: a voice keeps its own saved accent even when the accent list
+  // doesn't offer it — the prebuilt list is narrowed to accents that have stock
+  // voices, and the catalog itself changes. Without this the accent would read
+  // as the language's default and get written back into the draft, so opening
+  // the voice and saving it unchanged would silently replace its accent.
+  const savedCode = toInworldLanguage(language)
+  const savedRow = useMemo(() => {
+    if (!savedCode) return undefined
+    const family = familyCodeOf(savedCode, rows)
+    const offered = designAccentsForFamily(family, rows)
+    if (offered.some((row) => row.code.toLowerCase() === savedCode.toLowerCase())) return undefined
+    const known = rowForDesignCode(savedCode, rows) ?? rowForDesignCode(savedCode, catalog)
+    if (known) return known
+    // Unknown to the catalog too — it hasn't loaded, or Inworld dropped the row.
+    // Keep the saved code selectable under its own family rather than losing it.
+    const primary = primaryLanguageOf(savedCode)
+    const sample = rows.find((row) => row.familyCode.toLowerCase() === primary)
+      ?? catalog.find((row) => row.familyCode.toLowerCase() === primary)
+    if (!sample) return undefined
+    return {
+      code: savedCode,
+      familyCode: sample.familyCode,
+      familyDisplayName: sample.familyDisplayName,
+      accentDisplayName: "",
+      displayName: sample.familyDisplayName,
+      creationEnabled: true,
+      hasVoices: false,
+    }
+  }, [savedCode, catalog, rows])
+  const selected = savedRow?.code ?? canonicalizeDesignLocale(language, rows)
+  const selectedLanguage = savedRow?.familyCode ?? familyCodeOf(selected, rows)
   const languageOptions = useMemo<LocaleOption[]>(() => {
-    return designLanguageFamilies(rows)
+    const families = designLanguageFamilies(rows)
+    if (savedRow && !families.some((row) => row.familyCode.toLowerCase() === savedRow.familyCode.toLowerCase())) {
+      families.push({ familyCode: savedRow.familyCode, familyDisplayName: savedRow.familyDisplayName })
+    }
+    return families
       .map((family) => ({ value: family.familyCode, label: family.familyDisplayName }))
       .sort((a, b) => a.label.localeCompare(b.label, locale))
-  }, [rows, locale])
-  const accents = designAccentsForFamily(selectedLanguage, rows)
+  }, [rows, locale, savedRow])
+  const accents = useMemo(() => {
+    const base = designAccentsForFamily(selectedLanguage, rows)
+    if (!savedRow) return base
+    if (base.some((row) => row.code.toLowerCase() === savedRow.code.toLowerCase())) return base
+    return [...base, savedRow]
+  }, [selectedLanguage, rows, savedRow])
   const namedAccent = (region: "US" | "GB" | "MX" | "BR") => {
     if (region === "US") return t("audio.newVoice.designAccentUS")
     if (region === "GB") return t("audio.newVoice.designAccentGB")

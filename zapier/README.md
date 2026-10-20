@@ -68,7 +68,8 @@ they need no real secrets.
    zapier-platform register "Aquilla"
    ```
 
-4. Give the redirect URI to the identity worker. It is fixed by the App ID:
+4. Give the redirect URI to the identity worker. Run `zapier-platform describe` and
+   copy the redirect URI it prints. It is usually
    `https://zapier.com/dashboard/auth/oauth/return/App<ID>CLIAPI/`. Set it as
    `ZAPIER_REDIRECT_URI` on auth-worker (dev and prod), together with
    `ZAPIER_CLIENT_ID` and the `ZAPIER_CLIENT_SECRET` secret.
@@ -111,8 +112,9 @@ they need no real secrets.
 
 4. Move existing users with `zapier-platform migrate <old-version> <new-version>`.
 
-Public listing needs a 256px logo, a reviewer test account on prod, and live privacy,
-terms and help URLs.
+Going public has more requirements: a 512px logo, a reviewer account, 3 live users,
+and a successful live run of every trigger, action and search. See the "Public listing
+checklist" in `docs/ZAPIER.md`.
 
 ## Known gaps
 

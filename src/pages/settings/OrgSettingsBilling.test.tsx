@@ -157,13 +157,19 @@ describe("OrgSettingsBilling", () => {
   it('discards an older workspace response after navigation', async () => {
     let resolve!: (workspace: BillingWorkspace) => void
     vi.mocked(getBillingWorkspace).mockImplementationOnce(() => new Promise(r => { resolve = r }))
-      .mockResolvedValueOnce(paidWorkspace('team_20x', 2))
+      .mockResolvedValueOnce(paidWorkspace('team', 2))
     renderBilling()
     await waitFor(() => expect(getBillingWorkspace).toHaveBeenCalledTimes(1))
     fireEvent.click(screen.getByRole('link', { name: 'Switch workspace' }))
-    expect(await screen.findByTestId('billing-plan')).toHaveTextContent('Team 20×')
-    await act(async () => { resolve(paidWorkspace('pro')) })
-    expect(screen.getByTestId('billing-plan')).toHaveTextContent('Team 20×')
+    expect(await screen.findByTestId('billing-plan')).toHaveTextContent('Team')
+    expect(screen.getByText('Billed annually.')).toBeVisible()
+    // The stale workspace bills monthly; applying it would change the description.
+    const stale = paidWorkspace('team')
+    stale.entitlement!.billingInterval = 'month'
+    await act(async () => { resolve(stale) })
+    expect(screen.getByTestId('billing-plan')).toHaveTextContent('Team')
+    expect(screen.getByText('Billed annually.')).toBeVisible()
+    expect(screen.queryByText('Billed monthly.')).toBeNull()
     expect(mockGet).not.toHaveBeenCalled()
   })
 
@@ -171,7 +177,7 @@ describe("OrgSettingsBilling", () => {
     mockGet.mockResolvedValueOnce(unpaid)
     renderBilling()
     expect(await screen.findByTestId("billing-plan")).toHaveTextContent("Free")
-    expect(await screen.findByRole("tab", { name: "Team & Enterprise" })).toBeDefined()
+    expect(await screen.findByRole("link", { name: "Discuss your rollout" })).toBeDefined()
     expect(screen.queryByTestId("subscribe-field-plan")).toBeNull()
     expect(screen.getByTestId("billing-usage").textContent).toMatch(/rolling seven-day/)
     expect(screen.getByRole("link", { name: "Check covered access" }).getAttribute("href")).toContain("ETEN%20affiliate")
@@ -230,25 +236,31 @@ describe("OrgSettingsBilling", () => {
   })
 })
 
-it.each(['payment_failed', 'paid_period_ended', 'paid'] as const)(
+it.each(['payment_grace', 'payment_failed', 'paid_period_ended', 'paid'] as const)(
   'renders authoritative %s access without changing the subscription or showing ledger units', async reason => {
-    const workspace = paidWorkspace('pro')
-    workspace.entitlement!.access = { offer: reason === 'paid' ? 'pro' : 'free', reason,
-      paidThrough: '2026-10-01T00:00:00.000Z', cancelAtPeriodEnd: reason === 'paid' }
+    const workspace = paidWorkspace('team')
+    const paid = reason === 'paid' || reason === 'payment_grace'
+    workspace.entitlement!.access = { offer: paid ? 'team' : 'free', reason,
+      paidThrough: '2026-10-01T00:00:00.000Z', cancelAtPeriodEnd: reason === 'paid',
+      ...(reason === 'payment_grace' ? { graceEndsAt: '2026-10-08T00:00:00.000Z' } : {}) }
     vi.mocked(getBillingWorkspace).mockResolvedValue(workspace)
     renderBilling()
     const access = await screen.findByTestId('billing-access')
-    expect(access).toHaveTextContent(reason === 'payment_failed' ? 'Payment failed.'
+    expect(access).toHaveTextContent(reason === 'payment_grace' ? 'Stripe will retry your card'
+      : reason === 'payment_failed' ? 'Payment failed.'
       : reason === 'paid_period_ended' ? 'Your paid period has ended.' : 'Paid access continues through')
-    if (reason !== 'paid') expect(access).toHaveTextContent('Free')
+    // During the past-due grace Team stays on; only after it does the copy name Free.
+    if (paid) expect(access).not.toHaveTextContent('Free')
+    else expect(access).toHaveTextContent('Free')
+    if (reason === 'payment_grace') expect(access).toHaveTextContent(new Date('2026-10-08T00:00:00.000Z').toLocaleString())
     expect(access).not.toHaveTextContent(/credits|25|50/)
-    expect(screen.getByTestId('billing-plan')).toHaveTextContent('Pro')
+    expect(screen.getByTestId('billing-plan')).toHaveTextContent('Team')
     expect(mockGet).not.toHaveBeenCalled()
   },
 )
 
 it('routes native paid billing to the workspace portal and preserves access on failure', async () => {
-  vi.mocked(getBillingWorkspace).mockResolvedValue({ ...paidWorkspace('pro'), portalEnabled: true })
+  vi.mocked(getBillingWorkspace).mockResolvedValue({ ...paidWorkspace('team'), portalEnabled: true })
   vi.mocked(startWorkspaceBillingPortal).mockRejectedValueOnce(new Error('Portal temporarily unavailable'))
   renderBilling()
   fireEvent.click(await screen.findByRole('button', { name: 'Manage billing' }))
@@ -256,13 +268,13 @@ it('routes native paid billing to the workspace portal and preserves access on f
   expect(startWorkspaceBillingPortal).toHaveBeenCalledWith('jwt', 1)
   expect(screen.getByText('Use Manage billing to update this workspace’s subscription in Stripe.')).toBeVisible()
   expect(screen.queryByText(/Changes will be available when billing management is ready/)).toBeNull()
-  expect(screen.getByTestId('billing-plan')).toHaveTextContent('Pro')
+  expect(screen.getByTestId('billing-plan')).toHaveTextContent('Team')
   expect(screen.getByRole('button', { name: 'Manage billing' })).toBeEnabled()
   expect(getBillingOffers).not.toHaveBeenCalled()
 })
 
 it('explains a portal failure that carries no message in catalog copy', async () => {
-  vi.mocked(getBillingWorkspace).mockResolvedValue({ ...paidWorkspace('pro'), portalEnabled: true })
+  vi.mocked(getBillingWorkspace).mockResolvedValue({ ...paidWorkspace('team'), portalEnabled: true })
   vi.mocked(startWorkspaceBillingPortal).mockRejectedValueOnce('network down')
   renderBilling()
   fireEvent.click(await screen.findByRole('button', { name: 'Manage billing' }))
@@ -294,9 +306,8 @@ describe('AQU-1524 billing card inset', () => {
     expect(insetInsideCard(screen.getByText(/uses this workspace’s allowance/))).toBe(true)
     expect(workspace.querySelector('[data-slot="settings-block"]')).not.toBeNull()
 
-    // Compare new plans: intro, tabs, billing-period select, status line, footer.
+    // Compare new plans: intro, billing-period select, status line, footer.
     expect(insetInsideCard(screen.getByText(/Compare personal and shared team capacity/))).toBe(true)
-    expect(insetInsideCard(screen.getByRole('tab', { name: 'Team & Enterprise' }))).toBe(true)
     expect(insetInsideCard(screen.getByRole('combobox', { name: 'Plan billing period' }))).toBe(true)
     expect(insetInsideCard(await screen.findByText(/Plan prices are temporarily unavailable/))).toBe(true)
     expect(insetInsideCard(screen.getByText(/New plans reset AI capacity every seven days/))).toBe(true)

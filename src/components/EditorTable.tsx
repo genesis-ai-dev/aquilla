@@ -27,6 +27,7 @@ import {
   Blocks,
   BookOpenText,
   CloudOff,
+  Quote,
 } from "lucide-react"
 import { InlineToolsTab, useHasInlineTools } from "@/components/tools/ToolMounts"
 import { FillsTwiceIndicator } from "@/components/ui/fills-twice-indicator"
@@ -92,6 +93,7 @@ import { useLowMemoryActive } from "@/lib/perf/low-memory"
 import { TranslatedEditor, type FootnoteInsertionAnchor, type TranslatedEditorHandle } from "./TranslatedEditor"
 import { TimeOrderedEmptyState } from "./TimeOrderedEmptyState"
 import type { LinkedVideoEmptyState } from "@/lib/editor/linked-video-empty-state"
+import type { LinkedVideoSoundActions } from "@/lib/timeline/video-sound"
 import { CellTtsButton } from "./CellTtsButton"
 import { CellIssuesTab } from "./CellIssuesTab"
 import { BacktranslationPanel } from "./BacktranslationPanel"
@@ -228,6 +230,7 @@ import { useLocation, useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { namedCellRef } from "@/lib/cell-named-ref"
 import { isStructuralCell } from "@/lib/cells/structural"
+import { quoteSplitForRow } from "@/lib/cells/quote-split-plan"
 import {
   cellNumberLabel,
   importDisplayLabel,
@@ -922,6 +925,9 @@ interface EditorTableProps {
   /** AQU-1566: on that empty state, turn a caption track already on the
    *  timeline into this file's rows (the workspace confirms first). Same gate. */
   onUseCaptionTrackAsRows?: (trackId: string) => void
+  /** AQU-1681: on that empty state, make this file's rows from the linked
+   *  video's own sound. Maintainers only, never for a YouTube video. */
+  linkedVideoSound?: LinkedVideoSoundActions
   /** Called after a successful `target.cell.commit` enqueue so the parent
    *  refetches the cells projection. `committedEventId` is the event id the
    *  commit was assigned (known only here, before the projection round-trip);
@@ -1198,7 +1204,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   audioLens, castGutter = false, ttsSettings, onOpenAudioSetup,
   audioTrackColor, onSetAudioTrackColor,
   onAttachMediaFile, onAttachMediaUrl, linkedVideoEmptyState, linkedVideoEmptyPlacement = "text", onOpenMediaView,
-  onAttachCaptions, onUseCaptionTrackAsRows,
+  onAttachCaptions, onUseCaptionTrackAsRows, linkedVideoSound,
   orderedBy,
   onProjectChanged, onAddConceptFromSelection, onLinkConceptToEntity, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
   onCellCommitted,
@@ -2415,7 +2421,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // timestamps or ordinary text edits. One version scan serves both caches;
   // unchanged inputs retain their maps instead of rebuilding the whole file.
   const structureCache = useMemo(() => createEditorStructureCache(), [cellStore])
-  const { sequentialNumberByCellId, paragraphGroupInfoByCellId } = useMemo(() =>
+  const { sequentialNumberByCellId, paragraphGroupInfoByCellId, versePartByCellId } = useMemo(() =>
     readAtVersion(cellStoreVersion, () => structureCache.read(fileCellIds, cellStore)),
   [cellStore, cellStoreVersion, fileCellIds, structureCache])
 
@@ -2930,6 +2936,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onPauseCue={onPauseCue}
           rowIndex={index}
           contentNumber={sequentialNumberByCellId.get(cell.id) ?? index + 1}
+          versePart={versePartByCellId.get(cell.id)}
           lineNumbersEnabled={lineNumbersEnabled}
           scriptureNumbering={scriptureNumbering}
           cellLabelsEnabled={cellLabelsEnabled}
@@ -3058,6 +3065,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     milestoneNavigationItems,
     scriptureNumbering,
     sequentialNumberByCellId,
+    versePartByCellId,
     lineNumbersEnabled,
     micDenied,
     onAckRemoteChange,
@@ -3476,6 +3484,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onOpenMediaView={onOpenMediaView}
           onAttachCaptions={onAttachCaptions}
           onUseCaptionTrackAsRows={onUseCaptionTrackAsRows}
+          videoSound={linkedVideoSound}
         />
       ) : (
         <div className="flex-1" />
@@ -3754,6 +3763,12 @@ function CellSourceMenu({
   aboveDisabledReason,
   onRemove,
   removeDisabledReason,
+  /** AQU-1759: split this row at its quotation marks. The entry exists when
+   *  `onSplitAtQuotes` or a reason is given — on a file that takes inserted
+   *  rows anywhere, for whoever may add them — and explains itself when the
+   *  row has nothing to split. */
+  onSplitAtQuotes,
+  splitDisabledReason,
   /** Toggling the inline source editor open and shut. Absent ⇒ this person
    *  may not edit source text here at all. */
   sourceEditing,
@@ -3778,6 +3793,8 @@ function CellSourceMenu({
   aboveDisabledReason?: string | null
   onRemove?: () => void
   removeDisabledReason?: string | null
+  onSplitAtQuotes?: () => void
+  splitDisabledReason?: string | null
   sourceEditing?: boolean
   onToggleSourceEdit?: () => void
   sourceEditDisabledReason?: string | null
@@ -3889,6 +3906,15 @@ function CellSourceMenu({
                 reason={belowDisabledReason}
                 onSelect={onInsertBelow}
               />
+              {(onSplitAtQuotes || splitDisabledReason) && (
+                <RowInsertItem
+                  testId="cell-menu-split-quotes"
+                  icon={<Quote className="mr-2 h-3.5 w-3.5 shrink-0" />}
+                  label={t("editor.row.splitAtQuotes")}
+                  reason={splitDisabledReason}
+                  onSelect={onSplitAtQuotes}
+                />
+              )}
               <RowInsertItem
                 testId="cell-menu-remove"
                 icon={<X className="mr-2 h-3.5 w-3.5 shrink-0" />}
@@ -4134,6 +4160,8 @@ interface MemoizedRowProps {
   rowIndex: number
   /** AQU-610: 1-based ordinal among numbered (non-paratext) cells for sequential numbering. */
   contentNumber: number
+  /** AQU-1759: "5a"/"5b" when this row is part of a verse split at its quotes. */
+  versePart?: string
   lineNumbersEnabled: boolean
   cellLabelsEnabled: boolean
   sourceDirectionMode: DirectionMode
@@ -4202,7 +4230,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
     cell, linkedTakes, audioColumn, cellExamples, exampleOriginFor, completingState, cellError, previewText, healthRibbonPoint, infractions,
     backtranslating, backtranslationErrors, cellOpenCommentCount,
-    rowIndex, contentNumber, gridCols, castGutter, ttsSettings,
+    rowIndex, contentNumber, versePart, gridCols, castGutter, ttsSettings,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
     onSelectionPointerDown: onSelectionPointerDownParent,
     onNavigateCell: onNavigateCellParent,
@@ -4385,6 +4413,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onPauseCue={onPauseCue}
         rowIndex={rowIndex}
         contentNumber={contentNumber}
+        versePart={versePart}
         lineNumbersEnabled={lineNumbersEnabled}
         scriptureNumbering={scriptureNumbering}
         cellLabelsEnabled={cellLabelsEnabled}
@@ -4582,6 +4611,8 @@ interface EditorRowProps {
   rowIndex: number
   /** AQU-610: 1-based ordinal among numbered (non-paratext) cells for sequential numbering. */
   contentNumber: number
+  /** AQU-1759: "5a"/"5b" when this row is part of a verse split at its quotes. */
+  versePart?: string
   lineNumbersEnabled: boolean
   /** Scripture files number verse rows by canonical ref and leave headings unnumbered. */
   scriptureNumbering: boolean
@@ -5507,7 +5538,7 @@ function EditorRow({
   onPauseCue,
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
   onEscapeToGrid, onGridRowKeyNav,
-  rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
+  rowIndex, contentNumber, versePart, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
   isAnonymous, micDenied,
   audioLens, onOpenAudioSetup, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
   onCellCommitted, onValidated, repetitionCount, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
@@ -5549,7 +5580,7 @@ function EditorRow({
     onOpenAttachment, attachmentsByCell, onAttachmentAdded,
     onMediaRowActivate, onAssignCastVoice, onClearCastVoice, countCastLines, onTakeSaved, onLastTakeRemoved, audioHomeFor, myScopes,
     cellStore: previewCellStore,
-    onAddLineAt, onInsertCellBeside, onRemoveCell, onSetCellHidden, onRetimeCell,
+    onAddLineAt, onInsertCellBeside, onRemoveCell, onSetCellHidden, onRetimeCell, onSplitAtQuotes,
     timingLocked, canUnlockTiming, onOpenTimingSettings,
   } = useEditorActions()
   // AQU-633: a scoped member can only validate cells in their assigned lane/file.
@@ -5908,6 +5939,33 @@ function EditorRow({
   const sourceReadOnlyReasonForCell = idmlConfiguration
     ? t("editor.source.idmlProtected")
     : sourceReadOnlyReason
+
+  // AQU-1759: split this row at its quotation marks. Offered beside the
+  // inserts, to the same people, on the same files — a file with no clock,
+  // where a new row needs no timing — and, like every entry in this menu,
+  // drawn disabled with its reason when THIS row cannot take it. The scan only
+  // runs where the entry exists.
+  const offersSplit = structuralEditing && untimedInserts
+  const quoteSplit = useMemo(
+    () => (offersSplit ? quoteSplitForRow({ value: cell.original ?? "", valueHtml: cell.originalHtml }) : null),
+    [offersSplit, cell.original, cell.originalHtml],
+  )
+  const splitReason = !quoteSplit
+    ? null
+    // The row is audio or packaged layout: the insert's own reason says why.
+    : insertBelowReason
+      ?? (!canEditSourceForCell
+        ? t("editor.row.splitSourceLockedReason")
+        : quoteSplit.refusal === "single"
+          ? t("editor.row.splitNoQuoteReason")
+          : quoteSplit.refusal === "formatted"
+            ? t("editor.row.splitFormattedReason")
+            : quoteSplit.refusal === "markup"
+              ? t("editor.row.splitMarkupReason")
+              : null)
+  const splitAtQuotes = quoteSplit && !splitReason && onSplitAtQuotes
+    ? () => onSplitAtQuotes(cell.id)
+    : undefined
   const hasTranslatedText = Boolean(visibleTranslated?.trim())
   const showCompletionOverlay = isLoading && (!hasTranslatedText || loadingPhase === "aligning")
   const sourceCellDirection = useMemo(
@@ -7261,6 +7319,7 @@ function EditorRow({
     rowIndex,
     contentNumber,
     displayLabel: importDisplayLabel(cell.metadata),
+    versePart,
   })
   // ── Character gutter (2026-08-07, stacked media lens only) ──────────────
   // A media-gutter row "speaks" unless it's STRUCTURE (paratext/heading) —
@@ -8225,6 +8284,8 @@ function EditorRow({
               belowDisabledReason={insertBelowReason}
               onRemove={structuralEditing ? () => onRemoveCell?.(cell.id) : undefined}
               removeDisabledReason={removeReason}
+              onSplitAtQuotes={splitAtQuotes}
+              splitDisabledReason={splitReason}
               timestamps={timestamps}
               // AQU-1422: the reversible sibling of Remove. `onToggleHidden` is
               // the role gate (absent ⇒ no entry at all); the reason is the DCS

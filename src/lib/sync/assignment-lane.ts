@@ -115,6 +115,47 @@ export function lanesStaffedBy(
 }
 
 /**
+ * One attached team's lane checks (AQU-2047).
+ *
+ * `lanesExplicit` false is a living attachment: the team is tied to every
+ * current target lane, including one created later, until someone saves the
+ * checkboxes. `true` is the saved set, and `laneIds` are those lanes.
+ */
+export interface TeamLaneAttachment {
+  lanesExplicit: boolean
+  laneIds?: readonly string[]
+}
+
+/**
+ * AQU-2047: the lane options the project's attached teams are tied to.
+ *
+ * `teams` is `null`/`undefined` when the server did not say. Unknown is NOT
+ * "no lanes", so the list is returned untouched — the same convention as
+ * {@link lanesStaffedBy}. An empty list is a project with no attached team,
+ * which keeps today's menu.
+ *
+ * A team that has not saved checkboxes (`lanesExplicit` false) is tied to
+ * every current target lane. One such team among several means the union is
+ * every current lane: nothing here is removed. When every attached team has
+ * saved a set, a lane stays if any of them checked it.
+ *
+ * An option with no `laneId` is kept. The check is by lane id, and a lane
+ * this list cannot identify is not one it can call irrelevant.
+ */
+export function lanesTiedToTeams(
+  lanes: readonly AssignLaneOption[],
+  teams: readonly TeamLaneAttachment[] | null | undefined,
+): readonly AssignLaneOption[] {
+  if (teams == null || teams.length === 0) return lanes
+  if (teams.some((team) => !team.lanesExplicit)) return lanes
+  const allowed = new Set<string>()
+  for (const team of teams) {
+    for (const laneId of team.laneIds ?? []) allowed.add(laneId)
+  }
+  return lanes.filter((lane) => lane.laneId == null || allowed.has(lane.laneId))
+}
+
+/**
  * Lane options for an assign surface (AQU-1601).
  *
  * A project with one lane names it; hiding the field there taught people there
@@ -136,6 +177,11 @@ export function lanesStaffedBy(
  * which is NOT "nobody": the full list stands. A known set that matches
  * nothing narrows to zero options, and an assign surface must refuse rather
  * than offer lanes no one can work in.
+ *
+ * AQU-2047: `teamLanes` is the same cut for a team's saved lane checks. It
+ * applies only on the `lanes` branch, beside staffing, and a lane must pass
+ * both when both inputs are present. `null`/`undefined` and an empty list
+ * narrow nothing — a missing read, or a project with no attached team.
  */
 export function buildLaneItems(input: {
   lanes?: readonly AssignLaneOption[] | null
@@ -145,13 +191,16 @@ export function buildLaneItems(input: {
   defaultLaneFallback: string
   allowedTags?: readonly string[] | null
   staffedLaneIds?: readonly string[] | ReadonlySet<string> | null
+  teamLanes?: readonly TeamLaneAttachment[] | null
 }): AssignmentLaneItem[] {
   const extra = (input.targetLanes ?? []).filter((lane) => !isDefaultLaneValue(lane))
   const defaultLabel =
     input.laneLabels?.[""]?.trim() ||
     input.defaultLaneLabel?.trim() ||
     input.defaultLaneFallback
-  const laneRows = input.lanes?.length ? lanesStaffedBy(input.lanes, input.staffedLaneIds) : null
+  const laneRows = input.lanes?.length
+    ? lanesTiedToTeams(lanesStaffedBy(input.lanes, input.staffedLaneIds), input.teamLanes)
+    : null
   const all: AssignmentLaneItem[] = laneRows
     ? laneRows.map((lane) => ({ value: selectValueForLane(lane.legacyTag), label: lane.label }))
     : [

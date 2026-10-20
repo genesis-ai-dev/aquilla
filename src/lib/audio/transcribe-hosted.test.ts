@@ -65,6 +65,53 @@ describe("hosted transcription client", () => {
     await expect(transcribeHostedPcm(new Float32Array(16000), "jwt", "p"))
       .rejects.toThrow(/503/)
   })
+
+  // AQU-1681: a batch over an episode reaches the per-user limit (60 requests
+  // per 15 minutes). It must wait as long as the limiter says and send the
+  // same audio again — never skip it, never give the row up.
+  it("waits out the per-user limit and resends the same audio, when asked to", async () => {
+    let calls = 0
+    const bodies: string[] = []
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      bodies.push(String(init?.body))
+      calls += 1
+      return calls === 1
+        ? Response.json({ error: "rate_limited" }, { status: 429, headers: { "Retry-After": "420" } })
+        : Response.json({ text: "hello", chunks: [{ text: "hello", start: 0, end: 0.5 }], granularity: "word" })
+    })
+    const waits: number[] = []
+    const result = await transcribeHostedPcm(new Float32Array(16000), "jwt", "p", {
+      language: "en", onRateLimited: async (seconds) => { waits.push(seconds) },
+    })
+    expect(waits).toEqual([420])
+    expect(calls).toBe(2)
+    expect(JSON.parse(bodies[1]!).input_audio).toEqual(JSON.parse(bodies[0]!).input_audio)
+    expect(result).toEqual({ text: "hello", chunks: [{ text: "hello", start: 0, end: 0.5 }], granularity: "word" })
+  })
+
+  it("asks again after a minute when the limiter's wait cannot be read", async () => {
+    let calls = 0
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => (++calls === 1
+      ? Response.json({ error: "rate_limited" }, { status: 429 })
+      : Response.json({ text: "", chunks: [] })))
+    const waits: number[] = []
+    await transcribeHostedPcm(new Float32Array(16000), "jwt", "p", { onRateLimited: async (s) => { waits.push(s) } })
+    expect(waits).toEqual([60])
+  })
+
+  it("still fails a refused request for a caller that does not wait (one row's Transcribe button)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ error: "rate_limited" }, { status: 429 }))
+    await expect(transcribeHostedPcm(new Float32Array(16000), "jwt", "p")).rejects.toThrow(/429/)
+  })
+
+  it("reports the coarsest timing any window came back with", async () => {
+    let calls = 0
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => Response.json({
+      text: "x", chunks: [{ text: "x", start: 0, end: 1 }], granularity: ++calls === 1 ? "word" : "segment",
+    }))
+    const result = await transcribeHostedPcm(new Float32Array(61 * 16000), "jwt", "p")
+    expect(result.granularity).toBe("segment")
+  })
 })
 
 // Whisper and Qwen take a minute per request; Omnilingual must stay under

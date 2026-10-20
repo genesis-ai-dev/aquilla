@@ -14,7 +14,7 @@ import { env } from "cloudflare:test"
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
-import { __resetAiSpendCeilingStateForTests } from "../../../db/shared/ai-spend-ceiling"
+import { __resetAiSpendCeilingStateForTests, checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
 
 const MODEL = "anthropic/claude-sonnet-4.5"
 
@@ -198,5 +198,91 @@ describe("platform AI spend ceiling — chat proxy", () => {
 
     expect(res.status).toBe(503)
     expect(upstream).not.toHaveBeenCalled()
+  })
+})
+
+// AQU-2057: the one meter. Metered chat and agent calls write only
+// workspace_usage_requests, so a ceiling that reads only the daily credit
+// ledger never sees them. These run against the real schema (0181).
+describe("platform AI spend ceiling — workspace_usage_requests", () => {
+  const ceiling = { AI_DAILY_SPEND_CEILING_USD: "10", ENVIRONMENT: "test" }
+  let seq = 0
+
+  beforeEach(async () => {
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO organizations (id, name, owner_user_id) VALUES (2057, 'Meter', 1) ON CONFLICT DO NOTHING",
+    ).run()
+  })
+
+  /** One ledger row the way reserve/settle/release leave it. Background work has no user or project. */
+  async function meterRow(opts: {
+    dollars: number
+    mode: "metered" | "unmetered" | "byok"
+    state?: "reserved" | "settled" | "released"
+    createdAt?: string
+  }): Promise<void> {
+    const state = opts.state ?? "settled"
+    const rawMicroCents = opts.dollars * 100 * 1_000_000
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO workspace_usage_requests
+        (org_id, request_id, user_id, project_id, rail, rate_version, multiplier,
+         period_start, period_end, reserved_micro_units, state, raw_micro_cents,
+         settled_micro_units, resolved_at, mode, created_at)
+       VALUES (2057, ?, NULL, NULL, 'jev', '2026-09-cost-v1', 4, now() - interval '1 day',
+         now() + interval '6 days', ?, ?, ?, ?, ?, ?, COALESCE(?::timestamptz, now()))`,
+    )
+      .bind(
+        `req-${++seq}`,
+        rawMicroCents * 4,
+        state,
+        state === "settled" ? rawMicroCents : null,
+        state === "settled" ? rawMicroCents * 4 : null,
+        state === "reserved" ? null : new Date().toISOString(),
+        opts.mode,
+        opts.createdAt ?? null,
+      )
+      .run()
+  }
+
+  const check = () => checkAiSpendCeiling(env.AQUILLA_PG, ceiling, "test")
+
+  it("counts metered and unmetered spend together", async () => {
+    // Enterprise (unmetered) calls still run on our vendor key; skipping them
+    // would let the biggest customers spend past the platform floor.
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    await meterRow({ dollars: 6, mode: "metered" })
+    expect((await check()).ok).toBe(true)
+    await meterRow({ dollars: 5, mode: "unmetered" })
+    expect((await check()).ok).toBe(false)
+  })
+
+  it("never counts BYOK rows, which ran on the customer's own key", async () => {
+    await meterRow({ dollars: 50, mode: "byok" })
+    await meterRow({ dollars: 1, mode: "metered" })
+    expect((await check()).ok).toBe(true)
+  })
+
+  it("counts a held reservation at its bound so a burst cannot overshoot, and ignores released ones", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    await meterRow({ dollars: 50, mode: "metered", state: "released" })
+    expect((await check()).ok).toBe(true)
+    await meterRow({ dollars: 11, mode: "metered", state: "reserved" })
+    expect((await check()).ok).toBe(false)
+  })
+
+  it("only counts today's rows, so the ceiling resets at UTC midnight", async () => {
+    const lastNight = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`)
+    lastNight.setUTCMinutes(-1)
+    await meterRow({ dollars: 50, mode: "metered", createdAt: lastNight.toISOString() })
+    expect((await check()).ok).toBe(true)
+  })
+
+  it("adds the legacy ledger during the transition, so spend split across both still trips it", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    await seedPlatformSpend(6)
+    await meterRow({ dollars: 3, mode: "metered" })
+    expect((await check()).ok).toBe(true)
+    await meterRow({ dollars: 2, mode: "unmetered" })
+    expect((await check()).ok).toBe(false)
   })
 })

@@ -309,7 +309,7 @@ describe("GET /api/v2/orgs/:orgId/billing/offers", () => {
     expect(response.status).toBe(200)
     const body = await response.json() as { available: boolean; offers: Array<{ offer: string; interval: string; totalAmount: number }> }
     expect(body.available).toBe(true)
-    expect(body.offers.find(o => o.offer === "team_20x" && o.interval === "year")?.totalAmount).toBe(720000)
+    expect(body.offers.map(o => [o.offer, o.interval, o.totalAmount])).toEqual([["team", "month", 50000], ["team", "year", 500000]])
     expect(JSON.stringify(body)).not.toMatch(/credits|price_1|sk_test/i)
   })
 })

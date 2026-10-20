@@ -476,7 +476,7 @@ export function ProjectOverview() {
   // fired for a certain 403 — the answer is then `null`, "the server did not
   // say", which narrows nothing and leaves the list AQU-581 already narrows
   // for a lane delegate.
-  const { staffedLaneIds, refresh: refreshLaneStaffing } = useProjectLaneStaffing(
+  const { staffedLaneIds, teamLanes, refresh: refreshLaneStaffing } = useProjectLaneStaffing(
     id,
     jwt,
     (project?.syncRole?.level ?? 0) >= ROLE.PROJECT_LEAD,
@@ -1402,6 +1402,7 @@ export function ProjectOverview() {
       targetLanes: extraRegistryLanes(project?.targetLanes, project?.targetLanguage),
       lanes: assignLanes,
       staffedLaneIds,
+      teamLanes,
       jwt,
       author: session?.username ?? "",
       roleLevel: project?.syncRole?.level ?? 0,
@@ -1418,7 +1419,7 @@ export function ProjectOverview() {
     }
   }, [
     canAssign, isArchived, jwt, id, selectedUnitFileId, documentFiles, project?.targetLanes,
-    project?.targetLanguage, assignLanes, staffedLaneIds, project?.syncRole?.level, session?.username,
+    project?.targetLanguage, assignLanes, staffedLaneIds, teamLanes, project?.syncRole?.level, session?.username,
     policyAllowSelfAssignment, policyAssignmentMinRole, handleAssigned,
   ])
 
@@ -2497,6 +2498,7 @@ export function ProjectOverview() {
                   extraLanes={extraRegistryLanes(project?.targetLanes, project?.targetLanguage)}
                   assignLanes={assignLanes}
                   staffedLaneIds={staffedLaneIds}
+                  teamLanes={teamLanes}
                   files={documentFiles}
                   roleLevel={project?.syncRole?.level ?? 0}
                   author={session?.username ?? ""}
@@ -2955,6 +2957,7 @@ export function ProjectOverview() {
                               defaultLaneLabel={project?.targetLanguage ?? ""}
                               lanes={assignLanes}
                               staffedLaneIds={staffedLaneIds}
+                              teamLanes={teamLanes}
                               onOpen={refreshLaneStaffing}
                               laneRows={targetLaneRows}
                               roleLevel={project?.syncRole?.level ?? 0}

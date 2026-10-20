@@ -11,7 +11,7 @@
 // says everyone who can see the board will see the names (AQU-1989).
 
 import { Fragment, useId } from "react"
-import { Info } from "lucide-react"
+import { ShieldAlert } from "lucide-react"
 import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
 import { MONDAY_COLUMN_CATALOG, metricOnBoard, type MondayColumnMapping, type MondayMetricKey } from "@/lib/monday/types"
@@ -81,12 +81,15 @@ export function MondayColumnChooser({ rows, boardColumns, boardName, selected, o
                 />
                 {namesTicked && metric === group.metrics.findLast((m) => NAME_METRICS.includes(m)) && (
                   <li className="py-1.5">
+                    {/* Amber, not muted (Sam, 2026-10-19): who can see people's
+                        names is a security question, and the note has to stand
+                        out from the column descriptions around it. */}
                     <p
                       role="note"
                       data-testid="monday-names-note"
-                      className="flex items-start gap-2 rounded-xl border border-border/60 bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground"
+                      className="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs font-medium text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
                     >
-                      <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                      <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden="true" />
                       <span>{t("projectSettings.monday.chooser.namesVisible", { board: boardName })}</span>
                     </p>
                   </li>

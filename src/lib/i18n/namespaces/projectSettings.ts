@@ -2293,9 +2293,9 @@ export const projectSettings = defineNamespace({
       },
       "projectSettings.monday.chooser.namesVisible": {
         description:
-          "Calm, factual note under the 'Project manager' and 'Translators' columns in the checklist, shown while " +
+          "Security note under the 'Project manager' and 'Translators' columns in the checklist, shown in amber while " +
           "either is ticked: those columns put people's names on the Monday board, and anyone with access to the " +
-          "board can read them. Informational, not a warning.",
+          "board can read them. Plain and factual, so it reads as a clear caution without alarm.",
         placeholders: { board: "The Monday board's name (Monday data, not translated)." },
       },
       "projectSettings.monday.chooser.summaryAdds": {

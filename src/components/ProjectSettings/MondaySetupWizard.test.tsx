@@ -206,6 +206,9 @@ describe("step 2: what the board shows", () => {
     const note = await screen.findByTestId("monday-names-note")
     expect(note.getAttribute("role")).toBe("note")
     expect(note.textContent).toBe("Everyone who can see Translation Tracker on Monday will see these names.")
+    // A security note: amber, so it stands out from the column descriptions (Sam, 2026-10-19).
+    expect(note.className).toMatch(/\bbg-amber-50\b/)
+    expect(note.className).toMatch(/\bborder-amber-300\b/)
 
     fireEvent.click(box(/^Project manager$/))
     fireEvent.click(box(/^Translators$/))

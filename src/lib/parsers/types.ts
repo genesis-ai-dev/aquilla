@@ -340,6 +340,12 @@ export interface Voice {
    */
   language?: string
   /**
+   * Lane this voice belongs to (AQU-2037). A lane row id, not a legacy tag.
+   * Absent means the voice is not lane-owned yet: it stays visible on every
+   * lane, including the built-in Narrator. Stamped once, on first save.
+   */
+  laneId?: string
+  /**
    * Inworld talking speed in [0.5, 1.5]. Default 1. Maps to
    * `audioConfig.speakingRate`.
    */

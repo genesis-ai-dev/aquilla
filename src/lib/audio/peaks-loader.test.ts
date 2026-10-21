@@ -31,7 +31,7 @@ vi.mock("./upload", async (importOriginal) => {
 const decodePeaks = vi.fn<(bytes: Uint8Array, bins: number) => Promise<unknown>>()
 vi.mock("./peaks", () => ({ decodePeaks: (...a: [Uint8Array, number]) => decodePeaks(...a) }))
 
-const fetchPeaksSidecar = vi.fn<(args: Record<string, unknown>) => Promise<Float32Array | null>>()
+const fetchPeaksSidecar = vi.fn<(args: Record<string, unknown>) => Promise<StoredPeaks | null>>()
 const publishPeaksSidecarOnce = vi.fn<(args: Record<string, unknown>) => void>()
 vi.mock("./peaks-sidecar", async (importOriginal) => ({
   peaksAtBins: (await importOriginal<typeof import("./peaks-sidecar")>()).peaksAtBins,
@@ -40,6 +40,7 @@ vi.mock("./peaks-sidecar", async (importOriginal) => ({
 }))
 
 import { loadPeaksFor, loadPeaksBatch } from "./peaks-loader"
+import type { StoredPeaks } from "./peaks-sidecar"
 
 const AUDIO_ID = "audio-cell1-1700000000-abcdefgh"
 const EXT = "wav"

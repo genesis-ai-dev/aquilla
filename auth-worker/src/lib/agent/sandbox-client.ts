@@ -65,6 +65,12 @@ function resolveSandbox(env: SandboxEnv): { base: string; key: string } | null {
   return { base: base.replace(/\/$/, ""), key }
 }
 
+/** Is a sandbox configured at all? Lets a caller skip billing work for a call
+ *  that can only come back "sandbox unavailable". */
+export function sandboxConfigured(env: SandboxEnv): boolean {
+  return resolveSandbox(env) !== null
+}
+
 async function sandboxFetch(
   env: SandboxEnv,
   path: string,

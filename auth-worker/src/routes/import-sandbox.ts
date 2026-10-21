@@ -30,6 +30,7 @@ import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
 import { logVendorTimeout, vendorDeadline } from "../../../shared/vendor-timeouts"
 import { admitLlmCall, LlmRefusedError, projectOrgId } from "../lib/billing/paid-llm"
 import { providerRejectedPreModel } from "../lib/billing/chat-usage"
+import { admitSandboxTime, secondsSince } from "../lib/billing/sandbox-meter"
 
 /**
  * AQU-1848: the sandbox pool refused us because it is saturated, not broken.
@@ -63,6 +64,11 @@ const MAX_INPUT_BYTES = 25 * 1024 * 1024
 const MAX_RESULT_BYTES = 8 * 1024 * 1024
 /** Parser-model output cap — also the bound the meter reserves against. */
 const PARSER_MAX_TOKENS = 10_000
+/** The longest one import can hold its container: artifact copy, the 60 s
+ *  inspection, then two attempts of a 120 s parse, a 10 s size probe and a
+ *  read, plus the model calls in between. Only the reservation; the ledger
+ *  gets the measured seconds. */
+const IMPORT_CONTAINER_MAX_SECONDS = 600
 
 const unitSchema = z.object({
   sourceText: z.string().min(1).max(100_000),
@@ -352,11 +358,20 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
   const words = await wordGuard(c.env.AQUILLA_PG, orgId)
   if (!words.ok) return c.json(wordCapBody(words.reason), 429)
 
+  // AQU-2066: container time on the `sandbox` rail. Reserved before a
+  // container can start; settled with the measured seconds once it is gone.
+  // Metered even for an org on its own keys: the container is ours.
+  const containerTime = await admitSandboxTime(
+    c.env.AQUILLA_PG, c.env, { orgId: projectOrg, userId: user.id, projectId }, IMPORT_CONTAINER_MAX_SECONDS,
+  )
+  if (!containerTime.ok) return c.json(containerTime.body, containerTime.status)
+
   const sessionId = `import-${crypto.randomUUID()}`
   // AQU-1848: the pool counts concurrency per user, so one project lead cannot
   // hold every container with back-to-back imports.
   const tenant = sandboxTenant(user.id)
   const key = r2Key(c.env, projectId, sessionId)
+  const containerStartedAt = Date.now()
   try {
     await c.env.SNAPSHOTS.put(key, bytes, { httpMetadata: { contentType: mime } })
     const loaded = await sandboxFetchArtifact(c.env, sessionId, { key, path: "/workspace/input" }, signal, tenant)
@@ -541,6 +556,10 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
       c.env.SNAPSHOTS.delete(key),
       sandboxDestroy(c.env, sessionId),
     ])
+    // From the first container call until teardown returned: the span the
+    // container could be running. A pool refusal still settles its few
+    // seconds rather than proving no container ran.
+    await containerTime.settleSeconds(secondsSince(containerStartedAt))
   }
 })
 

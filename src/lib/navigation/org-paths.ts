@@ -136,9 +136,9 @@ export function projectEditorPath(projectId: string, fileId?: string | null): st
   return fileId ? `${base}/file/${fileId}` : base
 }
 
-/** Same-origin relative path from `?return=` — rejects protocol-relative URLs. */
+/** Same-origin relative path from `?return=` — rejects protocol-relative URLs and backslashes (`/\\evil.com`). */
 export function safeReturnPath(raw: string | null | undefined): string | null {
-  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return null
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\")) return null
   return raw
 }
 

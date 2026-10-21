@@ -15997,6 +15997,7 @@ export function ProjectWorkspace() {
               projectId: project.id,
               jwt,
               author: currentUsername,
+              onUseOwnKey: handleAiSetupNeeded,
               roleLevel: currentRoleLevel,
               context: {
                 fileId: agentScopeFile?.id ?? activeFileId ?? undefined,

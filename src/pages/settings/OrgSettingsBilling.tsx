@@ -5,6 +5,7 @@ import { BillingWorkspaceDetails } from "@/components/org/BillingWorkspaceSummar
 import { getBillingWorkspace, startWorkspaceBillingPortal, type BillingWorkspace } from "@/lib/sync/billing-workspace"
 import { billingOfferLabels } from "../../../db/shared/billing-offers"
 import { BillingOffers } from "@/components/org/BillingOffers"
+import { OrgAiMeter } from "@/components/billing/AiMeter"
 import { Badge } from "@/components/ui/badge"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -133,6 +134,13 @@ export function OrgSettingsBilling() {
         <Button variant="outline" onClick={() => setReload(value => value + 1)}>{t("billing.retry")}</Button>
       ) : (
         <div className="flex flex-col gap-10">
+          {jwt && activeOrgId != null ? (
+            <SettingsGroup label={t("billing.meter.sectionTitle")}>
+              <SettingsBlock>
+                <OrgAiMeter jwt={jwt} orgId={activeOrgId} canManage={canManage} refreshKey={reload} />
+              </SettingsBlock>
+            </SettingsGroup>
+          ) : null}
           <SettingsGroup label={t("billing.plan.group")}>
             <SettingsRow
               label={t("billing.plan.current")}

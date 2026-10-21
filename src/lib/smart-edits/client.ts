@@ -3,6 +3,7 @@
 // them and nobody should see an error about them.
 
 import { AUTH_BASE } from "@/lib/frontier/auth"
+import { aiRefusalError } from "@/lib/billing/ai-refusal"
 
 export const SMART_EDITS_SUGGEST_URL = `${AUTH_BASE}/api/v1/ai/smart-edits/suggest`
 export const SMART_EDITS_FEEDBACK_URL = `${AUTH_BASE}/api/v1/ai/smart-edits/feedback`
@@ -99,8 +100,9 @@ export async function requestLlmEdits(
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${identityToken}`, "Idempotency-Key": crypto.randomUUID() },
       body: JSON.stringify(input),
     })
-    if (res.status === 429) return { ok: false, reason: "allowance" }
-    if (!res.ok) return { ok: false, reason: "failed" }
+    if (!res.ok) {
+      return aiRefusalError(res.status, await res.text().catch(() => "")) ? { ok: false, reason: "allowance" } : { ok: false, reason: "failed" }
+    }
     const body = (await res.json()) as { suggestions?: unknown }
     return { ok: true, suggestions: Array.isArray(body.suggestions) ? body.suggestions.filter(isSuggestion) : [] }
   } catch {

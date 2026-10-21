@@ -51,6 +51,18 @@ describe("ProjectAssignedToMe", () => {
     expect(container.firstChild).toBeNull()
   })
 
+  it("AQU-1969: labels a validate assignment as validating", async () => {
+    mockGetMyAssignments.mockResolvedValue([
+      makeAssignment({ scopeLabel: "Genesis", kind: "validate", cellsDone: 3, cellsTotal: 10 }),
+      makeAssignment({ assignmentId: "asgn-2", scopeLabel: "Exodus", kind: "translate" }),
+    ])
+    render(<ProjectAssignedToMe projectId="proj-1" jwt="test-jwt" />)
+    await openPopover()
+    expect(await screen.findByText("Genesis")).toBeTruthy()
+    expect(screen.getAllByText("Validating")).toHaveLength(1)
+    expect(screen.getByText("Genesis").parentElement?.textContent).toContain("Validating")
+  })
+
   it("renders assignment rows with progress when assignments exist", async () => {
     mockGetMyAssignments.mockResolvedValue([
       makeAssignment({ scopeLabel: "Genesis", cellsDone: 3, cellsTotal: 10 }),

@@ -53,6 +53,7 @@ import {
   getMyAssignments,
   getProjectAssignmentRoster,
   getProjectUnitAssignees,
+  getProjectValidationAssignments,
   getUnitAssignments,
   resolveTargetLaneId,
 } from "../services/assignments"
@@ -1237,7 +1238,9 @@ projects.get("/:projectId/assignments/given", authMiddleware, async (c) => {
  * GET /api/v2/projects/:projectId/assignments/all — per-assignee open workload
  * + derived progress for THIS project (the overview's Team card). Returns the
  * same AssigneeWorkload shape as the org workload endpoint so the client can
- * reuse the same rendering logic.
+ * reuse the same rendering logic. AQU-1969: `roster` is translate work only;
+ * `validations` lists each open validate assignment with the assignee's own
+ * approvals, furthest behind first.
  *
  * AQU-1771: gated on the member-progress AND roster floors, like
  * /assignments/unit below — not on a hard Maintainer floor. The Team card shows
@@ -1264,8 +1267,13 @@ projects.get("/:projectId/assignments/all", authMiddleware, async (c) => {
   )
   if (denial) return c.json(denial, 403)
 
-  const roster = await getProjectAssignmentRoster(c.env, projectId)
-  return c.json({ roster })
+  // AQU-1969: translate work stays the per-person roster; each validate
+  // assignment is its own line, with the assignee's own approvals.
+  const [roster, validations] = await Promise.all([
+    getProjectAssignmentRoster(c.env, projectId),
+    getProjectValidationAssignments(c.env, projectId),
+  ])
+  return c.json({ roster, validations })
 })
 
 /**

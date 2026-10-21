@@ -1,16 +1,21 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
-import { X } from "lucide-react"
 import { getWorkload, unassignAssignment, type OrgWorkloadAssignment } from "@/lib/sync/assignments"
 import { Section } from "@/components/ui/page"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { AppTooltip } from "@/components/ui/tooltip"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { UserChip } from "@/components/UserChip"
 import { progressPercent } from "@/lib/progress/progress-percent"
 import { PROGRESS_BG } from "@/lib/progress/progress-palette"
 import { UserError } from "@/lib/errors/user-error"
+import {
+  compareValidationBehind,
+  isValidationRow,
+  validationHasAudio,
+  validationLeftOverall,
+} from "@/lib/assignments/validation-progress"
+import { useValidationProgressLines } from "./use-validation-progress"
+import { RemoveAssignmentButton } from "./RemoveAssignmentButton"
 
 /**
  * Team-workload rollup for the org Overview (manager oversight). One row per
@@ -35,6 +40,11 @@ import { UserError } from "@/lib/errors/user-error"
  * should show <username> next to a project-name badge before the scope
  * label so a manager with assignments across multiple projects can tell
  * them apart.
+ *
+ * AQU-1969: validate assignments follow under their own heading, furthest
+ * behind first, each reading the assignee's OWN approvals — a different
+ * measure from a translate row's "validated by anyone", so the two are not
+ * interleaved.
  */
 export function WorkloadRollup({
   jwt,
@@ -51,6 +61,7 @@ export function WorkloadRollup({
   onRefused?: () => void
 }) {
   const t = useT()
+  const progressLines = useValidationProgressLines()
   const [rows, setRows] = useState<OrgWorkloadAssignment[] | null>(null)
   const [removingId, setRemovingId] = useState<string | null>(null)
   const [removeError, setRemoveError] = useState<string | null>(null)
@@ -101,26 +112,44 @@ export function WorkloadRollup({
 
   if (!rows || rows.length === 0) return null
 
+  const translateRows = rows.filter((a) => !isValidationRow(a))
+  const validateRows = rows.filter(isValidationRow).sort(compareValidationBehind)
+
+  const removeButton = (a: OrgWorkloadAssignment) =>
+    canUnassignProject(a.projectId) && (
+      <RemoveAssignmentButton
+        scope={a.scopeLabel}
+        username={a.username}
+        removing={removingId === a.assignmentId}
+        onRemove={() => void handleRemove(a)}
+      />
+    )
+
+  // Who, where, which language — the same head on both kinds of row.
+  const head = (a: OrgWorkloadAssignment) => (
+    <div className="flex items-center gap-2">
+      <UserChip
+        userId={a.assigneeUserId}
+        username={a.username}
+        className="min-w-0"
+      />
+      <span className="shrink-0 truncate text-xs text-muted-foreground">{a.projectName}</span>
+      {/* AQU-538 (§3.5): lane chip when the assignment is pinned to a lane. */}
+      {(a.laneName || a.targetLang) && (
+        <Badge variant="outline" className="shrink-0">{a.laneName || a.targetLang}</Badge>
+      )}
+    </div>
+  )
+
   return (
     <Section title={t("org.workloadRollup.title")} action={action} contentClassName="pt-0">
       <div className="divide-y">
-        {rows.map((a) => {
+        {translateRows.map((a) => {
           const pct = progressPercent(a.cellsDone, a.cellsTotal)
           return (
             <div key={a.assignmentId} className="flex items-center gap-4 py-2.5 first:pt-0">
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <UserChip
-                    userId={a.assigneeUserId}
-                    username={a.username}
-                    className="min-w-0"
-                  />
-                  <span className="shrink-0 truncate text-xs text-muted-foreground">{a.projectName}</span>
-                  {/* AQU-538 (§3.5): lane chip when the assignment is pinned to a lane. */}
-                  {(a.laneName || a.targetLang) && (
-                    <Badge variant="outline" className="shrink-0">{a.laneName || a.targetLang}</Badge>
-                  )}
-                </div>
+                {head(a)}
                 <p className="truncate text-xs text-muted-foreground">{a.scopeLabel}</p>
                 {/* AQU-1764: done cells are VALIDATED cells — the shared
                     palette's text-validated blue. */}
@@ -134,27 +163,59 @@ export function WorkloadRollup({
                 </p>
                 <p className="text-xs text-muted-foreground tabular-nums">{pct}%</p>
               </div>
-              {canUnassignProject(a.projectId) && (
-                <AppTooltip content={t("org.workloadRollup.removeTooltip")}>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={t("org.workloadRollup.removeAriaLabel", {
-                      scope: a.scopeLabel,
-                      user: a.username ?? t("common.userChip.anonymous"),
-                    })}
-                    disabled={removingId === a.assignmentId}
-                    onClick={() => void handleRemove(a)}
-                  >
-                    <X />
-                  </Button>
-                </AppTooltip>
-              )}
+              {removeButton(a)}
             </div>
           )
         })}
       </div>
+      {validateRows.length > 0 && (
+        <div className={translateRows.length > 0 ? "mt-4" : undefined} data-testid="workload-validations">
+          <h3 className="mb-1 text-xs font-medium text-muted-foreground">{t("org.validationProgress.heading")}</h3>
+          <div className="divide-y">
+            {validateRows.map((a) => {
+              const v = a.validation
+              const lines = progressLines(v, validationHasAudio(v))
+              const left = validationLeftOverall(v)
+              const pct = progressPercent(v.text.validated, v.text.total)
+              return (
+                <div
+                  key={a.assignmentId}
+                  className="flex items-center gap-4 py-2.5"
+                  data-testid={`workload-validation-${a.assignmentId}`}
+                >
+                  <div className="min-w-0 flex-1">
+                    {head(a)}
+                    <p className="truncate text-xs text-muted-foreground">{a.scopeLabel}</p>
+                    {/* The assignee's own approvals, in the text-validated tone. */}
+                    <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                      <div className={`h-full rounded-full ${PROGRESS_BG.textValidated}`} style={{ width: `${pct}%` }} />
+                    </div>
+                    <p className="mt-1 text-xs tabular-nums text-muted-foreground" data-testid={`workload-validation-text-${a.assignmentId}`}>
+                      {lines.text}
+                    </p>
+                    {lines.audio && (
+                      <p className="text-xs tabular-nums text-muted-foreground" data-testid={`workload-validation-audio-${a.assignmentId}`}>
+                        {lines.audio}
+                      </p>
+                    )}
+                  </div>
+                  <div className="shrink-0 text-end">
+                    <p className="text-sm font-semibold tabular-nums">
+                      {v.text.validated}/{v.text.total}
+                    </p>
+                    <p className="text-xs text-muted-foreground tabular-nums">
+                      {left > 0
+                        ? t("org.validationProgress.left", { count: left })
+                        : t("org.projectOverview.plan.nothingLeft")}
+                    </p>
+                  </div>
+                  {removeButton(a)}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
       {removeError && <p className="mt-2 text-xs text-destructive">{removeError}</p>}
     </Section>
   )

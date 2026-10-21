@@ -268,7 +268,10 @@ vi.mock("@/lib/progress/file-progress-resource", () => ({
 vi.mock("@/lib/sync/assignments", () => ({
   getWorkload: vi.fn(async () => []),
   getProjectAssignments: vi.fn(async () => []),
+  // AQU-1969: the Team card's read — the translate roster plus validate assignments.
+  getProjectTeamProgress: vi.fn(async () => ({ roster: [], validations: [] })),
   getMyAssignments: vi.fn(async () => []),
+  unassignAssignment: vi.fn(async () => {}),
 }))
 
 // AQU-498: member-activity fetch, consumed by useMemberActivity ->
@@ -1875,18 +1878,18 @@ describe("ProjectOverview member activity detail (AQU-498)", () => {
   // not even see the "Activity" affordance to click.
 
   async function withWorkload() {
-    const { getProjectAssignments } = await import("@/lib/sync/assignments")
-    vi.mocked(getProjectAssignments).mockResolvedValue([
+    const { getProjectTeamProgress } = await import("@/lib/sync/assignments")
+    vi.mocked(getProjectTeamProgress).mockResolvedValue({ validations: [], roster: [
       { userId: 1, username: "alice", openAssignments: 2, cellsTotal: 10, cellsDone: 4 },
-    ])
+    ] })
   }
 
-  // getProjectAssignments.mockResolvedValue persists across tests (clearAllMocks
+  // getProjectTeamProgress.mockResolvedValue persists across tests (clearAllMocks
   // clears call history, not implementation) — restore the file-wide empty
   // default so later describe blocks don't inherit this suite's workload.
   afterEach(async () => {
-    const { getProjectAssignments } = await import("@/lib/sync/assignments")
-    vi.mocked(getProjectAssignments).mockResolvedValue([])
+    const { getProjectTeamProgress } = await import("@/lib/sync/assignments")
+    vi.mocked(getProjectTeamProgress).mockResolvedValue({ roster: [], validations: [] })
   })
 
   it("clicking a teammate's Activity affordance renders recent actions + files rollup", async () => {
@@ -1947,14 +1950,14 @@ describe("ProjectOverview member activity detail (AQU-498)", () => {
 // 403 into an empty list and say "No open assignments in this project yet."
 describe("ProjectOverview Team card when the server refuses the read (AQU-1771)", () => {
   afterEach(async () => {
-    const { getProjectAssignments } = await import("@/lib/sync/assignments")
-    vi.mocked(getProjectAssignments).mockResolvedValue([])
+    const { getProjectTeamProgress } = await import("@/lib/sync/assignments")
+    vi.mocked(getProjectTeamProgress).mockResolvedValue({ roster: [], validations: [] })
   })
 
   it("hides the card instead of claiming there are no open assignments", async () => {
-    const { getProjectAssignments } = await import("@/lib/sync/assignments")
+    const { getProjectTeamProgress } = await import("@/lib/sync/assignments")
     const { UserError } = await import("@/lib/errors/user-error")
-    vi.mocked(getProjectAssignments).mockRejectedValue(new UserError(403, "", "project"))
+    vi.mocked(getProjectTeamProgress).mockRejectedValue(new UserError(403, "", "project"))
     useProject.mockReturnValue({
       project: projectRecord({ level: 700, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
       status: "ready",
@@ -1963,7 +1966,7 @@ describe("ProjectOverview Team card when the server refuses the read (AQU-1771)"
     renderOverview()
 
     await screen.findByRole("button", { name: "Open project" })
-    await waitFor(() => expect(vi.mocked(getProjectAssignments)).toHaveBeenCalled())
+    await waitFor(() => expect(vi.mocked(getProjectTeamProgress)).toHaveBeenCalled())
     await waitFor(() => expect(screen.queryByTestId("overview-team-card")).not.toBeInTheDocument())
     expect(screen.queryByText("No open assignments in this project yet.")).not.toBeInTheDocument()
   })
@@ -1980,6 +1983,79 @@ describe("ProjectOverview Team card when the server refuses the read (AQU-1771)"
   })
 })
 
+// ── AQU-1969: validate assignments on the Team card ─────────────────────────
+describe("ProjectOverview Team card validators (AQU-1969)", () => {
+  const counts = (total: number, validated: number, waiting: number, changed: number) => ({ total, validated, waiting, changed })
+  afterEach(async () => {
+    const { getProjectTeamProgress } = await import("@/lib/sync/assignments")
+    vi.mocked(getProjectTeamProgress).mockResolvedValue({ roster: [], validations: [] })
+  })
+
+  it("lists each validator's own approvals apart from the translate rows, furthest behind first", async () => {
+    const { getProjectTeamProgress } = await import("@/lib/sync/assignments")
+    vi.mocked(getProjectTeamProgress).mockResolvedValue({
+      roster: [{ userId: 1, username: "alice", openAssignments: 1, cellsTotal: 10, cellsDone: 4 }],
+      validations: [
+        {
+          assignmentId: "v-near", assigneeUserId: 3, username: "bo", scopeLabel: "Deuteronomy 11",
+          targetLang: "", deadline: null, validation: { text: counts(10, 9, 0, 0), audio: counts(10, 0, 10, 0) },
+        },
+        {
+          assignmentId: "v-far", assigneeUserId: 2, username: "ana", scopeLabel: "Deuteronomy 1–10",
+          targetLang: "", deadline: null, validation: { text: counts(40, 34, 0, 2), audio: counts(40, 0, 40, 0) },
+        },
+      ],
+    })
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      memberProgressViewMinRole: 600,
+      canViewMemberProgress: true,
+    })
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    const list = await screen.findByTestId("overview-team-validations")
+    expect(within(list).getByRole("heading", { name: "Validation assignments" })).toBeInTheDocument()
+    const rows = within(list).getAllByRole("listitem").map((li) => li.getAttribute("data-testid"))
+    expect(rows).toEqual(["overview-team-validation-v-far", "overview-team-validation-v-near"])
+    expect(screen.getByTestId("overview-team-validation-text-v-far").textContent).toBe(
+      "Deuteronomy 1–10 · Validated 34 of 40 · 6 left · 2 changed since",
+    )
+    // The translator's row is still there, unchanged.
+    expect(await screen.findByRole("button", { name: "View activity for alice" })).toBeInTheDocument()
+    expect(screen.queryByText("No open assignments in this project yet.")).not.toBeInTheDocument()
+  })
+
+  it("does not call a project with only validators empty", async () => {
+    const { getProjectTeamProgress } = await import("@/lib/sync/assignments")
+    vi.mocked(getProjectTeamProgress).mockResolvedValue({
+      roster: [],
+      validations: [{
+        assignmentId: "v1", assigneeUserId: 2, username: "ana", scopeLabel: "Genesis",
+        targetLang: "", deadline: null, validation: { text: counts(4, 4, 0, 0), audio: counts(4, 0, 4, 0) },
+      }],
+    })
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      memberProgressViewMinRole: 600,
+      canViewMemberProgress: true,
+    })
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    expect(await screen.findByTestId("overview-team-validation-v1")).toBeInTheDocument()
+    expect(screen.queryByText("No open assignments in this project yet.")).not.toBeInTheDocument()
+  })
+})
+
 // ── AQU-1172: Team card expand/collapse ─────────────────────────────────────
 
 describe("ProjectOverview Team card collapse (AQU-1172)", () => {
@@ -1988,15 +2064,15 @@ describe("ProjectOverview Team card collapse (AQU-1172)", () => {
   // is the working surface plus a chevron — collapse is per-page-load only.
 
   async function withWorkload() {
-    const { getProjectAssignments } = await import("@/lib/sync/assignments")
-    vi.mocked(getProjectAssignments).mockResolvedValue([
+    const { getProjectTeamProgress } = await import("@/lib/sync/assignments")
+    vi.mocked(getProjectTeamProgress).mockResolvedValue({ validations: [], roster: [
       { userId: 1, username: "alice", openAssignments: 2, cellsTotal: 10, cellsDone: 4 },
-    ])
+    ] })
   }
 
   afterEach(async () => {
-    const { getProjectAssignments } = await import("@/lib/sync/assignments")
-    vi.mocked(getProjectAssignments).mockResolvedValue([])
+    const { getProjectTeamProgress } = await import("@/lib/sync/assignments")
+    vi.mocked(getProjectTeamProgress).mockResolvedValue({ roster: [], validations: [] })
   })
 
   it("starts expanded and hides the body when the header is clicked", async () => {
@@ -3229,5 +3305,67 @@ describe("imported originals on the overview (AQU-656)", () => {
     expect(within(card).queryByTestId("imported-originals-show-more")).not.toBeInTheDocument()
     expect(within(card).queryByTestId("imported-originals-show-all")).not.toBeInTheDocument()
     expect(within(card).queryByTestId("imported-originals-show-fewer")).not.toBeInTheDocument()
+  })
+})
+
+// AQU-1969 (Sam, 2026-10-19: "It should be more easy to unassign work"): the
+// Team card's validation rows carry the org workload's one-click ×, offered by
+// the server's own rule — the org's assignment role in this project.
+describe("ProjectOverview one-click unassign (AQU-1969)", () => {
+  const counts = (total: number, validated: number, waiting: number, changed: number) => ({ total, validated, waiting, changed })
+  const files = [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }]
+
+  async function withValidation() {
+    fetchProjectFiles.mockResolvedValue([fileSummary(1)])
+    const mod = await import("@/lib/sync/assignments")
+    vi.mocked(mod.getProjectTeamProgress).mockResolvedValue({
+      roster: [],
+      validations: [{
+        assignmentId: "v1", assigneeUserId: 3, username: "carol", scopeLabel: "GEN 1", targetLang: "",
+        deadline: null, validation: { text: counts(7, 2, 2, 0), audio: counts(7, 0, 7, 0) },
+      }],
+    })
+    return mod
+  }
+
+  it("a lead removes a validation assignment from the Team card: ×, then Confirm", async () => {
+    const mod = await withValidation()
+    useProject.mockReturnValue({ project: projectRecord({ level: ROLE.MAINTAINER, files } as never), status: "ready", refresh })
+    renderOverview()
+    const remove = await screen.findByTestId("overview-team-validation-remove-v1")
+    const readsBefore = vi.mocked(mod.getProjectTeamProgress).mock.calls.length
+    fireEvent.click(remove)
+    expect(mod.unassignAssignment).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByTestId("overview-team-validation-remove-v1-confirm"))
+    await waitFor(() => expect(mod.unassignAssignment).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "p1", fileId: "f1", assignmentId: "v1" }),
+    ))
+    // The card is read again, as after an Assign.
+    await waitFor(() => expect(vi.mocked(mod.getProjectTeamProgress).mock.calls.length).toBeGreaterThan(readsBefore))
+  })
+
+  // Sam, 2026-10-20: an archived project's assignments are frozen with it.
+  // AQU-2088 hides an archived project's Team card behind the archived notice,
+  // so there is no row to remove from; the × must not appear anywhere either.
+  it("an archived project offers no × (its Team card is hidden)", async () => {
+    await withValidation()
+    useProject.mockReturnValue({ project: projectRecord({ level: ROLE.MAINTAINER, files, deletedAt: "2026-10-01T00:00:00Z" } as never), status: "ready", refresh })
+    renderOverview()
+    await screen.findByTestId("overview-archived-notice")
+    expect(screen.queryByTestId("overview-team-validation-v1")).toBeNull()
+    expect(screen.queryByTestId("overview-team-validation-remove-v1")).toBeNull()
+  })
+
+  it("a Contributor who can see the card gets no ×", async () => {
+    await withValidation()
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      rosterViewMinRole: ROLE.CONTRIBUTOR,
+      memberProgressViewMinRole: ROLE.CONTRIBUTOR,
+    })
+    useProject.mockReturnValue({ project: projectRecord({ level: ROLE.CONTRIBUTOR, files } as never), status: "ready", refresh })
+    renderOverview()
+    await screen.findByTestId("overview-team-validation-v1")
+    expect(screen.queryByTestId("overview-team-validation-remove-v1")).toBeNull()
   })
 })

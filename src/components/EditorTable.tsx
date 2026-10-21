@@ -115,7 +115,7 @@ import {
   idmlMergedPlainGroupCollapsed,
   rememberManualStyleAlignment,
 } from "@/lib/idml/merged-plain-align"
-import { useStyleAlignDirtyMatch } from "@/lib/store/style-align-dirty"
+import { useManualStyleAlign, useStyleAlignDirtyMatch } from "@/lib/store/style-align-dirty"
 import { useIsMediaCursorCell, useMediaSyncActive } from "@/lib/timeline/media-cursor"
 import { useUiSlot } from "@/lib/ui-slots"
 import { CastGutterVoice } from "@/components/voice/CastGutterVoice"
@@ -5775,6 +5775,7 @@ function EditorRow({
     : undefined
   const visibleStyleSegments = useVisibleStyleSegments()
   const styleAlignDirty = useStyleAlignDirtyMatch(cell.id, visibleTranslatedHtml)
+  const manualStyleAlign = useManualStyleAlign(cell.id)
   const mergedPlainCollapsed = useMemo(() => {
     if (!visibleStyleSegments || !styleAlignDirty || !visibleTranslatedHtml) return false
     return idmlMergedPlainGroupCollapsed({
@@ -5787,8 +5788,8 @@ function EditorRow({
     onAlignStyles
     && !isLoading
     && visibleTranslated.trim()
-    && mergedPlainCollapsed
     && cellCanAlignStyles(cell)
+    && (mergedPlainCollapsed || manualStyleAlign)
   )
   const idmlPreview = idmlConfiguration?.kind === "ready"
     && idmlTargetIsPreview(visibleTranslatedHtml, cell.metadata)

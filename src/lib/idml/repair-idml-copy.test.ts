@@ -155,6 +155,44 @@ describe("IDML repair copy", () => {
     expect(plan.strings[0]?.translated).toBe("História da aliança")
   })
 
+  it("copies a translation when the stored source dropped an apostrophe", () => {
+    const plan = applyIdmlRepairTranslations(
+      [unit("0", "The Lord\u02BCs army was a spiritual being")],
+      [source("a", "The Lords army was a spiritual being", "O comandante do exército do Senhor")],
+    )
+
+    expect(plan.copied).toBe(1)
+    expect(plan.unmatched).toBe(0)
+    expect(plan.strings[0]?.original).toBe("The Lord\u02BCs army was a spiritual being")
+    expect(plan.strings[0]?.translated).toBe("O comandante do exército do Senhor")
+  })
+
+  it("keeps each copy when every repeat dropped the same apostrophe", () => {
+    const plan = applyIdmlRepairTranslations(
+      [unit("0", "The Lord\u02BCs army"), unit("1", "The Lord\u02BCs army")],
+      [
+        source("a", "The Lords army", "Primeira", null),
+        source("b", "The Lords army", "Segunda", "a"),
+      ],
+    )
+
+    expect(plan.strings.map((string) => string.translated)).toEqual(["Primeira", "Segunda"])
+  })
+
+  it("does not guess which line a dropped apostrophe belongs to", () => {
+    const plan = applyIdmlRepairTranslations(
+      [unit("0", "The Lord\u02BCs army")],
+      [
+        source("a", "The Lords army", "Primeira", null),
+        source("b", "The Lords army", "Segunda", "a"),
+      ],
+    )
+
+    expect(plan.copied).toBe(0)
+    expect(plan.strings[0]?.translated).toBe("")
+    expect(plan.unmatched).toBe(2)
+  })
+
   it("keeps the read that matches the file when the plain parse merges those cells", () => {
     const existing = [
       source("a", "The books", "Livros", null),

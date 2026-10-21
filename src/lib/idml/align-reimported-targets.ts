@@ -7,7 +7,13 @@ import type { CellRow } from "@/lib/sync/cells-read-types"
 import { fetchFileCells } from "@/lib/sync/cells-read"
 import { emitTargetCellCommits, type CellCommitInput } from "@/lib/sync/events-emit"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
-import { alignIdmlStyles, type AlignStylesCell } from "./align-styles"
+import {
+  alignIdmlStyles,
+  alignStylesWordingTooLong,
+  idmlWordingKey,
+  type AlignStylesCell,
+} from "./align-styles"
+import { markManualStyleAlign } from "@/lib/store/style-align-dirty"
 import {
   stitchIdmlSlotTexts,
   tryDeterministicIdmlSlotStitch,
@@ -18,6 +24,11 @@ import {
   distributeTranslationLikeSource,
   readSourceDistributionSlots,
 } from "./segment-distribution"
+import {
+  forceAlignIdmlStyles,
+  idmlPlacementOmitsStyledRuns,
+  requiredStyledRunCount,
+} from "./force-align"
 
 const ALIGN_CONCURRENCY = 4
 const COMMIT_CHUNK = 100
@@ -54,6 +65,11 @@ export interface IdmlReimportAlignOutcome {
   readonly unchanged: number
   readonly failed: number
   readonly skipped: number
+  /**
+   * Translations left exactly as they were. Align styles crashed or the note
+   * was too long to send, so the cell is flagged for a manual pass.
+   */
+  readonly manual: readonly IdmlReimportAlignCell[]
 }
 
 /**
@@ -116,13 +132,14 @@ export async function alignReimportedIdmlTargets(
   const placements = cells.map((cell) => idmlReimportPlacement(cell))
   const work = cells.filter((_, index) => placements[index] === "align" || placements[index] === "single")
   const aligned: AlignedIdmlReimport[] = []
+  const manual: IdmlReimportAlignCell[] = []
   let unchanged = placements.filter((placement) => placement === "current").length
   let failed = 0
   const skipped = placements.filter((placement) => placement === "skip").length
   const total = work.length
   if (total > 0) options.onProgress?.(0, total)
   if (total === 0 || options.signal?.aborted) {
-    return { aligned, unchanged, failed, skipped }
+    return { aligned, unchanged, failed, skipped, manual }
   }
 
   const limit = Math.max(1, options.concurrency ?? ALIGN_CONCURRENCY)
@@ -140,14 +157,21 @@ export async function alignReimportedIdmlTargets(
         const placed = await placeCell(cell, ask, options.signal)
         if (placed.kind === "aligned") aligned.push({ cell, completion: placed.completion })
         else if (placed.kind === "unchanged") unchanged += 1
+        else if (placed.kind === "manual") manual.push(cell)
         else failed += 1
         finished = true
         if (options.signal?.aborted) return
       } catch (error) {
         if (isAbort(error) || options.signal?.aborted) return
         const fallback = plainProtectedFallback(cell)
-        if (fallback) aligned.push({ cell, completion: fallback })
-        else {
+        if (fallback && completionKeepsTranslation(cell, fallback)) {
+          aligned.push({ cell, completion: fallback })
+        } else if (hasTranslation(cell)) {
+          // The model crashed, or the recovery would have saved an empty
+          // target. Leave the translation that re-import already copied.
+          manual.push(cell)
+          console.warn("[align-styles] re-import alignment left for a manual pass", cell.id, error)
+        } else {
           failed += 1
           console.warn("[align-styles] re-import alignment skipped", cell.id, error)
         }
@@ -161,7 +185,7 @@ export async function alignReimportedIdmlTargets(
     }
   }
   await Promise.all(Array.from({ length: Math.min(limit, total) }, () => worker()))
-  return { aligned, unchanged, failed, skipped }
+  return { aligned, unchanged, failed, skipped, manual }
 }
 
 export function commitsForAlignedIdmlTargets(
@@ -224,7 +248,7 @@ export async function alignReimportedIdmlFile(args: {
   signal?: AbortSignal
   onProgress?: (done: number, total: number) => void
 }): Promise<IdmlReimportAlignOutcome> {
-  const empty: IdmlReimportAlignOutcome = { aligned: [], unchanged: 0, failed: 0, skipped: 0 }
+  const empty: IdmlReimportAlignOutcome = { aligned: [], unchanged: 0, failed: 0, skipped: 0, manual: [] }
   if (args.signal?.aborted) return empty
   const jwt = await args.getToken(args.fileId)
   if (!jwt || args.signal?.aborted) return empty
@@ -256,6 +280,7 @@ export async function alignReimportedIdmlFile(args: {
   } catch (error) {
     console.warn("[align-styles] re-import alignment could not be saved", error)
   }
+  for (const cell of outcome.manual) markManualStyleAlign(cell.id)
   if (outcome.aligned.length > 0) {
     posthog.capture("ai styles aligned", {
       provider: args.host.provider,
@@ -300,6 +325,21 @@ function plainProtectedFallback(cell: IdmlReimportAlignCell): NormalizedCompleti
   }
 }
 
+function translationWording(cell: AlignStylesCell): string {
+  const plain = cell.translated ?? ""
+  const fromHtml = cell.translatedHtml?.replace(/<[^>]+>/g, " ") ?? ""
+  return plain.trim().length >= fromHtml.trim().length ? plain : fromHtml
+}
+
+function completionKeepsTranslation(
+  cell: AlignStylesCell,
+  completion: NormalizedCompletion,
+): boolean {
+  const original = idmlWordingKey(translationWording(cell))
+  if (!original) return false
+  return idmlWordingKey(completion.value) === original
+}
+
 async function placeCell(
   cell: IdmlReimportAlignCell,
   ask: IdmlReimportAlignAsk,
@@ -307,6 +347,7 @@ async function placeCell(
 ): Promise<
   | { kind: "aligned"; completion: NormalizedCompletion }
   | { kind: "unchanged" }
+  | { kind: "manual" }
   | { kind: "failed" }
 > {
   if (idmlReimportPlacement(cell) === "single") {
@@ -316,10 +357,36 @@ async function placeCell(
     if (completion.valueHtml === cell.translatedHtml) return { kind: "unchanged" }
     return { kind: "aligned", completion }
   }
-  const aligned = await alignIdmlStyles(cell, (messages) => ask(messages, signal))
-  return aligned.changed
-    ? { kind: "aligned", completion: aligned.completion }
-    : { kind: "unchanged" }
+  // A study note has many bold runs. One reply that fills every slot tends to
+  // shift later sentences into the early runs and leave Moses / River Nile
+  // empty. Pin the references, then copy each bold phrase out of the
+  // translation so the saved words stay exactly the ones already there.
+  const styledRuns = requiredStyledRunCount(cell)
+  const tooLong = alignStylesWordingTooLong(translationWording(cell))
+  let oneShotError: unknown
+  if (styledRuns < 4 && !tooLong) {
+    try {
+      const aligned = await alignIdmlStyles(cell, (messages) => ask(messages, signal))
+      if (!idmlPlacementOmitsStyledRuns(cell, aligned.completion.valueHtml)) {
+        return aligned.changed
+          ? { kind: "aligned", completion: aligned.completion }
+          : { kind: "unchanged" }
+      }
+    } catch (error) {
+      if (isAbort(error) || signal?.aborted) throw error
+      oneShotError = error
+    }
+  }
+  try {
+    const forced = forceAlignIdmlStyles(cell)
+    if (forced) return { kind: "aligned", completion: forced }
+  } catch (error) {
+    if (isAbort(error) || signal?.aborted) throw error
+    oneShotError = oneShotError ?? error
+  }
+  if (oneShotError && styledRuns < 2 && !tooLong) throw oneShotError
+  if (hasTranslation(cell)) return { kind: "manual" }
+  return { kind: "failed" }
 }
 
 function hasTranslation(cell: AlignStylesCell): boolean {
@@ -331,7 +398,10 @@ function hasTranslation(cell: AlignStylesCell): boolean {
 function targetMatchesSource(cell: AlignStylesCell, metadata: IdmlFormatMetadataV2): boolean {
   if (!cell.originalHtml || !cell.translatedHtml) return false
   try {
-    return validateIdmlTranslation(cell.originalHtml, cell.translatedHtml, metadata).valid
+    if (!validateIdmlTranslation(cell.originalHtml, cell.translatedHtml, metadata).valid) return false
+    // A shell can validate while Moses, River Nile, and the other bold runs
+    // are still empty. Repair has to place those runs again.
+    return !idmlPlacementOmitsStyledRuns(cell, cell.translatedHtml)
   } catch {
     return false
   }

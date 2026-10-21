@@ -23,6 +23,7 @@ import {
     isAcrosticHeadingParagraphStyle,
     isBookMarkerParagraphStyle,
     isChapterMarkerStyle,
+    isCvVerseMarkerStyle,
     isVerseMarkerStyle,
     iterateContentAbs,
     iterateCsrAbs,
@@ -442,13 +443,6 @@ export function readChapterTransitionFromParagraph(
         return readPsalmNumberFromHeadLabelParagraph(storyXml, bodyStart, bodyEnd);
     }
     return null;
-}
-
-function isCvVerseMarkerStyle(style: string): boolean {
-    return (
-        /(?:^|\/)cv%3av(?:$|\b)/.test(style) ||
-        /(?:^|\/)cv:v(?:$|\b)/.test(style)
-    );
 }
 
 function isAnyVerseMarkerStyle(style: string): boolean {

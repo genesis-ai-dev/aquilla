@@ -12,12 +12,15 @@
 import { useSyncExternalStore } from "react"
 
 const STORAGE_KEY = "aq.style-align-dirty.v1"
+const MANUAL_KEY = "aq.style-align-manual.v1"
 
 const listeners = new Set<() => void>()
 
 const EMPTY: Record<string, string> = {}
+const EMPTY_MANUAL: ReadonlySet<string> = new Set()
 
 let cached: Record<string, string> | undefined
+let manualCached: ReadonlySet<string> | undefined
 
 function hashHtml(html: string): string {
   let hash = 5381
@@ -95,11 +98,64 @@ export function useStyleAlignDirtyMatch(cellId: string, html: string | undefined
   return map[cellId] === hashHtml(html)
 }
 
+function readManual(): ReadonlySet<string> {
+  if (typeof localStorage === "undefined") return EMPTY_MANUAL
+  try {
+    const raw = localStorage.getItem(MANUAL_KEY)
+    if (!raw) return EMPTY_MANUAL
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return EMPTY_MANUAL
+    return new Set(parsed.filter((id): id is string => typeof id === "string"))
+  } catch {
+    return EMPTY_MANUAL
+  }
+}
+
+function peekManual(): ReadonlySet<string> {
+  if (!manualCached) manualCached = readManual()
+  return manualCached
+}
+
+function writeManual(next: ReadonlySet<string>): void {
+  manualCached = next
+  if (typeof localStorage !== "undefined") {
+    try {
+      if (next.size === 0) localStorage.removeItem(MANUAL_KEY)
+      else localStorage.setItem(MANUAL_KEY, JSON.stringify([...next]))
+    } catch {
+      // quota / access denied — the in-memory set still reflects the edit
+    }
+  }
+  for (const listener of listeners) listener()
+}
+
+/** A re-import left this cell's translation in place because Align styles could not run. */
+export function markManualStyleAlign(cellId: string): void {
+  const current = peekManual()
+  if (current.has(cellId)) return
+  writeManual(new Set([...current, cellId]))
+}
+
+export function clearManualStyleAlign(cellId: string): void {
+  const current = peekManual()
+  if (!current.has(cellId)) return
+  const next = new Set(current)
+  next.delete(cellId)
+  writeManual(next)
+}
+
+export function useManualStyleAlign(cellId: string): boolean {
+  const ids = useSyncExternalStore(subscribe, peekManual, () => EMPTY_MANUAL)
+  return ids.has(cellId)
+}
+
 export function resetStyleAlignDirtyForTests(): void {
   cached = undefined
+  manualCached = undefined
   if (typeof localStorage !== "undefined") {
     try {
       localStorage.removeItem(STORAGE_KEY)
+      localStorage.removeItem(MANUAL_KEY)
     } catch {
       // ignore
     }

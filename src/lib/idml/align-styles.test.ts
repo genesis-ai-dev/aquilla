@@ -65,6 +65,37 @@ describe("align IDML styles", () => {
     await expect(alignIdmlStyles(misalignedCell(unit), ask)).rejects.toThrow(/changed the wording/)
   })
 
+  it("keeps the translation when the model copies source reference punctuation", async () => {
+    const unit = await parsedRuns([
+      ["CharacterStyle/bd", "1:1–15"],
+      ["CharacterStyle/Plain", " "],
+      ["CharacterStyle/k_xt", "John"],
+      ["CharacterStyle/Plain", " called. In "],
+      ["CharacterStyle/xt", "1 John 3:18"],
+      ["CharacterStyle/Plain", "."],
+    ])
+    const translation = "1.1–15 João chamou. Em 1 João 3.18."
+    const ask = vi.fn().mockResolvedValue(JSON.stringify({
+      slots: [
+        { i: 0, t: "1:1-15" },
+        { i: 1, t: " " },
+        { i: 2, t: "João" },
+        { i: 3, t: " chamou. Em " },
+        { i: 4, t: "1 João 3:18" },
+        { i: 5, t: "." },
+      ],
+    }))
+
+    const aligned = await alignIdmlStyles(noteCell(unit, translation), ask)
+    const checked = validateIdmlTranslation(unit.sourceHtml, aligned.completion.valueHtml!, unit.metadata)
+
+    expect(checked.valid).toBe(true)
+    expect(aligned.completion.value).toBe(translation)
+    expect(checked.slots[0]).toBe("1.1–15")
+    expect(checked.slots[2]).toBe("João")
+    expect(checked.slots[4]).toBe("1 João 3.18")
+  })
+
   it("moves a note out of the first bold run when that run is only the headword", async () => {
     const unit = await parsedRuns([
       ["CharacterStyle/k", "Devil:"],
@@ -100,6 +131,53 @@ describe("align IDML styles", () => {
     }))
     const aligned = await alignIdmlStyles(misalignedCell(unit), ask)
     expect(aligned.changed).toBe(false)
+  })
+
+  it("asks again when the saved split left a styled run empty and the first answer copies it", async () => {
+    const unit = await parsedRuns([
+      ["CharacterStyle/Plain", "The "],
+      ["CharacterStyle/k_xt", "River Nile"],
+      ["CharacterStyle/Plain", "."],
+    ])
+    const translation = "O rio Nilo."
+    const cell: AlignStylesCell = {
+      ...noteCell(unit, translation),
+      translatedHtml: renderIdmlUnitHtml({
+        ...unit,
+        slots: unit.slots.map((slot, index) => ({
+          ...slot,
+          text: index === 0 ? "O rio Nilo" : index === 2 ? "." : "",
+        })),
+      }),
+    }
+    const messages = buildIdmlAlignStylesMessages(cell)
+    expect(messages[1]?.content).toContain("Do not repeat that split")
+    expect(messages[1]?.content).toContain("River Nile")
+    expect(messages[1]?.content).not.toContain(`0 | ${JSON.stringify(translation)}`)
+
+    const ask = vi.fn()
+      .mockResolvedValueOnce(JSON.stringify({
+        slots: [
+          { i: 0, t: "O rio Nilo" },
+          { i: 1, t: "" },
+          { i: 2, t: "." },
+        ],
+      }))
+      .mockResolvedValueOnce(JSON.stringify({
+        slots: [
+          { i: 0, t: "O " },
+          { i: 1, t: "rio Nilo" },
+          { i: 2, t: "." },
+        ],
+      }))
+
+    const aligned = await alignIdmlStyles(cell, ask)
+    const checked = validateIdmlTranslation(unit.sourceHtml, aligned.completion.valueHtml!, unit.metadata)
+
+    expect(ask).toHaveBeenCalledTimes(2)
+    expect(aligned.changed).toBe(true)
+    expect(checked.slots[1]).toBe("rio Nilo")
+    expect(aligned.completion.value).toBe(translation)
   })
 
   it("treats an unstyled preview as one sentence to place, not as empty runs", async () => {

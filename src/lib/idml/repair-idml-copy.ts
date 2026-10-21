@@ -1,5 +1,5 @@
 import type { IdmlFormatMetadataV2 } from "@aquilla/idml-roundtrip"
-import { matchImportContent, orderSourceCellsByAnchor } from "../../../sync-worker/src/events/import-content-match"
+import { matchImportContent, normalizeForMatch, orderSourceCellsByAnchor } from "../../../sync-worker/src/events/import-content-match"
 import { extractIdmlStrings } from "@/lib/parsers/idml"
 import type { TranslatableString } from "@/lib/parsers/core-types"
 import { t } from "@/lib/i18n/standalone"
@@ -58,14 +58,9 @@ export function applyIdmlRepairTranslations(
   existing: readonly IdmlRepairSourceCell[],
 ): IdmlRepairTranslationPlan {
   const ordered = orderSourceCellsByAnchor(existing)
-  const incoming = strings.map((string, index) => ({
-    cellId: String(index),
-    value: repairMatchValue(string.original),
-  }))
-  const { adopted } = matchImportContent(
-    incoming,
-    ordered.map((cell) => ({ cellId: cell.cellId, value: repairMatchValue(cell.value) })),
-    new Map(),
+  const adopted = matchRepairSources(
+    strings.map((string, index) => ({ cellId: String(index), value: string.original })),
+    ordered.map((cell) => ({ cellId: cell.cellId, value: cell.value })),
   )
   const byId = new Map(ordered.map((cell) => [cell.cellId, cell]))
   const used = new Set<string>()
@@ -362,6 +357,64 @@ function repairMatchValue(value: string): string {
   return value.replace(APOSTROPHE_FOLD, "'")
 }
 
+/**
+ * Pair parsed lines to the file's cells. Apostrophe characters are folded
+ * first. A second pass drops apostrophes entirely, so a source that lost one
+ * (`Lordʼs` stored as `Lords`) still receives its translation. That pass pairs
+ * a line only when the same number of copies remain on both sides.
+ */
+function matchRepairSources(
+  incoming: readonly { cellId: string; value: string }[],
+  existing: readonly { cellId: string; value: string }[],
+): Map<string, { cellId: string; quality: "ice" | "exact" }> {
+  const exact = matchImportContent(
+    incoming.map((cell) => ({ cellId: cell.cellId, value: repairMatchValue(cell.value) })),
+    existing.map((cell) => ({ cellId: cell.cellId, value: repairMatchValue(cell.value) })),
+    new Map(),
+  )
+  const usedIncoming = new Set(exact.adopted.keys())
+  const usedExisting = new Set([...exact.adopted.values()].map((match) => match.cellId))
+  const looseKey = (value: string) => normalizeForMatch(value).replace(APOSTROPHE_FOLD, "")
+  const looseIncoming = incoming.filter((cell) => !usedIncoming.has(cell.cellId))
+  const looseExisting = existing.filter((cell) => !usedExisting.has(cell.cellId))
+  const incomingCounts = new Map<string, number>()
+  const existingCounts = new Map<string, number>()
+  for (const cell of looseIncoming) {
+    const key = looseKey(cell.value)
+    if (key) incomingCounts.set(key, (incomingCounts.get(key) ?? 0) + 1)
+  }
+  for (const cell of looseExisting) {
+    const key = looseKey(cell.value)
+    if (key) existingCounts.set(key, (existingCounts.get(key) ?? 0) + 1)
+  }
+  const balanced = (value: string) => {
+    const key = looseKey(value)
+    const count = key ? incomingCounts.get(key) ?? 0 : 0
+    return count > 0 && count === existingCounts.get(key)
+  }
+  const byKey = new Map<string, { cellId: string; value: string }[]>()
+  for (const cell of looseExisting) {
+    if (!balanced(cell.value)) continue
+    const key = looseKey(cell.value)
+    const bucket = byKey.get(key)
+    if (bucket) bucket.push(cell)
+    else byKey.set(key, [cell])
+  }
+  const adopted = new Map(exact.adopted)
+  const cursors = new Map<string, number>()
+  for (const cell of looseIncoming) {
+    if (!balanced(cell.value)) continue
+    const key = looseKey(cell.value)
+    const bucket = byKey.get(key)
+    const cursor = cursors.get(key) ?? 0
+    const match = bucket?.[cursor]
+    if (!match) continue
+    cursors.set(key, cursor + 1)
+    adopted.set(cell.cellId, { cellId: match.cellId, quality: "exact" })
+  }
+  return adopted
+}
+
 function perfectRepairScore(score: { placed: number; distance: number }, existingCount: number): boolean {
   return existingCount > 0 && score.placed === existingCount && score.distance === 0
 }
@@ -371,11 +424,10 @@ function repairParseScore(
   existing: readonly { cellId: string; value: string }[],
   existingCount: number,
 ): { placed: number; distance: number } {
-  const incoming = candidate.strings.map((string, index) => ({
-    cellId: String(index),
-    value: repairMatchValue(string.original),
-  }))
-  const { adopted } = matchImportContent(incoming, existing, new Map())
+  const adopted = matchRepairSources(
+    candidate.strings.map((string, index) => ({ cellId: String(index), value: string.original })),
+    existing,
+  )
   return { placed: adopted.size, distance: Math.abs(candidate.strings.length - existingCount) }
 }
 

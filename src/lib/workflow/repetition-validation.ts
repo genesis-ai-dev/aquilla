@@ -13,6 +13,7 @@ import { normalizeRepetitionSource } from "./autopropagation"
 import {
   planRepetitionPropagation,
   repetitionCommitFor,
+  repetitionSourceOf,
   type RepetitionCell,
   type RepetitionCommit,
   type PlanRepetitionPropagationInput,
@@ -58,7 +59,7 @@ function sameGroup(
   key: string,
 ): RepetitionValidationCell[] {
   return cells.filter(
-    (c) => isVisibleCell(c) && c.fileId === fileId && normalizeRepetitionSource(c.original) === key,
+    (c) => isVisibleCell(c) && c.fileId === fileId && normalizeRepetitionSource(repetitionSourceOf(c)) === key,
   )
 }
 
@@ -99,7 +100,7 @@ export function planRepetitionValidation({
   resolveParentId?: ResolveParentId
 }): RepetitionPlan {
   const seed = cells.find((c) => c.id === seedId && isVisibleCell(c))
-  const key = seed ? normalizeRepetitionSource(seed.original) : ""
+  const key = seed ? normalizeRepetitionSource(repetitionSourceOf(seed)) : ""
   if (!seed || !key || !seed.translated.trim()) return { fills: [], validateIds: [] }
 
   const fills = planRepetitionPropagation({
@@ -163,7 +164,7 @@ export function planBulkRepetitionGroups({
   // Walk in document order so candidates and targets come out in it too.
   for (const cell of cells) {
     if (!seedSet.has(cell.id) || !isVisibleCell(cell)) continue
-    const key = normalizeRepetitionSource(cell.original)
+    const key = normalizeRepetitionSource(repetitionSourceOf(cell))
     const value = cell.translated
     if (!key || !value.trim()) continue
     const groupKey = `${cell.fileId}\u0000${key}`

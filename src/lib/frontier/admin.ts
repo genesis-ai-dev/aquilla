@@ -71,8 +71,20 @@ export interface AdminProject {
   creatorUsername: string | null
   totalCells: number
   validatedCells: number
+  /**
+   * AQU-1911: translated cells, with headings left out where the project (or
+   * its org) leaves them out, like the two counts above. Optional: an older
+   * server sends none.
+   */
+  filledCells?: number
   wordCount: number
   lastEditAt: number | null
+  /**
+   * AQU-1911: the latest sign of work — a cell edit, or a validation or
+   * recording, which never move `lastEditAt` (AQU-950). Optional: an older
+   * server sends none.
+   */
+  lastActivityAt?: number | null
   /** True when someone who is not a member of the owning org can access it. */
   shared: boolean
 }

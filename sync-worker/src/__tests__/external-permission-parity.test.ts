@@ -338,7 +338,7 @@ describe('permission parity — LinkMedia requires CONTRIBUTOR (400)+ at prepare
     )
 
     const prep = await prepareChangeset(tdb, token, [
-      { kind: 'LinkMedia', fileId: FILE, cellId: 'cell-1', artifactId },
+      { kind: 'LinkMedia', fileId: FILE, cellId: 'cell-1', artifactId, laneId: 'deflane1' },
     ])
 
     if (level === null || level < ROLE.CONTRIBUTOR) {

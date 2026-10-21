@@ -65,7 +65,7 @@ function stubProviders(modalReply: Record<string, unknown> = {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
     if (url.includes("/models?")) {
-      return Response.json({ data: [{ id: "openai/whisper-1", pricing: { prompt: "0.0001" } }] })
+      return Response.json({ data: [{ id: "openai/whisper-large-v3", pricing: { prompt: "0.0001" } }] })
     }
     if (url.startsWith("https://upstream.example")) {
       calls.whisper.push(JSON.parse(String(init?.body)))
@@ -93,9 +93,9 @@ describe("auto routing", () => {
     expect(response.status).toBe(200)
     expect(calls.modal).toHaveLength(0)
     expect(calls.whisper).toHaveLength(1)
-    expect(calls.whisper[0]).toMatchObject({ model: "openai/whisper-1", language: "fr" })
+    expect(calls.whisper[0]).toMatchObject({ model: "openai/whisper-large-v3", language: "fr" })
     expect(await response.json()).toEqual({ text: "bonjour", chunks: [{ text: "bonjour", start: 0, end: 0.5 }],
-      model: "whisper", timingsApproximate: false })
+      model: "whisper", timingsApproximate: false, granularity: "word" })
   })
 
   it("keeps Whisper auto-detect when the client sends no language", async () => {
@@ -119,7 +119,7 @@ describe("auto routing", () => {
     expect(calls.modal[0].body).toEqual({ model: "ctc", audio: request.input_audio.data, lang: "tpi_Latn" })
     expect(await response.json()).toEqual({ text: "ami ya", chunks: [
       { text: "ami", start: 0, end: 0.4 }, { text: "ya", start: 0.5, end: 0.8 },
-    ], model: "omni-ctc", timingsApproximate: false })
+    ], model: "omni-ctc", timingsApproximate: false, granularity: "word" })
   })
 
   it("omits lang when the script cannot be known, and flags approximate timings", async () => {
@@ -297,7 +297,7 @@ describe("Omnilingual billing — edge replies", () => {
       gpuSeconds: 1, gpu: "NVIDIA L4", peakMemGiB: 3.1, loadSec: 12 })
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ text: "ami", chunks: [{ text: "ami", start: 0, end: 1 }],
-      model: "omni-ctc", timingsApproximate: false })
+      model: "omni-ctc", timingsApproximate: false, granularity: "word" })
   })
 })
 
@@ -403,7 +403,7 @@ describe("Qwen3-ASR for Chinese varieties", () => {
     const jwt = await owner()
     const calls = stubProviders()
     expect((await post(jwt, { ...(await audio(1, "zh-CN")), model: "whisper" })).status).toBe(200)
-    expect(calls.whisper[0]).toMatchObject({ model: "openai/whisper-1", language: "zh" })
+    expect(calls.whisper[0]).toMatchObject({ model: "openai/whisper-large-v3", language: "zh" })
   })
 })
 

@@ -2,6 +2,11 @@ name: Refresh Dev Neon Branch
 
 on:
   workflow_dispatch:
+    inputs:
+      preflight_only:
+        description: "Only verify NEON_API_KEY against the Neon API (read-only, restores nothing)"
+        type: boolean
+        default: false
   schedule:
     # GitHub cron is UTC. These two schedules cover 4:07 a.m. Eastern during
     # daylight and standard time; the first step gates execution to the 4 a.m.
@@ -18,6 +23,16 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+      NEON_PROJECT_ID: sweet-paper-88472094
+      NEON_DEV_BRANCH: dev
+      NEON_PRODUCTION_BRANCH: production
+      NEON_DEV_DATABASE: neondb
+      NEON_DEV_ROLE: neondb_owner
+      DEV_API_HEALTH_URL: https://api.dev.aquilla.app/identity/api/v2/health
+      DEV_API_PROJECT_READ_URL: ${{ secrets.DEV_API_PROJECT_READ_URL }}
+      DEV_API_PROJECT_READ_TOKEN: ${{ secrets.DEV_API_PROJECT_READ_TOKEN }}
     steps:
       - name: Gate scheduled run to 4 a.m. Eastern
         id: eastern_gate
@@ -56,10 +71,6 @@ jobs:
 
       - name: Verify Neon refresh credentials are configured
         if: steps.eastern_gate.outputs.should_run == 'true'
-        env:
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-          DEV_API_PROJECT_READ_URL: ${{ secrets.DEV_API_PROJECT_READ_URL }}
-          DEV_API_PROJECT_READ_TOKEN: ${{ secrets.DEV_API_PROJECT_READ_TOKEN }}
         run: |
           if [ -z "$NEON_API_KEY" ]; then
             echo "::error::NEON_API_KEY is required to restore the dev Neon branch from production."
@@ -70,16 +81,16 @@ jobs:
             exit 1
           fi
 
-      - name: Restore dev branch from production and apply dev migrations
+      # Read-only: `neon branches get` on dev and production with the secret.
+      # A rejected NEON_API_KEY fails here with the rotation steps, instead of
+      # the Neon CLI's misleading "Not enough non-option arguments" retry line
+      # (every 08:07 UTC run from 2026-10-16 to 2026-10-20, e.g. run 39393566862).
+      - name: Verify NEON_API_KEY against the Neon API (read-only)
         if: steps.eastern_gate.outputs.should_run == 'true'
         env:
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-          NEON_PROJECT_ID: sweet-paper-88472094
-          NEON_DEV_BRANCH: dev
-          NEON_PRODUCTION_BRANCH: production
-          NEON_DEV_DATABASE: neondb
-          NEON_DEV_ROLE: neondb_owner
-          DEV_API_HEALTH_URL: https://api.dev.aquilla.app/identity/api/v2/health
-          DEV_API_PROJECT_READ_URL: ${{ secrets.DEV_API_PROJECT_READ_URL }}
-          DEV_API_PROJECT_READ_TOKEN: ${{ secrets.DEV_API_PROJECT_READ_TOKEN }}
+          NEON_REFRESH_PREFLIGHT_ONLY: "1"
+        run: pnpm neon:refresh:dev
+
+      - name: Restore dev branch from production and apply dev migrations
+        if: steps.eastern_gate.outputs.should_run == 'true' && inputs.preflight_only != true
         run: pnpm neon:refresh:dev

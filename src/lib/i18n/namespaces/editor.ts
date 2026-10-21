@@ -254,6 +254,34 @@ export const editor = defineNamespace({
     "editor.media.linkedVideoStudioVideo": "The video's owner can download the video file from YouTube Studio.",
     "editor.media.useTrackAsRows": "Use \"{track}\" as this file's rows",
     "editor.media.useTrackAsRowsHint": "Other caption tracks stay on the timeline.",
+    // AQU-1681: a linked video NOT on YouTube can give its own sound. Aquilla
+    // fetches it, keeps a copy, and splits it into rows like an upload.
+    "editor.media.linkedVideoUseSoundLink": "make rows from the video's own sound",
+    "editor.media.linkedVideoSoundTitle": "Make rows from the video's own sound",
+    "editor.media.linkedVideoSoundHint":
+      "Aquilla saves a copy of the video's sound with this file, splits it into rows " +
+      "where the speech pauses, and transcribes them. The rows are timed to the video.",
+    "editor.media.linkedVideoSoundReadingTracks": "Reading the video's sound tracks…",
+    "editor.media.linkedVideoSoundTrackLabel": "Sound track",
+    "editor.media.linkedVideoSoundStart": "Make rows",
+    "editor.media.linkedVideoSoundDownloading": "Downloading the video's sound…",
+    "editor.media.linkedVideoSoundDownloadingPercent": "Downloading the video's sound… {percent}%",
+    "editor.media.linkedVideoSoundSaving": "Saving a copy of the sound…",
+    "editor.media.linkedVideoSoundMakingRows": "Making rows…",
+    "editor.media.linkedVideoSoundCancelled": "Stopped. Nothing was saved.",
+    "editor.media.videoSound.fetchFailed":
+      "Couldn't download the video's sound. Check your connection and try again.",
+    "editor.media.videoSound.fileUnreadable":
+      "Couldn't download this video. Its server may not let other sites read it.",
+    "editor.media.videoSound.tooLarge": "This video is too large to keep a copy of.",
+    "editor.media.videoSound.empty": "The video's sound came back empty.",
+    "editor.media.videoSound.noSeparateSound": "This video's stream has no separate sound track to read.",
+    "editor.media.videoSound.encrypted": "This video's sound is encrypted, so Aquilla can't read it.",
+    "editor.media.videoSound.unsupportedFormat": "This video's sound is in a streaming format Aquilla can't read yet.",
+    "editor.media.videoSound.decodeFailed": "This browser couldn't decode the video's sound.",
+    "editor.media.videoSound.offset":
+      "The video's sound starts {seconds} s away from its picture, so rows made from it " +
+      "would be out of step with the video.",
 
     // — Footnotes: the inline strip, the bottom tray, and one note's row ——
     "editor.footnotes.label": "Footnotes",
@@ -1241,6 +1269,22 @@ export const editor = defineNamespace({
     // AQU-1566: a caption track on a linked video with no rows can become the
     // file's rows. It asks first, because the track leaves the timeline.
     "editor.timeline.trackUseAsRows": "Use as this file's rows",
+    // AQU-1684: hiding a track is personal — this screen only — and there is
+    // always a way back, the "Hidden tracks" menu in the timeline's toolbar.
+    "editor.timeline.trackHide": "Hide track",
+    "editor.timeline.trackHideCount": plural({
+      one: "Hide {count} track",
+      other: "Hide {count} tracks",
+    }),
+    "editor.timeline.trackHideBusy": "Can't hide a track while it's recording or being dragged",
+    "editor.timeline.hiddenTracks": plural({
+      one: "Hidden tracks ({count})",
+      other: "Hidden tracks ({count})",
+    }),
+    "editor.timeline.hiddenTracksAria": "Tracks you have hidden on this timeline",
+    "editor.timeline.hiddenTracksNote": "Hidden for you, on this device",
+    "editor.timeline.showTrack": "Show {name}",
+    "editor.timeline.showAllTracks": "Show all tracks",
     "editor.timeline.useAsRowsTitle": "Use \"{track}\" as this file's rows?",
     "editor.timeline.useAsRowsBody":
       "Its captions become rows you can translate in the Text view. The track " +
@@ -1367,6 +1411,41 @@ export const editor = defineNamespace({
     "editor.row.addLine": "Add a line",
     "editor.row.insertAbove": "Insert above",
     "editor.row.insertBelow": "Insert below",
+    // AQU-1759: split a passage at its quotation marks, so narration and each
+    // quotation become lines of their own and can be given different voices.
+    "editor.row.splitAtQuotes": "Split at quotes",
+    "editor.row.splitNoQuoteReason": "No quotation to split at \u2014 one speaker throughout.",
+    "editor.row.splitFormattedReason": "This line has formatting that can\u2019t be split automatically.",
+    "editor.row.splitMarkupReason": "Markup crosses a quotation mark here, so it can\u2019t be split automatically.",
+    "editor.row.splitSourceLockedReason": "Splitting changes the source text, which only a project lead can edit.",
+    "editor.splitQuotes.title": "Split this line at its quotation marks?",
+    "editor.splitQuotes.description": plural({
+      one: "It becomes {count} line, so each speaker can have their own voice. Every language shares the new lines.",
+      other: "It becomes {count} lines, so each speaker can have their own voice. Every language shares the new lines.",
+    }),
+    "editor.splitQuotes.narration": "Narration",
+    "editor.splitQuotes.quotation": "Quotation",
+    "editor.splitQuotes.translationsNote":
+      "A translation that splits the same way is divided between the new lines. Any other translation stays whole on the first line and is marked for review.",
+    "editor.splitQuotes.recordingsNote": "Recordings stay on the first line.",
+    "editor.splitQuotes.confirm": plural({
+      one: "Split into {count} line",
+      other: "Split into {count} lines",
+    }),
+    "editor.splitQuotes.doneToast": plural({
+      one: "Split into {count} line.",
+      other: "Split into {count} lines.",
+    }),
+    "editor.splitQuotes.keptToast": plural({
+      one: "{count} translation stayed on the first line \u2014 move its quoted part by hand.",
+      other: "{count} translations stayed on the first line \u2014 move their quoted parts by hand.",
+    }),
+    // Not plural()-wrapped: a sweep only reports here when it split two or
+    // more lines, so both numbers are always plural.
+    "editor.splitQuotes.doneManyToast": "Split {rows} lines into {count}.",
+    "editor.splitQuotes.unchangedToast": "That couldn\u2019t be split. Nothing was changed.",
+    "editor.splitQuotes.failedToast": "That line couldn\u2019t be split, so it has been put back.",
+    "editor.splitQuotes.forbiddenToast": "You don\u2019t have permission to split lines here, so it has been put back.",
     // AQU-1422: the reversible sibling of "Remove this line". The wording says
     // "cell" rather than "line" on purpose — one hide parks the row in EVERY
     // language lane at once, so calling it a line invites the reading that it
@@ -3279,9 +3358,13 @@ export const editor = defineNamespace({
           "Quiet line under the 'Attach captions' button in the linked-video empty " +
           "state, offering a second way in. Lower-case and starting with 'or' " +
           "because it continues the button above it. {link} is the clickable part " +
-          "(editor.media.linkedVideoUseRecordingLink); only it is underlined.",
+          "(editor.media.linkedVideoUseRecordingLink); only it is underlined. " +
+          "AQU-1681: a second line of the same shape wraps " +
+          "editor.media.linkedVideoUseSoundLink.",
         placeholders: {
-          link: "The clickable words, editor.media.linkedVideoUseRecordingLink.",
+          link:
+            "The clickable words, editor.media.linkedVideoUseRecordingLink or " +
+            "editor.media.linkedVideoUseSoundLink.",
         },
         maxLength: 40,
       },
@@ -3365,12 +3448,174 @@ export const editor = defineNamespace({
           "Note under those buttons when there is more than one caption track: " +
           "only the chosen track becomes rows, the others stay on the timeline.",
       },
+      "editor.media.linkedVideoUseSoundLink": {
+        description:
+          "Clickable part of a second quiet line in the linked-video empty state, " +
+          "shown only to a maintainer on a video that is not on YouTube. It sits " +
+          "inside editor.media.linkedVideoUseRecording ('or {link}'), so it is " +
+          "lower-case and continues that sentence. It opens a step where Aquilla " +
+          "takes the video's OWN soundtrack (nothing to upload) and splits its " +
+          "speech into this file's rows.",
+        maxLength: 44,
+      },
+      "editor.media.linkedVideoSoundTitle": {
+        description:
+          "Heading of that step: the rows of this file are made from the speech in " +
+          "the linked video's own soundtrack.",
+        maxLength: 44,
+      },
+      "editor.media.linkedVideoSoundHint": {
+        description:
+          "Explanation under that heading. Aquilla downloads the video's soundtrack " +
+          "and stores a copy with this file (so it keeps working if the video moves), " +
+          "cuts it into one row per stretch of speech wherever the speaking pauses, " +
+          "and turns each row's speech into text automatically. 'Timed to the video' " +
+          "means each row starts and ends at the moment in the video where it is said.",
+      },
+      "editor.media.linkedVideoSoundReadingTracks": {
+        description:
+          "Status beside a spinner while the step reads which soundtracks the video " +
+          "offers (a streamed film has one per dubbed language).",
+      },
+      "editor.media.linkedVideoSoundTrackLabel": {
+        description:
+          "Label before the button that picks which of the video's soundtracks to " +
+          "use; each soundtrack is a language the film is dubbed into. Defaults to " +
+          "the project's source language.",
+        maxLength: 24,
+      },
+      "editor.media.linkedVideoSoundStart": {
+        description:
+          "Primary button on that step that starts downloading the soundtrack and " +
+          "making the rows. Imperative.",
+        maxLength: 20,
+      },
+      "editor.media.linkedVideoSoundDownloading": {
+        description:
+          "Progress line while the video's soundtrack downloads, when its size is " +
+          "not known in advance (the progress bar under it is indeterminate).",
+      },
+      "editor.media.linkedVideoSoundDownloadingPercent": {
+        description:
+          "The same progress line when the share already downloaded is known.",
+        placeholders: { percent: "Whole number from 0 to 100." },
+      },
+      "editor.media.linkedVideoSoundSaving": {
+        description:
+          "Progress line while the downloaded soundtrack is uploaded and stored with " +
+          "this file, after the download and before the rows are made.",
+      },
+      "editor.media.linkedVideoSoundMakingRows": {
+        description:
+          "Progress line while the rows are being created from the stored soundtrack. " +
+          "It stays until the rows appear.",
+      },
+      "editor.media.linkedVideoSoundCancelled": {
+        description:
+          "Shown after the person pressed Cancel during the download or the upload: " +
+          "the run stopped and no rows or copy were kept.",
+      },
+      "editor.media.videoSound.fetchFailed": {
+        description:
+          "Error on that step when the video's soundtrack could not be downloaded " +
+          "even after retrying.",
+      },
+      "editor.media.videoSound.fileUnreadable": {
+        description:
+          "Error when the linked video is a direct link to a video file and the " +
+          "browser could not download it, most often because the server hosting it " +
+          "does not allow pages on other websites to read it.",
+      },
+      "editor.media.videoSound.tooLarge": {
+        description:
+          "Error when the linked video file is larger than Aquilla stores for one " +
+          "file, so no copy of it can be kept.",
+      },
+      "editor.media.videoSound.empty": {
+        description: "Error when the video's soundtrack downloaded with nothing in it.",
+      },
+      "editor.media.videoSound.noSeparateSound": {
+        description:
+          "Error when the streamed video carries its sound only inside the picture " +
+          "streams, with no soundtrack Aquilla can download on its own.",
+      },
+      "editor.media.videoSound.encrypted": {
+        description:
+          "Error when the streamed video's soundtrack is encrypted (copy-protected), " +
+          "which Aquilla does not try to get around.",
+      },
+      "editor.media.videoSound.unsupportedFormat": {
+        description:
+          "Error when the streamed video's soundtrack uses an older streaming format " +
+          "(MPEG-TS) that the browser cannot decode on its own.",
+      },
+      "editor.media.videoSound.decodeFailed": {
+        description:
+          "Error when the browser could not turn the downloaded soundtrack into " +
+          "sound it can analyse, usually because it does not support the audio codec.",
+      },
+      "editor.media.videoSound.offset": {
+        description:
+          "Error when the soundtrack does not start at the same moment as the " +
+          "picture (for example, one has an intro the other lacks). Rows made from " +
+          "it would not line up with the video, so none are made. 's' is seconds.",
+        placeholders: { seconds: "Seconds of difference, one decimal place, e.g. 4.0." },
+      },
       "editor.timeline.trackUseAsRows": {
         description:
           "Item in a caption track's right-click menu on the Media view's " +
           "timeline, offered only on a linked video that has no rows yet. It turns " +
           "this track's captions into the file's own rows (after a confirmation).",
         maxLength: 32,
+      },
+      "editor.timeline.trackHide": {
+        description:
+          "Item in a timeline track's right-click menu (and its ⋯ menu) on the Media " +
+          "view. It hides the track's lane on this person's own screen only — nothing " +
+          "is deleted or muted, and nobody else is affected. A 'track' is one row of the " +
+          "timeline, e.g. the source audio or a dub track.",
+        maxLength: 30,
+      },
+      "editor.timeline.trackHideCount": {
+        description:
+          "The same item when several timeline tracks are selected: hides all of them " +
+          "on this person's own screen.",
+        placeholders: { count: "How many tracks will be hidden; it also selects the plural form." },
+        maxLength: 30,
+      },
+      "editor.timeline.trackHideBusy": {
+        description:
+          "Hover text on the greyed-out 'Hide track' item while that track is recording " +
+          "a take or being dragged, which is when it may not be hidden.",
+      },
+      "editor.timeline.hiddenTracks": {
+        description:
+          "Label of a toolbar menu button on the Media view's timeline, shown only while " +
+          "the person has hidden some tracks. Opening it lists those tracks so each can " +
+          "be shown again. Keep the count in brackets after the words.",
+        placeholders: { count: "How many tracks are hidden; it also selects the plural form." },
+        maxLength: 26,
+      },
+      "editor.timeline.hiddenTracksAria": {
+        description:
+          "Screen-reader name of that 'Hidden tracks' menu button.",
+      },
+      "editor.timeline.hiddenTracksNote": {
+        description:
+          "A heading at the top of the 'Hidden tracks' menu saying that hiding applies " +
+          "only to this person, on this device — collaborators still see the tracks.",
+        maxLength: 40,
+      },
+      "editor.timeline.showTrack": {
+        description:
+          "Item in the 'Hidden tracks' menu that brings one hidden timeline track back " +
+          "into view.",
+        placeholders: { name: "The track's own name, e.g. 'Source audio' or a name someone gave it. Content, never translate." },
+      },
+      "editor.timeline.showAllTracks": {
+        description:
+          "Last item in the 'Hidden tracks' menu: brings every hidden track back into view.",
+        maxLength: 30,
       },
       "editor.timeline.useAsRowsTitle": {
         description:
@@ -8140,6 +8385,105 @@ export const editor = defineNamespace({
         placeholders: {
           key: "The metadata field name exactly as imported, e.g. \"Field\". Not translated.",
         },
+      },
+      // AQU-1759 — split a line at its quotation marks.
+      "editor.row.splitAtQuotes": {
+        description:
+          "Menu entry on a source line (the three-dot menu at its top-right). It cuts the " +
+          "line at its quotation marks into separate lines — narration, then each quoted " +
+          "speech — so each speaker can be given their own voice. Imperative. \"Quotes\" " +
+          "means quotation marks, not citations.",
+        maxLength: 24,
+      },
+      "editor.row.splitNoQuoteReason": {
+        description:
+          "Second line under that menu entry when it is disabled because the line has no " +
+          "quotation, or is one speaker throughout. Full sentence.",
+      },
+      "editor.row.splitFormattedReason": {
+        description:
+          "Second line under that menu entry when it is disabled because the source line " +
+          "carries rich formatting (styles, links) that splitting would lose. Full sentence.",
+      },
+      "editor.row.splitMarkupReason": {
+        description:
+          "Second line under that menu entry when it is disabled because scripture markup " +
+          "(e.g. a marker around Jesus' words) starts on one side of a quotation mark and " +
+          "ends on the other. Full sentence.",
+      },
+      "editor.row.splitSourceLockedReason": {
+        description:
+          "Second line under that menu entry when the person may add lines but may not " +
+          "edit source text, which splitting does. Full sentence.",
+      },
+      "editor.splitQuotes.title": {
+        description: "Heading of the dialog that previews a split before it happens. A question.",
+      },
+      "editor.splitQuotes.description": {
+        description:
+          "Body of that dialog, above the list of new lines. Explains the purpose (one voice " +
+          "per speaker) and that the new lines appear in every target language at once.",
+        placeholders: { count: "How many lines the one line becomes. Always two or more." },
+      },
+      "editor.splitQuotes.narration": {
+        description:
+          "Small tag beside a new line in the preview list, marking it as the narrator's " +
+          "words (outside quotation marks). A noun.",
+        maxLength: 16,
+      },
+      "editor.splitQuotes.quotation": {
+        description:
+          "Small tag beside a new line in the preview list, marking it as quoted speech " +
+          "(inside quotation marks). A noun.",
+        maxLength: 16,
+      },
+      "editor.splitQuotes.translationsNote": {
+        description:
+          "Note in the dialog about existing translations of the line: divided when they have " +
+          "matching quotation marks, otherwise kept on the first line and flagged for review.",
+      },
+      "editor.splitQuotes.recordingsNote": {
+        description:
+          "Note in the dialog, shown when the line already has recordings: they are not moved " +
+          "or deleted.",
+      },
+      "editor.splitQuotes.confirm": {
+        description: "The dialog's confirm button. Imperative.",
+        placeholders: { count: "How many lines the one line becomes. Always two or more." },
+        maxLength: 28,
+      },
+      "editor.splitQuotes.doneToast": {
+        description: "Toast after a split succeeds.",
+        placeholders: { count: "How many lines the one line became." },
+      },
+      "editor.splitQuotes.keptToast": {
+        description:
+          "Second toast line after a split, when some languages' translations could not be " +
+          "divided automatically and stayed whole on the first line.",
+        placeholders: { count: "How many languages' translations stayed whole." },
+      },
+      "editor.splitQuotes.doneManyToast": {
+        description:
+          "Toast after splitting several lines of a file at once (every line that holds more " +
+          "than one speaker). Both numbers are always two or more.",
+        placeholders: {
+          rows: "How many lines were split.",
+          count: "How many lines they became in total.",
+        },
+      },
+      "editor.splitQuotes.unchangedToast": {
+        description:
+          "Toast when a split could not even be attempted (the line changed meanwhile, or the " +
+          "connection failed). Nothing was written.",
+      },
+      "editor.splitQuotes.failedToast": {
+        description:
+          "Toast when the server refused a split; the line has been restored as it was.",
+      },
+      "editor.splitQuotes.forbiddenToast": {
+        description:
+          "Toast when the server refused a split for lack of permission; the line has been " +
+          "restored as it was.",
       },
       // AQU-1422 — hide / show one cell.
       "editor.row.hideCell": {

@@ -50,7 +50,7 @@ import {
 import { LaneArchivedDialog } from "./LaneArchivedDialog"
 // AQU-1613: a `?lane=` deep link is resolved by lane id (the stored choice and
 // the first-position fallback live in useActiveLane).
-import { laneTagForId, resolveDeepLinkLaneId } from "@/lib/lanes/active-lane-choice"
+import { laneIdForTag, laneTagForId, resolveDeepLinkLaneId } from "@/lib/lanes/active-lane-choice"
 import { readAtVersion, useActiveCellStore, useCellStoreVersion, type CellSummary } from "@/hooks/useActiveCellStore"
 import { useActiveLane } from "@/hooks/useActiveLane"
 import { useActiveTargetLane } from "@/hooks/useActiveTargetLane"
@@ -131,7 +131,7 @@ import { fetchContextualDrafts } from "@/lib/contextual/transport"
 import { ContextualRunPillMount } from "./contextual/ContextualRunPill"
 import type { CellData } from "@/hooks/useCells"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
-import { consumeMediaImportSeed, autoTranscribeImportedMedia } from "@/lib/audio/auto-transcribe"
+import { consumeMediaImportSeed, autoTranscribeImportedMedia, type MediaImportSeed } from "@/lib/audio/auto-transcribe"
 import { warmFileDubs } from "@/lib/audio/warm-dubs"
 import { effectiveSourceText } from "@/lib/cell-text"
 import {
@@ -210,6 +210,8 @@ import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
   setQueueTargetSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying } from "@/lib/audio/play-queue"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
 import { useTransportForFile } from "@/hooks/useTransportForFile"
+import { useAudioViewPlace } from "@/hooks/useAudioViewPlace"
+import { usePauseAudioWhenHidden } from "@/hooks/usePauseAudioWhenHidden"
 import { videoOwnsFile, virtualOwnsFile } from "@/lib/audio/transport"
 import { recordingDrivesPlayback, switchPlaybackSource, usePlaybackSource, type PlaybackSource } from "@/lib/audio/playback-source"
 import { youTubeVideoId } from "@/lib/video/youtube"
@@ -303,6 +305,10 @@ import { v7 as uuidv7 } from "uuid"
 import { sequenceBetween } from "@/lib/timeline/derive"
 import { isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
 import { buildCellRemovalInventory, type CellRemovalInventory } from "@/lib/cell-removal-inventory"
+import { planQuoteSplits, quoteSplitCandidates, quoteSplitForRow, voiceAssignmentsForSplits } from "@/lib/cells/quote-split-plan"
+import type { QuoteSplitPiece } from "@/lib/cells/quote-split"
+import { isHiddenCell } from "@/lib/cells/hidden"
+import { SplitAtQuotesDialog } from "@/components/SplitAtQuotesDialog"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
   canEditCells,
@@ -363,6 +369,13 @@ import { generateAndAttachCellVoice } from "@/lib/audio/generate-voice"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { TimeOrderedEmptyState } from "./TimeOrderedEmptyState"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
+import {
+  describeVideoSound,
+  extractVideoSound,
+  type LinkedVideoSoundActions,
+  type VideoSoundSource,
+} from "@/lib/timeline/video-sound"
+import { laneLanguageCode } from "@/lib/lanes/lane-display"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
 import { useFileAttachments } from "@/hooks/useFileAttachments"
@@ -475,7 +488,7 @@ import { applySuggestions, buildUndo, hasEffectiveChange } from "@/lib/file-labe
 import { renameFile, moveFileToCorpus, renameCorpus, deleteFile, applyFileSortIndexes, overlayPendingSortIndexes, settlePendingSortIndexes } from "@/lib/store/file-operations"
 import { deleteFileProjection } from "@/lib/sync/file-projection"
 import { fetchCellsByIds, fetchDeletedFiles, fetchProjectFiles } from "@/lib/sync/cells-read"
-import type { FileSummary } from "@/lib/sync/cells-read-types"
+import type { CellRow, FileSummary } from "@/lib/sync/cells-read-types"
 import { fileSummariesToProgress, mergeFileProgress } from "@/lib/progress/file-summary-progress"
 import { applyPushedFileProgress, invalidateFileProgress, invalidateProjectFileProgress, setLocalFileProgress } from "@/lib/progress/file-progress-resource"
 import { applyStructuralPolicy } from "@/lib/cells/structural"
@@ -708,9 +721,11 @@ export function ProjectWorkspace() {
   const t = useT()
   // AQU-1503: the batch-validate skip clauses are joined the way a list is
   // written in the reader's language, not with a hardcoded "; ".
-  const { list: formatLocaleList } = useFormat()
+  const { list: formatLocaleList, time: formatLocaleTime } = useFormat()
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
   const navigate = useNavigate()
+  // Leaving the tab pauses playback — a hidden tab can't keep the timeline in time.
+  usePauseAudioWhenHidden()
   // Declared up here because effects further down set and read them long before
   // the values they mirror are computed. Keeping the declarations ahead of every
   // use is what makes the mirroring legal (react-hooks/immutability).
@@ -1788,6 +1803,13 @@ export function ProjectWorkspace() {
     laneRows: project?.lanes != null ? laneRows : null,
     availableLanes,
   })
+  // AQU-2037: the open lane's ROW id — what a voice is stamped with and what
+  // every voice list is scoped to. `null` on a project with no target lane
+  // rows, where there is no lane to scope to and voices stay project-wide.
+  const activeLaneId = useMemo(
+    () => (project?.lanes != null ? laneIdForTag(activeLane, laneRows) : null),
+    [project?.lanes, activeLane, laneRows],
+  )
   // AQU-1326: opening a file used to fan out every workspace data hook at
   // mount — audit stats, comments, per-file audio attachments, the project-wide
   // progress rollup — all racing the cell stream for the same connection pool.
@@ -1804,6 +1826,7 @@ export function ProjectWorkspace() {
   const auditStatsEnabled = Boolean(project?.id && activeFileId && frontierSession?.jwt) && editorFirstPaint
   const {
     byCellId: auditStatsByCellId,
+    complete: auditStatsComplete,
     revalidate: revalidateAuditStats,
     revalidateCellStats,
     applyCommittedCellStats,
@@ -1856,6 +1879,7 @@ export function ProjectWorkspace() {
     username: currentUsername,
     requiredValidations: validationCount,
     auditStats: auditStatsByCellId,
+    auditStatsComplete,
     getToken: getTokenForFile,
     enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
     lane: activeLane,
@@ -2316,10 +2340,15 @@ export function ProjectWorkspace() {
       project,
       (project?.lanes ?? []).filter((lane) => lane.role === "target"),
     ),
+    activeLaneId,
   )
+  // AQU-2037: the audio surfaces read the ACTIVE LANE's voices — the per-cell
+  // picker, the batch dialog, the Media-timeline picker and Generate all go
+  // through `project.ttsSettings`. Writers use `tts.settings` / `tts.allVoices`
+  // instead; storing this view would delete the other lanes' voices.
   const audioProject = useMemo(
-    () => (project ? { ...project, ttsSettings: tts.settings } : null),
-    [project, tts.settings],
+    () => (project ? { ...project, ttsSettings: tts.laneSettings } : null),
+    [project, tts.laneSettings],
   )
   // AQU-1977: what the Assign dialog offers — the project's own languages, in
   // order, by name, with no invented "Default language" (a project made since
@@ -2357,12 +2386,16 @@ export function ProjectWorkspace() {
     // table's playback follow even if an earlier scroll had released it.
     editorRef.current?.setMediaFollow?.("engage")
   }, [])
+  // AQU-1642 follow-up: the Audio view's one place to play from. Its context —
+  // the file's cells with their takes — is written by a layout effect below,
+  // once they exist; the place only reads it at press time.
+  const { place: audioViewPlace, contextRef: audioViewContextRef } = useAudioViewPlace(activeFileId ?? null)
   const audioLens = useMemo<AudioLensContext | null>(
     () =>
       lens === "audio" && audioProject && !activeFileTimeOrdered
         ? {
             voices: tts.voices,
-            settings: tts.settings,
+            settings: tts.laneSettings,
             defaultVoiceId: tts.defaultVoiceId,
             project: audioProject,
             projectId: audioProject.id,
@@ -2392,11 +2425,12 @@ export function ProjectWorkspace() {
               setMakeCharacterSeedCellId(cellId)
               setMakeCharacterOpen(true)
             },
+            place: audioViewPlace,
           }
         : null,
     [
-      lens, audioProject, activeFileTimeOrdered, tts.voices, tts.settings, tts.defaultVoiceId,
-      tts.assignCells, frontierSession, currentUsername, cellStore, refresh,
+      lens, audioProject, activeFileTimeOrdered, tts.voices, tts.laneSettings, tts.defaultVoiceId,
+      tts.assignCells, frontierSession, currentUsername, cellStore, refresh, audioViewPlace,
     ],
   )
 
@@ -2604,8 +2638,12 @@ export function ProjectWorkspace() {
       sourceLanguage: sourceLanguage ?? "",
       targetLanguage: targetLanguage ?? "",
       terminology: surfaceConcepts.editor,
+      // AQU-2037: the editor's record is already overlaid for the open lane, so
+      // its voices are too — the cast gutter, the cell voice chip and the batch
+      // dialog all read them off `project.ttsSettings`.
+      ttsSettings: tts.laneSettings,
     }
-  }, [activeSourceLanguage, activeLaneTargetLanguage, project, surfaceConcepts.editor])
+  }, [activeSourceLanguage, activeLaneTargetLanguage, project, surfaceConcepts.editor, tts.laneSettings])
   // AQU-1721: the same record for the glossary, carrying only this project's
   // own concepts. The glossary edits what it lists, and a concept from a
   // subscribed termbase is not this project's to edit.
@@ -2913,10 +2951,15 @@ export function ProjectWorkspace() {
       emitted: Awaited<ReturnType<typeof enqueueEvents>>,
     ): Promise<boolean> => {
       if (!project?.id || !activeFileId) return false
+      // AQU-1759: a split's own source commit too — losing it would leave the
+      // split row holding its whole text with its pieces inserted after it,
+      // so the passage would read twice.
       const losers = emitted.filter(
         (e) =>
           staleIds.has(e.eventId) &&
-          (e.event.kind === "source.cell.reorder" || e.event.kind === "source.cell.delete"),
+          (e.event.kind === "source.cell.reorder"
+            || e.event.kind === "source.cell.delete"
+            || e.event.kind === "source.cell.commit"),
       )
       if (losers.length === 0) return true
 
@@ -2949,6 +2992,15 @@ export function ProjectWorkspace() {
             author: string
             payload: Record<string, never>
           }
+        | {
+            kind: "source.cell.commit"
+            projectId: string
+            fileId: string
+            cellId: string
+            parentId: string
+            author: string
+            payload: { value?: string; valueHtml?: string }
+          }
       > = []
       for (const loser of losers) {
         const cellId = loser.event.cellId
@@ -2968,6 +3020,13 @@ export function ProjectWorkspace() {
             ...base,
             kind: "source.cell.reorder" as const,
             payload: loser.event.payload as { anchorCellId: string | null },
+          })
+        } else if (loser.event.kind === "source.cell.commit") {
+          // Same: the text the row should now hold has not changed.
+          retries.push({
+            ...base,
+            kind: "source.cell.commit" as const,
+            payload: loser.event.payload as { value?: string; valueHtml?: string },
           })
         } else {
           retries.push({ ...base, kind: "source.cell.delete" as const, payload: {} })
@@ -3175,6 +3234,87 @@ export function ProjectWorkspace() {
   // Media-lens empty state: attach a clip to the ACTIVE file by upload or
   // direct URL. The Import dialog can't do this — it always creates a new
   // time-ordered file. Errors propagate to TimelineAddMedia, which renders them.
+  /**
+   * AQU-646: auto-transcribe a file's new media sections — importing (or
+   * attaching) a recording must surface source text without hunting for the
+   * Transcribe button. Fire and forget: the consent dialog (first run) +
+   * progress toast + per-cell badges carry the UX; a denial simply leaves
+   * manual transcribe available.
+   *
+   * Sam, 2026-08-18: an imported MP3 takes about a minute to come back with
+   * any text, and until it does the file looks empty and broken. The toast is
+   * CREATED LAZILY, on the first progress call — a consent denial or a file
+   * with nothing to transcribe never reports, so neither of those leaves a
+   * spinner hanging over a run that is not happening.
+   *
+   * AQU-1681: shared by the import, the recording upload and the linked
+   * video's own sound (the two attach flows had no toast at all), and the
+   * toast says when the hosted limit has paused the run and when it carries
+   * on — up to a quarter of an hour that would otherwise look like a hang.
+   */
+  const startAutoTranscribe = useCallback((seed: MediaImportSeed, fileName: string) => {
+    if (!project?.id) return
+    let toastId: string | null = null
+    let lastTotal = 0
+    let title = ""
+    let waitingUntil: number | null = null
+    const plural = (n: number) => (n === 1 ? "" : "s")
+    const show = () => {
+      const description = waitingUntil !== null
+        ? t("audio.bulkProgress.waitingForLimit", { time: formatLocaleTime(waitingUntil) })
+        : undefined
+      if (toastId === null) toastId = toast.add({ type: "loading", title, description, timeout: 0 })
+      else toast.update(toastId, { type: "loading", title, description })
+    }
+    void autoTranscribeImportedMedia({
+      seed,
+      projectId: project.id,
+      session: frontierSession ?? null,
+      sourceLanguage: activeSourceLanguage,
+      targetLanguage: activeLaneTargetLanguage,
+      onProgress: (done, total) => {
+        lastTotal = total
+        // The zeroth call lands BEFORE the Whisper model is fetched, which on
+        // a cold run is most of the minute — so the first thing on screen
+        // says what is happening rather than counting from nothing.
+        title =
+          done === 0
+            ? `Transcribing ${total} section${plural(total)} of "${fileName}"\u2026`
+            : `Transcribing \u2014 ${done} of ${total} done\u2026`
+        show()
+      },
+      onWaiting: (until) => {
+        waitingUntil = until
+        if (toastId !== null) show()
+      },
+      onFailed: (message) => {
+        if (toastId !== null) toast.update(toastId, { type: "error", title: `Couldn't transcribe "${fileName}": ${message}`, description: undefined })
+      },
+      onDone: async () => {
+        // Transcripts ride outbox-queued cell.audio.attach emits — flush so
+        // they land, then pull the projection with the new source text.
+        await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+        revalidateCells()
+        // Only if something was actually reported — see the lazy toast above.
+        if (toastId !== null) {
+          toast.update(toastId, { type: "success", title: `Transcribed ${lastTotal} section${plural(lastTotal)} of "${fileName}".`, description: undefined })
+        }
+      },
+    })
+  }, [project?.id, activeSourceLanguage, activeLaneTargetLanguage, frontierSession, getTokenForProjectFile, revalidateCells, t, formatLocaleTime])
+
+  /** After a recording lands on a file as its rows: send the rows, show
+   *  them, and transcribe them. Shared by the upload and, AQU-1681, the
+   *  linked video's own sound. */
+  const finishSourceMediaAttach = useCallback(async (fileId: string, fileName: string) => {
+    await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+    revalidateCells()
+    // AQU-646: the attach flow seeds auto-transcribe too — same "file gained
+    // media sections" moment as an import (see handleImported).
+    const seed = consumeMediaImportSeed(fileId)
+    if (seed) startAutoTranscribe(seed, fileName)
+  }, [getTokenForProjectFile, revalidateCells, startAutoTranscribe])
+
   const handleAttachMediaFile = useCallback(async (file: File) => {
     if (!project?.id || !activeFileId) return
     await attachMediaFileToTimeline(file, {
@@ -3183,25 +3323,8 @@ export function ProjectWorkspace() {
       author: currentUsername,
       getToken: getTokenForFile,
     })
-    await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
-    revalidateCells()
-    // AQU-646: the attach flow seeds auto-transcribe too — same "file gained
-    // media sections" moment as an import (see handleImported).
-    const seed = consumeMediaImportSeed(activeFileId)
-    if (seed) {
-      void autoTranscribeImportedMedia({
-        seed,
-        projectId: project.id,
-        session: frontierSession ?? null,
-        sourceLanguage: activeSourceLanguage,
-        targetLanguage: activeLaneTargetLanguage,
-        onDone: async () => {
-          await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
-          revalidateCells()
-        },
-      })
-    }
-  }, [project?.id, activeSourceLanguage, activeLaneTargetLanguage, activeFileId, currentUsername, frontierSession, getTokenForFile, getTokenForProjectFile, revalidateCells])
+    await finishSourceMediaAttach(activeFileId, activeFile?.name ?? file.name)
+  }, [project?.id, activeFileId, activeFile?.name, currentUsername, getTokenForFile, finishSourceMediaAttach])
 
   const handleAttachMediaUrl = useCallback(async (url: string) => {
     if (!project?.id || !activeFileId) return
@@ -9092,6 +9215,142 @@ export function ProjectWorkspace() {
   )
 
   /**
+   * AQU-1759: split rows at their quotation marks, so narration and each
+   * quotation become rows of their own and can be cast in different voices.
+   *
+   * Built from a FRESH read of the rows rather than the store: the plan chains
+   * on every language's translation head and on the follower's head, and a
+   * stale head is a stale sibling the server drops. It is one targeted read of
+   * the rows and their followers, not a refetch of the file.
+   *
+   * Then the same three moves every structural edit in this file makes — show
+   * it now, send it as one batch, put it back if the server refuses — with one
+   * difference in what counts as a refusal: only the SOURCE events decide
+   * whether the split happened. A translation that could not be divided costs
+   * that language its division, never the split.
+   */
+  const handleSplitAtQuotes = useCallback(
+    async (cellIds: readonly string[]): Promise<void> => {
+      if (!project?.id || !activeFileId || cellIds.length === 0) return
+      const projectId = project.id
+      const fileId = activeFileId
+      const followerOf = new Map<string, { cellId: string | null; sequenceAfter: number | undefined }>()
+      for (const cellId of cellIds) {
+        const insert = cellStore.getInsertPlan(cellId, "below")
+        followerOf.set(cellId, { cellId: insert?.reanchor?.cellId ?? null, sequenceAfter: insert?.sequenceAfter })
+      }
+      let rows: CellRow[]
+      try {
+        const mint = await getTokenForProjectFile(projectId, fileId)
+        if (!mint.token) throw new Error("no sync token")
+        const ids = new Set(cellIds)
+        for (const follower of followerOf.values()) if (follower.cellId) ids.add(follower.cellId)
+        rows = await fetchCellsByIds(projectId, fileId, [...ids], mint.token)
+      } catch (err) {
+        console.error("[splitAtQuotes] read failed:", err)
+        toast.add({ type: "error", title: t("editor.splitQuotes.unchangedToast") })
+        return
+      }
+      const sourceOf = new Map<string, CellRow>()
+      const targetsOf = new Map<string, CellRow[]>()
+      for (const row of rows) {
+        if (row.side === "source") sourceOf.set(row.cellId, row)
+        else targetsOf.set(row.cellId, [...(targetsOf.get(row.cellId) ?? []), row])
+      }
+      const plan = planQuoteSplits({
+        projectId,
+        fileId,
+        author: currentUsername,
+        mintId: uuidv7,
+        rows: cellIds.flatMap((cellId) => {
+          const source = sourceOf.get(cellId)
+          if (!source) return []
+          const follower = followerOf.get(cellId)
+          const next = follower?.cellId ? sourceOf.get(follower.cellId) : undefined
+          return [{
+            source,
+            targets: targetsOf.get(cellId) ?? [],
+            // Only a follower the server agrees is anchored here.
+            successor: next && next.anchorCellId === cellId ? { cellId: next.cellId, eventId: next.eventId } : null,
+            nextSequenceIndex: follower?.sequenceAfter,
+          }]
+        }),
+      })
+      if (plan.splits.length === 0) {
+        toast.add({ type: "error", title: t("editor.splitQuotes.unchangedToast") })
+        return
+      }
+
+      const undo = cellStore.applyOptimisticQuoteSplit(plan.splits.map((split) => ({
+        cellId: split.cellId,
+        firstText: split.pieces[0].text,
+        pieces: split.newCellIds.map((cellId, i) => ({
+          cellId,
+          value: split.pieces[i + 1].text,
+          sequenceIndex: split.sequenceIndexes[i],
+        })),
+        successorCellId: split.successorCellId,
+      })))
+      let emitted: Awaited<ReturnType<typeof enqueueEvents>>
+      try {
+        emitted = await enqueueEvents(plan.events)
+      } catch (err) {
+        // Nothing was queued: `enqueueEvents` refuses the whole batch on the
+        // first input it will not take.
+        console.error("[splitAtQuotes] refused before enqueue:", err)
+        cellStore.rollbackOptimisticQuoteSplit(undo)
+        toast.add({ type: "error", title: t("editor.splitQuotes.failedToast") })
+        return
+      }
+      const mine = new Set(emitted.map((e) => e.eventId))
+      const sourceSide = new Set(emitted.filter((e) => e.event.kind.startsWith("source.")).map((e) => e.eventId))
+      let refusal: MessageKey | null = null
+      const staleIds = new Set<string>()
+      await flushOutboxUntilSettled([...mine], {
+        getTokenForFile: getTokenForProjectFile,
+        onRejected: (entries) => {
+          if (entries.some((e) => sourceSide.has(e.id))) refusal ??= "editor.splitQuotes.failedToast"
+        },
+        onForbidden: (entries) => {
+          if (entries.some((e) => sourceSide.has(e.id))) refusal = "editor.splitQuotes.forbiddenToast"
+        },
+        onStaleSiblings: (entries) => {
+          for (const entry of entries) if (mine.has(entry.id)) staleIds.add(entry.id)
+        },
+      }, { maxRounds: Math.ceil(emitted.length / 100) + 2 })
+      // A dead-lettered re-anchor or source commit is repaired the way every
+      // structural edit here repairs one: re-read the head, re-send the intent.
+      const sourceStale = [...staleIds].some((id) => sourceSide.has(id))
+      if (!refusal && sourceStale && !(await rebaseStaleCellStructureEvents(staleIds, emitted))) {
+        refusal = "editor.splitQuotes.failedToast"
+      }
+      if (refusal) {
+        cellStore.rollbackOptimisticQuoteSplit(undo)
+        toast.add({ type: "error", title: t(refusal) })
+      } else {
+        // Narration after narration keeps the row's voice; quotations are left
+        // for casting — which is the whole point of splitting.
+        const voices = voiceAssignmentsForSplits(plan.splits, tts.settings?.castAssignments)
+        if (voices) void tts.saveTts({ castAssignments: { ...(tts.settings?.castAssignments ?? {}), ...voices } })
+        const lines = plan.splits.reduce((n, split) => n + split.pieces.length, 0)
+        const kept = plan.splits.reduce((n, split) => n + split.lanes.filter((l) => l.outcome === "kept").length, 0)
+        toast.add({
+          type: "success",
+          title: plan.splits.length === 1
+            ? t("editor.splitQuotes.doneToast", { count: lines })
+            : t("editor.splitQuotes.doneManyToast", { rows: plan.splits.length, count: lines }),
+          ...(kept > 0 ? { description: t("editor.splitQuotes.keptToast", { count: kept }) } : {}),
+        })
+        // A translation kept whole now sits on changed source text: ask again
+        // which rows are stale, so its review marker shows without a reload.
+        if (kept > 0) staleSourceRefetchRef.current()
+      }
+      revalidateCells()
+    },
+    [project?.id, activeFileId, currentUsername, cellStore, getTokenForProjectFile, revalidateCells, rebaseStaleCellStructureEvents, tts, toast, t],
+  )
+
+  /**
    * Land on a line the moment it exists. Keyed on the store's version so it
    * re-checks on every projection change and fires exactly once, on the first
    * tick where the row is really there. Gives up after a few seconds rather
@@ -9165,6 +9424,12 @@ export function ProjectWorkspace() {
   const handleRemoveCell = useCallback((cellId: string) => {
     requestRemoveCellRef.current(cellId)
   }, [])
+  // AQU-1759: same indirection, same reason — the preview it opens is declared
+  // beside the removal confirmation, further down.
+  const requestSplitAtQuotesRef = useRef<(cellId: string) => void>(() => {})
+  const handleRequestSplitAtQuotes = useCallback((cellId: string) => {
+    requestSplitAtQuotesRef.current(cellId)
+  }, [])
 
   // AQU-1422: identity-stable wrapper, for the reason the whole
   // EditorActionsContext exists — `handleSetCellHidden` is rebuilt whenever the
@@ -9228,6 +9493,7 @@ export function ProjectWorkspace() {
     onAddLineAt: handleAddLineAt,
     onInsertCellBeside: handleInsertCellBeside,
     onRemoveCell: handleRemoveCell,
+    onSplitAtQuotes: handleRequestSplitAtQuotes, // AQU-1759
     // AQU-1422: passed unconditionally — the ROLE gate is applied in the row,
     // with `canPerform` against the same table the emitter enforces, because
     // that is where the DCS/live-linked reasons already live.
@@ -9236,7 +9502,7 @@ export function ProjectWorkspace() {
     timingLocked,
     canUnlockTiming,
     onOpenTimingSettings: handleOpenTimingSettings,
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleSetCellHiddenStable, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings])
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRequestSplitAtQuotes, handleSetCellHiddenStable, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings])
 
 
   // Drives the editor-area rendering: loading skeleton vs. empty state vs.
@@ -10595,12 +10861,12 @@ export function ProjectWorkspace() {
     // Includes takes already in the current voice. The menu stays so a quality
     // change or a new reference clip can overwrite them. The dialog counts only
     // the cells the chosen quality will actually convert.
-    const plan = planChangeVoiceAll(holders, tts.settings)
+    const plan = planChangeVoiceAll(holders, tts.laneSettings, undefined, tts.settings)
     // Takes a voice is using as its reference clip are not converted, but the
     // menu stays so the confirmation can say how many were left out.
     const voiceChangeable = plan.targets.length + plan.skipped["up-to-date"] + plan.skipped["voice-reference"]
     return { untranscribed, unsynthesized: synthTargets.length, voiceChangeable }
-  }, [activeFileId, batchAudioCells, audioCueCells, synthTargets, tts.settings])
+  }, [activeFileId, batchAudioCells, audioCueCells, synthTargets, tts.settings, tts.laneSettings])
 
   /**
    * AQU-490: takes this viewer could still validate — the number the bulk
@@ -10674,6 +10940,25 @@ export function ProjectWorkspace() {
     },
   ), [project, activeFileId, cellSummaries, currentUsername, myScopes, activeLane])
 
+  // AQU-1759: whether this person may split this file's lines at their quotes.
+  // Settled further down (it needs the add/remove-rows tier and the file's
+  // placement), so the action menu reads it through this ref at click time.
+  const canSplitAtQuotesRef = useRef(false)
+  const canSplitAtQuotes = useCallback(() => canSplitAtQuotesRef.current, [])
+  /** AQU-1759: the rows "Split lines at quotes" would split — the row action's
+   *  own refusals (audio, IDML, parked rows) first, then what the text says. */
+  const quoteSplitFileCandidates = useCallback(() => quoteSplitCandidates(
+    cellStore.getAllCellViews().filter((cell) =>
+      (cell.medium ?? "text") !== "media"
+      && !isHiddenCell(cell)
+      && resolveIdmlEditorConfiguration(cell.metadata, cell.originalHtml) == null,
+    ),
+  ), [cellStore])
+  const quoteSplitSummary = useCallback(() => {
+    const { cellIds, lines } = quoteSplitFileCandidates()
+    return { rows: cellIds.length, lines }
+  }, [quoteSplitFileCandidates])
+
   const actionCtx = useMemo(() => ({
     project: project!,
     activeFileId,
@@ -10683,7 +10968,9 @@ export function ProjectWorkspace() {
     // because they read different maps (see validatableTakes above).
     audioCounts: { ...audioCounts, validatableTakes },
     batchValidateSummary,
-  }), [project, activeFileId, fileProgress, canExportByOrgPolicy, audioCounts, validatableTakes, batchValidateSummary])
+    canSplitAtQuotes,
+    quoteSplitSummary,
+  }), [project, activeFileId, fileProgress, canExportByOrgPolicy, audioCounts, validatableTakes, batchValidateSummary, canSplitAtQuotes, quoteSplitSummary])
 
   // AQU-481: source import emits `file.create` (+ N `source.cell.create`), and
   // `file.create` sits at PROJECT_LEAD (500) server-side. Read the role from
@@ -11079,7 +11366,10 @@ export function ProjectWorkspace() {
       const cells = mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellId)
       void runBatchSynthAll({
         cells,
-        project,
+        // AQU-2037: resolves each line's cast voice off `project.ttsSettings`,
+        // so it must be the OPEN LANE's library — a whole-file run is the same
+        // Generate, in bulk, and must not cross lanes either.
+        project: audioProject ?? project,
         session: frontierSession ?? null,
         username: currentUsername,
         resolveTargets: (c) => byFirstSource.get(c.id) ?? [],
@@ -11089,7 +11379,7 @@ export function ProjectWorkspace() {
         // characters is generated in the first one's voice — say which ones,
         // afterwards, rather than silently picking.
         const divergent = divergentVoiceTargets(targets, (id) =>
-          assignedCastVoiceId(project.ttsSettings, id),
+          assignedCastVoiceId(tts.laneSettings, id),
         )
         if (divergent.length === 0) return
         toast.add({
@@ -11105,7 +11395,8 @@ export function ProjectWorkspace() {
       void runChangeVoiceAll({
         projectId: project.id,
         cells: audioCueCells ?? fileCells,
-        settings: tts.settings,
+        settings: tts.laneSettings,
+        allSettings: tts.settings,
         session: frontierSession ?? null,
         author: currentUsername,
         diffusionSteps: CHANGE_VOICE_QUALITY_STEPS[batchVoiceQualityRef.current],
@@ -11124,8 +11415,11 @@ export function ProjectWorkspace() {
         revalidateCells?.()
       })
     },
+    // AQU-1759: every line the confirmation counted, through the row action's
+    // own path — one read, one optimistic apply, one batch.
+    runSplitAtQuotes: () => { void handleSplitAtQuotes(quoteSplitFileCandidates().cellIds) },
     navigate,
-  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId, audioValidationByCellId, audioCueCells, myScopes, t, reportBatchValidate, batchValidateSummary, tts.settings, activeSourceLanguage, activeLaneTargetLanguage])
+  }), [handleSplitAtQuotes, quoteSplitFileCandidates, activeFileId, completeBatch, getActiveCells, cellSummaries, project, audioProject, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId, audioValidationByCellId, audioCueCells, myScopes, t, reportBatchValidate, batchValidateSummary, tts.settings, tts.laneSettings, activeSourceLanguage, activeLaneTargetLanguage])
 
   // AQU-661: the dynamic primary-action button was removed; its actions now live
   // in the ⋯ overflow menu. This preserves the button's confirmation flow —
@@ -11137,10 +11431,11 @@ export function ProjectWorkspace() {
     if (pendingActionConfirm?.id !== "change-voice-all") return null
     return planChangeVoiceAll(
       audioCueCells ?? batchAudioCells,
-      tts.settings,
+      tts.laneSettings,
       CHANGE_VOICE_QUALITY_STEPS[batchVoiceQuality],
+      tts.settings,
     )
-  }, [pendingActionConfirm, audioCueCells, batchAudioCells, tts.settings, batchVoiceQuality])
+  }, [pendingActionConfirm, audioCueCells, batchAudioCells, tts.settings, tts.laneSettings, batchVoiceQuality])
   const [batchFileModal, setBatchFileModal] = useState<BatchFileModalRequest | null>(null)
   const handleWorkspaceAction = useCallback((action: WorkspaceAction) => {
     if (action.comingSoon) return
@@ -11637,9 +11932,11 @@ export function ProjectWorkspace() {
       // as the voice card renders no button on `no-take`.
       const take = changeVoiceSourceTake(cell)
       if (!take) return null
-      const voice = resolveCastVoice(tts.settings, cell.id, cell.ttsSettings?.voiceId)
+      const voice = resolveCastVoice(tts.laneSettings, cell.id, cell.ttsSettings?.voiceId)
       // A take some voice is cloned FROM is left alone: converting it would
       // change what that voice sounds like. Same rule as the whole-file run.
+      // Checked against the WHOLE library on purpose (AQU-2037): a voice on
+      // another lane cloned from this take would be changed just the same.
       const isReference = takeUsedByVoice(cell, tts.settings)
       const status = getTtsStatus(ttsStatusKey(cell.id))
       const busy = status.kind === "loading" || status.kind === "synthesizing"
@@ -11657,7 +11954,7 @@ export function ProjectWorkspace() {
         blockers,
       }
     },
-    [tts.settings],
+    [tts.settings, tts.laneSettings],
   )
 
   const handleChangeTimelineVoice = useCallback(
@@ -11666,7 +11963,7 @@ export function ProjectWorkspace() {
       const owner = resolveTakeCellRef.current(cellId)
       if (!owner) return
       const { cell } = owner
-      const voice = resolveCastVoice(tts.settings, cell.id, cell.ttsSettings?.voiceId)
+      const voice = resolveCastVoice(tts.laneSettings, cell.id, cell.ttsSettings?.voiceId)
       const diffusionSteps = CHANGE_VOICE_QUALITY_STEPS[quality]
       // The menu disables what cannot run, but it was drawn from an earlier
       // render: re-check before spending a conversion.
@@ -11696,7 +11993,7 @@ export function ProjectWorkspace() {
         ...(failure.kind === "error" && failure.message ? { description: failure.message } : {}),
       })
     },
-    [project, frontierSession, tts.settings, currentUsername, activeLane, revalidateCells, t],
+    [project, frontierSession, tts.settings, tts.laneSettings, currentUsername, activeLane, revalidateCells, t],
   )
   // Publish the resolver declared near the top of the component. Assigned on
   // every render, deliberately: it closes over this render's cue cells, and a
@@ -11765,6 +12062,16 @@ export function ProjectWorkspace() {
     () => mergeCellsWithAudio(legacyCells, workspaceAudioByCellId),
     [legacyCells, workspaceAudioByCellId],
   )
+  // AQU-1642 follow-up: what the Audio view's cards and ⋯ Play open the run
+  // with — the same lines, takes and "moved to this line" as the bar's Play.
+  // Written after every commit (no deps) so a press reads this render's cells;
+  // a layout effect, not a render-time write, because the hook's return value
+  // is frozen to react-hooks/immutability and the ref is never read in render.
+  useLayoutEffect(() => {
+    audioViewContextRef.current = project
+      ? { cells: audioMergedCells, projectId: project.id, session: frontierSession ?? null, onActiveCell: handleBarActiveCell }
+      : null
+  })
 
   // AQU-928: transcribe EXACTLY the sections selected on the timeline. Same
   // per-cell path (and same post-run flush/revalidate) as transcribe-all, only
@@ -11904,6 +12211,23 @@ export function ProjectWorkspace() {
   // Publish it to the stable wrapper the editor context hands the rows. See
   // `handleRemoveCell` above for why the indirection exists.
   requestRemoveCellRef.current = requestRemoveCell
+
+  /**
+   * AQU-1759: the split's preview. Read from the store, so it opens at once;
+   * the split itself re-reads the row before it writes anything.
+   */
+  const [pendingQuoteSplit, setPendingQuoteSplit] = useState<
+    { cellId: string; pieces: QuoteSplitPiece[]; hasRecordings: boolean } | null
+  >(null)
+  requestSplitAtQuotesRef.current = (cellId: string) => {
+    const cell = getActiveCell(cellId)
+    if (!cell) return
+    const { pieces, refusal } = quoteSplitForRow({ value: cell.original ?? "", valueHtml: cell.originalHtml })
+    if (refusal) return
+    const merged = mergeCellsWithAudio([cell], workspaceAudioByCellIdRef.current)[0] ?? cell
+    const hasRecordings = buildCellRemovalInventory({ cell: merged, targetLangs: [], commentCount: 0 }).takeCount > 0
+    setPendingQuoteSplit({ cellId, pieces, hasRecordings })
+  }
   // AQU-1422: same publication, same reason.
   setCellHiddenRef.current = (cellId, hidden) => { void handleSetCellHidden(cellId, hidden) }
 
@@ -11942,6 +12266,11 @@ export function ProjectWorkspace() {
   const placement = cellPlacement({
     orderedBy: activeFile ? fileOrderedBy(activeFile) : "sequence",
   })
+  // AQU-1759: the row menu's split gate, for the file-wide action — rows may
+  // be added here, source text may be edited, and the file has no clock.
+  canSplitAtQuotesRef.current = canEditLines
+    && canPerform("source.cell.commit", project?.syncRole?.level ?? null)
+    && placement === "anywhere"
 
   const videoDurationForTable = useVideoDurationSec(activeFile?.coreMediaUrl ?? null)
   /**
@@ -12296,9 +12625,69 @@ export function ProjectWorkspace() {
    * govern. It needs Project Lead on EVERY empty media file, not only a
    * linked video's, because the clip is stored as the file's source audio.
    */
-  const { offerCaptionRows, canImportCaptions, canUploadSourceMedia } = mediaEmptyGates({
+  const { offerCaptionRows, canImportCaptions, canUploadSourceMedia, offerVideoSoundRows } = mediaEmptyGates({
     roleLevel: project?.syncRole?.level, captionRowsMode, canEditTracks,
+    linkedVideoUrl: activeFile?.coreMediaUrl,
   })
+  /**
+   * AQU-1681: make an empty linked video's rows from its own sound. The sound
+   * is fetched (a streamed film's audio track, or a direct file), stored as
+   * this file's recording exactly like an upload, split at its pauses and
+   * transcribed — `finishSourceMediaAttach`, the upload's own tail.
+   *
+   * The film's track list is read once per file and kept for the run, so
+   * choosing a track and starting does not fetch the master twice. The
+   * default track is the project's source language (Sam, 2026-10-15).
+   */
+  const sourceLanguageCode = useMemo(
+    () => sourceLane
+      ? laneLanguageCode(sourceLane, { settings: project, role: "source", legacyTag: sourceLane.legacyTag ?? null })
+      : null,
+    [sourceLane, project],
+  )
+  const linkedVideoUrl = activeFile?.coreMediaUrl ?? null
+  const linkedVideoBaseName = (activeFile?.name ?? "").replace(/\.[a-z0-9]{2,5}$/i, "") || "video"
+  const linkedVideoSound = useMemo<LinkedVideoSoundActions | undefined>(() => {
+    if (!offerVideoSoundRows || !project?.id || !activeFileId || !linkedVideoUrl) return undefined
+    const projectId = project.id
+    const fileId = activeFileId
+    let described: Promise<VideoSoundSource> | null = null
+    const describeOnce = () => {
+      described ??= describeVideoSound(linkedVideoUrl, sourceLanguageCode).catch((err: unknown) => {
+        described = null
+        throw err
+      })
+      return described
+    }
+    return {
+      describe: async () => {
+        const source = await describeOnce()
+        return source.kind === "stream"
+          ? { tracks: source.tracks.map(({ id, name, lang }) => ({ id, name, lang })), defaultTrackId: source.defaultTrackId }
+          : { tracks: [], defaultTrackId: null }
+      },
+      run: async (trackId, { signal, onProgress }) => {
+        const sound = await extractVideoSound({
+          source: await describeOnce(),
+          trackId,
+          baseName: linkedVideoBaseName,
+          signal,
+          onProgress,
+        })
+        await attachMediaFileToTimeline(sound.file, {
+          projectId,
+          fileId,
+          author: currentUsername,
+          getToken: getTokenForFile,
+        }, {
+          ...(sound.analysis ? { analysis: sound.analysis } : {}),
+          signal,
+          onPhase: (phase) => onProgress({ phase }),
+        })
+        await finishSourceMediaAttach(fileId, linkedVideoBaseName)
+      },
+    }
+  }, [offerVideoSoundRows, project?.id, activeFileId, linkedVideoUrl, linkedVideoBaseName, sourceLanguageCode, currentUsername, getTokenForFile, finishSourceMediaAttach])
   const alignmentClipUrl = useMemo(() => {
     const urls = new Set(audioMergedCells.flatMap(cell => {
       const clip = sourceClipAudioForCell(cell)
@@ -14090,7 +14479,7 @@ export function ProjectWorkspace() {
     const cell = getActiveCell(cellId)
     const text = (cell?.translated ?? "").trim()
     if (!cell || !text || !project?.id || !frontierSession) return false
-    const voice = resolveCastVoice(tts.settings, cell.id)
+    const voice = resolveCastVoice(tts.laneSettings, cell.id)
     // AQU-510: the extension shows the reason this throws, so give it the
     // same localized, actionable sentence the built-in voice button shows
     // (AQU-891's categoriser), never a raw provider payload.
@@ -14099,7 +14488,7 @@ export function ProjectWorkspace() {
       fileId: cell.fileId,
       cellId: cell.id,
       text,
-      projectTtsSettings: tts.settings,
+      projectTtsSettings: tts.laneSettings,
       cellVoiceId: voice.id,
       geminiContext: {
         sourceLanguage: activeSourceLanguage || undefined,
@@ -14117,7 +14506,7 @@ export function ProjectWorkspace() {
     })
     await handleCellCommitted(cell.id)
     return true
-  }, [getActiveCell, project?.id, frontierSession, tts.settings, activeSourceLanguage, activeTargetLanguage, currentUsername, activeLane, handleCellCommitted])
+  }, [getActiveCell, project?.id, frontierSession, tts.laneSettings, activeSourceLanguage, activeTargetLanguage, currentUsername, activeLane, handleCellCommitted])
 
   // Smart Extensions (apiRev 2 + 3): what an `editor` extension mounted for
   // the active file reaches through the bridge — the same live focus locks,
@@ -14191,9 +14580,9 @@ export function ProjectWorkspace() {
     [project],
   )
   const extensionVoiceFor = useCallback((cellId: string) => {
-    const voice = resolveCastVoice(tts.settings, cellId)
-    return voice ? { name: voice.name, explicit: Boolean(assignedCastVoiceId(tts.settings, cellId)) } : null
-  }, [tts.settings])
+    const voice = resolveCastVoice(tts.laneSettings, cellId)
+    return voice ? { name: voice.name, explicit: Boolean(assignedCastVoiceId(tts.laneSettings, cellId)) } : null
+  }, [tts.laneSettings])
   // apiRev 4: the last built-in surfaces for an extension editor (audio
   // validation, the Audio lens's take, source editing, AI surfaces beside a
   // cell, the source selection toolbar), over the same handlers.
@@ -14232,7 +14621,7 @@ export function ProjectWorkspace() {
     onCellCommitted: (cellId) => { void handleCellCommitted(cellId) },
     myScopes,
     linkedTakesByCell,
-    ttsSettings: tts.settings,
+    ttsSettings: tts.laneSettings,
     onAssignCastVoice: handleAssignCastVoice,
     onClearCastVoice: handleClearCastVoice,
     onCloneVoice: (cellId) => {
@@ -14882,54 +15271,11 @@ export function ProjectWorkspace() {
     refresh()
     revalidateCells()
 
-    // AQU-646: auto-transcribe the imported sections — importing an MP3 must
-    // surface source text without hunting for the Transcribe button. Fire and
-    // forget: the consent dialog (first run) + progress banner + per-cell
-    // badges carry the UX; a denial simply leaves manual transcribe available.
+    // AQU-646: auto-transcribe the imported sections (startAutoTranscribe).
     for (const ref of refs) {
       if (!isMediaFileType(ref.type)) continue
       const seed = consumeMediaImportSeed(ref.id)
-      if (!seed || !project?.id) continue
-      // Sam, 2026-08-18: an imported MP3 takes about a minute to come back with
-      // any text, and until it does the file looks empty and broken. The toast
-      // is CREATED LAZILY, on the first progress call — a consent denial or a
-      // file with nothing to transcribe never reports, so neither of those
-      // leaves a spinner hanging over a run that is not happening.
-      let toastId: string | null = null
-      let lastTotal = 0
-      const plural = (n: number) => (n === 1 ? "" : "s")
-      void autoTranscribeImportedMedia({
-        seed,
-        projectId: project.id,
-        session: frontierSession ?? null,
-        sourceLanguage: activeSourceLanguage,
-        targetLanguage: activeLaneTargetLanguage,
-        onProgress: (done, total) => {
-          lastTotal = total
-          // The zeroth call lands BEFORE the Whisper model is fetched, which on
-          // a cold run is most of the minute — so the first thing on screen
-          // says what is happening rather than counting from nothing.
-          const title =
-            done === 0
-              ? `Transcribing ${total} section${plural(total)} of "${ref.name}"\u2026`
-              : `Transcribing \u2014 ${done} of ${total} done\u2026`
-          if (toastId === null) toastId = toast.add({ type: "loading", title, timeout: 0 })
-          else toast.update(toastId, { type: "loading", title })
-        },
-        onFailed: (message) => {
-          if (toastId !== null) toast.update(toastId, { type: "error", title: `Couldn't transcribe "${ref.name}": ${message}` })
-        },
-        onDone: async () => {
-          // Transcripts ride outbox-queued cell.audio.attach emits — flush so
-          // they land, then pull the projection with the new source text.
-          await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
-          revalidateCells()
-          // Only if something was actually reported — see the lazy toast above.
-          if (toastId !== null) {
-            toast.update(toastId, { type: "success", title: `Transcribed ${lastTotal} section${plural(lastTotal)} of "${ref.name}".` })
-          }
-        },
-      })
+      if (seed) startAutoTranscribe(seed, ref.name)
     }
   }
 
@@ -15103,6 +15449,7 @@ export function ProjectWorkspace() {
                     username={currentUsername}
                     targetLanguage={activeLaneTargetLanguage}
                     fileId={activeFileId}
+                    laneId={activeLaneId}
                   />
                 </div>
               ) : undefined
@@ -15161,17 +15508,18 @@ export function ProjectWorkspace() {
                   onReorderFiles={(writes) => { void handleReorderFiles(writes) }}
                   onMoveFileToGroup={(move) => { void handleMoveFileToGroup(move) }}
                 />
-                <SidebarProjectSection items={projectNavItems} />
-                {/* FRO-192: member's per-project assignment pickup panel. */}
-                {project?.id && jwt && (
-                  <ProjectAssignedToMe
-                    projectId={project.id}
-                    jwt={jwt}
-                    onJumpToAssignment={jumpToAssignment}
-                    refreshKey={assignmentsRefreshKey}
-                    defaultLaneLabel={activeTargetLanguage ?? ""}
-                  />
-                )}
+                <SidebarProjectSection items={projectNavItems}>
+                  {/* FRO-192: member's per-project assignment pickup — a sidebar button that opens a popover. */}
+                  {project?.id && jwt && (
+                    <ProjectAssignedToMe
+                      projectId={project.id}
+                      jwt={jwt}
+                      onJumpToAssignment={jumpToAssignment}
+                      refreshKey={assignmentsRefreshKey}
+                      defaultLaneLabel={activeTargetLanguage ?? ""}
+                    />
+                  )}
+                </SidebarProjectSection>
                 {/* AQU-581: a lane coordinator's own hand-outs, so they can take one back. */}
                 {project?.id && jwt && isLaneCoordinator && (
                   <ProjectHandedOut
@@ -15333,7 +15681,10 @@ export function ProjectWorkspace() {
             {project && activeFileId && centerSurface === "editor" && (
               <>
                 <SelectionBar
-                  project={project}
+                  /* AQU-2037: `audioProject` is `project` with the OPEN LANE's
+                     voices — the batch voice dialog this bar opens reads them
+                     off `project.ttsSettings`. */
+                  project={audioProject ?? project}
                   cellStore={cellStore}
                   session={frontierSession}
                   username={currentUsername}
@@ -15942,6 +16293,8 @@ export function ProjectWorkspace() {
                     }
                     isTextFullscreen={mediaSections.isFullscreen("text")}
                     onOpenRecording={handleOpenRecording}
+                    // AQU-1684: the track taking a take can't be hidden meanwhile.
+                    recordingSlot={recordingCellId !== null ? recordingSlot : null}
                     project={editorProject ?? project ?? undefined}
                     onSelectCell={setTimelineSelectedCellId}
                     // AQU-928: transcription emits contributor-level events, so
@@ -16267,7 +16620,10 @@ export function ProjectWorkspace() {
             getStatisticalBt={getStatisticalBt}
             onAlignmentSeedChange={handleAlignmentSeedChange}
             onSeekToCue={isSubtitleFile && timelineStacked ? handleCueSeek : undefined}
-            playingCueCellId={isSubtitleFile && timelineStacked ? playingCueCellId : null}
+            // AQU-1642: in the Audio view too — the line the bottom bar is
+            // playing is marked. Its card's controls reach the run through
+            // the Audio view's place (`audioLens.place`), not through here.
+            playingCueCellId={(isSubtitleFile && timelineStacked) || audioLens ? playingCueCellId : null}
             onPauseCue={pauseAllTransports}
             sourceLineEditing={sourceLineEditing}
             lineNumbersEnabled={fileMeta.lineNumbersEnabled}
@@ -16290,7 +16646,7 @@ export function ProjectWorkspace() {
                 : undefined
             }
             castGutter={timelineStacked}
-            ttsSettings={tts.settings}
+            ttsSettings={tts.laneSettings}
             orderedBy={activeFile ? fileOrderedBy(activeFile) : undefined}
             onOpenAudioSetup={openAudioSetup}
             onProjectChanged={refresh}
@@ -16313,6 +16669,7 @@ export function ProjectWorkspace() {
             // file's rows, for maintainers on an empty linked video only.
             onAttachCaptions={offerCaptionRows ? handleAttachCaptionsAsRows : undefined}
             onUseCaptionTrackAsRows={offerCaptionRows ? requestUseTrackAsRows : undefined}
+            linkedVideoSound={linkedVideoSound}
             onCellCommitted={handleCellCommitted}
             onValidated={handleCellValidated}
             repetitionCounts={repetitionCounts}
@@ -16724,7 +17081,9 @@ export function ProjectWorkspace() {
                   session={frontierSession ?? null}
                   settings={tts.settings}
                   onActiveCell={handleBarActiveCell}
-                  startCellId={timelineSelectedCellId}
+                  // AQU-1642 follow-up: in the Audio view, Play starts from the
+                  // verse last selected or stopped.
+                  startCellId={audioLens ? audioViewPlace.startCellId : timelineSelectedCellId}
                   coreMediaUrl={activeFile?.coreMediaUrl ?? null}
                   videoPaneOnScreen={showVideoPane}
                   // AQU-646 stage 3h: what the bar reads on a file with timings
@@ -17320,6 +17679,16 @@ export function ProjectWorkspace() {
         onConfirm={() => {
           if (pendingCellRemoval) void handleRemoveLine(pendingCellRemoval.cellId)
           setPendingCellRemoval(null)
+        }}
+      />
+      {/* AQU-1759: what a split will make, before it makes it. */}
+      <SplitAtQuotesDialog
+        pieces={pendingQuoteSplit?.pieces ?? null}
+        hasRecordings={pendingQuoteSplit?.hasRecordings ?? false}
+        onCancel={() => setPendingQuoteSplit(null)}
+        onConfirm={() => {
+          if (pendingQuoteSplit) void handleSplitAtQuotes([pendingQuoteSplit.cellId])
+          setPendingQuoteSplit(null)
         }}
       />
       {/* A remote timing-mode change, acknowledged (2026-08-06). */}

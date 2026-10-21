@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { mockTranscription, scriptMockResponse } from "./mock-openrouter"
+import { mockTranscription, scriptMockResponse, wavSecondsOfRequest } from "./mock-openrouter"
 import { expandSlashCommand } from "../src/lib/agent/slash-commands"
 
 type MockResponse = ReturnType<typeof scriptMockResponse>
@@ -16,6 +16,18 @@ describe("scripted local agent", () => {
         { word: "transcription", start: 0.25, end: 0.5 },
       ],
     })
+  })
+  // AQU-1681: a minute-long request has its words handed back to the rows they
+  // were spoken in; a stand-in that only ever "says" two words in the first
+  // half second would leave every row but the first empty in a local run.
+  it("speaks all the way through the audio it was sent", () => {
+    const wav = Buffer.alloc(44 + 32_000 * 3)
+    const seconds = wavSecondsOfRequest(JSON.stringify({ input_audio: { data: wav.toString("base64") } }))
+    expect(seconds).toBe(3)
+    const reply = mockTranscription(seconds)
+    expect(reply.words).toHaveLength(15)
+    expect(reply.words.slice(0, 3).map((w) => w.start)).toEqual([0, 0.2, 0.4])
+    expect(reply.text.startsWith("mock@0.0 mock@0.2 mock@0.4 ")).toBe(true)
   })
   it("returns a declarative JSON recipe for the owned importer contract", () => {
     const reply = message(scriptMockResponse([

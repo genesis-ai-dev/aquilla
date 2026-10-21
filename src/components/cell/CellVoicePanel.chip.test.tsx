@@ -14,6 +14,13 @@ vi.mock("@/hooks/useCellAudio", () => ({
     setTrim: vi.fn(), requestPeaks: vi.fn(), ensureBytes: vi.fn(),
   }),
 }))
+// AQU-1642 follow-up: what the bottom bar's run is doing on this line.
+const runHere = vi.hoisted(() => ({ kind: null as "playing" | "loading" | "paused" | null, sec: null as number | null }))
+vi.mock("@/lib/audio/play-queue", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useQueueCellKind: (cellId?: string) => (cellId ? runHere.kind : null),
+  useQueueCellPosition: (cellId?: string) => (cellId ? runHere.sec : null),
+}))
 const generateCellVoice = vi.hoisted(() => vi.fn(async (..._a: unknown[]) => true))
 vi.mock("@/lib/audio/voice-generate-helpers", () => ({
   generateCellVoice: (...a: unknown[]) => generateCellVoice(...a),
@@ -89,6 +96,8 @@ function draw(over: Partial<React.ComponentProps<typeof CellVoicePanel>> = {}) {
 }
 
 beforeEach(() => {
+  runHere.kind = null
+  runHere.sec = null
   generateCellVoice.mockClear()
   emitCellAudioDeselect.mockClear()
   injectOptimisticAudioDeselect.mockClear()
@@ -136,6 +145,62 @@ describe("CellVoicePanel — the take, then a row with its voice", () => {
   it("plays from the waveform's corner", () => {
     draw()
     expect(screen.getByTestId("voice-card-waveform-play")).toHaveAttribute("aria-label", "Play audio")
+  })
+
+  // AQU-1642 follow-up (Sam, 2026-10-17): in the Audio view the bottom bar's
+  // player is the card's player. The card shows where it is on this line —
+  // moving while it plays, held while it waits — and its corner button is
+  // Play, and a real Stop while the run plays here.
+  const placed = () => {
+    const place = { onPress: vi.fn(), onPick: vi.fn() }
+    draw({ place })
+    return place
+  }
+  const playline = () => screen.queryByTestId("voice-card-waveform-playline") as HTMLElement | null
+
+  it("is Stop while the bar's run plays this line, and shows how far it has got", () => {
+    runHere.kind = "playing"
+    runHere.sec = 2.5
+    const place = placed()
+    const button = screen.getByTestId("voice-card-waveform-play")
+    expect(button).toHaveAttribute("aria-label", "Stop")
+    expect(playline()?.style.left).toBe("25%")
+    fireEvent.click(button)
+    expect(place.onPress).toHaveBeenCalledTimes(1)
+  })
+
+  it("holds the place while the run waits on this line, and Play carries on from it", () => {
+    runHere.kind = "paused"
+    runHere.sec = 4
+    const place = placed()
+    const button = screen.getByTestId("voice-card-waveform-play")
+    expect(button).toHaveAttribute("aria-label", "Play audio")
+    expect(playline()?.style.left).toBe("40%")
+    expect(screen.getByTestId("voice-card-time")).toHaveTextContent("0:04")
+    fireEvent.click(button)
+    expect(place.onPress).toHaveBeenCalledTimes(1)
+  })
+
+  it("draws no place while the run is elsewhere, and Play starts this line", () => {
+    const place = placed()
+    expect(screen.getByTestId("voice-card-waveform-play")).toHaveAttribute("aria-label", "Play audio")
+    expect(playline()).toBeNull()
+    fireEvent.click(screen.getByTestId("voice-card-waveform-play"))
+    expect(place.onPress).toHaveBeenCalledTimes(1)
+  })
+
+  it("puts the place where the waveform is clicked", () => {
+    const place = placed()
+    fireEvent.pointerDown(screen.getByTestId("voice-card-waveform-seek"), { clientX: 0 })
+    expect(place.onPick).toHaveBeenCalledWith(0)
+  })
+
+  it("outside the Audio view, its button is still its own Play", () => {
+    runHere.kind = "playing"
+    runHere.sec = 2.5
+    draw()
+    expect(screen.getByTestId("voice-card-waveform-play")).toHaveAttribute("aria-label", "Play audio")
+    expect(playline()).toBeNull()
   })
 
   it("trims a generated voice right on the card", () => {

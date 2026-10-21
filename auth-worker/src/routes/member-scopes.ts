@@ -292,6 +292,15 @@ memberScopes.put(
       return c.json({ error: "project_lead required to manage scopes" }, 403)
     }
 
+    // [Pen test] Authorization & access control (2026-10-20): a project lead
+    // can be limited to some lanes. An empty replace-set means "every lane", so
+    // a lane-limited lead could clear their OWN scopes and widen themselves to
+    // every lane. Below Maintainer (who already reads every lane) nobody edits
+    // their own scopes; another lead or a maintainer does it.
+    if (targetUserId === user.id && callerRole.level < ROLE.MAINTAINER) {
+      return c.json({ error: "you cannot change your own lane scopes" }, 403)
+    }
+
     // Project must exist (also gives org/creator context for role resolution).
     const projectRow = await c.env.AQUILLA_PG.prepare(
       "SELECT id, created_by, org_id FROM projects WHERE id = ?",

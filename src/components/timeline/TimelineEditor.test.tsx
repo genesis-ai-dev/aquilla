@@ -863,6 +863,47 @@ describe("TimelineEditor", () => {
     expect(screen.queryByTestId("tl-detail-overlap")).toBeNull()
   })
 
+  // AQU-1767 (Sam, 2026-10-19): a split take's pills read the whole take.
+  it("a take cut into three pieces reads from its first piece to its last, with the sound it keeps", () => {
+    // Verse 10–20. A 4s take cut into 0–1.5s, 2.5–3.7s and 3.8–4.0s of the
+    // recording, so on the timeline 10.0–11.5, 12.5–13.7 and 13.8–14.0.
+    const TAKE = "audio-v2-1700000000-take.webm"
+    const piece = (n: number) => `audio-v2-170000000${n}-piece.webm`
+    const recording = { type: "audio", url: "frontier-audio://take", slot: "recording", durationMs: 4000 }
+    const plain = (id: string, start: number, end: number): CellData => {
+      const takeId = `audio-${id}-1700000000-take.webm`
+      return cell({
+        id, medium: "media", startTime: start, endTime: end, original: id, selectedAudioId: takeId,
+        attachments: { [takeId]: { ...recording, durationMs: 3000 }, [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" } },
+      } as unknown as Partial<CellData>)
+    }
+    const split = cell({
+      id: "v2", medium: "media", startTime: 10, endTime: 20, original: "v2", selectedAudioId: TAKE,
+      attachments: {
+        [TAKE]: { ...recording, trimEndMs: 1500 },
+        [piece(1)]: { ...recording, trimStartMs: 2500, trimEndMs: 3700, pieceOf: TAKE },
+        [piece(2)]: { ...recording, trimStartMs: 3800, pieceOf: TAKE },
+        [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+      },
+    } as unknown as Partial<CellData>)
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable
+        cells={[plain("v1", 0, 10), split, plain("v3", 20, 30)]}
+        onRetimeSubtitle={() => {}} initialSelectedCellId="v2"
+      />,
+    )
+    expect(screen.getByTestId("tl-detail-dub-range")).toHaveTextContent("Target: 0:10.0–0:14.0")
+    expect(screen.getByTestId("tl-detail-pieces")).toHaveTextContent("3 pieces")
+    // 1.5 + 1.2 + 0.2 seconds of sound.
+    expect(screen.getByTestId("tl-detail-duration")).toHaveTextContent("2.9s")
+    // Source 10.0s − the take's 4.0s span.
+    expect(screen.getByTestId("tl-detail-diff")).toHaveTextContent("Diff: +6.0s")
+    // Its own pieces never count as overlapping each other.
+    expect(screen.queryByTestId("tl-detail-overlap")).toBeNull()
+    expect(screen.queryByTestId("tl-detail-overlap-start")).toBeNull()
+  })
+
   // ── 2026-08-08: an automatic playback advance clears the selection ──
 
   const editorAt = (onSelectCell: (id: string | null) => void) => (
@@ -2487,15 +2528,19 @@ describe("TimelineEditor — rows come from the track model", () => {
     expect(screen.getByText("New folder from this track")).toBeTruthy()
   })
 
-  // The whole row of new machinery is withheld from someone who can do neither:
-  // no trigger, no `⋯`, no `select-none` the trigger would add. The row a
-  // viewer sees is the row that shipped.
-  it("adds nothing at all to a row when the person can do neither", () => {
+  // The maintainers' machinery is withheld from someone who can do neither.
+  // AQU-1684 (Sam): anyone may hide a track on their own screen, so the row's
+  // menu is theirs too — holding Hide alone.
+  it("gives a person who can do neither a menu with Hide alone", () => {
     render(
       <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}} />,
     )
-    expect(screen.queryByTestId("tl-track-menu-target-audio")).toBeNull()
     expect(screen.queryByTestId("tl-add-track")).toBeNull()
+    // Right-click the row (the event reaches it from the `⋯` inside it).
+    fireEvent.contextMenu(screen.getByTestId("tl-track-menu-target-audio"))
+    expect(screen.getByText("Hide track")).toBeTruthy()
+    expect(screen.queryByText("Rename")).toBeNull()
+    expect(screen.queryByText("New folder from this track")).toBeNull()
   })
 
   // Deleting really deletes, so it asks — and it asks with the NUMBER, which is
@@ -4015,7 +4060,9 @@ describe("TimelineEditor — a menu with nothing in it does not open", () => {
   // place." With several derived tracks selected there is genuinely nothing to
   // offer — Rename is single-track only and none of them can be coloured,
   // foldered from, or deleted with the setting off.
-  it("stays shut on a multi-selection of derived tracks with editing off", () => {
+  // AQU-1684: since anyone may hide tracks, such a selection is no longer
+  // empty — it offers to hide them all, and nothing it cannot do.
+  it("offers only Hide on a multi-selection of derived tracks with editing off", () => {
     render(
       <TimelineEditor
         fileId="f1" coreMediaUrl={null} editable cells={rowCells}
@@ -4026,9 +4073,8 @@ describe("TimelineEditor — a menu with nothing in it does not open", () => {
     fireEvent.click(rows[0])
     fireEvent.click(rows[1], { metaKey: true })
     fireEvent.contextMenu(rows[1])
-    expect(screen.queryByRole("menu")).toBeNull()
-    // …and the `⋯` goes with it, rather than advertising a menu that will not open.
-    expect(screen.queryByTestId("tl-track-menu-source-audio")).toBeNull()
+    expect(screen.getByText("Hide 2 tracks")).toBeTruthy()
+    expect(screen.queryByText("Rename")).toBeNull()
   })
 
   it("still opens on ONE of them, where Rename applies", () => {
@@ -4757,15 +4803,20 @@ describe("TimelineEditor — captions becoming a linked video's rows (AQU-1566)"
   // The viewer decision: a Viewer keeps "Open Media view" and may watch. What
   // the workspace hands a viewer is exactly this (every setup row present but
   // not theirs, no track callbacks), and none of it may surface.
-  it("gives a viewer no Sources menu, no Add track and no track menu", () => {
+  // AQU-1684: …and a track menu holding only Hide, which is theirs too.
+  it("gives a viewer no Sources menu, no Add track and a track menu with Hide alone", () => {
     render(<TimelineEditor {...base}
       onRequestLinkVideo={() => {}} canLinkVideo={false}
       onRequestImportAudioVtt={() => {}} canImportAudioVtt={false}
       onRequestImportCharacters={() => {}} canImportCharacters={false} />)
     expect(screen.queryByTestId("tl-sources-menu")).toBeNull()
     expect(screen.queryByTestId("tl-add-track")).toBeNull()
-    expect(document.querySelector('[data-testid^="tl-track-menu-"]')).toBeNull()
+    const menus = document.querySelectorAll<HTMLElement>('[data-testid^="tl-track-menu-"]')
+    expect(menus.length).toBeGreaterThan(0)
+    fireEvent.contextMenu(menus[0])
+    expect(screen.getByText("Hide track")).toBeTruthy()
     expect(screen.queryByText("Use as this file's rows")).toBeNull()
+    expect(screen.queryByText("Rename")).toBeNull()
   })
 })
 
@@ -5043,5 +5094,87 @@ describe("TimelineEditor — splitting takes (AQU-1767)", () => {
     expect(chip().className).not.toContain("ring-2")
     fireEvent.keyDown(window, { key: "s" })
     expect(onCutTargets).not.toHaveBeenCalled()
+  })
+})
+
+// AQU-1684 (Sam's decision): each person hides lanes on their own screen, per
+// file, stored on the device like folder collapse. A lane never vanishes
+// without trace — "Hidden tracks (N)" lists it to show again — and one that is
+// recording or being dragged may not be hidden.
+describe("TimelineEditor — hiding tracks (AQU-1684)", () => {
+  beforeEach(() => {
+    topOwner.value = 1
+    localStorage.clear()
+  })
+
+  const rowCells = [cell({ id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10 })]
+  const gutter = () => screen.getByTestId("tl-scroll").previousElementSibling as HTMLElement
+  const names = () =>
+    Array.from(gutter().querySelectorAll("span.font-semibold")).map((el) => el.textContent)
+  const lanes = () =>
+    screen.getByTestId("tl-scroll").querySelectorAll('[data-testid="tl-lane"],[data-testid^="tl-target-lane"],[data-testid="tl-source-regions"]').length
+  const editor = (props: Record<string, unknown> = {}) => (
+    <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}} {...props} />
+  )
+  /** Right-click a track's row and pick Hide. */
+  const hide = (trackId: string) => {
+    fireEvent.contextMenu(screen.getByTestId(`tl-track-menu-${trackId}`))
+    fireEvent.click(screen.getByText("Hide track"))
+  }
+
+  it("hides a lane from the gutter and the lanes, and lists it to show again", async () => {
+    render(editor())
+    const before = lanes()
+    expect(screen.queryByTestId("tl-hidden-tracks")).toBeNull()
+    hide("source-audio")
+    expect(names()).toEqual(["Source text", "Target audio"])
+    expect(lanes()).toBe(before - 1)
+    const menu = screen.getByTestId("tl-hidden-tracks")
+    expect(menu).toHaveTextContent("Hidden tracks (1)")
+    fireEvent.click(menu)
+    fireEvent.click(await screen.findByTestId("tl-show-track-source-audio"))
+    expect(names()).toEqual(["Source text", "Source audio", "Target audio"])
+    expect(lanes()).toBe(before)
+    expect(screen.queryByTestId("tl-hidden-tracks")).toBeNull()
+  })
+
+  it("is this person's, per file, kept on this device", () => {
+    const { unmount } = render(editor())
+    hide("target-audio")
+    expect(localStorage.getItem("aquilla:tlTracksHidden:f1")).toBe(JSON.stringify(["target-audio"]))
+    unmount()
+    const again = render(editor())
+    expect(names()).toEqual(["Source text", "Source audio"])
+    again.unmount()
+    render(editor({ fileId: "f2" }))
+    expect(names()).toEqual(["Source text", "Source audio", "Target audio"])
+  })
+
+  it("shows them all again at once", async () => {
+    render(editor())
+    hide("source-audio")
+    hide("target-audio")
+    fireEvent.click(screen.getByTestId("tl-hidden-tracks"))
+    expect(screen.getByTestId("tl-hidden-tracks")).toHaveTextContent("Hidden tracks (2)")
+    fireEvent.click(await screen.findByTestId("tl-show-all-tracks"))
+    expect(names()).toEqual(["Source text", "Source audio", "Target audio"])
+  })
+
+  it("will not hide the track the recorder is taking into", () => {
+    render(editor({ recordingSlot: "recording" }))
+    fireEvent.contextMenu(screen.getByTestId("tl-track-menu-target-audio"))
+    const item = screen.getByTestId("tl-track-hide")
+    expect(item).toHaveAttribute("data-disabled")
+    fireEvent.click(item)
+    expect(names()).toEqual(["Source text", "Source audio", "Target audio"])
+  })
+
+  it("will not hide a lane while a drag is under way in it", () => {
+    render(editor())
+    const lane = screen.getByTestId("tl-scroll").querySelector('[data-testid^="tl-target-lane"]') as HTMLElement
+    fireEvent.pointerDown(lane, { button: 0 })
+    fireEvent.contextMenu(screen.getByTestId("tl-track-menu-target-audio"))
+    expect(screen.getByTestId("tl-track-hide")).toHaveAttribute("data-disabled")
+    fireEvent.pointerUp(window)
   })
 })

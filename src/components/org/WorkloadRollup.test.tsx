@@ -95,7 +95,8 @@ describe("WorkloadRollup", () => {
     render(<WorkloadRollup jwt="jwt" orgId={1} />)
 
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
-    fireEvent.click(screen.getByRole("button", { name: /Remove assignment/ }))
+    fireEvent.click(screen.getByRole("button", { name: /^Remove assignment/ }))
+    fireEvent.click(screen.getByRole("button", { name: /^Confirm removing assignment/ }))
 
     await waitFor(() => expect(mockUnassign).toHaveBeenCalledWith({
       jwt: "jwt",
@@ -117,10 +118,45 @@ describe("WorkloadRollup", () => {
     render(<WorkloadRollup jwt="jwt" orgId={1} />)
 
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
-    fireEvent.click(screen.getByRole("button", { name: /Remove assignment/ }))
+    fireEvent.click(screen.getByRole("button", { name: /^Remove assignment/ }))
+    fireEvent.click(screen.getByRole("button", { name: /^Confirm removing assignment/ }))
 
     await waitFor(() => expect(screen.getByText(/role too low/)).toBeInTheDocument())
     // Row stays — removal failed, nothing was cleared.
     expect(screen.getByText("anna")).toBeInTheDocument()
+  })
+})
+
+// AQU-1969: validate assignments read the assignee's own approvals, under
+// their own heading, furthest behind first.
+describe("WorkloadRollup validators", () => {
+  const counts = (total: number, validated: number, waiting: number, changed: number) => ({ total, validated, waiting, changed })
+  const base = { projectId: "pa", projectName: "Torah", fileId: "f1", deadline: null }
+
+  it("lists validators apart from translators, furthest behind first, in the shared wording", async () => {
+    mockGetWorkload.mockResolvedValue([
+      // Newest first from the server.
+      { ...base, assignmentId: "v-near", assigneeUserId: 3, username: "bo", scopeLabel: "Deuteronomy 11", cellsTotal: 10, cellsDone: 9, kind: "validate", validation: { text: counts(10, 9, 0, 0), audio: counts(10, 0, 10, 0) } },
+      { ...base, assignmentId: "v-far", assigneeUserId: 2, username: "ana", scopeLabel: "Deuteronomy 1–10", cellsTotal: 40, cellsDone: 34, kind: "validate", validation: { text: counts(40, 34, 0, 2), audio: counts(40, 3, 30, 1) } },
+      { ...base, assignmentId: "t1", assigneeUserId: 4, username: "tom", scopeLabel: "Genesis", cellsTotal: 10, cellsDone: 4, kind: "translate" },
+    ])
+    render(<WorkloadRollup jwt="jwt" orgId={1} />)
+
+    const group = await screen.findByTestId("workload-validations")
+    expect(screen.getByText("Validation assignments")).toBeInTheDocument()
+    const order = [...group.querySelectorAll("[data-testid^=workload-validation-v]")]
+      .map((el) => el.getAttribute("data-testid"))
+      .filter((id) => !id?.includes("-text-") && !id?.includes("-audio-"))
+    expect(order).toEqual(["workload-validation-v-far", "workload-validation-v-near"])
+    expect(screen.getByTestId("workload-validation-text-v-far").textContent).toBe(
+      "Text validated 34 of 40 · 6 left · 2 changed since",
+    )
+    // Three of her lines have recordings: the audio line is there.
+    expect(screen.getByTestId("workload-validation-audio-v-far").textContent).toBe(
+      "Audio validated 3 of 40 · 7 left · 1 changed since · waiting on a recording (30)",
+    )
+    // The translator's row is outside the group and reads as it always has.
+    expect(group.textContent).not.toContain("tom")
+    expect(screen.getByText("4/10")).toBeInTheDocument()
   })
 })

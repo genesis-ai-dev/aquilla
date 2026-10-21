@@ -134,12 +134,20 @@ export function emitEventsTelemetry(
 }
 
 /** One `audio attached` per line a committed LinkMedia changeset attached to.
- *  LinkMedia always lands in the shared `recording` slot, with no lane, and
- *  the artifact carries no duration (upload does no decoding, see
- *  artifacts-route.ts), so none is sent. */
+ *  AQU-2086: the slot and lane are the command's — `recording` unless it asked
+ *  for `generatedVoice`, and the resolved lane's tag ('' for a plan staged
+ *  before LinkMedia carried a lane). The artifact itself carries no duration
+ *  (upload does no decoding, see artifacts-route.ts), so a length is sent only
+ *  when the caller stated one. */
 export function linkMediaTelemetry(
   projectId: string,
-  attached: ReadonlyArray<{ fileId: string; cellId: string }>,
+  attached: ReadonlyArray<{
+    fileId: string
+    cellId: string
+    slot: string
+    lane: string
+    durationMs?: number
+  }>,
   source: TelemetrySource,
 ): TelemetryEvent[] {
   return attached.map((a) => audioActionEvent({
@@ -147,10 +155,11 @@ export function linkMediaTelemetry(
     projectId,
     fileId: a.fileId,
     cellId: a.cellId,
-    slot: 'recording',
-    lane: '',
+    slot: a.slot,
+    lane: a.lane,
     source,
     surface: API_SURFACE,
+    ...(a.durationMs !== undefined ? { durationMs: a.durationMs } : {}),
   }))
 }
 

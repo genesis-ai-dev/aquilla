@@ -52,3 +52,40 @@ describe("VoiceSidebar (AQU-1978)", () => {
     expect(props.archivedLanes).toBeUndefined()
   })
 })
+
+// AQU-2038: the roster writes the WHOLE library back (AQU-2037) but draws — and
+// passes back with every write — the LANE's starred default, because `saveTts`
+// routes that key to the lane. The project-wide default here would be the
+// wrong star, and the next voice edit would move the lane's star back onto it.
+describe("VoiceSidebar (AQU-2038)", () => {
+  it("hands the roster the whole library with the lane's starred default", () => {
+    const project = { id: "p1", targetLanguage: "", lanes: [] } as unknown as ProjectRecord
+    const narrator = { id: "v-narrator", name: "Narrator" }
+    const sam = { id: "v-sam", name: "Samoan reader", laneId: "lane-sm" }
+    const ara = { id: "v-ara", name: "Arabic reader", laneId: "lane-ar" }
+    const settings = { voices: [narrator, sam, ara], defaultVoiceId: narrator.id }
+    const laneTts = {
+      settings,
+      // The lane view: lane-ar's voices only, and its own star.
+      laneSettings: { voices: [narrator, ara], defaultVoiceId: ara.id },
+      saveTts: vi.fn(),
+      castStats: new Map(),
+    } as unknown as ProjectTtsApi
+    render(
+      <VoiceSidebar
+        cells={[]}
+        project={project}
+        projectId="p1"
+        tts={laneTts}
+        session={null}
+        username="sam"
+        laneId="lane-ar"
+      />,
+    )
+    const props = panelProps.at(-1)!
+    const panelSettings = props.settings as { voices: Array<{ id: string }>; defaultVoiceId?: string }
+    expect(panelSettings.voices.map((v) => v.id)).toEqual([narrator.id, sam.id, ara.id])
+    expect(panelSettings.defaultVoiceId).toBe(ara.id)
+    expect(props.laneId).toBe("lane-ar")
+  })
+})

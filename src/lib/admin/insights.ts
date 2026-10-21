@@ -7,13 +7,12 @@
 import type { AdminProject, AdminOrg, AdminUser } from "@/lib/frontier/admin"
 import {
   PROJECT_STATUS_LABEL,
+  portfolioActivityStatus,
   type ProjectAttentionKind,
   type ProjectAttentionReason,
 } from "@/lib/project-status"
 
 const DAY_MS = 24 * 60 * 60 * 1000
-/** No target edit in this long ⇒ "stalled". Matches the org portfolio's 14d. */
-const STALE_MS = 14 * DAY_MS
 /** "Anywhere on Earth": a date isn't overdue until it has ended in UTC-12. */
 const AOE_GRACE_MS = (24 + 12) * 60 * 60 * 1000
 const SOON_MS = 7 * DAY_MS
@@ -35,11 +34,25 @@ export function deadlineState(p: Pick<AdminProject, "deadlineAt">, now: number):
   return "ok"
 }
 
-/** True when the project has content but hasn't been edited in STALE_MS. */
-export function isStalled(p: Pick<AdminProject, "totalCells" | "lastEditAt">, now: number): boolean {
-  if (p.totalCells <= 0) return false // an empty shell isn't "stalled", it's unstarted
-  if (p.lastEditAt == null) return true // has cells, never edited → stalled
-  return now - p.lastEditAt > STALE_MS
+/**
+ * AQU-1911: the org dashboard's rule (`portfolioActivityStatus`), so the admin
+ * console and the dashboards never disagree about which projects are stalled.
+ * A project nobody has started translating is not stalled, it is unstarted;
+ * and validating or recording is work, so the clock is `lastActivityAt`
+ * rather than the cell-edit stamp alone.
+ *
+ * An older server sends neither field. Then the totals stand in for the
+ * translated count and the edit stamp for the activity, which is the rule
+ * this function had before.
+ */
+export function isStalled(
+  p: Pick<AdminProject, "totalCells" | "filledCells" | "lastEditAt" | "lastActivityAt">,
+  now: number,
+): boolean {
+  return portfolioActivityStatus(
+    { filledCells: p.filledCells ?? p.totalCells, lastEditAt: p.lastActivityAt ?? p.lastEditAt },
+    now,
+  ) === "stalled"
 }
 
 export type AttentionKind = ProjectAttentionKind

@@ -30,3 +30,12 @@
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: microphone=(self), camera=(), geolocation=(), payment=(), usb=(), interest-cohort=()
   Strict-Transport-Security: max-age=31536000
+
+# AQU-2092: everything under /assets is a build output whose name carries a
+# content fingerprint (index-<hash>.js, app-chunk-<hash>.js, <name>-<hash>.wasm
+# …), so a changed file always gets a new URL. Keep them a year and never
+# re-check: without this a visit re-asks about 100+ files, one round trip each
+# on a slow link. The page itself (index.html, every app route) is not under
+# /assets and keeps revalidating, so a deploy shows up at once.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

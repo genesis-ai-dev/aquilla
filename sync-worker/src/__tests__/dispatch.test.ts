@@ -40,6 +40,7 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'file.delete': {},
     'file.restore': {},
     'cell.backtranslation.set': { btText: 'hello', targetEventId: 'evt-tgt-1', polished: false },
+    'cell.gloss.set': { glossText: 'hello', targetEventId: 'evt-tgt-1' },
     'comment.create': { commentId: 'cmt-1', scope: { kind: 'project' }, body: 'hi', parentCommentId: null },
     'comment.edit': { commentId: 'cmt-1', body: 'updated' },
     'comment.delete': { commentId: 'cmt-1' },

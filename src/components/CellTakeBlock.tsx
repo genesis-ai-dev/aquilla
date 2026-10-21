@@ -64,7 +64,8 @@ import { pieceGroupOf, type AudioAttachmentOut } from "@/lib/sync/cell-audio-rea
 import { TakesStrip } from "@/components/AudioRecorder/TakesStrip"
 import { attachmentOutFrom } from "@/lib/audio/cut-take"
 import { GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
-import { effectiveAttachmentDurationMs } from "@/lib/timeline/lane-timing"
+import { formatTakeSeconds, takePlayedMs } from "@/lib/audio/take-length"
+import { useInRouterContext, useNavigate } from "react-router-dom"
 
 export interface CellTakeBlockProps {
   project: ProjectRecord
@@ -141,6 +142,27 @@ export interface CellTakeBlockProps {
   pieces?: readonly AudioAttachmentOut[]
   /** The line's take history, already read by the tab — for the piece rows. */
   takesHistory?: ReadonlyMap<string, RecordingTextDrift>
+}
+
+type BadgeProps = React.ComponentProps<typeof CellTranscribeBadge>
+
+/** The transcription badge, plus "Change model" (Preferences → Local models)
+ *  when a router is mounted to navigate with. Some isolated renders of this
+ *  block have no router; they get the badge without that action. */
+function TranscribeBadge({ routed, projectId, ...badge }: BadgeProps & { routed: boolean; projectId: string }) {
+  return routed
+    ? <RoutedTranscribeBadge projectId={projectId} {...badge} />
+    : <CellTranscribeBadge {...badge} />
+}
+
+function RoutedTranscribeBadge({ projectId, ...badge }: BadgeProps & { projectId: string }) {
+  const navigate = useNavigate()
+  return (
+    <CellTranscribeBadge
+      {...badge}
+      onChangeModel={() => navigate(`/preferences/local-models?project=${encodeURIComponent(projectId)}`)}
+    />
+  )
 }
 
 export function CellTakeBlock(props: CellTakeBlockProps) {
@@ -241,6 +263,7 @@ function CellTakeBlockView({
     })
   }, [selectedAudioId, attachment, project.id, owner.fileId, owner.id, owner.selectedAudioId, username, targetLang])
 
+  const inRouter = useInRouterContext()
   const transcribeStatus = useTranscribeStatus(selectedAudioId)
   const isTranscribing = transcribeStatus.kind === "loading" || transcribeStatus.kind === "transcribing"
 
@@ -410,9 +433,7 @@ function CellTakeBlockView({
   // The length that PLAYS (AQU-1217: a trimmed take shows its trimmed
   // length) — the head said the whole file's while the timer under it said
   // the kept part's.
-  const keptMs = split
-    ? split.reduce((sum, piece) => sum + (effectiveAttachmentDurationMs(piece as never) ?? 0), 0)
-    : effectiveAttachmentDurationMs(attachment)
+  const keptMs = takePlayedMs(split ?? (attachment ? [attachment] : []))
   const trackVars = takeTrackVars({
     files: project.files,
     fileId: trackFileId ?? owner.fileId,
@@ -459,7 +480,7 @@ function CellTakeBlockView({
           </span>
         )}
         {!isSection && keptMs != null && (
-          <span data-testid="cell-take-length" className="tabular-nums text-muted-foreground">{(keptMs / 1000).toFixed(1)}s</span>
+          <span data-testid="cell-take-length" className="tabular-nums text-muted-foreground">{formatTakeSeconds(keptMs)}s</span>
         )}
         {provenance && (
           <span
@@ -520,7 +541,9 @@ function CellTakeBlockView({
         {!readOnlyTranscript && (
           // Model download %, failures (click to expand, with Retry) and a
           // success flash — the only place a transcription reports itself.
-          <CellTranscribeBadge
+          <TranscribeBadge
+            routed={inRouter}
+            projectId={project.id}
             audioId={selectedAudioId}
             hasTimings={(timings?.length ?? 0) > 0}
             onJumpToTranscript={() => transcriptPreviewRef.current?.scrollIntoView({ block: "nearest" })}

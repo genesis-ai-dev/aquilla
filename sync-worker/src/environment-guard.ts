@@ -109,11 +109,32 @@ export function deploymentEnvironmentError(
 
   const versionTag = bindings.CF_VERSION_METADATA?.tag
   const expectedTagPrefix = `${expected.worker}-${expected.environment}-`
-  if (!versionTag?.startsWith(expectedTagPrefix)) {
-    return `${requestHostname} expected a version tag beginning ${expectedTagPrefix}, received ${versionTag ?? "unset"}`
+  if (!versionTag) {
+    warnUntaggedVersion(expected)
+  } else if (!versionTag.startsWith(expectedTagPrefix)) {
+    return `${requestHostname} expected a version tag beginning ${expectedTagPrefix}, received ${versionTag}`
   }
 
   return null
+}
+
+let warnedUntagged = false
+
+/**
+ * A missing tag is served, not refused. `wrangler secret put` and dashboard
+ * secret edits derive an untagged version from the live one (same script, same
+ * bindings) and give it 100% of traffic in one step; Cloudflare has no way to
+ * refuse that promotion. Failing closed on it turned secret edits into full
+ * outages (dev sync, AQU-1361; prod identity, 2026-10-20). The binding checks
+ * above still catch cross-environment config, and a tag naming another Worker
+ * still fails closed. Warn once per isolate so the drift shows in Workers Logs.
+ */
+function warnUntaggedVersion(expected: ExpectedDeployment): void {
+  if (warnedUntagged) return
+  warnedUntagged = true
+  console.warn(
+    `[environment-guard] ${expected.worker} ${expected.environment} is serving an untagged version; redeploy through the repo deployer or rotate secrets with pnpm run secrets:rotate`,
+  )
 }
 
 /**

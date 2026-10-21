@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { PlanAssignments, type PlanAssignTarget } from "./PlanAssignments"
 import type { UnitAssignment } from "@/lib/sync/assignments"
 import { ROLE } from "@/lib/frontier/roles"
@@ -8,8 +8,17 @@ import { ROLE } from "@/lib/frontier/roles"
 // chapter fetch. Neither is what this section is about; stub both so a test
 // that only opens the section never opens a network path.
 vi.mock("@/components/AssignModal", () => ({
-  AssignModal: ({ activeFileId, defaultLane }: { activeFileId: string | null; defaultLane?: string }) => (
-    <div data-testid="assign-modal-mock" data-file={activeFileId ?? ""} data-lane={defaultLane ?? ""} />
+  AssignModal: ({ activeFileId, defaultLane, laneDelegate }: {
+    activeFileId: string | null
+    defaultLane?: string
+    laneDelegate?: { scopes: { value: string }[] }
+  }) => (
+    <div
+      data-testid="assign-modal-mock"
+      data-file={activeFileId ?? ""}
+      data-lane={defaultLane ?? ""}
+      data-delegate-lanes={(laneDelegate?.scopes ?? []).map((s) => s.value).join(",")}
+    />
   ),
 }))
 vi.mock("@/hooks/useProjectMembers", () => ({
@@ -193,11 +202,10 @@ describe("the closing coverage line", () => {
 })
 
 describe("the memberProgressViewMinRole floor", () => {
-  it("renders NOTHING for a viewer below the floor — not an empty section", () => {
+  it("renders NOTHING for a viewer below the floor who cannot assign — not an empty section", () => {
     const { container } = renderSection({
       minRole: ROLE.MAINTAINER,
       viewerRoleLevel: ROLE.CONTRIBUTOR,
-      assign: assignTarget,
       unassignedChapters: 3,
     })
     expect(screen.queryByTestId("plan-assignments")).toBeNull()
@@ -212,6 +220,26 @@ describe("the memberProgressViewMinRole floor", () => {
     // section flashes open on first paint and disappears once the org settings
     // land, which reads as a permissions bug.
     const { container } = renderSection({ ready: false })
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  // AQU-1914: assigning is "who can assign work" (the caller decides `assign`),
+  // not "who can see team progress". A project lead below the progress floor
+  // gets the button and still not the list.
+  it("keeps Assign for a viewer below the floor who may assign, with no list", () => {
+    renderSection({
+      minRole: ROLE.MAINTAINER,
+      viewerRoleLevel: ROLE.PROJECT_LEAD,
+      assign: { ...assignTarget, roleLevel: ROLE.PROJECT_LEAD },
+      unassignedChapters: 3,
+    })
+    expect(screen.getByTestId("plan-assign-open")).toBeInTheDocument()
+    expect(screen.queryByTestId("plan-assignment-a1")).toBeNull()
+    expect(screen.queryByTestId("plan-assignment-coverage")).toBeNull()
+  })
+
+  it("still renders nothing, Assign included, while the floor is unknown", () => {
+    const { container } = renderSection({ ready: false, assign: assignTarget })
     expect(container).toBeEmptyDOMElement()
   })
 
@@ -233,6 +261,19 @@ describe("the Assign affordance", () => {
     // for the AssignModal prop that would narrow it further.
     expect(modal).toHaveAttribute("data-file", "f1")
     expect(modal).toHaveAttribute("data-lane", "es")
+  })
+
+  it("hands the modal the caller's lane-delegate grant (AQU-1914)", () => {
+    renderSection({
+      lane: "es",
+      assign: {
+        ...assignTarget,
+        roleLevel: ROLE.CONTRIBUTOR,
+        laneDelegate: { allowScopedLaneAssignment: true, scopes: [{ kind: "lane", value: "es" }] },
+      },
+    })
+    fireEvent.click(screen.getByTestId("plan-assign-open"))
+    expect(screen.getByTestId("assign-modal-mock")).toHaveAttribute("data-delegate-lanes", "es")
   })
 })
 
@@ -326,5 +367,125 @@ describe("where a person's outstanding work is", () => {
     const left = screen.getByTestId("plan-assignment-left-a1")
     expect(left).toHaveTextContent("ch. 2")
     expect(left).not.toHaveTextContent("ch. 1")
+  })
+})
+
+// AQU-1969: a validator's row counts their OWN approvals, under the four rules.
+describe("validate assignments", () => {
+  const counts = (total: number, validated: number, waiting: number, changed: number) => ({ total, validated, waiting, changed })
+
+  it("words a validator's own progress and lists validators after translators, furthest behind first", () => {
+    renderSection({
+      assignments: [
+        // Newest first from the server: the two validators before the translator.
+        assignment({
+          assignmentId: "v-near",
+          username: "bo",
+          kind: "validate",
+          scopeLabel: "Deuteronomy 11",
+          validation: { text: counts(10, 9, 0, 0), audio: counts(10, 0, 10, 0) },
+        }),
+        assignment({
+          assignmentId: "v-far",
+          username: "ana",
+          kind: "validate",
+          scopeLabel: "Deuteronomy 1–10",
+          // 34 of 40, 6 left (2 of them changed since), 0 waiting.
+          validation: { text: counts(40, 34, 0, 2), audio: counts(40, 0, 40, 0) },
+        }),
+        assignment({ assignmentId: "t1", username: "tom", kind: "translate" }),
+      ],
+    })
+    const rows = screen.getAllByRole("listitem").map((li) => li.getAttribute("data-testid"))
+    expect(rows).toEqual(["plan-assignment-t1", "plan-assignment-v-far", "plan-assignment-v-near"])
+
+    expect(screen.getByTestId("plan-validation-text-v-far").textContent).toBe(
+      "Validated 34 of 40 · 6 left · 2 changed since",
+    )
+    expect(screen.getByTestId("plan-assignment-left-v-far").textContent).toBe("6 left")
+    // A validator is labelled as one; a translator is not.
+    expect(screen.getByTestId("plan-assignment-v-far").querySelector("[data-testid=plan-assignment-kind]")?.textContent).toBe("Validating")
+    expect(screen.getByTestId("plan-assignment-t1").querySelector("[data-testid=plan-assignment-kind]")).toBeNull()
+    // No recordings on the file: no audio line.
+    expect(screen.queryByTestId("plan-validation-audio-v-far")).toBeNull()
+  })
+
+  it("says what is waiting on someone else, and reports recordings when the file has them", () => {
+    renderSection({
+      showAudio: true,
+      assignments: [
+        assignment({
+          assignmentId: "v1",
+          kind: "validate",
+          validation: { text: counts(40, 35, 5, 0), audio: counts(40, 3, 36, 1) },
+        }),
+      ],
+    })
+    // Five untranslated lines are waiting, not behind: nothing is left in text.
+    expect(screen.getByTestId("plan-validation-text-v1").textContent).toBe(
+      "Text validated 35 of 40 · waiting on translation (5)",
+    )
+    expect(screen.getByTestId("plan-validation-audio-v1").textContent).toBe(
+      "Audio validated 3 of 40 · 1 left · 1 changed since · waiting on a recording (36)",
+    )
+    expect(screen.getByTestId("plan-assignment-left-v1").textContent).toBe("1 left")
+  })
+
+  it("reads 'Nothing left' once every line ready for them is approved", () => {
+    renderSection({
+      assignments: [
+        assignment({ assignmentId: "v1", kind: "validate", validation: { text: counts(4, 4, 0, 0), audio: counts(4, 0, 4, 0) } }),
+      ],
+    })
+    expect(screen.getByTestId("plan-assignment-left-v1").textContent).toBe("Nothing left")
+    expect(screen.getByTestId("plan-validation-text-v1").textContent).toBe("Validated 4 of 4")
+  })
+})
+
+// AQU-1969 (Sam, 2026-10-19): unassigning is one click wherever work is
+// assigned — the org workload's × on every row here too.
+describe("one-click unassign", () => {
+  const counts = (total: number, validated: number, waiting: number, changed: number) => ({ total, validated, waiting, changed })
+  const rows = () => [
+    assignment({ assignmentId: "t1", username: "tom", kind: "translate" }),
+    assignment({
+      assignmentId: "v1",
+      username: "carol",
+      kind: "validate",
+      validation: { text: counts(7, 2, 2, 0), audio: counts(7, 0, 7, 0) },
+    }),
+  ]
+
+  it("puts an × on translator and validator rows for whoever may unassign", () => {
+    renderSection({ assignments: rows(), onRemove: vi.fn(async () => {}) })
+    expect(screen.getByTestId("plan-assignment-remove-t1")).toHaveAccessibleName("Remove assignment: Genesis (tom)")
+    expect(screen.getByTestId("plan-assignment-remove-v1")).toHaveAccessibleName("Remove assignment: Genesis (carol)")
+  })
+
+  it("has no × for anyone else", () => {
+    renderSection({ assignments: rows() })
+    expect(screen.queryByTestId("plan-assignment-remove-t1")).toBeNull()
+    expect(screen.queryByTestId("plan-assignment-remove-v1")).toBeNull()
+  })
+
+  it("× then Confirm unassigns that row's assignment and the row goes at once", async () => {
+    const onRemove = vi.fn(async () => {})
+    renderSection({ assignments: rows(), onRemove })
+    fireEvent.click(screen.getByTestId("plan-assignment-remove-v1"))
+    expect(onRemove).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId("plan-assignment-remove-v1-confirm"))
+    expect(onRemove).toHaveBeenCalledWith("v1")
+    await screen.findByTestId("plan-assignment-t1")
+    await waitFor(() => expect(screen.queryByTestId("plan-assignment-v1")).toBeNull())
+    expect(screen.getByTestId("plan-assignment-t1")).toBeInTheDocument()
+  })
+
+  it("keeps the row and says why when the server refuses", async () => {
+    const onRemove = vi.fn(async () => { throw new Error("role too low for assignment.unassign") })
+    renderSection({ assignments: rows(), onRemove })
+    fireEvent.click(screen.getByTestId("plan-assignment-remove-t1"))
+    fireEvent.click(screen.getByTestId("plan-assignment-remove-t1-confirm"))
+    expect(await screen.findByText("role too low for assignment.unassign")).toBeInTheDocument()
+    expect(screen.getByTestId("plan-assignment-t1")).toBeInTheDocument()
   })
 })

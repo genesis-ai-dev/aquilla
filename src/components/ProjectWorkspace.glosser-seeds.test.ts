@@ -18,6 +18,7 @@ import { buildGlosserSeeds } from "./project-workspace-helpers"
 import { buildGlosser, ALIGNMENT_SEED_BT_WEIGHT } from "@/lib/completion/bt-glosser"
 import type { CellSummary } from "@/hooks/useActiveCellStore"
 import type { BacktranslationRecord } from "@/lib/completion/bt-record"
+import type { GlossRecord } from "@/lib/completion/gloss-record"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
 const NO_CELLS: readonly CellSummary[] = []
@@ -131,5 +132,85 @@ describe("the assembled seeds measurably change BT output (AQU-207)", () => {
         "mot",
       ),
     ).toBe("term")
+  })
+})
+
+/**
+ * AQU-1408 §2 — a corrected statistical gloss is training data.
+ *
+ * Josseline (Biblica ETT) asked for the editable gloss because it "only draws
+ * from validated text and is wrong until more books are validated". Making it
+ * editable without feeding it back would fix one cell at a time; the point is
+ * that correcting a word here fixes it everywhere that word appears. That
+ * feedback happens in exactly one place — this seed assembly — so it is tested
+ * here, with the glosser built from the result to prove the correction lands.
+ */
+describe("buildGlosserSeeds — corrected glosses re-seed the glosser (AQU-1408 §2)", () => {
+  const corpus = [
+    { id: "c1", translated: "maison", targetEventId: "e1" },
+    { id: "c2", translated: "maison grande", targetEventId: "e2" },
+  ] as unknown as CellSummary[]
+
+  function glossCacheOf(over: Partial<GlossRecord> = {}) {
+    return new Map<string, GlossRecord>([
+      ["c1", {
+        cellId: "c1",
+        glossText: "dwelling",
+        forText: "maison",
+        targetEventId: "e1",
+        createdAt: 1,
+        ...over,
+      }],
+    ])
+  }
+
+  function seeds(glossCache: ReadonlyMap<string, GlossRecord> | undefined) {
+    return buildGlosserSeeds({
+      corpusCells: corpus,
+      backtranslationCache: NO_BT,
+      glossCache,
+      terminology: undefined,
+      alignmentSeeds: undefined,
+    })
+  }
+
+  it("seeds a corrected gloss at the hand-edited weight, tagged with its cell", () => {
+    expect(seeds(glossCacheOf())).toEqual([
+      { source: "dwelling", target: "maison", weight: 5, originId: "c1" },
+    ])
+  })
+
+  it("contributes nothing when no gloss has been corrected", () => {
+    expect(seeds(undefined)).toEqual([])
+    expect(seeds(new Map())).toEqual([])
+  })
+
+  it("ignores a withdrawn correction", () => {
+    expect(seeds(glossCacheOf({ glossText: "   " }))).toEqual([])
+  })
+
+  it("ignores a correction pinned to a superseded commit", () => {
+    expect(seeds(glossCacheOf({ targetEventId: "stale" }))).toEqual([])
+  })
+
+  // The acceptance criterion in its own words: after an edited gloss is saved,
+  // glosses for OTHER cells with the same words reflect the correction.
+  it("moves the gloss of a different cell that shares the corrected words", () => {
+    const pairs = [
+      { source: "house", target: "maison", id: "c1" },
+      { source: "house big", target: "maison grande", id: "c2" },
+    ]
+    const glossC2 = (cache: ReadonlyMap<string, GlossRecord> | undefined) =>
+      buildGlosser(pairs, seeds(cache)).gloss("maison grande", { excludeId: "c2" })
+
+    expect(glossC2(undefined)).toContain("house")
+    expect(glossC2(glossCacheOf())).toContain("dwelling")
+  })
+
+  // Leave-one-out: without originId the corrected cell's own gloss would just
+  // replay the correction out of the model instead of being excluded, which is
+  // how a seeded corpus silently stops being a check on itself.
+  it("tags the seed so the corrected cell's own leave-one-out gloss excludes it", () => {
+    expect(seeds(glossCacheOf())[0].originId).toBe("c1")
   })
 })

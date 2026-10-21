@@ -42,7 +42,7 @@ import {
   type SourceHashes,
 } from "../src/lib/i18n/catalog-export"
 import { DEFAULT_LOCALE, LOCALES } from "../src/lib/i18n/locales"
-import { CATALOGS } from "../src/lib/i18n/messages"
+import { CATALOGS } from "../src/lib/i18n/messages/all"
 import { en, type MessageKey } from "../src/lib/i18n/messages/en"
 import { isPluralMessage } from "../src/lib/i18n/plurals"
 import sourceHashes from "../src/lib/i18n/source-hashes.json" with { type: "json" }

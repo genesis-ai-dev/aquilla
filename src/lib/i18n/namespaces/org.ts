@@ -494,6 +494,7 @@ export const org = defineNamespace({
     "org.memberActivityPanel.kindCommentEdit": "Edited a comment",
     "org.memberActivityPanel.kindCommentResolve": "Resolved a comment",
     "org.memberActivityPanel.kindCellBacktranslationSet": "Set a back-translation",
+    "org.memberActivityPanel.kindCellGlossSet": "Corrected a statistical gloss",
     "org.memberActivityPanel.kindCellAudioAttach": "Attached audio",
     "org.memberActivityPanel.kindCellAudioSelect": "Selected an audio take",
     "org.memberActivityPanel.kindCellRetime": "Retimed a cell",
@@ -1010,6 +1011,8 @@ export const org = defineNamespace({
     "org.workloadRollup.title": "Team workload",
     "org.workloadRollup.removeTooltip": "Remove this assignment",
     "org.workloadRollup.removeAriaLabel": "Remove assignment: {scope} ({user})",
+    "org.workloadRollup.removeConfirmAriaLabel": "Confirm removing assignment: {scope} ({user})",
+    "org.workloadRollup.removeCancelAriaLabel": "Cancel removing assignment: {scope} ({user})",
     "org.workloadRollup.unknownUser": "User {id}",
     "org.workloadRollup.removeErrorGeneric":
       "Can't remove this assignment — it has no resolved cells to route through.",
@@ -1463,6 +1466,14 @@ export const org = defineNamespace({
     // are identical for the same reason as its two siblings above: the count
     // is drawn as a bold numeral beside the phrase, never inside it.
     "org.projectOverview.plan.summaryNearlyCompleteLabel": plural({ one: "nearly complete", other: "nearly complete" }),
+    // AQU-2088: shown in the plan's place on an archived project, whose
+    // per-project reads the server refuses. It replaces a spinner that could
+    // never resolve, so it has to say WHY there is nothing here.
+    "org.projectOverview.archived.title": "This project is archived",
+    "org.projectOverview.archived.bodyCanRestore":
+      "Its plan and team are hidden while it sits in Trash. Nothing has been deleted — choose Restore above to bring it back.",
+    "org.projectOverview.archived.bodyAskManager":
+      "Its plan and team are hidden while it sits in Trash. Nothing has been deleted — a maintainer can restore it.",
     "org.projectOverview.plan.emptyTitle": "Nothing to plan yet",
     "org.projectOverview.plan.loading": "Loading the plan\u2026",
     "org.projectOverview.plan.saveFailed": "That change could not be saved, so it has been undone. Try again.",
@@ -1719,6 +1730,25 @@ export const org = defineNamespace({
     "org.projectOverview.plan.unassignedChapters": plural({ one: "{count} chapter is not assigned", other: "{count} chapters are not assigned" }),
     "org.projectOverview.plan.everyChapterAssigned": "Every chapter is assigned.",
     "org.projectOverview.plan.moreAssignees": "{count} more",
+
+    // -- AQU-1969: a Validate assignment's own-approval progress, in words. One
+    // renderer (use-validation-progress.ts) for the plan inspector, the Team
+    // card and the org's Team workload. --
+    "org.validationProgress.validated": "Validated {validated} of {total}",
+    "org.validationProgress.textValidated": "Text validated {validated} of {total}",
+    "org.validationProgress.audioValidated": "Audio validated {validated} of {total}",
+    "org.validationProgress.left": plural({ one: "{count} left", other: "{count} left" }),
+    "org.validationProgress.changedSince": plural({ one: "{count} changed since", other: "{count} changed since" }),
+    "org.validationProgress.waitingOnTranslation": plural({
+      one: "waiting on translation ({count})",
+      other: "waiting on translation ({count})",
+    }),
+    "org.validationProgress.waitingOnRecording": plural({
+      one: "waiting on a recording ({count})",
+      other: "waiting on a recording ({count})",
+    }),
+    "org.validationProgress.kindChip": "Validating",
+    "org.validationProgress.heading": "Validation assignments",
 
     // -- TeamDetail: single team's page. Most call-site strings here reuse
     // existing org.teamDetail.* / org.teamForm.* / common.* keys already
@@ -2870,6 +2900,25 @@ export const org = defineNamespace({
           user: "The assignee's username, or the localized org.workloadRollup.unknownUser fallback.",
         },
       },
+      "org.workloadRollup.removeConfirmAriaLabel": {
+        description:
+          "Accessible name for the red Confirm button (common.confirm) that the small × on an assignment row turns " +
+          "into, beside a Cancel button. Clicking it removes the assignment. Starts with the visible word, then says " +
+          "which assignment, so a screen reader says what the click will do.",
+        placeholders: {
+          scope: "The assignment's scope label (e.g. a book or chapter range) — not translated.",
+          user: "The assignee's username, or the localized fallback when it isn't known.",
+        },
+      },
+      "org.workloadRollup.removeCancelAriaLabel": {
+        description:
+          "Accessible name for the Cancel button (common.cancel) beside the red Confirm when removing an assignment: " +
+          "it turns both back into the × and removes nothing. Starts with the visible word, then says which assignment.",
+        placeholders: {
+          scope: "The assignment's scope label (e.g. a book or chapter range) — not translated.",
+          user: "The assignee's username, or the localized fallback when it isn't known.",
+        },
+      },
       "org.workloadRollup.unknownUser": {
         description:
           "Fallback shown in place of a username when a username isn't available — the org Overview team-workload rollup, the per-member usage rollup, and the project overview Team card.",
@@ -3319,6 +3368,18 @@ export const org = defineNamespace({
       "org.projectOverview.plan.summaryNearlyCompleteLabel": {
         description:
           "Summary pill. The count is rendered as a bold numeral immediately before this text: \"9\" + \"nearly complete\". The plural form is selected by that count even though it does not appear in the string. Counts only the units a few cells from finished, which are NOT also counted as in progress.",
+      },
+      "org.projectOverview.archived.title": {
+        description:
+          "Heading of the panel shown in the plan's place on an archived project's overview.",
+      },
+      "org.projectOverview.archived.bodyCanRestore": {
+        description:
+          "Body of that panel for a reader who may restore the project. Reassures them that archiving is a soft delete and points at the Restore button in the header above.",
+      },
+      "org.projectOverview.archived.bodyAskManager": {
+        description:
+          "Body of that panel for a reader who may NOT restore the project, so it names who can instead of pointing at a button they do not have.",
       },
       "org.projectOverview.plan.emptyTitle": {
         description: "Heading of the empty state, when a project has no plannable files yet.",
@@ -3927,6 +3988,59 @@ export const org = defineNamespace({
         description:
           "Overflow chip closing a truncated row of assignee avatars: how many people the row could not fit.",
         placeholders: { count: "Assignees not shown — a number." },
+      },
+      "org.validationProgress.validated": {
+        description:
+          "Head of a validator's progress line (AQU-1969): how many of the lines this person was asked to validate carry THEIR OWN approval of the current wording — not whether someone else approved them. 'Ana · Deuteronomy 1–10 · Validated 34 of 40 · 6 left'. Shown when there are no recordings to judge.",
+        placeholders: {
+          validated: "Lines this person has approved as they read now — a number, already formatted.",
+          total: "Lines theirs to approve — a number, already formatted.",
+        },
+      },
+      "org.validationProgress.textValidated": {
+        description:
+          "The same head as org.validationProgress.validated, used when the line beneath it reports recordings too, so the written text names itself.",
+        placeholders: {
+          validated: "Lines whose text this person has approved as it reads now — a number, already formatted.",
+          total: "Lines theirs to approve — a number, already formatted.",
+        },
+      },
+      "org.validationProgress.audioValidated": {
+        description:
+          "Head of a validator's recordings line: how many lines' recordings carry this person's own approval.",
+        placeholders: {
+          validated: "Lines whose recording this person has approved — a number, already formatted.",
+          total: "Lines theirs to approve — a number, already formatted.",
+        },
+      },
+      "org.validationProgress.left": {
+        description:
+          "Middle term of a validator's progress line: lines ready for them to approve that they have not approved yet. Follows the head after a middle dot.",
+        placeholders: { count: "Lines still to approve — a number; it also selects the plural form." },
+      },
+      "org.validationProgress.changedSince": {
+        description:
+          "Term of a validator's progress line: lines this person HAD approved whose wording (or recording) changed afterwards, so their approval no longer counts. Short for 'changed since they approved'; part of the 'left' count before it.",
+        placeholders: { count: "Lines changed since this person approved them — a number; it also selects the plural form." },
+      },
+      "org.validationProgress.waitingOnTranslation": {
+        description:
+          "Last term of a validator's text line: lines with no translation yet, so nothing to approve — the translator's backlog, not the validator's. Lower case: it follows the other terms on the same line.",
+        placeholders: { count: "Lines not translated yet — a number; it also selects the plural form." },
+      },
+      "org.validationProgress.waitingOnRecording": {
+        description:
+          "Last term of a validator's recordings line: lines nobody has recorded yet, so there is nothing to approve. Lower case: it follows the other terms on the same line.",
+        placeholders: { count: "Lines not recorded yet — a number; it also selects the plural form." },
+      },
+      "org.validationProgress.kindChip": {
+        description:
+          "Small chip beside a person's name in the plan inspector's 'Assigned to' list: this person was given only the validating of these lines, not the translating.",
+        maxLength: 16,
+      },
+      "org.validationProgress.heading": {
+        description:
+          "Small heading over the list of validate-only assignments on the project Team card and the org's Team workload, each line showing how much of their own approving a person has done.",
       },
       "org.memberActivityPanel.fileRollupSummary": {
         description:

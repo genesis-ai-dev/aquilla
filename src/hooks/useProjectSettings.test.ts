@@ -1202,6 +1202,35 @@ describe("isCountStructuralOnlyPatch (AQU-1083)", () => {
   })
 })
 
+// AQU-1912 — the switch's own gate, at the same project-lead floor `patch`
+// applies to a headings-only write. The page gated it on `canEdit`
+// (maintainer), so a project lead saw a control the server would accept
+// greyed out.
+describe("useProjectSettings — canEditCountStructural (AQU-1912)", () => {
+  it("is true for a project lead (500) while the rest of the form stays locked", async () => {
+    mockSettingsFetch(null)
+    const { result } = renderHook(() => useProjectSettings("p1", 500))
+    await waitFor(() => expect(result.current.canEditCountStructural).toBe(true))
+    expect(result.current.reasonCannotEditCountStructural).toBeNull()
+    expect(result.current.canEdit).toBe(false)
+  })
+
+  it("is false for a contributor (400), with a role reason", async () => {
+    mockSettingsFetch(null)
+    const { result } = renderHook(() => useProjectSettings("p1", 400))
+    await waitFor(() => expect(result.current.reasonCannotEditCountStructural).toBe("role"))
+    expect(result.current.canEditCountStructural).toBe(false)
+  })
+
+  it("is false offline even at owner, with an offline reason", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: false })
+    mockSettingsFetch(null)
+    const { result } = renderHook(() => useProjectSettings("p1", 700))
+    await waitFor(() => expect(result.current.reasonCannotEditCountStructural).toBe("offline"))
+    expect(result.current.canEditCountStructural).toBe(false)
+  })
+})
+
 describe("useProjectSettings — hydration event once per open (AQU-1470)", () => {
   // The open is tracked at module scope, so each test uses its own project id.
   const settingsRow = (): restClient.ProjectSettingsResponse => ({

@@ -3,7 +3,7 @@ import { MemoryRouter } from "react-router-dom"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { AutopilotActivityInspector } from "./AutopilotActivityInspector"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
-import { CATALOGS } from "@/lib/i18n/messages"
+import { CATALOGS } from "@/lib/i18n/messages/all"
 import type { Catalog } from "@/lib/i18n/messages/en"
 import { LOCALE_STORAGE_KEY } from "@/lib/i18n/store"
 import type {

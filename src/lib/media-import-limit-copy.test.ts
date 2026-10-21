@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { CATALOGS } from "./i18n/messages"
+import { CATALOGS } from "./i18n/messages/all"
 import { en } from "./i18n/messages/en"
 import { LOCALES } from "./i18n/locales"
 import { translate } from "./i18n/translate"

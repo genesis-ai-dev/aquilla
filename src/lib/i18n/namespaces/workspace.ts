@@ -282,6 +282,7 @@ export const workspace = defineNamespace({
     "workspace.transcribeBadge.loadShort": "load",
     "workspace.transcribeBadge.transcribingTooltip": "Transcribing audio…",
     "workspace.transcribeBadge.transcribingPill": "transcribing",
+    "workspace.transcribeBadge.changeModel": "Change model",
     "workspace.transcribeBadge.waitingForModelPill": "waiting for model",
     "workspace.transcribeBadge.waitingForModelTooltip":
       "Waiting for the zero-shot model to start. This take is transcribed as soon as it is ready.",
@@ -1444,6 +1445,12 @@ export const workspace = defineNamespace({
       },
       "workspace.transcribeBadge.transcribingTooltip": {
         description: "Tooltip on the gutter pill shown while Whisper transcription is actively running on a cell.",
+      },
+      "workspace.transcribeBadge.changeModel": {
+        description:
+          "Button in the failed-transcription popover. Opens Preferences → Local " +
+          "models so the user can pick a different transcription model.",
+        maxLength: 24,
       },
       "workspace.transcribeBadge.transcribingPill": {
         description:

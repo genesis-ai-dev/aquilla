@@ -117,6 +117,15 @@ export function metricsToAdd(
 }
 
 /**
+ * AQU-2087: the columns for a board Aquilla makes, in the order the picker
+ * lists them (Progress, Schedule, Team), with Aquilla ID last.
+ */
+export function newBoardMetrics(selected: ReadonlySet<MondayMetricKey>): MondayMetricKey[] {
+  const ordered = MONDAY_COLUMN_GROUPS.flatMap((group) => group.metrics).filter((metric) => selected.has(metric))
+  return [...ordered, REQUIRED_METRIC]
+}
+
+/**
  * The mapping to save: rows for ticked metrics (and anything outside the
  * catalog, like the item name), with the columns just added mapped in.
  * Unticking a column that was mapped stops filling it; the column itself

@@ -11,6 +11,8 @@ import { ThemeModeProvider } from "./branding/ThemeMode"
 import { FontSizeProvider } from "./branding/FontSize"
 import { ErrorBoundary } from "./components/ErrorBoundary"
 import { I18nProvider } from "./lib/i18n/I18nProvider"
+import { loadCatalog } from "./lib/i18n/messages"
+import { detectInitialLocale, readStoredLocale } from "./lib/i18n/store"
 import { AccountsProvider } from "./hooks/useAccounts"
 // Buffer/crypto/etc. provided by vite-plugin-node-polyfills (see vite.config.ts)
 
@@ -34,7 +36,17 @@ const queryClient = new QueryClient({
   },
 })
 
-createRoot(document.getElementById("root")!).render(
+// AQU-2090: only English ships with the app. A visitor in another language gets
+// their catalog before the first paint, so the app doesn't flash English, but
+// never waits more than 3 s for it: past that it starts in English and switches
+// when the catalog lands.
+const startingLocale = detectInitialLocale(readStoredLocale(), navigator.language)
+const startingCatalog = Promise.race([
+  loadCatalog(startingLocale).catch(() => undefined),
+  new Promise((resolve) => setTimeout(resolve, 3000)),
+])
+
+void startingCatalog.then(() => createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
@@ -54,4 +66,4 @@ createRoot(document.getElementById("root")!).render(
       </QueryClientProvider>
     </ErrorBoundary>
   </StrictMode>
-)
+))

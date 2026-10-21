@@ -723,14 +723,20 @@ const TOOL_SPECS: McpToolSpec[] = [
       'MAINTAINER. `ifMatchVersion` must equal the live settings version or you get ' +
       'plan_stale (re-fetch the current version and re-prepare); the receipt carries the new ' +
       'version.\n' +
-      '  { kind: "LinkMedia", fileId, cellId, artifactId } — event-native (compiles to ' +
-      'cell.audio.attach + cell.audio.select). `artifactId` must reference an audio-kind ' +
-      'artifact already uploaded to this project via REST ' +
+      '  { kind: "LinkMedia", fileId, cellId, artifactId, laneId, slot?, durationMs? } — ' +
+      'event-native (compiles to cell.audio.attach + cell.audio.select in the named lane). ' +
+      '`laneId` is REQUIRED and is a target lane\'s id from get_project — a take with no ' +
+      'lane is filed under the legacy default lane and never shows in a tagged lane\'s ' +
+      'Takes. `slot` is "recording" (default: a recorded take) or "generatedVoice" ' +
+      '(externally synthesized voice, reviewed and exported like in-app TTS); `durationMs` ' +
+      'is the clip length when you know it (the upload does no decoding). `artifactId` must ' +
+      'reference an audio-kind artifact already uploaded to this project via REST ' +
       '`POST .../projects/:projectId/artifacts` with header `x-artifact-kind: audio` — MCP ' +
-      'is JSON-RPC text and cannot carry that binary upload itself. Multiple LinkMedia ' +
-      'commands may share one changeset with each other, but LinkMedia cannot mix with ' +
-      'SetTranslation/CreateProject/UpdateProjectSettings in the same changeset. Requires ' +
-      'CONTRIBUTOR.\n' +
+      'is JSON-RPC text and cannot carry that binary upload itself. The receipt\'s `media[]` ' +
+      'carries the native take audioId the app now plays (not the artifact\'s). Multiple ' +
+      'LinkMedia commands may share one changeset with each other, but LinkMedia cannot mix ' +
+      'with SetTranslation/CreateProject/UpdateProjectSettings in the same changeset. ' +
+      'Requires CONTRIBUTOR.\n' +
       '  { kind: "DraftCells", fileId, cellIds, laneId?, instructions? } — ask the PROJECT\'S ' +
       'OWN copilot to draft those cells instead of writing the text yourself, so the result ' +
       'carries this project\'s terminology, example pairs and brief. Must be the SOLE command ' +
@@ -867,8 +873,27 @@ const TOOL_SPECS: McpToolSpec[] = [
                     type: 'string',
                     description: 'An audio-kind artifact id from the REST artifact upload endpoint.',
                   },
+                  laneId: {
+                    type: 'string',
+                    description:
+                      'Required lane id (lanes.id from get_project) of the target lane the take ' +
+                      'belongs to. A language tag is not accepted.',
+                  },
+                  slot: {
+                    type: 'string',
+                    enum: ['recording', 'generatedVoice'],
+                    description:
+                      'Which take slot the clip lands in: "recording" (default) for a recorded ' +
+                      'take, "generatedVoice" for externally synthesized voice, reviewed and ' +
+                      'exported like in-app TTS.',
+                  },
+                  durationMs: {
+                    type: 'integer',
+                    minimum: 1,
+                    description: "The clip's length in milliseconds, when known — the upload does no decoding.",
+                  },
                 },
-                required: ['kind', 'fileId', 'cellId', 'artifactId'],
+                required: ['kind', 'fileId', 'cellId', 'artifactId', 'laneId'],
                 additionalProperties: false,
               },
               {

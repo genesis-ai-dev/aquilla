@@ -125,9 +125,10 @@ async function complete(
     model, promptChars: messages.reduce((n, m) => n + m.content.length, 0), maxOutputTokens: maxTokens,
   })
   if (!call.ok) throw new LlmRefusedError(call)
-  // An org's own key (BYOK) goes to OpenRouter; otherwise the operator's
-  // builder pair (or the shared house key) is what the check admitted.
-  const upstream = call.source === "org" ? { apiKey: call.apiKey, url: completionsUrl(env) } : builderUpstream(env)
+  // A dedicated operator pair (TOOLS_BUILDER_*) keeps its own key and
+  // endpoint; otherwise the key the check admitted is the one sent.
+  const configured = builderUpstream(env)
+  const upstream = env.TOOLS_BUILDER_API_KEY?.trim() ? configured : { apiKey: call.apiKey, url: configured.url }
   const res = await (deps.fetchImpl ?? fetch)(upstream.url, {
     method: "POST",
     headers: {

@@ -42,8 +42,8 @@ import {
 import { languagesForLanes, loadLaneRows } from "../lib/read-lane-language"
 import { resolveLaneIdOrTag } from "../../../db/shared/lane-ref"
 import { languageOfTargetLane } from "../../../db/shared/lane-language"
-import { meterMode, type AiEntitlementRefusal } from "../../../db/shared/ai-entitlement"
-import { admitLlmCall, projectOrgId } from "../lib/billing/paid-llm"
+import type { PaidCallRefusal } from "../lib/billing/paid-call"
+import { admitLlmCall, legacyLedgers, projectOrgId } from "../lib/billing/paid-llm"
 import { METERED_MAX_OUTPUT_TOKENS } from "../lib/billing/chat-usage"
 
 const aiDraftInternal = new Hono<{ Bindings: Env; Variables: Variables }>()
@@ -110,10 +110,13 @@ aiDraftInternal.post("/internal/draft-cells", zValidator("json", bodySchema), as
     /* best-effort — degrade to org-less so drafting still runs under the ceiling */
   }
   const orgId = projectOrg ?? 0
+  // One ledger per call (paid-call.ts): the legacy credit guard and ledger are
+  // the record only while the meter is off.
+  const legacy = legacyLedgers(c.env, c.req.url)
 
   // Pre-flight the expensive rail BEFORE generating: an exhausted org gets a
   // clean named error and nothing is drafted, so nothing can be staged.
-  const creditCheck = await creditGuard(db, c.env, orgId, "agent")
+  const creditCheck = legacy ? await creditGuard(db, c.env, orgId, "agent") : { ok: true as const }
   if (!creditCheck.ok) {
     return c.json(
       {
@@ -184,18 +187,19 @@ aiDraftInternal.post("/internal/draft-cells", zValidator("json", bodySchema), as
     apiKey: c.env.OPENROUTER_API_KEY ?? "",
     url: resolveOpenRouterUrl(c.env),
     // A metered pass needs a bounded output, as in the agent's draft tool.
-    ...(meterMode(c.env) === "off" ? {} : { maxTokens: METERED_MAX_OUTPUT_TOKENS }),
+    ...(legacy ? {} : { maxTokens: METERED_MAX_OUTPUT_TOKENS }),
   }
-  let refused: AiEntitlementRefusal | undefined
+  let refused: PaidCallRefusal | undefined
   const admitPaidCall = async (input: { model: string; promptChars: number }) => {
     const call = await admitLlmCall(
       db, c.env,
       { orgId: projectOrg, userId: Number(body.userId), projectId: body.projectId, rail: "agent" },
       { ...input, maxOutputTokens: METERED_MAX_OUTPUT_TOKENS },
+      { requestUrl: c.req.url },
     )
     if (!call.ok) {
       refused = call
-      return { ok: false as const, message: call.reason }
+      return { ok: false as const, message: call.body.error }
     }
     // The draft tool reads the key off this config after admission, so the
     // key the check chose (house or the org's own) is the one that is sent.
@@ -230,8 +234,9 @@ aiDraftInternal.post("/internal/draft-cells", zValidator("json", bodySchema), as
   )
 
   // Meter whatever was actually spent, success or failure — the research pass
-  // costs money even when generation then fails. Never throws.
-  if (costCents > 0) await recordCredit(db, orgId, Number(body.userId), "agent", costCents, 1)
+  // costs money even when generation then fails. Never throws. With the meter
+  // on, each pass already settled on the weekly ledger.
+  if (legacy && costCents > 0) await recordCredit(db, orgId, Number(body.userId), "agent", costCents, 1)
 
   if (refused) return c.json(refused.body, refused.status)
   if (!gen.ok) return c.json({ error: "job_failed", message: gen.error }, 502)

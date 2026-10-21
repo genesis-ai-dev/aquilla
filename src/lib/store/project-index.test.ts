@@ -13,6 +13,7 @@ import {
   storeOriginalFile,
   getOriginalFile,
   mergeServerProjectWithLocalCache,
+  mergeTtsSettings,
   _resetDbForTesting,
 } from "./project-index"
 import type { ProjectRecord } from "../parsers/types"
@@ -328,6 +329,37 @@ describe("mergeServerProjectWithLocalCache — client-local overlays", () => {
     const merged = mergeServerProjectWithLocalCache(server, local)
     expect(merged.ttsSettings?.provider).toBe("mms")
     expect(merged.ttsSettings?.apiKey).toBe("AIzaLocalKey1234567890123")
+  })
+
+  it("AQU-2043: a filtered server voice set replaces the cached hidden lane", () => {
+    const arabic = { id: "ar-1", name: "Arabic", laneId: "ar" }
+    const samoan = { id: "sm-1", name: "Samoan", laneId: "sm" }
+    const narrator = { id: "narrator", name: "Narrator" }
+    const local = {
+      provider: "gemini" as const,
+      apiKey: "AIzaLocalKey1234567890123",
+      voices: [narrator, arabic, samoan],
+      castAssignments: { hero: "ar-1", guide: "sm-1" },
+      defaultVoiceId: "ar-1",
+      laneCastAssignments: { ar: { hero: "ar-1" }, sm: { guide: "sm-1" } },
+      laneDefaultVoiceId: { ar: "ar-1", sm: "sm-1" },
+    }
+    const server = {
+      provider: "mms" as const,
+      voices: [narrator, samoan],
+      castAssignments: { guide: "sm-1" },
+      laneCastAssignments: { sm: { guide: "sm-1" } },
+      laneDefaultVoiceId: { sm: "sm-1" },
+    }
+    const merged = mergeTtsSettings(local, server)
+    expect(merged.provider).toBe("mms")
+    expect(merged.apiKey).toBe("AIzaLocalKey1234567890123")
+    expect(merged.voices?.map((voice) => voice.id)).toEqual(["narrator", "sm-1"])
+    expect(merged.defaultVoiceId).toBeUndefined()
+    expect(merged.castAssignments).toEqual({ guide: "sm-1" })
+    expect(merged.laneCastAssignments).toEqual({ sm: { guide: "sm-1" } })
+    expect(merged.laneDefaultVoiceId).toEqual({ sm: "sm-1" })
+    expect(JSON.stringify(merged)).not.toContain("ar-1")
   })
 })
 

@@ -99,6 +99,14 @@ export interface AiEntitlementRequest {
 export interface AiEntitlementDeps {
   byokKeys?: ByokKeyLookup
   now?: Date
+  /** false: check plan, key and ceiling but reserve nothing (`recorded` is
+   *  false). For a multi-call run (agent, autopilot) that checks once at the
+   *  start and then reserves each provider call on its own. Default true. */
+  reserve?: boolean
+  /** The house credential when a provider has one secret per service rather
+   *  than one account key (Modal: OMNI_SHARED_SECRET, DIARIZATION_SHARED_SECRET,
+   *  SEED_VC_TOKEN). Replaces the HOUSE_KEY_ENV lookup; never used for BYOK. */
+  houseKey?: string
 }
 
 export type AiEntitlementReason =
@@ -162,14 +170,14 @@ export async function checkAiEntitlement(
     // shadow included: it is the platform kill switch, not an allowance.
     const ceiling = await checkAiSpendCeiling(db, env, request.rail)
     if (!ceiling.ok) return refusal(503, 'ai_spend_ceiling_reached', { message: AI_SPEND_CEILING_MESSAGE })
-    const apiKey = env[HOUSE_KEY_ENV[request.provider]]
+    const apiKey = deps.houseKey ?? env[HOUSE_KEY_ENV[request.provider]]
     if (!apiKey) return refusal(503, 'provider_unconfigured')
     key = { provider: request.provider, source: 'house', apiKey }
   }
   // 3/4. Enterprise is unmetered; Free and Team are metered.
   const usageMode: UsageMode = orgKey ? 'byok' : plan.weeklyAllowanceUnits === null ? 'unmetered' : 'metered'
 
-  if (mode === 'off') {
+  if (mode === 'off' || deps.reserve === false) {
     return { ok: true, mode: usageMode, decision: 'allow', tier: plan.tier, key, recorded: false,
       settle: async () => {}, release: async () => {} }
   }

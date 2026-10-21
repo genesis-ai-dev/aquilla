@@ -396,7 +396,8 @@ export interface Env {
   BILLING_CHAT_USAGE_REHEARSAL?: string
   /** Weekly allowance metering for any provider; retires legacy guards for metered calls. */
   BILLING_WEEKLY_USAGE_ENFORCE?: string
-  /** Unified billing meter (db/shared/ai-entitlement.ts): off | shadow | enforce. */
+  /** off | shadow | enforce — the one meter switch (db/shared/ai-entitlement.ts).
+   *  When set it wins over the two flags above (lib/billing/paid-call.ts). */
   BILLING_METER_MODE?: string
   /** Sandbox billing opt-in: loopback locally, or the allowlisted hosts below
    *  on a development deployment. Test-mode key required either way. */

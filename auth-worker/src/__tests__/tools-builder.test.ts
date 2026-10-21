@@ -12,7 +12,7 @@ import { UI_CHECKS } from "../lib/tools/build-prompt-guide"
 /** These tests are about the pipeline, not billing: every call is admitted on
  *  the house key "k" (the metering contract is in tools-build-metering.test.ts). */
 const houseKey: BuilderAdmit = async () => ({
-  ok: true, apiKey: "k", source: "house", settleFrom: async () => undefined, release: async () => {},
+  ok: true, apiKey: "k", recorded: false, settleFrom: async () => undefined, release: async () => {},
 })
 
 function stubFetch(contents: string[], cost = 0.12): { fetchImpl: typeof fetch; bodies: { model: string; max_tokens: number; messages: { role: string; content: string }[] }[] } {

@@ -67,7 +67,8 @@ it('blocks exhausted allowance before starting the provider', async () => {
   const fetch = upstream({ choices: [{ message: { content: JSON.stringify(recipe) } }], usage: { cost: 0.65 } })
   vi.stubGlobal('fetch', fetch)
   expect((await f.send()).status).toBe(200)
-  expect((await f.send({}, {}, crypto.randomUUID())).status).toBe(429)
+  // The spec §5.3 client contract: an exhausted allowance is 402, never 429 (429 is rate limiting).
+  expect((await f.send({}, {}, crypto.randomUUID())).status).toBe(402)
   expect(completions(fetch)).toBe(1)
 })
 it('rejects non-lead and unowned projects before reserving usage', async () => {

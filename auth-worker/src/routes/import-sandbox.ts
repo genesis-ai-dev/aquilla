@@ -28,7 +28,7 @@ import {
 import { MAX_SANDBOX_PROGRAM_CHARS } from "../../../shared/import-contract"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
 import { logVendorTimeout, vendorDeadline } from "../../../shared/vendor-timeouts"
-import { admitLlmCall, LlmRefusedError, projectOrgId } from "../lib/billing/paid-llm"
+import { admitLlmCall, legacyLedgers, LlmRefusedError, projectOrgId } from "../lib/billing/paid-llm"
 import { providerRejectedPreModel } from "../lib/billing/chat-usage"
 import { admitSandboxTime, secondsSince } from "../lib/billing/sandbox-meter"
 
@@ -351,12 +351,17 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
   const projectOrg = await projectOrgId(c.env.AQUILLA_PG, projectId)
   const orgId = projectOrg ?? 0
   const paidScope = { orgId: projectOrg, userId: user.id, projectId, rail: "llm" as const }
-  const credits = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm")
-  if (!credits.ok) {
-    return c.json({ error: "credit_cap_exceeded", reason: credits.reason, message: "LLM credit cap reached. Contact your org admin." }, 429)
+  // One ledger per call (paid-call.ts): the legacy credit/word guards and
+  // ledgers are the record only while the meter is off.
+  const legacy = legacyLedgers(c.env, c.req.url)
+  if (legacy) {
+    const credits = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm")
+    if (!credits.ok) {
+      return c.json({ error: "credit_cap_exceeded", reason: credits.reason, message: "LLM credit cap reached. Contact your org admin." }, 429)
+    }
+    const words = await wordGuard(c.env.AQUILLA_PG, orgId)
+    if (!words.ok) return c.json(wordCapBody(words.reason), 429)
   }
-  const words = await wordGuard(c.env.AQUILLA_PG, orgId)
-  if (!words.ok) return c.json(wordCapBody(words.reason), 429)
 
   // AQU-2066: container time on the `sandbox` rail. Reserved before a
   // container can start; settled with the measured seconds once it is gone.
@@ -406,7 +411,7 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
         model,
         promptChars: messages.reduce((n, m) => n + m.content.length, 0),
         maxOutputTokens: PARSER_MAX_TOKENS,
-      })
+      }, { requestUrl: c.req.url })
       if (!call.ok) throw new LlmRefusedError(call)
       const deadline = vendorDeadline("openRouterNonStreaming", signal)
       let upstream: Response
@@ -443,9 +448,11 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
         usage?: { cost?: number }
       }
       const settled = await call.settleFrom(body)
-      const rawCostCents = settled !== undefined && settled > 0 ? settled : 1
-      await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", rawCostCents, 1)
-      await recordWords(c.env.AQUILLA_PG, orgId, user.id, "llm", countWords(fileName))
+      if (legacy) {
+        const rawCostCents = settled !== undefined && settled > 0 ? settled : 1
+        await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", rawCostCents, 1)
+        await recordWords(c.env.AQUILLA_PG, orgId, user.id, "llm", countWords(fileName))
+      }
       const content = body.choices?.[0]?.message?.content
       if (!content) {
         previousError = "The model returned no parser program"

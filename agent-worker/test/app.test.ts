@@ -431,7 +431,7 @@ describe("POST /sessions/:id/fetch-artifact", () => {
       new Request("http://x/sessions/s1/fetch-artifact", {
         method: "POST",
         headers: AUTH,
-        body: JSON.stringify({ key: "nope", path: "input.csv" }),
+        body: JSON.stringify({ key: "artifacts/p1/nope", path: "input.csv" }),
       }),
     )
     expect(res.status).toBe(404)

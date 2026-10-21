@@ -4,7 +4,7 @@
 // downloaded every on-screen take just to draw its shape — Genesis 1 is 22
 // recordings and 404KB, which is 3.6s on Slow 4G and 8.6s on 3G before a
 // single bar appears, for a picture 20px tall. Peaks are the only thing the
-// list actually needs, and 320 of them quantized to a byte each is 328 bytes:
+// list actually needs, and 320 of them quantized to a byte each is 332 bytes:
 // a chapter's shapes drop to ~7KB, and the recording itself is fetched when
 // somebody presses play.
 //
@@ -29,8 +29,10 @@ import { audioObjectEndpoint, type SyncTokenForFile } from "./upload"
 export const PEAKS_SIDECAR_SUFFIX = ".peaks"
 
 const MAGIC = [0x41, 0x51, 0x50, 0x4b] as const // "AQPK"
-const FORMAT_VERSION = 1
-const HEADER_BYTES = 8
+/** Version 2 adds the clip's length to the header. Version 1 (no length) is
+ *  still read: the length is then unknown, as it was before. */
+const FORMAT_VERSION = 2
+const HEADER_BYTES = { 1: 8, 2: 12 } as const
 /** Refuse an implausibly large body before allocating from it. 4096 bins is an
  *  order of magnitude past WAVEFORM_BINS and still only 4KB. */
 const MAX_BINS = 4096
@@ -49,34 +51,80 @@ async function backendUnreachable(): Promise<boolean> {
   return (await isOnline()) === false
 }
 
+/**
+ * The one bin count a sidecar is written at: WAVEFORM_BINS (peaks-loader.ts,
+ * which imports this module, so the number lives here; a test keeps the two
+ * equal). One shared object per clip can only hold one shape, and a reader
+ * asking for a different count must not overwrite everyone else's with its
+ * own: it reads this one and narrows it (`peaksAtBins`) instead.
+ */
+export const SIDECAR_BINS = 320
+
+/** Stored peaks, and the clip's length when the writer knew it. */
+export interface StoredPeaks {
+  peaks: Float32Array
+  /** Milliseconds; null when unknown (a version 1 sidecar, or a decode that
+   *  could not tell). */
+  durationMs: number | null
+}
+
+/**
+ * `peaks` at `bins`: as they are when the counts match, narrowed by taking the
+ * loudest of each group when fewer are wanted (peaks are per-bin maximums, so
+ * this is what decoding at the smaller count draws), and null when more are
+ * wanted than the stored shape has.
+ */
+export function peaksAtBins(peaks: Float32Array, bins: number): Float32Array | null {
+  if (!Number.isInteger(bins) || bins <= 0 || bins > peaks.length) return null
+  if (bins === peaks.length) return peaks
+  const out = new Float32Array(bins)
+  for (let i = 0; i < bins; i++) {
+    const from = Math.floor((i * peaks.length) / bins)
+    const to = Math.max(from + 1, Math.floor(((i + 1) * peaks.length) / bins))
+    let max = 0
+    for (let j = from; j < to; j++) if (peaks[j] > max) max = peaks[j]
+    out[i] = max
+  }
+  return out
+}
+
 export function peaksSidecarObjectName(audioId: string, ext: string): string {
   return `${audioId}.${ext}${PEAKS_SIDECAR_SUFFIX}`
 }
 
 /**
- * Peaks as the stored body: a 8-byte header then one byte per bin.
+ * Peaks as the stored body: a 12-byte header then one byte per bin.
  *
- *   0..3  magic "AQPK"
- *   4     format version
- *   5     reserved, zero
- *   6..7  bin count, little-endian uint16
- *   8..   bins, each amplitude quantized to 0..255
+ *   0..3   magic "AQPK"
+ *   4      format version (2)
+ *   5      reserved, zero
+ *   6..7   bin count, little-endian uint16
+ *   8..11  the clip's length in ms, little-endian uint32; 0 = unknown
+ *   12..   bins, each amplitude quantized to 0..255
  *
  * A byte a bin is 1/255 of full scale — below a pixel on any waveform the app
  * draws, and it keeps a chapter's worth of shapes inside one TCP window.
+ *
+ * The length rides along because a waveform drawn from a sidecar never decodes
+ * the clip, and decoding was how a card learned the length of a clip whose
+ * attachment carries none (a voice-together clip, older takes): without it the
+ * card cannot place the faded trim ends or offer the trim handles.
  */
-export function encodePeaksSidecar(peaks: Float32Array): Uint8Array<ArrayBuffer> {
+export function encodePeaksSidecar(peaks: Float32Array, durationMs?: number | null): Uint8Array<ArrayBuffer> {
   const bins = peaks.length
-  const out = new Uint8Array(new ArrayBuffer(HEADER_BYTES + bins))
+  const header = HEADER_BYTES[FORMAT_VERSION]
+  const out = new Uint8Array(new ArrayBuffer(header + bins))
   out.set(MAGIC, 0)
   out[4] = FORMAT_VERSION
   out[5] = 0
   out[6] = bins & 0xff
   out[7] = (bins >> 8) & 0xff
+  const ms = durationMs != null && Number.isFinite(durationMs) && durationMs > 0 ? Math.min(0xffffffff, Math.round(durationMs)) : 0
+  new DataView(out.buffer).setUint32(8, ms, true)
   for (let i = 0; i < bins; i++) {
     const v = peaks[i]
     const clamped = Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0
-    out[HEADER_BYTES + i] = Math.round(clamped * 255)
+    out[header + i] = Math.round(clamped * 255)
   }
   return out
 }
@@ -86,16 +134,19 @@ export function encodePeaksSidecar(peaks: Float32Array): Uint8Array<ArrayBuffer>
  * read — a truncated object, a future format, somebody else's bytes. Null is
  * always answerable by decoding the clip, so a sidecar is never load-bearing.
  */
-export function decodePeaksSidecar(bytes: Uint8Array): Float32Array | null {
-  if (bytes.byteLength < HEADER_BYTES) return null
+export function decodePeaksSidecar(bytes: Uint8Array): StoredPeaks | null {
+  if (bytes.byteLength < HEADER_BYTES[1]) return null
   for (let i = 0; i < MAGIC.length; i++) if (bytes[i] !== MAGIC[i]) return null
-  if (bytes[4] !== FORMAT_VERSION) return null
+  const version = bytes[4]
+  if (version !== 1 && version !== 2) return null
+  const header = HEADER_BYTES[version]
   const bins = bytes[6] | (bytes[7] << 8)
   if (bins <= 0 || bins > MAX_BINS) return null
-  if (bytes.byteLength < HEADER_BYTES + bins) return null
+  if (bytes.byteLength < header + bins) return null
+  const ms = version === 2 ? new DataView(bytes.buffer, bytes.byteOffset, header).getUint32(8, true) : 0
   const peaks = new Float32Array(bins)
-  for (let i = 0; i < bins; i++) peaks[i] = bytes[HEADER_BYTES + i] / 255
-  return peaks
+  for (let i = 0; i < bins; i++) peaks[i] = bytes[header + i] / 255
+  return { peaks, durationMs: ms > 0 ? ms : null }
 }
 
 export interface PeaksSidecarArgs {
@@ -113,7 +164,7 @@ export interface PeaksSidecarArgs {
  * sidecar yet, no token, an unreadable body, a network blip. Never throws:
  * every failure means "decode the clip instead".
  */
-export async function fetchPeaksSidecar(args: PeaksSidecarArgs): Promise<Float32Array | null> {
+export async function fetchPeaksSidecar(args: PeaksSidecarArgs): Promise<StoredPeaks | null> {
   const { projectId, fileId, audioId, ext, getSyncToken } = args
   const fetchFn = args.fetchFn ?? fetch
   try {
@@ -150,16 +201,16 @@ export type PeaksSidecarPutResult = "stored" | "refused" | "skipped"
  * whether asking again could ever help.
  */
 export async function putPeaksSidecar(
-  args: PeaksSidecarArgs & { peaks: Float32Array },
+  args: PeaksSidecarArgs & { peaks: Float32Array; durationMs?: number | null },
 ): Promise<PeaksSidecarPutResult> {
-  const { projectId, fileId, audioId, ext, peaks, getSyncToken } = args
+  const { projectId, fileId, audioId, ext, peaks, durationMs, getSyncToken } = args
   if (peaks.length === 0 || peaks.length > MAX_BINS) return "refused"
   const fetchFn = args.fetchFn ?? fetch
   try {
     if (await backendUnreachable()) return "skipped"
     const token = await getSyncToken(projectId, fileId)
     if (!token) return "skipped"
-    const body = encodePeaksSidecar(peaks)
+    const body = encodePeaksSidecar(peaks, durationMs)
     // As a plain ArrayBuffer: the exact bytes, and the one body type every
     // fetch implementation in this codebase's targets takes without a cast.
     const bodyBuffer = body.buffer
@@ -204,8 +255,10 @@ export function __resetPeaksSidecarPublishesForTests(): void {
  * when the attempt is over, which is what a test can wait on.
  */
 export async function publishPeaksSidecarOnce(
-  args: PeaksSidecarArgs & { peaks: Float32Array },
+  args: PeaksSidecarArgs & { peaks: Float32Array; durationMs?: number | null },
 ): Promise<void> {
+  // Only the shared count is ever written (see SIDECAR_BINS).
+  if (args.peaks.length !== SIDECAR_BINS) return
   const key = `${args.projectId}/${args.fileId}/${peaksSidecarObjectName(args.audioId, args.ext)}`
   if (publishAttempted.has(key)) return
   publishAttempted.add(key)

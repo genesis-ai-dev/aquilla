@@ -16,9 +16,11 @@ vi.mock("@/lib/offline/connectivity", () => ({ isOnline: async () => backendReac
 import { WAVEFORM_BINS } from "./peaks-loader"
 import {
   PEAKS_SIDECAR_SUFFIX,
+  SIDECAR_BINS,
   decodePeaksSidecar,
   encodePeaksSidecar,
   fetchPeaksSidecar,
+  peaksAtBins,
   peaksSidecarObjectName,
   putPeaksSidecar,
   publishPeaksSidecarOnce,
@@ -60,17 +62,37 @@ describe("the stored body", () => {
 
   it("round-trips a waveform within a quantization step", () => {
     const peaks = ramp()
-    const back = decodePeaksSidecar(encodePeaksSidecar(peaks))
-    expect(back).not.toBeNull()
+    const back = decodePeaksSidecar(encodePeaksSidecar(peaks))?.peaks
+    expect(back).toBeDefined()
     expect(back!.length).toBe(peaks.length)
     for (let i = 0; i < peaks.length; i++) {
       expect(Math.abs(back![i] - peaks[i])).toBeLessThanOrEqual(1 / 255)
     }
   })
 
+  // WHY: a card drawn from the sidecar never decodes the clip, and decoding was
+  // how a clip with no length on its attachment (a voice-together clip) got
+  // one; without it the card has no trim ends and no trim handles.
+  it("carries the clip's length, and says when it is unknown", () => {
+    expect(decodePeaksSidecar(encodePeaksSidecar(ramp(), 4321.6))?.durationMs).toBe(4322)
+    expect(decodePeaksSidecar(encodePeaksSidecar(ramp()))?.durationMs).toBeNull()
+    expect(decodePeaksSidecar(encodePeaksSidecar(ramp(), Number.NaN))?.durationMs).toBeNull()
+  })
+
+  it("still reads a version 1 body, with the length unknown", () => {
+    const v2 = encodePeaksSidecar(ramp(), 5000)
+    const v1 = new Uint8Array(8 + SIDECAR_BINS)
+    v1.set(v2.subarray(0, 8), 0)
+    v1[4] = 1
+    v1.set(v2.subarray(12), 8)
+    const back = decodePeaksSidecar(v1)
+    expect(back?.durationMs).toBeNull()
+    expect(Array.from(back!.peaks)).toEqual(Array.from(decodePeaksSidecar(v2)!.peaks))
+  })
+
   it("clamps what a decode can hand it — silence, overshoot and NaN", () => {
     const back = decodePeaksSidecar(encodePeaksSidecar(new Float32Array([0, 1, 2, -1, NaN])))
-    expect(Array.from(back!)).toEqual([0, 1, 1, 0, 0])
+    expect(Array.from(back!.peaks)).toEqual([0, 1, 1, 0, 0])
   })
 
   it.each([
@@ -91,8 +113,8 @@ describe("the stored body", () => {
 describe("fetchPeaksSidecar", () => {
   it("reads the sidecar object under the clip's file, with the sync token", async () => {
     const fetchFn = vi.fn(async () => new Response(new Blob([encodePeaksSidecar(ramp())])))
-    const peaks = await fetchPeaksSidecar({ ...base, fetchFn: fetchFn as unknown as typeof fetch })
-    expect(peaks).toBeInstanceOf(Float32Array)
+    const stored = await fetchPeaksSidecar({ ...base, fetchFn: fetchFn as unknown as typeof fetch })
+    expect(stored?.peaks).toBeInstanceOf(Float32Array)
     const [url, init] = fetchFn.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toContain(`/audio/p1/f1/${AUDIO_ID}.${EXT}${PEAKS_SIDECAR_SUFFIX}`)
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer tok")
@@ -142,7 +164,7 @@ describe("putPeaksSidecar", () => {
     const [url, init] = fetchFn.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toContain(`${AUDIO_ID}.${EXT}${PEAKS_SIDECAR_SUFFIX}`)
     expect(init.method).toBe("PUT")
-    expect(decodePeaksSidecar(new Uint8Array(init.body as ArrayBuffer))).toBeInstanceOf(Float32Array)
+    expect(decodePeaksSidecar(new Uint8Array(init.body as ArrayBuffer))?.peaks).toBeInstanceOf(Float32Array)
   })
 
   it("reports a refusal instead of throwing — a viewer may not write one", async () => {
@@ -193,5 +215,30 @@ describe("publishPeaksSidecarOnce", () => {
     await publishPeaksSidecarOnce({ ...base, peaks: ramp(), fetchFn: f })
     await publishPeaksSidecarOnce({ ...base, audioId: "audio-cell2-1700000000-abcdefgh", peaks: ramp(), fetchFn: f })
     expect(fetchFn).toHaveBeenCalledTimes(2)
+  })
+})
+
+// WHY: one object per clip holds one shape. A reader at another count (the
+// extension editor draws 160) used to overwrite the shared 320 with its own,
+// and everyone else then rejected it and downloaded the clip again.
+describe("one shared shape per clip", () => {
+  it("is written at WAVEFORM_BINS", () => {
+    expect(SIDECAR_BINS).toBe(WAVEFORM_BINS)
+  })
+
+  it("is never published at another count", async () => {
+    const fetchFn = vi.fn(async () => new Response(null, { status: 200 }))
+    await publishPeaksSidecarOnce({ ...base, peaks: ramp(160), fetchFn: fetchFn as unknown as typeof fetch })
+    expect(fetchFn).not.toHaveBeenCalled()
+    await publishPeaksSidecarOnce({ ...base, peaks: ramp(SIDECAR_BINS), fetchFn: fetchFn as unknown as typeof fetch })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
+
+  it("narrows to fewer bins by taking each group's loudest, and cannot widen", () => {
+    const peaks = new Float32Array([0.1, 0.9, 0.3, 0.2, 0.5, 0.4])
+    expect(Array.from(peaksAtBins(peaks, 3)!).map((v) => +v.toFixed(2))).toEqual([0.9, 0.3, 0.5])
+    expect(peaksAtBins(peaks, 6)).toBe(peaks)
+    expect(peaksAtBins(peaks, 7)).toBeNull()
+    expect(peaksAtBins(peaks, 0)).toBeNull()
   })
 })

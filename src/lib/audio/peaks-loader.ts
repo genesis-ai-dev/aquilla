@@ -24,7 +24,7 @@ import { fetchCellAudio, parseFrontierAudioUrl } from "./upload"
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
 import { decodePeaks } from "./peaks"
 import { peaksCacheGet, peaksCachePut } from "./peaks-cache"
-import { fetchPeaksSidecar, publishPeaksSidecarOnce } from "./peaks-sidecar"
+import { fetchPeaksSidecar, peaksAtBins, publishPeaksSidecarOnce } from "./peaks-sidecar"
 
 /**
  * The bin count everything decodes at.
@@ -108,14 +108,17 @@ export async function loadPeaksFor(args: LoadPeaksArgs): Promise<Float32Array | 
   //    against the hundreds of KB the clip itself costs. This is the rung that
   //    makes the Audio view's list cheap: a chapter of takes draws for ~7KB and
   //    the recordings are fetched when somebody presses play.
+  //    It is stored at WAVEFORM_BINS only; a reader asking for fewer narrows it
+  //    rather than downloading the clip (and never writes its own count back).
   const stored = await fetchPeaksSidecar(sidecarArgs)
-  if (stored && stored.length === bins) {
+  const fromSidecar = stored ? peaksAtBins(stored.peaks, bins) : null
+  if (fromSidecar) {
     try {
-      await peaksCachePut(attachmentKey, stored)
+      await peaksCachePut(attachmentKey, fromSidecar)
     } catch {
       // Failing to cache is not failing to draw.
     }
-    return stored
+    return fromSidecar
   }
 
   // 4. The clip itself, writing through so the next reader skips it.
@@ -142,8 +145,11 @@ async function decodeAndKeep(
   sidecarArgs: { projectId: string; fileId: string; audioId: string; ext: string; getSyncToken: SyncTokenFetcher },
 ): Promise<Float32Array | null> {
   let peaks: Float32Array
+  let durationMs: number | null
   try {
-    peaks = (await decodePeaks(bytes, bins)).peaks
+    const decoded = await decodePeaks(bytes, bins)
+    peaks = decoded.peaks
+    durationMs = decoded.duration > 0 ? decoded.duration * 1000 : null
   } catch {
     return null
   }
@@ -152,7 +158,8 @@ async function decodeAndKeep(
   } catch {
     // As above: failing to cache is not failing to draw.
   }
-  void publishPeaksSidecarOnce({ ...sidecarArgs, peaks })
+  // Published only at the shared count (publishPeaksSidecarOnce checks).
+  void publishPeaksSidecarOnce({ ...sidecarArgs, peaks, durationMs })
   return peaks
 }
 

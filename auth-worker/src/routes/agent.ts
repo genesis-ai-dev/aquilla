@@ -15,7 +15,6 @@ import { z } from "zod"
 import type { AuthUser, Env, Variables } from "../types"
 import { authMiddleware } from "../middleware/auth"
 import { runAiGuard } from "../lib/ai-budget"
-import { checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
 import { getPlatformSettingsCached, type PlatformSettings } from "../lib/platform-settings"
 import { creditGuard, creditsFor, recordCredit, resolveCreditConfig } from "../lib/credits"
 import { countWords } from "../lib/billing/plans"
@@ -54,7 +53,8 @@ import { buildAugmentSystemPrompt } from "../lib/agent/prompt-augment"
 import { sandboxDestroy } from "../lib/agent/sandbox-client"
 import { openRouterExtras, streamUsageOptions } from "../lib/llm-vendor"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
-import { AgentUsageMeter, agentUsageAllowed, agentUsageEnabled } from "../lib/billing/agent-usage"
+import { AgentUsageMeter } from "../lib/billing/agent-usage"
+import { admitPaidCall, paidCallMeterMode } from "../lib/billing/paid-call"
 import {
   runCode,
   loadArtifact,
@@ -599,13 +599,6 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
     return c.json(guard.body, guard.status)
   }
 
-  // Platform daily spend ceiling (AQU-1869). Before the SSE stream opens, for
-  // the same reason the agent credit guard is: this is the dangerous rail.
-  const spendCeiling = await checkAiSpendCeiling(c.env.AQUILLA_PG, c.env, "agent")
-  if (!spendCeiling.ok) {
-    return c.json(spendCeiling.body, spendCeiling.status)
-  }
-
   // Credit guard: resolve org from project, pre-check agent sub-cap.
   // This is the DANGEROUS rail — block early (before the SSE stream starts).
   let orgId = 0
@@ -618,14 +611,16 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
   } catch {
     /* best-effort — degrade to org 0 (no-org) so we still record */
   }
-  // AQU-837 weekly allowance. Enforced usage never funds an unowned project
-  // from org 0, and once it meters a run the legacy guards are retired for it.
-  let usage: AgentUsageMeter | undefined
-  if (agentUsageEnabled(c.env)) {
-    if (!agentUsageAllowed(c.env, c.req.url)) return c.json({ error: "usage_rehearsal_unavailable" }, 503)
-    if (orgId <= 0) return c.json({ error: "forbidden", message: "This project has no billing workspace" }, 403)
-    usage = new AgentUsageMeter(c.env, { orgId, userId: user.id, projectId: body.projectId })
-  } else {
+  // AQU-2062: the one entitlement check, once for the run and before the SSE
+  // stream opens — plan, the key every model call uses, and the platform spend
+  // ceiling (AQU-1869). It reserves nothing: while the meter records, each
+  // model call (nested drafting included) reserves its own bound through
+  // AgentUsageMeter, which never funds an unowned project from org 0. The
+  // legacy guards are retired for runs the meter records.
+  const preflight = await admitPaidCall(c.env, { orgId, userId: user.id, projectId: body.projectId, rail: "agent", requestUrl: c.req.url })
+  if (!preflight.ok) return c.json(preflight.body, preflight.status)
+  const metering = paidCallMeterMode(c.env, c.req.url) !== "off"
+  if (!metering) {
     const creditCheck = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "agent")
     if (!creditCheck.ok) {
       return c.json(
@@ -662,6 +657,9 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
   // keep using the injected AQUILLA_PG.
   const runShim = c.env.PG_CONNECTION_STRING ? makePostgres(c.env.PG_CONNECTION_STRING) : null
   const env: Env = runScopedEnv(c.env, runShim)
+  // The meter writes from the loop, after this Response returns: it uses the
+  // run's own connection, not the request's.
+  const usage = metering ? new AgentUsageMeter(env, { orgId, userId: user.id, projectId: body.projectId }) : undefined
   const signal = c.req.raw.signal
   const runId = crypto.randomUUID()
   const lastUserMessage = [...body.messages].reverse().find((m) => m.role === "user")
@@ -693,7 +691,7 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
       const send = (frame: AgentFrame) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(frame)}\n\n`))
       }
-      runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel: role.level, runId, orgId, model: agentModel, draftModel: resolveDraftModel(c.env, platformSettings, agentModel), signal, send, usage, waitUntil, resolvedLaneId })
+      runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel: role.level, runId, orgId, apiKey: preflight.apiKey, model: agentModel, draftModel: resolveDraftModel(c.env, platformSettings, agentModel), signal, send, usage, waitUntil, resolvedLaneId })
         .catch((err) => {
           // Last-resort: surface, then settle the ledger as error.
           try {
@@ -763,6 +761,8 @@ interface LoopArgs {
   roleLevel: number
   runId: string
   orgId: number
+  /** The provider key the entitlement check chose for this run. */
+  apiKey: string
   model: string
   /** The draft tool's translation model (resolveDraftModel). */
   draftModel: string
@@ -799,7 +799,7 @@ function pickLane(rawArgs: string, activeLane: string | undefined): string | und
   return activeLane
 }
 
-async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel, runId, orgId, model, draftModel, signal, send, usage, waitUntil, resolvedLaneId }: LoopArgs): Promise<void> {
+async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel, runId, orgId, apiKey, model, draftModel, signal, send, usage, waitUntil, resolvedLaneId }: LoopArgs): Promise<void> {
   const aliases = new AliasMap()
   const sqlVars: SqlVarContext = {
     projectId: body.projectId,
@@ -1046,7 +1046,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
         upstream = await fetch(resolveOpenRouterUrl(env), {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+            Authorization: `Bearer ${apiKey}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
@@ -1216,7 +1216,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
           signal,
           draft: {
             model: draftModel,
-            apiKey: env.OPENROUTER_API_KEY ?? "",
+            apiKey,
             url: resolveOpenRouterUrl(env),
             ...(usage ? { maxTokens: usage.maxOutputTokens } : {}),
             sourceLanguage: languages.sourceLanguage,

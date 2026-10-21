@@ -141,8 +141,9 @@ export async function admitWorkspaceUsage(db: AquillaDb, input: AdmitUsageInput,
   })
 }
 
-/** The pre-T4 admission the already-metered routes use (T5 moves them onto
- * checkAiEntitlement): always enforces, and throws when the week is spent. */
+/** A direct, always-enforcing admission that throws when the week is spent.
+ * No route calls it since AQU-2062 (every paid call goes through
+ * checkAiEntitlement); ledger tests use it to seed reservations. */
 export async function reserveWorkspaceUsage(db: AquillaDb, input: {
   orgId: number; projectId: string; userId: number; requestId: string
   rail: CostRail; maxRawCostCents: number

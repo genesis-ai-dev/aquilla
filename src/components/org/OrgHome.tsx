@@ -524,6 +524,7 @@ export function OrgHome() {
   const orgSummaryColumns = useOrgSummaryColumns()
   const {
     orgs,
+    guestOrgs,
     accessibleProjects,
     accessibleProjectsLoading,
     accessibleProjectsError,
@@ -543,9 +544,19 @@ export function OrgHome() {
   // perfectly good org route if this view is reused.
   const isAllOrgsRoute = parseOrgPath(location.pathname)?.orgKey === ALL_ORGS_PARAM
   const jwt = session?.jwt ?? null
-  const portfolioScopeKey = !jwt || orgLoading
+  // AQU-1488: the totals cover the orgs where the caller only holds a project
+  // (guest orgs) too. A project-only member — invited to one project, never to
+  // its org — read "Projects 0" here beside a table listing that project. The
+  // server counts each project only if the caller can open it, so this adds
+  // exactly the projects they were given. Guest orgs come from the project
+  // directory, so the totals wait for it rather than counting twice.
+  const portfolioOrgIds = useMemo(
+    () => [...new Set([...orgs, ...guestOrgs].map((org) => org.id))].sort((a, b) => a - b),
+    [orgs, guestOrgs],
+  )
+  const portfolioScopeKey = !jwt || orgLoading || accessibleProjectsLoading
     ? null
-    : `all:${orgs.map((org) => org.id).sort((a, b) => a - b).join(",")}`
+    : `all:${portfolioOrgIds.join(",")}`
 
   const [aggregates, setAggregates] = useState<PortfolioAggregates | null>(null)
   // AQU-326: unredeemed invites addressed to the caller's email — without
@@ -593,7 +604,7 @@ export function OrgHome() {
     setError(null)
     // Overview totals come from the summary endpoint. The project table stays
     // on the paged directory below; this must not download every project.
-    getPortfolioAggregates(jwt, orgs.map((org) => org.id))
+    getPortfolioAggregates(jwt, portfolioOrgIds)
       .then((summary) => {
         if (!cancelled) setAggregates(summary)
       })
@@ -609,7 +620,7 @@ export function OrgHome() {
         if (!cancelled) setResolvedPortfolioScopeKey(portfolioScopeKey)
       })
     return () => { cancelled = true }
-  }, [jwt, orgLoading, orgs, portfolioScopeKey])
+  }, [jwt, orgLoading, orgs, portfolioOrgIds, portfolioScopeKey])
 
   // AQU-326: received-invites surface. Org-independent (matched by email).
   useEffect(() => {

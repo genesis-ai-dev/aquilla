@@ -340,9 +340,26 @@ export interface Voice {
    */
   language?: string
   /**
-   * Lane this voice belongs to (AQU-2037). A lane row id, not a legacy tag.
-   * Absent means the voice is not lane-owned yet: it stays visible on every
-   * lane, including the built-in Narrator. Stamped once, on first save.
+   * The target lane this voice belongs to (a lane ROW id, AQU-2037). A voice is
+   * made in one lane and is offered only there: the Voices panel, the per-cell
+   * picker, the batch dialog and the Media-timeline picker all list the active
+   * lane's voices, and Generate never speaks a lane's text with another lane's
+   * voice.
+   *
+   * ABSENT means "every lane", and that is load-bearing twice over: voices
+   * stored before this field existed have no lane yet and must keep working on
+   * every lane until AQU-2039 migrates them, and `builtIn` presets (the
+   * Narrator) are deliberately never stamped — every lane falls back to the
+   * Narrator, so it cannot belong to one lane.
+   *
+   * Stamped once, at the write that first stores the voice (`useProjectTts`'s
+   * `saveTts`), so every mint site — New voice / Clone / voice design, an
+   * import with speaker labels, diarization, "Adopt voices as cast" — lands in
+   * the active lane without each one having to know about lanes. An edit never
+   * re-stamps: a voice does not move lane because someone renamed it.
+   *
+   * A lane ID rather than the lane's tag, per AQU-1612/AQU-1613: ids survive a
+   * lane being renamed or having its language edited, tags do not.
    */
   laneId?: string
   /**

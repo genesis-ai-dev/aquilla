@@ -30,6 +30,7 @@ import { readSelectMods, type SelectMods } from "./selection"
 import { fmtClock, fmtDragTime } from "./format"
 import { DragTimeChip } from "./DragTimeChip"
 import type { CellData } from "@/hooks/useCells"
+import { isHiddenCell } from "@/lib/cells/hidden"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 const MIN_DUR_SEC = 0.2
@@ -330,6 +331,8 @@ export function TimelineCard({
   // The em-dash placeholder reads as content. A line nobody has written yet
   // shows its timecode and nothing else, in either track.
   const label = blank ? "" : labelText || cell.cellLabel || "—"
+  // A hidden line's text card, not the source-audio region it sits on.
+  const hiddenLine = isHiddenCell(cell) && !isDialogue
   const castName =
     cell.metadata && typeof cell.metadata.cast_name === "string"
       ? (cell.metadata.cast_name as string)
@@ -344,6 +347,7 @@ export function TimelineCard({
       // honors this opt-in) — a card's activation is selection, already done.
       data-spacebar-transport=""
       data-multi-selected={multiSelected ? "" : undefined}
+      data-hidden-line={hiddenLine ? "" : undefined}
       onClick={(e) => {
         // AQU-928: a modified click BUILDS a selection — it must not also yank
         // playback to this clip, which is what makes multi-select usable.
@@ -429,6 +433,10 @@ export function TimelineCard({
         // .24 → .12 on source audio, which is where it was obvious enough to
         // report (2026-08-27).
         !selected && !multiSelected && !drag && (isDialogue ? TRACK_HOVER_FILL_CLASS : "hover:bg-muted/30"),
+        // Sam's decision: a hidden line is drawn where it sits, faded the way
+        // the table fades a revealed hidden row. Its source-audio card is not:
+        // the recording under it still plays.
+        hiddenLine && "opacity-60",
       )}
       style={{ left: `${left}px`, width: `${width}px`, borderRadius: `${radiusPx}px` }}
     >

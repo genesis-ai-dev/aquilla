@@ -35,7 +35,8 @@ import { hashPasswordWerkzeugScrypt, verifyPasswordWerkzeugScrypt } from "../uti
 import { loadRetentionMetrics } from "../lib/retention-load"
 import { buildRetentionReport, reportWindow } from "../lib/retention-report"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
-import { countedFileSql } from "../../../db/shared/counted-files"
+import { countedFileSql, inCountedFileSql } from "../../../db/shared/counted-files"
+import { lessStructural } from "../services/org-permissions"
 import {
   ADMIN_ELEVATION_VERIFY_MAX_FAILURES,
   countRecentEvents,
@@ -492,13 +493,29 @@ function asBool(value: boolean | number | null | undefined): boolean {
 /** GET /api/v2/admin/projects — every project with org/creator + rollup + shared flag. */
 admin.get("/projects", async (c) => {
   const { results } = await c.env.AQUILLA_PG.prepare(
+    // AQU-1911: the cell counts follow the project's "count headings" answer,
+    // else its org's (the org dashboard's `lessStructural`), so a project
+    // reads the same validated % here as on its dashboards. Words never do,
+    // as on the dashboard. `filled_cells` and `last_activity_at` feed the
+    // dashboard's activity rule (portfolioActivityStatus): a project nobody
+    // has started translating is not stalled, and validating or recording is
+    // work. `file_section_progress.updated_at` is restamped by every
+    // counter-moving event, validations and takes included, where
+    // `files.last_edit_at` moves only on a cell write (AQU-950).
     `SELECT p.id, p.name, p.org_id, p.archived_at, p.created_at, p.deadline_at,
             o.name AS org_name,
             u.username AS creator_username,
-            COALESCE(SUM(f.cell_count), 0) AS total_cells,
-            COALESCE(SUM(f.approved_count), 0) AS validated_cells,
+            ${lessStructural('COALESCE(SUM(f.cell_count), 0)', 'COALESCE(SUM(f.structural_cell_count), 0)')} AS total_cells,
+            ${lessStructural('COALESCE(SUM(f.approved_count), 0)', 'COALESCE(SUM(f.structural_approved_count), 0)')} AS validated_cells,
+            ${lessStructural('COALESCE(SUM(f.filled_count), 0)', 'COALESCE(SUM(f.structural_filled_count), 0)')} AS filled_cells,
             COALESCE(SUM(f.word_count), 0) AS word_count,
             MAX(f.last_edit_at) AS last_edit_at,
+            GREATEST(
+              MAX(f.last_edit_at),
+              (SELECT MAX(fsp.updated_at) FROM file_section_progress fsp
+                WHERE fsp.project_id = p.id AND fsp.scope = 'file'
+                  AND ${inCountedFileSql('fsp', 'uncounted_activity_file')})
+            ) AS last_activity_at,
             (
               EXISTS (
                 SELECT 1 FROM project_members pm
@@ -529,6 +546,8 @@ admin.get("/projects", async (c) => {
        -- not the WHERE: this is a LEFT join and a project whose only file is
        -- hidden must still appear, at zero.
        LEFT JOIN files f ON f.project_id = p.id AND ${countedFileSql('f')}
+       LEFT JOIN project_settings ps ON ps.project_id = p.id
+       LEFT JOIN org_settings os ON os.org_id = p.org_id
       GROUP BY p.id, o.name, u.username
       ORDER BY p.created_at DESC`,
   ).all<{
@@ -542,8 +561,10 @@ admin.get("/projects", async (c) => {
     creator_username: string | null
     total_cells: number
     validated_cells: number
+    filled_cells: number
     word_count: number
     last_edit_at: number | null
+    last_activity_at: number | string | null
     shared: boolean | number | null
   }>()
   return c.json({
@@ -558,8 +579,10 @@ admin.get("/projects", async (c) => {
       creatorUsername: r.creator_username,
       totalCells: r.total_cells,
       validatedCells: r.validated_cells,
+      filledCells: r.filled_cells,
       wordCount: r.word_count,
       lastEditAt: r.last_edit_at,
+      lastActivityAt: r.last_activity_at == null ? null : Number(r.last_activity_at),
       shared: asBool(r.shared),
     })),
   })

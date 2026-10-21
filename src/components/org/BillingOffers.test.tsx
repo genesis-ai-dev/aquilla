@@ -16,26 +16,27 @@ async function realCatalog() {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('Stripe catalog → billing client → plan comparison', () => {
-  it('renders real composed prices, annual totals, audience tabs and monthly selection', async () => {
+  it('renders Free, Team at its real Stripe prices, and Enterprise with monthly selection (AQU-2058)', async () => {
     const catalog = await realCatalog()
     const fetch = vi.fn(async () => Response.json(catalog))
     vi.stubGlobal('fetch', fetch)
     const user = userEvent.setup()
     render(<BillingOffers jwt="jwt" orgId={7} />)
-    expect(await screen.findByText('$6,000.00 billed annually')).toBeVisible()
-    expect(screen.getByText('$7,200.00 billed annually')).toBeVisible()
-    expect(screen.getByRole('tab', { name: 'Team & Enterprise' })).toHaveAttribute('aria-selected', 'true')
-    expect(fetch.mock.calls[0]).toBeDefined()
+    expect(await screen.findByText('$5,000.00 billed annually')).toBeVisible()
+    expect(screen.getByText('$416.67/month')).toBeVisible()
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/orgs/7/billing/offers'), expect.objectContaining({
       headers: { Authorization: 'Bearer jwt' },
     }))
-    await user.click(screen.getByRole('tab', { name: 'Individual' }))
-    expect(await screen.findByText('$200.00 billed annually')).toBeVisible()
+    // One list for every workspace: no Individual/Team audience split any more.
+    expect(screen.queryByRole('tab')).toBeNull()
+    expect(screen.getByText('Free')).toBeVisible()
+    expect(screen.getByText('Enterprise')).toBeVisible()
+    expect(screen.getAllByRole('button', { name: /^Review / })).toHaveLength(1)
     await user.click(screen.getByRole('combobox', { name: 'Plan billing period' }))
     await user.click(screen.getByRole('option', { name: 'Monthly' }))
-    expect(await screen.findByText('$20.00/month')).toBeVisible()
-    expect(screen.getByRole('button', { name: 'Review Pro' })).toBeEnabled()
-    expect(document.body.textContent).not.toMatch(/credits|\b4000\b|\b1000\b|price_1/)
+    expect(await screen.findByText('$500.00/month')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Review Team' })).toBeEnabled()
+    expect(document.body.textContent).not.toMatch(/credits|\b4000\b|\b1000\b|price_1|Pro|Max/)
     expect(document.body.textContent).toContain('every seven days')
   })
   it.each(['missing', 'failure'])('hides amounts on %s pricing and retains inquiry actions', async kind => {

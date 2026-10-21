@@ -418,55 +418,84 @@ export function LanguagesSection({
                 {activeRows.map((lane) => (
                   <li
                     key={lane.id}
-                    className="flex flex-wrap items-center gap-2 rounded border bg-background px-2 py-1.5 text-sm"
+                    className="flex flex-col gap-2 rounded border bg-background px-2 py-1.5 text-sm"
                   >
-                    <LaneIdentityFields lane={lane} canEdit={canEdit} onEdit={onRenameLane!} />
-                    {/* AQU-1592: the code the lane actually resolves to —
-                        the override when set, else derived from the language. */}
-                    {laneLanguageCode(lane) && (
-                      <span className="shrink-0 text-xs text-muted-foreground">
-                        {laneLanguageCode(lane)}
-                      </span>
-                    )}
-                    {/* AQU-1784: only a lane that shares its label with another
-                        says how it is told apart — a project whose lane names
-                        are already unique renders exactly as it did. */}
-                    {laneSuffixes[lane.id] && (
-                      <span
-                        className="shrink-0 text-xs text-muted-foreground"
-                        data-testid={`lane-shown-as-${lane.id}`}
-                      >
-                        {t("projectSettings.languages.laneShownAs", { label: laneLabel(lane) })}
-                      </span>
-                    )}
-                    {/* AQU-1954 (Sam, 2026-10-14): whether every file owes
-                        audio in this language. Off, a file counts this
-                        language's audio only once it has a recording in it;
-                        on, the plan board and the Progress card expect it of
-                        every book. Saved straight away, like Archive. */}
-                    {onSetLaneRecordsAudio && pendingArchive !== lane.id && (
-                      <DisabledFieldTooltip disabled={!canEdit} tooltip={disabledTooltip}>
-                        <span className="ms-auto flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
-                          {/* The switch names its own language; this is the
-                              visible caption, so it is not read twice. */}
-                          <span aria-hidden="true">{t("projectSettings.languages.recordsAudioLabel")}</span>
-                          <Switch
-                            size="sm"
-                            data-testid={`records-audio-${lane.id}`}
-                            checked={lane.recordsAudio === true}
-                            disabled={!canEdit || audioBusyLane === lane.id}
-                            onCheckedChange={(checked) => void handleRecordsAudio(lane.id, checked)}
-                            aria-label={t("projectSettings.languages.recordsAudioAriaLabel", { lane: laneLabel(lane) })}
-                          />
+                    {/* AQU-2046: language, name, derived code, and Advanced stay
+                        one row. The confirmation is the next block, full width —
+                        not a flex sibling, so the code cannot sit on the
+                        last-change line and Advanced cannot slide under the buttons. */}
+                    <div
+                      className="flex w-full flex-wrap items-center gap-2"
+                      data-testid={`lane-identity-row-${lane.id}`}
+                    >
+                      <LaneIdentityFields lane={lane} canEdit={canEdit} onEdit={onRenameLane!} />
+                      {/* AQU-1592: the code the lane actually resolves to —
+                          the override when set, else derived from the language. */}
+                      {laneLanguageCode(lane) && (
+                        <span
+                          className="shrink-0 text-xs text-muted-foreground"
+                          data-testid={`lane-language-code-${lane.id}`}
+                        >
+                          {laneLanguageCode(lane)}
                         </span>
-                      </DisabledFieldTooltip>
-                    )}
-                    {pendingArchive === lane.id ? (
-                      // AQU-1977: its own line under the lane's fields. Kept in
-                      // the row, the sentence squeezed the language and name
-                      // boxes to empty slivers and slid "Advanced" under
-                      // Confirm archive.
-                      <div className="flex basis-full flex-wrap items-center gap-2" data-testid={`archive-confirm-${lane.id}`}>
+                      )}
+                      {/* AQU-1784: only a lane that shares its label with another
+                          says how it is told apart — a project whose lane names
+                          are already unique renders exactly as it did. */}
+                      {laneSuffixes[lane.id] && (
+                        <span
+                          className="shrink-0 text-xs text-muted-foreground"
+                          data-testid={`lane-shown-as-${lane.id}`}
+                        >
+                          {t("projectSettings.languages.laneShownAs", { label: laneLabel(lane) })}
+                        </span>
+                      )}
+                      {/* AQU-1954 (Sam, 2026-10-14): whether every file owes
+                          audio in this language. Off, a file counts this
+                          language's audio only once it has a recording in it;
+                          on, the plan board and the Progress card expect it of
+                          every book. Saved straight away, like Archive. */}
+                      {onSetLaneRecordsAudio && pendingArchive !== lane.id && (
+                        <DisabledFieldTooltip disabled={!canEdit} tooltip={disabledTooltip}>
+                          <span className="ms-auto flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+                            {/* The switch names its own language; this is the
+                                visible caption, so it is not read twice. */}
+                            <span aria-hidden="true">{t("projectSettings.languages.recordsAudioLabel")}</span>
+                            <Switch
+                              size="sm"
+                              data-testid={`records-audio-${lane.id}`}
+                              checked={lane.recordsAudio === true}
+                              disabled={!canEdit || audioBusyLane === lane.id}
+                              onCheckedChange={(checked) => void handleRecordsAudio(lane.id, checked)}
+                              aria-label={t("projectSettings.languages.recordsAudioAriaLabel", { lane: laneLabel(lane) })}
+                            />
+                          </span>
+                        </DisabledFieldTooltip>
+                      )}
+                      {pendingArchive !== lane.id && (
+                        <DisabledFieldTooltip
+                          disabled={!canEdit || !canArchiveAnyLane}
+                          tooltip={canEdit ? archiveBlockedTooltip : disabledTooltip}
+                        >
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 shrink-0"
+                            disabled={!canEdit || !canArchiveAnyLane}
+                            data-testid={`archive-lane-${lane.id}`}
+                            aria-label={t("projectSettings.languages.archiveLaneAriaLabel", { lane: laneLabel(lane) })}
+                            onClick={() => {
+                              setLaneActionError(null)
+                              setPendingArchive(lane.id)
+                            }}
+                          >
+                            <Archive className="h-4 w-4" />
+                          </Button>
+                        </DisabledFieldTooltip>
+                      )}
+                    </div>
+                    {pendingArchive === lane.id && (
+                      <div className="flex w-full flex-wrap items-center gap-2" data-testid={`archive-confirm-${lane.id}`}>
                         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                           <span className="text-xs text-muted-foreground">
                             {t("projectSettings.languages.archiveConfirm", { lane: laneLabel(lane) })}
@@ -488,26 +517,6 @@ export function LanguagesSection({
                           {t("common.cancel")}
                         </Button>
                       </div>
-                    ) : (
-                      <DisabledFieldTooltip
-                        disabled={!canEdit || !canArchiveAnyLane}
-                        tooltip={canEdit ? archiveBlockedTooltip : disabledTooltip}
-                      >
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 shrink-0"
-                          disabled={!canEdit || !canArchiveAnyLane}
-                          data-testid={`archive-lane-${lane.id}`}
-                          aria-label={t("projectSettings.languages.archiveLaneAriaLabel", { lane: laneLabel(lane) })}
-                          onClick={() => {
-                            setLaneActionError(null)
-                            setPendingArchive(lane.id)
-                          }}
-                        >
-                          <Archive className="h-4 w-4" />
-                        </Button>
-                      </DisabledFieldTooltip>
                     )}
                   </li>
                 ))}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { fetchProjectLaneStaffing } from "@/lib/sync/member-scopes"
+import type { TeamLaneAttachment } from "@/lib/sync/assignment-lane"
 
 export interface UseProjectLaneStaffing {
   /**
@@ -10,7 +11,13 @@ export interface UseProjectLaneStaffing {
    * surface narrowing its lane list leaves the list alone on a `null`.
    */
   staffedLaneIds: ReadonlySet<string> | null
-  /** Re-read the staffing; call it after a staffing or membership change. */
+  /**
+   * AQU-2047: each attached team's lane checks, or `null` when the server did
+   * not say and while the first read is still in flight. `null` and `[]`
+   * (no attached team) both leave the lane list alone.
+   */
+  teamLanes: readonly TeamLaneAttachment[] | null
+  /** Re-read staffing and the team lane checks; call it after either changes. */
   refresh: () => void
 }
 
@@ -18,6 +25,10 @@ export interface UseProjectLaneStaffing {
  * AQU-1994: which of a project's target lanes anyone on it can actually work
  * in. Every Assign surface on the project overview narrows its lane list with
  * this, so a manager cannot route work to a language nobody is staffed on.
+ *
+ * AQU-2047: the same read carries each attached team's lane checks
+ * (`teamLanes`). The menu unions those with staffing; this hook only holds
+ * what the server said.
  *
  * One GET per load (plus one per `refresh`), not one per member: the server
  * aggregates the lane grants against the live roster, which is also what makes
@@ -32,7 +43,11 @@ export function useProjectLaneStaffing(
   jwt: string | null,
   enabled = true,
 ): UseProjectLaneStaffing {
-  const [entry, setEntry] = useState<{ key: string; ids: ReadonlySet<string> | null } | null>(null)
+  const [entry, setEntry] = useState<{
+    key: string
+    ids: ReadonlySet<string> | null
+    teamLanes: readonly TeamLaneAttachment[] | null
+  } | null>(null)
   const [nonce, setNonce] = useState(0)
   const refresh = useCallback(() => setNonce((n) => n + 1), [])
   const key = enabled && jwt && projectId ? `${projectId}\u0000${jwt}` : null
@@ -40,11 +55,20 @@ export function useProjectLaneStaffing(
   useEffect(() => {
     if (!key || !jwt || !projectId) return
     let cancelled = false
-    void fetchProjectLaneStaffing(jwt, projectId).then((ids) => {
-      if (!cancelled) setEntry({ key, ids })
+    void fetchProjectLaneStaffing(jwt, projectId).then((read) => {
+      if (!cancelled) setEntry({
+        key,
+        ids: read?.staffedLaneIds ?? null,
+        teamLanes: read?.teamLanes ?? null,
+      })
     })
     return () => { cancelled = true }
   }, [key, jwt, projectId, nonce])
 
-  return { staffedLaneIds: key != null && entry?.key === key ? entry.ids : null, refresh }
+  const current = key != null && entry?.key === key ? entry : null
+  return {
+    staffedLaneIds: current?.ids ?? null,
+    teamLanes: current?.teamLanes ?? null,
+    refresh,
+  }
 }

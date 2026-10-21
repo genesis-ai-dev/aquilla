@@ -29,6 +29,8 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
   ClipboardCheck,
+  Eye,
+  EyeOff,
   Film,
   FolderInput,
   FolderPlus,
@@ -107,6 +109,7 @@ import { SCRUB_SEEK_THROTTLE_MS } from "@/lib/timeline/scrub"
 import {
   buildTrackRows,
   folderIdsOf,
+  hiddenTracksOf,
   folderMembers,
   folderReachInPx,
   resolveDropTarget,
@@ -116,7 +119,7 @@ import {
   type TrackDropTarget,
   type TrackRow,
 } from "@/lib/timeline/track-groups"
-import { loadCollapsedFolders, saveCollapsedFolders, toggleCollapsed } from "@/lib/timeline/track-collapse"
+import { loadCollapsedFolders, loadHiddenTracks, saveCollapsedFolders, saveHiddenTracks, toggleCollapsed } from "@/lib/timeline/track-collapse"
 import { TRACK_ACCENT_CLASS, TRACK_DOT_CLASS, trackHueVarsFor } from "@/lib/timeline/track-colors"
 import type { SummarySpan } from "@/lib/timeline/summary-band"
 import { TimelineFolderLane } from "./TimelineFolderLane"
@@ -134,7 +137,7 @@ import { seedAudibility, toggleAudibility, trackAudible, useQueueAudibility } fr
 import { isInEditableContext, isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { resolveTargetAudio, resolveTargetPieces, type TargetAudioRef } from "@/lib/audio/track-audio"
-import { RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
+import { RECORDING_SLOT, slotForTrack, trackIdForSlot } from "@/lib/timeline/track-slots"
 import { nextFolderName, nextTrackName } from "@/lib/timeline/track-names"
 import { loadSnapEnabled, saveSnapEnabled } from "@/lib/timeline/snap"
 import { setMediaCursorCell, setMediaSyncActive } from "@/lib/timeline/media-cursor"
@@ -444,6 +447,9 @@ export interface TimelineEditorProps {
   /** AQU-646 stage 3: which TRACK's slot the take should land in. The default
    *  dub row passes "recording", so its behaviour is unchanged. */
   onOpenRecording?(cellId: string, slot: string): void
+  /** AQU-1684: the slot the recorder is recording into while it is open, else
+   *  null — that track may not be hidden from under the take. */
+  recordingSlot?: string | null
   /** AQU-646 round 3 (text→media trace): seeds selection on mount — fills the
    *  chip strip, centers the track on the clip, and cues playback (paused)
    *  at its start via onSeekToTime, same semantics as a clean card click. */
@@ -1217,6 +1223,7 @@ export function TimelineEditor({
   onScrubStart,
   onScrubEnd,
   onOpenRecording,
+  recordingSlot = null,
   initialSelectedCellId,
   onSelectedCellChange,
   onChipActivated,
@@ -1302,6 +1309,15 @@ export function TimelineEditor({
   useEffect(() => {
     setCollapsedFolders(loadCollapsedFolders(fileId))
   }, [fileId])
+  // AQU-1684: which tracks this person has hidden on THIS file — the same
+  // personal, per-file, on-this-device state as folder collapse (Sam's
+  // decision), re-read on a file switch for the same reason. Hiding changes
+  // only what is drawn: the queue sounds every track from `tracks`, hidden or
+  // not, and mute stays the speaker's.
+  const [hiddenTrackIds, setHiddenTrackIds] = useState<ReadonlySet<string>>(() => loadHiddenTracks(fileId))
+  useEffect(() => {
+    setHiddenTrackIds(loadHiddenTracks(fileId))
+  }, [fileId])
 
   /**
    * The rows to draw: the tracks, with folder members lifted under their
@@ -1316,7 +1332,7 @@ export function TimelineEditor({
    * lanes render the same list, in the same order" a property of the code
    * rather than a coincidence two `.map` calls have to keep agreeing on.
    */
-  const trackRows = buildTrackRows(tracks, collapsedFolders)
+  const trackRows = buildTrackRows(tracks, collapsedFolders, hiddenTrackIds)
 
   function toggleFolder(folderId: string) {
     setCollapsedFolders((prev) => {
@@ -1353,10 +1369,67 @@ export function TimelineEditor({
     return created
   }
 
-  /** Is there anything to put in a track's menu at all? With neither rename
-   *  clearance nor the editing setting there is not, and the row renders
-   *  exactly as it did before this stage — no trigger, no `⋯`, nothing. */
-  const hasTrackMenu = Boolean(onRenameTrack || onSetTrackColor || trackEditing || onPromoteTrackToRows)
+  /** Is there anything to put in a track's menu at all? AQU-1684: there always
+   *  is now — anyone may hide a track on their own screen, viewers included
+   *  (Sam's decision), so every row has the menu; for a viewer it holds Hide
+   *  alone. Before, a row with neither rename clearance nor the editing
+   *  setting had no trigger, no `⋯`, nothing. */
+  const canHideTracks = Boolean(fileId)
+  const hasTrackMenu = Boolean(onRenameTrack || onSetTrackColor || trackEditing || onPromoteTrackToRows || canHideTracks)
+
+  // ── AQU-1684: hiding tracks ───────────────────────────────────────────────
+  /** The lane a primary-button press began in, until it is let go: a chip or
+   *  region being dragged there. Its track may not be hidden mid-gesture. */
+  const [pressedLaneTrackId, setPressedLaneTrackId] = useState<string | null>(null)
+  function pressLane(trackId: string, e: ReactPointerEvent<HTMLDivElement>) {
+    // A right-click (or a macOS ctrl+click) opens the menu; it is no drag.
+    if (e.button !== 0 || e.ctrlKey) return
+    setPressedLaneTrackId(trackId)
+    const release = () => {
+      setPressedLaneTrackId(null)
+      window.removeEventListener("pointerup", release, true)
+      window.removeEventListener("pointercancel", release, true)
+    }
+    window.addEventListener("pointerup", release, true)
+    window.addEventListener("pointercancel", release, true)
+  }
+  /** Tracks that may not be hidden right now: the one the recorder is taking
+   *  into, the one being reordered and the lane a drag is under way in. */
+  function busyTrackIds(): ReadonlySet<string> {
+    const busy = new Set<string>()
+    if (recordingSlot) busy.add(trackIdForSlot(recordingSlot))
+    if (trackDrag) busy.add(trackDrag.trackId)
+    if (pressedLaneTrackId) busy.add(pressedLaneTrackId)
+    return busy
+  }
+  function hideTracks(trackIds: readonly string[]) {
+    const busy = busyTrackIds()
+    const hiding = trackIds.filter((id) => !busy.has(id))
+    if (hiding.length === 0) return
+    setHiddenTrackIds((prev) => {
+      const next = new Set(prev)
+      for (const id of hiding) next.add(id)
+      saveHiddenTracks(fileId, next)
+      return next
+    })
+    // Nothing stays selected, renamed or picked on a lane that is not drawn:
+    // S would split a take nobody can see.
+    setTrackSelection((cur) =>
+      hiding.includes(cur.primaryId ?? "") || cur.extraIds.some((id) => hiding.includes(id)) ? EMPTY_SELECTION : cur,
+    )
+    if (renamingTrackId && hiding.includes(renamingTrackId)) setRenamingTrackId(null)
+    if (selectedTake && hiding.includes(trackIdForSlot(selectedTake.slot))) setSelectedTake(null)
+  }
+  function showTracks(trackIds: readonly string[]) {
+    setHiddenTrackIds((prev) => {
+      const next = new Set(prev)
+      for (const id of trackIds) next.delete(id)
+      saveHiddenTracks(fileId, next)
+      return next
+    })
+  }
+  /** What "Hidden tracks" lists: hidden ones that still exist, never a folder. */
+  const hiddenTracks = hiddenTracksOf(tracks, hiddenTrackIds)
 
   /**
    * AQU-646 stage 2b: which TRACKS are selected.
@@ -1466,6 +1539,7 @@ export function TimelineEditor({
         canColour: Boolean(onSetTrackColor),
         canEdit: Boolean(trackEditing),
         canPromote: Boolean(onPromoteTrackToRows),
+        canHide: canHideTracks,
       }),
     )
   }
@@ -1542,6 +1616,7 @@ export function TimelineEditor({
       onRename: onRenameTrack ? setRenamingTrackId : undefined,
       onSetColor: onSetTrackColor,
       onPromote: onPromoteTrackToRows,
+      ...(canHideTracks ? { onHide: hideTracks, busyTrackIds: busyTrackIds() } : {}),
       editing: trackEditing
         ? {
             onLeaveFolder: trackEditing.onLeaveFolder,
@@ -2726,17 +2801,30 @@ export function TimelineEditor({
       if (srcDurationSec == null && tgtDurationSec == null) return null
       return { kind: "free" as const, srcDurationSec, tgtDurationSec }
     }
-    const i = targetItems.findIndex((t) => t.cell.id === currentCell.id)
-    if (i < 0) return null
+    // AQU-1767: a split take's pieces are consecutive items, and the pills read
+    // them as the one take they are (Sam, 2026-10-19): from the first piece's
+    // start to the last piece's end, the sound they keep added up, and how many
+    // pieces. Diff and overlap measure that span against the line and its
+    // neighbours — the silences between pieces are inside the take.
+    const first = targetItems.findIndex((t) => t.cell.id === currentCell.id)
+    if (first < 0) return null
+    let last = first
+    while (targetItems[last + 1]?.cell.id === currentCell.id) last += 1
     const geomOf = (t: (typeof targetItems)[number] | undefined) =>
       t ? layout.targetGeom(t.cell, t.cell.attachments?.[t.audioId]) : null
-    const geom = geomOf(targetItems[i])
-    if (!geom || geom.usingFallback) return null
+    const pieceGeoms = targetItems.slice(first, last + 1).map(geomOf)
+    if (pieceGeoms.some((g) => !g || g.usingFallback)) return null
+    const spans = pieceGeoms.map((g) => ({ start: g!.start, end: g!.end }))
+    const geom = {
+      start: Math.min(...spans.map((s) => s.start)),
+      end: Math.max(...spans.map((s) => s.end)),
+    }
+    const soundSec = spans.reduce((sum, s) => sum + (s.end - s.start), 0)
     const { startTime, endTime } = currentCell
-    const prev = geomOf(targetItems[i - 1])
-    const next = geomOf(targetItems[i + 1])
+    const prev = geomOf(targetItems[first - 1])
+    const next = geomOf(targetItems[last + 1])
     const { headSec, tailSec } = chipOverlaps(
-      { start: geom.start, end: geom.end },
+      geom,
       prev ? { start: prev.start, end: prev.end } : null,
       next?.start ?? null,
     )
@@ -2761,7 +2849,8 @@ export function TimelineEditor({
       kind: "dubbing" as const,
       startSec: geom.start,
       endSec: geom.end,
-      durationSec: geom.end - geom.start,
+      durationSec: soundSec,
+      ...(spans.length > 1 ? { pieces: spans.length } : {}),
       startDiffSec,
       endDiffSec,
       durationDiffSec: startDiffSec != null && endDiffSec != null ? startDiffSec + endDiffSec : null,
@@ -4297,6 +4386,39 @@ export function TimelineEditor({
 
               Built from `items`, not three hardcoded rows: stage 8's untimed
               pocket bin is the same category and will want a fourth. */}
+          {/* AQU-1684: THE WAY BACK. Present exactly while this person has
+              hidden something on this file, so a lane never vanishes without
+              trace: it names how many, and lists each to show again. */}
+          {hiddenTracks.length > 0 && (
+            <OverflowMenu
+              items={[
+                { id: "hidden-note", type: "label", label: t("editor.timeline.hiddenTracksNote") },
+                ...hiddenTracks.map((track) => ({
+                  id: `show-${track.id}`,
+                  label: t("editor.timeline.showTrack", { name: track.name }),
+                  icon: Eye,
+                  testId: `tl-show-track-${track.id}`,
+                  onClick: () => showTracks([track.id]),
+                })),
+                ...(hiddenTracks.length > 1
+                  ? [
+                      { id: "show-all-sep", type: "separator" as const },
+                      {
+                        id: "show-all",
+                        label: t("editor.timeline.showAllTracks"),
+                        testId: "tl-show-all-tracks",
+                        onClick: () => showTracks(hiddenTracks.map((track) => track.id)),
+                      },
+                    ]
+                  : []),
+              ]}
+              triggerVariant="outline"
+              triggerLabel={t("editor.timeline.hiddenTracks", { count: hiddenTracks.length })}
+              triggerIcon={EyeOff}
+              testId="tl-hidden-tracks"
+              ariaLabel={t("editor.timeline.hiddenTracksAria")}
+            />
+          )}
           {sourceMenuItems.length > 0 && sourcesUsable && (
             <OverflowMenu
               items={sourceMenuItems}
@@ -4989,7 +5111,13 @@ export function TimelineEditor({
                         rule above still holds. */}
                     <ContextMenuTrigger
                       render={
-                        <div className={cn(selectedTrackIdSet.has(row.track.id) && "bg-accent/40")} />
+                        <div
+                          className={cn(selectedTrackIdSet.has(row.track.id) && "bg-accent/40")}
+                          // AQU-1684: a drag under way in this lane keeps it
+                          // from being hidden. Capture, because the chips own
+                          // their pointerdown.
+                          onPointerDownCapture={(e) => pressLane(row.track.id, e)}
+                        />
                       }
                     >
                       {lane}

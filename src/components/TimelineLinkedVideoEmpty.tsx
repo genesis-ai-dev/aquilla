@@ -33,6 +33,11 @@
 // Sam's D3 put the prompt on the timeline's Source text lane and left the
 // Media view's Text pane one line pointing at it. On Oct 5 he asked for the
 // same card there too, so both views draw it; the lane keeps its own prompt.
+//
+// AQU-1681: a video that is NOT on YouTube can give its own sound instead —
+// Aquilla fetches it, keeps a copy and splits it into rows, so nobody has to
+// find a recording. A third quiet link under the recording's, for maintainers
+// only; its step is LinkedVideoSoundStep.
 
 import { useState } from "react"
 import { Clapperboard } from "lucide-react"
@@ -43,6 +48,8 @@ import { detectFileType, isMediaFileType } from "@/lib/parsers/types"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import type { LinkedVideoCaptionTrack } from "@/lib/editor/linked-video-empty-state"
+import type { LinkedVideoSoundActions } from "@/lib/timeline/video-sound"
+import { LinkedVideoSoundStep } from "./LinkedVideoSoundStep"
 
 /** Same audio/video extensions TimelineAddMedia and the Import dialog take. */
 const MEDIA_FILE_ACCEPT = ".mp3,.wav,.m4a,.aac,.flac,.ogg,.oga,.opus,.mp4,.m4v,.mov,.webm,.mkv"
@@ -66,6 +73,9 @@ interface TimelineLinkedVideoEmptyProps {
   /** AQU-1566: turn an attached caption track into this file's rows (the
    *  workspace asks first). Absent below maintainer. */
   onUseCaptionTrackAsRows?: (trackId: string) => void
+  /** AQU-1681: make the rows from the video's own sound. Absent below
+   *  maintainer and for a YouTube video, whose sound cannot be read. */
+  videoSound?: LinkedVideoSoundActions
 }
 
 
@@ -81,6 +91,7 @@ export function TimelineLinkedVideoEmpty({
   onOpenMediaView,
   onAttachCaptions,
   onUseCaptionTrackAsRows,
+  videoSound,
 }: TimelineLinkedVideoEmptyProps) {
   const t = useT()
   const [busy, setBusy] = useState(false)
@@ -88,6 +99,8 @@ export function TimelineLinkedVideoEmpty({
   const [dragOver, setDragOver] = useState(false)
   // The second step: uploading the original recording instead.
   const [recordingStep, setRecordingStep] = useState(false)
+  // AQU-1681: or the other second step, the video's own sound.
+  const [soundStep, setSoundStep] = useState(false)
 
   const attachFile = async (file: File) => {
     if (!onAttachFile) return
@@ -138,6 +151,7 @@ export function TimelineLinkedVideoEmpty({
     ?? t(onAttachCaptions ? "editor.media.linkedVideoAttachHint" : "editor.media.linkedVideoNoCaptions")
   const captionAction = Boolean(onAttachCaptions) || promotable.length > 0
   const showRecordingStep = recordingStep && Boolean(onAttachFile)
+  const showSoundStep = soundStep && Boolean(videoSound)
 
   return (
     // 30rem, not max-w-md (28rem): at 28rem "…download the video file from
@@ -167,6 +181,9 @@ export function TimelineLinkedVideoEmpty({
           <p className="flex items-center gap-2 text-sm font-medium">
             <Spinner /> {t("editor.media.adding")}
           </p>
+        ) : showSoundStep && videoSound ? (
+          <LinkedVideoSoundStep actions={videoSound} quietLinkClassName={QUIET_LINK}
+            onBack={() => { setSoundStep(false); setError(null) }} />
         ) : showRecordingStep ? (
           <>
             <Clapperboard className="mb-2 h-6 w-6 text-muted-foreground" />
@@ -238,6 +255,20 @@ export function TimelineLinkedVideoEmpty({
                 {t("editor.media.linkedVideoAddRecording")}
               </Button>
             ))}
+            {/* AQU-1681: only ever offered beside "Attach captions" (both
+                are maintainer actions), so it always continues with "or". */}
+            {videoSound && (
+              <p className="mt-1 text-[0.8rem] text-muted-foreground">
+                <RichMessage k="editor.media.linkedVideoUseRecording" values={{
+                  link: (
+                    <Button variant="link" size="sm" className={cn("h-auto p-0 align-baseline", QUIET_LINK)}
+                      onClick={() => { setSoundStep(true); setError(null) }}>
+                      {t("editor.media.linkedVideoUseSoundLink")}
+                    </Button>
+                  ),
+                }} />
+              </p>
+            )}
           </>
         )}
       </div>

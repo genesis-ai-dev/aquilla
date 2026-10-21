@@ -31,7 +31,16 @@ vi.mock("./upload", async (importOriginal) => {
 const decodePeaks = vi.fn<(bytes: Uint8Array, bins: number) => Promise<unknown>>()
 vi.mock("./peaks", () => ({ decodePeaks: (...a: [Uint8Array, number]) => decodePeaks(...a) }))
 
+const fetchPeaksSidecar = vi.fn<(args: Record<string, unknown>) => Promise<StoredPeaks | null>>()
+const publishPeaksSidecarOnce = vi.fn<(args: Record<string, unknown>) => void>()
+vi.mock("./peaks-sidecar", async (importOriginal) => ({
+  peaksAtBins: (await importOriginal<typeof import("./peaks-sidecar")>()).peaksAtBins,
+  fetchPeaksSidecar: (a: Record<string, unknown>) => fetchPeaksSidecar(a),
+  publishPeaksSidecarOnce: (a: Record<string, unknown>) => publishPeaksSidecarOnce(a),
+}))
+
 import { loadPeaksFor, loadPeaksBatch } from "./peaks-loader"
+import type { StoredPeaks } from "./peaks-sidecar"
 
 const AUDIO_ID = "audio-cell1-1700000000-abcdefgh"
 const EXT = "wav"
@@ -54,6 +63,7 @@ beforeEach(() => {
   audioCachePut.mockResolvedValue()
   fetchCellAudio.mockResolvedValue(new Uint8Array([1, 2, 3]))
   decodePeaks.mockResolvedValue(decoded())
+  fetchPeaksSidecar.mockResolvedValue(null)
 })
 
 describe("loadPeaksFor — the two cache keys", () => {
@@ -103,6 +113,72 @@ describe("loadPeaksFor — the ladder stops at the first rung that answers", () 
     expect(fetchCellAudio).toHaveBeenCalledWith(
       expect.objectContaining({ projectId: "p1", fileId: "cue-sibling", audioId: AUDIO_ID, ext: EXT }),
     )
+  })
+})
+
+// AQU-2095. The ticket's number: a chapter of takes cost ~400KB to DRAW,
+// because a 20px rectangle was paid for with the whole recording. The sidecar
+// is a few hundred stored bytes, so what matters is which rungs it sits
+// between — above the clip, below anything already on this device — and that a
+// clip we did pay for leaves its shape behind for the next reader.
+describe("loadPeaksFor — the peaks sidecar", () => {
+  it("draws from the stored shape instead of downloading the recording", async () => {
+    const stored = new Float32Array(BINS).fill(0.75)
+    fetchPeaksSidecar.mockResolvedValue({ peaks: stored, durationMs: 4000 })
+
+    await expect(loadPeaksFor(base)).resolves.toBe(stored)
+    expect(fetchCellAudio).not.toHaveBeenCalled()
+    expect(decodePeaks).not.toHaveBeenCalled()
+    // And it is kept locally, so the next draw costs no request at all.
+    expect(peaksCachePut).toHaveBeenCalledWith(KEY, stored)
+  })
+
+  it("asks the clip's OWN file for it, as the clip's bytes are asked for", async () => {
+    await loadPeaksFor({ ...base, fileId: "cue-sibling" })
+    expect(fetchPeaksSidecar).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "p1", fileId: "cue-sibling", audioId: AUDIO_ID, ext: EXT }),
+    )
+  })
+
+  it("is not consulted when the bytes are already on this device", async () => {
+    audioCacheGet.mockResolvedValue(new Uint8Array([9, 9]))
+    await loadPeaksFor(base)
+    expect(fetchPeaksSidecar).not.toHaveBeenCalled()
+  })
+
+  it("downloads the clip when the stored shape has fewer bins than asked for", async () => {
+    fetchPeaksSidecar.mockResolvedValue({ peaks: new Float32Array(64).fill(0.5), durationMs: null })
+    await loadPeaksFor(base)
+    expect(fetchCellAudio).toHaveBeenCalledOnce()
+  })
+
+  // WHY: the extension editor draws 160 bins. It used to ignore the shared
+  // 320, download the clip, and write its own 160 over everyone else's shape.
+  it("narrows the stored shape for a reader that wants fewer bins, and writes nothing", async () => {
+    fetchPeaksSidecar.mockResolvedValue({ peaks: new Float32Array(BINS).fill(0.5), durationMs: 4000 })
+    const peaks = await loadPeaksFor({ ...base, bins: BINS / 2 })
+    expect(peaks?.length).toBe(BINS / 2)
+    expect(fetchCellAudio).not.toHaveBeenCalled()
+    expect(publishPeaksSidecarOnce).not.toHaveBeenCalled()
+  })
+
+  it("publishes the shape of a clip it had to download, for everyone after", async () => {
+    await loadPeaksFor(base)
+    expect(publishPeaksSidecarOnce).toHaveBeenCalledWith(
+      expect.objectContaining({ audioId: AUDIO_ID, ext: EXT, peaks: expect.any(Float32Array) }),
+    )
+  })
+
+  it("publishes the clip's length with its shape", async () => {
+    await loadPeaksFor(base)
+    const call = publishPeaksSidecarOnce.mock.calls[0]![0] as { durationMs: number | null }
+    expect(call.durationMs).toBeGreaterThan(0)
+  })
+
+  it("publishes nothing when the bytes would not decode", async () => {
+    decodePeaks.mockRejectedValue(new Error("unsupported"))
+    await expect(loadPeaksFor(base)).resolves.toBeNull()
+    expect(publishPeaksSidecarOnce).not.toHaveBeenCalled()
   })
 })
 

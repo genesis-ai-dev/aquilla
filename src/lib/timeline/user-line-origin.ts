@@ -19,11 +19,32 @@ export interface AquillaOrigin {
   version: number
   kind: "user-insert"
   createdAt?: number
+  /**
+   * AQU-1759: the row this one was split off. The same key the Agent API's
+   * SplitCell writes (sync-worker structure-engine `agentLineOrigin`), so a
+   * piece cut in the editor and one cut by an agent read alike. Still a
+   * `user-insert`: the exporters place it under the verse it follows exactly
+   * as they place any line added here, which is what puts a split verse back
+   * together on the way out.
+   */
+  splitFrom?: string
 }
 
 /** The metadata a newly added line carries. */
 export function userLineOrigin(): AquillaOrigin {
   return { version: 1, kind: "user-insert", createdAt: Date.now() }
+}
+
+/** AQU-1759: the metadata a piece split off `fromCellId` carries. */
+export function splitLineOrigin(fromCellId: string): AquillaOrigin {
+  return { ...userLineOrigin(), splitFrom: fromCellId }
+}
+
+/** AQU-1759: the row this one was split off, if it was. */
+export function splitFromCellId(cell: { metadata?: Record<string, unknown> | null }): string | null {
+  if (!isUserAddedLine(cell)) return null
+  const from = (cell.metadata?.aquillaOrigin as AquillaOrigin).splitFrom
+  return typeof from === "string" && from ? from : null
 }
 
 export function isUserAddedLine(cell: { metadata?: Record<string, unknown> | null }): boolean {

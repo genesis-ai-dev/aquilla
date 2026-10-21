@@ -147,7 +147,10 @@ export async function handleCheckingRequest(request: Request, env: CheckingEnv,
     const username = `${guest.name} (guest ${guest.guestId.slice(0, 8)})`
     if (route[2] === "content" && request.method === "GET") {
       const rows = await db.prepare(`SELECT u.ordinality, c.file_id AS "fileId", c.cell_id AS "cellId", f.name AS "fileName",
-        c.canonical_ref AS label, c.value AS text, c.side
+        c.canonical_ref AS label, c.value AS text, c.side, c.type,
+        -- Importers record paragraph starts on the shared source row only.
+        EXISTS (SELECT 1 FROM cells s WHERE s.project_id = c.project_id AND s.file_id = c.file_id
+          AND s.cell_id = c.cell_id AND s.side = 'source' AND s.metadata->>'paragraphStart' = 'true') AS "paragraphStart"
         FROM jsonb_array_elements(?::text::jsonb) WITH ORDINALITY AS u(unit, ordinality)
         JOIN cells c ON c.project_id = ? AND c.file_id = u.unit->>'fileId' AND c.cell_id = u.unit->>'cellId'
         JOIN files f ON f.project_id = c.project_id AND f.id = c.file_id AND f.deleted_at IS NULL

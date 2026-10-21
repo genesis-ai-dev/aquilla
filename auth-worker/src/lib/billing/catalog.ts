@@ -1,4 +1,3 @@
-import { readFreeWeeklyAllowance } from './allowance'
 import { catalogSchema, priceSchema } from './catalog-schema'
 export { catalogSchema, priceSchema } from './catalog-schema'
 import type { BillingOffers } from '../../../../db/shared/billing-offers'
@@ -20,7 +19,7 @@ export async function readValidatedBillingCatalog(env: Env) {
   const live = /^(sk|rk)_live_/.test(secret)
   if (!/^(sk|rk)_(test|live)_/.test(secret)
     || catalog.bindings.some(binding => binding.live !== live)
-    || new Set(catalog.bindings.map(binding => binding.priceId)).size !== 10) {
+    || new Set(catalog.bindings.map(binding => binding.priceId)).size !== catalog.bindings.length) {
     throw new Error('Invalid catalog environment')
   }
   const account = await stripeForm(env, 'GET', '/account')
@@ -33,7 +32,7 @@ export async function readValidatedBillingCatalog(env: Env) {
         env, 'GET', `/prices/${encodeURIComponent(binding.priceId)}`,
       )))))
   }
-  const offers = presentBillingOffers(catalog, prices, await readFreeWeeklyAllowance(env.AQUILLA_PG))
+  const offers = presentBillingOffers(catalog, prices)
   return { catalog, prices, offers }
 }
 

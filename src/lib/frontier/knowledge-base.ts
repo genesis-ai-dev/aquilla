@@ -54,11 +54,11 @@ export type KnowledgeScope =
  * this window the job cannot still be running, so the read side says so and
  * offers a retry instead.
  *
- * Deliberately well above the worker's own enrichment ceiling
- * (`KB_INDEX_FETCH_TIMEOUT_MS`, 60s, in
- * auth-worker/src/lib/knowledge/index-doc.ts) so a job still inside its budget
- * is never flagged: a real run either finishes or self-aborts long before this.
- * Keep the two in step if either moves.
+ * Deliberately well above the worker's own job budget (`KB_INDEX_BUDGET_MS` in
+ * auth-worker/src/lib/knowledge/index-doc.ts, itself derived from the 30s the
+ * platform grants a waitUntil task) so a job still inside its budget is never
+ * flagged: a real run either finishes or self-aborts long before this. Keep the
+ * two in step if either moves.
  */
 export const KB_INDEX_STALE_MS = 5 * 60_000
 

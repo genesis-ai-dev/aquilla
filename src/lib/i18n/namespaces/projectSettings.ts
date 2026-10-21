@@ -50,6 +50,10 @@ export const projectSettings = defineNamespace({
     "projectSettings.checking.play": "Play continuously",
     "projectSettings.checking.noRecording": "No selected recording for this passage.",
     "projectSettings.checking.playbackHelp": "Playback continues through available recordings in passage order.",
+    "projectSettings.checking.previous": "Previous passage",
+    "projectSettings.checking.next": "Next passage",
+    "projectSettings.checking.playPassage": "Play {label}",
+    "projectSettings.checking.yourFeedback": "Your feedback on this passage",
     "projectSettings.checking.feedbackPlaceholder": "What is clear? What could be improved?",
     "projectSettings.checking.sendFeedback": "Send feedback",
     "projectSettings.checking.retry": "Retry pending feedback",
@@ -1327,6 +1331,25 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.wizardConfirmNoAdds": "Aquilla will keep one row for this project up to date on {board}, in an “Aquilla projects” group.",
     "projectSettings.monday.wizardConfirmNoAddsPerFile": "Aquilla will keep one row per file up to date on {board}, in an “Aquilla projects” group.",
     "projectSettings.monday.wizardAddAndConnectButton": "Add columns and connect",
+    // AQU-2087: step 1's other choice, a clean board made by Aquilla.
+    "projectSettings.monday.newBoardOption": "Make a new board for me",
+    "projectSettings.monday.newBoardHelp":
+      "A clean board with only the columns you pick next, in one “Aquilla projects” group, and no sample rows.",
+    "projectSettings.monday.newBoardNameLabel": "Board name",
+    "projectSettings.monday.newBoardDefaultName": "Aquilla progress",
+    "projectSettings.monday.existingBoardOption": "A board you already have",
+    "projectSettings.monday.noBoardsYet": "This Monday account has no boards yet, so Aquilla will make one.",
+    "projectSettings.monday.wizardConfirmNewBoard": plural({
+      one: "Aquilla will make a board called “{board}” with {count} column, and keep one row for this project up to date in an “Aquilla projects” group.",
+      other: "Aquilla will make a board called “{board}” with {count} columns, and keep one row for this project up to date in an “Aquilla projects” group.",
+    }, "count"),
+    "projectSettings.monday.wizardConfirmNewBoardPerFile": plural({
+      one: "Aquilla will make a board called “{board}” with {count} column, and keep one row per file up to date in an “Aquilla projects” group.",
+      other: "Aquilla will make a board called “{board}” with {count} columns, and keep one row per file up to date in an “Aquilla projects” group.",
+    }, "count"),
+    "projectSettings.monday.wizardMakeBoardButton": "Make board and connect",
+    "projectSettings.monday.wizardMakingBoard": "Making your board in Monday…",
+    "projectSettings.monday.wizardNewBoardFailed": "Couldn't make the board: {reason}. Nothing was connected yet.",
     "projectSettings.monday.wizardAddingColumns": "Adding columns to your board…",
     "projectSettings.monday.wizardAddColumnsFailed": "Couldn't add the columns: {reason}. Nothing was connected yet.",
     "projectSettings.monday.wizardSomeColumnsNotAdded":
@@ -1337,6 +1360,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.chooser.groupTeam": "Team and activity",
     "projectSettings.monday.chooser.newColumn": "New column",
     "projectSettings.monday.chooser.alwaysIncluded": "Always included, so Aquilla can find this project's row again.",
+    "projectSettings.monday.chooser.namesVisible": "Everyone who can see {board} on Monday will see these names.",
     "projectSettings.monday.chooser.summaryAdds": plural({
       one: "Adds {count} new column to {board} and uses {uses} already there.",
       other: "Adds {count} new columns to {board} and uses {uses} already there.",
@@ -2211,6 +2235,57 @@ export const projectSettings = defineNamespace({
       "projectSettings.monday.wizardAddAndConnectButton": {
         description: "Final button of the Monday.com setup when new columns must be created first; then the board is connected.",
       },
+      "projectSettings.monday.newBoardOption": {
+        description:
+          "Choice in step 1 of the Monday.com setup (\"Which board?\"): instead of linking one of the user's Monday " +
+          "boards, Aquilla creates a new board for this project's progress.",
+      },
+      "projectSettings.monday.newBoardHelp": {
+        description:
+          "Explanation under \"Make a new board for me\": the new board holds only the columns the user ticks in the " +
+          "next step, inside one group named \"Aquilla projects\" (keep that name as written), with none of " +
+          "Monday's example rows.",
+      },
+      "projectSettings.monday.newBoardNameLabel": {
+        description: "Label of the text field for the new Monday board's name.",
+      },
+      "projectSettings.monday.newBoardDefaultName": {
+        description:
+          "The name the new Monday board gets unless the user types another. It becomes the board's real name in " +
+          "Monday, so keep it short.",
+      },
+      "projectSettings.monday.existingBoardOption": {
+        description: "Choice in step 1 of the Monday.com setup: link one of the user's existing Monday boards (picked below).",
+      },
+      "projectSettings.monday.noBoardsYet": {
+        description:
+          "Note in step 1 of the Monday.com setup when the user's Monday account has no boards at all; the only " +
+          "choice left is a new board made by Aquilla.",
+      },
+      "projectSettings.monday.wizardConfirmNewBoard": {
+        description: "Summary on the last setup step when Aquilla will create a new Monday board with the chosen columns.",
+        placeholders: {
+          board: "The new board's name, as the user typed it (not translated).",
+          count: "How many columns the new board gets.",
+        },
+      },
+      "projectSettings.monday.wizardConfirmNewBoardPerFile": {
+        description: "Same summary when the new board gets one row per file of the project instead of one for the whole project.",
+        placeholders: {
+          board: "The new board's name, as the user typed it (not translated).",
+          count: "How many columns the new board gets.",
+        },
+      },
+      "projectSettings.monday.wizardMakeBoardButton": {
+        description: "Final button of the Monday.com setup when Aquilla first creates a new board; then the board is connected.",
+      },
+      "projectSettings.monday.wizardMakingBoard": {
+        description: "Progress line while Aquilla creates the new board and its columns in the user's Monday account.",
+      },
+      "projectSettings.monday.wizardNewBoardFailed": {
+        description: "Error when Monday did not create the new board; nothing was connected.",
+        placeholders: { reason: "The error message, usually Monday's own, shown as received." },
+      },
       "projectSettings.monday.wizardAddingColumns": {
         description: "Progress line while Aquilla creates the chosen columns on the user's Monday board.",
       },
@@ -2289,6 +2364,13 @@ export const projectSettings = defineNamespace({
       },
       "projectSettings.monday.chooser.alwaysIncluded": {
         description: "Note under the locked 'Aquilla ID' column in the checklist, saying why it can't be unticked.",
+      },
+      "projectSettings.monday.chooser.namesVisible": {
+        description:
+          "Security note under the 'Project manager' and 'Translators' columns in the checklist, shown in amber while " +
+          "either is ticked: those columns put people's names on the Monday board, and anyone with access to the " +
+          "board can read them. Plain and factual, so it reads as a clear caution without alarm.",
+        placeholders: { board: "The Monday board's name (Monday data, not translated)." },
       },
       "projectSettings.monday.chooser.summaryAdds": {
         description: "Live summary under the column checklist when some ticked columns will be created.",
@@ -2796,6 +2878,10 @@ export const projectSettings = defineNamespace({
       "projectSettings.checking.urlLabel": {
         description: "Accessible name of the read-only field holding a checking link's URL.",
         placeholders: { title: "The link title the project lead typed (data, not translated)." },
+      },
+      "projectSettings.checking.playPassage": {
+        description: "Accessible name of the small play button beside one passage in the guest page's running text.",
+        placeholders: { label: "The passage reference, e.g. 'MRK 1:2', or 'Unit 3' when it has none." },
       },
       "projectSettings.checking.feedbackOn": {
         description: "Label of the feedback box on the guest page, naming the passage the feedback is about.",

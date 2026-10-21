@@ -1878,8 +1878,14 @@ const PORTFOLIO_VISIBILITY_PREDICATE = `(
 const PORTFOLIO_EXCLUDE_STRUCTURAL =
   "COALESCE(MAX(ps.count_structural), MAX(os.count_structural)) = 'false'"
 
-/** `total − structural` when the policy excludes, floored at zero. */
-const lessStructural = (total: string, structural: string) =>
+/**
+ * `total − structural` when the policy excludes, floored at zero.
+ *
+ * Exported for the admin console's project rollup (AQU-1911), which joins
+ * `project_settings ps` and `org_settings os` under the same aliases so a
+ * project reads the same validated % there as on its org dashboard.
+ */
+export const lessStructural = (total: string, structural: string) =>
   `GREATEST(0, ${total} - CASE WHEN ${PORTFOLIO_EXCLUDE_STRUCTURAL} THEN ${structural} ELSE 0 END)`
 
 /**

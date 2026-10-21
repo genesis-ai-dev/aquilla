@@ -2562,9 +2562,11 @@ CREATE INDEX IF NOT EXISTS workspace_plan_change_reviews_org
 CREATE TABLE IF NOT EXISTS workspace_usage_requests (
   org_id BIGINT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
   request_id TEXT NOT NULL CHECK (length(request_id) BETWEEN 1 AND 200),
-  user_id BIGINT NOT NULL REFERENCES users(id),
-  project_id TEXT NOT NULL REFERENCES projects(id),
-  rail TEXT NOT NULL CHECK (rail IN ('llm', 'agent', 'tts')),
+  -- 0181: NULL user_id is the system (background work); project_id is optional.
+  user_id BIGINT REFERENCES users(id),
+  project_id TEXT REFERENCES projects(id),
+  rail TEXT NOT NULL CONSTRAINT workspace_usage_requests_rail_check
+    CHECK (rail IN ('llm', 'agent', 'jev', 'tts', 'audio', 'gpu', 'sandbox')),
   rate_version TEXT NOT NULL CHECK (rate_version = '2026-09-cost-v1'),
   multiplier INTEGER NOT NULL CHECK (multiplier = 4),
   period_start TIMESTAMPTZ NOT NULL,
@@ -2577,6 +2579,13 @@ CREATE TABLE IF NOT EXISTS workspace_usage_requests (
   resolved_at TIMESTAMPTZ,
   -- Provider generation id for reconciling held reservations (never settles alone).
   provider_ref TEXT CHECK (length(provider_ref) BETWEEN 1 AND 200),
+  -- 0181: metered counts against the allowance; unmetered (Enterprise) and byok
+  -- are recorded for cost only. byok is never platform spend.
+  mode TEXT NOT NULL DEFAULT 'metered' CONSTRAINT workspace_usage_requests_mode_check
+    CHECK (mode IN ('metered', 'unmetered', 'byok')),
+  -- 0181: the entitlement decision; would_block is shadow mode.
+  decision TEXT NOT NULL DEFAULT 'allow' CONSTRAINT workspace_usage_requests_decision_check
+    CHECK (decision IN ('allow', 'would_block', 'block')),
   PRIMARY KEY (org_id, request_id),
   CHECK ((state = 'reserved' AND raw_micro_cents IS NULL AND settled_micro_units IS NULL AND resolved_at IS NULL)
     OR (state = 'settled' AND raw_micro_cents IS NOT NULL AND settled_micro_units = raw_micro_cents * multiplier AND resolved_at IS NOT NULL)
@@ -2586,6 +2595,9 @@ CREATE INDEX IF NOT EXISTS idx_workspace_usage_period
   ON workspace_usage_requests(org_id, period_start, period_end);
 CREATE INDEX IF NOT EXISTS idx_workspace_usage_held
   ON workspace_usage_requests(org_id, created_at) WHERE state = 'reserved';
+-- 0181: the platform spend ceiling sums today's rows across every org.
+CREATE INDEX IF NOT EXISTS idx_workspace_usage_created
+  ON workspace_usage_requests(created_at);
 -- AQU-1205: RFC 8628 device grants. Only hashes of both codes persist.
 CREATE TABLE IF NOT EXISTS agent_authorizations (
   device_hash TEXT PRIMARY KEY,

@@ -21,6 +21,7 @@ export const DEFAULT_EGRESS_OPTIONS: EgressOptions = Object.freeze({
   lanes: [""],
   includeSourceDocs: false,
   audioMode: "none",
+  audioFormat: "original",
   useCache: true,
 }) as EgressOptions
 

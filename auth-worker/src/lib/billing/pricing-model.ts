@@ -1,16 +1,51 @@
+import { costMultiplier } from '../../../../db/shared/billing-cost'
+
 /** New-offer contract. Existing Field subscriptions retain their legacy rules. */
-export type Offer = 'free' | 'pro' | 'max_5x' | 'max_20x' | 'team' | 'team_20x'
-const credits: Record<Offer, number> = {
-  free: 25, pro: 50, max_5x: 250, max_20x: 1000, team: 250, team_20x: 1000,
+export type Offer = 'free' | 'team'
+
+/** AQU-2056: allowances are raw provider dollars per week. Team is a multiple
+ * of Free so an admin change to Free moves Team with it (spec §4.3: Team at
+ * 100% must stay within 25% of annual Team revenue).
+ */
+export interface AllowancePolicy { freeWeeklyRawUsd: number; teamMultipleOfFree: number }
+export const DEFAULT_ALLOWANCE_POLICY: AllowancePolicy = { freeWeeklyRawUsd: 1, teamMultipleOfFree: 24 }
+
+/** Missing fields take the default; a present but invalid value throws so a
+ * bad admin save cannot silently become an unlimited or zero allowance.
+ */
+export function resolveAllowancePolicy(
+  stored: { freeWeeklyRawUsd?: unknown; teamMultipleOfFree?: unknown } | undefined,
+): AllowancePolicy {
+  const free = stored?.freeWeeklyRawUsd ?? DEFAULT_ALLOWANCE_POLICY.freeWeeklyRawUsd
+  const multiple = stored?.teamMultipleOfFree ?? DEFAULT_ALLOWANCE_POLICY.teamMultipleOfFree
+  if (typeof free !== 'number' || !Number.isFinite(free) || free < 0 || free > 10_000) {
+    throw new Error('Invalid Free weekly allowance')
+  }
+  if (typeof multiple !== 'number' || !Number.isFinite(multiple) || multiple < 1 || multiple > 1_000) {
+    throw new Error('Invalid Team multiple of Free')
+  }
+  return { freeWeeklyRawUsd: free, teamMultipleOfFree: multiple }
 }
-export function weeklyAllowance(offer: Offer, quantity = 1): number {
-  if (!Number.isSafeInteger(quantity) || quantity < 1
-    || (quantity !== 1 && offer !== 'max_20x' && offer !== 'team_20x')) {
+
+export function teamWeeklyRawUsd(policy: AllowancePolicy): number {
+  return policy.freeWeeklyRawUsd * policy.teamMultipleOfFree
+}
+
+/** The one raw-dollar → meter conversion. The meter counts units of one
+ * marked-up cent (db/shared/billing-cost.ts); every rail shares one markup.
+ * Units are internal: only admin screens may show them.
+ */
+export function rawUsdToAllowanceUnits(rawUsd: number): number {
+  const units = Math.round(rawUsd * 100 * costMultiplier('llm'))
+  if (!Number.isSafeInteger(units) || units < 0) throw new Error('Invalid allowance')
+  return units
+}
+
+export function weeklyAllowance(offer: Offer, quantity = 1, policy = DEFAULT_ALLOWANCE_POLICY): number {
+  if (!Number.isSafeInteger(quantity) || quantity !== 1 || (offer !== 'free' && offer !== 'team')) {
     throw new Error('Invalid capacity quantity')
   }
-  const allowance = credits[offer] * quantity
-  if (!Number.isSafeInteger(allowance)) throw new Error('Invalid allowance')
-  return allowance
+  return rawUsdToAllowanceUnits(offer === 'free' ? policy.freeWeeklyRawUsd : teamWeeklyRawUsd(policy))
 }
 
 /** Plan changes replace the cap without forgiving this week's consumption. */
@@ -74,16 +109,13 @@ export function resolveApprovedPrice(
     || price.recurring.usage_type !== 'licensed'
     || price.unit_amount === null || !Number.isSafeInteger(price.unit_amount)
     || price.unit_amount < 0) throw new Error('Stripe price does not match approved offer')
-  if (!Number.isSafeInteger(binding.maxQuantity) || binding.maxQuantity < 1
-    || (binding.offer !== 'max_20x' && binding.offer !== 'team_20x'
-      && binding.maxQuantity !== 1)
-    || quantity > binding.maxQuantity) throw new Error('Capacity quantity is not approved')
+  if (binding.maxQuantity !== 1 || quantity !== 1) throw new Error('Capacity quantity is not approved')
   const allowanceCredits = weeklyAllowance(binding.offer, quantity)
   const totalAmount = price.unit_amount * quantity
   if (!Number.isSafeInteger(totalAmount)) throw new Error('Invalid price total')
   return {
     usageInterval: 'week' as const, priceId: price.id, offer: binding.offer, quantity, allowanceCredits,
-    scope: binding.offer.startsWith('team') ? 'team' as const : 'personal' as const,
+    scope: 'team' as const,
     currency: price.currency, interval: binding.interval,
     unitAmount: price.unit_amount, totalAmount,
     monthlyEquivalent: binding.interval === 'year' ? totalAmount / 12 : totalAmount,
@@ -110,10 +142,7 @@ export function quoteOffer(
   if (catalog.checkoutLayout === 'single_item' && quantity !== 1) {
     throw new Error('Single-item launch plans require quantity one')
   }
-  const components: Array<{ offer: Exclude<Offer, 'free'>; quantity: number }> =
-    offer === 'team_20x' && catalog.checkoutLayout !== 'single_item'
-      ? [{ offer: 'team', quantity: 1 }, { offer: 'team_20x', quantity }]
-      : [{ offer, quantity }]
+  const components = [{ offer, quantity }]
   const lines = components.map(component => {
     const matches = catalog.bindings.filter(binding =>
       binding.offer === component.offer && binding.interval === interval)
@@ -130,9 +159,7 @@ export function quoteOffer(
     offer, quantity, interval, currency, totalAmount, usageInterval: 'week' as const,
     monthlyEquivalent: interval === 'year' ? totalAmount / 12 : totalAmount,
     allowanceCredits: weeklyAllowance(offer, quantity),
-    plan: offer.startsWith('team') ? 'team' : offer.startsWith('max') ? 'max' : 'pro',
-    scope: offer.startsWith('team') ? 'team' : 'personal',
-    capacity: offer.endsWith('20x') ? '20x_pro' : offer === 'max_5x' || offer === 'team' ? '5x_pro' : '2x_free',
+    plan: offer, scope: 'team' as const, capacity: offer,
     priceVersion: catalog.version,
     entitlementVersion: catalog.entitlementVersion,
     lineItems: lines.map(line => ({ price: line.priceId, quantity: line.quantity })),

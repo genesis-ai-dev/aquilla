@@ -400,7 +400,10 @@ describe("GlossaryEditor", () => {
 // the REAL `emitConceptDelta`, so the assertion is the event shape that reaches
 // the outbox — the contract a second user's projection depends on.
 describe("GlossaryEditor merge duplicates (AQU-1337)", () => {
-  const MERGE_BUTTON = "Merge duplicate concepts"
+  // AQU-2077: the accessible name IS the visible text — the button carried an
+  // aria-label of "Merge duplicate concepts", which left the visible label out
+  // of the accessible name (WCAG 2.5.3, Label in Name).
+  const MERGE_BUTTON = "Merge duplicates"
 
   function seedDuplicates() {
     mockProject.terminology = [
@@ -431,6 +434,16 @@ describe("GlossaryEditor merge duplicates (AQU-1337)", () => {
     seedDuplicates()
     renderEditor()
     expect(screen.getByRole("button", { name: MERGE_BUTTON })).toBeEnabled()
+  })
+
+  // AQU-2077: a voice-control user who says "Merge duplicates" must reach the
+  // button, so its visible text has to be part of its accessible name.
+  it("exposes an accessible name that contains the button's visible text", () => {
+    seedDuplicates()
+    renderEditor()
+    const merge = screen.getByTestId("merge-duplicates-btn")
+    expect(merge).toHaveAccessibleName(expect.stringContaining("Merge duplicates"))
+    expect(merge.textContent).toContain("Merge duplicates")
   })
 
   it("merges into the first-selected survivor as one term.update plus a term.delete per loser", async () => {
@@ -623,7 +636,7 @@ describe("GlossaryEditor role gating (AQU-208)", () => {
   it("gates Merge duplicates on the termbase floor like every other termbase write", async () => {
     const duplicates = [concept({}), concept({ id: "c2" })]
     const { unmount } = renderAs({ ...hydrated(400, "contributor"), terminology: duplicates })
-    const merge = screen.getByRole("button", { name: "Merge duplicate concepts" })
+    const merge = screen.getByRole("button", { name: "Merge duplicates" })
     expect(merge).toBeDisabled()
     await expectTooltip(
       merge,
@@ -634,7 +647,7 @@ describe("GlossaryEditor role gating (AQU-208)", () => {
     unmount()
 
     renderAs({ ...hydrated(500, "project_lead"), terminology: duplicates })
-    fireEvent.click(screen.getByRole("button", { name: "Merge duplicate concepts" }))
+    fireEvent.click(screen.getByRole("button", { name: "Merge duplicates" }))
     expect(screen.getByRole("dialog")).toBeInTheDocument()
   })
 

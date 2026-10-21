@@ -9,6 +9,8 @@ import type { ResolveSandbox, SandboxLike } from "./sandbox"
 import { admitWithWait, ANONYMOUS_TENANT, POOL_DO_NAME, type PoolGate, type WaitedAdmitResult } from "./pool"
 import type { Env } from "./types"
 
+const ARTIFACT_KEY_RE = /^(?:[A-Za-z0-9._-]+\/)*(?:artifacts|temporary-imports)\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/
+
 /** Uploads via /files are capped at 25MB decoded (contract §1). */
 export const FILE_PUT_MAX_BYTES = 25 * 1024 * 1024
 
@@ -319,6 +321,13 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
     const body = await c.req.json<{ key?: string; path?: string }>().catch(() => null)
     if (!body || typeof body.key !== "string" || typeof body.path !== "string") {
       return jsonError(c, "validation_failed", "key and path are required")
+    }
+    // Only the two key shapes auth-worker mints (optional env prefix, then
+    // artifacts/ or temporary-imports/ + two opaque segments). A leaked sandbox
+    // key must not make the whole bucket (audio, snapshots, other tenants)
+    // readable.
+    if (!ARTIFACT_KEY_RE.test(body.key)) {
+      return jsonError(c, "validation_failed", "key is not an artifact key")
     }
     let target: string
     try {

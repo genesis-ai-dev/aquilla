@@ -147,8 +147,11 @@ it('anchors explicit Free workspaces to creation and preserves legacy organizati
   const admitted = await reserveWorkspaceUsage(env.AQUILLA_PG, { ...input, maxRawCostCents: 6.25 }, now)
   expect(Date.parse(admitted.request.period_start)).toBe(Date.parse(createdAt))
   await expect(reserveWorkspaceUsage(env.AQUILLA_PG, { ...input, requestId: 'free-extra', maxRawCostCents: 0.01 }, now)).rejects.toThrow('exhausted')
+  // AQU-2059: an unconfirmed billing_scope no longer refuses usage accounting
+  // (that was a 503 on every AI route). The org is Free like any other, so it
+  // is refused only because this week's Free allowance is spent.
   await env.AQUILLA_PG.prepare('UPDATE organizations SET billing_scope = NULL WHERE id = 1').run()
-  await expect(reserveWorkspaceUsage(env.AQUILLA_PG, { ...input, requestId: 'legacy' }, now)).rejects.toThrow('explicit supported entitlement')
+  await expect(reserveWorkspaceUsage(env.AQUILLA_PG, { ...input, requestId: 'legacy' }, now)).rejects.toThrow('exhausted')
 })
 it('replays the real migration without losing usage or accepting an invalid accounting state', async () => {
   const { input, now, period } = await setup()
@@ -187,9 +190,14 @@ it('reports the same allowance and period admission uses, capped at 100 for disp
   await settleWorkspaceUsage(env.AQUILLA_PG, 1, input.requestId, 65)
   expect((await readWorkspaceUsageSummary(env.AQUILLA_PG, 1, now))?.percent).toBe(100)
   expect((await readUsageTotals(env.AQUILLA_PG, 1, period)).settled).toBe(260 * MICRO_UNITS_PER_UNIT)
-  // Legacy or unconfirmed workspaces have no measured allowance: null, not zero.
-  await env.AQUILLA_PG.prepare('UPDATE organizations SET billing_scope = NULL WHERE id = 1').run()
+  // AQU-2059: an unconfirmed workspace without Stripe is Free, so it has a
+  // measured percentage on its own creation-anchored week. Only Enterprise
+  // (unmetered) reports null.
+  await env.AQUILLA_PG.prepare('UPDATE organizations SET billing_scope = NULL, created_at = ?::timestamptz WHERE id = 1')
+    .bind(now.toISOString()).run()
   await env.AQUILLA_PG.prepare('DELETE FROM workspace_plan_entitlements WHERE org_id = 1').run()
+  expect(await readWorkspaceUsageSummary(env.AQUILLA_PG, 1, now)).toMatchObject({ percent: 0 })
+  await env.AQUILLA_PG.prepare("INSERT INTO org_billing (org_id, tier) VALUES (1, 'enterprise')").run()
   expect(await readWorkspaceUsageSummary(env.AQUILLA_PG, 1, now)).toBeNull()
 })
 
@@ -221,8 +229,10 @@ it('consumes an audited partner grant through the actual usage ledger without re
     body: JSON.stringify({ allowance: 999, reason: 'Unauthorized' }),
   }, env)
   expect(denied.status).toBe(403)
+  // Clearing the grant returns the org to its plan default (Free), whose
+  // allowance this week's usage already exceeds; it is not left without a plan.
   expect((await grant(null)).status).toBe(200)
-  await expect(reserveWorkspaceUsage(env.AQUILLA_PG, { ...input, requestId: 'cleared' }, now)).rejects.toThrow('explicit supported entitlement')
+  await expect(reserveWorkspaceUsage(env.AQUILLA_PG, { ...input, requestId: 'cleared' }, now)).rejects.toThrow('exhausted')
 })
 
 it('uses an admin Free allowance change in both admission and displayed percentage', async () => {

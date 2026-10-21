@@ -156,7 +156,7 @@ describe("pool admission on the container routes", () => {
     const res = await fetch(new Request("http://x/sessions/s2/fetch-artifact", {
       method: "POST",
       headers: { ...AUTH, "Content-Type": "application/json", [TENANT_HEADER]: "user:2" },
-      body: JSON.stringify({ key: "k", path: "/workspace/input" }),
+      body: JSON.stringify({ key: "artifacts/p1/k", path: "/workspace/input" }),
     }))
     expect(res.status).toBe(503)
     expect((await res.json() as { error: { code: string } }).error.code).toBe("pool_busy")

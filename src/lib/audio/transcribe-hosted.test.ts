@@ -58,7 +58,7 @@ describe("hosted transcription client", () => {
       Response.json({ error: "weekly_ai_allowance_exhausted" }, { status: 429 }),
     )
     await expect(transcribeHostedPcm(new Float32Array(61000), "jwt", "p"))
-      .rejects.toThrow(/AI capacity/)
+      .rejects.toThrow(/used this week's AI/)
     expect(fetchSpy).toHaveBeenCalledOnce()
   })
 

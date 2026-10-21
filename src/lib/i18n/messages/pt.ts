@@ -4687,7 +4687,6 @@ export const pt: Catalog = {
   "importExport.dialog.unrecordedCharacterCount": {"forms":{"one":"{count} personagem que ainda não tem nada gravado","many":"{count} personagens que ainda não têm nada gravado","other":"{count} personagens que ainda não têm nada gravado"},"countVar":"count"},
   "importExport.dialog.audioUnvalidatedNote": {"forms":{"one":"{count} linha vai exportar uma gravação que ninguém validou.","many":"{count} linhas vão exportar gravações que ninguém validou.","other":"{count} linhas vão exportar gravações que ninguém validou."},"countVar":"count"},
   "importExport.dialog.audioUnvalidatedOmittedNote": {"forms":{"one":"{count} linha não tem gravação validada e ficará em silêncio.","many":"{count} linhas não têm gravação validada e ficarão em silêncio.","other":"{count} linhas não têm gravação validada e ficarão em silêncio."},"countVar":"count"},
-  "importExport.dialog.audioUnvalidatedJump": "Mostrar para mim",
   "importExport.dialog.untimedRecordingsNote": {"forms":{"one":"{count} gravação não tem tempo e não pode ser colocada.","many":"{count} gravações não têm tempo e não podem ser colocadas.","other":"{count} gravações não têm tempo e não podem ser colocadas."},"countVar":"count"},
   "importExport.dialog.audioSectionTitle": "Áudio",
   "importExport.dialog.audioShapeGroupAriaLabel": "Forma da exportação de áudio",

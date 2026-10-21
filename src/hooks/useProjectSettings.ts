@@ -21,6 +21,7 @@ import posthog from "@/lib/posthog"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
 import { claimHydrationReport, retainProjectOpen } from "./project-settings-open"
 import { registerSettingsAccessor } from "@/lib/history/settings-access"
+import type { CompletionSettings, ProjectRecord } from "@/lib/parsers/types"
 import type { MediaDefaults } from "../../db/shared/media-setting-defaults"
 
 /** AQU-1768: one stable empty value, so an org with no media defaults never re-renders. */
@@ -136,6 +137,21 @@ function copySettingsKey<K extends keyof ProjectWideSettings>(
   key: K,
 ): void {
   target[key] = source[key]
+}
+
+/**
+ * Write one settings key onto a cached project record. The record and the
+ * settings object only overlap in part — a settings key the record does not
+ * declare still has to land, which a keyed assignment cannot express — so this
+ * goes through `Object.assign`, which sets the same own property without
+ * casting either side away.
+ */
+function copySettingsKeyToRecord<K extends keyof ProjectWideSettings>(
+  target: ProjectRecord,
+  source: ProjectWideSettings,
+  key: K,
+): void {
+  Object.assign(target, { [key]: source[key] })
 }
 
 /**
@@ -637,8 +653,12 @@ export function useProjectSettings(
             ...(got.settings.systemPrompt != null
               ? {
                   completionSettings: {
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- spread of partial settings object; exact shape depends on runtime migration state
-                    ...(existing.completionSettings ?? ({} as any)),
+                    // A project that has never had AI settings written has no
+                    // `completionSettings` at all, and the server sends only
+                    // `systemPrompt`, so the merged object is deliberately partial
+                    // until the settings editor fills the required keys in. The
+                    // assertion names that gap instead of erasing the whole shape.
+                    ...((existing.completionSettings ?? {}) as CompletionSettings),
                     systemPrompt: got.settings.systemPrompt,
                   },
                 }
@@ -1020,10 +1040,9 @@ export function useProjectSettings(
       void patchProject(projectId, (existing) => {
         // Roll back IDB keys to server truth for the keys in partial.
         const next = { ...existing }
-        for (const key of Object.keys(partial)) {
+        for (const key of Object.keys(partial) as (keyof ProjectWideSettings)[]) {
           if (key in snapTarget) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic key assignment during IDB rollback; string-keyed writes require any cast
-            ;(next as any)[key] = (snapTarget as any)[key]
+            copySettingsKeyToRecord(next, snapTarget, key)
           }
         }
         return next

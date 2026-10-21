@@ -639,9 +639,9 @@ const PROJECT_MEMORY_PATH_RE = /^\/project\/[^/]+\/memory(\/[^/]+)?$/
 // concurrent imports don't race and the last write doesn't silently drop
 // earlier refs. This is module-scoped (not component-scoped) deliberately —
 // a single ProjectWorkspace is mounted at a time and the chain must survive
-// between React re-renders.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let _lastImportWrite: Promise<any> = Promise.resolve(undefined)
+// between React re-renders. The seed value is what makes the slot's type
+// admit `undefined`; each appended link resolves with the project it read.
+let _lastImportWrite: Promise<ProjectRecord | undefined> = Promise.resolve(undefined)
 const EMPTY_STATUS_PROGRESS = { total: 0, translated: 0, validated: 0 }
 const EMPTY_CELL_DATA: CellData[] = []
 const EMPTY_CHAPTER_HEALTH: BookHealthChapter[] = []
@@ -15159,7 +15159,7 @@ export function ProjectWorkspace() {
     // The chain resolves with the fresh baseProject so the language-seed block
     // below (which also needs a fresh read) can reuse it without a second IDB call.
     const projectSnapshot = project // capture before the await boundary
-    _lastImportWrite = _lastImportWrite
+    const thisImportWrite = _lastImportWrite
       .catch(() => undefined) // absorb prior failures so the chain is never stuck
       .then(async () => {
         // WARN a fix: read fresh project state rather than the render-closure value —
@@ -15183,8 +15183,12 @@ export function ProjectWorkspace() {
         })
         return baseProject
       })
-    // Await and capture baseProject for the language-seed block below.
-    const baseProject = await _lastImportWrite
+    _lastImportWrite = thisImportWrite
+    // Await and capture baseProject for the language-seed block below. Awaiting
+    // the local handle rather than the module slot is what keeps this `ProjectRecord`
+    // instead of `ProjectRecord | undefined`: this link always resolves with the
+    // project it just read, while the slot has to admit its seed value.
+    const baseProject = await thisImportWrite
     // FRO-249: seed source/target language from the user's import answer.
     //
     // AQU-1596: only an EXPLICIT answer (the user confirmed via DirectionPanel)

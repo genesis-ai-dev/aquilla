@@ -15326,17 +15326,18 @@ export function ProjectWorkspace() {
                   onReorderFiles={(writes) => { void handleReorderFiles(writes) }}
                   onMoveFileToGroup={(move) => { void handleMoveFileToGroup(move) }}
                 />
-                <SidebarProjectSection items={projectNavItems} />
-                {/* FRO-192: member's per-project assignment pickup panel. */}
-                {project?.id && jwt && (
-                  <ProjectAssignedToMe
-                    projectId={project.id}
-                    jwt={jwt}
-                    onJumpToAssignment={jumpToAssignment}
-                    refreshKey={assignmentsRefreshKey}
-                    defaultLaneLabel={activeTargetLanguage ?? ""}
-                  />
-                )}
+                <SidebarProjectSection items={projectNavItems}>
+                  {/* FRO-192: member's per-project assignment pickup — a sidebar button that opens a popover. */}
+                  {project?.id && jwt && (
+                    <ProjectAssignedToMe
+                      projectId={project.id}
+                      jwt={jwt}
+                      onJumpToAssignment={jumpToAssignment}
+                      refreshKey={assignmentsRefreshKey}
+                      defaultLaneLabel={activeTargetLanguage ?? ""}
+                    />
+                  )}
+                </SidebarProjectSection>
                 {/* AQU-581: a lane coordinator's own hand-outs, so they can take one back. */}
                 {project?.id && jwt && isLaneCoordinator && (
                   <ProjectHandedOut

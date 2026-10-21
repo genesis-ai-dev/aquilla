@@ -612,6 +612,11 @@ export interface ProjectRecord {
   members: ProjectMember[]
   completionSettings?: CompletionSettings
   ttsSettings?: ProjectTtsSettings
+  /**
+   * AQU-2041: project leads may manage voices on lanes they can write.
+   * Absent is off. Only a maintainer can change it.
+   */
+  projectLeadsManageVoices?: boolean
   username?: string
   rules?: TranslationRule[]
   /** Per-project enable/severity overrides for built-in algorithmic checks.

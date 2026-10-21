@@ -115,6 +115,16 @@ export function isAutopilotOnlyPatch(partial: ProjectWideSettings): boolean {
 }
 
 /**
+ * AQU-2041: a voice-settings patch. Admitted at project lead only when the
+ * stored project has turned on "Project leads can manage voices". The server
+ * still checks that the change stays on lanes the lead can write.
+ */
+export function isTtsSettingsOnlyPatch(partial: ProjectWideSettings): boolean {
+  const keys = Object.keys(partial)
+  return keys.length > 0 && keys.every((key) => key === "ttsSettings")
+}
+
+/**
  * Copy one settings key across. Generic over the key so both sides of the
  * assignment are the same `ProjectWideSettings[K]`; a write keyed by the whole
  * `keyof` union does not typecheck, which is why the call sites below used to
@@ -901,6 +911,8 @@ export function useProjectSettings(
       : isLanguageOnlyPatch(partial) ? languageEditFloor
       : isAutopilotOnlyPatch(partial) ? AUTOPILOT_EDIT_ROLE_FLOOR
       : isAlignmentSeedsOnlyPatch(partial) ? ALIGNMENT_SEEDS_EDIT_ROLE_FLOOR
+      : isTtsSettingsOnlyPatch(partial) && serverRef.current?.settings.projectLeadsManageVoices === true
+        ? ROLE.PROJECT_LEAD
       : SETTINGS_EDIT_ROLE_FLOOR
     if (roleLevel < requiredLevel) {
       // Synced project below floor — do NOT apply locally; the server will

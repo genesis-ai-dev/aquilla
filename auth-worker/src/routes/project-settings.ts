@@ -51,6 +51,11 @@
 //            Autopilot surface). An autopilot-only write is admitted at
 //            project_lead 500 — whether your own project tries an experiment
 //            is a lead's call.
+//   AQU-2041 `ttsSettings`, only when the stored `projectLeadsManageVoices`
+//            flag is on. A project lead may then change voices, per-lane cast,
+//            and per-lane defaults on lanes they can write. The flag itself
+//            stays maintainer-only and defaults off. A save that rewrites a
+//            hidden lane's voices is refused.
 //
 // Everything else keeps the maintainer gate, unchanged. Each carve-out is
 // scoped to a write that changes NOTHING ELSE, so none widens access to any
@@ -67,6 +72,7 @@ import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { pushDirtyLinksAfterResponse } from "../lib/integrations/push"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
+import { leadMaySaveTtsSettings, incomingRewritesHiddenVoices } from "../../../src/lib/lanes/voice-wall"
 import { ROLE, type AuthUser } from "../types"
 import { ROLE_NAMES, resolveProjectRole } from "../services/project-permissions"
 import { roleRequiredBody, type RoleRequiredBody } from "../lib/role-denial"
@@ -442,6 +448,11 @@ const updateSettingsSchema = z.object({
   ifMatchVersion: z.number().int().nonnegative().optional(),
 })
 
+function plainRecord(value: unknown): Record<string, unknown> | null {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) return null
+  return value as Record<string, unknown>
+}
+
 function parseIntOrNull(s: string | undefined): number | null {
   if (s == null) return null
   const n = Number.parseInt(s, 10)
@@ -474,6 +485,7 @@ projectSettings.on(
     )
     const stored = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
     let settings = preserveRetiredLaneSettings(stored.settings, body.settings)
+    const incomingTts = plainRecord(settings.ttsSettings)
     if (role.level < SETTINGS_WRITE_MIN_ROLE) {
       // AQU-1750: behind the read wall this caller's body is an echo of a
       // filtered GET. Put back the lanes and primary language it could not
@@ -497,6 +509,19 @@ projectSettings.on(
       return c.json({ error: RETIRED_TERMINOLOGY_MESSAGE }, 400)
     }
 
+    if (
+      role.level < SETTINGS_WRITE_MIN_ROLE
+      && incomingTts
+      && incomingRewritesHiddenVoices(
+        plainRecord(stored.settings.ttsSettings) ?? {},
+        incomingTts,
+        visible,
+        lanes,
+      )
+    ) {
+      return c.json({ error: "voice changes are limited to lanes you can write" }, 403)
+    }
+
     if (role.level < SETTINGS_WRITE_MIN_ROLE) {
       // AQU-1086 and the single-key scopes below: below the maintainer floor,
       // the ONLY writes allowed are a no-op one or one whose changed keys all
@@ -516,9 +541,16 @@ projectSettings.on(
         && changed.every((key) => key === COUNT_STRUCTURAL_KEY)
       const alignmentSeedsOnly = changed.length > 0
         && changed.every((key) => key === ALIGNMENT_SEEDS_KEY)
+      const storedTts = plainRecord(stored.settings.ttsSettings) ?? {}
+      const nextTts = plainRecord(settings.ttsSettings) ?? {}
+      const voiceLeadWrite = changed.length > 0
+        && changed.every((key) => key === "ttsSettings")
+        && stored.settings.projectLeadsManageVoices === true
+        && role.level >= ROLE.PROJECT_LEAD
+        && leadMaySaveTtsSettings(storedTts, nextTts, visible, lanes)
       if (
         !noop && !languageOnly && !autopilotOnly
-        && !countStructuralOnly && !alignmentSeedsOnly
+        && !countStructuralOnly && !alignmentSeedsOnly && !voiceLeadWrite
       ) {
         return c.json(
           { error: `role >= maintainer (${SETTINGS_WRITE_MIN_ROLE}) required` },
@@ -586,6 +618,11 @@ projectSettings.on(
     // Boolean or absent. Absent is "inherit the org", so there is no null case
     // to accept — writing one would store a third state the resolver does not
     // have a meaning for.
+    const rawLeadVoices = (settings as Record<string, unknown>).projectLeadsManageVoices
+    if (rawLeadVoices !== undefined && typeof rawLeadVoices !== "boolean") {
+      return c.json({ error: "projectLeadsManageVoices must be a boolean" }, 400)
+    }
+
     const rawCountStructural = (body.settings as Record<string, unknown>)[COUNT_STRUCTURAL_KEY]
     if (rawCountStructural !== undefined && typeof rawCountStructural !== "boolean") {
       return c.json({ error: `${COUNT_STRUCTURAL_KEY} must be a boolean` }, 400)

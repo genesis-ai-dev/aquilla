@@ -24,9 +24,18 @@ import { ROLE } from "@/lib/sync/role-policy"
 import { LangQuestLinkError, linkLangQuest, publishLangQuestReleases, unlinkLangQuest } from "@/lib/langquest/api"
 import posthog from "@/lib/posthog"
 
-export function LangQuestLinkBadge({ projectId, roleLevel }: { projectId: string; roleLevel: number | null }) {
+export function LangQuestLinkBadge({
+  projectId,
+  roleLevel,
+  onSynced,
+}: {
+  projectId: string
+  roleLevel: number | null
+  /** After a sync that changed the project, so the host can re-read its files. */
+  onSynced?: () => void
+}) {
   const { t, locale } = useI18n()
-  const { link, sync, canSync, runSync, reload, jwt } = useLangQuestLink(projectId, roleLevel)
+  const { link, sync, canSync, runSync, reload, jwt } = useLangQuestLink(projectId, roleLevel, onSynced)
   const canManage = (roleLevel ?? 0) >= ROLE.MAINTAINER
   const [newToken, setNewToken] = useState("")
   const [channel, setChannel] = useState("")

@@ -35,13 +35,18 @@ export type LangQuestSyncState =
   | { kind: "done"; result: LangQuestSyncResult }
   | { kind: "failed"; message: string }
 
-export function useLangQuestLink(projectId: string, roleLevel: number | null) {
+export function useLangQuestLink(projectId: string, roleLevel: number | null, onSynced?: () => void) {
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const author = session?.username ?? "local"
   const [link, setLink] = useState<LangQuestLink | null>(null)
   const [sync, setSync] = useState<LangQuestSyncState>({ kind: "idle" })
   const running = useRef(false)
+  // Held in a ref so a host passing an inline callback does not restart the sync effect.
+  const onSyncedRef = useRef(onSynced)
+  useEffect(() => {
+    onSyncedRef.current = onSynced
+  })
   const lastRun = useRef(0)
   const canSync = (roleLevel ?? 0) >= ROLE.PROJECT_LEAD
 
@@ -90,6 +95,7 @@ export function useLangQuestLink(projectId: string, roleLevel: number | null) {
           onProgress: (progress) => setSync({ kind: "running", progress }),
         })
         setSync({ kind: "done", result })
+        if (result.cellsCreated + result.takesAttached + result.cellsRemoved > 0) onSyncedRef.current?.()
         posthog.capture("langquest synced", {
           project_id: projectId,
           trigger,

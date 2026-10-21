@@ -93,7 +93,7 @@ it('#19 decide() from the react sweep bills the project org as the system user',
   await freeOrg()
   const calls = jev()
   const out = await decide(settings(), { purpose: 'react', projectId: PROJECT, state: {},
-    questions: { q: { type: 'noul', question: 'Worth a run?' } }, fallback: () => ({ q: { kind: 'noul', p: 0 } }) })
+    questions: { q: { type: 'noul', instructions: { ask: 'Worth a run?' } } }, fallback: () => ({ q: { kind: 'noul', p: 0 } }) })
   expect(out.reason).not.toBe('refused')
   await expectOneFreeJevRowPerCall(calls, null)
 })
@@ -102,7 +102,7 @@ it('#20 bible-deps bills the person running a check', async () => {
   await freeOrg()
   const calls = jev()
   const deps = makeBibleTickDeps(settings(), env.AQUILLA_PG, { projectId: PROJECT, runId: 'bible-check:t', userId: 1 })
-  await deps.judge!.decide({ state: {}, questions: { q: { type: 'noul', question: 'Fits?' } }, fallback: () => ({ q: { kind: 'noul', p: 0 } }) })
+  await deps.judge!.decide({ state: {}, questions: { q: { type: 'noul', instructions: { ask: 'Fits?' } } }, fallback: () => ({ q: { kind: 'noul', p: 0 } }) })
   await expectOneFreeJevRowPerCall(calls, 1)
 })
 

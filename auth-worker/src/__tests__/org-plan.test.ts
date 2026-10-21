@@ -185,6 +185,28 @@ describe('the ledger reads the plan, not billing_scope', () => {
   })
 })
 
+describe('deploying the workers before 0182 is applied', () => {
+  // Found by the QA walk on the PR preview: the shared dev database had no 0182,
+  // and selecting the new columns made every plan read a 500.
+  it('resolves from the legacy plan, in and out of a transaction, then reads tier once 0182 lands', async () => {
+    await seedUser(1, 'alice')
+    await org(4); await legacyRow(4, 'field')
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('p', 'P', 4, 1)").run()
+    await pg.exec('ALTER TABLE org_billing DROP COLUMN tier, DROP COLUMN contract_ends_at')
+    try {
+      expect(await resolveOrgPlan(env.AQUILLA_PG, 4, now)).toMatchObject({ tier: 'team', contractEndsAt: null })
+      const admitted = await reserveWorkspaceUsage(env.AQUILLA_PG,
+        { orgId: 4, projectId: 'p', userId: 1, requestId: 'pre-0182', rail: 'llm', maxRawCostCents: 1 }, now)
+      expect(admitted.request.mode).toBe('metered')
+    } finally {
+      // Re-applying 0182 also proves it upgrades a pre-0182 schema.
+      await pg.exec(MIGRATION)
+    }
+    await pg.exec("UPDATE org_billing SET tier = 'enterprise', contract_ends_at = '2026-11-01T00:00:00Z' WHERE org_id = 4")
+    expect(await resolveOrgPlan(env.AQUILLA_PG, 4, now)).toMatchObject({ tier: 'enterprise', contractEndsAt: '2026-11-01T00:00:00.000Z' })
+  })
+})
+
 describe('GET /api/v2/orgs/:id/plan', () => {
   it('tells any member the tier, and nobody else', async () => {
     await seedUser(1, 'alice'); await seedUser(2, 'mallory')

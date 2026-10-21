@@ -67,8 +67,14 @@ export function resolveEnterpriseContract(contractEndsAt: string | null, now: Da
  * paid Stripe Team → stored tier → Free.
  */
 export async function resolveOrgPlan(db: AquillaDb, orgId: number, now = new Date()): Promise<OrgPlan | null> {
+  // tier and contract_ends_at come from 0182. Reading them through to_jsonb
+  // yields NULL where 0182 is not applied yet, instead of an undefined-column
+  // error, so these workers can deploy before the migration: a NULL tier falls
+  // back to the legacy plan. One statement, so it is safe inside the usage
+  // transaction. Read the columns directly once 0182 is applied everywhere.
   const row = await db.prepare(`SELECT o.created_at::text AS created_at,
-      b.tier, b.plan, b.contract_ends_at::text AS contract_ends_at, b.weekly_allowance,
+      to_jsonb(b) ->> 'tier' AS tier, b.plan,
+      to_jsonb(b) ->> 'contract_ends_at' AS contract_ends_at, b.weekly_allowance,
       e.offer, e.usage_anchor::text AS usage_anchor,
       s.payment_failed, s.paid_through::text AS paid_through, s.cancel_at_period_end
     FROM organizations o
@@ -83,7 +89,8 @@ export async function resolveOrgPlan(db: AquillaDb, orgId: number, now = new Dat
     }>()
   if (!row) return null
   const stored: OrgTier | null = row.tier ?? (row.plan != null ? tierFromLegacyPlan(row.plan) : null)
-  const contractEndsAt = row.contract_ends_at
+  const contractEndsAt = row.contract_ends_at === null ? null
+    : new Date(Date.parse(row.contract_ends_at)).toISOString()
 
   // A Stripe entitlement without a proven paid period is not Team yet.
   const workspaceAccess = row.offer && row.paid_through ? resolveWorkspaceAccess({

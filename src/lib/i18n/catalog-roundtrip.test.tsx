@@ -6,7 +6,8 @@ import { extractJsonStrings, exportJson } from "@/lib/parsers/json-i18n"
 import { I18nProvider, useT } from "./I18nProvider"
 import { LanguageSwitcher } from "./LanguageSwitcher"
 import { buildCatalogSourceJson, parseTranslatedCatalog } from "./catalog-export"
-import { CATALOGS } from "./messages"
+import { CATALOGS } from "./messages/all"
+import { registerCatalog } from "./messages"
 import type { Catalog } from "./messages/en"
 
 /** Open the globe menu and choose a locale by its endonym, as a user would. */
@@ -98,13 +99,13 @@ describe("round-tripped catalog renders through the language switcher", () => {
   })
 
   afterEach(() => {
-    CATALOGS.th = original
+    registerCatalog("th", original)
   })
 
   it("shows the translated strings after selecting the locale", async () => {
     // Ship the round-tripped catalog exactly as `scripts/i18n-catalog.ts import`
     // would, by writing it into the registry the provider reads.
-    CATALOGS.th = await translateCatalogInAquilla()
+    registerCatalog("th", await translateCatalogInAquilla())
 
     render(<Harness />)
     expect(screen.getByTestId("nav")).toHaveTextContent("Projects")
@@ -116,7 +117,7 @@ describe("round-tripped catalog renders through the language switcher", () => {
   })
 
   it("interpolates placeholders that survived the round-trip", async () => {
-    CATALOGS.th = await translateCatalogInAquilla()
+    registerCatalog("th", await translateCatalogInAquilla())
 
     render(<Harness />)
     await pickLanguage("ไทย")
@@ -128,7 +129,7 @@ describe("round-tripped catalog renders through the language switcher", () => {
   it("falls back to English for keys the round-trip left untranslated", async () => {
     const partial = await translateCatalogInAquilla()
     delete partial["nav.projects"]
-    CATALOGS.th = partial
+    registerCatalog("th", partial)
 
     render(<Harness />)
     await pickLanguage("ไทย")

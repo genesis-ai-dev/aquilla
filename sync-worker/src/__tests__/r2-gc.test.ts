@@ -210,6 +210,18 @@ describe("classifyKey", () => {
     })
   })
 
+  // AQU-2095: the stored waveform is the clip's shape, not a clip. No
+  // cell_audio row will ever name it, so classified on its own it would read
+  // as orphaned the night after it was written — and a list of takes would
+  // start paying for whole recordings again, silently.
+  it("maps a peaks sidecar onto the clip it describes", () => {
+    expect(classifyKey("projects/p1/files/f1/audio/a.webm.peaks")).toEqual({
+      namespace: "audio",
+      projectId: "p1",
+      ref: "f1/a.webm",
+    })
+  })
+
   // The allowlist is the sweep's primary safety property: a namespace it has
   // not been taught about must be invisible to it, not fair game.
   it.each([
@@ -260,6 +272,62 @@ describe("sweepOrphanedR2Objects", () => {
 
     expect(bucket._has("projects/p1/files/f1/audio/take-live.webm")).toBe(true)
     expect(bucket._has("projects/p1/files/f1/audio/take-superseded.webm")).toBe(false)
+  })
+
+  it("keeps a live take's peaks sidecar, and collects a dead take's", async () => {
+    // AQU-2095. The sidecar is the clip's waveform: kept while the clip is
+    // live (or the Audio view goes back to downloading recordings to draw
+    // them), gone with it (or every deleted take leaves litter behind).
+    await seed("cell_audio", [
+      take(),
+      take({ audio_id: "take-superseded.webm", deleted: 1, event_id: "e2" }),
+    ])
+    const bucket = makeStubBucket([
+      { key: "projects/p1/files/f1/audio/take-live.webm" },
+      { key: "projects/p1/files/f1/audio/take-live.webm.peaks", size: 328 },
+      { key: "projects/p1/files/f1/audio/take-superseded.webm.peaks", size: 328 },
+    ])
+    await sweepOrphanedR2Objects(envFor(bucket), { now: NOW })
+
+    expect(bucket._has("projects/p1/files/f1/audio/take-live.webm.peaks")).toBe(true)
+    expect(bucket._has("projects/p1/files/f1/audio/take-superseded.webm.peaks")).toBe(false)
+  })
+
+  // AQU-1767 cut pieces. WHY: `cell.audio.cut` gives each later piece a new id
+  // but the original take's url, so every piece plays the ORIGINAL bytes. With
+  // the first piece (the original row) deleted, nothing live had the original's
+  // id any more, and the sweep deleted the audio the surviving pieces play.
+  it("keeps the audio a cut take's surviving pieces play after its first piece is deleted", async () => {
+    await seed("cell_audio", [
+      take({ audio_id: "take-orig.webm", url: "frontier-audio://take-orig.webm", deleted: 1 }),
+      take({ audio_id: "take-orig-p2.webm", url: "frontier-audio://take-orig.webm", piece_of: "take-orig.webm", event_id: "e2" }),
+    ])
+    const bucket = makeStubBucket([{ key: "projects/p1/files/f1/audio/take-orig.webm" }])
+    await sweepOrphanedR2Objects(envFor(bucket), { now: NOW })
+    expect(bucket._has("projects/p1/files/f1/audio/take-orig.webm")).toBe(true)
+  })
+
+  it("keeps whatever object a live take's url plays, even with no piece mark", async () => {
+    await seed("cell_audio", [
+      take({ audio_id: "take-new.webm", url: "frontier-audio://take-shared.webm" }),
+    ])
+    const bucket = makeStubBucket([
+      { key: "projects/p1/files/f1/audio/take-shared.webm" },
+      { key: "projects/p1/files/f1/audio/nobody.webm" },
+    ])
+    await sweepOrphanedR2Objects(envFor(bucket), { now: NOW })
+    expect(bucket._has("projects/p1/files/f1/audio/take-shared.webm")).toBe(true)
+    expect(bucket._has("projects/p1/files/f1/audio/nobody.webm")).toBe(false)
+  })
+
+  it("still collects a cut take's bytes once no live piece plays them", async () => {
+    await seed("cell_audio", [
+      take({ audio_id: "take-orig.webm", url: "frontier-audio://take-orig.webm", deleted: 1 }),
+      take({ audio_id: "take-orig-p2.webm", url: "frontier-audio://take-orig.webm", piece_of: "take-orig.webm", deleted: 1, event_id: "e2" }),
+    ])
+    const bucket = makeStubBucket([{ key: "projects/p1/files/f1/audio/take-orig.webm" }])
+    await sweepOrphanedR2Objects(envFor(bucket), { now: NOW })
+    expect(bucket._has("projects/p1/files/f1/audio/take-orig.webm")).toBe(false)
   })
 
   it("keeps a voice-clone clip a voice in the project library points at", async () => {
@@ -706,5 +774,16 @@ describe("POST /admin/r2-gc", () => {
 
     expect(res?.status).toBe(503)
     expect(bucket._has("projects/p1/files/f1/audio/orphan.wav")).toBe(true)
+  })
+})
+
+describe("playedObject", () => {
+  it("reads the object a take plays from either url form, and nothing else", async () => {
+    const { playedObject } = await import("../r2-gc")
+    expect(playedObject("frontier-audio://a.webm")).toEqual({ fileId: null, name: "a.webm" })
+    expect(playedObject("/audio/p1/f%201/a.webm")).toEqual({ fileId: "f 1", name: "a.webm" })
+    expect(playedObject("https://example.org/a.mp3")).toBeNull()
+    expect(playedObject("frontier-audio://../x")).toBeNull()
+    expect(playedObject(null)).toBeNull()
   })
 })

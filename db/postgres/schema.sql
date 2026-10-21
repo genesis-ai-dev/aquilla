@@ -674,6 +674,8 @@ CREATE TABLE IF NOT EXISTS removed_cell_archive (
     validators        JSONB NOT NULL DEFAULT '[]'::jsonb,
     waivers           JSONB NOT NULL DEFAULT '[]'::jsonb,
     backtranslations  JSONB NOT NULL DEFAULT '[]'::jsonb,
+    -- AQU-1408 (0182): the cell's hand-corrected statistical glosses.
+    glosses           JSONB NOT NULL DEFAULT '[]'::jsonb,
     morph             JSONB NOT NULL DEFAULT '[]'::jsonb,
     audio             JSONB NOT NULL DEFAULT '[]'::jsonb,
     links             JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -1109,6 +1111,26 @@ CREATE TABLE cell_backtranslations (
     PRIMARY KEY (project_id, file_id, cell_id, target_event_id)
 );
 
+-- AQU-1408 (0182): a statistical gloss a contributor corrected by hand.
+-- Deliberately NOT a row of cell_backtranslations: that table's primary key is
+-- the same four columns, so a saved gloss and the AI back-translation of the
+-- same commit would collide — and the two are different kinds of reading a
+-- translator must be able to tell apart. Same pinning and lane rules as above;
+-- NULL lane_id is the lane whose legacy_tag is ''.
+CREATE TABLE cell_glosses (
+    project_id      TEXT NOT NULL,
+    file_id         TEXT NOT NULL,
+    cell_id         TEXT NOT NULL,
+    target_event_id TEXT NOT NULL,
+    gloss_text      TEXT NOT NULL,
+    author          TEXT NOT NULL,
+    event_id        TEXT NOT NULL,
+    server_seq      BIGINT,
+    created_at      BIGINT NOT NULL,
+    lane_id         TEXT,
+    PRIMARY KEY (project_id, file_id, cell_id, target_event_id)
+);
+
 -- AQU-1296: comment identity is PROJECT-SCOPED. `comment_id` was a global
 -- primary key, but the ids themselves are not globally unique — the Codex
 -- importer namespaces the event id and the file id per project and leaves
@@ -1211,7 +1233,12 @@ CREATE TABLE assignments (
     created_by       BIGINT NOT NULL,
     created_at       BIGINT NOT NULL,
     unassigned_at    BIGINT,
-    completed_at     BIGINT
+    completed_at     BIGINT,
+    -- AQU-1969 (0182): what the assignment hands out. 'translate' (the
+    -- default, and every older row) measures lines validated by anyone in the
+    -- scope; 'validate' measures the assignee's OWN approvals there.
+    kind             TEXT NOT NULL DEFAULT 'translate'
+                     CHECK (kind IN ('translate', 'validate'))
 );
 
 CREATE TABLE assignment_cells (
@@ -1333,6 +1360,10 @@ CREATE INDEX idx_cell_bt_file ON cell_backtranslations(project_id, file_id);
 -- AQU-1589: latest reading per cell within one lane. NULL lane_id stays in the
 -- index so the pre-backfill default-lane read is covered too.
 CREATE INDEX idx_cell_bt_lane ON cell_backtranslations(project_id, file_id, cell_id, lane_id, created_at DESC);
+CREATE INDEX idx_cell_gloss_cell ON cell_glosses(project_id, file_id, cell_id, created_at DESC);
+CREATE INDEX idx_cell_gloss_file ON cell_glosses(project_id, file_id);
+-- AQU-1408: latest gloss per cell within one lane — the per-file read's shape.
+CREATE INDEX idx_cell_gloss_lane ON cell_glosses(project_id, file_id, cell_id, lane_id, created_at DESC);
 CREATE INDEX idx_cell_validators_cell ON cell_validators(project_id, file_id, cell_id);
 -- "Which takes have I validated?" — a per-viewer question the editor asks for a
 -- whole file at once, which the primary key's leading columns cannot answer.
@@ -2562,9 +2593,11 @@ CREATE INDEX IF NOT EXISTS workspace_plan_change_reviews_org
 CREATE TABLE IF NOT EXISTS workspace_usage_requests (
   org_id BIGINT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
   request_id TEXT NOT NULL CHECK (length(request_id) BETWEEN 1 AND 200),
-  user_id BIGINT NOT NULL REFERENCES users(id),
-  project_id TEXT NOT NULL REFERENCES projects(id),
-  rail TEXT NOT NULL CHECK (rail IN ('llm', 'agent', 'tts')),
+  -- 0181: NULL user_id is the system (background work); project_id is optional.
+  user_id BIGINT REFERENCES users(id),
+  project_id TEXT REFERENCES projects(id),
+  rail TEXT NOT NULL CONSTRAINT workspace_usage_requests_rail_check
+    CHECK (rail IN ('llm', 'agent', 'jev', 'tts', 'audio', 'gpu', 'sandbox')),
   rate_version TEXT NOT NULL CHECK (rate_version = '2026-09-cost-v1'),
   multiplier INTEGER NOT NULL CHECK (multiplier = 4),
   period_start TIMESTAMPTZ NOT NULL,
@@ -2577,6 +2610,13 @@ CREATE TABLE IF NOT EXISTS workspace_usage_requests (
   resolved_at TIMESTAMPTZ,
   -- Provider generation id for reconciling held reservations (never settles alone).
   provider_ref TEXT CHECK (length(provider_ref) BETWEEN 1 AND 200),
+  -- 0181: metered counts against the allowance; unmetered (Enterprise) and byok
+  -- are recorded for cost only. byok is never platform spend.
+  mode TEXT NOT NULL DEFAULT 'metered' CONSTRAINT workspace_usage_requests_mode_check
+    CHECK (mode IN ('metered', 'unmetered', 'byok')),
+  -- 0181: the entitlement decision; would_block is shadow mode.
+  decision TEXT NOT NULL DEFAULT 'allow' CONSTRAINT workspace_usage_requests_decision_check
+    CHECK (decision IN ('allow', 'would_block', 'block')),
   PRIMARY KEY (org_id, request_id),
   CHECK ((state = 'reserved' AND raw_micro_cents IS NULL AND settled_micro_units IS NULL AND resolved_at IS NULL)
     OR (state = 'settled' AND raw_micro_cents IS NOT NULL AND settled_micro_units = raw_micro_cents * multiplier AND resolved_at IS NOT NULL)
@@ -2586,6 +2626,9 @@ CREATE INDEX IF NOT EXISTS idx_workspace_usage_period
   ON workspace_usage_requests(org_id, period_start, period_end);
 CREATE INDEX IF NOT EXISTS idx_workspace_usage_held
   ON workspace_usage_requests(org_id, created_at) WHERE state = 'reserved';
+-- 0181: the platform spend ceiling sums today's rows across every org.
+CREATE INDEX IF NOT EXISTS idx_workspace_usage_created
+  ON workspace_usage_requests(created_at);
 -- AQU-1205: RFC 8628 device grants. Only hashes of both codes persist.
 CREATE TABLE IF NOT EXISTS agent_authorizations (
   device_hash TEXT PRIMARY KEY,

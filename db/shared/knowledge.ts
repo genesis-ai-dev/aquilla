@@ -265,23 +265,27 @@ export async function getDocTree(
 }
 
 /** No nodeId → full extracted text. nodeId → its char-range substring, or
- *  null when the id doesn't resolve in the doc's tree. */
+ *  null when the id doesn't resolve in the doc's tree.
+ *
+ *  `tree` is whatever the last indexing run left on the row. The indexing job
+ *  reads it to continue from the summaries already there instead of paying for
+ *  the whole document again (AQU-2050); it is null before the first run. */
 export async function getDocText(
   db: AquillaDb,
   docId: string,
   nodeId?: string,
-): Promise<{ meta: KnowledgeDocMeta; text: string } | null> {
+): Promise<{ meta: KnowledgeDocMeta; text: string; tree: KnowledgeNode[] | null } | null> {
   const row = await db
     .prepare(`SELECT ${META_COLS}, extracted_text, index_tree FROM knowledge_docs WHERE id = ?`)
     .bind(docId)
     .first<Row & { extracted_text: string; index_tree: unknown }>()
   if (!row) return null
   const meta = rowToMeta(row)
-  if (nodeId == null) return { meta, text: row.extracted_text }
   const tree = parseTree(row.index_tree)
+  if (nodeId == null) return { meta, text: row.extracted_text, tree }
   const node = resolveNode(tree, nodeId)
   if (!node) return null
-  return { meta, text: row.extracted_text.slice(node.charStart, node.charEnd) }
+  return { meta, text: row.extracted_text.slice(node.charStart, node.charEnd), tree }
 }
 
 /** Deletes the row and returns its r2Key (so the caller can delete the R2

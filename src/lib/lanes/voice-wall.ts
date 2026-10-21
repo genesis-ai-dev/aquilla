@@ -2,14 +2,12 @@
  * AQU-2043: the lane read wall covers voices.
  *
  * A member who cannot read a lane does not receive that lane's voices, its
- * per-lane cast, or its per-lane default. The built-in Narrator has no lane
- * and stays on every lane. Any other voice with no lane counts as the first
- * lane's, which is where a save writes it.
+ * per-lane cast, or its per-lane default. A voice with no laneId is not
+ * lane-owned yet (pre-migration voices and the built-in Narrator) and stays.
  * Cast and default maps are keyed by legacy tag (`''` is the default lane).
  * `visible === null` means the caller sees every lane.
  */
 
-import { firstLaneIdFromIdentities, laneIdForStoredVoice } from "../audio/stamp-voice-lane"
 import type { LaneIdentity } from "./read-wall"
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -25,27 +23,16 @@ function voiceId(voice: Record<string, unknown>): string | null {
   return typeof voice.id === "string" && voice.id !== "" ? voice.id : null
 }
 
-/**
- * A voice is hidden when its lane is one the caller cannot read.
- * A voice with no lane, other than the Narrator, counts as the first lane's.
- */
-export function voiceHidden(
-  voice: Record<string, unknown>,
-  visible: ReadonlySet<string>,
-  firstLaneId: string | null = null,
-): boolean {
-  const laneId = laneIdForStoredVoice(voice, firstLaneId)
+/** A voice is hidden only when it names a lane the caller cannot read. */
+export function voiceHidden(voice: Record<string, unknown>, visible: ReadonlySet<string>): boolean {
+  const laneId = voice.laneId
   return typeof laneId === "string" && laneId !== "" && !visible.has(laneId)
 }
 
-function hiddenVoiceIds(
-  voices: readonly Record<string, unknown>[],
-  visible: ReadonlySet<string>,
-  firstLaneId: string | null,
-): Set<string> {
+function hiddenVoiceIds(voices: readonly Record<string, unknown>[], visible: ReadonlySet<string>): Set<string> {
   const ids = new Set<string>()
   for (const voice of voices) {
-    if (!voiceHidden(voice, visible, firstLaneId)) continue
+    if (!voiceHidden(voice, visible)) continue
     const id = voiceId(voice)
     if (id) ids.add(id)
   }
@@ -87,13 +74,12 @@ export function filterTtsSettingsToVisibleLanes(
   lanes: readonly LaneIdentity[],
 ): Record<string, unknown> {
   if (visible === null) return tts
-  const firstLaneId = firstLaneIdFromIdentities(lanes)
   const voices = voiceList(tts.voices)
-  const hiddenIds = hiddenVoiceIds(voices, visible, firstLaneId)
+  const hiddenIds = hiddenVoiceIds(voices, visible)
   const next: Record<string, unknown> = { ...tts }
 
   if ("voices" in tts) {
-    next.voices = voices.filter((voice) => !voiceHidden(voice, visible, firstLaneId))
+    next.voices = voices.filter((voice) => !voiceHidden(voice, visible))
   }
   if (isRecord(tts.castAssignments)) {
     const cast = filterVoiceIdMap(tts.castAssignments, hiddenIds)
@@ -129,7 +115,6 @@ function mergeVoices(
   stored: readonly Record<string, unknown>[],
   incoming: readonly Record<string, unknown>[],
   visible: ReadonlySet<string>,
-  firstLaneId: string | null,
 ): Record<string, unknown>[] {
   const incomingById = new Map<string, Record<string, unknown>>()
   for (const voice of incoming) {
@@ -140,20 +125,20 @@ function mergeVoices(
   const next: Record<string, unknown>[] = []
   for (const voice of stored) {
     const id = voiceId(voice)
-    if (voiceHidden(voice, visible, firstLaneId)) {
+    if (voiceHidden(voice, visible)) {
       next.push(voice)
       if (id) used.add(id)
       continue
     }
     if (!id) continue
     const sent = incomingById.get(id)
-    if (!sent || voiceHidden(sent, visible, firstLaneId)) continue
+    if (!sent || voiceHidden(sent, visible)) continue
     next.push(sameJson(sent, voice) ? voice : sent)
     used.add(id)
   }
   for (const voice of incoming) {
     const id = voiceId(voice)
-    if (!id || used.has(id) || voiceHidden(voice, visible, firstLaneId)) continue
+    if (!id || used.has(id) || voiceHidden(voice, visible)) continue
     next.push(voice)
     used.add(id)
   }
@@ -278,13 +263,12 @@ export function restoreHiddenTtsSettings(
   lanes: readonly LaneIdentity[],
 ): Record<string, unknown> {
   if (visible === null) return incoming
-  const firstLaneId = firstLaneIdFromIdentities(lanes)
   const storedVoices = voiceList(stored.voices)
-  const hiddenIds = hiddenVoiceIds(storedVoices, visible, firstLaneId)
+  const hiddenIds = hiddenVoiceIds(storedVoices, visible)
   const produced: Record<string, unknown> = {}
 
   if ("voices" in stored || "voices" in incoming) {
-    produced.voices = mergeVoices(storedVoices, voiceList(incoming.voices), visible, firstLaneId)
+    produced.voices = mergeVoices(storedVoices, voiceList(incoming.voices), visible)
   }
   if (isRecord(stored.castAssignments) || isRecord(incoming.castAssignments)) {
     produced.castAssignments = mergeCastMap(
@@ -422,7 +406,6 @@ export function incomingRewritesHiddenVoices(
   lanes: readonly LaneIdentity[],
 ): boolean {
   if (visible === null) return false
-  const firstLaneId = firstLaneIdFromIdentities(lanes)
   const storedVoices = voiceList(stored.voices)
   const storedById = new Map<string, Record<string, unknown>>()
   for (const voice of storedVoices) {
@@ -430,14 +413,14 @@ export function incomingRewritesHiddenVoices(
     if (id) storedById.set(id, voice)
   }
   for (const voice of voiceList(incoming.voices)) {
-    if (!voiceHidden(voice, visible, firstLaneId)) continue
+    if (!voiceHidden(voice, visible)) continue
     const id = voiceId(voice)
     const kept = id ? storedById.get(id) : undefined
     if (!kept || !sameJson(kept, voice)) return true
   }
   if (rewrittenHiddenLaneMap(stored.laneCastAssignments, incoming.laneCastAssignments, visible, lanes)) return true
   if (rewrittenHiddenLaneMap(stored.laneDefaultVoiceId, incoming.laneDefaultVoiceId, visible, lanes)) return true
-  const hiddenIds = hiddenVoiceIds(storedVoices, visible, firstLaneId)
+  const hiddenIds = hiddenVoiceIds(storedVoices, visible)
   if (isRecord(incoming.castAssignments)) {
     const storedCast = isRecord(stored.castAssignments) ? stored.castAssignments : {}
     for (const [cell, value] of Object.entries(incoming.castAssignments)) {

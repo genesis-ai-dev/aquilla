@@ -314,3 +314,81 @@ describe('GET /cells/audit-stats — lane marker (AQU-1506)', () => {
     expect(cells[0].activeValidators).toEqual(['alice'])
   })
 })
+
+// ── AQU-2094 ────────────────────────────────────────────────────────────────
+// WHY: on a whole Bible the full answer was ~9 MB of JSON, almost all of it the
+// chain head, hash and edit time of rows the client has already loaded. A
+// sparse read lists only cells someone has validated or waived, and the client
+// reads every other cell as "none of either".
+describe('GET /cells/audit-stats — sparse (AQU-2094)', () => {
+  const row = (cellId: string, side: string, eventId: string, lane: Record<string, string> = {}) => ({
+    project_id: 'proj-x', file_id: 'file-x', cell_id: cellId,
+    side, value: 'v', content_hash: `h-${cellId}`,
+    event_id: eventId, source_event_id: null,
+    last_editor: 'dev', last_edit_at: 1000, validated: 0, word_count: 1,
+    ...lane,
+  })
+  const SEED = {
+    lanes: [
+      { id: 'lane-src', project_id: 'proj-x', role: 'source', legacy_tag: '' },
+      { id: 'lane-def', project_id: 'proj-x', role: 'target', legacy_tag: '' },
+      { id: 'lane-fr', project_id: 'proj-x', role: 'target', legacy_tag: 'fr' },
+    ],
+    cells: [
+      row('validated', 'target', 'ev-v', { target_lang: '', lane_id: 'lane-def' }),
+      row('untouched', 'source', 'ev-u', { target_lang: '', lane_id: 'lane-src' }),
+      // A validator on an earlier edit no longer counts, so the cell is unlisted.
+      row('stale', 'target', 'ev-s-new', { target_lang: '', lane_id: 'lane-def' }),
+      row('waived', 'target', 'ev-w', { target_lang: '', lane_id: 'lane-def' }),
+      // Validated on fr only: the default lane's row must come too, or the
+      // client could not tell that lane's row exists and is unvalidated.
+      row('two-lanes', 'source', 'ev-t-src', { target_lang: '', lane_id: 'lane-src' }),
+      row('two-lanes', 'target', 'ev-t-fr', { target_lang: 'fr', lane_id: 'lane-fr' }),
+      row('two-lanes', 'target', 'ev-t-def', { target_lang: '', lane_id: 'lane-def' }),
+    ],
+    cell_validators: [
+      { project_id: 'proj-x', file_id: 'file-x', cell_id: 'validated', target_lang: '', lane_id: 'lane-def', event_id: 'ev-v', username: 'alice', decided_ts: 1 },
+      { project_id: 'proj-x', file_id: 'file-x', cell_id: 'stale', target_lang: '', lane_id: 'lane-def', event_id: 'ev-s-old', username: 'alice', decided_ts: 1 },
+      { project_id: 'proj-x', file_id: 'file-x', cell_id: 'two-lanes', target_lang: 'fr', lane_id: 'lane-fr', event_id: 'ev-t-fr', username: 'bob', decided_ts: 1 },
+    ],
+    cell_waivers: [
+      { project_id: 'proj-x', file_id: 'file-x', cell_id: 'waived', rule_id: 'double-space', match_hash: '', reason: null, waived_by: 'dev', waived_ts: 1 },
+    ],
+  }
+
+  async function read(query: string) {
+    const { db } = await makeTestDb(SEED)
+    const token = await makeTestToken(SECRET, { fileId: 'file-x', projectId: 'proj-x' })
+    const res = (await handleCellsAuditReadRequest(
+      new Request(`https://w/cells/audit-stats?${query}`, { headers: { Authorization: `Bearer ${token}` } }),
+      envWith(db),
+    ))!
+    expect(res.status).toBe(200)
+    return (await res.json()) as { cells: { cellId: string; side: string; targetLang: string; activeValidators: string[] }[]; sparse?: boolean }
+  }
+
+  it('lists only validated or waived cells, with every row of each, and says it is sparse', async () => {
+    const body = await read('fileId=file-x&sparse=1')
+    expect(body.sparse).toBe(true)
+    expect(body.cells.map((c) => `${c.cellId}/${c.side}/${c.targetLang}`).sort()).toEqual([
+      'two-lanes/source/',
+      'two-lanes/target/',
+      'two-lanes/target/fr',
+      'validated/target/',
+      'waived/target/',
+    ])
+    expect(body.cells.find((c) => c.cellId === 'validated')!.activeValidators).toEqual(['alice'])
+  })
+
+  it('answers in full without the flag', async () => {
+    const body = await read('fileId=file-x')
+    expect(body.sparse).toBeUndefined()
+    expect(new Set(body.cells.map((c) => c.cellId))).toEqual(new Set(['validated', 'untouched', 'stale', 'waived', 'two-lanes']))
+  })
+
+  it('ignores the flag on a single-cell read, which must always answer for its cell', async () => {
+    const body = await read('fileId=file-x&cellId=untouched&sparse=1')
+    expect(body.sparse).toBeUndefined()
+    expect(body.cells.map((c) => c.cellId)).toEqual(['untouched'])
+  })
+})

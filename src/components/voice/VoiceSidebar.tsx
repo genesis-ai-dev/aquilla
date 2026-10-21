@@ -24,6 +24,9 @@ interface VoiceSidebarProps {
   username: string
   targetLanguage?: string
   fileId?: string | null
+  /** AQU-2037: the open target lane's row id — the roster lists this lane's
+   *  voices, and a voice made here is stamped with it. */
+  laneId?: string | null
   /**
    * AQU-2041. When omitted, the project's own switch is used. The workspace
    * passes false when the open lane is not one this lead can write.
@@ -33,7 +36,7 @@ interface VoiceSidebarProps {
 
 export function VoiceSidebar({
   project, projectId, tts, session, username,
-  targetLanguage, fileId, cells, leadsManageVoices,
+  targetLanguage, fileId, cells, laneId, leadsManageVoices,
 }: VoiceSidebarProps) {
   // `username` is part of the rail's contract (the studio is project-scoped)
   // but the cast roster reads everything else it needs off `tts`.
@@ -45,13 +48,23 @@ export function VoiceSidebar({
   // rather than languages on a lane tagged with its own id. Archived lanes are
   // already left out, so no archive list is passed on.
   const laneLanguages = useMemo(() => liveTargetLaneLanguages(project.lanes), [project.lanes])
+  // AQU-2038: the roster's star is the LANE's default, while its voice list
+  // stays the whole library — a write from the panel carries every voice back
+  // (AQU-2037), and `saveTts` routes the `defaultVoiceId` it sends to this
+  // lane's own star. Handing it the project-wide default instead would draw
+  // the wrong star and move the lane's star back on the next voice edit.
+  const panelSettings = useMemo(
+    () => (tts.settings ? { ...tts.settings, defaultVoiceId: tts.laneSettings?.defaultVoiceId } : tts.settings),
+    [tts.settings, tts.laneSettings],
+  )
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 overflow-hidden rounded-xl border bg-background">
         <div className="h-full w-full overflow-x-hidden">
           <VoiceLibraryPanel
-            settings={tts.settings}
+            settings={panelSettings}
+            laneId={laneId}
             onSettingsChange={tts.saveTts}
             targetLanguage={targetLanguage}
             targetLanes={laneLanguages}

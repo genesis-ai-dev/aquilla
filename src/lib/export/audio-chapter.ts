@@ -23,6 +23,7 @@ import { parseCanonicalRef } from "@/lib/progress/canonical-rollup"
 import { chapterLabelForCell } from "./chapter-scope"
 import { characterKey } from "./audio-by-character"
 import { isSilencedForExport } from "./audio-validation-scope"
+import { isUserAddedLine } from "@/lib/timeline/user-line-origin"
 
 export interface ChapterClip {
   cellId: string
@@ -89,6 +90,33 @@ function canonicalOf(cell: CellData) {
   return parseCanonicalRef(cell.group) ?? parseCanonicalRef(cell.context) ?? parseCanonicalRef(cell.section)
 }
 
+type VerseRef = ReturnType<typeof canonicalOf>
+
+/**
+ * Each cell's verse: its own address, or — for a line added in the app, which
+ * has none — the verse it sits under.
+ *
+ * AQU-1759: splitting a verse at its quotation marks so the quotation can be
+ * voiced by someone else leaves the quotation on a row with no address (that
+ * is how the USFM export reassembles the verse). Read as "no verse", its take
+ * fell out of the chapter into the leftover file, and the chapter played the
+ * narration with the speech missing. An added line belongs to the verse above
+ * it — the same rule progress and the USFM export already follow — so it
+ * joins that verse here, right after it in document order.
+ */
+function versesForCells(cells: readonly CellData[]): VerseRef[] {
+  let above: VerseRef = null
+  return cells.map((cell) => {
+    const own = canonicalOf(cell)
+    if (isChapterHeading(cell)) return own
+    if (own) {
+      above = own
+      return own
+    }
+    return isUserAddedLine(cell) ? above : null
+  })
+}
+
 function verseSortNumber(verse: string): number {
   const n = parseInt(verse, 10)
   return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY
@@ -115,8 +143,7 @@ function chapterFromLabel(raw: string | null | undefined): { book: string; chapt
   return { book, chapter, key: label }
 }
 
-function chapterOfVerse(cell: CellData): { book: string; chapter: string; key: string } | null {
-  const ref = canonicalOf(cell)
+function chapterOfVerse(ref: VerseRef): { book: string; chapter: string; key: string } | null {
   if (!ref) return null
   return { book: ref.book, chapter: ref.chapter, key: `${ref.book} ${ref.chapter}` }
 }
@@ -132,14 +159,15 @@ function chapterOfVerse(cell: CellData): { book: string; chapter: string; key: s
  */
 function chaptersForCells(
   cells: CellData[],
+  verses: readonly VerseRef[],
   includeChapterHeadings: boolean,
 ): Array<{ book: string; chapter: string; key: string } | null> {
-  const direct = cells.map((cell) => {
+  const direct = cells.map((cell, i) => {
     if (isChapterHeading(cell)) {
       if (!includeChapterHeadings) return null
       return chapterFromLabel(cell.group) ?? chapterFromLabel(cell.section) ?? chapterFromLabel(cell.context)
     }
-    return chapterOfVerse(cell)
+    return chapterOfVerse(verses[i])
   })
   if (!includeChapterHeadings) return direct
   for (let i = 0; i < cells.length; i++) {
@@ -207,7 +235,8 @@ export function groupAudioByChapter(
   opts?: GroupAudioByChapterOptions,
 ): ChapterGroup[] {
   const includeChapterHeadings = opts?.includeChapterHeadings === true
-  const chapters = chaptersForCells(cells, includeChapterHeadings)
+  const verses = versesForCells(cells)
+  const chapters = chaptersForCells(cells, verses, includeChapterHeadings)
   const order: string[] = []
   const byKey = new Map<string, ChapterGroup>()
 
@@ -218,7 +247,7 @@ export function groupAudioByChapter(
     const attachment = cell.attachments?.[audioId]
     if (!attachment?.url) return
 
-    const ref = canonicalOf(cell)
+    const ref = verses[documentIndex]
     const chapter = chapters[documentIndex] ?? null
     const heading = isChapterHeading(cell)
     const key = chapter?.key ?? FILE_GROUP_KEY

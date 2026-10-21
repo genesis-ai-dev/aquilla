@@ -75,6 +75,9 @@ export function deriveCommittedCellStats(
 
 export interface UseCellsAuditStatsResult {
   byCellId: Map<string, CellAuditStats>
+  /** AQU-2094: `byCellId` came from a sparse read, so a cell missing from it
+   *  has no validators and no waivers (rather than "not loaded"). */
+  complete: boolean
   isLoading: boolean
   isError: boolean
   revalidate: () => void
@@ -161,12 +164,18 @@ function mergeStatsRows(
   return map
 }
 
+/**
+ * AQU-2094: asks for a sparse read — only cells someone has validated or
+ * waived. The rest of an entry is on the rows the editor already has, and on a
+ * whole Bible the full answer was ~9 MB. A worker that predates the flag
+ * answers in full, without `sparse: true`, and `complete` stays false.
+ */
 async function fetchCellsAuditStats(
   fileId: string,
   jwt: string,
   lane: string,
-): Promise<Map<string, CellAuditStats>> {
-  const url = `${syncWorkerHttpOrigin()}/cells/audit-stats?fileId=${encodeURIComponent(fileId)}`
+): Promise<{ map: Map<string, CellAuditStats>; complete: boolean }> {
+  const url = `${syncWorkerHttpOrigin()}/cells/audit-stats?fileId=${encodeURIComponent(fileId)}&sparse=1`
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${jwt}` },
   })
@@ -174,8 +183,8 @@ async function fetchCellsAuditStats(
     const body = await res.text().catch(() => "")
     throw new Error(`cells/audit-stats failed: HTTP ${res.status} — ${body.slice(0, 200)}`)
   }
-  const body = (await res.json()) as { cells: CellAuditStatsWireRow[] }
-  return mergeStatsRows(body.cells, lane)
+  const body = (await res.json()) as { cells: CellAuditStatsWireRow[]; sparse?: boolean }
+  return { map: mergeStatsRows(body.cells, lane), complete: body.sparse === true }
 }
 
 // Single-cell variant of fetchCellsAuditStats — same endpoint, scoped via
@@ -202,6 +211,7 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAud
   const { enabled, fileId, getTokenForFile, lane = "" } = opts
 
   const [data, setData] = useState<Map<string, CellAuditStats>>(EMPTY_AUDIT_STATS)
+  const [complete, setComplete] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [isError, setIsError] = useState(false)
 
@@ -222,6 +232,7 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAud
     const fid = fileRef.current
     if (!enabledRef.current || !fid) {
       setData(EMPTY_AUDIT_STATS)
+      setComplete(false)
       setIsLoading(false)
       setIsError(false)
       return
@@ -238,9 +249,10 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAud
         setIsLoading(false)
         return
       }
-      const map = await fetchCellsAuditStats(fid, token, activeLane)
+      const { map, complete: sparse } = await fetchCellsAuditStats(fid, token, activeLane)
       if (generationRef.current !== gen) return
       setData(map)
+      setComplete(sparse)
       setIsLoading(false)
     } catch (err) {
       if (generationRef.current !== gen) return
@@ -305,5 +317,5 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAud
     return true
   }, [])
 
-  return { byCellId: data, isLoading, isError, revalidate, revalidateCellStats, applyCommittedCellStats }
+  return { byCellId: data, complete, isLoading, isError, revalidate, revalidateCellStats, applyCommittedCellStats }
 }

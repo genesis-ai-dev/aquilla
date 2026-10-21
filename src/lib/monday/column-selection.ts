@@ -7,13 +7,14 @@
 // ID is always included: it is how a later setup finds the items Aquilla made.
 
 import {
-  MONDAY_COLUMN_CATALOG,
+  MONDAY_COLUMN_PROFILE,
   mergeAddedColumns,
   metricOnBoard,
   type MondayColumnMapping,
   type MondayMetricKey,
 } from "./types"
 import type { MondayAddColumnsResult, MondayBoardStructure } from "./api"
+import type { ColumnProfile } from "@/lib/integrations/sync-ui"
 
 export const REQUIRED_METRIC: MondayMetricKey = "external_id"
 
@@ -27,6 +28,13 @@ export const RECOMMENDED_METRICS: readonly MondayMetricKey[] = [
   "deadline",
   "schedule_status",
 ]
+
+/**
+ * AQU-1989: the columns that put people's names on the board. Never in the
+ * recommended set, so a new board carries no names unless someone ticks one;
+ * while one is ticked the picker says who will see them.
+ */
+export const NAME_METRICS: readonly MondayMetricKey[] = ["project_manager", "translators"]
 
 export type MondayColumnGroupKey = "progress" | "schedule" | "team"
 
@@ -74,10 +82,11 @@ export function initialColumnSelection(
   rows: MondayColumnMapping[],
   boardColumns: BoardColumns,
   { recommend }: { recommend: boolean },
+  profile: ColumnProfile = MONDAY_COLUMN_PROFILE,
 ): Set<MondayMetricKey> {
   const picked = new Set<MondayMetricKey>([REQUIRED_METRIC])
-  for (const { metric } of MONDAY_COLUMN_CATALOG) {
-    if (metricOnBoard(metric, rows, boardColumns)) picked.add(metric)
+  for (const { metric } of profile.catalog) {
+    if (metricOnBoard(metric, rows, boardColumns, profile)) picked.add(metric)
   }
   if (recommend) for (const metric of RECOMMENDED_METRICS) picked.add(metric)
   return picked
@@ -88,12 +97,13 @@ export function columnSelectionCounts(
   selected: ReadonlySet<MondayMetricKey>,
   rows: MondayColumnMapping[],
   boardColumns: BoardColumns,
+  profile: ColumnProfile = MONDAY_COLUMN_PROFILE,
 ): { adds: number; uses: number } {
   let adds = 0
   let uses = 0
-  for (const { metric } of MONDAY_COLUMN_CATALOG) {
+  for (const { metric } of profile.catalog) {
     if (!selected.has(metric)) continue
-    if (metricOnBoard(metric, rows, boardColumns)) uses++
+    if (metricOnBoard(metric, rows, boardColumns, profile)) uses++
     else adds++
   }
   return { adds, uses }
@@ -103,10 +113,20 @@ export function columnSelectionCounts(
 export function metricsToAdd(
   selected: ReadonlySet<MondayMetricKey>,
   rows: MondayColumnMapping[],
+  profile: ColumnProfile = MONDAY_COLUMN_PROFILE,
 ): MondayMetricKey[] {
-  return MONDAY_COLUMN_CATALOG.map((c) => c.metric).filter(
+  return profile.catalog.map((c) => c.metric).filter(
     (metric) => selected.has(metric) && !rows.some((r) => r.metric === metric && r.columnId),
   )
+}
+
+/**
+ * AQU-2087: the columns for a board Aquilla makes, in the order the picker
+ * lists them (Progress, Schedule, Team), with Aquilla ID last.
+ */
+export function newBoardMetrics(selected: ReadonlySet<MondayMetricKey>): MondayMetricKey[] {
+  const ordered = MONDAY_COLUMN_GROUPS.flatMap((group) => group.metrics).filter((metric) => selected.has(metric))
+  return [...ordered, REQUIRED_METRIC]
 }
 
 /**
@@ -119,8 +139,9 @@ export function selectedRows(
   rows: MondayColumnMapping[],
   selected: ReadonlySet<MondayMetricKey>,
   added: MondayAddColumnsResult | null,
+  profile: ColumnProfile = MONDAY_COLUMN_PROFILE,
 ): MondayColumnMapping[] {
   const merged = added ? mergeAddedColumns(rows, [...added.reused, ...added.created]) : rows
-  const inCatalog = new Set<MondayMetricKey>(MONDAY_COLUMN_CATALOG.map((c) => c.metric))
+  const inCatalog = new Set<MondayMetricKey>(profile.catalog.map((c) => c.metric))
   return merged.filter((r) => r.columnId && (!inCatalog.has(r.metric) || selected.has(r.metric)))
 }

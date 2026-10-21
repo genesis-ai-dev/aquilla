@@ -40,6 +40,7 @@ import {
 import type { ProjectTtsSettings, TtsProvider, Voice } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { PRESET_VOICES, upsertVoice } from "@/lib/audio/voices"
+import { voicesForLane } from "@/lib/audio/voice-lanes"
 import { formatVoiceLanguageName, languageForVoiceDescription } from "@/lib/audio/inworld-languages"
 import { providerInfo, resolveTtsProvider } from "@/lib/audio/tts-providers"
 import { NewVoiceModal } from "@/components/voice/NewVoiceModal"
@@ -73,6 +74,14 @@ interface Props {
   targetLanes?: string[]
   archivedLanes?: string[]
   settings: ProjectTtsSettings | undefined
+  /**
+   * AQU-2037: the open target lane's row id. The roster LISTS and COUNTS only
+   * this lane's voices (plus the lane-less ones AQU-2039 has yet to migrate),
+   * while every write still carries the project's whole library — this panel
+   * owns that library, and writing back one lane's slice would delete the rest.
+   * Null/absent on a project with no target lane rows: nothing is scoped then.
+   */
+  laneId?: string | null
   onSettingsChange: (next: Partial<ProjectTtsSettings>) => void | Promise<void>
   projectId?: string
   fileId?: string | null
@@ -107,7 +116,7 @@ type Editing =
   | { kind: "edit"; voice: Voice }
 
 export function VoiceLibraryPanel({
-  targetLanguage, targetLanes, archivedLanes, settings, onSettingsChange, projectId, fileId, session,
+  targetLanguage, targetLanes, archivedLanes, settings, laneId, onSettingsChange, projectId, fileId, session,
   selectedVoiceId, onSelectVoice, castStats, cells, roleLevel, leadsManageVoices = false,
 }: Props) {
   const t = useT()
@@ -196,16 +205,34 @@ export function VoiceLibraryPanel({
 
   const makeDefault = useCallback((voice: Voice) => writeBack(voices, voice.id), [voices, writeBack])
 
+  // AQU-2037: what this lane is OFFERED. Falls back to the presets when the
+  // lane has none of its own, so a target lane added to a project whose voices
+  // all belong elsewhere still lists the Narrator rather than nothing — the
+  // same rule `laneVoiceLibrary` applies everywhere else.
+  const laneVoices = useMemo(() => {
+    if (!laneId) return voices
+    const mine = voicesForLane(voices, laneId)
+    return mine.length > 0 ? mine : [...PRESET_VOICES]
+  }, [voices, laneId])
+
+  // The active voice (the assign target) must be one this lane has: the stored
+  // default can belong to another lane, and a highlight on a row that is not
+  // listed would offer a cross-lane assignment.
+  const laneSelectedId = laneVoices.some((v) => v.id === selectedId)
+    ? selectedId
+    : laneVoices[0]?.id ?? ""
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return q ? voices.filter((v) => v.name.toLowerCase().includes(q)) : voices
-  }, [voices, query])
+    return q ? laneVoices.filter((v) => v.name.toLowerCase().includes(q)) : laneVoices
+  }, [laneVoices, query])
 
   // AQU-1940: a migrated project can carry tens of thousands of voices (one
   // was minted per verse label), and a row per voice took the whole library
   // into one synchronous render — the tab froze and Chrome killed it on
   // out-of-memory. Mount only the rows in or near the scrollport instead; the
-  // header still counts the whole library and search still scans all of it.
+  // header still counts every row the lane offers and search still scans all
+  // of them (AQU-2037 narrowed both to the lane, not to the window).
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
     count: filtered.length,
@@ -245,7 +272,7 @@ export function VoiceLibraryPanel({
       {/* Header */}
       <div className="flex items-center justify-between px-4 pb-2 pt-3">
         <h2 className="text-sm font-semibold">{t("common.voices")}</h2>
-        <span className="text-xs text-muted-foreground">{voices.length}</span>
+        <span className="text-xs text-muted-foreground">{laneVoices.length}</span>
       </div>
 
       {/* Search */}
@@ -291,7 +318,7 @@ export function VoiceLibraryPanel({
                     voice={voice}
                     projectProvider={projectProvider}
                     showLanguageBadge={languageBadge}
-                    active={voice.id === selectedId}
+                    active={voice.id === laneSelectedId}
                     isDefault={voice.id === defaultVoiceId}
                     stats={castStats?.get(voice.id)}
                     canEdit={canEditVoices}

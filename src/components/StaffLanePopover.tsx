@@ -603,7 +603,7 @@ export function StaffLanePopover({
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={t("org.staffLanePopover.searchPlaceholder")}
-                aria-label={t("org.teamDetail.searchOrgMembersAriaLabel")}
+                aria-label={t("org.staffLanePopover.searchPlaceholder")}
                 className="h-8 ps-7 text-xs"
                 disabled={blockSearch}
               />
@@ -614,7 +614,11 @@ export function StaffLanePopover({
                 data-reason={rosterBlocked}
                 className="text-[11px] text-muted-foreground"
               >
-                {t(ROSTER_BLOCKED_KEY[rosterBlocked])}
+                {t(
+                  rosterBlocked === "hidden"
+                    ? "org.staffLanePopover.rosterHiddenWithInvitees"
+                    : "org.staffLanePopover.rosterNoAccessWithInvitees",
+                )}
               </p>
             )}
             <ul className="max-h-40 divide-y overflow-y-auto rounded border">
@@ -649,12 +653,9 @@ export function StaffLanePopover({
                 ))
               )}
             </ul>
-            {/* AQU-607: this control only reaches people already in your org —
-                that's why an outside-org name never appears here (the demo's
-                "you're not in my organization" dead-end). Surface the second
-                path explicitly rather than failing silently: external
-                contributors (e.g. translators) join via a project invite
-                link, not the org roster. */}
+            {/* AQU-607 / AQU-1798: the search reaches org members and people
+                already on this project. Someone in neither group still joins
+                through a project invite, so that path stays under the list. */}
             <p className="text-[11px] text-muted-foreground">
               {t("org.staffLanePopover.searchScopeNote")}{" "}
               <Link

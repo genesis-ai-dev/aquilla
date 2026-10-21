@@ -186,4 +186,54 @@ describe("buildRepetitionCounts", () => {
     const lone = buildRepetitionCounts([cell({ id: "a" }), cell({ id: "parked", hidden: true })])
     expect(lone.size).toBe(0)
   })
+
+  // AQU-2045: rows made from a recording all store the recording's file name.
+  it("counts rows made from a recording by their transcript, never by the file name they all store", () => {
+    const fromRecording = (id: string, transcription?: string) =>
+      cell({ id, original: "speech.webm", medium: "media", ...(transcription === undefined ? {} : { transcription }) })
+    const counts = buildRepetitionCounts([
+      fromRecording("m1", "Amen."),
+      fromRecording("m2", "In the beginning was the Word."),
+      fromRecording("m3", "  amen. "),
+      fromRecording("m4"),
+      fromRecording("m5"),
+      cell({ id: "text", original: "speech.webm" }),
+    ])
+    expect(counts.get("m1")).toBe(2)
+    expect(counts.get("m3")).toBe(2)
+    expect(counts.has("m2")).toBe(false)
+    // No transcript yet: nothing to repeat.
+    expect(counts.has("m4")).toBe(false)
+    expect(counts.has("m5")).toBe(false)
+    // A text row whose words happen to be the file name is not one of them.
+    expect(counts.has("text")).toBe(false)
+  })
+})
+
+describe("planRepetitionPropagation on rows made from a recording", () => {
+  it("fills only rows whose transcript repeats, not every row of the recording", () => {
+    const fromRecording = (over: Partial<RepetitionCell> & { id: string }) =>
+      cell({ original: "speech.webm", medium: "media", ...over })
+    const commits = planRepetitionPropagation({
+      confirmedCellId: "m1",
+      cells: [
+        fromRecording({ id: "m1", transcription: "Amen.", translated: "Amina.", status: "validated" }),
+        fromRecording({ id: "m2", transcription: "In the beginning was the Word." }),
+        fromRecording({ id: "m3", transcription: "Amen." }),
+        fromRecording({ id: "m4" }),
+      ],
+    })
+    expect(commits.map((c) => c.cellId)).toEqual(["m3"])
+  })
+
+  it("never fills from a row with no transcript yet", () => {
+    const commits = planRepetitionPropagation({
+      confirmedCellId: "m1",
+      cells: [
+        cell({ id: "m1", original: "speech.webm", medium: "media", translated: "Amina.", status: "validated" }),
+        cell({ id: "m2", original: "speech.webm", medium: "media" }),
+      ],
+    })
+    expect(commits).toEqual([])
+  })
 })

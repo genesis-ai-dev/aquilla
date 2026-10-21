@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { LOCALES } from "./locales"
-import { CATALOGS } from "./messages"
+import { CATALOGS } from "./messages/all"
 import { en, type MessageKey } from "./messages/en"
 
 const KB_KEYS = (Object.keys(en) as MessageKey[]).filter((key) =>

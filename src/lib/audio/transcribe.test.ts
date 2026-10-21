@@ -11,6 +11,7 @@ import { MemoryDirectoryHandle } from "@/lib/fs/__test__/mem-fs-handles"
 import { __setRootForTests, __flushAudioCacheForTests, audioCachePut, audioCacheGet } from "./bytes-cache"
 import { __resetOpfsAvailabilityForTests } from "@/lib/storage/opfs-availability"
 import { transcribeCell, slicePcmToTrim, __setTranscribeAudioForTests } from "./transcribe"
+import { releaseSharedClipPcm, sharedClipWindow } from "./shared-clip-pcm"
 import { getTranscribeStatus, clearTranscribeStatus } from "./transcribe-status"
 import { buildFrontierAudioUrl } from "./upload"
 import type { CellData } from "@/hooks/useCells"
@@ -186,6 +187,46 @@ describe("transcribeCell — imported media segments (AQU-646)", () => {
     const opts = (impl.mock.calls[0] as unknown[])[1] as import("./transcribe").TranscriptionOptions
     expect(opts.trim).toEqual({ trimStartMs: 1000, trimEndMs: 4000 })
     expect(opts.language).toBe("fr")
+  })
+
+  // AQU-1681: the rows of one shared clip decode it once (shared-clip-pcm.ts),
+  // so a row after the first must not read the clip's bytes again either —
+  // for a feature-length recording that is tens of megabytes per row.
+  it("names the shared clip, and skips reading its bytes once a row has decoded it", async () => {
+    await audioCachePut(AUDIO_ID, EXT, new Uint8Array([1, 2, 3]))
+    const impl = fakeTranscribe(["hola"])
+    __setTranscribeAudioForTests(impl)
+
+    await transcribeCell({ cell: makeMediaCell(), session, projectId: "proj-1", language: "es" })
+    const first = impl.mock.calls[0] as unknown as [Uint8Array, import("./transcribe").TranscriptionOptions]
+    expect(first[0]).toEqual(new Uint8Array([1, 2, 3]))
+    expect(first[1].sharedClipKey).toBe(FULL_ID)
+
+    // An earlier row of the batch decoded the clip.
+    await sharedClipWindow(FULL_ID, { trimStartMs: 0, trimEndMs: 1 }, () => new Uint8Array(), async () => new Float32Array(16))
+    await transcribeCell({ cell: makeMediaCell(), session, projectId: "proj-1", language: "es" })
+    const second = impl.mock.calls[1] as unknown as [Uint8Array, import("./transcribe").TranscriptionOptions]
+    expect(second[0].byteLength).toBe(0)
+    expect(fetchCellAudio).not.toHaveBeenCalled()
+    // Should the clip have been let go meanwhile, the bytes are still to hand.
+    expect(await second[1].loadClipBytes?.()).toEqual(new Uint8Array([1, 2, 3]))
+    releaseSharedClipPcm()
+  })
+
+  // AQU-1681: a minute of the shared recording was recognised in one request
+  // (transcribe-chunked.ts); each row then only stores its share — its audio
+  // is not read, and nothing more is sent anywhere.
+  it("stores a row's share of a minute without reading or sending its audio", async () => {
+    const impl = fakeTranscribe(["never"])
+    __setTranscribeAudioForTests(impl)
+    const words = await transcribeCell({
+      cell: makeMediaCell(), session, projectId: "proj-1", language: "es",
+      prerecognised: { text: "Hola, mundo.", chunks: [{ text: "Hola,", start: 0.1, end: 0.4 }, { text: "mundo.", start: 0.5, end: 0.9 }] },
+    })
+    expect(words).toBe(2)
+    expect(impl).not.toHaveBeenCalled()
+    expect(fetchCellAudio).not.toHaveBeenCalled()
+    expect(emitCellAudioAttach).toHaveBeenCalledWith(expect.objectContaining({ transcription: "Hola, mundo." }))
   })
 
   it("leaves language undefined (auto-detect) for unmapped tags", async () => {

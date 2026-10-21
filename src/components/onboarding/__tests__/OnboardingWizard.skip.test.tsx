@@ -244,8 +244,8 @@ describe("OnboardingWizard — fresh-signup path unchanged", () => {
 
 it("preserves a paid marketing selection when a returning account signs in", async () => {
   mockListMyOrgs.mockResolvedValue([{ id: 7, name: "Existing" }])
-  renderWizard("/onboarding?offer=max-20x&interval=annual&quantity=1&audience=individual")
+  renderWizard("/onboarding?offer=team&interval=annual&quantity=1&audience=team")
   advanceToSignIn()
   fireEvent.click(screen.getByRole("button", { name: "Login complete" }))
-  await waitFor(() => expect(navigate).toHaveBeenCalledWith("/billing/select?offer=max_20x&interval=year&quantity=1"))
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith("/billing/select?offer=team&interval=year&quantity=1"))
 })

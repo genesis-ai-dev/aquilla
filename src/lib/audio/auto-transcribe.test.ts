@@ -121,6 +121,19 @@ describe("autoTranscribeImportedMedia", () => {
     expect(runTranscribeAll).not.toHaveBeenCalled()
   })
 
+  // AQU-1681: the hosted limit can pause a long run for a quarter of an hour;
+  // the workspace's progress toast has to hear about it to say so.
+  it("tells the caller when the transcription limit pauses the run", async () => {
+    runTranscribeAll.mockImplementation(async (a: unknown) => {
+      const args = a as { onWaiting?: (until: number | null) => void }
+      args.onWaiting?.(1_700_000_000_000)
+      args.onWaiting?.(null)
+    })
+    const onWaiting = vi.fn()
+    await autoTranscribeImportedMedia({ seed, projectId: "p1", session: null, onWaiting })
+    expect(onWaiting.mock.calls).toEqual([[1_700_000_000_000], [null]])
+  })
+
   it("awaits onDone after the batch", async () => {
     const order: string[] = []
     runTranscribeAll.mockImplementation(async () => { order.push("batch") })

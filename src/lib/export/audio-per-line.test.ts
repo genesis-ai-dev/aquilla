@@ -44,7 +44,7 @@ const withTake = (id: string, startTime: number, ext = "wav") =>
   })
 
 /** A minimal but real RIFF/WAVE: header, `fmt `, `data`. */
-function makeWav(dataBytes = 8): Uint8Array {
+function makeWav(dataBytes = 8, sampleRate = 48000): Uint8Array {
   const bytes = new Uint8Array(12 + 8 + 16 + 8 + dataBytes)
   const view = new DataView(bytes.buffer)
   const tag = (at: number, s: string) => { for (let i = 0; i < 4; i += 1) view.setUint8(at + i, s.charCodeAt(i)) }
@@ -56,8 +56,8 @@ function makeWav(dataBytes = 8): Uint8Array {
   // see a blockAlign of 0 the moment something did (2026-08-27).
   view.setUint16(20, 1, true)      // audioFormat: PCM
   view.setUint16(22, 1, true)      // channels: mono
-  view.setUint32(24, 48000, true)  // sampleRate
-  view.setUint32(28, 96000, true)  // byteRate = rate * blockAlign
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * 2, true)  // byteRate = rate * blockAlign
   view.setUint16(32, 2, true)      // blockAlign: 1 channel * 16 bits
   view.setUint16(34, 16, true)     // bitsPerSample
   tag(36, "data"); view.setUint32(40, dataBytes, true)
@@ -801,6 +801,27 @@ describe("where a take is placed in the export", () => {
     expect(result.files).toBe(1)
   })
 
+  // AQU-1575: the timestamp is a count of the FILE'S samples. Inworld takes
+  // are stored at 24 kHz and Seed-VC takes at 22.05 kHz; stamped as if every
+  // WAV were 48 kHz, a DAW placed them at about twice their real time.
+  it("stamps a 24 kHz and a 22.05 kHz take at their own sample rates", async () => {
+    const rates: Record<string, number> = { "a-inworld": 24_000, "a-seedvc": 22_050 }
+    const result = await exportAudioPerLine({
+      cells: [withTake("inworld", 10), withTake("seedvc", 20)],
+      settings: SETTINGS, projectId: "p1", langCode: "es",
+      fetchBytes: async ({ audioId }) => makeWav(8, rates[audioId]),
+    })
+    const zip = await JSZip.loadAsync(await result.blob.arrayBuffer())
+    const timeReference = async (entry: string) => {
+      const bytes = await zip.file(entry)!.async("uint8array")
+      const at = new TextDecoder("latin1").decode(bytes).indexOf("bext")
+      return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(at + 8 + 338, true)
+    }
+    // 10 s at 24,000 a second, and 20 s at 22,050 a second.
+    expect(await timeReference("es_L0001_NO_CHARACTER.wav")).toBe(240_000)
+    expect(await timeReference("es_L0002_NO_CHARACTER.wav")).toBe(441_000)
+  })
+
   it("falls back to the line's start for a take nobody has placed", async () => {
     const result = await exportAudioPerLine({
       cells: [withTake("c1", 7)], settings: SETTINGS, projectId: "p1", langCode: "es",
@@ -827,5 +848,179 @@ describe("where a take is placed in the export", () => {
     const zip = await JSZip.loadAsync(await result.blob.arrayBuffer())
     const csv = await zip.file("manifest.csv")!.async("string")
     expect(csv).toContain("00:00:10.000")
+  })
+})
+
+// ── AQU-1575: every take as 16-bit / 48 kHz / mono WAV ─────────────────────
+//
+// LOTE's broadcast vendor needs exactly that file, and the stored takes are a
+// mix: 24 kHz Inworld WAVs, 22.05 kHz Seed-VC WAVs, compressed webm for Gemini
+// and MMS and for denoised takes. The WAV choice decodes each one and writes it
+// again on the chapter export's path.
+describe("the WAV format", () => {
+  /** What a written entry says about itself, read from its own header. */
+  const entryOf = async (blob: Blob, name: string) => {
+    const zip = await JSZip.loadAsync(await blob.arrayBuffer())
+    const bytes = await zip.file(name)!.async("uint8array")
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+    const chunks = new Map<string, { start: number; size: number }>()
+    let at = 12
+    while (at + 8 <= bytes.length) {
+      const id = String.fromCharCode(bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3])
+      const size = view.getUint32(at + 4, true)
+      chunks.set(id, { start: at + 8, size })
+      at += 8 + size + (size % 2)
+    }
+    const fmt = chunks.get("fmt ")!
+    const bext = chunks.get("bext")
+    return {
+      audioFormat: view.getUint16(fmt.start, true),
+      channels: view.getUint16(fmt.start + 2, true),
+      sampleRate: view.getUint32(fmt.start + 4, true),
+      bitsPerSample: view.getUint16(fmt.start + 14, true),
+      dataBytes: chunks.get("data")!.size,
+      timeReference: bext ? view.getUint32(bext.start + 338, true) : null,
+    }
+  }
+
+  /** Every take decodes to one second of 48 kHz audio. */
+  const oneSecond = async () => new Float32Array(48_000).fill(0.25)
+
+  const mixed = [
+    // A recorded mic take, stored compressed.
+    withTake("mic", 10, "webm"),
+    // A 24 kHz Inworld take, stored as a WAV.
+    withTake("inworld", 20, "wav"),
+    // A Gemini take: compressed, with a lossless WAV copy uploaded beside it.
+    cell({
+      id: "gemini", startTime: 30, endTime: 31,
+      selectedGeneratedVoiceAudioId: "gen-1.webm",
+      attachments: { "gen-1.webm": { url: "frontier-audio://gen-1.webm", type: "audio" } },
+    }),
+  ]
+
+  it("writes every take as a 16-bit, 48 kHz, mono WAV, whatever it was stored as", async () => {
+    const result = await exportAudioPerLine({
+      cells: mixed, settings: SETTINGS, projectId: "p1", langCode: "es",
+      format: "wav",
+      decode: oneSecond,
+      fetchBytes: async ({ ext }) =>
+        ext === "wav" ? makeWav(8, 24_000) : new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3, 4]),
+    })
+    const names = Object.keys((await JSZip.loadAsync(result.blob)).files).filter((n) => n !== "manifest.csv")
+    expect(names.sort()).toEqual([
+      "es_L0001_NO_CHARACTER.wav",
+      "es_L0002_NO_CHARACTER.wav",
+      "es_L0003_NO_CHARACTER.wav",
+    ])
+    for (const name of names) {
+      const entry = await entryOf(result.blob, name)
+      expect(entry).toMatchObject({ audioFormat: 1, channels: 1, sampleRate: 48_000, bitsPerSample: 16 })
+      // One second of audio: 48,000 frames of 2 bytes.
+      expect(entry.dataBytes).toBe(96_000)
+    }
+  })
+
+  it("stamps each converted take's position in 48 kHz samples", async () => {
+    const result = await exportAudioPerLine({
+      cells: mixed, settings: SETTINGS, projectId: "p1", langCode: "es",
+      format: "wav",
+      decode: oneSecond,
+      fetchBytes: async () => makeWav(8, 24_000),
+    })
+    expect((await entryOf(result.blob, "es_L0001_NO_CHARACTER.wav")).timeReference).toBe(10 * 48_000)
+    expect((await entryOf(result.blob, "es_L0002_NO_CHARACTER.wav")).timeReference).toBe(20 * 48_000)
+    expect((await entryOf(result.blob, "es_L0003_NO_CHARACTER.wav")).timeReference).toBe(30 * 48_000)
+  })
+
+  it("decodes a generated take from its WAV copy, and from the webm only when there is none", async () => {
+    const fetched: string[] = []
+    const generated = (id: string) => cell({
+      id, startTime: 5, endTime: 6,
+      selectedGeneratedVoiceAudioId: `${id}.webm`,
+      attachments: { [`${id}.webm`]: { url: `frontier-audio://${id}.webm`, type: "audio" } },
+    })
+    const result = await exportAudioPerLine({
+      cells: [generated("with-copy"), generated("no-copy")],
+      settings: SETTINGS, projectId: "p1", langCode: "es",
+      format: "wav",
+      decode: oneSecond,
+      fetchBytes: async ({ audioId, ext }) => {
+        fetched.push(`${audioId}.${ext}`)
+        if (audioId === "no-copy" && ext === "wav") throw new Error("404")
+        return ext === "wav" ? makeWav() : new Uint8Array([0x1a, 0x45, 0xdf, 0xa3])
+      },
+    })
+    expect(fetched).toEqual(["with-copy.wav", "no-copy.wav", "no-copy.webm"])
+    expect(result.files).toBe(2)
+  })
+
+  it("cuts a trim out of the decoded audio, compressed takes included", async () => {
+    const webmTake = cell({
+      id: "c1", startTime: 10, endTime: 14,
+      selectedAudioId: "a1",
+      attachments: {
+        a1: { url: "frontier-audio://a1.webm", type: "audio", durationMs: 1000, trimStartMs: 250 },
+      },
+    } as Partial<CellData>)
+    const result = await exportAudioPerLine({
+      cells: [webmTake], settings: SETTINGS, projectId: "p1", langCode: "es",
+      format: "wav",
+      decode: oneSecond,
+      fetchBytes: async () => new Uint8Array([0x1a, 0x45, 0xdf, 0xa3]),
+    })
+    const entry = await entryOf(result.blob, "es_L0001_NO_CHARACTER.wav")
+    // 750 ms survives, and it starts a quarter second into the line.
+    expect(entry.dataBytes).toBe(72_000)
+    expect(entry.timeReference).toBe(10.25 * 48_000)
+    expect(result.untrimmed).toBe(0)
+  })
+
+  it("decodes a clip shared by neighbouring lines once", async () => {
+    // A combined generation is attached to every line it covers under one id.
+    const shared = (id: string, at: number) => cell({
+      id, startTime: at, endTime: at + 1,
+      selectedAudioId: "combo",
+      attachments: { combo: { url: "frontier-audio://combo.wav", type: "audio" } },
+    })
+    let decodes = 0
+    const result = await exportAudioPerLine({
+      cells: [shared("c1", 1), shared("c2", 2), shared("c3", 3)],
+      settings: SETTINGS, projectId: "p1", langCode: "es",
+      format: "wav",
+      decode: async () => { decodes += 1; return oneSecond() },
+      fetchBytes: async () => makeWav(),
+    })
+    expect(result.files).toBe(3)
+    expect(decodes).toBe(1)
+  })
+
+  it("counts a take it cannot decode rather than slipping the original into a WAV export", async () => {
+    const result = await exportAudioPerLine({
+      cells: [withTake("c1", 10, "webm"), withTake("c2", 20)],
+      settings: SETTINGS, projectId: "p1", langCode: "es",
+      format: "wav",
+      decode: async (bytes) => {
+        if (bytes[0] === 0x1a) throw new Error("EncodingError")
+        return oneSecond()
+      },
+      fetchBytes: async ({ ext }) => (ext === "wav" ? makeWav() : new Uint8Array([0x1a, 0x45, 0xdf, 0xa3])),
+    })
+    expect(result.skipped).toBe(1)
+    expect(Object.keys((await JSZip.loadAsync(result.blob)).files).sort())
+      .toEqual(["es_L0002_NO_CHARACTER.wav", "manifest.csv"])
+  })
+
+  it("leaves the stored files alone when the format is the original", async () => {
+    let decodes = 0
+    const result = await exportAudioPerLine({
+      cells: [withTake("c1", 10, "webm")],
+      settings: SETTINGS, projectId: "p1", langCode: "es",
+      format: "original",
+      decode: async () => { decodes += 1; return oneSecond() },
+      fetchBytes: async () => new Uint8Array([0x1a, 0x45, 0xdf, 0xa3]),
+    })
+    expect(Object.keys((await JSZip.loadAsync(result.blob)).files)).toContain("es_L0001_NO_CHARACTER.webm")
+    expect(decodes).toBe(0)
   })
 })

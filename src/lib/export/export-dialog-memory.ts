@@ -40,6 +40,9 @@ export interface ExportDialogMemory {
   includeSource: boolean
   /** Chapter-audio stitch: play heading takes inside each chapter file. */
   includeChapterHeadings: boolean
+  /** AQU-1575: Audio by line copies the stored files, or writes every take
+   *  as 16-bit / 48 kHz / mono WAV. */
+  lineAudioFormat: "original" | "wav"
 }
 
 export const DEFAULT_EXPORT_MEMORY: ExportDialogMemory = {
@@ -51,6 +54,7 @@ export const DEFAULT_EXPORT_MEMORY: ExportDialogMemory = {
   excludeLabels: false,
   includeSource: false,
   includeChapterHeadings: false,
+  lineAudioFormat: "original",
 }
 
 interface Entry {
@@ -66,6 +70,7 @@ const AUDIO_MODES: readonly ExportDialogMemory["audioMode"][] = [
   "audio-chapter",
 ]
 const TARGETS: readonly SubtitleTarget[] = ["subtitle", "audio"]
+const LINE_AUDIO_FORMATS: readonly ExportDialogMemory["lineAudioFormat"][] = ["original", "wav"]
 
 const bool = (v: unknown, fallback: boolean): boolean =>
   typeof v === "boolean" ? v : fallback
@@ -101,6 +106,7 @@ export function normalizeExportMemory(raw: unknown): ExportDialogMemory {
     excludeLabels: bool(v.excludeLabels, false),
     includeSource: bool(v.includeSource, false),
     includeChapterHeadings: bool(v.includeChapterHeadings, false),
+    lineAudioFormat: oneOf(v.lineAudioFormat, LINE_AUDIO_FORMATS, DEFAULT_EXPORT_MEMORY.lineAudioFormat),
   }
 }
 

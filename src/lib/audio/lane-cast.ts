@@ -14,6 +14,13 @@
 // The project-wide `castAssignments` / `defaultVoiceId` stay the pre-lane
 // fallback and are never rewritten by a lane's choice, which is what keeps a
 // migrated project generating on every lane (AQU-2039 is the migration).
+//
+// ORDER WITH AQU-2037. `voice-lanes.ts` owns WHICH VOICES a lane can see;
+// this module owns which of them speaks each cell and which is starred.
+// `useProjectTts` applies them in that order — `laneTtsSettings(
+// laneScopedTtsSettings(settings, laneId), lane)` — so the library this
+// projection reads is already the lane's, and "visible on the lane" below
+// means exactly that.
 
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import { getVoiceLibrary } from "./voices"
@@ -26,11 +33,11 @@ import { getVoiceLibrary } from "./voices"
 export const LANE_CAST_DEFAULT = ""
 
 /**
- * The voices this lane can see. AQU-2037 is making the library itself
- * lane-owned; while it is project-wide this is every voice, so the visibility
- * proviso below ("...provided that voice is visible on the lane") is a no-op
- * today and becomes real the moment the library knows about lanes — that
- * follow-up changes this one function, not the rules around it.
+ * The voices this lane can see: the library of the settings handed in. Given
+ * the lane-scoped view from `voice-lanes.ts` (AQU-2037) — which is what
+ * `useProjectTts` passes — that is the lane's own library, and the proviso
+ * below ("...provided that voice is visible on the lane") is the real rule.
+ * Given the whole project blob instead it degrades to every voice.
  */
 function visibleVoiceIds(settings: ProjectTtsSettings): Set<string> {
   return new Set(getVoiceLibrary(settings).map((v) => v.id))

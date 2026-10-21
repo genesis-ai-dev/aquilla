@@ -171,6 +171,12 @@ export interface EditorActionsContextValue {
   /** Take this cell out, after the confirmation its inventory earns. */
   onRemoveCell?: (cellId: string) => void
   /**
+   * AQU-1759: preview splitting this cell at its quotation marks, so each
+   * speaker gets a line (and a voice) of their own. Opens the workspace's
+   * confirmation; nothing is written until it is confirmed.
+   */
+  onSplitAtQuotes?: (cellId: string) => void
+  /**
    * AQU-1422: park this cell, or bring it back. The reversible sibling of
    * `onRemoveCell` — nothing is deleted, so it needs no confirmation and no
    * Maintainer: the source text, every lane's translation, recordings, comments

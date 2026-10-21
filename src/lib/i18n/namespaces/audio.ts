@@ -440,6 +440,9 @@ export const audio = defineNamespace({
       one: "{count} cell is left out because its selected take is the reference clip for a voice.",
       other: "{count} cells are left out because their selected take is the reference clip for a voice.",
     }),
+    // AQU-1681: hosted transcription allows 60 requests per 15 minutes; a
+    // batch that reaches it waits and carries on by itself.
+    "audio.bulkProgress.waitingForLimit": "Transcription limit reached, continuing at {time}",
 
     // BatchVoiceDialog (AQU-1722) — "Generate voice" on the selection bar:
     // speak every selected line in one chosen voice.
@@ -690,6 +693,9 @@ export const audio = defineNamespace({
       "The AI provider took too long to respond. Try again — if it keeps happening, send a smaller request or switch models.",
     "audio.aiError.rateLimitedBody":
       "The AI provider is rate-limiting requests. Wait a moment and try again.",
+    "audio.aiError.transcriptionModelUnavailableTitle": "The transcription model isn't responding",
+    "audio.aiError.transcriptionModelUnavailableBody":
+      "Try again in a moment. If it keeps failing, choose a different model in Preferences → Local models → Transcription, or transcribe on this device instead.",
     "audio.aiError.providerUnavailableBody":
       "The AI provider returned a server error. This is usually temporary — try again in a moment.",
     "audio.aiError.providerRejectedBody":
@@ -2583,6 +2589,14 @@ export const audio = defineNamespace({
           "the project is using the selected take as its reference clip.",
         placeholders: { count: "How many cells were left out for this reason." },
       },
+      "audio.bulkProgress.waitingForLimit": {
+        description:
+          "Shown on the bulk-progress banner while a long transcription waits: the " +
+          "hosted transcription service accepts only so many requests in a quarter of " +
+          "an hour, so the batch pauses and carries on by itself at the time shown. " +
+          "Nothing is lost and the person does not need to do anything.",
+        placeholders: { time: "Clock time the batch carries on, e.g. 7:45 PM, in the reader's locale." },
+      },
       "audio.batchVoice.title": {
         description:
           "Heading of the dialog that generates spoken audio for every line the " +
@@ -3115,6 +3129,17 @@ export const audio = defineNamespace({
         description:
           "Popover heading for a 5xx response from the AI provider — framed as " +
           "usually temporary.",
+      },
+      "audio.aiError.transcriptionModelUnavailableTitle": {
+        description:
+          "Popover heading when the hosted speech-to-text model returned a server " +
+          "error for a recording's transcription.",
+      },
+      "audio.aiError.transcriptionModelUnavailableBody": {
+        description:
+          "Popover body for a failed hosted transcription. Names the remedies: retry, " +
+          "pick another model in Preferences, or use on-device transcription. Keep the " +
+          "Preferences → Local models → Transcription path matching the settings labels.",
       },
       "audio.aiError.providerRejectedTitle": {
         description:

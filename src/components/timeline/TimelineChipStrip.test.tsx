@@ -28,6 +28,24 @@ describe("TimelineTimingRow", () => {
     expect(screen.getByTestId("tl-detail-dub-range")).toHaveTextContent("Target: 0:10.0–0:14.3")
     expect(screen.getByTestId("tl-detail-duration")).toHaveTextContent("4.3s")
     expect(screen.getByTestId("tl-detail-diff")).toHaveTextContent("Diff: +0.7s")
+    // A whole take says nothing about pieces.
+    expect(screen.queryByTestId("tl-detail-pieces")).toBeNull()
+  })
+
+  // AQU-1767 (Sam, 2026-10-19): a split take's Target pill names its pieces.
+  it("a take cut into pieces reads 'N pieces · sound kept' after its span", () => {
+    render(
+      <TimelineTimingRow
+        cell={cell({ original: "x", startTime: 2, endTime: 6.5 })}
+        chipStats={{
+          kind: "dubbing", startSec: 1.5, endSec: 5.5, durationSec: 3.5, pieces: 3,
+          startDiffSec: -0.5, endDiffSec: 1, durationDiffSec: 0.5,
+          headOverlapSec: null, tailOverlapSec: null,
+        }}
+      />,
+    )
+    expect(screen.getByTestId("tl-detail-dub-range")).toHaveTextContent("Target: 0:01.5–0:05.5 | 3 pieces · 3.5s")
+    expect(screen.getByTestId("tl-detail-diff")).toHaveTextContent("Diff: +0.5s")
   })
 
   // 2026-08-08 (Sam): Diff is the whole DURATION difference — the old

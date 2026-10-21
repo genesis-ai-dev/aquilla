@@ -15,8 +15,9 @@ afterEach(() => { cleanup(); vi.restoreAllMocks() })
 function mount(role: string, audio: Array<{ cellId: string; audioId: string }> = []) {
   localStorage.setItem("aquilla:checking:link", JSON.stringify({ session: "s", guestId: "g", name: "Kathryn", title: "Listen", role, projectId: "p" }))
   request.mockResolvedValue({ rows: [
-    { fileId: "f", cellId: "1", fileName: "Mark", label: "MRK 1:1", text: "First passage", side: "source" },
+    { fileId: "f", cellId: "1", fileName: "Mark", label: "MRK 1:1", text: "First passage", side: "source", paragraphStart: true },
     { fileId: "f", cellId: "2", fileName: "Mark", label: "MRK 1:2", text: "Second passage", side: "source" },
+    { fileId: "f", cellId: "3", fileName: "Mark", label: "MRK 1:3", text: "Third passage", side: "source", paragraphStart: true },
   ], audio: audio.map(clip => ({ fileId: "f", url: "frontier-audio://x", trimStartMs: null, trimEndMs: null, ...clip })) })
   render(<MemoryRouter initialEntries={["/check/link"]}><Routes><Route path="/check/:token" element={<CheckingPage />} /></Routes></MemoryRouter>)
 }
@@ -25,10 +26,28 @@ describe("checking guest page", () => {
     mount("commenter")
     const draft = await screen.findByRole("textbox", { name: "Feedback on MRK 1:1" })
     fireEvent.change(draft, { target: { value: "First passage feedback" } })
-    fireEvent.click(screen.getByRole("button", { name: "Mark · MRK 1:2" }))
+    fireEvent.click(screen.getByRole("button", { name: /Second passage/ }))
     expect(screen.getByRole("textbox", { name: "Feedback on MRK 1:2" })).toHaveValue("")
-    fireEvent.click(screen.getByRole("button", { name: "Mark · MRK 1:1" }))
+    fireEvent.click(screen.getByRole("button", { name: /First passage/ }))
     expect(screen.getByRole("textbox", { name: "Feedback on MRK 1:1" })).toHaveValue("First passage feedback")
+  })
+  it("shows the passages as running text, breaking paragraphs only where the file does", async () => {
+    // Listeners read along as with a document; one card per verse loses the flow.
+    mount("viewer")
+    const document = await screen.findByRole("article", { name: "Shared passages" })
+    const paragraphs = [...document.querySelectorAll("p")].map(p => p.textContent?.replace(/\s+/g, " ").trim())
+    expect(paragraphs).toEqual(["1:1First passage 1:2Second passage", "1:3Third passage"])
+  })
+  it("attaches feedback to the passage being heard, and shows it under that passage once sent", async () => {
+    const { queueCheckingFeedback } = await import("@/lib/checking/feedback")
+    mount("commenter")
+    fireEvent.click(await screen.findByRole("button", { name: /Third passage/ }))
+    fireEvent.change(screen.getByRole("textbox", { name: "Feedback on MRK 1:3" }), { target: { value: "Clear and natural" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send feedback" }))
+    await waitFor(() => expect(queueCheckingFeedback).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ cellId: "3" }), "Clear and natural"))
+    expect(await screen.findByRole("list", { name: "Your feedback on this passage" })).toHaveTextContent("Clear and natural")
+    fireEvent.click(screen.getByRole("button", { name: /First passage/ }))
+    expect(screen.queryByRole("list", { name: "Your feedback on this passage" })).not.toBeInTheDocument()
   })
   it("does not offer feedback controls on viewer links", async () => {
     mount("viewer")
@@ -48,6 +67,7 @@ describe("checking guest page", () => {
     await waitFor(() => expect(fetched).toEqual(["a1", "a2"]))
     fireEvent.ended(screen.getByLabelText("Passage recording"))
     expect(await screen.findByRole("heading", { name: "MRK 1:2" })).toBeVisible()
+    expect(screen.getByRole("button", { name: /Second passage/ })).toHaveAttribute("aria-current", "true")
     // The second clip is served from the prefetch, not downloaded again.
     await waitFor(() => expect(screen.getByLabelText("Passage recording")).toHaveAttribute("src", "blob:clip"))
     expect(fetched).toEqual(["a1", "a2"])

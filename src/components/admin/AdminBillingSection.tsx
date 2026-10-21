@@ -37,7 +37,7 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
   const [busy, setBusy] = useState(false)
   const aliveRef = useRef(true)
 
-  const [freeWeekly, setFreeWeekly] = useState("25")
+  const [freeWeekly, setFreeWeekly] = useState("1")
   const [price, setPrice] = useState("")
   const [addonPrice, setAddonPrice] = useState("")
   const [wordsPerCredit, setWordsPerCredit] = useState("")
@@ -59,7 +59,7 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
     try {
       const [plans, rows] = await Promise.all([getAdminBillingPlans(jwt), getAdminBillingOrgs(jwt)])
       if (!aliveRef.current) return
-      setFreeWeekly(String(plans.plan.freeWeeklyAllowance ?? 25))
+      setFreeWeekly(String(plans.plan.freeWeeklyRawUsd ?? 1))
       setCatalog(plans)
       setOrgs(rows)
       setPrice(String(plans.plan.priceCents / 100))
@@ -87,7 +87,7 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
     setNotice(null)
     try {
       const saved = await updateAdminBillingPlans(jwt, {
-        freeWeeklyAllowance: Number(freeWeekly),
+        freeWeeklyRawUsd: Number(freeWeekly),
         ifMatchVersion: catalog.version,
         priceCents: Math.round(Number(price) * 100),
         addonPriceCents: Math.round(Number(addonPrice) * 100),
@@ -263,7 +263,7 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
         description="Included agent credits per tier. Users never see agent-processed words — only credits. Existing subscribers keep their Stripe price."
       >
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <AmountField label="Free weekly AI allowance (internal units)" value={freeWeekly} onChange={setFreeWeekly} />
+          <AmountField label="Free weekly AI allowance ($ raw provider cost; Team follows)" value={freeWeekly} onChange={setFreeWeekly} />
           <AmountField label="Words per credit (internal)" value={wordsPerCredit} onChange={setWordsPerCredit} />
           <AmountField label="Explore credits / cycle" value={exploreCredits} onChange={setExploreCredits} />
           <AmountField label="Field credits / cycle" value={fieldCredits} onChange={setFieldCredits} />

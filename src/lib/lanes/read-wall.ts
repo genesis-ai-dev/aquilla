@@ -65,9 +65,6 @@ export interface LaneIdentity {
   name: string | null
   /** `''` is the default target lane. Null is treated the same. */
   legacyTag: string | null
-  /** Switcher order. Present when the row was loaded for voice homing. */
-  position?: number
-  archivedAt?: string | null
 }
 
 /**

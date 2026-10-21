@@ -38,6 +38,9 @@ let currentReasonCannotEdit: "offline" | "role" | null = "role"
 let currentCanEditLanguages = false
 let currentReasonCannotEditLanguages: "offline" | "role" | null = "role"
 let currentLanguageEditFloor = 600
+// AQU-1912: "Count headings" has its own project-lead gate.
+let currentCanEditCountStructural = false
+let currentReasonCannotEditCountStructural: "offline" | "role" | null = "role"
 const languageLanes = [
   {
     id: "source-lane",
@@ -76,6 +79,8 @@ vi.mock("@/hooks/useProjectSettings", () => ({
     canEditLanguages: currentCanEditLanguages,
     reasonCannotEditLanguages: currentReasonCannotEditLanguages,
     languageEditFloor: currentLanguageEditFloor,
+    canEditCountStructural: currentCanEditCountStructural,
+    reasonCannotEditCountStructural: currentReasonCannotEditCountStructural,
     patch: vi.fn().mockResolvedValue({ kind: "ok" }),
     version: 1,
     updatedAt: null,
@@ -89,6 +94,17 @@ vi.mock("@/hooks/useProjectSettings", () => ({
     setLaneArchived: vi.fn().mockResolvedValue({ kind: "ok" }),
     hasFetched: true,
     isOnline: true,
+    refresh: vi.fn(),
+  }),
+}))
+
+// The validation pane's named-validator picker reads the roster.
+vi.mock("@/hooks/useProjectMembers", () => ({
+  useProjectMembers: () => ({
+    members: [],
+    isLoading: false,
+    error: null,
+    rosterHidden: false,
     refresh: vi.fn(),
   }),
 }))
@@ -179,6 +195,8 @@ beforeEach(() => {
   currentCanEditLanguages = false
   currentReasonCannotEditLanguages = "role"
   currentLanguageEditFloor = 600
+  currentCanEditCountStructural = false
+  currentReasonCannotEditCountStructural = "role"
 })
 
 describe("ProjectSettings — per-control permission hint (AQU-623)", () => {
@@ -277,5 +295,33 @@ describe("ProjectSettings — org-configurable language floor (AQU-1086 / AQU-98
     const title = screen.getByLabelText(/title/i)
     expect(title).toBeDisabled()
     await expectTooltip(title, /Only Maintainers can modify/)
+  })
+})
+
+// AQU-1912: the server has let a project lead change "Count headings" since
+// AQU-1083; the page gated the control on the maintainer floor instead.
+describe("ProjectSettings — Count headings follows its own project-lead floor (AQU-1912)", () => {
+  const headingsControl = () =>
+    screen.getByRole("combobox", { name: /count headings as translatable content/i })
+  // Locked, the control has ONE hover (AQU-1912): DisabledFieldTooltip's
+  // wrapper, which also says what the organization does.
+  const lockHintTrigger = (control: HTMLElement) => control.closest("span.block")!
+
+  it("a project lead can change it while the rest of the validation card stays locked", () => {
+    currentProject = makeProject({ syncRole: { level: 500, source: "member" } } as Partial<ProjectRecord>)
+    currentCanEditCountStructural = true
+    currentReasonCannotEditCountStructural = null
+    renderSettings(`/project/${PROJECT_ID}/settings/validation`)
+    expect(headingsControl()).not.toBeDisabled()
+    // canEdit (maintainer) stays false — see beforeEach.
+    expect(screen.getByRole("combobox", { name: /auto-propagate repetitions/i })).toBeDisabled()
+  })
+
+  it("a contributor sees it locked, and the hint names Project leads", async () => {
+    currentProject = makeProject({ syncRole: { level: 400, source: "member" } } as Partial<ProjectRecord>)
+    renderSettings(`/project/${PROJECT_ID}/settings/validation`)
+    expect(headingsControl()).toBeDisabled()
+    await expectTooltip(lockHintTrigger(headingsControl()), /Only Project leads can modify/)
+    await expectTooltip(lockHintTrigger(headingsControl()), /The organization currently/)
   })
 })

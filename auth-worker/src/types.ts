@@ -242,6 +242,15 @@ export interface Env {
    *  the Monday Developer Center (the SPA's /oauth/callback route; the SPA
    *  forwards code+state to the worker). Default: https://aquilla.app/oauth/callback. */
   MONDAY_REDIRECT_URI?: string
+
+  // ── Airtable integration (routes/airtable.ts, lib/airtable/*) — AQU-804 ──
+  /**
+   * Base URL of the Airtable Web API, default https://api.airtable.com. Set
+   * only to point a local stack at a stand-in Airtable (an unset value is
+   * what every deployment wants). The connection's personal access token
+   * lives encrypted in integration_connections, never here.
+   */
+  AIRTABLE_API_URL?: string
   /** API-facing origin for OAuth redirect + webhook URLs (e.g.
    *  https://api.aquilla.app/identity). Falls back to BASE_URL when unset. */
   BASE_URL_API?: string
@@ -282,6 +291,14 @@ export interface Env {
    *  where it is unbound (vitest route suites, an environment deployed before
    *  the DO migration) routes/contextual.ts falls back to the in-request loop. */
   CONTEXTUAL_RUN_DRIVER?: DurableObjectNamespace
+  /** Per-document knowledge-base indexing driver (src/knowledge-index-do.ts) —
+   *  AQU-2051. One object per document; its alarm runs the indexing job, so
+   *  summarizing a document of any size outlives the upload's ~30 s
+   *  `waitUntil` budget instead of being cut off mid-flight (AQU-2050).
+   *  Optional: where it is unbound (vitest route suites, an environment
+   *  deployed before the DO migration) routes/knowledge.ts falls back to the
+   *  in-request `waitUntil` job. */
+  KNOWLEDGE_INDEX_DRIVER?: DurableObjectNamespace
   /** Spans a project-wide autopilot start may drive at once. Lower it for a
    *  self-hosted upstream with few slots (see routes/contextual.ts). */
   CONTEXTUAL_MAX_CONCURRENCY?: string

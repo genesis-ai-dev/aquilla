@@ -17,19 +17,19 @@ afterEach(async () => {
 })
 it.each(manifest.bindings.map(b => [b.offer, b.interval] as const))(
   'passes real review %s %s into approved checkout line items and metadata', async (offer, interval) => {
-    const stripe = await setup(offer.startsWith('team') ? 'team' : 'personal')
+    const stripe = await setup('team')
     const input = await reviewed(offer, interval)
     const response = await checkout(input)
     expect(response.status).toBe(200)
     const body = await response.json() as { url: string; attemptId: string }
     expect(body.url).toBe('https://checkout.stripe.com/c/pay/cs_test_123')
     const params = new URLSearchParams(stripe.requests[0]!.body)
-    const components = offer === 'team_20x' ? ['team', 'team_20x'] : [offer]
-    components.forEach((component, index) => {
-      expect(params.get(`line_items[${index}][price]`)).toBe(manifest.bindings.find(b => b.offer === component && b.interval === interval)!.priceId)
-      expect(params.get(`line_items[${index}][quantity]`)).toBe('1')
-    })
-    expect(params.get(`line_items[${components.length}][price]`)).toBeNull()
+    expect(params.get('line_items[0][price]')).toBe(manifest.bindings.find(b => b.offer === offer && b.interval === interval)!.priceId)
+    expect(params.get('line_items[0][quantity]')).toBe('1')
+    expect(params.get('line_items[1][price]')).toBeNull()
+    // AQU-2058: tax-exclusive prices; Stripe Tax adds GST/HST and collects tax IDs.
+    expect(params.get('automatic_tax[enabled]')).toBe('true')
+    expect(params.get('tax_id_collection[enabled]')).toBe('true')
     expect(params.get('metadata[checkoutAttemptId]')).toBe(body.attemptId)
     expect(params.get('subscription_data[metadata][checkoutAttemptId]')).toBe(body.attemptId)
     expect(params.get('subscription_data[metadata][kind]')).toBe('workspace_plan_rehearsal')
@@ -82,7 +82,7 @@ it('does not switch offers or renew an old ambiguous attempt automatically', asy
   const stripe = await setup()
   const input = await reviewed()
   expect((await checkout(input)).status).toBe(200)
-  expect((await checkout(await reviewed('max_5x'))).status).toBe(409)
+  expect((await checkout(await reviewed('team', 'month'))).status).toBe(409)
   await env.AQUILLA_PG.prepare('UPDATE workspace_checkout_attempts SET expires_at = 1').run()
   expect((await checkout(input)).status).toBe(409)
   expect(stripe.requests).toHaveLength(1)
@@ -171,11 +171,11 @@ it('stores initial entitlement price IDs as a JSON array through the production 
   const saved = await recordInitialWorkspaceEntitlement(env.AQUILLA_PG, {
     orgId: 1, catalog: manifest as PriceCatalog,
     prices: manifest.bindings.map(b => stripeCatalogResponse(`/v1/prices/${b.priceId}`) as StripePriceInput),
-    offer: 'pro', interval: 'month', quantity: 1,
+    offer: 'team', interval: 'month', quantity: 1,
     subscriptionId: 'sub_initial', customerId: 'cus_initial',
     activatedAt: new Date(Date.now() - 1000).toISOString(),
   })
-  const expected = manifest.bindings.find(b => b.offer === 'pro' && b.interval === 'month')!.priceId
+  const expected = manifest.bindings.find(b => b.offer === 'team' && b.interval === 'month')!.priceId
   expect(saved.price_ids).toEqual([expected])
   expect(await env.AQUILLA_PG.prepare('SELECT jsonb_typeof(price_ids) AS kind FROM workspace_plan_entitlements').first())
     .toEqual({ kind: 'array' })
@@ -259,9 +259,9 @@ it.each(['workspace_plan_entitlements', 'org_billing_events', 'workspace_checkou
 it.each(['unpaid', 'wrong_customer', 'wrong_org', 'wrong_subscription', 'unknown_price',
   'changed_amount', 'changed_recurring_price', 'wrong_quantity', 'extra_item', 'missing_item',
   'truncated_items', 'live_session', 'live_subscription', 'live_event', 'inactive',
-  'wrong_attempt', 'missing_metadata', 'future_event'])(
+  'wrong_attempt', 'missing_metadata', 'future_event', 'tax_mismatch'])(
   'rejects %s without a receipt or plan', async fault => {
-    const payment = await completedPayment('team_20x')
+    const payment = await completedPayment('team')
     const { session, subscription, event } = payment
     switch (fault) {
       case 'unpaid': session.payment_status = 'unpaid'; break
@@ -282,6 +282,8 @@ it.each(['unpaid', 'wrong_customer', 'wrong_org', 'wrong_subscription', 'unknown
       case 'wrong_attempt': session.metadata.checkoutAttemptId = crypto.randomUUID(); break
       case 'missing_metadata': delete subscription.metadata.orgId; break
       case 'future_event': event.created += 3600; break
+      // Only Stripe Tax may raise the total above the approved price.
+      case 'tax_mismatch': Object.assign(session, { total_details: { amount_tax: 100, amount_discount: 0 } }); break
     }
     expect((await payment.send()).status).toBe(500)
     await expectNoPaymentGrant()
@@ -305,12 +307,20 @@ it('rejects a different Stripe account', async () => {
   expect((await payment.send()).status).toBe(500)
   await expectNoPaymentGrant()
 })
+it('grants Team when the paid total adds Stripe Tax to the approved price', async () => {
+  const payment = await completedPayment('team', 'year')
+  // 13% HST on $5,000: the subtotal stays the approved price.
+  Object.assign(payment.session, { amount_total: 565000, total_details: { amount_tax: 65000, amount_discount: 0 } })
+  expect((await payment.send()).status).toBe(200)
+  expect(await env.AQUILLA_PG.prepare('SELECT offer, scope FROM workspace_plan_entitlements WHERE org_id = 1').first())
+    .toEqual({ offer: 'team', scope: 'team' })
+})
 it('rechecks eligibility and pricing assignment at payment time', async () => {
   const payment = await completedPayment()
-  await env.AQUILLA_PG.prepare("UPDATE organizations SET billing_scope = 'team' WHERE id = 1").run()
+  await env.AQUILLA_PG.prepare('UPDATE organizations SET billing_scope = NULL WHERE id = 1').run()
   expect((await payment.send()).status).toBe(500)
   await expectNoPaymentGrant()
-  await env.AQUILLA_PG.prepare("UPDATE organizations SET billing_scope = 'personal' WHERE id = 1").run()
+  await env.AQUILLA_PG.prepare("UPDATE organizations SET billing_scope = 'team' WHERE id = 1").run()
   await env.AQUILLA_PG.prepare("INSERT INTO billing_price_cohorts (org_id, experiment_key, variant, price_version) VALUES (1, 'other', 'other', 'different')").run()
   expect((await payment.send()).status).toBe(500)
   await expectNoPaymentGrant()
@@ -359,7 +369,7 @@ it('replaces only confirmed expired checkout, keeping history and a new request 
   Object.assign(stripe.sessions.get(first.key)!, { status: 'expired', payment_status: 'unpaid', subscription: null })
   expect(await (await reconcileCheckout()).json()).toEqual({ status: 'expired' })
   expect(await (await reconcileCheckout()).json()).toEqual({ status: 'none' })
-  expect((await checkout(await reviewed('max_5x'))).status).toBe(200)
+  expect((await checkout(await reviewed('team', 'month'))).status).toBe(200)
   expect(stripe.requests[1]!.key).not.toBe(first.key)
   expect(stripe.sessions.size).toBe(2)
   expect(await env.AQUILLA_PG.prepare('SELECT count(*)::int AS n FROM workspace_checkout_attempts').first()).toEqual({ n: 2 })
@@ -484,8 +494,8 @@ function lifecycleEvent(payment: Awaited<ReturnType<typeof completedPayment>>, t
   Object.assign(payment.event.data.object, type.startsWith('invoice.')
     ? structuredClone(payment.invoice) : structuredClone(payment.subscription))
 }
-it('falls back to Free on failure and restores paid access without resetting the usage week', async () => {
-  const p = await completedPayment('max_20x')
+it('keeps Team through the past-due grace, falls back to Free after it, and restores paid access without resetting the usage week', async () => {
+  const p = await completedPayment('team')
   expect((await p.send()).status).toBe(200)
   const initial = (await lifecycleWorkspace()).entitlement!
   p.invoice.paid = false; p.invoice.status = 'open'; p.invoice.amount_remaining = p.invoice.amount_due
@@ -493,21 +503,26 @@ it('falls back to Free on failure and restores paid access without resetting the
   // Stripe can remain active after some payment failures; invoice state matters.
   lifecycleEvent(p, 'invoice.payment_failed', 'evt_failed')
   expect((await p.send()).status).toBe(200)
+  // Stripe Smart Retries run for 7 days; Team stays on until 7 days past the paid period.
+  const graceEndsAt = new Date(Date.parse(initial.access!.paidThrough) + 7 * 86_400_000).toISOString()
   expect((await lifecycleWorkspace()).entitlement).toMatchObject({
-    offer: 'max_20x', usagePeriodStart: initial.usagePeriodStart,
-    access: { offer: 'free', reason: 'payment_failed' },
+    offer: 'team', usagePeriodStart: initial.usagePeriodStart,
+    access: { offer: 'team', reason: 'payment_grace', graceEndsAt },
   })
+  const { readBillingWorkspace } = await import('../lib/billing/workspace')
+  expect((await readBillingWorkspace(env.AQUILLA_PG, 1, new Date(graceEndsAt)))!.entitlement!.access)
+    .toMatchObject({ offer: 'free', reason: 'payment_failed' })
   p.invoice.paid = true; p.invoice.status = 'paid'; p.invoice.amount_remaining = 0
   p.invoice.amount_paid = p.invoice.amount_due
   lifecycleEvent(p, 'invoice.paid', 'evt_recovered')
   expect((await p.send()).status).toBe(200)
   expect((await lifecycleWorkspace()).entitlement).toMatchObject({
-    usagePeriodStart: initial.usagePeriodStart, access: { offer: 'max_20x', reason: 'paid' },
+    usagePeriodStart: initial.usagePeriodStart, access: { offer: 'team', reason: 'paid' },
   })
   // A delayed failed event reads the paid invoice, rather than revoking recovered access.
   lifecycleEvent(p, 'invoice.payment_failed', 'evt_old_failure')
   expect((await p.send()).status).toBe(200)
-  expect((await lifecycleWorkspace()).entitlement!.access!.offer).toBe('max_20x')
+  expect((await lifecycleWorkspace()).entitlement!.access!.reason).toBe('paid')
   expect(await (await p.send()).json()).toEqual({ ok: true, duplicate: true })
 })
 it('retains already-paid access when canceled, then falls back at the exact paid boundary', async () => {
@@ -517,7 +532,7 @@ it('retains already-paid access when canceled, then falls back at the exact paid
   p.subscription.cancel_at_period_end = true
   lifecycleEvent(p, 'customer.subscription.updated', 'evt_cancel_scheduled')
   expect((await p.send()).status).toBe(200)
-  expect((await lifecycleWorkspace()).entitlement!.access).toMatchObject({ offer: 'pro', cancelAtPeriodEnd: true })
+  expect((await lifecycleWorkspace()).entitlement!.access).toMatchObject({ offer: 'team', cancelAtPeriodEnd: true })
   p.subscription.status = 'canceled'
   p.subscription.items.data[0]!.current_period_end = Math.floor(Date.now() / 1000)
   lifecycleEvent(p, 'customer.subscription.deleted', 'evt_canceled')
@@ -600,11 +615,11 @@ it('rejects a stale concurrent Stripe read and retries it against the recovered 
   lifecycleEvent(p, 'invoice.paid', 'evt_concurrent_recovery')
   try { expect((await p.send()).status).toBe(200) } finally { resume() }
   expect((await oldRequest).status).toBe(500)
-  expect((await lifecycleWorkspace()).entitlement!.access!.offer).toBe('pro')
+  expect((await lifecycleWorkspace()).entitlement!.access!.reason).toBe('paid')
   expect(await env.AQUILLA_PG.prepare("SELECT count(*)::int AS n FROM org_billing_events WHERE stripe_event_id = 'evt_concurrent_failure'").first()).toEqual({ n: 0 })
   lifecycleEvent(p, 'invoice.payment_failed', 'evt_concurrent_failure')
   expect((await p.send()).status).toBe(200)
-  expect((await lifecycleWorkspace()).entitlement!.access!.offer).toBe('pro')
+  expect((await lifecycleWorkspace()).entitlement!.access!.reason).toBe('paid')
 })
 it('does not clear a failed cancellation using an invoice for a different paid period', async () => {
   const p = await completedPayment()
@@ -616,7 +631,8 @@ it('does not clear a failed cancellation using an invoice for a different paid p
   p.invoice.lines.data[0]!.period.end++
   lifecycleEvent(p, 'customer.subscription.deleted', 'evt_wrong_canceled_invoice')
   expect((await p.send()).status).toBe(500)
-  expect((await lifecycleWorkspace()).entitlement!.access!.reason).toBe('payment_failed')
+  // The failure stays recorded; Team holds only for the grace window.
+  expect((await lifecycleWorkspace()).entitlement!.access!.reason).toBe('payment_grace')
 })
 
 // AQU-1491: production-shaped producer output passes through the signed webhook
@@ -627,11 +643,11 @@ it('activates a live-mode reviewed checkout and keeps renewal/portal processing 
   const { reconcileWorkspaceLifecycle } = await import('../lib/billing/workspace-lifecycle')
   const catalog = catalogSchema.parse({ ...manifest,
     bindings: manifest.bindings.map(b => ({ ...b, live: true })) })
-  const f = await completedPayment('pro', 'month', catalog)
+  const f = await completedPayment('team', 'month', catalog)
   expect((await f.send()).status).toBe(200)
   expect(await env.AQUILLA_PG.prepare('SELECT sandbox FROM workspace_checkout_attempts').first()).toEqual({ sandbox: false })
   const initial = await readWorkspaceEntitlement(env.AQUILLA_PG, 1)
-  expect(initial).toMatchObject({ offer: 'pro', stripe_subscription_id: f.subscription.id })
+  expect(initial).toMatchObject({ offer: 'team', stripe_subscription_id: f.subscription.id })
   expect((await f.send()).status).toBe(200)
   const stopped = { ...config(catalog), BILLING_WORKSPACE_CHECKOUT_ENABLED: 'false', STRIPE_WEBHOOK_SECRET: 'whsec_fixture' }
   expect((await f.send(stopped)).status).toBe(200)
@@ -647,7 +663,7 @@ it('activates a live-mode reviewed checkout and keeps renewal/portal processing 
   }, stopped)
   expect(workspace.status).toBe(200)
   expect(await workspace.json()).toMatchObject({ checkoutEnabled: false,
-    entitlement: { offer: 'pro', access: { offer: 'pro' } } })
+    entitlement: { offer: 'team', access: { offer: 'team' } } })
   const purchase = await app.request('https://api.aquilla.app/api/v2/orgs/1/billing/workspace/checkout', {
     method: 'POST', headers: authHeader(await jwtFor('alice')), body: '{}',
   }, stopped)

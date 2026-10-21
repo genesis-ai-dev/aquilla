@@ -210,8 +210,7 @@ describe("settings writes behind the lane read wall (AQU-1750)", () => {
       ...STORED,
       ttsSettings: {
         voices: [
-          { id: "preset-narrator", name: "Narrator", builtIn: true },
-          { id: "old", name: "Old hand" },
+          { id: "narrator", name: "Narrator" },
           { id: "de-1", name: "German", laneId: "ln-de" },
           { id: "es-1", name: "Spanish", laneId: "ln-es" },
         ],
@@ -227,20 +226,13 @@ describe("settings writes behind the lane read wall (AQU-1750)", () => {
     env.LANE_READ_WALL = "1"
     const lead = await getSettings("dan")
     const tts = lead.settings.ttsSettings as { voices: { id: string }[] }
-    expect(tts.voices.map((voice) => voice.id)).toEqual(["preset-narrator", "es-1"])
+    expect(tts.voices.map((voice) => voice.id)).toEqual(["narrator", "es-1"])
     expect(JSON.stringify(lead.settings.ttsSettings)).not.toContain("de-1")
-    expect(JSON.stringify(lead.settings.ttsSettings)).not.toContain("Old hand")
     const owner = await getSettings("alice")
     expect(JSON.stringify(owner.settings.ttsSettings)).toContain("de-1")
     const res = await echoWrite("dan", { autopilotEnabled: true })
     expect(res.status).toBe(200)
-    const saved = await storedSettings()
-    const voices = (saved.ttsSettings as { voices: { id: string; name: string; laneId?: string }[] }).voices
-    expect(saved.autopilotEnabled).toBe(true)
-    expect(voices.find((voice) => voice.id === "preset-narrator")?.laneId).toBeUndefined()
-    expect(voices.find((voice) => voice.id === "old")).toEqual({ id: "old", name: "Old hand", laneId: "ln-main" })
-    expect(voices.find((voice) => voice.id === "de-1")).toEqual({ id: "de-1", name: "German", laneId: "ln-de" })
-    expect(voices.find((voice) => voice.id === "es-1")).toEqual({ id: "es-1", name: "Spanish", laneId: "ln-es" })
+    expect(await storedSettings()).toEqual({ ...withVoices, autopilotEnabled: true })
   })
 
   it("a contributor's alignment-seed write is not refused because of the echo", async () => {

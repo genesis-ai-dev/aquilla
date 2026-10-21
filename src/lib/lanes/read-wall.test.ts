@@ -261,38 +261,6 @@ describe("lane read wall", () => {
       expect(next.defaultVoiceId).toBe("ar-1")
     })
 
-    it("treats an unscoped voice as the first lane's and leaves the Narrator", () => {
-      const voiceLanes = [
-        { id: "ar", name: "Arabic", legacyTag: "ar", position: 0, archivedAt: null },
-        { id: "sm", name: "Samoan", legacyTag: "sm", position: 1, archivedAt: null },
-      ]
-      const samoan = new Set(["sm"])
-      const storedVoices = {
-        ttsSettings: {
-          voices: [
-            { id: "preset-narrator", name: "Narrator", builtIn: true },
-            { id: "old", name: "Old hand" },
-            { id: "sm-1", name: "Samoan", laneId: "sm" },
-          ],
-          castAssignments: { hero: "old", guide: "sm-1" },
-          defaultVoiceId: "old",
-        },
-      }
-      const echo = filterSettingsToVisibleLanes({ settings: storedVoices }, samoan, voiceLanes).settings
-      const tts = echo.ttsSettings as {
-        voices: { id: string }[]
-        castAssignments: Record<string, string>
-        defaultVoiceId?: string
-      }
-      expect(tts.voices.map((voice) => voice.id)).toEqual(["preset-narrator", "sm-1"])
-      expect(tts.castAssignments).toEqual({ guide: "sm-1" })
-      expect(tts.defaultVoiceId).toBeUndefined()
-      expect(restoreHiddenLaneSettings(storedVoices, echo, samoan, voiceLanes)).toEqual({
-        ok: true,
-        settings: storedVoices,
-      })
-    })
-
     it("leaves the body alone when nothing is hidden", () => {
       // No key is added where the stored row has none, and a visible primary
       // stays the caller's to change.

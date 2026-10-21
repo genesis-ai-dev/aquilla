@@ -35,7 +35,7 @@ import { MemoryRouter } from "react-router-dom"
 import type { ColumnDef } from "@tanstack/react-table"
 import { DataTable } from "@/components/ui/data-table"
 import { StaffLanePopover } from "./StaffLanePopover"
-import { CATALOGS } from "@/lib/i18n/messages"
+import { CATALOGS } from "@/lib/i18n/messages/all"
 import { LANE_SCOPE_ABOVE_CEILING_ERROR } from "@/lib/lanes/scope-ids"
 
 // The popover links out to the project's invite page (AQU-607), so every
@@ -424,7 +424,7 @@ describe("StaffLanePopover", () => {
   it("filters the org roster by the search query", async () => {
     renderPopover()
     openPopover()
-    fireEvent.change(screen.getByPlaceholderText(/search your organization/i), {
+    fireEvent.change(screen.getByPlaceholderText(/search org members and project invitees/i), {
       target: { value: "mari" },
     })
 
@@ -441,6 +441,30 @@ describe("StaffLanePopover", () => {
 
     const invite = screen.getByRole("link", { name: /invite them to the project/i })
     expect(invite).toHaveAttribute("href", "/project/proj-1/settings/members")
+  })
+
+  // AQU-2048: since AQU-1798 the pool is org members plus people already on
+  // the project. The popover must name both, and still send someone who is
+  // neither through the project invite.
+  it("says the search covers org members and people already invited to the project", () => {
+    renderPopover()
+    openPopover()
+
+    const popover = screen.getByTestId("staff-lane-popover")
+    expect(popover).toHaveTextContent(
+      /add an org member or someone already invited to this project, scoped to this lane/i,
+    )
+    expect(popover).toHaveTextContent(
+      /searches org members and people already invited to this project\. adding someone who is neither\?/i,
+    )
+    expect(screen.getByRole("link", { name: /invite them to the project/i })).toBeInTheDocument()
+    expect(popover).not.toHaveTextContent(/searches your organization only/i)
+    expect(popover).not.toHaveTextContent(/search your organization/i)
+
+    fireEvent.change(screen.getByPlaceholderText(/search org members and project invitees/i), {
+      target: { value: "nobody-here" },
+    })
+    expect(screen.getByText(/no org members or project invitees match/i)).toBeInTheDocument()
   })
 
   // AQU-731 — "the staff button wasn't even working for me". The popover did
@@ -488,6 +512,12 @@ describe("StaffLanePopover", () => {
 
       expect(screen.queryByTestId("staff-lane-roster-blocked")).not.toBeInTheDocument()
       expect(screen.getByTestId("staff-lane-roster-note")).toHaveAttribute("data-reason", "hidden")
+      // The org list is hidden, but Kean is already on the project and listed.
+      // The note must not tell the operator that an invite is the only way.
+      expect(screen.getByTestId("staff-lane-roster-note")).toHaveTextContent(
+        /people already on this project are listed below/i,
+      )
+      expect(screen.getByTestId("staff-lane-roster-note")).not.toHaveTextContent(/instead/i)
       fireEvent.click(screen.getByText("kean"))
       fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
 
@@ -509,6 +539,27 @@ describe("StaffLanePopover", () => {
       expect(blockedRow()).toHaveAttribute("data-reason", "no-access")
       expect(screen.getByText(/can’t see this organization’s member list/i)).toBeInTheDocument()
       expect(screen.queryByText(/no one in your organization yet/i)).not.toBeInTheDocument()
+    })
+
+    it("still lists a direct invite when the operator can't see the org roster", () => {
+      mockRoster = { members: [], rosterAccessDenied: true }
+      mockProjectMembers = [
+        {
+          userId: 22,
+          username: "kean",
+          role: { level: 100, name: "viewer", source: "override" },
+          secondarySources: [],
+        },
+      ]
+      renderPopover()
+      openPopover()
+
+      expect(screen.queryByTestId("staff-lane-roster-blocked")).not.toBeInTheDocument()
+      expect(screen.getByTestId("staff-lane-roster-note")).toHaveTextContent(
+        /can’t see this organization’s member list\. people already on this project are listed below/i,
+      )
+      expect(screen.getByTestId("staff-lane-roster-note")).not.toHaveTextContent(/instead/i)
+      expect(screen.getByText("kean")).toBeInTheDocument()
     })
 
     it("surfaces the server's own message when the roster fetch failed", () => {
@@ -539,7 +590,7 @@ describe("StaffLanePopover", () => {
         "/project/proj-1/settings/members",
       )
       // Nothing to type into, so the box must not invite a search that can't run.
-      expect(screen.getByPlaceholderText(/search your organization/i)).toBeDisabled()
+      expect(screen.getByPlaceholderText(/search org members and project invitees/i)).toBeDisabled()
     })
 
     it("still reports a genuinely empty org as empty", () => {
@@ -973,7 +1024,7 @@ describe("StaffLanePopover", () => {
       openPopover()
       expect(onRowClick).not.toHaveBeenCalled()
 
-      fireEvent.change(screen.getByPlaceholderText(/search your organization/i), {
+      fireEvent.change(screen.getByPlaceholderText(/search org members and project invitees/i), {
         target: { value: "mari" },
       })
       expect(onRowClick).not.toHaveBeenCalled()

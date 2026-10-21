@@ -171,6 +171,52 @@ describe("assembleAudioEntries — separate-clips", () => {
     expect(fallback.skipped).toEqual([]) // a sibling miss is not a skipped clip
   })
 
+  // AQU-1575: LOTE's broadcast vendor needs 16-bit / 48 kHz / mono WAV, and a
+  // stored clip may be a 24 kHz WAV, a 22.05 kHz WAV or compressed webm. Asked
+  // for WAV, nothing passes through as stored.
+  it("writes every clip as a 16-bit, 48 kHz, mono WAV when WAV is asked for", async () => {
+    const { calls, fetchBytes } = makeFetch({
+      "a1.mp3": clipBytes(10, 6),
+      "gen-1.wav": clipBytes(20, 8),
+      "gen-1.webm": clipBytes(30, 4),
+    })
+    let decodes = 0
+    const result = await assembleAudioEntries(baseArgs({
+      audioFormat: "wav",
+      cells: [
+        audioCell("c1", "a1", "mp3"),
+        audioCell("c2", "gen-1", "webm", {}, "selectedGeneratedVoiceAudioId"),
+      ],
+      fetchBytes,
+      decode: async (b) => { decodes++; return fakeDecode(b) },
+    }))
+    expect(result.entries.map((e) => e.name)).toEqual(["000_c1_Mary.wav", "001_c2_John.wav"])
+    // The generated clip still starts from its lossless copy.
+    expect(calls).toEqual(["a1.mp3", "gen-1.wav"])
+    expect(decodes).toBe(2)
+    for (const entry of result.entries) {
+      const dv = new DataView(await entry.data.arrayBuffer())
+      expect(dv.getUint16(20, true)).toBe(1) // PCM
+      expect(dv.getUint16(22, true)).toBe(1) // mono
+      expect(dv.getUint32(24, true)).toBe(48_000)
+      expect(dv.getUint16(34, true)).toBe(16)
+    }
+    expect(wavSampleCount(result.entries[0].data)).toBe(6)
+    expect(wavSampleCount(result.entries[1].data)).toBe(8)
+  })
+
+  it("keeps passing stored clips through when the format is the original", async () => {
+    const stored = clipBytes(10, 6)
+    const { fetchBytes } = makeFetch({ "a1.mp3": stored })
+    const result = await assembleAudioEntries(baseArgs({
+      audioFormat: "original",
+      cells: [audioCell("c1", "a1", "mp3")],
+      fetchBytes,
+    }))
+    expect(result.entries.map((e) => e.name)).toEqual(["000_c1_Mary.mp3"])
+    expect(new Uint8Array(await result.entries[0].data.arrayBuffer())).toEqual(stored)
+  })
+
   it("records skips (no audio, fetch failure) and still completes with the rest", async () => {
     const { fetchBytes } = makeFetch({ "a1.mp3": clipBytes(10, 6) }) // a2 missing → 404
     const result = await assembleAudioEntries(baseArgs({

@@ -53,6 +53,7 @@ import {
   getMyAssignments,
   getProjectAssignmentRoster,
   getProjectUnitAssignees,
+  getProjectValidationAssignments,
   getUnitAssignments,
   resolveTargetLaneId,
 } from "../services/assignments"
@@ -109,8 +110,8 @@ import { readLaneTag } from "../../../db/shared/lane-ref"
 import { countedFileSql } from "../../../db/shared/counted-files"
 import { readDeclaredLanguages } from "../../../db/shared/file-declared-languages"
 import { loadRosterOrigins, type RosterOrigin } from "../services/roster-origins"
-import { markProjectMondayLinksDirty } from "../../../db/shared/monday-dirty"
-import { pushDirtyLinksAfterResponse } from "../lib/monday/push"
+import { markProjectSyncLinksDirty } from "../../../db/shared/progress-sync-dirty"
+import { pushDirtyLinksAfterResponse } from "../lib/integrations/push"
 import { ViewerScope, redactOrgCrumbs } from "../services/access-payload"
 
 const projects = new Hono<AuthHonoEnv>()
@@ -1092,7 +1093,7 @@ projects.patch("/:projectId/deadline", authMiddleware, zValidator("json", deadli
   // AQU-1770: a linked Monday board can show the deadline. Mark the link dirty
   // and push it straight after the response, like the settings that move the
   // board's numbers.
-  await markProjectMondayLinksDirty(c.env.AQUILLA_PG, [projectId])
+  await markProjectSyncLinksDirty(c.env.AQUILLA_PG, [projectId])
   pushDirtyLinksAfterResponse(c, { projectIds: [projectId] })
   return c.json({ ok: true, deadlineAt: deadline })
 })
@@ -1196,7 +1197,7 @@ projects.patch("/:projectId/pm", authMiddleware, zValidator("json", pmBody), asy
     .run()
   if (raised) notifyRoleChangeBestEffort(c, projectId, raised)
   // AQU-1770: a linked Monday board can show the project manager.
-  await markProjectMondayLinksDirty(c.env.AQUILLA_PG, [projectId])
+  await markProjectSyncLinksDirty(c.env.AQUILLA_PG, [projectId])
   pushDirtyLinksAfterResponse(c, { projectIds: [projectId] })
   return c.json({ ok: true, pm })
 })
@@ -1237,7 +1238,9 @@ projects.get("/:projectId/assignments/given", authMiddleware, async (c) => {
  * GET /api/v2/projects/:projectId/assignments/all — per-assignee open workload
  * + derived progress for THIS project (the overview's Team card). Returns the
  * same AssigneeWorkload shape as the org workload endpoint so the client can
- * reuse the same rendering logic.
+ * reuse the same rendering logic. AQU-1969: `roster` is translate work only;
+ * `validations` lists each open validate assignment with the assignee's own
+ * approvals, furthest behind first.
  *
  * AQU-1771: gated on the member-progress AND roster floors, like
  * /assignments/unit below — not on a hard Maintainer floor. The Team card shows
@@ -1264,8 +1267,13 @@ projects.get("/:projectId/assignments/all", authMiddleware, async (c) => {
   )
   if (denial) return c.json(denial, 403)
 
-  const roster = await getProjectAssignmentRoster(c.env, projectId)
-  return c.json({ roster })
+  // AQU-1969: translate work stays the per-person roster; each validate
+  // assignment is its own line, with the assignee's own approvals.
+  const [roster, validations] = await Promise.all([
+    getProjectAssignmentRoster(c.env, projectId),
+    getProjectValidationAssignments(c.env, projectId),
+  ])
+  return c.json({ roster, validations })
 })
 
 /**

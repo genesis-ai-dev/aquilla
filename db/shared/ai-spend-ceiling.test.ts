@@ -124,7 +124,7 @@ describe("checkAiSpendCeiling", () => {
   it("refuses the call with a 503 and a plain-language message once the ceiling is reached", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {})
     const outcome = await checkAiSpendCeiling(
-      stubDb({ spend_cents: 150, platform_settings: null }),
+      stubDb({ credit_cents: 150, platform_settings: null }),
       env,
       "chat",
     )
@@ -139,7 +139,7 @@ describe("checkAiSpendCeiling", () => {
 
   it("lets the call through below the ceiling", async () => {
     const outcome = await checkAiSpendCeiling(
-      stubDb({ spend_cents: 50, platform_settings: null }),
+      stubDb({ credit_cents: 50, platform_settings: null }),
       env,
       "chat",
     )
@@ -149,13 +149,26 @@ describe("checkAiSpendCeiling", () => {
   it("sums only the current UTC day, so the ceiling resets at the day boundary", async () => {
     let bound: unknown[] = []
     await checkAiSpendCeiling(
-      stubDb({ spend_cents: 0, platform_settings: null }, (_sql, binds) => {
+      stubDb({ credit_cents: 0, platform_settings: null }, (_sql, binds) => {
         bound = binds
       }),
       env,
       "chat",
     )
-    expect(bound).toEqual([utcDayKey()])
+    expect(bound).toEqual([utcDayKey(), utcDayKey(), utcDayKey()])
+  })
+
+  it("adds the one meter to the legacy ledger, so spend split across both still trips it", async () => {
+    // During the transition a metered call writes only workspace_usage_requests
+    // and an unmigrated call writes only org_credit_usage_daily (AQU-2057).
+    // Reading either alone would let the platform spend up to twice the ceiling.
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    const outcome = await checkAiSpendCeiling(
+      stubDb({ credit_cents: 60, meter_cents: 60, platform_settings: null }),
+      env,
+      "agent",
+    )
+    expect(outcome.ok).toBe(false)
   })
 
   it("honours an admin-lowered ceiling stored in platform_settings", async () => {
@@ -164,7 +177,7 @@ describe("checkAiSpendCeiling", () => {
     // the path that makes sync-worker's TTS/voice paths obey the admin console.
     const outcome = await checkAiSpendCeiling(
       stubDb({
-        spend_cents: 20,
+        credit_cents: 20,
         platform_settings: JSON.stringify({ aiDailySpendCeilingUsd: 0.01 }),
       }),
       { AI_DAILY_SPEND_CEILING_USD: "5", ENVIRONMENT: "test" },
@@ -177,7 +190,7 @@ describe("checkAiSpendCeiling", () => {
     // The whole point of the alert is that it is findable. One line per blocked
     // request would bury the signal inside the flood it is reporting.
     const error = vi.spyOn(console, "error").mockImplementation(() => {})
-    const db = stubDb({ spend_cents: 10_000, platform_settings: null })
+    const db = stubDb({ credit_cents: 10_000, platform_settings: null })
     for (let i = 0; i < 5; i++) await checkAiSpendCeiling(db, env, "chat")
     const alerts = error.mock.calls.filter((call) => String(call[0]).includes("ALERT"))
     expect(alerts).toHaveLength(1)

@@ -116,11 +116,12 @@ import { projectKnowledge, orgKnowledge } from "./routes/knowledge"
 import knowledgeInternalRoutes from "./routes/knowledge-internal"
 import styleRulesRoutes from "./routes/style-rules"
 import mondayRoutes from "./routes/monday"
+import airtableRoutes from "./routes/airtable"
 import contactRoutes from "./routes/contact"
 import feedbackRoutes from "./routes/feedback"
 import billingWorkspaceRoutes from "./routes/billing-workspace"
 import billingRoutes from "./routes/billing"
-import { flushDirtyLinks } from "./lib/monday/push"
+import { flushDirtyLinks } from "./lib/integrations/push"
 import { createRequestMemo } from "./lib/request-memo"
 import { pruneExpiredRevokedTokens } from "./utils/token-revocation"
 import { pruneAuthRateLimitEvents } from "./utils/rate-limit"
@@ -154,7 +155,9 @@ const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Headers": "Authorization, Content-Type, Idempotency-Key, If-Match-Version, X-Artifact-Name, X-Doc-Name, X-Source-Language, X-Target-Language",
   // Model A/B assignment echo (routes/chat.ts) — the SPA reads these off the
   // completion response to attribute accept/edit outcomes to the served model.
-  "Access-Control-Expose-Headers": "X-AB-Request-Id, X-AB-Arm, X-AB-Model",
+  // Retry-After (AQU-1681): a batch transcription refused by the per-user
+  // limit waits exactly as long as the limiter says, instead of guessing.
+  "Access-Control-Expose-Headers": "X-AB-Request-Id, X-AB-Arm, X-AB-Model, Retry-After",
   "Access-Control-Max-Age": "86400",
   Vary: "Origin",
 }
@@ -389,6 +392,10 @@ app.route("/api/v2/access-links", accessLinksRoutes)
 // push engine (routes/monday.ts). OAuth callback + inbound webhook routes are
 // deliberately unauthenticated (browser redirect / Monday-signed JWT).
 app.route("/api/v2/monday", mondayRoutes)
+// Airtable integration (AQU-804): the same shape as Monday's, connected with a
+// personal access token instead of OAuth. Its pushes ride Monday's triggers
+// (lib/integrations/push.ts), including the sync-worker nudge above.
+app.route("/api/v2/airtable", airtableRoutes)
 // External API credentials (PATs) for the Agent API (AQU-533 §2). Mint/list/
 // revoke; live role is re-resolved on every downstream API call.
 app.route("/api/v2/credentials", credentialsRoutes)
@@ -534,7 +541,7 @@ app.fetch = (async (request: Request, env: Env, ctx: ExecutionContext): Promise<
 
 // Cron (wrangler.toml [triggers], every 5 minutes). Three independent pieces
 // of work, each isolated so one failing cannot take the others down:
-//   1. flush Monday board links whose push was debounced (dirty_at set),
+//   1. flush Monday and Airtable links whose push was debounced (dirty_at set),
 //      oldest first, capped at 20 per run;
 //   2. sweep stranded contextual runs (dead driver / parked with spans left);
 //   3. the v3 react watcher — projects with agentMode.react on react to human
@@ -636,6 +643,10 @@ const scheduled = async (
 // named export of the Worker's entrypoint module for the runtime to find it;
 // the binding and migration live in wrangler.toml.
 export { ContextualRunDriver } from "./contextual-run-do"
+
+// AQU-2051 — the per-document knowledge-base indexing driver. Same rule: a
+// Durable Object class must be a named export of the entrypoint module.
+export { KnowledgeIndexDriver } from "./knowledge-index-do"
 
 // Keep `export default app` semantics (tests call app.request) while giving
 // the Workers runtime a `scheduled` handler on the same default export.

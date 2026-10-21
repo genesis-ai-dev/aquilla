@@ -20,18 +20,12 @@ import { laneDisplayNameSql } from "./lanes"
 export async function loadTargetLaneIdentities(db: AquillaDb, projectId: string): Promise<LaneIdentity[]> {
   const { results } = await db
     .prepare(
-      `SELECT id, ${laneDisplayNameSql("lanes")} AS name, legacy_tag, position, archived_at FROM lanes
+      `SELECT id, ${laneDisplayNameSql("lanes")} AS name, legacy_tag FROM lanes
         WHERE project_id = ? AND role = 'target'`,
     )
     .bind(projectId)
-    .all<{ id: string; name: string; legacy_tag: string | null; position: number; archived_at: string | null }>()
-  return (results ?? []).map((row) => ({
-    id: row.id,
-    name: row.name,
-    legacyTag: row.legacy_tag,
-    position: row.position,
-    archivedAt: row.archived_at,
-  }))
+    .all<{ id: string; name: string; legacy_tag: string | null }>()
+  return (results ?? []).map((row) => ({ id: row.id, name: row.name, legacyTag: row.legacy_tag }))
 }
 
 /**
@@ -65,20 +59,14 @@ export async function loadTargetLaneIdentitiesForProjects(
   const placeholders = projectIds.map(() => "?").join(", ")
   const { results } = await db
     .prepare(
-      `SELECT project_id, id, ${laneDisplayNameSql("lanes")} AS name, legacy_tag, position, archived_at FROM lanes
+      `SELECT project_id, id, ${laneDisplayNameSql("lanes")} AS name, legacy_tag FROM lanes
         WHERE role = 'target' AND project_id IN (${placeholders})`,
     )
     .bind(...projectIds)
-    .all<{ project_id: string; id: string; name: string; legacy_tag: string | null; position: number; archived_at: string | null }>()
+    .all<{ project_id: string; id: string; name: string; legacy_tag: string | null }>()
   for (const row of results ?? []) {
     const list = byProject.get(row.project_id) ?? []
-    list.push({
-      id: row.id,
-      name: row.name,
-      legacyTag: row.legacy_tag,
-      position: row.position,
-      archivedAt: row.archived_at,
-    })
+    list.push({ id: row.id, name: row.name, legacyTag: row.legacy_tag })
     byProject.set(row.project_id, list)
   }
   return byProject

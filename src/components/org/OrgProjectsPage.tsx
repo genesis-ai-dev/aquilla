@@ -76,8 +76,12 @@ export function OrgProjectsPage() {
   const isGuestOrg = activeGuestOrg != null
   // Member-org portfolio 403s for guests. Only fetch it when this org is a
   // membership — not merely "not yet classified as a guest" on first paint.
-  const portfolio = useOrgPortfolio(activeOrg ? activeOrgId : null, activeOrg?.name)
   const orgSettings = useOrgSettings(activeOrg ? activeOrgId : null, activeOrg?.role?.level)
+  // AQU-1913: the org settings version, so an org default changed elsewhere
+  // re-reads the numbers.
+  const portfolio = useOrgPortfolio(activeOrg ? activeOrgId : null, activeOrg?.name, {
+    orgSettingsVersion: orgSettings.version,
+  })
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   // AQU-1040: designated-PM narrowing, composed with the status filter below.

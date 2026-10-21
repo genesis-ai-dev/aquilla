@@ -260,6 +260,44 @@ export function scriptMockResponse(messages: ChatMessage[]) {
     }))
   }
 
+  // Airtable table SELECTION (auth-worker lib/airtable/analyze.ts
+  // selectTableForProject, AQU-804): echo back the first real table id.
+  if (userText.includes("Tables available:")) {
+    const tablesMatch = userText.match(/Tables available:\n(\[.*?\])\n/s)
+    let tableId = ""
+    try {
+      const tables = JSON.parse(tablesMatch?.[1] ?? "[]") as { tableId: string }[]
+      tableId = tables[0]?.tableId ?? ""
+    } catch { /* the server falls back to a name match */ }
+    return respond(JSON.stringify({ tableId, reason: "[mock] First table the token can see." }))
+  }
+
+  // Airtable field mapping (lib/airtable/analyze.ts): map completion onto the
+  // first percent or number field and the status onto the first single
+  // select, one record for the project and one per file. The server clamps it.
+  if (userText.includes("Airtable field mapping")) {
+    const fieldsMatch = userText.match(/Table fields: (\[.*?\])\n/s)
+    const tableMatch = userText.match(/\nTable: .* \((tbl[^)]*)\)\n/)
+    const columns: { columnId: string; columnType: string; metric: string }[] = []
+    try {
+      const fields = JSON.parse(fieldsMatch?.[1] ?? "[]") as { id: string; type: string }[]
+      const pct = fields.find((f) => f.type === "percent" || f.type === "number")
+      if (pct) columns.push({ columnId: pct.id, columnType: pct.type, metric: "completion_pct" })
+      const select = fields.find((f) => f.type === "singleSelect")
+      if (select) columns.push({ columnId: select.id, columnType: select.type, metric: "status_auto" })
+    } catch { /* an empty mapping is still a valid proposal */ }
+    return respond(JSON.stringify({
+      mapping: {
+        version: 1,
+        tableId: tableMatch?.[1] ?? "",
+        itemGranularity: "project_and_files",
+        columns,
+        notes: "[mock] Completion and status, one record for the project and one per file.",
+      },
+      summary: "[mock] Keeps a record for the project and one per episode up to date.",
+    }))
+  }
+
   // Monday.com board analyze (auth-worker lib/monday/analyze.ts): the prompt
   // asks for a "column mapping" proposal in strict JSON. Return a minimal valid
   // MondayMapping so the AI-configure flow works end-to-end against the mock.
@@ -443,11 +481,36 @@ export function scriptMockResponse(messages: ChatMessage[]) {
   )
 }
 
-export function mockTranscription() {
-  return { text: "Mock transcription", words: [
-    { word: "Mock", start: 0, end: 0.25 },
-    { word: "transcription", start: 0.25, end: 0.5 },
-  ], usage: { cost: 0.0001, seconds: 1 } }
+export function mockTranscription(audioSeconds?: number) {
+  if (audioSeconds === undefined || audioSeconds <= 0.5) {
+    return { text: "Mock transcription", words: [
+      { word: "Mock", start: 0, end: 0.25 },
+      { word: "transcription", start: 0.25, end: 0.5 },
+    ], usage: { cost: 0.0001, seconds: 1 } }
+  }
+  // AQU-1681: a minute of a recording is sent at once and each word is handed
+  // back to the row it was spoken in, so the stand-in "speaks" all the way
+  // through what it was sent: a word every fifth of a second — often enough
+  // that even the shortest row the splitter makes (200 ms) holds one — named
+  // for when it was said, so a local run shows each row's words are its own.
+  const words = Array.from({ length: Math.floor(audioSeconds / 0.2) }, (_, i) => ({
+    word: `mock@${(i * 0.2).toFixed(1)}`, start: i * 0.2, end: i * 0.2 + 0.15,
+  }))
+  return {
+    text: words.map((w) => w.word).join(" "), words,
+    usage: { cost: 0.0001, seconds: Math.ceil(audioSeconds) },
+  }
+}
+
+/** Seconds of 16 kHz mono 16-bit WAV in a transcription request's base64. */
+export function wavSecondsOfRequest(body: string): number | undefined {
+  try {
+    const data = (JSON.parse(body) as { input_audio?: { data?: string } }).input_audio?.data
+    if (!data) return undefined
+    return Math.max(0, Buffer.from(data, "base64").byteLength - 44) / 32_000
+  } catch {
+    return undefined
+  }
 }
 
 const server = http.createServer((req, res) => {
@@ -459,10 +522,11 @@ const server = http.createServer((req, res) => {
     return
   }
   if (req.method === "POST" && req.url?.endsWith("/audio/transcriptions")) {
-    req.resume()
+    const parts: Buffer[] = []
+    req.on("data", (part: Buffer) => parts.push(part))
     req.on("end", () => {
       res.writeHead(200, { "Content-Type": "application/json" })
-      res.end(JSON.stringify(mockTranscription()))
+      res.end(JSON.stringify(mockTranscription(wavSecondsOfRequest(Buffer.concat(parts).toString("utf8")))))
     })
     return
   }

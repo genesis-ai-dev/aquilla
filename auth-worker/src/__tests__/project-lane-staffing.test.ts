@@ -183,14 +183,15 @@ describe("project lane staffing (AQU-1994)", () => {
     expect(await laneIdsFor()).toEqual(["lane-fr", "lane-zh"])
   })
 
-  it("says nothing at all on a project with no target lane rows", async () => {
+  it("says nothing about staffing on a project with no target lane rows", async () => {
     await seedProject({ lanes: false })
 
     const res = await staffing()
     expect(res.status).toBe(200)
     // No `laneIds` key: the client reads that as "unknown" and keeps its
-    // current list, rather than narrowing to nothing.
-    expect(await res.json()).toEqual({})
+    // current list, rather than narrowing to nothing. `teamLanes` is still
+    // answered — here there is no attached team, which is not "no lanes".
+    expect(await res.json()).toEqual({ teamLanes: [] })
   })
 
   it("refuses a caller below project lead", async () => {
@@ -216,5 +217,93 @@ describe("project lane staffing (AQU-1994)", () => {
     await seedProject()
 
     expect((await staffing("gone")).status).toBe(403)
+  })
+})
+
+/**
+ * AQU-2047 — the same read tells Assign work which lanes each attached team
+ * is tied to. Staffing stays its own field: a team can check French while
+ * the only person on the project is on Mandarin Chinese.
+ */
+describe("project team lane attachments (AQU-2047)", () => {
+  async function attach(
+    groupId: number,
+    name: string,
+    explicit: boolean,
+    laneIds: string[] = [],
+  ): Promise<void> {
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO groups (id, org_id, name, created_by) VALUES (?, 1, ?, 1)",
+    )
+      .bind(groupId, name)
+      .run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO group_project_grants
+         (group_id, project_id, role_level, granted_by, lanes_explicit)
+       VALUES (?, 'p1', ?, 1, ?)`,
+    )
+      .bind(groupId, CONTRIBUTOR, explicit)
+      .run()
+    for (const laneId of laneIds) {
+      await env.AQUILLA_PG.prepare(
+        "INSERT INTO group_project_lanes (group_id, project_id, lane_id) VALUES (?, 'p1', ?)",
+      )
+        .bind(groupId, laneId)
+        .run()
+    }
+  }
+
+  async function body(username = "alice"): Promise<{
+    laneIds?: string[]
+    teamLanes: { lanesExplicit: boolean; laneIds?: string[] }[]
+  }> {
+    const res = await staffing(username)
+    expect(res.status).toBe(200)
+    return (await res.json()) as {
+      laneIds?: string[]
+      teamLanes: { lanesExplicit: boolean; laneIds?: string[] }[]
+    }
+  }
+
+  it("names the one lane an explicit team checked, and not the lanes it did not", async () => {
+    await seedProject()
+    await grant(2, "lane-zh")
+    await attach(1, "Team T", true, ["lane-fr"])
+
+    const read = await body()
+    // Staffing is untouched: Zhen is on Mandarin Chinese, the team checked French.
+    expect(read.laneIds).toEqual(["lane-zh"])
+    expect(read.teamLanes).toEqual([{ lanesExplicit: true, laneIds: ["lane-fr"] }])
+  })
+
+  it("reports a team that has not saved checkboxes without a lane list", async () => {
+    await seedProject()
+    await attach(1, "Team T", false)
+    // A row left behind must not become the set. lanes_explicit false means
+    // every current target lane, until someone saves the checkboxes.
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO group_project_lanes (group_id, project_id, lane_id) VALUES (1, 'p1', 'lane-fr')",
+    ).run()
+
+    const read = await body()
+    expect(read.teamLanes).toEqual([{ lanesExplicit: false }])
+    expect(read.teamLanes[0]).not.toHaveProperty("laneIds")
+  })
+
+  it("reports no attached team as an empty list", async () => {
+    await seedProject()
+
+    expect((await body()).teamLanes).toEqual([])
+  })
+
+  it("returns each explicit team on its own, ordered by group, for the client to union", async () => {
+    await seedProject()
+    await attach(2, "Team B", true, ["lane-sv"])
+    await attach(1, "Team A", true, ["lane-fr"])
+
+    expect((await body()).teamLanes).toEqual([
+      { lanesExplicit: true, laneIds: ["lane-fr"] },
+      { lanesExplicit: true, laneIds: ["lane-sv"] },
+    ])
   })
 })

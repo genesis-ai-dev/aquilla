@@ -3,6 +3,7 @@ import {
   fetchMemberLaneAssignments,
   fetchMemberScopes,
   fetchMyScopeGrant,
+  fetchProjectLaneStaffing,
   isInMemberScope,
   putMemberScopes,
   type MemberScope,
@@ -280,5 +281,66 @@ describe("fetchMemberLaneAssignments", () => {
       ),
     )
     expect(await fetchMemberLaneAssignments("jwt", "p1", 1, "ln-es1", API)).toEqual([ROW])
+  })
+})
+
+describe("fetchProjectLaneStaffing (AQU-2047)", () => {
+  it("reads staffing and each attached team's lane checks from one response", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          laneIds: ["lane-zh"],
+          teamLanes: [
+            { lanesExplicit: true, laneIds: ["lane-fr"] },
+            { lanesExplicit: false, laneIds: ["lane-sv"] },
+          ],
+        }),
+        { status: 200 },
+      ),
+    )
+    const read = await fetchProjectLaneStaffing("jwt", "p1", API)
+    expect(read?.staffedLaneIds).toEqual(new Set(["lane-zh"]))
+    // A non-explicit team is tied to every current lane; a leftover laneIds
+    // list on that entry is not its set.
+    expect(read?.teamLanes).toEqual([
+      { lanesExplicit: true, laneIds: ["lane-fr"] },
+      { lanesExplicit: false },
+    ])
+  })
+
+  it("treats a missing teamLanes as unknown, and an empty list as no attached team", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ laneIds: ["lane-fr"] }), { status: 200 }),
+    )
+    expect(await fetchProjectLaneStaffing("jwt", "p1", API)).toEqual({
+      staffedLaneIds: new Set(["lane-fr"]),
+      teamLanes: null,
+    })
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ laneIds: [], teamLanes: [] }), { status: 200 }),
+    )
+    expect(await fetchProjectLaneStaffing("jwt", "p1", API)).toEqual({
+      staffedLaneIds: new Set(),
+      teamLanes: [],
+    })
+  })
+
+  it("treats a missing laneIds as unknown staffing, even when team lanes arrived", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ teamLanes: [] }), { status: 200 }),
+    )
+    expect(await fetchProjectLaneStaffing("jwt", "p1", API)).toEqual({
+      staffedLaneIds: null,
+      teamLanes: [],
+    })
+  })
+
+  it("returns null on a refusal or a network failure", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 403 }))
+    expect(await fetchProjectLaneStaffing("jwt", "p1", API)).toBeNull()
+
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"))
+    expect(await fetchProjectLaneStaffing("jwt", "p1", API)).toBeNull()
   })
 })

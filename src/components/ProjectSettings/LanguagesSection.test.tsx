@@ -278,15 +278,65 @@ describe("LanguagesSection — lane last-change in the archive confirmation (AQU
   })
 
   it("puts the archive confirmation on its own line, under the lane's fields", async () => {
-    // AQU-1977 (Sam, 2026-10-14): kept in the one-line row, the sentence
-    // squeezed the language and name boxes to empty slivers and slid
-    // "Advanced" under Confirm archive. The row wraps; the confirmation takes
-    // a full line of its own.
+    // The confirmation used to share the identity flex row, so it squeezed the
+    // language and name boxes and slid Advanced under Confirm archive. It is
+    // now the next block under that row, full width.
     renderRows(vi.fn(async (): Promise<LaneLastChangeResult> => ({ kind: "ok", lastChange: null })))
     fireEvent.click(screen.getByTestId("archive-lane-lane-es"))
     const confirm = await screen.findByTestId("archive-confirm-lane-es")
-    expect(confirm.className).toContain("basis-full")
-    expect(confirm.closest("li")!.className).toContain("flex-wrap")
+    const row = screen.getByTestId("lane-identity-row-lane-es")
+    expect(row.contains(confirm)).toBe(false)
+    expect(confirm.parentElement).toBe(row.parentElement)
+    expect(confirm.className).toContain("w-full")
+    expect(row.compareDocumentPosition(confirm) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it("keeps a derived lane code and Advanced out of the archive confirmation", async () => {
+    // AQU-2046: archiving Samoan put the derived code "sm" on the last-change
+    // line and Advanced under the buttons. Both stay in the identity row.
+    const samoan: ProjectLaneView = {
+      id: "lane-sm",
+      role: "target",
+      language: "Samoan",
+      name: null,
+      langCode: null,
+      legacyTag: null,
+      position: 1,
+      archivedAt: null,
+    }
+    const { onSetLaneArchived } = renderRows(
+      vi.fn(async (): Promise<LaneLastChangeResult> => ({
+        kind: "ok",
+        lastChange: { at: Date.UTC(2026, 9, 13), by: "matthew_test" },
+      })),
+      [DEFAULT_LANE, samoan],
+    )
+    fireEvent.click(screen.getByTestId("archive-lane-lane-sm"))
+    const confirm = await screen.findByTestId("archive-confirm-lane-sm")
+    const code = screen.getByTestId("lane-language-code-lane-sm")
+    const advanced = screen.getByTestId("lane-advanced-toggle-lane-sm")
+    const row = screen.getByTestId("lane-identity-row-lane-sm")
+    expect(code.textContent).toBe("sm")
+    expect(confirm.contains(code)).toBe(false)
+    expect(confirm.contains(advanced)).toBe(false)
+    expect(row.contains(code)).toBe(true)
+    expect(row.contains(advanced)).toBe(true)
+    expect(confirm.textContent).toMatch(/samoan/i)
+    expect(confirm.contains(screen.getByRole("button", { name: /confirm archive/i }))).toBe(true)
+    expect(confirm.contains(screen.getByRole("button", { name: /^cancel$/i }))).toBe(true)
+    const note = await screen.findByTestId("lane-last-change-lane-sm")
+    expect(confirm.contains(note)).toBe(true)
+    expect(confirm.contains(code)).toBe(false)
+
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }))
+    await waitFor(() => expect(screen.queryByTestId("archive-confirm-lane-sm")).toBeNull())
+    expect(onSetLaneArchived).not.toHaveBeenCalled()
+    expect(screen.getByTestId("archive-lane-lane-sm")).toBeTruthy()
+    expect(screen.getByTestId("lane-language-code-lane-sm").textContent).toBe("sm")
+
+    fireEvent.click(screen.getByTestId("archive-lane-lane-sm"))
+    fireEvent.click(await screen.findByRole("button", { name: /confirm archive/i }))
+    await waitFor(() => expect(onSetLaneArchived).toHaveBeenCalledWith("lane-sm", true))
   })
 
   it("asks only about the lane being archived, so another lane's edits can't leak in", async () => {

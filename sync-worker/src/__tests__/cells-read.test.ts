@@ -1797,3 +1797,115 @@ describe("AQU-1841: cursor-pinned page ordering", () => {
     expect(body.cells[0].cellId).toBe("lc00020")
   })
 })
+
+// AQU-2094. WHY: a whole Bible is 17 pages, and each waited for the one before
+// it to arrive before it was even asked for. The first page now hands out every
+// later page's cursor, so the client can fetch the next page while it draws
+// this one. Those cursors must be exactly the chain fetching in turn produces,
+// or a page could skip or repeat rows (including a multi-lane cell cut in two).
+describe("AQU-2094 pageCursors", () => {
+  it("hands out the same cursors as walking nextCursor, cold and cached", async () => {
+    const db = await makeTestDb({ cells: [
+      makeCell({ cell_id: "a", side: "source", anchor_cell_id: null, event_id: "s-a", value: "Source A" }),
+      makeCell({ cell_id: "b", side: "source", anchor_cell_id: "a", event_id: "s-b", value: "Source B" }),
+      makeCell({ cell_id: "c", side: "source", anchor_cell_id: "b", event_id: "s-c", value: "Source C" }),
+      makeCell({ cell_id: "d", side: "source", anchor_cell_id: "c", event_id: "s-d", value: "Source D" }),
+      makeCell({ cell_id: "a", anchor_cell_id: null, event_id: "t-a", value: "Target A" }),
+      makeCell({ cell_id: "a", target_lang: "es", anchor_cell_id: null, event_id: "es-a", value: "Destino A" }),
+      makeCell({ cell_id: "c", anchor_cell_id: "a", event_id: "t-c", value: "Target C" }),
+      makeCell({ cell_id: "c", target_lang: "es", anchor_cell_id: "a", event_id: "es-c", value: "Destino C" }),
+      makeCell({ cell_id: "orphan", anchor_cell_id: "c", event_id: "t-o", value: "Target only" }),
+    ] })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    type Page = { cells: { cellId: string; side: string }[]; nextCursor: string | null; pageCursors?: string[] }
+    const read = async (query: string): Promise<Page> => (await (await handleCellsReadRequest(
+      new Request(`https://w/api/v1/projects/proj-a/files/file-x/cells?${query}`, { headers: { Authorization: `Bearer ${token}` } }),
+      envWith(db.db),
+    ))!.json()) as Page
+    try {
+      for (const cold of [true, false]) {
+        if (cold) resetChainCacheForTests()
+        const first = await read("paired=1&limit=1&pageSize=2")
+        expect(first.cells.map((r) => r.cellId)).toEqual(["a", "a", "a"])
+
+        const walked: string[] = []
+        const pages: string[][] = []
+        for (let next = first.nextCursor; next; ) {
+          walked.push(next)
+          const page = await read(`paired=1&limit=2&cursor=${encodeURIComponent(next)}`)
+          expect(page.pageCursors).toBeUndefined()
+          pages.push(page.cells.map((r) => `${r.cellId}/${r.side}`))
+          next = page.nextCursor
+        }
+        expect(first.pageCursors).toEqual(walked)
+        expect(pages).toEqual([
+          ["b/source", "c/source", "c/target", "c/target"],
+          ["d/source", "orphan/target"],
+        ])
+      }
+      // No later pages, no cursors.
+      expect((await read("paired=1&limit=2000&pageSize=2000")).pageCursors).toBeUndefined()
+    } finally {
+      await db.close()
+    }
+  })
+})
+
+// AQU-2094: the SPA's consumer against the real producer. The next page must be
+// asked for while the current one is still being handled, pages must still
+// arrive whole and in order, and a page that does not end where the next cursor
+// starts must not lose rows.
+describe("AQU-2094 streamFileCells fetches the next page ahead", () => {
+  const seed = () => makeTestDb({ cells: [
+    makeCell({ cell_id: "a", side: "source", anchor_cell_id: null, event_id: "s-a", value: "A" }),
+    makeCell({ cell_id: "b", side: "source", anchor_cell_id: "a", event_id: "s-b", value: "B" }),
+    makeCell({ cell_id: "c", side: "source", anchor_cell_id: "b", event_id: "s-c", value: "C" }),
+    makeCell({ cell_id: "d", side: "source", anchor_cell_id: "c", event_id: "s-d", value: "D" }),
+    makeCell({ cell_id: "e", side: "source", anchor_cell_id: "d", event_id: "s-e", value: "E" }),
+    makeCell({ cell_id: "b", anchor_cell_id: null, event_id: "t-b", value: "Target B" }),
+  ] })
+
+  async function stream(rewrite: (url: URL) => void) {
+    const { streamFileCells } = await import("../../../src/lib/sync/cells-read")
+    const db = await seed()
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const log: string[] = []
+    let requests = 0
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      const url = new URL(input)
+      rewrite(url)
+      log.push(`fetch ${++requests}`)
+      return (await handleCellsReadRequest(new Request(url.toString(), { headers: { Authorization: `Bearer ${token}` } }), envWith(db.db)))!
+    }))
+    const pages: string[][] = []
+    try {
+      await streamFileCells("proj-a", "file-x", token, async (rows) => {
+        log.push(`page ${pages.length + 1}`)
+        pages.push(rows.map((r) => `${r.cellId}/${r.side}`))
+        await new Promise((resolve) => setTimeout(resolve, 5))
+      }, undefined, undefined, undefined, true)
+    } finally {
+      vi.unstubAllGlobals()
+      await db.close()
+    }
+    return { pages, log }
+  }
+
+  it("asks for page 3 before page 2 has been handled, and delivers every page in order", async () => {
+    const { pages, log } = await stream((url) => {
+      url.searchParams.set("limit", url.searchParams.has("cursor") ? "2" : "1")
+      if (url.searchParams.has("pageSize")) url.searchParams.set("pageSize", "2")
+    })
+    expect(pages).toEqual([["a/source"], ["b/source", "b/target"], ["c/source", "d/source"], ["e/source"]])
+    expect(log.indexOf("fetch 3")).toBeLessThan(log.indexOf("page 2"))
+  })
+
+  it("loses no rows when a page ends somewhere other than the next cursor", async () => {
+    // The cursors are cut for pages of 3; the pages actually served hold 2.
+    const { pages } = await stream((url) => {
+      url.searchParams.set("limit", url.searchParams.has("cursor") ? "2" : "1")
+      if (url.searchParams.has("pageSize")) url.searchParams.set("pageSize", "3")
+    })
+    expect(pages.flat()).toEqual(["a/source", "b/source", "b/target", "c/source", "d/source", "e/source"])
+  })
+})

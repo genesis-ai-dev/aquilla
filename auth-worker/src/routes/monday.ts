@@ -30,9 +30,7 @@ import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import type { Context } from "hono"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
-import { ROLE, type Env } from "../types"
-import { getEffectiveOrgRole } from "../services/org-permissions"
-import { resolveProjectRole } from "../services/project-permissions"
+import type { Env } from "../types"
 import {
   encryptMondayToken,
   decryptMondayToken,
@@ -55,6 +53,7 @@ import {
   fetchBoardStructure,
   gqlString,
   listBoards,
+  MondayApiError,
   mondayGraphQL,
   runAliasedMutations,
 } from "../lib/monday/client"
@@ -75,20 +74,26 @@ import {
   AnalyzeUpstreamError,
   NoBoardsError,
 } from "../lib/monday/analyze"
-import { pushBoardLink, schedulePush } from "../lib/monday/push"
+import { pushBoardLink } from "../lib/monday/push"
+import { schedulePush } from "../lib/integrations/push"
 import {
   addMissingColumns,
+  createCleanBoard,
   ensureProjectsGroup,
   findExistingColumn,
   isCreatableMetric,
   PROJECTS_GROUP_TITLE,
 } from "../lib/monday/columns"
-import { notifySyncWorkerOfMondayLinkChange } from "../services/sync-worker-notify"
 import { secureCompare } from "../utils/secure-compare"
+import {
+  getProjectOrgId,
+  MANAGE_MIN_ROLE,
+  notifyLinkChangedBestEffort,
+  orgGuard,
+  projectGuard,
+} from "./_integration-helpers"
 
 const monday = new Hono<AuthHonoEnv>()
-
-const MANAGE_MIN_ROLE = ROLE.MAINTAINER
 
 /**
  * Public base of THIS worker, for the webhook URL Monday calls back. It must
@@ -155,49 +160,12 @@ async function orgTokenOr409(
   }
 }
 
-async function getProjectOrgId(env: Env, projectId: string): Promise<number | null> {
-  const row = await env.AQUILLA_PG.prepare("SELECT org_id FROM projects WHERE id = ?")
-    .bind(projectId)
-    .first<{ org_id: number | null }>()
-  return row?.org_id ?? null
-}
-
 async function getLink(env: Env, projectId: string): Promise<IntegrationLinkRow | null> {
   return env.AQUILLA_PG.prepare(
     "SELECT * FROM integration_links WHERE project_id = ? AND provider = ?",
   )
     .bind(projectId, PROVIDER)
     .first<IntegrationLinkRow>()
-}
-
-/** Guard: caller must have >= minRole on the org. Returns role or an error Response. */
-async function orgGuard(
-  c: Context<AuthHonoEnv>,
-  minRole: number | null,
-): Promise<{ orgId: number } | Response> {
-  const orgId = parseInt(c.req.param("orgId") ?? "", 10)
-  if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
-  const role = await getEffectiveOrgRole(c.env, orgId, c.get("user"))
-  if (role == null) return c.json({ error: "no access to org" }, 403)
-  if (minRole != null && role < minRole) {
-    return c.json({ error: `org role >= maintainer (${minRole}) required` }, 403)
-  }
-  return { orgId }
-}
-
-/** Guard: caller must have >= minRole on the project. */
-async function projectGuard(
-  c: Context<AuthHonoEnv>,
-  minRole: number | null,
-): Promise<{ projectId: string } | Response> {
-  const projectId = c.req.param("projectId") ?? ""
-  if (!projectId) return c.json({ error: "invalid projectId" }, 400)
-  const role = await resolveProjectRole(c.env, c.get("user"), projectId)
-  if (!role) return c.json({ error: "no access to project" }, 403)
-  if (minRole != null && role.level < minRole) {
-    return c.json({ error: `project role >= maintainer (${minRole}) required` }, 403)
-  }
-  return { projectId }
 }
 
 function linkResponse(link: IntegrationLinkRow, orgConnected: boolean) {
@@ -525,28 +493,6 @@ const putLinkSchema = z.object({
   config: z.record(z.string(), z.unknown()),
   enabled: z.boolean().optional(),
 })
-
-/**
- * AQU-1828: the project's DO caches "this project has no Monday link" so it
- * stops nudging identity on every edit. Any change to the link row has to drop
- * that cache, or a freshly linked project would not start pushing until the
- * DO's backstop TTL lapsed. Best-effort: `executionCtx` is absent in some test
- * harnesses, and the link row itself is already durable.
- */
-function notifyLinkChangedBestEffort(
-  c: {
-    env: Parameters<typeof notifySyncWorkerOfMondayLinkChange>[0]
-    executionCtx: { waitUntil(promise: Promise<unknown>): void }
-  },
-  projectId: string,
-): void {
-  const notifyPromise = notifySyncWorkerOfMondayLinkChange(c.env, projectId)
-  try {
-    c.executionCtx.waitUntil(notifyPromise)
-  } catch {
-    void notifyPromise
-  }
-}
 
 monday.put(
   "/projects/:projectId/link",
@@ -1062,6 +1008,66 @@ monday.post(
       structure: {
         url: structure.url ?? null,
         name: structure.name ?? null,
+        columns: structure.columns.map(({ id, title, type }) => ({ id, title, type })),
+        groups: structure.groups,
+      },
+    })
+  },
+)
+
+// AQU-2087: "Make a new board for me". Step 1 of the setup can start from a
+// clean board instead of one of the user's: Aquilla makes it with only the
+// columns ticked in step 2, then the setup links it like any other board.
+// Same permission as adding columns.
+const newBoardSchema = z.object({
+  name: z.string().trim().min(1).max(255),
+  metrics: z.array(z.string()).max(25),
+})
+
+monday.post(
+  "/projects/:projectId/board",
+  authMiddleware,
+  zValidator("json", newBoardSchema),
+  async (c) => {
+    const guard = await projectGuard(c, MANAGE_MIN_ROLE)
+    if (guard instanceof Response) return guard
+    const body = c.req.valid("json")
+
+    const orgId = await getProjectOrgId(c.env, guard.projectId)
+    if (orgId == null) return c.json({ error: "project has no org" }, 409)
+    const token = await orgTokenOr409(c, orgId)
+    if (token instanceof Response) return token
+
+    let made
+    try {
+      made = await createCleanBoard(token, body.name, body.metrics.filter(isCreatableMetric))
+    } catch (err) {
+      console.error("[monday] new board failed:", err)
+      return c.json(
+        { error: err instanceof MondayApiError ? `Monday didn't make the board: ${err.message}` : "Monday API error" },
+        502,
+      )
+    }
+
+    let structure
+    try {
+      structure = await fetchBoardStructure(token, made.boardId)
+    } catch {
+      structure = {
+        url: null,
+        name: body.name,
+        columns: made.created.map((col) => ({ id: col.columnId, title: col.title, type: col.columnType })),
+        groups: [],
+      }
+    }
+    return c.json({
+      boardId: made.boardId,
+      created: made.created,
+      reused: made.reused,
+      failed: made.failed,
+      structure: {
+        url: structure.url ?? null,
+        name: structure.name ?? body.name,
         columns: structure.columns.map(({ id, title, type }) => ({ id, title, type })),
         groups: structure.groups,
       },

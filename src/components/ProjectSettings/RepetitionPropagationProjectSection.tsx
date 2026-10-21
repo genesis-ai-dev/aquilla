@@ -71,6 +71,21 @@ export function RepetitionPropagationProjectSection({
     setBusy(false)
   }
 
+  // One hover, as on "Count headings" beside it (AQU-1912): locked, the lock's
+  // explanation leads with the organization's answer under it — two stacked
+  // tooltips let the inner one hide why the control is grey.
+  const locked = Boolean(disabled) && disabledTooltip != null
+  const trigger = (
+    <SelectTrigger
+      id="auto-propagate-repetitions"
+      className="w-52 bg-background"
+      aria-label={t("projectSettings.autoPropagateRepetitions.label")}
+      aria-describedby="auto-propagate-repetitions-default"
+    >
+      <SelectValue />
+    </SelectTrigger>
+  )
+
   return (
     <SettingsRow
       label={
@@ -81,7 +96,10 @@ export function RepetitionPropagationProjectSection({
       description={t("projectSettings.autoPropagateRepetitions.description")}
       control={
         <div className="flex flex-col items-end gap-1">
-          <DisabledFieldTooltip disabled={Boolean(disabled)} tooltip={disabledTooltip ?? null}>
+          <DisabledFieldTooltip
+            disabled={locked}
+            tooltip={locked ? <>{disabledTooltip}<p className="text-muted-foreground">{currentDefault}</p></> : null}
+          >
             <Select
               items={options}
               disabled={disabled || busy}
@@ -91,25 +109,20 @@ export function RepetitionPropagationProjectSection({
               {/* A span owns the hover rather than the trigger itself —
                   making a control its own tooltip trigger races that
                   control's pointer and focus handling. */}
-              <Tooltip>
-                <TooltipTrigger
-                  delay={200}
-                  closeOnClick={false}
-                  render={<span className="block" />}
-                >
-                  <SelectTrigger
-                    id="auto-propagate-repetitions"
-                    className="w-52 bg-background"
-                    aria-label={t("projectSettings.autoPropagateRepetitions.label")}
-                    aria-describedby="auto-propagate-repetitions-default"
+              {locked ? trigger : (
+                <Tooltip>
+                  <TooltipTrigger
+                    delay={200}
+                    closeOnClick={false}
+                    render={<span className="block" />}
                   >
-                    <SelectValue />
-                  </SelectTrigger>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" align="center">
-                  {currentDefault}
-                </TooltipContent>
-              </Tooltip>
+                    {trigger}
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" align="center">
+                    {currentDefault}
+                  </TooltipContent>
+                </Tooltip>
+              )}
               <SelectContent>
                 <SelectGroup>
                   {options.map((o) => (

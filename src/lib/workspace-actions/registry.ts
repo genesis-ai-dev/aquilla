@@ -1,4 +1,4 @@
-import { Plus, Sparkles, Download, CheckSquare, Mic, Wand2, AudioLines } from "lucide-react"
+import { Plus, Sparkles, Download, CheckSquare, Mic, Wand2, AudioLines, Quote } from "lucide-react"
 import { CHANGE_VOICE_QUALITY_LABEL, getChangeVoiceQuality } from "@/lib/store/change-voice-quality"
 import type {
   WorkspaceAction, WorkspaceActionContext,
@@ -245,5 +245,24 @@ export const workspaceActions: WorkspaceAction[] = [
       confirmLabelKey: "nav.workspaceActions.changeVoiceAll.confirmLabel",
     },
     run: (_c, args) => args.runChangeVoiceAll(),
+  },
+  {
+    // AQU-1759: the row menu's "Split at quotes", for every line of the file
+    // at once — a chapter of John has dozens of verses mixing narration and
+    // speech. The count in the confirmation comes from the same scan the run
+    // splits from, and a file with nothing to split says so with no confirm.
+    id: "split-quotes", labelKey: "nav.workspaceActions.splitQuotes.label", icon: Quote, group: "secondary",
+    isAvailable: (c) => c.activeFileId != null && (c.canSplitAtQuotes?.() ?? false),
+    requiresConfirmation: {
+      titleKey: "nav.workspaceActions.splitQuotes.title",
+      description: (c, t) => {
+        const summary = c.quoteSplitSummary?.()
+        if (!summary || summary.rows === 0) return t("nav.workspaceActions.splitQuotes.none")
+        return t("nav.workspaceActions.splitQuotes.description", { count: summary.rows, lines: summary.lines })
+      },
+      confirmLabelKey: "nav.workspaceActions.splitQuotes.confirmLabel",
+      canConfirm: (c) => (c.quoteSplitSummary?.().rows ?? 0) > 0,
+    },
+    run: (_c, args) => args.runSplitAtQuotes(),
   },
 ]

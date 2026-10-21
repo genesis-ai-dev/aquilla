@@ -53,6 +53,7 @@ import {
   fetchBoardStructure,
   gqlString,
   listBoards,
+  MondayApiError,
   mondayGraphQL,
   runAliasedMutations,
 } from "../lib/monday/client"
@@ -77,6 +78,7 @@ import { pushBoardLink } from "../lib/monday/push"
 import { schedulePush } from "../lib/integrations/push"
 import {
   addMissingColumns,
+  createCleanBoard,
   ensureProjectsGroup,
   findExistingColumn,
   isCreatableMetric,
@@ -1006,6 +1008,66 @@ monday.post(
       structure: {
         url: structure.url ?? null,
         name: structure.name ?? null,
+        columns: structure.columns.map(({ id, title, type }) => ({ id, title, type })),
+        groups: structure.groups,
+      },
+    })
+  },
+)
+
+// AQU-2087: "Make a new board for me". Step 1 of the setup can start from a
+// clean board instead of one of the user's: Aquilla makes it with only the
+// columns ticked in step 2, then the setup links it like any other board.
+// Same permission as adding columns.
+const newBoardSchema = z.object({
+  name: z.string().trim().min(1).max(255),
+  metrics: z.array(z.string()).max(25),
+})
+
+monday.post(
+  "/projects/:projectId/board",
+  authMiddleware,
+  zValidator("json", newBoardSchema),
+  async (c) => {
+    const guard = await projectGuard(c, MANAGE_MIN_ROLE)
+    if (guard instanceof Response) return guard
+    const body = c.req.valid("json")
+
+    const orgId = await getProjectOrgId(c.env, guard.projectId)
+    if (orgId == null) return c.json({ error: "project has no org" }, 409)
+    const token = await orgTokenOr409(c, orgId)
+    if (token instanceof Response) return token
+
+    let made
+    try {
+      made = await createCleanBoard(token, body.name, body.metrics.filter(isCreatableMetric))
+    } catch (err) {
+      console.error("[monday] new board failed:", err)
+      return c.json(
+        { error: err instanceof MondayApiError ? `Monday didn't make the board: ${err.message}` : "Monday API error" },
+        502,
+      )
+    }
+
+    let structure
+    try {
+      structure = await fetchBoardStructure(token, made.boardId)
+    } catch {
+      structure = {
+        url: null,
+        name: body.name,
+        columns: made.created.map((col) => ({ id: col.columnId, title: col.title, type: col.columnType })),
+        groups: [],
+      }
+    }
+    return c.json({
+      boardId: made.boardId,
+      created: made.created,
+      reused: made.reused,
+      failed: made.failed,
+      structure: {
+        url: structure.url ?? null,
+        name: structure.name ?? body.name,
         columns: structure.columns.map(({ id, title, type }) => ({ id, title, type })),
         groups: structure.groups,
       },

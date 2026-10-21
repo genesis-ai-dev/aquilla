@@ -259,6 +259,88 @@ describe("/api/v2/admin/* platform-admin gate", () => {
     expect(body.projects[0]).toMatchObject({ id: "pa", totalCells: 0 })
   })
 
+  // AQU-1911: the admin console counted headings even where the project or its
+  // org had turned "count headings" off, so its validated % disagreed with the
+  // dashboards. Project answer, else org answer, else count them.
+  it("GET /projects follows the count-headings setting, the project's then the org's", async () => {
+    await seedUser(7, "root")
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES ('inherits', 'John', 1, 1), ('counts', 'Mark', 1, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_settings (org_id, settings) VALUES (1, '{\"countStructuralCells\":false}')",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_settings (project_id, settings) VALUES ('counts', '{\"countStructuralCells\":true}')",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e1', 1, 'inherits', 'file.create', 'wendi', '{}', 1000, 1000, 1), ('e2', 1, 'counts', 'file.create', 'wendi', '{}', 1000, 1000, 2)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO files (id, project_id, name, event_id, cell_count, approved_count, filled_count, word_count,
+                          structural_cell_count, structural_approved_count, structural_filled_count)
+       VALUES ('f1', 'inherits', 'JHN', 'e1', 100, 40, 60, 500, 10, 4, 6),
+              ('f2', 'counts', 'MRK', 'e2', 100, 40, 60, 500, 10, 4, 6)`,
+    ).run()
+
+    const res = await app.request("/api/v2/admin/projects", { headers: authHeader(await jwtFor("root")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      projects: Array<{ id: string; totalCells: number; validatedCells: number; filledCells: number; wordCount: number }>
+    }
+    const byId = Object.fromEntries(body.projects.map((p) => [p.id, p]))
+    // The org leaves headings out and this project follows it. Words never
+    // take the setting, as on the dashboard.
+    expect(byId.inherits).toMatchObject({ totalCells: 90, validatedCells: 36, filledCells: 54, wordCount: 500 })
+    // This project counts them whatever its org says.
+    expect(byId.counts).toMatchObject({ totalCells: 100, validatedCells: 40, filledCells: 60, wordCount: 500 })
+  })
+
+  // AQU-1911: "Stalled" is the dashboard's activity rule, so the console needs
+  // the same clock — validations and takes restamp the progress rows, never
+  // files.last_edit_at.
+  it("GET /projects reports the latest activity, validations and takes included", async () => {
+    await seedUser(7, "root")
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES ('reviewing', 'John', 1, 1), ('quiet', 'Mark', 1, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e1', 1, 'reviewing', 'file.create', 'wendi', '{}', 1000, 1000, 1), ('e2', 1, 'quiet', 'file.create', 'wendi', '{}', 1000, 1000, 2)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO files (id, project_id, name, event_id, cell_count, filled_count, last_edit_at, deleted_at)
+       VALUES ('f1', 'reviewing', 'JHN', 'e1', 100, 60, 1000, NULL),
+              ('f-gone', 'reviewing', 'Old JHN', 'e1', 100, 60, 1000, 123),
+              ('f2', 'quiet', 'MRK', 'e2', 100, 60, 1000, NULL)`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, language, name, position, archived_at) VALUES
+         ('l1', 'reviewing', 'target', 'Greek', NULL, 0, NULL),
+         ('l2', 'quiet', 'target', 'Greek', NULL, 0, NULL)`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, lane_id, total_count, filled_count, updated_at)
+       VALUES ('reviewing', 'f1', 'file', '', 'l1', 100, 60, 5000),
+              ('reviewing', 'f-gone', 'file', '', 'l1', 100, 60, 9000),
+              ('quiet', 'f2', 'file', '', 'l2', 100, 60, 500)`,
+    ).run()
+
+    const res = await app.request("/api/v2/admin/projects", { headers: authHeader(await jwtFor("root")) }, env)
+    const body = (await res.json()) as {
+      projects: Array<{ id: string; lastEditAt: number | null; lastActivityAt: number | null }>
+    }
+    const byId = Object.fromEntries(body.projects.map((p) => [p.id, p]))
+    // A validation pass restamped the progress row; the edit stamp stayed put.
+    // The deleted file's newer row is not this project's work.
+    expect(byId.reviewing).toMatchObject({ lastEditAt: 1000, lastActivityAt: 5000 })
+    // Never earlier than the last cell edit.
+    expect(byId.quiet).toMatchObject({ lastEditAt: 1000, lastActivityAt: 1000 })
+  })
+
   it("GET /projects flags a project as shared when a non-org member can access it", async () => {
     await seedUser(7, "root")
     await seedUser(1, "wendi")

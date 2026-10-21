@@ -107,6 +107,17 @@ describe("public/_headers ↔ worker/security-headers.ts parity", () => {
   })
 })
 
+// AQU-2092: fingerprinted build files are kept for a year; the page is not.
+describe("public/_headers — caching", () => {
+  it("keeps /assets/* (fingerprinted build output) for a year without re-checking", () => {
+    expect(parseRule(HEADERS_FILE, "/assets/*")["Cache-Control"]).toBe("public, max-age=31536000, immutable")
+  })
+
+  it("leaves the page itself to revalidate, so a deploy shows up at once", () => {
+    expect(findCaseInsensitive(STATIC_HEADERS, "Cache-Control")).toBeUndefined()
+  })
+})
+
 function findCaseInsensitive(record: Record<string, string>, name: string): string | undefined {
   const key = Object.keys(record).find((k) => k.toLowerCase() === name.toLowerCase())
   return key === undefined ? undefined : record[key]

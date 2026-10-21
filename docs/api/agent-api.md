@@ -383,15 +383,35 @@ are new in v1.1, and `CreateOrg` was added by AQU-1221
   MAINTAINER**. `ifMatchVersion` must equal the live settings version both at prepare and at
   commit — a mismatch at either point is `409 plan_stale` (re-fetch the current version and
   re-prepare, don't blindly retry commit).
-- **`LinkMedia`** (`{ kind: "LinkMedia", fileId, cellId, artifactId }`) — **event-native**:
-  compiles to `cell.audio.attach` + `cell.audio.select`, requires **CONTRIBUTOR** at commit time
-  (same perimeter as SetTranslation). `artifactId` must reference an `audio`-kind artifact already
-  uploaded to the same project (see the audio-upload paragraph below) — a missing, wrong-kind, or
-  cross-project artifact is `validation_failed` at prepare, or `plan_stale` if it disappears
-  between prepare and commit. Multiple `LinkMedia` commands may share one changeset; a `LinkMedia`
-  changeset cannot mix with any other command kind. Commit copies the artifact's bytes into the
-  target cell's file's audio key (the same R2 layout `sync-worker/src/audio.ts` reads), so the
-  app's native playback route serves externally-attached audio with no special-casing.
+- **`LinkMedia`** (`{ kind: "LinkMedia", fileId, cellId, artifactId, laneId, slot?, durationMs? }`)
+  — **event-native**: compiles to `cell.audio.attach` + `cell.audio.select`, requires
+  **CONTRIBUTOR** at commit time (same perimeter as SetTranslation). `artifactId` must reference an
+  `audio`-kind artifact already uploaded to the same project (see the audio-upload paragraph below)
+  — a missing, wrong-kind, or cross-project artifact is `validation_failed` at prepare, or
+  `plan_stale` if it disappears between prepare and commit. Multiple `LinkMedia` commands may share
+  one changeset; a `LinkMedia` changeset cannot mix with any other command kind. Commit copies the
+  artifact's bytes into the target cell's file's audio key (the same R2 layout
+  `sync-worker/src/audio.ts` reads), so the app's native playback route serves externally-attached
+  audio with no special-casing.
+  - **`laneId`** (required, AQU-2086) — the target lane the take belongs to, as `lanes.id` from the
+    project read; a language tag or legacy tag is not accepted, and an omitted id is
+    `validation_failed` naming the discovery endpoint — the same rule as `SetTranslation.laneId`.
+    The editor lists a cell's takes **per lane**, so a take attached with no lane was filed under
+    the legacy default lane and the Arabic (or any tagged) lane's Takes panel said "No takes yet"
+    while the commit had succeeded.
+  - **`slot`** (optional) — `"recording"` (default) attaches the clip as a recorded take;
+    `"generatedVoice"` attaches it as synthesized voice, where in-app TTS takes live, so an
+    externally generated voice (an ElevenLabs bridge, say) is reviewed, selected and exported
+    exactly like one the app generated.
+  - **`durationMs`** (optional) — the clip's length when the caller knows it. The upload does no
+    decoding, so this is the only way a take arrives with a duration; the recorder's own takes
+    heal theirs in the browser, a `generatedVoice` take does not.
+  - **The take's id is not the upload's `audioId`.** Commit mints a native, cell-seeded audio id
+    for the take (the convention the recorder uses — `db/shared/audio-id.ts`) and copies the bytes
+    under it; the SPA tells a dub take from a file's imported programme clip by that seed, so the
+    artifact's bare UUID would never sound on the Target track or be stitched into the dubbing
+    export. The receipt's **`media[]`** (`{ fileId, cellId, artifactId, audioId, slot, laneId }`)
+    reports the id to refer to from now on.
 
 **Uploading audio for `LinkMedia`.** MCP is JSON-RPC and cannot carry a 25MB binary body, so audio
 always goes through the REST artifact endpoint first, regardless of which transport stages the

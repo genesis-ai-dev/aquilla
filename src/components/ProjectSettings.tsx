@@ -458,6 +458,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     reasonCannotEdit,
     canEditLanguages,
     reasonCannotEditLanguages,
+    canEditCountStructural,
+    reasonCannotEditCountStructural,
     languageEditFloor,
     patch: patchShared,
     version: sharedVersion,
@@ -697,6 +699,30 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const languageDisabledTooltip =
     reasonCannotEditLanguages === "offline" ? t("projectSettings.permission.reconnectToEdit")
     : reasonCannotEditLanguages === "role" ? languageRoleLockHint
+    : null
+
+  // AQU-1912: "Count headings" is a project-lead setting (AQU-1083), so its
+  // lock hint names Project leads, not the page-wide Maintainer floor.
+  const structuralPrivilegedRole = resolveRoleName(t, ROLE.PROJECT_LEAD, { plural: true })
+  const structuralRoleLockHint = (
+    <PermissionLockHint
+      title={t("projectSettings.permission.onlyRoleCanModify", {
+        role: structuralPrivilegedRole,
+      })}
+      onView={id ? () => setPrivilegedOpen(true) : undefined}
+      href={id ? undefined : PERMISSION_DOCS_URL}
+      linkLabel={
+        id
+          ? t("projectSettings.permission.viewPrivilegedMembers", {
+              role: structuralPrivilegedRole,
+            })
+          : t("error.permissionDenied.learnMore")
+      }
+    />
+  )
+  const structuralDisabledTooltip =
+    reasonCannotEditCountStructural === "offline" ? t("projectSettings.permission.reconnectToEdit")
+    : reasonCannotEditCountStructural === "role" ? structuralRoleLockHint
     : null
 
   // AQU-765: renaming a synced project now persists to the server rename
@@ -2969,8 +2995,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 <StructuralCellsProjectSection
                   value={sharedSettingsBlob?.countStructuralCells}
                   orgDefault={orgCountStructuralCells ?? true}
-                  disabled={!canEditShared}
-                  disabledTooltip={sharedDisabledTooltip ?? undefined}
+                  disabled={!canEditCountStructural}
+                  disabledTooltip={structuralDisabledTooltip ?? undefined}
                   onPatch={patchShared}
                 />
               }

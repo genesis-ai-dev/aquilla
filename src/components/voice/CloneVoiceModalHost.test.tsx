@@ -55,7 +55,9 @@ function makeTts(over: Partial<ProjectTtsApi> = {}): ProjectTtsApi {
   const settings: ProjectTtsSettings = { provider: "gemini", voices: [narrator], defaultVoiceId: narrator.id }
   return {
     settings,
+    laneSettings: settings,
     voices: [narrator],
+    allVoices: [narrator],
     defaultVoiceId: narrator.id,
     castStats: new Map(),
     saveTts: vi.fn(async () => {}),

@@ -3,13 +3,12 @@
 // `wrangler secret put` is a one-shot: it patches the live Worker and routes
 // traffic to a brand-new version that Cloudflare derives from the running one.
 // The derived version keeps the script etag and every binding, but it does NOT
-// inherit the custom version tag — and both environment guards
-// (auth-worker/src/environment-guard.ts, sync-worker/src/environment-guard.ts)
-// require `CF_VERSION_METADATA.tag` to name the Worker and environment serving
-// a first-party API host. An ordinary secret rotation therefore took dev sync
-// to a hard 503 with correct bindings and correct secrets.
+// inherit the custom version tag. The environment guards used to refuse that
+// untagged version (a hard 503 on dev sync, and on prod identity 2026-10-20);
+// they now serve it with a warning, but it still escapes the deployers' binding
+// verification and the version-to-commit trail.
 //
-// This script keeps the guard fail-closed and fixes the rotation instead:
+// This script keeps the live version tagged and verified:
 //
 //   1. STAGE  `wrangler versions secret put` creates a new version carrying the
 //             rotated secret and the deployment tag, WITHOUT shifting traffic.

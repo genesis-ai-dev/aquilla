@@ -67,6 +67,22 @@ describe("isStalled", () => {
   })
 })
 
+// AQU-1911: the org dashboard's rule (portfolioActivityStatus), so the two
+// consoles agree about which projects are stalled.
+describe("isStalled — the org dashboard's activity rule (AQU-1911)", () => {
+  it("is false for a project nobody has started translating, however old", () => {
+    expect(isStalled({ totalCells: 100, filledCells: 0, lastEditAt: NOW - 60 * DAY, lastActivityAt: NOW - 60 * DAY }, NOW)).toBe(false)
+    expect(isStalled({ totalCells: 100, filledCells: 0, lastEditAt: null, lastActivityAt: null }, NOW)).toBe(false)
+  })
+  it("is false for a team that is only validating or recording", () => {
+    // No cell written in a month, but the progress rows moved yesterday.
+    expect(isStalled({ totalCells: 100, filledCells: 60, lastEditAt: NOW - 30 * DAY, lastActivityAt: NOW - DAY }, NOW)).toBe(false)
+  })
+  it("is true for a started project with no activity in the window", () => {
+    expect(isStalled({ totalCells: 100, filledCells: 60, lastEditAt: NOW - 30 * DAY, lastActivityAt: NOW - 20 * DAY }, NOW)).toBe(true)
+  })
+})
+
 describe("attentionReasons", () => {
   it("is empty for a healthy, recently-edited project", () => {
     expect(attentionReasons(project(), NOW)).toEqual([])

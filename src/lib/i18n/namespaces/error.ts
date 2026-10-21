@@ -57,6 +57,7 @@ export const error = defineNamespace({
     "error.monday.analyze": "Couldn't build a board mapping suggestion.",
     "error.monday.sync": "Couldn't push this project to Monday.",
     "error.monday.addColumns": "Couldn't add the columns to the Monday board.",
+    "error.monday.newBoard": "Couldn't make the new board in Monday.",
     // AQU-804: the Airtable integration (src/lib/airtable/api.ts).
     "error.airtable.loadConnection": "Couldn't load the Airtable connection status.",
     "error.airtable.connect": "Couldn't connect Airtable. Try again.",

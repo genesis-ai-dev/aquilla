@@ -215,6 +215,13 @@ export interface ProjectWideSettings {
    */
   autopilotEnabled?: boolean
   /**
+   * AQU-2041: when on, a project lead can create, edit, and assign voices on
+   * the lanes they can write. Absent or false keeps voice management at
+   * maintainer. Only a maintainer can change this key. Turning it off leaves
+   * voices that were already created.
+   */
+  projectLeadsManageVoices?: boolean
+  /**
    * AQU-1937: the per-project "Smart Extensions" switch. Absent / false = the
    * project is exactly today's Aquilla: the native editor, the built-in
    * importers, and no extensions UI or routes (auth-worker refuses the tools

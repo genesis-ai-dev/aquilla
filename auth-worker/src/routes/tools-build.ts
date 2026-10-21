@@ -85,7 +85,8 @@ export async function buildToolRoute(c: Context<AuthHonoEnv>) {
     projectId,
     rail: "llm" as const,
   }
-  const admit = (bound: Parameters<typeof admitLlmCall>[3]) => admitLlmCall(c.env.AQUILLA_PG, c.env, scope, bound)
+  const admit = (bound: Parameters<typeof admitLlmCall>[3]) =>
+    admitLlmCall(c.env.AQUILLA_PG, c.env, scope, bound, { requestUrl: c.req.url })
 
   try {
     const b = body?.base

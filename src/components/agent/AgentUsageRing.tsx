@@ -3,36 +3,30 @@
  * the per-message token/credit line: usage is one glance away, not repeated
  * under every reply.
  *
- * Role-aware:
- *   - Maintainer+: the org CreditsDial (today's agent spend vs. the daily cap,
- *     with a breakdown popover). Credit figures stay behind its double gate;
- *     when the server hides them (403), the run-budget ring stands in.
- *   - Everyone else: the latest run's budget as a percentage only — the same
- *     figure BudgetMeter showed inline, never credits.
+ * AQU-2068: everyone sees the org's one % meter (compact form), the same
+ * meter as the org overview and billing page, with a note that agent runs
+ * drain it faster. Credits never show here. When the meter cannot load (no
+ * org, signed out, read failed) the latest run's budget % stands in.
  */
 
-import { ROLE } from "@/lib/frontier/roles"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { AiMeterCompact, type AiMeterProps } from "@/components/billing/AiMeter"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { AgentBudget, AgentRunUi } from "@/lib/agent/run-state"
 import { budgetPct } from "./budget-pct"
-import { CreditsDial, type CreditsDialProps } from "./CreditsDial"
 import { UsageRingIcon } from "./UsageRingIcon"
 
 export interface AgentUsageRingProps {
-  credits?: CreditsDialProps | null
+  meter?: AiMeterProps | null
   runs: readonly AgentRunUi[]
-  isStreaming: boolean
 }
 
-export function AgentUsageRing({ credits, runs, isStreaming }: AgentUsageRingProps) {
-  const budget = runs.findLast((run) => run.budget)?.budget
-  const runRing = budget ? <RunBudgetRing budget={budget} /> : null
-  if (credits && credits.orgRoleLevel >= ROLE.MAINTAINER) {
-    // Re-fetch org spend once a run settles, so the ring isn't stale.
-    return <CreditsDial {...credits} refreshKey={isStreaming ? -1 : runs.length} fallback={runRing} />
+export function AgentUsageRing({ meter, runs }: AgentUsageRingProps) {
+  if (meter && meter.view.kind !== "loading" && meter.view.kind !== "unavailable") {
+    return <AiMeterCompact {...meter} />
   }
-  return runRing
+  const budget = runs.findLast((run) => run.budget)?.budget
+  return budget ? <RunBudgetRing budget={budget} /> : null
 }
 
 function RunBudgetRing({ budget }: { budget: AgentBudget }) {

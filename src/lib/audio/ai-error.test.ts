@@ -6,7 +6,8 @@
 
 import { describe, it, expect } from "vitest"
 import { categorizeAiError } from "./ai-error"
-import { errorFromHostedTts, errorFromVoiceConvert, HOSTED_TTS_CREDIT_CAP_BODY } from "./tts-engine-error"
+import { errorFromHostedTts, errorFromVoiceConvert } from "./tts-engine-error"
+import { AiRefusalError } from "@/lib/billing/ai-refusal"
 
 const OPENROUTER_413 =
   'Completion failed: 413 {"error":{"message":"request too large for model `meta-llama/llama-3.3-70b-instruct`, max 131072 tokens","code":413},"user_id":"user_2abc"}'
@@ -211,31 +212,28 @@ describe("categorizeAiError — names the TTS engine that failed", () => {
     expect(result.title).toBe("Inworld TTS isn't configured")
   })
 
-  // AQU-1872: an org out of credit is refused before the vendor is ever
-  // called. Titling that "Inworld TTS failed" sends the user to debug an
-  // engine that is working, and never names the org admin who can clear it.
-  it("calls an exhausted credit allowance what it is, not an engine failure", () => {
+  // AQU-1872/AQU-2068: a workspace out of allowance is refused before the
+  // vendor is ever called. Titling that "Inworld TTS failed" sends the user to
+  // debug an engine that is working.
+  it("calls an exhausted allowance what it is, not an engine failure", () => {
     const result = categorizeAiError(
       'Inworld TTS failed (429): {"error":"credit_cap_exceeded","reason":"daily"}',
     )
-    expect(result.category).toBe("hosted-tts-credit-cap")
-    expect(result.category).not.toBe("hosted-tts-failed")
-    expect(result.title).toBe("AI credit allowance used up")
-    expect(result.body).toMatch(/no audio was generated/i)
-    expect(result.body).toMatch(/org admin/i)
-    // Never a machine dump, never advice to retry an engine that is fine, and
-    // no Gemini red herring — the cause is named outright here.
-    expect(result.body).not.toContain("credit_cap_exceeded")
+    expect(result.category).toBe("ai-allowance-exhausted")
+    expect(result.title).toBe("This week's AI is used up")
+    expect(result.body).toMatch(/used this week's AI/i)
+    // Never a machine dump, never advice to retry, never credits or amounts.
+    expect(result.body).not.toMatch(/credit_cap_exceeded|credit|\$/i)
     expect(result.body).not.toMatch(/try again in a moment/i)
     expect(result.body).not.toMatch(/gemini/i)
   })
 
-  it("recognizes the authored credit-allowance body", () => {
-    // WHY: errorFromHostedTts replaces the JSON with this prose, so the
-    // categorizer must still place it after the message has been rewritten.
-    const result = categorizeAiError(HOSTED_TTS_CREDIT_CAP_BODY)
-    expect(result.category).toBe("hosted-tts-credit-cap")
-    expect(result.title).toBe("AI credit allowance used up")
+  it("places the refusal helper's own message after it was rethrown", () => {
+    // WHY: call sites throw AiRefusalError; surfaces categorize err.message.
+    const message = new AiRefusalError({ reason: "ai_allowance_exhausted", resetsAt: "2026-10-26T00:00:00Z", canUpgrade: true, canByok: true }).message
+    const result = categorizeAiError(message)
+    expect(result.category).toBe("ai-allowance-exhausted")
+    expect(result.body).toBe(message)
   })
 
   it("keeps the per-user TTS budget 429 on its own daily-quota branch", () => {

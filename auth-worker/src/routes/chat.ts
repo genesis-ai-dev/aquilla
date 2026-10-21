@@ -1,5 +1,5 @@
-import { admitChatUsage, METERED_MAX_OUTPUT_TOKENS, meterChatStream, observeChatStreamCost, providerRejectedPreModel, releaseChatUsage, settleChatUsage, type ChatUsage } from '../lib/billing/chat-usage'
-import { weeklyUsageActive } from '../lib/billing/usage-mode'
+import { METERED_MAX_OUTPUT_TOKENS, meterChatStream, observeChatStreamCost, openRouterEstimate, providerRejectedPreModel, releaseChatUsage, settleChatUsage } from '../lib/billing/chat-usage'
+import { admitPaidCall, paidCallMeterMode } from '../lib/billing/paid-call'
 // POST /api/v1/chat/completions — OpenAI-compatible authenticated proxy to
 // OpenRouter. Streams via SSE when `stream: true`; otherwise returns the
 // upstream JSON verbatim so codex-web's existing client code keeps working.
@@ -22,7 +22,6 @@ import type { Env, Variables, AuthUser } from "../types"
 import { authMiddleware } from "../middleware/auth"
 import { resolveProjectRole } from "../services/project-permissions"
 import { runAiGuard } from "../lib/ai-budget"
-import { checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
 import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 import { getPlatformSettingsCached, type PlatformSettings } from "../lib/platform-settings"
 import { creditGuard, recordCredit } from "../lib/credits"
@@ -327,32 +326,25 @@ chat.post(
       return c.json(guard.body, guard.status)
     }
 
-    // Platform daily spend ceiling (AQU-1869) — checked on BOTH the legacy and
-    // the metered path, before the org guards below, because it protects the
-    // shared OpenRouter key rather than any one org's allowance.
-    const spendCeiling = await checkAiSpendCeiling(c.env.AQUILLA_PG, c.env, "chat")
-    if (!spendCeiling.ok) {
-      return c.json(spendCeiling.body, spendCeiling.status)
-    }
-
     // Credit guard + attribution (AQU-414 follow-up): chat invoked from a
     // project context bills that project's org; project-less chat falls back
-    // to org 0 as before. The guard uses the same org so chat respects the
-    // org's caps once an admin turns enforcement on (log-only by default).
+    // to org 0 as before.
     const orgId = await orgIdLookup
-    let usage: ChatUsage | undefined
-    const weekly = weeklyUsageActive(c.env, c.req.url)
-    if (weekly === 'unavailable') return c.json({ error: 'usage_rehearsal_unavailable' }, 503)
-    if (weekly === 'on') {
-      // Unlike legacy attribution, enforced usage must never fall back to org 0.
-      if (!request.projectId || orgId <= 0) return c.json({ error: 'forbidden' }, 403)
-      const suppliedId = c.req.header('Idempotency-Key')
-      if (suppliedId && !z.string().uuid().safeParse(suppliedId).success) {
-        return c.json({ error: 'invalid_request_id' }, 400)
-      }
-      usage = { orgId, requestId: suppliedId ?? crypto.randomUUID() }
+    // AQU-2062: the one entitlement check — plan, key, platform spend ceiling
+    // (AQU-1869) and, when the meter is on, this call's reservation. Metered
+    // requests carry a server-enforced output cap so the bound holds.
+    if (!["off", "unavailable"].includes(paidCallMeterMode(c.env, c.req.url))) {
+      request.max_tokens = Math.min(request.max_tokens ?? METERED_MAX_OUTPUT_TOKENS, METERED_MAX_OUTPUT_TOKENS)
     }
-    // Legacy credit/word guards are retired once the weekly ledger meters this call.
+    // Unlike legacy attribution, metered usage never falls back to org 0.
+    const gate = await admitPaidCall(c.env, {
+      orgId: request.projectId ? orgId : 0, userId: user.id, projectId: request.projectId ?? null, rail: "llm",
+      requestUrl: c.req.url, idempotencyKey: c.req.header("Idempotency-Key"),
+      estimate: openRouterEstimate(c.env, { model, promptChars: requestPromptChars, maxOutputTokens: request.max_tokens ?? METERED_MAX_OUTPUT_TOKENS }),
+    })
+    if (!gate.ok) return c.json(gate.body, gate.status)
+    const { usage, apiKey } = gate
+    // Legacy credit/word guards are retired once the meter records this call.
     if (!usage) {
       // AQU-1871: org 0 is the no-org fallback every project-less chat lands
       // in, so guarding it as one org let any user's spend consume the cap
@@ -374,21 +366,6 @@ chat.post(
     }
     const chatWords = countWords(request.messages.map((m) => m.content).join(" "))
 
-    if (usage) {
-      // Metered requests carry a server-enforced output cap so the bound holds.
-      request.max_tokens = Math.min(request.max_tokens ?? METERED_MAX_OUTPUT_TOKENS, METERED_MAX_OUTPUT_TOKENS)
-      try {
-        const created = await admitChatUsage(c.env, { ...usage, userId: user.id, projectId: request.projectId!,
-          model, promptChars: requestPromptChars, maxOutputTokens: request.max_tokens })
-        if (!created) return c.json({ error: 'usage_request_already_admitted' }, 409)
-      } catch (error) {
-        if (error instanceof Error && error.message === 'Weekly AI allowance exhausted') {
-          return c.json({ error: 'weekly_ai_allowance_exhausted', message: 'This workspace has used its available AI allowance. Try again after the weekly reset or update its plan.' }, 429)
-        }
-        if (error instanceof Error && error.message === 'Model price unavailable') return c.json({ error: 'model_price_unavailable' }, 503)
-        return c.json({ error: 'usage_accounting_unavailable' }, 503)
-      }
-    }
     // AQU-1849: the proxy's one upstream call, bounded two different ways.
     //
     //   * `stream: false` — nothing arrives until the whole completion is
@@ -411,7 +388,7 @@ chat.post(
       const upstream = await fetch(resolveOpenRouterUrl(c.env), {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${c.env.OPENROUTER_API_KEY}`,
+          Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
         body: buildOpenRouterBody(request, model, c.env),

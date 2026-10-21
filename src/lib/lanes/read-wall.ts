@@ -14,6 +14,8 @@
  * a lane and is never hidden by these rules.
  */
 
+import { filterTtsSettingsToVisibleLanes, restoreHiddenTtsSettings } from "./voice-wall"
+
 /** Viewer. A grant below this does not reveal a lane. Matches frontier/roles. */
 const VIEWER = 100
 /**
@@ -136,6 +138,9 @@ export function filterSettingsToVisibleLanes<
   if (primaryHidden(settings.targetLanguage, kept)) {
     settings.targetLanguage = ""
   }
+  if (isSettingsRecord(settings.ttsSettings)) {
+    settings.ttsSettings = filterTtsSettingsToVisibleLanes(settings.ttsSettings, visible, lanes)
+  }
   const rows = response.lanes
   if (rows === undefined) return { ...response, settings }
   return {
@@ -208,7 +213,19 @@ export function restoreHiddenLaneSettings(
     }
     settings.targetLanguage = primary
   }
+  if (isSettingsRecord(stored.ttsSettings) || isSettingsRecord(incoming.ttsSettings)) {
+    settings.ttsSettings = restoreHiddenTtsSettings(
+      isSettingsRecord(stored.ttsSettings) ? stored.ttsSettings : {},
+      isSettingsRecord(incoming.ttsSettings) ? incoming.ttsSettings : {},
+      visible,
+      lanes,
+    )
+  }
   return { ok: true, settings }
+}
+
+function isSettingsRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value)
 }
 
 /**

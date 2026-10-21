@@ -18,7 +18,16 @@ vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: vi.fn(() => ({ session: { jwt: "test-jwt" }, loading: false })),
 }))
 
+// No org by default; one test puts the user in an org to see the meter.
+vi.mock("@/context/OrgContext", () => ({ useActiveOrgOptional: vi.fn(() => null) }))
+vi.mock("@/lib/billing/ai-meter", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/billing/ai-meter")>()),
+  getAiMeter: vi.fn(async () => ({ orgId: 3, plan: "free", mode: "metered", percentUsed: 57, resetsAt: "2026-10-26T00:00:00Z" })),
+}))
+
 import { getMyUsage } from "@/lib/sync/usage"
+import { useActiveOrgOptional } from "@/context/OrgContext"
+import { MemoryRouter } from "react-router-dom"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 
 const mockGetMyUsage = vi.mocked(getMyUsage)
@@ -122,5 +131,14 @@ describe("UsageSection", () => {
     // Error is swallowed: no banner, falls through to no-data state
     expect(screen.queryByText(/error/i)).not.toBeInTheDocument()
     expect(screen.getByText("No usage recorded yet.")).toBeInTheDocument()
+  })
+
+  // AQU-2068: personal usage shows the same workspace % meter as the org
+  // overview, so a member sees the number that decides whether AI stops.
+  it("shows the active workspace's % meter", async () => {
+    mockGetMyUsage.mockResolvedValue(FULL_USAGE)
+    vi.mocked(useActiveOrgOptional).mockReturnValue({ activeOrg: { id: 3, name: "Team", role: { level: 10 } } } as unknown as ReturnType<typeof useActiveOrgOptional>)
+    render(<MemoryRouter><UsageSection /></MemoryRouter>)
+    expect(await screen.findByText("57%")).toBeInTheDocument()
   })
 })

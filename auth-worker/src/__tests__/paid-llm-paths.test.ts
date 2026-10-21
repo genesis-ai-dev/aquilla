@@ -27,6 +27,9 @@ import type { ProjectMetricsSummary } from "../lib/monday/metrics"
 import { LlmRefusedError } from "../lib/billing/paid-llm"
 import { MAX_REPAIR_ATTEMPTS } from "../lib/tools/builder"
 import type { Env } from "../types"
+import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
+import { DEFAULT_KB_INDEX_MODEL } from "../lib/knowledge/index-doc"
+import { TOOLS_BUILDER_MODEL } from "../lib/tools/builder"
 
 const ORG = 41
 const PROJECT = "proj-paid"
@@ -48,15 +51,23 @@ const meterEnv = (mode: Meter) => Object.assign(Object.create(env), {
 /** Every provider call, with the key it was sent with. */
 let modelCalls: { body: Record<string, unknown>; auth: string | null }[]
 
-/** The model answers `reply(n)` for its n-th call; the rate card has no
- *  prices, so admission reserves the unpriced bound and settles the reported
- *  cost. Sandbox endpoints answer like a healthy container. */
+/** Every model these paths can pick in the test env, so the rate card prices
+ *  it: admission refuses a model it cannot price (paid-call.ts). */
+const PRICED_MODELS = [...new Set([
+  DEFAULT_LLM_MODEL_ID, DEFAULT_KB_INDEX_MODEL, TOOLS_BUILDER_MODEL,
+  env.AGENT_MODEL_DEFAULT, env.AGENT_DRAFT_MODEL_DEFAULT, env.DEFAULT_LLM_MODEL,
+].filter((m): m is string => !!m))]
+const RATE_CARD = { data: PRICED_MODELS.map((id) => ({ id, pricing: { prompt: "0.000001", completion: "0.000002" } })) }
+
+/** The model answers `reply(n)` for its n-th call; admission reserves from
+ *  the rate card and settles the reported cost. Sandbox endpoints answer like
+ *  a healthy container. */
 function stubProviders(reply: (n: number) => string) {
   modelCalls = []
   let execs = 0
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
-    if (url === `${BASE}/models`) return Response.json({ data: [] })
+    if (url === `${BASE}/models`) return Response.json(RATE_CARD)
     if (url === `${BASE}/chat/completions`) {
       const headers = new Headers(init?.headers)
       modelCalls.push({ body: JSON.parse(String(init?.body)) as Record<string, unknown>, auth: headers.get("Authorization") })
@@ -319,6 +330,30 @@ describe("an admitted call settles the cost the provider reported, one row per c
     expect(res.status).toBe(200)
     expect(modelCalls).toHaveLength(1)
     expect(await ledger()).toEqual([settledRow("llm", 1)])
+  })
+})
+
+// The spend ceiling sums both the weekly ledger and the legacy credit ledger,
+// so a call written to both would count twice (paid-call.ts, AQU-2062).
+describe("one ledger per call", () => {
+  beforeEach(() => seedOrgProject({ overLimit: false }))
+  const legacyRows = async () => (await env.AQUILLA_PG.prepare(
+    "SELECT raw_cost_cents FROM org_credit_usage_daily WHERE org_id = ?",
+  ).bind(ORG).all<{ raw_cost_cents: number }>()).results
+
+  it("with the meter on, the call settles on the weekly ledger only", async () => {
+    stubProviders(() => "A brief for children.")
+    expect((await briefSummary(meterEnv("shadow"))).status).toBe(200)
+    expect(await ledger()).toEqual([settledRow("llm", 1)])
+    expect(await legacyRows()).toEqual([])
+  })
+
+  it("with the meter off, the legacy credit ledger stays the only record", async () => {
+    stubProviders(() => "A brief for children.")
+    const off = Object.assign(Object.create(meterEnv("shadow")), { BILLING_METER_MODE: "off" }) as Env
+    expect((await briefSummary(off)).status).toBe(200)
+    expect(await ledger()).toEqual([])
+    expect(await legacyRows()).toHaveLength(1)
   })
 })
 

@@ -14,6 +14,7 @@
 
 import { FRONTIER_CHAT_URL } from "@/lib/completion/completion-service"
 import type { AgentFrame, AgentRunRequest } from "./protocol"
+import { aiRefusalError } from "@/lib/billing/ai-refusal"
 
 export const AGENT_RUN_URL = FRONTIER_CHAT_URL.replace(
   /\/api\/v1\/chat\/completions$/,
@@ -107,9 +108,8 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
   })
   if (!res.ok) {
     const text = await res.text().catch(() => "")
-    if (res.status === 402) {
-      throw new Error(`AI limit reached: ${text || "Out of credits."}`)
-    }
+    const refused = aiRefusalError(res.status, text)
+    if (refused) throw refused
     throw new Error(`Agent run failed: ${res.status} ${text}`)
   }
   if (!res.body) {

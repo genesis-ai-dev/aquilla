@@ -5,6 +5,7 @@ import { effectiveSourceText, type SourceTextCell } from "@/lib/cell-text"
 import { getUserProviderOverride, type UserProviderOverride } from "@/lib/store/user-provider-override"
 import { shouldUseLocalLlm, completeWithLocalLlm } from "@/lib/offline/local-llm-client"
 import { t } from "@/lib/i18n/standalone"
+import { aiRefusalError } from "@/lib/billing/ai-refusal"
 import { stripTrailingBareMarkers } from "./strip-trailing-usfm-markers"
 // AQU-1230: the pure prompt-assembly core lives in ./prompt-build so the Agent
 // API's effective-prompt preview (sync-worker) can call the SAME builders
@@ -715,10 +716,9 @@ export async function complete(options: CompleteOptions): Promise<string> {
     })
     if (!res.ok) {
       const text = await res.text().catch(() => "")
-      // Frontier returns 402 when subscription/credits are exhausted; surface message.
-      if (provider === "frontier" && res.status === 402) {
-        throw new Error(t("rules.completion.frontierLimitReached", { detail: text || t("rules.completion.outOfCredits") }))
-      }
+      // AQU-2068: the workspace's weekly AI is used up (402 or a legacy code).
+      const refused = provider === "frontier" ? aiRefusalError(res.status, text) : null
+      if (refused) throw refused
       // AQU-1158: hosted drafting has no OPENROUTER_API_KEY (typical on
       // api.dev). If the user pasted their own completion key, talk to
       // OpenRouter from the browser — that request never hits our chat

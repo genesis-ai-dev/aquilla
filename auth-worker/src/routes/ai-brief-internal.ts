@@ -31,7 +31,7 @@ import { creditGuard, recordCredit } from "../lib/credits"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
 import { resolveProjectRoleShared } from "../../../db/shared/project-roles"
 import { BRIEF_L1_MAX_CHARS, BRIEF_L1_SYSTEM_PROMPT } from "../../../db/shared/brief"
-import { admitLlmCall, projectOrgId } from "../lib/billing/paid-llm"
+import { admitLlmCall, legacyLedgers, projectOrgId } from "../lib/billing/paid-llm"
 import { providerRejectedPreModel } from "../lib/billing/chat-usage"
 import {
   logVendorTimeout,
@@ -97,8 +97,10 @@ aiBriefInternal.post("/internal/brief-summary", zValidator("json", bodySchema), 
     /* best-effort — degrade to org-less so spend is still recorded */
   }
   const orgId = projectOrg ?? 0
+  // One ledger per call (paid-call.ts): legacy credits only while the meter is off.
+  const legacy = legacyLedgers(c.env, c.req.url)
 
-  const creditCheck = await creditGuard(db, c.env, orgId, "agent")
+  const creditCheck = legacy ? await creditGuard(db, c.env, orgId, "agent") : { ok: true as const }
   if (!creditCheck.ok) {
     return c.json(
       {
@@ -115,6 +117,7 @@ aiBriefInternal.post("/internal/brief-summary", zValidator("json", bodySchema), 
     db, c.env,
     { orgId: projectOrg, userId: Number(body.userId), projectId: body.projectId, rail: "llm" },
     { model, promptChars: BRIEF_L1_SYSTEM_PROMPT.length + userContent.length, maxOutputTokens: BRIEF_MAX_TOKENS },
+    { requestUrl: c.req.url },
   )
   if (!call.ok) return c.json(call.body, call.status)
 
@@ -169,7 +172,7 @@ aiBriefInternal.post("/internal/brief-summary", zValidator("json", bodySchema), 
 
   // Meter whatever was spent, success or failure. Never throws.
   const costCents = (await call.settleFrom(data)) ?? 0
-  if (costCents > 0) await recordCredit(db, orgId, Number(body.userId), "agent", costCents, 1)
+  if (legacy && costCents > 0) await recordCredit(db, orgId, Number(body.userId), "agent", costCents, 1)
 
   if (data.error?.message) {
     return c.json({ error: "job_failed", message: `brief summary model: ${data.error.message}` }, 502)

@@ -33,8 +33,8 @@
 // quietly widen.
 
 import { t } from "@/lib/i18n/standalone"
+import { isAiAllowanceMessage } from "@/lib/billing/ai-refusal"
 import {
-  HOSTED_TTS_CREDIT_CAP_BODY,
   HOSTED_TTS_FAILED_BODY,
   HOSTED_TTS_NOT_CONFIGURED_BODY,
   SEED_VC_FAILED_BODY,
@@ -57,7 +57,7 @@ export type ErrorCategory =
   | "gemini-failed"
   | "hosted-tts-not-configured"
   | "hosted-tts-failed"
-  | "hosted-tts-credit-cap"
+  | "ai-allowance-exhausted"
   | "seed-vc-not-configured"
   | "seed-vc-failed"
   | "consent-denied"
@@ -237,19 +237,19 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     }
   }
 
-  // AQU-1872: an org out of AI credit is refused BEFORE the vendor is called,
-  // so it is not a vendor failure. This must precede the hosted-tts branches:
-  // the raw 429 body also carries "voice/tts", which would otherwise title it
-  // "Inworld TTS failed" and tell the user the engine broke when nothing was
-  // ever sent to it.
-  if (
-    m.includes("credit_cap_exceeded") ||
-    m.includes("ai credit allowance")
-  ) {
+  // AQU-1872/AQU-2068: a workspace out of weekly AI is refused BEFORE the
+  // vendor is called, so it is not a vendor failure. This must precede the
+  // hosted-tts branches: the raw 429 body also carries "voice/tts", which
+  // would otherwise title it "Inworld TTS failed" and tell the user the engine
+  // broke when nothing was ever sent to it. The one helper recognises both
+  // its own message and a raw refusal body folded into a string.
+  if (isAiAllowanceMessage(raw)) {
+    // Our own message already says when it comes back; a raw body does not.
+    const allowanceBody = raw.startsWith(t("billing.refusal.allowance")) ? raw : t("billing.refusal.allowance")
     return {
-      category: "hosted-tts-credit-cap",
-      title: t("audio.aiError.creditCapTitle"),
-      body: HOSTED_TTS_CREDIT_CAP_BODY,
+      category: "ai-allowance-exhausted",
+      title: t("billing.refusal.title"),
+      body: allowanceBody,
       raw,
     }
   }

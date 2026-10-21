@@ -100,7 +100,7 @@ it('fails closed on unowned projects and non-local providers before creating a r
   expect(f.completions).toHaveLength(0)
 })
 
-it('meters the segmentation pass and refuses it with a 429 once the week is spent', async () => {
+it('meters the segmentation pass and refuses it with a 402 once the week is spent', async () => {
   const f = await setup()
   const period = (await readBillingWorkspace(env.AQUILLA_PG, 1))!.entitlement!
   const response = await f.generate()
@@ -110,8 +110,9 @@ it('meters the segmentation pass and refuses it with a 429 once the week is spen
   await reserveWorkspaceUsage(env.AQUILLA_PG, { orgId: 1, projectId: PROJECT, userId: 1, requestId: 'spent', rail: 'agent', maxRawCostCents: 62.5 },
     new Date(Date.parse(period.usagePeriodStart) + 1000))
   const refused = await f.generate()
-  expect(refused.status).toBe(429)
-  expect(await refused.json()).toMatchObject({ error: { code: 'weekly_ai_allowance_exhausted' } })
+  // The spec §5.3 client contract: an exhausted allowance is 402, never 429 (429 is rate limiting).
+  expect(refused.status).toBe(402)
+  expect(await refused.json()).toMatchObject({ error: 'ai_allowance_exhausted' })
   expect(f.completions).toHaveLength(1)
   expect((await f.generate({ AGENT_MODEL_DEFAULT: 'unknown', CONTEXTUAL_FAST_MODEL: 'unknown', AI_ALLOWED_MODELS: 'unknown' })).status).toBe(503)
 })

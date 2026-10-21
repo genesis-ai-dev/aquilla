@@ -52,7 +52,9 @@ function serverSettings(): ProjectTtsSettings {
 const project = { id: "proj-1", name: "P", ttsSettings: serverSettings() } as unknown as ProjectRecord
 
 // Mirror the workspace wiring: the panel resolves the active voice from
-// `settings` itself; the field picker assigns through the same hook; a
+// `settings` itself — the LANE view (`tts.laneSettings`), which is what the
+// workspace hands every voice read and where a cast made from the editor
+// lands (AQU-2037/2038); the field picker assigns through the same hook; a
 // successful generate swaps serverSettings identity (as useProject.refresh()
 // does).
 function Harness() {
@@ -64,8 +66,8 @@ function Harness() {
         voicePicker={
           <CastGutterVoice
             variant="field"
-            voice={resolveCastVoice(tts.settings, cell.id)}
-            explicit={Boolean(findVoice(tts.settings, assignedCastVoiceId(tts.settings, cell.id)))}
+            voice={resolveCastVoice(tts.laneSettings, cell.id)}
+            explicit={Boolean(findVoice(tts.laneSettings, assignedCastVoiceId(tts.laneSettings, cell.id)))}
             castName={null}
             editable
             voices={voices}
@@ -73,9 +75,9 @@ function Harness() {
           />
         }
         cell={cell}
-        project={{ ...project, ttsSettings: tts.settings } as ProjectRecord}
+        project={{ ...project, ttsSettings: tts.laneSettings } as ProjectRecord}
         projectId="proj-1"
-        settings={tts.settings}
+        settings={tts.laneSettings}
         session={{ jwt: "x" } as unknown as never}
         username="tester"
         onRecord={() => {}}

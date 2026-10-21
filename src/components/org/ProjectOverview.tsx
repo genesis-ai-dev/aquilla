@@ -30,6 +30,7 @@ import { LinkSeedFailedBanner } from "@/components/LinkSeedFailedNotice"
 import { downloadProjectBundle } from "@/lib/sync/export-bundle"
 import { downloadImportedOriginal, downloadImportedOriginalsZip } from "@/lib/file-original-download"
 import { AssignWork } from "./AssignWork"
+import { TeamValidationList } from "./TeamValidationList"
 import { MembersSection } from "@/components/ProjectSettings/MembersSection"
 import { MemberActivityPanel } from "./MemberActivityPanel"
 import { ProjectAutopilotPanel } from "./ProjectAutopilotPanel"
@@ -93,12 +94,14 @@ import { planRowsToCsv, planCsvFilename } from "@/lib/progress/plan-csv"
 import { fetchProjectFiles, type FileSummary } from "@/lib/sync/cells-read"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
 import {
-  getProjectAssignments,
+  getProjectTeamProgress,
   getProjectUnitAssignees,
   getUnitAssignments,
+  unassignAssignment,
   type UnitAssignee,
   type AssigneeWorkload,
   type UnitAssignment,
+  type ValidationAssignment,
 } from "@/lib/sync/assignments"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { useRereadWhenSettingsMayHaveMoved } from "@/hooks/useRereadWhenSettingsMayHaveMoved"
@@ -584,6 +587,8 @@ export function ProjectOverview() {
   const [pmNoteOpen, setPmNoteOpen] = useState(false)
   const pmNoteId = useId()
   const [workload, setWorkload] = useState<AssigneeWorkload[]>([])
+  // AQU-1969: each open validate assignment, with its assignee's own approvals.
+  const [validations, setValidations] = useState<ValidationAssignment[]>([])
   const [workloadRefused, setWorkloadRefused] = useState(false)
 
   // AQU-538 §3.3: the lane filter tab selection. `null` = "All" — today's
@@ -805,10 +810,13 @@ export function ProjectOverview() {
   const loadWorkload = useCallback(async () => {
     if (!jwt || !id) return
     try {
-      setWorkload(await getProjectAssignments(jwt, id))
+      const team = await getProjectTeamProgress(jwt, id)
+      setWorkload(team.roster)
+      setValidations(team.validations)
       setWorkloadRefused(false)
     } catch (err) {
       setWorkload([])
+      setValidations([])
       setWorkloadRefused(err instanceof UserError && err.status === 403)
     }
   }, [jwt, id])
@@ -1470,6 +1478,34 @@ export function ProjectOverview() {
     policyAllowSelfAssignment, policyAssignmentMinRole, planLaneDelegate, handleAssigned,
   ])
 
+  /**
+   * AQU-1969 (Sam, 2026-10-19: "It should be more easy to unassign work"): a
+   * one-click × on every row that is one assignment — here as on the org Team
+   * workload. Offered by the server's own rule for `assignment.unassign`: the
+   * org's assignment role in this project, which is also what the org
+   * workload asks. Self-assigning never extends to unassigning, and a language
+   * delegate taking back their own hand-outs keeps the Handed out page, which
+   * knows who gave what. The file only routes the request's token; the server
+   * closes the assignment by its id across the project.
+   */
+  // Never on an archived project (Sam, 2026-10-20): archiving takes its
+  // assignments off every workload and "Assigned to me" list already, and
+  // inside the project they read as it does — frozen, with no ×.
+  const canUnassign = !isArchived && projectPolicy.ready && (project?.syncRole?.level ?? 0) >= policyAssignmentMinRole
+  const unassignVia = useCallback(
+    (fileId: string | null | undefined) =>
+      canUnassign && jwt && id && fileId
+        ? async (assignmentId: string) => {
+            await unassignAssignment({ jwt, projectId: id, fileId, author: session?.username ?? "", assignmentId })
+            // The same refresh an Assign gets: the unit's list, the board's
+            // chips and counts, and the Team card.
+            setPlanAssignmentsNonce((n) => n + 1)
+            void handleAssigned()
+          }
+        : undefined,
+    [canUnassign, jwt, id, session?.username, handleAssigned],
+  )
+
   const planInspector = selectedPlanUnit ? (
     <PlanInspector
       key={planUnitId(selectedPlanUnit)}
@@ -1515,6 +1551,7 @@ export function ProjectOverview() {
           viewerRoleLevel={projectRoleLevel}
           ready={projectPolicy.ready}
           assign={planAssignTarget}
+          onRemove={unassignVia(selectedUnitFileId)}
         />
       }
       onPatch={patchPlanUnit}
@@ -2954,9 +2991,9 @@ export function ProjectOverview() {
                     )}
                     {teamOpen && (
                       <div id="overview-team-panel">
-                        {workload.length === 0 ? (
+                        {workload.length === 0 && validations.length === 0 ? (
                           <p className="text-sm text-muted-foreground">{t("org.projectOverview.noOpenAssignments")}</p>
-                        ) : (
+                        ) : workload.length === 0 ? null : (
                           <ul className="space-y-2">
                             {workload.map((w) => {
                               const donePct = progressPercent(w.cellsDone, w.cellsTotal)
@@ -3005,6 +3042,14 @@ export function ProjectOverview() {
                             })}
                           </ul>
                         )}
+
+                        {/* AQU-1969: validators, furthest behind first, apart
+                            from the translate rows above. */}
+                        <TeamValidationList
+                          validations={validations}
+                          showLane={showLaneTabs}
+                          onRemove={unassignVia(documentFiles[0]?.id ?? firstFileId)}
+                        />
 
                         {selectedMemberUsername && (
                           <MemberActivityPanel

@@ -14,6 +14,7 @@ import { getEffectiveOrgRole } from '../services/org-permissions'
 import { ROLE } from '../types'
 import { readBillingWorkspace } from '../lib/billing/workspace'
 import { readWorkspaceUsageSummary } from '../lib/billing/workspace-usage'
+import { resolveOrgPlan } from '../../../db/shared/org-plan'
 
 const billingWorkspace = new Hono<AuthHonoEnv>()
 billingWorkspace.get('/orgs/:orgId/billing/workspace', authMiddleware, async c => {
@@ -36,6 +37,23 @@ billingWorkspace.get('/orgs/:orgId/billing/workspace', authMiddleware, async c =
     ...(usage ? { usagePercent: usage.percent, usageResetsAt: usage.resetsAt } : {}),
     ...(workspacePortalAvailable(c.env, c.req.url, workspace) ? { portalEnabled: true } : {}),
   })
+})
+/** AQU-2059: the org's one plan, so the client never copies the rules (spec
+ * §4.2). Any member may read it; it carries no prices or ledger values. */
+billingWorkspace.get('/orgs/:orgId/plan', authMiddleware, async c => {
+  const raw = c.req.param('orgId') ?? ''
+  const orgId = Number(raw)
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(orgId) || orgId < 1) {
+    return c.json({ error: 'invalid_org' }, 400)
+  }
+  const role = await getEffectiveOrgRole(c.env, orgId, c.get('user'))
+  if (role == null) return c.json({ error: 'forbidden' }, 403)
+  c.header('Cache-Control', 'private, no-store')
+  const plan = await resolveOrgPlan(c.env.AQUILLA_PG, orgId)
+  if (!plan) return c.json({ error: 'not_found' }, 404)
+  return c.json({ orgId, tier: plan.tier, source: plan.source, metered: plan.weeklyAllowanceUnits !== null,
+    periodStart: plan.period.start, periodEnd: plan.period.end, contractEndsAt: plan.contractEndsAt,
+    ...(plan.graceEndsAt ? { graceEndsAt: plan.graceEndsAt } : {}) })
 })
 const selectionSchema = z.object({
   offer: z.enum(paidOffers), interval: z.enum(['month', 'year']), quantity: z.literal(1),

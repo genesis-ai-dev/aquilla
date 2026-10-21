@@ -174,6 +174,19 @@ describe("POST /api/v2/access-links/:token/redeem", () => {
     expect(jwtSub(body.access_token)).toBe("translator")
   })
 
+  it("kills the link once the bound account gains access outside the project (stale-link takeover)", async () => {
+    const token = await setup("4821")
+    // Account later joins an unrelated project of its own.
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES ('own-proj', 'Own', NULL, 2)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('own-proj', 2, 700, 2)",
+    ).run()
+    const res = await redeem(token, "4821")
+    expect(res.status).toBe(401)
+  })
+
   it("treats a wrong PIN as a dead link and increments the attempt counter", async () => {
     const token = await setup("4821")
     const res = await redeem(token, "0000")

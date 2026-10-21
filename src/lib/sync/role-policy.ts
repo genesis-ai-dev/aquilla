@@ -138,6 +138,8 @@ const REQUIRED_ROLE: Record<string, number> = {
   "comment.resolve": ROLE.COMMENTER,
 
   "cell.backtranslation.set": ROLE.CONTRIBUTOR,
+  // AQU-1408 §1: correcting the gloss is the same act at a different grain.
+  "cell.gloss.set": ROLE.CONTRIBUTOR,
 
   "assignment.create": ROLE.PROJECT_LEAD,
   "assignment.reassign": ROLE.PROJECT_LEAD,

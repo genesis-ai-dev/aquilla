@@ -1026,6 +1026,9 @@ describe('isChainMutatingKind', () => {
     'term.approve': false,
     'term.reject': false,
     'cell.backtranslation.set': false,
+    // AQU-1408: a gloss correction is a side row (cell_glosses) pinned to a
+    // target event; it never advances the target head.
+    'cell.gloss.set': false,
     'assignment.create': false,
     'assignment.reassign': false,
     'assignment.unassign': false,

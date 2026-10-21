@@ -1,8 +1,6 @@
-import { readWeeklyAllowance } from './allowance'
 import type { AquillaDb } from '../../../../db/shim/postgres'
 import { MICRO_UNITS_PER_UNIT, quoteProviderCost, type CostRail } from '../../../../db/shared/billing-cost'
-import { readBillingWorkspace } from './workspace'
-import { weeklyUsagePeriod } from './pricing-model'
+import { resolveOrgPlan } from '../../../../db/shared/org-plan'
 
 export const OVERAGE_FACTOR = 1.05
 
@@ -56,11 +54,13 @@ async function locked<T>(db: AquillaDb, orgId: number, fn: (tx: AquillaDb) => Pr
   })
 }
 
+/** Only metered rows count against the allowance; unmetered (Enterprise) and
+ * byok rows are recorded for cost only (spec §2.2). */
 export async function readUsageTotals(db: AquillaDb, orgId: number, period: { start: string; end: string }) {
   const totals = await db.prepare(`SELECT
     COALESCE(SUM(CASE WHEN state = 'reserved' THEN reserved_micro_units ELSE 0 END), 0) AS reserved,
     COALESCE(SUM(CASE WHEN state = 'settled' THEN settled_micro_units ELSE 0 END), 0) AS settled
-    FROM workspace_usage_requests WHERE org_id = ?
+    FROM workspace_usage_requests WHERE org_id = ? AND mode = 'metered'
     AND period_start = ?::timestamptz AND period_end = ?::timestamptz`)
     .bind(orgId, period.start, period.end).first<{ reserved: number; settled: number }>()
   const reserved = Number(totals?.reserved)
@@ -93,33 +93,28 @@ export async function reserveWorkspaceUsage(db: AquillaDb, input: {
         || prior.reserved_micro_units !== quote.microUnits) throw new Error('Usage request identity conflict')
       return { created: false, request: prior }
     }
-    const workspace = await readBillingWorkspace(tx, input.orgId, now)
-    const units = workspace ? await readWeeklyAllowance(tx, workspace) : null
-    if (!workspace || units === null) {
-      throw new Error('Workspace usage requires an explicit supported entitlement')
-    }
-    if (workspace.entitlement && !workspace.entitlement.access) {
-      throw new Error('Paid workspace access is unresolved')
-    }
-    const org = await tx.prepare('SELECT created_at::text FROM organizations WHERE id = ?')
-      .bind(input.orgId).first<{ created_at: string }>()
-    const period = workspace.entitlement ? {
-      start: workspace.entitlement.usagePeriodStart, end: workspace.entitlement.usagePeriodEnd,
-    } : weeklyUsagePeriod(org!.created_at, now.toISOString())
-    const allowance = units * MICRO_UNITS_PER_UNIT
-    const totals = await readUsageTotals(tx, input.orgId, period)
-    // Decision 2026-09-16: nothing new starts at or past 100%, but a bounded
-    // request may finish up to 5% over so a pessimistic bound does not strand
-    // the last step of the week. Customers only ever see 100%.
-    if (totals.committed >= allowance || totals.committed + quote.microUnits > allowance * OVERAGE_FACTOR) {
-      throw new Error('Weekly AI allowance exhausted')
+    // AQU-2059: every org has a plan; there is no eligibility gate to fail.
+    const plan = await resolveOrgPlan(tx, input.orgId, now)
+    if (!plan) throw new Error('Usage workspace does not exist')
+    const { period } = plan
+    // Enterprise is unmetered: recorded for cost, never refused on allowance.
+    const mode: UsageMode = plan.weeklyAllowanceUnits === null ? 'unmetered' : 'metered'
+    if (plan.weeklyAllowanceUnits !== null) {
+      const allowance = plan.weeklyAllowanceUnits * MICRO_UNITS_PER_UNIT
+      const totals = await readUsageTotals(tx, input.orgId, period)
+      // Decision 2026-09-16: nothing new starts at or past 100%, but a bounded
+      // request may finish up to 5% over so a pessimistic bound does not strand
+      // the last step of the week. Customers only ever see 100%.
+      if (totals.committed >= allowance || totals.committed + quote.microUnits > allowance * OVERAGE_FACTOR) {
+        throw new Error('Weekly AI allowance exhausted')
+      }
     }
     await tx.prepare(`INSERT INTO workspace_usage_requests
       (org_id, request_id, user_id, project_id, rail, rate_version, multiplier,
-       period_start, period_end, reserved_micro_units)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?::timestamptz, ?::timestamptz, ?)`)
+       period_start, period_end, reserved_micro_units, mode)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?::timestamptz, ?::timestamptz, ?, ?)`)
       .bind(input.orgId, input.requestId, input.userId, input.projectId, input.rail,
-        quote.rateVersion, quote.multiplier, period.start, period.end, quote.microUnits).run()
+        quote.rateVersion, quote.multiplier, period.start, period.end, quote.microUnits, mode).run()
     return { created: true, request: (await readRequest(tx, input.orgId, input.requestId))! }
   })
 }
@@ -189,21 +184,13 @@ export async function listHeldUsage(db: AquillaDb, orgId: number, limit = 100) {
 /** Customer-facing usage: the same allowance and period admission uses, so the
  * percentage can never disagree with enforcement. Display caps at 100 while
  * the ledger keeps the true overrun. Returns null rather than a fabricated
- * zero for workspaces without a measured allowance.
+ * zero for Enterprise (unmetered).
  */
 export async function readWorkspaceUsageSummary(db: AquillaDb, orgId: number, now = new Date()) {
-  const workspace = await readBillingWorkspace(db, orgId, now)
-  if (!workspace) return null
-  const units = await readWeeklyAllowance(db, workspace)
-  if (units === null) return null
-  if (workspace.entitlement && !workspace.entitlement.access) return null
-  const org = await db.prepare('SELECT created_at::text FROM organizations WHERE id = ?')
-    .bind(orgId).first<{ created_at: string }>()
-  if (!org) return null
-  const period = workspace.entitlement ? {
-    start: workspace.entitlement.usagePeriodStart, end: workspace.entitlement.usagePeriodEnd,
-  } : weeklyUsagePeriod(org.created_at, now.toISOString())
-  const allowance = units * MICRO_UNITS_PER_UNIT
-  const totals = await readUsageTotals(db, orgId, period)
-  return { percent: Math.min(100, (allowance === 0 ? 100 : Math.floor((totals.committed / allowance) * 100))), resetsAt: period.end }
+  const plan = await resolveOrgPlan(db, orgId, now)
+  // Enterprise is unmetered: there is no percentage to show.
+  if (!plan || plan.weeklyAllowanceUnits === null) return null
+  const allowance = plan.weeklyAllowanceUnits * MICRO_UNITS_PER_UNIT
+  const totals = await readUsageTotals(db, orgId, plan.period)
+  return { percent: Math.min(100, (allowance === 0 ? 100 : Math.floor((totals.committed / allowance) * 100))), resetsAt: plan.period.end }
 }

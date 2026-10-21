@@ -1463,6 +1463,49 @@ export async function emitCellBacktranslationSet(
   return eventId
 }
 
+export interface CellGlossSetInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** The corrected gloss. Empty withdraws the correction. */
+  glossText: string
+  /** Current projected head of the target cell this gloss reads. */
+  targetEventId: string
+  /** Lane whose translation this gloss reads. */
+  targetLang?: string
+  /** The lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
+  author: string
+  clientTs?: number
+}
+
+/**
+ * AQU-1408 §1: emit a `cell.gloss.set` event — non-chain-mutating (parentId
+ * omitted), like `cell.backtranslation.set`. The payload pins the correction to
+ * the target commit it reads, so a later edit of that cell falls the UI back to
+ * the freshly computed gloss instead of showing a reading of words that are
+ * gone.
+ */
+export async function emitCellGlossSet(
+  input: CellGlossSetInput,
+): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.gloss.set",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: {
+      glossText: input.glossText,
+      targetEventId: input.targetEventId,
+      ...targetLaneFields(input),
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 // ── Harmonize helper (AQU-186) ────────────────────────────────────────────
 // Emits a `target.cell.commit` with a `harmonize_origin` payload field —
 // the `cell.commit.harmonize` variant per AD-2. Using a payload field (not

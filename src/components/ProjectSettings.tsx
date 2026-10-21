@@ -2907,6 +2907,20 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           <div id="section-voice">
             <SettingsGroup label={t("projectSettings.section.voice")}>
               <SettingsRow
+                label={t("projectSettings.voice.leadsManageLabel")}
+                description={t("projectSettings.voice.leadsManageDescription")}
+                control={
+                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
+                    <Switch
+                      checked={sharedSettingsBlob.projectLeadsManageVoices === true}
+                      onCheckedChange={(checked) => { void patchShared({ projectLeadsManageVoices: checked }) }}
+                      disabled={!canEditShared}
+                      aria-label={t("projectSettings.voice.leadsManageLabel")}
+                    />
+                  </DisabledFieldTooltip>
+                }
+              />
+              <SettingsRow
                 label="Gemini TTS"
                 description={t("projectSettings.voice.geminiKeyHelp")}
                 block

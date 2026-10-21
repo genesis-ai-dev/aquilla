@@ -345,6 +345,7 @@ import { canPerform, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedL
 import { laneComboboxOptions } from "@/components/lane-options"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import { denialMessage } from "@/lib/permissions/denial"
+import { canManageVoices } from "@/lib/audio/voice-permission"
 import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
 import { lockHolderForCell, useFocusLock } from "@/hooks/useFocusLock"
 import type { ProjectWsServerMessage, WsReconciler } from "@/lib/sync/ws-reconciler"
@@ -3655,6 +3656,11 @@ export function ProjectWorkspace() {
   // name. Ref-wrapped below so the context value stays identity-stable.
   const handleTimelineAssignVoice = useCallback(
     (cell: CellData, voiceId: string, opts?: { applyToSpeaker?: boolean }) => {
+      const level = project?.syncRole?.level ?? null
+      if (!canManageVoices(level, project?.projectLeadsManageVoices === true, activeLaneId != null)) {
+        toast.add({ type: "error", title: denialMessage(t, ROLE.MAINTAINER, level) })
+        return
+      }
       const castName =
         cell.metadata && typeof cell.metadata.cast_name === "string" ? (cell.metadata.cast_name as string) : null
       if (opts?.applyToSpeaker && castName) {
@@ -3666,7 +3672,7 @@ export function ProjectWorkspace() {
       }
       tts.assignCells([cell.id], voiceId)
     },
-    [tts, getActiveCells],
+    [tts, getActiveCells, project?.syncRole?.level, project?.projectLeadsManageVoices, activeLaneId, t],
   )
   const timelineAssignVoiceRef = useRef(handleTimelineAssignVoice)
   timelineAssignVoiceRef.current = handleTimelineAssignVoice
@@ -15480,6 +15486,7 @@ export function ProjectWorkspace() {
                     targetLanguage={activeLaneTargetLanguage}
                     fileId={activeFileId}
                     laneId={activeLaneId}
+                    leadsManageVoices={project.projectLeadsManageVoices === true && activeLaneId != null}
                   />
                 </div>
               ) : undefined
@@ -17533,6 +17540,7 @@ export function ProjectWorkspace() {
           targetLanes={liveLaneLanguages}
           cells={audioMergedCells}
           roleLevel={project.syncRole?.level ?? null}
+          leadsManageVoices={project.projectLeadsManageVoices === true && activeLaneId != null}
         />
       )}
       <SharePanel

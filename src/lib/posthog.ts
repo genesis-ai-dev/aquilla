@@ -1,4 +1,4 @@
-import posthog from "posthog-js"
+import type { PostHog } from "posthog-js"
 import { isAnalyticsEnabled, onAnalyticsConsentChange } from "@/lib/analytics-consent"
 import { resolveAppEnv } from "@/lib/analytics-env"
 import { installResizeObserverNoiseGuard } from "@/lib/analytics-noise"
@@ -10,13 +10,84 @@ const KEY = import.meta.env.VITE_POSTHOG_KEY as string | undefined
 // legal fallback. Override with `VITE_POSTHOG_HOST=https://eu.i.posthog.com`.
 const HOST = resolvePosthogHost(import.meta.env.VITE_POSTHOG_HOST as string | undefined)
 
+// AQU-2093: posthog-js (~280 KB) is no longer part of the first load. This
+// module hands out a small stand-in at once; the library loads after the page
+// has finished loading and the browser is idle, then receives every call made
+// meanwhile, in order. Errors thrown before it arrives are held and reported as
+// soon as it does, so the first seconds of a visit are still covered.
+type Call = (instance: PostHog) => void
+const pending: Call[] = []
+let loaded: PostHog | null = null
+
+function whenLoaded(call: Call): void {
+  if (loaded) call(loaded)
+  else pending.push(call)
+}
+
+const posthog = {
+  capture: (...args: Parameters<PostHog["capture"]>): void => whenLoaded((ph) => void ph.capture(...args)),
+  captureException: (...args: Parameters<PostHog["captureException"]>): void =>
+    whenLoaded((ph) => void ph.captureException(...args)),
+  identify: (...args: Parameters<PostHog["identify"]>): void => whenLoaded((ph) => ph.identify(...args)),
+  register: (...args: Parameters<PostHog["register"]>): void => whenLoaded((ph) => ph.register(...args)),
+  reset: (...args: Parameters<PostHog["reset"]>): void => whenLoaded((ph) => ph.reset(...args)),
+  /** Undefined until the library has loaded (and while recording is off). */
+  get_session_replay_url: (...args: Parameters<PostHog["get_session_replay_url"]>): string | undefined =>
+    loaded?.get_session_replay_url(...args),
+}
+
+/** Errors thrown before the library arrives; PostHog's own handlers take over after. */
+function holdEarlyErrors(win: Window): (ph: PostHog) => void {
+  const early: unknown[] = []
+  const onError = (event: ErrorEvent) => early.push(event.error ?? event.message)
+  const onRejection = (event: PromiseRejectionEvent) => early.push(event.reason)
+  win.addEventListener("error", onError)
+  win.addEventListener("unhandledrejection", onRejection)
+  return (ph) => {
+    win.removeEventListener("error", onError)
+    win.removeEventListener("unhandledrejection", onRejection)
+    for (const error of early) ph.captureException(error)
+  }
+}
+
+function afterPageLoad(win: Window, start: () => void): void {
+  const whenIdle = () =>
+    typeof win.requestIdleCallback === "function" ? win.requestIdleCallback(start, { timeout: 3000 }) : win.setTimeout(start, 1)
+  if (win.document.readyState === "complete") whenIdle()
+  else win.addEventListener("load", whenIdle, { once: true })
+}
+
 if (typeof window !== "undefined" && KEY) {
   // AQU-1572: ahead of init, so the benign ResizeObserver message never reaches
   // the exception rate limiter that real errors share. The `$exception` noise
   // filter itself runs inside `redactCaptureEvent` below; this guard is the
   // part a `before_send` hook cannot do (see analytics-noise.ts).
   installResizeObserverNoiseGuard(window)
-  posthog.init(KEY, {
+  const reportEarlyErrors = holdEarlyErrors(window)
+  afterPageLoad(window, () => {
+    void import("posthog-js").then(({ default: posthog }) => {
+      initPosthog(posthog, KEY)
+      loaded = posthog
+      reportEarlyErrors(posthog)
+      for (const call of pending.splice(0)) call(posthog)
+    })
+  })
+
+  onAnalyticsConsentChange((enabled) => {
+    whenLoaded((ph) => {
+      if (enabled) {
+        ph.opt_in_capturing()
+        ph.startSessionRecording()
+      } else {
+        ph.opt_out_capturing()
+        ph.stopSessionRecording()
+      }
+    })
+  })
+}
+
+function initPosthog(posthog: PostHog, key: string): void {
+  posthog.init(key, {
     api_host: HOST,
     persistence: "localStorage+cookie",
     capture_pageview: true,
@@ -66,16 +137,6 @@ if (typeof window !== "undefined" && KEY) {
   // for dashboards to split on. `posthog.reset()` clears super-properties, so
   // logout registers it again (useFrontierSession.ts).
   posthog.register({ app_env: resolveAppEnv(window.location) })
-
-  onAnalyticsConsentChange((enabled) => {
-    if (enabled) {
-      posthog.opt_in_capturing()
-      posthog.startSessionRecording()
-    } else {
-      posthog.opt_out_capturing()
-      posthog.stopSessionRecording()
-    }
-  })
 }
 
 export default posthog

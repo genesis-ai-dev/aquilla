@@ -7,7 +7,7 @@ import {
   LOCALES,
   normalizeLocale,
 } from "./locales"
-import { CATALOGS } from "./messages"
+import { CATALOGS } from "./messages/all"
 import { detectInitialLocale } from "./store"
 import { isPluralMessage } from "./plurals"
 

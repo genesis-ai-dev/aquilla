@@ -401,6 +401,24 @@ describe("POST /sessions/:id/fetch-artifact", () => {
     sandbox = new FakeSandbox()
   })
 
+  it("accepts source-upload keys ending in /original.<ext>", async () => {
+    const key = "artifacts/p1/a1/original.docx"
+    const env = makeEnv({
+      SNAPSHOTS: {
+        get: async (k: string) =>
+          k === key ? { arrayBuffer: async () => new ArrayBuffer(1) } : null,
+      } as unknown as Env["SNAPSHOTS"],
+    })
+    const res = await harness(sandbox, env)(
+      new Request("http://x/sessions/s1/fetch-artifact", {
+        method: "POST",
+        headers: AUTH,
+        body: JSON.stringify({ key, path: "input.docx" }),
+      }),
+    )
+    expect(res.status).toBe(200)
+  })
+
   it("copies an R2 object into the container", async () => {
     const payload = new TextEncoder().encode("csv,data\n1,2\n")
     const env = makeEnv({

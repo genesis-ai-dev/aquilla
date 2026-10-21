@@ -208,7 +208,8 @@ describe("AssignedToMe", () => {
     ])
     renderInbox()
 
-    await waitFor(() => expect(screen.getByText("Mark · MRK 1")).toBeInTheDocument())
+    // AQU-1510: a chapters scope reads as its chapters; the file has its own column.
+    await waitFor(() => expect(screen.getByText("MRK 1")).toBeInTheDocument())
     expect(screen.getByText("01-JHN.usfm")).toBeInTheDocument()
     expect(screen.getByText("02-MRK.usfm")).toBeInTheDocument()
     expect(screen.getByText("4/10 cells · 40%")).toBeInTheDocument()
@@ -290,7 +291,7 @@ describe("AssignedToMe", () => {
     renderInbox()
     await waitFor(() => expect(screen.getByText("JON 2")).toBeInTheDocument())
     // Chapters in reading order, whatever order they were ticked in.
-    fireEvent.click(screen.getByText("Ruth \u00b7 RUT 3, RUT 2"))
+    fireEvent.click(screen.getByText("RUT 2\u20133"))
     await waitFor(() => expect(navigate).toHaveBeenCalledTimes(1))
     expect(navigate).toHaveBeenLastCalledWith("/project/pa/editor/file/f1?cellId=RUT%202%3A1&lane=&flash=1")
     fireEvent.click(screen.getByText("JON 2"))
@@ -349,11 +350,11 @@ describe("AssignedToMe", () => {
     await waitFor(() => expect(screen.getByText("John scope")).toBeInTheDocument())
 
     fireEvent.change(screen.getByPlaceholderText("Search assignments…"), { target: { value: "MRK" } })
-    await waitFor(() => expect(screen.getByText("Mark · MRK 1")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText("MRK 1")).toBeInTheDocument())
     expect(screen.queryByText("John scope")).toBeNull()
 
     fireEvent.change(screen.getByPlaceholderText("Search assignments…"), { target: { value: "01-JHN" } })
     await waitFor(() => expect(screen.getByText("John scope")).toBeInTheDocument())
-    expect(screen.queryByText("Mark · MRK 1")).toBeNull()
+    expect(screen.queryByText("MRK 1")).toBeNull()
   })
 })

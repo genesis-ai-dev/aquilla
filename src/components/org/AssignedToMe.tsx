@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { DateTooltip } from "@/components/ui/date-tooltip"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { EmptyState, Page, PageHeader, TableEmptyState } from "@/components/ui/page"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
@@ -25,7 +26,7 @@ import { PROGRESS_BG } from "@/lib/progress/progress-palette"
 import { getFileSectionProgress } from "@/lib/progress/file-progress-resource"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
 import { editorCellHref } from "@/components/project-workspace-lane-deeplink"
-import { assignmentSectionKeys, resolveAssignmentLandingCell } from "./assignment-landing"
+import { assignmentScopeText, assignmentSectionKeys, resolveAssignmentLandingCell } from "./assignment-landing"
 
 /**
  * The lane is always emitted, as an empty `?lane=` for a default-lane
@@ -193,7 +194,14 @@ export function AssignedToMe() {
           const a = row.original
           return (
             <div className="flex min-w-0 items-center gap-2">
-              <span className="truncate">{a.scopeLabel}</span>
+              {/* AQU-1510: the scope is what tells two rows on one book
+                  apart, so it reads as ranges and the full list is a hover
+                  away rather than clipped off the edge. */}
+              <AppTooltip content={a.scopeLabel}>
+                <span className="truncate" data-testid={`assigned-scope-${a.assignmentId}`}>
+                  {assignmentScopeText(a)}
+                </span>
+              </AppTooltip>
               <AssignmentLaneBadge
                 targetLang={a.targetLang}
                 laneName={a.laneName}
@@ -304,6 +312,11 @@ export function AssignedToMe() {
             <DataTable
               columns={columns}
               data={rows}
+              // AQU-1510: fixed layout, so the columns keep their widths and a
+              // long scope truncates inside its own column instead of
+              // stretching the table past the page and scrolling the start
+              // of the label (or the whole label) out of view.
+              tableClassName="table-fixed"
               loading={loading}
               loadingLabel={t("org.assignedToMe.loadingLabel")}
               getRowId={(a) => a.assignmentId}

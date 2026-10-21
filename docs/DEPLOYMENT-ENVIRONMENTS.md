@@ -63,6 +63,10 @@ pass `--snapshot` to have it cut a `premigrate-<timestamp>` Neon branch off
 production first (instant and copy-on-write, and what you restore from if the
 apply goes wrong), or `--no-snapshot` if one already exists. `dev` and `local`
 are ungated — they are refreshable by design (`pnpm neon:refresh:dev`). The
+refresh first reads `dev` and `production` with its credentials and stops with
+the rotation steps if the Neon API rejects them; `NEON_REFRESH_PREFLIGHT_ONLY=1`
+(the workflow's `preflight_only` input) runs only that check, which is how a
+rotated `NEON_API_KEY` is verified without restoring anything. The
 refresh deletes `integration_connections` (and by cascade the Monday board
 links) right after the restore, because the copy carries every production
 org's encrypted Monday tokens and the dev Worker could otherwise use them
@@ -100,15 +104,24 @@ secret, which fails as an opaque upstream `401` rather than a missing-key error.
 **Never rotate an identity or sync secret with bare `wrangler secret put`.** That command
 is a one-shot: it patches the live Worker and immediately shifts traffic to a new version
 Cloudflare derives from the running one. The derived version keeps the script etag and
-every binding — and drops the custom version tag. Both API Workers' environment guards
-(`auth-worker/src/environment-guard.ts`, `sync-worker/src/environment-guard.ts`) require
-`CF_VERSION_METADATA.tag` to name the Worker and environment serving a first-party API
-host, so the rotation lands a hard `503 Worker deployment configuration does not match
-this API environment` with correct secrets and correct bindings. That is what took dev
-sync offline on 2026-09-22.
+every binding — and drops the custom version tag. A dashboard secret edit does the same.
+Cloudflare has no setting that stops that untagged version from taking traffic.
 
-`scripts/cloudflare-secret-rotate.mjs` is the supported path, and it keeps the guard
-fail-closed rather than loosening it:
+**Untagged versions are served, wrongly tagged versions are refused.** Both API Workers'
+environment guards (`auth-worker/src/environment-guard.ts`,
+`sync-worker/src/environment-guard.ts`) check the plain-text bindings (and, for sync,
+`AUTH_WORKER_URL` and `DEPLOYMENT_WORKER_NAME`) on every first-party API request, and
+return `503 Worker deployment configuration does not match this API environment` on any
+mismatch. A `CF_VERSION_METADATA.tag` that names a different Worker or environment is
+also a `503`. A **missing** tag is not: the guard serves the request and logs one
+`[environment-guard] … is serving an untagged version` warning per isolate. The guards
+used to refuse a missing tag too; that turned secret edits into full outages — dev sync
+on 2026-09-22, and every production sign-in on 2026-10-20 after three `wrangler secret
+put`s on `aquilla-identity`. The warning in Workers Logs is now the signal that a version
+went out outside the repo deployers; recover it as described below.
+
+`scripts/cloudflare-secret-rotate.mjs` is still the supported path, because it keeps a
+tagged, verified version live:
 
 ```bash
 printf %s "$KEY" | pnpm run secrets:rotate sync development SYNC_SECRET_KEY
@@ -135,8 +148,8 @@ the source of truth the deployers enforce. **Web secrets** rotate by re-running
 version is verified against an immutable preview origin, which a patched version has none
 of.
 
-A rotation that has already gone out the old way is recovered the same way any untagged
-version is: re-run that surface's verified deployment
+A rotation that has already gone out the old way keeps serving, but untagged. Bring it
+back under the deployers the same way as any untagged version: re-run that surface's verified deployment
 (`pnpm run deploy:aquilla:dev:sync`, …), which stages and promotes a properly tagged
 version with the new secret value intact.
 

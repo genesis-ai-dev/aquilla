@@ -7,7 +7,7 @@
  * frame to select with Intl.PluralRules. Only public UI namespaces.
  */
 
-import { CATALOGS } from "@/lib/i18n/messages"
+import { catalogFor } from "@/lib/i18n/messages"
 import { DEFAULT_LOCALE, directionFor } from "@/lib/i18n/locales"
 
 export const UI_STRING_PREFIXES = ["editor.", "common.", "extensions.", "comments.", "workspace.", "agentWorkspace.", "search.", "autopilot."] as const
@@ -22,8 +22,9 @@ export interface UiStrings {
 }
 
 export function uiStrings(locale: string, keys: readonly string[]): UiStrings {
-  const catalog = (CATALOGS[locale] ?? {}) as Record<string, unknown>
-  const en = CATALOGS[DEFAULT_LOCALE] as Record<string, unknown>
+  // The user's own locale, which the app has already fetched (AQU-2090).
+  const catalog = (catalogFor(locale) ?? {}) as Record<string, unknown>
+  const en = catalogFor(DEFAULT_LOCALE) as Record<string, unknown>
   const strings: Record<string, UiStringValue> = {}
   for (const key of keys.slice(0, MAX_UI_STRING_KEYS)) {
     if (!UI_STRING_PREFIXES.some((p) => key.startsWith(p))) continue

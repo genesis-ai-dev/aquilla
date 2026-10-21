@@ -94,6 +94,21 @@ export function hostedLanguageTag(tag?: string): string | undefined {
   return /^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$/.test(value) ? value : undefined
 }
 
+/**
+ * The hosted model did not answer (a 5xx from our route). The message is an
+ * English match key for ai-error.ts ("hosted transcription model
+ * unavailable"), which turns it into copy that names the way out: retry, or
+ * pick another model in Preferences → Local models.
+ */
+export class HostedTranscriptionUnavailableError extends Error {
+  readonly status: number
+  constructor(status: number) {
+    super(`Hosted transcription model unavailable (${status}).`)
+    this.name = "HostedTranscriptionUnavailableError"
+    this.status = status
+  }
+}
+
 /** AQU-1681: the per-user limit refused the request (429 `rate_limited`). */
 export class TranscriptionRateLimitedError extends Error {
   readonly retryAfterSeconds: number
@@ -152,6 +167,7 @@ async function postWindow(
   if (response.status === 429 && code === "rate_limited") {
     throw new TranscriptionRateLimitedError(retryAfterSeconds(response))
   }
+  if (response.status >= 500) throw new HostedTranscriptionUnavailableError(response.status)
   throw new Error(`Hosted transcription failed (${response.status}). Try again.`)
 }
 

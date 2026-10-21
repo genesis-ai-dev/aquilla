@@ -74,6 +74,9 @@ const NAMESPACES: readonly GcNamespace[] = ["audio", "voice", "artifact"]
 
 /** Suffix of the Inworld clone-id cache that rides alongside a reference clip. */
 const CLONE_CACHE_SUFFIX = ".inworld.json"
+/** AQU-2095: suffix of the stored-waveform sidecar that rides alongside a clip.
+ *  Mirrors PEAKS_SIDECAR_SUFFIX in src/lib/audio/peaks-sidecar.ts. */
+const PEAKS_SIDECAR_SUFFIX = ".peaks"
 
 export interface R2GcCursors {
   /** Last `projects/{pid}/` prefix finished — audio + voice namespaces. */
@@ -145,7 +148,15 @@ export function classifyKey(rest: string): { namespace: GcNamespace; projectId: 
     if (parts.length === 6 && parts[2] === "files" && parts[4] === "audio") {
       const [, projectId, , fileId, , audioId] = parts
       if (!projectId || !fileId || !audioId) return null
-      return { namespace: "audio", projectId, ref: `${fileId}/${audioId}` }
+      // AQU-2095: a `.peaks` sidecar is the clip's waveform, not a clip of its
+      // own — no cell_audio row will ever name it. Map it back onto the clip it
+      // describes, as the voice namespace does for the clone cache, so it is
+      // kept while the clip is live and collected with it.
+      const ref = audioId.endsWith(PEAKS_SIDECAR_SUFFIX)
+        ? audioId.slice(0, -PEAKS_SIDECAR_SUFFIX.length)
+        : audioId
+      if (!ref) return null
+      return { namespace: "audio", projectId, ref: `${fileId}/${ref}` }
     }
     // projects/{pid}/voices/{refId} and the {refId}.inworld.json clone cache,
     // which lives or dies with the clip it was derived from.
@@ -172,16 +183,46 @@ export function classifyKey(rest: string): { namespace: GcNamespace; projectId: 
   return null
 }
 
+/**
+ * The audio object a take's url plays: `frontier-audio://{name}` names an
+ * object in the take's own file; an `/audio/{project}/{file}/{name}` path names
+ * its file too. Anything else (an outside media URL, a legacy LFS link) is not
+ * in this bucket and keeps nothing alive.
+ */
+export function playedObject(url: string | null): { fileId: string | null; name: string } | null {
+  if (!url) return null
+  const scheme = "frontier-audio://"
+  if (url.startsWith(scheme)) {
+    const name = url.slice(scheme.length)
+    return name && !name.includes("/") ? { fileId: null, name } : null
+  }
+  const path = url.match(/^\/audio\/[^/]+\/([^/]+)\/([^/]+)$/)
+  if (path) return { fileId: decodeURIComponent(path[1]!), name: decodeURIComponent(path[2]!) }
+  return null
+}
+
 /** Every `(fileId, audioId)` an audio object is still reachable through. */
 async function loadAudioRefs(db: AquillaDb, projectId: string): Promise<Set<string>> {
   const refs = new Set<string>()
   // Live takes. `deleted = 1` is the soft-delete the projection writes, so its
   // bytes ARE collectable — that is the point of sweeping regenerated takes.
+  //
+  // A live take keeps three names alive, not one: its own id, the object its
+  // url plays, and the take it was cut from. They differ for a cut piece
+  // (AQU-1767): `cell.audio.cut` gives each later piece a new id but the SAME
+  // url, so every piece plays the original take's bytes. Keyed on the id alone,
+  // deleting a cut take's first piece (the original row) left those bytes with
+  // no live id, and the next sweep deleted the audio the surviving pieces play.
   const takes = await db
-    .prepare(`SELECT file_id, audio_id FROM cell_audio WHERE project_id = ? AND deleted = 0`)
+    .prepare(`SELECT file_id, audio_id, url, piece_of FROM cell_audio WHERE project_id = ? AND deleted = 0`)
     .bind(projectId)
-    .all<{ file_id: string; audio_id: string }>()
-  for (const r of takes.results ?? []) refs.add(`${r.file_id}/${r.audio_id}`)
+    .all<{ file_id: string; audio_id: string; url: string | null; piece_of: string | null }>()
+  for (const r of takes.results ?? []) {
+    refs.add(`${r.file_id}/${r.audio_id}`)
+    if (r.piece_of) refs.add(`${r.file_id}/${r.piece_of}`)
+    const played = playedObject(r.url)
+    if (played) refs.add(played.fileId ? `${played.fileId}/${played.name}` : `${r.file_id}/${played.name}`)
+  }
 
   // Agent-API audio artifacts: the bytes sit in the per-file audio layout keyed
   // by the artifact id standing in for a file id (schema.sql, 0064).

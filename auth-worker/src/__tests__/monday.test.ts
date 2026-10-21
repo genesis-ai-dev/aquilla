@@ -1398,6 +1398,119 @@ describe("analyze board selection", () => {
 
 // ── "Add the missing columns for me" ───────────────────────────────────────
 
+// AQU-2087: "Make a new board for me".
+describe("POST /api/v2/monday/projects/:projectId/board", () => {
+  /** A fake Monday that hands back a new board with a starter kit, and records every call. */
+  function fakeNewBoard(opts: { refuseBoard?: string } = {}) {
+    const calls: string[] = []
+    const columns: Array<{ id: string; title: string; type: string }> = [
+      { id: "name", title: "Name", type: "name" },
+      { id: "person", title: "Person", type: "people" },
+      { id: "status", title: "Status", type: "status" },
+      { id: "date4", title: "Date", type: "date" },
+    ]
+    const groups = [{ id: "topics", title: "Group Title" }]
+    const fn = mockFetch((url, body) => {
+      if (!url.startsWith("https://api.monday.com/v2")) return null
+      const query = (JSON.parse(body) as { query: string }).query
+      calls.push(query)
+      if (query.includes("create_board(")) {
+        if (opts.refuseBoard) return jsonResponse({ errors: [{ message: opts.refuseBoard }] })
+        return jsonResponse({ data: { create_board: { id: "777" } } })
+      }
+      if (query.includes("delete_column(")) {
+        const id = /column_id: "([^"]+)"/.exec(query)?.[1]
+        columns.splice(columns.findIndex((col) => col.id === id), 1)
+        return jsonResponse({ data: { delete_column: { id } } })
+      }
+      if (query.includes("create_column(")) {
+        const title = /title: "([^"]+)"/.exec(query)?.[1] ?? "?"
+        const type = /column_type: (\w+)/.exec(query)?.[1] ?? "?"
+        const col = { id: `col_${columns.length}`, title, type }
+        columns.push(col)
+        return jsonResponse({ data: { create_column: col } })
+      }
+      if (query.includes("create_group(")) {
+        groups.unshift({ id: "aquilla_group", title: "Aquilla projects" })
+        return jsonResponse({ data: { create_group: { id: "aquilla_group", title: "Aquilla projects" } } })
+      }
+      if (query.includes("delete_group(")) {
+        const id = /group_id: "([^"]+)"/.exec(query)?.[1]
+        groups.splice(groups.findIndex((g) => g.id === id), 1)
+        return jsonResponse({ data: { delete_group: { id } } })
+      }
+      if (query.includes("settings_str")) {
+        return jsonResponse({
+          data: { boards: [{ name: "Aquilla progress", url: "https://acme.monday.com/boards/777", columns: [...columns], groups: [...groups] }] },
+        })
+      }
+      return null
+    })
+    return { fn, calls, columns, groups }
+  }
+
+  it("makes a public, empty board with only the ticked columns, in order, Aquilla ID last, under one group on top", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    const monday = fakeNewBoard()
+    const res = await request("anna", "POST", "/api/v2/monday/projects/proj-1/board", {
+      name: "  Aquilla progress  ",
+      metrics: ["completion_pct", "external_id", "status_auto", "project_name", "last_activity"],
+    })
+    expect(res.status).toBe(200)
+    const out = (await res.json()) as {
+      boardId: string
+      created: Array<{ metric: string; columnId: string }>
+      failed: unknown[]
+      structure: { url: string; name: string; columns: Array<{ title: string }>; groups: Array<{ title: string }> }
+    }
+    expect(monday.calls[0]).toContain('create_board(board_name: "Aquilla progress", board_kind: public, empty: true)')
+    expect(out.boardId).toBe("777")
+    // Monday's starter columns and group are gone; only the item name stays.
+    expect(monday.calls.filter((q) => q.includes("delete_column("))).toHaveLength(3)
+    expect(out.created.map((col) => col.metric)).toEqual(["completion_pct", "status_auto", "last_activity", "external_id"])
+    expect(out.structure.columns.map((col) => col.title)).toEqual(["Name", "Completion %", "Status", "Last activity", "Aquilla ID"])
+    expect(monday.calls.find((q) => q.includes("create_group("))).toContain('relative_to: "topics", position_relative_method: before_at')
+    expect(out.structure.groups).toEqual([{ id: "aquilla_group", title: "Aquilla projects" }])
+    expect(out.structure.url).toBe("https://acme.monday.com/boards/777")
+    expect(out.failed).toEqual([])
+  })
+
+  it("contributor (400) gets 403 and no board is made", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    const monday = fakeNewBoard()
+    const res = await request("tom", "POST", "/api/v2/monday/projects/proj-1/board", {
+      name: "Aquilla progress",
+      metrics: ["completion_pct"],
+    })
+    expect(res.status).toBe(403)
+    expect(monday.calls).toEqual([])
+  })
+
+  it("says why when Monday won't make the board, and touches nothing else", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    const monday = fakeNewBoard({ refuseBoard: "User unauthorized to perform action" })
+    const res = await request("anna", "POST", "/api/v2/monday/projects/proj-1/board", {
+      name: "Aquilla progress",
+      metrics: ["completion_pct"],
+    })
+    expect(res.status).toBe(502)
+    expect(((await res.json()) as { error: string }).error).toContain("User unauthorized to perform action")
+    expect(monday.calls).toHaveLength(1)
+  })
+
+  it("refuses a blank name", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    const monday = fakeNewBoard()
+    const res = await request("anna", "POST", "/api/v2/monday/projects/proj-1/board", { name: "   ", metrics: [] })
+    expect(res.status).toBe(400)
+    expect(monday.calls).toEqual([])
+  })
+})
+
 describe("POST /api/v2/monday/projects/:projectId/columns", () => {
   /** A fake board whose columns grow as create_column is called. */
   function fakeBoard(initial: Array<{ id: string; title: string; type: string }>, failTitles: string[] = []) {

@@ -573,3 +573,20 @@ describe("TimelineCard — the hover rung", () => {
     expect(el.className).not.toContain("--tl-track-hover")
   })
 })
+
+// Sam's decision (hidden lines on the timeline): a hidden line's text cards are
+// drawn where they sit, faded; the source-audio card under it is not, because
+// the recording there still plays.
+describe("TimelineCard — a hidden line", () => {
+  it("fades its text card", () => {
+    render(<TimelineCard cell={cell({ hidden: true } as Partial<CellData>)} {...base} variant="subtitle" onSelect={() => {}} onRetime={() => {}} />)
+    const card = screen.getByTestId("tl-card-c1")
+    expect(card).toHaveAttribute("data-hidden-line")
+    expect(card.className).toContain("opacity-60")
+  })
+
+  it("leaves the source-audio card under it as it is", () => {
+    render(<TimelineCard cell={cell({ hidden: true } as Partial<CellData>)} {...base} variant="dialogue" onSelect={() => {}} onRetime={() => {}} />)
+    expect(screen.getByTestId("tl-card-c1")).not.toHaveAttribute("data-hidden-line")
+  })
+})

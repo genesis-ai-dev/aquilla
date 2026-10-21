@@ -40,9 +40,14 @@ import {
 export type ChipStats =
   | {
       kind: "dubbing"
+      /** A split take reads as one: its first piece's start… */
       startSec: number
+      /** …to its last piece's end. */
       endSec: number
+      /** The sound it keeps — a split take's pieces added up, not the span. */
       durationSec: number
+      /** AQU-1767: how many pieces the take is cut into; absent when whole. */
+      pieces?: number
       /** Dub start − original start: negative when the dub begins BEFORE its
        *  verse. Shown only in the Diff pill's hover. */
       startDiffSec: number | null
@@ -181,6 +186,12 @@ export function TimelineTimingRow({ cell, chipStats, audioMissing }: TimelineChi
             <span data-testid="tl-detail-dub-range" className="font-mono tabular-nums">
               {t("workspace.chipStrip.targetLabel")} {fmtClock(chipStats.startSec, true)}–{fmtClock(chipStats.endSec, true)}
               {" | "}
+              {chipStats.pieces != null && chipStats.pieces > 1 && (
+                <span data-testid="tl-detail-pieces">
+                  {t("workspace.chipStrip.pieceCount", { count: chipStats.pieces })}
+                  {" · "}
+                </span>
+              )}
               <span data-testid="tl-detail-duration">{chipStats.durationSec.toFixed(1)}s</span>
             </span>
           </Pill>

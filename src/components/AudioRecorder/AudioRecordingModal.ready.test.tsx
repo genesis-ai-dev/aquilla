@@ -255,6 +255,21 @@ describe("the selected take, before recording", () => {
     expect(cut.querySelector("[data-dashed='true']")).not.toBeNull()
   })
 
+  // AQU-1767 (Sam's walk, 2026-10-15): the Recording tab said 2.4s for this
+  // take; both now say it the one way (take-length.ts).
+  it("says a split take's length as the Recording tab does", () => {
+    attachmentsState.byCellId = entry({
+      selectedAudioId: "audio-c1-1.wav",
+      attachments: {
+        "audio-c1-1.wav": take("audio-c1-1.wav", { label: "Take 1 · 1", durationMs: 4000, trimEndMs: 1200 }),
+        "audio-c1-2.wav": take("audio-c1-2.wav", { label: "Take 1 · 2", durationMs: 4000, trimStartMs: 2000, trimEndMs: 3150, pieceOf: "audio-c1-1.wav" }),
+      },
+    })
+    render(modalEl())
+    expect(screen.getByTestId("rec-ready-take")).toHaveTextContent("Take 1 · 2.3s")
+    expect(screen.getByText("0:02.3")).toBeInTheDocument()
+  })
+
   it("names and measures a split take the same whichever piece is selected", () => {
     attachmentsState.byCellId = entry({
       selectedAudioId: "audio-c1-2.wav",
@@ -480,5 +495,36 @@ describe("the takes drawer, resting closed", () => {
     fireEvent.click(sw)
     expect(screen.queryByTestId("rec-takes-drawer")).toBeNull()
     expect(screen.getByTestId("rec-takes-drawer-open")).toHaveAttribute("aria-checked", "false")
+  })
+})
+
+// Sam's decision (hidden lines on the timeline): Next and Previous walk past a
+// hidden line, and the line count leaves it out.
+describe("AudioRecordingModal — hidden lines", () => {
+  const line = (id: string, over: Record<string, unknown> = {}) => ({ ...cell, id, ...over }) as unknown as CellData
+
+  it("steps over a hidden line both ways", () => {
+    const onActiveCellChange = vi.fn()
+    const cells = [line("c1"), line("c2", { hidden: true }), line("c3")]
+    const { rerender } = render(
+      <AudioRecordingModal open project={project} cells={cells} activeCellId="c1" username="sam"
+        onActiveCellChange={onActiveCellChange} onTakeSaved={() => {}} onClose={() => {}} />,
+    )
+    fireEvent.click(screen.getByTestId("rec-next"))
+    expect(onActiveCellChange).toHaveBeenLastCalledWith("c3")
+    rerender(
+      <AudioRecordingModal open project={project} cells={cells} activeCellId="c3" username="sam"
+        onActiveCellChange={onActiveCellChange} onTakeSaved={() => {}} onClose={() => {}} />,
+    )
+    fireEvent.click(screen.getByTestId("rec-prev"))
+    expect(onActiveCellChange).toHaveBeenLastCalledWith("c1")
+  })
+
+  it("still shows a hidden line it was opened on", () => {
+    render(
+      <AudioRecordingModal open project={project} cells={[line("c1"), line("c2", { hidden: true })]} activeCellId="c2" username="sam"
+        onActiveCellChange={() => {}} onTakeSaved={() => {}} onClose={() => {}} />,
+    )
+    expect(screen.getByTestId("rec-prev")).not.toBeDisabled()
   })
 })

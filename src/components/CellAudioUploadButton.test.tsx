@@ -9,7 +9,7 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { CellAudioUploadButton } from "./CellAudioUploadButton"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { LOCALE_STORAGE_KEY } from "@/lib/i18n/store"
-import { CATALOGS } from "@/lib/i18n/messages"
+import { CATALOGS } from "@/lib/i18n/messages/all"
 import { translate } from "@/lib/i18n/translate"
 
 vi.mock("@/hooks/useFrontierSession", () => ({

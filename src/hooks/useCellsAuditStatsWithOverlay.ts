@@ -23,13 +23,14 @@ export function useCellsAuditStatsWithOverlay(
   opts: UseCellsAuditStatsWithOverlayOptions,
 ): {
   byCellId: Map<string, CellAuditStats>
+  complete: boolean
   isLoading: boolean
   isError: boolean
   revalidate: () => void
   revalidateCellStats: (cellId: string) => void
   applyCommittedCellStats: (cellId: string, rows: readonly CellRow[]) => boolean
 } {
-  const { byCellId: base, isLoading, isError, revalidate, revalidateCellStats, applyCommittedCellStats } = useCellsAuditStats(opts)
+  const { byCellId: base, complete, isLoading, isError, revalidate, revalidateCellStats, applyCommittedCellStats } = useCellsAuditStats(opts)
 
   const pending = usePendingOutboxRecords({
     enabled: !!opts.fileId,
@@ -41,5 +42,5 @@ export function useCellsAuditStatsWithOverlay(
     return applyOutboxOverlay({ base, pending, lane: opts.lane ?? "" })
   }, [base, pending, opts.lane])
 
-  return { byCellId, isLoading, isError, revalidate, revalidateCellStats, applyCommittedCellStats }
+  return { byCellId, complete, isLoading, isError, revalidate, revalidateCellStats, applyCommittedCellStats }
 }

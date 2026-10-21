@@ -218,6 +218,20 @@ describe("AssignedToMe", () => {
     expect(mockGetMy).toHaveBeenCalledWith("jwt", 1)
   })
 
+  // AQU-1969: a validate assignment's "done" is the caller's own approvals,
+  // and the row says it is validating work.
+  it("labels a validate assignment as validating", async () => {
+    mockGetMy.mockResolvedValue([
+      { assignmentId: "a1", projectId: "pa", projectName: "John", fileId: "f1", fileName: "01-JHN.usfm", scopeKind: "books", scopeLabel: "John scope", targetLang: "", deadline: null, note: null, cellsTotal: 10, cellsDone: 4, createdAt: 200, kind: "validate" },
+      { assignmentId: "a2", projectId: "pb", projectName: "Mark", fileId: "f2", fileName: "02-MRK.usfm", scopeKind: "books", scopeLabel: "Mark scope", targetLang: "", deadline: null, note: null, cellsTotal: 5, cellsDone: 1, createdAt: 100, kind: "translate" },
+    ])
+    renderInbox()
+
+    await waitFor(() => expect(screen.getByText("John scope")).toBeInTheDocument())
+    expect(screen.getAllByText("Validating")).toHaveLength(1)
+    expect(screen.getByText("John scope").parentElement?.textContent).toContain("Validating")
+  })
+
   // AQU-729 / AQU-538 (§3.5): every assignment shows its lane; named lanes use
   // the tag, the default lane ('') uses the project's target language label.
   // AQU-690: when fileId is present, open that file in the editor.

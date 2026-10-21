@@ -291,6 +291,20 @@ export function laneOfBacktranslationEvent(payload: unknown): string {
   return typeof lang === 'string' ? lang : ''
 }
 
+/**
+ * AQU-1408: the lane tag a `cell.gloss.set` event names.
+ *
+ * Same rule as {@link laneOfBacktranslationEvent} — a gloss is not a cells row
+ * and takes no part in the AD-2 chain, so it stays out of {@link laneOfEvent}
+ * too. Separate function rather than a shared one because the two kinds can
+ * diverge (a gloss has no `polished` dimension) and a shared helper would hide
+ * that the day one of them grows a second lane field.
+ */
+export function laneOfGlossEvent(payload: unknown): string {
+  const lang = (payload as { targetLang?: unknown } | null | undefined)?.targetLang
+  return typeof lang === 'string' ? lang : ''
+}
+
 // FTS index maintenance: none. Postgres auto-maintains the cells.value_tsv
 // generated column + GIN index on every cells write, so the projection emits no
 // FTS statements (the old SQLite FTS5 cells_fts shadow-table upkeep is gone).
@@ -616,7 +630,7 @@ export function buildBulkSourceCellCreateStmt(
 }
 
 /** Caller hint: which projection tables this event will touch. */
-export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'cell_audio_validators' | 'cell_attachments' | 'comments' | 'cell_backtranslations' | 'cell_links' | 'cell_word_morph' | 'concepts'
+export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'cell_audio_validators' | 'cell_attachments' | 'comments' | 'cell_backtranslations' | 'cell_glosses' | 'cell_links' | 'cell_word_morph' | 'concepts'
 
 /**
  * Apply one event to the projection (without the AD-2 sibling guard — the
@@ -1425,6 +1439,14 @@ export function buildEventProjectionStmts(
             )
             .bind(...dependentBinds, ...dependentGateBinds),
         )
+        stmts.push(
+          db
+            .prepare(
+              `DELETE FROM cell_glosses
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?${dependentGateAnd}`,
+            )
+            .bind(...dependentBinds, ...dependentGateBinds),
+        )
         // Morph analysis is written by the /import-morph route, never by an
         // event — so this DELETE is its only cleanup path anywhere. Harmless
         // on replay for the same reason as the rest.
@@ -1467,6 +1489,19 @@ export function buildEventProjectionStmts(
               ...dependentGateBinds,
             ),
         )
+        stmts.push(
+          db
+            .prepare(
+              `DELETE FROM cell_glosses
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?
+                 AND ${backtranslationLaneMatchSql()}${dependentGateAnd}`,
+            )
+            .bind(
+              ...dependentBinds,
+              ...backtranslationLaneMatchBinds(event.projectId, lane),
+              ...dependentGateBinds,
+            ),
+        )
       }
 
       // LAST, deliberately: every statement above tests this row's head with
@@ -1500,9 +1535,10 @@ export function buildEventProjectionStmts(
             'comments',
             'cell_waivers',
             'cell_backtranslations',
+            'cell_glosses',
             'cell_word_morph',
           ]
-        : ['cells', 'files', 'cell_validators', 'cell_backtranslations']
+        : ['cells', 'files', 'cell_validators', 'cell_backtranslations', 'cell_glosses']
     }
 
     case 'source.cell.restore': {
@@ -1538,6 +1574,7 @@ export function buildEventProjectionStmts(
         'comments',
         'cell_waivers',
         'cell_backtranslations',
+        'cell_glosses',
         'cell_word_morph',
       ]
     }
@@ -3015,6 +3052,54 @@ case 'cell.audio.attach': {
           ),
       )
       return ['cell_backtranslations']
+    }
+
+    case 'cell.gloss.set': {
+      // AQU-1408 §1. Non-chain-mutating, exactly like the back-translation
+      // above: does NOT move cells.event_id, does NOT touch cell_validators or
+      // endorsement_count. Keyed by the target commit the gloss reads, so a
+      // later edit of that cell leaves this row addressable as the reading of
+      // the commit it actually described rather than silently re-pointing.
+      //
+      // An empty `glossText` is a real write, not a no-op: it is how a
+      // contributor withdraws a correction and asks for the computed gloss
+      // back. The read route returns it and the client treats "" as absent, so
+      // deleting the row here would make an un-correction invisible to every
+      // other member until they reloaded.
+      const p = event.payload as EventPayloads['cell.gloss.set']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
+      }
+      const lane = laneOfGlossEvent(p)
+      stmts.push(
+        db
+          .prepare(
+            `INSERT INTO cell_glosses (
+              project_id, file_id, cell_id, target_event_id,
+              gloss_text, author, event_id, server_seq, created_at, lane_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ${laneIdResolveSql('target')})
+            ON CONFLICT(project_id, file_id, cell_id, target_event_id) DO UPDATE SET
+              gloss_text  = excluded.gloss_text,
+              author      = excluded.author,
+              event_id    = excluded.event_id,
+              server_seq  = excluded.server_seq,
+              created_at  = excluded.created_at,
+              lane_id     = COALESCE(excluded.lane_id, cell_glosses.lane_id)`,
+          )
+          .bind(
+            event.projectId,
+            event.fileId,
+            event.cellId,
+            p.targetEventId,
+            p.glossText,
+            event.author,
+            event.id,
+            event.serverSeq ?? null,
+            event.serverTs,
+            ...laneIdResolveBinds('target', event.projectId, lane),
+          ),
+      )
+      return ['cell_glosses']
     }
 
     case 'assignment.create':

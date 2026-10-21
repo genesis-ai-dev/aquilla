@@ -659,3 +659,13 @@ it("AQU-1208: Monday setup uses the project's organization, not the personal org
   renderAt(`/project/${PROJECT_ID}/settings/integrations`)
   expect(screen.getByTestId("monday-project-org")).toHaveTextContent("7")
 })
+
+vi.mock("./ProjectSettings/AirtableIntegrationSection", () => ({
+  AirtableIntegrationSection: ({ orgId }: { orgId: number | null }) => (
+    <div data-testid="airtable-project-org">{orgId}</div>
+  ),
+}))
+it("AQU-804: Integrations shows Airtable beside Monday, with the project's organization", () => {
+  renderAt(`/project/${PROJECT_ID}/settings/integrations`)
+  expect(screen.getByTestId("airtable-project-org")).toHaveTextContent("7")
+})

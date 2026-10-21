@@ -58,6 +58,25 @@ export const error = defineNamespace({
     "error.monday.sync": "Couldn't push this project to Monday.",
     "error.monday.addColumns": "Couldn't add the columns to the Monday board.",
     "error.monday.newBoard": "Couldn't make the new board in Monday.",
+    // AQU-804: the Airtable integration (src/lib/airtable/api.ts).
+    "error.airtable.loadConnection": "Couldn't load the Airtable connection status.",
+    "error.airtable.connect": "Couldn't connect Airtable. Try again.",
+    "error.airtable.tokenRejected":
+      "Airtable didn't accept this token. Check that you copied all of it and that it hasn't been deleted.",
+    "error.airtable.missingScopes": "This token needs more access in Airtable: add {scopes} to it, then paste it again.",
+    "error.airtable.unreachable": "Couldn't reach Airtable. Try again in a minute.",
+    "error.airtable.disconnect": "Couldn't disconnect Airtable.",
+    "error.airtable.loadBases": "Couldn't load your Airtable bases.",
+    "error.airtable.loadTables": "Couldn't load that base's tables and fields.",
+    "error.airtable.noTables":
+      "This Airtable token can't see any tables yet. In Airtable, give the token access to the base you track progress in, then try again.",
+    "error.airtable.loadLink": "Couldn't load this project's Airtable table link.",
+    "error.airtable.saveLink": "Couldn't save the Airtable table link.",
+    "error.airtable.updateLink": "Couldn't update the Airtable table link.",
+    "error.airtable.removeLink": "Couldn't remove the Airtable table link.",
+    "error.airtable.analyze": "Couldn't build a field mapping suggestion.",
+    "error.airtable.sync": "Couldn't push this project to Airtable.",
+    "error.airtable.addFields": "Couldn't add the fields to the Airtable table.",
     "error.termbase.publish": "Couldn't share this termbase with the organization.",
     "error.termbase.unpublish": "Couldn't stop sharing this termbase.",
     "error.termbase.listPublished": "Couldn't load the termbases shared in this organization.",
@@ -81,6 +100,14 @@ export const error = defineNamespace({
       screenshot: "error-state",
     },
     keys: {
+      "error.airtable.missingScopes": {
+        description:
+          "Shown under the token field in Airtable settings when the pasted personal access " +
+          "token lacks a permission Aquilla needs (AQU-804).",
+        placeholders: {
+          scopes: "One or more Airtable scope names, comma-separated, exactly as Airtable spells them (e.g. 'schema.bases:read'). Never translated.",
+        },
+      },
       "error.generic.title": {
         description:
           "Heading of the generic failure panel shown when an unexpected error is " +

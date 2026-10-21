@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { clearLaneCast, LANE_CAST_DEFAULT, laneTtsSettings, setLaneCast, setLaneDefaultVoice } from "./lane-cast"
 import { resolveCastVoice, assignedCastVoiceId } from "./voices"
+import { buildCastRemovals } from "@/lib/import/cast-from-speakers"
 import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 
 const SAMOAN = "sm"
@@ -142,5 +143,24 @@ describe("clearLaneCast", () => {
 
   it("writes nothing for a project with no lane cast at all", () => {
     expect(clearLaneCast(settings({ castAssignments: { c1: "v-old" } }), ["c1"])).toEqual({})
+  })
+
+  it("composes with buildCastRemovals into one save that clears the cell on every lane", () => {
+    // The workspace's "No character" and bulk "clear characters" paths send
+    // both patches in ONE saveTts call: the project-wide map pruned, and every
+    // lane's own entry dropped. They touch different keys, so the spread must
+    // leave both intact — and the merged result must name no voice for the
+    // cleared cell on any lane, while an untouched cell keeps its lane voice.
+    const s = settings({
+      castAssignments: { c1: "v-old", c2: "v-old" },
+      laneCastAssignments: { [SAMOAN]: { c1: "v-sm", c2: "v-sm" }, [ARABIC]: { c1: "v-ar" } },
+    })
+    const patch: Partial<ProjectTtsSettings> = { ...buildCastRemovals(["c1"], s), ...clearLaneCast(s, ["c1"]) }
+    expect(patch.castAssignments).toEqual({ c2: "v-old" })
+    expect(patch.laneCastAssignments).toEqual({ [SAMOAN]: { c2: "v-sm" }, [ARABIC]: {} })
+    const merged = { ...s, ...patch }
+    expect(assignedCastVoiceId(laneTtsSettings(merged, SAMOAN), "c1")).toBeUndefined()
+    expect(assignedCastVoiceId(laneTtsSettings(merged, ARABIC), "c1")).toBeUndefined()
+    expect(assignedCastVoiceId(laneTtsSettings(merged, SAMOAN), "c2")).toBe("v-sm")
   })
 })

@@ -7,7 +7,7 @@
 // link has no cursor yet, so its first run is the whole import. One run at a
 // time per mounted project.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { FRONTIER_API_URL } from "@/lib/sync/sync-token"
@@ -50,11 +50,6 @@ export function useLangQuestLink(projectId: string, roleLevel: number | null, on
   const lastRun = useRef(0)
   const canSync = (roleLevel ?? 0) >= ROLE.PROJECT_LEAD
 
-  const getJwt = useCallback(() => jwt, [jwt])
-  const getToken = useMemo(
-    () => buildFileScopedTokenFetcher(getJwt, projectId, {}, FRONTIER_API_URL),
-    [getJwt, projectId],
-  )
 
   const reload = useCallback(async () => {
     if (!jwt) return null
@@ -75,6 +70,8 @@ export function useLangQuestLink(projectId: string, roleLevel: number | null, on
       if (!jwt || !link || !canSync || link.needsReauth || running.current) return
       running.current = true
       lastRun.current = Date.now()
+      // Built per run, not per render: an unlinked project never needs upload tokens.
+      const getToken = buildFileScopedTokenFetcher(() => jwt, projectId, {}, FRONTIER_API_URL)
       setSync({ kind: "running", progress: null })
       const started = performance.now()
       try {
@@ -115,7 +112,7 @@ export function useLangQuestLink(projectId: string, roleLevel: number | null, on
         await reload()
       }
     },
-    [jwt, canSync, projectId, author, getToken, reload],
+    [jwt, canSync, projectId, author, reload],
   )
 
   const runSync = useCallback((trigger: "focus" | "manual") => syncLink(link, trigger), [syncLink, link])

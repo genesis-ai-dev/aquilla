@@ -5129,7 +5129,13 @@ export function ProjectWorkspace() {
       // file no longer carries. The cast LIST is deliberately untouched — see
       // `buildCastRemovals`.
       try {
-        await tts.saveTts(buildCastRemovals(dirty.map((c) => c.id), tts.settings))
+        await tts.saveTts({
+          ...buildCastRemovals(dirty.map((c) => c.id), tts.settings),
+          // AQU-2038: and every lane's own entry — the characters being cleared
+          // are shared, so no lane's voice for them survives. The same rule as
+          // "No character" above.
+          ...clearLaneCast(tts.settings, dirty.map((c) => c.id)),
+        })
       } catch (e) {
         console.warn("[characters] pruning the cast assignments failed", e)
         toast.add({ type: "warning", title: "Characters cleared, but the cast assignments could not be updated." })

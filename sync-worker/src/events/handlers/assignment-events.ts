@@ -7,7 +7,8 @@
 //
 // Each event writes the canonical events row (history/audit) and then mutates
 // the `assignments` / `assignment_cells` projection tables:
-//   - assignment.create  : INSERT the assignments row, resolve the
+//   - assignment.create  : INSERT the assignments row (with its kind —
+//                           translate or validate, AQU-1969), resolve the
 //                           book/chapter/cell scope into assignment_cells from
 //                           the live `cells` projection, then set cells_total.
 //                           A chapter is resolved with the plan board's own
@@ -78,13 +79,17 @@ export function handleAssignmentEvent(
 
     // 1. Insert the assignment row. cells_total starts at 0 and is filled by
     //    the COUNT update below (after assignment_cells is populated).
+    //    AQU-1969: `kind` is 'validate' only when the payload says so in
+    //    exactly that word; anything else — absent on every older event, or a
+    //    value no client sends — is the translate assignment it always was,
+    //    rather than an insert the column's CHECK would refuse mid-batch.
     stmts.push(
       db
         .prepare(
           `INSERT INTO assignments (
             assignment_id, project_id, assignee_user_id, scope_kind, scope_label,
-            lane_id, cells_total, deadline, note, created_by, created_at
-          ) VALUES (?, ?, ?, ?, ?, ${laneIdResolveSql('target')}, 0, ?, ?, ?, ?)
+            lane_id, cells_total, deadline, note, created_by, created_at, kind
+          ) VALUES (?, ?, ?, ?, ?, ${laneIdResolveSql('target')}, 0, ?, ?, ?, ?, ?)
           ON CONFLICT DO NOTHING`,
         )
         .bind(
@@ -100,6 +105,7 @@ export function handleAssignmentEvent(
           p.note ?? null,
           claims.userId,
           serverTs,
+          p.kind === 'validate' ? 'validate' : 'translate',
         ),
     )
 

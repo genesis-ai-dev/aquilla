@@ -68,6 +68,10 @@ export type OutboxEventKind =
   | "cell.link.set"
   // Back-translation (contributor-level; non-chain-mutating).
   | "cell.backtranslation.set"
+  // AQU-1408 §1: a hand-corrected statistical gloss (contributor-level;
+  // non-chain-mutating). Its own kind, not a flag on the BT event — the two
+  // are different readings of the same commit and both stay addressable.
+  | "cell.gloss.set"
   // File lifecycle.
   | "file.create"
   // File label rename (contributor-level; non-chain-mutating).
@@ -589,6 +593,23 @@ export interface OutboxEventPayloads {
     laneId?: string
   }
 
+  /**
+   * AQU-1408 §1: the statistical gloss as a contributor corrected it.
+   * Non-chain-mutating (parentId omitted). `targetEventId` pins the gloss to
+   * the commit whose words it reads. No `polished` dimension — every row is a
+   * human correction by construction. An empty `glossText` withdraws the
+   * correction and restores the computed gloss.
+   */
+  "cell.gloss.set": {
+    glossText: string
+    /** The target.cell.commit event_id this gloss reads. */
+    targetEventId: string
+    /** Lane whose translation this gloss reads. */
+    targetLang?: string
+    /** The lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
+  }
+
   "file.create": {
     name: string
     fileType: string
@@ -699,6 +720,8 @@ export interface OutboxEventPayloads {
     assigneeUserId: number
     deadline?: string | null
     note?: string | null
+    /** AQU-1969: absent = 'translate', the only kind before this field. */
+    kind?: "translate" | "validate"
   }
   "assignment.reassign": {
     assignmentId: string

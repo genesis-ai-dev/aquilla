@@ -66,6 +66,7 @@ import { assignedCastVoiceId, findVoice, resolveCastVoice } from "@/lib/audio/vo
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { useCellAudio, type UseCellAudioResult } from "@/hooks/useCellAudio"
+import { queueClockIsFileTime, useQueueCellKind, useQueueCellPosition } from "@/lib/audio/play-queue"
 import { setCellPref, useCellPref } from "@/lib/store/audio-cell-prefs"
 import { persistTakeTrim, trimMs } from "@/lib/audio/persist-trim"
 import { keptWindowSec } from "@/lib/audio/kept-window"
@@ -106,6 +107,13 @@ interface CellVoicePanelProps {
   onAfterGenerate: () => void
   /** Retained for host compatibility; per-cell playback now runs locally. */
   onPlay?: () => void
+  /**
+   * AQU-1642 follow-up (Sam, 2026-10-17): the Audio view's one place to play
+   * from. The card's corner button presses it (Play, and Stop while the bottom
+   * bar's run is on this line), a click along the waveform puts the place
+   * there, and the card draws where the run is on this line, paused included.
+   */
+  place?: { onPress: () => void; onPick: (atSeconds: number) => void } | null
   /**
    * The row's player for this line's recording (or generated voice). Play,
    * pause, and seek go through it so the cell highlight tracks this button.
@@ -275,6 +283,7 @@ export function CellVoicePanel({
   controller,
   targetLang,
   voicePicker,
+  place = null,
 }: CellVoicePanelProps) {
   const t = useT()
   const sess = session as FrontierSession | null
@@ -347,6 +356,19 @@ export function CellVoicePanel({
   const playableAtt = playableId ? cell.attachments?.[playableId] : undefined
   const kept = keptWindowSec(cell, playableId, playableAtt)
   const isSourceClip = kept.kind === "section"
+  // AQU-1642 follow-up: where the bottom bar's run is on this line. Its clock
+  // is this card's only when the run plays what the card shows — the line's
+  // take, or an imported section's recording; otherwise no place is drawn.
+  const runKind = useQueueCellKind(place ? cell.id : undefined)
+  const runAt = useQueueCellPosition(place ? cell.id : undefined)
+  const run = place
+    ? {
+        kind: runKind,
+        sec: queueClockIsFileTime(cell) === isSourceClip ? runAt : null,
+        onPress: place.onPress,
+        onPick: place.onPick,
+      }
+    : null
   // AQU-1767: a piece of a split take trims back out only as far as its
   // neighbouring piece (Sam, 2026-10-15).
   const pieceLimits = useMemo(() => {
@@ -571,47 +593,59 @@ export function CellVoicePanel({
     )
     return (
       <div className="min-w-0" dir="ltr" data-voice-card="">
-        <TakeWaveform
-          controller={audio}
-          audioId={playableId}
-          kept={kept}
-          height={56}
-          missingAction={missingGenerate}
-          // A source section wears the lighter rung, as the source row's own
-          // chips do; a take the dub track's (or its own track's) colour.
-          kind={isSourceClip || isGenerated ? "generated" : "take"}
-          trackVars={trackVars}
-          strategy={project.audioMediaStrategy ?? "lazy"}
-          trimEditable={!isSourceClip && canEdit}
-          {...(pieceLimits ? { trimLimits: pieceLimits } : {})}
-          onCommitTrim={commitTrim}
-          className="voice-card-wave"
-          testId="voice-card-waveform"
-        >
-          <span className="pointer-events-none absolute bottom-1 left-2 z-10 flex items-center gap-1">
-            <TakeTimeReadout currentTime={currentTime} duration={duration} kept={kept} testId="voice-card-time" />
-            {voiceDiffers && (
-              <AppTooltip content={takeVoiceTip}>
-                <span
-                  data-wave-overlay=""
-                  data-testid="voice-card-take-voice"
-                  data-tone={pillOnAmber ? "blue" : "amber"}
-                  className={cn(
-                    "pointer-events-auto flex h-4 items-center rounded px-1.5 text-[10px] font-semibold ring-1 ring-inset",
-                    // A see-through fill, so the take shows through it (Sam).
-                    pillOnAmber
-                      ? "bg-blue-500/30 text-blue-800 ring-blue-600/60 dark:bg-blue-400/30 dark:text-blue-100 dark:ring-blue-400/60"
-                      : "bg-amber-400/45 text-amber-800 ring-amber-600/60 dark:bg-amber-400/30 dark:text-amber-100 dark:ring-amber-400/60",
-                    WAVE_OVERLAY_CLASS,
-                  )}
-                >
-                  <span aria-hidden>{takeVoiceName ?? t("editor.voice.removedVoice")}</span>
-                  <span className="sr-only">{takeVoiceTip}</span>
-                </span>
-              </AppTooltip>
-            )}
-          </span>
-        </TakeWaveform>
+        {/* AQU-1642 follow-up: the waveform is a play control — its button
+            and a click along it set the place to play from, so pressing it
+            never counts as selecting the verse (which sends the place to the
+            verse's start). */}
+        <div data-place-control="">
+          <TakeWaveform
+            controller={audio}
+            audioId={playableId}
+            kept={kept}
+            height={56}
+            missingAction={missingGenerate}
+            // A source section wears the lighter rung, as the source row's own
+            // chips do; a take the dub track's (or its own track's) colour.
+            kind={isSourceClip || isGenerated ? "generated" : "take"}
+            trackVars={trackVars}
+            strategy={project.audioMediaStrategy ?? "lazy"}
+            trimEditable={!isSourceClip && canEdit}
+            {...(pieceLimits ? { trimLimits: pieceLimits } : {})}
+            onCommitTrim={commitTrim}
+            run={run}
+            className="voice-card-wave"
+            testId="voice-card-waveform"
+          >
+            <span className="pointer-events-none absolute bottom-1 left-2 z-10 flex items-center gap-1">
+              <TakeTimeReadout
+                currentTime={run?.sec != null && !audio.isPlaying ? run.sec : currentTime}
+                duration={duration}
+                kept={kept}
+                testId="voice-card-time"
+              />
+              {voiceDiffers && (
+                <AppTooltip content={takeVoiceTip}>
+                  <span
+                    data-wave-overlay=""
+                    data-testid="voice-card-take-voice"
+                    data-tone={pillOnAmber ? "blue" : "amber"}
+                    className={cn(
+                      "pointer-events-auto flex h-4 items-center rounded px-1.5 text-[10px] font-semibold ring-1 ring-inset",
+                      // A see-through fill, so the take shows through it (Sam).
+                      pillOnAmber
+                        ? "bg-blue-500/30 text-blue-800 ring-blue-600/60 dark:bg-blue-400/30 dark:text-blue-100 dark:ring-blue-400/60"
+                        : "bg-amber-400/45 text-amber-800 ring-amber-600/60 dark:bg-amber-400/30 dark:text-amber-100 dark:ring-amber-400/60",
+                      WAVE_OVERLAY_CLASS,
+                    )}
+                  >
+                    <span aria-hidden>{takeVoiceName ?? t("editor.voice.removedVoice")}</span>
+                    <span className="sr-only">{takeVoiceTip}</span>
+                  </span>
+                </AppTooltip>
+              )}
+            </span>
+          </TakeWaveform>
+        </div>
         {row(
           <>
             {canEdit && changeBlocker !== "no-take" && (

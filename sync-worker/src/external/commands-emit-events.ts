@@ -626,6 +626,10 @@ function validatePayload(
       if (p.note !== undefined && p.note !== null && typeof p.note !== 'string') {
         return bad('note must be a string or null when present')
       }
+      // AQU-1969: absent is a translate assignment, as before the field existed.
+      if (p.kind !== undefined && p.kind !== 'translate' && p.kind !== 'validate') {
+        return bad("kind must be 'translate' or 'validate' when present")
+      }
       return {
         ...(p.assignmentId !== undefined ? { assignmentId: p.assignmentId } : {}),
         scopeKind: p.scopeKind,
@@ -634,6 +638,7 @@ function validatePayload(
         assigneeUserId: p.assigneeUserId,
         ...(p.deadline !== undefined ? { deadline: p.deadline } : {}),
         ...(p.note !== undefined ? { note: p.note } : {}),
+        ...(p.kind !== undefined ? { kind: p.kind } : {}),
       }
     }
     case 'assignment.reassign': {

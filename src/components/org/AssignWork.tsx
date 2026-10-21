@@ -36,6 +36,8 @@ import {
 } from "@/components/ui/select"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { AssignKindField } from "@/components/AssignKindField"
+import type { AssignmentKind } from "@/lib/sync/assignments"
 
 /**
  * Manager affordance (project_lead+) on the project overview: assign a book or
@@ -151,6 +153,8 @@ export function AssignWork({
   const [selectedChapters, setSelectedChapters] = useState<string[]>([])
   const [chapters, setChapters] = useState<string[]>([])
   const [deadlineDate, setDeadlineDate] = useState<Date | undefined>(undefined)
+  // AQU-1969: Translate (the assignment as it always was) unless chosen.
+  const [kind, setKind] = useState<AssignmentKind>("translate")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const laneItems = useMemo(
@@ -339,9 +343,11 @@ export function AssignWork({
         ...(targetLang ? { targetLang } : {}),
         ...(laneId ? { laneId } : {}),
         deadline: deadline || null,
+        kind,
       })
       setSelectedChapters([])
       setDeadlineDate(undefined)
+      setKind("translate")
       setOpen(false)
       onAssigned?.()
     } catch (e) {
@@ -367,6 +373,7 @@ export function AssignWork({
   return (
     <div role="group" aria-label={t("dialog.assign.title")} className="mt-3 w-full rounded-md border p-3">
       <FieldGroup className="gap-4">
+        <AssignKindField id="assign-work-kind" value={kind} onChange={setKind} disabled={busy} />
         <Field>
           <FieldLabel htmlFor={laneItems.length > 1 ? "assign-work-lane" : undefined}>
             {t("dialog.assign.laneLabel")}

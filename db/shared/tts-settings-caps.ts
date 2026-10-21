@@ -19,7 +19,12 @@
 /** Most voices a project's library may hold. */
 export const MAX_TTS_VOICES = 2_000
 
-/** Most cell→voice entries `castAssignments` may hold. */
+/**
+ * Most cell→voice entries a project's casting may hold, counting the
+ * project-wide `castAssignments` and every lane's own map together (AQU-2038) —
+ * the ceiling is on how much casting the blob carries, not on which map it
+ * sits in.
+ */
 export const MAX_TTS_CAST_ASSIGNMENTS = 100_000
 
 /** Largest serialized `ttsSettings` value, in bytes. */
@@ -51,6 +56,12 @@ function utf8Bytes(text: string): number {
   return text.length
 }
 
+/** Keys in a plain-object map; anything else carries no entries. */
+function countEntries(value: unknown): number {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return 0
+  return Object.keys(value as Record<string, unknown>).length
+}
+
 /**
  * Count what the cap is about. A non-object (or absent) value measures as
  * empty: it carries no library, and its shape is somebody else's refusal.
@@ -59,14 +70,22 @@ export function measureTtsSettings(value: unknown): TtsSettingsSize {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return { voices: 0, assignments: 0, bytes: 0 }
   }
-  const settings = value as { voices?: unknown; castAssignments?: unknown }
+  const settings = value as {
+    voices?: unknown
+    castAssignments?: unknown
+    laneCastAssignments?: unknown
+  }
   const voices = Array.isArray(settings.voices) ? settings.voices.length : 0
-  const assignments =
-    typeof settings.castAssignments === 'object'
-      && settings.castAssignments !== null
-      && !Array.isArray(settings.castAssignments)
-      ? Object.keys(settings.castAssignments as Record<string, unknown>).length
-      : 0
+  // AQU-2038: the per-lane casts count too. A lane map that went uncounted
+  // would be a way back to the 5 MB blob this cap exists to stop — one lane per
+  // language, each holding its own full cast.
+  let assignments = countEntries(settings.castAssignments)
+  const lanes = settings.laneCastAssignments
+  if (typeof lanes === 'object' && lanes !== null && !Array.isArray(lanes)) {
+    for (const cast of Object.values(lanes as Record<string, unknown>)) {
+      assignments += countEntries(cast)
+    }
+  }
   return { voices, assignments, bytes: serializedBytes(value) }
 }
 

@@ -91,6 +91,12 @@ const UNCOVERED: Record<string, string> = {
   agent_sessions: "never granted to app_runtime",
   api_credentials: "never granted to app_runtime",
   cell_links: "never granted to app_runtime",
+  // AQU-1408 (0182): hand-corrected statistical glosses, created alongside
+  // cell_backtranslations' shape and read through the same sync-worker
+  // perimeter. Listed here rather than given a policy for the blanket reason
+  // above — a new table is not granted to app_runtime, so a policy written
+  // `TO app_runtime` would be inert.
+  cell_glosses: "never granted to app_runtime",
   chain_claims: "never granted to app_runtime",
   concepts: "never granted to app_runtime",
   file_segmentation: "never granted to app_runtime",

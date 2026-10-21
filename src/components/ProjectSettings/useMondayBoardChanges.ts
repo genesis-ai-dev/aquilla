@@ -4,6 +4,9 @@
 // after a save), so a column added on Monday is always there to pick and the
 // "Board structure changed" banner can name it. The server's answer is the
 // authority on the banner: a new column that was deleted again clears it.
+//
+// An Airtable table link reads its fields the same way (AQU-804): it passes
+// its own `source`, which answers in this hook's (Monday-shaped) terms.
 
 import { useCallback, useEffect, useState } from "react"
 import {
@@ -16,6 +19,20 @@ import {
 
 export type MondayNewColumn = MondayBoardChanges["newColumns"][number]
 
+/** Where the columns and the "new since linking" answer come from. */
+export interface BoardChangesSource {
+  read: (jwt: string, projectId: string) => Promise<MondayBoardChanges>
+  dismiss: (jwt: string, projectId: string, columnIds: string[]) => Promise<MondayBoardChanges>
+  /** The columns alone, when `read` fails (Monday: the org's board structure route). */
+  structure?: (jwt: string, orgId: number, boardId: string) => Promise<MondayBoardStructure>
+}
+
+const MONDAY_SOURCE: BoardChangesSource = {
+  read: fetchMondayBoardChanges,
+  dismiss: dismissMondayBoardChanges,
+  structure: fetchMondayBoardStructure,
+}
+
 const NO_COLUMNS: MondayNewColumn[] = []
 
 export function useMondayBoardChanges({
@@ -25,6 +42,7 @@ export function useMondayBoardChanges({
   boardId,
   enabled,
   onStaleChange,
+  source = MONDAY_SOURCE,
 }: {
   jwt: string | null
   projectId: string
@@ -35,6 +53,7 @@ export function useMondayBoardChanges({
   enabled: boolean
   /** The server's verdict on "Board structure changed", to mirror on the link. */
   onStaleChange: (stale: boolean) => void
+  source?: BoardChangesSource
 }) {
   const [structure, setStructure] = useState<MondayBoardStructure | null>(null)
   const [newColumns, setNewColumns] = useState<MondayNewColumn[]>([])
@@ -51,7 +70,8 @@ export function useMondayBoardChanges({
   useEffect(() => {
     if (!jwt || !active) return
     let alive = true
-    fetchMondayBoardChanges(jwt, projectId)
+    source
+      .read(jwt, projectId)
       .then((got) => {
         if (!alive) return
         setStructure(got.structure)
@@ -62,9 +82,9 @@ export function useMondayBoardChanges({
       })
       .catch(async () => {
         // The columns alone still let the mapping show titles and offer them.
-        if (orgId != null) {
+        if (orgId != null && source.structure) {
           try {
-            const got = await fetchMondayBoardStructure(jwt, orgId, boardId)
+            const got = await source.structure(jwt, orgId, boardId)
             if (alive) setStructure(got)
           } catch {
             // Keep whatever columns an earlier read gave.
@@ -77,7 +97,7 @@ export function useMondayBoardChanges({
     return () => {
       alive = false
     }
-  }, [jwt, active, projectId, orgId, boardId, nonce, onStaleChange])
+  }, [jwt, active, projectId, orgId, boardId, nonce, onStaleChange, source])
 
   /** "Not needed": stop asking about these columns. */
   const dismiss = useCallback(
@@ -85,7 +105,7 @@ export function useMondayBoardChanges({
       if (!jwt) return
       setDismissing(true)
       try {
-        const got = await dismissMondayBoardChanges(jwt, projectId, columnIds)
+        const got = await source.dismiss(jwt, projectId, columnIds)
         setStructure(got.structure)
         setNewColumns(got.newColumns)
         onStaleChange(got.structureStale)
@@ -93,7 +113,7 @@ export function useMondayBoardChanges({
         setDismissing(false)
       }
     },
-    [jwt, projectId, onStaleChange],
+    [jwt, projectId, onStaleChange, source],
   )
 
   // With no board (or no right to read it) there is nothing to show; what an

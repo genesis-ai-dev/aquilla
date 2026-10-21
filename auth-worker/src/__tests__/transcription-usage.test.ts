@@ -21,7 +21,7 @@ async function fixture() {
   }, { headers: { 'X-Generation-Id': 'gen-whisper' } }))
   vi.stubGlobal('fetch', vi.fn(async input => {
     if (String(input).includes('/models?')) return Response.json({ data: [
-      { id: 'openai/whisper-1', pricing: { prompt: '0.0001' } },
+      { id: 'openai/whisper-large-v3', pricing: { prompt: '0.0001' } },
     ] })
     if (String(input).endsWith('/audio/transcriptions')) return provider()
     throw new Error(`unexpected provider ${input}`)

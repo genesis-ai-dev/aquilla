@@ -78,6 +78,7 @@ export type ErrorCategory =
   | "rate-limited"
   | "timed-out"
   | "provider-unavailable"
+  | "transcription-model-unavailable"
   | "provider-rejected"
   | "unknown"
 
@@ -114,6 +115,18 @@ export function categorizeAiError(rawMessage: string): ActionableError {
   const raw = rawMessage.trim()
   const m = raw.toLowerCase()
   const status = extractStatus(m)
+
+  // The hosted transcription model failed (transcribe-hosted.ts
+  // HostedTranscriptionUnavailableError). Unlike a generic provider outage
+  // there is a way out the user controls: another model in Preferences.
+  if (m.includes("hosted transcription model unavailable")) {
+    return {
+      category: "transcription-model-unavailable",
+      title: t("audio.aiError.transcriptionModelUnavailableTitle"),
+      body: t("audio.aiError.transcriptionModelUnavailableBody"),
+      raw,
+    }
+  }
 
   // Platform daily SPEND ceiling (AQU-1869): a 503 from any paid AI path once
   // the platform's dollar floor for the day is reached. It must be matched

@@ -693,6 +693,9 @@ export const audio = defineNamespace({
       "The AI provider took too long to respond. Try again — if it keeps happening, send a smaller request or switch models.",
     "audio.aiError.rateLimitedBody":
       "The AI provider is rate-limiting requests. Wait a moment and try again.",
+    "audio.aiError.transcriptionModelUnavailableTitle": "The transcription model isn't responding",
+    "audio.aiError.transcriptionModelUnavailableBody":
+      "Try again in a moment. If it keeps failing, choose a different model in Preferences → Local models → Transcription, or transcribe on this device instead.",
     "audio.aiError.providerUnavailableBody":
       "The AI provider returned a server error. This is usually temporary — try again in a moment.",
     "audio.aiError.providerRejectedBody":
@@ -3126,6 +3129,17 @@ export const audio = defineNamespace({
         description:
           "Popover heading for a 5xx response from the AI provider — framed as " +
           "usually temporary.",
+      },
+      "audio.aiError.transcriptionModelUnavailableTitle": {
+        description:
+          "Popover heading when the hosted speech-to-text model returned a server " +
+          "error for a recording's transcription.",
+      },
+      "audio.aiError.transcriptionModelUnavailableBody": {
+        description:
+          "Popover body for a failed hosted transcription. Names the remedies: retry, " +
+          "pick another model in Preferences, or use on-device transcription. Keep the " +
+          "Preferences → Local models → Transcription path matching the settings labels.",
       },
       "audio.aiError.providerRejectedTitle": {
         description:

@@ -103,6 +103,7 @@ import {
   type BacktranslationActionSource,
   type BacktranslationRecord,
 } from "@/lib/completion/bt-record"
+import { EMPTY_GLOSS_READING, type GlossReading } from "@/lib/completion/gloss-record"
 import { ContextualDraftCard } from "./contextual/ContextualDraftCard"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
 import { AlignStylesButton } from "./cell/AlignStylesButton"
@@ -124,7 +125,8 @@ import { useIsMediaCursorCell, useMediaSyncActive } from "@/lib/timeline/media-c
 import { useUiSlot } from "@/lib/ui-slots"
 import { CastGutterVoice } from "@/components/voice/CastGutterVoice"
 import { projectTargetLaneLanguages, showVoiceLanguageBadge } from "@/lib/audio/inworld-voices"
-import { queueClockIsFileTime, useIsQueueCurrentCell, useQueueCellPlayhead, useQueueCurrentCellId } from "@/lib/audio/play-queue"
+import { queueClockIsFileTime, useIsQueueCurrentCell, useQueueCellKind, useQueueCellPlayhead, useQueueCurrentCellId } from "@/lib/audio/play-queue"
+import type { AudioViewPlace } from "@/hooks/useAudioViewPlace"
 import { useVideoClockPlaying, useVideoSoundingCellId } from "@/lib/timeline/video-clock"
 import { useRailIdleHide } from "@/hooks/useRailIdleHide"
 import {
@@ -753,6 +755,25 @@ export interface EditorTableHandle {
  *  In Audio mode each cell's SOURCE column is replaced with CellVoicePanel —
  *  the full per-line voice controls (character picker, generate, play, make-a-
  *  character) — so this context carries everything that panel needs. */
+/**
+ * AQU-1642 follow-up: a press that selects a verse — inside its row, and not on
+ * one of its play controls. A menu the row opens is drawn outside it (⋯ Play
+ * audio's among them), and pressing in one is no choice of verse either.
+ */
+function selectsAudioPlace(row: HTMLElement | null, target: EventTarget | null): boolean {
+  if (!row || !(target instanceof Element) || !row.contains(target)) return false
+  return !target.closest("[data-place-control]")
+}
+
+/** Whether focus arrived by keyboard. Old engines that lack the selector say no. */
+function isFocusVisible(target: EventTarget | null): boolean {
+  try {
+    return target instanceof Element && target.matches(":focus-visible")
+  } catch {
+    return false
+  }
+}
+
 export interface AudioLensContext {
   voices: Voice[]
   /** Hydrated TTS settings (cast assignments) — source of truth for who voices a line. */
@@ -775,6 +796,11 @@ export interface AudioLensContext {
   onPlayCell: (cellId: string, enrichedCell?: CellData) => void
   /** Open the "make a character from this voice" flow seeded with this cell's take. */
   onMakeCharacterFromCell: (cellId: string) => void
+  /**
+   * AQU-1642 follow-up: the one place to play from. The cards and ⋯ Play drive
+   * the bottom bar's player through it, and selecting a verse moves it.
+   */
+  place?: AudioViewPlace
 }
 
 interface EditorTableProps {
@@ -1013,9 +1039,13 @@ interface EditorTableProps {
   heardLinesLoading?: boolean
   /** Called when user saves a BT edit. Parent emits `cell.backtranslation.set`. */
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
-  /** On-demand statistical gloss (corpus-derived, never persisted) for the BT
-   *  tab's collapsed reference section. */
-  getStatisticalBt?: (translatedText: string, cellId: string) => string
+  /** AQU-1408 §1: called when the user saves a correction to the statistical
+   *  gloss. Parent emits `cell.gloss.set`. Empty text withdraws the correction. */
+  onSaveGloss?: (cell: CellData, glossText: string) => void
+  /** The statistical gloss to show for a cell: the contributor's saved
+   *  correction when one still describes this text, else the corpus-derived
+   *  gloss computed on demand (AQU-1408 §1). */
+  getStatisticalBt?: (translatedText: string, cellId: string) => GlossReading
   cellOpenCommentCount?: Map<string, number>
   // onOpenComments/onOpenHistory moved to EditorActionsContext (FRO perf
   // cleanup) — pure pass-through, never consumed above the row.
@@ -1168,7 +1198,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   backtranslationByCellId,
   linkedTakesByCell,
   heardLinesLoading = false,
-  onSaveBacktranslation, getStatisticalBt,
+  onSaveBacktranslation, onSaveGloss, getStatisticalBt,
   cellOpenCommentCount,
   onSeekToCue,
   playingCueCellId = null,
@@ -2903,6 +2933,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           backtranslationErrors={backtranslationErrors}
           onBacktranslate={onBacktranslate}
           onSaveBacktranslation={onSaveBacktranslation}
+          onSaveGloss={onSaveGloss}
           getStatisticalBt={getStatisticalBt}
           getFootnoteDetails={getFootnoteDetails}
           cellOpenCommentCount={cellOpenCommentCount}
@@ -3065,6 +3096,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     onProjectChanged,
     onReleaseCell,
     onSaveBacktranslation,
+    onSaveGloss,
     onSeekToCue,
     playingCueCellId,
     onPauseCue,
@@ -4125,7 +4157,8 @@ interface MemoizedRowProps {
   backtranslationErrors?: Map<string, string>
   onBacktranslate?: (cell: CellData, source: BacktranslationActionSource) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
-  getStatisticalBt?: (translatedText: string, cellId: string) => string
+  onSaveGloss?: (cell: CellData, glossText: string) => void
+  getStatisticalBt?: (translatedText: string, cellId: string) => GlossReading
   getFootnoteDetails: (cellId: string) => CellFootnoteDetails
   cellOpenCommentCount?: Map<string, number>
   onSeekToCue?: (cellId: string) => void
@@ -4232,7 +4265,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     structuralEditing, untimedInserts,
     insertAboveStartSec, insertAboveEndSec, insertBelowStartSec, insertBelowEndSec,
     prevStartSec, nextStartSec, timedFile,
-    isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, getStatisticalBt,
+    isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, onSaveGloss, getStatisticalBt,
     getFootnoteDetails,
     onSeekToCue, cuePlaying, onPauseCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
@@ -4380,6 +4413,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         backtranslationError={backtranslationError}
         onBacktranslate={onBacktranslate}
         onSaveBacktranslation={onSaveBacktranslation}
+        onSaveGloss={onSaveGloss}
         getStatisticalBt={getStatisticalBt}
         getFootnoteDetails={getFootnoteDetails}
         openCommentCount={openCommentCount}
@@ -4562,7 +4596,8 @@ interface EditorRowProps {
   backtranslationError?: string
   onBacktranslate?: (cell: CellData, source: BacktranslationActionSource) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
-  getStatisticalBt?: (translatedText: string, cellId: string) => string
+  onSaveGloss?: (cell: CellData, glossText: string) => void
+  getStatisticalBt?: (translatedText: string, cellId: string) => GlossReading
   getFootnoteDetails: (cellId: string) => CellFootnoteDetails
   /** FRO-207: Lazily returns the interlinear alignment model. */
   getAlignmentModel?: () => import("@/lib/completion/interlinear").AlignmentModel | null
@@ -5505,6 +5540,7 @@ function EditorRow({
   insertAboveStartSec, insertAboveEndSec, insertBelowStartSec, insertBelowEndSec,
   prevStartSec = null, nextStartSec = null, timedFile,
   isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate, onSaveBacktranslation,
+  onSaveGloss,
   getStatisticalBt,
   getFootnoteDetails,
   openCommentCount,
@@ -7107,6 +7143,14 @@ function EditorRow({
       ? `t${takeWindow.start}-${takeWindow.end}~${takeWindow.gaps?.map((g) => `${g.start}-${g.end}`).join(",") ?? ""}`
       : ""
   const { setTrim: setRailTrim } = audioController
+  // AQU-1642 follow-up: in the Audio view the bottom bar's player is the one
+  // player — the card, ⋯ Play audio and selecting a verse drive it.
+  const audioPlace = audioLens?.place ?? null
+  const runHere = useQueueCellKind(audioPlace ? cell.id : undefined)
+  // ⋯ Play audio is the run's, unless the line's own player is the one
+  // sounding (a fresh take playing itself after Generate): then it pauses that.
+  const railViaRun = audioPlace != null && !audioController.isPlaying
+  const railPlaying = railViaRun ? runHere === "playing" || runHere === "loading" : audioController.isPlaying
   useEffect(() => {
     if (railSectionWindow) setRailTrim(railSectionWindow.start, railSectionWindow.end)
     else if (takeWindow) setRailTrim(takeWindow.start, takeWindow.end, takeWindow.gaps)
@@ -7497,9 +7541,11 @@ function EditorRow({
   // ── BT tab: statistical gloss is computed while the tab is open so the
   // live "as you translate" check and AI-vs-pairs disagreement can render
   // without waiting on a collapsed expander.
-  const statisticalGloss = useMemo(() => {
-    if (!expanded || expansionTab !== "backtranslation" || !visibleTranslated.trim()) return ""
-    return getStatisticalBt?.(visibleTranslated, cell.id) ?? ""
+  const glossReading = useMemo((): GlossReading => {
+    if (!expanded || expansionTab !== "backtranslation" || !visibleTranslated.trim()) {
+      return EMPTY_GLOSS_READING
+    }
+    return getStatisticalBt?.(visibleTranslated, cell.id) ?? EMPTY_GLOSS_READING
   }, [expanded, expansionTab, visibleTranslated, getStatisticalBt, cell.id])
 
   // Stable rail handlers
@@ -7526,13 +7572,29 @@ function EditorRow({
     // the next one, producing three rails when an editor is also focused.
     setIsHovering(false)
   }
-  const handleRowFocusCapture = () => {
+  const handleRowFocusCapture = (e: React.FocusEvent) => {
     // AQU-669: claim the exclusive focus pin for this cell. Because the table
     // holds a single owner, this simultaneously releases whichever row was
     // pinned before — no reliance on the previous row's focus-out.
     onRowFocusPin(cell.id)
     // AQU-354: focusing anything in the row re-summons an idle-collapsed rail.
     registerRailActivity()
+    // AQU-1642 follow-up: tabbing into a verse selects it, as a click does.
+    // Only a keyboard arrival (`:focus-visible`), from outside the row — a
+    // click has already selected it, and focus put back by a closing dialog
+    // is no choice of the person's.
+    const from = e.relatedTarget as Node | null
+    if (audioPlace && !(from && rowRef.current?.contains(from)) && selectsAudioPlace(rowRef.current, e.target) && isFocusVisible(e.target)) {
+      audioPlace.select(cell.id)
+    }
+  }
+  // AQU-1642 follow-up (Sam, 2026-10-17): in the Audio view, selecting a verse
+  // — pressing anywhere in its row but its play controls — sends the place to
+  // play from to that verse's start: the next Play, wherever it is pressed,
+  // starts it from the top. A Cmd/Ctrl-click is multi-select, not this.
+  const handleRowPointerDownCapture = (e: React.PointerEvent) => {
+    if (!audioPlace || e.button !== 0 || e.metaKey || e.ctrlKey) return
+    if (selectsAudioPlace(rowRef.current, e.target)) audioPlace.select(cell.id)
   }
   const handleRowBlurCapture = (e: React.FocusEvent) => {
     const next = e.relatedTarget as Node | null
@@ -7932,6 +7994,7 @@ function EditorRow({
         onFocusCapture={handleRowFocusCapture}
         onBlurCapture={handleRowBlurCapture}
         onMouseDownCapture={handleRowMouseDownCapture}
+        onPointerDownCapture={handleRowPointerDownCapture}
         onClick={handleRowClick}
         onKeyDown={handleGridRowKeyDown}
       >
@@ -8141,6 +8204,13 @@ function EditorRow({
               recordUnavailable={getUnsupportedReason()}
               onAfterGenerate={audioLens.onAfterGenerate}
               onPlay={() => audioLens.onPlayCell(cell.id, cell)}
+              // AQU-1642 follow-up: the card drives the bottom bar's player —
+              // Play, and Stop while the run is on this verse — and draws the
+              // place to play from, held while it waits.
+              place={audioPlace ? {
+                onPress: () => audioPlace.pressCard(cell.id),
+                onPick: (atSeconds: number) => audioPlace.pickOnWaveform(cell.id, atSeconds),
+              } : null}
               onMakeCharacter={() => audioLens.onMakeCharacterFromCell(cell.id)}
               voicePicker={audioVoice && (
                 <CastGutterVoice
@@ -8926,6 +8996,10 @@ function EditorRow({
         <div className="pointer-events-none relative col-start-2 z-20 flex justify-end md:absolute md:end-2 md:top-0.5">
           <div
             className="pointer-events-auto"
+            // AQU-1642 follow-up: ⋯ Play audio lives in here and pauses and
+            // resumes the run, so pressing into the rail never counts as
+            // selecting the verse (which would send the place to its start).
+            data-place-control=""
             // AQU-354: track focus landing on / leaving a rail control so the
             // idle auto-hide never collapses the rail while it is being used.
             onFocusCapture={() => setRailHasFocus(true)}
@@ -9099,21 +9173,24 @@ function EditorRow({
               {hasAudio && (
                 <RailButton
                   icon={
-                    audioController.isPlaying ? (
+                    railPlaying ? (
                       <Pause className="h-3.5 w-3.5" />
                     ) : (
                       <Play className="h-3.5 w-3.5" />
                     )
                   }
-                  tooltip={audioController.isPlaying ? t("common.pause") : t("editor.audio.play")}
+                  tooltip={railPlaying ? t("common.pause") : t("editor.audio.play")}
                   onClick={() => {
+                    // AQU-1642 follow-up: in the Audio view, Play and Pause on
+                    // the bottom bar's run (a pause keeps the place).
+                    if (railViaRun && audioPlace) { audioPlace.pressMenu(cell.id); return }
                     if (audioController.state === "loading") return
                     if (audioController.isPlaying) audioController.pause()
                     else void audioController.play()
                   }}
-                  disabled={audioController.state === "loading"}
+                  disabled={!railViaRun && audioController.state === "loading"}
                   toneClass={
-                    audioController.isPlaying
+                    railPlaying
                       ? "text-primary hover:text-primary"
                       : undefined
                   }
@@ -9324,7 +9401,8 @@ function EditorRow({
                   isBacktranslationConfigured={isBacktranslationConfigured}
                   isBacktranslating={isBacktranslating}
                   backtranslationError={backtranslationError}
-                  statisticalGloss={statisticalGloss}
+                  statisticalGloss={glossReading.text}
+                  glossCorrected={glossReading.corrected}
                   alignmentOpen={btAlignmentOpen}
                   onAlignmentOpenChange={setBtAlignmentOpen}
                   alignmentModel={alignmentModelForExpansion}
@@ -9332,6 +9410,7 @@ function EditorRow({
                   originalWords={originalWords}
                   onBacktranslate={onBacktranslate}
                   onSaveBacktranslation={onSaveBacktranslation}
+                  onSaveGloss={onSaveGloss}
                   onAlignmentSeedChange={onAlignmentSeedChange}
                   confirmedSeeds={project.alignmentSeeds ?? []}
                 />

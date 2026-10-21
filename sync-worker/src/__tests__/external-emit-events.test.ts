@@ -526,6 +526,43 @@ describe('EmitEvents — commit', () => {
     expect(missingRes.status).toBe(400)
   })
 
+  it('AQU-1969: a validate assignment keeps its kind through the API, and an unknown kind is refused', async () => {
+    const env = makeEnv(tdb.db)
+    const lead = await memberToken(tdb, 500)
+    const assignee = await memberToken(tdb, 400)
+    const { body: prep } = await prepare(env, lead.token, [
+      {
+        kind: 'assignment.create',
+        payload: {
+          scopeKind: 'books',
+          scope: [{ fileId: FILE }],
+          scopeLabel: 'File X',
+          assigneeUserId: assignee.userId,
+          kind: 'validate',
+        },
+      },
+    ])
+    expect(prep.changeset.status).toBe('staged')
+    expect((await commit(env, lead.token, prep.changeset.id)).res.status).toBe(200)
+    const assignments = await tdb.rows<{ kind: string }>('assignments')
+    expect(assignments.map((a) => a.kind)).toEqual(['validate'])
+
+    const { res: badRes, body: badBody } = await prepare(env, lead.token, [
+      {
+        kind: 'assignment.create',
+        payload: {
+          scopeKind: 'books',
+          scope: [{ fileId: FILE }],
+          scopeLabel: 'File X',
+          assigneeUserId: assignee.userId,
+          kind: 'review',
+        },
+      },
+    ])
+    expect(badRes.status).toBe(400)
+    expect(JSON.stringify(badBody)).toContain('kind')
+  })
+
   it('the perimeter is the backstop: a mid-flight role revocation rejects the events', async () => {
     const env = makeEnv(tdb.db)
     const contributor = await memberToken(tdb, 400)

@@ -34,7 +34,7 @@ vi.mock("@/components/ui/scroll-area", () => ({
 
 import { FileTargetImportPanel, type FileTargetPanelBack } from "./FileTargetImportPanel"
 import { applyEBibleTargetImport } from "@/lib/import"
-import { CATALOGS } from "@/lib/i18n/messages"
+import { CATALOGS } from "@/lib/i18n/messages/all"
 import { translate } from "@/lib/i18n/translate"
 import { formatCount } from "@/lib/i18n/format"
 

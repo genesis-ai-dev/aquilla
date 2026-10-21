@@ -26,6 +26,7 @@ export const ORG_SETTINGS_SECTIONS = [
   "billing",
   "providers",
   "monday",
+  "airtable",
 ] as const
 export type OrgSettingsSection = (typeof ORG_SETTINGS_SECTIONS)[number]
 
@@ -44,6 +45,7 @@ export const ORG_SETTINGS_SECTION_TITLES: Record<OrgSettingsSection, string> = {
   billing: "Billing & usage",
   providers: "AI provider keys",
   monday: "Monday.com",
+  airtable: "Airtable",
 }
 
 export const ORG_SETTINGS_SECTION_DESCRIPTIONS: Record<OrgSettingsSection, string> = {
@@ -58,4 +60,6 @@ export const ORG_SETTINGS_SECTION_DESCRIPTIONS: Record<OrgSettingsSection, strin
     "Org-level keys act as a baseline for everyone in this organization. Projects or individuals can override with their own.",
   monday:
     "Connect this organization's Monday.com account. Projects can then link a board and push progress automatically.",
+  airtable:
+    "Connect this organization's Airtable with a personal access token. Projects can then link a table and push progress automatically.",
 }

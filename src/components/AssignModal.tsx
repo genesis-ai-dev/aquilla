@@ -58,6 +58,7 @@ import {
 } from "@/components/ui/select"
 import { DatePicker, dateToDeadlineString } from "@/components/ui/date-picker"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { AssignKindField } from "@/components/AssignKindField"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import { partitionMembers, type ProjectMember } from "@/lib/frontier/members"
@@ -69,7 +70,7 @@ import {
   getFileChapters,
   AssignmentEmitError,
 } from "@/lib/sync/assignments"
-import type { AssignmentScopeEntry, AssignmentScopeKind } from "@/lib/sync/assignments"
+import type { AssignmentKind, AssignmentScopeEntry, AssignmentScopeKind } from "@/lib/sync/assignments"
 import { ROLE } from "@/lib/frontier/roles"
 import {
   canOpenAssignUi,
@@ -259,6 +260,8 @@ export function AssignModal({
     callerUserId ?? members.find((member) => member.username === author)?.userId ?? null
 
   const [scopeKind, setScopeKind] = useState<ScopeKind>("verses")
+  // AQU-1969: Translate (the assignment as it always was) unless chosen.
+  const [kind, setKind] = useState<AssignmentKind>("translate")
   const [selectedMemberId, setSelectedMemberId] = useState<string>("")
   // AQU-538 (§3.5): the target-language lane this assignment is pinned to. '' =
   // default lane. Only surfaced when the project has extra lanes.
@@ -310,6 +313,7 @@ export function AssignModal({
       setError(null)
       setNote("")
       setDeadlineDate(undefined)
+      setKind("translate")
     }
   }, [open, selectedCellIds.size, activeFileId, isSelfAssignMode, effectiveCallerUserId, defaultLane, effectiveDelegate])
 
@@ -540,6 +544,7 @@ export function AssignModal({
           targetLang: laneTagForAssignment(laneValue),
           deadline,
           note: note.trim() || null,
+          kind,
         })
         const failed = results.filter((r) => r.error)
         const succeeded = results.length - failed.length
@@ -619,6 +624,7 @@ export function AssignModal({
         targetLang: laneTagForAssignment(laneValue),
         deadline,
         note: note.trim() || null,
+        kind,
       })
       onAssigned()
       onOpenChange(false)
@@ -645,7 +651,7 @@ export function AssignModal({
     jwt, projectId, author, note, onAssigned, onOpenChange,
     roleLevel, allowSelfAssignment, assignmentMinRole, effectiveDelegate, isLaneDelegate,
     effectiveCallerUserId, deadlineDate, groupLabelByFileId,
-    laneValue, noStaffedLanes, isScripture, segmentNoun, selectUnitErrorKey, assigneeRefusal, t,
+    laneValue, noStaffedLanes, isScripture, segmentNoun, selectUnitErrorKey, assigneeRefusal, kind, t,
   ])
 
   // Role gate (AQU-496 / AQU-581): a caller at the org's assignment floor
@@ -685,6 +691,9 @@ export function AssignModal({
             max-h-[85dvh] DialogContent. */}
         <DialogBody>
         <FieldGroup className="py-1">
+          {/* AQU-1969: what the work is comes before which lines and who. */}
+          <AssignKindField id="assign-modal-kind" value={kind} onChange={setKind} disabled={submitting} />
+
           <Field>
             <FieldLabel htmlFor="assign-modal-scope">{t("dialog.assign.scopeLabel")}</FieldLabel>
             <Select

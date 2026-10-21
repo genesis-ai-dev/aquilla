@@ -20,6 +20,14 @@
 // Postgres heap order, not the active lane. Validators are still keyed on the
 // row's own chain head, so each row's `activeValidators` was always its own
 // lane's — only the client's choice of row was wrong.
+//
+// AQU-2094: `sparse=1` (whole-file reads only) leaves out every cell that has
+// no active validator and no waiver on any of its rows, and says so with
+// `sparse: true`. Everything else in an entry — chain head, content hash,
+// last-edit time — is on the rows the client has already loaded, so on a
+// whole Bible the full answer was ~9 MB of JSON repeating them. The client
+// reads a cell missing from a sparse answer as "no validators, no waivers".
+// An older client never sends the flag and gets the full answer.
 
 import { verifyTokenForFile } from '../auth'
 import { wireLegacyTagSql } from '../../../db/shared/lane-sql'
@@ -53,6 +61,7 @@ export async function handleCellsAuditReadRequest(
   if (!fileId) return new Response('missing fileId', { status: 400 })
 
   const cellId = url.searchParams.get('cellId')
+  const sparse = !cellId && url.searchParams.get('sparse') === '1'
 
   const auth = await verifyTokenForFile(token, fileId, env.SYNC_SECRET_KEY)
   if (!auth.ok) return new Response(auth.reason, { status: auth.status })
@@ -174,7 +183,18 @@ export async function handleCellsAuditReadRequest(
     })
   }
 
-  const cells = cellsRes.results.map((r) => {
+  // A cell is listed with ALL its rows or not at all, so the client's per-lane
+  // choice of row (rankStatsRow) sees exactly what a full answer would give it.
+  const listed = sparse
+    ? new Set(
+        cellsRes.results
+          .filter((r) => (byCell.get(r.cell_id)?.get(r.last_edit_event_id)?.length ?? 0) > 0 || waiversByCell.has(r.cell_id))
+          .map((r) => r.cell_id),
+      )
+    : null
+  const rows = listed ? cellsRes.results.filter((r) => listed.has(r.cell_id)) : cellsRes.results
+
+  const cells = rows.map((r) => {
     const activeValidators =
       byCell.get(r.cell_id)?.get(r.last_edit_event_id) ?? []
     return {
@@ -190,5 +210,5 @@ export async function handleCellsAuditReadRequest(
       waivers: waiversByCell.get(r.cell_id) ?? [],
     }
   })
-  return Response.json({ cells })
+  return Response.json(sparse ? { cells, sparse: true } : { cells })
 }

@@ -38,6 +38,10 @@ export const VENDOR_TIMEOUT_MS = {
    *  client may also sleep on a 429 *between* attempts, which this does not
    *  cover (each attempt gets its own deadline). */
   mondayGraphQL: 30_000,
+  /** Airtable Web API (AQU-804): one record batch (≤10 records), a metadata
+   *  read or a field creation. Per ATTEMPT — the client's 429 wait sits
+   *  between attempts, outside this deadline. */
+  airtableApi: 30_000,
   /** Monday OAuth token endpoint — a token exchange/refresh, never slow when healthy. */
   mondayTokenEndpoint: 15_000,
   /** sync-worker → identity Monday push nudge. Fires from the DO broadcast on

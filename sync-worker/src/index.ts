@@ -92,6 +92,7 @@ import { handleConceptsReadRequest } from "./events/concepts-read-route"
 import { handleConceptOccurrencesRequest } from "./events/concept-occurrences-route"
 import { handleTerminologyScanRequest } from "./events/terminology-scan-route"
 import { handleCellBacktranslationsReadRequest } from "./events/cell-backtranslations-read-route"
+import { handleCellGlossesReadRequest } from "./events/cell-glosses-read-route"
 import { handleExternalReadRequest } from "./external/read-routes"
 import { handleExternalCommentsRequest } from "./external/comments-route"
 import { handleExternalMemoryReadRequest } from "./external/memory-read-routes"
@@ -512,6 +513,8 @@ const worker = {
     if (conceptsReadResponse) return withCors(conceptsReadResponse, request)
     const btReadResponse = await handleCellBacktranslationsReadRequest(request, env)
     if (btReadResponse) return withCors(btReadResponse, request)
+    const glossReadResponse = await handleCellGlossesReadRequest(request, env)
+    if (glossReadResponse) return withCors(glossReadResponse, request)
     const externalReadResponse = await handleExternalReadRequest(request, env)
     if (externalReadResponse) return withCors(externalReadResponse, request)
     // AQU-1233: agent-facing comment reads. Its own module (rather than another

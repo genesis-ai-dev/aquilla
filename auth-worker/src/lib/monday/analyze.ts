@@ -1,14 +1,14 @@
-// AI board-analysis — one non-streaming OpenRouter call (direct fetch, JSON
-// mode; AQU-2063: admitted by the AI entitlement check, keyed by it) that
+// AI board-analysis — one non-streaming OpenRouter call (lib/integrations/llm.ts:
+// JSON mode, admitted by the AI entitlement check — AQU-2063) that
 // proposes a MondayMapping for a board + project. The LLM output is NEVER
 // trusted: sanitizeMapping clamps it server-side (unknown columnIds dropped,
 // read-only column types rejected) before it reaches the client.
 
 import type { Env } from "../../types"
 import { getPlatformSettingsCached } from "../platform-settings"
-import { openRouterUsage } from "../llm-vendor"
 import { DEFAULT_LLM_MODEL_ID } from "../model-defaults"
-import { admitLlmCall, LlmRefusedError, type PaidScope } from "../billing/paid-llm"
+import type { PaidScope } from "../billing/paid-llm"
+import { callAnalysisLlm, parseJsonAnswer } from "../integrations/llm"
 import {
   sanitizeMapping,
   METRIC_KEYS,
@@ -19,11 +19,8 @@ import {
 } from "./types"
 import type { MondayItemSample, MondayBoardSummary } from "./client"
 import type { ProjectMetricsSummary } from "./metrics"
-import {
-  isAbortTimeout,
-  logVendorTimeout,
-  VENDOR_TIMEOUT_MS,
-} from "../../../../shared/vendor-timeouts"
+
+export { AnalyzeUpstreamError, extractJsonObject } from "../integrations/llm"
 
 export interface AnalyzeArgs {
   structure: { columns: MondayBoardColumn[]; groups: MondayBoardGroup[] }
@@ -93,115 +90,14 @@ function buildPrompt(args: AnalyzeArgs): string {
   return lines.join("\n")
 }
 
-/** Thrown when the AI upstream itself is unavailable (non-2xx) — the route
- *  turns this into a clean 502, never a misleading "invalid JSON". */
-export class AnalyzeUpstreamError extends Error {
-  readonly status: number
-  constructor(status: number) {
-    super(`AI provider unavailable (HTTP ${status})`)
-    this.name = "AnalyzeUpstreamError"
-    this.status = status
-  }
-}
-
-/**
- * Extract the first balanced JSON object from possibly-messy LLM output:
- * strips markdown code fences, then brace-scans (string-aware) so leading or
- * trailing prose around the object doesn't break parsing.
- */
-export function extractJsonObject(content: string): string | null {
-  let text = content.trim()
-  const fence = /```(?:json)?\s*([\s\S]*?)```/.exec(text)
-  if (fence) text = fence[1].trim()
-  const start = text.indexOf("{")
-  if (start < 0) return null
-  let depth = 0
-  let inString = false
-  let escaped = false
-  for (let i = start; i < text.length; i++) {
-    const ch = text[i]
-    if (inString) {
-      if (escaped) escaped = false
-      else if (ch === "\\") escaped = true
-      else if (ch === '"') inString = false
-      continue
-    }
-    if (ch === '"') inString = true
-    else if (ch === "{") depth++
-    else if (ch === "}") {
-      depth--
-      if (depth === 0) return text.slice(start, i + 1)
-    }
-  }
-  return null
-}
-
 function tryParseProposal(content: string): { mapping?: unknown; summary?: unknown } | null {
-  const json = extractJsonObject(content)
-  if (!json) return null
-  try {
-    return JSON.parse(json) as { mapping?: unknown; summary?: unknown }
-  } catch {
-    return null
-  }
+  return parseJsonAnswer<{ mapping: unknown; summary: unknown }>(content)
 }
 
-/** Output the meter reserves per call. The request sends no max_tokens (a
- *  clipped JSON proposal is useless), so this only sizes the reservation. */
-const ANALYZE_RESERVE_OUTPUT_TOKENS = 4_096
-
-async function callLlm(env: Env, scope: PaidScope, model: string, prompt: string): Promise<string> {
-  // AQU-2063: admitted before it spends; settles the reported usage.cost,
-  // which this call already requested and used to throw away.
-  const call = await admitLlmCall(env.AQUILLA_PG, env, scope, {
-    model, promptChars: prompt.length, maxOutputTokens: ANALYZE_RESERVE_OUTPUT_TOKENS,
-  })
-  if (!call.ok) throw new LlmRefusedError(call)
-  const base = env.OPENROUTER_BASE_URL
-    ? env.OPENROUTER_BASE_URL.replace(/\/$/, "")
-    : "https://openrouter.ai/api/v1"
-  let upstream: Response
-  try {
-    upstream = await fetch(`${base}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${call.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.2,
-        stream: false,
-        response_format: { type: "json_object" },
-        ...openRouterUsage(env.OPENROUTER_BASE_URL),
-      }),
-      // AQU-1849: `stream: false`, so nothing arrives until the completion is
-      // whole — this one deadline therefore bounds the entire answer. A blown
-      // one becomes the same AnalyzeUpstreamError the wizard already renders,
-      // carrying a 504 status.
-      signal: AbortSignal.timeout(VENDOR_TIMEOUT_MS.openRouterNonStreaming),
-    })
-  } catch (err) {
-    if (isAbortTimeout(err)) {
-      logVendorTimeout("openRouterNonStreaming", err)
-      throw new AnalyzeUpstreamError(504)
-    }
-    throw err
-  }
-  if (!upstream.ok) {
-    // Log the body snippet server-side only — never surfaced to the client.
-    const text = await upstream.text().catch(() => "")
-    console.error(`[monday analyze] upstream HTTP ${upstream.status}: ${text.slice(0, 300)}`)
-    throw new AnalyzeUpstreamError(upstream.status)
-  }
-  const data = (await upstream.json()) as {
-    choices?: Array<{ message?: { content?: string } }>
-  }
-  await call.settleFrom(data)
-  const content = data.choices?.[0]?.message?.content
-  if (!content) throw new Error("LLM returned no content")
-  return content
+// AQU-2063: admitted by the AI entitlement check before it spends, and
+// settles the usage.cost it used to throw away (lib/integrations/llm.ts).
+function callLlm(env: Env, scope: PaidScope, model: string, prompt: string): Promise<string> {
+  return callAnalysisLlm(env, scope, model, prompt, "monday analyze")
 }
 
 // ── Board selection ────────────────────────────────────────────────────────

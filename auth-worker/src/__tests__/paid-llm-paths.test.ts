@@ -21,6 +21,8 @@ import { resetRateCardCache } from "../lib/billing/rate-card"
 import { createDoc, getDocMeta } from "../../../db/shared/knowledge"
 import { indexKnowledgeDoc } from "../lib/knowledge/index-doc"
 import { analyzeBoardMapping } from "../lib/monday/analyze"
+import { analyzeTableMapping } from "../lib/airtable/analyze"
+import type { AirtableTableStructure } from "../lib/airtable/types"
 import type { ProjectMetricsSummary } from "../lib/monday/metrics"
 import { LlmRefusedError } from "../lib/billing/paid-llm"
 import { MAX_REPAIR_ATTEMPTS } from "../lib/tools/builder"
@@ -178,6 +180,16 @@ const mondayArgs = {
   summary: { projectId: PROJECT, projectName: "P", project: {}, files: [] } as unknown as ProjectMetricsSummary,
 }
 const mondayScope = { orgId: ORG, userId: 1, projectId: PROJECT, rail: "llm" as const }
+// Airtable's table analysis (AQU-804) reached dev after the spec, through the
+// same shared call as Monday (lib/integrations/llm.ts), so it is metered too.
+const airtableArgs = {
+  structure: {
+    fetchedAt: "2026-10-21T00:00:00Z", baseId: "app1", baseName: "B", tableId: "tbl1", tableName: "T",
+    primaryFieldId: null, fields: [],
+  } satisfies AirtableTableStructure,
+  sampleRecords: [],
+  summary: mondayArgs.summary,
+}
 
 const buildTool = async (e: Env, extra: Record<string, unknown> = {}) => app.request(
   `/api/v2/projects/${PROJECT}/tools/build`,
@@ -229,6 +241,12 @@ describe("an org past its allowance is refused before any provider call (enforce
   it("Monday analyze (#24) throws the refusal for the route to answer", async () => {
     stubProviders(() => "{}")
     await expect(analyzeBoardMapping(meterEnv("enforce"), mondayScope, mondayArgs)).rejects.toBeInstanceOf(LlmRefusedError)
+    expect(modelCalls).toHaveLength(0)
+  })
+
+  it("Airtable analyze (shares #24's call) throws the refusal for the route to answer", async () => {
+    stubProviders(() => "{}")
+    await expect(analyzeTableMapping(meterEnv("enforce"), mondayScope, airtableArgs)).rejects.toBeInstanceOf(LlmRefusedError)
     expect(modelCalls).toHaveLength(0)
   })
 
@@ -285,6 +303,13 @@ describe("an admitted call settles the cost the provider reported, one row per c
     stubProviders(() => JSON.stringify({ mapping: { nonsense: true }, summary: "s" }))
     // The proposal is unusable, but the call was paid for and is on the ledger.
     await expect(analyzeBoardMapping(meterEnv("shadow"), mondayScope, mondayArgs)).rejects.toThrow()
+    expect(modelCalls).toHaveLength(1)
+    expect(await ledger()).toEqual([settledRow("llm", 1)])
+  })
+
+  it("Airtable analyze (shares #24's call): settles the reported cost", async () => {
+    stubProviders(() => JSON.stringify({ mapping: { nonsense: true }, summary: "s" }))
+    await expect(analyzeTableMapping(meterEnv("shadow"), mondayScope, airtableArgs)).rejects.toThrow()
     expect(modelCalls).toHaveLength(1)
     expect(await ledger()).toEqual([settledRow("llm", 1)])
   })

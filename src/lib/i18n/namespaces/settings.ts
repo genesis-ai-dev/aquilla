@@ -449,6 +449,32 @@ export const settings = defineNamespace({
     "settings.monday.disconnectConfirmBody":
       "This removes the connection for the whole organization. Every " +
       "project's board link and sync configuration will be deleted. This cannot be undone.",
+    // ── Org settings → Airtable (AQU-804) ──
+    "settings.airtable.navHint": "Table sync",
+    "settings.airtable.connectedBadge": "Connected",
+    "settings.airtable.notConnectedBadge": "Not connected",
+    "settings.airtable.connectPrompt":
+      "Paste a personal access token from Airtable to connect. Projects can then link a table and push their progress into it.",
+    "settings.airtable.connectRestrictedNotice": "Ask an org maintainer or owner to connect Airtable.",
+    "settings.airtable.tokenLabel": "Personal access token",
+    "settings.airtable.tokenHelp":
+      "Create one in Airtable with the scopes {scopes}, and give it access to the base you track progress in. Aquilla keeps it encrypted and never shows it again.",
+    "settings.airtable.createTokenLink": "Create a token in Airtable",
+    "settings.airtable.connectButton": "Connect Airtable",
+    "settings.airtable.saveTokenButton": "Save new token",
+    "settings.airtable.replaceTokenButton": "Replace token",
+    "settings.airtable.openAirtableButton": "Open Airtable",
+    "settings.airtable.connectedNotice": plural({
+      one: "Airtable connected. The token can see {count} base.",
+      other: "Airtable connected. The token can see {count} bases.",
+    }, "count"),
+    "settings.airtable.tokenRejectedNotice":
+      "Airtable no longer accepts the saved token, so progress isn't being pushed. Paste a new token to keep syncing.",
+    "settings.airtable.otherDeploymentNotice":
+      "This connection was made on another Aquilla deployment and can't be used here. Paste a token to connect this one.",
+    "settings.airtable.disconnectConfirmTitle": "Disconnect Airtable?",
+    "settings.airtable.disconnectConfirmBody":
+      "This removes the connection for the whole organization. Every project's table link and sync configuration will be deleted; the tables and their records stay in Airtable.",
     // "Account:" prefix → auth.resetPassword.accountPrefix (identical text, same
     //   "label: value" call-site pattern already used in ResetPassword.tsx)
     // "Cancel" → common.cancel (identical text)
@@ -791,10 +817,22 @@ export const settings = defineNamespace({
           "new tab. \"Monday.com\" is a product name and is not translated.",
       },
       "settings.monday.connectedAsRow": {
-        description: "Row on the Monday.com connection card naming the connected Monday user.",
+        description:
+          "Row on the Monday.com (or Airtable — AQU-804) connection card naming the connected user.",
         placeholders: {
-          username: "The connected Monday.com account's display username. Not translated.",
+          username: "The connected account's display username, or for Airtable its email. Not translated.",
         },
+      },
+      "settings.airtable.tokenHelp": {
+        description:
+          "Help under the Airtable personal-access-token field, followed by a 'Create a token in Airtable' link.",
+        placeholders: {
+          scopes: "Airtable scope names, comma-separated, exactly as Airtable spells them (e.g. 'data.records:read'). Never translated.",
+        },
+      },
+      "settings.airtable.connectedNotice": {
+        description: "Confirmation after an Airtable token was accepted and saved for the organization.",
+        placeholders: { count: "How many Airtable bases the token can see, a whole number." },
       },
       "settings.monday.connectedOnRow": {
         description:
@@ -805,9 +843,9 @@ export const settings = defineNamespace({
       },
       "settings.monday.connectedAsOnRow": {
         description:
-          "Row under the Monday.com account name on the connection card: who connected it and when.",
+          "Row on the Monday.com (or Airtable — AQU-804) connection card: who connected it and when.",
         placeholders: {
-          username: "The connected Monday.com account's display username. Not translated.",
+          username: "The connected account's display username, or for Airtable its email. Not translated.",
           date: "A locale-formatted date string (already localized by the caller before interpolation).",
         },
       },

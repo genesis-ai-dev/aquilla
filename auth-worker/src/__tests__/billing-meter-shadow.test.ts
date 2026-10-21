@@ -16,7 +16,7 @@ import type { Env } from '../types'
 import { authHeader, jwtFor, seedUser } from './helpers/db'
 import { rateCard } from './helpers/rate-card'
 import { resetRateCardCache } from '../lib/billing/rate-card'
-import { resetTranscriptionRateCache } from '../lib/billing/transcription-usage'
+import { resetTranscriptionRateCache, WHISPER_MODEL } from '../lib/billing/transcription-usage'
 import { reserveWorkspaceUsage } from '../lib/billing/workspace-usage'
 import { resolveOrgPlan } from '../../../db/shared/org-plan'
 import { _test, startReactionRun } from '../routes/contextual'
@@ -81,7 +81,7 @@ function providers(): Calls {
   vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input instanceof Request ? input.url : input)
     if (url.endsWith('/models')) return rateCard()
-    if (url.includes('/models?')) return Response.json({ data: [{ id: 'openai/whisper-1', pricing: { prompt: '0.0001' } }] })
+    if (url.includes('/models?')) return Response.json({ data: [{ id: WHISPER_MODEL, pricing: { prompt: '0.0001' } }] })
     if (url.includes('/admin/projects/')) return new Response('{}')
     const headers = new Headers(init?.headers)
     calls.keys.push(headers.get('Authorization') ?? headers.get('X-Omni-Secret') ?? '')

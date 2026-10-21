@@ -21,7 +21,8 @@
 
 import { audioObjectKey, isPathSafeId, r2KeyPrefix, safeAudioContentType } from "./audio"
 import { verifyTokenForFile, verifyTokenForProject, WRITE_ROLE_LEVEL } from "./auth"
-import { checkAiSpendCeiling } from "../../db/shared/ai-spend-ceiling"
+import { modalGpuRawCents, VOICE_CONVERT_GPU } from "../../db/shared/audio-price-card"
+import { entitleProjectAiCall, releaseQuietly, settleQuietly } from "./ai-metering"
 // Shared with the Inworld proxy: both bound their one upstream subrequest with
 // AbortSignal.timeout and need the same DOMException check to tell a blown
 // deadline apart from a dead upstream.
@@ -44,6 +45,8 @@ export interface VoiceConvertEnv {
   AI_DAILY_SPEND_CEILING_USD?: string
   /** Deployment profile; "test" bypasses the spend-ceiling read cache. */
   ENVIRONMENT?: string
+  /** off | shadow | enforce (db/shared/ai-entitlement.ts, AQU-2061). */
+  BILLING_METER_MODE?: string
 }
 
 // AQU-1854: ceiling on every clip this route buffers. Conversion is the one
@@ -318,14 +321,6 @@ export async function handleVoiceConvertRequest(
     )
   }
 
-  // Platform daily spend ceiling (AQU-1869). Checked before the R2 reads and
-  // the Modal call: a conversion starts an L40S GPU container, and the point
-  // of the ceiling is that nothing paid starts once the floor is hit.
-  const spendCeiling = await checkAiSpendCeiling(db, env, "voice-convert")
-  if (!spendCeiling.ok) {
-    return Response.json(spendCeiling.body, { status: spendCeiling.status })
-  }
-
   // Resolve the source clip: inline upload, or an existing R2 recording.
   //
   // AQU-1854: both branches hand Modal the Blob they already hold rather than
@@ -370,11 +365,25 @@ export async function handleVoiceConvertRequest(
   modalForm.append("reference", refBlob, "reference")
   modalForm.append("diffusion_steps", String(clampSteps(form.get("diffusionSteps"))))
 
+  // The one entitlement check (AQU-2065), which also runs the platform daily
+  // spend ceiling (AQU-1869): nothing paid starts once the floor is hit. GPU
+  // work stays metered even for a BYOK org (spec Q9). The bound is a run that
+  // lasts until our timeout; settlement uses the time the call took.
+  const entitled = await entitleProjectAiCall(db, env, {
+    projectId, userId: verified.claims.userId, rail: "gpu", provider: "modal", houseKey: env.SEED_VC_TOKEN,
+    estimateRawCents: modalGpuRawCents(VOICE_CONVERT_GPU, SEED_VC_REQUEST_TIMEOUT_MS / 1000),
+    requestId: crypto.randomUUID(),
+  })
+  if (!entitled.ok) return entitled.response
+  const { grant } = entitled
+  const gpuCost = (startedAt: number) => modalGpuRawCents(VOICE_CONVERT_GPU, (Date.now() - startedAt) / 1000)
+
   let modalRes: Response
+  const startedAt = Date.now()
   try {
     modalRes = await fetch(env.SEED_VC_URL, {
       method: "POST",
-      headers: { "X-Auth-Token": env.SEED_VC_TOKEN },
+      headers: { "X-Auth-Token": grant.key.apiKey },
       body: modalForm,
       // AQU-1854: without this a hung GPU held the Worker invocation open until
       // the platform killed it, which surfaced as a spinner that never resolved
@@ -382,6 +391,8 @@ export async function handleVoiceConvertRequest(
       signal: AbortSignal.timeout(SEED_VC_REQUEST_TIMEOUT_MS),
     })
   } catch (err) {
+    // A timeout or dropped connection may follow GPU work: the reservation
+    // stays held for reconciliation.
     if (isAbortTimeout(err)) {
       logVendorTimeout("modalVoiceConvert", err)
       return new Response(
@@ -394,11 +405,19 @@ export async function handleVoiceConvertRequest(
   }
   if (!modalRes.ok) {
     const detail = await modalRes.text().catch(() => "")
+    // Seed-VC checks the token and the form before it touches the GPU, so a
+    // 4xx other than 408 is proven free; anything else may have run.
+    if (modalRes.status >= 400 && modalRes.status < 500 && modalRes.status !== 408) {
+      await releaseQuietly(grant, "voice-convert")
+    } else {
+      await settleQuietly(grant, gpuCost(startedAt), "voice-convert")
+    }
     return new Response(`voice conversion failed (${modalRes.status}): ${detail}`.trim(), {
       status: 502,
     })
   }
   const convertedBytes = await modalRes.arrayBuffer()
+  await settleQuietly(grant, gpuCost(startedAt), "voice-convert")
 
   // Write the result as a new cell-audio object (same layout as client uploads),
   // so the client only needs to attach the returned audioId.

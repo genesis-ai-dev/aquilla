@@ -32,6 +32,7 @@ import { ROLE } from "../types"
 import { authMiddleware } from "../middleware/auth"
 import { resolveProjectRole } from "../services/project-permissions"
 import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
+import { callJev } from "../lib/jev/client"
 import {
   DEFAULT_TAG_THRESHOLDS,
   MAX_PARTICIPANT_CANDIDATES,
@@ -42,7 +43,6 @@ import {
   type TagCandidates,
 } from "../../../src/lib/understanding/passage-tags"
 import {
-  JEV_DECISIONS_URL,
   JEV_MODEL,
   MAX_NODES_PER_REQUEST,
   buildPassageTagRequest,
@@ -134,20 +134,6 @@ function heuristicWindow(nodes: readonly TaggedNodeRequest[]): PassageTagResult[
     combinePassageTags(entry.node, nodes[index - 1]?.node ?? null, entry.candidates, null))
 }
 
-/**
- * Resolve the decisions endpoint. Same derivation as the seam route's — see
- * ./ai-seams.ts: OpenRouter fronts TypeSafe's evaluation API at
- * `/api/alpha/decisions`, a SIBLING of `/api/v1`, so deriving it from
- * OPENROUTER_BASE_URL replaces the version segment rather than appending.
- */
-export function resolvePassageTagUrl(env: Pick<Env, "OPENROUTER_BASE_URL">): string {
-  const base = env.OPENROUTER_BASE_URL?.trim()
-  if (!base) return JEV_DECISIONS_URL
-  const trimmed = base.replace(/\/+$/, "")
-  const withoutVersion = trimmed.replace(/\/v\d+$/, "")
-  return `${withoutVersion}/alpha/decisions`
-}
-
 aiPassageTags.post(
   "/classify",
   authMiddleware,
@@ -185,24 +171,12 @@ aiPassageTags.post(
     }
 
     let answers: ReturnType<typeof parsePassageTagAnswers> | null = null
-    try {
-      const res = await fetch(resolvePassageTagUrl(c.env), {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${c.env.OPENROUTER_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(buildPassageTagRequest(nodes)),
-        signal: AbortSignal.timeout(TAG_TIMEOUT_MS),
-      })
-      if (res.ok) {
-        answers = parsePassageTagAnswers(await res.json(), nodes)
-      } else {
-        console.warn(`[ai-passage-tags] upstream ${res.status}; using heuristic tags`)
-      }
-    } catch (err) {
-      console.warn("[ai-passage-tags] tagging failed; using heuristic tags:", err)
-    }
+    // AQU-2064: through callJev, like every other Jev caller, so the call is
+    // billed on the jev rail (it used to fetch the endpoint directly).
+    const called = await callJev(c.env, buildPassageTagRequest(nodes), TAG_TIMEOUT_MS,
+      { projectId: input.projectId, userId: user.id })
+    if (called.ok) answers = parsePassageTagAnswers(called.body, nodes)
+    else console.warn(`[ai-passage-tags] tagging ${called.reason}; using heuristic tags`)
 
     if (!answers) return c.json({ tags: heuristicWindow(nodes), model: null })
 

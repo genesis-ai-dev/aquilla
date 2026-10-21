@@ -458,6 +458,12 @@ export function ProjectOverview() {
   const { open: openWorkspace, isPending: openPending, overlay: openingOverlay } = useOpenWorkspace()
   const { project, status, refresh, pm, roleLevel, projectSettings } = useProject(id)
   useNavHistoryTitle(project?.name)
+  // AQU-2097: the server refuses most of an archived project's reads, and the
+  // cards they feed (Progress, Languages, Team, the file rollups) hide on that
+  // refusal. Those reads are keyed on this too, so Restore — which re-reads
+  // the project and clears it — re-reads them all instead of leaving the cards
+  // hidden until a manual reload.
+  const archivedSince = project?.deletedAt ?? null
   // AQU-1586: the target lane ROWS — the only place a lane's language is
   // recorded. A lane's `legacy_tag` is its event key and can be the opaque
   // lane id, so nothing on this page may label a lane with it.
@@ -784,7 +790,7 @@ export function ProjectOverview() {
 
   useEffect(() => {
     void loadRow()
-  }, [loadRow])
+  }, [loadRow, archivedSince])
 
   // Only redirect when the user genuinely has no access to this project.
   // `useProject` is server-verified per-project (not org-scoped): a
@@ -823,7 +829,7 @@ export function ProjectOverview() {
 
   useEffect(() => {
     void loadWorkload()
-  }, [loadWorkload])
+  }, [loadWorkload, archivedSince])
 
   // AQU-495: after a successful assign, refresh BOTH the portfolio row and the
   // open-assignments workload list so the Team card updates without a reload.
@@ -847,7 +853,7 @@ export function ProjectOverview() {
       .then((rows) => { if (!cancelled) setFiles(rows) })
       .catch(() => { if (!cancelled) setFiles([]) })
     return () => { cancelled = true }
-  }, [jwt, id, firstFileId, fileSetKey, project?.name])
+  }, [jwt, id, firstFileId, fileSetKey, project?.name, archivedSince])
 
   // AQU-498: token minter for MemberActivityPanel — same project-scoped
   // sync-token mint used for the per-file rollups above (verifyTokenForProject
@@ -1772,7 +1778,14 @@ export function ProjectOverview() {
     const res = await unarchiveProjectRemote(id, jwt)
     setBusy(false)
     if (res.kind === "restored" || res.kind === "local-only") {
-      await refresh()
+      // The project read clears `archivedSince`, which re-runs the reads keyed
+      // on it; the hooks that own their reads are asked directly. Settings
+      // carry the project's language rows, refused while it was archived:
+      // without them the plan falls back to the default language and loses
+      // its language label.
+      await Promise.all([refresh(), projectSettings.refresh()])
+      refreshLaneStaffing()
+      refreshMembers()
     } else if (res.kind === "forbidden") {
       setError(res.message ?? t("org.projectOverview.restoreForbidden"))
     } else if (res.kind === "error") {

@@ -55,7 +55,8 @@ interface UsageRow {
   raw_micro_cents: string | null; reserved_micro_units: string; multiplier: number
 }
 const usageRows = () => t.rows<UsageRow>("workspace_usage_requests")
-/** The settled raw cost of a row, in cents. */
+/** The settled raw cost of a row, in cents. The ledger stores whole
+ *  micro-cents, so compare against the card with a 1e-6¢ tolerance. */
 const rawCents = (row: UsageRow) => Number(row.raw_micro_cents) / 1_000_000
 /** The reservation a row was admitted with, in raw cents. */
 const reservedCents = (row: UsageRow) => Number(row.reserved_micro_units) / row.multiplier / 1_000_000
@@ -220,7 +221,7 @@ describe("diarization (#15)", () => {
 
     ;[row] = await usageRows()
     expect(row.state).toBe("settled")
-    expect(rawCents(row)).toBeGreaterThanOrEqual(modalGpuRawCents(DIARIZATION_GPU, 120))
+    expect(rawCents(row)).toBeGreaterThanOrEqual(modalGpuRawCents(DIARIZATION_GPU, 120) - 1e-6)
     expect(rawCents(row)).toBeLessThan(modalGpuRawCents(DIARIZATION_GPU, 130))
   })
 
@@ -275,7 +276,7 @@ describe("voice-convert (#16)", () => {
     const rows = await usageRows()
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ rail: "gpu", mode: "metered", state: "settled" })
-    expect(rawCents(rows[0])).toBeGreaterThanOrEqual(modalGpuRawCents(VOICE_CONVERT_GPU, 5))
+    expect(rawCents(rows[0])).toBeGreaterThanOrEqual(modalGpuRawCents(VOICE_CONVERT_GPU, 5) - 1e-6)
     expect(rawCents(rows[0])).toBeLessThan(modalGpuRawCents(VOICE_CONVERT_GPU, 6))
   })
 })

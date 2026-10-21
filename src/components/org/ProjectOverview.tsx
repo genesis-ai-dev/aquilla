@@ -75,7 +75,7 @@ import { useProjectPlan } from "@/hooks/useProjectPlan"
 import {
   audioFileIds,
   textFileIds,
-  planUnitIsNearlyComplete,
+  planUnitShowsWayToWork,
   planUnitId,
   planUnitLabel,
   planOpenKind,
@@ -1079,7 +1079,9 @@ export function ProjectOverview() {
   const planFileKey = useMemo(
     () => Array.from(new Set([
       ...planUnits
-        .filter((u) => planUnitIsNearlyComplete(u, tableNow, planAudioFiles, planTextFiles))
+        // AQU-1974: and units marked done with work left, whose rows name
+        // their short chapters too.
+        .filter((u) => planUnitShowsWayToWork(u, tableNow, planAudioFiles, planTextFiles))
         .map((u) => u.fileId),
       // AQU-1278: plus whichever file the OPEN unit belongs to, nearly complete
       // or not. The inspector's "N chapters are not assigned" counts the unit's

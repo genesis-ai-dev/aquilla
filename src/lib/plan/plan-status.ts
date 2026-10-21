@@ -485,6 +485,32 @@ export function planUnitIsNearlyComplete(
 }
 
 /**
+ * AQU-1974: does this unit get the ways to its remaining cells — the row's
+ * shortfall link and chapter names, the inspector's "Go to first…", the grid's
+ * count badges and the section prefetch?
+ *
+ * A nearly-complete unit does (AQU-1278). So does a unit somebody marked done
+ * that still has work in it, which its row already says in amber (AQU-1494):
+ * the mark is a lead saying the book is finished, so what is left is exactly
+ * what they need to reach, however far from the nearly-complete threshold it
+ * is. Before this, the mark was what hid it.
+ *
+ * Deliberately a separate question from `planUnitIsNearlyComplete`, which still
+ * decides grouping and the status pill: a done unit stays in Done.
+ */
+export function planUnitShowsWayToWork(
+  u: PlanUnit,
+  now: number,
+  audioFiles?: ReadonlySet<string>,
+  textFiles?: ReadonlySet<string>,
+): boolean {
+  if (u.doneAt == null) return planUnitIsNearlyComplete(u, now, audioFiles, textFiles)
+  const hasAudio = audioFiles ? audioFiles.has(u.fileId) : planUnitExpectsAudio(u)
+  const hasText = textFiles ? textFiles.has(u.fileId) : planUnitExpectsText(u)
+  return planUnitShortfall(u, hasAudio, hasText).worst > 0
+}
+
+/**
  * Within a group the soonest deadline is the most urgent, so target date
  * ascending; undated units sort last (they carry no claim about when), then
  * by label so the order is stable between renders.

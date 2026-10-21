@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import {
   planUnitIsNearlyComplete,
+  planUnitShowsWayToWork,
   planUnitStatus,
   planUnitLabel,
   planUnitId,
@@ -1090,5 +1091,26 @@ describe("text expectation (AQU-955)", () => {
       const sorted = sortNearlyComplete(units, audioFileIds(units), textFileIds(units))
       expect(sorted.map((u) => u.sectionKey)).toEqual(["MAT", "MRK"])
     })
+  })
+})
+
+// AQU-1974: the ways to a unit's remaining cells (row link, chapter names,
+// inspector link, grid badges, prefetch) are a separate question from "nearly
+// complete", which keeps deciding grouping and the status pill.
+describe("planUnitShowsWayToWork", () => {
+  const DONE = Date.parse("2026-08-20T00:00:00Z")
+  it("is nearly-complete for a unit nobody marked done", () => {
+    expect(planUnitShowsWayToWork(shortBy(1000, 3), NOW)).toBe(true)
+    expect(planUnitShowsWayToWork(shortBy(1000, 300), NOW)).toBe(false)
+  })
+
+  it("is true for a unit marked done with any work left, however much", () => {
+    expect(planUnitShowsWayToWork(shortBy(1000, 3, { doneAt: DONE }), NOW)).toBe(true)
+    expect(planUnitShowsWayToWork(shortBy(1000, 400, { doneAt: DONE }), NOW)).toBe(true)
+    expect(planUnitIsNearlyComplete(shortBy(1000, 3, { doneAt: DONE }), NOW)).toBe(false)
+  })
+
+  it("is false for a unit marked done with nothing left", () => {
+    expect(planUnitShowsWayToWork(shortBy(1000, 0, { doneAt: DONE }), NOW)).toBe(false)
   })
 })

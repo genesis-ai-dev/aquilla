@@ -129,7 +129,9 @@ aquifer.get("/tabitha", authMiddleware, async (c) => {
 
 // ── POST /answers ───────────────────────────────────────────────────────────
 const citationSchema = z.object({
-  url: z.string().url(),
+  // http(s) only: citations are published to a public third-party site, and
+  // z.string().url() alone accepts javascript:/data: schemes.
+  url: z.string().url().refine((u) => /^https?:\/\//i.test(u), "citation url must be http(s)"),
   title: z.string().optional(),
   quote: z.string().optional(),
 })

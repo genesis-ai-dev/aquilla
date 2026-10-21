@@ -221,6 +221,41 @@ describe("verses scope", () => {
   })
 })
 
+// ── Task: translate or validate (AQU-1969) ───────────────────────────────────
+describe("task (AQU-1969)", () => {
+  it("opens on Translate, and a translate assignment says so", async () => {
+    render(<AssignModal {...BASE_PROPS} />)
+    expect(screen.getByRole("combobox", { name: /task/i }).textContent).toMatch(/translate/i)
+    // The validate-only sentence is not there to explain the default.
+    expect(screen.queryByText(/lines they approve themselves/i)).toBeNull()
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+    expect(mockCreate.mock.calls[0][0].kind).toBe("translate")
+  })
+
+  it("sends a Validate assignment, and says what its progress will count", async () => {
+    render(<AssignModal {...BASE_PROPS} />)
+    await pickSelectOption(/task/i, /validate/i)
+    expect(screen.getByText(/lines they approve themselves/i)).toBeTruthy()
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+    expect(mockCreate.mock.calls[0][0]).toMatchObject({ kind: "validate", assigneeUserId: 42, scopeKind: "books" })
+  })
+
+  it("gives every file of a books batch the chosen kind", async () => {
+    render(<AssignModal {...BASE_PROPS} />)
+    await pickSelectOption(/task/i, /validate/i)
+    await pickSelectOption(/scope/i, /books \(files\)/i)
+    fireEvent.click(screen.getByText("Genesis"))
+    await pickSelectOption(/assign to/i, /bob/)
+    fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
+    await waitFor(() => expect(mockBulkCreate).toHaveBeenCalledTimes(1))
+    expect(mockBulkCreate.mock.calls[0][0].kind).toBe("validate")
+  })
+})
+
 // ── Scope: selection ─────────────────────────────────────────────────────────
 describe("selection scope", () => {
   it("is enabled and pre-selected when selectedCellIds is non-empty", async () => {

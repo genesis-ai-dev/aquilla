@@ -10,15 +10,14 @@ import { env } from "cloudflare:test"
 import { describe, it, expect, afterEach, vi } from "vitest"
 import { seedUser } from "./helpers/db"
 import { encryptMondayToken } from "../lib/monday/crypto"
+import { isTransientPushError } from "../lib/monday/push"
+import { flushDirtyLinks, schedulePush } from "../lib/integrations/push"
 import {
-  flushDirtyLinks,
-  isTransientPushError,
   retryDelaySeconds,
-  schedulePush,
   MAX_PUSH_ATTEMPTS,
   RETRY_BASE_SECONDS,
   RETRY_MAX_SECONDS,
-} from "../lib/monday/push"
+} from "../lib/integrations/push-state"
 import { MondayApiError } from "../lib/monday/client"
 import type { Env } from "../types"
 

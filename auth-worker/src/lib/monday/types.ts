@@ -216,8 +216,8 @@ export function parseJsonColumn<T>(raw: unknown, fallback: T): T {
   return raw as T
 }
 
-/** "Aquilla ID", "Aquilla id", "aquilla_id", "AquillaID" … */
-function isAquillaIdTitle(title: string | undefined): boolean {
+/** "Aquilla ID", "Aquilla id", "aquilla_id", "AquillaID" … (Airtable field names too.) */
+export function isAquillaIdTitle(title: string | undefined): boolean {
   return (title ?? "").toLowerCase().replace(/[^a-z]/g, "") === "aquillaid"
 }
 

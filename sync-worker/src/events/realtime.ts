@@ -8,7 +8,7 @@ import type { EventKind } from './types'
 // Tables that can be invalidated via projection.dirty messages.
 // Adding a new projection table requires adding it here so clients can
 // invalidate the corresponding query keys.
-export type ProjectionTable = 'events' | 'cells' | 'files' | 'cell_validators' | 'cell_waivers' | 'cell_audio' | 'cell_audio_validators' | 'cell_attachments' | 'comments' | 'cell_backtranslations' | 'assignments' | 'assignment_cells' | 'cell_links' | 'cell_word_morph' | 'concepts'
+export type ProjectionTable = 'events' | 'cells' | 'files' | 'cell_validators' | 'cell_waivers' | 'cell_audio' | 'cell_audio_validators' | 'cell_attachments' | 'comments' | 'cell_backtranslations' | 'cell_glosses' | 'assignments' | 'assignment_cells' | 'cell_links' | 'cell_word_morph' | 'concepts'
 
 // Single source of truth for valid ProjectionTable runtime values. The Set
 // and the type must stay in sync — adding a new table requires updating both.
@@ -28,6 +28,7 @@ const PROJECTION_TABLES: ReadonlySet<string> = new Set<ProjectionTable>([
   'cell_audio_validators',
   'comments',
   'cell_backtranslations',
+  'cell_glosses',
   'assignments',
   'assignment_cells',
   // Was in the ProjectionTable union but never here — so every

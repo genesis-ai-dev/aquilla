@@ -5,6 +5,12 @@ export const dialog = defineNamespace({
     "dialog.confirmCheckboxDefault": "I understand this action.",
     "dialog.assign.title": "Assign work",
     "dialog.assign.scopeLabel": "Scope",
+    // AQU-1969: what the assignment hands out.
+    "dialog.assign.kindLabel": "Task",
+    "dialog.assign.kind.translate": "Translate",
+    "dialog.assign.kind.validate": "Validate",
+    "dialog.assign.kindValidateDescription":
+      "Their progress counts the lines they approve themselves, in text and audio.",
     "dialog.assign.scope.selection": "Current selection",
     "dialog.assign.scope.allVerses": "All verses in file",
     "dialog.assign.scope.entireFile": "Entire file",
@@ -83,6 +89,34 @@ export const dialog = defineNamespace({
           "Form label above the scope selector — what portion of the project this " +
           "assignment covers (current selection, whole file, chapters, or files).",
         screenshot: "assign-modal",
+      },
+      "dialog.assign.kindLabel": {
+        description:
+          "Form label above the choice of what an assignment hands out: Translate " +
+          "(the work as it has always been) or Validate (only the approving). On " +
+          "both assign surfaces — the Assign dialog and the Team card's panel.",
+        screenshot: "assign-modal",
+      },
+      "dialog.assign.kind.translate": {
+        description:
+          "Task option: the person translates the lines (the default, and every " +
+          "assignment made before there was a choice). A verb, like its sibling.",
+        screenshot: "assign-modal",
+      },
+      "dialog.assign.kind.validate": {
+        description:
+          "Task option: the person only validates (approves) the lines; somebody " +
+          "else translates them. Use the word the app uses for approving a line.",
+        screenshot: "assign-modal",
+      },
+      "dialog.assign.kindValidateDescription": {
+        description:
+          "Helper text under the Task field, shown only when Validate is chosen: " +
+          "this person's progress will count their OWN approvals of the lines — " +
+          "not whether someone else has approved them — for written text and for " +
+          "recordings alike.",
+        screenshot: "assign-modal",
+        maxLength: 120,
       },
       "dialog.assign.scope.selection": {
         description:

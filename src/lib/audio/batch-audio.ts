@@ -4,49 +4,16 @@
 //   1. Filter cells to those with work to do.
 //   2. Run them sequentially with a small concurrency window (default: 2).
 //   3. Maintain a cancellation flag so the AudioBulkProgressBanner can stop it.
-//   4. Expose progress via a lightweight pub-sub store so the banner re-renders.
+//   4. Expose progress via a lightweight pub-sub store (`batch-progress.ts`)
+//      so the banner re-renders.
 //
 // Progress is intentionally separate from the per-cell transcribe-status /
 // tts-status stores — the banner shows aggregate throughput, per-cell badges
 // show per-cell state.
 
-import { useSyncExternalStore } from "react"
+import { addBatchWait, getBatchProgress, removeBatchWait, setBatchProgress, type BatchKind } from "./batch-progress"
 
-// ---------------------------------------------------------------------------
-// Progress store
-// ---------------------------------------------------------------------------
-
-export type BatchKind = "transcribe" | "synth" | "measure" | "changeVoice"
-
-export interface BatchProgress {
-  kind: BatchKind
-  total: number
-  done: number
-  /** Signals were cancelled; in-flight cells may still complete. */
-  cancelled: boolean
-  /** AQU-1681: the hosted transcription limit refused a request; the batch
-   *  carries on at this time (epoch ms). */
-  waitingUntil?: number
-}
-
-let _progress: BatchProgress | null = null
-/** AQU-1681: when every waiter is due to carry on, so the banner can say so.
- *  A list because the two concurrent jobs can both be waiting. */
-const _waits: number[] = []
-const _listeners = new Set<() => void>()
-
-function notify() {
-  for (const l of _listeners) l()
-}
-
-export function getBatchProgress(): BatchProgress | null {
-  return _progress
-}
-
-function setBatchProgress(p: BatchProgress | null) {
-  _progress = p && _waits.length > 0 ? { ...p, waitingUntil: Math.max(..._waits) } : p
-  notify()
-}
+export { getBatchProgress, useBatchProgress, type BatchKind, type BatchProgress } from "./batch-progress"
 
 /**
  * AQU-1681: wait out the hosted transcription limit, showing the banner when
@@ -59,8 +26,7 @@ async function waitOutTranscriptionLimit(
 ): Promise<void> {
   // A second over what the limiter asked for, so the retry lands in the new window.
   const until = Date.now() + Math.ceil(retryAfterSeconds + 1) * 1000
-  _waits.push(until)
-  if (_progress) setBatchProgress(_progress)
+  addBatchWait(until)
   onWaiting?.(until)
   try {
     while (Date.now() < until) {
@@ -68,22 +34,9 @@ async function waitOutTranscriptionLimit(
       await new Promise<void>((resolve) => setTimeout(resolve, Math.min(1000, until - Date.now())))
     }
   } finally {
-    _waits.splice(_waits.indexOf(until), 1)
+    removeBatchWait(until)
     onWaiting?.(null)
-    if (_progress) {
-      const { waitingUntil: _done, ...rest } = _progress
-      setBatchProgress(rest)
-    }
   }
-}
-
-function subscribe(listener: () => void): () => void {
-  _listeners.add(listener)
-  return () => { _listeners.delete(listener) }
-}
-
-export function useBatchProgress(): BatchProgress | null {
-  return useSyncExternalStore(subscribe, getBatchProgress, () => null)
 }
 
 // ---------------------------------------------------------------------------

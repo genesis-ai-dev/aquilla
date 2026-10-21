@@ -125,15 +125,55 @@ describe("ExportDialog — unvalidated audio, before the export runs (AQU-965)",
     expect(note()).toBeNull()
   })
 
-  it("takes the viewer to the first such line, and gets out of the way", async () => {
+  // AQU-2073 (Sam, 2026-10-20): every such line, by name, one click each.
+  it("names every such line as a pill, and a pill takes the viewer there and gets out of the way", async () => {
     const onJumpToAudioLine = vi.fn()
     const onOpenChange = vi.fn()
     render(
       <ExportDialog {...BASE} onOpenChange={onOpenChange} onJumpToAudioLine={onJumpToAudioLine} />,
     )
-    await userEvent.click(screen.getByRole("button", { name: /show me/i }))
-    expect(onJumpToAudioLine).toHaveBeenCalledWith("c2")
+    // c2 and c3 are the second and third lines in time order: L2, L3.
+    const pills = screen.getAllByTestId("export-audio-unvalidated-line")
+    expect(pills.map((b) => b.textContent)).toEqual(["L2", "L3"])
+    expect(screen.queryByRole("button", { name: /show me/i })).toBeNull()
+    await userEvent.click(screen.getByRole("button", { name: "Show line L3" }))
+    expect(onJumpToAudioLine).toHaveBeenCalledWith("c3")
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("names a line by its reference when it has one", () => {
+    const refd = [
+      heardLine("c1", 1, 0),
+      { ...heardLine("v5", 0, 1), context: "JHN 6:5" } as CellData,
+    ]
+    render(<ExportDialog {...BASE} audioCells={refd} onJumpToAudioLine={vi.fn()} />)
+    expect(screen.getAllByTestId("export-audio-unvalidated-line").map((b) => b.textContent)).toEqual(["JHN 6:5"])
+  })
+
+  it("shows eight pills and \"+N more\", which opens the rest in place", async () => {
+    const many = Array.from({ length: 11 }, (_, i) => heardLine(`m${i + 1}`, 0, i))
+    render(<ExportDialog {...BASE} audioCells={many} onJumpToAudioLine={vi.fn()} />)
+    expect(screen.getAllByTestId("export-audio-unvalidated-line")).toHaveLength(8)
+    const more = screen.getByTestId("export-audio-unvalidated-more")
+    expect(more).toHaveTextContent("+3 more")
+    await userEvent.click(more)
+    expect(screen.getAllByTestId("export-audio-unvalidated-line").map((b) => b.textContent))
+      .toEqual(["L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9", "L10", "L11"])
+    expect(screen.queryByTestId("export-audio-unvalidated-more")).toBeNull()
+  })
+
+  it("lists the lines that will be left silent under \"Validated only\" too", async () => {
+    render(<ExportDialog {...BASE} onJumpToAudioLine={vi.fn()} />)
+    await chooseByLine()
+    await chooseValidatedOnly()
+    expect(note()).toHaveTextContent("2 lines have no validated recording and will be left silent")
+    expect(screen.getAllByTestId("export-audio-unvalidated-line").map((b) => b.textContent)).toEqual(["L2", "L3"])
+  })
+
+  it("without a way to jump, the count stands alone", () => {
+    render(<ExportDialog {...BASE} />)
+    expect(note()).toHaveTextContent("2 lines will export recordings nobody has validated")
+    expect(screen.queryByTestId("export-audio-unvalidated-line")).toBeNull()
   })
 
   it("never gates the export — the count is a warning, not a block", async () => {

@@ -9,7 +9,10 @@ import { resolveProjectRole } from "../services/project-permissions"
 import { resolveProjectRoleShared } from "../../../db/shared/project-roles"
 import { secureCompare } from "../utils/secure-compare"
 import { ASR_MODEL_CHOICES } from "../../../db/shared/asr-models"
-import type { OmniModel } from "../../../db/shared/omni-asr-cost"
+import { omniWarmCostCents, type OmniModel } from "../../../db/shared/omni-asr-cost"
+import { admitPaidCall } from "../lib/billing/paid-call"
+import { releaseChatUsage } from "../lib/billing/chat-usage"
+import { settleWorkspaceUsage } from "../lib/billing/workspace-usage"
 import { COMPRESSED_AUDIO_FORMATS, transcribe, type TranscribeResult } from "../lib/transcribe-core"
 import { omniConfigured, omniFetch, omniStatusSchema, zeroShotEnabledForOrg } from "../lib/omni-asr"
 
@@ -95,9 +98,11 @@ transcription.post("/internal/transcriptions",
     return respond(c, result, ok => ({ ...ok, creditsCharged }))
   })
 
-// ── Warm-up + status proxies (spec §5). Warming is free; only a project
-// contributor can trigger it, and ZS respects the org gate so a disabled org
-// cannot spin up the expensive container.
+// ── Warm-up + status proxies (spec §5). Only a project contributor can warm,
+// and ZS respects the org gate so a disabled org cannot spin up the expensive
+// container. A warm-up spends GPU time, so it passes the one entitlement check
+// on the gpu rail like a transcription (AQU-2062, spec Q3): no unmetered path
+// a user can loop on.
 
 /** Accept our model ids and Modal's short names alike. */
 const omniModelParam = z.enum(["ctc", "zs", "omni-ctc", "omni-zs"])
@@ -116,14 +121,33 @@ async function omniGate(env: Env, projectId: string, model: OmniModel): Promise<
   return null
 }
 
-async function warm(c: AppContext, projectId: string, model: OmniModel) {
+async function warm(c: AppContext, projectId: string, model: OmniModel, userId: number) {
   const denied = await omniGate(c.env, projectId, model)
   if (denied) return c.json({ error: denied.error }, denied.status)
   if (!omniConfigured(c.env)) return c.json({ error: "Omnilingual transcription is not configured" }, 503)
+  const project = await c.env.AQUILLA_PG.prepare("SELECT org_id FROM projects WHERE id = ?")
+    .bind(projectId).first<{ org_id: number | null }>()
+  const cost = omniWarmCostCents(model)
+  const gate = await admitPaidCall(c.env, {
+    orgId: project?.org_id ?? 0, userId, projectId, rail: "gpu", provider: "modal",
+    houseKey: c.env.OMNI_SHARED_SECRET, requestUrl: c.req.url, estimate: () => cost,
+  })
+  if (!gate.ok) return c.json(gate.body, gate.status)
   try {
     const response = await omniFetch(c.env, "/warm", { method: "POST", body: { model }, timeoutMs: 10000 })
-    if (!response.ok) return c.json({ error: "Warm-up failed" }, 502)
+    if (!response.ok) {
+      // As for /transcribe: a 4xx other than 408 is refused before any GPU
+      // starts, so it is proven free. Anything less certain stays held.
+      if (gate.usage && response.status >= 400 && response.status < 500 && response.status !== 408) {
+        await releaseChatUsage(c.env, gate.usage)
+      }
+      return c.json({ error: "Warm-up failed" }, 502)
+    }
   } catch { return c.json({ error: "Warm-up unavailable" }, 502) }
+  if (gate.usage) {
+    try { await settleWorkspaceUsage(c.env.AQUILLA_PG, gate.usage.orgId, gate.usage.requestId, cost) }
+    catch { console.warn("[billing] omnilingual warm-up usage requires reconciliation", gate.usage) }
+  }
   return c.json({ ok: true }, 202)
 }
 
@@ -152,7 +176,7 @@ transcription.post("/transcriptions/warm", authMiddleware,
   zValidator("json", warmSchema), async c => {
     const { projectId, model } = c.req.valid("json")
     if (!(await memberMay(c, projectId))) return c.json({ error: "forbidden" }, 403)
-    return warm(c, projectId, model)
+    return warm(c, projectId, model, c.get("user").id)
   })
 
 transcription.get("/transcriptions/status", authMiddleware,
@@ -174,7 +198,7 @@ transcription.post("/internal/transcriptions/status",
     const role = await resolveProjectRoleShared(c.env.AQUILLA_PG, { id: String(userId) }, projectId)
     if (!role || role.level < TRANSCRIBE_MIN_ROLE) return c.json({ error: "permission_denied" }, 403)
     if (action === "warm") {
-      const warmed = await warm(c, projectId, model)
+      const warmed = await warm(c, projectId, model, userId)
       if (warmed.status !== 202) return warmed
     }
     return status(c, projectId, model)

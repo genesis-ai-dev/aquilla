@@ -26,7 +26,7 @@
 // small language chip so nobody mistakes it for work in the language they are
 // looking at.
 
-import { useMemo, useState } from "react"
+import { useMemo, useState, type ReactNode } from "react"
 import { Plus } from "lucide-react"
 import { useT, useI18n } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
@@ -38,14 +38,22 @@ import { fmtDeadlineDate } from "@/lib/format-date"
 import { formatList } from "@/lib/i18n/format"
 import { classifyPlanSection, isTimeBucketKey, numberedBookCodes, planSectionLabel } from "@/lib/plan/plan-section"
 import { planPct, planUnitShortfall, type PlanShortfall } from "@/lib/plan/plan-status"
-import type { UnitAssignment, UnitAssignmentChapter } from "@/lib/sync/assignments"
+import type { UnitAssignment, UnitAssignmentChapter, ValidationProgress } from "@/lib/sync/assignments"
+import {
+  compareValidationBehind,
+  isValidationRow,
+  validationLeft,
+  validationLeftOverall,
+} from "@/lib/assignments/validation-progress"
 import type { AssignLaneOption, TeamLaneAttachment } from "@/lib/sync/assignment-lane"
 import type { LaneDelegateGrant } from "@/lib/sync/role-policy"
 import type { FileReference, FileType } from "@/lib/parsers/types"
 import { SectionVisibilityGate } from "../SectionVisibilityBadge"
 import { laneChipLabel } from "../project-lanes"
+import { RemoveAssignmentButton, useAssignmentRemoval } from "../RemoveAssignmentButton"
 import { PlanBar } from "./PlanBar"
 import { usePlanShortfallRenderer, usePlanReadoutTips } from "./use-plan-note"
+import { useValidationProgressLines } from "../use-validation-progress"
 
 /** AssignModal takes the editor's cell selection; a PM surface has none. */
 const EMPTY_SELECTION: ReadonlySet<string> = new Set()
@@ -194,6 +202,11 @@ export interface PlanAssignmentsProps {
   /** True once that floor is known; false renders nothing at all. */
   ready: boolean
   assign?: PlanAssignTarget
+  /**
+   * AQU-1969: unassign one row (each row then has its ×). Absent for whoever
+   * may not — the caller decides, by the same rule the server applies.
+   */
+  onRemove?: (assignmentId: string) => Promise<void>
 }
 
 /**
@@ -223,13 +236,32 @@ export function PlanAssignments({
   viewerRoleLevel,
   ready,
   assign,
+  onRemove,
 }: PlanAssignmentsProps) {
   const t = useT()
   const [assignOpen, setAssignOpen] = useState(false)
+  const removal = useAssignmentRemoval(onRemove ?? noRemove)
+  // A removed row goes at once, before the unit's list is read again.
+  const live = assignments.filter((a) => !removal.removedIds.has(a.assignmentId))
+  // AQU-1969: translators first, in the order this panel has always listed
+  // them; then each validator, furthest behind first.
+  const translateRows = live.filter((a) => !isValidationRow(a))
+  const validateRows = live.filter(isValidationRow).sort(compareValidationBehind)
+  const removeButton = (a: UnitAssignment) =>
+    onRemove ? (
+      <RemoveAssignmentButton
+        scope={a.scopeLabel}
+        username={a.username}
+        removing={removal.removingId === a.assignmentId}
+        onRemove={() => void removal.removeOne(a.assignmentId)}
+        size="icon-xs"
+        testId={`plan-assignment-remove-${a.assignmentId}`}
+      />
+    ) : undefined
 
   // Nothing to say and no way to act: render no heading rather than an empty
   // box under a label, which reads as a section that failed to load.
-  if (assignments.length === 0 && !assign && unassignedChapters == null) return null
+  if (live.length === 0 && !assign && unassignedChapters == null && !removal.error) return null
   // Until the floor is known the whole section waits, Assign included: the
   // policy that decides `assign` arrives with the same response.
   if (!ready) return null
@@ -256,9 +288,9 @@ export function PlanAssignments({
       </div>
 
       <SectionVisibilityGate minRole={minRole} viewerRoleLevel={viewerRoleLevel} ready={ready}>
-        {assignments.length > 0 && (
+        {live.length > 0 && (
           <ul className="flex flex-col gap-2">
-            {assignments.map((a) => (
+            {translateRows.map((a) => (
               <PlanAssignmentRow
                 key={a.assignmentId}
                 assignment={a}
@@ -267,10 +299,24 @@ export function PlanAssignments({
                 defaultLaneLabel={defaultLaneLabel}
                 showAudio={showAudio}
                 unitSectionKeys={unitSectionKeys}
+                remove={removeButton(a)}
+              />
+            ))}
+            {validateRows.map((a) => (
+              <PlanValidationRow
+                key={a.assignmentId}
+                assignment={a}
+                validation={a.validation}
+                now={now}
+                lane={lane}
+                defaultLaneLabel={defaultLaneLabel}
+                showAudio={showAudio}
+                remove={removeButton(a)}
               />
             ))}
           </ul>
         )}
+        {removal.error && <p className="text-xs text-destructive">{removal.error}</p>}
 
         {unassignedChapters != null && (
           <p className="text-[11.5px] text-muted-foreground" data-testid="plan-assignment-coverage">
@@ -303,6 +349,7 @@ function PlanAssignmentRow({
   defaultLaneLabel,
   showAudio,
   unitSectionKeys,
+  remove,
 }: {
   assignment: UnitAssignment
   now: number
@@ -310,6 +357,8 @@ function PlanAssignmentRow({
   defaultLaneLabel: string
   showAudio: boolean
   unitSectionKeys?: readonly string[]
+  /** The row's × (AQU-1969), for whoever may unassign. */
+  remove?: ReactNode
 }) {
   const t = useT()
   const readoutTips = usePlanReadoutTips()
@@ -410,13 +459,16 @@ function PlanAssignmentRow({
             that blue went to the progress bars (AQU-1764). Not underlined:
             it is not a link, and an underline would promise a click that
             goes nowhere. "Nothing left" stays grey: it asks for nothing. */}
-        <span
-          className={`shrink-0 text-[11px] tabular-nums ${
-            outstanding ? "font-medium text-foreground" : "text-muted-foreground"
-          }`}
-          data-testid={`plan-assignment-left-${a.assignmentId}`}
-        >
-          {left}
+        <span className="flex shrink-0 items-center gap-1">
+          <span
+            className={`text-[11px] tabular-nums ${
+              outstanding ? "font-medium text-foreground" : "text-muted-foreground"
+            }`}
+            data-testid={`plan-assignment-left-${a.assignmentId}`}
+          >
+            {left}
+          </span>
+          {remove}
         </span>
       </div>
 
@@ -449,6 +501,124 @@ function PlanAssignmentRow({
               validated: planPct(a.audioValidated, a.cellsTotal),
             })}
             tips={readoutTips("audio", a.recorded, a.audioValidated, a.cellsTotal)}
+          />
+        )}
+      </div>
+    </li>
+  )
+}
+
+/**
+ * AQU-1969: one person's VALIDATING of the unit — their own approvals, not the
+ * unit's. Laid out like a translator's row (name and what is left on top, then
+ * the slice, then the bars) so the two read as one list, with a chip saying
+ * which kind of work this is.
+ *
+ * Measured in the assignment's own language whatever tab is showing: an
+ * approval belongs to one language. A row in another language carries the
+ * lane chip, exactly as a translator's does.
+ *
+ * The bars keep their meaning from the row above them, narrowed to this
+ * person: the outer bar is what is ready for them (translated, or recorded),
+ * the inner one what they have approved.
+ */
+function PlanValidationRow({
+  assignment: a,
+  validation: v,
+  now,
+  lane,
+  defaultLaneLabel,
+  showAudio,
+  remove,
+}: {
+  assignment: UnitAssignment
+  validation: ValidationProgress
+  now: number
+  lane: string
+  defaultLaneLabel: string
+  showAudio: boolean
+  /** The row's × (AQU-1969), for whoever may unassign. */
+  remove?: ReactNode
+}) {
+  const t = useT()
+  const { locale } = useI18n()
+  const readoutTips = usePlanReadoutTips()
+  const progressLines = useValidationProgressLines()
+  const otherLane = a.targetLang !== lane
+  const left = showAudio ? validationLeftOverall(v) : validationLeft(v.text)
+  const lines = progressLines(v, showAudio)
+  const ready = (c: ValidationProgress["text"]) => Math.max(0, c.total - c.waiting)
+
+  const meta = [
+    a.scopeLabel,
+    a.deadline
+      ? t("org.projectOverview.plan.assignmentDue", { date: fmtDeadlineDate(a.deadline, now, locale) })
+      : t("org.projectOverview.plan.assignmentNoDeadline"),
+  ].join(" · ")
+
+  return (
+    <li className="flex flex-col gap-1" data-testid={`plan-assignment-${a.assignmentId}`} data-kind="validate">
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <span className="flex min-w-0 items-center gap-2">
+          <UserChip userId={a.assigneeUserId} username={a.username} size="xs" nameClassName="text-[13px]" />
+          {/* Same chip as the language one beside it: a quiet label, not a control. */}
+          <span
+            data-testid="plan-assignment-kind"
+            className="shrink-0 rounded border bg-card px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground"
+          >
+            {t("org.validationProgress.kindChip")}
+          </span>
+          {otherLane && (
+            <span
+              data-testid="plan-assignment-lane"
+              className="shrink-0 rounded border bg-card px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground"
+            >
+              {laneChipLabel(a.targetLang, defaultLaneLabel, t("org.projectOverview.laneDefaultFallback"), a.laneName)}
+            </span>
+          )}
+        </span>
+        <span className="flex shrink-0 items-center gap-1">
+          <span
+            className={`text-[11px] tabular-nums ${
+              left > 0 ? "font-medium text-foreground" : "text-muted-foreground"
+            }`}
+            data-testid={`plan-assignment-left-${a.assignmentId}`}
+          >
+            {left > 0
+              ? t("org.validationProgress.left", { count: left })
+              : t("org.projectOverview.plan.nothingLeft")}
+          </span>
+          {remove}
+        </span>
+      </div>
+
+      <p className="text-[11.5px] text-muted-foreground">{meta}</p>
+      <p className="text-[11.5px] tabular-nums text-muted-foreground" data-testid={`plan-validation-text-${a.assignmentId}`}>
+        {lines.text}
+      </p>
+      {lines.audio && (
+        <p className="text-[11.5px] tabular-nums text-muted-foreground" data-testid={`plan-validation-audio-${a.assignmentId}`}>
+          {lines.audio}
+        </p>
+      )}
+
+      <div className="flex flex-col gap-[3px] ps-7">
+        <PlanBar
+          label={t("org.projectOverview.plan.textBarLabel")}
+          outer={planPct(ready(v.text), v.text.total)}
+          inner={planPct(v.text.validated, v.text.total)}
+          tone="text"
+          aria={lines.text}
+          tips={readoutTips("text", ready(v.text), v.text.validated, v.text.total)}
+        />
+        {showAudio && (
+          <PlanBar
+            label={t("org.projectOverview.plan.audioBarLabel")}
+            outer={planPct(ready(v.audio), v.audio.total)}
+            inner={planPct(v.audio.validated, v.audio.total)}
+            tone="audio"
+            aria={lines.audio ?? ""}
+            tips={readoutTips("audio", ready(v.audio), v.audio.validated, v.audio.total)}
           />
         )}
       </div>
@@ -526,3 +696,5 @@ function PlanAssignHost({
     />
   )
 }
+
+const noRemove = async () => {}

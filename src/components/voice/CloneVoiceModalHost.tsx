@@ -50,13 +50,14 @@ export function CloneVoiceModalHost({
 
   // AQU-2037: a library write merges into the PROJECT's voices, not the open
   // lane's — `tts.voices` is the lane view, and storing it would delete every
-  // other lane's voices. The stored default rides along unchanged for the same
-  // reason: `tts.defaultVoiceId` is this lane's resolved default, so writing it
-  // back would overwrite another lane's starred voice. `saveTts` stamps the new
-  // voice with the active lane on the way through.
+  // other lane's voices. `saveTts` stamps the new voice with the active lane on
+  // the way through.
+  // AQU-2038: a `defaultVoiceId` in the patch is the ACTIVE LANE's star, so the
+  // default riding along is the lane's own (`tts.laneSettings`). Passing the
+  // project-wide one through here would move the lane's star back onto it.
   const saveVoice = (voice: Voice) => {
     if (!canEditVoices) return
-    const next = upsertVoice(tts.allVoices, voice, tts.settings?.defaultVoiceId)
+    const next = upsertVoice(tts.allVoices, voice, tts.laneSettings?.defaultVoiceId)
     void tts.saveTts({ voices: next.voices, defaultVoiceId: next.defaultVoiceId })
   }
 

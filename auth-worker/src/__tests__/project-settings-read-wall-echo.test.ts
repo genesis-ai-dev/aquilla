@@ -204,6 +204,37 @@ describe("settings writes behind the lane read wall (AQU-1750)", () => {
     expect(await storedSettings()).toEqual(STORED)
   })
 
+  it("a lead's read omits a hidden lane's voices, and an echo does not delete them", async () => {
+    await seed()
+    const withVoices = {
+      ...STORED,
+      ttsSettings: {
+        voices: [
+          { id: "narrator", name: "Narrator" },
+          { id: "de-1", name: "German", laneId: "ln-de" },
+          { id: "es-1", name: "Spanish", laneId: "ln-es" },
+        ],
+        defaultVoiceId: "de-1",
+        castAssignments: { hero: "de-1", guide: "es-1" },
+        laneCastAssignments: { de: { hero: "de-1" }, es: { guide: "es-1" } },
+        laneDefaultVoiceId: { de: "de-1", es: "es-1" },
+      },
+    }
+    await env.AQUILLA_PG.prepare(
+      "UPDATE project_settings SET settings = ? WHERE project_id = 'p1'",
+    ).bind(JSON.stringify(withVoices)).run()
+    env.LANE_READ_WALL = "1"
+    const lead = await getSettings("dan")
+    const tts = lead.settings.ttsSettings as { voices: { id: string }[] }
+    expect(tts.voices.map((voice) => voice.id)).toEqual(["narrator", "es-1"])
+    expect(JSON.stringify(lead.settings.ttsSettings)).not.toContain("de-1")
+    const owner = await getSettings("alice")
+    expect(JSON.stringify(owner.settings.ttsSettings)).toContain("de-1")
+    const res = await echoWrite("dan", { autopilotEnabled: true })
+    expect(res.status).toBe(200)
+    expect(await storedSettings()).toEqual({ ...withVoices, autopilotEnabled: true })
+  })
+
   it("a contributor's alignment-seed write is not refused because of the echo", async () => {
     // AQU-1408 admits an alignmentSeeds-only diff at Contributor. The filtered
     // echo used to add targetLanes/targetLanguage to the diff, so behind the

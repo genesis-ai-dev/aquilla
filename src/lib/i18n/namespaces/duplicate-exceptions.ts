@@ -964,4 +964,19 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "noun 'a draft' (fr 'Brouillon', ru 'Черновик'). An imperative verb on a " +
     "button and a nominalized stage caption take different words in most target " +
     "languages, so the two cannot share a translation.",
+  "dialog.assign.kind.translate":
+    "AQU-1969: an OPTION in the Assign dialog's Task field naming a KIND OF WORK a " +
+    "person is given (and read back on the closed field: 'Task: Translate'). " +
+    "editor.selection.translate is the selection toolbar's imperative button that " +
+    "asks the AI to draft the selected cells right now. A named kind of assigned " +
+    "work and a command to an AI are different words in many target languages " +
+    "(an infinitive or noun against an imperative), and the AI button must not " +
+    "start reading as a human task.",
+  "dialog.assign.kind.validate":
+    "AQU-1969: an OPTION in the Assign dialog's Task field naming a KIND OF WORK a " +
+    "person is given — only the approving, on lines somebody else translates. " +
+    "editor.selection.validate is the selection toolbar's imperative button that " +
+    "signs off the selected lines now, with a count badge after it. A named kind " +
+    "of assigned work and an imperative one-click action take different forms in " +
+    "many target languages (an infinitive or noun against an imperative).",
 }

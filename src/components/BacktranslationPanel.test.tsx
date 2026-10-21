@@ -53,9 +53,11 @@ describe("BacktranslationPanel", () => {
     renderPanel()
     expect(screen.getByRole("button", { name: /generate back-translation/i })).toBeTruthy()
     // AQU-1408: the gloss is a section that is simply there, not an expander
-    // the reader has to know to open.
+    // the reader has to know to open. (The pencil beside it is named
+    // "Correct the statistical gloss" — an action on the section, not a
+    // disclosure of it, so the exact-match name is what this asserts.)
     expect(screen.getByRole("heading", { name: /statistical gloss/i })).toBeTruthy()
-    expect(screen.queryByRole("button", { name: /statistical gloss/i })).toBeNull()
+    expect(screen.queryByRole("button", { name: /^statistical gloss$/i })).toBeNull()
   })
 
   it("shows the statistical gloss before any AI back-translation exists", () => {
@@ -187,5 +189,85 @@ describe("BacktranslationPanel", () => {
     })
     expect(screen.getByLabelText("Contributor+ required to edit back-translations")).toBeTruthy()
     expect(screen.queryByRole("button", { name: /generate back-translation/i })).toBeNull()
+  })
+})
+
+/**
+ * AQU-1408 §1 — the statistical gloss is correctable.
+ *
+ * Biblica ETT's reviewers could read the gloss, see it was wrong, and do
+ * nothing about it: it was computed from validated pairs only, so on a book
+ * nobody had validated it was wrong by construction. Josseline called making
+ * it editable "the only thing we need". These tests hold the affordance, the
+ * role floor, and the way back out of a correction.
+ */
+describe("BacktranslationPanel — correcting the statistical gloss (AQU-1408 §1)", () => {
+  it("lets a contributor correct the gloss", () => {
+    const onSaveGloss = vi.fn()
+    renderPanel({ statisticalGloss: "house of him", onSaveGloss })
+    fireEvent.click(screen.getByRole("button", { name: "Correct the statistical gloss" }))
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "dwelling of-him" } })
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+    expect(onSaveGloss).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "c1", translated: "maison de lui" }),
+      "dwelling of-him",
+    )
+  })
+
+  // The project with too few pairs to produce a gloss is exactly the project
+  // whose reviewers have the most to say. Gating the pencil on the computed
+  // gloss existing would lock them out at the moment they need it.
+  it("offers the correction even when the corpus produced no gloss", () => {
+    renderPanel({ statisticalGloss: "", onSaveGloss: vi.fn() })
+    expect(screen.getByText(/not enough translated pairs/i)).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Correct the statistical gloss" })).toBeTruthy()
+  })
+
+  it("clearing the box withdraws the correction rather than cancelling the edit", () => {
+    const onSaveGloss = vi.fn()
+    renderPanel({ statisticalGloss: "dwelling of-him", glossCorrected: true, onSaveGloss })
+    fireEvent.click(screen.getByRole("button", { name: "Correct the statistical gloss" }))
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "" } })
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+    expect(onSaveGloss).toHaveBeenCalledWith(expect.objectContaining({ id: "c1" }), "")
+  })
+
+  it("does not emit a write when the text comes back unchanged", () => {
+    const onSaveGloss = vi.fn()
+    renderPanel({ statisticalGloss: "house of him", onSaveGloss })
+    fireEvent.click(screen.getByRole("button", { name: "Correct the statistical gloss" }))
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+    expect(onSaveGloss).not.toHaveBeenCalled()
+  })
+
+  it("cancel leaves the gloss and the correction alone", () => {
+    const onSaveGloss = vi.fn()
+    renderPanel({ statisticalGloss: "house of him", onSaveGloss })
+    fireEvent.click(screen.getByRole("button", { name: "Correct the statistical gloss" }))
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "dwelling" } })
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }))
+    expect(onSaveGloss).not.toHaveBeenCalled()
+    expect(screen.getByText("house of him")).toBeTruthy()
+  })
+
+  // A reader weighing the gloss needs to know whether it is the corpus's own
+  // guess or a colleague's correction of it.
+  it("marks a corrected gloss, and drops the computed-gloss small print", () => {
+    renderPanel({ statisticalGloss: "dwelling of-him", glossCorrected: true })
+    expect(screen.getByText(/corrected by a translator/i)).toBeTruthy()
+    expect(screen.queryByText(/built statistically/i)).toBeNull()
+  })
+
+  it("keeps the small print on an uncorrected gloss", () => {
+    renderPanel({ statisticalGloss: "house of him" })
+    expect(screen.queryByText(/corrected by a translator/i)).toBeNull()
+    expect(screen.getByText(/built statistically/i)).toBeTruthy()
+  })
+
+  it("shows a reviewer why they cannot correct it instead of hiding the control", () => {
+    renderPanel({ editable: false, statisticalGloss: "house of him" })
+    const locked = screen.getByLabelText("Contributor+ required to correct the gloss")
+    expect(locked).toBeTruthy()
+    expect((locked as HTMLButtonElement).disabled).toBe(true)
   })
 })

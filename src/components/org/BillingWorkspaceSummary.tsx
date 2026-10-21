@@ -68,11 +68,8 @@ export function BillingWorkspaceDetails({ data }: { data: BillingWorkspace }) {
           <p className="text-sm text-muted-foreground">
             {t('billing.workspace.allowanceScope')}
           </p>
-          {typeof data.usagePercent === 'number' && data.usageResetsAt ? (
-            <p className="text-sm text-muted-foreground" data-testid="billing-usage-percent" role="status">
-              {t('billing.workspace.usagePercent', { percent: data.usagePercent, date: new Date(data.usageResetsAt).toLocaleString() })}
-            </p>
-          ) : data.entitlement ? <p className="text-sm text-muted-foreground">
+          {/* AQU-2068: the % used lives in the one meter above this group. */}
+          {data.entitlement ? <p className="text-sm text-muted-foreground">
             {t('billing.workspace.usagePeriodEnds', { date: new Date(data.entitlement.usagePeriodEnd).toLocaleString() })}
           </p> : null}
         </SettingsBlock>

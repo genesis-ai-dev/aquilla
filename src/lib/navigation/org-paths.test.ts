@@ -85,6 +85,7 @@ describe("editor settings handoff", () => {
     expect(safeReturnPath("/project/p1/editor/file/f1")).toBe("/project/p1/editor/file/f1")
     expect(safeReturnPath("//evil.example/phish")).toBeNull()
     expect(safeReturnPath("https://evil.example")).toBeNull()
+    expect(safeReturnPath("/\\evil.example")).toBeNull()
     expect(safeReturnPath(null)).toBeNull()
   })
 

@@ -674,7 +674,7 @@ CREATE TABLE IF NOT EXISTS removed_cell_archive (
     validators        JSONB NOT NULL DEFAULT '[]'::jsonb,
     waivers           JSONB NOT NULL DEFAULT '[]'::jsonb,
     backtranslations  JSONB NOT NULL DEFAULT '[]'::jsonb,
-    -- AQU-1408 (0182): the cell's hand-corrected statistical glosses.
+    -- AQU-1408 (0184): the cell's hand-corrected statistical glosses.
     glosses           JSONB NOT NULL DEFAULT '[]'::jsonb,
     morph             JSONB NOT NULL DEFAULT '[]'::jsonb,
     audio             JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -1111,7 +1111,7 @@ CREATE TABLE cell_backtranslations (
     PRIMARY KEY (project_id, file_id, cell_id, target_event_id)
 );
 
--- AQU-1408 (0182): a statistical gloss a contributor corrected by hand.
+-- AQU-1408 (0184): a statistical gloss a contributor corrected by hand.
 -- Deliberately NOT a row of cell_backtranslations: that table's primary key is
 -- the same four columns, so a saved gloss and the AI back-translation of the
 -- same commit would collide — and the two are different kinds of reading a
@@ -1234,7 +1234,7 @@ CREATE TABLE assignments (
     created_at       BIGINT NOT NULL,
     unassigned_at    BIGINT,
     completed_at     BIGINT,
-    -- AQU-1969 (0182): what the assignment hands out. 'translate' (the
+    -- AQU-1969 (0183): what the assignment hands out. 'translate' (the
     -- default, and every older row) measures lines validated by anyone in the
     -- scope; 'validate' measures the assignee's OWN approvals there.
     kind             TEXT NOT NULL DEFAULT 'translate'

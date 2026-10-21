@@ -1769,6 +1769,50 @@ describe("OPS-44 elevation-required mint", () => {
     }
   })
 
+  it("AQU-2003: a read-only platform view token is held like the 403 was, never posted", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1", { projectId: "burmese-ot" }))
+    const fetchMock = vi.fn()
+    const onForbidden = vi.fn()
+    const view: TokenMintResult = {
+      token: "tok-view",
+      status: 200,
+      role: { level: 100, source: "platform" },
+    }
+    const mint = vi.fn(async () => view)
+
+    const result = await flushOutboxBatch({
+      getTokenForFile: mint,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      onForbidden,
+    })
+
+    expect(result).toMatchObject({ posted: 0, quarantined: 0, authError: false })
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(onForbidden).not.toHaveBeenCalled()
+    // The second mint bypasses the minter's cache, which may predate the grant.
+    expect(mint).toHaveBeenLastCalledWith("burmese-ot", "f1", { forceRefresh: true })
+    const [record] = await peekOutboxBatch(10)
+    expect(record.status).toBe("pending")
+    expect(record.lastError).toEqual({ status: 403, reason: ELEVATION_HOLD_REASON })
+  })
+
+  it("AQU-2003: a cached view token is replaced by the elevated one on the forced re-mint", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1", { projectId: "burmese-ot" }))
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ accepted: [{ id: "e1" }], rejected: [] }))
+    const mint = vi.fn(async (_p: string, _f: string, opts?: { forceRefresh?: boolean }): Promise<TokenMintResult> =>
+      opts?.forceRefresh
+        ? { token: "tok-owner", status: 200 }
+        : { token: "tok-view", status: 200, role: { level: 100, source: "platform" } })
+
+    const result = await flushOutboxBatch({
+      getTokenForFile: mint,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    expect(result).toMatchObject({ accepted: 1, quarantined: 0 })
+    expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toMatchObject({ Authorization: "Bearer tok-owner" })
+  })
+
   it("contrast: a generic mint 403 (no access, archived) still quarantines", async () => {
     await enqueueOutboxEvent(makeEvent("e1", "f1", { projectId: "gone" }))
     const onForbidden = vi.fn()

@@ -187,6 +187,16 @@ reopen without a *new* `rules.*` orphan.
 
 ## `terminology.*` i18n keys — orphaned by the `TerminologyPage.tsx` deletion (2026-09-21)
 
+> **Status: `terminology.page.*` (16 keys) swept on 2026-10-16, `candidates.*` (11) on
+> 2026-10-19** — see those runs' entries at the bottom of this file for the proof and the
+> per-slice recipe. **24 of the 51 remain**, all in the one remaining five-prefix slice:
+> `libraryStats.*` (7), `reviewQueue.*` (6), `importDialog.*` (6), `common.*` (3),
+> `conceptDialog.*` (2), plus the 6 already-orphaned keys listed below. **All four
+> `duplicate-exceptions.ts` entries live in that last slice**, so it is the only one that has
+> to touch that file. The `page.*` and `candidates.*` lists below are kept as the record of
+> what went; do not re-derive them. Note `candidates.ngramLength` was NOT one of the 11 — it
+> is live in `CellTranscribeBadge.tsx`; see the 2026-10-19 entry.
+
 - **Found**: deleting `TerminologyPage.tsx` and the modules only it reached (see the
   component-cleanup entry above) left 65 of the 239 keys in
   `src/lib/i18n/namespaces/terminology.ts` with no reader — **51 since AQU-1337 re-surfaced
@@ -315,8 +325,9 @@ and each needs its own zero-importer re-verification before deletion, since file
   (`scripts/vite-phonemizer-browser.ts`) delegating to
   `src/lib/audio/phonemizer-browser-env.ts`; `vite.config.ts` has no stub alias, and the
   module was debris from the superseded alias-based approach. `pnpm build` stayed green.
-- `src/components/ui/{attachment,item,toggle-group,bar-spinner}.tsx` (537 lines total) —
-  unused shadcn/ui primitives. Deliberately NOT logged as dead code: `src/components/ui/` is
+- `src/components/ui/{attachment,item,bar-spinner}.tsx` — unused shadcn/ui primitives
+  (`toggle-group.tsx` was on this list and is off it: `MediaImportPreviewDialog.tsx`
+  imports it, confirmed by the 2026-10-14 sweep). Deliberately NOT logged as dead code: `src/components/ui/` is
   a vendored primitive library where "added ahead of first use" is normal, and `shadcn add`
   would just re-create them. Only worth touching if a human says the repo prefers a
   strictly-used-only `ui/` directory.
@@ -1977,3 +1988,267 @@ the real rev-1243 Chromium") is now more than advice — step 1 above *measures*
 container has rev 1194/Chromium 141 and the shim is what makes the suite runnable at all, so
 those six failing against a deliberately mismatched browser is the expected outcome, not a
 finding.
+
+## 2026-10-16 — dead-key run: the `terminology.page.*` slice (16 of the queued 51)
+
+**Done this run** (theme 1, dead-code deletion applied to the message catalog; 11 files,
+390 deletions / 5 insertions, no test file touched): the 16 orphaned keys under
+`terminology.page.*`, orphaned by the 2026-09-21 `TerminologyPage.tsx` deletion. This is the
+first of the three slices the 2026-10-07 entry's budget arithmetic prescribed
+(`page.*` / `candidates.*` / the five small prefixes together); the other two are untouched.
+
+- `src/lib/i18n/namespaces/terminology.ts` — 16 entries out of `messages` (22 lines) and 14
+  out of `context.keys` (70 lines). **Two of the 16 — `editConceptTitle` and `deleteConcept`
+  — carry no per-key context entry at all**, which is legitimate (`requiresOwnContextEntry()`
+  exempts a plain label with no placeholder, no `maxLength` and no a11y-name naming pattern),
+  so expect 1 hit for those two and 2 for the rest; a strip script that asserts two hits per
+  key will trip on them.
+  - Two section headers lost every key under them and went with them: `── TerminologyPage.tsx:
+    ConceptRow (main concepts table row) ──` and the 5-line `── TerminologyPage.tsx: tab strip
+    (counted variants …) ──` (whose own text cited three of the deleted keys).
+  - `── TerminologyPage.tsx: main page chrome ──` became `── GlossaryEditor.tsx inside the
+    workspace shell — what is left of the retired TerminologyPage.tsx's own chrome ──`,
+    following the `rules.ts` precedent of re-pointing a header at the live container rather
+    than deleting the provenance. Its two survivors are both live and both that surface:
+    `terminology.page.mergeDuplicatesButton` (`GlossaryEditor.tsx:789`) and
+    `terminology.loadingLabel` (`ProjectWorkspace.tsx:14258`, the Suspense fallback for the
+    lazily-imported `GlossaryEditorContent`).
+  - `terminology.loadingLabel`'s context note claimed it was "Rendered from two places for the
+    same surface — the Terminology page itself and the workspace shell's Suspense fallback".
+    One of those two is the page that was deleted, so the note was reworded to the one
+    remaining caller, keeping the "worded without naming its container" instruction. Exactly
+    the `rules.loadingLabel` edit the 2026-10-07 run made, for the same reason.
+- The nine generated catalogs `src/lib/i18n/messages/{ar,fr,id,ms,my,ru,th,zh-Hans,zh-Hant}.ts`
+  (16 lines each, 15 in `fr` — it never carried `page.conceptsHeading`) and
+  `src/lib/i18n/source-hashes.json` (143 hash entries across the nine locales). Mandatory, not
+  optional: `Catalog` is `Partial<Record<MessageKey, …>>`, so a key dropped from the base
+  namespace is an excess-property `tsc` error in every catalog still carrying it.
+- **`duplicate-exceptions.ts` was NOT touched, and that is a finding, not an omission** — see
+  the simulation below. The four exception-carrying orphans the old entry names
+  (`libraryStats.enforcedLabel`, `libraryStats.infringedLabel`,
+  `conceptDialog.renderingPlaceholder`, `common.statusLabel`) are all in the *third* slice, so
+  the file is this run's problem only if a deleted key was the other half of some pair. None was.
+
+**Proof** (all of it run, none argued):
+
+- Orphan status re-verified per key, not per prefix: for each of the 17 `terminology.page.*`
+  keys, a literal grep across `src e2e scripts worker auth-worker/src sync-worker/src
+  agent-worker/src tools parity packages` outside `src/lib/i18n/` — 16 miss, and
+  `page.mergeDuplicatesButton` hits `GlossaryEditor.tsx`, which is why it stayed. No dynamic
+  `` `terminology.…${ `` construction exists anywhere in the repo, so a literal search is
+  sufficient (unchanged from the old entry's finding).
+- **The no-duplicates guards were simulated before the edit**, reusing the 2026-10-07 recipe
+  (a throwaway script re-implementing the three hard assertions against the catalog with the
+  16 keys removed in memory). Result: **none of the 16 strings is in a collision group at
+  all** — the unexcused-duplicate group count is 241 before and 241 after, no exception loses
+  its key, and no exception is left excusing a group that drops below two keys. Re-run against
+  the edited tree afterwards: same 241, 8175 keys. The cheap pre-check is worth keeping for
+  the remaining two slices, where the four real exceptions live.
+- One guard this slice had to check that the `rules.*` run did not: `context.test.ts:78-85`
+  requires every declared screenshot surface to be linked by at least one key's context. None
+  of the 16 entries declares a `screenshot` and the `terminology` namespace's `_context` has
+  none either, so no surface lost its last linker (verified in the same simulation).
+- `source-hashes.json` was rewritten with Python's `json.dumps(…, indent=2,
+  ensure_ascii=False) + "\n"`, proven byte-identical to the sidecar's own writer
+  (`scripts/i18n-catalog.ts:117`, `JSON.stringify(all, null, 2) + "\n"`) by a no-op round-trip
+  on the untouched 3,344,352-byte file before any key was dropped. The diff is 143 deleted
+  lines and zero added (`git diff --numstat` → `0 143`).
+- `npx tsc -b` green, `pnpm i18n:check` green (**8175 keys covered, was 8191** — exactly 16
+  fewer), the 15-file `src/lib/i18n` suite 193/193 green, then the full gate below.
+
+### Budget: 11 files / 390 lines, and the per-key arithmetic is now measured twice
+
+Against the stated ≤8 files / ≤300 lines. Same structural overage the 2026-10-07 entry
+predicted and for the same reason — a single i18n key costs a line in 11 files — but the slice
+worked: 390 lines against that run's 617, and the three-way split it prescribed is vindicated,
+so the two remaining slices should go the same way. Measured cost per key in this namespace is
+**~24 lines** (the context entries are multi-line prose), not the 11 the `rules.*` run saw, so
+`candidates.*` (11 keys) should land near ~270 lines and the five-prefix slice (24 keys) will
+likely exceed this one.
+
+### Smoke 2026-10-16: 93/101 — the documented six, plus a NEW pre-existing flake, A/B'd
+
+`E2E_PG_ADMIN_URL=… npx tsx scripts/e2e-shard.ts 1 -- smoke.spec`: **93 passed, 8 failed,
+21.2m.** Six are the standing Chromium-revision-gap media set, at their current line numbers:
+`import-and-edit.smoke.spec.ts:177`, `import-and-edit.smoke.spec.ts:338` × 3 (the YouTube
+srt/vtt/sbv caption exports — was `:333`), and `import-media-captions.smoke.spec.ts:132` × 2.
+The 2026-10-14 container recipe (the rev-1243 shim, Postgres + the `aquilla` role, the three
+workers' `npm ci --legacy-peer-deps`) worked verbatim and nothing else was needed.
+
+**The other two are new to this ledger and are NOT this diff** —
+`collab/commit-chain-linear.smoke.spec.ts:155` ("quick re-edit after Tab / Shift+Tab chains on
+the first save (already translated verse)", `readTargetText` polls `""` instead of
+`"QUICK-A, corrected"` for 10s) and `:321` ("a second tab of the same user sees the first tab's
+commit and chains on it"). A/B'd as a single-spec shard in the same container rather than
+assumed:
+
+| arm | result |
+| --- | --- |
+| the diff `git stash`ed (pristine `dev`) | **2 failed / 8 passed**, 3.6m — `:66` and `:155` |
+| the diff in place | **10 passed**, 2.8m |
+
+So the pristine arm failed *harder* than the changed one, and the second failing test moved
+(`:66` pristine vs `:321` in the full run) while `:155` is common to both — an order/timing
+instability in that spec on trunk, not a regression. It cannot be this diff in any case: the
+16 keys had no reader, and removing an unused catalog key cannot reach the commit chain.
+**Worth a ticket** as a pre-existing flake, same family as issue
+[#410](https://github.com/genesis-ai-dev/aquilla/issues/410) but on the Playwright side.
+**Expected figure in this container is therefore 93-95/101**: the six media failures always,
+plus whatever `commit-chain-linear` does that run.
+
+**One trap this run paid for, worth the line**: `pkill -9 -f wrangler` matches the agent's own
+shell, whose command line contains the word, and kills it mid-chain — the `git stash pop` after
+it silently never ran. Match on `workerd` (or `pgrep`-then-`kill` by pid) and never put
+`wrangler` in a `pkill -f` pattern from a shell whose own argv mentions it. Note also that `ss`
+is still absent in this container (2026-10-14 finding); a 5-line Python `connect_ex` loop over
+`9787/9788/6173/10456/10460` is the portable replacement for the stale-port poll.
+
+## 2026-10-19 — dead-key run: the `terminology.candidates.*` slice (11 of the queued 35)
+
+**Done this run** (theme 1, dead-code deletion applied to the message catalog; 12 files,
+276 deletions / 9 insertions, no test file touched): the 11 orphaned keys under
+`terminology.candidates.*`, orphaned by the 2026-09-21 `TerminologyPage.tsx` /
+`CandidateTermsPanel.tsx` deletion. This is the **second** of the three slices the 2026-10-07
+entry's budget arithmetic prescribed; **24 of the 51 remain** — the five-prefix slice
+(`libraryStats.*` 7, `reviewQueue.*` 6, `importDialog.*` 6, `common.*` 3, `conceptDialog.*` 2)
+plus the 6 already-orphaned keys, which is where all four `duplicate-exceptions.ts` entries live.
+
+- `src/lib/i18n/namespaces/terminology.ts` — 11 entries out of `messages` and **5** out of
+  `context.keys`. **Only 5 of the 11 carry a per-key context entry** (`countRankedByNc`,
+  `minedFromSummary`, `corpusScopeFull`, `corpusScopeCapped`, `miningLabel`); the other six
+  (`emptyTitle`, `emptyDescription`, `ncTooltip`, `cTooltip`, `g2Tooltip`, `promoteButton`) are
+  plain labels with no placeholder, no `maxLength` and no a11y-name pattern, which
+  `requiresOwnContextEntry()` legitimately exempts. A strip script asserting two hits per key
+  trips on six of eleven here — worse than the `page.*` slice's two of sixteen.
+- **`terminology.candidates.ngramLength` is the twelfth `candidates.*` key and it is LIVE** —
+  do not delete it, and do not trust a prefix-wide grep. Its one caller is
+  `src/components/CellTranscribeBadge.tsx:62`, where it renders the **word count of a
+  transcription take**, not a candidate term; `src/lib/i18n/namespaces/workspace.ts:289-291`
+  documents that reuse in a comment beside `workspace.transcribeBadge.doneTooltip`. It is the
+  whole reason each locale catalog carries 12 `candidates.*` lines while this slice removes 11.
+- Section headers: `── TerminologyPage.tsx: candidate-terms tab intro paragraph ──` lost all
+  four of its keys and went with them. `── CandidateTermsPanel.tsx ──` kept exactly one
+  survivor, so it was re-pointed at the live container (`── CellTranscribeBadge.tsx — the one
+  survivor of the retired CandidateTermsPanel.tsx's own keys ──`), the same `rules.ts` /
+  `page.*` precedent.
+- Two surviving context notes named surfaces this deletion removes the last trace of, and were
+  reworded to their one remaining caller (the `loadingLabel` precedent from 2026-10-16):
+  - `terminology.candidates.ngramLength` — "Badge on a candidate-term row" → worded for the
+    transcription take it actually renders on, without naming its container.
+  - `terminology.common.occurrenceCount` — claimed it was "reused for both the term detail
+    header and a candidate-term row"; its only caller is `TerminologyTermDetail.tsx:598`.
+- The nine generated catalogs `src/lib/i18n/messages/{ar,fr,id,ms,my,ru,th,zh-Hans,zh-Hant}.ts`
+  (**11 lines each, uniformly** — unlike the `page.*` slice, where `fr` was one short) and
+  `src/lib/i18n/source-hashes.json` (**99** hash entries = 11 × 9, no locale missing any).
+  Mandatory, not optional, for the `Catalog = Partial<Record<MessageKey, …>>` excess-property
+  reason the standing entry gives.
+- **`duplicate-exceptions.ts` untouched, and that is a finding** — see the simulation. None of
+  the four exception-carrying orphans is in this slice, and no deleted string was the other
+  half of any exception's pair.
+
+**The feature did not die with its strings, which is worth knowing before a future run
+"restores" them**: candidate mining is alive and moved server-side —
+`sync-worker/src/events/terminology-scan.ts:5` imports `extractCandidates` from
+`src/lib/terminology/candidates.ts` (still tested), and `GlossaryEditor.tsx:538` fetches
+`/terminology/candidates` via `fetchTerminologyCandidates`. But the editor **renders none of
+these 11 strings** — it silently turns each candidate into a draft concept
+(`addConcept(..., status: "draft")`). So the strings are dead while the feature lives; if a UI
+ever re-surfaces a ranked candidate list, they will be re-authored, exactly as AQU-1337 did for
+`mergeDialog.*`. The `e2e/specs/projects/terminology-candidates-tab.smoke.spec.ts` that
+`docs/FEATURE-STORIES.csv` T-22 still cites no longer exists either.
+
+**Proof** (all of it run, none argued):
+
+- Orphan status verified per key, not per prefix: for each of the 12 `terminology.candidates.*`
+  keys, a literal grep across `src e2e scripts worker auth-worker/src sync-worker/src
+  agent-worker/src tools parity packages` outside `src/lib/i18n/` — 11 miss, and `ngramLength`
+  hits `CellTranscribeBadge.tsx`, which is why it stayed. A repo-wide grep (excluding
+  `node_modules`/`.git`/`dist`) found the other two mentions of the prefix and both were
+  accounted for: the `workspace.ts` comment documenting `ngramLength`'s reuse, and this ledger.
+  No dynamic `` `terminology.…${ `` construction exists anywhere, so a literal search suffices.
+- The prefix `terminology.livingMemory.styleRules.candidates.*` is a **different, live** feature
+  (proposed style rules) and matches a careless `candidates\.` grep. Anchor on
+  `terminology\.candidates\.`.
+- **The i18n hard guards were simulated before the edit**, reusing the 2026-10-07 recipe (a
+  throwaway script re-implementing `no-duplicates.test.ts`'s three hard assertions plus
+  `context.test.ts`'s screenshot-linkage check against the catalog with the 11 keys removed in
+  memory). Result: **none of the 11 strings is in a collision group at all** — unexcused
+  duplicate groups **252 before, 252 after**; no exception loses its key or stops colliding; no
+  exception is left excusing a group that drops below two keys; no declared screenshot surface
+  loses its last linker (none of the 5 context entries declares a `screenshot`, nor does the
+  namespace `_context`); and no *surviving* context entry cites a deleted key by name — the
+  three that cross-cite each other (`minedFromSummary` ↔ `corpusScopeFull`/`corpusScopeCapped`)
+  are all inside the slice. `LEGACY_CONTEXT_GAPS` is `[]` on trunk, so there was no carve-out to
+  re-check. Re-run against the edited tree afterwards: same 252, 8304 keys.
+- `source-hashes.json` was rewritten with Python's `json.dumps(…, indent=2,
+  ensure_ascii=False) + "\n"`, proven byte-identical to the sidecar's own writer
+  (`scripts/i18n-catalog.ts`, `JSON.stringify(all, null, 2) + "\n"`) by a no-op round-trip on
+  the untouched 3,334,089-byte file before any key was dropped. The diff is 99 deleted lines and
+  zero added (`git diff --numstat` → `0 99`).
+- `npx tsc -b` green, `pnpm i18n:check` green (**8304 keys covered, was 8315** — exactly 11
+  fewer), the 15-file `src/lib/i18n` suite 193/193 green, then the full gate.
+
+### Budget: 12 files / 285 lines, and the per-key cost is now measured three times
+
+Against the stated ≤8 files / ≤300 lines. Same structural overage as the two prior slices, same
+reason (one key costs a line in 11 files), but this one landed **inside** the line budget: 276
+deletions / 9 insertions across 11 source files + this ledger. Measured cost is **~25 lines per
+key** (276/11), which tracks the `page.*` slice's ~24 almost exactly and confirms the
+three-way split was right. The remaining five-prefix slice is 24 keys → **expect ~600 lines**,
+so it should itself be split in two (the ledger's 2026-10-16 prediction that it "will likely
+exceed this one" is now a measurement, not a guess).
+
+### Container setup 2026-10-19: two new blockers, neither in the existing recipes
+
+1. **`ONNXRUNTIME_NODE_INSTALL=skip` no longer works, and the pnpm CLI override does not
+   either.** `pnpm i` dies in `onnxruntime-node`'s postinstall with `read ECONNRESET` against
+   **`api.nuget.org`** — the proxy's own `/__agentproxy/status` lists three
+   `ws_closed_mid_exchange` failures for that host, so it is unreachable here, not slow.
+   `pnpm i --config.neverBuiltDependencies[]=onnxruntime-node` is **silently ignored** by pnpm
+   10.19.0 (the postinstall still ran). What works is the 2026-10-09 recipe, unchanged:
+   `pnpm install --ignore-scripts` (6.8s, exit 0, links `node_modules/.bin`). The root gate
+   (`lint`/`build`/`test`) then ran green with **no `pnpm rebuild` at all** — the four
+   postinstalls that entry restores were not needed for it. `onnxruntime-node` is a Node-only
+   transitive of `@huggingface/transformers` and `.github/audit-allowlist.json` already records
+   that it is in no deployed artifact, so skipping it changes nothing the gates measure.
+2. **The agent harness kills a background command at 30 minutes, which silently truncates a
+   chained gate.** `{ pnpm lint; pnpm build; pnpm test; }` as one background command was killed
+   mid-`pnpm test`; the log's last line was `ELIFECYCLE Test failed`, which reads exactly like a
+   real suite failure and is not one (zero `FAIL` lines above it, and `TEST_EXIT` was never
+   written). **Run each gate as its own background command** — `pnpm build` ~14m and `pnpm test`
+   ~24m each fit, chained they do not — and always assert on the `GATE_EXIT=` sentinel rather
+   than on the tail of the log.
+
+Also worth re-recording because both earlier recipes held verbatim: the **rev-1243 Chromium
+double symlink** (2026-10-14, exact — image still ships 1194, `@playwright/test` still resolves
+1243), **Postgres installed but not listening** (uncomment `listen_addresses`, `pg_ctl start`,
+`create role aquilla`, `E2E_PG_ADMIN_URL`), and **`npm ci --legacy-peer-deps` in each of the
+three worker packages** (all three `package-lock.json` files verified untouched afterwards). Two
+notes on top: `pg_ctl -w start` outlives the harness killing its wrapper shell (the daemon keeps
+running — re-check with a `psql` probe, not by assuming it died), and the role must be created
+over the **unix socket** as `postgres` (`su postgres -c psql`), since a TCP connect as
+`postgres` prompts for a password that does not exist here.
+
+### Smoke 2026-10-19: 95/101 — the documented six and nothing else, booted first try
+
+`E2E_PG_ADMIN_URL=… npx tsx scripts/e2e-shard.ts 1 -- smoke.spec`: **95 passed, 6 failed,
+20.5m.** All six are the standing Chromium-revision-gap media set, at **exactly the line numbers
+the 2026-10-16 entry recorded** — `import-and-edit.smoke.spec.ts:177`, `:338` × 3 (the YouTube
+srt/vtt/sbv caption exports), `import-media-captions.smoke.spec.ts:132` × 2 (embedded m4a/mp4).
+They cannot be this diff in any case: the 11 keys had no reader, and removing an unused catalog
+key cannot reach media decode. No A/B arm was needed, the set being identical to the documented
+one; the pre-edit guard simulation plus the identical `pnpm test` counts carry the preservation
+proof.
+
+**The two `collab/commit-chain-linear.smoke.spec.ts` failures the 2026-10-16 run flagged as new
+did NOT recur** (`:155` and `:321` both passed here), which supports that run's A/B conclusion
+that they are order/timing instability on trunk rather than anything a diff caused. **95/101 is
+the best figure recorded in this container** (92/99 on 2026-10-14, 95/101 on 2026-10-12, 93/101
+on 2026-10-16), so the expected figure is **95/101 with the six media failures**, and anything
+else is worth A/B'ing.
+
+The whole stack booted on the **first** attempt, which no previous run managed — the 2026-10-14
+recipe plus the 2026-10-09 `--ignore-scripts` install is now complete enough to follow blind.
+The `pkill` traps both earlier entries record were avoided by never using `pkill -f` at all:
+`ps -eo pid,args | grep -E "[w]orkerd serve|[w]rangler dev"` reported no strays and nothing
+needed killing.

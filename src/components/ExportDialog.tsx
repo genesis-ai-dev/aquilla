@@ -20,6 +20,7 @@
 // a "Voice" filter appears letting users export only one voice's cells across
 // all camera angles.
 
+import { ExtensionExports } from "@/components/tools/ExtensionExports"
 import { useState, useEffect, useMemo, useRef, useCallback, type ComponentType } from "react"
 import { Download, AlertTriangle, CheckCircle2, ChevronRight } from "lucide-react"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
@@ -66,6 +67,7 @@ import {
   scopeAudioCellsForExport,
   unvalidatedAudioLineIds,
 } from "@/lib/export/audio-validation-scope"
+import { audioLineLabels } from "@/lib/export/audio-line-labels"
 import { downloadSourceFile, downloadProjectZip, fetchSourceSidecar, fetchRemovedCells } from "@/lib/sync/source-export"
 import { exportPlainTextStructured } from "@/lib/export/exporters/plaintext"
 import { exportMarkdownStructured } from "@/lib/export/exporters/markdown"
@@ -89,6 +91,7 @@ import {
   hasExportMemory,
   readExportMemory,
   writeExportMemory,
+  type ExportDialogMemory,
   type ExportSection,
   type SubtitleTarget,
 } from "@/lib/export/export-dialog-memory"
@@ -435,6 +438,9 @@ interface ExportDialogProps {
   onJumpToAudioLine?: (cellId: string) => void
 }
 
+/** AQU-2073: how many line pills the unvalidated-audio note shows before "+N more". */
+const UNVALIDATED_LINE_PILLS_SHOWN = 8
+
 function profileIdFromCells(cells: readonly CellData[]): string | null {
   for (const cell of cells) {
     const metadata = cell.metadata
@@ -625,6 +631,9 @@ export function ExportDialog({
   const [vttIncludeSource, setVttIncludeSource] = useState(false)
   /** Chapter stitch only. Off keeps each chapter file to its verses. */
   const [includeChapterHeadings, setIncludeChapterHeadings] = useState(false)
+  /** AQU-1575, Audio by line only: copy each take as stored, or write every
+   *  take as 16-bit / 48 kHz / mono WAV for a broadcast deliverable. */
+  const [lineAudioFormat, setLineAudioFormat] = useState<ExportDialogMemory["lineAudioFormat"]>("original")
   /** Which audio deliverable the Audio card will produce. Mix tracks, a review
    *  folder, and a chapter stitch share a card and a button rather than
    *  competing as separate entries in the format list. */
@@ -673,6 +682,7 @@ export function ExportDialog({
       setVttExcludeLabels(remembered.excludeLabels)
       setVttIncludeSource(remembered.includeSource)
       setIncludeChapterHeadings(remembered.includeChapterHeadings)
+      setLineAudioFormat(remembered.lineAudioFormat)
       // The remembered format is checked against what is actually on offer —
       // ids come and go with the file type and the build, and selecting one
       // that is no longer listed would leave the radio group with no selection
@@ -897,6 +907,7 @@ export function ExportDialog({
       excludeLabels: vttExcludeLabels,
       includeSource: vttIncludeSource,
       includeChapterHeadings,
+      lineAudioFormat,
     })
   }, [
     open,
@@ -910,6 +921,7 @@ export function ExportDialog({
     vttExcludeLabels,
     vttIncludeSource,
     includeChapterHeadings,
+    lineAudioFormat,
   ])
 
   /**
@@ -1174,6 +1186,13 @@ export function ExportDialog({
     () => unvalidatedAudioLineIds(audioSourceCells, audioValidationRequirement),
     [audioSourceCells, audioValidationRequirement],
   )
+  /** AQU-2073: those lines named for the note's pills — a line's reference
+   *  ("JHN 6:5"), or "L3" the way the by-line export numbers its files. */
+  const unvalidatedAudioPills = useMemo(() => {
+    const labels = audioLineLabels(audioSourceCells)
+    return unvalidatedAudioLines.map((id) => ({ id, label: labels.get(id) ?? id }))
+  }, [audioSourceCells, unvalidatedAudioLines])
+  const [showAllUnvalidatedLines, setShowAllUnvalidatedLines] = useState(false)
 
   /**
    * The cells the AUDIO deliverables export from, with the content mode
@@ -1564,12 +1583,16 @@ export function ExportDialog({
         exportToastRef.current = null
       } else if (fmt === "audio-by-line") {
         // The other shape (Sam, 2026-08-18: "a separate track for each
-        // recording? With timing data?"). No decoding — the stored bytes are
-        // copied straight across, so this is lossless and fast where the
-        // character export has to resample everything onto one timeline.
-        setStatus({ kind: "busy", msg: "Collecting recordings…" })
+        // recording? With timing data?"). By default no decoding — the stored
+        // bytes are copied straight across, so this is lossless and fast where
+        // the character export has to resample everything onto one timeline.
+        // AQU-1575: the WAV choice decodes every take and writes it again as
+        // 16-bit / 48 kHz / mono.
+        const lineWav = lineAudioFormat === "wav"
+        setStatus({ kind: "busy", msg: lineWav ? t("importExport.status.decodingAudio") : "Collecting recordings…" })
         const { exportAudioPerLine } = await import("@/lib/export/audio-per-line")
         const { fetchCellAudio } = await import("@/lib/audio/upload")
+        const decode = lineWav ? (await import("@/lib/audio/decode-mono")).decodeToMono48k : undefined
         const getSyncToken = (_pid: string, fileId: string) => getToken(fileId)
         const result = await exportAudioPerLine({
           cells: audioExportCells,
@@ -1584,7 +1607,15 @@ export function ExportDialog({
           fileBase: defaultBaseName,
           fetchBytes: ({ projectId: pid, fileId, audioId, ext }) =>
             fetchCellAudio({ projectId: pid, fileId, audioId, ext, getSyncToken }),
-          onProgress: (d, t) => setStatus({ kind: "busy", msg: `Collecting ${d}/${t}…` }),
+          format: lineAudioFormat,
+          decode,
+          onProgress: (d, tot) =>
+            setStatus({
+              kind: "busy",
+              msg: lineWav
+                ? t("importExport.status.decodingCount", { done: d, total: tot })
+                : `Collecting ${d}/${tot}…`,
+            }),
         })
         if (result.files === 0) {
           setStatus({
@@ -2020,34 +2051,67 @@ export function ExportDialog({
    */
   const renderUnvalidatedAudioNote = () => {
     if (unvalidatedAudioLines.length === 0) return null
+    // AQU-2073 (Sam, 2026-10-20): every such line by name, each one click
+    // away, instead of a "Show me" that only reached the first. A long file
+    // shows the first few and "+N more", which opens the rest in place.
+    const shown = showAllUnvalidatedLines
+      ? unvalidatedAudioPills
+      : unvalidatedAudioPills.slice(0, UNVALIDATED_LINE_PILLS_SHOWN)
+    const hidden = unvalidatedAudioPills.length - shown.length
+    const pillClass =
+      "rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-medium tabular-nums " +
+      "text-amber-800 hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 " +
+      "dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-900/50"
     return (
-      <p
+      <div
         data-testid="export-audio-unvalidated-note"
-        className="text-xs leading-relaxed text-amber-700 dark:text-amber-400"
+        className="flex flex-col gap-1.5 text-xs leading-relaxed text-amber-700 dark:text-amber-400"
       >
-        {t(
-          validatedOnly
-            ? "importExport.dialog.audioUnvalidatedOmittedNote"
-            : "importExport.dialog.audioUnvalidatedNote",
-          { count: unvalidatedAudioLines.length },
-        )}
+        <p className="m-0">
+          {t(
+            validatedOnly
+              ? "importExport.dialog.audioUnvalidatedOmittedNote"
+              : "importExport.dialog.audioUnvalidatedNote",
+            { count: unvalidatedAudioLines.length },
+          )}
+        </p>
         {onJumpToAudioLine && (
-          <>
-            {" "}
-            <button
-              type="button"
-              className="underline underline-offset-2 hover:no-underline"
-              onClick={() => {
-                // The dialog covers the line it is about to show.
-                onOpenChange(false)
-                onJumpToAudioLine(unvalidatedAudioLines[0])
-              }}
-            >
-              {t("importExport.dialog.audioUnvalidatedJump")}
-            </button>
-          </>
+          <ul
+            className="m-0 flex list-none flex-wrap gap-1 p-0"
+            aria-label={t("importExport.dialog.audioUnvalidatedLinesAria")}
+          >
+            {shown.map(({ id, label }) => (
+              <li key={id}>
+                <button
+                  type="button"
+                  className={pillClass}
+                  aria-label={t("importExport.dialog.audioUnvalidatedShowLine", { line: label })}
+                  data-testid="export-audio-unvalidated-line"
+                  onClick={() => {
+                    // The dialog covers the line it is about to show.
+                    onOpenChange(false)
+                    onJumpToAudioLine(id)
+                  }}
+                >
+                  {label}
+                </button>
+              </li>
+            ))}
+            {hidden > 0 && (
+              <li>
+                <button
+                  type="button"
+                  className="rounded-full px-2 py-0.5 text-[11px] font-medium text-amber-800 underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 dark:text-amber-300"
+                  data-testid="export-audio-unvalidated-more"
+                  onClick={() => setShowAllUnvalidatedLines(true)}
+                >
+                  {t("importExport.dialog.audioUnvalidatedMore", { count: hidden })}
+                </button>
+              </li>
+            )}
+          </ul>
         )}
-      </p>
+      </div>
     )
   }
 
@@ -2138,6 +2202,23 @@ export function ExportDialog({
           </div>
           )
   }
+
+  /** AQU-1575: Audio by line copies each take as stored, or writes every take
+   *  as the WAV a broadcast studio asks for. Same checkbox shape as the
+   *  chapter stitch's heading option, and remembered with it. */
+  const renderLineFormatOption = () => (
+    <label className="flex items-start gap-2 text-xs text-muted-foreground">
+      <Checkbox
+        data-testid="export-line-audio-wav"
+        checked={lineAudioFormat === "wav"}
+        onCheckedChange={(c) => setLineAudioFormat(c === true ? "wav" : "original")}
+      />
+      <span className="flex flex-col gap-0.5">
+        <span className="text-foreground">{t("importExport.dialog.lineAudioWav")}</span>
+        <span>{t("importExport.dialog.lineAudioWavHint")}</span>
+      </span>
+    </label>
+  )
 
   /** How many verses will be stitched, and into how many chapter files. */
   const renderChapterPreview = () => {
@@ -2326,6 +2407,7 @@ export function ExportDialog({
                   </label>
                 ))}
               </RadioGroup>
+              {audioMode === "audio-by-line" && renderLineFormatOption()}
               {/* The preview belongs WITH the button that acts on it. */}
               {audioMode === "audio-chapter" ? renderChapterPreview() : renderCharacterPreview()}
               {renderUnvalidatedAudioNote()}
@@ -2790,6 +2872,9 @@ export function ExportDialog({
         {/* Subtitle shape options — on the card for a dubbing file. */}
         {!isDubbingFile && format === "vtt" && renderVttOptions()}
 
+        {!isDubbingFile && format === "audio-by-line"
+          // i18n-exempt "file" is an ExportScope tag, not copy
+          && effectiveScope === "file" && renderLineFormatOption()}
         {/* Who is recorded — on the card for a dubbing file. */}
         {!isDubbingFile && (format === "audio-by-character" || format === "audio-by-line")
           // i18n-exempt "file" is an ExportScope tag, not copy
@@ -3004,6 +3089,7 @@ export function ExportDialog({
             </ul>
           </div>
         )}
+        <ExtensionExports projectId={projectId} fileId={activeFileId} lane={targetLang ?? ""} getToken={getToken} />
         </>
         )}
         </DialogBody>

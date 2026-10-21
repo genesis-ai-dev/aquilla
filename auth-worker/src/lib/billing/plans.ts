@@ -144,7 +144,10 @@ export function periodAllowanceWords(args: {
 }
 
 export interface FieldPlanSettings {
+  /** Legacy unit cap; the meter reads freeWeeklyRawUsd instead (AQU-2056). */
   freeWeeklyAllowance?: number
+  freeWeeklyRawUsd?: number
+  teamMultipleOfFree?: number
   priceCents?: number
   includedWords?: number
   addonWords?: number

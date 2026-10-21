@@ -15,6 +15,17 @@ export interface KnowledgeDocument {
   r2Key: string
   docSummary: string | null
   indexStatus: KnowledgeIndexStatus
+  /**
+   * AQU-2002: why the last indexing run ended where it did, or null when it
+   * had nothing to report.
+   *
+   * Server-authored and shown verbatim (auth-worker's `describeIndexFailure`),
+   * for the same reason `KnowledgeBaseApiError.serverMessage` is: the reason
+   * names the fix, and a status badge on its own does not. A `ready` doc can
+   * carry one too — structure indexed, summaries missing — so this is not
+   * "the error" but "what this run has to say".
+   */
+  indexError: string | null
   createdBy: string
   createdAt: string
   updatedAt: string
@@ -43,11 +54,11 @@ export type KnowledgeScope =
  * this window the job cannot still be running, so the read side says so and
  * offers a retry instead.
  *
- * Deliberately well above the worker's own enrichment ceiling
- * (`KB_INDEX_FETCH_TIMEOUT_MS`, 60s, in
- * auth-worker/src/lib/knowledge/index-doc.ts) so a job still inside its budget
- * is never flagged: a real run either finishes or self-aborts long before this.
- * Keep the two in step if either moves.
+ * Deliberately well above the worker's own job budget (`KB_INDEX_BUDGET_MS` in
+ * auth-worker/src/lib/knowledge/index-doc.ts, itself derived from the 30s the
+ * platform grants a waitUntil task) so a job still inside its budget is never
+ * flagged: a real run either finishes or self-aborts long before this. Keep the
+ * two in step if either moves.
  */
 export const KB_INDEX_STALE_MS = 5 * 60_000
 

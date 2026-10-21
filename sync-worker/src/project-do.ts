@@ -81,6 +81,7 @@ import { LINK_SYNC_INVOCATION_BUDGET_MS, mirrorSync, type MirrorSyncResult } fro
 import { makePostgres } from "../../db/shim/postgres"
 import { createRerunSingleFlight } from "./lib/rerun-single-flight"
 import { serviceBearerMatches } from "./lib/service-auth"
+import { withStoreSecrets } from "../../db/shared/secrets-store-overlay"
 
 /**
  * AQU-346: how long a member-removed denylist entry blocks reconnects.
@@ -326,8 +327,12 @@ export class ProjectSync extends DurableObject<DOEnv> {
   /** Epoch ms until which identity said this project has no Monday link. */
   private mondayUnlinkedUntil = 0
 
+  /** The env the runtime handed us; `this.env` is it plus Secrets Store values. */
+  private readonly baseEnv: DOEnv
+
   constructor(ctx: DurableObjectState, env: DOEnv) {
     super(ctx, env)
+    this.baseEnv = env
     // AQU-1836: the runtime answers the client heartbeat for us. An
     // auto-responded ping never wakes the DO, and
     // `getWebSocketAutoResponseTimestamp` still records that the socket is
@@ -405,7 +410,14 @@ export class ProjectSync extends DurableObject<DOEnv> {
     }
   }
 
+  /** Re-resolve SS_<NAME> Secrets Store bindings (cached ~60 s per isolate),
+   *  so a long-lived DO picks up a rotated secret without a redeploy. */
+  private async refreshStoreSecrets(): Promise<void> {
+    this.env = await withStoreSecrets(this.baseEnv)
+  }
+
   async fetch(request: Request): Promise<Response> {
+    await this.refreshStoreSecrets()
     const url = new URL(request.url)
 
     // AQU-476: mirror sync trigger, single-flighted per DO instance (see
@@ -682,6 +694,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
   // ── Hibernatable socket events ─────────────────────────────────────────
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    await this.refreshStoreSecrets()
     const conn = this.connections.get(ws)
     if (!conn) {
       // hydrate() retires sockets it can't identify, so this is only reachable
@@ -721,6 +734,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
    * how an untouched project stops costing DO duration.
    */
   async alarm(): Promise<void> {
+    await this.refreshStoreSecrets()
     const now = Date.now()
     // AQU-1374: drop rows for sockets that died without firing close/error
     // BEFORE the lease sweep, so it doesn't emit presence.diff frames for

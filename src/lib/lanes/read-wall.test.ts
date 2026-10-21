@@ -23,9 +23,8 @@ describe("lane read wall", () => {
     expect(laneReadWallEnabled("true")).toBe(true)
   })
 
-  it("shows every lane to a project lead and nothing to an ungranted contributor", () => {
-    // AQU-1795: the wall opens at project lead (500), not only at maintainer.
-    expect(visibleLaneTags({ enabled: true, role: 500 })).toBeNull()
+  it("shows every lane to a maintainer and nothing to an ungranted project lead", () => {
+    expect(visibleLaneTags({ enabled: true, role: 500 })).toEqual(new Set())
     expect(visibleLaneTags({ enabled: true, role: 600 })).toBeNull()
     expect(visibleLaneTags({ enabled: true, role: 400, src: "platform" })).toBeNull()
     expect(visibleLaneTags({ enabled: false, role: 400 })).toBeNull()
@@ -194,6 +193,72 @@ describe("lane read wall", () => {
       expect(restoreHiddenLaneSettings(stored, withoutPrimary, visible, lanes)).toEqual({ ok: true, settings: stored })
       const replaced = restoreHiddenLaneSettings(stored, { ...stored, targetLanguage: "Spanish" }, visible, lanes)
       expect(replaced.ok).toBe(false)
+    })
+
+    it("hides a lane's voices, cast, and default, and an echo puts them back", () => {
+      const voiceLanes = [
+        { id: "sm", name: "Samoan", legacyTag: "sm" },
+        { id: "ar", name: "Arabic", legacyTag: "ar" },
+      ]
+      const samoan = new Set(["sm"])
+      const storedVoices = {
+        systemPrompt: "Formal.",
+        ttsSettings: {
+          apiKey: "device-key",
+          voices: [
+            { id: "narrator", name: "Narrator" },
+            { id: "ar-1", name: "Arabic", laneId: "ar" },
+            { id: "sm-1", name: "Samoan", laneId: "sm" },
+          ],
+          defaultVoiceId: "ar-1",
+          castAssignments: { hero: "ar-1", guide: "sm-1" },
+          laneCastAssignments: { ar: { hero: "ar-1" }, sm: { guide: "sm-1" } },
+          laneDefaultVoiceId: { ar: "ar-1", sm: "sm-1" },
+        },
+      }
+      const echo = filterSettingsToVisibleLanes({ settings: storedVoices }, samoan, voiceLanes).settings
+      const tts = echo.ttsSettings as {
+        voices: { id: string }[]
+        castAssignments: Record<string, string>
+        laneCastAssignments: Record<string, unknown>
+        laneDefaultVoiceId: Record<string, string>
+        defaultVoiceId?: string
+        apiKey: string
+      }
+      expect(tts.voices.map((voice) => voice.id)).toEqual(["narrator", "sm-1"])
+      expect(tts.defaultVoiceId).toBeUndefined()
+      expect(tts.castAssignments).toEqual({ guide: "sm-1" })
+      expect(tts.laneCastAssignments).toEqual({ sm: { guide: "sm-1" } })
+      expect(tts.laneDefaultVoiceId).toEqual({ sm: "sm-1" })
+      expect(JSON.stringify(tts)).not.toContain("ar-1")
+      expect(tts.apiKey).toBe("device-key")
+      expect(restoreHiddenLaneSettings(storedVoices, echo, samoan, voiceLanes)).toEqual({
+        ok: true,
+        settings: storedVoices,
+      })
+
+      const edited = {
+        ...echo,
+        ttsSettings: {
+          ...tts,
+          voices: tts.voices.map((voice) => (voice.id === "sm-1" ? { ...voice, name: "Samoa" } : voice)),
+          laneDefaultVoiceId: { sm: "sm-1" },
+        },
+      }
+      const restored = restoreHiddenLaneSettings(storedVoices, edited, samoan, voiceLanes)
+      expect(restored.ok).toBe(true)
+      if (!restored.ok) return
+      const next = restored.settings.ttsSettings as {
+        voices: { id: string; name?: string; laneId?: string }[]
+        laneCastAssignments: Record<string, unknown>
+        laneDefaultVoiceId: Record<string, string>
+        defaultVoiceId: string
+      }
+      expect(next.voices.find((voice) => voice.id === "sm-1")?.name).toBe("Samoa")
+      expect(next.voices.find((voice) => voice.id === "ar-1")).toEqual({ id: "ar-1", name: "Arabic", laneId: "ar" })
+      expect(next.laneCastAssignments.ar).toEqual({ hero: "ar-1" })
+      expect(next.laneDefaultVoiceId.ar).toBe("ar-1")
+      expect(next.defaultVoiceId).toBe("ar-1")
     })
 
     it("leaves the body alone when nothing is hidden", () => {

@@ -349,6 +349,21 @@ describe("useOrgSettings — rollback on rejected writes (AQU-255 follow-up)", (
     expect(result.current.countStructuralOverrides).toBe(2)
   })
 
+  it("keeps the media defaults' override counts across a save too (AQU-1768)", async () => {
+    mockFetchResponse = { ...serverTruth(), mediaDefaultOverrides: { timingLocked: 2 } }
+    vi.mocked(restClient.patchOrgSettings).mockResolvedValueOnce({
+      kind: "ok",
+      value: { orgId: 1, settings: { timingLocked: false }, version: 4, updatedAt: null, updatedBy: 9 },
+    })
+
+    const { result } = renderHook(() => useOrgSettings(1, 600))
+    await waitFor(() => expect(result.current.mediaDefaultOverrides.timingLocked).toBe(2))
+    await act(async () => {
+      await result.current.patch({ timingLocked: false })
+    })
+    expect(result.current.mediaDefaultOverrides.timingLocked).toBe(2)
+  })
+
   it("a reply that carries the counts replaces them, so a reset to 0 sticks", async () => {
     mockFetchResponse = { ...serverTruth(), validationCountOverrides: 1 }
     vi.mocked(restClient.patchOrgSettings).mockResolvedValueOnce({

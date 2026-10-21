@@ -11,6 +11,8 @@ import {
   slotForCell,
   sourceFileSecToProgramme,
   targetRatio,
+  withoutHiddenTakes,
+  type Programme,
 } from "./programme"
 import type { CellData } from "@/hooks/useCells"
 
@@ -252,5 +254,61 @@ describe("source-window contiguity (pre-merge round)", () => {
     for (let i = 0; i < prog.slots.length - 1; i++) {
       expect(prog.slots[i].sourceWindow!.end).toBe(prog.slots[i + 1].sourceWindow!.start)
     }
+  })
+})
+
+// AQU-1767 (Sam, 2026-10-15): Free timing plays a split take as one take —
+// its pieces back to back, joined into one clip.
+describe("buildProgramme — a split take", () => {
+  const TAKE = "audio-a-1700000000-take.wav"
+  const PIECE = "audio-a-1700000500-piece.wav"
+  const split = (pieceMs?: number) =>
+    verse("a", 0, 2, undefined, {
+      selectedAudioId: TAKE,
+      attachments: {
+        [TAKE]: { type: "audio", url: "frontier-audio://take", slot: "recording", durationMs: 4000, trimStartMs: 200, trimEndMs: 1500 },
+        [PIECE]: { type: "audio", url: "frontier-audio://take", slot: "recording", pieceOf: TAKE, durationMs: pieceMs, trimStartMs: 2500, ...(pieceMs ? { trimEndMs: 3700 } : {}) },
+        [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+      },
+    } as unknown as Partial<CellData>)
+
+  it("sizes the line by every piece and plays them as one joined clip", () => {
+    const [slot] = buildProgramme([split(4000)]).slots
+    // 1.3s + 1.2s; the second spends 1s between them in the recording, unheard.
+    expect(slot.targetLenSec).toBeCloseTo(2.5)
+    expect(slot.slotLenSec).toBeCloseTo(2.5)
+    expect(slot.targetWindow).toEqual({ start: 0, end: 2.5 })
+    expect(slot.targetPieces).toEqual([
+      { audioId: TAKE, start: 0.2, end: 1.5 },
+      { audioId: PIECE, start: 2.5, end: 3.7 },
+    ])
+  })
+
+  it("falls back to the first piece while a piece's length is unknown", () => {
+    const [slot] = buildProgramme([split(undefined)]).slots
+    expect(slot.targetPieces).toBeUndefined()
+    expect(slot.targetLenSec).toBeCloseTo(1.3)
+    expect(slot.targetWindow).toEqual({ start: 0.2, end: 1.5 })
+  })
+})
+
+// Sam's decision (hidden lines on the timeline): in Free timing a hidden verse
+// keeps its place, sounds only its original, and with none is stepped over.
+describe("withoutHiddenTakes", () => {
+  it("keeps every verse's place but takes a hidden verse's take out of what plays", () => {
+    const prog = {
+      totalSec: 20,
+      byCellId: new Map(),
+      slots: [
+        { cellId: "a", startSec: 0, sourceLenSec: 4, targetLenSec: 6, nominalLenSec: 4, cardLenSec: 4, slotLenSec: 6, clock: "target", sourceWindow: { start: 0, end: 4 }, targetWindow: { start: 0, end: 6 } },
+        { cellId: "b", startSec: 6, sourceLenSec: 0, targetLenSec: 3, nominalLenSec: 4, cardLenSec: 3, slotLenSec: 3, clock: "target", sourceWindow: null, targetWindow: { start: 0, end: 3 } },
+        { cellId: "c", startSec: 9, sourceLenSec: 0, targetLenSec: 3, nominalLenSec: 4, cardLenSec: 3, slotLenSec: 3, clock: "target", sourceWindow: null, targetWindow: { start: 0, end: 3 } },
+      ],
+    } as unknown as Programme
+    const out = withoutHiddenTakes(prog, new Set(["a", "b"]))
+    expect(out.slots.map((s) => [s.cellId, s.startSec, s.slotLenSec])).toEqual([["a", 0, 6], ["b", 6, 3], ["c", 9, 3]])
+    expect(out.byCellId.get("a")).toMatchObject({ targetWindow: null, clock: "source" })
+    expect(out.byCellId.get("b")).toMatchObject({ targetWindow: null, clock: null })
+    expect(out.byCellId.get("c")).toBe(prog.slots[2])
   })
 })

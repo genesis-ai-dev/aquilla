@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { AssignWork } from "./AssignWork"
+import { pickSelectOption as selectOption } from "@/test-utils/select"
 
 // AQU-676: mock only the roster fetch — partitionMembers stays real so the
 // tests exercise the actual project-members-only filter, not a stub of it.
@@ -70,6 +71,27 @@ describe("AssignWork", () => {
   it("collapses to an Assign… button", () => {
     renderAssign()
     expect(screen.getByRole("button", { name: "Assign…" })).toBeInTheDocument()
+  })
+
+  it("AQU-1969: sends Translate by default and Validate when chosen", async () => {
+    rosterOk()
+    mockCreate.mockResolvedValue("as-kind")
+    renderAssign()
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    expect(screen.getByRole("combobox", { name: /^task$/i }).textContent).toMatch(/translate/i)
+    await pickSelectOption(/^assignee$/i, /^anna$/)
+    fireEvent.click(screen.getByRole("button", { name: "Assign" }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ kind: "translate" })))
+
+    // The panel closes on success; open it again and hand out validating.
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    expect(screen.getByRole("combobox", { name: /^task$/i }).textContent).toMatch(/translate/i)
+    await selectOption(/^task$/i, /^validate$/i)
+    await pickSelectOption(/^assignee$/i, /^anna$/)
+    fireEvent.click(screen.getByRole("button", { name: "Assign" }))
+    await waitFor(() => expect(mockCreate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: "validate", assigneeUserId: 2 }),
+    ))
   })
 
   it("pre-fills the lane the manager arrived from and sends that lane's id", async () => {
@@ -502,5 +524,258 @@ describe("AssignWork — the empty assignee picker explains itself (AQU-1308)", 
     expect(
       screen.queryByText(/couldn’t load this project’s members/i),
     ).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * AQU-1994 — the Team card's Assign work field offers only the lanes someone
+ * on the project is on.
+ *
+ * Reported case: a project with three target lanes (French, Mandarin Chinese,
+ * Swedish) whose team is only on Mandarin Chinese listed all three, so a
+ * manager could route French or Swedish work to people with no access to
+ * either language.
+ */
+describe("AssignWork — only the lanes the project's people are on (AQU-1994)", () => {
+  const threeLanes = [
+    { legacyTag: "French", label: "French", laneId: "lane-fr" },
+    { legacyTag: "Mandarin Chinese", label: "Mandarin Chinese", laneId: "lane-zh" },
+    { legacyTag: "Swedish", label: "Swedish", laneId: "lane-sv" },
+  ]
+  const laneRows = [
+    { id: "lane-fr", legacyTag: "French" },
+    { id: "lane-zh", legacyTag: "Mandarin Chinese" },
+    { id: "lane-sv", legacyTag: "Swedish" },
+  ]
+
+  function renderLanes(
+    staffedLaneIds: ReadonlySet<string> | null,
+    extra: Partial<React.ComponentProps<typeof AssignWork>> = {},
+  ) {
+    return render(
+      <AssignWork
+        projectId="p1"
+        files={files}
+        jwt="jwt"
+        author="wendi"
+        lanes={threeLanes}
+        laneRows={laneRows}
+        laneTags={["French", "Mandarin Chinese", "Swedish"]}
+        staffedLaneIds={staffedLaneIds}
+        {...extra}
+      />,
+    )
+  }
+
+  it("names the one staffed lane instead of listing all three", async () => {
+    rosterOk()
+    renderLanes(new Set(["lane-zh"]))
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+
+    // One lane names itself rather than showing a dropdown.
+    expect(await screen.findByTestId("assign-work-lane-fixed")).toHaveTextContent(
+      "Mandarin Chinese",
+    )
+    expect(screen.queryByTestId("assign-work-lane")).not.toBeInTheDocument()
+    expect(screen.queryByText("French")).not.toBeInTheDocument()
+    expect(screen.queryByText("Swedish")).not.toBeInTheDocument()
+  })
+
+  it("adds a lane once someone is on it, and still leaves out the unstaffed one", async () => {
+    rosterOk()
+    renderLanes(new Set(["lane-zh", "lane-fr"]))
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+
+    const trigger = await screen.findByTestId("assign-work-lane")
+    fireEvent.click(trigger)
+    expect(await screen.findByRole("option", { name: "French" })).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: "Mandarin Chinese" })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "Swedish" })).not.toBeInTheDocument()
+  })
+
+  it("does not preselect the lane tab the manager arrived from when nobody is on it", async () => {
+    rosterOk()
+    renderLanes(new Set(["lane-zh", "lane-sv"]), { arrivedLane: "French" })
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+
+    const trigger = await screen.findByTestId("assign-work-lane")
+    expect(trigger.textContent).toContain("Choose the language lane this work is for")
+    expect(trigger.textContent).not.toContain("French")
+  })
+
+  it("says so and refuses Assign when nobody on the project is on any lane", async () => {
+    rosterOk()
+    mockCreate.mockResolvedValue("as-never")
+    renderLanes(new Set<string>())
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+
+    expect(await screen.findByTestId("assign-work-no-staffed-lanes")).toHaveTextContent(
+      /no one on this project is on any of its languages/i,
+    )
+    expect(screen.queryByTestId("assign-work-lane")).not.toBeInTheDocument()
+    const submit = screen.getByRole("button", { name: "Assign" })
+    expect(submit).toBeDisabled()
+    fireEvent.click(submit)
+    expect(mockCreate).not.toHaveBeenCalled()
+  })
+
+  it("leaves every lane on offer when the server said nothing about staffing", async () => {
+    rosterOk()
+    renderLanes(null)
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+
+    const trigger = await screen.findByTestId("assign-work-lane")
+    fireEvent.click(trigger)
+    for (const lane of ["French", "Mandarin Chinese", "Swedish"]) {
+      expect(await screen.findByRole("option", { name: lane })).toBeInTheDocument()
+    }
+    expect(screen.queryByTestId("assign-work-no-staffed-lanes")).not.toBeInTheDocument()
+  })
+
+  it("re-reads staffing when the panel is opened, so a lane just staffed shows up", () => {
+    rosterOk()
+    const onOpen = vi.fn()
+    renderLanes(new Set(["lane-zh"]), { onOpen })
+    expect(onOpen).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    expect(onOpen).toHaveBeenCalledTimes(1)
+  })
+
+  it("sends the staffed lane's id when the single named lane is submitted", async () => {
+    rosterOk()
+    mockCreate.mockResolvedValue("as-zh")
+    renderLanes(new Set(["lane-zh"]))
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    await screen.findByTestId("assign-work-lane-fixed")
+    await pickSelectOption(/assignee/i, /^anna$/)
+
+    fireEvent.click(screen.getByRole("button", { name: "Assign" }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalled())
+    expect(mockCreate.mock.calls[0]![0]).toMatchObject({
+      targetLang: "Mandarin Chinese",
+      laneId: "lane-zh",
+    })
+  })
+})
+
+/**
+ * AQU-2047 — the Language lane menu lists the lanes the attached teams are
+ * tied to. A team that saved French only must not still offer Mandarin
+ * Chinese and Swedish. Staffing (the describe above) still applies on top.
+ */
+describe("AssignWork — lanes the attached teams are tied to (AQU-2047)", () => {
+  const threeLanes = [
+    { legacyTag: "French", label: "French", laneId: "lane-fr" },
+    { legacyTag: "Mandarin Chinese", label: "Mandarin Chinese", laneId: "lane-zh" },
+    { legacyTag: "Swedish", label: "Swedish", laneId: "lane-sv" },
+  ]
+  const laneRows = [
+    { id: "lane-fr", legacyTag: "French" },
+    { id: "lane-zh", legacyTag: "Mandarin Chinese" },
+    { id: "lane-sv", legacyTag: "Swedish" },
+  ]
+
+  function renderLanes(
+    extra: Partial<React.ComponentProps<typeof AssignWork>> = {},
+  ) {
+    return render(
+      <AssignWork
+        projectId="p1"
+        files={files}
+        jwt="jwt"
+        author="wendi"
+        lanes={threeLanes}
+        laneRows={laneRows}
+        laneTags={["French", "Mandarin Chinese", "Swedish"]}
+        staffedLaneIds={new Set(["lane-fr", "lane-zh", "lane-sv"])}
+        {...extra}
+      />,
+    )
+  }
+
+  async function openMenu() {
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    const trigger = await screen.findByTestId("assign-work-lane")
+    fireEvent.click(trigger)
+    return trigger
+  }
+
+  it("offers French only when the team checked French", async () => {
+    rosterOk()
+    renderLanes({ teamLanes: [{ lanesExplicit: true, laneIds: ["lane-fr"] }] })
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+
+    expect(await screen.findByTestId("assign-work-lane-fixed")).toHaveTextContent("French")
+    expect(screen.queryByText("Mandarin Chinese")).not.toBeInTheDocument()
+    expect(screen.queryByText("Swedish")).not.toBeInTheDocument()
+  })
+
+  it("keeps the current lanes when the team has not saved a lane list", async () => {
+    rosterOk()
+    renderLanes({ teamLanes: [{ lanesExplicit: false }] })
+    await openMenu()
+    for (const lane of ["French", "Mandarin Chinese", "Swedish"]) {
+      expect(screen.getByRole("option", { name: lane })).toBeInTheDocument()
+    }
+  })
+
+  it("leaves every lane on offer when team data is omitted or there is no team", async () => {
+    rosterOk()
+    const { unmount } = renderLanes({ teamLanes: null })
+    await openMenu()
+    for (const lane of ["French", "Mandarin Chinese", "Swedish"]) {
+      expect(screen.getByRole("option", { name: lane })).toBeInTheDocument()
+    }
+    unmount()
+
+    rosterOk()
+    renderLanes({ teamLanes: [] })
+    await openMenu()
+    for (const lane of ["French", "Mandarin Chinese", "Swedish"]) {
+      expect(screen.getByRole("option", { name: lane })).toBeInTheDocument()
+    }
+  })
+
+  it("offers the union when two teams checked different lanes", async () => {
+    rosterOk()
+    renderLanes({
+      teamLanes: [
+        { lanesExplicit: true, laneIds: ["lane-fr"] },
+        { lanesExplicit: true, laneIds: ["lane-sv"] },
+      ],
+    })
+    await openMenu()
+    expect(screen.getByRole("option", { name: "French" })).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: "Swedish" })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "Mandarin Chinese" })).not.toBeInTheDocument()
+  })
+
+  it("still hides a lane nobody is on, even when a team checked it", async () => {
+    rosterOk()
+    renderLanes({
+      staffedLaneIds: new Set(["lane-zh"]),
+      teamLanes: [{ lanesExplicit: true, laneIds: ["lane-fr", "lane-zh"] }],
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    expect(await screen.findByTestId("assign-work-lane-fixed")).toHaveTextContent(
+      "Mandarin Chinese",
+    )
+    expect(screen.queryByText("French")).not.toBeInTheDocument()
+  })
+
+  it("assigns the lane the menu still offers", async () => {
+    rosterOk()
+    mockCreate.mockResolvedValue("as-fr")
+    renderLanes({ teamLanes: [{ lanesExplicit: true, laneIds: ["lane-fr"] }] })
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    await screen.findByTestId("assign-work-lane-fixed")
+    await pickSelectOption(/assignee/i, /^anna$/)
+
+    fireEvent.click(screen.getByRole("button", { name: "Assign" }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalled())
+    expect(mockCreate.mock.calls[0]![0]).toMatchObject({
+      targetLang: "French",
+      laneId: "lane-fr",
+    })
   })
 })

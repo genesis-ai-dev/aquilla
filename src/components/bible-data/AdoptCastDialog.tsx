@@ -12,7 +12,7 @@
 // already reads or by its name in any interface language, and only the first
 // adoption names it.
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,7 +29,7 @@ import { existingNarratorName, narratorInCast, planVoiceCast, type VoiceCastCell
 import type { Voice } from "@/lib/bible-data/voice-index"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
-import { CATALOGS } from "@/lib/i18n/messages"
+import { catalogFor, CATALOG_LOCALES, loadAllCatalogs } from "@/lib/i18n/messages"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { BibleVoicesContextValue } from "./voices-context"
 import { narratorKey } from "./voice-text"
@@ -52,9 +52,14 @@ interface AdoptCastDialogProps {
   onClose: () => void
 }
 
-/** The narrator's (or author's) label in every interface language. */
+/**
+ * The narrator's (or author's) label in every interface language that has
+ * arrived. Only the visitor's language ships with the app (AQU-2090); the dialog
+ * fetches the rest when it opens, so a narrator adopted under another
+ * language's label is found a moment later.
+ */
 function narratorLabels(key: MessageKey): string[] {
-  return Object.values(CATALOGS).map((catalog) => (catalog as Record<string, string | undefined>)[key] ?? "")
+  return CATALOG_LOCALES.map((locale) => (catalogFor(locale) as Record<string, string | undefined> | undefined)?.[key] ?? "")
 }
 
 export function AdoptCastDialog({ chapter, voices, cells, castNames, onAdopt, onClose }: AdoptCastDialogProps) {
@@ -64,6 +69,16 @@ export function AdoptCastDialog({ chapter, voices, cells, castNames, onAdopt, on
   // Read once: the cast names as they are when the dialog opens.
   const [snapshot] = useState(cells)
   const { index, labelFor, shared } = voices
+  const [catalogsArrived, setCatalogsArrived] = useState(0)
+  useEffect(() => {
+    let live = true
+    void loadAllCatalogs().then(() => {
+      if (live) setCatalogsArrived((n) => n + 1)
+    })
+    return () => {
+      live = false
+    }
+  }, [])
   const plan = useMemo(() => {
     const key = narratorKey(index.narrator.kind)
     const narrator =
@@ -73,7 +88,9 @@ export function AdoptCastDialog({ chapter, voices, cells, castNames, onAdopt, on
         ? narrator
         : ((voice.speech.speaker ? labelFor(voice.speech.speaker)?.label : undefined) ?? null)
     return planVoiceCast(index, snapshot, shared, scope === "chapter" ? { kind: "chapter", chapter } : { kind: "file" }, nameOf)
-  }, [index, labelFor, snapshot, shared, scope, chapter, castNames, t])
+    // catalogsArrived: re-plan once every language's label is here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [index, labelFor, snapshot, shared, scope, chapter, castNames, t, catalogsArrived])
 
   const unknown = t("bibleData.voices.unknownSpeaker")
   const skipped: { key: MessageKey; lines: (VoiceCastLine & { detail?: string })[] }[] = [

@@ -4,7 +4,8 @@
 // activity (short calendar date, datetime on hover) | actions. Actions:
 //   Open   → the workspace at that lane (/project/:id/editor?lane=<tag>)
 //   Assign → AssignModal pre-scoped to the lane (via OrgLaneAssignModal)
-//   Staff  → StaffLanePopover (add-person-to-lane in one gesture)
+//   Staff  → StaffLanePopover (put a person on the lane in one gesture, and
+//            — AQU-1998 — take one of the people already on it off again)
 //
 // Rendered inside DataTable's `renderSubRow` slot, so the outer element is a
 // TableRow whose single full-width cell hosts the lane grid.

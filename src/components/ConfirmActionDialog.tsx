@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -11,6 +11,8 @@ interface ConfirmActionDialogProps {
   onOpenChange: (open: boolean) => void
   title: string
   description: string
+  /** A second paragraph under the description. */
+  notice?: string
   confirmLabel: string
   checkboxLabel?: string
   /**
@@ -22,14 +24,20 @@ interface ConfirmActionDialogProps {
   canConfirm?: boolean
   /** Button variant for the confirm action. Defaults to "default". */
   variant?: "default" | "destructive"
+  /** Extra controls between the description and the attribution checkbox. */
+  extra?: ReactNode
+  /** Keeps confirm off even after the checkbox, for example when the chosen options match nothing. */
+  confirmDisabled?: boolean
   onConfirm: () => void
 }
 
 export function ConfirmActionDialog({
-  open, onOpenChange, title, description, confirmLabel,
+  open, onOpenChange, title, description, notice, confirmLabel,
   checkboxLabel,
   canConfirm = true,
   variant = "default",
+  extra,
+  confirmDisabled = false,
   onConfirm,
 }: ConfirmActionDialogProps) {
   const t = useT()
@@ -42,7 +50,9 @@ export function ConfirmActionDialog({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
+          {notice ? <p className="text-sm text-muted-foreground">{notice}</p> : null}
         </DialogHeader>
+        {extra}
         {canConfirm && (
           <label className="flex items-start gap-2 py-2 text-sm">
             <Checkbox
@@ -60,7 +70,7 @@ export function ConfirmActionDialog({
           {canConfirm && (
             <Button
               variant={variant}
-              disabled={!checked}
+              disabled={!checked || confirmDisabled}
               onClick={() => { onConfirm(); onOpenChange(false) }}
             >
               {confirmLabel}

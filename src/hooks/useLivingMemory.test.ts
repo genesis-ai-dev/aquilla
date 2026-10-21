@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest"
 import { filterValidated, sortValidated } from "./useLivingMemory"
+import { buildProjectCellSnapshot } from "./useProjectCells"
 import type { CellData } from "./useCells"
+import type { CellRow } from "@/lib/sync/cells-read-types"
 
 // Minimal stub: only the fields useLivingMemory cares about.
 function makeCell(overrides: Partial<CellData> & { id: string }): CellData {
@@ -100,5 +102,81 @@ describe("sortValidated", () => {
     const original = [...cells]
     sortValidated(cells)
     expect(cells.map((c) => c.id)).toEqual(original.map((c) => c.id))
+  })
+})
+
+/**
+ * AQU-2001: Living Memory aggregates the corpus snapshot `useProjectCells`
+ * publishes, and that snapshot keeps only target rows belonging to the lane it
+ * was read in. So the regression lives in the composition, not in either half:
+ * `filterValidated` is correct, and the snapshot builder is correct, but
+ * running the builder at the default lane `''` over rows that live in a named
+ * lane drops every target row — and a cell with no target can never be
+ * `validated`. The pane then showed its empty state however many cells the
+ * team had actually validated.
+ *
+ * The fixture is a curriculum-style file on purpose (ordered by
+ * `sequenceIndex`, `canonicalRef: null`): the LOTE projects where this was
+ * found have no scripture refs, and the guard has to prove that nothing in
+ * this path filters those cells out.
+ */
+describe("validated examples across the lane-scoped corpus read (AQU-2001)", () => {
+  const laneRows: CellRow[] = [
+    {
+      cellId: "seg-1",
+      side: "source",
+      targetLang: "",
+      value: "Come before God daily.",
+      valueHtml: null,
+      type: "text",
+      canonicalRef: null,
+      anchorCellId: null,
+      eventId: "e-src-1",
+      sourceEventId: null,
+      lastEditor: "joel",
+      lastEditAt: 1000,
+      validated: false,
+      wordCount: 4,
+      sequenceIndex: 1,
+    },
+    {
+      cellId: "seg-1",
+      side: "target",
+      targetLang: "de",
+      value: "Komm täglich vor Gott.",
+      valueHtml: null,
+      type: "text",
+      canonicalRef: null,
+      anchorCellId: null,
+      eventId: "e-tgt-1",
+      sourceEventId: "e-src-1",
+      lastEditor: "joel",
+      lastEditAt: 2000,
+      validated: true,
+      wordCount: 4,
+      sequenceIndex: 1,
+    },
+  ]
+
+  it("surfaces a validated curriculum pair when the corpus is read in its named lane", () => {
+    const validated = filterValidated(buildProjectCellSnapshot(laneRows, "file-lote", "de"))
+
+    expect(validated.map((cell) => cell.id)).toEqual(["seg-1"])
+    expect(validated[0].original).toBe("Come before God daily.")
+    expect(validated[0].translated).toBe("Komm täglich vor Gott.")
+  })
+
+  it("finds nothing when the same corpus is read at the default lane — the bug", () => {
+    expect(filterValidated(buildProjectCellSnapshot(laneRows, "file-lote", ""))).toEqual([])
+  })
+
+  it("leaves default-lane (scripture-style) projects reading their own pairs", () => {
+    const defaultLaneRows: CellRow[] = [
+      { ...laneRows[0], canonicalRef: "GEN 1:1", sequenceIndex: null },
+      { ...laneRows[1], targetLang: "", canonicalRef: "GEN 1:1", sequenceIndex: null },
+    ]
+
+    const validated = filterValidated(buildProjectCellSnapshot(defaultLaneRows, "file-gen", ""))
+    expect(validated.map((cell) => cell.id)).toEqual(["seg-1"])
   })
 })

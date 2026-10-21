@@ -374,6 +374,23 @@
     color-scheme: dark;
   }
 
+  /* Solid primary for surfaces whose main action must read as THE action
+     (Smart Extensions builder, extension page, permission prompt). The brand
+     --primary is a deliberately muted, light accent with dark text; on these
+     pages it read as disabled next to outline buttons (owner, 2026-10-13).
+     Derived from the brand token (same hue, deeper and more saturated, white
+     text), so every brand and both themes keep their own hue; an achromatic
+     brand primary stays achromatic. Declared on :root so it resolves against
+     the root's --primary; `.solid-primary` then swaps the pair for a subtree. */
+  :root {
+    --primary-solid: oklch(from var(--primary) min(l, 0.52) calc(c * 1.8) h);
+    --primary-solid-foreground: oklch(0.99 0 0);
+  }
+  .solid-primary {
+    --primary: var(--primary-solid);
+    --primary-foreground: var(--primary-solid-foreground);
+  }
+
   /* Links are the one place the hand cursor isn't ours to remove by dropping a
      class: Blink and WebKit pick it in the hit-test whenever the computed
      cursor is `auto` and the node is a link, so no amount of removing
@@ -783,4 +800,29 @@ textarea,
   outline: 2px solid color-mix(in oklab, var(--foreground) 35%, transparent);
   outline-offset: 2px;
   border-radius: 6px;
+}
+
+/* AQU-1937: Smart Extensions' reserved identity. A muted iris (low-chroma
+   violet, hue 292: well away from Aquilla's blue at 245) outside every brand's
+   palette, used ONLY by the host-drawn ExtensionFrame and ExtensionMarker
+   (src/components/tools/) so people can always tell app-proper UI from
+   extension-drawn content. Reserved: an ESLint rule forbids the token anywhere
+   else, no brand or theme defines it, and it is NOT one of the CSS variables
+   forwarded into extension frames (srcdoc.ts THEME_VARS).
+   One family everywhere: -accent (label text + icon), -subtle (tab/chip tint),
+   -line (1px hairline), -glow (faint inner edge tint).
+   WCAG AA for the label text: light 6.2:1 on white, 5.6:1 on -subtle;
+   dark 9.5:1 on the dark surface, 7.5:1 on -subtle. */
+:root {
+  --extension-accent: oklch(0.5 0.11 292);
+  --extension-accent-subtle: oklch(0.962 0.02 292);
+  --extension-accent-line: oklch(0.5 0.11 292 / 0.28);
+  --extension-accent-glow: oklch(0.5 0.11 292 / 0.07);
+}
+:root.dark,
+.dark {
+  --extension-accent: oklch(0.8 0.085 292);
+  --extension-accent-subtle: oklch(0.29 0.04 292);
+  --extension-accent-line: oklch(0.8 0.085 292 / 0.26);
+  --extension-accent-glow: oklch(0.8 0.085 292 / 0.08);
 }

@@ -2,7 +2,7 @@
 
 Guidance for Claude Code working in this repo. See also **`AGENTS.md`** (testing/E2E rules,
 shared by all AI assistants) and `docs/` (SYNC, AGENT-API, AGENT-SANDBOX, SEO, OPSEC,
-FEATURE-STORIES, PARTNER-INTEGRATIONS;
+FEATURE-STORIES, PARTNER-INTEGRATIONS, ZAPIER;
 SPEC.md covers the separate VS Code Codex extension that uses Aquilla as a backend).
 
 ## Layout — flat single-SPA trunk
@@ -73,7 +73,7 @@ pnpm i
 pnpm dev          # tsx scripts/dev-stack.ts — full local stack (SPA + workers; agent-worker :8790)
 pnpm dev:vite     # just the vite dev server
 pnpm build        # tsc -b && vite build && scripts/check-brand-build.ts aquilla
-pnpm lint         # eslint .
+pnpm lint         # eslint . with an 8 GiB heap (NODE_OPTIONS in the script; AQU-2084)
 pnpm test         # vitest run — root suite EXCLUDES e2e/** and all worker packages
                   #   (auth-worker, sync-worker, agent-worker, worker, parity)
 pnpm test:watch

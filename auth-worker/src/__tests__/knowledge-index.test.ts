@@ -1,6 +1,8 @@
 import { env } from "cloudflare:test"
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { segmentText, applyEnrichment, indexKnowledgeDoc } from "../lib/knowledge/index-doc"
+import {
+  segmentText, applyEnrichment, indexKnowledgeDoc, describeIndexFailure,
+} from "../lib/knowledge/index-doc"
 import { indexDocOnOwnConnection, openIndexingConnection, type IndexingConnection } from "../routes/knowledge"
 import { createDoc, getDocTree, getDocMeta } from "../../../db/shared/knowledge"
 import type { Env } from "../types"
@@ -46,6 +48,30 @@ describe("applyEnrichment", () => {
   })
 })
 
+// AQU-2002: these sentences are rendered verbatim in the knowledge-base list,
+// so they have to read as advice and may name no internals.
+describe("describeIndexFailure", () => {
+  it("names the fix for each failure a run can hit", () => {
+    expect(describeIndexFailure(new Error("no OPENROUTER_API_KEY")))
+      .toBe("No summarizing model is configured in this environment.")
+    expect(describeIndexFailure(new Error("openrouter 402"))).toContain("out of credit")
+    expect(describeIndexFailure(new Error("openrouter 429"))).toContain("rate-limiting")
+    expect(describeIndexFailure(new Error("openrouter 401"))).toContain("credentials")
+    expect(describeIndexFailure(new SyntaxError("Unexpected token")))
+      .toContain("could not be read")
+    const aborted = new Error("The operation was aborted")
+    aborted.name = "AbortError"
+    expect(describeIndexFailure(aborted)).toContain("did not answer within")
+  })
+
+  it("never leaks the underlying error text", () => {
+    const reason = describeIndexFailure(
+      new Error('relation "knowledge_docs" does not exist at 0x7f'),
+    )
+    expect(reason).toBe("The summarizing step failed for an unexpected reason.")
+  })
+})
+
 describe("indexKnowledgeDoc", () => {
   const DOC = "88888888-8888-8888-8888-888888888888"
   async function seed() {
@@ -70,20 +96,109 @@ describe("indexKnowledgeDoc", () => {
     expect(res?.tree?.[0].summary).toBe("sa")
   })
 
-  it("upstream failure → status failed, never throws", async () => {
+  // AQU-2002: the model leg only writes summaries, so losing it cannot mean
+  // the document failed to index. It used to: the heuristic tree was discarded,
+  // the row was parked at `failed` with nothing recorded, and the retry button
+  // the badge offered ran the same doomed call again — the LOTE knowledge
+  // base's "never indexes, re-index also fails, no error shown".
+  it("upstream failure → ready WITHOUT summaries, keeping the structure, reason recorded", async () => {
     await seed()
     vi.stubGlobal("fetch", vi.fn(async () => new Response("boom", { status: 500 })))
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {})
+
     await indexKnowledgeDoc({ OPENROUTER_API_KEY: "k" }, env.AQUILLA_PG, DOC)
-    expect((await getDocMeta(env.AQUILLA_PG, DOC))?.indexStatus).toBe("failed")
+
+    const res = await getDocTree(env.AQUILLA_PG, DOC)
+    expect(res?.meta.indexStatus).toBe("ready")
+    // The two markdown headings of the seeded doc are still navigable.
+    expect(res?.tree?.map((n) => n.title)).toEqual(["A", "B"])
+    expect(res?.tree?.[0].summary).toBeUndefined()
+    expect(res?.meta.docSummary).toBeNull()
+    expect(res?.meta.indexError).toBe("The summarizing model returned HTTP 500.")
+    logged.mockRestore()
   })
 
-  it("no API key → status failed (dev without key degrades, not crashes)", async () => {
+  it("a billing rejection names the account, not a status code the uploader cannot act on", async () => {
     await seed()
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("no credit", { status: 402 })))
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {})
+
+    await indexKnowledgeDoc({ OPENROUTER_API_KEY: "k" }, env.AQUILLA_PG, DOC)
+
+    expect((await getDocMeta(env.AQUILLA_PG, DOC))?.indexError).toContain("out of credit")
+    logged.mockRestore()
+  })
+
+  it("no API key → ready without summaries, saying so (dev without a key degrades)", async () => {
+    await seed()
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {})
+
     await indexKnowledgeDoc({}, env.AQUILLA_PG, DOC)
-    expect((await getDocMeta(env.AQUILLA_PG, DOC))?.indexStatus).toBe("failed")
+
+    const meta = await getDocMeta(env.AQUILLA_PG, DOC)
+    expect(meta?.indexStatus).toBe("ready")
+    expect(meta?.indexError).toBe("No summarizing model is configured in this environment.")
+    logged.mockRestore()
+  })
+
+  it("a doc with no extractable text is failed, with a reason no retry can clear", async () => {
+    await seed()
+    // Upload rejects text-free files, but an inherited copy or a hand-edited
+    // row can still reach the job this way.
+    await env.AQUILLA_PG.prepare("UPDATE knowledge_docs SET extracted_text = '' WHERE id = ?")
+      .bind(DOC).run()
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {})
+
+    await indexKnowledgeDoc({ OPENROUTER_API_KEY: "k" }, env.AQUILLA_PG, DOC)
+
+    const meta = await getDocMeta(env.AQUILLA_PG, DOC)
+    expect(meta?.indexStatus).toBe("failed")
+    expect(meta?.indexError).toContain("no extractable text")
+    logged.mockRestore()
+  })
+
+  it("a clean run clears the reason left by the run before it", async () => {
+    await seed()
+    await indexKnowledgeDoc({}, env.AQUILLA_PG, DOC) // no key → degraded
+    expect((await getDocMeta(env.AQUILLA_PG, DOC))?.indexError).not.toBeNull()
+
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({ docSummary: "doc sum", nodes: [] }) } }],
+    }))))
+    await indexKnowledgeDoc({ OPENROUTER_API_KEY: "k" }, env.AQUILLA_PG, DOC)
+
+    const meta = await getDocMeta(env.AQUILLA_PG, DOC)
+    expect(meta?.indexStatus).toBe("ready")
+    expect(meta?.indexError).toBeNull()
+  })
+
+  // AQU-2002: PostHog had zero events from this pipeline over the week the
+  // LOTE uploads were stuck, so "never indexed" could only be investigated by
+  // reading rows by hand. Every run now says it started and how it ended.
+  it("ships a start event and a terminal event for each run", async () => {
+    await seed()
+    const shipped: string[] = []
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).includes("/i/v1/logs")) {
+        const body = JSON.parse(String(init?.body)) as {
+          resourceLogs: { scopeLogs: { logRecords: { body: { stringValue: string } }[] }[] }[]
+        }
+        shipped.push(body.resourceLogs[0].scopeLogs[0].logRecords[0].body.stringValue)
+        return new Response("{}")
+      }
+      return new Response("boom", { status: 500 })
+    }))
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {})
+
+    await indexKnowledgeDoc(
+      { OPENROUTER_API_KEY: "k", POSTHOG_KEY: "phc_test" }, env.AQUILLA_PG, DOC,
+    )
+
+    expect(shipped).toEqual(["kb-index-started", "kb-index-degraded"])
+    logged.mockRestore()
   })
   // AQU-1376: the two ways a doc used to end up stranded at `pending` forever.
-  it("hung upstream is aborted by the timeout → failed, not left pending", async () => {
+  it("hung upstream is aborted by the timeout → terminal, not left pending", async () => {
     await seed()
     // Stands in for a response that never arrives: settles only when the job's
     // own AbortController fires, which is exactly what real fetch does.
@@ -97,7 +212,11 @@ describe("indexKnowledgeDoc", () => {
 
     await indexKnowledgeDoc({ OPENROUTER_API_KEY: "k" }, env.AQUILLA_PG, DOC, { timeoutMs: 20 })
 
-    expect((await getDocMeta(env.AQUILLA_PG, DOC))?.indexStatus).toBe("failed")
+    // Terminal either way; since AQU-2002 the structure survives the hang and
+    // only the summaries are reported missing.
+    const meta = await getDocMeta(env.AQUILLA_PG, DOC)
+    expect(meta?.indexStatus).toBe("ready")
+    expect(meta?.indexError).toContain("did not answer within")
     expect(logged).toHaveBeenCalled()
     logged.mockRestore()
   })

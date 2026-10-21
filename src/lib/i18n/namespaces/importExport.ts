@@ -716,6 +716,10 @@ export const importExport = defineNamespace({
     "importExport.dialog.includeChapterHeadings": "Include chapter headings",
     "importExport.dialog.includeChapterHeadingsHint":
       "Adds each heading's recording to its chapter file, in reading order. Off keeps the file to verses only.",
+    // AQU-1575: the broadcast deliverable LOTE's vendor asked for, by name.
+    "importExport.dialog.lineAudioWav": "Convert every recording to WAV (16-bit, 48 kHz, mono)",
+    "importExport.dialog.lineAudioWavHint":
+      "For broadcast delivery. Off copies each recording as it was saved, which may be compressed or at a lower sample rate.",
     "importExport.dialog.chapterStitchPreview":
       "{clips} verses recorded · {chapters} chapters",
     "importExport.status.stitchingChapterAudio": "Stitching chapter audio…",
@@ -882,7 +886,9 @@ export const importExport = defineNamespace({
       one: "{count} line has no validated recording and will be left silent.",
       other: "{count} lines have no validated recording and will be left silent.",
     }),
-    "importExport.dialog.audioUnvalidatedJump": "Show me",
+    "importExport.dialog.audioUnvalidatedLinesAria": "Lines with an unvalidated recording",
+    "importExport.dialog.audioUnvalidatedShowLine": "Show line {line}",
+    "importExport.dialog.audioUnvalidatedMore": "+{count} more",
     "importExport.dialog.untimedRecordingsNote": plural({
       one: "{count} recording has no timing and cannot be placed.",
       other: "{count} recordings have no timing and cannot be placed.",
@@ -2312,10 +2318,20 @@ export const importExport = defineNamespace({
           "The same amber warning in the Export dialog's Audio card when the Content setting is 'Validated only': these lines have no validated recording, so the audio export leaves them silent (and omits their file from the per-line zip).",
         placeholders: { count: "Number of lines with no validated recording." },
       },
-      "importExport.dialog.audioUnvalidatedJump": {
+      "importExport.dialog.audioUnvalidatedLinesAria": {
         description:
-          "Link at the end of the Export dialog's unvalidated-recordings warning. Closes the dialog and takes the user to the first line that has no validated recording. Two or three words.",
-        maxLength: 24,
+          "Accessible name for the row of small line buttons under the Export dialog's unvalidated-recordings warning; each button names one line that would ship a recording nobody has validated.",
+      },
+      "importExport.dialog.audioUnvalidatedShowLine": {
+        description:
+          "Accessible name for one small line button under the Export dialog's unvalidated-recordings warning. Pressing it closes the dialog and takes the user to that line.",
+        placeholders: { line: "How the file names the line: its reference (e.g. 'JHN 6:5') or 'L' and its number (e.g. 'L3'). Not translated." },
+      },
+      "importExport.dialog.audioUnvalidatedMore": {
+        description:
+          "Button after the first eight line buttons under the Export dialog's unvalidated-recordings warning, when there are more lines; pressing it shows the rest in place. Keep it very short.",
+        placeholders: { count: "How many more lines are not shown yet." },
+        maxLength: 16,
       },
       "importExport.dialog.untimedRecordingsNote": {
         description:
@@ -2433,6 +2449,19 @@ export const importExport = defineNamespace({
         description:
           "Hint under the include-chapter-headings checkbox, saying headings play in reading order " +
           "when the box is on and that an unchecked box exports verses only.",
+      },
+      "importExport.dialog.lineAudioWav": {
+        description:
+          "Checkbox on the Audio by line export. On re-encodes every recording as an uncompressed WAV " +
+          "file; off copies each recording in the format it was saved in. '16-bit, 48 kHz, mono' is " +
+          "the technical audio format a broadcast studio asks for — keep the numbers and units as they " +
+          "are. The choice is remembered with the rest of the export dialog.",
+      },
+      "importExport.dialog.lineAudioWavHint": {
+        description:
+          "Hint under the convert-to-WAV checkbox on the Audio by line export: the WAV files are for " +
+          "broadcast delivery, and leaving the box unchecked keeps each recording as it was saved, " +
+          "which can mean a compressed file or a lower sample rate.",
       },
       "importExport.dialog.chapterStitchPreview": {
         description:

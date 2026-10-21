@@ -50,6 +50,10 @@ export const projectSettings = defineNamespace({
     "projectSettings.checking.play": "Play continuously",
     "projectSettings.checking.noRecording": "No selected recording for this passage.",
     "projectSettings.checking.playbackHelp": "Playback continues through available recordings in passage order.",
+    "projectSettings.checking.previous": "Previous passage",
+    "projectSettings.checking.next": "Next passage",
+    "projectSettings.checking.playPassage": "Play {label}",
+    "projectSettings.checking.yourFeedback": "Your feedback on this passage",
     "projectSettings.checking.feedbackPlaceholder": "What is clear? What could be improved?",
     "projectSettings.checking.sendFeedback": "Send feedback",
     "projectSettings.checking.retry": "Retry pending feedback",
@@ -298,7 +302,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.share.laneChoiceAll": "Every current target lane",
     "projectSettings.share.laneChoiceSome": "Only selected lanes",
     "projectSettings.share.laneChoiceRequired": "Choose the lanes before adding this person.",
-    "projectSettings.share.laneChoiceLeadNote": "A project lead sees every target lane.",
+    "projectSettings.share.laneChoiceLeadNote": "A maintainer sees every target lane.",
     "projectSettings.share.laneChoiceAdminHint":
       "To limit someone to some lanes, use that project's share panel.",
     "projectSettings.share.inviteLinkReady": "Invite link ready. Send it to the recipient.",
@@ -665,6 +669,12 @@ export const projectSettings = defineNamespace({
     "projectSettings.validation.customOption": "Set for this project",
     "projectSettings.validation.requiredTextSourceAria": "Text validators: use the organization default or set a number for this project",
     "projectSettings.validation.requiredAudioSourceAria": "Audio validators: use the organization default or set a number for this project",
+    // AQU-1768: the media settings can follow the organization's default too.
+    "projectSettings.mediaDefaults.orgOn": "Organization default (on)",
+    "projectSettings.mediaDefaults.orgOff": "Organization default (off)",
+    "projectSettings.mediaDefaults.orgValue": "Organization default ({value})",
+    "projectSettings.mediaDefaults.cellEditingNobody": "No one",
+    "projectSettings.mediaDefaults.sourceAria": "{setting}: use the organization default or set it for this project",
     "projectSettings.validation.minRoleLabel": "Minimum validator role",
     "projectSettings.validation.minRoleDescription": "Only users with at least this role can cast a validation vote. Defaults to reviewer.",
     // ── StructuralCellsProjectSection ── AQU-1083
@@ -697,7 +707,9 @@ export const projectSettings = defineNamespace({
     "projectSettings.autoPropagateRepetitions.off": "Don't propagate",
     "projectSettings.autoPropagateRepetitions.saveFailed": "Could not save that change",
 
-    "projectSettings.validation.allowSelfLabel": "Allow self-validation",
+    // AQU-1768: "(text)", like "Required validators (text)" above it — the
+    // recordings' own switch sits further down under Audio validation.
+    "projectSettings.validation.allowSelfLabel": "Allow self-validation (text)",
     // AQU-1571: the server refuses the vote up front, for every role, and the
     // editor greys the check out; "ignored" and "a contributor's" were both wrong.
     "projectSettings.validation.allowSelfDescription":
@@ -1319,6 +1331,25 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.wizardConfirmNoAdds": "Aquilla will keep one row for this project up to date on {board}, in an “Aquilla projects” group.",
     "projectSettings.monday.wizardConfirmNoAddsPerFile": "Aquilla will keep one row per file up to date on {board}, in an “Aquilla projects” group.",
     "projectSettings.monday.wizardAddAndConnectButton": "Add columns and connect",
+    // AQU-2087: step 1's other choice, a clean board made by Aquilla.
+    "projectSettings.monday.newBoardOption": "Make a new board for me",
+    "projectSettings.monday.newBoardHelp":
+      "A clean board with only the columns you pick next, in one “Aquilla projects” group, and no sample rows.",
+    "projectSettings.monday.newBoardNameLabel": "Board name",
+    "projectSettings.monday.newBoardDefaultName": "Aquilla progress",
+    "projectSettings.monday.existingBoardOption": "A board you already have",
+    "projectSettings.monday.noBoardsYet": "This Monday account has no boards yet, so Aquilla will make one.",
+    "projectSettings.monday.wizardConfirmNewBoard": plural({
+      one: "Aquilla will make a board called “{board}” with {count} column, and keep one row for this project up to date in an “Aquilla projects” group.",
+      other: "Aquilla will make a board called “{board}” with {count} columns, and keep one row for this project up to date in an “Aquilla projects” group.",
+    }, "count"),
+    "projectSettings.monday.wizardConfirmNewBoardPerFile": plural({
+      one: "Aquilla will make a board called “{board}” with {count} column, and keep one row per file up to date in an “Aquilla projects” group.",
+      other: "Aquilla will make a board called “{board}” with {count} columns, and keep one row per file up to date in an “Aquilla projects” group.",
+    }, "count"),
+    "projectSettings.monday.wizardMakeBoardButton": "Make board and connect",
+    "projectSettings.monday.wizardMakingBoard": "Making your board in Monday…",
+    "projectSettings.monday.wizardNewBoardFailed": "Couldn't make the board: {reason}. Nothing was connected yet.",
     "projectSettings.monday.wizardAddingColumns": "Adding columns to your board…",
     "projectSettings.monday.wizardAddColumnsFailed": "Couldn't add the columns: {reason}. Nothing was connected yet.",
     "projectSettings.monday.wizardSomeColumnsNotAdded":
@@ -1329,6 +1360,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.chooser.groupTeam": "Team and activity",
     "projectSettings.monday.chooser.newColumn": "New column",
     "projectSettings.monday.chooser.alwaysIncluded": "Always included, so Aquilla can find this project's row again.",
+    "projectSettings.monday.chooser.namesVisible": "Everyone who can see {board} on Monday will see these names.",
     "projectSettings.monday.chooser.summaryAdds": plural({
       one: "Adds {count} new column to {board} and uses {uses} already there.",
       other: "Adds {count} new columns to {board} and uses {uses} already there.",
@@ -1343,6 +1375,120 @@ export const projectSettings = defineNamespace({
       one: "Add {count} column",
       other: "Add {count} columns",
     }, "count"),
+
+    // ── Airtable integration (AQU-804) — Monday's screens for a table ──
+    "projectSettings.airtable.tableSyncLabel": "Table sync",
+    "projectSettings.airtable.loadingIntegration": "Loading Airtable integration…",
+    "projectSettings.airtable.connectionCheckFailed": "Could not check the Airtable connection. Try again.",
+    "projectSettings.airtable.orgNotConnected": "Your organization hasn't connected Airtable yet.",
+    "projectSettings.airtable.noTableLinkedReadOnly":
+      "No Airtable table is linked to this project. Maintainers can set one up here.",
+    "projectSettings.airtable.linkTablePrompt":
+      "Link an Airtable table to push this project's translation progress automatically, for the whole project and for each file.",
+    "projectSettings.airtable.setupWithAiBlurb":
+      "Picks the table, maps your progress figures to its fields, and shows you the plan before anything is written.",
+    "projectSettings.airtable.syncOnBadge": "Sync on",
+    "projectSettings.airtable.pushedNotice": plural({
+      one: "Pushed to Airtable ({count} record).",
+      other: "Pushed to Airtable ({count} records).",
+    }, "count"),
+    "projectSettings.airtable.syncFailedNotice": "Sync failed: {reason}",
+    "projectSettings.airtable.addFieldsButton": "Add fields",
+    "projectSettings.airtable.addFieldsDialogTitle": "Add fields to your table",
+    "projectSettings.airtable.addFieldsConfirm": plural({
+      one: "Add {count} field",
+      other: "Add {count} fields",
+    }, "count"),
+    "projectSettings.airtable.removeTableLinkTitle": "Remove table link?",
+    "projectSettings.airtable.removeTableLinkDescription":
+      "Progress will stop pushing to {table}. The table and its records are left untouched in Airtable.",
+    "projectSettings.airtable.removeTableLinkAriaLabel": "Remove table link",
+    "projectSettings.airtable.tableChangesIntro":
+      "New in your Airtable table since it was linked. Map a field to fill it from Aquilla (then pick what it shows and save the mapping), or mark it not needed.",
+    "projectSettings.airtable.tableChangesReadOnly": "Aquilla can't fill this kind of field.",
+    "projectSettings.airtable.structureStaleWarning": "The table's fields changed — review the mapping below.",
+    "projectSettings.airtable.linkedTablePrefix": "Linked table:",
+    "projectSettings.airtable.openTable": "Open table in Airtable",
+    "projectSettings.airtable.syncNowPausedTooltip": "Sync is off. Turn it on to push progress to Airtable.",
+    "projectSettings.airtable.fieldMappingLabel": "Field mapping",
+    "projectSettings.airtable.loadingTableFields": "Loading the table's fields…",
+    "projectSettings.airtable.reconfigurePlaceholder":
+      "Describe what to change — e.g. “track validated % instead of completion, one record per episode”",
+    "projectSettings.airtable.fieldHeader": "Airtable field",
+    "projectSettings.airtable.pickFieldPlaceholder": "Pick a field",
+    "projectSettings.airtable.noFieldsMapped": "No fields mapped.",
+    "projectSettings.airtable.recordsLine.project": "One record for the whole project.",
+    "projectSettings.airtable.recordsLine.file": "One record per file.",
+    "projectSettings.airtable.recordsLine.projectAndFiles": "One record for the project and one per file.",
+    "projectSettings.airtable.granularity.project": "One record for the whole project",
+    "projectSettings.airtable.granularity.file": "One record per file (episode)",
+    "projectSettings.airtable.granularity.projectAndFiles": "One record for the project and one per file",
+    "projectSettings.airtable.recordsLabel": "Table records",
+    "projectSettings.airtable.wizardTitle": "Set up Airtable with AI",
+    "projectSettings.airtable.wizardIntroLine":
+      "Aquilla picks a table and suggests what to show. Nothing changes in Airtable until you confirm.",
+    "projectSettings.airtable.connectGateDescription":
+      "Your organization isn't connected to Airtable yet. Paste a personal access token to connect it; setup continues right after.",
+    "projectSettings.airtable.scanButton": "Scan and propose",
+    "projectSettings.airtable.connectAndScanButton": "Connect and scan",
+    "projectSettings.airtable.scanStep1Label": "Reading this project and your Airtable tables",
+    "projectSettings.airtable.scanStep2Label": "Matching progress figures to the table's fields",
+    "projectSettings.airtable.wizardTableTitle": "Which table?",
+    "projectSettings.airtable.wizardColumnsTitle": "What should your table show?",
+    "projectSettings.airtable.tableInBase": "In the {base} base",
+    "projectSettings.airtable.loadingBases": "Loading bases…",
+    "projectSettings.airtable.loadingTables": "Loading tables…",
+    "projectSettings.airtable.tableListFailed":
+      "Couldn't list the tables — an org maintainer can change the table later.",
+    "projectSettings.airtable.baseSelectAriaLabel": "Airtable base",
+    "projectSettings.airtable.tableSelectAriaLabel": "Airtable table",
+    "projectSettings.airtable.pickBasePlaceholder": "Pick a base",
+    "projectSettings.airtable.pickTablePlaceholder": "Pick a table",
+    "projectSettings.airtable.someFieldsSkipped": "Some fields were skipped",
+    "projectSettings.airtable.wizardAdvancedShow": "Advanced: match fields myself",
+    "projectSettings.airtable.wizardConfirmAdds": plural({
+      one: "Aquilla will add {count} field to {table}.",
+      other: "Aquilla will add {count} fields to {table}.",
+    }, "count"),
+    "projectSettings.airtable.wizardConfirmNoAdds": "Aquilla will use the fields already in {table}.",
+    "projectSettings.airtable.wizardConfirmRecords.project": "It keeps one record for this project up to date there.",
+    "projectSettings.airtable.wizardConfirmRecords.file": "It keeps one record per file up to date there.",
+    "projectSettings.airtable.wizardConfirmRecords.projectAndFiles":
+      "It keeps one record for this project and one per file up to date there.",
+    "projectSettings.airtable.wizardAddAndConnectButton": "Add fields and connect",
+    "projectSettings.airtable.wizardAddingFields": "Adding fields to your table…",
+    "projectSettings.airtable.wizardAddFieldsFailed": "Couldn't add the fields: {reason}. Nothing was connected yet.",
+    "projectSettings.airtable.wizardSomeFieldsNotAdded":
+      "Airtable didn't add: {columns} ({reason}). Everything else is connected; you can add them later from this page.",
+    "projectSettings.airtable.applyingStatus": "Linking the table and pushing your progress…",
+    "projectSettings.airtable.wizardDoneTitle": "Airtable is set up",
+    "projectSettings.airtable.wizardDoneNeedsAttentionTitle": "Table linked — sync needs attention",
+    "projectSettings.airtable.wizardDoneLine": "This project now syncs to {table}.",
+    "projectSettings.airtable.pushedRecords": plural({
+      one: "Pushed {count} record.",
+      other: "Pushed {count} records.",
+    }, "count"),
+    "projectSettings.airtable.firstPushFailed": "Linked, but the first push failed: {reason} You can retry with Sync now.",
+    "projectSettings.airtable.wizardLinkWarningsTitle": "The table is linked, but some fields were left out:",
+    "projectSettings.airtable.chooser.intro":
+      "Tick what you want in your Airtable table. We'll use fields you already have and add any that are missing.",
+    "projectSettings.airtable.chooser.inTable": "In your table",
+    "projectSettings.airtable.chooser.newField": "New field",
+    "projectSettings.airtable.chooser.alwaysIncluded": "Always included, so Aquilla can find its records again.",
+    "projectSettings.airtable.chooser.summaryAdds": plural({
+      one: "Adds {count} new field to {board} and uses {uses} already there.",
+      other: "Adds {count} new fields to {board} and uses {uses} already there.",
+    }, "count"),
+    "projectSettings.airtable.chooser.summaryNoAdds": plural({
+      one: "Uses {count} field already in {board}; nothing new is added.",
+      other: "Uses {count} fields already in {board}; nothing new is added.",
+    }, "count"),
+    "projectSettings.airtable.chooser.namesVisible": "Everyone who can see {board} in Airtable will see these names.",
+    "projectSettings.airtable.orgNextLinkProjectsDescription":
+      "Your organization is connected. Choose a project to review its recommended table and progress fields.",
+    "projectSettings.airtable.orgProjectLinkedTo": "Linked to {table}",
+    "projectSettings.airtable.orgProjectLinksFailed": "Couldn't check which projects are linked to Airtable.",
+    "projectSettings.airtable.orgProjectTableChanged": "Table changed",
 
     // ── Terminology source-term matching (AQU-1271) ──
     "projectSettings.termMatching.title": "Prefixes and suffixes",
@@ -2203,6 +2349,57 @@ export const projectSettings = defineNamespace({
       "projectSettings.monday.wizardAddAndConnectButton": {
         description: "Final button of the Monday.com setup when new columns must be created first; then the board is connected.",
       },
+      "projectSettings.monday.newBoardOption": {
+        description:
+          "Choice in step 1 of the Monday.com setup (\"Which board?\"): instead of linking one of the user's Monday " +
+          "boards, Aquilla creates a new board for this project's progress.",
+      },
+      "projectSettings.monday.newBoardHelp": {
+        description:
+          "Explanation under \"Make a new board for me\": the new board holds only the columns the user ticks in the " +
+          "next step, inside one group named \"Aquilla projects\" (keep that name as written), with none of " +
+          "Monday's example rows.",
+      },
+      "projectSettings.monday.newBoardNameLabel": {
+        description: "Label of the text field for the new Monday board's name.",
+      },
+      "projectSettings.monday.newBoardDefaultName": {
+        description:
+          "The name the new Monday board gets unless the user types another. It becomes the board's real name in " +
+          "Monday, so keep it short.",
+      },
+      "projectSettings.monday.existingBoardOption": {
+        description: "Choice in step 1 of the Monday.com setup: link one of the user's existing Monday boards (picked below).",
+      },
+      "projectSettings.monday.noBoardsYet": {
+        description:
+          "Note in step 1 of the Monday.com setup when the user's Monday account has no boards at all; the only " +
+          "choice left is a new board made by Aquilla.",
+      },
+      "projectSettings.monday.wizardConfirmNewBoard": {
+        description: "Summary on the last setup step when Aquilla will create a new Monday board with the chosen columns.",
+        placeholders: {
+          board: "The new board's name, as the user typed it (not translated).",
+          count: "How many columns the new board gets.",
+        },
+      },
+      "projectSettings.monday.wizardConfirmNewBoardPerFile": {
+        description: "Same summary when the new board gets one row per file of the project instead of one for the whole project.",
+        placeholders: {
+          board: "The new board's name, as the user typed it (not translated).",
+          count: "How many columns the new board gets.",
+        },
+      },
+      "projectSettings.monday.wizardMakeBoardButton": {
+        description: "Final button of the Monday.com setup when Aquilla first creates a new board; then the board is connected.",
+      },
+      "projectSettings.monday.wizardMakingBoard": {
+        description: "Progress line while Aquilla creates the new board and its columns in the user's Monday account.",
+      },
+      "projectSettings.monday.wizardNewBoardFailed": {
+        description: "Error when Monday did not create the new board; nothing was connected.",
+        placeholders: { reason: "The error message, usually Monday's own, shown as received." },
+      },
       "projectSettings.monday.wizardAddingColumns": {
         description: "Progress line while Aquilla creates the chosen columns on the user's Monday board.",
       },
@@ -2281,6 +2478,13 @@ export const projectSettings = defineNamespace({
       },
       "projectSettings.monday.chooser.alwaysIncluded": {
         description: "Note under the locked 'Aquilla ID' column in the checklist, saying why it can't be unticked.",
+      },
+      "projectSettings.monday.chooser.namesVisible": {
+        description:
+          "Security note under the 'Project manager' and 'Translators' columns in the checklist, shown in amber while " +
+          "either is ticked: those columns put people's names on the Monday board, and anyone with access to the " +
+          "board can read them. Plain and factual, so it reads as a clear caution without alarm.",
+        placeholders: { board: "The Monday board's name (Monday data, not translated)." },
       },
       "projectSettings.monday.chooser.summaryAdds": {
         description: "Live summary under the column checklist when some ticked columns will be created.",
@@ -2369,6 +2573,111 @@ export const projectSettings = defineNamespace({
       },
       "projectSettings.monday.removeBoardLinkAriaLabel": {
         description: "Accessible name of the icon-only trash button that opens the remove-board-link confirmation.",
+      },
+      "projectSettings.airtable.pushedNotice": {
+        description: "Line under the Sync now button after a push to the project's Airtable table succeeded (AQU-804).",
+        placeholders: { count: "How many Airtable records were written, a whole number." },
+      },
+      "projectSettings.airtable.syncFailedNotice": {
+        description: "Line under the Sync now button when a push to Airtable failed.",
+        placeholders: { reason: "Airtable's or the server's own reason, in English, shown as given." },
+      },
+      "projectSettings.airtable.addFieldsConfirm": {
+        description: "Confirm button of the 'Add fields to your table' dialog; creates that many new fields in the Airtable table.",
+        placeholders: { count: "How many fields will be created, a whole number." },
+      },
+      "projectSettings.airtable.removeTableLinkDescription": {
+        description: "Body of the confirmation before unlinking the project's Airtable table.",
+        placeholders: { table: "The linked Airtable table's name (data, not translated)." },
+      },
+      "projectSettings.airtable.removeTableLinkAriaLabel": {
+        description: "Accessible name of the icon-only trash button that opens the remove-table-link confirmation.",
+      },
+      "projectSettings.airtable.baseSelectAriaLabel": {
+        description: "Accessible name of the dropdown that picks an Airtable base (a base holds tables).",
+      },
+      "projectSettings.airtable.tableSelectAriaLabel": {
+        description: "Accessible name of the dropdown that picks a table inside the chosen Airtable base.",
+      },
+      "projectSettings.airtable.tableInBase": {
+        description: "Small line under the chosen Airtable table's name in setup, naming the base it is in.",
+        placeholders: { base: "The Airtable base's name (data, not translated)." },
+      },
+      "projectSettings.airtable.wizardConfirmAdds": {
+        description:
+          "First sentence of the last setup step: how many new fields Aquilla will create in the Airtable table. " +
+          "Followed by one of the projectSettings.airtable.wizardConfirmRecords.* sentences.",
+        placeholders: {
+          count: "How many fields will be created, a whole number.",
+          table: "The Airtable table's name (data, not translated).",
+        },
+      },
+      "projectSettings.airtable.wizardConfirmNoAdds": {
+        description:
+          "First sentence of the last setup step when no new field is needed. Followed by one of the " +
+          "projectSettings.airtable.wizardConfirmRecords.* sentences, which say 'there' meaning this table.",
+        placeholders: { table: "The Airtable table's name (data, not translated)." },
+      },
+      "projectSettings.airtable.wizardAddFieldsFailed": {
+        description: "Error in setup when creating the new Airtable fields failed; nothing was linked.",
+        placeholders: { reason: "Airtable's or the server's own reason, in English, shown as given." },
+      },
+      "projectSettings.airtable.wizardSomeFieldsNotAdded": {
+        description: "Warning after setup when Airtable refused to create some of the fields; the link itself works.",
+        placeholders: {
+          columns: "The names of the fields that were not created, comma-separated (data, not translated).",
+          reason: "Airtable's reason for the first refusal, in English, shown as given.",
+        },
+      },
+      "projectSettings.airtable.wizardDoneLine": {
+        description: "First sentence of the last setup screen once the table is linked.",
+        placeholders: { table: "The Airtable table's name (data, not translated)." },
+      },
+      "projectSettings.airtable.pushedRecords": {
+        description: "Line on the last setup screen after the first push into Airtable landed.",
+        placeholders: { count: "How many Airtable records were written, a whole number." },
+      },
+      "projectSettings.airtable.firstPushFailed": {
+        description:
+          "Warning on the last setup screen when the table was linked but the first push failed. " +
+          "'Sync now' is the name of the button that retries (projectSettings.monday.syncNowButton).",
+        placeholders: { reason: "Airtable's or the server's own reason, in English, shown as given; it ends with its own full stop." },
+      },
+      "projectSettings.airtable.chooser.summaryAdds": {
+        description:
+          "Live line under the field list in Airtable setup: how many new fields will be created in the table " +
+          "and how many existing ones are used.",
+        placeholders: {
+          count: "How many new fields will be created, a whole number.",
+          board: "The Airtable TABLE's name (data, not translated). Named 'board' because the list is shared with Monday.com setup.",
+          uses: "How many fields already in the table are used, a whole number.",
+        },
+      },
+      "projectSettings.airtable.chooser.summaryNoAdds": {
+        description: "Live line under the field list in Airtable setup when nothing new will be created.",
+        placeholders: {
+          count: "How many fields already in the table are used, a whole number.",
+          board: "The Airtable TABLE's name (data, not translated). Named 'board' because the list is shared with Monday.com setup.",
+        },
+      },
+      "projectSettings.airtable.chooser.namesVisible": {
+        description:
+          "Security note under the 'Project manager' and 'Translators' fields in the Airtable setup's field list, shown " +
+          "in amber while either is ticked: those fields put people's names in the Airtable table, and anyone with " +
+          "access to the table can read them. Plain and factual, so it reads as a clear caution without alarm. " +
+          "Sibling of projectSettings.monday.chooser.namesVisible.",
+        placeholders: {
+          board: "The Airtable TABLE's name (data, not translated). Named 'board' because the list is shared with Monday.com setup.",
+        },
+      },
+      "projectSettings.airtable.chooser.inTable": {
+        description:
+          "Small badge beside a field in the Airtable setup list when that field already exists in the " +
+          "user's table (it is used as it is, not created again).",
+      },
+      "projectSettings.airtable.orgProjectLinkedTo": {
+        description: "Status line under a project's name in Org settings → Airtable.",
+        placeholders: { table: "The linked Airtable table's name (data, not translated)." },
       },
       "projectSettings.monday.removeMappingRowAriaLabel": {
         description: "Accessible name of the icon-only trash button that deletes one column-mapping row.",
@@ -2789,6 +3098,10 @@ export const projectSettings = defineNamespace({
         description: "Accessible name of the read-only field holding a checking link's URL.",
         placeholders: { title: "The link title the project lead typed (data, not translated)." },
       },
+      "projectSettings.checking.playPassage": {
+        description: "Accessible name of the small play button beside one passage in the guest page's running text.",
+        placeholders: { label: "The passage reference, e.g. 'MRK 1:2', or 'Unit 3' when it has none." },
+      },
       "projectSettings.checking.feedbackOn": {
         description: "Label of the feedback box on the guest page, naming the passage the feedback is about.",
         placeholders: { label: "The passage reference, e.g. 'MRK 1:2', or 'Unit 3' when it has none." },
@@ -2882,7 +3195,37 @@ export const projectSettings = defineNamespace({
       },
       "projectSettings.validation.customOption": {
         description:
-          "Option in the same dropdown. Choosing it lets this project set its own number of required validators, in a box that appears next to it.",
+          "Option in the same dropdown. Choosing it lets this project set its own value instead of the organization's. " +
+          "Also used beside the timeline, line-editing and recording-validation settings (AQU-1768).",
+      },
+      "projectSettings.mediaDefaults.orgOn": {
+        description:
+          "Option in a dropdown beside an on/off project setting (timing lock, timeline track editing, validating your own " +
+          "recordings). Choosing it means this project follows its organization's default, which is currently ON.",
+      },
+      "projectSettings.mediaDefaults.orgOff": {
+        description:
+          "Same dropdown, when the organization's default is currently OFF.",
+      },
+      "projectSettings.mediaDefaults.orgValue": {
+        description:
+          "Same dropdown beside a role setting ('Who can add and remove cells', 'Minimum role to validate recordings'). " +
+          "Choosing it means this project follows its organization's choice, shown in brackets.",
+        placeholders: {
+          value: "The organization's current choice, e.g. 'Project lead' or 'No one', already translated.",
+        },
+      },
+      "projectSettings.mediaDefaults.cellEditingNobody": {
+        description:
+          "Short name for the 'nobody may add or remove cells' choice, shown inside 'Organization default (…)' and in the " +
+          "closed role picker on the organization's Project defaults page. Not a role.",
+      },
+      "projectSettings.mediaDefaults.sourceAria": {
+        description:
+          "Screen-reader label for that dropdown. Not shown on screen.",
+        placeholders: {
+          setting: "The setting's own label, e.g. 'Lock the timings against dragging', already translated.",
+        },
       },
       "projectSettings.validation.requiredTextSourceAria": {
         description:

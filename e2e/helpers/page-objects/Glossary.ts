@@ -50,7 +50,7 @@ export class Glossary {
    * are picked by a rendering that identifies them — duplicates share a source
    * term — and the FIRST pick survives. Waits for the term.* flush. */
   async mergeConcepts(survivorRendering: string, ...mergedAwayRenderings: string[]): Promise<void> {
-    await this.page.getByRole("button", { name: "Merge duplicate concepts" }).click()
+    await this.page.getByRole("button", { name: "Merge duplicates" }).click()
     const dialog = this.page.getByRole("dialog")
     await expect(dialog).toBeVisible({ timeout: 5_000 })
     for (const rendering of [survivorRendering, ...mergedAwayRenderings]) {

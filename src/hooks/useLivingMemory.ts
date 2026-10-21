@@ -45,6 +45,7 @@ export function useLivingMemory({
   projectId,
   project,
   enabled = true,
+  lane = "",
 }: {
   projectId: string
   /** The calling surface already owns project loading. Keeping that ownership
@@ -53,6 +54,14 @@ export function useLivingMemory({
   /** Validated examples are expensive: every project file is read. Callers
    * should enable this only while a surface actually consumes those cells. */
   enabled?: boolean
+  /**
+   * AQU-2001: the lane whose validated pairs to aggregate. The corpus read
+   * keeps only target rows whose `targetLang` equals this lane, so an omitted
+   * lane selects the legacy default lane — empty on any project translated
+   * into a named lane, which left Living Memory showing no validated examples
+   * at all. Same bug class as the Rules pane's corpus read (AQU-1906).
+   */
+  lane?: string
 }): UseLivingMemoryResult {
   const { session } = useFrontierSession()
   const jwt = session?.jwt
@@ -77,6 +86,7 @@ export function useLivingMemory({
     projectFiles,
     getToken,
     enabled: enabled && Boolean(project) && Boolean(jwt),
+    lane,
   })
 
   const cells = useMemo(() => {

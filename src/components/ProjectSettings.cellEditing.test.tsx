@@ -149,6 +149,12 @@ function renderSettings(path = `/project/${PROJECT_ID}/settings`) {
 
 const PANE = `/project/${PROJECT_ID}/settings/general`
 
+/** AQU-1768: the tier follows the organization until "Set for this project". */
+async function setForThisProject(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByTestId("cell-editing-floor-source"))
+  await user.click(await screen.findByRole("option", { name: "Set for this project" }))
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   currentProject = makeProject()
@@ -179,6 +185,7 @@ describe("ProjectSettings — who can add and remove cells (AQU-1068)", () => {
   it("saves the chosen tier as cellEditingFloor, and touches nothing else", async () => {
     const user = userEvent.setup()
     renderSettings(PANE)
+    await setForThisProject(user)
 
     await user.click(screen.getByTestId("settings-cell-editing-floor"))
     await user.click(await screen.findByRole("option", { name: "Maintainer (600)" }))
@@ -193,6 +200,7 @@ describe("ProjectSettings — who can add and remove cells (AQU-1068)", () => {
   it("saves a below-contributor tier — the new rungs reach the wire, not just the list", async () => {
     const user = userEvent.setup()
     renderSettings(PANE)
+    await setForThisProject(user)
 
     await user.click(screen.getByTestId("settings-cell-editing-floor"))
     await user.click(await screen.findByRole("option", { name: "Reviewer (300)" }))
@@ -205,6 +213,7 @@ describe("ProjectSettings — who can add and remove cells (AQU-1068)", () => {
   it("offers the six tiers in order, reset default first then up the ladder", async () => {
     const user = userEvent.setup()
     renderSettings(PANE)
+    await setForThisProject(user)
     await user.click(screen.getByTestId("settings-cell-editing-floor"))
     const labels = (await screen.findAllByRole("option")).map((o) => o.textContent)
     expect(labels).toEqual([

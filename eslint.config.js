@@ -26,7 +26,7 @@ export default defineConfig([
   // nearest eslint.config.js, so without this ignore it loads those copies' configs.
   // Browser smoke builds and Wrangler bundles are generated, and Wrangler
   // removes its temporary files while the local test stack runs.
-  globalIgnores(['dist', 'dist-e2e-*', '**/.wrangler/**', '.claude', '.worktrees']),
+  globalIgnores(['dist', 'dist-e2e-*', '**/.wrangler/**', '.claude', '.worktrees', 'zapier']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
@@ -129,6 +129,27 @@ export default defineConfig([
             message: `"${name}" here is the browser global, not an import — if this is meant to be a lucide icon or local symbol, import it (see AQU-642).`,
           }),
         ),
+      ],
+    },
+  },
+  // AQU-1937: Smart Extensions' reserved identity color. Only the host-drawn
+  // ExtensionFrame / ExtensionMarker may use the --extension-accent token, so
+  // nothing else (app UI, themes, anything forwarded into extension frames)
+  // can look like — or restyle — the extension identity. Tests check it too.
+  {
+    files: ['src/**/*.{ts,tsx}', 'shared/**/*.ts'],
+    ignores: ['src/components/tools/ExtensionFrame.tsx', 'src/components/tools/ExtensionMarker.tsx', '**/*.test.{ts,tsx}'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'Literal[value=/extension-accent/]',
+          message: 'The --extension-accent color is reserved for ExtensionFrame / ExtensionMarker (AQU-1937). Use those components.',
+        },
+        {
+          selector: 'TemplateElement[value.raw=/extension-accent/]',
+          message: 'The --extension-accent color is reserved for ExtensionFrame / ExtensionMarker (AQU-1937). Use those components.',
+        },
       ],
     },
   },

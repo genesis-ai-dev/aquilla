@@ -17,6 +17,7 @@ import { isStructuralCell } from "@/lib/cells/structural"
 import { isHiddenCell } from "@/lib/cells/hidden"
 import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/extract"
 import { sortByLens } from "@/lib/timeline/derive"
+import { splitLineOrigin } from "@/lib/timeline/user-line-origin"
 import type { OrderedBy, RuleWaiver } from "@/lib/parsers/types"
 import type { FileProgressResponse, ProgressCounts } from "@/lib/progress/file-progress-resource"
 import { deriveMilestoneNavigation, type MilestoneNavigationCell } from "@/lib/milestone-navigation"
@@ -28,6 +29,16 @@ import { readOfflineFileCells, resolveOfflineStore, subscribeToOfflineFileCells 
 import { subscribeToDiscardedOfflineCommits } from "@/lib/offline/refused-writes"
 
 const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
+/** AQU-2094: what a sparse audit read says about a cell it leaves out. */
+const NO_AUDIT: CellAuditStats = Object.freeze({
+  cellId: "",
+  editCount: 0,
+  contentHash: "",
+  lastEditAt: null,
+  lastEditEventId: null,
+  activeValidators: Object.freeze([]) as unknown as string[],
+  waivers: Object.freeze([]) as unknown as CellAuditStats["waivers"],
+})
 const EMPTY_TAKES: ReadonlySet<string> = new Set()
 const EMPTY_CELL_IDS: readonly string[] = Object.freeze([])
 const EMPTY_SUMMARIES: readonly CellSummary[] = Object.freeze([])
@@ -194,6 +205,12 @@ interface RuntimeContext {
   requiredValidations: number
   auditStats: ReadonlyMap<string, CellAuditStats>
   /**
+   * AQU-2094: `auditStats` came from a sparse read, so a cell missing from it
+   * has no validators and no waivers. That is an answer, not "not loaded yet":
+   * the row's denormalized `validated` column must not speak for the cell.
+   */
+  auditStatsComplete?: boolean
+  /**
    * AQU-646: cells that carry a recording of their OWN (a clip seeded with the
    * cell's id, not the file-seeded imported source clip).
    *
@@ -302,6 +319,14 @@ interface DerivedCache {
  * See `useActiveCellStore.largeFile.test.ts` for the regression guards built on
  * them, and `useActiveCellStore.largeFile.bench.test.ts` for the benchmark.
  */
+/** AQU-1759: what `applyOptimisticQuoteSplit` changed, so a refusal can put it back. */
+export interface QuoteSplitUndo {
+  /** Every source row the split touched, as it was before. */
+  rows: Map<string, CellRow>
+  /** The pieces it inserted. */
+  insertedIds: string[]
+}
+
 export interface CellStoreWorkStats {
   /**
    * Cells visited by a loop whose length is the FILE's, summed across every
@@ -476,8 +501,17 @@ export class CellStore {
     this.emit(changed)
   }
 
+  /** The audit entry for a cell (see `RuntimeContext.auditStatsComplete`). */
+  private auditOf(cellId: string, stats: ReadonlyMap<string, CellAuditStats> = this.ctx.auditStats): CellAuditStats | undefined {
+    return stats.get(cellId) ?? (this.ctx.auditStatsComplete ? NO_AUDIT : undefined)
+  }
+
   setRuntime(next: RuntimeContext): void {
     const prevStats = this.ctx.auditStats
+    // AQU-2094: the first sparse read changes what every cell's MISSING entry
+    // means, which no diff of the two maps can see — so it refreshes every
+    // cell, as a threshold change does.
+    const completeChanged = Boolean(this.ctx.auditStatsComplete) !== Boolean(next.auditStatsComplete)
     const nextLane = next.lane ?? ""
     const statsChanged = prevStats !== next.auditStats
     // AQU-1083: a structural-policy flip changes which cells every derived
@@ -517,7 +551,7 @@ export class CellStore {
       this.replaceRows(this.toRows(), { full: true, maxServerSeq: this.maxServerSeq })
       return
     }
-    if (statsChanged || userChanged) {
+    if (statsChanged || userChanged || completeChanged) {
       // Invariant: a per-cell version bump is ALWAYS paired with a per-cell
       // emit of the same set. Editor rows read useSyncExternalStore over
       // getCellVersion; a bump without an emit lets a parent-driven render
@@ -526,7 +560,7 @@ export class CellStore {
       // row then stays stale until remount. The old bumpAllCells()-but-emit-
       // only-the-changed-cells shape here was exactly that: audit-stats churn
       // during a batch silently inflated every cell's version.
-      if (userChanged) {
+      if (userChanged || completeChanged) {
         this.bumpAllCells()
         this.rebuildDerivedIndexes()
         this.emit(this.order)
@@ -817,7 +851,7 @@ export class CellStore {
       this.ctx.fileId ?? "",
       this.ctx.username,
       this.ctx.requiredValidations,
-      this.ctx.auditStats.get(cellId),
+      this.auditOf(cellId),
     )
     this.applyContentOverlays(cell)
     this.applyOwnTake(cell)
@@ -938,6 +972,16 @@ export class CellStore {
     }
     this.summaryCache.set(cellId, entry)
     return entry
+  }
+
+  /**
+   * AQU-1767 phase 2: a source row's place in the anchor chain and its head —
+   * what undoing a removal needs to point the next row back at the restored one
+   * (only if nobody has moved it since). Null when there is no source row.
+   */
+  getSourceChainInfo(cellId: string): { anchorCellId: string | null; eventId: string } | null {
+    const source = this.sourceById.get(cellId)
+    return source ? { anchorCellId: source.anchorCellId ?? null, eventId: source.eventId } : null
   }
 
   /**
@@ -1289,6 +1333,17 @@ export class CellStore {
     return this.removedCellIds.has(cellId)
   }
 
+  /**
+   * AQU-1767 phase 2: a removal was undone (`source.cell.restore`), so the
+   * cell is back in the file. Forget that it left — or writes made to it from
+   * now on would drop themselves as writes to a removed cell — and lift its
+   * freshness floor so the confirming read can bring its rows in.
+   */
+  markRestored(cellId: string): void {
+    this.removedCellIds.delete(cellId)
+    this.freshnessFloors.delete(cellId)
+  }
+
   toRows(): CellRow[] {
     const rows: CellRow[] = []
     for (const id of this.sourceOrder) {
@@ -1588,7 +1643,7 @@ export class CellStore {
 
     const target = this.targetById.get(cellId)
     const threshold = Math.min(15, Math.max(1, this.ctx.requiredValidations))
-    const audit = this.ctx.auditStats.get(cellId)
+    const audit = this.auditOf(cellId)
     const beforeValidation = validationContribution(audit, existing, threshold)
     const afterValidation = validationContribution(audit, target, threshold)
     const validationUnchanged = beforeValidation.endorsements === afterValidation.endorsements
@@ -1824,6 +1879,120 @@ export class CellStore {
     // carries its `hidden` flag, so re-deriving is what honours it.
     this.setHiddenCellIds(this.collectHiddenCellIds())
     this.rebuildDerivedIndexes()
+    this.fileVersion++
+    this.emitAll()
+  }
+
+  /**
+   * AQU-1759: rows split at their quotation marks, visible on the SAME TICK.
+   *
+   * The same reasoning as `applyOptimisticSourceInsert`, for the same reason:
+   * a split changes `order`, and waiting on the confirming read makes
+   * `replaceRows` rebuild every derived index of the file. Applying it here
+   * first means that read arrives with the order already right, so it only
+   * corrects the handful of rows it touched.
+   *
+   * Each split row keeps its id and shows its first piece; the later pieces
+   * are spliced in after it, chained on each other; and the row that followed
+   * it moves onto the last piece. One rebuild and one emit for the whole
+   * batch, so the per-file sweep costs the same as a single row.
+   *
+   * Returns what it changed, for `rollbackOptimisticQuoteSplit` — the floor
+   * stamped here would otherwise protect a refused split forever.
+   */
+  applyOptimisticQuoteSplit(splits: ReadonlyArray<{
+    cellId: string
+    firstText: string
+    pieces: ReadonlyArray<{ cellId: string; value: string; sequenceIndex?: number }>
+    successorCellId: string | null
+  }>): QuoteSplitUndo {
+    const undo: QuoteSplitUndo = { rows: new Map(), insertedIds: [] }
+    const changed: string[] = []
+    const now = Date.now()
+    // First sight of a row is its state before the split: a row that is both
+    // split AND the follower of another split row is touched twice.
+    const snapshot = (row: CellRow) => { if (!undo.rows.has(row.cellId)) undo.rows.set(row.cellId, row) }
+    for (const split of splits) {
+      const source = this.sourceById.get(split.cellId)
+      if (!source) continue
+      snapshot(source)
+      this.sourceById.set(split.cellId, { ...source, value: split.firstText, valueHtml: null })
+      this.freshnessFloors.set(split.cellId, ++this.writeSeq)
+      changed.push(split.cellId)
+
+      let previous = split.cellId
+      for (const piece of split.pieces) {
+        if (this.sourceById.has(piece.cellId)) continue
+        this.sourceById.set(piece.cellId, {
+          cellId: piece.cellId,
+          side: "source",
+          targetLang: "",
+          value: piece.value,
+          valueHtml: null,
+          type: source.type,
+          canonicalRef: null,
+          anchorCellId: previous,
+          // No event id until the flush lands — see applyOptimisticSourceInsert.
+          eventId: "",
+          sourceEventId: null,
+          lastEditor: this.ctx.username,
+          lastEditAt: now,
+          validated: false,
+          wordCount: 0,
+          endorsementCount: 0,
+          ...(piece.sequenceIndex != null ? { sequenceIndex: piece.sequenceIndex } : {}),
+          metadata: { aquillaOrigin: splitLineOrigin(split.cellId) },
+        } as CellRow)
+        this.freshnessFloors.set(piece.cellId, ++this.writeSeq)
+        const sourceAt = this.sourceOrder.indexOf(previous)
+        this.sourceOrder.splice(sourceAt >= 0 ? sourceAt + 1 : this.sourceOrder.length, 0, piece.cellId)
+        const orderAt = this.order.indexOf(previous)
+        this.order.splice(orderAt >= 0 ? orderAt + 1 : this.order.length, 0, piece.cellId)
+        undo.insertedIds.push(piece.cellId)
+        changed.push(piece.cellId)
+        previous = piece.cellId
+      }
+
+      const successor = split.successorCellId ? this.sourceById.get(split.successorCellId) : undefined
+      if (successor && previous !== split.cellId) {
+        snapshot(successor)
+        this.sourceById.set(successor.cellId, { ...successor, anchorCellId: previous })
+        this.freshnessFloors.set(successor.cellId, ++this.writeSeq)
+        changed.push(successor.cellId)
+      }
+    }
+    if (changed.length === 0) return undo
+    this.indexById = new Map(this.order.map((id, index) => [id, index]))
+    this.listVersion++
+    this.setHiddenCellIds(this.collectHiddenCellIds())
+    this.rebuildDerivedIndexes()
+    this.bumpCells(changed)
+    this.fileVersion++
+    this.emit(changed)
+    return undo
+  }
+
+  /** Undo `applyOptimisticQuoteSplit` for a split the server refused. */
+  rollbackOptimisticQuoteSplit(undo: QuoteSplitUndo): void {
+    const inserted = new Set(undo.insertedIds)
+    if (inserted.size === 0 && undo.rows.size === 0) return
+    for (const id of inserted) {
+      this.sourceById.delete(id)
+      this.targetById.delete(id)
+      this.freshnessFloors.delete(id)
+    }
+    this.sourceOrder = this.sourceOrder.filter((id) => !inserted.has(id))
+    this.targetOrder = this.targetOrder.filter((id) => !inserted.has(id))
+    this.order = this.order.filter((id) => !inserted.has(id))
+    for (const row of undo.rows.values()) {
+      this.sourceById.set(row.cellId, row)
+      this.freshnessFloors.delete(row.cellId)
+    }
+    this.indexById = new Map(this.order.map((id, index) => [id, index]))
+    this.listVersion++
+    this.setHiddenCellIds(this.collectHiddenCellIds())
+    this.rebuildDerivedIndexes()
+    this.bumpCells([...undo.rows.keys(), ...inserted])
     this.fileVersion++
     this.emitAll()
   }
@@ -2263,7 +2432,7 @@ export class CellStore {
     const snapshot = this.fileProgressSnapshot
     const source = this.sourceById.get(cellId)
     if (this.derivedIndexesDirty || !snapshot || !source) return false
-    const audit = this.ctx.auditStats.get(cellId)
+    const audit = this.auditOf(cellId)
     const before = validationContribution(audit, previous, snapshot.validationCount)
     const after = validationContribution(audit, next, snapshot.validationCount)
     const validatedDelta = Number(after.validated) - Number(before.validated)
@@ -2331,8 +2500,8 @@ export class CellStore {
       const source = this.sourceById.get(id)
       if (!source) continue
       const target = this.targetById.get(id)
-      const before = validationContribution(previous.get(id), target, threshold)
-      const after = validationContribution(next.get(id), target, threshold)
+      const before = validationContribution(this.auditOf(id, previous), target, threshold)
+      const after = validationContribution(this.auditOf(id, next), target, threshold)
       if (before.endorsements === after.endorsements && before.validated === after.validated) continue
       add("", before, after)
       const section = source.canonicalRef ? sectionLabelFromCanonical(source.canonicalRef) : ""
@@ -2413,7 +2582,7 @@ export class CellStore {
       // that counts headings also start counting parked ones.
       if (source && !isHiddenCell(source)
         && (this.ctx.countStructural !== false || !isStructuralCell(source.type))) {
-        const audit = this.ctx.auditStats.get(id)
+        const audit = this.auditOf(id)
         const endorsements = audit ? audit.activeValidators.length : Math.max(0, target?.endorsementCount ?? 0)
         const authoritative = audit !== undefined || target?.endorsementCount !== undefined
         const validated = authoritative ? endorsements >= progressThreshold : Boolean(target?.validated)
@@ -2641,6 +2810,8 @@ export interface UseActiveCellStoreOptions {
   username?: string
   requiredValidations?: number
   auditStats?: ReadonlyMap<string, CellAuditStats>
+  /** AQU-2094: see `RuntimeContext.auditStatsComplete`. */
+  auditStatsComplete?: boolean
   getToken?: (fileId: string) => Promise<string | null>
   enabled?: boolean
   /**
@@ -2688,6 +2859,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     username = "local",
     requiredValidations = 1,
     auditStats = EMPTY_STATS,
+    auditStatsComplete = false,
     getToken,
     enabled = true,
     lane = "",
@@ -2745,8 +2917,8 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     // rows against it on change (instant lane switch, no refetch). This effect
     // is defined before the (projectId, fileId, enabled) reload effect, so on a
     // lane change the store's active lane is updated before any fetch runs.
-    store.setRuntime({ projectId, fileId, username, requiredValidations, auditStats, lane, countStructural, showHidden })
-  }, [auditStats, countStructural, fileId, lane, projectId, requiredValidations, showHidden, store, username])
+    store.setRuntime({ projectId, fileId, username, requiredValidations, auditStats, auditStatsComplete, lane, countStructural, showHidden })
+  }, [auditStats, auditStatsComplete, countStructural, fileId, lane, projectId, requiredValidations, showHidden, store, username])
 
   // I4 cache hygiene: never persist optimistic values as server rows.
   // `applyOptimisticTargetEdit` mutates the target row in place (value under

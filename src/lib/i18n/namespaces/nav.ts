@@ -193,6 +193,40 @@ export const nav = defineNamespace({
       "n",
     ),
     "nav.workspaceActions.synthAll.confirmLabel": "Generate audio",
+    "nav.workspaceActions.changeVoiceAll.label": "Change voice of existing audio",
+    "nav.workspaceActions.changeVoiceAll.title": "Change voice",
+    "nav.workspaceActions.changeVoiceAll.description": plural(
+      {
+        one:
+          "Converts {n} cell to its assigned voice at {quality} quality. A changed " +
+          "reference clip is included. A take already at that quality from the current " +
+          "clip stays. Nothing is generated from text.",
+        other:
+          "Converts {n} cells to each assigned voice at {quality} quality. A changed " +
+          "reference clip is included. A take already at that quality from the current " +
+          "clip stays. Nothing is generated from text.",
+      },
+      "n",
+    ),
+    "nav.workspaceActions.changeVoiceAll.confirmLabel": "Change voice",
+    // AQU-1759: split every line that mixes narration and quoted speech.
+    "nav.workspaceActions.splitQuotes.label": "Split lines at quotes",
+    "nav.workspaceActions.splitQuotes.title": "Split lines at their quotation marks?",
+    "nav.workspaceActions.splitQuotes.description": plural({
+      one:
+        "{count} line in this file holds more than one speaker. Split at its quotation " +
+        "marks it becomes {lines} lines, so each speaker can have their own voice. Every " +
+        "language shares the new lines. A translation that splits the same way is " +
+        "divided; any other stays whole on the first line and is marked for review.",
+      other:
+        "{count} lines in this file hold more than one speaker. Split at their quotation " +
+        "marks they become {lines} lines, so each speaker can have their own voice. Every " +
+        "language shares the new lines. A translation that splits the same way is " +
+        "divided; any other stays whole on the first line and is marked for review.",
+    }),
+    "nav.workspaceActions.splitQuotes.none":
+      "No line in this file holds more than one speaker at its quotation marks, so there is nothing to split.",
+    "nav.workspaceActions.splitQuotes.confirmLabel": "Split lines",
     // AQU-365: the checkbox on the workspace-action confirmation dialog above
     // (distinct from ConfirmActionDialog's generic default, since this one
     // names WHY the checkbox matters — attribution). e2e asserts this exact
@@ -901,6 +935,63 @@ export const nav = defineNamespace({
       },
       "nav.workspaceActions.synthAll.confirmLabel": {
         description: "Confirm button of the dialog above.",
+        maxLength: 24,
+      },
+      "nav.workspaceActions.changeVoiceAll.label": {
+        description:
+          "Secondary action-menu item (Audio lens) that keeps every cell's existing " +
+          "recording and makes it sound like the cloned voice assigned to that cell. " +
+          "Contrast with 'Generate AI voice for empty cells', which makes new audio " +
+          "from text.",
+        maxLength: 40,
+      },
+      "nav.workspaceActions.changeVoiceAll.title": {
+        description: "Heading of the confirmation dialog for the action above.",
+        maxLength: 32,
+      },
+      "nav.workspaceActions.changeVoiceAll.description": {
+        description:
+          "Body of the confirmation dialog above. The point to keep: only the speaker's " +
+          "sound changes, and a new reference clip or a different quality is redone.",
+        placeholders: {
+          n: "How many cells will be converted at the quality chosen in this dialog. Takes already made from the current reference clip at that quality are not included.",
+          quality:
+            "The quality chosen in this dialog — Fast, Standard, or High — already " +
+            "translated. Insert it as given.",
+        },
+        maxLength: 200,
+      },
+      "nav.workspaceActions.changeVoiceAll.confirmLabel": {
+        description: "Confirm button of the dialog above.",
+        maxLength: 24,
+      },
+      "nav.workspaceActions.splitQuotes.label": {
+        description:
+          "Menu item in the file's \u22ef menu. It cuts every line that mixes narration and " +
+          "quoted speech at its quotation marks, so each speaker can be given a separate " +
+          "voice. \"Quotes\" means quotation marks.",
+        maxLength: 32,
+      },
+      "nav.workspaceActions.splitQuotes.title": {
+        description: "Heading of the confirmation dialog for the action above. A question.",
+        maxLength: 48,
+      },
+      "nav.workspaceActions.splitQuotes.description": {
+        description:
+          "Body of that dialog: how many lines will be split, what they become, and what " +
+          "happens to existing translations.",
+        placeholders: {
+          count: "How many lines of the file hold more than one speaker. One or more.",
+          lines: "How many lines those become in total. Always more than the first number.",
+        },
+      },
+      "nav.workspaceActions.splitQuotes.none": {
+        description:
+          "Body of that dialog when the file has no line to split. The dialog then offers " +
+          "only Close.",
+      },
+      "nav.workspaceActions.splitQuotes.confirmLabel": {
+        description: "Confirm button of that dialog. Imperative.",
         maxLength: 24,
       },
       "nav.workspaceActions.confirmAttribution": {

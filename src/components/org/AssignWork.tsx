@@ -6,8 +6,10 @@ import {
   buildLaneItems,
   initialAssignmentLane,
   laneIdForTag,
+  lanesStaffedBy,
   laneTagForAssignment,
   type AssignLaneOption,
+  type TeamLaneAttachment,
 } from "@/lib/sync/assignment-lane"
 import { canSubmitAssignment } from "@/lib/sync/role-policy"
 import { Button } from "@/components/ui/button"
@@ -34,6 +36,8 @@ import {
 } from "@/components/ui/select"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { AssignKindField } from "@/components/AssignKindField"
+import type { AssignmentKind } from "@/lib/sync/assignments"
 
 /**
  * Manager affordance (project_lead+) on the project overview: assign a book or
@@ -96,6 +100,23 @@ export interface AssignWorkProps {
    * Absent before the lane rows exist; the tag still goes out.
    */
   laneRows?: readonly { id: string; legacyTag: string | null }[]
+  /**
+   * AQU-1994: the project's lanes at least one of its people is on. The field
+   * offers only these, so a manager cannot route work to a language nobody on
+   * the project can work in. `null`/omitted is "the server did not say" — not
+   * "nobody" — and leaves the list as it was.
+   */
+  staffedLaneIds?: ReadonlySet<string> | readonly string[] | null
+  /**
+   * AQU-2047: each attached team's lane checks. A lane stays when any attached
+   * team is tied to it. `lanesExplicit: false` is tied to every current target
+   * lane. `null`, omitted, or `[]` (no attached team) leaves the list as it
+   * was — absence is not "no lanes". Applied with staffing: a lane must pass
+   * both when both are present.
+   */
+  teamLanes?: readonly TeamLaneAttachment[] | null
+  /** Called when the panel is opened, so staffing and team lanes can be re-read. */
+  onOpen?: () => void
 }
 
 const DEFAULT_ROLE_LEVEL = 500
@@ -117,6 +138,9 @@ export function AssignWork({
   laneLabels,
   defaultLaneLabel,
   laneRows,
+  staffedLaneIds,
+  teamLanes,
+  onOpen,
 }: AssignWorkProps) {
   const t = useT()
   const isSelfAssignMode = roleLevel < assignmentMinRole
@@ -129,6 +153,8 @@ export function AssignWork({
   const [selectedChapters, setSelectedChapters] = useState<string[]>([])
   const [chapters, setChapters] = useState<string[]>([])
   const [deadlineDate, setDeadlineDate] = useState<Date | undefined>(undefined)
+  // AQU-1969: Translate (the assignment as it always was) unless chosen.
+  const [kind, setKind] = useState<AssignmentKind>("translate")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const laneItems = useMemo(
@@ -139,9 +165,17 @@ export function AssignWork({
         laneLabels,
         defaultLaneLabel,
         defaultLaneFallback: t("dialog.assign.defaultLaneFallback"),
+        staffedLaneIds,
+        teamLanes,
       }),
-    [lanes, laneTags, laneLabels, defaultLaneLabel, t],
+    [lanes, laneTags, laneLabels, defaultLaneLabel, staffedLaneIds, teamLanes, t],
   )
+  // AQU-1994: nobody on the project is on any of its lanes. There is nothing
+  // truthful to offer, so the field says so and Assign is refused rather than
+  // listing languages no one can work in. Asked of staffing alone, so the
+  // legacy `laneTags` shape (a project with no lane rows) is untouched.
+  const noStaffedLanes =
+    Boolean(lanes?.length) && lanesStaffedBy(lanes ?? [], staffedLaneIds).length === 0
   // undefined = the arrival rule; a string or null is the manager's own pick.
   // Reset when the panel opens or the lane they arrived from changes, so a
   // previous choice doesn't survive into the All tab.
@@ -270,6 +304,10 @@ export function AssignWork({
       setError(t("dialog.assign.error.selfOnly"))
       return
     }
+    if (noStaffedLanes) {
+      setError(t("org.assignWork.noStaffedLanes"))
+      return
+    }
     // One lane names itself. Several lanes pre-fill only from the tab the
     // manager arrived from; the All tab pre-fills nothing and cannot submit.
     const chosenLane = laneItems.length === 1 ? laneItems[0]!.value : selectedLane
@@ -305,9 +343,11 @@ export function AssignWork({
         ...(targetLang ? { targetLang } : {}),
         ...(laneId ? { laneId } : {}),
         deadline: deadline || null,
+        kind,
       })
       setSelectedChapters([])
       setDeadlineDate(undefined)
+      setKind("translate")
       setOpen(false)
       onAssigned?.()
     } catch (e) {
@@ -319,7 +359,12 @@ export function AssignWork({
 
   if (!open) {
     return (
-      <Button type="button" size="sm" variant="outline" onClick={() => setOpen(true)}>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={() => { setOpen(true); onOpen?.() }}
+      >
         {t("org.assignWork.assignButtonLabel")}
       </Button>
     )
@@ -328,11 +373,16 @@ export function AssignWork({
   return (
     <div role="group" aria-label={t("dialog.assign.title")} className="mt-3 w-full rounded-md border p-3">
       <FieldGroup className="gap-4">
+        <AssignKindField id="assign-work-kind" value={kind} onChange={setKind} disabled={busy} />
         <Field>
           <FieldLabel htmlFor={laneItems.length > 1 ? "assign-work-lane" : undefined}>
             {t("dialog.assign.laneLabel")}
           </FieldLabel>
-          {laneItems.length === 1 ? (
+          {noStaffedLanes ? (
+            <FieldError data-testid="assign-work-no-staffed-lanes">
+              {t("org.assignWork.noStaffedLanes")}
+            </FieldError>
+          ) : laneItems.length === 1 ? (
             <p data-testid="assign-work-lane-fixed" className="text-sm">
               {laneItems[0]!.label}
             </p>
@@ -521,7 +571,7 @@ export function AssignWork({
           <Button
             type="button"
             onClick={() => void submit()}
-            disabled={busy}
+            disabled={busy || noStaffedLanes}
           >
             {t("dialog.assign.submit")}
           </Button>

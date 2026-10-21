@@ -87,6 +87,12 @@ MONDAY_APP_SLUG=""
 # for local dev use the local SPA origin:
 MONDAY_REDIRECT_URI="http://localhost:5173/oauth/callback"
 
+# Airtable integration (routes/airtable.ts, AQU-804). Needs no app or secret:
+# each org pastes a personal access token, stored encrypted like Monday's. Set
+# this only to walk the integration against a stand-in Airtable on this
+# machine; leave it unset to talk to the real API.
+# AIRTABLE_API_URL="http://127.0.0.1:9690"
+
 # DO NOT put WRANGLER_LOCAL in this file (or in any deployed env). It's
 # injected by `scripts/dev-stack.ts` only and unlocks /__test__/reset and
 # /__dev__/{seed,login} — see routes/dev-seed.ts and routes/test-reset.ts.
@@ -176,3 +182,19 @@ MONDAY_REDIRECT_URI="http://localhost:5173/oauth/callback"
 # Stripe keys
 #STRIPE_SECRET_KEY=sk_live_1234.... (Or sk_test_ for sandbox key)
 #STRIPE_PUBLISHABLE_KEY=pk_live_1234....
+
+# Zapier's pre-registered OAuth client (docs/ZAPIER.md). Leave all three unset
+# unless you are testing the Zapier connection locally. Production values come
+# from `zapier register` (client id, redirect) and `wrangler secret put`.
+# ZAPIER_CLIENT_ID=aquilla-zapier-local
+# ZAPIER_CLIENT_SECRET=local-only-secret
+# ZAPIER_REDIRECT_URI=https://zapier.com/dashboard/auth/oauth/return/App000000CLIAPI/
+
+# Omnilingual ASR (infra/modal/omni_asr.py). Leave unset to keep hosted
+# transcription on OpenRouter only. For a local live test: `modal serve
+# infra/modal/omni_asr.py`, put its URL here, and use the value of the Modal
+# secret `aquilla-omni-asr`. Zero-shot example audio is fetched by Modal, so
+# the sync-worker must be publicly reachable: run a tunnel to :8789 and set
+# both SYNC_WORKER_URL (here) and DIARIZATION_PUBLIC_BASE (sync-worker) to it.
+# OMNI_ASR_MODAL_URL=""
+# OMNI_SHARED_SECRET=""

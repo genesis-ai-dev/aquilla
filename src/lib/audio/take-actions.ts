@@ -6,6 +6,7 @@
 import { emitCellAudioRemove, emitCellAudioRename, enqueueEvents } from "@/lib/sync/events-emit"
 import { injectOptimisticAudioRemove, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { audioIdSeededWith } from "@/lib/audio/upload"
+import { recordStep, withGroup } from "@/lib/history/history"
 
 /**
  * Remove one take. SUB-48: the remove gets its own overlay, so the take leaves
@@ -24,12 +25,72 @@ export async function removeTake(args: {
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
   author: string
+  /** AQU-1767 phase 2: whether this was the take that played, so Undo can
+   *  choose it again. Omit to record no history step (a bulk removal records
+   *  its own). */
+  history?: { wasSelected: boolean }
 }): Promise<void> {
   const { projectId, fileId, cellId, audioId, slot, author, targetLang } = args
   const removeP = emitCellAudioRemove({ projectId, fileId, cellId, audioId, author, ...(targetLang ? { targetLang } : {}) })
   injectOptimisticAudioRemove(fileId, cellId, audioId, slot, removeP)
   await removeP
   notifyAudioAttachmentsChanged(fileId)
+  if (args.history) {
+    recordStep({
+      kind: "take.remove",
+      data: { cellId, audioId, slot, wasSelected: args.history.wasSelected, selectedBefore: null },
+      labelKey: "editor.history.stepDeleteTake",
+      fileId,
+    })
+  }
+}
+
+/**
+ * AQU-1767 (Sam, 2026-10-14): delete a split take — every piece — as one step
+ * (one Undo brings them all back). The pieces go in one outbox transaction,
+ * each with the overlay `removeTake` gives one. A take of one piece is just
+ * `removeTake`.
+ */
+export async function removeWholeTake(args: {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** Every live piece, first one first. */
+  pieces: readonly { audioId: string; slot: string }[]
+  targetLang?: string
+  author: string
+  /** Whether it was the take that played, so Undo can choose it again. */
+  history: { wasSelected: boolean }
+}): Promise<void> {
+  const { projectId, fileId, cellId, pieces, author, targetLang } = args
+  const [first, ...rest] = pieces
+  if (!first) return
+  if (rest.length === 0) {
+    await removeTake({ projectId, fileId, cellId, audioId: first.audioId, slot: first.slot, author, ...(targetLang ? { targetLang } : {}), history: args.history })
+    return
+  }
+  const queued = await enqueueEvents(
+    pieces.map((piece) => ({
+      kind: "cell.audio.remove" as const,
+      projectId,
+      fileId,
+      cellId,
+      parentId: null,
+      author,
+      payload: { audioId: piece.audioId, ...(targetLang ? { targetLang } : {}) },
+    })),
+  )
+  pieces.forEach((piece, i) => injectOptimisticAudioRemove(fileId, cellId, piece.audioId, piece.slot, queued[i]?.eventId))
+  notifyAudioAttachmentsChanged(fileId)
+  recordStep({
+    kind: "take.remove",
+    data: {
+      cellId, audioId: first.audioId, slot: first.slot, wasSelected: args.history.wasSelected, selectedBefore: null,
+      pieces: rest.map((piece) => piece.audioId),
+    },
+    labelKey: "editor.history.stepDeleteTake",
+    fileId,
+  })
 }
 
 export interface TakeRemoval {
@@ -79,9 +140,44 @@ export async function renameTake(args: {
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
   author: string
+  /** AQU-1767 phase 2: the name it had, for Undo (undefined = record no step). */
+  labelBefore?: string | null
 }): Promise<void> {
-  await emitCellAudioRename(args)
+  const { labelBefore, ...rename } = args
+  await emitCellAudioRename(rename)
   notifyAudioAttachmentsChanged(args.fileId)
+  if (labelBefore !== undefined) {
+    recordStep({
+      kind: "take.rename",
+      data: { cellId: args.cellId, audioId: args.audioId, before: labelBefore, after: args.label },
+      labelKey: "editor.history.stepRenameTake",
+      fileId: args.fileId,
+    })
+  }
+}
+
+/**
+ * AQU-1767 (Sam, 2026-10-15): rename a split take — every piece, as ONE Undo
+ * step. Each is stored as the new name numbered by where it sits in the
+ * recording, the way the pieces are shown anyway (pieceNames works the
+ * numbers out every time, whatever a piece has stored).
+ */
+export async function renameWholeTake(args: {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** The take's pieces in the order they sit in the recording. */
+  pieces: readonly { audioId: string; label?: string | null }[]
+  name: string
+  targetLang?: string
+  author: string
+}): Promise<void> {
+  const { pieces, name, ...where } = args
+  await withGroup({ labelKey: "editor.history.stepRenameTake", fileId: args.fileId }, async () => {
+    for (const [i, piece] of pieces.entries()) {
+      await renameTake({ ...where, audioId: piece.audioId, label: `${name} · ${i + 1}`, labelBefore: piece.label ?? null })
+    }
+  }, { alwaysGroup: true })
 }
 
 /**

@@ -215,9 +215,12 @@ function NewVoiceModalBody({
     }),
   )
   const update = useCallback((patch: Partial<Voice>) => setDraft((d) => ({ ...d, ...patch })), [])
+  // AQU-2032: the Language/Accent fields own `language`. A speaker pick may only
+  // seed it when the draft has none — it must never overwrite the accent the
+  // user chose, nor clear the language when the speaker carries none.
   const setInworldVoice = useCallback((voiceId: string, language?: string) => {
-    update({ voiceName: voiceId, language })
-  }, [update])
+    setDraft((d) => (d.language ? { ...d, voiceName: voiceId } : { ...d, voiceName: voiceId, language }))
+  }, [])
   const inworldLocaleLanguage = draft.language
     ?? catalogLanguages.find((lane) => toInworldLanguage(lane))
     ?? catalogLanguages[0]
@@ -562,16 +565,28 @@ function NewVoiceModalBody({
               {onMakeDefault && !isDefault && (
                 <AppTooltip content={t("audio.newVoice.makeNarratorHint")}>
                   <Button
-                    type="button" variant="outline" onClick={onMakeDefault}
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    aria-label={t("audio.newVoice.makeNarratorButton")}
+                    onClick={onMakeDefault}
                   >
-                    <Star className="me-1 h-3.5 w-3.5" /> {t("audio.newVoice.makeNarratorButton")}
+                    <Star className="fill-current" />
                   </Button>
                 </AppTooltip>
               )}
               {isDefault && (
-                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                  <Star className="h-3.5 w-3.5 text-primary" /> {t("audio.narrator")}
-                </span>
+                <AppTooltip content={t("audio.narrator")}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    aria-label={t("audio.narrator")}
+                    className="border-primary text-primary hover:border-primary hover:bg-primary/10 hover:text-primary dark:border-primary dark:hover:border-primary dark:hover:bg-primary/10 dark:hover:text-primary"
+                  >
+                    <Star className="fill-current" />
+                  </Button>
+                </AppTooltip>
               )}
               {onDelete && !draft.builtIn && (
                 <Button

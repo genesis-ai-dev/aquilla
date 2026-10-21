@@ -30,6 +30,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, cleanup } from "@testing-library/react"
 import { MemoryRouter, Route, Routes, Link, useLocation } from "react-router-dom"
 import { ProjectSettings, ProjectSettingsDialog } from "./ProjectSettings"
+import { projectLanguageSettingsPath } from "@/lib/navigation/org-paths"
 
 
 vi.mock("@/components/org/OrgSidebar", () => ({
@@ -385,6 +386,63 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.queryByLabelText(/project title/i)).toBeNull()
   })
 
+  // AQU-2031: the editor's TARGET header used to reach these cards through a
+  // `?q=` search pre-fill, which always showed the search box and mixed in
+  // cards from other groups. Those entry points now deep-link to the GROUP
+  // pane with `?focus=`, which scrolls one card (or one field) into view while
+  // the page stays a pane: no search box, the group's own title.
+  it("a `?focus=` deep link lands on the pane with its target scrolled into view", () => {
+    const scrolled: { id: string; block?: ScrollLogicalPosition }[] = []
+    vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (
+      this: Element,
+      arg?: boolean | ScrollIntoViewOptions,
+    ) {
+      scrolled.push({ id: this.id, block: typeof arg === "object" ? arg.block : undefined })
+    })
+
+    const cases = [
+      // "Change target language…", the single-lane TARGET pill, and the "Set
+      // target language" prompt all share this one.
+      { focus: "languages", elementId: "section-languages", block: "start" },
+      // "Add lane…" — the field sits below the lane list, so a project with
+      // enough lanes would otherwise open with it below the fold.
+      { focus: "add-lane", elementId: "add-lane-field", block: "nearest" },
+    ] as const
+
+    for (const { focus, elementId, block } of cases) {
+      scrolled.length = 0
+      // Render the URL the EDITOR actually navigates to, from the same helper
+      // ProjectWorkspace calls — so a producer that went back to `?q=` (or to
+      // the settings index) fails here rather than only in the browser.
+      renderAt(projectLanguageSettingsPath(PROJECT_ID, focus))
+
+      // Pane mode, not a search: the box the pre-fill always showed is absent,
+      // and the title is the group's own rather than "Project settings".
+      expect(screen.queryByLabelText(/search settings/i)).toBeNull()
+      expect(screen.getByRole("heading", { name: "General" })).toBeTruthy()
+      // The Languages card is on the pane either way...
+      expect(document.getElementById("section-languages")).toBeTruthy()
+      // ...and only General's cards are — no card from another group tags along
+      // the way the keyword search used to pull in unrelated matches.
+      expect(screen.queryByLabelText(/examples retrieved/i)).toBeNull()
+      // ...and the deep link scrolled to the requested target, not the top.
+      expect(scrolled).toEqual([{ id: elementId, block }])
+
+      cleanup()
+    }
+  })
+
+  it("an unknown `?focus=` value leaves the pane untouched rather than throwing", () => {
+    const scrollIntoView = vi
+      .spyOn(Element.prototype, "scrollIntoView")
+      .mockImplementation(() => {})
+
+    renderAt(`/project/${PROJECT_ID}/settings/general?focus=not-a-target`)
+
+    expect(screen.getByRole("heading", { name: "General" })).toBeTruthy()
+    expect(scrollIntoView).not.toHaveBeenCalled()
+  })
+
   it("the Settings breadcrumb returns to the settings index", () => {
     renderAt(`/project/${PROJECT_ID}/settings/general`)
     expect(screen.getByLabelText(/project title/i)).toBeTruthy()
@@ -600,4 +658,14 @@ vi.mock("./ProjectSettings/MondayIntegrationSection", () => ({
 it("AQU-1208: Monday setup uses the project's organization, not the personal organization", () => {
   renderAt(`/project/${PROJECT_ID}/settings/integrations`)
   expect(screen.getByTestId("monday-project-org")).toHaveTextContent("7")
+})
+
+vi.mock("./ProjectSettings/AirtableIntegrationSection", () => ({
+  AirtableIntegrationSection: ({ orgId }: { orgId: number | null }) => (
+    <div data-testid="airtable-project-org">{orgId}</div>
+  ),
+}))
+it("AQU-804: Integrations shows Airtable beside Monday, with the project's organization", () => {
+  renderAt(`/project/${PROJECT_ID}/settings/integrations`)
+  expect(screen.getByTestId("airtable-project-org")).toHaveTextContent("7")
 })

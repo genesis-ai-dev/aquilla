@@ -54,7 +54,9 @@ export function BillingWorkspaceDetails({ data }: { data: BillingWorkspace }) {
             : t(explanations[data.eligibility.reason])}</p>
           {data.entitlement?.access ? (
             <p className="text-sm text-muted-foreground" data-testid="billing-access" role="status">
-              {data.entitlement.access.reason === 'payment_failed'
+              {data.entitlement.access.reason === 'payment_grace' && data.entitlement.access.graceEndsAt
+                ? t('billing.workspace.paymentGrace', { date: new Date(data.entitlement.access.graceEndsAt).toLocaleString() })
+                : data.entitlement.access.reason === 'payment_failed'
                 ? t('billing.workspace.paymentFailed')
                 : data.entitlement.access.reason === 'paid_period_ended'
                   ? t('billing.workspace.paidPeriodEnded')
@@ -66,11 +68,8 @@ export function BillingWorkspaceDetails({ data }: { data: BillingWorkspace }) {
           <p className="text-sm text-muted-foreground">
             {t('billing.workspace.allowanceScope')}
           </p>
-          {typeof data.usagePercent === 'number' && data.usageResetsAt ? (
-            <p className="text-sm text-muted-foreground" data-testid="billing-usage-percent" role="status">
-              {t('billing.workspace.usagePercent', { percent: data.usagePercent, date: new Date(data.usageResetsAt).toLocaleString() })}
-            </p>
-          ) : data.entitlement ? <p className="text-sm text-muted-foreground">
+          {/* AQU-2068: the % used lives in the one meter above this group. */}
+          {data.entitlement ? <p className="text-sm text-muted-foreground">
             {t('billing.workspace.usagePeriodEnds', { date: new Date(data.entitlement.usagePeriodEnd).toLocaleString() })}
           </p> : null}
         </SettingsBlock>

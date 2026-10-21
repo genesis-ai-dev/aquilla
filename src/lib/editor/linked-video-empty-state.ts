@@ -83,6 +83,23 @@ export function captionsBecomeRows(
   return emptyState !== null && !rows.loading && !rows.failed
 }
 
+/**
+ * AQU-1681: can a linked video's own sound be read to make rows? Not
+ * YouTube's — its picture is YouTube's player in a frame, it offers no API
+ * for the sound, and downloading it breaks its terms — and only an http(s)
+ * link can be fetched at all.
+ */
+export function canReadVideoSound(url: string | null | undefined): boolean {
+  const trimmed = url?.trim()
+  if (!trimmed || youTubeVideoId(trimmed) !== null) return false
+  try {
+    const { protocol } = new URL(trimmed)
+    return protocol === "http:" || protocol === "https:"
+  } catch {
+    return false
+  }
+}
+
 /** Who is offered what on an empty time-ordered file, and in the caption dialog. */
 export interface MediaEmptyGates {
   /** Attach captions in place, and "Use (track) as this file's rows". */
@@ -91,6 +108,8 @@ export interface MediaEmptyGates {
   canImportCaptions: boolean
   /** Upload (or link) the file's original recording. */
   canUploadSourceMedia: boolean
+  /** AQU-1681: make the rows from the linked video's own sound. */
+  offerVideoSoundRows: boolean
 }
 
 /**
@@ -105,7 +124,12 @@ export interface MediaEmptyGates {
  *  - captions as a timeline track: maintainer AND track editing on, as before;
  *  - the original recording: Project Lead and up, because it is stored as the
  *    file's source audio (`canAttachSourceAudio`, the server's floor). Below
- *    that nobody can add it, so nobody is offered it.
+ *    that nobody can add it, so nobody is offered it;
+ *  - rows from the video's own sound (AQU-1681): maintainer, on the same
+ *    empty file as the caption rows, and only when that sound can be read
+ *    (`canReadVideoSound`: never YouTube). Sam ruled it maintainer work, like
+ *    the rest of setting up a file's sources; it stores the same source audio
+ *    as the recording, so the server's floor is met on the way.
  *
  * `roleLevel` null is "not known yet": the source-audio check fails open like
  * every `role-policy` check, the maintainer checks fail closed as the
@@ -116,11 +140,14 @@ export function mediaEmptyGates(input: {
   captionRowsMode: boolean
   /** Maintainer and the project's track-editing switch on. */
   canEditTracks: boolean
+  /** The file's linked video (`coreMediaUrl`). */
+  linkedVideoUrl?: string | null
 }): MediaEmptyGates {
   const maintainer = (input.roleLevel ?? 0) >= ROLE.MAINTAINER
   return {
     offerCaptionRows: input.captionRowsMode && maintainer,
     canImportCaptions: input.captionRowsMode ? maintainer : input.canEditTracks,
     canUploadSourceMedia: canAttachSourceAudio(input.roleLevel ?? null),
+    offerVideoSoundRows: input.captionRowsMode && maintainer && canReadVideoSound(input.linkedVideoUrl),
   }
 }

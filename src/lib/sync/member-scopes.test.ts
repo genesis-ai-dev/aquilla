@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
 import {
+  fetchMemberLaneAssignments,
   fetchMemberScopes,
   fetchMyScopeGrant,
+  fetchProjectLaneStaffing,
   isInMemberScope,
   putMemberScopes,
   type MemberScope,
@@ -211,5 +213,134 @@ describe("fetchMyScopeGrant", () => {
   it("returns null on an error status", async () => {
     reply({ error: "no access to project" }, 403)
     expect(await fetchMyScopeGrant("jwt", "p1", API)).toBeNull()
+  })
+})
+
+// AQU-1999 — the seam between the route and the removal that acts on what it
+// says. The bodies here are exactly the shapes auth-worker's
+// `member-lane-assignments.test.ts` asserts it returns, so the two halves of
+// the contract are pinned against the same wire shape.
+describe("fetchMemberLaneAssignments", () => {
+  const ROW = { assignmentId: "as-1", fileId: "f1", scopeLabel: "Acts 1" }
+
+  it("GETs the lane's assignments with the lane as a query param", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ assignments: [ROW] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    )
+    expect(await fetchMemberLaneAssignments("jwt-123", "proj-1", 42, "ln-es1", API)).toEqual([ROW])
+
+    const [url, init] = fetchSpy.mock.calls[0]
+    expect(url).toBe(`${API}/api/v2/projects/proj-1/members/42/lane-assignments?lane=ln-es1`)
+    expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer jwt-123")
+  })
+
+  it("encodes a lane value that needs it", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ assignments: [] }), { status: 200 }),
+    )
+    await fetchMemberLaneAssignments("jwt", "p1", 7, "Spanish \u2014 Mexico", API)
+    const [url] = fetchSpy.mock.calls[0]
+    expect(url).toBe(
+      `${API}/api/v2/projects/p1/members/7/lane-assignments?lane=Spanish%20%E2%80%94%20Mexico`,
+    )
+  })
+
+  it("reads an empty list as nothing open \u2014 the one-press removal", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ assignments: [] }), { status: 200 }),
+    )
+    expect(await fetchMemberLaneAssignments("jwt", "p1", 1, "ln-es1", API)).toEqual([])
+  })
+
+  // null is "couldn't tell", which the caller must not read as "nothing open":
+  // that is how an assignment ends up stranded in an unreachable lane.
+  it("returns null on a refusal, a malformed body and a network failure", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 403 }))
+    expect(await fetchMemberLaneAssignments("jwt", "p1", 1, "ln-es1", API)).toBeNull()
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 400 }))
+    expect(await fetchMemberLaneAssignments("jwt", "p1", 1, "nope", API)).toBeNull()
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({}), { status: 200 }),
+    )
+    expect(await fetchMemberLaneAssignments("jwt", "p1", 1, "ln-es1", API)).toBeNull()
+
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"))
+    expect(await fetchMemberLaneAssignments("jwt", "p1", 1, "ln-es1", API)).toBeNull()
+  })
+
+  it("drops a row with no file id \u2014 there is nothing to route an unassign through", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({ assignments: [ROW, { assignmentId: "as-2", scopeLabel: "Acts 2" }] }),
+        { status: 200 },
+      ),
+    )
+    expect(await fetchMemberLaneAssignments("jwt", "p1", 1, "ln-es1", API)).toEqual([ROW])
+  })
+})
+
+describe("fetchProjectLaneStaffing (AQU-2047)", () => {
+  it("reads staffing and each attached team's lane checks from one response", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          laneIds: ["lane-zh"],
+          teamLanes: [
+            { lanesExplicit: true, laneIds: ["lane-fr"] },
+            { lanesExplicit: false, laneIds: ["lane-sv"] },
+          ],
+        }),
+        { status: 200 },
+      ),
+    )
+    const read = await fetchProjectLaneStaffing("jwt", "p1", API)
+    expect(read?.staffedLaneIds).toEqual(new Set(["lane-zh"]))
+    // A non-explicit team is tied to every current lane; a leftover laneIds
+    // list on that entry is not its set.
+    expect(read?.teamLanes).toEqual([
+      { lanesExplicit: true, laneIds: ["lane-fr"] },
+      { lanesExplicit: false },
+    ])
+  })
+
+  it("treats a missing teamLanes as unknown, and an empty list as no attached team", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ laneIds: ["lane-fr"] }), { status: 200 }),
+    )
+    expect(await fetchProjectLaneStaffing("jwt", "p1", API)).toEqual({
+      staffedLaneIds: new Set(["lane-fr"]),
+      teamLanes: null,
+    })
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ laneIds: [], teamLanes: [] }), { status: 200 }),
+    )
+    expect(await fetchProjectLaneStaffing("jwt", "p1", API)).toEqual({
+      staffedLaneIds: new Set(),
+      teamLanes: [],
+    })
+  })
+
+  it("treats a missing laneIds as unknown staffing, even when team lanes arrived", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ teamLanes: [] }), { status: 200 }),
+    )
+    expect(await fetchProjectLaneStaffing("jwt", "p1", API)).toEqual({
+      staffedLaneIds: null,
+      teamLanes: [],
+    })
+  })
+
+  it("returns null on a refusal or a network failure", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 403 }))
+    expect(await fetchProjectLaneStaffing("jwt", "p1", API)).toBeNull()
+
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"))
+    expect(await fetchProjectLaneStaffing("jwt", "p1", API)).toBeNull()
   })
 })

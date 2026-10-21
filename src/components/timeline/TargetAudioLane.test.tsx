@@ -588,13 +588,38 @@ describe("TargetAudioLane — resize-as-trim (round 7)", () => {
 })
 
 describe("TargetAudioLane — interaction", () => {
-  it("clean click selects and seeks", () => {
+  // AQU-1767 (Sam, 2026-10-14): a click selects the take and leaves the
+  // playhead alone, so S can split it there; a double-click jumps to the line.
+  it("clean click selects the line and the take, and does not seek", () => {
     const onSelect = vi.fn()
+    const onSelectTake = vi.fn()
     const onSeek = vi.fn()
-    render(<TargetAudioLane {...base} items={[item({}, 4000)]} onSelect={onSelect} onSeek={onSeek} />)
+    render(
+      <TargetAudioLane {...base} items={[item({}, 4000)]} onSelect={onSelect} onSelectTake={onSelectTake} onSeek={onSeek} />,
+    )
     fireEvent.click(screen.getByTestId("tl-target-c1"))
     expect(onSelect).toHaveBeenCalledWith("c1")
+    expect(onSelectTake).toHaveBeenCalledWith("c1")
+    expect(onSeek).not.toHaveBeenCalled()
+  })
+
+  it("double-click jumps to the line", () => {
+    const onSeek = vi.fn()
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} onSeek={onSeek} />)
+    fireEvent.doubleClick(screen.getByTestId("tl-target-c1"))
     expect(onSeek).toHaveBeenCalledWith("c1")
+  })
+
+  it("rings the selected take strongly, and a merely selected line's take quietly", () => {
+    const { unmount } = render(
+      <TargetAudioLane {...base} selectedId="c1" selectedTakeCellId="c1" items={[item({}, 4000)]} />,
+    )
+    expect(screen.getByTestId("tl-target-c1").className).toContain("ring-2 ring-sky-500")
+    unmount()
+    render(<TargetAudioLane {...base} selectedId="c1" items={[item({}, 4000)]} />)
+    const cls = screen.getByTestId("tl-target-c1").className
+    expect(cls).toContain("ring-1 ring-sky-500/50")
+    expect(cls).not.toContain("ring-2")
   })
 
   it("dragging commits the new start (clamped into the section) and suppresses the seek", () => {
@@ -1982,5 +2007,51 @@ describe("TargetAudioLane — the validation tick", () => {
       />,
     )
     expect(tick()).toBeNull()
+  })
+})
+
+// Sam's decision (hidden lines on the timeline): a hidden line's takes are
+// drawn where they sit, faded, with nothing on them to play or record with.
+describe("TargetAudioLane — a hidden line", () => {
+  const wired = { ...base, projectId: "p1", fileId: "f1", session: { jwt: "tok", username: "sam" } as never }
+
+  it("is faded and offers neither play nor record", () => {
+    render(<TargetAudioLane {...wired} items={[item({ hidden: true } as Partial<CellData>, 4000)]} onOpenRecording={vi.fn()} />)
+    const chip = screen.getByTestId("tl-target-c1")
+    expect(chip).toHaveAttribute("data-hidden-line")
+    expect(chip.className).toContain("opacity-60")
+    expect(screen.queryByTestId("tl-target-c1-play")).toBeNull()
+    expect(screen.queryByTestId("tl-target-c1-record")).toBeNull()
+  })
+
+  it("draws every piece of a split take faded", () => {
+    const A = "audio-c1-1700000000-take.webm", B = "audio-c1-1700000500-piece.webm"
+    const cut = item({ hidden: true } as Partial<CellData>, 4000, "c1", { trimEndMs: 1500 })
+    ;(cut.cell.attachments as Record<string, object>)[B] = { type: "audio", url: "frontier-audio://take", durationMs: 4000, trimStartMs: 2000, pieceOf: A }
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[
+          { ...cut, pieceIndex: 0, pieceCount: 2 },
+          { cell: cut.cell, kind: "take", audioId: B, pieceIndex: 1, pieceCount: 2 },
+        ]}
+      />,
+    )
+    const chips = document.querySelectorAll('[data-testid^="tl-target-c1"][data-audio-id]')
+    expect(chips).toHaveLength(2)
+    for (const chip of chips) expect(chip).toHaveAttribute("data-hidden-line")
+  })
+
+  it("leaves its empty slot without a record button", () => {
+    const empty = { id: "c9", fileId: "f1", medium: "media", startTime: 30, endTime: 36, attachments: {}, hidden: true } as unknown as CellData
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} emptyCells={[empty]} onOpenRecording={vi.fn()} />)
+    expect(screen.queryByTestId("tl-target-empty-c9-record")).toBeNull()
+  })
+
+  it("plays and records as before once shown again", () => {
+    render(<TargetAudioLane {...wired} items={[item({}, 4000)]} onOpenRecording={vi.fn()} />)
+    expect(screen.getByTestId("tl-target-c1")).not.toHaveAttribute("data-hidden-line")
+    expect(screen.getByTestId("tl-target-c1-play")).toBeInTheDocument()
+    expect(screen.getByTestId("tl-target-c1-record")).toBeInTheDocument()
   })
 })

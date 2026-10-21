@@ -225,7 +225,22 @@ CREATE TABLE group_project_grants (
     role_level INTEGER NOT NULL,
     granted_by BIGINT,
     granted_at TIMESTAMPTZ DEFAULT now(),
+    -- AQU-1813: false = this attachment still means every target lane, including
+    -- one created later (Codex attaches before the content sweep builds lanes).
+    -- true = group_project_lanes is the whole set, and a lane created later
+    -- stays off until someone edits the attachment.
+    lanes_explicit BOOLEAN NOT NULL DEFAULT false,
     PRIMARY KEY (group_id, project_id)
+);
+
+-- The lanes checked on an explicit team attachment (AQU-1813). Empty when
+-- lanes_explicit is false. All checks the lanes that exist at that moment;
+-- it does not keep watching for new ones.
+CREATE TABLE IF NOT EXISTS group_project_lanes (
+    group_id   BIGINT NOT NULL,
+    project_id TEXT NOT NULL,
+    lane_id    TEXT NOT NULL,
+    PRIMARY KEY (group_id, project_id, lane_id)
 );
 
 CREATE TABLE project_invites (
@@ -352,7 +367,15 @@ CREATE TABLE project_settings (
     roster_view_min_role TEXT
       GENERATED ALWAYS AS (CASE WHEN jsonb_typeof((settings::jsonb) -> 'rosterViewMinRole') = 'number' THEN (settings::jsonb) ->> 'rosterViewMinRole' END) STORED,
     member_progress_view_min_role TEXT
-      GENERATED ALWAYS AS (CASE WHEN jsonb_typeof((settings::jsonb) -> 'memberProgressViewMinRole') = 'number' THEN (settings::jsonb) ->> 'memberProgressViewMinRole' END) STORED
+      GENERATED ALWAYS AS (CASE WHEN jsonb_typeof((settings::jsonb) -> 'memberProgressViewMinRole') = 'number' THEN (settings::jsonb) ->> 'memberProgressViewMinRole' END) STORED,
+    -- 0176 (AQU-1768): whether the project sets its own media settings, so
+    -- org-default overrides can be counted and cleared without the blob. NULL
+    -- = inherits the org's default. One line each (dev-stack reconciler).
+    timing_locked TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'timingLocked') STORED,
+    allow_track_editing TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'allowTrackEditing') STORED,
+    cell_editing_floor TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'cellEditingFloor') STORED,
+    allow_self_validation_audio TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'allowSelfValidationAudio') STORED,
+    validation_role_floor_audio TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationRoleFloorAudio') STORED
 );
 CREATE INDEX project_settings_agent_react ON project_settings(project_id) WHERE agent_react;
 
@@ -635,6 +658,33 @@ CREATE TABLE IF NOT EXISTS chain_claims (
     event_id   TEXT NOT NULL,
     PRIMARY KEY (project_id, file_id, cell_id, parent_key)
 );
+
+-- AQU-1767 phase 2 (migration 0178): what a `source.cell.delete` took, so
+-- `source.cell.restore` can put it back. Written once by the delete's
+-- projection (same batch, same gate), keyed by the delete event; `restored_by`
+-- makes each archive single-use. See the migration for the full rules.
+CREATE TABLE IF NOT EXISTS removed_cell_archive (
+    delete_event_id   TEXT PRIMARY KEY,
+    project_id        TEXT NOT NULL,
+    file_id           TEXT NOT NULL,
+    cell_id           TEXT NOT NULL,
+    deleted_by        TEXT NOT NULL,
+    deleted_ts        BIGINT NOT NULL,
+    cells_rows        JSONB NOT NULL DEFAULT '[]'::jsonb,
+    validators        JSONB NOT NULL DEFAULT '[]'::jsonb,
+    waivers           JSONB NOT NULL DEFAULT '[]'::jsonb,
+    backtranslations  JSONB NOT NULL DEFAULT '[]'::jsonb,
+    -- AQU-1408 (0182): the cell's hand-corrected statistical glosses.
+    glosses           JSONB NOT NULL DEFAULT '[]'::jsonb,
+    morph             JSONB NOT NULL DEFAULT '[]'::jsonb,
+    audio             JSONB NOT NULL DEFAULT '[]'::jsonb,
+    links             JSONB NOT NULL DEFAULT '[]'::jsonb,
+    comments          JSONB NOT NULL DEFAULT '[]'::jsonb,
+    restored_by       TEXT,
+    restored_ts       BIGINT
+);
+CREATE INDEX IF NOT EXISTS idx_removed_cell_archive_cell
+    ON removed_cell_archive (project_id, file_id, cell_id, deleted_ts DESC);
 
 CREATE TABLE files (
     id             TEXT PRIMARY KEY,
@@ -1008,6 +1058,12 @@ CREATE TABLE cell_audio (
     -- permanent home for every take that predates this column (rebuild replays
     -- historical cell.lane.retime events into it forever).
     target_offset_ms   BIGINT,
+    -- AQU-1767 (0177): the take this row was CUT from, when it is a piece of
+    -- one. NULL for every whole take and for a cut's first piece (the root).
+    -- Group key = COALESCE(piece_of, audio_id); selection is per group — every
+    -- live piece of a selected group is selected, so a row needs every piece
+    -- validated (the progress MIN over selected dubs already says so).
+    piece_of           TEXT,
     PRIMARY KEY (project_id, file_id, cell_id, audio_id)
 );
 
@@ -1051,6 +1107,26 @@ CREATE TABLE cell_backtranslations (
     -- AQU-1589: lanes.id of this reading. Nullable until the AQU-1616 backfill.
     -- NULL belongs to the target lane whose legacy_tag is '' — rows written
     -- before this column. Writers resolve the event's tag, never a lane name.
+    lane_id         TEXT,
+    PRIMARY KEY (project_id, file_id, cell_id, target_event_id)
+);
+
+-- AQU-1408 (0182): a statistical gloss a contributor corrected by hand.
+-- Deliberately NOT a row of cell_backtranslations: that table's primary key is
+-- the same four columns, so a saved gloss and the AI back-translation of the
+-- same commit would collide — and the two are different kinds of reading a
+-- translator must be able to tell apart. Same pinning and lane rules as above;
+-- NULL lane_id is the lane whose legacy_tag is ''.
+CREATE TABLE cell_glosses (
+    project_id      TEXT NOT NULL,
+    file_id         TEXT NOT NULL,
+    cell_id         TEXT NOT NULL,
+    target_event_id TEXT NOT NULL,
+    gloss_text      TEXT NOT NULL,
+    author          TEXT NOT NULL,
+    event_id        TEXT NOT NULL,
+    server_seq      BIGINT,
+    created_at      BIGINT NOT NULL,
     lane_id         TEXT,
     PRIMARY KEY (project_id, file_id, cell_id, target_event_id)
 );
@@ -1157,7 +1233,12 @@ CREATE TABLE assignments (
     created_by       BIGINT NOT NULL,
     created_at       BIGINT NOT NULL,
     unassigned_at    BIGINT,
-    completed_at     BIGINT
+    completed_at     BIGINT,
+    -- AQU-1969 (0182): what the assignment hands out. 'translate' (the
+    -- default, and every older row) measures lines validated by anyone in the
+    -- scope; 'validate' measures the assignee's OWN approvals there.
+    kind             TEXT NOT NULL DEFAULT 'translate'
+                     CHECK (kind IN ('translate', 'validate'))
 );
 
 CREATE TABLE assignment_cells (
@@ -1279,6 +1360,10 @@ CREATE INDEX idx_cell_bt_file ON cell_backtranslations(project_id, file_id);
 -- AQU-1589: latest reading per cell within one lane. NULL lane_id stays in the
 -- index so the pre-backfill default-lane read is covered too.
 CREATE INDEX idx_cell_bt_lane ON cell_backtranslations(project_id, file_id, cell_id, lane_id, created_at DESC);
+CREATE INDEX idx_cell_gloss_cell ON cell_glosses(project_id, file_id, cell_id, created_at DESC);
+CREATE INDEX idx_cell_gloss_file ON cell_glosses(project_id, file_id);
+-- AQU-1408: latest gloss per cell within one lane — the per-file read's shape.
+CREATE INDEX idx_cell_gloss_lane ON cell_glosses(project_id, file_id, cell_id, lane_id, created_at DESC);
 CREATE INDEX idx_cell_validators_cell ON cell_validators(project_id, file_id, cell_id);
 -- "Which takes have I validated?" — a per-viewer question the editor asks for a
 -- whole file at once, which the primary key's leading columns cannot answer.
@@ -1457,8 +1542,9 @@ CREATE INDEX IF NOT EXISTS idx_model_ab_events_user ON model_ab_events(user_id);
 -- pair = unscoped = today's behavior. 'lane' rows restrict target-side writes
 -- to those lanes (default lane stored as literal ''); 'file' rows restrict
 -- writes to those fileIds. Kinds compose with AND. Enforced in sync-worker
--- authorize; source/comment/audio/file-level events are never gated. Leads
--- (role >= 500) must stay unscoped (auth-worker CRUD rejects scoping them).
+-- authorize; source/comment/audio/file-level events are never gated.
+-- Maintainer and above (role >= 600) stay unscoped. A project lead may hold
+-- lane rows: those are the target lanes they can see.
 CREATE TABLE IF NOT EXISTS project_member_scopes (
     project_id TEXT NOT NULL,
     user_id    BIGINT NOT NULL,
@@ -1730,6 +1816,11 @@ CREATE TABLE IF NOT EXISTS knowledge_docs (
     index_status TEXT NOT NULL DEFAULT 'pending'
       CHECK (index_status IN ('pending','ready','failed')),
     index_tree JSONB,
+    -- Why the last indexing run ended where it did, in words the uploader can
+    -- act on (0179; AQU-2002). Set with index_status='ready' when the structure
+    -- landed but its summaries did not, and with 'failed' when there was
+    -- nothing to index. NULL = nothing to report.
+    index_error TEXT,
     created_by TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -2502,9 +2593,11 @@ CREATE INDEX IF NOT EXISTS workspace_plan_change_reviews_org
 CREATE TABLE IF NOT EXISTS workspace_usage_requests (
   org_id BIGINT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
   request_id TEXT NOT NULL CHECK (length(request_id) BETWEEN 1 AND 200),
-  user_id BIGINT NOT NULL REFERENCES users(id),
-  project_id TEXT NOT NULL REFERENCES projects(id),
-  rail TEXT NOT NULL CHECK (rail IN ('llm', 'agent', 'tts')),
+  -- 0181: NULL user_id is the system (background work); project_id is optional.
+  user_id BIGINT REFERENCES users(id),
+  project_id TEXT REFERENCES projects(id),
+  rail TEXT NOT NULL CONSTRAINT workspace_usage_requests_rail_check
+    CHECK (rail IN ('llm', 'agent', 'jev', 'tts', 'audio', 'gpu', 'sandbox')),
   rate_version TEXT NOT NULL CHECK (rate_version = '2026-09-cost-v1'),
   multiplier INTEGER NOT NULL CHECK (multiplier = 4),
   period_start TIMESTAMPTZ NOT NULL,
@@ -2517,6 +2610,13 @@ CREATE TABLE IF NOT EXISTS workspace_usage_requests (
   resolved_at TIMESTAMPTZ,
   -- Provider generation id for reconciling held reservations (never settles alone).
   provider_ref TEXT CHECK (length(provider_ref) BETWEEN 1 AND 200),
+  -- 0181: metered counts against the allowance; unmetered (Enterprise) and byok
+  -- are recorded for cost only. byok is never platform spend.
+  mode TEXT NOT NULL DEFAULT 'metered' CONSTRAINT workspace_usage_requests_mode_check
+    CHECK (mode IN ('metered', 'unmetered', 'byok')),
+  -- 0181: the entitlement decision; would_block is shadow mode.
+  decision TEXT NOT NULL DEFAULT 'allow' CONSTRAINT workspace_usage_requests_decision_check
+    CHECK (decision IN ('allow', 'would_block', 'block')),
   PRIMARY KEY (org_id, request_id),
   CHECK ((state = 'reserved' AND raw_micro_cents IS NULL AND settled_micro_units IS NULL AND resolved_at IS NULL)
     OR (state = 'settled' AND raw_micro_cents IS NOT NULL AND settled_micro_units = raw_micro_cents * multiplier AND resolved_at IS NOT NULL)
@@ -2526,6 +2626,9 @@ CREATE INDEX IF NOT EXISTS idx_workspace_usage_period
   ON workspace_usage_requests(org_id, period_start, period_end);
 CREATE INDEX IF NOT EXISTS idx_workspace_usage_held
   ON workspace_usage_requests(org_id, created_at) WHERE state = 'reserved';
+-- 0181: the platform spend ceiling sums today's rows across every org.
+CREATE INDEX IF NOT EXISTS idx_workspace_usage_created
+  ON workspace_usage_requests(created_at);
 -- AQU-1205: RFC 8628 device grants. Only hashes of both codes persist.
 CREATE TABLE IF NOT EXISTS agent_authorizations (
   device_hash TEXT PRIMARY KEY,
@@ -2568,6 +2671,8 @@ CREATE TABLE IF NOT EXISTS mcp_oauth_codes (
   credential_id UUID,
   expires_at TIMESTAMPTZ NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  access TEXT NOT NULL DEFAULT 'write',
+  CONSTRAINT mcp_oauth_codes_access_check CHECK (access IN ('read', 'write')),
   CONSTRAINT mcp_oauth_codes_scope_check CHECK (
     (org_ids IS NOT NULL AND jsonb_typeof(org_ids) = 'array'
       AND jsonb_array_length(org_ids) > 0 AND org_id IS NULL AND project_id IS NULL)
@@ -2801,6 +2906,63 @@ CREATE OR REPLACE VIEW assignment_member_cells WITH (security_invoker = true) AS
 -- AQU-1491: runtime grants, distinct from legacy word/credit allowances.
 ALTER TABLE org_billing ADD COLUMN weekly_allowance BIGINT
   CHECK (weekly_allowance >= 0 AND weekly_allowance <= 10000000);
+-- AQU-2059 (0182): the one plan per org that db/shared/org-plan.ts resolves.
+-- NULL tier falls back to the legacy `plan` mapping; no row means Free.
+ALTER TABLE org_billing ADD COLUMN tier TEXT
+  CONSTRAINT org_billing_tier_check CHECK (tier IN ('free', 'team', 'enterprise'));
+-- Enterprise contract end; a 14-day Team-sized grace follows, then Free.
+ALTER TABLE org_billing ADD COLUMN contract_ends_at TIMESTAMPTZ;
+
+-- Aquilla Tools (prototype): agent-built, sandboxed mini-apps per project.
+-- `project_tools` is the tool; `project_tool_versions` its immutable version
+-- history (source + manifest + sha256 code hash + bridge api_rev);
+-- `project_tool_grants` is each user's STANDING permission grant for a tool.
+-- Tool writes are ordinary events; the sync-worker stamps
+-- events.provenance = {origin:'tool', toolId, version, codeHash, ...} after
+-- verifying them against project_tool_versions (see the partial index below,
+-- which the activity/revert read uses).
+CREATE TABLE IF NOT EXISTS project_tools (
+  id                 TEXT PRIMARY KEY,
+  project_id         TEXT NOT NULL,
+  name               TEXT NOT NULL,
+  description        TEXT NOT NULL DEFAULT '',
+  current_version    INTEGER NOT NULL DEFAULT 1,
+  upstream_tool_id   TEXT,
+  created_by_user_id BIGINT NOT NULL,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  archived_at        TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS project_tools_project ON project_tools (project_id) WHERE archived_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS project_tool_versions (
+  tool_id            TEXT NOT NULL REFERENCES project_tools(id) ON DELETE CASCADE,
+  project_id         TEXT NOT NULL,
+  version            INTEGER NOT NULL,
+  source             TEXT NOT NULL,
+  manifest           JSONB NOT NULL,
+  code_hash          TEXT NOT NULL,
+  api_rev            INTEGER NOT NULL,
+  origin             TEXT NOT NULL CHECK (origin IN ('starter', 'builder', 'edit', 'copy')),
+  build_meta         JSONB,
+  created_by_user_id BIGINT NOT NULL,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (tool_id, version)
+);
+CREATE INDEX IF NOT EXISTS project_tool_versions_hash ON project_tool_versions (project_id, tool_id, code_hash);
+
+CREATE TABLE IF NOT EXISTS project_tool_grants (
+  tool_id    TEXT NOT NULL REFERENCES project_tools(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL,
+  user_id    BIGINT NOT NULL,
+  scopes     JSONB NOT NULL DEFAULT '[]'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (tool_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS events_tool_provenance
+  ON events (project_id, (provenance->>'toolId'), server_seq)
+  WHERE provenance->>'origin' = 'tool';
 
 -- AQU-1249: feature-flagged WIP. Capabilities confer no project membership.
 CREATE TABLE IF NOT EXISTS checking_links (

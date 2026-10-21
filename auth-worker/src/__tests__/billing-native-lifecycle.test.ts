@@ -20,16 +20,30 @@ afterEach(() => {
   vi.useRealTimers()
   vi.unstubAllGlobals()
 })
+// These sandbox frames were recorded for a retired Pro → Max 5× portal change.
+// AQU-2058 left Team as the only plan, so its one portal change is monthly ↔
+// annual. Remap the recorded prices onto Team month → Team year; Stripe's
+// proration and period shapes are unchanged.
+const team = (interval: 'month' | 'year') => catalog.bindings.find(b => b.interval === interval)!
+const remap: Array<[string, string]> = [
+  ['price_1UFaJN7SR91OrWMSzEu68J2x', team('month').priceId], ['prod_VG6WxGbN40ZhVl', team('month').productId],
+  ['price_1UFaJO7SR91OrWMS4wUWfNLB', team('year').priceId], ['prod_VG6W6C2JBJgl1g', team('year').productId],
+]
 function frame(phase: keyof typeof frames) {
   // Preserve actual Stripe fields/absence, adapting only our isolated test identity.
-  return JSON.parse(JSON.stringify(frames[phase])
+  const result = JSON.parse(remap.reduce((text, [from, to]) => text.replaceAll(from, to), JSON.stringify(frames[phase]))
     .replaceAll(frames.initial.subscription.id, 'sub_rehearsal')
     .replaceAll(frames.initial.subscription.customer, 'cus_rehearsal')) as {
       subscription: Record<string, unknown>; invoice: Record<string, unknown>
     }
+  const items = result.subscription.items as { data: Array<{ price: { id: string; unit_amount: number } }> }
+  for (const item of items.data) {
+    item.price.unit_amount = item.price.id === team('year').priceId ? 500000 : 50000
+  }
+  return result
 }
 async function setup(activate = true) {
-  const paid = await completedPayment('pro', 'month', catalog)
+  const paid = await completedPayment('team', 'month', catalog)
   let current = frame('initial')
   Object.assign(paid.subscription, current.subscription)
   const upstream = globalThis.fetch
@@ -61,29 +75,29 @@ async function setup(activate = true) {
       created: Math.floor(now.getTime() / 1000) - 1,
     }, current.subscription, now) }
 }
-it('reconciles real paid upgrade, credit downgrade, and flexible cancellation without resetting usage', async () => {
+it('reconciles a paid switch to annual, a credited switch back, and flexible cancellation without resetting usage', async () => {
   const f = await setup()
   expect(frames.initial.invoice).not.toHaveProperty('paid')
   await f.apply()
   const anchor = (await readWorkspaceEntitlement(env.AQUILLA_PG, 1))!.usage_anchor
-  for (const [phase, offer] of [['upgrade', 'max_5x'], ['downgrade', 'pro'], ['cancellation', 'pro']] as const) {
+  for (const [phase, interval] of [['upgrade', 'year'], ['downgrade', 'month'], ['cancellation', 'month']] as const) {
     f.select(phase); await f.apply()
     const stored = await readWorkspaceEntitlement(env.AQUILLA_PG, 1)
-    expect(stored).toMatchObject({ offer, usage_anchor: anchor, quantity: 1, billing_interval: 'month' })
+    expect(stored).toMatchObject({ offer: 'team', usage_anchor: anchor, quantity: 1, billing_interval: interval })
     expect(stored!.price_ids).toHaveLength(1)
     expect((await readWorkspaceSubscriptionState(env.AQUILLA_PG, 1))!.payment_failed).toBe(false)
   }
   expect(frames.cancellation.subscription.cancel_at_period_end).toBe(false)
   expect(frames.cancellation.subscription.cancel_at).toBeGreaterThan(0)
   expect((await readWorkspaceSubscriptionState(env.AQUILLA_PG, 1))!.cancel_at_period_end).toBe(true)
-  expect((await readBillingWorkspace(env.AQUILLA_PG, 1, now))!.entitlement!.offer).toBe('pro')
+  expect((await readBillingWorkspace(env.AQUILLA_PG, 1, now))!.entitlement).toMatchObject({ offer: 'team', billingInterval: 'month' })
 })
 it('does not grant an upgrade when its invoice remains unpaid', async () => {
   const f = await setup(); const current = f.select('upgrade')
   Object.assign(current.invoice, { status: 'open', amount_paid: 0, amount_remaining: 4000, attempt_count: 1 })
   current.subscription.status = 'past_due'
   await f.apply()
-  expect((await readWorkspaceEntitlement(env.AQUILLA_PG, 1))!.offer).toBe('pro')
+  expect((await readWorkspaceEntitlement(env.AQUILLA_PG, 1))!.billing_interval).toBe('month')
   expect((await readWorkspaceSubscriptionState(env.AQUILLA_PG, 1))!.payment_failed).toBe(true)
 })
 it.each(['wrong_period', 'missing_proration', 'wrong_subscription', 'extra_charge'])('rejects invalid paid proof: %s', async kind => {
@@ -97,7 +111,7 @@ it.each(['wrong_period', 'missing_proration', 'wrong_subscription', 'extra_charg
   const before = await readWorkspaceSubscriptionState(env.AQUILLA_PG, 1)
   await expect(f.apply()).rejects.toThrow()
   expect(await readWorkspaceSubscriptionState(env.AQUILLA_PG, 1)).toEqual(before)
-  expect((await readWorkspaceEntitlement(env.AQUILLA_PG, 1))!.offer).toBe('pro')
+  expect((await readWorkspaceEntitlement(env.AQUILLA_PG, 1))!.billing_interval).toBe('month')
 })
 it('rolls back the plan mutation when the subscription-state write fails', async () => {
   const f = await setup(); f.select('upgrade')
@@ -147,5 +161,5 @@ it('retries overlapping native upgrade events after a revision conflict without 
   const state = await readWorkspaceSubscriptionState(env.AQUILLA_PG, 1)
   for (let i = 0; i < ids.length; i++) expect((await f.send(ids[i]!, types[i])).status).toBe(200)
   expect(await readWorkspaceSubscriptionState(env.AQUILLA_PG, 1)).toEqual(state)
-  expect(await readWorkspaceEntitlement(env.AQUILLA_PG, 1)).toMatchObject({ offer: 'max_5x', usage_anchor: anchor })
+  expect(await readWorkspaceEntitlement(env.AQUILLA_PG, 1)).toMatchObject({ offer: 'team', billing_interval: 'year', usage_anchor: anchor })
 })

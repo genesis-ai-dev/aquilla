@@ -26,6 +26,9 @@ interface Props {
   /** Optional: invoked when the user clicks "Retry" in the error popover.
    *  Without this, only "Dismiss" is offered. */
   onRetry?: () => void
+  /** Opens the transcription model picker. Offered when the hosted model
+   *  itself failed, so the user has a way out besides retrying. */
+  onChangeModel?: () => void
 }
 
 const SUCCESS_FLASH_MS = 5000
@@ -33,7 +36,7 @@ const SUCCESS_FLASH_MS = 5000
 // Shared compact sizing so every state reads as one consistent gutter pill.
 const PILL = "h-5 gap-1 px-1.5 py-0 text-[10px]"
 
-export function CellTranscribeBadge({ audioId, hasTimings: _hasTimings, onJumpToTranscript, onRetry }: Props) {
+export function CellTranscribeBadge({ audioId, hasTimings: _hasTimings, onJumpToTranscript, onRetry, onChangeModel }: Props) {
   const t = useT()
   const status = useTranscribeStatus(audioId)
   const [flashedDone, setFlashedDone] = useState<TranscribeStatus & { kind: "done" } | null>(null)
@@ -98,6 +101,17 @@ export function CellTranscribeBadge({ audioId, hasTimings: _hasTimings, onJumpTo
     )
   }
 
+  if (status.kind === "transcribing" && status.waiting === "model") {
+    return (
+      <AppTooltip content={t("workspace.transcribeBadge.waitingForModelTooltip")}>
+        <Badge variant="secondary" className={cn(PILL, "text-amber-700 dark:text-amber-300")}>
+          <Spinner className="size-2.5" />
+          <span>{t("workspace.transcribeBadge.waitingForModelPill")}</span>
+        </Badge>
+      </AppTooltip>
+    )
+  }
+
   if (status.kind === "transcribing") {
     return (
       <AppTooltip content={t("workspace.transcribeBadge.transcribingTooltip")}>
@@ -115,6 +129,9 @@ export function CellTranscribeBadge({ audioId, hasTimings: _hasTimings, onJumpTo
     const actions: AiStatusAction[] = []
     if (onRetry) {
       actions.push({ label: "Retry", primary: true, onClick: () => { dismiss(); onRetry() } })
+    }
+    if (onChangeModel && error.category === "transcription-model-unavailable") {
+      actions.push({ label: t("workspace.transcribeBadge.changeModel"), onClick: () => { dismiss(); onChangeModel() } })
     }
     return (
       <CellAiStatusPopover

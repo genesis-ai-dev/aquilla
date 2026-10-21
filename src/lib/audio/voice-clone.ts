@@ -90,6 +90,9 @@ export interface ConvertToCloneVoiceArgs {
   source?: Blob
   /** Or an existing cell-audio object id under this file to re-voice. */
   sourceAudioId?: string
+  /** The cell the result attaches to. When sent, the worker names the clip
+   *  `vc-<reference fingerprint>-audio-<cellId>-…` (see change-voice.ts). */
+  cellId?: string
   /** Seed-VC diffusion steps (4-10 fast, 25 default, 30-50 best). */
   diffusionSteps?: number
   getSyncToken: SyncTokenForFile
@@ -111,7 +114,7 @@ export interface ConvertToCloneVoiceResult {
 export async function convertToCloneVoice(
   args: ConvertToCloneVoiceArgs,
 ): Promise<ConvertToCloneVoiceResult> {
-  const { projectId, fileId, referenceAudioId, source, sourceAudioId, diffusionSteps, getSyncToken } = args
+  const { projectId, fileId, referenceAudioId, source, sourceAudioId, cellId, diffusionSteps, getSyncToken } = args
   if (!source && !sourceAudioId) {
     throw new Error("convertToCloneVoice: provide a source blob or sourceAudioId")
   }
@@ -124,6 +127,7 @@ export async function convertToCloneVoice(
   form.append("referenceAudioId", referenceAudioId)
   if (source) form.append("source", source, "source")
   if (sourceAudioId) form.append("sourceAudioId", sourceAudioId)
+  if (cellId) form.append("cellId", cellId)
   if (typeof diffusionSteps === "number") form.append("diffusionSteps", String(diffusionSteps))
 
   const res = await fetch(`${syncWorkerHttpOrigin()}/api/v1/voice/convert`, {

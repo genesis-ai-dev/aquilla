@@ -93,6 +93,7 @@ export class JWTService {
   async createAccessTokenWithPayload(
     username: string,
     sessionStartedAt?: number,
+    sessionId?: string,
   ): Promise<{ token: string; payload: JWTPayload }> {
     if (!this.env.SECRET_KEY) {
       throw new Error("SECRET_KEY is not configured for JWT signing")
@@ -116,6 +117,12 @@ export class JWTService {
       // the chain forgets the original login and "how old is this session"
       // stops being answerable after the first refresh.
       sst: sessionStartedAt ?? now,
+      // [Pen test] Auth & session mgmt (2026-10-19): session family id,
+      // carried across refreshes. Refresh deliberately leaves the previous
+      // token valid, so revoking only the presented `jti` at logout left every
+      // earlier token in the chain (and the ability to /auth/refresh from it)
+      // alive for up to 30/90 days. See utils/token-revocation.ts.
+      sid: sessionId ?? crypto.randomUUID(),
     }
 
     // hono/jwt's `sign` typing rejects arbitrary strings for `alg`, but we

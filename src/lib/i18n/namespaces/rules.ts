@@ -51,6 +51,10 @@ export const rules = defineNamespace({
     "rules.infraction.builtin.capitalization": "Lowercase letter where a capital is expected",
     "rules.infraction.builtin.footnoteQuoteMismatch":
       "This footnote quotes text that is not in the verse",
+    "rules.infraction.builtin.corruptedCharacters": "Corrupted or garbled characters in translation",
+    "rules.infraction.builtin.unpairedQuotes": "Unpaired quotation mark in translation",
+    "rules.infraction.builtin.untranslatedFragment": "Source word left untranslated",
+    "rules.infraction.builtin.lengthRatio": "Translation is much shorter or longer than the source",
     "rules.infraction.builtin.placeholderIntegrity": plural({
       one: "Placeholder {tokens} missing in translation",
       other: "Placeholders {tokens} missing in translation",
@@ -98,6 +102,18 @@ export const rules = defineNamespace({
     "rules.builtin.footnoteQuoteMismatch.name": "Footnote quote",
     "rules.builtin.footnoteQuoteMismatch.description":
       "Text a footnote or cross-reference quotes from the verse must appear in that verse's translation.",
+    "rules.builtin.corruptedCharacters.name": "Corrupted characters",
+    "rules.builtin.corruptedCharacters.description":
+      "Replacement characters (�), stray control characters or garbled text such as \"Ã©\" that the source doesn't have.",
+    "rules.builtin.unpairedQuotes.name": "Unpaired quotes",
+    "rules.builtin.unpairedQuotes.description":
+      "An opening or closing quotation mark without its partner, unless the source leaves a quotation open too.",
+    "rules.builtin.untranslatedFragment.name": "Untranslated words",
+    "rules.builtin.untranslatedFragment.description":
+      "A word copied from the source in the source's script, when the translation is written in a different script.",
+    "rules.builtin.lengthRatio.name": "Length mismatch",
+    "rules.builtin.lengthRatio.description":
+      "Translation is under 40% or over 250% of the source's length — a sign of a dropped or added clause. Off by default: normal length varies by language pair.",
 
     // ── Shared vocabulary ───────────────────────────────────────────────────
     "rules.severity.major": "Major",
@@ -111,6 +127,8 @@ export const rules = defineNamespace({
       "These switches apply to the {lane} lane only. Other lanes keep their own.",
     "rules.builtinChecks.punctuation.fromLanguage": "Using {language} punctuation conventions.",
     "rules.builtinChecks.punctuation.fromProfile": "Using the punctuation from the Language profile.",
+    "rules.builtinChecks.punctuation.noSpecialConventions":
+      "Judged by the source's own marks. {language} has no special punctuation conventions.",
     "rules.builtinChecks.punctuation.sourceRelative":
       "Judged by the source's own marks — this lane records no language.",
     "rules.builtinChecks.violationCount": plural({
@@ -444,6 +462,65 @@ export const rules = defineNamespace({
         "Translation rules, quality checks and health — the rule list and editor, the file-check pass and its findings drawer, and completion/health readouts. Note the user's OWN rule names and descriptions are content and are never keyed; only the chrome around them is.",
     },
     keys: {
+      "rules.builtin.corruptedCharacters.name": {
+        description:
+          "Name of a built-in quality check in the built-in checks list on the Rules page. It flags " +
+          "characters damaged by a text-encoding error. Short, like the other check names.",
+        maxLength: 30,
+      },
+      "rules.builtin.corruptedCharacters.description": {
+        description:
+          "One-line description under that check's name. Keep the replacement character (�) and the " +
+          "example garbled text \"Ã©\" exactly as written: they are literal examples, not words.",
+      },
+      "rules.infraction.builtin.corruptedCharacters": {
+        description:
+          "Finding shown on a row when the translation contains characters damaged by a text-encoding error. " +
+          "The damaged characters are underlined in the translation.",
+      },
+      "rules.builtin.unpairedQuotes.name": {
+        description:
+          "Name of a built-in quality check in the built-in checks list. It flags a quotation mark " +
+          "that has no matching opening or closing mark. Short, like the other check names.",
+        maxLength: 30,
+      },
+      "rules.builtin.unpairedQuotes.description": {
+        description: "One-line description under that check's name in the built-in checks list.",
+      },
+      "rules.infraction.builtin.unpairedQuotes": {
+        description:
+          "Finding shown on a row when a quotation mark in the translation has no partner. Mirrors " +
+          "'Unpaired bracket/parenthesis/brace in translation'.",
+      },
+      "rules.builtin.untranslatedFragment.name": {
+        description:
+          "Name of a built-in quality check in the built-in checks list. It flags a word left in the " +
+          "source language (for example a name left in Latin letters in a Hindi translation). Short.",
+        maxLength: 30,
+      },
+      "rules.builtin.untranslatedFragment.description": {
+        description: "One-line description under that check's name in the built-in checks list.",
+      },
+      "rules.infraction.builtin.untranslatedFragment": {
+        description:
+          "Finding shown on a row when a word from the source was copied into the translation without " +
+          "being translated. The word is underlined in the translation.",
+      },
+      "rules.builtin.lengthRatio.name": {
+        description:
+          "Name of a built-in quality check in the built-in checks list. It flags a translation much " +
+          "shorter or longer than its source. Short, like the other check names.",
+        maxLength: 30,
+      },
+      "rules.builtin.lengthRatio.description": {
+        description:
+          "One-line description under that check's name. Keep the percentages. The check is off by default.",
+      },
+      "rules.infraction.builtin.lengthRatio": {
+        description:
+          "Finding shown on a row when the translation is far shorter or longer than the source, which " +
+          "can mean part of the text was dropped or added.",
+      },
       "rules.builtin.numberIntegrityExtra.name": {
         description:
           "Name of a built-in quality check, shown in the built-in checks list on the Rules page. " +
@@ -516,6 +593,13 @@ export const rules = defineNamespace({
       "rules.builtinChecks.punctuation.fromProfile": {
         description:
           "Same note, when the project's Language profile fills in the punctuation itself and so wins over the per-language defaults.",
+      },
+      "rules.builtinChecks.punctuation.noSpecialConventions": {
+        description:
+          "Same note, when the lane records a language with no special punctuation marks of its own (Spanish, English, French, …): the two punctuation checks compare against the source's own marks (AQU-2000).",
+        placeholders: {
+          language: "The lane's language as the user typed it — verbatim, never translated.",
+        },
       },
       "rules.builtinChecks.punctuation.sourceRelative": {
         description:

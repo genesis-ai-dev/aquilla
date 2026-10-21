@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type Dispatch, type ReactNode, type SetStateAction } from "react"
+import { notifySmartExtensionsChanged } from "@/lib/tools/smart-extensions-enabled"
+import { recordStep } from "@/lib/history/history"
 import { Navigate, useLocation, useParams, useNavigate, useSearchParams, type Location } from "react-router-dom"
 import {
   isProjectEditorPath,
@@ -95,6 +97,7 @@ import {
 import { isAutopilotVisible } from "@/lib/features/flags"
 import { isBibleDataExperimentOn } from "@/lib/bible-data/experiment"
 import type { BibleEnrichmentSettings } from "../../db/shared/bible-enrichments"
+import type { MediaDefaults } from "../../db/shared/media-setting-defaults"
 import { BibleDataSection } from "./ProjectSettings/BibleDataSection"
 import { LanguageProfileSection } from "./ProjectSettings/LanguageProfileSection"
 import { ProjectDecisionsSection } from "./ProjectSettings/ProjectDecisionsSection"
@@ -118,6 +121,7 @@ import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
 import { TermbaseSharingSection } from "./ProjectSettings/TermbaseSharingSection"
 import { MondayIntegrationSection } from "./ProjectSettings/MondayIntegrationSection"
+import { AirtableIntegrationSection } from "./ProjectSettings/AirtableIntegrationSection"
 import { SourceLinkSection } from "./ProjectSettings/SourceLinkSection"
 import { LinkSourceSection } from "./ProjectSettings/LinkSourceSection"
 import { ExperimentalFlagsSection } from "./ProjectSettings/ExperimentalFlagsSection"
@@ -140,6 +144,8 @@ import { readValidationCount, readValidationCountAudio } from "@/lib/progress/re
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
 import type { CellEditingTier, ProjectWideSettings } from "@/lib/sync/project-settings"
 import { FLOOR_LABEL } from "@/pages/settings/constants"
+import { CELL_EDITING_FLOOR_OPTIONS, cellEditingTierLabel } from "@/components/ProjectSettings/cell-editing-floor-options"
+import { OrgDefaultSource, orgBooleanOptionLabel } from "@/components/ProjectSettings/OrgDefaultSource"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { PERMISSION_DOCS_URL } from "@/components/PermissionDeniedAlert"
 import { resolveRoleName, ROLE } from "@/lib/frontier/roles"
@@ -170,40 +176,9 @@ import { PostEditMetricsSection } from "@/components/metrics/PostEditMetricsSect
  */
 const SHOW_TERMBASE_SHARING_IN_SETTINGS = false
 
-/**
- * AQU-1068: the cell-editing tiers, in the order they are offered.
- *
- * The reset default leads, matching every other floor control on this page;
- * the rest climb the ladder, matching RosterProgressSection and
- * TermbaseEditSection.
- *
- * The labels used to be DESCRIPTIVE — "Maintainers and project leads", "Anyone
- * who can edit" — on the theory that they said who is admitted more plainly
- * than a bare rank. Matthew's review overruled that (Sam approved, 2026-09-08):
- * an admin who has just set someone's role on the Members panel should not have
- * to work out which bespoke phrase covers that rank, so this is the standard
- * ladder, spelled the standard way, and only "No one" — which is not a role —
- * keeps a phrase of its own.
- *
- * `level` is what makes the two-tier labelling work, exactly as in
- * RosterProgressSection: FLOOR_LABEL supplies the short word for the closed
- * trigger and the message key the fuller row in the open list. "No one" has no
- * level and therefore no FLOOR_LABEL entry, so it shows its row text in both.
- */
-const CELL_EDITING_FLOOR_OPTIONS: readonly {
-  value: CellEditingTier
-  /** Ladder level this tier admits, or null for "none" — which is a refusal,
-   *  not a rank, and so has no place on the ladder. */
-  level: number | null
-  labelKey: MessageKey
-}[] = [
-  { value: "none", level: null, labelKey: "projectSettings.cellEditing.optionNone" },
-  { value: "commenter", level: ROLE.COMMENTER, labelKey: "projectSettings.cellEditing.optionCommenter" },
-  { value: "reviewer", level: ROLE.REVIEWER, labelKey: "projectSettings.cellEditing.optionReviewer" },
-  { value: "contributor", level: ROLE.CONTRIBUTOR, labelKey: "projectSettings.cellEditing.optionContributor" },
-  { value: "project_lead", level: ROLE.PROJECT_LEAD, labelKey: "projectSettings.cellEditing.optionProjectLead" },
-  { value: "maintainer", level: ROLE.MAINTAINER, labelKey: "projectSettings.cellEditing.optionMaintainer" },
-]
+/** AQU-1768: an org with no media defaults, as one stable value. */
+const NO_ORG_MEDIA_DEFAULTS: MediaDefaults = Object.freeze({})
+
 
 /**
  * AQU-1720: what one cell is when a docx/txt/md file is imported. A dubbing
@@ -277,14 +252,16 @@ interface Baseline {
   allowSelfValidation: boolean
   // AQU-490: the audio policy. Separate keys, never fallbacks for the text
   // ones.
-  validationRoleFloorAudio: "reviewer" | "project_lead" | "maintainer"
+  // AQU-1768: these five are the project's OWN values; null = it follows the
+  // organization's default (then each setting's built-in default).
+  validationRoleFloorAudio: "reviewer" | "project_lead" | "maintainer" | null
   validationNamedUsersAudio: string[]
-  allowSelfValidationAudio: boolean
+  allowSelfValidationAudio: boolean | null
   /** AQU-646: may people add lines into the timeline's silences? */
-  cellEditingFloor: CellEditingTier
+  cellEditingFloor: CellEditingTier | null
   /** AQU-646 stage 2: may this project's timelines be restructured? */
-  allowTrackEditing: boolean
-  timingLocked: boolean
+  allowTrackEditing: boolean | null
+  timingLocked: boolean | null
   harmonize_min_role: "project_lead" | "maintainer"
   /** AQU-460: EXPLICIT persisted value only. `undefined` = no explicit choice
    *  yet — the effective (displayed) state is derived via
@@ -337,19 +314,16 @@ function buildBaseline(project: ProjectRecord): Baseline {
     validationRoleFloor: project.validationRoleFloor ?? "reviewer",
     validationNamedUsers: project.validationNamedUsers ?? [],
     allowSelfValidation: project.allowSelfValidation ?? true,
-    validationRoleFloorAudio: project.validationRoleFloorAudio ?? "reviewer",
+    // AQU-1768: absent = "Organization default", not the built-in value. The
+    // built-ins (reviewer, self-validation on, cell editing nobody, track
+    // editing off, timing LOCKED) now apply only when the organization sets
+    // none either; the controls below resolve them for display.
+    validationRoleFloorAudio: project.validationRoleFloorAudio ?? null,
     validationNamedUsersAudio: project.validationNamedUsersAudio ?? [],
-    allowSelfValidationAudio: project.allowSelfValidationAudio ?? true,
-    // Off unless a project has said otherwise: the affordance is speculative
-    // and underdeveloped, so absent must read as off, not as unset.
-    cellEditingFloor: project.cellEditingFloor ?? "none",
-    // Off unless a project has said otherwise. Multi-track is capability for
-    // clients who want it, and a project that never turns it on should not be
-    // able to tell it was built.
-    allowTrackEditing: project.allowTrackEditing ?? false,
-    // AQU-646: absent means LOCKED, so the box starts ticked on every project
-    // that predates the setting. See resolveTimingLocked.
-    timingLocked: resolveTimingLocked(project),
+    allowSelfValidationAudio: typeof project.allowSelfValidationAudio === "boolean" ? project.allowSelfValidationAudio : null,
+    cellEditingFloor: project.cellEditingFloor ?? null,
+    allowTrackEditing: typeof project.allowTrackEditing === "boolean" ? project.allowTrackEditing : null,
+    timingLocked: typeof project.timingLocked === "boolean" ? project.timingLocked : null,
     harmonize_min_role: project.harmonize_min_role ?? "project_lead",
     // AQU-460: preserve "unset" — do NOT default to false here, that would
     // make an unset scripture project look explicitly off in the diff/baseline.
@@ -420,6 +394,17 @@ interface ProjectSettingsProps {
   modal?: boolean
 }
 
+/**
+ * AQU-2031: the `?focus=` vocabulary a caller may deep-link to on a settings
+ * pane, mapped to the element scrolled into view. `block` is per target: a card
+ * goes to the top of the pane, a single field inside a card only moves far
+ * enough to be on screen (so a short project does not scroll at all).
+ */
+const SETTINGS_FOCUS_TARGETS: Record<string, { elementId: string; block: ScrollLogicalPosition }> = {
+  languages: { elementId: "section-languages", block: "start" },
+  "add-lane": { elementId: "add-lane-field", block: "nearest" },
+}
+
 export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const t = useT()
   const { id, section: sectionParam } = useParams<{ id: string; section?: string }>()
@@ -473,6 +458,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     reasonCannotEdit,
     canEditLanguages,
     reasonCannotEditLanguages,
+    canEditCountStructural,
+    reasonCannotEditCountStructural,
     languageEditFloor,
     patch: patchShared,
     version: sharedVersion,
@@ -493,6 +480,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // AQU-1771: the rest of the org policy, carried for this project.
     orgPolicy: carriedOrgPolicy,
     visibilityFloors: carriedVisibilityFloors,
+    // AQU-1768: what "Organization default" means for the media settings.
+    // Defaulted for callers (and test doubles) that predate the field.
+    orgMediaDefaults = NO_ORG_MEDIA_DEFAULTS,
   } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null, {
     // AQU-1086: the org's language-edit floor rides on the project record, so
     // the language fields below can be enabled for a project lead when the org
@@ -711,6 +701,30 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     : reasonCannotEditLanguages === "role" ? languageRoleLockHint
     : null
 
+  // AQU-1912: "Count headings" is a project-lead setting (AQU-1083), so its
+  // lock hint names Project leads, not the page-wide Maintainer floor.
+  const structuralPrivilegedRole = resolveRoleName(t, ROLE.PROJECT_LEAD, { plural: true })
+  const structuralRoleLockHint = (
+    <PermissionLockHint
+      title={t("projectSettings.permission.onlyRoleCanModify", {
+        role: structuralPrivilegedRole,
+      })}
+      onView={id ? () => setPrivilegedOpen(true) : undefined}
+      href={id ? undefined : PERMISSION_DOCS_URL}
+      linkLabel={
+        id
+          ? t("projectSettings.permission.viewPrivilegedMembers", {
+              role: structuralPrivilegedRole,
+            })
+          : t("error.permissionDenied.learnMore")
+      }
+    />
+  )
+  const structuralDisabledTooltip =
+    reasonCannotEditCountStructural === "offline" ? t("projectSettings.permission.reconnectToEdit")
+    : reasonCannotEditCountStructural === "role" ? structuralRoleLockHint
+    : null
+
   // AQU-765: renaming a synced project now persists to the server rename
   // endpoint (maintainer+). Local (unsynced) projects keep their name editable
   // — their IDB record is the source of truth. For a cloud project below the
@@ -755,12 +769,20 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [validationRoleFloor, setValidationRoleFloor] = useState<"reviewer" | "project_lead" | "maintainer">("reviewer")
   const [validationNamedUsers, setValidationNamedUsers] = useState<string[]>([])
   const [allowSelfValidation, setAllowSelfValidation] = useState(true)
-  const [validationRoleFloorAudio, setValidationRoleFloorAudio] = useState<"reviewer" | "project_lead" | "maintainer">("reviewer")
+  const [validationRoleFloorAudio, setValidationRoleFloorAudio] = useState<"reviewer" | "project_lead" | "maintainer" | null>(null)
   const [validationNamedUsersAudio, setValidationNamedUsersAudio] = useState<string[]>([])
-  const [allowSelfValidationAudio, setAllowSelfValidationAudio] = useState(true)
-  const [cellEditingFloor, setCellEditingFloor] = useState<CellEditingTier>("none")
-  const [allowTrackEditing, setAllowTrackEditing] = useState(false)
-  const [timingLocked, setTimingLocked] = useState(true)
+  // AQU-1768: null = follow the organization's default.
+  const [allowSelfValidationAudio, setAllowSelfValidationAudio] = useState<boolean | null>(null)
+  const [cellEditingFloor, setCellEditingFloor] = useState<CellEditingTier | null>(null)
+  const [allowTrackEditing, setAllowTrackEditing] = useState<boolean | null>(null)
+  const [timingLocked, setTimingLocked] = useState<boolean | null>(null)
+  // AQU-1768: the value in force for each — the project's own, else the
+  // organization's default, else the built-in one. What the disabled control
+  // shows while the project follows the organization, and where "Set for this
+  // project" starts from.
+  const effectiveTimingLocked = resolveTimingLocked({ timingLocked: timingLocked ?? orgMediaDefaults.timingLocked })
+  const effectiveAllowTrackEditing = allowTrackEditing ?? orgMediaDefaults.allowTrackEditing ?? false
+  const effectiveCellEditingFloor: CellEditingTier = cellEditingFloor ?? orgMediaDefaults.cellEditingFloor ?? "none"
   // AQU-186: harmonize_min_role — project_lead floor, configurable up to maintainer.
   const [harmonizeMinRole, setHarmonizeMinRole] = useState<"project_lead" | "maintainer">("project_lead")
   // AQU-460: EXPLICIT persisted value only — `undefined` means no explicit
@@ -1263,12 +1285,14 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         changedFieldLabels.push("named validators")
       }
       if (allowSelfValidation !== baseline.allowSelfValidation) { sharedUpdates.allowSelfValidation = allowSelfValidation; changedFieldLabels.push("self-validation") }
-      if (validationRoleFloorAudio !== baseline.validationRoleFloorAudio) { sharedUpdates.validationRoleFloorAudio = validationRoleFloorAudio; changedFieldLabels.push("minimum role to validate recordings") }
+      // AQU-1768: null → undefined, which the merged blob drops: the project
+      // goes back to the organization's default, as the counts above do.
+      if (validationRoleFloorAudio !== baseline.validationRoleFloorAudio) { sharedUpdates.validationRoleFloorAudio = validationRoleFloorAudio ?? undefined; changedFieldLabels.push("minimum role to validate recordings") }
       if (JSON.stringify(validationNamedUsersAudio) !== JSON.stringify(baseline.validationNamedUsersAudio)) { sharedUpdates.validationNamedUsersAudio = validationNamedUsersAudio; changedFieldLabels.push("named recording validators") }
-      if (allowSelfValidationAudio !== baseline.allowSelfValidationAudio) { sharedUpdates.allowSelfValidationAudio = allowSelfValidationAudio; changedFieldLabels.push("validating your own recordings") }
-      if (cellEditingFloor !== baseline.cellEditingFloor) { sharedUpdates.cellEditingFloor = cellEditingFloor; changedFieldLabels.push("who can add and remove cells") }
-      if (allowTrackEditing !== baseline.allowTrackEditing) { sharedUpdates.allowTrackEditing = allowTrackEditing; changedFieldLabels.push("timeline track editing") }
-      if (timingLocked !== baseline.timingLocked) { sharedUpdates.timingLocked = timingLocked; changedFieldLabels.push("the timing lock") }
+      if (allowSelfValidationAudio !== baseline.allowSelfValidationAudio) { sharedUpdates.allowSelfValidationAudio = allowSelfValidationAudio ?? undefined; changedFieldLabels.push("validating your own recordings") }
+      if (cellEditingFloor !== baseline.cellEditingFloor) { sharedUpdates.cellEditingFloor = cellEditingFloor ?? undefined; changedFieldLabels.push("who can add and remove cells") }
+      if (allowTrackEditing !== baseline.allowTrackEditing) { sharedUpdates.allowTrackEditing = allowTrackEditing ?? undefined; changedFieldLabels.push("timeline track editing") }
+      if (timingLocked !== baseline.timingLocked) { sharedUpdates.timingLocked = timingLocked ?? undefined; changedFieldLabels.push("the timing lock") }
       if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push("harmonize min role") }
       if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push(isBibleDataExperimentOn(project) ? "Bible data" : "Bible resources") }
       if (!sameSetting(bibleEnrichments, baseline.bibleEnrichments)) { sharedUpdates.bibleEnrichments = bibleEnrichments; changedFieldLabels.push("Bible data enrichments") }
@@ -1285,7 +1309,20 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       }
 
       if (Object.keys(sharedUpdates).length > 0) {
+        // AQU-1767 phase 2: the save is one history step. What each setting held
+        // before is the server's blob as this page last read it.
+        const beforeBlob = (sharedSettingsBlob ?? {}) as Record<string, unknown>
         const out = await patchShared(sharedUpdates)
+        if (out.kind === "ok") {
+          recordStep({
+            kind: "settings.project",
+            data: {
+              changes: Object.entries(sharedUpdates).map(([key, after]) => ({ key, before: beforeBlob[key] ?? null, after })),
+            },
+            labelKey: "editor.history.stepSettings",
+            labelParams: { count: Object.keys(sharedUpdates).length },
+          }, id ? { projectId: id, username: session?.username || project?.username || "local" } : undefined)
+        }
         if (out.kind === "conflict") {
           toast.add({
             type: "warning",
@@ -1554,6 +1591,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // Monday.com board sync — cloud (synced) projects only: the link lives on
     // the server against the project's org connection.
     { id: "section-monday", label: "Monday.com", keywords: ["monday", "integration", "board", "push", "progress sync", "project management"], visible: isCloudProject },
+    // AQU-804: Airtable table sync, the same shape (and the same cloud-only rule).
+    { id: "section-airtable", label: "Airtable", keywords: ["airtable", "integration", "table", "base", "push", "progress sync", "episodes", "project management"], visible: isCloudProject },
     { id: "section-experimental", label: "Experimental", keywords: ["experimental", "flags", "beta", "preview", "contextual", "contextual drafting"] },
   ]
 
@@ -1566,6 +1605,20 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   // mount; the box stays user-editable/clearable afterward.
   const [searchQuery, setSearchQuery] = useState(() => searchParams.get("q") ?? "")
   const lowerQuery = searchQuery.trim().toLowerCase()
+
+  // AQU-2031: `?focus=<target>` is the pane-mode counterpart of `?q=`. A caller
+  // that wants one card reachable in one click deep-links to the card's GROUP
+  // page (`…/settings/general?focus=languages`) and the card is scrolled into
+  // view here. Unlike `?q=`, the page stays a pane — no search box, the group's
+  // own title, only the group's cards — so the person does not land on what
+  // looks like a search they never ran.
+  const focusTarget = searchParams.get("focus")
+  useEffect(() => {
+    if (!focusTarget || loading) return
+    const target = SETTINGS_FOCUS_TARGETS[focusTarget]
+    if (!target) return
+    document.getElementById(target.elementId)?.scrollIntoView?.({ block: target.block })
+  }, [focusTarget, loading])
   const visibleSections = lowerQuery
     ? ALL_SECTIONS.filter(
         (s) =>
@@ -1669,10 +1722,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     {
       id: "integrations",
       label: "Integrations",
-      description: "Monday.com board sync",
+      description: "Monday.com and Airtable sync",
       icon: Plug,
       hub: "Integrations",
-      sectionIds: ["section-monday"],
+      sectionIds: ["section-monday", "section-airtable"],
     },
     {
       id: "experimental",
@@ -1693,6 +1746,25 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   // Index lists only hub-level entries; a `hideFromIndex` pane stays
   // deep-linkable but is opened from a parent pane NavRow.
   const indexGroups = visibleGroups.filter((g) => !g.hideFromIndex)
+
+  // AQU-2030: the back link, title, and save controls stay pinned at the top of
+  // the pane while the form scrolls under them. Measuring the pinned block lets
+  // the scroll port reserve that much `scroll-padding-top`, so tabbing to a
+  // field below the fold scrolls it clear of the header instead of under it.
+  const pinnedHeaderRef = useRef<HTMLDivElement | null>(null)
+  const [pinnedHeaderHeight, setPinnedHeaderHeight] = useState(0)
+  useEffect(() => {
+    const el = pinnedHeaderRef.current
+    if (!el) return
+    const measure = () => setPinnedHeaderHeight(el.getBoundingClientRect().height)
+    measure()
+    if (typeof ResizeObserver === "undefined") return
+    // The block grows and shrinks as the save controls appear with the dirty
+    // state, so re-measure rather than reading it once on mount.
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [loading])
 
   // Living Memory extraction: `memory`, `rules`, and `system-prompt` moved out
   // of settings onto the standalone /project/:id/memory surface. Old section
@@ -1760,6 +1832,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       "section-terminology",
       "section-termbase-sharing",
       "section-monday",
+      "section-airtable",
       "section-ai-metrics",
     ]
     const headers = new Map<string, string>()
@@ -1808,7 +1881,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     validation: resolveRoleName(t, validationRoleFloor),
     "audio-media": t(AUDIO_MEDIA_STRATEGY_LABELS[audioMediaStrategy].nameKey),
     metrics: "Post-edit",
-    integrations: "Monday.com",
+    integrations: "Monday.com, Airtable",
     experimental: "This device",
   }
 
@@ -1948,15 +2021,32 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   })()
 
   const settingsContent = (
-    <Page size={pageSize}>
-          {modal && onSettingsPane ? (
-            <BackLink
-              className="mb-6"
-              label={breadcrumbParent?.label ?? t("editor.navTitle.projectSettings")}
-              onClick={() => requestHistoryNavigation(-1)}
-            />
-          ) : null}
-          <div className="flex flex-col gap-12">
+    <Page
+      size={pageSize}
+      style={pinnedHeaderHeight ? { scrollPaddingTop: `${pinnedHeaderHeight}px` } : undefined}
+    >
+          {/*
+            AQU-2030: the pinned block. `-mt-6 pt-6` and `pb-4` are an opaque
+            bleed above and below the header — they keep an unscrolled pane
+            laid out exactly as before (the content stack's `mt-8` + this
+            `pb-4` restore the `gap-12` rhythm) while giving the pinned band
+            breathing room once form content slides underneath it. The
+            background is opaque, not translucent, so nothing shows through:
+            `bg-popover` matches DialogContent in the modal, `bg-background`
+            the AppShell card on the full-page route.
+          */}
+          <div
+            ref={pinnedHeaderRef}
+            data-slot="project-settings-pinned-header"
+            className={`sticky top-0 z-20 -mt-6 pt-6 pb-4 ${modal ? "bg-popover" : "bg-background"}`}
+          >
+            {modal && onSettingsPane ? (
+              <BackLink
+                className="mb-6"
+                label={breadcrumbParent?.label ?? t("editor.navTitle.projectSettings")}
+                onClick={() => requestHistoryNavigation(-1)}
+              />
+            ) : null}
             <PageHeader
               title={pageTitle}
               description={pageDescription}
@@ -1964,6 +2054,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               inset={pageSize !== "wide"}
               className="mb-0"
             />
+          </div>
+          <div className="mt-8 flex flex-col gap-12">
 
             {/* Search lives on the index only (detail panes match org settings). */}
             {showSearch && (
@@ -2189,15 +2281,27 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 description={t("projectSettings.cellEditing.description")}
                 control={
                   <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                    {/* AQU-1768: follow the organization's tier, or set one here. */}
+                    <OrgDefaultSource
+                      id="cell-editing-floor-source"
+                      settingLabel={t("projectSettings.cellEditing.label")}
+                      inherited={cellEditingFloor == null}
+                      orgOptionLabel={t("projectSettings.mediaDefaults.orgValue", {
+                        value: cellEditingTierLabel(t, orgMediaDefaults.cellEditingFloor ?? "none"),
+                      })}
+                      disabled={!canEditShared}
+                      onChange={(inherit) => setCellEditingFloor(inherit ? null : effectiveCellEditingFloor)}
+                    />
                     <Select
                       items={CELL_EDITING_FLOOR_OPTIONS.map((o) => ({
                         value: o.value,
                         label: (o.level != null ? FLOOR_LABEL[o.level] : undefined) ?? t(o.labelKey),
                       }))}
-                      disabled={!canEditShared}
-                      value={cellEditingFloor}
+                      disabled={!canEditShared || cellEditingFloor == null}
+                      value={effectiveCellEditingFloor}
                       onValueChange={(value) =>
-                        setCellEditingFloor((value ?? cellEditingFloor) as typeof cellEditingFloor)
+                        setCellEditingFloor((value ?? effectiveCellEditingFloor) as CellEditingTier)
                       }
                     >
                       <SelectTrigger
@@ -2216,6 +2320,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                         </SelectGroup>
                       </SelectContent>
                     </Select>
+                    </div>
                   </DisabledFieldTooltip>
                 }
               />
@@ -2842,7 +2947,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 control={
                   <Button
                     variant="outline"
-                    onClick={() => requestNavigate("/preferences")}
+                    // The hosted model picker says which models know this
+                    // project's language, so it needs to know the project.
+                    onClick={() => requestNavigate(project ? `/preferences/local-models?project=${encodeURIComponent(project.id)}` : "/preferences")}
                   >
                     {t("projectSettings.localModels.manageButton")}
                   </Button>
@@ -2876,6 +2983,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               validationRoleFloorAudio={validationRoleFloorAudio}
               validationNamedUsersAudio={validationNamedUsersAudio}
               allowSelfValidationAudio={allowSelfValidationAudio}
+              orgValidationRoleFloorAudio={orgMediaDefaults.validationRoleFloorAudio ?? null}
+              orgAllowSelfValidationAudio={orgMediaDefaults.allowSelfValidationAudio ?? null}
               disabled={!canEditShared}
               disabledTooltip={sharedDisabledTooltip ?? undefined}
               // AQU-1083: the last row of the validation card. Passed as a
@@ -2886,8 +2995,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 <StructuralCellsProjectSection
                   value={sharedSettingsBlob?.countStructuralCells}
                   orgDefault={orgCountStructuralCells ?? true}
-                  disabled={!canEditShared}
-                  disabledTooltip={sharedDisabledTooltip ?? undefined}
+                  disabled={!canEditCountStructural}
+                  disabledTooltip={structuralDisabledTooltip ?? undefined}
                   onPatch={patchShared}
                 />
               }
@@ -2979,20 +3088,30 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             <CardContent className="space-y-3">
               {/* AQU-646. FIRST in the card because it constrains everything
                   below it — the pencil under it is moot while nothing moves. */}
-              <div className="flex items-start gap-2">
+              <div className="flex flex-wrap items-start gap-2">
+                {/* AQU-1768: while the project follows the organization the
+                    box shows the organization's choice and cannot be ticked. */}
                 <Checkbox
                   id="timing-locked"
                   data-testid="settings-timing-locked"
-                  checked={timingLocked}
-                  disabled={!canEditShared}
+                  checked={effectiveTimingLocked}
+                  disabled={!canEditShared || timingLocked == null}
                   onCheckedChange={(checked) => setTimingLocked(checked)}
                 />
-                <label htmlFor="timing-locked" className="text-sm">
+                <label htmlFor="timing-locked" className="min-w-0 flex-1 text-sm">
                   {t("projectSettings.timeline.lockLabel")}
                   <p className="mt-1 text-xs text-muted-foreground">
                     {t("projectSettings.timeline.lockHint")}
                   </p>
                 </label>
+                <OrgDefaultSource
+                  id="timing-locked-source"
+                  settingLabel={t("projectSettings.timeline.lockLabel")}
+                  inherited={timingLocked == null}
+                  orgOptionLabel={orgBooleanOptionLabel(t, orgMediaDefaults.timingLocked ?? true)}
+                  disabled={!canEditShared}
+                  onChange={(inherit) => setTimingLocked(inherit ? null : effectiveTimingLocked)}
+                />
               </div>
               {/* AQU-646 stage 2. LAST in the card, because it is the wider
                   claim of the two: the lock above constrains what may move on
@@ -3000,20 +3119,28 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   may be added to, grouped and recoloured at all. Off by
                   default, and enforced on the server as well — the UI
                   withholding a button is not a permission. */}
-              <div className="flex items-start gap-2">
+              <div className="flex flex-wrap items-start gap-2">
                 <Checkbox
                   id="allow-track-editing"
                   data-testid="settings-allow-track-editing"
-                  checked={allowTrackEditing}
-                  disabled={!canEditShared}
+                  checked={effectiveAllowTrackEditing}
+                  disabled={!canEditShared || allowTrackEditing == null}
                   onCheckedChange={(checked) => setAllowTrackEditing(checked)}
                 />
-                <label htmlFor="allow-track-editing" className="text-sm">
+                <label htmlFor="allow-track-editing" className="min-w-0 flex-1 text-sm">
                   {t("projectSettings.timeline.trackEditingLabel")}
                   <p className="mt-1 text-xs text-muted-foreground">
                     {t("projectSettings.timeline.trackEditingHint")}
                   </p>
                 </label>
+                <OrgDefaultSource
+                  id="allow-track-editing-source"
+                  settingLabel={t("projectSettings.timeline.trackEditingLabel")}
+                  inherited={allowTrackEditing == null}
+                  orgOptionLabel={orgBooleanOptionLabel(t, orgMediaDefaults.allowTrackEditing ?? false)}
+                  disabled={!canEditShared}
+                  onChange={(inherit) => setAllowTrackEditing(inherit ? null : effectiveAllowTrackEditing)}
+                />
               </div>
             </CardContent>
           </Card>
@@ -3098,6 +3225,15 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           />
         )}
 
+        {searchGroupLabel("section-airtable")}
+        {id && sectionsToRender.some((s) => s.id === "section-airtable") && (
+          <AirtableIntegrationSection
+            projectId={id}
+            orgId={project?.orgId ?? null}
+            roleLevel={project?.syncRole?.level ?? null}
+          />
+        )}
+
         {searchGroupLabel("section-ai-metrics")}
         {sectionsToRender.some((s) => s.id === "section-ai-metrics") && (
           <PostEditMetricsSection
@@ -3123,6 +3259,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             autopilotEnabled={sharedSettingsBlob.autopilotEnabled}
             roleLevel={project?.syncRole?.level ?? null}
             onSetAutopilotEnabled={(enabled) => { void patchShared({ autopilotEnabled: enabled }) }}
+            // AQU-1937: the per-project Smart Extensions switch (Maintainer+,
+            // the ordinary settings floor; the server refuses lower roles).
+            smartExtensionsEnabled={sharedSettingsBlob.smartExtensionsEnabled}
+            onSetSmartExtensionsEnabled={(enabled) => {
+              void Promise.resolve(patchShared({ smartExtensionsEnabled: enabled })).then(() => notifySmartExtensionsChanged(id))
+            }}
           />
         )}
           </div>

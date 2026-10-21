@@ -709,6 +709,7 @@ export function GlossaryEditor({
         onSetUpAffixes={() => navigate(`/project/${id}/settings/ai`)}
         bibleLink={bibleLinkAvailable ? { defaultBook: bibleLinkBook } : undefined}
         onExternalIdsChange={onExternalIdsChange}
+        files={projectFiles}
         onJumpToCell={({ cellId, fileId }) => {
           navigate(`/project/${id}/editor/file/${encodeURIComponent(fileId)}?cellId=${encodeURIComponent(cellId)}`)
         }}
@@ -760,6 +761,7 @@ export function GlossaryEditor({
         <DisabledFieldTooltip disabled={!canManage} tooltip={termbaseDenial}>
           <Button
             variant="outline"
+            size="sm"
             disabled={!canManage}
             onClick={() => downloadBlob(exportConceptsCsv(visibleConcepts), "glossary.csv", "text/csv")}
           >
@@ -769,6 +771,7 @@ export function GlossaryEditor({
         <DisabledFieldTooltip disabled={!canManage} tooltip={termbaseDenial}>
           <Button
             variant="outline"
+            size="sm"
             disabled={!canManage}
             onClick={() => downloadBlob(exportConceptsTbx(visibleConcepts, project?.lanes), "glossary.tbx", "application/xml")}
           >
@@ -783,7 +786,6 @@ export function GlossaryEditor({
               size="sm"
               disabled={!canManage}
               onClick={() => setMergeOpen(true)}
-              aria-label={t("terminology.mergeDialog.title")}
               data-testid="merge-duplicates-btn"
             >
               <Merge data-icon="inline-start" /> {t("terminology.page.mergeDuplicatesButton")}
@@ -792,6 +794,7 @@ export function GlossaryEditor({
         )}
         <Button
           variant={view === "violations" ? "secondary" : "outline"}
+          size="sm"
           aria-pressed={view === "violations"}
           onClick={() => {
             setView((current) => current === "violations" ? "glossary" : "violations")

@@ -41,7 +41,7 @@ export const settings = defineNamespace({
     "settings.transcription.title": "Transcription",
     "settings.transcription.scope":
       "This choice applies to your account in this browser.",
-    "settings.transcription.hosted": "Aquilla hosted Whisper (recommended)",
+    "settings.transcription.hosted": "Aquilla hosted (recommended)",
     "settings.transcription.hostedDescription":
       "Ready immediately. Uses your workspace's AI capacity. No key or download needed.",
     "settings.transcription.local": "Local Whisper in this browser",
@@ -49,6 +49,56 @@ export const settings = defineNamespace({
       "Download Whisper below. Runs on your device without using hosted AI capacity. Speed depends on your device.",
     "settings.transcription.capacityExceeded":
       "Your workspace has reached its AI capacity. Try after the reset, update your plan, or select local Whisper in Preferences → Local models.",
+    // ── Omnilingual ASR: hosted model choice, zero-shot warm-up and batches ──
+    "settings.transcription.model.legend": "Hosted model",
+    "settings.transcription.model.auto": "Automatic",
+    "settings.transcription.model.autoDescription":
+      "Picks the model that knows the project's language: Qwen3-ASR for Chinese, Whisper, then Omnilingual.",
+    "settings.transcription.model.whisper": "Whisper",
+    "settings.transcription.model.whisperDescription": "OpenAI's model. Strong in widely spoken languages.",
+    "settings.transcription.model.qwen": "Qwen3-ASR",
+    "settings.transcription.model.qwenDescription":
+      "Strong in Chinese and its dialects, and lower cost than Whisper.",
+    "settings.transcription.model.omni": "Omnilingual",
+    "settings.transcription.model.omniDescription":
+      "Meta's model for more than 1,600 languages, including many that no other model knows.",
+    "settings.transcription.model.zeroShot": "Omnilingual Zero-Shot",
+    "settings.transcription.model.zeroShotDescription":
+      "Any language — learns from your project's recorded takes. Slower, and uses more credits.",
+    "settings.transcription.model.supports": "Supports {language}",
+    "settings.transcription.model.doesNotSupport": "Does not support {language}",
+    "settings.transcription.model.seeAll": "See all {count} languages",
+    "settings.transcription.model.search": "Search languages",
+    "settings.transcription.model.dialects": "Chinese dialects",
+    "settings.transcription.model.examples": plural({
+      one: "{count} usable example in this project",
+      other: "{count} usable examples in this project",
+    }, "count"),
+    "settings.transcription.zeroShot.warmupTitle": "Starting the zero-shot model — about 1–3 minutes",
+    "settings.transcription.zeroShot.warmupTimeout": "The zero-shot model did not start in time.",
+    "settings.transcription.zeroShot.warmupFailed":
+      "The zero-shot model did not start. Try again, or choose Automatic in Preferences.",
+    "settings.transcription.zeroShot.useAutomatic": "Use automatic",
+    "settings.transcription.zeroShot.noExamples":
+      "Zero-shot needs at least one recorded and transcribed line in this language.",
+    "settings.transcription.zeroShot.useOmniStandard": "Use Omnilingual standard instead",
+    "settings.transcription.zeroShot.disabledByOrg":
+      "Your organization has turned off zero-shot transcription. Aquilla used the automatic model instead.",
+    "settings.transcription.zeroShot.examplesFailed":
+      "Could not load this project's zero-shot examples ({status}). Try again.",
+    "settings.transcription.zeroShot.batchTitle": plural({
+      one: "Transcribe {count} recording with zero-shot?",
+      other: "Transcribe {count} recordings with zero-shot?",
+    }, "count"),
+    "settings.transcription.zeroShot.batchShare": "≈ {percent}% of this week's remaining credits",
+    "settings.transcription.zeroShot.batchCredits": "≈ {credits} for this batch",
+    "settings.transcription.zeroShot.batchConfirm": "Transcribe",
+    "settings.transcription.zeroShot.orgLabel": "Allow zero-shot transcription",
+    "settings.transcription.zeroShot.orgDescription":
+      "Members can choose the Omnilingual Zero-Shot model in their Preferences. It learns a " +
+      "language from the project's own recordings, and uses more credits than the automatic model.",
+    "settings.transcription.zeroShot.orgSaveFailed": "Could not save that setting",
+    "settings.transcription.zeroShot.orgBlocked": "Only organization admins can change this.",
 
     // ── StructuralCellsSection (org settings → security) ── AQU-1083
     "settings.structuralCells.label": "Count headings as translatable content",
@@ -111,6 +161,23 @@ export const settings = defineNamespace({
     "settings.overrideStatus.andMore": plural({
       one: "and {count} more",
       other: "and {count} more",
+    }, "count"),
+
+    // ── MediaDefaultsSection ── AQU-1768
+    "settings.mediaDefaults.groupLabel": "Timeline and recordings",
+    "settings.mediaDefaults.timingLockedDescription":
+      "Whether imported timings are locked against dragging. Projects use this unless they set their own.",
+    "settings.mediaDefaults.allowTrackEditingDescription":
+      "Whether maintainers may add, group and recolour timeline tracks. Projects use this unless they set their own.",
+    "settings.mediaDefaults.cellEditingFloorDescription":
+      "Who may add and remove lines. Projects use this unless they set their own.",
+    "settings.mediaDefaults.allowSelfValidationAudioDescription":
+      "Whether people may validate their own recordings. Projects use this unless they set their own.",
+    "settings.mediaDefaults.validationRoleFloorAudioDescription":
+      "The lowest role that may validate recordings. Projects use this unless they set their own.",
+    "settings.mediaDefaults.resetDescription": plural({
+      one: "It will keep its own setting and ignore this default. Reset it to follow the organization instead?",
+      other: "They will keep their own setting and ignore this default. Reset them to follow the organization instead?",
     }, "count"),
 
     // ── RepetitionPropagationSection (AQU-1391) ──
@@ -382,6 +449,32 @@ export const settings = defineNamespace({
     "settings.monday.disconnectConfirmBody":
       "This removes the connection for the whole organization. Every " +
       "project's board link and sync configuration will be deleted. This cannot be undone.",
+    // ── Org settings → Airtable (AQU-804) ──
+    "settings.airtable.navHint": "Table sync",
+    "settings.airtable.connectedBadge": "Connected",
+    "settings.airtable.notConnectedBadge": "Not connected",
+    "settings.airtable.connectPrompt":
+      "Paste a personal access token from Airtable to connect. Projects can then link a table and push their progress into it.",
+    "settings.airtable.connectRestrictedNotice": "Ask an org maintainer or owner to connect Airtable.",
+    "settings.airtable.tokenLabel": "Personal access token",
+    "settings.airtable.tokenHelp":
+      "Create one in Airtable with the scopes {scopes}, and give it access to the base you track progress in. Aquilla keeps it encrypted and never shows it again.",
+    "settings.airtable.createTokenLink": "Create a token in Airtable",
+    "settings.airtable.connectButton": "Connect Airtable",
+    "settings.airtable.saveTokenButton": "Save new token",
+    "settings.airtable.replaceTokenButton": "Replace token",
+    "settings.airtable.openAirtableButton": "Open Airtable",
+    "settings.airtable.connectedNotice": plural({
+      one: "Airtable connected. The token can see {count} base.",
+      other: "Airtable connected. The token can see {count} bases.",
+    }, "count"),
+    "settings.airtable.tokenRejectedNotice":
+      "Airtable no longer accepts the saved token, so progress isn't being pushed. Paste a new token to keep syncing.",
+    "settings.airtable.otherDeploymentNotice":
+      "This connection was made on another Aquilla deployment and can't be used here. Paste a token to connect this one.",
+    "settings.airtable.disconnectConfirmTitle": "Disconnect Airtable?",
+    "settings.airtable.disconnectConfirmBody":
+      "This removes the connection for the whole organization. Every project's table link and sync configuration will be deleted; the tables and their records stay in Airtable.",
     // "Account:" prefix → auth.resetPassword.accountPrefix (identical text, same
     //   "label: value" call-site pattern already used in ResetPassword.tsx)
     // "Cancel" → common.cancel (identical text)
@@ -422,6 +515,48 @@ export const settings = defineNamespace({
       screenshot: "project-settings",
     },
     keys: {
+      "settings.transcription.model.supports": {
+        description: "Tick line on a transcription model's row: the model knows the project's language.",
+        placeholders: { language: "The project's language name, e.g. 'Tok Pisin'." },
+      },
+      "settings.transcription.model.doesNotSupport": {
+        description: "Cross line on a transcription model's row: the model does not know the project's language.",
+        placeholders: { language: "The project's language name, e.g. 'Tok Pisin'." },
+      },
+      "settings.transcription.model.seeAll": {
+        description: "Disclosure that opens a searchable list of every language a transcription model knows.",
+        placeholders: { count: "How many languages, a plain number, e.g. '99'." },
+      },
+      "settings.transcription.model.examples": {
+        description:
+          "Under the zero-shot model: how many recorded and transcribed takes in this project it can learn from (at most 10).",
+        placeholders: { count: "A plain number from 0 to 10." },
+      },
+      "settings.transcription.zeroShot.warmupTitle": {
+        description:
+          "Persistent toast title while the zero-shot speech-recognition model starts on the " +
+          "server, shown above a progress bar. The time is an estimate.",
+      },
+      "settings.transcription.zeroShot.examplesFailed": {
+        description: "Error when the project's example recordings for zero-shot transcription fail to load.",
+        placeholders: { status: "The HTTP status code, a plain number (data), e.g. '503'." },
+      },
+      "settings.transcription.zeroShot.batchTitle": {
+        description: "Confirmation toast title before transcribing several recordings with the zero-shot model.",
+        placeholders: { count: "How many recordings the batch will transcribe, a plain number." },
+      },
+      "settings.transcription.zeroShot.batchShare": {
+        description:
+          "Estimated cost of a zero-shot transcription batch, as a share of the organization's " +
+          "credits left this week. '≈' means approximately.",
+        placeholders: { percent: "A whole-number percentage without the % sign, e.g. '12'." },
+      },
+      "settings.transcription.zeroShot.batchCredits": {
+        description:
+          "Estimated cost of a zero-shot transcription batch when the remaining balance is not visible. " +
+          "'≈' means approximately.",
+        placeholders: { credits: "An already-formatted credit amount, e.g. '40 cr'. Not translated." },
+      },
       "settings.localLlm.detectedOne": {
         description:
           "Confirmation shown under the Model field after \"Detect models\" finds exactly " +
@@ -514,6 +649,32 @@ export const settings = defineNamespace({
         placeholders: {
           count: "Whole number of projects not named in the list, 1 or more.",
         },
+      },
+      "settings.mediaDefaults.groupLabel": {
+        description:
+          "Heading of a group on the organization's Project defaults page holding the timeline and recording defaults " +
+          "(timing lock, track editing, who may add and remove lines, recording validation).",
+      },
+      "settings.mediaDefaults.timingLockedDescription": {
+        description: "Help text under the timing-lock row in that group. An on/off switch sits beside it.",
+      },
+      "settings.mediaDefaults.allowTrackEditingDescription": {
+        description: "Help text under the timeline-track-editing row in that group. An on/off switch sits beside it.",
+      },
+      "settings.mediaDefaults.cellEditingFloorDescription": {
+        description: "Help text under the 'Who can add and remove cells' row in that group. A role picker sits beside it.",
+      },
+      "settings.mediaDefaults.allowSelfValidationAudioDescription": {
+        description: "Help text under the 'Allow validating your own recordings' row in that group. An on/off switch sits beside it.",
+      },
+      "settings.mediaDefaults.validationRoleFloorAudioDescription": {
+        description: "Help text under the 'Minimum role to validate recordings' row in that group. A role picker sits beside it.",
+      },
+      "settings.mediaDefaults.resetDescription": {
+        description:
+          "Body of the dialog shown after an org maintainer changes one of these defaults, when some projects set their " +
+          "own value and will ignore it. The confirm button clears those projects' own value so they follow the " +
+          "organization; the cancel button leaves them alone. Pluralized on how many projects.",
       },
       "settings.personalProvider.trailingPathHint": {
         description:
@@ -656,10 +817,22 @@ export const settings = defineNamespace({
           "new tab. \"Monday.com\" is a product name and is not translated.",
       },
       "settings.monday.connectedAsRow": {
-        description: "Row on the Monday.com connection card naming the connected Monday user.",
+        description:
+          "Row on the Monday.com (or Airtable — AQU-804) connection card naming the connected user.",
         placeholders: {
-          username: "The connected Monday.com account's display username. Not translated.",
+          username: "The connected account's display username, or for Airtable its email. Not translated.",
         },
+      },
+      "settings.airtable.tokenHelp": {
+        description:
+          "Help under the Airtable personal-access-token field, followed by a 'Create a token in Airtable' link.",
+        placeholders: {
+          scopes: "Airtable scope names, comma-separated, exactly as Airtable spells them (e.g. 'data.records:read'). Never translated.",
+        },
+      },
+      "settings.airtable.connectedNotice": {
+        description: "Confirmation after an Airtable token was accepted and saved for the organization.",
+        placeholders: { count: "How many Airtable bases the token can see, a whole number." },
       },
       "settings.monday.connectedOnRow": {
         description:
@@ -670,9 +843,9 @@ export const settings = defineNamespace({
       },
       "settings.monday.connectedAsOnRow": {
         description:
-          "Row under the Monday.com account name on the connection card: who connected it and when.",
+          "Row on the Monday.com (or Airtable — AQU-804) connection card: who connected it and when.",
         placeholders: {
-          username: "The connected Monday.com account's display username. Not translated.",
+          username: "The connected account's display username, or for Airtable its email. Not translated.",
           date: "A locale-formatted date string (already localized by the caller before interpolation).",
         },
       },

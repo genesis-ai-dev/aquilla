@@ -110,16 +110,18 @@ import contextualBibleCheckRoutes from "./routes/contextual-bible-check"
 import teamRoutes from "./routes/team"
 import teamHandoffRoutes from "./routes/team-handoffs"
 import agentArtifactsRoutes from "./routes/agent-artifacts"
+import toolsRoutes from "./routes/tools"
 import agentSessionRoutes from "./routes/agent-sessions"
 import { projectKnowledge, orgKnowledge } from "./routes/knowledge"
 import knowledgeInternalRoutes from "./routes/knowledge-internal"
 import styleRulesRoutes from "./routes/style-rules"
 import mondayRoutes from "./routes/monday"
+import airtableRoutes from "./routes/airtable"
 import contactRoutes from "./routes/contact"
 import feedbackRoutes from "./routes/feedback"
 import billingWorkspaceRoutes from "./routes/billing-workspace"
 import billingRoutes from "./routes/billing"
-import { flushDirtyLinks } from "./lib/monday/push"
+import { flushDirtyLinks } from "./lib/integrations/push"
 import { createRequestMemo } from "./lib/request-memo"
 import { pruneExpiredRevokedTokens } from "./utils/token-revocation"
 import { pruneAuthRateLimitEvents } from "./utils/rate-limit"
@@ -140,6 +142,7 @@ import { setAccessGrantsMode } from "../../db/shared/project-roles"
 import { sendScheduledRetentionReport } from "./lib/retention-cron"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
 import { redactLogPath } from "../../shared/log-path-redaction"
+import { withStoreSecrets } from "../../db/shared/secrets-store-overlay"
 
 const app = new Hono<HonoEnv>()
 
@@ -152,10 +155,21 @@ const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Headers": "Authorization, Content-Type, Idempotency-Key, If-Match-Version, X-Artifact-Name, X-Doc-Name, X-Source-Language, X-Target-Language",
   // Model A/B assignment echo (routes/chat.ts) — the SPA reads these off the
   // completion response to attribute accept/edit outcomes to the served model.
-  "Access-Control-Expose-Headers": "X-AB-Request-Id, X-AB-Arm, X-AB-Model",
+  // Retry-After (AQU-1681): a batch transcription refused by the per-user
+  // limit waits exactly as long as the limiter says, instead of guessing.
+  "Access-Control-Expose-Headers": "X-AB-Request-Id, X-AB-Arm, X-AB-Model, Retry-After",
   "Access-Control-Max-Age": "86400",
   Vary: "Origin",
 }
+
+// Secrets Store overlay (db/shared/secrets-store-overlay.ts): a binding named
+// SS_<NAME> supplies env.<NAME>, so a secret can change in the store without a
+// new Worker version. Registered first so every route, and every middleware
+// below, reads the resolved values. The per-Worker secret stays the fallback.
+app.use("*", async (c, next) => {
+  c.env = await withStoreSecrets(c.env)
+  await next()
+})
 
 // Workers Routes mount: this worker is routed under two prefixes on the
 // api.aquilla.app subdomain — `/identity/*` for the identity surface
@@ -263,6 +277,8 @@ app.get("/", (c) =>
       "/api/v2/health",
       "/api/v1/chat/completions",
       "/api/v1/audio/transcriptions",
+      "/api/v1/audio/transcriptions/warm",
+      "/api/v1/audio/transcriptions/status",
       "/api/v1/chat/ab-feedback",
       "/api/v1/import/classify",
       "/api/v1/import/parse/:projectId",
@@ -341,6 +357,8 @@ app.route("/api/v2/projects", teamHandoffRoutes)
 // composer; proxies bytes into the shared artifacts table + SNAPSHOTS R2 so
 // the harness load_artifact tool can read them (routes/agent-artifacts.ts).
 app.route("/api/v2/projects", agentArtifactsRoutes)
+// Aquilla Tools (prototype): sandboxed, agent-built mini-apps (routes/tools.ts).
+app.route("/api/v2/projects", toolsRoutes)
 // Team chat history — the caller's own past agent conversations, listed and
 // reopened (AQU-1653, routes/agent-sessions.ts). Sibling router, same base;
 // read-only, and scoped to (project, user) so it never surfaces another
@@ -374,6 +392,10 @@ app.route("/api/v2/access-links", accessLinksRoutes)
 // push engine (routes/monday.ts). OAuth callback + inbound webhook routes are
 // deliberately unauthenticated (browser redirect / Monday-signed JWT).
 app.route("/api/v2/monday", mondayRoutes)
+// Airtable integration (AQU-804): the same shape as Monday's, connected with a
+// personal access token instead of OAuth. Its pushes ride Monday's triggers
+// (lib/integrations/push.ts), including the sync-worker nudge above.
+app.route("/api/v2/airtable", airtableRoutes)
 // External API credentials (PATs) for the Agent API (AQU-533 §2). Mint/list/
 // revoke; live role is re-resolved on every downstream API call.
 app.route("/api/v2/credentials", credentialsRoutes)
@@ -519,7 +541,7 @@ app.fetch = (async (request: Request, env: Env, ctx: ExecutionContext): Promise<
 
 // Cron (wrangler.toml [triggers], every 5 minutes). Three independent pieces
 // of work, each isolated so one failing cannot take the others down:
-//   1. flush Monday board links whose push was debounced (dirty_at set),
+//   1. flush Monday and Airtable links whose push was debounced (dirty_at set),
 //      oldest first, capped at 20 per run;
 //   2. sweep stranded contextual runs (dead driver / parked with spans left);
 //   3. the v3 react watcher — projects with agentMode.react on react to human
@@ -531,6 +553,7 @@ const scheduled = async (
   env: Env,
   ctx: ExecutionContext,
 ): Promise<void> => {
+  env = await withStoreSecrets(env)
   const environmentError = scheduledDeploymentEnvironmentError(env)
   if (environmentError) {
     console.error("Refusing scheduled work with cross-environment identity bindings", {
@@ -620,6 +643,10 @@ const scheduled = async (
 // named export of the Worker's entrypoint module for the runtime to find it;
 // the binding and migration live in wrangler.toml.
 export { ContextualRunDriver } from "./contextual-run-do"
+
+// AQU-2051 — the per-document knowledge-base indexing driver. Same rule: a
+// Durable Object class must be a named export of the entrypoint module.
+export { KnowledgeIndexDriver } from "./knowledge-index-do"
 
 // Keep `export default app` semantics (tests call app.request) while giving
 // the Workers runtime a `scheduled` handler on the same default export.

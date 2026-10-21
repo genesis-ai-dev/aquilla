@@ -37,7 +37,8 @@ import {
   REGISTER_MAX_PER_IP,
   RESET_REQUEST_MAX_PER_IDENTIFIER,
 } from "../utils/rate-limit"
-import { revokeToken } from "../utils/token-revocation"
+import { revokeSessionFamily, revokeToken } from "../utils/token-revocation"
+import { parseAdminEmails } from "../middleware/platform-admin"
 import { evictUserSessions } from "../lib/session-cache"
 import {
   LegacyUserMigrationError,
@@ -197,6 +198,19 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
       )
     }
     await recordAuthEvent(c.env.AQUILLA_PG, "register", ipIdent, true)
+
+    // [Pen test] Infra (2026-10-16): on non-production deploys (PR previews)
+    // the ADMIN_EMAILS bootstrap names a fixture account, and the admin
+    // step-up code is returned inline (`devCode`). If that fixture row is
+    // missing (e.g. after the nightly dev-branch restore) anyone could
+    // self-register the address and become platform admin. Refuse to mint
+    // public accounts for allowlisted addresses; same 409 shape as a duplicate.
+    if (c.env.ENVIRONMENT !== "production") {
+      const reserved = parseAdminEmails(c.env)
+      if (reserved.has(email.trim().toLowerCase()) || reserved.has(username.trim().toLowerCase())) {
+        return c.json({ detail: "User already exists", error: "Registration failed" }, 409)
+      }
+    }
 
     // Uniqueness is case-insensitive (AQU-340): reject `ryan` when `Ryan`
     // already exists so we never mint case-twin accounts that then collide in
@@ -618,6 +632,7 @@ auth.post("/refresh", authMiddleware, async (c) => {
   const { token, payload: minted } = await jwtService.createAccessTokenWithPayload(
     user.username,
     typeof payload.sst === "number" ? payload.sst : payload.iat,
+    typeof payload.sid === "string" ? payload.sid : undefined,
   )
   return c.json({
     access_token: token,
@@ -642,6 +657,15 @@ auth.post("/logout", authMiddleware, async (c) => {
   if (payload.jti) {
     try {
       await revokeToken(c.env.AQUILLA_PG, payload.jti, user.id, payload.exp)
+      // Also kill earlier tokens in the same refresh chain: refresh leaves the
+      // previous token valid, so a copy of it would otherwise outlive logout.
+      if (typeof payload.sid === "string") {
+        const sessionStart = typeof payload.sst === "number" ? payload.sst : payload.iat
+        const maxAgeDays = parseInt(c.env.MAX_SESSION_AGE_DAYS || "90", 10)
+        await revokeSessionFamily(
+          c.env.AQUILLA_PG, payload.sid, user.id, sessionStart + maxAgeDays * 86400,
+        )
+      }
     } catch (err) {
       console.error("[auth] logout revoke failed:", err)
       return c.json({ error: "Failed to log out" }, 500)

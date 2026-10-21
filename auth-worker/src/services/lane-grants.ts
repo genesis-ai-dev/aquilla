@@ -37,7 +37,7 @@
 // nothing to point a grant at, and the AQU-730 backfill fills both tables
 // later.
 
-import { loadTargetLaneIdentities } from "../../../db/shared/lane-visibility"
+import { loadCurrentTargetLanes, loadTargetLaneIdentities } from "../../../db/shared/lane-visibility"
 import { resolveProjectRoleShared } from "../../../db/shared/project-roles"
 import { planLaneGrants } from "../../../src/lib/lanes/grant-backfill"
 
@@ -175,7 +175,17 @@ export async function applyMigratedMemberLaneGrants(
   userId: number,
   projectIds: readonly string[],
 ): Promise<void> {
-  await applyMemberLaneGrantsForProjects(db, userId, projectIds, null)
+  for (const projectId of new Set(projectIds)) {
+    if (await hasDirectMembership(db, projectId, userId)) {
+      const role = await resolveProjectRoleShared(db, { id: String(userId) }, projectId)
+      if (!role) continue
+      await applyDirectAddLaneGrants(db, projectId, userId, role.level, null)
+      continue
+    }
+    // A project reached only through a team uses that attachment's lanes
+    // (AQU-1800 / AQU-1813), not "every lane" when the team has named some.
+    await reconcileMemberProjectLanes(db, projectId, userId, null)
+  }
 }
 
 /**
@@ -211,8 +221,9 @@ export async function applyMemberLaneGrantsForProjects(
  * re-add used to union the new choice into them, which kept a stale narrow
  * row under "every current lane" — the client's lane list then forced the
  * person onto that one lane. An empty list deletes the rows: that is what
- * "every current lane" stores, and what a project lead holds (AD-12: a lead
- * is never lane-scoped).
+ * "every current lane" stores for a role below project lead. A project lead
+ * stores one scope per current target lane instead, so a lane created later
+ * is not included until someone grants it.
  */
 export async function replaceMemberLaneScopes(
   db: AquillaDb,
@@ -241,16 +252,76 @@ export async function replaceMemberLaneScopes(
   }
 }
 
+/** Lane-grant rows stop at contributor. A team may still confer project lead. */
+const LANE_GRANT_CAP = 400
+const MAINTAINER = 600
+const VIEWER = 100
+
+export type TeamLaneSelection =
+  | { explicit: false }
+  | { explicit: true; laneIds: string[] }
+
 /**
- * AQU-1801 — grants for someone just added to a team.
+ * The lanes a team attachment may store. Omitting the list keeps the living
+ * "every lane" attachment (Codex, and callers that predate the checkboxes).
+ * Naming lanes freezes the attachment to those lanes.
+ */
+export async function resolveTeamLaneSelection(
+  db: AquillaDb,
+  projectId: string,
+  laneIds: readonly string[] | undefined,
+): Promise<{ ok: true; selection: TeamLaneSelection } | { ok: false; error: string }> {
+  if (laneIds == null) return { ok: true, selection: { explicit: false } }
+  const current = await loadCurrentTargetLanes(db, projectId)
+  if (current.length > 0 && laneIds.length === 0) {
+    return { ok: false, error: "Choose at least one target lane." }
+  }
+  const allowed = new Set(current.map((lane) => lane.id))
+  const unknown = laneIds.filter((id) => !allowed.has(id))
+  if (unknown.length > 0) {
+    return { ok: false, error: "laneIds must name current target lanes of this project" }
+  }
+  return { ok: true, selection: { explicit: true, laneIds: [...laneIds] } }
+}
+
+/** Remember which lanes an attachment covers. The grant row must already exist. */
+export async function saveTeamLaneSelection(
+  db: AquillaDb,
+  groupId: number,
+  projectId: string,
+  selection: TeamLaneSelection,
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE group_project_grants SET lanes_explicit = ${selection.explicit ? "TRUE" : "FALSE"}
+        WHERE group_id = ? AND project_id = ?`,
+    )
+    .bind(groupId, projectId)
+    .run()
+  await db
+    .prepare("DELETE FROM group_project_lanes WHERE group_id = ? AND project_id = ?")
+    .bind(groupId, projectId)
+    .run()
+  if (!selection.explicit) return
+  for (const laneId of selection.laneIds) {
+    await db
+      .prepare(
+        `INSERT INTO group_project_lanes (group_id, project_id, lane_id)
+         VALUES (?, ?, ?)
+         ON CONFLICT DO NOTHING`,
+      )
+      .bind(groupId, projectId, laneId)
+      .run()
+  }
+}
+
+/**
+ * AQU-1801 / AQU-1813 — grants for someone just added to a team.
  *
- * A `group_members` row opens every project the team is attached to, so the
- * new member needs grants on each of them. Nothing here is team-specific
- * beyond the project list: the role is re-resolved per project by
- * `applyMemberLaneGrantsForProjects`, and a member who already holds rows on
- * one of those projects (a direct membership, an invite, an earlier team) has
- * only their level rewritten, so joining a team never widens the lane set they
- * could already read.
+ * Each attached project contributes its stored lanes. Two teams union. A
+ * direct membership keeps the lanes it already had and gains the team's.
+ * Someone with no direct membership is rewritten to the teams they are on
+ * now, which drops a lane scope left behind by an earlier removal.
  */
 export async function applyTeamMemberLaneGrants(
   db: AquillaDb,
@@ -259,20 +330,17 @@ export async function applyTeamMemberLaneGrants(
   grantedBy: number | null,
 ): Promise<void> {
   const projectIds = await loadTeamProjectIds(db, groupId)
-  if (projectIds.length === 0) return
-  await applyMemberLaneGrantsForProjects(db, userId, projectIds, grantedBy)
+  for (const projectId of projectIds) {
+    await reconcileMemberProjectLanes(db, projectId, userId, grantedBy)
+  }
 }
 
 /**
- * AQU-1801 — grants for a team's whole roster on one project.
+ * AQU-1801 — re-level the grants a team's roster already holds.
  *
- * Covers both writes that change what a team's members hold on a project:
- * attaching the team (every member reaches a project they could not before)
- * and changing the team's role on it (the same people, a new level). The
- * level case needs no special handling — `applyDirectAddLaneGrants` rewrites
- * the level on the rows a member already has, so a demotion to Viewer leaves
- * them reading exactly the lanes they could edit before, and the promotion
- * back restores editing on those same lanes.
+ * Changing the team's role does not change which lanes are checked. A lane
+ * grant is capped at contributor: the attachment may still confer project
+ * lead, and that role is what the management actions read.
  */
 export async function applyTeamProjectLaneGrants(
   db: AquillaDb,
@@ -285,8 +353,321 @@ export async function applyTeamProjectLaneGrants(
     .bind(groupId)
     .all<{ user_id: number }>()
   for (const row of results ?? []) {
-    await applyMemberLaneGrantsForProjects(db, Number(row.user_id), [projectId], grantedBy)
+    const userId = Number(row.user_id)
+    const role = await resolveProjectRoleShared(db, { id: String(userId) }, projectId)
+    if (!role || role.level >= MAINTAINER || role.level < VIEWER) continue
+    await applyDirectAddLaneGrants(
+      db,
+      projectId,
+      userId,
+      Math.min(role.level, LANE_GRANT_CAP),
+      grantedBy,
+    )
   }
+}
+
+/** Rewrite one person's lanes from the teams that still reach this project. */
+export async function reconcileMemberProjectLanes(
+  db: AquillaDb,
+  projectId: string,
+  userId: number,
+  grantedBy: number | null,
+): Promise<void> {
+  const role = await resolveProjectRoleShared(db, { id: String(userId) }, projectId)
+  if (!role || role.level >= MAINTAINER || role.level < VIEWER) {
+    if (!role) await clearLaneRows(db, projectId, userId)
+    return
+  }
+  const access = await teamLaneAccess(db, userId, projectId)
+  const level = Math.min(role.level, LANE_GRANT_CAP)
+  if (!(await hasDirectMembership(db, projectId, userId))) {
+    await replaceLaneRows(db, projectId, userId, access, level, grantedBy)
+    return
+  }
+  await unionTeamLanesIntoDirect(db, projectId, userId, access, level, grantedBy)
+}
+
+/** After a team is attached or its checks change, rewrite every member. */
+export async function applyTeamRosterLaneChecks(
+  db: AquillaDb,
+  groupId: number,
+  projectId: string,
+  grantedBy: number | null,
+): Promise<void> {
+  const { results } = await db
+    .prepare("SELECT user_id FROM group_members WHERE group_id = ?")
+    .bind(groupId)
+    .all<{ user_id: number }>()
+  for (const row of results ?? []) {
+    await reconcileMemberProjectLanes(db, projectId, Number(row.user_id), grantedBy)
+  }
+}
+
+/**
+ * The person who just created a lane can see it, even when they are below
+ * maintainer and were not granted every other lane. Maintainer and above
+ * already see it through the wall.
+ */
+export async function grantCreatedLaneToActor(
+  db: AquillaDb,
+  projectId: string,
+  laneId: string,
+  userId: number,
+): Promise<void> {
+  const role = await resolveProjectRoleShared(db, { id: String(userId) }, projectId)
+  if (!role || role.level >= MAINTAINER || role.level < VIEWER) return
+  const level = Math.min(role.level, LANE_GRANT_CAP)
+  await db
+    .prepare(
+      `INSERT INTO project_member_lane_roles
+         (project_id, user_id, lane, role_level, granted_by)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (project_id, user_id, lane) DO NOTHING`,
+    )
+    .bind(projectId, userId, laneId, level, userId)
+    .run()
+  const scopes = await loadMemberLaneScopes(db, projectId, userId)
+  if (scopes.length === 0 || scopes.includes(laneId)) return
+  await db
+    .prepare(
+      `INSERT INTO project_member_scopes
+         (project_id, user_id, kind, value, created_by, created_at)
+       VALUES (?, ?, 'lane', ?, ?, ?)
+       ON CONFLICT (project_id, user_id, kind, value) DO NOTHING`,
+    )
+    .bind(projectId, userId, laneId, String(userId), Date.now())
+    .run()
+}
+
+/** A freshly added project lead is scoped to the lanes that exist then. */
+export async function grantCurrentLanesToMember(
+  db: AquillaDb,
+  projectId: string,
+  userId: number,
+  createdBy: number,
+): Promise<void> {
+  const ids = (await loadCurrentTargetLanes(db, projectId)).map((lane) => lane.id)
+  await replaceMemberLaneScopes(db, projectId, userId, ids, createdBy)
+  await syncMemberLaneGrants(db, projectId, userId, ids, createdBy)
+}
+
+function laneFlag(value: unknown): boolean {
+  return value === true || value === 1 || value === "t" || value === "true"
+}
+
+/**
+ * AQU-2047: every team attached to this project, and the lanes that attachment
+ * is tied to. A team that has not saved checkboxes (`lanesExplicit` false) is
+ * tied to every current target lane — the stored rows, if any are left behind,
+ * are not its set. An explicit team is tied only to its `group_project_lanes`
+ * rows. An empty list is a project with no attached team.
+ */
+export interface ProjectTeamLaneAttachment {
+  lanesExplicit: boolean
+  laneIds?: string[]
+}
+
+export async function loadProjectTeamLaneAttachments(
+  db: AquillaDb,
+  projectId: string,
+): Promise<ProjectTeamLaneAttachment[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT group_id, lanes_explicit
+         FROM group_project_grants
+        WHERE project_id = ?
+        ORDER BY group_id`,
+    )
+    .bind(projectId)
+    .all<{ group_id: number | string; lanes_explicit: boolean | number | string }>()
+  const teams = results ?? []
+  if (teams.length === 0) return []
+
+  const { results: laneRows } = await db
+    .prepare(
+      `SELECT group_id, lane_id
+         FROM group_project_lanes
+        WHERE project_id = ?
+        ORDER BY group_id, lane_id`,
+    )
+    .bind(projectId)
+    .all<{ group_id: number | string; lane_id: string }>()
+  const lanesByGroup = new Map<number, string[]>()
+  for (const row of laneRows ?? []) {
+    const groupId = Number(row.group_id)
+    const list = lanesByGroup.get(groupId) ?? []
+    list.push(row.lane_id)
+    lanesByGroup.set(groupId, list)
+  }
+
+  return teams.map((team) => {
+    if (!laneFlag(team.lanes_explicit)) return { lanesExplicit: false }
+    return {
+      lanesExplicit: true,
+      laneIds: lanesByGroup.get(Number(team.group_id)) ?? [],
+    }
+  })
+}
+
+async function teamLaneAccess(
+  db: AquillaDb,
+  userId: number,
+  projectId: string,
+): Promise<{ explicit: boolean; laneIds: string[] }> {
+  const { results } = await db
+    .prepare(
+      `SELECT gpg.group_id AS group_id, gpg.lanes_explicit AS lanes_explicit
+         FROM group_project_grants gpg
+         JOIN group_members gm ON gm.group_id = gpg.group_id
+        WHERE gpg.project_id = ? AND gm.user_id = ?`,
+    )
+    .bind(projectId, userId)
+    .all<{ group_id: number; lanes_explicit: boolean | number | string }>()
+  const teams = results ?? []
+  if (teams.length === 0) return { explicit: true, laneIds: [] }
+  if (teams.some((team) => !laneFlag(team.lanes_explicit))) {
+    const lanes = await loadTargetLaneIdentities(db, projectId)
+    return { explicit: false, laneIds: lanes.map((lane) => lane.id) }
+  }
+  const ids = new Set<string>()
+  for (const team of teams) {
+    for (const laneId of await loadStoredTeamLaneIds(db, Number(team.group_id), projectId)) {
+      ids.add(laneId)
+    }
+  }
+  return { explicit: true, laneIds: [...ids] }
+}
+
+async function loadStoredTeamLaneIds(
+  db: AquillaDb,
+  groupId: number,
+  projectId: string,
+): Promise<string[]> {
+  const { results } = await db
+    .prepare(
+      "SELECT lane_id FROM group_project_lanes WHERE group_id = ? AND project_id = ? ORDER BY lane_id",
+    )
+    .bind(groupId, projectId)
+    .all<{ lane_id: string }>()
+  return (results ?? []).map((row) => row.lane_id)
+}
+
+async function hasDirectMembership(
+  db: AquillaDb,
+  projectId: string,
+  userId: number,
+): Promise<boolean> {
+  const row = await db
+    .prepare("SELECT 1 AS ok FROM project_members WHERE project_id = ? AND user_id = ?")
+    .bind(projectId, userId)
+    .first<{ ok: number }>()
+  return row != null
+}
+
+async function clearLaneRows(db: AquillaDb, projectId: string, userId: number): Promise<void> {
+  await db
+    .prepare(
+      "DELETE FROM project_member_scopes WHERE project_id = ? AND user_id = ? AND kind = 'lane'",
+    )
+    .bind(projectId, userId)
+    .run()
+  await db
+    .prepare("DELETE FROM project_member_lane_roles WHERE project_id = ? AND user_id = ?")
+    .bind(projectId, userId)
+    .run()
+}
+
+async function replaceLaneRows(
+  db: AquillaDb,
+  projectId: string,
+  userId: number,
+  access: { explicit: boolean; laneIds: string[] },
+  level: number,
+  grantedBy: number | null,
+): Promise<void> {
+  await clearLaneRows(db, projectId, userId)
+  if (access.explicit) {
+    const now = Date.now()
+    for (const laneId of access.laneIds) {
+      await db
+        .prepare(
+          `INSERT INTO project_member_scopes
+             (project_id, user_id, kind, value, created_by, created_at)
+           VALUES (?, ?, 'lane', ?, ?, ?)
+           ON CONFLICT (project_id, user_id, kind, value) DO NOTHING`,
+        )
+        .bind(projectId, userId, laneId, grantedBy == null ? "0" : String(grantedBy), now)
+        .run()
+    }
+  }
+  for (const laneId of access.laneIds) {
+    await insertLaneGrant(db, projectId, userId, laneId, level, grantedBy)
+  }
+}
+
+async function unionTeamLanesIntoDirect(
+  db: AquillaDb,
+  projectId: string,
+  userId: number,
+  access: { explicit: boolean; laneIds: string[] },
+  level: number,
+  grantedBy: number | null,
+): Promise<void> {
+  if (!access.explicit) {
+    // A living attachment is every lane, including one created later, which
+    // is stored as no lane scopes. A direct scope list would hide that.
+    await db
+      .prepare(
+        "DELETE FROM project_member_scopes WHERE project_id = ? AND user_id = ? AND kind = 'lane'",
+      )
+      .bind(projectId, userId)
+      .run()
+  } else {
+    const scopes = new Set(await loadMemberLaneScopes(db, projectId, userId))
+    if (scopes.size > 0) {
+      const now = Date.now()
+      for (const laneId of access.laneIds) {
+        if (scopes.has(laneId)) continue
+        await db
+          .prepare(
+            `INSERT INTO project_member_scopes
+               (project_id, user_id, kind, value, created_by, created_at)
+             VALUES (?, ?, 'lane', ?, ?, ?)
+             ON CONFLICT (project_id, user_id, kind, value) DO NOTHING`,
+          )
+          .bind(projectId, userId, laneId, grantedBy == null ? "0" : String(grantedBy), now)
+          .run()
+      }
+    }
+  }
+  const { results } = await db
+    .prepare("SELECT lane FROM project_member_lane_roles WHERE project_id = ? AND user_id = ?")
+    .bind(projectId, userId)
+    .all<{ lane: string }>()
+  const held = new Set((results ?? []).map((row) => row.lane))
+  for (const laneId of access.laneIds) {
+    if (held.has(laneId)) continue
+    await insertLaneGrant(db, projectId, userId, laneId, level, grantedBy)
+  }
+}
+
+async function insertLaneGrant(
+  db: AquillaDb,
+  projectId: string,
+  userId: number,
+  laneId: string,
+  level: number,
+  grantedBy: number | null,
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO project_member_lane_roles
+         (project_id, user_id, lane, role_level, granted_by)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (project_id, user_id, lane) DO NOTHING`,
+    )
+    .bind(projectId, userId, laneId, level, grantedBy)
+    .run()
 }
 
 /** The projects a team is attached to. */

@@ -72,6 +72,10 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // because re-import, DCS repair and diarization all emit them through a
   // user's own outbox, and nothing emits this but a person choosing it.
   'source.cell.visibility.set': ROLE.PROJECT_LEAD,
+  // AQU-1767 phase 2: undoing a removal. The floor matches the delete it
+  // reverses; authorize.ts adds the real rule — only the person who removed the
+  // cell, or a maintainer, may put it back, and never through the external API.
+  'source.cell.restore': ROLE.COMMENTER,
 
   // Target-side: translator commits.
   'target.cell.create': ROLE.CONTRIBUTOR,
@@ -95,6 +99,8 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'cell.audio.rename': ROLE.CONTRIBUTOR,
   'cell.audio.trim': ROLE.CONTRIBUTOR,
   'cell.audio.place': ROLE.CONTRIBUTOR,
+  // AQU-1767: cutting a take needs exactly what trimming it needs (Sam, 2026-10-12).
+  'cell.audio.cut': ROLE.CONTRIBUTOR,
   'cell.audio.measure': ROLE.CONTRIBUTOR,
 
   // AQU-777: per-cell file attachments. Same floor as the other per-cell blob
@@ -133,6 +139,9 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'file.rename': ROLE.CONTRIBUTOR,
   // Sidebar folder label — same class as file.rename (grouping, not inventory).
   'file.corpus.set': ROLE.CONTRIBUTOR,
+  // Smart Extensions apiRev 7: an extension's tags/kind/meta on a file. Same
+  // floor as creating the file (the extension's write:files scope).
+  'file.extension.set': ROLE.PROJECT_LEAD,
   // AQU-1569: NOT the contributor floor its file.corpus.set neighbour sits at.
   // A corpus marker moves one file into a folder; a reorder rewrites the
   // sidebar every member of the project reads, which is the same "project
@@ -172,6 +181,12 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // Viewing BTs is gated only at the read route (viewer+); the write event
   // is contributor-level matching target.* for consistency.
   'cell.backtranslation.set': ROLE.CONTRIBUTOR,
+
+  // AQU-1408 §1: correcting the statistical gloss is the same act as writing a
+  // back-translation at a different grain, so it sits on the same rung. The
+  // ticket asks for "any contributor, not only an admin" — contributor(400) is
+  // that floor, and matches cell.backtranslation.set above.
+  'cell.gloss.set': ROLE.CONTRIBUTOR,
 
   // Assignments: a manager (project_lead+) assigns work to members. Reassign
   // and unassign are the same managerial authority.

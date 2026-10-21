@@ -23,7 +23,7 @@
 // see trimWindowForCell), so spacing the original out could never have been a
 // data edit in the first place.
 
-import { resolveTargetAudio, sourceClipAudioForCell } from "@/lib/audio/track-audio"
+import { resolveTargetPieces, sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { effectiveAttachmentDurationMs, MIN_TARGET_LEN_SEC } from "./lane-timing"
 import type { CellData } from "@/hooks/useCells"
 
@@ -62,8 +62,17 @@ export interface ProgrammeSlot {
   /** The original's window on the FILE clock; null for a take-only section. */
   sourceWindow: Window | null
   /** The dub's window on its OWN clip clock (trim start → trim end); null
-   *  when there's no dub, or when its length simply isn't known. */
+   *  when there's no dub, or when its length simply isn't known. For a SPLIT
+   *  take it is the window on the JOINED copy's clock: 0 → every piece. */
   targetWindow: Window | null
+  /**
+   * AQU-1767 (Sam, 2026-10-15): a split take's pieces, in the order they sit
+   * in the recording, each as its window on the recording's clock. Free
+   * timing plays them as one take — joined into one copy, so nothing has to
+   * skip between them — and lays them out end to end. Absent for a take
+   * never split.
+   */
+  targetPieces?: { audioId: string; start: number; end: number }[]
 }
 
 export interface Programme {
@@ -81,6 +90,27 @@ function sectionLenSec(cell: CellData): number {
   if (typeof startTime !== "number" || !Number.isFinite(startTime)) return 0
   if (typeof endTime !== "number" || !Number.isFinite(endTime)) return 0
   return Math.max(0, endTime - startTime)
+}
+
+/**
+ * A split take's pieces as windows on the recording's clock, in clip order,
+ * and how long they sound together. Null when any piece's length is unknown.
+ */
+function splitWindows(
+  cell: CellData,
+  pieces: readonly { audioId: string }[],
+): { pieces: { audioId: string; start: number; end: number }[]; totalMs: number } | null {
+  const out: { audioId: string; start: number; end: number }[] = []
+  let totalMs = 0
+  for (const p of pieces) {
+    const att = cell.attachments?.[p.audioId]
+    const ms = effectiveAttachmentDurationMs(att)
+    if (ms == null || !att) return null
+    const start = att.trimStartMs != null && Number.isFinite(att.trimStartMs) && att.trimStartMs > 0 ? att.trimStartMs / 1000 : 0
+    out.push({ audioId: p.audioId, start, end: start + ms / 1000 })
+    totalMs += ms
+  }
+  return { pieces: out, totalMs }
 }
 
 /**
@@ -111,15 +141,19 @@ export function buildProgramme(cells: readonly CellData[]): Programme {
     // would have to skip it, which is exactly what this design avoids.
     const sourceLenSec = sourceWindow ? nominalLenSec : 0
 
-    const target = resolveTargetAudio(cell)
+    const pieces = resolveTargetPieces(cell)
+    const target = pieces[0] ?? null
     const att = target ? cell.attachments?.[target.audioId] : undefined
-    const effMs = effectiveAttachmentDurationMs(att)
+    // AQU-1767: a split take sounds as all its pieces, back to back — but only
+    // when every piece's length is known; otherwise its first piece, as before.
+    const split = pieces.length > 1 ? splitWindows(cell, pieces) : null
+    const effMs = split ? split.totalMs : effectiveAttachmentDurationMs(att)
     // A dub whose length genuinely isn't known borrows the section's, which is
     // what its chip already draws at (targetChipGeom's `usingFallback`). It
     // gets no playback window — there's no honest trim to play.
     const targetLenSec = target ? (effMs != null ? effMs / 1000 : nominalLenSec) : 0
     const trimStartSec =
-      att?.trimStartMs != null && Number.isFinite(att.trimStartMs) && att.trimStartMs > 0
+      !split && att?.trimStartMs != null && Number.isFinite(att.trimStartMs) && att.trimStartMs > 0
         ? att.trimStartMs / 1000
         : 0
     const targetWindow: Window | null =
@@ -151,6 +185,7 @@ export function buildProgramme(cells: readonly CellData[]): Programme {
       clock,
       sourceWindow,
       targetWindow,
+      ...(split ? { targetPieces: split.pieces } : {}),
     }
     slots.push(slot)
     byCellId.set(cell.id, slot)
@@ -158,6 +193,26 @@ export function buildProgramme(cells: readonly CellData[]): Programme {
   }
 
   return { slots, totalSec: cursor, byCellId }
+}
+
+/**
+ * Sam's decision (hidden lines on the timeline): the programme as it PLAYS
+ * when some lines are hidden. Every verse keeps its place and length — the
+ * timeline draws a hidden one where it always sat, faded — but a hidden
+ * verse's take is taken out: it sounds only its original, clocked by it, and
+ * one with no original has nothing left to play, so playback steps over it.
+ */
+export function withoutHiddenTakes(prog: Programme, hiddenCellIds: ReadonlySet<string>): Programme {
+  if (hiddenCellIds.size === 0) return prog
+  const byCellId = new Map<string, ProgrammeSlot>()
+  const slots = prog.slots.map((slot) => {
+    const out: ProgrammeSlot = hiddenCellIds.has(slot.cellId)
+      ? { ...slot, targetWindow: null, targetPieces: undefined, clock: slot.sourceWindow ? "source" : null }
+      : slot
+    byCellId.set(out.cellId, out)
+    return out
+  })
+  return { ...prog, slots, byCellId }
 }
 
 /** The slot a programme second falls in. Times past the end return null. */

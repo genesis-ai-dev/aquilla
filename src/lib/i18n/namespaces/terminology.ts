@@ -504,23 +504,12 @@ export const terminology = defineNamespace({
       other: "{count} forbidden",
     }),
 
-    // ── CandidateTermsPanel.tsx ──────────────────────────────────────────────
-    "terminology.candidates.emptyTitle": "No candidate terms",
-    "terminology.candidates.emptyDescription": "No candidate terms found in the loaded cells.",
-    "terminology.candidates.countRankedByNc": plural({
-      one: "{count} candidate term, ranked by NC-value",
-      other: "{count} candidate terms, ranked by NC-value",
-    }),
+    // ── CellTranscribeBadge.tsx — the one survivor of the retired
+    // CandidateTermsPanel.tsx's own keys ─────────────────────────────────────
     "terminology.candidates.ngramLength": plural({
       one: "{count} word",
       other: "{count} words",
     }),
-    "terminology.candidates.ncTooltip":
-      "NC-value — termhood with context weighting (default rank)",
-    "terminology.candidates.cTooltip": "C-value — nestedness-adjusted termhood",
-    "terminology.candidates.g2Tooltip":
-      "G² keyness — how unexpectedly frequent vs the reference corpus",
-    "terminology.candidates.promoteButton": "Promote to managed",
 
     // ── ProjectSettings/TermbaseSharingSection.tsx ───────────────────────────
     "terminology.sharing.title": "Termbase Sharing",
@@ -618,18 +607,6 @@ export const terminology = defineNamespace({
     "terminology.conceptDialog.renderingPlaceholder": "rendering",
     "terminology.conceptDialog.targetRenderingsLabel": "Target renderings",
 
-    // ── TerminologyPage.tsx: ConceptRow (main concepts table row) ───────────
-    "terminology.page.editConceptAria": "Edit concept {term}",
-    "terminology.page.deleteConceptAria": "Delete concept {term}",
-
-    // ── TerminologyPage.tsx: tab strip (counted variants of the tab labels
-    // below reuse terminology.page.conceptsHeading / reviewQueueHeading /
-    // candidateTermsHeading / terminology.violations.title for the bare and
-    // "Concepts (N)" forms — these two are only for the "N pending" forms
-    // those keys don't cover) ────────────────────────────────────────────
-    "terminology.page.reviewQueueCountLabel": "Review queue ({count})",
-    "terminology.page.candidateTermsCountLabel": "Candidate terms ({count})",
-
     // ── TerminologyPage.tsx: TermbaseImportDialog ────────────────────────────
     "terminology.importDialog.title": "Import term base",
     "terminology.importDialog.parsing": "Parsing…",
@@ -648,39 +625,10 @@ export const terminology = defineNamespace({
     "terminology.libraryStats.cellsAnalyzedLabel": "Cells analyzed",
     "terminology.libraryStats.mostInfringedLabel": "Most infringed",
 
-    // ── TerminologyPage.tsx: candidate-terms tab intro paragraph ────────────
-    "terminology.candidates.minedFromSummary": plural({
-      one:
-        "Mined from {count} source/WIP cell text{note}. Mining runs off the main " +
-        "thread. Keyness (G²) uses a derived rest-of-corpus baseline. Promoting " +
-        "adds a suggested concept you can then give renderings.",
-      other:
-        "Mined from {count} source/WIP cell texts{note}. Mining runs off the main " +
-        "thread. Keyness (G²) uses a derived rest-of-corpus baseline. Promoting " +
-        "adds a suggested concept you can then give renderings.",
-    }),
-    "terminology.candidates.corpusScopeFull": " — the full loaded project",
-    "terminology.candidates.corpusScopeCapped":
-      " (capped at the first {ceiling} of {total} loaded cells — corpus exceeds the safety ceiling)",
-    "terminology.candidates.miningLabel": "Mining candidate terms…",
-
-    // ── TerminologyPage.tsx: main page chrome ────────────────────────────────
+    // ── GlossaryEditor.tsx inside the workspace shell — what is left of the
+    // retired TerminologyPage.tsx's own chrome ──────────────────────────────
     "terminology.loadingLabel": "Loading terminology",
-    "terminology.page.addConceptButton": "Add concept",
-    "terminology.page.editConceptTitle": "Edit concept",
-    "terminology.page.deleteConcept":
-      "Delete this concept? This removes it for everyone in the project and cannot be undone.",
-    "terminology.page.deleteNamedConcept":
-      'Delete "{term}"? This removes the concept and all its renderings for everyone in the project and cannot be undone.',
     "terminology.page.mergeDuplicatesButton": "Merge duplicates",
-    "terminology.page.reviewQueueHeading": "Review queue",
-    "terminology.page.candidateTermsHeading": "Candidate terms",
-    "terminology.page.conceptsHeading": "Concepts ({count})",
-    "terminology.page.noConceptsTitle": "No concepts yet.",
-    "terminology.page.noConceptsDescription": "Add a concept manually or import a CSV / TBX file.",
-    "terminology.page.addFirstConceptButton": "Add first concept",
-    "terminology.page.renderingsColumnHeader": "Renderings",
-    "terminology.page.deleteConceptDialogTitle": "Delete concept",
     // ── BibleEntityLinkSection.tsx (AQU-1693): the Bible person, place or
     // group a concept names, on the term detail page ────────────────────────
     "terminology.bibleLink.heading": "Bible person, place or group",
@@ -1022,9 +970,9 @@ export const terminology = defineNamespace({
       },
       "terminology.common.occurrenceCount": {
         description:
-          "Generic occurrence-count stat, reused for both the term detail header " +
-          "(cells containing a concept's source term) and a candidate-term row (times " +
-          "it occurs in the loaded corpus); {count} is that count.",
+          "Generic occurrence-count stat, rendered on the term detail header (cells " +
+          "containing a concept's source term); {count} is that count. The candidate-term " +
+          "row that was its other caller is gone, so it stays worded for reuse.",
         placeholders: { count: "The occurrence count." },
       },
       "terminology.termDetail.enforcedCount": {
@@ -1120,17 +1068,12 @@ export const terminology = defineNamespace({
           "infractions it has; {count} is that count.",
         placeholders: { count: "Number of forbidden-rendering-present infractions." },
       },
-      "terminology.candidates.countRankedByNc": {
-        description:
-          "Header line above the ranked candidate-term list; {count} is the number of " +
-          "candidates found.",
-        placeholders: { count: "Number of candidate terms found." },
-      },
       "terminology.candidates.ngramLength": {
         description:
-          "Badge on a candidate-term row showing how many words the candidate spans; " +
-          "{count} is that word count.",
-        placeholders: { count: "Number of words the candidate term spans." },
+          "Word-count badge over a short span of text; {count} is that word count. " +
+          "Rendered on a finished transcription take — the candidate-term row that was " +
+          "its other caller is gone — so it stays worded without naming its container.",
+        placeholders: { count: "Number of words the span holds." },
       },
       "terminology.sharing.unsubscribeAria": {
         description:
@@ -1349,32 +1292,6 @@ export const terminology = defineNamespace({
           "concept dialog — each rendering is one approved/alternate/forbidden " +
           "translation of the source term.",
       },
-      "terminology.page.editConceptAria": {
-        description:
-          "Accessible name for the pencil button opening the edit-concept dialog on a " +
-          "concepts-table row; {term} is the concept's own source headword (not translated).",
-        placeholders: { term: "The concept's source headword, verbatim (not translated)." },
-      },
-      "terminology.page.deleteConceptAria": {
-        description:
-          "Accessible name for the trash button opening the delete-concept confirm dialog " +
-          "on a concepts-table row; {term} is the concept's own source headword (not translated).",
-        placeholders: { term: "The concept's source headword, verbatim (not translated)." },
-      },
-      "terminology.page.reviewQueueCountLabel": {
-        description:
-          "Tab-strip button label for the review-queue tab once it has at least one draft " +
-          "concept awaiting review; falls back to the bare terminology.page.reviewQueueHeading " +
-          "text when the count is zero.",
-        placeholders: { count: "Number of draft concepts awaiting review." },
-      },
-      "terminology.page.candidateTermsCountLabel": {
-        description:
-          "Tab-strip button label for the candidate-terms tab once mining has produced " +
-          "results; falls back to the bare terminology.page.candidateTermsHeading text " +
-          "before mining has run.",
-        placeholders: { count: "Number of mined candidate terms." },
-      },
       "terminology.importDialog.title": {
         description:
           "Title of the dialog for bulk-importing terms into the project's term base " +
@@ -1444,98 +1361,19 @@ export const terminology = defineNamespace({
       "terminology.libraryStats.mostInfringedLabel": {
         description: "Small heading over the list of the concepts with the most violations, shown when any exist.",
       },
-      "terminology.candidates.minedFromSummary": {
-        description:
-          "Intro paragraph above the candidate-terms tab's ranked list, stating how " +
-          "many cells the term-mining pass covered and how it works. {note} is a whole " +
-          "already-localized trailing clause (see terminology.candidates.corpusScopeFull " +
-          "/ corpusScopeCapped) — insert it exactly where the placeholder sits, it " +
-          "already carries its own leading space/punctuation. Plural category is chosen " +
-          "by {count}.",
-        placeholders: {
-          count: "Number of cells the mining pass covered; also selects the plural form.",
-          note:
-            "Already-localized trailing clause naming the scan's scope — either " +
-            "terminology.candidates.corpusScopeFull or ...corpusScopeCapped, verbatim " +
-            "including its own leading space.",
-        },
-      },
-      "terminology.candidates.corpusScopeFull": {
-        description:
-          "Trailing clause appended into terminology.candidates.minedFromSummary when " +
-          "the mining pass covered the whole loaded project (not capped). Keep the " +
-          "leading space — it is the only separator between this clause and the word " +
-          "it follows.",
-      },
-      "terminology.candidates.corpusScopeCapped": {
-        description:
-          "Trailing clause appended into terminology.candidates.minedFromSummary when " +
-          "the loaded corpus exceeded the mining safety ceiling and was truncated. Keep " +
-          "the leading space — it is the only separator between this clause and the " +
-          "word it follows.",
-        placeholders: {
-          ceiling: "The fixed safety-ceiling cell count the scan capped at.",
-          total: "The total number of loaded cells before capping.",
-        },
-      },
-      "terminology.candidates.miningLabel": {
-        description: "Transient status shown while the candidate-term mining pass is running off the main thread.",
-      },
       "terminology.loadingLabel": {
         description:
           "Loading-panel label shown while the Terminology surface's initial data " +
-          "is still loading. Rendered from two places for the same surface — the " +
-          "Terminology page itself and the workspace shell's Suspense fallback — " +
-          "so it is worded without naming either container.",
-      },
-      "terminology.page.deleteNamedConcept": {
-        description:
-          "Body of the confirmation asked before deleting a terminology concept, " +
-          "when the concept has a source term to name. Full sentence, ends with a " +
-          "period. States the blast radius (everyone in the project) and that it " +
-          "cannot be undone — do not soften either. The term is quoted.",
-        placeholders: {
-          term: "The concept's source term, shown in quotes so it is clear which one is going.",
-        },
-      },
-      "terminology.page.addConceptButton": {
-        description: "Header button opening the add-concept dialog.",
+          "is still loading. Rendered from the workspace shell's Suspense fallback " +
+          "while the glossary loads — the standalone Terminology page that was the " +
+          "other caller is gone — so it stays worded without naming its container.",
       },
       "terminology.page.mergeDuplicatesButton": {
         description:
           "Button opening the merge-duplicate-concepts dialog, shown only once the " +
-          "project has 2+ concepts. Visible text; distinct from the same button's " +
-          "accessible name (terminology.mergeDialog.title, reused here since identical).",
-      },
-      "terminology.page.reviewQueueHeading": {
-        description:
-          "Card heading over the review-queue tab's content (draft concepts awaiting " +
-          "approval); also the tab-strip button's own label when there are zero pending " +
-          "concepts (see terminology.page.reviewQueueCountLabel for the counted form).",
-      },
-      "terminology.page.candidateTermsHeading": {
-        description:
-          "Card heading over the candidate-terms tab's content (mined term suggestions); " +
-          "also the tab-strip button's own label before mining has produced results (see " +
-          "terminology.page.candidateTermsCountLabel for the counted form).",
-      },
-      "terminology.page.conceptsHeading": {
-        description:
-          "Card heading over the main concepts list/table, with the total concept count; " +
-          "also reused verbatim as the tab-strip button's own label for the same tab.",
-        placeholders: { count: "Total number of concepts in the project's term base." },
-      },
-      "terminology.page.noConceptsTitle": {
-        description: "Empty-state title shown when the project's term base has no concepts yet.",
-      },
-      "terminology.page.noConceptsDescription": {
-        description: "Empty-state body text under terminology.page.noConceptsTitle, suggesting how to add the first concept.",
-      },
-      "terminology.page.addFirstConceptButton": {
-        description: "Empty-state call-to-action button opening the add-concept dialog.",
-      },
-      "terminology.page.renderingsColumnHeader": {
-        description: "Column heading over the renderings column in the concepts table.",
+          "project has 2+ concepts. This is the button's whole accessible name as " +
+          "well as its visible text (AQU-2077): it carries no aria-label, so a " +
+          "translation must stay speakable as a voice command.",
       },
       "terminology.bibleLink.heading": {
         description:
@@ -1582,11 +1420,6 @@ export const terminology = defineNamespace({
           "Help text under the section heading. Voices and Who's Who are names of Bible " +
           "data features (who speaks in a verse; who a word refers to); translate them " +
           "the way the rest of the app does.",
-      },
-      "terminology.page.deleteConceptDialogTitle": {
-        description:
-          "Title of the checkbox-confirm dialog shown before permanently deleting a " +
-          "concept and all its renderings.",
       },
     },
   },

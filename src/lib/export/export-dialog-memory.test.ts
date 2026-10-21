@@ -100,6 +100,17 @@ describe("a stored value that cannot be trusted", () => {
     expect(readExportMemory("sam", "p1").includeChapterHeadings).toBe(true)
   })
 
+  // AQU-1575: a broadcast deliverable is asked for the same way every time,
+  // so the WAV choice is remembered like the dialog's other choices.
+  it("remembers whether Audio by line writes WAV", () => {
+    expect(normalizeExportMemory({}).lineAudioFormat).toBe("original")
+    expect(normalizeExportMemory({ lineAudioFormat: "wav" }).lineAudioFormat).toBe("wav")
+    expect(normalizeExportMemory({ lineAudioFormat: "flac" }).lineAudioFormat).toBe("original")
+    writeExportMemory("sam", "p1", { ...DEFAULT_EXPORT_MEMORY, lineAudioFormat: "wav" })
+    expect(readExportMemory("sam", "p1").lineAudioFormat).toBe("wav")
+    expect(readExportMemory("levi", "p1").lineAudioFormat).toBe("original")
+  })
+
   it("refuses a subtitle target it does not recognise", () => {
     expect(normalizeExportMemory({ subtitleTarget: "video" }).subtitleTarget).toBe("subtitle")
   })

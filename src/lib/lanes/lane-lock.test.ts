@@ -112,7 +112,7 @@ describe("laneWriteLocked mirrors the server's archived-lane kind table", () => 
       "target.cell.reorder", "target.cell.repin", "cell.validate", "cell.unvalidate",
       "cell.waive", "cell.unwaive", "cell.audio.attach", "cell.audio.select",
       "cell.audio.remove", "cell.audio.rename", "cell.audio.trim", "cell.audio.place",
-      "cell.audio.measure", "cell.audio.validate", "cell.audio.unvalidate",
+      "cell.audio.cut", "cell.audio.measure", "cell.audio.validate", "cell.audio.unvalidate",
       "cell.lane.retime", "cell.backtranslation.set",
     ]
     for (const kind of kinds) {

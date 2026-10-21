@@ -98,6 +98,23 @@ export interface MintSyncTokenOptions {
    * server-side harness has no session to elevate.
    */
   platformElevated?: boolean
+  /**
+   * AQU-2003: opt-in. When true, an UN-elevated caller whose only grant path
+   * is platform-admin power gets a Viewer-level (100) token that keeps
+   * `src: "platform"`, instead of `elevation_required`. Ryder and Matthew
+   * agreed that a step-up code on every foreign project made platform QA
+   * impractical, so read access is reopened while user-content writes stay
+   * gated: the sync-worker's role floors plus an explicit rule in
+   * events/authorize.ts refuse a platform token below Contributor. The one
+   * exception is the link-sync trigger (POST /api/v1/projects/:id/link/sync),
+   * which any genuine Viewer can also fire and which writes only
+   * server-authored mirror data. Omitted/false keeps OPS-44's fail-closed
+   * answer, which is what the server-side agent harness (command-tools.ts)
+   * must keep: it can
+   * write, so it never gets a platform token without elevation. Has no effect
+   * when `platformElevated` is true (that mints the full 700 token).
+   */
+  platformViewWithoutElevation?: boolean
 }
 
 /**
@@ -205,6 +222,7 @@ export async function mintSyncTokenForUser(
   // Only a caller whose ONLY path was platform gets refused.
   if (resolved.source === "platform" && opts?.platformElevated !== true) {
     let genuine: RoleResolution | null = null
+    let genuineLookupFailed = false
     try {
       genuine = await resolveGenuineProjectRole(env, user, projectId)
     } catch (err) {
@@ -212,9 +230,26 @@ export async function mintSyncTokenForUser(
       // platform path closed; elevating still works, and a genuine member is
       // unaffected because their resolution never reaches this arm.
       if (!(err instanceof RoleLookupError)) throw err
+      // AQU-2003: a failed lookup is NOT "no genuine grant". The caller may be
+      // a real Contributor whose grant we could not read; a Viewer token would
+      // make the SPA outbox quarantine their edits as forbidden. Keep failing
+      // closed (elevation_required) rather than guess.
+      genuineLookupFailed = true
     }
-    if (!genuine) return { ok: false, reason: "elevation_required" }
-    resolved = genuine
+    if (genuine) {
+      resolved = genuine
+    } else if (opts?.platformViewWithoutElevation === true && !genuineLookupFailed) {
+      // AQU-2003: read-only platform view. The sync-worker refuses every
+      // user-content write from this token (its role floors plus the explicit
+      // platform-view rule in events/authorize.ts; link-sync, which any
+      // genuine Viewer can also fire, is the documented exception).
+      // `source` stays "platform" so its lane read
+      // wall and membership re-check still treat this admin as one who may
+      // see all lanes of a project they do not belong to.
+      resolved = { ...resolved, level: 100, name: roleNameFor(100) }
+    } else {
+      return { ok: false, reason: "elevation_required" }
+    }
   }
 
   const signed = await signSyncTokenWithRole(env, user, projectId, fileId, resolved)

@@ -5,14 +5,16 @@
 // the grants and the sharer's intent disagreed. The sharer now sends one
 // of two explicit choices:
 //
-//   allCurrentLanes: true   — no lane scopes; grants on every current lane
-//   scopeLanes: [ids]       — those lanes only, at the project role
+//   allCurrentLanes: true   — below project lead: no lane scopes; grants on
+//                             every current lane, and a later lane too
+//   scopeLanes: [ids]       — those lanes only
 //
-// A project lead and above are not lane-scoped. Their role already sees
-// every lane (and a lead below the old Maintainer wall still receives a
-// grant on each current lane from the existing planner). A role change of
-// someone who is already a member does not ask again: the lanes they hold
-// stay, and only the level is rewritten. A choice that IS named on the add of
+// Maintainer and above are not lane-scoped. A project lead is: a fresh
+// membership that does not name lanes is a snapshot of the lanes that exist
+// then (kind "snapshot"), and a named list is those lanes only. A role
+// change of someone who is already a member does not ask again: the lanes
+// they hold stay, and only the level is rewritten. Raising someone to
+// project lead does not reveal a lane. A choice that IS named on the add of
 // an existing member replaces their lanes, and a fresh membership starts from
 // no lane rows — the rows of a removed membership are not inherited.
 
@@ -24,7 +26,7 @@ export const LANE_CHOICE_REQUIRED = "lane_choice_required"
 export const LANE_CHOICE_CONFLICT = "lane_choice_conflict"
 
 export type ExplicitLaneChoice =
-  | { ok: true; kind: "skip" | "all" }
+  | { ok: true; kind: "skip" | "all" | "snapshot" }
   | { ok: true; kind: "lanes"; laneIds: string[] }
   | {
       ok: false
@@ -45,10 +47,39 @@ export async function resolveExplicitLaneChoice(
     requireChoice: boolean
   },
 ): Promise<ExplicitLaneChoice> {
-  if (input.role >= ROLE.PROJECT_LEAD) return { ok: true, kind: "skip" }
-
   const requested = input.scopeLanes ?? []
   const wantsAll = input.allCurrentLanes === true
+  if (input.role >= ROLE.MAINTAINER) return { ok: true, kind: "skip" }
+  if (input.role >= ROLE.PROJECT_LEAD) {
+    if (wantsAll && requested.length > 0) {
+      return {
+        ok: false,
+        code: LANE_CHOICE_CONFLICT,
+        error: "Choose every current target lane or name specific lanes, not both.",
+      }
+    }
+    if (requested.length > 0) {
+      const resolved = await resolveInviteLaneScopes(env, projectIds, requested)
+      if (!resolved.ok) {
+        return {
+          ok: false,
+          code: "lane_unresolved",
+          error:
+            projectIds.length > 1
+              ? "scopeLanes must each name one lane of these projects"
+              : "scopeLanes must each name one lane of this project",
+          ...(resolved.ambiguous.length > 0 ? { ambiguous: resolved.ambiguous } : {}),
+          ...(resolved.unmatched.length > 0 ? { unmatched: resolved.unmatched } : {}),
+        }
+      }
+      return { ok: true, kind: "lanes", laneIds: resolved.laneIds }
+    }
+    // A role change keeps the lanes they already hold. A fresh project lead
+    // is snapshotted onto the lanes that exist then.
+    if (!input.requireChoice) return { ok: true, kind: "skip" }
+    return { ok: true, kind: "snapshot" }
+  }
+
   if (wantsAll && requested.length > 0) {
     return {
       ok: false,

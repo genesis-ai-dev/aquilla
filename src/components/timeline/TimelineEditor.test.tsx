@@ -670,7 +670,9 @@ describe("TimelineEditor", () => {
     expect(screen.getByTestId("tl-target-m3")).toHaveAttribute("data-kind", "generated")
   })
 
-  it("clicking a Target-track chip selects the section and seeks playback to it", () => {
+  // AQU-1767 (Sam, 2026-10-14): a click selects the take and leaves the
+  // playhead alone; a double-click jumps to the line.
+  it("clicking a Target-track chip selects the section; double-clicking seeks playback to it", () => {
     const onSeekToTime = vi.fn()
     render(
       <TimelineEditor
@@ -679,8 +681,10 @@ describe("TimelineEditor", () => {
       />,
     )
     fireEvent.click(screen.getByTestId("tl-target-m2"))
-    expect(onSeekToTime).toHaveBeenCalledWith(10)
+    expect(onSeekToTime).not.toHaveBeenCalled()
     expect(screen.getByTestId("tl-detail")).toHaveAttribute("data-cell-id", "m2")
+    fireEvent.doubleClick(screen.getByTestId("tl-target-m2"))
+    expect(onSeekToTime).toHaveBeenCalledWith(10)
   })
 
   it("speaker buttons start audible, push audibility into the queue, toggle, and persist per file", () => {
@@ -857,6 +861,47 @@ describe("TimelineEditor", () => {
     expect(screen.getByTestId("tl-detail-overlap-start")).toHaveTextContent("Start overlap: −1.0s")
     expect(screen.getByTestId("tl-detail-overlap-end")).toHaveTextContent("End overlap: −1.0s")
     expect(screen.queryByTestId("tl-detail-overlap")).toBeNull()
+  })
+
+  // AQU-1767 (Sam, 2026-10-19): a split take's pills read the whole take.
+  it("a take cut into three pieces reads from its first piece to its last, with the sound it keeps", () => {
+    // Verse 10–20. A 4s take cut into 0–1.5s, 2.5–3.7s and 3.8–4.0s of the
+    // recording, so on the timeline 10.0–11.5, 12.5–13.7 and 13.8–14.0.
+    const TAKE = "audio-v2-1700000000-take.webm"
+    const piece = (n: number) => `audio-v2-170000000${n}-piece.webm`
+    const recording = { type: "audio", url: "frontier-audio://take", slot: "recording", durationMs: 4000 }
+    const plain = (id: string, start: number, end: number): CellData => {
+      const takeId = `audio-${id}-1700000000-take.webm`
+      return cell({
+        id, medium: "media", startTime: start, endTime: end, original: id, selectedAudioId: takeId,
+        attachments: { [takeId]: { ...recording, durationMs: 3000 }, [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" } },
+      } as unknown as Partial<CellData>)
+    }
+    const split = cell({
+      id: "v2", medium: "media", startTime: 10, endTime: 20, original: "v2", selectedAudioId: TAKE,
+      attachments: {
+        [TAKE]: { ...recording, trimEndMs: 1500 },
+        [piece(1)]: { ...recording, trimStartMs: 2500, trimEndMs: 3700, pieceOf: TAKE },
+        [piece(2)]: { ...recording, trimStartMs: 3800, pieceOf: TAKE },
+        [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+      },
+    } as unknown as Partial<CellData>)
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable
+        cells={[plain("v1", 0, 10), split, plain("v3", 20, 30)]}
+        onRetimeSubtitle={() => {}} initialSelectedCellId="v2"
+      />,
+    )
+    expect(screen.getByTestId("tl-detail-dub-range")).toHaveTextContent("Target: 0:10.0–0:14.0")
+    expect(screen.getByTestId("tl-detail-pieces")).toHaveTextContent("3 pieces")
+    // 1.5 + 1.2 + 0.2 seconds of sound.
+    expect(screen.getByTestId("tl-detail-duration")).toHaveTextContent("2.9s")
+    // Source 10.0s − the take's 4.0s span.
+    expect(screen.getByTestId("tl-detail-diff")).toHaveTextContent("Diff: +6.0s")
+    // Its own pieces never count as overlapping each other.
+    expect(screen.queryByTestId("tl-detail-overlap")).toBeNull()
+    expect(screen.queryByTestId("tl-detail-overlap-start")).toBeNull()
   })
 
   // ── 2026-08-08: an automatic playback advance clears the selection ──
@@ -1303,6 +1348,30 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(onChange).not.toHaveBeenCalled()
     fireEvent.click(other)
     expect(onChange).toHaveBeenCalledWith("dubbing")
+  })
+
+  // Sam, 2026-10-15: the Bluetooth note is a small amber pill beside the
+  // timing switch, its explanation behind an info button — not a full line.
+  it("says Bluetooth in a pill after the timing switch, the full message behind its info button", async () => {
+    mockOutputLatencySec = 0.178
+    try {
+      renderAt("dubbing", { onChangeTimingMode: vi.fn() })
+      const pill = screen.getByTestId("tl-output-latency-note")
+      expect(pill).toHaveTextContent(/^Bluetooth$/)
+      const switchEl = screen.getByTestId("tl-timing-mode")
+      expect(switchEl.compareDocumentPosition(pill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(switchEl.parentElement).toBe(pill.parentElement)
+      expect(screen.queryByText(/arrives a moment after the app sends it/)).toBeNull()
+      fireEvent.click(screen.getByRole("button", { name: "About playing through Bluetooth" }))
+      expect(await screen.findByText(/arrives a moment after the app sends it/)).toBeInTheDocument()
+    } finally {
+      mockOutputLatencySec = 0
+    }
+  })
+
+  it("shows no Bluetooth pill on a wired or measured output", () => {
+    renderAt("dubbing", { onChangeTimingMode: vi.fn() })
+    expect(screen.queryByTestId("tl-output-latency-note")).toBeNull()
   })
 
   it("hides a linked video and says why — it runs on the original's timing", () => {
@@ -2459,15 +2528,19 @@ describe("TimelineEditor — rows come from the track model", () => {
     expect(screen.getByText("New folder from this track")).toBeTruthy()
   })
 
-  // The whole row of new machinery is withheld from someone who can do neither:
-  // no trigger, no `⋯`, no `select-none` the trigger would add. The row a
-  // viewer sees is the row that shipped.
-  it("adds nothing at all to a row when the person can do neither", () => {
+  // The maintainers' machinery is withheld from someone who can do neither.
+  // AQU-1684 (Sam): anyone may hide a track on their own screen, so the row's
+  // menu is theirs too — holding Hide alone.
+  it("gives a person who can do neither a menu with Hide alone", () => {
     render(
       <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}} />,
     )
-    expect(screen.queryByTestId("tl-track-menu-target-audio")).toBeNull()
     expect(screen.queryByTestId("tl-add-track")).toBeNull()
+    // Right-click the row (the event reaches it from the `⋯` inside it).
+    fireEvent.contextMenu(screen.getByTestId("tl-track-menu-target-audio"))
+    expect(screen.getByText("Hide track")).toBeTruthy()
+    expect(screen.queryByText("Rename")).toBeNull()
+    expect(screen.queryByText("New folder from this track")).toBeNull()
   })
 
   // Deleting really deletes, so it asks — and it asks with the NUMBER, which is
@@ -3987,7 +4060,9 @@ describe("TimelineEditor — a menu with nothing in it does not open", () => {
   // place." With several derived tracks selected there is genuinely nothing to
   // offer — Rename is single-track only and none of them can be coloured,
   // foldered from, or deleted with the setting off.
-  it("stays shut on a multi-selection of derived tracks with editing off", () => {
+  // AQU-1684: since anyone may hide tracks, such a selection is no longer
+  // empty — it offers to hide them all, and nothing it cannot do.
+  it("offers only Hide on a multi-selection of derived tracks with editing off", () => {
     render(
       <TimelineEditor
         fileId="f1" coreMediaUrl={null} editable cells={rowCells}
@@ -3998,9 +4073,8 @@ describe("TimelineEditor — a menu with nothing in it does not open", () => {
     fireEvent.click(rows[0])
     fireEvent.click(rows[1], { metaKey: true })
     fireEvent.contextMenu(rows[1])
-    expect(screen.queryByRole("menu")).toBeNull()
-    // …and the `⋯` goes with it, rather than advertising a menu that will not open.
-    expect(screen.queryByTestId("tl-track-menu-source-audio")).toBeNull()
+    expect(screen.getByText("Hide 2 tracks")).toBeTruthy()
+    expect(screen.queryByText("Rename")).toBeNull()
   })
 
   it("still opens on ONE of them, where Rename applies", () => {
@@ -4729,15 +4803,20 @@ describe("TimelineEditor — captions becoming a linked video's rows (AQU-1566)"
   // The viewer decision: a Viewer keeps "Open Media view" and may watch. What
   // the workspace hands a viewer is exactly this (every setup row present but
   // not theirs, no track callbacks), and none of it may surface.
-  it("gives a viewer no Sources menu, no Add track and no track menu", () => {
+  // AQU-1684: …and a track menu holding only Hide, which is theirs too.
+  it("gives a viewer no Sources menu, no Add track and a track menu with Hide alone", () => {
     render(<TimelineEditor {...base}
       onRequestLinkVideo={() => {}} canLinkVideo={false}
       onRequestImportAudioVtt={() => {}} canImportAudioVtt={false}
       onRequestImportCharacters={() => {}} canImportCharacters={false} />)
     expect(screen.queryByTestId("tl-sources-menu")).toBeNull()
     expect(screen.queryByTestId("tl-add-track")).toBeNull()
-    expect(document.querySelector('[data-testid^="tl-track-menu-"]')).toBeNull()
+    const menus = document.querySelectorAll<HTMLElement>('[data-testid^="tl-track-menu-"]')
+    expect(menus.length).toBeGreaterThan(0)
+    fireEvent.contextMenu(menus[0])
+    expect(screen.getByText("Hide track")).toBeTruthy()
     expect(screen.queryByText("Use as this file's rows")).toBeNull()
+    expect(screen.queryByText("Rename")).toBeNull()
   })
 })
 
@@ -4929,5 +5008,173 @@ describe("TimelineEditor — an empty linked video (Sam's D3)", () => {
         audioCues={[cell({ id: "c1", original: "Whoa there", startTime: 1, endTime: 2 })]} />,
     )
     expect(screen.queryByTestId("tl-source-gap-label")).toBeNull()
+  })
+})
+
+// AQU-1767 (Sam, 2026-10-14): the blade stays on B, S splits the selected take
+// at the playhead, and the "cut at the playhead" button is gone.
+describe("TimelineEditor — splitting takes (AQU-1767)", () => {
+  beforeEach(() => { topOwner.value = 1 })
+  const TAKE_ID = "audio-m2-1700000000-take.wav"
+  const takeCell = () =>
+    cell({
+      id: "m2", original: "Two", medium: "media", startTime: 10, endTime: 20,
+      selectedAudioId: TAKE_ID,
+      attachments: { [TAKE_ID]: { type: "audio", url: "frontier-audio://take", slot: "recording", durationMs: 4000 } },
+    })
+
+  it("keeps the blade toggle and has no cut-at-the-playhead button", () => {
+    render(
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={[takeCell()]} onRetimeSubtitle={() => {}} onCutTargets={vi.fn()} />,
+    )
+    expect(screen.getByTestId("tl-blade-toggle")).toBeInTheDocument()
+    expect(screen.queryByTestId("tl-cut-at-playhead")).toBeNull()
+  })
+
+  // Sam (2026-10-14): "S should only split AT PLAYHEAD and only ON A SELECTED
+  // TAKE." 38 px/s at the default zoom; the take sits at 10-14 s.
+  const renderSplit = (onCutTargets = vi.fn(), onSeekToTime = vi.fn()) => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={[takeCell()]}
+        onRetimeSubtitle={() => {}} onCutTargets={onCutTargets} onSeekToTime={onSeekToTime}
+      />,
+    )
+    const playheadTo = (sec: number) => fireEvent.click(screen.getByTestId("tl-ruler"), { clientX: sec * 38 })
+    return { onCutTargets, onSeekToTime, playheadTo, chip: () => screen.getByTestId("tl-target-m2") }
+  }
+
+  it("S splits the selected take at the playhead", () => {
+    const { onCutTargets, playheadTo, chip } = renderSplit()
+    playheadTo(12)
+    fireEvent.click(chip())
+    expect(chip().className).toContain("ring-2 ring-sky-500")
+    fireEvent.keyDown(window, { key: "s" })
+    expect(onCutTargets).toHaveBeenCalledTimes(1)
+    const [cuts] = onCutTargets.mock.calls[0]
+    expect(cuts).toHaveLength(1)
+    expect(cuts[0]).toMatchObject({ cellId: "m2", audioId: TAKE_ID })
+    expect(cuts[0].atMs).toBeGreaterThan(1900)
+    expect(cuts[0].atMs).toBeLessThan(2100)
+  })
+
+  it("clicking a take leaves the playhead where it is; double-clicking jumps to the line", () => {
+    const { onSeekToTime, playheadTo, chip } = renderSplit()
+    playheadTo(12)
+    expect(onSeekToTime).toHaveBeenCalledTimes(1)
+    fireEvent.click(chip())
+    expect(onSeekToTime).toHaveBeenCalledTimes(1)
+    fireEvent.doubleClick(chip())
+    expect(onSeekToTime).toHaveBeenCalledTimes(2)
+    expect(onSeekToTime.mock.calls[1][0]).toBeCloseTo(10)
+  })
+
+  it("S never splits at the mouse: with no take selected it does nothing", () => {
+    const { onCutTargets, playheadTo, chip } = renderSplit()
+    playheadTo(12)
+    // 2 s into the take (the test DOM lays the chip at x = 0).
+    fireEvent.pointerMove(chip(), { clientX: 2 * 38 })
+    fireEvent.keyDown(window, { key: "s" })
+    expect(onCutTargets).not.toHaveBeenCalled()
+  })
+
+  it("S does nothing while the playhead is off the selected take", () => {
+    const { onCutTargets, playheadTo, chip } = renderSplit()
+    playheadTo(2)
+    fireEvent.click(chip())
+    fireEvent.keyDown(window, { key: "s" })
+    expect(onCutTargets).not.toHaveBeenCalled()
+  })
+
+  it("a click on the line's card drops the selected take", () => {
+    const { onCutTargets, playheadTo, chip } = renderSplit()
+    fireEvent.click(chip())
+    fireEvent.click(screen.getByTestId("tl-card-m2"))
+    playheadTo(12)
+    expect(chip().className).not.toContain("ring-2")
+    fireEvent.keyDown(window, { key: "s" })
+    expect(onCutTargets).not.toHaveBeenCalled()
+  })
+})
+
+// AQU-1684 (Sam's decision): each person hides lanes on their own screen, per
+// file, stored on the device like folder collapse. A lane never vanishes
+// without trace — "Hidden tracks (N)" lists it to show again — and one that is
+// recording or being dragged may not be hidden.
+describe("TimelineEditor — hiding tracks (AQU-1684)", () => {
+  beforeEach(() => {
+    topOwner.value = 1
+    localStorage.clear()
+  })
+
+  const rowCells = [cell({ id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10 })]
+  const gutter = () => screen.getByTestId("tl-scroll").previousElementSibling as HTMLElement
+  const names = () =>
+    Array.from(gutter().querySelectorAll("span.font-semibold")).map((el) => el.textContent)
+  const lanes = () =>
+    screen.getByTestId("tl-scroll").querySelectorAll('[data-testid="tl-lane"],[data-testid^="tl-target-lane"],[data-testid="tl-source-regions"]').length
+  const editor = (props: Record<string, unknown> = {}) => (
+    <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}} {...props} />
+  )
+  /** Right-click a track's row and pick Hide. */
+  const hide = (trackId: string) => {
+    fireEvent.contextMenu(screen.getByTestId(`tl-track-menu-${trackId}`))
+    fireEvent.click(screen.getByText("Hide track"))
+  }
+
+  it("hides a lane from the gutter and the lanes, and lists it to show again", async () => {
+    render(editor())
+    const before = lanes()
+    expect(screen.queryByTestId("tl-hidden-tracks")).toBeNull()
+    hide("source-audio")
+    expect(names()).toEqual(["Source text", "Target audio"])
+    expect(lanes()).toBe(before - 1)
+    const menu = screen.getByTestId("tl-hidden-tracks")
+    expect(menu).toHaveTextContent("Hidden tracks (1)")
+    fireEvent.click(menu)
+    fireEvent.click(await screen.findByTestId("tl-show-track-source-audio"))
+    expect(names()).toEqual(["Source text", "Source audio", "Target audio"])
+    expect(lanes()).toBe(before)
+    expect(screen.queryByTestId("tl-hidden-tracks")).toBeNull()
+  })
+
+  it("is this person's, per file, kept on this device", () => {
+    const { unmount } = render(editor())
+    hide("target-audio")
+    expect(localStorage.getItem("aquilla:tlTracksHidden:f1")).toBe(JSON.stringify(["target-audio"]))
+    unmount()
+    const again = render(editor())
+    expect(names()).toEqual(["Source text", "Source audio"])
+    again.unmount()
+    render(editor({ fileId: "f2" }))
+    expect(names()).toEqual(["Source text", "Source audio", "Target audio"])
+  })
+
+  it("shows them all again at once", async () => {
+    render(editor())
+    hide("source-audio")
+    hide("target-audio")
+    fireEvent.click(screen.getByTestId("tl-hidden-tracks"))
+    expect(screen.getByTestId("tl-hidden-tracks")).toHaveTextContent("Hidden tracks (2)")
+    fireEvent.click(await screen.findByTestId("tl-show-all-tracks"))
+    expect(names()).toEqual(["Source text", "Source audio", "Target audio"])
+  })
+
+  it("will not hide the track the recorder is taking into", () => {
+    render(editor({ recordingSlot: "recording" }))
+    fireEvent.contextMenu(screen.getByTestId("tl-track-menu-target-audio"))
+    const item = screen.getByTestId("tl-track-hide")
+    expect(item).toHaveAttribute("data-disabled")
+    fireEvent.click(item)
+    expect(names()).toEqual(["Source text", "Source audio", "Target audio"])
+  })
+
+  it("will not hide a lane while a drag is under way in it", () => {
+    render(editor())
+    const lane = screen.getByTestId("tl-scroll").querySelector('[data-testid^="tl-target-lane"]') as HTMLElement
+    fireEvent.pointerDown(lane, { button: 0 })
+    fireEvent.contextMenu(screen.getByTestId("tl-track-menu-target-audio"))
+    expect(screen.getByTestId("tl-track-hide")).toHaveAttribute("data-disabled")
+    fireEvent.pointerUp(window)
   })
 })

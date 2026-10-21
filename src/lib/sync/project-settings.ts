@@ -17,6 +17,7 @@ import type { TranslationBrief } from "@/lib/brief/types"
 import type { InheritedFromLink } from "@/lib/sync/inherited-settings"
 import type { DraftContextSettings } from "@/lib/completion/draft-context"
 import type { DirectionMode } from "@/lib/text-direction"
+import type { MediaDefaults } from "../../../db/shared/media-setting-defaults"
 
 /** Initial server version for projects with no settings row. */
 export const PROJECT_SETTINGS_VERSION_INITIAL = 0
@@ -213,6 +214,15 @@ export interface ProjectWideSettings {
    * keep it; see `isAutopilotVisible` in src/lib/features/flags.ts.
    */
   autopilotEnabled?: boolean
+  /**
+   * AQU-1937: the per-project "Smart Extensions" switch. Absent / false = the
+   * project is exactly today's Aquilla: the native editor, the built-in
+   * importers, and no extensions UI or routes (auth-worker refuses the tools
+   * API). True = the extensions UI, the Smart Extension editor as the default
+   * (switch-back stays) and extension importers (the first-party Door43 one)
+   * in Import. Maintainer (600)+, the ordinary settings floor.
+   */
+  smartExtensionsEnabled?: boolean
   /**
    * AQU-186: minimum role level required to trigger a harmonization sweep on
    * this project. Default (absent) = project_lead (500). Configurable up to
@@ -498,6 +508,12 @@ export interface ProjectSettingsResponse {
    */
   orgValidationCount?: number | null
   orgValidationCountAudio?: number | null
+  /**
+   * AQU-1768: the org's media defaults (valid values only; empty when it set
+   * none). A project with no value of its own for one of these keys follows
+   * the org's; the server gates resolve the same way.
+   */
+  orgMediaDefaults?: MediaDefaults
   /**
    * Whether the org lets bulk text validation take untouched AI drafts. On
    * this response for the same reason as the line above, and because a project

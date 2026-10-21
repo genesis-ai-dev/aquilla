@@ -13,6 +13,7 @@
 // expiry, mirroring `makeSyncTokenFetcher` in src/lib/sync/sync-token.ts.
 
 import { fetchSyncToken, SyncTokenError } from "@/lib/sync/sync-token"
+import { onElevationGranted } from "@/lib/errors/elevation-required-signal"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { SyncTokenForFile } from "./upload"
 
@@ -40,6 +41,13 @@ interface CachedToken {
 // (`sessionKey(s) = s.username`), so switching the active session naturally
 // partitions the cache instead of leaking across it.
 const cache = new Map<string, CachedToken>()
+
+// AQU-2003: an un-elevated platform admin is minted a Viewer (100) token for a
+// foreign project. This cache would keep serving it for up to 15 minutes after
+// the admin enters the step-up code, so audio writes (floor CONTRIBUTOR) would
+// keep failing on a page that now says it is editable. Drop every entry on a
+// grant; the next call mints at the elevated level.
+onElevationGranted(() => cache.clear())
 
 /** @internal — test seam; clears the shared cache between test cases. */
 export function __resetAudioSyncTokenCacheForTests(): void {

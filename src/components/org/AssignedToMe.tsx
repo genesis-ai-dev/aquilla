@@ -5,6 +5,7 @@ import { Building2 } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
 import { AssignmentLaneBadge } from "@/components/AssignmentLaneBadge"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
@@ -199,6 +200,11 @@ export function AssignedToMe() {
                 defaultLaneLabel={defaultLaneLabelByProjectId.get(a.projectId) ?? ""}
                 fallbackLabel={laneFallbackLabel}
               />
+              {/* AQU-1969: a validate assignment's progress is this person's
+                  own approvals; say which kind it is. */}
+              {a.kind === "validate" && (
+                <Badge variant="outline" className="shrink-0">{t("org.validationProgress.kindChip")}</Badge>
+              )}
             </div>
           )
         },

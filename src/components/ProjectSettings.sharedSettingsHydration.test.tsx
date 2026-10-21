@@ -165,7 +165,7 @@ const tree = (pane: string) => (
 
 const isOn = (el: HTMLElement) =>
   el.getAttribute("aria-checked") === "true" || el.getAttribute("data-state") === "checked"
-const selfValidation = () => screen.getByRole("switch", { name: /^allow self-validation$/i })
+const selfValidation = () => screen.getByRole("switch", { name: /^allow self-validation \(text\)$/i })
 const saveButton = () => screen.queryByRole("button", { name: /save changes/i })
 
 /** The validation pane: both validation policies and the harmonize floor. */

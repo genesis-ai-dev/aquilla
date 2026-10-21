@@ -141,15 +141,16 @@ afterEach(() => {
 })
 
 describe("settings writes behind the lane read wall (AQU-1750)", () => {
-  it("a project lead sees every target lane; a contributor still sees only grants (AQU-1795)", async () => {
+  it("a project lead sees only granted lanes; a lead with no grant sees none", async () => {
     await seed()
     env.LANE_READ_WALL = "1"
     const lead = await getSettings("dan")
-    expect(lead.settings.targetLanguage).toBe("French")
-    expect(lead.settings.targetLanes).toEqual(["de", "es"])
-    expect(targetLaneIds(lead).sort()).toEqual(["ln-de", "ln-es", "ln-main"])
+    expect(lead.settings.targetLanguage).toBe("")
+    expect(lead.settings.targetLanes).toEqual(["es"])
+    expect(targetLaneIds(lead)).toEqual(["ln-es"])
     const ungrantedLead = await getSettings("erin")
-    expect(targetLaneIds(ungrantedLead).sort()).toEqual(["ln-de", "ln-es", "ln-main"])
+    expect(ungrantedLead.settings.targetLanguage).toBe("")
+    expect(targetLaneIds(ungrantedLead)).toEqual([])
 
     const contributor = await getSettings("carla")
     expect(contributor.settings.targetLanguage).toBe("")
@@ -203,6 +204,37 @@ describe("settings writes behind the lane read wall (AQU-1750)", () => {
     expect(await storedSettings()).toEqual(STORED)
   })
 
+  it("a lead's read omits a hidden lane's voices, and an echo does not delete them", async () => {
+    await seed()
+    const withVoices = {
+      ...STORED,
+      ttsSettings: {
+        voices: [
+          { id: "narrator", name: "Narrator" },
+          { id: "de-1", name: "German", laneId: "ln-de" },
+          { id: "es-1", name: "Spanish", laneId: "ln-es" },
+        ],
+        defaultVoiceId: "de-1",
+        castAssignments: { hero: "de-1", guide: "es-1" },
+        laneCastAssignments: { de: { hero: "de-1" }, es: { guide: "es-1" } },
+        laneDefaultVoiceId: { de: "de-1", es: "es-1" },
+      },
+    }
+    await env.AQUILLA_PG.prepare(
+      "UPDATE project_settings SET settings = ? WHERE project_id = 'p1'",
+    ).bind(JSON.stringify(withVoices)).run()
+    env.LANE_READ_WALL = "1"
+    const lead = await getSettings("dan")
+    const tts = lead.settings.ttsSettings as { voices: { id: string }[] }
+    expect(tts.voices.map((voice) => voice.id)).toEqual(["narrator", "es-1"])
+    expect(JSON.stringify(lead.settings.ttsSettings)).not.toContain("de-1")
+    const owner = await getSettings("alice")
+    expect(JSON.stringify(owner.settings.ttsSettings)).toContain("de-1")
+    const res = await echoWrite("dan", { autopilotEnabled: true })
+    expect(res.status).toBe(200)
+    expect(await storedSettings()).toEqual({ ...withVoices, autopilotEnabled: true })
+  })
+
   it("a contributor's alignment-seed write is not refused because of the echo", async () => {
     // AQU-1408 admits an alignmentSeeds-only diff at Contributor. The filtered
     // echo used to add targetLanes/targetLanguage to the diff, so behind the
@@ -223,9 +255,9 @@ describe("settings writes behind the lane read wall (AQU-1750)", () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as SettingsBody
     expect(body.settings).toEqual({ ...(await getSettings("dan")).settings })
-    expect(body.settings.targetLanguage).toBe("French")
-    expect(body.settings.targetLanes).toEqual(["de", "es"])
-    expect(targetLaneIds(body).sort()).toEqual(["ln-de", "ln-es", "ln-main"])
+    expect(body.settings.targetLanguage).toBe("")
+    expect(body.settings.targetLanes).toEqual(["es"])
+    expect(targetLaneIds(body)).toEqual(["ln-es"])
   })
 
   it("the 409 body is filtered like the GET, and the retry built on it loses nothing", async () => {
@@ -240,10 +272,10 @@ describe("settings writes behind the lane read wall (AQU-1750)", () => {
     const res = await patchSettings("dan", { ...clientBody(seen.settings), ...edit }, 0)
     expect(res.status).toBe(409)
     const body = (await res.json()) as { current: SettingsBody }
-    expect(body.current.settings.targetLanguage).toBe("French")
-    expect(body.current.settings.targetLanes).toEqual(["de", "es"])
-    expect(body.current.settings.archivedLanes).toEqual(["de"])
-    expect(targetLaneIds(body.current).sort()).toEqual(["ln-de", "ln-es", "ln-main"])
+    expect(body.current.settings.targetLanguage).toBe("")
+    expect(body.current.settings.targetLanes).toEqual(["es"])
+    expect(body.current.settings.archivedLanes).toEqual([])
+    expect(targetLaneIds(body.current)).toEqual(["ln-es"])
     expect(await storedSettings()).toEqual(STORED)
 
     const retry = await patchSettings("dan", { ...clientBody(body.current.settings), ...edit }, body.current.version)

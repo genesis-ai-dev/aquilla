@@ -91,9 +91,18 @@ const UNCOVERED: Record<string, string> = {
   agent_sessions: "never granted to app_runtime",
   api_credentials: "never granted to app_runtime",
   cell_links: "never granted to app_runtime",
+  // AQU-1408 (0182): hand-corrected statistical glosses, created alongside
+  // cell_backtranslations' shape and read through the same sync-worker
+  // perimeter. Listed here rather than given a policy for the blanket reason
+  // above — a new table is not granted to app_runtime, so a policy written
+  // `TO app_runtime` would be inert.
+  cell_glosses: "never granted to app_runtime",
   chain_claims: "never granted to app_runtime",
   concepts: "never granted to app_runtime",
   file_segmentation: "never granted to app_runtime",
+  // AQU-1813 (0172): the lanes a team attachment covers. Unlike
+  // group_project_grants, app_user_can_access_project() never reads it.
+  group_project_lanes: "never granted to app_runtime",
   integration_links: "never granted to app_runtime",
   knowledge_docs: "never granted to app_runtime",
   lanes: "never granted to app_runtime",
@@ -110,8 +119,15 @@ const UNCOVERED: Record<string, string> = {
   seq_allocations: "never granted to app_runtime",
   // AQU-1694 (0164): derived word links, written like cell_word_morph.
   source_word_alignment: "never granted to app_runtime",
+  // AQU-1767 (0171): what a row removal took, kept so the removal can be
+  // undone. Written and read only by the sync-worker's projection of
+  // source.cell.delete / source.cell.restore; no app read path touches it.
+  removed_cell_archive: "never granted to app_runtime",
   style_rules: "never granted to app_runtime",
   workspace_usage_requests: "never granted to app_runtime",
+  project_tools: "never granted to app_runtime (tools prototype)",
+  project_tool_versions: "never granted to app_runtime (tools prototype)",
+  project_tool_grants: "never granted to app_runtime (tools prototype)",
 }
 
 describe("RLS coverage over project-scoped tables", () => {

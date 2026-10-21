@@ -3,6 +3,7 @@
 
 import type { BillingPlan, BillingStatus } from "./plans"
 import { emptyBillingRow, type OrgBillingRow } from "./words"
+import { tierFromLegacyPlan } from "../../../../db/shared/org-plan"
 
 // Mutation paths must never turn a database failure into an empty billing row.
 async function readOrgBilling(db: AquillaDb, orgId: number): Promise<OrgBillingRow> {
@@ -146,6 +147,12 @@ export async function upsertOrgBilling(
       next.hard_cap_words,
     )
     .run()
+  // AQU-2059: a legacy plan write (admin picker or Field webhook) moves the
+  // resolver's tier with it until the admin portal sets the tier directly (T10).
+  if (patch.plan !== undefined) {
+    await db.prepare("UPDATE org_billing SET tier = ? WHERE org_id = ?")
+      .bind(tierFromLegacyPlan(patch.plan), patch.orgId).run()
+  }
 }
 
 export async function applySubscriptionSnapshot(

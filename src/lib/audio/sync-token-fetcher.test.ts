@@ -22,6 +22,7 @@ vi.mock("@/lib/sync/sync-token", async () => {
 })
 
 import { fetchSyncToken } from "@/lib/sync/sync-token"
+import { notifyElevationGranted } from "@/lib/errors/elevation-required-signal"
 import { makeAudioSyncTokenFetcher, __resetAudioSyncTokenCacheForTests } from "./sync-token-fetcher"
 
 const mockedFetchSyncToken = vi.mocked(fetchSyncToken)
@@ -146,5 +147,17 @@ describe("makeAudioSyncTokenFetcher — shared module-level cache", () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe("makeAudioSyncTokenFetcher — admin step-up (AQU-2003)", () => {
+  it("drops cached tokens when elevation is granted, so audio writes stop using the Viewer token", async () => {
+    const fetcher = makeAudioSyncTokenFetcher(() => makeSession())
+    const before = await fetcher("proj-1", "file-1")
+    expect(await fetcher("proj-1", "file-1")).toBe(before)
+    notifyElevationGranted()
+    const after = await fetcher("proj-1", "file-1")
+    expect(after).not.toBe(before)
+    expect(mockedFetchSyncToken).toHaveBeenCalledTimes(2)
   })
 })

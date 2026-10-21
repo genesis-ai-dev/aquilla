@@ -26,6 +26,7 @@
 // in sync-worker/src/events/authorize.ts; the client gate is a UX affordance,
 // not the security boundary.
 
+import { fileDisplayName } from "@/lib/file-display-name"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { UserCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -57,6 +58,7 @@ import {
 } from "@/components/ui/select"
 import { DatePicker, dateToDeadlineString } from "@/components/ui/date-picker"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { AssignKindField } from "@/components/AssignKindField"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import { partitionMembers, type ProjectMember } from "@/lib/frontier/members"
@@ -68,7 +70,7 @@ import {
   getFileChapters,
   AssignmentEmitError,
 } from "@/lib/sync/assignments"
-import type { AssignmentScopeEntry, AssignmentScopeKind } from "@/lib/sync/assignments"
+import type { AssignmentKind, AssignmentScopeEntry, AssignmentScopeKind } from "@/lib/sync/assignments"
 import { ROLE } from "@/lib/frontier/roles"
 import {
   canOpenAssignUi,
@@ -79,9 +81,11 @@ import {
 import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
 import {
   buildLaneItems,
+  lanesStaffedBy,
   laneTagForAssignment,
   selectValueForLane,
   type AssignLaneOption,
+  type TeamLaneAttachment,
 } from "@/lib/sync/assignment-lane"
 
 type ScopeKind = "selection" | "verses" | "chapters" | "books"
@@ -109,6 +113,20 @@ interface AssignModalProps {
    * `defaultLane` that names none of them opens on the first.
    */
   lanes?: readonly AssignLaneOption[]
+  /**
+   * AQU-1994: the project's lanes at least one of its people is on. `lanes` is
+   * narrowed to these, so this modal offers exactly what the Team card's
+   * Assign work panel offers. `null`/omitted means the server did not say and
+   * leaves the list as it was.
+   */
+  staffedLaneIds?: ReadonlySet<string> | readonly string[] | null
+  /**
+   * AQU-2047: each attached team's lane checks. The same input Assign work
+   * on the project overview passes, so this modal (lane row, plan, org,
+   * editor) offers the same lanes. `null`, omitted, or `[]` leaves the list
+   * as it was.
+   */
+  teamLanes?: readonly TeamLaneAttachment[] | null
   /** Display names keyed by lane tag, including '' for the default lane. */
   laneLabels?: Readonly<Record<string, string>>
   /**
@@ -205,6 +223,8 @@ export function AssignModal({
   projectFiles,
   targetLanes,
   lanes,
+  staffedLaneIds,
+  teamLanes,
   laneLabels,
   defaultLane = "",
   defaultLaneLabel,
@@ -240,6 +260,8 @@ export function AssignModal({
     callerUserId ?? members.find((member) => member.username === author)?.userId ?? null
 
   const [scopeKind, setScopeKind] = useState<ScopeKind>("verses")
+  // AQU-1969: Translate (the assignment as it always was) unless chosen.
+  const [kind, setKind] = useState<AssignmentKind>("translate")
   const [selectedMemberId, setSelectedMemberId] = useState<string>("")
   // AQU-538 (§3.5): the target-language lane this assignment is pinned to. '' =
   // default lane. Only surfaced when the project has extra lanes.
@@ -291,6 +313,7 @@ export function AssignModal({
       setError(null)
       setNote("")
       setDeadlineDate(undefined)
+      setKind("translate")
     }
   }, [open, selectedCellIds.size, activeFileId, isSelfAssignMode, effectiveCallerUserId, defaultLane, effectiveDelegate])
 
@@ -332,7 +355,7 @@ export function AssignModal({
   // AQU-676: the assignee picker must list only the project's own members,
   // never everyone with org-baseline access. Org members inherit access to
   // every project via AD-12 max-wins, so without this filter a per-team mentor
-  // doing assignments sees (and could assign to) other language teams' people.
+  // doing assignments sees (and could assign to) people staffed on other lanes.
   // partitionMembers (AQU-454) keeps only members with a project-specific path
   // (override / group / creator); org-baseline-only members drop out.
   //
@@ -368,9 +391,18 @@ export function AssignModal({
         defaultLaneLabel,
         defaultLaneFallback: t("dialog.assign.defaultLaneFallback"),
         allowedTags: laneDelegateLanes(effectiveDelegate),
+        staffedLaneIds,
+        teamLanes,
       }),
-    [lanes, targetLanes, laneLabels, defaultLaneLabel, effectiveDelegate, t],
+    [lanes, targetLanes, laneLabels, defaultLaneLabel, effectiveDelegate, staffedLaneIds, teamLanes, t],
   )
+  // AQU-1994: the project has lanes but nobody on it is on any of them. The
+  // modal names that instead of offering a language no one can work in, and
+  // refuses the submit — the same answer the Team card's panel gives. Asked of
+  // staffing alone: a lane delegate whose own lanes no longer exist also ends
+  // up with nothing to choose, and that is a different sentence.
+  const noStaffedLanes =
+    Boolean(lanes?.length) && lanesStaffedBy(lanes ?? [], staffedLaneIds).length === 0
   // AQU-1977: given the project's own lanes, a pick that names none of them —
   // an empty default on a project that has no '' lane — reads as the first.
   const laneValue =
@@ -448,6 +480,10 @@ export function AssignModal({
 
   const handleSubmit = useCallback(async () => {
     setError(null)
+    if (noStaffedLanes) {
+      setError(t("org.assignWork.noStaffedLanes"))
+      return
+    }
     const member = members.find((m) => String(m.userId) === selectedMemberId)
     if (!member) { setError(t("dialog.assign.error.selectMember")); return }
 
@@ -492,7 +528,8 @@ export function AssignModal({
     if (scopeKind === "books") {
       if (selectedFileIds.size === 0) { setError(t("dialog.assign.error.selectFile")); return }
       const entries = Array.from(selectedFileIds).map((fid) => {
-        const name = projectFiles.find((f) => f.id === fid)?.name ?? fid
+        const file = projectFiles.find((f) => f.id === fid)
+        const name = file ? fileDisplayName(file) : fid
         const groupLabel = groupLabelByFileId.get(fid)
         return { fileId: fid, scopeLabel: groupLabel ? `${groupLabel} · ${name}` : name }
       })
@@ -507,6 +544,7 @@ export function AssignModal({
           targetLang: laneTagForAssignment(laneValue),
           deadline,
           note: note.trim() || null,
+          kind,
         })
         const failed = results.filter((r) => r.error)
         const succeeded = results.length - failed.length
@@ -586,6 +624,7 @@ export function AssignModal({
         targetLang: laneTagForAssignment(laneValue),
         deadline,
         note: note.trim() || null,
+        kind,
       })
       onAssigned()
       onOpenChange(false)
@@ -612,7 +651,7 @@ export function AssignModal({
     jwt, projectId, author, note, onAssigned, onOpenChange,
     roleLevel, allowSelfAssignment, assignmentMinRole, effectiveDelegate, isLaneDelegate,
     effectiveCallerUserId, deadlineDate, groupLabelByFileId,
-    laneValue, isScripture, segmentNoun, selectUnitErrorKey, assigneeRefusal, t,
+    laneValue, noStaffedLanes, isScripture, segmentNoun, selectUnitErrorKey, assigneeRefusal, kind, t,
   ])
 
   // Role gate (AQU-496 / AQU-581): a caller at the org's assignment floor
@@ -652,6 +691,9 @@ export function AssignModal({
             max-h-[85dvh] DialogContent. */}
         <DialogBody>
         <FieldGroup className="py-1">
+          {/* AQU-1969: what the work is comes before which lines and who. */}
+          <AssignKindField id="assign-modal-kind" value={kind} onChange={setKind} disabled={submitting} />
+
           <Field>
             <FieldLabel htmlFor="assign-modal-scope">{t("dialog.assign.scopeLabel")}</FieldLabel>
             <Select
@@ -728,6 +770,16 @@ export function AssignModal({
               </FieldDescription>
             </Field>
           )}
+          {/* AQU-1994: no one on the project is on any of its lanes. Say so
+              where the picker would have been; Assign is refused. */}
+          {noStaffedLanes && (
+            <Field>
+              <FieldLabel>{t("dialog.assign.laneLabel")}</FieldLabel>
+              <FieldError data-testid="assign-modal-no-staffed-lanes">
+                {t("org.assignWork.noStaffedLanes")}
+              </FieldError>
+            </Field>
+          )}
           {/* AQU-581: a lane delegate scoped to one language of a multi-language
               project has nothing to choose, but still needs to see which
               language the work lands in — hiding the picker hid that too. */}
@@ -773,7 +825,7 @@ export function AssignModal({
                             onCheckedChange={() => toggleFile(f.id)}
                             className="size-3"
                           />
-                          {f.name}
+                          {fileDisplayName(f)}
                         </label>
                       ))}
                     </div>
@@ -893,7 +945,7 @@ export function AssignModal({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
             {t("common.cancel")}
           </Button>
-          <Button onClick={handleSubmit} disabled={submitting}>
+          <Button onClick={handleSubmit} disabled={submitting || noStaffedLanes}>
             {submitting ? <Spinner className="me-1" /> : null}
             {t("dialog.assign.submit")}
           </Button>

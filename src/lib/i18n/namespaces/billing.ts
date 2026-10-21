@@ -89,6 +89,7 @@ export const billing = defineNamespace({
     "billing.workspace.eligibility.already_subscribed": "This workspace already has a paid plan. Changes will be available when billing management is ready.",
     "billing.workspace.eligibility.personal_collaboration_review": "This personal workspace has collaborators. Contact us to confirm the right plan before purchasing.",
     "billing.workspace.manageInStripe": "Use Manage billing to update this workspace’s subscription in Stripe.",
+    "billing.workspace.paymentGrace": "Payment failed. Stripe will retry your card, and your Team plan stays active until {date}. Update your payment method in Manage billing to keep it.",
     "billing.workspace.paymentFailed": "Payment failed. Your AI allowance falls back to Free. This week’s usage still counts; if it exceeds Free’s allowance, AI pauses until the weekly reset or payment recovery.",
     "billing.workspace.paidPeriodEnded": "Your paid period has ended. Your AI allowance follows Free, with this week’s usage still counted.",
     "billing.workspace.canceled": "Your subscription is canceled. Paid access continues through {date}.",
@@ -138,6 +139,31 @@ export const billing = defineNamespace({
     "billing.aiUsage.pauseNote": "Usage limits may pause affected AI requests until capacity is available again. Your projects remain available for manual editing and review.",
     "billing.aiUsage.noSelfService": "Self-service allowance purchases are not available. Contact us if your organization needs more capacity.",
     "billing.aiUsage.contact": "Discuss AI capacity",
+    "billing.meter.label": "AI this week",
+    "billing.meter.loading": "Loading AI usage…",
+    "billing.meter.unavailable": "AI usage is unavailable right now.",
+    "billing.meter.percent": "{percent}%",
+    "billing.meter.ariaLabel": "{percent}% of this week's AI used",
+    "billing.meter.resets": "Resets {day}",
+    "billing.meter.warning": "Most of this week's AI is used.",
+    "billing.meter.exhausted": "This week's AI is used up. AI actions are paused until {day}.",
+    "billing.meter.exhaustedNoDate": "This week's AI is used up. AI actions are paused until it resets.",
+    "billing.meter.askAdmin": "Ask a workspace admin to upgrade or add your own key.",
+    "billing.meter.upgrade": "Upgrade to Team",
+    "billing.meter.ownKey": "Use your own key",
+    "billing.meter.enterpriseContact": "Talk to us about Enterprise",
+    "billing.meter.agentNote": "Agent runs use much more of this week's AI than single drafts.",
+    "billing.meter.byok": "Not metered",
+    "billing.meter.byokTooltip": "You're using your own AI provider, so Aquilla doesn't meter this. See costs in your provider's dashboard.",
+    "billing.meter.byokInfoAriaLabel": "Why AI is not metered",
+    "billing.meter.unlimited": "Unlimited",
+    "billing.meter.unlimitedHelp": "Your Enterprise plan includes unlimited AI.",
+    "billing.meter.enterprise": "Enterprise",
+    "billing.meter.sectionTitle": "AI usage",
+    "billing.refusal.title": "This week's AI is used up",
+    "billing.refusal.allowance": "This workspace has used this week's AI.",
+    "billing.refusal.resets": "It comes back on {day}.",
+    "billing.refusal.ceiling": "Aquilla's AI is unavailable right now. Try again later, or use your own AI provider.",
     "billing.usage.period": "Agent credits this period",
     "billing.usage.label": "Usage",
     "billing.usage.unpaidHelp": "Explore includes a cycle of agent credits. Field Plan checkout is coming soon.",
@@ -453,6 +479,12 @@ export const billing = defineNamespace({
   "billing.workspace.manageInStripe": {
     "description": "Help text for a workspace that already has a paid plan. \"Manage billing\" is the label of the button on this page (billing.portal.manage); use the same translation. Stripe is the payment provider's name; do not translate it."
   },
+  "billing.workspace.paymentGrace": {
+    "description": "Status after a renewal payment failed but the grace period is still running: Stripe retries the card and the Team plan stays active until the date. \"Team\" is the plan name. \"Manage billing\" is the label of the button on this page (billing.portal.manage); use the same translation. Stripe is the payment provider's name; do not translate it.",
+    "placeholders": {
+      "date": "Date and time the grace period ends, already formatted for the user's locale."
+    }
+  },
   "billing.workspace.paymentFailed": {
     "description": "Status after a payment failed: the workspace gets the AI allowance of the Free plan, and AI can pause if this week's usage is already over that allowance. \"Free\" is the plan name (billing.plan.free)."
   },
@@ -579,6 +611,29 @@ export const billing = defineNamespace({
   },
   "billing.aiUsage.contact": {
     "description": "Link that starts an email to support about more AI capacity."
+  },
+  "billing.meter.percent": {
+    "description": "The large number on the AI meter: how much of this week's AI allowance the workspace has used. Never an amount.",
+    "placeholders": { "percent": "Whole number from 0 to 100." }
+  },
+  "billing.meter.ariaLabel": {
+    "description": "Screen-reader name of the AI meter's progress bar and the tooltip on the compact meter ring.",
+    "placeholders": { "percent": "Whole number from 0 to 100." }
+  },
+  "billing.meter.resets": {
+    "description": "Small text beside the AI meter: the day the weekly AI allowance starts again.",
+    "placeholders": { "day": "Short weekday name, already localized (e.g. Mon)." }
+  },
+  "billing.meter.exhausted": {
+    "description": "Alert under the AI meter at 100%: new AI actions are stopped until the weekly reset.",
+    "placeholders": { "day": "Short weekday name, already localized (e.g. Mon)." }
+  },
+  "billing.meter.byokInfoAriaLabel": {
+    "description": "Screen-reader name of the info button beside a greyed AI meter; its tooltip explains the workspace uses its own AI provider."
+  },
+  "billing.refusal.resets": {
+    "description": "Second sentence of the error shown when an AI action was refused because the weekly allowance is used up.",
+    "placeholders": { "day": "Full weekday name, already localized (e.g. Monday)." }
   }
 },
     _context: {

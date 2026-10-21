@@ -12,6 +12,7 @@
 
 import type { AquillaDb } from "../shim/postgres"
 import { loadOrgVisibilityFloorsForProject } from "./visibility-floors"
+import { mediaDefaultsFromOrgSettings } from "./media-setting-defaults"
 
 export const MAX_VALIDATION_THRESHOLD = 15
 
@@ -104,6 +105,22 @@ export async function loadInheritedPolicyDefaults(
   if (org.validationCount != null) out.validationCount = org.validationCount
   if (org.validationCountAudio != null) out.validationCountAudio = org.validationCountAudio
   if (floors) Object.assign(out, floors)
+  // AQU-1768: the media settings that are also policy keys (who may add or
+  // remove lines, audio self-validation, the audio validation role floor).
+  const row = await db
+    .prepare(`SELECT os.settings FROM projects p JOIN org_settings os ON os.org_id = p.org_id WHERE p.id = ?`)
+    .bind(projectId)
+    .first<{ settings: string | null }>()
+  let orgSettings: unknown = null
+  try {
+    orgSettings = row?.settings ? JSON.parse(row.settings) : null
+  } catch {
+    // An unreadable org blob inherits nothing: the built-in defaults apply.
+  }
+  const media = mediaDefaultsFromOrgSettings(orgSettings)
+  for (const key of ["cellEditingFloor", "allowSelfValidationAudio", "validationRoleFloorAudio"] as const) {
+    if (media[key] !== undefined) out[key] = media[key]
+  }
   return out
 }
 

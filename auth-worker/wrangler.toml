@@ -92,6 +92,16 @@ class_name = "ContextualRunDriver"
 tag = "v1"
 new_sqlite_classes = ["ContextualRunDriver"]
 
+# AQU-2051 — the per-document knowledge-base indexing driver. A new DO class
+# needs its own migration tag; v1 above must stay as it is.
+[[durable_objects.bindings]]
+name = "KNOWLEDGE_INDEX_DRIVER"
+class_name = "KnowledgeIndexDriver"
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["KnowledgeIndexDriver"]
+
 # Keep the top-level email binding for default-profile compatibility. Every live
 # named environment also declares its own binding because Wrangler environments
 # do not inherit top-level bindings.
@@ -120,6 +130,9 @@ name = "EMAIL"
 #   GITLAB_ADMIN_TOKEN      — trusted service token for access reconstruction.
 #   STRIPE_SECRET_KEY       — Stripe secret (sk_test_… / sk_live_…). Never commit.
 #   STRIPE_WEBHOOK_SECRET   — Stripe webhook signing secret (whsec_…).
+#   OMNI_SHARED_SECRET      — sent as X-Omni-Secret to the Omnilingual ASR Modal
+#                             app; MUST match its `aquilla-omni-asr` Modal secret.
+#                             Unset → non-Whisper hosted transcription answers 503.
 # Plain vars: see types.ts for the full list.
 #
 # Outbound email (password reset + project invites) goes through Cloudflare
@@ -146,8 +159,8 @@ binding = "CF_VERSION_METADATA"
 [placement]
 mode = "smart"
 
-# Monday.com integration: cron flush of debounced board-link pushes
-# (src/index.ts scheduled() → lib/monday/push.ts flushDirtyLinks, cap 20).
+# Monday.com and Airtable integrations: cron flush of debounced link pushes
+# (src/index.ts scheduled() → lib/integrations/push.ts flushDirtyLinks, cap 20).
 # NOTE: like placement/observability, [triggers] is NOT inherited by env
 # blocks — keep the env-block copies below in sync.
 [triggers]
@@ -156,6 +169,14 @@ mode = "smart"
 crons = ["*/5 * * * *", "0 14 * * 1", "0 14 1 * *"]
 
 [vars]
+# Omnilingual ASR on Modal (infra/modal/omni_asr.py). Hosted transcription for
+# languages Whisper lacks, plus the zero-shot opt-in. Empty = Automatic keeps
+# Whisper auto-detect for those languages and an explicit Omnilingual choice
+# answers 503. Needs `wrangler secret put OMNI_SHARED_SECRET --env=<env>` with
+# the value of the Modal secret `aquilla-omni-asr`. OMNI_ASR_AMORTIZATION
+# (default 1.5) multiplies metered GPU cost to cover idle and cold-start time.
+OMNI_ASR_MODAL_URL = ""
+OMNI_ASR_AMORTIZATION = "1.5"
 ALGORITHM = "HS256"
 # [Pen test] Auth & session mgmt (2026-09-28): was 43200 (30 days). Lowered per
 # docs/OPSEC.md V8 — with server-side jti revocation now in place
@@ -285,7 +306,25 @@ class_name = "ContextualRunDriver"
 tag = "v1"
 new_sqlite_classes = ["ContextualRunDriver"]
 
+# AQU-2051 — the per-document knowledge-base indexing driver. A new DO class
+# needs its own migration tag; v1 above must stay as it is.
+[[env.production.durable_objects.bindings]]
+name = "KNOWLEDGE_INDEX_DRIVER"
+class_name = "KnowledgeIndexDriver"
+
+[[env.production.migrations]]
+tag = "v2"
+new_sqlite_classes = ["KnowledgeIndexDriver"]
+
 [env.production.vars]
+# Omnilingual ASR on Modal (infra/modal/omni_asr.py). Hosted transcription for
+# languages Whisper lacks, plus the zero-shot opt-in. Empty = Automatic keeps
+# Whisper auto-detect for those languages and an explicit Omnilingual choice
+# answers 503. Needs `wrangler secret put OMNI_SHARED_SECRET --env=<env>` with
+# the value of the Modal secret `aquilla-omni-asr`. OMNI_ASR_AMORTIZATION
+# (default 1.5) multiplies metered GPU cost to cover idle and cold-start time.
+OMNI_ASR_MODAL_URL = "https://genesis-ai-dev--aquilla-omnilingual-asr-api.us-east.modal.run"
+OMNI_ASR_AMORTIZATION = "1.5"
 ALGORITHM = "HS256"
 # [Pen test] Auth & session mgmt (2026-09-28): see [vars] above for why this
 # dropped from 43200 (30 days) — same reasoning applies to production.
@@ -350,6 +389,14 @@ BILLING_WORKSPACE_CHECKOUT_ENABLED = "false"
 # Same SECRET_KEY + SYNC_SECRET_KEY as prod so tokens minted against dev still
 # verify against prod workers during cross-env testing.
 # ---------------------------------------------------------------------------
+# Secrets Store (docs/DEPLOYMENT-ENVIRONMENTS.md, "Changing a secret without a
+# redeploy"): SS_<NAME> supplies env.<NAME> at runtime, so the value can change
+# in the store without a new Worker version.
+[[env.production.secrets_store_secrets]]
+binding = "SS_OMNI_SHARED_SECRET"
+store_id = "74633238cfb84b6a8197a6bd21b2fa21"
+secret_name = "aquilla-production-OMNI_SHARED_SECRET"
+
 [env.development]
 name = "aquilla-dev-identity"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
@@ -406,10 +453,28 @@ class_name = "ContextualRunDriver"
 tag = "v1"
 new_sqlite_classes = ["ContextualRunDriver"]
 
+# AQU-2051 — the per-document knowledge-base indexing driver. A new DO class
+# needs its own migration tag; v1 above must stay as it is.
+[[env.development.durable_objects.bindings]]
+name = "KNOWLEDGE_INDEX_DRIVER"
+class_name = "KnowledgeIndexDriver"
+
+[[env.development.migrations]]
+tag = "v2"
+new_sqlite_classes = ["KnowledgeIndexDriver"]
+
 [env.development.version_metadata]
 binding = "CF_VERSION_METADATA"
 
 [env.development.vars]
+# Omnilingual ASR on Modal (infra/modal/omni_asr.py). Hosted transcription for
+# languages Whisper lacks, plus the zero-shot opt-in. Empty = Automatic keeps
+# Whisper auto-detect for those languages and an explicit Omnilingual choice
+# answers 503. Needs `wrangler secret put OMNI_SHARED_SECRET --env=<env>` with
+# the value of the Modal secret `aquilla-omni-asr`. OMNI_ASR_AMORTIZATION
+# (default 1.5) multiplies metered GPU cost to cover idle and cold-start time.
+OMNI_ASR_MODAL_URL = "https://genesis-ai-dev--aquilla-omnilingual-asr-api.us-east.modal.run"
+OMNI_ASR_AMORTIZATION = "1.5"
 POSTHOG_HOST = "https://eu.i.posthog.com"
 POSTHOG_KEY = "phc_qy5gb7wTaW5RbmMW8SEyQPSLKtYFtUobaqKZWiUs7cBt"
 ALGORITHM = "HS256"
@@ -470,6 +535,14 @@ MONDAY_REDIRECT_URI = "https://dev.aquilla.app/oauth/callback"
 # AQU-1352 P1: shadow-compare the access_grants resolver (logs parity mismatches; answers unchanged).
 ACCESS_GRANTS_RESOLVER = "shadow"
 
+# Secrets Store (docs/DEPLOYMENT-ENVIRONMENTS.md, "Changing a secret without a
+# redeploy"): SS_<NAME> supplies env.<NAME> at runtime, so the value can change
+# in the store without a new Worker version.
+[[env.development.secrets_store_secrets]]
+binding = "SS_OMNI_SHARED_SECRET"
+store_id = "74633238cfb84b6a8197a6bd21b2fa21"
+secret_name = "aquilla-development-OMNI_SHARED_SECRET"
+
 [env.e2e]
 name = "aquilla-identity-e2e"
 
@@ -489,6 +562,16 @@ class_name = "ContextualRunDriver"
 [[env.e2e.migrations]]
 tag = "v1"
 new_sqlite_classes = ["ContextualRunDriver"]
+
+# AQU-2051 — the per-document knowledge-base indexing driver. A new DO class
+# needs its own migration tag; v1 above must stay as it is.
+[[env.e2e.durable_objects.bindings]]
+name = "KNOWLEDGE_INDEX_DRIVER"
+class_name = "KnowledgeIndexDriver"
+
+[[env.e2e.migrations]]
+tag = "v2"
+new_sqlite_classes = ["KnowledgeIndexDriver"]
 
 [env.e2e.vars]
 ALGORITHM = "HS256"

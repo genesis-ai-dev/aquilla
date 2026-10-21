@@ -22,6 +22,7 @@ vi.mock("@/lib/monday/api", () => ({
   },
   addMondayColumns: vi.fn(),
   analyzeMondayMapping: vi.fn(),
+  createMondayBoard: vi.fn(),
   deleteMondayLink: vi.fn(),
   fetchMondayBoards: vi.fn(),
   fetchMondayBoardStructure: vi.fn(),
@@ -193,6 +194,45 @@ describe("step 2: what the board shows", () => {
     await waitFor(() =>
       expect(screen.getByTestId("monday-column-summary").textContent).toMatch(/^Adds 6 new columns/),
     )
+  })
+
+  it("says who will see names only while Translators or Project manager is ticked (AQU-1989)", async () => {
+    renderWizard()
+    await toColumns()
+    expect(checked(/^Translators$/)).toBe(false)
+    expect(checked(/^Project manager$/)).toBe(false)
+    expect(screen.queryByTestId("monday-names-note")).toBeNull()
+
+    fireEvent.click(box(/^Translators$/))
+    const note = await screen.findByTestId("monday-names-note")
+    expect(note.getAttribute("role")).toBe("note")
+    expect(note.textContent).toBe("Everyone who can see Translation Tracker on Monday will see these names.")
+    // A security note: amber, so it stands out from the column descriptions (Sam, 2026-10-19).
+    expect(note.className).toMatch(/\bbg-amber-50\b/)
+    expect(note.className).toMatch(/\bborder-amber-300\b/)
+
+    fireEvent.click(box(/^Project manager$/))
+    fireEvent.click(box(/^Translators$/))
+    await waitFor(() => expect(checked(/^Translators$/)).toBe(false))
+    expect(screen.getByTestId("monday-names-note")).toBeTruthy() // Project manager is still ticked
+
+    fireEvent.click(box(/^Project manager$/))
+    await waitFor(() => expect(screen.queryByTestId("monday-names-note")).toBeNull())
+  })
+
+  it("shows the names note straight away when the board already has a Translators column (AQU-1989)", async () => {
+    mocked.fetchMondayBoardStructure.mockResolvedValue({
+      url: "https://actual-account.monday.com/boards/b1",
+      columns: [
+        { id: "numbers_1", title: "Progress", type: "numbers" },
+        { id: "text_1", title: "Translators", type: "text" },
+      ],
+      groups: [],
+    })
+    renderWizard()
+    await toColumns()
+    expect(checked(/^Translators$/)).toBe(true)
+    expect(screen.getByTestId("monday-names-note").textContent).toMatch(/everyone who can see translation tracker/i)
   })
 
   it("won't go on with nothing but Aquilla ID ticked", async () => {
@@ -380,11 +420,17 @@ describe("before the scan", () => {
     expect(screen.getByRole("button", { name: /scan and propose/i })).toBeTruthy()
   })
 
-  it("tells the user to make a board when the account has none, instead of echoing a 409", async () => {
-    mocked.analyzeMondayMapping.mockRejectedValue(new api.MondayApiError("no boards found in this Monday account", 409))
+  it("an account with no boards opens step 1 on making one, instead of echoing a 409", async () => {
+    // The real shape: readError keeps the server's words in `cause`, behind a generic message.
+    const err = new api.MondayApiError("Couldn't build a board mapping suggestion.", 409)
+    err.cause = "HTTP 409 — no boards found in this Monday account"
+    mocked.analyzeMondayMapping.mockRejectedValue(err)
     renderWizard()
     fireEvent.click(screen.getByRole("button", { name: /scan and propose/i }))
-    await waitFor(() => expect(screen.getByText(/create one in monday/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/has no boards yet, so aquilla will make one/i)).toBeTruthy())
+    expect(screen.getAllByRole("radio")).toHaveLength(1)
+    expect(screen.getByRole("radio", { name: /make a new board for me/i }).getAttribute("aria-checked")).toBe("true")
+    expect((screen.getByTestId("monday-new-board-name") as HTMLInputElement).value).toBe("Aquilla progress")
   })
 
   it("opens with one sentence, not a list", () => {
@@ -412,5 +458,129 @@ describe("manual mode", () => {
     expect(mocked.analyzeMondayMapping).not.toHaveBeenCalled()
     expect(screen.getByTestId("monday-column-translators").textContent).toMatch(/on your board/i)
     expect(screen.getByRole("button", { name: /advanced: match columns myself/i })).toBeTruthy()
+  })
+})
+
+// AQU-2087: "Make a new board for me".
+describe("step 1: make a new board", () => {
+  beforeEach(() => {
+    mocked.createMondayBoard.mockImplementation(async (_jwt, _p, body) => ({
+      boardId: "nb1",
+      created: body.metrics.map((metric, i) => ({ metric, columnId: `nb_col_${i}`, columnType: "text", title: metric })),
+      reused: [],
+      failed: [],
+      structure: { url: "https://acme.monday.com/boards/nb1", name: body.name, columns: [], groups: [] },
+    }))
+  })
+
+  async function toNewBoard(name?: string) {
+    await toBoard()
+    fireEvent.click(screen.getByRole("radio", { name: /make a new board for me/i }))
+    const input = await screen.findByTestId("monday-new-board-name")
+    if (name != null) fireEvent.change(input, { target: { value: name } })
+  }
+
+  it("makes a board with only the ticked columns, in the picker's order, then links and pushes it", async () => {
+    const { onLinked } = renderWizard()
+    await toNewBoard("Ruth progress")
+    next()
+    await waitFor(() => expect(screen.getByTestId("monday-wizard-columns")).toBeTruthy())
+    // A new board has nothing on it: the recommended set is ticked, the AI's columns aren't used.
+    expect(checked(/^completion %/i)).toBe(true)
+    expect(checked(/^translators/i)).toBe(false)
+    expect(screen.queryByText(/on your board/i)).toBeNull()
+    fireEvent.click(box(/^translators/i))
+    next()
+    await waitFor(() => expect(screen.getByTestId("monday-wizard-confirm")).toBeTruthy())
+    expect(screen.getByText(/make a board called “Ruth progress” with 9 columns/i)).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: /make board and connect/i }))
+    await waitFor(() => expect(screen.getByTestId("monday-wizard-done")).toBeTruthy())
+
+    expect(mocked.addMondayColumns).not.toHaveBeenCalled()
+    expect(mocked.createMondayBoard).toHaveBeenCalledWith("tok", "p1", {
+      name: "Ruth progress",
+      metrics: [
+        "completion_pct",
+        "validated_pct",
+        "audio_validated_pct",
+        "status_auto",
+        "deadline",
+        "schedule_status",
+        "last_activity",
+        "translators",
+        "external_id",
+      ],
+    })
+    const linked = mocked.putMondayLink.mock.calls[0]![2]
+    expect(linked.boardId).toBe("nb1")
+    expect(linked.boardName).toBe("Ruth progress")
+    expect(linked.config.columns.map((c) => c.metric)).toEqual([
+      "completion_pct",
+      "validated_pct",
+      "audio_validated_pct",
+      "status_auto",
+      "deadline",
+      "schedule_status",
+      "last_activity",
+      "translators",
+      "external_id",
+    ])
+    // The AI's proposal was for another board: none of it rides along.
+    expect(linked.config.columns.some((c) => c.columnId === "numbers_1")).toBe(false)
+    expect((linked.config as { notes?: string }).notes).toBeUndefined()
+    expect(mocked.syncMondayNow).toHaveBeenCalled()
+    expect(onLinked).toHaveBeenCalled()
+  })
+
+  it("a blank name can't go on", async () => {
+    renderWizard()
+    await toNewBoard("   ")
+    expect(screen.getByRole("button", { name: /^next$/i })).toHaveProperty("disabled", true)
+  })
+
+  it("says why Monday didn't make the board, and links nothing", async () => {
+    const err = new api.MondayApiError("Couldn't make the new board in Monday.", 502)
+    err.cause = "HTTP 502 — Monday didn't make the board: User unauthorized to perform action"
+    mocked.createMondayBoard.mockRejectedValue(err)
+    renderWizard()
+    await toNewBoard()
+    next()
+    await waitFor(() => expect(screen.getByTestId("monday-wizard-columns")).toBeTruthy())
+    next()
+    await waitFor(() => expect(screen.getByTestId("monday-wizard-confirm")).toBeTruthy())
+    fireEvent.click(screen.getByRole("button", { name: /make board and connect/i }))
+    await waitFor(() => expect(screen.getByText(/couldn't make the board: .*user unauthorized/i)).toBeTruthy())
+    expect(mocked.putMondayLink).not.toHaveBeenCalled()
+  })
+
+  it("a retry after a failed link links the board already made, never a second one", async () => {
+    mocked.putMondayLink.mockRejectedValueOnce(new Error("link refused"))
+    renderWizard()
+    await toNewBoard()
+    next()
+    await waitFor(() => expect(screen.getByTestId("monday-wizard-columns")).toBeTruthy())
+    next()
+    await waitFor(() => expect(screen.getByTestId("monday-wizard-confirm")).toBeTruthy())
+    fireEvent.click(screen.getByRole("button", { name: /make board and connect/i }))
+    await waitFor(() => expect(screen.getByText(/link refused/i)).toBeTruthy())
+    fireEvent.click(screen.getByRole("button", { name: /make board and connect/i }))
+    await waitFor(() => expect(screen.getByTestId("monday-wizard-done")).toBeTruthy())
+    expect(mocked.createMondayBoard).toHaveBeenCalledTimes(1)
+    expect(mocked.putMondayLink.mock.calls.map((call) => call[2].boardId)).toEqual(["nb1", "nb1"])
+  })
+
+  it("going back to the AI's board keeps its own ticks and adds its columns as before", async () => {
+    renderWizard()
+    await toNewBoard()
+    fireEvent.click(screen.getByRole("radio", { name: /translation tracker/i }))
+    next()
+    await waitFor(() => expect(screen.getByTestId("monday-wizard-columns")).toBeTruthy())
+    expect(screen.getAllByText(/on your board/i).length).toBeGreaterThan(0)
+    next()
+    await waitFor(() => expect(screen.getByTestId("monday-wizard-confirm")).toBeTruthy())
+    fireEvent.click(screen.getByRole("button", { name: /add columns and connect|^connect$/i }))
+    await waitFor(() => expect(screen.getByTestId("monday-wizard-done")).toBeTruthy())
+    expect(mocked.createMondayBoard).not.toHaveBeenCalled()
+    expect(mocked.putMondayLink.mock.calls[0]![2].boardId).toBe("b1")
   })
 })

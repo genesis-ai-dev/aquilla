@@ -21,6 +21,7 @@ import { handleFileVideoSet } from './handlers/file-video-set'
 import { handleFileTimingSet } from './handlers/file-timing-set'
 import { handleFileCorpusSet } from './handlers/file-corpus-set'
 import { handleFileReorder } from './handlers/file-reorder'
+import { handleFileExtensionSet } from './handlers/file-extension-set'
 import { handleFileTrackSet } from './handlers/file-track-set'
 import { handleFileDelete, handleFileRestore } from './handlers/file-delete-restore'
 import { handleCommentEvent, type CommentEventKind } from './handlers/comment-events'
@@ -79,6 +80,7 @@ export function dispatchEvent(
     case 'source.cell.metadata.patch':
     case 'source.cell.reanchor':
     case 'source.cell.visibility.set':
+    case 'source.cell.restore':
     case 'target.cell.create':
     case 'target.cell.commit':
     case 'target.cell.delete':
@@ -93,6 +95,7 @@ export function dispatchEvent(
     case 'cell.audio.rename':
     case 'cell.audio.trim':
     case 'cell.audio.place':
+    case 'cell.audio.cut':
     case 'cell.audio.measure':
     case 'cell.audio.validate':
     case 'cell.audio.unvalidate':
@@ -186,6 +189,17 @@ export function dispatchEvent(
         ),
       }
 
+    case 'file.extension.set':
+      return {
+        ok: true,
+        result: handleFileExtensionSet(
+          db,
+          authed as AuthorizedEvent<'file.extension.set'>,
+          serverTs,
+          opts.serverSeq,
+        ),
+      }
+
     case 'file.reorder':
       return {
         ok: true,
@@ -237,6 +251,7 @@ export function dispatchEvent(
       }
 
     case 'cell.backtranslation.set':
+    case 'cell.gloss.set':
     case 'cast.assign':
     case 'cell.retime':
     case 'cell.lane.retime':

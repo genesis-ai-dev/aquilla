@@ -31,6 +31,8 @@ export type OutboxEventKind =
   // and no lane's translation goes stale. Hiding is per CELL, not per lane,
   // which is why one source-side kind covers every language.
   | "source.cell.visibility.set"
+  // AQU-1767 phase 2: undo a removal — restore the cell as the removal found it.
+  | "source.cell.restore"
   // Target-side cell events (translator).
   | "target.cell.create"
   | "target.cell.commit"
@@ -49,6 +51,8 @@ export type OutboxEventKind =
   | "cell.audio.rename"
   | "cell.audio.trim"
   | "cell.audio.place"
+  // AQU-1767: cut one dub piece in two (contributor, like trim).
+  | "cell.audio.cut"
   | "cell.audio.measure"
   // AQU-777: per-cell file attachments (screenshots / reference images).
   // Contributor-level, non-chain-mutating. The bytes are already in R2 by the
@@ -64,11 +68,17 @@ export type OutboxEventKind =
   | "cell.link.set"
   // Back-translation (contributor-level; non-chain-mutating).
   | "cell.backtranslation.set"
+  // AQU-1408 §1: a hand-corrected statistical gloss (contributor-level;
+  // non-chain-mutating). Its own kind, not a flag on the BT event — the two
+  // are different readings of the same commit and both stay addressable.
+  | "cell.gloss.set"
   // File lifecycle.
   | "file.create"
   // File label rename (contributor-level; non-chain-mutating).
   | "file.rename"
   | "file.corpus.set"
+  // Smart Extensions apiRev 7: replace files.meta.extension (project_lead+).
+  | "file.extension.set"
   // AQU-1569: the file's hand-placed position in its sidebar group
   // (project_lead+; non-chain-mutating). Null clears it back to the automatic
   // name-derived order.
@@ -176,10 +186,14 @@ export interface OutboxEventPayloads {
     sequenceIndex?: number
     transcription?: string
     cameraState?: string
+    /** Smart Extensions apiRev 7: an extension's file write (verified server-side). */
+    tool_origin?: { origin: "tool"; toolId: string; version: number; codeHash: string; session?: string }
   }
   "source.cell.commit": {
     value?: string
     valueHtml?: string
+    /** Aquilla Tools: an extension's source edit (verified server-side). */
+    tool_origin?: { origin: "tool"; toolId: string; version: number; codeHash: string; session?: string }
     /** AQU-847 / AQU-646: corrected source text for a MEDIA section. An
      *  imported media cell's `value` is the import filename, so the user's
      *  edit lands here — the field `effectiveSourceText` (and therefore export
@@ -187,13 +201,20 @@ export interface OutboxEventPayloads {
      *  still advances, so targets go stale. */
     transcription?: string
   }
-  "source.cell.delete": Record<string, never>
+  "source.cell.delete": {
+    /** Smart Extensions apiRev 7: an extension's file write (verified server-side). */
+    tool_origin?: { origin: "tool"; toolId: string; version: number; codeHash: string; session?: string }
+  }
   "source.cell.reorder": {
     anchorCellId: string | null
   }
   "source.cell.visibility.set": {
     /** true parks the cell (stamps hidden_at), false brings it back (NULL). */
     hidden: boolean
+  }
+  "source.cell.restore": {
+    /** The removal to undo; absent = the cell's newest unrestored removal. */
+    deleteEventId?: string
   }
 
   "target.cell.create": {
@@ -276,6 +297,14 @@ export interface OutboxEventPayloads {
      * this to trigger the AD-14 endorsement-revocation cascade and the
      * harmonize-affected-validation comment thread. Only set by emitCellHarmonize.
      */
+    /**
+     * Aquilla Tools (prototype): the tool that made this write. Caller-declared;
+     * the sync-worker verifies it against project_tool_versions and stamps the
+     * trusted envelope into events.provenance (events/tool-provenance.ts).
+     */
+    tool_origin?: { origin: "tool"; toolId: string; version: number; codeHash: string; session?: string }
+    /** Aquilla Tools: set on the compensating events "revert since T" emits. */
+    revert_of_tool?: { toolId: string; sinceMs: number }
     harmonize_origin?: {
       /** Stable id of the built-in check or custom rule that drove the sweep. */
       rule_or_check_id: string
@@ -303,6 +332,12 @@ export interface OutboxEventPayloads {
     /** The target.cell.commit / target.cell.create event being validated. */
     editEventId: string
     /**
+     * Aquilla Tools (prototype): the tool that made this write. Caller-declared;
+     * the sync-worker verifies it against project_tool_versions and stamps the
+     * trusted envelope into events.provenance (events/tool-provenance.ts).
+     */
+    tool_origin?: { origin: "tool"; toolId: string; version: number; codeHash: string; session?: string }
+    /**
      * AQU-538: lane of the target row being validated. Omitted on the wire for
      * the default lane (`''`). Validation is projected per lane so a cell can
      * be validated in one lane and unvalidated in another.
@@ -313,6 +348,8 @@ export interface OutboxEventPayloads {
   }
   "cell.unvalidate": {
     editEventId: string
+    /** Aquilla Tools: the tool that withdrew this validation (provenance, apiRev 2). */
+    tool_origin?: { origin: "tool"; toolId: string; version: number; codeHash: string; session?: string }
     /** AQU-538: lane of the target row being unvalidated. Omitted for `''`. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
@@ -372,6 +409,8 @@ export interface OutboxEventPayloads {
     laneId?: string
     /** AQU-1565 follow-up: "source" marks the shared programme audio; absent is a dub. */
     role?: "dub" | "source"
+    /** AQU-1767: born a piece of this take (a split take's cleaned copy). Fill-only. */
+    pieceOf?: string
   }
   "cell.audio.select": {
     /** null: leave the slot with nothing selected (2026-09-28) — how a line
@@ -439,6 +478,24 @@ export interface OutboxEventPayloads {
   "cell.audio.place": {
     audioId: string
     targetOffsetMs: number | null
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
+  }
+  /**
+   * AQU-1767: cut a dub piece in two at `atMs`, a position in the clip's OWN
+   * audio (the trim window's domain). The server copies the piece into
+   * `newAudioId` over the same bytes, windowed [atMs, old end], shortens the
+   * original to [old start, atMs], and resets both halves' votes. A cut it
+   * cannot make (too near an edge, not a dub, unknown length) changes nothing.
+   */
+  "cell.audio.cut": {
+    audioId: string
+    atMs: number
+    newAudioId: string
+    newLabel?: string
+    firstLabel?: string
     /** AQU-1462: see `cell.audio.attach`. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
@@ -536,6 +593,23 @@ export interface OutboxEventPayloads {
     laneId?: string
   }
 
+  /**
+   * AQU-1408 §1: the statistical gloss as a contributor corrected it.
+   * Non-chain-mutating (parentId omitted). `targetEventId` pins the gloss to
+   * the commit whose words it reads. No `polished` dimension — every row is a
+   * human correction by construction. An empty `glossText` withdraws the
+   * correction and restores the computed gloss.
+   */
+  "cell.gloss.set": {
+    glossText: string
+    /** The target.cell.commit event_id this gloss reads. */
+    targetEventId: string
+    /** Lane whose translation this gloss reads. */
+    targetLang?: string
+    /** The lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
+  }
+
   "file.create": {
     name: string
     fileType: string
@@ -554,6 +628,11 @@ export interface OutboxEventPayloads {
   // Set/clear the file's sidebar corpus group. Null clears it (Ungrouped).
   "file.corpus.set": {
     corpusMarker: string | null
+  }
+  // Smart Extensions apiRev 7: kind/tags/group/owner/meta (file-extension.ts).
+  "file.extension.set": {
+    extension: Record<string, unknown> | null
+    tool_origin?: { origin: "tool"; toolId: string; version: number; codeHash: string; session?: string }
   }
   // AQU-1569: the file's hand-placed position within its corpus group, stored
   // in files.meta.sortIndex. Fractional (a midpoint between two neighbours);
@@ -641,6 +720,8 @@ export interface OutboxEventPayloads {
     assigneeUserId: number
     deadline?: string | null
     note?: string | null
+    /** AQU-1969: absent = 'translate', the only kind before this field. */
+    kind?: "translate" | "validate"
   }
   "assignment.reassign": {
     assignmentId: string

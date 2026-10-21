@@ -515,6 +515,9 @@ export function mergeCellsWithAudio(
         ...(a.validators ? { validators: a.validators } : {}),
         ...(a.role ? { role: a.role } : {}),
         ...(a.recordedBy != null ? { recordedBy: a.recordedBy } : {}),
+        // AQU-1767: which take a piece was cut from — the chips, the playback
+        // overlay and the validation gutter all expand a selection by it.
+        ...(a.pieceOf ? { pieceOf: a.pieceOf } : {}),
       }
     }
     return {

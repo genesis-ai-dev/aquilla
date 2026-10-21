@@ -7,25 +7,13 @@ import { OrgOverview } from "@/components/org/OrgOverview"
 import { OrgProjectsPage } from "@/components/org/OrgProjectsPage"
 import { OrgRouteGate } from "@/components/org/OrgRouteGate"
 import { ProductTourProvider } from "@/context/ProductTourContext"
-import { ArchivedProjects } from "@/components/org/ArchivedProjects"
 import { ProjectOverview } from "@/components/org/ProjectOverview"
-import { AssignedToMe } from "@/components/org/AssignedToMe"
-import { SharedProjectsPage } from "@/components/org/SharedProjectsPage"
 import { resumeOrgPath, projectMemoryPath } from "@/lib/navigation/org-paths"
-import { JoinPage } from "@/components/JoinPage"
-import { AccessLinkPage } from "@/components/AccessLinkPage"
-import { JoinOrgPage } from "@/components/JoinOrgPage"
-import { VerifyEmailPage } from "@/components/VerifyEmailPage"
-import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard"
-import { ResetPassword } from "@/pages/ResetPassword"
-import { BillingSelection } from "@/pages/BillingSelection"
 import { Login } from "@/pages/Login"
-import { PrivacyPolicy } from "@/pages/PrivacyPolicy"
 import { NotFound } from "@/pages/NotFound"
 import { DevLoginRoute } from "@/components/DevLoginRoute"
 import { DevLogoutRoute } from "@/components/DevLogoutRoute"
 import { MarketingLoginRoute } from "@/components/MarketingLoginRoute"
-import { Preferences, PreferencesDialog } from "@/pages/Preferences"
 import { SyncingProvider, useSyncing } from "@/context/SyncingContext"
 import { OrgProvider } from "@/context/OrgContext"
 import { OutboxProvider } from "@/context/OutboxContext"
@@ -70,12 +58,68 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { useGlobalAudioShortcuts } from "@/hooks/useGlobalAudioShortcuts"
 import { useSessionRefresh } from "@/hooks/useSessionRefresh"
 import { ProjectWorkspaceRoute } from "@/components/ProjectWorkspaceRoute"
+import { ToolsMountProvider } from "@/components/tools/ToolsMountContext"
+import { SmartExtensionsGate } from "@/components/tools/SmartExtensionsGate"
+import { BuildJobNotifier } from "@/components/tools/builder/BuildJobNotifier"
 import { ProjectElevationBoundary } from "@/components/ProjectElevationBoundary"
 import { RedirectToProjectOverview } from "@/components/RedirectToProjectOverview"
 
+// AQU-2093: pages most visits never open (invites, onboarding, billing, account
+// recovery, preferences, the assigned and archived lists) load when visited,
+// so their code stays off the first load.
+const SharedProjectsPage = lazy(() =>
+  import("@/components/org/SharedProjectsPage").then((m) => ({ default: m.SharedProjectsPage })),
+)
+const AssignedToMe = lazy(() =>
+  import("@/components/org/AssignedToMe").then((m) => ({ default: m.AssignedToMe })),
+)
+const ArchivedProjects = lazy(() =>
+  import("@/components/org/ArchivedProjects").then((m) => ({ default: m.ArchivedProjects })),
+)
+const JoinPage = lazy(() =>
+  import("@/components/JoinPage").then((m) => ({ default: m.JoinPage })),
+)
+const AccessLinkPage = lazy(() =>
+  import("@/components/AccessLinkPage").then((m) => ({ default: m.AccessLinkPage })),
+)
+const JoinOrgPage = lazy(() =>
+  import("@/components/JoinOrgPage").then((m) => ({ default: m.JoinOrgPage })),
+)
+const VerifyEmailPage = lazy(() =>
+  import("@/components/VerifyEmailPage").then((m) => ({ default: m.VerifyEmailPage })),
+)
+const OnboardingWizard = lazy(() =>
+  import("@/components/onboarding/OnboardingWizard").then((m) => ({ default: m.OnboardingWizard })),
+)
+const BillingSelection = lazy(() =>
+  import("@/pages/BillingSelection").then((m) => ({ default: m.BillingSelection })),
+)
+const ResetPassword = lazy(() =>
+  import("@/pages/ResetPassword").then((m) => ({ default: m.ResetPassword })),
+)
+const PrivacyPolicy = lazy(() =>
+  import("@/pages/PrivacyPolicy").then((m) => ({ default: m.PrivacyPolicy })),
+)
+const Preferences = lazy(() =>
+  import("@/pages/Preferences").then((m) => ({ default: m.Preferences })),
+)
+const PreferencesDialog = lazy(() =>
+  import("@/pages/Preferences").then((m) => ({ default: m.PreferencesDialog })),
+)
 // Heavy workspace / admin routes — loaded only when navigated to
 const ProjectWorkspace = lazy(() =>
-  import("@/components/ProjectWorkspace").then((m) => ({ default: m.ProjectWorkspace })),
+  import("@/components/ProjectWorkspace").then((m) => ({
+    // Smart Extensions (prototype): the project's installed extensions feed
+    // the panel, inline and editor mounts inside the workspace. One stable
+    // component type, so surface hops keep the instance (AQU-1496).
+    default: function ProjectWorkspaceWithExtensions() {
+      return (
+        <ToolsMountProvider>
+          <m.ProjectWorkspace />
+        </ToolsMountProvider>
+      )
+    },
+  })),
 )
 const OrgDataEgress = lazy(() =>
   import("@/pages/OrgDataEgress").then((m) => ({ default: m.OrgDataEgress })),
@@ -95,6 +139,11 @@ const OrgAccessPage = lazy(() =>
 )
 const OrgAccessAuditPage = lazy(() =>
   import("@/pages/OrgAccessAuditPage").then((m) => ({ default: m.OrgAccessAuditPage })),
+)
+// AQU-1958: org-wide comments view — the project Comments page's list across
+// every project in the org the caller can see.
+const OrgCommentsPage = lazy(() =>
+  import("@/pages/OrgCommentsPage").then((m) => ({ default: m.OrgCommentsPage })),
 )
 const MembersPage = lazy(() =>
   import("@/pages/MembersPage").then((m) => ({ default: m.MembersPage })),
@@ -119,6 +168,9 @@ const OrgSettingsProviders = lazy(() =>
 )
 const OrgSettingsMonday = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsMonday })),
+)
+const OrgSettingsAirtable = lazy(() =>
+  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsAirtable })),
 )
 const OrgSettingsRules = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsRules })),
@@ -162,6 +214,12 @@ const ApproveChangeset = lazy(() =>
 // reviewing external-agent work stops meaning one approval URL per changeset.
 const ProjectApprovals = lazy(() =>
   import("@/pages/ProjectApprovals/ProjectApprovals").then((m) => ({ default: m.ProjectApprovals })),
+)
+const ToolsPage = lazy(() =>
+  import("@/pages/Tools/ToolsPage").then((m) => ({ default: m.ToolsPage })),
+)
+const ToolRunPage = lazy(() =>
+  import("@/pages/Tools/ToolRunPage").then((m) => ({ default: m.ToolRunPage })),
 )
 void hydratePrefetchStatus()
 void probeOpfsAvailability()
@@ -268,6 +326,12 @@ function RedirectToProjectMemory({ section }: { section?: string }) {
   return <Navigate to={`${projectMemoryPath(id!, section)}${search}`} replace />
 }
 
+/** Smart Extensions were "Tools" in the first prototype: keep old links working. */
+function RedirectToExtensions() {
+  const { id, toolId } = useParams<{ id: string; toolId?: string }>()
+  return <Navigate to={`/project/${id}/extensions${toolId ? `/${toolId}` : ""}`} replace />
+}
+
 function LazyRoute({ children, fallback = <RouteLoadingFallback /> }: { children: ReactNode; fallback?: ReactNode }) {
   return <Suspense fallback={fallback}>{children}</Suspense>
 }
@@ -366,6 +430,7 @@ function AppRoutes() {
 
   return (
     <>
+      <BuildJobNotifier />
       {/* Workspace routes intentionally suspend to this outer boundary: when
           entered through useOpenWorkspace's transition, React keeps the source
           project overview mounted so its blocking "Opening project" overlay
@@ -395,7 +460,7 @@ function AppRoutes() {
         {/* AQU-282: dedicated login — eagerly loaded (public, no auth required) */}
         <Route path="/login" element={<Login />} />
         <Route path="/billing/select" element={<BillingSelection />} />
-        {/* AQU-270: account recovery — eagerly loaded (public, no auth required) */}
+        {/* AQU-270: account recovery — public, no auth required */}
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/privacy-policy" element={<PrivacyPolicy />} />
         {/* Dev-only auto-login/logout — see components/DevLoginRoute.tsx */}
@@ -414,9 +479,9 @@ function AppRoutes() {
           <Route index element={<OrgHomeRoute />} />
           <Route path="overview" element={<OrgOverview />} />
           <Route path="projects" element={<OrgProjectsPage />} />
-          <Route path="assigned" element={<AssignedToMe />} />
-          <Route path="archived" element={<ArchivedProjects />} />
-          <Route path="archived/files" element={<ArchivedProjects />} />
+          <Route path="assigned" element={<OrgLazyRoute><AssignedToMe /></OrgLazyRoute>} />
+          <Route path="archived" element={<OrgLazyRoute><ArchivedProjects /></OrgLazyRoute>} />
+          <Route path="archived/files" element={<OrgLazyRoute><ArchivedProjects /></OrgLazyRoute>} />
           <Route path="egress" element={<OrgLazyRoute><OrgDataEgress /></OrgLazyRoute>} />
           <Route path="teams" element={<OrgLazyRoute><TeamsList /></OrgLazyRoute>} />
           <Route path="teams/:groupId" element={<OrgLazyRoute><TeamDetail /></OrgLazyRoute>} />
@@ -427,6 +492,7 @@ function AppRoutes() {
           />
           <Route path="members" element={<OrgLazyRoute><MembersPage /></OrgLazyRoute>} />
           <Route path="members/matrix" element={<OrgLazyRoute><MembersPage /></OrgLazyRoute>} />
+          <Route path="comments" element={<OrgLazyRoute><OrgCommentsPage /></OrgLazyRoute>} />
           <Route path="access" element={<OrgLazyRoute><OrgAccessPage /></OrgLazyRoute>} />
           <Route path="access-audit" element={<OrgLazyRoute><OrgAccessAuditPage /></OrgLazyRoute>} />
           <Route path="settings" element={<OrgLazyRoute><Settings /></OrgLazyRoute>} />
@@ -444,6 +510,7 @@ function AppRoutes() {
           <Route path="settings/rules" element={<OrgLazyRoute><OrgSettingsRules /></OrgLazyRoute>} />
           <Route path="settings/knowledge" element={<OrgLazyRoute><OrgSettingsKnowledge /></OrgLazyRoute>} />
           <Route path="settings/monday" element={<OrgLazyRoute><OrgSettingsMonday /></OrgLazyRoute>} />
+          <Route path="settings/airtable" element={<OrgLazyRoute><OrgSettingsAirtable /></OrgLazyRoute>} />
         </Route>
 
         {/* Project routes stay flat (not nested under /orgs).
@@ -459,6 +526,10 @@ function AppRoutes() {
         <Route path="/project/:id/rules" element={<RedirectToProjectMemory section="quality" />} />
         {/* AQU-841 — in-app approvals queue for agent-staged changesets. */}
         <Route path="/project/:id/approvals" element={<ProjectElevationBoundary><LazyRoute><ProjectApprovals /></LazyRoute></ProjectElevationBoundary>} />
+        <Route path="/project/:id/extensions" element={<ProjectElevationBoundary><LazyRoute><SmartExtensionsGate><ToolsMountProvider><ToolsPage /></ToolsMountProvider></SmartExtensionsGate></LazyRoute></ProjectElevationBoundary>} />
+        <Route path="/project/:id/extensions/:toolId" element={<ProjectElevationBoundary><LazyRoute><SmartExtensionsGate><ToolRunPage /></SmartExtensionsGate></LazyRoute></ProjectElevationBoundary>} />
+        <Route path="/project/:id/tools" element={<RedirectToExtensions />} />
+        <Route path="/project/:id/tools/:toolId" element={<RedirectToExtensions />} />
         <Route path="/project/:id/agent" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
         <Route path="/project/:id/voice" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
         <Route path="/project/:id/terminology" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
@@ -487,8 +558,8 @@ function AppRoutes() {
       </Suspense>
       {backgroundLocation ? (
         <Routes>
-          <Route path="/preferences" element={<PreferencesDialog />} />
-          <Route path="/preferences/:section" element={<PreferencesDialog />} />
+          <Route path="/preferences" element={<LazyRoute><PreferencesDialog /></LazyRoute>} />
+          <Route path="/preferences/:section" element={<LazyRoute><PreferencesDialog /></LazyRoute>} />
           <Route path="/project/:id/settings" element={<ProjectElevationBoundary><LazyRoute><ProjectSettingsDialog /></LazyRoute></ProjectElevationBoundary>} />
           <Route path="/project/:id/settings/:section" element={<ProjectElevationBoundary><LazyRoute><ProjectSettingsDialog /></LazyRoute></ProjectElevationBoundary>} />
         </Routes>

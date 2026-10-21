@@ -16,7 +16,7 @@
 import type { Context, Next } from "hono"
 import type { AuthUser, Env, JWTPayload, Variables } from "../types"
 import { JWTService } from "../auth/jwt"
-import { isTokenRevoked } from "../utils/token-revocation"
+import { isSessionFamilyRevoked, isTokenRevoked } from "../utils/token-revocation"
 import { getCachedSession, sessionCacheKey, setCachedSession } from "../lib/session-cache"
 
 export type AuthHonoEnv = { Bindings: Env; Variables: Variables }
@@ -128,6 +128,9 @@ export async function resolveSession(
     // natural 30-day expiry or a full password reset. See
     // utils/token-revocation.ts.
     if (payload.jti && (await isTokenRevoked(env.AQUILLA_PG, payload.jti))) {
+      return { ok: false, reason: "revoked" }
+    }
+    if (typeof payload.sid === "string" && (await isSessionFamilyRevoked(env.AQUILLA_PG, payload.sid))) {
       return { ok: false, reason: "revoked" }
     }
 

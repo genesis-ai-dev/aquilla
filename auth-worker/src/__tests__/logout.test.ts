@@ -70,6 +70,30 @@ describe("POST /api/v2/auth/logout", () => {
     expect(stillLive.status).toBe(200)
   })
 
+  it("revokes the whole refresh chain — an earlier token from the same session dies too", async () => {
+    await register("logout4", "logout4@example.com", "old-password-1")
+    const login = await reqJson("/api/v2/auth/token", { username: "logout4", password: "old-password-1" })
+    const { access_token: first } = (await login.json()) as { access_token: string }
+
+    // Force a refresh by minting a successor directly, as /auth/refresh does.
+    const { JWTService } = await import("../auth/jwt")
+    const { verify } = await import("hono/jwt")
+    const firstPayload = (await verify(first, env.SECRET_KEY, "HS256")) as { sst: number; sid: string }
+    expect(typeof firstPayload.sid).toBe("string")
+    const svc = new JWTService(env)
+    const { token: second, payload: secondPayload } = await svc.createAccessTokenWithPayload(
+      "logout4", firstPayload.sst, firstPayload.sid,
+    )
+    expect(secondPayload.sid).toBe(firstPayload.sid)
+
+    await app.request("/api/v2/auth/logout", { method: "POST", headers: authHeader(second) }, env)
+
+    const stolenOld = await app.request("/api/v2/auth/me", { headers: authHeader(first) }, env)
+    expect(stolenOld.status).toBe(401)
+    const refreshAttempt = await app.request("/api/v2/auth/refresh", { method: "POST", headers: authHeader(first) }, env)
+    expect(refreshAttempt.status).toBe(401)
+  })
+
   it("a token minted with no jti (pre-existing token shape) is unaffected by the revocation check", async () => {
     await register("logout3", "logout3@example.com", "some-password-1")
     const legacyShapedToken = await jwtFor("logout3")

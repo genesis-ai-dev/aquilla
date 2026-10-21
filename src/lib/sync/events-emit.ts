@@ -339,6 +339,10 @@ export interface CellCommitInput {
    * undo commits carry no such tag).
    */
   propagatedFromCellId?: string
+  /** Aquilla Tools: the tool that made this write (provenance, see outbox-types). */
+  toolOrigin?: OutboxPayloadFor<"target.cell.commit">["tool_origin"]
+  /** Aquilla Tools: this commit compensates a tool's write ("revert since T"). */
+  revertOfTool?: OutboxPayloadFor<"target.cell.commit">["revert_of_tool"]
 }
 
 function noteTargetCellCommit(input: CellCommitInput): void {
@@ -387,6 +391,8 @@ function targetCellCommitEventInput(
       ...(input.propagatedFromCellId !== undefined
         ? { propagated_from_cell_id: input.propagatedFromCellId }
         : {}),
+      ...(input.toolOrigin ? { tool_origin: input.toolOrigin } : {}),
+      ...(input.revertOfTool ? { revert_of_tool: input.revertOfTool } : {}),
     },
     clientTs: input.clientTs,
   }
@@ -457,6 +463,8 @@ export interface CellValidateInput {
   surface?: TelemetrySurface
   author: string
   clientTs?: number
+  /** Aquilla Tools: the tool that made this validation (provenance). */
+  toolOrigin?: OutboxPayloadFor<"cell.validate">["tool_origin"]
 }
 
 /**
@@ -487,6 +495,7 @@ export async function emitCellValidate(input: CellValidateInput): Promise<string
       editEventId: input.editEventId,
       // AQU-538: '' (default lane) is omitted from the wire.
       ...targetLaneFields(input),
+      ...(input.toolOrigin ? { tool_origin: input.toolOrigin } : {}),
     },
     clientTs: input.clientTs,
   })
@@ -520,6 +529,7 @@ export async function emitCellUnvalidate(input: CellValidateInput): Promise<stri
       editEventId: input.editEventId,
       // AQU-538: '' (default lane) is omitted from the wire.
       ...targetLaneFields(input),
+      ...(input.toolOrigin ? { tool_origin: input.toolOrigin } : {}),
     },
     clientTs: input.clientTs,
   })
@@ -653,6 +663,9 @@ export interface CellAudioAttachInput {
   targetLang?: string
   /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
   laneId?: string
+  /** AQU-1767: born a PIECE of this take (the group's root). Fill-only on the
+   *  server — a re-attach can never move a take into or out of a group. */
+  pieceOf?: string
   /**
    * AQU-1572: which gesture produced this clip — telemetry only, never on the
    * wire. ONLY the originating gesture passes one (an upload or LinkMedia
@@ -722,6 +735,7 @@ export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<
       ...(input.timings !== undefined ? { timings: input.timings } : {}),
       ...(input.transcription !== undefined ? { transcription: input.transcription } : {}),
       ...(input.role !== undefined ? { role: input.role } : {}),
+      ...(input.pieceOf !== undefined ? { pieceOf: input.pieceOf } : {}),
       ...targetLaneFields(input),
     },
     clientTs: input.clientTs,
@@ -865,6 +879,56 @@ export async function emitCellAudioPlace(input: CellAudioPlaceInput): Promise<st
     parentId: null,
     author: input.author,
     payload: { audioId: input.audioId, targetOffsetMs: input.targetOffsetMs, ...targetLaneFields(input) },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface CellAudioCutInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** The piece being cut. */
+  audioId: string
+  /** Where, in the clip's OWN audio (ms) — the trim window's domain. */
+  atMs: number
+  /** The second piece's id, minted by the caller so the step can be undone. */
+  newAudioId: string
+  newLabel?: string
+  firstLabel?: string
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `cell.audio.cut` — one dub piece becomes two over the same bytes.
+ * (AQU-1767 phase 1)
+ *
+ * Not a pair of trims plus an attach: the server makes the new row from the
+ * stored one in a single projection, so it can never disagree with itself
+ * about the url, slot, lane, role or placement the two pieces share, and a
+ * cut it refuses changes nothing at all.
+ */
+export async function emitCellAudioCut(input: CellAudioCutInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.audio.cut",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: {
+      audioId: input.audioId,
+      atMs: Math.round(input.atMs),
+      newAudioId: input.newAudioId,
+      ...(input.newLabel ? { newLabel: input.newLabel } : {}),
+      ...(input.firstLabel ? { firstLabel: input.firstLabel } : {}),
+      ...targetLaneFields(input),
+    },
     clientTs: input.clientTs,
   })
   return eventId
@@ -1210,6 +1274,52 @@ export async function emitCellAudioRemove(input: CellAudioRemoveInput): Promise<
   return eventId
 }
 
+/**
+ * AQU-1767: undo a cut — remove the new piece, give the first piece its old
+ * end back, and (when the cut renamed it) its old name — as ONE outbox write.
+ * Queued one at a time, a tab closed in between kept the removal and lost the
+ * trim, leaving the take's tail missing. Returns the three event ids in order
+ * (the rename's only when there is one).
+ */
+export async function emitCellAudioUncut(input: {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** The piece the cut made. */
+  removeAudioId: string
+  /** The piece that was cut, and its whole window back. */
+  audioId: string
+  trimStartMs: number | null
+  trimEndMs: number | null
+  /** Set when the cut renamed the first piece ("Take 1" → "Take 1 · 1"). */
+  rename?: { label: string | null }
+  targetLang?: string
+  laneId?: string
+  author: string
+}): Promise<string[]> {
+  const base = {
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+  }
+  const lane = targetLaneFields(input)
+  const inputs: BuildEventInput<OutboxEventKind>[] = [
+    { ...base, kind: "cell.audio.remove", payload: { audioId: input.removeAudioId, ...lane } },
+    {
+      ...base,
+      kind: "cell.audio.trim",
+      payload: { audioId: input.audioId, trimStartMs: input.trimStartMs, trimEndMs: input.trimEndMs, ...lane },
+    },
+    ...(input.rename
+      ? [{ ...base, kind: "cell.audio.rename" as const, payload: { audioId: input.audioId, label: input.rename.label, ...lane } }]
+      : []),
+  ] as BuildEventInput<OutboxEventKind>[]
+  const queued = await enqueueEvents(inputs)
+  return queued.map((q) => q.eventId)
+}
+
 // ── Audio validation (AQU-490) ────────────────────────────────────────────
 // A vote is on a TAKE, so these carry an audioId where the text pair carries
 // an editEventId. Non-chain-mutating like the text pair, for the same reason:
@@ -1353,6 +1463,49 @@ export async function emitCellBacktranslationSet(
   return eventId
 }
 
+export interface CellGlossSetInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** The corrected gloss. Empty withdraws the correction. */
+  glossText: string
+  /** Current projected head of the target cell this gloss reads. */
+  targetEventId: string
+  /** Lane whose translation this gloss reads. */
+  targetLang?: string
+  /** The lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
+  author: string
+  clientTs?: number
+}
+
+/**
+ * AQU-1408 §1: emit a `cell.gloss.set` event — non-chain-mutating (parentId
+ * omitted), like `cell.backtranslation.set`. The payload pins the correction to
+ * the target commit it reads, so a later edit of that cell falls the UI back to
+ * the freshly computed gloss instead of showing a reading of words that are
+ * gone.
+ */
+export async function emitCellGlossSet(
+  input: CellGlossSetInput,
+): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.gloss.set",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: {
+      glossText: input.glossText,
+      targetEventId: input.targetEventId,
+      ...targetLaneFields(input),
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 // ── Harmonize helper (AQU-186) ────────────────────────────────────────────
 // Emits a `target.cell.commit` with a `harmonize_origin` payload field —
 // the `cell.commit.harmonize` variant per AD-2. Using a payload field (not
@@ -1479,6 +1632,10 @@ export interface SourceCellCreateInput {
   /** Authorship — the admin/importer-bot user. */
   author: string
   clientTs?: number
+  /** Smart Extensions apiRev 7: the extension making this file write. */
+  toolOrigin?: OutboxPayloadFor<"source.cell.create">["tool_origin"]
+  /** Deterministic event id (idempotent re-runs). */
+  id?: string
 }
 
 /**
@@ -1511,7 +1668,9 @@ export async function emitSourceCellCreate(
       ...(input.sequenceIndex !== undefined ? { sequenceIndex: input.sequenceIndex } : {}),
       ...(input.transcription !== undefined ? { transcription: input.transcription } : {}),
       ...(input.cameraState !== undefined ? { cameraState: input.cameraState } : {}),
+      ...(input.toolOrigin ? { tool_origin: input.toolOrigin } : {}),
     },
+    ...(input.id !== undefined ? { id: input.id } : {}),
     clientTs: input.clientTs,
   })
   return eventId
@@ -1564,6 +1723,8 @@ export interface SourceCellDeleteInput {
   parentId?: string | null
   author: string
   clientTs?: number
+  /** Smart Extensions apiRev 7: the extension making this file write. */
+  toolOrigin?: OutboxPayloadFor<"source.cell.delete">["tool_origin"]
 }
 
 /**
@@ -1579,7 +1740,39 @@ export async function emitSourceCellDelete(input: SourceCellDeleteInput): Promis
     cellId: input.cellId,
     parentId: input.parentId ?? null,
     author: input.author,
-    payload: {},
+    payload: input.toolOrigin ? { tool_origin: input.toolOrigin } : {},
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface SourceCellRestoreInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** The removal to undo. Omit to undo the cell's newest removal — the outbox
+   *  may have re-sent a stale removal under a new id. */
+  deleteEventId?: string
+  author: string
+  clientTs?: number
+}
+
+/**
+ * AQU-1767 phase 2: undo a removal — `source.cell.restore` puts the cell back
+ * as the removal found it (rows, translations, votes, takes, links, comments),
+ * from the archive the removal's projection wrote. Not chain-mutating: the row
+ * is gone, so there is no head to name. The server refuses it unless the
+ * sender removed the cell themselves or is a maintainer.
+ */
+export async function emitSourceCellRestore(input: SourceCellRestoreInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "source.cell.restore",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: input.deleteEventId ? { deleteEventId: input.deleteEventId } : {},
     clientTs: input.clientTs,
   })
   return eventId
@@ -1652,6 +1845,8 @@ export interface SourceCellCommitInput {
   id?: string
   author: string
   clientTs?: number
+  /** Aquilla Tools: provenance when an extension makes the edit. */
+  toolOrigin?: OutboxPayloadFor<"source.cell.commit">["tool_origin"]
 }
 
 /**
@@ -1678,6 +1873,7 @@ export async function emitSourceCellCommit(input: SourceCellCommitInput): Promis
       value: input.value,
       ...(input.valueHtml !== undefined ? { valueHtml: input.valueHtml } : {}),
       ...(input.transcription !== undefined ? { transcription: input.transcription } : {}),
+      ...(input.toolOrigin ? { tool_origin: input.toolOrigin } : {}),
     },
     ...(input.id !== undefined ? { id: input.id } : {}),
     clientTs: input.clientTs,
@@ -1865,6 +2061,30 @@ export async function emitFileCorpusSet(input: FileCorpusSetInput): Promise<stri
     parentId: null,
     author: input.author,
     payload: { corpusMarker: trimmed || null },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface FileExtensionSetInput {
+  projectId: string
+  fileId: string
+  /** The whole files.meta.extension (shared/tools/file-extension.ts); null clears it. */
+  extension: Record<string, unknown> | null
+  author: string
+  toolOrigin?: OutboxPayloadFor<"file.extension.set">["tool_origin"]
+  clientTs?: number
+}
+
+/** Smart Extensions apiRev 7: replace a file's extension metadata (kind, tags, group, meta). */
+export async function emitFileExtensionSet(input: FileExtensionSetInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "file.extension.set",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    parentId: null,
+    author: input.author,
+    payload: { extension: input.extension, ...(input.toolOrigin ? { tool_origin: input.toolOrigin } : {}) },
     clientTs: input.clientTs,
   })
   return eventId

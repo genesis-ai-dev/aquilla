@@ -65,6 +65,16 @@ describe("VoiceCloneSection filled state", () => {
     expect(screen.getByRole("button", { name: /Upload audio/ })).toBeTruthy()
   })
 
+  it("opens the file picker from Upload audio", () => {
+    renderSection({ id: "v", name: "N" })
+    const input = screen.getByLabelText("Upload audio", { selector: "input" }) as HTMLInputElement
+    expect(input.className).toContain("sr-only")
+    expect(input.tabIndex).toBe(-1)
+    const click = vi.spyOn(input, "click").mockImplementation(() => {})
+    fireEvent.click(screen.getByRole("button", { name: /Upload audio/ }))
+    expect(click).toHaveBeenCalledOnce()
+  })
+
   it("uploads a dropped audio file as the reference", async () => {
     const onChange = renderSection({ id: "v", name: "N" })
     const zone = screen.getByRole("group", { name: "Add a reference clip" })

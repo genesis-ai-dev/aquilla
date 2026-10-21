@@ -113,6 +113,10 @@ export type BuiltinCheckId =
   | "usfm-structure"
   | "capitalization"
   | "footnote-quote-mismatch"
+  | "corrupted-characters"
+  | "unpaired-quotes"
+  | "untranslated-fragment"
+  | "length-ratio"
 
 export interface AlgorithmicCheckOverride {
   enabled: boolean
@@ -336,6 +340,29 @@ export interface Voice {
    */
   language?: string
   /**
+   * The target lane this voice belongs to (a lane ROW id, AQU-2037). A voice is
+   * made in one lane and is offered only there: the Voices panel, the per-cell
+   * picker, the batch dialog and the Media-timeline picker all list the active
+   * lane's voices, and Generate never speaks a lane's text with another lane's
+   * voice.
+   *
+   * ABSENT means "every lane", and that is load-bearing twice over: voices
+   * stored before this field existed have no lane yet and must keep working on
+   * every lane until AQU-2039 migrates them, and `builtIn` presets (the
+   * Narrator) are deliberately never stamped — every lane falls back to the
+   * Narrator, so it cannot belong to one lane.
+   *
+   * Stamped once, at the write that first stores the voice (`useProjectTts`'s
+   * `saveTts`), so every mint site — New voice / Clone / voice design, an
+   * import with speaker labels, diarization, "Adopt voices as cast" — lands in
+   * the active lane without each one having to know about lanes. An edit never
+   * re-stamps: a voice does not move lane because someone renamed it.
+   *
+   * A lane ID rather than the lane's tag, per AQU-1612/AQU-1613: ids survive a
+   * lane being renamed or having its language edited, tags do not.
+   */
+  laneId?: string
+  /**
    * Inworld talking speed in [0.5, 1.5]. Default 1. Maps to
    * `audioConfig.speakingRate`.
    */
@@ -406,6 +433,24 @@ export interface ProjectTtsSettings {
    * files. Absent for projects that never opened the Studio.
    */
   castAssignments?: Record<string, string>
+  /**
+   * AQU-2038: the per-lane cast, keyed by lane legacy tag (`''` is the default
+   * lane — the same convention as `cells`/`lanes` since AQU-538), then by
+   * cellId. A lane with no entry for a cell falls back to the project-wide
+   * `castAssignments` above, so every project that predates this field keeps
+   * generating exactly as it did. The empty string is a SENTINEL meaning "this
+   * lane uses its own default voice" — it has to be storable, because a lane
+   * that is sent back to its default must outrank a project-wide assignment
+   * naming a voice.
+   */
+  laneCastAssignments?: Record<string, Record<string, string>>
+  /**
+   * AQU-2038: the starred/default voice per lane, keyed by lane legacy tag.
+   * Absent for a lane that never starred one — it then falls back to
+   * `defaultVoiceId`. The empty-string sentinel means "this lane has no
+   * default of its own", which outranks the project-wide default.
+   */
+  laneDefaultVoiceId?: Record<string, string>
   /**
    * Character disagreements a person has settled. (AQU-646, 2026-08-18)
    *
@@ -864,6 +909,9 @@ export interface FileReference {
    * numeric sort on an `undefined` cannot express.
    */
   sortIndex?: number
+  /** AQU-1937: what to SHOW for this file when an extension labelled it
+   *  ("Titus · ULT"); `name` stays the stored name. Read through fileDisplayName. */
+  displayLabel?: string
   originalName?: string  // Set the first time `name` is auto-rewritten by a suggestion or user rename. Enables hover-to-see-original. Never overwritten after set.
   /** Stable USFM/Scripture book identity used for re-import collision matching. */
   bookCode?: string
@@ -995,6 +1043,8 @@ export function isSubtitleImportFile(
  */
 export const AUDIO_CUES_ROLE = "audio-cues"
 export const TIMELINE_CONTENT_ROLE = "timeline-content"
+/** Smart Extensions apiRev 7: an extension's data file (shared/tools/file-extension.ts). */
+export { EXTENSION_DATA_ROLE } from "../../../shared/tools/file-extension"
 
 /**
  * True for that sibling. The canonical predicate — every surface that lists,
@@ -1007,7 +1057,13 @@ export function isAudioCueFile(file: Pick<FileReference, "role"> | null | undefi
 
 /** Internal cue files appear as tracks in their parent media timeline. */
 export function isHiddenTimelineFile(file: Pick<FileReference, "role"> | null | undefined): boolean {
-  return isAudioCueFile(file) || file?.role === TIMELINE_CONTENT_ROLE
+  return isAudioCueFile(file) || file?.role === TIMELINE_CONTENT_ROLE || isExtensionDataFile(file)
+}
+
+/** Smart Extensions apiRev 7: an extension's own data file — hidden like the
+ *  timeline companions unless the user turns on "Show extension data files". */
+export function isExtensionDataFile(file: Pick<FileReference, "role"> | null | undefined): boolean {
+  return file?.role === "extension-data"
 }
 
 /**

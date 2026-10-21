@@ -4,25 +4,18 @@
 // Uses the v3 event-log backed useComments hook (comment.* event grammar).
 //
 // AQU-185: filter/sort/show-resolved/navigate/@mention/FTS
+// AQU-1958: CSV export of the visible list; the thread card and filter bar now
+// live in comments-thread-card.tsx / comments-filter-controls.tsx, shared with
+// the org-wide comments view.
 
 import { useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import {
-  MessageCircle, MessageCircleCheck,
-  AlertCircle, Search, Settings2, RefreshCw,
-} from "lucide-react"
+import { MessageCircle, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { Card, CardContent } from "@/components/ui/card"
 import { EmptyState } from "@/components/ui/empty"
 import { Badge } from "@/components/ui/badge"
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@/components/ui/input-group"
-import { UserChip } from "@/components/UserChip"
 import { useComments } from "@/hooks/useComments"
 import { editorCommentHref } from "@/components/project-workspace-lane-deeplink"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
@@ -30,31 +23,12 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { useProject } from "@/hooks/useProject"
 import type { ProjectRecord } from "@/lib/parsers/types"
-import { renderCommentHtml, stripAgentCommentMarker } from "@/lib/comments/comment-helpers"
-import DOMPurify from "dompurify"
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTitle,
-  PopoverTrigger,
-} from "@/components/ui/popover"
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { useT, useI18n } from "@/lib/i18n/I18nProvider"
-import type { TFunction } from "@/lib/i18n/I18nProvider"
-import { DateTooltip } from "@/components/ui/date-tooltip"
-import { Separator } from "@/components/ui/separator"
-import { Switch } from "@/components/ui/switch"
+import { stripAgentCommentMarker } from "@/lib/comments/comment-helpers"
+import { commentsCsvBlob, commentsCsvFilename } from "@/lib/comments/comments-csv"
+import { downloadBlob } from "@/lib/export/export-service"
+import { useT } from "@/lib/i18n/I18nProvider"
 import {
   type FilterState,
-  type SortOrder,
   DEFAULT_FILTER,
   applyFilters,
   applySorting,
@@ -62,410 +36,10 @@ import {
   headerBadgeCount,
   resolveFileName,
 } from "./comments-page-filters"
-import { cellPlaceKey, formatScriptureRef, useCommentCellPlaces } from "./comments-cell-preview"
-
-function sortItems(t: TFunction): { value: SortOrder; label: string }[] {
-  return [
-    { value: "unresolved-first", label: t("comments.sort.unresolvedFirst") },
-    { value: "recent-activity", label: t("comments.sort.recentActivity") },
-    { value: "creation", label: t("comments.sort.newest") },
-  ]
-}
-
-function scopeLabel(comment: CommentRecord, fileMap: Map<string, string>, t: TFunction): string {
-  if (comment.scopeKind === "file") {
-    const { name } = resolveFileName(comment.fileId, fileMap, t)
-    return t("comments.scope.file", { file: name })
-  }
-  return t("common.project")
-}
-
-function CellPlace({
-  root,
-  place,
-  fileMap,
-  t,
-}: {
-  root: CommentRecord
-  place?: string
-  fileMap: Map<string, string>
-  t: TFunction
-}) {
-  if (root.scopeKind === "cell") {
-    const label = place || formatScriptureRef(root.cellRef)
-    if (label) return <span className="min-w-0 flex-1 truncate">{label}</span>
-    return <span className="min-w-0 flex-1 truncate">{resolveFileName(root.fileId, fileMap, t).name}</span>
-  }
-  return <span className="min-w-0 flex-1 truncate">{scopeLabel(root, fileMap, t)}</span>
-}
-
-function safeCommentHtml(text: string): string {
-  return DOMPurify.sanitize(renderCommentHtml(text), {
-    ALLOWED_TAGS: ["b", "i", "code", "br", "span"],
-    ALLOWED_ATTR: ["class"],
-  })
-}
-
-function PageCommentRow({
-  comment,
-  isRoot,
-  fileMissing,
-  place,
-  fileMap,
-  root,
-  onNavigate,
-}: {
-  comment: CommentRecord
-  isRoot: boolean
-  fileMissing: boolean
-  place?: string
-  fileMap: Map<string, string>
-  root: CommentRecord
-  onNavigate?: (comment: CommentRecord) => void
-}) {
-  const { t } = useI18n()
-  return (
-    <button
-      type="button"
-      onClick={() => onNavigate?.(comment)}
-      disabled={!onNavigate}
-      className="block w-full p-2 text-start outline-none hover:bg-accent/40 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-default"
-    >
-      {isRoot && (
-        <div className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-          <CellPlace root={root} place={place} fileMap={fileMap} t={t} />
-          {fileMissing && (
-            <Badge variant="outline" className="h-4 px-1 text-[10px] text-muted-foreground">
-              {t("comments.file.deletedBadge")}
-            </Badge>
-          )}
-        </div>
-      )}
-      <div className="flex items-center gap-1.5 text-xs">
-        <UserChip
-          username={comment.authorLabel ?? comment.authorId}
-          size="xs"
-          nameClassName="text-xs"
-        />
-        <span className="text-muted-foreground">
-          <DateTooltip
-            value={comment.createdAt}
-            label=""
-            variant="ago"
-            side="top"
-            editedAt={comment.deletedAt ? null : comment.updatedAt}
-            editedNotice={t("comments.bubble.edited")}
-          />
-        </span>
-      </div>
-      {comment.deletedAt != null ? (
-        <p className="mt-1 ps-7 text-sm text-muted-foreground">{t("comments.bubble.deletedBody")}</p>
-      ) : (
-        <div
-          data-ph-mask=""
-          className="mt-1 ps-7 text-sm select-text"
-          dangerouslySetInnerHTML={{ __html: safeCommentHtml(comment.body) }}
-        />
-      )}
-    </button>
-  )
-}
-
-
-// ── Thread (top-level + replies) ─────────────────────────────────────────
-
-interface ThreadProps {
-  root: CommentRecord
-  replies: CommentRecord[]
-  fileMap: Map<string, string>
-  /** Book, chapter, and verse for this thread's cell, when the read has landed. */
-  place?: string
-  onNavigate?: (root: CommentRecord) => void
-}
-
-function CommentThreadCard({
-  root, replies, fileMap, place, onNavigate,
-}: ThreadProps) {
-  const { t, locale } = useI18n()
-
-  const messages = [root, ...replies]
-  const authors = new Intl.ListFormat(locale, { style: "long", type: "conjunction" }).format(
-    [...new Set(messages.map((message) => message.authorLabel ?? message.authorId))],
-  )
-  const resolvedSummary = t("comments.thread.resolvedSummary", {
-    count: messages.length,
-    authors,
-  })
-  const fileMissing = !!root.fileId && !resolveFileName(root.fileId, fileMap, t).exists
-
-  const threadBody = (
-    <>
-      <ul className="divide-y">
-        {messages.map((comment, index) => (
-          <li key={comment.commentId}>
-            <PageCommentRow
-              comment={comment}
-              isRoot={index === 0}
-              fileMissing={fileMissing}
-              place={place}
-              fileMap={fileMap}
-              root={root}
-              onNavigate={onNavigate}
-            />
-          </li>
-        ))}
-      </ul>
-    </>
-  )
-
-  const shell = root.resolved ? (
-    <button
-      type="button"
-      onClick={() => onNavigate?.(root)}
-      disabled={!onNavigate}
-      className="flex w-full items-center gap-2 rounded-lg border bg-card p-2 text-start text-sm outline-none hover:bg-accent/40 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-default"
-    >
-      <MessageCircleCheck className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-      <span className="min-w-0 flex-1 truncate">{resolvedSummary}</span>
-    </button>
-  ) : (
-    <div className="rounded-lg border bg-card text-sm">{threadBody}</div>
-  )
-
-  return shell
-}
-
-// ── Filter/sort controls ──────────────────────────────────────────────────
-
-interface FilterControlsProps {
-  filter: FilterState
-  onChange: (next: FilterState) => void
-  fileOptions: { id: string; name: string }[]
-  authorOptions: { id: string; label: string }[]
-  isRefreshing: boolean
-  onRefresh: () => void
-}
-
-const filterLabelClass = "font-normal text-muted-foreground"
-/** Matches FieldGroup `gap-3` so select popups sit the same distance from their trigger. */
-const FILTER_MENU_GAP_PX = 12
-
-/** Base UI treats "" as no value (`data-placeholder`), which mutes the trigger. */
-const ALL_SELECT_VALUE = "__all__"
-
-function toSelectValue(value: string) {
-  return value === "" ? ALL_SELECT_VALUE : value
-}
-
-function fromSelectValue(value: string | null) {
-  return value == null || value === ALL_SELECT_VALUE ? "" : value
-}
-
-function FilterSelectRow({
-  id,
-  label,
-  items,
-  value,
-  onValueChange,
-  side = "bottom",
-}: {
-  id: string
-  label: string
-  items: { value: string; label: string }[]
-  value: string
-  onValueChange: (value: string) => void
-  side?: "top" | "bottom"
-}) {
-  const selectItems = items.map((item) => ({
-    ...item,
-    value: toSelectValue(item.value),
-  }))
-  return (
-    <Field orientation="horizontal" className="items-center justify-between gap-3">
-      <FieldLabel htmlFor={id} className={filterLabelClass}>
-        {label}
-      </FieldLabel>
-      <Select
-        items={selectItems}
-        value={toSelectValue(value)}
-        onValueChange={(next) => onValueChange(fromSelectValue(next))}
-      >
-        <SelectTrigger id={id} size="sm" aria-label={label}>
-          <SelectValue className="truncate" />
-        </SelectTrigger>
-        <SelectContent
-          align="end"
-          side={side}
-          alignItemWithTrigger={false}
-          sideOffset={FILTER_MENU_GAP_PX}
-        >
-          <SelectGroup>
-            {selectItems.map((item) => (
-              <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
-            ))}
-          </SelectGroup>
-        </SelectContent>
-      </Select>
-    </Field>
-  )
-}
-
-function FilterControls({
-  filter,
-  onChange,
-  fileOptions,
-  authorOptions,
-  isRefreshing,
-  onRefresh,
-}: FilterControlsProps) {
-  const t = useT()
-  const [menuOpen, setMenuOpen] = useState(false)
-  const sortItemsList = sortItems(t)
-  const allFilesLabel = t("comments.filter.allFiles")
-  const anyoneLabel = t("comments.filter.anyone")
-  const showResolvedLabel = t("comments.filter.showResolved")
-  const activeFilterCount = countActiveFilters(filter)
-  const canReset = activeFilterCount > 0 || filter.sort !== DEFAULT_FILTER.sort
-  const hasFiles = fileOptions.length > 0
-  const hasAuthors = authorOptions.length > 0
-
-  return (
-    <div className="flex items-center gap-2">
-      <InputGroup className="h-8 flex-1 bg-card">
-        <InputGroupAddon>
-          <Search />
-        </InputGroupAddon>
-        <InputGroupInput
-          className="text-sm"
-          placeholder={t("comments.filter.searchPlaceholder")}
-          value={filter.search}
-          onChange={(e) => onChange({ ...filter, search: e.target.value })}
-        />
-      </InputGroup>
-      <Popover open={menuOpen} onOpenChange={setMenuOpen}>
-        <AppTooltip
-          content={t("comments.filter.filtersButton")}
-          side="bottom"
-          disabled={menuOpen}
-        >
-          <PopoverTrigger
-            render={
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                className="bg-card"
-                aria-label={t("comments.filter.filtersButton")}
-                aria-pressed={activeFilterCount > 0}
-              >
-                <Settings2 />
-              </Button>
-            }
-          />
-        </AppTooltip>
-        <PopoverContent
-          align="end"
-          side="bottom"
-          sideOffset={4}
-          className="w-72 gap-0 p-0"
-          data-testid="comments-filters-popover"
-        >
-          <PopoverTitle className="sr-only">{t("comments.filter.filtersButton")}</PopoverTitle>
-          <FieldGroup className="gap-3 p-2.5">
-            <FilterSelectRow
-              id="comments-filter-sort"
-              label={t("comments.filter.sortLabel")}
-              items={sortItemsList}
-              value={filter.sort}
-              onValueChange={(value) => onChange({ ...filter, sort: value as SortOrder })}
-              side={!hasFiles && !hasAuthors ? "top" : "bottom"}
-            />
-            <Field orientation="horizontal">
-              <FieldLabel htmlFor="comments-filter-show-resolved" className={filterLabelClass}>
-                {showResolvedLabel}
-              </FieldLabel>
-              <Switch
-                id="comments-filter-show-resolved"
-                checked={filter.showResolved}
-                onCheckedChange={(checked) => onChange({ ...filter, showResolved: checked })}
-                aria-label={showResolvedLabel}
-              />
-            </Field>
-            {hasFiles && (
-              <FilterSelectRow
-                id="comments-filter-file"
-                label={t("common.file")}
-                items={[
-                  { value: "", label: allFilesLabel },
-                  ...fileOptions.map((file) => ({ value: file.id, label: file.name })),
-                ]}
-                value={filter.fileId}
-                onValueChange={(value) => onChange({ ...filter, fileId: value })}
-                side={!hasAuthors ? "top" : "bottom"}
-              />
-            )}
-            {hasAuthors && (
-              <FilterSelectRow
-                id="comments-filter-author"
-                label={t("comments.filter.authorLabel")}
-                items={[
-                  { value: "", label: anyoneLabel },
-                  ...authorOptions.map((author) => ({ value: author.id, label: author.label })),
-                ]}
-                value={filter.authorId}
-                onValueChange={(value) => onChange({ ...filter, authorId: value })}
-              />
-            )}
-            {hasAuthors && (
-              <FilterSelectRow
-                id="comments-filter-participant"
-                label={t("comments.filter.participantLabel")}
-                items={[
-                  { value: "", label: anyoneLabel },
-                  ...authorOptions.map((author) => ({ value: author.id, label: author.label })),
-                ]}
-                value={filter.participant}
-                onValueChange={(value) => onChange({ ...filter, participant: value })}
-                side="top"
-              />
-            )}
-          </FieldGroup>
-          {canReset && (
-            <>
-              <Separator />
-              <div className="flex justify-end p-2.5">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="text-foreground"
-                  onClick={() => onChange(DEFAULT_FILTER)}
-                >
-                  {t("common.reset")}
-                </Button>
-              </div>
-            </>
-          )}
-        </PopoverContent>
-      </Popover>
-      <AppTooltip content={t("common.refresh")} side="bottom" align="end">
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          className="bg-card"
-          onClick={onRefresh}
-          disabled={isRefreshing}
-          aria-label={t("common.refresh")}
-        >
-          {isRefreshing ? <Spinner /> : <RefreshCw />}
-        </Button>
-      </AppTooltip>
-    </div>
-  )
-}
-
-// ── Page ──────────────────────────────────────────────────────────────────
+import { cellPlaceKey, useCommentCellPlaces } from "./comments-cell-preview"
+import { CommentThreadCard } from "./comments-thread-card"
+import { CommentsFilterControls } from "./comments-filter-controls"
+import { buildCommentCsvThreads } from "./comments-export-threads"
 
 interface CommentsPageProps {
   /** Reuse the workspace's already-resolved project for file labels instead
@@ -579,6 +153,21 @@ export function CommentsPage({ project: workspaceProject }: CommentsPageProps = 
     navigate(editorCommentHref(projectId, root.fileId, root.cellId, root.commentId))
   }
 
+  // AQU-1958: the export is the visible list, filters and sort included — what
+  // is on screen is what lands in the file.
+  function handleExport() {
+    const label = project?.name ?? t("common.comments")
+    const threads = buildCommentCsvThreads({
+      roots: displayedRoots,
+      repliesByParent,
+      projectNames: new Map(projectId ? [[projectId, project?.name ?? ""]] : []),
+      fileMap,
+      places,
+      t,
+    })
+    downloadBlob(commentsCsvBlob(threads), commentsCsvFilename(label))
+  }
+
   const activeFilterCount = countActiveFilters(filter)
 
   return (
@@ -604,13 +193,15 @@ export function CommentsPage({ project: workspaceProject }: CommentsPageProps = 
         )}
       </div>
 
-      <FilterControls
+      <CommentsFilterControls
         filter={filter}
         onChange={setFilter}
         fileOptions={fileOptions}
         authorOptions={authorOptions}
         isRefreshing={isLoading}
         onRefresh={refresh}
+        onExport={handleExport}
+        exportDisabled={displayedRoots.length === 0}
       />
 
       {isError && (

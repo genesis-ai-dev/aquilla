@@ -2,7 +2,7 @@ import { env } from 'cloudflare:test'
 import { afterEach, expect, it, vi } from 'vitest'
 import app from '../index'
 import type { Env } from '../types'
-import { completedPayment, config } from './helpers/workspace-billing'
+import { completedPayment, config, pinSmallAllowancePolicy } from './helpers/workspace-billing'
 import { authHeader, jwtFor } from './helpers/db'
 import { readUsageTotals, reserveWorkspaceUsage, settleWorkspaceUsage } from '../lib/billing/workspace-usage'
 import { readBillingWorkspace } from '../lib/billing/workspace'
@@ -17,8 +17,9 @@ const FILE = 'file-mrk'
 afterEach(async () => { if (_test.lastLoop) await _test.lastLoop; _test.lastLoop = null; vi.unstubAllGlobals(); resetRateCardCache() })
 
 async function setup() {
-  const paid = await completedPayment('pro', 'month')
+  const paid = await completedPayment('team', 'month', undefined, 'personal')
   expect((await paid.send()).status).toBe(200)
+  await pinSmallAllowancePolicy()
   await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES (?, 'Autopilot', 1, 1)").bind(PROJECT).run()
   // The start gate (AQU-827) needs both languages and an answered brief
   // question; AQU-1050's release gate needs the project to have opted in.
@@ -78,15 +79,15 @@ it('reserves and settles every autopilot graph call through the run owner worksp
 it('pauses a run at the span edge once the week is spent, without calling the provider', async () => {
   const f = await setup()
   const period = (await readBillingWorkspace(env.AQUILLA_PG, 1))!.entitlement!
-  await reserveWorkspaceUsage(env.AQUILLA_PG, { orgId: 1, projectId: PROJECT, userId: 1, requestId: 'spent', rail: 'agent', maxRawCostCents: 12.5 },
+  await reserveWorkspaceUsage(env.AQUILLA_PG, { orgId: 1, projectId: PROJECT, userId: 1, requestId: 'spent', rail: 'agent', maxRawCostCents: 62.5 },
     new Date(Date.parse(period.usagePeriodStart) + 1000))
-  await settleWorkspaceUsage(env.AQUILLA_PG, 1, 'spent', 12.5)
+  await settleWorkspaceUsage(env.AQUILLA_PG, 1, 'spent', 62.5)
   const { status, runId } = await f.start()
   expect(status).toBe(201)
   const run = await getRun(env.AQUILLA_PG, runId!)
   expect(run?.status).toBe('paused')
   expect(f.completions).toHaveLength(0)
-  expect((await f.totals()).committed).toBe(50_000_000)
+  expect((await f.totals()).committed).toBe(250_000_000)
 })
 it('fails closed on unowned projects and non-local providers before creating a run', async () => {
   const f = await setup()
@@ -99,18 +100,19 @@ it('fails closed on unowned projects and non-local providers before creating a r
   expect(f.completions).toHaveLength(0)
 })
 
-it('meters the segmentation pass and refuses it with a 429 once the week is spent', async () => {
+it('meters the segmentation pass and refuses it with a 402 once the week is spent', async () => {
   const f = await setup()
   const period = (await readBillingWorkspace(env.AQUILLA_PG, 1))!.entitlement!
   const response = await f.generate()
   expect(response.status).toBe(200)
   expect(f.completions).toHaveLength(1)
   expect(await f.totals()).toEqual({ reserved: 0, settled: 160_000, committed: 160_000 })
-  await reserveWorkspaceUsage(env.AQUILLA_PG, { orgId: 1, projectId: PROJECT, userId: 1, requestId: 'spent', rail: 'agent', maxRawCostCents: 12.5 },
+  await reserveWorkspaceUsage(env.AQUILLA_PG, { orgId: 1, projectId: PROJECT, userId: 1, requestId: 'spent', rail: 'agent', maxRawCostCents: 62.5 },
     new Date(Date.parse(period.usagePeriodStart) + 1000))
   const refused = await f.generate()
-  expect(refused.status).toBe(429)
-  expect(await refused.json()).toMatchObject({ error: { code: 'weekly_ai_allowance_exhausted' } })
+  // The spec §5.3 client contract: an exhausted allowance is 402, never 429 (429 is rate limiting).
+  expect(refused.status).toBe(402)
+  expect(await refused.json()).toMatchObject({ error: 'ai_allowance_exhausted' })
   expect(f.completions).toHaveLength(1)
   expect((await f.generate({ AGENT_MODEL_DEFAULT: 'unknown', CONTEXTUAL_FAST_MODEL: 'unknown', AI_ALLOWED_MODELS: 'unknown' })).status).toBe(503)
 })

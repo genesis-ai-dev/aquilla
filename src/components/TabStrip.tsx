@@ -52,6 +52,8 @@ function tabCloseSolidClasses(active: boolean): string {
 interface FileMeta {
   id: string
   name: string
+  /** AQU-1937: an extension's display label, shown instead of `name`. */
+  displayLabel?: string
   originalName?: string
 }
 
@@ -84,7 +86,7 @@ export function fileNameFor(
 ): string | null {
   const file = files.find((f) => f.id === fileId)
   if (!file) return null
-  for (const candidate of [file.name, file.originalName]) {
+  for (const candidate of [file.displayLabel, file.name, file.originalName]) {
     const trimmed = candidate?.trim()
     if (!trimmed || trimmed === fileId || looksLikeUuid(trimmed)) continue
     return trimmed

@@ -246,6 +246,16 @@ describe("buildProjectExport — source docs, audio, dedupe", () => {
     expect(assembleAudio.mock.calls[0][0]).toMatchObject({ mode: "separate-clips", fileSlug: "GEN" })
   })
 
+  it("hands the WAV choice to the audio assembler (AQU-1575)", async () => {
+    const assembleAudio = vi.fn(async (_args: AudioAssemblyArgs) => ({ entries: [], skipped: [], peakPcmBytes: 0 }))
+    await buildProjectExport(
+      sel([{ id: "f1", name: "GEN.SFM", type: "usfm" }]),
+      opts({ textMode: "none", audioMode: "separate-clips", audioFormat: "wav" }),
+      makeDeps({ assembleAudio }),
+    )
+    expect(assembleAudio.mock.calls[0][0]).toMatchObject({ mode: "separate-clips", audioFormat: "wav" })
+  })
+
   it("dedupes colliding entry paths with _2 suffixes instead of overwriting", async () => {
     const { entries } = await buildProjectExport(
       sel([

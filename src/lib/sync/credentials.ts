@@ -37,6 +37,9 @@ export interface ApiCredential {
   /** AQU-1180: does this token see real human identities in agent-facing
    *  responses? Off unless an owner deliberately turned it on. */
   pii: boolean
+  /** An app connected through OAuth (ChatGPT, Zapier). Optional: an older
+   *  auth-worker omits it, and treating that as a plain token is harmless. */
+  oauth?: boolean
 }
 
 export interface MintCredentialInput {

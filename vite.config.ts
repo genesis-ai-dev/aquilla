@@ -8,6 +8,7 @@ import babel from "@rolldown/plugin-babel"
 import tailwindcss from "@tailwindcss/vite"
 import { nodePolyfills } from "vite-plugin-node-polyfills"
 import { brandingHtmlPlugin } from "./scripts/vite-html-branding.ts"
+import { stripI18nContextPlugin } from "./scripts/vite-strip-i18n-context.ts"
 import { resolveBuildBranch, resolveBuildDate, resolveBuildSha } from "./scripts/build-info.ts"
 import { TRANSFORMERS_ORT_SPECIFIER, resolveTransformersOrtExternWasm } from "./scripts/transformers-ort-extern-wasm.ts"
 import { BRAND_DATA, BRAND_DATA_IDS } from "./src/branding/brands/data.ts"
@@ -101,6 +102,8 @@ export default defineConfig(({ mode }) => ({
       globals: { Buffer: true, global: true, process: true },
     }),
     brandingHtmlPlugin(brand),
+    // AQU-2090: translator notes are for the catalog tooling, never the browser.
+    stripI18nContextPlugin(),
     {
       name: "version-json",
       writeBundle() {
@@ -248,6 +251,8 @@ export default defineConfig(({ mode }) => ({
             "sync-worker/**",
             "agent-worker/**",
             "worker/**",
+            // The Zapier app has its own package.json + jest suite (cd zapier && npm test).
+            "zapier/**",
             // Parity-run acceptance/roundtrip suites run via `pnpm parity:score` /
             // `pnpm roundtrip:score` with parity/vitest.config.ts — rows there are
             // red by design until implemented, so they must not fail the default

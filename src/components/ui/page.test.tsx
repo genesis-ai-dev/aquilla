@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 
-import { Page, PageHeader, StatTile, STAT_TILE_GRID } from "./page"
+import { Page, PageHeader, SettingsRow, StatTile, STAT_TILE_GRID } from "./page"
 
 describe("StatTile", () => {
   it("keeps multi-digit values compact without crowding adjacent numerals", () => {
@@ -96,5 +96,16 @@ describe("PageHeader", () => {
   it("keeps the section-stack gap below the title", () => {
     const { container } = render(<PageHeader title="All organizations" />)
     expect(container.firstElementChild).toHaveClass("mb-12")
+  })
+})
+
+describe("SettingsRow", () => {
+  it("keeps its control at the top, so it doesn't move when the description grows (AQU-1768)", () => {
+    const { container } = render(
+      <SettingsRow label="Lock the timings" description="A long description" control={<button type="button">Toggle</button>} />,
+    )
+    const row = container.firstElementChild
+    expect(row).toHaveClass("flex", "items-start", "justify-between")
+    expect(row).not.toHaveClass("items-center")
   })
 })

@@ -1,8 +1,10 @@
 // Knowledge base HTTP surface (spec: docs/superpowers/specs/2026-08-07-knowledge-base-design.md).
 // projectKnowledge mounts at /api/v2/projects, orgKnowledge at /api/v2/orgs.
 // Originals live in R2 (SNAPSHOTS) under kb/…; extracted text + tree in
-// knowledge_docs via db/shared/knowledge.ts. Indexing runs async (waitUntil) on
-// a connection of its own — see indexDocOnOwnConnection (AQU-1763).
+// knowledge_docs via db/shared/knowledge.ts. Indexing runs on the per-document
+// Durable Object driver (AQU-2051, src/knowledge-index-do.ts), on a connection
+// of its own — see indexDocOnOwnConnection (AQU-1763) for the fallback path
+// used where that binding is absent.
 import { Hono, type Context } from "hono"
 import type { ContentfulStatusCode } from "hono/utils/http-status"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
@@ -11,7 +13,8 @@ import { resolveProjectRole } from "../services/project-permissions"
 import { getEffectiveOrgRole } from "../services/org-permissions"
 import { DocumentExtractionError, extractTextFromDocx, extractTextFromPdf } from "./parse-document"
 import { shipLog } from "../posthog-logs"
-import { indexKnowledgeDoc } from "../lib/knowledge/index-doc"
+import { indexKnowledgeDoc, KB_INDEX_BUDGET_MS } from "../lib/knowledge/index-doc"
+import { kickKnowledgeIndexDriver } from "../lib/knowledge/index-driver"
 import { propagateKnowledgeDocs } from "../../../db/shared/inherited-settings"
 import { makePostgres, type AquillaDb } from "../../../db/shim/postgres"
 import {
@@ -175,8 +178,8 @@ export function openIndexingConnection(
  *  AQU-1763: this job must NOT run on the request-scoped `AQUILLA_PG` shim.
  *  index.ts closes that shim in its `finally` the moment the Response returns,
  *  and postgres.js `end({ timeout: 5 })` destroys the pool 5s later — while
- *  indexing is still awaiting a model round-trip of up to
- *  `KB_INDEX_FETCH_TIMEOUT_MS` (60s). Both the terminal `index_status='ready'`
+ *  indexing is still awaiting a model round-trip, for as long as
+ *  `KB_INDEX_BUDGET_MS` allows. Both the terminal `index_status='ready'`
  *  write and the compensating `'failed'` write in its catch then landed on a
  *  dead connection, so the row never left `pending`: every upload showed
  *  "Indexing…" and then "Indexing stalled" (AQU-1376's read-side window) for a
@@ -204,17 +207,87 @@ export async function indexDocOnOwnConnection(
   }
 }
 
-/** Fire the indexing job off c.executionCtx.waitUntil when available; in the
- *  test harness there's no real ExecutionContext and the getter throws, so
- *  fall back to letting the promise settle on its own (matches the pattern
- *  used elsewhere in this worker, e.g. routes/project-members.ts). */
+/** Hand the indexing job to the per-document Durable Object driver (AQU-2051),
+ *  which runs it on its own alarm invocation and so is not cut off by this
+ *  request's ~30 s `waitUntil` budget. The handshake is deliberately tiny
+ *  (store the job, arm the alarm, 202), so the upload or retry response returns
+ *  as fast as it did before.
+ *
+ *  Where the binding is absent — the vitest route suites, and any environment
+ *  deployed before the DO migration — this keeps the old behaviour exactly:
+ *  the job runs off `c.executionCtx.waitUntil`, or, in the test harness where
+ *  there is no real ExecutionContext and the getter throws, by letting the
+ *  promise settle on its own (the pattern used elsewhere in this worker, e.g.
+ *  routes/project-members.ts).
+ *
+ *  A kick that fails is NOT retried in-request: see `kickKnowledgeIndexDriver`
+ *  for why a local fallback there would race the alarm it may already have
+ *  armed. */
 function runIndexing(c: Context<AuthHonoEnv>, docId: string): void {
+  const kick = kickKnowledgeIndexDriver(c.env, docId)
+  if (kick) {
+    runInBackground(c, kick)
+    return
+  }
   runInBackground(
     c,
     indexDocOnOwnConnection(c.env, docId).catch((err: unknown) => {
       console.error(`[knowledge] indexing job for ${docId} failed to start:`, err)
     }),
   )
+}
+
+/** AQU-2002: how long after its last write an indexing job may still be
+ *  running. A job settles inside its whole-job budget (`KB_INDEX_BUDGET_MS`),
+ *  itself inside the platform's waitUntil window, so past this window nothing
+ *  is in flight any more.
+ *
+ *  This is the *server's* debounce, deliberately much shorter than the read
+ *  side's `KB_INDEX_STALE_MS` (5 min, src/lib/frontier/knowledge-base.ts): the
+ *  UI only offers the retry button once a doc looks stalled, so a human retry
+ *  always clears this window. What it does catch is a second request for a job
+ *  already in flight — a double-clicked button, a replayed request, two agents
+ *  reindexing the same doc — which would otherwise start a duplicate job and
+ *  reset the staleness clock out from under the first one.
+ *
+ *  AQU-2051 revisited this against the driver's ceiling, as that ticket asked,
+ *  and left it where it is — still derived from the *request-hosted* budget,
+ *  which is the only path this row-level claim now has to cover on its own. A
+ *  driver-hosted run legitimately outlasts this window (`KB_DRIVER_BUDGET_MS`),
+ *  but it can no longer be double-started by doing so: the per-document object
+ *  refuses a second job while it is driving, and its heartbeat keeps the row
+ *  off the read side's stalled list for as long as it works, so the retry
+ *  button is never offered over a live job at all. So this stays the cheap
+ *  first line — it stops a duplicate request before any object is reached —
+ *  and it still clears long before a dead job's row goes stale, so a human
+ *  retry is never blocked. */
+export const KB_REINDEX_DEBOUNCE_MS = KB_INDEX_BUDGET_MS + 30_000
+
+/** Restart indexing for one doc, unless a job is already running for it.
+ *
+ *  The claim is the UPDATE itself, so two concurrent requests cannot both win
+ *  it: the row only moves back to `pending` when it is not already a *fresh*
+ *  `pending`, and the caller that fails to move it starts no job. Retrying a
+ *  doc also clears the previous run's `index_error` — the reason belongs to the
+ *  run that produced it, and leaving it in place would make the retry look like
+ *  it had already failed. */
+async function restartIndexing(c: Context<AuthHonoEnv>, docId: string): Promise<Response> {
+  // updated_at is the clock the read side uses to tell "indexing now" from
+  // "stalled since forever" (AQU-1376), so a retry has to restart it — without
+  // this an older doc would look stalled the instant it went back to pending.
+  const claimed = await c.env.AQUILLA_PG.prepare(
+    `UPDATE knowledge_docs
+        SET index_status = 'pending', index_error = NULL, updated_at = now()
+      WHERE id = ?
+        AND NOT (index_status = 'pending'
+                 AND updated_at > now() - make_interval(secs => ?::int))
+    RETURNING id`,
+  )
+    .bind(docId, Math.round(KB_REINDEX_DEBOUNCE_MS / 1000))
+    .first<{ id: string }>()
+  if (!claimed) return c.json({ ok: true, alreadyIndexing: true }, 202)
+  runIndexing(c, docId)
+  return c.json({ ok: true }, 202)
 }
 
 /** The one upload implementation: extension allowlist → size cap → text
@@ -321,6 +394,22 @@ export async function handleUpload(
     const { body, status } = errorJson("job_failed", "knowledge doc insert failed", 500)
     return c.json(body, status)
   }
+
+  // AQU-2002: the pipeline shipped no events at all, so "the upload never
+  // indexed" could not be answered from telemetry — not even "did the bytes
+  // ever reach us". This is the first of the four (upload-received,
+  // index-started, index-ready/degraded, index-failed; the rest are in
+  // lib/knowledge/index-doc.ts).
+  runInBackground(
+    c,
+    shipLog(c.env, "aquilla-identity", "info", "kb-upload-received", {
+      "kb.doc_id": id,
+      "kb.extension": kbExtension(fileName) ?? "unknown",
+      "kb.size_bytes": bytes.byteLength,
+      "kb.text_chars": extracted.text.length,
+      "kb.scope": "projectId" in scope ? "project" : "org",
+    }),
+  )
 
   runIndexing(c, id)
 
@@ -558,16 +647,7 @@ projectKnowledge.post("/:projectId/knowledge/:docId/reindex", authMiddleware, as
     return c.json(body, status)
   }
 
-  // updated_at is the clock the read side uses to tell "indexing now" from
-  // "stalled since forever" (AQU-1376), so a retry has to restart it — without
-  // this an older doc would look stalled the instant it went back to pending.
-  await c.env.AQUILLA_PG.prepare(
-    `UPDATE knowledge_docs SET index_status = 'pending', updated_at = now() WHERE id = ?`,
-  )
-    .bind(docId)
-    .run()
-  runIndexing(c, docId)
-  return c.json({ ok: true }, 202)
+  return restartIndexing(c, docId)
 })
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -715,14 +795,5 @@ orgKnowledge.post("/:orgId/knowledge/:docId/reindex", authMiddleware, async (c) 
     return c.json(body, status)
   }
 
-  // updated_at is the clock the read side uses to tell "indexing now" from
-  // "stalled since forever" (AQU-1376), so a retry has to restart it — without
-  // this an older doc would look stalled the instant it went back to pending.
-  await c.env.AQUILLA_PG.prepare(
-    `UPDATE knowledge_docs SET index_status = 'pending', updated_at = now() WHERE id = ?`,
-  )
-    .bind(docId)
-    .run()
-  runIndexing(c, docId)
-  return c.json({ ok: true }, 202)
+  return restartIndexing(c, docId)
 })

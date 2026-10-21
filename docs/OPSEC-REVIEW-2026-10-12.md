@@ -502,6 +502,35 @@ fix was restored (`git stash` of the one source file, re-run):
 
 ---
 
+## Update 2026-10-16 (AQU-2003): sync-token reads reopened at Viewer
+
+Ryder and Matthew agreed to narrow the sync-token half of OPS-44. A step-up code
+on every foreign project made platform QA impractical, so an un-elevated
+platform admin whose only path to a project is platform power now receives a
+read-only sync token: level 100 (Viewer), still stamped `src: "platform"` so the
+sync-worker's lane read wall lets them see every lane. User-content writes stay
+refused: the role floors (events COMMENTER 200 and up, audio/attachments/TTS/
+voice-convert CONTRIBUTOR 400, import, upload and merge PROJECT_LEAD 500) plus
+a new explicit rule in `sync-worker/src/events/authorize.ts` that rejects any
+`src: "platform"` token below Contributor, whatever an org's floors say. The
+step-up code re-mints at the full platform level. The server-side agent harness
+does not opt in and still fails closed.
+
+One exception remains: `POST /api/v1/projects/:id/link/sync` takes any valid
+project token with no role floor. Any genuine Viewer can fire it too, and it
+writes only server-authored mirror data folded from the linked upstream.
+
+Residual risk, accepted: a stolen but non-elevated admin JWT can again read any
+tenant's project content (D2) through the sync-worker. PAT minting, the org's
+vendor keys and the sibling fold keep their OPS-44 elevation gate. The finding
+text above is left as written.
+
+The earlier-noted edge, an org setting `assignmentMinRole` to Viewer (which
+replaces the static floor for assignment events), is closed by the explicit rule
+above: the view token is refused before any floor is consulted.
+
+---
+
 _Re-run the mechanical parts of this review with: `npx vitest run --project app
 scripts/platform-elevation-coverage.test.ts && cd auth-worker && npx vitest run
 src/__tests__/admin-membership-elevation.test.ts src/__tests__/credentials.test.ts

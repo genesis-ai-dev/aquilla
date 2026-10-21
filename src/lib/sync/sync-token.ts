@@ -9,6 +9,7 @@
 
 import { isElevationRequiredBody } from "@/lib/errors/user-error"
 import { notifyElevationRequiredIfCurrent } from "@/lib/frontier/elevation"
+import { ROLE } from "@/lib/frontier/roles"
 
 // Phase D: default points at aquilla-identity (aquilla-identity).
 // VITE_FRONTIER_BASE is retained as a fallback for E2E test environments that
@@ -112,6 +113,8 @@ interface CachedToken {
    * audio cache in src/lib/audio/sync-token-fetcher.ts.
    */
   jwt: string
+  /** AQU-2003: role the token was minted with, handed back on cache hits. */
+  role?: SyncTokenResponse["role"]
 }
 
 const REFRESH_SAFETY_MS = 30_000
@@ -161,6 +164,16 @@ export interface SyncTokenMintResult {
   /** OPS-44: set on a 403 that only asks the platform admin to step up. The
    *  flusher holds these events instead of quarantining them. */
   elevationRequired?: boolean
+  /** AQU-2003: the role the minted token carries, on success. The outbox
+   *  flusher reads it to tell a read-only platform view from a writable token. */
+  role?: SyncTokenResponse["role"]
+}
+
+/** AQU-2003: surface the role only for a read-only platform view (platform
+ *  source, below Contributor), the one case a caller needs it for. Every other
+ *  result keeps its original `{ token, status }` shape. */
+function platformRole(role: SyncTokenResponse["role"] | undefined): { role?: SyncTokenResponse["role"] } {
+  return role?.source === "platform" && role.level < ROLE.CONTRIBUTOR ? { role } : {}
 }
 
 /** AQU-1788: options for one mint call. */
@@ -212,7 +225,7 @@ export function makeSyncTokenMinter(
     // re-mint cannot leave the stale-role token available to the next caller.
     if (forceRefresh) cached = null
     if (!forceRefresh && cached && cached.jwt === jwt && cached.expiresAtMs > now + REFRESH_SAFETY_MS) {
-      return { token: cached.value, status: 200 }
+      return { token: cached.value, status: 200, ...platformRole(cached.role) }
     }
     const existing = forceRefresh ? undefined : pending.get(jwt)
     if (existing) return existing
@@ -223,9 +236,10 @@ export function makeSyncTokenMinter(
           value: resp.token,
           expiresAtMs: now + resp.expiresIn * 1000,
           jwt,
+          role: resp.role,
         }
         callbacks.onRole?.(resp.role)
-        return { token: resp.token, status: 200 }
+        return { token: resp.token, status: 200, ...platformRole(resp.role) }
       } catch (err) {
         let status: number | null = null
         let elevationRequired = false

@@ -41,3 +41,29 @@ describe("trackMenuScopes — promotable (AQU-1566)", () => {
     expect(trackMenuIsEmpty(scopes([byId("fr")]))).toBe(true)
   })
 })
+
+// AQU-1684: anyone may hide tracks on their own screen — never a folder, and
+// not while one of them is recording or being dragged.
+describe("trackMenuScopes — hide (AQU-1684)", () => {
+  const tracks = deriveTracksForFile(null)
+  const byId = (id: string) => tracks.find((track) => track.id === id)!
+  const folder = { id: "f", kind: "folder", name: "Folder", order: 9, groupId: null } as TimelineTrack
+  const scopes = (targets: TimelineTrack[], busy?: string[]) =>
+    trackMenuScopes({ targets, canRename: false, canColour: false, canEdit: false, canHide: true, busyIds: new Set(busy) })
+
+  it("hides every selected track but a folder, and is enough to open the menu", () => {
+    const s = scopes([byId("source-audio"), byId("target-audio"), folder])
+    expect(s.hideable.map((t) => t.id)).toEqual(["source-audio", "target-audio"])
+    expect(trackMenuIsEmpty(scopes([byId("source-audio")]))).toBe(false)
+    expect(trackMenuIsEmpty(scopes([folder]))).toBe(true)
+  })
+
+  it("is held back while one of them is busy", () => {
+    expect(scopes([byId("target-audio")], ["target-audio"]).hideBusy).toBe(true)
+    expect(scopes([byId("source-audio")], ["target-audio"]).hideBusy).toBe(false)
+  })
+
+  it("is nothing without the callback", () => {
+    expect(trackMenuScopes({ targets: [byId("source-audio")], canRename: false, canColour: false, canEdit: false }).hideable).toEqual([])
+  })
+})

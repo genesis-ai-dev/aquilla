@@ -26,6 +26,7 @@ import { resolveLaneIdOrTag, type ResolvedLane } from "../../../../db/shared/lan
 import { AGENT_REQUIRED_ROLE, ROLE_NAME } from "./schema-card"
 import { loadLintRules, lintDraft, rulesForLane } from "./lint"
 import { cellEditingFloorFromSettings, isCellEditingKind } from "../../../../db/shared/cell-editing-floor"
+import { withOrgMediaDefaults } from "../../../../db/shared/media-setting-defaults"
 
 // ── Wire contract (must match the plan doc byte-for-byte) ───────────────────
 
@@ -352,12 +353,20 @@ type Verdict =
  *  refusing answer is the safe one here. */
 async function loadCellEditingFloor(db: AquillaDb, projectId: string): Promise<number | null> {
   try {
+    // AQU-1768: a project with no tier of its own follows its org's default.
     const row = await db
-      .prepare(`SELECT settings FROM project_settings WHERE project_id = ?`)
+      .prepare(
+        `SELECT ps.settings AS project_settings, os.settings AS org_settings
+           FROM (SELECT ?::text AS id) q
+           LEFT JOIN project_settings ps ON ps.project_id = q.id
+           LEFT JOIN projects p ON p.id = q.id
+           LEFT JOIN org_settings os ON os.org_id = p.org_id`,
+      )
       .bind(projectId)
-      .first<{ settings: string | null }>()
-    if (!row?.settings) return null
-    return cellEditingFloorFromSettings(JSON.parse(row.settings))
+      .first<{ project_settings: string | null; org_settings: string | null }>()
+    const project = row?.project_settings ? JSON.parse(row.project_settings) : null
+    const org = row?.org_settings ? JSON.parse(row.org_settings) : null
+    return cellEditingFloorFromSettings(withOrgMediaDefaults(project, org))
   } catch {
     return null
   }

@@ -74,6 +74,90 @@ export interface AudioAttachmentOut {
    * a project with self-validation off.
    */
   recordedBy?: string | null
+  /**
+   * AQU-1767: the take this one was CUT from (its piece group's root), or
+   * null/absent for a whole take and for a cut's first piece. Group key =
+   * `pieceOf ?? audioId`; when one piece is selected, every live piece of its
+   * group is — see `selectedPieceIds`.
+   */
+  pieceOf?: string | null
+}
+
+/** AQU-1767: the piece group a take belongs to — its root's id. */
+export function pieceGroupOf(att: Pick<AudioAttachmentOut, "pieceOf"> | undefined, audioId: string): string {
+  return att?.pieceOf ?? audioId
+}
+
+/**
+ * AQU-1767: every live piece of the group the slot's selection belongs to, in
+ * CLIP order (by where each piece starts in the audio). A take that was never
+ * cut answers with just itself, so a caller can always loop over this instead
+ * of reading the one pointer.
+ *
+ * Works on either read shape — the server's per-file entry or a merged
+ * `CellData` — because both carry `attachments` keyed by id with `slot`.
+ */
+export function selectedPieceIds(
+  attachments:
+    | Record<
+        string,
+        {
+          pieceOf?: string | null
+          slot?: string
+          trimStartMs?: number | null
+          isDeleted?: boolean
+        }
+      >
+    | undefined,
+  selectedId: string | null | undefined,
+): string[] {
+  if (!selectedId || !attachments) return []
+  const picked = attachments[selectedId]
+  if (!picked) return []
+  const group = pieceGroupOf(picked, selectedId)
+  const ids = Object.entries(attachments)
+    .filter(([id, a]) => !a.isDeleted && a.slot === picked.slot && pieceGroupOf(a, id) === group)
+    .map(([id]) => id)
+  if (!ids.includes(selectedId)) ids.push(selectedId)
+  return ids.sort((x, y) => (attachments[x]?.trimStartMs ?? 0) - (attachments[y]?.trimStartMs ?? 0))
+}
+
+/**
+ * AQU-1767 (Sam, 2026-10-15): how far a piece of a split take may be trimmed
+ * back OUT, in ms on the recording's clock. A cut edge reaches as far as the
+ * neighbouring piece's edge as it stands now and never over it, so two pieces
+ * never play the same audio. The limit follows the neighbour as it is
+ * trimmed, and goes with it when it is deleted. An outer edge (the first
+ * piece's start, the last piece's end) answers null: the recording's own end.
+ * Moving a piece is not limited by any of this.
+ */
+export function pieceTrimLimitsMs(
+  attachments:
+    | Record<
+        string,
+        {
+          pieceOf?: string | null
+          slot?: string
+          trimStartMs?: number | null
+          trimEndMs?: number | null
+          isDeleted?: boolean
+        }
+      >
+    | undefined,
+  audioId: string,
+): { minStartMs: number | null; maxEndMs: number | null } {
+  const ids = selectedPieceIds(attachments, audioId)
+  const i = ids.indexOf(audioId)
+  const self = attachments?.[audioId]
+  if (!attachments || !self || i < 0) return { minStartMs: null, maxEndMs: null }
+  const prev = i > 0 ? attachments[ids[i - 1]] : undefined
+  const next = i < ids.length - 1 ? attachments[ids[i + 1]] : undefined
+  return {
+    // A previous piece that runs to the recording's end already overlaps this
+    // one: leave no room rather than hand it more.
+    minStartMs: prev ? (prev.trimEndMs ?? self.trimStartMs ?? 0) : null,
+    maxEndMs: next ? (next.trimStartMs ?? 0) : null,
+  }
 }
 
 /** A take counts toward validation only if somebody dubbed it. */
@@ -157,6 +241,13 @@ export function selectedDubTakes(entry: CellAudioEntry): AudioAttachmentOut[] {
     const att = entry.attachments[audioId]
     return att && isDubTake(att) ? att : undefined
   }
+  // AQU-1767: a cut take is several selected pieces, and each is validated on
+  // its own — so each one is a take this question is measured over (the
+  // server's progress MIN already counts every selected dub row).
+  const piecesOf = (att: AudioAttachmentOut): AudioAttachmentOut[] =>
+    selectedPieceIds(entry.attachments, att.audioId)
+      .map((id) => entry.attachments[id])
+      .filter((a): a is AudioAttachmentOut => a != null && isDubTake(a))
 
   const out: AudioAttachmentOut[] = []
   // Keyed by audioId, because the same take appearing under two slots would
@@ -176,7 +267,7 @@ export function selectedDubTakes(entry: CellAudioEntry): AudioAttachmentOut[] {
     // The two default-track slots are handled together below.
     if (slot === RECORDING_SLOT || slot === GENERATED_VOICE_SLOT) continue
     const att = dubAt(slot)
-    if (att) push(att)
+    if (att) for (const piece of piecesOf(att)) push(piece)
   }
 
   // ONE TAKE PER TRACK, and the default track is the only one that needs
@@ -189,7 +280,7 @@ export function selectedDubTakes(entry: CellAudioEntry): AudioAttachmentOut[] {
   // (2026-09-21). This is that resolution restated over the read shape, which
   // is what keeps the two from drifting.
   const defaultTrack = dubAt(RECORDING_SLOT) ?? dubAt(GENERATED_VOICE_SLOT)
-  if (defaultTrack) push(defaultTrack)
+  if (defaultTrack) for (const piece of piecesOf(defaultTrack)) push(piece)
   return out
 }
 

@@ -53,6 +53,8 @@ export interface WaveformEdge {
   valueText?: string
   /** Draggable? A read-only edge is drawn grey and takes no input. */
   editable: boolean
+  /** AQU-1767: drawn dashed — a split take's cut, which is not an edge of what plays. */
+  dashed?: boolean
   /** Pointer drag: the fraction under the pointer. */
   onDrag?: (fraction: number) => void
   /** Arrow keys: -1 / +1, `coarse` with Shift. */
@@ -73,9 +75,19 @@ export interface WaveformRectProps {
   trackVars?: Record<string, string>
   /** The part that plays, as fractions of the whole clip. Outside it is faded. */
   keep?: { start: number; end: number } | null
+  /**
+   * AQU-1767: stretches INSIDE `keep` that do not play either, as fractions —
+   * the space between a split take's pieces. Faded like the outside.
+   */
+  gaps?: readonly { start: number; end: number }[]
   /** Playback position as a fraction of the whole clip; drawn only while `playing`. */
   progress?: number | null
   playing?: boolean
+  /**
+   * AQU-1642 follow-up: draw `progress` while stopped too — the Audio view's
+   * card holds the place it will play from (Sam, 2026-10-17).
+   */
+  holdProgress?: boolean
   /** Top-left play/stop. Omit to hide the button. */
   onTogglePlay?: () => void
   playLabel?: string
@@ -126,8 +138,10 @@ export function WaveformRect({
   kind = "take",
   trackVars = NEUTRAL_TRACK_VARS,
   keep = null,
+  gaps,
   progress = null,
   playing = false,
+  holdProgress = false,
   onTogglePlay,
   playLabel = "",
   stopLabel = "",
@@ -205,7 +219,7 @@ export function WaveformRect({
     }
   }
 
-  const showProgress = playing && progress != null && Number.isFinite(progress)
+  const showProgress = (playing || holdProgress) && progress != null && Number.isFinite(progress)
   const fracFromX = (clientX: number): number => {
     const el = boxRef.current
     if (!el) return 0
@@ -283,6 +297,17 @@ export function WaveformRect({
           style={{ width: pct(1 - keep.end) }}
         />
       )}
+      {gaps?.map((gap, i) =>
+        gap.end > gap.start ? (
+          <div
+            key={i}
+            aria-hidden
+            data-testid={testId ? `${testId}-fade-gap` : undefined}
+            className="pointer-events-none absolute inset-y-0 bg-background/60"
+            style={{ left: pct(gap.start), width: pct(gap.end - gap.start) }}
+          />
+        ) : null,
+      )}
 
       {onSeek && (
         <div
@@ -293,7 +318,7 @@ export function WaveformRect({
           aria-valuenow={Math.round(clamp01(progress ?? 0) * 100)}
           tabIndex={-1}
           data-testid={testId ? `${testId}-seek` : undefined}
-          className="absolute inset-0 cursor-pointer"
+          className="absolute inset-0 cursor-default"
           {...seekHandlers}
         />
       )}
@@ -454,8 +479,12 @@ function EdgeLine({
       )}
       style={{ left: pct(edge.at) }}
     >
-      {/* The line itself: 2px, fully opaque. */}
-      <div className={cn("mx-auto h-full w-0.5 rounded-[1px]", editable ? "bg-foreground" : "bg-muted-foreground/80")} />
+      {/* The line itself: 2px, fully opaque; a cut is dashed (Sam, 2026-10-15). */}
+      {edge.dashed ? (
+        <div data-dashed="true" className="mx-auto h-full w-0 border-l-2 border-dashed border-muted-foreground/80" />
+      ) : (
+        <div className={cn("mx-auto h-full w-0.5 rounded-[1px]", editable ? "bg-foreground" : "bg-muted-foreground/80")} />
+      )}
       {/* Its time, at the top, on whichever side keeps it inside the box. */}
       {showTime && edge.valueText && (
         <span

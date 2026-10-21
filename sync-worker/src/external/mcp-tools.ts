@@ -299,6 +299,70 @@ const TOOL_SPECS: McpToolSpec[] = [
     },
   },
   {
+    name: 'transcribe_audio',
+    description:
+      'Speech to text with word timings, including LOW-RESOURCE languages that ordinary ASR does not ' +
+      'know. Transcribes a cell\'s selected recorded take (fileId + cellId + laneId) or raw ' +
+      'audio { data: <base64>, format: "wav" } (16 kHz mono PCM16; long audio is cut into windows ' +
+      'for you). model: "auto" (default — Whisper for its 99 languages, Qwen3-ASR for Chinese ' +
+      'varieties, Omnilingual CTC for 1,600+ others), or force "whisper" | "qwen3-asr" | "omni-ctc" | ' +
+      '"omni-zs". "omni-zs" (Omnilingual zero-shot) learns the language from up to 10 of this lane\'s ' +
+      'own recorded + transcribed cells (picked automatically by source-text overlap, or name them ' +
+      'in exampleCellIds) — use it for a language no model has seen. It cold-starts: call ' +
+      'transcription_status { model: "omni-zs", warm: true } first and poll until state is "ready"; ' +
+      'a cold call fails with reason "asr_warming". language (BCP-47) defaults to the lane\'s. ' +
+      'Returns { text, words: [{ text, start, end }] (seconds), model, timingsApproximate, ' +
+      'creditsCharged }. SPENDS WORKSPACE CREDITS (metered GPU time for Omnilingual) and needs a ' +
+      'project-scoped read-write credential. WRITES NOTHING: to store the transcript, stage it with ' +
+      'prepare_translations (SetTranslation for a target take, SetTranscription for a source media ' +
+      'cell) so it goes through the normal approval gate. A stored webm take can ' +
+      'only go to omni-ctc / omni-zs, and must be at most 30 s (60 s for Whisper/Qwen WAV).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        laneId: { type: 'string', description: 'Target lane id (from get_project). Required with cellId, and for omni-zs.' },
+        fileId: { type: 'string', description: 'File of the cell whose selected take to transcribe.' },
+        cellId: { type: 'string', description: 'Cell whose selected recorded take to transcribe.' },
+        audio: {
+          type: 'object',
+          description: 'Raw audio instead of a cell: { data: base64, format: "wav" } — 16 kHz mono PCM16, up to 10 min.',
+          properties: { data: { type: 'string' }, format: { type: 'string', enum: ['wav'] } },
+          required: ['data', 'format'],
+          additionalProperties: false,
+        },
+        model: { type: 'string', enum: ['auto', 'whisper', 'qwen3-asr', 'omni-ctc', 'omni-zs'], description: 'Default "auto".' },
+        language: { type: 'string', description: 'BCP-47 tag, e.g. "luo" or "tpi-Latn". Defaults to the lane\'s language.' },
+        exampleCellIds: {
+          type: 'array', items: { type: 'string' },
+          description: 'omni-zs only: up to 10 cells in this lane whose recordings + text to learn from (2–30 s each). Omit to pick automatically.',
+        },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'transcription_status',
+    description:
+      'Is an Omnilingual model ready? The zero-shot model ("omni-zs") takes about 2 minutes to start ' +
+      'when cold. Pass warm: true to start it (free), then poll every ~5 s until state is "ready" ' +
+      'before calling transcribe_audio with model "omni-zs". Returns { state: "cold"|"starting"|"ready", ' +
+      'estGpuSecPerAudioSec } — the second is the measured GPU-seconds per audio-second, for ' +
+      'estimating a batch\'s cost. Whisper and Qwen3-ASR need no warm-up. Refused when the ' +
+      'organization has turned zero-shot off.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        model: { type: 'string', enum: ['omni-zs', 'omni-ctc'], description: 'Default "omni-zs".' },
+        warm: { type: 'boolean', description: 'Start the model if it is cold. Default false.' },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'search_projects',
     description:
       'Full-text search SEVERAL projects in one call — the cross-project form of ' +
@@ -659,14 +723,20 @@ const TOOL_SPECS: McpToolSpec[] = [
       'MAINTAINER. `ifMatchVersion` must equal the live settings version or you get ' +
       'plan_stale (re-fetch the current version and re-prepare); the receipt carries the new ' +
       'version.\n' +
-      '  { kind: "LinkMedia", fileId, cellId, artifactId } — event-native (compiles to ' +
-      'cell.audio.attach + cell.audio.select). `artifactId` must reference an audio-kind ' +
-      'artifact already uploaded to this project via REST ' +
+      '  { kind: "LinkMedia", fileId, cellId, artifactId, laneId, slot?, durationMs? } — ' +
+      'event-native (compiles to cell.audio.attach + cell.audio.select in the named lane). ' +
+      '`laneId` is REQUIRED and is a target lane\'s id from get_project — a take with no ' +
+      'lane is filed under the legacy default lane and never shows in a tagged lane\'s ' +
+      'Takes. `slot` is "recording" (default: a recorded take) or "generatedVoice" ' +
+      '(externally synthesized voice, reviewed and exported like in-app TTS); `durationMs` ' +
+      'is the clip length when you know it (the upload does no decoding). `artifactId` must ' +
+      'reference an audio-kind artifact already uploaded to this project via REST ' +
       '`POST .../projects/:projectId/artifacts` with header `x-artifact-kind: audio` — MCP ' +
-      'is JSON-RPC text and cannot carry that binary upload itself. Multiple LinkMedia ' +
-      'commands may share one changeset with each other, but LinkMedia cannot mix with ' +
-      'SetTranslation/CreateProject/UpdateProjectSettings in the same changeset. Requires ' +
-      'CONTRIBUTOR.\n' +
+      'is JSON-RPC text and cannot carry that binary upload itself. The receipt\'s `media[]` ' +
+      'carries the native take audioId the app now plays (not the artifact\'s). Multiple ' +
+      'LinkMedia commands may share one changeset with each other, but LinkMedia cannot mix ' +
+      'with SetTranslation/CreateProject/UpdateProjectSettings in the same changeset. ' +
+      'Requires CONTRIBUTOR.\n' +
       '  { kind: "DraftCells", fileId, cellIds, laneId?, instructions? } — ask the PROJECT\'S ' +
       'OWN copilot to draft those cells instead of writing the text yourself, so the result ' +
       'carries this project\'s terminology, example pairs and brief. Must be the SOLE command ' +
@@ -803,8 +873,27 @@ const TOOL_SPECS: McpToolSpec[] = [
                     type: 'string',
                     description: 'An audio-kind artifact id from the REST artifact upload endpoint.',
                   },
+                  laneId: {
+                    type: 'string',
+                    description:
+                      'Required lane id (lanes.id from get_project) of the target lane the take ' +
+                      'belongs to. A language tag is not accepted.',
+                  },
+                  slot: {
+                    type: 'string',
+                    enum: ['recording', 'generatedVoice'],
+                    description:
+                      'Which take slot the clip lands in: "recording" (default) for a recorded ' +
+                      'take, "generatedVoice" for externally synthesized voice, reviewed and ' +
+                      'exported like in-app TTS.',
+                  },
+                  durationMs: {
+                    type: 'integer',
+                    minimum: 1,
+                    description: "The clip's length in milliseconds, when known — the upload does no decoding.",
+                  },
                 },
-                required: ['kind', 'fileId', 'cellId', 'artifactId'],
+                required: ['kind', 'fileId', 'cellId', 'artifactId', 'laneId'],
                 additionalProperties: false,
               },
               {
@@ -1194,13 +1283,15 @@ const TOOL_SPECS: McpToolSpec[] = [
     },
   },
 ]
-type ToolKind = 'read' | 'stage' | 'commit' | 'discard'
+type ToolKind = 'read' | 'spend' | 'stage' | 'commit' | 'discard'
 
 /**
  * How each tool touches Aquilla state. Every tool MUST be listed (a test
  * enforces it), so a new tool cannot ship without a deliberate choice.
  *
  *  read    — no state change at all.
+ *  spend   — no project state change, but it costs workspace credits each
+ *            call (so it is neither read-only nor idempotent).
  *  stage   — writes a pending changeset only; nothing in the project changes
  *            until a confirm (and, in ask mode, a human approval).
  *  commit  — applies a staged changeset: may overwrite translations, delete or
@@ -1219,6 +1310,8 @@ export const TOOL_KINDS: Record<string, ToolKind> = {
   get_skill: 'read',
   search_project: 'read',
   find_similar_cells: 'read',
+  transcribe_audio: 'spend',
+  transcription_status: 'read',
   search_projects: 'read',
   read_content: 'read',
   read_history: 'read',

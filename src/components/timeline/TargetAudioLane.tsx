@@ -13,7 +13,26 @@
 
 import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
-import { Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Mic, Play, Sparkles, Square, VolumeX } from "lucide-react"
+import { AudioLines, Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Mic, Pencil, Play, Scissors, Sparkles, Square, Trash2, VolumeX, X } from "lucide-react"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuRadioGroup,
+  ContextMenuRadioItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
+import {
+  CHANGE_VOICE_QUALITIES,
+  type ChangeVoiceBlocker,
+  type ChangeVoiceQuality,
+} from "@/lib/audio/change-voice"
+import { CHANGE_VOICE_QUALITY_LABEL } from "@/lib/store/change-voice-quality"
 import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { toast } from "@/components/ui/toast"
@@ -43,6 +62,9 @@ import {
   type TargetChipGeom,
 } from "@/lib/timeline/lane-timing"
 import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
+import { canCutAt } from "@/lib/audio/cut-take"
+import { pieceTrimLimitsMs } from "@/lib/sync/cell-audio-read-types"
+import { takeBaseLabel } from "@/lib/audio/take-groups"
 import { snapSpan, SNAP_THRESHOLD_PX } from "@/lib/timeline/snap"
 import { trackChipClass, trackChipPlayingClass, trackHueVars } from "@/lib/timeline/track-colors"
 import { DragTimeChip } from "./DragTimeChip"
@@ -60,6 +82,7 @@ import type { TimelineLayout } from "@/lib/timeline/layout"
 import type { CellData } from "@/hooks/useCells"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { takeBadgeState } from "@/components/cell/audio-validation-state"
+import { isHiddenCell } from "@/lib/cells/hidden"
 import { CHIP_PLAYLINE_CLASS, CHIP_VALIDATED_BADGE_CLASS, chipCornerButtonClass } from "@/components/audio/chip-classes"
 
 export interface TargetAudioItem {
@@ -67,6 +90,10 @@ export interface TargetAudioItem {
   kind: "take" | "generated"
   /** The active dub attachment's id (for duration/trim lookup). */
   audioId: string
+  /** AQU-1767: which piece of a cut take this is (0-based, clip order), and
+   *  how many there are. Absent for a take that was never cut. */
+  pieceIndex?: number
+  pieceCount?: number
 }
 
 export interface TargetAudioLaneProps {
@@ -79,6 +106,13 @@ export interface TargetAudioLaneProps {
   viewStartSec: number
   viewEndSec: number
   selectedId: string | null
+  /**
+   * AQU-1767 (Sam, 2026-10-14): the line whose take ON THIS LANE is the
+   * selected take — the one S splits at the playhead. A selected line alone
+   * (from its card or its row) lights its takes more quietly, because S does
+   * not act on them.
+   */
+  selectedTakeCellId?: string | null
   /** The verse the transport is WAITING ON (queue state "loading") — its chip
    *  shows a small spinner while the readiness gate parks. */
   loadingCellId?: string | null
@@ -106,7 +140,11 @@ export interface TargetAudioLaneProps {
   masterHonorsTrims?: boolean
   snapEnabled?: boolean
   onSelect(id: string): void
-  /** Clean chip click navigates playback to the section (same as a card). */
+  /** AQU-1767 (Sam, 2026-10-14): a clean click on a take selects THAT take,
+   *  after `onSelect` has selected its line. */
+  onSelectTake?(cellId: string): void
+  /** A double-click on a take jumps playback to its line (a single click
+   *  selects it and leaves the playhead where it is — Sam, 2026-10-14). */
   onSeek?(id: string): void
   /** Round 6/7: move a chip — the dub's new CLIP-ZERO ANCHOR (file seconds).
    *
@@ -117,6 +155,12 @@ export interface TargetAudioLaneProps {
   /** Round 7: trim a chip — the COMPLETE desired trim state (both keys
    *  resolved; undefined clears a key back to the clip edge). */
   onTrimTarget?(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): void
+  /** AQU-1767: the blade is in hand — a click on a chip cuts it there. */
+  bladeActive?: boolean
+  /** AQU-1767: cut one take at `atMs`, a position in its own audio. */
+  onCutTarget?(cellId: string, audioId: string, atMs: number): void
+  /** AQU-1767: what a right-click on a take offers. Absent, it offers nothing. */
+  takeMenu?: TakeMenuActions
   /** Round 8b: corner mic button — opens the recording modal on this cell. */
   onOpenRecording?(cellId: string): void
   /** SUB-51: timed media sections with NO dub yet. Their empty space in this
@@ -185,6 +229,53 @@ interface ChipGeometry {
   ratio: number | null
 }
 
+/**
+ * AQU-1767 (Sam, 2026-10-14): the actions a take's right-click menu offers.
+ * Each is optional; a missing one is simply not in the menu.
+ */
+export interface TakeMenuActions {
+  /** Open the recorder on this line, on this take's track. */
+  reRecord?(cellId: string): void
+  /** Generate a new voice for this line straight away, on this take's track. */
+  regenerate?(cellId: string): void
+  /**
+   * AQU-2026: re-voice this line's own take into its cast voice at `quality`.
+   * Nothing is synthesized from text — the words and timing are kept.
+   */
+  changeVoice?(cellId: string, quality: ChangeVoiceQuality): void
+  /**
+   * AQU-2026: what Change voice can do on this line, or `null` to leave the
+   * item out of the menu entirely (a line whose only sound is the film's own
+   * programme audio has nothing of its own to convert).
+   */
+  changeVoiceState?(cellId: string): ChangeVoiceMenuState | null
+  /** Ask for a new name; `current` is the take's own name, if it has one. */
+  rename?(cellId: string, audioId: string, current: string | null): void
+  /** Delete this take, or this piece of a cut take. */
+  remove?(cellId: string, audioId: string): void
+  /** Add or withdraw your own approval of this take. */
+  vote?(cellId: string, audioId: string, validated: boolean): void
+  /** Whether you may vote on this take, and whether you already have. */
+  voteState?(cellId: string, audioId: string): { canVote: boolean; voted: boolean }
+}
+
+/**
+ * AQU-2026: why the per-line Change voice can't run. `no-take` never reaches
+ * the menu — the item is left out instead.
+ */
+export type ChangeVoiceMenuBlocker = ChangeVoiceBlocker | "voice-reference" | "busy"
+
+/** AQU-2026: what a take's Change voice submenu offers for one line. */
+export interface ChangeVoiceMenuState {
+  /** The voice the line is cast to — named in the reason the menu gives. */
+  voiceName: string
+  /** The quality this take was converted at, ticked in the submenu. Null when
+   *  the take is not a conversion, so nothing shows as current. */
+  quality: ChangeVoiceQuality | null
+  /** Why Change voice can't run at each quality; null where it can. */
+  blockers: Record<ChangeVoiceQuality, ChangeVoiceMenuBlocker | null>
+}
+
 function TargetAudioChip({
   chip,
   prevChip,
@@ -200,9 +291,13 @@ function TargetAudioChip({
   editable,
   snap,
   onSelect,
+  onSelectTake,
   onSeek,
   onRetimeTarget,
   onTrimTarget,
+  bladeActive = false,
+  onCutTarget,
+  takeMenu,
   onOpenRecording,
   validationRequirementAudio = 1,
   currentUsername = "",
@@ -238,7 +333,9 @@ function TargetAudioChip({
    *  "runs long". */
   audioFirst: boolean
   pxPerSec: number
-  selected: boolean
+  /** "take": this is the selected take (S splits it). "line": its line is
+   *  selected, but not this take. */
+  selected: "take" | "line" | false
   /** The transport is parked waiting on this verse's audio (slow load). */
   loading: boolean
   /** This chip's dub audio definitively 404'd. */
@@ -246,12 +343,16 @@ function TargetAudioChip({
   editable: boolean
   snap: { enabled: boolean; candidates: number[] }
   onSelect(id: string): void
+  onSelectTake?(cellId: string): void
   onSeek?(id: string): void
   /** AQU-646 stage 3: the TAKE being moved, not just its line. Placement is
    *  stored per take now — two tracks share a line, and a per-cell anchor
    *  would make dragging one chip move the other. */
   onRetimeTarget?(cellId: string, anchorSec: number, audioId: string): void
   onTrimTarget?(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): void
+  bladeActive?: boolean
+  onCutTarget?(cellId: string, audioId: string, atMs: number): void
+  takeMenu?: TakeMenuActions
   onOpenRecording?(cellId: string): void
   /** AQU-490: how many validators the project asks for on a recording. */
   validationRequirementAudio?: number
@@ -263,6 +364,16 @@ function TargetAudioChip({
   const t = useT()
   const { cell } = chip.item
   const { geom, section } = chip
+  // AQU-1767: the first (or only) piece keeps the chip's historical test id;
+  // later pieces add "-p2", "-p3"… so every piece is addressable.
+  const testKey = chip.item.pieceIndex ? `${cell.id}-p${chip.item.pieceIndex + 1}` : cell.id
+  // AQU-1767: where the blade would cut, while it hovers over this chip.
+  const [bladeX, setBladeX] = useState<number | null>(null)
+  // AQU-1767: where the take was right-clicked, so "Split here" cuts there.
+  // Taken on pointerdown (which precedes the context menu) and read into state
+  // when the menu opens, so the menu draws with the point it will use.
+  const contextXRef = useRef<number | null>(null)
+  const [menuSplitAtMs, setMenuSplitAtMs] = useState<number | null>(null)
   const [drag, setDrag] = useState<{ mode: ChipDragMode; dx: number } | null>(null)
   /**
    * AQU-646 stage 5: is THIS chip's own preview sounding?
@@ -320,6 +431,13 @@ function TargetAudioChip({
     ? takeBadgeState(chipTake, currentUsername, validationRequirementAudio)
     : null
 
+  // AQU-1767 (Sam, 2026-10-15): a piece's cut edge trims back out only as far
+  // as its neighbouring piece's edge — in the RECORDING, not on the timeline,
+  // so moving pieces about changes nothing here.
+  const pieceLimits = (chip.item.pieceCount ?? 1) > 1
+    ? pieceTrimLimitsMs(cell.attachments as Parameters<typeof pieceTrimLimitsMs>[0], chip.item.audioId)
+    : null
+
   // The one span transform shared by preview and commit.
   function proposeSpan(mode: ChipDragMode, dxSec: number): { start: number; end: number } {
     const thresholdSec = SNAP_THRESHOLD_PX / pxPerSec
@@ -373,7 +491,11 @@ function TargetAudioChip({
       // arm has always had: drag a chip to the move clamp's limit and then pull
       // this handle past it, and the audible span ended up entirely after its
       // own line, with no contact at all.
-      const lo = Math.max(geom.anchor, prevChip?.start ?? -Infinity)
+      const lo = Math.max(
+        geom.anchor,
+        prevChip?.start ?? -Infinity,
+        pieceLimits?.minStartMs != null ? geom.anchor + pieceLimits.minStartMs / 1000 : -Infinity,
+      )
       // Floored at `lo` so the clamp cannot invert on a chip whose end already
       // sits before its section — that chip is already outside the invariant,
       // and pinning its handle is better than sending it further out.
@@ -388,7 +510,10 @@ function TargetAudioChip({
     // trimEnd ≤ duration, len ≥ min — and the mirror of the ceiling above: the
     // audible END may not be pulled back before the section, or the take stops
     // touching the line it performs.
-    const hi = geom.durationSec != null ? geom.anchor + geom.durationSec : end
+    const hi = Math.min(
+      geom.durationSec != null ? geom.anchor + geom.durationSec : end,
+      pieceLimits?.maxEndMs != null ? geom.anchor + pieceLimits.maxEndMs / 1000 : Infinity,
+    )
     // Capped by `hi`, because the floor must never demand a LONGER clip than
     // was actually recorded: a short take on a late-starting section cannot
     // reach it, and asking would pin the handle at audio that does not exist.
@@ -494,12 +619,38 @@ function TargetAudioChip({
   // The height term is the same argument as the width one: a trim handle is a
   // target you have to hit, and on a compact band it is smaller than the
   // pointer that has to find it.
+  // AQU-1767: with the blade in hand the chip is a cutting surface — no trim
+  // handles to catch the pointer, and no move.
+  const blade = bladeActive && editable && Boolean(onCutTarget)
+  // AQU-1767: a take only has a menu where there is something in it to do.
+  const hasMenu = editable && (Boolean(onCutTarget) || Boolean(takeMenu && Object.keys(takeMenu).length > 0))
+  /** The take-relative ms under a pointer x, and whether a cut there is legal. */
+  const bladeAt = (clientX: number): { atMs: number; ok: boolean; x: number } | null => {
+    const el = chipRef.current
+    if (!el) return null
+    const x = clientX - el.getBoundingClientRect().left
+    const sec = paintedStart + pxToSec(x, pxPerSec)
+    const atMs = (sec - geom.anchor) * 1000
+    return { atMs, ok: canCutAt(chipTake, atMs), x }
+  }
+  const cutRef = useRef(false)
   const canResize =
-    editable && Boolean(onTrimTarget) && chip.resizable &&
+    !blade && editable && Boolean(onTrimTarget) && chip.resizable &&
     chipH >= MIN_CHIP_GRIP_H_PX &&
     secToPx(geom.end - geom.start, pxPerSec) >= 24
 
   function beginDrag(mode: ChipDragMode, e: React.PointerEvent) {
+    if (blade) {
+      // AQU-1767: the blade cuts where it lands, on the primary button only.
+      if (mode !== "move" || e.button !== 0 || e.ctrlKey) return
+      e.stopPropagation()
+      const at = bladeAt(e.clientX)
+      if (at?.ok) {
+        cutRef.current = true
+        onCutTarget?.(cell.id, chip.item.audioId, at.atMs)
+      }
+      return
+    }
     if (mode === "move" ? !canMove : !canResize) return
     // Primary button only, and not a macOS context-click — see the identical
     // guard in TimelineCard.beginDrag for why this is a real bug and not
@@ -626,8 +777,12 @@ function TargetAudioChip({
   const showLeftGlyph = leftGlyph != null && fitsBadges && paintedPx >= 20
   // AQU-646 stage 5. Withheld while a state glyph holds the corner — see the
   // button's own comment — and needing the same room the record mic does.
-  const showPlayButton = Boolean(preview) && leftGlyph == null && fitsBadges && fullPx >= 28
+  // Sam's decision: a hidden line's takes are drawn faded, and neither play
+  // nor take a new recording from here.
+  const hiddenLine = isHiddenCell(cell)
+  const showPlayButton = !hiddenLine && Boolean(preview) && leftGlyph == null && fitsBadges && fullPx >= 28
   const showRecordButton =
+    !hiddenLine &&
     editable &&
     Boolean(onOpenRecording) &&
     fitsBadges &&
@@ -719,7 +874,7 @@ function TargetAudioChip({
         <div key="tail" className="text-red-600 dark:text-red-400">
           {tailOverlapSec != null && (
             <span
-              data-testid={`tl-target-${cell.id}-tip-overlap`}
+              data-testid={`tl-target-${testKey}-tip-overlap`}
               className="font-semibold tabular-nums"
             >
               −{tailOverlapSec.toFixed(1)}s{" "}
@@ -734,7 +889,7 @@ function TargetAudioChip({
         <div key="head" className="text-red-600 dark:text-red-400">
           {headOverlapSec != null && (
             <span
-              data-testid={`tl-target-${cell.id}-tip-overlap-head`}
+              data-testid={`tl-target-${testKey}-tip-overlap-head`}
               className="font-semibold tabular-nums"
             >
               −{headOverlapSec.toFixed(1)}s{" "}
@@ -773,12 +928,11 @@ function TargetAudioChip({
   }
   const tooltipContent = <div className="flex flex-col gap-0.5">{tipLines}</div>
 
-  return (
-    <AppTooltip content={tooltipContent} disabled={drag != null}>
+  const chipButton = (
     <button
       type="button"
       ref={chipRef}
-      data-testid={`tl-target-${cell.id}`}
+      data-testid={`tl-target-${testKey}`}
       // Space after clicking a chip belongs to the TRANSPORT (same opt-in as
       // the timeline cards); the corner record button inside stays native.
       data-spacebar-transport=""
@@ -789,6 +943,7 @@ function TargetAudioChip({
       {...(syncFailed ? { "data-sync-failed": "true" } : {})}
       {...(missing ? { "data-missing": "true" } : {})}
       {...(loading ? { "data-loading": "true" } : {})}
+      {...(hiddenLine ? { "data-hidden-line": "" } : {})}
       // AQU-646 stage 6F: the flag the LANE lifts itself by, so the drag
       // readout above this chip is not painted over by a neighbouring row. Set
       // here rather than reported upward because the drag already lives in this
@@ -803,12 +958,36 @@ function TargetAudioChip({
       data-span-end={span.end.toFixed(3)}
       {...(chip.ratio != null ? { "data-ratio": chip.ratio.toFixed(2) } : {})}
       onClick={() => {
+        // AQU-1767: a blade click cut the take; it is not also a seek.
+        if (cutRef.current) {
+          cutRef.current = false
+          return
+        }
+        // AQU-1767 (Sam, 2026-10-14): a click selects the take and leaves the
+        // playhead where it is, so S can split it there. Jumping to the line
+        // is a double-click.
         onSelect(cell.id)
-        if (!movedRef.current) onSeek?.(cell.id)
+        if (!movedRef.current) onSelectTake?.(cell.id)
         movedRef.current = false
       }}
+      onDoubleClick={(e) => {
+        // Not from the play or record button in a corner, and not a blade cut.
+        if (blade || (e.target as Element).closest?.('[role="button"]')) return
+        onSeek?.(cell.id)
+      }}
       onPointerEnter={() => setHovered(true)}
-      onPointerLeave={() => setHovered(false)}
+      onPointerLeave={() => {
+        setHovered(false)
+        setBladeX(null)
+      }}
+      onPointerMove={(e) => {
+        if (!blade) return
+        const at = bladeAt(e.clientX)
+        setBladeX(at?.ok ? at.x : null)
+      }}
+      {...(blade ? { "data-blade": "" } : {})}
+      data-audio-id={chip.item.audioId}
+      {...(chip.item.pieceCount ? { "data-piece": `${(chip.item.pieceIndex ?? 0) + 1}/${chip.item.pieceCount}` } : {})}
       onFocus={() => setHovered(true)}
       onBlur={() => setHovered(false)}
       // AQU-646 stage 2: A RIGHT-CLICK ON A CHIP OPENS NOTHING, DELIBERATELY.
@@ -823,11 +1002,21 @@ function TargetAudioChip({
       // this stops the custom one. That is the intended outcome, not an
       // oversight — noted here because "nothing happened" is otherwise a
       // reasonable thing to file a bug about.
-      onContextMenu={(e) => {
-        e.preventDefault()
-        e.stopPropagation()
+      //
+      // AQU-1767 (Sam, 2026-10-14): unless the take has a menu of its own. The
+      // menu's trigger owns `onContextMenu` then (one supplied alongside it
+      // replaces it) and stops the event itself, so the track's menu still
+      // never opens over a take.
+      {...(hasMenu ? {} : {
+        onContextMenu: (e: React.MouseEvent) => {
+          e.preventDefault()
+          e.stopPropagation()
+        },
+      })}
+      onPointerDown={(e) => {
+        if (e.button === 2 || e.ctrlKey) contextXRef.current = e.clientX
+        beginDrag("move", e)
       }}
-      onPointerDown={(e) => beginDrag("move", e)}
       style={{
         // AQU-646 stage 7: NO COLOUR HERE ANY MORE, and that is the headline.
         // The hue arrives as inherited CUSTOM PROPERTIES set once on the lane,
@@ -875,9 +1064,12 @@ function TargetAudioChip({
         // for the informational src/tgt end difference.
         overflow === "overlap" &&
           "border-red-500 ring-1 ring-red-500/70 bg-red-100/80 text-red-800 dark:bg-red-950/70 dark:text-red-300",
-        canMove && "cursor-grab active:cursor-grabbing",
+        blade ? "cursor-crosshair" : canMove && "cursor-grab active:cursor-grabbing",
         "hover:brightness-105",
-        selected && "ring-2 ring-sky-500",
+        selected === "take" && "ring-2 ring-sky-500",
+        selected === "line" && "ring-1 ring-sky-500/50",
+        // Sam's decision: faded like the table's revealed hidden row.
+        hiddenLine && "opacity-60",
       )}
     >
       {drag && (
@@ -890,6 +1082,15 @@ function TargetAudioChip({
           startSec={span.start}
           endSec={span.end}
           deltaSec={drag.mode === "resize-r" ? span.end - geom.end : span.start - geom.start}
+        />
+      )}
+      {blade && bladeX != null && (
+        // AQU-1767: where the blade will cut — a dashed line under the pointer.
+        <span
+          aria-hidden
+          data-testid={`tl-target-${testKey}-blade-line`}
+          style={{ left: `${bladeX}px` }}
+          className="pointer-events-none absolute inset-y-0 z-20 w-0 border-l-2 border-dashed border-amber-500"
         />
       )}
       {waveform && (
@@ -909,7 +1110,7 @@ function TargetAudioChip({
       {canResize && (
         <span
           aria-hidden
-          data-testid={`tl-target-${cell.id}-handle-l`}
+          data-testid={`tl-target-${testKey}-handle-l`}
           onPointerDown={(e) => beginDrag("resize-l", e)}
           className="absolute inset-y-0 left-0 flex w-[7px] cursor-col-resize items-center justify-center opacity-0 transition-opacity group-hover/chip:opacity-100 bg-background/70"
         >
@@ -944,7 +1145,7 @@ function TargetAudioChip({
       {chip.item.kind === "generated" && !showLeftGlyph && chipH >= MIN_CHIP_GRIP_H_PX && paintedPx >= 24 && (
         <span
           aria-hidden
-          data-testid={`tl-target-${cell.id}-generated`}
+          data-testid={`tl-target-${testKey}-generated`}
                   // AQU-646 stage 5: the play button wants this side too. The sparkle
             // is decorative and the button is an action, so on hover the
             // action wins — the same reason the sparkle already gives way to a
@@ -967,7 +1168,7 @@ function TargetAudioChip({
       {geom.usingFallback && fitsBadges && (
         <span
           aria-hidden
-          data-testid={`tl-target-${cell.id}-unknown-length`}
+          data-testid={`tl-target-${testKey}-unknown-length`}
           className="ml-0.5 shrink-0 text-[10px] font-semibold leading-none opacity-70"
         >
           ?
@@ -988,7 +1189,7 @@ function TargetAudioChip({
                   ? t("editor.timeline.takeLoading")
                   : t("editor.timeline.takeSaving")
           }
-          data-testid={`tl-target-${cell.id}-${leftGlyph}`}
+          data-testid={`tl-target-${testKey}-${leftGlyph}`}
           className="absolute left-1.5 top-1 z-10 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-background/85 shadow-sm ring-1 ring-border"
         >
           {leftGlyph === "missing" ? (
@@ -1017,8 +1218,10 @@ function TargetAudioChip({
 
           BOTH `stopPropagation` CALLS ARE LOAD-BEARING. Without the pointerdown
           one, pressing play begins a chip MOVE drag; without the click one, the
-          chip's own onClick fires `onSeek` — which moves the playhead, the
-          exact thing this button was ruled not to do. */}
+          chip's own onClick selects the take as well. (The chip's double-click
+          jump skips its corner buttons itself, so a quick second press on play
+          does not move the playhead — the thing this button was ruled not to
+          do.) */}
       {showPlayButton && preview && (
         <span
           role="button"
@@ -1026,7 +1229,7 @@ function TargetAudioChip({
           title={priming ? t("common.loading") : previewing ? t("common.stop") : t("workspace.targetAudioLane.playClip")}
           aria-label={priming ? t("common.loading") : previewing ? t("common.stop") : t("workspace.targetAudioLane.playClip")}
           aria-busy={priming || undefined}
-          data-testid={`tl-target-${cell.id}-play`}
+          data-testid={`tl-target-${testKey}-play`}
           onPointerDown={(e) => { e.stopPropagation(); preview.prime() }}
           onClick={(e) => { e.stopPropagation(); togglePreview() }}
           onKeyDown={(e) => {
@@ -1048,7 +1251,7 @@ function TargetAudioChip({
           role="button"
           tabIndex={0}
           title={t("workspace.targetAudioLane.recordAudio")}
-          data-testid={`tl-target-${cell.id}-record`}
+          data-testid={`tl-target-${testKey}-record`}
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation()
@@ -1070,7 +1273,7 @@ function TargetAudioChip({
       )}
       {(chipValidationState === "self" || chipValidationState === "full") && (
         <span
-          data-testid={`tl-target-${cell.id}-validated`}
+          data-testid={`tl-target-${testKey}-validated`}
           title={chipValidationState === "full"
             ? t("workspace.targetAudioLane.takeValidated")
             : t("workspace.targetAudioLane.takeValidatedByYou")}
@@ -1093,7 +1296,7 @@ function TargetAudioChip({
         <span
           aria-hidden
           ref={playlineRef}
-          data-testid={`tl-target-${cell.id}-playline`}
+          data-testid={`tl-target-${testKey}-playline`}
           className={CHIP_PLAYLINE_CLASS}
         />
       )}
@@ -1103,7 +1306,7 @@ function TargetAudioChip({
       {truncatedHead && (
         <span
           aria-hidden
-          data-testid={`tl-target-${cell.id}-overflow-head`}
+          data-testid={`tl-target-${testKey}-overflow-head`}
           className={cn(
             "absolute inset-y-0 left-0 flex w-[6px] items-center justify-center",
             overflow === "overlap"
@@ -1117,7 +1320,7 @@ function TargetAudioChip({
       {truncatedTail && (
         <span
           aria-hidden
-          data-testid={`tl-target-${cell.id}-overflow`}
+          data-testid={`tl-target-${testKey}-overflow`}
           className={cn(
             "absolute inset-y-0 right-0 flex w-[6px] items-center justify-center",
             overflow === "overlap"
@@ -1131,7 +1334,7 @@ function TargetAudioChip({
       {canResize && (
         <span
           aria-hidden
-          data-testid={`tl-target-${cell.id}-handle-r`}
+          data-testid={`tl-target-${testKey}-handle-r`}
           onPointerDown={(e) => beginDrag("resize-r", e)}
           className="absolute inset-y-0 right-0 flex w-[7px] cursor-col-resize items-center justify-center opacity-0 transition-opacity group-hover/chip:opacity-100 bg-background/70"
         >
@@ -1139,7 +1342,165 @@ function TargetAudioChip({
         </span>
       )}
     </button>
-    </AppTooltip>
+  )
+  if (!hasMenu) {
+    return (
+      <AppTooltip content={tooltipContent} disabled={drag != null}>
+        {chipButton}
+      </AppTooltip>
+    )
+  }
+  // AQU-1767 (Sam, 2026-10-14): a right-click on a take offers what can be
+  // done with it. The menu's root sits outside the tooltip and its trigger
+  // renders the chip itself, so the tooltip and the menu share one element.
+  const audioId = chip.item.audioId
+  const vote = takeMenu?.vote && takeMenu.voteState ? takeMenu.voteState(cell.id, audioId) : null
+  // AQU-2026: the per-line Change voice. The state is read off the line, not
+  // this chip: it converts the take the Audio tab's voice card would, which on
+  // a cut take is the whole take whichever piece was right-clicked.
+  const changeVoice = takeMenu?.changeVoice && takeMenu.changeVoiceState
+    ? takeMenu.changeVoiceState(cell.id)
+    : null
+  // A reason that holds at EVERY quality is the item's own reason — a stock
+  // voice, a take a voice is cloned from, or a conversion already running on
+  // this line. `up-to-date` is never one of those: it can only match the one
+  // quality the take already carries, which leaves the others to pick.
+  const changeVoiceBlocked = changeVoice != null
+    && CHANGE_VOICE_QUALITIES.every((q) => changeVoice.blockers[q] != null)
+    ? changeVoice.blockers.standard
+    : null
+  const changeVoiceReason = changeVoiceBlocked === "not-cloned"
+    ? t("editor.voice.changeVoiceNeedsClone", { name: changeVoice?.voiceName ?? "" })
+    : changeVoiceBlocked === "voice-reference"
+      ? t("editor.timeline.takeMenuChangeVoiceIsReference")
+      : null
+  const isPiece = (chip.item.pieceCount ?? 1) > 1
+  const canSplit = Boolean(onCutTarget) && editable
+  return (
+    <ContextMenu
+      onOpenChange={(open) => {
+        if (!open) return
+        const x = contextXRef.current
+        contextXRef.current = null
+        const at = x == null ? null : bladeAt(x)
+        setMenuSplitAtMs(at?.ok ? at.atMs : null)
+      }}
+    >
+      <AppTooltip content={tooltipContent} disabled={drag != null}>
+        <ContextMenuTrigger render={chipButton} />
+      </AppTooltip>
+      <ContextMenuContent className="w-56" data-testid={`tl-take-menu-${testKey}`}>
+        {canSplit && (
+          <ContextMenuItem
+            data-testid="tl-take-menu-split"
+            disabled={menuSplitAtMs == null}
+            onClick={() => { if (menuSplitAtMs != null) onCutTarget?.(cell.id, audioId, menuSplitAtMs) }}
+          >
+            <Scissors className="h-3.5 w-3.5" />
+            {/* No "S" hint: S splits the selected take at the PLAYHEAD; this
+                splits where you right-clicked (Sam, 2026-10-14). */}
+            {t("editor.timeline.takeMenuSplit")}
+          </ContextMenuItem>
+        )}
+        {takeMenu?.reRecord && !hiddenLine && (
+          <ContextMenuItem data-testid="tl-take-menu-rerecord" onClick={() => takeMenu.reRecord?.(cell.id)}>
+            <Mic className="h-3.5 w-3.5" />
+            {t("editor.timeline.takeMenuReRecord")}
+          </ContextMenuItem>
+        )}
+        {takeMenu?.regenerate && (
+          <ContextMenuItem data-testid="tl-take-menu-regenerate" onClick={() => takeMenu.regenerate?.(cell.id)}>
+            <Sparkles className="h-3.5 w-3.5" />
+            {t("editor.timeline.takeMenuRegenerate")}
+          </ContextMenuItem>
+        )}
+        {/* AQU-2026: Change voice for THIS line, beside Regenerate. The Audio
+            tab keeps it on the voice card, and a time-ordered file has no voice
+            cards (the lens is the timeline), so this menu is the only place a
+            dubbing team can re-voice one line instead of the whole file.
+
+            A blocked item carries the reason as its LABEL rather than a
+            tooltip: a disabled menu item fires no pointer events, so a tooltip
+            on it would never open — the same trap `ChangeVoiceButton` works
+            around with a stand-in trigger, which a menu item cannot have. */}
+        {changeVoice && takeMenu?.changeVoice && (changeVoiceBlocked != null ? (
+          <ContextMenuItem data-testid="tl-take-menu-change-voice" disabled>
+            <AudioLines className="h-3.5 w-3.5" />
+            {changeVoiceReason ?? t("editor.voice.changeVoice")}
+          </ContextMenuItem>
+        ) : (
+          <ContextMenuSub>
+            <ContextMenuSubTrigger data-testid="tl-take-menu-change-voice">
+              <AudioLines className="h-3.5 w-3.5" />
+              {t("editor.voice.changeVoice")}
+            </ContextMenuSubTrigger>
+            {/* The quality the Audio tab's popover offers, as the pick-one
+                shape a menu has: radio items, so the quality this take already
+                carries announces as checked (the same reason TrackMenuItems'
+                colour submenu uses them). Picking one converts at it; the one
+                it already is, is spent, and the header says so. */}
+            <ContextMenuSubContent className="w-52">
+              <ContextMenuRadioGroup value={changeVoice.quality ?? ""}>
+                {/* Inside the group, not above it: a menu label names the group
+                    it belongs to, and Base UI throws without one. */}
+                <ContextMenuLabel data-testid="tl-take-menu-change-voice-note">
+                  {CHANGE_VOICE_QUALITIES.some((q) => changeVoice.blockers[q] === "up-to-date")
+                    ? t("editor.voice.changeVoiceUpToDate", { name: changeVoice.voiceName })
+                    : t("editor.voice.changeVoiceQuality")}
+                </ContextMenuLabel>
+                {CHANGE_VOICE_QUALITIES.map((q) => (
+                  <ContextMenuRadioItem
+                    key={q}
+                    value={q}
+                    data-testid={`tl-take-menu-change-voice-${q}`}
+                    disabled={changeVoice.blockers[q] != null}
+                    onClick={() => {
+                      if (changeVoice.blockers[q] == null) takeMenu.changeVoice?.(cell.id, q)
+                    }}
+                  >
+                    {t(CHANGE_VOICE_QUALITY_LABEL[q])}
+                  </ContextMenuRadioItem>
+                ))}
+              </ContextMenuRadioGroup>
+            </ContextMenuSubContent>
+          </ContextMenuSub>
+        ))}
+        {vote?.canVote && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              data-testid="tl-take-menu-vote"
+              onClick={() => takeMenu?.vote?.(cell.id, audioId, !vote.voted)}
+            >
+              {vote.voted ? <X className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
+              {/* A piece is approved with its whole take (Sam, 2026-10-15). */}
+              {t(vote.voted ? "editor.timeline.takeMenuUnapprove" : "editor.timeline.takeMenuApprove")}
+            </ContextMenuItem>
+          </>
+        )}
+        {(takeMenu?.rename || takeMenu?.remove) && <ContextMenuSeparator />}
+        {takeMenu?.rename && (
+          <ContextMenuItem
+            data-testid="tl-take-menu-rename"
+            // A piece renames its whole take, by the take's own name.
+            onClick={() => takeMenu.rename?.(cell.id, audioId, (isPiece ? takeBaseLabel(chipTake?.label) : chipTake?.label) ?? null)}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            {t("editor.timeline.takeMenuRename")}
+          </ContextMenuItem>
+        )}
+        {takeMenu?.remove && (
+          <ContextMenuItem
+            variant="destructive"
+            data-testid="tl-take-menu-delete"
+            onClick={() => takeMenu.remove?.(cell.id, audioId)}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            {t(isPiece ? "editor.timeline.takeMenuDeletePiece" : "editor.timeline.takeMenuDeleteTake")}
+          </ContextMenuItem>
+        )}
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }
 
@@ -1150,15 +1511,20 @@ export function TargetAudioLane({
   viewStartSec,
   viewEndSec,
   selectedId,
+  selectedTakeCellId = null,
   loadingCellId,
   missingCellIds,
   editable,
   masterHonorsTrims,
   snapEnabled,
   onSelect,
+  onSelectTake,
   onSeek,
   onRetimeTarget,
   onTrimTarget,
+  bladeActive = false,
+  onCutTarget,
+  takeMenu,
   onOpenRecording,
   validationRequirementAudio,
   emptyCells,
@@ -1222,6 +1588,13 @@ export function TargetAudioLane({
     })
   }
 
+  // AQU-1767: in TIME order, not line order. A line's pieces come in clip order,
+  // but a piece moved past the next line's chip must still meet its real
+  // neighbours — the overlap, trespass and snap rules below all read the array
+  // as the left-to-right row. Stable, and a no-op for takes never cut: the move
+  // clamp already keeps a chip from passing its neighbour's start.
+  chips.sort((a, b) => a.geom.start - b.geom.start)
+
   // AQU-646: peaks for the chips actually on screen AND actually drawable.
   //
   // Both filters matter. Visibility keeps a 70-minute episode from decoding
@@ -1258,11 +1631,13 @@ export function TargetAudioLane({
   const boundPreview = useChipPreview({ projectId: projectId ?? null, session: session ?? null })
   const makePreview = previewFactory ?? boundPreview
 
-  const candidatesFor = (cellId: string, section: { start: number; end: number }): number[] => {
+  // AQU-1767: by TAKE, not by line — a piece snaps to its sibling's edges, which
+  // is how two pieces are laid back end to end.
+  const candidatesFor = (audioId: string, section: { start: number; end: number }): number[] => {
     if (!snapEnabled) return []
     const out: number[] = [section.start, section.end]
     for (const c of chips) {
-      if (c.item.cell.id === cellId) continue
+      if (c.item.audioId === audioId) continue
       out.push(c.geom.start, c.geom.end)
     }
     return out
@@ -1287,6 +1662,8 @@ export function TargetAudioLane({
   const emptySlots =
     editable && onOpenRecording
       ? (emptyCells ?? []).flatMap((cell) => {
+          // A hidden line is not recorded onto from the timeline.
+          if (isHiddenCell(cell)) return []
           // SUB-53: an un-dubbed verse's slot is just its original's length,
           // so the button sits over exactly where the dub will land.
           const span = layout?.spanFor(cell, "source") ?? null
@@ -1424,7 +1801,8 @@ export function TargetAudioLane({
       {chips.map((chip, i) =>
         isVisible(chip.geom.start, chip.geom.end, viewStartSec, viewEndSec) ? (
           <TargetAudioChip
-            key={chip.item.cell.id}
+            // AQU-1767: keyed by TAKE — a cut line has a chip per piece.
+            key={`${chip.item.cell.id}:${chip.item.audioId}`}
             chip={chip}
             prevChip={
               i > 0
@@ -1441,15 +1819,21 @@ export function TargetAudioLane({
             paintOrder={chips.length - i}
             audioFirst={Boolean(audioFirst)}
             pxPerSec={pxPerSec}
-            selected={selectedId === chip.item.cell.id}
+            selected={
+              selectedTakeCellId === chip.item.cell.id ? "take" : selectedId === chip.item.cell.id ? "line" : false
+            }
             loading={loadingCellId === chip.item.cell.id}
             missing={missingCellIds?.has(chip.item.cell.id) ?? false}
             editable={editable}
-            snap={{ enabled: Boolean(snapEnabled), candidates: candidatesFor(chip.item.cell.id, chip.section) }}
+            snap={{ enabled: Boolean(snapEnabled), candidates: candidatesFor(chip.item.audioId, chip.section) }}
             onSelect={onSelect}
+            onSelectTake={onSelectTake}
             onSeek={onSeek}
             onRetimeTarget={onRetimeTarget}
             onTrimTarget={onTrimTarget}
+            bladeActive={bladeActive}
+            onCutTarget={onCutTarget}
+            takeMenu={takeMenu}
             onOpenRecording={onOpenRecording}
             validationRequirementAudio={validationRequirementAudio}
             currentUsername={session?.username ?? ""}

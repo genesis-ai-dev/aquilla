@@ -2,48 +2,48 @@ import { Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
+import type { Context } from "hono"
 import type { Env, Variables } from "../types"
 import { authMiddleware } from "../middleware/auth"
-import { creditGuard, recordCredit } from "../lib/credits"
-import { checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
-import { weeklyUsageActive } from "../lib/billing/usage-mode"
-import { reserveWorkspaceUsage } from "../lib/billing/workspace-usage"
-import { settleChatUsage, holdChatUsage, type ChatUsage } from "../lib/billing/chat-usage"
-import { readProviderCostCents } from "../../../db/shared/billing-cost"
-import {
-  transcriptionSeconds, transcriptionCostBound, WHISPER_MODEL,
-} from "../lib/billing/transcription-usage"
 import { resolveProjectRole } from "../services/project-permissions"
-import {
-  enforceRateLimit, userRateLimitIdentifier,
-} from "../../../db/shared/rate-limit"
+import { resolveProjectRoleShared } from "../../../db/shared/project-roles"
+import { secureCompare } from "../utils/secure-compare"
+import { ASR_MODEL_CHOICES } from "../../../db/shared/asr-models"
+import { omniWarmCostCents, type OmniModel } from "../../../db/shared/omni-asr-cost"
+import { admitPaidCall } from "../lib/billing/paid-call"
+import { releaseChatUsage } from "../lib/billing/chat-usage"
+import { settleWorkspaceUsage } from "../lib/billing/workspace-usage"
+import { COMPRESSED_AUDIO_FORMATS, transcribe, type TranscribeResult } from "../lib/transcribe-core"
+import { omniConfigured, omniFetch, omniStatusSchema, zeroShotEnabledForOrg } from "../lib/omni-asr"
 
 const transcription = new Hono<{ Bindings: Env; Variables: Variables }>()
 
-/** Transcription calls allowed per user per shared limiter window. Named (it
- *  was a bare `60` inline) so the cap reads the same way as every sibling
- *  route's — see db/shared/rate-limit.ts. */
-const TRANSCRIPTION_MAX_PER_USER_PER_WINDOW = 60
+/** Contributor: the role that may record and transcribe. */
+const TRANSCRIBE_MIN_ROLE = 400
 
-const requestSchema = z.object({
+const base64Audio = z.string().min(1).max(2600000).regex(/^[A-Za-z0-9+/]+={0,2}$/)
+const commonFields = {
   projectId: z.string().min(1).max(200),
-  input_audio: z.object({
-    data: z.string().min(1).max(2600000).regex(/^[A-Za-z0-9+/]+={0,2}$/),
-    format: z.literal("wav"),
-  }),
-  language: z.string().regex(/^[a-z]{2,3}$/).optional(),
+  /** The project's raw BCP-47 tag; the server picks the model from it. */
+  language: z.string().max(64).regex(/^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$/).optional(),
+  /** "auto" routes by language (spec §1); the rest are explicit picks. */
+  model: z.enum(ASR_MODEL_CHOICES).default("auto"),
+  /** Zero-shot context pairs from GET …/transcription-examples. */
+  examples: z.array(z.object({
+    url: z.string().max(4096),
+    text: z.string().min(1).max(4000),
+  })).max(10).optional(),
+}
+const requestSchema = z.object({
+  ...commonFields,
+  input_audio: z.object({ data: base64Audio, format: z.literal("wav") }),
 })
-const upstreamSchema = z.object({
-  text: z.string(),
-  words: z.array(z.object({
-    word: z.string(), start: z.number().finite().nonnegative(),
-    end: z.number().finite().nonnegative(),
-  })).optional(),
-  segments: z.array(z.object({
-    text: z.string(), start: z.number().finite().nonnegative(),
-    end: z.number().finite().nonnegative(),
-  })).optional(),
-})
+
+type AppContext = Context<{ Bindings: Env; Variables: Variables }>
+function respond(c: AppContext, result: TranscribeResult, extra?: (body: object) => object) {
+  if (!result.ok) return c.json(result.body, result.status, result.headers)
+  return c.json(extra ? extra(result.body) : result.body, 200, result.headers)
+}
 
 transcription.post("/transcriptions", authMiddleware,
   bodyLimit({ maxSize: 2700000 }),
@@ -51,113 +51,157 @@ transcription.post("/transcriptions", authMiddleware,
     const user = c.get("user")
     const request = c.req.valid("json")
     const role = await resolveProjectRole(c.env, user, request.projectId)
-    if (!role || role.level < 400) return c.json({ error: "forbidden" }, 403)
-    if (!c.env.OPENROUTER_API_KEY) {
-      return c.json({ error: "Hosted transcription is not configured" }, 503)
-    }
-    let seconds: number
-    try { seconds = transcriptionSeconds(request.input_audio.data) }
-    catch { return c.json({ error: "Invalid transcription audio" }, 400) }
-    const project = await c.env.AQUILLA_PG.prepare(
-      "SELECT org_id FROM projects WHERE id = ?",
-    ).bind(request.projectId).first<{ org_id: number | null }>()
-    const orgId = project?.org_id ?? 0
-    const weekly = weeklyUsageActive(c.env, c.req.url)
-    if (weekly === "unavailable") {
-      return c.json({ error: "usage_rehearsal_unavailable" }, 503)
-    }
-    if (weekly === "on" && orgId <= 0) return c.json({ error: "forbidden" }, 403)
-    // Platform daily spend ceiling (AQU-1869) — applies to the metered path
-    // too, so it sits outside the `weekly === "off"` branch below.
-    const spendCeiling = await checkAiSpendCeiling(c.env.AQUILLA_PG, c.env, "transcription")
-    if (!spendCeiling.ok) return c.json(spendCeiling.body, spendCeiling.status)
-    if (weekly === "off") {
-      const check = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm")
-      if (!check.ok) return c.json({ error: "credit_cap_exceeded" }, 429)
-    }
-    // AQU-1843: atomic, and FAIL CLOSED — transcription bills a vendor per
-    // call, so a limiter outage must not uncap it.
-    const transcribeLimit = await enforceRateLimit(c.env.AQUILLA_PG, {
-      kind: "audio_transcriptions",
-      identifier: userRateLimitIdentifier(user.id),
-      limit: TRANSCRIPTION_MAX_PER_USER_PER_WINDOW,
-      failMode: "closed",
+    if (!role || role.level < TRANSCRIBE_MIN_ROLE) return c.json({ error: "forbidden" }, 403)
+    return respond(c, await transcribe(c.env, {
+      userId: user.id, projectId: request.projectId, audio: request.input_audio,
+      language: request.language, model: request.model, examples: request.examples,
+      idempotencyKey: c.req.header("Idempotency-Key"), requestUrl: c.req.url,
+    }))
+  })
+
+// ── Internal: sync-worker's Agent API tools (spec §7) ─────────────────────
+// Authenticated with the shared SYNC_SECRET_KEY like ai-draft-internal.ts;
+// the user's role is resolved live here, never trusted from the caller.
+// A stored take is forwarded in its own container (webm/ogg/…), with the
+// duration from its row.
+
+function internalCaller(c: AppContext) {
+  const header = c.req.header("Authorization") ?? ""
+  return Boolean(c.env.SYNC_SECRET_KEY) && secureCompare(header, `Bearer ${c.env.SYNC_SECRET_KEY}`)
+}
+const internalUser = z.union([z.number().int().positive(), z.string().regex(/^\d+$/).transform(Number)])
+
+const internalRequestSchema = z.object({
+  ...commonFields,
+  userId: internalUser,
+  requestId: z.string().uuid().optional(),
+  audio: z.object({
+    data: base64Audio,
+    format: z.enum(["wav", ...COMPRESSED_AUDIO_FORMATS]),
+    durationMs: z.number().int().positive().max(60000).optional(),
+  }),
+})
+
+transcription.post("/internal/transcriptions",
+  bodyLimit({ maxSize: 2700000 }),
+  zValidator("json", internalRequestSchema), async c => {
+    if (!internalCaller(c)) return c.json({ error: "unauthorized" }, 401)
+    const body = c.req.valid("json")
+    const role = await resolveProjectRoleShared(c.env.AQUILLA_PG, { id: String(body.userId) }, body.projectId)
+    if (!role || role.level < TRANSCRIBE_MIN_ROLE) return c.json({ error: "permission_denied" }, 403)
+    const result = await transcribe(c.env, {
+      userId: body.userId, projectId: body.projectId, audio: body.audio,
+      language: body.language, model: body.model, examples: body.examples,
+      idempotencyKey: body.requestId, requestUrl: c.req.url,
     })
-    if (!transcribeLimit.allowed) {
-      return c.json({ error: "rate_limited" }, 429, {
-        "Retry-After": String(transcribeLimit.retryAfterSeconds),
-      })
+    const creditsCharged = result.ok ? result.creditsCharged : null
+    return respond(c, result, ok => ({ ...ok, creditsCharged }))
+  })
+
+// ── Warm-up + status proxies (spec §5). Only a project contributor can warm,
+// and ZS respects the org gate so a disabled org cannot spin up the expensive
+// container. A warm-up spends GPU time, so it passes the one entitlement check
+// on the gpu rail like a transcription (AQU-2062, spec Q3): no unmetered path
+// a user can loop on.
+
+/** Accept our model ids and Modal's short names alike. */
+const omniModelParam = z.enum(["ctc", "zs", "omni-ctc", "omni-zs"])
+  .transform((m): OmniModel => (m === "omni-ctc" || m === "ctc" ? "ctc" : "zs"))
+
+async function omniGate(env: Env, projectId: string, model: OmniModel): Promise<{ error: string; status: 403 | 503 } | null> {
+  if (!omniConfigured(env)) return { error: "Omnilingual transcription is not configured", status: 503 }
+  if (model === "zs") {
+    const project = await env.AQUILLA_PG.prepare("SELECT org_id FROM projects WHERE id = ?")
+      .bind(projectId).first<{ org_id: number | null }>()
+    let enabled: boolean
+    try { enabled = await zeroShotEnabledForOrg(env.AQUILLA_PG, project?.org_id ?? 0) }
+    catch { return { error: "Transcription settings unavailable", status: 503 } }
+    if (!enabled) return { error: "zero_shot_disabled", status: 403 }
+  }
+  return null
+}
+
+async function warm(c: AppContext, projectId: string, model: OmniModel, userId: number) {
+  const denied = await omniGate(c.env, projectId, model)
+  if (denied) return c.json({ error: denied.error }, denied.status)
+  if (!omniConfigured(c.env)) return c.json({ error: "Omnilingual transcription is not configured" }, 503)
+  const project = await c.env.AQUILLA_PG.prepare("SELECT org_id FROM projects WHERE id = ?")
+    .bind(projectId).first<{ org_id: number | null }>()
+  const cost = omniWarmCostCents(model)
+  const gate = await admitPaidCall(c.env, {
+    orgId: project?.org_id ?? 0, userId, projectId, rail: "gpu", provider: "modal",
+    houseKey: c.env.OMNI_SHARED_SECRET, requestUrl: c.req.url, estimate: () => cost,
+  })
+  if (!gate.ok) return c.json(gate.body, gate.status)
+  try {
+    const response = await omniFetch(c.env, "/warm", { method: "POST", body: { model }, timeoutMs: 10000 })
+    if (!response.ok) {
+      // As for /transcribe: a 4xx other than 408 is refused before any GPU
+      // starts, so it is proven free. Anything less certain stays held.
+      if (gate.usage && response.status >= 400 && response.status < 500 && response.status !== 408) {
+        await releaseChatUsage(c.env, gate.usage)
+      }
+      return c.json({ error: "Warm-up failed" }, 502)
     }
-    let bound: number
-    try { bound = await transcriptionCostBound(c.env, seconds) }
-    catch { return c.json({ error: "Transcription price unavailable" }, 503) }
-    let usage: ChatUsage | undefined
-    if (weekly === "on") {
-      const suppliedId = c.req.header("Idempotency-Key")
-      if (suppliedId && !z.string().uuid().safeParse(suppliedId).success) {
-        return c.json({ error: "invalid_request_id" }, 400)
-      }
-      usage = { orgId, requestId: suppliedId ?? crypto.randomUUID() }
-      try {
-        const admitted = await reserveWorkspaceUsage(c.env.AQUILLA_PG, {
-          ...usage, projectId: request.projectId, userId: user.id,
-          rail: "llm", maxRawCostCents: bound,
-        })
-        if (!admitted.created) return c.json({ error: "request_already_started" }, 409)
-      } catch (error) {
-        if (error instanceof Error && error.message === "Weekly AI allowance exhausted") {
-          return c.json({ error: "weekly_ai_allowance_exhausted" }, 429)
-        }
-        return c.json({ error: "Transcription accounting unavailable" }, 503)
-      }
+  } catch { return c.json({ error: "Warm-up unavailable" }, 502) }
+  if (gate.usage) {
+    try { await settleWorkspaceUsage(c.env.AQUILLA_PG, gate.usage.orgId, gate.usage.requestId, cost) }
+    catch { console.warn("[billing] omnilingual warm-up usage requires reconciliation", gate.usage) }
+  }
+  return c.json({ ok: true }, 202)
+}
+
+async function status(c: AppContext, projectId: string, model: OmniModel) {
+  const denied = await omniGate(c.env, projectId, model)
+  if (denied) return c.json({ error: denied.error }, denied.status)
+  if (!omniConfigured(c.env)) return c.json({ error: "Omnilingual transcription is not configured" }, 503)
+  try {
+    const response = await omniFetch(c.env, `/status?model=${model}`, { method: "GET", timeoutMs: 10000 })
+    if (!response.ok) return c.json({ error: "Status unavailable" }, 502)
+    const parsed = omniStatusSchema.safeParse(await response.json().catch(() => null))
+    if (!parsed.success) return c.json({ error: "Invalid status response" }, 502)
+    return c.json(parsed.data, 200, { "Cache-Control": "no-store" })
+  } catch { return c.json({ error: "Status unavailable" }, 502) }
+}
+
+const warmSchema = z.object({ projectId: z.string().min(1).max(200), model: omniModelParam })
+const statusQuerySchema = z.object({ projectId: z.string().min(1).max(200), model: omniModelParam.default("zs") })
+
+async function memberMay(c: AppContext, projectId: string) {
+  const role = await resolveProjectRole(c.env, c.get("user"), projectId)
+  return Boolean(role && role.level >= TRANSCRIBE_MIN_ROLE)
+}
+
+transcription.post("/transcriptions/warm", authMiddleware,
+  zValidator("json", warmSchema), async c => {
+    const { projectId, model } = c.req.valid("json")
+    if (!(await memberMay(c, projectId))) return c.json({ error: "forbidden" }, 403)
+    return warm(c, projectId, model, c.get("user").id)
+  })
+
+transcription.get("/transcriptions/status", authMiddleware,
+  zValidator("query", statusQuerySchema), async c => {
+    const { projectId, model } = c.req.valid("query")
+    if (!(await memberMay(c, projectId))) return c.json({ error: "forbidden" }, 403)
+    return status(c, projectId, model)
+  })
+
+const internalWarmSchema = z.object({
+  projectId: z.string().min(1).max(200), userId: internalUser, model: omniModelParam,
+  action: z.enum(["status", "warm"]).default("status"),
+})
+
+transcription.post("/internal/transcriptions/status",
+  zValidator("json", internalWarmSchema), async c => {
+    if (!internalCaller(c)) return c.json({ error: "unauthorized" }, 401)
+    const { projectId, userId, model, action } = c.req.valid("json")
+    const role = await resolveProjectRoleShared(c.env.AQUILLA_PG, { id: String(userId) }, projectId)
+    if (!role || role.level < TRANSCRIBE_MIN_ROLE) return c.json({ error: "permission_denied" }, 403)
+    if (action === "warm") {
+      const warmed = await warm(c, projectId, model, userId)
+      if (warmed.status !== 202) return warmed
     }
-    const base = c.env.OPENROUTER_BASE_URL?.replace(/\/+$/, "")
-      ?? "https://openrouter.ai/api/v1"
-    let generationId: string | undefined
-    try {
-      const response = await fetch(`${base}/audio/transcriptions`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${c.env.OPENROUTER_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: WHISPER_MODEL, input_audio: request.input_audio,
-          language: request.language, response_format: "verbose_json",
-          timestamp_granularities: ["word", "segment"],
-        }),
-        signal: AbortSignal.timeout(65000),
-      })
-      generationId = response.headers.get("X-Generation-Id") ?? undefined
-      if (!response.ok) {
-        if (usage) await holdChatUsage(c.env, usage, generationId)
-        return c.json({ error: "Transcription provider failed" }, 502)
-      }
-      const data = await response.json() as Record<string, unknown>
-      if (usage) {
-        c.header("X-Billing-Usage-Status", await settleChatUsage(c.env, usage,
-          { ...data, ...(generationId ? { id: generationId } : {}) }))
-      } else {
-        let cost = bound
-        try { cost = readProviderCostCents(data) } catch { /* legacy estimate */ }
-        // Whisper bills whole seconds (transcriptionCostBound assumes the same)
-        // and the ledger's units column is INTEGER: never pass the raw duration.
-        await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", cost, Math.ceil(seconds))
-      }
-      const parsed = upstreamSchema.safeParse(data)
-      if (!parsed.success) return c.json({ error: "Invalid transcription response" }, 502)
-      const { text, words, segments } = parsed.data
-      const chunks = words?.length
-        ? words.map(({ word, start, end }) => ({ text: word, start, end }))
-        : segments ?? []
-      if (text.trim() && !chunks.length) {
-        return c.json({ error: "Transcription provider returned no timings" }, 502)
-      }
-      return c.json({ text, chunks })
-    } catch {
-      if (usage) await holdChatUsage(c.env, usage, generationId)
-      return c.json({ error: "Transcription provider unavailable" }, 502)
-    }
+    return status(c, projectId, model)
   })
 
 export default transcription

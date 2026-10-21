@@ -1,4 +1,5 @@
-import { Plus, Sparkles, Download, CheckSquare, Mic, Wand2 } from "lucide-react"
+import { Plus, Sparkles, Download, CheckSquare, Mic, Wand2, AudioLines, Quote } from "lucide-react"
+import { CHANGE_VOICE_QUALITY_LABEL, getChangeVoiceQuality } from "@/lib/store/change-voice-quality"
 import type {
   WorkspaceAction, WorkspaceActionContext,
 } from "./types"
@@ -230,5 +231,38 @@ export const workspaceActions: WorkspaceAction[] = [
       confirmLabelKey: "nav.workspaceActions.synthAll.confirmLabel",
     },
     run: (_c, args) => args.runSynthAll(),
+  },
+  {
+    id: "change-voice-all", labelKey: "nav.workspaceActions.changeVoiceAll.label", icon: AudioLines, group: "secondary",
+    isAvailable: (c) => c.activeFileId != null && (c.audioCounts?.voiceChangeable ?? 0) > 0,
+    requiresConfirmation: {
+      titleKey: "nav.workspaceActions.changeVoiceAll.title",
+      description: (c, t) => {
+        const n = c.audioCounts?.voiceChangeable ?? 0
+        const quality = t(CHANGE_VOICE_QUALITY_LABEL[getChangeVoiceQuality()])
+        return t("nav.workspaceActions.changeVoiceAll.description", { n, quality })
+      },
+      confirmLabelKey: "nav.workspaceActions.changeVoiceAll.confirmLabel",
+    },
+    run: (_c, args) => args.runChangeVoiceAll(),
+  },
+  {
+    // AQU-1759: the row menu's "Split at quotes", for every line of the file
+    // at once — a chapter of John has dozens of verses mixing narration and
+    // speech. The count in the confirmation comes from the same scan the run
+    // splits from, and a file with nothing to split says so with no confirm.
+    id: "split-quotes", labelKey: "nav.workspaceActions.splitQuotes.label", icon: Quote, group: "secondary",
+    isAvailable: (c) => c.activeFileId != null && (c.canSplitAtQuotes?.() ?? false),
+    requiresConfirmation: {
+      titleKey: "nav.workspaceActions.splitQuotes.title",
+      description: (c, t) => {
+        const summary = c.quoteSplitSummary?.()
+        if (!summary || summary.rows === 0) return t("nav.workspaceActions.splitQuotes.none")
+        return t("nav.workspaceActions.splitQuotes.description", { count: summary.rows, lines: summary.lines })
+      },
+      confirmLabelKey: "nav.workspaceActions.splitQuotes.confirmLabel",
+      canConfirm: (c) => (c.quoteSplitSummary?.().rows ?? 0) > 0,
+    },
+    run: (_c, args) => args.runSplitAtQuotes(),
   },
 ]

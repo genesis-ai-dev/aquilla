@@ -25,6 +25,63 @@ import { loadLaneGrants } from '../../../db/shared/lane-visibility'
 import { refusalForArchivedLane, targetLaneRowExists, targetLaneRowsFor } from './archived-lane'
 import { eventLaneIdOf, resolveEventLane } from '../../../src/lib/lanes/event-lane'
 import { isEligibleLaneAssignee, isOwnLaneAssignment } from './lane-delegate-authority'
+import { toolClaimVerified } from './tool-provenance'
+import { EXTENSION_DATA_ROLE } from '../../../shared/tools/file-extension'
+import { findRestorableRemoval } from './removed-cell-archive'
+
+/** Smart Extensions apiRev 7: file-content writes an extension's identity must be verified for. */
+const EXTENSION_GATED_KINDS = new Set<string>([
+  'source.cell.create',
+  'source.cell.commit',
+  'source.cell.delete',
+  'source.cell.reorder',
+  'source.cell.metadata.patch',
+  'file.extension.set',
+])
+/** The cell writes an extension makes in its own data file (floor CONTRIBUTOR there). */
+const DATA_FILE_CELL_KINDS = new Set<string>(['source.cell.create', 'source.cell.commit', 'source.cell.delete'])
+
+type ExtensionGate = { ok: true; dataFile: boolean } | { ok: false; reason: string }
+
+/**
+ * apiRev 7: (1) a write that CLAIMS an extension (`payload.tool_origin`) must
+ * carry a valid tool session for that tool, version, hash, project and author,
+ * or it is refused — provenance cannot be borrowed; (2) a write into an
+ * extension DATA file must come from a verified extension, or be the user's own
+ * "revert since T" compensation (`revert_of_tool`), which an extension they
+ * run could have made anyway.
+ */
+async function extensionWriteGate(
+  db: AquillaDb,
+  raw: RawEvent<EventKind>,
+  author: string,
+  secret: string | undefined,
+  cache: RequestCache | undefined,
+): Promise<ExtensionGate> {
+  const claim = await toolClaimVerified(raw.payload, { projectId: raw.projectId, author }, secret)
+  if (claim && !claim.ok) {
+    return { ok: false, reason: `the extension identity on ${raw.kind} could not be verified (missing or invalid tool session)` }
+  }
+  if (!raw.fileId) return { ok: true, dataFile: false }
+  // Memoized per request (one read per file however many events). A read
+  // failure means "not a data file": the write then meets its normal floor
+  // (the batch is not 500ed, like the other settings-gated carve-outs).
+  let role: string | null = null
+  try {
+    role = cache?.fileRole
+      ? await cache.fileRole(raw.projectId, raw.fileId)
+      : (await db.prepare(`SELECT role FROM files WHERE id = ? AND project_id = ?`).bind(raw.fileId, raw.projectId).first<{ role: string | null }>())?.role ?? null
+  } catch {
+    role = null
+  }
+  const dataFile = role === EXTENSION_DATA_ROLE
+  if (!dataFile) return { ok: true, dataFile: false }
+  const revert = (raw.payload as { revert_of_tool?: unknown } | null)?.revert_of_tool
+  if (!claim && !(revert && typeof revert === 'object')) {
+    return { ok: false, reason: 'extension data files can only be written by an extension' }
+  }
+  return { ok: true, dataFile: true }
+}
 
 /** Sentinel fileId used by project-scoped comment.* events in the outbox. */
 export const PROJECT_SENTINEL_FILE_ID = '__project__'
@@ -276,6 +333,14 @@ async function laneGrantsForExternalToken(
   return pending
 }
 
+/** AQU-2003: refusal for the read-only platform view token (see call sites). */
+function refusePlatformView(claims: SyncTokenClaims): { ok: false; status: 403; reason: string } | null {
+  if (claims.src === 'platform' && claims.role < ROLE.CONTRIBUTOR) {
+    return { ok: false, status: 403, reason: 'platform view is read-only; enter the admin code to edit' }
+  }
+  return null
+}
+
 /**
  * The ONLY function that mints AuthorizedEvent instances. Every event handler
  * accepts AuthorizedEvent and TypeScript prevents bypass (the symbol-branded
@@ -353,6 +418,15 @@ export async function authorize<K extends EventKind>(
         ? tokenClaims.username
         : `user:${tokenClaims.userId}`
 
+    // AQU-2003: the read-only platform view. An un-elevated platform admin is
+    // minted a Viewer (100) token that keeps `src: "platform"`. That token must
+    // write nothing, whatever an org's floors say: `assignmentMinRole` can be
+    // set to Viewer and replaces the static floor, and the lane checks below
+    // skip `src === 'platform'`. One explicit rule here closes both, ahead of
+    // every floor.
+    const platformViewRefusal = refusePlatformView(tokenClaims)
+    if (platformViewRefusal) return platformViewRefusal
+
     if (tokenClaims.role < requiredRoleFor(raw.kind)) {
       return { ok: false, status: 403, reason: `role too low for ${raw.kind}` }
     }
@@ -411,6 +485,15 @@ export async function authorize<K extends EventKind>(
     typeof tokenClaims.username === 'string' && tokenClaims.username.trim() !== ''
       ? tokenClaims.username
       : `user:${tokenClaims.userId}`
+
+  // AQU-2003: the read-only platform view. An un-elevated platform admin is
+  // minted a Viewer (100) token that keeps `src: "platform"`. That token must
+  // write nothing, whatever an org's floors say: `assignmentMinRole` can be
+  // set to Viewer and replaces the static floor, and the lane checks below
+  // skip `src === 'platform'`. One explicit rule here closes both, ahead of
+  // every floor.
+  const platformViewRefusal = refusePlatformView(tokenClaims)
+  if (platformViewRefusal) return platformViewRefusal
 
   // AQU-1462: an archived lane refuses writes that name it. Every role,
   // including Maintainer and platform, and whether or not the write wall is
@@ -501,7 +584,20 @@ export async function authorize<K extends EventKind>(
     db != null && isAssignmentKind(raw.kind)
       ? await resolveAssignmentAuthority(db, raw.projectId, settings)
       : null
-  const requiredRole = assignmentAuthority?.minRole ?? requiredRoleFor(raw.kind)
+  // Smart Extensions apiRev 7: a claimed extension identity on a file write
+  // must be vouched for by a server-minted tool session, and an extension data
+  // file is written only by a verified extension (floor CONTRIBUTOR, so the
+  // translators who use an alignment editor can save their alignments).
+  const extensionGate = db != null && EXTENSION_GATED_KINDS.has(raw.kind)
+    ? await extensionWriteGate(db, raw as RawEvent<EventKind>, tokenUsername, secret, settings)
+    : null
+  if (extensionGate && !extensionGate.ok) {
+    return { ok: false, status: 403, reason: extensionGate.reason }
+  }
+  const baseRequiredRole = assignmentAuthority?.minRole ?? requiredRoleFor(raw.kind)
+  const requiredRole = extensionGate?.ok && extensionGate.dataFile && DATA_FILE_CELL_KINDS.has(raw.kind)
+    ? ROLE.CONTRIBUTOR
+    : baseRequiredRole
 
   // AQU-1415: when the write wall is on, a grant can elevate the caller
   // inside one lane, and the absence of a grant denies the write even when
@@ -717,6 +813,42 @@ export async function authorize<K extends EventKind>(
         ok: false,
         status: 403,
         reason: 'removing an imported cell requires maintainer',
+      }
+    }
+  }
+
+  // AQU-1767 phase 2: UNDOING A REMOVAL is the remover's own act. Only the
+  // person who removed the cell may put it back — or a maintainer, who could
+  // have removed it themselves. Never through the external API: the agent
+  // surface has its own undo (compensating commits) and no archive to read.
+  // A restore with nothing to restore (no archive, or the cell is live again)
+  // is refused here rather than accepted as a silent no-op, so the undo that
+  // sent it can say so.
+  if (raw.kind === 'source.cell.restore') {
+    if (tokenClaims.src === 'external') {
+      return { ok: false, status: 403, reason: 'restoring a removed cell is not available through the API' }
+    }
+    if (db != null) {
+      if (raw.cellId == null || raw.fileId == null) {
+        return { ok: false, status: 400, reason: 'source.cell.restore needs a fileId and a cellId' }
+      }
+      const named = (raw.payload as { deleteEventId?: unknown } | null)?.deleteEventId
+      const removal = await findRestorableRemoval(
+        db,
+        raw.projectId,
+        raw.fileId,
+        raw.cellId,
+        typeof named === 'string' && named !== '' ? named : null,
+      )
+      if (!removal) {
+        return { ok: false, status: 422, reason: 'there is no removal of this cell to undo' }
+      }
+      if (removal.deletedBy !== tokenUsername && tokenClaims.role < ROLE.MAINTAINER) {
+        return {
+          ok: false,
+          status: 403,
+          reason: 'only the person who removed this cell, or a maintainer, can put it back',
+        }
       }
     }
   }

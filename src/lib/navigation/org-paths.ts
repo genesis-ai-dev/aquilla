@@ -101,6 +101,23 @@ export function projectSettingsPath(projectId: string, section?: string): string
     : `/project/${projectId}/settings`
 }
 
+/**
+ * AQU-2031: the editor TARGET header's way into the project's language
+ * settings. It lands on the General PANE with one card scrolled into view
+ * (`?focus=`), NOT on a `?q=` search pre-fill: search mode always shows the
+ * search box and matches cards in other groups, so the person arrived at what
+ * looked like a search they never ran. `"languages"` is the Languages card
+ * (Change target language…, the single-lane TARGET pill, "Set target
+ * language"); `"add-lane"` is its "Add a target lane" field (Add lane…).
+ * The `focus` values are read by `SETTINGS_FOCUS_TARGETS` in ProjectSettings.
+ */
+export function projectLanguageSettingsPath(
+  projectId: string,
+  focus: "languages" | "add-lane",
+): string {
+  return `${projectSettingsPath(projectId, "general")}?focus=${focus}`
+}
+
 /** Living Memory surface — the section index, or one of its detail panes. */
 export function projectMemoryPath(projectId: string, section?: string): string {
   return section
@@ -119,9 +136,9 @@ export function projectEditorPath(projectId: string, fileId?: string | null): st
   return fileId ? `${base}/file/${fileId}` : base
 }
 
-/** Same-origin relative path from `?return=` — rejects protocol-relative URLs. */
+/** Same-origin relative path from `?return=` — rejects protocol-relative URLs and backslashes (`/\\evil.com`). */
 export function safeReturnPath(raw: string | null | undefined): string | null {
-  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return null
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\")) return null
   return raw
 }
 

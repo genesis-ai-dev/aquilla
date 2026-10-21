@@ -22,6 +22,7 @@
 // All non-public routes apply `authMiddleware`. Routes that touch
 // `c.env.AQUILLA_PG` no-op gracefully if the binding is absent (test envs).
 
+import { parseFileLabel } from "../../../shared/tools/file-extension"
 import { Hono } from "hono"
 import { roleRequiredBody } from "../lib/role-denial"
 import { zValidator } from "@hono/zod-validator"
@@ -52,6 +53,7 @@ import {
   getMyAssignments,
   getProjectAssignmentRoster,
   getProjectUnitAssignees,
+  getProjectValidationAssignments,
   getUnitAssignments,
   resolveTargetLaneId,
 } from "../services/assignments"
@@ -97,6 +99,8 @@ import {
 import { loadLinkFileIds } from "../services/source-linking"
 import {
   applyDirectAddLaneGrants,
+  grantCurrentLanesToMember,
+  reconcileMemberProjectLanes,
   replaceMemberLaneScopes,
   syncMemberLaneGrants,
 } from "../services/lane-grants"
@@ -106,8 +110,8 @@ import { readLaneTag } from "../../../db/shared/lane-ref"
 import { countedFileSql } from "../../../db/shared/counted-files"
 import { readDeclaredLanguages } from "../../../db/shared/file-declared-languages"
 import { loadRosterOrigins, type RosterOrigin } from "../services/roster-origins"
-import { markProjectMondayLinksDirty } from "../../../db/shared/monday-dirty"
-import { pushDirtyLinksAfterResponse } from "../lib/monday/push"
+import { markProjectSyncLinksDirty } from "../../../db/shared/progress-sync-dirty"
+import { pushDirtyLinksAfterResponse } from "../lib/integrations/push"
 import { ViewerScope, redactOrgCrumbs } from "../services/access-payload"
 
 const projects = new Hono<AuthHonoEnv>()
@@ -119,6 +123,9 @@ function roleNameFor(level: number): string {
 interface FileProjection {
   id: string
   name: string
+  /** AQU-1937: files.meta.extension.label — the name an extension asked the
+   *  app to SHOW ("Titus · ULT"). `name` stays the stored, imported name. */
+  displayLabel?: string
   type: string
   cellCount: number
   /** The files-table `role` column, forwarded raw. `type` above already folds
@@ -234,6 +241,7 @@ export async function loadFilesByProject(
     let timingMode: "dubbing" | "audioFirst" | undefined
     let audioVttTimebase: FileProjection["audioVttTimebase"]
     let trackOverrides: FileProjection["trackOverrides"]
+    let displayLabel: string | undefined
     if (f.meta) {
       try {
         const m = JSON.parse(f.meta) as {
@@ -252,7 +260,9 @@ export async function loadFilesByProject(
           corpusMarker?: unknown
           parserVersion?: unknown
           sortIndex?: unknown
+          extension?: { label?: unknown }
         }
+        displayLabel = parseFileLabel(m.extension?.label) ?? undefined
         if (m.orderedBy) orderedBy = m.orderedBy
         // AQU-1596: read through the declared-languages contract, which
         // prefers the canonical keys and still accepts the legacy spellings
@@ -324,6 +334,7 @@ export async function loadFilesByProject(
       ...(timingMode ? { timingMode } : {}),
       ...(audioVttTimebase ? { audioVttTimebase } : {}),
       ...(trackOverrides ? { trackOverrides } : {}),
+      ...(displayLabel ? { displayLabel } : {}),
     })
     byProject.set(f.project_id, list)
   }
@@ -1082,7 +1093,7 @@ projects.patch("/:projectId/deadline", authMiddleware, zValidator("json", deadli
   // AQU-1770: a linked Monday board can show the deadline. Mark the link dirty
   // and push it straight after the response, like the settings that move the
   // board's numbers.
-  await markProjectMondayLinksDirty(c.env.AQUILLA_PG, [projectId])
+  await markProjectSyncLinksDirty(c.env.AQUILLA_PG, [projectId])
   pushDirtyLinksAfterResponse(c, { projectIds: [projectId] })
   return c.json({ ok: true, deadlineAt: deadline })
 })
@@ -1186,7 +1197,7 @@ projects.patch("/:projectId/pm", authMiddleware, zValidator("json", pmBody), asy
     .run()
   if (raised) notifyRoleChangeBestEffort(c, projectId, raised)
   // AQU-1770: a linked Monday board can show the project manager.
-  await markProjectMondayLinksDirty(c.env.AQUILLA_PG, [projectId])
+  await markProjectSyncLinksDirty(c.env.AQUILLA_PG, [projectId])
   pushDirtyLinksAfterResponse(c, { projectIds: [projectId] })
   return c.json({ ok: true, pm })
 })
@@ -1227,7 +1238,9 @@ projects.get("/:projectId/assignments/given", authMiddleware, async (c) => {
  * GET /api/v2/projects/:projectId/assignments/all — per-assignee open workload
  * + derived progress for THIS project (the overview's Team card). Returns the
  * same AssigneeWorkload shape as the org workload endpoint so the client can
- * reuse the same rendering logic.
+ * reuse the same rendering logic. AQU-1969: `roster` is translate work only;
+ * `validations` lists each open validate assignment with the assignee's own
+ * approvals, furthest behind first.
  *
  * AQU-1771: gated on the member-progress AND roster floors, like
  * /assignments/unit below — not on a hard Maintainer floor. The Team card shows
@@ -1254,8 +1267,13 @@ projects.get("/:projectId/assignments/all", authMiddleware, async (c) => {
   )
   if (denial) return c.json(denial, 403)
 
-  const roster = await getProjectAssignmentRoster(c.env, projectId)
-  return c.json({ roster })
+  // AQU-1969: translate work stays the per-person roster; each validate
+  // assignment is its own line, with the assignee's own approvals.
+  const [roster, validations] = await Promise.all([
+    getProjectAssignmentRoster(c.env, projectId),
+    getProjectValidationAssignments(c.env, projectId),
+  ])
+  return c.json({ roster, validations })
 })
 
 /**
@@ -1666,8 +1684,9 @@ async function grantProjectMemberOne(
     }
   }
 
-  // AQU-1808: a new member below project lead must say which lanes. A role
+  // AQU-1808: a new member below maintainer must say which lanes. A role
   // change does not ask again — the lanes they already hold stay put.
+  // A new project lead is snapshotted onto the lanes that exist then.
   const laneChoice = await resolveExplicitLaneChoice(env, [projectId], {
     role,
     allCurrentLanes: entry.allCurrentLanes,
@@ -1698,8 +1717,11 @@ async function grantProjectMemberOne(
   // the client on that one lane), and they kept an earlier every-lane grant
   // set under a re-add that named one lane. So a fresh membership starts from
   // no lane rows, and a lane list given for an existing member replaces the
-  // lanes they held. A project lead is never lane-scoped (AD-12): a promotion
-  // drops the stale scope rows the client's lane list would narrow by.
+  // lanes they held.
+  //
+  // A fresh project lead is given the lanes that exist then, as scope rows,
+  // so a lane created later is not theirs until someone grants it. Raising
+  // someone who is already a member to project lead does not reveal a lane.
   //
   // AQU-1782: a role change of an existing member that names no lanes keeps
   // the lanes they hold and rewrites only the level on those rows.
@@ -1707,13 +1729,12 @@ async function grantProjectMemberOne(
   if (laneChoice.kind === "lanes") {
     await replaceMemberLaneScopes(env.AQUILLA_PG, projectId, target.id, laneChoice.laneIds, callerUserId)
     await syncMemberLaneGrants(env.AQUILLA_PG, projectId, target.id, laneChoice.laneIds, callerUserId)
+  } else if (laneChoice.kind === "snapshot") {
+    await grantCurrentLanesToMember(env.AQUILLA_PG, projectId, target.id, callerUserId)
   } else if (laneChoice.kind === "all" || freshMembership) {
     await replaceMemberLaneScopes(env.AQUILLA_PG, projectId, target.id, [], callerUserId)
     await syncMemberLaneGrants(env.AQUILLA_PG, projectId, target.id, [], callerUserId)
   } else {
-    if (role >= ROLE.PROJECT_LEAD) {
-      await replaceMemberLaneScopes(env.AQUILLA_PG, projectId, target.id, [], callerUserId)
-    }
     await applyDirectAddLaneGrants(env.AQUILLA_PG, projectId, target.id, role, callerUserId)
   }
   await auditMembershipChange(env, actor, {
@@ -1872,6 +1893,10 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
   )
     .bind(projectId, targetUserId)
     .run()
+  // AQU-1818: a removed direct membership must not leave lane rows behind.
+  // A team that still reaches the person keeps that team's lanes.
+  forgetProjectRole(c.env, projectId, targetUserId)
+  await reconcileMemberProjectLanes(c.env.AQUILLA_PG, projectId, targetUserId, user.id)
   await auditMembershipChange(c.env, user, {
     action: "project.member.remove",
     where: { scope: "project", projectId },

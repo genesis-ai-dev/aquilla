@@ -15,6 +15,10 @@ import { BIBLE_BUILTIN_CHECKS } from "./bible-builtin-checks"
 import * as usfmStructure from "./check-functions/usfm-structure"
 import * as capitalization from "./check-functions/capitalization"
 import * as footnoteQuoteMismatch from "./check-functions/footnote-quote-mismatch"
+import * as corruptedCharacters from "./check-functions/corrupted-characters"
+import * as unpairedQuotes from "./check-functions/unpaired-quotes"
+import * as untranslatedFragment from "./check-functions/untranslated-fragment"
+import * as lengthRatio from "./check-functions/length-ratio"
 
 export interface BuiltinCheckDefinition {
   id: BuiltinCheckId
@@ -197,6 +201,50 @@ export const BUILTIN_CHECKS: Record<BuiltinCheckId, BuiltinCheckDefinition> = {
     run: footnoteQuoteMismatch.runCheck,
     message: footnoteQuoteMismatch.MESSAGE,
   },
+  // The four below fill gaps in MQM coverage (https://www.w3.org/community/mqmcg/):
+  // character encoding, unpaired marks, partial untranslated text, and a
+  // length signal for omission/addition. Each is pure per cell and linear in
+  // the cell's length, so incremental-infractions re-runs only the edited cell.
+  "corrupted-characters": {
+    id: "corrupted-characters",
+    name: "Corrupted characters",
+    description: "Replacement characters (\uFFFD), stray control characters or garbled text such as \"Ã©\" that the source doesn't have.",
+    defaultSeverity: "major",
+    defaultEnabled: true,
+    runsOnEmptyTarget: false,
+    run: corruptedCharacters.runCheck,
+    message: corruptedCharacters.MESSAGE,
+  },
+  "unpaired-quotes": {
+    id: "unpaired-quotes",
+    name: "Unpaired quotes",
+    description: "An opening or closing quotation mark without its partner, unless the source leaves a quotation open too.",
+    defaultSeverity: "minor",
+    defaultEnabled: true,
+    runsOnEmptyTarget: false,
+    run: unpairedQuotes.runCheck,
+    message: unpairedQuotes.MESSAGE,
+  },
+  "untranslated-fragment": {
+    id: "untranslated-fragment",
+    name: "Untranslated words",
+    description: "A word copied from the source in the source's script, when the translation is written in a different script.",
+    defaultSeverity: "minor",
+    defaultEnabled: true,
+    runsOnEmptyTarget: false,
+    run: untranslatedFragment.runCheck,
+    message: untranslatedFragment.MESSAGE,
+  },
+  "length-ratio": {
+    id: "length-ratio",
+    name: "Length mismatch",
+    description: "Translation is under 40% or over 250% of the source's length — a sign of a dropped or added clause. Off by default: normal length varies by language pair.",
+    defaultSeverity: "minor",
+    defaultEnabled: false,
+    runsOnEmptyTarget: false,
+    run: lengthRatio.runCheck,
+    message: lengthRatio.MESSAGE,
+  },
 }
 
 /** The text checks every project has. Bible data checks: BIBLE_BUILTIN_CHECK_IDS. */
@@ -215,4 +263,8 @@ export const BUILTIN_CHECK_IDS: BuiltinCheckId[] = [
   "usfm-structure",
   "capitalization",
   "footnote-quote-mismatch",
+  "corrupted-characters",
+  "unpaired-quotes",
+  "untranslated-fragment",
+  "length-ratio",
 ]

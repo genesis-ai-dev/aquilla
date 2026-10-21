@@ -17,6 +17,7 @@ import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { VALIDATION_FLOOR_ROLE_OPTIONS, resolveRoleName } from "@/lib/frontier/roles"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import { OrgDefaultSource, orgBooleanOptionLabel } from "./OrgDefaultSource"
 
 type ValidationRoleFloor = NonNullable<ProjectRecord["validationRoleFloor"]>
 
@@ -38,6 +39,11 @@ function roleOptionsFor(t: ReturnType<typeof useT>): { value: ValidationRoleFloo
 
 /** AQU-1771: the counts may be null, meaning "use the organization's default". */
 type CountUpdates = { validationCount?: number | null; validationCountAudio?: number | null }
+/** AQU-1768: and so may the two audio permission settings. */
+type MediaUpdates = {
+  validationRoleFloorAudio?: ValidationRoleFloor | null
+  allowSelfValidationAudio?: boolean | null
+}
 
 interface Props {
   /** Project id for loading member usernames into the named-validators combobox. */
@@ -60,9 +66,16 @@ interface Props {
    * ones — a project can want two ears on a recording and one on a
    * translation, or trust a different set of people with each.
    */
-  validationRoleFloorAudio?: ValidationRoleFloor
+  validationRoleFloorAudio?: ValidationRoleFloor | null
   validationNamedUsersAudio?: string[]
-  allowSelfValidationAudio?: boolean
+  allowSelfValidationAudio?: boolean | null
+  /**
+   * AQU-1768: for the audio floor and self-validation, null (above) means the
+   * project follows its organization's default. These are what that default
+   * currently is; null = the organization set none (reviewer / allowed).
+   */
+  orgValidationRoleFloorAudio?: ValidationRoleFloor | null
+  orgAllowSelfValidationAudio?: boolean | null
   /** When true, all inputs are disabled (role/offline gate). */
   disabled?: boolean
   /**
@@ -92,15 +105,13 @@ interface Props {
    */
   notice?: ReactNode
   onChange: (
-    updates: CountUpdates & Partial<
+    updates: CountUpdates & MediaUpdates & Partial<
       Pick<
         ProjectRecord,
         | "validationRoleFloor"
         | "validationNamedUsers"
         | "allowSelfValidation"
-        | "validationRoleFloorAudio"
         | "validationNamedUsersAudio"
-        | "allowSelfValidationAudio"
       >
     >
   ) => void
@@ -127,9 +138,11 @@ export function ValidationSettingsSection({
   validationRoleFloor = "reviewer",
   validationNamedUsers = [],
   allowSelfValidation = true,
-  validationRoleFloorAudio = "reviewer",
+  validationRoleFloorAudio = null,
   validationNamedUsersAudio = [],
-  allowSelfValidationAudio = true,
+  allowSelfValidationAudio = null,
+  orgValidationRoleFloorAudio = null,
+  orgAllowSelfValidationAudio = null,
   disabled = false,
   disabledTooltip,
   notice,
@@ -138,6 +151,10 @@ export function ValidationSettingsSection({
   onChange,
 }: Props) {
   const t = useT()
+  // AQU-1768: the value in force — the project's own, else the organization's,
+  // else the built-in one. Shown (disabled) while the project follows the org.
+  const effectiveFloorAudio: ValidationRoleFloor = validationRoleFloorAudio ?? orgValidationRoleFloorAudio ?? "reviewer"
+  const effectiveSelfAudio = allowSelfValidationAudio ?? orgAllowSelfValidationAudio ?? true
   const ROLE_OPTIONS = roleOptionsFor(t)
   const { members } = useProjectMembers(projectId)
 
@@ -345,13 +362,24 @@ export function ValidationSettingsSection({
           description={t("projectSettings.validation.minRoleAudioDescription")}
           control={
             <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+              <OrgDefaultSource
+                id="validation-role-floor-audio-source"
+                settingLabel={t("projectSettings.validation.minRoleAudioLabel")}
+                inherited={validationRoleFloorAudio == null}
+                orgOptionLabel={t("projectSettings.mediaDefaults.orgValue", {
+                  value: ROLE_OPTIONS.find((o) => o.value === (orgValidationRoleFloorAudio ?? "reviewer"))?.label ?? "",
+                })}
+                disabled={disabled}
+                onChange={(inherit) => onChange({ validationRoleFloorAudio: inherit ? null : effectiveFloorAudio })}
+              />
               <Select
                 items={ROLE_OPTIONS}
-                disabled={disabled}
-                value={validationRoleFloorAudio}
+                disabled={disabled || validationRoleFloorAudio == null}
+                value={effectiveFloorAudio}
                 onValueChange={(v) =>
                   onChange({
-                    validationRoleFloorAudio: (v ?? validationRoleFloorAudio) as ValidationRoleFloor,
+                    validationRoleFloorAudio: (v ?? effectiveFloorAudio) as ValidationRoleFloor,
                   })
                 }
               >
@@ -372,6 +400,7 @@ export function ValidationSettingsSection({
                   </SelectGroup>
                 </SelectContent>
               </Select>
+              </div>
             </DisabledFieldTooltip>
           }
         />
@@ -380,13 +409,23 @@ export function ValidationSettingsSection({
           description={t("projectSettings.validation.allowSelfAudioDescription")}
           control={
             <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+              <OrgDefaultSource
+                id="allow-self-validation-audio-source"
+                settingLabel={t("projectSettings.validation.allowSelfAudioLabel")}
+                inherited={allowSelfValidationAudio == null}
+                orgOptionLabel={orgBooleanOptionLabel(t, orgAllowSelfValidationAudio ?? true)}
+                disabled={disabled}
+                onChange={(inherit) => onChange({ allowSelfValidationAudio: inherit ? null : effectiveSelfAudio })}
+              />
               <Switch
                 id="allow-self-validation-audio"
-                disabled={disabled}
-                checked={allowSelfValidationAudio}
+                disabled={disabled || allowSelfValidationAudio == null}
+                checked={effectiveSelfAudio}
                 onCheckedChange={(checked) => onChange({ allowSelfValidationAudio: checked })}
                 aria-label={t("projectSettings.validation.allowSelfAudioLabel")}
               />
+              </div>
             </DisabledFieldTooltip>
           }
         />

@@ -5,6 +5,8 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { fmtLabeledDateTime, fmtShortCalendarDate } from "@/lib/format-date"
+import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 
 const emitSelect = vi.fn(async (..._args: unknown[]) => "evt-1")
@@ -41,7 +43,7 @@ vi.mock("@/hooks/useRecordingTextDrift", () => ({
   useRecordingTextDrift: () => driftResult,
 }))
 
-import { TakesStrip } from "./TakesStrip"
+import { TakesStrip, nextTakeLabel } from "./TakesStrip"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
 const session = { jwt: "jwt", username: "dir" } as never
@@ -630,30 +632,33 @@ describe("TakesStrip — reporting the last take", () => {
 
       const stamp = await screen.findByTestId("take-recorded-a")
       expect(stamp.textContent).toContain("mariette")
-      expect(stamp.textContent).toContain(
-        new Date(Date.parse("2026-06-30T10:00:00Z")).toLocaleDateString(),
-      )
+      expect(stamp.textContent).toContain(fmtShortCalendarDate(Date.parse("2026-06-30T10:00:00Z")))
+      expect(stamp.querySelector("[title]")).toBeNull()
     })
 
-    it("gives the exact time in the tooltip, since the stamp shows only the day", async () => {
+    it("gives the exact time in the date tooltip, since the stamp shows only the day", async () => {
+      const recordedAt = Date.parse("2026-06-30T10:00:00Z")
       driftResult = new Map([["a", drift("a")]])
-      render(<TakesStrip {...common} takes={[take("a", 1000)]} selectedAudioId="a" />)
+      renderWithTooltips(<TakesStrip {...common} takes={[take("a", 1000)]} selectedAudioId="a" />)
 
-      const title = (await screen.findByTestId("take-recorded-a")).getAttribute("title")
-      expect(title).toContain("Recorded")
-      expect(title).toContain("mariette")
-      expect(title).toContain(new Date(Date.parse("2026-06-30T10:00:00Z")).toLocaleString())
+      const stamp = await screen.findByTestId("take-recorded-a")
+      const trigger = stamp.querySelector("[data-slot=tooltip-trigger]")
+      expect(trigger).toBeTruthy()
+      await expectTooltip(trigger!, fmtLabeledDateTime(recordedAt, "Recorded"))
     })
 
     it("says a synthesised take was GENERATED, not recorded", async () => {
       // The named person chose to generate it; they did not perform it, and
       // calling a TTS render a recording misattributes human performance.
+      const recordedAt = Date.parse("2026-06-30T10:00:00Z")
       driftResult = new Map([["g", drift("g", { drifted: false })]])
-      render(<TakesStrip {...common} takes={[genTake("g")]} selectedGeneratedAudioId="g" selectedAudioId={null} />)
+      renderWithTooltips(<TakesStrip {...common} takes={[genTake("g")]} selectedGeneratedAudioId="g" selectedAudioId={null} />)
 
-      const title = (await screen.findByTestId("take-recorded-g")).getAttribute("title")
-      expect(title).toContain("Generated")
-      expect(title).not.toContain("Recorded")
+      const stamp = await screen.findByTestId("take-recorded-g")
+      const trigger = stamp.querySelector("[data-slot=tooltip-trigger]")
+      expect(trigger).toBeTruthy()
+      await expectTooltip(trigger!, fmtLabeledDateTime(recordedAt, "Generated"))
+      expect(screen.getByRole("tooltip").textContent).not.toContain("Recorded")
     })
 
     it("never badges a synthesised take as text-drifted", async () => {
@@ -683,6 +688,16 @@ describe("TakesStrip — reporting the last take", () => {
 describe("TakesStrip — length", () => {
   it("gives a trimmed take the length that plays", () => {
     render(<TakesStrip {...common} takes={[{ ...take("audio-c1-a.webm", 2560), trimStartMs: 256, trimEndMs: 2320 }]} selectedAudioId={null} />)
-    expect(screen.getByTestId("take-length-audio-c1-a.webm")).toHaveTextContent("2.1s")
+    // 2.064s kept, in tenths rounded down as the recorder says it (AQU-1767).
+    expect(screen.getByTestId("take-length-audio-c1-a.webm")).toHaveTextContent("2.0s")
+  })
+})
+
+// AQU-1767 (Sam's walk, 2026-10-15): splitting "Take 1" renames it "Take 1 · 1"
+// and "Take 1 · 2", and the next recording was named "Take 1" again.
+describe("nextTakeLabel", () => {
+  it("counts a split take's pieces as their take's number", () => {
+    expect(nextTakeLabel([{ label: "Take 1 · 1" }, { label: "Take 1 · 2" }])).toBe("Take 2")
+    expect(nextTakeLabel([{ label: "Take 1" }, { label: "Take 3 · 2" }])).toBe("Take 4")
   })
 })

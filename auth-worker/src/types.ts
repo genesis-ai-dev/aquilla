@@ -175,6 +175,26 @@ export interface Env {
   /** Dev/e2e only: override the OpenRouter API base (e.g. the scripted mock
    *  in scripts/mock-openrouter.ts). Never set in prod. */
   OPENROUTER_BASE_URL?: string
+  /** Aquilla Tools builder (prototype). A dedicated OpenRouter key/base for
+   *  build_tool calls, so builder spend is separable from chat/agent spend.
+   *  When the key is unset the builder falls back to OPENROUTER_API_KEY /
+   *  OPENROUTER_BASE_URL. TOOLS_BUILDER_MODEL overrides the builder model. */
+  TOOLS_BUILDER_API_KEY?: string
+  TOOLS_BUILDER_BASE_URL?: string
+  TOOLS_BUILDER_MODEL?: string
+  /** Smart Extensions read:web (aquilla.web.fetch): optional deployment-wide
+   *  allowlist of domains (comma-separated, manifest.web syntax). Unset = any
+   *  domain a user approves for an extension. */
+  TOOLS_WEB_ALLOWED_DOMAINS?: string
+  /** Omnilingual ASR Modal app base URL (infra/modal/omnilingual_asr.py),
+   *  e.g. https://<workspace>--omnilingual-asr-web.modal.run. Unset = hosted
+   *  transcription for non-Whisper languages answers 503. */
+  OMNI_ASR_MODAL_URL?: string
+  /** Secret: shared with the Modal app's `aquilla-omni-asr` secret, sent as
+   *  X-Omni-Secret. `wrangler secret put OMNI_SHARED_SECRET`. */
+  OMNI_SHARED_SECRET?: string
+  /** Multiplier on metered GPU cost for idle/cold-start time. Default 1.5. */
+  OMNI_ASR_AMORTIZATION?: string
   /** Kill switch for Jev react decisions (lib/jev/decide.ts): "off" makes the
    *  react loop use its fixed rules without calling Jev. Unset = on. */
   JEV_REACT?: string
@@ -222,6 +242,15 @@ export interface Env {
    *  the Monday Developer Center (the SPA's /oauth/callback route; the SPA
    *  forwards code+state to the worker). Default: https://aquilla.app/oauth/callback. */
   MONDAY_REDIRECT_URI?: string
+
+  // ── Airtable integration (routes/airtable.ts, lib/airtable/*) — AQU-804 ──
+  /**
+   * Base URL of the Airtable Web API, default https://api.airtable.com. Set
+   * only to point a local stack at a stand-in Airtable (an unset value is
+   * what every deployment wants). The connection's personal access token
+   * lives encrypted in integration_connections, never here.
+   */
+  AIRTABLE_API_URL?: string
   /** API-facing origin for OAuth redirect + webhook URLs (e.g.
    *  https://api.aquilla.app/identity). Falls back to BASE_URL when unset. */
   BASE_URL_API?: string
@@ -236,6 +265,12 @@ export interface Env {
   /** Local stacks only (honoured with WRANGLER_LOCAL=1): a JSON array of
    *  client metadata documents served instead of fetching their client_id. */
   MCP_OAUTH_PINNED_CLIENTS?: string
+  /** Zapier's pre-registered OAuth client (docs/ZAPIER.md). All three unset →
+   *  no Zapier client in this environment. The secret is a wrangler secret. */
+  ZAPIER_CLIENT_ID?: string
+  ZAPIER_CLIENT_SECRET?: string
+  /** https://zapier.com/dashboard/auth/oauth/return/App<ID>CLIAPI/ */
+  ZAPIER_REDIRECT_URI?: string
 
   // ── AQU-AGENT harness (routes/agent.ts new tools) ────────────────────────
   /** Base URL of the sandbox worker (aquilla-agent-sandbox). Local dev may
@@ -256,6 +291,14 @@ export interface Env {
    *  where it is unbound (vitest route suites, an environment deployed before
    *  the DO migration) routes/contextual.ts falls back to the in-request loop. */
   CONTEXTUAL_RUN_DRIVER?: DurableObjectNamespace
+  /** Per-document knowledge-base indexing driver (src/knowledge-index-do.ts) —
+   *  AQU-2051. One object per document; its alarm runs the indexing job, so
+   *  summarizing a document of any size outlives the upload's ~30 s
+   *  `waitUntil` budget instead of being cut off mid-flight (AQU-2050).
+   *  Optional: where it is unbound (vitest route suites, an environment
+   *  deployed before the DO migration) routes/knowledge.ts falls back to the
+   *  in-request `waitUntil` job. */
+  KNOWLEDGE_INDEX_DRIVER?: DurableObjectNamespace
   /** Spans a project-wide autopilot start may drive at once. Lower it for a
    *  self-hosted upstream with few slots (see routes/contextual.ts). */
   CONTEXTUAL_MAX_CONCURRENCY?: string
@@ -353,6 +396,9 @@ export interface Env {
   BILLING_CHAT_USAGE_REHEARSAL?: string
   /** Weekly allowance metering for any provider; retires legacy guards for metered calls. */
   BILLING_WEEKLY_USAGE_ENFORCE?: string
+  /** off | shadow | enforce — the one meter switch (db/shared/ai-entitlement.ts).
+   *  When set it wins over the two flags above (lib/billing/paid-call.ts). */
+  BILLING_METER_MODE?: string
   /** Sandbox billing opt-in: loopback locally, or the allowlisted hosts below
    *  on a development deployment. Test-mode key required either way. */
   BILLING_WORKSPACE_CHECKOUT_REHEARSAL?: string
@@ -453,6 +499,10 @@ export interface JWTPayload {
    *  tracks the current token. Optional — tokens minted before this field
    *  existed have none, and refresh falls back to their `iat`. */
   sst?: number
+  /** Session family id: minted at login and carried across every sliding
+   *  refresh, so logout can revoke the whole refresh chain (not just the one
+   *  `jti` presented). Optional — older tokens have none. */
+  sid?: string
   [k: string]: unknown
 }
 

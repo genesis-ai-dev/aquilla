@@ -18,6 +18,7 @@ import { handleTtsRequest } from "./tts"
 import { handleDiarizationRequest } from "./diarization"
 import { notifyProjectDo } from "./archive-broadcast"
 import { handleCorsPreflight, withCors } from "./cors"
+import { handleRobotsTxt } from "./robots"
 import { handleProjectArchiveRequest } from "./project-archive"
 import { handleMemberRemovedRequest, notifyProjectDoMemberRemoved } from "./member-removed"
 import {
@@ -35,6 +36,7 @@ import { handleCellsReadRequest } from "./events/cells-read-route"
 import { handleCellConfidenceRequest } from "./events/cell-confidence-route"
 import { handleHealthRollupRequest } from "./events/health-rollup-route"
 import { handleCellAudioReadRequest } from "./events/cell-audio-read-route"
+import { handleTranscriptionExamplesRequest } from "./events/transcription-examples-route"
 import { handleCellLinksReadRequest } from "./events/cell-links-read-route"
 import { handleCellMorphReadRequest } from "./events/cell-morph-read-route"
 import { handleSourceWordAlignmentRequest } from "./events/source-word-alignment-route"
@@ -44,7 +46,9 @@ import { handleExternalChangesetsRequest } from "./external/changesets-route"
 import { handleSessionChangesetsRequest } from "./external/session-routes"
 import { handleExternalArtifactsRequest } from "./external/artifacts-route"
 import { handleExternalKnowledgeRequest } from "./external/knowledge-route"
+import { handleExternalTranscriptionRequest } from "./external/transcription-route"
 import { handleFilesReadRequest } from "./events/files-read-route"
+import { handleCellsByRefRequest } from "./events/cells-by-ref-route"
 import { handleProgressReadRequest } from "./events/progress-read-route"
 import { handlePlanRequest } from "./events/plan-route"
 import { handleBulkImportRequest } from "./events/import-route"
@@ -88,6 +92,7 @@ import { handleConceptsReadRequest } from "./events/concepts-read-route"
 import { handleConceptOccurrencesRequest } from "./events/concept-occurrences-route"
 import { handleTerminologyScanRequest } from "./events/terminology-scan-route"
 import { handleCellBacktranslationsReadRequest } from "./events/cell-backtranslations-read-route"
+import { handleCellGlossesReadRequest } from "./events/cell-glosses-read-route"
 import { handleExternalReadRequest } from "./external/read-routes"
 import { handleExternalCommentsRequest } from "./external/comments-route"
 import { handleExternalMemoryReadRequest } from "./external/memory-read-routes"
@@ -113,6 +118,7 @@ import { redactLogPath } from "../../shared/log-path-redaction"
 import { deploymentEnvironmentError, unauthenticatedBypassError } from "./environment-guard"
 import { asReadonlyR2, type ReadonlyR2Bucket } from "./lib/readonly-r2"
 import { runR2GcSweep, R2_GC_CRON } from "./r2-gc-cron"
+import { withStoreSecrets } from "../../db/shared/secrets-store-overlay"
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace -- Cloudflare namespace augmentation requires this syntax
@@ -324,6 +330,11 @@ const worker = {
     const preflight = handleCorsPreflight(request)
     if (preflight) return preflight
 
+    // Static and data-free, so it answers ahead of the environment guards and
+    // the Postgres handle below.
+    const robots = handleRobotsTxt(request)
+    if (robots) return robots
+
     const environmentError = deploymentEnvironmentError(request.url, env)
     if (environmentError) {
       console.error("Refusing request with cross-environment worker bindings", {
@@ -447,6 +458,9 @@ const worker = {
     if (cellsAuditReadResponse) return withCors(cellsAuditReadResponse, request)
     const filesReadResponse = await handleFilesReadRequest(request, env)
     if (filesReadResponse) return withCors(filesReadResponse, request)
+    // Smart Extensions apiRev 7: cells by canonical ref across files.
+    const cellsByRefResponse = await handleCellsByRefRequest(request, env)
+    if (cellsByRefResponse) return withCors(cellsByRefResponse, request)
     const progressReadResponse = await handleProgressReadRequest(request, env)
     if (progressReadResponse) return withCors(progressReadResponse, request)
 
@@ -461,6 +475,9 @@ const worker = {
     if (healthRollupResponse) return withCors(healthRollupResponse, request)
     const cellAudioReadResponse = await handleCellAudioReadRequest(request, env)
     if (cellAudioReadResponse) return withCors(cellAudioReadResponse, request)
+    // Omnilingual ASR zero-shot examples + their signed audio (spec §2).
+    const transcriptionExamplesResponse = await handleTranscriptionExamplesRequest(request, env, mountPrefix)
+    if (transcriptionExamplesResponse) return withCors(transcriptionExamplesResponse, request)
     const cellLinksReadResponse = await handleCellLinksReadRequest(request, env)
     if (cellLinksReadResponse) return withCors(cellLinksReadResponse, request)
     const cellMorphReadResponse = await handleCellMorphReadRequest(request, env)
@@ -496,6 +513,8 @@ const worker = {
     if (conceptsReadResponse) return withCors(conceptsReadResponse, request)
     const btReadResponse = await handleCellBacktranslationsReadRequest(request, env)
     if (btReadResponse) return withCors(btReadResponse, request)
+    const glossReadResponse = await handleCellGlossesReadRequest(request, env)
+    if (glossReadResponse) return withCors(glossReadResponse, request)
     const externalReadResponse = await handleExternalReadRequest(request, env)
     if (externalReadResponse) return withCors(externalReadResponse, request)
     // AQU-1233: agent-facing comment reads. Its own module (rather than another
@@ -611,6 +630,9 @@ const worker = {
 
     // AQU-1762: Agent API knowledge-base (reference document) upload / list.
     // Bridged to auth-worker, which owns extraction + indexing.
+    // Omnilingual ASR spec §7: agent transcription + ZS warm-up status.
+    const externalTranscriptionResponse = await handleExternalTranscriptionRequest(request, env, mountPrefix)
+    if (externalTranscriptionResponse) return withCors(externalTranscriptionResponse, request)
     const externalKnowledgeResponse = await handleExternalKnowledgeRequest(request, env)
     if (externalKnowledgeResponse) return withCors(externalKnowledgeResponse, request)
 
@@ -659,6 +681,9 @@ export default {
   // saturation — are queryable without a repro.
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const startedAt = Date.now()
+    // Secrets Store overlay: SS_<NAME> bindings supply env.<NAME> (db/shared/
+    // secrets-store-overlay.ts); the Worker secret stays the fallback.
+    env = await withStoreSecrets(env)
     let response: Response
     try {
       response = await worker.fetch(request, env, ctx)
@@ -711,6 +736,7 @@ export default {
     env: Env,
     _ctx: ExecutionContext,
   ): Promise<void> {
+    env = await withStoreSecrets(env)
     if (controller.cron === R2_GC_CRON) {
       try {
         await runR2GcSweep(env)
@@ -744,6 +770,7 @@ export default {
     env: Env,
     ctx: ExecutionContext,
   ): Promise<void> {
+    env = await withStoreSecrets(env)
     if (!env.HYPERDRIVE) {
       throw new Error(
         "HYPERDRIVE not bound — the side-effect queue consumer needs Postgres",

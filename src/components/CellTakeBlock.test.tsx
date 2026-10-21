@@ -376,7 +376,8 @@ describe("what its line says (Sam, 2026-09-30)", () => {
       durationMs: 2560, trimStartMs: 256, trimEndMs: 2320,
     })
     draw({ owner })
-    expect(screen.getByTestId("cell-take-length")).toHaveTextContent("2.1s")
+    // 2.064s kept, in tenths rounded down as the recorder says it (AQU-1767).
+    expect(screen.getByTestId("cell-take-length")).toHaveTextContent("2.0s")
   })
 
   it("says a transcribed take cannot be checked when nothing says what it should say", () => {

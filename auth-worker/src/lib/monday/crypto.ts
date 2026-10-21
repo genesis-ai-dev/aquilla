@@ -1,4 +1,5 @@
-// AES-GCM encryption for Monday OAuth access tokens (WebCrypto).
+// AES-GCM encryption for Monday OAuth access tokens (WebCrypto; the cipher
+// itself is lib/integrations/token-crypto.ts, shared with Airtable — AQU-804).
 //
 // Storage format: base64(iv || ciphertext), 12-byte random IV per encryption.
 // Key derivation: SHA-256(<key material> + ":monday-token"), where the key
@@ -13,6 +14,12 @@
 // MONDAY_TOKEN_KEY so its Monday key is one no other deployment holds.
 
 import type { Env } from "../../types"
+import {
+  decryptIntegrationToken,
+  encryptIntegrationToken,
+  integrationTokenKeyMaterial,
+  toBase64,
+} from "../integrations/token-crypto"
 
 const KEY_CONTEXT = ":monday-token"
 
@@ -24,31 +31,7 @@ const KEY_CONTEXT = ":monday-token"
 export function mondayTokenKeyMaterial(
   env: Pick<Env, "SECRET_KEY" | "MONDAY_TOKEN_KEY">,
 ): string {
-  return env.MONDAY_TOKEN_KEY?.trim() || env.SECRET_KEY
-}
-
-async function deriveKey(secretKey: string): Promise<CryptoKey> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(secretKey + KEY_CONTEXT),
-  )
-  return crypto.subtle.importKey("raw", digest, { name: "AES-GCM" }, false, [
-    "encrypt",
-    "decrypt",
-  ])
-}
-
-function toBase64(bytes: Uint8Array): string {
-  let binary = ""
-  for (const b of bytes) binary += String.fromCharCode(b)
-  return btoa(binary)
-}
-
-function fromBase64(b64: string): Uint8Array {
-  const binary = atob(b64)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-  return bytes
+  return integrationTokenKeyMaterial(env)
 }
 
 /** Encrypt a Monday access token for storage → base64(iv || ciphertext). */
@@ -56,17 +39,7 @@ export async function encryptMondayToken(
   secretKey: string,
   plaintext: string,
 ): Promise<string> {
-  const key = await deriveKey(secretKey)
-  const iv = crypto.getRandomValues(new Uint8Array(12))
-  const ciphertext = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv },
-    key,
-    new TextEncoder().encode(plaintext),
-  )
-  const out = new Uint8Array(iv.length + ciphertext.byteLength)
-  out.set(iv, 0)
-  out.set(new Uint8Array(ciphertext), iv.length)
-  return toBase64(out)
+  return encryptIntegrationToken(secretKey, KEY_CONTEXT, plaintext)
 }
 
 // ── OAuth 2.1 PKCE helpers ─────────────────────────────────────────────────
@@ -99,13 +72,5 @@ export async function decryptMondayToken(
   secretKey: string,
   encoded: string,
 ): Promise<string> {
-  const bytes = fromBase64(encoded)
-  if (bytes.length <= 12) throw new Error("monday token ciphertext too short")
-  const key = await deriveKey(secretKey)
-  const plaintext = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: bytes.slice(0, 12) },
-    key,
-    bytes.slice(12),
-  )
-  return new TextDecoder().decode(plaintext)
+  return decryptIntegrationToken(secretKey, KEY_CONTEXT, encoded)
 }

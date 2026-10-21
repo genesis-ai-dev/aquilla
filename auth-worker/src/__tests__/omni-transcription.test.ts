@@ -65,7 +65,7 @@ function stubProviders(modalReply: Record<string, unknown> = {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
     if (url.includes("/models?")) {
-      return Response.json({ data: [{ id: "openai/whisper-1", pricing: { prompt: "0.0001" } }] })
+      return Response.json({ data: [{ id: "openai/whisper-large-v3", pricing: { prompt: "0.0001" } }] })
     }
     if (url.startsWith("https://upstream.example")) {
       calls.whisper.push(JSON.parse(String(init?.body)))
@@ -93,7 +93,7 @@ describe("auto routing", () => {
     expect(response.status).toBe(200)
     expect(calls.modal).toHaveLength(0)
     expect(calls.whisper).toHaveLength(1)
-    expect(calls.whisper[0]).toMatchObject({ model: "openai/whisper-1", language: "fr" })
+    expect(calls.whisper[0]).toMatchObject({ model: "openai/whisper-large-v3", language: "fr" })
     expect(await response.json()).toEqual({ text: "bonjour", chunks: [{ text: "bonjour", start: 0, end: 0.5 }],
       model: "whisper", timingsApproximate: false, granularity: "word" })
   })
@@ -403,7 +403,7 @@ describe("Qwen3-ASR for Chinese varieties", () => {
     const jwt = await owner()
     const calls = stubProviders()
     expect((await post(jwt, { ...(await audio(1, "zh-CN")), model: "whisper" })).status).toBe(200)
-    expect(calls.whisper[0]).toMatchObject({ model: "openai/whisper-1", language: "zh" })
+    expect(calls.whisper[0]).toMatchObject({ model: "openai/whisper-large-v3", language: "zh" })
   })
 })
 

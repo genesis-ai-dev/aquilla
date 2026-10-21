@@ -39,7 +39,7 @@ describe("AudioBulkProgressBanner — Change voice (AQU-1109)", () => {
     expect(screen.getByText("0/4")).toBeTruthy()
 
     await user.click(screen.getByRole("button", { name: "Cancel batch" }))
-    expect(cancelBatchChangeVoice).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(cancelBatchChangeVoice).toHaveBeenCalledTimes(1))
 
     await act(async () => { release(); await run })
     expect(screen.queryByText("Changing voices")).toBeNull()

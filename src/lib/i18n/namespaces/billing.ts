@@ -139,6 +139,31 @@ export const billing = defineNamespace({
     "billing.aiUsage.pauseNote": "Usage limits may pause affected AI requests until capacity is available again. Your projects remain available for manual editing and review.",
     "billing.aiUsage.noSelfService": "Self-service allowance purchases are not available. Contact us if your organization needs more capacity.",
     "billing.aiUsage.contact": "Discuss AI capacity",
+    "billing.meter.label": "AI this week",
+    "billing.meter.loading": "Loading AI usage…",
+    "billing.meter.unavailable": "AI usage is unavailable right now.",
+    "billing.meter.percent": "{percent}%",
+    "billing.meter.ariaLabel": "{percent}% of this week's AI used",
+    "billing.meter.resets": "Resets {day}",
+    "billing.meter.warning": "Most of this week's AI is used.",
+    "billing.meter.exhausted": "This week's AI is used up. AI actions are paused until {day}.",
+    "billing.meter.exhaustedNoDate": "This week's AI is used up. AI actions are paused until it resets.",
+    "billing.meter.askAdmin": "Ask a workspace admin to upgrade or add your own key.",
+    "billing.meter.upgrade": "Upgrade to Team",
+    "billing.meter.ownKey": "Use your own key",
+    "billing.meter.enterpriseContact": "Talk to us about Enterprise",
+    "billing.meter.agentNote": "Agent runs use much more of this week's AI than single drafts.",
+    "billing.meter.byok": "Not metered",
+    "billing.meter.byokTooltip": "You're using your own AI provider, so Aquilla doesn't meter this. See costs in your provider's dashboard.",
+    "billing.meter.byokInfoAriaLabel": "Why AI is not metered",
+    "billing.meter.unlimited": "Unlimited",
+    "billing.meter.unlimitedHelp": "Your Enterprise plan includes unlimited AI.",
+    "billing.meter.enterprise": "Enterprise",
+    "billing.meter.sectionTitle": "AI usage",
+    "billing.refusal.title": "This week's AI is used up",
+    "billing.refusal.allowance": "This workspace has used this week's AI.",
+    "billing.refusal.resets": "It comes back on {day}.",
+    "billing.refusal.ceiling": "Aquilla's AI is unavailable right now. Try again later, or use your own AI provider.",
     "billing.usage.period": "Agent credits this period",
     "billing.usage.label": "Usage",
     "billing.usage.unpaidHelp": "Explore includes a cycle of agent credits. Field Plan checkout is coming soon.",
@@ -586,6 +611,29 @@ export const billing = defineNamespace({
   },
   "billing.aiUsage.contact": {
     "description": "Link that starts an email to support about more AI capacity."
+  },
+  "billing.meter.percent": {
+    "description": "The large number on the AI meter: how much of this week's AI allowance the workspace has used. Never an amount.",
+    "placeholders": { "percent": "Whole number from 0 to 100." }
+  },
+  "billing.meter.ariaLabel": {
+    "description": "Screen-reader name of the AI meter's progress bar and the tooltip on the compact meter ring.",
+    "placeholders": { "percent": "Whole number from 0 to 100." }
+  },
+  "billing.meter.resets": {
+    "description": "Small text beside the AI meter: the day the weekly AI allowance starts again.",
+    "placeholders": { "day": "Short weekday name, already localized (e.g. Mon)." }
+  },
+  "billing.meter.exhausted": {
+    "description": "Alert under the AI meter at 100%: new AI actions are stopped until the weekly reset.",
+    "placeholders": { "day": "Short weekday name, already localized (e.g. Mon)." }
+  },
+  "billing.meter.byokInfoAriaLabel": {
+    "description": "Screen-reader name of the info button beside a greyed AI meter; its tooltip explains the workspace uses its own AI provider."
+  },
+  "billing.refusal.resets": {
+    "description": "Second sentence of the error shown when an AI action was refused because the weekly allowance is used up.",
+    "placeholders": { "day": "Full weekday name, already localized (e.g. Monday)." }
   }
 },
     _context: {

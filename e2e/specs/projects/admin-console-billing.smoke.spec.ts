@@ -27,6 +27,6 @@ test('admin weekly capacity persists and reaches the owning organization billing
   await billing.openPlatformBilling(false)
   await expect(alice.getByTestId(`weekly-allowance-${alice.orgId}`)).toHaveValue('1000')
   await billing.openWorkspace(alice.orgId)
-  await expect(alice.getByTestId('billing-usage-percent')).toContainText('0%')
+  await expect(alice.getByTestId('ai-meter')).toContainText('0%')
   await expect(alice.getByTestId('billing-workspace')).toContainText('covered access')
 })

@@ -43,13 +43,22 @@ export function VoiceSidebar({
   // rather than languages on a lane tagged with its own id. Archived lanes are
   // already left out, so no archive list is passed on.
   const laneLanguages = useMemo(() => liveTargetLaneLanguages(project.lanes), [project.lanes])
+  // AQU-2038: the roster's star is the LANE's default, while its voice list
+  // stays the whole library — a write from the panel carries every voice back
+  // (AQU-2037), and `saveTts` routes the `defaultVoiceId` it sends to this
+  // lane's own star. Handing it the project-wide default instead would draw
+  // the wrong star and move the lane's star back on the next voice edit.
+  const panelSettings = useMemo(
+    () => (tts.settings ? { ...tts.settings, defaultVoiceId: tts.laneSettings?.defaultVoiceId } : tts.settings),
+    [tts.settings, tts.laneSettings],
+  )
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 overflow-hidden rounded-xl border bg-background">
         <div className="h-full w-full overflow-x-hidden">
           <VoiceLibraryPanel
-            settings={tts.settings}
+            settings={panelSettings}
             laneId={laneId}
             onSettingsChange={tts.saveTts}
             targetLanguage={targetLanguage}

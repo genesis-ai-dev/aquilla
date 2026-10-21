@@ -210,6 +210,8 @@ import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
   setQueueTargetSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying } from "@/lib/audio/play-queue"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
 import { useTransportForFile } from "@/hooks/useTransportForFile"
+import { useAudioViewPlace } from "@/hooks/useAudioViewPlace"
+import { usePauseAudioWhenHidden } from "@/hooks/usePauseAudioWhenHidden"
 import { videoOwnsFile, virtualOwnsFile } from "@/lib/audio/transport"
 import { recordingDrivesPlayback, switchPlaybackSource, usePlaybackSource, type PlaybackSource } from "@/lib/audio/playback-source"
 import { youTubeVideoId } from "@/lib/video/youtube"
@@ -282,7 +284,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { canHarmonize, emitCastAssign, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
+import { canHarmonize, emitCastAssign, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -363,6 +365,7 @@ import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
 import { runDiarization, findFileClip, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { extractVoiceReference } from "@/lib/audio/reference-extract"
 import { assignedCastVoiceId, getVoiceLibrary, newVoiceId, resolveCastVoice, VOICE_PALETTE } from "@/lib/audio/voices"
+import { clearLaneCast, setLaneCast } from "@/lib/audio/lane-cast"
 import { generateAndAttachCellVoice } from "@/lib/audio/generate-voice"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { TimeOrderedEmptyState } from "./TimeOrderedEmptyState"
@@ -527,6 +530,14 @@ import {
   writeLocalBacktranslation,
   type BacktranslationRecord,
 } from "@/lib/completion/bt-record"
+import {
+  glossRecordFromHydrationRow,
+  glossesReadQuery,
+  resolveGloss,
+  writeLocalGloss,
+  type GlossReading,
+  type GlossRecord,
+} from "@/lib/completion/gloss-record"
 import {
   normalizeProtectedCompletion,
   type NormalizedCompletion,
@@ -714,6 +725,8 @@ export function ProjectWorkspace() {
   const { list: formatLocaleList, time: formatLocaleTime } = useFormat()
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
   const navigate = useNavigate()
+  // Leaving the tab pauses playback — a hidden tab can't keep the timeline in time.
+  usePauseAudioWhenHidden()
   // Declared up here because effects further down set and read them long before
   // the values they mirror are computed. Keeping the declarations ahead of every
   // use is what makes the mirroring legal (react-hooks/immutability).
@@ -1814,6 +1827,7 @@ export function ProjectWorkspace() {
   const auditStatsEnabled = Boolean(project?.id && activeFileId && frontierSession?.jwt) && editorFirstPaint
   const {
     byCellId: auditStatsByCellId,
+    complete: auditStatsComplete,
     revalidate: revalidateAuditStats,
     revalidateCellStats,
     applyCommittedCellStats,
@@ -1866,6 +1880,7 @@ export function ProjectWorkspace() {
     username: currentUsername,
     requiredValidations: validationCount,
     auditStats: auditStatsByCellId,
+    auditStatsComplete,
     getToken: getTokenForFile,
     enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
     lane: activeLane,
@@ -2041,6 +2056,10 @@ export function ProjectWorkspace() {
   const glosserCacheRef = useRef<{
     corpusCells: readonly CellSummary[]
     backtranslationCache: Map<string, BacktranslationRecord>
+    // AQU-1408 §2: corrected glosses seed the glosser, so a correction that
+    // does not move this key hands back the pre-correction glosser — the exact
+    // failure AQU-207 fixed for alignment seeds below.
+    glossCache: Map<string, GlossRecord>
     terminology: ProjectRecord["terminology"] | undefined
     // AQU-207: confirmed/invalidated interlinear alignments seed the glosser
     // too, so they belong in the cache key — otherwise a confirmation hands
@@ -2323,6 +2342,8 @@ export function ProjectWorkspace() {
       (project?.lanes ?? []).filter((lane) => lane.role === "target"),
     ),
     activeLaneId,
+    // AQU-2038: the cast and the default voice are this lane's, not the project's.
+    activeLane,
   )
   // AQU-2037: the audio surfaces read the ACTIVE LANE's voices — the per-cell
   // picker, the batch dialog, the Media-timeline picker and Generate all go
@@ -2368,6 +2389,10 @@ export function ProjectWorkspace() {
     // table's playback follow even if an earlier scroll had released it.
     editorRef.current?.setMediaFollow?.("engage")
   }, [])
+  // AQU-1642 follow-up: the Audio view's one place to play from. Its context —
+  // the file's cells with their takes — is written by a layout effect below,
+  // once they exist; the place only reads it at press time.
+  const { place: audioViewPlace, contextRef: audioViewContextRef } = useAudioViewPlace(activeFileId ?? null)
   const audioLens = useMemo<AudioLensContext | null>(
     () =>
       lens === "audio" && audioProject && !activeFileTimeOrdered
@@ -2403,11 +2428,12 @@ export function ProjectWorkspace() {
               setMakeCharacterSeedCellId(cellId)
               setMakeCharacterOpen(true)
             },
+            place: audioViewPlace,
           }
         : null,
     [
       lens, audioProject, activeFileTimeOrdered, tts.voices, tts.laneSettings, tts.defaultVoiceId,
-      tts.assignCells, frontierSession, currentUsername, cellStore, refresh,
+      tts.assignCells, frontierSession, currentUsername, cellStore, refresh, audioViewPlace,
     ],
   )
 
@@ -2617,7 +2643,8 @@ export function ProjectWorkspace() {
       terminology: surfaceConcepts.editor,
       // AQU-2037: the editor's record is already overlaid for the open lane, so
       // its voices are too — the cast gutter, the cell voice chip and the batch
-      // dialog all read them off `project.ttsSettings`.
+      // dialog all read them off `project.ttsSettings`. AQU-2038: so are its
+      // cast and default voice, which `laneSettings` resolves for the lane.
       ttsSettings: tts.laneSettings,
     }
   }, [activeSourceLanguage, activeLaneTargetLanguage, project, surfaceConcepts.editor, tts.laneSettings])
@@ -4544,7 +4571,14 @@ export function ProjectWorkspace() {
           return
         }
         try {
-          await tts.saveTts(buildCastRemovals(cells.map((c) => c.id), tts.settings))
+          // AQU-2038: the project-wide map (the unprojected one — the lane
+          // projection must never be written back over the fallback), AND every
+          // lane's own entry: the character being removed is shared, so no
+          // lane's voice for it survives.
+          await tts.saveTts({
+            ...buildCastRemovals(cells.map((c) => c.id), tts.settings),
+            ...clearLaneCast(tts.settings, cells.map((c) => c.id)),
+          })
         } catch (e) {
           console.warn("[characters] pruning the voice map failed", e)
           toast.add({ type: "warning", title: "Character removed, but the cast assignments could not be updated." })
@@ -4556,7 +4590,10 @@ export function ProjectWorkspace() {
         return
       }
 
-      await tts.saveTts(buildCastRemovals([cell.id], tts.settings))
+      await tts.saveTts({
+        ...buildCastRemovals([cell.id], tts.settings),
+        ...clearLaneCast(tts.settings, [cell.id]),
+      })
       if (castName === "" || !project?.id || !activeFileId) return
       try {
         await emitCastAssign({
@@ -4869,6 +4906,10 @@ export function ProjectWorkspace() {
         await tts.saveTts({
           voices: additions.voices,
           castAssignments: {
+            // AQU-2038: the project-wide cast, deliberately — an imported
+            // character sheet is every lane's starting point, not this lane's
+            // own casting. `tts.laneSettings` is the lane projection; merging
+            // that in here would stamp one lane's choices onto the fallback.
             ...(tts.settings?.castAssignments ?? {}),
             ...additions.castAssignments,
           },
@@ -4982,6 +5023,10 @@ export function ProjectWorkspace() {
         await tts.saveTts({
           voices: additions.voices,
           castAssignments: {
+            // AQU-2038: the project-wide cast, deliberately — an imported
+            // character sheet is every lane's starting point, not this lane's
+            // own casting. `tts.laneSettings` is the lane projection; merging
+            // that in here would stamp one lane's choices onto the fallback.
             ...(tts.settings?.castAssignments ?? {}),
             ...additions.castAssignments,
           },
@@ -5096,7 +5141,13 @@ export function ProjectWorkspace() {
       // file no longer carries. The cast LIST is deliberately untouched — see
       // `buildCastRemovals`.
       try {
-        await tts.saveTts(buildCastRemovals(dirty.map((c) => c.id), tts.settings))
+        await tts.saveTts({
+          ...buildCastRemovals(dirty.map((c) => c.id), tts.settings),
+          // AQU-2038: and every lane's own entry — the characters being cleared
+          // are shared, so no lane's voice for them survives. The same rule as
+          // "No character" above.
+          ...clearLaneCast(tts.settings, dirty.map((c) => c.id)),
+        })
       } catch (e) {
         console.warn("[characters] pruning the cast assignments failed", e)
         toast.add({ type: "warning", title: "Characters cleared, but the cast assignments could not be updated." })
@@ -6617,9 +6668,18 @@ export function ProjectWorkspace() {
   //  - localStorage fallback so results survive page reload before server round-trip.
   //
   const [backtranslationCache, setBacktranslationCache] = useState<Map<string, BacktranslationRecord>>(new Map())
+  // AQU-1408 §1: hand-corrected statistical glosses, same cache shape as the
+  // back-translations above. Separate map, because a cell can have both and
+  // they are read against each other.
+  const [glossCache, setGlossCache] = useState<Map<string, GlossRecord>>(new Map())
   const [backtranslatingState, setBacktranslatingState] = useState<Set<string>>(new Set())
   const [backtranslationErrorsState, setBacktranslationErrorsState] = useState<Map<string, string>>(new Map())
   const locallyTouchedBtRef = useRef(new Set<string>())
+  const locallyTouchedGlossRef = useRef(new Set<string>())
+  const hydrateGlossesRef = useRef<(
+    fileId: string,
+    mode: "replace-untouched" | "replace",
+  ) => Promise<void>>(async () => {})
   const hydrateBacktranslationsRef = useRef<(
     fileId: string,
     mode: "fill-missing" | "replace-untouched" | "replace",
@@ -6699,6 +6759,74 @@ export function ProjectWorkspace() {
     void hydrateBacktranslations(activeFileId, "replace")
   }, [project?.id, activeFileId, activeLane, hydrateBacktranslations])
 
+  /**
+   * AQU-1408 §1: fetch this file's hand-corrected glosses.
+   *
+   * Narrower than the BT hydration by design — there is no "fill-missing"
+   * mode. A gloss cache miss is not "we have not fetched yet", it is "nobody
+   * has corrected this cell", and both answers render the computed gloss. So
+   * the only two modes that mean anything are a full lane/file swap and a
+   * remote-write refresh that must not clobber what this user just typed.
+   */
+  const hydrateGlosses = useCallback(async (
+    fileId: string,
+    mode: "replace-untouched" | "replace",
+  ) => {
+    if (!project?.id) return
+    try {
+      const jwt = await getTokenForFile(fileId)
+      if (!jwt) return
+      const { syncWorkerHttpOrigin } = await import("@/lib/sync/sync-worker-url")
+      const res = await fetch(
+        `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(project.id)}/files/${encodeURIComponent(fileId)}/glosses${glossesReadQuery(activeLane)}`,
+        { headers: { Authorization: `Bearer ${jwt}` } },
+      )
+      if (!res.ok) return
+      const data = (await res.json()) as {
+        glosses: Array<{
+          cellId: string
+          targetEventId: string
+          glossText: string
+          author: string
+          createdAt: number
+        }>
+      }
+      setGlossCache((prev) => {
+        if (mode === "replace") {
+          const next = new Map<string, GlossRecord>()
+          for (const row of data.glosses) {
+            const kept = locallyTouchedGlossRef.current.has(row.cellId) ? prev.get(row.cellId) : undefined
+            next.set(row.cellId, kept ?? glossRecordFromHydrationRow(row))
+          }
+          for (const cellId of locallyTouchedGlossRef.current) {
+            const kept = prev.get(cellId)
+            if (kept) next.set(cellId, kept)
+          }
+          return next
+        }
+        const next = new Map(prev)
+        for (const row of data.glosses) {
+          if (locallyTouchedGlossRef.current.has(row.cellId)) continue
+          const incoming = glossRecordFromHydrationRow(row)
+          const existing = next.get(row.cellId)
+          next.set(row.cellId, existing?.forText
+            ? { ...incoming, forText: existing.forText }
+            : incoming)
+        }
+        return next
+      })
+    } catch (err) {
+      console.warn("[gloss-hydrate] failed to fetch corrected glosses:", err)
+    }
+  }, [project?.id, getTokenForFile, activeLane])
+  hydrateGlossesRef.current = hydrateGlosses
+
+  useEffect(() => {
+    if (!project?.id || !activeFileId) return
+    locallyTouchedGlossRef.current = new Set()
+    void hydrateGlosses(activeFileId, "replace")
+  }, [project?.id, activeFileId, activeLane, hydrateGlosses])
+
   // Same gate as the AI-completion sparkle: a signed-in Frontier session or a
   // custom endpoint+model (project settings or per-device override) counts as
   // configured — BT generation no longer requires project-level customization.
@@ -6718,6 +6846,7 @@ export function ProjectWorkspace() {
       cached &&
       cached.corpusCells === corpusCells &&
       cached.backtranslationCache === backtranslationCache &&
+      cached.glossCache === glossCache &&
       cached.terminology === terminology &&
       cached.alignmentSeeds === alignmentSeeds
     ) {
@@ -6730,6 +6859,7 @@ export function ProjectWorkspace() {
     const seeds = buildGlosserSeeds({
       corpusCells,
       backtranslationCache,
+      glossCache,
       terminology,
       alignmentSeeds,
     })
@@ -6738,12 +6868,13 @@ export function ProjectWorkspace() {
     glosserCacheRef.current = {
       corpusCells,
       backtranslationCache,
+      glossCache,
       terminology,
       alignmentSeeds,
       glosser: g,
     }
     return g
-  }, [corpusCells, backtranslationCache, laneLocalConcepts, project?.alignmentSeeds])
+  }, [corpusCells, backtranslationCache, glossCache, laneLocalConcepts, project?.alignmentSeeds])
 
   // Build the interlinear alignment model lazily. It is only used inside an
   // expanded row's BT tab, so constructing it on workspace open just burns heap
@@ -6846,6 +6977,50 @@ export function ProjectWorkspace() {
   }, [project?.id, currentUsername, setBtWriteError, activeLane])
 
   /**
+   * AQU-1408 §1: persist a corrected statistical gloss to cache + localStorage
+   * + outbox, the same three places a back-translation goes.
+   *
+   * `glossText` may be empty — that is a contributor withdrawing a correction,
+   * and it has to travel, because other members are looking at the correction
+   * right now. The record is kept (not deleted) with an empty string so the
+   * local cache answers "corrected to nothing" rather than "never fetched",
+   * which is what makes the fallback to the computed gloss immediate.
+   */
+  const persistGloss = useCallback((cell: CellData, glossText: string) => {
+    const pinnedTargetEventId = resolveBtTargetEventId(undefined, cell.targetEventId)
+    const record: GlossRecord = {
+      cellId: cell.id,
+      glossText,
+      targetEventId: pinnedTargetEventId,
+      forText: cell.translated,
+      author: currentUsername,
+      createdAt: Date.now(),
+    }
+
+    locallyTouchedGlossRef.current.add(cell.id)
+    setGlossCache((prev) => new Map(prev).set(cell.id, record))
+
+    if (project?.id) writeLocalGloss(project.id, record, activeLane)
+
+    if (!project?.id || !cell.fileId || !pinnedTargetEventId) {
+      console.warn("[gloss-persist] missing project/file/targetEventId — skipping outbox emit")
+      return
+    }
+    void emitCellGlossSet({
+      projectId: project.id,
+      fileId: cell.fileId,
+      cellId: cell.id,
+      glossText,
+      targetEventId: pinnedTargetEventId,
+      ...(activeLane ? { targetLang: activeLane } : {}),
+      author: currentUsername,
+    }).catch((err) => {
+      console.warn("[gloss-persist] outbox emit failed:", err)
+      setBtWriteError("Couldn't save the gloss correction locally — copy your text and reload.")
+    })
+  }, [project?.id, currentUsername, setBtWriteError, activeLane])
+
+  /**
    * Generate the cell's back-translation with the configured LLM. Called by
    * the BT tab's Generate/Refresh buttons — this is the ONLY generation path
    * that persists a BT; nothing runs automatically on commit. The statistical
@@ -6905,13 +7080,24 @@ export function ProjectWorkspace() {
     }
   }, [isBacktranslationConfigured, project?.completionSettings, activeSourceLanguage, activeLaneTargetLanguage, laneLocalConcepts, frontierSession, persistBt, backtranslationCache, corpusCells, getGlosser])
 
+  // AQU-1408 §1: committed-head lookup for the gloss resolver. A gloss
+  // hydrated from the server carries no `forText`, so the only way to tell
+  // whether it still describes the live cell is its pin.
+  const corpusCellsById = useMemo(
+    () => new Map(corpusCells.map((c) => [c.id, c] as const)),
+    [corpusCells],
+  )
+
   /**
-   * On-demand statistical gloss for the BT tab's collapsed "statistical
-   * reference" section. Computed from the project's own translation pairs,
-   * never persisted — it's a rough corpus-derived hint, not the BT of record.
+   * The statistical gloss the BT tab shows for a cell.
+   *
+   * Two sources, in order: a contributor's saved correction when one still
+   * describes the text on screen (AQU-1408 §1), otherwise the corpus-derived
+   * gloss computed here on demand. `corrected` says which, because the reader
+   * is being asked to trust one of them.
    */
-  const getStatisticalBt = useCallback((translatedText: string, cellId: string): string => {
-    if (!translatedText.trim()) return ""
+  const getStatisticalBt = useCallback((translatedText: string, cellId: string): GlossReading => {
+    if (!translatedText.trim()) return { text: "", corrected: false }
     // Leave-one-out: the cell's own pair is in the corpus, and glossing it with
     // a model that has memorized it just replays its source.
     const gloss = getGlosser().gloss(translatedText, { excludeId: cellId }).trim()
@@ -6920,8 +7106,14 @@ export function ProjectWorkspace() {
     // BT tab can say "not enough pairs yet" instead of presenting the
     // translation as its own reading.
     const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()
-    return norm(gloss) === norm(translatedText) ? "" : gloss
-  }, [getGlosser])
+    const computed = norm(gloss) === norm(translatedText) ? "" : gloss
+    return resolveGloss({
+      record: glossCache.get(cellId),
+      computed,
+      visibleTranslated: translatedText,
+      committedTargetEventId: corpusCellsById.get(cellId)?.targetEventId,
+    })
+  }, [getGlosser, glossCache, corpusCellsById])
 
   // Add-from-selection: create a concept from a source-side selection in the
   // editor. A rendering in the payload activates the concept immediately;
@@ -7044,6 +7236,11 @@ export function ProjectWorkspace() {
   const saveBacktranslation = useCallback((cell: CellData, btText: string, polished: boolean) => {
     persistBt(cell, btText, polished)
   }, [persistBt])
+
+  /** AQU-1408 §1: called when a user saves a gloss correction from the BT tab. */
+  const saveGloss = useCallback((cell: CellData, glossText: string) => {
+    persistGloss(cell, glossText)
+  }, [persistGloss])
 
   // ── FRO-192: assignment data ──────────────────────────────────────────────
   // Members list: used by AssignModal for the assignee picker and for building
@@ -8318,6 +8515,9 @@ export function ProjectWorkspace() {
               }
               if (msg.kind === "cell.backtranslation.set" && msg.file && !ownWrite) {
                 void hydrateBacktranslationsRef.current(msg.file, "replace-untouched")
+              }
+              if (msg.kind === "cell.gloss.set" && msg.file && !ownWrite) {
+                void hydrateGlossesRef.current(msg.file, "replace-untouched")
               }
               // Don't pop the "remote changed" banner for our own writes —
               // the editor just committed; bouncing the same event back via
@@ -11890,6 +12090,16 @@ export function ProjectWorkspace() {
     () => mergeCellsWithAudio(legacyCells, workspaceAudioByCellId),
     [legacyCells, workspaceAudioByCellId],
   )
+  // AQU-1642 follow-up: what the Audio view's cards and ⋯ Play open the run
+  // with — the same lines, takes and "moved to this line" as the bar's Play.
+  // Written after every commit (no deps) so a press reads this render's cells;
+  // a layout effect, not a render-time write, because the hook's return value
+  // is frozen to react-hooks/immutability and the ref is never read in render.
+  useLayoutEffect(() => {
+    audioViewContextRef.current = project
+      ? { cells: audioMergedCells, projectId: project.id, session: frontierSession ?? null, onActiveCell: handleBarActiveCell }
+      : null
+  })
 
   // AQU-928: transcribe EXACTLY the sections selected on the timeline. Same
   // per-cell path (and same post-run flush/revalidate) as transcribe-all, only
@@ -14578,18 +14788,20 @@ export function ProjectWorkspace() {
         }
       }
 
-      const assignments: Record<string, string> = {}
-      for (const c of media) assignments[c.id] = voiceId
+      // AQU-2038: casting those lines is this lane's call, like every other
+      // assignment made from the editor — in the SAME patch as the new voice,
+      // because a second save in this tick would merge over a pre-save copy of
+      // the settings and drop it.
       await tts.saveTts({
         voices,
-        castAssignments: { ...(tts.settings?.castAssignments ?? {}), ...assignments },
+        ...setLaneCast(tts.settings, activeLane, media.map((c) => c.id), voiceId),
       })
     } catch (e) {
       console.warn("[adopt-speaker-voice] failed:", e)
     } finally {
       setAdoptingSpeaker(false)
     }
-  }, [project?.id, activeFileId, activeFile?.name, adoptingSpeaker, cellStore, getTokenForFile, tts.settings, tts.saveTts])
+  }, [project?.id, activeFileId, activeFile?.name, adoptingSpeaker, cellStore, getTokenForFile, tts.settings, tts.saveTts, activeLane])
 
   const fileMenuItems = useMemo((): OverflowMenuItem[] => {
     if (!activeFileId) return []
@@ -15326,17 +15538,18 @@ export function ProjectWorkspace() {
                   onReorderFiles={(writes) => { void handleReorderFiles(writes) }}
                   onMoveFileToGroup={(move) => { void handleMoveFileToGroup(move) }}
                 />
-                <SidebarProjectSection items={projectNavItems} />
-                {/* FRO-192: member's per-project assignment pickup panel. */}
-                {project?.id && jwt && (
-                  <ProjectAssignedToMe
-                    projectId={project.id}
-                    jwt={jwt}
-                    onJumpToAssignment={jumpToAssignment}
-                    refreshKey={assignmentsRefreshKey}
-                    defaultLaneLabel={activeTargetLanguage ?? ""}
-                  />
-                )}
+                <SidebarProjectSection items={projectNavItems}>
+                  {/* FRO-192: member's per-project assignment pickup — a sidebar button that opens a popover. */}
+                  {project?.id && jwt && (
+                    <ProjectAssignedToMe
+                      projectId={project.id}
+                      jwt={jwt}
+                      onJumpToAssignment={jumpToAssignment}
+                      refreshKey={assignmentsRefreshKey}
+                      defaultLaneLabel={activeTargetLanguage ?? ""}
+                    />
+                  )}
+                </SidebarProjectSection>
                 {/* AQU-581: a lane coordinator's own hand-outs, so they can take one back. */}
                 {project?.id && jwt && isLaneCoordinator && (
                   <ProjectHandedOut
@@ -15500,7 +15713,8 @@ export function ProjectWorkspace() {
                 <SelectionBar
                   /* AQU-2037: `audioProject` is `project` with the OPEN LANE's
                      voices — the batch voice dialog this bar opens reads them
-                     off `project.ttsSettings`. */
+                     off `project.ttsSettings`. AQU-2038: and the lane's own
+                     cast and default voice, which Voice together reads too. */
                   project={audioProject ?? project}
                   cellStore={cellStore}
                   session={frontierSession}
@@ -15523,7 +15737,8 @@ export function ProjectWorkspace() {
                       project,
                       fileId: activeFileId,
                       cells: sel,
-                      settings: tts.settings,
+                      // AQU-2037/2038: the lane's voices, cast and default.
+                      settings: tts.laneSettings,
                       session: frontierSession,
                       username: currentUsername,
                       // AQU-1591: the lane this is a performance of.
@@ -15782,6 +15997,7 @@ export function ProjectWorkspace() {
               projectId: project.id,
               jwt,
               author: currentUsername,
+              onUseOwnKey: handleAiSetupNeeded,
               roleLevel: currentRoleLevel,
               context: {
                 fileId: agentScopeFile?.id ?? activeFileId ?? undefined,
@@ -16110,6 +16326,8 @@ export function ProjectWorkspace() {
                     }
                     isTextFullscreen={mediaSections.isFullscreen("text")}
                     onOpenRecording={handleOpenRecording}
+                    // AQU-1684: the track taking a take can't be hidden meanwhile.
+                    recordingSlot={recordingCellId !== null ? recordingSlot : null}
                     project={editorProject ?? project ?? undefined}
                     onSelectCell={setTimelineSelectedCellId}
                     // AQU-928: transcription emits contributor-level events, so
@@ -16423,6 +16641,7 @@ export function ProjectWorkspace() {
             isBacktranslationConfigured={isBacktranslationConfigured}
             onBacktranslate={runBacktranslation}
             onSaveBacktranslation={saveBacktranslation}
+            onSaveGloss={saveGloss}
             backtranslating={backtranslating}
             backtranslationErrors={backtranslationErrors}
             backtranslationByCellId={backtranslationCache}
@@ -16434,7 +16653,10 @@ export function ProjectWorkspace() {
             getStatisticalBt={getStatisticalBt}
             onAlignmentSeedChange={handleAlignmentSeedChange}
             onSeekToCue={isSubtitleFile && timelineStacked ? handleCueSeek : undefined}
-            playingCueCellId={isSubtitleFile && timelineStacked ? playingCueCellId : null}
+            // AQU-1642: in the Audio view too — the line the bottom bar is
+            // playing is marked. Its card's controls reach the run through
+            // the Audio view's place (`audioLens.place`), not through here.
+            playingCueCellId={(isSubtitleFile && timelineStacked) || audioLens ? playingCueCellId : null}
             onPauseCue={pauseAllTransports}
             sourceLineEditing={sourceLineEditing}
             lineNumbersEnabled={fileMeta.lineNumbersEnabled}
@@ -16890,9 +17112,13 @@ export function ProjectWorkspace() {
                   cells={legacyCells}
                   projectId={project.id}
                   session={frontierSession ?? null}
-                  settings={tts.settings}
+                  // AQU-2037/2038: the lane's voices, cast and default — the
+                  // bar names the voice the sounding line speaks with HERE.
+                  settings={tts.laneSettings}
                   onActiveCell={handleBarActiveCell}
-                  startCellId={timelineSelectedCellId}
+                  // AQU-1642 follow-up: in the Audio view, Play starts from the
+                  // verse last selected or stopped.
+                  startCellId={audioLens ? audioViewPlace.startCellId : timelineSelectedCellId}
                   coreMediaUrl={activeFile?.coreMediaUrl ?? null}
                   videoPaneOnScreen={showVideoPane}
                   // AQU-646 stage 3h: what the bar reads on a file with timings

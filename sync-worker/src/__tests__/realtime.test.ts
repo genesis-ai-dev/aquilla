@@ -271,6 +271,8 @@ describe('PROJECTION_TABLES', () => {
       cell_audio_validators: true,
       comments: true,
       cell_backtranslations: true,
+      // AQU-1408: hand-corrected statistical glosses.
+      cell_glosses: true,
       assignments: true,
       assignment_cells: true,
       cell_links: true,

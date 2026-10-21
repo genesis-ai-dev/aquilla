@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { AssignWork } from "./AssignWork"
+import { pickSelectOption as selectOption } from "@/test-utils/select"
 
 // AQU-676: mock only the roster fetch — partitionMembers stays real so the
 // tests exercise the actual project-members-only filter, not a stub of it.
@@ -70,6 +71,27 @@ describe("AssignWork", () => {
   it("collapses to an Assign… button", () => {
     renderAssign()
     expect(screen.getByRole("button", { name: "Assign…" })).toBeInTheDocument()
+  })
+
+  it("AQU-1969: sends Translate by default and Validate when chosen", async () => {
+    rosterOk()
+    mockCreate.mockResolvedValue("as-kind")
+    renderAssign()
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    expect(screen.getByRole("combobox", { name: /^task$/i }).textContent).toMatch(/translate/i)
+    await pickSelectOption(/^assignee$/i, /^anna$/)
+    fireEvent.click(screen.getByRole("button", { name: "Assign" }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ kind: "translate" })))
+
+    // The panel closes on success; open it again and hand out validating.
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    expect(screen.getByRole("combobox", { name: /^task$/i }).textContent).toMatch(/translate/i)
+    await selectOption(/^task$/i, /^validate$/i)
+    await pickSelectOption(/^assignee$/i, /^anna$/)
+    fireEvent.click(screen.getByRole("button", { name: "Assign" }))
+    await waitFor(() => expect(mockCreate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: "validate", assigneeUserId: 2 }),
+    ))
   })
 
   it("pre-fills the lane the manager arrived from and sends that lane's id", async () => {

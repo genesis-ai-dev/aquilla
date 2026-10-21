@@ -242,6 +242,15 @@ export interface Env {
    *  the Monday Developer Center (the SPA's /oauth/callback route; the SPA
    *  forwards code+state to the worker). Default: https://aquilla.app/oauth/callback. */
   MONDAY_REDIRECT_URI?: string
+
+  // ── Airtable integration (routes/airtable.ts, lib/airtable/*) — AQU-804 ──
+  /**
+   * Base URL of the Airtable Web API, default https://api.airtable.com. Set
+   * only to point a local stack at a stand-in Airtable (an unset value is
+   * what every deployment wants). The connection's personal access token
+   * lives encrypted in integration_connections, never here.
+   */
+  AIRTABLE_API_URL?: string
   /** API-facing origin for OAuth redirect + webhook URLs (e.g.
    *  https://api.aquilla.app/identity). Falls back to BASE_URL when unset. */
   BASE_URL_API?: string
@@ -387,7 +396,8 @@ export interface Env {
   BILLING_CHAT_USAGE_REHEARSAL?: string
   /** Weekly allowance metering for any provider; retires legacy guards for metered calls. */
   BILLING_WEEKLY_USAGE_ENFORCE?: string
-  /** off | shadow | enforce (spec §5.4; db/shared/ai-entitlement.ts meterMode). */
+  /** off | shadow | enforce — the one meter switch (db/shared/ai-entitlement.ts).
+   *  When set it wins over the two flags above (lib/billing/paid-call.ts). */
   BILLING_METER_MODE?: string
   /** Sandbox billing opt-in: loopback locally, or the allowlisted hosts below
    *  on a development deployment. Test-mode key required either way. */

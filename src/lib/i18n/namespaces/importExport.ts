@@ -885,7 +885,9 @@ export const importExport = defineNamespace({
       one: "{count} line has no validated recording and will be left silent.",
       other: "{count} lines have no validated recording and will be left silent.",
     }),
-    "importExport.dialog.audioUnvalidatedJump": "Show me",
+    "importExport.dialog.audioUnvalidatedLinesAria": "Lines with an unvalidated recording",
+    "importExport.dialog.audioUnvalidatedShowLine": "Show line {line}",
+    "importExport.dialog.audioUnvalidatedMore": "+{count} more",
     "importExport.dialog.untimedRecordingsNote": plural({
       one: "{count} recording has no timing and cannot be placed.",
       other: "{count} recordings have no timing and cannot be placed.",
@@ -2281,10 +2283,20 @@ export const importExport = defineNamespace({
           "The same amber warning in the Export dialog's Audio card when the Content setting is 'Validated only': these lines have no validated recording, so the audio export leaves them silent (and omits their file from the per-line zip).",
         placeholders: { count: "Number of lines with no validated recording." },
       },
-      "importExport.dialog.audioUnvalidatedJump": {
+      "importExport.dialog.audioUnvalidatedLinesAria": {
         description:
-          "Link at the end of the Export dialog's unvalidated-recordings warning. Closes the dialog and takes the user to the first line that has no validated recording. Two or three words.",
-        maxLength: 24,
+          "Accessible name for the row of small line buttons under the Export dialog's unvalidated-recordings warning; each button names one line that would ship a recording nobody has validated.",
+      },
+      "importExport.dialog.audioUnvalidatedShowLine": {
+        description:
+          "Accessible name for one small line button under the Export dialog's unvalidated-recordings warning. Pressing it closes the dialog and takes the user to that line.",
+        placeholders: { line: "How the file names the line: its reference (e.g. 'JHN 6:5') or 'L' and its number (e.g. 'L3'). Not translated." },
+      },
+      "importExport.dialog.audioUnvalidatedMore": {
+        description:
+          "Button after the first eight line buttons under the Export dialog's unvalidated-recordings warning, when there are more lines; pressing it shows the rest in place. Keep it very short.",
+        placeholders: { count: "How many more lines are not shown yet." },
+        maxLength: 16,
       },
       "importExport.dialog.untimedRecordingsNote": {
         description:

@@ -76,9 +76,9 @@ export async function runCode(args: RunCodeArgs, ctx: HarnessToolCtx): Promise<s
     }, runCodeMaxSeconds(timeoutMs))
     : null
   if (containerTime && !containerTime.ok) {
-    return `error: ${containerTime.reason === "ai_allowance_exhausted"
+    return `error: ${containerTime.body.error === "ai_allowance_exhausted"
       ? "the workspace has used its AI allowance for this week, so code cannot run"
-      : containerTime.reason}`
+      : containerTime.body.error}`
   }
 
   // Executing code touches (potentially untrusted) artifact bytes in scope —

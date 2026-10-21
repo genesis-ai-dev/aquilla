@@ -21,6 +21,7 @@ import { resetRateCardCache } from "../lib/billing/rate-card"
 import { SANDBOX_PRICE_CARD, containerCents } from "../lib/billing/sandbox-meter"
 import { runCode, type HarnessToolCtx } from "../lib/agent/harness-tools"
 import type { Env } from "../types"
+import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
 
 const ORG = 52
 const PROJECT = "proj-sandbox-time"
@@ -34,6 +35,11 @@ const meterEnv = (mode: Meter) => Object.assign(Object.create(env), {
   AGENT_SANDBOX_KEY: "sandbox-key",
   AI_BUDGET_ENFORCE: "false",
 }) as Env
+
+/** The parser model must be priced: admission refuses what it cannot price. */
+const RATE_CARD = { data: [...new Set([DEFAULT_LLM_MODEL_ID, env.AGENT_MODEL_DEFAULT, env.AGENT_DRAFT_MODEL_DEFAULT,
+  env.DEFAULT_LLM_MODEL].filter((m): m is string => !!m))]
+  .map((id) => ({ id, pricing: { prompt: "0.000001", completion: "0.000002" } })) }
 
 /** Simulated container run time: each exec advances the clock by this much,
  *  so the measured seconds are known without waiting for them. */
@@ -49,7 +55,7 @@ function stubSandbox(opts: { busy?: boolean } = {}) {
   vi.spyOn(Date, "now").mockImplementation(() => realNow() + skewMs)
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
-    if (url === `${BASE}/models`) return Response.json({ data: [] })
+    if (url === `${BASE}/models`) return Response.json(RATE_CARD)
     if (url === `${BASE}/chat/completions`) {
       return Response.json({
         id: "gen-1",

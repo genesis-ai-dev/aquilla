@@ -368,6 +368,7 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
   // Metered even for an org on its own keys: the container is ours.
   const containerTime = await admitSandboxTime(
     c.env.AQUILLA_PG, c.env, { orgId: projectOrg, userId: user.id, projectId }, IMPORT_CONTAINER_MAX_SECONDS,
+    { requestUrl: c.req.url },
   )
   if (!containerTime.ok) return c.json(containerTime.body, containerTime.status)
 

@@ -44,8 +44,9 @@ export interface PaidCallInput {
   userId: number | null
   projectId: string | null
   rail: CostRail
-  /** Default `openrouter`. A Modal service passes its own secret as houseKey. */
-  provider?: 'openrouter' | 'modal'
+  /** Default `openrouter`. A Modal service passes its own secret as houseKey;
+   *  the agent sandbox (`cloudflare`, AQU-2066) passes AGENT_SANDBOX_KEY. */
+  provider?: 'openrouter' | 'modal' | 'cloudflare'
   houseKey?: string
   /** The caller's URL, for the local rehearsal gate. Background work has none. */
   requestUrl?: string
@@ -70,7 +71,7 @@ export async function admitPaidCall(env: Env, input: PaidCallInput): Promise<Pai
     if (mode !== 'off') return refuse(403, 'forbidden', 'This project has no billing workspace')
     const ceiling = await checkAiSpendCeiling(env.AQUILLA_PG, env, input.rail)
     if (!ceiling.ok) return { ok: false, status: ceiling.status, body: ceiling.body }
-    const houseKey = input.houseKey ?? (input.provider === 'modal' ? undefined : env.OPENROUTER_API_KEY)
+    const houseKey = input.houseKey ?? (input.provider && input.provider !== 'openrouter' ? undefined : env.OPENROUTER_API_KEY)
     return houseKey ? { ok: true, apiKey: houseKey } : refuse(503, 'provider_unconfigured')
   }
   const reserve = mode !== 'off' && input.estimate !== undefined

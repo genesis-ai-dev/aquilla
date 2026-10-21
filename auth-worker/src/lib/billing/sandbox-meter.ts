@@ -7,11 +7,10 @@
 // The pool caps (agent-worker/src/pool.ts) are unchanged: they bound how many
 // containers run at once; this bounds how much a workspace spends.
 import type { AquillaDb } from '../../../../db/shim/postgres'
-import {
-  checkAiEntitlement, type AiEntitlementEnv, type AiEntitlementRefusal,
-} from '../../../../db/shared/ai-entitlement'
-import { AI_SPEND_CEILING_MESSAGE, checkAiSpendCeiling } from '../../../../db/shared/ai-spend-ceiling'
-import type { PaidScope } from './paid-llm'
+import type { Env } from '../../types'
+import { releaseWorkspaceUsage, settleWorkspaceUsage } from '../../../../db/shared/workspace-usage'
+import { admitPaidCall, type PaidCallRefusal } from './paid-call'
+import type { PaidLlmEnv, PaidScope } from './paid-llm'
 
 /** Cloudflare Containers price card, USD, for the sandbox's instance type
  *  (agent-worker/wrangler.toml `instance_type = "standard-1"`: ½ vCPU, 4 GiB,
@@ -45,33 +44,33 @@ export interface SandboxTimeGrant {
   release(): Promise<void>
 }
 
-/** Reserve up to `maxSeconds` of container time before a container starts. */
+/** Reserve up to `maxSeconds` of container time before a container starts.
+ *  Admits through T5's admitPaidCall (paid-call.ts), so the meter-mode
+ *  mapping and the org-less rule match every other paid path. */
 export async function admitSandboxTime(
-  db: AquillaDb, env: AiEntitlementEnv, scope: Omit<PaidScope, 'rail'>, maxSeconds: number,
-): Promise<SandboxTimeGrant | AiEntitlementRefusal> {
-  if (scope.orgId === null) {
-    // An org-less project has no ledger; the platform ceiling still applies.
-    const ceiling = await checkAiSpendCeiling(db, env, 'sandbox')
-    if (!ceiling.ok) {
-      return { ok: false, status: 503, reason: 'ai_spend_ceiling_reached',
-        body: { error: 'ai_spend_ceiling_reached', message: AI_SPEND_CEILING_MESSAGE } }
-    }
-    return { ok: true, settleSeconds: async () => {}, release: async () => {} }
-  }
-  const grant = await checkAiEntitlement(db, env, {
-    orgId: scope.orgId, userId: scope.userId, projectId: scope.projectId, rail: 'sandbox',
-    provider: 'cloudflare', estimateRawCents: containerCents(maxSeconds), requestId: crypto.randomUUID(),
+  db: AquillaDb, env: PaidLlmEnv, scope: Omit<PaidScope, 'rail'>, maxSeconds: number,
+  opts: { requestUrl?: string } = {},
+): Promise<SandboxTimeGrant | PaidCallRefusal> {
+  // Derive rather than spread: a run-scoped env inherits its secrets.
+  const callEnv = Object.assign(Object.create(env) as Env, { AQUILLA_PG: db })
+  const gate = await admitPaidCall(callEnv, {
+    orgId: scope.orgId ?? 0, userId: scope.userId, projectId: scope.projectId, rail: 'sandbox',
+    provider: 'cloudflare', houseKey: env.AGENT_SANDBOX_KEY, requestUrl: opts.requestUrl,
+    estimate: () => containerCents(maxSeconds),
   })
-  if (!grant.ok) return grant
+  if (!gate.ok) return gate
+  const { usage } = gate
   return {
     ok: true,
     async settleSeconds(seconds) {
-      try { await grant.settle(containerCents(seconds)) }
-      catch (err) { console.error('[billing] sandbox settle failed; reservation held:', err) }
+      if (!usage) return
+      try { await settleWorkspaceUsage(db, usage.orgId, usage.requestId, containerCents(seconds)) }
+      catch (err) { console.error('[billing] sandbox settle failed; reservation held:', usage, err) }
     },
     async release() {
-      try { await grant.release() }
-      catch (err) { console.error('[billing] sandbox release failed; reservation held:', err) }
+      if (!usage) return
+      try { await releaseWorkspaceUsage(db, usage.orgId, usage.requestId) }
+      catch (err) { console.error('[billing] sandbox release failed; reservation held:', usage, err) }
     },
   }
 }

@@ -67,7 +67,7 @@ function harness(opts: {
     postEvents: async ({ events: batch }) => {
       events.push(...batch)
       return opts.rejectEvents
-        ? { posted: 0, rejected: batch.map((e) => ({ id: e.id, reason: "role" })), stale: [] }
+        ? { posted: 0, rejected: batch.map((e) => ({ id: e.id, status: 403, reason: "role" })), stale: [] }
         : { posted: batch.length, rejected: [], stale: [] }
     },
     uploadAudio: async (args) => {

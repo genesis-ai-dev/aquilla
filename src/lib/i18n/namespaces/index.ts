@@ -43,6 +43,7 @@ import { agentDraftReview } from "./agentDraftReview"
 import { workspace } from "./workspace"
 import { segmentation } from "./segmentation"
 import { smartEdits } from "./smartEdits"
+import { langquest } from "./langquest"
 import { harmonizer } from "./harmonizer"
 import { bibleData } from "./bibleData"
 import { extensions } from "./extensions"
@@ -82,6 +83,7 @@ export const NAMESPACES = [
   workspace,
   segmentation,
   smartEdits,
+  langquest,
   harmonizer,
   bibleData,
   extensions,

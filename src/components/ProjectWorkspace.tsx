@@ -422,6 +422,7 @@ import { SignedOutWorkspace } from "./org/SignedOutWorkspace"
 import { OrgBreadcrumb } from "./org/OrgBreadcrumb"
 import { WorkspaceHeader } from "./WorkspaceHeader"
 import { DcsSyncBadgeMount } from "@/components/dcs/DcsSyncBadge"
+import { LangQuestLinkBadge } from "@/components/langquest/LangQuestLinkBadge"
 import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
 import type { EditorLens } from "@/components/EditorModeToggle"
 import { SelectionBar } from "./SelectionBar"
@@ -15687,6 +15688,11 @@ export function ProjectWorkspace() {
                 roleLevel={serverRoleLevel}
                 onClick={openProjectSettings}
               />
+            )}
+            {/* AQU-2105: LangQuest live link — sync, publish, unlink. Self-gated:
+                renders nothing when the project has no LangQuest link. */}
+            {project && projectId && (
+              <LangQuestLinkBadge projectId={projectId} roleLevel={serverRoleLevel} />
             )}
             {/* AQU-661: file-scoped actions live in the chapter-row File options
                 menu; Import + Settings stay as header buttons on this

@@ -12,7 +12,7 @@ import { creditGuard, recordCredit } from "./credits"
 import { admitPaidCall, paidCallMeterMode } from "./billing/paid-call"
 import { settleWorkspaceUsage } from "./billing/workspace-usage"
 import {
-  settleChatUsage, holdChatUsage, releaseChatUsage, type ChatUsage,
+  settleChatUsage, holdChatUsage, releaseChatUsage,
 } from "./billing/chat-usage"
 import { costMultiplier, readProviderCostCents } from "../../../db/shared/billing-cost"
 import {

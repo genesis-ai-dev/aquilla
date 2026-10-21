@@ -1,3 +1,4 @@
+import { AiRefusalError } from "@/lib/billing/ai-refusal"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 
 const shouldUseLocalLlm = vi.fn(async () => false)
@@ -657,11 +658,14 @@ describe("complete", () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it("frontier: surfaces 402 subscription-limit errors with server message", async () => {
-    fetchMock.mockResolvedValueOnce(new Response("Monthly credits exhausted", { status: 402 }))
-    await expect(
-      complete({ settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg }),
-    ).rejects.toThrow(/Frontier AI limit reached: Monthly credits exhausted/)
+  it("frontier: a 402 is the workspace's weekly AI, worded by the one refusal helper (AQU-2068)", async () => {
+    // WHY: the server's body may carry amounts or ledger words; the user gets
+    // what stopped and when it comes back, never "credits" (spec R7).
+    fetchMock.mockResolvedValueOnce(Response.json({ error: "ai_allowance_exhausted", tier: "free", resetsAt: "2026-10-26T00:00:00Z" }, { status: 402 }))
+    const err = await complete({ settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(AiRefusalError)
+    expect((err as Error).message).toMatch(/^This workspace has used this week's AI\./)
+    expect((err as Error).message).not.toMatch(/credit/i)
   })
 
   it("custom: POSTs to {endpoint}/v1/chat/completions without auth", async () => {

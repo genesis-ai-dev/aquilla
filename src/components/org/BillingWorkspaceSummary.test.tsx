@@ -47,7 +47,9 @@ describe('billing workspace API → client → settings', () => {
     expect(document.body.textContent).not.toMatch(/credits|0%|100%/)
     expect(screen.queryByRole('button')).toBeNull()
   })
-  it('shows measured weekly usage as a capped percentage with its reset time', async () => {
+  it('leaves the percentage to the one AI meter instead of repeating it (AQU-2068)', async () => {
+    // WHY: two percentages on one page drift apart; the billing page renders
+    // OrgAiMeter above this group, so this summary only keeps the period end.
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ ...workspace,
       eligibility: { reason: 'already_subscribed', offers: [] },
       entitlement: { offer: 'team', scope: 'team', billingInterval: 'month',
@@ -56,10 +58,9 @@ describe('billing workspace API → client → settings', () => {
       usagePercent: 37, usageResetsAt: '2026-09-18T12:00:00.000Z',
     })))
     render(<BillingWorkspaceSummary jwt="jwt" orgId={7} />)
-    expect(await screen.findByTestId('billing-usage-percent')).toHaveTextContent(
-      `37% of this week’s AI allowance used. Resets ${new Date('2026-09-18T12:00:00.000Z').toLocaleString()}.`)
-    expect(screen.queryByText(/not available yet/)).toBeNull()
-    expect(document.body.textContent).not.toMatch(/credits/)
+    expect(await screen.findByTestId('billing-workspace')).toBeVisible()
+    expect(screen.queryByTestId('billing-usage-percent')).toBeNull()
+    expect(document.body.textContent).not.toMatch(/37%|credits/)
   })
   it('rejects a response for another workspace', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ ...workspace, orgId: 8 })))

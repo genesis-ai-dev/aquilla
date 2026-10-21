@@ -1,4 +1,5 @@
 import { t } from "@/lib/i18n/standalone"
+import { aiRefusalError } from "@/lib/billing/ai-refusal"
 import { AUTH_BASE } from "@/lib/frontier/auth"
 import { buildTranscriptionRequest, type TranscriptionRequestExample } from "./transcription-request"
 import { autoRouteIsOpenRouter } from "./asr-catalog"
@@ -140,9 +141,8 @@ async function postWindow(
   if (response.ok) return await response.json() as HostedPart
   const failure = await response.json().catch(() => null) as { error?: string } | null
   const code = failure?.error ?? ""
-  if (["weekly_ai_allowance_exhausted", "credit_cap_exceeded"].includes(code)) {
-    throw new Error(t("settings.transcription.capacityExceeded"))
-  }
+  const refused = aiRefusalError(response.status, failure)
+  if (refused) throw refused
   if (response.status === 403 && code === "zero_shot_disabled") throw new ZeroShotDisabledError()
   // `zero_shot_examples_required` is the server branch's name for the same answer.
   if (response.status === 400 && (code === "zs_no_examples" || code === "zero_shot_examples_required")) {

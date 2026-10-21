@@ -211,6 +211,9 @@ export interface FetchFileCellsOptions {
    * N=1 (no non-default lanes) requests are byte-identical to pre-lane ones.
    */
   lane?: string
+  /** AQU-2094: first page only — also ask for every later page's cursor,
+   *  `pageSize` rows each (`CellsPageWithMeta.pageCursors`). */
+  pageSize?: number
 }
 
 /** Full-read page plus the M2-1 watermark. Extends the shared `CellsPage`
@@ -223,6 +226,9 @@ export interface CellsPageWithMeta extends CellsPage {
   /** AQU-943: the project incarnation this page's watermark belongs to.
    *  Absent when talking to a pre-AQU-943 server. */
   projectEpoch?: number | null
+  /** AQU-2094: with `pageSize` on the first page, the cursor of every later
+   *  page, in order. Absent from a worker that predates it. */
+  pageCursors?: string[]
 }
 
 /**
@@ -243,6 +249,7 @@ export async function fetchFileCells(
   if (typeof opts.limit === "number") params.set("limit", String(opts.limit))
   if (opts.cursor) params.set("cursor", opts.cursor)
   if (opts.lane) params.set("lane", opts.lane)
+  if (typeof opts.pageSize === "number") params.set("pageSize", String(opts.pageSize))
   const qs = params.toString()
   const url =
     `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}` +
@@ -400,6 +407,12 @@ export async function fetchCellsByIds(
  * is still "same watermark on every page or no cursor", it just fires far less
  * often. A page-to-page change still means the pin was retired or evicted and
  * the stream really may be torn.)
+ *
+ * AQU-2094: a paired read asks the first page for every later page's cursor
+ * and keeps the next page downloading while `onPage` handles the current one,
+ * instead of a round trip per page (17 of them on a whole Bible). Pages still
+ * reach `onMeta`/`onPage` one at a time, in order. A worker without
+ * `pageCursors` is read one page after another, as before.
  */
 export async function streamFileCells(
   projectId: string,
@@ -421,7 +434,7 @@ export async function streamFileCells(
   const MAX_PAGES = paired ? 1000 : 100
   for (let i = 0; i < MAX_PAGES; i++) {
     // Keep the first paint small; amortize subsequent network/database work.
-    const page = await fetchFileCells(projectId, fileId, { side, cursor, lane, paired, limit: i === 0 ? 500 : 2000 }, jwt)
+    const page = await fetchFileCells(projectId, fileId, { side, cursor, lane, paired, limit: i === 0 ? 500 : LATER_PAGE_SIZE, ...(i === 0 && paired ? { pageSize: LATER_PAGE_SIZE } : {}) }, jwt)
     if (onMeta) onMeta({ maxServerSeq: page.maxServerSeq, projectEpoch: page.projectEpoch, total: page.total })
     const nextCursor = page.nextCursor ?? undefined
     const isLast = nextCursor === undefined
@@ -432,10 +445,46 @@ export async function streamFileCells(
     const cont = await onPage(legacy ? (isLast ? legacyRows : []) : page.cells, isLast)
     if (cont === false) return
     if (isLast) return
+    if (i === 0 && !legacy && page.pageCursors?.length) {
+      const cursors = page.pageCursors
+      if (cursors.length >= MAX_PAGES) break
+      const fetchPage = (k: number) => {
+        const next = fetchFileCells(projectId, fileId, { side, cursor: cursors[k], lane, paired, limit: LATER_PAGE_SIZE }, jwt)
+        next.catch(() => {}) // Surfaced when its turn comes; never unhandled if the caller stops first.
+        return next
+      }
+      // One page ahead hides the round trip without splitting the connection
+      // across many downloads, which would delay every page's first paint.
+      let ahead = fetchPage(0)
+      let k = 0
+      for (; k < cursors.length; k++) {
+        const current = ahead
+        if (k + 1 < cursors.length) ahead = fetchPage(k + 1)
+        const later = await current
+        // Each page must end where the next cursor starts. If not (a page
+        // size the server read differently), carry on one page at a time from
+        // where this page really ends, discarding the page fetched ahead.
+        const chained = (later.nextCursor ?? undefined) === cursors[k + 1]
+        if (onMeta) onMeta({ maxServerSeq: later.maxServerSeq, projectEpoch: later.projectEpoch, total: later.total })
+        const last = later.nextCursor == null
+        if ((await onPage(later.cells, last)) === false) return
+        if (last) return
+        if (!chained) {
+          cursor = later.nextCursor!
+          break
+        }
+      }
+      if (k === cursors.length) return
+      i += k + 1
+      continue
+    }
     cursor = nextCursor
   }
   throw new CellsReadError(0, `pagination exceeded ${MAX_PAGES} pages for fileId=${fileId}`)
 }
+
+/** Rows per page after the first (the server's maximum). */
+const LATER_PAGE_SIZE = 2000
 
 /**
  * Paginate through every page of cells for a file. Returns the flat array of

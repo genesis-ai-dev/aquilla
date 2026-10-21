@@ -68,7 +68,18 @@ export function useProjectPlan(opts: {
     void (async () => {
       try {
         const token = await getToken()
-        if (cancelled || !token) return
+        if (cancelled || generation.current !== gen) return
+        if (!token) {
+          // AQU-2088: a token the session could not mint is a FAILED read, not
+          // a pending one. `getToken` answers null rather than throwing (see
+          // ProjectOverview's `getPlanToken`), so returning here left `status`
+          // pinned at "loading" — on an archived project, whose sync-token mint
+          // is refused, the board said "Loading the plan…" for ever with no way
+          // out. The board's error state says the read failed and offers Retry.
+          setError("no sync token")
+          setStatus("error")
+          return
+        }
         const body = await fetchProjectPlan(projectId, token, lane)
         if (cancelled || generation.current !== gen) return
         setUnits(body.units)

@@ -62,6 +62,7 @@ const NAMED_LANE_KINDS = new Set<string>([
   "cell.audio.unvalidate",
   "cell.lane.retime",
   "cell.backtranslation.set",
+  "cell.gloss.set",
 ])
 
 export function archiveCheckApplies(kind: string): boolean {

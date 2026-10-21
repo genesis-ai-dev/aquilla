@@ -22,7 +22,7 @@ beforeAll(async () => {
   )).input_audio.data
 })
 const catalog = () => Response.json({ data: [
-  { id: "openai/whisper-1", pricing: { prompt: "0.0001" } },
+  { id: "openai/whisper-large-v3", pricing: { prompt: "0.0001" } },
 ] })
 
 async function owner() {
@@ -71,7 +71,7 @@ describe("hosted transcription", () => {
       const payload = JSON.parse(String(init?.body))
       upstreamBodies.push(payload)
       expect(payload).toMatchObject({
-        model: "openai/whisper-1", language: "fr",
+        model: "openai/whisper-large-v3", language: "fr",
         response_format: "verbose_json",
         timestamp_granularities: ["word", "segment"],
         input_audio: { format: "wav" },
@@ -151,6 +151,25 @@ describe("hosted transcription", () => {
     // Whisper bills whole seconds (usage.seconds: 3), so the ledger stores 3.
     expect(row).toMatchObject({ org_id: 1, user_id: 1, rail: "llm", units: 3 })
     expect(row?.raw_cost_cents).toBeCloseTo(0.1, 9)
+  })
+
+  // 2026-10-20: OpenRouter refused whisper-1 under the account's zero-data-
+  // retention policy (404 "0 endpoints … available"). The route answered a
+  // bare 502 and the reason was lost, so it read as an outage for days. The
+  // upstream reason must reach the logs.
+  it("logs OpenRouter's reason when it refuses the transcription", async () => {
+    const jwt = await owner()
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {})
+    vi.spyOn(globalThis, "fetch").mockImplementation(async input =>
+      String(input).includes("/models?") ? catalog() : Response.json(
+        { error: { message: "0 endpoints out of 1 requested are available matching your guardrail restrictions and data policy" } },
+        { status: 404 },
+      ))
+    const response = await app.request("/api/v1/audio/transcriptions", {
+      method: "POST", headers: authHeader(jwt), body: JSON.stringify(body),
+    }, settings())
+    expect(response.status).toBe(502)
+    expect(logged.mock.calls.flat().join(" ")).toMatch(/openai\/whisper-large-v3 upstream 404: .*guardrail restrictions/)
   })
 
   it("rejects provider text without timings", async () => {

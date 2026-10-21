@@ -129,6 +129,30 @@ describe("identity deployment environment guard", () => {
     ).toContain("expected a version tag beginning aquilla-dev-identity-development-")
   })
 
+  // The 2026-10-20 sign-in outage: three `wrangler secret put`s promoted
+  // untagged copies of the live version and every request got a 503. Those
+  // copies keep every binding, so serve them and warn instead of refusing.
+  it("serves an untagged version derived by a secret edit, and warns once", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const untagged = bindings("production", {
+      CF_VERSION_METADATA: { id: "secret-edit", timestamp: "2026-10-20T02:08:00Z" },
+    } as Partial<Env>)
+    expect(deploymentEnvironmentError(DEPLOYMENTS.production.apiUrl, untagged)).toBeNull()
+    expect(scheduledDeploymentEnvironmentError(untagged)).toBeNull()
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0]?.[0]).toContain("untagged version")
+    warn.mockRestore()
+  })
+
+  it("still rejects an untagged version whose bindings belong to another environment", () => {
+    expect(
+      deploymentEnvironmentError(
+        DEPLOYMENTS.production.apiUrl,
+        bindings("development", { CF_VERSION_METADATA: undefined } as Partial<Env>),
+      ),
+    ).toContain("expected ENVIRONMENT=production")
+  })
+
   it("returns before scheduled work opens Hyperdrive", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {})
     let openedHyperdrive = false

@@ -8,6 +8,9 @@
 // for backwards compatibility with existing recordings.
 
 import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
+// AQU-2086: the id convention lives in db/shared so the Agent API's LinkMedia
+// compile step (sync-worker) mints the same cell-seeded ids the recorder does.
+import { audioIdSeededWith, buildAudioId } from "../../../db/shared/audio-id"
 // Type-only: the implementation is reached by dynamic import below, so
 // there is no cycle between the two modules.
 import type { MultipartUploadProgress } from "@/lib/audio/multipart-upload"
@@ -49,13 +52,10 @@ export type SyncTokenForFile = (
  * Build a stable audio id in the desktop format:
  *   audio-{cellId}-{timestamp}-{random}
  * Characters in cellId that R2 object names dislike (":" etc.) are normalised.
+ * Defined in db/shared/audio-id.ts (see the import above); re-exported here so
+ * the SPA's many call sites keep their import path.
  */
-export function buildAudioId(cellId: string): string {
-  const normalised = cellId.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 64)
-  const ts = Date.now()
-  const rnd = Math.random().toString(36).slice(2, 11)
-  return `audio-${normalised}-${ts}-${rnd}`
-}
+export { buildAudioId }
 
 /** Prefix that marks a take produced by on-device noise removal (RNNoise). */
 const DENOISED_AUDIO_PREFIX = "dn-"
@@ -79,12 +79,9 @@ export function buildDenoisedAudioId(cellId: string): string {
  * distinguishes them — attachment trims fail in both directions (single-segment
  * imports carry none; cropped takes gain some). Relies on the seed convention
  * above staying stable — change buildAudioId's seeding and this breaks.
+ * Defined in db/shared/audio-id.ts; re-exported here.
  */
-export function audioIdSeededWith(audioId: string | undefined, id: string): boolean {
-  if (!audioId || !id) return false
-  const normalised = id.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 64)
-  return audioId.includes(`-${normalised}-`)
-}
+export { audioIdSeededWith }
 
 /**
  * True when an audioId names a denoised take. Tolerates the stored
@@ -108,14 +105,25 @@ export function buildFrontierAudioUrl(audioId: string, ext: string): string {
   return `${AUDIO_URL_SCHEME}://${audioId}.${ext}`
 }
 
-function audioEndpoint(projectId: string, fileId: string, audioId: string, ext: string): string {
-  const objectName = `${audioId}.${ext}`
+/**
+ * The HTTP endpoint of ONE object under a file's audio prefix.
+ *
+ * `objectName` is the R2 object's own filename: `<audioId>.<ext>` for a clip,
+ * and that plus a suffix for a sidecar that rides alongside it (AQU-2095's
+ * peaks sidecar — see peaks-sidecar.ts). The worker route accepts any
+ * `[A-Za-z0-9._-]+` name, so a sidecar needs no endpoint of its own.
+ */
+export function audioObjectEndpoint(projectId: string, fileId: string, objectName: string): string {
   return (
     `${syncWorkerHttpOrigin()}/audio/` +
     `${encodeURIComponent(projectId)}/` +
     `${encodeURIComponent(fileId)}/` +
     `${encodeURIComponent(objectName)}`
   )
+}
+
+function audioEndpoint(projectId: string, fileId: string, audioId: string, ext: string): string {
+  return audioObjectEndpoint(projectId, fileId, `${audioId}.${ext}`)
 }
 
 export interface UploadCellAudioArgs {

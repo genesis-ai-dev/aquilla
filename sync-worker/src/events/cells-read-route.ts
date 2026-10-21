@@ -15,6 +15,13 @@
 //                         served from that same ordering (and re-advertise its
 //                         `maxServerSeq`) instead of re-walking the file under
 //                         a watermark a peer commit has since moved.
+//   pageSize=N          — AQU-2094: optional, first page only. The response
+//                         also carries `pageCursors`: the cursor of every page
+//                         after this one, N rows each (max 2000), exactly the
+//                         chain of `nextCursor`s fetching them in turn would
+//                         hand out. A client can then fetch the next page while
+//                         it draws this one instead of waiting a round trip per
+//                         page. Fetch each with `limit=N`.
 //   lane=<tag>          — AQU-538: optional. When present, target rows are
 //                         the lane whose legacy_tag is <tag>, matched on
 //                         lane_id. Source rows are ALWAYS included. Applies
@@ -581,6 +588,17 @@ function completePageStart<T>(items: T[], offset: number, paired: boolean, id: (
   return offset
 }
 
+/** AQU-2094: the `?pageSize=` cursors (see the header). Each page ends where
+ *  `completePageEnd` ends it, so these are the `nextCursor`s fetching the
+ *  pages in turn would produce. */
+function laterPageCursors<T>(items: T[], from: number, pageSize: number, paired: boolean, id: (item: T) => string, pin: CursorPin | null): string[] {
+  const cursors: string[] = []
+  for (let offset = from; offset < items.length; offset = completePageEnd(items, offset, pageSize, paired, id)) {
+    cursors.push(encodeCursor({ offset, ...(pin ? { pin } : {}) }))
+  }
+  return cursors
+}
+
 function completePageEnd<T>(items: T[], offset: number, limit: number, paired: boolean, id: (item: T) => string): number {
   let end = Math.min(offset + limit, items.length)
   if (paired) {
@@ -802,6 +820,8 @@ export async function handleCellsReadRequest(
   }
 
   const cursor = decodeCursor(url.searchParams.get("cursor"))
+  const qPageSize = cursor ? null : parseInt(url.searchParams.get("pageSize") ?? "", 10)
+  const pageSize = qPageSize !== null && !isNaN(qPageSize) ? Math.min(MAX_LIMIT, Math.max(1, qPageSize)) : null
   // Opt-in row paging preserves the legacy side-ordered API for other readers.
   const paired = url.searchParams.get("paired") === "1" && sideFilter === null
 
@@ -1112,6 +1132,7 @@ export async function handleCellsReadRequest(
       {
         cells,
         nextCursor: hasMore ? encodeCursor({ offset: nextOffset, ...(servedPin ? { pin: servedPin } : {}) }) : null,
+        ...(pageSize !== null && hasMore ? { pageCursors: laterPageCursors(cached.items, nextOffset, pageSize, paired, (r) => r.cellId, servedPin) } : {}),
         total: cached.items.length,
         // AQU-1841: a page served from the pinned ordering re-advertises the
         // PINNED watermark, not the live one — the rows it delivered are that
@@ -1256,6 +1277,9 @@ export async function handleCellsReadRequest(
       // after this one can be served from the ordering just cached, even if a
       // peer commits in between.
       nextCursor: hasMore ? encodeCursor({ offset: nextOffset, ...(servedPin ? { pin: servedPin } : {}) }) : null,
+      ...(pageSize !== null && hasMore && !(cellIdsFilter && cellIdsFilter.length > 0)
+        ? { pageCursors: laterPageCursors(ordered, nextOffset, pageSize, paired, (r) => r.cell_id, servedPin) }
+        : {}),
       total: ordered.length,
       ...(paired ? { completeRows: true } : {}),
       // Null only on the cellIds fast path, which skips the watermark query.

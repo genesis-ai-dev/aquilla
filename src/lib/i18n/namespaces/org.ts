@@ -494,6 +494,7 @@ export const org = defineNamespace({
     "org.memberActivityPanel.kindCommentEdit": "Edited a comment",
     "org.memberActivityPanel.kindCommentResolve": "Resolved a comment",
     "org.memberActivityPanel.kindCellBacktranslationSet": "Set a back-translation",
+    "org.memberActivityPanel.kindCellGlossSet": "Corrected a statistical gloss",
     "org.memberActivityPanel.kindCellAudioAttach": "Attached audio",
     "org.memberActivityPanel.kindCellAudioSelect": "Selected an audio take",
     "org.memberActivityPanel.kindCellRetime": "Retimed a cell",
@@ -1463,6 +1464,14 @@ export const org = defineNamespace({
     // are identical for the same reason as its two siblings above: the count
     // is drawn as a bold numeral beside the phrase, never inside it.
     "org.projectOverview.plan.summaryNearlyCompleteLabel": plural({ one: "nearly complete", other: "nearly complete" }),
+    // AQU-2088: shown in the plan's place on an archived project, whose
+    // per-project reads the server refuses. It replaces a spinner that could
+    // never resolve, so it has to say WHY there is nothing here.
+    "org.projectOverview.archived.title": "This project is archived",
+    "org.projectOverview.archived.bodyCanRestore":
+      "Its plan and team are hidden while it sits in Trash. Nothing has been deleted — choose Restore above to bring it back.",
+    "org.projectOverview.archived.bodyAskManager":
+      "Its plan and team are hidden while it sits in Trash. Nothing has been deleted — a maintainer can restore it.",
     "org.projectOverview.plan.emptyTitle": "Nothing to plan yet",
     "org.projectOverview.plan.loading": "Loading the plan\u2026",
     "org.projectOverview.plan.saveFailed": "That change could not be saved, so it has been undone. Try again.",
@@ -3319,6 +3328,18 @@ export const org = defineNamespace({
       "org.projectOverview.plan.summaryNearlyCompleteLabel": {
         description:
           "Summary pill. The count is rendered as a bold numeral immediately before this text: \"9\" + \"nearly complete\". The plural form is selected by that count even though it does not appear in the string. Counts only the units a few cells from finished, which are NOT also counted as in progress.",
+      },
+      "org.projectOverview.archived.title": {
+        description:
+          "Heading of the panel shown in the plan's place on an archived project's overview.",
+      },
+      "org.projectOverview.archived.bodyCanRestore": {
+        description:
+          "Body of that panel for a reader who may restore the project. Reassures them that archiving is a soft delete and points at the Restore button in the header above.",
+      },
+      "org.projectOverview.archived.bodyAskManager": {
+        description:
+          "Body of that panel for a reader who may NOT restore the project, so it names who can instead of pointing at a button they do not have.",
       },
       "org.projectOverview.plan.emptyTitle": {
         description: "Heading of the empty state, when a project has no plannable files yet.",

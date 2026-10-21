@@ -709,6 +709,7 @@ export function GlossaryEditor({
         onSetUpAffixes={() => navigate(`/project/${id}/settings/ai`)}
         bibleLink={bibleLinkAvailable ? { defaultBook: bibleLinkBook } : undefined}
         onExternalIdsChange={onExternalIdsChange}
+        files={projectFiles}
         onJumpToCell={({ cellId, fileId }) => {
           navigate(`/project/${id}/editor/file/${encodeURIComponent(fileId)}?cellId=${encodeURIComponent(cellId)}`)
         }}

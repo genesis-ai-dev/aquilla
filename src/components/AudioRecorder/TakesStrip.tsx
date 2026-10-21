@@ -36,7 +36,7 @@ import { useRecordingTextDrift } from "@/hooks/useRecordingTextDrift"
 import type { RecordingTextDrift } from "@/lib/audio/text-drift"
 import { transcriptVerdict } from "@/lib/audio/transcript-verdict"
 import { takeTrackVars } from "@/lib/timeline/take-colors"
-import { effectiveAttachmentDurationMs } from "@/lib/timeline/lane-timing"
+import { formatTakeSeconds, takePlayedMs } from "@/lib/audio/take-length"
 import { TakeRowWave } from "@/components/audio/TakeRowWave"
 import { TakeTextVerdict } from "@/components/audio/TakeTextVerdict"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -742,21 +742,13 @@ export function TakesStrip({
                     )}
                     {isSplit ? (
                       <span data-testid={`take-length-${att.audioId}`} className="shrink-0 text-muted-foreground/70">
-                        {(pieces.reduce((sum, p) => sum + (effectiveAttachmentDurationMs({
-                          durationMs: p.durationMs ?? undefined,
-                          trimStartMs: p.trimStartMs ?? undefined,
-                          trimEndMs: p.trimEndMs ?? undefined,
-                        }) ?? 0), 0) / 1000).toFixed(1)}s
+                        {formatTakeSeconds(takePlayedMs(pieces) ?? 0)}s
                       </span>
                     ) : att.durationMs != null ? (
                       // The length that plays: a trimmed take's kept part
                       // (AQU-1217), as the chip and the take on top say it.
                       <span data-testid={`take-length-${att.audioId}`} className="shrink-0 text-muted-foreground/70">
-                        {((effectiveAttachmentDurationMs({
-                          durationMs: att.durationMs,
-                          trimStartMs: att.trimStartMs ?? undefined,
-                          trimEndMs: att.trimEndMs ?? undefined,
-                        }) ?? att.durationMs) / 1000).toFixed(1)}s
+                        {formatTakeSeconds(takePlayedMs([att]) ?? att.durationMs)}s
                       </span>
                     ) : (
                       // SUB-48: no measured length. Say so — a blank space read

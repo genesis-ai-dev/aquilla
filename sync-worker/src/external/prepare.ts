@@ -73,6 +73,7 @@ import type { ChangesetSummary, ChangesetWarning, ExternalEnv, PlannedEventIds }
 import { validateApiCredentialRequest, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { loadProjectSettings } from '../../../db/shared/projects'
+import { buildAudioId } from '../../../db/shared/audio-id'
 import { laneContextFrom, laneIdRequiredMessage, resolveTargetLaneId } from './external-lane'
 import { languagesEqual } from '../../../src/lib/language-normalize'
 import { visibleTagsForMember } from '../../../db/shared/lane-visibility'
@@ -608,7 +609,7 @@ export async function prepareChangesetCore(
         'LinkMedia cannot be mixed with other command kinds in one changeset',
       )
     }
-    return prepareLinkMedia(db, cred, projectId, id, autonomyMode, linkMedia, env)
+    return prepareLinkMedia(db, cred, projectId, id, autonomyMode, linkMedia, env, resolvedRole.level)
   }
 
   // Past the PlanImport branch every remaining command is a SetTranslation —
@@ -1040,6 +1041,17 @@ async function stageReceiptOnlyChangeset(
 }
 
 /**
+ * AQU-2086: the native take id for a LinkMedia attach — cell-seeded like a
+ * recorded take's (db/shared/audio-id.ts), carrying the artifact's extension so
+ * the audio route and the `frontier-audio://` url keep their `<id>.<ext>` shape.
+ */
+function linkMediaAudioId(cellId: string, artifactAudioId: string | null): string {
+  const id = buildAudioId(cellId)
+  const dot = artifactAudioId ? artifactAudioId.lastIndexOf('.') : -1
+  return artifactAudioId && dot >= 0 ? `${id}.${artifactAudioId.slice(dot + 1)}` : id
+}
+
+/**
  * Prepare a LinkMedia changeset (Agent API v1.1 §3): for each attach command,
  * verify the target cell exists in the live projection and the referenced
  * artifact exists, is kind `audio`, and belongs to this project, then stage the
@@ -1049,6 +1061,13 @@ async function stageReceiptOnlyChangeset(
  * artifact + cell existence are re-checked directly at commit (plan_stale on
  * disappearance), so no per-cell head is pinned (attaching audio does not
  * conflict with a concurrent text edit on the same cell).
+ *
+ * AQU-2086: each command's `laneId` is resolved here exactly as SetTranslation's
+ * (lanes.id, visible to this caller, not archived) and stored resolved, and the
+ * take's native audio id is minted here too — cell-seeded like a recorded
+ * take's, so the SPA's provenance rule (db/shared/audio-id.ts) reads it as a
+ * dub. Both ride the plan so commit, and a crash-retry of it, attach the same
+ * take to the same lane.
  */
 async function prepareLinkMedia(
   db: AquillaDb,
@@ -1058,14 +1077,39 @@ async function prepareLinkMedia(
   autonomyMode: 'ask' | 'act',
   cmds: LinkMediaCommand[],
   env: ExternalEnv,
+  roleLevel: number,
 ): Promise<Response> {
-  // Resolve live state for every target cell in one query.
-  const cellStates = await resolveCellStates(db, projectId, cmds)
+  // Resolve live state for every target cell in one query. Lane-less on
+  // purpose: the state map is keyed per lane, and LinkMedia's cell check asks
+  // whether the cell exists at all (source or any lane's target), not whether
+  // it has a translation in the take's lane.
+  const cellStates = await resolveCellStates(
+    db,
+    projectId,
+    cmds.map(({ fileId, cellId }) => ({ fileId, cellId })),
+  )
   const plannedLinkMedia: NonNullable<PlannedEventIds['linkMedia']> = []
 
-  for (const cmd of cmds) {
-    // LinkMedia is lane-independent — the default-lane state entry still
-    // reports source/any-lane-target existence for the cell.
+  // AQU-2086: the lane each take belongs to. A tag is not a lane, and omitting
+  // the id is not the former default lane (AQU-1615) — the cell existence
+  // check below stays lane-independent, because the lane is about where the
+  // take is READ: a tagged lane's editor view lists only its own takes.
+  const projectSettings = await loadProjectSettings(db, projectId)
+  const { visible: visibleLaneIds } = await visibleTagsForMember(
+    db,
+    env.LANE_READ_WALL,
+    projectId,
+    Number(cred.userId),
+    roleLevel,
+  )
+  const laneCtx = laneContextFrom(projectSettings.lanes ?? [], projectSettings.settings, visibleLaneIds)
+  const resolvedCmds: LinkMediaCommand[] = []
+
+  for (const [index, cmd] of cmds.entries()) {
+    const lane = resolveTargetLaneId(cmd.laneId, `commands[${index}].laneId`, laneCtx)
+    if (!lane.ok) return errorResponse('validation_failed', lane.message)
+    // LinkMedia's cell check is lane-independent — the default-lane state entry
+    // still reports source/any-lane-target existence for the cell.
     const s = cellStates.get(laneCellKey(cmd.fileId, cmd.cellId))
     if (!s || (!s.sourceExists && !s.targetExists)) {
       return errorResponse(
@@ -1074,9 +1118,9 @@ async function prepareLinkMedia(
       )
     }
     const artifact = await db
-      .prepare(`SELECT id, kind FROM artifacts WHERE id::text = ? AND project_id = ?`)
+      .prepare(`SELECT id, kind, audio_id FROM artifacts WHERE id::text = ? AND project_id = ?`)
       .bind(cmd.artifactId, projectId)
-      .first<{ id: string; kind: string }>()
+      .first<{ id: string; kind: string; audio_id: string | null }>()
     if (!artifact) {
       return errorResponse('validation_failed', `artifact ${cmd.artifactId} not found in project`)
     }
@@ -1089,7 +1133,9 @@ async function prepareLinkMedia(
       artifactId: cmd.artifactId,
       attachEventId: uuidv7(),
       selectEventId: uuidv7(),
+      audioId: linkMediaAudioId(cmd.cellId, artifact.audio_id),
     })
+    resolvedCmds.push({ ...cmd, laneId: lane.lane.id, slot: cmd.slot ?? 'recording' })
   }
 
   const summary: ChangesetSummary = { mediaLinked: cmds.length, warnings: [] }
@@ -1101,7 +1147,7 @@ async function prepareLinkMedia(
     createdByUserId: String(cred.userId),
     credentialId: cred.credentialId,
     autonomyMode,
-    commands: [...cmds],
+    commands: resolvedCmds,
     preconditions: [],
     summary,
     plannedIds,

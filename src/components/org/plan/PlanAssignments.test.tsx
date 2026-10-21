@@ -8,8 +8,17 @@ import { ROLE } from "@/lib/frontier/roles"
 // chapter fetch. Neither is what this section is about; stub both so a test
 // that only opens the section never opens a network path.
 vi.mock("@/components/AssignModal", () => ({
-  AssignModal: ({ activeFileId, defaultLane }: { activeFileId: string | null; defaultLane?: string }) => (
-    <div data-testid="assign-modal-mock" data-file={activeFileId ?? ""} data-lane={defaultLane ?? ""} />
+  AssignModal: ({ activeFileId, defaultLane, laneDelegate }: {
+    activeFileId: string | null
+    defaultLane?: string
+    laneDelegate?: { scopes: { value: string }[] }
+  }) => (
+    <div
+      data-testid="assign-modal-mock"
+      data-file={activeFileId ?? ""}
+      data-lane={defaultLane ?? ""}
+      data-delegate-lanes={(laneDelegate?.scopes ?? []).map((s) => s.value).join(",")}
+    />
   ),
 }))
 vi.mock("@/hooks/useProjectMembers", () => ({
@@ -193,11 +202,10 @@ describe("the closing coverage line", () => {
 })
 
 describe("the memberProgressViewMinRole floor", () => {
-  it("renders NOTHING for a viewer below the floor — not an empty section", () => {
+  it("renders NOTHING for a viewer below the floor who cannot assign — not an empty section", () => {
     const { container } = renderSection({
       minRole: ROLE.MAINTAINER,
       viewerRoleLevel: ROLE.CONTRIBUTOR,
-      assign: assignTarget,
       unassignedChapters: 3,
     })
     expect(screen.queryByTestId("plan-assignments")).toBeNull()
@@ -212,6 +220,26 @@ describe("the memberProgressViewMinRole floor", () => {
     // section flashes open on first paint and disappears once the org settings
     // land, which reads as a permissions bug.
     const { container } = renderSection({ ready: false })
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  // AQU-1914: assigning is "who can assign work" (the caller decides `assign`),
+  // not "who can see team progress". A project lead below the progress floor
+  // gets the button and still not the list.
+  it("keeps Assign for a viewer below the floor who may assign, with no list", () => {
+    renderSection({
+      minRole: ROLE.MAINTAINER,
+      viewerRoleLevel: ROLE.PROJECT_LEAD,
+      assign: { ...assignTarget, roleLevel: ROLE.PROJECT_LEAD },
+      unassignedChapters: 3,
+    })
+    expect(screen.getByTestId("plan-assign-open")).toBeInTheDocument()
+    expect(screen.queryByTestId("plan-assignment-a1")).toBeNull()
+    expect(screen.queryByTestId("plan-assignment-coverage")).toBeNull()
+  })
+
+  it("still renders nothing, Assign included, while the floor is unknown", () => {
+    const { container } = renderSection({ ready: false, assign: assignTarget })
     expect(container).toBeEmptyDOMElement()
   })
 
@@ -233,6 +261,19 @@ describe("the Assign affordance", () => {
     // for the AssignModal prop that would narrow it further.
     expect(modal).toHaveAttribute("data-file", "f1")
     expect(modal).toHaveAttribute("data-lane", "es")
+  })
+
+  it("hands the modal the caller's lane-delegate grant (AQU-1914)", () => {
+    renderSection({
+      lane: "es",
+      assign: {
+        ...assignTarget,
+        roleLevel: ROLE.CONTRIBUTOR,
+        laneDelegate: { allowScopedLaneAssignment: true, scopes: [{ kind: "lane", value: "es" }] },
+      },
+    })
+    fireEvent.click(screen.getByTestId("plan-assign-open"))
+    expect(screen.getByTestId("assign-modal-mock")).toHaveAttribute("data-delegate-lanes", "es")
   })
 })
 

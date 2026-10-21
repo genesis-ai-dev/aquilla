@@ -46,6 +46,7 @@ import {
   validationLeftOverall,
 } from "@/lib/assignments/validation-progress"
 import type { AssignLaneOption, TeamLaneAttachment } from "@/lib/sync/assignment-lane"
+import type { LaneDelegateGrant } from "@/lib/sync/role-policy"
 import type { FileReference, FileType } from "@/lib/parsers/types"
 import { SectionVisibilityGate } from "../SectionVisibilityBadge"
 import { laneChipLabel } from "../project-lanes"
@@ -147,6 +148,8 @@ export interface PlanAssignTarget {
   roleLevel: number
   allowSelfAssignment: boolean
   assignmentMinRole: number
+  /** AQU-1914: the caller's lane-delegate grant (AQU-581), as the editor passes it. */
+  laneDelegate?: LaneDelegateGrant
   callerUserId: number | null
   /** Re-read the unit's assignments; this is an AD-3 read, nothing is pushed. */
   onAssigned: () => void
@@ -215,6 +218,11 @@ export interface PlanAssignmentsProps {
  * reusing it here would both show this to maintainers whose org hid
  * per-member progress and hide it from the contributors an org deliberately
  * opened it to.
+ *
+ * The Assign button is NOT behind that gate (AQU-1914). Who may hand out work
+ * is the org's "who can assign work" setting, decided by the caller in
+ * `assign`; reading everyone's progress is a different permission. A caller
+ * who may assign but not read sees the heading and the button, no list.
  */
 export function PlanAssignments({
   assignments,
@@ -254,26 +262,32 @@ export function PlanAssignments({
   // Nothing to say and no way to act: render no heading rather than an empty
   // box under a label, which reads as a section that failed to load.
   if (live.length === 0 && !assign && unassignedChapters == null && !removal.error) return null
+  // Until the floor is known the whole section waits, Assign included: the
+  // policy that decides `assign` arrives with the same response.
+  if (!ready) return null
+  // Below the read floor with no way to act: nothing at all, as before.
+  const canRead = viewerRoleLevel != null && viewerRoleLevel >= minRole
+  if (!canRead && !assign) return null
 
   return (
-    <SectionVisibilityGate minRole={minRole} viewerRoleLevel={viewerRoleLevel} ready={ready}>
-      <div className="flex flex-col gap-2" data-testid="plan-assignments">
-        <div className="flex items-center justify-between gap-2">
-          <Label>{t("org.projectOverview.plan.assignedTo")}</Label>
-          {assign && (
-            <Button
-              type="button"
-              variant="outline"
-              size="xs"
-              data-testid="plan-assign-open"
-              onClick={() => setAssignOpen(true)}
-            >
-              <Plus className="h-3 w-3" aria-hidden />
-              {t("org.projectOverview.plan.assign")}
-            </Button>
-          )}
-        </div>
+    <div className="flex flex-col gap-2" data-testid="plan-assignments">
+      <div className="flex items-center justify-between gap-2">
+        <Label>{t("org.projectOverview.plan.assignedTo")}</Label>
+        {assign && (
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            data-testid="plan-assign-open"
+            onClick={() => setAssignOpen(true)}
+          >
+            <Plus className="h-3 w-3" aria-hidden />
+            {t("org.projectOverview.plan.assign")}
+          </Button>
+        )}
+      </div>
 
+      <SectionVisibilityGate minRole={minRole} viewerRoleLevel={viewerRoleLevel} ready={ready}>
         {live.length > 0 && (
           <ul className="flex flex-col gap-2">
             {translateRows.map((a) => (
@@ -311,19 +325,19 @@ export function PlanAssignments({
               : t("org.projectOverview.plan.everyChapterAssigned")}
           </p>
         )}
+      </SectionVisibilityGate>
 
-        {/* Mounted only while it is open, so the roster read is lazy — the same
-            arrangement OrgLaneAssignModal makes for the org dashboard. */}
-        {assignOpen && assign && (
-          <PlanAssignHost
-            target={assign}
-            lane={lane}
-            defaultLaneLabel={defaultLaneLabel}
-            onClose={() => setAssignOpen(false)}
-          />
-        )}
-      </div>
-    </SectionVisibilityGate>
+      {/* Mounted only while it is open, so the roster read is lazy — the same
+          arrangement OrgLaneAssignModal makes for the org dashboard. */}
+      {assignOpen && assign && (
+        <PlanAssignHost
+          target={assign}
+          lane={lane}
+          defaultLaneLabel={defaultLaneLabel}
+          onClose={() => setAssignOpen(false)}
+        />
+      )}
+    </div>
   )
 }
 
@@ -631,7 +645,7 @@ function PlanAssignHost({
   defaultLaneLabel: string
   onClose: () => void
 }) {
-  const { members } = useProjectMembers(target.projectId)
+  const { members, rosterHidden, error: rosterError } = useProjectMembers(target.projectId)
   // AssignModal wants FileReference; the plan only ever knows ids and names.
   // Same shim OrgLaneAssignModal writes, for the same reason: the modal reads
   // `type` for its scope wording and nothing else off these rows.
@@ -664,9 +678,13 @@ function PlanAssignHost({
       defaultLane={lane}
       defaultLaneLabel={defaultLaneLabel}
       members={members}
+      // AQU-1914: Assign now reaches callers below the roster floor, so an
+      // empty picker must say why, as the editor's does (AQU-1308).
+      rosterUnavailable={rosterHidden ? "hidden" : rosterError ? "load-failed" : null}
       roleLevel={target.roleLevel}
       allowSelfAssignment={target.allowSelfAssignment}
       assignmentMinRole={target.assignmentMinRole}
+      laneDelegate={target.laneDelegate}
       callerUserId={target.callerUserId}
       selectedCellIds={EMPTY_SELECTION}
       jwt={target.jwt}

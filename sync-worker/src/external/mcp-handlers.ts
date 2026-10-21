@@ -331,8 +331,13 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'bytes first via REST POST .../projects/:projectId/artifacts with header ' +
         '"x-artifact-kind: audio" (MCP is JSON-RPC text and cannot carry that binary body) — ' +
         'see limits.maxArtifactBytes for the size cap. Then stage LinkMedia via ' +
-        'prepare_translations\'s `commands` argument. Multiple LinkMedia commands may share ' +
-        'one changeset; LinkMedia cannot mix with any other command kind.',
+        'prepare_translations\'s `commands` argument with the target lane\'s `laneId` ' +
+        '(required — lanes.id from get_project; a take with no lane is filed under the ' +
+        'legacy default lane and never shows in a tagged lane\'s Takes) and an optional ' +
+        '`slot` ("recording", the default, or "generatedVoice" for externally synthesized ' +
+        'voice). The receipt\'s `media[]` carries the native take audioId the app plays. ' +
+        'Multiple LinkMedia commands may share one changeset; LinkMedia cannot mix with any ' +
+        'other command kind.',
     },
     structure: {
       mcpStagingTool: 'prepare_translations',

@@ -33,6 +33,12 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
+/** The list lives in a popover: wait for the sidebar button, then open it. */
+async function openPopover() {
+  const trigger = await screen.findByText("My assignments")
+  fireEvent.click(trigger)
+}
+
 describe("ProjectAssignedToMe", () => {
   it("renders nothing when there are no assignments", async () => {
     mockGetMyAssignments.mockResolvedValue([])
@@ -51,7 +57,8 @@ describe("ProjectAssignedToMe", () => {
       makeAssignment({ assignmentId: "asgn-2", scopeLabel: "Exodus", kind: "translate" }),
     ])
     render(<ProjectAssignedToMe projectId="proj-1" jwt="test-jwt" />)
-    await waitFor(() => expect(screen.getByText("Genesis")).toBeTruthy())
+    await openPopover()
+    expect(await screen.findByText("Genesis")).toBeTruthy()
     expect(screen.getAllByText("Validating")).toHaveLength(1)
     expect(screen.getByText("Genesis").parentElement?.textContent).toContain("Validating")
   })
@@ -62,8 +69,8 @@ describe("ProjectAssignedToMe", () => {
       makeAssignment({ assignmentId: "asgn-2", scopeLabel: "Exodus", cellsDone: 5, cellsTotal: 5 }),
     ])
     render(<ProjectAssignedToMe projectId="proj-1" jwt="test-jwt" />)
-    await waitFor(() => expect(screen.getByText("My assignments")).toBeTruthy())
-    expect(screen.getByText("Genesis")).toBeTruthy()
+    await openPopover()
+    expect(await screen.findByText("Genesis")).toBeTruthy()
     expect(screen.getByText("Exodus")).toBeTruthy()
     // Progress: 3/10 = 30%, 5/5 = 100%
     expect(screen.getByText("3/10 cells")).toBeTruthy()
@@ -87,6 +94,7 @@ describe("ProjectAssignedToMe", () => {
         defaultLaneLabel="Portuguese"
       />,
     )
+    await openPopover()
     await waitFor(() => expect(screen.getByText("Genesis")).toBeTruthy())
     expect(screen.getByText("es")).toBeTruthy()
     expect(screen.getByText("Portuguese")).toBeTruthy()
@@ -102,9 +110,12 @@ describe("ProjectAssignedToMe", () => {
     render(
       <ProjectAssignedToMe projectId="proj-1" jwt="test-jwt" onJumpToAssignment={onJump} />,
     )
+    await openPopover()
     await waitFor(() => expect(screen.getByText("Genesis")).toBeTruthy())
     fireEvent.click(screen.getByText("Genesis").closest("button")!)
     expect(onJump).toHaveBeenCalledWith(assignment)
+    // Jumping takes the user to the work, so the popover gets out of the way.
+    await waitFor(() => expect(screen.queryByText("Genesis")).toBeNull())
   })
 
   it("shows deadline when present", async () => {
@@ -112,21 +123,25 @@ describe("ProjectAssignedToMe", () => {
       makeAssignment({ scopeLabel: "Genesis", deadline: "2026-07-01" }),
     ])
     render(<ProjectAssignedToMe projectId="proj-1" jwt="test-jwt" />)
+    await openPopover()
     await waitFor(() => {
       expect(screen.getByText(`Due ${fmtDeadlineDate("2026-07-01")}`)).toBeTruthy()
     })
   })
 
-  it("collapses and re-expands when the header is clicked", async () => {
-    mockGetMyAssignments.mockResolvedValue([makeAssignment()])
+  // The sidebar button carries the count so the list can stay closed until
+  // the user asks for it, without hiding that there is work waiting.
+  it("keeps the list closed until the sidebar button is clicked, showing the count", async () => {
+    mockGetMyAssignments.mockResolvedValue([
+      makeAssignment(),
+      makeAssignment({ assignmentId: "asgn-2", scopeLabel: "Exodus" }),
+    ])
     render(<ProjectAssignedToMe projectId="proj-1" jwt="test-jwt" />)
-    await waitFor(() => expect(screen.getByText("Genesis")).toBeTruthy())
-    // Collapse
-    fireEvent.click(screen.getByText("My assignments"))
+    const trigger = (await screen.findByText("My assignments")).closest("button")!
+    await waitFor(() => expect(trigger.textContent).toContain("2"))
     expect(screen.queryByText("Genesis")).toBeNull()
-    // Re-expand
-    fireEvent.click(screen.getByText("My assignments"))
-    expect(screen.getByText("Genesis")).toBeTruthy()
+    fireEvent.click(trigger)
+    expect(await screen.findByText("Genesis")).toBeTruthy()
   })
 
   // AQU-495 regression: this is the mechanism that makes the sidebar "My

@@ -305,3 +305,14 @@ describe("categorizeAiError — OpenRouter key vs Gemini (AQU-1158)", () => {
     expect(result.title).not.toMatch(/gemini/i)
   })
 })
+
+describe("hosted transcription model failures", () => {
+  // The copy must name what the user can do: retry, another model, or
+  // on-device transcription. A generic "provider unavailable" left them stuck.
+  it("points to the model picker instead of only saying try again", () => {
+    const e = categorizeAiError("Hosted transcription model unavailable (502).")
+    expect(e.category).toBe("transcription-model-unavailable")
+    expect(e.body).toMatch(/Preferences/)
+    expect(e.body).toMatch(/on this device/)
+  })
+})

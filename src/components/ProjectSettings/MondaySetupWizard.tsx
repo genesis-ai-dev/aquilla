@@ -22,7 +22,7 @@
 // through sanitizeMapping, and read-only Monday column types stay out of the
 // pickers.
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { AlertTriangle, Check, ExternalLink, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -42,9 +42,13 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
+import { Input } from "@/components/ui/input"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { cn } from "@/lib/utils"
 import {
   addMondayColumns,
   analyzeMondayMapping,
+  createMondayBoard,
   deleteMondayLink,
   fetchMondayBoards,
   fetchMondayBoardStructure,
@@ -57,6 +61,7 @@ import {
   type MondayBoard,
   type MondayBoardLink,
   type MondayBoardStructure,
+  type MondayNewBoardResult,
 } from "@/lib/monday/api"
 import { connectFailureKey, useMondayOAuthOutcome } from "@/lib/monday/oauth-return"
 import { isTauriRuntime } from "@/lib/offline/is-tauri"
@@ -67,6 +72,7 @@ import {
   columnSelectionCounts,
   initialColumnSelection,
   metricsToAdd,
+  newBoardMetrics,
   selectedRows,
 } from "@/lib/monday/column-selection"
 import { MondayMappingRows } from "./MondayMappingEditor"
@@ -116,6 +122,48 @@ function ScanStep({ state, label }: { state: "pending" | "running" | "done"; lab
   )
 }
 
+/**
+ * The server's own words for a failed call: readError keeps them in `cause`
+ * ("HTTP 409 — no boards found…") behind a generic message.
+ */
+function serverReason(e: unknown): string {
+  const detail = e instanceof MondayApiError && typeof e.cause === "string" ? /— (.+)$/s.exec(e.cause)?.[1] : undefined
+  return detail ?? errMsg(e)
+}
+
+/** One of step 1's two choices: a radio and its words, with anything it needs below. */
+function BoardChoice({
+  value,
+  selected,
+  label,
+  help,
+  aside,
+  children,
+}: {
+  value: "existing" | "new"
+  selected: boolean
+  label: string
+  help?: string
+  aside?: ReactNode
+  children?: ReactNode
+}) {
+  return (
+    <div className={cn("flex flex-col gap-2 rounded-lg border p-3", selected ? "border-primary/40 bg-muted/40" : "")}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <label className="flex min-w-0 flex-1 items-start gap-2.5 text-sm">
+          <RadioGroupItem value={value} className="mt-0.5 shrink-0" />
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <span className="font-medium break-words">{label}</span>
+            {help && <span className="text-xs text-muted-foreground">{help}</span>}
+          </span>
+        </label>
+        {aside}
+      </div>
+      {children}
+    </div>
+  )
+}
+
 const STEP_NUMBER: Partial<Record<Stage, number>> = { board: 1, columns: 2, confirm: 3 }
 
 export function MondaySetupWizard({
@@ -149,7 +197,7 @@ export function MondaySetupWizard({
   const [boards, setBoards] = useState<MondayBoard[] | null>(null)
   const [changingBoard, setChangingBoard] = useState(false)
 
-  const [applyStep, setApplyStep] = useState<"adding" | "linking">("linking")
+  const [applyStep, setApplyStep] = useState<"making" | "adding" | "linking">("linking")
   const [notAdded, setNotAdded] = useState<MondayAddColumnsResult["failed"]>([])
   const [linkedBoardUrl, setLinkedBoardUrl] = useState<string | null>(null)
   const [linkedBoardName, setLinkedBoardName] = useState<string | null>(null)
@@ -157,6 +205,19 @@ export function MondaySetupWizard({
   /** Warnings the link route returned — the same ones the manual path shows. */
   const [linkWarnings, setLinkWarnings] = useState<string[]>([])
   const [awaitingOAuth, setAwaitingOAuth] = useState(false)
+
+  // AQU-2087: step 1's other choice. Aquilla makes a clean board instead of
+  // linking one of the user's; its columns are ticked apart from an existing
+  // board's, so switching back and forth loses neither.
+  const [newBoard, setNewBoard] = useState(false)
+  const [newBoardName, setNewBoardName] = useState("")
+  const [newSelected, setNewSelected] = useState<Set<MondayMetricKey>>(
+    () => initialColumnSelection([], undefined, { recommend: true }),
+  )
+  /** The Monday account has no boards at all, so a new one is the only choice. */
+  const [noBoards, setNoBoards] = useState(false)
+  /** The board this run already made, so a retry after a failed link doesn't make another. */
+  const [madeBoard, setMadeBoard] = useState<MondayNewBoardResult | null>(null)
 
   const aliveRef = useRef(true)
   useEffect(() => {
@@ -199,6 +260,11 @@ export function MondaySetupWizard({
     setPushNotice(null)
     setLinkWarnings([])
     setAwaitingOAuth(false)
+    setNewBoard(false)
+    setNewBoardName(t("projectSettings.monday.newBoardDefaultName"))
+    setNewSelected(initialColumnSelection([], undefined, { recommend: true }))
+    setNoBoards(false)
+    setMadeBoard(null)
     // Only on open; the manual path's board list loads below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
@@ -242,12 +308,14 @@ export function MondaySetupWizard({
       } catch (e) {
         if (!aliveRef.current) return
         // 409 = the account has no boards to sync to. Retrying can't fix that,
-        // so say what to do instead of offering "Scan and propose" again.
-        setError(
-          e instanceof MondayApiError && e.status === 409 && /no boards/i.test(e.message)
-            ? "This Monday account has no boards yet. Create one in Monday, then run setup again."
-            : errMsg(e),
-        )
+        // and AQU-2087 means it needn't: step 1 opens on making one.
+        if (e instanceof MondayApiError && e.status === 409 && /no boards/i.test(serverReason(e))) {
+          setNoBoards(true)
+          setNewBoard(true)
+          setStage("board")
+          return
+        }
+        setError(errMsg(e))
         setStage("intro")
       }
     },
@@ -312,7 +380,7 @@ export function MondaySetupWizard({
 
   // ── Step 1 → 2 ───────────────────────────────────────────────────────────
   const goToColumns = useCallback(async () => {
-    if (manual) {
+    if (manual && !newBoard) {
       // No AI: read the board, then tick what's already there plus the
       // recommended set.
       setBusy(true)
@@ -325,7 +393,7 @@ export function MondaySetupWizard({
     }
     setError(null)
     setStage("columns")
-  }, [manual, boardId, loadStructure])
+  }, [manual, newBoard, boardId, loadStructure])
 
   // Advanced matching: a number sent to an existing column is used, so tick it.
   const handleAdvancedRows = useCallback((next: MondayColumnMapping[]) => {
@@ -339,31 +407,64 @@ export function MondaySetupWizard({
 
   // ── Step 3: create the new columns, then link and prove it by pushing ────
   const boards_ = boards ?? []
-  const boardName =
+  const existingBoardName =
     analysis?.boardName ?? boards_.find((b) => b.id === boardId)?.name ?? structure?.name ?? boardId
-  const { adds } = columnSelectionCounts(selected, rows, structure?.columns)
-  const pickedBeyondId = [...selected].some((m) => m !== REQUIRED_METRIC)
+  const typedBoardName = newBoardName.trim() || t("projectSettings.monday.newBoardDefaultName")
+  const boardName = newBoard ? typedBoardName : existingBoardName
+  // A new board has no columns of its own and nothing for the AI's rows to point at.
+  const chooserRows = newBoard ? [] : rows
+  const chooserColumns = newBoard ? undefined : structure?.columns
+  const ticks = newBoard ? newSelected : selected
+  const setTicks = newBoard ? setNewSelected : setSelected
+  const { adds } = columnSelectionCounts(ticks, chooserRows, chooserColumns)
+  const pickedBeyondId = [...ticks].some((m) => m !== REQUIRED_METRIC)
 
   const handleConfirm = useCallback(async () => {
-    if (!jwt || !boardId) return
+    if (!jwt || (!newBoard && !boardId)) return
     setStage("applying")
     setError(null)
     setNotAdded([])
 
     let added: MondayAddColumnsResult | null = null
-    const need = metricsToAdd(selected, rows)
-    if (need.length > 0) {
-      setApplyStep("adding")
-      try {
-        added = await addMondayColumns(jwt, projectId, { boardId, metrics: need })
+    let linkBoardId = boardId
+    let linkBoardName: string | null = boardName
+    if (newBoard) {
+      // AQU-2087: make the board first (once per run), then link it like any other.
+      let made = madeBoard
+      if (!made) {
+        setApplyStep("making")
+        try {
+          made = await createMondayBoard(jwt, projectId, { name: typedBoardName, metrics: newBoardMetrics(newSelected) })
+        } catch (e) {
+          if (!aliveRef.current) return
+          setError(t("projectSettings.monday.wizardNewBoardFailed", { reason: serverReason(e) }))
+          setStage("confirm")
+          return
+        }
         if (!aliveRef.current) return
-        setStructure(added.structure)
-        setNotAdded(added.failed)
-      } catch (e) {
-        if (!aliveRef.current) return
-        setError(t("projectSettings.monday.wizardAddColumnsFailed", { reason: errMsg(e) }))
-        setStage("confirm")
-        return
+        setMadeBoard(made)
+      }
+      added = made
+      linkBoardId = made.boardId
+      linkBoardName = made.structure.name ?? typedBoardName
+      setBoardId(made.boardId)
+      setStructure(made.structure)
+      setNotAdded(made.failed)
+    } else {
+      const need = metricsToAdd(selected, rows)
+      if (need.length > 0) {
+        setApplyStep("adding")
+        try {
+          added = await addMondayColumns(jwt, projectId, { boardId, metrics: need })
+          if (!aliveRef.current) return
+          setStructure(added.structure)
+          setNotAdded(added.failed)
+        } catch (e) {
+          if (!aliveRef.current) return
+          setError(t("projectSettings.monday.wizardAddColumnsFailed", { reason: errMsg(e) }))
+          setStage("confirm")
+          return
+        }
       }
     }
     setApplyStep("linking")
@@ -372,8 +473,9 @@ export function MondaySetupWizard({
     // user flips that, the template no longer fits — a project-shaped
     // "{projectName}" would name every file item identically (and, under
     // matchExisting byName, collapse them onto one board item). Drop it and let
-    // the server pick its granularity-correct default.
-    const proposal = analysis?.proposal
+    // the server pick its granularity-correct default. A new board ignores the
+    // AI's proposal altogether: it was made for another board.
+    const proposal = newBoard ? undefined : analysis?.proposal
     const { itemNameTemplate: template, ...rest } = proposal ?? {
       version: 1 as const,
       itemGranularity: granularity,
@@ -383,18 +485,18 @@ export function MondaySetupWizard({
 
     try {
       const out = await putMondayLink(jwt, projectId, {
-        boardId,
-        ...(boardName ? { boardName } : {}),
+        boardId: linkBoardId,
+        ...(linkBoardName ? { boardName: linkBoardName } : {}),
         config: {
           ...rest,
           ...(keepTemplate ? { itemNameTemplate: template } : {}),
           itemGranularity: granularity,
-          columns: selectedRows(rows, selected, added),
+          columns: newBoard ? selectedRows([], newSelected, added) : selectedRows(rows, selected, added),
         },
       })
       if (!aliveRef.current) return
       setLinkedBoardUrl(out.link.boardUrl ?? added?.structure.url ?? structure?.url ?? analysis?.boardUrl ?? null)
-      setLinkedBoardName(out.link.boardName ?? boardName ?? null)
+      setLinkedBoardName(out.link.boardName ?? linkBoardName ?? null)
       setLinkWarnings(out.warnings)
       onLinked(out.link, out.warnings)
 
@@ -422,7 +524,10 @@ export function MondaySetupWizard({
       setError(errMsg(e))
       setStage("confirm")
     }
-  }, [jwt, boardId, selected, rows, projectId, analysis, granularity, boardName, structure, onLinked, t])
+  }, [
+    jwt, newBoard, boardId, boardName, madeBoard, projectId, typedBoardName, newSelected, selected, rows,
+    analysis, granularity, structure, onLinked, t,
+  ])
 
   const handleUndo = useCallback(async () => {
     if (!jwt) return
@@ -461,6 +566,7 @@ export function MondaySetupWizard({
       value={boardId || null}
       onValueChange={(value) => {
         const id = (value as string) ?? ""
+        setNewBoard(false)
         if (!id || id === boardId) return
         if (manual) setBoardId(id)
         else void runScan(id)
@@ -527,46 +633,65 @@ export function MondaySetupWizard({
 
         {stage === "board" && (
           <div className="space-y-3" data-testid="monday-wizard-board">
-            {manual ? (
-              boards === null ? (
-                <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Spinner className="h-4 w-4" /> {t("projectSettings.monday.loadingBoards")}
-                </p>
-              ) : boards.length === 0 ? (
-                <p className="text-sm text-muted-foreground">{t("projectSettings.monday.boardListFailed")}</p>
-              ) : (
-                boardSelect
-              )
-            ) : (
-              <div className="rounded-lg border p-3">
-                {!changingBoard ? (
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium break-words">{boardName}</p>
-                      {analysis?.boardReason && <p className="text-xs text-muted-foreground">{analysis.boardReason}</p>}
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setChangingBoard(true)
-                        void loadBoards()
-                      }}
-                    >
-                      {t("org.projectOverview.change")}
-                    </Button>
-                  </div>
-                ) : boards === null ? (
-                  <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Spinner className="h-4 w-4" /> {t("projectSettings.monday.loadingBoards")}
-                  </p>
-                ) : boards.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">{t("projectSettings.monday.boardListFailed")}</p>
-                ) : (
-                  boardSelect
+            {noBoards && <p className="text-sm text-muted-foreground">{t("projectSettings.monday.noBoardsYet")}</p>}
+            <RadioGroup
+              name="monday-board-choice"
+              value={newBoard ? "new" : "existing"}
+              onValueChange={(value) => setNewBoard(value === "new")}
+              className="flex flex-col gap-2"
+            >
+              {!noBoards && (
+                <BoardChoice
+                  value="existing"
+                  selected={!newBoard}
+                  label={manual ? t("projectSettings.monday.existingBoardOption") : existingBoardName}
+                  help={manual ? undefined : analysis?.boardReason || undefined}
+                  aside={
+                    !manual && !changingBoard ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setNewBoard(false)
+                          setChangingBoard(true)
+                          void loadBoards()
+                        }}
+                      >
+                        {t("org.projectOverview.change")}
+                      </Button>
+                    ) : undefined
+                  }
+                >
+                  {(manual || changingBoard) &&
+                    (boards === null ? (
+                      <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Spinner className="h-4 w-4" /> {t("projectSettings.monday.loadingBoards")}
+                      </p>
+                    ) : boards.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">{t("projectSettings.monday.boardListFailed")}</p>
+                    ) : (
+                      boardSelect
+                    ))}
+                </BoardChoice>
+              )}
+              <BoardChoice
+                value="new"
+                selected={newBoard}
+                label={t("projectSettings.monday.newBoardOption")}
+                help={t("projectSettings.monday.newBoardHelp")}
+              >
+                {newBoard && (
+                  <Input
+                    id="monday-new-board-name"
+                    aria-label={t("projectSettings.monday.newBoardNameLabel")}
+                    value={newBoardName}
+                    maxLength={255}
+                    onChange={(e) => setNewBoardName(e.target.value)}
+                    data-testid="monday-new-board-name"
+                  />
                 )}
-              </div>
-            )}
+              </BoardChoice>
+            </RadioGroup>
             {error && <p className="text-sm text-destructive">{error}</p>}
           </div>
         )}
@@ -574,14 +699,14 @@ export function MondaySetupWizard({
         {stage === "columns" && (
           <div className="max-h-[60vh] space-y-4 overflow-y-auto pr-1" data-testid="monday-wizard-columns">
             <MondayColumnChooser
-              rows={rows}
-              boardColumns={structure?.columns}
+              rows={chooserRows}
+              boardColumns={chooserColumns}
               boardName={boardName}
-              selected={selected}
-              onChange={setSelected}
+              selected={ticks}
+              onChange={setTicks}
             />
 
-            {analysis && analysis.warnings.length > 0 && (
+            {!newBoard && analysis && analysis.warnings.length > 0 && (
               <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/40">
                 <p className="flex items-center gap-1.5 text-sm font-medium">
                   <AlertTriangle className="h-4 w-4 text-amber-600" />
@@ -626,10 +751,12 @@ export function MondaySetupWizard({
                     </SelectContent>
                   </Select>
                 </div>
-                <div>
-                  <p className="mb-1 text-xs text-muted-foreground">{t("projectSettings.monday.reviewRowsCaption")}</p>
-                  <MondayMappingRows rows={rows} structure={structure} disabled={false} onChange={handleAdvancedRows} />
-                </div>
+                {!newBoard && (
+                  <div>
+                    <p className="mb-1 text-xs text-muted-foreground">{t("projectSettings.monday.reviewRowsCaption")}</p>
+                    <MondayMappingRows rows={rows} structure={structure} disabled={false} onChange={handleAdvancedRows} />
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -638,7 +765,14 @@ export function MondaySetupWizard({
         {stage === "confirm" && (
           <div className="space-y-3" data-testid="monday-wizard-confirm">
             <p className="text-sm">
-              {adds > 0
+              {newBoard
+                ? t(
+                    perFile
+                      ? "projectSettings.monday.wizardConfirmNewBoardPerFile"
+                      : "projectSettings.monday.wizardConfirmNewBoard",
+                    { count: adds, board: boardName },
+                  )
+                : adds > 0
                 ? t(
                     perFile ? "projectSettings.monday.wizardConfirmAddsPerFile" : "projectSettings.monday.wizardConfirmAdds",
                     { count: adds },
@@ -655,9 +789,11 @@ export function MondaySetupWizard({
         {stage === "applying" && (
           <p className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
             <Spinner className="h-4 w-4" />{" "}
-            {applyStep === "adding"
-              ? t("projectSettings.monday.wizardAddingColumns")
-              : t("projectSettings.monday.applyingStatus")}
+            {applyStep === "making"
+              ? t("projectSettings.monday.wizardMakingBoard")
+              : applyStep === "adding"
+                ? t("projectSettings.monday.wizardAddingColumns")
+                : t("projectSettings.monday.applyingStatus")}
           </p>
         )}
 
@@ -762,7 +898,7 @@ export function MondaySetupWizard({
               <Button variant="ghost" onClick={() => onOpenChange(false)}>
                 {t("common.cancel")}
               </Button>
-              <Button onClick={() => void goToColumns()} disabled={!boardId || busy}>
+              <Button onClick={() => void goToColumns()} disabled={(newBoard ? !newBoardName.trim() : !boardId) || busy}>
                 {busy && <Spinner data-icon="inline-start" />}
                 {t("common.next")}
               </Button>
@@ -784,7 +920,9 @@ export function MondaySetupWizard({
                 {t("common.back")}
               </Button>
               <Button onClick={() => void handleConfirm()}>
-                {adds > 0
+                {newBoard
+                  ? t("projectSettings.monday.wizardMakeBoardButton")
+                  : adds > 0
                   ? t("projectSettings.monday.wizardAddAndConnectButton")
                   : t("projectSettings.advancedLlm.connectButton")}
               </Button>

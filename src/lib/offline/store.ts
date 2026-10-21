@@ -2,7 +2,6 @@
 // the Tauri desktop app. Only valid inside the Tauri WebView (OPFS + a
 // SharedWorker leader election) — the plain browser SPA has no use for this
 // and keeps reading through sync-worker HTTP (see src/lib/sync/*-read.ts).
-import { makePersistedAdapter } from "@livestore/adapter-web"
 import { createStorePromise, type Adapter, type Store } from "@livestore/livestore"
 import { unstable_batchedUpdates as batchUpdates } from "react-dom"
 import { schema } from "./schema"
@@ -25,7 +24,12 @@ export { isTauriRuntime }
 export type CreateOfflineAdapter = () => Adapter | Promise<Adapter>
 
 const defaultCreateAdapter: CreateOfflineAdapter = async () => {
-  const [{ default: LiveStoreWorker }, { default: LiveStoreSharedWorker }] = await Promise.all([
+  // AQU-2091: imported here, not at the top. Importing @livestore/adapter-web
+  // starts downloading and compiling its 605 KB SQLite engine immediately
+  // (sqlite-loader.js kicks it off at module load), and a top-level import put
+  // that on every browser visit, though only the desktop app ever boots a store.
+  const [{ makePersistedAdapter }, { default: LiveStoreWorker }, { default: LiveStoreSharedWorker }] = await Promise.all([
+    import("@livestore/adapter-web"),
     import("./livestore.worker?worker"),
     import("@livestore/adapter-web/shared-worker?sharedworker"),
   ])

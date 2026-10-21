@@ -78,7 +78,10 @@ function upstreamError(status: number, error: string, retryAfter: string | null)
     return errorResponse('validation_failed',
       'this take is webm, which Whisper/Qwen3-ASR cannot read; pass model "omni-ctc" or "omni-zs", or upload WAV as audio', { reason: error })
   }
-  const code: ExternalErrorCode = status === 429 || error === 'credit_cap_exceeded' || error === 'weekly_ai_allowance_exhausted'
+  // 402 is the one allowance refusal since AQU-2062 (spec §5.3); the 429 codes
+  // are the legacy caps and rate limiting.
+  const code: ExternalErrorCode = status === 429 || status === 402 || error === 'credit_cap_exceeded'
+    || error === 'weekly_ai_allowance_exhausted' || error === 'ai_allowance_exhausted'
     ? 'rate_limited'
     : status === 403 ? 'permission_denied'
       : status === 400 ? 'validation_failed'

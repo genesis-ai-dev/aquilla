@@ -9,9 +9,8 @@
 import { z } from "zod"
 import type { Env } from "../types"
 import { creditGuard, recordCredit } from "./credits"
-import { checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
-import { weeklyUsageActive } from "./billing/usage-mode"
-import { reserveWorkspaceUsage, settleWorkspaceUsage } from "./billing/workspace-usage"
+import { admitPaidCall, paidCallMeterMode } from "./billing/paid-call"
+import { settleWorkspaceUsage } from "./billing/workspace-usage"
 import {
   settleChatUsage, holdChatUsage, releaseChatUsage, type ChatUsage,
 } from "./billing/chat-usage"
@@ -71,7 +70,7 @@ export interface TranscribeSuccess {
 
 export type TranscribeResult =
   | { ok: true; body: TranscribeSuccess; creditsCharged: number | null; headers: Record<string, string> }
-  | { ok: false; status: 400 | 403 | 409 | 429 | 502 | 503; body: { error: string }; headers?: Record<string, string> }
+  | { ok: false; status: 400 | 402 | 403 | 409 | 429 | 502 | 503; body: { error: string }; headers?: Record<string, string> }
 
 const fail = (status: 400 | 403 | 409 | 429 | 502 | 503, error: string, headers?: Record<string, string>): TranscribeResult =>
   ({ ok: false, status, body: { error }, ...(headers ? { headers } : {}) })
@@ -139,17 +138,9 @@ export async function transcribe(env: Env, input: TranscribeInput): Promise<Tran
     catch { return fail(503, "Transcription settings unavailable") }
     if (!enabled) return fail(403, "zero_shot_disabled")
   }
-  const weekly = weeklyUsageActive(env, input.requestUrl)
-  if (weekly === "unavailable") return fail(503, "usage_rehearsal_unavailable")
-  if (weekly === "on" && orgId <= 0) return fail(403, "forbidden")
-  // Platform daily spend ceiling (AQU-1869) — applies to the metered path
-  // too, so it sits outside the `weekly === "off"` branch below.
-  const spendCeiling = await checkAiSpendCeiling(env.AQUILLA_PG, env, "transcription")
-  if (!spendCeiling.ok) return { ok: false, status: spendCeiling.status as 429 | 503, body: spendCeiling.body as { error: string } }
-  if (weekly === "off") {
-    const check = await creditGuard(env.AQUILLA_PG, env, orgId, "llm")
-    if (!check.ok) return fail(429, "credit_cap_exceeded")
-  }
+  const meter = paidCallMeterMode(env, input.requestUrl)
+  if (meter === "unavailable") return fail(503, "usage_rehearsal_unavailable")
+  if (meter !== "off" && orgId <= 0) return fail(403, "forbidden")
   // AQU-1843: atomic, and FAIL CLOSED — transcription bills a vendor per
   // call, so a limiter outage must not uncap it.
   const transcribeLimit = await enforceRateLimit(env.AQUILLA_PG, {
@@ -171,23 +162,23 @@ export async function transcribe(env: Env, input: TranscribeInput): Promise<Tran
       bound = omniCostBoundCents(omniModel, seconds, amortization)
     }
   } catch { return fail(503, "Transcription price unavailable") }
-  let usage: ChatUsage | undefined
-  if (weekly === "on") {
-    const suppliedId = input.idempotencyKey
-    if (suppliedId && !z.string().uuid().safeParse(suppliedId).success) return fail(400, "invalid_request_id")
-    usage = { orgId, requestId: suppliedId ?? crypto.randomUUID() }
-    try {
-      const admitted = await reserveWorkspaceUsage(env.AQUILLA_PG, {
-        ...usage, projectId: input.projectId, userId: input.userId,
-        rail: "llm", maxRawCostCents: bound,
-      })
-      if (!admitted.created) return fail(409, "request_already_started")
-    } catch (error) {
-      if (error instanceof Error && error.message === "Weekly AI allowance exhausted") {
-        return fail(429, "weekly_ai_allowance_exhausted")
-      }
-      return fail(503, "Transcription accounting unavailable")
-    }
+  // AQU-2062: the one entitlement check — plan, key, platform spend ceiling
+  // (AQU-1869) and, when the meter is on, a reservation of the bound above.
+  // Whisper/Qwen run on OpenRouter's audio rail; Omnilingual is our own Modal
+  // GPU, whose house credential is the service's shared secret.
+  const gate = await admitPaidCall(env, {
+    orgId, userId: input.userId, projectId: input.projectId,
+    ...(omniModel === null
+      ? { rail: "audio" as const, provider: "openrouter" as const }
+      : { rail: "gpu" as const, provider: "modal" as const, houseKey: env.OMNI_SHARED_SECRET }),
+    requestUrl: input.requestUrl, idempotencyKey: input.idempotencyKey, estimate: () => bound,
+  })
+  if (!gate.ok) return { ok: false, status: gate.status, body: gate.body }
+  const { usage, apiKey } = gate
+  // Legacy credit guard only when the meter does not record this call.
+  if (!usage) {
+    const check = await creditGuard(env.AQUILLA_PG, env, orgId, "llm")
+    if (!check.ok) return fail(429, "credit_cap_exceeded")
   }
 
   if (omniModel !== null && omniConfigured(env)) {
@@ -253,7 +244,7 @@ export async function transcribe(env: Env, input: TranscribeInput): Promise<Tran
     const response = await fetch(`${base}/audio/transcriptions`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({

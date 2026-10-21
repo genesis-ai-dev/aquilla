@@ -32,6 +32,15 @@ export const OMNI_MAX_RTF: Record<OmniModel, number> = { ctc: 0.5, zs: 2 }
 /** Fixed seconds added to the bound for model load and example fetches. */
 export const OMNI_BOUND_OVERHEAD_SEC = 30
 
+/** A warm-up (POST /warm) spawns a container to load the model and reports no
+ * GPU time of its own. Until the service measures it, it is priced at the
+ * model-load overhead the transcription bound already assumes, without the
+ * amortization factor: idle scaledown time is amortized into transcription
+ * calls, so charging it here as well would count it twice (AQU-2062). */
+export function omniWarmCostCents(model: OmniModel): number {
+  return OMNI_BOUND_OVERHEAD_SEC * omniGpuCentsPerSec(OMNI_MODEL_GPU[model])
+}
+
 /** Covers idle scaledown time and cold starts that no single call is billed for. */
 export const OMNI_DEFAULT_AMORTIZATION = 1.5
 

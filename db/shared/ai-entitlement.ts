@@ -45,7 +45,9 @@ export function meterMode(env: { BILLING_METER_MODE?: string }): MeterMode {
 }
 
 /** Providers a paid call can reach. */
-export type AiProvider = 'openrouter' | 'gemini' | 'inworld' | 'modal'
+/** `cloudflare` is the agent sandbox's containers (AQU-2066); its house key is
+ *  the sandbox worker's shared key, and it has no BYOK. */
+export type AiProvider = 'openrouter' | 'gemini' | 'inworld' | 'modal' | 'cloudflare'
 /** Spec Q9: customers may bring OpenRouter and Gemini keys. */
 const BYOK_PROVIDERS: readonly AiProvider[] = ['openrouter', 'gemini']
 /** Spec Q9: GPU (Modal) and sandbox (Cloudflare containers) cannot run on a
@@ -57,6 +59,7 @@ const HOUSE_KEY_ENV = {
   gemini: 'GEMINI_API_KEY',
   inworld: 'INWORLD_API_KEY',
   modal: 'MODAL_TOKEN',
+  cloudflare: 'AGENT_SANDBOX_KEY',
 } as const satisfies Record<AiProvider, string>
 
 export interface AiEntitlementEnv extends AiSpendCeilingEnv {
@@ -65,6 +68,7 @@ export interface AiEntitlementEnv extends AiSpendCeilingEnv {
   GEMINI_API_KEY?: string
   INWORLD_API_KEY?: string
   MODAL_TOKEN?: string
+  AGENT_SANDBOX_KEY?: string
 }
 
 export interface ProviderKey {

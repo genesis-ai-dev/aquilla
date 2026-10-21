@@ -8,9 +8,13 @@ import {
   sandboxExec,
   sandboxFetchArtifact,
   sandboxReadFile,
+  sandboxConfigured,
   sandboxTenant,
   type SandboxEnv,
 } from "./sandbox-client"
+import type { AiEntitlementEnv } from "../../../../db/shared/ai-entitlement"
+import { projectOrgId } from "../billing/paid-llm"
+import { admitSandboxTime, secondsSince } from "../billing/sandbox-meter"
 import { proposeMemory, proposeBriefUpdate, type MemoryProvenance } from "./memory-writes"
 import type { HarnessFrame } from "./frames"
 import type { MemoryContext } from "../../../../db/shared/agent-memory"
@@ -23,7 +27,7 @@ const CODE_PREVIEW_MAX = 400
 
 /** Context threaded from the run loop into every harness tool. */
 export interface HarnessToolCtx {
-  env: SandboxEnv & { AQUILLA_PG: AquillaDb }
+  env: SandboxEnv & AiEntitlementEnv & { AQUILLA_PG: AquillaDb }
   runId: string
   /** The sandbox container id — one per session, or the runId when sessionless. */
   sandboxSessionId: string
@@ -61,6 +65,22 @@ export async function runCode(args: RunCodeArgs, ctx: HarnessToolCtx): Promise<s
   }
   const timeoutMs = typeof args.timeoutMs === "number" ? args.timeoutMs : undefined
 
+  // AQU-2066: container time on the `sandbox` rail, reserved before the call
+  // and settled with the seconds it measured. Always metered: the container
+  // is ours even when the org brings its own model keys.
+  const containerTime = sandboxConfigured(ctx.env)
+    ? await admitSandboxTime(ctx.env.AQUILLA_PG, ctx.env, {
+      orgId: await projectOrgId(ctx.env.AQUILLA_PG, ctx.projectId),
+      userId: ctx.userId,
+      projectId: ctx.projectId,
+    }, runCodeMaxSeconds(timeoutMs))
+    : null
+  if (containerTime && !containerTime.ok) {
+    return `error: ${containerTime.body.error === "ai_allowance_exhausted"
+      ? "the workspace has used its AI allowance for this week, so code cannot run"
+      : containerTime.body.error}`
+  }
+
   // Executing code touches (potentially untrusted) artifact bytes in scope —
   // mark the turn so memory writes lock (contracts §2 untrusted-content guard).
   ctx.markUntrusted()
@@ -74,6 +94,7 @@ export async function runCode(args: RunCodeArgs, ctx: HarnessToolCtx): Promise<s
 
   // AQU-1848: agent runs share the per-tenant pool cap with sandbox imports, so
   // one user cannot drain the container pool from either direction.
+  const startedAt = Date.now()
   const out = await sandboxExec(
     ctx.env,
     ctx.sandboxSessionId,
@@ -81,6 +102,11 @@ export async function runCode(args: RunCodeArgs, ctx: HarnessToolCtx): Promise<s
     ctx.signal,
     sandboxTenant(ctx.userId),
   )
+  // A refused or unreachable sandbox ran no code for us; anything else ran
+  // for as long as the call took (cold start included).
+  if (containerTime) {
+    await (out.available ? containerTime.settleSeconds(secondsSince(startedAt)) : containerTime.release())
+  }
   if (!out.available) {
     ctx.send({
       type: "tool.code.output",
@@ -111,6 +137,13 @@ export async function runCode(args: RunCodeArgs, ctx: HarnessToolCtx): Promise<s
     r.truncated ? "(output truncated)" : "",
   ].filter(Boolean)
   return parts.join("\n")
+}
+
+/** Upper bound for one run_code call: agent-worker's clamped timeout
+ *  (exec.ts, default 60 s, max 300 s) plus a minute for a cold start. */
+function runCodeMaxSeconds(timeoutMs?: number): number {
+  const ms = typeof timeoutMs === "number" && timeoutMs > 0 ? Math.min(timeoutMs, 300_000) : 60_000
+  return ms / 1000 + 60
 }
 
 // ── load_artifact ─────────────────────────────────────────────────────────────

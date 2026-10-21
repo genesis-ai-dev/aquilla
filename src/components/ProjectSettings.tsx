@@ -121,6 +121,7 @@ import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
 import { TermbaseSharingSection } from "./ProjectSettings/TermbaseSharingSection"
 import { MondayIntegrationSection } from "./ProjectSettings/MondayIntegrationSection"
+import { AirtableIntegrationSection } from "./ProjectSettings/AirtableIntegrationSection"
 import { SourceLinkSection } from "./ProjectSettings/SourceLinkSection"
 import { LinkSourceSection } from "./ProjectSettings/LinkSourceSection"
 import { ExperimentalFlagsSection } from "./ProjectSettings/ExperimentalFlagsSection"
@@ -1590,6 +1591,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // Monday.com board sync — cloud (synced) projects only: the link lives on
     // the server against the project's org connection.
     { id: "section-monday", label: "Monday.com", keywords: ["monday", "integration", "board", "push", "progress sync", "project management"], visible: isCloudProject },
+    // AQU-804: Airtable table sync, the same shape (and the same cloud-only rule).
+    { id: "section-airtable", label: "Airtable", keywords: ["airtable", "integration", "table", "base", "push", "progress sync", "episodes", "project management"], visible: isCloudProject },
     { id: "section-experimental", label: "Experimental", keywords: ["experimental", "flags", "beta", "preview", "contextual", "contextual drafting"] },
   ]
 
@@ -1719,10 +1722,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     {
       id: "integrations",
       label: "Integrations",
-      description: "Monday.com board sync",
+      description: "Monday.com and Airtable sync",
       icon: Plug,
       hub: "Integrations",
-      sectionIds: ["section-monday"],
+      sectionIds: ["section-monday", "section-airtable"],
     },
     {
       id: "experimental",
@@ -1829,6 +1832,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       "section-terminology",
       "section-termbase-sharing",
       "section-monday",
+      "section-airtable",
       "section-ai-metrics",
     ]
     const headers = new Map<string, string>()
@@ -1877,7 +1881,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     validation: resolveRoleName(t, validationRoleFloor),
     "audio-media": t(AUDIO_MEDIA_STRATEGY_LABELS[audioMediaStrategy].nameKey),
     metrics: "Post-edit",
-    integrations: "Monday.com",
+    integrations: "Monday.com, Airtable",
     experimental: "This device",
   }
 
@@ -3215,6 +3219,15 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {searchGroupLabel("section-monday")}
         {id && sectionsToRender.some((s) => s.id === "section-monday") && (
           <MondayIntegrationSection
+            projectId={id}
+            orgId={project?.orgId ?? null}
+            roleLevel={project?.syncRole?.level ?? null}
+          />
+        )}
+
+        {searchGroupLabel("section-airtable")}
+        {id && sectionsToRender.some((s) => s.id === "section-airtable") && (
+          <AirtableIntegrationSection
             projectId={id}
             orgId={project?.orgId ?? null}
             roleLevel={project?.syncRole?.level ?? null}

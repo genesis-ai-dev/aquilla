@@ -13,7 +13,7 @@
 // and this board can never disagree about the total.
 
 import type { AquillaDb } from '../../../db/shim/postgres'
-import { markProjectMondayLinksDirty } from '../../../db/shared/monday-dirty'
+import { markProjectSyncLinksDirty } from '../../../db/shared/progress-sync-dirty'
 import { verifyTokenForProject } from '../auth'
 import { ROLE } from './role-policy'
 import { checkProjectMembershipDetailed } from './membership'
@@ -350,7 +350,7 @@ export async function handlePlanRequest(
   // target date, schedule). Mark its link dirty; the identity worker's
   // 5-minute flush pushes it. Pushing from here would need the identity
   // worker's Monday token, so this path waits for the cron.
-  await markProjectMondayLinksDirty(db, [projectId])
+  await markProjectSyncLinksDirty(db, [projectId])
 
   const { results } = await db
     .prepare(readPlanUnitsSql('AND u.file_id = ? AND u.section_key = ?'))

@@ -169,6 +169,9 @@ const OrgSettingsProviders = lazy(() =>
 const OrgSettingsMonday = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsMonday })),
 )
+const OrgSettingsAirtable = lazy(() =>
+  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsAirtable })),
+)
 const OrgSettingsRules = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsRules })),
 )
@@ -507,6 +510,7 @@ function AppRoutes() {
           <Route path="settings/rules" element={<OrgLazyRoute><OrgSettingsRules /></OrgLazyRoute>} />
           <Route path="settings/knowledge" element={<OrgLazyRoute><OrgSettingsKnowledge /></OrgLazyRoute>} />
           <Route path="settings/monday" element={<OrgLazyRoute><OrgSettingsMonday /></OrgLazyRoute>} />
+          <Route path="settings/airtable" element={<OrgLazyRoute><OrgSettingsAirtable /></OrgLazyRoute>} />
         </Route>
 
         {/* Project routes stay flat (not nested under /orgs).

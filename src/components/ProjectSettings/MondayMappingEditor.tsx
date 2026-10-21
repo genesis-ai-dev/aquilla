@@ -5,6 +5,9 @@
 // Column titles come from the cached/fetched board structure when available;
 // we fall back to the raw column id so the tables stay usable when the caller
 // can't fetch structure (e.g. project maintainer without org maintainer role).
+//
+// Airtable's settings use the same tables (AQU-804): `copy` and
+// `readOnlyTypes` carry its words and field types, Monday's by default.
 
 import { useMemo, useState } from "react"
 import { Plus, Trash2 } from "lucide-react"
@@ -34,6 +37,7 @@ import {
   type MondayMetricKey,
 } from "@/lib/monday/types"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { MONDAY_MAPPING_COPY, type MappingCopy } from "@/lib/integrations/sync-ui"
 
 function columnTitle(structure: MondayBoardStructure | null, columnId: string): string {
   return structure?.columns.find((c) => c.id === columnId)?.title ?? columnId
@@ -43,19 +47,21 @@ function columnTitle(structure: MondayBoardStructure | null, columnId: string): 
 export function MondayMappingTable({
   columns,
   structure,
+  copy = MONDAY_MAPPING_COPY,
 }: {
   columns: MondayColumnMapping[]
   structure: MondayBoardStructure | null
+  copy?: MappingCopy
 }) {
   const t = useT()
   if (columns.length === 0) {
-    return <p className="text-sm text-muted-foreground">{t("projectSettings.monday.noColumnsMapped")}</p>
+    return <p className="text-sm text-muted-foreground">{t(copy.noColumnsMapped)}</p>
   }
   return (
     <Table data-testid="monday-mapping-preview">
       <TableHeader>
         <TableRow>
-          <TableHead>{t("projectSettings.monday.columnHeader")}</TableHead>
+          <TableHead>{t(copy.columnHeader)}</TableHead>
           <TableHead>{t("fileDetails.type")}</TableHead>
           <TableHead>{t("projectSettings.monday.metricHeader")}</TableHead>
         </TableRow>
@@ -102,16 +108,21 @@ export function MondayMappingRows({
   structure,
   disabled,
   onChange,
+  copy = MONDAY_MAPPING_COPY,
+  readOnlyTypes = MONDAY_READONLY_COLUMN_TYPES,
 }: {
   rows: MondayColumnMapping[]
   structure: MondayBoardStructure | null
   disabled: boolean
   onChange: (rows: MondayColumnMapping[]) => void
+  copy?: MappingCopy
+  /** Column types nothing can write; kept out of the picker. */
+  readOnlyTypes?: ReadonlySet<string>
 }) {
   const t = useT()
   const writableColumns = useMemo(
-    () => (structure?.columns ?? []).filter((c) => !MONDAY_READONLY_COLUMN_TYPES.has(c.type)),
-    [structure],
+    () => (structure?.columns ?? []).filter((c) => !readOnlyTypes.has(c.type)),
+    [structure, readOnlyTypes],
   )
 
   const columnItems = useMemo(() => {
@@ -138,7 +149,7 @@ export function MondayMappingRows({
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>{t("projectSettings.monday.columnHeader")}</TableHead>
+            <TableHead>{t(copy.columnHeader)}</TableHead>
             <TableHead>{t("projectSettings.monday.metricHeader")}</TableHead>
             <TableHead className="w-10" />
           </TableRow>
@@ -161,8 +172,8 @@ export function MondayMappingRows({
                   }}
                   disabled={disabled}
                 >
-                  <SelectTrigger aria-label={t("projectSettings.monday.columnHeader")}>
-                    <SelectValue placeholder={t("projectSettings.monday.pickColumnPlaceholder")} />
+                  <SelectTrigger aria-label={t(copy.columnHeader)}>
+                    <SelectValue placeholder={t(copy.pickColumnPlaceholder)} />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectGroup>
@@ -235,6 +246,9 @@ export function MondayMappingEditor({
   saving,
   onSave,
   requestedRow = null,
+  copy,
+  readOnlyTypes,
+  testId = "monday-mapping-editor",
 }: {
   initialColumns: MondayColumnMapping[]
   structure: MondayBoardStructure | null
@@ -243,6 +257,9 @@ export function MondayMappingEditor({
   onSave: (columns: MondayColumnMapping[]) => void
   /** "Map it" on a new board column: add a row for it (once per click). */
   requestedRow?: { row: MondayColumnMapping; nonce: number } | null
+  copy?: MappingCopy
+  readOnlyTypes?: ReadonlySet<string>
+  testId?: string
 }) {
   const [rows, setRows] = useState<MondayColumnMapping[]>(initialColumns)
   // "Map it" adds the column's row once per click. Adjusting state while
@@ -263,12 +280,14 @@ export function MondayMappingEditor({
   const complete = rows.every((r) => r.columnId !== "")
 
   return (
-    <div className="space-y-3" data-testid="monday-mapping-editor">
+    <div className="space-y-3" data-testid={testId}>
       <MondayMappingRows
         rows={rows}
         structure={structure}
         disabled={disabled}
         onChange={setRows}
+        copy={copy}
+        readOnlyTypes={readOnlyTypes}
       />
       <Button
         disabled={disabled || saving || !isDirty || !complete}

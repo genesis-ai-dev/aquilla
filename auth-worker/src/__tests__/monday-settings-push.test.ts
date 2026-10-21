@@ -8,7 +8,7 @@ import { afterEach, describe, it, expect, vi } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import { encryptMondayToken } from "../lib/monday/crypto"
-import { pushDirtyLinksNow } from "../lib/monday/push"
+import { pushDirtyLinksNow } from "../lib/integrations/push"
 
 const config = {
   version: 1,

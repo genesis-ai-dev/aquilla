@@ -18,7 +18,10 @@
 //   - creditGuard on the `agent` rail BEFORE any paid call, so an exhausted org
 //     fails cleanly and nothing is generated (and therefore nothing is staged);
 //   - recordCredit on the same rail after the call, so spend is metered
-//     identically to an in-app agent draft.
+//     identically to an in-app agent draft;
+//   - AQU-2063: each paid pass is admitted by checkAiEntitlement (lib/billing/
+//     paid-llm.ts) and settles its own usage.cost on the weekly meter. The
+//     platform spend ceiling runs inside that check.
 
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
@@ -26,7 +29,6 @@ import { z } from "zod"
 import type { Env, Variables } from "../types"
 import { secureCompare } from "../utils/secure-compare"
 import { runAiGuard } from "../lib/ai-budget"
-import { checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
 import { getPlatformSettingsCached } from "../lib/platform-settings"
 import { creditGuard, recordCredit } from "../lib/credits"
 import { AliasMap } from "../lib/agent/compress"
@@ -40,6 +42,9 @@ import {
 import { languagesForLanes, loadLaneRows } from "../lib/read-lane-language"
 import { resolveLaneIdOrTag } from "../../../db/shared/lane-ref"
 import { languageOfTargetLane } from "../../../db/shared/lane-language"
+import type { PaidCallRefusal } from "../lib/billing/paid-call"
+import { admitLlmCall, legacyLedgers, projectOrgId } from "../lib/billing/paid-llm"
+import { METERED_MAX_OUTPUT_TOKENS } from "../lib/billing/chat-usage"
 
 const aiDraftInternal = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -96,25 +101,22 @@ aiDraftInternal.post("/internal/draft-cells", zValidator("json", bodySchema), as
   const guard = await runAiGuard(model, Number(body.userId), db, c.env)
   if (!guard.ok) return c.json(guard.body, guard.status)
 
-  // Platform daily spend ceiling (AQU-1869).
-  const spendCeiling = await checkAiSpendCeiling(db, c.env, "draft-cells")
-  if (!spendCeiling.ok) return c.json(spendCeiling.body, spendCeiling.status)
-
-  // Org for the credit rails: the project's org (0 = personal/org-less).
-  let orgId = 0
+  // Org for the credit rails and the weekly meter: the project's org. null =
+  // personal/org-less, which has no ledger (legacy credits record it as 0).
+  let projectOrg: number | null = null
   try {
-    const projectRow = await db
-      .prepare("SELECT org_id FROM projects WHERE id = ?")
-      .bind(body.projectId)
-      .first<{ org_id: number | null }>()
-    orgId = projectRow?.org_id ?? 0
+    projectOrg = await projectOrgId(db, body.projectId)
   } catch {
-    /* best-effort — degrade to org 0 so spend is still recorded */
+    /* best-effort — degrade to org-less so drafting still runs under the ceiling */
   }
+  const orgId = projectOrg ?? 0
+  // One ledger per call (paid-call.ts): the legacy credit guard and ledger are
+  // the record only while the meter is off.
+  const legacy = legacyLedgers(c.env, c.req.url)
 
   // Pre-flight the expensive rail BEFORE generating: an exhausted org gets a
   // clean named error and nothing is drafted, so nothing can be staged.
-  const creditCheck = await creditGuard(db, c.env, orgId, "agent")
+  const creditCheck = legacy ? await creditGuard(db, c.env, orgId, "agent") : { ok: true as const }
   if (!creditCheck.ok) {
     return c.json(
       {
@@ -177,6 +179,38 @@ aiDraftInternal.post("/internal/draft-cells", zValidator("json", bodySchema), as
       if (fromLane) targetLanguage = fromLane
     }
   }
+  // AQU-2063: every paid pass (research, then generation) is admitted on its
+  // own and settles its own reported cost. A pass the check refuses is kept
+  // here so the caller gets the 402/503 contract, not a generic 502.
+  const modelCfg = {
+    model,
+    apiKey: c.env.OPENROUTER_API_KEY ?? "",
+    url: resolveOpenRouterUrl(c.env),
+    // A metered pass needs a bounded output, as in the agent's draft tool.
+    ...(legacy ? {} : { maxTokens: METERED_MAX_OUTPUT_TOKENS }),
+  }
+  let refused: PaidCallRefusal | undefined
+  const admitPaidCall = async (input: { model: string; promptChars: number }) => {
+    const call = await admitLlmCall(
+      db, c.env,
+      { orgId: projectOrg, userId: Number(body.userId), projectId: body.projectId, rail: "agent" },
+      { ...input, maxOutputTokens: METERED_MAX_OUTPUT_TOKENS },
+      { requestUrl: c.req.url },
+    )
+    if (!call.ok) {
+      refused = call
+      return { ok: false as const, message: call.body.error }
+    }
+    // The draft tool reads the key off this config after admission, so the
+    // key the check chose (house or the org's own) is the one that is sent.
+    modelCfg.apiKey = call.apiKey
+    return {
+      ok: true as const,
+      settle: (result: unknown) => call.settleFrom(result),
+      // An error or a cut-off answer is an uncertain charge: keep it held.
+      hold: async () => undefined,
+    }
+  }
   const gen = await generateDrafts(
     db,
     { fileId: body.fileId, cellIds: body.cellIds, limit: body.cellIds.length, instructions: body.instructions },
@@ -194,14 +228,17 @@ aiDraftInternal.post("/internal/draft-cells", zValidator("json", bodySchema), as
         costCents += (u.cost ?? 0) * 100
       },
       maxCells: batchCap,
+      admitPaidCall,
     },
-    { model, apiKey: c.env.OPENROUTER_API_KEY ?? "", url: resolveOpenRouterUrl(c.env) },
+    modelCfg,
   )
 
   // Meter whatever was actually spent, success or failure — the research pass
-  // costs money even when generation then fails. Never throws.
-  if (costCents > 0) await recordCredit(db, orgId, Number(body.userId), "agent", costCents, 1)
+  // costs money even when generation then fails. Never throws. With the meter
+  // on, each pass already settled on the weekly ledger.
+  if (legacy && costCents > 0) await recordCredit(db, orgId, Number(body.userId), "agent", costCents, 1)
 
+  if (refused) return c.json(refused.body, refused.status)
   if (!gen.ok) return c.json({ error: "job_failed", message: gen.error }, 502)
 
   return c.json({

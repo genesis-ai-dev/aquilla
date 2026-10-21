@@ -1,5 +1,5 @@
-// AI board-analysis — one non-streaming OpenRouter call (same internals as
-// routes/chat.ts: direct fetch with env.OPENROUTER_API_KEY, JSON mode) that
+// AI board-analysis — one non-streaming OpenRouter call (lib/integrations/llm.ts:
+// JSON mode, admitted by the AI entitlement check — AQU-2063) that
 // proposes a MondayMapping for a board + project. The LLM output is NEVER
 // trusted: sanitizeMapping clamps it server-side (unknown columnIds dropped,
 // read-only column types rejected) before it reaches the client.
@@ -7,6 +7,7 @@
 import type { Env } from "../../types"
 import { getPlatformSettingsCached } from "../platform-settings"
 import { DEFAULT_LLM_MODEL_ID } from "../model-defaults"
+import type { PaidScope } from "../billing/paid-llm"
 import { callAnalysisLlm, parseJsonAnswer } from "../integrations/llm"
 import {
   sanitizeMapping,
@@ -93,8 +94,10 @@ function tryParseProposal(content: string): { mapping?: unknown; summary?: unkno
   return parseJsonAnswer<{ mapping: unknown; summary: unknown }>(content)
 }
 
-function callLlm(env: Env, model: string, prompt: string): Promise<string> {
-  return callAnalysisLlm(env, model, prompt, "monday analyze")
+// AQU-2063: admitted by the AI entitlement check before it spends, and
+// settles the usage.cost it used to throw away (lib/integrations/llm.ts).
+function callLlm(env: Env, scope: PaidScope, model: string, prompt: string): Promise<string> {
+  return callAnalysisLlm(env, scope, model, prompt, "monday analyze")
 }
 
 // ── Board selection ────────────────────────────────────────────────────────
@@ -157,6 +160,7 @@ function bestByName(boards: MondayBoardSummary[], summary: ProjectMetricsSummary
  */
 export async function selectBoardForProject(
   env: Env,
+  scope: PaidScope,
   args: { boards: MondayBoardSummary[]; summary: ProjectMetricsSummary },
 ): Promise<BoardChoice> {
   const { boards, summary } = args
@@ -186,7 +190,7 @@ export async function selectBoardForProject(
   let chosen: MondayBoardSummary | undefined
   let reason = ""
   try {
-    const parsed = tryParseProposal(await callLlm(env, model, prompt)) as
+    const parsed = tryParseProposal(await callLlm(env, scope, model, prompt)) as
       | { boardId?: unknown; reason?: unknown }
       | null
     if (parsed && typeof parsed.boardId === "string") {
@@ -207,7 +211,7 @@ export async function selectBoardForProject(
 }
 
 /** Run the LLM analysis and clamp its proposal. Throws on upstream/parse failure. */
-export async function analyzeBoardMapping(env: Env, args: AnalyzeArgs): Promise<AnalyzeResult> {
+export async function analyzeBoardMapping(env: Env, scope: PaidScope, args: AnalyzeArgs): Promise<AnalyzeResult> {
   if (!env.OPENROUTER_API_KEY) {
     throw new Error("OPENROUTER_API_KEY is not configured")
   }
@@ -216,11 +220,11 @@ export async function analyzeBoardMapping(env: Env, args: AnalyzeArgs): Promise<
     settings.defaultLlmModel || env.DEFAULT_LLM_MODEL || DEFAULT_LLM_MODEL_ID
 
   const prompt = buildPrompt(args)
-  let parsed = tryParseProposal(await callLlm(env, model, prompt))
+  let parsed = tryParseProposal(await callLlm(env, scope, model, prompt))
   if (!parsed) {
     // One retry with an explicit JSON-only instruction before giving up.
     parsed = tryParseProposal(
-      await callLlm(env, model, `${prompt}\n\nReturn ONLY the JSON object.`),
+      await callLlm(env, scope, model, `${prompt}\n\nReturn ONLY the JSON object.`),
     )
   }
   if (!parsed) throw new Error("LLM returned invalid JSON")

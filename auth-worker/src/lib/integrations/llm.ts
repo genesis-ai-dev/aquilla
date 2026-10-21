@@ -1,11 +1,12 @@
 // The one non-streaming OpenRouter call the integration setups make (Monday's
-// board analysis, Airtable's table analysis — AQU-804): same internals as
-// routes/chat.ts (direct fetch with env.OPENROUTER_API_KEY, JSON mode), plus
+// board analysis, Airtable's table analysis — AQU-804): a direct fetch in JSON
+// mode, admitted by the AI entitlement check (AQU-2063), plus
 // the lenient JSON extraction both need because a model's "strict JSON" is
 // sometimes wrapped in a code fence or prose.
 
 import type { Env } from "../../types"
 import { openRouterUsage } from "../llm-vendor"
+import { admitLlmCall, LlmRefusedError, type PaidScope } from "../billing/paid-llm"
 import {
   isAbortTimeout,
   logVendorTimeout,
@@ -66,8 +67,20 @@ export function parseJsonAnswer<T extends object>(content: string): Partial<T> |
   }
 }
 
-/** One completion. `label` names the caller in the server-side error log. */
-export async function callAnalysisLlm(env: Env, model: string, prompt: string, label: string): Promise<string> {
+/** Output the meter reserves per call. The request sends no max_tokens (a
+ *  clipped JSON answer is useless), so this only sizes the reservation. */
+const ANALYSIS_RESERVE_OUTPUT_TOKENS = 4_096
+
+/** One completion. `label` names the caller in the server-side error log.
+ *  AQU-2063: admitted before it spends (a refusal throws LlmRefusedError for
+ *  the route to answer) and settles the usage.cost the provider reports. */
+export async function callAnalysisLlm(
+  env: Env, scope: PaidScope, model: string, prompt: string, label: string,
+): Promise<string> {
+  const call = await admitLlmCall(env.AQUILLA_PG, env, scope, {
+    model, promptChars: prompt.length, maxOutputTokens: ANALYSIS_RESERVE_OUTPUT_TOKENS,
+  })
+  if (!call.ok) throw new LlmRefusedError(call)
   const base = env.OPENROUTER_BASE_URL
     ? env.OPENROUTER_BASE_URL.replace(/\/$/, "")
     : "https://openrouter.ai/api/v1"
@@ -76,7 +89,7 @@ export async function callAnalysisLlm(env: Env, model: string, prompt: string, l
     upstream = await fetch(`${base}/chat/completions`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+        Authorization: `Bearer ${call.apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -109,6 +122,7 @@ export async function callAnalysisLlm(env: Env, model: string, prompt: string, l
   const data = (await upstream.json()) as {
     choices?: Array<{ message?: { content?: string } }>
   }
+  await call.settleFrom(data)
   const content = data.choices?.[0]?.message?.content
   if (!content) throw new Error("LLM returned no content")
   return content

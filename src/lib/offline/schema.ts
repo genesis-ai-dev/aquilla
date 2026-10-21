@@ -1,7 +1,7 @@
 import { Events, Schema, State, makeSchema } from "@livestore/livestore"
 
 /** Bump on any offline event change, then run `pnpm offline:fixture` (enforced by eventlog-compat.test.ts). */
-export const OFFLINE_DATA_GENERATION = 2
+export const OFFLINE_DATA_GENERATION = 3
 
 /**
  * AQU-1614: prefix for a lane key derived from a lane's legacy tag rather than
@@ -53,6 +53,10 @@ const projects = State.SQLite.table({
     orgId: State.SQLite.text(),
     settings: State.SQLite.json({ nullable: true }),
     syncedAt: State.SQLite.datetime({ nullable: true }),
+    // The server's GET /projects/:id response as of the last online open, so
+    // the app can open this project after starting with no connection
+    // (project-snapshot.ts). Null until a build that records it has seen one.
+    snapshot: State.SQLite.json({ nullable: true }),
   },
 })
 
@@ -182,6 +186,10 @@ const events = {
       settings: Schema.Unknown,
       syncedAt: Schema.NullOr(Schema.Date),
     }),
+  }),
+  projectSnapshotSynced: Events.clientOnly({
+    name: "v1.ProjectSnapshotSynced",
+    schema: Schema.Struct({ id: Schema.String, snapshot: Schema.Unknown }),
   }),
   projectRemoved: Events.clientOnly({
     name: "v1.ProjectRemoved",
@@ -407,6 +415,7 @@ const materializers = State.SQLite.materializers(events, {
       settings,
       syncedAt,
     }),
+  "v1.ProjectSnapshotSynced": ({ id, snapshot }) => tables.projects.update({ snapshot }).where({ id }),
   "v1.ProjectRemoved": ({ id }) => tables.projects.delete().where({ id }),
 
   "v1.FileSynced": ({ id, projectId, name, type, sequenceIndex }) =>

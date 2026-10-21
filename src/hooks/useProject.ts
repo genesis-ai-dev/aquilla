@@ -15,7 +15,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { minimalProjectRecord, resolveCloudProjectResult } from "@/lib/sync/cloud-projects"
+import { minimalProjectRecord } from "@/lib/sync/cloud-projects"
+import { resolveProjectForRead } from "@/lib/sync/project-resolve"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { overlaySettings } from "@/hooks/project-settings-overlay"
@@ -140,7 +141,8 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
         hasLoaded.current = true
         return
       }
-      const result = await resolveCloudProjectResult(projectId, session.jwt)
+      // Desktop: falls back to the downloaded copy when the server is unreachable.
+      const result = await resolveProjectForRead(projectId, session.jwt)
       if (cancelled) return
       if (!result.ok) {
         if (result.reason === "unauthenticated") {

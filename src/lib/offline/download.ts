@@ -21,6 +21,7 @@ import {
 } from "@/lib/sync/cells-read"
 import { resolveCloudProjectResult as resolveCloudProjectResultDefault } from "@/lib/sync/cloud-projects"
 import { fetchSyncToken as fetchSyncTokenDefault } from "@/lib/sync/sync-token"
+import { writeProjectSnapshot } from "./project-snapshot"
 
 // sync-worker's file-list/cells routes verify a short-lived sync-token (see
 // cells-read.ts's header comment), never the raw session JWT — confirmed by
@@ -197,6 +198,8 @@ export async function downloadProjectOffline(
         syncedAt: new Date(),
       }),
     )
+    // Lets the project open after the app starts with no connection.
+    writeProjectSnapshot(store, summary)
 
     const { token: syncToken } = await deps.fetchSyncToken(jwt, projectId, OFFLINE_DOWNLOAD_TOKEN_FILE_ID)
 

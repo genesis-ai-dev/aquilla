@@ -234,6 +234,12 @@ export interface Env {
    * token encrypted before it unreadable — the org reconnects.
    */
   MONDAY_TOKEN_KEY?: string
+  /**
+   * LangQuest API base for project links (lib/langquest/client.ts). Unset ⇒
+   * https://next.langquest.org/api/v1; point a preview at
+   * https://next-preview.langquest.org/api/v1.
+   */
+  LANGQUEST_API_BASE?: string
   /** Monday app id (plain var; informational/config). */
   MONDAY_APP_ID?: string
   /** Monday app slug (plain var; informational/config). */

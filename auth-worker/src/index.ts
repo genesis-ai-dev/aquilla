@@ -117,6 +117,7 @@ import knowledgeInternalRoutes from "./routes/knowledge-internal"
 import styleRulesRoutes from "./routes/style-rules"
 import mondayRoutes from "./routes/monday"
 import airtableRoutes from "./routes/airtable"
+import langquestRoutes from "./routes/langquest"
 import contactRoutes from "./routes/contact"
 import feedbackRoutes from "./routes/feedback"
 import billingWorkspaceRoutes from "./routes/billing-workspace"
@@ -396,6 +397,7 @@ app.route("/api/v2/monday", mondayRoutes)
 // personal access token instead of OAuth. Its pushes ride Monday's triggers
 // (lib/integrations/push.ts), including the sync-worker nudge above.
 app.route("/api/v2/airtable", airtableRoutes)
+app.route("/api/v2/langquest", langquestRoutes)
 // External API credentials (PATs) for the Agent API (AQU-533 §2). Mint/list/
 // revoke; live role is re-resolved on every downstream API call.
 app.route("/api/v2/credentials", credentialsRoutes)

@@ -36,14 +36,20 @@ import {
 import { propagateKnowledgeDocs } from "../../../../db/shared/inherited-settings"
 import { shipLog, type PosthogLogEnv } from "../../posthog-logs"
 import { segmentText } from "./segment"
+import { admitLlmCall, LlmRefusedError, projectOrgId, type PaidLlmEnv, type PaidScope } from "../billing/paid-llm"
 
 export { segmentText }
 
-export interface KbIndexEnv extends PosthogLogEnv {
-  OPENROUTER_API_KEY?: string
-  OPENROUTER_BASE_URL?: string
+/** The worker env: the model calls go through the AI entitlement check
+ *  (AQU-2063), which needs the meter mode, the house keys and the rate card. */
+export interface KbIndexEnv extends PosthogLogEnv, PaidLlmEnv {
   KB_INDEX_MODEL?: string
 }
+
+/** Output the meter reserves per summarizing call. The request sends no
+ *  max_tokens (a clipped JSON reply would lose every summary in its batch), so
+ *  this is only the reservation; settlement records the reported cost. */
+const KB_RESERVE_OUTPUT_TOKENS = 8_192
 
 /** What the platform grants a `ctx.waitUntil` task after the response is sent:
  *  "If any Promises have not settled after 30 seconds, they are canceled."
@@ -292,6 +298,12 @@ function upstreamDetail(body: string): string {
  *  column names, no key material (AQU-2002, same contract as the extraction
  *  messages in routes/parse-document.ts). */
 export function describeIndexFailure(err: unknown): string {
+  // AQU-2063: the AI entitlement check refused the call before it spent.
+  if (err instanceof LlmRefusedError) {
+    return err.refusal.status === 402
+      ? "This workspace has used its AI allowance for the week. Try indexing again after it resets."
+      : "AI summarizing is paused right now. Try again later."
+  }
   const message = err instanceof Error ? err.message : String(err)
   // Workers raise an AbortError; a thrown-through rejection from a stubbed or
   // polyfilled fetch may only say so in its message.
@@ -418,8 +430,19 @@ export async function indexKnowledgeDoc(
     let docSummary = doc.meta.docSummary
     let lost: { err: unknown } | null = null
     try {
+      // AQU-2063: indexing runs after the upload response, with no live user,
+      // so it bills the doc's org as the system user (spec §3.3).
+      const paid: PaidCtx = {
+        db,
+        scope: {
+          orgId: doc.meta.orgId ?? (doc.meta.projectId ? await projectOrgId(db, doc.meta.projectId) : null),
+          userId: null,
+          projectId: doc.meta.projectId,
+          rail: "llm",
+        },
+      }
       const outcome = await enrichNodes(
-        env, doc.meta.name, doc.text, nodes, docSummary, startedAt + timeoutMs,
+        env, paid, doc.meta.name, doc.text, nodes, docSummary, startedAt + timeoutMs,
       )
       docSummary = outcome.docSummary
       if ("error" in outcome) lost = { err: outcome.error }
@@ -499,6 +522,7 @@ export async function indexKnowledgeDoc(
  *  the whole document again inside one budget (AQU-2050). */
 async function enrichNodes(
   env: KbIndexEnv,
+  paid: PaidCtx,
   docName: string,
   text: string,
   nodes: KnowledgeNode[],
@@ -526,7 +550,7 @@ async function enrichNodes(
     if (batches.length === 1 && pending.length === all.length) {
       try {
         return { docSummary: applyEnrichment(nodes, await complete(
-          env, buildEnrichmentPrompt(docName, text, batches[0]), abort.signal,
+          env, paid, buildEnrichmentPrompt(docName, text, batches[0]), abort.signal,
         )).docSummary }
       } catch (err) {
         return { docSummary: null, error: err }
@@ -538,7 +562,7 @@ async function enrichNodes(
     // summaries, and the deadline cancelling its siblings is no reason to
     // throw them away.
     const settled = await Promise.allSettled(batches.map((batch) => complete(
-      env, buildEnrichmentPrompt(docName, text, batch, { wholeDocument: false }), abort.signal,
+      env, paid, buildEnrichmentPrompt(docName, text, batch, { wholeDocument: false }), abort.signal,
     )))
     let error: unknown
     const summaries = new Map<string, string>()
@@ -561,7 +585,7 @@ async function enrichNodes(
     if (error !== undefined) return { docSummary: priorDocSummary, error }
     try {
       const docReply = await complete(
-        env, buildDocSummaryPrompt(docName, all, summariesOf(nodes)), abort.signal,
+        env, paid, buildDocSummaryPrompt(docName, all, summariesOf(nodes)), abort.signal,
       )
       return { docSummary: parseReply(docReply).docSummary?.trim() || priorDocSummary }
     } catch (err) {
@@ -579,14 +603,25 @@ async function enrichNodes(
  *  `openrouter <status>: <provider's words>` so the cause reaches the logs,
  *  and describeIndexFailure can tell a context overflow from any other 400
  *  (AQU-2029). */
-async function complete(env: KbIndexEnv, prompt: string, signal: AbortSignal): Promise<string> {
+interface PaidCtx { db: AquillaDb; scope: PaidScope }
+
+async function complete(env: KbIndexEnv, paid: PaidCtx, prompt: string, signal: AbortSignal): Promise<string> {
+  const model = env.KB_INDEX_MODEL || DEFAULT_KB_INDEX_MODEL
+  // AQU-2063: admitted before it spends; a refusal reaches the uploader
+  // through describeIndexFailure.
+  const call = await admitLlmCall(paid.db, env, paid.scope, {
+    model, promptChars: prompt.length, maxOutputTokens: KB_RESERVE_OUTPUT_TOKENS,
+  })
+  if (!call.ok) throw new LlmRefusedError(call)
   const res = await fetch(openRouterUrl(env), {
     method: "POST",
-    headers: { Authorization: `Bearer ${env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${call.apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: env.KB_INDEX_MODEL || DEFAULT_KB_INDEX_MODEL,
+      model,
       messages: [{ role: "user", content: prompt }],
       response_format: { type: "json_object" },
+      // Without this OpenRouter reports no cost, and the call cannot settle.
+      usage: { include: true },
     }),
     signal,
   })
@@ -595,5 +630,6 @@ async function complete(env: KbIndexEnv, prompt: string, signal: AbortSignal): P
     throw new Error(`openrouter ${res.status}${detail ? `: ${detail}` : ""}`)
   }
   const body = (await res.json()) as { choices?: { message?: { content?: string } }[] }
+  await call.settleFrom(body)
   return body.choices?.[0]?.message?.content ?? ""
 }

@@ -13,7 +13,6 @@ import type { Env, Variables } from "../types"
 import { authMiddleware } from "../middleware/auth"
 import { resolveProjectRole } from "../services/project-permissions"
 import { runAiGuard } from "../lib/ai-budget"
-import { checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
 import { creditGuard, recordCredit } from "../lib/credits"
 import { countWords } from "../lib/billing/plans"
 import { recordWords, wordCapBody, wordGuard } from "../lib/billing/words"
@@ -29,6 +28,8 @@ import {
 import { MAX_SANDBOX_PROGRAM_CHARS } from "../../../shared/import-contract"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
 import { logVendorTimeout, vendorDeadline } from "../../../shared/vendor-timeouts"
+import { admitLlmCall, LlmRefusedError, projectOrgId } from "../lib/billing/paid-llm"
+import { providerRejectedPreModel } from "../lib/billing/chat-usage"
 
 /**
  * AQU-1848: the sandbox pool refused us because it is saturated, not broken.
@@ -60,6 +61,8 @@ const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 const MIN_IMPORT_ROLE = 500
 const MAX_INPUT_BYTES = 25 * 1024 * 1024
 const MAX_RESULT_BYTES = 8 * 1024 * 1024
+/** Parser-model output cap — also the bound the meter reserves against. */
+const PARSER_MAX_TOKENS = 10_000
 
 const unitSchema = z.object({
   sourceText: z.string().min(1).max(100_000),
@@ -336,12 +339,12 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
   const aiGuard = await runAiGuard(model, user.id, c.env.AQUILLA_PG, c.env)
   if (!aiGuard.ok) return c.json(aiGuard.body, aiGuard.status)
 
-  // Platform daily spend ceiling (AQU-1869).
-  const spendCeiling = await checkAiSpendCeiling(c.env.AQUILLA_PG, c.env, "import-sandbox")
-  if (!spendCeiling.ok) return c.json(spendCeiling.body, spendCeiling.status)
-  const project = await c.env.AQUILLA_PG.prepare("SELECT org_id FROM projects WHERE id = ?")
-    .bind(projectId).first<{ org_id: number | null }>()
-  const orgId = project?.org_id ?? 0
+  // AQU-2063: each parser-model call is admitted by checkAiEntitlement (which
+  // runs the platform spend ceiling) and settles its usage.cost on the weekly
+  // meter. A refusal ends the import with the 402/503 contract.
+  const projectOrg = await projectOrgId(c.env.AQUILLA_PG, projectId)
+  const orgId = projectOrg ?? 0
+  const paidScope = { orgId: projectOrg, userId: user.id, projectId, rail: "llm" as const }
   const credits = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm")
   if (!credits.ok) {
     return c.json({ error: "credit_cap_exceeded", reason: credits.reason, message: "LLM credit cap reached. Contact your org admin." }, 429)
@@ -376,24 +379,31 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
       // (`stream: false`, so the headers wait for the whole completion),
       // linked to the client's signal. The outer catch turns a blown one into
       // the route's import_parser_failed 502, with the vendor named in the logs.
+      const messages = parserPrompt({
+        fileName,
+        mime,
+        sourceLanguage,
+        targetLanguage,
+        inspection: inspected.data.stdout.slice(0, 64 * 1024),
+        previousError,
+      })
+      const call = await admitLlmCall(c.env.AQUILLA_PG, c.env, paidScope, {
+        model,
+        promptChars: messages.reduce((n, m) => n + m.content.length, 0),
+        maxOutputTokens: PARSER_MAX_TOKENS,
+      })
+      if (!call.ok) throw new LlmRefusedError(call)
       const deadline = vendorDeadline("openRouterNonStreaming", signal)
       let upstream: Response
       try {
         upstream = await fetch(openRouterUrl(c.env), {
           method: "POST",
-          headers: { Authorization: `Bearer ${c.env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
+          headers: { Authorization: `Bearer ${call.apiKey}`, "Content-Type": "application/json" },
           body: JSON.stringify({
             model,
-            messages: parserPrompt({
-              fileName,
-              mime,
-              sourceLanguage,
-              targetLanguage,
-              inspection: inspected.data.stdout.slice(0, 64 * 1024),
-              previousError,
-            }),
+            messages,
             temperature: 0,
-            max_tokens: 10_000,
+            max_tokens: PARSER_MAX_TOKENS,
             stream: false,
             ...openRouterExtras(c.env.OPENROUTER_BASE_URL, "high"),
             response_format: { type: "json_object" },
@@ -409,13 +419,16 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
       }
       if (!upstream.ok) {
         const detail = await upstream.text().catch(() => "")
+        // A gateway-side 4xx proves no generation ran; anything else stays held.
+        if (providerRejectedPreModel(upstream.status, detail)) await call.release()
         throw new Error(detail.slice(0, 500) || `Parser model returned ${upstream.status}`)
       }
       const body = await upstream.json() as {
         choices?: Array<{ message?: { content?: string } }>
         usage?: { cost?: number }
       }
-      const rawCostCents = typeof body.usage?.cost === "number" && body.usage.cost > 0 ? body.usage.cost * 100 : 1
+      const settled = await call.settleFrom(body)
+      const rawCostCents = settled !== undefined && settled > 0 ? settled : 1
       await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", rawCostCents, 1)
       await recordWords(c.env.AQUILLA_PG, orgId, user.id, "llm", countWords(fileName))
       const content = body.choices?.[0]?.message?.content
@@ -506,6 +519,9 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
     }
     throw new Error(previousError || "The sandbox parser could not produce a valid import")
   } catch (error) {
+    if (error instanceof LlmRefusedError) {
+      return c.json(error.refusal.body, error.refusal.status)
+    }
     if (error instanceof SandboxBusyError) {
       // Transient saturation, not a bad file. Say so, and say when to retry —
       // this is the "waiting for a sandbox" state the user sees.

@@ -14,7 +14,7 @@ export interface RateCard { fetchedAt: number; prices: Map<string, { prompt: num
 const CARD_TTL_MS = 10 * 60 * 1000
 const cache = new Map<string, RateCard>()
 
-export async function readRateCard(env: Env, now = Date.now()): Promise<RateCard> {
+export async function readRateCard(env: Pick<Env, 'OPENROUTER_BASE_URL' | 'OPENROUTER_API_KEY'>, now = Date.now()): Promise<RateCard> {
   const base = env.OPENROUTER_BASE_URL?.replace(/\/$/, '')
   if (!base) throw new Error('Rate card unavailable')
   const cached = cache.get(base)

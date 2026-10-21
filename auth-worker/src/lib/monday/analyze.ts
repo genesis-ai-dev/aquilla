@@ -1,5 +1,5 @@
-// AI board-analysis — one non-streaming OpenRouter call (same internals as
-// routes/chat.ts: direct fetch with env.OPENROUTER_API_KEY, JSON mode) that
+// AI board-analysis — one non-streaming OpenRouter call (direct fetch, JSON
+// mode; AQU-2063: admitted by the AI entitlement check, keyed by it) that
 // proposes a MondayMapping for a board + project. The LLM output is NEVER
 // trusted: sanitizeMapping clamps it server-side (unknown columnIds dropped,
 // read-only column types rejected) before it reaches the client.
@@ -8,6 +8,7 @@ import type { Env } from "../../types"
 import { getPlatformSettingsCached } from "../platform-settings"
 import { openRouterUsage } from "../llm-vendor"
 import { DEFAULT_LLM_MODEL_ID } from "../model-defaults"
+import { admitLlmCall, LlmRefusedError, type PaidScope } from "../billing/paid-llm"
 import {
   sanitizeMapping,
   METRIC_KEYS,
@@ -145,7 +146,17 @@ function tryParseProposal(content: string): { mapping?: unknown; summary?: unkno
   }
 }
 
-async function callLlm(env: Env, model: string, prompt: string): Promise<string> {
+/** Output the meter reserves per call. The request sends no max_tokens (a
+ *  clipped JSON proposal is useless), so this only sizes the reservation. */
+const ANALYZE_RESERVE_OUTPUT_TOKENS = 4_096
+
+async function callLlm(env: Env, scope: PaidScope, model: string, prompt: string): Promise<string> {
+  // AQU-2063: admitted before it spends; settles the reported usage.cost,
+  // which this call already requested and used to throw away.
+  const call = await admitLlmCall(env.AQUILLA_PG, env, scope, {
+    model, promptChars: prompt.length, maxOutputTokens: ANALYZE_RESERVE_OUTPUT_TOKENS,
+  })
+  if (!call.ok) throw new LlmRefusedError(call)
   const base = env.OPENROUTER_BASE_URL
     ? env.OPENROUTER_BASE_URL.replace(/\/$/, "")
     : "https://openrouter.ai/api/v1"
@@ -154,7 +165,7 @@ async function callLlm(env: Env, model: string, prompt: string): Promise<string>
     upstream = await fetch(`${base}/chat/completions`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+        Authorization: `Bearer ${call.apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -187,6 +198,7 @@ async function callLlm(env: Env, model: string, prompt: string): Promise<string>
   const data = (await upstream.json()) as {
     choices?: Array<{ message?: { content?: string } }>
   }
+  await call.settleFrom(data)
   const content = data.choices?.[0]?.message?.content
   if (!content) throw new Error("LLM returned no content")
   return content
@@ -252,6 +264,7 @@ function bestByName(boards: MondayBoardSummary[], summary: ProjectMetricsSummary
  */
 export async function selectBoardForProject(
   env: Env,
+  scope: PaidScope,
   args: { boards: MondayBoardSummary[]; summary: ProjectMetricsSummary },
 ): Promise<BoardChoice> {
   const { boards, summary } = args
@@ -281,7 +294,7 @@ export async function selectBoardForProject(
   let chosen: MondayBoardSummary | undefined
   let reason = ""
   try {
-    const parsed = tryParseProposal(await callLlm(env, model, prompt)) as
+    const parsed = tryParseProposal(await callLlm(env, scope, model, prompt)) as
       | { boardId?: unknown; reason?: unknown }
       | null
     if (parsed && typeof parsed.boardId === "string") {
@@ -302,7 +315,7 @@ export async function selectBoardForProject(
 }
 
 /** Run the LLM analysis and clamp its proposal. Throws on upstream/parse failure. */
-export async function analyzeBoardMapping(env: Env, args: AnalyzeArgs): Promise<AnalyzeResult> {
+export async function analyzeBoardMapping(env: Env, scope: PaidScope, args: AnalyzeArgs): Promise<AnalyzeResult> {
   if (!env.OPENROUTER_API_KEY) {
     throw new Error("OPENROUTER_API_KEY is not configured")
   }
@@ -311,11 +324,11 @@ export async function analyzeBoardMapping(env: Env, args: AnalyzeArgs): Promise<
     settings.defaultLlmModel || env.DEFAULT_LLM_MODEL || DEFAULT_LLM_MODEL_ID
 
   const prompt = buildPrompt(args)
-  let parsed = tryParseProposal(await callLlm(env, model, prompt))
+  let parsed = tryParseProposal(await callLlm(env, scope, model, prompt))
   if (!parsed) {
     // One retry with an explicit JSON-only instruction before giving up.
     parsed = tryParseProposal(
-      await callLlm(env, model, `${prompt}\n\nReturn ONLY the JSON object.`),
+      await callLlm(env, scope, model, `${prompt}\n\nReturn ONLY the JSON object.`),
     )
   }
   if (!parsed) throw new Error("LLM returned invalid JSON")

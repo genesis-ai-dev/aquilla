@@ -12,6 +12,17 @@ import { formatLintIssues, lintToolSource, type LintIssue } from "../../../../sh
 import { TOOLS_BUILDER_SYSTEM_PROMPT, buildUserMessage, parseBuildReply } from "./build-prompt"
 import { TOOLS_REVIEW_SYSTEM_PROMPT, buildFixMessage, buildReviewMessage, parseReview, staticUiFindings, type UiCheck } from "./build-review"
 import { mergeRequirements, unmetMusts, type ToolRequirement } from "../../../../shared/tools/requirements"
+import { LlmRefusedError, type LlmBound, type PaidLlmAdmission } from "../billing/paid-llm"
+import { providerRejectedPreModel } from "../billing/chat-usage"
+
+/** AQU-2063: admits one builder call through the AI entitlement check. The
+ *  route binds it to the project's org and the person building. */
+export type BuilderAdmit = (bound: LlmBound) => Promise<PaidLlmAdmission>
+
+export interface BuildDeps {
+  admit: BuilderAdmit
+  fetchImpl?: typeof fetch
+}
 
 /** The builder model (OpenRouter id). */
 export const TOOLS_BUILDER_MODEL = "anthropic/claude-opus-5.5"
@@ -107,11 +118,17 @@ async function complete(
   env: BuildEnv,
   messages: Message[],
   maxTokens: number,
-  fetchImpl: typeof fetch,
+  deps: BuildDeps,
 ): Promise<{ text: string; usage: BuildUsage; model: string; truncated: boolean }> {
   const model = env.TOOLS_BUILDER_MODEL?.trim() || TOOLS_BUILDER_MODEL
-  const upstream = builderUpstream(env)
-  const res = await fetchImpl(upstream.url, {
+  const call = await deps.admit({
+    model, promptChars: messages.reduce((n, m) => n + m.content.length, 0), maxOutputTokens: maxTokens,
+  })
+  if (!call.ok) throw new LlmRefusedError(call)
+  // An org's own key (BYOK) goes to OpenRouter; otherwise the operator's
+  // builder pair (or the shared house key) is what the check admitted.
+  const upstream = call.source === "org" ? { apiKey: call.apiKey, url: completionsUrl(env) } : builderUpstream(env)
+  const res = await (deps.fetchImpl ?? fetch)(upstream.url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -122,9 +139,12 @@ async function complete(
   })
   if (!res.ok) {
     const text = await res.text().catch(() => "")
+    // A gateway-side 4xx proves no generation ran; anything else stays held.
+    if (providerRejectedPreModel(res.status, text)) await call.release()
     throw new Error(`builder upstream ${res.status}: ${text.slice(0, 300)}`)
   }
   const body = (await res.json()) as CompletionBody
+  await call.settleFrom(body)
   if (body.error?.message) throw new Error(`builder upstream error: ${body.error.message}`)
   return {
     text: body.choices?.[0]?.message?.content ?? "",
@@ -168,7 +188,7 @@ function gate(text: string): Gated {
  * UI bar → at most one fix pass (kept only if it passes the gates). Repairs —
  * the SPA's smoke-render retries — are a single plain call.
  */
-export async function runBuild(env: BuildEnv, req: BuildRequest, fetchImpl: typeof fetch = fetch): Promise<BuildResult> {
+export async function runBuild(env: BuildEnv, req: BuildRequest, deps: BuildDeps): Promise<BuildResult> {
   const first = await complete(
     env,
     [
@@ -176,7 +196,7 @@ export async function runBuild(env: BuildEnv, req: BuildRequest, fetchImpl: type
       { role: "user", content: buildUserMessage(req.request, req.repair, req.base) },
     ],
     TOOLS_BUILDER_MAX_TOKENS,
-    fetchImpl,
+    deps,
   )
   const model = first.model
   let usage = first.usage
@@ -203,7 +223,7 @@ export async function runBuild(env: BuildEnv, req: BuildRequest, fetchImpl: type
         { role: "user", content: buildReviewMessage({ request: req.request, requirements, manifestJson: best.manifestJson, source: best.source, findings }) },
       ],
       TOOLS_REVIEW_MAX_TOKENS,
-      fetchImpl,
+      deps,
     )
     usage = addUsage(usage, rv.usage)
     const review = parseReview(rv.text)
@@ -227,7 +247,7 @@ export async function runBuild(env: BuildEnv, req: BuildRequest, fetchImpl: type
             },
           ],
           TOOLS_BUILDER_MAX_TOKENS,
-          fetchImpl,
+          deps,
         )
         usage = addUsage(usage, fx.usage)
         const fg = gate(fx.text)

@@ -536,4 +536,88 @@ describe("ApiTokensSection", () => {
       expect(writeRow).not.toHaveTextContent("read-only")
     })
   })
+  // AQU-2102: the closed trigger used to print whatever was stored — a numeric org
+  // id, a project uuid, `90d` — so a user could not tell what the token they were
+  // about to mint would be scoped to. Each dropdown must echo the option's own text.
+  describe("scope dropdown labels", () => {
+    const ORG_NAMELESS: OrgSummary = {
+      id: 46445,
+      name: null,
+      role: { level: 600, name: "maintainer" },
+    }
+    const PROJECT_OTHER_ORG: CloudProjectSummary = {
+      id: "proj-other",
+      name: "Other Org Project",
+      gitlabProjectId: null,
+      orgId: 46445,
+      role: { level: 600, name: "maintainer", source: "invite" },
+    }
+
+    async function openMintDialog() {
+      render(<ApiTokensSection />)
+      await waitFor(() => expect(mockListCredentials).toHaveBeenCalled())
+      fireEvent.click(screen.getByRole("button", { name: "New token" }))
+      await screen.findByText("New API token")
+    }
+
+    it("shows the expiry preset's label, never its internal id", async () => {
+      await openMintDialog()
+
+      // "90 days" is preselected, so the raw id was visible on open.
+      const expiry = screen.getByRole("combobox", { name: /Expiry/i })
+      expect(expiry).toHaveTextContent("90 days")
+      expect(expiry).not.toHaveTextContent("90d")
+
+      expect(await pickSelectOption(/Expiry/i, /^30 days$/)).toHaveTextContent("30 days")
+      expect(await pickSelectOption(/Expiry/i, /^No expiry$/)).toHaveTextContent("No expiry")
+      expect(await pickSelectOption(/Expiry/i, /^90 days$/)).toHaveTextContent("90 days")
+    })
+
+    it("shows the org's name and the project's name once picked, not their ids", async () => {
+      await openMintDialog()
+
+      // Unpicked, both keep their placeholders rather than an empty box.
+      expect(screen.getByRole("combobox", { name: /Organization/i })).toHaveTextContent(
+        "No organization (personal)",
+      )
+      expect(screen.getByRole("combobox", { name: /^Project$/i })).toHaveTextContent(
+        "No project (org-wide)",
+      )
+
+      const org = await pickSelectOption(/Organization/i, /^Acme Org$/)
+      expect(org).toHaveTextContent("Acme Org")
+      expect(org).not.toHaveTextContent(String(ORG.id))
+
+      const project = await pickSelectOption(/^Project$/i, /^Maintainer Project$/)
+      expect(project).toHaveTextContent("Maintainer Project")
+      expect(project).not.toHaveTextContent(PROJECT_MAINTAINER.id)
+    })
+
+    it("falls back to the org-id label for a nameless org, matching its option text", async () => {
+      mockListMyOrgs.mockResolvedValue([ORG_NAMELESS])
+      await openMintDialog()
+
+      expect(await pickSelectOption(/Organization/i, /^Org 46445$/)).toHaveTextContent("Org 46445")
+    })
+
+    it("resets the project dropdown to its placeholder when the org changes, not to a stale name", async () => {
+      mockListMyOrgs.mockResolvedValue([ORG, ORG_NAMELESS])
+      mockFetchAccessibleProjects.mockResolvedValue({
+        ok: true,
+        projects: [PROJECT_MAINTAINER, PROJECT_OTHER_ORG],
+      })
+      await openMintDialog()
+
+      await pickSelectOption(/Organization/i, /^Acme Org$/)
+      expect(await pickSelectOption(/^Project$/i, /^Maintainer Project$/)).toHaveTextContent(
+        "Maintainer Project",
+      )
+
+      await pickSelectOption(/Organization/i, /^Org 46445$/)
+      const project = screen.getByRole("combobox", { name: /^Project$/i })
+      await waitFor(() => expect(project).toHaveTextContent("No project (org-wide)"))
+      expect(project).not.toHaveTextContent("Maintainer Project")
+      expect(project).not.toHaveTextContent(PROJECT_MAINTAINER.id)
+    })
+  })
 })

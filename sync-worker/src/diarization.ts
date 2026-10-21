@@ -40,7 +40,9 @@
 import { verifyTokenForFile, WRITE_ROLE_LEVEL, type SyncTokenClaims } from "./auth"
 import { audioObjectKey, isPathSafeId, safeAudioContentType } from "./audio"
 import { secureCompare as constantTimeEqual } from "./lib/secure-compare"
-import { checkAiSpendCeiling } from "../../db/shared/ai-spend-ceiling"
+import { DIARIZATION_GPU, modalGpuRawCents } from "../../db/shared/audio-price-card"
+import { readUsageRequest, settleWorkspaceUsage } from "../../db/shared/workspace-usage"
+import { entitleProjectAiCall, projectOrgId, releaseQuietly } from "./ai-metering"
 import {
   isAbortTimeout,
   logVendorTimeout,
@@ -64,6 +66,8 @@ export interface DiarizationEnv {
   AI_DAILY_SPEND_CEILING_USD?: string
   /** Deployment profile; "test" bypasses the spend-ceiling read cache. */
   ENVIRONMENT?: string
+  /** off | shadow | enforce (db/shared/ai-entitlement.ts, AQU-2061). */
+  BILLING_METER_MODE?: string
 }
 
 interface JobRow {
@@ -77,8 +81,12 @@ interface JobRow {
   turns_json: string | null
   error: string | null
   created_by: number | null
+  created_at: number | string
   updated_at: number | string
 }
+
+/** infra/modal/diarization.py `timeout=1800`: the longest a job can bill. */
+export const DIARIZATION_MAX_GPU_SECONDS = 1800
 
 const JSON_HEADERS = { "Content-Type": "application/json" }
 
@@ -165,13 +173,21 @@ async function start(request: Request, env: DiarizationEnv): Promise<Response> {
   const overCap = await liveJobCapExceeded(env, projectId, auth.claims.userId)
   if (overCap) return json({ error: overCap }, 429)
 
-  // Platform daily spend ceiling (AQU-1869). Only `start` is gated: status,
-  // audio and callback finish jobs that already cost money, and refusing them
-  // would burn the GPU time without keeping the result.
-  const spendCeiling = await checkAiSpendCeiling(env.AQUILLA_PG, env, "diarization")
-  if (!spendCeiling.ok) return json(spendCeiling.body, spendCeiling.status)
-
+  // The one entitlement check (AQU-2065), which also runs the platform daily
+  // spend ceiling (AQU-1869). Only `start` is gated: status, audio and callback
+  // finish jobs that already cost money, and refusing them would burn the GPU
+  // time without keeping the result. GPU work stays metered even for a BYOK
+  // org (spec Q9). The job id is the request id, so the callback can settle
+  // it. The bound is a job that runs to Modal's timeout.
   const jobId = crypto.randomUUID()
+  const entitled = await entitleProjectAiCall(env.AQUILLA_PG!, env, {
+    projectId, userId: auth.claims.userId, rail: "gpu", provider: "modal",
+    houseKey: env.DIARIZATION_SHARED_SECRET,
+    estimateRawCents: modalGpuRawCents(DIARIZATION_GPU, DIARIZATION_MAX_GPU_SECONDS), requestId: jobId,
+  })
+  if (!entitled.ok) return entitled.response
+  const { grant } = entitled
+
   const fetchToken = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "")
   const now = Date.now()
   const numSpeakers = Number.isInteger(body.numSpeakers) && body.numSpeakers! > 0 ? body.numSpeakers! : null
@@ -201,7 +217,7 @@ async function start(request: Request, env: DiarizationEnv): Promise<Response> {
       method: "POST",
       headers: JSON_HEADERS,
       body: JSON.stringify({
-        secret: env.DIARIZATION_SHARED_SECRET,
+        secret: grant.key.apiKey,
         jobId,
         audioUrl,
         callbackUrl,
@@ -210,6 +226,9 @@ async function start(request: Request, env: DiarizationEnv): Promise<Response> {
       signal: AbortSignal.timeout(VENDOR_TIMEOUT_MS.modalDiarizationStart),
     })
     if (!res.ok) {
+      // `start` validates and only then spawns the GPU job, so a 4xx other
+      // than 408 is proven free. Anything else stays held for reconciliation.
+      if (res.status >= 400 && res.status < 500 && res.status !== 408) await releaseQuietly(grant, "diarization")
       const detail = await res.text().catch(() => "")
       await setStatus(env, jobId, "failed", { error: `modal start ${res.status}: ${detail.slice(0, 200)}` })
       return json({ error: "failed to start diarization" }, 502)
@@ -312,7 +331,30 @@ async function callback(request: Request, env: DiarizationEnv): Promise<Response
   } else {
     await setStatus(env, body.jobId, "failed", { error: body.error ?? "diarization failed" })
   }
+  // A failed job ran on the GPU too, so both outcomes settle.
+  await settleDiarizationUsage(env, job)
   return json({ ok: true })
+}
+
+/**
+ * AQU-2065: settle a job's reservation at the GPU time we measured, from the
+ * job's creation to its callback. That is at least the time Modal billed, so
+ * it never undercharges. Modal retries a callback, so only a reservation that
+ * is still open settles. A job the sweep failed never calls back: its
+ * reservation stays held for reconciliation.
+ */
+async function settleDiarizationUsage(env: DiarizationEnv, job: JobRow): Promise<void> {
+  const db = env.AQUILLA_PG!
+  try {
+    const orgId = await projectOrgId(db, job.project_id)
+    if (orgId === null) return
+    const usage = await readUsageRequest(db, orgId, job.id)
+    if (usage?.state !== "reserved") return
+    const gpuSeconds = Math.max(0, (Date.now() - Number(job.created_at)) / 1000)
+    await settleWorkspaceUsage(db, orgId, job.id, modalGpuRawCents(DIARIZATION_GPU, gpuSeconds))
+  } catch (err) {
+    console.warn("[billing] diarization usage requires reconciliation", { jobId: job.id }, err)
+  }
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────

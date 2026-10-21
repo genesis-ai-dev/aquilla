@@ -38,6 +38,9 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { AssignKindField } from "@/components/AssignKindField"
 import type { AssignmentKind } from "@/lib/sync/assignments"
+import type { OverlapScope } from "@/lib/sync/assignment-overlap"
+import { useAssignmentOverlap } from "@/hooks/useAssignmentOverlap"
+import { AssignmentOverlapNotice } from "./AssignmentOverlapNotice"
 
 /**
  * Manager affordance (project_lead+) on the project overview: assign a book or
@@ -357,6 +360,24 @@ export function AssignWork({
     }
   }
 
+  // AQU-1510: say so when this would assign someone lines they already hold.
+  // No chapters ticked is the whole book, the same reading the submit takes.
+  const overlapScope = useMemo<OverlapScope | null>(
+    () => (orderedChosen.length > 0 ? { kind: "chapters", chapters: orderedChosen } : { kind: "file" }),
+    [orderedChosen],
+  )
+  const overlapFileIds = useMemo(() => (open && fileId ? [fileId] : []), [open, fileId])
+  const overlapMember = assigneeId === "" ? null : members.find((m) => m.userId === Number(assigneeId)) ?? null
+  const overlaps = useAssignmentOverlap({
+    jwt,
+    projectId,
+    fileIds: overlapFileIds,
+    scope: overlapScope,
+    assigneeUserId: overlapMember?.userId ?? null,
+    lane: laneItems.length === 1 ? laneItems[0]!.value : selectedLane,
+    kind,
+  })
+
   if (!open) {
     return (
       <Button
@@ -584,6 +605,11 @@ export function AssignWork({
             {t("common.cancel")}
           </Button>
         </div>
+        <AssignmentOverlapNotice
+          overlaps={overlaps}
+          username={overlapMember?.username ?? ""}
+          fileName={(id) => sortedFiles.find((f) => f.id === id)?.label ?? id}
+        />
         {error && <FieldError>{error}</FieldError>}
       </FieldGroup>
     </div>

@@ -257,9 +257,12 @@ export function AssignedToMe() {
               <div className="h-1.5 w-full max-w-[7.5rem] overflow-hidden rounded-full bg-muted">
                 <div className={`h-full rounded-full ${PROGRESS_BG.textValidated}`} style={{ width: `${pct}%` }} />
               </div>
-              <span className="text-xs tabular-nums text-muted-foreground">
-                {t("org.assignedToMe.cellsProgress", { done: a.cellsDone, total: a.cellsTotal, pct })}
-              </span>
+              {/* AQU-1510: the count is this assignment's cells, not the file's. */}
+              <AppTooltip content={t("org.assignedToMe.cellsProgressHint", { done: a.cellsDone, total: a.cellsTotal })}>
+                <span className="text-xs tabular-nums text-muted-foreground">
+                  {t("org.assignedToMe.cellsProgress", { done: a.cellsDone, total: a.cellsTotal, pct })}
+                </span>
+              </AppTooltip>
             </div>
           )
         },

@@ -46,6 +46,10 @@ export const dialog = defineNamespace({
     "dialog.assign.error.selectMember": "Select a member.",
     "dialog.assign.error.notProjectMember": "You can only assign work to a project member.",
     "dialog.assign.error.selfOnly": "You can only assign work to yourself.",
+    "dialog.assign.overlap.oneFile":
+      "{username} already holds {held} in {file}, so this would assign those lines twice. You can still assign it.",
+    "dialog.assign.overlap.manyFiles":
+      "{username} already holds lines in {files}, so this would assign them twice. You can still assign it.",
     "dialog.assign.error.laneOutOfScope":
       "You can only assign work in the language lanes you've been given.",
     "dialog.assign.error.assigneeNotEligible":
@@ -254,6 +258,28 @@ export const dialog = defineNamespace({
           "Inline validation error when the selected assignee turns out not to be a " +
           "project member (defense-in-depth check; the picker already filters these " +
           "out in normal use).",
+        screenshot: "assign-modal",
+      },
+      "dialog.assign.overlap.oneFile": {
+        description:
+          "Amber warning in the Assign work dialog and the Team card's assign panel when the new " +
+          "assignment covers lines the chosen person already holds in one file. It warns and " +
+          "never blocks: the Assign button still works.",
+        placeholders: {
+          username: "The person being assigned — not translated.",
+          held: "What they already hold there, e.g. \"MAT 21–28\" or a stored label like \"All verses\".",
+          file: "The file's display name, e.g. \"Matthew\".",
+        },
+        screenshot: "assign-modal",
+      },
+      "dialog.assign.overlap.manyFiles": {
+        description:
+          "Amber warning in the Assign work dialog when several picked files hold lines the " +
+          "chosen person already has. Warns only; the Assign button still works.",
+        placeholders: {
+          username: "The person being assigned — not translated.",
+          files: "Up to three file names separated by commas, then \"…\" when there are more.",
+        },
         screenshot: "assign-modal",
       },
       "dialog.assign.error.selfOnly": {

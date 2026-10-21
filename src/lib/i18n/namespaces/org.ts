@@ -981,6 +981,7 @@ export const org = defineNamespace({
     "org.assignedToMe.emptyTitle": "You have no open assignments.",
     "org.assignedToMe.loadingLabel": "Loading assignments",
     "org.assignedToMe.cellsProgress": "{done}/{total} cells · {pct}%",
+    "org.assignedToMe.cellsProgressHint": "{done} of the {total} cells in this assignment are done. The count covers only this assignment, not the whole file.",
 
     // -- SectionVisibilityBadge: "who can see this section" affordance --
     "org.sectionVisibilityBadge.floorEveryone": "Everyone can see this",
@@ -2793,6 +2794,15 @@ export const org = defineNamespace({
           done: "Whole-number count of cells completed in this assignment.",
           total: "Whole-number count of cells total in this assignment's scope.",
           pct: "Whole-number completion percentage, e.g. 40.",
+        },
+      },
+      "org.assignedToMe.cellsProgressHint": {
+        description:
+          "Tooltip on the progress caption in the 'Assigned to me' inbox, saying what the " +
+          "count is out of: the cells in that one assignment, not the whole file.",
+        placeholders: {
+          done: "Whole-number count of cells completed in this assignment.",
+          total: "Whole-number count of cells in this assignment's scope.",
         },
       },
       "org.orgHome.teamVisibilityRosterFloorHint": {

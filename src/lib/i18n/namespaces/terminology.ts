@@ -1371,8 +1371,9 @@ export const terminology = defineNamespace({
       "terminology.page.mergeDuplicatesButton": {
         description:
           "Button opening the merge-duplicate-concepts dialog, shown only once the " +
-          "project has 2+ concepts. Visible text; distinct from the same button's " +
-          "accessible name (terminology.mergeDialog.title, reused here since identical).",
+          "project has 2+ concepts. This is the button's whole accessible name as " +
+          "well as its visible text (AQU-2077): it carries no aria-label, so a " +
+          "translation must stay speakable as a voice command.",
       },
       "terminology.bibleLink.heading": {
         description:

@@ -88,8 +88,8 @@ import {
   reprojectValidatedStmts,
   type ValidationThresholdKey,
 } from "../../../db/shared/validation-threshold"
-import { markOrgMondayLinksDirty, markProjectMondayLinksDirty } from "../../../db/shared/monday-dirty"
-import { pushDirtyLinksAfterResponse } from "../lib/monday/push"
+import { markOrgSyncLinksDirty, markProjectSyncLinksDirty } from "../../../db/shared/progress-sync-dirty"
+import { pushDirtyLinksAfterResponse } from "../lib/integrations/push"
 import {
   MEDIA_DEFAULT_COLUMNS,
   MEDIA_DEFAULT_KEYS,
@@ -776,11 +776,11 @@ orgSettings.on(
       }
     }
     // AQU-1771: what the inheriting projects push to Monday moved too — for the
-    // headings rule and for an approvals default alike (db/shared/monday-dirty.ts
+    // headings rule and for an approvals default alike (db/shared/progress-sync-dirty.ts
     // lists the keys computeProjectMetrics reads). Marked once per save, however
     // many of those keys it changed; the push itself runs after the response.
     if (headingsRuleChanged || thresholdChanged) {
-      await markOrgMondayLinksDirty(c.env.AQUILLA_PG, orgId)
+      await markOrgSyncLinksDirty(c.env.AQUILLA_PG, orgId)
       pushDirtyLinksAfterResponse(c, { orgId })
     }
     // AQU-1768: a media default moved, so the projects that set none of their
@@ -1017,7 +1017,7 @@ orgSettings.post(
     }
 
     // AQU-1771: they now resolve to the org's value, so their boards are stale.
-    await markProjectMondayLinksDirty(
+    await markProjectSyncLinksDirty(
       c.env.AQUILLA_PG,
       affected.map((row) => row.project_id),
     )

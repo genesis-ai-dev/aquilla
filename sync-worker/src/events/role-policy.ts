@@ -182,6 +182,12 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // is contributor-level matching target.* for consistency.
   'cell.backtranslation.set': ROLE.CONTRIBUTOR,
 
+  // AQU-1408 §1: correcting the statistical gloss is the same act as writing a
+  // back-translation at a different grain, so it sits on the same rung. The
+  // ticket asks for "any contributor, not only an admin" — contributor(400) is
+  // that floor, and matches cell.backtranslation.set above.
+  'cell.gloss.set': ROLE.CONTRIBUTOR,
+
   // Assignments: a manager (project_lead+) assigns work to members. Reassign
   // and unassign are the same managerial authority.
   'assignment.create': ROLE.PROJECT_LEAD,

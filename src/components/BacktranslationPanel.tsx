@@ -42,12 +42,18 @@ export interface BacktranslationPanelProps {
   isBacktranslating?: boolean
   backtranslationError?: string
   statisticalGloss: string
+  /** AQU-1408 §1: true when `statisticalGloss` is a saved human correction
+   *  rather than the corpus-derived computation. */
+  glossCorrected?: boolean
   alignmentOpen: boolean
   onAlignmentOpenChange: (open: boolean) => void
   alignmentModel: AlignmentModel | null
   showAlignment: boolean
   onBacktranslate?: (cell: CellData, source: BacktranslationActionSource) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
+  /** AQU-1408 §1: save a correction to the statistical gloss. Empty text
+   *  withdraws the correction and restores the computed gloss. */
+  onSaveGloss?: (cell: CellData, glossText: string) => void
   onAlignmentSeedChange?: (seed: AlignmentSeed) => void
   confirmedSeeds?: AlignmentSeed[]
   /** AQU-462: original-language (Macula Hebrew/Greek) words for this cell, when
@@ -67,12 +73,14 @@ export function BacktranslationPanel({
   isBacktranslating,
   backtranslationError,
   statisticalGloss,
+  glossCorrected,
   alignmentOpen,
   onAlignmentOpenChange,
   alignmentModel,
   showAlignment,
   onBacktranslate,
   onSaveBacktranslation,
+  onSaveGloss,
   onAlignmentSeedChange,
   confirmedSeeds,
   originalWords,
@@ -81,6 +89,11 @@ export function BacktranslationPanel({
   const [editing, setEditing] = useState(false)
   const [editValue, setEditValue] = useState("")
   const [saving, setSaving] = useState(false)
+  // AQU-1408 §1: the gloss editor is its own state. Reusing the AI reading's
+  // would make opening one close the other, and the two are routinely read
+  // against each other — that is the whole reason both are on screen.
+  const [glossEditing, setGlossEditing] = useState(false)
+  const [glossEditValue, setGlossEditValue] = useState("")
 
   const hasTranslation = visibleTranslated.trim().length > 0
   const reading = cell.backtranslation?.trim() ?? ""
@@ -100,6 +113,32 @@ export function BacktranslationPanel({
     setEditing(false)
     setEditValue("")
   }, [])
+
+  const startGlossEdit = useCallback(() => {
+    setGlossEditValue(gloss)
+    setGlossEditing(true)
+  }, [gloss])
+
+  const cancelGlossEdit = useCallback(() => {
+    setGlossEditing(false)
+    setGlossEditValue("")
+  }, [])
+
+  /**
+   * An empty box is not a cancel: it is how a contributor says "my correction
+   * was wrong, go back to the corpus". `onSaveGloss` takes it and the cell
+   * falls back to the computed gloss, so the withdrawal reaches other members
+   * the same way the correction did.
+   */
+  const saveGlossEdit = useCallback((text: string) => {
+    const next = text.trim()
+    if (next === gloss.trim()) {
+      setGlossEditing(false)
+      return
+    }
+    onSaveGloss?.(subject, next)
+    setGlossEditing(false)
+  }, [gloss, onSaveGloss, subject])
 
   const saveEdit = useCallback((text: string) => {
     const next = text.trim()
@@ -124,26 +163,105 @@ export function BacktranslationPanel({
           absent — it is simply the first thing in the tab. */}
       {hasTranslation && !editing && (
         <section className="relative overflow-hidden rounded-xl bg-muted/40 py-2.5 pr-3 pl-4">
-          <span aria-hidden className="absolute inset-y-0 left-0 w-[3px] rounded-md bg-muted-foreground/30" />
-          <h4 className="text-[11px] font-medium text-foreground">
-            {t("editor.bt.statisticalGloss")}
-          </h4>
-          <p className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
-            {t("editor.bt.glossDescriptor")}
-          </p>
-          {gloss ? (
+          <span
+            aria-hidden
+            className={cn(
+              "absolute inset-y-0 left-0 w-[3px] rounded-md",
+              glossCorrected ? "bg-emerald-500/55" : "bg-muted-foreground/30",
+            )}
+          />
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <h4 className="text-[11px] font-medium text-foreground">
+                  {t("editor.bt.statisticalGloss")}
+                </h4>
+                {/* AQU-1408 §1: the corpus's own guess and a colleague's
+                    correction of it are different claims, and the reader is
+                    being asked to trust one of them. Say which this is. */}
+                {glossCorrected && (
+                  <span className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400">
+                    {t("editor.bt.glossCorrected")}
+                  </span>
+                )}
+              </div>
+              <p className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
+                {t("editor.bt.glossDescriptor")}
+              </p>
+            </div>
+            {/* The gloss is editable whenever there is a translation to gloss —
+                not only once the corpus managed to produce one. A project whose
+                pairs are too thin for a gloss is exactly the project whose
+                reviewers have the most to correct (AQU-1408, Biblica ETT). */}
+            {!glossEditing && (editable ? (
+              <AppTooltip content={t("editor.bt.glossEditTooltip")}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={startGlossEdit}
+                  aria-label={t("editor.bt.glossEditAria")}
+                  className="shrink-0 rounded-full text-muted-foreground hover:text-foreground"
+                >
+                  <Pencil />
+                </Button>
+              </AppTooltip>
+            ) : (
+              <AppTooltip content={t("editor.bt.glossContributorRequired")}>
+                <span className="inline-flex shrink-0">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    disabled
+                    aria-label={t("editor.bt.glossContributorRequired")}
+                    className="rounded-full text-muted-foreground"
+                  >
+                    <Pencil />
+                  </Button>
+                </span>
+              </AppTooltip>
+            ))}
+          </div>
+          {glossEditing ? (
+            <div className="mt-1.5 flex flex-col gap-1.5">
+              <textarea
+                autoFocus
+                value={glossEditValue}
+                onChange={(e) => setGlossEditValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") cancelGlossEdit()
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) saveGlossEdit(glossEditValue)
+                }}
+                rows={3}
+                aria-label={t("editor.bt.glossEditAria")}
+                className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-[13px] leading-relaxed text-foreground outline-none focus:ring-1 focus:ring-ring"
+              />
+              <p className="text-[10px] leading-relaxed text-muted-foreground/70">
+                {t("editor.bt.glossEditHint")}
+              </p>
+              <div className="flex items-center justify-end gap-1.5">
+                <Button type="button" variant="ghost" size="xs" onClick={cancelGlossEdit}>
+                  {t("common.cancel")}
+                </Button>
+                <Button type="button" size="xs" onClick={() => saveGlossEdit(glossEditValue)}>
+                  {t("common.save")}
+                </Button>
+              </div>
+            </div>
+          ) : gloss ? (
             <p className="mt-1.5 text-[13px] leading-relaxed text-foreground/80">{gloss}</p>
           ) : (
             <p className="mt-1.5 text-[11px] italic text-muted-foreground">
               {t("editor.bt.glossNotEnoughPairs")}
             </p>
           )}
-          {disagree && (
+          {disagree && !glossEditing && (
             <p className="mt-1.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
               {t("editor.bt.pairsDisagree")}
             </p>
           )}
-          {disagree && editable && (
+          {disagree && editable && !glossEditing && (
             <Button
               type="button"
               variant="ghost"
@@ -154,7 +272,10 @@ export function BacktranslationPanel({
               {t("editor.bt.usePairsInstead")}
             </Button>
           )}
-          {gloss && (
+          {/* The disclaimer describes how the COMPUTED gloss was made. Once a
+              person has corrected it, saying "built statistically, expect rough
+              word choices" is no longer true of what is on screen. */}
+          {gloss && !glossCorrected && !glossEditing && (
             <p className="mt-1.5 text-[10px] leading-relaxed text-muted-foreground/70">
               {t("editor.bt.glossDisclaimer")}
             </p>

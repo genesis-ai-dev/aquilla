@@ -145,6 +145,10 @@ export type EventKind =
   // Back-translations (non-chain-mutating; contributor-level).
   // Does NOT move cells.event_id; does NOT affect validations or endorsements.
   | 'cell.backtranslation.set'
+  // AQU-1408 §1: a hand-corrected statistical gloss. Its own kind rather than
+  // a flag on the BT event because the two are different readings of the same
+  // commit and must both be addressable — see db/postgres/migrations/0182.
+  | 'cell.gloss.set'
   // Assignments (project-level, non-chain-mutating; project-lead+). Carry a
   // fileId on the envelope for auth/routing like comments, but their scope is
   // project-level — resolved into assignment_cells from the payload.
@@ -969,6 +973,23 @@ export interface EventPayloads {
     /** AQU-1462: lane whose translation this back-translation describes. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
+  }
+
+  // ── Statistical gloss (non-chain-mutating) ─────────────────────────────
+  // AQU-1408 §1. The gloss is computed from the project's own translated
+  // pairs; this event carries the text a contributor PUT IN ITS PLACE. There
+  // is no `polished` flag: every row here is a human correction by
+  // construction, which is also why §2 can seed the glosser from it without
+  // asking who wrote it. An empty `glossText` clears the correction and falls
+  // the cell back to the computed gloss.
+  'cell.gloss.set': {
+    glossText: string
+    /** The target.cell.commit / target.cell.create event_id this gloss reads. */
+    targetEventId: string
+    /** Lane whose translation this gloss reads (legacy_tag; '' is the default). */
+    targetLang?: string
+    /** The lane row's id, when the caller has it. Must name the same lane as `targetLang`. */
     laneId?: string
   }
 

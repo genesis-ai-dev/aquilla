@@ -267,7 +267,8 @@ describe("an admitted call settles the cost the provider reported, one row per c
     const res = await importParse(meterEnv("shadow"))
     expect(res.status).toBe(200)
     expect(modelCalls).toHaveLength(1)
-    expect(await ledger()).toEqual([settledRow("llm", 1)])
+    // The container's own seconds are a separate `sandbox` row (AQU-2066).
+    expect((await ledger()).filter((r) => r.rail !== "sandbox")).toEqual([settledRow("llm", 1)])
   })
 
   it("knowledge indexing (#23): asks for usage.cost and bills the system user", async () => {

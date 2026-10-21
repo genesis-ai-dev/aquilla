@@ -165,11 +165,27 @@ function inspection(me: LangQuestMe) {
   }
 }
 
+/** Postgres's "relation does not exist": migration 0185 has not reached this database yet. */
+function isMissingLinkTable(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err)
+  return msg.includes("langquest_links") && (msg.includes("does not exist") || msg.includes("undefined_table"))
+}
+
+// Every project open asks this (the LangQuest badge), so on a database the
+// migration has not reached yet it answers "not linked" rather than putting a
+// 500 on every page — the precedent is lib/credits.ts isMissingTableError.
+// The routes that only a linked project calls still fail loudly.
 langquest.get("/projects/:projectId/link", authMiddleware, async (c) => {
   const guard = await projectGuard(c, null)
   if (guard instanceof Response) return guard
-  const link = await getLink(c.env, guard.projectId)
-  return c.json({ link: link ? linkOut(link) : null })
+  try {
+    const link = await getLink(c.env, guard.projectId)
+    return c.json({ link: link ? linkOut(link) : null })
+  } catch (err) {
+    if (!isMissingLinkTable(err)) throw err
+    console.warn("[langquest] langquest_links is missing — apply migration 0185 to this database")
+    return c.json({ link: null })
+  }
 })
 
 const putLinkSchema = tokenSchema.extend({ languageId: z.string().min(1).max(500) })

@@ -198,6 +198,20 @@ describe("connecting a token", () => {
     expect(text).not.toContain(stored!.token_enc)
   })
 
+  it("opening a project never errors on a database migration 0185 has not reached", async () => {
+    await seedOrgProject()
+    await env.AQUILLA_PG.prepare("ALTER TABLE langquest_passages RENAME TO langquest_passages_away").run()
+    await env.AQUILLA_PG.prepare("ALTER TABLE langquest_links RENAME TO langquest_links_away").run()
+    try {
+      const res = await request("tom", "GET", "/api/v2/langquest/projects/proj-1/link")
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ link: null })
+    } finally {
+      await env.AQUILLA_PG.prepare("ALTER TABLE langquest_links_away RENAME TO langquest_links").run()
+      await env.AQUILLA_PG.prepare("ALTER TABLE langquest_passages_away RENAME TO langquest_passages").run()
+    }
+  })
+
   it("only a maintainer can link a project", async () => {
     await seedOrgProject()
     install(makeFake())

@@ -2,7 +2,7 @@ import { env } from 'cloudflare:test'
 import { afterEach, expect, it, vi } from 'vitest'
 import app from '../index'
 import { authHeader, jwtFor } from './helpers/db'
-import { completedPayment, config } from './helpers/workspace-billing'
+import { completedPayment, config, pinSmallAllowancePolicy } from './helpers/workspace-billing'
 import { readBillingWorkspace } from '../lib/billing/workspace'
 import { readUsageTotals, reserveWorkspaceUsage, settleWorkspaceUsage } from '../lib/billing/workspace-usage'
 import { resetTranscriptionRateCache } from '../lib/billing/transcription-usage'
@@ -10,8 +10,9 @@ import { resetTranscriptionRateCache } from '../lib/billing/transcription-usage'
 const projectId = 'transcription-usage-project'
 afterEach(() => { vi.unstubAllGlobals(); resetTranscriptionRateCache() })
 async function fixture() {
-  const paid = await completedPayment('pro', 'month')
+  const paid = await completedPayment('team', 'month', undefined, 'personal')
   expect((await paid.send()).status).toBe(200)
+  await pinSmallAllowancePolicy()
   await env.AQUILLA_PG.prepare(
     "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, 'Audio', 1, 1)",
   ).bind(projectId).run()
@@ -20,7 +21,7 @@ async function fixture() {
   }, { headers: { 'X-Generation-Id': 'gen-whisper' } }))
   vi.stubGlobal('fetch', vi.fn(async input => {
     if (String(input).includes('/models?')) return Response.json({ data: [
-      { id: 'openai/whisper-1', pricing: { prompt: '0.0001' } },
+      { id: 'openai/whisper-large-v3', pricing: { prompt: '0.0001' } },
     ] })
     if (String(input).endsWith('/audio/transcriptions')) return provider()
     throw new Error(`unexpected provider ${input}`)
@@ -61,8 +62,8 @@ it('meters real client WAV output through auth and settles provider cost to capa
 it('refuses exhausted weekly capacity before invoking Whisper', async () => {
   const f = await fixture()
   await reserveWorkspaceUsage(env.AQUILLA_PG, { orgId: 1, projectId, userId: 1,
-    requestId: 'spent', rail: 'llm', maxRawCostCents: 12.5 })
-  await settleWorkspaceUsage(env.AQUILLA_PG, 1, 'spent', 12.5)
+    requestId: 'spent', rail: 'llm', maxRawCostCents: 62.5 })
+  await settleWorkspaceUsage(env.AQUILLA_PG, 1, 'spent', 62.5)
   const response = await f.send()
   expect(response.status).toBe(429)
   expect(await response.json()).toEqual({ error: 'weekly_ai_allowance_exhausted' })

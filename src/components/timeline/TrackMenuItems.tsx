@@ -28,7 +28,7 @@
 // AND IF NOTHING IS OFFERED, THE MENU DOES NOT OPEN. See `trackMenuIsEmpty`.
 
 import type { ReactNode } from "react"
-import { FolderPlus, FolderMinus, Palette, Pencil, Rows3, Trash2 } from "lucide-react"
+import { EyeOff, FolderPlus, FolderMinus, Palette, Pencil, Rows3, Trash2 } from "lucide-react"
 import {
   ContextMenuItem,
   ContextMenuRadioGroup,
@@ -92,6 +92,8 @@ export function trackMenuScopes({
   canColour,
   canEdit,
   canPromote = false,
+  canHide = false,
+  busyIds,
 }: {
   targets: readonly TimelineTrack[]
   canRename: boolean
@@ -100,8 +102,21 @@ export function trackMenuScopes({
   /** AQU-1566: the file is a linked video with no rows and the person is a
    *  maintainer, so a caption track may become its rows. */
   canPromote?: boolean
+  /** AQU-1684: anyone may hide tracks on their own screen. */
+  canHide?: boolean
+  /** AQU-1684: tracks that may not be hidden right now — recording, or being
+   *  dragged. */
+  busyIds?: ReadonlySet<string>
 }) {
   const only = targets.length === 1 ? targets[0] : null
+
+  // AQU-1684: every track but a folder can be hidden — a folder is a heading,
+  // and closing it is how its tracks are put away. Offered while one of them
+  // is recording or being dragged too, but greyed out: the lane must not
+  // vanish from under the take or the pointer, and saying why beats a menu
+  // that changes shape mid-gesture.
+  const hideable = canHide ? targets.filter((tr) => tr.kind !== "folder") : []
+  const hideBusy = hideable.some((tr) => busyIds?.has(tr.id) ?? false)
 
   // AQU-1566: one SOURCE caption track that has its own content, and only that.
   // The server copies exactly one source caption file into the rows, so a
@@ -143,6 +158,8 @@ export function trackMenuScopes({
   return {
     only,
     promotable,
+    hideable,
+    hideBusy,
     rename: canRename ? only : null,
     colourable: canColour ? colourable : [],
     foldable: canEdit ? foldable : [],
@@ -155,6 +172,7 @@ export function trackMenuScopes({
 export function trackMenuIsEmpty(scopes: ReturnType<typeof trackMenuScopes>): boolean {
   return (
     scopes.promotable == null &&
+    scopes.hideable.length === 0 &&
     scopes.rename == null &&
     scopes.colourable.length === 0 &&
     scopes.foldable.length === 0 &&
@@ -170,6 +188,8 @@ export function trackMenuItems({
   onSetColor,
   editing,
   onPromote,
+  onHide,
+  busyTrackIds,
 }: {
   /**
    * The tracks this menu acts on — the selection when the right-clicked row is
@@ -189,14 +209,20 @@ export function trackMenuItems({
    *  video with no rows; NOT gated on the track-editing setting (Sam). The
    *  caller asks for confirmation before anything is written. */
   onPromote?: (trackId: string) => void
+  /** AQU-1684: hide these tracks on this person's own screen. Everyone has it. */
+  onHide?: (trackIds: readonly string[]) => void
+  /** AQU-1684: tracks recording or being dragged, which may not be hidden now. */
+  busyTrackIds?: ReadonlySet<string>
 }): ReactNode {
   // ONE AUTHORITY, read here and by the trigger that decided to open at all.
-  const { promotable, rename, colourable, foldable, inAFolder, deletable } = trackMenuScopes({
+  const { promotable, hideable, hideBusy, rename, colourable, foldable, inAFolder, deletable } = trackMenuScopes({
     targets,
     canRename: Boolean(onRename),
     canColour: Boolean(onSetColor),
     canEdit: Boolean(editing),
     canPromote: Boolean(onPromote),
+    canHide: Boolean(onHide),
+    busyIds: busyTrackIds,
   })
   const anythingBelowPromote = rename != null || colourable.length > 0 || foldable.length > 0
     || inAFolder.length > 0 || deletable.length > 0
@@ -213,7 +239,24 @@ export function trackMenuItems({
           {t("editor.timeline.trackUseAsRows")}
         </ContextMenuItem>
       )}
-      {onPromote && promotable && anythingBelowPromote && <ContextMenuSeparator />}
+      {onPromote && promotable && (hideable.length > 0 || anythingBelowPromote) && <ContextMenuSeparator />}
+
+      {/* AQU-1684: everyone's, and about this screen alone, so it sits above
+          the maintainers' items that change the file for everybody. */}
+      {onHide && hideable.length > 0 && (
+        <ContextMenuItem
+          disabled={hideBusy}
+          title={hideBusy ? t("editor.timeline.trackHideBusy") : undefined}
+          data-testid="tl-track-hide"
+          onClick={() => onHide(ids(hideable))}
+        >
+          <EyeOff className="h-3.5 w-3.5" />
+          {hideable.length > 1
+            ? t("editor.timeline.trackHideCount", { count: hideable.length })
+            : t("editor.timeline.trackHide")}
+        </ContextMenuItem>
+      )}
+      {onHide && hideable.length > 0 && anythingBelowPromote && <ContextMenuSeparator />}
 
       {/* Renaming is a single-track verb: there is one field and one name.
           With several selected it is simply absent rather than renaming an

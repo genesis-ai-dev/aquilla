@@ -290,11 +290,33 @@ export interface UpdateProjectSettingsCommand {
  *  cell.audio.attach + cell.audio.select events. The artifact must be an
  *  `audio`-kind artifact in the same project (uploaded via the REST artifact
  *  endpoint with `x-artifact-kind: audio`). */
+/** AQU-2086: the two slots of the default target-audio track a LinkMedia take
+ *  may land in. `cell_audio.slot` is an open string (an added track addresses
+ *  its takes by its own track id), but the Agent API names only these two —
+ *  the ones the Takes list, the Target track and the dubbing export read. */
+export const LINK_MEDIA_SLOTS = ['recording', 'generatedVoice'] as const
+export type LinkMediaSlot = (typeof LINK_MEDIA_SLOTS)[number]
+
+/** AQU-2086: sanity bound on a caller-stated clip length (24 h). */
+export const LINK_MEDIA_MAX_DURATION_MS = 24 * 60 * 60 * 1000
+
 export interface LinkMediaCommand {
   kind: 'LinkMedia'
   fileId: string
   cellId: string
   artifactId: string
+  /** AQU-2086: `lanes.id` of the target lane the take belongs to. Required, as
+   *  for SetTranslation (AQU-1615): a take that names no lane is filed under
+   *  the legacy '' lane, and a tagged lane's editor view lists only its own
+   *  takes — the commit succeeded and the cell still said "No takes yet". */
+  laneId: string
+  /** AQU-2086: which slot the clip takes. Absent = `recording` (a recorded
+   *  take); `generatedVoice` lands externally synthesized voice where in-app
+   *  TTS takes live, reviewed and exported the same way. */
+  slot?: LinkMediaSlot
+  /** AQU-2086: the clip's length in ms when the caller knows it. The artifact
+   *  upload does no decoding, so this is the only way a take arrives with one. */
+  durationMs?: number
 }
 
 export type Command =
@@ -946,11 +968,43 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
         issues.push({ index, message: 'LinkMedia.artifactId must be a non-empty string' })
         return
       }
+      // AQU-2086: the lane is required and is lanes.id, exactly as SetTranslation's.
+      if (c.laneId === undefined) {
+        issues.push({ index, message: laneIdRequiredMessage('LinkMedia.laneId') })
+        return
+      }
+      if (!isNonEmptyString(c.laneId) || c.laneId.length > 64) {
+        issues.push({ index, message: 'LinkMedia.laneId lane does not exist' })
+        return
+      }
+      if (c.slot !== undefined && !LINK_MEDIA_SLOTS.includes(c.slot as LinkMediaSlot)) {
+        issues.push({
+          index,
+          message: `LinkMedia.slot must be one of ${LINK_MEDIA_SLOTS.map((s) => `"${s}"`).join(', ')} when present`,
+        })
+        return
+      }
+      if (
+        c.durationMs !== undefined &&
+        (typeof c.durationMs !== 'number' ||
+          !Number.isInteger(c.durationMs) ||
+          c.durationMs <= 0 ||
+          c.durationMs > LINK_MEDIA_MAX_DURATION_MS)
+      ) {
+        issues.push({
+          index,
+          message: `LinkMedia.durationMs must be a positive integer of milliseconds (at most ${LINK_MEDIA_MAX_DURATION_MS}) when present`,
+        })
+        return
+      }
       commands.push({
         kind: 'LinkMedia',
         fileId: c.fileId,
         cellId: c.cellId,
         artifactId: c.artifactId,
+        laneId: c.laneId,
+        ...(c.slot !== undefined ? { slot: c.slot as LinkMediaSlot } : {}),
+        ...(c.durationMs !== undefined ? { durationMs: c.durationMs } : {}),
       })
       return
     }

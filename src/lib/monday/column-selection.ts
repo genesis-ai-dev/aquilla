@@ -28,6 +28,13 @@ export const RECOMMENDED_METRICS: readonly MondayMetricKey[] = [
   "schedule_status",
 ]
 
+/**
+ * AQU-1989: the columns that put people's names on the board. Never in the
+ * recommended set, so a new board carries no names unless someone ticks one;
+ * while one is ticked the picker says who will see them.
+ */
+export const NAME_METRICS: readonly MondayMetricKey[] = ["project_manager", "translators"]
+
 export type MondayColumnGroupKey = "progress" | "schedule" | "team"
 
 /** The three groups the picker shows; every catalog column but Aquilla ID is in one. */
@@ -107,6 +114,15 @@ export function metricsToAdd(
   return MONDAY_COLUMN_CATALOG.map((c) => c.metric).filter(
     (metric) => selected.has(metric) && !rows.some((r) => r.metric === metric && r.columnId),
   )
+}
+
+/**
+ * AQU-2087: the columns for a board Aquilla makes, in the order the picker
+ * lists them (Progress, Schedule, Team), with Aquilla ID last.
+ */
+export function newBoardMetrics(selected: ReadonlySet<MondayMetricKey>): MondayMetricKey[] {
+  const ordered = MONDAY_COLUMN_GROUPS.flatMap((group) => group.metrics).filter((metric) => selected.has(metric))
+  return [...ordered, REQUIRED_METRIC]
 }
 
 /**

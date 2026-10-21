@@ -364,6 +364,11 @@ export interface PlannedEventIds {
     artifactId: string
     attachEventId: string
     selectEventId: string
+    /** AQU-2086: the take's native audio id — cell-seeded like a recorded
+     *  take's (db/shared/audio-id.ts), minted at prepare so a crash-retry
+     *  copies to and attaches the SAME id. Absent on plans staged before
+     *  AQU-2086; commit then falls back to the artifact's own audio_id. */
+    audioId?: string
   }[]
   /** InsertCell / DeleteCell / SplitCell: the whole structural plan — minted
    *  event ids, pinned parent heads, and the prepare-time cut text. */
@@ -454,6 +459,20 @@ export interface ChangesetReceipt {
   committedAt: string
   /** PlanImport: the created file's id. */
   fileId?: string
+  /** AQU-2086 LinkMedia: one entry per attach that landed. */
+  media?: LinkMediaReceiptEntry[]
+}
+
+/** AQU-2086: what a committed LinkMedia command actually attached — the native
+ *  take id the app plays and lists (NOT the artifact's audio_id, which is only
+ *  the upload's storage name), with the slot and lane it took. */
+export interface LinkMediaReceiptEntry {
+  fileId: string
+  cellId: string
+  artifactId: string
+  audioId: string
+  slot: string
+  laneId?: string
 }
 
 /** AQU-1185: one applied membership change, recorded on the receipt so the

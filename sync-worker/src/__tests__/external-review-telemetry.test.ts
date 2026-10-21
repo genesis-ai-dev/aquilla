@@ -254,10 +254,18 @@ describe('review telemetry — builders', () => {
     expect(server).toEqual(cellValidationEvent(true, {
       medium: 'text', projectId: 'p', fileId: 'f1', cellId: UUID_CELL, lane: 'es', source: 'api', auto: false, surface: 'api',
     }))
-    const [attach] = linkMediaTelemetry('p', [{ fileId: 'f1', cellId: UUID_CELL }], 'agent')
+    // AQU-2086: the command's slot and lane, and a stated duration, ride through.
+    const [attach] = linkMediaTelemetry(
+      'p',
+      [{ fileId: 'f1', cellId: UUID_CELL, slot: 'generatedVoice', lane: 'ar', durationMs: 1500 }],
+      'agent',
+    )
     expect(attach).toEqual(audioActionEvent({
-      origin: 'attach', projectId: 'p', fileId: 'f1', cellId: UUID_CELL, slot: 'recording', lane: '', source: 'agent', surface: 'api',
+      origin: 'attach', projectId: 'p', fileId: 'f1', cellId: UUID_CELL, slot: 'generatedVoice', lane: 'ar',
+      durationMs: 1500, source: 'agent', surface: 'api',
     }))
+    const [plain] = linkMediaTelemetry('p', [{ fileId: 'f1', cellId: UUID_CELL, slot: 'recording', lane: '' }], 'agent')
+    expect(plain.properties).not.toHaveProperty('duration_ms')
   })
 
   it('each line keeps its own lane when one action spans lanes', () => {
@@ -283,7 +291,7 @@ describe('review telemetry — builders', () => {
   })
 
   it('sends nothing when POSTHOG_KEY is blank or unset', async () => {
-    const events = linkMediaTelemetry('p', [{ fileId: 'f', cellId: 'c' }], 'api')
+    const events = linkMediaTelemetry('p', [{ fileId: 'f', cellId: 'c', slot: 'recording', lane: '' }], 'api')
     sendReviewTelemetry({ POSTHOG_KEY: '', POSTHOG_HOST: PH_HOST }, ctx, 'alice', events)
     sendReviewTelemetry({ POSTHOG_KEY: '   ' }, ctx, 'alice', events)
     sendReviewTelemetry({}, ctx, 'alice', events)
@@ -294,7 +302,7 @@ describe('review telemetry — builders', () => {
   it('never throws, even when PostHog is unreachable', async () => {
     fetchSpy.mockRejectedValue(new TypeError('network down'))
     const err = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const events = linkMediaTelemetry('p', [{ fileId: 'f', cellId: 'c' }], 'api')
+    const events = linkMediaTelemetry('p', [{ fileId: 'f', cellId: 'c', slot: 'recording', lane: '' }], 'api')
     expect(() => sendReviewTelemetry(makeEnv(tdb.db), ctx, 'alice', events)).not.toThrow()
     await expect(Promise.all(pending)).resolves.toBeDefined()
     expect(err).toHaveBeenCalledWith('[review-telemetry] dropped events:', 'TypeError')
@@ -600,7 +608,7 @@ describe('review telemetry — LinkMedia commits', () => {
     const { artifactId, audioId } = (await upload.json()) as { artifactId: string; audioId: string }
 
     const { body: prep } = await prepare(env, contributor.token, [
-      { kind: 'LinkMedia', fileId: FILE, cellId: UUID_CELL, artifactId },
+      { kind: 'LinkMedia', fileId: FILE, cellId: UUID_CELL, artifactId, laneId: 'deflane1' },
     ])
     expect(await posthogBatches()).toHaveLength(0)
 
@@ -641,7 +649,7 @@ describe('sendReviewTelemetry on a local stack', () => {
   it('prints what would have been sent instead of sending it', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
     const info = vi.spyOn(console, 'info').mockImplementation(() => {})
-    const events = linkMediaTelemetry('p', [{ fileId: 'f1', cellId: 'c1' }], 'api')
+    const events = linkMediaTelemetry('p', [{ fileId: 'f1', cellId: 'c1', slot: 'recording', lane: '' }], 'api')
     sendReviewTelemetry({ POSTHOG_KEY: '', ENVIRONMENT: 'local' }, undefined, 'alice', events)
     expect(fetchSpy).not.toHaveBeenCalled()
     expect(info).toHaveBeenCalledWith('[review-telemetry]', 'audio attached', expect.stringContaining('"surface":"api"'))

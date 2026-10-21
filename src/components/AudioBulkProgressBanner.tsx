@@ -3,22 +3,18 @@
 
 import { X } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { useFormat } from "@/lib/i18n/format"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
-import {
-  useBatchProgress,
-  cancelBatchTranscribe,
-  cancelBatchSynth,
-  cancelBatchMeasure,
-} from "@/lib/audio/batch-audio"
-import { cancelBatchChangeVoice } from "@/lib/audio/change-voice-batch"
+import { useBatchProgress } from "@/lib/audio/batch-progress"
 
 export function AudioBulkProgressBanner() {
   const t = useT()
+  const format = useFormat()
   const progress = useBatchProgress()
   if (!progress) return null
 
-  const { kind, total, done, cancelled } = progress
+  const { kind, total, done, cancelled, waitingUntil } = progress
   const pct = total > 0 ? Math.round((done / total) * 100) : 0
   const label =
     kind === "transcribe"
@@ -28,11 +24,18 @@ export function AudioBulkProgressBanner() {
         : kind === "changeVoice"
           ? t("audio.bulkProgress.changingVoices")
           : t("common.measuringLengths")
+  // AQU-2093: the batch drivers load on demand. A running batch has already
+  // loaded its own, so this resolves straight away.
   const handleCancel = () => {
-    if (kind === "transcribe") cancelBatchTranscribe()
-    else if (kind === "synth") cancelBatchSynth()
-    else if (kind === "changeVoice") cancelBatchChangeVoice()
-    else cancelBatchMeasure()
+    if (kind === "changeVoice") {
+      void import("@/lib/audio/change-voice-batch").then((m) => m.cancelBatchChangeVoice())
+      return
+    }
+    void import("@/lib/audio/batch-audio").then((m) => {
+      if (kind === "transcribe") m.cancelBatchTranscribe()
+      else if (kind === "synth") m.cancelBatchSynth()
+      else m.cancelBatchMeasure()
+    })
   }
 
   return (
@@ -47,6 +50,12 @@ export function AudioBulkProgressBanner() {
       <span className="tabular-nums text-muted-foreground">
         {done}/{total}
       </span>
+      {/* AQU-1681: the hosted limit paused the batch; it carries on by itself. */}
+      {waitingUntil !== undefined && !cancelled && (
+        <span className="text-muted-foreground" data-testid="bulk-progress-waiting">
+          {t("audio.bulkProgress.waitingForLimit", { time: format.time(waitingUntil) })}
+        </span>
+      )}
       {!cancelled && (
         <AppTooltip content={t("audio.bulkProgress.cancelTooltip")}>
           <Button

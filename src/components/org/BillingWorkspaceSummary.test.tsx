@@ -5,7 +5,7 @@ import type { BillingWorkspace } from '@/lib/sync/billing-workspace'
 
 const workspace: BillingWorkspace = {
   orgId: 7, name: 'Translation team', scope: 'team',
-  eligibility: { reason: 'ready', offers: ['team', 'team_20x'] },
+  eligibility: { reason: 'ready', offers: ['team'] },
   entitlement: null, usagePercent: null, checkoutEnabled: false,
 }
 afterEach(() => vi.unstubAllGlobals())
@@ -34,7 +34,7 @@ describe('billing workspace API → client → settings', () => {
   it('shows the persisted paid-plan period without inventing measured usage', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ ...workspace,
       eligibility: { reason: 'already_subscribed', offers: [] },
-      entitlement: { offer: 'team_20x', scope: 'team',
+      entitlement: { offer: 'team', scope: 'team',
         priceVersion: '2026-09-baseline', entitlementVersion: '2026-09-weekly',
         usagePeriodStart: '2026-09-11T12:00:00.000Z',
         usagePeriodEnd: '2026-09-18T12:00:00.000Z' },
@@ -50,7 +50,7 @@ describe('billing workspace API → client → settings', () => {
   it('shows measured weekly usage as a capped percentage with its reset time', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ ...workspace,
       eligibility: { reason: 'already_subscribed', offers: [] },
-      entitlement: { offer: 'pro', scope: 'personal', billingInterval: 'month',
+      entitlement: { offer: 'team', scope: 'team', billingInterval: 'month',
         priceVersion: '2026-09-baseline', entitlementVersion: '2026-09-weekly',
         usagePeriodStart: '2026-09-11T12:00:00.000Z', usagePeriodEnd: '2026-09-18T12:00:00.000Z' },
       usagePercent: 37, usageResetsAt: '2026-09-18T12:00:00.000Z',

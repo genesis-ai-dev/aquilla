@@ -60,6 +60,13 @@ export interface TranscribeSuccess {
   chunks: Array<{ text: string; start: number; end: number }>
   model: AsrModel
   timingsApproximate: boolean
+  /**
+   * AQU-1681: what `chunks` are — words, whole segments, or nothing timed.
+   * The client sends a minute of a recording at a time and hands each word
+   * back to the row it was spoken in; a sentence-long segment can span two
+   * rows, so it needs to know.
+   */
+  granularity: "word" | "segment" | "none"
 }
 
 export type TranscribeResult =
@@ -234,6 +241,7 @@ export async function transcribe(env: Env, input: TranscribeInput): Promise<Tran
       body: {
         text, chunks: words.map(({ text, start, end }) => ({ text, start, end })),
         model, timingsApproximate: timingsApproximate ?? false,
+        granularity: words.length ? "word" : "none",
       },
     }
   }
@@ -258,6 +266,10 @@ export async function transcribe(env: Env, input: TranscribeInput): Promise<Tran
     generationId = response.headers.get("X-Generation-Id") ?? undefined
     if (!response.ok) {
       if (usage) await holdChatUsage(env, usage, generationId)
+      // Keep OpenRouter's reason in the logs: a routing refusal (no endpoint
+      // allowed by the account's data policy) looked exactly like an outage.
+      const detail = (await response.text().catch(() => "")).slice(0, 300)
+      console.error(`[transcription] ${openRouterModel} upstream ${response.status}: ${detail}`)
       return fail(502, "Transcription provider failed")
     }
     const data = await response.json() as Record<string, unknown>
@@ -282,7 +294,10 @@ export async function transcribe(env: Env, input: TranscribeInput): Promise<Tran
     return {
       ok: true, headers,
       creditsCharged: usage ? (providerCents === null ? null : toCredits(providerCents)) : toCredits(providerCents ?? bound),
-      body: { text, chunks, model, timingsApproximate: false },
+      body: {
+        text, chunks, model, timingsApproximate: false,
+        granularity: words?.length ? "word" : segments?.length ? "segment" : "none",
+      },
     }
   } catch {
     if (usage) await holdChatUsage(env, usage, generationId)

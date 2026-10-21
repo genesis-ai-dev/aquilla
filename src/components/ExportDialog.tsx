@@ -90,6 +90,7 @@ import {
   hasExportMemory,
   readExportMemory,
   writeExportMemory,
+  type ExportDialogMemory,
   type ExportSection,
   type SubtitleTarget,
 } from "@/lib/export/export-dialog-memory"
@@ -622,6 +623,9 @@ export function ExportDialog({
   const [vttIncludeSource, setVttIncludeSource] = useState(false)
   /** Chapter stitch only. Off keeps each chapter file to its verses. */
   const [includeChapterHeadings, setIncludeChapterHeadings] = useState(false)
+  /** AQU-1575, Audio by line only: copy each take as stored, or write every
+   *  take as 16-bit / 48 kHz / mono WAV for a broadcast deliverable. */
+  const [lineAudioFormat, setLineAudioFormat] = useState<ExportDialogMemory["lineAudioFormat"]>("original")
   /** Which audio deliverable the Audio card will produce. Mix tracks, a review
    *  folder, and a chapter stitch share a card and a button rather than
    *  competing as separate entries in the format list. */
@@ -670,6 +674,7 @@ export function ExportDialog({
       setVttExcludeLabels(remembered.excludeLabels)
       setVttIncludeSource(remembered.includeSource)
       setIncludeChapterHeadings(remembered.includeChapterHeadings)
+      setLineAudioFormat(remembered.lineAudioFormat)
       // The remembered format is checked against what is actually on offer —
       // ids come and go with the file type and the build, and selecting one
       // that is no longer listed would leave the radio group with no selection
@@ -894,6 +899,7 @@ export function ExportDialog({
       excludeLabels: vttExcludeLabels,
       includeSource: vttIncludeSource,
       includeChapterHeadings,
+      lineAudioFormat,
     })
   }, [
     open,
@@ -907,6 +913,7 @@ export function ExportDialog({
     vttExcludeLabels,
     vttIncludeSource,
     includeChapterHeadings,
+    lineAudioFormat,
   ])
 
   /**
@@ -1528,12 +1535,16 @@ export function ExportDialog({
         exportToastRef.current = null
       } else if (fmt === "audio-by-line") {
         // The other shape (Sam, 2026-08-18: "a separate track for each
-        // recording? With timing data?"). No decoding — the stored bytes are
-        // copied straight across, so this is lossless and fast where the
-        // character export has to resample everything onto one timeline.
-        setStatus({ kind: "busy", msg: "Collecting recordings…" })
+        // recording? With timing data?"). By default no decoding — the stored
+        // bytes are copied straight across, so this is lossless and fast where
+        // the character export has to resample everything onto one timeline.
+        // AQU-1575: the WAV choice decodes every take and writes it again as
+        // 16-bit / 48 kHz / mono.
+        const lineWav = lineAudioFormat === "wav"
+        setStatus({ kind: "busy", msg: lineWav ? t("importExport.status.decodingAudio") : "Collecting recordings…" })
         const { exportAudioPerLine } = await import("@/lib/export/audio-per-line")
         const { fetchCellAudio } = await import("@/lib/audio/upload")
+        const decode = lineWav ? (await import("@/lib/audio/decode-mono")).decodeToMono48k : undefined
         const getSyncToken = (_pid: string, fileId: string) => getToken(fileId)
         const result = await exportAudioPerLine({
           cells: audioExportCells,
@@ -1548,7 +1559,15 @@ export function ExportDialog({
           fileBase: defaultBaseName,
           fetchBytes: ({ projectId: pid, fileId, audioId, ext }) =>
             fetchCellAudio({ projectId: pid, fileId, audioId, ext, getSyncToken }),
-          onProgress: (d, t) => setStatus({ kind: "busy", msg: `Collecting ${d}/${t}…` }),
+          format: lineAudioFormat,
+          decode,
+          onProgress: (d, tot) =>
+            setStatus({
+              kind: "busy",
+              msg: lineWav
+                ? t("importExport.status.decodingCount", { done: d, total: tot })
+                : `Collecting ${d}/${tot}…`,
+            }),
         })
         if (result.files === 0) {
           setStatus({
@@ -2103,6 +2122,23 @@ export function ExportDialog({
           )
   }
 
+  /** AQU-1575: Audio by line copies each take as stored, or writes every take
+   *  as the WAV a broadcast studio asks for. Same checkbox shape as the
+   *  chapter stitch's heading option, and remembered with it. */
+  const renderLineFormatOption = () => (
+    <label className="flex items-start gap-2 text-xs text-muted-foreground">
+      <Checkbox
+        data-testid="export-line-audio-wav"
+        checked={lineAudioFormat === "wav"}
+        onCheckedChange={(c) => setLineAudioFormat(c === true ? "wav" : "original")}
+      />
+      <span className="flex flex-col gap-0.5">
+        <span className="text-foreground">{t("importExport.dialog.lineAudioWav")}</span>
+        <span>{t("importExport.dialog.lineAudioWavHint")}</span>
+      </span>
+    </label>
+  )
+
   /** How many verses will be stitched, and into how many chapter files. */
   const renderChapterPreview = () => {
     const preview = chapterPreview
@@ -2290,6 +2326,7 @@ export function ExportDialog({
                   </label>
                 ))}
               </RadioGroup>
+              {audioMode === "audio-by-line" && renderLineFormatOption()}
               {/* The preview belongs WITH the button that acts on it. */}
               {audioMode === "audio-chapter" ? renderChapterPreview() : renderCharacterPreview()}
               {renderUnvalidatedAudioNote()}
@@ -2754,6 +2791,9 @@ export function ExportDialog({
         {/* Subtitle shape options — on the card for a dubbing file. */}
         {!isDubbingFile && format === "vtt" && renderVttOptions()}
 
+        {!isDubbingFile && format === "audio-by-line"
+          // i18n-exempt "file" is an ExportScope tag, not copy
+          && effectiveScope === "file" && renderLineFormatOption()}
         {/* Who is recorded — on the card for a dubbing file. */}
         {!isDubbingFile && (format === "audio-by-character" || format === "audio-by-line")
           // i18n-exempt "file" is an ExportScope tag, not copy

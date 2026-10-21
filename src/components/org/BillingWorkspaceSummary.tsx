@@ -54,7 +54,9 @@ export function BillingWorkspaceDetails({ data }: { data: BillingWorkspace }) {
             : t(explanations[data.eligibility.reason])}</p>
           {data.entitlement?.access ? (
             <p className="text-sm text-muted-foreground" data-testid="billing-access" role="status">
-              {data.entitlement.access.reason === 'payment_failed'
+              {data.entitlement.access.reason === 'payment_grace' && data.entitlement.access.graceEndsAt
+                ? t('billing.workspace.paymentGrace', { date: new Date(data.entitlement.access.graceEndsAt).toLocaleString() })
+                : data.entitlement.access.reason === 'payment_failed'
                 ? t('billing.workspace.paymentFailed')
                 : data.entitlement.access.reason === 'paid_period_ended'
                   ? t('billing.workspace.paidPeriodEnded')

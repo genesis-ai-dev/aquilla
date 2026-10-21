@@ -21,7 +21,31 @@ export interface HostedTranscriptionOptions {
    * whether to send the same window again. Asked at most once per clip.
    */
   onWarming?: () => Promise<boolean>
+  /**
+   * AQU-1681: the per-user limit (60 requests per 15 minutes) refused this
+   * request. Given, the same audio is sent again once this resolves — it is
+   * handed the seconds the limiter asked for, and may throw to give up (a
+   * cancelled batch). Absent, the refusal is an error, as it always was: a
+   * single row's Transcribe button should not sit silently for 15 minutes.
+   */
+  onRateLimited?: (retryAfterSeconds: number) => Promise<void>
 }
+
+/** When the limiter's answer cannot be read (an older server that does not
+ *  expose Retry-After), ask again after this long. A refused request costs
+ *  nothing. */
+export const FALLBACK_RETRY_AFTER_SECONDS = 60
+
+function retryAfterSeconds(response: Response): number {
+  const raw = response.headers.get("Retry-After")
+  if (!raw) return FALLBACK_RETRY_AFTER_SECONDS
+  const seconds = Number(raw)
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds
+  const at = Date.parse(raw)
+  return Number.isFinite(at) ? Math.max(0, (at - Date.now()) / 1000) : FALLBACK_RETRY_AFTER_SECONDS
+}
+
+const GRANULARITY_RANK = { word: 0, none: 1, segment: 2 } as const
 
 /** The server answered 403 `zero_shot_disabled`: the org turned ZS off. */
 export class ZeroShotDisabledError extends Error {
@@ -70,6 +94,42 @@ export function hostedLanguageTag(tag?: string): string | undefined {
   return /^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$/.test(value) ? value : undefined
 }
 
+/**
+ * The hosted model did not answer (a 5xx from our route). The message is an
+ * English match key for ai-error.ts ("hosted transcription model
+ * unavailable"), which turns it into copy that names the way out: retry, or
+ * pick another model in Preferences → Local models.
+ */
+export class HostedTranscriptionUnavailableError extends Error {
+  readonly status: number
+  constructor(status: number) {
+    super(`Hosted transcription model unavailable (${status}).`)
+    this.name = "HostedTranscriptionUnavailableError"
+    this.status = status
+  }
+}
+
+/** AQU-1681: the per-user limit refused the request (429 `rate_limited`). */
+export class TranscriptionRateLimitedError extends Error {
+  readonly retryAfterSeconds: number
+  constructor(retryAfterSeconds: number) {
+    super("Hosted transcription failed (429). Try again.")
+    this.name = "TranscriptionRateLimitedError"
+    this.retryAfterSeconds = retryAfterSeconds
+  }
+}
+
+/**
+ * AQU-1681: the window a row of a shared source recording is sent in — the
+ * account's model, except zero-shot, which a source clip never uses (it is no
+ * lane's speech; see `transcribeHosted`). A batch packs that many seconds of
+ * rows into one request.
+ */
+export function sourceClipWindowSeconds(username: string | undefined, language?: string): number {
+  const chosen = getTranscriptionModel(username)
+  return hostedWindowSeconds(chosen === "omni-zs" ? "auto" : chosen, hostedLanguageTag(language))
+}
+
 type HostedPart = TranscriptionResult
 
 async function postWindow(
@@ -104,6 +164,10 @@ async function postWindow(
     throw new ZeroShotNoExamplesError()
   }
   if (response.status === 503 && code === "asr_warming") throw new AsrWarmingError()
+  if (response.status === 429 && code === "rate_limited") {
+    throw new TranscriptionRateLimitedError(retryAfterSeconds(response))
+  }
+  if (response.status >= 500) throw new HostedTranscriptionUnavailableError(response.status)
   throw new Error(`Hosted transcription failed (${response.status}). Try again.`)
 }
 
@@ -119,15 +183,27 @@ export async function transcribeHostedPcm(
   const windowSec = hostedWindowSeconds(model, opts.language)
   const starts = windowStarts(pcm, windowSec, windowSec === 30)
   let warmRetries = 1
+  // AQU-1681: a refusal by the per-user limit sends the same window again
+  // once `onRateLimited` has waited it out; without it, it is an error.
+  const send = async (window: Float32Array): Promise<HostedPart> => {
+    for (;;) {
+      try {
+        return await postWindow(window, jwt, projectId, opts)
+      } catch (error) {
+        if (!(error instanceof TranscriptionRateLimitedError) || !opts.onRateLimited) throw error
+        await opts.onRateLimited(error.retryAfterSeconds)
+      }
+    }
+  }
   for (let i = 0; i < starts.length; i++) {
     const window = pcm.subarray(starts[i], starts[i + 1] ?? pcm.length)
     let part: HostedPart
     try {
-      part = await postWindow(window, jwt, projectId, opts)
+      part = await send(window)
     } catch (error) {
       if (!(error instanceof AsrWarmingError) || !opts.onWarming || warmRetries-- <= 0) throw error
       if (!await opts.onWarming()) throw error
-      part = await postWindow(window, jwt, projectId, opts)
+      part = await send(window)
     }
     result.text = [result.text, part.text].filter(Boolean).join(" ")
     const seconds = starts[i] / 16000
@@ -136,6 +212,11 @@ export async function transcribeHostedPcm(
     })))
     if (part.model) result.model = part.model
     if (part.timingsApproximate) result.timingsApproximate = true
+    // AQU-1681: the coarsest timing any window came back with.
+    if (part.granularity && (!result.granularity
+      || GRANULARITY_RANK[part.granularity] > GRANULARITY_RANK[result.granularity])) {
+      result.granularity = part.granularity
+    }
   }
   return result
 }
@@ -187,12 +268,16 @@ export async function transcribeHosted(
     zeroShot?: ZeroShotCellContext
     /** The take is waiting for the model to start (true), or no longer (false). */
     onWaitingForModel?: (waiting: boolean) => void
+    /** AQU-1681: wait out the per-user limit (see `HostedTranscriptionOptions`). */
+    onRateLimited?: (retryAfterSeconds: number) => Promise<void>
     warmupUi?: WarmupUi
   },
 ): Promise<TranscriptionResult> {
   const language = hostedLanguageTag(args.language)
   const run = (model: TranscriptionModel, extra: Partial<HostedTranscriptionOptions> = {}) =>
-    transcribeHostedPcm(pcm, args.jwt, args.projectId, { language, model, ...extra })
+    transcribeHostedPcm(pcm, args.jwt, args.projectId, {
+      language, model, ...(args.onRateLimited ? { onRateLimited: args.onRateLimited } : {}), ...extra,
+    })
   const chosen = getTranscriptionModel(args.username)
   const cell = args.zeroShot
   // Zero-shot learns from this lane's takes; a source clip has none to use.

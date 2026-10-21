@@ -17,6 +17,7 @@
 
 import { AUTH_API_URL } from "./sync-token"
 import type { CurrentTargetLane, MemberLaneGrant } from "@/lib/lanes/grant-gap"
+import type { TeamLaneAttachment } from "@/lib/sync/assignment-lane"
 
 /** A single lane/file write-restriction row on a project member. */
 export interface MemberScope {
@@ -107,20 +108,32 @@ export async function fetchMyScopeGrant(
 }
 
 /**
- * AQU-1994: GET /api/v2/projects/:projectId/lane-staffing — the project's
- * target lanes at least one of its people is on (a lane grant at Contributor
- * or above, held directly or through an attached org Team).
+ * AQU-1994 / AQU-2047: GET /api/v2/projects/:projectId/lane-staffing.
  *
- * `null` means the server did not say: the caller is below project lead, the
- * project has no target lane rows, the server predates the route, or the call
- * failed. Unknown is NOT "nobody is staffed" — a caller must keep offering
- * the lanes it offers today rather than narrow to nothing on a null.
+ * `staffedLaneIds` is the project's target lanes at least one of its people
+ * is on (a lane grant at Contributor or above, held directly or through an
+ * attached org Team). `null` means the server did not say: no `laneIds` key
+ * (a project with no target lane rows), or a value that is not a list.
+ * Unknown is NOT "nobody is staffed".
+ *
+ * `teamLanes` is each attached team's saved checks. `null` means the server
+ * did not say (an older server omits the field). An empty list is no attached
+ * team. Neither one is "no lanes".
+ *
+ * The whole read is `null` when the caller is below project lead, the server
+ * predates the route, or the call failed. A caller must keep offering the
+ * lanes it offers today rather than narrow to nothing on a null.
  */
+export interface ProjectLaneStaffingRead {
+  staffedLaneIds: ReadonlySet<string> | null
+  teamLanes: readonly TeamLaneAttachment[] | null
+}
+
 export async function fetchProjectLaneStaffing(
   jwt: string,
   projectId: string,
   apiUrl: string = AUTH_API_URL,
-): Promise<ReadonlySet<string> | null> {
+): Promise<ProjectLaneStaffingRead | null> {
   try {
     const res = await fetch(
       `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/lane-staffing`,
@@ -130,13 +143,39 @@ export async function fetchProjectLaneStaffing(
       console.warn(`[member-scopes] fetchProjectLaneStaffing ${projectId} → HTTP ${res.status}`)
       return null
     }
-    const body = (await res.json()) as { laneIds?: unknown }
-    if (!Array.isArray(body.laneIds)) return null
-    return new Set(body.laneIds.filter((id): id is string => typeof id === "string"))
+    const body = (await res.json()) as { laneIds?: unknown; teamLanes?: unknown }
+    return {
+      staffedLaneIds: parseStaffedLaneIds(body.laneIds),
+      teamLanes: parseTeamLanes(body.teamLanes),
+    }
   } catch (err) {
     console.warn("[member-scopes] fetchProjectLaneStaffing failed:", err)
     return null
   }
+}
+
+function parseStaffedLaneIds(value: unknown): ReadonlySet<string> | null {
+  if (!Array.isArray(value)) return null
+  return new Set(value.filter((id): id is string => typeof id === "string"))
+}
+
+function parseTeamLanes(value: unknown): readonly TeamLaneAttachment[] | null {
+  if (!Array.isArray(value)) return null
+  const teams: TeamLaneAttachment[] = []
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue
+    const row = entry as { lanesExplicit?: unknown; laneIds?: unknown }
+    if (typeof row.lanesExplicit !== "boolean") continue
+    if (!row.lanesExplicit) {
+      teams.push({ lanesExplicit: false })
+      continue
+    }
+    const laneIds = Array.isArray(row.laneIds)
+      ? row.laneIds.filter((id): id is string => typeof id === "string")
+      : []
+    teams.push({ lanesExplicit: true, laneIds })
+  }
+  return teams
 }
 
 /**

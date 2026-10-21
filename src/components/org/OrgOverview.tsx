@@ -113,8 +113,12 @@ export function OrgOverview() {
   const jwt = session?.jwt ?? null
   const navigate = useNavigate()
 
-  const portfolio = useOrgPortfolio(activeOrgId, activeOrg?.name)
   const orgSettings = useOrgSettings(activeOrgId, activeOrg?.role?.level)
+  // AQU-1913: the org settings version, so an org default changed elsewhere
+  // re-reads the numbers.
+  const portfolio = useOrgPortfolio(activeOrgId, activeOrg?.name, {
+    orgSettingsVersion: orgSettings.version,
+  })
   const canEditVisibility = canEditRosterProgressFloor(activeOrg?.role?.level)
   const memberProgressReady = orgSettings.hasFetched
   const memberProgressViewerRole = activeOrg?.role?.level ?? null

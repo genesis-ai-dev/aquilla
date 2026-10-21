@@ -75,6 +75,23 @@ describe("groupAudioByChapter", () => {
     expect(groups[0]!.clips.map((c) => c.cellId)).toEqual(["a", "b"])
   })
 
+  it("keeps a line added under a verse in that verse's chapter, right after it", () => {
+    // AQU-1759: John 6:5 split at its quotation so the quote has its own
+    // voice. The quote row carries no verse address; read as "no verse", its
+    // take left the chapter and the chapter played without the speech.
+    const added = (id: string) => withTake(id, "", { metadata: { aquillaOrigin: { kind: "user-insert", version: 1 } } })
+    const groups = groupAudioByChapter([
+      withTake("v4", "JHN 6:4"),
+      withTake("v5", "JHN 6:5"),
+      added("v5-quote"),
+      withTake("v6", "JHN 6:6"),
+      // An imported row with no address is still not a verse's.
+      withTake("loose", ""),
+    ])
+    expect(groups.map((g) => g.key)).toEqual(["JHN 6", "__file__"])
+    expect(groups[0]!.clips.map((c) => c.cellId)).toEqual(["v4", "v5", "v5-quote", "v6"])
+  })
+
   it("does not change by-character grouping of the same cells", () => {
     // Sanity that we only read the recording slot the other exports use, so a
     // cell with both a recording and a generated voice still prefers the take.

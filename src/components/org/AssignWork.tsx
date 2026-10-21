@@ -9,6 +9,7 @@ import {
   lanesStaffedBy,
   laneTagForAssignment,
   type AssignLaneOption,
+  type TeamLaneAttachment,
 } from "@/lib/sync/assignment-lane"
 import { canSubmitAssignment } from "@/lib/sync/role-policy"
 import { Button } from "@/components/ui/button"
@@ -104,7 +105,15 @@ export interface AssignWorkProps {
    * "nobody" — and leaves the list as it was.
    */
   staffedLaneIds?: ReadonlySet<string> | readonly string[] | null
-  /** Called when the panel is opened, so staffing can be re-read. */
+  /**
+   * AQU-2047: each attached team's lane checks. A lane stays when any attached
+   * team is tied to it. `lanesExplicit: false` is tied to every current target
+   * lane. `null`, omitted, or `[]` (no attached team) leaves the list as it
+   * was — absence is not "no lanes". Applied with staffing: a lane must pass
+   * both when both are present.
+   */
+  teamLanes?: readonly TeamLaneAttachment[] | null
+  /** Called when the panel is opened, so staffing and team lanes can be re-read. */
   onOpen?: () => void
 }
 
@@ -128,6 +137,7 @@ export function AssignWork({
   defaultLaneLabel,
   laneRows,
   staffedLaneIds,
+  teamLanes,
   onOpen,
 }: AssignWorkProps) {
   const t = useT()
@@ -152,8 +162,9 @@ export function AssignWork({
         defaultLaneLabel,
         defaultLaneFallback: t("dialog.assign.defaultLaneFallback"),
         staffedLaneIds,
+        teamLanes,
       }),
-    [lanes, laneTags, laneLabels, defaultLaneLabel, staffedLaneIds, t],
+    [lanes, laneTags, laneLabels, defaultLaneLabel, staffedLaneIds, teamLanes, t],
   )
   // AQU-1994: nobody on the project is on any of its lanes. There is nothing
   // truthful to offer, so the field says so and Assign is refused rather than

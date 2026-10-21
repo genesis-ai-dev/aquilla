@@ -122,6 +122,10 @@ export const org = defineNamespace({
     "org.egress.options.audio.voice.description": "Each voice’s recordings joined together, no gaps.",
     "org.egress.options.audio.timeline.label": "Voice timeline stems (silence while others speak)",
     "org.egress.options.audio.timeline.description": "One aligned track per voice; all tracks share the file’s timeline.",
+    // AQU-1575: the broadcast deliverable LOTE's vendor asked for, by name.
+    "org.egress.options.audioWav": "Convert every clip to WAV (16-bit, 48 kHz, mono)",
+    "org.egress.options.audioWavDescription":
+      "For broadcast delivery. Off copies each clip as it was saved, which may be compressed or at a lower sample rate.",
     "org.egress.options.useCache": "Reuse cached exports for unchanged projects",
     "org.egress.options.empty": "These options would export nothing — pick a lane, an audio mode, or source documents.",
     "org.egress.options.estimate": "{fileCount} · {cellCount}",
@@ -1183,9 +1187,11 @@ export const org = defineNamespace({
 
     // -- StaffLanePopover: one-gesture staffing control (AQU-538 §3.4) --
     "org.staffLanePopover.staffLaneHeading": "Staff {lane}",
-    "org.staffLanePopover.orgMemberPhrase": "org member",
+    // AQU-2048: {member} names both groups the search actually covers. Someone
+    // in neither is still a project invite (searchScopeNote + inviteToProjectLink).
+    "org.staffLanePopover.orgMemberPhrase": "org member or someone already invited",
     "org.staffLanePopover.addOrgMemberDescription": "Add an {member} to this project, scoped to this lane.",
-    "org.staffLanePopover.searchPlaceholder": "Search your organization",
+    "org.staffLanePopover.searchPlaceholder": "Search org members and project invitees",
     // AQU-731: the four ways the org roster comes back unusable, each named
     // rather than collapsed into "no one in your organization yet".
     "org.staffLanePopover.rosterLoading": "Loading your organization…",
@@ -1195,12 +1201,18 @@ export const org = defineNamespace({
       "Your organization hides its member list. Invite the person to the project instead.",
     "org.staffLanePopover.rosterNoAccess":
       "You can staff this lane, but you can’t see this organization’s member list. Invite the person to the project instead.",
+    // Same two blocks, but only when people already on the project are listed
+    // under the note. "Invite instead" would be false there — those people
+    // are the list. Anyone in neither group still uses the footer invite.
+    "org.staffLanePopover.rosterHiddenWithInvitees":
+      "Your organization hides its member list. People already on this project are listed below.",
+    "org.staffLanePopover.rosterNoAccessWithInvitees":
+      "You can staff this lane, but you can’t see this organization’s member list. People already on this project are listed below.",
     "org.staffLanePopover.rosterLoadFailed": "Couldn’t load your organization’s members.",
     "org.staffLanePopover.rosterEmpty": "No one in your organization yet.",
-    "org.staffLanePopover.rosterNoMatch": "No org members match.",
-    // "Search org members" aria-label → org.teamDetail.searchOrgMembersAriaLabel (identical text)
+    "org.staffLanePopover.rosterNoMatch": "No org members or project invitees match.",
     "org.staffLanePopover.searchScopeNote":
-      "Searches your organization only. Adding someone from outside it?",
+      "Searches org members and people already invited to this project. Adding someone who is neither?",
     "org.staffLanePopover.inviteToProjectLink": "Invite them to the project",
     // "Change" → org.projectOverview.change (identical text)
     // "Role" aria-label → common.roleLabel (identical text)
@@ -1451,6 +1463,14 @@ export const org = defineNamespace({
     // are identical for the same reason as its two siblings above: the count
     // is drawn as a bold numeral beside the phrase, never inside it.
     "org.projectOverview.plan.summaryNearlyCompleteLabel": plural({ one: "nearly complete", other: "nearly complete" }),
+    // AQU-2088: shown in the plan's place on an archived project, whose
+    // per-project reads the server refuses. It replaces a spinner that could
+    // never resolve, so it has to say WHY there is nothing here.
+    "org.projectOverview.archived.title": "This project is archived",
+    "org.projectOverview.archived.bodyCanRestore":
+      "Its plan and team are hidden while it sits in Trash. Nothing has been deleted — choose Restore above to bring it back.",
+    "org.projectOverview.archived.bodyAskManager":
+      "Its plan and team are hidden while it sits in Trash. Nothing has been deleted — a maintainer can restore it.",
     "org.projectOverview.plan.emptyTitle": "Nothing to plan yet",
     "org.projectOverview.plan.loading": "Loading the plan\u2026",
     "org.projectOverview.plan.saveFailed": "That change could not be saved, so it has been undone. Try again.",
@@ -1869,6 +1889,19 @@ export const org = defineNamespace({
       "org.egress.options.estimateAudio": {
         description: "Optional audio-duration suffix appended to the Data egress estimate.",
         placeholders: { minutes: "Rounded number of recorded-audio minutes." },
+      },
+      "org.egress.options.audioWav": {
+        description:
+          "Checkbox under the Data egress audio modes, shown only when 'Every clip separately' is " +
+          "chosen. On re-encodes every clip as an uncompressed WAV file; off copies each clip in the " +
+          "format it was saved in. '16-bit, 48 kHz, mono' is the technical audio format a broadcast " +
+          "studio asks for — keep the numbers and units as they are.",
+      },
+      "org.egress.options.audioWavDescription": {
+        description:
+          "Help text under the convert-to-WAV checkbox in Data egress: the WAV files are for broadcast " +
+          "delivery, and leaving the box unchecked keeps each clip as it was saved, which can mean a " +
+          "compressed file or a lower sample rate.",
       },
       "org.egress.results.projectStatus": {
         description: "Live export progress line for one project in a multi-project organization export.",
@@ -3065,16 +3098,36 @@ export const org = defineNamespace({
       },
       "org.staffLanePopover.addOrgMemberDescription": {
         description:
-          "Subheading under org.staffLanePopover.staffLaneHeading explaining what the popover does. Rendered via RichMessage with {member} substituted as a bold span whose text is the translated org.staffLanePopover.orgMemberPhrase — supplied as a node (not raw data) so its emphasis and word position both survive translation.",
-        placeholders: { member: "The already-translated, bold-styled 'org member' phrase (org.staffLanePopover.orgMemberPhrase) — do not interpolate it as plain data." },
+          "Subheading under org.staffLanePopover.staffLaneHeading. Names who can be added to this lane: an organization member, or someone already invited to this project. Rendered via RichMessage with {member} substituted as a bold span whose text is the translated org.staffLanePopover.orgMemberPhrase — supplied as a node (not raw data) so its emphasis and word position both survive translation. Do not narrow this to organization members only, and do not say the search finds people who are neither.",
+        placeholders: { member: "The already-translated, bold-styled phrase (org.staffLanePopover.orgMemberPhrase) naming both groups — an organization member, or someone already invited to the project. Do not interpolate it as plain data." },
+      },
+      "org.staffLanePopover.searchPlaceholder": {
+        description:
+          "Placeholder on the Staff popover search field. The field searches organization members and people already invited to the project (direct invitees who are not org members). Do not say it searches the organization only, and do not say it finds people outside both groups. Also the field's accessible name, so it must not end in an ellipsis.",
+      },
+      "org.staffLanePopover.searchScopeNote": {
+        description:
+          "Footer under the Staff popover search. States that the search covers organization members and people already invited to this project, then asks about someone who is neither. The sentence runs on into a link labelled org.staffLanePopover.inviteToProjectLink, which is how that person is added, so do not end this as a standalone sentence. Do not say the search finds people outside both groups.",
+      },
+      "org.staffLanePopover.rosterNoMatch": {
+        description:
+          "Shown in the Staff popover list when the typed search matches nobody. The search covers organization members and people already invited to the project, so this must not say that only organization members were searched.",
       },
       "org.staffLanePopover.rosterNoAccess": {
         description:
-          "Shown in place of the org member list when the roster fetch was refused because the operator is not a member of the org (403 without the roster-hidden policy flag). They can still staff the lane — the point is that this particular search can't help them, and the project-invite link below can. Do not translate as a permission error about staffing itself.",
+          "Shown in place of the list when the roster fetch was refused because the operator is not a member of the org (403 without the roster-hidden policy flag) and nobody already on the project can be picked. They can still staff the lane — this search can't help them, and the project-invite link below can. When people already on the project are listed, org.staffLanePopover.rosterNoAccessWithInvitees is shown instead. Do not translate as a permission error about staffing itself.",
       },
       "org.staffLanePopover.rosterHidden": {
         description:
-          "Shown in place of the org member list when org policy hides the roster from this operator. Distinct from rosterNoAccess (no membership) and from rosterEmpty (the org really has no members).",
+          "Shown in place of the list when org policy hides the roster and nobody already on the project can be picked. Distinct from rosterNoAccess (no membership) and from rosterEmpty (the org really has no members). When people already on the project are listed, org.staffLanePopover.rosterHiddenWithInvitees is shown instead.",
+      },
+      "org.staffLanePopover.rosterNoAccessWithInvitees": {
+        description:
+          "Note above the Staff popover list when the operator cannot see the org member list but people already on the project are listed below. Do not say a project invite is the only way to add someone — those people can be picked here. The footer link covers anyone who is neither an organization member nor already on the project. Do not translate as a permission error about staffing itself.",
+      },
+      "org.staffLanePopover.rosterHiddenWithInvitees": {
+        description:
+          "Note above the Staff popover list when org policy hides the member list but people already on the project are listed below. Do not say a project invite is the only way to add someone — those people can be picked here. Distinct from rosterHidden, which replaces the list when there is nobody to show.",
       },
       "org.staffLanePopover.rosterNoOrg": {
         description:
@@ -3274,6 +3327,18 @@ export const org = defineNamespace({
       "org.projectOverview.plan.summaryNearlyCompleteLabel": {
         description:
           "Summary pill. The count is rendered as a bold numeral immediately before this text: \"9\" + \"nearly complete\". The plural form is selected by that count even though it does not appear in the string. Counts only the units a few cells from finished, which are NOT also counted as in progress.",
+      },
+      "org.projectOverview.archived.title": {
+        description:
+          "Heading of the panel shown in the plan's place on an archived project's overview.",
+      },
+      "org.projectOverview.archived.bodyCanRestore": {
+        description:
+          "Body of that panel for a reader who may restore the project. Reassures them that archiving is a soft delete and points at the Restore button in the header above.",
+      },
+      "org.projectOverview.archived.bodyAskManager": {
+        description:
+          "Body of that panel for a reader who may NOT restore the project, so it names who can instead of pointing at a button they do not have.",
       },
       "org.projectOverview.plan.emptyTitle": {
         description: "Heading of the empty state, when a project has no plannable files yet.",

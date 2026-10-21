@@ -197,6 +197,26 @@ export function EgressOptionsPanel({
             </label>
           ))}
         </RadioGroup>
+        {/* AQU-1575: only separate clips can hand over stored files as they
+            are; every other mode already writes 16-bit / 48 kHz / mono WAV,
+            so the choice is shown only where it changes something. */}
+        {options.audioMode === "separate-clips" && (
+          <label className="flex items-start gap-2 px-2.5 pt-1 text-sm">
+            <Checkbox
+              className="mt-0.5"
+              data-testid="egress-audio-wav"
+              checked={options.audioFormat === "wav"}
+              onCheckedChange={(c) => onChange({ audioFormat: c === true ? "wav" : "original" })}
+              disabled={disabled}
+            />
+            <span className="flex flex-col gap-0.5">
+              {t("org.egress.options.audioWav")}
+              <span className="text-xs text-muted-foreground">
+                {t("org.egress.options.audioWavDescription")}
+              </span>
+            </span>
+          </label>
+        )}
       </fieldset>
 
       <label className="flex items-center gap-2 text-sm">

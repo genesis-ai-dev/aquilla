@@ -84,6 +84,7 @@ import {
   laneTagForAssignment,
   selectValueForLane,
   type AssignLaneOption,
+  type TeamLaneAttachment,
 } from "@/lib/sync/assignment-lane"
 
 type ScopeKind = "selection" | "verses" | "chapters" | "books"
@@ -118,6 +119,13 @@ interface AssignModalProps {
    * leaves the list as it was.
    */
   staffedLaneIds?: ReadonlySet<string> | readonly string[] | null
+  /**
+   * AQU-2047: each attached team's lane checks. The same input Assign work
+   * on the project overview passes, so this modal (lane row, plan, org,
+   * editor) offers the same lanes. `null`, omitted, or `[]` leaves the list
+   * as it was.
+   */
+  teamLanes?: readonly TeamLaneAttachment[] | null
   /** Display names keyed by lane tag, including '' for the default lane. */
   laneLabels?: Readonly<Record<string, string>>
   /**
@@ -215,6 +223,7 @@ export function AssignModal({
   targetLanes,
   lanes,
   staffedLaneIds,
+  teamLanes,
   laneLabels,
   defaultLane = "",
   defaultLaneLabel,
@@ -379,8 +388,9 @@ export function AssignModal({
         defaultLaneFallback: t("dialog.assign.defaultLaneFallback"),
         allowedTags: laneDelegateLanes(effectiveDelegate),
         staffedLaneIds,
+        teamLanes,
       }),
-    [lanes, targetLanes, laneLabels, defaultLaneLabel, effectiveDelegate, staffedLaneIds, t],
+    [lanes, targetLanes, laneLabels, defaultLaneLabel, effectiveDelegate, staffedLaneIds, teamLanes, t],
   )
   // AQU-1994: the project has lanes but nobody on it is on any of them. The
   // modal names that instead of offering a language no one can work in, and

@@ -369,6 +369,37 @@ export async function addMondayColumns(
   }
 }
 
+/** A board Aquilla just made, with the columns it put on it. */
+export interface MondayNewBoardResult extends MondayAddColumnsResult {
+  boardId: string
+}
+
+/**
+ * POST /api/v2/monday/projects/:projectId/board (maintainer+). AQU-2087 "Make a
+ * new board for me": Monday makes a clean board with only `metrics`' columns,
+ * in that order, and one "Aquilla projects" group. Nothing is linked yet.
+ */
+export async function createMondayBoard(
+  jwt: string,
+  projectId: string,
+  body: { name: string; metrics: MondayMetricKey[] },
+): Promise<MondayNewBoardResult> {
+  const res = await fetch(`${AUTH_BASE}/api/v2/monday/projects/${projectId}/board`, {
+    method: "POST",
+    headers: authHeaders(jwt),
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) await readError(res, "error.monday.newBoard")
+  const data = (await res.json()) as Partial<MondayNewBoardResult> & { boardId: string; structure: MondayBoardStructure }
+  return {
+    boardId: data.boardId,
+    created: data.created ?? [],
+    reused: data.reused ?? [],
+    failed: data.failed ?? [],
+    structure: data.structure,
+  }
+}
+
 /** One project's link, as Org settings → Monday.com lists it. */
 export interface MondayOrgProjectLink {
   projectId: string

@@ -195,6 +195,26 @@ export function buildProgramme(cells: readonly CellData[]): Programme {
   return { slots, totalSec: cursor, byCellId }
 }
 
+/**
+ * Sam's decision (hidden lines on the timeline): the programme as it PLAYS
+ * when some lines are hidden. Every verse keeps its place and length — the
+ * timeline draws a hidden one where it always sat, faded — but a hidden
+ * verse's take is taken out: it sounds only its original, clocked by it, and
+ * one with no original has nothing left to play, so playback steps over it.
+ */
+export function withoutHiddenTakes(prog: Programme, hiddenCellIds: ReadonlySet<string>): Programme {
+  if (hiddenCellIds.size === 0) return prog
+  const byCellId = new Map<string, ProgrammeSlot>()
+  const slots = prog.slots.map((slot) => {
+    const out: ProgrammeSlot = hiddenCellIds.has(slot.cellId)
+      ? { ...slot, targetWindow: null, targetPieces: undefined, clock: slot.sourceWindow ? "source" : null }
+      : slot
+    byCellId.set(out.cellId, out)
+    return out
+  })
+  return { ...prog, slots, byCellId }
+}
+
 /** The slot a programme second falls in. Times past the end return null. */
 export function slotAtProgrammeSec(prog: Programme, sec: number): ProgrammeSlot | null {
   if (!Number.isFinite(sec) || sec < 0) return null

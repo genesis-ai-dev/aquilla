@@ -540,3 +540,30 @@ describe("batch-validate-audio", () => {
     expect(runBatchValidate).not.toHaveBeenCalled()
   })
 })
+
+// AQU-1759: the row menu's split, for every line of the file. Offered only
+// where the row entry would be, and the confirmation promises the count the
+// run will split — or says there is nothing, with no confirm at all.
+describe("split-quotes", () => {
+  const action = () => workspaceActions.find((a) => a.id === "split-quotes")!
+  const at = (rows: number, lines: number, may = true) => ctx({
+    activeFileId: "f1",
+    canSplitAtQuotes: () => may,
+    quoteSplitSummary: () => ({ rows, lines }),
+  })
+
+  it("is offered only to someone who may split rows in this file", () => {
+    expect(action().isAvailable(at(3, 7, false))).toBe(false)
+    expect(action().isAvailable(ctx({ activeFileId: "f1" }))).toBe(false)
+    expect(action().isAvailable(at(3, 7))).toBe(true)
+  })
+
+  it("promises the count it will split, and offers no confirm when there is none", () => {
+    const confirm = action().requiresConfirmation!
+    expect(confirm.description(at(3, 7), t, joinList)).toContain("3 lines in this file hold more than one speaker")
+    expect(confirm.description(at(3, 7), t, joinList)).toContain("they become 7 lines")
+    expect(confirm.canConfirm!(at(3, 7))).toBe(true)
+    expect(confirm.description(at(0, 0), t, joinList)).toBe(englishOf("nav.workspaceActions.splitQuotes.none"))
+    expect(confirm.canConfirm!(at(0, 0))).toBe(false)
+  })
+})

@@ -11,7 +11,7 @@ export async function prepareWorkspaceLaunch(options: {
   const { secret, accountId, live, apply } = options
   if (!secret.startsWith(live ? 'sk_live_' : 'sk_test_')) throw new Error('Stripe mode mismatch')
   if (!/^acct_[a-zA-Z0-9]+$/.test(accountId)) throw new Error('Expected Stripe account required')
-  const version = '2026-09-native'
+  const version = '2026-10-team'
   async function request(path: string, params?: Record<string, string>, identity?: string) {
     if (params && !apply) throw new Error('Catalog incomplete. Review and rerun with --apply to create missing objects.')
     const response = await fetch(`https://api.stripe.com/v1${path}`, {
@@ -44,10 +44,8 @@ export async function prepareWorkspaceLaunch(options: {
     }
     for (const interval of ['month', 'year'] as const) {
       const amountField = interval === 'month' ? 'monthlyCents' : 'annualCents'
-      // Bundle the Team platform charge once into its native 20× price.
-      const amount = component[amountField] + (component.key === 'team_20x'
-        ? baseline.components.find(c => c.key === 'team')![amountField] : 0)
-      const lookup = `aquilla_native_2026_09_${component.key}_${interval}`
+      const amount = component[amountField]
+      const lookup = `aquilla_native_${version.replaceAll('-', '_')}_${component.key}_${interval}`
       const found = await request(`/prices?lookup_keys[]=${lookup}&limit=2`)
       const matches = (found?.data ?? []) as Record<string, unknown>[]
       if (matches.length > 1) throw new Error('Ambiguous native price')
@@ -72,7 +70,7 @@ export async function prepareWorkspaceLaunch(options: {
   const configs = await request('/billing_portal/configurations?limit=100')
   if (configs?.has_more) throw new Error('Portal catalog needs operator review: more than 100 configurations')
   const configurations: Record<string, string> = {}
-  for (const scope of ['personal', 'team'] as const) {
+  for (const scope of ['team'] as const) {
     const marker = `${version}-${scope}`
     const existing = ((configs?.data ?? []) as Record<string, unknown>[]).filter(config =>
       (config.metadata as Record<string, unknown> | undefined)?.aquilla_native === marker)

@@ -688,7 +688,8 @@ describe("TakesStrip — reporting the last take", () => {
 describe("TakesStrip — length", () => {
   it("gives a trimmed take the length that plays", () => {
     render(<TakesStrip {...common} takes={[{ ...take("audio-c1-a.webm", 2560), trimStartMs: 256, trimEndMs: 2320 }]} selectedAudioId={null} />)
-    expect(screen.getByTestId("take-length-audio-c1-a.webm")).toHaveTextContent("2.1s")
+    // 2.064s kept, in tenths rounded down as the recorder says it (AQU-1767).
+    expect(screen.getByTestId("take-length-audio-c1-a.webm")).toHaveTextContent("2.0s")
   })
 })
 

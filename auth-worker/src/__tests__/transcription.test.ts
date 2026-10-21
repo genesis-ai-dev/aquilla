@@ -22,7 +22,7 @@ beforeAll(async () => {
   )).input_audio.data
 })
 const catalog = () => Response.json({ data: [
-  { id: "openai/whisper-1", pricing: { prompt: "0.0001" } },
+  { id: "openai/whisper-large-v3", pricing: { prompt: "0.0001" } },
 ] })
 
 async function owner() {
@@ -71,7 +71,7 @@ describe("hosted transcription", () => {
       const payload = JSON.parse(String(init?.body))
       upstreamBodies.push(payload)
       expect(payload).toMatchObject({
-        model: "openai/whisper-1", language: "fr",
+        model: "openai/whisper-large-v3", language: "fr",
         response_format: "verbose_json",
         timestamp_granularities: ["word", "segment"],
         input_audio: { format: "wav" },
@@ -99,7 +99,24 @@ describe("hosted transcription", () => {
     expect(upstreamBodies).toHaveLength(1)
     expect(result).toEqual({ text: "bonjour", chunks: [
       { text: "bonjour", start: 0, end: 0.5 },
-    ], model: "whisper", timingsApproximate: false })
+    ], model: "whisper", timingsApproximate: false, granularity: "word" })
+  })
+
+  // AQU-1681: the client hands each word of a minute-long request back to the
+  // row it was spoken in. A sentence-long segment can span two rows, so the
+  // response says when that is all the provider gave.
+  it("says when the timings are per segment rather than per word", async () => {
+    const jwt = await owner()
+    vi.spyOn(globalThis, "fetch").mockImplementation(async input =>
+      String(input).includes("/models?") ? catalog() : Response.json({
+        text: "hello there", segments: [{ text: "hello there", start: 0, end: 1.2 }],
+        usage: { cost: 0.001 },
+      }))
+    const response = await app.request("/api/v1/audio/transcriptions", {
+      method: "POST", headers: authHeader(jwt), body: JSON.stringify(body),
+    }, settings())
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ granularity: "segment" })
   })
 
   it("meters fractional-second clips as whole billed seconds on the legacy credit rail", async () => {
@@ -136,6 +153,25 @@ describe("hosted transcription", () => {
     expect(row?.raw_cost_cents).toBeCloseTo(0.1, 9)
   })
 
+  // 2026-10-20: OpenRouter refused whisper-1 under the account's zero-data-
+  // retention policy (404 "0 endpoints … available"). The route answered a
+  // bare 502 and the reason was lost, so it read as an outage for days. The
+  // upstream reason must reach the logs.
+  it("logs OpenRouter's reason when it refuses the transcription", async () => {
+    const jwt = await owner()
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {})
+    vi.spyOn(globalThis, "fetch").mockImplementation(async input =>
+      String(input).includes("/models?") ? catalog() : Response.json(
+        { error: { message: "0 endpoints out of 1 requested are available matching your guardrail restrictions and data policy" } },
+        { status: 404 },
+      ))
+    const response = await app.request("/api/v1/audio/transcriptions", {
+      method: "POST", headers: authHeader(jwt), body: JSON.stringify(body),
+    }, settings())
+    expect(response.status).toBe(502)
+    expect(logged.mock.calls.flat().join(" ")).toMatch(/openai\/whisper-large-v3 upstream 404: .*guardrail restrictions/)
+  })
+
   it("rejects provider text without timings", async () => {
     const jwt = await owner()
     vi.spyOn(globalThis, "fetch").mockImplementation(async input =>
@@ -162,5 +198,15 @@ describe("hosted transcription — browser preflight", () => {
 
     expect(response.status).toBe(204)
     expect(response.headers.get("Access-Control-Allow-Headers")?.toLowerCase()).toContain("idempotency-key")
+  })
+
+  // AQU-1681: a batch refused by the per-user limit waits for Retry-After. A
+  // cross-origin page can only read that header if it is exposed.
+  it("lets the browser read Retry-After", async () => {
+    const response = await app.request("/api/v1/audio/transcriptions", {
+      method: "POST", headers: { "Content-Type": "application/json", Origin: "http://127.0.0.1:5173" },
+      body: JSON.stringify(body),
+    }, env)
+    expect(response.headers.get("Access-Control-Expose-Headers")).toMatch(/(^|,\s*)Retry-After(,|$)/)
   })
 })

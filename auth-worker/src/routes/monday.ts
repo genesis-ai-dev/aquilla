@@ -74,6 +74,7 @@ import {
   AnalyzeUpstreamError,
   NoBoardsError,
 } from "../lib/monday/analyze"
+import { LlmRefusedError } from "../lib/billing/paid-llm"
 import { pushBoardLink } from "../lib/monday/push"
 import { schedulePush } from "../lib/integrations/push"
 import {
@@ -878,6 +879,8 @@ monday.post(
 
     const summary = await computeProjectMetrics(c.env.AQUILLA_PG, guard.projectId, { appBaseUrl: c.env.BASE_URL })
     if (!summary) return c.json({ error: "project not found" }, 404)
+    // AQU-2063: the model calls bill the project's org, as the person asking.
+    const paidScope = { orgId, userId: c.get("user").id, projectId: guard.projectId, rail: "llm" as const }
 
     let boardId = body.boardId
     let boardName: string | null = null
@@ -885,7 +888,7 @@ monday.post(
     let structure, sampleItems
     try {
       if (!boardId) {
-        const choice = await selectBoardForProject(c.env, {
+        const choice = await selectBoardForProject(c.env, paidScope, {
           boards: await listBoards(token),
           summary,
         })
@@ -911,7 +914,7 @@ monday.post(
       : undefined
 
     try {
-      const result = await analyzeBoardMapping(c.env, {
+      const result = await analyzeBoardMapping(c.env, paidScope, {
         structure,
         sampleItems,
         summary,
@@ -931,6 +934,7 @@ monday.post(
         boardReason,
       })
     } catch (err) {
+      if (err instanceof LlmRefusedError) return c.json(err.refusal.body, err.refusal.status)
       console.error("[monday] analyze failed:", err)
       // Upstream outage gets a clear, distinct shape (the body snippet is
       // logged server-side only — never leaked to the client).

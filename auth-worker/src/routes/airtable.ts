@@ -36,6 +36,7 @@ import { parseJsonColumn, type IntegrationConnectionRow, type IntegrationLinkRow
 import { computeProjectMetrics } from "../lib/monday/metrics"
 import { runningEnvironment } from "../lib/monday/tokens"
 import { AnalyzeUpstreamError } from "../lib/integrations/llm"
+import { LlmRefusedError } from "../lib/billing/paid-llm"
 import {
   airtableClient,
   fetchBaseTables,
@@ -622,6 +623,8 @@ airtable.post("/projects/:projectId/analyze", authMiddleware, zValidator("json",
 
   const summary = await computeProjectMetrics(c.env.AQUILLA_PG, guard.projectId, { appBaseUrl: c.env.BASE_URL })
   if (!summary) return c.json({ error: "project not found" }, 404)
+  // AQU-2063: the model calls bill the project's org, as the person asking.
+  const paidScope = { orgId, userId: c.get("user").id, projectId: guard.projectId, rail: "llm" as const }
 
   let structure: AirtableTableStructure
   let tableReason: string
@@ -652,7 +655,7 @@ airtable.post("/projects/:projectId/analyze", authMiddleware, zValidator("json",
     }
     const named = body.tableId ? candidates.find((t) => t.tableId === body.tableId) : undefined
     if (body.tableId && !named) return c.json({ error: "Airtable base or table not found" }, 404)
-    const choice = named ? { ...named, reason: "" } : await selectTableForProject(c.env, { tables: candidates, summary })
+    const choice = named ? { ...named, reason: "" } : await selectTableForProject(c.env, paidScope, { tables: candidates, summary })
     tableReason = choice.reason
     const table = tablesByBase.get(choice.baseId)!.find((t) => t.id === choice.tableId)!
     structure = structureOf(choice.baseId, choice.baseName || null, table)
@@ -670,7 +673,7 @@ airtable.post("/projects/:projectId/analyze", authMiddleware, zValidator("json",
     ? (sanitizeAirtableMapping({ ...body.currentConfig, tableId: structure.tableId }, structure).mapping ?? undefined)
     : undefined
   try {
-    const result = await analyzeTableMapping(c.env, {
+    const result = await analyzeTableMapping(c.env, paidScope, {
       structure,
       sampleRecords,
       summary,
@@ -685,6 +688,7 @@ airtable.post("/projects/:projectId/analyze", authMiddleware, zValidator("json",
       structure: publicStructure(structure),
     })
   } catch (err) {
+    if (err instanceof LlmRefusedError) return c.json(err.refusal.body, err.refusal.status)
     console.error("[airtable] analyze failed:", err)
     if (err instanceof AnalyzeUpstreamError) return c.json({ error: err.message }, 502)
     return c.json({ error: "analyze failed" }, 502)

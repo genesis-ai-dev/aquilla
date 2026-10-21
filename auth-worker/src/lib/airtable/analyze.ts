@@ -12,6 +12,7 @@ import type { Env } from "../../types"
 import { getPlatformSettingsCached } from "../platform-settings"
 import { DEFAULT_LLM_MODEL_ID } from "../model-defaults"
 import { callAnalysisLlm, parseJsonAnswer } from "../integrations/llm"
+import type { PaidScope } from "../billing/paid-llm"
 import type { ProjectMetricsSummary } from "../monday/metrics"
 import { METRIC_KEYS } from "../monday/types"
 import type { AirtableRecord } from "./client"
@@ -91,15 +92,17 @@ function buildPrompt(args: AirtableAnalyzeArgs): string {
 }
 
 /** Run the analysis and clamp its proposal. Throws on upstream/parse failure. */
-export async function analyzeTableMapping(env: Env, args: AirtableAnalyzeArgs): Promise<AirtableAnalyzeResult> {
+export async function analyzeTableMapping(
+  env: Env, scope: PaidScope, args: AirtableAnalyzeArgs,
+): Promise<AirtableAnalyzeResult> {
   if (!env.OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is not configured")
   const model = await analysisModel(env)
   const prompt = buildPrompt(args)
   type Answer = { mapping: unknown; summary: unknown }
-  let parsed = parseJsonAnswer<Answer>(await callAnalysisLlm(env, model, prompt, "airtable analyze"))
+  let parsed = parseJsonAnswer<Answer>(await callAnalysisLlm(env, scope, model, prompt, "airtable analyze"))
   if (!parsed) {
     parsed = parseJsonAnswer<Answer>(
-      await callAnalysisLlm(env, model, `${prompt}\n\nReturn ONLY the JSON object.`, "airtable analyze"),
+      await callAnalysisLlm(env, scope, model, `${prompt}\n\nReturn ONLY the JSON object.`, "airtable analyze"),
     )
   }
   if (!parsed) throw new Error("LLM returned invalid JSON")
@@ -171,6 +174,7 @@ function bestByName(tables: TableCandidate[], summary: ProjectMetricsSummary): T
  */
 export async function selectTableForProject(
   env: Env,
+  scope: PaidScope,
   args: { tables: TableCandidate[]; summary: ProjectMetricsSummary },
 ): Promise<TableChoice> {
   const { tables, summary } = args
@@ -194,7 +198,7 @@ export async function selectTableForProject(
   let reason = ""
   try {
     const parsed = parseJsonAnswer<{ tableId: unknown; reason: unknown }>(
-      await callAnalysisLlm(env, await analysisModel(env), prompt, "airtable table selection"),
+      await callAnalysisLlm(env, scope, await analysisModel(env), prompt, "airtable table selection"),
     )
     if (parsed && typeof parsed.tableId === "string") chosen = tables.find((t) => t.tableId === parsed.tableId)
     if (chosen && typeof parsed?.reason === "string") reason = parsed.reason

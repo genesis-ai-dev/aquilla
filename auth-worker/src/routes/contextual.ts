@@ -582,7 +582,7 @@ export async function selfTickLoop(
             llm: guarded.llm,
             notify,
             ...(concurrency ? { concurrency } : {}),
-            triage: (input) => decide(env, { purpose: "triage", projectId, ...input }),
+            triage: (input) => decide(runEnv, { purpose: "triage", projectId, ...input }),
             bible,
           })
           if (checkpoint.reused > 0) {

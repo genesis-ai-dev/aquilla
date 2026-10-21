@@ -77,7 +77,9 @@ import {
   type IdmlPointerSelection,
 } from "@/lib/richtext/idml-caret"
 import { createIdmlActiveSegmentExtension, idmlSegmentCaretStep } from "@/lib/richtext/idml-segment-caret"
-import { getVisibleStyleSegments } from "@/lib/store/visible-style-segments-pref"
+import { applyIdmlSegmentEdge, segmentPiecesFromDoc } from "@/lib/richtext/idml-segment-edge"
+import { useStyleSegmentEdgeDrag } from "@/components/cell/useStyleSegmentEdgeDrag"
+import { getVisibleStyleSegments, useVisibleStyleSegments } from "@/lib/store/visible-style-segments-pref"
 import {
   FOOTNOTE_NODE_NAME,
   buildUsfmPlainTextMap,
@@ -688,6 +690,11 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   const isReadOnly = !editable || Boolean(heldByLabel) || Boolean(preparedIdmlContent?.error)
   const isReadOnlyRef = useRef(isReadOnly)
   useEffect(() => { isReadOnlyRef.current = isReadOnly }, [isReadOnly])
+  // Visible style segments lock a placed IDML cell so a bold or italic edge
+  // can be dragged without the caret taking the pointer. The preview sentence,
+  // before it is passed into the runs, never mounts this IDML editor.
+  const visibleStyleSegments = useVisibleStyleSegments()
+  const segmentEdgeMode = Boolean(idmlContext) && !isReadOnly && visibleStyleSegments
 
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // AQU-664: emits live text on a short debounce so terminology blots can be
@@ -869,7 +876,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   }, [publishSelection])
 
   const editor = useEditor({
-    editable: !isReadOnly,
+    editable: !isReadOnly && !segmentEdgeMode,
     content: initialContent,
     // IDML click offsets are source-artifact offsets. Preserve every space so
     // the rendered geometry, DOM range, and ProseMirror position stay aligned.
@@ -1805,8 +1812,30 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
 
   useEffect(() => {
     if (!editor || editor.isDestroyed) return
-    editor.setEditable(!isReadOnly)
-  }, [editor, isReadOnly])
+    editor.setEditable(!isReadOnly && !segmentEdgeMode)
+  }, [editor, isReadOnly, segmentEdgeMode])
+
+  const segmentEditorRef = useRef(editor)
+  segmentEditorRef.current = editor
+  useStyleSegmentEdgeDrag({
+    enabled: segmentEdgeMode && editor != null && !editor.isDestroyed,
+    getContainer: () => {
+      const current = segmentEditorRef.current
+      if (!current || current.isDestroyed) return null
+      return current.view.dom
+    },
+    getPieces: () => {
+      const current = segmentEditorRef.current
+      if (!current || current.isDestroyed || !idmlContext) return null
+      return segmentPiecesFromDoc(current.state.doc, idmlContext)
+    },
+    onEdge: (slotIndex, edge, boundary) => {
+      const current = segmentEditorRef.current
+      if (!current || current.isDestroyed || !idmlContext) return
+      applyIdmlSegmentEdge(current.view, slotIndex, edge, boundary, idmlContext)
+    },
+    onGestureEnd: () => commitEditorSnapshot.current(),
+  })
 
   const [, forceEditorStateUpdate] = useState(0)
   useEffect(() => {

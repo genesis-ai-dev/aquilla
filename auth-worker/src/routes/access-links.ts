@@ -38,6 +38,7 @@ import {
   INVITE_MIN_ROLE,
   LINK_ROLE_CAP,
   ROLE,
+  type Env,
   type ProjectAccessLinkRow,
 } from "../types"
 import { resolveProjectRole, isLinkRoleLevel } from "../services/project-permissions"

@@ -365,6 +365,7 @@ import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
 import { runDiarization, findFileClip, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { extractVoiceReference } from "@/lib/audio/reference-extract"
 import { assignedCastVoiceId, getVoiceLibrary, newVoiceId, resolveCastVoice, VOICE_PALETTE } from "@/lib/audio/voices"
+import { clearLaneCast, setLaneCast } from "@/lib/audio/lane-cast"
 import { generateAndAttachCellVoice } from "@/lib/audio/generate-voice"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { TimeOrderedEmptyState } from "./TimeOrderedEmptyState"
@@ -2329,6 +2330,8 @@ export function ProjectWorkspace() {
       (project?.lanes ?? []).filter((lane) => lane.role === "target"),
     ),
     activeLaneId,
+    // AQU-2038: the cast and the default voice are this lane's, not the project's.
+    activeLane,
   )
   // AQU-2037: the audio surfaces read the ACTIVE LANE's voices — the per-cell
   // picker, the batch dialog, the Media-timeline picker and Generate all go
@@ -2628,7 +2631,8 @@ export function ProjectWorkspace() {
       terminology: surfaceConcepts.editor,
       // AQU-2037: the editor's record is already overlaid for the open lane, so
       // its voices are too — the cast gutter, the cell voice chip and the batch
-      // dialog all read them off `project.ttsSettings`.
+      // dialog all read them off `project.ttsSettings`. AQU-2038: so are its
+      // cast and default voice, which `laneSettings` resolves for the lane.
       ttsSettings: tts.laneSettings,
     }
   }, [activeSourceLanguage, activeLaneTargetLanguage, project, surfaceConcepts.editor, tts.laneSettings])
@@ -4555,7 +4559,14 @@ export function ProjectWorkspace() {
           return
         }
         try {
-          await tts.saveTts(buildCastRemovals(cells.map((c) => c.id), tts.settings))
+          // AQU-2038: the project-wide map (the unprojected one — the lane
+          // projection must never be written back over the fallback), AND every
+          // lane's own entry: the character being removed is shared, so no
+          // lane's voice for it survives.
+          await tts.saveTts({
+            ...buildCastRemovals(cells.map((c) => c.id), tts.settings),
+            ...clearLaneCast(tts.settings, cells.map((c) => c.id)),
+          })
         } catch (e) {
           console.warn("[characters] pruning the voice map failed", e)
           toast.add({ type: "warning", title: "Character removed, but the cast assignments could not be updated." })
@@ -4567,7 +4578,10 @@ export function ProjectWorkspace() {
         return
       }
 
-      await tts.saveTts(buildCastRemovals([cell.id], tts.settings))
+      await tts.saveTts({
+        ...buildCastRemovals([cell.id], tts.settings),
+        ...clearLaneCast(tts.settings, [cell.id]),
+      })
       if (castName === "" || !project?.id || !activeFileId) return
       try {
         await emitCastAssign({
@@ -4880,6 +4894,10 @@ export function ProjectWorkspace() {
         await tts.saveTts({
           voices: additions.voices,
           castAssignments: {
+            // AQU-2038: the project-wide cast, deliberately — an imported
+            // character sheet is every lane's starting point, not this lane's
+            // own casting. `tts.laneSettings` is the lane projection; merging
+            // that in here would stamp one lane's choices onto the fallback.
             ...(tts.settings?.castAssignments ?? {}),
             ...additions.castAssignments,
           },
@@ -4993,6 +5011,10 @@ export function ProjectWorkspace() {
         await tts.saveTts({
           voices: additions.voices,
           castAssignments: {
+            // AQU-2038: the project-wide cast, deliberately — an imported
+            // character sheet is every lane's starting point, not this lane's
+            // own casting. `tts.laneSettings` is the lane projection; merging
+            // that in here would stamp one lane's choices onto the fallback.
             ...(tts.settings?.castAssignments ?? {}),
             ...additions.castAssignments,
           },
@@ -5107,7 +5129,13 @@ export function ProjectWorkspace() {
       // file no longer carries. The cast LIST is deliberately untouched — see
       // `buildCastRemovals`.
       try {
-        await tts.saveTts(buildCastRemovals(dirty.map((c) => c.id), tts.settings))
+        await tts.saveTts({
+          ...buildCastRemovals(dirty.map((c) => c.id), tts.settings),
+          // AQU-2038: and every lane's own entry — the characters being cleared
+          // are shared, so no lane's voice for them survives. The same rule as
+          // "No character" above.
+          ...clearLaneCast(tts.settings, dirty.map((c) => c.id)),
+        })
       } catch (e) {
         console.warn("[characters] pruning the cast assignments failed", e)
         toast.add({ type: "warning", title: "Characters cleared, but the cast assignments could not be updated." })
@@ -14599,18 +14627,20 @@ export function ProjectWorkspace() {
         }
       }
 
-      const assignments: Record<string, string> = {}
-      for (const c of media) assignments[c.id] = voiceId
+      // AQU-2038: casting those lines is this lane's call, like every other
+      // assignment made from the editor — in the SAME patch as the new voice,
+      // because a second save in this tick would merge over a pre-save copy of
+      // the settings and drop it.
       await tts.saveTts({
         voices,
-        castAssignments: { ...(tts.settings?.castAssignments ?? {}), ...assignments },
+        ...setLaneCast(tts.settings, activeLane, media.map((c) => c.id), voiceId),
       })
     } catch (e) {
       console.warn("[adopt-speaker-voice] failed:", e)
     } finally {
       setAdoptingSpeaker(false)
     }
-  }, [project?.id, activeFileId, activeFile?.name, adoptingSpeaker, cellStore, getTokenForFile, tts.settings, tts.saveTts])
+  }, [project?.id, activeFileId, activeFile?.name, adoptingSpeaker, cellStore, getTokenForFile, tts.settings, tts.saveTts, activeLane])
 
   const fileMenuItems = useMemo((): OverflowMenuItem[] => {
     if (!activeFileId) return []
@@ -15522,7 +15552,8 @@ export function ProjectWorkspace() {
                 <SelectionBar
                   /* AQU-2037: `audioProject` is `project` with the OPEN LANE's
                      voices — the batch voice dialog this bar opens reads them
-                     off `project.ttsSettings`. */
+                     off `project.ttsSettings`. AQU-2038: and the lane's own
+                     cast and default voice, which Voice together reads too. */
                   project={audioProject ?? project}
                   cellStore={cellStore}
                   session={frontierSession}
@@ -15545,7 +15576,8 @@ export function ProjectWorkspace() {
                       project,
                       fileId: activeFileId,
                       cells: sel,
-                      settings: tts.settings,
+                      // AQU-2037/2038: the lane's voices, cast and default.
+                      settings: tts.laneSettings,
                       session: frontierSession,
                       username: currentUsername,
                       // AQU-1591: the lane this is a performance of.
@@ -16917,7 +16949,9 @@ export function ProjectWorkspace() {
                   cells={legacyCells}
                   projectId={project.id}
                   session={frontierSession ?? null}
-                  settings={tts.settings}
+                  // AQU-2037/2038: the lane's voices, cast and default — the
+                  // bar names the voice the sounding line speaks with HERE.
+                  settings={tts.laneSettings}
                   onActiveCell={handleBarActiveCell}
                   // AQU-1642 follow-up: in the Audio view, Play starts from the
                   // verse last selected or stopped.

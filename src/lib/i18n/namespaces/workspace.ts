@@ -480,6 +480,10 @@ export const workspace = defineNamespace({
     "workspace.chipStrip.durationDiffTooltipWithDetail": "Source duration − target duration · {detail}",
     "workspace.chipStrip.diffStartDetail": "Start: {value}",
     "workspace.chipStrip.diffEndDetail": "End: {value}",
+    "workspace.chipStrip.pieceCount": plural({
+      one: "{count} piece",
+      other: "{count} pieces",
+    }),
 
     // -- timeline/TargetAudioLane --
     "workspace.targetAudioLane.previewTooLong":
@@ -2069,6 +2073,13 @@ export const workspace = defineNamespace({
         description:
           "Same as workspace.chipStrip.diffStartDetail, for the clip's end edge.",
         placeholders: { value: "Already-formatted signed seconds (e.g. '+0.3s') — not translated." },
+      },
+      "workspace.chipStrip.pieceCount": {
+        description:
+          "In the 'Target:' pill of the chip stats strip, for a take that has been cut " +
+          "into pieces: how many pieces it is, before the length of sound they keep " +
+          "(e.g. 'Target: 0:01.6–0:05.6 | 3 pieces · 3.5s'). Only shown for 2 or more.",
+        placeholders: { count: "How many pieces the take is cut into (2 or more)." },
       },
 
       "workspace.targetAudioLane.previewTooLong": {

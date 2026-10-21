@@ -210,6 +210,8 @@ import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
   setQueueTargetSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying } from "@/lib/audio/play-queue"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
 import { useTransportForFile } from "@/hooks/useTransportForFile"
+import { useAudioViewPlace } from "@/hooks/useAudioViewPlace"
+import { usePauseAudioWhenHidden } from "@/hooks/usePauseAudioWhenHidden"
 import { videoOwnsFile, virtualOwnsFile } from "@/lib/audio/transport"
 import { recordingDrivesPlayback, switchPlaybackSource, usePlaybackSource, type PlaybackSource } from "@/lib/audio/playback-source"
 import { youTubeVideoId } from "@/lib/video/youtube"
@@ -714,6 +716,8 @@ export function ProjectWorkspace() {
   const { list: formatLocaleList, time: formatLocaleTime } = useFormat()
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
   const navigate = useNavigate()
+  // Leaving the tab pauses playback — a hidden tab can't keep the timeline in time.
+  usePauseAudioWhenHidden()
   // Declared up here because effects further down set and read them long before
   // the values they mirror are computed. Keeping the declarations ahead of every
   // use is what makes the mirroring legal (react-hooks/immutability).
@@ -2370,6 +2374,10 @@ export function ProjectWorkspace() {
     // table's playback follow even if an earlier scroll had released it.
     editorRef.current?.setMediaFollow?.("engage")
   }, [])
+  // AQU-1642 follow-up: the Audio view's one place to play from. Its context —
+  // the file's cells with their takes — is written by a layout effect below,
+  // once they exist; the place only reads it at press time.
+  const { place: audioViewPlace, contextRef: audioViewContextRef } = useAudioViewPlace(activeFileId ?? null)
   const audioLens = useMemo<AudioLensContext | null>(
     () =>
       lens === "audio" && audioProject && !activeFileTimeOrdered
@@ -2405,11 +2413,12 @@ export function ProjectWorkspace() {
               setMakeCharacterSeedCellId(cellId)
               setMakeCharacterOpen(true)
             },
+            place: audioViewPlace,
           }
         : null,
     [
       lens, audioProject, activeFileTimeOrdered, tts.voices, tts.laneSettings, tts.defaultVoiceId,
-      tts.assignCells, frontierSession, currentUsername, cellStore, refresh,
+      tts.assignCells, frontierSession, currentUsername, cellStore, refresh, audioViewPlace,
     ],
   )
 
@@ -11892,6 +11901,16 @@ export function ProjectWorkspace() {
     () => mergeCellsWithAudio(legacyCells, workspaceAudioByCellId),
     [legacyCells, workspaceAudioByCellId],
   )
+  // AQU-1642 follow-up: what the Audio view's cards and ⋯ Play open the run
+  // with — the same lines, takes and "moved to this line" as the bar's Play.
+  // Written after every commit (no deps) so a press reads this render's cells;
+  // a layout effect, not a render-time write, because the hook's return value
+  // is frozen to react-hooks/immutability and the ref is never read in render.
+  useLayoutEffect(() => {
+    audioViewContextRef.current = project
+      ? { cells: audioMergedCells, projectId: project.id, session: frontierSession ?? null, onActiveCell: handleBarActiveCell }
+      : null
+  })
 
   // AQU-928: transcribe EXACTLY the sections selected on the timeline. Same
   // per-cell path (and same post-run flush/revalidate) as transcribe-all, only
@@ -16113,6 +16132,8 @@ export function ProjectWorkspace() {
                     }
                     isTextFullscreen={mediaSections.isFullscreen("text")}
                     onOpenRecording={handleOpenRecording}
+                    // AQU-1684: the track taking a take can't be hidden meanwhile.
+                    recordingSlot={recordingCellId !== null ? recordingSlot : null}
                     project={editorProject ?? project ?? undefined}
                     onSelectCell={setTimelineSelectedCellId}
                     // AQU-928: transcription emits contributor-level events, so
@@ -16437,7 +16458,10 @@ export function ProjectWorkspace() {
             getStatisticalBt={getStatisticalBt}
             onAlignmentSeedChange={handleAlignmentSeedChange}
             onSeekToCue={isSubtitleFile && timelineStacked ? handleCueSeek : undefined}
-            playingCueCellId={isSubtitleFile && timelineStacked ? playingCueCellId : null}
+            // AQU-1642: in the Audio view too — the line the bottom bar is
+            // playing is marked. Its card's controls reach the run through
+            // the Audio view's place (`audioLens.place`), not through here.
+            playingCueCellId={(isSubtitleFile && timelineStacked) || audioLens ? playingCueCellId : null}
             onPauseCue={pauseAllTransports}
             sourceLineEditing={sourceLineEditing}
             lineNumbersEnabled={fileMeta.lineNumbersEnabled}
@@ -16895,7 +16919,9 @@ export function ProjectWorkspace() {
                   session={frontierSession ?? null}
                   settings={tts.settings}
                   onActiveCell={handleBarActiveCell}
-                  startCellId={timelineSelectedCellId}
+                  // AQU-1642 follow-up: in the Audio view, Play starts from the
+                  // verse last selected or stopped.
+                  startCellId={audioLens ? audioViewPlace.startCellId : timelineSelectedCellId}
                   coreMediaUrl={activeFile?.coreMediaUrl ?? null}
                   videoPaneOnScreen={showVideoPane}
                   // AQU-646 stage 3h: what the bar reads on a file with timings

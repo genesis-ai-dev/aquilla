@@ -106,6 +106,10 @@ const UNCOVERED: Record<string, string> = {
   integration_links: "never granted to app_runtime",
   knowledge_docs: "never granted to app_runtime",
   lanes: "never granted to app_runtime",
+  // AQU-2105 (0185): a project's LangQuest link (encrypted token) and its
+  // passage→cell map, read and written only by auth-worker routes/langquest.ts.
+  langquest_links: "never granted to app_runtime — rows hold an encrypted credential",
+  langquest_passages: "never granted to app_runtime",
   project_access_links: "never granted to app_runtime — rows are credentials",
   // AQU-1249: anonymous guests redeem a link by its token with no user in
   // context, so 0034's per-user policy shape cannot apply (as mcp_oauth_codes).

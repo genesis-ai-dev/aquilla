@@ -291,7 +291,8 @@ describe("RecordingTakes — heard lines, tracks and what a take is checked agai
 
   it("gives a trimmed take the length that plays", () => {
     drawHeard({ cell: heard(), performs: ["line-2"], partOfSplit: false })
-    expect(within(blocks()[1]).getByTestId("cell-take-length")).toHaveTextContent("2.1s")
+    // 2.064s kept, in tenths rounded down as the recorder says it (AQU-1767).
+    expect(within(blocks()[1]).getByTestId("cell-take-length")).toHaveTextContent("2.0s")
   })
 
   it("leaves a part of a split line unchecked", () => {

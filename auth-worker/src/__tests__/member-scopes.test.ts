@@ -279,6 +279,12 @@ describe("member-scopes — maintainer and above stay unscoped", () => {
     const res = await putScopes(jwt, 3, [])
     expect(res.status).toBe(200)
   })
+
+  it("403s a lane-limited lead clearing their OWN scopes (self-widening)", async () => {
+    await putScopes(await jwtFor("owner"), 3, [{ kind: "lane", value: "es" }])
+    const res = await putScopes(await jwtFor("lead"), 3, [])
+    expect(res.status).toBe(403)
+  })
 })
 
 describe("AQU-553 sync-token — scopes claim included/omitted", () => {

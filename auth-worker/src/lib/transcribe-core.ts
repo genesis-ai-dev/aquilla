@@ -266,6 +266,10 @@ export async function transcribe(env: Env, input: TranscribeInput): Promise<Tran
     generationId = response.headers.get("X-Generation-Id") ?? undefined
     if (!response.ok) {
       if (usage) await holdChatUsage(env, usage, generationId)
+      // Keep OpenRouter's reason in the logs: a routing refusal (no endpoint
+      // allowed by the account's data policy) looked exactly like an outage.
+      const detail = (await response.text().catch(() => "")).slice(0, 300)
+      console.error(`[transcription] ${openRouterModel} upstream ${response.status}: ${detail}`)
       return fail(502, "Transcription provider failed")
     }
     const data = await response.json() as Record<string, unknown>

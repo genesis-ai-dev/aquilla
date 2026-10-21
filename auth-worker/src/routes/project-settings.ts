@@ -65,7 +65,7 @@
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
-import { pushDirtyLinksAfterResponse } from "../lib/monday/push"
+import { pushDirtyLinksAfterResponse } from "../lib/integrations/push"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE, type AuthUser } from "../types"
 import { ROLE_NAMES, resolveProjectRole } from "../services/project-permissions"
@@ -111,7 +111,7 @@ import { lanesForScopeVisibility } from "../../../src/lib/lanes/scope-ids"
 import { loadTargetLaneIdentities, visibleTagsForMember } from "../../../db/shared/lane-visibility"
 import { grantNewLane } from "../../../db/shared/lane-grants"
 import { grantCreatedLaneToActor } from "../services/lane-grants"
-import { markProjectMondayLinksDirty } from "../../../db/shared/monday-dirty"
+import { markProjectSyncLinksDirty } from "../../../db/shared/progress-sync-dirty"
 import type { AquillaDb } from "../../../db/shim/postgres"
 import { laneLanguage } from "../../../src/lib/lanes/lane-display"
 import { validateSettingsKeyValue } from "../../../db/shared/project-settings-keys"
@@ -849,7 +849,7 @@ async function pushMondayAfterLaneChange(
   c: { env: AuthHonoEnv["Bindings"]; executionCtx: { waitUntil(promise: Promise<unknown>): void } },
   projectId: string,
 ): Promise<void> {
-  await markProjectMondayLinksDirty(c.env.AQUILLA_PG, [projectId])
+  await markProjectSyncLinksDirty(c.env.AQUILLA_PG, [projectId])
   pushDirtyLinksAfterResponse(c, { projectIds: [projectId] })
 }
 

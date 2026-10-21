@@ -6,6 +6,7 @@ import { ROLE } from "@/lib/frontier/roles"
 import type { ContextualDraftsScope } from "@/lib/contextual/drafts-store"
 import { btSeedsFromAlignmentSeeds, type BtSeed } from "@/lib/completion/bt-glosser"
 import type { BacktranslationRecord } from "@/lib/completion/bt-record"
+import type { GlossRecord } from "@/lib/completion/gloss-record"
 import type { CellSummary } from "@/hooks/useActiveCellStore"
 import type { FileSummary } from "@/lib/sync/cells-read-types"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -199,6 +200,7 @@ export function trackDeleteGate(
  * Four sources feed the statistical BT, in ascending order of how explicitly
  * the user asked for them:
  *   - corrected BTs from the cache (2, or 5 when unpolished — a raw human edit)
+ *   - corrected statistical glosses (5 — AQU-1408 §2)
  *   - termbase renderings (preferred 3 / admitted 1 / forbidden -3)
  *   - confirmed / invalidated interlinear alignments (±2 via
  *     `btSeedsFromAlignmentSeeds`)
@@ -210,10 +212,12 @@ export function trackDeleteGate(
 export function buildGlosserSeeds(args: {
   corpusCells: readonly CellSummary[]
   backtranslationCache: ReadonlyMap<string, BacktranslationRecord>
+  /** AQU-1408 §2: hand-corrected glosses, keyed by cell id. */
+  glossCache?: ReadonlyMap<string, GlossRecord>
   terminology: ProjectRecord["terminology"] | undefined
   alignmentSeeds: ProjectRecord["alignmentSeeds"] | undefined
 }): BtSeed[] {
-  const { corpusCells, backtranslationCache, terminology, alignmentSeeds } = args
+  const { corpusCells, backtranslationCache, glossCache, terminology, alignmentSeeds } = args
   const seeds: BtSeed[] = []
 
   // High-weight seeds from previous user-corrected BTs stored in the cache.
@@ -232,6 +236,32 @@ export function buildGlosserSeeds(args: {
       source: record.btText,
       target: record.forText || cell.translated,
       weight: record.polished === false ? 5 : 2,
+      originId: record.cellId,
+    })
+  }
+
+  // AQU-1408 §2: a corrected gloss is the most direct supervision the glosser
+  // can get — the user rewrote this very model's output for these exact words.
+  // It seeds at the same weight as a hand-rewritten BT (5), which is what the
+  // ticket asks for ("the same way hand-edited AI back translations already
+  // re-seed it"), and carries `originId` so the leave-one-out gloss of the
+  // corrected cell is not just its own correction read back. That is also what
+  // makes the correction show up on OTHER cells using the same words, which is
+  // the acceptance criterion.
+  for (const record of glossCache?.values() ?? []) {
+    const text = record.glossText.trim()
+    if (!text) continue
+    const cell = corpusByCellId.get(record.cellId)
+    if (!cell?.translated) continue
+    // Same staleness rule as the BTs above: a correction pinned to a
+    // superseded commit describes words that are gone.
+    if (record.targetEventId && cell.targetEventId && record.targetEventId !== cell.targetEventId) {
+      continue
+    }
+    seeds.push({
+      source: text,
+      target: record.forText || cell.translated,
+      weight: 5,
       originId: record.cellId,
     })
   }

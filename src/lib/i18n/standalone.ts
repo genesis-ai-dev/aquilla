@@ -11,7 +11,7 @@
  * which this cannot do. See AQU-820/AQU-832.
  */
 
-import { CATALOGS } from "./messages"
+import { catalogFor } from "./messages"
 import type { MessageKey } from "./messages/en"
 import { DEFAULT_LOCALE, normalizeLocale } from "./locales"
 import { readStoredLocale } from "./store"
@@ -19,5 +19,6 @@ import { translate, type TVars } from "./translate"
 
 export function t(key: MessageKey, vars?: TVars): string {
   const locale = normalizeLocale(readStoredLocale())
-  return translate(CATALOGS[locale] ?? CATALOGS[DEFAULT_LOCALE], key, vars, locale)
+  // English until the locale's catalog has arrived (main.tsx fetches it first).
+  return translate(catalogFor(locale) ?? catalogFor(DEFAULT_LOCALE), key, vars, locale)
 }

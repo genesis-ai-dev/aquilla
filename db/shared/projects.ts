@@ -16,7 +16,7 @@
 // either worker — the same handle both inject as `env.AQUILLA_PG`.
 
 import type { AquillaDb, AquillaStatement } from "../shim/postgres"
-import { markProjectMondayLinksDirty, mondayMetricSettingsChanged } from "./monday-dirty"
+import { markProjectSyncLinksDirty, syncMetricSettingsChanged } from "./progress-sync-dirty"
 import { isPrimaryRegistryLane } from "../../src/lib/lanes/registry-lanes"
 import {
   askedLanesFromSpecs,
@@ -566,8 +566,8 @@ export async function updateProjectSettingsShared(
   // AQU-1771: a linked Monday board must not keep the old percentages until
   // the next edit. Downstream copies the link writes come back through here
   // with their own before/after, so each marks itself.
-  if (mondayMetricSettingsChanged(current.settings, normalizedSettings)) {
-    await markProjectMondayLinksDirty(db, [input.projectId])
+  if (syncMetricSettingsChanged(current.settings, normalizedSettings)) {
+    await markProjectSyncLinksDirty(db, [input.projectId])
   }
 
   const fresh = await loadProjectSettings(db, input.projectId)

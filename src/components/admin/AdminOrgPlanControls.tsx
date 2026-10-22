@@ -78,7 +78,9 @@ export function OrgPlanControl({
       >
         <option value="free">Free</option>
         <option value="team">Team</option>
-        <option value="enterprise">Enterprise</option>
+        {/* Enterprise is the unlimited plan: usage is recorded, never refused,
+            until the contract end below (none = no end). */}
+        <option value="enterprise">Enterprise (unlimited)</option>
       </select>
       {org.tier === "enterprise" ? (
         <label className="flex items-center gap-1 text-[10px] text-muted-foreground">

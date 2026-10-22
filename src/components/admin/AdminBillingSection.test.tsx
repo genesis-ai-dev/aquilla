@@ -7,6 +7,7 @@ import type { AdminBillingOrg, AdminBillingPlans } from "@/lib/frontier/admin"
 vi.mock("@/lib/frontier/admin", () => ({
   getAdminBillingPlans: vi.fn(),
   getAdminBillingOrgs: vi.fn(),
+  getAdminBillingOrg: vi.fn(),
   updateAdminBillingPlans: vi.fn(),
   patchAdminBillingOrg: vi.fn(),
   patchAdminWeeklyAllowance: vi.fn(),
@@ -22,6 +23,7 @@ import {
   getAdminWouldBlock,
   patchAdminOrgPlan,
   patchAdminWeeklyAllowance,
+  getAdminBillingOrg,
   getAdminBillingOrgs,
   getAdminBillingPlans,
   grantAdminWords,
@@ -30,6 +32,7 @@ import {
 
 const mockPlans = vi.mocked(getAdminBillingPlans)
 const mockOrgs = vi.mocked(getAdminBillingOrgs)
+const mockOrg = vi.mocked(getAdminBillingOrg)
 const mockSave = vi.mocked(updateAdminBillingPlans)
 const mockGrant = vi.mocked(grantAdminWords)
 
@@ -113,7 +116,14 @@ const ENTERPRISE_ORG: AdminBillingOrg = {
 beforeEach(() => {
   vi.clearAllMocks()
   mockPlans.mockResolvedValue(CATALOG)
-  mockOrgs.mockResolvedValue([ORG, ENTERPRISE_ORG])
+  // Stands in for the server: search and tier filtering happen there now.
+  mockOrgs.mockImplementation(async (_jwt, query = {}) => {
+    const q = (query.q ?? "").toLowerCase()
+    const orgs = [ORG, ENTERPRISE_ORG].filter((o) =>
+      !q || (o.orgName ?? "").toLowerCase().includes(q) || String(o.orgId) === q)
+    return { orgs, total: orgs.length }
+  })
+  mockOrg.mockImplementation(async (_jwt, orgId) => (orgId === 1 ? ORG : ENTERPRISE_ORG))
   mockSave.mockResolvedValue({ plan: CATALOG.plan, version: 2, warnings: [] })
   mockGrant.mockResolvedValue()
   vi.mocked(getAdminWouldBlock).mockResolvedValue({ meterMode: "shadow", orgs: [] })
@@ -156,17 +166,19 @@ describe("AdminBillingSection", () => {
     expect(await screen.findByTestId("admin-words-1")).toBeDefined()
     expect(screen.getByTestId("admin-words-2")).toBeDefined()
 
-    fireEvent.change(screen.getByLabelText("Search organizations…"), { target: { value: "Biblica" } })
+    fireEvent.change(screen.getByLabelText("Search name, owner or org id…"), { target: { value: "Biblica" } })
 
     await waitFor(() => expect(screen.queryByTestId("admin-words-1")).toBeNull())
     expect(screen.getByTestId("admin-words-2")).toBeDefined()
+    // The server searches every org, not just the page already loaded.
+    expect(mockOrgs).toHaveBeenLastCalledWith("jwt", expect.objectContaining({ q: "Biblica", offset: 0 }))
   })
 
   it("finds an org by its numeric id", async () => {
     render(<AdminBillingSection jwt="jwt" />)
     await screen.findByTestId("admin-words-1")
 
-    fireEvent.change(screen.getByLabelText("Search organizations…"), { target: { value: "2" } })
+    fireEvent.change(screen.getByLabelText("Search name, owner or org id…"), { target: { value: "2" } })
 
     await waitFor(() => expect(screen.queryByTestId("admin-words-1")).toBeNull())
     expect(screen.getByTestId("admin-words-2")).toBeDefined()
@@ -210,25 +222,65 @@ describe("AdminBillingSection — AQU-942: the resolved shell survives revalidat
   })
 
   it("keeps the catalog form and org table mounted while a grant revalidates", async () => {
-    // WHY: `act` re-fetches after every grant/reset, flipping `loading` back
-    // on. Gating the section on `loading` blanked the whole tab after each
-    // action, losing the table's sort/scroll and flashing the form away.
+    // WHY: blanking the section while a row re-reads after a grant/reset loses
+    // the table's scroll and flashes the form away.
     render(<AdminBillingSection jwt="jwt" />)
     await screen.findByTestId("save-field-plan")
 
-    let release: (plans: AdminBillingPlans) => void = () => {}
-    mockPlans.mockImplementationOnce(
-      () => new Promise<AdminBillingPlans>((resolve) => { release = resolve }),
+    let release: (org: AdminBillingOrg) => void = () => {}
+    mockOrg.mockImplementationOnce(
+      () => new Promise<AdminBillingOrg>((resolve) => { release = resolve }),
     )
     fireEvent.click(screen.getByTestId("grant-words-1"))
     await waitFor(() => expect(mockGrant).toHaveBeenCalled())
 
     expect(screen.getByTestId("admin-billing")).toBeDefined()
     expect(screen.getByTestId("save-field-plan")).toBeDefined()
+    expect(screen.getByTestId("admin-words-2")).toBeDefined()
     expect(screen.queryByRole("status", { name: "Loading billing" })).toBeNull()
 
-    release(CATALOG)
+    release(ORG)
     await waitFor(() => expect(screen.getByTestId("admin-billing")).toBeDefined())
+  })
+})
+
+// The Billing tab timed out reading every org on the platform. These pin the
+// fix's contract: one page at a time, and a change re-reads only its own row.
+describe("AdminBillingSection — paged org list", () => {
+  it("re-reads only the changed org after a plan change, not the whole list", async () => {
+    render(<AdminBillingSection jwt="jwt" />)
+    const select = await screen.findByLabelText("plan for Come and See")
+    const listReads = mockOrgs.mock.calls.length
+    mockOrg.mockResolvedValueOnce({ ...ORG, tier: "enterprise", resolvedTier: "enterprise", effectiveWeeklyAllowance: null })
+
+    fireEvent.change(select, { target: { value: "enterprise" } })
+
+    await waitFor(() => expect(screen.getByTestId("plan-status-1").textContent).toBe("Unmetered · no end date"))
+    expect(mockOrg).toHaveBeenCalledWith("jwt", 1)
+    expect(mockOrgs.mock.calls.length).toBe(listReads)
+  })
+
+  it("filters by plan on the server and starts again at page one", async () => {
+    mockOrgs.mockResolvedValue({ orgs: [ORG, ENTERPRISE_ORG], total: 120 })
+    render(<AdminBillingSection jwt="jwt" />)
+    await screen.findByTestId("admin-words-1")
+    fireEvent.click(screen.getByTestId("admin-billing-next-page"))
+    await waitFor(() => expect(mockOrgs).toHaveBeenLastCalledWith("jwt", expect.objectContaining({ offset: 50 })))
+
+    fireEvent.change(screen.getByTestId("admin-billing-tier-filter"), { target: { value: "paid" } })
+
+    await waitFor(() =>
+      expect(mockOrgs).toHaveBeenLastCalledWith("jwt", expect.objectContaining({ tier: "paid", offset: 0 })))
+  })
+
+  it("pages through every match and shows where it is", async () => {
+    mockOrgs.mockResolvedValue({ orgs: [ORG, ENTERPRISE_ORG], total: 120 })
+    render(<AdminBillingSection jwt="jwt" />)
+    await waitFor(() => expect(screen.getByTestId("admin-billing-org-count").textContent).toBe("1–50 of 120"))
+    fireEvent.click(screen.getByTestId("admin-billing-next-page"))
+    fireEvent.click(await screen.findByTestId("admin-billing-next-page"))
+    await waitFor(() => expect(screen.getByTestId("admin-billing-org-count").textContent).toBe("101–120 of 120"))
+    expect(screen.getByTestId("admin-billing-next-page")).toBeDisabled()
   })
 })
 
@@ -290,10 +342,10 @@ describe('per-org plan control', () => {
   })
 
   it('shows the grace state after an Enterprise contract ends', async () => {
-    mockOrgs.mockResolvedValue([{
+    mockOrgs.mockResolvedValue({ orgs: [{
       ...ENTERPRISE_ORG, contractEndsAt: '2026-10-10T00:00:00.000Z', resolvedTier: 'team',
       planSource: 'contract_grace', graceEndsAt: '2026-10-24T00:00:00.000Z', effectiveWeeklyAllowance: 9_600,
-    }])
+    }], total: 1 })
     render(<AdminBillingSection jwt="jwt" />)
     expect((await screen.findByTestId('plan-status-2')).textContent).toBe('Contract ended · Team-sized grace until 2026-10-24')
   })

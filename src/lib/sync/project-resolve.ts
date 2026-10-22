@@ -19,6 +19,12 @@ import type { ProjectSettingsResponse } from "./project-settings"
 export type ProjectReadResult = ResolveProjectResult & {
   /** True when the project came from this device's offline copy, not the server. */
   fromOfflineCopy?: boolean
+  /**
+   * True when the server was unreachable and the offline store hadn't opened
+   * within {@link OFFLINE_STORE_WAIT_MS}, so the offline copy was never looked
+   * at. Resolve again once {@link whenOfflineStoreOpen} says it has opened.
+   */
+  offlineCopyPending?: boolean
 }
 
 export async function resolveProjectForRead(projectId: string, jwt: string): Promise<ProjectReadResult> {
@@ -32,8 +38,29 @@ export async function resolveProjectForRead(projectId: string, jwt: string): Pro
   }
   if (result.reason !== "unreachable") return result
 
-  const snapshot = await withOfflineStore((store, snapshots) => snapshots.readProjectSnapshot(store, projectId, owner))
-  return snapshot ? { ok: true, project: snapshot, fromOfflineCopy: true } : result
+  let storeLate = false
+  const snapshot = await withOfflineStore(
+    (store, snapshots) => snapshots.readProjectSnapshot(store, projectId, owner),
+    () => { storeLate = true },
+  )
+  if (snapshot) return { ok: true, project: snapshot, fromOfflineCopy: true }
+  return storeLate ? { ...result, offlineCopyPending: true } : result
+}
+
+/**
+ * Desktop: resolves true once the offline store has opened, however long that
+ * takes (a schema rebuild after an update can run past
+ * {@link OFFLINE_STORE_WAIT_MS}). False in the browser or if it fails to open.
+ */
+export async function whenOfflineStoreOpen(): Promise<boolean> {
+  if (!isTauriRuntime()) return false
+  try {
+    const { getOfflineStore } = await import("@/lib/offline/store")
+    await getOfflineStore()
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** Desktop: keeps `jwt`'s account's settings response for {@link readOfflineProjectSettings}. */
@@ -66,6 +93,7 @@ async function withOfflineStore<T>(
     store: Awaited<ReturnType<typeof import("@/lib/offline/store").getOfflineStore>>,
     snapshots: typeof import("@/lib/offline/project-snapshot"),
   ) => T,
+  onStoreLate?: () => void,
 ): Promise<T | null> {
   try {
     const [{ getOfflineStore }, snapshots] = await Promise.all([
@@ -74,6 +102,7 @@ async function withOfflineStore<T>(
     ])
     return run(await withinOfflineStoreWait(getOfflineStore()), snapshots)
   } catch (error) {
+    if (error instanceof OfflineStoreWaitTimeout) onStoreLate?.()
     // No usable offline store (e.g. a newer build owns it, or it never
     // finished opening): behave as before.
     console.warn("[offline] project snapshot unavailable", error)
@@ -81,10 +110,16 @@ async function withOfflineStore<T>(
   }
 }
 
+class OfflineStoreWaitTimeout extends Error {
+  constructor() {
+    super(`offline store not open after ${OFFLINE_STORE_WAIT_MS}ms`)
+  }
+}
+
 function withinOfflineStoreWait<T>(pending: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`offline store not open after ${OFFLINE_STORE_WAIT_MS}ms`)), OFFLINE_STORE_WAIT_MS)
+    timer = setTimeout(() => reject(new OfflineStoreWaitTimeout()), OFFLINE_STORE_WAIT_MS)
   })
   return Promise.race([pending, timeout]).finally(() => clearTimeout(timer))
 }

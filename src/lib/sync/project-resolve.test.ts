@@ -12,6 +12,7 @@ const h = vi.hoisted(() => ({
   store: null as Store<typeof import("@/lib/offline/schema").schema> | null,
   storeError: null as Error | null,
   storeHangs: false,
+  storeGate: null as Promise<void> | null,
 }))
 
 vi.mock("@/lib/offline/is-tauri", () => ({ isTauriRuntime: () => h.tauri }))
@@ -20,11 +21,12 @@ vi.mock("@/lib/offline/store", () => ({
   getOfflineStore: vi.fn(async () => {
     if (h.storeError) throw h.storeError
     if (h.storeHangs) return new Promise(() => {})
+    if (h.storeGate) await h.storeGate
     return h.store
   }),
 }))
 
-const { OFFLINE_STORE_WAIT_MS, readOfflineProjectSettings, rememberProjectSettingsOffline, resolveProjectForRead } =
+const { OFFLINE_STORE_WAIT_MS, readOfflineProjectSettings, rememberProjectSettingsOffline, resolveProjectForRead, whenOfflineStoreOpen } =
   await import("./project-resolve")
 
 /** Unsigned JWT-shaped token for `sub` — only its subject is ever read. */
@@ -44,6 +46,7 @@ beforeEach(async () => {
   h.tauri = true
   h.storeError = null
   h.storeHangs = false
+  h.storeGate = null
   h.store = await createStorePromise({ schema, storeId: `resolve-${++seq}`, adapter: makeInMemoryAdapter() })
   h.store.commit(events.projectSynced({ id: "proj1", name: "Genesis", orgId: "1", settings: null, syncedAt: new Date() }))
   h.store.commit(events.offlineProjectStatusSet({ projectId: "proj1", status: "ready", syncedAt: null, queueDepth: 0 }))
@@ -76,10 +79,39 @@ describe("resolveProjectForRead", () => {
       h.result = { ok: false, reason: "unreachable" }
       const pending = resolveProjectForRead("proj1", jwt)
       await vi.advanceTimersByTimeAsync(OFFLINE_STORE_WAIT_MS)
-      expect(await pending).toEqual(h.result)
+      expect(await pending).toEqual({ ...h.result, offlineCopyPending: true })
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it("finds the offline copy on a retry once a slow store has opened", async () => {
+    h.result = { ok: true, project: project() }
+    await resolveProjectForRead("proj1", jwt)
+    await vi.waitFor(() => expect(readProjectSnapshot(h.store!, "proj1", "anna")).not.toBeNull())
+
+    let open!: () => void
+    h.storeGate = new Promise((resolve) => { open = resolve })
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    h.result = { ok: false, reason: "unreachable" }
+    vi.useFakeTimers()
+    try {
+      const pending = resolveProjectForRead("proj1", jwt)
+      await vi.advanceTimersByTimeAsync(OFFLINE_STORE_WAIT_MS)
+      expect(await pending).toEqual({ ...h.result, offlineCopyPending: true })
+    } finally {
+      vi.useRealTimers()
+    }
+
+    open()
+    expect(await whenOfflineStoreOpen()).toBe(true)
+    h.storeGate = null
+    expect(await resolveProjectForRead("proj1", jwt)).toEqual({ ok: true, project: project(), fromOfflineCopy: true })
+  })
+
+  it("reports no offline store to wait for in the browser", async () => {
+    h.tauri = false
+    expect(await whenOfflineStoreOpen()).toBe(false)
   })
 
   it("passes through an unreachable server when nothing is stored", async () => {

@@ -16,7 +16,7 @@ import {
   type ProjectSettingsEditor,
   settingsEditorName,
 } from "@/lib/sync/project-settings"
-import { readOfflineProjectSettings, rememberProjectSettingsOffline } from "@/lib/sync/project-resolve"
+import { readOfflineProjectSettings, rememberProjectSettingsOffline, whenOfflineStoreOpen } from "@/lib/sync/project-resolve"
 import type { ProjectOrgPolicy, ProjectVisibilityFloors } from "@/lib/sync/project-org-policy"
 import posthog from "@/lib/posthog"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
@@ -615,7 +615,13 @@ export function useProjectSettings(
   // marks hasFetched — anything that fails closed on it stays closed.
   const hydrateFromOfflineCopy = useCallback(async () => {
     if (!projectId || !jwt || serverRef.current) return
-    const cached = await readOfflineProjectSettings(projectId, jwt)
+    let cached = await readOfflineProjectSettings(projectId, jwt)
+    // The read gives up on a store that is slow to open (e.g. rebuilding after
+    // an update); read once more when it has opened rather than leave the
+    // editor without lane rows.
+    if (!cached && (await whenOfflineStoreOpen()) && aliveRef.current && !serverRef.current) {
+      cached = await readOfflineProjectSettings(projectId, jwt)
+    }
     if (cached && aliveRef.current && !serverRef.current) writeServer(cached)
   }, [projectId, jwt, writeServer])
 

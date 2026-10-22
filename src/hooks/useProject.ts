@@ -16,7 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { minimalProjectRecord } from "@/lib/sync/cloud-projects"
-import { resolveProjectForRead } from "@/lib/sync/project-resolve"
+import { resolveProjectForRead, whenOfflineStoreOpen } from "@/lib/sync/project-resolve"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { overlaySettings } from "@/hooks/project-settings-overlay"
@@ -114,6 +114,9 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
   // unassigned or not-yet-resolved; the overview's PM card reads it and
   // refresh()es after an assignment.
   const [pm, setPm] = useState<{ id: number; username: string } | null>(null)
+  // Desktop: the last resolve gave up waiting for the offline store, so the
+  // downloaded copy was never consulted. Retried once the store opens.
+  const [offlineCopyPending, setOfflineCopyPending] = useState(false)
   const hasLoaded = useRef(Boolean(initialProject))
   const { session, loading: sessionLoading } = useFrontierSession()
 
@@ -144,6 +147,7 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
       // Desktop: falls back to the downloaded copy when the server is unreachable.
       const result = await resolveProjectForRead(projectId, session.jwt)
       if (cancelled) return
+      setOfflineCopyPending(result.offlineCopyPending === true)
       if (!result.ok) {
         if (result.reason === "unauthenticated") {
           void notifySessionExpiredIfCurrent(session.jwt)
@@ -183,6 +187,23 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
     const cleanup = refresh()
     return cleanup
   }, [refresh])
+
+  // Desktop, offline: a cold open can outrun the offline store (a rebuild after
+  // an update can take longer than the resolve waits), leaving "unreachable"
+  // over a project that is on disk. Re-resolve once the store is open; the
+  // retry no longer waits, so it can't trigger itself again.
+  useEffect(() => {
+    if (!offlineCopyPending) return
+    let alive = true
+    let cancelRetry: (() => void) | null = null
+    void whenOfflineStoreOpen().then((open) => {
+      if (open && alive) cancelRetry = refresh()
+    })
+    return () => {
+      alive = false
+      cancelRetry?.()
+    }
+  }, [offlineCopyPending, refresh])
 
   // AQU-1570: another surface in this tab changed the project on the server —
   // typically Project Settings, a route modal over this page, linking a source

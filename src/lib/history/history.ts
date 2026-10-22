@@ -470,9 +470,13 @@ export function setHistoryScope(projectId: string | null, username: string | nul
   if (next) void loadScope(next)
 }
 
-/** How opening a step's language went: open and loaded, not allowed any more,
- *  or not in time (offline, still loading). */
-export type LaneSwitch = "ready" | "denied" | "timeout"
+/**
+ * How opening a step's language went: open and loaded; `denied`, the person
+ * may no longer work in it (the step is dropped, gap 29); `blocked`, it could
+ * not be opened from here or not in time (the step waits, like one made in
+ * another file).
+ */
+export type LaneSwitch = "ready" | "denied" | "blocked"
 
 /**
  * How to open another language before undoing a step made in it (gap 24). The
@@ -744,7 +748,7 @@ async function runNow(which: "undo" | "redo", scope: string): Promise<HistoryRes
     // A step lives in its language: open it there first, so the change happens
     // where the person can see it (gap 24).
     if (top.lane !== undefined && top.lane !== activeLane) {
-      const opened = laneSwitcher ? await laneSwitcher(top.lane) : "timeout"
+      const opened = laneSwitcher ? await laneSwitcher(top.lane) : "blocked"
       if (activeScope !== scope) return null
       if (fromList()[fromList().length - 1]?.id !== top.id) return { step: label, outcome: { kind: "moved" } }
       if (opened === "denied") {

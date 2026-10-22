@@ -404,7 +404,7 @@ describe("one history per project, every language", () => {
     recordStep(laneStep("sw-a"))
     recordStep(laneStep("sw-b"))
     setHistoryScope("p1", "sam", "French")
-    setLaneSwitcher(async () => "timeout")
+    setLaneSwitcher(async () => "blocked")
     expect((await undoLast())?.outcome).toEqual({ kind: "blocked", reason: "language" })
     expect(historyView().undoSteps.map((s) => s.labelKey)).toEqual(["sw-a", "sw-b"])
     setLaneSwitcher(async () => "denied")

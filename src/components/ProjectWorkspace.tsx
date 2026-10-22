@@ -271,7 +271,9 @@ import { injectOptimisticAudioTrim,
   injectOptimisticAudioPlace, injectOptimisticAudioAttachment, injectOptimisticAudioRemove, injectOptimisticAudioDeselect,
   notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { attachmentOutFrom, canCutAt, newPieceAudioId, pieceLabels } from "@/lib/audio/cut-take"
-import { recordStep, registerStepKinds, setHistoryScope, setOpenFileProbe, withGroup, type HistoryResult } from "@/lib/history/history"
+import { recordStep, registerStepKinds, setHistoryRemote, setHistoryScope, setLaneSwitcher, setOpenFileProbe, withGroup, type HistoryResult, type LaneSwitch } from "@/lib/history/history"
+import { httpHistoryRemote } from "@/lib/history/history-remote"
+import { laneAccessFor, waitUntilReady } from "@/lib/history/lane-switch"
 import { rowStepHandlers } from "@/lib/history/row-steps"
 import { HistoryPanel } from "./history/HistoryPanel"
 import { editStepHandlers } from "@/lib/history/edit-steps"
@@ -4083,11 +4085,25 @@ export function ProjectWorkspace() {
   )
   // Cmd/Ctrl+Z and its friends, app-wide; say what was undone, or why not.
   useEffect(() => {
-    // Sam, 2026-10-14: one history per language — switching language switches
-    // to that language's own undo and redo.
+    // Decision 11: one history per person and project, whatever language is
+    // open. The language is passed so a step knows the one it was made in,
+    // and an undo from another language opens that one first.
     setHistoryScope(project?.id ?? null, currentUsername || null, activeLane)
-    return () => setHistoryScope(null, null)
   }, [project?.id, currentUsername, activeLane])
+  useEffect(() => () => setHistoryScope(null, null), [])
+  // …and it follows the person to other devices, through the server's copy.
+  const historyJwtRef = useRef<string | null>(null)
+  historyJwtRef.current = frontierSession?.jwt ?? null
+  useEffect(() => {
+    setHistoryRemote(httpHistoryRemote(() => historyJwtRef.current))
+    return () => setHistoryRemote(null)
+  }, [])
+  // A step's language, named the way the switcher names it (decision 11: the
+  // History panel and the toasts say which language each step was made in).
+  const historyLaneName = useCallback(
+    (tag: string) => laneLabels[tag] || (tag === "" ? activeTargetLanguage || "Target" : tag),
+    [laneLabels, activeTargetLanguage],
+  )
   const reportHistory = useCallback(
     (which: "undo" | "redo", result: HistoryResult) => {
       const name = t(result.step.labelKey as never, result.step.labelParams as never)
@@ -4099,7 +4115,7 @@ export function ProjectWorkspace() {
         })
       } else if (o.kind === "done") {
         toast.add({ type: "info", title: t(which === "undo" ? "editor.history.undone" : "editor.history.redone", { step: name }) })
-      } else if (o.kind === "blocked") {
+      } else if (o.kind === "blocked" && o.reason === "elsewhere") {
         // AQU-1767 phase 2: made in another file; it waits on the stack.
         toast.add({
           type: "info",
@@ -4107,6 +4123,16 @@ export function ProjectWorkspace() {
             ? t("editor.history.blockedElsewhere", { file: result.step.fileName, step: name })
             : t("editor.history.blockedElsewhereNoName", { step: name }),
         })
+      } else if (o.kind === "blocked" && o.reason === "language") {
+        toast.add({
+          type: "info",
+          title: t("editor.history.blockedLanguage", { step: name, language: historyLaneName(result.step.lane ?? "") }),
+        })
+      } else if (o.kind === "moved") {
+        // Decision 11: another of this person's devices got there first.
+        toast.add({ type: "info", title: t(which === "undo" ? "editor.history.movedUndo" : "editor.history.movedRedo", { step: name }) })
+      } else if (o.kind === "skipped" && o.reason === "approved") {
+        toast.add({ type: "warning", title: t("editor.history.skippedApproved", { step: name, name: o.by ?? "" }) })
       } else if (o.kind === "skipped") {
         toast.add({
           type: "warning",
@@ -4115,7 +4141,9 @@ export function ProjectWorkspace() {
               ? "editor.history.skippedGone"
               : o.reason === "unavailable"
                 ? "editor.history.skippedUnavailable"
-                : "editor.history.skippedChanged",
+                : o.reason === "notAllowed"
+                  ? "editor.history.skippedNotAllowed"
+                  : "editor.history.skippedChanged",
             { step: name },
           ),
         })
@@ -4123,7 +4151,7 @@ export function ProjectWorkspace() {
         toast.add({ type: "error", title: t("editor.history.failed", { step: name }) })
       }
     },
-    [t],
+    [t, historyLaneName],
   )
   useHistoryShortcuts(reportHistory)
 
@@ -14128,6 +14156,33 @@ export function ProjectWorkspace() {
     ],
   )
 
+  // ── Decision 11: undoing a step made in another language opens it first ──
+  //
+  // Gap 24: the change happens where the person can see it. The switch is the
+  // switcher's own; the step runs once that language's lines and takes have
+  // loaded and the handlers below have re-registered with it.
+  const laneReadyRef = useRef({ lane: activeLane, ready: false })
+  laneReadyRef.current = {
+    lane: activeLane,
+    ready: !cellsLoading && workspaceAudioLoaded && timelineAudioLoaded && (!audioCueSibling || cueAudioLoaded),
+  }
+  const laneSwitchRef = useRef<(lane: string) => Promise<LaneSwitch>>(async () => "blocked")
+  laneSwitchRef.current = async (lane: string) => {
+    const access = laneAccessFor(lane, {
+      available: availableLanes,
+      scoped: scopedLanes,
+      archived: archivedLaneTags,
+      canSwitch: canSwitchLanes(project?.syncRole?.level),
+    })
+    if (access !== "ok") return access
+    setActiveLane(lane)
+    return waitUntilReady(() => laneReadyRef.current.lane === lane && laneReadyRef.current.ready)
+  }
+  useEffect(() => {
+    setLaneSwitcher((lane) => laneSwitchRef.current(lane))
+    return () => setLaneSwitcher(null)
+  }, [])
+
   // ── AQU-1767 phase 2: what Undo and Redo do, for every step kind ─────────
   //
   // Steps are recorded as plain data wherever the user acts (here, in the
@@ -15772,7 +15827,7 @@ export function ProjectWorkspace() {
 
   const fileChapterToolbar = activeFileId ? (
     <FileChapterToolbar
-      historyControl={<HistoryPanel onResult={reportHistory} />}
+      historyControl={<HistoryPanel onResult={reportHistory} laneName={historyLaneName} />}
       lens={lens}
       onLensChange={(l) => {
         switchLens(l)

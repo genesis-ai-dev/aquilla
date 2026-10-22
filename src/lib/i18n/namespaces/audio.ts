@@ -17,8 +17,6 @@ export const audio = defineNamespace({
     "audio.newVoice.engineLabel": "Engine",
     "audio.newVoice.inworldVoiceLabel": "Voice",
     "audio.newVoice.inworldVoiceLoading": "Loading voices…",
-    "audio.newVoice.inworldVoiceUnavailable":
-      "Couldn't load Inworld voices for these languages. Showing the built-in list.",
     "audio.newVoice.inworldCustomVoice": "Designed voice",
     "audio.newVoice.tabPrebuilt": "Prebuilt voice",
     "audio.newVoice.tabDesign": "Voice design",
@@ -791,12 +789,6 @@ export const audio = defineNamespace({
         description:
           "Short status shown in the Inworld voice dropdown while the catalog is " +
           "fetched from the hosted TTS worker.",
-      },
-      "audio.newVoice.inworldVoiceUnavailable": {
-        description:
-          "Helper under the Inworld voice dropdown when the live catalog could " +
-          "not be loaded (missing API key, network error, or no voices for the " +
-          "project's languages). The dropdown still lists a small built-in English set.",
       },
       "audio.newVoice.inworldCustomVoice": {
         description:

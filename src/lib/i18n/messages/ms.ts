@@ -1709,7 +1709,6 @@ export const ms: Catalog = {
   "audio.newVoice.engineLabel": "Enjin",
   "audio.newVoice.inworldVoiceLabel": "Suara",
   "audio.newVoice.inworldVoiceLoading": "Memuatkan suara…",
-  "audio.newVoice.inworldVoiceUnavailable": "Tidak dapat memuatkan suara Inworld untuk bahasa ini. Menunjukkan senarai terbina dalam.",
   "audio.newVoice.inworldCustomVoice": "Suara yang direka",
   "audio.newVoice.tabPrebuilt": "Suara sedia ada",
   "audio.newVoice.tabDesign": "Reka suara",

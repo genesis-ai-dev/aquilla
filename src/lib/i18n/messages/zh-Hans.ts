@@ -1717,7 +1717,6 @@ export const zh_Hans: Catalog = {
   "audio.newVoice.engineLabel": "引擎",
   "audio.newVoice.inworldVoiceLabel": "声音",
   "audio.newVoice.inworldVoiceLoading": "正在加载声音…",
-  "audio.newVoice.inworldVoiceUnavailable": "无法加载这些语言的 Inworld 声音。正在显示内置列表。",
   "audio.newVoice.inworldCustomVoice": "设计的声音",
   "audio.newVoice.tabPrebuilt": "预置声音",
   "audio.newVoice.tabDesign": "声音设计",

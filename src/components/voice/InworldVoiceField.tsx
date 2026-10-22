@@ -44,13 +44,17 @@ export function InworldVoiceField({
     () => catalogLanguagesForInworld(targetLanguages, language),
     [targetLanguages, language],
   )
-  const { voices, status, attempted } = useInworldCatalogVoices({
+  const { voices, status } = useInworldCatalogVoices({
     enabled: true,
     projectId,
     fileId,
     session,
     languages: catalogLanguages,
   })
+  // AQU-2035: the lookup ran and this language has no stock voices. Offering
+  // the built-in English list instead is the wrong set of choices, so the
+  // picker is disabled on the voice that will actually be saved.
+  const unavailable = status === "unavailable"
   const showBadge = showVoiceLanguageBadge(targetLanguages) || catalogLanguages.length > 1
   const groups = useMemo(() => groupCatalogByLanguage(voices), [voices])
   const selected = voices.find((v) => v.voiceId === value)
@@ -73,6 +77,7 @@ export function InworldVoiceField({
       <FieldLabel htmlFor="inworld-voice">{t("audio.newVoice.inworldVoiceLabel")}</FieldLabel>
       <Select
         value={selectValue}
+        disabled={unavailable}
         onValueChange={(next) => {
           const id = typeof next === "string" && next ? next : DEFAULT_INWORLD_VOICE
           const match = voices.find((v) => v.voiceId === id)
@@ -128,9 +133,6 @@ export function InworldVoiceField({
           ))}
         </SelectContent>
       </Select>
-      {status === "fallback" && attempted && (
-        <p className="text-[11px] text-muted-foreground">{t("audio.newVoice.inworldVoiceUnavailable")}</p>
-      )}
     </Field>
   )
 }

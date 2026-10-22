@@ -114,8 +114,18 @@ export const FILES_PAGE_SIZE = 100
 export async function fetchProjectFiles(
   projectId: string,
   jwt: string,
-  /** Smart Extensions apiRev 7: also list the (hidden) extension data files. */
-  opts: { extensionData?: boolean } = {},
+  opts: {
+    /** Smart Extensions apiRev 7: also list the (hidden) extension data files. */
+    extensionData?: boolean
+    /**
+     * AQU-2118: the target lane whose filled / approved counts each row
+     * carries — the lane the sidebar's switcher shows. '' (the default lane)
+     * is never put on the wire, so a one-lane project's request stays
+     * byte-identical to before (the AQU-538 convention); the server then
+     * pins the counts to its bridge / only lane as it always has.
+     */
+    lane?: string
+  } = {},
 ): Promise<FileSummary[]> {
   const base = `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/files`
   const files: FileSummary[] = []
@@ -125,6 +135,7 @@ export async function fetchProjectFiles(
     const params = new URLSearchParams({ limit: String(FILES_PAGE_SIZE) })
     if (cursor) params.set("cursor", cursor)
     if (opts.extensionData) params.set("extensionData", "1")
+    if (opts.lane) params.set("lane", opts.lane)
     const res = await observedSyncFetch(`${base}?${params.toString()}`, fetchInit(jwt))
     const body: { files: FileSummary[]; nextCursor?: string | null } = await readJson(res)
     for (const f of body.files) {

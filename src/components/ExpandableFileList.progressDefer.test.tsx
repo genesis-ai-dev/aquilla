@@ -18,6 +18,12 @@ import { EditorScrollProvider } from "@/context/EditorScrollContext"
 import type { FileReference } from "@/lib/parsers/types"
 
 const prefetchMock = vi.fn()
+// AQU-2118: the expanded file's section read, so the lane it is handed can be
+// pinned without the real hook reaching for the network.
+const sectionStateMock = vi.fn()
+vi.mock("@/hooks/useSectionProgress", () => ({
+  useSectionProgressState: (...args: unknown[]) => sectionStateMock(...args),
+}))
 vi.mock("@/lib/progress/file-progress-resource", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/progress/file-progress-resource")>()
   return {
@@ -65,6 +71,9 @@ function renderList(props: Partial<React.ComponentProps<typeof ExpandableFileLis
 
 beforeEach(() => {
   prefetchMock.mockClear()
+  sectionStateMock.mockReset()
+  sectionStateMock.mockReturnValue({ sections: null, error: false, retry: vi.fn() })
+  localStorage.clear()
 })
 
 describe("ExpandableFileList — file-progress deferral (AQU-1326)", () => {
@@ -96,11 +105,21 @@ describe("ExpandableFileList — file-progress deferral (AQU-1326)", () => {
         </EditorScrollProvider>
       </I18nProvider>,
     )
-    expect(prefetchMock).toHaveBeenCalledWith(PROJECT_ID, "gen", expect.any(Function))
+    expect(prefetchMock).toHaveBeenCalledWith(PROJECT_ID, "gen", expect.any(Function), "")
   })
 
   it("prefetches at mount when nothing is being deferred (default behaviour)", () => {
     renderList()
-    expect(prefetchMock).toHaveBeenCalledWith(PROJECT_ID, "gen", expect.any(Function))
+    expect(prefetchMock).toHaveBeenCalledWith(PROJECT_ID, "gen", expect.any(Function), "")
+  })
+
+  // AQU-2118: both per-file reads name the lane the switcher shows, or the
+  // server answers the project's default lane — not the open one on a
+  // multi-lane project.
+  it("names the lane it is given on the prefetch and on the expanded file's section read", () => {
+    localStorage.setItem("sidebar:expanded:p1", JSON.stringify(["gen"]))
+    renderList({ lane: "fr" })
+    expect(prefetchMock).toHaveBeenCalledWith(PROJECT_ID, "gen", expect.any(Function), "fr")
+    expect(sectionStateMock).toHaveBeenCalledWith(PROJECT_ID, "gen", 0, expect.any(Function), undefined, "fr")
   })
 })

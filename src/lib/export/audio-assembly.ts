@@ -216,7 +216,7 @@ export async function assembleAudioEntries(args: AudioAssemblyArgs): Promise<Aud
       audioId: parsed.audioId,
       ext: parsed.ext,
       clipKey: `${parsed.audioId}.${parsed.ext}`,
-      voice: resolveCastVoice(args.settings, cell.id, cell.ttsSettings?.voiceId),
+      voice: resolveCastVoice(args.settings, cell, cell.ttsSettings?.voiceId),
       trimmed: (attachment.trimStartMs ?? 0) > 0 || attachment.trimEndMs != null,
     })
   })

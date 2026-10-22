@@ -7366,7 +7366,7 @@ function EditorRow({
   // every assignment pointing at it. In all three the sheet's `cast_name` is
   // sitting right there on the cell — the cast gutter has always drawn it — and
   // the two corners went blank anyway.
-  const castVoiceId = cellLabelsEnabled ? assignedCastVoiceId(project.ttsSettings, cell.id) : undefined
+  const castVoiceId = cellLabelsEnabled ? assignedCastVoiceId(project.ttsSettings, cell) : undefined
   const castName = castVoiceId ? findVoice(project.ttsSettings, castVoiceId)?.name : undefined
   const labelText = castName ?? ownCastName(cell) ?? cell.cellLabel ?? null
   // AQU-1687: Bible voices. The voice chip outranks only the cell's own
@@ -7383,7 +7383,7 @@ function EditorRow({
   const cellContext = useCellContext(cell.group, cell.type)
   const castHoldsSlot =
     ownCastName(cell) !== null ||
-    Boolean(findVoice(project.ttsSettings, assignedCastVoiceId(project.ttsSettings, cell.id)))
+    Boolean(findVoice(project.ttsSettings, assignedCastVoiceId(project.ttsSettings, cell)))
   const showVoiceChip = Boolean(cellVoices?.chip) && !castHoldsSlot
   const showCellLabel = cellLabelsEnabled && Boolean(labelText) && !showVoiceChip
 
@@ -7440,12 +7440,12 @@ function EditorRow({
   const speaksInGutter = castGutter && !isStructuralCell(cell.type)
   const speaksInAudio = Boolean(audioLens) && cell.type !== "paratext"
   const resolvedVoice = (speaksInGutter || speaksInAudio)
-    ? resolveCastVoice(ttsSettings, cell.id, cell.ttsSettings?.voiceId)
+    ? resolveCastVoice(ttsSettings, cell, cell.ttsSettings?.voiceId)
     : null
   const gutterVoice = speaksInGutter ? resolvedVoice : null
   const audioVoice = speaksInAudio ? resolvedVoice : null
   const assignmentResolves = Boolean(
-    findVoice(ttsSettings, assignedCastVoiceId(ttsSettings, cell.id) ?? cell.ttsSettings?.voiceId),
+    findVoice(ttsSettings, assignedCastVoiceId(ttsSettings, cell) ?? cell.ttsSettings?.voiceId),
   )
   const gutterExplicit = speaksInGutter && assignmentResolves
   const audioExplicit = speaksInAudio && assignmentResolves

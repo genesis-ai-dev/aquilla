@@ -150,6 +150,10 @@ export interface CellSummary {
   selectedGeneratedVoiceAudioId?: string
   /** AQU-646: this line carries a recording of its own — see `applyOwnTake`. */
   hasOwnTake?: boolean
+  /** AQU-2125: the character this line names (`metadata.cast_name`), trimmed.
+   *  Carried so the cast lookup can find a character's voice from a summary.
+   *  Absent on a line that names nobody. */
+  castName?: string
 }
 
 export interface CellTextPair {
@@ -1056,6 +1060,7 @@ export class CellStore {
       // chapter health builder's `isExcluded`, and batch drafting's target list —
       // can apply the same predicate without reaching back into the store's rows.
       hidden: view.hidden,
+      ...summaryCastName(view.metadata),
     }
     const entry = {
       version,
@@ -3648,6 +3653,12 @@ export function useCellStoreVersion(store: CellStore): number {
 export function useCellStoreViews(store: CellStore): CellViewModel[] {
   const version = useCellStoreVersion(store)
   return useMemo(() => readAtVersion(version, () => store.getAllCellViews()), [store, version])
+}
+
+function summaryCastName(metadata: CellData["metadata"]): { castName?: string } {
+  const raw = metadata?.cast_name
+  const name = typeof raw === "string" ? raw.trim() : ""
+  return name ? { castName: name } : {}
 }
 
 function deriveStatus(translated: string, validated: boolean): CellData["status"] {

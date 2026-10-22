@@ -17,6 +17,13 @@ import {
 import { laneScopedTtsSettings, stampNewVoiceLanes } from "@/lib/audio/voice-lanes"
 import { laneTtsSettings, setLaneCast, setLaneDefaultVoice } from "@/lib/audio/lane-cast"
 import {
+  castLinesOf,
+  expandCharacterCast,
+  foldCastByCharacter,
+  setLaneCharacterCast,
+  type CastLine,
+} from "@/lib/audio/character-cast"
+import {
   migrateOmnivoiceTtsSettings,
   omnivoiceMigrationProperties,
 } from "@/lib/audio/omnivoice-migrate"
@@ -77,7 +84,30 @@ export interface ProjectTtsApi {
    * lane's default voice. Other lanes are untouched (AQU-2038).
    */
   assignCells: (cellIds: Iterable<string>, voiceId: string | null) => void
+  /**
+   * AQU-2125: cast a whole character on the active lane — one entry, however
+   * many lines it has. `lineIds` are the character's lines the caller can see;
+   * see `setLaneCharacterCast`. `null` sends the character to the default.
+   */
+  assignCharacter: (castName: string, voiceId: string | null, lineIds: Iterable<string>) => void
 }
+
+/**
+ * AQU-2125: what the hook needs to know about characters.
+ *
+ * `foldLines` is read when a save happens, so a caller can hand over lines it
+ * only has later in its render (a dubbing file's heard lines); without it the
+ * fold uses the summaries' own characters. `mayWriteProjectCast` is true only
+ * for a role the server lets rewrite the project-wide cast (maintainer and up):
+ * a project lead's voice save may touch only per-lane keys (AQU-2041), so a
+ * fold riding along on it would get the whole save refused.
+ */
+export interface ProjectTtsCastOptions {
+  foldLines?: () => readonly CastLine[]
+  mayWriteProjectCast?: boolean
+}
+
+const NO_CAST_OPTIONS: ProjectTtsCastOptions = {}
 
 export function useProjectTts(
   projectId: string | null | undefined,
@@ -104,6 +134,7 @@ export function useProjectTts(
    * — the engine, the key, the voice library — stays project-wide.
    */
   lane: string = "",
+  castOptions: ProjectTtsCastOptions = NO_CAST_OPTIONS,
 ): ProjectTtsApi {
   // Read durable settings synchronously from localStorage on first render (lazy
   // init), so a reload sees the saved voice library immediately. Falls back to
@@ -130,6 +161,10 @@ export function useProjectTts(
     () => migrateOmnivoiceTtsSettings(rawSettings, { targetLanguage }),
     [rawSettings, targetLanguage],
   )
+
+  // AQU-2125: the characters the loaded lines name. Read by the view below and
+  // by the fold every save runs.
+  const castLines = useStableCastLines(cells)
 
   // The durable write. Takes the WHOLE project-wide blob, already migrated —
   // `saveTts` builds that from a patch, and the OmniVoice migration below hands
@@ -203,10 +238,18 @@ export function useProjectTts(
         const { defaultVoiceId: starred, ...rest } = patch
         patch = { ...rest, ...setLaneDefaultVoice(previous, lane, starred) }
       }
-      const merged = { ...(previous ?? {}), ...patch } as ProjectTtsSettings
+      let merged = { ...(previous ?? {}), ...patch } as ProjectTtsSettings
+      // AQU-2125: every save by someone who may rewrite the project-wide cast
+      // also folds the lines in view into one entry per character, so a project
+      // cast line by line shrinks back under the size cap as it is worked on.
+      // Never invents a cast map on a project that has none.
+      if (castOptions.mayWriteProjectCast && merged.castAssignments) {
+        const fold = foldCastByCharacter(merged.castAssignments, castOptions.foldLines?.() ?? castLines)
+        if (fold.changed) merged = { ...merged, castAssignments: fold.castAssignments }
+      }
       await writeSettings(migrateOmnivoiceTtsSettings(merged, { targetLanguage }) ?? merged)
     },
-    [projectId, localTts, serverSettings, targetLanguage, activeLaneId, lane, writeSettings],
+    [projectId, localTts, serverSettings, targetLanguage, activeLaneId, lane, writeSettings, castOptions, castLines],
   )
 
   // AQU-1189: persist OmniVoice → Inworld once per project open so stored JSON
@@ -244,6 +287,13 @@ export function useProjectTts(
     [localTts, serverSettings, lane, saveTts],
   )
 
+  const assignCharacter = useCallback(
+    (castName: string, voiceId: string | null, lineIds: Iterable<string>) => {
+      void saveTts(setLaneCharacterCast(localTts ?? serverSettings, lane, activeLaneId, castName, voiceId, lineIds))
+    },
+    [localTts, serverSettings, lane, activeLaneId, saveTts],
+  )
+
   const allVoices = useMemo(() => getVoiceLibrary(settings), [settings])
   // Everything a surface READS goes through the lane view, built in a fixed
   // order: first the lane-scoped library — which voices this lane can see
@@ -251,9 +301,14 @@ export function useProjectTts(
   // (AQU-2038), so a project-wide assignment naming a voice this lane cannot
   // see is not an assignment here. `settings` stays whole so writers keep
   // merging into the project's real library.
+  //
+  // AQU-2125: last, each loaded line's character entry is copied onto the line,
+  // in this view only, so a surface that looks a voice up by line id alone
+  // still hears the character's voice. `castLines` changes only when a
+  // character does, not on every edit.
   const laneSettings = useMemo(
-    () => laneTtsSettings(laneScopedTtsSettings(settings, activeLaneId), lane),
-    [settings, activeLaneId, lane],
+    () => expandCharacterCast(laneTtsSettings(laneScopedTtsSettings(settings, activeLaneId), lane), castLines),
+    [settings, activeLaneId, lane, castLines],
   )
   const voices = useMemo(() => getVoiceLibrary(laneSettings), [laneSettings])
   const defaultVoiceId = useMemo(() => resolveVoice(laneSettings, undefined).id, [laneSettings])
@@ -277,5 +332,29 @@ export function useProjectTts(
     return m
   }, [cells, laneSettings, defaultVoiceId])
 
-  return { settings, laneSettings, voices, allVoices, defaultVoiceId, castStats, saveTts, assignCells }
+  return { settings, laneSettings, voices, allVoices, defaultVoiceId, castStats, saveTts, assignCells, assignCharacter }
+}
+
+/**
+ * The summaries' characters, as the same array for as long as no line's
+ * character changes — the read view above depends on it, and a new array on
+ * every keystroke would rebuild the view and every memo downstream of it.
+ */
+function useStableCastLines(cells: readonly CellSummary[]): CastLine[] {
+  const signature = useMemo(
+    () => castLinesOf(cells).map((l) => `${l.id}${FIELD}${l.castName}`).join(LINE),
+    [cells],
+  )
+  return useMemo(() => parseCastLines(signature), [signature])
+}
+
+const FIELD = "\u0000"
+const LINE = "\u0001"
+
+function parseCastLines(signature: string): CastLine[] {
+  if (signature === "") return []
+  return signature.split(LINE).map((entry) => {
+    const at = entry.indexOf(FIELD)
+    return { id: entry.slice(0, at), castName: entry.slice(at + 1) }
+  })
 }

@@ -291,7 +291,8 @@ import { canHarmonize, emitCastAssign, emitCellHarmonize, emitSourceCellVisibili
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
-import { buildCastAdditions, buildCastRemovals, carriesCharacterSheetData } from "@/lib/import/cast-from-speakers"
+import { buildCastRemovals, carriesCharacterSheetData } from "@/lib/import/cast-from-speakers"
+import { buildCharacterCastWrite, castLinesOf, type CastLine } from "@/lib/audio/character-cast"
 import { ImportCharactersDialog } from "./timeline/ImportCharactersDialog"
 import { CharacterCheckDrawer, type ResolveChoice } from "./timeline/CharacterCheckDrawer"
 import type { CueReconcilePlan } from "@/lib/import/cue-reconcile"
@@ -2377,6 +2378,15 @@ export function ProjectWorkspace() {
     resetContextualDraftsStore()
   }, [])
 
+  // AQU-2125: the lines a save folds into one cast entry per character — this
+  // file's and, in a dubbing file, its heard lines'. The heard lines are only
+  // known further down, so this is filled in there and read when a save runs.
+  const castFoldLinesRef = useRef<() => readonly CastLine[]>(() => [])
+  const mayWriteProjectCast = (project?.syncRole?.level ?? 0) >= ROLE.MAINTAINER
+  const ttsCastOptions = useMemo(
+    () => ({ foldLines: () => castFoldLinesRef.current(), mayWriteProjectCast }),
+    [mayWriteProjectCast],
+  )
   // Audio lens: TTS settings (engine, voice library, cast) hydrated from IDB
   // and overlaid onto the project so generation uses the real engine/key/cast.
   const tts = useProjectTts(
@@ -2404,6 +2414,7 @@ export function ProjectWorkspace() {
     activeLaneId,
     // AQU-2038: the cast and the default voice are this lane's, not the project's.
     activeLane,
+    ttsCastOptions,
   )
   // AQU-2037: the audio surfaces read the ACTIVE LANE's voices — the per-cell
   // picker, the batch dialog, the Media-timeline picker and Generate all go
@@ -3726,7 +3737,9 @@ export function ProjectWorkspace() {
         const ids = getActiveCells()
           .filter((c) => c.metadata && (c.metadata.cast_name as unknown) === castName)
           .map((c) => c.id)
-        tts.assignCells(ids.length > 0 ? ids : [cell.id], voiceId)
+        // AQU-2125: the CHARACTER is cast, once — not each of its lines, which
+        // is what grew a dubbing project's settings past the size cap.
+        tts.assignCharacter(castName, voiceId, ids.length > 0 ? ids : [cell.id])
         return
       }
       tts.assignCells([cell.id], voiceId)
@@ -4294,6 +4307,8 @@ export function ProjectWorkspace() {
         : { ...c, metadata: { ...(c.metadata ?? {}), target_offset_ms: offset } }
     })
   }, [audioCues, cueAudioByCellId, cueAnchorOverrides])
+  // AQU-2125: what a save folds — read at save time (see `castFoldLinesRef`).
+  castFoldLinesRef.current = () => castLinesOf([...cellSummaries, ...(audioCueCells ?? [])])
   cueTakeCountRef.current = () => {
     let n = 0
     for (const entry of cueAudioByCellId.values()) {
@@ -4909,9 +4924,11 @@ export function ProjectWorkspace() {
    * writes the record; the voice is what makes it visible, and it is also what
    * puts the character in the voice picker.
    *
-   * `buildCastAdditions` is the existing pipeline — one voice per distinct
-   * name, reusing any that already exist, seeded from the current library so a
+   * `buildCharacterCastWrite` is the pipeline — one voice per distinct name,
+   * reusing any that already exist, seeded from the current library so a
    * project that has never opened Voice Studio still keeps its Narrator preset.
+   * Since AQU-2125 it casts each CHARACTER once instead of every line: the
+   * lines have just been given their names, so the name finds the voice.
    */
   const handleImportCharacters = useCallback(
     async (plan: CharacterAssignmentPlan) => {
@@ -4962,23 +4979,13 @@ export function ProjectWorkspace() {
       let newVoices = 0
       try {
         const before = new Set(getVoiceLibrary(tts.settings).map((v) => v.name))
-        const additions = buildCastAdditions(
-          plan.assignments.map((a) => ({ cellId: a.cellId, speaker: a.castName })),
-          tts.settings,
-          uuidv7,
-        )
-        newVoices = additions.voices.filter((v) => !before.has(v.name)).length
-        await tts.saveTts({
-          voices: additions.voices,
-          castAssignments: {
-            // AQU-2038: the project-wide cast, deliberately — an imported
-            // character sheet is every lane's starting point, not this lane's
-            // own casting. `tts.laneSettings` is the lane projection; merging
-            // that in here would stamp one lane's choices onto the fallback.
-            ...(tts.settings?.castAssignments ?? {}),
-            ...additions.castAssignments,
-          },
-        })
+        // AQU-2038: the project-wide cast, deliberately — an imported character
+        // sheet is every lane's starting point, not this lane's own casting.
+        // `tts.laneSettings` is the lane projection; building from it would
+        // stamp one lane's choices onto the fallback.
+        const write = buildCharacterCastWrite(plan.assignments, tts.settings, uuidv7)
+        newVoices = write.voices.filter((v) => !before.has(v.name)).length
+        await tts.saveTts({ voices: write.voices, castAssignments: write.castAssignments })
       } catch (e) {
         // The names and camera states are already written, so this is a
         // degraded success rather than a failure — but it is the half that
@@ -5079,23 +5086,13 @@ export function ProjectWorkspace() {
       let newVoices = 0
       try {
         const before = new Set(getVoiceLibrary(tts.settings).map((v) => v.name))
-        const additions = buildCastAdditions(
-          plan.assignments.map((a) => ({ cellId: a.cellId, speaker: a.castName })),
-          tts.settings,
-          uuidv7,
-        )
-        newVoices = additions.voices.filter((v) => !before.has(v.name)).length
-        await tts.saveTts({
-          voices: additions.voices,
-          castAssignments: {
-            // AQU-2038: the project-wide cast, deliberately — an imported
-            // character sheet is every lane's starting point, not this lane's
-            // own casting. `tts.laneSettings` is the lane projection; merging
-            // that in here would stamp one lane's choices onto the fallback.
-            ...(tts.settings?.castAssignments ?? {}),
-            ...additions.castAssignments,
-          },
-        })
+        // AQU-2038: the project-wide cast, deliberately — an imported character
+        // sheet is every lane's starting point, not this lane's own casting.
+        // `tts.laneSettings` is the lane projection; building from it would
+        // stamp one lane's choices onto the fallback.
+        const write = buildCharacterCastWrite(plan.assignments, tts.settings, uuidv7)
+        newVoices = write.voices.filter((v) => !before.has(v.name)).length
+        await tts.saveTts({ voices: write.voices, castAssignments: write.castAssignments })
       } catch (e) {
         console.warn("[characters] minting voices failed", e)
         toast.add({ type: "warning", title: "Characters imported, but the cast list could not be updated." })
@@ -9461,7 +9458,12 @@ export function ProjectWorkspace() {
       } else {
         // Narration after narration keeps the row's voice; quotations are left
         // for casting — which is the whole point of splitting.
-        const voices = voiceAssignmentsForSplits(plan.splits, tts.settings?.castAssignments)
+        // AQU-2125: through the lookup, so a row cast by its character (no entry
+        // of its own) still hands its voice to its narration pieces.
+        const voices = voiceAssignmentsForSplits(
+          plan.splits,
+          (id) => assignedCastVoiceId(tts.settings, cellStore.getCellView(id) ?? id),
+        )
         if (voices) void tts.saveTts({ castAssignments: { ...(tts.settings?.castAssignments ?? {}), ...voices } })
         const lines = plan.splits.reduce((n, split) => n + split.pieces.length, 0)
         const kept = plan.splits.reduce((n, split) => n + split.lanes.filter((l) => l.outcome === "kept").length, 0)
@@ -12127,7 +12129,7 @@ export function ProjectWorkspace() {
       // as the voice card renders no button on `no-take`.
       const take = changeVoiceSourceTake(cell)
       if (!take) return null
-      const voice = resolveCastVoice(tts.laneSettings, cell.id, cell.ttsSettings?.voiceId)
+      const voice = resolveCastVoice(tts.laneSettings, cell, cell.ttsSettings?.voiceId)
       // A take some voice is cloned FROM is left alone: converting it would
       // change what that voice sounds like. Same rule as the whole-file run.
       // Checked against the WHOLE library on purpose (AQU-2037): a voice on
@@ -12158,7 +12160,7 @@ export function ProjectWorkspace() {
       const owner = resolveTakeCellRef.current(cellId)
       if (!owner) return
       const { cell } = owner
-      const voice = resolveCastVoice(tts.laneSettings, cell.id, cell.ttsSettings?.voiceId)
+      const voice = resolveCastVoice(tts.laneSettings, cell, cell.ttsSettings?.voiceId)
       const diffusionSteps = CHANGE_VOICE_QUALITY_STEPS[quality]
       // The menu disables what cannot run, but it was drawn from an earlier
       // render: re-check before spending a conversion.
@@ -14674,7 +14676,7 @@ export function ProjectWorkspace() {
     const cell = getActiveCell(cellId)
     const text = (cell?.translated ?? "").trim()
     if (!cell || !text || !project?.id || !frontierSession) return false
-    const voice = resolveCastVoice(tts.laneSettings, cell.id)
+    const voice = resolveCastVoice(tts.laneSettings, cell)
     // AQU-510: the extension shows the reason this throws, so give it the
     // same localized, actionable sentence the built-in voice button shows
     // (AQU-891's categoriser), never a raw provider payload.

@@ -106,7 +106,7 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
   const statusKeys = chosen.map((c) => ttsStatusKey(c.id))
   const setAll = (s: Parameters<typeof setTtsStatus>[1]) => { for (const k of statusKeys) setTtsStatus(k, s) }
 
-  const voice = resolveCastVoice(settings, chosen[0].id)
+  const voice = resolveCastVoice(settings, chosen[0])
   const provider = voice.provider ?? resolveTtsProvider(settings)
   const joined = chosen.map((c) => c.translated.trim()).join(SEPARATOR)
   const getSyncToken = audioSyncTokenFetcherForSession(session)

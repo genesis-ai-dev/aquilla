@@ -132,12 +132,12 @@ export function characterIdentity(
 ): { key: string; name: string; color?: string } {
   const named = resolveName?.(cell)?.trim() || null
   if (named) {
-    const voice = resolveCastVoice(settings, cell.id, cell.ttsSettings?.voiceId)
+    const voice = resolveCastVoice(settings, cell, cell.ttsSettings?.voiceId)
     return { key: named, name: named, ...(voice.color ? { color: voice.color } : {}) }
   }
-  const explicit = assignedCastVoiceId(settings, cell.id) ?? cell.ttsSettings?.voiceId
+  const explicit = assignedCastVoiceId(settings, cell) ?? cell.ttsSettings?.voiceId
   if (!explicit) return { key: UNNAMED_CHARACTER_KEY, name: UNNAMED_CHARACTER_LABEL }
-  const voice = resolveCastVoice(settings, cell.id, cell.ttsSettings?.voiceId)
+  const voice = resolveCastVoice(settings, cell, cell.ttsSettings?.voiceId)
   // AQU-1461: A VOICE NAMED BY ITS ID IS NOT A CAST CHARACTER. The New voice
   // modal requires a name, but `voices` is persisted project JSON that imports,
   // other clients and the Agent API all write — so an id can arrive here, and it

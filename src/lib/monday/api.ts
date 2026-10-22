@@ -149,14 +149,17 @@ export type MondayOAuthResult = { ok: true; backTo: string } | { ok: false; reas
 /**
  * GET /api/v2/monday/oauth/callback?code&state — completes the OAuth exchange.
  * Called by the SPA /oauth/callback route (Monday's registered redirect URI is
- * an SPA route, not the worker). No auth header needed: the signed `state` JWT
- * carries org/user identity. The `code` is single-use — call exactly once.
+ * an SPA route, not the worker). The signed `state` JWT carries org/user
+ * identity and the caller's session must match it (login-CSRF guard). The
+ * `code` is single-use — call exactly once.
  */
-export async function completeMondayOAuth(code: string, state: string): Promise<MondayOAuthResult> {
+export async function completeMondayOAuth(code: string, state: string, jwt: string): Promise<MondayOAuthResult> {
   const qs = new URLSearchParams({ code, state })
   let res: Response
   try {
-    res = await fetch(`${AUTH_BASE}/api/v2/monday/oauth/callback?${qs.toString()}`)
+    res = await fetch(`${AUTH_BASE}/api/v2/monday/oauth/callback?${qs.toString()}`, {
+      headers: { Authorization: `Bearer ${jwt}` },
+    })
   } catch (e) {
     return { ok: false, reason: e instanceof Error ? e.message : "network error" }
   }

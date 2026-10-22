@@ -90,24 +90,24 @@ describe("startMondayConnect", () => {
 })
 
 describe("completeMondayOAuth", () => {
-  it("GETs the callback with code+state as query params and no auth header", async () => {
+  it("GETs the callback with code+state as query params and the caller session", async () => {
     fetchMock().mockResolvedValueOnce(ok({ ok: true, backTo: "/orgs/7/settings/monday" }))
-    const res = await completeMondayOAuth("the-code", "the-state")
+    const res = await completeMondayOAuth("the-code", "the-state", "jwt")
     expect(res).toEqual({ ok: true, backTo: "/orgs/7/settings/monday" })
     const call = fetchMock().mock.calls[0]
     expect(call[0]).toMatch(/\/api\/v2\/monday\/oauth\/callback\?code=the-code&state=the-state$/)
-    expect(call[1]).toBeUndefined() // plain GET, no headers
+    expect(call[1].headers.Authorization).toBe("Bearer jwt") // bound to the caller (login-CSRF guard)
   })
 
   it("returns ok:false with the server reason on failure", async () => {
     fetchMock().mockResolvedValueOnce(ok({ ok: false, reason: "state expired" }, 400))
-    const res = await completeMondayOAuth("c", "s")
+    const res = await completeMondayOAuth("c", "s", "jwt")
     expect(res).toEqual({ ok: false, reason: "state expired" })
   })
 
   it("returns ok:false (never throws) on network error — the code is single-use", async () => {
     fetchMock().mockRejectedValueOnce(new Error("offline"))
-    const res = await completeMondayOAuth("c", "s")
+    const res = await completeMondayOAuth("c", "s", "jwt")
     expect(res.ok).toBe(false)
   })
 })

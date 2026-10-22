@@ -936,8 +936,9 @@ projectSettings.post(
         })),
       })
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
-      return c.json({ error: `write failed: ${message}` }, 500)
+      // [Pen test] never echo driver text (can name tables/columns) to the client.
+      console.error("[project-settings] write failed:", e)
+      return c.json({ error: "write failed" }, 500)
     }
     if (!created.ok) {
       const status = created.problem === "duplicate" ? 409 : 400
@@ -952,8 +953,9 @@ projectSettings.post(
       await grantNewLane(c.env.AQUILLA_PG, projectId, { laneId: created.laneId }, user.id)
       await grantCreatedLaneToActor(c.env.AQUILLA_PG, projectId, created.laneId, user.id)
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
-      return c.json({ error: `write failed: ${message}` }, 500)
+      // [Pen test] never echo driver text (can name tables/columns) to the client.
+      console.error("[project-settings] write failed:", e)
+      return c.json({ error: "write failed" }, 500)
     }
     // AQU-1594: the lane row is the registry. Do not mirror the tag into
     // settings.targetLanes.
@@ -1024,8 +1026,9 @@ projectSettings.get("/:projectId/lanes/:laneId/last-change", authMiddleware, asy
     const lastChange = await readLaneLastChange(c.env.AQUILLA_PG, projectId, laneId)
     return c.json({ lastChange })
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e)
-    return c.json({ error: `read failed: ${message}` }, 500)
+    // [Pen test] never echo driver text (can name tables/columns) to the client.
+    console.error("[project-settings] read failed:", e)
+    return c.json({ error: "read failed" }, 500)
   }
 })
 

@@ -223,7 +223,7 @@ describe("GET /api/v2/monday/oauth/callback", () => {
 
     const res = await app.request(
       `/api/v2/monday/oauth/callback?code=auth-code&state=${encodeURIComponent(state)}`,
-      {},
+      { headers: authHeader(await jwtFor("anna")) },
       menv,
     )
     expect(res.status).toBe(200)
@@ -271,6 +271,27 @@ describe("GET /api/v2/monday/oauth/callback", () => {
     expect(account.userName).toBe("Anna M")
   })
 
+  it("rejects a callback from anyone but the user who started the flow (login-CSRF)", async () => {
+    await seedOrgProject()
+    mockFetch(() => null)
+    const startRes = await request("anna", "POST", "/api/v2/monday/orgs/1/connection/start", {})
+    const { url } = (await startRes.json()) as { url: string }
+    const state = new URL(url).searchParams.get("state")!
+    const path = `/api/v2/monday/oauth/callback?code=auth-code&state=${encodeURIComponent(state)}`
+
+    const victim = await app.request(path, { headers: authHeader(await jwtFor("tom")) }, menv)
+    expect(victim.status).toBe(401)
+    expect(await victim.json()).toEqual({ ok: false, reason: "session_mismatch" })
+
+    const anon = await app.request(path, {}, menv)
+    expect(anon.status).toBe(401)
+
+    const row = await env.AQUILLA_PG.prepare(
+      "SELECT 1 AS n FROM integration_connections WHERE org_id = '1'",
+    ).first()
+    expect(row).toBeNull()
+  })
+
   it("rejects a valid-signature state that lacks the PKCE verifier claim", async () => {
     await seedOrgProject()
     mockFetch(() => null)
@@ -282,7 +303,7 @@ describe("GET /api/v2/monday/oauth/callback", () => {
     )
     const res = await app.request(
       `/api/v2/monday/oauth/callback?code=auth-code&state=${encodeURIComponent(state)}`,
-      {},
+      { headers: authHeader(await jwtFor("anna")) },
       menv,
     )
     expect(res.status).toBe(401)

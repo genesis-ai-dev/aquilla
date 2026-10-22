@@ -45,7 +45,7 @@ import {
   useOfflineProjectStatus,
 } from "@/lib/offline/download"
 import { cacheProjectMediaOffline, type CacheProjectMediaResult } from "@/lib/offline/media-cache"
-import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioDenominator, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, portfolioShowsText, portfolioLaneMeasure, portfolioMeasure, portfolioText, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
+import { getPortfolio, translatedPct, aiDraftedPct, audioDenominator, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, portfolioShowsText, portfolioLaneMeasure, portfolioText, portfolioTextMeasure, textValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { OverviewLaneTable } from "./OverviewLaneTable"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { isLaneArchived } from "@/components/project-lane-archive"
@@ -1665,9 +1665,11 @@ export function ProjectOverview() {
     })),
     [projectLanes, project?.targetLanguage, t],
   )
-  // Media redesign slice 1: the view's languages say what it shows. Validated
-  // is the lines DONE by what each language delivers; for a Text language
-  // that is its validated text, exactly as before.
+  // Media redesign slice 1: the view's languages say what it shows.
+  // Validated is the lines DONE by what each language delivers; for a Text
+  // language that is its validated text, exactly as before. On "All" both
+  // text tiles count only the languages that deliver text, over one
+  // denominator; an Audio language reads in the audio tiles (Sam, Oct 22).
   // AQU-2116 + media redesign: an audio-only language shows only its audio
   // figures — the Translated/Validated/AI-drafted tiles, bars and Customize
   // entries drop out. What each language delivers decides; one nobody has
@@ -1679,9 +1681,9 @@ export function ProjectOverview() {
     : audio ? portfolioText(audio) : { filled: 0, total: 0 }
   const viewDone = activeLane
     ? portfolioLaneMeasure(activeLane)
-    : audio ? portfolioMeasure(audio) : { total: 0, started: 0, done: 0, headline: 0 }
+    : audio ? portfolioTextMeasure(audio) : { total: 0, started: 0, done: 0, headline: 0 }
   const tileTranslatedPct = activeLane ? laneTranslatedPct(activeLane) : audio ? translatedPct(audio) : 0
-  const tileValidatedPct = activeLane ? laneValidatedPct(activeLane) : audio ? validatedPct(audio) : 0
+  const tileValidatedPct = activeLane ? laneValidatedPct(activeLane) : audio ? textValidatedPct(audio) : 0
   const CROSS_LANE_TOOLTIP = t("org.projectOverview.crossLaneTooltip")
   // AQU-1951: audio follows the language tab as text does. Each take belongs
   // to a language (AQU-1591), so the lane's own recordings replace the

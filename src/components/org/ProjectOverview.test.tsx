@@ -911,6 +911,42 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     expect(screen.queryByText("Validated")).not.toBeInTheDocument()
   })
 
+  // Sam, Oct 22: on "All", a Text language beside an Audio one reads its
+  // validated text over its own lines, as Translated does; the Audio
+  // language's approvals read only in the audio tiles.
+  it("counts only the text languages in the All tab's Validated, beside an Audio language", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "RUT", type: "usfm", createdAt: "x", cellCount: 45 }] }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "Audio Bible", totalCells: 90,
+      filledCells: 30, validatedCells: 20, aiDraftedCells: 0,
+      audioTotalCells: 90, audioCells: 15, validatedAudioCells: 6, recordsAudio: true,
+      recordedMs: 90000, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null,
+      lanes: [{
+        lane: "fr", role: "target", name: "French", laneId: "ln-fr", position: 1,
+        totalCells: 45, filledCells: 30, validatedCells: 20, lastEditAt: null,
+        audioCells: 5, validatedAudioCells: 0, audioTotalCells: 45, recordsAudio: false,
+        delivers: "text", bothValidatedCells: 0,
+      }, {
+        lane: "sw", role: "target", name: "Swahili", laneId: "ln-sw", position: 2,
+        totalCells: 45, filledCells: 0, validatedCells: 0, lastEditAt: null,
+        audioCells: 10, validatedAudioCells: 6, audioTotalCells: 45, recordsAudio: true,
+        delivers: "audio", bothValidatedCells: 0,
+      }],
+    }])
+    renderOverview()
+
+    await waitFor(() => expect(screen.getAllByText("Validated").length).toBeGreaterThan(0))
+    // 20 of 45: 44%. The old mix, 26 of 90, would read 29%.
+    expect(screen.getAllByText("44%").length).toBeGreaterThan(0)
+    expect(screen.queryByText("29%")).not.toBeInTheDocument()
+  })
+
   // AQU-489: a PM who has never seen the dashboard must be able to name what
   // each progress number means without hovering. Every tile/bar label below
   // is rendered as plain visible text (not just a `title`/tooltip attribute)

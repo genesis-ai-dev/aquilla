@@ -7,10 +7,12 @@ import {
   portfolioCountsByLanguage,
   portfolioDeliversText,
   portfolioMeasure,
+  portfolioTextMeasure,
   progressPct,
   startedPct,
   projectNeedsPortfolioAttention,
   summarizePortfolioProjects,
+  textValidatedPct,
   translatedPct,
   validatedPct,
   type PortfolioMetricsProject,
@@ -204,6 +206,32 @@ describe("measuring a project by what its languages deliver", () => {
     })
     expect(portfolioMeasure(p)).toEqual({ total: 90, started: 52, done: 33, headline: 44 })
     expect(translatedPct(p)).toBe(22 / 45)
+  })
+
+  it("measures the Progress card's text tiles over the text languages only, so Validated shares Translated's denominator", () => {
+    const p = project({
+      totalCells: 90, filledCells: 30, validatedCells: 20,
+      lanes: [
+        lane({ delivers: "text", filledCells: 30, validatedCells: 20 }),
+        lane({ delivers: "audio", audioCells: 10, validatedAudioCells: 6 }),
+      ],
+    })
+    // The seeded walk project: French 30 translated and 20 validated beside a
+    // Swahili Audio language with 6 approved. Validated reads 20 of 45, not
+    // 26 of 90.
+    expect(portfolioTextMeasure(p)).toEqual({ total: 45, started: 30, done: 20, headline: 30 })
+    expect(textValidatedPct(p)).toBe(20 / 45)
+    expect(translatedPct(p)).toBe(30 / 45)
+    const both = project({
+      totalCells: 20, filledCells: 9, validatedCells: 7,
+      lanes: [
+        lane({ delivers: "text_and_audio", totalCells: 10, filledCells: 9, validatedCells: 7, audioCells: 6, validatedAudioCells: 6, bothValidatedCells: 4 }),
+        lane({ delivers: "audio", totalCells: 10, audioTotalCells: 10, audioCells: 10, validatedAudioCells: 10 }),
+      ],
+    })
+    expect(portfolioTextMeasure(both)).toEqual({ total: 10, started: 9, done: 4, headline: 4 })
+    const textOnly = project({ totalCells: 100, filledCells: 60, validatedCells: 30, lanes: [lane({ delivers: null })] })
+    expect(portfolioTextMeasure(textOnly)).toEqual({ total: 100, started: 60, done: 30, headline: 60 })
   })
 
   it("keeps an audio-only project out of the translated mean, not at 0", () => {

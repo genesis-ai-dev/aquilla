@@ -116,6 +116,41 @@ export function portfolioText<L extends LaneActivity>(
   return { total, filled }
 }
 
+/**
+ * The Progress card's text tiles, over the languages that deliver text: a
+ * Text language's validated lines, a Text and audio language's lines done on
+ * both halves. An Audio language beside them stays out, as it does from
+ * `portfolioText`, so on "All" Validated and Translated share one denominator
+ * and the Audio language reads only in the audio tiles (Sam, Oct 22). A
+ * project of Text languages reads its project-wide figures, exactly as before.
+ */
+export function portfolioTextMeasure<L extends LaneActivity>(
+  p: { totalCells: number; filledCells: number; validatedCells: number; lanes?: readonly L[] | null },
+): LaneMeasure {
+  if (!portfolioCountsByLanguage(p)) {
+    return { total: p.totalCells, started: p.filledCells, done: p.validatedCells, headline: p.filledCells }
+  }
+  const sum: LaneMeasure = { total: 0, started: 0, done: 0, headline: 0 }
+  for (const lane of targetLanes(p)) {
+    if (!laneCountsText(lane.delivers)) continue
+    const m = portfolioLaneMeasure(lane)
+    sum.total += m.total
+    sum.started += m.started
+    sum.done += m.done
+    sum.headline += m.headline
+  }
+  return sum
+}
+
+/** Done fraction 0..1 of `portfolioTextMeasure`: the Progress card's Validated tile. */
+export function textValidatedPct(
+  p: Pick<PortfolioMetricsProject, "totalCells" | "validatedCells"> &
+    Partial<Pick<PortfolioMetricsProject, "filledCells" | "lanes">>,
+): number {
+  const m = portfolioTextMeasure({ filledCells: 0, ...p })
+  return m.total > 0 ? m.done / m.total : 0
+}
+
 /** Lines with any work in them, by what each language delivers. Text: lines with text. */
 function portfolioStarted<L extends LaneActivity>(p: { filledCells: number; lanes?: readonly L[] | null }): number {
   if (!portfolioCountsByLanguage(p)) return p.filledCells

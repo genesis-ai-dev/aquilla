@@ -18,7 +18,6 @@
 import { useEffect, useState, type ReactNode } from "react"
 import { Archive, ArchiveRestore, Plus, Globe } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Switch } from "@/components/ui/switch"
 import { LanguageComboboxInput } from "@/components/LanguageComboboxInput"
 import { Badge } from "@/components/ui/badge"
 import { FieldLabel } from "@/components/ui/field"
@@ -41,6 +40,8 @@ import { useDerivedLanguageCode } from "@/lib/languages/use-derived-language-cod
 import { laneLabelSuffixesById } from "@/lib/lanes/lane-language"
 import { withLaneLabelSuffix } from "@/lib/lanes/lane-label-suffix"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
+import { LaneDeliversSelect } from "@/components/LaneDeliversSelect"
+import { laneRowDelivers, type LaneDelivers } from "@/lib/lanes/lane-delivers"
 import { useFormat } from "@/lib/i18n/format"
 
 const MAX_LANE_LENGTH = 64
@@ -89,15 +90,19 @@ export interface LanguagesSectionProps {
   }) => Promise<"ok" | "duplicate" | "invalid" | "malformed_code">
   onSetLaneArchived?: (laneId: string, archived: boolean) => Promise<boolean>
   /**
-   * AQU-1954: the "Records audio" switch on each language row. Omitted (a
-   * local project, or an older caller), the rows show no switch.
+   * Media redesign slice 1: the "Delivers" choice on each language row (Text,
+   * Audio, or Text and audio), which replaced AQU-1954's "Records audio"
+   * switch. Omitted (a local project, or an older caller), the rows show none.
    */
-  onSetLaneRecordsAudio?: (laneId: string, recordsAudio: boolean) => Promise<boolean>
+  onSetLaneDelivers?: (laneId: string, delivers: LaneDelivers) => Promise<LaneDeliversOutcome>
   /** AQU-1464: reads the lane's newest target edit for the archive confirmation.
    *  Optional — omitted for a local project, where there is no server to ask;
    *  the dialog then simply carries no activity line. */
   onLoadLaneLastChange?: (laneId: string) => Promise<LaneLastChangeResult>
 }
+
+/** How saving a language's "Delivers" choice went. */
+export type LaneDeliversOutcome = "ok" | "forbidden" | "offline" | "error"
 
 function normalizeLane(lane: string): string {
   return lane.trim()
@@ -147,7 +152,7 @@ export function LanguagesSection({
   onRenameLane,
   onCreateLane,
   onSetLaneArchived,
-  onSetLaneRecordsAudio,
+  onSetLaneDelivers,
   onLoadLaneLastChange,
 }: LanguagesSectionProps) {
   const t = useT()
@@ -162,8 +167,9 @@ export function LanguagesSection({
   const [pendingArchive, setPendingArchive] = useState<string | null>(null)
   const [laneActionError, setLaneActionError] = useState<string | null>(null)
   const [busyLane, setBusyLane] = useState<string | null>(null)
-  // AQU-1954: the row whose "Records audio" switch is saving.
-  const [audioBusyLane, setAudioBusyLane] = useState<string | null>(null)
+  // The row whose "Delivers" choice is saving, and the value it is saving: the
+  // dropdown shows it at once and snaps back to the stored one if refused.
+  const [deliversSaving, setDeliversSaving] = useState<{ laneId: string; delivers: LaneDelivers } | null>(null)
   const derivedNewLaneCode = useDerivedLanguageCode(newLane)
 
   const laneRows = laneRecords ?? []
@@ -317,15 +323,17 @@ export function LanguagesSection({
     }
   }
 
-  async function handleRecordsAudio(laneId: string, recordsAudio: boolean) {
-    if (!onSetLaneRecordsAudio) return
+  async function handleDelivers(laneId: string, delivers: LaneDelivers) {
+    if (!onSetLaneDelivers || !canEdit) return
     setLaneActionError(null)
-    setAudioBusyLane(laneId)
+    setDeliversSaving({ laneId, delivers })
     try {
-      const ok = await onSetLaneRecordsAudio(laneId, recordsAudio)
-      if (!ok) setLaneActionError(t("projectSettings.languages.savingFailedGeneric"))
+      const outcome = await onSetLaneDelivers(laneId, delivers)
+      if (outcome === "forbidden") setLaneActionError(t("projectSettings.languages.permissionError"))
+      else if (outcome === "offline") setLaneActionError(t("projectSettings.languages.offlineError"))
+      else if (outcome === "error") setLaneActionError(t("projectSettings.languages.savingFailedGeneric"))
     } finally {
-      setAudioBusyLane(null)
+      setDeliversSaving(null)
     }
   }
 
@@ -406,8 +414,10 @@ export function LanguagesSection({
           <FieldLabel>{t("projectSettings.languages.additionalLanesLabel")}</FieldLabel>
           <p className="mb-2 text-xs text-muted-foreground">
             {t("projectSettings.languages.additionalLanesDescription")}
-            {rowMode && onSetLaneRecordsAudio && (
-              <span className="mt-1 block">{t("projectSettings.languages.recordsAudioHint")}</span>
+            {rowMode && onSetLaneDelivers && (
+              <span className="mt-1 block" data-testid="lane-delivers-hint">
+                {t("projectSettings.languages.deliversHint")}
+              </span>
             )}
           </p>
           {rowMode ? (
@@ -450,24 +460,27 @@ export function LanguagesSection({
                           {t("projectSettings.languages.laneShownAs", { label: laneLabel(lane) })}
                         </span>
                       )}
-                      {/* AQU-1954 (Sam, 2026-10-14): whether every file owes
-                          audio in this language. Off, a file counts this
-                          language's audio only once it has a recording in it;
-                          on, the plan board and the Progress card expect it of
-                          every book. Saved straight away, like Archive. */}
-                      {onSetLaneRecordsAudio && pendingArchive !== lane.id && (
+                      {/* Media redesign slice 1 (Sam, Oct 22): what this
+                          language delivers — Text, Audio, or Text and audio —
+                          which decides how its progress is counted everywhere.
+                          Saved straight away, like Archive. A language that
+                          had "Records audio" on has no choice yet and asks. */}
+                      {onSetLaneDelivers && pendingArchive !== lane.id && (
                         <DisabledFieldTooltip disabled={!canEdit} tooltip={disabledTooltip}>
                           <span className="ms-auto flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
-                            {/* The switch names its own language; this is the
+                            {/* The dropdown names its own language; this is the
                                 visible caption, so it is not read twice. */}
-                            <span aria-hidden="true">{t("projectSettings.languages.recordsAudioLabel")}</span>
-                            <Switch
-                              size="sm"
-                              data-testid={`records-audio-${lane.id}`}
-                              checked={lane.recordsAudio === true}
-                              disabled={!canEdit || audioBusyLane === lane.id}
-                              onCheckedChange={(checked) => void handleRecordsAudio(lane.id, checked)}
-                              aria-label={t("projectSettings.languages.recordsAudioAriaLabel", { lane: laneLabel(lane) })}
+                            <span aria-hidden="true">{t("projectSettings.languages.deliversLabel")}</span>
+                            <LaneDeliversSelect
+                              testId={`lane-delivers-${lane.id}`}
+                              value={
+                                deliversSaving?.laneId === lane.id
+                                  ? deliversSaving.delivers
+                                  : laneRowDelivers(lane)
+                              }
+                              laneLabel={laneLabel(lane)}
+                              disabled={!canEdit || deliversSaving?.laneId === lane.id}
+                              onValueChange={(delivers) => void handleDelivers(lane.id, delivers)}
                             />
                           </span>
                         </DisabledFieldTooltip>
@@ -494,6 +507,14 @@ export function LanguagesSection({
                         </DisabledFieldTooltip>
                       )}
                     </div>
+                    {onSetLaneDelivers && laneRowDelivers(lane) == null && pendingArchive !== lane.id && (
+                      <p
+                        className="text-xs text-amber-700 dark:text-amber-500"
+                        data-testid={`lane-delivers-needs-choice-${lane.id}`}
+                      >
+                        {t("projectSettings.languages.deliversNeedsChoice")}
+                      </p>
+                    )}
                     {pendingArchive === lane.id && (
                       <div className="flex w-full flex-wrap items-center gap-2" data-testid={`archive-confirm-${lane.id}`}>
                         <div className="flex min-w-0 flex-1 flex-col gap-0.5">

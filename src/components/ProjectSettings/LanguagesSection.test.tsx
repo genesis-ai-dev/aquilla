@@ -7,7 +7,9 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
-import { LanguagesSection } from "./LanguagesSection"
+import userEvent from "@testing-library/user-event"
+import { LanguagesSection, type LaneDeliversOutcome } from "./LanguagesSection"
+import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 import type { PatchOutcome } from "@/hooks/useProjectSettings"
 import type { LaneLastChangeResult, ProjectLaneView } from "@/lib/sync/project-settings"
 import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
@@ -910,62 +912,109 @@ describe("LanguagesSection — lanes that read the same (AQU-1784)", () => {
   })
 })
 
-// AQU-1954 (Sam, 2026-10-14): "Records audio" lives on each language's row.
-describe("LanguagesSection — Records audio per language (AQU-1954)", () => {
+// Media redesign slice 1 (Sam, Oct 22): each language row says what it
+// delivers — Text, Audio, or Text and audio — in place of AQU-1954's
+// "Records audio" switch.
+describe("LanguagesSection — Delivers per language", () => {
   const GERMAN: ProjectLaneView = {
     id: "lane-de", role: "target", name: "German", langCode: "de", legacyTag: "", position: 0, archivedAt: null,
-    recordsAudio: true,
+    recordsAudio: false, delivers: "text",
   }
   const TOK_PISIN: ProjectLaneView = {
     id: "lane-tpi", role: "target", name: "Tok Pisin", langCode: "tpi", legacyTag: "tpi", position: 1, archivedAt: null,
+    recordsAudio: false, delivers: "audio",
+  }
+  // A language that had "Records audio" on: migration 0186 leaves it unchosen.
+  const SWAHILI: ProjectLaneView = {
+    id: "lane-sw", role: "target", name: "Swahili", langCode: "sw", legacyTag: "sw", position: 2, archivedAt: null,
+    recordsAudio: true, delivers: null,
   }
 
-  function renderRows(onSetLaneRecordsAudio?: (laneId: string, on: boolean) => Promise<boolean>, canEdit = true) {
+  function renderRows(
+    onSetLaneDelivers?: (laneId: string, delivers: LaneDelivers) => Promise<LaneDeliversOutcome>,
+    canEdit = true,
+    lanes: ProjectLaneView[] = [GERMAN, TOK_PISIN, SWAHILI],
+  ) {
     render(
       <LanguagesSection
         defaultTargetLanguage="German"
-        targetLanes={["de", "tpi"]}
+        targetLanes={["de", "tpi", "sw"]}
         canEdit={canEdit}
         disabledTooltip={null}
         patch={vi.fn(async (): Promise<PatchOutcome> => ({ kind: "ok" }))}
-        laneRecords={[GERMAN, TOK_PISIN]}
+        laneRecords={lanes}
         onRenameLane={vi.fn(async () => "ok" as const)}
         onCreateLane={vi.fn(async () => "ok" as const)}
         onSetLaneArchived={vi.fn(async () => true)}
-        onSetLaneRecordsAudio={onSetLaneRecordsAudio}
+        onSetLaneDelivers={onSetLaneDelivers}
       />,
     )
   }
 
-  it("shows each language's own switch, off when the row says nothing", () => {
-    renderRows(vi.fn(async () => true))
-    expect(screen.getByRole("switch", { name: "German records audio" })).toHaveAttribute("aria-checked", "true")
-    expect(screen.getByRole("switch", { name: "Tok Pisin records audio" })).toHaveAttribute("aria-checked", "false")
+  async function choose(lane: string, option: string) {
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("combobox", { name: `What ${lane} delivers` }))
+    await user.click(await screen.findByRole("option", { name: option }))
+  }
+
+  it("shows each language's own choice, and no Records audio switch", () => {
+    renderRows(vi.fn(async () => "ok" as const), true, [GERMAN, TOK_PISIN])
+    expect(screen.getByRole("combobox", { name: "What German delivers" })).toHaveTextContent("Text")
+    expect(screen.getByRole("combobox", { name: "What Tok Pisin delivers" })).toHaveTextContent("Audio")
+    expect(screen.queryByRole("switch")).toBeNull()
+    expect(screen.queryByText(/Records audio/)).toBeNull()
+    expect(screen.getByTestId("lane-delivers-hint")).toHaveTextContent(/Text and audio: a line is done only when both/)
+  })
+
+  it("asks for a choice on a language that had Records audio on, and only there", () => {
+    renderRows(vi.fn(async () => "ok" as const))
+    const swahili = screen.getByRole("combobox", { name: "What Swahili delivers" })
+    expect(swahili).toHaveTextContent("Choose")
+    expect(swahili).toHaveAttribute("data-needs-choice", "true")
+    expect(screen.getByTestId("lane-delivers-needs-choice-lane-sw")).toHaveTextContent(
+      /Choose whether it delivers Text, or Text and audio/,
+    )
+    expect(screen.queryByTestId("lane-delivers-needs-choice-lane-de")).toBeNull()
+    expect(screen.queryByTestId("lane-delivers-needs-choice-lane-tpi")).toBeNull()
+  })
+
+  it("reads an older server's rows from Records audio: off is Text, on asks", () => {
+    const { delivers: _de, ...oldGerman } = GERMAN
+    const { delivers: _sw, ...oldSwahili } = SWAHILI
+    renderRows(vi.fn(async () => "ok" as const), true, [oldGerman, oldSwahili])
+    expect(screen.getByRole("combobox", { name: "What German delivers" })).toHaveTextContent("Text")
+    expect(screen.getByRole("combobox", { name: "What Swahili delivers" })).toHaveTextContent("Choose")
   })
 
   it("saves one language at a time", async () => {
-    const save = vi.fn(async () => true)
+    const save = vi.fn(async () => "ok" as const)
     renderRows(save)
-    fireEvent.click(screen.getByRole("switch", { name: "Tok Pisin records audio" }))
-    await waitFor(() => expect(save).toHaveBeenCalledWith("lane-tpi", true))
+    await choose("German", "Text and audio")
+    await waitFor(() => expect(save).toHaveBeenCalledWith("lane-de", "text_and_audio"))
     expect(save).toHaveBeenCalledTimes(1)
   })
 
-  it("says so when the save fails", async () => {
-    renderRows(vi.fn(async () => false))
-    fireEvent.click(screen.getByRole("switch", { name: "German records audio" }))
-    expect(await screen.findByText("Saving failed.")).toBeInTheDocument()
+  it("snaps back and says why when the save is refused", async () => {
+    renderRows(vi.fn(async () => "forbidden" as const))
+    await choose("German", "Audio")
+    expect(await screen.findByText("You don't have permission to change shared settings.")).toBeInTheDocument()
+    expect(screen.getByRole("combobox", { name: "What German delivers" })).toHaveTextContent("Text")
+  })
+
+  it("says so when the save fails offline", async () => {
+    renderRows(vi.fn(async () => "offline" as const))
+    await choose("German", "Audio")
+    expect(await screen.findByText("You're offline. Reconnect to save language lanes.")).toBeInTheDocument()
   })
 
   it("cannot be changed by someone who may not edit languages", () => {
-    const save = vi.fn(async () => true)
-    renderRows(save, false)
-    fireEvent.click(screen.getByRole("switch", { name: "Tok Pisin records audio" }))
-    expect(save).not.toHaveBeenCalled()
+    renderRows(vi.fn(async () => "ok" as const), false)
+    expect(screen.getByRole("combobox", { name: "What Tok Pisin delivers" })).toBeDisabled()
   })
 
   it("is not drawn where there is nothing to save it to", () => {
     renderRows(undefined)
-    expect(screen.queryByRole("switch")).toBeNull()
+    expect(screen.queryByRole("combobox", { name: /delivers/ })).toBeNull()
+    expect(screen.queryByTestId("lane-delivers-hint")).toBeNull()
   })
 })

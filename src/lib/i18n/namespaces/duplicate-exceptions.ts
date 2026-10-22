@@ -205,6 +205,20 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "awaiting accept/dismiss. A controlled-vocabulary review state and a per-cell " +
     "AI-authorship marker are different referents that happen to share one English " +
     "adjective.",
+  "projectSettings.languages.deliversText":
+    "One option of the 'Delivers' dropdown on a target language row, naming what " +
+    "that language PRODUCES. It is worded as one set with its siblings " +
+    "projectSettings.languages.deliversAudio and deliversTextAndAudio, and a " +
+    "translator has to keep the three parallel. Reusing the editor's Text lens " +
+    "tab or the timeline's Text pane title would tie a deliverable choice to a " +
+    "UI mode, and an edit to either would silently break the set.",
+  "projectSettings.languages.deliversAudio":
+    "One option of the 'Delivers' dropdown on a target language row, naming what " +
+    "that language PRODUCES. It is worded as one set with its siblings " +
+    "projectSettings.languages.deliversText and deliversTextAndAudio, and a " +
+    "translator has to keep the three parallel. Reusing the lens tab's or the " +
+    "export card's 'Audio' would tie a deliverable choice to a UI mode or a file " +
+    "label, and an edit to either would silently break the set.",
   "nav.lens.audio":
     "Standalone tab label of the header Text/Audio segmented lens switch — a " +
     "primary navigation control read on its own, alongside its sibling 'Text'. " +

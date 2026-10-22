@@ -106,7 +106,7 @@ import {
   createProjectLane,
   renameProjectLane,
   setProjectLaneArchived,
-  setProjectLaneRecordsAudio,
+  setProjectLaneDelivers,
   fetchLaneLastChange,
   settingsEditorName,
   type LaneLastChangeResult,
@@ -125,7 +125,8 @@ import { AirtableIntegrationSection } from "./ProjectSettings/AirtableIntegratio
 import { SourceLinkSection } from "./ProjectSettings/SourceLinkSection"
 import { LinkSourceSection } from "./ProjectSettings/LinkSourceSection"
 import { ExperimentalFlagsSection } from "./ProjectSettings/ExperimentalFlagsSection"
-import { LanguagesSection } from "./ProjectSettings/LanguagesSection"
+import { LanguagesSection, type LaneDeliversOutcome } from "./ProjectSettings/LanguagesSection"
+import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 import { MembersSection } from "./ProjectSettings/MembersSection"
 import { BRIEF_ICON, LIVING_MEMORY_ICON } from "./LivingMemoryButton"
 import { briefStatus } from "@/lib/brief/brief"
@@ -602,14 +603,17 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     return "invalid" as const
   }, [session?.jwt, id, refreshSharedSettingsAfterWrite])
 
-  // AQU-1954: the "Records audio" switch on one language row.
-  const setLaneRecordsAudio = useCallback(async (laneId: string, recordsAudio: boolean) => {
+  // Media redesign slice 1: the "Delivers" choice on one language row.
+  const setLaneDelivers = useCallback(async (laneId: string, delivers: LaneDelivers): Promise<LaneDeliversOutcome> => {
     const jwt = session?.jwt
-    if (!jwt || !id) return false
-    const result = await setProjectLaneRecordsAudio(jwt, id, laneId, recordsAudio)
-    if (result.kind !== "ok") return false
+    if (!jwt || !id) return "error"
+    const result = await setProjectLaneDelivers(jwt, id, laneId, delivers)
+    if (result.kind === "forbidden") return "forbidden"
+    if (result.kind !== "ok") {
+      return typeof navigator !== "undefined" && navigator.onLine === false ? "offline" : "error"
+    }
     await refreshSharedSettingsAfterWrite()
-    return true
+    return "ok"
   }, [session?.jwt, id, refreshSharedSettingsAfterWrite])
 
   const setLaneArchived = useCallback(async (laneId: string, archived: boolean) => {
@@ -2238,7 +2242,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             onRenameLane={isCloudProject ? renameLane : undefined}
             onCreateLane={isCloudProject ? createLane : undefined}
             onSetLaneArchived={isCloudProject ? setLaneArchived : undefined}
-            onSetLaneRecordsAudio={isCloudProject ? setLaneRecordsAudio : undefined}
+            onSetLaneDelivers={isCloudProject ? setLaneDelivers : undefined}
             onLoadLaneLastChange={isCloudProject ? loadLaneLastChange : undefined}
           />
         )}

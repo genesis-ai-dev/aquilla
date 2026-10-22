@@ -238,8 +238,8 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
       expect(mockCreateProjectLane).toHaveBeenCalledTimes(2)
     })
     expect(mockCreateProjectLane.mock.calls.map((call) => call[2])).toEqual([
-      { name: "", language: "French" },
-      { name: "", language: "es" },
+      { name: "", language: "French", delivers: "text" },
+      { name: "", language: "es", delivers: "text" },
     ])
   })
 

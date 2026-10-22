@@ -1117,12 +1117,22 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.archivingButton": "Archiving…",
     "projectSettings.languages.confirmArchiveButton": "Confirm archive",
     "projectSettings.languages.archiveLaneAriaLabel": "Archive lane {lane}",
-    // AQU-1954 — each language row's "Records audio" switch.
-    "projectSettings.languages.recordsAudioLabel": "Records audio",
-    "projectSettings.languages.recordsAudioAriaLabel": "{lane} records audio",
-    "projectSettings.languages.recordsAudioHint":
-      "Records audio: when on, every book needs audio in that language. When " +
-      "off, a book counts audio only once it has a recording in that language.",
+    // Media redesign slice 1 — each language row's "Delivers" choice, which
+    // replaced AQU-1954's "Records audio" switch. Also used by the create dialog.
+    "projectSettings.languages.deliversLabel": "Delivers",
+    "projectSettings.languages.deliversAriaLabel": "What {lane} delivers",
+    "projectSettings.languages.deliversText": "Text",
+    "projectSettings.languages.deliversAudio": "Audio",
+    "projectSettings.languages.deliversTextAndAudio": "Text and audio",
+    "projectSettings.languages.deliversChoose": "Choose",
+    "projectSettings.languages.deliversHint":
+      "Delivers decides how a language's progress is counted. Text: a line is done " +
+      "when its text is validated. Audio: a line is done when its recording is " +
+      "approved, and no text is needed. Text and audio: a line is done only when " +
+      "both its text and its recording are approved.",
+    "projectSettings.languages.deliversNeedsChoice":
+      "This language had \"Records audio\" turned on. Choose whether it delivers Text, " +
+      "or Text and audio. Until you choose, its progress is counted as before.",
     "projectSettings.languages.archivedLanesLabel": "Archived lanes",
     "projectSettings.languages.archivedLanesDescription":
       "Hidden from the lane switcher by default. Their translations are kept; " +
@@ -2177,8 +2187,10 @@ export const projectSettings = defineNamespace({
           date: "The already-formatted, locale-aware date of the edit (data) — insert exactly as given, do not reformat or reorder its parts.",
         },
       },
-      "projectSettings.languages.recordsAudioAriaLabel": {
-        description: "Accessible name of the switch on one target language row that says every file needs audio in that language.",
+      "projectSettings.languages.deliversAriaLabel": {
+        description:
+          "Accessible name of the dropdown on one target language row that says what the " +
+          "language delivers: Text, Audio, or Text and audio.",
         placeholders: {
           lane: "The language's display name (data, not translated).",
         },

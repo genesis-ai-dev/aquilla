@@ -29,7 +29,7 @@ import { sign, verify } from "hono/jwt"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import type { Context } from "hono"
-import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
+import { authMiddleware, resolveSession, type AuthHonoEnv } from "../middleware/auth"
 import type { Env } from "../types"
 import {
   encryptMondayToken,
@@ -286,6 +286,17 @@ monday.get("/oauth/callback", async (c) => {
   }
   const orgId = Number(state.orgId)
   if (!Number.isFinite(orgId)) return fail("bad_state", 401)
+
+  // [Pen test] API security (2026-10-22): the state JWT alone proves who
+  // STARTED the flow, not who is finishing it. Without this binding an
+  // attacker could start a flow for their own org and lure a victim admin
+  // through Monday's consent screen, parking the victim's Monday token on the
+  // attacker's org (OAuth login-CSRF). The SPA already holds the session, so
+  // the caller sends it and it must be the user who minted the state.
+  const session = await resolveSession(c.env, c.req.header("Authorization"))
+  if (!session.ok || session.user.username !== state.userId) {
+    return fail("session_mismatch", 401)
+  }
   const backTo =
     typeof state.backTo === "string" && isSafeAppPath(state.backTo)
       ? state.backTo

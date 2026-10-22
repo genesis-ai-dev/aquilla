@@ -160,6 +160,7 @@ adminBilling.patch("/billing/plans", zValidator("json", fieldPlanPatchSchema), a
 const orgListSchema = z.object({
   q: z.string().trim().max(200).optional(),
   tier: z.enum(["free", "team", "enterprise", "paid"]).optional(),
+  sort: z.enum(["name", "usage"]).default("name"),
   limit: z.coerce.number().int().min(1).max(ADMIN_BILLING_PAGE_MAX).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 })

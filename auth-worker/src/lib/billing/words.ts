@@ -192,12 +192,17 @@ export function trailingYearStart(): string {
   return nDaysAgoUtc(364)
 }
 
+/** Where a period starts when the org has none on record. */
+export function defaultPeriodStart(): string {
+  return nDaysAgoUtc(FIELD_PLAN.intervalDays - 1)
+}
+
 export function periodStartDate(billing: OrgBillingRow): string {
   if (billing.current_period_start) {
     const parsed = Date.parse(billing.current_period_start)
     if (Number.isFinite(parsed)) return utcDateKey(new Date(parsed))
   }
-  return nDaysAgoUtc(FIELD_PLAN.intervalDays - 1)
+  return defaultPeriodStart()
 }
 
 export async function resetWordUsage(db: AquillaDb, orgId: number, since?: string): Promise<number> {

@@ -4,7 +4,7 @@
 // time timed the Billing tab out.
 
 import { readWordSnapshots } from "./word-snapshots"
-import type { SnapshotCatalog } from "./words"
+import { defaultPeriodStart, type SnapshotCatalog } from "./words"
 import { resolveOrgPlans, tierFromLegacyPlan, type OrgTier } from "../../../../db/shared/org-plan"
 
 export const ADMIN_BILLING_PAGE_MAX = 200
@@ -12,10 +12,15 @@ export const ADMIN_BILLING_PAGE_MAX = 200
 /** `paid` is Team or Enterprise as set by an admin or the legacy plan. */
 export type AdminBillingTierFilter = OrgTier | "paid"
 
+/** `usage`: most words used this billing period first — the number the
+ * console shows as agent credits used. */
+export type AdminBillingSort = "name" | "usage"
+
 export interface AdminBillingOrgQuery {
   /** Matches org name or owner username (substring), or the org id exactly. */
   q?: string
   tier?: AdminBillingTierFilter
+  sort?: AdminBillingSort
   limit: number
   offset: number
   /** One org only — the detail read after an admin change. */
@@ -49,6 +54,14 @@ export async function readAdminBillingOrgs(db: AquillaDb, catalog: SnapshotCatal
     where.push(`${STORED_TIER_SQL} = ?`)
     binds.push(query.tier)
   }
+  // Same window as readWordSnapshot: the period's UTC start day, or the
+  // default window for an org with no period on record.
+  const usageOrder = query.sort === "usage"
+    ? `(SELECT COALESCE(SUM(uw.words), 0) FROM org_word_usage_daily uw
+         WHERE uw.org_id = o.id
+           AND uw.date_utc >= COALESCE((b.current_period_start AT TIME ZONE 'UTC')::date, ?::date)) DESC, `
+    : ""
+  const orderBinds = query.sort === "usage" ? [defaultPeriodStart()] : []
   const { results } = await db
     .prepare(
       `SELECT o.id, o.name, u.username AS owner_username, b.weekly_allowance, b.plan AS legacy_plan,
@@ -57,10 +70,10 @@ export async function readAdminBillingOrgs(db: AquillaDb, catalog: SnapshotCatal
         FROM organizations o LEFT JOIN users u ON u.id = o.owner_user_id
         LEFT JOIN org_billing b ON b.org_id = o.id
         ${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}
-        ORDER BY o.name ASC NULLS LAST, o.id ASC
+        ORDER BY ${usageOrder}o.name ASC NULLS LAST, o.id ASC
         LIMIT ? OFFSET ?`,
     )
-    .bind(...binds, query.limit, query.offset)
+    .bind(...binds, ...orderBinds, query.limit, query.offset)
     .all<{
       id: number; name: string | null; owner_username: string | null; weekly_allowance: number | null
       legacy_plan: string | null; tier: OrgTier | null; contract_ends_at: string | null; total: number | string

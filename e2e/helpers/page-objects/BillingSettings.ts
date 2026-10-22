@@ -18,6 +18,8 @@ export class BillingSettingsPage {
   /** The org list is paged, so find the org by id rather than hoping it is on page one. */
   async showOrg(orgId: number) {
     await this.page.getByLabel('Search name, owner or org id…').fill(String(orgId))
+    // The search is applied (and kept in the URL) once typing pauses.
+    await expect(this.page).toHaveURL(new RegExp(`[?&]q=${orgId}(&|$)`))
     await expect(this.page.getByTestId(`weekly-allowance-${orgId}`)).toBeVisible()
   }
 

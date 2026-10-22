@@ -471,10 +471,13 @@ export async function updateAdminBillingPlans(
 
 /** `paid` = Team or Enterprise. */
 export type AdminBillingTierFilter = OrgTier | "paid"
+/** `usage`: most agent credits used this period first. */
+export type AdminBillingSort = "name" | "usage"
 
 export interface AdminBillingOrgQuery {
   q?: string
   tier?: AdminBillingTierFilter
+  sort?: AdminBillingSort
   limit?: number
   offset?: number
 }
@@ -487,6 +490,7 @@ export async function getAdminBillingOrgs(
   const params = new URLSearchParams()
   if (query.q?.trim()) params.set("q", query.q.trim())
   if (query.tier) params.set("tier", query.tier)
+  if (query.sort && query.sort !== "name") params.set("sort", query.sort)
   if (query.limit !== undefined) params.set("limit", String(query.limit))
   if (query.offset !== undefined) params.set("offset", String(query.offset))
   const qs = params.toString()

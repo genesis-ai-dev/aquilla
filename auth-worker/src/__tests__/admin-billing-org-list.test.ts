@@ -99,6 +99,15 @@ describe('GET /admin/billing/orgs', () => {
     expect(ids(await list('?tier=free'))).toEqual([1, 4])
   })
 
+  it('sorts by this period\'s usage — the number each row shows — then by name', async () => {
+    const res = await request('/api/v2/admin/billing/orgs?sort=usage', { headers: await admin() })
+    const { orgs } = (await res.json()) as { orgs: { orgId: number; wordsUsed: number }[] }
+    // Org 2's period started 10 days ago (its day-30 usage is outside it);
+    // org 3's usage is older than the default window, so it ties at zero.
+    expect(orgs.map(o => [o.orgId, o.wordsUsed])).toEqual([[2, 700], [1, 300], [4, 0], [3, 0]])
+    expect((await request('/api/v2/admin/billing/orgs?sort=newest', { headers: await admin() })).status).toBe(400)
+  })
+
   it('pages with a total that counts every match', async () => {
     const first = await list('?limit=2&offset=0')
     const second = await list('?limit=2&offset=2')

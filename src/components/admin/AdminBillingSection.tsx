@@ -14,8 +14,6 @@ import { formatAgentCredits, formatUsdFromCents, normalizeBillingPlan } from "@/
 import {
   patchAdminOrgPlan,
   patchAdminWeeklyAllowance,
-  getAdminBillingOrg,
-  getAdminBillingOrgs,
   getAdminBillingPlans,
   grantAdminCredits,
   grantAdminWords,
@@ -25,11 +23,9 @@ import {
   updateAdminBillingPlans,
   type AdminBillingOrg,
   type AdminBillingPlans,
-  type AdminBillingTierFilter,
 } from "@/lib/frontier/admin"
-
-/** Orgs per page. The list is read a page at a time, searched on the server. */
-const PAGE_SIZE = 50
+import { useAdminBillingOrgList } from "./useAdminBillingOrgList"
+import { AdminBillingOrgToolbar, RowSaveStatusLine } from "./AdminBillingOrgToolbar"
 
 /**
  * Platform billing: Field Plan catalog amounts + per-org grants/resets.
@@ -38,16 +34,8 @@ const PAGE_SIZE = 50
  */
 export function AdminBillingSection({ jwt }: { jwt: string }) {
   const [catalog, setCatalog] = useState<AdminBillingPlans | null>(null)
-  const [orgs, setOrgs] = useState<AdminBillingOrg[] | null>(null)
-  const [total, setTotal] = useState(0)
-  const [search, setSearch] = useState("")
-  const [query, setQuery] = useState("")
-  const [tierFilter, setTierFilter] = useState<AdminBillingTierFilter | "">("")
-  const [offset, setOffset] = useState(0)
-  // Bumped to re-read the current page, e.g. after a catalog save.
-  const [listVersion, setListVersion] = useState(0)
-  // The page request the shown rows answer; differs from pageKey while one is in flight.
-  const [loadedKey, setLoadedKey] = useState<string | null>(null)
+  const list = useAdminBillingOrgList(jwt)
+  const { orgs, act, rowStatus } = list
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -91,36 +79,6 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
     void refreshCatalog()
   }, [refreshCatalog])
 
-  // Search on the server, once typing pauses; a new search starts at page one.
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setQuery(search.trim())
-      setOffset(0)
-    }, 250)
-    return () => clearTimeout(timer)
-  }, [search])
-
-  const pageKey = `${query}|${tierFilter}|${offset}|${listVersion}`
-  useEffect(() => {
-    let current = true
-    getAdminBillingOrgs(jwt, { q: query, tier: tierFilter || undefined, limit: PAGE_SIZE, offset })
-      .then((page) => {
-        if (!current || !aliveRef.current) return
-        setOrgs(page.orgs)
-        setTotal(page.total)
-        setLoadedKey(pageKey)
-      })
-      .catch((err: unknown) => {
-        if (!current || !aliveRef.current) return
-        setError(err instanceof Error ? err.message : String(err))
-        setLoadedKey(pageKey)
-      })
-    return () => {
-      current = false
-    }
-  }, [jwt, query, tierFilter, offset, pageKey])
-  const orgsLoading = loadedKey !== pageKey
-
   async function saveCatalog() {
     if (!catalog) return
     setBusy(true)
@@ -142,30 +100,13 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
       setNotice(saved.warnings.length > 0 ? saved.warnings.join(" ") : "Catalog saved.")
       await refreshCatalog()
       // Catalog amounts feed every row's allowance.
-      setListVersion((v) => v + 1)
+      list.reload()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
     }
   }
-
-  /** Run one org's change, then re-read only that org's row. */
-  const act = useCallback(
-    async (orgId: number, fn: () => Promise<unknown>) => {
-      setError(null)
-      setNotice(null)
-      try {
-        await fn()
-        const row = await getAdminBillingOrg(jwt, orgId)
-        if (!aliveRef.current) return
-        setOrgs((prev) => prev?.map((o) => (o.orgId === orgId ? row : o)) ?? prev)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
-      }
-    },
-    [jwt],
-  )
 
   const unitsPerRawUsd = catalog?.plan.unitsPerRawUsd ?? 400
   const columns = useMemo<ColumnDef<AdminBillingOrg>[]>(
@@ -174,10 +115,13 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
         id: "org",
         accessorFn: (row) => row.orgName ?? `#${row.orgId}`,
         header: "Org",
+        // The server orders the list; sorting one page here would mislead.
+        enableSorting: false,
         cell: ({ row }) => (
           <div className="min-w-[120px]">
             <OrgWithAvatar name={row.original.orgName ?? `#${row.original.orgId}`} />
             <div className="pl-7 text-[10px] tabular-nums text-muted-foreground">#{row.original.orgId} · {row.original.ownerUsername}</div>
+            <RowSaveStatusLine orgId={row.original.orgId} status={rowStatus[row.original.orgId]} />
           </div>
         ),
       },
@@ -284,7 +228,7 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
         ),
       },
     ],
-    [act, jwt, unitsPerRawUsd],
+    [act, jwt, rowStatus, unitsPerRawUsd],
   )
 
   // AQU-942: only a first load that has resolved nothing may replace the
@@ -336,50 +280,22 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
           data={orgs ?? []}
           getRowId={(row) => String(row.orgId)}
           searchPlaceholder="Search name, owner or org id…"
-          searchValue={search}
-          onSearchChange={setSearch}
-          searching={orgsLoading}
+          searchValue={list.search}
+          onSearchChange={list.setSearch}
+          searching={list.loading}
           loading={orgs === null}
           loadingLabel="Loading organizations"
           toolbar={
-            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <select
-                aria-label="Filter by plan"
-                data-testid="admin-billing-tier-filter"
-                className="h-8 rounded-md border bg-background px-2 text-xs text-foreground"
-                value={tierFilter}
-                onChange={(e) => {
-                  setTierFilter(e.target.value as AdminBillingTierFilter | "")
-                  setOffset(0)
-                }}
-              >
-                <option value="">All plans</option>
-                <option value="paid">Paid (Team + Enterprise)</option>
-                <option value="enterprise">Enterprise</option>
-                <option value="team">Team</option>
-                <option value="free">Free</option>
-              </select>
-              <span className="tabular-nums" data-testid="admin-billing-org-count">
-                {total === 0 ? "0 orgs" : `${offset + 1}–${Math.min(offset + PAGE_SIZE, total)} of ${total}`}
-              </span>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={offset === 0 || orgsLoading}
-                onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
-              >
-                Previous
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={offset + PAGE_SIZE >= total || orgsLoading}
-                onClick={() => setOffset((o) => o + PAGE_SIZE)}
-                data-testid="admin-billing-next-page"
-              >
-                Next
-              </Button>
-            </div>
+            <AdminBillingOrgToolbar
+              tierFilter={list.tierFilter}
+              onTierFilter={list.setTierFilter}
+              sort={list.sort}
+              onSort={list.setSort}
+              offset={list.offset}
+              total={list.total}
+              loading={list.loading}
+              onOffset={list.setOffset}
+            />
           }
           emptyState={<p className="text-sm text-muted-foreground">No orgs found.</p>}
           testId="admin-billing-orgs"
@@ -394,9 +310,9 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
           {notice}
         </p>
       ) : null}
-      {error ? (
+      {error || list.listError ? (
         <p className="text-sm text-destructive" role="alert">
-          {error}
+          {error ?? list.listError}
         </p>
       ) : null}
     </div>

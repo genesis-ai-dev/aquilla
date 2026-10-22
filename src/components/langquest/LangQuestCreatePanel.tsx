@@ -4,7 +4,8 @@
 // it reaches (POST /inspect, nothing stored) → the panel says what the token
 // lets Aquilla do for the chosen language → Create makes the project, adds a
 // target lane in the LangQuest language, and links it (the token is stored
-// encrypted on the server from here on). The import itself is the link's
+// encrypted on the server from here on). If the link fails, the panel stays
+// open with the reason and Create retries just the link (AQU-2126). The import itself is the link's
 // first sync, which the project's LangQuest badge starts as soon as the
 // project opens — so a long import never holds this dialog open.
 
@@ -17,7 +18,6 @@ import { Input } from "@/components/ui/input"
 import { RevealableInput } from "@/components/ui/revealable-input"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
-import { toast } from "@/components/ui/toast"
 import { ProjectDestinationPicker, type Destination } from "@/components/ProjectDestinationPicker"
 import { ProjectTeamsPicker, teamsRequired } from "@/components/ProjectTeamsPicker"
 import { LangQuestLogo } from "@/components/langquest/LangQuestLogo"
@@ -67,6 +67,10 @@ export function LangQuestCreatePanel({ jwt, username, getProjectId, pageOrgId, o
   const [teamIds, setTeamIds] = useState<number[]>([])
   const [busy, setBusy] = useState<"checking" | "creating" | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // AQU-2126: set once the cloud project and its lanes exist. If the link then
+  // fails, the dialog stays open and Create retries only the link, so a retry
+  // never adds a second target lane and the language and name stay as created.
+  const [prepared, setPrepared] = useState<{ projectId: string; languageId: string } | null>(null)
 
   const language = inspection?.languages.find((l) => l.languageId === languageId) ?? null
   const needTeams = teamsRequired(destination?.role, destination?.orgId)
@@ -94,7 +98,8 @@ export function LangQuestCreatePanel({ jwt, username, getProjectId, pageOrgId, o
       const result = await inspectLangQuestToken(jwt, trimmed)
       setInspection(result)
       const first = result.languages.find((l) => canLinkLanguage(l.can))
-      setLanguageId(first?.languageId ?? "")
+      // After a failed link, a new token must link the language already created.
+      setLanguageId(prepared?.languageId ?? first?.languageId ?? "")
       if (first && !name.trim()) setName(first.name)
       posthog.capture("langquest token checked", {
         scopes: result.token.scopes,
@@ -122,35 +127,45 @@ export function LangQuestCreatePanel({ jwt, username, getProjectId, pageOrgId, o
       files: [],
       members: [{ userId: username ?? "", role: "owner" }],
     }
-    try {
-      await createCloudProject(jwt, {
-        id: project.id,
-        name: project.name,
-        orgId: destination.orgId,
-        teamIds: destination.orgId != null ? teamIds : undefined,
-      })
-    } catch (err) {
-      console.error("[langquest-create] project create failed:", err)
-      setError(t("langquest.error.createFailed"))
-      setBusy(null)
-      return
+    if (prepared?.projectId !== project.id) {
+      try {
+        await createCloudProject(jwt, {
+          id: project.id,
+          name: project.name,
+          orgId: destination.orgId,
+          teamIds: destination.orgId != null ? teamIds : undefined,
+        })
+      } catch (err) {
+        console.error("[langquest-create] project create failed:", err)
+        setError(t("langquest.error.createFailed"))
+        setBusy(null)
+        return
+      }
+      // Lanes: the passage labels are the source; the recordings perform the
+      // LangQuest language, so it is the target lane the takes land in.
+      try {
+        const settings = await fetchProjectSettings(jwt, project.id)
+        const sourceLane = settings?.lanes?.find((lane) => lane.role === "source")
+        if (sourceLane) await renameProjectLane(jwt, project.id, sourceLane.id, { language: LABEL_LANGUAGE })
+        await createProjectLane(jwt, project.id, { name: language.name, language: language.code })
+      } catch (err) {
+        console.warn("[langquest-create] lane write failed (non-fatal):", err)
+      }
+      setPrepared({ projectId: project.id, languageId: language.languageId })
     }
-    // Lanes: the passage labels are the source; the recordings perform the
-    // LangQuest language, so it is the target lane the takes land in.
-    try {
-      const settings = await fetchProjectSettings(jwt, project.id)
-      const sourceLane = settings?.lanes?.find((lane) => lane.role === "source")
-      if (sourceLane) await renameProjectLane(jwt, project.id, sourceLane.id, { language: LABEL_LANGUAGE })
-      await createProjectLane(jwt, project.id, { name: language.name, language: language.code })
-    } catch (err) {
-      console.warn("[langquest-create] lane write failed (non-fatal):", err)
-    }
-    let linked = true
     try {
       await linkLangQuest(jwt, project.id, token.trim(), language.languageId)
     } catch (err) {
+      // The project exists but nothing else in the app can link it (the
+      // badge only shows on linked projects), so keep the dialog open here.
       console.error("[langquest-create] link failed:", err)
-      linked = false
+      posthog.capture("langquest link failed", {
+        project_id: project.id,
+        status: err instanceof LangQuestLinkError ? err.status : null,
+      })
+      setError(t("langquest.error.linkFailed", { reason: failureText(err) }))
+      setBusy(null)
+      return
     }
     await createProject(project)
     posthog.capture("project created", {
@@ -158,14 +173,11 @@ export function LangQuestCreatePanel({ jwt, username, getProjectId, pageOrgId, o
       project_shape: "langquest",
       source_language: project.sourceLanguage,
       target_language: project.targetLanguage,
-      langquest_linked: linked,
+      langquest_linked: true,
       langquest_scopes: inspection.token.scopes,
       langquest_access: accessLevel(language.can),
     })
     setBusy(null)
-    // The project exists either way, so creation completes; the badge in the
-    // project offers the link again.
-    if (!linked) toast.add({ type: "warning", title: t("langquest.error.linkFailed") })
     onCreated(project)
   }
 
@@ -173,7 +185,12 @@ export function LangQuestCreatePanel({ jwt, username, getProjectId, pageOrgId, o
     <>
       <DialogBody>
         <fieldset disabled={busy !== null} aria-busy={busy !== null} className="flex min-w-0 flex-col gap-5">
-          <ProjectDestinationPicker jwt={jwt} pageOrgId={pageOrgId} onChange={setDestination} disabled={busy !== null} />
+          <ProjectDestinationPicker
+            jwt={jwt}
+            pageOrgId={pageOrgId}
+            onChange={setDestination}
+            disabled={busy !== null || prepared !== null}
+          />
           {destination?.orgId != null && (
             <ProjectTeamsPicker
               teams={destination.teams ?? []}
@@ -181,7 +198,7 @@ export function LangQuestCreatePanel({ jwt, username, getProjectId, pageOrgId, o
               value={teamIds}
               onValueChange={setTeamIds}
               showRequiredError={false}
-              disabled={busy !== null}
+              disabled={busy !== null || prepared !== null}
             />
           )}
           <FieldGroup>
@@ -237,6 +254,7 @@ export function LangQuestCreatePanel({ jwt, username, getProjectId, pageOrgId, o
                   <Select
                     items={inspection.languages.map((l) => ({ value: l.languageId, label: l.name }))}
                     value={languageId}
+                    disabled={prepared !== null}
                     onValueChange={(value) => {
                       if (!value) return
                       setLanguageId(value)
@@ -261,7 +279,12 @@ export function LangQuestCreatePanel({ jwt, username, getProjectId, pageOrgId, o
                 {language && <PermissionList can={language.can} />}
                 <Field>
                   <FieldLabel htmlFor="langquest-project-name">{t("langquest.create.nameLabel")}</FieldLabel>
-                  <Input id="langquest-project-name" value={name} onChange={(e) => setName(e.target.value)} />
+                  <Input
+                    id="langquest-project-name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    disabled={prepared !== null}
+                  />
                 </Field>
               </>
             )}
@@ -281,7 +304,11 @@ export function LangQuestCreatePanel({ jwt, username, getProjectId, pageOrgId, o
           data-testid="langquest-create-submit"
         >
           {busy === "creating" ? <Spinner data-icon="inline-start" /> : <LangQuestLogo />}
-          {busy === "creating" ? t("langquest.create.creating") : t("langquest.create.submit")}
+          {busy === "creating"
+            ? t("langquest.create.creating")
+            : prepared
+              ? t("langquest.create.retryLink")
+              : t("langquest.create.submit")}
         </Button>
       </DialogFooter>
     </>

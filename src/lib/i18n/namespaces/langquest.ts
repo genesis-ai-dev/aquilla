@@ -21,6 +21,7 @@ export const langquest = defineNamespace({
     "langquest.create.nameLabel": "Project name",
     "langquest.create.submit": "Create and import",
     "langquest.create.creating": "Creating project",
+    "langquest.create.retryLink": "Try linking again",
     "langquest.create.createdToast": "{name} is linked to LangQuest. Its recordings are importing now.",
     // Access summary and capabilities
     "langquest.access.none": "No access",
@@ -39,7 +40,7 @@ export const langquest = defineNamespace({
     "langquest.error.tokenRejected": "LangQuest didn't accept that token. It may be mistyped, revoked or expired.",
     "langquest.error.unreachable": "Couldn't reach LangQuest. Try again.",
     "langquest.error.createFailed": "Couldn't create the project. Try again.",
-    "langquest.error.linkFailed": "The project was created, but linking it to LangQuest failed. Link it from the LangQuest badge in the project.",
+    "langquest.error.linkFailed": "The project was created but isn't linked to LangQuest yet. {reason}",
     // Workspace badge and panel
     "langquest.badge.label": "LangQuest · {language}",
     "langquest.badge.ariaLabel": "LangQuest link: sync and publish",
@@ -84,6 +85,11 @@ export const langquest = defineNamespace({
       "langquest.create.tokenFor": { description: "Line naming the LangQuest organization the pasted token belongs to.", placeholders: { org: "LangQuest organization name." } },
       "langquest.create.noAccess": { description: "Option in the language picker for a language the token cannot read; it is disabled.", placeholders: { name: "LangQuest language name." } },
       "langquest.create.createdToast": { description: "Toast after the project is created and linked.", placeholders: { name: "The new project's name." } },
+      "langquest.error.linkFailed": {
+        description:
+          "Error in the import dialog when the project was made but the LangQuest link failed; the dialog stays open and the button becomes Try linking again.",
+        placeholders: { reason: "A full sentence saying why: LangQuest refused the token, or could not be reached." },
+      },
       "langquest.capability.missing": {
         description: "Shown under a capability the token lacks, naming the permission to tick on LangQuest's Connect page. Keep the scope id untranslated.",
         placeholders: { scope: "A LangQuest scope id such as read or release, shown as-is." },

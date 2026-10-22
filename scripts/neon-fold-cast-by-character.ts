@@ -84,7 +84,7 @@ function writeBackup(dir: string, projectId: string, version: number, settings: 
 function reportLine(r: ProjectFoldReport): string {
   return (
     `  ${r.projectId} ${r.projectName ?? "(unnamed)"}: cast entries ${r.entriesBefore} -> ${r.entriesAfter} ` +
-    `(${r.characterEntries} characters, ${r.droppedLineEntries} line entries dropped), ` +
+    `(${r.characterEntries} characters added, ${r.droppedLineEntries} line entries dropped), ` +
     `${r.linesWithCharacter} lines name a character, ` +
     `${r.newlyVoicedLines} newly voiced, ${r.markedLines} held voiceless, ` +
     `bytes ${r.settingsBytesBefore} -> ${r.settingsBytesAfter}, ` +

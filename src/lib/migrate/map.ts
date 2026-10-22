@@ -29,6 +29,7 @@ import {
 } from "./ids"
 import type { IngestEvent } from "./types"
 import { decodeHtmlEntities } from "../html-entities"
+import { isKnownBookCode } from "../file-labeling/bible-book-names"
 import { validateIdmlTranslation } from "@aquilla/idml-roundtrip"
 import {
   canonicalIdmlCellMetadata,
@@ -237,6 +238,26 @@ function canonicalTargetWithProof(
   return validation.valid ? upgraded.targetHtml : html
 }
 
+/**
+ * The USFM book a legacy-Codex file names outright (AQU-1196).
+ *
+ * A migrated file is named by its `.codex` basename stem (see
+ * `scripts/migrate.ts`), so a Scripture file's name IS a bare code — `1CH`,
+ * `MAT`. Only an exact known code counts: the fuzzy file-name detector
+ * (`bookCodeFromFileName`) reads a code out of any stem that merely starts or
+ * ends with three matching letters, which would stamp a book onto notes,
+ * `intro` and other paratext. Undefined means "leave `book_code` NULL" —
+ * `files.book_code` is what the Testament grouping, re-import collision
+ * matching and server-side rollups read, so a guess there is worse than a gap.
+ *
+ * Shared with `scripts/neon-backfill-book-codes.ts` so the migrator's rule and
+ * the backfill's rule cannot drift apart.
+ */
+export function legacyBookCodeFor(fileName: string): string | undefined {
+  const stem = (fileName || "").trim()
+  return isKnownBookCode(stem) ? stem.toUpperCase() : undefined
+}
+
 /** Map one source/target file pair to its deterministic event stream. */
 export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): IngestEvent[] {
   const { projectId, projectKey, fallbackAuthor, fallbackTs } = opts
@@ -247,6 +268,8 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
   const idmlReadiness = idml
     ? idmlAssessment?.readiness ?? "needs-artifact"
     : "not-idml"
+  // An IDML pair is a layout document, never Scripture — no book code.
+  const bookCode = idml ? undefined : legacyBookCodeFor(pair.name)
 
   events.push({
     id: fileCreateEventId(projectId, fileId),
@@ -259,6 +282,7 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
     payload: {
       name: pair.name,
       fileType: idml ? "idml" : "codex",
+      ...(bookCode ? { bookCode } : {}),
       ...(idml
         ? {
             kind: "idml",

@@ -2,6 +2,7 @@
 import { makeMaintenancePostgres } from '../db/shim/postgres'
 import {
   fullProgressRecomputeStmts,
+  TEXT_AUDIO_STALE_FILES_SQL,
   UNREFERENCED_LINES_STALE_FILES_SQL,
 } from '../sync-worker/src/events/progress-projection'
 
@@ -51,10 +52,20 @@ async function main(): Promise<void> {
     // `pnpm neon:backfill:progress:prod --unreferenced-lines` once (`:dev` for
     // the preview database).
     const unreferencedLines = process.argv.includes('--unreferenced-lines')
-    const scoped = missingOnly || missingBooks || unreferencedLines
+    // Media redesign slice 1: `--text-and-audio` re-runs only the files whose
+    // progress rows have recordings and no joint text × audio histogram yet
+    // (migration 0186), which "Text and audio" languages count their finished
+    // lines from. Safe to re-run: a re-projected file is never selected again.
+    // Production: apply 0186, deploy, then run it once, before or right after
+    // applying Sam's Text / Text and audio choices.
+    const textAndAudio = process.argv.includes('--text-and-audio')
+    const scoped = missingOnly || missingBooks || unreferencedLines || textAndAudio
     const unreferencedSql = UNREFERENCED_LINES_STALE_FILES_SQL
     const { results: files } = await db
-      .prepare(unreferencedLines && !missingBooks
+      .prepare(textAndAudio
+        ? `${TEXT_AUDIO_STALE_FILES_SQL}
+            ORDER BY 1, 2`
+        : unreferencedLines && !missingBooks
         ? `${unreferencedSql}
             ORDER BY project_id, id`
         : missingBooks

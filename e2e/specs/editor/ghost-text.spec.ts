@@ -29,6 +29,8 @@ test("ghost text learns from validated cells; Tab and words-that-fit commit like
   const cellId = seeded.cellIds[seeded.rowOf(HELD_OUT_REF)]
   const ws = await openSeededProject(page, seeded)
   const assist = new TypingAssist(page, ws)
+  // Off by default (AQU-2117): opt in through the real switch before typing.
+  await assist.enableGhostText()
 
   await assist.openNextUnfinished(cellId)
   await assist.type("E hizo Dios animales de ")
@@ -85,6 +87,8 @@ test("ghost text uses the cell's source verse: an empty cell's first word, and a
   const cellId = seeded.cellIds[seeded.rowOf(SOURCE_DRIVEN_REF)]
   const ws = await openSeededProject(page, seeded)
   const assist = new TypingAssist(page, ws)
+  // Off by default (AQU-2117): opt in through the real switch before typing.
+  await assist.enableGhostText()
   await assist.openNextUnfinished(cellId)
 
   // Empty cell: "God blessed …" → "bendijo". Re-type a space and remove it

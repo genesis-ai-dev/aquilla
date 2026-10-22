@@ -127,6 +127,9 @@ const UNCOVERED: Record<string, string> = {
   // undone. Written and read only by the sync-worker's projection of
   // source.cell.delete / source.cell.restore; no app read path touches it.
   removed_cell_archive: "never granted to app_runtime",
+  // Decision 11 (0187): each person's undo history for a project, read and
+  // written only by auth-worker's /edit-history route for the caller's own row.
+  edit_histories: "never granted to app_runtime",
   style_rules: "never granted to app_runtime",
   workspace_usage_requests: "never granted to app_runtime",
   project_tools: "never granted to app_runtime (tools prototype)",

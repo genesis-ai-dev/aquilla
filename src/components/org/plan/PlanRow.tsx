@@ -26,6 +26,7 @@ import {
   planPct,
   planUnitExpectsAudio,
   planUnitIsNearlyComplete,
+  planUnitShowsWayToWork,
   planUnitLabel,
   planUnitExpectsText,
   planUnitShortfall,
@@ -246,6 +247,9 @@ export const PlanRow = memo(function PlanRow({
   const hasAudio = audioFiles ? audioFiles.has(unit.fileId) : planUnitExpectsAudio(unit)
   const shortfall = planUnitShortfall(unit, hasAudio, hasText)
   const nearly = planUnitIsNearlyComplete(unit, now, audioFiles, textFiles)
+  // AQU-1974: the ways to the remaining cells — the link, the chapter names —
+  // also belong to a unit marked done with work left in it.
+  const showsWayToWork = planUnitShowsWayToWork(unit, now, audioFiles, textFiles)
   const shortfallText = usePlanShortfallText(shortfall)
   // Null from the renderer means nothing is outstanding, which on a unit nobody
   // has marked done is itself the news — see `nothingLeft` in the catalog.
@@ -281,7 +285,7 @@ export const PlanRow = memo(function PlanRow({
   // click. Sam, 2026-09-16: a date is not a reason to withhold the way to the
   // work. `leftToDo` non-null is `nearlyComplete`; `shortfallText` non-null
   // rules out "Nothing left", which has no cell to land on.
-  const openable = leftToDo !== null && shortfallText !== null && onOpenShortfall !== undefined
+  const openable = showsWayToWork && shortfallText !== null && onOpenShortfall !== undefined
 
   // WHERE the outstanding cells are, named for any nearly-complete unit whose
   // chapters are known. Dated or not: a row three cells from finished is
@@ -296,7 +300,7 @@ export const PlanRow = memo(function PlanRow({
   // conjunction are locale business, and Intl already owns them.
   const chapterList = shortChapters ?? []
   let whereText: string | null = null
-  if (leftToDo !== null && shortfallText !== null && chapterList.length > 0) {
+  if (showsWayToWork && shortfallText !== null && chapterList.length > 0) {
     const named = chapterList.slice(0, WHERE_CHAPTERS_NAMED)
     const rest = chapterList.length - named.length
     // CONJUNCTION when the list is complete — "12 and 40" — and the plain unit
@@ -311,7 +315,7 @@ export const PlanRow = memo(function PlanRow({
   // first because it comes first in the book. Without this a row whose open
   // cells sat partly in a book's title or above its first verse named only
   // chapters, and a row short only there named nothing.
-  if (leftToDo !== null && shortfallText !== null && frontMatterShort) {
+  if (showsWayToWork && shortfallText !== null && frontMatterShort) {
     whereText = whereText
       ? t("org.projectOverview.plan.shortfallWhereWithFrontMatter", { chapters: whereText })
       : t("org.projectOverview.plan.frontMatter")
@@ -380,17 +384,17 @@ export const PlanRow = memo(function PlanRow({
    * selecting the row: this link means "take me to the work", not "tell me
    * more about it".
    */
-  const shortfallNode = (text: string) => {
+  const shortfallNode = (text: string, toneClass?: string) => {
     const node = (
     <span
       // The mockup draws the shortfall as a link. It was azure, until that
       // blue went to the progress bars (AQU-1764); in the text colour it now
       // carries a standing underline, the same look as the inspector's "Go to
       // first…" link, because without one it only admitted to being clickable
-      // on hover.
-      className={`font-medium text-foreground${
+      // on hover. Inside the amber done-with-work line it keeps the amber.
+      className={`font-medium ${toneClass ?? "text-foreground"}${
         openable
-          ? " cursor-pointer rounded-sm underline decoration-foreground/40 underline-offset-2 hover:decoration-foreground focus-visible:decoration-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          ? ` cursor-pointer rounded-sm underline ${toneClass ? "decoration-current/40 hover:decoration-current focus-visible:decoration-current" : "decoration-foreground/40 hover:decoration-foreground focus-visible:decoration-foreground"} underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring`
           : ""
       }`}
       role={openable ? "button" : undefined}
@@ -436,13 +440,22 @@ export const PlanRow = memo(function PlanRow({
   const line2Node: ReactNode = (() => {
     // Amber, the board's "needs attention" colour, in place of "marked <date>":
     // the date is in the side panel, and this is the line that changed.
-    if (doneWithWork !== null) {
+    if (doneWithWork !== null && shortfallText !== null) {
+      // AQU-1974: "Marked done · <3 cells to validate> · chapters 12 and 40",
+      // the count a link to the first of them, like any other row's. The
+      // templates are rendered around the sentinel and split on it, as below,
+      // so the words and separators stay the translator's.
+      const [before, after] = t("org.projectOverview.plan.markedDoneWithWork", { work: PAIR_SLOT }).split(PAIR_SLOT)
+      const marked = <>{before}{shortfallNode(shortfallText, PLAN_TONE.soon.text)}{after}</>
+      const [lead, tail] = whereText
+        ? t("org.projectOverview.plan.shortfallPair", { first: PAIR_SLOT, second: whereText }).split(PAIR_SLOT)
+        : ["", ""]
       return (
         <span
           className={`font-medium ${PLAN_TONE.soon.text}`}
           data-testid={`plan-done-with-work-${unit.fileId}-${unit.sectionKey}`}
         >
-          {doneWithWork}
+          {lead}{marked}{tail}
         </span>
       )
     }

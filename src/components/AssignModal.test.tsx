@@ -9,6 +9,7 @@ vi.mock("@/lib/sync/assignments", () => ({
   createAssignment: vi.fn(),
   createBulkFileAssignments: vi.fn(),
   getFileChapters: vi.fn(),
+  getUnitAssignments: vi.fn().mockResolvedValue([]),
   AssignmentEmitError: class AssignmentEmitError extends Error {
     constructor(message: string) { super(message); this.name = "AssignmentEmitError" }
   },
@@ -18,12 +19,13 @@ vi.mock("@/lib/frontier/roles", async (importOriginal) => {
   return { ...actual }
 })
 
-import { createAssignment, createBulkFileAssignments, getFileChapters } from "@/lib/sync/assignments"
+import { createAssignment, createBulkFileAssignments, getFileChapters, getUnitAssignments } from "@/lib/sync/assignments"
 import { ROLE } from "@/lib/frontier/roles"
 
 const mockCreate = vi.mocked(createAssignment)
 const mockBulkCreate = vi.mocked(createBulkFileAssignments)
 const mockChapters = vi.mocked(getFileChapters)
+const mockUnit = vi.mocked(getUnitAssignments)
 
 const BASE_PROPS = {
   open: true,
@@ -52,6 +54,7 @@ beforeEach(() => {
     args.entries.map((e) => ({ fileId: e.fileId, assignmentId: `assign-${e.fileId}` })),
   )
   mockChapters.mockResolvedValue(["GEN 1", "GEN 2", "GEN 3"])
+  mockUnit.mockResolvedValue([])
 })
 afterEach(() => vi.restoreAllMocks())
 
@@ -218,6 +221,42 @@ describe("verses scope", () => {
     expect(args.jwt).toBe("test-jwt")
     expect(args.author).toBe("wendi")
     expect(args.projectId).toBe("proj-1")
+  })
+})
+
+// ── AQU-1510: warn when the person already holds these lines ─────────────────
+describe("overlap warning (AQU-1510)", () => {
+  it("says anna already holds GEN 2, and still assigns the whole file", async () => {
+    mockUnit.mockResolvedValue([
+      {
+        assignmentId: "held",
+        assigneeUserId: 42,
+        username: "anna",
+        scopeLabel: "Genesis · GEN 2",
+        targetLang: "",
+        deadline: null,
+        cellsTotal: 5,
+        translated: 0,
+        validated: 0,
+        recorded: 0,
+        audioValidated: 0,
+        chapters: [{ key: "GEN 2", total: 5, translated: 0, validated: 0, recorded: 0, audioValidated: 0 }],
+      },
+    ])
+    render(<AssignModal {...BASE_PROPS} />)
+    await pickSelectOption(/assign to/i, /anna/)
+    expect(await screen.findByTestId("assignment-overlap")).toHaveTextContent(
+      "anna already holds GEN 2 in Genesis",
+    )
+    fireEvent.click(screen.getByRole("button", { name: /assign/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+  })
+
+  it("stays quiet for bob, who holds nothing here", async () => {
+    render(<AssignModal {...BASE_PROPS} />)
+    await pickSelectOption(/assign to/i, /bob/)
+    await waitFor(() => expect(mockUnit).toHaveBeenCalledWith("test-jwt", "proj-1", "file-1", "", ""))
+    expect(screen.queryByTestId("assignment-overlap")).not.toBeInTheDocument()
   })
 })
 

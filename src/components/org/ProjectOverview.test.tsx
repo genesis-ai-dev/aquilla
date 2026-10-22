@@ -59,6 +59,7 @@ const LOADED_PROJECT_SETTINGS = {
   orgPolicy: null,
   visibilityFloors: null,
   patch: vi.fn(async () => ({ kind: "ok" as const })),
+  refresh: vi.fn(async () => null),
 }
 vi.mock("@/hooks/useProject", () => ({
   useProject: (...a: unknown[]) => {
@@ -945,6 +946,28 @@ describe("ProjectOverview archive/restore", () => {
     fireEvent.click(btn)
 
     await waitFor(() => expect(unarchiveProjectRemote).toHaveBeenCalledWith("p1", "jwt"))
+  })
+
+  // AQU-2097. WHY: the server refuses an archived project's reads, and the
+  // cards they feed hide on that refusal. Restore re-read only the project, so
+  // Progress, Languages and Team stayed gone, and the plan lost its language,
+  // until a manual reload.
+  it("Restore re-reads what the archive hid, without a reload (AQU-2097)", async () => {
+    const live = projectRecord({ level: 700 })
+    useProject.mockReturnValue({ project: projectRecord({ level: 700, deletedAt: "2026-05-01" }), status: "ready", refresh })
+    refresh.mockImplementation(async () => {
+      useProject.mockReturnValue({ project: live, status: "ready", refresh })
+    })
+    unarchiveProjectRemote.mockResolvedValue({ kind: "restored" })
+    renderOverview()
+    await screen.findByTestId("overview-archived-notice")
+    const portfolioReads = getPortfolio.mock.calls.length
+
+    fireEvent.click(screen.getByRole("button", { name: "Restore" }))
+
+    await waitFor(() => expect(screen.queryByTestId("overview-archived-notice")).toBeNull())
+    expect(LOADED_PROJECT_SETTINGS.refresh).toHaveBeenCalled()
+    await waitFor(() => expect(getPortfolio.mock.calls.length).toBeGreaterThan(portfolioReads))
   })
 
   // AQU-2088: the server refuses every per-project read for an archived

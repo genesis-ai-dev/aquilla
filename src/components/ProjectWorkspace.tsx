@@ -510,7 +510,7 @@ import {
 } from "@/components/ui/select"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
-import { audioProgressCellIds, sameAudioProgressCellIds } from "@/lib/progress/audio-progress-cells"
+import { audioProgressCellIds } from "@/lib/progress/audio-progress-cells"
 import {
   detectStrongTextDirection,
   projectSettingTextDirection,
@@ -10903,24 +10903,31 @@ export function ProjectWorkspace() {
    * which is how a text-only project keeps the chapter list, the colours and
    * the single whole-file walk it had before audio progress existed.
    *
-   * Held by MEMBERSHIP rather than by the memo's identity: the attachment read
-   * hands back a fresh map on every refetch, and the chapter projection below
-   * is a whole-file walk, so re-running it for an unchanged set is exactly the
-   * per-render cost AQU-1104 removed. (The store applies the same comparison
-   * for its own rollup, inside `setAudioProgressCellIds`.)
+   * DEPENDS ON `audioProgressIds` DIRECTLY, and must keep doing so. The first
+   * cut of this held the sets in a ref and compared them by membership, to
+   * spare the chapter projection a whole-file walk when a refetch changed
+   * nothing. A ref read is not a dependency the React Compiler can see, so it
+   * memoized this against a value it believed never changed and froze the
+   * reader at `undefined` — the state on first render, before the attachment
+   * read returns. The chapter list then showed TEXT figures for an audio-only
+   * file until something else in the session invalidated the memo, which is
+   * precisely the bug this ticket is about, reintroduced one layer up. It
+   * survived the whole unit suite because Vitest runs with the compiler off
+   * (CLAUDE.md, "React Compiler gotcha"); the PR preview caught it.
+   *
+   * The walk it was protecting is cheap to protect honestly: for a file with
+   * no recordings `audioProgressCellIds` returns a frozen empty singleton, so
+   * a text-only project — the case AQU-1104 cared about — is identity-stable
+   * anyway, and a file with audio only re-derives when the attachment read
+   * actually returns.
    */
-  const audioProgressIdsRef = useRef(audioProgressIds)
-  if (!sameAudioProgressCellIds(audioProgressIdsRef.current, audioProgressIds)) {
-    audioProgressIdsRef.current = audioProgressIds
-  }
-  const stableAudioProgressIds = audioProgressIdsRef.current
   const audioChapterStage = useMemo(() => {
-    if (stableAudioProgressIds.recorded.size === 0) return undefined
+    if (audioProgressIds.recorded.size === 0) return undefined
     return (cellId: string): AudioCellStage | undefined =>
-      stableAudioProgressIds.audioValidated.has(cellId)
+      audioProgressIds.audioValidated.has(cellId)
         ? "audioValidated"
-        : stableAudioProgressIds.recorded.has(cellId) ? "recorded" : undefined
-  }, [stableAudioProgressIds])
+        : audioProgressIds.recorded.has(cellId) ? "recorded" : undefined
+  }, [audioProgressIds])
 
   // Only the expanded sidebar consumes this projection. Keep health live, but
   // defer its whole-file display walk until that surface actually renders.

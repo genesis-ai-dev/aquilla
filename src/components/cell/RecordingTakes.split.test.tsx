@@ -41,11 +41,11 @@ const URL = "frontier-audio://audio-c1-1.webm"
 const T1 = "audio-c1-1.webm", P2 = "audio-c1-2.webm", T2 = "audio-c1-3.webm", Q2 = "audio-c1-4.webm"
 const audio = (over: Record<string, unknown>) => ({ type: "audio", url: URL, slot: "recording", durationMs: 4000, ...over })
 
-function draw(attachments: Record<string, unknown>, selectedAudioId = T1, over: Record<string, unknown> = {}) {
+function draw(attachments: Record<string, unknown>, selectedAudioId = T1, over: Record<string, unknown> = {}, editable = true) {
   const c = { id: "c1", fileId: "f1", original: "", translated: "", selectedAudioId, attachments, ...over } as unknown as CellData
   render(
     <RecordingTakes
-      project={project} cell={c} cellText="Hola mundo" editable username="dir"
+      project={project} cell={c} cellText="Hola mundo" editable={editable} username="dir"
       session={{ jwt: "j", username: "dir" } as never} onOpenRecording={vi.fn()} onUseAsCellText={vi.fn()}
     />,
   )
@@ -69,13 +69,14 @@ describe("RecordingTakes — a split take (AQU-1767)", () => {
     expect(within(pieces).getByTestId(`take-label-${P2}`)).toHaveTextContent("Take 1 · 2")
     // Pieces play together: nothing on a piece's row chooses it on its own.
     expect(within(pieces).queryByRole("button", { name: "Use this take" })).toBeNull()
-    // Sam, 2026-10-15: a piece is not edited on its own here, only deleted —
-    // its approval shows but takes no vote, and it has no rename.
+    // Decision 7 (replacing Sam's 2026-10-15 ruling): each piece's row takes
+    // its own vote and its own name; the take on top takes no vote.
     const votes = within(pieces).getAllByTestId("audio-validation-button")
     expect(votes).toHaveLength(2)
-    for (const v of votes) expect(v.hasAttribute("aria-pressed")).toBe(false)
-    expect(within(pieces).queryByRole("button", { name: "Rename take" })).toBeNull()
+    for (const v of votes) expect(v.hasAttribute("aria-pressed")).toBe(true)
+    expect(within(pieces).getAllByRole("button", { name: "Rename take" })).toHaveLength(2)
     expect(within(pieces).getAllByRole("button", { name: "Delete take" })).toHaveLength(2)
+    expect(screen.queryByTestId("cell-take-validation")).toBeNull()
   })
 
   // Sam, 2026-10-15: the take is renamed whole, and its pieces follow.
@@ -136,15 +137,78 @@ describe("RecordingTakes — a split take (AQU-1767)", () => {
     })
   })
 
-  it("approves the whole take from the top, every piece", async () => {
-    const { emitCellAudioValidate } = await import("@/lib/sync/events-emit")
-    vi.mocked(emitCellAudioValidate).mockClear()
-    draw(splitTake)
-    const top = within(screen.getByTestId("cell-take-validation"))
-    fireEvent.click(top.getByTestId("audio-validation-button"))
-    await vi.waitFor(() =>
-      expect(vi.mocked(emitCellAudioValidate).mock.calls.map(([i]) => (i as { audioId: string }).audioId).sort()).toEqual([T1, P2].sort()),
-    )
+  // Decision 7: each piece of a cut take is approved on its own.
+  describe("approving piece by piece", () => {
+    it("approves one piece from its row, and only that piece", async () => {
+      const { emitCellAudioValidate } = await import("@/lib/sync/events-emit")
+      vi.mocked(emitCellAudioValidate).mockClear()
+      draw(splitTake)
+      fireEvent.click(within(screen.getByTestId(`take-row-${P2}`)).getByTestId("audio-validation-button"))
+      await vi.waitFor(() => expect(vi.mocked(emitCellAudioValidate)).toHaveBeenCalled())
+      expect(vi.mocked(emitCellAudioValidate).mock.calls.map(([i]) => (i as { audioId: string }).audioId)).toEqual([P2])
+    })
+
+    it("shows each piece's own votes on its own row", () => {
+      draw({
+        [T1]: audio({ label: "Take 1 · 1", trimEndMs: 1500 }),
+        [P2]: audio({ label: "Take 1 · 2", trimStartMs: 1500, pieceOf: T1, validatorCount: 1, validators: ["rita"] }),
+      })
+      const first = within(screen.getByTestId(`take-row-${T1}`)).getByTestId("audio-validation-button")
+      const second = within(screen.getByTestId(`take-row-${P2}`)).getByTestId("audio-validation-button")
+      expect(second.getAttribute("aria-label")).toMatch(/^Audio validated by others/)
+      expect(first.getAttribute("aria-label")).toMatch(/^Audio not validated/)
+    })
+
+    it("lets someone who may validate but not edit the takes vote on each piece, and nothing more", () => {
+      draw(splitTake, T1, {}, false)
+      const pieces = screen.getByTestId("tab-take-pieces")
+      for (const v of within(pieces).getAllByTestId("audio-validation-button")) expect(v.hasAttribute("aria-pressed")).toBe(true)
+      for (const b of within(pieces).getAllByRole("button", { name: "Rename take" })) expect(b).toBeDisabled()
+      for (const b of within(pieces).getAllByRole("button", { name: "Delete take" })) expect(b).toBeDisabled()
+    })
+  })
+
+  // Decision 7: each piece of a cut take has its own name.
+  describe("naming piece by piece", () => {
+    it("renames one piece from its row, starting from its own name; its sibling and the take keep theirs", async () => {
+      const { emitCellAudioRename } = await import("@/lib/sync/events-emit")
+      vi.mocked(emitCellAudioRename).mockClear()
+      draw(splitTake)
+      fireEvent.click(within(screen.getByTestId(`take-row-${P2}`)).getByRole("button", { name: "Rename take" }))
+      const box = screen.getByTestId(`take-rename-${P2}`)
+      expect(box).toHaveValue("Take 1 · 2")
+      fireEvent.change(box, { target: { value: "Chorus" } })
+      fireEvent.keyDown(box, { key: "Enter" })
+      await vi.waitFor(() => expect(vi.mocked(emitCellAudioRename)).toHaveBeenCalled())
+      expect(vi.mocked(emitCellAudioRename).mock.calls.map(([i]) => [(i as { audioId: string }).audioId, (i as { label: string }).label]))
+        .toEqual([[P2, "Chorus"]])
+      expect(screen.getByTestId(`take-label-${P2}`)).toHaveTextContent(/^Chorus$/)
+      expect(screen.getByTestId(`take-label-${T1}`)).toHaveTextContent(/^Take 1 · 1$/)
+      expect(screen.getByTestId("cell-take-label")).toHaveTextContent(/^Take 1$/)
+    })
+
+    it("shows a piece renamed on its own by its name, and renaming the take leaves it alone", async () => {
+      const { emitCellAudioRename } = await import("@/lib/sync/events-emit")
+      vi.mocked(emitCellAudioRename).mockClear()
+      draw({
+        [T1]: audio({ label: "Take 1 · 1", trimEndMs: 1500 }),
+        [P2]: audio({ label: "Chorus", trimStartMs: 1500, trimEndMs: 2500, pieceOf: T1 }),
+        [T2]: audio({ label: "Take 1 · 3", trimStartMs: 2500, pieceOf: T1 }),
+      })
+      const pieces = screen.getByTestId("tab-take-pieces")
+      expect(within(pieces).getByTestId(`take-label-${T1}`)).toHaveTextContent(/^Take 1 · 1$/)
+      expect(within(pieces).getByTestId(`take-label-${P2}`)).toHaveTextContent(/^Chorus$/)
+      expect(within(pieces).getByTestId(`take-label-${T2}`)).toHaveTextContent(/^Take 1 · 3$/)
+      expect(screen.getByTestId("cell-take-label")).toHaveTextContent(/^Take 1$/)
+
+      fireEvent.click(screen.getByTestId("cell-take-rename-button"))
+      const box = screen.getByTestId("cell-take-rename")
+      fireEvent.change(box, { target: { value: "Greeting" } })
+      fireEvent.keyDown(box, { key: "Enter" })
+      await vi.waitFor(() => expect(vi.mocked(emitCellAudioRename)).toHaveBeenCalledTimes(2))
+      expect(vi.mocked(emitCellAudioRename).mock.calls.map(([i]) => [(i as { audioId: string }).audioId, (i as { label: string }).label]))
+        .toEqual([[T1, "Greeting · 1"], [T2, "Greeting · 3"]])
+    })
   })
 
   it("deletes the whole take from the top, and one piece from its row", async () => {
@@ -210,5 +274,23 @@ describe("RecordingTakes — a split take (AQU-1767)", () => {
     expect(screen.getByTestId("cell-take-label")).toHaveTextContent("Take 1")
     expect(screen.queryByTestId("cell-take-split")).toBeNull()
     expect(screen.queryByTestId("tab-take-pieces")).toBeNull()
+  })
+
+  it("approves and renames a take never split from the top, as before", async () => {
+    const { emitCellAudioValidate, emitCellAudioRename } = await import("@/lib/sync/events-emit")
+    vi.mocked(emitCellAudioValidate).mockClear()
+    vi.mocked(emitCellAudioRename).mockClear()
+    draw({ [T1]: audio({ label: "Take 1" }) })
+    fireEvent.click(within(screen.getByTestId("cell-take-validation")).getByTestId("audio-validation-button"))
+    await vi.waitFor(() => expect(vi.mocked(emitCellAudioValidate)).toHaveBeenCalled())
+    expect(vi.mocked(emitCellAudioValidate).mock.calls.map(([i]) => (i as { audioId: string }).audioId)).toEqual([T1])
+    fireEvent.click(screen.getByTestId("cell-take-rename-button"))
+    const box = screen.getByTestId("cell-take-rename")
+    expect(box).toHaveValue("Take 1")
+    fireEvent.change(box, { target: { value: "Best" } })
+    fireEvent.keyDown(box, { key: "Enter" })
+    await vi.waitFor(() => expect(vi.mocked(emitCellAudioRename)).toHaveBeenCalled())
+    expect(vi.mocked(emitCellAudioRename).mock.calls.map(([i]) => [(i as { audioId: string }).audioId, (i as { label: string }).label]))
+      .toEqual([[T1, "Best"]])
   })
 })

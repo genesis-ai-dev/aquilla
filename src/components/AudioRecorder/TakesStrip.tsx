@@ -30,7 +30,7 @@ import {
   retryFailedAudioSync,
 } from "@/lib/audio/audio-attachments-bus"
 import { hasOwnRecordingLeft, removeTake, removeWholeTake, renameTake } from "@/lib/audio/take-actions"
-import { originalRecordingId, pieceNames, takeBaseLabel, takeRows } from "@/lib/audio/take-groups"
+import { originalRecordingId, pieceNames, splitTakeName, takeRows } from "@/lib/audio/take-groups"
 import { pieceGroupOf } from "@/lib/sync/cell-audio-read-types"
 import { useRecordingTextDrift } from "@/hooks/useRecordingTextDrift"
 import type { RecordingTextDrift } from "@/lib/audio/text-drift"
@@ -111,9 +111,10 @@ interface Props {
   variant?: "recorder" | "tab" | "pieces"
   /*
    * "pieces" (AQU-1767, Sam 2026-10-14): a split take's own pieces, listed
-   * under it in the Recording tab — play, approve, rename, delete each. No
-   * choosing (they play together, as one take), no cleaning (the take is
-   * cleaned whole, above) and no text check (the take is checked whole).
+   * under it in the Recording tab — play, approve, rename, delete each. Each
+   * piece has its own votes and its own name (decision 7). No choosing (they
+   * play together, as one take), no cleaning (the take is cleaned whole,
+   * above) and no text check (the take is checked whole).
    *
    * Elsewhere a split take is ONE row: its name, "split in N", its whole
    * length; play plays its pieces, choose and delete act on all of them, and
@@ -171,7 +172,8 @@ export function TakesStrip({
   const audioValidation = useAudioValidation({
     project, fileId, cellId, username: author, jwt: session?.jwt ?? null,
     ...(targetLang ? { targetLang } : {}),
-    surface: "recorder",
+    // AQU-1572: a piece's vote is cast in the Recording tab.
+    surface: piecesList ? "recording-tab" : "recorder",
   })
   const [playingId, setPlayingId] = useState<string | null>(null)
   const [loadingId, setLoadingId] = useState<string | null>(null)
@@ -510,6 +512,21 @@ export function TakesStrip({
     [labelOverrides, t],
   )
 
+  // AQU-1767 (Sam, 2026-10-15): pieces numbered by where they sit, worked out
+  // here. A piece renamed on its own goes by that name (decision 7).
+  const names = useMemo(() => pieceNames(takes), [takes])
+  /** The name a row shows and a rename starts from: a piece's own or numbered
+   *  name in the pieces list, a take's stored name everywhere else. */
+  const shownLabel = useCallback(
+    (att: AudioAttachmentOut): string =>
+      labelOverrides.get(att.audioId) ?? (piecesList ? names.get(att.audioId) : null) ?? displayLabel(att),
+    [labelOverrides, piecesList, names, displayLabel],
+  )
+  /** A split take's row: the name its pieces share, not any one piece's. */
+  const splitLabel = (pieces: readonly AudioAttachmentOut[]): string =>
+    splitTakeName(pieces.map((p) => ({ label: labelOverrides.get(p.audioId) ?? p.label }))) ??
+    (isDenoisedAudioId(pieces[0].audioId) ? t("audio.takesStrip.cleanedLabel") : t("audio.takesStrip.takeFallback"))
+
   // Inline rename (pencil → input; Enter/blur commits, Esc cancels).
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameDraft, setRenameDraft] = useState("")
@@ -521,7 +538,7 @@ export function TakesStrip({
       const label = renameDraft.trim()
       setRenamingId(null)
       if (renameCancelledRef.current) { renameCancelledRef.current = false; return }
-      if (!label || label === displayLabel(att)) return
+      if (!label || label === shownLabel(att)) return
       setLabelOverrides((prev) => new Map(prev).set(att.audioId, label))
       try {
         await renameTake({ projectId, fileId, cellId, audioId: att.audioId, label, author, ...(targetLang ? { targetLang } : {}), labelBefore: att.label ?? null })
@@ -533,7 +550,7 @@ export function TakesStrip({
         })
       }
     },
-    [renameDraft, displayLabel, projectId, fileId, cellId, author, targetLang],
+    [renameDraft, shownLabel, projectId, fileId, cellId, author, targetLang],
   )
 
   // Legacy takes recorded before labels existed: backfill "Take N" ONCE (by
@@ -581,9 +598,8 @@ export function TakesStrip({
     return [...rows.filter((r) => r.isCleaned).sort(byId), ...rows.filter((r) => !r.isCleaned).sort(byId)]
   }, [takes, hide, piecesList])
 
-  // AQU-1767 (Sam, 2026-10-15): pieces numbered by where they sit, worked
-  // out here; and every take dated by the recording its words came from.
-  const names = useMemo(() => pieceNames(takes), [takes])
+  // AQU-1767 (Sam, 2026-10-15): every take dated by the recording its words
+  // came from.
   const takesById = useMemo(() => Object.fromEntries(takes.map((t) => [t.audioId, t])), [takes])
 
   if (ordered.length === 0) return null
@@ -733,7 +749,7 @@ export function TakesStrip({
                 ) : (
                   <>
                     <span data-testid={`take-label-${att.audioId}`} className="truncate font-medium">
-                      {isSplit ? takeBaseLabel(displayLabel(att)) : piecesList ? (names.get(att.audioId) ?? displayLabel(att)) : displayLabel(att)}
+                      {isSplit ? splitLabel(pieces) : shownLabel(att)}
                     </span>
                     {isSplit && (
                       <span data-testid={`take-split-${att.audioId}`} className="shrink-0 text-muted-foreground/70">
@@ -842,16 +858,16 @@ export function TakesStrip({
                         testId={`take-verdict-${att.audioId}`}
                       />
                     )}
-                    {/* A split take's pieces are not renamed one by one (Sam,
-                        2026-10-15): on its pieces' rows a piece is only deleted. */}
-                    {!isSplit && !piecesList && <AppTooltip content={t("audio.takesStrip.renameTooltip")}>
+                    {/* A split take's row is not renamed: its pieces are, each
+                        on its own row in the Recording tab (decision 7). */}
+                    {!isSplit && <AppTooltip content={t("audio.takesStrip.renameTooltip")}>
                       <Button
                         type="button"
                         variant="ghost"
                         size="icon-xs"
                         onClick={() => {
                           renameCancelledRef.current = false
-                          setRenameDraft(displayLabel(att))
+                          setRenameDraft(shownLabel(att))
                           setRenamingId(att.audioId)
                         }}
                         aria-label={t("audio.takesStrip.renameTooltip")}
@@ -905,20 +921,22 @@ export function TakesStrip({
                   A VOTE ONLY ON THE CIRCLED TAKE (Sam, 2026-09-29 and -30):
                   a vote is cast only on the take that plays for the line,
                   where it can be heard, so every other take shows its
-                  validation read-only. In the Recording tab's lists nothing
-                  is circled — the take that plays sits above them, with its
-                  own vote. */}
-              {/* AQU-1767: a split take's row stands for every piece. Its pieces'
-                  rows show their approval but take no vote: the take is approved
-                  whole, from the top (Sam, 2026-10-15: a piece is not edited on
-                  its own here, only deleted). */}
+                  validation read-only. In the Recording tab's other takes
+                  nothing is circled — the take that plays sits above them,
+                  with its own vote. */}
+              {/* AQU-1767: a split take's row stands for every piece, each
+                  named in its list. Decision 7 (replacing Sam's 2026-10-15
+                  ruling): the pieces list sits under the take that plays, and
+                  each piece there takes its own vote — from whoever may
+                  validate, as the take on top does, not only from someone who
+                  may edit the takes. */}
               <AudioValidationControl
-                  readOnly={readOnly || piecesList || tab || !isCircled}
+                  readOnly={!piecesList && (readOnly || tab || !isCircled)}
                   cellRef={cellId}
-                  takes={pieces.flatMap((p) => audioValidation.takeFor(
-                    { attachments: { [p.audioId]: p }, selectedBySlot: { [p.slot]: p.audioId } },
-                    p.audioId,
-                  ))}
+                  takes={audioValidation.takesFor({
+                    attachments: Object.fromEntries(pieces.map((p) => [p.audioId, p])),
+                    selectedBySlot: { [att.slot]: att.audioId },
+                  })}
                   currentUsername={author}
                   validationRequirement={audioValidation.validationRequirement}
                   canValidate={audioValidation.canValidate}

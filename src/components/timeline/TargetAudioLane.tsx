@@ -64,7 +64,7 @@ import {
 import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { canCutAt } from "@/lib/audio/cut-take"
 import { pieceTrimLimitsMs } from "@/lib/sync/cell-audio-read-types"
-import { takeBaseLabel } from "@/lib/audio/take-groups"
+import { pieceNameIn } from "@/lib/audio/take-groups"
 import { snapSpan, SNAP_THRESHOLD_PX } from "@/lib/timeline/snap"
 import { trackChipClass, trackChipPlayingClass, trackHueVars } from "@/lib/timeline/track-colors"
 import { DragTimeChip } from "./DragTimeChip"
@@ -1473,8 +1473,8 @@ function TargetAudioChip({
               onClick={() => takeMenu?.vote?.(cell.id, audioId, !vote.voted)}
             >
               {vote.voted ? <X className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
-              {/* A piece is approved with its whole take (Sam, 2026-10-15). */}
-              {t(vote.voted ? "editor.timeline.takeMenuUnapprove" : "editor.timeline.takeMenuApprove")}
+              {/* A piece is approved on its own (decision 7). */}
+              {t(vote.voted ? "editor.timeline.takeMenuUnapprove" : isPiece ? "editor.timeline.takeMenuApprovePiece" : "editor.timeline.takeMenuApprove")}
             </ContextMenuItem>
           </>
         )}
@@ -1482,8 +1482,9 @@ function TargetAudioChip({
         {takeMenu?.rename && (
           <ContextMenuItem
             data-testid="tl-take-menu-rename"
-            // A piece renames its whole take, by the take's own name.
-            onClick={() => takeMenu.rename?.(cell.id, audioId, (isPiece ? takeBaseLabel(chipTake?.label) : chipTake?.label) ?? null)}
+            // A piece is renamed on its own, from the name it is shown by
+            // (decision 7).
+            onClick={() => takeMenu.rename?.(cell.id, audioId, (isPiece ? pieceNameIn(cell.attachments, audioId) : chipTake?.label) ?? null)}
           >
             <Pencil className="h-3.5 w-3.5" />
             {t("editor.timeline.takeMenuRename")}

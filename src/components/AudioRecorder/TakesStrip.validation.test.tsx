@@ -102,6 +102,30 @@ describe("TakesStrip — audio validation", () => {
     expect(emitUnvalidate).not.toHaveBeenCalled()
   })
 
+  // Decision 7: a split take is one row in the recorder, and its list names
+  // each piece with its own votes — a vote on one piece is that piece's alone.
+  it("lists a split take's pieces by their own names, each with its own votes", async () => {
+    draw([
+      take({ audioId: "p1", label: "Take 2 · 1", trimEndMs: 1000, validatorCount: 0, validators: [] }),
+      take({ audioId: "p3", label: "Take 2 · 3", trimStartMs: 1000, trimEndMs: 2000, pieceOf: "p1", validatorCount: 1, validators: ["rita"] }),
+      take({ audioId: "p2", label: "Chorus", trimStartMs: 2000, pieceOf: "p1", validatorCount: 0, validators: [] }),
+    ], "p1")
+    const mark = screen.getByTestId("audio-validation-button")
+    await userEvent.hover(mark)
+    const list = await screen.findByRole("dialog")
+    const items = within(list).getAllByRole("listitem").filter((li) => li.parentElement?.parentElement === list)
+    expect(items.map((li) => li.textContent)).toEqual([
+      expect.stringMatching(/^Take 2 · 1/),
+      expect.stringMatching(/^Take 2 · 2.*rita/),
+      expect.stringMatching(/^Chorus/),
+    ])
+    expect(items[0].textContent).not.toMatch(/rita/)
+    expect(items[2].textContent).not.toMatch(/rita/)
+    await userEvent.click(within(items[2]).getByRole("button", { name: /validate this take/i }))
+    expect(emitValidate).toHaveBeenCalledTimes(1)
+    expect(emitValidate.mock.calls[0][0]).toMatchObject({ audioId: "p2" })
+  })
+
   // The role guard is defensive rather than decorative: a keyboard or
   // programmatic trigger reaches the emit too, and a guaranteed 403 must not
   // enter the outbox.

@@ -193,10 +193,39 @@ describe("TargetAudioLane — a take's right-click menu (AQU-1767)", () => {
     )
     rightClick("tl-target-c1-p2", 20)
     expect((await screen.findByTestId("tl-take-menu-delete")).textContent).toContain("Delete this piece")
-    // Sam, 2026-10-15: a piece is approved and renamed with its whole take.
-    expect(screen.getByTestId("tl-take-menu-vote").textContent).toContain("Approve this take")
-    fireEvent.click(screen.getByTestId("tl-take-menu-rename"))
-    expect(actions.rename).toHaveBeenCalledWith("c1", PIECE, "Take 1")
+    // Decision 7: a piece is approved and renamed on its own, and the rename
+    // box opens holding the piece's own name, numbered by where it sits.
+    expect(screen.getByTestId("tl-take-menu-vote").textContent).toContain("Approve this piece")
+    expect(actions.voteState).toHaveBeenCalledWith("c1", PIECE)
+    fireEvent.click(screen.getByTestId("tl-take-menu-vote"))
+    expect(actions.vote).toHaveBeenCalledWith("c1", PIECE, true)
+    rightClick("tl-target-c1-p2", 20)
+    fireEvent.click(await screen.findByTestId("tl-take-menu-rename"))
+    expect(actions.rename).toHaveBeenCalledWith("c1", PIECE, "Take 1 · 2")
+  })
+
+  it("opens a piece renamed on its own with that name", async () => {
+    const c = cell({
+      [TAKE]: { type: "audio", url: "frontier-audio://take", slot: "recording", durationMs: 4000, trimEndMs: 2000, label: "Take 1 · 1" },
+      [PIECE]: { type: "audio", url: "frontier-audio://take", slot: "recording", durationMs: 4000, trimStartMs: 2000, pieceOf: TAKE, label: "Chorus" },
+    })
+    const actions = menuActions()
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[
+          { cell: c, kind: "take", audioId: TAKE, pieceIndex: 0, pieceCount: 2 },
+          { cell: c, kind: "take", audioId: PIECE, pieceIndex: 1, pieceCount: 2 },
+        ]}
+        takeMenu={actions}
+      />,
+    )
+    rightClick("tl-target-c1-p2", 20)
+    fireEvent.click(await screen.findByTestId("tl-take-menu-rename"))
+    expect(actions.rename).toHaveBeenCalledWith("c1", PIECE, "Chorus")
+    rightClick("tl-target-c1", 20)
+    fireEvent.click(await screen.findByTestId("tl-take-menu-rename"))
+    expect(actions.rename).toHaveBeenLastCalledWith("c1", TAKE, "Take 1 · 1")
   })
 
   it("opens nothing on a timeline you cannot edit", () => {

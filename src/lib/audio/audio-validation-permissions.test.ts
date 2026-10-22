@@ -10,6 +10,7 @@ import {
   audioValidationTakes,
   canValidateTake,
   lineValidationTakes,
+  takeVoteState,
 } from "./audio-validation-permissions"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 
@@ -137,6 +138,45 @@ describe("audioValidationTakes", () => {
     expect(audioValidationTakes(e, {}, policy(), reason)[0]).toMatchObject({
       validatorCount: 0, validators: [], isGenerated: false, canValidate: true,
     })
+  })
+})
+
+// Decision 7: the timeline's "Approve this piece" asks about one piece only.
+describe("takeVoteState", () => {
+  const entry = (attachments: Record<string, unknown>, selected: Record<string, string>) =>
+    ({
+      attachments,
+      selectedBySlot: selected,
+      selectedAudioId: selected.recording ?? null,
+      selectedGeneratedVoiceAudioId: selected.generatedVoice ?? null,
+      audioTimings: {},
+    }) as unknown as CellAudioEntry
+  const cut = entry(
+    {
+      p1: { audioId: "p1", slot: "recording", trimStartMs: 0, validatorCount: 0, validators: [], recordedBy: "bo" },
+      p2: { audioId: "p2", slot: "recording", trimStartMs: 1000, pieceOf: "p1", validatorCount: 1, validators: ["ana"], recordedBy: "bo" },
+      p3: { audioId: "p3", slot: "recording", trimStartMs: 2000, pieceOf: "p1", validatorCount: 0, validators: [], recordedBy: "bo" },
+    },
+    { recording: "p1" },
+  )
+
+  it("answers for the one piece asked about, never for its siblings", () => {
+    expect(takeVoteState(cut, {}, policy(), "p2")).toEqual({ canVote: true, voted: true })
+    expect(takeVoteState(cut, {}, policy(), "p1")).toEqual({ canVote: true, voted: false })
+    expect(takeVoteState(cut, {}, policy(), "p3")).toEqual({ canVote: true, voted: false })
+  })
+
+  it("refuses the person who recorded the take on every piece when self-validation is off", () => {
+    for (const id of ["p1", "p2", "p3"]) {
+      expect(takeVoteState(cut, { allowSelfValidationAudio: false }, policy({ username: "bo" }), id).canVote).toBe(false)
+    }
+  })
+
+  it("answers for a take never cut exactly as before", () => {
+    const whole = entry({ a: { audioId: "a", slot: "recording", validatorCount: 1, validators: ["ana"] } }, { recording: "a" })
+    expect(takeVoteState(whole, {}, policy(), "a")).toEqual({ canVote: true, voted: true })
+    expect(takeVoteState(whole, {}, policy({ username: "cy" }), "a")).toEqual({ canVote: true, voted: false })
+    expect(takeVoteState(whole, { validationRoleFloorAudio: "project_lead" }, policy(), "a")).toEqual({ canVote: false, voted: false })
   })
 })
 

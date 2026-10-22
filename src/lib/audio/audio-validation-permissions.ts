@@ -183,6 +183,24 @@ export function audioValidationTakes(
   })
 }
 
+/**
+ * Whether the viewer may vote on ONE take, and whether they have: what the
+ * timeline's right-click menu asks of the chip it opened on. A piece of a cut
+ * take answers for itself alone (decision 7, replacing Sam's 2026-10-15 ruling
+ * that a piece answered for its whole take). A take the line does not measure
+ * (not selected, or the source clip) takes no vote.
+ */
+export function takeVoteState(
+  entry: CellAudioEntry | undefined,
+  project: Parameters<typeof audioValidationTakes>[1],
+  policy: AudioValidationPolicy,
+  audioId: string,
+): { canVote: boolean; voted: boolean } {
+  const take = audioValidationTakes(entry, project, policy, () => "")
+    .find((x) => x.audioId === audioId && x.canValidate)
+  return { canVote: take != null, voted: take != null && take.validators.includes(policy.username) }
+}
+
 /** Where a take a line's audio check stands for LIVES: the row's own cell, or
  *  the heard line (a cue in the audio-cue sibling) that performs the line. */
 export interface TakeOwner {

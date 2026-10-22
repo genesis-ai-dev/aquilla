@@ -1,11 +1,13 @@
 import { FRONTIER_BASE } from "./auth"
 import { fetchWithTimeout } from "./orgs"
 import { UserError } from "@/lib/errors/user-error"
+import { deliversView, type LaneDelivers } from "@/lib/lanes/lane-delivers"
 import {
   audioDenominator,
   deadlineStatus,
   emptyPortfolioAggregate,
   latestActivityAt,
+  portfolioLaneMeasure,
   validatedPct,
   type OrgPortfolioAggregate,
   type PortfolioAggregate,
@@ -20,6 +22,13 @@ export {
   isDeadlineOverdue,
   latestActivityAt,
   portfolioActivityStatus,
+  portfolioCountsByLanguage,
+  portfolioDeliversText,
+  portfolioLaneMeasure,
+  portfolioMeasure,
+  portfolioText,
+  progressPct,
+  startedPct,
   translatedPct,
   validatedPct,
   type DeadlineStatus,
@@ -65,6 +74,18 @@ export interface PortfolioLane {
   audioTotalCells?: number
   /** AQU-1954: the language row's "Records audio" switch. */
   recordsAudio?: boolean
+  /**
+   * Media redesign slice 1: what this language delivers — Text, Audio, or Text
+   * and audio — or null when nobody has chosen yet (counts as Text). Absent on
+   * older servers, which also reads as Text.
+   */
+  delivers?: LaneDelivers | null
+  /**
+   * Media redesign slice 1: lines with BOTH their text validated and their
+   * recording approved — what a "Text and audio" language counts as done.
+   * Absent on older servers.
+   */
+  bothValidatedCells?: number
 }
 
 export interface PortfolioProject {
@@ -401,14 +422,47 @@ export function isAudioOnlyView(p: PortfolioProject, lane: PortfolioLane | null)
   return !textAnywhere && p.audioCells > 0
 }
 
+/**
+ * Media redesign: does the Progress card show TEXT figures for the language
+ * (or, on "All", the languages) in view? Each language answers by what it
+ * delivers (`deliversView`), and one nobody has chosen for answers by evidence
+ * exactly as `isAudioOnlyView` does. A view where nobody has chosen anything
+ * keeps AQU-2116's answer to the letter.
+ */
+export function portfolioShowsText(p: PortfolioProject, lane: PortfolioLane | null): boolean {
+  const lanes = lane != null ? [lane] : (p.lanes ?? []).filter((l) => l.role !== "source")
+  if (!lanes.some((l) => l.delivers != null)) return !isAudioOnlyView(p, lane)
+  return lanes.some((l) => deliversView(l.delivers, isAudioOnlyView(p, l) ? "audio" : "text") !== "audio")
+}
+
 /** translated (has-content) fraction 0..1 for a single lane (0 when no cells). */
 export function laneTranslatedPct(lane: PortfolioLane): number {
   return lane.totalCells > 0 ? lane.filledCells / lane.totalCells : 0
 }
 
-/** validated fraction 0..1 for a single lane (0 when no cells). */
+/**
+ * Media redesign slice 1: the share of a lane's lines with any of its
+ * deliverable in them, 0..1 — its translated share for a Text language, as
+ * before; its recorded share for an Audio one. The lighter half of its bar.
+ */
+export function laneStartedPct(lane: PortfolioLane): number {
+  const m = portfolioLaneMeasure(lane)
+  return m.total > 0 ? Math.min(1, m.started / m.total) : 0
+}
+
+/** Media redesign slice 1: a language that delivers audio and no text. */
+export function laneDeliversAudioOnly(lane: Pick<PortfolioLane, "delivers">): boolean {
+  return lane.delivers === "audio"
+}
+
+/**
+ * Done fraction 0..1 for a single lane (0 when no cells): validated text for a
+ * Text language, approved recordings for an Audio one, both for Text and audio
+ * (media redesign slice 1).
+ */
 export function laneValidatedPct(lane: PortfolioLane): number {
-  return lane.totalCells > 0 ? lane.validatedCells / lane.totalCells : 0
+  const m = portfolioLaneMeasure(lane)
+  return m.total > 0 ? m.done / m.total : 0
 }
 
 /**

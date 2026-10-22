@@ -52,7 +52,7 @@ import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { fetchMemberScopes, type MemberScope } from "@/lib/sync/member-scopes"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import { ROLE } from "@/lib/frontier/roles"
-import { laneTranslatedPct, laneValidatedPct, type PortfolioLane } from "@/lib/frontier/portfolio"
+import { laneDeliversAudioOnly, laneStartedPct, laneValidatedPct, type PortfolioLane } from "@/lib/frontier/portfolio"
 import type { FileReference } from "@/lib/parsers/types"
 import type { ProjectMember } from "@/lib/frontier/members"
 import type { AssignLaneOption, TeamLaneAttachment } from "@/lib/sync/assignment-lane"
@@ -182,7 +182,10 @@ function LaneProgressBar({ lane, dimmed = false }: {
   dimmed?: boolean
 }) {
   // AQU-1493: never 100 while a cell in the lane is outstanding.
-  const translated = progressPercentOfFraction(laneTranslatedPct(lane))
+  // Media redesign slice 1: by what the language delivers — an Audio language's
+  // bar is its approved lines, then its recorded ones.
+  const t = useT()
+  const translated = progressPercentOfFraction(laneStartedPct(lane))
   const validated = progressPercentOfFraction(laneValidatedPct(lane))
   return (
     <span className="flex items-center gap-2">
@@ -191,7 +194,16 @@ function LaneProgressBar({ lane, dimmed = false }: {
         height={6}
         className={dimmed ? "w-16 opacity-70" : "w-16"}
       />
-      <span className="w-9 text-right text-sm tabular-nums text-muted-foreground">{translated}%</span>
+      <span
+        className="w-9 text-right text-sm tabular-nums text-muted-foreground"
+        aria-label={
+          laneDeliversAudioOnly(lane)
+            ? t("org.orgHome.pctRecorded", { pct: translated })
+            : t("org.orgHome.pctTranslated", { pct: translated })
+        }
+      >
+        {translated}%
+      </span>
     </span>
   )
 }
@@ -306,7 +318,7 @@ export function OverviewLaneTable({
       },
       {
         id: "translated",
-        accessorFn: (l) => laneTranslatedPct(l),
+        accessorFn: (l) => laneStartedPct(l),
         header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.orgHome.table.translatedHeaderLabel")} />,
         meta: { className: "w-[9rem]" },
         cell: ({ row }) => <LaneProgressBar lane={row.original} />,

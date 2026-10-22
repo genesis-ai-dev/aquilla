@@ -45,7 +45,7 @@ import {
   useOfflineProjectStatus,
 } from "@/lib/offline/download"
 import { cacheProjectMediaOffline, type CacheProjectMediaResult } from "@/lib/offline/media-cache"
-import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioDenominator, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, isAudioOnlyView, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
+import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioDenominator, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, portfolioShowsText, portfolioLaneMeasure, portfolioMeasure, portfolioText, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { OverviewLaneTable } from "./OverviewLaneTable"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { isLaneArchived } from "@/components/project-lane-archive"
@@ -1603,7 +1603,6 @@ export function ProjectOverview() {
   // AQU-1954: a project that says it records audio shows its audio from the
   // first day, at 0%, rather than hiding it until the first take.
   const hasAudio = audio != null && (audio.audioCells > 0 || (audio.recordsAudio === true && audioDenominator(audio) > 0))
-  const showAudio = hasAudio
 
   // AQU-538 §3.3: lane tabs + tile recompute. Tabs only surface once a project
   // has more than one lane (N=1 stays byte-identical). `activeLane` is the
@@ -1638,11 +1637,6 @@ export function ProjectOverview() {
   ]
   const activeLane: PortfolioLane | null =
     selectedLaneTag != null ? activeProjectLanes.find((l) => l.lane === selectedLaneTag) ?? null : null
-  // AQU-2116: an audio-only language shows only its audio figures — the
-  // Translated/Validated/AI-drafted tiles, bars and Customize entries drop out.
-  // Judged on the tab being viewed, like every other figure in this card, and
-  // on evidence alone: see `isAudioOnlyView`.
-  const showText = hasText && !(audio != null && isAudioOnlyView(audio, activeLane))
   /**
    * AQU-1278: the same lanes the tabs above offer, MINUS "All", for the plan
    * board's own picker. The plan is one language's answer — "All" has no
@@ -1664,6 +1658,21 @@ export function ProjectOverview() {
     })),
     [projectLanes, project?.targetLanguage, t],
   )
+  // Media redesign slice 1: the view's languages say what it shows. Validated
+  // is the lines DONE by what each language delivers; for a Text language
+  // that is its validated text, exactly as before.
+  // AQU-2116 + media redesign: an audio-only language shows only its audio
+  // figures — the Translated/Validated/AI-drafted tiles, bars and Customize
+  // entries drop out. What each language delivers decides; one nobody has
+  // chosen for is judged on evidence (`portfolioShowsText`).
+  const showText = hasText && audio != null && portfolioShowsText(audio, activeLane)
+  const showAudio = hasAudio
+  const viewText = activeLane
+    ? { filled: activeLane.filledCells, total: activeLane.totalCells }
+    : audio ? portfolioText(audio) : { filled: 0, total: 0 }
+  const viewDone = activeLane
+    ? portfolioLaneMeasure(activeLane)
+    : audio ? portfolioMeasure(audio) : { total: 0, started: 0, done: 0, headline: 0 }
   const tileTranslatedPct = activeLane ? laneTranslatedPct(activeLane) : audio ? translatedPct(audio) : 0
   const tileValidatedPct = activeLane ? laneValidatedPct(activeLane) : audio ? validatedPct(audio) : 0
   const CROSS_LANE_TOOLTIP = t("org.projectOverview.crossLaneTooltip")
@@ -2532,8 +2541,8 @@ export function ProjectOverview() {
                         {statVisible("translated") && (
                           <StatBar
                             label={t("org.orgHome.table.translatedHeaderLabel")}
-                            value={activeLane ? activeLane.filledCells : audio.filledCells}
-                            total={activeLane ? activeLane.totalCells : audio.totalCells}
+                            value={viewText.filled}
+                            total={viewText.total}
                             tone="textTranslated"
                             suffix={t("org.projectOverview.cellsSuffix")}
                           />
@@ -2550,8 +2559,8 @@ export function ProjectOverview() {
                         {statVisible("validated") && (
                           <StatBar
                             label={t("org.orgHome.table.validatedHeaderLabel")}
-                            value={activeLane ? activeLane.validatedCells : audio.validatedCells}
-                            total={activeLane ? activeLane.totalCells : audio.totalCells}
+                            value={viewDone.done}
+                            total={viewDone.total}
                             tone="textValidated"
                             suffix={t("org.projectOverview.cellsSuffix")}
                           />

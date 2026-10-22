@@ -65,6 +65,31 @@ export function laneCountsAudio(delivers: LaneDelivers | null | undefined): bool
 }
 
 /**
+ * Which figures a progress surface shows for a language: its text, its audio,
+ * or both side by side.
+ */
+export type DeliversView = "text" | "audio" | "both"
+
+/**
+ * THE audio-only decision, for every surface that draws progress. What someone
+ * chose in Languages wins; a language nobody has chosen for is judged by what
+ * its work holds — recordings and no target text read as audio (AQU-2110's
+ * evidence rule, which the caller passes in as `evidence`).
+ */
+export function deliversView(delivers: LaneDelivers | null | undefined, evidence: DeliversView): DeliversView {
+  switch (delivers) {
+    case "text":
+      return "text"
+    case "audio":
+      return "audio"
+    case "text_and_audio":
+      return "both"
+    default:
+      return evidence
+  }
+}
+
+/**
  * The "Records audio" value a choice implies: a language that delivers audio
  * owes it on every file. The setter writes both columns together, so the ~70
  * readers of `lanes.records_audio` (the plan board's audio bars, the dashboard's

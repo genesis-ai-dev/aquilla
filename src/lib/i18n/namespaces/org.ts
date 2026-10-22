@@ -171,6 +171,9 @@ export const org = defineNamespace({
     // -- LaneChips: per-lane progress chips on an OrgHome project row --
     "org.laneChips.tooltip": "{label} — {pct} translated",
     "org.laneChips.ariaLabel": "{label}: {pct} translated",
+    // Media redesign slice 1: the same chip for a language that delivers audio.
+    "org.laneChips.recordedTooltip": "{label} — {pct} recorded",
+    "org.laneChips.recordedAriaLabel": "{label}: {pct} recorded",
 
     // -- OrgHome: org dashboard (org list, project portfolio, signed-out/empty states) --
     "org.orgHome.signedOut.heading": "Sign in to see your workspace",
@@ -197,6 +200,7 @@ export const org = defineNamespace({
     "org.orgHome.dueDate": "Due {date}",
     "org.orgHome.pctTranslated": "{pct}% translated",
     "org.orgHome.pctValidated": "{pct}% validated",
+    "org.orgHome.pctRecorded": "{pct}% recorded",
     // AQU-883: the project directory backs shared/guest projects; its failure used to
     // be indistinguishable from an empty list, so it gets its own announced state.
     "org.orgHome.projectDirectoryError.title": "Couldn’t load your project directory",
@@ -279,6 +283,9 @@ export const org = defineNamespace({
       "Audio: percentage of cells with at least one recording attached.",
     "org.orgHome.table.sourceTargetLanguageAria": "Source and target language",
     "org.orgHome.table.audioPctAria": "{pct}% audio",
+    // Media redesign slice 1: a project whose languages all deliver audio has
+    // no text to translate; its Translated cell shows a dash with this name.
+    "org.orgHome.table.noTextToTranslateAria": "No text to translate: this project delivers audio",
 
     // -- Guest org projects page: same table as a member org, guest copy --
     "org.guestOrgHome.orgFallbackWithId": "Org #{id}",
@@ -2016,6 +2023,31 @@ export const org = defineNamespace({
       "org.orgHome.dueDate": {
         description: "Second line of the project-row deadline tooltip on OrgHome, naming the exact due date.",
         placeholders: { date: "Already-formatted deadline date (e.g. 'Jan 1, 2020')." },
+      },
+      "org.orgHome.table.noTextToTranslateAria": {
+        description:
+          "Accessible name of the em dash shown in a project row's Translated cell when every language of the project delivers audio, so there is no text to translate.",
+      },
+      "org.laneChips.recordedTooltip": {
+        description:
+          "Tooltip on a per-lane progress chip for a language that delivers audio: the share of its lines that have a recording. Same {label}/{pct} semantics as org.laneChips.tooltip.",
+        placeholders: {
+          label: "Lane display name (target language or lane tag) — not translated, may be a language name.",
+          pct: "Pre-formatted percentage string (e.g. '31%'), already locale-aware and bidi-isolated.",
+        },
+      },
+      "org.laneChips.recordedAriaLabel": {
+        description:
+          "Accessible name for a per-lane progress chip of a language that delivers audio. Same {label}/{pct} semantics as org.laneChips.tooltip.",
+        placeholders: {
+          label: "Lane display name (target language or lane tag) — not translated, may be a language name.",
+          pct: "Pre-formatted percentage string (e.g. '31%'), already locale-aware and bidi-isolated.",
+        },
+      },
+      "org.orgHome.pctRecorded": {
+        description:
+          "Accessible name for a language's progress figure when that language delivers audio: the share of its lines that have a recording.",
+        placeholders: { pct: "Whole-number recorded percentage, e.g. 40." },
       },
       "org.orgHome.pctTranslated": {
         description:

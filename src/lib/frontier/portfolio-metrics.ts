@@ -10,10 +10,117 @@
  * tiles, so this must not become one.
  */
 
+import {
+  laneCountsAudio,
+  laneCountsText,
+  laneMeasure,
+  type LaneDelivers,
+  type LaneMeasure,
+} from "../lanes/lane-delivers"
+
 const STALE_MS = 14 * 24 * 60 * 60 * 1000
 
-/** A lane contributes its activity timestamp. Other lane fields are ignored. */
-type LaneActivity = { lastEditAt: number | null }
+/**
+ * A lane contributes its activity timestamp, and (media redesign slice 1) what
+ * it delivers with the counts it is measured by. Everything but the timestamp
+ * is optional: a server that predates a field sends none, and a caller that
+ * only asks about activity passes none.
+ */
+type LaneActivity = {
+  lastEditAt: number | null
+  role?: "source" | "target"
+  delivers?: LaneDelivers | null
+  totalCells?: number
+  filledCells?: number
+  validatedCells?: number
+  audioTotalCells?: number
+  audioCells?: number
+  validatedAudioCells?: number
+  bothValidatedCells?: number
+}
+
+/** The target languages of a row; the source lane rides along for its label only. */
+function targetLanes<L extends LaneActivity>(p: { lanes?: readonly L[] | null }): L[] {
+  return (p.lanes ?? []).filter((lane) => lane.role !== "source")
+}
+
+/**
+ * Media redesign slice 1: does any language of this project count its
+ * recordings — Audio, or Text and audio? Only then are its numbers measured
+ * language by language. A project whose every language is Text (or not chosen
+ * yet) keeps the project-wide figures it always had, to the cell.
+ */
+export function portfolioCountsByLanguage<L extends LaneActivity>(p: { lanes?: readonly L[] | null }): boolean {
+  return targetLanes(p).some((lane) => laneCountsAudio(lane.delivers))
+}
+
+/** Does any language of this project deliver text? A project with no languages yet does. */
+export function portfolioDeliversText<L extends LaneActivity>(p: { lanes?: readonly L[] | null }): boolean {
+  const targets = targetLanes(p)
+  return targets.length === 0 || targets.some((lane) => laneCountsText(lane.delivers))
+}
+
+/** One language measured by what it delivers (src/lib/lanes/lane-delivers.ts). */
+export function portfolioLaneMeasure(lane: LaneActivity): LaneMeasure {
+  const total = lane.totalCells ?? 0
+  return laneMeasure(lane.delivers, {
+    total,
+    filled: lane.filledCells ?? 0,
+    validated: lane.validatedCells ?? 0,
+    audioTotal: lane.audioTotalCells ?? total,
+    recorded: lane.audioCells ?? 0,
+    audioApproved: lane.validatedAudioCells ?? 0,
+    bothApproved: lane.bothValidatedCells ?? 0,
+  })
+}
+
+/**
+ * The project measured by what each of its languages delivers: done lines
+ * across all languages over all their lines (gap 5). A project of Text
+ * languages reads its project-wide figures, exactly as before.
+ */
+export function portfolioMeasure<L extends LaneActivity>(
+  p: { totalCells: number; filledCells: number; validatedCells: number; lanes?: readonly L[] | null },
+): LaneMeasure {
+  if (!portfolioCountsByLanguage(p)) {
+    return { total: p.totalCells, started: p.filledCells, done: p.validatedCells, headline: p.filledCells }
+  }
+  const sum: LaneMeasure = { total: 0, started: 0, done: 0, headline: 0 }
+  for (const lane of targetLanes(p)) {
+    const m = portfolioLaneMeasure(lane)
+    sum.total += m.total
+    sum.started += m.started
+    sum.done += m.done
+    sum.headline += m.headline
+  }
+  return sum
+}
+
+/**
+ * The project's TEXT figures, over the languages that deliver text. A Text
+ * project reads its project-wide figures; one with an Audio language leaves
+ * that language's (empty) text out, so a French text beside a Swahili audio
+ * reads French's translated share rather than half of it.
+ */
+export function portfolioText<L extends LaneActivity>(
+  p: { totalCells: number; filledCells: number; validatedCells: number; lanes?: readonly L[] | null },
+): { total: number; filled: number } {
+  if (!portfolioCountsByLanguage(p)) return { total: p.totalCells, filled: p.filledCells }
+  let total = 0
+  let filled = 0
+  for (const lane of targetLanes(p)) {
+    if (!laneCountsText(lane.delivers)) continue
+    total += lane.totalCells ?? 0
+    filled += lane.filledCells ?? 0
+  }
+  return { total, filled }
+}
+
+/** Lines with any work in them, by what each language delivers. Text: lines with text. */
+function portfolioStarted<L extends LaneActivity>(p: { filledCells: number; lanes?: readonly L[] | null }): number {
+  if (!portfolioCountsByLanguage(p)) return p.filledCells
+  return targetLanes(p).reduce((sum, lane) => sum + portfolioLaneMeasure(lane).started, 0)
+}
 
 /** Fields the overview rollup reads. A full portfolio row satisfies this. */
 export interface PortfolioMetricsProject {
@@ -34,14 +141,58 @@ export interface PortfolioMetricsProject {
   unitsOverdue?: number
 }
 
-/** validated fraction 0..1 (0 when no cells). */
-export function validatedPct(p: Pick<PortfolioMetricsProject, "totalCells" | "validatedCells">): number {
-  return p.totalCells > 0 ? p.validatedCells / p.totalCells : 0
+/**
+ * Done fraction 0..1 (0 when no cells): validated text for a Text project, as
+ * always; with an Audio or a Text and audio language, the lines done by what
+ * each language delivers (media redesign slice 1).
+ */
+export function validatedPct(
+  p: Pick<PortfolioMetricsProject, "totalCells" | "validatedCells"> &
+    Partial<Pick<PortfolioMetricsProject, "filledCells" | "lanes">>,
+): number {
+  const m = portfolioMeasure({ filledCells: 0, ...p })
+  return m.total > 0 ? m.done / m.total : 0
 }
 
-/** translated (has-content) fraction 0..1 (0 when no cells). */
-export function translatedPct(p: Pick<PortfolioMetricsProject, "totalCells" | "filledCells">): number {
-  return p.totalCells > 0 ? p.filledCells / p.totalCells : 0
+/**
+ * Media redesign slice 1: the project's headline progress 0..1, by what each
+ * language delivers — the translated share for a Text project, exactly as
+ * before; approved recordings for an Audio one. What "least translated" and
+ * "most progress" sort by, so an audio project is not filed as untouched.
+ */
+export function progressPct(
+  p: Pick<PortfolioMetricsProject, "totalCells" | "filledCells"> &
+    Partial<Pick<PortfolioMetricsProject, "validatedCells" | "lanes">>,
+): number {
+  const m = portfolioMeasure({ validatedCells: 0, ...p })
+  return m.total > 0 ? m.headline / m.total : 0
+}
+
+/**
+ * Media redesign slice 1: the share of lines with any work in them, by what
+ * each language delivers — the translated share for a Text project, as before;
+ * recorded lines for an Audio one. The lighter half of a done bar.
+ */
+export function startedPct(
+  p: Pick<PortfolioMetricsProject, "totalCells" | "filledCells"> &
+    Partial<Pick<PortfolioMetricsProject, "validatedCells" | "lanes">>,
+): number {
+  const m = portfolioMeasure({ validatedCells: 0, ...p })
+  return m.total > 0 ? Math.min(1, m.started / m.total) : 0
+}
+
+/**
+ * Translated (has-content) fraction 0..1 (0 when no cells), over the
+ * languages that deliver text. A project whose languages all deliver audio has
+ * no text to translate and reads 0 — callers show nothing for it
+ * (`portfolioDeliversText`).
+ */
+export function translatedPct(
+  p: Pick<PortfolioMetricsProject, "totalCells" | "filledCells"> &
+    Partial<Pick<PortfolioMetricsProject, "validatedCells" | "lanes">>,
+): number {
+  const text = portfolioText({ validatedCells: 0, ...p })
+  return text.total > 0 ? text.filled / text.total : 0
 }
 
 /**
@@ -161,7 +312,10 @@ export function portfolioActivityStatus<L extends LaneActivity>(
   p: { filledCells: number; lastEditAt: number | null; lanes?: readonly L[] | null },
   now: number,
 ): PortfolioActivityStatus {
-  if (p.filledCells === 0) return "not-started"
+  // Media redesign slice 1: "started" by what each language delivers, so an
+  // Audio project is under way from its first recording rather than "not
+  // started" for as long as nobody types. A Text project: its filled cells.
+  if (portfolioStarted(p) === 0) return "not-started"
   const activityAt = latestActivityAt(p)
   if (activityAt == null || now - activityAt > STALE_MS) return "stalled"
   return "active"
@@ -264,13 +418,19 @@ export function summarizePortfolioProjects(
 ): PortfolioAggregate {
   if (projects.length === 0) return emptyPortfolioAggregate()
   let translated = 0
+  let textProjects = 0
   let validated = 0
   let audio = 0
   let stalled = 0
   let overdue = 0
   let attention = 0
   for (const project of projects) {
-    translated += translatedPct(project)
+    // Media redesign slice 1: a project with no text to translate stays out of
+    // the translated mean rather than pulling it down with a 0.
+    if (portfolioDeliversText(project)) {
+      translated += translatedPct(project)
+      textProjects += 1
+    }
     validated += validatedPct(project)
     audio += audioPct(project)
     if (portfolioActivityStatus(project, now) === "stalled") stalled += 1
@@ -280,7 +440,7 @@ export function summarizePortfolioProjects(
   const n = projects.length
   return {
     projectCount: n,
-    avgTranslatedPct: translated / n,
+    avgTranslatedPct: textProjects > 0 ? translated / textProjects : 0,
     avgValidatedPct: validated / n,
     avgAudioPct: audio / n,
     stalledCount: stalled,

@@ -987,8 +987,15 @@ export function ProjectOverview() {
    * from that language's row (Project settings → Languages). Carried on the
    * portfolio row, so it is read again with the row whenever settings change.
    */
-  const recordsAudio =
-    (audio?.lanes ?? []).find((l) => l.role !== "source" && l.lane === planLane)?.recordsAudio === true
+  const planPortfolioLane = (audio?.lanes ?? []).find((l) => l.role !== "source" && l.lane === planLane)
+  const recordsAudio = planPortfolioLane?.recordsAudio === true
+  /**
+   * Media redesign slice 1: what that language delivers. The board stops
+   * guessing "audio-only" from what a file holds once the language says: an
+   * Audio language owes no text anywhere, a Text and audio one owes it on every
+   * file. Text, and a language nobody has chosen for, read as before.
+   */
+  const planDelivers = planPortfolioLane?.delivers ?? null
   const planShowAudio = useMemo(() => planHasAudio(planUnits, recordsAudio), [planUnits, recordsAudio])
   /**
    * Which FILES carry recordings. Audio expectation is judged per file, never
@@ -1005,7 +1012,7 @@ export function ProjectOverview() {
    * the medium they are actually being produced in instead of reading 0%
    * forever against text nobody will ever write. See `textFileIds`.
    */
-  const planTextFiles = useMemo(() => textFileIds(planUnits), [planUnits])
+  const planTextFiles = useMemo(() => textFileIds(planUnits, planDelivers), [planUnits, planDelivers])
 
   // ── AQU-1278: the two background reads the board and inspector cannot make ──
   //
@@ -1416,8 +1423,8 @@ export function ProjectOverview() {
   }, [planUnits, selectedPlanUnitId])
 
   const planCsv = useCallback(
-    () => planRowsToCsv(planUnits, tableNow, recordsAudio),
-    [planUnits, tableNow, recordsAudio],
+    () => planRowsToCsv(planUnits, tableNow, recordsAudio, planDelivers),
+    [planUnits, tableNow, recordsAudio, planDelivers],
   )
   const handleCopyPlanCsv = useCallback(() => {
     void navigator.clipboard.writeText(planCsv()).then(() => {
@@ -2696,6 +2703,7 @@ export function ProjectOverview() {
                     units={planUnits}
                     now={tableNow}
                     recordsAudio={recordsAudio}
+                    delivers={planDelivers}
                     projectId={id ?? null}
                     status={planStatus}
                     onRetry={refreshPlan}

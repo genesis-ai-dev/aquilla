@@ -327,6 +327,54 @@ describe("AQU-1954: a project that says it records audio", () => {
   })
 })
 
+// Media redesign slice 1: the board reads what the language DELIVERS instead
+// of guessing from what a file holds, once the language says. Audio and Text
+// and audio write "Records audio" on, so the audio half needs nothing new.
+describe("the language says what it delivers", () => {
+  const ruth = counts(45, 0, 0, 0, 0, { fileId: "ruth", fileName: "Ruth", sectionKey: "RUT" })
+
+  it("Audio: no text anywhere, an AUD bar only, and \"45 to record\", never \"45 to translate\" (P1.2)", () => {
+    const rows = [ruth]
+    expect(textFileIds(rows, "audio").size).toBe(0)
+    expect(planHasText(rows, "audio")).toBe(false)
+    expect(planHasAudio(rows, true)).toBe(true)
+    const shortfall = planUnitShortfall(ruth, audioFileIds(rows, true).has("ruth"), textFileIds(rows, "audio").has("ruth"))
+    expect(shortfall).toMatchObject({ toTranslate: 0, toValidate: 0, toRecord: 45 })
+    expect(planShortfallParts(shortfall)).toEqual([{ kind: "record", count: 45 }])
+  })
+
+  it("Audio: an untouched book reads Not started, the first take moves it to In progress (P1.3)", () => {
+    const rows = [ruth]
+    const audioFiles = audioFileIds(rows, true)
+    expect(planUnitStatus(ruth, NOW, audioFiles, textFileIds(rows, "audio"))).toBe("not_started")
+    const recordedOne = { ...ruth, audioCount: 1 }
+    expect(planUnitStatus(recordedOne, NOW, audioFiles, textFileIds([recordedOne], "audio"))).toBe("in_progress")
+  })
+
+  it("Text and audio: text is owed on every file, even one that holds only recordings (P1.6)", () => {
+    const recordingsOnly = counts(10, 0, 0, 6, 6, { fileId: "takes" })
+    expect(textFileIds([recordingsOnly]).has("takes")).toBe(false)
+    expect(textFileIds([recordingsOnly], "text_and_audio").has("takes")).toBe(true)
+    const shortfall = planUnitShortfall(recordingsOnly, true, true)
+    expect(planShortfallParts(shortfall).map((p) => p.kind)).toEqual(["translate", "record"])
+  })
+
+  it("Text, and a language nobody has chosen for, keep the board's evidence exactly as before", () => {
+    const recordingsOnly = counts(10, 0, 0, 6, 6, { fileId: "takes" })
+    const written = counts(10, 4, 2, 0, 0, { fileId: "text" })
+    const rows = [recordingsOnly, written]
+    for (const delivers of ["text", null, undefined] as const) {
+      expect([...textFileIds(rows, delivers)]).toEqual([...textFileIds(rows)])
+      expect(planSummary(rows, NOW, false, delivers)).toEqual(planSummary(rows, NOW))
+    }
+  })
+
+  it("the summary strip follows the choice like the rows do", () => {
+    const rows = [counts(22, 0, 0, 22, 22, { fileId: "a" }), counts(23, 0, 0, 0, 0, { fileId: "b" })]
+    expect(planSummary(rows, NOW, true, "audio")).toMatchObject({ total: 2, nearlyComplete: 1 })
+  })
+})
+
 describe("a dubbing project's audio is counted against its CUE SHEET", () => {
   // The real shape, from The Chosen: 646 subtitle cells, a hidden cue sheet of
   // 548 cues, and every take hanging off a cue. The two counts are not meant

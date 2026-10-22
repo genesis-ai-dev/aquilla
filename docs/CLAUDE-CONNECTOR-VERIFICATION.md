@@ -1,0 +1,111 @@
+# Claude connector verification
+
+Issue: AQU-2127. Checked on 2026-10-23, Asia/Singapore.
+
+## Completed checks
+
+- `claude plugin validate ./plugins/aquilla` passes with Claude Code 2.1.307.
+  Directory checks report no warnings. The CLI suggests a marketplace install
+  command after a public marketplace exists; none is claimed yet.
+- A real Claude Code session loads the exported bundle and advertises
+  `aquilla:attention-queue`, `aquilla:terminology-drift`, and
+  `aquilla:translation-status-report` through its Skill tool. The probe
+  invokes no Aquilla tools and establishes discovery only.
+- `scripts/chatgpt-plugin.test.ts`: 10 tests pass under Vitest 5.0.1,
+  using the worktree's own installed runner and a temporary Node config.
+  The config selects only this test and caps execution at one worker.
+- An unauthenticated production MCP `initialize` request returns HTTP 401
+  with `WWW-Authenticate`, the correct resource metadata URL, and `act` scope.
+- The referenced protected-resource document returns the exact MCP URL,
+  the identity issuer, header bearer authentication, and `act` scope.
+- The production issuer discovery document advertises authorization code,
+  S256 PKCE, public-client authentication (`none`), and CIMD support.
+- An authorization request carrying Claude's published client metadata URL
+  and hosted HTTPS callback returns HTTP 302 to Aquilla's consent screen.
+  Client metadata validation occurs later in the session-gated consent API;
+  the redirect does not establish that Claude's identity is accepted.
+  This check grants no access and exchanges no token.
+
+The production MCP endpoint is:
+
+```text
+https://api.aquilla.app/sync/api/v1/external/mcp
+```
+
+The hosted client identity and callback checked are:
+
+```text
+https://claude.ai/api/oauth/mcp-oauth-client-metadata
+https://claude.ai/api/mcp/auth_callback
+```
+
+## Pending authenticated verification
+
+The available browser redirects Claude's connector settings to sign-in.
+The local Claude CLI has API-key authentication; that does not sign the
+browser into a paid Claude account or grant access to Aquilla.
+The direct browser probe of Aquilla's consent URL shows **Loading** with
+only the build-info button. Jev's `done` result does not prove consent
+readiness; the returned elements contain no sign-in or consent controls.
+
+Consequently, these checks remain unrun:
+
+- Real Claude connector installation, consent, and token exchange.
+- Authenticated `initialize`, tool discovery, and each tool invocation in Claude.
+- Read-only reports, requested correction, excluded organization rejection,
+  prompt injection resistance, and connection revocation in Claude.
+- Reviewer account access and complete tool-inventory coverage.
+
+Direct fetching of Claude's client metadata from this machine returns 403.
+The initial authorize route forwards parameters to the consent page without
+fetching metadata. Its redirect does not establish metadata validation,
+browser sign-in, or a complete OAuth flow.
+
+## Native Claude Code limitation
+
+`auth-worker/src/routes/mcp-oauth.ts` checks redirect URIs with exact array
+membership. Claude's native client uses ephemeral loopback ports, which
+[Claude's authentication requirements](https://claude.com/docs/connectors/building/authentication)
+require matching without the port for both localhost and 127.0.0.1.
+The package loads locally, but native OAuth compatibility remains unresolved.
+This packaging change does not alter authorization validation.
+
+## Test impact
+
+Commands actually run:
+
+```sh
+claude plugin validate ./plugins/aquilla
+claude plugin validate /private/tmp/aquilla-claude-submission/aquilla
+```
+
+The package suite runs through the installed Vitest entry point with
+`run --config /private/tmp/aqu-2127-vitest.config.mjs`.
+That temporary config selects `scripts/chatgpt-plugin.test.ts` in Node,
+without the unrelated SPA setup. Discovery uses a real Claude CLI session
+with `--plugin-dir`, `--tools Skill`, and `--no-session-persistence`.
+Live requests use curl against the MCP endpoint, its resource metadata,
+the issuer metadata, and the initial authorization route.
+
+No application build or full smoke suite runs: these changes affect static
+plugin packaging, and no application or worker source changes.
+
+The changed contract is plugin discovery: Claude consumes the shared HTTP
+MCP configuration and three skills through `.claude-plugin/plugin.json`.
+The existing OAuth catalog produces the tool names and annotations used
+by those skill instructions. The regression in `scripts/chatgpt-plugin.test.ts`
+checks that composition, shared identity/version, and HTTP transport.
+
+No application UI, persistence, import, or permission contract changes.
+No new browser smoke journey is needed for static packaging.
+The existing spec's `04-features/auth-and-account.md`,
+**External agent project authorization**, distinguishes device authorization
+from MCP OAuth discovery. Packaging changes neither contract; no spec edit
+is required. This does not reconcile the broader OAuth spec backlog.
+
+## Submission status
+
+Not submitted. Listing text, setup instructions, existing icon, and reviewer
+journeys are in `CLAUDE-CONNECTOR.md`. Public documentation, a public plugin
+distribution repository, reviewer credentials, and authenticated tests remain
+prerequisites. Do not check the portal's all-tools-tested acknowledgment yet.

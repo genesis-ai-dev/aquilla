@@ -40,6 +40,8 @@ export const MODAL_GPU_CENTS_PER_SEC: Readonly<Record<string, number>> = {
 /** infra/modal/diarization.py `gpu="T4"`; infra/modal/seed_vc.py runs on L40S. */
 export const DIARIZATION_GPU = 'NVIDIA T4'
 export const VOICE_CONVERT_GPU = 'NVIDIA L40S'
+/** infra/modal/voice_forge.py `convert_audio` (library voices, RVC) runs on L4. */
+export const LIBRARY_VOICE_CONVERT_GPU = 'NVIDIA L4'
 /** Same idle-scaledown and cold-start allowance as Omnilingual. */
 export const MODAL_GPU_AMORTIZATION = OMNI_DEFAULT_AMORTIZATION
 

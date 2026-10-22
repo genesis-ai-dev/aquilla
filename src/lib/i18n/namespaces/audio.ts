@@ -11,7 +11,31 @@ export const audio = defineNamespace({
     "audio.newVoice.titleEdit": "Edit voice",
     "audio.newVoice.tabTts": "TTS voice",
     "audio.newVoice.tabClone": "Clone voice",
+    "audio.newVoice.tabCharacter": "Characters",
+    "audio.newVoice.errorCharacterRequired": "Pick a character voice.",
     "audio.newVoice.kindGroupLabel": "Voice kind",
+
+    // CharacterVoicePicker — the Characters tab: pre-built synthetic character
+    // voices a project adds to its cast in one click.
+    "audio.characters.intro":
+      "Ready-made character voices. Record a line in any language, then use Change voice to give it this character's voice.",
+    "audio.characters.filterGroupAriaLabel": "Filter character voices",
+    "audio.characters.filterFemale": "Female",
+    "audio.characters.filterMale": "Male",
+    "audio.characters.filterChild": "Child",
+    "audio.characters.filterTeen": "Teen",
+    "audio.characters.filterYoungAdult": "Young adult",
+    "audio.characters.filterAdult": "Adult",
+    "audio.characters.filterElderly": "Elderly",
+    "audio.characters.noMatches": "No character voices match these filters.",
+    "audio.characters.previewAriaLabel": "Preview {name}",
+    "audio.characters.pauseAriaLabel": "Stop previewing {name}",
+    "audio.characters.add": "Add",
+    "audio.characters.use": "Use",
+    "audio.characters.current": "Current",
+    "audio.characters.inCast": "In cast",
+    "audio.characters.howItWorks":
+      "Synthetic voices that belong to no real person. The reader's words, pronunciation and intonation are kept; only who it sounds like changes.",
     "audio.newVoice.namePlaceholder": "e.g. Narrator",
     "audio.newVoice.nameAriaLabel": "Voice name",
     "audio.newVoice.engineLabel": "Engine",
@@ -397,6 +421,7 @@ export const audio = defineNamespace({
     "audio.library.voicedStats": "{voiced}/{assigned} voiced",
     "audio.library.noLinesYet": "no lines yet",
     "audio.library.cloneEngineLabel": "Clone",
+    "audio.library.characterEngineLabel": "Character",
 
     // VoiceCloneSection — record/upload the reference clip a cloned voice
     // is re-voiced to match.
@@ -753,6 +778,25 @@ export const audio = defineNamespace({
           "Tab label for the 'clone a real voice from a reference clip' way of " +
           "making a voice, as opposed to the TTS voice tab.",
         maxLength: 18,
+      },
+      "audio.newVoice.tabCharacter": {
+        description:
+          "Tab label for picking a ready-made character voice from a built-in list, " +
+          "next to the TTS voice and Clone voice tabs.",
+        maxLength: 18,
+      },
+      "audio.characters.filterGroupAriaLabel": {
+        description:
+          "Accessible group label (not visible text) for the row of filter chips " +
+          "(Female, Male, Child, …) above the list of character voices.",
+      },
+      "audio.characters.previewAriaLabel": {
+        description: "Accessible label of the play button on a character voice card.",
+        placeholders: { name: "The character voice's name, e.g. 'Hearth'." },
+      },
+      "audio.characters.pauseAriaLabel": {
+        description: "Accessible label of the same button while that character's preview is playing.",
+        placeholders: { name: "The character voice's name, e.g. 'Hearth'." },
       },
       "audio.newVoice.kindGroupLabel": {
         description:
@@ -2453,6 +2497,12 @@ export const audio = defineNamespace({
         description:
           "Small label on a voice row naming its engine, shown for voices that are " +
           "clones (built from a reference clip) rather than plain TTS voices.",
+        maxLength: 12,
+      },
+      "audio.library.characterEngineLabel": {
+        description:
+          "Same slot as audio.library.cloneEngineLabel, shown for voices picked from " +
+          "the built-in list of ready-made character voices.",
         maxLength: 12,
       },
       "audio.clone.title": {

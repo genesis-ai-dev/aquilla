@@ -125,6 +125,58 @@ describe("FileRow — AQU-341 truncation consistency", () => {
     expect(slot).toHaveAttribute("aria-label", "99% translated, 100% validated")
   })
 
+  // AQU-2111: a project whose target language has no written form reads 0
+  // filled / 0 approved forever, so the row has to draw its AUDIO figures
+  // instead — this row used to read "0% translated, 0% validated" over a file
+  // where every line was recorded and signed off.
+  it("draws the audio bar alone on a file with takes and no target text", () => {
+    const { container } = renderRow({
+      progress: { translated: 0, validated: 0, total: 10, recorded: 5, audioValidated: 5 },
+    })
+    const slot = container.querySelector('[data-testid="file-row-progress-slot"]')!
+    expect(slot).toHaveAttribute("aria-label", "50% recorded, 50% audio validated")
+    const bars = slot.querySelectorAll('[data-slot="progress-split-bar"]')
+    expect(bars).toHaveLength(1)
+    expect([...bars[0].querySelectorAll<HTMLElement>("[data-progress-tone]")]
+      .map((part) => `${part.dataset.progressTone} ${part.style.width}`))
+      .toEqual(["audioValidated 50%"])
+    // The slot reservation is untouched, so names still truncate identically.
+    expect(slot.className).toContain("w-[50px]")
+  })
+
+  it("keeps the text bar and adds an audio one on a file with both", () => {
+    const { container } = renderRow({
+      progress: { translated: 8, validated: 5, total: 10, recorded: 4, audioValidated: 1 },
+    })
+    const slot = container.querySelector('[data-testid="file-row-progress-slot"]')!
+    expect(slot).toHaveAttribute(
+      "aria-label",
+      "80% translated, 50% validated, 40% recorded, 10% audio validated",
+    )
+    const bars = slot.querySelectorAll('[data-slot="progress-split-bar"]')
+    expect(bars).toHaveLength(2)
+    expect([...bars[0].querySelectorAll<HTMLElement>("[data-progress-tone]")]
+      .map((part) => part.dataset.progressTone)).toEqual(["textValidated", "textTranslated"])
+    expect([...bars[1].querySelectorAll<HTMLElement>("[data-progress-tone]")]
+      .map((part) => part.dataset.progressTone)).toEqual(["audioValidated", "audioRecorded"])
+  })
+
+  // WHY: a text-only project must look exactly as it did. An absent pair (an
+  // older sync-worker) and a real zero both mean "no audio bar", and neither
+  // may read as "0% recorded".
+  it("is unchanged on a text-only file, whether the audio pair is zero or absent", () => {
+    for (const progress of [
+      { translated: 8, validated: 5, total: 10 },
+      { translated: 8, validated: 5, total: 10, recorded: 0, audioValidated: 0 },
+    ]) {
+      const { container, unmount } = renderRow({ progress })
+      const slot = container.querySelector('[data-testid="file-row-progress-slot"]')!
+      expect(slot).toHaveAttribute("aria-label", "80% translated, 50% validated")
+      expect(slot.querySelectorAll('[data-slot="progress-split-bar"]')).toHaveLength(1)
+      unmount()
+    }
+  })
+
   it("exposes the full (untruncated) name so the user can recover it", () => {
     const { container } = renderRow()
     // The accessible name is the full string even though it renders truncated.

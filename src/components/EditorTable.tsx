@@ -2408,6 +2408,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           translated: entry.translated,
           validated: entry.validated,
           total: entry.total,
+          // AQU-2110: the audio pair, and text alone, so the picker can tell
+          // an audio-only file from one that has both and show the right figures.
+          textTranslated: entry.textTranslated,
+          audioRecorded: entry.audioRecorded,
+          audioValidated: entry.audioValidated,
           ...(idmlMilestoneNavigation
             ? {
                 subsections: entry.subsections.map((subsection) => ({
@@ -2417,6 +2422,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                   translated: subsection.translated,
                   validated: subsection.validated,
                   total: subsection.total,
+                  textTranslated: subsection.textTranslated,
+                  audioRecorded: subsection.audioRecorded,
+                  audioValidated: subsection.audioValidated,
                 })),
               }
             : {}),

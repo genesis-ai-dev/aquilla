@@ -588,8 +588,8 @@ export function useProjectSettings(
   // settings as they were last saved, not as they were last fetched.
   const writeServerConfirmed = useCallback((next: ProjectSettingsResponse | null) => {
     writeServer(next)
-    if (projectId && next) rememberProjectSettingsOffline(projectId, next)
-  }, [projectId, writeServer])
+    if (projectId && jwt && next) rememberProjectSettingsOffline(projectId, jwt, next)
+  }, [projectId, jwt, writeServer])
 
   // Keep a ref so refresh's identity is stable across connectivity changes.
   const isOnlineRef = useRef(isOnline)
@@ -614,10 +614,10 @@ export function useProjectSettings(
   // settings response so the editor gets its lane rows and allows edits. Never
   // marks hasFetched — anything that fails closed on it stays closed.
   const hydrateFromOfflineCopy = useCallback(async () => {
-    if (!projectId || serverRef.current) return
-    const cached = await readOfflineProjectSettings(projectId)
+    if (!projectId || !jwt || serverRef.current) return
+    const cached = await readOfflineProjectSettings(projectId, jwt)
     if (cached && aliveRef.current && !serverRef.current) writeServer(cached)
-  }, [projectId, writeServer])
+  }, [projectId, jwt, writeServer])
 
   const refresh = useCallback(async (): Promise<ProjectSettingsResponse | null> => {
     if (!projectId || !jwt) return null

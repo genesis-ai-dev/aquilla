@@ -37,15 +37,29 @@ interface JwtLifetime {
  * whenever the answer isn't knowable, so callers stay on the do-nothing path.
  */
 export function jwtLifetime(token: string | null | undefined): JwtLifetime | null {
+  const payload = unverifiedJwtPayload(token)
+  if (typeof payload?.iat !== "number" || typeof payload.exp !== "number") return null
+  return { iat: payload.iat, exp: payload.exp }
+}
+
+/**
+ * The account a JWT was minted for (`sub`, the username), unverified. For
+ * deciding whose locally kept data a token may read, never for trusting it.
+ */
+export function jwtSubject(token: string | null | undefined): string | null {
+  const sub = unverifiedJwtPayload(token)?.sub
+  return typeof sub === "string" && sub !== "" ? sub : null
+}
+
+function unverifiedJwtPayload(token: string | null | undefined): Record<string, unknown> | null {
   if (!token) return null
   try {
     const parts = token.split(".")
     if (parts.length !== 3) return null
     // atob requires standard base64; JWT uses base64url — swap - and _
     const padded = parts[1].replace(/-/g, "+").replace(/_/g, "/")
-    const payload = JSON.parse(atob(padded)) as { iat?: unknown; exp?: unknown }
-    if (typeof payload.iat !== "number" || typeof payload.exp !== "number") return null
-    return { iat: payload.iat, exp: payload.exp }
+    const payload: unknown = JSON.parse(atob(padded))
+    return payload && typeof payload === "object" ? (payload as Record<string, unknown>) : null
   } catch {
     return null
   }

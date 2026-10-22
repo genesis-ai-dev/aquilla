@@ -41,11 +41,11 @@ const URL = "frontier-audio://audio-c1-1.webm"
 const T1 = "audio-c1-1.webm", P2 = "audio-c1-2.webm", T2 = "audio-c1-3.webm", Q2 = "audio-c1-4.webm"
 const audio = (over: Record<string, unknown>) => ({ type: "audio", url: URL, slot: "recording", durationMs: 4000, ...over })
 
-function draw(attachments: Record<string, unknown>, selectedAudioId = T1, over: Record<string, unknown> = {}, editable = true) {
+function draw(attachments: Record<string, unknown>, selectedAudioId = T1, over: Record<string, unknown> = {}, editable = true, proj = project) {
   const c = { id: "c1", fileId: "f1", original: "", translated: "", selectedAudioId, attachments, ...over } as unknown as CellData
   render(
     <RecordingTakes
-      project={project} cell={c} cellText="Hola mundo" editable={editable} username="dir"
+      project={proj} cell={c} cellText="Hola mundo" editable={editable} username="dir"
       session={{ jwt: "j", username: "dir" } as never} onOpenRecording={vi.fn()} onUseAsCellText={vi.fn()}
     />,
   )
@@ -157,6 +157,46 @@ describe("RecordingTakes — a split take (AQU-1767)", () => {
       const second = within(screen.getByTestId(`take-row-${P2}`)).getByTestId("audio-validation-button")
       expect(second.getAttribute("aria-label")).toMatch(/^Audio validated by others/)
       expect(first.getAttribute("aria-label")).toMatch(/^Audio not validated/)
+    })
+
+    // Sam, 2026-10-22: the take on top takes no vote; it says how many of its
+    // pieces are approved, read-only.
+    it("says on the take how many of its pieces are approved, and takes no vote there", () => {
+      draw({
+        [T1]: audio({ label: "Take 1 · 1", trimEndMs: 1500 }),
+        [P2]: audio({ label: "Take 1 · 2", trimStartMs: 1500, pieceOf: T1, validatorCount: 1, validators: ["rita"] }),
+      })
+      const head = screen.getByTestId("cell-take-head")
+      expect(within(head).getByTestId("cell-take-pieces-approved")).toHaveTextContent("1 of 2 pieces approved")
+      expect(within(head).queryByTestId("audio-validation-button")).toBeNull()
+      expect(within(head).queryByRole("button", { name: /pieces approved/i })).toBeNull()
+    })
+
+    it("counts a piece approved only once it has the approvals the project requires", () => {
+      const twoNeeded = { ...project, validationCountAudio: 2 } as ProjectRecord
+      draw({
+        [T1]: audio({ label: "Take 1 · 1", trimEndMs: 1000, validatorCount: 2, validators: ["rita", "ravi"] }),
+        [P2]: audio({ label: "Take 1 · 2", trimStartMs: 1000, trimEndMs: 2000, pieceOf: T1, validatorCount: 2, validators: ["rita", "ravi"] }),
+        [T2]: audio({ label: "Take 1 · 3", trimStartMs: 2000, pieceOf: T1, validatorCount: 1, validators: ["rita"] }),
+      }, T1, {}, true, twoNeeded)
+      expect(screen.getByTestId("cell-take-pieces-approved")).toHaveTextContent("2 of 3 pieces approved")
+      expect(screen.getByTestId("cell-take-pieces-approved")).toHaveAttribute("data-all-approved", "false")
+    })
+
+    it("shows the count to someone who may not edit the takes too", () => {
+      draw(splitTake, T1, {}, false)
+      expect(screen.getByTestId("cell-take-pieces-approved")).toHaveTextContent("0 of 2 pieces approved")
+    })
+
+    it("says another split take's count on its row, with no vote there", () => {
+      draw({
+        ...splitTake,
+        [T2]: audio({ url: "frontier-audio://audio-c1-3.webm", label: "Take 2 · 1", trimEndMs: 1000, validatorCount: 1, validators: ["rita"] }),
+        [Q2]: audio({ url: "frontier-audio://audio-c1-3.webm", label: "Take 2 · 2", trimStartMs: 1000, pieceOf: T2 }),
+      })
+      const row = within(screen.getByTestId("tab-other-takes")).getByTestId(`take-row-${T2}`)
+      expect(within(row).getByTestId(`take-pieces-approved-${T2}`)).toHaveTextContent("1 of 2 pieces approved")
+      expect(within(row).queryByTestId("audio-validation-button")).toBeNull()
     })
 
     it("lets someone who may validate but not edit the takes vote on each piece, and nothing more", () => {
@@ -274,6 +314,7 @@ describe("RecordingTakes — a split take (AQU-1767)", () => {
     expect(screen.getByTestId("cell-take-label")).toHaveTextContent("Take 1")
     expect(screen.queryByTestId("cell-take-split")).toBeNull()
     expect(screen.queryByTestId("tab-take-pieces")).toBeNull()
+    expect(screen.queryByTestId("cell-take-pieces-approved")).toBeNull()
   })
 
   it("approves and renames a take never split from the top, as before", async () => {

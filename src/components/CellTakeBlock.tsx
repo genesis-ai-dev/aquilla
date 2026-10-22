@@ -55,6 +55,7 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CodexCell, WordTiming } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { AudioValidationControl } from "./cell/AudioValidationControl"
+import { PiecesApproved } from "./audio/PiecesApproved"
 import { useAudioValidation } from "@/hooks/useAudioValidation"
 import { hasOwnRecordingLeft, removeTake, removeWholeTake, renameTake, renameWholeTake } from "@/lib/audio/take-actions"
 import { splitTakeName } from "@/lib/audio/take-groups"
@@ -226,8 +227,15 @@ function CellTakeBlockView({
   const split = pieces && pieces.length > 1 ? pieces : null
   // A split take has no vote of its own: each piece is approved on its row
   // below (decision 7, replacing Sam's 2026-10-15 ruling that the take was
-  // approved whole from here).
+  // approved whole from here). It says how many of them are, read-only (Sam,
+  // 2026-10-22).
   const validationTakes = split ? [] : audioValidation.takeFor(owner, selectedAudioId)
+  const pieceVotes = split
+    ? audioValidation.takesFor({
+        attachments: Object.fromEntries(split.map((p) => [p.audioId, p])),
+        selectedBySlot: { [split[0].slot]: split[0].audioId },
+      })
+    : []
 
   // AQU-1217: the part of the clip that plays for this line — the take's
   // stored trim, or, for an imported source-audio section, the section itself.
@@ -538,7 +546,15 @@ function CellTakeBlockView({
             This is the take that PLAYS, heard right here, so it can be
             validated here as from the line's audio check; the takes listed
             under it show theirs read-only. A split take's pieces carry theirs
-            on their own rows instead. */}
+            on their own rows instead, and the take says how many are
+            approved. */}
+        {split && (
+          <PiecesApproved
+            pieces={pieceVotes}
+            requirement={audioValidation.validationRequirement}
+            testId="cell-take-pieces-approved"
+          />
+        )}
         {validationTakes.length > 0 && (
           <span data-testid="cell-take-validation" className="flex items-center">
             <AudioValidationControl

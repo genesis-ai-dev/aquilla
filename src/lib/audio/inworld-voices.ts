@@ -2,14 +2,16 @@
 //
 // Live voices come from sync-worker GET /api/v1/voice/tts/voices, filtered to
 // SYSTEM voices whose primary language matches the project's target-language
-// lanes. When no lookup can be attempted at all (worker not configured, no
-// project/file context, no file-scoped sync token) we fall back to the small
-// built-in English list.
+// lanes. When no lookup can be attempted at all (no project/file context, no
+// file-scoped sync token) we fall back to the small built-in English list.
 //
 // A lookup that WAS attempted and came back empty or failed reports
 // `unavailable` with no voices (AQU-2035): an English list is the wrong set of
 // choices for, say, Danish, so callers disable the picker instead of swapping
-// the built-in list in behind the user's back.
+// the built-in list in behind the user's back. An unconfigured worker belongs
+// here, not above: `listInworldVoices` throws on its 503, so every language
+// reports `unavailable` and the picker is disabled rather than offering stock
+// voices that could not be synthesized anyway.
 
 import { useEffect, useState } from "react"
 import { INWORLD_TTS_VOICES } from "./tts-providers"

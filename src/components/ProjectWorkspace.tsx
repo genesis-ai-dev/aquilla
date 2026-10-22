@@ -276,6 +276,7 @@ import { httpHistoryRemote } from "@/lib/history/history-remote"
 import { laneAccessFor, waitUntilReady } from "@/lib/history/lane-switch"
 import { CastStepBuilder, castValueOf, mediaStepHandlers, type CastValue } from "@/lib/history/media-steps"
 import { sourceStepHandlers } from "@/lib/history/source-steps"
+import { recordingLinesStepHandlers } from "@/lib/history/recording-lines-steps"
 import { rowStepHandlers } from "@/lib/history/row-steps"
 import { HistoryPanel } from "./history/HistoryPanel"
 import { editStepHandlers } from "@/lib/history/edit-steps"
@@ -381,7 +382,7 @@ import { clearLaneCast, setLaneCast } from "@/lib/audio/lane-cast"
 import { generateAndAttachCellVoice } from "@/lib/audio/generate-voice"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { TimeOrderedEmptyState } from "./TimeOrderedEmptyState"
-import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
+import { attachMediaFileToTimeline, attachMediaUrlToTimeline, type MadeLine } from "@/lib/timeline/attach-media"
 import {
   describeVideoSound,
   extractVideoSound,
@@ -3473,20 +3474,33 @@ export function ProjectWorkspace() {
     if (seed) startAutoTranscribe(seed, fileName)
   }, [getTokenForProjectFile, revalidateCells, startAutoTranscribe])
 
+  /** Decision 11: "Make lines from a recording" is an Undo step (P13.6). */
+  const recordRecordingLines = useCallback((fileId: string, lines: readonly MadeLine[]) => {
+    if (lines.length === 0) return
+    recordStep({
+      kind: "lines.fromRecording",
+      data: { lines: lines.map((l) => ({ cellId: l.cellId, eventId: l.eventId })) },
+      labelKey: "editor.history.stepLinesFromRecording",
+      fileId,
+      fileName: activeFileNameRef.current,
+    })
+  }, [])
+
   const handleAttachMediaFile = useCallback(async (file: File) => {
     if (!project?.id || !activeFileId) return
-    await attachMediaFileToTimeline(file, {
+    const { lines } = await attachMediaFileToTimeline(file, {
       projectId: project.id,
       fileId: activeFileId,
       author: currentUsername,
       getToken: getTokenForFile,
     })
     await finishSourceMediaAttach(activeFileId, activeFile?.name ?? file.name)
-  }, [project?.id, activeFileId, activeFile?.name, currentUsername, getTokenForFile, finishSourceMediaAttach])
+    recordRecordingLines(activeFileId, lines)
+  }, [project?.id, activeFileId, activeFile?.name, currentUsername, getTokenForFile, finishSourceMediaAttach, recordRecordingLines])
 
   const handleAttachMediaUrl = useCallback(async (url: string) => {
     if (!project?.id || !activeFileId) return
-    await attachMediaUrlToTimeline(url, {
+    const { lines } = await attachMediaUrlToTimeline(url, {
       projectId: project.id,
       fileId: activeFileId,
       author: currentUsername,
@@ -3494,7 +3508,8 @@ export function ProjectWorkspace() {
     })
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     revalidateCells()
-  }, [project?.id, activeFileId, currentUsername, getTokenForFile, getTokenForProjectFile, revalidateCells])
+    recordRecordingLines(activeFileId, lines)
+  }, [project?.id, activeFileId, currentUsername, getTokenForFile, getTokenForProjectFile, revalidateCells, recordRecordingLines])
 
   /**
    * AQU-646: is this project's timeline locked against dragging?
@@ -13329,7 +13344,7 @@ export function ProjectWorkspace() {
           signal,
           onProgress,
         })
-        await attachMediaFileToTimeline(sound.file, {
+        const { lines } = await attachMediaFileToTimeline(sound.file, {
           projectId,
           fileId,
           author: currentUsername,
@@ -13340,9 +13355,10 @@ export function ProjectWorkspace() {
           onPhase: (phase) => onProgress({ phase }),
         })
         await finishSourceMediaAttach(fileId, linkedVideoBaseName)
+        recordRecordingLines(fileId, lines)
       },
     }
-  }, [offerVideoSoundRows, project?.id, activeFileId, linkedVideoUrl, linkedVideoBaseName, sourceLanguageCode, currentUsername, getTokenForFile, finishSourceMediaAttach])
+  }, [offerVideoSoundRows, project?.id, activeFileId, linkedVideoUrl, linkedVideoBaseName, sourceLanguageCode, currentUsername, getTokenForFile, finishSourceMediaAttach, recordRecordingLines])
   const alignmentClipUrl = useMemo(() => {
     const urls = new Set(audioMergedCells.flatMap(cell => {
       const clip = sourceClipAudioForCell(cell)
@@ -14560,6 +14576,39 @@ export function ProjectWorkspace() {
       }),
     )
   }, [getActiveCell, cellStore, project?.id, project?.syncRole?.level, currentUsername, getTokenForProjectFile, revalidateCells])
+  // …and lines made from a recording, in the open file or as a new file.
+  const lineUntouched = useCallback(
+    (cellId: string, createdEventId: string | null): boolean | null => {
+      const cell = getActiveCell(cellId)
+      if (!cell) return null
+      const plan = cellStore.getRemovalPlan(cellId)
+      if (!plan || plan.targetLangs.length > 0 || cell.hasOwnTake || (cell.translated ?? "").trim()) return false
+      return createdEventId == null || plan.eventId === createdEventId
+    },
+    [getActiveCell, cellStore],
+  )
+  const fileStateRef = useRef<(fileId: string) => "live" | "deleted" | null>(() => null)
+  fileStateRef.current = (fileId) => {
+    if (optimisticDeletes.has(fileId) || [...deletedFiles, ...optimisticTrash].some((f) => f.fileId === fileId)) return "deleted"
+    if ((hydratedProject?.files ?? []).some((f) => f.id === fileId) || optimisticFiles.some((f) => f.id === fileId)) return "live"
+    return null
+  }
+  useEffect(() => {
+    return registerStepKinds(
+      recordingLinesStepHandlers({
+        lineUntouched,
+        removeLine: async (cellId) => (await removeLineCore(cellId)) !== false,
+        restoreLine: (cellId) => applyRestoreRow(cellId),
+        fileState: (fileId) => fileStateRef.current(fileId),
+        fileUntouched: (fileId) => {
+          if (fileId !== activeFileId || cellsLoading) return "notOpen"
+          return getActiveCells().every((c) => lineUntouched(c.id, null) === true)
+        },
+        trashFile: (fileId) => handleDeleteFile(fileId),
+        restoreFile: (fileId) => handleRestoreFile(fileId),
+      }),
+    )
+  }, [lineUntouched, removeLineCore, applyRestoreRow, activeFileId, cellsLoading, getActiveCells, handleDeleteFile, handleRestoreFile])
 
   useEffect(() => {
     const readAtt = (cellId: string, audioId: string) => readTake(cellId, audioId)?.att ?? null
@@ -16081,6 +16130,30 @@ export function ProjectWorkspace() {
       if (!isMediaFileType(ref.type)) continue
       const seed = consumeMediaImportSeed(ref.id)
       if (seed) startAutoTranscribe(seed, ref.name)
+    }
+    // Decision 11, gap 30: importing a recording as a new file is an Undo
+    // step; Undo moves the file to Recently deleted while nobody has worked
+    // on its lines. It runs from any file, so it names none to wait for.
+    const recordings = refs.filter((ref) => isMediaFileType(ref.type))
+    if (recordings.length === 1) {
+      recordStep({
+        kind: "file.importRecording",
+        data: { fileId: recordings[0].id },
+        labelKey: "editor.history.stepImportRecording",
+        fileId: null,
+        fileName: recordings[0].name,
+      })
+    } else if (recordings.length > 1) {
+      recordGroup(
+        { labelKey: "editor.history.stepImportRecording", fileId: null },
+        recordings.map((ref) => ({
+          kind: "file.importRecording",
+          data: { fileId: ref.id },
+          labelKey: "editor.history.stepImportRecording",
+          fileId: null,
+          fileName: ref.name,
+        })),
+      )
     }
   }
 

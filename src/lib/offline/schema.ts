@@ -51,6 +51,9 @@ const projects = State.SQLite.table({
     id: State.SQLite.text({ primaryKey: true }),
     name: State.SQLite.text(),
     orgId: State.SQLite.text(),
+    // The server's GET /projects/:id/settings response as of the last online
+    // open — the lane rows the editor needs before it allows an edit
+    // (project-snapshot.ts). Null until a build that records it has seen one.
     settings: State.SQLite.json({ nullable: true }),
     syncedAt: State.SQLite.datetime({ nullable: true }),
     // The server's GET /projects/:id response as of the last online open, so
@@ -190,6 +193,10 @@ const events = {
   projectSnapshotSynced: Events.clientOnly({
     name: "v1.ProjectSnapshotSynced",
     schema: Schema.Struct({ id: Schema.String, snapshot: Schema.Unknown }),
+  }),
+  projectSettingsSnapshotSynced: Events.clientOnly({
+    name: "v1.ProjectSettingsSnapshotSynced",
+    schema: Schema.Struct({ id: Schema.String, settings: Schema.Unknown }),
   }),
   projectRemoved: Events.clientOnly({
     name: "v1.ProjectRemoved",
@@ -409,13 +416,15 @@ export { events }
 const materializers = State.SQLite.materializers(events, {
   "v1.LocalCheckpoint": () => [],
   "v1.ProjectSynced": ({ id, name, orgId, settings, syncedAt }) =>
+    // `settings` is set on insert only: a re-download must not wipe the stored
+    // settings response (v1.ProjectSettingsSnapshotSynced owns it after that).
     tables.projects.insert({ id, name, orgId, settings, syncedAt }).onConflict("id", "update", {
       name,
       orgId,
-      settings,
       syncedAt,
     }),
   "v1.ProjectSnapshotSynced": ({ id, snapshot }) => tables.projects.update({ snapshot }).where({ id }),
+  "v1.ProjectSettingsSnapshotSynced": ({ id, settings }) => tables.projects.update({ settings }).where({ id }),
   "v1.ProjectRemoved": ({ id }) => tables.projects.delete().where({ id }),
 
   "v1.FileSynced": ({ id, projectId, name, type, sequenceIndex }) =>

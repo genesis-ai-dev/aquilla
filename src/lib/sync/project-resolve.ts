@@ -1,6 +1,7 @@
-// Project resolution for READ paths (useProject, useProjectOrgId): the server
-// first, and — in the desktop app only — the downloaded project's stored
-// snapshot when the server can't be reached (src/lib/offline/project-snapshot.ts).
+// Project resolution for READ paths (useProject, useProjectOrgId, and
+// useProjectSettings' lane rows): the server first, and — in the desktop app
+// only — the downloaded project's stored snapshot when the server can't be
+// reached (src/lib/offline/project-snapshot.ts).
 //
 // The download itself keeps calling resolveCloudProjectResult directly: it must
 // never be handed a stale snapshot in place of the server's answer.
@@ -9,6 +10,7 @@
 // SPA never pulls LiveStore into its bundle.
 import { isTauriRuntime } from "@/lib/offline/is-tauri"
 import { resolveCloudProjectResult, type ResolveProjectResult } from "./cloud-projects"
+import type { ProjectSettingsResponse } from "./project-settings"
 
 export type ProjectReadResult = ResolveProjectResult & {
   /** True when the project came from this device's offline copy, not the server. */
@@ -27,6 +29,21 @@ export async function resolveProjectForRead(projectId: string, jwt: string): Pro
 
   const snapshot = await withOfflineStore((store, snapshots) => snapshots.readProjectSnapshot(store, projectId))
   return snapshot ? { ok: true, project: snapshot, fromOfflineCopy: true } : result
+}
+
+/** Desktop: keeps a settings response for {@link readOfflineProjectSettings}. */
+export function rememberProjectSettingsOffline(projectId: string, settings: ProjectSettingsResponse): void {
+  if (!isTauriRuntime()) return
+  void withOfflineStore((store, snapshots) => snapshots.writeProjectSettingsSnapshot(store, projectId, settings))
+}
+
+/**
+ * Desktop: the last settings response for a downloaded project, for when the
+ * settings GET can't run. Null in the browser, or with nothing stored.
+ */
+export async function readOfflineProjectSettings(projectId: string): Promise<ProjectSettingsResponse | null> {
+  if (!isTauriRuntime()) return null
+  return withOfflineStore((store, snapshots) => snapshots.readProjectSettingsSnapshot(store, projectId))
 }
 
 async function withOfflineStore<T>(

@@ -39,6 +39,10 @@ export function buildSampleSession() {
       id: "proj1",
       snapshot: { id: "proj1", name: "Genesis", orgId: 1, role: { level: 300, name: "translator", source: "org" }, files: [] },
     }),
+    events.projectSettingsSnapshotSynced({
+      id: "proj1",
+      settings: { version: 1, updatedAt: "2026-01-01T00:00:00.000Z", updatedBy: null, settings: {}, lanes: [] },
+    }),
     events.fileSynced({ id: "file1", projectId: "proj1", name: "GEN", type: "usfm", sequenceIndex: 0 }),
     events.fileSynced({ id: "file2", projectId: "proj1", name: "EXO", type: "usfm", sequenceIndex: 1 }),
     // Rows an earlier build landed before lanes existed (AQU-1614).

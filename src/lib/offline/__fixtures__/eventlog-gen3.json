@@ -16,6 +16,7 @@
     "v1.OfflineProjectRemoved": "{ readonly projectId: string }",
     "v1.OfflineProjectStatusSet": "{ readonly projectId: string; readonly status: \"downloading\" | \"ready\" | \"removing\"; readonly syncedAt: Date | null; readonly queueDepth: number }",
     "v1.ProjectRemoved": "{ readonly id: string }",
+    "v1.ProjectSettingsSnapshotSynced": "{ readonly id: string; readonly settings: unknown }",
     "v1.ProjectSnapshotSynced": "{ readonly id: string; readonly snapshot: unknown }",
     "v1.ProjectSynced": "{ readonly id: string; readonly name: string; readonly orgId: string; readonly settings: unknown; readonly syncedAt: Date | null }",
     "v1.SyncCursorSet": "{ readonly projectId: string; readonly fileId: string; readonly serverSeq: number | null; readonly projectEpoch: number | null }",
@@ -61,6 +62,19 @@
             "source": "org"
           },
           "files": []
+        }
+      }
+    },
+    {
+      "name": "v1.ProjectSettingsSnapshotSynced",
+      "args": {
+        "id": "proj1",
+        "settings": {
+          "version": 1,
+          "updatedAt": "2026-01-01T00:00:00.000Z",
+          "updatedBy": null,
+          "settings": {},
+          "lanes": []
         }
       }
     },

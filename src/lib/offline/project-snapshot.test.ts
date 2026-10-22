@@ -3,7 +3,13 @@ import { createStorePromise, type Store } from "@livestore/livestore"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { events, schema } from "./schema"
-import { readProjectSnapshot, writeProjectSnapshot } from "./project-snapshot"
+import type { ProjectSettingsResponse } from "@/lib/sync/project-settings"
+import {
+  readProjectSettingsSnapshot,
+  readProjectSnapshot,
+  writeProjectSettingsSnapshot,
+  writeProjectSnapshot,
+} from "./project-snapshot"
 
 let store: Store<typeof schema>
 let seq = 0
@@ -58,5 +64,35 @@ describe("project snapshot", () => {
     const commit = vi.spyOn(store, "commit")
     writeProjectSnapshot(store, summary())
     expect(commit).not.toHaveBeenCalled()
+  })
+})
+
+const settingsResponse = (version = 1) =>
+  ({
+    version,
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    updatedBy: null,
+    settings: {},
+    lanes: [{ id: "lane1", role: "target", legacyTag: "en", position: 0, archivedAt: null }],
+  }) as unknown as ProjectSettingsResponse
+
+describe("project settings snapshot", () => {
+  it("round-trips for a downloaded project", () => {
+    seedProject("ready")
+    writeProjectSettingsSnapshot(store, "proj1", settingsResponse())
+    expect(readProjectSettingsSnapshot(store, "proj1")).toEqual(settingsResponse())
+  })
+
+  it("is not read back until the download is ready", () => {
+    seedProject("downloading")
+    writeProjectSettingsSnapshot(store, "proj1", settingsResponse())
+    expect(readProjectSettingsSnapshot(store, "proj1")).toBeNull()
+  })
+
+  it("survives a re-download of the project", () => {
+    seedProject("ready")
+    writeProjectSettingsSnapshot(store, "proj1", settingsResponse(2))
+    store.commit(events.projectSynced({ id: "proj1", name: "Genesis", orgId: "1", settings: null, syncedAt: new Date() }))
+    expect(readProjectSettingsSnapshot(store, "proj1")?.version).toBe(2)
   })
 })

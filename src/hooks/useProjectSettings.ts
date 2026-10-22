@@ -16,6 +16,7 @@ import {
   type ProjectSettingsEditor,
   settingsEditorName,
 } from "@/lib/sync/project-settings"
+import { readOfflineProjectSettings, rememberProjectSettingsOffline } from "@/lib/sync/project-resolve"
 import type { ProjectOrgPolicy, ProjectVisibilityFloors } from "@/lib/sync/project-org-policy"
 import posthog from "@/lib/posthog"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
@@ -602,9 +603,21 @@ export function useProjectSettings(
   // Keep one request per mounted consumer in flight and let every caller await
   // the same result instead of stacking identical GETs.
   const refreshInFlightRef = useRef<Promise<ProjectSettingsResponse | null> | null>(null)
+  // Desktop, server unreachable: hydrate from the downloaded project's last
+  // settings response so the editor gets its lane rows and allows edits. Never
+  // marks hasFetched — anything that fails closed on it stays closed.
+  const hydrateFromOfflineCopy = useCallback(async () => {
+    if (!projectId || serverRef.current) return
+    const cached = await readOfflineProjectSettings(projectId)
+    if (cached && aliveRef.current && !serverRef.current) writeServer(cached)
+  }, [projectId, writeServer])
+
   const refresh = useCallback(async (): Promise<ProjectSettingsResponse | null> => {
     if (!projectId || !jwt) return null
-    if (!isOnlineRef.current) return null
+    if (!isOnlineRef.current) {
+      void hydrateFromOfflineCopy()
+      return null
+    }
     if (refreshInFlightRef.current) return refreshInFlightRef.current
 
     const request = (async (): Promise<ProjectSettingsResponse | null> => {
@@ -619,10 +632,12 @@ export function useProjectSettings(
         // source lockdown treat un-fetched as locked), and do NOT clobber a
         // previously fetched server snapshot with null. The existing focus /
         // online / settings-updated revalidation paths retry the GET.
+        if (out.status === 0) void hydrateFromOfflineCopy()
         return null
       }
       const got = out.value
       writeServer(got)
+      if (got) rememberProjectSettingsOffline(projectId, got)
       setHasFetched(true)
       const withinMs = got ? claimHydrationReport(projectId) : null
       if (got && withinMs !== null) {
@@ -704,7 +719,7 @@ export function useProjectSettings(
     } finally {
       if (refreshInFlightRef.current === request) refreshInFlightRef.current = null
     }
-  }, [projectId, jwt])
+  }, [projectId, jwt, hydrateFromOfflineCopy])
 
   // AQU-1816: what a writer that bypasses `patch` calls instead of a bare
   // `refresh()`. The broadcast reaches the sibling instances (and the overview's

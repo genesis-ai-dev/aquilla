@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { events, schema } from "@/lib/offline/schema"
 import { readProjectSnapshot } from "@/lib/offline/project-snapshot"
 import type { CloudProjectSummary, ResolveProjectResult } from "./cloud-projects"
+import type { ProjectSettingsResponse } from "./project-settings"
 
 const h = vi.hoisted(() => ({
   tauri: true,
@@ -21,7 +22,7 @@ vi.mock("@/lib/offline/store", () => ({
   }),
 }))
 
-const { resolveProjectForRead } = await import("./project-resolve")
+const { readOfflineProjectSettings, rememberProjectSettingsOffline, resolveProjectForRead } = await import("./project-resolve")
 
 const project = (name = "Genesis") =>
   ({ id: "proj1", name, gitlabProjectId: null, orgId: 1, role: { level: 300, name: "translator", source: "org" } }) as CloudProjectSummary
@@ -76,5 +77,20 @@ describe("resolveProjectForRead", () => {
     expect(await resolveProjectForRead("proj1", "jwt")).toEqual(h.result)
     const { getOfflineStore } = await import("@/lib/offline/store")
     expect(getOfflineStore).not.toHaveBeenCalled()
+  })
+})
+
+describe("offline project settings", () => {
+  const settings = { version: 3, updatedAt: "", updatedBy: null, settings: {}, lanes: [] } as unknown as ProjectSettingsResponse
+
+  it("hands back what was remembered", async () => {
+    rememberProjectSettingsOffline("proj1", settings)
+    await vi.waitFor(async () => expect(await readOfflineProjectSettings("proj1")).toEqual(settings))
+  })
+
+  it("is a no-op in the browser", async () => {
+    h.tauri = false
+    rememberProjectSettingsOffline("proj1", settings)
+    expect(await readOfflineProjectSettings("proj1")).toBeNull()
   })
 })

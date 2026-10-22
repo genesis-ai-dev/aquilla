@@ -13,6 +13,7 @@
 import type { Store } from "@livestore/livestore"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import type { ProjectStateResponse } from "@/lib/sync/archive"
+import type { ProjectSettingsResponse } from "@/lib/sync/project-settings"
 import { isProjectOfflineReady } from "./offline-reads"
 import { events, tables, type schema } from "./schema"
 
@@ -36,4 +37,27 @@ export function writeProjectSnapshot(store: Store<typeof schema>, snapshot: Proj
   if (!row) return
   if (JSON.stringify(row.snapshot ?? null) === JSON.stringify(snapshot)) return
   store.commit(events.projectSnapshotSynced({ id: snapshot.id, snapshot }))
+}
+
+/** The stored settings response, or null when the project isn't downloaded or has none yet. */
+export function readProjectSettingsSnapshot(
+  store: Store<typeof schema>,
+  projectId: string,
+): ProjectSettingsResponse | null {
+  if (!isProjectOfflineReady(store, projectId)) return null
+  const row = store.query(tables.projects.select().where({ id: projectId }).first())
+  const settings = row?.settings as ProjectSettingsResponse | null | undefined
+  return settings && typeof settings === "object" && "settings" in settings ? settings : null
+}
+
+/** As {@link writeProjectSnapshot}, for the project's settings response. */
+export function writeProjectSettingsSnapshot(
+  store: Store<typeof schema>,
+  projectId: string,
+  settings: ProjectSettingsResponse,
+): void {
+  const row = store.query(tables.projects.select().where({ id: projectId }).first())
+  if (!row) return
+  if (JSON.stringify(row.settings ?? null) === JSON.stringify(settings)) return
+  store.commit(events.projectSettingsSnapshotSynced({ id: projectId, settings }))
 }

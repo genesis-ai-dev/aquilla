@@ -178,6 +178,7 @@ import {
   timelinePlayReady,
   ruleFixPreflight,
   fetchDeletedFilesWithProjectToken,
+  pushedRollupProgress,
 } from "./project-workspace-helpers"
 import type { PaintGate } from "./project-workspace-helpers"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
@@ -1817,6 +1818,10 @@ export function ProjectWorkspace() {
     () => (project?.lanes != null ? laneIdForTag(activeLane, laneRows) : null),
     [project?.lanes, activeLane, laneRows],
   )
+  // AQU-2118: the lane the sidebar's progress reads are for, as the
+  // long-lived socket handler below sees it.
+  const activeLaneRef = useRef(activeLane)
+  activeLaneRef.current = activeLane
   // AQU-1326: opening a file used to fan out every workspace data hook at
   // mount — audit stats, comments, per-file audio attachments, the project-wide
   // progress rollup — all racing the cell stream for the same connection pool.
@@ -1987,13 +1992,16 @@ export function ProjectWorkspace() {
   const localFileProgress = useMemo(() => readAtVersion(cellStoreVersion, () => cellStore.getFileProgressSnapshot()), [cellStore, cellStoreVersion])
   useEffect(() => {
     if (!project?.id || !activeFileId || !localFileProgress) return
+    // AQU-2118: the store holds the open lane's cells, so its snapshot is
+    // that lane's record — not the default lane's, which it used to overwrite.
     readAtVersion(cellStoreVersion, () => setLocalFileProgress(
       project.id,
       activeFileId,
       localFileProgress,
       cellStore.getPendingProgressEventIds(),
+      activeLane,
     ))
-  }, [activeFileId, cellStore, cellStoreVersion, localFileProgress, project?.id])
+  }, [activeFileId, activeLane, cellStore, cellStoreVersion, localFileProgress, project?.id])
   const getActiveCells = useCallback(() => cellStore.getAllCellViews(), [cellStore])
   const getActiveCell = useCallback((cellId: string) => cellStore.getCellView(cellId), [cellStore])
   // Fortify pass: raw store cells carry NO audio attachments — any handler
@@ -7547,16 +7555,25 @@ export function ProjectWorkspace() {
     Map<string, { translated: number; validated: number; total: number }>
   >(new Map())
   const progressSnapshotTokenFileId = project?.files[0]?.id ?? null
+  // AQU-2118: the rollup is read for the lane the switcher shows, and re-read
+  // when that changes — the server pins it to the bridge / only lane
+  // otherwise, which is not the open lane on a multi-lane project. Reads can
+  // overlap (a lane switch during a push-triggered refresh), so each one
+  // takes a ticket and only the newest may land: an older lane's numbers
+  // arriving last must not paint over the current lane's.
+  const progressSnapshotTicket = useRef(0)
   const refreshAllFilesProgress = useCallback(async () => {
+    const ticket = ++progressSnapshotTicket.current
     if (!project?.id || !progressSnapshotTokenFileId) {
       setAllFilesProgressSnapshot(new Map())
       return
     }
     const token = await getTokenForFile(progressSnapshotTokenFileId)
     if (!token) throw new Error("project progress token unavailable")
-    const summaries = await fetchProjectFiles(project.id, token)
+    const summaries = await fetchProjectFiles(project.id, token, { lane: activeLane })
+    if (ticket !== progressSnapshotTicket.current) return
     setAllFilesProgressSnapshot(fileSummariesToProgress(summaries))
-  }, [getTokenForFile, progressSnapshotTokenFileId, project?.id])
+  }, [activeLane, getTokenForFile, progressSnapshotTokenFileId, project?.id])
   useEffect(() => {
     // AQU-1326: the rollup paints the SIDEBAR's per-file progress bars, not the
     // open file — hold it until the first cell page has painted so it doesn't
@@ -7568,7 +7585,8 @@ export function ProjectWorkspace() {
         // (existing behavior) until the next successful fetch.
       })
     // Re-fetch whenever the file count changes (import/delete) so newly
-    // added files pick up a snapshot without a full reload.
+    // added files pick up a snapshot without a full reload, and whenever the
+    // lane changes (AQU-2118) — the callback's identity carries it.
   }, [editorFirstPaint, project?.files.length, refreshAllFilesProgress])
   const fileProgress = useMemo(
     () => {
@@ -8505,7 +8523,7 @@ export function ProjectWorkspace() {
                 // writing request says it is pushing the numbers, they are
                 // already on their way in this same batch — the refetch would
                 // only race them to the same answer.
-                if (!msg.progressPushed) invalidateFileProgress(pid, msg.file)
+                if (!msg.progressPushed) invalidateFileProgress(pid, msg.file, activeLaneRef.current)
               }
               // target.cell.commit is also Autopilot's durable review
               // boundary. Reconcile proposals for the exact mounted scope
@@ -8641,7 +8659,7 @@ export function ProjectWorkspace() {
                 counts: msg.counts,
                 sections: msg.sections,
               })) {
-                invalidateFileProgress(pid, msg.file)
+                invalidateFileProgress(pid, msg.file, msg.lane)
               }
               // The sidebar's own bars come from the project file rollup, not
               // from this resource (file-summary-progress.ts), and that rollup
@@ -8650,37 +8668,23 @@ export function ProjectWorkspace() {
               // now moves the bar live instead of waiting for a remount —
               // without the GET /files that refreshing it would cost.
               //
-              // Only the default lane, because that is the lane the rollup
-              // itself is pinned to: files-read-route takes its filled and
-              // approved counts from the '' bridge lane, falling back to the
-              // single target lane when a project has no bridge (AQU-1594).
-              // On such a project no frame ever matches and the bar keeps its
-              // old refresh — the one thing that must not happen is a named
-              // lane's numbers landing in a row reporting the bridge's. The
-              // denominator is safe either way: it is a fact about the source
-              // text, so every lane's row carries the same one (AQU-1599).
-              if (msg.lane === "") {
-                setAllFilesProgressSnapshot((current) => {
-                  const existing = current.get(msg.file)
-                  const next = {
-                    translated: msg.counts.filledCount,
-                    validated: msg.counts.validatedCount,
-                    total: msg.counts.totalCount,
-                  }
-                  if (
-                    existing
-                    && existing.translated === next.translated
-                    && existing.validated === next.validated
-                    && existing.total === next.total
-                  ) return current
-                  const merged = new Map(current)
-                  merged.set(msg.file, next)
-                  return merged
-                })
-              }
+              // Only a frame for the lane the rollup was read for (AQU-2118:
+              // the one the switcher shows, which `refreshAllFilesProgress`
+              // names on the wire). A frame for any other lane leaves the row
+              // alone — the one thing that must not happen is one lane's
+              // numbers landing in a row reporting another's. The denominator
+              // is safe either way: it is a fact about the source text, so
+              // every lane's row carries the same one (AQU-1599).
+              setAllFilesProgressSnapshot((current) => pushedRollupProgress(
+                current,
+                { file: msg.file, lane: msg.lane, counts: msg.counts },
+                activeLaneRef.current,
+              ))
             } else if (msg.t === "file.progress.updated") {
               if (msg.project !== pid) return
-              invalidateFileProgress(pid, msg.file)
+              // The frame names no lane; the record on screen is the open
+              // lane's (AQU-2118).
+              invalidateFileProgress(pid, msg.file, activeLaneRef.current)
               void refreshAllFilesProgress().catch(() => {
                 // The next normal sidebar refresh retries a transient token or
                 // network failure. Do not turn a realtime hint into an
@@ -15567,6 +15571,7 @@ export function ProjectWorkspace() {
                   files={project.files}
                   activeFileId={activeFileId}
                   fileProgress={fileProgress}
+                  lane={activeLane}
                   hasActiveChapters={hasActiveChapters}
                   getActiveChapterHealth={getActiveChapterHealth}
                   // AQU-1326: the sidebar's per-file /progress reads wait for

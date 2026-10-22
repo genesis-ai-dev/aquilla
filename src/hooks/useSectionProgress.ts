@@ -17,9 +17,10 @@ export function useSectionProgress(
   validationCount: number,
   getTokenForFile: ((fileId: string) => Promise<string | null>) | undefined,
   countStructural = true,
+  lane = '',
 ): SectionProgress[] | null {
   const state = useSectionProgressState(
-    projectId, fileId, validationCount, getTokenForFile, countStructural,
+    projectId, fileId, validationCount, getTokenForFile, countStructural, lane,
   )
   return state.sections
 }
@@ -33,6 +34,11 @@ export function useSectionProgress(
  * answer, and nothing in the response says which policy produced it. The
  * default counts headings, which is what every caller meant before the
  * setting existed.
+ *
+ * AQU-2118: `lane` is the target lane the sections are read for — the one the
+ * sidebar's switcher shows. Progress is materialized per lane (AQU-538), and
+ * a read that names none gets the project's own default lane, which is not
+ * the open one on a multi-lane project. '' is the default lane, as everywhere.
  */
 export function useSectionProgressState(
   projectId: string | null,
@@ -40,8 +46,9 @@ export function useSectionProgressState(
   validationCount: number,
   getTokenForFile: ((fileId: string) => Promise<string | null>) | undefined,
   countStructural = true,
+  lane = '',
 ): { sections: SectionProgress[] | null; error: boolean; retry: () => void } {
-  const resource = useFileProgressResource(projectId, fileId, getTokenForFile)
+  const resource = useFileProgressResource(projectId, fileId, getTokenForFile, lane)
   // Both policies alter every number in the cached snapshot without touching
   // the file's revision, so a flip has to force the refetch itself — the ETag
   // carries each one, but only a request can discover that.
@@ -52,8 +59,8 @@ export function useSectionProgressState(
     const changed =
       previous.validationCount !== validationCount
       || previous.countStructural !== countStructural
-    if (changed && projectId && fileId) invalidateFileProgress(projectId, fileId)
-  }, [fileId, projectId, validationCount, countStructural])
+    if (changed && projectId && fileId) invalidateFileProgress(projectId, fileId, lane)
+  }, [fileId, lane, projectId, validationCount, countStructural])
   const sections = resource.progress
     ? resource.progress.sections.map((section) => ({
         label: section.key,

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { getPortfolio, getPortfolioAggregates, getPortfolioPage, getPortfolios, getPortfoliosPage, validatedPct, attentionRank, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, languagePairLabel, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "./portfolio"
+import { getPortfolio, getPortfolioAggregates, getPortfolioPage, getPortfolios, getPortfoliosPage, validatedPct, attentionRank, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, languagePairLabel, laneTranslatedPct, laneValidatedPct, isAudioOnlyView, type PortfolioProject, type PortfolioLane } from "./portfolio"
 
 const ORIG = global.fetch
 
@@ -180,6 +180,46 @@ describe("lane helpers (AQU-538)", () => {
     const result = await getPortfolio("jwt", 1)
     expect(result[0].lanes).toHaveLength(2)
     expect(result[0].lanes?.[0].lane).toBe("")
+  })
+})
+
+describe("isAudioOnlyView (AQU-2116)", () => {
+  const lane = (over: Partial<PortfolioLane>): PortfolioLane => ({ lane: "", totalCells: 0, filledCells: 0, validatedCells: 0, lastEditAt: null, ...over })
+
+  // Recording has to have started before the absence of target text means
+  // anything — the plan board's rule (AQU-955). The switch alone never counts.
+  it.each([
+    ["recorded with no target text", { totalCells: 100, filledCells: 0, audioCells: 60 }, true],
+    ["recorded and partly translated", { totalCells: 100, filledCells: 1, audioCells: 60 }, false],
+    ["records audio but nothing recorded yet", { totalCells: 100, filledCells: 0, audioCells: 0, recordsAudio: true, audioTotalCells: 100 }, false],
+    ["brand-new project: no text, no takes", { totalCells: 0, filledCells: 0, audioCells: 0 }, false],
+    ["text-only project", { totalCells: 100, filledCells: 80, audioCells: 0 }, false],
+  ])("%s → %s on the All view", (_name, over, expected) => {
+    expect(isAudioOnlyView(project(over), null)).toBe(expected)
+  })
+
+  it("on All, any target language with text keeps the text figures", () => {
+    const lanes = [lane({ lane: "", filledCells: 0, totalCells: 100 }), lane({ lane: "es", filledCells: 5, totalCells: 100 })]
+    expect(isAudioOnlyView(project({ totalCells: 100, filledCells: 0, audioCells: 60, lanes }), null)).toBe(false)
+  })
+
+  it("on All, the SOURCE lane's text does not count as a target language's", () => {
+    const lanes = [lane({ lane: "", role: "source", filledCells: 100, totalCells: 100 }), lane({ lane: "my", role: "target", filledCells: 0, totalCells: 100 })]
+    expect(isAudioOnlyView(project({ totalCells: 100, filledCells: 0, audioCells: 60, lanes }), null)).toBe(true)
+  })
+
+  it("judges the language tab being viewed, not the project", () => {
+    const audioOnly = lane({ lane: "my", totalCells: 100, filledCells: 0, audioCells: 60, validatedAudioCells: 60 })
+    const withText = lane({ lane: "es", totalCells: 100, filledCells: 40, audioCells: 0 })
+    const p = project({ totalCells: 100, filledCells: 40, audioCells: 60, lanes: [audioOnly, withText] })
+    expect(isAudioOnlyView(p, audioOnly)).toBe(true)
+    expect(isAudioOnlyView(p, withText)).toBe(false)
+  })
+
+  // AQU-1951: a server too old to send per-lane audio cannot answer this, and
+  // the text figures must stay exactly as they were rather than vanish.
+  it("a lane with no per-lane audio field is never audio-only", () => {
+    expect(isAudioOnlyView(project({ totalCells: 100, filledCells: 0, audioCells: 60 }), lane({ lane: "my", totalCells: 100, filledCells: 0 }))).toBe(false)
   })
 })
 

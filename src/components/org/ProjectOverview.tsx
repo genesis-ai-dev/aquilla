@@ -45,7 +45,7 @@ import {
   useOfflineProjectStatus,
 } from "@/lib/offline/download"
 import { cacheProjectMediaOffline, type CacheProjectMediaResult } from "@/lib/offline/media-cache"
-import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioDenominator, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
+import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioDenominator, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, isAudioOnlyView, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { OverviewLaneTable } from "./OverviewLaneTable"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { isLaneArchived } from "@/components/project-lane-archive"
@@ -1603,7 +1603,6 @@ export function ProjectOverview() {
   // AQU-1954: a project that says it records audio shows its audio from the
   // first day, at 0%, rather than hiding it until the first take.
   const hasAudio = audio != null && (audio.audioCells > 0 || (audio.recordsAudio === true && audioDenominator(audio) > 0))
-  const showText = hasText
   const showAudio = hasAudio
 
   // AQU-538 §3.3: lane tabs + tile recompute. Tabs only surface once a project
@@ -1639,6 +1638,11 @@ export function ProjectOverview() {
   ]
   const activeLane: PortfolioLane | null =
     selectedLaneTag != null ? activeProjectLanes.find((l) => l.lane === selectedLaneTag) ?? null : null
+  // AQU-2116: an audio-only language shows only its audio figures — the
+  // Translated/Validated/AI-drafted tiles, bars and Customize entries drop out.
+  // Judged on the tab being viewed, like every other figure in this card, and
+  // on evidence alone: see `isAudioOnlyView`.
+  const showText = hasText && !(audio != null && isAudioOnlyView(audio, activeLane))
   /**
    * AQU-1278: the same lanes the tabs above offer, MINUS "All", for the plan
    * board's own picker. The plan is one language's answer — "All" has no

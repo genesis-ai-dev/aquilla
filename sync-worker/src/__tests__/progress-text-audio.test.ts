@@ -10,6 +10,7 @@ import {
   TEXT_AUDIO_STALE_FILES_SQL,
 } from "../events/progress-projection"
 import { bothApprovedFromHistogram } from "../../../src/lib/lanes/lane-delivers"
+import { counts } from "../events/progress-read-route"
 import { makeTestDb } from "./helpers/pg-test-db"
 
 const P = "proj-ta"
@@ -142,5 +143,28 @@ describe("joint text × audio histogram", () => {
     expect(await stale()).toEqual([F])
     for (const stmt of fullProgressRecomputeStmts(db, P, F, TS)) await stmt.run()
     expect(await stale()).toEqual([])
+  })
+})
+
+describe("the progress read's both-halves count", () => {
+  const row = {
+    scope: "file" as const, section_key: "", revision: 1,
+    total_count: 11, filled_count: 10, validator_histogram: { "1": 8, "0": 2 },
+    text_audio_validator_histogram: { "1:1": 5, "0:1": 2 },
+    structural_count: 1, structural_text_audio_validator_histogram: { "1:1": 1 },
+  }
+
+  it("reads the joint histogram at the two thresholds", () => {
+    expect(counts(row, 1, true, 1).bothValidatedCount).toBe(5)
+    expect(counts(row, 2, true, 1).bothValidatedCount).toBe(0)
+  })
+
+  it("leaves headings out when the project does", () => {
+    expect(counts(row, 1, false, 1).bothValidatedCount).toBe(4)
+  })
+
+  it("reads a row from before the histogram as nothing done on both halves", () => {
+    const { text_audio_validator_histogram: _joint, ...old } = row
+    expect(counts(old, 1, true, 1).bothValidatedCount).toBe(0)
   })
 })

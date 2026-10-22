@@ -44,6 +44,12 @@ export interface PlanUnit {
    * subtitle file with a linked cue sheet.
    */
   audioTotalCount?: number | null
+  /**
+   * Media redesign slice 2: lines with both their text and their recording
+   * validated — what a "Text and audio" language counts as done. Absent from
+   * a worker that predates it, which reads as none.
+   */
+  bothValidatedCount?: number
   lastEditAt: number | null
   /** Calendar date 'YYYY-MM-DD', lane-independent. Null when unplanned. */
   targetDate: string | null

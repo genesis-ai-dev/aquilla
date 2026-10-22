@@ -323,21 +323,24 @@ describe("GET .../plan — caching and auth", () => {
       file_section_progress: [progress("f1", "file", "")],
     })
     const etag = (await get(db)).headers.get("ETag")!
-    expect(etag).toContain(":s3")
+    expect(etag).toContain(":s4")
 
     // And the marker is load-bearing: a caller holding the same key from
     // before the shape changed does NOT get a 304.
-    const previousShape = etag.replace(":s3", "")
+    const previousShape = etag.replace(":s4", "")
     expect(previousShape).not.toBe(etag)
     const res = await get(db, { headers: { "If-None-Match": previousShape } })
     expect(res.status).toBe(200)
 
-    // AQU-490: nor does one from the shape immediately before this — the live
-    // case at deploy. audioValidatedCount kept its name and its type and
-    // changed its question, which nothing else in the key can express.
-    const s2Era = etag.replace(":va1:s3", ":s2")
+    // AQU-490: nor does one from an older shape — the live case at deploy.
+    // audioValidatedCount kept its name and its type and changed its question,
+    // which nothing else in the key can express.
+    const s2Era = etag.replace(":va1:s4", ":s2")
     expect(s2Era).not.toBe(etag)
     expect((await get(db, { headers: { "If-None-Match": s2Era } })).status).toBe(200)
+    // Media redesign slice 2: bothValidatedCount joined the body (s4).
+    const s3Era = etag.replace(":s4", ":s3")
+    expect((await get(db, { headers: { "If-None-Match": s3Era } })).status).toBe(200)
   })
 
   it("moves when the validation threshold or the headings policy changes", async () => {
@@ -791,5 +794,22 @@ describe("GET .../plan — last activity follows what the language delivers", ()
   it("a Text language, and one nobody has chosen for, read their last text edit as before", async () => {
     expect(await lastActivity("text")).toBe(TS - 20 * 86_400_000)
     expect(await lastActivity(null)).toBe(TS - 20 * 86_400_000)
+  })
+})
+
+describe("GET .../plan — lines done on both halves", () => {
+  it("reads each unit's joint histogram at the project's two thresholds", async () => {
+    const { db } = await makeTestDb({
+      files: [file("ep1", { name: "Episode 1" })],
+      file_section_progress: [
+        progress("ep1", "file", "", {
+          total_count: 10, filled_count: 9, validator_histogram: JSON.stringify({ "1": 7, "0": 2 }),
+          audio_count: 6, audio_validator_histogram: JSON.stringify({ "1": 6 }),
+          text_audio_validator_histogram: JSON.stringify({ "1:1": 4, "0:1": 2 }),
+        }),
+      ],
+    })
+    const body = (await (await get(db)).json()) as PlanResponse
+    expect(body.units[0]).toMatchObject({ totalCount: 10, validatedCount: 7, audioValidatedCount: 6, bothValidatedCount: 4 })
   })
 })

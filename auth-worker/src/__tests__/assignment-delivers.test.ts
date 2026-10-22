@@ -4,7 +4,7 @@
 // done") and P1.6.
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
-import { getMyAssignments, getOrgAssignmentWorkload } from "../services/assignments"
+import { getMyAssignments, getMyAssignmentsAcrossOrg, getOrgAssignmentWorkload } from "../services/assignments"
 import { laneLineDone, type LaneDelivers } from "../../../src/lib/lanes/lane-delivers"
 import type { Env } from "../types"
 import { seedUser } from "./helpers/db"
@@ -137,5 +137,11 @@ describe("assignment progress by what the language delivers", () => {
         "TRUNCATE users, organizations, org_members, projects, project_settings, project_members, events, files, lanes, cells, cell_audio, assignments, assignment_cells RESTART IDENTITY CASCADE",
       ).run()
     }
+  })
+
+  it("tells the org inbox what the language delivers, so its link lands on the right line (P2.2)", async () => {
+    await seed("audio", [{ text: null, audio: 2 }, { text: null, audio: null }])
+    const rows = await getMyAssignmentsAcrossOrg(testEnv, 1, 2)
+    expect(rows.find((r) => r.assignmentId === "as-ana")).toMatchObject({ laneDelivers: "audio", cellsDone: 1 })
   })
 })

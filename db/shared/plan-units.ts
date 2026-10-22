@@ -121,6 +121,9 @@ export interface PlanUnitRow {
   // instead of trusting a stored verdict that a threshold change invalidates.
   audio_validator_histogram: Record<string, number> | string
   structural_audio_validator_histogram: Record<string, number> | string
+  /** Media redesign slice 2: the unit's own joint text × audio histogram (0186). */
+  text_audio_validator_histogram?: Record<string, number> | string
+  structural_text_audio_validator_histogram?: Record<string, number> | string
   /**
    * The denominator the audio counts are measured against: the CUE SHEET's
    * cell count where one is linked, and NULL where none is — which is the
@@ -237,6 +240,12 @@ export function readPlanUnitsSql(extraScope = ""): string {
             CASE WHEN cs.id IS NOT NULL THEN COALESCE(psl.structural_audio_validator_histogram, ps.structural_audio_validator_histogram, '{}'::jsonb)
                  ELSE COALESCE(pl.structural_audio_validator_histogram, pd.structural_audio_validator_histogram, '{}'::jsonb) END
               AS structural_audio_validator_histogram,
+            -- Media redesign slice 2: the unit's OWN joint text × audio
+            -- histogram — what a "Text and audio" language counts as done.
+            -- Never the cue sheet's: its lines hold no text.
+            COALESCE(pl.text_audio_validator_histogram, '{}'::jsonb) AS text_audio_validator_histogram,
+            COALESCE(pl.structural_text_audio_validator_histogram, '{}'::jsonb)
+              AS structural_text_audio_validator_histogram,
             -- NULL where there is no sheet: the reader's signal to measure
             -- audio against the text total, exactly as it always has.
             CASE WHEN cs.id IS NOT NULL

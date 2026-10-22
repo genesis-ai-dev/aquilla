@@ -46,6 +46,7 @@ import { AUDIO_CTE_SQL, cellAudioVotesSql } from "../../../db/shared/audio-progr
 import { laneDisplayNameSql } from "../../../db/shared/lanes"
 import { wireLegacyTagSql } from "../../../db/shared/lane-sql"
 import { effectiveThresholdSql, loadEffectiveThreshold } from "../../../db/shared/validation-threshold"
+import { parseLaneDelivers, type LaneDelivers } from "../../../src/lib/lanes/lane-delivers"
 import {
   assignmentKind,
   compareValidationBehind,
@@ -1120,6 +1121,12 @@ export async function getAssignmentsGivenBy(
 /** One of the caller's open assignments, with its project name (org-wide inbox). */
 export interface MyOrgAssignment extends MyAssignment {
   projectName: string
+  /**
+   * Media redesign slice 2: what the assignment's language delivers, so the
+   * inbox's link lands on the first line still lacking what that language
+   * owes. Null when nobody has chosen (counts as Text).
+   */
+  laneDelivers: LaneDelivers | null
 }
 
 /**
@@ -1145,6 +1152,7 @@ export async function getMyAssignmentsAcrossOrg(
             ${CELLS_TOTAL_SUBQUERY} AS cells_total, a.created_at AS created_at,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
             a.kind AS kind,
+            ln.delivers AS lane_delivers,
             (SELECT ac.file_id FROM assignment_member_cells ac
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id,
             (SELECT f.name FROM assignment_member_cells ac
@@ -1175,6 +1183,7 @@ export async function getMyAssignmentsAcrossOrg(
       created_at: number
       cells_done: number
       kind: string | null
+      lane_delivers: string | null
       file_id: string | null
       file_name: string | null
     }>()
@@ -1186,6 +1195,7 @@ export async function getMyAssignmentsAcrossOrg(
     assignmentId: r.assignment_id,
     projectId: r.project_id,
     projectName: r.project_name,
+    laneDelivers: parseLaneDelivers(r.lane_delivers),
     fileId: r.file_id,
     fileName: r.file_name,
     fileIds: fileIds.get(r.assignment_id) ?? [],

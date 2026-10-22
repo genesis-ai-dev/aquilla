@@ -79,7 +79,7 @@ import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { toUserFacingError, UserError } from "@/lib/errors/user-error"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 
-type TeamTab = "overview" | "projects" | "members"
+type TeamTab = "projects" | "members"
 type TeamMember = TeamDetailType["members"][number]
 type TeamProject = TeamDetailType["projects"][number]
 
@@ -885,12 +885,7 @@ export function TeamDetail() {
                 <TabsList aria-label={t("org.teamDetail.sectionsAriaLabel")}>
                   <TabsTrigger value="projects">{t("nav.projects")}</TabsTrigger>
                   <TabsTrigger value="members">{t("editor.navTitle.members")}</TabsTrigger>
-                  <TabsTrigger value="overview" disabled>
-                    {t("editor.navTitle.overview")}
-                  </TabsTrigger>
                 </TabsList>
-
-                <TabsContent value="overview" />
 
                 <TabsContent value="projects" className="space-y-4">
                   <div className="flex items-start justify-between gap-3">

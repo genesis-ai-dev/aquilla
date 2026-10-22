@@ -118,6 +118,7 @@ import {
   visibilityRolePickerLabelKey,
 } from "./SectionVisibilityBadge"
 import { Badge } from "@/components/ui/badge"
+import { LangQuestLinkBadge } from "@/components/langquest/LangQuestLinkBadge"
 import { ProjectDeadlineStatuses, ProjectStatusChip } from "@/components/ProjectStatus"
 import {
   Dialog,
@@ -1994,6 +1995,13 @@ export function ProjectOverview() {
                           {t("org.projectOverview.inactiveBadge")}
                         </Badge>
                       )}
+                      {/* AQU-2105: a LangQuest-linked project syncs from here too —
+                          a new project lands on this page, so its import starts here. */}
+                      <LangQuestLinkBadge
+                        projectId={id}
+                        roleLevel={project?.syncRole?.level ?? null}
+                        onSynced={() => void refresh()}
+                      />
                     </div>
                     {/* Language pair */}
                     {languagePair && (

@@ -22,6 +22,11 @@ vi.mock("@/lib/monday/api", () => ({
 }))
 
 const navigate = vi.fn()
+// AQU-2105: the LangQuest badge reads the project's link on open; unlinked here.
+vi.mock("@/lib/langquest/api", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/langquest/api")>()),
+  fetchLangQuestLink: vi.fn().mockResolvedValue(null),
+}))
 vi.mock("react-router-dom", async (importActual) => {
   const actual = await importActual<typeof import("react-router-dom")>()
   return { ...actual, useNavigate: () => navigate }

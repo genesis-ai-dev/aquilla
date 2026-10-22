@@ -1947,6 +1947,42 @@ CREATE TABLE IF NOT EXISTS integration_item_links (
   PRIMARY KEY (link_id, entity_kind, entity_id)
 );
 
+-- LangQuest live links (0185_langquest_links.sql): one per project, the
+-- encrypted lqp_ token, the change-feed cursor, and the passage→cell map.
+CREATE TABLE IF NOT EXISTS langquest_links (
+  project_id        TEXT PRIMARY KEY,
+  token_enc         TEXT NOT NULL,          -- AES-GCM, base64(iv||ciphertext)
+  environment       TEXT,                   -- deployment that stored the token (AQU-1775)
+  api_base          TEXT NOT NULL,          -- e.g. https://next.langquest.org/api/v1
+  lq_org_id         TEXT NOT NULL,
+  lq_org_name       TEXT,
+  language_id       TEXT NOT NULL,
+  language_name     TEXT,
+  language_code     TEXT,
+  token_id          TEXT,
+  scopes            JSONB NOT NULL DEFAULT '[]'::jsonb,  -- the token's scopes when linked
+  can               JSONB,                  -- LangQuest's `can` for this language when linked
+  token_expires_at  TIMESTAMPTZ,
+  feed_cursor       TEXT,
+  needs_reauth      BOOLEAN NOT NULL DEFAULT FALSE,
+  last_synced_at    TIMESTAMPTZ,
+  last_sync_error   TEXT,
+  created_by        TEXT NOT NULL,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS langquest_passages (
+  project_id  TEXT NOT NULL REFERENCES langquest_links(project_id) ON DELETE CASCADE,
+  unit_id     TEXT NOT NULL,
+  file_id     TEXT NOT NULL,
+  cell_id     TEXT NOT NULL,
+  label       TEXT,
+  sort_order  TEXT,
+  take_id     TEXT,                         -- the LangQuest version last attached as a take
+  PRIMARY KEY (project_id, unit_id)
+);
+
 -- Scene briefs (0070_scene_briefs.sql; contextual translation pipeline §9).
 -- One row per analyzed scene span: construal (L2 markdown) + ambiguity register
 -- + optional condensed L1 summary, keyed by endpoint cell UUIDs (never

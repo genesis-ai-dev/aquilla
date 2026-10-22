@@ -60,6 +60,8 @@ import { ROLE } from "@/lib/frontier/roles"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import posthog from "@/lib/posthog"
+import { LangQuestCreatePanel } from "@/components/langquest/LangQuestCreatePanel"
+import { LangQuestLogo } from "@/components/langquest/LangQuestLogo"
 
 interface ProjectCreateDialogProps {
   onCreated: (project: ProjectRecord) => void
@@ -286,6 +288,8 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
   // close, or page-org change). Submit is disabled while it is null, so a
   // stale or unresolved choice can never pick the org (review finding).
   const [destination, setDestination] = useState<Destination | null>(null)
+  // AQU-2105: the "Import from LangQuest" path replaces the form while chosen.
+  const [langquestMode, setLangquestMode] = useState(false)
   // AQU-1352 P2: teams to create into; reset whenever the destination changes.
   const [teamIds, setTeamIds] = useState<number[]>([])
   const [teamsError, setTeamsError] = useState(false)
@@ -592,6 +596,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
   useEffect(() => {
     if (open) return
     setDestination(null)
+    setLangquestMode(false)
     setTeamIds([])
     setTeamsError(false)
     form.reset()
@@ -644,8 +649,24 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
       </DialogTrigger>
       <DialogContent closeDisabled={!canClose}>
         <DialogHeader>
-          <DialogTitle>{t("projectSettings.create.dialogTitle")}</DialogTitle>
+          <DialogTitle>
+            {langquestMode ? t("langquest.create.title") : t("projectSettings.create.dialogTitle")}
+          </DialogTitle>
         </DialogHeader>
+        {langquestMode ? (
+          <LangQuestCreatePanel
+            jwt={session?.jwt}
+            username={session?.username}
+            getProjectId={() => draftProjectId.current}
+            pageOrgId={orgId}
+            onBack={() => setLangquestMode(false)}
+            onCreated={(project) => {
+              onCreated(project)
+              toast.add({ type: "success", title: t("langquest.create.createdToast", { name: project.name }) })
+              setOpen(false)
+            }}
+          />
+        ) : (
         <form
           id="project-create-form"
           autoComplete="off"
@@ -661,6 +682,22 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
           className="contents"
         >
           <DialogBody>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-auto w-full justify-start gap-3 py-2 text-left"
+              onClick={() => setLangquestMode(true)}
+              disabled={locked}
+              data-testid="project-create-langquest"
+            >
+              <LangQuestLogo className="size-6" />
+              <span className="flex min-w-0 flex-col">
+                <span className="font-medium">{t("langquest.create.entry")}</span>
+                <span className="text-xs font-normal whitespace-normal text-muted-foreground">
+                  {t("langquest.create.entryHint")}
+                </span>
+              </span>
+            </Button>
             {/* AQU-1519: one disabled fieldset backs the whole lock — it takes
                 every input, radio, select trigger and button inside it out of
                 play at once, so a control added to this dialog later (the
@@ -1215,6 +1252,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
             }}
           />
         </form>
+        )}
       </DialogContent>
     </Dialog>
   )

@@ -370,6 +370,37 @@ export async function getPortfolioAggregates(
   }
 }
 
+/**
+ * AQU-2116: is the language being viewed AUDIO-ONLY — recorded, and carrying no
+ * target text anywhere in it?
+ *
+ * The Progress card drops its text tiles, bars and Customize entries when this
+ * is true, so an audio-only project stops reading "Translated 0% · Validated
+ * 0%" beside its real audio figures. A PM reading those zeroes concluded the
+ * verifications had never registered.
+ *
+ * Decided on EVIDENCE, exactly the way the plan board already decides it
+ * (`planUnitExpectsText`, AQU-955): recording has to have started before the
+ * absence of text means anything. A language whose "Records audio" switch is on
+ * but has recorded nothing, and a brand-new project with neither text nor
+ * takes, both still owe text — asking the switch here (AQU-1954) would call
+ * every untouched language that records audio audio-only.
+ *
+ * `lane` is the language tab being viewed, null for "All". On "All" the text
+ * figures go only when NO target language has any text. A lane from a server
+ * too old to send per-lane audio (AQU-1951) cannot answer the question, so it
+ * answers "no" and the text figures stay exactly as they were.
+ */
+export function isAudioOnlyView(p: PortfolioProject, lane: PortfolioLane | null): boolean {
+  if (lane != null) {
+    if (lane.audioCells == null) return false
+    return lane.filledCells === 0 && lane.audioCells > 0
+  }
+  const textAnywhere =
+    p.filledCells > 0 || (p.lanes ?? []).some((l) => l.role !== "source" && l.filledCells > 0)
+  return !textAnywhere && p.audioCells > 0
+}
+
 /** translated (has-content) fraction 0..1 for a single lane (0 when no cells). */
 export function laneTranslatedPct(lane: PortfolioLane): number {
   return lane.totalCells > 0 ? lane.filledCells / lane.totalCells : 0

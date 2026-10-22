@@ -1133,3 +1133,41 @@ describe("choosing which language the plan counts", () => {
     expect(screen.getByTestId("plan-lane-picker")).toHaveTextContent("German")
   })
 })
+
+// AQU-1974. WHY: a book marked done that still has work in it says so in amber
+// (AQU-1494), but the mark used to remove every way to reach that work — the
+// link, the chapter names, the inspector's "Go to first…" and the grid badges
+// were all keyed on "nearly complete", which a done unit never is. The original
+// ask (AQU-727) was exactly a way back to the cells nobody finished.
+describe("a unit marked done with work left keeps the way to it (AQU-1974)", () => {
+  const withRow = (units: PlanUnit[], props: Partial<React.ComponentProps<typeof PlanBoard>> = {}) =>
+    render(<PlanBoard units={units} now={NOW} projectId="p1" selectedId={null} onSelect={vi.fn()} {...props} />)
+
+  it("makes the shortfall a link and names the short chapters, and stays in Done", () => {
+    const onOpenShortfall = vi.fn()
+    withRow(
+      [unit({ filledCount: 100, validatedCount: 97, doneAt: NOW, doneBy: "r" })],
+      { onOpenShortfall, shortChaptersByUnit: new Map([["f1:", ["12", "40"]]]) },
+    )
+    const row = screen.getByTestId("plan-row-f1-")
+    expect(within(screen.getByTestId("plan-group-done")).getByTestId("plan-row-f1-")).toBe(row)
+    expect(within(row).getByTestId("plan-done-with-work-f1-"))
+      .toHaveTextContent(/^Marked done · 3 cells to validate · chapters 12 and 40$/)
+    fireEvent.click(within(row).getByTestId("plan-shortfall-f1-"))
+    expect(onOpenShortfall).toHaveBeenCalledTimes(1)
+  })
+
+  it("does so however far from finished the done mark was given", () => {
+    withRow([unit({ filledCount: 100, validatedCount: 60, doneAt: NOW, doneBy: "r" })], { onOpenShortfall: vi.fn() })
+    expect(screen.getByTestId("plan-shortfall-f1-")).toHaveTextContent("40 cells to validate")
+  })
+
+  it("offers nothing on a done unit with nothing left", () => {
+    withRow(
+      [unit({ filledCount: 100, validatedCount: 100, doneAt: NOW, doneBy: "r" })],
+      { onOpenShortfall: vi.fn(), shortChaptersByUnit: new Map([["f1:", ["12"]]]) },
+    )
+    expect(screen.queryByTestId("plan-shortfall-f1-")).toBeNull()
+    expect(screen.queryByTestId("plan-done-with-work-f1-")).toBeNull()
+  })
+})

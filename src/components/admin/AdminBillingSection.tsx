@@ -8,8 +8,11 @@ import { Section } from "@/components/ui/page"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { OrgWithAvatar } from "@/components/OrgWithAvatar"
 import { AdminSectionSkeleton } from "./shared"
+import { OrgPlanControl, TeamCostLine, WeeklyAllowanceUsd } from "./AdminOrgPlanControls"
+import { AdminWouldBlockReport } from "./AdminWouldBlockReport"
 import { formatAgentCredits, formatUsdFromCents, normalizeBillingPlan } from "@/lib/billing/plans"
 import {
+  patchAdminOrgPlan,
   patchAdminWeeklyAllowance,
   getAdminBillingOrgs,
   getAdminBillingPlans,
@@ -121,6 +124,7 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
     [refresh],
   )
 
+  const unitsPerRawUsd = catalog?.plan.unitsPerRawUsd ?? 400
   const columns = useMemo<ColumnDef<AdminBillingOrg>[]>(
     () => [
       {
@@ -137,20 +141,13 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
       {
         id: "plan",
         header: "Plan",
+        // AQU-2067: the one plan (free | team | enterprise) replaces the
+        // legacy Explore/Field/Enterprise select.
         cell: ({ row }) => (
-          <select
-            aria-label={`plan for ${row.original.orgName ?? row.original.orgId}`}
-            className="h-7 rounded-md border bg-background px-1.5 text-xs"
-            value={normalizeBillingPlan(row.original.plan)}
-            onChange={(e) => {
-              const plan = e.target.value as AdminBillingOrg["plan"]
-              void act(() => patchAdminBillingOrg(jwt, row.original.orgId, { plan }))
-            }}
-          >
-            <option value="explore">Explore</option>
-            <option value="field">Field</option>
-            <option value="enterprise">Enterprise</option>
-          </select>
+          <OrgPlanControl
+            org={row.original}
+            onCommit={(plan) => void act(() => patchAdminOrgPlan(jwt, row.original.orgId, plan))}
+          />
         ),
       },
       {
@@ -170,11 +167,10 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
       },
       {
         id: "weekly",
-        header: "Weekly AI allowance",
-        cell: ({ row }) => <OverrideCredits
-          label={`weekly allowance for ${row.original.orgName ?? row.original.orgId}`}
-          testId={`weekly-allowance-${row.original.orgId}`}
-          value={row.original.weeklyAllowance ?? null}
+        header: "Weekly AI allowance ($ raw)",
+        cell: ({ row }) => <WeeklyAllowanceUsd
+          org={row.original}
+          unitsPerRawUsd={unitsPerRawUsd}
           onCommit={value => void act(() => patchAdminWeeklyAllowance(jwt, row.original.orgId, value))}
         />,
       },
@@ -245,7 +241,7 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
         ),
       },
     ],
-    [act, jwt],
+    [act, jwt, unitsPerRawUsd],
   )
 
   // AQU-942: only a first load that has resolved nothing may replace the
@@ -272,6 +268,7 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
           <AmountField label="Add-on ($ / pack)" value={addonPrice} onChange={setAddonPrice} />
           <AmountField label="Enterprise credits / lane / year" value={enterpriseCredits} onChange={setEnterpriseCredits} />
         </div>
+        {catalog ? <TeamCostLine freeWeeklyRawUsd={freeWeekly} plan={catalog.plan} /> : null}
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <Button onClick={() => void saveCatalog()} disabled={busy || !catalog} data-testid="save-field-plan">
             {busy ? "Saving…" : "Save catalog"}
@@ -291,7 +288,7 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
           ? "Weekly AI allowance enforcement is enabled."
           : "Weekly AI allowance enforcement is off. These allowances take effect when enforcement is enabled."}
       </p>
-      <Section title="Organizations" description="Set weekly AI capacity for a team or a user’s personal workspace. Weekly grants preserve usage and Stripe billing. Blank uses the plan default. Legacy controls appear separately.">
+      <Section title="Organizations" description="Set each org’s plan and weekly AI allowance in raw provider dollars. Every org is Free unless set otherwise; Enterprise is unmetered until its contract ends, then gets a 14-day Team-sized grace. Weekly grants preserve usage and Stripe billing. Blank uses the plan default.">
         {orgs && orgs.length > 0 ? (
           <DataTable
             columns={columns}
@@ -317,6 +314,8 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
           <p className="text-sm text-muted-foreground">No orgs found.</p>
         )}
       </Section>
+
+      <AdminWouldBlockReport jwt={jwt} />
 
       {notice ? (
         <p className="text-sm text-muted-foreground" role="status">

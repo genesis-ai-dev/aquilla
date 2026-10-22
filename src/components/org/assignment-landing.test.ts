@@ -48,3 +48,24 @@ describe("resolveAssignmentLandingCell", () => {
     expect(await resolveAssignmentLandingCell({ scopeKind: "books", scopeLabel: "Entire file", fileId: "f1" }, read)).toBeNull()
   })
 })
+
+// AQU-1510. WHY: two assignments on one book looked like "two projects per
+// book" because the only thing telling them apart, "MAT 1, MAT 2, … MAT 28",
+// was clipped or scrolled away. Read as ranges, the label fits and says it.
+describe("assignmentScopeText", () => {
+  const chapters = (scopeLabel: string) => ({ scopeKind: "chapters", scopeLabel })
+  it("collapses consecutive chapters into ranges, book by book", async () => {
+    const { assignmentScopeText } = await import("./assignment-landing")
+    const label = Array.from({ length: 28 }, (_, i) => `MAT ${i + 1}`).join(", ")
+    expect(assignmentScopeText(chapters(label))).toBe("MAT 1–28")
+    expect(assignmentScopeText(chapters("LUK 22, LUK 23, LUK 24"))).toBe("LUK 22–24")
+    expect(assignmentScopeText(chapters("MAT 5, MAT 1, MAT 2, MAT 3, MRK 2"))).toBe("MAT 1–3, 5 · MRK 2")
+    expect(assignmentScopeText(chapters("Matthew · MAT 21, MAT 22"))).toBe("MAT 21–22")
+  })
+
+  it("keeps any other scope's label as it is", async () => {
+    const { assignmentScopeText } = await import("./assignment-landing")
+    expect(assignmentScopeText({ scopeKind: "books", scopeLabel: "All verses" })).toBe("All verses")
+    expect(assignmentScopeText({ scopeKind: "file", scopeLabel: "MAT.usfm" })).toBe("MAT.usfm")
+  })
+})

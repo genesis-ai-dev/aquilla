@@ -29,7 +29,7 @@ import { sign, verify } from "hono/jwt"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import type { Context } from "hono"
-import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
+import { authMiddleware, resolveSession, type AuthHonoEnv } from "../middleware/auth"
 import type { Env } from "../types"
 import {
   encryptMondayToken,
@@ -74,6 +74,7 @@ import {
   AnalyzeUpstreamError,
   NoBoardsError,
 } from "../lib/monday/analyze"
+import { LlmRefusedError } from "../lib/billing/paid-llm"
 import { pushBoardLink } from "../lib/monday/push"
 import { schedulePush } from "../lib/integrations/push"
 import {
@@ -285,6 +286,17 @@ monday.get("/oauth/callback", async (c) => {
   }
   const orgId = Number(state.orgId)
   if (!Number.isFinite(orgId)) return fail("bad_state", 401)
+
+  // [Pen test] API security (2026-10-22): the state JWT alone proves who
+  // STARTED the flow, not who is finishing it. Without this binding an
+  // attacker could start a flow for their own org and lure a victim admin
+  // through Monday's consent screen, parking the victim's Monday token on the
+  // attacker's org (OAuth login-CSRF). The SPA already holds the session, so
+  // the caller sends it and it must be the user who minted the state.
+  const session = await resolveSession(c.env, c.req.header("Authorization"))
+  if (!session.ok || session.user.username !== state.userId) {
+    return fail("session_mismatch", 401)
+  }
   const backTo =
     typeof state.backTo === "string" && isSafeAppPath(state.backTo)
       ? state.backTo
@@ -878,6 +890,8 @@ monday.post(
 
     const summary = await computeProjectMetrics(c.env.AQUILLA_PG, guard.projectId, { appBaseUrl: c.env.BASE_URL })
     if (!summary) return c.json({ error: "project not found" }, 404)
+    // AQU-2063: the model calls bill the project's org, as the person asking.
+    const paidScope = { orgId, userId: c.get("user").id, projectId: guard.projectId, rail: "llm" as const }
 
     let boardId = body.boardId
     let boardName: string | null = null
@@ -885,7 +899,7 @@ monday.post(
     let structure, sampleItems
     try {
       if (!boardId) {
-        const choice = await selectBoardForProject(c.env, {
+        const choice = await selectBoardForProject(c.env, paidScope, {
           boards: await listBoards(token),
           summary,
         })
@@ -911,7 +925,7 @@ monday.post(
       : undefined
 
     try {
-      const result = await analyzeBoardMapping(c.env, {
+      const result = await analyzeBoardMapping(c.env, paidScope, {
         structure,
         sampleItems,
         summary,
@@ -931,6 +945,7 @@ monday.post(
         boardReason,
       })
     } catch (err) {
+      if (err instanceof LlmRefusedError) return c.json(err.refusal.body, err.refusal.status)
       console.error("[monday] analyze failed:", err)
       // Upstream outage gets a clear, distinct shape (the body snippet is
       // logged server-side only — never leaked to the client).

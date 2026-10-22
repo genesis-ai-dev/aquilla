@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from "vitest"
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react"
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
+import { render, screen, fireEvent, waitFor, cleanup, act } from "@testing-library/react"
 import { ExperimentalFlagsSection } from "./ExperimentalFlagsSection"
+import * as projectIndex from "@/lib/store/project-index"
 import { createProject, getProject, _resetDbForTesting } from "@/lib/store/project-index"
 import { FLAGS, isAutopilotVisible, isFlagEnabled } from "@/lib/features/flags"
 import { ROLE } from "@/lib/frontier/roles"
@@ -44,6 +45,93 @@ describe("ExperimentalFlagsSection — community checking (AQU-1249)", () => {
     await waitFor(async () => expect(isFlagEnabled((await getProject("p1"))!, "communityChecking")).toBe(true))
     fireEvent.click(toggle)
     await waitFor(() => expect(screen.queryByText("Checking link creator")).not.toBeInTheDocument())
+  })
+})
+
+describe("ExperimentalFlagsSection — a toggle made before the seed read lands (AQU-1947)", () => {
+  // The section seeds its device-local flags from one IDB read at mount. On a
+  // loaded machine that read can resolve after the user's first click, carrying
+  // a snapshot taken before the click's write. These hold the read on a
+  // deferred promise so the late landing happens every run, not one in a
+  // thousand.
+  const CHECKING_SWITCH = { name: "Community checking (WIP)" } as const
+
+  function holdSeedRead() {
+    let land!: (record: ProjectRecord | undefined) => void
+    const pending = new Promise<ProjectRecord | undefined>((resolve) => { land = resolve })
+    vi.spyOn(projectIndex, "getProject").mockReturnValueOnce(pending)
+    return (record: ProjectRecord | undefined) => act(async () => { land(record) })
+  }
+
+  const storedFlag = async () => isFlagEnabled((await getProject("p1"))!, "communityChecking")
+
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it("a pre-click snapshot landing after the click leaves the switch on, matching the stored flag", async () => {
+    await createProject(makeProject())
+    const preClick = await getProject("p1")
+    const landSeed = holdSeedRead()
+    render(<ExperimentalFlagsSection projectId="p1" />)
+    const toggle = await screen.findByRole("switch", CHECKING_SWITCH)
+    fireEvent.click(toggle)
+    await waitFor(async () => expect(await storedFlag()).toBe(true))
+
+    await landSeed(preClick)
+    expect(toggle).toBeChecked()
+    expect(screen.getByText("Checking link creator")).toBeVisible()
+
+    // The CI failure: with the switch reverted to off, this second click
+    // turned the flag back ON instead of off.
+    fireEvent.click(toggle)
+    expect(toggle).not.toBeChecked()
+    expect(screen.queryByText("Checking link creator")).not.toBeInTheDocument()
+    await waitFor(async () => expect(await storedFlag()).toBe(false))
+  })
+
+  it("a post-first-write snapshot landing after the second click leaves the switch off, matching the stored flag", async () => {
+    await createProject(makeProject())
+    const landSeed = holdSeedRead()
+    render(<ExperimentalFlagsSection projectId="p1" />)
+    const toggle = await screen.findByRole("switch", CHECKING_SWITCH)
+    fireEvent.click(toggle)
+    await waitFor(async () => expect(await storedFlag()).toBe(true))
+    const postFirstWrite = await getProject("p1")
+    fireEvent.click(toggle)
+    await waitFor(async () => expect(await storedFlag()).toBe(false))
+
+    await landSeed(postFirstWrite)
+    expect(toggle).not.toBeChecked()
+    expect(screen.queryByText("Checking link creator")).not.toBeInTheDocument()
+  })
+
+  it("the late seed still fills every stored flag the user has not touched", async () => {
+    // The seed yields only on the keys the user set; it is not skipped outright.
+    await createProject(makeProject({ experimentalFlags: { smartEdits: true } }))
+    const stored = await getProject("p1")
+    const landSeed = holdSeedRead()
+    render(<ExperimentalFlagsSection projectId="p1" />)
+    fireEvent.click(await screen.findByRole("switch", CHECKING_SWITCH))
+
+    await landSeed(stored)
+    expect(screen.getByRole("switch", CHECKING_SWITCH)).toBeChecked()
+    expect(screen.getByRole("switch", { name: "Smart edits" })).toBeChecked()
+  })
+
+  it("moving to another project shows that project's stored flags, not the previous one's toggles", async () => {
+    // The route reuses this component across /project/:id/settings, so a
+    // toggle in one project must not outrank the next project's seed.
+    await createProject(makeProject())
+    await createProject(makeProject({ id: "p2", experimentalFlags: { communityChecking: false } }))
+    const p2 = await getProject("p2")
+    const { rerender } = render(<ExperimentalFlagsSection projectId="p1" />)
+    fireEvent.click(await screen.findByRole("switch", CHECKING_SWITCH))
+    await waitFor(async () => expect(await storedFlag()).toBe(true))
+
+    const landSeed = holdSeedRead()
+    rerender(<ExperimentalFlagsSection projectId="p2" />)
+    await landSeed(p2)
+    expect(screen.getByRole("switch", CHECKING_SWITCH)).not.toBeChecked()
+    expect(screen.queryByText("Checking link creator")).not.toBeInTheDocument()
   })
 })
 

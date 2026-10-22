@@ -191,10 +191,10 @@ aiSmartEdits.post("/suggest", authMiddleware, zValidator("json", suggestSchema),
     .map((s) => ({ s, tier: "memory" as const }))
   const toVerify = selected.filter((s) => s.tier === "verify").slice(0, MAX_VERIFY_PER_REQUEST)
 
-  let jev: "skipped" | "model" | "no_key" | "timeout" | "upstream" = "skipped"
+  let jev: "skipped" | "model" | "no_key" | "timeout" | "upstream" | "refused" = "skipped"
   if (input.verify && toVerify.length > 0) {
     const request = buildVerifyRequest(JEV_MODEL, passage, toVerify)
-    const called = await callJev(c.env, request, JEV_TIMEOUT_MS)
+    const called = await callJev(c.env, request, JEV_TIMEOUT_MS, { projectId: input.projectId, userId: user.id })
     if (!called.ok) {
       jev = called.reason
     } else {

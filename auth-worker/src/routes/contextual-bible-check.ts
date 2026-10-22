@@ -47,7 +47,7 @@ bibleCheck.post(
 
     // Jev calls are metered like a run's (agent_cost_meter, COST_METER=1); flushed before the answer.
     const meter = makeCostMeter(c.env, db)
-    const deps = makeBibleTickDeps(c.env, db, { projectId, runId: `bible-check:${crypto.randomUUID()}` }, { meter })
+    const deps = makeBibleTickDeps(c.env, db, { projectId, runId: `bible-check:${crypto.randomUUID()}`, userId: c.get("user").id }, { meter })
     const flags = await deps.flags()
     if (!flags.autopilot || !flags.checks) {
       const { body: err, status } = errorJson(

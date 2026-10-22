@@ -803,6 +803,44 @@ describe("EditorTable — EditorActionsContext wiring", () => {
       resetVisibleStyleSegmentsCacheForTests()
     }
   })
+
+  it("keeps a placed cell closed while style segments are visible", async () => {
+    const source = idmlParagraph(idmlSlot(0, "Body", "Hello ") + idmlSlot(1, "Bold", "world"))
+    const target = idmlParagraph(idmlSlot(0, "Body", "Bonjour ") + idmlSlot(1, "Bold", "monde"))
+    const hash = createHash("sha256").update([
+      "slot:0:editable:CharacterStyle/Body",
+      "slot:1:editable:CharacterStyle/Bold",
+    ].join("\u0000")).digest("hex")
+    setVisibleStyleSegments(true)
+    try {
+      const { unmount } = renderTable(
+        { onOpenComments: vi.fn() },
+        new Map(),
+        { cellStore: makePlainRunStore("cell-1", source, target, "Bonjour monde", hash) },
+      )
+      const surface = (await screen.findByText("monde")).closest("[data-target-read-view]") as HTMLElement
+      expect(surface.hasAttribute("data-segment-edge-mode")).toBe(true)
+      fireEvent.click(surface)
+      expect(document.querySelector(".ProseMirror")).toBeNull()
+      unmount()
+
+      setVisibleStyleSegments(false)
+      renderTable(
+        { onOpenComments: vi.fn() },
+        new Map(),
+        { cellStore: makePlainRunStore("cell-1", source, target, "Bonjour monde", hash) },
+      )
+      const opened = (await screen.findByText("monde")).closest("[data-target-read-view]") as HTMLElement
+      expect(opened.hasAttribute("data-segment-edge-mode")).toBe(false)
+      fireEvent.click(opened)
+      await waitFor(() => {
+        expect(document.querySelector(".ProseMirror")).not.toBeNull()
+      })
+    } finally {
+      setVisibleStyleSegments(false)
+      resetVisibleStyleSegmentsCacheForTests()
+    }
+  })
 })
 
 function makePlainRunStore(

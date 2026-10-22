@@ -147,7 +147,7 @@ export type EventKind =
   | 'cell.backtranslation.set'
   // AQU-1408 §1: a hand-corrected statistical gloss. Its own kind rather than
   // a flag on the BT event because the two are different readings of the same
-  // commit and must both be addressable — see db/postgres/migrations/0182.
+  // commit and must both be addressable — see db/postgres/migrations/0184_cell_glosses.sql.
   | 'cell.gloss.set'
   // Assignments (project-level, non-chain-mutating; project-lead+). Carry a
   // fileId on the envelope for auth/routing like comments, but their scope is

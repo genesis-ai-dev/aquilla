@@ -14,7 +14,7 @@ export interface RateCard { fetchedAt: number; prices: Map<string, { prompt: num
 const CARD_TTL_MS = 10 * 60 * 1000
 const cache = new Map<string, RateCard>()
 
-export async function readRateCard(env: Env, now = Date.now()): Promise<RateCard> {
+export async function readRateCard(env: Pick<Env, 'OPENROUTER_BASE_URL' | 'OPENROUTER_API_KEY'>, now = Date.now()): Promise<RateCard> {
   const base = env.OPENROUTER_BASE_URL?.replace(/\/$/, '')
   if (!base) throw new Error('Rate card unavailable')
   const cached = cache.get(base)
@@ -62,5 +62,32 @@ export function boundRequestCostCents(card: RateCard, input: { model: string; pr
   const cents = (promptTokens * price.prompt + input.maxOutputTokens * price.completion) * 100
   providerCostToMicroCents(cents)
   // A free model still needs a positive reservation to hold its request slot.
+  return Math.max(cents, 0.0001)
+}
+
+/** Jev (TypeSafe's decisions model, typesafe/jev-*) is not on the OpenRouter
+ * card, and its decisions endpoint reports tokens, not cost. Decision
+ * 2026-10-21 (Ryder, AQU-2064): Jev is priced at 0. Every call still passes the
+ * entitlement check and writes its jev row; it counts nothing against the
+ * allowance. If Jev gets a price, the 2026-10-06 Jev shadow eval measured
+ * about $0.035 per million input tokens and $0.13 per million output tokens:
+ * set them here, in USD per token (0.035e-6 and 0.13e-6).
+ */
+export const JEV_PRICE_USD_PER_TOKEN = { input: 0, output: 0 } as const
+/** Output tokens one Jev call may answer with, for the reservation bound. */
+export const JEV_MAX_OUTPUT_TOKENS = 4096
+
+/** Raw cents for the tokens a Jev call reported. */
+export function jevCostCents(usage: { input_tokens: number; output_tokens: number }) {
+  const cents = (usage.input_tokens * JEV_PRICE_USD_PER_TOKEN.input
+    + usage.output_tokens * JEV_PRICE_USD_PER_TOKEN.output) * 100
+  providerCostToMicroCents(cents)
+  return cents
+}
+/** Reservation bound for one Jev call, by the same 2-characters-a-token rule
+ * as boundRequestCostCents. A zero price still reserves a positive amount:
+ * the ledger needs one to hold the request slot. */
+export function jevBoundCents(promptChars: number) {
+  const cents = jevCostCents({ input_tokens: Math.ceil(promptChars / 2), output_tokens: JEV_MAX_OUTPUT_TOKENS })
   return Math.max(cents, 0.0001)
 }

@@ -315,3 +315,139 @@ export function restoreHiddenTtsSettings(
   }
   return next
 }
+
+function tagWritable(tag: string, writable: ReadonlySet<string> | null, lanes: readonly LaneIdentity[]): boolean {
+  if (writable === null) return true
+  const matches = lanes.filter((lane) => (lane.legacyTag ?? "") === tag)
+  if (matches.length !== 1) return false
+  return writable.has(matches[0]!.id)
+}
+
+function laneIdWritable(laneId: unknown, writable: ReadonlySet<string> | null): boolean {
+  return typeof laneId === "string" && laneId !== "" && (writable === null || writable.has(laneId))
+}
+
+/**
+ * A project lead's voice save may change voices, per-lane cast, and per-lane
+ * defaults on lanes they can write. It may not change a voice with no lane,
+ * a hidden lane, the project-wide cast or default, or any other voice setting.
+ * `writable === null` means every lane (the wall is off).
+ */
+export function leadMaySaveTtsSettings(
+  stored: Record<string, unknown>,
+  next: Record<string, unknown>,
+  writable: ReadonlySet<string> | null,
+  lanes: readonly LaneIdentity[],
+): boolean {
+  const managed = new Set(["voices", "laneCastAssignments", "laneDefaultVoiceId"])
+  const keys = new Set([...Object.keys(stored), ...Object.keys(next)])
+  for (const key of keys) {
+    if (managed.has(key)) continue
+    if (!sameJson(stored[key], next[key])) return false
+  }
+  if (!voiceEditsAllowed(voiceList(stored.voices), voiceList(next.voices), writable)) return false
+  if (!laneMapEditsAllowed(stored.laneCastAssignments, next.laneCastAssignments, writable, lanes)) return false
+  if (!laneMapEditsAllowed(stored.laneDefaultVoiceId, next.laneDefaultVoiceId, writable, lanes)) return false
+  return true
+}
+
+function voiceEditsAllowed(
+  stored: readonly Record<string, unknown>[],
+  next: readonly Record<string, unknown>[],
+  writable: ReadonlySet<string> | null,
+): boolean {
+  const storedById = new Map<string, Record<string, unknown>>()
+  for (const voice of stored) {
+    const id = voiceId(voice)
+    if (id) storedById.set(id, voice)
+  }
+  const nextById = new Map<string, Record<string, unknown>>()
+  for (const voice of next) {
+    const id = voiceId(voice)
+    if (id) nextById.set(id, voice)
+  }
+  const ids = new Set([...storedById.keys(), ...nextById.keys()])
+  for (const id of ids) {
+    const before = storedById.get(id)
+    const after = nextById.get(id)
+    if (sameJson(before, after)) continue
+    if (!laneIdWritable((after ?? before)?.laneId, writable)) return false
+    if (before && !laneIdWritable(before.laneId, writable)) return false
+  }
+  return true
+}
+
+function laneMapEditsAllowed(
+  stored: unknown,
+  next: unknown,
+  writable: ReadonlySet<string> | null,
+  lanes: readonly LaneIdentity[],
+): boolean {
+  const before = isRecord(stored) ? stored : {}
+  const after = isRecord(next) ? next : {}
+  if (!isRecord(stored) && !isRecord(next)) return true
+  const tags = new Set([...Object.keys(before), ...Object.keys(after)])
+  for (const tag of tags) {
+    if (sameJson(before[tag], after[tag])) continue
+    if (!tagWritable(tag, writable, lanes)) return false
+  }
+  return true
+}
+
+/**
+ * The body names a hidden lane's voice, cast, or default differently from
+ * the stored row. Leaving the key out is the filtered echo, not a change.
+ * `visible === null` is never a rewrite.
+ */
+export function incomingRewritesHiddenVoices(
+  stored: Record<string, unknown>,
+  incoming: Record<string, unknown>,
+  visible: ReadonlySet<string> | null,
+  lanes: readonly LaneIdentity[],
+): boolean {
+  if (visible === null) return false
+  const storedVoices = voiceList(stored.voices)
+  const storedById = new Map<string, Record<string, unknown>>()
+  for (const voice of storedVoices) {
+    const id = voiceId(voice)
+    if (id) storedById.set(id, voice)
+  }
+  for (const voice of voiceList(incoming.voices)) {
+    if (!voiceHidden(voice, visible)) continue
+    const id = voiceId(voice)
+    const kept = id ? storedById.get(id) : undefined
+    if (!kept || !sameJson(kept, voice)) return true
+  }
+  if (rewrittenHiddenLaneMap(stored.laneCastAssignments, incoming.laneCastAssignments, visible, lanes)) return true
+  if (rewrittenHiddenLaneMap(stored.laneDefaultVoiceId, incoming.laneDefaultVoiceId, visible, lanes)) return true
+  const hiddenIds = hiddenVoiceIds(storedVoices, visible)
+  if (isRecord(incoming.castAssignments)) {
+    const storedCast = isRecord(stored.castAssignments) ? stored.castAssignments : {}
+    for (const [cell, value] of Object.entries(incoming.castAssignments)) {
+      if (!pointsAtHiddenVoice(value, hiddenIds)) continue
+      if (storedCast[cell] !== value) return true
+    }
+  }
+  if (
+    pointsAtHiddenVoice(incoming.defaultVoiceId, hiddenIds)
+    && incoming.defaultVoiceId !== stored.defaultVoiceId
+  ) {
+    return true
+  }
+  return false
+}
+
+function rewrittenHiddenLaneMap(
+  stored: unknown,
+  incoming: unknown,
+  visible: ReadonlySet<string>,
+  lanes: readonly LaneIdentity[],
+): boolean {
+  if (!isRecord(incoming)) return false
+  const before = isRecord(stored) ? stored : {}
+  for (const [tag, value] of Object.entries(incoming)) {
+    if (!laneKeyHidden(tag, visible, lanes)) continue
+    if (!sameJson(before[tag], value)) return true
+  }
+  return false
+}

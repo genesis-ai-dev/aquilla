@@ -301,8 +301,8 @@ const TOOL_SPECS: McpToolSpec[] = [
   {
     name: 'transcribe_audio',
     description:
-      'Speech to text with word timings, including LOW-RESOURCE languages that ordinary ASR does not ' +
-      'know. Transcribes a cell\'s selected recorded take (fileId + cellId + laneId) or raw ' +
+      'Speech to text with word timings for supported languages, including low-resource languages. ' +
+      'Transcribes a cell\'s selected recorded take (fileId + cellId + laneId) or raw ' +
       'audio { data: <base64>, format: "wav" } (16 kHz mono PCM16; long audio is cut into windows ' +
       'for you). model: "auto" (default — Whisper for its 99 languages, Qwen3-ASR for Chinese ' +
       'varieties, Omnilingual CTC for 1,600+ others), or force "whisper" | "qwen3-asr" | "omni-ctc" | ' +
@@ -346,7 +346,8 @@ const TOOL_SPECS: McpToolSpec[] = [
     name: 'transcription_status',
     description:
       'Is an Omnilingual model ready? The zero-shot model ("omni-zs") takes about 2 minutes to start ' +
-      'when cold. Pass warm: true to start it (free), then poll every ~5 s until state is "ready" ' +
+      'when cold. Pass warm: true to start it; warm-up uses workspace AI capacity. ' +
+      'Poll with warm: false every ~5 s until state is "ready" ' +
       'before calling transcribe_audio with model "omni-zs". Returns { state: "cold"|"starting"|"ready", ' +
       'estGpuSecPerAudioSec } — the second is the measured GPU-seconds per audio-second, for ' +
       'estimating a batch\'s cost. Whisper and Qwen3-ASR need no warm-up. Refused when the ' +
@@ -1311,7 +1312,8 @@ export const TOOL_KINDS: Record<string, ToolKind> = {
   search_project: 'read',
   find_similar_cells: 'read',
   transcribe_audio: 'spend',
-  transcription_status: 'read',
+  // Optional warm-up starts infrastructure and consumes workspace AI capacity.
+  transcription_status: 'spend',
   search_projects: 'read',
   read_content: 'read',
   read_history: 'read',

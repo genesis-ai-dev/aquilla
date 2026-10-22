@@ -64,7 +64,9 @@ export interface BibleRunRecorders {
 export function makeBibleTickDeps(
   env: Env,
   db: AquillaDb,
-  run: { projectId: string; runId: string },
+  /** userId: who Jev bills — the person running a check; omitted for a
+   *  background run, which bills as the system (spec §3.3). */
+  run: { projectId: string; runId: string; userId?: number | null },
   recorders: BibleRunRecorders = {},
 ): BibleTickDeps {
   // Prototype-chained, not spread: a request env can inherit its bindings
@@ -89,7 +91,7 @@ export function makeBibleTickDeps(
         // answers from the fallback (every question abstains) without a call.
         const deadline = started + Math.max(0, BIBLE_QA_RUN_BUDGET_MS - jevMs)
         try {
-          return await decide(runEnv, { purpose: "bible-qa", projectId: run.projectId, ...input, deadline })
+          return await decide(runEnv, { purpose: "bible-qa", projectId: run.projectId, userId: run.userId ?? null, ...input, deadline })
         } finally {
           jevMs += Date.now() - started
         }

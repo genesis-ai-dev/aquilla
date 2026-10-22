@@ -16,6 +16,7 @@ import { handleTtsRequest } from "../tts"
 import { __setInworldBackoffSleepForTests, bytesToBase64, INWORLD_DESIGN_DEFAULT_PREVIEW_TEXT } from "../inworld-tts"
 import type { SyncTokenClaims } from "../auth"
 import { __resetAiSpendCeilingStateForTests } from "../../../db/shared/ai-spend-ceiling"
+import { inworldTtsRawCents } from "../../../db/shared/audio-price-card"
 
 const SECRET = "tts-tests-secret"
 const INWORLD_API_KEY = "dGVzdDprZXk=" // base64("test:key")
@@ -163,6 +164,11 @@ function makeStubDb(
             return stmt
           },
           async first<T = unknown>(): Promise<T | null> {
+            // AQU-2065: the entitlement check resolves the org's plan. A bare
+            // org row is a Free org; with the meter off nothing is reserved.
+            if (sql.includes("FROM organizations o")) {
+              return FREE_ORG_PLAN_ROW as unknown as T
+            }
             if (sql.includes("FROM projects")) {
               return (projectOrgId != null ? { org_id: projectOrgId } : null) as unknown as T
             }
@@ -290,6 +296,12 @@ function makeStubDb(
   }
 }
 
+/** The row resolveOrgPlan reads for an org with no billing state: Free. */
+const FREE_ORG_PLAN_ROW = {
+  created_at: "2026-01-01T00:00:00Z", tier: null, plan: null, contract_ends_at: null, weekly_allowance: null,
+  offer: null, usage_anchor: null, payment_failed: null, paid_through: null, cancel_at_period_end: null,
+}
+
 // ── Env builder ──────────────────────────────────────────────────────────────
 
 type StubEnv = {
@@ -308,8 +320,6 @@ type StubEnv = {
   CREDIT_DAILY_CAP?: string
   CREDIT_WEEKLY_CAP?: string
   CREDIT_ENFORCE?: string
-  TTS_COST_CENTS_PER_CALL?: string
-  TTS_COST_PER_AUDIO_SEC_CENTS?: string
 }
 
 function makeEnv(
@@ -697,21 +707,19 @@ describe("POST /api/v1/voice/tts", () => {
       expect(userRow?.audio_seconds).toBeCloseTo(1)
     })
 
-    it("also charges the estimate to the credit ledger, not a bare per-call cost", async () => {
+    it("charges the credit ledger by characters sent, with the estimated seconds as units", async () => {
       const { db, creditRows } = makeStubDb(7)
       stubInworld({ wav: makeUnparseableWav() })
       const token = await makeToken()
       const text = "b".repeat(30) // → 2s estimate
 
-      const res = (await call(
-        makeEnv(db, { TTS_COST_PER_AUDIO_SEC_CENTS: "1" }),
-        ttsReq({ projectId: "p1", fileId: "f1", text }, token),
-      ))!
+      const res = (await call(makeEnv(db), ttsReq({ projectId: "p1", fileId: "f1", text }, token)))!
 
       expect(res.status).toBe(200)
       const row = creditRows.find((r) => r.org_id === 7 && r.rail === "tts")
-      // 2¢ flat per call + 2s × 1¢ = 4¢, and 2 whole audio-seconds of units.
-      expect(row?.raw_cost_cents).toBeCloseTo(4)
+      // AQU-2065: Inworld bills characters, not calls. 30 chars on the default
+      // model (inworld-tts-2) at the card's rate, not the old flat 2¢.
+      expect(row?.raw_cost_cents).toBeCloseTo(inworldTtsRawCents(30, "inworld-tts-2"))
       expect(row?.units).toBe(2)
     })
 

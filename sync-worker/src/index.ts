@@ -228,16 +228,9 @@ declare global {
       POSTHOG_KEY?: string
       /** PostHog ingest host. Defaults to https://eu.i.posthog.com (AQU-854). */
       POSTHOG_HOST?: string
-      /**
-       * Flat per-call TTS cost estimate in cents (amortised GPU cold-start etc.).
-       * Default: 2 (2¢ per synthesis call). Spec § Config.
-       */
-      TTS_COST_CENTS_PER_CALL?: string
-      /**
-       * Additional per-audio-second cost in cents. Default: 0.
-       * Tune once actual GPU billing is available.
-       */
-      TTS_COST_PER_AUDIO_SEC_CENTS?: string
+      /** off | shadow | enforce — the unified billing meter for TTS,
+       *  voice-convert and diarization (db/shared/ai-entitlement.ts). */
+      BILLING_METER_MODE?: string
       /**
        * Platform-wide daily AI spend ceiling in US dollars, checked before
        * every paid AI call in this worker too — TTS, voice-convert,

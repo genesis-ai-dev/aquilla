@@ -91,7 +91,7 @@ const UNCOVERED: Record<string, string> = {
   agent_sessions: "never granted to app_runtime",
   api_credentials: "never granted to app_runtime",
   cell_links: "never granted to app_runtime",
-  // AQU-1408 (0182): hand-corrected statistical glosses, created alongside
+  // AQU-1408 (0184): hand-corrected statistical glosses, created alongside
   // cell_backtranslations' shape and read through the same sync-worker
   // perimeter. Listed here rather than given a policy for the blanket reason
   // above — a new table is not granted to app_runtime, so a policy written
@@ -106,6 +106,10 @@ const UNCOVERED: Record<string, string> = {
   integration_links: "never granted to app_runtime",
   knowledge_docs: "never granted to app_runtime",
   lanes: "never granted to app_runtime",
+  // AQU-2105 (0185): a project's LangQuest link (encrypted token) and its
+  // passage→cell map, read and written only by auth-worker routes/langquest.ts.
+  langquest_links: "never granted to app_runtime — rows hold an encrypted credential",
+  langquest_passages: "never granted to app_runtime",
   project_access_links: "never granted to app_runtime — rows are credentials",
   // AQU-1249: anonymous guests redeem a link by its token with no user in
   // context, so 0034's per-user policy shape cannot apply (as mcp_oauth_codes).

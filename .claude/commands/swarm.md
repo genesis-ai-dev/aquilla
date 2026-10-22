@@ -117,8 +117,9 @@ pass. For each oversized issue:
    applies the category label), **status `Triage`** — new issues are never created in `Todo`
    (see AGENTS.md → "Agent-ready vs. human-in-the-loop"; ⚠️ the templates embed `Todo`, so
    pass `state: Triage` explicitly and confirm the response says `Triage`), **unassigned**
-   (the team rotation auto-assigns at create time — if the response shows an assignee, clear
-   it with a follow-up `assignee: null` save), priority inherited, with a one-line scope +
+   (don't pass `assignee`; the team's Triage Responsibility is **No action** in Linear, so
+   nothing auto-assigns — if the response does show one, the setting has drifted: clear it
+   with a follow-up `assignee: null` save), priority inherited, with a one-line scope +
    acceptance criterion.
 3. Leave the parent as a tracking umbrella (do not work it directly; its children carry the work).
 4. Comment on the parent listing the sub-issues created.

@@ -557,6 +557,15 @@ describe("knowledge routes — reindex", () => {
       PROJECT, jwt, new TextEncoder().encode("# x\ny"), "a.md", bucket, { OPENROUTER_API_KEY: "k" },
     )
     const { doc } = (await uploadRes.json()) as { doc: { id: string } }
+    // Let the upload's own job finish first, or its terminal write lands after
+    // the staging below and the row is no longer a live job (AQU-2063 gave the
+    // job an entitlement check, which made that race visible).
+    await vi.waitFor(async () => {
+      const row = await env.AQUILLA_PG.prepare("SELECT index_status FROM knowledge_docs WHERE id = ?")
+        .bind(doc.id)
+        .first<{ index_status: string }>()
+      expect(row?.index_status).toBe("ready")
+    })
 
     // Where a live job leaves the row: pending, written just now.
     await env.AQUILLA_PG.prepare(

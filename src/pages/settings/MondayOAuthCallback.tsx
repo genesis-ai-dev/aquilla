@@ -15,6 +15,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { Spinner } from "@/components/ui/spinner"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { completeMondayOAuth } from "@/lib/monday/api"
@@ -41,6 +42,8 @@ export function MondayOAuthCallback() {
   const [searchParams] = useSearchParams()
   const [exchangeError, setExchangeError] = useState<MondayConnectFailure | null>(null)
   const ranRef = useRef(false)
+  const { session, loading: sessionLoading } = useFrontierSession()
+  const jwt = session?.jwt ?? null
 
   const code = searchParams.get("code")
   const state = searchParams.get("state")
@@ -55,14 +58,20 @@ export function MondayOAuthCallback() {
 
   useEffect(() => {
     if (ranRef.current) return
+    // The exchange is bound to the signed-in user; wait for the session to
+    // hydrate rather than burning the single-use code without it.
+    if (code && state && sessionLoading) return
     if (!code || !state) {
       ranRef.current = true
       announceMondayOAuthOutcome({ ok: false, reason: toConnectFailure(mondayError), orgId })
       return
     }
     ranRef.current = true
+    const exchange = jwt
+      ? completeMondayOAuth(code, state, jwt)
+      : Promise.resolve({ ok: false, reason: "failed" } as const)
 
-    void completeMondayOAuth(code, state).then((result) => {
+    void exchange.then((result) => {
       if (result.ok) {
         announceMondayOAuthOutcome({ ok: true, orgId })
         // Server validates backTo is an app path; keep a client-side guard so
@@ -75,7 +84,7 @@ export function MondayOAuthCallback() {
         setExchangeError(reason)
       }
     })
-  }, [navigate, code, state, mondayError, orgId, returnTo])
+  }, [navigate, code, state, mondayError, orgId, returnTo, jwt, sessionLoading])
 
   if (failed) {
     return (

@@ -71,6 +71,9 @@ import {
   AssignmentEmitError,
 } from "@/lib/sync/assignments"
 import type { AssignmentKind, AssignmentScopeEntry, AssignmentScopeKind } from "@/lib/sync/assignments"
+import type { OverlapScope } from "@/lib/sync/assignment-overlap"
+import { useAssignmentOverlap } from "@/hooks/useAssignmentOverlap"
+import { AssignmentOverlapNotice } from "@/components/org/AssignmentOverlapNotice"
 import { ROLE } from "@/lib/frontier/roles"
 import {
   canOpenAssignUi,
@@ -654,6 +657,37 @@ export function AssignModal({
     laneValue, noStaffedLanes, isScripture, segmentNoun, selectUnitErrorKey, assigneeRefusal, kind, t,
   ])
 
+  // AQU-1510: say so when this would assign someone lines they already hold.
+  // A selection has no chapters to compare, so it is not checked.
+  const overlapScope = useMemo<OverlapScope | null>(() => {
+    if (scopeKind === "verses" || scopeKind === "books") return { kind: "file" }
+    if (scopeKind === "chapters" && selectedChapters.size > 0) {
+      return { kind: "chapters", chapters: [...selectedChapters] }
+    }
+    return null
+  }, [scopeKind, selectedChapters])
+  const overlapFileIds = useMemo(
+    () => (scopeKind === "books" ? [...selectedFileIds] : activeFileId ? [activeFileId] : []),
+    [scopeKind, selectedFileIds, activeFileId],
+  )
+  const overlapMember = members.find((m) => String(m.userId) === selectedMemberId) ?? null
+  const overlaps = useAssignmentOverlap({
+    jwt,
+    projectId,
+    fileIds: overlapFileIds,
+    scope: overlapScope,
+    assigneeUserId: overlapMember?.userId ?? null,
+    lane: laneValue,
+    kind,
+  })
+  const overlapFileName = useCallback(
+    (fileId: string) => {
+      const file = projectFiles.find((f) => f.id === fileId)
+      return file ? fileDisplayName(file) : fileId
+    },
+    [projectFiles],
+  )
+
   // Role gate (AQU-496 / AQU-581): a caller at the org's assignment floor
   // always renders; below that, only when one of the org's two carve-outs
   // applies — self-assign, or a lane-scoped delegate grant (canOpenAssignUi).
@@ -937,6 +971,11 @@ export function AssignModal({
             />
           </Field>
 
+          <AssignmentOverlapNotice
+            overlaps={overlaps}
+            username={overlapMember?.username ?? ""}
+            fileName={overlapFileName}
+          />
           {error && <FieldError>{error}</FieldError>}
         </FieldGroup>
         </DialogBody>

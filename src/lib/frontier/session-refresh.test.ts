@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import "fake-indexeddb/auto"
-import { jwtLifetime, refreshActiveSession, shouldRefreshJwt } from "./session-refresh"
+import { jwtLifetime, jwtSubject, refreshActiveSession, shouldRefreshJwt } from "./session-refresh"
 import { clearSession, loadActiveSession, saveSession } from "./session-store"
 
 const LIFETIME = 30 * 24 * 60 * 60
@@ -41,6 +41,20 @@ describe("jwtLifetime", () => {
     expect(jwtLifetime("not-a-jwt")).toBeNull()
     expect(jwtLifetime(tokenWith({ sub: "anna" }))).toBeNull()
     expect(jwtLifetime(tokenWith({ iat: 10, exp: "soon" }))).toBeNull()
+  })
+})
+
+describe("jwtSubject", () => {
+  it("reads the username out of the payload", () => {
+    expect(jwtSubject(tokenWith({ sub: "anna" }))).toBe("anna")
+  })
+
+  it("returns null when there is no usable subject", () => {
+    expect(jwtSubject(null)).toBeNull()
+    expect(jwtSubject("not-a-jwt")).toBeNull()
+    expect(jwtSubject(tokenWith({ iat: 10 }))).toBeNull()
+    expect(jwtSubject(tokenWith({ sub: "" }))).toBeNull()
+    expect(jwtSubject(tokenWith({ sub: 7 }))).toBeNull()
   })
 })
 

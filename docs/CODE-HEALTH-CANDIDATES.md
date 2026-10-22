@@ -1149,16 +1149,20 @@ lint output is byte-identical to baseline except for the one directive that goes
 before the run and returns nothing after. Non-test `as any` / `: any` hits left in the SPA
 after this run, for whoever picks the theme up next:
 
-- `src/hooks/useProjectSettings.ts:560` (`...(existing.completionSettings ?? ({} as any))`)
+- ~~`src/hooks/useProjectSettings.ts:560` (`...(existing.completionSettings ?? ({} as any))`)
   and `:918` (`;(next as any)[key] = (snapTarget as any)[key]` inside a generic key-copy
-  loop). **Not taken**: both need the surrounding settings-merge generics understood, not a
-  cast swapped — `:918` in particular is a keyof-indexed write across two object types and
-  tightening it is a real typing exercise, not a mechanical one.
+  loop).~~ **DONE 2026-10-21** — see that run's entry. Both were taken, and the read above
+  was right that `:918` is a typing exercise: it needed a second generic helper
+  (`copySettingsKeyToRecord`) beside the existing `copySettingsKey`, because that write
+  targets a `ProjectRecord` and not the `ProjectWideSettings` the existing helper takes.
 - `sync-worker/src/__tests__/helpers/in-memory-db.ts` (4) — test helper, frozen zone.
 - Everything else `grep` reports for `:\s*any\b` in `src`, `auth-worker/src`,
   `sync-worker/src`, `agent-worker/src` and `worker/` is the English word "any" in prose
   comments (checked line by line; ~35 of them). Do not re-derive that list — the pattern
-  is noisy and the real set is the two `useProjectSettings.ts` lines above.
+  is noisy. **And do not trust it as an enumeration either**: it missed
+  `ProjectWorkspace.tsx`'s `let _lastImportWrite: Promise<any>`, which matches neither
+  `as any` nor `:\s*any\b`. The authoritative enumeration is the
+  `@typescript-eslint/no-explicit-any` **disable list** — see the 2026-10-21 entry.
 
 ## Unused `eslint-disable` directives — DANGEROUS theme; read the 2026-10-09 entry first
 
@@ -2252,3 +2256,138 @@ recipe plus the 2026-10-09 `--ignore-scripts` install is now complete enough to 
 The `pkill` traps both earlier entries record were avoided by never using `pkill -f` at all:
 `ps -eo pid,args | grep -E "[w]orkerd serve|[w]rangler dev"` reported no strays and nothing
 needed killing.
+
+## 2026-10-21 — type-tightening run: the last three `any`s in non-test source
+
+**Done this run** (theme 3, type tightening; 2 files, 34 insertions / 11 deletions, no test
+file touched): the three remaining `@typescript-eslint/no-explicit-any` sites in non-test
+source are gone, and with them all three `eslint-disable` directives. Two of the three were
+the ones the 2026-09 `(window as any)` entry queued and declined; the third that entry never
+saw (see the methodology note below).
+
+- **`src/components/ProjectWorkspace.tsx:643`** — `let _lastImportWrite: Promise<any>`, the
+  FRO-249 module-level serialization chain for `handleImported`'s
+  `getProject`→`updateProject` read-modify-write. The `any` was there because the slot is
+  seeded with `Promise.resolve(undefined)` and then reassigned to a chain that resolves with
+  a `ProjectRecord`, and `const baseProject = await _lastImportWrite` 40 lines later reads
+  the slot's type, not the chain's. Fixed by naming the appended link in a local
+  (`thisImportWrite`), assigning the slot from it, and awaiting the local — so the slot can
+  honestly be `Promise<ProjectRecord | undefined>` (it has to admit its seed) while the await
+  stays `ProjectRecord`. **Runtime-identical**: it is the same promise object in both places,
+  and the assignment is the statement immediately before the await, so no interleaving can
+  swap the slot in between.
+- **`src/hooks/useProjectSettings.ts:631`** — `...(existing.completionSettings ?? ({} as any))`.
+  Narrowed to `...((existing.completionSettings ?? {}) as CompletionSettings)`. This is still
+  an assertion and the comment now says why rather than waving at "runtime migration state":
+  `CompletionSettings` has five required keys (`endpoint`, `model`, `maxTokens`,
+  `temperature`, `systemPrompt`), the server sends only `systemPrompt`, and a project that
+  has never had AI settings written has no `completionSettings` at all — so the merged object
+  is deliberately partial until the settings editor fills the rest in. Making it honest at the
+  type level means widening `ProjectRecord.completionSettings`, which is a schema question,
+  not a cleanup. **The improvement is scope, not safety**: the assertion now covers one named
+  shape instead of erasing all checking on the spread.
+- **`src/hooks/useProjectSettings.ts:1014`** — `;(next as any)[key] = (snapTarget as any)[key]`
+  in the forbidden-write IDB rollback. The 2026-09 entry called this "a real typing exercise,
+  not a mechanical one" and that was correct: the file already has `copySettingsKey<K extends
+  keyof ProjectWideSettings>` (whose own doc-comment says it exists "because the call sites
+  below used to cast the value away"), but it takes a `ProjectWideSettings` target and *this*
+  write targets a `ProjectRecord`. Added a second generic beside it,
+  `copySettingsKeyToRecord`, which writes through `Object.assign(target, { [key]: source[key] })`
+  — the record and the settings object only partly overlap, so a settings key the record does
+  not declare still has to land, and a keyed assignment cannot express that. Loop head now
+  reads `Object.keys(partial) as (keyof ProjectWideSettings)[]`, matching the file's own
+  idiom at `rollbackRejectedKeys`.
+
+### Methodology: enumerate `any` from the disable list, never from a regex
+
+This is the reusable part. `@typescript-eslint/no-explicit-any` arrives via
+`tseslint.configs.recommended` (`eslint.config.js:34`) and is turned **off only for test
+files** (`eslint.config.js:186`), so:
+
+- At baseline `pnpm lint` reported **zero** `no-explicit-any` violations repo-wide — all 34
+  mentions of the rule in the output were `Unused eslint-disable directive` warnings, every
+  one of them in a frozen test file where the rule is off anyway.
+- Therefore every `any` in non-test source *had* to carry a disable, and
+  `grep -rn "no-explicit-any"` over `src` + the four worker packages + `e2e` + `scripts` +
+  `parity` + `packages` + `tools`, minus test files, was the complete set: exactly three.
+- After the run that same grep returns **nothing**. Non-test source is `any`-free, and the
+  claim is proven by the linter rather than argued.
+
+A regex over `any` cannot do this. The 2026-09 survey ran one, concluded "the real set is the
+two `useProjectSettings.ts` lines", and missed `Promise<any>` entirely — it matches neither
+`as any` nor `:\s*any\b`. Future type-tightening runs: start from the disable list.
+
+**Not a guard.** Nothing stops the next `any` + disable from landing; making the rule an
+error, or banning the directive, is an `eslint.config.js` change that would move the lint
+gate and was out of this run's scope. Worth a ticket if the invariant is meant to hold.
+
+### Baseline 2026-10-21 (`origin/dev` `b3afcf31`)
+
+- `pnpm lint` — **exit 0**, 1076 problems (0 errors, 1076 warnings).
+- `pnpm build` — **exit 0** (`tsc -b` + `vite build` + brand check).
+- `pnpm test` — **exit 1**: `Test Files 1 failed | 2063 passed | 2 skipped (2066)`,
+  `Tests 1 failed | 23242 passed | 23 skipped (23266)`, 1618s.
+
+The one red is **pre-existing and full-suite-only**:
+`src/components/ProjectSettings/ExperimentalFlagsSection.test.tsx` >
+"keeps checking WIP off until explicitly enabled and persists the flag" — a
+`expect(…).not.toBeInTheDocument()` that finds `Checking link creator` present. Run in
+isolation the file is **12/12 green**, so this is another member of the
+[#410](https://github.com/genesis-ai-dev/aquilla/issues/410) full-suite-only family
+(alongside `TeamsList`, `ArchivedProjects` and `OrgContext` already in this ledger), not a
+logic failure. Frozen for this run either way, and not a file this diff touches.
+
+### Final gate 2026-10-21
+
+- `pnpm lint` — exit 0, **1076 problems (0 errors)**, and the per-rule histogram is
+  **identical** to baseline. The raw diff is non-empty but is *only* line-number shifts
+  inside the two edited files (the diff adds 23 lines to `ProjectWorkspace.tsx` and
+  `useProjectSettings.ts` above existing warnings). Note the gate-ordering trap from
+  2026-10-14 was avoided by `rm -rf packages/idml-roundtrip/dist` before the comparison lint,
+  since the baseline lint had run before any `tsc -b`.
+- `pnpm build` — exit 0.
+- `pnpm test` — exit 1, `Test Files 1 failed | 2063 passed | 2 skipped (2066)`,
+  `Tests 1 failed | 23242 passed | 23 skipped (23266)`, 1526s — **identical counts to
+  baseline, and the same single test**. Red-to-same-red on the pre-existing flake,
+  green-to-green on all 23242 others.
+- `pnpm run test:e2e:guard` — exit 0, 7 files / 67 tests (this also confirms the Chromium
+  revision shim satisfies `refuseMissingPlaywrightChromium()`).
+- Smoke (`npx tsx scripts/e2e-shard.ts 1 -- smoke.spec`) — **96 passed, 6 failed, 16.3m**,
+  the whole stack booted first try. The six are *precisely* the standing
+  Chromium-revision-gap media set at the line numbers the 2026-10-16 and 2026-10-19 entries
+  recorded: `import-and-edit.smoke.spec.ts:177`, `:338` × 3 (YouTube srt/vtt/sbv caption
+  exports), `import-media-captions.smoke.spec.ts:132` × 2 (embedded m4a/mp4). Zero new
+  failures, so no A/B arm was needed. **The suite is 102 tests now, not 101**, so the
+  expected figure in this container becomes **96/102** — the best recorded here (95/101 on
+  2026-10-19 and 2026-10-12, 93/101 on 2026-10-16, 92/99 on 2026-10-14). The
+  `collab/bt-edit-locked-for-reviewer.smoke.spec.ts:79` and
+  `collab/commit-chain-linear.smoke.spec.ts` flakes earlier entries flagged did **not**
+  recur. These six cannot be this diff in any case: it changes three type annotations and
+  one local binding and cannot reach media decode.
+
+Bundle-hash comparison was deliberately **not** used as the proof here, unlike the 2026-10-09
+`eslint-disable` run: that theme's edits were source-identical no-ops, so a hash difference
+was itself the finding. This run changes real source (a new local binding, a new helper
+function), so a differing chunk hash is the expected outcome and carries no information. The
+proof is unchanged tests, green-to-green, plus `tsc -b`.
+
+### Container setup 2026-10-21: the 2026-10-19 recipe held verbatim, with two additions
+
+Both standing recipes worked with no modification — `pnpm install --ignore-scripts` for the
+root (the plain `pnpm i` still dies in `onnxruntime-node`'s postinstall with `read
+ECONNRESET`), the rev-1194→1243 Chromium double symlink, Postgres `listen_addresses` +
+`pg_ctl start` + `create role aquilla` over the unix socket + `E2E_PG_ADMIN_URL`, and
+`npm ci --legacy-peer-deps` in all three worker packages (exit 0 each, all three
+`package-lock.json` verified untouched afterwards). Two things worth adding:
+
+1. **A failed `pnpm i` leaves `node_modules` unlinked, and the symptom is misleading.** The
+   first `pnpm i` aborts in the postinstall *after* resolution but *before* linking, leaving
+   71 entries in `node_modules` and **no `node_modules/.bin` directory at all**. A gate run
+   at that point fails with a missing-binary error that looks nothing like a network problem.
+   Go straight to `--ignore-scripts`; do not retry the plain install (the retry fails
+   identically, ~90s wasted). `pnpm rebuild` was again not needed for any gate.
+2. **`pg_ctl -w start` exceeds the 180s foreground tool timeout and that is not a failure.**
+   The call gets moved to the background and never writes a completion line, but the daemon
+   *is* up — `pgrep -af "postgres -D"` and a `PGPASSWORD=… psql -h 127.0.0.1 -U aquilla`
+   probe both confirm it. Verify with a probe, as the 2026-10-19 entry says; do not re-issue
+   the start (that is what leaves the stale `postmaster.pid`).

@@ -9,14 +9,19 @@ vi.mock("@/lib/frontier/members", async (importActual) => ({
   ...(await importActual<typeof import("@/lib/frontier/members")>()),
   fetchProjectRoster: vi.fn(),
 }))
-vi.mock("@/lib/sync/assignments", () => ({ createAssignment: vi.fn(), getFileChapters: vi.fn() }))
+vi.mock("@/lib/sync/assignments", () => ({
+  createAssignment: vi.fn(),
+  getFileChapters: vi.fn(),
+  getUnitAssignments: vi.fn(),
+}))
 
 import { fetchProjectRoster, type ProjectMember } from "@/lib/frontier/members"
-import { createAssignment, getFileChapters } from "@/lib/sync/assignments"
+import { createAssignment, getFileChapters, getUnitAssignments, type UnitAssignment } from "@/lib/sync/assignments"
 
 const mockRoster = vi.mocked(fetchProjectRoster)
 const mockCreate = vi.mocked(createAssignment)
 const mockChapters = vi.mocked(getFileChapters)
+const mockUnit = vi.mocked(getUnitAssignments)
 
 // anna has a project-specific path (direct override); orgbill only reaches the
 // project through his org-wide role, so AQU-676 excludes him from the picker.
@@ -64,6 +69,7 @@ function renderAssign(onAssigned = vi.fn()) {
 beforeEach(() => {
   vi.clearAllMocks()
   mockChapters.mockResolvedValue([]) // default: no chapters unless a test sets them
+  mockUnit.mockResolvedValue([]) // default: nobody holds anything yet
 })
 afterEach(() => vi.restoreAllMocks())
 
@@ -777,5 +783,60 @@ describe("AssignWork — lanes the attached teams are tied to (AQU-2047)", () =>
       targetLang: "French",
       laneId: "lane-fr",
     })
+  })
+})
+
+// AQU-1510: the Pattani Malay case — a whole book, then a list of its
+// chapters for the same person. Warn, never block (Sam, Oct 21).
+describe("AssignWork overlap warning (AQU-1510)", () => {
+  const wholeBook = (over: Partial<UnitAssignment> = {}): UnitAssignment => ({
+    assignmentId: "held",
+    assigneeUserId: 2,
+    username: "anna",
+    scopeLabel: "John",
+    targetLang: "",
+    deadline: null,
+    cellsTotal: 40,
+    translated: 0,
+    validated: 0,
+    recorded: 0,
+    audioValidated: 0,
+    chapters: [
+      { key: "GEN 1", total: 20, translated: 0, validated: 0, recorded: 0, audioValidated: 0 },
+      { key: "GEN 2", total: 20, translated: 0, validated: 0, recorded: 0, audioValidated: 0 },
+    ],
+    ...over,
+  })
+
+  it("says what the person already holds, and still assigns", async () => {
+    rosterOk()
+    mockChapters.mockResolvedValue(["GEN 1", "GEN 2"])
+    mockUnit.mockResolvedValue([wholeBook()])
+    mockCreate.mockResolvedValue("as-overlap")
+    renderAssign()
+
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    await pickSelectOption(/^assignee$/i, /^anna$/)
+    fireEvent.click(await screen.findByText("GEN 2"))
+
+    const notice = await screen.findByTestId("assignment-overlap")
+    expect(notice).toHaveTextContent("anna already holds GEN 2 in John")
+    expect(mockUnit).toHaveBeenCalledWith("jwt", "p1", "f1", "", "")
+
+    fireEvent.click(screen.getByRole("button", { name: "Assign" }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+  })
+
+  it("stays quiet when someone else holds the book", async () => {
+    rosterOk()
+    mockChapters.mockResolvedValue(["GEN 1", "GEN 2"])
+    mockUnit.mockResolvedValue([wholeBook({ assigneeUserId: 7, username: "ben" })])
+    renderAssign()
+
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    await pickSelectOption(/^assignee$/i, /^anna$/)
+    fireEvent.click(await screen.findByText("GEN 2"))
+    await waitFor(() => expect(mockUnit).toHaveBeenCalled())
+    expect(screen.queryByTestId("assignment-overlap")).not.toBeInTheDocument()
   })
 })

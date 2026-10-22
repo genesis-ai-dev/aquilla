@@ -351,7 +351,14 @@ const portfolioSummaryBody = z.object({
  * AQU-756: an explicit list used to 400 at 101 orgs ("request was invalid
  * for this org"). There is no org-count cap. Omitted orgIds means every
  * membership. An empty array still means none. Platform admins may name
- * orgs they are not members of; everyone else must belong to each explicit id.
+ * orgs they are not members of; everyone else must belong to each explicit id
+ * — or, AQU-1488, hold a project in it.
+ *
+ * A project-only member (invited to one project, never to its org) used to see
+ * "Projects 0" on the all-organizations Overview beside a table listing that
+ * project, because only memberships could be named here. Naming a guest org
+ * widens nothing: every row still passes the per-project visibility predicate,
+ * so a guest's totals count exactly the projects they were given.
  */
 async function resolvePortfolioOrgIds(
   env: Env,
@@ -365,10 +372,13 @@ async function resolvePortfolioOrgIds(
   const isAdmin = await isPlatformAdminEmail(env, user.email)
   if (!isAdmin && !fromMemberships && uniqueOrgIds.length > 0) {
     const placeholders = uniqueOrgIds.map(() => "?").join(", ")
-    const allowed = await env.AQUILLA_PG.prepare(
-      `SELECT org_id FROM org_members WHERE user_id = ? AND org_id IN (${placeholders})`,
-    ).bind(user.id, ...uniqueOrgIds).all<{ org_id: number }>()
-    const allowedOrgIds = new Set((allowed.results ?? []).map((row) => row.org_id))
+    const [allowed, guestOrgIds] = await Promise.all([
+      env.AQUILLA_PG.prepare(
+        `SELECT org_id FROM org_members WHERE user_id = ? AND org_id IN (${placeholders})`,
+      ).bind(user.id, ...uniqueOrgIds).all<{ org_id: number }>(),
+      listProjectGrantOrgIds(env, user.id),
+    ])
+    const allowedOrgIds = new Set([...(allowed.results ?? []).map((row) => row.org_id), ...guestOrgIds])
     if (uniqueOrgIds.some((orgId) => !allowedOrgIds.has(orgId))) {
       return { error: "not an org member" }
     }

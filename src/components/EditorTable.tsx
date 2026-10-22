@@ -108,6 +108,7 @@ import { ContextualDraftCard } from "./contextual/ContextualDraftCard"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
 import { AlignStylesButton } from "./cell/AlignStylesButton"
 import { PassToStyleSegmentsButton } from "./cell/PassToStyleSegmentsButton"
+import { useStyleSegmentEdgeDrag } from "./cell/useStyleSegmentEdgeDrag"
 import { StyleAlignWarning } from "./cell/StyleAlignWarning"
 import { cellCanAlignStyles } from "@/lib/idml/align-styles"
 import {
@@ -116,6 +117,14 @@ import {
   placeIdmlPreviewInOnlySlot,
   readIdmlMetadataV2,
 } from "@/lib/idml/preview-segment"
+import { plainTextFromProtectedHtml } from "@/lib/idml/protected-html"
+import {
+  readSegmentPiecesFromHtml,
+  rewriteIdmlSlotTexts,
+  reflowSegmentEdge,
+  type SegmentEdge,
+} from "@/lib/idml/segment-edge"
+import { paintSegmentSlotTexts } from "@/lib/idml/segment-edge-hit"
 import {
   idmlMergedPlainGroupCollapsed,
   rememberManualStyleAlignment,
@@ -5853,6 +5862,38 @@ function EditorRow({
     && editable
     && (previewNeedsModel ? onAlignStyles : readIdmlMetadataV2(cell.metadata)?.editableSlotIndexes.length === 1)
   )
+  // A placed translation, with the style boxes showing, is resized by dragging
+  // a bold or italic edge. Typing comes back when the switch is turned off.
+  // A preview that has not been passed into the runs stays a normal sentence.
+  const styleSegmentDrag = Boolean(
+    visibleStyleSegments
+    && idmlConfiguration?.kind === "ready"
+    && !idmlPreview
+    && editable
+    && !isLoading
+    && !lockHolderLabel
+  )
+  const styleSegmentDragRef = useRef(false)
+  styleSegmentDragRef.current = styleSegmentDrag
+  const segmentEdgeDirtyRef = useRef(false)
+  const segmentHtmlRef = useRef(visibleTranslatedHtml)
+  if (!segmentEdgeDirtyRef.current) segmentHtmlRef.current = visibleTranslatedHtml
+  const applySegmentEdgeRef = useRef<(slotIndex: number, edge: SegmentEdge, boundary: number) => void>(() => {})
+  const commitSegmentEdgeRef = useRef<() => void>(() => {})
+  useStyleSegmentEdgeDrag({
+    enabled: styleSegmentDrag && !isEditorActive,
+    getContainer: () => targetReadContentRef.current,
+    getPieces: () => {
+      const html = segmentHtmlRef.current
+      if (!html) return null
+      return readSegmentPiecesFromHtml(html, {
+        catalog: idmlStyleCatalog,
+        paragraphStyleId: idmlParagraphStyleId,
+      })
+    },
+    onEdge: (slotIndex, edge, boundary) => applySegmentEdgeRef.current(slotIndex, edge, boundary),
+    onGestureEnd: () => commitSegmentEdgeRef.current(),
+  })
   storedTargetHtmlRef.current = visibleTranslatedHtml
   latestTargetRef.current = { value: visibleTranslated ?? "", valueHtml: visibleTranslatedHtml ?? "" }
   const canEditSourceForCell = canEditSource && !idmlConfiguration
@@ -6492,6 +6533,38 @@ function EditorRow({
     }
   }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, project.validationRoleFloor, project.validationNamedUsers, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.originalHtml, cell.metadata, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, idmlConfiguration, t, settleOwedRepetitions, settleTextStep])
 
+  applySegmentEdgeRef.current = (slotIndex, edge, boundary) => {
+    const html = segmentHtmlRef.current
+    if (!html || idmlConfiguration?.kind !== "ready") return
+    const pieces = readSegmentPiecesFromHtml(html, {
+      catalog: idmlStyleCatalog,
+      paragraphStyleId: idmlParagraphStyleId,
+    })
+    const updates = reflowSegmentEdge(pieces, slotIndex, edge, boundary)
+    if (!updates) return
+    const next = rewriteIdmlSlotTexts(html, updates)
+    if (!next || next === html) return
+    if (validateIdmlEditorCommit(idmlConfiguration, next)) return
+    segmentHtmlRef.current = next
+    segmentEdgeDirtyRef.current = true
+    const surface = targetReadContentRef.current
+    if (surface) paintSegmentSlotTexts(surface, updates)
+    setLocalTargetDraft({
+      value: plainTextFromProtectedHtml(next, []),
+      valueHtml: next,
+    })
+  }
+  commitSegmentEdgeRef.current = () => {
+    if (!segmentEdgeDirtyRef.current) return
+    const html = segmentHtmlRef.current
+    segmentEdgeDirtyRef.current = false
+    if (!html) return
+    void handleEditorCommit({
+      value: plainTextFromProtectedHtml(html, []),
+      valueHtml: html,
+    })
+  }
+
   // AQU-618: run a single-cell AI generate/Replace, then return the translator
   // to the edited cell and confirm the save. Both entry points — the Replace
   // confirm dialog and the direct sparkle on an empty cell — used to fire
@@ -6911,7 +6984,7 @@ function EditorRow({
   }, [])
 
   const requestTargetEdit = useCallback((pointerSelection?: IdmlPointerSelection | null) => {
-    if (!editable || isLoading || lockHolderLabel) return
+    if (!editable || isLoading || lockHolderLabel || styleSegmentDragRef.current) return
     pendingIdmlPointerSelectionRef.current = pointerSelection ?? null
     // AQU-746: open the keystroke-buffer window and move focus to the persistent
     // row wrapper *synchronously*, before React swaps the read view out. Without
@@ -8679,6 +8752,7 @@ function EditorRow({
                     aria-label={targetLockedReason ? `${editorAriaLabel} — ${targetLockedReason}` : editorAriaLabel}
                     title={targetLockedReason ?? undefined}
                     data-target-read-view
+                    data-segment-edge-mode={styleSegmentDrag ? "" : undefined}
                     data-target-locked-by={lockHolderLabel ?? undefined}
                     dir={targetCellDirection}
                     lang={targetLanguageCode}
@@ -8694,6 +8768,7 @@ function EditorRow({
                     // the text cursor, and whether Enter opens the editor.
                     tabIndex={editable && !isLoading ? 0 : undefined}
                     editable={editable && !isLoading && !lockHolderLabel}
+                    className={styleSegmentDrag ? "cursor-default" : undefined}
                     subdued={showCompletionOverlay}
                     empty={!visibleTranslated?.trim()}
                     preserveWhitespace={Boolean(idmlConfiguration) && !idmlPreview}

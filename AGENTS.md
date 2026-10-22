@@ -237,10 +237,11 @@ structure (extra sections go *after* the template's). ⚠️ All three templates
 `to-issues` AFK slice (an explicit `state` overrides the template's — verified 2026-08-28)
 — and **check the create response shows the status you intended**; if an issue meant for
 `Triage` came back `Todo`, immediately re-save it. **Agent-created issues are also left
-unassigned** — the team auto-assigns new issues on a rotation, which wins at create time
-even if you pass no assignee; when the create response shows an assignee, immediately
-re-save with `assignee: null` (the response omitting the assignee field confirms it's
-clear).
+unassigned** — never pass `assignee`. The team's Triage Responsibility is set to **No
+action** in Linear (since 2026-10-22), so nothing auto-assigns at create time and there is
+no rotation assignee to clear. If a create response does show an assignee, the Linear
+setting has drifted: re-save with `assignee: null` (the response omitting the assignee
+field confirms it's clear) and tell the user.
 
 Status pipeline:
 

@@ -46,6 +46,7 @@ import { agentDraftReview } from "../namespaces/agentDraftReview"
 import { workspace } from "../namespaces/workspace"
 import { segmentation } from "../namespaces/segmentation"
 import { smartEdits } from "../namespaces/smartEdits"
+import { langquest } from "../namespaces/langquest"
 import { harmonizer } from "../namespaces/harmonizer"
 import { bibleData } from "../namespaces/bibleData"
 import { extensions } from "../namespaces/extensions"
@@ -86,6 +87,7 @@ export const en = {
   ...workspace.keys,
   ...segmentation.keys,
   ...smartEdits.keys,
+  ...langquest.keys,
   ...harmonizer.keys,
   ...bibleData.keys,
   ...extensions.keys,

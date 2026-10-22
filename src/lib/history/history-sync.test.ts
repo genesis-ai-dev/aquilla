@@ -163,9 +163,10 @@ describe("two devices at once (P13.7)", () => {
     if (seen?.kind !== "copy" || !seen.history) throw new Error("expected a copy")
     await a.write("p1", seen.revision, {
       ...seen.history,
-      undo: [...seen.history.undo, { id: "from-a", kind: "test.log", data: { name: "From A" }, labelKey: "From A", at: Date.now() - 1 }],
+      undo: [...seen.history.undo, { id: "from-a", kind: "test.log", data: { name: "From A" }, labelKey: "From A", at: seen.history.undo[0].at + 1 }],
     })
     // This device, still on the older revision, records its own.
+    await new Promise((r) => setTimeout(r, 5))
     recordStep(step("From B"))
     await settle()
     const stored = server.copyOf("p1", "asha")

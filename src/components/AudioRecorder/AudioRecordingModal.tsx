@@ -77,6 +77,7 @@ import { SegmentTabs } from "@/components/ui/tabs"
 import { setRecordingFormatPref, useRecordingFormatPref } from "@/lib/store/recording-format-pref"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
 import { ACCEPT, OFFLINE_MESSAGE, attachAudioFileToCell, validateAudioFile } from "@/lib/audio/attach-file"
+import { playingInSlot, recordTakeAdded } from "@/lib/history/take-steps"
 import { recordingLimitsFor } from "@/lib/audio/recording-limits"
 import { MAX_AUDIO_UPLOAD_BYTES, audioIdSeededWith, buildAudioId, uploadCellAudio, deleteCellAudio, fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
@@ -1448,6 +1449,22 @@ export function AudioRecordingModal({
         validatorCount: autoValidate ? 1 : 0,
       }, attachEventId)
       notifyAudioAttachmentsChanged(activeCell.fileId)
+      // Decision 11: recording a take is one Undo step. Undo takes the take
+      // away and plays what this track played before; Redo brings it back.
+      recordTakeAdded(
+        "record",
+        {
+          cellId: activeCell.id,
+          audioId: savedTakeId,
+          slot: targetSlot,
+          selectedBefore: playingInSlot(audioEntry, targetSlot),
+          window: {
+            trimStartMs: takeTrimWindow.trimStartMs ?? undefined,
+            trimEndMs: takeTrimWindow.trimEndMs ?? undefined,
+          },
+        },
+        { fileId: activeCell.fileId },
+      )
       if (autoValidate) {
         void emitCellAudioValidate({
           projectId: project.id,
@@ -1553,7 +1570,7 @@ export function AudioRecordingModal({
       // that struck mid-upload retries with the SAME take after reconnect.
       setPhase(recorder.state.kind === "stopped" ? "preview" : "error")
     }
-  }, [recorder.state, online, session, activeCell, project.id, project.lanes, username, recordingTakes, scheduleAutoAdvance, returnToReady, laneTag, previewTrim])
+  }, [recorder.state, online, session, activeCell, project.id, project.lanes, username, recordingTakes, scheduleAutoAdvance, returnToReady, laneTag, previewTrim, audioEntry, targetSlot])
 
   // Attach an existing FILE as a take, through this dialog's phase machine.
   //
@@ -1594,6 +1611,8 @@ export function AudioRecordingModal({
         // track, so it follows the recorder's target the same way a take does.
         slot: targetSlot,
         surface: "recorder",
+        // Decision 11: uploading is an Undo step too.
+        history: { selectedBefore: playingInSlot(audioEntry, targetSlot) },
       })
       onTakeSaved?.(activeCell.id)
       returnToReady(`${label} added`)
@@ -1619,7 +1638,7 @@ export function AudioRecordingModal({
     // transitively and the callback was rebuilt whenever it changed. Named
     // explicitly anyway, because that chain is two hops of coincidence away
     // from someone decoupling the takes list from the track.
-  }, [activeCell, session, project.id, username, recordingTakes, targetSlot, onTakeSaved, returnToReady, laneTag, takesDrawerOpen])
+  }, [activeCell, session, project.id, username, recordingTakes, targetSlot, onTakeSaved, returnToReady, laneTag, takesDrawerOpen, audioEntry])
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const onUploadInputChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {

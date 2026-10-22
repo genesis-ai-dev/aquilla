@@ -280,7 +280,7 @@ import { editStepHandlers } from "@/lib/history/edit-steps"
 import { trackStepHandlers, trackFieldsOf, type TrackFields, type TrackTake } from "@/lib/history/track-steps"
 import { readProjectSettingsFor, writeProjectSettingsFor } from "@/lib/history/settings-access"
 import { useHistoryShortcuts } from "@/lib/history/useHistory"
-import { takeStepHandlers, type CutRecord } from "@/lib/history/take-steps"
+import { playingInSlot, takeStepHandlers, type CutRecord } from "@/lib/history/take-steps"
 import { enqueueTakeRemovals, hasOwnRecordingLeft, removeTake, renameTake, renameWholeTake } from "@/lib/audio/take-actions"
 import { regenerateVoiceTake } from "./AudioRecorder/regenerate-voice"
 import { commitAudioValidation } from "@/lib/audio/audio-validation-commit"
@@ -344,7 +344,7 @@ import { deriveTracksForFile } from "@/lib/timeline/tracks"
 import { nextFolderName } from "@/lib/timeline/track-names"
 import { applyPendingOrders, renormaliseOrders, settledPendingOrders } from "@/lib/timeline/track-reorder"
 import { folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
-import { DEFAULT_TARGET_TRACK_ID, RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
+import { DEFAULT_TARGET_TRACK_ID, GENERATED_VOICE_SLOT, RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
 import { fileTrackColor } from "@/lib/timeline/take-colors"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
@@ -12486,6 +12486,7 @@ export function ProjectWorkspace() {
         author: currentUsername,
         diffusionSteps,
         ...(activeLane ? { targetLang: activeLane } : {}),
+        recordStep: true, // decision 11: an Undo step
       })
       if (ok) {
         toast.add({ type: "success", title: t("editor.timeline.changeVoiceDone", { name: voice.name }) })
@@ -14349,6 +14350,24 @@ export function ProjectWorkspace() {
           const owner = resolveTakeCellRef.current(cellId)
           if (owner) notifyAudioAttachmentsChanged(owner.fileId)
         },
+        // Decision 11: a take that was added (recorded, uploaded, generated…).
+        approvedByOthers: (cellId, audioId) =>
+          (readAtt(cellId, audioId)?.validators ?? []).find((v) => v !== currentUsername) ?? null,
+        liveGroup: (cellId, audioId) => {
+          const atts = resolveTakeCellRef.current(cellId)?.cell.attachments ?? {}
+          const group = atts[audioId]?.pieceOf ?? audioId
+          return Object.entries(atts)
+            .filter(([id, a]) => !a.isDeleted && (a.pieceOf ?? id) === group)
+            .map(([id]) => id)
+        },
+        takeRemoved: (cellId, removedIds) => {
+          const owner = resolveTakeCellRef.current(cellId)
+          const takes = Object.entries(owner?.cell.attachments ?? {})
+            .filter(([id]) => !removedIds.includes(id))
+            .map(([id, a]) => ({ audioId: id, voiceId: a.voiceId ?? null, isDeleted: a.isDeleted }))
+          if (!hasOwnRecordingLeft(takes, "", cellId)) handleLastTakeRemoved(cellId)
+        },
+        takeRestored: (cellId) => handleTakeSaved(cellId),
       }),
       ...rowStepHandlers({
         readRow: (cellId) => {
@@ -14458,6 +14477,7 @@ export function ProjectWorkspace() {
     return unregister
   }, [
     readTake, applyTakeTrim, applyTakePlace, applyTakeCut, applyTakeUncut, applyTakeRemove, applyTakeRename, applyTakeSelect,
+    handleLastTakeRemoved, handleTakeSaved,
     getActiveCell, readRowTiming, cellStore, applyRetimeSubtitle, applyCellHidden, removeLineCore, applyRestoreRow, applyRepoint,
     activeLane, applyTargetText, project?.id, currentUsername, getTokenForProjectFile, revalidateAuditStats, revalidateCell,
     serverTimelineTracks, applyTrackPatches,
@@ -15039,6 +15059,8 @@ export function ProjectWorkspace() {
       username: currentUsername,
       ...(activeLane ? { targetLang: activeLane } : {}),
       surface: "cell",
+      // Decision 11: an Undo step, naming what played in that slot before.
+      history: { selectedBefore: playingInSlot(workspaceAudioByCellIdRef.current.get(cell.id), GENERATED_VOICE_SLOT) },
     }).catch((e: unknown) => {
       throw new Error(categorizeAiError(e instanceof Error ? e.message : String(e)).body, { cause: e })
     })

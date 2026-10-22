@@ -10,7 +10,9 @@ import {
   injectOptimisticAudioDeselect,
   notifyAudioAttachmentsChanged,
 } from "@/lib/audio/audio-attachments-bus"
-import { isDefaultTrackSlot, slotsForTrack, trackIdForSlot } from "@/lib/timeline/track-slots"
+import { GENERATED_VOICE_SLOT, isDefaultTrackSlot, slotsForTrack, trackIdForSlot } from "@/lib/timeline/track-slots"
+import { withGroup } from "@/lib/history/history"
+import { playingInSlot, recordSlotChoice } from "@/lib/history/take-steps"
 import { nextTakeLabel } from "./TakesStrip"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import type { CellData } from "@/hooks/useCells"
@@ -41,8 +43,15 @@ export interface RegenerateVoiceArgs {
  * Generate a new voice take for one line and make it the one that sounds.
  * Resolves false when there is nothing to say or the generation failed; the
  * failure itself is written to the per-cell TTS status by `generateCellVoice`.
+ *
+ * Decision 11: ONE Undo step — the new take, and the recording it stopped
+ * from sounding.
  */
-export async function regenerateVoiceTake(args: RegenerateVoiceArgs): Promise<boolean> {
+export function regenerateVoiceTake(args: RegenerateVoiceArgs): Promise<boolean> {
+  return withGroup({ labelKey: "editor.history.stepGenerateVoice", fileId: args.cell.fileId }, () => regenerate(args))
+}
+
+async function regenerate(args: RegenerateVoiceArgs): Promise<boolean> {
   const { project, cell, entry, session, username, targetSlot, laneTag } = args
   const attachments = Object.values(entry?.attachments ?? {})
   // The takes on THIS track, the source clip excluded: what "Take N" counts.
@@ -67,6 +76,9 @@ export async function regenerateVoiceTake(args: RegenerateVoiceArgs): Promise<bo
     // generated-voice slot.
     slot: isDefaultTrackSlot(targetSlot) ? undefined : targetSlot,
     ...(laneTag ? { targetLang: laneTag } : {}),
+    history: {
+      selectedBefore: playingInSlot(entry, isDefaultTrackSlot(targetSlot) ? GENERATED_VOICE_SLOT : targetSlot),
+    },
   })
   if (!ok) return false
 
@@ -90,6 +102,10 @@ export async function regenerateVoiceTake(args: RegenerateVoiceArgs): Promise<bo
     else injectOptimisticAudioDeselect(cell.fileId, cell.id, "recording", displaceP)
     await displaceP
     notifyAudioAttachmentsChanged(cell.fileId)
+    recordSlotChoice(
+      { cellId: cell.id, slot: "recording", before: playingInSlot(entry, "recording"), after: sourceClip?.audioId ?? null },
+      { fileId: cell.fileId },
+    )
   }
   return true
 }

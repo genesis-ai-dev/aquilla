@@ -146,3 +146,107 @@ describe("take.select / take.remove / take.rename", () => {
     expect(ctx.rename).not.toHaveBeenCalled()
   })
 })
+
+// Decision 11: recording, uploading, generating, changing a voice and removing
+// noise each ADD a take; undo takes it away and plays what played before.
+describe("take.add", () => {
+  /** A cell whose slot "recording" plays `playing`; remove/select update it. */
+  function cell(takes: Takes, playing: { id: string | null }) {
+    return ctxFor(takes, {
+      selectedIn: () => playing.id,
+      remove: vi.fn(async (_c, id) => {
+        takes[id] = { ...takes[id], isDeleted: true }
+        if (playing.id === id) playing.id = null
+      }),
+      select: vi.fn(async (_c, _slot, id) => {
+        if (id) takes[id] = { ...takes[id], isDeleted: false }
+        playing.id = id
+      }),
+      approvedByOthers: (_c, id) => (takes[id]?.validators ?? []).find((v) => v !== "asha") ?? null,
+      liveGroup: (_c, id) => Object.keys(takes).filter((k) => !takes[k].isDeleted && (takes[k].pieceOf ?? k) === id),
+      takeRemoved: vi.fn(),
+      takeRestored: vi.fn(),
+    })
+  }
+  const added = { cellId: "c", audioId: "new", slot: "recording", selectedBefore: "take1" }
+
+  it("undo removes the new take and plays the old one again; redo brings the new one back", async () => {
+    const takes: Takes = { take1: { slot: "recording" }, new: { slot: "recording", validators: ["asha"] } }
+    const playing = { id: "new" as string | null }
+    const { ctx, handlers } = cell(takes, playing)
+    expect(await handlers["take.add"].undo(added)).toEqual({ kind: "done" })
+    expect(ctx.remove).toHaveBeenCalledWith("c", "new")
+    expect(playing.id).toBe("take1")
+    expect(ctx.takeRemoved).toHaveBeenCalledWith("c", ["new"])
+    expect(await handlers["take.add"].redo(added)).toEqual({ kind: "done" })
+    expect(playing.id).toBe("new")
+    expect(takes.new.isDeleted).toBe(false)
+    expect(ctx.takeRestored).toHaveBeenCalledWith("c")
+  })
+
+  it("is skipped, naming them, once someone else has approved the new take (gap 25)", async () => {
+    const takes: Takes = { take1: {}, new: { validators: ["asha", "ben"] } }
+    const { ctx, handlers } = cell(takes, { id: "new" })
+    expect(await handlers["take.add"].undo(added)).toEqual({ kind: "skipped", reason: "approved", by: "ben" })
+    expect(ctx.remove).not.toHaveBeenCalled()
+  })
+
+  it("is skipped once it was cut or trimmed since", async () => {
+    const cut: Takes = { take1: {}, new: {}, piece: { pieceOf: "new" } }
+    expect(await cell(cut, { id: "new" }).handlers["take.add"].undo(added)).toEqual({ kind: "skipped", reason: "changed" })
+    const trimmed: Takes = { take1: {}, new: { trimStartMs: 300 } }
+    const born = { ...added, window: { trimStartMs: 200, trimEndMs: undefined } }
+    expect(await cell(trimmed, { id: "new" }).handlers["take.add"].undo(born)).toEqual({ kind: "skipped", reason: "changed" })
+  })
+
+  it("leaves the slot alone when another take was chosen since, or the old one is gone", async () => {
+    const takes: Takes = { take1: {}, other: {}, new: {} }
+    const playing = { id: "other" as string | null }
+    const { ctx, handlers } = cell(takes, playing)
+    expect(await handlers["take.add"].undo(added)).toEqual({ kind: "done" })
+    expect(ctx.select).not.toHaveBeenCalled()
+    expect(playing.id).toBe("other")
+  })
+
+  it("a cleaned split take comes and goes with all its pieces", async () => {
+    const takes: Takes = { take1: {}, dn: {}, "dn-2": { pieceOf: "dn" } }
+    const playing = { id: "dn" as string | null }
+    const { ctx, handlers } = cell(takes, playing)
+    const data = { ...added, audioId: "dn", pieces: ["dn-2"] }
+    expect(await handlers["take.add"].undo(data)).toEqual({ kind: "done" })
+    expect(ctx.remove).toHaveBeenCalledTimes(2)
+    expect(await handlers["take.add"].redo(data)).toEqual({ kind: "done" })
+    expect(ctx.select).toHaveBeenLastCalledWith("c", "recording", "dn-2")
+  })
+
+  it("redo is skipped when someone brought the take back already; undo of a take already gone is skipped as gone", async () => {
+    const live: Takes = { take1: {}, new: {} }
+    expect(await cell(live, { id: "new" }).handlers["take.add"].redo(added)).toEqual({ kind: "skipped", reason: "changed" })
+    const gone: Takes = { take1: {} }
+    expect(await cell(gone, { id: "take1" }).handlers["take.add"].undo(added)).toEqual({ kind: "skipped", reason: "gone" })
+  })
+
+  it("a transcript that arrives after the undo does not bring the take back", async () => {
+    const { wasTakeUndone } = await import("@/lib/audio/undone-takes")
+    const takes: Takes = { take1: {}, late: {} }
+    const { handlers } = cell(takes, { id: "late" })
+    await handlers["take.add"].undo({ ...added, audioId: "late" })
+    expect(wasTakeUndone("late")).toBe(true)
+    await handlers["take.add"].redo({ ...added, audioId: "late" })
+    expect(wasTakeUndone("late")).toBe(false)
+  })
+})
+
+describe("take.select that emptied a slot", () => {
+  it("undo plays the old take again; redo empties the slot again", async () => {
+    const select = vi.fn(async () => {})
+    let playing: string | null = null
+    const { handlers } = ctxFor({ take1: {} }, { selectedIn: () => playing, select })
+    const data = { cellId: "c", slot: "recording", before: "take1", after: null }
+    expect(await handlers["take.select"].undo(data)).toEqual({ kind: "done" })
+    expect(select).toHaveBeenLastCalledWith("c", "recording", "take1")
+    playing = "take1"
+    expect(await handlers["take.select"].redo(data)).toEqual({ kind: "done" })
+    expect(select).toHaveBeenLastCalledWith("c", "recording", null)
+  })
+})

@@ -14,6 +14,7 @@ import {
   serializeIdmlEditorDocument,
   type IdmlEditorConfiguration,
 } from "@/lib/richtext/idml-editor"
+import { applyIdmlSegmentEdge } from "@/lib/richtext/idml-segment-edge"
 
 const SOURCE_HTML =
   `<p data-idml-version="2">`
@@ -186,37 +187,34 @@ describe("TranslatedEditor — protected IDML mode", () => {
     expect(committed.valueHtml).not.toContain("idml-style-")
   })
 
-  it("steps ArrowRight from the end of one style run into the next", async () => {
+  it("locks typing and moves a bold run by its edge while style segments are visible", async () => {
     setVisibleStyleSegments(true)
     const onCommit = vi.fn()
+    const html = adjacentTarget("Hello world ", "fox")
     const { container } = render(
       <TranslatedEditor
-        cellId="idml-segment-arrow"
-        initialPlain={"Source\tSecond"}
-        initialHtml={SOURCE_HTML}
-        idmlConfiguration={CONFIGURATION}
+        cellId="idml-segment-edge"
+        initialPlain="Hello world fox"
+        initialHtml={html}
+        idmlConfiguration={ADJACENT_CONFIGURATION}
         onCommit={onCommit}
       />,
     )
     await act(async () => { await Promise.resolve() })
     const surface = container.querySelector(".ProseMirror") as EditorSurface
+    expect(surface.getAttribute("contenteditable")).toBe("false")
     const editor = surface.editor!
-    let end = -1
-    editor.state.doc.descendants((node, position) => {
-      if (end >= 0) return false
-      if (node.type.name !== "idmlSlot") return true
-      end = position + 1 + node.content.size
-      return false
-    })
     act(() => {
-      fireEvent.focus(surface)
-      editor.view.dispatch(
-        editor.state.tr.setSelection(TextSelection.create(editor.state.doc, end)),
-      )
-      fireEvent.keyDown(surface, { key: "ArrowRight" })
+      fireEvent.keyDown(surface, { key: "Z" })
     })
-    expect(editor.state.selection.$from.parent.attrs.slot).toBe(1)
-    expect(editor.state.selection.$from.parentOffset).toBe(0)
+    expect(slotVisibleText(surface, 0)).toBe("Hello world ")
+    expect(slotVisibleText(surface, 1)).toBe("fox")
+
+    act(() => {
+      applyIdmlSegmentEdge(editor.view, 1, "start", 6)
+    })
+    expect(slotVisibleText(surface, 0)).toBe("Hello ")
+    expect(slotVisibleText(surface, 1)).toBe("world fox")
   })
 
   it("places the caret inside an empty protected slot when the editor is activated", async () => {

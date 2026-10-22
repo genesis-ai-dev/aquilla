@@ -14,9 +14,13 @@ vi.mock("@/lib/frontier/admin", () => ({
   resetAdminWords: vi.fn(),
   grantAdminCredits: vi.fn(),
   resetAdminCredits: vi.fn(),
+  patchAdminOrgPlan: vi.fn(),
+  getAdminWouldBlock: vi.fn(),
 }))
 
 import {
+  getAdminWouldBlock,
+  patchAdminOrgPlan,
   patchAdminWeeklyAllowance,
   getAdminBillingOrgs,
   getAdminBillingPlans,
@@ -45,6 +49,16 @@ const CATALOG: AdminBillingPlans = {
     fieldCreditsPerCycle: 1_000,
     addonCredits: 1_000,
     enterpriseCreditsPerLanguagePerYear: 10_000,
+    freeWeeklyRawUsd: 1,
+    teamMultipleOfFree: 24,
+    unitsPerRawUsd: 400,
+    teamCost: {
+      teamWeeklyRawUsd: 24,
+      teamWeeklyRevenueUsd: 5_000 / 52,
+      costShareOfRevenue: 24 / (5_000 / 52),
+      maxCostShare: 0.25,
+      exceedsMaxShare: false,
+    },
   },
   version: 1,
   stripeConfigured: false,
@@ -73,6 +87,13 @@ const ORG: AdminBillingOrg = {
   includedCreditsOverride: null,
   billedLanguageCountOverride: null,
   wordsPerCredit: 100,
+  weeklyAllowance: null,
+  tier: "team",
+  contractEndsAt: null,
+  resolvedTier: "team",
+  planSource: "stored",
+  graceEndsAt: null,
+  effectiveWeeklyAllowance: 9_600,
 }
 
 /** Enterprise partner with a persisted capacity period — the AQU-1212 case. */
@@ -81,6 +102,9 @@ const ENTERPRISE_ORG: AdminBillingOrg = {
   orgId: 2,
   orgName: "Biblica",
   plan: "enterprise",
+  tier: "enterprise",
+  resolvedTier: "enterprise",
+  effectiveWeeklyAllowance: null,
   periodStart: "2026-01-01T00:00:00.000Z",
   periodEnd: "2026-01-29T00:00:00.000Z",
   languageCount: 5,
@@ -92,6 +116,8 @@ beforeEach(() => {
   mockOrgs.mockResolvedValue([ORG, ENTERPRISE_ORG])
   mockSave.mockResolvedValue({ plan: CATALOG.plan, version: 2, warnings: [] })
   mockGrant.mockResolvedValue()
+  vi.mocked(getAdminWouldBlock).mockResolvedValue({ meterMode: "shadow", orgs: [] })
+  vi.mocked(patchAdminOrgPlan).mockResolvedValue()
 })
 afterEach(() => vi.restoreAllMocks())
 
@@ -222,7 +248,76 @@ it('sets and clears a partner weekly grant without changing its Stripe plan', as
   vi.mocked(patchAdminWeeklyAllowance).mockResolvedValue()
   render(<AdminBillingSection jwt="jwt" />)
   const input = await screen.findByLabelText('weekly allowance for Biblica')
-  fireEvent.change(input, { target: { value: '1000' } })
+  // AQU-2067: admins state allowances in raw provider dollars, not meter units.
+  fireEvent.change(input, { target: { value: '2.5' } })
   fireEvent.blur(input)
-  await waitFor(() => expect(patchAdminWeeklyAllowance).toHaveBeenCalledWith('jwt', 2, 1000))
+  await waitFor(() => expect(patchAdminWeeklyAllowance).toHaveBeenCalledWith('jwt', 2, 2.5))
+})
+
+// AQU-2067 (unified billing T10). Team is a multiple of Free, so the admin
+// must see Team's worst-case raw cost before saving a Free change, and be
+// warned when it passes 25% of Team revenue (spec Q7).
+describe('Free cap → Team implied cost', () => {
+  it('shows Team at 24× Free and warns only once Team passes 25% of revenue', async () => {
+    render(<AdminBillingSection jwt="jwt" />)
+    const line = await screen.findByTestId('team-implied-cost')
+    expect(line.textContent).toMatch(/\$24\.00\/week raw/)
+    expect(screen.queryByTestId('team-cost-warning')).toBeNull()
+    fireEvent.change(screen.getByLabelText('Free weekly AI allowance ($ raw provider cost; Team follows)'), {
+      target: { value: '2' },
+    })
+    expect(screen.getByTestId('team-implied-cost').textContent).toMatch(/\$48\.00\/week raw/)
+    expect(screen.getByTestId('team-cost-warning')).toBeDefined()
+  })
+})
+
+describe('per-org plan control', () => {
+  it('replaces Explore/Field with free | team | enterprise and saves the plan', async () => {
+    render(<AdminBillingSection jwt="jwt" />)
+    const select = (await screen.findByLabelText('plan for Come and See')) as HTMLSelectElement
+    expect([...select.options].map(o => o.value)).toEqual(['free', 'team', 'enterprise'])
+    fireEvent.change(select, { target: { value: 'enterprise' } })
+    await waitFor(() => expect(patchAdminOrgPlan).toHaveBeenCalledWith('jwt', 1, { tier: 'enterprise', contractEndsAt: null }))
+  })
+
+  it('sets an Enterprise contract end date', async () => {
+    render(<AdminBillingSection jwt="jwt" />)
+    const date = await screen.findByLabelText('contract end for Biblica')
+    fireEvent.change(date, { target: { value: '2027-01-31' } })
+    fireEvent.blur(date)
+    await waitFor(() => expect(patchAdminOrgPlan).toHaveBeenCalledWith('jwt', 2,
+      { tier: 'enterprise', contractEndsAt: '2027-01-31T00:00:00Z' }))
+  })
+
+  it('shows the grace state after an Enterprise contract ends', async () => {
+    mockOrgs.mockResolvedValue([{
+      ...ENTERPRISE_ORG, contractEndsAt: '2026-10-10T00:00:00.000Z', resolvedTier: 'team',
+      planSource: 'contract_grace', graceEndsAt: '2026-10-24T00:00:00.000Z', effectiveWeeklyAllowance: 9_600,
+    }])
+    render(<AdminBillingSection jwt="jwt" />)
+    expect((await screen.findByTestId('plan-status-2')).textContent).toBe('Contract ended · Team-sized grace until 2026-10-24')
+  })
+})
+
+describe('would-block report', () => {
+  it('lists each org with its users and rails for both periods', async () => {
+    vi.mocked(getAdminWouldBlock).mockResolvedValue({
+      meterMode: 'shadow',
+      orgs: [{
+        orgId: 1, orgName: 'Come and See', tier: 'free', pctUsed: 1.2, lastAt: '2026-10-20T00:00:00Z',
+        current: { requests: 3, rawUsd: 1.5, byRail: { llm: 2, agent: 1 }, users: [
+          { userId: 4, username: 'wendi', requests: 2, rails: ['llm'] },
+          { userId: null, username: null, requests: 1, rails: ['agent'] },
+        ] },
+        previous: { requests: 0, rawUsd: 0, byRail: {}, users: [] },
+      }],
+    })
+    render(<AdminBillingSection jwt="jwt" />)
+    const row = await screen.findByTestId('would-block-1')
+    expect(row.textContent).toContain('120%')
+    expect(row.textContent).toContain('3 blocked · $1.50 raw')
+    expect(row.textContent).toContain('wendi ×2 (llm)')
+    expect(row.textContent).toContain('background work ×1 (agent)')
+    expect(screen.getByTestId('meter-mode').textContent).toContain('shadow')
+  })
 })

@@ -354,6 +354,40 @@ describe("VoiceLibraryPanel — AQU-365 role gating", () => {
     expect(screen.getAllByRole("button", { name: /More voice actions/ }).length).toBeGreaterThan(0)
   })
 
+  it("keeps New voice disabled for a project lead until the project allows it", () => {
+    setupWithRole(ROLE.PROJECT_LEAD)
+    expect((screen.getByRole("button", { name: /New voice/ }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it("enables New voice for a project lead when the project allows it", () => {
+    const onSettingsChange = vi.fn()
+    const narrator = makeVoice()
+    render(
+      <VoiceLibraryPanel
+        projectId="dev-project"
+        settings={{ provider: "gemini", voices: [narrator], defaultVoiceId: narrator.id }}
+        onSettingsChange={onSettingsChange}
+        roleLevel={ROLE.PROJECT_LEAD}
+        leadsManageVoices
+      />,
+    )
+    expect((screen.getByRole("button", { name: /New voice/ }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it("keeps New voice disabled for a contributor even when the project allows leads", () => {
+    const narrator = makeVoice()
+    render(
+      <VoiceLibraryPanel
+        projectId="dev-project"
+        settings={{ provider: "gemini", voices: [narrator], defaultVoiceId: narrator.id }}
+        onSettingsChange={vi.fn()}
+        roleLevel={ROLE.CONTRIBUTOR}
+        leadsManageVoices
+      />,
+    )
+    expect((screen.getByRole("button", { name: /New voice/ }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
   it("fails open (New voice enabled) when roleLevel is not provided (local/legacy project)", () => {
     setupWithRole(null)
     const button = screen.getByRole("button", { name: /New voice/ }) as HTMLButtonElement

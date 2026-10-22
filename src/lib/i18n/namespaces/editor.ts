@@ -4505,13 +4505,13 @@ export const editor = defineNamespace({
         description:
           "Label of the switch that draws bold and italic runs as small inline " +
           "blocks inside the cell, once a translation has been placed into those " +
-          "runs. An empty untranslated cell stays blank. Regular text stays " +
-          "ordinary, so the translator types around those blocks and can click or " +
-          "arrow into one to type that phrase in bold or italic. An empty block " +
-          "in a placed translation shows a faint name until they type. Consecutive " +
-          "regular runs are one typing space: an empty one shows a single faint " +
-          "Regular, with no box and no gap between the runs. Applies to this " +
-          "browser only.",
+          "runs. An empty untranslated cell stays blank and can still be typed. " +
+          "After the words are in the runs, the cell stops accepting typing so " +
+          "the side of a bold or italic block can be dragged, like resizing a " +
+          "window, to take in or give back whole words. Turning the switch off " +
+          "makes the cell editable again. An empty block shows a faint name. " +
+          "Consecutive regular runs stay one sentence, with no box. Applies to " +
+          "this browser only.",
         maxLength: 32,
       },
       "editor.view.lowMemory": {

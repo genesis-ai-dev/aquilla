@@ -360,6 +360,16 @@ export interface AdminFieldPlan {
   teamWeeklyRawUsd?: number
   freeWeeklyUnits?: number
   teamWeeklyUnits?: number
+  /** AQU-2067: Team's raw cost at 100% use against its weekly revenue (spec Q7). */
+  teamCost?: {
+    teamWeeklyRawUsd: number
+    teamWeeklyRevenueUsd: number
+    costShareOfRevenue: number
+    maxCostShare: number
+    exceedsMaxShare: boolean
+  }
+  /** Meter units per raw provider dollar; admin display only. */
+  unitsPerRawUsd?: number
   name: string
   intervalDays: number
   priceCents: number
@@ -376,8 +386,12 @@ export interface AdminFieldPlan {
   enterpriseCreditsPerLanguagePerYear: number
 }
 
+export type BillingMeterMode = "off" | "shadow" | "enforce"
+export type OrgTier = "free" | "team" | "enterprise"
+
 export interface AdminBillingPlans {
   weeklyUsageEnforced?: boolean
+  meterMode?: BillingMeterMode
   plan: AdminFieldPlan
   version: number
   stripeConfigured: boolean
@@ -387,6 +401,15 @@ export interface AdminBillingPlans {
 export interface AdminBillingOrg {
   ownerUsername?: string | null
   weeklyAllowance?: number | null
+  /** AQU-2067: the plan an admin set (org_billing.tier). */
+  tier: OrgTier
+  contractEndsAt: string | null
+  /** What the resolver answers now: Stripe Team or a contract grace can differ from `tier`. */
+  resolvedTier: OrgTier
+  planSource: "default" | "stored" | "stripe" | "contract_grace"
+  graceEndsAt: string | null
+  /** Meter units per week in effect; null = unmetered. */
+  effectiveWeeklyAllowance: number | null
   orgId: number
   orgName: string | null
   plan: "none" | "explore" | "field" | "enterprise"
@@ -650,11 +673,52 @@ export async function sendAdminRetentionReport(
   return (await res.json()) as { subject: string }
 }
 
-export async function patchAdminWeeklyAllowance(jwt: string, orgId: number, allowance: number | null) {
+/** AQU-2067: the per-org override in raw provider dollars; null = plan default. */
+export async function patchAdminWeeklyAllowance(jwt: string, orgId: number, allowanceRawUsd: number | null) {
   const res = await fetchWithTimeout(
     `${FRONTIER_BASE}/api/v2/admin/billing/org/${orgId}/weekly-allowance`,
     { method: 'PATCH', headers: { ...authHeaders(jwt), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ allowance, reason: 'Admin weekly capacity adjustment' }) },
+      body: JSON.stringify({ allowanceRawUsd, reason: 'Admin weekly capacity adjustment' }) },
   )
   if (!res.ok) throw new UserError(res.status, await readError(res))
+}
+
+/** AQU-2067: set an org's plan. contractEndsAt applies to Enterprise only. */
+export async function patchAdminOrgPlan(
+  jwt: string,
+  orgId: number,
+  plan: { tier: OrgTier; contractEndsAt?: string | null },
+) {
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/admin/billing/org/${orgId}/plan`,
+    { method: 'PATCH', headers: { ...authHeaders(jwt), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...plan, reason: 'Admin plan change' }) },
+  )
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+}
+
+export interface WouldBlockPeriod {
+  requests: number
+  rawUsd: number
+  byRail: Partial<Record<string, number>>
+  /** userId null is background work with no live user. */
+  users: { userId: number | null; username: string | null; requests: number; rails: string[] }[]
+}
+
+export interface WouldBlockOrg {
+  orgId: number
+  orgName: string | null
+  current: WouldBlockPeriod
+  previous: WouldBlockPeriod
+  lastAt: string
+  tier?: OrgTier
+  /** Share of this period's allowance used; null = unmetered. */
+  pctUsed?: number | null
+}
+
+/** AQU-2067: shadow-mode would-block report (spec §5.4). */
+export async function getAdminWouldBlock(jwt: string): Promise<{ meterMode: BillingMeterMode; orgs: WouldBlockOrg[] }> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/billing/would-block`, { headers: authHeaders(jwt) })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return (await res.json()) as { meterMode: BillingMeterMode; orgs: WouldBlockOrg[] }
 }

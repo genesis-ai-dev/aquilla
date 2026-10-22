@@ -785,6 +785,48 @@ textarea,
   min-height: 0;
 }
 
+/* While style segments are visible, a placed translation is adjusted by
+   dragging the side of a bold or italic box, the way a window is resized.
+   The bar is the grab. The resize cursor is set on the slot itself. */
+[data-segment-edge-mode] {
+  user-select: none;
+  -webkit-user-select: none;
+}
+[data-segment-edge-mode] [data-idml-protected="slot"][data-segment-edge="left"] {
+  cursor: ew-resize;
+  box-shadow:
+    inset 2px 0 0 color-mix(in oklch, var(--color-foreground) 55%, transparent),
+    inset 0 0 0 1px color-mix(in oklch, var(--color-foreground) 28%, transparent);
+}
+[data-segment-edge-mode] [data-idml-protected="slot"][data-segment-edge="right"] {
+  cursor: ew-resize;
+  box-shadow:
+    inset -2px 0 0 color-mix(in oklch, var(--color-foreground) 55%, transparent),
+    inset 0 0 0 1px color-mix(in oklch, var(--color-foreground) 28%, transparent);
+}
+/* During a drag the box is the words still inside it, and the plain runs it
+   can take from or give to are underlined. The fixed bar is the cut itself,
+   including when the pointer has moved past the box to drop words. */
+[data-segment-edge-mode][data-segment-dragging] [data-segment-drag-region="emphasis"] {
+  box-shadow: inset 0 0 0 1.5px color-mix(in oklch, var(--color-foreground) 62%, transparent);
+}
+[data-segment-edge-mode][data-segment-dragging] [data-segment-drag-region="plain"] {
+  background-color: color-mix(in oklch, var(--color-foreground) 7%, transparent);
+  box-shadow: inset 0 -2px 0 color-mix(in oklch, var(--color-foreground) 50%, transparent);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.aq-segment-drag-guide {
+  position: fixed;
+  z-index: 80;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  pointer-events: none;
+  background: var(--color-foreground);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-background, white) 65%, transparent);
+}
+
 /* Audio view (Sam, 2026-09-28): a line's waveform and its audio check point at
    each other, since a validated line shows the same green check for text and
    audio. Pointing at the audio check outlines the waveform it is about;

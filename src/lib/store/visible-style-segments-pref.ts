@@ -5,6 +5,9 @@
  * Off unless the user opts in. A missing key reads as off, which is how every
  * cell looked before this preference existed.
  *
+ * Once a translation sits in the runs, the target cell stops taking keystrokes
+ * while this is on, so the edges of the bold and italic boxes can be dragged.
+ *
  * Key schema: `aq.visible-style-segments.v1` (value `"on"`; absent = off).
  */
 

@@ -26,6 +26,8 @@ describe("neon-target hands the backfill its flags", () => {
     // a refused production apply into a silent dry run.
     expect(childArgs("prune-phantom-voices", ["--apply", "--production", "--only", "p1"]))
       .toEqual(["scripts/neon-prune-phantom-voices.ts", "--apply", "--production", "--only", "p1"])
+    expect(childArgs("fold-cast-by-character", ["--apply", "--production", "--only", "p1"]))
+      .toEqual(["scripts/neon-fold-cast-by-character.ts", "--apply", "--production", "--only", "p1"])
     // AQU-1953: the seed extract reads --no-upload itself (one-off hand-off, no R2 put).
     expect(childArgs("seed-extract", ["--no-upload"]))
       .toEqual(["scripts/seed-extract.ts", "--no-upload"])

@@ -1023,6 +1023,18 @@ export const importExport = defineNamespace({
     "importExport.notices.basicParserFallback":
       "Aquilla could not verify this structured layout with AI, so it used the basic parser. Check " +
       "the preview carefully before importing.",
+    "importExport.notices.subtitleShortFormTimestamps": plural({
+      one:
+        "{count} cue time left out the hours (01:03.209) and was read as minutes and seconds. " +
+        "Check that cue's wording in the preview.",
+      other:
+        "{count} cue times left out the hours (01:03.209) and were read as minutes and seconds. " +
+        "Check those cues' wording in the preview.",
+    }),
+    "importExport.notices.subtitleCuesUnreadable": plural({
+      one: "{count} cue time could not be read, so its wording is not in this import.",
+      other: "{count} cue times could not be read, so their wording is not in this import.",
+    }),
 
     // — Manifest normalization warnings: src/lib/import/normalized-manifest.ts —
     //   Per-unit diagnostics attached to NormalizedImportFile.warnings. Not
@@ -1534,6 +1546,27 @@ export const importExport = defineNamespace({
         'Importing a source document into a project and exporting a translation back out — the format pickers, per-format hints, upload progress, collision handling and failure messages. Importing is the very first action a translator takes in Aquilla, so these strings are read before any other working surface.',
     },
     keys: {
+      // Import preview notices for subtitle files (AQU-2119) — shown in the
+      // PreviewPanel's "Review before importing" list before anything is
+      // written, so a .vtt whose cue times leave out the hours is reported
+      // instead of quietly losing those cues.
+      "importExport.notices.subtitleShortFormTimestamps": {
+        description:
+          "Preview notice after importing a subtitle file whose cue times used WebVTT's short form (no hours). Aquilla read them as minutes and seconds and kept the cues; the notice exists because those cues used to disappear. Count-governed. '01:03.209' is a literal example of such a time — keep it as written.",
+        placeholders: {
+          count:
+            "Number of cue timestamps that were read as minutes and seconds; also governs the plural form.",
+        },
+      },
+      "importExport.notices.subtitleCuesUnreadable": {
+        description:
+          "Preview notice after importing a subtitle file in which some cue timestamp lines still could not be read, so those cues' words are not being imported. A loss the person needs to see before committing the import. Count-governed.",
+        placeholders: {
+          count:
+            "Number of cue timestamp lines that produced no cue; also governs the plural form.",
+        },
+      },
+
       // Timeline media import (AQU-1431) — the three dialogs that review segments
       // against a media file before anything is saved: the shared media import
       // preview, Attach captions, and Align script. In all of them {number} is a

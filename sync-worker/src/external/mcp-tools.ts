@@ -301,8 +301,8 @@ const TOOL_SPECS: McpToolSpec[] = [
   {
     name: 'transcribe_audio',
     description:
-      'Speech to text with word timings, including LOW-RESOURCE languages that ordinary ASR does not ' +
-      'know. Transcribes a cell\'s selected recorded take (fileId + cellId + laneId) or raw ' +
+      'Speech to text with word timings for supported languages, including low-resource languages. ' +
+      'Transcribes a cell\'s selected recorded take (fileId + cellId + laneId) or raw ' +
       'audio { data: <base64>, format: "wav" } (16 kHz mono PCM16; long audio is cut into windows ' +
       'for you). model: "auto" (default — Whisper for its 99 languages, Qwen3-ASR for Chinese ' +
       'varieties, Omnilingual CTC for 1,600+ others), or force "whisper" | "qwen3-asr" | "omni-ctc" | ' +

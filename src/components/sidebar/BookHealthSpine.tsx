@@ -267,14 +267,28 @@ function chapterFigures(chapter: BookHealthChapter): { text: string | null; audi
   }
 }
 
-/** The "x translated · y recorded" line under a chapter with no square map. */
-function chapterProgressWords(chapter: BookHealthChapter): string {
+/**
+ * The "x translated · y recorded" line under a chapter with no square map.
+ *
+ * AQU-2112: both halves are keyed. The translated half was two unkeyed
+ * literals in the JSX above (carried as suppressed i18n debt); it had to be
+ * touched to make room for the audio half, and a word a reader sees is not
+ * made translatable by moving it into a function, so it got a key instead.
+ */
+function chapterProgressWords(chapter: BookHealthChapter, t: TFunction): string {
   const view = viewOf(chapter)
-  const words = (part: number, word: string) =>
-    chapter.percentagesOnly ? `${part}% ${word}` : `${part}/${chapter.total} ${word}`
   const parts: string[] = []
-  if (view !== "audio") parts.push(words(chapter.translated, "translated"))
-  if (view !== "text") parts.push(words(chapter.audioRecorded ?? 0, "recorded"))
+  if (view !== "audio") {
+    parts.push(chapter.percentagesOnly
+      ? t("agentWorkspace.chapterPercentTranslated", { translated: chapter.translated })
+      : t("agentWorkspace.chapterCountTranslated", { translated: chapter.translated, total: chapter.total }))
+  }
+  if (view !== "text") {
+    const recorded = chapter.audioRecorded ?? 0
+    parts.push(chapter.percentagesOnly
+      ? t("agentWorkspace.chapterPercentRecorded", { recorded })
+      : t("agentWorkspace.chapterCountRecorded", { recorded, total: chapter.total }))
+  }
   return parts.join(" · ")
 }
 
@@ -421,7 +435,7 @@ export function BookHealthSpine({
                   </span>
                 ) : (
                   <span className="mt-0.5 block truncate text-[9px] text-muted-foreground/80">
-                    {chapterProgressWords(chapter)}
+                    {chapterProgressWords(chapter, t)}
                     {visual.measured && visual.score !== undefined && visual.score < 100
                       ? ` · health ${Math.round(visual.score)}`
                       : ""}

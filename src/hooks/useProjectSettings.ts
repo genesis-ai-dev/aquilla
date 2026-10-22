@@ -16,6 +16,7 @@ import {
   type ProjectSettingsEditor,
   settingsEditorName,
 } from "@/lib/sync/project-settings"
+import { readOfflineProjectSettings, rememberProjectSettingsOffline, whenOfflineStoreOpen } from "@/lib/sync/project-resolve"
 import type { ProjectOrgPolicy, ProjectVisibilityFloors } from "@/lib/sync/project-org-policy"
 import posthog from "@/lib/posthog"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
@@ -582,6 +583,13 @@ export function useProjectSettings(
     if (next?.orgMediaDefaults !== undefined) setOrgMediaDefaults(next.orgMediaDefaults)
     if (next?.lanes !== undefined) setLanes(next.lanes)
   }, [])
+  // A response the server actually returned (never an optimistic guess): also
+  // kept as the desktop's offline copy, so a cold offline open sees the
+  // settings as they were last saved, not as they were last fetched.
+  const writeServerConfirmed = useCallback((next: ProjectSettingsResponse | null) => {
+    writeServer(next)
+    if (projectId && jwt && next) rememberProjectSettingsOffline(projectId, jwt, next)
+  }, [projectId, jwt, writeServer])
 
   // Keep a ref so refresh's identity is stable across connectivity changes.
   const isOnlineRef = useRef(isOnline)
@@ -602,9 +610,27 @@ export function useProjectSettings(
   // Keep one request per mounted consumer in flight and let every caller await
   // the same result instead of stacking identical GETs.
   const refreshInFlightRef = useRef<Promise<ProjectSettingsResponse | null> | null>(null)
+  // Desktop, server unreachable: hydrate from the downloaded project's last
+  // settings response so the editor gets its lane rows and allows edits. Never
+  // marks hasFetched — anything that fails closed on it stays closed.
+  const hydrateFromOfflineCopy = useCallback(async () => {
+    if (!projectId || !jwt || serverRef.current) return
+    let cached = await readOfflineProjectSettings(projectId, jwt)
+    // The read gives up on a store that is slow to open (e.g. rebuilding after
+    // an update); read once more when it has opened rather than leave the
+    // editor without lane rows.
+    if (!cached && (await whenOfflineStoreOpen()) && aliveRef.current && !serverRef.current) {
+      cached = await readOfflineProjectSettings(projectId, jwt)
+    }
+    if (cached && aliveRef.current && !serverRef.current) writeServer(cached)
+  }, [projectId, jwt, writeServer])
+
   const refresh = useCallback(async (): Promise<ProjectSettingsResponse | null> => {
     if (!projectId || !jwt) return null
-    if (!isOnlineRef.current) return null
+    if (!isOnlineRef.current) {
+      void hydrateFromOfflineCopy()
+      return null
+    }
     if (refreshInFlightRef.current) return refreshInFlightRef.current
 
     const request = (async (): Promise<ProjectSettingsResponse | null> => {
@@ -619,10 +645,11 @@ export function useProjectSettings(
         // source lockdown treat un-fetched as locked), and do NOT clobber a
         // previously fetched server snapshot with null. The existing focus /
         // online / settings-updated revalidation paths retry the GET.
+        if (out.status === 0) void hydrateFromOfflineCopy()
         return null
       }
       const got = out.value
-      writeServer(got)
+      writeServerConfirmed(got)
       setHasFetched(true)
       const withinMs = got ? claimHydrationReport(projectId) : null
       if (got && withinMs !== null) {
@@ -704,7 +731,7 @@ export function useProjectSettings(
     } finally {
       if (refreshInFlightRef.current === request) refreshInFlightRef.current = null
     }
-  }, [projectId, jwt])
+  }, [projectId, jwt, hydrateFromOfflineCopy, writeServerConfirmed])
 
   // AQU-1816: what a writer that bypasses `patch` calls instead of a bare
   // `refresh()`. The broadcast reaches the sibling instances (and the overview's
@@ -865,13 +892,13 @@ export function useProjectSettings(
       if (!aliveRef.current) return
       const nonEmptyCount = Object.values(local).filter((v) => v !== "" && v != null).length
       if (out.kind === "ok") {
-        writeServer(out.value)
+        writeServerConfirmed(out.value)
         posthog.capture("project settings migrated", {
           project_id: projectId,
           fields_count: nonEmptyCount,
         })
       } else if (out.kind === "conflict") {
-        writeServer(out.latest)
+        writeServerConfirmed(out.latest)
         posthog.capture("project settings migration conflict", {
           project_id: projectId,
           fields_count: nonEmptyCount,
@@ -880,7 +907,7 @@ export function useProjectSettings(
       // forbidden / error: leave server at version 0; display is still backed
       // by local cache. A fresh hook instance will retry on next mount.
     })()
-  }, [hasFetched, server, canEdit, local, jwt, projectId])
+  }, [hasFetched, server, canEdit, local, jwt, projectId, writeServerConfirmed])
 
   const patch = useCallback(async (partial: ProjectWideSettings): Promise<PatchOutcome> => {
     // Gate logic for local apply vs. server write:
@@ -986,8 +1013,8 @@ export function useProjectSettings(
       // serialized writer runs. Without this, a back-to-back save would read
       // the optimistic version we wrote above and send the same `ifMatchVersion`
       // twice — guaranteed 409.
-      if (outcome.kind === "ok") writeServer(outcome.value)
-      else if (outcome.kind === "conflict") writeServer(outcome.latest)
+      if (outcome.kind === "ok") writeServerConfirmed(outcome.value)
+      else if (outcome.kind === "conflict") writeServerConfirmed(outcome.latest)
       return outcome
     })
     if (!aliveRef.current) return { kind: "ok" }
@@ -1066,7 +1093,7 @@ export function useProjectSettings(
       return rollbackRejectedKeys(prev, partial, snapTarget)
     })
     return { kind: "error", message: result.message, status: result.status }
-  }, [projectId, jwt, roleLevel, termbaseEditMinRole, languageEditFloor, refresh, runSerialized, t])
+  }, [projectId, jwt, roleLevel, termbaseEditMinRole, languageEditFloor, refresh, runSerialized, t, writeServerConfirmed])
 
   // AQU-1767 phase 2: let a history step read and write this project's
   // settings through this hook, wherever the person presses Undo.

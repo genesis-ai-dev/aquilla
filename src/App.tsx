@@ -21,6 +21,7 @@ import { OfflineStoreProvider } from "@/context/OfflineStoreContext"
 import { OfflineSyncManagerMount } from "@/components/OfflineSyncManagerMount"
 import { UnsyncedOfflineWorkGuard } from "@/components/UnsyncedOfflineWorkGuard"
 import { OfflineShutdownGuard } from "@/components/OfflineShutdownGuard"
+import { OfflineLaunchResume } from "@/components/OfflineLaunchResume"
 import { LocalLlmConfigMount } from "@/components/LocalLlmConfigMount"
 import { ConflictToast } from "@/components/ConflictToast"
 import { OfflineLeaderWatchdog } from "@/components/OfflineLeaderWatchdog"
@@ -378,6 +379,7 @@ export default function App() {
       <OfflineSyncManagerMount />
       <UnsyncedOfflineWorkGuard />
       <OfflineShutdownGuard />
+      <OfflineLaunchResume />
       <LocalLlmConfigMount />
       <TooltipProvider delay={600}>
         <SyncingProvider>

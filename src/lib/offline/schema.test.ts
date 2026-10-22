@@ -46,7 +46,8 @@ describe("projects", () => {
     )
     expect(store.query(tables.projects.select().where({ id: "proj1" }).first())).toMatchObject({
       name: "Renamed Project",
-      settings: null,
+      // Kept: a re-download must not wipe the stored settings response.
+      settings: { theme: "dark" },
     })
 
     store.commit(events.projectRemoved({ id: "proj1" }))

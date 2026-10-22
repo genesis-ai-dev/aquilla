@@ -20,7 +20,10 @@ import {
   streamFileCells as streamFileCellsDefault,
 } from "@/lib/sync/cells-read"
 import { resolveCloudProjectResult as resolveCloudProjectResultDefault } from "@/lib/sync/cloud-projects"
+import { jwtSubject } from "@/lib/frontier/session-refresh"
+import { fetchProjectSettingsResult as fetchProjectSettingsResultDefault } from "@/lib/sync/project-settings"
 import { fetchSyncToken as fetchSyncTokenDefault } from "@/lib/sync/sync-token"
+import { writeProjectSettingsSnapshot, writeProjectSnapshot } from "./project-snapshot"
 
 // sync-worker's file-list/cells routes verify a short-lived sync-token (see
 // cells-read.ts's header comment), never the raw session JWT — confirmed by
@@ -83,6 +86,7 @@ export function __resetDownloadProgressForTests(): void {
 
 export interface DownloadProjectDeps {
   resolveCloudProjectResult: typeof resolveCloudProjectResultDefault
+  fetchProjectSettingsResult: typeof fetchProjectSettingsResultDefault
   fetchSyncToken: typeof fetchSyncTokenDefault
   fetchProjectFiles: typeof fetchProjectFilesDefault
   streamFileCells: typeof streamFileCellsDefault
@@ -115,6 +119,7 @@ async function waitForVerifiedStore(deps: DownloadProjectDeps): Promise<void> {
 
 const defaultDeps: DownloadProjectDeps = {
   resolveCloudProjectResult: resolveCloudProjectResultDefault,
+  fetchProjectSettingsResult: fetchProjectSettingsResultDefault,
   fetchSyncToken: fetchSyncTokenDefault,
   fetchProjectFiles: fetchProjectFilesDefault,
   streamFileCells: streamFileCellsDefault,
@@ -197,6 +202,18 @@ export async function downloadProjectOffline(
         syncedAt: new Date(),
       }),
     )
+    // Lets the project open after the app starts with no connection — for
+    // this account only (project-snapshot.ts).
+    const owner = jwtSubject(jwt)
+    if (owner) writeProjectSnapshot(store, summary, owner)
+    // ...and be edited there: without its settings the editor has no lane rows.
+    // Fetched here because useProjectSettings' own GET usually ran before this
+    // download created the row, so it had nowhere to keep the response.
+    const settingsResult = await deps.fetchProjectSettingsResult(jwt, projectId)
+    if (!settingsResult.ok) {
+      throw new Error(`downloadProjectOffline: could not fetch settings for ${projectId} (${settingsResult.status})`)
+    }
+    if (owner && settingsResult.value) writeProjectSettingsSnapshot(store, projectId, settingsResult.value, owner)
 
     const { token: syncToken } = await deps.fetchSyncToken(jwt, projectId, OFFLINE_DOWNLOAD_TOKEN_FILE_ID)
 

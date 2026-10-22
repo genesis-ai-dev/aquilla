@@ -247,14 +247,21 @@ describe('read-only output', () => {
 })
 
 describe('transcription_status', () => {
-  it('asks auth-worker to warm the model, then returns its state', async () => {
+  it.each([false, true])('routes model status with warm=%s through MCP', async (warm) => {
     const token = await credToken({ userId: 2 })
     reply = () => Response.json({ state: 'starting', estGpuSecPerAudioSec: 0.5 })
-    const res = await post(token, { model: 'omni-zs', warm: true }, true)
-    expect(await res.json()).toEqual({ state: 'starting', estGpuSecPerAudioSec: 0.5 })
+    const res = await handleExternalMcpRequest(new Request('https://w/api/v1/external/mcp', {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
+        name: 'transcription_status', arguments: { projectId: PROJECT, model: 'omni-zs', warm },
+      } }),
+    }), makeEnv())
+    const body = await res!.json() as { result: { content: { text: string }[]; isError?: boolean } }
+    expect(body.result.isError).not.toBe(true)
+    expect(JSON.parse(body.result.content[0].text)).toMatchObject({ state: 'starting', estGpuSecPerAudioSec: 0.5 })
     expect(calls[0]).toMatchObject({
       url: `${AUTH_URL}/api/v1/audio/internal/transcriptions/status`,
-      body: { projectId: PROJECT, userId: '2', model: 'omni-zs', action: 'warm' },
+      body: { projectId: PROJECT, userId: '2', model: 'omni-zs', action: warm ? 'warm' : 'status' },
     })
   })
 })

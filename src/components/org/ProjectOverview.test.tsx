@@ -164,6 +164,20 @@ vi.mock("@/lib/frontier/portfolio", () => ({
   DEADLINE_SOON_WINDOW_MS: 7 * 24 * 60 * 60 * 1000,
   isDeadlineOverdue: (deadlineUtcMidnight: number, nowMs: number) =>
     nowMs >= deadlineUtcMidnight + (24 + 12) * 60 * 60 * 1000,
+  // AQU-2116: real implementation, not a stub — the Progress card's whole text
+  // half hangs off this rule, so a wrong stub here would hide it.
+  isAudioOnlyView: (
+    p: { filledCells: number; audioCells: number; lanes?: Array<{ filledCells: number; role?: string }> },
+    lane: { filledCells: number; audioCells?: number } | null,
+  ) => {
+    if (lane != null) {
+      if (lane.audioCells == null) return false
+      return lane.filledCells === 0 && lane.audioCells > 0
+    }
+    const textAnywhere =
+      p.filledCells > 0 || (p.lanes ?? []).some((l) => l.role !== "source" && l.filledCells > 0)
+    return !textAnywhere && p.audioCells > 0
+  },
   // AQU-538 §3.3: real per-lane helpers so the lane table/tiles compute true %s.
   laneTranslatedPct: (l: { filledCells: number; totalCells: number }) => (l.totalCells > 0 ? l.filledCells / l.totalCells : 0),
   laneValidatedPct: (l: { validatedCells: number; totalCells: number }) => (l.totalCells > 0 ? l.validatedCells / l.totalCells : 0),
@@ -783,15 +797,15 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
 
     // Has Audio (coverage) tile should appear
     await waitFor(() => expect(screen.getAllByText("Has audio").length).toBeGreaterThan(0))
-    // Translated and Validated must NOT appear (filledCells === 0 means showText is false,
-    // but note: totalCells > 0 means hasText=true in current logic which guards on totalCells.
-    // The real guard is audioCells > 0 for audio, and totalCells > 0 for text.
-    // For audio-only: filledCells=0 but totalCells=100, so text bars still show.
-    // Per AQU-168 spec: hide text metrics only when "no text content (translatable cells > 0)".
-    // totalCells > 0 means there IS translatable content, so text bars appear even if empty.
-    // The audio-only guard is specifically: audioCells > 0 shows Has Audio, always shows text when totalCells > 0.
-    // This test therefore confirms Has Audio appears when audioCells > 0.
-    expect(screen.getAllByText("Has audio").length).toBeGreaterThan(0)
+    // AQU-2116: and the text figures are GONE. The card used to read
+    // "Translated 0% · Validated 0%" beside these real audio numbers, because
+    // the text tiles only ever asked whether the project had cells at all; a PM
+    // read those zeroes as "the verifications never registered".
+    const card = screen.getByTestId("progress-card")
+    expect(within(card).queryByText("Translated")).not.toBeInTheDocument()
+    expect(within(card).queryByText("Validated")).not.toBeInTheDocument()
+    expect(within(card).queryByTestId("stat-bar-textTranslated")).not.toBeInTheDocument()
+    expect(within(card).queryByTestId("stat-bar-textValidated")).not.toBeInTheDocument()
     // AQU-1092: the tile used to render a hardcoded "N/A" because the metric
     // was said not to exist. It does (cell_audio.approved, counted by the org
     // portfolio), so the tile shows a real number.
@@ -802,6 +816,63 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     expect(screen.getAllByText("Audio Validated")).toHaveLength(2)
     expect(screen.getAllByText("15%")).toHaveLength(2)
     expect(screen.queryByText("N/A")).not.toBeInTheDocument()
+
+    // While they are hidden the Customize menu does not offer them either.
+    fireEvent.click(screen.getByTestId("customize-stats-trigger"))
+    await screen.findByTestId("customize-stat-audio-validated")
+    expect(screen.queryByTestId("customize-stat-translated")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("customize-stat-validated")).not.toBeInTheDocument()
+  })
+
+  it("AQU-2116: one target cell of text brings Translated/Validated back", async () => {
+    // Evidence both ways: the work became text work, so the text figures are
+    // owed again — and the Audio Validated figure must not budge.
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "John", totalCells: 100,
+      filledCells: 1, // somebody wrote one target cell
+      validatedCells: 0, aiDraftedCells: 0,
+      audioCells: 60, validatedAudioCells: 15,
+      recordedMs: 90000, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null,
+    }])
+    renderOverview()
+
+    const card = await screen.findByTestId("progress-card")
+    await waitFor(() => expect(within(card).getAllByText("Translated").length).toBeGreaterThan(0))
+    expect(within(card).getAllByText("Validated").length).toBeGreaterThan(0)
+    expect(within(card).getByTestId("stat-bar-textTranslated")).toHaveTextContent("1/100 cells")
+    // Unchanged by this fix: 15 of 100 cells.
+    expect(within(card).getByTestId("stat-bar-audioValidated")).toHaveTextContent("15/100 cells")
+  })
+
+  it("AQU-2116: a language that records audio but has recorded nothing still shows its text figures", async () => {
+    // Absence of text is not evidence on its own — a text project on day one
+    // has none either. Only recordings with no text read as audio-only.
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "John", totalCells: 100, filledCells: 0, validatedCells: 0,
+      aiDraftedCells: 0,
+      audioTotalCells: 100, recordsAudio: true,
+      audioCells: 0, validatedAudioCells: 0,
+      recordedMs: 0, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null,
+    }])
+    renderOverview()
+
+    const card = await screen.findByTestId("progress-card")
+    await waitFor(() => expect(within(card).getAllByText("Translated").length).toBeGreaterThan(0))
+    expect(within(card).getAllByText("Validated").length).toBeGreaterThan(0)
   })
 
   // AQU-489: a PM who has never seen the dashboard must be able to name what
@@ -2601,6 +2672,38 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     // Back to All restores the cross-lane figures.
     fireEvent.click(screen.getByRole("tab", { name: "All" }))
     await waitFor(() => expect(statTile("Translated")).toHaveTextContent("50%"))
+  })
+
+  it("AQU-2116: an audio-only language tab hides the text figures; the text language's tab and All keep them", async () => {
+    // One project, two languages: Bambara records and writes nothing, es
+    // writes. The rule follows the tab being viewed, and "All" only drops the
+    // text figures when NO target language has any text.
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject({
+      audioCells: 60, validatedAudioCells: 40,
+      lanes: [
+        { ...TWO_LANES[0], filledCells: 0, validatedCells: 0, audioCells: 60, validatedAudioCells: 40 },
+        { ...TWO_LANES[1], audioCells: 0, validatedAudioCells: 0 },
+      ],
+    })])
+    renderOverview()
+
+    await screen.findByTestId("lane-filter-tabs")
+    const card = screen.getByTestId("progress-card")
+
+    // All: es has text, so the text figures stay.
+    expect(within(card).getAllByText("Translated").length).toBeGreaterThan(0)
+
+    // Bambara (the default lane): recorded, no text → audio figures only.
+    fireEvent.click(screen.getByRole("tab", { name: "Bambara" }))
+    await waitFor(() => expect(within(card).queryByText("Translated")).not.toBeInTheDocument())
+    expect(within(card).queryByTestId("stat-bar-textValidated")).not.toBeInTheDocument()
+    expect(statTile("Audio Validated")).toHaveTextContent("20%") // 40 of 200 cells
+
+    // es: has text, owes no audio → its text figures are untouched.
+    fireEvent.click(screen.getByRole("tab", { name: "es" }))
+    await waitFor(() => expect(within(card).getAllByText("Translated").length).toBeGreaterThan(0))
+    expect(statTile("Translated")).toHaveTextContent("20%") // 20 of its 100 cells
   })
 
   it("AQU-1951: a language tab shows that language's recordings, over the project's audio cells", async () => {

@@ -10909,10 +10909,10 @@ export function ProjectWorkspace() {
   // Read off the UNGATED map, not `workspaceAudioByCellId`: the picker lives
   // in the text lens, where the gated map is empty for anyone who may not
   // restructure cells, and a contributor validating takes there is exactly
-  // who needs the figure to move. The requirement is the project's audio
-  // one, resolved project → org → 1 — the same threshold the cell's audio
-  // validation control and the server's progress counts apply.
-  const audioValidationRequirement = project ? readValidationCountAudio(project) : 1
+  // who needs the figure to move. The requirement is `audioValidationRequirement`
+  // declared above (AQU-2111): the project's audio one, resolved project → org
+  // → 1 — the same threshold the cell's audio validation control and the
+  // server's progress counts apply.
   const audioProgressIds = useMemo(
     () => audioProgressCellIds(audioValidationByCellId, audioValidationRequirement),
     [audioValidationByCellId, audioValidationRequirement],

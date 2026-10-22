@@ -23,7 +23,12 @@ describe("last workspace", () => {
   it.each([
     ["/", true],
     ["/orgs/all", true],
+    ["/orgs", true],
+    ["/orgs/46446", true],
     ["/orgs/46446/overview", true],
+    ["/orgs/46446/projects", true],
+    ["/orgs/46446/members", false],
+    ["/orgs/46446/teams/7", false],
     ["/project/p1/editor", false],
     ["/login", false],
   ])("treats %s as a launch landing: %s", (path, expected) => {

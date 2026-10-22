@@ -34,7 +34,12 @@ export function readLastWorkspace(username: string): LastWorkspace | null {
   }
 }
 
+// `/`, then an org home: the org index redirects members to /overview and
+// guests to /projects. Any other org page (members, settings, …) is one the
+// user went to, so a resume must not pull them off it.
+const LAUNCH_LANDING_PATH = /^\/(?:orgs(?:\/[^/]+(?:\/(?:overview|projects))?)?\/?)?$/
+
 /** Where a launch lands before anything is opened: `/`, then the org home. */
 export function isLaunchLandingPath(pathname: string): boolean {
-  return pathname === "/" || pathname === "/orgs" || pathname.startsWith("/orgs/")
+  return LAUNCH_LANDING_PATH.test(pathname)
 }

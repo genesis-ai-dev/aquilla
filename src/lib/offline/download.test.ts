@@ -12,6 +12,8 @@ import {
 } from "./download"
 import type { CellRow, FileSummary } from "@/lib/sync/cells-read-types"
 import type { ResolveProjectResult } from "@/lib/sync/cloud-projects"
+import type { ProjectSettingsResponse } from "@/lib/sync/project-settings"
+import { readProjectSettingsSnapshot } from "./project-snapshot"
 
 let store: Store<typeof schema>
 let storeId = 0
@@ -46,6 +48,14 @@ function cellRow(overrides: Partial<CellRow> & Pick<CellRow, "cellId" | "side">)
   }
 }
 
+const settingsResponse = {
+  version: 3,
+  updatedAt: "",
+  updatedBy: null,
+  settings: { targetLanguage: "fr" },
+  lanes: [],
+} as unknown as ProjectSettingsResponse
+
 function fakeDeps(overrides: Partial<DownloadProjectDeps> = {}): DownloadProjectDeps {
   const files: FileSummary[] = [
     {
@@ -76,6 +86,7 @@ function fakeDeps(overrides: Partial<DownloadProjectDeps> = {}): DownloadProject
   }
   return {
     resolveCloudProjectResult: async () => okResult,
+    fetchProjectSettingsResult: async () => ({ ok: true, value: settingsResponse }),
     fetchSyncToken: async () => ({ token: "sync-tok", expiresIn: 900, role: { level: 700, name: "owner", source: "creator" } }),
     fetchProjectFiles: async () => files,
     streamFileCells: async (_p, _fileId, _jwt, onPage) => {
@@ -109,6 +120,21 @@ describe("downloadProjectOffline", () => {
 
     const offlineRow = store.query(tables.offlineProjects.select().where({ projectId: "proj1" }).first())
     expect(offlineRow?.status).toBe("ready")
+  })
+
+  it("keeps the project's settings response so it can be edited offline", async () => {
+    await downloadProjectOffline(store, "proj1", "jwt", fakeDeps())
+    expect(readProjectSettingsSnapshot(store, "proj1")).toEqual(settingsResponse)
+  })
+
+  it("fails and rolls back when the settings can't be fetched", async () => {
+    await expect(
+      downloadProjectOffline(store, "proj1", "jwt", fakeDeps({
+        fetchProjectSettingsResult: async () => ({ ok: false, status: 502, message: "bad gateway" }),
+      })),
+    ).rejects.toThrow(/settings/)
+    expect(store.query(tables.projects.select().where({ id: "proj1" }).first())).toBeUndefined()
+    expect(store.query(tables.offlineProjects.select().where({ projectId: "proj1" }).first())).toBeUndefined()
   })
 
   it("clears progress after completion", async () => {
@@ -437,6 +463,7 @@ describe("recoverInterruptedDownloads", () => {
     const never = () => new Promise<never>(() => {})
     const stalled: DownloadProjectDeps = {
       resolveCloudProjectResult: never,
+      fetchProjectSettingsResult: never,
       fetchSyncToken: never,
       fetchProjectFiles: never,
       streamFileCells: never,

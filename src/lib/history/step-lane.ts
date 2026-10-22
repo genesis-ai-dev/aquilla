@@ -8,7 +8,13 @@
  * by every language, so their steps belong to none and run wherever you are.
  */
 
-/** Step kinds whose change every language shares. */
+/**
+ * Step kinds whose change every language shares. Any other kind belongs to the
+ * language it was made in — the right default for what later slices add
+ * (linking or unlinking a clip, placing one from the library: a clip lives in
+ * its language), which then only has to register its handler with
+ * `registerStepKinds` and record with `recordStep`.
+ */
 const LANE_FREE_KINDS: ReadonlySet<string> = new Set([
   "row.retime",
   "row.hidden",

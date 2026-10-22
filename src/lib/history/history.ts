@@ -254,12 +254,13 @@ async function readScope(key: string): Promise<void> {
   }
   const s = stacksFor(key)
   if (saved && s.revision == null) s.revision = saved.revision
-  const changed = mergeIn(key, incoming)
+  const recordedMeanwhile = s.undo.length + s.redo.length > 0
+  mergeIn(key, incoming)
   if (lanes.length > 0) {
     s.unpushed = true
     await writeLocal(key)
     await dropLaneHistories(projectId, username, lanes.map((l) => l.lane))
-  } else if (changed && saved) {
+  } else if (recordedMeanwhile && saved) {
     // Steps recorded before the read finished sit on top of the saved ones.
     scheduleSave(key)
   }
@@ -378,9 +379,13 @@ async function pushOnce(key: string): Promise<void> {
       return
     }
     if (res.history) mergeIn(key, res.history)
-    s.revision = res.revision
+    s.revision = newer(s.revision, res.revision)
   }
 }
+
+/** Revisions only grow: a read that left before a write of ours landed must
+ *  not take this copy back to an older one. */
+const newer = (a: number | null, b: number) => (a != null && a > b ? a : b)
 
 const pulls = new Map<string, Promise<"unchanged" | "merged" | null>>()
 
@@ -407,7 +412,7 @@ async function pullOnce(key: string): Promise<"unchanged" | "merged" | null> {
     return "unchanged"
   }
   const changed = res.history ? mergeIn(key, res.history) : false
-  s.revision = res.revision
+  s.revision = newer(s.revision, res.revision)
   // This copy holds something the server's lacks: send the merged one back.
   // (Nothing at all is not worth a row: opening a project writes nothing.)
   const hasSteps = s.undo.length + s.redo.length + s.gone.length > 0

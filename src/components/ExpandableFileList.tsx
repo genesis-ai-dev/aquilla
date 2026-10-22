@@ -52,7 +52,9 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { shouldDimUnassigned } from "@/lib/assignments/assigned-files"
 import type { FileFilterFocusHandle } from "@/hooks/useFileFilterFocus"
 
-interface FileStats { translated: number; validated: number; total: number }
+// AQU-2111: the shared shape, which now carries the audio pair too — a local
+// re-declaration would have dropped it silently on the way to FileRow.
+import type { FileStats } from "@/lib/progress/file-summary-progress"
 
 /** What the Reset-order confirmation needs to remember while it is open: which
  *  group is being reset, how to label it, and the writes that will clear it. */

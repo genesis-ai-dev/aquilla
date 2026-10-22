@@ -344,6 +344,9 @@ export const nav = defineNamespace({
     "nav.fileRow.timelineOrderedFile": "Timeline-ordered file",
     "nav.fileRow.importedAsTooltip": "{name} (imported as {originalName})",
     "nav.fileRow.progressAriaLabel": "{translated}% translated, {validated}% validated",
+    "nav.fileRow.audioProgressAriaLabel": "{recorded}% recorded, {audioValidated}% audio validated",
+    "nav.fileRow.progressWithAudioAriaLabel":
+      "{translated}% translated, {validated}% validated, {recorded}% recorded, {audioValidated}% audio validated",
     "nav.fileRow.fileActions": "File actions",
     // Export menu item reuses nav.workspaceActions.export (same phrase, same act).
     // Assign-work menu item reuses dialog.assign.title (same phrase, same act).
@@ -1429,6 +1432,28 @@ export const nav = defineNamespace({
         placeholders: {
           translated: "Percent of the file's cells translated, 0-100.",
           validated: "Percent of the file's cells validated, 0-100.",
+        },
+      },
+      "nav.fileRow.audioProgressAriaLabel": {
+        description:
+          "AQU-2111: the same slot's label on a file whose target language has no " +
+          "written form, so the row draws only the audio bar. 'Recorded' is lines " +
+          "that have a take; 'audio validated' is lines whose recording has been " +
+          "signed off.",
+        placeholders: {
+          recorded: "Percent of the file's lines with a recording, 0-100.",
+          audioValidated: "Percent of the file's lines whose audio is validated, 0-100.",
+        },
+      },
+      "nav.fileRow.progressWithAudioAriaLabel": {
+        description:
+          "AQU-2111: the same slot's label on a file that has both target text and " +
+          "recordings, so the row draws a text bar above an audio bar.",
+        placeholders: {
+          translated: "Percent of the file's cells translated, 0-100.",
+          validated: "Percent of the file's cells validated, 0-100.",
+          recorded: "Percent of the file's lines with a recording, 0-100.",
+          audioValidated: "Percent of the file's lines whose audio is validated, 0-100.",
         },
       },
       "nav.fileRow.fileActions": {

@@ -209,6 +209,111 @@ describe("GET /api/v1/projects/:projectId/files", () => {
     expect(body.file).toMatchObject({ cellCount: 3, filledCount: 0, approvedCount: 0 })
   })
 
+  // AQU-2111: an audio-only project reads 0 filled / 0 approved forever, so the
+  // listing has to carry the audio pair too — without it every sidebar row on
+  // such a project showed 0% however much had been recorded and validated.
+  it("returns per-file audio counts from the projection row", async () => {
+    const { db } = await makeTestDb({
+      files: [{ id: "file-aud", project_id: "proj-a", name: "Genesis", cell_count: 10 }],
+      file_section_progress: [{
+        project_id: "proj-a", file_id: "file-aud", scope: "file", section_key: "",
+        total_count: 10, filled_count: 0, validator_histogram: {},
+        audio_count: 6, audio_validator_histogram: JSON.stringify({ 1: 2, 3: 2 }),
+        revision: 1, updated_at: 1,
+      }],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-aud" })
+    const response = (await handleFilesReadRequest(new Request(
+      "https://w/api/v1/projects/proj-a/files/file-aud",
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), envWith(db)))!
+    const body = await response.json() as {
+      file: { filledCount: number; audioCount: number; audioValidatedCount: number }
+    }
+    // Six lines recorded; four of them have at least one vote (the default
+    // audio requirement), and the text half is untouched at zero.
+    expect(body.file).toMatchObject({ filledCount: 0, audioCount: 6, audioValidatedCount: 4 })
+  })
+
+  // AQU-490: validated is the histogram mass at or above the project's AUDIO
+  // requirement, never the stored one-vote `audio_validated_count`. A project
+  // that asks for three listens must not have its sidebar call a line done
+  // that the line's own control calls outstanding.
+  it("measures audio validation against validationCountAudio, not the text threshold", async () => {
+    const { db } = await makeTestDb({
+      files: [{ id: "file-aud", project_id: "proj-a", name: "Genesis", cell_count: 10 }],
+      project_settings: [{
+        project_id: "proj-a",
+        settings: JSON.stringify({ validationCount: 1, validationCountAudio: 3 }),
+        version: 1,
+      }],
+      file_section_progress: [{
+        project_id: "proj-a", file_id: "file-aud", scope: "file", section_key: "",
+        total_count: 10, filled_count: 0, validator_histogram: {},
+        audio_count: 6,
+        audio_validated_count: 6,
+        audio_validator_histogram: JSON.stringify({ 1: 2, 3: 2, 4: 1 }),
+        revision: 1, updated_at: 1,
+      }],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-aud" })
+    const response = (await handleFilesReadRequest(new Request(
+      "https://w/api/v1/projects/proj-a/files/file-aud",
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), envWith(db)))!
+    const body = await response.json() as { file: { audioCount: number; audioValidatedCount: number } }
+    expect(body.file).toMatchObject({ audioCount: 6, audioValidatedCount: 3 })
+  })
+
+  // AQU-1278: a voiced chapter heading must leave BOTH halves when the policy
+  // excludes structural cells, or a book reports more audio than it has cells.
+  it("subtracts the structural share of the audio pair when the policy excludes it", async () => {
+    const { db } = await makeTestDb({
+      files: [{ id: "file-aud", project_id: "proj-a", name: "Genesis", cell_count: 10 }],
+      project_settings: [{
+        project_id: "proj-a", settings: JSON.stringify({ countStructuralCells: false }), version: 1,
+      }],
+      file_section_progress: [{
+        project_id: "proj-a", file_id: "file-aud", scope: "file", section_key: "",
+        total_count: 10, structural_count: 2, filled_count: 0, validator_histogram: {},
+        audio_count: 6, structural_audio_count: 2,
+        audio_validator_histogram: JSON.stringify({ 1: 4 }),
+        structural_audio_validator_histogram: JSON.stringify({ 1: 2 }),
+        revision: 1, updated_at: 1,
+      }],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-aud" })
+    const response = (await handleFilesReadRequest(new Request(
+      "https://w/api/v1/projects/proj-a/files/file-aud",
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), envWith(db)))!
+    const body = await response.json() as {
+      file: { cellCount: number; audioCount: number; audioValidatedCount: number }
+    }
+    expect(body.file).toMatchObject({ cellCount: 8, audioCount: 4, audioValidatedCount: 2 })
+  })
+
+  // `files` carries no audio rollup, so a file with no projection row has no
+  // audio figures to report — exactly what the per-file progress read says
+  // for it too.
+  it("reports zero audio for a file with no projection row", async () => {
+    const { db } = await makeTestDb({
+      files: [{
+        id: "file-old", project_id: "proj-a", name: "Genesis",
+        cell_count: 10, filled_count: 8, approved_count: 6,
+      }],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-old" })
+    const response = (await handleFilesReadRequest(new Request(
+      "https://w/api/v1/projects/proj-a/files/file-old",
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), envWith(db)))!
+    const body = await response.json() as {
+      file: { filledCount: number; audioCount: number; audioValidatedCount: number }
+    }
+    expect(body.file).toMatchObject({ filledCount: 8, audioCount: 0, audioValidatedCount: 0 })
+  })
+
   it("caps legacy validationCount values at the 15+ histogram bucket", async () => {
     const { db } = await makeTestDb({
       files: [{ id: "file-cap", project_id: "proj-a", name: "Genesis", approved_count: 0 }],
@@ -525,6 +630,53 @@ describe("the audio-cue timebase a file was imported with", () => {
 })
 
 describe("GET /files with the lane read wall", () => {
+  // AQU-2111: the audio pair is lane-scoped exactly as the text pair is. On an
+  // audio-only project it is the ONLY non-zero counter, so leaving it behind
+  // would publish another lane's recording progress to a caller walled off
+  // from it.
+  it("replaces the default lane's audio counters too", async () => {
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: "deflane1", project_id: "proj-a", role: "target", name: "Spanish", legacy_tag: "" },
+        { id: "eslane01", project_id: "proj-a", role: "target", name: "Spanish Team", legacy_tag: "es" },
+      ],
+      files: [{ id: "file-gen", project_id: "proj-a", name: "Genesis", cell_count: 80 }],
+      file_section_progress: [
+        {
+          project_id: "proj-a", file_id: "file-gen", scope: "file", section_key: "",
+          target_lang: "", lane_id: "deflane1",
+          total_count: 70, filled_count: 0, validator_histogram: {},
+          audio_count: 60, audio_validator_histogram: JSON.stringify({ 1: 50 }),
+          revision: 1, updated_at: 1,
+        },
+        {
+          project_id: "proj-a", file_id: "file-gen", scope: "file", section_key: "",
+          target_lang: "es", lane_id: "eslane01",
+          total_count: 10, filled_count: 0, validator_histogram: {},
+          audio_count: 4, audio_validator_histogram: JSON.stringify({ 1: 3 }),
+          revision: 1, updated_at: 1,
+        },
+      ],
+    })
+    const token = await makeTestToken(SECRET, {
+      projectId: "proj-a",
+      fileId: "file-gen",
+      role: 400,
+      laneGrants: [{ lane: "eslane01", level: 400 }],
+    })
+    const res = (await handleFilesReadRequest(
+      new Request("https://w/api/v1/projects/proj-a/files", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET, LANE_READ_WALL: "1" },
+    ))!
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      files: Array<{ cellCount: number; audioCount: number; audioValidatedCount: number }>
+    }
+    expect(body.files[0]).toMatchObject({ cellCount: 10, audioCount: 4, audioValidatedCount: 3 })
+  })
+
   it("replaces the default-lane counters when that lane was not granted", async () => {
     const { db } = await makeTestDb({
       lanes: [

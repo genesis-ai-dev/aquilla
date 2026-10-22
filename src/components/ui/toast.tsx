@@ -33,11 +33,30 @@ function withDedupeId<Data extends object>(
   }
 }
 
+/**
+ * Toasts whose latest change came through `toast.update` (AQU-2125). The pulse
+ * means "that happened again", which is what a repeated `add` is; an update is
+ * a progress count ticking or a loading toast turning into its result, and a
+ * character import that reports every tenth line would otherwise throb the
+ * whole way through.
+ */
+const quietUpdates = new Set<string>()
+
 const toast = {
   ...toastManager,
   add<Data extends object = object>(options: ToastManagerAddOptions<Data>) {
-    return toastManager.add(withDedupeId(options))
+    const deduped = withDedupeId(options)
+    if (deduped.id != null) quietUpdates.delete(deduped.id)
+    return toastManager.add(deduped)
   },
+  update: ((id, updates) => {
+    quietUpdates.add(id)
+    return toastManager.update(id, updates)
+  }) as typeof toastManager.update,
+  close: ((id) => {
+    if (id != null) quietUpdates.delete(id)
+    return toastManager.close(id)
+  }) as typeof toastManager.close,
 }
 
 function ToastProvider({ ...props }: ToastPrimitive.Provider.Props) {
@@ -132,12 +151,13 @@ function ToastItem({
   const updateKey = toastItem.updateKey ?? 0
 
   React.useEffect(() => {
-    // First paint is updateKey 0 — skip. Only upserts pulse.
-    if (updateKey === 0) return
+    // First paint is updateKey 0 — skip. Only upserts pulse, and only repeats:
+    // an update (progress, a result) stays still.
+    if (updateKey === 0 || quietUpdates.has(toastItem.id)) return
     setPulsing(true)
     const settle = window.setTimeout(() => setPulsing(false), 120)
     return () => window.clearTimeout(settle)
-  }, [updateKey])
+  }, [updateKey, toastItem.id])
 
   return (
     <Toast toast={toastItem}>

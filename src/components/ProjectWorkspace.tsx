@@ -136,7 +136,7 @@ import type { CellData } from "@/hooks/useCells"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { consumeMediaImportSeed, autoTranscribeImportedMedia, type MediaImportSeed } from "@/lib/audio/auto-transcribe"
 import { warmFileDubs } from "@/lib/audio/warm-dubs"
-import { effectiveSourceText } from "@/lib/cell-text"
+import { effectiveSourceText, projectedSourceValue, sourceCommitFields } from "@/lib/cell-text"
 import {
   focusedCommentFromSearchParams,
   openCommentsCellFromSearchParams,
@@ -275,6 +275,7 @@ import { recordGroup, recordStep, registerStepKinds, setHistoryRemote, setHistor
 import { httpHistoryRemote } from "@/lib/history/history-remote"
 import { laneAccessFor, waitUntilReady } from "@/lib/history/lane-switch"
 import { CastStepBuilder, castValueOf, mediaStepHandlers, type CastValue } from "@/lib/history/media-steps"
+import { sourceStepHandlers } from "@/lib/history/source-steps"
 import { rowStepHandlers } from "@/lib/history/row-steps"
 import { HistoryPanel } from "./history/HistoryPanel"
 import { editStepHandlers } from "@/lib/history/edit-steps"
@@ -292,7 +293,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { canHarmonize, emitCastAssign, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
+import { canHarmonize, emitCastAssign, emitSourceCellCommit, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { postSplitCastCopies, resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -14532,6 +14533,33 @@ export function ProjectWorkspace() {
       }),
     )
   }, [readFilmLink, writeFilmLink, writeCueLinks, getTokenForProjectFile, readCastValue, writeCastValues])
+  // …and source text, chained on the line's source head like any source edit.
+  useEffect(() => {
+    return registerStepKinds(
+      sourceStepHandlers({
+        readSource: (cellId) => {
+          const cell = getActiveCell(cellId)
+          if (!cell) return null
+          return { value: projectedSourceValue(cell), eventId: cellStore.getSourceChainInfo(cellId)?.eventId ?? null }
+        },
+        commitSource: async (cellId, text, parentId) => {
+          const cell = getActiveCell(cellId)
+          if (!cell || !project?.id || !canPerform("source.cell.commit", project.syncRole?.level ?? null)) return null
+          const eventId = await emitSourceCellCommit({
+            projectId: project.id,
+            fileId: cell.fileId,
+            cellId,
+            parentId,
+            ...sourceCommitFields(cell, text),
+            author: currentUsername,
+          })
+          await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+          revalidateCells()
+          return eventId
+        },
+      }),
+    )
+  }, [getActiveCell, cellStore, project?.id, project?.syncRole?.level, currentUsername, getTokenForProjectFile, revalidateCells])
 
   useEffect(() => {
     const readAtt = (cellId: string, audioId: string) => readTake(cellId, audioId)?.att ?? null
@@ -14611,8 +14639,8 @@ export function ProjectWorkspace() {
             : { value: cell.original ?? "", valueHtml: cell.originalHtml }
         },
         commitText: async (cellId, side, _lane, text) => {
-          // Only translations are recorded as text steps (source text is a
-          // project lead's import-level act with its own history).
+          // Only translations are recorded as text steps; source text has its
+          // own step kind, chained on the source head (source-steps.ts).
           if (side === "target") await applyTargetText(cellId, text)
         },
         readTextVote: (cellId, lane) => {

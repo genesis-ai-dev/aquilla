@@ -20,6 +20,7 @@ const LANE_FREE_KINDS: ReadonlySet<string> = new Set([
   "cue.link",
   "cast.assign",
   "lines.fromRecording",
+  "source.text",
 ])
 
 /**

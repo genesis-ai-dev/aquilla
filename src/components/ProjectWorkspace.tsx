@@ -7,6 +7,7 @@ import { confirmedTargetHeadKeys } from "@/lib/sync/confirmed-target-heads"
 import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
 import { Suspense, lazy, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from "react"
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom"
+import { useRememberLastWorkspace } from "@/hooks/useRememberLastWorkspace"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
 import { RichMessage } from "@/lib/i18n/RichMessage"
@@ -1556,6 +1557,8 @@ export function ProjectWorkspace() {
   // should attribute to the actual signed-in user.
   const { session: frontierSession } = useFrontierSession()
   const currentUsername = frontierSession?.username || project?.username || "local"
+  // Desktop: lets an offline launch reopen this project (OfflineLaunchResume).
+  useRememberLastWorkspace(projectId, frontierSession?.username)
   // Smart Extensions: an installed `editor` extension may replace the
   // standard editor for this file (choice remembered per user/project/file).
   const extensionEditorChoice = useExtensionEditorChoice(currentUsername, projectId ?? "", activeFileId ?? null)

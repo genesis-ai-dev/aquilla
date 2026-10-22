@@ -23,10 +23,17 @@ interface Props {
    * for the active file the spine renders from `getChapters` regardless.
    */
   deferFetch?: boolean
+  /**
+   * AQU-2118: the target lane the sections are read for — the one the
+   * sidebar's switcher shows. Omitted, the read names no lane and the server
+   * answers the project's default, which is not the open lane on a
+   * multi-lane project.
+   */
+  lane?: string
 }
 
 /** Sections shown beneath an expanded file, with per-cell health squares. */
-export function FileSectionGrid({ projectId, fileId, validationCount, countStructural, getTokenForFile, onSectionClick, getChapters, deferFetch }: Props) {
+export function FileSectionGrid({ projectId, fileId, validationCount, countStructural, getTokenForFile, onSectionClick, getChapters, deferFetch, lane }: Props) {
   const t = useT()
   const chapters = useMemo(() => getChapters?.(), [getChapters])
   // A null fileId is the hook's own no-op: it skips the fetch and re-fires as
@@ -37,6 +44,7 @@ export function FileSectionGrid({ projectId, fileId, validationCount, countStruc
     validationCount,
     getTokenForFile,
     countStructural,
+    lane,
   )
 
   if (!chapters && sections === null) {

@@ -1719,7 +1719,6 @@ export const ar: Catalog = {
   "audio.newVoice.engineLabel": "المحرّك",
   "audio.newVoice.inworldVoiceLabel": "الصوت",
   "audio.newVoice.inworldVoiceLoading": "جارٍ تحميل الأصوات…",
-  "audio.newVoice.inworldVoiceUnavailable": "تعذّر تحميل أصوات Inworld لهذه اللغات. تُعرض القائمة المدمجة.",
   "audio.newVoice.inworldCustomVoice": "صوت مصمَّم",
   "audio.newVoice.tabPrebuilt": "صوت جاهز",
   "audio.newVoice.tabDesign": "تصميم الصوت",

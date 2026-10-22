@@ -2,8 +2,14 @@
 //
 // Live voices come from sync-worker GET /api/v1/voice/tts/voices, filtered to
 // SYSTEM voices whose primary language matches the project's target-language
-// lanes. When the worker isn't configured (no API key) or the editor has no
-// file-scoped sync token, we fall back to the small built-in English list.
+// lanes. When no lookup can be attempted at all (worker not configured, no
+// project/file context, no file-scoped sync token) we fall back to the small
+// built-in English list.
+//
+// A lookup that WAS attempted and came back empty or failed reports
+// `unavailable` with no voices (AQU-2035): an English list is the wrong set of
+// choices for, say, Danish, so callers disable the picker instead of swapping
+// the built-in list in behind the user's back.
 
 import { useEffect, useState } from "react"
 import { INWORLD_TTS_VOICES } from "./tts-providers"
@@ -59,6 +65,13 @@ export function showVoiceLanguageBadge(languages: readonly string[]): boolean {
   return languages.length > 1
 }
 
+/**
+ * `fallback` — no lookup was attempted, so the built-in English list stands in.
+ * `unavailable` — a lookup ran and came back empty or failed; there are no
+ * voices to offer for the chosen language (AQU-2035).
+ */
+export type InworldCatalogStatus = "loading" | "ready" | "fallback" | "unavailable"
+
 const catalogCache = new Map<string, InworldCatalogVoice[]>()
 
 /** @internal — test seam. */
@@ -78,14 +91,11 @@ export function useInworldCatalogVoices(args: {
   languages: readonly string[]
   /** Every SYSTEM voice, not filtered to project lanes — Voice Design locales. */
   allSystem?: boolean
-}): { voices: InworldCatalogVoice[]; status: "loading" | "ready" | "fallback"; attempted: boolean } {
+}): { voices: InworldCatalogVoice[]; status: InworldCatalogStatus } {
   const { enabled, projectId, fileId, session, languages, allSystem = false } = args
   const langKey = allSystem ? "all" : languages.map((l) => l.trim().toLowerCase()).join(",")
-  const canFetch = Boolean(
-    enabled && projectId && fileId && session?.jwt && (allSystem || languages.length > 0),
-  )
   const [voices, setVoices] = useState<InworldCatalogVoice[]>(fallbackInworldCatalog)
-  const [status, setStatus] = useState<"loading" | "ready" | "fallback">("fallback")
+  const [status, setStatus] = useState<InworldCatalogStatus>("fallback")
 
   useEffect(() => {
     if (!enabled) return
@@ -111,8 +121,8 @@ export function useInworldCatalogVoices(args: {
     ).then((rows) => {
       if (cancelled) return
       if (rows.length === 0) {
-        setVoices(fallbackInworldCatalog())
-        setStatus("fallback")
+        setVoices([])
+        setStatus("unavailable")
         return
       }
       catalogCache.set(key, rows)
@@ -120,14 +130,14 @@ export function useInworldCatalogVoices(args: {
       setStatus("ready")
     }).catch(() => {
       if (cancelled) return
-      setVoices(fallbackInworldCatalog())
-      setStatus("fallback")
+      setVoices([])
+      setStatus("unavailable")
     })
     return () => { cancelled = true }
     // langKey / jwt stand in for languages and session identity.
   }, [enabled, projectId, fileId, session?.jwt, langKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { voices, status, attempted: canFetch }
+  return { voices, status }
 }
 
 const supportedLanguageCache = new Map<string, InworldSupportedLanguage[]>()

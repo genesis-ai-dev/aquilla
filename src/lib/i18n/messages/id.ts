@@ -1726,7 +1726,6 @@ export const id: Catalog = {
   "audio.newVoice.engineLabel": "Mesin",
   "audio.newVoice.inworldVoiceLabel": "Suara",
   "audio.newVoice.inworldVoiceLoading": "Memuat suara…",
-  "audio.newVoice.inworldVoiceUnavailable": "Tidak dapat memuat suara Inworld untuk bahasa-bahasa ini. Menampilkan daftar bawaan.",
   "audio.newVoice.inworldCustomVoice": "Suara rancangan",
   "audio.newVoice.tabPrebuilt": "Suara siap pakai",
   "audio.newVoice.tabDesign": "Perancangan suara",

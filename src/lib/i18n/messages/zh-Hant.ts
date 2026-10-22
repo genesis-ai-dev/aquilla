@@ -1717,7 +1717,6 @@ export const zh_Hant: Catalog = {
   "audio.newVoice.engineLabel": "引擎",
   "audio.newVoice.inworldVoiceLabel": "聲音",
   "audio.newVoice.inworldVoiceLoading": "正在載入聲音…",
-  "audio.newVoice.inworldVoiceUnavailable": "無法載入這些語言的 Inworld 聲音。目前顯示內建清單。",
   "audio.newVoice.inworldCustomVoice": "設計的聲音",
   "audio.newVoice.tabPrebuilt": "預設聲音",
   "audio.newVoice.tabDesign": "聲音設計",

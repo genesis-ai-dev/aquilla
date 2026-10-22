@@ -1718,7 +1718,6 @@ export const my: Catalog = {
   "audio.newVoice.engineLabel": "အင်ဂျင်",
   "audio.newVoice.inworldVoiceLabel": "အသံ",
   "audio.newVoice.inworldVoiceLoading": "အသံများ ဖွင့်နေသည်…",
-  "audio.newVoice.inworldVoiceUnavailable": "ဤဘာသာစကားများအတွက် Inworld အသံများကို မဖွင့်နိုင်ပါ။ ပါလာသည့်စာရင်းကို ပြထားသည်။",
   "audio.newVoice.inworldCustomVoice": "ဒီဇိုင်းလုပ်ထားသော အသံ",
   "audio.newVoice.tabPrebuilt": "ကြိုတင်ပြုလုပ်ထားသော အသံ",
   "audio.newVoice.tabDesign": "အသံဒီဇိုင်း",

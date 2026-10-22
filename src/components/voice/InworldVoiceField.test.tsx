@@ -1,6 +1,11 @@
 /**
  * InworldVoiceField — live catalog for the project's target-language lanes.
  * Language badges appear only when there is more than one lane (AQU-1189).
+ *
+ * AQU-2035: when the lookup runs and the chosen language has no stock voices
+ * (or the request fails), the picker is disabled on the voice that will be
+ * saved. It no longer swaps in the built-in English list under a note reading
+ * like an error.
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -9,6 +14,7 @@ import userEvent from "@testing-library/user-event"
 import { InworldVoiceField } from "./InworldVoiceField"
 import { listInworldVoices } from "@/lib/sync/tts"
 import { __resetInworldCatalogCacheForTests } from "@/lib/audio/inworld-voices"
+import { CATALOGS } from "@/lib/i18n/messages/all"
 import type { FrontierSession } from "@/lib/frontier/types"
 
 vi.mock("@/lib/sync/tts", () => ({
@@ -92,5 +98,61 @@ describe("InworldVoiceField", () => {
       expect(listInworldVoices).toHaveBeenCalled()
     })
     expect(onChange).not.toHaveBeenCalled()
+  })
+
+  // AQU-2035 — reported on Danish/Default: the lookup came back empty, the
+  // field swapped in the built-in English list (Conrad, …) and printed
+  // "Couldn't load Inworld voices…" under it. English voices are the wrong
+  // choices for Danish and the note reads as an error, so the picker is
+  // disabled on the saved voice instead.
+  it("disables the picker and keeps the saved voice when the language has no stock voices", async () => {
+    vi.mocked(listInworldVoices).mockResolvedValue([])
+    const { onChange } = renderField(["Danish"], "da-DK", "Mads")
+    const trigger = await screen.findByRole("combobox", { name: "Voice" })
+    await waitFor(() => expect(trigger).toBeDisabled())
+    expect(trigger).toHaveTextContent("Mads")
+    expect(screen.queryByText(/Showing the built-in list/i)).toBeNull()
+    expect(screen.queryByText("Dennis")).toBeNull()
+    // The saved voice survives: nothing reselects it behind the user's back.
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it("disables the picker when the voice lookup itself fails", async () => {
+    vi.mocked(listInworldVoices).mockRejectedValue(new Error("network"))
+    renderField(["Danish"], "da-DK", "Mads")
+    const trigger = await screen.findByRole("combobox", { name: "Voice" })
+    await waitFor(() => expect(trigger).toBeDisabled())
+    expect(screen.queryByText(/Showing the built-in list/i)).toBeNull()
+  })
+
+  it("shows the built-in default rather than a blank when there is no saved voice", async () => {
+    vi.mocked(listInworldVoices).mockResolvedValue([])
+    renderField(["Danish"], "da-DK", undefined)
+    const trigger = await screen.findByRole("combobox", { name: "Voice" })
+    await waitFor(() => expect(trigger).toBeDisabled())
+    expect(trigger).toHaveTextContent("Dennis")
+  })
+
+  it("re-enables the picker for a language that does have stock voices", async () => {
+    vi.mocked(listInworldVoices).mockResolvedValue([
+      { voiceId: "Dennis", displayName: "Dennis", language: "en-US" },
+      { voiceId: "Sarah", displayName: "Sarah", language: "en-US" },
+    ])
+    const user = userEvent.setup()
+    renderField(["en"])
+    const trigger = await screen.findByRole("combobox", { name: "Voice" })
+    await waitFor(() => expect(trigger).toBeEnabled())
+    await user.click(trigger)
+    expect(await screen.findByRole("option", { name: "Sarah" })).toBeTruthy()
+  })
+
+  // Same guard one layer down: a translated note would reappear in a
+  // non-English UI if any catalog still carried the retired key.
+  it("carries no built-in-list note in any locale (AQU-2035)", () => {
+    const retired = "audio.newVoice.inworldVoiceUnavailable"
+    const survivors = Object.entries(CATALOGS)
+      .filter(([, catalog]) => retired in catalog)
+      .map(([locale]) => locale)
+    expect(survivors).toEqual([])
   })
 })

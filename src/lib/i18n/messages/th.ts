@@ -1716,7 +1716,6 @@ export const th: Catalog = {
   "audio.newVoice.engineLabel": "เอนจิน",
   "audio.newVoice.inworldVoiceLabel": "เสียง",
   "audio.newVoice.inworldVoiceLoading": "กำลังโหลดเสียง…",
-  "audio.newVoice.inworldVoiceUnavailable": "โหลดเสียง Inworld สำหรับภาษาเหล่านี้ไม่ได้ กำลังแสดงรายการที่มีมาให้",
   "audio.newVoice.inworldCustomVoice": "เสียงที่ออกแบบ",
   "audio.newVoice.tabPrebuilt": "เสียงสำเร็จรูป",
   "audio.newVoice.tabDesign": "ออกแบบเสียง",

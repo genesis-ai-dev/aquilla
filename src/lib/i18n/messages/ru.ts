@@ -1746,7 +1746,6 @@ export const ru: Catalog = {
   "audio.newVoice.engineLabel": "Движок",
   "audio.newVoice.inworldVoiceLabel": "Голос",
   "audio.newVoice.inworldVoiceLoading": "Загрузка голосов…",
-  "audio.newVoice.inworldVoiceUnavailable": "Не удалось загрузить голоса Inworld для этих языков. Показан встроенный список.",
   "audio.newVoice.inworldCustomVoice": "Сконструированный голос",
   "audio.newVoice.tabPrebuilt": "Готовый голос",
   "audio.newVoice.tabDesign": "Конструктор голоса",

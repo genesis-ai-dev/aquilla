@@ -20,6 +20,11 @@ import { sortByLens } from "@/lib/timeline/derive"
 import { splitLineOrigin } from "@/lib/timeline/user-line-origin"
 import type { OrderedBy, RuleWaiver } from "@/lib/parsers/types"
 import type { FileProgressResponse, ProgressCounts } from "@/lib/progress/file-progress-resource"
+import {
+  EMPTY_AUDIO_PROGRESS_CELL_IDS,
+  sameAudioProgressCellIds,
+  type AudioProgressCellIds,
+} from "@/lib/progress/audio-progress-cells"
 import { deriveMilestoneNavigation, type MilestoneNavigationCell } from "@/lib/milestone-navigation"
 import type { ImportMilestoneKind } from "../../shared/import-contract"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
@@ -40,6 +45,17 @@ const NO_AUDIT: CellAuditStats = Object.freeze({
   waivers: Object.freeze([]) as unknown as CellAuditStats["waivers"],
 })
 const EMPTY_TAKES: ReadonlySet<string> = new Set()
+/**
+ * The per-cell bits the navigation rollup counts, and the progress cache
+ * compares: a cell's entry in the mask changes exactly when one of its five
+ * figures would. AQU-2110 added the last three; the first two are the pair
+ * every surface showed before it.
+ */
+const FLAG_TRANSLATED = 1
+const FLAG_VALIDATED = 2
+const FLAG_TEXT_TRANSLATED = 4
+const FLAG_AUDIO_RECORDED = 8
+const FLAG_AUDIO_VALIDATED = 16
 const EMPTY_CELL_IDS: readonly string[] = Object.freeze([])
 const EMPTY_SUMMARIES: readonly CellSummary[] = Object.freeze([])
 const EMPTY_TEXT_PAIRS: readonly CellTextPair[] = Object.freeze([])
@@ -153,7 +169,33 @@ export interface CellCommitHandle {
   sourceEventId: string | null
 }
 
-export interface CellNavigationEntry {
+/**
+ * The five figures a division's progress is read from.
+ *
+ * `translated` / `validated` are the pair every surface has always shown:
+ * translated is target text OR a take of the line's own (AQU-646), validated
+ * is the projected TEXT flag. AQU-2110 adds the three beside them, counted
+ * over the same cells by the same structural and hidden-cell rules:
+ *
+ *   - `textTranslated`: target text only. What tells an audio-only file
+ *     apart — recordings and no text — from one that has both, which is the
+ *     per-file decision the chapter picker makes about which figures to show.
+ *   - `audioRecorded` / `audioValidated`: the audio pair, from the id sets
+ *     the workspace feeds in through `setAudioProgressCellIds`. Audio
+ *     validation lives nowhere in the cell projection, so until that lands
+ *     both read 0 — which is "not known yet", not "none", and why the picker
+ *     only switches to audio figures once something is recorded.
+ */
+export interface CellNavigationProgress {
+  translated: number
+  validated: number
+  textTranslated: number
+  audioRecorded: number
+  audioValidated: number
+  total: number
+}
+
+export interface CellNavigationEntry extends CellNavigationProgress {
   key: string
   label: string
   shortLabel: string
@@ -161,21 +203,15 @@ export interface CellNavigationEntry {
   firstCellId: string
   firstIndex: number
   cellIds: readonly string[]
-  translated: number
-  validated: number
-  total: number
   subsections: readonly CellNavigationSubsection[]
 }
 
-export interface CellNavigationSubsection {
+export interface CellNavigationSubsection extends CellNavigationProgress {
   key: string
   label: string
   firstCellId: string
   firstIndex: number
   cellIds: readonly string[]
-  translated: number
-  validated: number
-  total: number
 }
 
 export const MILESTONE_SUBSECTION_SIZE = 50
@@ -221,6 +257,15 @@ interface RuntimeContext {
    * `cell_audio`, which is a much bigger change for the same answer.
    */
   ownTakeCellIds?: ReadonlySet<string>
+  /**
+   * AQU-2110: which cells are recorded, and which of those are audio
+   * validated, for the navigation rollup's audio figures. Fed in the same way
+   * as `ownTakeCellIds` and for the same reason — audio is not in the cell
+   * projection — through `setAudioProgressCellIds`. Unlike that set it is
+   * not part of any cell's view model, so changing it rebuilds the
+   * navigation index and nothing else.
+   */
+  audioProgressCellIds?: AudioProgressCellIds
   /**
    * AQU-538: the active target LANE the view renders. `''`/undefined = the
    * default lane (byte-identical to pre-lane behaviour). Optional so existing
@@ -501,6 +546,37 @@ export class CellStore {
     this.emit(changed)
   }
 
+  /**
+   * AQU-2110: which cells are recorded and which are audio validated, for the
+   * navigation rollup (the chapter picker and the sidebar's chapter grid).
+   *
+   * Audio validation is not part of any cell's view model — no row, summary
+   * or status reads it — so unlike `setOwnTakeCellIds` this bumps no cell
+   * version and rebuilds no derived view. It re-counts the navigation index
+   * alone and wakes the whole-file subscribers, which is what moves a
+   * chapter's figure the moment a take is validated, with no reload and
+   * without touching the file-progress snapshot.
+   *
+   * The audio bits ride the same flags bitmask the progress cache compares,
+   * so a membership change misses that cache on its own and an identical
+   * set — a refetch that changed nothing — returns before any work.
+   */
+  setAudioProgressCellIds(next: AudioProgressCellIds): void {
+    const prev = this.ctx.audioProgressCellIds ?? EMPTY_AUDIO_PROGRESS_CELL_IDS
+    if (sameAudioProgressCellIds(prev, next)) {
+      this.ctx = { ...this.ctx, audioProgressCellIds: next }
+      return
+    }
+    this.ctx = { ...this.ctx, audioProgressCellIds: next }
+    // A dirty derived index will rebuild the navigation on its next read;
+    // a clean one is re-counted here so the snapshot beside it is kept.
+    if (!this.derivedIndexesDirty) {
+      this.navIndex = this.buildNavigationIndex(this.order).entries
+    }
+    this.fileVersion++
+    this.emitAll()
+  }
+
   /** The audit entry for a cell (see `RuntimeContext.auditStatsComplete`). */
   private auditOf(cellId: string, stats: ReadonlyMap<string, CellAuditStats> = this.ctx.auditStats): CellAuditStats | undefined {
     return stats.get(cellId) ?? (this.ctx.auditStatsComplete ? NO_AUDIT : undefined)
@@ -535,6 +611,8 @@ export class CellStore {
       lane: nextLane,
       countStructural: nextCountStructural,
       ownTakeCellIds: next.ownTakeCellIds ?? this.ctx.ownTakeCellIds,
+      // AQU-2110: same hand-off, same rule.
+      audioProgressCellIds: next.audioProgressCellIds ?? this.ctx.audioProgressCellIds,
     }
     if (showHiddenChanged) {
       this.visibleOrderCache = null
@@ -2411,16 +2489,23 @@ export class CellStore {
       sections: snapshot.sections.map(counts => counts.key === section
         ? { ...counts, filledCount: counts.filledCount + delta } : counts),
     }
-    // Navigation treats an audio take as translated even with empty text.
-    if (!this.ctx.ownTakeCellIds?.has(cellId)) {
-      this.navIndex = this.navIndex.map((item, index) => index === entryIndex ? {
-        ...item,
-        translated: item.translated + delta,
-        subsections: item.subsections.map((subsection, subIndex) => subIndex === subsectionIndex
-          ? { ...subsection, translated: subsection.translated + delta } : subsection),
-      } : item)
-      this.navigationProgressCache.delete(this.order)
-    }
+    // Navigation treats an audio take as translated even with empty text, so
+    // `translated` holds still on a line that has one — but `textTranslated`
+    // is text alone (AQU-2110) and always moves with the edit, or an
+    // optimistic first word on an audio-only file would leave the picker
+    // believing the file still has no text.
+    const hasOwnTake = this.ctx.ownTakeCellIds?.has(cellId) === true
+    const patch = <T extends CellNavigationProgress>(counts: T): T => ({
+      ...counts,
+      textTranslated: counts.textTranslated + delta,
+      translated: hasOwnTake ? counts.translated : counts.translated + delta,
+    })
+    this.navIndex = this.navIndex.map((item, index) => index === entryIndex ? {
+      ...patch(item),
+      subsections: item.subsections.map((subsection, subIndex) => subIndex === subsectionIndex
+        ? patch(subsection) : subsection),
+    } : item)
+    this.navigationProgressCache.delete(this.order)
     return true
   }
 
@@ -2703,17 +2788,28 @@ export class CellStore {
         ?? ""
       // Navigation counts an audio take as translated, and uses the projected
       // validation flag. Keep these semantics distinct from file progress.
-      flags[index] = (targetValue.trim() || this.ctx.ownTakeCellIds?.has(cellId) ? 1 : 0)
-        | (target?.validated ? 2 : 0)
+      //
+      // AQU-2110: the text-only and audio bits ride the same mask, so a take
+      // being validated misses the cache exactly as a text edit does.
+      const hasText = targetValue.trim().length > 0
+      const audio = this.ctx.audioProgressCellIds
+      flags[index] = (hasText || this.ctx.ownTakeCellIds?.has(cellId) ? FLAG_TRANSLATED : 0)
+        | (target?.validated ? FLAG_VALIDATED : 0)
+        | (hasText ? FLAG_TEXT_TRANSLATED : 0)
+        | (audio?.recorded.has(cellId) ? FLAG_AUDIO_RECORDED : 0)
+        | (audio?.audioValidated.has(cellId) ? FLAG_AUDIO_VALIDATED : 0)
       if (cached?.flags[index] !== flags[index]) unchanged = false
     }
     if (unchanged && cached) return { entries: cached.entries, milestoneByCellId: derived.milestoneByCellId }
 
     this.work.navigationIndexRebuilds++
     const displayIndexByCellId = new Map(ids.map((id, index) => [id, index]))
-    const progressFor = (cellIds: readonly string[]) => {
+    const progressFor = (cellIds: readonly string[]): CellNavigationProgress => {
       let translated = 0
       let validated = 0
+      let textTranslated = 0
+      let audioRecorded = 0
+      let audioValidated = 0
       let total = 0
       for (const cellId of cellIds) {
         // AQU-1083: the chapter keeps every cell in `cellIds` — the sidebar
@@ -2732,15 +2828,20 @@ export class CellStore {
         total += 1
         const index = displayIndexByCellId.get(cellId)
         const value = index === undefined ? 0 : flags[index]
-        if (value & 1) translated++
-        if (value & 2) validated++
+        if (value & FLAG_TRANSLATED) translated++
+        if (value & FLAG_VALIDATED) validated++
+        if (value & FLAG_TEXT_TRANSLATED) textTranslated++
+        if (value & FLAG_AUDIO_RECORDED) audioRecorded++
+        if (value & FLAG_AUDIO_VALIDATED) audioValidated++
       }
-      return { translated, validated, total }
+      return { translated, validated, textTranslated, audioRecorded, audioValidated, total }
     }
     const entries = derived.orderedMilestones.map((group): CellNavigationEntry => {
       // AQU-1083: `total` is summed from the subsections rather than read off
       // `group.cellIds.length` because progressFor may skip structural cells.
-      const progress = { translated: 0, validated: 0, total: 0 }
+      const progress: CellNavigationProgress = {
+        translated: 0, validated: 0, textTranslated: 0, audioRecorded: 0, audioValidated: 0, total: 0,
+      }
       const subsections: CellNavigationSubsection[] = []
       for (let offset = 0; offset < group.cellIds.length; offset += MILESTONE_SUBSECTION_SIZE) {
         const cellIds = group.cellIds.slice(offset, offset + MILESTONE_SUBSECTION_SIZE)
@@ -2748,6 +2849,9 @@ export class CellStore {
         const counts = progressFor(cellIds)
         progress.translated += counts.translated
         progress.validated += counts.validated
+        progress.textTranslated += counts.textTranslated
+        progress.audioRecorded += counts.audioRecorded
+        progress.audioValidated += counts.audioValidated
         progress.total += counts.total
         subsections.push({
           key: `${group.milestone.key}:range:${firstCellId}`,

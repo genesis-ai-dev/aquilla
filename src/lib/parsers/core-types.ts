@@ -90,6 +90,24 @@ export interface TranslatableString {
 }
 
 /**
+ * Subtitle-import cue counts (AQU-2119). Numbers, never sentences — the
+ * preview notice's wording is resolved where it is built (`import.ts`), the
+ * same split `structureFindings` uses.
+ */
+export interface SubtitleCueRepair {
+  /** Cue timestamp lines padded from WebVTT's short form (`01:03.209`) to the
+   *  strict `HH:MM:SS.mmm` the parser matches. Every one of these would
+   *  otherwise have vanished WITH ITS WORDS — see
+   *  `repairShortFormCueTimestamps`. Always 0 for SRT, which has no short
+   *  form. */
+  repairedShortForm: number
+  /** Timestamp lines that produced no cue at all: a range the parser still
+   *  can't read, or a range with no text under it. Reported so the import says
+   *  so instead of dropping the words silently. */
+  droppedCues: number
+}
+
+/**
  * One parsed file emitted by the worker-safe text parse core
  * (`parse-text-formats.ts`). Structurally a subset of `ImportResult`
  * (../import.ts) — every extra `ImportResult` field is optional, so a
@@ -109,6 +127,8 @@ export interface ParsedTextFileResult {
    *  site, the same way `rule-engine.ts` reason codes are handled. Absent when
    *  the file is clean. */
   structureFindings?: UsfmStructureFinding[]
+  /** Subtitle (vtt/srt) cue counts (AQU-2119). Absent when both are zero. */
+  cueRepair?: SubtitleCueRepair
 }
 
 /**

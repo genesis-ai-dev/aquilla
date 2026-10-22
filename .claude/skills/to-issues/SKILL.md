@@ -94,10 +94,12 @@ without `state: Triage` lands in the agent queue (an explicit `state` overrides 
 template's). **Verify the create response shows the status you intended** — if a HITL
 slice came back `Todo`, immediately re-save it to `Triage`.
 
-**Leave every issue unassigned.** The team's auto-assign rotation sets an assignee at
-create time (it wins even if you pass no assignee) — if the create response shows an
-assignee, immediately re-save with `assignee: null` and confirm the response no longer
-lists one.
+**Leave every issue unassigned — never pass `assignee`.** Nothing assigns one for you: the
+team's Triage Responsibility is set to **No action** in Linear (since 2026-10-22), so there
+is no rotation assignee to clear after create. An owner is set later — by a human during
+triage, or by the runner at pickup if the issue is still unassigned (AGENTS.md → "Issue
+workflow"). If a create response does show an assignee, the Linear setting has drifted:
+re-save with `assignee: null` and tell the user.
 
 Mark the slice's type (HITL/AFK) in the issue body (see below). Never publish an AFK slice
 to `Todo` without acceptance criteria — if you can't write them, it's HITL, and it goes to

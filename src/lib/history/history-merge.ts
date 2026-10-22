@@ -15,6 +15,10 @@
  *   undone on one device before another device made a new step can no longer
  *   be redone, exactly as a new step clears Redo on one device.
  *
+ * - Every copy says when each device last wrote it (`devices`): an Undo asks
+ *   the server first only when another device wrote recently (history.ts,
+ *   `claim`). The newest time per device wins.
+ *
  * Pure and order-independent apart from ties (the first copy wins those), so
  * two devices merging each other's copies reach the same history.
  */
@@ -26,16 +30,29 @@ export interface GoneEntry {
   at: number
 }
 
+/** One device (a browser tab) that wrote the history, and when it last did. */
+export interface DeviceWrite {
+  id: string
+  /** When it last wrote the server's copy (ms, by its own clock). */
+  at: number
+}
+
 /** A history as it is saved and sent: both stacks, the skip log, the tombstones. */
 export interface HistoryDoc {
   undo: StepRecord[]
   redo: StepRecord[]
   log: SkipLogEntry[]
   gone: GoneEntry[]
+  /** Which devices wrote it, and when each last did. Absent in copies saved
+   *  before Oct 22, and in a history no device has sent yet. */
+  devices?: DeviceWrite[]
 }
 
 /** Enough to outlive any copy that could still hold the steps. */
 export const GONE_LIMIT = 400
+
+/** Only the most recent writers matter (an Undo looks back a few minutes). */
+export const DEVICES_LIMIT = 20
 
 export const emptyHistoryDoc = (): HistoryDoc => ({ undo: [], redo: [], log: [], gone: [] })
 
@@ -56,7 +73,20 @@ export function normalizeHistoryDoc(raw: unknown): HistoryDoc {
     gone: Array.isArray(v.gone)
       ? (v.gone as GoneEntry[]).filter((g) => g && typeof g.id === "string" && typeof g.at === "number")
       : [],
+    ...(Array.isArray(v.devices)
+      ? { devices: (v.devices as DeviceWrite[]).filter((d) => d && typeof d.id === "string" && typeof d.at === "number") }
+      : {}),
   }
+}
+
+/** Two lists of writers as one: each device's newest time, the newest devices kept. */
+export function mergeDevices(a: readonly DeviceWrite[] = [], b: readonly DeviceWrite[] = []): DeviceWrite[] {
+  const at = new Map<string, number>()
+  for (const d of [...a, ...b]) at.set(d.id, Math.max(at.get(d.id) ?? 0, d.at))
+  return [...at.entries()]
+    .map(([id, t]) => ({ id, at: t }))
+    .sort((x, y) => x.at - y.at || (x.id < y.id ? -1 : 1))
+    .slice(-DEVICES_LIMIT)
 }
 
 export function mergeHistories(
@@ -108,7 +138,8 @@ export function mergeHistories(
     .sort((x, y) => x.at - y.at || (x.id < y.id ? -1 : 1))
     .slice(-GONE_LIMIT)
 
-  return { undo, redo, log, gone: goneList }
+  const devices = mergeDevices(a.devices, b.devices)
+  return { undo, redo, log, gone: goneList, ...(devices.length > 0 ? { devices } : {}) }
 }
 
 /** Two copies that hold the same steps in the same places (the log aside). */

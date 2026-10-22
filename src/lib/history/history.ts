@@ -39,9 +39,10 @@
  * reads another's.
  */
 import { dropLaneHistories, loadHistory, loadLaneHistories, saveHistory } from "./history-store"
-import { GONE_LIMIT, emptyHistoryDoc, mergeHistories, sameHistory, type HistoryDoc } from "./history-merge"
+import { GONE_LIMIT, emptyHistoryDoc, mergeDevices, mergeHistories, sameHistory, type DeviceWrite, type HistoryDoc } from "./history-merge"
 import type { HistoryRemote } from "./history-remote"
 import { stepLane } from "./step-lane"
+import { tabConnId } from "@/lib/sync/ws-reconciler"
 
 /**
  * Why a step was left alone. `approved`: someone else approved what it made
@@ -115,6 +116,7 @@ export interface SkipLogEntry {
 }
 
 interface Stacks extends HistoryDoc {
+  devices: DeviceWrite[]
   /** The server revision this copy is known to include; null = never synced. */
   revision: number | null
   /** Changed here since the server last took a copy. */
@@ -165,13 +167,13 @@ const laneByProject = new Map<string, string>()
 function stacksFor(key: string): Stacks {
   let s = stacks.get(key)
   if (!s) {
-    s = { ...emptyHistoryDoc(), revision: null, unpushed: false }
+    s = { ...emptyHistoryDoc(), devices: [], revision: null, unpushed: false }
     stacks.set(key, s)
   }
   return s
 }
 
-const docOf = (s: Stacks): HistoryDoc => ({ undo: s.undo, redo: s.redo, log: s.log, gone: s.gone })
+const docOf = (s: Stacks): HistoryDoc => ({ undo: s.undo, redo: s.redo, log: s.log, gone: s.gone, devices: s.devices })
 
 /** A step leaves both stacks for good: remember it, so no other copy brings it back. */
 function bury(s: Stacks, id: string): void {
@@ -290,6 +292,9 @@ function stampGroup(data: unknown, lane: string): unknown {
 function mergeIn(key: string, other: HistoryDoc): boolean {
   const s = stacksFor(key)
   const merged = mergeHistories(docOf(s), other, LIMITS)
+  // When the other devices last wrote is not shown anywhere: kept whether or
+  // not a step moved.
+  s.devices = merged.devices ?? []
   if (sameHistory(merged, docOf(s)) && merged.gone.length === s.gone.length) return false
   s.undo.splice(0, s.undo.length, ...merged.undo)
   s.redo.splice(0, s.redo.length, ...merged.redo)
@@ -309,6 +314,36 @@ export function historyReady(): Promise<void> {
 
 /** How long an Undo waits to hear whether another device got there first. */
 const CLAIM_WAIT_MS = 1500
+
+/**
+ * An Undo waits for that answer only when another of the person's devices
+ * wrote this project's history this recently (Sam, Oct 22). Otherwise it goes
+ * at once: one person on one device never waits.
+ */
+export const OTHER_DEVICE_WINDOW_MS = 5 * 60_000
+
+const DEVICE_KEY = "aquilla.history.device"
+let device: string | null = null
+
+/**
+ * This browser tab's name in the history's list of writers. A tab, not a
+ * computer: two tabs hold two copies of the history, just as two computers
+ * do. Kept across a reload (sessionStorage), so a reload does not make the tab
+ * look like another device. A duplicated tab starts with the original's name;
+ * the two then undo without waiting for each other, and each step's own
+ * "changed since?" guard still stands.
+ */
+function thisDevice(): string {
+  device ??= tabConnId(DEVICE_KEY)
+  return device
+}
+
+/** When another device last wrote this copy's history, as far as this copy
+ *  knows (ms; 0 = never). Learned from the copies it receives, never asked for. */
+function otherDeviceWroteAt(s: Stacks): number {
+  const me = thisDevice()
+  return s.devices.reduce((newest, d) => (d.id !== me && d.at > newest ? d.at : newest), 0)
+}
 
 /** Where the server copy lives. The workspace sets it once a session exists;
  *  null keeps the history on this device only (signed out, tests). */
@@ -369,10 +404,14 @@ async function pushOnce(key: string): Promise<void> {
     const r = remote
     const s = stacks.get(key)
     if (!r || !s) return
-    const snapshot = JSON.parse(JSON.stringify(docOf(s))) as HistoryDoc
+    // Signed with this device and the time, so the person's other devices know
+    // it is in use (see `claim`).
+    const wrote = { id: thisDevice(), at: Date.now() }
+    const snapshot = JSON.parse(JSON.stringify({ ...docOf(s), devices: mergeDevices(s.devices, [wrote]) })) as HistoryDoc
     const res = await r.write(projectId, s.revision ?? 0, snapshot)
     if (!res) return // offline or refused: it stays unpushed, and goes with the next write
     if (res.kind === "saved") {
+      s.devices = mergeDevices(s.devices, [wrote])
       s.revision = res.revision
       if (sameHistory(docOf(s), snapshot)) s.unpushed = false
       void writeLocal(key)
@@ -411,6 +450,7 @@ async function pullOnce(key: string): Promise<"unchanged" | "merged" | null> {
     if (s.unpushed) schedulePush(key)
     return "unchanged"
   }
+  const knewOf = otherDeviceWroteAt(s)
   const changed = res.history ? mergeIn(key, res.history) : false
   s.revision = newer(s.revision, res.revision)
   // This copy holds something the server's lacks: send the merged one back.
@@ -420,19 +460,26 @@ async function pullOnce(key: string): Promise<"unchanged" | "merged" | null> {
     s.unpushed = true
     schedulePush(key)
   }
-  if (changed) void writeLocal(key)
+  // Kept here too when only the writers' times moved: after a reload, an Undo
+  // still knows another device is in use.
+  if (changed || otherDeviceWroteAt(s) !== knewOf) void writeLocal(key)
   return "merged"
 }
 
 /**
  * Before an undo or redo writes anything, ask the server whether another
  * device of the same person already took the step (P13.7: two devices cannot
- * undo the same step twice). Offline, or with no answer in time, the step
- * runs: its own "changed since?" guard still stands between it and a second
- * write.
+ * undo the same step twice). Only when another device wrote this history in
+ * the last few minutes, as this copy knows from the copies it has received;
+ * otherwise nothing is asked and the step runs at once. Offline, or with no
+ * answer in time, the step runs too: its own "changed since?" guard still
+ * stands between it and a second write.
  */
 async function claim(key: string, id: string, which: "undo" | "redo"): Promise<"ok" | "moved"> {
   if (!remote) return "ok"
+  // A time far ahead of this clock is not taken to mean "just now" either.
+  const since = Date.now() - otherDeviceWroteAt(stacksFor(key))
+  if (since >= OTHER_DEVICE_WINDOW_MS || since <= -OTHER_DEVICE_WINDOW_MS) return "ok"
   let timer: ReturnType<typeof setTimeout> | null = null
   const timeout = new Promise<null>((resolve) => {
     timer = setTimeout(() => resolve(null), CLAIM_WAIT_MS)
@@ -929,6 +976,13 @@ export function resetHistoryForTests(): void {
   openFileProbe = null
   laneSwitcher = null
   remote = null
+  // The next "device" is a new one.
+  device = null
+  try {
+    globalThis.sessionStorage?.removeItem(DEVICE_KEY)
+  } catch {
+    // unavailable: the next name is minted fresh anyway
+  }
   emit()
 }
 

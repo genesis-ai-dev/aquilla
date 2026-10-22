@@ -1,6 +1,6 @@
 // Decision 11: one person's history on two devices, merged step by step.
 import { describe, it, expect } from "vitest"
-import { mergeHistories, type HistoryDoc } from "./history-merge"
+import { DEVICES_LIMIT, mergeHistories, normalizeHistoryDoc, type HistoryDoc } from "./history-merge"
 import type { StepRecord } from "./history"
 
 const LIMITS = { steps: 100, log: 30 }
@@ -71,5 +71,21 @@ describe("merging two copies of one history", () => {
     const merged = mergeHistories(doc({ undo: many, log: [entry] }), doc({ log: [entry] }), { steps: 4, log: 30 })
     expect(ids(merged).undo).toEqual(["s2", "s3", "s4", "s5"])
     expect(merged.log).toHaveLength(1)
+  })
+
+  it("remembers when each device last wrote: its newest time, the newest devices kept", () => {
+    const a = doc({ devices: [{ id: "laptop", at: 10 }, { id: "phone", at: 30 }] })
+    const b = doc({ devices: [{ id: "laptop", at: 20 }] })
+    expect(mergeHistories(a, b, LIMITS).devices).toEqual([
+      { id: "laptop", at: 20 },
+      { id: "phone", at: 30 },
+    ])
+    const crowd = doc({ devices: Array.from({ length: DEVICES_LIMIT + 5 }, (_, i) => ({ id: `d${i}`, at: i })) })
+    const kept = mergeHistories(crowd, doc({}), LIMITS).devices ?? []
+    expect(kept).toHaveLength(DEVICES_LIMIT)
+    expect(kept[0].id).toBe("d5")
+    // A copy saved before devices were recorded reads as none.
+    expect(normalizeHistoryDoc({ undo: [], redo: [], log: [], gone: [] }).devices).toBeUndefined()
+    expect(mergeHistories(doc({}), doc({}), LIMITS).devices).toBeUndefined()
   })
 })

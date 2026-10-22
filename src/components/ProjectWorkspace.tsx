@@ -509,6 +509,7 @@ import {
 } from "@/components/ui/select"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
+import { audioProgressCellIds } from "@/lib/progress/audio-progress-cells"
 import {
   detectStrongTextDirection,
   projectSettingTextDirection,
@@ -10899,6 +10900,26 @@ export function ProjectWorkspace() {
   useEffect(() => {
     cellStore.setOwnTakeCellIds(ownTakeCellIds)
   }, [cellStore, ownTakeCellIds])
+
+  // AQU-2110: and which of those lines are AUDIO VALIDATED, so the chapter
+  // picker's rollup can show the audio pair — a chapter on an audio-only
+  // project read "100% translated / 0% validated" however many takes were
+  // signed off, because only the text flag was ever counted.
+  //
+  // Read off the UNGATED map, not `workspaceAudioByCellId`: the picker lives
+  // in the text lens, where the gated map is empty for anyone who may not
+  // restructure cells, and a contributor validating takes there is exactly
+  // who needs the figure to move. The requirement is `audioValidationRequirement`
+  // declared above (AQU-2111): the project's audio one, resolved project → org
+  // → 1 — the same threshold the cell's audio validation control and the
+  // server's progress counts apply.
+  const audioProgressIds = useMemo(
+    () => audioProgressCellIds(audioValidationByCellId, audioValidationRequirement),
+    [audioValidationByCellId, audioValidationRequirement],
+  )
+  useEffect(() => {
+    cellStore.setAudioProgressCellIds(audioProgressIds)
+  }, [cellStore, audioProgressIds])
 
   /** The link index in the shape every cue-aware resolver takes. */
   const cueLinkArgs = useMemo(

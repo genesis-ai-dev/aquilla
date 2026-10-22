@@ -345,6 +345,10 @@ export const editor = defineNamespace({
     "editor.milestone.cellRange": "Cells {range}",
     "editor.milestone.percentTranslated": "{percent}% translated",
     "editor.milestone.percentValidated": "{percent}% validated",
+    // AQU-2110 — the audio pair, shown instead of (audio-only file) or beside
+    // (file with text and takes) the two above.
+    "editor.milestone.percentRecorded": "{percent}% recorded",
+    "editor.milestone.percentAudioValidated": "{percent}% audio validated",
     // AQU-515 — pericope suggestions, offered beside the division picker when
     // the open file addresses scripture.
     "editor.pericope.trigger": "Suggested passages",
@@ -4017,6 +4021,32 @@ export const editor = defineNamespace({
           "reviewer has marked validated. Validated is a stronger state than " +
           "translated, so the two words must stay clearly different.",
         maxLength: 20,
+        placeholders: {
+          percent: "Whole-number percentage, already rounded, without the % sign.",
+        },
+      },
+      "editor.milestone.percentRecorded": {
+        description:
+          "AQU-2110: first line of the AUDIO progress figure in the picker row — " +
+          "the share of the division's lines that carry a recording. Shown instead " +
+          "of the two text lines on a file whose target language has no written " +
+          "form (recordings, no text), and beside them on a file that has both. " +
+          "Same fixed column as editor.milestone.percentTranslated, so it must fit " +
+          "one short line; a marker icon and a magenta swatch carry the meaning " +
+          "visually, this wording is hover text and what a screen reader reads.",
+        maxLength: 20,
+        placeholders: {
+          percent: "Whole-number percentage, already rounded, without the % sign.",
+        },
+      },
+      "editor.milestone.percentAudioValidated": {
+        description:
+          "AQU-2110: second line of that audio figure — the share of the division's " +
+          "lines whose recording has been signed off (every chosen take meets the " +
+          "project's audio validation requirement). Must read as distinct from " +
+          "editor.milestone.percentValidated, which is about the TEXT; on a file " +
+          "showing both, the two sit side by side.",
+        maxLength: 24,
         placeholders: {
           percent: "Whole-number percentage, already rounded, without the % sign.",
         },

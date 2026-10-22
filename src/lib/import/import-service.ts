@@ -12,7 +12,14 @@ import type {
 } from "../../../shared/import-contract"
 
 export interface ImportPreviewNotice {
-  code: "basic-parser-fallback"
+  code:
+    | "basic-parser-fallback"
+    /** AQU-2119: short-form WebVTT cue timestamps were padded on the way in.
+     *  Without the pad those cues vanished with their words. */
+    | "subtitle-short-form-timestamps"
+    /** AQU-2119: cue timestamp lines that produced no cue, so the import says
+     *  so rather than dropping their words silently. */
+    | "subtitle-cues-unreadable"
   severity: "warning"
   message: string
 }

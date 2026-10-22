@@ -100,6 +100,7 @@ import {
 } from "./import/normalized-manifest"
 import { ImportService } from "./import/import-service"
 import type { ImportPreviewNotice, PreparedImportFile } from "./import/import-service"
+import type { SubtitleCueRepair } from "./parsers/core-types"
 import {
   classifyAndParseUnknownText,
   readUnknownTextFile,
@@ -503,6 +504,10 @@ export interface ImportResult {
   /** Paratext-parity chapter/verse + marker findings (AQU-1731), USFM only.
    *  Carried as codes + refs and translated in the preview. */
   structureFindings?: UsfmStructureFinding[]
+  /** Subtitle cue counts from the parse core (AQU-2119). Turned into preview
+   *  notices by `preparedParsedFile`; absent when nothing was repaired or
+   *  refused. */
+  cueRepair?: SubtitleCueRepair
   roundTripFidelity?: RoundTripFidelity
   /** Exact container for a multi-book import. Stored once and bound to every
    * emitted book instead of becoming every book's export skeleton. */
@@ -595,7 +600,37 @@ function preparedParsedFile(
   if (results.length === 0 || results.every((result) => result.strings.length === 0)) {
     throw new Error(t("importExport.errors.noImportableContent", { fileName: file.name, fileType }))
   }
-  return { fileType, results }
+  return { fileType, results: results.map(withSubtitleCueNotices) }
+}
+
+/** AQU-2119: turn the parse core's subtitle cue counts into preview notices.
+ *  The core carries numbers only, so the wording is resolved here — the same
+ *  split `structureFindings` uses. A repaired cue is reported rather than
+ *  passed over in silence because the alternative, before the repair existed,
+ *  was losing it; a cue the parser still refused is reported for the same
+ *  reason. */
+function withSubtitleCueNotices(result: ImportResult): ImportResult {
+  const repair = result.cueRepair
+  if (!repair) return result
+  const notices: ImportPreviewNotice[] = []
+  if (repair.repairedShortForm > 0) {
+    notices.push({
+      code: "subtitle-short-form-timestamps",
+      severity: "warning",
+      message: t("importExport.notices.subtitleShortFormTimestamps", {
+        count: repair.repairedShortForm,
+      }),
+    })
+  }
+  if (repair.droppedCues > 0) {
+    notices.push({
+      code: "subtitle-cues-unreadable",
+      severity: "warning",
+      message: t("importExport.notices.subtitleCuesUnreadable", { count: repair.droppedCues }),
+    })
+  }
+  if (notices.length === 0) return result
+  return { ...result, importNotices: [...(result.importNotices ?? []), ...notices] }
 }
 
 async function prepareSandboxImport(
@@ -827,9 +862,9 @@ export async function prepareImportFile(
       if (analysisError) {
         prepared.results = prepared.results.map((result) => ({
           ...result,
-          importNotices: [{
-            code: "basic-parser-fallback",
-            severity: "warning",
+          importNotices: [...(result.importNotices ?? []), {
+            code: "basic-parser-fallback" as const,
+            severity: "warning" as const,
             message: t("importExport.notices.basicParserFallback"),
           }],
         }))

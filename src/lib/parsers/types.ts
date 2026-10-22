@@ -8,6 +8,7 @@ export type {
   SourceLocation,
   TranslatableString,
   ParsedTextFileResult,
+  SubtitleCueRepair,
   ExportCellFields,
 } from "./core-types"
 // Also needed in local type positions below, not just re-exported.

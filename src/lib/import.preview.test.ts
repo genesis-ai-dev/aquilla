@@ -100,6 +100,42 @@ describe("parseFile — parse phase only (no upload)", () => {
     expect(captured).toHaveLength(0)
   })
 
+  it("AQU-2119: Upload files keeps short-form VTT cues and says so in the preview", async () => {
+    // The Upload-files panel goes through prepareImportFile, which used to hand
+    // the raw text straight to the strict cue matcher — so a .vtt written with
+    // WebVTT's optional hours field imported short, with no warning.
+    const vtt = [
+      "WEBVTT",
+      "",
+      "01:03.209 --> 01:03.667",
+      "First cue text",
+      "",
+      "01:04.000 --> 01:05.500",
+      "Second cue text",
+      "",
+      "00:00:08.1 --> 00:00:09.5",
+      "Unreadable cue text",
+    ].join("\n")
+
+    const prepared = await prepareImportFile(makeFile("subs.vtt", vtt), { projectId: "p1" })
+
+    expect(prepared.fileType).toBe("vtt")
+    const [result] = prepared.results
+    expect(result.strings.map((cue) => cue.original)).toEqual([
+      "First cue text",
+      "Second cue text",
+    ])
+    expect(result.strings[0].start).toBeCloseTo(63.209)
+    expect(result.importNotices?.map((notice) => notice.code)).toEqual([
+      "subtitle-short-form-timestamps",
+      "subtitle-cues-unreadable",
+    ])
+    // The notices are sentences by the time they reach the preview, and the
+    // one that matters carries the count of cues whose words were dropped.
+    expect(result.importNotices?.[1].message).toContain("1")
+    expect(captured).toHaveLength(0)
+  })
+
   it("parses a markdown file into cells without touching fetch", async () => {
     const md = "# Title\n\nParagraph one.\n\nParagraph two.\n"
     const file = makeFile("doc.md", md)

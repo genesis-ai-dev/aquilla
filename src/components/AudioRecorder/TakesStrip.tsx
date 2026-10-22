@@ -41,6 +41,7 @@ import { TakeRowWave } from "@/components/audio/TakeRowWave"
 import { TakeTextVerdict } from "@/components/audio/TakeTextVerdict"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { AudioValidationControl } from "@/components/cell/AudioValidationControl"
+import { PiecesApproved } from "@/components/audio/PiecesApproved"
 import { useAudioValidation } from "@/hooks/useAudioValidation"
 
 /**
@@ -63,6 +64,16 @@ export function nextTakeLabel(takes: Array<Pick<AudioAttachmentOut, "label">>): 
   // in so a fresh recording never collides with a pending backfill.
   const unlabeled = takes.filter((t) => !t.label).length
   return `Take ${Math.max(max, unlabeled) + 1}`
+}
+
+/** One row of the list: a take, or (AQU-1767) one piece of a split take. */
+interface ListRow {
+  att: AudioAttachmentOut
+  /** What the row plays: a split take's pieces, or the row's own clip. */
+  pieces: AudioAttachmentOut[]
+  isCleaned: boolean
+  /** A piece's row: the whole take it was cut from, its pieces in clip order. */
+  take?: AudioAttachmentOut[]
 }
 
 interface Props {
@@ -118,7 +129,10 @@ interface Props {
    *
    * Elsewhere a split take is ONE row: its name, "split in N", its whole
    * length; play plays its pieces, choose and delete act on all of them, and
-   * Remove noise keeps its cuts.
+   * Remove noise keeps its cuts. It takes no vote: it says how many of its
+   * pieces are approved. In the recorder each piece is listed under it on a
+   * row of its own, as in the pieces list, with its own vote and its own name
+   * (decision 7, Sam 2026-10-22).
    */
   /** Takes to leave out of the list (the tab's playing take). */
   hide?: readonly string[]
@@ -291,12 +305,13 @@ export function TakesStrip({
   /**
    * Audition a take. `windows` (AQU-1767): play only these parts of the
    * recording, in order — a piece's window, or a split take's pieces. Absent,
-   * the whole clip as always.
+   * the whole clip as always. `key`: the row playing it, when a split take's
+   * row and its first piece's row share a clip.
    */
-  const play = useCallback(async (att: AudioAttachmentOut, windows?: readonly { startSec: number; endSec: number | null }[]) => {
-    if (playingId === att.audioId) { stopPlayback(); return }
+  const play = useCallback(async (att: AudioAttachmentOut, windows?: readonly { startSec: number; endSec: number | null }[], key: string = att.audioId) => {
+    if (playingId === key) { stopPlayback(); return }
     stopPlayback()
-    setLoadingId(att.audioId)
+    setLoadingId(key)
     try {
       let src = att.url
       const frontier = parseFrontierAudioUrl(att.url)
@@ -318,11 +333,11 @@ export function TakesStrip({
       claimActiveAudio(audition())
       if (windows && windows.length > 0) await holdToWindows(audio, windows)
       await audio.play()
-      setPlayingId(att.audioId)
+      setPlayingId(key)
     } catch {
       stopPlayback()
     } finally {
-      setLoadingId((cur) => (cur === att.audioId ? null : cur))
+      setLoadingId((cur) => (cur === key ? null : cur))
     }
   }, [playingId, stopPlayback, audition, session, projectId, fileId, holdToWindows])
 
@@ -516,11 +531,12 @@ export function TakesStrip({
   // here. A piece renamed on its own goes by that name (decision 7).
   const names = useMemo(() => pieceNames(takes), [takes])
   /** The name a row shows and a rename starts from: a piece's own or numbered
-   *  name in the pieces list, a take's stored name everywhere else. */
+   *  name, a take never split its stored one. (A split take's row is named by
+   *  `splitLabel`.) */
   const shownLabel = useCallback(
     (att: AudioAttachmentOut): string =>
-      labelOverrides.get(att.audioId) ?? (piecesList ? names.get(att.audioId) : null) ?? displayLabel(att),
-    [labelOverrides, piecesList, names, displayLabel],
+      labelOverrides.get(att.audioId) ?? names.get(att.audioId) ?? displayLabel(att),
+    [labelOverrides, names, displayLabel],
   )
   /** A split take's row: the name its pieces share, not any one piece's. */
   const splitLabel = (pieces: readonly AudioAttachmentOut[]): string =>
@@ -590,13 +606,23 @@ export function TakesStrip({
   // Cleaned (dn-) takes pinned above originals; stable id order within groups.
   // AQU-1767: a split take is one row (its first piece stands for it), named
   // as cleaned by its group; the pieces list keeps a row per piece, in order.
-  const ordered = useMemo(() => {
+  // Decision 7 (Sam, 2026-10-22): the recorder lists each piece of a split
+  // take under it, on a row of its own. `take` marks a piece's row: the whole
+  // take it was cut from, its pieces in clip order.
+  const ordered = useMemo((): ListRow[] => {
     const listed = hide?.length ? takes.filter((t) => !hide.includes(t.audioId)) : takes
-    if (piecesList) return takeRows(listed).flatMap((row) => row.pieces).map((att) => ({ att, pieces: [att], isCleaned: false }))
+    const pieceRows = (take: AudioAttachmentOut[]): ListRow[] =>
+      take.map((att) => ({ att, pieces: [att], isCleaned: false, take }))
+    if (piecesList) return takeRows(listed).flatMap((row) => pieceRows(row.pieces))
     const rows = takeRows(listed).map((row) => ({ att: row.pieces[0], pieces: row.pieces, isCleaned: isDenoisedAudioId(row.group) }))
     const byId = (a: { att: AudioAttachmentOut }, b: { att: AudioAttachmentOut }) => a.att.audioId.localeCompare(b.att.audioId)
-    return [...rows.filter((r) => r.isCleaned).sort(byId), ...rows.filter((r) => !r.isCleaned).sort(byId)]
-  }, [takes, hide, piecesList])
+    const sorted = [...rows.filter((r) => r.isCleaned).sort(byId), ...rows.filter((r) => !r.isCleaned).sort(byId)]
+    // The Recording tab lists a piece only under the take that plays.
+    if (tab) return sorted
+    return sorted.flatMap((row) => (row.pieces.length > 1 ? [row, ...pieceRows(row.pieces)] : [row]))
+  }, [takes, hide, piecesList, tab])
+  // What a heading counts: takes, never the pieces listed under them.
+  const takeCount = piecesList ? ordered.length : ordered.filter((r) => !r.take).length
 
   // AQU-1767 (Sam, 2026-10-15): every take dated by the recording its words
   // came from.
@@ -613,12 +639,12 @@ export function TakesStrip({
     >
       {tab && (
         <div className="text-[11px] font-medium text-muted-foreground">
-          {t("editor.recordingTab.otherTakes", { count: ordered.length })}
+          {t("editor.recordingTab.otherTakes", { count: takeCount })}
         </div>
       )}
       {piecesList && (
         <div className="text-[11px] font-medium text-muted-foreground" data-testid="take-pieces-heading">
-          {t("editor.recordingTab.pieces", { count: ordered.length })}
+          {t("editor.recordingTab.pieces", { count: takeCount })}
         </div>
       )}
       {/* The recorder's utility strip carries the count and the border itself,
@@ -626,7 +652,7 @@ export function TakesStrip({
           "Takes (3)" headings three inches apart is the failure this avoids. */}
       {!chromeless && !tab && !piecesList && (
         <div className="mb-2 text-xs text-muted-foreground/60">
-          {t("audio.takesStrip.heading", { count: ordered.length })}
+          {t("audio.takesStrip.heading", { count: takeCount })}
         </div>
       )}
       {/* Round 8: rows, not chips — one take per line, name first.
@@ -636,15 +662,21 @@ export function TakesStrip({
           this component cannot know, and a second cap in here would fight
           whichever one it is inside. */}
       <div className="flex flex-col gap-1">
-        {ordered.map(({ att, pieces, isCleaned }) => {
+        {ordered.map(({ att, pieces, isCleaned, take }) => {
           // Use optimistic override while in-flight; fall back to server value.
           const effectiveSelectedId = optimisticSelectedId ?? activeTakeId
           // AQU-1767: a split take, as one row.
           const isSplit = pieces.length > 1
+          // AQU-1767: one piece of a split take, on its own row.
+          const isPiece = take != null
+          // The recorder lists a split take's row and its first piece's row
+          // together, and both are that piece's clip: a piece's row there goes
+          // by its own key (and test ids).
+          const rowKey = isPiece && !piecesList ? `piece-${att.audioId}` : att.audioId
           // A piece of the playing take is not "chosen" on its own: the take is.
-          const isCircled = !piecesList && pieces.some((p) => p.audioId === effectiveSelectedId)
+          const isCircled = !isPiece && pieces.some((p) => p.audioId === effectiveSelectedId)
           // What plays: a piece's own window, or a split take's pieces.
-          const windows = piecesList || isSplit
+          const windows = isPiece || isSplit
             ? pieces.map((p) => ({ startSec: (p.trimStartMs ?? 0) / 1000, endSec: p.trimEndMs == null ? null : p.trimEndMs / 1000 }))
             : undefined
             // AQU-646 stage 3: synthetic-ness comes off the TAKE, not off its slot —
@@ -658,7 +690,7 @@ export function TakesStrip({
           // from — not by when a piece was cut or a copy cleaned — so a take
           // and all its pieces agree. A piece's own row says neither: the
           // take above it does, once.
-          const provenance = piecesList
+          const provenance = isPiece
             ? null
             : takeHistory.get(originalRecordingId(takesById, att.audioId)) ??
               takeHistory.get(pieceGroupOf(att, att.audioId)) ??
@@ -672,8 +704,8 @@ export function TakesStrip({
                 cellText,
               })
             : null
-          const isPlaying = att.audioId === playingId
-          const isLoading = att.audioId === loadingId
+          const isPlaying = rowKey === playingId
+          const isLoading = rowKey === loadingId
           const isBusy = att.audioId === busyId
           // Disable all circle buttons while any selection switch is in flight.
           const isSelectInFlight = busyId !== null
@@ -682,12 +714,27 @@ export function TakesStrip({
           // as that take is still present.
           const revertTo = att.referenceAudioId
           const canRevert = isCleaned && !!revertTo && haveTake.has(revertTo)
+          // Decision 7 (Sam, 2026-10-22): a piece takes its own vote. In the
+          // pieces list it sits under the take that plays, from whoever may
+          // validate; in the recorder only while its take is the circled one,
+          // as every take there. A split take's row takes none: it says how
+          // many of its pieces are approved.
+          const takeCircled = isPiece && take.some((p) => p.audioId === effectiveSelectedId)
+          const voteReadOnly = isPiece
+            ? !piecesList && (readOnly || !takeCircled)
+            : readOnly || tab || !isCircled
+          const validationTakes = audioValidation.takesFor({
+            attachments: Object.fromEntries(pieces.map((p) => [p.audioId, p])),
+            selectedBySlot: { [att.slot]: att.audioId },
+          })
           return (
             <div
-              key={att.audioId}
-              data-testid={`take-row-${att.audioId}`}
+              key={rowKey}
+              data-testid={`take-row-${rowKey}`}
               className={cn(
-                "group/take flex w-full items-center gap-1.5 rounded-md border px-1.5 py-1 text-xs transition-colors",
+                "group/take flex items-center gap-1.5 rounded-md border px-1.5 py-1 text-xs transition-colors",
+                // The recorder's piece rows sit indented under their take.
+                isPiece && !piecesList ? "ms-5" : "w-full",
                 isCircled
                   ? isGenerated
                     ? "border-violet-500/60 bg-violet-500/10"
@@ -702,7 +749,7 @@ export function TakesStrip({
                   type="button"
                   variant="ghost"
                   size="icon-xs"
-                  onClick={() => void play(att, windows)}
+                  onClick={() => void play(att, windows, rowKey)}
                   aria-label={isPlaying ? t("common.stop") : t("audio.takesStrip.playTakeTooltip")}
                   className="rounded-md hover:bg-background"
                 >
@@ -728,10 +775,10 @@ export function TakesStrip({
               <span className="flex min-w-0 flex-1 items-center gap-1 tabular-nums">
                 {isCleaned && <Bird className="h-3 w-3 shrink-0 text-emerald-600 dark:text-emerald-400" />}
                 {isGenerated && <Sparkles className="h-3 w-3 shrink-0 text-violet-600 dark:text-violet-400" />}
-                {renamingId === att.audioId ? (
+                {renamingId === rowKey ? (
                   <input
                     autoFocus
-                    data-testid={`take-rename-${att.audioId}`}
+                    data-testid={`take-rename-${rowKey}`}
                     value={renameDraft}
                     onChange={(e) => setRenameDraft(e.target.value)}
                     onBlur={() => void commitRename(att)}
@@ -748,7 +795,7 @@ export function TakesStrip({
                   />
                 ) : (
                   <>
-                    <span data-testid={`take-label-${att.audioId}`} className="truncate font-medium">
+                    <span data-testid={`take-label-${rowKey}`} className="truncate font-medium">
                       {isSplit ? splitLabel(pieces) : shownLabel(att)}
                     </span>
                     {isSplit && (
@@ -757,13 +804,13 @@ export function TakesStrip({
                       </span>
                     )}
                     {isSplit ? (
-                      <span data-testid={`take-length-${att.audioId}`} className="shrink-0 text-muted-foreground/70">
+                      <span data-testid={`take-length-${rowKey}`} className="shrink-0 text-muted-foreground/70">
                         {formatTakeSeconds(takePlayedMs(pieces) ?? 0)}s
                       </span>
                     ) : att.durationMs != null ? (
                       // The length that plays: a trimmed take's kept part
                       // (AQU-1217), as the chip and the take on top say it.
-                      <span data-testid={`take-length-${att.audioId}`} className="shrink-0 text-muted-foreground/70">
+                      <span data-testid={`take-length-${rowKey}`} className="shrink-0 text-muted-foreground/70">
                         {formatTakeSeconds(takePlayedMs([att]) ?? att.durationMs)}s
                       </span>
                     ) : (
@@ -771,7 +818,7 @@ export function TakesStrip({
                       // as "fine" while the chip was quietly section-width.
                       <span
                         title={t("audio.takesStrip.unknownLengthTooltip")}
-                        data-testid={`take-unknown-length-${att.audioId}`}
+                        data-testid={`take-unknown-length-${rowKey}`}
                         className="shrink-0 text-muted-foreground/50"
                       >
                         ?
@@ -780,7 +827,7 @@ export function TakesStrip({
                     {att.pendingSync && (
                       <span
                         title={t("audio.takesStrip.pendingSyncTooltip")}
-                        data-testid={`take-saving-${att.audioId}`}
+                        data-testid={`take-saving-${rowKey}`}
                         className="flex shrink-0 items-center gap-0.5 text-[10px] text-muted-foreground/70"
                       >
                         <CloudUpload className="h-3 w-3 animate-pulse" /> {t("common.saving")}
@@ -792,7 +839,7 @@ export function TakesStrip({
                       <button
                         type="button"
                         title={t("audio.takesStrip.syncFailedTooltip")}
-                        data-testid={`take-sync-failed-${att.audioId}`}
+                        data-testid={`take-sync-failed-${rowKey}`}
                         onClick={() => {
                           void retryFailedAudioSync(projectId, fileId, cellId, att.audioId)
                         }}
@@ -859,7 +906,7 @@ export function TakesStrip({
                       />
                     )}
                     {/* A split take's row is not renamed: its pieces are, each
-                        on its own row in the Recording tab (decision 7). */}
+                        on its own row (decision 7). */}
                     {!isSplit && <AppTooltip content={t("audio.takesStrip.renameTooltip")}>
                       <Button
                         type="button"
@@ -868,7 +915,7 @@ export function TakesStrip({
                         onClick={() => {
                           renameCancelledRef.current = false
                           setRenameDraft(shownLabel(att))
-                          setRenamingId(att.audioId)
+                          setRenamingId(rowKey)
                         }}
                         aria-label={t("audio.takesStrip.renameTooltip")}
                         disabled={readOnly}
@@ -880,7 +927,7 @@ export function TakesStrip({
                   </>
                 )}
               </span>
-              {!piecesList && !isCleaned && !isGenerated && (
+              {!isPiece && !isCleaned && !isGenerated && (
                 <AppTooltip content={t("audio.takesStrip.removeNoiseTooltip")}>
                   <Button
                     type="button"
@@ -924,26 +971,29 @@ export function TakesStrip({
                   validation read-only. In the Recording tab's other takes
                   nothing is circled — the take that plays sits above them,
                   with its own vote. */}
-              {/* AQU-1767: a split take's row stands for every piece, each
-                  named in its list. Decision 7 (replacing Sam's 2026-10-15
-                  ruling): the pieces list sits under the take that plays, and
-                  each piece there takes its own vote — from whoever may
-                  validate, as the take on top does, not only from someone who
-                  may edit the takes. */}
-              <AudioValidationControl
-                  readOnly={!piecesList && (readOnly || tab || !isCircled)}
+              {/* AQU-1767, decision 7 (replacing Sam's 2026-10-15 ruling that
+                  a split take was approved whole): each piece takes its own
+                  vote on its own row (see `voteReadOnly`); the split take's
+                  row says how many of them are approved, read-only. */}
+              {isSplit ? (
+                <PiecesApproved
+                  pieces={validationTakes}
+                  requirement={audioValidation.validationRequirement}
+                  testId={`take-pieces-approved-${rowKey}`}
+                />
+              ) : (
+                <AudioValidationControl
+                  readOnly={voteReadOnly}
                   cellRef={cellId}
-                  takes={audioValidation.takesFor({
-                    attachments: Object.fromEntries(pieces.map((p) => [p.audioId, p])),
-                    selectedBySlot: { [att.slot]: att.audioId },
-                  })}
+                  takes={validationTakes}
                   currentUsername={author}
                   validationRequirement={audioValidation.validationRequirement}
                   canValidate={audioValidation.canValidate}
                   onValidationChange={audioValidation.onValidationChange}
                   variant="inline"
                 />
-              {!piecesList && <AppTooltip content={isCircled ? t("audio.takesStrip.activeTakeTooltip") : t("audio.takesStrip.useTakeTooltip")}>
+              )}
+              {!isPiece && <AppTooltip content={isCircled ? t("audio.takesStrip.activeTakeTooltip") : t("audio.takesStrip.useTakeTooltip")}>
                 <Button
                   type="button"
                   variant="ghost"

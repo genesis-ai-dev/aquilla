@@ -2200,6 +2200,11 @@ export const editor = defineNamespace({
       one: "{count} piece",
       other: "{count} pieces",
     }),
+    // Decision 7 (Sam, 2026-10-22): a cut take takes no vote of its own.
+    "editor.recordingTab.piecesApproved": plural({
+      one: "{approved} of {count} piece approved",
+      other: "{approved} of {count} pieces approved",
+    }),
     "editor.recordingTab.matches": "Matches the text",
     "editor.recordingTab.differs": plural({
       one: "{count} word differs",
@@ -8498,6 +8503,17 @@ export const editor = defineNamespace({
           "one part of a take that was split on the timeline. Count-governed.",
         placeholders: { count: "How many pieces the take is in. Always 2 or more." },
         maxLength: 24,
+      },
+      "editor.recordingTab.piecesApproved": {
+        description:
+          "Read-only status beside a split take's name, in the Recording tab and the recorder's " +
+          "list of takes. Each piece of the take is approved (validated) on its own, so the " +
+          "take says how many of its pieces are, e.g. '2 of 3 pieces approved'. Count-governed.",
+        placeholders: {
+          approved: "How many of the pieces are approved. 0 up to {count}.",
+          count: "How many pieces the take is in. Always 2 or more.",
+        },
+        maxLength: 32,
       },
       "editor.recordingTab.matches": {
         description:

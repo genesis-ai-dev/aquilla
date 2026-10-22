@@ -102,28 +102,19 @@ describe("TakesStrip — audio validation", () => {
     expect(emitUnvalidate).not.toHaveBeenCalled()
   })
 
-  // Decision 7: a split take is one row in the recorder, and its list names
-  // each piece with its own votes — a vote on one piece is that piece's alone.
-  it("lists a split take's pieces by their own names, each with its own votes", async () => {
+  // Decision 7 (Sam, 2026-10-22): a split take's own row takes no vote; each
+  // piece is voted on from its own row under it (TakesStrip.pieces.test.tsx).
+  it("takes no vote for every piece at once on a split take's row", async () => {
     draw([
       take({ audioId: "p1", label: "Take 2 · 1", trimEndMs: 1000, validatorCount: 0, validators: [] }),
-      take({ audioId: "p3", label: "Take 2 · 3", trimStartMs: 1000, trimEndMs: 2000, pieceOf: "p1", validatorCount: 1, validators: ["rita"] }),
-      take({ audioId: "p2", label: "Chorus", trimStartMs: 2000, pieceOf: "p1", validatorCount: 0, validators: [] }),
+      take({ audioId: "p2", label: "Take 2 · 2", trimStartMs: 1000, pieceOf: "p1", validatorCount: 0, validators: [] }),
     ], "p1")
-    const mark = screen.getByTestId("audio-validation-button")
-    await userEvent.hover(mark)
-    const list = await screen.findByRole("dialog")
-    const items = within(list).getAllByRole("listitem").filter((li) => li.parentElement?.parentElement === list)
-    expect(items.map((li) => li.textContent)).toEqual([
-      expect.stringMatching(/^Take 2 · 1/),
-      expect.stringMatching(/^Take 2 · 2.*rita/),
-      expect.stringMatching(/^Chorus/),
-    ])
-    expect(items[0].textContent).not.toMatch(/rita/)
-    expect(items[2].textContent).not.toMatch(/rita/)
-    await userEvent.click(within(items[2]).getByRole("button", { name: /validate this take/i }))
+    expect(within(screen.getByTestId("take-row-p1")).queryByTestId("audio-validation-button")).toBeNull()
+    const marks = screen.getAllByTestId("audio-validation-button")
+    expect(marks).toHaveLength(2)
+    await userEvent.click(marks[0])
     expect(emitValidate).toHaveBeenCalledTimes(1)
-    expect(emitValidate.mock.calls[0][0]).toMatchObject({ audioId: "p2" })
+    expect(emitValidate.mock.calls[0][0]).toMatchObject({ audioId: "p1" })
   })
 
   // The role guard is defensive rather than decorative: a keyboard or

@@ -498,6 +498,7 @@ import { fileSummariesToProgress, mergeFileProgress } from "@/lib/progress/file-
 import { applyPushedFileProgress, invalidateFileProgress, invalidateProjectFileProgress, setLocalFileProgress } from "@/lib/progress/file-progress-resource"
 import { applyStructuralPolicy } from "@/lib/cells/structural"
 import { isExcludedFromWork } from "@/lib/health/excluded-cell"
+import type { AudioCellStage } from "@/lib/health/chapter-health"
 import { Button } from "@/components/ui/button"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -508,6 +509,7 @@ import {
 } from "@/components/ui/select"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
+import { audioProgressCellIds, sameAudioProgressCellIds } from "@/lib/progress/audio-progress-cells"
 import {
   detectStrongTextDirection,
   projectSettingTextDirection,
@@ -7580,35 +7582,6 @@ export function ProjectWorkspace() {
   // and chapters, so the sidebar's chapter grid also skips re-rendering.
   const chapterHealthBuilder = useMemo(() => chapterHealthBuilderFor(cellStore), [cellStore])
   const hasActiveChapters = activeFileId != null && readAtVersion(cellStoreVersion, () => cellStore.getNavigationIndex().length > 0)
-  // Only the expanded sidebar consumes this projection. Keep health live, but
-  // defer its whole-file display walk until that surface actually renders.
-  const getActiveChapterHealth = useCallback((): BookHealthChapter[] => {
-    if (!activeFileId) return EMPTY_CHAPTER_HEALTH
-    return readAtVersion(cellStoreVersion, () => {
-      // Summaries sit in store order, so the store's index is a direct lookup;
-      // the id check guards the (never observed) case of a skipped row, falling
-      // back to a map built once for this pass.
-      let summaryById: Map<string, CellSummary> | null = null
-      const getSummary = (cellId: string): CellSummary | undefined => {
-        const index = cellStore.findIndexByCellId(cellId)
-        const direct = index >= 0 ? cellSummaries[index] : undefined
-        if (direct && direct.id === cellId) return direct
-        summaryById ??= new Map(cellSummaries.map((cell) => [cell.id, cell]))
-        return summaryById.get(cellId)
-      }
-      return chapterHealthBuilder.build(cellStore.getNavigationIndex(), {
-        getSummary,
-        health: (cellId) => effectiveHealthMap.get(cellId),
-        hasIssue: (cellId) => (infractions.get(cellId)?.length ?? 0) > 0,
-        // AQU-1083 / AQU-1424: draw a heading the project does not count, and any
-        // PARKED cell, as "not counted" rather than as work left to do. The
-        // chapter's fraction already excludes both — the store does that — so this
-        // only chooses the colour and what it announces. The rule itself lives in
-        // `isExcludedFromWork`, where the two cases stay separate and tested.
-        isExcluded: (cellId) => isExcludedFromWork(getSummary(cellId), countStructuralCells),
-      })
-    })
-  }, [activeFileId, cellStore, cellStoreVersion, cellSummaries, chapterHealthBuilder, countStructuralCells, effectiveHealthMap, infractions])
 
   // AD-14: the four-sub-score breakdown popover is retired. The project ring
   // shows decay-derived health; the "biggest drags" popover redesign (cells
@@ -10846,6 +10819,77 @@ export function ProjectWorkspace() {
   useEffect(() => {
     cellStore.setOwnTakeCellIds(ownTakeCellIds)
   }, [cellStore, ownTakeCellIds])
+
+  /**
+   * AQU-2112: which of the open file's lines are RECORDED, and which are
+   * AUDIO VALIDATED, for the sidebar's chapter list below.
+   *
+   * Read off the UNGATED map, not `workspaceAudioByCellId`: the sidebar is
+   * shown in the text lens too, where the gated map is empty for anyone who
+   * may not restructure cells — and a contributor signing off takes there is
+   * exactly who needs the chapter to fill in. The requirement is the
+   * project's audio one, resolved project → org → 1, the same threshold the
+   * cell's own audio validation control and the server's progress counts use.
+   */
+  const sidebarAudioValidationRequirement = project ? readValidationCountAudio(project) : 1
+  const sidebarAudioProgressIds = useMemo(
+    () => audioProgressCellIds(audioValidationByCellId, sidebarAudioValidationRequirement),
+    [audioValidationByCellId, sidebarAudioValidationRequirement],
+  )
+  /**
+   * The same two sets as one reader, or NO reader at all when nothing in the
+   * file is recorded — which is how a text-only project keeps the chapter
+   * list, the colours and the single whole-file walk it had before audio
+   * progress existed. Memoized on membership, not on the attachment map, so a
+   * refetch that changed nothing does not rebuild the whole file's chapters.
+   */
+  const audioProgressIdsRef = useRef(sidebarAudioProgressIds)
+  if (!sameAudioProgressCellIds(audioProgressIdsRef.current, sidebarAudioProgressIds)) {
+    audioProgressIdsRef.current = sidebarAudioProgressIds
+  }
+  const stableAudioProgressIds = audioProgressIdsRef.current
+  const audioChapterStage = useMemo(() => {
+    if (stableAudioProgressIds.recorded.size === 0) return undefined
+    return (cellId: string): AudioCellStage | undefined =>
+      stableAudioProgressIds.audioValidated.has(cellId)
+        ? "audioValidated"
+        : stableAudioProgressIds.recorded.has(cellId) ? "recorded" : undefined
+  }, [stableAudioProgressIds])
+
+  // Only the expanded sidebar consumes this projection. Keep health live, but
+  // defer its whole-file display walk until that surface actually renders.
+  const getActiveChapterHealth = useCallback((): BookHealthChapter[] => {
+    if (!activeFileId) return EMPTY_CHAPTER_HEALTH
+    return readAtVersion(cellStoreVersion, () => {
+      // Summaries sit in store order, so the store's index is a direct lookup;
+      // the id check guards the (never observed) case of a skipped row, falling
+      // back to a map built once for this pass.
+      let summaryById: Map<string, CellSummary> | null = null
+      const getSummary = (cellId: string): CellSummary | undefined => {
+        const index = cellStore.findIndexByCellId(cellId)
+        const direct = index >= 0 ? cellSummaries[index] : undefined
+        if (direct && direct.id === cellId) return direct
+        summaryById ??= new Map(cellSummaries.map((cell) => [cell.id, cell]))
+        return summaryById.get(cellId)
+      }
+      return chapterHealthBuilder.build(cellStore.getNavigationIndex(), {
+        getSummary,
+        health: (cellId) => effectiveHealthMap.get(cellId),
+        hasIssue: (cellId) => (infractions.get(cellId)?.length ?? 0) > 0,
+        // AQU-1083 / AQU-1424: draw a heading the project does not count, and any
+        // PARKED cell, as "not counted" rather than as work left to do. The
+        // chapter's fraction already excludes both — the store does that — so this
+        // only chooses the colour and what it announces. The rule itself lives in
+        // `isExcludedFromWork`, where the two cases stay separate and tested.
+        isExcluded: (cellId) => isExcludedFromWork(getSummary(cellId), countStructuralCells),
+        // AQU-2112: the line's audio state, so an audio-only file's chapters
+        // fill in as its takes are signed off instead of reading untranslated
+        // forever. Undefined on a project with no recordings — see
+        // `audioChapterStage`.
+        audioStage: audioChapterStage,
+      })
+    })
+  }, [activeFileId, audioChapterStage, cellStore, cellStoreVersion, cellSummaries, chapterHealthBuilder, countStructuralCells, effectiveHealthMap, infractions])
 
   /** The link index in the shape every cue-aware resolver takes. */
   const cueLinkArgs = useMemo(

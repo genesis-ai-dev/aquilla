@@ -458,6 +458,8 @@ export const importExport = defineNamespace({
       "Updating matches stable units and keeps translations, language lanes, comments, audio, and units missing from the new file.",
     "importExport.collision.ambiguousWarning":
       "Some files have multiple matches. Choose Skip or Import as duplicate for those files.",
+    "importExport.collision.mediaUpdateUnavailable":
+      "Audio and video files cannot be updated in place. Choose Skip or Import as duplicate for those files.",
     "importExport.collision.applyToAll": "Apply to all:",
     "importExport.collision.updateAll": "Update all",
     "importExport.collision.skipAll": "Skip all",

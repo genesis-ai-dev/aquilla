@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect } from "vitest"
-import { detectCollisions } from "./import-collision"
+import { detectCollisions, supportsInPlaceReimport } from "./import-collision"
 
 describe("detectCollisions — bookCode primary", () => {
   it("returns the existing file id needed for safe in-place reconciliation", () => {
@@ -158,5 +158,94 @@ describe("detectCollisions — mixed bookCode presence", () => {
       [{ name: "Genesis", bookCode: "GEN" }],
     )
     expect(result).toHaveLength(0)
+  })
+})
+
+/**
+ * AQU-2120 — "Update existing" must never quietly duplicate.
+ *
+ * WHY each test matters:
+ *   - XLSX re-import was never even offered: the importer stores one sheet as
+ *     "data.xlsx — Sheet1", which never equals the incoming "data.xlsx", so
+ *     dropping the same workbook again silently made a second file.
+ *   - A workbook whose sheets were both imported has no single answer, so it
+ *     must report ambiguous rather than overwrite an arbitrary sheet's file.
+ *   - Media has no in-place path at all (`emitMediaFile` always mints a new
+ *     file id), so a media collision must come back with no `existingId` —
+ *     that is what stops the panel offering "Update existing".
+ */
+describe("detectCollisions — re-import that can actually happen (AQU-2120)", () => {
+  it("matches a workbook against the sheet file the importer named after it", () => {
+    const [collision] = detectCollisions(
+      [{ name: "data.xlsx" }],
+      [{ id: "sheet-1", name: "data.xlsx — Sheet1" }],
+    )
+    expect(collision).toMatchObject({
+      name: "data.xlsx",
+      existingName: "data.xlsx — Sheet1",
+      existingId: "sheet-1",
+    })
+  })
+
+  it("reports ambiguous when several of a workbook's sheets are already imported", () => {
+    const [collision] = detectCollisions(
+      [{ name: "data.xlsx" }],
+      [
+        { id: "sheet-1", name: "data.xlsx — Sheet1" },
+        { id: "sheet-2", name: "data.xlsx — Sheet2" },
+      ],
+    )
+    expect(collision.ambiguous).toBe(true)
+    expect(collision.existingId).toBeUndefined()
+  })
+
+  it("prefers an exact name match over the sheet index", () => {
+    const [collision] = detectCollisions(
+      [{ name: "data.xlsx" }],
+      [
+        { id: "whole-workbook", name: "data.xlsx" },
+        { id: "sheet-1", name: "data.xlsx — Sheet1" },
+      ],
+    )
+    expect(collision.existingId).toBe("whole-workbook")
+  })
+
+  it("does not read a sheet suffix into a non-workbook name", () => {
+    expect(detectCollisions(
+      [{ name: "notes.docx" }],
+      [{ id: "f1", name: "notes.docx — appendix" }],
+    )).toHaveLength(0)
+  })
+
+  it("offers no in-place update for a colliding media file", () => {
+    const [collision] = detectCollisions(
+      [{ name: "sermon.mp3" }],
+      [{ id: "existing-media", name: "sermon.mp3" }],
+    )
+    expect(collision).toMatchObject({
+      name: "sermon.mp3",
+      existingName: "sermon.mp3",
+      updateUnsupported: true,
+    })
+    expect(collision.existingId).toBeUndefined()
+  })
+
+  it("still offers in-place update for a colliding text file", () => {
+    const [collision] = detectCollisions(
+      [{ name: "jonah.usfm" }],
+      [{ id: "existing-text", name: "jonah.usfm" }],
+    )
+    expect(collision.existingId).toBe("existing-text")
+    expect(collision.updateUnsupported).toBeUndefined()
+  })
+
+  it("knows which kinds of file can be re-imported in place", () => {
+    expect(supportsInPlaceReimport("sermon.mp3")).toBe(false)
+    expect(supportsInPlaceReimport("lesson.mp4")).toBe(false)
+    expect(supportsInPlaceReimport("jonah.usfm")).toBe(true)
+    expect(supportsInPlaceReimport("pairs.csv")).toBe(true)
+    expect(supportsInPlaceReimport("strings.json")).toBe(true)
+    // Subtitles are text units, not a timeline blob: they reconcile normally.
+    expect(supportsInPlaceReimport("captions.vtt")).toBe(true)
   })
 })

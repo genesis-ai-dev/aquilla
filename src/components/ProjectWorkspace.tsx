@@ -271,9 +271,10 @@ import { injectOptimisticAudioTrim,
   injectOptimisticAudioPlace, injectOptimisticAudioAttachment, injectOptimisticAudioRemove, injectOptimisticAudioDeselect,
   notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { attachmentOutFrom, canCutAt, newPieceAudioId, pieceLabels } from "@/lib/audio/cut-take"
-import { recordStep, registerStepKinds, setHistoryRemote, setHistoryScope, setLaneSwitcher, setOpenFileProbe, withGroup, type HistoryResult, type LaneSwitch } from "@/lib/history/history"
+import { recordGroup, recordStep, registerStepKinds, setHistoryRemote, setHistoryScope, setLaneSwitcher, setOpenFileProbe, withGroup, type HistoryResult, type LaneSwitch } from "@/lib/history/history"
 import { httpHistoryRemote } from "@/lib/history/history-remote"
 import { laneAccessFor, waitUntilReady } from "@/lib/history/lane-switch"
+import { CastStepBuilder, castValueOf, mediaStepHandlers, type CastValue } from "@/lib/history/media-steps"
 import { rowStepHandlers } from "@/lib/history/row-steps"
 import { HistoryPanel } from "./history/HistoryPanel"
 import { editStepHandlers } from "@/lib/history/edit-steps"
@@ -4168,9 +4169,13 @@ export function ProjectWorkspace() {
   // is declared far below this callback, so it is reached through a ref that
   // is assigned right after the hook runs.
   const timingAckOwnWriteRef = useRef<{ note(mode: AudioTimingMode): void; clear(): void } | null>(null)
-  const applyLinkVideo = useCallback(
-    async (url: string | null) => {
-      if (!project?.id || !activeFileId) return
+  // Decision 11: the film each file was last given from here, until the
+  // project read catches up — so an Undo right after a link sees it.
+  const filmWrittenRef = useRef<Map<string, string | null>>(new Map())
+  /** Write the open file's film; false when it was refused (said in a toast). */
+  const writeFilmLink = useCallback(
+    async (url: string | null): Promise<boolean> => {
+      if (!project?.id || !activeFileId) return false
       const nextMode = resolveFileTimingMode(
         activeFile ? { ...activeFile, coreMediaUrl: url } : null,
         project,
@@ -4187,7 +4192,9 @@ export function ProjectWorkspace() {
           author: currentUsername,
         })
         await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+        filmWrittenRef.current.set(activeFileId, url)
         refresh()
+        return true
       } catch (e) {
         // The write never landed: withdraw the intent, as applyTimingMode does.
         if (modeWillChange) timingAckOwnWriteRef.current?.clear()
@@ -4197,9 +4204,43 @@ export function ProjectWorkspace() {
               ? e.message
               : "Could not save the video link."
             : denialMessage(t, ROLE.CONTRIBUTOR, level) })
+        return false
       }
     },
     [project, activeFile, activeFileId, currentUsername, getTokenForProjectFile, refresh, activeLane, fileHasAudioCues, timingNothingToFollow],
+  )
+  /** The film the open file has now, as far as this tab knows. */
+  const readFilmLink = useCallback(
+    (fileId: string): string | null | undefined => {
+      if (fileId !== activeFileId || !activeFile) return undefined
+      const read = activeFile.coreMediaUrl ?? null
+      const written = filmWrittenRef.current
+      if (!written.has(fileId)) return read
+      // The project read has caught up with what was written here.
+      if (written.get(fileId) === read) {
+        written.delete(fileId)
+        return read
+      }
+      return written.get(fileId) ?? null
+    },
+    [activeFileId, activeFile],
+  )
+  const applyLinkVideo = useCallback(
+    async (url: string | null) => {
+      if (!activeFileId) return
+      const before = readFilmLink(activeFileId) ?? null
+      if (!(await writeFilmLink(url))) return
+      // Decision 11: linking, replacing or clearing the film is an Undo step.
+      if (before === url) return
+      recordStep({
+        kind: "film.link",
+        data: { fileId: activeFileId, before, after: url },
+        labelKey: url ? "editor.history.stepLinkFilm" : "editor.history.stepUnlinkFilm",
+        fileId: activeFileId,
+        fileName: activeFileNameRef.current,
+      })
+    },
+    [activeFileId, readFilmLink, writeFilmLink],
   )
   // Flow B (2026-08-05): linking a video while in Free timing prompts to
   // switch back (declinable, with the video-stays-hidden warning). NOTE the
@@ -4347,6 +4388,10 @@ export function ProjectWorkspace() {
     projectId: project?.id ?? null,
     fileId: audioCueSibling ? (activeFileId ?? null) : null,
   })
+  // Decision 11: the pairings as they stand, for the Undo steps below to read
+  // at the moment they run (the toggle paints them locally first).
+  const cueLinksRef = useRef({ index: cueLinks, loaded: cueLinksLoaded })
+  cueLinksRef.current = { index: cueLinks, loaded: cueLinksLoaded }
 
   // AQU-646 (2026-08-27): THE CUE CELLS ARE RESOLVED HERE, beside the links
   // they belong with, and not 4,800 lines below where they used to sit.
@@ -4431,29 +4476,51 @@ export function ProjectWorkspace() {
    * contributor floor regardless, so the check would be a third lock on the
    * same door.
    */
-  const handleToggleCueLink = useCallback(
-    async (textCellId: string, cueCellId: string, linked: boolean) => {
-      if (!project?.id || !activeFileId || !audioCueSibling) return
-      setCueLinkLocally(textCellId, cueCellId, linked)
-      try {
-        await emitCellLinkSet({
-          projectId: project.id,
-          fileId: activeFileId,
-          cellId: textCellId,
-          toFileId: audioCueSibling.id,
-          toCellId: cueCellId,
-          linked,
-          origin: "manual",
-          author: currentUsername,
-        })
-      } catch (e) {
-        console.warn("[cue-links] toggle failed", e)
-        // Put the paint back where the server still has it.
-        setCueLinkLocally(textCellId, cueCellId, !linked)
-        toast.add({ type: "error", title: "Couldn't save that pairing." })
+  const writeCueLinks = useCallback(
+    async (changes: ReadonlyArray<{ textCellId: string; cueCellId: string; linked: boolean }>): Promise<boolean> => {
+      if (!project?.id || !activeFileId || !audioCueSibling) return false
+      for (const { textCellId, cueCellId, linked } of changes) {
+        setCueLinkLocally(textCellId, cueCellId, linked)
+        try {
+          await emitCellLinkSet({
+            projectId: project.id,
+            fileId: activeFileId,
+            cellId: textCellId,
+            toFileId: audioCueSibling.id,
+            toCellId: cueCellId,
+            linked,
+            origin: "manual",
+            author: currentUsername,
+          })
+        } catch (e) {
+          console.warn("[cue-links] toggle failed", e)
+          // Put the paint back where the server still has it.
+          setCueLinkLocally(textCellId, cueCellId, !linked)
+          toast.add({ type: "error", title: "Couldn't save that pairing." })
+          return false
+        }
       }
+      return true
     },
     [project?.id, activeFileId, audioCueSibling, currentUsername, setCueLinkLocally],
+  )
+  const handleToggleCueLink = useCallback(
+    async (textCellId: string, cueCellId: string, linked: boolean) => {
+      if (!activeFileId) return
+      const before = (cueLinksRef.current.index.cuesForText.get(textCellId) ?? []).includes(cueCellId)
+      if (!(await writeCueLinks([{ textCellId, cueCellId, linked }]))) return
+      // Decision 11: pairing and unpairing are Undo steps. Dismissing a
+      // proposal changes nothing that is paired, and is not one.
+      if (before === linked) return
+      recordStep({
+        kind: "cue.link",
+        data: { textCellId, cueCellId, linked },
+        labelKey: linked ? "editor.history.stepLinkCue" : "editor.history.stepUnlinkCue",
+        fileId: activeFileId,
+        fileName: activeFileNameRef.current,
+      })
+    },
+    [activeFileId, writeCueLinks],
   )
   // The frame grid the incoming cues are checked against (AQU-646,
   // 2026-08-14). Read off the SUMMARIES rather than `legacyCells`, which is
@@ -4683,6 +4750,24 @@ export function ProjectWorkspace() {
   )
   const bothCharacterSheets = audioCharacterCount > 0 && characterCount > 0
 
+  // Decision 11: every character action below is ONE Undo step — the lines it
+  // wrote and the voice-settings entries it changed (media-steps.ts).
+  const recordCastStep = useCallback(
+    (step: CastStepBuilder, count: number) => {
+      const data = step.data()
+      if (!data || !activeFileId) return
+      recordStep({
+        kind: "cast.assign",
+        data,
+        labelKey: "editor.history.stepCharacters",
+        labelParams: { count },
+        fileId: activeFileId,
+        fileName: activeFileNameRef.current,
+      })
+    },
+    [activeFileId],
+  )
+
   // Matt's QA (2026-08-21): the picker's inverse — take the character OFF a
   // line without putting another in its place. Two halves behind one visible
   // outcome (the NC ring): the voice-map entry goes — along with any
@@ -4734,8 +4819,10 @@ export function ProjectWorkspace() {
         frozenAgreement.current = characterAgreement
         setCharacterWrite({ done: 0, total: cells.length, phase: "writing" })
         let done = 0
+        const step = new CastStepBuilder()
         try {
           for (const c of cells) {
+            step.cell(activeFileId, c, { castName: null })
             await emitCastAssign({
               projectId: project.id,
               fileId: activeFileId,
@@ -4759,10 +4846,12 @@ export function ProjectWorkspace() {
           // projection must never be written back over the fallback), AND every
           // lane's own entry: the character being removed is shared, so no
           // lane's voice for it survives.
-          await tts.saveTts({
+          const patch = {
             ...buildCastRemovals(cells.map((c) => c.id), tts.settings),
             ...clearLaneCast(tts.settings, cells.map((c) => c.id)),
-          })
+          }
+          await tts.saveTts(patch)
+          step.settings(tts.settings as Record<string, unknown> | undefined, patch)
         } catch (e) {
           console.warn("[characters] pruning the voice map failed", e)
           toast.add({ type: "warning", title: "Character removed, but the cast assignments could not be updated." })
@@ -4770,16 +4859,24 @@ export function ProjectWorkspace() {
         characterWriteBusy.current = false
         setCharacterWrite(null)
         revalidateCells()
+        recordCastStep(step, cells.length)
         toast.update(toastId, { type: "success", title: `Removed "${castName}" from ${cells.length} lines.` })
         return
       }
 
-      await tts.saveTts({
+      const step = new CastStepBuilder()
+      const patch = {
         ...buildCastRemovals([cell.id], tts.settings),
         ...clearLaneCast(tts.settings, [cell.id]),
-      })
-      if (castName === "" || !project?.id || !activeFileId) return
+      }
+      await tts.saveTts(patch)
+      step.settings(tts.settings as Record<string, unknown> | undefined, patch)
+      if (castName === "" || !project?.id || !activeFileId) {
+        recordCastStep(step, 1)
+        return
+      }
       try {
+        step.cell(activeFileId, cell, { castName: null })
         await emitCastAssign({
           projectId: project.id,
           fileId: activeFileId,
@@ -4789,11 +4886,12 @@ export function ProjectWorkspace() {
         })
         await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
         revalidateCells()
+        recordCastStep(step, 1)
       } catch (e) {
         toast.add({ type: "error", title: e instanceof Error ? e.message : "Couldn't clear the character." })
       }
     },
-    [tts, project, activeFileId, currentUsername, getTokenForProjectFile, revalidateCells, t, getActiveCells, characterAgreement, reportCharacterWrite],
+    [tts, project, activeFileId, currentUsername, getTokenForProjectFile, revalidateCells, t, getActiveCells, characterAgreement, reportCharacterWrite, recordCastStep],
   )
   const timelineClearVoiceRef = useRef(handleTimelineClearVoice)
   timelineClearVoiceRef.current = handleTimelineClearVoice
@@ -4856,6 +4954,7 @@ export function ProjectWorkspace() {
         c?.metadata && typeof c.metadata.cast_name === "string" ? c.metadata.cast_name : ""
 
       const records = { ...(tts.settings?.characterResolutions ?? {}) }
+      const step = new CastStepBuilder()
       try {
         let done = 0
         for (const choice of choices) {
@@ -4866,16 +4965,16 @@ export function ProjectWorkspace() {
             [activeFileId, text],
             [cueFileId, cue],
           ] as const) {
+            const cameraState =
+              choice.axis === "camera" ? (choice.value as CameraState) : cell.cameraState !== undefined ? cell.cameraState : undefined
+            const castName = choice.axis === "name" ? choice.value : nameOf(cell)
+            step.cell(fileId, cell, { castName, ...(cameraState !== undefined ? { cameraState } : {}) })
             await emitCastAssign({
               projectId: project.id,
               fileId,
               cellId: cell.id,
-              castName: choice.axis === "name" ? choice.value : nameOf(cell),
-              ...(choice.axis === "camera"
-                ? { cameraState: choice.value as CameraState }
-                : cell.cameraState !== undefined
-                  ? { cameraState: cell.cameraState }
-                  : {}),
+              castName,
+              ...(cameraState !== undefined ? { cameraState } : {}),
               author: currentUsername,
             })
           }
@@ -4890,6 +4989,8 @@ export function ProjectWorkspace() {
         setCharacterWrite({ done: choices.length, total: choices.length, phase: "syncing" })
         await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
         await tts.saveTts({ characterResolutions: records })
+        step.settings(tts.settings as Record<string, unknown> | undefined, { characterResolutions: records })
+        recordCastStep(step, choices.length)
         if (toastId != null) {
           toast.update(toastId, { type: "success", title: `${choices.length} decisions saved.` })
         }
@@ -4919,6 +5020,7 @@ export function ProjectWorkspace() {
       tts,
       characterAgreement,
       reportCharacterWrite,
+      recordCastStep,
     ],
   )
 
@@ -4954,6 +5056,7 @@ export function ProjectWorkspace() {
     const cueById = new Map((audioCues ?? []).map((c) => [c.id, c]))
     const nameOf = (c: { metadata?: Record<string, unknown> | null } | undefined) =>
       c?.metadata && typeof c.metadata.cast_name === "string" ? c.metadata.cast_name : ""
+    const step = new CastStepBuilder()
     try {
       let done = 0
       for (const [key, record] of entries) {
@@ -4968,16 +5071,16 @@ export function ProjectWorkspace() {
           const loserFileId = choice.chose === "subtitle" ? cueFileId : activeFileId
           const current = axis === "name" ? nameOf(loser) : loser.cameraState
           if (current === choice.rejected) continue // already back, or self-healed
+          const castName = axis === "name" ? String(choice.rejected) : nameOf(loser)
+          const cameraState =
+            axis === "camera" ? (choice.rejected as CameraState) : loser.cameraState !== undefined ? loser.cameraState : undefined
+          step.cell(loserFileId, loser, { castName, ...(cameraState !== undefined ? { cameraState } : {}) })
           await emitCastAssign({
             projectId: project.id,
             fileId: loserFileId,
             cellId: loser.id,
-            castName: axis === "name" ? String(choice.rejected) : nameOf(loser),
-            ...(axis === "camera"
-              ? { cameraState: choice.rejected as CameraState }
-              : loser.cameraState !== undefined
-                ? { cameraState: loser.cameraState }
-                : {}),
+            castName,
+            ...(cameraState !== undefined ? { cameraState } : {}),
             author: currentUsername,
           })
         }
@@ -4986,6 +5089,8 @@ export function ProjectWorkspace() {
       setCharacterWrite({ done: entries.length, total: entries.length, phase: "syncing" })
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       await tts.saveTts({ characterResolutions: {} })
+      step.settings(tts.settings as Record<string, unknown> | undefined, { characterResolutions: {} })
+      recordCastStep(step, entries.length)
       toast.update(toastId, { type: "success", title: "Every character decision was undone — the disagreements are back in the list." })
     } catch (e) {
       toast.update(toastId, { type: "error", title: e instanceof Error ? `Couldn't reset: ${e.message}` : "Couldn't reset." })
@@ -5009,6 +5114,7 @@ export function ProjectWorkspace() {
     tts,
     characterAgreement,
     reportCharacterWrite,
+    recordCastStep,
   ])
 
   /**
@@ -5049,8 +5155,15 @@ export function ProjectWorkspace() {
       frozenAgreement.current = characterAgreement
       setCharacterWrite({ done: 0, total: plan.assignments.length, phase: "writing" })
       let done = 0
+      // AQU-1147: fresh read at call time — what each line held before.
+      const step = new CastStepBuilder()
       try {
         for (const a of plan.assignments) {
+          step.cell(activeFileId, cellStore.getCellView(a.cellId) ?? { id: a.cellId }, {
+            castName: a.castName,
+            ...(a.cameraState !== undefined ? { cameraState: a.cameraState } : {}),
+            ...(a.lineNumber !== undefined ? { lineNumber: a.lineNumber } : {}),
+          })
           await emitCastAssign({
             projectId: project.id,
             fileId: activeFileId,
@@ -5090,6 +5203,8 @@ export function ProjectWorkspace() {
         const write = buildCharacterCastWrite(plan.assignments, tts.settings, uuidv7)
         newVoices = write.voices.filter((v) => !before.has(v.name)).length
         await tts.saveTts({ voices: write.voices, castAssignments: write.castAssignments })
+        // Undo takes the assignments back; voices added to the library stay.
+        step.settings(tts.settings as Record<string, unknown> | undefined, { castAssignments: write.castAssignments })
       } catch (e) {
         // The names and camera states are already written, so this is a
         // degraded success rather than a failure — but it is the half that
@@ -5101,6 +5216,7 @@ export function ProjectWorkspace() {
       characterWriteBusy.current = false
       setCharacterWrite(null)
       revalidateCells()
+      recordCastStep(step, plan.assignments.length)
       toast.update(toastId, { type: "success", title: `${plan.assignments.length} lines now carry a character — ${plan.distinctCharacters} people` +
           (newVoices > 0 ? `, ${newVoices} added to the cast` : "") +
           (plan.blankRows > 0 ? `. ${plan.blankRows} rows skipped as unspoken text.` : ".") })
@@ -5114,6 +5230,8 @@ export function ProjectWorkspace() {
       tts,
       characterAgreement,
       reportCharacterWrite,
+      cellStore,
+      recordCastStep,
     ],
   )
 
@@ -5160,8 +5278,15 @@ export function ProjectWorkspace() {
       frozenAgreement.current = characterAgreement
       setCharacterWrite({ done: 0, total: plan.assignments.length, phase: "writing" })
       let done = 0
+      const cueById = new Map((audioCues ?? []).map((c) => [c.id, c]))
+      const step = new CastStepBuilder()
       try {
         for (const a of plan.assignments) {
+          step.cell(cueFileId, cueById.get(a.cellId) ?? { id: a.cellId }, {
+            castName: a.castName,
+            ...(a.cameraState !== undefined ? { cameraState: a.cameraState } : {}),
+            ...(a.lineNumber !== undefined ? { lineNumber: a.lineNumber } : {}),
+          })
           await emitCastAssign({
             projectId: project.id,
             fileId: cueFileId,
@@ -5198,6 +5323,8 @@ export function ProjectWorkspace() {
         const write = buildCharacterCastWrite(plan.assignments, tts.settings, uuidv7)
         newVoices = write.voices.filter((v) => !before.has(v.name)).length
         await tts.saveTts({ voices: write.voices, castAssignments: write.castAssignments })
+        // Undo takes the assignments back; voices added to the library stay.
+        step.settings(tts.settings as Record<string, unknown> | undefined, { castAssignments: write.castAssignments })
       } catch (e) {
         console.warn("[characters] minting voices failed", e)
         toast.add({ type: "warning", title: "Characters imported, but the cast list could not be updated." })
@@ -5207,6 +5334,7 @@ export function ProjectWorkspace() {
       setCharacterWrite(null)
       refreshAudioCues()
       revalidateCells()
+      recordCastStep(step, plan.assignments.length)
       toast.update(toastId, { type: "success", title: `${plan.assignments.length} heard lines now carry a character — ` +
           `${plan.distinctCharacters} people` +
           (newVoices > 0 ? `, ${newVoices} added to the cast` : "") +
@@ -5217,11 +5345,13 @@ export function ProjectWorkspace() {
       reportCharacterWrite,
       project?.id,
       audioCueSibling?.id,
+      audioCues,
       currentUsername,
       getTokenForProjectFile,
       refreshAudioCues,
       revalidateCells,
       tts,
+      recordCastStep,
     ],
   )
 
@@ -5278,8 +5408,10 @@ export function ProjectWorkspace() {
       frozenAgreement.current = characterAgreement
       setCharacterWrite({ done: 0, total: dirty.length, phase: "writing" })
       let done = 0
+      const step = new CastStepBuilder()
       try {
         for (const cell of dirty) {
+          step.cell(args.fileId, cell, { castName: null, cameraState: null, lineNumber: null })
           await emitCastAssign({
             projectId: project.id,
             fileId: args.fileId,
@@ -5308,13 +5440,15 @@ export function ProjectWorkspace() {
       // file no longer carries. The cast LIST is deliberately untouched — see
       // `buildCastRemovals`.
       try {
-        await tts.saveTts({
+        const patch = {
           ...buildCastRemovals(dirty.map((c) => c.id), tts.settings),
           // AQU-2038: and every lane's own entry — the characters being cleared
           // are shared, so no lane's voice for them survives. The same rule as
           // "No character" above.
           ...clearLaneCast(tts.settings, dirty.map((c) => c.id)),
-        })
+        }
+        await tts.saveTts(patch)
+        step.settings(tts.settings as Record<string, unknown> | undefined, patch)
       } catch (e) {
         console.warn("[characters] pruning the cast assignments failed", e)
         toast.add({ type: "warning", title: "Characters cleared, but the cast assignments could not be updated." })
@@ -5323,6 +5457,7 @@ export function ProjectWorkspace() {
       characterWriteBusy.current = false
       setCharacterWrite(null)
       args.after()
+      recordCastStep(step, dirty.length)
       toast.update(toastId, { type: "success", title: `Cleared the characters on ${dirty.length} ${args.noun}.` })
     },
     [
@@ -5332,6 +5467,7 @@ export function ProjectWorkspace() {
       characterAgreement,
       reportCharacterWrite,
       tts,
+      recordCastStep,
     ],
   )
 
@@ -12125,6 +12261,19 @@ export function ProjectWorkspace() {
       }
       const changed = diff.link.length + diff.unlink.length
       if (changed > 0) await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      // Decision 11: one Undo step for the whole re-pair.
+      recordGroup(
+        { labelKey: "editor.history.stepRepairCues", fileId: activeFile.id, fileName: activeFileNameRef.current },
+        [
+          ...diff.link.map((l) => ({ textCellId: l.textCellId, cueCellId: l.cueCellId, linked: true })),
+          ...diff.unlink.map((l) => ({ textCellId: l.textCellId, cueCellId: l.cueCellId, linked: false })),
+        ].map((data) => ({
+          kind: "cue.link",
+          data,
+          labelKey: data.linked ? "editor.history.stepLinkCue" : "editor.history.stepUnlinkCue",
+          fileId: activeFile.id,
+        })),
+      )
       refreshCueLinks()
       toast.add({ type: "success", title: changed === 0
           ? "The pairings came out the same."
@@ -14321,6 +14470,68 @@ export function ProjectWorkspace() {
     },
     [project, getActiveCell, applyOptimisticTargetEdit, resolveTargetCommitParentId, currentUsername, activeLane, laneWriteFrozen, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, confirmCommitted],
   )
+
+  // Decision 11: the film, the pairings and the characters, undone through the
+  // same writes their actions use. Read through refs, so a voice-settings save
+  // or a fresh cue read does not re-register every handler.
+  const ttsRef = useRef(tts)
+  ttsRef.current = tts
+  const audioCuesRef = useRef(audioCues)
+  audioCuesRef.current = audioCues
+  const readCastValue = useCallback(
+    (fileId: string, cellId: string): CastValue | null => {
+      const cell =
+        fileId === activeFileId
+          ? cellStore.getCellView(cellId)
+          : fileId === audioCueSibling?.id
+            ? (audioCuesRef.current ?? []).find((c) => c.id === cellId)
+            : undefined
+      return cell ? castValueOf(cell, { cameraState: true, lineNumber: true }) : null
+    },
+    [activeFileId, audioCueSibling?.id, cellStore],
+  )
+  const writeCastValues = useCallback(
+    async (changes: ReadonlyArray<{ fileId: string; cellId: string; value: CastValue }>) => {
+      if (!project?.id) return
+      for (const { fileId, cellId, value } of changes) {
+        await emitCastAssign({
+          projectId: project.id,
+          fileId,
+          cellId,
+          castName: value.castName,
+          ...("cameraState" in value ? { cameraState: (value.cameraState ?? null) as CameraState | null } : {}),
+          ...("lineNumber" in value ? { lineNumber: value.lineNumber ?? null } : {}),
+          author: currentUsername,
+        })
+      }
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      refreshAudioCues()
+      revalidateCells()
+    },
+    [project?.id, currentUsername, getTokenForProjectFile, refreshAudioCues, revalidateCells],
+  )
+  useEffect(() => {
+    return registerStepKinds(
+      mediaStepHandlers({
+        readFilm: readFilmLink,
+        writeFilm: async (_fileId, url) => writeFilmLink(url),
+        readCueLink: (textCellId, cueCellId) => {
+          const { index, loaded } = cueLinksRef.current
+          if (!loaded) return null
+          return (index.cuesForText.get(textCellId) ?? []).includes(cueCellId)
+        },
+        writeCueLinks: async (changes) => {
+          const ok = await writeCueLinks(changes)
+          if (ok) await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+          return ok
+        },
+        readCast: readCastValue,
+        writeCast: writeCastValues,
+        readVoiceSettings: () => (ttsRef.current.settings as Record<string, unknown> | undefined) ?? null,
+        writeVoiceSettings: (patch) => ttsRef.current.saveTts(patch as Parameters<typeof tts.saveTts>[0]),
+      }),
+    )
+  }, [readFilmLink, writeFilmLink, writeCueLinks, getTokenForProjectFile, readCastValue, writeCastValues])
 
   useEffect(() => {
     const readAtt = (cellId: string, audioId: string) => readTake(cellId, audioId)?.att ?? null

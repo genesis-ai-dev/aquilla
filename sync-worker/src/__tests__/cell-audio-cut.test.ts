@@ -235,6 +235,87 @@ describe('cell.audio.cut', () => {
   })
 })
 
+// Decision 7 (Oct 20, replacing Sam's 2026-10-15 ruling): each piece of a cut
+// take is approved and named on its own, and the line is approved once every
+// piece on it is. The server already keeps all of that per row; these pin it,
+// because the editor now votes and renames one piece at a time.
+describe('piece by piece (decision 7)', () => {
+  const lineVotes = async (): Promise<number | null> => {
+    const row = (await h.pg.query<{ dub_votes: number | null }>(
+      AUDIO_CTE_SQL.replace(/\?/g, (() => { let i = 0; return () => `$${++i}` })()),
+      [P, F],
+    )).rows[0]
+    return row?.dub_votes == null ? null : Number(row.dub_votes)
+  }
+  const field = async (key: 'validator_count' | 'label' | 'deleted') =>
+    Object.fromEntries((await rows()).map((r) => [r.audio_id, r[key]]))
+  // "Take 1 · 1", "Take 1 · 2", "Take 1 · 3", as the editor names them.
+  async function threePieces() {
+    await attach('take-a', { durationMs: 6_000 })
+    await project('cell.audio.cut', { audioId: 'take-a', atMs: 2_000, newAudioId: 'take-b', firstLabel: 'Take 1 · 1', newLabel: 'Take 1 · 2' })
+    await project('cell.audio.cut', { audioId: 'take-b', atMs: 4_000, newAudioId: 'take-c', newLabel: 'Take 1 · 3' })
+  }
+
+  it('a vote on one piece is that piece\'s alone, and withdrawing it touches no sibling', async () => {
+    await threePieces()
+    await project('cell.audio.validate', { audioId: 'take-a' }, { author: 'ravi' })
+    await project('cell.audio.validate', { audioId: 'take-b' }, { author: 'rita' })
+    expect(await field('validator_count')).toEqual({ 'take-a': 1, 'take-b': 1, 'take-c': 0 })
+    await project('cell.audio.unvalidate', { audioId: 'take-b' }, { author: 'rita' })
+    expect(await field('validator_count')).toEqual({ 'take-a': 1, 'take-b': 0, 'take-c': 0 })
+  })
+
+  it('renaming one piece renames only it', async () => {
+    await threePieces()
+    await project('cell.audio.rename', { audioId: 'take-b', label: 'Chorus' })
+    expect(await field('label')).toEqual({ 'take-a': 'Take 1 · 1', 'take-b': 'Chorus', 'take-c': 'Take 1 · 3' })
+  })
+
+  it('the line is approved only once every piece is, at the required count', async () => {
+    await threePieces()
+    for (const author of ['rita', 'ravi']) {
+      for (const audioId of ['take-a', 'take-b']) await project('cell.audio.validate', { audioId }, { author })
+    }
+    expect(await lineVotes()).toBe(0)
+    await project('cell.audio.validate', { audioId: 'take-c' }, { author: 'rita' })
+    expect(await lineVotes()).toBe(1)
+    await project('cell.audio.validate', { audioId: 'take-c' }, { author: 'ravi' })
+    expect(await lineVotes()).toBe(2)
+  })
+
+  it('deleting the one piece short of approval approves the line; bringing it back brings back its own votes', async () => {
+    await threePieces()
+    for (const author of ['rita', 'ravi']) {
+      for (const audioId of ['take-a', 'take-b']) await project('cell.audio.validate', { audioId }, { author })
+    }
+    await project('cell.audio.validate', { audioId: 'take-c' }, { author: 'rita' })
+    expect(await lineVotes()).toBe(1)
+    await project('cell.audio.remove', { audioId: 'take-c' })
+    expect(await lineVotes()).toBe(2)
+    // Undo of a delete re-selects the piece (take-steps.ts), which un-deletes it.
+    await project('cell.audio.select', { audioId: 'take-c', slot: 'recording' })
+    expect((await field('deleted'))['take-c']).toBe(0)
+    expect(await field('validator_count')).toEqual({ 'take-a': 2, 'take-b': 2, 'take-c': 1 })
+    expect(await lineVotes()).toBe(1)
+  })
+
+  it('cutting a piece again clears only that piece\'s votes', async () => {
+    await threePieces()
+    for (const audioId of ['take-a', 'take-b', 'take-c']) await project('cell.audio.validate', { audioId }, { author: 'rita' })
+    await project('cell.audio.cut', { audioId: 'take-c', atMs: 5_000, newAudioId: 'take-d', newLabel: 'Take 1 · 4' })
+    expect(await field('validator_count')).toEqual({ 'take-a': 1, 'take-b': 1, 'take-c': 0, 'take-d': 0 })
+  })
+
+  it('a take never cut is approved and renamed exactly as before', async () => {
+    await attach('take-a')
+    await project('cell.audio.validate', { audioId: 'take-a' }, { author: 'rita' })
+    await project('cell.audio.rename', { audioId: 'take-a', label: 'Best' })
+    expect(await field('validator_count')).toEqual({ 'take-a': 1 })
+    expect(await field('label')).toEqual({ 'take-a': 'Best' })
+    expect(await lineVotes()).toBe(1)
+  })
+})
+
 // AQU-1767 (Sam, 2026-10-14): "Remove noise" on a split take keeps its cuts —
 // the cleaned root is attached, then each other piece naming it.
 describe('cell.audio.attach — a piece born into a group', () => {

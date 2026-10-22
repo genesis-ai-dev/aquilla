@@ -164,6 +164,61 @@ it("never reads 100% while a cell is untranslated", () => {
   expect(plain()).toContain("252 translated (100%)")
 })
 
+// AQU-2111: the footer counts the open file itself, so it is the other half of
+// the "an audio-only file reads 0%" bug. The audio figures ride in on the same
+// progress prop; `StatusBarView` is rendered directly here because the pair is
+// counted from the attachment map, not from cells.
+describe("StatusBar and audio figures", () => {
+  const plain = (el: HTMLElement) => (el.textContent ?? "").replace(/[\u2066-\u2069]/g, "")
+  const view = (progress: ComponentProps<typeof StatusBarView>["progress"]) =>
+    render(<StatusBarView progress={progress} getHealthByCell={() => []} projectHealth={0} />)
+
+  it("reports the recorded figure, and no text figures, on an audio-only file", () => {
+    const { container } = view({ total: 10, translated: 0, validated: 0, recorded: 5, audioValidated: 5 })
+    expect(plain(container)).toContain("10 lines")
+    expect(plain(container)).toContain("5 recorded (50%)")
+    expect(plain(container)).not.toContain("translated")
+    expect(screen.queryByTestId("status-bar-unvalidated")).toBeNull()
+    expect(screen.queryByTestId("status-bar-validated")).toBeNull()
+    const badge = screen.getByTestId("status-bar-validated-audio")
+    expect(plain(badge)).toContain("5 audio validated")
+    expect(badge.querySelector("[aria-hidden]")!.className).toContain(PROGRESS_BG.audioValidated)
+  })
+
+  it("splits recorded-but-unvalidated from audio-validated, in the audio tones", () => {
+    const { container } = view({ total: 10, translated: 0, validated: 0, recorded: 6, audioValidated: 2 })
+    expect(plain(container)).toContain("6 recorded (60%)")
+    const pending = screen.getByTestId("status-bar-unvalidated-audio")
+    expect(plain(pending)).toContain("4 recorded, not validated")
+    expect(pending.querySelector("[aria-hidden]")!.className).toContain(PROGRESS_BG.audioRecorded)
+  })
+
+  it("keeps the text summary and adds the audio badges on a file with both", () => {
+    const { container } = view({ total: 10, translated: 8, validated: 5, recorded: 4, audioValidated: 1 })
+    expect(plain(container)).toContain("8 translated (80%)")
+    expect(plain(container)).toContain("3 unvalidated")
+    expect(plain(container)).toContain("5 validated")
+    expect(plain(container)).toContain("3 recorded, not validated")
+    expect(plain(container)).toContain("1 audio validated")
+  })
+
+  // WHY: an absent pair is "not known here" (an older sync-worker, or the
+  // attachment map before it loads) and a zero is "none" — neither may put a
+  // "0 recorded" badge in a text project's footer.
+  it("draws nothing for audio when there is none, absent or zero", () => {
+    for (const progress of [
+      { total: 10, translated: 8, validated: 5 },
+      { total: 10, translated: 8, validated: 5, recorded: 0, audioValidated: 0 },
+    ]) {
+      const { container, unmount } = view(progress)
+      expect(plain(container)).toContain("8 translated (80%)")
+      expect(plain(container)).not.toContain("recorded")
+      expect(plain(container)).not.toContain("audio validated")
+      unmount()
+    }
+  })
+})
+
 it("groups the badge counts the way the counts beside them are grouped", () => {
   // The footer read "1,208 cells · 1,207 translated" and then "1207 validated".
   const many = Array.from({ length: 2500 }, (_, i) =>

@@ -3,8 +3,9 @@
 //   GET /api/v1/projects/:projectId/files            (?trash=1, ?limit=&cursor=, ?lane=)
 //   GET /api/v1/projects/:projectId/files/:fileId    (?lane=)
 //
-// AQU-2118: `?lane=<tag>` pins the FILLED / APPROVED counters to that target
-// lane's progress row — the sidebar passes the lane its switcher shows.
+// AQU-2118: `?lane=<tag>` pins the FILLED / APPROVED counters (and, AQU-2111,
+// the audio pair beside them) to that target lane's progress row — the
+// sidebar passes the lane its switcher shows.
 // Without it the counters stay pinned to the project's bridge / only lane,
 // byte-identical to before.
 //
@@ -52,6 +53,11 @@ interface FileRowRaw {
   cell_count: number
   approved_count: number
   filled_count: number
+  /** AQU-2111: the audio twin of the pair above, for this file's pinned lane.
+   *  Zero when the file has no projection row — `files` carries no audio
+   *  rollup to fall back on, exactly as the per-file progress read has it. */
+  audio_count: number
+  audio_validated_count: number
   word_count: number
   last_edit_at: number | null
   deleted_at: number | null
@@ -120,6 +126,18 @@ interface FileSummary {
   approvedCount: number
   /** Target cells with content (TRIM(value) != ''): the "translated" count. */
   filledCount: number
+  /**
+   * AQU-2111: lines with a take of their own, and lines whose weakest chosen
+   * take meets the project's AUDIO validation requirement.
+   *
+   * Same rules as the per-file progress read and the Dashboard's audio tiles:
+   * the weakest selected dub take decides, an imported source clip is not a
+   * recording, and the structural-cell policy subtracts from both halves. An
+   * audio-only project reads 0 translated here and always will — these are the
+   * numbers that say how much of it is done.
+   */
+  audioCount: number
+  audioValidatedCount: number
   wordCount: number
   lastEditAt: number | null
   /** AQU-272: epoch-ms when this file was soft-deleted, or null if active. */
@@ -188,6 +206,8 @@ function mapRow(row: FileRowRaw): FileSummary {
     cellCount: row.cell_count,
     approvedCount: row.approved_count,
     filledCount: row.filled_count,
+    audioCount: row.audio_count,
+    audioValidatedCount: row.audio_validated_count,
     wordCount: row.word_count,
     lastEditAt: row.last_edit_at,
     deletedAt: row.deleted_at ?? null,
@@ -310,6 +330,20 @@ export async function handleFilesReadRequest(
             THEN GREATEST(0, f.filled_count - ${less("f.structural_filled_count")})
             ELSE 0
           END AS filled_count, ` +
+    // AQU-2111: the audio pair, off the same pinned-lane row. There is no
+    // `files` counter to fall back on — the projection is the only source, as
+    // the per-file progress read already documents — so a file with no row
+    // reads 0, which is what that read reports for it too.
+    `CASE WHEN p.file_id IS NOT NULL
+            THEN GREATEST(0, p.audio_count - ${less("p.structural_audio_count")})
+            ELSE 0
+          END AS audio_count, ` +
+    // AQU-490: validated is the histogram mass at or above the project's AUDIO
+    // threshold, never the stored `audio_validated_count` (fixed at one vote).
+    `CASE WHEN p.file_id IS NOT NULL
+            THEN GREATEST(0, COALESCE(aa.approved, 0) - ${less("COALESCE(saa.approved, 0)")})
+            ELSE 0
+          END AS audio_validated_count, ` +
     "f.word_count, f.last_edit_at, f.deleted_at, " +
     "(b.file_id IS NOT NULL) AS has_original_source"
   // Anchored on the bound project id rather than on either table, so the CTE
@@ -319,6 +353,10 @@ export async function handleFilesReadRequest(
   const thresholdCte =
     // AQU-1771: project → org → 1, from the generated columns.
     `WITH thr AS (SELECT ${effectiveThresholdSql('ps.validation_count', 'os.validation_count')} AS n, ` +
+    // AQU-2111: resolved in the same CTE as the text threshold, and project →
+    // org → 1 by the same rule. A project that asks for two listens must not
+    // have its sidebar call a one-vote line validated.
+    `${effectiveThresholdSql('ps.validation_count_audio', 'os.validation_count_audio')} AS na, ` +
     "COALESCE(ps.count_structural, os.count_structural) = 'false' AS exclude_structural, " +
     // AQU-2118: the lane `?lane=` named, read by the progress join below. The
     // files-counter fallback is for the lane whose fill that sum IS — the
@@ -358,6 +396,10 @@ export async function handleFilesReadRequest(
     " LEFT JOIN LATERAL (SELECT SUM(entry.value::integer)::integer AS approved FROM jsonb_each_text(p.validator_histogram) entry WHERE entry.key::integer >= COALESCE(thr.n, 1)) a ON true" +
     // AQU-1083: the structural share of the same buckets, for the subtraction.
     " LEFT JOIN LATERAL (SELECT SUM(entry.value::integer)::integer AS approved FROM jsonb_each_text(p.structural_validator_histogram) entry WHERE entry.key::integer >= COALESCE(thr.n, 1)) sa ON true" +
+    // AQU-2111: the audio histogram and its structural share, at the AUDIO
+    // threshold.
+    " LEFT JOIN LATERAL (SELECT SUM(entry.value::integer)::integer AS approved FROM jsonb_each_text(p.audio_validator_histogram) entry WHERE entry.key::integer >= COALESCE(thr.na, 1)) aa ON true" +
+    " LEFT JOIN LATERAL (SELECT SUM(entry.value::integer)::integer AS approved FROM jsonb_each_text(p.structural_audio_validator_histogram) entry WHERE entry.key::integer >= COALESCE(thr.na, 1)) saa ON true" +
     " LEFT JOIN file_source_blobs b ON b.file_id = f.id AND b.project_id = f.project_id"
   const orderBy = "ORDER BY f.last_edit_at DESC NULLS LAST, f.name ASC, f.id ASC"
 
@@ -552,6 +594,12 @@ function zeroCounters(rows: FileRowRaw[]): void {
     row.cell_count = 0
     row.filled_count = 0
     row.approved_count = 0
+    // AQU-2111: the audio pair is lane-scoped exactly as the text pair is.
+    // Leaving it behind would publish, to a caller walled off from every
+    // target lane (or from the one `?lane=` named), the one set of counters
+    // that is not zero on an audio-only project.
+    row.audio_count = 0
+    row.audio_validated_count = 0
   }
 }
 
@@ -593,6 +641,7 @@ async function hideUngrantedDefaultLaneCounts(
   const { results } = await env.AQUILLA_PG.prepare(
     `WITH thr AS (
        SELECT ${effectiveThresholdSql('ps.validation_count', 'os.validation_count')} AS n,
+              ${effectiveThresholdSql('ps.validation_count_audio', 'os.validation_count_audio')} AS na,
               COALESCE(ps.count_structural, os.count_structural) = 'false' AS exclude_structural
          FROM (SELECT ?::text AS id) q
          LEFT JOIN project_settings ps ON ps.project_id = q.id
@@ -602,7 +651,9 @@ async function hideUngrantedDefaultLaneCounts(
      SELECT p.file_id AS file_id,
             MAX(GREATEST(0, p.total_count - ${less("p.structural_count")}))::int AS cell_count,
             SUM(GREATEST(0, p.filled_count - ${less("p.structural_filled_count")}))::int AS filled_count,
-            SUM(GREATEST(0, COALESCE(a.approved, 0) - ${less("COALESCE(sa.approved, 0)")}))::int AS approved_count
+            SUM(GREATEST(0, COALESCE(a.approved, 0) - ${less("COALESCE(sa.approved, 0)")}))::int AS approved_count,
+            SUM(GREATEST(0, p.audio_count - ${less("p.structural_audio_count")}))::int AS audio_count,
+            SUM(GREATEST(0, COALESCE(aa.approved, 0) - ${less("COALESCE(saa.approved, 0)")}))::int AS audio_validated_count
        FROM file_section_progress p
        JOIN public.lanes pl
          ON pl.project_id = p.project_id AND pl.id = p.lane_id AND pl.role = 'target'
@@ -617,6 +668,16 @@ async function hideUngrantedDefaultLaneCounts(
            FROM jsonb_each_text(p.structural_validator_histogram) entry
           WHERE entry.key::integer >= COALESCE(thr.n, 1)
        ) sa ON true
+       LEFT JOIN LATERAL (
+         SELECT SUM(entry.value::integer)::integer AS approved
+           FROM jsonb_each_text(p.audio_validator_histogram) entry
+          WHERE entry.key::integer >= COALESCE(thr.na, 1)
+       ) aa ON true
+       LEFT JOIN LATERAL (
+         SELECT SUM(entry.value::integer)::integer AS approved
+           FROM jsonb_each_text(p.structural_audio_validator_histogram) entry
+          WHERE entry.key::integer >= COALESCE(thr.na, 1)
+       ) saa ON true
       WHERE p.project_id = ?
         AND p.scope = 'file' AND p.section_key = ''
         AND p.file_id IN (${filePlaceholders})
@@ -624,7 +685,14 @@ async function hideUngrantedDefaultLaneCounts(
       GROUP BY p.file_id`,
   )
     .bind(projectId, projectId, ...fileIds, ...tagList)
-    .all<{ file_id: string; cell_count: number; filled_count: number; approved_count: number }>()
+    .all<{
+      file_id: string
+      cell_count: number
+      filled_count: number
+      approved_count: number
+      audio_count: number
+      audio_validated_count: number
+    }>()
 
   const byFile = new Map((results ?? []).map((row) => [row.file_id, row]))
   for (const row of rows) {
@@ -632,6 +700,8 @@ async function hideUngrantedDefaultLaneCounts(
     row.cell_count = counts ? Number(counts.cell_count) || 0 : 0
     row.filled_count = counts ? Number(counts.filled_count) || 0 : 0
     row.approved_count = counts ? Number(counts.approved_count) || 0 : 0
+    row.audio_count = counts ? Number(counts.audio_count) || 0 : 0
+    row.audio_validated_count = counts ? Number(counts.audio_validated_count) || 0 : 0
   }
 }
 

@@ -398,6 +398,9 @@ export const workspace = defineNamespace({
     // -- StatusBar --
     "workspace.statusBar.summary": "{total} cells · {translated} translated {pct}",
     "workspace.statusBar.unvalidatedBadge": "{count} unvalidated",
+    "workspace.statusBar.audioSummary": "{total} lines · {translated} recorded {pct}",
+    "workspace.statusBar.unvalidatedAudioBadge": "{count} recorded, not validated",
+    "workspace.statusBar.audioValidatedBadge": "{count} audio validated",
 
     // -- UpdateBanner --
     "workspace.updateBanner.updateAvailable": "Update available",
@@ -1828,6 +1831,32 @@ export const workspace = defineNamespace({
           "validated. {count} is a plain number, not itself bidi-isolated.",
         placeholders: { count: "How many cells are unvalidated." },
         screenshot: "workspace-nav",
+      },
+      "workspace.statusBar.audioSummary": {
+        description:
+          "AQU-2111: the same footer status line on an audio-only file — one whose " +
+          "target language has no written form, so every line carries a recording " +
+          "and no text. It replaces the translated figure with the recorded one; " +
+          "all three values arrive already formatted and bidi-isolated, so place " +
+          "them where your word order needs them but do not reformat them.",
+        placeholders: {
+          total: "Already-formatted total line count.",
+          translated: "Already-formatted count of lines with a recording.",
+          pct: "Already-formatted percentage in parentheses, e.g. '(42%)'.",
+        },
+      },
+      "workspace.statusBar.unvalidatedAudioBadge": {
+        description:
+          "AQU-2111: small badge in the status footer counting lines that have a " +
+          "recording nobody has validated yet — the audio twin of the unvalidated " +
+          "badge. {count} is a plain number, not itself bidi-isolated.",
+        placeholders: { count: "How many recorded lines are not validated." },
+      },
+      "workspace.statusBar.audioValidatedBadge": {
+        description:
+          "AQU-2111: small badge in the status footer counting lines whose " +
+          "recording has been validated.",
+        placeholders: { count: "How many lines have validated audio." },
       },
 
       "workspace.updateBanner.updateAvailable": {

@@ -15,13 +15,14 @@ import {
   translatedPct,
   validatedPct,
 } from "../../../src/lib/frontier/portfolio-metrics"
+import type { LaneDelivers } from "../../../src/lib/lanes/lane-delivers"
 
 const DAY = 24 * 60 * 60 * 1000
 
 interface Lane {
-  role?: string
+  role?: "source" | "target"
   lane: string
-  delivers?: string | null
+  delivers?: LaneDelivers | null
   totalCells: number
   filledCells: number
   validatedCells: number

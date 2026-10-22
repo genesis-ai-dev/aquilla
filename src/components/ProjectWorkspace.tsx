@@ -110,7 +110,7 @@ import {
 import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCache } from "@/lib/store/project-index"
 import { completionBatchSizeFor, workspaceActions, getVisibleActions } from "@/lib/workspace-actions/registry"
 import type { WorkspaceAction } from "@/lib/workspace-actions/types"
-import type { FileReference } from "@/lib/parsers/types"
+import type { FileReference, ProjectTtsSettings } from "@/lib/parsers/types"
 import { fileOrderedBy, infractionSeverity, isMediaFileType, isTranslationMemoryFile, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import { resolveBibleEnrichment } from "../../db/shared/bible-enrichments"
 import { isBibleDataExperimentOn, isBibleOpen } from "@/lib/bible-data/experiment"
@@ -14545,7 +14545,7 @@ export function ProjectWorkspace() {
         readCast: readCastValue,
         writeCast: writeCastValues,
         readVoiceSettings: () => (ttsRef.current.settings as Record<string, unknown> | undefined) ?? null,
-        writeVoiceSettings: (patch) => ttsRef.current.saveTts(patch as Parameters<typeof tts.saveTts>[0]),
+        writeVoiceSettings: (patch) => ttsRef.current.saveTts(patch as Partial<ProjectTtsSettings>),
       }),
     )
   }, [readFilmLink, writeFilmLink, writeCueLinks, getTokenForProjectFile, readCastValue, writeCastValues])

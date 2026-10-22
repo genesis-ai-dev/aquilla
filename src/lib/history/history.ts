@@ -738,7 +738,7 @@ async function runNow(which: "undo" | "redo", scope: string): Promise<HistoryRes
   }
   busy = true
   emit()
-  let record: StepRecord | null = null
+  let record: StepRecord | null
   let movedBefore: number | undefined
   let outcome: StepOutcome
   try {

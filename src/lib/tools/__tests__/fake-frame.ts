@@ -11,8 +11,14 @@
  * vitest has torn the happy-dom environment down, where the global `Event` is
  * Node's again and happy-dom's EventTarget refuses it — an unhandled error
  * charged to whichever file the scheduler reached next, failing a run with
- * zero failing tests (AQU-2072). So each window tracks what it has in flight,
- * a closed window drops it, and the after-each hook below cancels the rest.
+ * zero failing tests (AQU-2072). Cancelling what is in flight when the test
+ * ends is not enough: the runtime and SDK running inside the frame keep plain
+ * timers of their own (the SDK's `later`, call deadlines, repaint intervals)
+ * that this module cannot see, and one that fires after that hook posts
+ * again, scheduling a fresh delivery nobody cancels. So each window tracks
+ * what it has in flight, and the after-each hook below closes every window
+ * the test made — like tearing its iframe out of the page: what is in flight
+ * is dropped, and whatever posts afterwards goes nowhere.
  */
 
 import { afterEach } from "vitest"
@@ -21,7 +27,7 @@ import type { SmokeFrame } from "../smoke"
 type Listener = (e: Event) => void
 type Timer = ReturnType<typeof setTimeout>
 
-/** Every window this module instance has made, for the after-each hook. */
+/** Every window this module instance has made and not yet closed, for the after-each hook. */
 const windows = new Set<FakeWindow>()
 
 export class FakeWindow extends EventTarget {
@@ -89,16 +95,17 @@ export class FakeWindow extends EventTarget {
   }
 }
 
-/** Cancel every delivery still in flight on every window this module has made. */
-export function cancelPendingFakeFrameDeliveries(): void {
-  for (const w of windows) w.cancelPending()
+/** Close every window this module has made that is still open. */
+export function closeFakeWindows(): void {
+  for (const w of windows) w.close()
 }
 
-// Registered on the importing test file's root suite, so nothing a test
-// scheduled can fire once that test is over, whether or not the test disposed
-// its pair. Relies on vitest evaluating this module once per test file, which
-// its per-file isolation does.
-afterEach(cancelPendingFakeFrameDeliveries)
+// Registered on the importing test file's root suite, so nothing scheduled
+// through a window a test made can fire once that test is over — not what the
+// test left in flight, and not what the frame's own timers post afterwards —
+// whether or not the test disposed its pair. Relies on vitest evaluating this
+// module once per test file, which its per-file isolation does.
+afterEach(closeFakeWindows)
 
 export interface FakeFramePair {
   host: FakeWindow

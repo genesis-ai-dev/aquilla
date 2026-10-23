@@ -499,6 +499,7 @@ import { liveAudioProgress } from "@/lib/progress/live-audio-progress"
 import { applyPushedFileProgress, invalidateFileProgress, invalidateProjectFileProgress, setLocalFileProgress } from "@/lib/progress/file-progress-resource"
 import { applyStructuralPolicy } from "@/lib/cells/structural"
 import { isExcludedFromWork } from "@/lib/health/excluded-cell"
+import type { AudioCellStage } from "@/lib/health/chapter-health"
 import { Button } from "@/components/ui/button"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -7661,35 +7662,6 @@ export function ProjectWorkspace() {
   // and chapters, so the sidebar's chapter grid also skips re-rendering.
   const chapterHealthBuilder = useMemo(() => chapterHealthBuilderFor(cellStore), [cellStore])
   const hasActiveChapters = activeFileId != null && readAtVersion(cellStoreVersion, () => cellStore.getNavigationIndex().length > 0)
-  // Only the expanded sidebar consumes this projection. Keep health live, but
-  // defer its whole-file display walk until that surface actually renders.
-  const getActiveChapterHealth = useCallback((): BookHealthChapter[] => {
-    if (!activeFileId) return EMPTY_CHAPTER_HEALTH
-    return readAtVersion(cellStoreVersion, () => {
-      // Summaries sit in store order, so the store's index is a direct lookup;
-      // the id check guards the (never observed) case of a skipped row, falling
-      // back to a map built once for this pass.
-      let summaryById: Map<string, CellSummary> | null = null
-      const getSummary = (cellId: string): CellSummary | undefined => {
-        const index = cellStore.findIndexByCellId(cellId)
-        const direct = index >= 0 ? cellSummaries[index] : undefined
-        if (direct && direct.id === cellId) return direct
-        summaryById ??= new Map(cellSummaries.map((cell) => [cell.id, cell]))
-        return summaryById.get(cellId)
-      }
-      return chapterHealthBuilder.build(cellStore.getNavigationIndex(), {
-        getSummary,
-        health: (cellId) => effectiveHealthMap.get(cellId),
-        hasIssue: (cellId) => (infractions.get(cellId)?.length ?? 0) > 0,
-        // AQU-1083 / AQU-1424: draw a heading the project does not count, and any
-        // PARKED cell, as "not counted" rather than as work left to do. The
-        // chapter's fraction already excludes both — the store does that — so this
-        // only chooses the colour and what it announces. The rule itself lives in
-        // `isExcludedFromWork`, where the two cases stay separate and tested.
-        isExcluded: (cellId) => isExcludedFromWork(getSummary(cellId), countStructuralCells),
-      })
-    })
-  }, [activeFileId, cellStore, cellStoreVersion, cellSummaries, chapterHealthBuilder, countStructuralCells, effectiveHealthMap, infractions])
 
   // AD-14: the four-sub-score breakdown popover is retired. The project ring
   // shows decay-derived health; the "biggest drags" popover redesign (cells
@@ -10906,7 +10878,11 @@ export function ProjectWorkspace() {
   // project read "100% translated / 0% validated" however many takes were
   // signed off, because only the text flag was ever counted.
   //
-  // Read off the UNGATED map, not `workspaceAudioByCellId`: the picker lives
+  // AQU-2112 reads the SAME two sets for the sidebar's chapter list, which is
+  // why there is one derivation here and not two: the picker and the sidebar
+  // cannot disagree about which lines are recorded if neither owns the answer.
+  //
+  // Read off the UNGATED map, not `workspaceAudioByCellId`: both surfaces live
   // in the text lens, where the gated map is empty for anyone who may not
   // restructure cells, and a contributor validating takes there is exactly
   // who needs the figure to move. The requirement is `audioValidationRequirement`
@@ -10920,6 +10896,73 @@ export function ProjectWorkspace() {
   useEffect(() => {
     cellStore.setAudioProgressCellIds(audioProgressIds)
   }, [cellStore, audioProgressIds])
+
+  /**
+   * AQU-2112: the same two sets as one per-line reader for the sidebar's
+   * chapter list, or NO reader at all when nothing in the file is recorded —
+   * which is how a text-only project keeps the chapter list, the colours and
+   * the single whole-file walk it had before audio progress existed.
+   *
+   * DEPENDS ON `audioProgressIds` DIRECTLY, and must keep doing so. The first
+   * cut of this held the sets in a ref and compared them by membership, to
+   * spare the chapter projection a whole-file walk when a refetch changed
+   * nothing. A ref read is not a dependency the React Compiler can see, so it
+   * memoized this against a value it believed never changed and froze the
+   * reader at `undefined` — the state on first render, before the attachment
+   * read returns. The chapter list then showed TEXT figures for an audio-only
+   * file until something else in the session invalidated the memo, which is
+   * precisely the bug this ticket is about, reintroduced one layer up. It
+   * survived the whole unit suite because Vitest runs with the compiler off
+   * (CLAUDE.md, "React Compiler gotcha"); the PR preview caught it.
+   *
+   * The walk it was protecting is cheap to protect honestly: for a file with
+   * no recordings `audioProgressCellIds` returns a frozen empty singleton, so
+   * a text-only project — the case AQU-1104 cared about — is identity-stable
+   * anyway, and a file with audio only re-derives when the attachment read
+   * actually returns.
+   */
+  const audioChapterStage = useMemo(() => {
+    if (audioProgressIds.recorded.size === 0) return undefined
+    return (cellId: string): AudioCellStage | undefined =>
+      audioProgressIds.audioValidated.has(cellId)
+        ? "audioValidated"
+        : audioProgressIds.recorded.has(cellId) ? "recorded" : undefined
+  }, [audioProgressIds])
+
+  // Only the expanded sidebar consumes this projection. Keep health live, but
+  // defer its whole-file display walk until that surface actually renders.
+  const getActiveChapterHealth = useCallback((): BookHealthChapter[] => {
+    if (!activeFileId) return EMPTY_CHAPTER_HEALTH
+    return readAtVersion(cellStoreVersion, () => {
+      // Summaries sit in store order, so the store's index is a direct lookup;
+      // the id check guards the (never observed) case of a skipped row, falling
+      // back to a map built once for this pass.
+      let summaryById: Map<string, CellSummary> | null = null
+      const getSummary = (cellId: string): CellSummary | undefined => {
+        const index = cellStore.findIndexByCellId(cellId)
+        const direct = index >= 0 ? cellSummaries[index] : undefined
+        if (direct && direct.id === cellId) return direct
+        summaryById ??= new Map(cellSummaries.map((cell) => [cell.id, cell]))
+        return summaryById.get(cellId)
+      }
+      return chapterHealthBuilder.build(cellStore.getNavigationIndex(), {
+        getSummary,
+        health: (cellId) => effectiveHealthMap.get(cellId),
+        hasIssue: (cellId) => (infractions.get(cellId)?.length ?? 0) > 0,
+        // AQU-1083 / AQU-1424: draw a heading the project does not count, and any
+        // PARKED cell, as "not counted" rather than as work left to do. The
+        // chapter's fraction already excludes both — the store does that — so this
+        // only chooses the colour and what it announces. The rule itself lives in
+        // `isExcludedFromWork`, where the two cases stay separate and tested.
+        isExcluded: (cellId) => isExcludedFromWork(getSummary(cellId), countStructuralCells),
+        // AQU-2112: the line's audio state, so an audio-only file's chapters
+        // fill in as its takes are signed off instead of reading untranslated
+        // forever. Undefined on a project with no recordings — see
+        // `audioChapterStage`.
+        audioStage: audioChapterStage,
+      })
+    })
+  }, [activeFileId, audioChapterStage, cellStore, cellStoreVersion, cellSummaries, chapterHealthBuilder, countStructuralCells, effectiveHealthMap, infractions])
 
   /** The link index in the shape every cue-aware resolver takes. */
   const cueLinkArgs = useMemo(

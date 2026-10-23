@@ -6,7 +6,7 @@
 // unique and strictly above every pre-existing event, id-replays are dropped
 // without duplicating rows, and the projection still lands.
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest"
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest"
 import { handleMigrateIngestRequest } from "../events/migrate-ingest-route"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
 
@@ -70,6 +70,26 @@ async function eventSeqs(): Promise<Array<{ id: string; server_seq: number }>> {
 }
 
 describe("migrate-ingest seq pre-allocation (AQU-1005)", () => {
+  it("bulk source projection matches sequential values, timestamps and duplicate-cell ordering", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1700000000000)
+    try {
+      const events = [
+        ...Array.from({ length: 205 }, (_, i) => ({ ...cellCreate(`bulk-${i}`, `c${i}`, `Source ${i}`),
+          payload: { cellId: `c${i}`, value: `Source ${i}`, startMs: 10.75, endMs: 1234.5, metadata: { note: `n${i}` } } })),
+        cellCreate("duplicate-cell", "c0", "Later source value"),
+      ]
+      const send = () => new Request("https://sync.test/migrate/ingest", { method: "POST",
+        headers: { Authorization: `Bearer ${SECRET}` }, body: JSON.stringify({ projectId: PROJECT, events, deferFileCounters: true }) })
+      const read = async () => (await t.pg.query(`SELECT cell_id,value,event_id,last_edit_at,start_ms,end_ms,metadata FROM cells ORDER BY cell_id`)).rows
+      expect((await handleMigrateIngestRequest(send(), env()))?.status).toBe(200)
+      const expected = await read()
+      await t.reset()
+      expect((await handleMigrateIngestRequest(send(), { ...env(), MIGRATION_BULK_SOURCE: true }))?.status).toBe(200)
+      expect(await read()).toEqual(expected)
+      expect((await eventSeqs()).length).toBe(206)
+    } finally { clock.mockRestore() }
+  })
+
   it("assigns unique ascending seqs from one allocated block (eventsOnly firehose)", async () => {
     const events = ["e1", "e2", "e3", "e4", "e5"].map((id, i) => cellCreate(id, `c${i}`, `v${i}`))
     const res = await handleMigrateIngestRequest(ingestRequest(events, { eventsOnly: true }), env())

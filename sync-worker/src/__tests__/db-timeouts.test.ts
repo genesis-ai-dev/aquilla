@@ -20,6 +20,7 @@ import {
   LONG_OPERATION_TIMEOUTS,
   pgTimeoutConnectionParams,
   withLongOperationTimeout,
+  withTransactionTimeouts,
   type PgExecutor,
 } from "../../../db/shim/postgres"
 import { handleDbTimeoutsRequest } from "../db-timeouts-route"
@@ -64,6 +65,21 @@ describe("connection timeout defaults", () => {
       idleInTransactionTimeoutMs: null,
     })
     expect(params).toEqual({})
+  })
+})
+
+describe("pooled migration transaction ceilings", () => {
+  it("sets both ceilings inside every transaction and permits named long-operation overrides", async () => {
+    const { exec, sent, sql } = recorder()
+    const db = new PostgresDb(withTransactionTimeouts(exec))
+    await db.prepare("SELECT 1").run()
+    await db.batchPipelined([db.prepare("SELECT 2"), db.prepare("SELECT 3")])
+    await withLongOperationTimeout(db, "migration-finalize").prepare("SELECT 4").run()
+    const setup = sql().filter(s => s.includes("set_config('statement_timeout'"))
+    expect(setup).toHaveLength(3)
+    expect(setup.every(s => s.includes("'15000', true") && s.includes("'30000', true"))).toBe(true)
+    expect(sql().slice(-2)).toEqual(["SET LOCAL statement_timeout = 300000", "SELECT 4"])
+    expect(sent.every(s => s.inTx)).toBe(true)
   })
 })
 

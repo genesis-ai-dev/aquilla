@@ -25,6 +25,18 @@ vi.mock("../../../src/lib/migrate/gitlab/api", async (importActual) => ({
   listDescendantGroups: vi.fn(async () => []),
 }))
 
+describe("direct migration configuration", () => {
+  const env = { SYNC_SECRET_KEY: "s", GITLAB_URL: "https://git", FRONTIER_TOKEN: "t" }
+  it("requires complete opt-in configuration and limits direct ingestion chunks", () => {
+    expect(loadConfig(env).directIngest).toBeUndefined()
+    expect(() => loadConfig({ ...env, MIGRATE_INGEST_BASE: "https://direct" })).toThrow(/All direct migration/)
+    const config = loadConfig({ ...env, MIGRATE_INGEST_BASE: "https://direct", MIGRATE_INGEST_SECRET: "operator", MIGRATE_INGEST_DESTINATION: "host/db/role" })
+    expect(config.chunkStart).toBe(250)
+    expect(config.chunkMax).toBe(250)
+    expect(config.directIngest?.secret).toBe("operator")
+  })
+})
+
 describe("parseArgs", () => {
   it("defaults to the daemon command", () => {
     expect(parseArgs([], {})).toEqual({ cmd: "daemon", kind: "content", dryRun: false, force: false })

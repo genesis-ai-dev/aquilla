@@ -70,7 +70,13 @@ const log = (m: string): void => console.log(new Date().toISOString(), m)
 
 async function build(config: DaemonConfig) {
   const db = new DaemonDb(path.join(config.home, "daemon.db"))
-  const sync = new SyncClient(config.syncBase, config.syncSecret, config.runner)
+  const sync = new SyncClient(config.syncBase, config.syncSecret, config.runner, {}, config.directIngest ? {
+    ...config.directIngest,
+    identity: (projectId) => {
+      const p = db.listProjects().find(project => project.aquilla_id === projectId)
+      return p && p.org_id !== null ? { gitlabId: p.gitlab_id, orgId: p.org_id, teamId: p.team_id } : undefined
+    },
+  } : undefined)
   const gitlab = new GitLabClient(config.gitlabUrl, config.gitlabToken)
   const creds = await resolveCredentialsFromEnv(process.env)
   const pacer = new Pacer({

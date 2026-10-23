@@ -5,6 +5,7 @@ export interface DaemonConfig {
   home: string
   syncBase: string
   syncSecret: string
+  directIngest?: { base: string; secret: string; destination: string }
   gitlabUrl: string
   gitlabToken: string
   runner: string
@@ -31,10 +32,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Part
     if (!v) throw new Error(`${k} not set`)
     return v
   }
+  const directKeys = [env.MIGRATE_INGEST_BASE, env.MIGRATE_INGEST_SECRET, env.MIGRATE_INGEST_DESTINATION]
+  if (directKeys.some(Boolean) && !directKeys.every(Boolean)) throw new Error("All direct migration transport settings must be provided")
+  const directIngest = directKeys.every(Boolean) ? {
+    base: env.MIGRATE_INGEST_BASE!, secret: env.MIGRATE_INGEST_SECRET!, destination: env.MIGRATE_INGEST_DESTINATION!,
+  } : undefined
   const r2 = env.R2_ACCOUNT_ID && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY
     ? { accountId: env.R2_ACCOUNT_ID, accessKeyId: env.R2_ACCESS_KEY_ID, secretAccessKey: env.R2_SECRET_ACCESS_KEY }
     : undefined
   return {
+    directIngest,
     home: env.MIGRATE_HOME ?? path.join(os.homedir(), "aquilla-migrate"),
     syncBase: env.SYNC_BASE ?? "https://api.aquilla.app/sync",
     syncSecret: required("SYNC_SECRET_KEY"),
@@ -42,9 +49,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Part
     gitlabToken: required("FRONTIER_TOKEN"),
     runner: env.MIGRATE_RUNNER ?? `daemon@${os.hostname()}`,
     pushEventsPerSec: num(env.PUSH_EVENTS_PER_SEC, 400),
-    chunkStart: 500,
+    chunkStart: directIngest ? 250 : 500,
     chunkMin: 50,
-    chunkMax: 2500,
+    chunkMax: directIngest ? 250 : 2500,
     fetchConcurrency: num(env.FETCH_CONCURRENCY, 1),
     materializeConcurrency: num(env.MATERIALIZE_CONCURRENCY, 1),
     audioCopyConcurrency: num(env.AUDIO_COPY_CONCURRENCY, 4),

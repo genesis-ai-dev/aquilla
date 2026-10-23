@@ -8,7 +8,7 @@
 // nothing starts until the maintainer ticks the statement, and the worker keeps
 // that confirmation as an audit record.
 import { useCallback, useState, type ReactNode } from "react"
-import { AlertTriangle, FileAudio, Upload, X } from "lucide-react"
+import { FileAudio, ShieldCheck, Upload, X } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -18,6 +18,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { probeDurationMsSafe } from "@/lib/import"
 import {
+  CUSTOM_VOICE_CONSENT_STATEMENT,
   CUSTOM_VOICE_MAX_CLIP_BYTES,
   CUSTOM_VOICE_MAX_CLIPS,
   CUSTOM_VOICE_MAX_MINUTES,
@@ -121,6 +122,7 @@ function TrainVoiceForm({ draft, projectId, fileId, session, onStarted, nameFiel
   }, [canStart, projectId, fileId, session, recordings, name, consent, onStarted, draft.id, draft.color])
 
   const meterPct = Math.min(100, (minutes / CUSTOM_VOICE_RECOMMENDED_MINUTES) * 100)
+  const [dragging, setDragging] = useState(false)
 
   return (
     <div className="space-y-4">
@@ -130,12 +132,19 @@ function TrainVoiceForm({ draft, projectId, fileId, session, onStarted, nameFiel
       <div className="space-y-2">
         <label
           className={cn(
-            "flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed p-4 text-sm",
-            "hover:bg-accent/40",
+            "flex cursor-pointer flex-col items-center gap-1 rounded-xl border border-dashed px-4 py-5 text-center transition-colors",
+            "hover:border-foreground/30 hover:bg-accent/30",
+            dragging && "border-primary bg-primary/5",
           )}
+          onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => { e.preventDefault(); setDragging(false); addFiles(e.dataTransfer.files) }}
         >
-          <Upload className="size-4" />
-          {t("audio.train.addRecordings")}
+          <span className="mb-1 grid size-9 place-items-center rounded-full bg-muted">
+            <Upload className="size-4" />
+          </span>
+          <span className="text-sm font-medium">{t("audio.train.addRecordings")}</span>
+          <span className="text-[11px] text-muted-foreground">{t("audio.train.recordingTips")}</span>
           <input
             type="file"
             accept="audio/*,video/*"
@@ -145,12 +154,11 @@ function TrainVoiceForm({ draft, projectId, fileId, session, onStarted, nameFiel
             onChange={(e) => { addFiles(e.target.files); e.target.value = "" }}
           />
         </label>
-        <p className="text-[11px] text-muted-foreground">{t("audio.train.recordingTips")}</p>
 
         {recordings.length > 0 && (
-          <ul className="max-h-36 space-y-1 overflow-y-auto">
+          <ul className="max-h-32 divide-y overflow-y-auto rounded-lg border">
             {recordings.map((r, i) => (
-              <li key={`${r.file.name}-${i}`} className="flex items-center gap-2 rounded-lg bg-muted/50 px-2 py-1 text-xs">
+              <li key={`${r.file.name}-${i}`} className="flex items-center gap-2 px-2.5 py-1 text-xs">
                 <FileAudio className="size-3.5 shrink-0 text-muted-foreground" />
                 <span className="min-w-0 flex-1 truncate">{r.file.name}</span>
                 {r.file.size > CUSTOM_VOICE_MAX_CLIP_BYTES ? (
@@ -171,31 +179,42 @@ function TrainVoiceForm({ draft, projectId, fileId, session, onStarted, nameFiel
           </ul>
         )}
 
-        <div className="space-y-1">
-          <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-            <div
-              className={cn("h-full rounded-full transition-[width]", enough ? "bg-primary" : "bg-amber-500")}
-              style={{ width: `${meterPct}%` }}
-            />
+        {recordings.length > 0 && (
+          <div className="space-y-1">
+            <div className="flex items-baseline justify-between text-[11px]">
+              <span className={cn("tabular-nums font-medium", tooMuch ? "text-destructive" : enough ? "text-foreground" : "text-amber-600 dark:text-amber-400")}>
+                {t("audio.train.audioMeter", { minutes: minutes.toFixed(1) })}
+              </span>
+              <span className="text-muted-foreground">
+                {tooMuch
+                  ? t("audio.train.tooMuchAudio", { max: CUSTOM_VOICE_MAX_MINUTES })
+                  : enough
+                    ? t("audio.train.recommendedHint", { recommended: CUSTOM_VOICE_RECOMMENDED_MINUTES })
+                    : t("audio.train.minimumHint", { min: CUSTOM_VOICE_MIN_MINUTES })}
+              </span>
+            </div>
+            <div className="h-1 overflow-hidden rounded-full bg-muted">
+              <div
+                className={cn("h-full rounded-full transition-[width] duration-500", enough ? "bg-primary" : "bg-amber-500")}
+                style={{ width: `${meterPct}%` }}
+              />
+            </div>
           </div>
-          <p className={cn("text-[11px]", tooMuch ? "text-destructive" : "text-muted-foreground")}>
-            {tooMuch
-              ? t("audio.train.tooMuchAudio", { max: CUSTOM_VOICE_MAX_MINUTES })
-              : t("audio.train.audioMeter", {
-                minutes: minutes.toFixed(1),
-                min: CUSTOM_VOICE_MIN_MINUTES,
-                recommended: CUSTOM_VOICE_RECOMMENDED_MINUTES,
-              })}
-          </p>
-        </div>
+        )}
       </div>
 
-      <div className="space-y-2 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3">
-        <p className="flex items-center gap-1.5 text-sm font-medium">
-          <AlertTriangle className="size-4 text-amber-500" />
+      <div className="space-y-2.5 rounded-xl border border-amber-500/30 bg-amber-500/[0.06] p-3">
+        <p className="flex items-center gap-1.5 text-[13px] font-medium">
+          <ShieldCheck className="size-4 text-amber-600 dark:text-amber-400" />
           {t("audio.train.consentTitle")}
         </p>
-        <p className="text-xs text-muted-foreground">{t("audio.train.consentBody")}</p>
+        <p className="text-xs leading-relaxed text-muted-foreground">{t("audio.train.consentBody")}</p>
+        <details className="group text-[11px] text-muted-foreground">
+          <summary className="cursor-pointer select-none underline-offset-2 hover:underline">
+            {t("audio.train.fullStatement")}
+          </summary>
+          <p className="mt-1.5 rounded-md bg-background/60 p-2 leading-relaxed" lang="en">{CUSTOM_VOICE_CONSENT_STATEMENT}</p>
+        </details>
         {/* Not a wrapping <label>: around the Checkbox's own button, one click
             would toggle it twice. */}
         <div className="flex items-start gap-2 text-xs">
@@ -206,7 +225,7 @@ function TrainVoiceForm({ draft, projectId, fileId, session, onStarted, nameFiel
             aria-label={t("audio.train.consentCheckboxAriaLabel")}
             className="mt-0.5"
           />
-          <label htmlFor="train-voice-consent">{t("audio.train.consentCheckbox")}</label>
+          <label htmlFor="train-voice-consent" className="leading-relaxed">{t("audio.train.consentCheckbox")}</label>
         </div>
       </div>
 

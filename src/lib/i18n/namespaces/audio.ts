@@ -16,33 +16,30 @@ export const audio = defineNamespace({
 
     // TrainVoicePanel — train a custom voice from an organization's own
     // recordings of a real person. Consent is the organization's responsibility.
-    "audio.train.intro":
-      "Train a voice from recordings of a real person, such as an actor or narrator. Training takes about 45 minutes; then Change voice can give any reader's lines this voice.",
+    "audio.train.intro": "A voice trained from a real speaker's recordings. Ready in about 45 minutes.",
     "audio.train.speakerNameLabel": "Speaker name",
     "audio.train.speakerNamePlaceholder": "e.g. Maria (narrator)",
     "audio.train.addRecordings": "Add recordings",
     "audio.train.addRecordingsAriaLabel": "Add recordings of the speaker",
-    "audio.train.recordingTips":
-      "Clean speech from this one speaker, with no music or other voices. Any language. Audio or video files, up to 20 MB each.",
+    "audio.train.recordingTips": "One speaker, clean speech, any language · 5–60 min · up to 20 MB per file",
     "audio.train.fileTooLarge": "Over 20 MB",
     "audio.train.removeRecordingAriaLabel": "Remove {name}",
-    "audio.train.audioMeter": "{minutes} min of speech. At least {min} min needed, {recommended}+ recommended.",
-    "audio.train.tooMuchAudio": "More than {max} minutes. Remove some recordings.",
-    "audio.train.consentTitle": "Consent is your organization's responsibility",
-    "audio.train.consentBody":
-      "Only train the voice of a person who has given informed consent for an AI model of their voice to be made and used in this project. Your organization must obtain and keep that consent, honour any withdrawal of it, and follow the laws and agreements that apply to you and to the speaker, such as voice and likeness rights, data protection and union rules. Aquilla records who confirmed this and when.",
-    "audio.train.consentCheckbox":
-      "On behalf of my organization, I confirm we have this speaker's informed consent and that this use complies with the laws that apply to us.",
+    "audio.train.audioMeter": "{minutes} min",
+    "audio.train.tooMuchAudio": "Over {max} min — remove some",
+    "audio.train.consentTitle": "Consent is on your organization",
+    "audio.train.consentBody": "You need the speaker's informed consent, and you must follow the laws that apply to you and to them. We record who confirmed and when.",
+    "audio.train.consentCheckbox": "For my organization, I confirm the speaker consented and this use is lawful.",
     "audio.train.consentCheckboxAriaLabel": "Confirm the speaker's consent on behalf of your organization",
     "audio.train.uploading": "Uploading {done} of {total}…",
     "audio.train.start": "Start training",
+    "audio.train.minimumHint": "{min} min minimum",
+    "audio.train.recommendedHint": "{recommended}+ min sounds best",
+    "audio.train.fullStatement": "Read the full statement",
     "audio.newVoice.errorCharacterRequired": "Pick a character voice.",
     "audio.newVoice.kindGroupLabel": "Voice kind",
 
     // CharacterVoicePicker — the Characters tab: pre-built synthetic character
     // voices a project adds to its cast in one click.
-    "audio.characters.intro":
-      "Ready-made character voices. Record a line in any language, then use Change voice to give it this character's voice.",
     "audio.characters.filterGroupAriaLabel": "Filter character voices",
     "audio.characters.filterFemale": "Female",
     "audio.characters.filterMale": "Male",
@@ -54,12 +51,11 @@ export const audio = defineNamespace({
     "audio.characters.noMatches": "No character voices match these filters.",
     "audio.characters.previewAriaLabel": "Preview {name}",
     "audio.characters.pauseAriaLabel": "Stop previewing {name}",
-    "audio.characters.add": "Add",
-    "audio.characters.use": "Use",
-    "audio.characters.current": "Current",
-    "audio.characters.inCast": "In cast",
-    "audio.characters.howItWorks":
-      "Synthetic voices that belong to no real person. The reader's words, pronunciation and intonation are kept; only who it sounds like changes.",
+    "audio.characters.addAriaLabel": "Add {name} to the cast",
+    "audio.characters.useAriaLabel": "Use {name}",
+    "audio.characters.currentAriaLabel": "{name} is this voice's character",
+    "audio.characters.inCastAriaLabel": "{name} is already in the cast",
+    "audio.characters.footnote": "Synthetic voices — no real person's voice.",
     "audio.newVoice.namePlaceholder": "e.g. Narrator",
     "audio.newVoice.nameAriaLabel": "Voice name",
     "audio.newVoice.engineLabel": "Engine",
@@ -824,12 +820,16 @@ export const audio = defineNamespace({
         placeholders: { name: "The recording's file name, e.g. 'session-1.wav'." },
       },
       "audio.train.audioMeter": {
-        description: "Line under the meter showing how much speech the picked recordings add up to.",
-        placeholders: {
-          minutes: "Total minutes picked so far, one decimal, e.g. '12.5'.",
-          min: "Minimum minutes required, e.g. '5'.",
-          recommended: "Recommended minutes, e.g. '15'.",
-        },
+        description: "Total length of the picked recordings, above the progress bar.",
+        placeholders: { minutes: "Total minutes picked so far, one decimal, e.g. '12.5'." },
+      },
+      "audio.train.minimumHint": {
+        description: "Right of the meter while there is not enough audio yet.",
+        placeholders: { min: "Minimum minutes required, e.g. '5'." },
+      },
+      "audio.train.recommendedHint": {
+        description: "Right of the meter once the minimum is met: how much audio gives the best quality.",
+        placeholders: { recommended: "Recommended minutes, e.g. '15'." },
       },
       "audio.train.tooMuchAudio": {
         description: "Shown instead of the meter line when the recordings exceed the maximum.",
@@ -855,6 +855,22 @@ export const audio = defineNamespace({
       },
       "audio.characters.pauseAriaLabel": {
         description: "Accessible label of the same button while that character's preview is playing.",
+        placeholders: { name: "The character voice's name, e.g. 'Hearth'." },
+      },
+      "audio.characters.addAriaLabel": {
+        description: "Accessible label of the + button on a character card; adds that voice to the project's cast.",
+        placeholders: { name: "The character voice's name, e.g. 'Hearth'." },
+      },
+      "audio.characters.useAriaLabel": {
+        description: "Accessible label of the same button while editing a voice: switches it to this character.",
+        placeholders: { name: "The character voice's name, e.g. 'Hearth'." },
+      },
+      "audio.characters.currentAriaLabel": {
+        description: "Accessible label of the same (disabled) button on the character the edited voice already uses.",
+        placeholders: { name: "The character voice's name, e.g. 'Hearth'." },
+      },
+      "audio.characters.inCastAriaLabel": {
+        description: "Accessible label of the same (disabled) button when that character is already in the cast.",
         placeholders: { name: "The character voice's name, e.g. 'Hearth'." },
       },
       "audio.newVoice.kindGroupLabel": {

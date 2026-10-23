@@ -54,9 +54,11 @@ describe("NewVoiceModal Train voice tab", () => {
   it("says plainly that consent is the organization's responsibility and the applicable law", () => {
     renderModal()
     fireEvent.click(screen.getByRole("tab", { name: /Train voice/ }))
-    expect(screen.getByText("Consent is your organization's responsibility")).toBeInTheDocument()
-    expect(screen.getByText(/Your organization must obtain and keep that consent/)).toBeInTheDocument()
-    expect(screen.getByText(/follow the laws and agreements that apply to you and to the speaker/)).toBeInTheDocument()
+    expect(screen.getByText("Consent is on your organization")).toBeInTheDocument()
+    expect(screen.getByText(/You need the speaker's informed consent/)).toBeInTheDocument()
+    expect(screen.getByText(/follow the laws that apply to you and to them/)).toBeInTheDocument()
+    // The exact recorded wording is one click away.
+    expect(screen.getByText(/My organization, not Aquilla, is responsible/)).toBeInTheDocument()
   })
 
   it("won't start until there is enough speech and consent is confirmed", async () => {
@@ -66,12 +68,12 @@ describe("NewVoiceModal Train voice tab", () => {
     const start = () => screen.getByRole("button", { name: "Start training" })
 
     pick(1) // 3 min — under the 5 min minimum
-    await screen.findByText(/3\.0 min of speech/)
+    await screen.findByText("3.0 min")
     fireEvent.click(screen.getByRole("checkbox"))
     expect(start()).toBeDisabled()
 
     pick(1) // 6 min total
-    await screen.findByText(/6\.0 min of speech/)
+    await screen.findByText("6.0 min")
     fireEvent.click(screen.getByRole("checkbox")) // untick
     expect(start()).toBeDisabled()
     fireEvent.click(screen.getByRole("checkbox"))

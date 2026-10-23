@@ -14,6 +14,18 @@ import { buildVoiceReferenceId, uploadVoiceReference } from "./voice-clone"
 
 /** Mirrors CUSTOM_VOICE_CONSENT_VERSION in sync-worker/src/custom-voice.ts. */
 export const CUSTOM_VOICE_CONSENT_VERSION = "2026-10-23"
+/**
+ * The exact statement the server records, shown in full behind "Read the full
+ * statement". Kept in English: it is the wording stored in the audit record.
+ * Mirrors CUSTOM_VOICE_CONSENT_STATEMENT in sync-worker/src/custom-voice.ts.
+ */
+export const CUSTOM_VOICE_CONSENT_STATEMENT =
+  "My organization has the informed consent of the person whose voice is in these recordings " +
+  "to create an AI model of their voice and to use it in this project, and this use complies " +
+  "with the laws, regulations and agreements that apply to my organization and to the speaker " +
+  "(for example voice and likeness rights, data protection and union agreements). My " +
+  "organization, not Aquilla, is responsible for obtaining, documenting and honouring that " +
+  "consent, including any withdrawal of it."
 
 /** Training needs at least this much speech; RVC wobbles below it. */
 export const CUSTOM_VOICE_MIN_MINUTES = 5

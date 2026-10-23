@@ -246,6 +246,22 @@ describe('read-only output', () => {
   })
 })
 
+describe('identity service transport', () => {
+  it('prefers the identity service binding for the actual transcription request', async () => {
+    const token = await credToken({ userId: 2 })
+    const serviceFetch = fetch
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('public route must not be used') }))
+    const response = await handleExternalTranscriptionRequest(new Request(`https://w/api/v1/external/projects/${PROJECT}/transcriptions`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ audio: { data: wav(1), format: 'wav' }, language: 'luo', model: 'omni-ctc' }),
+    }), { ...makeEnv(), AUTH_WORKER: { fetch: serviceFetch } })
+    expect(response!.status).toBe(200)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({ auth: `Bearer ${SECRET}`, body: { projectId: PROJECT, userId: '2', language: 'luo' } })
+  })
+
+})
+
 describe('transcription_status', () => {
   it.each([false, true])('routes model status with warm=%s through MCP', async (warm) => {
     const token = await credToken({ userId: 2 })
@@ -267,19 +283,6 @@ describe('transcription_status', () => {
 })
 
 describe('MCP + discovery', () => {
-  it('prefers the identity service binding for the actual transcription request', async () => {
-    const token = await credToken({ userId: 2 })
-    const serviceFetch = fetch
-    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('public route must not be used') }))
-    const response = await handleExternalTranscriptionRequest(new Request(`https://w/api/v1/external/projects/${PROJECT}/transcriptions`, {
-      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ audio: { data: wav(1), format: 'wav' }, language: 'luo', model: 'omni-ctc' }),
-    }), { ...makeEnv(), AUTH_WORKER: { fetch: serviceFetch } })
-    expect(response!.status).toBe(200)
-    expect(calls).toHaveLength(1)
-    expect(calls[0]).toMatchObject({ auth: `Bearer ${SECRET}`, body: { projectId: PROJECT, userId: '2', language: 'luo' } })
-  })
-
   it('transcribe_audio over MCP reaches the same route', async () => {
     const token = await credToken({ userId: 2 })
     const res = await handleExternalMcpRequest(new Request('https://w/api/v1/external/mcp', {

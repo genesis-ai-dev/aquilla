@@ -1,4 +1,5 @@
 import type { FileType, TranslatableString } from "@/lib/parsers/types"
+import type { SpeakerAssignment } from "@/lib/import/cast-from-speakers"
 import type { EpubSpineMember } from "@/lib/parsers/epub"
 import {
   normalizeTranslatableStrings,
@@ -58,12 +59,12 @@ export interface ImportServiceContext {
 
 export interface ImportServiceCommitResult<Reference> {
   ref: Reference
-  speakerPairs: { cellId: string; speaker: string | undefined }[]
+  speakerPairs: SpeakerAssignment[]
 }
 
 export interface ImportServiceResult<Reference> {
   refs: Reference[]
-  speakerPairs: { cellId: string; speaker: string | undefined }[]
+  speakerPairs: SpeakerAssignment[]
   manifests: NormalizedImportFile[]
 }
 
@@ -140,7 +141,7 @@ export class ImportService<Context extends ImportServiceContext, Reference> {
       throw new Error(`${file.name} did not contain any importable content.`)
     }
     const refs: Reference[] = []
-    const speakerPairs: { cellId: string; speaker: string | undefined }[] = []
+    const speakerPairs: SpeakerAssignment[] = []
     const manifests: NormalizedImportFile[] = []
 
     // Validate the complete parser output before emitting the first file. A

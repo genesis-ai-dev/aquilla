@@ -834,6 +834,39 @@ export async function handleEventsWriteRequest(
   const pendingEntries: PendingEntry[] = []
   const seenEventIds = new Set<string>()
 
+  // AQU-2143: files whose counter / progress recompute is owed by a REPLAY.
+  //
+  // An event whose id already exists takes the fast path below and produces no
+  // pending entry, so it contributed nothing to the post-commit recompute. That
+  // is exactly wrong for the batch this is a retry OF: the client aborts a slow
+  // POST at its 15 s timeout, the worker's chunks commit anyway but its
+  // recompute never runs, and every retry from then on is a pure replay. The
+  // file's progress rows then keep their pre-burst values until some unrelated
+  // single event lands on it — which on a finished bulk validate never happens.
+  //
+  // Recorded per file, like the committed impacts, and drained by the same
+  // coalesced pass. The pass is a full-file aggregate scan, so re-running it
+  // for a replay is idempotent: it cannot write a wrong answer, only a redundant
+  // one. That is why no attempt is made to work out what the original event
+  // projected — unknowable from the replay, and the alternative (doing nothing)
+  // is the bug.
+  const replayedCounterFiles = new Map<string, CounterImpact>()
+
+  const recordReplayCounterImpact = (projectId: string, replayed: RawEvent): void => {
+    if (!replayed.fileId) return
+    const key = `${projectId}|${replayed.fileId}`
+    let impact = replayedCounterFiles.get(key)
+    if (!impact) {
+      impact = { projectId, fileId: replayed.fileId, fullSections: false, cellIds: new Set() }
+      replayedCounterFiles.set(key, impact)
+    }
+    if (typeof replayed.kind === 'string' && replayed.kind.startsWith('source.cell.')) {
+      impact.fullSections = true
+    } else if (replayed.cellId) {
+      impact.cellIds.add(replayed.cellId)
+    }
+  }
+
   // PERF-2: collect the ids/cells the per-event pre-checks need and fetch
   // each concern in one batched SELECT up front (see the helpers above for
   // why this is semantics-preserving). Collection runs over raw, not-yet-
@@ -1110,6 +1143,9 @@ export async function handleEventsWriteRequest(
     // pre-fetch; one SELECT per request, not per event).
     if (existingIds.has(rawEvent.id)) {
       accepted.push({ id: rawEvent.id })
+      // AQU-2143: silently, but not for free — the commit this replays may have
+      // left its counters behind. `eventProjectId` is the token-verified one.
+      recordReplayCounterImpact(eventProjectId, rawEvent)
       continue
     }
 
@@ -1755,7 +1791,14 @@ export async function handleEventsWriteRequest(
   }
 
   // ── Commit accumulated statements in batch-limit-sized chunks ──────────
-  if (pendingStmts.length > 0) {
+  //
+  // AQU-2143: entered for a batch that is ENTIRELY a replay too (no statements,
+  // but a recompute owed — see `replayedCounterFiles`). The chunk loop below is
+  // then a no-op and `recomputeCommitted` runs over the replayed impacts alone,
+  // which is the whole point: the batch this retries may have committed its
+  // events and died before its own recompute, and a burst that ends on such a
+  // retry has no later event to heal the file.
+  if (pendingStmts.length > 0 || replayedCounterFiles.size > 0) {
     interface PendingChunk {
       entries: PendingEntry[]
       stmts: AquillaStatement[]
@@ -1800,6 +1843,12 @@ export async function handleEventsWriteRequest(
     // cell each in the same file no longer scan it ten times.
     const collectCounterImpacts = (entries: readonly PendingEntry[]): CounterImpact[] => {
       const counterFiles = new Map<string, CounterImpact>()
+      // AQU-2143: the replays first, so a batch that is ENTIRELY a retry still
+      // recomputes (it has no committed entries at all). Copied, so a second
+      // call over the same request cannot consume them.
+      for (const [key, replayed] of replayedCounterFiles) {
+        counterFiles.set(key, { ...replayed, cellIds: new Set(replayed.cellIds) })
+      }
       for (const entry of entries) {
         if (entry.counterFile) {
           const key = `${entry.counterFile.projectId}|${entry.counterFile.fileId}`
